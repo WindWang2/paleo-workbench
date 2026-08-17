@@ -331,7 +331,6 @@ def export_widget_snapshot(
     is non-empty instead of the legacy ``[]``.
     """
     label = format_label.upper()
-    fmt = label.lower()
     caps = view_export_capabilities(widget)
     if label not in caps:
         supported = "、".join(sorted(caps, key=_view_format_rank)) or "无"
@@ -354,22 +353,16 @@ def export_widget_snapshot(
             message=f"视图导出失败: {exc.__class__.__name__}: {exc}",
         )
 
-    artifact = None
-    stored = str(output_path)
-    if register and project is not None:
-        if project_path is not None:
-            ensure_artifact_layout(project_path)
-            stored, _ = relativize_path(str(output_path), project_path)
-        artifact = record_export(
-            project,
-            linked_id=linked_id,
-            output_path=stored,
-            fmt=fmt,
-            source_task_ids=list(source_task_ids or []),
-            catalog_output_path=str(output_path),
-        )
-        surface = _export_surface_kind(_resolve_export_target(widget))
-        artifact.included_map_elements = ["visualization_view", surface]
+    artifact = register_exported_view(
+        widget,
+        output_path,
+        label,
+        project=project,
+        project_path=project_path,
+        linked_id=linked_id,
+        register=register,
+        source_task_ids=source_task_ids,
+    )
 
     return ExportJobResult(
         success=True,
@@ -378,6 +371,37 @@ def export_widget_snapshot(
         artifact=artifact,
         message=f"已导出视图: {output_path.name}",
     )
+
+
+def register_exported_view(
+    widget: Any,
+    output_path: Path,
+    format_label: str = "PNG",
+    *,
+    project: ProjectDocument | None = None,
+    project_path: Path | None = None,
+    linked_id: str = "viz_view",
+    register: bool = True,
+    source_task_ids: list[str] | None = None,
+) -> ExportArtifact | None:
+    """Record an already-written view export. Does not render."""
+    if not register or project is None:
+        return None
+    stored = str(output_path)
+    if project_path is not None:
+        ensure_artifact_layout(project_path)
+        stored, _ = relativize_path(str(output_path), project_path)
+    artifact = record_export(
+        project,
+        linked_id=linked_id,
+        output_path=stored,
+        fmt=format_label.lower(),
+        source_task_ids=list(source_task_ids or []),
+        catalog_output_path=str(output_path),
+    )
+    surface = _export_surface_kind(_resolve_export_target(widget))
+    artifact.included_map_elements = ["visualization_view", surface]
+    return artifact
 
 
 def _export_widget_png(widget: Any, output_path: Path) -> None:
