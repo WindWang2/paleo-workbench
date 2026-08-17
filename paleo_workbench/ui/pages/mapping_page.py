@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
-from PySide6.QtCore import QPointF, QTimer, Signal
+from PySide6.QtCore import QPointF, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QGraphicsItem,
     QGraphicsView,
@@ -60,6 +62,7 @@ from paleo_workbench.ui.pages.contour_draft_worker import (
     ContourDraftWorker,
     commit_contour_drafts,
 )
+from paleo_workbench.ui.map_export_worker import snapshot_map_export, start_map_export_job
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 
 logger = logging.getLogger(__name__)
@@ -96,6 +99,10 @@ class MappingPage(QWidget):
         self._reference_service = ReferenceLayerService()
         self._contour_job = OwnedWorkerJob(self)
         self._contour_job.released.connect(self._clear_contour_job)
+        self._export_job = OwnedWorkerJob(self)
+        self._export_job.released.connect(self._on_export_job_released)
+        self._export_busy = False
+        self._pending_export: dict | None = None
         # Attribute-table record cache keyed by (layer, data revision) so
         # selection-only tool operations never reconvert every feature.
         self._attribute_table_records: tuple[object, int, list[dict[str, Any]]] | None = None
@@ -498,6 +505,8 @@ class MappingPage(QWidget):
 
     def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
         joined = self._contour_job.shutdown(wait_ms)
+        export_ok = self._export_job.shutdown(wait_ms)
+        self._end_export_busy()
         # The native raster worker lives on the embedded NativeMapCanvas and
         # never receives a QCloseEvent when the window/shell is torn down —
         # without this the QThread is destroyed while running (qFatal abort on
@@ -511,7 +520,7 @@ class MappingPage(QWidget):
                     controller.shutdown(wait_ms)
         except Exception:
             pass
-        return joined
+        return joined and export_ok
 
     def save_draft(self) -> bool:
         """Write scene features back into the active PaleoMapDocument and clear dirty."""
@@ -1630,28 +1639,84 @@ class MappingPage(QWidget):
 
         The scalar-layer ids are factor-task ids by construction, so they provide the
         export lineage without consulting interpolation or legacy Matplotlib canvases.
+        Rendering runs on a worker; this slot only snapshots inputs and starts the job.
         """
         if self._native_factor_scene is None:
             return None
-        from paleo_workbench.resources.export_service import export_widget_snapshot
+        if self._export_job.is_running:
+            return None
 
         task_ids = [
             layer.id
             for layer in self._native_factor_scene.registry.layers()
             if self._native_factor_scene.scalar_layer(layer.id) is not None
         ]
-        return export_widget_snapshot(
-            self.unified_canvas,
-            output_path,
-            "PNG",
-            project=self._project,
-            # MappingPage is intentionally not coupled to a controller-owned
-            # project filename. ProjectManager will relativize this path on save.
-            project_path=None,
-            linked_id=task_ids[0] if task_ids else "factor_map",
-            register=register,
-            source_task_ids=task_ids,
+        output = Path(output_path)
+        spec = snapshot_map_export(self.unified_canvas, output)
+        self._pending_export = {
+            "path": output,
+            "widget": self.unified_canvas,
+            "project": self._project,
+            "linked_id": task_ids[0] if task_ids else "factor_map",
+            "register": register,
+            "source_task_ids": task_ids,
+        }
+        self._begin_export_busy()
+        start_map_export_job(
+            self._export_job,
+            spec,
+            on_finished=self._on_map_export_finished,
+            on_failed=self._on_map_export_failed,
+            on_cancelled=self._on_map_export_cancelled,
         )
+        return None
+
+    def _begin_export_busy(self) -> None:
+        if not self._export_busy:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            self._export_busy = True
+        if getattr(self, "status_bar", None) is not None:
+            self.status_bar.scale.setText("正在导出…")
+
+    def _end_export_busy(self) -> None:
+        if self._export_busy:
+            QApplication.restoreOverrideCursor()
+            self._export_busy = False
+
+    def _on_export_job_released(self) -> None:
+        if self._export_busy:
+            self._end_export_busy()
+
+    def _on_map_export_finished(self, path: str) -> None:
+        pending = self._pending_export
+        self._pending_export = None
+        self._end_export_busy()
+        if pending:
+            from paleo_workbench.resources.export_service import register_exported_view
+
+            register_exported_view(
+                pending["widget"],
+                pending["path"],
+                "PNG",
+                project=pending["project"],
+                project_path=None,
+                linked_id=pending["linked_id"],
+                register=pending["register"],
+                source_task_ids=pending["source_task_ids"],
+            )
+        if getattr(self, "status_bar", None) is not None:
+            self.status_bar.scale.setText(f"已导出视图: {Path(path).name}")
+
+    def _on_map_export_failed(self, message: str) -> None:
+        self._pending_export = None
+        self._end_export_busy()
+        QMessageBox.warning(self, "导出失败", message)
+
+    def _on_map_export_cancelled(self) -> None:
+        self._pending_export = None
+        self._end_export_busy()
+        if getattr(self, "status_bar", None) is not None:
+            self.status_bar.scale.setText("已取消导出")
 
     def _on_topology_locate_requested(self, feature_id: str) -> None:
         """Select the flagged feature and center the edit view on it."""

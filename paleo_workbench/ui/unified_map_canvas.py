@@ -18,7 +18,81 @@ from paleo_workbench.mapping.map_render_backend import (
 )
 from paleo_workbench.ui import tokens
 
-__all__ = ["UnifiedMapCanvas"]
+__all__ = ["UnifiedMapCanvas", "paint_map_decorations"]
+
+
+def paint_map_decorations(
+    painter: QPainter,
+    decorations: Mapping[str, Any],
+    *,
+    width: int,
+    height: int,
+    extent: tuple[float, float, float, float],
+    dpi: float | None = None,
+) -> None:
+    """Draw title / scale / north arrow / legend. ``dpi`` None keeps screen cosmetics."""
+    canvas_width = int(width)
+    canvas_height = int(height)
+    # Export overlays scale cosmetic sizes (fonts, pen widths, glyphs) with
+    # dpi/96 so a 300-dpi export matches the physical screen look; the
+    # screen path (dpi=None) stays unchanged.
+    dpi_scale = (float(dpi) / 96.0) if dpi else 1.0
+    elements = {str(item) for item in decorations.get("elements") or ()}
+    title = str(decorations.get("title") or "")
+    if title and (not elements or "标题栏" in elements or "title" in elements):
+        painter.save()
+        painter.setPen(QColor("#f8f9fa"))
+        font = painter.font()
+        font.setPointSizeF(max(10, font.pointSize() + 3) * dpi_scale)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(
+            QRectF(14, 10, canvas_width - 28, canvas_height - 20),
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+            title,
+        )
+        painter.restore()
+    if not elements or "比例尺" in elements or "scale_bar" in elements:
+        width_units = extent[2] - extent[0]
+        target_units = width_units * 0.2
+        if target_units > 0.0:
+            pixels = max(35.0, canvas_width * 0.2)
+            y = canvas_height - 24.0
+            painter.save()
+            painter.setPen(QPen(QColor("#ffffff"), 2.0 * dpi_scale))
+            painter.drawLine(QPointF(16, y), QPointF(16 + pixels, y))
+            painter.drawLine(QPointF(16, y - 4 * dpi_scale), QPointF(16, y + 4 * dpi_scale))
+            painter.drawLine(QPointF(16 + pixels, y - 4 * dpi_scale), QPointF(16 + pixels, y + 4 * dpi_scale))
+            painter.drawText(QPointF(16, y - 7 * dpi_scale), f"{target_units:.3g} map units")
+            painter.restore()
+    if not elements or "指北针" in elements or "north_arrow" in elements:
+        painter.save()
+        center = QPointF(canvas_width - 28, 37)
+        painter.setPen(QPen(QColor("#ffffff"), 1.5 * dpi_scale))
+        painter.setBrush(QColor("#343a40"))
+        painter.drawPolygon(QPolygonF([
+            center + QPointF(0, -18 * dpi_scale),
+            center + QPointF(-6 * dpi_scale, 10 * dpi_scale),
+            center + QPointF(0, 5 * dpi_scale),
+            center + QPointF(6 * dpi_scale, 10 * dpi_scale),
+        ]))
+        painter.drawText(center + QPointF(-5 * dpi_scale, -22 * dpi_scale), "N")
+        painter.restore()
+    if (not elements or "图例" in elements or "legend" in elements) and decorations.get("legend_items"):
+        items = [str(item) for item in decorations["legend_items"]][:8]
+        painter.save()
+        painter.setPen(QPen(QColor("#dfe6ee"), 1.0 * dpi_scale))
+        painter.setBrush(QColor(24, 28, 34, 210))
+        box_height = 10 + 18 * len(items)
+        rect = QRectF(canvas_width - 180, canvas_height - box_height - 16, 164, box_height)
+        painter.drawRect(rect)
+        for index, item in enumerate(items):
+            painter.setBrush(QColor("#6c8ebf"))
+            y = rect.top() + 14 + index * 18
+            painter.drawRect(rect.left() + 8, y - 8, 9, 9)
+            painter.setPen(QColor("#f8f9fa"))
+            painter.drawText(QPointF(rect.left() + 23, y), item)
+        painter.restore()
 
 
 class UnifiedMapCanvas(QWidget):
@@ -355,59 +429,14 @@ class UnifiedMapCanvas(QWidget):
         self, painter: QPainter, decorations: Mapping[str, Any], *, width: int | None = None,
         height: int | None = None, dpi: float | None = None,
     ) -> None:
-        canvas_width = self.width() if width is None else int(width)
-        canvas_height = self.height() if height is None else int(height)
-        # Export overlays scale cosmetic sizes (fonts, pen widths, glyphs) with
-        # dpi/96 so a 300-dpi export matches the physical screen look; the
-        # screen path (dpi=None) stays unchanged.
-        dpi_scale = (float(dpi) / 96.0) if dpi else 1.0
-        elements = {str(item) for item in decorations.get("elements") or ()}
-        title = str(decorations.get("title") or "")
-        if title and (not elements or "标题栏" in elements or "title" in elements):
-            painter.save()
-            painter.setPen(QColor("#f8f9fa"))
-            font = painter.font()
-            font.setPointSizeF(max(10, font.pointSize() + 3) * dpi_scale)
-            font.setBold(True)
-            painter.setFont(font)
-            painter.drawText(QRectF(14, 10, canvas_width - 28, canvas_height - 20), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, title)
-            painter.restore()
-        if not elements or "比例尺" in elements or "scale_bar" in elements:
-            width_units = self._view_extent[2] - self._view_extent[0]
-            target_units = width_units * 0.2
-            if target_units > 0.0:
-                pixels = max(35.0, canvas_width * 0.2)
-                y = canvas_height - 24.0
-                painter.save()
-                painter.setPen(QPen(QColor("#ffffff"), 2.0 * dpi_scale))
-                painter.drawLine(QPointF(16, y), QPointF(16 + pixels, y))
-                painter.drawLine(QPointF(16, y - 4 * dpi_scale), QPointF(16, y + 4 * dpi_scale))
-                painter.drawLine(QPointF(16 + pixels, y - 4 * dpi_scale), QPointF(16 + pixels, y + 4 * dpi_scale))
-                painter.drawText(QPointF(16, y - 7 * dpi_scale), f"{target_units:.3g} map units")
-                painter.restore()
-        if not elements or "指北针" in elements or "north_arrow" in elements:
-            painter.save()
-            center = QPointF(canvas_width - 28, 37)
-            painter.setPen(QPen(QColor("#ffffff"), 1.5 * dpi_scale))
-            painter.setBrush(QColor("#343a40"))
-            painter.drawPolygon(QPolygonF([center + QPointF(0, -18 * dpi_scale), center + QPointF(-6 * dpi_scale, 10 * dpi_scale), center + QPointF(0, 5 * dpi_scale), center + QPointF(6 * dpi_scale, 10 * dpi_scale)]))
-            painter.drawText(center + QPointF(-5 * dpi_scale, -22 * dpi_scale), "N")
-            painter.restore()
-        if (not elements or "图例" in elements or "legend" in elements) and decorations.get("legend_items"):
-            items = [str(item) for item in decorations["legend_items"]][:8]
-            painter.save()
-            painter.setPen(QPen(QColor("#dfe6ee"), 1.0 * dpi_scale))
-            painter.setBrush(QColor(24, 28, 34, 210))
-            height = 10 + 18 * len(items)
-            rect = QRectF(canvas_width - 180, canvas_height - height - 16, 164, height)
-            painter.drawRect(rect)
-            for index, item in enumerate(items):
-                painter.setBrush(QColor("#6c8ebf"))
-                y = rect.top() + 14 + index * 18
-                painter.drawRect(rect.left() + 8, y - 8, 9, 9)
-                painter.setPen(QColor("#f8f9fa"))
-                painter.drawText(QPointF(rect.left() + 23, y), item)
-            painter.restore()
+        paint_map_decorations(
+            painter,
+            decorations,
+            width=self.width() if width is None else int(width),
+            height=self.height() if height is None else int(height),
+            extent=self._view_extent,
+            dpi=dpi,
+        )
 
     def render_export_image(self, width: int, height: int, *, dpi: float = 300.0) -> QImage:
         """Synchronously render the same backend/composition at export resolution."""
