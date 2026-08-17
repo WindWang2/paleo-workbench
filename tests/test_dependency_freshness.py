@@ -807,6 +807,102 @@ def test_for_project_caches_graph_per_catalog_revision(monkeypatch):
         assert len(builds) == 2  # second revision reused
     finally:
         clear_dependency_graph_cache()
+
+
+def test_for_project_second_call_does_not_resweep_catalog(monkeypatch):
+    """#538: context resolution must not re-list runs or re-resolve versions
+    while the catalog revision is unchanged (50 factor tasks, ≥1000 runs)."""
+    from types import SimpleNamespace
+
+    from paleo_workbench.catalog.types import DataRunRef, DataStage, DataVersionRef
+    from paleo_workbench.workflow.freshness import clear_dependency_graph_cache
+
+    n_tasks = 50
+    n_runs = 1000
+    versions: list[DataVersionRef] = []
+    runs: list[DataRunRef] = []
+    for i in range(n_runs):
+        task_id = f"factor-{i % n_tasks}"
+        rid = f"run-{i}"
+        vid = f"ver-{i}"
+        runs.append(
+            DataRunRef(
+                run_id=rid,
+                operation="factor_map",
+                output_version_ids=[vid],
+                domain_task_id=task_id,
+                status="completed",
+            )
+        )
+        versions.append(
+            DataVersionRef(
+                asset_id=f"asset-{i}",
+                version_id=vid,
+                name=vid,
+                stage=DataStage.DERIVED,
+                producing_run_id=rid,
+            )
+        )
+
+    latest_by_task = {f"factor-{k}": f"ver-{n_runs - n_tasks + k}" for k in range(n_tasks)}
+    project = ProjectDocument.new("P")
+    for k in range(n_tasks):
+        project.factor_map_tasks.append(
+            FactorMapTask(
+                id=f"factor-{k}",
+                name=f"F{k}",
+                target_horizon="H1",
+                factor_type="砂岩含量",
+                method="IDW",
+                grid_artifact_version_id=latest_by_task[f"factor-{k}"],
+            )
+        )
+
+    document = SimpleNamespace(catalog_revision=1)
+
+    class _CountingCatalog:
+        service = SimpleNamespace(document=document)
+
+        def __init__(self) -> None:
+            self.list_runs_calls = 0
+            self.resolve_version_calls = 0
+            self._versions = {v.version_id: v for v in versions}
+            self._runs = list(runs)
+
+        def list_versions(self):
+            return list(versions)
+
+        def list_runs(self):
+            self.list_runs_calls += 1
+            return list(self._runs)
+
+        def resolve_version(self, version_id: str):
+            self.resolve_version_calls += 1
+            return self._versions.get(version_id)
+
+    class _EmptyService:
+        def list_assets(self, include_trashed=False):
+            return []
+
+    clear_dependency_graph_cache()
+    try:
+        fake = _CountingCatalog()
+        FreshnessService.for_project(
+            project, catalog=fake, service=_EmptyService()
+        )
+        # Graph rebuild lists runs once; context must reuse that index.
+        assert fake.list_runs_calls == 1
+        assert fake.resolve_version_calls == 0
+
+        fake.list_runs_calls = 0
+        fake.resolve_version_calls = 0
+        FreshnessService.for_project(
+            project, catalog=fake, service=_EmptyService()
+        )
+        assert fake.list_runs_calls == 0
+        assert fake.resolve_version_calls == 0
+    finally:
+        clear_dependency_graph_cache()
 # ------------------------------------------------------------------ C15 identity
 # Freshness/recompute identity must be stable across reruns: superseded
 # per-run asset tips must not stay "current", QC must collapse to the latest

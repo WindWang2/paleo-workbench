@@ -245,7 +245,11 @@ class FreshnessService:
             return cls(graph, ctx, catalog=None, check_integrity=check_integrity)
         graph = _cached_graph_for(cat)
         ctx = resolve_current_project_version_context(
-            project, catalog=cat, service=service, extra_selected=extra_selected
+            project,
+            catalog=cat,
+            service=service,
+            extra_selected=extra_selected,
+            graph=graph,
         )
         return cls(graph, ctx, catalog=cat, check_integrity=check_integrity)
 

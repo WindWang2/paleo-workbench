@@ -1777,6 +1777,100 @@ def _interpolate_grid_point_euclidean(
     return float(np.sum(weights * values) / weight_sum), n_blocked, False
 
 
+def _interpolate_grid_point_curve(
+    pt: PointTuple,
+    well_array: np.ndarray,
+    barriers: Sequence[BarrierLine],
+    config: ConstrainedIDWConfig,
+    density_weights: np.ndarray,
+    euclidean: np.ndarray,
+    candidate_distances: np.ndarray,
+    direction_weight_factors: np.ndarray,
+    g_pair: np.ndarray,
+    *,
+    cell_label: int = -2,
+    well_labels: Optional[np.ndarray] = None,
+    cell_dir_index: int = -1,
+    cell_s: float = 0.0,
+    cell_n: float = 0.0,
+    cell_ratio: float = 1.0,
+    well_curve_coords: Dict[int, Dict[str, np.ndarray]],
+    blocked_mask: Optional[np.ndarray] = None,
+    cell_index: int = -1,
+) -> Tuple[Optional[float], int, bool]:
+    """Vectorized curve-corridor candidate selection (same semantics as the scalar loop)."""
+    from drawing.single_factor.direction_corridor import pairs_in_search_neighborhood
+
+    n_wells = len(well_array)
+    blocked_wells = np.zeros(n_wells, dtype=bool)
+    if well_labels is not None and cell_label >= 0:
+        wl = np.asarray(well_labels, dtype=int)
+        blocked_wells |= (wl >= 0) & (wl != int(cell_label))
+    if barriers:
+        if blocked_mask is not None and cell_index >= 0:
+            blocked_wells |= np.asarray(blocked_mask[cell_index, :], dtype=bool)
+        else:
+            for idx in range(n_wells):
+                if is_blocked_by_barrier(
+                    pt,
+                    (float(well_array[idx, 0]), float(well_array[idx, 1])),
+                    barriers,
+                    config.endpoint_tolerance,
+                ):
+                    blocked_wells[idx] = True
+    n_blocked = int(blocked_wells.sum())
+
+    base_radius = max(float(config.search_radius), 1e-9)
+    radius_scales = (
+        (1.0,)
+        if bool(config.limit_interpolation_to_search_radius)
+        else (1.0, 1.5, 2.25, 3.0)
+    )
+    candidate_mask = np.zeros(n_wells, dtype=bool)
+    required_points = max(1, int(config.min_points))
+    for pass_index, radius_scale in enumerate(radius_scales):
+        r_pass = base_radius * radius_scale
+        in_nbhd = pairs_in_search_neighborhood(
+            euclidean=euclidean,
+            d_eff=candidate_distances,
+            g_pair=g_pair,
+            cell_s=float(cell_s),
+            cell_n=float(cell_n),
+            cell_ratio=float(cell_ratio),
+            cell_dir=int(cell_dir_index),
+            well_coords=well_curve_coords,
+            base_radius=r_pass,
+            use_extended_search=bool(config.use_extended_search),
+        )
+        candidate_mask = (~blocked_wells) & np.asarray(in_nbhd, dtype=bool)
+        required_points = max(1, int(config.min_points) - pass_index)
+        if int(candidate_mask.sum()) >= required_points:
+            break
+
+    exact = candidate_mask & (candidate_distances <= 1e-9)
+    if bool(exact.any()):
+        idx = int(np.flatnonzero(exact)[0])
+        return float(well_array[idx, 2]), n_blocked, True
+    if int(candidate_mask.sum()) < required_points:
+        return None, n_blocked, True
+
+    cand_idx = np.nonzero(candidate_mask)[0]
+    order = np.argsort(candidate_distances[cand_idx], kind="stable")
+    selected = cand_idx[order[: max(1, int(config.max_points))]]
+    dists = np.asarray(candidate_distances[selected], dtype=float)
+    values = np.asarray(well_array[selected, 2], dtype=float)
+    if density_weights.size:
+        decluster = np.asarray(density_weights[selected], dtype=float)
+    else:
+        decluster = np.ones_like(dists)
+    decluster = decluster * np.asarray(direction_weight_factors[selected], dtype=float)
+    weights = decluster / np.power(np.maximum(dists, 1e-9), float(config.power))
+    weight_sum = float(weights.sum())
+    if weight_sum <= 0:
+        return None, n_blocked, True
+    return float(np.sum(weights * values) / weight_sum), n_blocked, True
+
+
 def _interpolate_grid_point(
     pt: PointTuple,
     well_array: np.ndarray,
@@ -1808,10 +1902,7 @@ def _interpolate_grid_point(
     distances use blended curve coordinates so stretch follows bent direction
     polylines and search neighborhoods elongate along-axis.
     """
-    from drawing.single_factor.direction_corridor import (
-        pair_effective_distance,
-        pair_in_search_neighborhood,
-    )
+    from drawing.single_factor.direction_corridor import pairs_effective_distance
 
     dx = well_array[:, 0] - pt[0]
     dy = well_array[:, 1] - pt[1]
@@ -1831,28 +1922,26 @@ def _interpolate_grid_point(
     direction_weight_factors = np.ones(len(well_array), dtype=float)
     candidate_distances = euclidean.copy()
     used_direction = False
+    curve_g_pair: Optional[np.ndarray] = None
 
     if use_curve:
         used_direction = True
         geoms = direction_geoms or ()
-        for idx in range(len(well_array)):
-            d_eff, g_pair = pair_effective_distance(
-                euclidean=float(euclidean[idx]),
-                cell_dir=int(cell_dir_index),
-                cell_s=float(cell_s),
-                cell_n=float(cell_n),
-                cell_g=float(cell_g),
-                cell_ratio=float(cell_ratio),
-                well_index=int(idx),
-                well_coords=well_curve_coords,
-                geoms=geoms,
-            )
-            candidate_distances[idx] = d_eff
-            if g_pair > 1e-9:
-                # Mild corridor boost without washing out multi-center peaks
-                direction_weight_factors[idx] = 1.0 + float(
-                    config.direction_corridor_strength
-                ) * 0.35 * g_pair
+        d_eff, curve_g_pair = pairs_effective_distance(
+            euclidean=euclidean,
+            cell_dir=int(cell_dir_index),
+            cell_s=float(cell_s),
+            cell_n=float(cell_n),
+            cell_g=float(cell_g),
+            cell_ratio=float(cell_ratio),
+            well_coords=well_curve_coords,
+            geoms=geoms,
+        )
+        candidate_distances = d_eff
+        boost = curve_g_pair > 1e-9
+        direction_weight_factors[boost] = 1.0 + float(
+            config.direction_corridor_strength
+        ) * 0.35 * curve_g_pair[boost]
     else:
         # Legacy fixed-angle anisotropic distance (compatibility path)
         direction = nearest_direction_context(pt, directions, float(config.direction_taper_plateau))
@@ -1913,6 +2002,27 @@ def _interpolate_grid_point(
             blocked_mask=blocked_mask,
             cell_index=cell_index,
         )
+    if use_curve:
+        return _interpolate_grid_point_curve(
+            pt,
+            well_array,
+            barriers,
+            config,
+            density_weights,
+            euclidean,
+            candidate_distances,
+            direction_weight_factors,
+            curve_g_pair if curve_g_pair is not None else np.zeros(len(well_array)),
+            cell_label=cell_label,
+            well_labels=well_labels,
+            cell_dir_index=int(cell_dir_index),
+            cell_s=float(cell_s),
+            cell_n=float(cell_n),
+            cell_ratio=float(cell_ratio),
+            well_curve_coords=well_curve_coords or {},
+            blocked_mask=blocked_mask,
+            cell_index=cell_index,
+        )
     for pass_index, radius_scale in enumerate(radius_scales):
         r_pass = base_radius * radius_scale
         weighted_candidates = []
@@ -1938,30 +2048,10 @@ def _interpolate_grid_point(
                     blocked_indices.add(int(idx))
                     continue
 
-            if use_curve:
-                wc_dir = well_curve_coords.get(int(cell_dir_index))
-                g_well = float(wc_dir["g"][idx]) if wc_dir is not None else 0.0
-                in_nbhd = pair_in_search_neighborhood(
-                    euclidean=float(euclidean[idx]),
-                    d_eff=float(candidate_distances[idx]),
-                    g_pair=min(float(cell_g), g_well),
-                    cell_s=float(cell_s),
-                    cell_n=float(cell_n),
-                    cell_ratio=float(cell_ratio),
-                    well_index=int(idx),
-                    cell_dir=int(cell_dir_index),
-                    well_coords=well_curve_coords,
-                    base_radius=r_pass,
-                    use_extended_search=bool(config.use_extended_search),
-                )
-                if not in_nbhd:
-                    continue
-                dist = float(candidate_distances[idx])
-            else:
-                filter_d = float(candidate_distances[idx]) if config.use_extended_search else float(euclidean[idx])
-                if filter_d > r_pass:
-                    continue
-                dist = float(candidate_distances[idx]) if used_direction else float(euclidean[idx])
+            filter_d = float(candidate_distances[idx]) if config.use_extended_search else float(euclidean[idx])
+            if filter_d > r_pass:
+                continue
+            dist = float(candidate_distances[idx]) if used_direction else float(euclidean[idx])
 
             if dist <= 1e-9:
                 return float(well_array[idx, 2]), len(blocked_indices), used_direction

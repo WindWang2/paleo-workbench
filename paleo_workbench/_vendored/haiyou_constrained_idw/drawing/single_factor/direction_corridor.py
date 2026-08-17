@@ -1059,6 +1059,123 @@ def precompute_well_curve_coords(
     return result
 
 
+def _blend_effective_distance_vec(
+    euclidean: np.ndarray,
+    curve_dist: np.ndarray,
+    g_pair: np.ndarray,
+) -> np.ndarray:
+    g = np.clip(g_pair, 0.0, 1.0)
+    g = np.where(g >= 0.25, np.minimum(1.0, 0.70 + 0.30 * g), g)
+    de2 = euclidean * euclidean
+    dc2 = curve_dist * curve_dist
+    return np.sqrt(np.maximum((1.0 - g) * de2 + g * dc2, 0.0))
+
+
+def _elliptical_search_accept_vec(
+    s0: float,
+    n0: float,
+    s1: np.ndarray,
+    n1: np.ndarray,
+    ratio: float,
+    base_radius: float,
+    g_pair: np.ndarray,
+    euclidean: np.ndarray,
+    *,
+    line_length: float = 0.0,
+) -> np.ndarray:
+    r = max(float(base_radius), 1e-9)
+    g = np.clip(np.asarray(g_pair, dtype=float), 0.0, 1.0)
+    a = max(float(ratio), 1.0)
+    r_par = r * (1.0 + g * (a - 1.0) * 1.15)
+    if line_length > 0.0:
+        r_par = np.maximum(
+            r_par,
+            np.maximum(g * float(line_length) * 1.20, float(line_length) * 1.05 * g),
+        )
+    r_par = np.maximum(r_par, r * a * np.maximum(g, 0.85))
+    ds = np.abs(float(s0) - np.asarray(s1, dtype=float))
+    dn = np.abs(float(n0) - np.asarray(n1, dtype=float))
+    in_ellipse = (ds / np.maximum(r_par, 1e-9)) ** 2 + (dn / max(r, 1e-9)) ** 2 <= 1.0
+    euc_ok = (g < 0.35) & (np.asarray(euclidean, dtype=float) <= r)
+    low_g = g <= 1e-9
+    return np.where(low_g, np.asarray(euclidean, dtype=float) <= r, in_ellipse | euc_ok)
+
+
+def pairs_effective_distance(
+    *,
+    euclidean: np.ndarray,
+    cell_dir: int,
+    cell_s: float,
+    cell_n: float,
+    cell_g: float,
+    cell_ratio: float,
+    well_coords: Dict[int, Dict[str, np.ndarray]],
+    geoms: Sequence[PolylineGeometry] | None = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Vectorized (d_eff, g_pair) for one cell against every well."""
+    euc = np.asarray(euclidean, dtype=float)
+    zeros = np.zeros(euc.shape, dtype=float)
+    if int(cell_dir) < 0 or float(cell_g) <= 1e-9:
+        return euc.copy(), zeros
+    wc = well_coords.get(int(cell_dir))
+    if wc is None:
+        return euc.copy(), zeros
+    valid = np.asarray(wc["valid"], dtype=bool)
+    g_well = np.asarray(wc["g"], dtype=float)
+    g_pair = np.where(valid, np.minimum(float(cell_g), g_well), 0.0)
+    a = max(float(cell_ratio), float(wc["ratio"]), 1.0)
+    ds = (float(cell_s) - np.asarray(wc["s"], dtype=float)) / a
+    dn = float(cell_n) - np.asarray(wc["n"], dtype=float)
+    d_curve = np.sqrt(np.maximum(ds * ds + dn * dn, 0.0))
+    d_eff = _blend_effective_distance_vec(euc, d_curve, g_pair)
+    inactive = g_pair <= 1e-9
+    d_eff = np.where(inactive, euc, d_eff)
+    g_pair = np.where(inactive, 0.0, g_pair)
+    return d_eff, g_pair
+
+
+def pairs_in_search_neighborhood(
+    *,
+    euclidean: np.ndarray,
+    d_eff: np.ndarray,
+    g_pair: np.ndarray,
+    cell_s: float,
+    cell_n: float,
+    cell_ratio: float,
+    cell_dir: int,
+    well_coords: Dict[int, Dict[str, np.ndarray]],
+    base_radius: float,
+    use_extended_search: bool,
+) -> np.ndarray:
+    """Vectorized elliptical neighborhood test for one cell against every well."""
+    r = max(float(base_radius), 1e-9)
+    euc = np.asarray(euclidean, dtype=float)
+    de = np.asarray(d_eff, dtype=float)
+    gp = np.asarray(g_pair, dtype=float)
+    fallback = euc <= r if not use_extended_search else de <= r
+    if int(cell_dir) < 0:
+        return fallback
+    wc = well_coords.get(int(cell_dir))
+    if wc is None:
+        return euc <= r
+    a = max(float(cell_ratio), float(wc["ratio"]), 1.0)
+    if use_extended_search:
+        in_nbhd = _elliptical_search_accept_vec(
+            float(cell_s),
+            float(cell_n),
+            np.asarray(wc["s"], dtype=float),
+            np.asarray(wc["n"], dtype=float),
+            a,
+            r,
+            gp,
+            euc,
+            line_length=float(wc.get("line_length", 0.0) or 0.0),
+        )
+    else:
+        in_nbhd = euc <= r
+    return np.where(gp <= 1e-9, fallback, in_nbhd)
+
+
 def pair_effective_distance(
     *,
     euclidean: float,
@@ -1076,24 +1193,18 @@ def pair_effective_distance(
     Uses curve distance only when both points share the same controlling
     direction (or the well is valid under the cell's direction).
     """
-    if cell_dir < 0 or cell_g <= 1e-9:
-        return float(euclidean), 0.0
-    wc = well_coords.get(int(cell_dir))
-    if wc is None or not bool(wc["valid"][well_index]):
-        return float(euclidean), 0.0
-    # zone check
-    if geoms and 0 <= cell_dir < len(geoms):
-        # already same dir index
-        pass
-    g_well = float(wc["g"][well_index])
-    g_pair = min(float(cell_g), g_well)
-    if g_pair <= 1e-9:
-        return float(euclidean), 0.0
-    a = max(float(cell_ratio), float(wc["ratio"]), 1.0)
-    dc2 = curve_distance_sq(cell_s, cell_n, float(wc["s"][well_index]), float(wc["n"][well_index]), a)
-    d_curve = math.sqrt(max(dc2, 0.0))
-    d_eff = blend_effective_distance(float(euclidean), d_curve, g_pair)
-    return d_eff, g_pair
+    idx = int(well_index)
+    d_eff, g_pair = pairs_effective_distance(
+        euclidean=np.asarray([float(euclidean)]),
+        cell_dir=int(cell_dir),
+        cell_s=float(cell_s),
+        cell_n=float(cell_n),
+        cell_g=float(cell_g),
+        cell_ratio=float(cell_ratio),
+        well_coords=_well_coords_at(well_coords, idx),
+        geoms=geoms,
+    )
+    return float(d_eff[0]), float(g_pair[0])
 
 
 def pair_in_search_neighborhood(
@@ -1111,27 +1222,35 @@ def pair_in_search_neighborhood(
     use_extended_search: bool,
 ) -> bool:
     """Elliptical neighborhood when under direction control."""
-    r = max(float(base_radius), 1e-9)
-    if g_pair <= 1e-9 or cell_dir < 0:
-        return float(euclidean) <= r if not use_extended_search else float(d_eff) <= r
-    wc = well_coords.get(int(cell_dir))
-    if wc is None:
-        return float(euclidean) <= r
-    a = max(float(cell_ratio), float(wc["ratio"]), 1.0)
-    if use_extended_search:
-        return elliptical_search_accept(
-            cell_s,
-            cell_n,
-            float(wc["s"][well_index]),
-            float(wc["n"][well_index]),
-            a,
-            r,
-            g_pair,
-            float(euclidean),
-            line_length=float(wc.get("line_length", 0.0) or 0.0),
-        )
-    # Extended search off: still weight by d_eff but filter by Euclidean
-    return float(euclidean) <= r
+    idx = int(well_index)
+    accepted = pairs_in_search_neighborhood(
+        euclidean=np.asarray([float(euclidean)]),
+        d_eff=np.asarray([float(d_eff)]),
+        g_pair=np.asarray([float(g_pair)]),
+        cell_s=float(cell_s),
+        cell_n=float(cell_n),
+        cell_ratio=float(cell_ratio),
+        cell_dir=int(cell_dir),
+        well_coords=_well_coords_at(well_coords, idx),
+        base_radius=float(base_radius),
+        use_extended_search=bool(use_extended_search),
+    )
+    return bool(accepted[0])
+
+
+def _well_coords_at(
+    well_coords: Dict[int, Dict[str, np.ndarray]], index: int
+) -> Dict[int, Dict[str, np.ndarray]]:
+    sliced: Dict[int, Dict[str, np.ndarray]] = {}
+    for dir_index, wc in well_coords.items():
+        entry: Dict[str, np.ndarray] = {}
+        for key, value in wc.items():
+            if isinstance(value, np.ndarray) and value.shape[:1] and value.shape[0] > index:
+                entry[key] = value[index : index + 1]
+            else:
+                entry[key] = value
+        sliced[dir_index] = entry
+    return sliced
 
 
 __all__ = [
@@ -1158,6 +1277,8 @@ __all__ = [
     "build_grid_direction_cache",
     "build_legacy_direction_field",
     "precompute_well_curve_coords",
+    "pairs_effective_distance",
+    "pairs_in_search_neighborhood",
     "pair_effective_distance",
     "pair_in_search_neighborhood",
 ]
