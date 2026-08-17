@@ -25,17 +25,29 @@ def test_clip_curve_depth_range():
     assert np.max(clipped_depths) <= 2000.0
 
 
+def _median_ms(fn, trials: int = 5, warmup: int = 1) -> float:
+    for _ in range(warmup):
+        fn()
+    samples = []
+    for _ in range(trials):
+        t0 = time.perf_counter()
+        fn()
+        samples.append((time.perf_counter() - t0) * 1000.0)
+    return float(np.median(samples))
+
+
 def test_simplify_curve_screen_space_performance():
     # Dense curve with 20,000 points
+    rng = np.random.default_rng(0)
     y_px = np.linspace(0, 1080, 20000)
-    x_px = 100 + 50 * np.sin(y_px * 0.1) + np.random.randn(20000) * 0.1  # jitter < 0.5px
-    
-    t0 = time.perf_counter()
-    simp_x, simp_y = simplify_curve_screen_space(x_px, y_px, epsilon=0.5)
-    t1 = time.perf_counter()
-    
-    elapsed_ms = (t1 - t0) * 1000.0
-    
+    x_px = 100 + 50 * np.sin(y_px * 0.1) + rng.normal(0.0, 0.1, 20000)  # jitter < 0.5px
+
+    def _run():
+        return simplify_curve_screen_space(x_px, y_px, epsilon=0.5)
+
+    simp_x, simp_y = _run()
+    elapsed_ms = _median_ms(_run)
+
     # Compression: 20,000 points down to < 1000 points (> 95% reduction) in < 3ms
     assert len(simp_x) < 1000
     assert elapsed_ms < 3.0

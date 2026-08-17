@@ -141,6 +141,30 @@ def test_geological_modeling_3d_page_ui_elements(qtbot):
     assert page.slide_clip_x is not None
 
 
+def test_geological_modeling_3d_page_clip_and_tie_without_show(qtbot):
+    """#639: clip/tie/splitter wiring must run under offscreen (no page.show())."""
+    page = GeologicalModeling3DPage()
+    qtbot.addWidget(page)
+    page.resize(1600, 900)
+
+    splitter = getattr(page, "_main_splitter", None) or page.findChild(QSplitter)
+    assert splitter is not None
+    # Offscreen sizes() stay 50/50 until show(); the width cap is what forces
+    # the center pane above 50% once the layout is realized.
+    assert splitter.widget(0).maximumWidth() <= 320
+    assert splitter.count() >= 2
+
+    page.chk_clip_x.setChecked(True)
+    page.slide_clip_x.setValue(60)
+    page.combo_clip_x_dir.setCurrentIndex(1)
+    page._update_clipping()
+
+    page.slider_wavelet_freq.setValue(45)
+    page.slider_td_shift.setValue(-10)
+    page._on_tie_params_changed()
+    assert page.bh_raw_data == []
+
+
 @requires_real_opengl
 def test_geological_modeling_3d_page_splitter_layout(qtbot):
     page = GeologicalModeling3DPage()

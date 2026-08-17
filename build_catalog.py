@@ -1,7 +1,8 @@
 """Build master catalog + description files for all 312 SVG icons."""
 import os, json
+from pathlib import Path
 
-OUTDIR = "/home/kevin/projects/paleo_project/svg_output"
+OUTDIR = str(Path(__file__).resolve().parent / "svg_output")
 DESCDIR = os.path.join(OUTDIR, "descriptions")
 os.makedirs(DESCDIR, exist_ok=True)
 
@@ -415,21 +416,22 @@ add(B, "rock_bedding_lenticular", "透镜状层理",   "Lenticular Bedding",    
 add(B, "rock_mud_crack",          "泥裂",         "Mud Crack",             "附录M.2.9",         "STRU-M2-5H/C","#666",  "多边形裂纹，泥裂。")
 add(B, "rock_rain_print",         "雨痕",         "Rain Print",            "附录M.2.9",         "STRU-M2-6H/C","#666",  "小圆圈，雨痕构造。")
 
-# ──────────────────────────────────────────────
-# Write catalog.json
-# ──────────────────────────────────────────────
-with open(os.path.join(OUTDIR, "catalog.json"), 'w', encoding='utf-8') as f:
-    json.dump(catalog, f, ensure_ascii=False, indent=2)
+if __name__ == "__main__":
+    # ──────────────────────────────────────────────
+    # Write catalog.json
+    # ──────────────────────────────────────────────
+    with open(os.path.join(OUTDIR, "catalog.json"), 'w', encoding='utf-8') as f:
+        json.dump(catalog, f, ensure_ascii=False, indent=2)
 
-# Write individual description files
-for entry in catalog:
-    write_desc(entry)
+    # Write individual description files
+    for entry in catalog:
+        write_desc(entry)
 
-# Summary
-from collections import Counter
-cat_counts = Counter(e['category'] for e in catalog)
-print(f"\nTotal catalog entries: {len(catalog)}")
-print(f"Description files:    {len(os.listdir(DESCDIR))}")
-print()
-for k, v in sorted(cat_counts.items()):
-    print(f"  {v:3d}  {k}")
+    # Summary
+    from collections import Counter
+    cat_counts = Counter(e['category'] for e in catalog)
+    print(f"\nTotal catalog entries: {len(catalog)}")
+    print(f"Description files:    {len(os.listdir(DESCDIR))}")
+    print()
+    for k, v in sorted(cat_counts.items()):
+        print(f"  {v:3d}  {k}")
