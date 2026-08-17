@@ -154,6 +154,33 @@ def test_purge_trashed_failed_save_keeps_payloads_restorable(service, tmp_path, 
     assert service.document.versions == []
 
 
+def test_purge_trashed_failed_save_restores_asset_tombstone(
+    service, tmp_path, monkeypatch
+):
+    """#616: un-trashing a partially-live asset must roll back if save fails."""
+    v1 = service.import_raw(_make_source(tmp_path, payload=b"payload-one"))
+    working = service.create_working_copy(v1.id)
+    working.write_bytes(b"payload-two")
+    v2 = service.commit_working_copy(working, asset_id=v1.asset_id)
+    service.trash_asset(v1.asset_id, reason="cleanup")
+    service.restore_version(v1.id)
+    asset = service._asset_or_raise(v1.asset_id)
+    assert asset.trashed is True
+    assert v1.trashed is False
+    assert v2.trashed is True
+
+    def boom(_self, _document):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(CatalogStore, "save", boom)
+    with pytest.raises(OSError):
+        service.purge_trashed()
+
+    assert asset.trashed is True
+    assert v2.trashed is True
+    assert v1.trashed is False
+
+
 # --- F3: restore rollback only touches versions the restore modified ---------
 
 

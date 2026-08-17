@@ -1277,6 +1277,15 @@ class DataCatalogService:
                 existing = model
                 break
         if existing is not None:
+            before = (
+                existing.model_name,
+                existing.model_type,
+                existing.capability,
+                existing.provider,
+                existing.status,
+                dict(existing.metadata),
+                dict(existing.provenance),
+            )
             changed = False
             if existing.model_name != model_name:
                 existing.model_name = model_name
@@ -1304,7 +1313,19 @@ class DataCatalogService:
                 existing.provenance.update(provenance)
                 changed = True
             if changed:
-                self._save()
+                try:
+                    self._save()
+                except Exception:
+                    (
+                        existing.model_name,
+                        existing.model_type,
+                        existing.capability,
+                        existing.provider,
+                        existing.status,
+                        existing.metadata,
+                        existing.provenance,
+                    ) = before
+                    raise
             return existing
         model = Model(
             model_id=model_id,
@@ -1457,10 +1478,19 @@ class DataCatalogService:
             ok, reason = can_promote_to_production(self, model_id, model_version)
             if not ok:
                 raise CatalogError(f"Cannot promote to production: {reason}")
+            before_model_status = model.status
+            before_version_status = version.status
+            before_demo_only = version.demo_only
             model.status = "production"
             version.status = "production"
             version.demo_only = False
-            self._save()
+            try:
+                self._save()
+            except Exception:
+                model.status = before_model_status
+                version.status = before_version_status
+                version.demo_only = before_demo_only
+                raise
             return version
 
     def find_production_model(self, capability: str) -> ModelVersion | None:
@@ -1942,8 +1972,19 @@ class DataCatalogService:
             surviving_asset_ids = {
                 v.asset_id for v in self.document.versions if not v.trashed
             }
+            untrashed_snapshots: list[
+                tuple[DataAsset, bool, str | None, dict[str, Any]]
+            ] = []
             for asset in trashed_assets:
                 if asset.id in surviving_asset_ids:
+                    untrashed_snapshots.append(
+                        (
+                            asset,
+                            asset.trashed,
+                            asset.trashed_at,
+                            dict(asset.metadata),
+                        )
+                    )
                     asset.trashed = False
                     asset.trashed_at = None
                     asset.metadata.pop("trash", None)
@@ -1965,6 +2006,10 @@ class DataCatalogService:
                     # stayed in the document the whole time).
                     if asset not in self.document.assets:
                         self._add_asset(asset)
+                for asset, was_trashed, was_at, was_meta in untrashed_snapshots:
+                    asset.trashed = was_trashed
+                    asset.trashed_at = was_at
+                    asset.metadata = was_meta
                 self.document.version_tags.update(removed_version_tags)
                 self.document.asset_tags.update(removed_asset_tags)
                 self.document.asset_tags.update(removed_zombie_tags)
