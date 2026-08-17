@@ -157,11 +157,13 @@ def test_scan_concurrent_vanished_file_skipped(tmp_path: Path, monkeypatch):
     original = scanner._process_file
     call_count = [0]
 
-    def patched(path, project_path, skip):
+    def patched(path, project_path, skip, classify=None):
         call_count[0] += 1
         if call_count[0] == 1:
             return None  # simulate vanished
-        return original(path, project_path, skip)
+        if classify is None:
+            return original(path, project_path, skip)
+        return original(path, project_path, skip, classify)
 
     monkeypatch.setattr(scanner, "_process_file", patched)
     results = scan_resources(tmp_path)

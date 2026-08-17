@@ -6,7 +6,7 @@ window-exposure path, while the animation contract only needs the event loop.
 """
 import pytest
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation
-from PySide6.QtWidgets import QGraphicsOpacityEffect, QStackedWidget
+from PySide6.QtWidgets import QGraphicsOpacityEffect
 
 
 # --- AppShell page-switch tests (headless: no native-window exposure) ---
@@ -62,44 +62,29 @@ def test_rapid_page_switch_restarts_animation(qtbot):
     assert isinstance(effect, QGraphicsOpacityEffect)
 
 
-# --- Isolated contract test (no AppShell, no WebEngine hang) ---
+# --- Contract test drives the production helper (not a local replica) ---
 
 def test_fade_animation_contract(qtbot):
-    """Verify the fade helper builds a correct animation on a bare stack.
+    """#644: assert AppShell._animate_page_fade, not a mirrored copy."""
+    from paleo_workbench.ui.app_shell import AppShell
 
-    Mirrors ``AppShell._animate_page_fade`` so the contract (effect + animation
-    duration/easing/values) is checked even when AppShell cannot be constructed.
-    """
-    stack = QStackedWidget()
-    qtbot.addWidget(stack)
-    page_a = QStackedWidget()
-    page_b = QStackedWidget()
-    stack.addWidget(page_a)
-    stack.addWidget(page_b)
-
-    # Reproduce the helper's logic against the bare stack.
-    def animate(index: int):
-        page = stack.widget(index)
-        existing = page.graphicsEffect()
-        if isinstance(existing, QGraphicsOpacityEffect):
-            existing.setOpacity(1.0)
-        effect = QGraphicsOpacityEffect(page)
-        effect.setOpacity(0.7)
-        page.setGraphicsEffect(effect)
-        anim = QPropertyAnimation(effect, b"opacity", page)
-        anim.setDuration(150)
-        anim.setStartValue(0.7)
-        anim.setEndValue(1.0)
-        anim.setEasingCurve(QEasingCurve.Type.OutQuad)
-        anim.start()
-        return anim, effect
-
-    anim, effect = animate(1)
+    shell = AppShell()
+    qtbot.addWidget(shell)
+    shell._animate_page_fade(1)
+    anim = shell._fade_anim
+    assert isinstance(anim, QPropertyAnimation)
     assert anim.duration() == 150
     assert anim.easingCurve() == QEasingCurve.Type.OutQuad
     assert anim.startValue() == 0.7
     assert anim.endValue() == 1.0
+    page = shell.page_stack.widget(1)
+    effect = page.graphicsEffect()
     assert isinstance(effect, QGraphicsOpacityEffect)
-    # Rapid restart: previous effect reset to full, new one starts at 0.7.
-    anim2, effect2 = animate(1)
-    assert effect2.opacity() == 0.7
+    assert effect.opacity() == pytest.approx(0.7)
+    # Rapid restart on the same page: production replaces the effect at 0.7.
+    shell._animate_page_fade(1)
+    effect2 = page.graphicsEffect()
+    assert isinstance(effect2, QGraphicsOpacityEffect)
+    assert effect2.opacity() == pytest.approx(0.7)
+    assert isinstance(shell._fade_anim, QPropertyAnimation)
+    assert shell._fade_anim.duration() == 150

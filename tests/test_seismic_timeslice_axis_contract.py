@@ -20,6 +20,7 @@ def demo_segy() -> Path:
     return path
 
 
+@pytest.mark.slow
 def test_read_timeslice_matches_volume_axes(demo_segy: Path):
     """2D Time profile source and 3D horizontal plane must share (IL, XL) order."""
     from geoviz_seismic.loader import SeismicLoader

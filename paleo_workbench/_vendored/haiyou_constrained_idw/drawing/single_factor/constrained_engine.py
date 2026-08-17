@@ -25,6 +25,10 @@ _NON_BLOCKING_MODES = {"none", "off", "no_block", "soft", "partial", "0", "false
 def is_full_block_mode(block_mode: str) -> bool:
     return str(block_mode or "").strip().lower() not in _NON_BLOCKING_MODES
 
+def _raise_if_cancelled(token) -> None:
+    if token is not None:
+        token.raise_if_cancelled()
+
 
 @dataclass(frozen=True)
 class ConstraintWell:
@@ -574,8 +578,10 @@ def generate_constrained_idw(
     levels: Sequence[float],
     config: ConstrainedIDWConfig,
     interpolation_areas: Optional[Sequence[BoundaryPolygon]] = None,
+    cancellation_token=None,
 ) -> ConstrainedGridResult:
     """Generate a constrained IDW surface and masked contour polylines."""
+    _raise_if_cancelled(cancellation_token)
     if len(wells) < 3:
         raise ValueError(f"有效井点不足，至少需要 3 个，当前 {len(wells)} 个")
     if not boundaries:
@@ -772,6 +778,7 @@ def generate_constrained_idw(
         well_coverage_mask=well_coverage_mask,
         data_hull_mask=domain_hull_mask,
     )
+    _raise_if_cancelled(cancellation_token)
     total_cells = int(domain_mask.size)
     valid_cells = int(np.count_nonzero(domain_mask))
     outside_cells = max(total_cells - valid_cells, 0)
@@ -805,6 +812,7 @@ def generate_constrained_idw(
     else:
         diagnostics["分割区域数"] = 1 if bool(domain_mask.any()) else 0
         diagnostics["region_count"] = diagnostics["分割区域数"]
+    _raise_if_cancelled(cancellation_token)
 
     # ── 第 3 步：区域内约束 IDW 插值趋势面（曲线坐标走廊 + 椭圆搜索）──
     from drawing.single_factor.fast_grid import interpolate_idw_grid_batch
@@ -893,8 +901,11 @@ def generate_constrained_idw(
             well_array[:, 1],
             _barrier_segments(active_barriers),
             endpoint_tolerance=config.endpoint_tolerance,
+            cancellation_token=cancellation_token,
         )
         for cell_index, (row, col) in enumerate(zip(point_rows, point_cols)):
+            if cell_index % 64 == 0:
+                _raise_if_cancelled(cancellation_token)
             pt = (float(grid_x[col]), float(grid_y[row]))
             cell_label = int(region_labels[row, col]) if region_labels is not None else -2
             c_dir = -1
@@ -967,6 +978,7 @@ def generate_constrained_idw(
             use_extended_search=bool(config.use_extended_search),
             limit_search_radius=bool(config.limit_interpolation_to_search_radius),
         )
+        _raise_if_cancelled(cancellation_token)
         # Optional LOS refine only near barriers (small band — keeps UI responsive)
         if active_barriers and near_active_mask is not None:
             refine = domain_mask & np.asarray(near_active_mask, dtype=bool)
@@ -984,8 +996,11 @@ def generate_constrained_idw(
                     well_array[:, 1],
                     _barrier_segments(active_barriers),
                     endpoint_tolerance=config.endpoint_tolerance,
+                    cancellation_token=cancellation_token,
                 )
                 for cell_index, (row, col) in enumerate(zip(refine_rows, refine_cols)):
+                    if cell_index % 64 == 0:
+                        _raise_if_cancelled(cancellation_token)
                     pt = (float(grid_x[col]), float(grid_y[row]))
                     cell_label = int(region_labels[row, col]) if region_labels is not None else -2
                     c_dir = int(direction_cache["dir_index"][row, col]) if direction_cache is not None else -1
@@ -1086,6 +1101,7 @@ def generate_constrained_idw(
     diagnostics["方向线覆盖百分比"] = coverage_pct
     diagnostics["direction_coverage_percent"] = coverage_pct
 
+    _raise_if_cancelled(cancellation_token)
     # ── 第 4 步：区域内补洞 + 平滑（不跨区域、不跨打断线）──
     # 区域标签负责把域切成独立区，补洞/平滑不跨区；同时恢复不跨打断线的
     # 线段级隔离（配合近线预过滤保性能），未贯穿打断线产生的局部跳变也留痕。
@@ -1612,6 +1628,7 @@ def generate_constrained_idw(
     diagnostics["final_pruned_closed_contours"] = int(final_prune.get("pruned_closed", 0))
     diagnostics["kept_contour_polylines"] = int(sum(len(v) for v in contours.values()))
     diagnostics["生成等值线条数"] = int(sum(len(v) for v in contours.values()))
+    _raise_if_cancelled(cancellation_token)
     return ConstrainedGridResult(
         grid_z=contour_grid,
         grid_x=grid_x,
@@ -2148,6 +2165,7 @@ def _barrier_blocked_mask(
     well_y: np.ndarray,
     barrier_segments: Sequence[Tuple[PointTuple, PointTuple]],
     endpoint_tolerance: float = 1e-7,
+    cancellation_token=None,
 ) -> np.ndarray:
     """Vectorized LOS barrier mask: ``blocked[c, w]`` == segment c→w crosses a barrier.
 
@@ -2170,6 +2188,7 @@ def _barrier_blocked_mask(
     # Element budget (cells x wells) per chunk.
     chunk = max(1, 4_000_000 // max(1, n_wells))
     for start in range(0, n_cells, chunk):
+        _raise_if_cancelled(cancellation_token)
         stop = min(start + chunk, n_cells)
         ax = cell_x[start:stop, None]
         ay = cell_y[start:stop, None]

@@ -1,7 +1,7 @@
 name: Slow tests (nightly)
 
 # Packaging #442: the fast CI gate intentionally runs `-m "not slow"`, but the
-# 12 slow tests are the ONLY end-to-end real-data coverage (real LAS/DAT/SEGY
+# 14 slow tests are the ONLY end-to-end real-data coverage (real LAS/DAT/SEGY
 # vendor formats, tests/test_geoviz_real_data_smoke.py) and the interpolation
 # performance gates (tests/perf/test_interpolation_perf.py). Nothing else ever
 # ran them, and they self-skip when the gitignored data/ tree is absent — so
@@ -9,7 +9,7 @@ name: Slow tests (nightly)
 #
 # This leg executes the full slow family on a schedule (and on manual
 # dispatch). It is FAIL-CLOSED in two ways:
-#   1. If the slow family shrinks below its 12-test baseline, the leg fails.
+#   1. If the slow family shrinks below its 14-test baseline, the leg fails.
 #   2. If the representative data tree is absent, the real-data tests skip and
 #      the leg fails with an explicit message — never a silent green.
 # Providing the data makes the leg green; the perf gates then run too.
@@ -82,11 +82,11 @@ jobs:
           python -c "import geoviz, geoviz_well_seismic_3d"
 
       - name: Assert the slow family has not silently shrunk
-        # Baseline 12 = 7 real-data smoke + 5 interpolation perf tests.
+        # Baseline 14 = 7 real-data smoke + 5 interpolation perf + 2 real SEGY axis contracts (#650).
         run: |
           count="$(python -m pytest --collect-only -q -m slow tests/ 2>&1 | grep -oE '[0-9]+ tests collected' | grep -oE '^[0-9]+')"
-          echo "slow tests collected: ${count} (baseline 12)"
-          test -n "${count}" && test "${count}" -ge 12
+          echo "slow tests collected: ${count} (baseline 14)"
+          test -n "${count}" && test "${count}" -ge 14
 
       - name: Run slow tests (real-data smoke + interpolation perf gates)
         env:

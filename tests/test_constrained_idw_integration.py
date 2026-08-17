@@ -229,6 +229,69 @@ def test_run_respects_cancellation_token_before_compute():
         run_constrained_idw(_sample_points(6), grid_n=24, cancellation_token=token)
 
 
+def test_adapter_forwards_cancellation_token_into_generate():
+    """#670: generate must receive the host token, not just pre/post checks."""
+    seen: dict[str, object] = {}
+    engine = cia._ensure_haiyou_engine()
+    real = engine["generate_constrained_idw"]
+
+    def _fake_generate(*args, **kwargs):
+        seen["token"] = kwargs.get("cancellation_token")
+        raise RuntimeError("stop-before-idw")
+
+    engine["generate_constrained_idw"] = _fake_generate
+
+    class _Token:
+        def raise_if_cancelled(self) -> None:
+            return
+
+    token = _Token()
+    try:
+        with pytest.raises(RuntimeError, match="stop-before-idw"):
+            run_constrained_idw(
+                _sample_points(6), grid_n=24, cancellation_token=token
+            )
+        assert seen.get("token") is token
+    finally:
+        engine["generate_constrained_idw"] = real
+
+
+def test_run_cancels_during_engine_generate():
+    """#670: cancel during generate must raise before the engine returns."""
+    from geoviz import JobCancelled
+
+    class _TripInsideGenerate:
+        def __init__(self) -> None:
+            self.in_generate = False
+            self.checked_in_generate = 0
+
+        def raise_if_cancelled(self) -> None:
+            if self.in_generate:
+                self.checked_in_generate += 1
+                raise JobCancelled()
+
+    token = _TripInsideGenerate()
+    engine = cia._ensure_haiyou_engine()
+    real = engine["generate_constrained_idw"]
+
+    def _wrapped(*args, **kwargs):
+        token.in_generate = True
+        try:
+            return real(*args, **kwargs)
+        finally:
+            token.in_generate = False
+
+    engine["generate_constrained_idw"] = _wrapped
+    try:
+        with pytest.raises(JobCancelled):
+            run_constrained_idw(
+                _sample_points(6), grid_n=24, cancellation_token=token
+            )
+        assert token.checked_in_generate >= 1
+    finally:
+        engine["generate_constrained_idw"] = real
+
+
 # --------------------------------------------------------------------------- #
 # Host dispatch (apply_interpolation_to_task) + provenance
 # --------------------------------------------------------------------------- #

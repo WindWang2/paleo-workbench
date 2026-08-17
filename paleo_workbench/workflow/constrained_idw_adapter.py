@@ -511,6 +511,7 @@ def run_constrained_idw(
         directions,
         levels=[],  # unused with extract_contours=False
         config=config,
+        cancellation_token=cancellation_token,
     )
 
     if cancellation_token is not None:
