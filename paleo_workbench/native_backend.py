@@ -343,33 +343,19 @@ def _py_compute_coherence_3d(
             trace_sq_sum = np.sum(sub**2, axis=(0, 1))
             mean_sq = (trace_sum / n_spatial) ** 2
             sum_sq = trace_sq_sum
-            # Prefix sums replace the per-sample Python k-loop (#621).
-            # NaNs are counted separately so a later finite window is not
-            # poisoned by `nan - nan` on the raw cumulative totals.
-            nan_flag = ~np.isfinite(mean_sq) | ~np.isfinite(sum_sq)
-            finite_num = np.where(nan_flag, 0.0, mean_sq)
-            finite_den = np.where(nan_flag, 0.0, sum_sq)
-            cs_num = np.empty(nt + 1, dtype=np.float64)
-            cs_den = np.empty(nt + 1, dtype=np.float64)
-            cs_nan = np.empty(nt + 1, dtype=np.int32)
-            cs_num[0] = 0.0
-            cs_den[0] = 0.0
-            cs_nan[0] = 0
-            cs_num[1:] = np.cumsum(finite_num)
-            cs_den[1:] = np.cumsum(finite_den)
-            cs_nan[1:] = np.cumsum(nan_flag.astype(np.int32))
-            k = np.arange(nt)
-            k0 = np.maximum(0, k - ht)
-            k1 = np.minimum(nt - 1, k + ht)
-            vert_len = (k1 - k0 + 1).astype(np.float64)
-            run_num = cs_num[k1 + 1] - cs_num[k0]
-            run_den = (cs_den[k1 + 1] - cs_den[k0]) / vert_len + 1e-12
-            value = run_num / run_den
-            # C++ parity: NaN input in the window maps to 0.0.
-            has_nan = (cs_nan[k1 + 1] - cs_nan[k0]) > 0
-            out = np.clip(value, 0.0, 1.0)
-            out = np.where(has_nan | np.isnan(value), 0.0, out)
-            coh[i, j, :] = out.astype(np.float32, copy=False)
+
+            for k in range(nt):
+                k0 = max(0, k - ht)
+                k1 = min(nt - 1, k + ht)
+                vert_len = float(k1 - k0 + 1)
+                run_num = np.sum(mean_sq[k0 : k1 + 1])
+                run_den = np.sum(sum_sq[k0 : k1 + 1]) / vert_len + 1e-12
+                value = run_num / run_den
+                if isinstance(value, float) and math.isnan(value):
+                    # C++ parity: NaN input maps to 0.0 via the clamp chain.
+                    coh[i, j, k] = 0.0
+                else:
+                    coh[i, j, k] = float(np.clip(value, 0.0, 1.0))
 
     return coh
 

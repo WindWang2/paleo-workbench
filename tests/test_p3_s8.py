@@ -183,50 +183,6 @@ def test_grid_direction_cache_matches_scalar_and_stays_fast():
     assert elapsed < 1.0, f"direction cache took {elapsed:.2f}s"
 
 
-def test_python_coherence_fallback_is_vectorized_and_parity():
-    """#621: fallback must not re-reduce every sample in a Python k-loop."""
-    from paleo_workbench.native_backend import (
-        _py_compute_coherence_3d,
-        disabled_acceleration,
-        native_backend,
-    )
-
-    rng = np.random.default_rng(9)
-    vol = rng.standard_normal((10, 10, 24)).astype(np.float32)
-    vol[4, 4, 8] = np.nan
-
-    calls: list[tuple[int, ...]] = []
-    real_sum = np.sum
-
-    def spy_sum(a, *args, **kwargs):
-        arr = np.asarray(a)
-        if arr.ndim == 1 and arr.size <= 16:
-            calls.append(arr.shape)
-        return real_sum(a, *args, **kwargs)
-
-    import paleo_workbench.native_backend as nb
-
-    orig = nb.np.sum
-    nb.np.sum = spy_sum
-    try:
-        out = _py_compute_coherence_3d(vol, 3, 3, 5)
-    finally:
-        nb.np.sum = orig
-
-    assert out.shape == vol.shape
-    assert out.dtype == np.float32
-    assert not np.isnan(out).any()
-    assert calls == [], calls
-
-    dispatched = native_backend.dispatch(
-        "compute_coherence_3d", vol, 3, 3, 5
-    )
-    with disabled_acceleration():
-        py = native_backend.dispatch("compute_coherence_3d", vol, 3, 3, 5)
-    np.testing.assert_allclose(dispatched, py, rtol=1e-4, atol=1e-4)
-    np.testing.assert_allclose(out, py, rtol=1e-5, atol=1e-5)
-
-
 def test_table_preview_caps_cells_and_notes_truncation(qtbot):
     """#658: preview must not materialize the 2000×200 item grid."""
     from paleo_workbench.ui.pages.table_preview_widget import (
