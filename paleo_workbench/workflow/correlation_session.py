@@ -121,14 +121,15 @@ def adjacent_links_for_marker(
         for a, b in zip(ordered, ordered[1:]):
             # only adjacent in section (no gap in well_order indices)
             ia, ib = _sort_key(a), _sort_key(b)
-            if ib - ia != 1 and not (
-                a.well_id and b.well_id and abs(
+            well_id_adjacent = bool(
+                a.well_id
+                and b.well_id
+                and abs(
                     order_index.get(a.well_id, -99) - order_index.get(b.well_id, -99)
                 )
                 == 1
-            ):
-                # still link consecutive tops in sorted section order
-                pass
+            )
+            adjacent = (ib - ia == 1) or well_id_adjacent
             lid = (
                 "clink_"
                 + hashlib.sha256(f"{a.id}|{b.id}".encode()).hexdigest()[:12]
@@ -141,7 +142,7 @@ def adjacent_links_for_marker(
                     well_a_id=a.well_id,
                     well_b_id=b.well_id,
                     method=method,
-                    adjacent_only=True,
+                    adjacent_only=adjacent,
                 )
             )
     return links

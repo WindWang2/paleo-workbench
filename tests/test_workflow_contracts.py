@@ -179,8 +179,8 @@ def test_prediction_demo_not_production():
     r = evaluate_readiness(p, "facies_prediction")
     # mock path should not look like clean production READY without warnings
     assert r.status in {ReadinessStatus.PARTIAL, ReadinessStatus.READY}
-    if r.status is ReadinessStatus.PARTIAL:
-        assert any("mock" in x.message_zh.lower() or "mock" in x.code for x in r.reasons)
+    # Honesty gate is unconditional: READY-without-warning used to skip this (#649).
+    assert any("mock" in x.message_zh.lower() or "mock" in x.code for x in r.reasons)
     assert c.implementation_status is not ImplementationStatus.PRODUCTION
 
 

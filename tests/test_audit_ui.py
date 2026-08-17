@@ -114,6 +114,22 @@ def _vector_layer():
     )
 
 
+def test_layer_properties_apply_blocks_invalid_classes_json(qtbot):
+    """#652: Apply must not emit a style that silently dropped Classes JSON."""
+    dlg = MapLayerPropertiesDialog(_vector_layer())
+    qtbot.addWidget(dlg)
+    received = []
+    dlg.properties_applied.connect(lambda _id, payload: received.append(payload))
+
+    dlg.renderer_combo.setCurrentText("categorized")
+    dlg.classes_edit.setPlainText('{"delta": #6c8ebf}')
+    dlg.apply()
+
+    assert received == []
+    assert not dlg.classes_error_label.isHidden()
+    assert "Invalid Classes JSON" in dlg.classes_error_label.text()
+
+
 def test_layer_properties_ok_blocks_invalid_classes_json(qtbot):
     """Audit C83: OK must not silently close over unparseable Classes JSON;
     an inline error appears next to the field instead."""

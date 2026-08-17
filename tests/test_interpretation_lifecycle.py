@@ -101,34 +101,26 @@ def test_save_new_version_immutable_and_parent_chain(tmp_path: Path):
         assert z1.shape == (40, 40)
 
         # Edit again → v2; v1 bytes must remain unchanged
-        art1_bytes = Path(
+        art1_path = Path(
             Path(project_path).parent / ref1.artifact_path
             if not Path(ref1.artifact_path).is_file()
             else ref1.artifact_path
-        ).read_bytes()
+        )
+        art1_bytes = art1_path.read_bytes()
         draft.sculpt((12.0, 12.0), delta_z=-2.0, radius=4.0)
         ref2, msg2 = save_draft_as_new_version(draft, project, project_path)
         assert msg2 == "ok" and ref2 is not None
         assert ref2.current_version_id != v1
         assert ref2.parent_version_id == v1
-        art1_path = Path(project_path).parent / (
-            # after second save project ref points to v2; find v1 file via d1 fingerprint path
-            # v1 path was captured in art1_bytes from first path
-            Path(ref1.artifact_path).name
-            if not Path(ref1.artifact_path).is_file()
-            else ref1.artifact_path
-        )
-        # Prefer reading the first path we hashed
-        first_path = (
-            Path(project_path).parent / ref1.artifact_path
-            if not Path(str(ref1.artifact_path)).is_file()
-            else Path(ref1.artifact_path)
-        )
-        # After catalog rehome, path may move under intermediate/ — verify from catalog if needed
-        if first_path.is_file():
-            # The immutable v1 bytes must be preserved across the catalog
-            # rehome — the artifact CONTENT never changes, only its location.
-            assert first_path.read_bytes() == art1_bytes
+        # After catalog rehome the original path may move. Locate v1 via the
+        # catalog — never skip the immutability check just because is_file()
+        # is false on the first path (#643).
+        v1_ver = service.get_version(v1)
+        v1_path = Path(v1_ver.path)
+        if not v1_path.is_file():
+            v1_path = Path(project_path).parent / v1_ver.path
+        assert v1_path.is_file(), f"v1 artifact not locatable after rehome: {v1_ver.path}"
+        assert v1_path.read_bytes() == art1_bytes
         assert project.horizon_interpretations[0].current_version_id == ref2.current_version_id
     finally:
         reset_catalog()
