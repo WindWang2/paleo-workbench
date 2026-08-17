@@ -409,13 +409,19 @@ class ComputeSettings:
         return "CPU多线程"
 
     def idw_row_block(self, cols: int, n_wells: int) -> int:
-        """Adaptive row block size to keep (block * cols * n_wells) memory moderate."""
+        """Adaptive row block size to keep (block * cols * n_wells) memory moderate.
+
+        The element budget is a *global* peak, not a per-worker allotment:
+        multithread execution holds one block of temporaries on every worker
+        at once, so the per-block size is divided by ``cpu_workers()`` (#525).
+        """
         n_wells = max(1, int(n_wells))
         cols = max(1, int(cols))
         target = 4_000_000 + int(12_000_000 * (self.cpu_percent / 100.0))
-        per_row = cols * n_wells
-        block = max(1, target // max(per_row, 1))
         workers = self.cpu_workers()
+        share = max(1, int(workers))
+        per_row = cols * n_wells * share
+        block = max(1, target // max(per_row, 1))
         return max(1, min(block, 128 if workers > 1 else 256))
 
     def summary_text(self) -> str:

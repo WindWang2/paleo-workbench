@@ -125,6 +125,7 @@ def resolve_current_project_version_context(
     catalog: Any | None = None,
     service: Any | None = None,
     extra_selected: Mapping[str, str] | None = None,
+    graph: Any | None = None,
 ) -> CurrentProjectVersionContext:
     """Build a deterministic current-version context for the open project.
 
@@ -138,6 +139,26 @@ def resolve_current_project_version_context(
     ctx = CurrentProjectVersionContext()
     cat = catalog if catalog is not None else get_catalog()
     svc = service if service is not None else get_catalog_service()
+
+    def _resolve_version(vid: str) -> Any:
+        if graph is not None:
+            ver = getattr(graph, "versions", {}).get(vid)
+            if ver is not None:
+                return ver
+        if cat is None:
+            return None
+        return cat.resolve_version(vid)
+
+    run_by_id: dict[str, Any] | None = None
+    if graph is not None:
+        runs = getattr(graph, "runs", None)
+        if runs is not None:
+            run_by_id = runs
+    if run_by_id is None and cat is not None:
+        try:
+            run_by_id = {r.run_id: r for r in cat.list_runs()}
+        except Exception:
+            run_by_id = {}
 
     # 1. Catalog current pointers
     if svc is not None:
@@ -154,7 +175,11 @@ def resolve_current_project_version_context(
     # when no service is present (tests / degraded mode). Prefer explicit select later.
     if svc is None and cat is not None:
         by_asset: dict[str, list[Any]] = {}
-        for ver in cat.list_versions():
+        graph_versions = getattr(graph, "versions", None) if graph is not None else None
+        version_iter = (
+            graph_versions.values() if graph_versions else cat.list_versions()
+        )
+        for ver in version_iter:
             by_asset.setdefault(ver.asset_id, []).append(ver)
         for asset_id, vers in by_asset.items():
             if asset_id in ctx.current_by_asset:
@@ -177,7 +202,7 @@ def resolve_current_project_version_context(
         vid = getattr(ref, "current_version_id", None)
         if not vid or cat is None:
             continue
-        ver = cat.resolve_version(vid)
+        ver = _resolve_version(vid)
         if ver is not None:
             ctx.select(ver.asset_id, vid, label=getattr(ref, "name", "") or "")
         else:
@@ -201,14 +226,19 @@ def resolve_current_project_version_context(
         if not vid:
             continue
         if cat is not None:
-            ver = cat.resolve_version(vid)
+            ver = _resolve_version(vid)
             if ver is not None:
                 ctx.select(ver.asset_id, vid, label=getattr(ref, "name", "") or "")
                 ctx.mark_domain_product_current(
                     str(getattr(ref, "id", "") or ""), vid
                 )
                 _deselect_superseded_domain_tips(
-                    ctx, cat, str(getattr(ref, "id", "") or ""), vid
+                    ctx,
+                    cat,
+                    str(getattr(ref, "id", "") or ""),
+                    vid,
+                    run_by_id=run_by_id,
+                    resolve_version=_resolve_version,
                 )
             else:
                 ctx.selected_version_ids.add(vid)
@@ -229,14 +259,19 @@ def resolve_current_project_version_context(
         if not vid:
             continue
         if cat is not None:
-            ver = cat.resolve_version(vid)
+            ver = _resolve_version(vid)
             if ver is not None:
                 ctx.select(ver.asset_id, vid, label=getattr(ref, "name", "") or "")
                 ctx.mark_domain_product_current(
                     str(getattr(ref, "id", "") or ""), vid
                 )
                 _deselect_superseded_domain_tips(
-                    ctx, cat, str(getattr(ref, "id", "") or ""), vid
+                    ctx,
+                    cat,
+                    str(getattr(ref, "id", "") or ""),
+                    vid,
+                    run_by_id=run_by_id,
+                    resolve_version=_resolve_version,
                 )
             else:
                 ctx.selected_version_ids.add(vid)
@@ -257,7 +292,7 @@ def resolve_current_project_version_context(
     for task in getattr(project, "factor_map_tasks", None) or []:
         grid_vid = getattr(task, "grid_artifact_version_id", None)
         if grid_vid and cat is not None:
-            ver = cat.resolve_version(grid_vid)
+            ver = _resolve_version(grid_vid)
             if ver is not None:
                 ctx.select(
                     ver.asset_id,
@@ -275,6 +310,8 @@ def resolve_current_project_version_context(
                     cat,
                     str(getattr(task, "id", "") or ""),
                     grid_vid,
+                    run_by_id=run_by_id,
+                    resolve_version=_resolve_version,
                 )
         snap = getattr(task, "input_snapshot_hash", "") or ""
         gen = getattr(task, "generator_version", None)
@@ -348,6 +385,9 @@ def _deselect_superseded_domain_tips(
     catalog: Any | None,
     domain_task_id: str,
     keep_version_id: str,
+    *,
+    run_by_id: Mapping[str, Any] | None = None,
+    resolve_version: Any | None = None,
 ) -> None:
     """Keep only the project-selected tip of a domain task selected.
 
@@ -357,18 +397,29 @@ def _deselect_superseded_domain_tips(
     #373 / C15). Explicit selections applied later (``extra_selected``)
     still win. Best-effort: a catalog that cannot resolve versions simply
     leaves the selection untouched.
+
+    ``run_by_id`` / ``resolve_version`` are optional precomputed indexes so a
+    project with many domain tasks does not re-list the catalog per task
+    (#538).
     """
-    if catalog is None or not domain_task_id or not keep_version_id:
+    if not domain_task_id or not keep_version_id:
         return
-    try:
-        run_by_id = {r.run_id: r for r in catalog.list_runs()}
-    except Exception:
-        return
+    if run_by_id is None:
+        if catalog is None:
+            return
+        try:
+            run_by_id = {r.run_id: r for r in catalog.list_runs()}
+        except Exception:
+            return
+    if resolve_version is None:
+        if catalog is None:
+            return
+        resolve_version = catalog.resolve_version
     for vid in list(ctx.selected_version_ids):
         if vid == keep_version_id:
             continue
         try:
-            ver = catalog.resolve_version(vid)
+            ver = resolve_version(vid)
         except Exception:
             continue
         if ver is None or not getattr(ver, "producing_run_id", None):

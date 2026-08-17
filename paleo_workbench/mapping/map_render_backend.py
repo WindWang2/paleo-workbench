@@ -386,7 +386,6 @@ class FallbackMapRenderBackend(MapRenderBackend):
             self._strip_reuse_count += 1
             dx_px, dy_px = shift
             painter.drawImage(QPointF(-dx_px, -dy_px), cached)
-            self._paint_scalar_grids(painter)
             self._paint_strips(painter, dx_px, dy_px)
         else:
             self._rasterization_count += 1
@@ -565,18 +564,14 @@ class FallbackMapRenderBackend(MapRenderBackend):
             self._paint_vector_layer(painter, layer, view, self._layer_margin_units(layer))
             painter.restore()
 
-    def _paint_scalar_grids(self, painter: QPainter) -> None:
-        """Recomposite scalar rasters over a reused frame (idempotent source-over)."""
-        for layer in self._snapshot.layers:
-            if layer.layer_type != "scalar_grid" or not layer.visible or layer.opacity <= 0.0:
-                continue
-            painter.save()
-            painter.setOpacity(max(0.0, min(1.0, float(layer.opacity))))
-            self._draw_scalar_grid(painter, layer)
-            painter.restore()
-
     def _paint_strips(self, painter: QPainter, dx_px: float, dy_px: float) -> None:
-        """Rasterize only the viewport strips exposed by a same-scale pan."""
+        """Rasterize only the viewport strips exposed by a same-scale pan.
+
+        Translucent source-over is not idempotent: the blit already holds one
+        composite, so strip paint must be clipped to the newly exposed pixels
+        (#521). Opaque vector paint stays unclipped so AA at the strip edge
+        still matches a full re-rasterization.
+        """
         width, height = self._output_size
         strips: list[QRectF] = []
         if dx_px > 0.0:
@@ -603,8 +598,16 @@ class FallbackMapRenderBackend(MapRenderBackend):
             for layer in self._snapshot.layers:
                 if not layer.visible or layer.opacity <= 0.0:
                     continue
+                opacity = max(0.0, min(1.0, float(layer.opacity)))
                 painter.save()
-                painter.setOpacity(max(0.0, min(1.0, float(layer.opacity))))
+                # Scalar rasters always cover the layer footprint; clip so the
+                # blit is not re-blended. Translucent vectors that cross the
+                # strip boundary need the same clip.
+                if layer.layer_type == "scalar_grid" or opacity < 1.0:
+                    painter.setClipRect(strip)
+                painter.setOpacity(opacity)
+                if layer.layer_type == "scalar_grid":
+                    self._draw_scalar_grid(painter, layer)
                 self._paint_vector_layer(painter, layer, strip_view, self._layer_margin_units(layer))
                 painter.restore()
 

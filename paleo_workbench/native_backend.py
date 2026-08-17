@@ -55,6 +55,10 @@ _NATIVE_MODULES = {
     "grid_render": grid_render_core,
 }
 
+# One-time warning per feature when dispatch / is_accelerated divert a stale
+# repo-root binary to the pure-Python fallback (#520).
+_STALE_WARNED: set[str] = set()
+
 
 def _repo_root() -> Path:
     """Monorepo root (the directory that contains ``paleo_workbench/``)."""
@@ -91,6 +95,10 @@ def native_status(feature: str) -> str:
     resolved to a committed binary at the repository root (``"stale"``) — the
     shadowing failure mode from packaging #435 where the CI "freshly built"
     assert would otherwise pass vacuously.
+
+    Repo-root binaries are always ``"stale"`` (they shadow ``sys.path[0]`` and
+    typically predate ``__version__``). :meth:`NativeEngineBackend.dispatch`
+    and :meth:`NativeEngineBackend.is_accelerated` refuse them.
     """
     origin = _module_origin(_NATIVE_MODULES.get(feature))
     if origin == "repo_root":
@@ -98,6 +106,20 @@ def native_status(feature: str) -> str:
     if origin == "missing":
         return "missing"
     return "fresh"
+
+
+def _warn_stale_native(feature: str) -> None:
+    if feature in _STALE_WARNED:
+        return
+    _STALE_WARNED.add(feature)
+    version = native_version(feature)
+    warnings.warn(
+        f"native {feature} module resolved to a stale repo-root binary "
+        f"(version={version!r}); using the pure-Python fallback. "
+        "Rebuild the extension under native/ or install a fresh wheel.",
+        UserWarning,
+        stacklevel=3,
+    )
 
 
 def native_version(feature: str) -> str | None:
@@ -687,10 +709,22 @@ class NativeEngineBackend:
         return feature_map.get(feature, False)
 
     def is_accelerated(self, feature: str) -> bool:
-        """Check if C++ acceleration for feature is currently active."""
+        """Check if C++ acceleration for feature is currently active.
+
+        A module that imported successfully can still be unusable: committed
+        repo-root binaries are classified ``"stale"`` by :func:`native_status`
+        and must not be dispatched (#520).
+        """
         if self._force_python:
             return False
-        return self.has_cpp(feature)
+        if not self.has_cpp(feature):
+            return False
+        status = native_status(feature)
+        if status != "fresh":
+            if status == "stale":
+                _warn_stale_native(feature)
+            return False
+        return True
 
     @contextmanager
     def disabled_acceleration(self) -> Generator[None, None, None]:

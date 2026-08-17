@@ -8,6 +8,7 @@ import pytest
 
 from paleo_workbench.native_backend import (
     NativeEngineBackend,
+    _NATIVE_MODULES,
     _module_origin,
     _repo_root,
     disabled_acceleration,
@@ -25,7 +26,10 @@ def test_native_backend_singleton_instance():
 
 def test_is_accelerated_reflects_cpp_capability():
     for feature in ["seismic_3d", "well_log", "map_edit"]:
-        assert is_accelerated(feature) is native_backend.has_cpp(feature)
+        if native_status(feature) == "fresh":
+            assert is_accelerated(feature) is native_backend.has_cpp(feature)
+        else:
+            assert is_accelerated(feature) is False
     assert is_accelerated("no_such_feature") is False
 
 
@@ -36,8 +40,11 @@ def test_disabled_acceleration_context_manager():
         assert is_accelerated("well_log") is False
         assert is_accelerated("map_edit") is False
 
-    # Outside block, returns original state
-    assert is_accelerated("seismic_3d") == native_backend.has_cpp("seismic_3d")
+    # Outside block, returns original state (stale repo-root binaries stay gated).
+    if native_status("seismic_3d") == "fresh":
+        assert is_accelerated("seismic_3d") == native_backend.has_cpp("seismic_3d")
+    else:
+        assert is_accelerated("seismic_3d") is False
 
 
 def test_dispatch_fast_slice_extract_parity():
@@ -96,6 +103,35 @@ def test_native_status_distinguishes_stale_missing_fresh():
     for feature in ("seismic_3d", "well_log", "map_edit", "grid_render"):
         assert native_status(feature) in {"fresh", "stale", "missing"}
     assert native_status("no_such_feature") == "missing"
+
+
+def test_dispatch_diverts_stale_repo_root_binary_to_fallback(monkeypatch):
+    """#520: a repo-root .so is 'stale'; dispatch must not call it."""
+    from paleo_workbench import native_backend as nb_mod
+
+    calls: list[str] = []
+    fake = _fake_module(_repo_root())
+    fake.fast_slice_extract = lambda *a, **k: calls.append("cpp") or "from-stale-cpp"
+    monkeypatch.setitem(_NATIVE_MODULES, "seismic_3d", fake)
+    monkeypatch.setitem(
+        NativeEngineBackend._FUNCTION_MODULE_MAP,
+        "fast_slice_extract",
+        ("seismic_3d", fake),
+    )
+    if hasattr(nb_mod, "_STALE_WARNED"):
+        monkeypatch.setattr(nb_mod, "_STALE_WARNED", set())
+
+    backend = NativeEngineBackend()
+    monkeypatch.setattr(backend, "has_cpp", lambda feature: True)
+
+    vol = np.zeros((2, 3, 4), dtype=np.float32)
+    with pytest.warns(UserWarning, match="stale repo-root"):
+        out = backend.dispatch("fast_slice_extract", vol, 0, 1)
+
+    assert calls == []
+    assert native_status("seismic_3d") == "stale"
+    assert backend.is_accelerated("seismic_3d") is False
+    np.testing.assert_array_equal(out, vol[1])
 
 
 def test_native_version_is_string_or_none():
