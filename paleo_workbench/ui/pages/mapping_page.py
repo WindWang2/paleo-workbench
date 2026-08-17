@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QPointF, Signal
+from PySide6.QtCore import QPointF, QTimer, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
     QGraphicsItem,
@@ -221,8 +221,14 @@ class MappingPage(QWidget):
         self.layer_tree.document_selected.connect(self._on_document_selected)
         self.attribute_table.property_changed.connect(self._on_property_changed)
         self.attribute_table.feature_selection_requested.connect(self._on_attribute_feature_selected)
+        self._pending_opacity_refresh = False
+        self._opacity_refresh = QTimer(self)
+        self._opacity_refresh.setSingleShot(True)
+        self._opacity_refresh.setInterval(100)
+        self._opacity_refresh.timeout.connect(self._flush_reference_opacity)
         self.reference_panel.reference_visibility_changed.connect(self._on_reference_visibility_changed)
         self.reference_panel.reference_opacity_changed.connect(self._on_reference_opacity_changed)
+        self.reference_panel.opacity_slider.sliderReleased.connect(self._flush_reference_opacity)
         self.edit_view.view_state_changed.connect(self.reference_panel.set_view_state)
         self.edit_view.view_state_changed.connect(
             self.bottom_workbench.factor_shelf.set_view_state
@@ -1545,10 +1551,18 @@ class MappingPage(QWidget):
         if layer is not None:
             layer.opacity = max(0.0, min(1.0, float(opacity)))
             self._presentation_dirty = True
-            self._refresh_unified_composition()
-            self._stage_composition_state()
-            self._sync_save_enabled()
-            self._emit_mapping_context()
+            self._pending_opacity_refresh = True
+            self._opacity_refresh.start()
+
+    def _flush_reference_opacity(self) -> None:
+        if not self._pending_opacity_refresh:
+            return
+        self._pending_opacity_refresh = False
+        self._opacity_refresh.stop()
+        self._refresh_unified_composition()
+        self._stage_composition_state()
+        self._sync_save_enabled()
+        self._emit_mapping_context()
 
     def _on_chrome_changed(self, chrome: dict) -> None:
         if self._active_document is None:

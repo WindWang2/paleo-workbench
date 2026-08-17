@@ -65,6 +65,41 @@ from paleo_workbench.project.models import _now_iso
 from paleo_workbench.project.paths import artifact_dir_for
 
 
+class _CatalogMaps:
+    """One immutable-swap container for the six id indexes.
+
+    The dicts inside stay mutable for incremental ``_add_*`` / ``_remove_*``
+    updates. Readers must hold this object (from ``_ensure_maps()``) rather
+    than re-reading the six attributes after a concurrent invalidate.
+    """
+
+    __slots__ = (
+        "asset_by_id",
+        "version_by_id",
+        "run_by_id",
+        "versions_by_asset",
+        "children_by_parent",
+        "assets_by_legacy_id",
+    )
+
+    def __init__(
+        self,
+        *,
+        asset_by_id: dict[str, DataAsset],
+        version_by_id: dict[str, DataVersion],
+        run_by_id: dict[str, DataRun],
+        versions_by_asset: dict[str, list[DataVersion]],
+        children_by_parent: dict[str, list[DataVersion]],
+        assets_by_legacy_id: dict[str, DataAsset],
+    ) -> None:
+        self.asset_by_id = asset_by_id
+        self.version_by_id = version_by_id
+        self.run_by_id = run_by_id
+        self.versions_by_asset = versions_by_asset
+        self.children_by_parent = children_by_parent
+        self.assets_by_legacy_id = assets_by_legacy_id
+
+
 class _BatchSave:
     """Context manager returned by :meth:`DataCatalogService.batch_save`.
 
@@ -158,39 +193,63 @@ class DataCatalogService:
         # document on first use). A lookup miss rebuilds the maps from the
         # document as a self-healing safety net, so a missed maintenance site
         # can never return a wrong *negative* answer (only rebuild cost).
-        self._asset_by_id: dict[str, DataAsset] | None = None
-        self._version_by_id: dict[str, DataVersion] | None = None
-        self._run_by_id: dict[str, DataRun] | None = None
-        self._versions_by_asset: dict[str, list[DataVersion]] | None = None
-        self._children_by_parent: dict[str, list[DataVersion]] | None = None
-        self._assets_by_legacy_id: dict[str, DataAsset] | None = None
+        # Published as one snapshot so unlocked readers never observe a
+        # mid-rebuild / mid-invalidate None window (#619).
+        self._maps: _CatalogMaps | None = None
 
     # -- maintained indexes -------------------------------------------------
 
+    @property
+    def _asset_by_id(self) -> dict[str, DataAsset] | None:
+        maps = self._maps
+        return None if maps is None else maps.asset_by_id
+
+    @property
+    def _version_by_id(self) -> dict[str, DataVersion] | None:
+        maps = self._maps
+        return None if maps is None else maps.version_by_id
+
+    @property
+    def _run_by_id(self) -> dict[str, DataRun] | None:
+        maps = self._maps
+        return None if maps is None else maps.run_by_id
+
+    @property
+    def _versions_by_asset(self) -> dict[str, list[DataVersion]] | None:
+        maps = self._maps
+        return None if maps is None else maps.versions_by_asset
+
+    @property
+    def _children_by_parent(self) -> dict[str, list[DataVersion]] | None:
+        maps = self._maps
+        return None if maps is None else maps.children_by_parent
+
+    @property
+    def _assets_by_legacy_id(self) -> dict[str, DataAsset] | None:
+        maps = self._maps
+        return None if maps is None else maps.assets_by_legacy_id
+
+    @_assets_by_legacy_id.setter
+    def _assets_by_legacy_id(self, value: dict[str, DataAsset] | None) -> None:
+        maps = self._maps
+        if maps is not None and value is not None:
+            maps.assets_by_legacy_id = value
+
     def _invalidate_maps(self) -> None:
         """Drop the cached indexes; they rebuild lazily on next use."""
-        self._asset_by_id = None
-        self._version_by_id = None
-        self._run_by_id = None
-        self._versions_by_asset = None
-        self._children_by_parent = None
-        self._assets_by_legacy_id = None
+        self._maps = None
 
-    def _ensure_maps(self) -> None:
+    def _ensure_maps(self) -> _CatalogMaps:
         """Build the id→object indexes from the document (idempotent)."""
-        if self._asset_by_id is not None:
-            return
-        self._asset_by_id = {a.id: a for a in self.document.assets}
-        self._version_by_id = {v.id: v for v in self.document.versions}
-        self._run_by_id = {r.id: r for r in self.document.runs}
+        maps = self._maps
+        if maps is not None:
+            return maps
         versions_by_asset: dict[str, list[DataVersion]] = {}
         children: dict[str, list[DataVersion]] = {}
         for version in self.document.versions:
             versions_by_asset.setdefault(version.asset_id, []).append(version)
             for pid in version.parent_version_ids:
                 children.setdefault(pid, []).append(version)
-        self._versions_by_asset = versions_by_asset
-        self._children_by_parent = children
         # Legacy-bridge resolution order mirrors ``_find_asset_by_legacy_id``:
         # an asset whose *id* equals the legacy id wins; otherwise the first
         # asset bridged via ``legacy_resource_id`` (first-wins via setdefault).
@@ -200,25 +259,33 @@ class DataCatalogService:
         for asset in self.document.assets:
             if asset.legacy_resource_id is not None:
                 legacy.setdefault(asset.legacy_resource_id, asset)
-        self._assets_by_legacy_id = legacy
+        maps = _CatalogMaps(
+            asset_by_id={a.id: a for a in self.document.assets},
+            version_by_id={v.id: v for v in self.document.versions},
+            run_by_id={r.id: r for r in self.document.runs},
+            versions_by_asset=versions_by_asset,
+            children_by_parent=children,
+            assets_by_legacy_id=legacy,
+        )
+        self._maps = maps
+        return maps
 
     def _maps_consistent(self) -> bool:
         """Debug/self-check: cached indexes match the document exactly."""
-        if self._asset_by_id is None:
-            self._ensure_maps()
-        if len(self._asset_by_id) != len(self.document.assets):
+        maps = self._ensure_maps()
+        if len(maps.asset_by_id) != len(self.document.assets):
             return False
-        if len(self._version_by_id) != len(self.document.versions):
+        if len(maps.version_by_id) != len(self.document.versions):
             return False
-        if len(self._run_by_id) != len(self.document.runs):
+        if len(maps.run_by_id) != len(self.document.runs):
             return False
         for asset in self.document.assets:
-            if self._asset_by_id.get(asset.id) is not asset:
+            if maps.asset_by_id.get(asset.id) is not asset:
                 return False
         for version in self.document.versions:
-            if self._version_by_id.get(version.id) is not version:
+            if maps.version_by_id.get(version.id) is not version:
                 return False
-            if self._versions_by_asset.get(version.asset_id) is None:
+            if maps.versions_by_asset.get(version.asset_id) is None:
                 return False
         return True
 
@@ -513,35 +580,34 @@ class DataCatalogService:
     # -- lookups ------------------------------------------------------------
 
     def _asset_or_raise(self, asset_id: str) -> DataAsset:
-        self._ensure_maps()
-        asset = self._asset_by_id.get(asset_id)
+        maps = self._ensure_maps()
+        asset = maps.asset_by_id.get(asset_id)
         if asset is not None:
             return asset
         # Safety net: a missed maintenance site (or a stale map) rebuilds from
         # the document, so an unknown id is genuinely unknown before raising.
         self._invalidate_maps()
-        self._ensure_maps()
-        asset = self._asset_by_id.get(asset_id)
+        maps = self._ensure_maps()
+        asset = maps.asset_by_id.get(asset_id)
         if asset is None:
             raise CatalogError(f"Unknown asset: {asset_id}")
         return asset
 
     def _version_or_raise(self, version_id: str) -> DataVersion:
-        self._ensure_maps()
-        version = self._version_by_id.get(version_id)
+        maps = self._ensure_maps()
+        version = maps.version_by_id.get(version_id)
         if version is not None:
             return version
         self._invalidate_maps()
-        self._ensure_maps()
-        version = self._version_by_id.get(version_id)
+        maps = self._ensure_maps()
+        version = maps.version_by_id.get(version_id)
         if version is None:
             raise CatalogError(f"Unknown version: {version_id}")
         return version
 
     def _asset_by_legacy_id(self, legacy_resource_id: str) -> DataAsset | None:
         """Stable legacy-bridge resolution (id match wins, then first bridge)."""
-        self._ensure_maps()
-        return self._assets_by_legacy_id.get(legacy_resource_id)
+        return self._ensure_maps().assets_by_legacy_id.get(legacy_resource_id)
 
     def _live_asset_by_legacy_id(self, legacy_resource_id: str) -> DataAsset | None:
         """Like :meth:`_asset_by_legacy_id` but ignores trashed assets.
@@ -550,8 +616,7 @@ class DataCatalogService:
         able to re-bridge a fresh asset instead of dead-ending on the trashed
         one (review finding I2).
         """
-        self._ensure_maps()
-        asset = self._assets_by_legacy_id.get(legacy_resource_id)
+        asset = self._ensure_maps().assets_by_legacy_id.get(legacy_resource_id)
         if asset is not None and asset.trashed:
             return None
         return asset
@@ -573,13 +638,13 @@ class DataCatalogService:
         return self._version_or_raise(version_id)
 
     def get_run(self, run_id: str) -> DataRun:
-        self._ensure_maps()
-        run = self._run_by_id.get(run_id)
+        maps = self._ensure_maps()
+        run = maps.run_by_id.get(run_id)
         if run is not None:
             return run
         self._invalidate_maps()
-        self._ensure_maps()
-        run = self._run_by_id.get(run_id)
+        maps = self._ensure_maps()
+        run = maps.run_by_id.get(run_id)
         if run is None:
             raise CatalogError(f"Unknown run: {run_id}")
         return run
@@ -598,8 +663,7 @@ class DataCatalogService:
         return list(self.document.runs)
 
     def list_versions(self, asset_id: str) -> list[DataVersion]:
-        self._ensure_maps()
-        versions = list(self._versions_by_asset.get(asset_id, ()))
+        versions = list(self._ensure_maps().versions_by_asset.get(asset_id, ()))
         return sorted(versions, key=lambda v: v.version_number)
 
     def resolve_path(self, version: DataVersion) -> Path:
@@ -658,8 +722,10 @@ class DataCatalogService:
     # -- version registration ------------------------------------------------
 
     def _next_version_number(self, asset_id: str) -> int:
-        self._ensure_maps()
-        numbers = [v.version_number for v in self._versions_by_asset.get(asset_id, ())]
+        numbers = [
+            v.version_number
+            for v in self._ensure_maps().versions_by_asset.get(asset_id, ())
+        ]
         return max(numbers, default=0) + 1
 
     def _build_version(
@@ -816,8 +882,7 @@ class DataCatalogService:
             parents: list[str] = []
             run: DataRun | None = None
             if run_id is not None:
-                self._ensure_maps()
-                known = self._version_by_id
+                known = self._ensure_maps().version_by_id
                 run = self.get_run(run_id)
                 parents = [
                     pid for pid in run.input_version_ids if pid in known
@@ -1535,13 +1600,13 @@ class DataCatalogService:
     def get_lineage(self, version_id: str) -> dict[str, Any]:
         """Parents, children, and the producing run for a version."""
         version = self._version_or_raise(version_id)
-        self._ensure_maps()
+        maps = self._ensure_maps()
         parents = [
-            self._version_by_id[pid]
+            maps.version_by_id[pid]
             for pid in version.parent_version_ids
-            if pid in self._version_by_id
+            if pid in maps.version_by_id
         ]
-        children = list(self._children_by_parent.get(version_id, ()))
+        children = list(maps.children_by_parent.get(version_id, ()))
         run = None
         if version.run_id is not None:
             try:
@@ -1739,10 +1804,9 @@ class DataCatalogService:
 
     def _active_current_candidate(self, asset: DataAsset, exclude_id: str) -> str | None:
         """Newest non-trashed version of *asset* (excluding *exclude_id*)."""
-        self._ensure_maps()
         active = [
             v
-            for v in self._versions_by_asset.get(asset.id, ())
+            for v in self._ensure_maps().versions_by_asset.get(asset.id, ())
             if not v.trashed and v.id != exclude_id
         ]
         return active[-1].id if active else None

@@ -1469,10 +1469,16 @@ class DataPage(QWidget):
                 if res.id in report.checksum_updates:
                     res.checksum = report.checksum_updates[res.id]
         self._refresh()
-        self._set_action_status(f"完整性校验完成: {report.summary_text}")
+        self.data_toolbar.set_verify_running(False)
+        cancelled = any("已取消" in detail for detail in report.details)
+        if cancelled:
+            self._set_action_status("完整性校验已取消")
+        else:
+            self._set_action_status(f"完整性校验完成: {report.summary_text}")
 
     @Slot(str)
     def _on_verify_failed(self, message: str) -> None:
+        self.data_toolbar.set_verify_running(False)
         self._set_action_status(f"完整性校验失败: {message}")
 
     # --- Preview & Workspace ---

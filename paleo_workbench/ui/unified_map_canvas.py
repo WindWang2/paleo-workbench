@@ -236,8 +236,19 @@ class UnifiedMapCanvas(QWidget):
         self.set_extent(self._extent_history[self._extent_history_index], record_history=False)
         return True
 
+    def _screen_pixel_ratio(self) -> float:
+        try:
+            ratio = float(self.devicePixelRatioF())
+        except Exception:
+            ratio = 1.0
+        return ratio if ratio > 0.0 else 1.0
+
     def _request_render(self) -> None:
-        self._backend.set_output_size(max(1, self.width()), max(1, self.height()))
+        ratio = self._screen_pixel_ratio()
+        width = max(1, int(round(self.width() * ratio)))
+        height = max(1, int(round(self.height() * ratio)))
+        self._backend.set_output_size(width, height)
+        self._backend.set_dpi(96.0 * ratio)
         self._backend.request_render()
         self._render_request_count += 1
         self._schedule_frame_poll(0)
@@ -268,6 +279,7 @@ class UnifiedMapCanvas(QWidget):
             frame.stride,
             QImage.Format.Format_RGBA8888,
         )
+        self._image.setDevicePixelRatio(self._screen_pixel_ratio())
         self._navigation_transform = QTransform()
         self._frame_delivery_count += 1
         self._frame_bytes_delivered += len(frame.rgba)
