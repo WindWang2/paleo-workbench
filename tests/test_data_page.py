@@ -1427,8 +1427,11 @@ def test_data_page_export_runs_off_gui_thread(qtbot, tmp_path: Path):
         return_value=(str(tmp_path / "out.csv"), ""),
     ):
         page._export_selected_asset("CSV")
-        # Nothing ran synchronously in the slot.
-        assert threads == []
+        # The export must run OFF the GUI thread. Proving "not synchronous"
+        # by asserting the worker has not even started yet is a race (a
+        # fast scheduler can begin the worker before the slot's caller
+        # regains control); the thread-name check below is the real
+        # synchronous-execution guard.
         qtbot.waitUntil(lambda: bool(threads), timeout=15_000)
         qtbot.waitUntil(
             lambda: not page._export_job.is_running, timeout=15_000
