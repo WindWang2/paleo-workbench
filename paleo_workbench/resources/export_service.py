@@ -53,7 +53,7 @@ def view_export_capabilities(widget: Any | None) -> frozenset[str]:
     - Well-log canvas (``paint_all``): PNG/SVG/PDF via geoviz_well_log
     - Cross-well composite (``export_composite``): PNG/SVG/PDF
     - Paleo map canvas: PNG/SVG/PDF via professional figure export
-    - Unified map canvas: high-resolution PNG via MapRenderBackend + decorations
+    - Unified map canvas: PNG/SVG/PDF via the same MapRenderBackend pipeline
     - Native factor-map canvas: PNG via its Qt/native composition path
     - Everything else (seismic GL, engine preview, empty): PNG grab only
     """
@@ -64,13 +64,13 @@ def view_export_capabilities(widget: Any | None) -> frozenset[str]:
         return host_caps
     target = _resolve_export_target(widget)
     kind = _export_surface_kind(target)
-    if kind in {"well_log", "cross_well", "paleo_map"}:
+    if kind in {"well_log", "cross_well", "paleo_map", "unified_map"}:
         if kind == "well_log" and not getattr(target, "tracks", None):
             # Empty legacy canvas (nothing loaded, or the engine surface owns
             # the view): vector export would silently produce a blank file.
             return frozenset()
         return frozenset({"PNG", "SVG", "PDF"})
-    if kind in {"native_factor_map", "unified_map"}:
+    if kind == "native_factor_map":
         return frozenset({"PNG"})
     if hasattr(target, "grab"):
         return frozenset({"PNG"})
@@ -470,6 +470,9 @@ def _export_widget_svg(widget: Any, output_path: Path) -> None:
     if kind == "paleo_map":
         _export_paleo_map(target, output_path, "svg")
         return
+    if kind == "unified_map" and hasattr(target, "export_svg"):
+        target.export_svg(str(output_path))
+        return
     raise ExportError("当前视图不支持 SVG 矢量导出，请改用 PNG")
 
 
@@ -491,6 +494,9 @@ def _export_widget_pdf(widget: Any, output_path: Path) -> None:
         return
     if kind == "paleo_map":
         _export_paleo_map(target, output_path, "pdf")
+        return
+    if kind == "unified_map" and hasattr(target, "export_pdf"):
+        target.export_pdf(str(output_path))
         return
     raise ExportError("当前视图不支持 PDF 矢量导出，请改用 PNG")
 

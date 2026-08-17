@@ -94,11 +94,28 @@ class MapLayerPropertiesDialog(QDialog):
             symbology_form.addRow("Gamma", self.gamma_spin)
             symbology_form.addRow("NoData", self.nodata_combo)
         else:
+            from paleo_workbench.mapping.map_styles import LinePattern, MarkerSymbol
+
             self.fill_edit = QLineEdit(str(style.get("fill") or ""), symbology)
             self.stroke_edit = QLineEdit(str(style.get("stroke") or ""), symbology)
             self.stroke_width_spin = QDoubleSpinBox(symbology)
             self.stroke_width_spin.setRange(0.0, 100.0)
             self.stroke_width_spin.setValue(float(style.get("stroke_width") or 1.0))
+            self.line_pattern_combo = QComboBox(symbology)
+            for pattern in LinePattern:
+                self.line_pattern_combo.addItem(pattern.value, pattern.value)
+            self.line_pattern_combo.setCurrentText(
+                str(style.get("line_pattern") or LinePattern.SOLID.value)
+            )
+            self.marker_combo = QComboBox(symbology)
+            for marker in MarkerSymbol:
+                self.marker_combo.addItem(marker.value, marker.value)
+            self.marker_combo.setCurrentText(
+                str(style.get("marker") or MarkerSymbol.CIRCLE.value)
+            )
+            self.marker_size_spin = QDoubleSpinBox(symbology)
+            self.marker_size_spin.setRange(0.5, 96.0)
+            self.marker_size_spin.setValue(float(style.get("marker_size") or 6.0))
             self.renderer_combo = QComboBox(symbology)
             self.renderer_combo.addItems(["single", "categorized", "graduated"])
             self.renderer_combo.setCurrentText(str(style.get("renderer") or "single"))
@@ -112,6 +129,9 @@ class MapLayerPropertiesDialog(QDialog):
             symbology_form.addRow("Fill / ramp", self.fill_edit)
             symbology_form.addRow("Stroke", self.stroke_edit)
             symbology_form.addRow("Stroke width", self.stroke_width_spin)
+            symbology_form.addRow("Line pattern", self.line_pattern_combo)
+            symbology_form.addRow("Marker", self.marker_combo)
+            symbology_form.addRow("Marker size", self.marker_size_spin)
             symbology_form.addRow("Renderer", self.renderer_combo)
             symbology_form.addRow("Classification field", self.classification_field_edit)
             symbology_form.addRow("Classes (JSON)", self.classes_edit)
@@ -182,6 +202,9 @@ class MapLayerPropertiesDialog(QDialog):
             "fill": self.fill_edit.text().strip(),
             "stroke": self.stroke_edit.text().strip(),
             "stroke_width": self.stroke_width_spin.value(),
+            "line_pattern": self.line_pattern_combo.currentText(),
+            "marker": self.marker_combo.currentText(),
+            "marker_size": self.marker_size_spin.value(),
             "renderer": self.renderer_combo.currentText(),
             "field": self.classification_field_edit.text().strip(),
             "labels": labels,

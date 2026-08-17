@@ -33,6 +33,9 @@ def cleanup_qt_deferred_deletes():
     segmentation faults or Bus errors under offscreen *or* live platforms.
     """
     yield
+    from paleo_workbench.mapping.map_render_backend import shutdown_live_fallback_backends
+
+    shutdown_live_fallback_backends()
     app = QApplication.instance()
     if app is not None:
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)

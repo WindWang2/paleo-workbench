@@ -3,10 +3,25 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import math
 from typing import Any, Mapping
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPolygonF, QTransform, QWheelEvent
+from PySide6.QtCore import QMarginsF, QPointF, QRect, QRectF, QSize, QSizeF, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QImage,
+    QMouseEvent,
+    QPageSize,
+    QPainter,
+    QPainterPath,
+    QPdfWriter,
+    QPen,
+    QPolygonF,
+    QTransform,
+    QWheelEvent,
+)
+from PySide6.QtSvg import QSvgGenerator
 from PySide6.QtWidgets import QWidget
 
 from paleo_workbench.mapping.map_render_backend import (
@@ -146,6 +161,7 @@ class UnifiedMapCanvas(QWidget):
         self._render_request_count = 0
         self._frame_delivery_count = 0
         self._frame_bytes_delivered = 0
+        self._last_snapshot_signature: tuple | None = None
         self._publish_backend_status()
 
     @property
@@ -180,9 +196,48 @@ class UnifiedMapCanvas(QWidget):
         }
 
     def set_layer_snapshot(self, snapshot: MapRenderSnapshot) -> None:
+        signature = self._snapshot_signature(snapshot)
+        if signature == self._last_snapshot_signature:
+            # Host refreshes can fire many times per interaction; identical
+            # revisions/visibility must not enqueue another render pass.
+            return
+        self._last_snapshot_signature = signature
         self._navigation_render.stop()
         self._backend.set_layer_snapshot(snapshot)
         self._request_render()
+
+    @staticmethod
+    def _snapshot_signature(snapshot: MapRenderSnapshot) -> tuple:
+        return (
+            str(snapshot.project_crs),
+            tuple(
+                (
+                    layer.id,
+                    layer.layer_type,
+                    int(layer.data_revision),
+                    int(layer.style_revision),
+                    bool(layer.visible),
+                    round(float(layer.opacity), 6),
+                    layer.scale_range,
+                    str(layer.source_version_id),
+                )
+                for layer in snapshot.layers
+            ),
+        )
+
+    @property
+    def snapshot_source_version_ids(self) -> tuple[str, ...]:
+        """Catalog DataVersion ids referenced by the current composition."""
+        backend_snapshot = getattr(self._backend, "_snapshot", None)
+        if backend_snapshot is None:
+            return ()
+        return tuple(
+            dict.fromkeys(
+                str(layer.source_version_id)
+                for layer in backend_snapshot.layers
+                if layer.source_version_id
+            )
+        )
 
     def set_map_tool_controller(self, controller) -> None:
         """Attach the one exclusive host map-tool controller.
@@ -427,18 +482,156 @@ class UnifiedMapCanvas(QWidget):
 
     def _paint_decorations(
         self, painter: QPainter, decorations: Mapping[str, Any], *, width: int | None = None,
-        height: int | None = None, dpi: float | None = None,
+        height: int | None = None, scale: float = 1.0,
+        extent: tuple[float, float, float, float] | None = None,
     ) -> None:
-        paint_map_decorations(
-            painter,
-            decorations,
-            width=self.width() if width is None else int(width),
-            height=self.height() if height is None else int(height),
-            extent=self._view_extent,
-            dpi=dpi,
-        )
+        """Paint chrome (title/scale bar/north arrow/legend) in device pixels.
 
-    def render_export_image(self, width: int, height: int, *, dpi: float = 300.0) -> QImage:
+        ``scale`` is ``dpi / 96`` for exports: every fixed-size element —
+        including text, which is set in pixel sizes — scales with it.
+        ``extent`` is the extent actually rendered into this target (exports
+        letterbox the view extent); the scale bar reads it so its label always
+        matches the drawn bar length.
+        """
+        canvas_width = self.width() if width is None else int(width)
+        canvas_height = self.height() if height is None else int(height)
+        drawn_extent = self._view_extent if extent is None else extent
+        elements = {str(item) for item in decorations.get("elements") or ()}
+        title = str(decorations.get("title") or "")
+        title_font = QFont(painter.font())
+        title_font.setPixelSize(max(10, round(16 * scale)))
+        title_font.setBold(True)
+        if title and (not elements or "标题栏" in elements or "title" in elements):
+            painter.save()
+            painter.setPen(QColor("#f8f9fa"))
+            painter.setFont(title_font)
+            painter.drawText(
+                QRectF(14 * scale, 10 * scale, canvas_width - 28 * scale, canvas_height - 20 * scale),
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, title,
+            )
+            painter.restore()
+        if not elements or "比例尺" in elements or "scale_bar" in elements:
+            self._paint_scale_bar(painter, drawn_extent, canvas_width, canvas_height, scale)
+        if not elements or "指北针" in elements or "north_arrow" in elements:
+            painter.save()
+            center = QPointF(canvas_width - 28 * scale, 37 * scale)
+            painter.setPen(QPen(QColor("#ffffff"), 1.5 * scale))
+            painter.setBrush(QColor("#343a40"))
+            painter.drawPolygon(QPolygonF([
+                center + QPointF(0, -18 * scale),
+                center + QPointF(-6 * scale, 10 * scale),
+                center + QPointF(0, 5 * scale),
+                center + QPointF(6 * scale, 10 * scale),
+            ]))
+            font = QFont(painter.font())
+            font.setPixelSize(max(8, round(10 * scale)))
+            painter.setFont(font)
+            painter.drawText(center + QPointF(-5 * scale, -22 * scale), "N")
+            painter.restore()
+        if (not elements or "图例" in elements or "legend" in elements) and decorations.get("legend_items"):
+            items = [str(item) for item in decorations["legend_items"]][:8]
+            painter.save()
+            legend_width = 164 * scale
+            row_height = 18 * scale
+            swatch = 9 * scale
+            legend_height = 10 * scale + row_height * len(items)
+            painter.setPen(QPen(QColor("#dfe6ee"), 1.0 * scale))
+            painter.setBrush(QColor(24, 28, 34, 210))
+            rect = QRectF(
+                canvas_width - legend_width - 16 * scale,
+                canvas_height - legend_height - 16 * scale,
+                legend_width,
+                legend_height,
+            )
+            painter.drawRect(rect)
+            font = QFont(painter.font())
+            font.setPixelSize(max(8, round(11 * scale)))
+            for index, item in enumerate(items):
+                painter.setBrush(QColor("#6c8ebf"))
+                y = rect.top() + 14 * scale + index * row_height
+                painter.drawRect(QRectF(rect.left() + 8 * scale, y - swatch, swatch, swatch))
+                painter.setPen(QColor("#f8f9fa"))
+                painter.setFont(font)
+                painter.drawText(QPointF(rect.left() + 23 * scale, y), item)
+            painter.restore()
+
+    @staticmethod
+    def _nice_scale_units(value: float) -> float:
+        """Round a map-unit length down onto the 1/2/5 × 10ⁿ ladder."""
+        if value <= 0.0 or not math.isfinite(value):
+            return value
+        exponent = math.floor(math.log10(value))
+        fraction = value / (10.0**exponent)
+        for nice in (5.0, 2.0, 1.0):
+            if fraction >= nice:
+                return nice * (10.0**exponent)
+        return 10.0**exponent
+
+    @classmethod
+    def _scale_bar_spec(
+        cls, extent: tuple[float, float, float, float], canvas_width: int, scale: float = 1.0,
+    ) -> tuple[float, float] | None:
+        """Return (nice unit length, matching pixel length) for a scale bar.
+
+        Bar length matches the printed label exactly (units → pixels via the
+        target's own extent), so the bar is a true measurement reference.
+        """
+        xmin, _, xmax, _ = extent
+        span = xmax - xmin
+        if span <= 0.0:
+            return None
+        target_units = cls._nice_scale_units(span * 0.2)
+        if target_units <= 0.0:
+            return None
+        pixels = target_units / span * canvas_width
+        if pixels < 16 * scale:
+            return None
+        return target_units, pixels
+
+    def _paint_scale_bar(
+        self,
+        painter: QPainter,
+        extent: tuple[float, float, float, float],
+        canvas_width: int,
+        canvas_height: int,
+        scale: float,
+    ) -> None:
+        spec = self._scale_bar_spec(extent, canvas_width, scale)
+        if spec is None:
+            return
+        target_units, pixels = spec
+        y = canvas_height - 24.0 * scale
+        painter.save()
+        painter.setPen(QPen(QColor("#ffffff"), 2.0 * scale))
+        painter.drawLine(QPointF(16 * scale, y), QPointF(16 * scale + pixels, y))
+        painter.drawLine(QPointF(16 * scale, y - 4 * scale), QPointF(16 * scale, y + 4 * scale))
+        painter.drawLine(QPointF(16 * scale + pixels, y - 4 * scale), QPointF(16 * scale + pixels, y + 4 * scale))
+        font = QFont(painter.font())
+        font.setPixelSize(max(8, round(10 * scale)))
+        painter.setFont(font)
+        label = f"{target_units:g} map units"
+        painter.drawText(QPointF(16 * scale, y - 7 * scale), label)
+        painter.restore()
+
+    def _letterboxed_extent(self, width: int, height: int) -> tuple[float, float, float, float]:
+        """Expand the view extent so geometry keeps its aspect at any export size."""
+        xmin, ymin, xmax, ymax = self._view_extent
+        span_x, span_y = xmax - xmin, ymax - ymin
+        if width < 1 or height < 1 or span_x <= 0 or span_y <= 0:
+            return self._view_extent
+        target_aspect = width / height
+        view_aspect = span_x / span_y
+        if math.isclose(target_aspect, view_aspect, rel_tol=1e-3):
+            return self._view_extent
+        if target_aspect > view_aspect:
+            padded = span_y * target_aspect
+            return (xmin - (padded - span_x) / 2.0, ymin, xmax + (padded - span_x) / 2.0, ymax)
+        padded = span_x / target_aspect
+        return (xmin, ymin - (padded - span_y) / 2.0, xmax, ymax + (padded - span_y) / 2.0)
+
+    def render_export_image(
+        self, width: int, height: int, *, dpi: float = 300.0, preserve_aspect: bool = True,
+    ) -> QImage:
         """Synchronously render the same backend/composition at export resolution."""
         if width < 1 or height < 1:
             raise ValueError("export size must be positive")
@@ -446,9 +639,12 @@ class UnifiedMapCanvas(QWidget):
             self._backend.cancel_render()
         previous_size = self._backend._output_size
         previous_dpi = self._backend._dpi
+        previous_extent = self._backend._extent
         try:
             self._backend.set_output_size(int(width), int(height))
             self._backend.set_dpi(float(dpi))
+            if preserve_aspect:
+                self._backend.set_extent(self._letterboxed_extent(int(width), int(height)))
             frame = self._backend.render_sync()
             image = QImage(
                 frame.rgba, frame.width, frame.height, frame.stride,
@@ -458,14 +654,16 @@ class UnifiedMapCanvas(QWidget):
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             state = self._overlay_provider() if self._overlay_provider is not None else {}
             self._paint_decorations(
-                painter, (state or {}).get("decorations") or {},
-                width=width, height=height, dpi=dpi,
+                painter, (state or {}).get("decorations") or {}, width=width, height=height,
+                scale=float(dpi) / 96.0,
+                extent=self._letterboxed_extent(int(width), int(height)) if preserve_aspect else self._view_extent,
             )
             painter.end()
             return image
         finally:
             self._backend.set_output_size(*previous_size)
             self._backend.set_dpi(previous_dpi)
+            self._backend.set_extent(previous_extent)
 
     def export_png(
         self,
@@ -487,8 +685,91 @@ class UnifiedMapCanvas(QWidget):
             else:
                 height = 1600
         image = self.render_export_image(width, height, dpi=dpi)
+        # Persist the physical resolution so printed sizes match the export DPI.
+        dots_per_meter = round(float(dpi) / 0.0254)
+        image.setDotsPerMeterX(dots_per_meter)
+        image.setDotsPerMeterY(dots_per_meter)
         if not image.save(path, "PNG"):
             raise RuntimeError("could not save unified map PNG")
+
+    def export_svg(
+        self, path: str, *, width: int = 2400, height: int = 1600, dpi: float = 300.0
+    ) -> None:
+        """Vector SVG export through the same composition pipeline as the screen."""
+        generator = QSvgGenerator()
+        generator.setFileName(str(path))
+        generator.setSize(QSize(int(width), int(height)))
+        generator.setViewBox(QRect(0, 0, int(width), int(height)))
+        generator.setResolution(int(round(float(dpi))))
+        generator.setTitle(self._export_title())
+        painter = QPainter()
+        if not painter.begin(generator):
+            raise RuntimeError("could not begin unified map SVG export")
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            self._paint_export_vector(painter, int(width), int(height), dpi)
+        finally:
+            painter.end()
+
+    def export_pdf(
+        self, path: str, *, width: int = 2400, height: int = 1600, dpi: float = 300.0
+    ) -> None:
+        """Vector PDF export through the same composition pipeline as the screen."""
+        writer = QPdfWriter(str(path))
+        writer.setResolution(int(round(float(dpi))))
+        page_mm = QSizeF(width / dpi * 25.4, height / dpi * 25.4)
+        writer.setPageSize(QPageSize(page_mm, QPageSize.Unit.Millimeter))
+        writer.setPageMargins(QMarginsF(0, 0, 0, 0))
+        painter = QPainter()
+        if not painter.begin(writer):
+            raise RuntimeError("could not begin unified map PDF export")
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            page_rect = writer.pageLayout().paintRectPixels(writer.resolution())
+            self._paint_export_vector(
+                painter, int(page_rect.width()), int(page_rect.height()), dpi
+            )
+        finally:
+            painter.end()
+
+    def _paint_export_vector(self, painter: QPainter, width: int, height: int, dpi: float) -> None:
+        """Run the backend's vector pipeline plus chrome at export resolution."""
+        from paleo_workbench.mapping.map_render_backend import FallbackMapRenderBackend
+
+        if self._backend.render_active:
+            # An in-flight screen render must not complete against the mutated
+            # export viewport and later surface on screen.
+            self._backend.cancel_render()
+        previous_size = self._backend._output_size
+        previous_dpi = self._backend._dpi
+        previous_extent = self._backend._extent
+        export_extent = self._letterboxed_extent(int(width), int(height))
+        try:
+            self._backend.set_output_size(int(width), int(height))
+            self._backend.set_dpi(float(dpi))
+            self._backend.set_extent(export_extent)
+            if isinstance(self._backend, FallbackMapRenderBackend):
+                self._backend.render_to_painter(painter, int(width), int(height), dpi=float(dpi))
+            else:
+                frame = self._backend.render_sync()
+                image = QImage(
+                    frame.rgba, frame.width, frame.height, frame.stride,
+                    QImage.Format.Format_RGBA8888,
+                )
+                painter.drawImage(QRectF(0, 0, width, height), image)
+            state = self._overlay_provider() if self._overlay_provider is not None else {}
+            self._paint_decorations(
+                painter, (state or {}).get("decorations") or {}, width=width, height=height,
+                scale=float(dpi) / 96.0, extent=export_extent,
+            )
+        finally:
+            self._backend.set_output_size(*previous_size)
+            self._backend.set_dpi(previous_dpi)
+            self._backend.set_extent(previous_extent)
+
+    def _export_title(self) -> str:
+        state = self._overlay_provider() if self._overlay_provider is not None else {}
+        return str((state or {}).get("decorations", {}).get("title") or "Paleogeographic map")
 
     def _paint_geometry_outline(self, painter: QPainter, geometry: object) -> None:
         if not isinstance(geometry, Mapping):
@@ -610,9 +891,11 @@ class UnifiedMapCanvas(QWidget):
             self._tool_controller.active_tool.mouse_move(
                 self._cursor_map, modifiers=self._modifier_names(event.modifiers())
             )
-        # Pointer feedback (measure hover, rubber band, snap mark) only repaints
-        # the overlay; document data never changes on a move, so no tool_operation.
-        self.update()
+            if handled:
+                self.tool_operation.emit()
+            # Only tools paint cursor-relative feedback; a bare hover over the
+            # canvas must not schedule full repaints per mouse-move event.
+            self.update()
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
