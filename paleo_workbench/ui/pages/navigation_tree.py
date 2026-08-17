@@ -208,6 +208,14 @@ class NavigationTree(QTreeWidget):
                 target_to_reselect = child
         if target_to_reselect is not None:
             self.setCurrentItem(target_to_reselect)
+        elif selected_value is not None:
+            self._reset_filter_to_all()
+
+    def _reset_filter_to_all(self) -> None:
+        """Re-select 全部 when the active tag/review leaf was deleted (#656)."""
+        all_item = self.topLevelItem(0)
+        if all_item is not None:
+            self.setCurrentItem(all_item)
 
     def _update_node_recursive(self, item: QTreeWidgetItem, counts: CatalogCounts) -> None:
         query: FilterQuery | None = item.data(0, Qt.ItemDataRole.UserRole)
@@ -265,6 +273,8 @@ class NavigationTree(QTreeWidget):
 
         if target_to_reselect:
             self.setCurrentItem(target_to_reselect)
+        elif selected_tag is not None:
+            self._reset_filter_to_all()
 
     @staticmethod
     def _label_of(item: QTreeWidgetItem) -> str:

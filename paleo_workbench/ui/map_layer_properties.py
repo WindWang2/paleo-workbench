@@ -219,6 +219,11 @@ class MapLayerPropertiesDialog(QDialog):
         return None
 
     def apply(self) -> None:
+        error = self.classes_json_error()
+        if error:
+            self.classes_error_label.setText(error)
+            self.classes_error_label.show()
+            return
         self.properties_applied.emit(self._layer_id, self.payload())
 
     def _accept_after_apply(self) -> None:

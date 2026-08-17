@@ -240,7 +240,7 @@ class _CaptureTool(MapTool):
     def cancel(self) -> bool:
         had_points = bool(self.points)
         self.points.clear()
-        return had_points or True
+        return had_points
 
     def finish(self) -> bool:
         if self.geometry_type == "Point":

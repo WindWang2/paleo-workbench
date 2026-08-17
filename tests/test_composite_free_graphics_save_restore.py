@@ -6,66 +6,39 @@ the live scene geometry (``reconcile_panels``), image assets are copied
 into the workspace (``rewrite_image_paths``), and free-graphic records are
 restored per item.
 
-``composite_view`` imports PySide6 at module level, so these tests import
-only the two module-level pure helpers. When PySide6 is unavailable (plain
-``/usr/bin/python3`` / CI), the helpers are extracted from the module
-source instead of importing the module; the helpers depend on nothing but
-``pathlib``/``shutil``.
+``composite_view`` imports PySide6 at module level. These tests import the
+real helpers. Missing Qt is an explicit skip; any other import failure
+fails the suite (#638 — no AST stand-in).
 """
 
 from __future__ import annotations
 
-import ast
-import shutil
 import sys
 from pathlib import Path
 
-# Well Log Workstation moved out of this tree into the well-log-engine
-# submodule (apps/wellplot-desktop). Put that app on sys.path so the real
-# module is imported; the source-extraction fallback below covers checkouts
-# where the submodule app is not importable (no PySide6 / partial checkout).
+import pytest
+
+# Well Log Workstation lives in the well-log-engine submodule. Import the
+# real module — an AST-extracted stand-in kept this file green when the
+# production import path was broken (#638). Missing Qt is an explicit skip;
+# any other ImportError fails the suite.
 _WORKSTATION_APP = (
     Path(__file__).resolve().parents[1]
     / "well-log-engine"
     / "apps"
     / "wellplot-desktop"
 )
-if _WORKSTATION_APP.is_dir():
-    sys.path.insert(0, str(_WORKSTATION_APP))
-
-try:
-    from well_log_workstation.composite_view import (
-        reconcile_panels,
-        rewrite_image_paths,
+if not _WORKSTATION_APP.is_dir():
+    pytest.skip(
+        "well-log-engine/apps/wellplot-desktop missing; run git submodule update --init",
+        allow_module_level=True,
     )
-except ImportError:
-    # PySide6 not installed: pull the two pure functions out of the module
-    # source (module-level imports of Qt never run in this path).
-    def _extract_helpers() -> tuple:
-        module_path = _WORKSTATION_APP / "well_log_workstation" / "composite_view.py"
-        if not module_path.is_file():
-            raise RuntimeError(
-                f"composite_view.py not found under well-log-engine submodule "
-                f"(expected {module_path}); run `git submodule update --init`"
-            )
-        tree = ast.parse(module_path.read_text(encoding="utf-8"))
-        names = {"reconcile_panels", "rewrite_image_paths"}
-        body = [
-            node
-            for node in tree.body
-            if isinstance(node, ast.FunctionDef) and node.name in names
-        ]
-        if len(body) != 2:
-            raise RuntimeError(
-                "composite_view.py pure helpers not found for source extraction"
-            )
-        namespace: dict = {"Path": Path, "shutil": shutil}
-        module = ast.Module(body=body, type_ignores=[])
-        ast.fix_missing_locations(module)
-        exec(compile(module, "<composite_view helpers>", "exec"), namespace)
-        return namespace["reconcile_panels"], namespace["rewrite_image_paths"]
-
-    reconcile_panels, rewrite_image_paths = _extract_helpers()
+sys.path.insert(0, str(_WORKSTATION_APP))
+pytest.importorskip("PySide6")
+from well_log_workstation.composite_view import (  # noqa: E402
+    reconcile_panels,
+    rewrite_image_paths,
+)
 
 
 def _panel(

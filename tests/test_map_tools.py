@@ -57,7 +57,8 @@ def test_capture_tools_create_features_and_escape_only_cancels_capture() -> None
 
     assert session.feature("poly-1").geometry["type"] == "Polygon"
     assert session.feature("poly-1").geometry["coordinates"][0][-1] == (0.0, 0.0)
-    assert controller.key_press("escape") is True
+    # Finished capture has no in-progress vertices; Escape is a no-op (#624).
+    assert controller.key_press("escape") is False
     assert session.feature("poly-1").feature_id == "poly-1"
 
 
@@ -66,9 +67,24 @@ def test_escape_cancels_an_unfinished_capture_without_rolling_back_the_session()
     point = AddPointTool(session, feature_id_factory=lambda: "p2")
     controller = MapToolController()
     controller.set_active_tool(point)
-    assert controller.key_press("escape") is True
+    # Empty capture is not an edit: Escape must not claim it handled a cancel
+    # (#624 — `had_points or True` used to force a full composition resync).
+    assert controller.key_press("escape") is False
     point.mouse_press((3.0, 4.0))
     assert session.feature("p2").geometry["coordinates"] == (3.0, 4.0)
+
+
+def test_empty_polygon_cancel_is_false_in_progress_cancel_is_true() -> None:
+    """#624: cancel() reports whether any captured vertices were discarded."""
+    _layer, session = _session()
+    polygon = AddPolygonTool(session, feature_id_factory=lambda: "poly-esc")
+    assert polygon.cancel() is False
+    polygon.mouse_press((0.0, 0.0))
+    polygon.mouse_press((1.0, 0.0))
+    assert polygon.points
+    assert polygon.cancel() is True
+    assert polygon.points == []
+    assert polygon.cancel() is False
 
 
 def test_measure_distance_tool_reports_map_space_distance_without_editing() -> None:

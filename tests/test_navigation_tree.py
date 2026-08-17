@@ -1,4 +1,5 @@
 from paleo_workbench.project.models import ResourceItem
+from paleo_workbench.ui.pages.filter_index import FilterQuery
 from paleo_workbench.ui.pages.navigation_tree import NavigationTree
 
 
@@ -78,3 +79,37 @@ def test_tree_no_emit_for_nonexistent_group(qtbot):
     # No group nodes anymore; selecting "全部" emits normally
     tree.setCurrentItem(tree.topLevelItem(0))
     assert received == ["全部"]
+
+
+def test_deleted_tag_leaf_resets_filter_to_all(qtbot):
+    """#656: removing the selected tag must not leave a stale invisible filter."""
+    from PySide6.QtCore import Qt
+
+    tagged = _res("well_log")
+    tagged.tags = ["focus"]
+    tree = NavigationTree()
+    qtbot.addWidget(tree)
+    tree.update_counts([tagged], [])
+
+    tag_parent = tree.tag_parent_item
+    assert tag_parent is not None
+    tag_leaf = tag_parent.child(0)
+    assert tag_leaf is not None
+
+    queries: list[FilterQuery] = []
+    tree.filter_query_changed.connect(queries.append)
+    tree.setCurrentItem(tag_leaf)
+    assert queries
+    assert queries[-1].node_type == "tag"
+    assert queries[-1].node_value == "focus"
+
+    queries.clear()
+    tree.update_counts([_res("well_log")], [])
+
+    current = tree.currentItem()
+    assert current is not None
+    current_query = current.data(0, Qt.ItemDataRole.UserRole)
+    assert current_query is not None
+    assert current_query.node_type == "all"
+    assert queries
+    assert queries[-1].node_type == "all"
