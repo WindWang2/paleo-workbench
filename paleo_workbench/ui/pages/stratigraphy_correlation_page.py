@@ -39,6 +39,7 @@ from geoviz import FormationTop
 from paleo_workbench.resources.export_service import default_export_dir
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+from paleo_workbench.ui.pages.correlation_load_worker import CorrelationLoadWorker
 from paleo_workbench.ui.pages.cross_well_export_dialog import CrossWellExportDialog
 from paleo_workbench.ui.pages.dtw_propagation_worker import (
     DtwPropagationWorker,
@@ -85,6 +86,10 @@ class StratigraphyCorrelationPage(QWidget):
         self.correlation_engine = StratigraphicCorrelationEngine()
         self._dtw_job = OwnedWorkerJob(self)
         self._dtw_job.released.connect(self._on_dtw_job_released)
+        self._load_job = OwnedWorkerJob(self)
+        self._load_job.released.connect(self._on_load_job_released)
+        self._load_seq = 0
+        self._active_load_seq = 0
         self._dtw_formation = ""
         self._dtw_confidence = 0.0
         self._dtw_conf_text = "置信度: 不可用"
@@ -333,6 +338,9 @@ class StratigraphyCorrelationPage(QWidget):
         self._sync_backend_stack()
 
     def set_project(self, project) -> None:
+        if project is not self._project and self._load_job.is_running:
+            self._load_seq += 1
+            self._load_job.cancel()
         self._project = project
         self._refresh_interp_status()
 
@@ -445,6 +453,9 @@ class StratigraphyCorrelationPage(QWidget):
         """
         if self._dtw_job.is_running:
             self._dtw_job.shutdown(wait_ms)
+        if self._load_job.is_running:
+            self._load_seq += 1
+            self._load_job.shutdown(wait_ms)
         self._release_engine_view()
         return True
 
@@ -915,6 +926,8 @@ class StratigraphyCorrelationPage(QWidget):
         if self._project is None:
             QMessageBox.warning(self, "地层对比", "未绑定工程")
             return
+        if self._load_job.is_running:
+            return
         if self._dtw_job.is_running:
             self._dtw_job.cancel()
         ids = self.selected_resource_ids()
@@ -926,9 +939,33 @@ class StratigraphyCorrelationPage(QWidget):
         if not ids:
             QMessageBox.information(self, "地层对比", "工程中没有测井 LAS 资源")
             return
-        logs, names, loaded_ids, warnings = load_correlation_wells(
-            self._project, resource_ids=ids, max_wells=8
+        self._load_seq += 1
+        self._active_load_seq = self._load_seq
+        worker = CorrelationLoadWorker(
+            self._project,
+            ids,
+            max_wells=8,
+            seq=self._active_load_seq,
+            loader=load_correlation_wells,
         )
+        self.load_btn.setEnabled(False)
+        self.status_label.setText("正在加载连井剖面…")
+        self._load_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed, worker.cancelled),
+            result_connections=(
+                (worker.finished, self._on_load_finished),
+                (worker.failed, self._on_load_failed),
+                (worker.cancelled, self._on_load_cancelled),
+            ),
+            cancel=worker.cancel,
+            target=self._project,
+        )
+
+    def _on_load_finished(self, result) -> None:
+        if self._active_load_seq != self._load_seq:
+            return
+        logs, names, loaded_ids, warnings = result
         if not logs:
             QMessageBox.warning(
                 self,
@@ -936,6 +973,15 @@ class StratigraphyCorrelationPage(QWidget):
                 "未能加载任何井曲线\n" + "\n".join(warnings[:5]),
             )
             return
+        self._apply_load_result(logs, names, loaded_ids, warnings)
+
+    def _apply_load_result(
+        self,
+        logs,
+        names,
+        loaded_ids,
+        warnings,
+    ) -> None:
         self._loaded_logs = list(logs)
         self._loaded_names = list(names)
         # Per-well success list from the loader: a well that failed to load
@@ -963,6 +1009,19 @@ class StratigraphyCorrelationPage(QWidget):
             msg += f"；Engine: {self._engine_error}"
         self.status_label.setText(msg if ok else "加载失败")
         self.section_updated.emit()
+
+    def _on_load_failed(self, message: str) -> None:
+        if self._active_load_seq != self._load_seq:
+            return
+        self.status_label.setText(f"加载失败: {message}")
+        QMessageBox.warning(self, "地层对比", f"未能加载连井剖面\n{message}")
+
+    def _on_load_cancelled(self) -> None:
+        if "正在加载" in self.status_label.text():
+            self.status_label.setText("加载已取消")
+
+    def _on_load_job_released(self) -> None:
+        self.load_btn.setEnabled(True)
 
     def _bind_correlation_engine_wells(self) -> None:
         """Feed the loaded section curves into the DTW recommendation engine.
@@ -1073,6 +1132,9 @@ class StratigraphyCorrelationPage(QWidget):
     def clear_section(self) -> None:
         if self._dtw_job.is_running:
             self._dtw_job.cancel()
+        if self._load_job.is_running:
+            self._load_seq += 1
+            self._load_job.cancel()
         self.cross_host.clear()
         canvas = self.cross_host.widget
         canvas.tops_model.clear()

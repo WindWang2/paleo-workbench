@@ -17,6 +17,17 @@ from paleo_workbench.workflow.stratigraphy_correlation import (
 )
 
 
+def _wait_section(qtbot, page, *, wells: int | None = None) -> None:
+    def _ready() -> bool:
+        if page._load_job.is_running:
+            return False
+        if wells is not None:
+            return len(page._loaded_logs) == wells
+        return True
+
+    qtbot.waitUntil(_ready, timeout=10_000)
+
+
 def test_app_shell_page_five_is_stratigraphy_correlation(qtbot):
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
@@ -148,6 +159,7 @@ def test_load_section_keeps_id_alignment_when_middle_well_fails(qtbot, monkeypat
     for i in range(page.well_list.count()):
         page.well_list.item(i).setCheckState(Qt.CheckState.Checked)
     page.load_btn.click()
+    _wait_section(qtbot, page, wells=2)
     assert page._loaded_resource_ids == [r1.id, r3.id]
     assert len(page._loaded_names) == 2
 
@@ -203,6 +215,7 @@ def test_page_lists_wells_and_loads_section(qtbot, monkeypatch):
     assert page.well_list.count() == 2
     assert "H1" in page.horizon_value.text()
     page.load_btn.click()
+    _wait_section(qtbot, page, wells=2)
     assert page.cross_host.inner.canvas_count >= 2
     assert "2 口井" in page.loaded_value.text()
 
@@ -264,6 +277,7 @@ def test_dual_path_backend_switch_keeps_legacy_and_builds_engine_plan(
     page.set_project(project)
     page.update_state(project)
     page.load_btn.click()
+    _wait_section(qtbot, page, wells=2)
     assert page.backend() == "legacy"
     assert page.cross_host.inner.canvas_count >= 2
     # Engine plan always built for parity even on Legacy path.

@@ -68,6 +68,10 @@ def _load_page(qtbot, tmp_path, monkeypatch) -> StratigraphyCorrelationPage:
     page.set_project(_project(tmp_path))
     page.update_state()
     page.load_section()
+    qtbot.waitUntil(
+        lambda: bool(page._loaded_logs) and not page._load_job.is_running,
+        timeout=10_000,
+    )
     return page
 
 
