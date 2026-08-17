@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QPointF, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -59,6 +61,8 @@ from paleo_workbench.ui.pages.contour_draft_worker import (
     commit_contour_drafts,
 )
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+
+logger = logging.getLogger(__name__)
 
 
 class MappingPage(QWidget):
@@ -1586,7 +1590,12 @@ class MappingPage(QWidget):
                 contour_drafts=drafts,
                 scene=self.unified_scene,
             )
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError) as exc:
+            logger.exception("Factor overlay failed for %s", resource_id)
+            message = f"无法叠加参考图：{exc}"
+            if getattr(self, "status_bar", None) is not None:
+                self.status_bar.scale.setText(message)
+            QMessageBox.warning(self, "参考叠加失败", message)
             return
         # Scalar rasters begin below the document's vector compatibility layers;
         # contours and samples remain above as separate registry entries.

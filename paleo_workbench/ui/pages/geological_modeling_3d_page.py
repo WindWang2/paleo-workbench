@@ -945,6 +945,8 @@ class GeologicalModeling3DPage(QWidget):
         self._restore_joint_display_settings()
         self._restore_joint_slice_settings()
         if project_changed:
+            self.bh_raw_data = []
+            self.faults_raw_data = []
             # Drop the previous project's rendered brick/overlays immediately.
             self._on_joint_scene_updated()
 
@@ -1143,6 +1145,55 @@ class GeologicalModeling3DPage(QWidget):
         self._joint_analysis_tabs.addTab(
             self._build_export_diag_tab(), "导出与诊断"
         )
+        self._sync_analysis_actions()
+
+    def _joint_well_heads(self) -> list:
+        scene = getattr(self._joint_host, "scene", None)
+        if scene is None:
+            return []
+        return list(getattr(scene, "_wells", None) or [])
+
+    def _bh_raw_from_joint_wells(self) -> list[dict]:
+        """Map joint-scene WellHead records onto the analysis borehole dicts."""
+        records: list[dict] = []
+        for well in self._joint_well_heads():
+            depth = float(getattr(well, "total_depth_m", 0.0) or 0.0)
+            if depth <= 0:
+                continue
+            records.append(
+                {
+                    "name": str(getattr(well, "name", "") or "well"),
+                    "x": float(getattr(well, "x", 0.0) or 0.0),
+                    "y": float(getattr(well, "y", 0.0) or 0.0),
+                    "total_depth": depth,
+                    "layers": [
+                        {"top": 0.0, "bottom": depth, "lithology": "未分层"},
+                    ],
+                }
+            )
+        return records
+
+    def _sync_bh_raw_from_joint_scene(self) -> None:
+        """Fill Auto-Tie / crossplot inputs from the joint scene (#529)."""
+        records = self._bh_raw_from_joint_wells()
+        if records:
+            self.bh_raw_data = records
+        self._sync_analysis_actions()
+
+    def _sync_analysis_actions(self) -> None:
+        enabled = bool(self.bh_raw_data)
+        for name in (
+            "btn_auto_tie",
+            "_wtie_auto_proxy",
+            "btn_crossplot",
+            "_facies_crossplot_proxy",
+            "btn_ai_advisor",
+            "_diag_ai_proxy",
+            "btn_cross_fence",
+        ):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.setEnabled(enabled)
 
     def _build_stratal_tab(self) -> QWidget:
         """Stratal / proportional slice controls — the stage-2 demo entry."""
@@ -2300,6 +2351,7 @@ class GeologicalModeling3DPage(QWidget):
                 profile.set_scene(self._joint_host.scene)
         self._refresh_joint_well_tree()
         self._fill_joint_well_combos()
+        self._sync_bh_raw_from_joint_scene()
         self._sync_joint_visibility_from_tree()
         self._refresh_joint_slice_card()
         warning = self._joint_host.scene.slice_state_warning
@@ -2567,7 +2619,7 @@ class GeologicalModeling3DPage(QWidget):
 
         self.btn_run.setEnabled(True)
         self.progress_bar.setVisible(False)
-        self.btn_ai_advisor.setEnabled(True)
+        self._sync_analysis_actions()
 
         logger.info("3D geological modeling successfully updated in viewport.")
 
@@ -2998,7 +3050,9 @@ class GeologicalModeling3DPage(QWidget):
         only applies the result to the calibration controls.
         """
         if not self.bh_raw_data:
-            QMessageBox.information(self, "提示", "请先运行三维建模以加载数据。")
+            self._sync_bh_raw_from_joint_scene()
+        if not self.bh_raw_data:
+            QMessageBox.information(self, "提示", "联合场景中没有井数据，无法进行井震标定。")
             return
 
         freq = float(self.slider_wavelet_freq.value())
@@ -3051,7 +3105,9 @@ class GeologicalModeling3DPage(QWidget):
         :func:`paleo_workbench.viz.geomodel.analysis.generate_cross_well_fence`.
         """
         if not self.bh_raw_data:
-            QMessageBox.information(self, "提示", "请先运行三维建模以加载钻孔数据。")
+            self._sync_bh_raw_from_joint_scene()
+        if not self.bh_raw_data:
+            QMessageBox.information(self, "提示", "联合场景中没有井数据，无法生成连井剖面。")
             return
 
         mesh = analysis.generate_cross_well_fence(self.bh_raw_data, nz_samples=25)
@@ -3077,7 +3133,9 @@ class GeologicalModeling3DPage(QWidget):
         :func:`paleo_workbench.viz.geomodel.analysis.run_lithology_crossplot`.
         """
         if not self.bh_raw_data:
-            QMessageBox.information(self, "提示", "请先运行三维建模以加载数据。")
+            self._sync_bh_raw_from_joint_scene()
+        if not self.bh_raw_data:
+            QMessageBox.information(self, "提示", "联合场景中没有井数据，无法进行岩性交会。")
             return
 
         analysis_result = analysis.run_lithology_crossplot(self.bh_raw_data)

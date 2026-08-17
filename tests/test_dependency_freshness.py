@@ -595,6 +595,41 @@ def test_data_version_not_mutated_with_stale_flag():
     assert "stale" not in d
 
 
+def test_extra_selected_wins_without_prediction_tasks():
+    """#667: extra_selected must apply even when prediction_tasks is empty."""
+
+    class _Asset:
+        def __init__(self, asset_id: str, current: str, name: str = "") -> None:
+            self.id = asset_id
+            self.current_version_id = current
+            self.name = name
+
+    class _Service:
+        def list_assets(self, include_trashed: bool = False):
+            return [_Asset("asset-h", "ver-catalog", "horizon")]
+
+    project = ProjectDocument.new("NoPred")
+    project.factor_map_tasks.append(
+        FactorMapTask(
+            id="fa",
+            name="Fa",
+            target_horizon="H1",
+            factor_type="sand",
+            method="IDW",
+            status="complete",
+        )
+    )
+    assert list(project.prediction_tasks or []) == []
+
+    ctx = resolve_current_project_version_context(
+        project,
+        catalog=None,
+        service=_Service(),
+        extra_selected={"asset-h": "ver-override"},
+    )
+    assert ctx.current_by_asset["asset-h"] == "ver-override"
+
+
 # --------------------------------------------------------------------------- cycle safety
 def test_cycle_detection_safe():
     from paleo_workbench.catalog.types import LineageEdge

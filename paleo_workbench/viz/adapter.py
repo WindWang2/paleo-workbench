@@ -99,6 +99,10 @@ class VizAdapter:
             source="prediction",
         )
 
+    def from_ref(self, ref: VizRef, project: Any = None) -> VizPayload:
+        """Resolve a VizRef — alias kept for VisualizationWorkspace.load."""
+        return self.resolve(ref, project)
+
     def resolve(self, ref: VizRef, project: Any) -> VizPayload:
         label = ref.label or ref.id or ref.kind
         try:
