@@ -225,3 +225,37 @@ def test_read_preview_closes_fresh_loader(monkeypatch, tmp_path):
         src.close()
 
     assert closed, "read_preview must close its fresh per-call SeismicLoader"
+
+
+def test_read_preview_cancelled_token_does_not_poison_single_flight(tmp_path):
+    """A cancelled token must not leak a registered single-flight slot (#535).
+
+    The old code claimed the _InFlightPreviewRead slot and only then raised
+    the cancellation inside the lock, outside the try/except that publishes
+    the slot — the stale slot made every later preview read of the same key
+    block forever on event.wait().
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from geoviz import CancellationToken, JobCancelled
+
+    segy = _write_mini_segy(tmp_path / "cancel.sgy", n_il=20, n_xl=20, n_s=20)
+    src = SeismicVolumeSource(segy)
+    token = CancellationToken()
+    token.cancel()
+
+    with pytest.raises(JobCancelled):
+        src.read_preview(max_dim=16, max_budget=16**3, cancellation_token=token)
+    # No leaked slot for the key.
+    assert src._in_flight == {}
+
+    # A later preview read of the same key must proceed instead of blocking
+    # on the poisoned slot. Guard with a timeout so a regression fails fast
+    # instead of hanging the suite.
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(src.read_preview, max_dim=16, max_budget=16**3)
+        vol, warning = future.result(timeout=30)
+
+    assert vol is not None
+    assert src.physical_reads == 1
+    src.close()

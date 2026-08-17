@@ -105,3 +105,118 @@ def test_send_to_prep_starts_worker_off_gui_thread(qtbot, monkeypatch):
     )
     assert not controller._prepare_job.is_running
     controller._prepare_job.shutdown(1_000)
+
+
+
+
+def _run_with_output(cat, *, operation, inputs, name, domain_task_id=None):
+    """Mirror of tests/test_dependency_freshness.py helper (InMemoryCatalog)."""
+    run = cat.begin_run(
+        operation=operation,
+        input_version_ids=list(inputs),
+        parameters={},
+        generator_version="gen-v1",
+        domain_task_id=domain_task_id,
+        input_snapshot_hash=None,
+    )
+    out = cat.register_derived(
+        run_id=run.run_id,
+        name=name,
+        path=f"/tmp/{name}.npz",
+        checksum=f"sha-{name}",
+        kind="product",
+        format="npz",
+    )
+    cat.complete_run(run.run_id)
+    return run.run_id, out.version_id
+
+
+def _recompute_catalog_with_stale_factor() -> "tuple[InMemoryCatalog, str]":
+
+    """Catalog with raw -> h1 -> factor(t1), plus h2 superseding h1 (same asset).
+
+    Returns (catalog, h2_version_id); the factor run consuming h1 is STALE.
+    """
+    from tests.fakes.inmemory_catalog import InMemoryCatalog
+
+    cat = InMemoryCatalog()
+    raw = cat.register_input(
+        name="raw", path="/tmp/raw", checksum="sha-raw",
+        kind="seismic", format="sgy", legacy_resource_id="res-raw",
+    ).version_id
+    _, h1 = _run_with_output(
+        cat, operation="horizon_interpretation", inputs=[raw],
+        name="h1", domain_task_id="interp",
+    )
+    _, h2 = _run_with_output(
+        cat, operation="horizon_interpretation", inputs=[raw],
+        name="h2", domain_task_id="interp",
+    )
+    first = cat.resolve_version(h1)
+    second = cat.resolve_version(h2)
+    second.asset_id = first.asset_id  # same asset: h2 supersedes h1
+    _run_with_output(
+        cat, operation="factor_map", inputs=[h1],
+        name="Fa", domain_task_id="t1",
+    )
+    return cat, h2
+
+
+def test_recompute_requested_is_consumed_and_executes_plan(qtbot, monkeypatch):
+    """#537: 更新受影响成果 must reach a controller action, run the minimal
+    recompute plan off the GUI thread and refresh home steps."""
+    import paleo_workbench.catalog.runtime as catalog_runtime
+    from paleo_workbench.app import PaleoWorkbenchWindow
+    from paleo_workbench.project.models import (
+        FactorMapTask,
+        HorizonInterpretationRef,
+    )
+
+    cat, h2 = _recompute_catalog_with_stale_factor()
+
+    window = PaleoWorkbenchWindow()
+    qtbot.addWidget(window)
+    project = window.project
+    project.factor_map_tasks.append(
+        FactorMapTask(
+            id="t1",
+            name="H1 孔隙度",
+            target_horizon="H1",
+            factor_type="孔隙度",
+            method="IDW",
+            status="pending",
+            parameters={
+                "sample_points": [
+                    {"x": 0.0, "y": 0.0, "value": 0.0},
+                    {"x": 1.0, "y": 0.0, "value": 0.3},
+                    {"x": 0.0, "y": 1.0, "value": 0.7},
+                    {"x": 1.0, "y": 1.0, "value": 1.0},
+                ]
+            },
+        )
+    )
+    project.horizon_interpretations.append(
+        HorizonInterpretationRef(
+            name="h2", horizon_key="H1", current_version_id=h2
+        )
+    )
+
+    progress = window.app_shell.home_page_widget().workflow_progress
+    catalog_runtime.set_catalog(cat)
+    try:
+        progress.recompute_requested.emit()
+        qtbot.waitUntil(
+            lambda: "执行结果" in progress.plan_label.text(), timeout=20_000
+        )
+    finally:
+        catalog_runtime.reset_catalog()
+
+    text = progress.plan_label.text()
+    assert "需要更新" in text, f"plan summary should describe the stale step: {text}"
+    # The factor_map step was executed (production interpolation path), so the
+    # executor reported an 'ok' outcome rather than 'no handler'.
+    assert "ok" in text.lower() or "执行结果" in text
+    # The staged task copy was committed to the live project on the GUI thread.
+    assert project.factor_map_tasks[0].status == "complete"
+    # The recompute action refreshed the home step strip.
+    assert not progress.recompute_button.isHidden()

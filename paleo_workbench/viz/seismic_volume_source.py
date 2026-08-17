@@ -414,15 +414,21 @@ class SeismicVolumeSource:
                 return hit, ""
             slot = self._in_flight.get(key)
             if slot is None:
+                # Check cancellation BEFORE registering the single-flight slot:
+                # a raise here would leave a registered slot whose event is
+                # never set, poisoning every later caller for this key (#535).
+                if cancellation_token is not None:
+                    cancellation_token.raise_if_cancelled()
+                # Same for the loader guard: an AssertionError raised after
+                # registration would bypass the try/except that publishes the
+                # slot (e.g. close() raced this call) (#535).
+                if not pseudo and self._loader is None:
+                    raise RuntimeError("SeismicVolumeSource is closed")
                 slot = _InFlightPreviewRead()
                 self._in_flight[key] = slot
                 owner = True
             else:
                 owner = False
-            if owner and cancellation_token is not None:
-                cancellation_token.raise_if_cancelled()
-            if not pseudo:
-                assert self._loader is not None
 
         if not owner:
             slot.event.wait()
