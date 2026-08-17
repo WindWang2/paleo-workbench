@@ -8,11 +8,14 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from decimal import Decimal
+import logging
 import math
 from pathlib import Path
 import re
 from typing import Any, Callable, Generator
 import warnings
+
+_LOG = logging.getLogger("paleo_workbench")
 
 import numpy as np
 
@@ -758,6 +761,10 @@ class NativeEngineBackend:
                 set_las_parser_provider,
             )
         except ImportError:  # pragma: no cover
+            _LOG.warning(
+                "geoviz hook providers missing; LAS preview, downsample and "
+                "isosurface stay on the Python path even if has_cpp() is true"
+            )
             return
 
         from paleo_workbench.viz.seismic_3d_api import marching_cubes_3d
@@ -766,6 +773,9 @@ class NativeEngineBackend:
         set_isosurface_extractor(marching_cubes_3d)
         set_las_parser_provider(_cpp_las_parser_provider)
         self._installed_hooks = True
+
+    def hooks_installed(self) -> bool:
+        return bool(self._installed_hooks)
 
 
 def _cpp_minmax_provider(

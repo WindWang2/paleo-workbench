@@ -27,11 +27,10 @@ def test_bootstrap_finds_repo_root_with_geoviz_package():
 
 
 def test_bootstrap_relative_paths_match_pytest_pythonpath():
-    """Keep bootstrap path list aligned with pyproject pytest.pythonpath."""
+    """Keep bootstrap package list aligned with pyproject pytest.pythonpath."""
     from paleo_workbench.env_bootstrap import _GEOVIZ_RELATIVE_PATHS
 
     expected = {
-        "geo-viz-engine",
         "geo-viz-engine/packages/geoviz_common",
         "geo-viz-engine/packages/geoviz_paleo_map",
         "geo-viz-engine/packages/geoviz_plots",
@@ -43,3 +42,24 @@ def test_bootstrap_relative_paths_match_pytest_pythonpath():
         "geo-viz-engine/packages/geoviz_map",
     }
     assert set(_GEOVIZ_RELATIVE_PATHS) == expected
+    assert "geo-viz-engine" not in _GEOVIZ_RELATIVE_PATHS
+
+
+def test_bootstrap_skips_engine_root_when_stale_so_present(tmp_path, monkeypatch):
+    """#627: a committed .so at the engine root must not go on sys.path."""
+    import sys
+
+    from paleo_workbench import env_bootstrap as boot
+
+    engine = tmp_path / "geo-viz-engine"
+    (engine / "geoviz").mkdir(parents=True)
+    (engine / "geoviz" / "__init__.py").write_text("", encoding="utf-8")
+    (engine / "stale.cpython-313-x86_64-linux-gnu.so").write_bytes(b"x")
+    monkeypatch.setattr(boot, "_repo_root", lambda: tmp_path)
+    inserted = str(engine)
+    try:
+        boot.ensure_geoviz_on_path()
+        assert inserted not in sys.path
+    finally:
+        if inserted in sys.path:
+            sys.path.remove(inserted)

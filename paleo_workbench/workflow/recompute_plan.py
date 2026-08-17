@@ -388,6 +388,7 @@ class PlanExecutor:
         result = PlanExecutionResult(plan=plan)
         failed_ops: set[str] = set()
         failed_run_ids: set[str] = set()
+        poisoned_versions: set[str] = set()
 
         for step in plan.steps:
             if self._cancelled or gen != self._active_generation:
@@ -404,13 +405,11 @@ class PlanExecutor:
                 plan.skipped_run_ids.append(step.run_id or "")
                 continue
 
-            # Skip if a required upstream operation in this plan already failed
-            if self.skip_dependents_on_failure and failed_run_ids:
-                # If any of this step's inputs were outputs of a failed step, skip
-                # We approximate: skip all remaining after stop_on_failure, or
-                # if operation ordering implies dependency via plan order only
-                # when stop_on_failure is False we still skip direct dependents.
-                pass
+            if self.skip_dependents_on_failure and poisoned_versions:
+                if any(vid in poisoned_versions for vid in step.input_version_ids):
+                    plan.skipped_run_ids.append(step.run_id or "")
+                    result.messages.append(f"skip {step.label} (upstream failure)")
+                    continue
 
             if self.stop_on_failure and failed_run_ids:
                 plan.skipped_run_ids.append(step.run_id or "")
@@ -422,6 +421,9 @@ class PlanExecutor:
                 plan.failed_run_ids.append(step.run_id or "")
                 failed_run_ids.add(step.run_id or "")
                 failed_ops.add(step.operation)
+                if step.run_id:
+                    poisoned_versions.add(step.run_id)
+                poisoned_versions.update(step.reuse_output_version_ids)
                 result.messages.append(
                     f"no handler for operation {step.operation!r}; mark failed"
                 )
@@ -437,6 +439,9 @@ class PlanExecutor:
                 plan.failed_run_ids.append(step.run_id or "")
                 failed_run_ids.add(step.run_id or "")
                 failed_ops.add(step.operation)
+                if step.run_id:
+                    poisoned_versions.add(step.run_id)
+                poisoned_versions.update(step.reuse_output_version_ids)
                 result.messages.append(f"failed {step.label}: {exc}")
                 if self.stop_on_failure:
                     result.stopped_early = True

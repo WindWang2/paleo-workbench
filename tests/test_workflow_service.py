@@ -136,3 +136,18 @@ def test_home_workflow_steps_sync_into_active_run():
     assert steps[0].step_type == "data_check"
     assert steps[0].status == "complete"
     assert run.workflow_steps[0].status == "complete"
+
+
+def test_home_workflow_steps_complete_clears_persisted_warning():
+    """#668: recovered evidence must overwrite a sticky warning/failed flag."""
+    project = ProjectDocument.new("Demo")
+    run = create_compilation_run(project, "Run", "ZJ2", "scheme")
+    data_step = next(s for s in run.workflow_steps if s.step_type == "data_check")
+    data_step.status = "warning"
+    project.resources.append(
+        ResourceItem(name="A1.Las", path="a.las", type="well_log", format="las")
+    )
+    steps = home_workflow_steps(project)
+    assert steps[0].step_type == "data_check"
+    assert steps[0].status == "complete"
+    assert data_step.status == "complete"

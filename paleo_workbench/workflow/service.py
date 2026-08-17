@@ -203,11 +203,10 @@ def home_workflow_steps(
             existing = WorkflowStep(step_type=step_type, status=status)  # type: ignore[arg-type]
             active_run.workflow_steps.append(existing)
         else:
-            # Evidence can promote progress; never erase a failed/warning flag
-            # that was set more specifically than a plain pending/complete.
-            # ``stale`` may replace complete when upstream selection advanced.
+            # Keep a persisted failed/warning against weaker pending/stale
+            # overlays, but let fresh evidence promote back to complete.
             if existing.status in {"failed", "warning"} and status in {
-                "complete",
+                "pending",
                 "stale",
             }:
                 pass
