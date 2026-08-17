@@ -10,6 +10,16 @@ import numpy as np
 PointTuple = Tuple[float, float]
 
 
+def data_hull_exists(well_xy: np.ndarray) -> bool:
+    """True when well points define a usable convex hull (3+ unique hull verts)."""
+    if well_xy is None or np.asarray(well_xy).size == 0:
+        return False
+    points = np.asarray(well_xy, dtype=float).reshape(-1, 2)
+    if points.shape[0] < 3:
+        return False
+    return len(_convex_hull(points)) >= 3
+
+
 def build_data_hull_mask(
     grid_x: np.ndarray,
     grid_y: np.ndarray,
@@ -31,15 +41,9 @@ def build_data_hull_mask(
     if buffer_meters > 0.0:
         hull = _offset_convex_hull(hull, float(buffer_meters))
 
-    rows = len(grid_y)
-    cols = len(grid_x)
-    mask = np.zeros((rows, cols), dtype=bool)
-    for row in range(rows):
-        y = float(grid_y[row])
-        for col in range(cols):
-            x = float(grid_x[col])
-            mask[row, col] = _point_in_polygon((x, y), hull)
-    return mask
+    from drawing.single_factor.fast_grid import rasterize_polygon_mask
+
+    return rasterize_polygon_mask(grid_x, grid_y, hull)
 
 
 def apply_mask_to_grid(grid: np.ndarray, mask: Optional[np.ndarray]) -> np.ndarray:
@@ -92,25 +96,6 @@ def _offset_convex_hull(hull: Sequence[PointTuple], distance: float) -> Tuple[Po
         scale = (length + distance) / length
         expanded.append((cx + dx * scale, cy + dy * scale))
     return tuple(expanded)
-
-
-def _point_in_polygon(pt: PointTuple, ring: Sequence[PointTuple]) -> bool:
-    if len(ring) < 3:
-        return False
-    x, y = pt
-    inside = False
-    j = len(ring) - 1
-    for i in range(len(ring)):
-        xi, yi = ring[i]
-        xj, yj = ring[j]
-        if (yi > y) != (yj > y):
-            denom = yj - yi
-            if abs(denom) > 1e-30:
-                x_intersect = (xj - xi) * (y - yi) / denom + xi
-                if x < x_intersect:
-                    inside = not inside
-        j = i
-    return inside
 
 
 def estimate_hull_buffer_meters(map_diagonal: float, ratio: float = 0.02) -> float:

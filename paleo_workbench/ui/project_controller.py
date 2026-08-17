@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QFileDialog, QMessageBox
@@ -34,6 +35,7 @@ class ProjectController:
         # Runtime-only session identity.  It never becomes project data; its
         # sole job is making project replacement an explicit lifecycle edge.
         self._session_generation = 0
+        self._maintenance_thread: threading.Thread | None = None
 
     @property
     def session_generation(self) -> int:
@@ -54,6 +56,9 @@ class ProjectController:
         the user closes again afterwards (documented UX).
         """
         self._session_generation += 1
+        thread = self._maintenance_thread
+        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=5.0)
         shell = getattr(self.window, "app_shell", None)
         shutdown = getattr(shell, "shutdown_workers", None)
         if callable(shutdown):
@@ -227,28 +232,46 @@ class ProjectController:
         """
         generation = self._session_generation
 
-        def maintain() -> None:
+        def kickoff() -> None:
             if (
                 generation != self._session_generation
                 or self.window.project is not loaded
                 or self.window.project_path != target
             ):
                 return
-            try:
-                from paleo_workbench.catalog import get_catalog_service
+            thread = threading.Thread(
+                target=self._run_catalog_maintenance,
+                args=(generation, target, loaded),
+                name="catalog-maintenance",
+                daemon=True,
+            )
+            self._maintenance_thread = thread
+            thread.start()
 
-                service = get_catalog_service()
-                if service is None:
-                    return
-                service.migrate_legacy_resources(loaded.resources)
-                service._sweep_temp_on_open()
-                service.ensure_index_ready()
-            except Exception:
-                # Canonical project/catalog remain available even if an
-                # optional acceleration rebuild cannot complete.
+        QTimer.singleShot(0, kickoff)
+
+    def _run_catalog_maintenance(
+        self, generation: int, target: Path, loaded: ProjectDocument
+    ) -> None:
+        if (
+            generation != self._session_generation
+            or self.window.project is not loaded
+            or self.window.project_path != target
+        ):
+            return
+        try:
+            from paleo_workbench.catalog import get_catalog_service
+
+            service = get_catalog_service()
+            if service is None:
                 return
-
-        QTimer.singleShot(0, maintain)
+            service.migrate_legacy_resources(loaded.resources)
+            service._sweep_temp_on_open()
+            service.ensure_index_ready()
+        except Exception:
+            # Canonical project/catalog remain available even if an
+            # optional acceleration rebuild cannot complete.
+            return
 
     def save_project(self) -> Path | None:
         if not self.window._flush_mapping_draft():

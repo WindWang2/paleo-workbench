@@ -352,9 +352,7 @@ def _py_compute_coherence_3d(
                 run_den = np.sum(sum_sq[k0 : k1 + 1]) / vert_len + 1e-12
                 value = run_num / run_den
                 if isinstance(value, float) and math.isnan(value):
-                    # C++ parity: NaN input propagates into the sums, and the
-                    # std::min/std::max clamp chain maps NaN to 0.0 (never a
-                    # NaN sample in the output volume).
+                    # C++ parity: NaN input maps to 0.0 via the clamp chain.
                     coh[i, j, k] = 0.0
                 else:
                     coh[i, j, k] = float(np.clip(value, 0.0, 1.0))

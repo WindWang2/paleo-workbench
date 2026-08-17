@@ -152,6 +152,43 @@ def test_vertex_handles_hidden_when_multi_or_none_selected(qtbot):
     assert scene.vertex_handle_count() == 3  # closed triangle: 4 pts, 3 unique
 
 
+def test_vertex_commit_revalidates_only_the_edited_feature(qtbot, monkeypatch):
+    """#653: a vertex commit must not re-run shapely topology on every facies."""
+    from paleo_workbench.ui.pages import map_edit_scene as scene_mod
+
+    polys = [
+        {
+            "id": f"f{i}",
+            "name": f"A{i}",
+            "coordinates": [
+                [float(i * 3), 0.0],
+                [float(i * 3 + 2), 0.0],
+                [float(i * 3 + 2), 2.0],
+                [float(i * 3), 2.0],
+                [float(i * 3), 0.0],
+            ],
+        }
+        for i in range(16)
+    ]
+    scene = MapEditScene()
+    scene.load_document(
+        PaleoMapDocument(name="M", linked_target_horizon="H", facies_polygons=polys)
+    )
+    scene.refresh_topology()
+
+    calls: list[str] = []
+    real = scene_mod.facies_geometry_issues
+
+    def spy(item):
+        calls.append(item.feature_id)
+        return real(item)
+
+    monkeypatch.setattr(scene_mod, "facies_geometry_issues", spy)
+
+    assert scene.apply_set_vertex("f0", 1, 1.0, 0.1)
+    assert calls == ["f0"], calls
+
+
 def test_set_vertex_via_scene_pushes_command_and_undo(qtbot):
     scene = MapEditScene()
     scene.load_document(_facies_doc([[0, 0], [10, 0], [10, 10], [0, 0]]))

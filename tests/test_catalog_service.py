@@ -920,6 +920,105 @@ def test_result_asset_registration_does_not_hold_lock_across_payload_io(
     assert registered[0].current_version_id is not None
 
 
+def test_register_version_does_not_hold_lock_across_payload_io(
+    service, tmp_path, monkeypatch
+):
+    """#617: register_version must drop the catalog lock across copy+hash+fsync."""
+    import threading
+    import time as time_mod
+
+    import paleo_workbench.catalog.service as service_mod
+
+    existing = service.import_raw(_make_source(tmp_path, name="existing-617.las"))
+    src = _make_source(tmp_path, name="worker-version.bin", payload=b"y" * 4096)
+
+    entered_placement = threading.Event()
+    real_place = service_mod.place_managed_file
+
+    def slow_place(*args, **kwargs):
+        entered_placement.set()
+        time_mod.sleep(0.5)
+        return real_place(*args, **kwargs)
+
+    monkeypatch.setattr(service_mod, "place_managed_file", slow_place)
+
+    errors: list[str] = []
+
+    def register_in_worker() -> None:
+        try:
+            service.register_version(existing.asset_id, src, DataStage.OUTPUT)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(repr(exc))
+
+    worker = threading.Thread(target=register_in_worker)
+    worker.start()
+    assert entered_placement.wait(timeout=5.0), "worker never reached payload placement"
+
+    started = time_mod.perf_counter()
+    service.add_tags(["audit-617"], asset_id=existing.asset_id)
+    elapsed_ms = (time_mod.perf_counter() - started) * 1000
+
+    worker.join(timeout=10.0)
+    assert not worker.is_alive()
+    assert errors == []
+    assert elapsed_ms < 250, (
+        f"GUI add_tags stalled {elapsed_ms:.0f} ms while register_version "
+        "payload I/O (0.5 s) was in flight — lock still spans copy+hash"
+    )
+    versions = [
+        v for v in service.document.versions if v.asset_id == existing.asset_id
+    ]
+    assert len(versions) == 2
+
+
+def test_import_raw_does_not_hold_lock_across_payload_io(
+    service, tmp_path, monkeypatch
+):
+    """#617: import_raw must not wrap the streaming copy in the service lock."""
+    import threading
+    import time as time_mod
+
+    import paleo_workbench.catalog.service as service_mod
+
+    existing = service.import_raw(_make_source(tmp_path, name="existing-import.las"))
+    src = _make_source(tmp_path, name="incoming-raw.bin", payload=b"z" * 4096)
+
+    entered_placement = threading.Event()
+    real_place = service_mod.place_managed_file
+
+    def slow_place(*args, **kwargs):
+        entered_placement.set()
+        time_mod.sleep(0.5)
+        return real_place(*args, **kwargs)
+
+    monkeypatch.setattr(service_mod, "place_managed_file", slow_place)
+
+    errors: list[str] = []
+
+    def import_in_worker() -> None:
+        try:
+            service.import_raw(src, name="incoming-raw.bin")
+        except Exception as exc:  # noqa: BLE001
+            errors.append(repr(exc))
+
+    worker = threading.Thread(target=import_in_worker)
+    worker.start()
+    assert entered_placement.wait(timeout=5.0), "worker never reached payload placement"
+
+    started = time_mod.perf_counter()
+    service.add_tags(["audit-import-617"], asset_id=existing.asset_id)
+    elapsed_ms = (time_mod.perf_counter() - started) * 1000
+
+    worker.join(timeout=10.0)
+    assert not worker.is_alive()
+    assert errors == []
+    assert elapsed_ms < 250, (
+        f"GUI add_tags stalled {elapsed_ms:.0f} ms while import_raw "
+        "payload I/O (0.5 s) was in flight — lock still spans copy+hash"
+    )
+    assert any(a.name == "incoming-raw.bin" for a in service.document.assets)
+
+
 # --- batch flush staleness (#516) ------------------------------------------
 
 
