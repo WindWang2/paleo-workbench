@@ -161,6 +161,40 @@ def test_unified_canvas_wheel_zoom_keeps_cursor_map_point_fixed(qtbot, delta) ->
     assert after[1] == pytest.approx(before[1], abs=1e-9)
 
 
+def test_unified_canvas_renders_at_device_pixel_ratio(qtbot, monkeypatch) -> None:
+    """#623: screen frames must be rasterized at physical pixels, not logical size."""
+    canvas = UnifiedMapCanvas(backend=FallbackMapRenderBackend())
+    qtbot.addWidget(canvas)
+    canvas.resize(300, 180)
+    monkeypatch.setattr(type(canvas), "devicePixelRatioF", lambda self: 2.0)
+    sizes: list[tuple[int, int]] = []
+    dpis: list[float] = []
+    backend = canvas.backend
+    original_size = backend.set_output_size
+    original_dpi = backend.set_dpi
+
+    def capture_size(width: int, height: int) -> None:
+        sizes.append((width, height))
+        original_size(width, height)
+
+    def capture_dpi(dpi: float) -> None:
+        dpis.append(float(dpi))
+        original_dpi(dpi)
+
+    backend.set_output_size = capture_size  # type: ignore[method-assign]
+    backend.set_dpi = capture_dpi  # type: ignore[method-assign]
+    canvas.set_layer_snapshot(_snapshot())
+    canvas.show()
+    qtbot.waitUntil(lambda: canvas.last_frame is not None, timeout=2000)
+
+    assert sizes[-1] == (600, 360)
+    assert dpis[-1] == pytest.approx(192.0)
+    assert canvas.last_frame is not None
+    assert canvas.last_frame.width == 600
+    assert canvas.last_frame.height == 360
+    assert canvas._image.devicePixelRatio() == pytest.approx(2.0)
+
+
 def test_unified_canvas_wheel_zoom_keeps_cursor_fixed_across_many_notches(qtbot) -> None:
     """N notches at one cursor drift by 0; pan round-trips still return exactly."""
     canvas = UnifiedMapCanvas(backend=FallbackMapRenderBackend())

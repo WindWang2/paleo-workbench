@@ -7,6 +7,8 @@ recorded checksums. Un-bridged assets keep the legacy self-hashing path.
 from __future__ import annotations
 
 import hashlib
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
@@ -47,7 +49,12 @@ class IntegrityCheckReport:
         )
 
 
-def compute_sha256(path: Path, max_bytes: int | None = None) -> str | None:
+def compute_sha256(
+    path: Path,
+    max_bytes: int | None = None,
+    *,
+    is_cancelled: Callable[[], bool] | None = None,
+) -> str | None:
     if not path.is_file():
         return None
     h = hashlib.sha256()
@@ -55,6 +62,8 @@ def compute_sha256(path: Path, max_bytes: int | None = None) -> str | None:
     try:
         with open(path, "rb") as f:
             while True:
+                if is_cancelled is not None and is_cancelled():
+                    return None
                 chunk = f.read(65536)
                 if not chunk:
                     break
@@ -89,6 +98,13 @@ class IntegrityWorker(QObject):
         # assets whose integrity is owned by the DataCatalogService.
         self._catalog_service = catalog_service
         self._bridged_versions = dict(bridged_versions or {})
+        self._cancel = threading.Event()
+
+    def cancel(self) -> None:
+        self._cancel.set()
+
+    def _cancelled(self) -> bool:
+        return self._cancel.is_set() or QThread.currentThread().isInterruptionRequested()
 
     def _verify_via_catalog(self, version_id: str, view_name: str, report: IntegrityCheckReport) -> IntegrityState:
         """Verify a catalog-managed version via the Core service.
@@ -117,8 +133,14 @@ class IntegrityWorker(QObject):
 
         try:
             for idx, asset in enumerate(self._assets):
+                if self._cancelled():
+                    report.details.append("完整性校验已取消")
+                    break
                 view = asset_view_from_object(asset, project_root=self._project_root)
                 self.progress.emit(idx + 1, len(self._assets), view.name)
+                if self._cancelled():
+                    report.details.append("完整性校验已取消")
+                    break
 
                 catalog_version_id = self._bridged_versions.get(view.id)
                 if catalog_version_id is not None and self._catalog_service is not None:
@@ -139,7 +161,10 @@ class IntegrityWorker(QObject):
                     report.unmanaged_count += 1
                 elif view.checksum:
                     # Compute actual SHA-256 and compare
-                    actual_hash = compute_sha256(path_obj)
+                    actual_hash = compute_sha256(path_obj, is_cancelled=self._cancelled)
+                    if self._cancelled():
+                        report.details.append("完整性校验已取消")
+                        break
                     if actual_hash == view.checksum:
                         state = IntegrityState.VERIFIED
                         report.verified_count += 1
@@ -149,7 +174,10 @@ class IntegrityWorker(QObject):
                         report.details.append(f"{view.name}: 校验和不匹配 (预期 {view.checksum[:8]}, 实际 {actual_hash[:8] if actual_hash else 'N/A'})")
                 else:
                     # Compute new checksum and record for main-thread assignment
-                    new_hash = compute_sha256(path_obj)
+                    new_hash = compute_sha256(path_obj, is_cancelled=self._cancelled)
+                    if self._cancelled():
+                        report.details.append("完整性校验已取消")
+                        break
                     if new_hash:
                         report.checksum_updates[view.id] = new_hash
                         state = IntegrityState.VERIFIED
