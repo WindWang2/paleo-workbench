@@ -343,21 +343,38 @@ def _py_compute_coherence_3d(
             trace_sq_sum = np.sum(sub**2, axis=(0, 1))
             mean_sq = (trace_sum / n_spatial) ** 2
             sum_sq = trace_sq_sum
-
-            for k in range(nt):
-                k0 = max(0, k - ht)
-                k1 = min(nt - 1, k + ht)
-                vert_len = float(k1 - k0 + 1)
-                run_num = np.sum(mean_sq[k0 : k1 + 1])
-                run_den = np.sum(sum_sq[k0 : k1 + 1]) / vert_len + 1e-12
+            # Independent window sums (not prefix totals). A 1e20 sample
+            # overflows float32 v*v on the C++ path and is ~1e40 here; baking
+            # that into a running prefix makes later `prefix[b]-prefix[a]`
+            # lose every finite sample (the s8 #621 regression).
+            run_num, vert_len = _clamped_vertical_window_sums(mean_sq, ht)
+            run_den = _clamped_vertical_window_sums(sum_sq, ht)[0] / vert_len + 1e-12
+            with np.errstate(invalid="ignore", divide="ignore"):
                 value = run_num / run_den
-                if isinstance(value, float) and math.isnan(value):
-                    # C++ parity: NaN input maps to 0.0 via the clamp chain.
-                    coh[i, j, k] = 0.0
-                else:
-                    coh[i, j, k] = float(np.clip(value, 0.0, 1.0))
+            out = np.clip(value, 0.0, 1.0)
+            out = np.where(np.isnan(value), 0.0, out)
+            coh[i, j, :] = out.astype(np.float32, copy=False)
 
     return coh
+
+
+def _clamped_vertical_window_sums(values: np.ndarray, half: int) -> tuple[np.ndarray, np.ndarray]:
+    """Sum the clamped [k-half, k+half] window independently at every sample."""
+    nt = int(values.shape[0])
+    if nt == 0:
+        empty = np.empty(0, dtype=np.float64)
+        return empty, empty
+    data = np.asarray(values, dtype=np.float64)
+    if half <= 0:
+        return data, np.ones(nt, dtype=np.float64)
+    padded = np.pad(data, (half, half), mode="constant")
+    windows = np.lib.stride_tricks.sliding_window_view(padded, 2 * half + 1)
+    totals = windows.sum(axis=1)
+    k = np.arange(nt)
+    vert_len = (np.minimum(nt - 1, k + half) - np.maximum(0, k - half) + 1).astype(
+        np.float64
+    )
+    return totals, vert_len
 
 
 def _py_marching_cubes_3d(

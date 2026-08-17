@@ -99,14 +99,17 @@ def document_render_snapshot(
     visibility: Mapping[str, bool] | None = None,
     records: Iterable[Mapping[str, Any]] | None = None,
     layer_revisions: Mapping[str, int] | None = None,
+    previous_layers: Iterable[MapLayerSnapshot] | None = None,
 ) -> MapRenderSnapshot:
     """Create a revisioned render snapshot from a legacy document or live scene.
 
     ``records`` allows unsaved MapEditScene output to render without modifying the
     document. ``layer_revisions`` supplies authoritative per-layer data revision
     counters (keyed by layer id) so data edits bump a counter instead of hashing
-    every feature; without it the full-content hash is used as a fallback. The
-    output has one vector layer per existing compatibility layer kind; future
+    every feature; without it the full-content hash is used as a fallback.
+    ``previous_layers`` reuses features/extent for layers whose revision is
+    unchanged so a one-feature edit does not re-walk the rest of the document.
+    The output has one vector layer per existing compatibility layer kind; future
     LayerRegistry-backed vector layers replace this adapter transparently.
     """
     if document is None:
@@ -116,13 +119,22 @@ def document_render_snapshot(
     document_id = str(getattr(document, "id", "map") or "map")
     facies_style = dict(_DEFAULT_STYLES["facies"])
     facies_style.update(dict(getattr(document, "facies_style", None) or {}))
+    prev_by_id = {layer.id: layer for layer in (previous_layers or ())}
     layers: list[MapLayerSnapshot] = []
     for kind in ("facies", "well", "line", "label"):
-        features = _features_for_kind(source_records, kind)
         layer_id = f"{document_id}:{kind}"
+        prev = prev_by_id.get(layer_id)
         if layer_revisions is not None:
             data_revision = int(layer_revisions.get(layer_id) or 0)
+            if prev is not None and prev.data_revision == data_revision:
+                features = prev.features
+                extent = prev.extent
+            else:
+                features = _features_for_kind(source_records, kind)
+                extent = _extent_for_features(features)
         else:
+            features = _features_for_kind(source_records, kind)
+            extent = _extent_for_features(features)
             data_revision = _stable_revision(features)
         style = dict(facies_style if kind == "facies" else _DEFAULT_STYLES[kind])
         style.update(_authoring_style(document, kind))
@@ -131,7 +143,7 @@ def document_render_snapshot(
                 id=layer_id,
                 name={"facies": "Facies", "well": "Wells", "line": "Lines", "label": "Labels"}[kind],
                 layer_type="vector",
-                extent=_extent_for_features(features),
+                extent=extent,
                 crs=str(project_crs or ""),
                 data_revision=data_revision,
                 style_revision=_stable_revision(style),

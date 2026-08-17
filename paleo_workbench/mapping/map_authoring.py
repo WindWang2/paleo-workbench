@@ -150,6 +150,7 @@ class MapAuthoringDocument:
                 ),
             )
         self.active_kind = "facies"
+        self._records_cache: dict[str, tuple[int, list[dict[str, Any]]]] = {}
 
     @classmethod
     def from_document(cls, document, *, project_crs: str | None = None) -> "MapAuthoringDocument":
@@ -209,10 +210,22 @@ class MapAuthoringDocument:
 
     def records(self) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
+        revisions = self.data_revisions()
         for kind in _LAYER_KINDS:
             layer = self.layer(kind)
-            source = layer.edit_session.features() if layer.edit_session is not None else layer.features()
-            records.extend(feature_to_record(feature, kind=kind) for feature in source)
+            revision = revisions[layer.id]
+            cached = self._records_cache.get(kind)
+            if cached is not None and cached[0] == revision:
+                records.extend(cached[1])
+                continue
+            source = (
+                layer.edit_session.features()
+                if layer.edit_session is not None
+                else layer.features()
+            )
+            converted = [feature_to_record(feature, kind=kind) for feature in source]
+            self._records_cache[kind] = (revision, converted)
+            records.extend(converted)
         return records
 
     def data_revisions(self) -> dict[str, int]:
