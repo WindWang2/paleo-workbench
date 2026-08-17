@@ -132,6 +132,22 @@ def _list_texts(preview: WellLocationPreview) -> list[str]:
     ]
 
 
+def test_sync_list_selection_does_not_reenter_activation(qtbot):
+    """#664: block selectionModel, not the view, when syncing the list."""
+    preview = _show_well_preview(qtbot, _well_preview())
+    calls = {"n": 0}
+    original = preview._activate_list_well
+
+    def _wrapped(*args, **kwargs):
+        calls["n"] += 1
+        return original(*args, **kwargs)
+
+    preview._activate_list_well = _wrapped
+    preview._sync_list_selection(1)
+    assert calls["n"] == 0
+    assert preview.well_list.currentIndex().isValid()
+
+
 def test_well_list_is_persistent_naturally_sorted_and_stable(qtbot):
     preview = _show_well_preview(
         qtbot,

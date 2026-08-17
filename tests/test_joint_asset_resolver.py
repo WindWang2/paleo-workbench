@@ -72,3 +72,40 @@ def test_path_hints_override_when_files_exist(tmp_path: Path):
     project.joint_analysis = JointAnalysisState(path_hints={"segy": str(hinted)})
     paths = resolve_joint_assets(project, data_root=data)
     assert paths.segy == hinted
+
+
+def test_las_name_containing_td_stays_in_las_slot(tmp_path: Path):
+    """#666: substring 'td' must not steal a LAS file (e.g. STD-1.las)."""
+    las = tmp_path / "STD-1.las"
+    las.write_text("~A\n", encoding="utf-8")
+    project = ProjectDocument.new("t")
+    project.resources.append(
+        ResourceItem(name="STD-1.las", path=str(las), type="well_log", format="las")
+    )
+    paths = resolve_joint_assets(project)
+    assert las in paths.las_files
+    assert paths.td_dir is None
+
+
+def test_las_under_wellhead_dir_is_not_well_head(tmp_path: Path):
+    """#666: path containing 井位 must not reclassify a LAS as the well head."""
+    las = tmp_path / "井位" / "A1.las"
+    las.parent.mkdir()
+    las.write_text("~A\n", encoding="utf-8")
+    wh = tmp_path / "ExportWellHead.dat"
+    wh.write_text("A 1 2 3 4 5 6\n", encoding="utf-8")
+    project = ProjectDocument.new("t")
+    project.resources.extend(
+        [
+            ResourceItem(name="A1.las", path=str(las), type="well_log", format="las"),
+            ResourceItem(
+                name="ExportWellHead.dat",
+                path=str(wh),
+                type="well_head",
+                format="dat",
+            ),
+        ]
+    )
+    paths = resolve_joint_assets(project)
+    assert paths.well_head == wh
+    assert las in paths.las_files

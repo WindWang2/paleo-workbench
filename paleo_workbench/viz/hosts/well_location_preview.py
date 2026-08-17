@@ -679,7 +679,7 @@ class WellLocationPreview(QWidget):
         index = self._list_index_for_point_index(point_index)
         if not index.isValid():
             return
-        blocker = QSignalBlocker(self.well_list)
+        blocker = QSignalBlocker(self.well_list.selectionModel())
         self.well_list.setCurrentIndex(index)
         self.well_list.scrollTo(
             index,

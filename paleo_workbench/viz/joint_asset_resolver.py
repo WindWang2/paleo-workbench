@@ -131,23 +131,42 @@ def _from_project(project: ProjectDocument) -> JointAssetPaths:
         rtype = (res.type or "").lower()
         fmt = (res.format or path.suffix.lower().lstrip(".")).lower()
         name = (res.name or path.name).lower()
-        if fmt in {"sgy", "segy"} or rtype in {"seismic", "segy"}:
+        # Declared type / file format win over path-substring heuristics so
+        # names like STD-1.las or files under a 井位/ folder keep their slot.
+        is_segy = fmt in {"sgy", "segy"} or rtype in {"seismic", "segy"}
+        is_las = fmt == "las" or rtype in {"well_log", "las"}
+        is_well_head = rtype in {"well_head", "wellhead"}
+        is_td = rtype in {"time_depth", "td"}
+        is_horizon = rtype in {"horizon", "layer"}
+        is_tops = rtype in {"well_tops", "tops"}
+        if not any((is_segy, is_las, is_well_head, is_td, is_horizon, is_tops)):
+            if "wellhead" in name or (
+                path.parent.name == "井位" and fmt in {"dat", "csv", "txt", "xlsx", "xls"}
+            ):
+                is_well_head = True
+            elif name == "td" or name.startswith("td.") or "时深" in str(path):
+                is_td = True
+            elif fmt == "dat" and "层位" in str(path):
+                is_horizon = True
+            elif "tops" in name or "分层" in str(path):
+                is_tops = True
+        if is_segy:
             if out.segy is None:
                 out.segy = path
-        elif rtype in {"well_head", "wellhead"} or "wellhead" in name or "井位" in str(path):
+        elif is_well_head:
             if out.well_head is None:
                 out.well_head = path
                 out.well_head_asset_id = res.id
-        elif "td" in name or "时深" in str(path) or rtype in {"time_depth", "td"}:
+        elif is_td:
             if path.is_dir() and out.td_dir is None:
                 out.td_dir = path
             elif path.is_file() and out.td_dir is None:
                 out.td_dir = path.parent
-        elif rtype in {"horizon", "layer"} or fmt == "dat" and "层位" in str(path):
+        elif is_horizon:
             out.horizons.append(path)
-        elif fmt == "las" or rtype in {"well_log", "las"}:
+        elif is_las:
             out.las_files.append(path)
-        elif "tops" in name or "分层" in str(path) or rtype in {"well_tops", "tops"}:
+        elif is_tops:
             if out.tops is None:
                 out.tops = path
     return out
