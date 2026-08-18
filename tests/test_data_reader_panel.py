@@ -1470,7 +1470,8 @@ def test_reader_panel_renders_seismic_slice_preview(qtbot):
 
     import numpy as np
     # Create dummy 3D volume: shape (10, 10, 10)
-    volume = np.random.rand(10, 10, 10).astype(np.float32)
+    rng = np.random.default_rng(16)
+    volume = rng.random((10, 10, 10)).astype(np.float32)
 
     panel.render(
         PreviewResult(

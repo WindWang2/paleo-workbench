@@ -441,7 +441,8 @@ def test_package_importable_and_joint_widget_facades_renderer(qtbot):
 
     scene = WellSeismicScene()
     scene.set_survey_from_corners(P1, P2, P3, n_samples=16, dt_ms=2.0)
-    vol = np.random.randn(8, 8, 16).astype(np.float32)
+    rng = np.random.default_rng(14)
+    vol = rng.standard_normal((8, 8, 16)).astype(np.float32)
     scene.set_volume_access(InMemoryVolumeAccess(vol))
     scene.add_time_slice(4.0)
     td = TimeDepthTable(

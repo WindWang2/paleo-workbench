@@ -141,7 +141,8 @@ def test_run_returns_interpolate_factor_grid_contract():
     assert gz.shape == (result["grid_n"], result["grid_n"])
     assert np.isfinite(gz).sum() > 0
     assert result["min"] <= result["mean"] <= result["max"]
-    assert 0.0 <= result["r_squared"] <= 1.0
+    assert np.isfinite(result["r_squared"])
+    assert result["r_squared"] <= 1.0 + 1e-9
     assert result["n_points"] == 8
 
 
@@ -323,7 +324,33 @@ def test_apply_interpolation_runs_constrained_idw_and_sets_provenance():
     assert np.isfinite(factor_grid_result_for_task(task).grid_z).sum() > 0
     qm = task.quality_metrics
     assert qm["backend"] == CONSTRAINED_IDW_ENGINE_LABEL
-    assert "r_squared" in qm and 0.0 <= qm["r_squared"] <= 1.0
+    assert "r_squared" in qm and np.isfinite(qm["r_squared"])
+
+
+def test_r_squared_is_signed_not_clamped_at_zero():
+    """#844: the constrained-IDW R² must keep its sign like the gve methods.
+
+    A grid that fits worse than the constant mean (predictions all zero against
+    observed [10, 0, 10, 0], SS_res=200 > SS_tot=100) must report the NEGATIVE
+    R²; the old ``max(0, …)`` clamp flattened it to 0.0 and hid the bad fit.
+    """
+    grid_x = np.linspace(-1.0, 11.0, 11)
+    grid_y = np.linspace(-1.0, 11.0, 11)
+    grid_z = np.zeros((11, 11), dtype=float)
+
+    class _Well:
+        def __init__(self, x, y, value):
+            self.x, self.y, self.value = x, y, value
+
+    wells = [
+        _Well(0.0, 0.0, 10.0),
+        _Well(10.0, 0.0, 0.0),
+        _Well(0.0, 10.0, 10.0),
+        _Well(10.0, 10.0, 0.0),
+    ]
+    r2, skipped = cia._leave_one_out_grid_fidelity(grid_z, grid_x, grid_y, wells)
+    assert skipped == 0
+    assert r2 == pytest.approx(-1.0)
 
 
 def test_apply_interpolation_persists_break_polylines_with_project_constraints():

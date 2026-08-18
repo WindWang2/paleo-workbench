@@ -61,8 +61,11 @@ def test_dispatch_fast_slice_extract_parity():
 
 
 def test_dispatch_minmax_downsample_parity():
+    # Seeded so rare single-backend NaN/tie-break/overflow inputs stay
+    # reproducible (#851).
+    rng = np.random.default_rng(1)
     depths = np.linspace(100.0, 500.0, 1000, dtype=np.float32)
-    values = np.random.randn(1000).astype(np.float32)
+    values = rng.standard_normal(1000).astype(np.float32)
 
     d_acc, v_acc = native_backend.dispatch("minmax_downsample", depths, values, 100)
     with disabled_acceleration():
@@ -73,9 +76,16 @@ def test_dispatch_minmax_downsample_parity():
 
 
 def test_install_all_hooks_idempotent():
-    # Must run cleanly without error
+    # Must run cleanly without error; a second pass must leave hooks installed
+    # exactly when the geoviz provider API is importable (#622 companion, #851).
     install_all_hooks()
     install_all_hooks()
+    try:
+        import geoviz  # noqa: F401
+    except ImportError:
+        assert native_backend.hooks_installed() is False
+    else:
+        assert native_backend.hooks_installed() is True
 
 
 def test_install_all_hooks_logs_when_providers_missing(monkeypatch, caplog):

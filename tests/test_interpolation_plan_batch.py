@@ -339,3 +339,31 @@ def test_fault_chunk_budget_scales_with_well_count():
     assert _chunk_cells_for_budget(_ELEMENT_BUDGET, 8000) < _chunk_cells_for_budget(
         _ELEMENT_BUDGET, 1000
     )
+
+
+def test_high_power_idw_populates_cells_with_positive_weight_totals():
+    """#844: populated must test ``totals > 0``, not the 1e-12 distance epsilon.
+
+    Distances are clamped to the 1e-12 epsilon before exponentiation, so the
+    *weight* sum at distant cells is not a distance: with power>=3 on a large
+    UTM box it stays positive but falls far below 1e-12. The old comparison
+    left those cells NaN — power=3 on this fixture NaN'd all 16 cells (and
+    ``apply_idw_plan`` raised 插值结果全为无效值), power=4 NaN'd 7/16. A
+    positive weight sum always yields a well-defined weighted average.
+    """
+    rng = np.random.default_rng(11)
+    points = [
+        {"x": float(x), "y": float(y), "value": float(v)}
+        for x, y, v in zip(
+            rng.uniform(0.0, 500_000.0, 6),
+            rng.uniform(0.0, 500_000.0, 6),
+            rng.uniform(10.0, 100.0, 6),
+        )
+    ]
+    values = [p["value"] for p in points]
+    for power in (3.0, 4.0):
+        plan = build_idw_plan(points, grid_n=4, power=power)
+        result = apply_idw_plan(plan, values)
+        assert np.isfinite(result["grid_z"]).all(), (
+            f"power={power} produced NaN cells"
+        )

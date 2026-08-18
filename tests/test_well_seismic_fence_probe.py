@@ -29,7 +29,8 @@ P3 = (1725, 4805, 12793.0, 16406.0)
 def _scene_with_volume() -> WellSeismicScene:
     scene = WellSeismicScene()
     scene.set_survey_from_corners(P1, P2, P3, n_samples=16, dt_ms=2.0)
-    vol = np.random.randn(8, 8, 16).astype(np.float32)
+    rng = np.random.default_rng(10)
+    vol = rng.standard_normal((8, 8, 16)).astype(np.float32)
     scene.set_volume_access(InMemoryVolumeAccess(vol))
     scene.set_preview_mode(True)
     scene.set_wells(

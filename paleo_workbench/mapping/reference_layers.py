@@ -9,13 +9,33 @@ from typing import Any
 
 import numpy as np
 from PySide6.QtGui import QImage
-from osgeo import gdal, osr
+
+try:
+    from osgeo import gdal, osr
+except ImportError:  # pragma: no cover — dev machines without GDAL
+    gdal = None  # type: ignore[assignment]
+    osr = None  # type: ignore[assignment]
 
 from paleo_workbench.project.models import MapReferenceLayer
 
 
 class ReferenceLayerError(ValueError):
     """Raised when a reference source cannot join the project coordinate system."""
+
+
+def _require_gdal() -> None:
+    """Fail an operation with an actionable error when GDAL is unavailable.
+
+    The module must stay importable when ``osgeo`` is missing or its wheel and
+    system libgdal mismatch (#851): a hard module-level ``from osgeo import
+    gdal`` made every importer of ``mapping_page`` un-collectable on such
+    machines, silently dropping ~470 tests (including the #662 export
+    regressions) instead of failing loudly with a usable message.
+    """
+    if gdal is None or osr is None:
+        raise ReferenceLayerError(
+            "参考图功能需要 GDAL（osgeo）；请安装/修复 GDAL 后重试"
+        )
 
 
 def _read_band_as_array(band, *, width: int, height: int) -> np.ndarray:
@@ -25,6 +45,7 @@ def _read_band_as_array(band, *, width: int, height: int) -> np.ndarray:
     ``ReadRaster`` + numpy frombuffer. CI/dev installs of osgeo often ship
     without the ``_gdal_array`` extension when numpy was missing at build time.
     """
+    _require_gdal()
     try:
         return np.asarray(
             band.ReadAsArray(buf_xsize=width, buf_ysize=height),
@@ -145,6 +166,7 @@ class ReferenceLayerService:
         )
 
     def import_layer(self, path: str | Path, project_crs: str) -> MapReferenceLayer:
+        _require_gdal()
         source_path = Path(path)
         if not source_path.is_file():
             raise ReferenceLayerError(f"参考图文件不存在：{source_path}")
@@ -206,6 +228,7 @@ class ReferenceLayerService:
         self.refresh_status(layer)
         if layer.status != "ready":
             return []
+        _require_gdal()
         dataset = gdal.OpenEx(layer.source_path, gdal.OF_VECTOR)
         if dataset is None:
             layer.status = "failed"
@@ -246,6 +269,7 @@ class ReferenceLayerService:
         self.refresh_status(layer)
         if layer.status != "ready":
             raise ReferenceLayerError(layer.error_message or "参考图不可用")
+        _require_gdal()
         path = Path(layer.source_path)
         try:
             cache_key = self._source_revision(layer)
@@ -331,6 +355,7 @@ class ReferenceLayerService:
         self.refresh_status(layer)
         if layer.status != "ready":
             raise ReferenceLayerError(layer.error_message or "参考图不可用")
+        _require_gdal()
         try:
             cache_key = self._source_revision(layer)
         except OSError as exc:
@@ -384,6 +409,7 @@ class ReferenceLayerService:
         self.refresh_status(layer)
         if layer.status != "ready":
             raise ReferenceLayerError(layer.error_message or "参考图不可用")
+        _require_gdal()
         dataset = gdal.OpenEx(layer.source_path, gdal.OF_RASTER)
         if dataset is None or dataset.RasterXSize <= 0 or dataset.RasterYSize <= 0:
             layer.status = "failed"

@@ -15,7 +15,8 @@ from paleo_workbench.viz.seismic_3d_api import AttributePipeline, AttributeTaskW
 
 def test_attribute_pipeline_coherence_computation():
     # 3D dummy volume 20x20x50
-    volume = np.random.randn(20, 20, 50).astype(np.float32)
+    rng = np.random.default_rng(2)
+    volume = rng.standard_normal((20, 20, 50)).astype(np.float32)
 
     pipeline = AttributePipeline()
     result = pipeline.compute_attribute(volume, attribute_type="coherence_3d")
@@ -26,7 +27,8 @@ def test_attribute_pipeline_coherence_computation():
 
 
 def test_attribute_task_worker_asynchronous(qtbot):
-    volume = np.random.randn(15, 15, 30).astype(np.float32)
+    rng = np.random.default_rng(2)
+    volume = rng.standard_normal((15, 15, 30)).astype(np.float32)
     worker = AttributeTaskWorker(volume=volume, attribute_type="coherence_3d")
 
     progresses: list[float] = []

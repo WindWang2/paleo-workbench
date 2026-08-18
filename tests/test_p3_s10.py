@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
+import pytest
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication, QFileDialog
 
@@ -149,3 +150,36 @@ def test_windows_ctest_step_is_fail_closed() -> None:
     assert "continue-on-error" not in unix
     assert "--parallel 2" in unix
     assert "timeout-minutes" not in unix
+
+
+def test_reference_layers_imports_cleanly_without_gdal(monkeypatch, tmp_path) -> None:
+    """#851: reference_layers must not hard-fail collection when GDAL is broken.
+
+    The module-level ``from osgeo import gdal, osr`` made this file (and every
+    module importing mapping_page) un-collectable on machines where the GDAL
+    wheel and system libgdal mismatch — silently dropping ~470 tests including
+    the #662 export regressions above. With osgeo made un-importable the module
+    must still import, and the GDAL-backed operations must fail with a clear
+    ReferenceLayerError instead of an AttributeError.
+    """
+    import importlib
+    import sys
+
+    import paleo_workbench.mapping.reference_layers as rl
+
+    monkeypatch.setitem(sys.modules, "osgeo", None)
+    monkeypatch.setitem(sys.modules, "osgeo.gdal", None)
+    monkeypatch.setitem(sys.modules, "osgeo.osr", None)
+    monkeypatch.delitem(
+        sys.modules, "paleo_workbench.mapping.reference_layers", raising=False
+    )
+
+    mod = importlib.import_module("paleo_workbench.mapping.reference_layers")
+
+    assert mod.gdal is None and mod.osr is None
+    # Collection-visible surface still exists and errors are actionable.
+    assert mod.ReferenceLayerService is not None
+    source = tmp_path / "ref.tif"
+    source.write_bytes(b"x")
+    with pytest.raises(mod.ReferenceLayerError, match="GDAL"):
+        mod.ReferenceLayerService().import_layer(source, "EPSG:4326")

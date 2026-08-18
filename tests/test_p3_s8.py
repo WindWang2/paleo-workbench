@@ -118,7 +118,8 @@ def test_data_hull_mask_matches_vectorized_raster():
     got = masks.build_data_hull_mask(grid_x, grid_y, wells, buffer_meters=0.0)
     hull = masks._convex_hull(wells)
     ref = rasterize_polygon_mask(grid_x, grid_y, hull)
-    assert got is not None
+    assert isinstance(got, np.ndarray)
+    assert got.shape == ref.shape
     np.testing.assert_array_equal(got, ref)
 
 
