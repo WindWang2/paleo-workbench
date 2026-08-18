@@ -331,7 +331,11 @@ class UnifiedMapCanvas(QWidget):
         )
 
     def pan_by_pixels(self, dx: float, dy: float) -> None:
-        xmin, ymin, xmax, ymax = self._view_extent
+        # Pixel→world conversion must use the letterboxed (fitted) span — the
+        # same mapping the content is drawn through (#522). The raw view span
+        # is up to 2× off on the expanded axis, making drags jump back half
+        # their travel once the re-rendered frame arrives (#831).
+        xmin, ymin, xmax, ymax = self._fitted_extent()
         width, height = max(1, self.width()), max(1, self.height())
         world_dx = -float(dx) * (xmax - xmin) / width
         world_dy = float(dy) * (ymax - ymin) / height
@@ -478,7 +482,12 @@ class UnifiedMapCanvas(QWidget):
             painter.drawLine(center + QPointF(-8, 0), center + QPointF(8, 0))
             painter.drawLine(center + QPointF(0, -8), center + QPointF(0, 8))
             painter.restore()
-        self._paint_decorations(painter, state.get("decorations") or {})
+        # Screen chrome must measure the letterboxed extent actually drawn
+        # (#522/#831): the raw view span mislabels the bar by up to 2× on the
+        # expanded axis and contradicts the export path, which is correct.
+        self._paint_decorations(
+            painter, state.get("decorations") or {}, extent=self._fitted_extent()
+        )
 
     def _paint_decorations(
         self, painter: QPainter, decorations: Mapping[str, Any], *, width: int | None = None,
@@ -888,14 +897,15 @@ class UnifiedMapCanvas(QWidget):
         self._cursor_map = self.screen_to_map(event.position())
         self.map_position_changed.emit(self._cursor_map)
         if self._tool_controller is not None and self._tool_controller.active_tool is not None:
-            self._tool_controller.active_tool.mouse_move(
+            handled = self._tool_controller.active_tool.mouse_move(
                 self._cursor_map, modifiers=self._modifier_names(event.modifiers())
             )
             if handled:
-                self.tool_operation.emit()
-            # Only tools paint cursor-relative feedback; a bare hover over the
-            # canvas must not schedule full repaints per mouse-move event.
-            self.update()
+                self.tool_operation.emit(self._active_tool_edits_data())
+                # Only tools paint cursor-relative feedback; a bare hover over
+                # the canvas must not schedule full repaints per mouse-move
+                # event.
+                self.update()
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
