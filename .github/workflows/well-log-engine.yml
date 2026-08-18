@@ -57,12 +57,11 @@ jobs:
       # well-log-engine is a git submodule; every job below builds it, so
       # materialize it up front and fail fast if it is missing. Explicit init
       # of only well-log-engine (not submodules:recursive): the sibling
-      # geo-viz-engine submodule contains a file whose name is invalid on
-      # Windows filesystems ('{"filename": "ui-ref-screenshot.png"}'), which
-      # aborts a recursive checkout on windows-latest. Same pattern as
-      # ci.yml's well-log-workstation job. Tracking: packaging #441 — rename
-      # the invalid filenames in geo-viz-engine and bump the gitlink, then
-      # remove this single-submodule workaround.
+      # Scoped init (not submodules:recursive): these jobs build only
+      # well-log-engine, so materializing the sibling geo-viz-engine
+      # checkout would be pure extra time. Historically this was also a
+      # Windows-filesystem workaround (packaging #441); that blocker is
+      # resolved upstream and a recursive checkout is safe again.
       - name: Init well-log-engine submodule
         shell: bash
         run: git submodule update --init well-log-engine
@@ -184,12 +183,11 @@ jobs:
       # well-log-engine is a git submodule; every job below builds it, so
       # materialize it up front and fail fast if it is missing. Explicit init
       # of only well-log-engine (not submodules:recursive): the sibling
-      # geo-viz-engine submodule contains a file whose name is invalid on
-      # Windows filesystems ('{"filename": "ui-ref-screenshot.png"}'), which
-      # aborts a recursive checkout on windows-latest. Same pattern as
-      # ci.yml's well-log-workstation job. Tracking: packaging #441 — rename
-      # the invalid filenames in geo-viz-engine and bump the gitlink, then
-      # remove this single-submodule workaround.
+      # Scoped init (not submodules:recursive): these jobs build only
+      # well-log-engine, so materializing the sibling geo-viz-engine
+      # checkout would be pure extra time. Historically this was also a
+      # Windows-filesystem workaround (packaging #441); that blocker is
+      # resolved upstream and a recursive checkout is safe again.
       - name: Init well-log-engine submodule
         shell: bash
         run: git submodule update --init well-log-engine
@@ -244,12 +242,11 @@ jobs:
       # well-log-engine is a git submodule; every job below builds it, so
       # materialize it up front and fail fast if it is missing. Explicit init
       # of only well-log-engine (not submodules:recursive): the sibling
-      # geo-viz-engine submodule contains a file whose name is invalid on
-      # Windows filesystems ('{"filename": "ui-ref-screenshot.png"}'), which
-      # aborts a recursive checkout on windows-latest. Same pattern as
-      # ci.yml's well-log-workstation job. Tracking: packaging #441 — rename
-      # the invalid filenames in geo-viz-engine and bump the gitlink, then
-      # remove this single-submodule workaround.
+      # Scoped init (not submodules:recursive): these jobs build only
+      # well-log-engine, so materializing the sibling geo-viz-engine
+      # checkout would be pure extra time. Historically this was also a
+      # Windows-filesystem workaround (packaging #441); that blocker is
+      # resolved upstream and a recursive checkout is safe again.
       - name: Init well-log-engine submodule
         shell: bash
         run: git submodule update --init well-log-engine
@@ -313,12 +310,11 @@ jobs:
       # well-log-engine is a git submodule; every job below builds it, so
       # materialize it up front and fail fast if it is missing. Explicit init
       # of only well-log-engine (not submodules:recursive): the sibling
-      # geo-viz-engine submodule contains a file whose name is invalid on
-      # Windows filesystems ('{"filename": "ui-ref-screenshot.png"}'), which
-      # aborts a recursive checkout on windows-latest. Same pattern as
-      # ci.yml's well-log-workstation job. Tracking: packaging #441 — rename
-      # the invalid filenames in geo-viz-engine and bump the gitlink, then
-      # remove this single-submodule workaround.
+      # Scoped init (not submodules:recursive): these jobs build only
+      # well-log-engine, so materializing the sibling geo-viz-engine
+      # checkout would be pure extra time. Historically this was also a
+      # Windows-filesystem workaround (packaging #441); that blocker is
+      # resolved upstream and a recursive checkout is safe again.
       - name: Init well-log-engine submodule
         shell: bash
         run: git submodule update --init well-log-engine
@@ -394,12 +390,11 @@ jobs:
       # well-log-engine is a git submodule; every job below builds it, so
       # materialize it up front and fail fast if it is missing. Explicit init
       # of only well-log-engine (not submodules:recursive): the sibling
-      # geo-viz-engine submodule contains a file whose name is invalid on
-      # Windows filesystems ('{"filename": "ui-ref-screenshot.png"}'), which
-      # aborts a recursive checkout on windows-latest. Same pattern as
-      # ci.yml's well-log-workstation job. Tracking: packaging #441 — rename
-      # the invalid filenames in geo-viz-engine and bump the gitlink, then
-      # remove this single-submodule workaround.
+      # Scoped init (not submodules:recursive): these jobs build only
+      # well-log-engine, so materializing the sibling geo-viz-engine
+      # checkout would be pure extra time. Historically this was also a
+      # Windows-filesystem workaround (packaging #441); that blocker is
+      # resolved upstream and a recursive checkout is safe again.
       - name: Init well-log-engine submodule
         shell: bash
         run: git submodule update --init well-log-engine
@@ -524,12 +519,11 @@ jobs:
       # well-log-engine is a git submodule; every job below builds it, so
       # materialize it up front and fail fast if it is missing. Explicit init
       # of only well-log-engine (not submodules:recursive): the sibling
-      # geo-viz-engine submodule contains a file whose name is invalid on
-      # Windows filesystems ('{"filename": "ui-ref-screenshot.png"}'), which
-      # aborts a recursive checkout on windows-latest. Same pattern as
-      # ci.yml's well-log-workstation job. Tracking: packaging #441 — rename
-      # the invalid filenames in geo-viz-engine and bump the gitlink, then
-      # remove this single-submodule workaround.
+      # Scoped init (not submodules:recursive): these jobs build only
+      # well-log-engine, so materializing the sibling geo-viz-engine
+      # checkout would be pure extra time. Historically this was also a
+      # Windows-filesystem workaround (packaging #441); that blocker is
+      # resolved upstream and a recursive checkout is safe again.
       - name: Init well-log-engine submodule
         shell: bash
         run: git submodule update --init well-log-engine

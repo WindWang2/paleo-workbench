@@ -26,14 +26,14 @@ Editable installs are the **preferred** way to make `import geoviz` work for any
 Python process (ISS-ENV-01). Pytest also configures package roots via
 `pyproject.toml` `[tool.pytest.ini_options].pythonpath`.
 
-**Windows source checkout:** currently blocked by the `geo-viz-engine`
-submodule, which ships filenames Windows filesystems cannot materialize
-(`{"filename": "ui-ref-*.png"}` — tracking issue #441). The fix lives in the
-geo-viz-engine repo (rename + release) followed by a gitlink bump here; the
-CI guard step fails on any *new* Windows-invalid submodule path. Until the
-bump lands, Windows developers can init only the `well-log-engine` submodule
-(`git submodule update --init well-log-engine`), but geoviz and therefore the
-app will be unavailable.
+**Windows source checkout:** supported. The packaging #441 blocker
+(Windows-invalid filenames in the `geo-viz-engine` submodule) was resolved
+upstream by the rename; the pinned submodule trees scan clean, and the CI
+guard step ("Guard against Windows-invalid submodule filenames" in `ci.yml`,
+with a local twin in `tests/test_workflow_integrity.py`) fails on any *new*
+Windows-invalid submodule path so a broken gitlink cannot be re-pinned
+silently. A full recursive checkout
+(`git submodule update --init --recursive`) works on Windows.
 
 When packages are not installed, `paleo_workbench.env_bootstrap` prepends the
 checkout's `geo-viz-engine` package roots on import of `paleo_workbench` and

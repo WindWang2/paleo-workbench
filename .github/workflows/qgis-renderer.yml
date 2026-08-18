@@ -62,7 +62,7 @@ jobs:
           #   external/ copies (PREFER_INTERNAL_LIBS=TRUE for non-vcpkg
           #   builds), so only Protobuf/QScintilla/qtkeychain/QCA are
           #   additionally required by the configure flags below (exiv2: WITH_EXIV2
-#   defaults ON and its find_package is REQUIRED).
+          #   defaults ON and its find_package is REQUIRED).
           sudo apt-get install -y --no-install-recommends \
             build-essential \
             cmake \
