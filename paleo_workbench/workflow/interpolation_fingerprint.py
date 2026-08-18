@@ -505,9 +505,8 @@ def task_has_numerical_output(task: Any) -> bool:
     from paleo_workbench.project import factor_grid_artifacts as fga
 
     task_id = str(getattr(task, "id", "") or "")
-    with fga._LIVE_FACTOR_GRIDS_LOCK:
-        if task_id and task_id in fga._LIVE_FACTOR_GRIDS:
-            return True
+    if fga.has_live_factor_grid(task_id):
+        return True
     path = getattr(task, "grid_artifact_path", None)
     if path:
         try:

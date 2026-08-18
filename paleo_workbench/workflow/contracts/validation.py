@@ -41,13 +41,21 @@ CONTRACT_DATARUN_MAP = {
 def validate_registry(registry: "WorkflowContractRegistry") -> list[str]:
     issues: list[str] = []
     ids = {c.id for c in registry.list_contracts()}
+    by_id = {c.id: c for c in registry.list_contracts()}
     for c in registry.list_contracts():
         for up in c.upstream_contract_ids:
             if up not in ids:
                 issues.append(f"{c.id}: unknown upstream {up}")
+            elif c.id not in by_id[up].downstream_contract_ids:
+                # Graph consistency (audit #848): downstream/upstream edges
+                # must mirror each other; one-sided declarations hid real
+                # consumption relationships from the readiness graph.
+                issues.append(f"{up}->{c.id}: missing mirror downstream on {up}")
         for down in c.downstream_contract_ids:
             if down not in ids:
                 issues.append(f"{c.id}: unknown downstream {down}")
+            elif c.id not in by_id[down].upstream_contract_ids:
+                issues.append(f"{c.id}->{down}: missing mirror upstream on {down}")
         for op in c.datarun_operations:
             if op and op not in KNOWN_DATARUN_OPERATIONS:
                 issues.append(f"{c.id}: undeclared DataRun operation {op!r}")

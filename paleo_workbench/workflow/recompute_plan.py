@@ -42,6 +42,7 @@ class RecomputeStep:
     reuse_run_id: str | None = None
     reuse_output_version_ids: list[str] = field(default_factory=list)
     input_version_ids: list[str] = field(default_factory=list)
+    output_version_ids: list[str] = field(default_factory=list)
     label: str = ""
     can_reuse_existing: bool = False
     requires_compute: bool = True
@@ -57,6 +58,7 @@ class RecomputeStep:
             "reuse_run_id": self.reuse_run_id,
             "reuse_output_version_ids": list(self.reuse_output_version_ids),
             "input_version_ids": list(self.input_version_ids),
+            "output_version_ids": list(self.output_version_ids),
             "label": self.label,
             "can_reuse_existing": self.can_reuse_existing,
             "requires_compute": self.requires_compute,
@@ -109,6 +111,8 @@ OPERATION_LABELS_ZH: dict[str, str] = {
     "export": "成果导出",
     "horizon_interpretation": "层位解释",
     "modeling": "三维建模",
+    "stratigraphic_correlation": "连井对比",
+    "fault_interpretation": "断层解释",
 }
 
 
@@ -270,6 +274,11 @@ def build_recompute_plan(
         )
         order += 1
         label = _step_label(run, freshness)
+        # Outputs are version-namespace ids (`ver_…`), distinct from run ids
+        # (`run_…`): the executor poisons these so downstream steps whose
+        # input_version_ids intersect them are skipped after a failure
+        # (audit #847-4 — poisoning run_id never intersects inputs).
+        output_ids = list(graph.run_outputs.get(run.run_id, ()))
         if can_reuse and reuse is not None:
             steps.append(
                 RecomputeStep(
@@ -282,6 +291,7 @@ def build_recompute_plan(
                     reuse_run_id=reuse.run_id,
                     reuse_output_version_ids=list(reuse.output_version_ids or []),
                     input_version_ids=current_inputs,
+                    output_version_ids=output_ids,
                     label=label,
                     can_reuse_existing=True,
                     requires_compute=False,
@@ -297,6 +307,7 @@ def build_recompute_plan(
                     action=PlanAction.REQUIRES_COMPUTE,
                     reason=reason,
                     input_version_ids=current_inputs,
+                    output_version_ids=output_ids,
                     label=label,
                     can_reuse_existing=False,
                     requires_compute=True,
@@ -421,8 +432,10 @@ class PlanExecutor:
                 plan.failed_run_ids.append(step.run_id or "")
                 failed_run_ids.add(step.run_id or "")
                 failed_ops.add(step.operation)
-                if step.run_id:
-                    poisoned_versions.add(step.run_id)
+                # Poison the step's OUTPUT VERSIONS — downstream steps declare
+                # those ids in input_version_ids. A run_id (`run_…`) lives in
+                # a disjoint namespace and never intersects (audit #847-4).
+                poisoned_versions.update(step.output_version_ids)
                 poisoned_versions.update(step.reuse_output_version_ids)
                 result.messages.append(
                     f"no handler for operation {step.operation!r}; mark failed"
@@ -439,8 +452,9 @@ class PlanExecutor:
                 plan.failed_run_ids.append(step.run_id or "")
                 failed_run_ids.add(step.run_id or "")
                 failed_ops.add(step.operation)
-                if step.run_id:
-                    poisoned_versions.add(step.run_id)
+                # Same version-namespace poisoning as above: dependents that
+                # consumed this run's outputs must be skipped.
+                poisoned_versions.update(step.output_version_ids)
                 poisoned_versions.update(step.reuse_output_version_ids)
                 result.messages.append(f"failed {step.label}: {exc}")
                 if self.stop_on_failure:

@@ -40,7 +40,7 @@ A centralized, event-driven state observer module (`paleo_workbench/viz/seismic_
 A single-point registration specification data structure that bundles an asset format's classification rules (extensions/magic bytes), preview parser callable, and exporter provider into one place.
 
 ### WorkflowOrchestrator
-A deep workflow state machine orchestrator module (`paleo_workbench/workflow/orchestrator.py`) that encapsulates step transitions, prerequisite evidence validation, and automatic state saving behind a 2-method interface (`next_step`, `get_step_context`).
+A legacy headless step-cursor helper (`paleo_workbench/workflow/orchestrator.py`) that exposes `next_step` / `get_step_context` for scripting/tests. It never persists or infers authoritative state: the single source of truth for workflow step status is the evidence/freshness inference in `paleo_workbench/workflow/service.py` (`home_workflow_steps`), which production UI reads. `next_step` refuses to advance past a step that has no evidence-backed validity.
 
 ---
 

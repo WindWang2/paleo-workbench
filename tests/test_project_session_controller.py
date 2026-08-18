@@ -85,7 +85,7 @@ def test_catalog_maintenance_runs_off_gui_thread(qtbot, tmp_path, monkeypatch):
         def migrate_legacy_resources(self, _resources):
             seen.append(("migrate", threading.current_thread() is not threading.main_thread()))
 
-        def _sweep_temp_on_open(self):
+        def sweep_temp_on_open(self):
             seen.append(("sweep", threading.current_thread() is not threading.main_thread()))
 
         def ensure_index_ready(self):

@@ -112,8 +112,20 @@ class CatalogStore:
                     ) from error
         bak = catalog_bak_file_for(self.project_path)
         if bak.is_file():
-            data = json.loads(bak.read_text(encoding="utf-8"))
-            document = CatalogDocument.model_validate(data)
+            try:
+                data = json.loads(bak.read_text(encoding="utf-8"))
+                document = CatalogDocument.model_validate(data)
+            except (OSError, ValueError, TypeError) as error:
+                # Both the canonical file AND the backup are unreadable:
+                # isolate the canonical bytes for forensics and raise a typed
+                # CatalogError instead of leaking a raw JSONDecodeError while
+                # leaving the corrupt files in place (audit #848).
+                _isolate_corrupt_file(path)
+                _isolate_corrupt_file(bak)
+                raise CatalogError(
+                    f"Catalog file and its backup are both corrupt: {path} "
+                    f"(backup error: {error})"
+                ) from error
             # Re-promote the backup to the canonical path so subsequent
             # saves start from a clean state.
             try:

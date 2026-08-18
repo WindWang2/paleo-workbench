@@ -167,6 +167,7 @@ def _data_import() -> DomainWorkflowContract:
             "seismic_volume",
             "horizon_interpretation",
             "factor_interpolation",
+            "fault_interpretation",
         ],
         datarun_operations=[],
         workflow_step_types=["data_check"],
@@ -253,6 +254,7 @@ def _well_log_ingest() -> DomainWorkflowContract:
             "well_correlation",
             "factor_interpolation",
             "facies_prediction",
+            "well_seismic_joint",
         ],
         expert_questions=[
             _q(
@@ -555,6 +557,8 @@ def _seismic_volume() -> DomainWorkflowContract:
             "horizon_interpretation",
             "well_seismic_joint",
             "facies_prediction",
+            "fault_interpretation",
+            "geomodel_3d",
         ],
         expert_questions=[
             _q(
@@ -650,7 +654,12 @@ def _horizon_interpretation() -> DomainWorkflowContract:
             )
         ],
         qc_rules=[],
-        upstream_contract_ids=["seismic_volume", "data_import"],
+        upstream_contract_ids=[
+            "seismic_volume",
+            "data_import",
+            "well_correlation",
+            "well_seismic_joint",
+        ],
         downstream_contract_ids=["factor_interpolation", "geomodel_3d", "paleomap_compile"],
         datarun_operations=["horizon_interpretation"],
         expert_questions=[
@@ -915,6 +924,7 @@ def _factor_interpolation() -> DomainWorkflowContract:
             "horizon_interpretation",
             "fault_interpretation",
             "data_import",
+            "well_correlation",
         ],
         downstream_contract_ids=["facies_prediction", "paleomap_compile"],
         datarun_operations=["factor_map"],
@@ -1246,7 +1256,7 @@ def _quality_control() -> DomainWorkflowContract:
                 "well_table_qc_clean",
             )
         ],
-        upstream_contract_ids=["paleomap_compile"],
+        upstream_contract_ids=["paleomap_compile", "facies_prediction"],
         downstream_contract_ids=["export"],
         datarun_operations=["qc"],
         workflow_step_types=["qc"],

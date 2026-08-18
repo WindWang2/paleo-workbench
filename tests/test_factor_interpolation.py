@@ -156,7 +156,7 @@ def test_apply_interpolation_to_task_fills_grid_and_metrics():
     apply_interpolation_to_task(task, method="IDW", grid_n=10)
     assert task.status == "complete"
     assert task.method == "IDW"
-    assert task.source_kind == "mixed"
+    assert task.source_kind == "mock"
     assert task.generator_version == GENERATOR_VERSION
     # Stage-3: numerical payload lives in live FactorGrid cache, not nested lists.
     assert "grid_z" not in (task.parameters or {})

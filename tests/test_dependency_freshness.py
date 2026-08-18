@@ -486,34 +486,42 @@ def test_plan_executor_partial_failure():
 
 
 def test_skip_dependents_on_failure_leaves_unrelated_steps_running():
-    """#669: stop_on_failure=False must skip only dependents of the failed step."""
+    """#669: stop_on_failure=False must skip only dependents of the failed step.
+
+    Ids use the production namespaces (``run_…`` for run ids, ``ver_…`` for
+    input/output version ids) — the original test used the literal ``"a"`` for
+    both, which masked the namespace bug fixed by #847-4.
+    """
     from paleo_workbench.workflow.recompute_plan import RecomputePlan, RecomputeStep
 
     plan = RecomputePlan(
         steps=[
             RecomputeStep(
                 order=1,
-                run_id="a",
+                run_id="run_a",
                 operation="op_a",
                 domain_task_id="a",
                 action=PlanAction.REQUIRES_COMPUTE,
+                output_version_ids=["ver_a"],
                 label="A",
             ),
             RecomputeStep(
                 order=2,
-                run_id="b",
+                run_id="run_b",
                 operation="op_b",
                 domain_task_id="b",
                 action=PlanAction.REQUIRES_COMPUTE,
-                input_version_ids=["a"],
+                input_version_ids=["ver_a"],
+                output_version_ids=["ver_b"],
                 label="B",
             ),
             RecomputeStep(
                 order=3,
-                run_id="c",
+                run_id="run_c",
                 operation="op_c",
                 domain_task_id="c",
                 action=PlanAction.REQUIRES_COMPUTE,
+                output_version_ids=["ver_c"],
                 label="C",
             ),
         ]
@@ -532,10 +540,71 @@ def test_skip_dependents_on_failure_leaves_unrelated_steps_running():
         skip_dependents_on_failure=True,
     )
     ex.execute(plan)
-    assert plan.failed_run_ids == ["a"]
-    assert "b" in plan.skipped_run_ids
-    assert "c" in plan.completed_run_ids
-    assert ran == ["c"]
+    assert plan.failed_run_ids == ["run_a"]
+    assert "run_b" in plan.skipped_run_ids
+    assert "run_c" in plan.completed_run_ids
+    assert ran == ["run_c"]
+
+
+def test_skip_dependents_poisons_version_ids_from_real_plan():
+    """#847-4: the plan pipeline (build_recompute_plan → execute with
+    stop_on_failure=False) must skip dependents of a failed run.
+
+    Regression: the executor poisoned ``run_id`` values while downstream steps
+    list ``input_version_ids`` (a disjoint namespace), so dependents kept
+    running and ``skipped_run_ids`` stayed empty.
+    """
+    from paleo_workbench.workflow.recompute_plan import (
+        PlanExecutor,
+        build_recompute_plan,
+    )
+
+    cat = InMemoryCatalog()
+    _, h = _run_with_output(cat, operation="horizon_interpretation", inputs=[], name="H")
+    fa_run, fa_ver = _run_with_output(
+        cat, operation="factor_map", inputs=[h], name="Fa", domain_task_id="fa"
+    )
+    pa_run, pa_ver = _run_with_output(
+        cat, operation="prediction", inputs=[fa_ver], name="Pa", domain_task_id="pa"
+    )
+    _, _ = _run_with_output(
+        cat, operation="map_compile", inputs=[pa_ver], name="M", domain_task_id="m"
+    )
+
+    svc = _svc(cat, current={})
+    # Force all runs into the plan regardless of staleness.
+    plan = build_recompute_plan(svc, stale_only=False)
+    plan_run_ids = {step.run_id for step in plan.steps}
+    assert fa_run in plan_run_ids and pa_run in plan_run_ids
+
+    ran: list[str] = []
+
+    def ok(step):
+        ran.append(step.run_id)
+
+    def boom(step):
+        raise RuntimeError("factor failed")
+
+    ex = PlanExecutor(
+        handlers={
+            "horizon_interpretation": ok,
+            "factor_map": boom,
+            "prediction": ok,
+            "map_compile": ok,
+        },
+        stop_on_failure=False,
+        skip_dependents_on_failure=True,
+    )
+    result = ex.execute(plan)
+    assert fa_run in plan.failed_run_ids
+    assert any("factor failed" in m for m in result.messages)
+    # The prediction consumption of the failed factor's OUTPUT VERSION must be
+    # skipped — the old executor poisoned the run_id namespace instead, so
+    # skipped_run_ids stayed empty and the dependent kept running.
+    assert pa_run in plan.skipped_run_ids, (
+        f"prediction {pa_run} must be skipped after factor {fa_run} failed; "
+        f"failed={plan.failed_run_ids} skipped={plan.skipped_run_ids}"
+    )
 
 
 def test_reuse_existing_when_identical_run_present():

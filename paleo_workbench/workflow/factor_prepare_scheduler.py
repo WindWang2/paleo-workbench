@@ -14,6 +14,7 @@ Workers never mutate the live ProjectDocument.
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -503,11 +504,37 @@ def run_factor_prepare_schedule(
                     pool.submit(_run_group, items): key
                     for key, items in groups.items()
                 }
+                group_items_by_key = {key: items for key, items in groups.items()}
                 for fut in as_completed(futures):
                     if cancellation_token is not None:
                         cancellation_token.raise_if_cancelled()
                     group_key = futures[fut]
-                    group_results = fut.result()
+                    try:
+                        group_results = fut.result()
+                    except (JobCancelled, Exception) as exc:  # noqa: BLE001
+                        # One failing group must not discard the OTHER groups'
+                        # completed results (audit #848): record the group's
+                        # tasks as failed and keep collecting. (The serial
+                        # path already had per-task isolation.)
+                        failed_n += 1
+                        logging.getLogger(__name__).warning(
+                            "factor prepare group %r failed: %s",
+                            str(group_key),
+                            exc,
+                        )
+                        for task, _state, _fp in group_items_by_key.get(
+                            group_key, ()
+                        ):
+                            results_by_id[task.id] = FactorPrepareTaskResult(
+                                task_id=task.id,
+                                dirty_state="dirty",
+                                reused=False,
+                                task=None,
+                                scheduled_result_fingerprint="",
+                                error=f"group failed: {exc}",
+                            )
+                            executed += 1
+                        continue
                     for item in group_results:
                         results_by_id[item.task_id] = item
                         executed += 1

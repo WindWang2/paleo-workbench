@@ -27,6 +27,33 @@ from paleo_workbench.catalog.storage import catalog_dir_for
 
 DB_FILENAME = "catalog.sqlite"
 
+
+def metadata_search_value(value: Any) -> str:
+    """Canonical string form for governance-metadata search.
+
+    Mirrors what SQLite's ``json_extract(metadata, '$.key')`` CAST to TEXT
+    yields for a value round-tripped through JSON: booleans become ``"1"`` /
+    ``"0"``, numbers their decimal text, strings verbatim. Both the SQLite
+    index path (``db.py``) and the canonical document scan (``queries.py``)
+    normalize through this same function so one query returns the same rows
+    regardless of index freshness (audit #849-2).
+    """
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    return str(value)
+
+
+def like_escape_literal(text: str) -> str:
+    """Escape user text for inclusion in a LIKE pattern.
+
+    ``%`` and ``_`` are LIKE wildcards in the index path but literal
+    characters in the canonical scan; escaping keeps both paths' matching
+    semantics identical (audit #849-2).
+    """
+    return (
+        str(text).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    )
+
 # Version of the index table layout itself (distinct from the canonical
 # document's CATALOG_SCHEMA_VERSION). Bump whenever the index schema changes so
 # stale databases are rebuilt from the canonical store instead of being queried
@@ -925,8 +952,8 @@ class CatalogIndex:
                     )
                     params.append(tag_name)
         if text:
-            wheres.append("a.name LIKE ?")
-            params.append(f"%{text}%")
+            wheres.append("a.name LIKE ? ESCAPE '\\'")
+            params.append(f"%{like_escape_literal(text)}%")
         if type is not None:
             wheres.append("a.type = ?")
             params.append(str(type))
@@ -935,9 +962,11 @@ class CatalogIndex:
             # json_extract predicate keeps governance filtering on the index
             # path at 10k+ assets without a schema change. The path is quoted
             # and the extraction CAST to TEXT so non-string values (manual
-            # catalog.json edits) match like the canonical scan does.
+            # catalog.json edits) match like the canonical scan does. Values
+            # normalize through metadata_search_value so booleans agree with
+            # the scan path's Python-side str() semantics (audit #849-2).
             wheres.append("CAST(json_extract(a.metadata, ?) AS TEXT) = ?")
-            params.extend([f'$."{key}"', str(value)])
+            params.extend([f'$."{key}"', metadata_search_value(value)])
         where = f"WHERE {' AND '.join(wheres)}" if wheres else ""
         sql = f"SELECT DISTINCT a.* FROM assets a {' '.join(joins)} {where}"
         rows = self._connect().execute(sql, params).fetchall()
