@@ -36,8 +36,10 @@ from paleo_workbench.ui.pages.geoviz_preview_provider import LocalVisualizationP
 from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
 from paleo_workbench.ui.pages.visualization_summary_panel import VisualizationSummaryPanel
 from paleo_workbench.ui.pages.visualization_trace_panel import VisualizationTracePanel
+from paleo_workbench.ui.pages.well_log_load_worker import WellLogLoadWorker
 from paleo_workbench.viz.adapter import VizAdapter
 from paleo_workbench.viz.models import VizRef
+from paleo_workbench.viz.well_log_load import is_well_log_cached
 
 
 class VisualizationPage(QWidget):
@@ -74,6 +76,12 @@ class VisualizationPage(QWidget):
         self._export_job.released.connect(self._on_export_job_released)
         self._export_busy = False
         self._pending_export: dict | None = None
+        # #842: cold-cache LAS parses run on a worker thread; the LRU-hit path
+        # stays synchronous.  _load_seq guards stale completions.
+        self._well_log_job = OwnedWorkerJob(self)
+        self._well_log_job.released.connect(self._on_well_log_job_released)
+        self._pending_well_log_ref: VizRef | None = None
+        self._load_seq = 0
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -244,10 +252,98 @@ class VisualizationPage(QWidget):
             return
 
         self._preview_controller.invalidate()
+        if ref.kind == "well_log":
+            self._open_well_log(ref)
+            return
         payload = self._adapter.resolve(ref, project)
         self.composite_panel.load_payload(payload)
         self.trace_panel.update_ref(ref, payload)
         self._sync_export_capabilities()
+
+    def _open_well_log(self, ref: VizRef) -> None:
+        """Open a LAS/XML well log: sync fast path on LRU hit, worker otherwise.
+
+        Cold multi-MB LAS parses used to run on the GUI thread for seconds
+        (#842).  A cache hit stays synchronous; a cold parse runs on an owned
+        ``WellLogLoadWorker`` and the payload is applied via a queued signal.
+        A newer open supersedes an in-flight load (latest wins).
+        """
+        project = self._project_stub()
+        path = VizAdapter._absolute_path(ref.path, project) if ref.path else ""
+        if path and is_well_log_cached(path):
+            if self._well_log_job.is_running:
+                self._well_log_job.cancel()
+            try:
+                payload = self._adapter.resolve(ref, project)
+            except Exception as exc:  # noqa: BLE001 — surface any failure to UI
+                self._on_well_log_failed(ref, str(exc))
+                return
+            self._apply_well_log_payload(ref, payload)
+            return
+
+        if self._well_log_job.is_running:
+            # An in-flight cold load cannot be restarted in place; cancel it
+            # and re-open once the job releases its thread (#842 latest-wins).
+            self._pending_well_log_ref = ref
+            self._well_log_job.cancel()
+            return
+
+        self._load_seq += 1
+        seq = self._load_seq
+        label = ref.label or ref.id or "井数据"
+        self.composite_panel.status_label.setText(f"正在加载: {label}")
+        worker = WellLogLoadWorker(ref, project, adapter=self._adapter)
+        self._well_log_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed, worker.cancelled),
+            result_connections=(
+                (worker.finished, lambda payload: self._on_well_log_resolved(ref, payload, seq)),
+                (worker.failed, lambda message: self._on_well_log_failed(ref, message)),
+            ),
+            cancel=worker.cancel,
+            target=project,
+        )
+
+    def _on_well_log_job_released(self) -> None:
+        pending = self._pending_well_log_ref
+        self._pending_well_log_ref = None
+        if pending is not None:
+            self.open_ref(pending)
+
+    def _apply_well_log_payload(self, ref: VizRef, payload) -> None:
+        self.composite_panel.load_payload(payload)
+        self.trace_panel.update_ref(ref, payload)
+        self._sync_export_capabilities()
+
+    def _on_well_log_resolved(self, ref: VizRef, payload, seq: int) -> None:
+        if seq != self._load_seq or not self._refs_match(self._current_ref, ref):
+            return
+        self._apply_well_log_payload(ref, payload)
+
+    def _on_well_log_failed(self, ref: VizRef, message: str) -> None:
+        if not self._refs_match(self._current_ref, ref):
+            return
+        from paleo_workbench.viz.models import VizPayload
+
+        payload = VizPayload(
+            kind="message",
+            label=ref.label or ref.id or "井数据",
+            message=f"井数据加载失败: {message}",
+        )
+        self._apply_well_log_payload(ref, payload)
+
+    @staticmethod
+    def _refs_match(a: VizRef | None, b: VizRef | None) -> bool:
+        """Same logical well_log ref (id+path), tolerating distinct instances."""
+        if a is b:
+            return True
+        if not a or not b:
+            return False
+        return (
+            getattr(a, "kind", None) == getattr(b, "kind", None)
+            and getattr(a, "id", None) == getattr(b, "id", None)
+            and getattr(a, "path", None) == getattr(b, "path", None)
+        )
 
     def _show_preview_loading(self) -> None:
         ref = self._current_ref
@@ -290,11 +386,13 @@ class VisualizationPage(QWidget):
         return super().event(event)
 
     def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
-        """Release async previews / export before a project-scoped shell is replaced."""
+        """Release async previews / exports / LAS loads before the shell is replaced."""
 
         export_ok = self._export_job.shutdown(wait_ms)
+        self._pending_well_log_ref = None
+        well_log_ok = self._well_log_job.shutdown(wait_ms)
         self._end_export_busy()
-        return export_ok and self._preview_controller.shutdown(wait_ms)
+        return export_ok and well_log_ok and self._preview_controller.shutdown(wait_ms)
 
     def _reload_current(self) -> None:
         if self._current_ref is not None:

@@ -82,6 +82,10 @@ class AssetTableModel(QAbstractTableModel):
         # Optional view -> view overlay (catalog enrichment) applied once per
         # row build; None keeps the legacy behavior for un-bridged projects.
         self._view_enricher = None
+        # Last (column, order) sorted by — None until the model is sorted.
+        # Survives model rebuilds so the host can re-apply the user's sort
+        # after a filter/refresh reset (#850-1).
+        self._last_sort: tuple[int, object] | None = None
 
     def set_project_root(self, root: Path | str | None) -> None:
         if root:
@@ -95,6 +99,7 @@ class AssetTableModel(QAbstractTableModel):
     def set_column_keys(self, keys: list[str]) -> None:
         self.beginResetModel()
         self._column_keys = list(keys)
+        self._last_sort = None
         self.endResetModel()
 
     def set_assets(self, assets: list[object]) -> None:
@@ -102,6 +107,9 @@ class AssetTableModel(QAbstractTableModel):
         self._raw_assets = list(assets)
         self._views = [self._build_view(a) for a in self._raw_assets]
         self._filtered_rows = list(range(len(self._raw_assets)))
+        # The reset-time view auto-sort mutates stale rows; drop the recorded
+        # sort so it is never mistaken for a user sort (#850-1).
+        self._last_sort = None
         self.endResetModel()
 
     def _build_view(self, asset: object) -> AssetView:
@@ -113,6 +121,7 @@ class AssetTableModel(QAbstractTableModel):
     def set_filtered_rows(self, rows: list[int]) -> None:
         self.beginResetModel()
         self._filtered_rows = list(rows)
+        self._last_sort = None
         self.endResetModel()
 
     def set_assets_filtered(
@@ -131,6 +140,9 @@ class AssetTableModel(QAbstractTableModel):
         else:
             self._views = [self._build_view(a) for a in self._raw_assets]
         self._filtered_rows = list(rows)
+        # The reset-time view auto-sort mutates stale rows; drop the recorded
+        # sort so it is never mistaken for a user sort (#850-1).
+        self._last_sort = None
         self.endResetModel()
 
     def asset_at(self, view_row: int) -> object | None:
@@ -151,6 +163,11 @@ class AssetTableModel(QAbstractTableModel):
 
     def assets(self) -> list[object]:
         return list(self._raw_assets)
+
+    @property
+    def last_sort(self) -> tuple[int, object] | None:
+        """Last (column, order) the model was sorted by, or None."""
+        return self._last_sort
 
     def rowCount(self, parent=QModelIndex()) -> int:
         if parent.isValid():
@@ -260,7 +277,7 @@ class AssetTableModel(QAbstractTableModel):
             return
         key = self._column_keys[column]
         reverse = (order == Qt.SortOrder.DescendingOrder)
-
+        self._last_sort = (column, order)
         self.beginResetModel()
 
         def sort_key(row_idx: int) -> tuple:

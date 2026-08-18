@@ -16,6 +16,7 @@ class SeismicContextToolbar(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("SeismicContextToolbar")
+        self._inferring = False
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(
@@ -73,3 +74,13 @@ class SeismicContextToolbar(QFrame):
         self.horizon_value.setText(str(horizon or "—"))
         self.attribute_value.setText(str(attribute or "振幅"))
         self.mode_value.setText(str(display_mode or "vd"))
+
+    def set_inferring(self, busy: bool) -> None:
+        """Enable/disable the run/demo actions for the duration of a run.
+
+        #850-7: an active inference must be visible instead of silently
+        swallowing a second click.
+        """
+        self._inferring = bool(busy)
+        self.run_btn.setEnabled(not self._inferring)
+        self.demo_btn.setEnabled(not self._inferring)

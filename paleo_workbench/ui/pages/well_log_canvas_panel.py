@@ -17,9 +17,12 @@ from geoviz import WellLogCanvas, build_qpainter_tracks
 
 from paleo_workbench.pipeline.assets import WELL_KEY
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+from paleo_workbench.ui.pages.well_log_load_worker import WellLogLoadWorker
 from paleo_workbench.viz import welllog_engine_adapter as engine_adapter
 from paleo_workbench.viz.adapter import VizAdapter
 from paleo_workbench.viz.prediction_helpers import well_log_data_from_prediction
+from paleo_workbench.viz.well_log_load import is_well_log_cached
 from paleo_workbench.workflow.well_log_prediction import merge_prediction_onto_well_log
 
 BackendName = Literal["legacy", "engine"]
@@ -57,6 +60,12 @@ class WellLogCanvasPanel(QFrame):
         self._engine_view: QWidget | None = None
         self._WellLogView = None
         self._welllog_mod = None
+        # #842: cold bound-LAS parses run on a worker thread; LRU hits stay
+        # synchronous.  _load_seq guards stale completions across re-selects.
+        self._well_log_job = OwnedWorkerJob(self)
+        self._well_log_job.released.connect(self._on_well_log_job_released)
+        self._pending_state = None
+        self._load_seq = 0
 
         # Default backend from env; host may still switch explicitly.
         self._backend: BackendName = (
@@ -182,6 +191,8 @@ class WellLogCanvasPanel(QFrame):
 
     def shutdown(self) -> None:
         """Release the retained native document before a project switch/close."""
+        self._pending_state = None
+        self._well_log_job.shutdown(3_000)
         self._release_engine_document()
         self.well_log_data = None
         self._bound_las = False
@@ -201,11 +212,16 @@ class WellLogCanvasPanel(QFrame):
         if project is not None:
             self._project = project
         if task is None:
+            self._load_seq += 1
+            if self._well_log_job.is_running:
+                self._well_log_job.cancel()
             self._show_empty("未选择预测任务")
             return
 
         primary_ids = (getattr(task, "input_refs", None) or {}).get(WELL_KEY) or []
         if project is not None and primary_ids:
+            self._load_seq += 1
+            seq = self._load_seq
             resource = _primary_resource(project, task, WELL_KEY)
             if resource is None:
                 self._show_empty("未找到绑定的井数据资源")
@@ -215,16 +231,67 @@ class WellLogCanvasPanel(QFrame):
             if ref is None:
                 self._show_empty("绑定资源不支持井数据可视化")
                 return
-            payload = adapter.resolve(ref, project)
-            if payload.well_log is not None:
-                merged = merge_prediction_onto_well_log(payload.well_log, task)
-                self._show_well_log(merged, bound_las=True)
+            path = VizAdapter._absolute_path(ref.path or "", project) if ref.path else ""
+            if path and is_well_log_cached(path):
+                # Warm cache → synchronous fast path (no worker churn).  A
+                # stale in-flight load is cancelled so it cannot land later.
+                if self._well_log_job.is_running:
+                    self._well_log_job.cancel()
+                payload = adapter.resolve(ref, project)
+                self._apply_bound_payload(payload, task, seq=seq)
                 return
-            message = (payload.message or "").strip() or "无法加载井数据"
-            self._show_empty(message)
+            if self._well_log_job.is_running:
+                # A cold load is still in flight for a previous task; the newer
+                # selection wins once the job releases its thread.
+                self._pending_state = (task, project)
+                self._well_log_job.cancel()
+                return
+            # Cold cache → parse on a worker thread, merge + render on
+            # completion (#842; the merge itself is short GUI-thread work).
+            self._show_empty("正在加载绑定井数据…")
+            worker = WellLogLoadWorker(ref, project, adapter=adapter)
+            self._well_log_job.start(
+                worker,
+                terminal_signals=(worker.finished, worker.failed, worker.cancelled),
+                result_connections=(
+                    (worker.finished, lambda payload, t=task, s=seq: self._on_bound_las_resolved(payload, t, s)),
+                    (worker.failed, lambda message, s=seq: self._on_bound_las_failed(message, s)),
+                ),
+                cancel=worker.cancel,
+                target=project,
+            )
             return
 
+        # Synthetic (no bound resource): invalidate any in-flight bound load.
+        self._load_seq += 1
+        if self._well_log_job.is_running:
+            self._well_log_job.cancel()
         self._show_well_log(well_log_data_from_prediction(task), bound_las=False)
+
+    def _on_well_log_job_released(self) -> None:
+        pending = self._pending_state
+        self._pending_state = None
+        if pending is not None:
+            task, project = pending
+            self.update_state(task, project)
+
+    def _apply_bound_payload(self, payload, task, *, seq: int) -> None:
+        if seq != self._load_seq:
+            return
+        if payload.well_log is not None:
+            merged = merge_prediction_onto_well_log(payload.well_log, task)
+            self._show_well_log(merged, bound_las=True)
+            return
+        message = (payload.message or "").strip() or "无法加载井数据"
+        self._show_empty(message)
+
+    def _on_bound_las_resolved(self, payload, task, seq: int) -> None:
+        self._apply_bound_payload(payload, task, seq=seq)
+
+    def _on_bound_las_failed(self, message: str, seq: int) -> None:
+        if seq != self._load_seq:
+            return
+        self._show_empty(f"无法加载井数据: {message}")
 
     # --- internals ----------------------------------------------------------
 

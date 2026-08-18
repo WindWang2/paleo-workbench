@@ -379,7 +379,14 @@ def asset_view_from_artifact(artifact: ExportArtifact, project_root: Path | None
         path_obj = project_root / path_obj
 
     file_exists = path_obj.exists()
-    integrity = IntegrityState.VERIFIED if file_exists else IntegrityState.MISSING
+    if not file_exists:
+        integrity = IntegrityState.MISSING
+    else:
+        # An ExportArtifact carries no recorded checksum bytes; claiming
+        # "已校验" on mere file existence was never a true statement.  The
+        # explicit IntegrityWorker flow can verify it; until then the honest
+        # posture is UNKNOWN ("未校验") (#850-4).
+        integrity = IntegrityState.UNKNOWN
 
     size_bytes = None
     if file_exists and path_obj.is_file():

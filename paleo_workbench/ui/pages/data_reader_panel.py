@@ -422,7 +422,13 @@ class DataReaderPanel(QFrame):
         self._current_result = result
         self.title_label.setText(result.title)
         self.meta_label.setText(self._meta_text(result))
-        self.warning_label.setText(result.warning)
+        warning = result.warning
+        if target is self.table_preview and self.table_preview.truncated:
+            # Deeper preview truncation was tooltip-only; surface it in the
+            # warning label so the user knows fewer rows are shown than
+            # requested (#850-5).
+            warning = self._merge_warning(warning, self.table_preview.truncation_message)
+        self.warning_label.setText(warning)
         self.stack.setCurrentWidget(target)
         self.current_mode = result.mode
         self.reader_mode_changed.emit(result.mode)

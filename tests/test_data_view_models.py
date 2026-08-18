@@ -124,7 +124,11 @@ def test_asset_view_from_artifact(tmp_path: Path):
     assert view.stage == DataStage.OUTPUT
     assert view.is_output is True
     assert view.type_label == "成果"
-    assert view.integrity_state == IntegrityState.VERIFIED
+    # An ExportArtifact carries no recorded checksum bytes: the cheap view
+    # reports UNKNOWN ("未校验") instead of claiming "已校验" on mere file
+    # existence (#850-4). Byte-level verification is the IntegrityWorker's job.
+    assert view.integrity_state == IntegrityState.UNKNOWN
+    assert view.integrity_label == "未校验"
     assert view.lineage.parent_ids == ["res_001"]
 
 

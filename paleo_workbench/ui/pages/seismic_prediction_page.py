@@ -234,6 +234,8 @@ class SeismicPredictionPage(QWidget):
         )
         worker = InferenceWorker(service, run.id)
         self._active_inference_context = (self._session_token, self._project, service)
+        # #850-7: expose the busy state instead of silently swallowing clicks.
+        self.context_toolbar.set_inferring(True)
         self._inference_job.start(
             worker,
             terminal_signals=(worker.terminal,),
@@ -259,6 +261,7 @@ class SeismicPredictionPage(QWidget):
         self._on_inference_failed(text)
 
     def _on_inference_completed(self, payload: dict) -> None:
+        self.context_toolbar.set_inferring(False)
         run = payload.get("run")
         if run is None or getattr(run, "status", "") == "failed":
             error = "未知错误"
@@ -316,4 +319,5 @@ class SeismicPredictionPage(QWidget):
         self.prediction_updated.emit()
 
     def _on_inference_failed(self, text: str) -> None:
+        self.context_toolbar.set_inferring(False)
         QMessageBox.critical(self, "地震预测失败", f"推断失败: {text}")
