@@ -39,19 +39,27 @@ def bounded_dtw_band(n_samples: int, band_radius: int | None = None) -> int:
 
 
 class DtwPropagationWorker(QObject):
-    """Run ``canvas.propagate_pick_via_dtw`` off the GUI thread.
+    """Run the DTW propagation COMPUTE off the GUI thread (#826).
 
-    Emits per-well ``progress(done, total)``, ``finished(created_ids)`` with
-    the list of new ghost-pick ids, ``failed(message)``, or ``cancelled()``.
-    An optional ``recommend_fn`` runs the DTW top-depth recommendation in the
-    same worker thread (its O(n*m) pure-Python DP froze the GUI slot for
-    ~1.5 s per click); the result is delivered early via
-    ``recommendation_ready`` so the confidence label is ready before
+    The worker calls ``canvas.compute_dtw_propagation`` — pure curve
+    extraction + banded DTW — and emits the resulting ``(well_name, depth)``
+    pairs via ``finished``. Applying the picks (``picks_model.add_pick``:
+    QObject dict + undo stack mutations) belongs to the GUI thread; the page
+    does that in its ``finished`` slot. Calling the all-in-one
+    ``propagate_pick_via_dtw`` here raced GUI-side iteration over the picks
+    dict (reproduced ``RuntimeError: dictionary changed size during
+    iteration``).
+
+    Also emits per-well ``progress(done, total)``, ``failed(message)``, or
+    ``cancelled()``. An optional ``recommend_fn`` runs the DTW top-depth
+    recommendation in the same worker thread (its O(n*m) pure-Python DP
+    froze the GUI slot for ~1.5 s per click); the result is delivered early
+    via ``recommendation_ready`` so the confidence label is ready before
     ``finished`` renders it.
     """
 
     progress = Signal(int, int)
-    finished = Signal(object)  # list[str] created pick ids
+    finished = Signal(object)  # list[tuple[str, float]] (well, depth) pairs
     recommendation_ready = Signal(object)  # TopRecommendation | None
     failed = Signal(str)
     cancelled = Signal()
@@ -104,14 +112,19 @@ class DtwPropagationWorker(QObject):
                     raise JobCancelled("DTW propagation cancelled")
                 self.progress.emit(done, total)
 
-            created = self._canvas.propagate_pick_via_dtw(
+            compute = getattr(self._canvas, "compute_dtw_propagation", None)
+            if compute is None:  # pragma: no cover - pinned gve always has it
+                raise RuntimeError(
+                    "geo-viz-engine lacks compute_dtw_propagation; the "
+                    "submodule pin is too old for thread-safe propagation"
+                )
+            pairs = compute(
                 self._ref_well,
                 self._ref_depth,
-                self._formation,
                 band_radius=band,
                 progress_callback=_on_progress,
             )
-            self.finished.emit(created)
+            self.finished.emit(pairs)
         except Exception as exc:  # noqa: BLE001 — surface any failure to UI
             try:
                 from geoviz import JobCancelled

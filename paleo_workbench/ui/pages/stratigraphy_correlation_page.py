@@ -609,7 +609,19 @@ class StratigraphyCorrelationPage(QWidget):
             self._dtw_conf_text = f"置信度: {rec.confidence:.2f}"
             self._dtw_confidence = rec.confidence
 
-    def _on_dtw_finished(self, created) -> None:
+    def _on_dtw_finished(self, pairs) -> None:
+        """Apply the worker's computed (well, depth) pairs on the GUI thread.
+
+        Model/undo mutations must happen here — never in the worker (#826):
+        add_pick rewrites the picks dict and the undo stack while paint and
+        hit-testing iterate them.
+        """
+        created = []
+        model = self.cross_host.widget.picks_model
+        for well_name, depth in pairs or ():
+            created.append(
+                model.add_pick(self._dtw_formation, well_name, depth, source="dtw")
+            )
         self.status_label.setText(
             f"DTW 已为层位 {self._dtw_formation} 生成 {len(created)} 个建议拾取 "
             f"({self._dtw_conf_text})（点击接受 / 右键拒绝）"
