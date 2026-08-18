@@ -44,21 +44,29 @@ def test_send_to_prep_starts_worker_off_gui_thread(qtbot, monkeypatch):
         PredictionTask(name="p1", status="complete")
     )
 
-    state = {"snapshot": 0, "batch_calls": 0, "run_thread": None}
+    state = {"snapshot": 0, "batch_calls": 0, "run_thread": None, "generation": None}
 
     class _FakeSnapshot:
         tasks = [object()]
 
     class _FakeResult:
-        generation = 1
         clean_count = 0
         executed_count = 0
         task_results = ()
         cancelled = False
         created_default_tasks = False
 
+        @property
+        def generation(self):
+            # The process-global prepare generation counter is monotonic and
+            # shared with every earlier test, so a hardcoded value only
+            # matches when this test happens to run first. Echo the real
+            # generation captured by the snapshot fake instead.
+            return state["generation"]
+
     def _fake_snapshot(project, *, generation, method):
         state["snapshot"] += 1
+        state["generation"] = generation
         return _FakeSnapshot()
 
     monkeypatch.setattr(wc_mod, "build_prepare_snapshot", _fake_snapshot)
