@@ -174,18 +174,22 @@ def test_joint_host_progressive_lod_after_release(qtbot, monkeypatch):
         host._start_volume_worker("fake.sgy")
 
         # L0 result is delivered while OwnedWorkerJob still owns the thread
-        # (its queued release lands afterwards) — L1 must nevertheless load.
-        # Phases are transient, so assert on the recorded progression.
-        qtbot.waitUntil(lambda: any("已加载 L1" in s for s in statuses), timeout=5_000)
+        # (its queued release lands afterwards) — the ladder must continue
+        # through L1 and L2 (#825 / #860). Phases are transient, so assert on
+        # the recorded progression rather than a single intermediate phase.
         qtbot.waitUntil(lambda: not host._volume_job.is_running, timeout=5_000)
 
         joined = "\n".join(statuses)
         assert "已加载 L0" in joined, "L0 preview must be delivered first"
         assert "精细化中 (L1)" in joined, "progressive L1 refinement must be scheduled"
-        assert host._volume_phase == "L1_READY"
+        assert "精细化中 (L2)" in joined, "progressive L2 refinement must be scheduled"
+        assert "已加载 L2" in joined, "L2 preview must be delivered last"
+        assert host._volume_phase == "L2_READY"
         l0_idx = next(i for i, s in enumerate(statuses) if "已加载 L0" in s)
         l1_idx = next(i for i, s in enumerate(statuses) if "精细化中 (L1)" in s)
-        assert l0_idx < l1_idx
+        l2_idx = next(i for i, s in enumerate(statuses) if "精细化中 (L2)" in s)
+        l2_ready_idx = next(i for i, s in enumerate(statuses) if "已加载 L2" in s)
+        assert l0_idx < l1_idx < l2_idx < l2_ready_idx
     finally:
         host.shutdown()
 

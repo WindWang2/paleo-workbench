@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
 
-from paleo_workbench.catalog import set_catalog, reset_catalog
+from paleo_workbench.catalog import CatalogPort, set_catalog, reset_catalog
+from paleo_workbench.catalog.adapter import CoreCatalogAdapter
+from paleo_workbench.catalog.service import DataCatalogService
 from paleo_workbench.project.models import ProjectDocument, ResourceItem
 from paleo_workbench.workflow.correlation_artifact import (
     scientific_fingerprint_correlation,
@@ -46,13 +49,37 @@ def catalog(tmp_path: Path):
     reset_catalog()
 
 
-def _well_versions(cat: InMemoryCatalog, n: int = 3) -> list[str]:
+@pytest.fixture
+def core_catalog(tmp_path: Path):
+    """Core-backed catalog that copies DERIVED artifacts into managed storage.
+
+    Use this for save/reopen round-trips: since #848 the lifecycle helpers
+    delete the local working artifact after catalog registration, so a fake
+    that only stores the path string would leave no readable payload.
+    """
+    project_path = tmp_path / "demo.paleo.json"
+    service = DataCatalogService.open(project_path)
+    cat = CoreCatalogAdapter(service)
+    set_catalog(cat)
+    yield cat
+    service.close()
+    reset_catalog()
+
+
+def _well_versions(cat: CatalogPort, base_dir: Path, n: int = 3) -> list[str]:
     ids = []
     for i in range(n):
+        # Core-backed catalogs copy the source file into managed storage and
+        # verify its digest, so the dummy well file must exist and its checksum
+        # must match the actual bytes.
+        src = base_dir / f"W{i}.las"
+        content = b"LAS"
+        src.write_bytes(content)
+        checksum = hashlib.sha256(content).hexdigest()
         ref = cat.register_input(
             name=f"W{i}.las",
-            path=f"/tmp/W{i}.las",
-            checksum=f"sha-w{i}",
+            path=str(src),
+            checksum=checksum,
             kind="well_log",
             format="las",
             legacy_resource_id=f"well-{i}",
@@ -66,11 +93,11 @@ def _proj_path(tmp_path: Path) -> Path:
     return tmp_path / "demo.paleo.json"
 
 
-def test_correlation_save_reopen_v2_parent(tmp_path: Path, catalog):
+def test_correlation_save_reopen_v2_parent(tmp_path: Path, core_catalog):
     project = ProjectDocument.new("Corr")
     project.meta.project_root = str(tmp_path)
     proj_path = _proj_path(tmp_path)
-    wells = _well_versions(catalog, 3)
+    wells = _well_versions(core_catalog, tmp_path, 3)
     for i, vid in enumerate(wells):
         project.resources.append(
             ResourceItem(
@@ -110,14 +137,14 @@ def test_correlation_save_reopen_v2_parent(tmp_path: Path, catalog):
             method=CorrelationMethod.MANUAL,
         )
     )
-    ref1, msg1 = save_correlation_draft(draft, project, proj_path, catalog=catalog)
+    ref1, msg1 = save_correlation_draft(draft, project, proj_path, catalog=core_catalog)
     assert msg1 == "ok"
     assert ref1 is not None
     v1 = ref1.current_version_id
     fp1 = ref1.scientific_fingerprint
 
     # No-op save
-    ref_noop, msg_noop = save_correlation_draft(draft, project, proj_path, catalog=catalog)
+    ref_noop, msg_noop = save_correlation_draft(draft, project, proj_path, catalog=core_catalog)
     assert msg_noop == "noop_unchanged"
     assert ref_noop.current_version_id == v1
     assert len(project.correlation_interpretations) == 1
@@ -125,23 +152,22 @@ def test_correlation_save_reopen_v2_parent(tmp_path: Path, catalog):
     # Edit one top → V2
     draft.payload.tops[0].depth = 101.5
     draft.bump()
-    ref2, msg2 = save_correlation_draft(draft, project, proj_path, catalog=catalog)
+    ref2, msg2 = save_correlation_draft(draft, project, proj_path, catalog=core_catalog)
     assert msg2 == "ok"
     assert ref2.current_version_id != v1
     assert ref2.parent_version_id == v1
     assert ref2.scientific_fingerprint != fp1
 
-    # Historical + current artifacts under *.artifacts
-    arts_root = tmp_path / "demo.artifacts"
-    arts = list(arts_root.rglob("*.correlation.json")) if arts_root.is_dir() else []
-    if not arts:
-        arts = list(tmp_path.parent.glob("**/demo.artifacts/**/*.correlation.json"))
-    assert arts, "expected correlation artifacts"
+    # Historical + current artifacts live in catalog-managed storage (#848).
     depths = []
     from paleo_workbench.workflow.correlation_artifact import read_correlation_artifact
 
-    for a in arts:
-        pl, _ = read_correlation_artifact(a)
+    for vid in (v1, ref2.current_version_id):
+        ver = core_catalog.service.get_version(vid)
+        assert ver is not None, f"missing catalog version {vid}"
+        path = core_catalog.service.resolve_path(ver)
+        assert path.is_file(), f"managed artifact missing for {vid}: {path}"
+        pl, _ = read_correlation_artifact(path)
         for t in pl.tops:
             if t.well_id == "well-0" and t.marker == "H1":
                 depths.append(t.depth)
@@ -159,7 +185,7 @@ def test_correlation_lineage_inputs(tmp_path: Path, catalog):
     project = ProjectDocument.new("L")
     project.meta.project_root = str(tmp_path)
     proj_path = _proj_path(tmp_path)
-    wells = _well_versions(catalog, 2)
+    wells = _well_versions(catalog, tmp_path, 2)
     draft = new_correlation_draft(
         well_resource_ids=["a", "b"],
         well_version_ids=wells,
@@ -179,12 +205,12 @@ def test_correlation_lineage_inputs(tmp_path: Path, catalog):
     assert run.domain_task_id == draft.interpretation_id
 
 
-def test_artifact_does_not_embed_curves(tmp_path: Path, catalog):
+def test_artifact_does_not_embed_curves(tmp_path: Path, core_catalog):
     """Artifact size scales with tops/links, not giant curve samples."""
     project = ProjectDocument.new("S")
     project.meta.project_root = str(tmp_path)
     proj_path = _proj_path(tmp_path)
-    wells = _well_versions(catalog, 2)
+    wells = _well_versions(core_catalog, tmp_path, 2)
     giant = "x" * 500_000
     draft = new_correlation_draft(
         well_resource_ids=["w0", "w1"],
@@ -195,14 +221,17 @@ def test_artifact_does_not_embed_curves(tmp_path: Path, catalog):
         ],
     )
     assert "samples" not in draft.payload.model_dump()
-    ref, msg = save_correlation_draft(draft, project, proj_path, catalog=catalog)
+    ref, msg = save_correlation_draft(draft, project, proj_path, catalog=core_catalog)
     assert msg == "ok"
-    arts_root = tmp_path / "demo.artifacts"
-    arts = list(arts_root.rglob("*.correlation.json"))
-    assert arts
-    size = max(a.stat().st_size for a in arts)
+    # Since #848 the referenced artifact is the catalog-managed copy, not a
+    # local ghost file under demo.artifacts.
+    ver = core_catalog.service.get_version(ref.current_version_id)
+    assert ver is not None
+    art_path = core_catalog.service.resolve_path(ver)
+    assert art_path.is_file()
+    size = art_path.stat().st_size
     assert size < 50_000, f"artifact too large: {size}"
-    text = arts[0].read_text(encoding="utf-8")
+    text = art_path.read_text(encoding="utf-8")
     assert giant not in text
     assert "tops" in text
 
@@ -216,7 +245,7 @@ def test_depth_domain_mismatch_detection():
     assert set(domains) == {"MD", "TVDSS"}
 
 
-def test_fault_save_noop_and_v2(tmp_path: Path, catalog):
+def test_fault_save_noop_and_v2(tmp_path: Path, core_catalog):
     project = ProjectDocument.new("F")
     project.meta.project_root = str(tmp_path)
     proj_path = _proj_path(tmp_path)
@@ -232,20 +261,21 @@ def test_fault_save_noop_and_v2(tmp_path: Path, catalog):
         source_version_ids=[],
         crs="EPSG:4547",
     )
-    ref1, m1 = save_fault_draft(draft, project, proj_path, catalog=catalog)
+    ref1, m1 = save_fault_draft(draft, project, proj_path, catalog=core_catalog)
     assert m1 == "ok"
     v1 = ref1.current_version_id
-    ref_n, mn = save_fault_draft(draft, project, proj_path, catalog=catalog)
+    ref_n, mn = save_fault_draft(draft, project, proj_path, catalog=core_catalog)
     assert mn == "noop_unchanged"
     assert ref_n.current_version_id == v1
 
     draft.payload.traces[0].polyline.append([3.0, 0.0])
     draft.bump()
-    ref2, m2 = save_fault_draft(draft, project, proj_path, catalog=catalog)
+    ref2, m2 = save_fault_draft(draft, project, proj_path, catalog=core_catalog)
     assert m2 == "ok"
     assert ref2.current_version_id != v1
     assert ref2.parent_version_id == v1
 
+    # Reopen follows the catalog-managed artifact path recorded on the ref (#848).
     d2 = restore_fault_draft_from_project(project, proj_path)
     assert d2 is not None
     assert len(d2.payload.traces[0].polyline) == 4
@@ -468,7 +498,7 @@ def test_stable_top_ids_enable_noop_on_resave(tmp_path: Path, catalog):
     project = ProjectDocument.new("N")
     project.meta.project_root = str(tmp_path)
     proj_path = _proj_path(tmp_path)
-    wells = _well_versions(catalog, 2)
+    wells = _well_versions(catalog, tmp_path, 2)
     name_to_id = {"W0": "well-0", "W1": "well-1"}
     rows = [_Row("W0", "H1", 100.0), _Row("W1", "H1", 105.0)]
     tops1 = tops_from_canvas_rows(rows, name_to_resource_id=name_to_id)
@@ -586,7 +616,7 @@ def test_fault_input_stales_factor_run(tmp_path: Path, catalog):
     assert rep.state is FreshnessState.STALE
 
 
-def test_well_log_overlay_from_correlation(tmp_path: Path, catalog):
+def test_well_log_overlay_from_correlation(tmp_path: Path, core_catalog):
     """Production path: real WellLogData → markers → adapt_well_log_data plan."""
     import numpy as np
 
@@ -609,7 +639,7 @@ def test_well_log_overlay_from_correlation(tmp_path: Path, catalog):
     project = ProjectDocument.new("O")
     project.meta.project_root = str(tmp_path)
     proj_path = _proj_path(tmp_path)
-    wells = _well_versions(catalog, 2)
+    wells = _well_versions(core_catalog, tmp_path, 2)
     draft = new_correlation_draft(
         well_resource_ids=["well-0", "well-1"],
         well_version_ids=wells,
@@ -618,11 +648,10 @@ def test_well_log_overlay_from_correlation(tmp_path: Path, catalog):
             FormationTop(well_id="well-1", well_name="W1", marker="H1", depth=55.0),
         ],
     )
-    ref, msg = save_correlation_draft(draft, project, proj_path, catalog=catalog)
+    ref, msg = save_correlation_draft(draft, project, proj_path, catalog=core_catalog)
     assert msg == "ok"
-    arts = list((tmp_path / "demo.artifacts").rglob("*.correlation.json"))
-    assert arts
-    project.correlation_interpretations[0].artifact_path = arts[0].as_posix()
+    # The artifact path on the ref already points at the catalog-managed copy (#848).
+    project.correlation_interpretations[0].artifact_path = ref.artifact_path
 
     rows = formation_tops_overlay_for_well(
         project, well_id="well-0", project_path=proj_path
@@ -658,7 +687,7 @@ def test_well_log_overlay_from_correlation(tmp_path: Path, catalog):
 
 
 def test_visualization_workspace_binds_project_for_overlay(
-    tmp_path: Path, catalog, monkeypatch, qtbot
+    tmp_path: Path, core_catalog, monkeypatch, qtbot
 ):
     """Production path: workspace/page set_project → well_host overlay on apply.
 
@@ -683,16 +712,16 @@ def test_visualization_workspace_binds_project_for_overlay(
     project = ProjectDocument.new("H")
     project.meta.project_root = str(tmp_path)
     proj_path = _proj_path(tmp_path)
-    wells = _well_versions(catalog, 1)
+    wells = _well_versions(core_catalog, tmp_path, 1)
     draft = new_correlation_draft(
         well_resource_ids=["well-0"],
         well_version_ids=wells,
         tops=[FormationTop(well_id="well-0", well_name="W0", marker="TopA", depth=12.5)],
     )
-    ref, msg = save_correlation_draft(draft, project, proj_path, catalog=catalog)
+    ref, msg = save_correlation_draft(draft, project, proj_path, catalog=core_catalog)
     assert msg == "ok"
-    arts = list((tmp_path / "demo.artifacts").rglob("*.correlation.json"))
-    project.correlation_interpretations[0].artifact_path = arts[0].as_posix()
+    # The ref's artifact_path points at the catalog-managed copy (#848).
+    project.correlation_interpretations[0].artifact_path = ref.artifact_path
 
     monkeypatch.setattr(
         "paleo_workbench.viz.welllog_engine_adapter.welllog_engine_env_enabled",
