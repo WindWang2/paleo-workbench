@@ -65,10 +65,16 @@ points batch into single `drawPoints` calls (complex well/star markers degrade t
 dots beyond a cap). Point/vertex diagnostics are exposed via `render_diagnostics()`.
 
 **Threaded rendering.** `FallbackMapRenderBackend(threaded=True)` (the default from
-`create_map_render_backend`) renders each frame on a one-worker
+`create_map_render_backend`) rasterises each FULL frame on a one-worker
 `ThreadPoolExecutor`; stale/cancelled generations are discarded by generation
-number. The synchronous contract used by tests and direct constructors is
-unchanged.
+number. Worker frames paint geometry only: QPainter on a privately-owned
+QImage is thread-safe for primitives, but Qt font engines are not (painting
+label text off the GUI thread segfaulted Python 3.13 runs), so label
+placements are collected as plain data and painted during GUI-thread
+finalisation — the only font work left, proportional to label count (≤1500
+per layer), never to vertex count (#822). The synchronous contract used by
+tests and direct constructors is unchanged and produces byte-identical
+frames (both orders geometry-then-labels).
 
 **Export parity.** `render_to_painter` runs the identical composition pipeline into
 any `QPaintDevice`, backing `export_svg`/`export_pdf` (vector) and
@@ -89,7 +95,10 @@ export lineage.
   snapshot rebuild is ~0.1 ms warm; frame cache makes identical re-renders ~0.03 ms.
 * Zoomed-in frames cull to the visible subset (~1% drawn at 5% viewport), and the
   vertex budget bounds the worst frame regardless of data size.
-* First-time preparation and per-frame rasterisation run off the GUI thread.
+* First-time preparation AND per-frame rasterisation run off the GUI thread;
+  GUI-thread work per delivered frame is label painting + a byte copy (#822 —
+  previously only `_prepare_layers` ran off-thread and full-frame painting
+  blocked the GUI for 0.7-8.4 s at 10k-100k features).
 * Screen, PNG, SVG and PDF now come from one pipeline with DPI-correct symbols and
   chrome; the fallback backend honours the same style vocabulary as the QGIS bridge
   (patterns, markers, labels, categorized fills).

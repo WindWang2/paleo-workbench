@@ -208,6 +208,29 @@ class MapRenderBackend(ABC):
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class _LabelSpec:
+    """Plain-data label placement collected during rasterisation (#822).
+
+    The render worker paints GEOMETRY ONLY (QPainter on QImage is
+    thread-safe for primitives, but Qt font engines are not - painting text
+    off the GUI thread crashed Python 3.13 runs). Label specs are shipped
+    back as values and painted on the GUI thread in the frame-finalisation
+    step, so no QFont/drawText call ever happens off-thread.
+    """
+
+    x: float
+    y: float
+    text: str
+    size: float
+    bold: bool
+    family: str
+    color: str
+    halo_color: str
+    halo_width: float
+    dpi_scale: float
+
+
 class _PreparedFeature:
     """Viewport-independent parsed geometry for one feature."""
 
@@ -510,10 +533,12 @@ class FallbackMapRenderBackend(MapRenderBackend):
             # arrival and the newest state renders as soon as the worker frees.
             return self._next_generation()
         self._ensure_executor()
-        # Worker: the expensive prepared-layer parse only. QPainter/QFont
-        # work stays on the GUI thread (see _prepare_layers) — rendering the
-        # frame after preparation is cheap vectorised painting.
-        self._render_future = self._executor.submit(self._prepare_layers)
+        # Worker: the FULL frame rasterisation minus text (#822). QPainter on
+        # a privately-owned QImage is thread-safe for geometry primitives;
+        # label placements travel back as plain data and paint on the GUI
+        # thread during finalisation — no font engine is ever touched
+        # off-thread (the Py3.13 constraint documented at _prepare_layers).
+        self._render_future = self._executor.submit(self._rasterize_frame_offthread)
         self._render_generation = generation
         return generation
 
@@ -527,7 +552,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
             generation = self._render_generation
             self._render_generation = None
             try:
-                future.result()
+                image, key, specs, elapsed_ms = future.result()
             except Exception:  # noqa: BLE001 - a failed frame must never crash polling
                 self._diagnostics["render_errors"] += 1
                 self._maybe_submit_pending()
@@ -535,12 +560,12 @@ class FallbackMapRenderBackend(MapRenderBackend):
             if generation != self._generation:
                 self._maybe_submit_pending()
                 return None
-            # Preparation finished off-thread; rasterise here on the GUI
-            # thread (fonts!) — cheap now that every layer is prepared. A
+            # Geometry rasterised off-thread; finalise on the GUI thread —
+            # the only font work left, proportional to label count. A
             # painting failure must surface through render_errors exactly
             # like a worker-side failure did, never raise into the poller.
             try:
-                frame, key = self._render_frame(generation)
+                frame = self._finalize_frame(image, key, generation, specs, elapsed_ms)
             except Exception:  # noqa: BLE001
                 self._diagnostics["render_errors"] += 1
                 self._maybe_submit_pending()
@@ -558,7 +583,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
             return
         self._render_pending = False
         self._render_generation = self._next_generation()
-        self._render_future = self._executor.submit(self._prepare_layers)
+        self._render_future = self._executor.submit(self._rasterize_frame_offthread)
 
     @property
     def render_active(self) -> bool:
@@ -647,9 +672,13 @@ class FallbackMapRenderBackend(MapRenderBackend):
             if layer.layer_type == "vector" and layer.features:
                 self._prepared_layer(layer)
 
-    def _render_frame(self, generation: int) -> tuple[RenderFrame, tuple]:
-        # Capture the state identity before painting: coalesced viewport
-        # changes during rendering must not re-key the finished frame.
+    def _rasterize_frame_offthread(self) -> tuple[QImage, tuple, list, float]:
+        """Rasterise the full frame WITHOUT text; worker-thread safe (#822).
+
+        Geometry painting on a privately-owned QImage is thread-safe; label
+        placements are collected as plain ``_LabelSpec`` values. The GUI
+        thread finalises via :meth:`_finalize_frame` (fonts live there).
+        """
         key = self._frame_key()
         self._prepare_layers()
         width, height = self._output_size
@@ -657,25 +686,42 @@ class FallbackMapRenderBackend(MapRenderBackend):
         image.fill(_BACKGROUND)
         painter = QPainter(image)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        specs: list = []
         started = time.perf_counter()
         try:
-            self._paint_composition(painter, width, height, self._dpi)
+            self._paint_composition(painter, width, height, self._dpi, label_specs=specs)
         finally:
             painter.end()
         elapsed_ms = (time.perf_counter() - started) * 1000.0
         self._diagnostics["frames_rendered"] += 1
         self._diagnostics["last_render_ms"] = elapsed_ms
-        return (
-            RenderFrame(
-                generation=generation,
-                width=image.width(),
-                height=image.height(),
-                stride=image.bytesPerLine(),
-                rgba=image.constBits().tobytes(),
-                render_ms=elapsed_ms,
-            ),
-            key,
+        return image, key, specs, elapsed_ms
+
+    def _finalize_frame(
+        self, image: QImage, key: tuple, generation: int, specs: list, elapsed_ms: float
+    ) -> RenderFrame:
+        """GUI-thread finalisation: paint collected labels, extract bytes."""
+        if specs:
+            painter = QPainter(image)
+            try:
+                self._paint_label_specs(painter, specs)
+            finally:
+                painter.end()
+        return RenderFrame(
+            generation=generation,
+            width=image.width(),
+            height=image.height(),
+            stride=image.bytesPerLine(),
+            rgba=image.constBits().tobytes(),
+            render_ms=elapsed_ms,
         )
+
+    def _render_frame(self, generation: int) -> tuple[RenderFrame, tuple]:
+        # Synchronous path (tests / unthreaded hosts): rasterise + collect on
+        # the calling thread, finalise in the same order the threaded path
+        # uses (geometry first, labels after) so both produce identical bytes.
+        image, key, specs, elapsed_ms = self._rasterize_frame_offthread()
+        return self._finalize_frame(image, key, generation, specs, elapsed_ms), key
 
     # -- composition pipeline ----------------------------------------------
 
@@ -685,7 +731,17 @@ class FallbackMapRenderBackend(MapRenderBackend):
         units_per_pixel = (xmax - xmin) / max(1, width)
         return units_per_pixel / (0.0254 / _BASE_DPI)
 
-    def _paint_composition(self, painter: QPainter, width: int, height: int, dpi: float) -> None:
+    def _paint_composition(
+        self, painter: QPainter, width: int, height: int, dpi: float,
+        label_specs: list | None = None,
+    ) -> None:
+        """Paint the composition.
+
+        ``label_specs`` non-None (worker path): label placements are
+        COLLECTED as plain data instead of painted, so the pass never
+        touches font engines off the GUI thread (#822). None (export /
+        render_to_painter): labels paint inline as before.
+        """
         xmin, ymin, xmax, ymax = fit_extent_to_aspect(self._extent, width, height)
         span_x = xmax - xmin
         span_y = ymax - ymin
@@ -715,7 +771,8 @@ class FallbackMapRenderBackend(MapRenderBackend):
                     self._draw_scalar_grid(painter, layer)
                 elif layer.layer_type == "vector" and layer.features:
                     self._paint_vector_layer(
-                        painter, layer, xmin, ymin, span_x, span_y, width, height, dpi_scale
+                        painter, layer, xmin, ymin, span_x, span_y, width, height, dpi_scale,
+                        label_specs=label_specs,
                     )
             finally:
                 painter.restore()
@@ -768,6 +825,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
         width: int,
         height: int,
         dpi_scale: float,
+        label_specs: list | None = None,
     ) -> None:
         style = VectorStyle.from_dict(layer.style)
         scale_x = width / span_x
@@ -812,6 +870,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
                 painter, prepared, visible_features, style, view,
                 xmin, ymin, scale_x, scale_y, width, height,
                 marker_radius, stroke_width, transparent_fill, fill, dpi_scale,
+                label_specs=label_specs,
             )
 
     @staticmethod
@@ -1012,6 +1071,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
         transparent_fill: bool,
         fill: QColor,
         dpi_scale: float,
+        label_specs: list | None = None,
     ) -> None:
         xy = prepared.point_xy
         screen = np.empty_like(xy)
@@ -1091,7 +1151,10 @@ class FallbackMapRenderBackend(MapRenderBackend):
             for position, (px, py) in enumerate(points.tolist()):
                 feature = prepared.features[feature_indices[position]]
                 anchor = QPointF(px, py)
-                self._draw_label_text(painter, anchor, feature, labels.field, style, dpi_scale)
+                self._draw_label_text(
+                    painter, anchor, feature, labels.field, style, dpi_scale,
+                    label_specs=label_specs,
+                )
 
     def _draw_dots(self, painter: QPainter, points: np.ndarray, radius: float) -> None:
         """One batched drawPoints call for any number of dot markers."""
@@ -1150,6 +1213,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
         field: str,
         style: VectorStyle,
         dpi_scale: float,
+        label_specs: list | None = None,
     ) -> None:
         text = str(
             feature.properties.get(field)
@@ -1161,6 +1225,26 @@ class FallbackMapRenderBackend(MapRenderBackend):
             return
         assert style.labels is not None
         position = anchor + QPointF(max(4.0, style.marker_size * dpi_scale / 2.0 + 2.0), -4.0 * dpi_scale)
+        if label_specs is not None:
+            # Deferred painting (#822): the rasterisation pass may run on a
+            # worker thread where font engines must not be touched; collect
+            # the placement as plain data for the GUI-thread finaliser.
+            labels_cfg = style.labels
+            label_specs.append(
+                _LabelSpec(
+                    x=float(position.x()),
+                    y=float(position.y()),
+                    text=text,
+                    size=float(labels_cfg.size),
+                    bold=bool(labels_cfg.bold),
+                    family=str(labels_cfg.font_family or ""),
+                    color=str(labels_cfg.color),
+                    halo_color=str(labels_cfg.halo_color),
+                    halo_width=float(labels_cfg.halo_width),
+                    dpi_scale=float(dpi_scale),
+                )
+            )
+            return
         painter.save()
         font = painter.font()
         font.setPointSizeF(max(6.0, style.labels.size * dpi_scale))
@@ -1176,6 +1260,32 @@ class FallbackMapRenderBackend(MapRenderBackend):
                 painter.drawText(position + QPointF(dx, dy), text)
         painter.setPen(QColor(style.labels.color))
         painter.drawText(position, text)
+        painter.restore()
+
+    def _paint_label_specs(self, painter: QPainter, specs: list) -> None:
+        """Paint collected label placements (GUI thread only, #822).
+
+        The only font-engine work left on the frame path; proportional to
+        the label count (capped at 1 500 per layer), never to vertex count.
+        """
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.save()
+        font = painter.font()
+        for spec in specs:
+            font.setPointSizeF(max(6.0, spec.size * spec.dpi_scale))
+            font.setBold(spec.bold)
+            if spec.family:
+                font.setFamily(spec.family)
+            painter.setFont(font)
+            position = QPointF(spec.x, spec.y)
+            halo = QColor(spec.halo_color)
+            if halo.alpha() > 0 and spec.halo_width > 0:
+                offset = spec.halo_width * spec.dpi_scale
+                painter.setPen(halo)
+                for dx, dy in ((-offset, 0), (offset, 0), (0, -offset), (0, offset)):
+                    painter.drawText(position + QPointF(dx, dy), spec.text)
+            painter.setPen(QColor(spec.color))
+            painter.drawText(position, spec.text)
         painter.restore()
 
     def _draw_scalar_grid(self, painter: QPainter, layer: MapLayerSnapshot) -> None:
