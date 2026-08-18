@@ -674,6 +674,20 @@ class UnifiedMapCanvas(QWidget):
             self._backend.set_dpi(previous_dpi)
             self._backend.set_extent(previous_extent)
 
+    def _default_export_height(self, width: int) -> int:
+        """Height matching the current view's aspect for a given export width.
+
+        A fixed canvas (the old 2400x1600) letterboxed any non-3:2 view into a
+        different world window than the PNG export, so the same view produced
+        two different pictures (#852). PNG/SVG/PDF all derive from the view.
+        """
+        xmin, ymin, xmax, ymax = self._view_extent
+        if xmax > xmin and ymax > ymin:
+            return max(
+                64, min(16000, round(int(width) * (ymax - ymin) / (xmax - xmin)))
+            )
+        return 1600
+
     def export_png(
         self,
         path: str,
@@ -683,16 +697,7 @@ class UnifiedMapCanvas(QWidget):
         dpi: float = 300.0,
     ) -> None:
         if height is None:
-            # Match the current view's aspect (#522): a fixed 2400x1600
-            # canvas letterboxed a non-3:2 view, and pre-letterboxing it
-            # stretched the export by up to ~25% relative to the screen.
-            xmin, ymin, xmax, ymax = self._view_extent
-            if xmax > xmin and ymax > ymin:
-                height = max(
-                    64, min(16000, round(width * (ymax - ymin) / (xmax - xmin)))
-                )
-            else:
-                height = 1600
+            height = self._default_export_height(width)
         image = self.render_export_image(width, height, dpi=dpi)
         # Persist the physical resolution so printed sizes match the export DPI.
         dots_per_meter = round(float(dpi) / 0.0254)
@@ -702,9 +707,15 @@ class UnifiedMapCanvas(QWidget):
             raise RuntimeError("could not save unified map PNG")
 
     def export_svg(
-        self, path: str, *, width: int = 2400, height: int = 1600, dpi: float = 300.0
+        self, path: str, *, width: int = 2400, height: int | None = None, dpi: float = 300.0
     ) -> None:
-        """Vector SVG export through the same composition pipeline as the screen."""
+        """Vector SVG export through the same composition pipeline as the screen.
+
+        ``height`` defaults to the view-derived height (same rule as the PNG
+        path) so the SVG frame shows the same world window as the PNG export
+        (#852)."""
+        if height is None:
+            height = self._default_export_height(width)
         generator = QSvgGenerator()
         generator.setFileName(str(path))
         generator.setSize(QSize(int(width), int(height)))
@@ -721,9 +732,15 @@ class UnifiedMapCanvas(QWidget):
             painter.end()
 
     def export_pdf(
-        self, path: str, *, width: int = 2400, height: int = 1600, dpi: float = 300.0
+        self, path: str, *, width: int = 2400, height: int | None = None, dpi: float = 300.0
     ) -> None:
-        """Vector PDF export through the same composition pipeline as the screen."""
+        """Vector PDF export through the same composition pipeline as the screen.
+
+        ``height`` defaults to the view-derived height (same rule as the PNG
+        path) so the PDF page frames the same world window as the PNG export
+        (#852)."""
+        if height is None:
+            height = self._default_export_height(width)
         writer = QPdfWriter(str(path))
         writer.setResolution(int(round(float(dpi))))
         page_mm = QSizeF(width / dpi * 25.4, height / dpi * 25.4)

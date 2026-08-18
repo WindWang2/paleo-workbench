@@ -841,6 +841,18 @@ class DataLifecycleController:
         source_path: Path | None = None
         if isinstance(asset, ResourceItem):
             source_path = page._resolve_resource_path(asset)
+            if service is not None and ref is not None:
+                # Prefer the immutable managed snapshot the catalog version
+                # references: the legacy original may have drifted since
+                # import, and the delivery DataRun claims it is version X's
+                # bytes (#835). Falls back to the legacy path only when the
+                # managed payload is unavailable.
+                try:
+                    managed = service.resolve_path(service.get_version(ref.version_id))
+                    if managed.is_file():
+                        source_path = managed
+                except Exception:
+                    pass
             if not source_path.is_file() and service is not None and ref is not None:
                 try:
                     source_path = service.resolve_path(service.get_version(ref.version_id))
@@ -895,7 +907,15 @@ class DataLifecycleController:
     def run_delivery_copy(self, source_path: Path, destination: Path) -> str:
         """Copy the payload and checksum the destination (worker thread)."""
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_path, destination)
+        # copyfile (not copy2): managed payloads are stored with the owner
+        # write bit cleared as an in-repo accident guard, and that guard is
+        # not a delivery attribute — the recipient must be able to open and
+        # save the deliverable (#835). Restore a writable mode explicitly.
+        shutil.copyfile(source_path, destination)
+        try:
+            destination.chmod(0o644)
+        except OSError:
+            pass
         return sha256_file(destination)
 
     def finish_delivery(
