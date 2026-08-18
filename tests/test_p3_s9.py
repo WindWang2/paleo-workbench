@@ -39,9 +39,12 @@ def _independent_window_coherence(volume, inline_window, crossline_window, sampl
             for k in range(nt):
                 k0 = max(0, k - ht)
                 k1 = min(nt - 1, k + ht)
-                vert_len = float(k1 - k0 + 1)
+                # Semblance normalizes by the SPATIAL trace count J (#823):
+                # identical traces → 1.0 for any window geometry. The former
+                # ÷vert_len made this reference carry the same L/J error as
+                # the implementation, so parity could never catch it.
                 run_num = np.sum(mean_sq[k0 : k1 + 1])
-                run_den = np.sum(sum_sq[k0 : k1 + 1]) / vert_len + 1e-12
+                run_den = np.sum(sum_sq[k0 : k1 + 1]) / n_spatial + 1e-12
                 value = run_num / run_den
                 if isinstance(value, float) and value != value:
                     coh[i, j, k] = 0.0
