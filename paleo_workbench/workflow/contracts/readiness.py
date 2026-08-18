@@ -96,8 +96,16 @@ def _count_for_types(counts: dict[str, int], types: list[str]) -> int:
 def evaluate_contract_readiness(
     project: Any,
     contract: DomainWorkflowContract,
+    *,
+    catalog: Any | None = None,
 ) -> ReadinessReport:
-    """Evaluate readiness for one contract using project metadata only."""
+    """Evaluate readiness for one contract using project metadata only.
+
+    *catalog* (optional) is the catalog backend the production-model probe
+    should read; when omitted the global runtime catalog is used (single-
+    window UI). Embedded/batch evaluators must pass their own backend so the
+    evaluation never depends on process-global state (audit #848).
+    """
     reasons: list[ReadinessReason] = []
     counts = _resource_counts(project)
 
@@ -309,12 +317,17 @@ def evaluate_contract_readiness(
                 )
             )
         # Stage-13: infrastructure readiness ≠ production model availability.
-        # Read-only: never seed/mutate the catalog from an evaluation. 
+        # Read-only: never seed/mutate the catalog from an evaluation.
+        # Use the caller's *catalog* when given; fall back to the global
+        # runtime only for the legacy UI path (audit #848).
         try:
-            from paleo_workbench.catalog import get_catalog_service
             from paleo_workbench.prediction.providers import CAPABILITY_FACIES
 
-            svc = get_catalog_service()
+            svc = catalog
+            if svc is None:
+                from paleo_workbench.catalog import get_catalog_service
+
+                svc = get_catalog_service()
             if svc is None:
                 reasons.append(
                     ReadinessReason(
@@ -411,6 +424,7 @@ def evaluate_readiness(
     contract_id: str,
     *,
     registry: WorkflowContractRegistry | None = None,
+    catalog: Any | None = None,
 ) -> ReadinessReport:
     reg = registry or get_default_registry()
     c = reg.get_contract(contract_id)
@@ -426,18 +440,24 @@ def evaluate_readiness(
                 )
             ],
         )
-    return evaluate_contract_readiness(project, c)
+    return evaluate_contract_readiness(project, c, catalog=catalog)
 
 
 class WorkflowReadinessEvaluator:
     def __init__(self, registry: WorkflowContractRegistry | None = None) -> None:
         self.registry = registry or get_default_registry()
 
-    def evaluate(self, project: Any, contract_id: str) -> ReadinessReport:
-        return evaluate_readiness(project, contract_id, registry=self.registry)
+    def evaluate(
+        self, project: Any, contract_id: str, *, catalog: Any | None = None
+    ) -> ReadinessReport:
+        return evaluate_readiness(
+            project, contract_id, registry=self.registry, catalog=catalog
+        )
 
-    def evaluate_all(self, project: Any) -> list[ReadinessReport]:
+    def evaluate_all(
+        self, project: Any, *, catalog: Any | None = None
+    ) -> list[ReadinessReport]:
         return [
-            evaluate_contract_readiness(project, c)
+            evaluate_contract_readiness(project, c, catalog=catalog)
             for c in self.registry.list_contracts()
         ]

@@ -38,6 +38,7 @@ from paleo_workbench.catalog.gc import (
     plan_gc as _gc_plan,
     sweep_gc as _gc_sweep,
 )
+from paleo_workbench.catalog.model_gates import can_promote_to_production
 from paleo_workbench.catalog.models import (
     CatalogDocument,
     DataAsset,
@@ -396,10 +397,10 @@ class DataCatalogService:
         if ensure_index:
             service._ensure_index_fresh()
         if sweep_temp:
-            service._sweep_temp_on_open()
+            service.sweep_temp_on_open()
         return service
 
-    def _sweep_temp_on_open(self) -> None:
+    def sweep_temp_on_open(self) -> None:
         """Conservative cleanup on open: stale temp files and empty dirs.
 
         Only files that can NEVER be referenced by a version record are
@@ -721,6 +722,16 @@ class DataCatalogService:
 
     # -- version registration ------------------------------------------------
 
+    def _is_safe_version_id(self, version_id: str) -> bool:
+        """True when *version_id* is safe to use as a storage path segment."""
+        return bool(
+            version_id
+            and not version_id.startswith(".")
+            and all(c.isalnum() or c in "._-" for c in version_id)
+            and "/" not in version_id
+            and "\\" not in version_id
+        )
+
     def _next_version_number(self, asset_id: str) -> int:
         numbers = [
             v.version_number
@@ -755,6 +766,14 @@ class DataCatalogService:
             metadata=dict(metadata or {}),
         )
         if version_id is not None:
+            # Defensive id sanitization (audit #848): a caller-supplied id like
+            # "../.." could otherwise escape the ledger tree through the
+            # managed-storage placement path. No production caller passes ids
+            # today, but the seam must not trust them when someday one does.
+            if not self._is_safe_version_id(version_id):
+                raise CatalogError(
+                    f"Unsafe version id {version_id!r}: only [A-Za-z0-9._-] allowed"
+                )
             if any(v.id == version_id for v in self.document.versions):
                 raise ImmutableVersionError(
                     f"Version {version_id} is already committed and immutable"
@@ -1583,7 +1602,6 @@ class DataCatalogService:
                     f"ModelVersion {model_id}@{model_version} not registered"
                 )
             # Safety gates (Stage 13): never promote demo/heuristic into production.
-            from paleo_workbench.prediction.model_package import can_promote_to_production
 
             ok, reason = can_promote_to_production(self, model_id, model_version)
             if not ok:
@@ -1624,7 +1642,6 @@ class DataCatalogService:
                 continue
             if model.status != "production" or model.capability != capability:
                 continue
-            from paleo_workbench.prediction.model_package import can_promote_to_production
 
             ok, _reason = can_promote_to_production(
                 self,
@@ -2181,7 +2198,12 @@ class DataCatalogService:
         )
         run.output_version_ids = [version.id]
         # Commit under the lock (#517); the payload build above stays outside.
+        # Version numbers are re-allocated INSIDE the lock (mirroring
+        # register_version): the number computed in ``_build_version`` ran
+        # outside it, so concurrent promotes of the same asset could both
+        # compute max+1 and commit duplicates [1,2,2] (audit #849-1).
         with self._lock:
+            version.version_number = self._next_version_number(asset.id)
             self._add_version(version)
             self._add_run(run)
             asset.current_version_id = version.id
@@ -2491,7 +2513,7 @@ class DataCatalogService:
             include_trashed=include_trashed,
         )
 
-    def _rebase_artifact_paths(self) -> bool:
+    def rebase_artifact_paths(self) -> bool:
         """Rewrite managed version paths after a save-as relocation.
 
         Version paths are stored relative to the project dir and include the

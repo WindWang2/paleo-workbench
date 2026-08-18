@@ -326,38 +326,8 @@ def _asset_type_for_version(service, version_id: str) -> str:
     return str(getattr(version, "metadata", {}) or {}).get("kind", "")
 
 
-class _ServiceRunView:
-    def __init__(self, service):
-        self._service = service
-
-    def list_runs(self):
-        return [_RunProxy(run) for run in self._service.document.runs]
-
-    def resolve_version(self, version_id):
-        try:
-            return self._service.get_version(version_id)
-        except Exception:
-            return None
-
-
-class _RunProxy:
-    __slots__ = ("_run",)
-
-    def __init__(self, run):
-        self._run = run
-
-    @property
-    def domain_task_id(self):
-        return (self._run.parameters or {}).get("_domain_task_id")
-
-    @property
-    def output_version_ids(self):
-        return self._run.output_version_ids
-
-    @property
-    def input_version_ids(self):
-        return self._run.input_version_ids
-
-    @property
-    def status(self):
-        return self._run.status
+# Shared adapter-shaped run view (single implementation; audit #848).
+from paleo_workbench.catalog.service_view import (  # noqa: E402
+    RunProxy as _RunProxy,
+    ServiceRunView as _ServiceRunView,
+)

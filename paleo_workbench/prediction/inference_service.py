@@ -121,49 +121,11 @@ def _resolve_resource_version_id(service, resource_id: str) -> str | None:
     return None
 
 
-class _ServiceRunView:
-    """Adapter-shaped view over the service for lifecycle run-graph helpers.
-
-    :class:`DataRun` stores ``domain_task_id`` in ``parameters["_domain_task_id"]``
-    (mirroring :class:`~paleo_workbench.catalog.adapter.CoreCatalogAdapter`), so
-    the proxy exposes it as an attribute like the ``DataRunRef`` the lifecycle
-    helpers expect.
-    """
-
-    def __init__(self, service):
-        self._service = service
-
-    def list_runs(self):
-        return [_RunProxy(run) for run in self._service.document.runs]
-
-    def resolve_version(self, version_id):
-        try:
-            return self._service.get_version(version_id)
-        except Exception:
-            return None
-
-
-class _RunProxy:
-    __slots__ = ("_run",)
-
-    def __init__(self, run):
-        self._run = run
-
-    @property
-    def domain_task_id(self):
-        return (self._run.parameters or {}).get("_domain_task_id")
-
-    @property
-    def output_version_ids(self):
-        return self._run.output_version_ids
-
-    @property
-    def input_version_ids(self):
-        return self._run.input_version_ids
-
-    @property
-    def status(self):
-        return self._run.status
+# Shared adapter-shaped run view (single implementation; audit #848).
+from paleo_workbench.catalog.service_view import (  # noqa: E402
+    RunProxy as _RunProxy,
+    ServiceRunView as _ServiceRunView,
+)
 
 
 def start_inference(
@@ -417,13 +379,17 @@ def _now_iso() -> str:
 
 
 def link_run_to_domain_task(service, run_id: str, domain_task_id: str) -> DataRun:
-    """Record the domain PredictionTask id on a run (for run-graph lineage)."""
+    """Record the domain PredictionTask id on a run (for run-graph lineage).
+
+    Uses the public ``update_run_status`` surface (with the run's existing
+    status) instead of reaching into ``service._save()`` (audit #848).
+    """
     run = service.get_run(run_id)
-    params = dict(run.parameters or {})
-    params["_domain_task_id"] = domain_task_id
-    run.parameters = params
-    service._save()
-    return run
+    return service.update_run_status(
+        run_id,
+        (run.status or "running"),
+        extra_parameters={"_domain_task_id": domain_task_id},
+    )
 
 
 def materialize_prediction_task(

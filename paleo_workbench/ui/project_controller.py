@@ -175,7 +175,10 @@ class ProjectController:
         """Close the active catalog service's SQLite handle, if any.
 
         Called before replacing/resetting the catalog so the previous
-        project's handle never leaks. Best-effort, never raises.
+        project's handle never leaks. Best-effort, never raises. Also drops
+        the process-global session caches so a closed project's grids /
+        graphs / plans do not linger in memory until LRU eviction (audit
+        #848).
         """
         try:
             from paleo_workbench.catalog import get_catalog_service
@@ -183,6 +186,22 @@ class ProjectController:
             service = get_catalog_service()
             if service is not None:
                 service.close()
+        except Exception:
+            pass
+        try:
+            from paleo_workbench.project.factor_grid_artifacts import (
+                clear_session_caches,
+            )
+            from paleo_workbench.workflow.freshness import (
+                clear_dependency_graph_cache,
+            )
+            from paleo_workbench.workflow.interpolation_fingerprint import (
+                plan_cache_clear,
+            )
+
+            clear_session_caches()
+            clear_dependency_graph_cache()
+            plan_cache_clear()
         except Exception:
             pass
 
@@ -266,7 +285,7 @@ class ProjectController:
             if service is None:
                 return
             service.migrate_legacy_resources(loaded.resources)
-            service._sweep_temp_on_open()
+            service.sweep_temp_on_open()
             service.ensure_index_ready()
         except Exception:
             # Canonical project/catalog remain available even if an
@@ -394,7 +413,7 @@ class ProjectController:
                 target, ensure_index=False, sweep_temp=False
             )
             try:
-                service._rebase_artifact_paths()
+                service.rebase_artifact_paths()
             finally:
                 service.close()
         except Exception:

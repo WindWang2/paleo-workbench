@@ -356,7 +356,7 @@ def test_rebase_rewrites_trash_original_path_and_model_uri(service, tmp_path):
     )
     # Persist the stale prefixes, then rebase as Save As does.
     service._save()
-    changed = service._rebase_artifact_paths()
+    changed = service.rebase_artifact_paths()
     assert changed is True
     current = service.project_path.name.removesuffix(".paleo.json") + ".artifacts"
     refreshed = service.get_version(version.id)

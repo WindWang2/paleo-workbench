@@ -184,6 +184,15 @@ def save_correlation_draft(
         store_path = rel.as_posix()
     except ValueError:
         store_path = managed_path
+    if version is not None:
+        # Success-path hygiene (audit #848): the catalog registered a managed
+        # copy and the ref points at it — the local working artifact is an
+        # unreferenced duplicate that would accumulate on every save (the
+        # failure path above already compensates with artifact.unlink()).
+        try:
+            artifact.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     domains = detect_depth_domain_mismatch(list(draft.payload.tops))
     ref = CorrelationInterpretationRef(

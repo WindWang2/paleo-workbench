@@ -235,8 +235,9 @@ def _attach_result_to_task(
     task.parameters = params
     task.method = method if method != "mock" else "IDW"
     task.status = "complete"
-    if task.source_kind == "mock":
-        task.source_kind = "mixed"
+    # Honesty (audit #848): a synthetic/mock task stays ``mock`` — completing
+    # the interpolation must not relabel it ``mixed`` (laundering pure
+    # synthetic input as production data for QC/编图 without annotation).
     task.generator_version = GENERATOR_VERSION
     task.grid_metadata = grid_result.to_descriptor()
     # Re-interp invalidates any previous artifact; next project save re-externalises.
@@ -557,7 +558,7 @@ def batch_prepare_factor_maps(
                 method=method,
                 parameters={"sample_points": points},
                 status="pending",
-                source_kind="mixed",
+                source_kind="mock",  # pure synthetic input — never "mixed" (audit #848)
                 seed=seed + index,
             )
             project.factor_map_tasks.append(task)

@@ -1,4 +1,9 @@
-"""WorkflowOrchestrator: Centralized, headless workflow state machine & step orchestrator."""
+"""WorkflowOrchestrator: headless workflow step-transition helper.
+
+Legacy helper kept for tests/scripting: authoritative step state inference
+and persistence live in :func:`paleo_workbench.workflow.service.home_workflow_steps`
+(single source of truth). This orchestrator only advances a cursor; it never
+persists state, so production UI must not rely on it (audit #847-2)."""
 
 from __future__ import annotations
 
@@ -32,7 +37,7 @@ class StepTransitionResult:
 
 
 class WorkflowOrchestrator:
-    """Deep module orchestrating workflow step transitions, prerequisite checks, and state saving."""
+    """Headless step-cursor helper (see module docstring; state saving claim removed)."""
 
     STEP_NAMES = {
         "data_check": "数据校验",
@@ -74,12 +79,23 @@ class WorkflowOrchestrator:
         )
 
     def next_step(self, step_payload: dict[str, Any] | None = None) -> StepTransitionResult:
-        """Deep interface method 2/2: advance to the next step if prerequisites are satisfied."""
+        """Deep interface method 2/2: advance to the next step if prerequisites are satisfied.
+
+        The current step must be evidence-valid (``is_valid``) before
+        advancing — an empty project must never walk the whole strip to
+        "已完成" without producing anything (audit #847-2).
+        """
         ctx = self.get_step_context()
         if ctx.prerequisites:
             return StepTransitionResult(
                 success=False,
                 message=f"无法进入下一步: {', '.join(ctx.prerequisites)}",
+                step_context=ctx,
+            )
+        if not ctx.is_valid:
+            return StepTransitionResult(
+                success=False,
+                message=f"当前步骤 [{ctx.step_name}] 尚未完成，不能进入下一步",
                 step_context=ctx,
             )
 

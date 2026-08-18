@@ -67,13 +67,13 @@ def test_move_whole_tree_to_fresh_target(tmp_path):
     reopened = DataCatalogService.open(target)
     try:
         assert reopened.document.catalog_revision >= 1
-        assert reopened._rebase_artifact_paths() is True
+        assert reopened.rebase_artifact_paths() is True
         version = reopened.get_version(version_id)
         assert reopened.resolve_path(version).is_file()
         assert reopened.verify_integrity(version_id).status_for(version_id) == "verified"
         assert reopened.index_revision() == reopened.document.catalog_revision
         # Idempotent: rebasing again changes nothing.
-        assert reopened._rebase_artifact_paths() is False
+        assert reopened.rebase_artifact_paths() is False
     finally:
         reopened.close()
 

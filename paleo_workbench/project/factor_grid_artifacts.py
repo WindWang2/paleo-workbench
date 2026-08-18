@@ -38,7 +38,10 @@ if TYPE_CHECKING:
 __all__ = [
     "GRID_ARRAY_PARAMETER_KEYS",
     "clear_live_factor_grid",
+    "clear_live_factor_grid_if_fingerprint",
+    "clear_session_caches",
     "factor_grid_result_for_task",
+    "has_live_factor_grid",
     "live_factor_grid_cache_stats",
     "persist_factor_grid_artifacts",
     "reset_artifact_load_counter",
@@ -342,6 +345,19 @@ def peek_live_factor_grid(task_id: str | None):
         return _LIVE_FACTOR_GRIDS.get(str(task_id))
 
 
+def has_live_factor_grid(task_id: str | None) -> bool:
+    """True when a live/persisted-cache entry exists for *task_id* (public API).
+
+    Public accessor so callers outside this module never touch the private
+    ``_LIVE_FACTOR_GRIDS`` mapping directly (audit #848 — private member
+    overreach by interpolation_fingerprint).
+    """
+    if not task_id:
+        return False
+    with _LIVE_FACTOR_GRIDS_LOCK:
+        return str(task_id) in _LIVE_FACTOR_GRIDS
+
+
 def grid_result_fingerprint(grid) -> str | None:
     """The result fingerprint a stored grid carries, if any (#834)."""
     params = getattr(grid, "algorithm_parameters", None)
@@ -374,6 +390,22 @@ def clear_live_factor_grid_if_fingerprint(
             0, _LIVE_FACTOR_GRIDS_TOTAL_BYTES - old_bytes
         )
         return True
+
+
+def clear_session_caches() -> None:
+    """Drop all process-global factor-grid caches (project close / teardown).
+
+    ``_LIVE_FACTOR_GRIDS`` / ``_GEOMETRY_POOL`` previously lingered until LRU
+    eviction after a project closed (bounded, but memory-resident — audit
+    #848). Safe to call at any time; the caches rebuild lazily.
+    """
+    global _LIVE_FACTOR_GRIDS_TOTAL_BYTES
+    with _LIVE_FACTOR_GRIDS_LOCK:
+        _LIVE_FACTOR_GRIDS.clear()
+        _LIVE_FACTOR_GRID_BYTES.clear()
+        _LIVE_ARTIFACT_IDENTITY.clear()
+        _LIVE_FACTOR_GRIDS_TOTAL_BYTES = 0
+        _GEOMETRY_POOL.clear()
 
 
 def live_factor_grid_cache_stats() -> dict[str, int | float]:

@@ -173,6 +173,14 @@ def save_fault_draft(
         store_path = rel.as_posix()
     except ValueError:
         store_path = managed_path
+    if version is not None:
+        # Success-path hygiene (audit #848): managed copy registered and ref
+        # points at it — remove the local working duplicate so saves don't
+        # accumulate ghost artifacts (failure path compensates above).
+        try:
+            artifact.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     ref = FaultInterpretationRef(
         id=draft.interpretation_id,

@@ -65,6 +65,16 @@ class CoreCatalogAdapter:
         """The wrapped Core service (for UI operations beyond the port)."""
         return self._service
 
+    def batch_save(self) -> "_BatchSave":
+        """Merge many mutator calls into ONE canonical write (C38 / audit #849-3).
+
+        Bulk registration loops (folder import) wrap their per-file calls in
+        this context so the O(N²) full-document rewrite + fsync happens once
+        instead of once per registered input. See
+        :meth:`DataCatalogService.batch_save`.
+        """
+        return self._service.batch_save()
+
     # ------------------------------------------------------------- conversions
     def _tag_by_id(self) -> dict:
         """Tag id→Tag map cached per (document, revision).

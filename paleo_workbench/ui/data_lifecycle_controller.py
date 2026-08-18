@@ -1323,14 +1323,45 @@ class DataLifecycleController:
                 "import catalog registration unavailable: %s", exc
             )
             return
-        for resource in resources:
-            try:
-                register_resource_input(resource)
-            except Exception as exc:
-                failure = f"{resource.name} ({resource.id}): {exc}"
-                self.last_registration_failures.append(failure)
-                logging.getLogger(__name__).warning(
-                    "import catalog registration failed for %s: %s",
-                    resource.id,
-                    exc,
-                )
+        # Bulk path (audit #849-3): register every file inside ONE batch so
+        # the canonical document is written (serialize + fsync) once, not once
+        # per file (O(N²) bytes on large folders). Per-resource failures are
+        # caught inside the batch so one bad file never discards the others;
+        # a failed final flush restores the pre-batch document and is recorded
+        # like any other registration failure (the import must never break).
+        batch = None
+        try:
+            from paleo_workbench.catalog import get_catalog
+
+            cat = get_catalog()
+            if cat is not None:
+                enter = getattr(cat, "batch_save", None)
+                if callable(enter):
+                    batch = enter()
+                    batch.__enter__()
+        except Exception as exc:
+            batch = None
+            logging.getLogger(__name__).warning(
+                "import catalog batch unavailable; falling back per-file: %s", exc
+            )
+        try:
+            for resource in resources:
+                try:
+                    register_resource_input(resource)
+                except Exception as exc:
+                    failure = f"{resource.name} ({resource.id}): {exc}"
+                    self.last_registration_failures.append(failure)
+                    logging.getLogger(__name__).warning(
+                        "import catalog registration failed for %s: %s",
+                        resource.id,
+                        exc,
+                    )
+        finally:
+            if batch is not None:
+                try:
+                    batch.__exit__(None, None, None)
+                except Exception as exc:
+                    self.last_registration_failures.append(f"批提交失败: {exc}")
+                    logging.getLogger(__name__).warning(
+                        "import catalog batch commit failed: %s", exc
+                    )

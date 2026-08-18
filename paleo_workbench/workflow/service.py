@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from typing import Any
 
 from paleo_workbench.project.models import CompilationRun, ProjectDocument, WorkflowStep
+
+_log = logging.getLogger("paleo_workbench.workflow")
 
 
 def _active_quality_reports(project: ProjectDocument):
@@ -49,13 +52,21 @@ def _evidence_step_status(project: ProjectDocument, step_type: str) -> str:
     if step_type == "data_check":
         return "complete" if project.resources else "pending"
     if step_type == "factor_map":
-        if any(getattr(task, "status", "") == "complete" for task in project.factor_map_tasks):
+        statuses = [getattr(task, "status", "") for task in project.factor_map_tasks]
+        if any(status in ("failed", "error") for status in statuses):
+            return "failed"
+        if any(status == "complete" for status in statuses):
             return "complete"
-        return "running" if project.factor_map_tasks else "pending"
+        return "running" if statuses else "pending"
     if step_type == "prediction":
-        if any(getattr(task, "status", "") == "complete" for task in project.prediction_tasks):
+        statuses = [
+            getattr(task, "status", "") for task in project.prediction_tasks
+        ]
+        if any(status in ("failed", "error") for status in statuses):
+            return "failed"
+        if any(status == "complete" for status in statuses):
             return "complete"
-        return "running" if project.prediction_tasks else "pending"
+        return "running" if statuses else "pending"
     if step_type == "map_compile":
         return "complete" if project.paleomap_documents else "pending"
     if step_type == "qc":
@@ -123,6 +134,15 @@ def _apply_freshness_overlay(
         # FRESH → keep evidence complete
         return evidence_status
     except Exception:
+        # Never let a freshness probe break the status strip — but a probe
+        # that raises must not degrade silently: STALE/UNKNOWN products would
+        # otherwise keep showing 已完成 with zero visibility (audit #847-3).
+        _log.warning(
+            "freshness overlay failed for step %r; showing evidence status %r",
+            step_type,
+            evidence_status,
+            exc_info=True,
+        )
         return evidence_status
 
 
@@ -175,6 +195,14 @@ def home_workflow_steps(
 
             freshness_service = FreshnessService.for_project(project, catalog=catalog)
         except Exception:
+            # A freshness service that cannot be built must not disable the
+            # whole home strip — but it must not be silent either (audit
+            # #847-3): log once so degraded (UNKNOWN) freshness is traceable.
+            _log.warning(
+                "freshness service unavailable; home steps fall back to "
+                "evidence-only status",
+                exc_info=True,
+            )
             freshness_service = None
 
     inferred = {

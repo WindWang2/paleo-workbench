@@ -137,11 +137,17 @@ def search_assets(
     if type:
         results = [a for a in results if a.type == type]
     if metadata_pairs:
+        # Same canonical serialization as the SQLite index path (booleans →
+        # "1"/"0") so index-backed and scan results agree (audit #849-2).
+        from paleo_workbench.catalog.db import metadata_search_value
+
         results = [
             a
             for a in results
             if all(
-                str(a.metadata.get(k, "")) == v for k, v in metadata_pairs
+                metadata_search_value(a.metadata.get(k, ""))
+                == metadata_search_value(v)
+                for k, v in metadata_pairs
             )
         ]
     if stage is not None:

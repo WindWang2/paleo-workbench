@@ -21,15 +21,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from paleo_workbench.catalog.models import Model, ModelVersion
+from paleo_workbench.catalog.model_gates import (
+    NON_PROMOTABLE_MODEL_TYPES,
+    NON_PROMOTABLE_PROVIDERS,
+    can_promote_to_production,
+)
 from paleo_workbench.prediction.providers import (
     PROVIDER_DEMO,
     PROVIDER_LOCAL_ASSET,
 )
-
-# Providers that must never be packaged as scientific production.
-NON_PROMOTABLE_PROVIDERS = frozenset({PROVIDER_DEMO, PROVIDER_LOCAL_ASSET})
-NON_PROMOTABLE_MODEL_TYPES = frozenset({"demo", "heuristic"})
 
 # Spatial output classes supported by the Stage-13 pipeline.
 SPATIAL_VECTOR_POLYGONS = "VECTOR_POLYGONS"
@@ -363,37 +363,3 @@ def register_model_package(
         version = service.promote_model(manifest.model_id, manifest.model_version)
         model = service.get_model(manifest.model_id)
     return model, version
-
-
-def can_promote_to_production(
-    service, model_id: str, model_version: str, *, require_input_schema: bool = True
-) -> tuple[bool, str]:
-    """Return (ok, reason) for promote gates (shared with catalog.promote_model).
-
-    ``require_input_schema`` is a PROMOTE-time requirement: a version promoted
-    before the schema contract existed must not silently disappear from
-    find_production_model on upgrade (Agent L P2) — reads keep the other
-    gates but tolerate the legacy empty-schema case.
-    """
-    try:
-        model = service.get_model(model_id)
-        version = service.get_model_version(model_id, model_version)
-    except Exception as exc:  # CatalogError
-        return False, str(exc)
-    if version.demo_only:
-        return False, "demo_only model versions cannot be promoted to production"
-    # Case/alias-insensitive checks: "Demo"/"DEMO"/"local-asset" must not
-    # slip past exact-match allowlists (H4-3c).
-    provider_norm = (model.provider or "").strip().casefold()
-    if provider_norm in {p.strip().casefold() for p in NON_PROMOTABLE_PROVIDERS}:
-        return False, f"provider {model.provider!r} is not promotable to production"
-    type_norm = (model.model_type or "").strip().casefold()
-    if type_norm in {t.strip().casefold() for t in NON_PROMOTABLE_MODEL_TYPES}:
-        return False, f"model_type {model.model_type!r} is not promotable to production"
-    if model.metadata.get("scientific") is False:
-        return False, "model metadata marks scientific=False"
-    if version.metadata.get("scientific") is False:
-        return False, "version metadata marks scientific=False (H4-3b)"
-    if require_input_schema and not version.input_schema:
-        return False, "input_schema is required for production promotion (H5-b)"
-    return True, "ok"
