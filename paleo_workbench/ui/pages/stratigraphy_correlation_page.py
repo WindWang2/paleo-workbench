@@ -1033,9 +1033,15 @@ class StratigraphyCorrelationPage(QWidget):
         wells: list[dict[str, Any]] = []
         for log, name in zip(self._loaded_logs, self._loaded_names):
             curves: dict[str, Any] = {}
+            depths: dict[str, Any] = {}
             for curve in getattr(log, "curves", None) or []:
                 curves[curve.name] = list(curve.values)
-            wells.append({"name": name, "curves": curves})
+                # Real per-curve depth axis (#846): recommend_top fabricated
+                # depths on the legacy uniform 0.0/0.5 grid without it.
+                curve_depth = getattr(curve, "depth", None)
+                if curve_depth is not None:
+                    depths[curve.name] = list(curve_depth)
+            wells.append({"name": name, "curves": curves, "depths": depths})
         self.correlation_engine.with_wells(wells)
 
     def _reload_current_section(self) -> None:

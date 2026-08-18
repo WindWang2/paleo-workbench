@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 import numpy as np
 
 
@@ -15,7 +16,7 @@ class SparseDeltaPatch:
 
 
 class SculptableHorizonMesh:
-    """Stateful 3D horizon surface mesh with RBF sculpting and sparse undo/redo."""
+    """Stateful 3D horizon surface mesh with Gaussian brush sculpting and sparse undo/redo."""
 
     def __init__(
         self,
@@ -38,7 +39,13 @@ class SculptableHorizonMesh:
         delta_z: float,
         radius: float = 5.0,
     ) -> np.ndarray:
-        """Deform surface vertex elevations within a radial influence sphere and record delta patch."""
+        """Deform surface vertex elevations with a radial Gaussian brush.
+
+        The brush is a fixed Gaussian kernel (not a fitted RBF solve):
+        weights fall to EXACTLY zero at ``radius`` — the plain
+        exp(-(d/(r/2))²) profile still applied 1.83% of the delta at the
+        rim, leaving a visible step at the brush boundary (#846).
+        """
         cx, cy = center_xy
         dx = self.vertices[:, 0] - cx
         dy = self.vertices[:, 1] - cy
@@ -48,7 +55,13 @@ class SculptableHorizonMesh:
         indices = np.where(within_mask)[0]
 
         if len(indices) > 0:
-            weights = np.exp(-((dist[within_mask] / (radius * 0.5)) ** 2))
+            sigma = radius * 0.5
+            tail = math.exp(-((radius / sigma) ** 2))
+            denom = 1.0 - tail
+            if denom <= 0.0:  # pragma: no cover - radius > 0 keeps tail < 1
+                weights = np.ones(len(indices))
+            else:
+                weights = (np.exp(-((dist[within_mask] / sigma) ** 2)) - tail) / denom
             old_z = self.vertices[indices, 2].copy()
             new_z = old_z + delta_z * weights
             self.vertices[indices, 2] = new_z
@@ -60,14 +73,19 @@ class SculptableHorizonMesh:
         return self.vertices
 
     def smooth_anneal(self, iterations: int = 1) -> np.ndarray:
-        """Apply laplacian smooth annealing to mesh height values."""
+        """Apply laplacian smooth annealing to mesh height values.
+
+        The undo patch records only the vertices that actually moved
+        (#846): the previous all-indices patch pushed three full float32
+        grids per smoothing step onto the undo stack on a 1000x1000
+        horizon, violating SparseDeltaPatch's own memory contract.
+        """
         if self.grid_shape is None:
-            n_pts = len(self.vertices)
-            side = int(np.round(np.sqrt(n_pts)))
-            if side * side == n_pts:
-                self.grid_shape = (side, side)
-            else:
-                raise ValueError("grid_shape is required for smooth_anneal on unstructured mesh")
+            raise ValueError(
+                "grid_shape is required for smooth_anneal: vertex count alone "
+                "cannot identify the (rows, cols) topology (N=36 is both 4x9 "
+                "and 6x6)"
+            )
 
         rows, cols = self.grid_shape
         grid = self.vertices[:, 2].reshape((rows, cols)).copy()
@@ -81,13 +99,17 @@ class SculptableHorizonMesh:
             ) / 8.0
             grid = smoothed
 
-        old_z = self.vertices[:, 2].copy()
         new_z = grid.ravel()
+        changed = np.nonzero(new_z != self.vertices[:, 2])[0]
+        if len(changed) > 0:
+            patch = SparseDeltaPatch(
+                indices=changed,
+                old_z=self.vertices[changed, 2].copy(),
+                new_z=new_z[changed],
+            )
+            self._undo_stack.append(patch)
+            self._redo_stack.clear()
         self.vertices[:, 2] = new_z
-
-        patch = SparseDeltaPatch(indices=np.arange(len(self.vertices)), old_z=old_z, new_z=new_z)
-        self._undo_stack.append(patch)
-        self._redo_stack.clear()
         return self.vertices
 
     def can_undo(self) -> bool:
@@ -114,7 +136,7 @@ class SculptableHorizonMesh:
 
 
 class HorizonSculpting:
-    """RBF and Gaussian brush surface sculptor for 3D horizon meshes."""
+    """Gaussian brush surface sculptor for 3D horizon meshes."""
 
     def sculpt_surface(
         self,

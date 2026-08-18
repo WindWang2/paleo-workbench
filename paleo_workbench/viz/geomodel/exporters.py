@@ -43,14 +43,20 @@ def _generate_structured_grid(spec: GridSpec) -> tuple[np.ndarray, np.ndarray]:
     def _nid(i, j, k):
         return i * (ny + 1) * (nz + 1) + j * (nz + 1) + k
 
+    # C3D8/B8 face-cyclic node order: bottom face counter-clockwise
+    # (i,j) -> (i+1,j) -> (i+1,j+1) -> (i,j+1), top face directly above
+    # (node 5 sits on node 1, ...). The previous (i,j),(i+1,j),(i,j+1),
+    # (i+1,j+1) assembly was a bowtie (Z-scan) order: every element's
+    # closed-surface divergence volume was exactly 0 and its face normals
+    # were meaningless — degenerate cells for both solvers (#829).
     n0 = _nid(ei, ej, ek)
     n1 = _nid(ei + 1, ej, ek)
-    n2 = _nid(ei, ej + 1, ek)
-    n3 = _nid(ei + 1, ej + 1, ek)
+    n2 = _nid(ei + 1, ej + 1, ek)
+    n3 = _nid(ei, ej + 1, ek)
     n4 = _nid(ei, ej, ek + 1)
     n5 = _nid(ei + 1, ej, ek + 1)
-    n6 = _nid(ei, ej + 1, ek + 1)
-    n7 = _nid(ei + 1, ej + 1, ek + 1)
+    n6 = _nid(ei + 1, ej + 1, ek + 1)
+    n7 = _nid(ei, ej + 1, ek + 1)
 
     elements = np.stack([n0, n1, n2, n3, n4, n5, n6, n7], axis=1)
     return nodes, elements
@@ -65,11 +71,15 @@ def export_to_flac3d(filename: str, nx: int = 10, ny: int = 10, nz: int = 10,
         with open(filename, 'w', encoding='utf-8') as f:
             f.write("* FLAC3D grid exported by PaleoWorkbench\n")
             f.write(f"* Grid dimensions: {nx} x {ny} x {nz}\n")
+            # Itasca grid format: gridpoints start with 'G', brick zones are
+            # 'Z B8' followed by the eight corner gridpoint ids (#829 — the
+            # previous 'GRID'/'ZON hex' keywords do not exist in FLAC3D's
+            # grammar, so the files could not be imported at all).
             for node_id, (x, y, z) in enumerate(nodes, start=1):
-                f.write(f"GRID {node_id} {x:.4f} {y:.4f} {z:.4f}\n")
+                f.write(f"G {node_id} {x:.4f} {y:.4f} {z:.4f}\n")
             for zone_id, elem in enumerate(elements, start=1):
                 ids = " ".join(str(n + 1) for n in elem)  # 1-based
-                f.write(f"ZON hex {zone_id} {ids}\n")
+                f.write(f"Z B8 {zone_id} {ids}\n")
         logger.info("FLAC3D grid successfully exported to %s", filename)
         return True
     except Exception as e:

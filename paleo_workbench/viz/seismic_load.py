@@ -100,7 +100,19 @@ def _load_pseudo_3d_ignore_geometry(path: str) -> tuple[np.ndarray | None, str]:
         return None, f"SEGY 加载失败: {exc.__class__.__name__}"
 
 
-def _bound_volume(volume: np.ndarray) -> tuple[np.ndarray, bool]:
+def _bound_volume(
+    volume: np.ndarray,
+    *,
+    max_dim: int = MAX_DIM,
+) -> tuple[np.ndarray, bool]:
+    """Safety-bound a volume to ``max_dim`` per axis.
+
+    The bound must match the caller's budget (#825): read_preview computes
+    strides for its own (max_dim, max_budget), so a post-read clamp against
+    the module-default 128 would silently truncate LOD1/LOD2 cubes whose
+    strided axes legitimately exceed 128, breaking the shape-vs-strides
+    contract that read_lod_volume_with_strides validates.
+    """
     from paleo_workbench.viz.seismic_3d_api import fast_resample_volume_3d
 
     vol = np.asarray(volume, dtype=np.float32)
@@ -112,11 +124,11 @@ def _bound_volume(volume: np.ndarray) -> tuple[np.ndarray, bool]:
         vol = vol.reshape(-1, vol.shape[-2], vol.shape[-1])
 
     s0, s1, s2 = vol.shape
-    truncated = s0 > MAX_DIM or s1 > MAX_DIM or s2 > MAX_DIM
+    truncated = s0 > max_dim or s1 > max_dim or s2 > max_dim
     if truncated:
-        t0 = min(s0, MAX_DIM)
-        t1 = min(s1, MAX_DIM)
-        t2 = min(s2, MAX_DIM)
+        t0 = min(s0, max_dim)
+        t1 = min(s1, max_dim)
+        t2 = min(s2, max_dim)
         out = fast_resample_volume_3d(vol, (t0, t1, t2))
     else:
         out = vol

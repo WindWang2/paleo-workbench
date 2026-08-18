@@ -344,6 +344,7 @@ class WellSeismicJointHost(QObject):
         self._assets_job = OwnedWorkerJob(self)
         self._volume_generation = 0
         self._volume_phase = "EMPTY"
+        self._volume_lod = -1
         self._source_backed_access = None
         self._paths: JointAssetPaths | None = None
         self._survey_meta: dict = {}
@@ -417,6 +418,7 @@ class WellSeismicJointHost(QObject):
         # Supersede any in-flight preview load for the previous project.
         self._volume_generation += 1
         self._volume_phase = "EMPTY"
+        self._volume_lod = -1
         self._source_backed_access = None
         if self._volume_job.is_running:
             self._volume_job.cancel()
@@ -895,7 +897,10 @@ class WellSeismicJointHost(QObject):
         )
 
     def _maybe_start_next_lod(self, segy_path: str, current_lod: int) -> None:
-        if current_lod != 0:
+        # Progressive refinement ladder: 0 -> 1 -> 2 (#825). The old
+        # `current_lod != 0` early-return made level 2 permanently dead code
+        # — the ladder delivered exactly one upgrade and stopped.
+        if current_lod < 0 or current_lod + 1 > 2:
             return
         if self._volume_job.is_running:
             # The L0 result slot is queued BEFORE OwnedWorkerJob's queued
@@ -906,7 +911,7 @@ class WellSeismicJointHost(QObject):
                 self._lod_release_pending = True
                 self._volume_job.released.connect(self._on_volume_job_released)
             return
-        self._start_next_lod_worker(segy_path)
+        self._start_next_lod_worker(segy_path, current_lod + 1)
 
     def _cancel_pending_lod(self) -> None:
         if not self._lod_release_pending:
@@ -927,17 +932,17 @@ class WellSeismicJointHost(QObject):
             self._pending_l0_start = None
             self._start_volume_worker(pending)
             return
-        if self._volume_phase != "L0_READY" or self._volume_job.is_running:
+        if self._volume_phase not in ("L0_READY", "L1_READY") or self._volume_job.is_running:
             return
         if self._paths is None or self._paths.segy is None:
             return
-        self._start_next_lod_worker(str(self._paths.segy))
+        self._start_next_lod_worker(str(self._paths.segy), self._volume_lod + 1)
 
-    def _start_next_lod_worker(self, segy_path: str) -> None:
+    def _start_next_lod_worker(self, segy_path: str, next_lod: int = 1) -> None:
         generation = self._volume_generation
-        self._volume_phase = "L1_LOADING"
-        self.status_changed.emit("精细化中 (L1)…")
-        worker = PreviewVolumeWorker(segy_path, generation=generation, lod=1)
+        self._volume_phase = f"L{next_lod}_LOADING"
+        self.status_changed.emit(f"精细化中 (L{next_lod})…")
+        worker = PreviewVolumeWorker(segy_path, generation=generation, lod=next_lod)
         self._volume_job.start(
             worker,
             terminal_signals=(worker.finished, worker.failed),
@@ -995,6 +1000,7 @@ class WellSeismicJointHost(QObject):
             self._scene.set_preview_mode(True)
 
         self._volume_phase = "L0_READY" if int(lod) == 0 else f"L{int(lod)}_READY"
+        self._volume_lod = int(lod)
         names = list(self._scene.well_trajectories().keys())
         if (
             getattr(self, "_auto_default_fence", True)
@@ -1014,11 +1020,11 @@ class WellSeismicJointHost(QObject):
         self.status_changed.emit(msg)
         self.scene_updated.emit()
 
-        if int(lod) == 0 and self._paths is not None and self._paths.segy is not None:
+        if int(lod) < 2 and self._paths is not None and self._paths.segy is not None:
             try:
                 self._maybe_start_next_lod(str(self._paths.segy), int(lod))
             except Exception:
-                logger.debug("L1 schedule skipped", exc_info=True)
+                logger.debug("next LOD schedule skipped", exc_info=True)
 
     @Slot(str, int)
     def _on_volume_failed(self, err: str, generation: int = 0) -> None:

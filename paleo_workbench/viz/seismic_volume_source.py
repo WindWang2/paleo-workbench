@@ -488,10 +488,13 @@ class SeismicVolumeSource:
                 )
             self.physical_reads += 1
             vol = np.ascontiguousarray(volume, dtype=np.float32)
-            # Final bound if budget still exceeded (safety).
+            # Final bound if budget still exceeded (safety). The bound must
+            # use THIS call's budget: the module-default 128 clamped LOD1/2
+            # strided cubes whose axes legitimately exceed 128, breaking the
+            # shape-vs-strides contract checked by callers (#825).
             from paleo_workbench.viz.seismic_load import _bound_volume
 
-            vol, further = _bound_volume(vol)
+            vol, further = _bound_volume(vol, max_dim=max_dim)
             warning = ""
             if strides != (1, 1, 1) or further:
                 warning = (

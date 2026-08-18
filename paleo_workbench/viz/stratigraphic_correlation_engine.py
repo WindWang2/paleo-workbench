@@ -102,7 +102,14 @@ class StratigraphicCorrelationEngine:
         ref_top_depth: float,
         curve_key: str = "GR",
     ) -> TopRecommendation:
-        """Auto-recommend target well formation top depth using DTW curve matching."""
+        """Auto-recommend target well formation top depth using DTW curve matching.
+
+        Forwards each curve's real depth axis when the well binding carries
+        one (``depths[curve_key]``) plus the configured DTW window (#846):
+        without the axes the component fell back to the legacy uniform
+        0.0/0.5 grid, fabricating depths (an identical-curve reference top
+        at 1004 m came back as 499.5 m).
+        """
         ref_curve = self._get_well_curve(ref_well, curve_key)
         target_curve = self._get_well_curve(target_well, curve_key)
         return self._top_correlator.recommend_top_depth(
@@ -110,6 +117,9 @@ class StratigraphicCorrelationEngine:
             target_curve=target_curve,
             ref_top_depth=ref_top_depth,
             depth_step=self._depth_step,
+            ref_depths=self._get_well_depths(ref_well, curve_key),
+            target_depths=self._get_well_depths(target_well, curve_key),
+            window=self._dtw_window,
         )
 
     def generate_polygons(self, top_names: list[str]) -> list[dict[str, Any]]:
@@ -143,10 +153,23 @@ class StratigraphicCorrelationEngine:
         recommendations: dict[str, TopRecommendation] = {}
 
         for i in range(len(self._wells) - 1):
-            w_a_name = self._wells[i].get("name", "")
-            w_b_name = self._wells[i + 1].get("name", "")
+            w_a = self._wells[i]
+            w_b = self._wells[i + 1]
+            w_a_name = w_a.get("name", "")
+            w_b_name = w_b.get("name", "")
             if w_a_name and w_b_name:
                 alignments[(w_a_name, w_b_name)] = self.align_curves(w_a_name, w_b_name, curve_key)
+                # Recommend each marker top the reference well carries into
+                # the adjacent well (the field existed but was never filled,
+                # #846). Keys: "<top>@<target well>".
+                for item in w_a.get("tops") or w_a.get("layers") or []:
+                    top_name = item.get("name") or item.get("lithology")
+                    if top_name is None:
+                        continue
+                    ref_depth = float(item.get("depth", item.get("top", 0.0)))
+                    recommendations[f"{top_name}@{w_b_name}"] = self.recommend_top(
+                        w_a_name, w_b_name, ref_depth, curve_key
+                    )
 
         return CorrelationSectionResult(
             shifts=shifts,
@@ -163,3 +186,12 @@ class StratigraphicCorrelationEngine:
                 if curve_key in curves:
                     return np.asarray(curves[curve_key], dtype=np.float64)
         return np.array([], dtype=np.float64)
+
+    def _get_well_depths(self, well_name: str, curve_key: str) -> np.ndarray | None:
+        """Depth axis for a named well's curve, when the binding carries one."""
+        for w in self._wells:
+            if w.get("name") == well_name:
+                depths = (w.get("depths") or {}).get(curve_key)
+                if depths is not None:
+                    return np.asarray(depths, dtype=np.float64)
+        return None

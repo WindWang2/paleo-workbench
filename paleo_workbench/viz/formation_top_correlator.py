@@ -50,8 +50,19 @@ class FormationTopCorrelator:
         shift_a = (shifts or {}).get(well_a.get("name", ""), 0.0)
         shift_b = (shifts or {}).get(well_b.get("name", ""), 0.0)
 
-        tops_a = {t.get("name"): float(t.get("depth", 0.0)) + shift_a for t in well_a.get("tops", [])}
-        tops_b = {t.get("name"): float(t.get("depth", 0.0)) + shift_b for t in well_b.get("tops", [])}
+        # Same key spellings the datum engine accepts (#846): 'tops' or
+        # 'layers' for the interval list, 'depth' or 'top' per item — a
+        # 'layers'-style well silently produced zero correlation polygons.
+        def _tops(well: dict, shift: float) -> dict:
+            out: dict = {}
+            for item in well.get("tops") or well.get("layers") or []:
+                name = item.get("name") or item.get("lithology")
+                if name is not None:
+                    out[name] = float(item.get("depth", item.get("top", 0.0))) + shift
+            return out
+
+        tops_a = _tops(well_a, shift_a)
+        tops_b = _tops(well_b, shift_b)
 
         polygons: list[dict[str, Any]] = []
 
@@ -89,6 +100,7 @@ class FormationTopCorrelator:
         depth_step: float | None = None,
         ref_depths: np.ndarray | None = None,
         target_depths: np.ndarray | None = None,
+        window: int | None = None,
     ) -> TopRecommendation:
         """Use DTW curve alignment to recommend corresponding marker top depth in target well.
 
@@ -134,7 +146,7 @@ class FormationTopCorrelator:
         if ref_is_descending:
             ref_idx = len(ref_curve) - 1 - ref_idx
 
-        alignment = self.dtw_matcher.match_curves(ref_curve, target_curve)
+        alignment = self.dtw_matcher.match_curves(ref_curve, target_curve, window=window)
         target_idx = self.dtw_matcher.transfer_top_index(ref_idx, alignment.path_ref, alignment.path_target)
 
         if target_depths is not None and len(target_depths) == len(target_curve):
