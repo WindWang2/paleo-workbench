@@ -60,18 +60,23 @@ def test_draft_dirty_via_fingerprint_not_only_undo_stack():
 def test_sparse_edit_not_full_grid_copy_on_sculpt():
     draft = open_draft_from_array(_z(64, 64), horizon_key="H1")
     before = draft.working_z().copy()
-    draft.sculpt((5.0, 5.0), delta_z=2.0, radius=3.0)
+    cx, cy, radius = 5.0, 5.0, 3.0
+    draft.sculpt((cx, cy), delta_z=2.0, radius=radius)
     after = draft.working_z()
     changed = np.count_nonzero(after != before)
     assert 0 < changed < before.size  # local patch, not whole grid rewrite semantics
-    # Undo stack stores sparse indices: EXACTLY the modified cells, with
-    # payloads matching the pre/post state at those indices. The previous
-    # two assertions were disjunctions that held for ANY index array over
-    # the grid (tautologies), so a dense-patch regression (indices=arange
-    # + full copies) kept this test green (#526).
+    # The #846 brush records a sparse patch containing every vertex within the
+    # falloff radius (weights fall to zero exactly at the rim).  Float32
+    # rounding on a flat baseline can make the visible change count slightly
+    # smaller than the mathematical footprint, so assert on the brush
+    # footprint rather than on the visible delta.
+    rows, cols = before.shape
+    y, x = np.mgrid[0:rows, 0:cols]
+    footprint = np.count_nonzero(np.hypot(x - cx, y - cy) <= radius)
     patch = draft._mesh._undo_stack[-1]
-    assert patch.indices.size == changed
+    assert patch.indices.size == footprint
     assert patch.indices.size < before.size
+    assert changed <= footprint
     flat_before = before.reshape(-1)
     flat_after = after.reshape(-1)
     np.testing.assert_array_equal(patch.old_z, flat_before[patch.indices])
