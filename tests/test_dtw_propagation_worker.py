@@ -104,17 +104,16 @@ def test_bounded_dtw_band_caps_memory_for_large_curves():
 
 
 class _FakeCanvas:
-    """Records the propagate call; returns a canned pick list."""
+    """Records the compute call; returns canned (well, depth) pairs."""
 
     def __init__(self):
         self.calls = []
-        self.picks = ["p1"]
+        self.pairs = [("W2", 1200.0)]
 
-    def propagate_pick_via_dtw(
+    def compute_dtw_propagation(
         self,
         ref_well,
         ref_depth,
-        formation,
         band_radius=None,
         progress_callback=None,
     ):
@@ -122,14 +121,13 @@ class _FakeCanvas:
             {
                 "ref_well": ref_well,
                 "ref_depth": ref_depth,
-                "formation": formation,
                 "band_radius": band_radius,
                 "thread": threading.current_thread().name,
             }
         )
         if progress_callback is not None:
             progress_callback(1, 1)
-        return list(self.picks)
+        return list(self.pairs)
 
 
 def test_worker_runs_propagation_with_bounded_band(qtbot):
@@ -143,7 +141,7 @@ def test_worker_runs_propagation_with_bounded_band(qtbot):
     )
     with qtbot.waitSignal(worker.finished, timeout=5_000) as sig:
         worker.run()
-    assert sig.args[0] == ["p1"]
+    assert sig.args[0] == [("W2", 1200.0)]
     assert len(canvas.calls) == 1
     call = canvas.calls[0]
     assert call["ref_well"] == "A1"
@@ -168,8 +166,8 @@ def test_worker_midrun_cancel_raises_jobcancelled(qtbot):
     """Cancelling during a well boundary surfaces as a clean cancelled signal."""
 
     class _BlockingCanvas:
-        def propagate_pick_via_dtw(
-            self, ref_well, ref_depth, formation, band_radius=None, progress_callback=None
+        def compute_dtw_propagation(
+            self, ref_well, ref_depth, band_radius=None, progress_callback=None
         ):
             if progress_callback is not None:
                 progress_callback(1, 1)  # cancel flag is set → JobCancelled
@@ -197,7 +195,7 @@ def test_run_dtw_executes_off_gui_thread_with_capped_band(qtbot, tmp_path, monke
     canvas.picks_model.add_pick("C1", "A1", 1164.0)
 
     recorder = _FakeCanvas()
-    monkeypatch.setattr(canvas, "propagate_pick_via_dtw", recorder.propagate_pick_via_dtw)
+    monkeypatch.setattr(canvas, "compute_dtw_propagation", recorder.compute_dtw_propagation)
 
     page._run_dtw()
     assert recorder.calls == []  # nothing ran synchronously in the slot
@@ -213,6 +211,45 @@ def test_run_dtw_executes_off_gui_thread_with_capped_band(qtbot, tmp_path, monke
     # Band capped to the loaded curves' sample count (81 samples → 20).
     assert call["band_radius"] == 20
     qtbot.waitUntil(lambda: page.dtw_btn.isEnabled(), timeout=5_000)
+    page.shutdown_workers(2_000)
+
+
+def test_run_dtw_applies_picks_on_gui_thread_only(qtbot, tmp_path, monkeypatch):
+    """#826: the worker computes; every model mutation happens on the GUI
+    thread. add_pick called off-thread raced GUI iteration over the picks
+    dict (dictionary changed size during iteration)."""
+    page = _load_page(qtbot, tmp_path, monkeypatch)
+    canvas = page.cross_host.widget
+    canvas.picks_model.add_pick("C1", "A1", 1164.0)
+
+    compute_threads: list[str] = []
+    apply_threads: list[str] = []
+    real_compute = canvas.compute_dtw_propagation
+
+    def _recorded_compute(ref_well, ref_depth, band_radius=None, progress_callback=None):
+        compute_threads.append(threading.current_thread().name)
+        return [("A2", 1200.0)]
+
+    model = canvas.picks_model
+    real_add = model.add_pick
+
+    def _recorded_add(*args, **kwargs):
+        apply_threads.append(threading.current_thread().name)
+        return real_add(*args, **kwargs)
+
+    monkeypatch.setattr(canvas, "compute_dtw_propagation", _recorded_compute)
+    monkeypatch.setattr(model, "add_pick", _recorded_add)
+    assert real_compute is not None  # API present on the pinned gve
+
+    page._run_dtw()
+    qtbot.waitUntil(
+        lambda: "建议拾取" in page.status_label.text() and bool(apply_threads),
+        timeout=10_000,
+    )
+    assert compute_threads and compute_threads[0] != threading.main_thread().name
+    assert apply_threads and all(t == threading.main_thread().name for t in apply_threads)
+    picks = canvas.picks_model.all_picks()
+    assert any(p.formation_name == "C1" for p in picks)
     page.shutdown_workers(2_000)
 
 
@@ -234,8 +271,8 @@ def test_run_dtw_shutdown_cancels_inflight_job(qtbot, tmp_path, monkeypatch):
     release = threading.Event()
 
     class _SlowCanvas(_FakeCanvas):
-        def propagate_pick_via_dtw(
-            self, ref_well, ref_depth, formation, band_radius=None, progress_callback=None
+        def compute_dtw_propagation(
+            self, ref_well, ref_depth, band_radius=None, progress_callback=None
         ):
             self.calls.append({"thread": threading.current_thread().name})
             started.set()
@@ -244,7 +281,7 @@ def test_run_dtw_shutdown_cancels_inflight_job(qtbot, tmp_path, monkeypatch):
             return []
 
     monkeypatch.setattr(
-        canvas, "propagate_pick_via_dtw", _SlowCanvas().propagate_pick_via_dtw
+        canvas, "compute_dtw_propagation", _SlowCanvas().compute_dtw_propagation
     )
     page._run_dtw()
     qtbot.waitUntil(lambda: started.is_set(), timeout=5_000)
@@ -268,7 +305,7 @@ def test_run_dtw_recommendation_runs_off_gui_thread(qtbot, tmp_path, monkeypatch
     canvas = page.cross_host.widget
     canvas.picks_model.add_pick("C1", "A1", 1164.0)
     monkeypatch.setattr(
-        canvas, "propagate_pick_via_dtw", _FakeCanvas().propagate_pick_via_dtw
+        canvas, "compute_dtw_propagation", _FakeCanvas().compute_dtw_propagation
     )
 
     calls = {"thread": None, "rec": None}
@@ -309,7 +346,7 @@ def test_run_dtw_recommendation_failure_degrades_to_unavailable(
     canvas = page.cross_host.widget
     canvas.picks_model.add_pick("C1", "A1", 1164.0)
     monkeypatch.setattr(
-        canvas, "propagate_pick_via_dtw", _FakeCanvas().propagate_pick_via_dtw
+        canvas, "compute_dtw_propagation", _FakeCanvas().compute_dtw_propagation
     )
 
     def boom(**kwargs):

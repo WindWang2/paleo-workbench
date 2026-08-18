@@ -22,7 +22,14 @@ from typing import Any, Callable
 
 from geoviz import JobCancelled
 
-from paleo_workbench.project.factor_grid_artifacts import clear_live_factor_grid
+from paleo_workbench.project.factor_grid_artifacts import (
+    clear_live_factor_grid,
+    clear_live_factor_grid_if_fingerprint,
+    grid_result_fingerprint,
+    peek_live_factor_grid,
+    store_live_factor_grid,
+)
+from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 from paleo_workbench.project.models import (
     CoordinateReference,
     FactorMapTask,
@@ -82,6 +89,11 @@ class FactorPrepareTaskResult:
     scheduled_result_fingerprint: str | None = None
     error: str | None = None
     elapsed_ms: float = 0.0
+    # The grid this run computed for the task (#834): carried alongside the
+    # staged metadata so the commit can (re)store the EXACT grid the task
+    # describes, even if a competing run keyed over it in the process-global
+    # live cache between compute and commit.
+    grid: FactorGridResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -417,6 +429,7 @@ def run_factor_prepare_schedule(
                     task=task.model_copy(deep=True),
                     scheduled_result_fingerprint=result_fp,
                     error=error,
+                    grid=peek_live_factor_grid(task.id),
                 )
             _emit(
                 total=total,
@@ -480,6 +493,7 @@ def run_factor_prepare_schedule(
                             task=updated.model_copy(deep=True),
                             scheduled_result_fingerprint=result_fp,
                             error=_task_failure(updated),
+                            grid=peek_live_factor_grid(task.id),
                         )
                     )
                 return out
@@ -560,13 +574,22 @@ def commit_prepare_batch_result(
     """
     discarded: list[str] = []
 
+    items_by_id = {item.task_id: item for item in result.task_results}
+
     def _invalidate_live_grids(ids: list[str]) -> list[str]:
         # A discarded commit must not leave its grid in the process-global
         # live cache: the renderer/saver would otherwise serve (or persist)
-        # the rejected grid for the task (H11 torn-cache finding).
+        # the rejected grid for the task (H11 torn-cache finding). Clearing
+        # is FINGERPRINT-CONDITIONAL (#834): a superseded run must not evict
+        # a newer run's grid that keyed over the same task id.
         for tid in ids:
             try:
-                clear_live_factor_grid(tid)
+                item = items_by_id.get(tid)
+                fp = grid_result_fingerprint(item.grid) if item is not None else None
+                if fp is not None:
+                    clear_live_factor_grid_if_fingerprint(tid, fp)
+                else:
+                    clear_live_factor_grid(tid)
             except Exception:
                 pass
         return ids
@@ -629,5 +652,14 @@ def commit_prepare_batch_result(
         # Targeted field replacement by index.
         idx = live_project.factor_map_tasks.index(live)
         live_project.factor_map_tasks[idx] = item.task
+        # Pair the accepted metadata with EXACTLY the grid this run computed
+        # (#834): a competing entry may have keyed over the live cache since
+        # the worker stored it; re-storing the carried (immutable) grid
+        # repairs the pairing, and is a no-op when nothing intervened.
+        if item.grid is not None:
+            try:
+                store_live_factor_grid(item.task_id, item.grid)
+            except Exception:
+                pass
 
     return _invalidate_live_grids(discarded)

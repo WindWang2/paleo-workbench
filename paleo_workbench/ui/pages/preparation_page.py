@@ -4,6 +4,10 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QMessageBox, QSplitter, QVBoxLayout, QWidget
 
 from paleo_workbench.ui import tokens
+from paleo_workbench.project.factor_grid_artifacts import (
+    current_factor_prepare_generation,
+    next_factor_prepare_generation,
+)
 from paleo_workbench.ui.pages.boundary_panel import BoundaryPanel
 from geoviz import CancellationToken
 
@@ -48,6 +52,9 @@ class PreparationPage(QWidget):
         self.setObjectName("PreparationPage")
         self._project = None
         self._tasks: list = []
+        # Process-global prepare/recompute generation (#834): shared with the
+        # send-to-prepare and recompute entries so concurrent runs supersede
+        # each other instead of both passing their own private guards.
         self._prepare_generation = 0
         self._prepare_job = OwnedWorkerJob(self)
         self._prepare_job.released.connect(self._clear_prepare_job)
@@ -91,7 +98,7 @@ class PreparationPage(QWidget):
         """Bind the live ProjectDocument so batch generate can mutate factor_map_tasks."""
         # Project switch supersedes any in-flight prepare generation.
         if project is not self._project and self.is_prepare_running():
-            self._prepare_generation += 1
+            self._prepare_generation = next_factor_prepare_generation()
             self._prepare_job.cancel()
         self._project = project
         self._refresh_well_table_view()
@@ -202,7 +209,7 @@ class PreparationPage(QWidget):
 
     def _start_prepare_worker(self, method: str) -> None:
         self._set_generate_enabled(False)
-        self._prepare_generation += 1
+        self._prepare_generation = next_factor_prepare_generation()
         generation = self._prepare_generation
         token = CancellationToken()
         # Snapshot on the host thread so scientific inputs match Stage-4 fingerprints.
@@ -239,7 +246,7 @@ class PreparationPage(QWidget):
             self._set_generate_enabled(True)
 
     def _on_prepare_progress(self, update: FactorPrepareProgress) -> None:
-        if update.generation != self._prepare_generation:
+        if update.generation != current_factor_prepare_generation():
             return
         if self._prepare_job.target is not self._project:
             return
@@ -254,13 +261,13 @@ class PreparationPage(QWidget):
         target = self._prepare_job.target
         if target is None or self._project is not target:
             return
-        if int(result.generation) != int(self._prepare_generation):
+        if int(result.generation) != int(current_factor_prepare_generation()):
             # Superseded by a newer prepare request or project switch.
             return
         discarded = commit_prepare_batch_result(
             target,
             result,
-            expected_generation=self._prepare_generation,
+            expected_generation=current_factor_prepare_generation(),
         )
         self.update_state(target.factor_map_tasks)
         self.factor_maps_updated.emit()

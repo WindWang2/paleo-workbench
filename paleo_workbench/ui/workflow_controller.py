@@ -6,6 +6,13 @@ from PySide6.QtWidgets import QMessageBox
 from geoviz import CancellationToken
 
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+from paleo_workbench.project.factor_grid_artifacts import (
+    clear_live_factor_grid_if_fingerprint,
+    current_factor_prepare_generation,
+    grid_result_fingerprint,
+    next_factor_prepare_generation,
+    peek_live_factor_grid,
+)
 from paleo_workbench.ui.pages.factor_prepare_worker import FactorPrepareWorker
 from paleo_workbench.workflow.factor_prepare_scheduler import (
     build_prepare_snapshot,
@@ -39,9 +46,16 @@ class _RecomputeWorker(QObject):
     completed = Signal(object, object, object)  # (plan, result, task_updates)
     failed = Signal(str)
 
-    def __init__(self, project, parent=None):
+    def __init__(self, project, generation=0, parent=None):
         super().__init__(parent)
         self._project = project
+        # Process-global run identity (#834): a prepare/send-to-prep entry
+        # that starts later must supersede this recompute's staged results.
+        self.generation = int(generation)
+        # Grids this run stored, keyed by task id — used by the GUI-thread
+        # commit to pair accepted metadata with exactly its own grid and by
+        # a stale discard to clear only entries still owned by this run.
+        self.grids: dict[str, object] = {}
 
     def run(self) -> None:
         try:
@@ -78,6 +92,7 @@ class _RecomputeWorker(QObject):
                 # project off the GUI thread).
                 staged = task.model_copy(deep=True)
                 apply_interpolation_to_task(staged, project=project)
+                self.grids[task_id] = peek_live_factor_grid(task_id)
                 updates.append((task_id, staged))
 
             result = PlanExecutor(handlers={"factor_map": _factor_map_handler}).execute(plan)
@@ -161,7 +176,13 @@ class WorkflowController:
         if self._recompute_job.is_running:
             QMessageBox.information(self.window, "更新受影响成果", "重算任务正在进行中…")
             return
-        worker = _RecomputeWorker(project)
+        # Global run identity (#834): supersedes (and is superseded by) any
+        # concurrent prepare / send-to-prepare run.
+        generation = next_factor_prepare_generation()
+        worker = _RecomputeWorker(project, generation=generation)
+        # Kept for the completion slot (this controller is not a QObject,
+        # so sender() is unavailable there).
+        self._recompute_worker = worker
         self._recompute_job.start(
             worker,
             terminal_signals=(worker.completed, worker.failed),
@@ -176,7 +197,27 @@ class WorkflowController:
         # Commit staged factor tasks on the GUI thread (the worker only
         # interpolated deep copies). Never commit into a project that is no
         # longer the one the plan was built against (#537).
+        worker = getattr(self, "_recompute_worker", None)
+        grids = getattr(worker, "grids", {}) if worker is not None else {}
+        worker_generation = int(getattr(worker, "generation", 0)) if worker is not None else 0
+        # A newer prepare/recompute run superseded this one (#834): drop the
+        # staged metadata AND this run's grids (without evicting a newer
+        # run's entries that keyed over the same task ids).
+        superseded = worker_generation != current_factor_prepare_generation()
         project = self.window.project
+        if superseded:
+            for task_id, _staged in task_updates or ():
+                grid = grids.get(task_id)
+                fp = grid_result_fingerprint(grid) if grid is not None else None
+                if fp is not None:
+                    clear_live_factor_grid_if_fingerprint(task_id, fp)
+                else:
+                    peek = peek_live_factor_grid(task_id)
+                    if peek is not None:
+                        clear_live_factor_grid_if_fingerprint(
+                            task_id, grid_result_fingerprint(peek)
+                        )
+            task_updates = []
         if project is not None and task_updates and self._recompute_job.target is project:
             by_id = {
                 str(getattr(task, "id", "")): index
@@ -186,6 +227,18 @@ class WorkflowController:
                 index = by_id.get(task_id)
                 if index is not None:
                     project.factor_map_tasks[index] = staged
+                    # Pair accepted metadata with exactly this run's grid
+                    # (#834): repair a cache keyed over by a competing entry.
+                    grid = grids.get(task_id)
+                    if grid is not None:
+                        try:
+                            from paleo_workbench.project.factor_grid_artifacts import (
+                                store_live_factor_grid,
+                            )
+
+                            store_live_factor_grid(task_id, grid)
+                        except Exception:
+                            pass
         progress = self._home_workflow_progress()
         if progress is None:
             return
@@ -345,7 +398,7 @@ class WorkflowController:
         if self._prepare_job.is_running:
             QMessageBox.information(self.window, "发送制备", "单因素图制备正在进行中…")
             return
-        self._prepare_generation += 1
+        self._prepare_generation = next_factor_prepare_generation()
         generation = self._prepare_generation
         token = CancellationToken()
         try:
@@ -412,11 +465,11 @@ class WorkflowController:
         project = self.window.project
         if self._prepare_job.target is not project:
             return
-        if int(result.generation) != int(self._prepare_generation):
+        if int(result.generation) != int(current_factor_prepare_generation()):
             return
         # Fingerprint-guarded commit — same semantics as the preparation page.
         commit_prepare_batch_result(
-            project, result, expected_generation=self._prepare_generation
+            project, result, expected_generation=current_factor_prepare_generation()
         )
         self._on_factor_maps_updated()
         page = self._prep_page()

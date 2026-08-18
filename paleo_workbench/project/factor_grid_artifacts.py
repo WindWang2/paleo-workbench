@@ -115,6 +115,31 @@ def reset_artifact_load_counter() -> None:
         _ARTIFACT_PHYSICAL_LOADS = 0
 
 
+# --- process-global prepare/recompute generation (#834) ---------------------
+# Factor computation has three entry points (prepare page "生成", well-log
+# "发送制备", home "更新受影响成果") that each used to guard their own
+# private generation counter. Two concurrent entries both passed their own
+# guards, so the LAST task-metadata writer and the LAST live-grid storer
+# could come from different runs — pairing e.g. "克里金" metadata with an
+# IDW grid that the next save would externalize as that task's artifact.
+# A single process-global monotonic generation makes any competing entry
+# supersede every earlier in-flight run, regardless of which page started it.
+_FACTOR_PREPARE_GENERATION = 0
+
+
+def next_factor_prepare_generation() -> int:
+    """Atomically allocate the next process-global prepare/recompute run."""
+    global _FACTOR_PREPARE_GENERATION
+    with _LIVE_FACTOR_GRIDS_LOCK:
+        _FACTOR_PREPARE_GENERATION += 1
+        return _FACTOR_PREPARE_GENERATION
+
+
+def current_factor_prepare_generation() -> int:
+    with _LIVE_FACTOR_GRIDS_LOCK:
+        return _FACTOR_PREPARE_GENERATION
+
+
 def _array_nbytes(arr: np.ndarray | None) -> int:
     if arr is None:
         return 0
@@ -307,6 +332,48 @@ def clear_live_factor_grid(task_id: str | None) -> None:
             _LIVE_FACTOR_GRIDS_TOTAL_BYTES = max(
                 0, _LIVE_FACTOR_GRIDS_TOTAL_BYTES - old_bytes
             )
+
+
+def peek_live_factor_grid(task_id: str | None):
+    """Read-only view of a task's cached grid (arrays are sealed immutable)."""
+    if not task_id:
+        return None
+    with _LIVE_FACTOR_GRIDS_LOCK:
+        return _LIVE_FACTOR_GRIDS.get(str(task_id))
+
+
+def grid_result_fingerprint(grid) -> str | None:
+    """The result fingerprint a stored grid carries, if any (#834)."""
+    params = getattr(grid, "algorithm_parameters", None)
+    if not isinstance(params, dict):
+        return None
+    fp = params.get("result_fingerprint")
+    return str(fp) if fp else None
+
+
+def clear_live_factor_grid_if_fingerprint(
+    task_id: str | None, fingerprint: str | None
+) -> bool:
+    """Drop the cached entry only while it still carries *fingerprint*.
+
+    A superseded prepare/recompute run must not evict the WINNING run's
+    grid just because both keyed the process-global cache by task id (#834).
+    """
+    global _LIVE_FACTOR_GRIDS_TOTAL_BYTES
+    if not task_id or not fingerprint:
+        return False
+    key = str(task_id)
+    with _LIVE_FACTOR_GRIDS_LOCK:
+        live = _LIVE_FACTOR_GRIDS.get(key)
+        if live is None or grid_result_fingerprint(live) != fingerprint:
+            return False
+        del _LIVE_FACTOR_GRIDS[key]
+        old_bytes = _LIVE_FACTOR_GRID_BYTES.pop(key, 0)
+        _LIVE_ARTIFACT_IDENTITY.pop(key, None)
+        _LIVE_FACTOR_GRIDS_TOTAL_BYTES = max(
+            0, _LIVE_FACTOR_GRIDS_TOTAL_BYTES - old_bytes
+        )
+        return True
 
 
 def live_factor_grid_cache_stats() -> dict[str, int | float]:
