@@ -10,7 +10,7 @@ from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.project.paths import is_within_directory
 from paleo_workbench.resources.well_tops_parser import parse_well_tops
 from paleo_workbench.viz.adapter import VizAdapter
-from paleo_workbench.workflow.well_log_prediction import merge_prediction_onto_well_log
+from paleo_workbench.viz.prediction_helpers import merge_prediction_onto_well_log
 
 
 def _resource_path(project: ProjectDocument, resource) -> Path:

@@ -445,7 +445,6 @@ def materialize_prediction_task(
             "demo_only": bool(model.get("demo_only", False)),
             "demo": bool(result_summary.get("demo", False)),
             "run_id": resolved_run,
-            "output_version_id": resolved_out,
             "prediction_version_id": resolved_out,
         },
         result_summary=result_summary,

@@ -21,9 +21,11 @@ from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 from paleo_workbench.ui.pages.well_log_load_worker import WellLogLoadWorker
 from paleo_workbench.viz import welllog_engine_adapter as engine_adapter
 from paleo_workbench.viz.adapter import VizAdapter
-from paleo_workbench.viz.prediction_helpers import well_log_data_from_prediction
+from paleo_workbench.viz.prediction_helpers import (
+    merge_prediction_onto_well_log,
+    well_log_data_from_prediction,
+)
 from paleo_workbench.viz.well_log_load import is_well_log_cached
-from paleo_workbench.workflow.well_log_prediction import merge_prediction_onto_well_log
 
 BackendName = Literal["legacy", "engine"]
 

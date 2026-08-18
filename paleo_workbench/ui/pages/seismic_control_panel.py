@@ -5,7 +5,8 @@ from PySide6.QtWidgets import QComboBox, QFrame, QLabel, QPushButton, QVBoxLayou
 
 from paleo_workbench.ui import tokens
 from paleo_workbench.viz.prediction_helpers import field_value
-from paleo_workbench.workflow.seismic_prediction import SEISMIC_DISPLAY_MODES
+
+SEISMIC_DISPLAY_MODES = ("vd", "wiggle")
 
 
 class SeismicControlPanel(QFrame):

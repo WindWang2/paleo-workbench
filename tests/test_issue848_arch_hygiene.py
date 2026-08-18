@@ -495,6 +495,77 @@ def test_store_load_raises_catalog_error_when_canonical_and_bak_corrupt(tmp_path
     assert len(isolated) == 1
 
 
+# ------------------------------------- deferred: metadata dialect convergence
+
+
+def test_prediction_task_metadata_uses_single_version_key(project):
+    """Registry path must set prediction_version_id only; no output_version_id
+    legacy dialect remains for _on_seismic_send_to_mapping to double-read."""
+    from paleo_workbench.prediction.inference_service import materialize_prediction_task
+
+    task = materialize_prediction_task(
+        project,
+        payload={
+            "run_id": "run_42",
+            "output_version_id": "ver_out_1",
+            "result_summary": {"predicted_regions": []},
+            "model": {
+                "model_id": "m1",
+                "model_version": "1",
+                "model_name": "Demo",
+                "model_version_id": "mv_1",
+            },
+        },
+        name_prefix="测试预测",
+        workflow="seismic_facies",
+        run_id="run_42",
+        output_version_id="ver_out_1",
+    )
+    assert task.model_metadata.get("prediction_version_id") == "ver_out_1"
+    assert "output_version_id" not in task.model_metadata, (
+        "model_metadata must converge on a single prediction_version_id key; "
+        "output_version_id is the catalog/run dialect, not task metadata"
+    )
+
+
+# ----------------------------------------- deferred: legacy wrapper deletion
+
+
+def test_legacy_prediction_wrapper_modules_removed():
+    """paleo_workbench/workflow/{facies,seismic,well_log}_prediction.py were
+    legacy wrappers with no production callers once utilities moved out."""
+    removed = [
+        "paleo_workbench.workflow.facies_prediction",
+        "paleo_workbench.workflow.seismic_prediction",
+        "paleo_workbench.workflow.well_log_prediction",
+    ]
+    for name in removed:
+        with pytest.raises(ImportError):
+            __import__(name)
+
+
+def test_well_log_prediction_utilities_rehoused():
+    """Still-used helpers from the legacy wrapper moved to viz layer / page."""
+    from paleo_workbench.ui.pages.well_log_prediction_page import export_well_canvas
+    from paleo_workbench.viz.prediction_helpers import (
+        merge_prediction_onto_well_log,
+        regions_to_depth_intervals,
+    )
+
+    assert callable(regions_to_depth_intervals)
+    assert callable(merge_prediction_onto_well_log)
+    assert callable(export_well_canvas)
+
+
+def test_seismic_display_modes_rehoused():
+    """SEISMIC_DISPLAY_MODES moved next to its only consumer."""
+    from paleo_workbench.ui.pages.seismic_control_panel import SEISMIC_DISPLAY_MODES
+
+    assert isinstance(SEISMIC_DISPLAY_MODES, tuple)
+    assert "vd" in SEISMIC_DISPLAY_MODES
+    assert "wiggle" in SEISMIC_DISPLAY_MODES
+
+
 # ------------------------------------------------------------------ helpers
 
 
