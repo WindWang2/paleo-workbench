@@ -729,7 +729,10 @@ class FallbackMapRenderBackend(MapRenderBackend):
         """Approximate 1:N denominator assuming map units are metres."""
         xmin, _, xmax, _ = fit_extent_to_aspect(self._extent, width, self._output_size[1])
         units_per_pixel = (xmax - xmin) / max(1, width)
-        return units_per_pixel / (0.0254 / _BASE_DPI)
+        # The denominator is units per physical inch: it must follow the
+        # configured dpi, not the hard-coded base (#852) — scale_range
+        # visibility was silently wrong on HiDPI/export otherwise.
+        return units_per_pixel / (0.0254 / self._dpi)
 
     def _paint_composition(
         self, painter: QPainter, width: int, height: int, dpi: float,
@@ -769,6 +772,12 @@ class FallbackMapRenderBackend(MapRenderBackend):
             try:
                 if layer.layer_type == "scalar_grid":
                     self._draw_scalar_grid(painter, layer)
+                elif layer.layer_type == "raster_source":
+                    # Reference basemaps must survive the fallback pipeline
+                    # too — the off-thread export worker renders through a
+                    # throwaway fallback backend even on QGIS installs, and a
+                    # missing branch silently dropped the raster (#832).
+                    self._draw_raster_source(painter, layer)
                 elif layer.layer_type == "vector" and layer.features:
                     self._paint_vector_layer(
                         painter, layer, xmin, ymin, span_x, span_y, width, height, dpi_scale,
@@ -1307,6 +1316,26 @@ class FallbackMapRenderBackend(MapRenderBackend):
             width * 4,
             QImage.Format.Format_RGBA8888,
         ).copy()
+        xmin, ymin, xmax, ymax = layer.extent
+        top_left = self._screen_point((xmin, ymax))
+        bottom_right = self._screen_point((xmax, ymin))
+        if top_left is not None and bottom_right is not None:
+            painter.drawImage(QRectF(top_left, bottom_right).normalized(), image)
+
+    def _draw_raster_source(self, painter: QPainter, layer: MapLayerSnapshot) -> None:
+        """Composite a reference raster (``renderer_payload`` is the image path).
+
+        Mirrors the scalar-grid mapping without interpolation: the image is
+        stretched onto the layer's world extent. A missing/unreadable source
+        is skipped silently, exactly like the QGIS `_qgis_snapshot` side skips
+        raster sources without a path.
+        """
+        source = layer.renderer_payload
+        if not source:
+            return
+        image = QImage(str(source))
+        if image.isNull():
+            return
         xmin, ymin, xmax, ymax = layer.extent
         top_left = self._screen_point((xmin, ymax))
         bottom_right = self._screen_point((xmax, ymin))

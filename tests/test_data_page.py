@@ -1478,3 +1478,83 @@ def test_update_state_builds_row_views_once_per_refresh(qtbot, tmp_path: Path):
     assert calls == [1] * n, f"expected {n} builds, got {len(calls)}"
     # The table still received its views.
     assert page.asset_table.model.rowCount() >= n
+
+
+def test_deliver_managed_resource_copies_immutable_snapshot_not_drifted_original(
+    qtbot, monkeypatch, tmp_path: Path
+):
+    """#835: delivery of a catalog-bridged managed resource must copy the
+    immutable managed snapshot the version references, never the legacy
+    original file that may have drifted since import; and the deliverable
+    must stay writable (no propagated read-only protection bit)."""
+    from PySide6.QtWidgets import QDialog
+
+    from paleo_workbench.catalog import (
+        CoreCatalogAdapter,
+        DataCatalogService,
+        reset_catalog,
+        set_catalog,
+    )
+    from paleo_workbench.catalog.checksum import sha256_file
+    from paleo_workbench.catalog.lifecycle import register_resource_input
+    from paleo_workbench.ui import data_lifecycle_controller as dlc
+
+    project_file = tmp_path / "proj" / "demo.paleo.json"
+    project_file.parent.mkdir(parents=True)
+    project_file.write_text("{}", encoding="utf-8")
+    service = DataCatalogService.open(project_file)
+    try:
+        set_catalog(CoreCatalogAdapter(service))
+
+        original = tmp_path / "orig.las"
+        original.write_bytes(b"ORIGINAL-CURVE-DATA")
+        resource = ResourceItem(
+            id="res-delivery-835",
+            name="orig.las",
+            path=str(original),
+            type="well_log",
+            format="las",
+            status="parsed",
+            external=False,
+        )
+        ref = register_resource_input(resource)
+        assert ref is not None
+
+        # The legacy original drifts after import; the managed snapshot must not.
+        original.write_bytes(b"TAMPERED-BYTES")
+        assert sha256_file(original) != ref.checksum
+
+        project = ProjectDocument.new("Demo")
+        project.resources.append(resource)
+        page = DataPage(project=project)
+        qtbot.addWidget(page)
+        page.project_path = project_file
+
+        destination = tmp_path / "handoff" / "delivery.las"
+
+        class AcceptedDialog:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def exec(self):  # noqa: A003 - Qt API name
+                return QDialog.DialogCode.Accepted
+
+            def output_path(self):
+                return destination
+
+        monkeypatch.setattr(dlc, "_DeliveryDialog", AcceptedDialog)
+        page._lifecycle.deliver_asset(resource)
+
+        status = page.data_toolbar.operation_status_label.text()
+        assert "源文件不存在" not in status
+        assert "已导出 / 交付" in status
+        # Bytes match the immutable managed snapshot (== recorded version
+        # checksum), NOT the drifted original.
+        assert destination.read_bytes() == b"ORIGINAL-CURVE-DATA"
+        assert sha256_file(destination) == ref.checksum
+        # The deliverable must be usable by the recipient: writable, never a
+        # propagated read-only protection bit (mode 400).
+        assert bool(destination.stat().st_mode & 0o200)
+    finally:
+        reset_catalog()
+        service.close()

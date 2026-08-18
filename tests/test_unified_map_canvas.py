@@ -211,3 +211,38 @@ def test_unified_canvas_wheel_zoom_keeps_cursor_fixed_across_many_notches(qtbot)
     after = canvas.screen_to_map(cursor)
     assert after[0] == pytest.approx(before[0], abs=1e-9)
     assert after[1] == pytest.approx(before[1], abs=1e-9)
+
+
+def test_export_svg_default_height_follows_view_aspect(qtbot, tmp_path) -> None:
+    """#852: the SVG export default must derive its frame from the view's
+    aspect exactly like the PNG path — a fixed 2400x1600 letterboxed any
+    non-3:2 view into a different world window than the PNG export, so the
+    same view produced two different pictures."""
+    canvas = UnifiedMapCanvas(backend=FallbackMapRenderBackend())
+    qtbot.addWidget(canvas)
+    canvas.resize(900, 640)
+    canvas.set_extent((0.0, 0.0, 10.0, 5.0), record_history=False)
+
+    out = tmp_path / "map.svg"
+    canvas.export_svg(str(out))
+    text = out.read_text(encoding="utf-8")
+    # 2:1 view at width 2400 -> height 1200, not the old fixed 1600.
+    assert 'width="2400"' in text
+    assert 'height="1200"' in text
+
+
+def test_export_pdf_default_size_follows_view_aspect(qtbot, tmp_path) -> None:
+    """#852: the PDF export default must derive its page from the view's
+    aspect like the PNG path (2:1 view at 300 dpi -> 2400x1200 px)."""
+    canvas = UnifiedMapCanvas(backend=FallbackMapRenderBackend())
+    qtbot.addWidget(canvas)
+    canvas.resize(900, 640)
+    canvas.set_extent((0.0, 0.0, 10.0, 5.0), record_history=False)
+
+    out = tmp_path / "map.pdf"
+    canvas.export_pdf(str(out))
+    data = out.read_bytes()
+    assert data.startswith(b"%PDF")
+    # 2400px @ 300dpi = 8in x 4in = 576pt x 288pt (not the old 576 x 384 =
+    # fixed 2400x1600). Qt writes MediaBox with six decimal places.
+    assert b"/MediaBox [0 0 576.000000 288.000000]" in data

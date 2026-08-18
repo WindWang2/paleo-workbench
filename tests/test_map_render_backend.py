@@ -453,3 +453,136 @@ def test_fallback_dpi_scales_widths_but_not_geometry_positions() -> None:
     # Same vertical band center (position unchanged), wider band at 300 dpi.
     assert (min(rows_96) + max(rows_96)) // 2 == (min(rows_300) + max(rows_300)) // 2
     assert len(rows_300) > len(rows_96)
+
+
+def _frame_ink(frame) -> int:
+    """Sum of pixel deviation from the fallback background across a frame."""
+    pixels = np.frombuffer(frame.rgba, dtype=np.uint8).reshape(
+        frame.height, frame.width, 4
+    ).astype(int)
+    background = np.array([0x18, 0x1C, 0x22, 0xFF], dtype=int)
+    return int(np.abs(pixels - background).sum())
+
+
+def test_fallback_scale_denominator_tracks_configured_dpi() -> None:
+    """#852: _scale_denominator must use the configured dpi, not a hard-coded
+    96 — otherwise a 300-dpi export reports a 3.1x-too-small denominator and
+    scale_range layer visibility flips incorrectly on HiDPI/export."""
+    backend = FallbackMapRenderBackend()
+    backend.initialize()
+    backend.set_extent((0.0, 0.0, 20.0, 20.0))
+    backend.set_output_size(160, 120)
+
+    denom_96 = backend._scale_denominator(160)
+    backend.set_dpi(192.0)
+    denom_192 = backend._scale_denominator(160)
+    backend.set_dpi(300.0)
+    denom_300 = backend._scale_denominator(160)
+
+    assert denom_96 > 0
+    # The denominator is units-per-pixel × dpi / 0.0254: it must scale with
+    # the configured dpi (192/96 = 2x, 300/96 = 3.125x).
+    assert denom_192 / denom_96 == pytest.approx(192.0 / 96.0, rel=1e-9)
+    assert denom_300 / denom_96 == pytest.approx(300.0 / 96.0, rel=1e-9)
+
+
+def test_fallback_scale_range_visibility_flips_with_configured_dpi() -> None:
+    """#852: a scale_range window must gate on the denominator derived from
+    the configured dpi; with the 96-dpi hard-code the layer's visibility was
+    frozen regardless of the export dpi."""
+    backend = FallbackMapRenderBackend()
+    backend.initialize()
+    backend.set_extent((0.0, 0.0, 20.0, 20.0))
+    backend.set_output_size(160, 120)
+    # For this viewport the fitted extent spans 26.667 world units across
+    # 160 px: denominator ≈ 630 @ 96 dpi and ≈ 1968 @ 300 dpi. The window
+    # between the two makes the layer appear only at high dpi.
+    backend.set_layer_snapshot(
+        MapRenderSnapshot(
+            project_crs="EPSG:3857",
+            layers=(
+                MapLayerSnapshot(
+                    id="scaled",
+                    name="Scaled",
+                    layer_type="vector",
+                    extent=(0.0, 0.0, 20.0, 20.0),
+                    crs="EPSG:3857",
+                    data_revision=1,
+                    style_revision=1,
+                    features=(
+                        {
+                            "id": "f1",
+                            "geometry": {
+                                "type": "Polygon",
+                                "coordinates": [
+                                    [
+                                        [0.0, 0.0],
+                                        [20.0, 0.0],
+                                        [20.0, 20.0],
+                                        [0.0, 20.0],
+                                        [0.0, 0.0],
+                                    ]
+                                ],
+                            },
+                            "properties": {},
+                        },
+                    ),
+                    style={"fill": "#ff00ff", "stroke": "#ff00ff", "stroke_width": 1.0},
+                    scale_range=(700.0, 2000.0),
+                ),
+            ),
+        )
+    )
+
+    backend.set_dpi(96.0)
+    frame_low = backend.render_sync()
+    backend.set_dpi(300.0)
+    frame_high = backend.render_sync()
+
+    # Below the window at 96 dpi (629.9 < 700): background only. At 300 dpi
+    # (1968.5 in [700, 2000]) the magenta layer covers the viewport.
+    assert _frame_ink(frame_low) == 0
+    assert _frame_ink(frame_high) > 0
+
+
+def test_fallback_backend_renders_raster_source_reference(tmp_path) -> None:
+    """#832: the fallback composition must draw raster_source layers too —
+    the off-thread export worker renders through a throwaway fallback backend
+    even on QGIS installs, so a missing branch silently dropped the reference
+    basemap from exported PNGs."""
+    from PySide6.QtGui import QColor, QImage
+
+    source = tmp_path / "basemap.png"
+    image = QImage(8, 8, QImage.Format.Format_RGBA8888)
+    image.fill(QColor("#ff8800"))
+    assert image.save(str(source), "PNG")
+
+    snapshot = MapRenderSnapshot(
+        project_crs="EPSG:3857",
+        layers=(
+            MapLayerSnapshot(
+                id="reference",
+                name="Reference",
+                layer_type="raster_source",
+                extent=(0.0, 0.0, 4.0, 4.0),
+                crs="EPSG:3857",
+                data_revision=1,
+                style_revision=1,
+                renderer_payload=str(source),
+            ),
+        ),
+    )
+    backend = FallbackMapRenderBackend()
+    backend.initialize()
+    backend.set_layer_snapshot(snapshot)
+    backend.set_extent((0.0, 0.0, 4.0, 4.0))
+    backend.set_output_size(64, 64)
+    frame = backend.render_sync()
+
+    # The raster tint (#ff8800) must dominate the frame instead of the
+    # background: red channel high, green channel at 0x88.
+    pixels = np.frombuffer(frame.rgba, dtype=np.uint8).reshape(64, 64, 4).astype(int)
+    orange = int(
+        ((np.abs(pixels[:, :, 0] - 0xFF) < 40) & (np.abs(pixels[:, :, 1] - 0x88) < 40)).sum()
+    )
+    assert orange > 64 * 64 // 2

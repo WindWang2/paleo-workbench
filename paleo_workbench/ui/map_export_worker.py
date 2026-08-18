@@ -131,14 +131,28 @@ class MapExportWorker(QObject):
             render_and_save_map_export(self._spec)
         except Exception as exc:  # noqa: BLE001 — surface any failure to UI
             if self._cancel_event.is_set():
+                # A render that raised mid-way may have left partial bytes
+                # on disk; a cancelled export must never keep them (#852).
+                self._discard_partial()
                 self.cancelled.emit()
                 return
             self.failed.emit(f"{exc.__class__.__name__}: {exc}")
             return
         if self._cancel_event.is_set():
+            # The render completed and wrote its file while the user was
+            # cancelling: drop the stale half-product instead of reporting
+            # "cancelled" next to a completed-looking file (#852).
+            self._discard_partial()
             self.cancelled.emit()
             return
         self.finished.emit(self._spec.path)
+
+    def _discard_partial(self) -> None:
+        """Remove the target file written by a cancelled render (best-effort)."""
+        try:
+            Path(self._spec.path).unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def start_map_export_job(
