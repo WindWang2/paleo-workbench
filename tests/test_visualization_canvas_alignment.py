@@ -73,6 +73,10 @@ def test_open_ref_loads_las_into_well_log_canvas(qtbot, tmp_path: Path):
     ref = VizAdapter().ref_from_resource(res)
     assert ref is not None
     page.open_ref(ref)
+    # #842: cold-cache LAS opens are asynchronous — wait for the payload.
+    qtbot.waitUntil(
+        lambda: len(page.composite_panel.well_canvas.tracks) > 0, timeout=10_000
+    )
 
     assert page.composite_panel.tabs.tabText(page.composite_panel.tabs.currentIndex()) == "测井"
     assert len(page.composite_panel.well_canvas.tracks) > 0

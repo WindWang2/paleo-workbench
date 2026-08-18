@@ -28,6 +28,12 @@ class ContourDraftWorker(QObject):
 
     Applying drafts to live map documents remains a short GUI-thread commit,
     so edits made while extraction runs are not overwritten by a stale clone.
+
+    The snapshot is NARROW (mirroring ``FactorPrepareWorker``'s snapshot
+    contract): only the fields the extraction core consumes are staged —
+    factor tasks (grids resolve through the live cache by task id) and the
+    contour-draft ledger.  The previous whole-document ``model_copy(deep=True)``
+    stalled the GUI for seconds on large projects (#850-6).
     """
 
     completed = Signal(object)
@@ -43,8 +49,19 @@ class ContourDraftWorker(QObject):
         cancellation_token: CancellationToken | None = None,
     ) -> None:
         super().__init__(parent)
-        self._project = project.model_copy(deep=True)
+        self._project = self._build_snapshot(project)
         self._cancellation_token = cancellation_token or CancellationToken()
+
+    @staticmethod
+    def _build_snapshot(project):
+        from paleo_workbench.project.models import ProjectDocument
+
+        snapshot = ProjectDocument.new("_contour_snapshot")
+        snapshot.factor_map_tasks = list(
+            getattr(project, "factor_map_tasks", None) or []
+        )
+        snapshot.contour_drafts = list(getattr(project, "contour_drafts", None) or [])
+        return snapshot
 
     def run(self) -> None:
         try:

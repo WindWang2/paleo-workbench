@@ -51,6 +51,11 @@ def test_open_ref_well_log_selects_well_tab(qtbot, tmp_path: Path):
     ref = VizAdapter().ref_from_resource(res)
     page.open_ref(ref)
 
+    # #842: cold-cache LAS opens resolve on a worker thread; wait for the
+    # payload to land instead of asserting mid-load.
+    qtbot.waitUntil(
+        lambda: len(page.composite_panel.well_canvas.tracks) > 0, timeout=10_000
+    )
     assert page.composite_panel.tabs.currentIndex() == 0  # 测井
     assert page.composite_panel.well_canvas is not None
     assert len(page.composite_panel.well_canvas.tracks) > 0
@@ -152,6 +157,14 @@ def test_summary_asset_selected_opens_ref(qtbot, tmp_path: Path):
     page.summary_panel.asset_list.setCurrentRow(0)
     page.summary_panel.asset_list.itemActivated.emit(page.summary_panel.asset_list.item(0))
 
+    # #842: cold-cache LAS opens are asynchronous — wait for the tab to land.
+    qtbot.waitUntil(
+        lambda: page.composite_panel.tabs.tabText(
+            page.composite_panel.tabs.currentIndex()
+        )
+        == "测井",
+        timeout=10_000,
+    )
     assert page.composite_panel.tabs.tabText(page.composite_panel.tabs.currentIndex()) == "测井"
     assert page._current_ref is not None
     assert page._current_ref.kind == "well_log"
@@ -166,6 +179,10 @@ def test_trace_refresh_reloads_current(qtbot, tmp_path: Path):
     page.update_state([res], [], [])
     ref = VizAdapter().ref_from_resource(res)
     page.open_ref(ref)
+    # #842: cold-cache LAS opens are asynchronous; wait before refreshing.
+    qtbot.waitUntil(
+        lambda: page.trace_panel.kind_value.text() == "well_log", timeout=10_000
+    )
 
     page.trace_panel.refresh_btn.click()
     assert page.trace_panel.kind_value.text() == "well_log"
@@ -180,6 +197,10 @@ def test_message_payload_clears_prior_well_tracks(qtbot, tmp_path: Path):
     qtbot.addWidget(page)
     page.update_state([res], [], [])
     page.open_ref(VizAdapter().ref_from_resource(res))
+    # #842: cold-cache opens are asynchronous — wait for the payload to land.
+    qtbot.waitUntil(
+        lambda: len(page.composite_panel.well_canvas.tracks) > 0, timeout=10_000
+    )
     assert len(page.composite_panel.well_canvas.tracks) > 0
 
     missing = ResourceItem(
@@ -192,6 +213,9 @@ def test_message_payload_clears_prior_well_tracks(qtbot, tmp_path: Path):
     page.update_state([res, missing], [], [])
     page.open_ref(VizAdapter().ref_from_resource(missing))
 
+    qtbot.waitUntil(
+        lambda: page.composite_panel.well_canvas.tracks == [], timeout=10_000
+    )
     assert page.composite_panel.well_canvas.tracks == []
     assert "不存在" in page.trace_panel.path_value.text() or "不可读" in page.trace_panel.path_value.text()
 

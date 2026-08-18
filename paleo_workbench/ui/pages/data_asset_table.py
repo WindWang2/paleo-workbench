@@ -95,7 +95,12 @@ class DataAssetTable(QWidget):
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setSortingEnabled(True)
+        # Header clicks are routed through _on_header_clicked instead of the
+        # view's built-in sorting so the user's sort intent is tracked
+        # explicitly (Qt's implicit sortByColumn(0, descending) on setModel
+        # must never be mistaken for a user sort — #850-1).
+        self.table.setSortingEnabled(False)
+        self.table.horizontalHeader().sectionClicked.connect(self._on_header_clicked)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -123,6 +128,9 @@ class DataAssetTable(QWidget):
         self._resources = list(resources)
         self._artifacts = list(artifacts)
         self._project_root = project_root
+        prev_primary = self._selected_asset
+        prev_multi = list(self._selected_assets)
+        pre_build_sort = self.model.last_sort
         assets: list[object] = [*self._resources, *self._artifacts, *(extra_assets or [])]
         # project_root makes project-relative paths resolvable so relative
         # assets are not misreported as MISSING (F4).
@@ -140,25 +148,36 @@ class DataAssetTable(QWidget):
             views=self._index.views,  # reuse the index's views (#527)
         )
         self._visible_assets = [assets[i] for i in filtered]
-        # Auto-fit column widths to content on data refresh.
-        # Temporarily disable stretch-last-section so resizeColumnsToContents
-        # measures actual content, not the previously-stretched width.
+        # Auto-fit column widths to content on data refresh.  Skip the
+        # O(rows×cols) content measurement on large tables — 1k rows measured
+        # ~0.5s offscreen with zero paint cost — mirroring the
+        # TablePreviewWidget ≤10k-cell guard (#850-3).
         header = self.table.horizontalHeader()
         prev_stretch = header.stretchLastSection()
         header.setStretchLastSection(False)
-        for col in range(header.count()):
-            header.resizeSection(col, 50)
-        self.table.resizeColumnsToContents()
-        for col in range(header.count()):
-            w = header.sectionSize(col)
-            if w > 300:
-                header.resizeSection(col, 300)
+        cell_count = self.model.rowCount() * self.model.columnCount()
+        if cell_count <= 10_000:
+            for col in range(header.count()):
+                header.resizeSection(col, 50)
+            self.table.resizeColumnsToContents()
+            for col in range(header.count()):
+                w = header.sectionSize(col)
+                if w > 300:
+                    header.resizeSection(col, 300)
+        else:
+            # No content measurement on big tables; keep a readable fixed width.
+            for col in range(header.count()):
+                header.resizeSection(col, 120)
         header.setStretchLastSection(prev_stretch)
-        if not self._sync_selection() and self._selected_asset is not None:
-            self._selected_asset = None
-            self._selected_assets = []
-            self.selected_asset_changed.emit(None)
-            self.selected_assets_changed.emit([])
+        # The model rebuild above dropped the header sort; re-apply it so the
+        # visible order stays honest with the indicator (#850-1).
+        self._reapply_sort(pre_build_sort)
+        self._sync_selection()
+        # Notify consumers whenever a refresh shrank/cleared the selection, so
+        # batch operations can never act on rows that are no longer visible
+        # (#850-2).  Intermediary restores during model resets are transient;
+        # compare against the pre-refresh state.
+        self._emit_selection_changes(prev_primary, prev_multi)
 
     def set_category(self, category: str) -> None:
         query = self._index._parse_legacy_category(category, self._search_text)
@@ -221,15 +240,19 @@ class DataAssetTable(QWidget):
                 self._resources, self._artifacts, project_root=self._project_root
             )
             return
+        prev_primary = self._selected_asset
+        prev_multi = list(self._selected_assets)
+        pre_build_sort = self.model.last_sort
         filtered = self._index.filter_query(self._filter_query)
         self.model.set_filtered_rows(filtered)
         source = assets if assets else [*self._resources, *self._artifacts]
         self._visible_assets = [source[i] for i in filtered if 0 <= i < len(source)]
-        if not self._sync_selection() and self._selected_asset is not None:
-            self._selected_asset = None
-            self._selected_assets = []
-            self.selected_asset_changed.emit(None)
-            self.selected_assets_changed.emit([])
+        # Re-apply the header sort lost by the model rebuild so the visible
+        # order stays honest with the sort indicator (#850-1).
+        self._reapply_sort(pre_build_sort)
+        self._sync_selection()
+        # Same shrink-notification contract as update_assets (#850-2).
+        self._emit_selection_changes(prev_primary, prev_multi)
 
     def _build_column_settings_menu(self) -> None:
         for column in COLUMN_DEFINITIONS:
@@ -325,20 +348,91 @@ class DataAssetTable(QWidget):
         ]
         self._sync_selection()
 
-    def _sync_selection(self) -> bool:
-        selected_key = self._asset_key(self._selected_asset)
-        selected_row = next(
-            (
-                row
-                for row, asset in enumerate(self._visible_assets)
-                if self._asset_key(asset) == selected_key
-            ),
-            None,
+    def _on_header_clicked(self, column: int) -> None:
+        """Sort by the clicked column, toggling direction on repeat clicks.
+
+        Replaces the view's built-in sorting so the user's sort intent is
+        recorded explicitly (see ``_reapply_sort`` / #850-1).
+        """
+        header = self.table.horizontalHeader()
+        if (
+            column == header.sortIndicatorSection()
+            and header.sortIndicatorOrder() == Qt.SortOrder.AscendingOrder
+        ):
+            order = Qt.SortOrder.DescendingOrder
+        else:
+            order = Qt.SortOrder.AscendingOrder
+        header.setSortIndicator(column, order)
+        header.setSortIndicatorShown(True)
+        self.model.sort(column, order)
+
+    def _reapply_sort(self, pre_build_sort=None) -> None:
+        """Re-apply the user's header sort after a filter/refresh model rebuild.
+
+        A model rebuild resets the rows (canonical order) while the header
+        keeps its indicator; re-sorting keeps the shown order honest with the
+        indicator instead of silently resetting it (#850-1).  *pre_build_sort*
+        is the sort captured before the rebuild — the rebuild itself clears the
+        model's recorded sort so Qt's reset-time auto-sort is never mistaken
+        for a user action.
+        """
+        last = pre_build_sort if pre_build_sort is not None else self.model.last_sort
+        if last is None:
+            return
+        column, order = last
+        if not (0 <= column < self.model.columnCount()):
+            return
+        self.table.sortByColumn(column, order)
+
+    def _emit_selection_changes(self, prev_primary, prev_multi: list[object]) -> None:
+        """Emit selection signals when a refresh/filter shrank or cleared it.
+
+        Compares the current selection (already rebuilt onto the visible rows)
+        against the pre-mutation state so consumers stop acting on rows that
+        are no longer visible (#850-2).
+        """
+        current_primary = self._selected_asset
+        primary_changed = (prev_primary is None) != (current_primary is None) or (
+            prev_primary is not None
+            and current_primary is not None
+            and self._asset_key(prev_primary) != self._asset_key(current_primary)
         )
+        multi_changed = [
+            self._asset_key(a) for a in prev_multi
+        ] != [self._asset_key(a) for a in self._selected_assets]
+        if primary_changed:
+            self.selected_asset_changed.emit(current_primary)
+        if multi_changed:
+            self.selected_assets_changed.emit(list(self._selected_assets))
+
+    def _sync_selection(self) -> bool:
+        """Restore the selection onto the current visible rows.
+
+        Rebuilds ``_selected_assets`` from what is actually visible so a
+        filter/search change can never leave the multi-selection pointing at
+        rows the user can no longer see (#850-2).  Emits nothing itself
+        (callers notify via :meth:`_emit_selection_changes`).  Returns True
+        when at least one previously selected asset is still visible.
+        """
+        wanted_keys = {
+            key
+            for key in (
+                self._asset_key(self._selected_asset),
+                *(self._asset_key(a) for a in self._selected_assets),
+            )
+            if key is not None
+        }
+
         selection_model = self.table.selectionModel()
         selection_model.blockSignals(True)
         self.table.clearSelection()
-        if selected_row is not None:
-            self.table.selectRow(selected_row)
+        restored: list[object] = []
+        for row, asset in enumerate(self._visible_assets):
+            if self._asset_key(asset) in wanted_keys:
+                self.table.selectRow(row)
+                restored.append(asset)
         selection_model.blockSignals(False)
-        return selected_row is not None
+
+        self._selected_assets = list(restored)
+        self._selected_asset = restored[0] if restored else None
+        return bool(restored)

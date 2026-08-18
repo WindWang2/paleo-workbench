@@ -62,6 +62,23 @@ def detect_depth_unit(path: str) -> str:
     return "m"
 
 
+def is_well_log_cached(path: str) -> bool:
+    """True when a load result for *path* is already in the LRU cache.
+
+    Cheap stat-key check without parsing, so callers can keep the synchronous
+    fast path on a cache hit and defer only cold parses to a worker thread
+    (#842).
+    """
+    if not path:
+        return False
+    file_path = Path(path)
+    try:
+        mtime = file_path.stat().st_mtime
+    except OSError:
+        return False
+    return (str(file_path), mtime) in _las_cache
+
+
 def load_well_log_from_path(path: str) -> Any | None:
     """Return engine ``WellLogData`` for LAS or XML well log files.
 

@@ -89,6 +89,12 @@ def test_well_log_canvas_uses_bound_las(qtbot, monkeypatch):
     qtbot.addWidget(panel)
     panel.update_state(task, project=project)
 
+    # #842: cold-cache bound-LAS resolution runs on a worker thread; wait for
+    # the merged payload to land before asserting.
+    qtbot.waitUntil(
+        lambda: panel.well_log_data is not None and panel.has_bound_las(),
+        timeout=10_000,
+    )
     # Merge prediction facies onto a copy of LAS data (identity not preserved).
     assert panel.well_log_data is not None
     assert panel.well_log_data.well_name == "from-adapter"
@@ -96,6 +102,7 @@ def test_well_log_canvas_uses_bound_las(qtbot, monkeypatch):
     assert len(panel.well_log_data.lithology) >= 1
     assert panel.stack.currentWidget() is panel.canvas_scroll
     assert panel.empty_label.isHidden()
+    panel.shutdown()
 
 
 def test_well_log_canvas_bound_failure_shows_message(qtbot, monkeypatch):
@@ -128,9 +135,15 @@ def test_well_log_canvas_bound_failure_shows_message(qtbot, monkeypatch):
     qtbot.addWidget(panel)
     panel.update_state(task, project=project)
 
+    # #842: cold-cache resolution runs on a worker thread — wait for the
+    # failure payload to land.
+    qtbot.waitUntil(
+        lambda: panel.empty_label.text() == "井数据文件不存在或不可读", timeout=10_000
+    )
     assert panel.well_log_data is None
     assert panel.stack.currentWidget() is panel.empty_label
     assert panel.empty_label.text() == "井数据文件不存在或不可读"
+    panel.shutdown()
 
 
 def test_canvas_panel_default_backend_is_engine(qtbot, monkeypatch):

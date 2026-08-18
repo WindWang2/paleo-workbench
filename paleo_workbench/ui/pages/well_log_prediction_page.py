@@ -76,6 +76,10 @@ class WellLogPredictionPage(QWidget):
         self.evidence_panel.demo_requested.connect(self._on_demo)
         self.evidence_panel.send_requested.connect(self.send_to_preparation_requested.emit)
         self.evidence_panel.export_requested.connect(self._on_export)
+        # A bound LAS finishes loading on a worker thread (#842); refresh the
+        # evidence summary once it lands so the "绑定 LAS" source label and the
+        # export gating track the actual canvas state.
+        self.canvas_panel.canvas_ready.connect(self._on_canvas_ready)
 
     def set_project(self, project) -> None:
         if project is not self._project:
@@ -130,6 +134,12 @@ class WellLogPredictionPage(QWidget):
         ):
             return self._tasks[self._selected_index]
         return active_prediction_task(self._tasks)
+
+    def _on_canvas_ready(self, _ready: bool) -> None:
+        task = self._current_task()
+        self.evidence_panel.update_state(
+            task, bound_las=self.canvas_panel.has_bound_las()
+        )
 
     def _on_task_selected(self, index: int) -> None:
         self._selected_index = index
@@ -261,6 +271,8 @@ class WellLogPredictionPage(QWidget):
         )
         worker = InferenceWorker(service, run.id)
         self._active_inference_context = (self._session_token, self._project, service)
+        # #850-7: expose the busy state instead of silently swallowing clicks.
+        self.evidence_panel.set_inferring(True)
         self._inference_job.start(
             worker,
             terminal_signals=(worker.terminal,),
@@ -286,6 +298,7 @@ class WellLogPredictionPage(QWidget):
         self._on_inference_failed(text)
 
     def _on_inference_completed(self, payload: dict) -> None:
+        self.evidence_panel.set_inferring(False)
         run = payload.get("run")
         if run is None or getattr(run, "status", "") == "failed":
             error = "未知错误"
@@ -344,6 +357,7 @@ class WellLogPredictionPage(QWidget):
         self.prediction_updated.emit()
 
     def _on_inference_failed(self, text: str) -> None:
+        self.evidence_panel.set_inferring(False)
         QMessageBox.critical(self, "测井预测失败", f"推断失败: {text}")
 
     def _on_export(self, format_label: str = "PNG") -> None:

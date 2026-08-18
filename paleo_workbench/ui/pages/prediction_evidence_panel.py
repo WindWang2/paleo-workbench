@@ -19,6 +19,7 @@ class PredictionEvidencePanel(QFrame):
         super().__init__(parent)
         self.setObjectName("PredictionEvidencePanel")
         self.setFixedWidth(220)
+        self._inferring = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(
@@ -92,8 +93,16 @@ class PredictionEvidencePanel(QFrame):
     def set_actions_enabled(self, *, can_export: bool, can_send: bool) -> None:
         self.export_btn.setEnabled(can_export)
         self.send_btn.setEnabled(can_send)
-        self.run_btn.setEnabled(True)
-        self.demo_btn.setEnabled(True)
+        # #850-7: while an inference runs the run/demo actions stay disabled
+        # instead of silently swallowing a second click.
+        self.run_btn.setEnabled(not self._inferring)
+        self.demo_btn.setEnabled(not self._inferring)
+
+    def set_inferring(self, busy: bool) -> None:
+        """Enable/disable the run/demo actions for the duration of a run."""
+        self._inferring = bool(busy)
+        self.run_btn.setEnabled(not self._inferring)
+        self.demo_btn.setEnabled(not self._inferring)
 
     def update_state(self, task, *, bound_las: bool = False) -> None:
         summary = field_value(task, "result_summary", {}) or {}

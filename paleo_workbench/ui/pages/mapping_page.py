@@ -505,9 +505,14 @@ class MappingPage(QWidget):
     def _on_contour_failed(self, message: str) -> None:
         if self._contour_job.target is not self._project:
             return
-        self.bottom_workbench.factor_shelf.contour_draft_btn.setToolTip(
-            f"等值线初稿失败：{message}"
-        )
+        text = f"等值线初稿失败：{message}"
+        shelf = self.bottom_workbench.factor_shelf
+        shelf.contour_draft_btn.setToolTip(text)
+        # A tooltip alone is an invisible failure (the button simply re-enables).
+        # Mirror the preparation page's summary text on the page's persistent
+        # status surface so the failure is actually visible (#843).
+        if getattr(self, "status_bar", None) is not None:
+            self.status_bar.scale.setText(text)
 
     def _clear_contour_job(self) -> None:
         self.bottom_workbench.factor_shelf.contour_draft_btn.setEnabled(True)
