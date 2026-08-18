@@ -64,8 +64,44 @@ _STALE_WARNED: set[str] = set()
 
 
 def _repo_root() -> Path:
-    """Monorepo root (the directory that contains ``paleo_workbench/``)."""
-    return Path(__file__).resolve().parent.parent
+    """Monorepo root (the directory that contains ``paleo_workbench/``).
+
+    Resolved once per process: ``dispatch()`` consults the module origin on
+    every call, and two uncached ``Path.resolve()`` round-trips measured
+    ~0.1 ms — ~25x the native call itself for small payloads (#833).
+    """
+    global _REPO_ROOT_CACHE
+    if _REPO_ROOT_CACHE is None:
+        _REPO_ROOT_CACHE = Path(__file__).resolve().parent.parent
+    return _REPO_ROOT_CACHE
+
+
+_REPO_ROOT_CACHE: Path | None = None
+
+
+def _package_version() -> str:
+    """Version the native extensions are expected to be built against."""
+    import paleo_workbench
+
+    return str(getattr(paleo_workbench, "__version__", ""))
+
+
+def _resolve_cached(path: Path) -> Path:
+    """Resolve ``path`` once per distinct path string (symlinks are stable
+    for the lifetime of a process). Keeps ``dispatch()`` free of repeated
+    filesystem round-trips (#833)."""
+    key = str(path)
+    resolved = _RESOLVE_CACHE.get(key)
+    if resolved is None:
+        try:
+            resolved = str(path.resolve())
+        except OSError:  # pragma: no cover — path resolution edge cases
+            resolved = key
+        _RESOLVE_CACHE[key] = resolved
+    return Path(resolved)
+
+
+_RESOLVE_CACHE: dict[str, str] = {}
 
 
 def _module_origin(mod: Any) -> str:
@@ -82,11 +118,8 @@ def _module_origin(mod: Any) -> str:
     module_path = Path(getattr(mod, "__file__", "") or "")
     if not module_path.is_absolute():
         return "installed"
-    try:
-        if module_path.resolve().parent == _repo_root():
-            return "repo_root"
-    except OSError:  # pragma: no cover — path resolution edge cases
-        pass
+    if _resolve_cached(module_path).parent == _repo_root():
+        return "repo_root"
     return "installed"
 
 
@@ -102,13 +135,32 @@ def native_status(feature: str) -> str:
     Repo-root binaries are always ``"stale"`` (they shadow ``sys.path[0]`` and
     typically predate ``__version__``). :meth:`NativeEngineBackend.dispatch`
     and :meth:`NativeEngineBackend.is_accelerated` refuse them.
+
+    An otherwise "installed" module is only ``"fresh"`` when its build
+    metadata agrees with this package (#833): editable installs, sibling
+    worktrees and stale wheels used to be trusted blindly, so a pre-#621
+    binary without ``__version__`` (or an old wheel with a mismatched one)
+    was dispatched as fresh with zero diagnostics. Now:
+
+    * a present ``__version__`` that differs from ``paleo_workbench.__version__``
+      is ``"stale"``;
+    * a module with no ``__version__`` at all is trusted only when its binary
+      lives inside this checkout's tree (the geo-viz-engine-built
+      ``map_edit_core`` predates build metadata by design); anything else —
+      site-packages, foreign worktrees, old wheels — is ``"stale"``.
     """
     origin = _module_origin(_NATIVE_MODULES.get(feature))
     if origin == "repo_root":
         return "stale"
     if origin == "missing":
         return "missing"
-    return "fresh"
+    version = native_version(feature)
+    if version is not None:
+        return "fresh" if version == _package_version() else "stale"
+    module_path = Path(getattr(_NATIVE_MODULES.get(feature), "__file__", "") or "")
+    if module_path.is_absolute() and _repo_root() in _resolve_cached(module_path).parents:
+        return "fresh"
+    return "stale"
 
 
 def _warn_stale_native(feature: str) -> None:
@@ -116,10 +168,28 @@ def _warn_stale_native(feature: str) -> None:
         return
     _STALE_WARNED.add(feature)
     version = native_version(feature)
+    expected = _package_version()
+    origin = _module_origin(_NATIVE_MODULES.get(feature))
+    if origin == "repo_root":
+        detail = (
+            f"it resolved to a stale repo-root binary (version={version!r}) "
+            "that shadows freshly built modules"
+        )
+    elif version is None:
+        detail = (
+            "it carries no build metadata (__version__) and does not live in "
+            "this checkout's tree — likely a stale foreign build (old wheel, "
+            "editable install, or sibling worktree)"
+        )
+    else:
+        detail = (
+            f"its build metadata ({version!r}) predates the current package "
+            f"({expected!r})"
+        )
     warnings.warn(
-        f"native {feature} module resolved to a stale repo-root binary "
-        f"(version={version!r}); using the pure-Python fallback. "
-        "Rebuild the extension under native/ or install a fresh wheel.",
+        f"native {feature} module is stale: {detail}; "
+        "using the pure-Python fallback. Rebuild the extension under "
+        "native/ or install a fresh wheel.",
         UserWarning,
         stacklevel=3,
     )
@@ -347,8 +417,13 @@ def _py_compute_coherence_3d(
             # overflows float32 v*v on the C++ path and is ~1e40 here; baking
             # that into a running prefix makes later `prefix[b]-prefix[a]`
             # lose every finite sample (the s8 #621 regression).
-            run_num, vert_len = _clamped_vertical_window_sums(mean_sq, ht)
-            run_den = _clamped_vertical_window_sums(sum_sq, ht)[0] / vert_len + 1e-12
+            run_num = _clamped_vertical_window_sums(mean_sq, ht)[0]
+            # Semblance denominator normalizes by the SPATIAL trace count J,
+            # not the vertical window length L (#823): ÷L made a fully
+            # continuous body read L/J (0.333 at the default 3x3x3 window),
+            # scaling with window geometry instead of geology. Identical
+            # traces → 1.0 for any window shape.
+            run_den = _clamped_vertical_window_sums(sum_sq, ht)[0] / n_spatial + 1e-12
             with np.errstate(invalid="ignore", divide="ignore"):
                 value = run_num / run_den
             out = np.clip(value, 0.0, 1.0)
@@ -416,8 +491,32 @@ def _py_marching_cubes_3d(
         work[~finite_mask] = sentinel
     else:
         work = vol
-    verts, faces, _normals, _values = marching_cubes(work, level=level)
+    verts, faces, _normals, _values = _marching_cubes_no_crossing_guard(work, level)
     return verts.astype(np.float32), faces.astype(np.int32)
+
+
+def _marching_cubes_no_crossing_guard(
+    work: np.ndarray, level: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Run skimage, mapping its no-crossing RuntimeError to an empty mesh.
+
+    The C++ K-F2 contract (#830): a level inside the data range but with no
+    strict crossing (constant == level, level == min/max, or a binary 0/1
+    volume at iso 1.0) yields ``(0, 3)`` empty arrays — skimage instead
+    raises ``RuntimeError: No surface found at the given iso value.``, which
+    used to escape and make the UI silently toggle the isosurface off.
+    """
+    from skimage.measure import marching_cubes
+
+    try:
+        return marching_cubes(work, level=level)
+    except RuntimeError:
+        return (
+            np.zeros((0, 3), dtype=np.float64),
+            np.zeros((0, 3), dtype=np.int64),
+            np.zeros((0, 3), dtype=np.float64),
+            np.zeros((0,), dtype=np.float64),
+        )
 
 
 def _py_minmax_downsample(

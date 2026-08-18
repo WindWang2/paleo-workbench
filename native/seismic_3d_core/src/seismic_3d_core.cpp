@@ -488,7 +488,13 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
                     if (!std::isfinite(mean_sq[k]) || !std::isfinite(sum_sq[k])) ++nonfinite_in_window;
                 }
                 for (size_t k = 0; k < nt; ++k) {
-                    double den = run_den / static_cast<double>(k1 - k0 + 1) + 1e-12;
+                    // Semblance denominator: normalize by the SPATIAL trace
+                    // count J, not the vertical window length L (#823). The
+                    // old ÷L made a fully continuous body read L/J (0.333 at
+                    // the default 3x3x3 window) — scaling with window geometry
+                    // instead of geology. S = Σ_k(Σ_j v)²/(J·Σ_kΣ_j v²) gives
+                    // identical traces → 1.0 for any window shape.
+                    double den = run_den / n_spatial + 1e-12;
                     // NaN propagates to 0.0 through the std::min/std::max clamp
                     // chain whenever the window overlaps a non-finite sample,
                     // matching the Python fallback's per-window recompute

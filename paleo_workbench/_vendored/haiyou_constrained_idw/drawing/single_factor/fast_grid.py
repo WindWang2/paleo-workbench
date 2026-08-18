@@ -358,7 +358,15 @@ def _idw_row_block(
         w = decl_k * dir_k / xp.power(xp.maximum(d_safe, 1e-9), float(power))
         w = xp.where(valid, w, 0.0)
         wsum = w.sum(axis=2)
-        vals = xp.sum(w * z_k, axis=2) / xp.maximum(wsum, 1e-12)
+        # Divide by the UNCLAMPED weight sum, mirroring the scalar sibling
+        # (_interpolate_grid_point_euclidean). A max(wsum, 1e-12) floor made
+        # far-field cells at power>=3 (wsum ~1e-13 from ~20km distances)
+        # silently decay a constant field by wsum/1e-12 (#828); the
+        # `update = eligible & (wsum > 0.0)` guard already keeps the
+        # divide-by-zero case out, and IDW is scale-invariant in wsum, so the
+        # ratio is exact however small the sum is.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            vals = xp.sum(w * z_k, axis=2) / wsum
         update = eligible & (wsum > 0.0)
         result[update] = vals[update]
         pending = pending & ~update
