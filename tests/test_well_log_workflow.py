@@ -126,10 +126,16 @@ def test_canvas_merges_facies_onto_bound_las(qtbot, monkeypatch):
     qtbot.addWidget(panel)
     panel.update_state(task, project=project)
 
-    assert panel.has_bound_las() is True
+    # Since #842 cold LAS loads bind asynchronously (worker thread); wait for
+    # the deferred bind instead of asserting synchronously.
+    qtbot.waitUntil(
+        lambda: panel.well_log_data is not None and panel.has_bound_las(),
+        timeout=10_000,
+    )
     assert panel.well_log_data.well_name == "from-adapter"
     assert len(panel.well_log_data.lithology) == 2
     assert "LithologyTrack" in panel.track_kinds()
+    panel.shutdown()
 
 
 def test_page_run_and_export_png(qtbot, tmp_path, monkeypatch):
