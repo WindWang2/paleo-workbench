@@ -33,11 +33,15 @@ class FormationVolumeIntegrator:
 
         n_pts = top_vertices.shape[0]
         if grid_shape is None:
-            side = int(np.round(np.sqrt(n_pts)))
-            if side * side == n_pts:
-                grid_shape = (side, side)
-            else:
-                raise ValueError("grid_shape is required for non-square vertex counts")
+            # sqrt-inference is ambiguous for ANY vertex count that has more
+            # than one factorization — a 4x9 grid and a 6x6 grid both have
+            # N=36, and the wrong guess mis-built every neighbor strip (an
+            # 8x volume error in the audit's 4x9 example). Production
+            # callers all pass the shape; require it (#846).
+            raise ValueError(
+                "grid_shape is required: vertex count alone cannot identify "
+                "the (rows, cols) topology (e.g. N=36 is both 4x9 and 6x6)"
+            )
 
         rows, cols = grid_shape
         if rows * cols != n_pts:

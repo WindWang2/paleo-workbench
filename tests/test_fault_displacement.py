@@ -25,8 +25,11 @@ def test_fault_displacement_offsets_hanging_wall():
         throw_z=-15.0,
     )
 
-    footwall_mask = displaced[:, 0] < 5.0
-    hangingwall_mask = displaced[:, 0] >= 5.0
+    # Classify by PRE-fault geometry: the signed heave (#846) moves the
+    # hanging wall horizontally too, so post-displacement x would mislabel
+    # moved vertices as footwall.
+    footwall_mask = vertices[:, 0] < 5.0
+    hangingwall_mask = vertices[:, 0] >= 5.0
 
     assert np.allclose(displaced[footwall_mask, 2], 100.0)
     assert np.allclose(displaced[hangingwall_mask, 2], 85.0)

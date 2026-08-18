@@ -57,7 +57,11 @@ class FaultDisplacement:
 
         if throw_x == 0.0 and dip_deg > 0 and dip_deg < 90:
             rad_dip = math.radians(dip_deg)
-            effective_throw_x = abs(throw_z) / math.tan(rad_dip)
+            # Heave must carry the throw's SIGN (#846): a reverse fault
+            # (throw_z < 0) displaces the hanging wall in the OPPOSITE
+            # horizontal direction from a normal fault of the same magnitude
+            # — abs() made both point the same way.
+            effective_throw_x = throw_z / math.tan(rad_dip)
         else:
             effective_throw_x = throw_x
 
