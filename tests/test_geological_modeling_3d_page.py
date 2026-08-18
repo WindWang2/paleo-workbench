@@ -77,8 +77,10 @@ def test_geomodel_exporters():
         with open(flac3d_path, 'r', encoding='utf-8') as f:
             content = f.read()
             assert "* FLAC3D grid" in content
-            assert "GRID" in content
-            assert "ZON hex" in content
+            # Since #829 the exporter emits Itasca grid keywords (G / Z B8);
+            # the old "GRID"/"ZON hex" lines were the bug, not the contract.
+            assert any(ln.startswith("G ") for ln in content.splitlines())
+            assert any(ln.startswith("Z B8 ") for ln in content.splitlines())
             
         # Test Abaqus export
         assert export_to_abaqus(abaqus_path, nx=3, ny=3, nz=3)

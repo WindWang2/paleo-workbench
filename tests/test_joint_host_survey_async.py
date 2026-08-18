@@ -87,8 +87,18 @@ def test_joint_reload_scans_segy_off_gui_thread_and_caches(qtbot, tmp_path, monk
 
     # A second reload reuses the cached payload — no repeat scan.
     host.reload()
+    # Since #825 the ladder runs L0 -> L1 -> L2 and several phases can elapse
+    # between waitUntil polls, so accept every post-reload volume phase.
     qtbot.waitUntil(
-        lambda: host._volume_phase in ("L0_LOADING", "L0_READY", "L1_READY"),
+        lambda: host._volume_phase in (
+            "METADATA_READY",
+            "L0_LOADING",
+            "L0_READY",
+            "L1_LOADING",
+            "L1_READY",
+            "L2_LOADING",
+            "L2_READY",
+        ),
         timeout=20_000,
     )
     assert calls["count"] == 1
@@ -117,9 +127,19 @@ def test_joint_reload_segy_metadata_failure_falls_back(qtbot, tmp_path, monkeypa
     qtbot.waitUntil(
         lambda: any("SEG-Y 元数据读取失败" in s for s in statuses), timeout=20_000
     )
-    # Dense-fallback preview worker still starts.
+    # Dense-fallback preview worker still starts. Since #825 the ladder runs
+    # L0 -> L1 -> L2 and phases can elapse between waitUntil polls, so accept
+    # every post-reload volume phase.
     qtbot.waitUntil(
-        lambda: host._volume_phase in ("L0_LOADING", "L0_READY", "L1_READY"),
+        lambda: host._volume_phase in (
+            "METADATA_READY",
+            "L0_LOADING",
+            "L0_READY",
+            "L1_LOADING",
+            "L1_READY",
+            "L2_LOADING",
+            "L2_READY",
+        ),
         timeout=20_000,
     )
     host.shutdown()
