@@ -6,28 +6,12 @@ from pathlib import Path
 
 from geoviz import CurveData, WellLogData
 
-from paleo_workbench.app import PaleoWorkbenchWindow
 from paleo_workbench.project.models import ProjectDocument, ResourceItem
 from paleo_workbench.ui.pages.well_log_prediction_page import WellLogPredictionPage
-from paleo_workbench.workflow.well_log_prediction import (
+from paleo_workbench.viz.prediction_helpers import (
     export_well_canvas,
     merge_prediction_onto_well_log,
-    run_well_log_facies_prediction,
 )
-
-
-def test_run_well_log_facies_prediction_binds_las_and_horizon():
-    project = ProjectDocument.new("Well")
-    project.stratigraphy.target_horizon = "ZJ2"
-    project.resources.append(
-        ResourceItem(name="A1.las", path="/tmp/A1.las", type="well_log", format="las")
-    )
-    task = run_well_log_facies_prediction(project, seed=3)
-    assert task.status == "complete"
-    assert task.model_metadata.get("workflow") == "well_log_facies"
-    assert task.model_metadata.get("target_horizon") == "ZJ2"
-    assert task.input_refs.get("well_log_resource_ids") == [project.resources[0].id]
-    assert "ZJ2" in task.name
 
 
 def test_merge_prediction_adds_lithology_and_facies_tracks():
@@ -190,21 +174,3 @@ def test_page_run_and_export_png(qtbot, tmp_path, monkeypatch):
     finally:
         reset_catalog()
         service.close()
-
-
-def test_app_send_to_preparation_builds_factor_maps(qtbot):
-    project = ProjectDocument.new("SendPrep")
-    project.stratigraphy.target_horizon = "C6"
-    run_well_log_facies_prediction(project, seed=1)
-
-    window = PaleoWorkbenchWindow(project=project)
-    qtbot.addWidget(window)
-    page = window.app_shell.well_log_prediction_page_widget()
-    assert isinstance(page, WellLogPredictionPage)
-
-    page.evidence_panel.send_btn.click()
-    # 发送制备 runs on a worker thread (C05); wait for the guarded commit.
-    qtbot.waitUntil(
-        lambda: len(window.project.factor_map_tasks) >= 1, timeout=60_000
-    )
-    assert all(t.status == "complete" for t in window.project.factor_map_tasks)

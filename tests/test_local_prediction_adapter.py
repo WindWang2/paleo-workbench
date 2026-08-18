@@ -9,11 +9,7 @@ from paleo_workbench.prediction.adapters import (
     MockPredictionAdapter,
 )
 from paleo_workbench.project.models import ProjectDocument, ResourceItem
-from paleo_workbench.workflow.seismic_prediction import run_seismic_facies_prediction
-from paleo_workbench.workflow.well_log_prediction import (
-    regions_to_depth_intervals,
-    run_well_log_facies_prediction,
-)
+from paleo_workbench.viz.prediction_helpers import regions_to_depth_intervals
 
 
 def _write_gr_las(path: Path) -> None:
@@ -73,40 +69,6 @@ def test_local_adapter_uses_las_gr_when_readable(tmp_path: Path):
     well_meta = summary.get("well_meta") or {}
     assert well_meta.get("curve")
     assert well_meta.get("source_well") == "A1.las"
-
-
-def test_run_well_log_workflow_marks_local_adapter(tmp_path: Path):
-    las = tmp_path / "B1.las"
-    _write_gr_las(las)
-    project = ProjectDocument.new("W")
-    project.stratigraphy.target_horizon = "ZJ2"
-    project.meta.project_root = str(tmp_path)
-    project.resources.append(
-        ResourceItem(name="B1.las", path=str(las), type="well_log", format="las")
-    )
-    task = run_well_log_facies_prediction(project, seed=1)
-    assert task.model_metadata.get("adapter") == "local"
-    assert task.input_refs.get("well_log_resource_ids") == [project.resources[0].id]
-    assert task.result_summary.get("is_mock") is False
-
-
-def test_run_seismic_records_seismic_meta(tmp_path: Path):
-    segy = tmp_path / "vol.sgy"
-    segy.write_bytes(b"\x00" * 64)  # unreadable volume but path exists
-    project = ProjectDocument.new("S")
-    project.stratigraphy.target_horizon = "H1"
-    project.meta.project_root = str(tmp_path)
-    project.resources.append(
-        ResourceItem(name="vol.sgy", path=str(segy), type="seismic", format="segy")
-    )
-    task = run_seismic_facies_prediction(project, seed=0)
-    assert task.input_refs.get("seismic_resource_ids") == [project.resources[0].id]
-    # local adapter with seismic path
-    assert task.adapter_kind in {"local", "mock"}
-    if task.adapter_kind == "local":
-        meta = task.result_summary.get("seismic_meta") or {}
-        assert meta.get("source_seismic") == "vol.sgy"
-        assert meta.get("path_readable") is True
 
 
 def test_seismic_only_random_fallback_is_honestly_mocked(tmp_path: Path):

@@ -554,11 +554,7 @@ class WorkflowController:
                     catalog_service = get_catalog_service()
                 except Exception:
                     catalog_service = None
-                pred_vid = str(
-                    meta.get("prediction_version_id")
-                    or meta.get("output_version_id")
-                    or ""
-                ) or None
+                pred_vid = str(meta.get("prediction_version_id") or "") or None
                 compile_map_production(
                     self.window.project,
                     prediction_task_id=task.id,

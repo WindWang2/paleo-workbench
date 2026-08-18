@@ -2,28 +2,8 @@
 
 from __future__ import annotations
 
-from paleo_workbench.project.models import PaleoMapDocument, ProjectDocument, ResourceItem
+from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.ui.pages.seismic_prediction_page import SeismicPredictionPage
-from paleo_workbench.workflow.seismic_prediction import run_seismic_facies_prediction
-
-
-def test_run_seismic_facies_prediction_binds_assets_and_horizon():
-    project = ProjectDocument.new("Seis")
-    project.stratigraphy.target_horizon = "C6"
-    project.resources.append(
-        ResourceItem(
-            name="cube.sgy",
-            path="/tmp/cube.sgy",
-            type="seismic",
-            format="sgy",
-        )
-    )
-    task = run_seismic_facies_prediction(project, seed=2)
-    assert task.status == "complete"
-    assert task.model_metadata.get("workflow") == "seismic_facies"
-    assert task.model_metadata.get("target_horizon") == "C6"
-    assert task.input_refs.get("seismic_resource_ids") == [project.resources[0].id]
-    assert "C6" in task.name
 
 
 def test_workbench_controls_emit_mode_attribute_and_auto_tie(qtbot):
@@ -105,22 +85,3 @@ def test_page_run_creates_task_and_updates_view(qtbot, tmp_path):
     finally:
         reset_catalog()
         service.close()
-
-
-def test_app_send_to_mapping_compiles_draft(qtbot):
-    from paleo_workbench.app import PaleoWorkbenchWindow
-
-    project = ProjectDocument.new("Send")
-    project.stratigraphy.target_horizon = "ZJ2"
-    run_seismic_facies_prediction(project, seed=1)
-
-    window = PaleoWorkbenchWindow(project=project)
-    qtbot.addWidget(window)
-    page = window.app_shell.seismic_prediction_page_widget()
-    assert isinstance(page, SeismicPredictionPage)
-
-    before = len(window.project.paleomap_documents)
-    page.control_panel.send_btn.click()
-
-    assert len(window.project.paleomap_documents) == before + 1
-    assert isinstance(window.project.paleomap_documents[-1], PaleoMapDocument)

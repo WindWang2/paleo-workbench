@@ -565,8 +565,8 @@ def register_export_output(
     """Register an OUTPUT version directly (no ExportArtifact required).
 
     Used by export paths that previously wrote a file with zero tracking
-    (e.g. ``export_well_canvas``). Returns the registered version, or None
-    when no catalog backend is active.
+    (e.g. ``paleo_workbench.viz.prediction_helpers.export_well_canvas``).
+    Returns the registered version, or None when no catalog backend is active.
     """
     cat = catalog or get_catalog()
     if cat is None:

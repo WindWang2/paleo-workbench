@@ -23,11 +23,13 @@ from paleo_workbench.resources.export_service import default_export_dir
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 from paleo_workbench.ui.pages.prediction_evidence_panel import PredictionEvidencePanel
-from paleo_workbench.viz.prediction_helpers import active_prediction_task
+from paleo_workbench.viz.prediction_helpers import (
+    active_prediction_task,
+    export_well_canvas,
+)
 from paleo_workbench.ui.pages.prediction_task_panel import PredictionTaskPanel
 from paleo_workbench.ui.pages.well_log_canvas_panel import WellLogCanvasPanel
 from paleo_workbench.workflow.stratigraphy import active_target_horizon
-from paleo_workbench.workflow.well_log_prediction import export_well_canvas
 
 
 class WellLogPredictionPage(QWidget):
