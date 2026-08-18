@@ -43,8 +43,11 @@ LEVELS = [BASE_N, BASE_N * 2, BASE_N * 4]
 # canonical store re-serializes the whole document per save (inherent O(N²)
 # in total save bytes), so its levels are capped tighter than the others to
 # keep the big-N run inside the CI per-test timeout while still exercising
-# the 4x ratio.
-TRASH_LEVELS = [max(BASE_N // 2, 16), min(BASE_N, 128), min(BASE_N * 2, 256)]
+# the 4x ratio. #841: the 32/128 ladder still blew the 45s budget on slow
+# fsync-bound 3.12 CI runners; halved to 16/64, keeping the same 4x ratio
+# (quadratic behavior still trips LINEAR_CEILING) at ~4x less absolute
+# write volume.
+TRASH_LEVELS = [max(BASE_N // 4, 16), min(BASE_N // 2, 64), min(BASE_N, 128)]
 CHAIN_DEPTH = max(8, BASE_N // 4)
 REPS = 3
 # Generous ratio ceilings over a 4x data increase (linear ⇒ ~4x, quadratic ⇒
