@@ -123,7 +123,8 @@ def test_i3_zero_target_shape_raises_on_both_paths():
 
 @pytest.mark.parametrize("bad_window", [-2, 0, 4])
 def test_c3_invalid_window_raises_on_both_paths(bad_window):
-    vol = np.random.randn(8, 8, 10).astype(np.float32)
+    rng = np.random.default_rng(6)
+    vol = rng.standard_normal((8, 8, 10)).astype(np.float32)
     _both_raise(compute_coherence_3d, vol, bad_window, 3, 3)
 
 

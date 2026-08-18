@@ -15,6 +15,13 @@ from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
 from tests.perf.fixtures import make_mock_resources, make_tmp_tree, stress_n
 from tests.perf.timing import print_stress, timed
 
+# Ratio gates (mirroring tests/test_catalog_scale.py): timings are compared
+# between a small and a large workload so the assertion is scale-relative, not
+# a brittle absolute-millisecond bound. +FLOOR absorbs fixed overhead and
+# machine noise (issue #851: these tests used to be print-only).
+SCALE_CEILING = 5.0
+FLOOR_MS = 25.0
+
 
 class InstantProvider(PreviewProvider):
     def preview(self, asset):
@@ -43,8 +50,12 @@ def test_stress_s1_update_state(qtbot):
     n = stress_n(2000)
     page = DataPage(ProjectDocument.new("Stress"))
     qtbot.addWidget(page)
-    resources = make_mock_resources(n)
 
+    # Small workload first: gates below compare the per-row scaling.
+    small = make_mock_resources(max(64, n // 8))
+    timing_small, _ = timed("S1_update_small", lambda: page.update_state({}, small))
+
+    resources = make_mock_resources(n)
     timing, _ = timed("S1_update", lambda: page.update_state({}, resources))
     print_stress("S1_update", n=n, ms=timing.ms)
 
@@ -52,10 +63,26 @@ def test_stress_s1_update_state(qtbot):
     model = page.asset_table.model
     assert model is not None
     assert model.rowCount() == n
+    # 8x rows ⇒ ≤~5x time (+floor); an O(N²) refresh would blow this wide.
+    assert timing.ms < SCALE_CEILING * timing_small.ms + FLOOR_MS, (
+        f"S1_update scaling: {timing.ms:.1f}ms at n={n} vs "
+        f"{timing_small.ms:.1f}ms at n={n // 8}"
+    )
 
 
 def test_stress_s2_filter_index():
     n = stress_n(2000)
+    small_n = max(64, n // 8)
+    small = make_mock_resources(small_n)
+    idx_small = FilterIndex()
+    idx_small.rebuild(small)
+    timing_all_small, rows_all_small = timed(
+        "S2_filter_all_small", lambda: idx_small.filter("全部", "")
+    )
+    timing_q_small, rows_q_small = timed(
+        "S2_filter_search_small", lambda: idx_small.filter("测井", "asset_0000")
+    )
+
     resources = make_mock_resources(n)
     idx = FilterIndex()
     idx.rebuild(resources)
@@ -64,6 +91,11 @@ def test_stress_s2_filter_index():
     timing_all, rows_all = timed("S2_filter_all", lambda: idx.filter("全部", ""))
     print_stress("S2_filter_all", n=n, ms=timing_all.ms)
     assert len(rows_all) == n
+    assert len(rows_all_small) == small_n
+    assert timing_all.ms < SCALE_CEILING * timing_all_small.ms + FLOOR_MS, (
+        f"S2_filter_all scaling: {timing_all.ms:.1f}ms at n={n} vs "
+        f"{timing_all_small.ms:.1f}ms at n={small_n}"
+    )
 
     timing_q, rows_q = timed(
         "S2_filter_search",
@@ -71,6 +103,11 @@ def test_stress_s2_filter_index():
     )
     print_stress("S2_filter_search", n=n, ms=timing_q.ms)
     assert len(rows_q) >= 1
+    assert len(rows_q_small) >= 1
+    assert timing_q.ms < SCALE_CEILING * timing_q_small.ms + FLOOR_MS, (
+        f"S2_filter_search scaling: {timing_q.ms:.1f}ms at n={n} vs "
+        f"{timing_q_small.ms:.1f}ms at n={small_n}"
+    )
 
 
 def test_stress_s3_rapid_select(qtbot):
@@ -103,10 +140,25 @@ def test_stress_s3_rapid_select(qtbot):
 
 def test_stress_s4_import_folder(tmp_path):
     n = 300
+    small_n = max(64, n // 4)
+    small_root = make_tmp_tree(tmp_path / "small", n=small_n)
+    timing_small, small_report = timed(
+        "S4_import_folder_small", lambda: import_folder(small_root, existing=[])
+    )
     root = make_tmp_tree(tmp_path, n=n)
     timing, report = timed("S4_import_folder", lambda: import_folder(root, existing=[]))
     print_stress("S4_import_folder", n=n, ms=timing.ms)
     assert report.added_count == n
+    assert small_report.added_count == small_n
+    # The import folder path is currently Θ(N²) in catalog.json bytes because
+    # each file is saved individually (tracked by #849, not this batch). The
+    # current reality is ~16x for 4x files; this gate is deliberately loose
+    # (25x + floor) so it only trips on blows WORSE than today while still
+    # failing if a future regression makes the path super-quadratic.
+    assert timing.ms < 25.0 * timing_small.ms + FLOOR_MS, (
+        f"S4_import_folder scaling: {timing.ms:.1f}ms at n={n} vs "
+        f"{timing_small.ms:.1f}ms at n={small_n}"
+    )
 
 
 def test_stress_s5_scan_concurrent_large(tmp_path):
@@ -137,3 +189,9 @@ def test_stress_s5_scan_concurrent_large(tmp_path):
     assert len(concurrent_results) == n
     assert serial_results[0].name == concurrent_results[0].name
     assert serial_results[-1].name == concurrent_results[-1].name
+    # Concurrent scan must not be slower than serial by a large factor
+    # (generous ceiling; the scan is I/O-bound and parallel workers should win).
+    assert timing_concurrent.ms < 3.0 * timing_serial.ms + FLOOR_MS, (
+        f"S5 concurrent {timing_concurrent.ms:.1f}ms vs serial "
+        f"{timing_serial.ms:.1f}ms at n={n}"
+    )

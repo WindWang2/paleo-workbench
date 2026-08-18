@@ -335,7 +335,11 @@ def _leave_one_out_grid_fidelity(
     ss_tot = float(np.sum((v_obs - v_obs.mean()) ** 2))
     if ss_tot < 1e-12:
         return 1.0, n_skipped
-    return float(max(0.0, min(1.0, 1.0 - ss_res / ss_tot))), n_skipped
+    # Signed R² (never clamped to [0, 1]): a fit worse than the constant
+    # mean must report a negative value, matching the gve methods that write
+    # the same ``r_squared`` key (issue #844). The old max(0, ...) clamp made
+    # a bad fit indistinguishable from an exactly-mean fit.
+    return float(1.0 - ss_res / ss_tot), n_skipped
 
 
 def _value_range_from_wells(wells: Sequence[Any]) -> tuple[float | None, float | None]:

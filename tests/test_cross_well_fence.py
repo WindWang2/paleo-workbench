@@ -30,7 +30,8 @@ def test_cross_well_fence_generator_mesh():
 
 
 def test_cross_well_fence_extract_seismic_slice():
-    seismic_vol = np.random.uniform(-1.0, 1.0, size=(20, 20, 50)).astype(np.float32)
+    rng = np.random.default_rng(12)
+    seismic_vol = rng.uniform(-1.0, 1.0, size=(20, 20, 50)).astype(np.float32)
     wells = [
         {"name": "W1", "x": 2, "y": 3},
         {"name": "W2", "x": 12, "y": 15},

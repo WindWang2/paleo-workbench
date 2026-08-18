@@ -317,7 +317,8 @@ def test_profile_follows_scene_extract_domain(qtbot):
     scene = WellSeismicScene()
     p1, p2, p3 = (1315, 4165, 0.0, 0.0), (1315, 4805, 12793.0, 0.0), (1725, 4805, 12793.0, 16406.0)
     scene.set_survey_from_corners(p1, p2, p3, n_samples=16, dt_ms=2.0)
-    scene.set_volume_access(InMemoryVolumeAccess(np.random.randn(8, 8, 16).astype(np.float32)))
+    rng = np.random.default_rng(18)
+    scene.set_volume_access(InMemoryVolumeAccess(rng.standard_normal((8, 8, 16)).astype(np.float32)))
     scene.set_preview_mode(True)
     scene.set_wells(
         [

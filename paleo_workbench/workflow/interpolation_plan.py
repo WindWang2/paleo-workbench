@@ -457,7 +457,12 @@ def _idw_multi_chunked(
         if fault_mask is not None:
             weights[fault_mask[start:stop]] = 0.0
         totals = np.sum(weights, axis=1)
-        populated = totals > epsilon
+        # Depopulation test: totals are a SUM OF WEIGHTS, not a distance. The
+        # 1e-12 epsilon is the distance floor applied before exponentiation;
+        # comparing the weight sum against it wrongly depopulates distant
+        # cells at power>=3 where positive totals fall below 1e-12 (issue
+        # #844). Any positive total is a well-defined weighted sum.
+        populated = totals > 0.0
         # weights[populated]: (P, N); z_stack: (F, N) → (F, P)
         if np.any(populated):
             w_pop = weights[populated]

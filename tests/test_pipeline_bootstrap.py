@@ -65,7 +65,13 @@ def test_bootstrap_default_keeps_full_scan_checksums(tmp_path: Path):
 
     result = bootstrap_sample_project(data_root)
 
-    assert result.document.resources[0].checksum is not None
+    # The default full scan must store the REAL sha256 of the file content,
+    # not merely "something non-null" (#851).
+    import hashlib
+
+    checksum = result.document.resources[0].checksum
+    assert checksum is not None
+    assert checksum == hashlib.sha256(b"~Version\n").hexdigest()
 
 
 def test_bootstrap_missing_root_raises(tmp_path: Path):

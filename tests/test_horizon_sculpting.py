@@ -63,7 +63,8 @@ def test_sculptable_horizon_mesh_undo_redo():
 def test_horizon_sculpting_anneals_surface_smoothly():
     sculptor = HorizonSculpting()
     # Create noisy grid surface
-    z_grid = np.random.uniform(90.0, 110.0, size=(10, 10)).astype(np.float32)
+    rng = np.random.default_rng(8)
+    z_grid = rng.uniform(90.0, 110.0, size=(10, 10)).astype(np.float32)
     smoothed = sculptor.smooth_anneal(z_grid, iterations=3)
 
     assert smoothed.shape == (10, 10)

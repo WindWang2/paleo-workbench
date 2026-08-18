@@ -6,6 +6,9 @@ import pytest
 
 from geoviz_seismic.wiggle_instanced import WiggleTraceTexture, WiggleTraceRenderer
 
+# Seeded module RNG so OpenGL texture/lifecycle tests stay reproducible (#851).
+_rng = np.random.default_rng(4)
+
 
 def test_wiggle_trace_texture_initialization():
     texture = WiggleTraceTexture()
@@ -16,7 +19,7 @@ def test_wiggle_trace_texture_initialization():
 
 def test_wiggle_trace_texture_update_slice():
     texture = WiggleTraceTexture()
-    slice_data = np.random.randn(100, 500).astype(np.float32)
+    slice_data = _rng.standard_normal((100, 500)).astype(np.float32)
 
     # In mock/headless CPU environment, mock_gl allocates a non-zero texture_id
     texture.update_slice(slice_data, mock_gl=True)
@@ -28,12 +31,12 @@ def test_wiggle_trace_texture_update_slice():
 
 def test_wiggle_trace_texture_reupload_cleanup():
     texture = WiggleTraceTexture()
-    slice1 = np.random.randn(50, 200).astype(np.float32)
+    slice1 = _rng.standard_normal((50, 200)).astype(np.float32)
     texture.update_slice(slice1, mock_gl=True)
     first_id = texture.texture_id
 
     # Re-upload new slice
-    slice2 = np.random.randn(80, 300).astype(np.float32)
+    slice2 = _rng.standard_normal((80, 300)).astype(np.float32)
     texture.update_slice(slice2, mock_gl=True)
     assert texture.num_traces == 80
     assert texture.num_samples == 300
@@ -48,7 +51,7 @@ def test_wiggle_trace_texture_reupload_cleanup():
 
 def test_renderer_facade_set_data():
     renderer = WiggleTraceRenderer()
-    slice_data = np.random.randn(120, 400).astype(np.float32)
+    slice_data = _rng.standard_normal((120, 400)).astype(np.float32)
     renderer.set_data(slice_data, mock_gl=True)
     assert renderer.num_traces == 120
     assert renderer.num_samples == 400
@@ -157,7 +160,7 @@ def test_renderer_nan_validation():
 
 def test_renderer_render_export():
     renderer = WiggleTraceRenderer()
-    slice_data = np.random.randn(50, 100).astype(np.float32)
+    slice_data = _rng.standard_normal((50, 100)).astype(np.float32)
     renderer.set_data(slice_data, mock_gl=True)
 
     # gve 31b7f15d: this renderer has no offscreen OpenGL context, so an
