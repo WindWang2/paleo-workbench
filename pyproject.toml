@@ -36,6 +36,12 @@ dev = [
     # tests/test_wheel_assets.py builds the wheel in-process via the PEP 517
     # backend hook; modern runner venvs no longer ship setuptools implicitly.
     "setuptools>=69",
+    # The marching-cubes fallback contract tests (#830,
+    # tests/test_issues_823_828_830_833.py) drive the pure-Python fallback
+    # with the C++ extension disabled; that path implements the isovalue
+    # boundary contract via scikit-image when no native module is available.
+    # Without it CI fails with "No module named 'skimage'" (#859 follow-up).
+    "scikit-image>=0.22",
 ]
 native = [
     "pybind11>=2.12",
