@@ -8,7 +8,10 @@ from typing import TYPE_CHECKING
 
 from paleo_workbench.project.models import ResourceItem
 from paleo_workbench.project.paths import safe_file_stat
-from paleo_workbench.resources.preview_parsers.models import PreviewResult
+from paleo_workbench.resources.preview_parsers.models import (
+    MAX_TEXT_PREVIEW_BYTES,
+    PreviewResult,
+)
 
 if TYPE_CHECKING:
     from paleo_workbench.ui.pages.preview_settings import PreviewSettings
@@ -128,19 +131,32 @@ def dat_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewRes
 def table_preview(resource: ResourceItem, delimiter: str, settings: PreviewSettings) -> PreviewResult:
     path = Path(resource.path)
     preview_bytes, truncated = read_preview_chunk(path, settings.text_limit_kib)
-    preview_text = preview_bytes.decode("utf-8", errors="replace")
+    # utf-8-sig strips a leading BOM so it cannot leak into the first header
+    # cell (Excel's "CSV UTF-8" export writes one).
+    preview_text = preview_bytes.decode("utf-8-sig", errors="replace")
     parsed_rows: list[tuple[str, ...]] = []
 
-    with io.StringIO(preview_text, newline="") as buffer:
-        reader = csv.reader(buffer, delimiter=delimiter)
-        for row_index, row in enumerate(reader):
-            if row_index > settings.table_max_rows:
-                truncated = True
-                break
+    # csv raises _csv.Error for a single field larger than its (131072-char
+    # default) limit, which is below the preview byte budget. The chunk read
+    # above is already bounded, so accept fields up to that bound; raise-only
+    # so a larger pre-existing process-wide limit is never lowered.
+    csv.field_size_limit(
+        max(len(preview_bytes), MAX_TEXT_PREVIEW_BYTES, csv.field_size_limit())
+    )
 
-            if len(row) > settings.table_max_columns:
-                truncated = True
-            parsed_rows.append(tuple(row[: settings.table_max_columns]))
+    try:
+        with io.StringIO(preview_text, newline="") as buffer:
+            reader = csv.reader(buffer, delimiter=delimiter)
+            for row_index, row in enumerate(reader):
+                if row_index > settings.table_max_rows:
+                    truncated = True
+                    break
+
+                if len(row) > settings.table_max_columns:
+                    truncated = True
+                parsed_rows.append(tuple(row[: settings.table_max_columns]))
+    except csv.Error as exc:
+        return parse_error_preview(resource, f"表格解析失败: {exc.__class__.__name__}")
 
     headers = parsed_rows[0] if parsed_rows else ()
     body = tuple(parsed_rows[1:]) if parsed_rows else ()
