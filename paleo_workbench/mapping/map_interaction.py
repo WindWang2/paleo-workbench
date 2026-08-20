@@ -151,6 +151,9 @@ class SnapMatch:
     distance: float
 
 
+_MAX_QUERY_CELLS = 4096
+
+
 class FeatureSpatialIndex:
     """Revision-cached, cell-indexed feature/vertex/segment candidates."""
 
@@ -190,7 +193,9 @@ class FeatureSpatialIndex:
                 max(bound[2] for bound in all_bounds) - min(bound[0] for bound in all_bounds),
                 max(bound[3] for bound in all_bounds) - min(bound[1] for bound in all_bounds),
             )
-            self._cell_size = max(span / 64.0, 1e-9)
+            # A degenerate span (all features coincident) must not shrink the
+            # cell size to ~0: query ranges would map to billions of cells.
+            self._cell_size = span / 64.0 if span > 0.0 else 1.0
         else:
             self._cell_size = 1.0
         self._feature_cells = {}
@@ -239,26 +244,51 @@ class FeatureSpatialIndex:
             else:
                 bucket.append(value)
 
-    def _query_cells(self, bounds: Bounds) -> tuple[tuple[int, int], ...]:
-        return tuple(self._cells(bounds))
+    def _query_cells(self, bounds: Bounds) -> tuple[tuple[int, int], ...] | None:
+        """Cells covered by ``bounds``.
+
+        Returns ``None`` when the range spans more than ``_MAX_QUERY_CELLS``
+        cells (tolerance large relative to the layer's cell size); callers
+        then fall back to scanning every bucket, mirroring
+        ``FeatureQueryIndex._MAX_QUERY_CELLS``.
+        """
+        left, bottom = self._cell((bounds[0], bounds[1]))
+        right, top = self._cell((bounds[2], bounds[3]))
+        if (right - left + 1) * (top - bottom + 1) > _MAX_QUERY_CELLS:
+            return None
+        return tuple((x, y) for x in range(left, right + 1) for y in range(bottom, top + 1))
 
     def _feature_candidates(self, bounds: Bounds) -> tuple[VectorFeature, ...]:
-        ids = {
-            feature_id
-            for cell in self._query_cells(bounds)
-            for feature_id in self._feature_cells.get(cell, ())
-        }
+        cells = self._query_cells(bounds)
+        if cells is None:
+            ids = set(self._by_id)
+        else:
+            ids = {
+                feature_id
+                for cell in cells
+                for feature_id in self._feature_cells.get(cell, ())
+            }
         return tuple(sorted((self._by_id[feature_id] for feature_id in ids), key=lambda feature: self._draw_order[feature.feature_id], reverse=True))
 
     def _vertex_candidates(self, bounds: Bounds) -> tuple[tuple[str, Point, tuple[int, ...], bool], ...]:
+        cells = self._query_cells(bounds)
+        if cells is None:
+            buckets = self._vertex_cells.values()
+        else:
+            buckets = (self._vertex_cells.get(cell, ()) for cell in cells)
         return tuple(
             candidate
-            for cell in self._query_cells(bounds)
-            for candidate in self._vertex_cells.get(cell, ())
+            for bucket in buckets
+            for candidate in bucket
         )
 
     def _segment_candidates(self, bounds: Bounds) -> tuple[tuple[str, Point, Point], ...]:
-        return tuple({candidate for cell in self._query_cells(bounds) for candidate in self._segment_cells.get(cell, ())})
+        cells = self._query_cells(bounds)
+        if cells is None:
+            buckets = self._segment_cells.values()
+        else:
+            buckets = (self._segment_cells.get(cell, ()) for cell in cells)
+        return tuple({candidate for bucket in buckets for candidate in bucket})
 
     def identify(self, point: Point, tolerance: float) -> str | None:
         self._ensure()
