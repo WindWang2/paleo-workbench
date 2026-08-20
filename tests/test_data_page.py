@@ -1558,3 +1558,53 @@ def test_deliver_managed_resource_copies_immutable_snapshot_not_drifted_original
     finally:
         reset_catalog()
         service.close()
+
+
+def test_data_page_open_selected_folder_resolves_project_relative_resource(qtbot, tmp_path: Path):
+    """#891: a project-relative managed resource (the relocatable storage
+    form) must open its folder under the project dir, not process CWD."""
+    project_file = tmp_path / "proj" / "demo.paleo.json"
+    project_file.parent.mkdir(parents=True)
+    data_dir = tmp_path / "proj" / "data"
+    data_dir.mkdir()
+    (data_dir / "well.las").write_text("~Version\n", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    resource = ResourceItem(
+        name="well.las",
+        type="well_log",
+        format="las",
+        path="data/well.las",  # project-relative
+    )
+    project.resources.append(resource)
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page.set_project_path(project_file)
+    page._set_selected_asset(resource)
+    opened = []
+    monkeypatch_url = "paleo_workbench.ui.pages.data_page.QDesktopServices.openUrl"
+    from unittest.mock import patch
+    with patch(monkeypatch_url) as open_url:
+        open_url.side_effect = lambda url: opened.append(url.toLocalFile()) or True
+        folder = page.open_selected_folder()
+    assert folder == data_dir
+    assert opened == [data_dir.as_posix()]
+
+
+def test_data_page_open_selected_folder_survives_pathlib_oserror(qtbot, tmp_path: Path):
+    """#891/#882: an unprobeable (over-long) path degrades to the missing
+    branch instead of raising out of the slot."""
+    project = ProjectDocument.new("Demo")
+    resource = ResourceItem(
+        name="bad",
+        type="well_log",
+        format="las",
+        path="a" * 300,
+    )
+    project.resources.append(resource)
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page._set_selected_asset(resource)
+    folder = page.open_selected_folder()  # must not raise
+    assert folder is not None
+    status = page.data_toolbar.operation_status_label.text()
+    assert status.startswith(("目录: ", "目录不存在"))

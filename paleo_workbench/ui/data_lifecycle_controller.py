@@ -511,7 +511,14 @@ class DataLifecycleController:
             return "invalid", None, Path(), None
         resource = page._selected_asset
         path = page._resolve_resource_path(resource)
-        if not path.exists():
+        # Unprobeable paths (over-long, EACCES) report as missing instead of
+        # raising out of the slot — same policy as the data-page view builder
+        # (#882/#891).
+        try:
+            path_exists = path.exists()
+        except OSError:
+            path_exists = False
+        if not path_exists:
             resource.status = "missing"
             if resource.parsed_summary is None:
                 resource.parsed_summary = {}

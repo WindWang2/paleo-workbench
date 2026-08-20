@@ -40,6 +40,8 @@ from paleo_workbench.ui.pages.data_view_models import (
     AssetView,
     asset_view_from_object,
     enrich_view_from_catalog,
+    path_exists_safe,
+    path_is_dir_safe,
 )
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
 from paleo_workbench.ui.pages.filter_index import CATEGORIES, FilterQuery
@@ -735,14 +737,20 @@ class DataPage(QWidget):
             self._set_action_status("请选择一个数据项")
             return None
         if isinstance(self._selected_asset, ResourceItem):
-            path = Path(self._selected_asset.path)
+            path = self._resolve_resource_path(self._selected_asset)
         elif isinstance(self._selected_asset, ExportArtifact):
-            path = Path(self._selected_asset.output_path)
+            # record_export stores project-RELATIVE output paths; resolve
+            # against the project dir like prepare_delivery does (#891).
+            rel = Path(self._selected_asset.output_path)
+            if rel.is_absolute() or self.project_path is None:
+                path = rel.expanduser()
+            else:
+                path = Path(resolve_project_path(str(rel), self._project_file_for_io()))
         else:
             path = Path(getattr(self._selected_asset, "path", ""))
 
-        folder = path if path.is_dir() else path.parent
-        if not folder.exists():
+        folder = path if path_is_dir_safe(path) else path.parent
+        if not path_exists_safe(folder):
             self._set_action_status("目录不存在")
             return folder
         QDesktopServices.openUrl(QUrl.fromLocalFile(folder.as_posix()))
