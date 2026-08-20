@@ -24,7 +24,6 @@ from typing import Any, Callable
 from geoviz import JobCancelled
 
 from paleo_workbench.project.factor_grid_artifacts import (
-    clear_live_factor_grid,
     clear_live_factor_grid_if_fingerprint,
     grid_result_fingerprint,
     peek_live_factor_grid,
@@ -609,14 +608,18 @@ def commit_prepare_batch_result(
         # the rejected grid for the task (H11 torn-cache finding). Clearing
         # is FINGERPRINT-CONDITIONAL (#834): a superseded run must not evict
         # a newer run's grid that keyed over the same task id.
+        #
+        # When this run produced NO grid for the task (failed, cancelled, or
+        # never executed) it stored nothing, so it owns nothing to evict and
+        # must clear nothing. Falling back to an unconditional clear here
+        # deleted the *winning* run's freshly committed grid, leaving a task
+        # marked `complete` whose payload then went missing on save (#881).
         for tid in ids:
             try:
                 item = items_by_id.get(tid)
                 fp = grid_result_fingerprint(item.grid) if item is not None else None
                 if fp is not None:
                     clear_live_factor_grid_if_fingerprint(tid, fp)
-                else:
-                    clear_live_factor_grid(tid)
             except Exception:
                 pass
         return ids

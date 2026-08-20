@@ -211,12 +211,12 @@ class WorkflowController:
                 fp = grid_result_fingerprint(grid) if grid is not None else None
                 if fp is not None:
                     clear_live_factor_grid_if_fingerprint(task_id, fp)
-                else:
-                    peek = peek_live_factor_grid(task_id)
-                    if peek is not None:
-                        clear_live_factor_grid_if_fingerprint(
-                            task_id, grid_result_fingerprint(peek)
-                        )
+                # No `else`: when this run produced no grid for the task it
+                # stored nothing and owns nothing to evict. The previous
+                # fallback read the cached entry via `peek_live_factor_grid`
+                # and then "conditionally" cleared it using that same entry's
+                # own fingerprint — a test that can never fail — so it deleted
+                # the winning newer run's grid outright (#881).
             task_updates = []
         if project is not None and task_updates and self._recompute_job.target is project:
             by_id = {

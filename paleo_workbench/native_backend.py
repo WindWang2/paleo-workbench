@@ -498,19 +498,32 @@ def _py_marching_cubes_3d(
 def _marching_cubes_no_crossing_guard(
     work: np.ndarray, level: float
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Run skimage, mapping its no-crossing RuntimeError to an empty mesh.
+    """Run skimage, mapping its no-crossing errors to an empty mesh.
 
     The C++ K-F2 contract (#830): a level inside the data range but with no
     strict crossing (constant == level, level == min/max, or a binary 0/1
     volume at iso 1.0) yields ``(0, 3)`` empty arrays — skimage instead
     raises ``RuntimeError: No surface found at the given iso value.``, which
     used to escape and make the UI silently toggle the isosurface off.
+
+    ``gradient_direction="ascent"`` is required for orientation parity with the
+    C++ kernel (#876). That kernel defines the "inside" set as
+    ``value >= isovalue`` (seismic_3d_core.cpp) and orients each triangle's
+    normal AWAY from that set's centroid. skimage's default ``"descent"`` is the
+    opposite convention, so every face came back wound backwards: normals
+    inverted and the divergence-theorem volume negated relative to native.
+
+    ``ValueError`` is caught alongside ``RuntimeError`` because the non-finite
+    sentinel substitution in :func:`_py_marching_cubes_3d` can push the level
+    outside the working array's range, which skimage reports as
+    ``ValueError: Surface level must be within volume data range``. The C++ path
+    skips cubes touching non-finite voxels and returns an empty mesh instead.
     """
     from skimage.measure import marching_cubes
 
     try:
-        return marching_cubes(work, level=level)
-    except RuntimeError:
+        return marching_cubes(work, level=level, gradient_direction="ascent")
+    except (RuntimeError, ValueError):
         return (
             np.zeros((0, 3), dtype=np.float64),
             np.zeros((0, 3), dtype=np.int64),

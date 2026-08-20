@@ -125,6 +125,10 @@ class VisualizationWorkspace(QFrame):
         self.tabs.addTab(self.engine_host.widget, EnginePreviewHost.tab_title)
         layout.addWidget(self.tabs, 1)
 
+    def has_well_log_loaded(self) -> bool:
+        """Return True if well log data is currently displayed in either backend."""
+        return self.well_host.has_data()
+
     def _tab_index(self, title: str) -> int:
         for index in range(self.tabs.count()):
             if self.tabs.tabText(index) == title:
