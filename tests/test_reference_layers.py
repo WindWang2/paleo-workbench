@@ -4,7 +4,9 @@ import json
 
 import numpy as np
 import pytest
-from osgeo import gdal, ogr, osr
+gdal = pytest.importorskip("osgeo.gdal")
+ogr = pytest.importorskip("osgeo.ogr")
+osr = pytest.importorskip("osgeo.osr")
 
 from paleo_workbench.mapping.reference_layers import (
     ReferenceLayerError,
