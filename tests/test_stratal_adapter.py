@@ -72,7 +72,10 @@ def test_stratal_ms_to_sample_index_endpoints_and_monotonicity():
         xline_start=200, xline_step=2, n_crosslines=6,
         n_samples=50, dt_ms=4.0, t0_ms=100.0,
     )
-    reg = SimpleNamespace(n_sample=20)  # preview downsampled to 20 samples
+    # Legitimate preview per VolumeRegistration: 50 native samples at
+    # stride 3 give ceil(50/3) == 17 preview samples.
+    stride = 3
+    reg = SimpleNamespace(n_sample=17, strides=(1, 1, stride))
     # Call the PRODUCTION transform (K-F6: the previous test recomputed
     # expectations with a test-local copy of the formula and could never
     # catch a regression in the shipped arithmetic).
@@ -84,33 +87,31 @@ def test_stratal_ms_to_sample_index_endpoints_and_monotonicity():
                 np.asarray([twt]),
                 dt_ms=survey.dt_ms,
                 t0_ms=survey.t0_ms,
-                n_samples=survey.n_samples,
-                n_sample_preview=reg.n_sample,
+                sample_stride=reg.strides[2],
             )[0]
         )
 
-    scale = reg.n_sample - 1
     dt = survey.dt_ms
     # t0 boundary -> preview sample 0.
     assert transform(survey.t0_ms) == pytest.approx(0.0)
-    # Last full sample (t0 + (n_samples-1)*dt) -> last preview sample.
-    last_twt = survey.t0_ms + (survey.n_samples - 1) * dt
-    assert transform(last_twt) == pytest.approx(scale)
+    # Native sample p*stride maps exactly to preview sample p (#890: the
+    # endpoint-ratio form drifted up to stride-1 samples on odd sizes).
+    for p in (0, 1, 5, 16):
+        assert transform(survey.t0_ms + p * stride * dt) == pytest.approx(float(p))
     # Monotonic non-decreasing in twt.
-    twts = np.linspace(survey.t0_ms, last_twt, 9)
+    twts = np.linspace(survey.t0_ms, survey.t0_ms + 49 * dt, 9)
     out = np.asarray([transform(t) for t in twts])
     assert (np.diff(out) >= 0).all()
-    # Spot check a mid value against an independent hand computation.
-    assert transform(survey.t0_ms + 25 * dt) == pytest.approx(25 / 49.0 * 19.0)
+    # Spot check a non-lattice value: native sample 25 -> 25/3.
+    assert transform(survey.t0_ms + 25 * dt) == pytest.approx(25.0 / stride)
     # Degenerate dt (<=0) degrades to dt=1.0, never divides by zero.
     degenerate = ms_to_preview_sample_index(
-        np.asarray([survey.t0_ms + 10.0]),
+        np.asarray([survey.t0_ms + 30.0]),
         dt_ms=0.0,
         t0_ms=survey.t0_ms,
-        n_samples=survey.n_samples,
-        n_sample_preview=reg.n_sample,
+        sample_stride=stride,
     )[0]
-    assert degenerate == pytest.approx(10.0 / 49.0 * 19.0)
+    assert degenerate == pytest.approx(30.0 / stride)
 
 
 def test_stratal_adapter_end_to_end_with_demo_and_renderer(qtbot):
