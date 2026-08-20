@@ -101,9 +101,11 @@ def build_stratal_grids(
         np.arange(n_x_prev, dtype=float),
         indexing="ij",
     )
-    # preview (i,x) fraction -> full-grid fractional index
-    fi = ii_prev / max(n_i_prev - 1, 1) * max(survey.n_inlines - 1, 1)
-    fx = xx_prev / max(n_x_prev - 1, 1) * max(survey.n_crosslines - 1, 1)
+    # Preview index p corresponds exactly to native index p*stride
+    # (VolumeRegistration contract); an endpoint-normalised shape ratio
+    # drifts by up to stride-1 native samples on non-divisible sizes (#890).
+    fi = ii_prev * reg.strides[0]
+    fx = xx_prev * reg.strides[1]
 
     def _to_preview_sample_index(grid_ms: np.ndarray) -> np.ndarray:
         coords = np.stack([fi, fx])
@@ -114,8 +116,7 @@ def build_stratal_grids(
             ms,
             dt_ms=survey.dt_ms,
             t0_ms=survey.t0_ms,
-            n_samples=survey.n_samples,
-            n_sample_preview=reg.n_sample,
+            sample_stride=reg.strides[2],
         )
 
     return _to_preview_sample_index(top_ms), _to_preview_sample_index(bot_ms)
@@ -126,22 +127,19 @@ def ms_to_preview_sample_index(
     *,
     dt_ms: float,
     t0_ms: float,
-    n_samples: int,
-    n_sample_preview: int,
+    sample_stride: int = 1,
 ) -> np.ndarray:
     """Vectorized ms -> preview-sample-index transform.
 
-    The registration's ``time_ms_to_sample_idx`` rescaled to the preview
-    sampling: ``(twt - t0)/dt / (n_samples-1) * (n_sample_preview-1)``.
-    Endpooints: ``t0`` maps to 0; ``t0 + (n_samples-1)*dt`` maps to
-    ``n_sample_preview-1``. Non-positive ``dt_ms`` degrades to 1.0 (matching
-    the legacy per-pixel loop).
+    The preview volume samples native indices ``range(0, n, stride)`` so the
+    exact map is ``(twt - t0)/dt / stride``. Endpoints: ``t0`` maps to 0;
+    native sample ``p*stride`` maps to preview sample ``p``. Non-positive
+    ``dt_ms`` degrades to 1.0 (matching the legacy per-pixel loop).
     """
     dt = dt_ms if dt_ms and dt_ms > 0 else 1.0
+    stride = max(1, int(sample_stride))
     full_t = (np.asarray(ms, dtype=float) - t0_ms) / dt
-    full_nt = max(n_samples - 1, 1)
-    s_idx = full_t / full_nt * max(n_sample_preview - 1, 0)
-    return np.asarray(s_idx, dtype=float)
+    return np.asarray(full_t / stride, dtype=float)
 
 
 def build_stratal_surfaces(

@@ -1318,20 +1318,23 @@ def test_plan_includes_empty_lineage_prediction_after_upstream_change(tmp_path: 
 
 
 def test_ms_to_preview_sample_index_production_function():
-    """FU2 (K-F6): pin the PRODUCTION transform, not a test-local copy."""
+    """FU2 (K-F6): pin the PRODUCTION transform, not a test-local copy.
+
+    #890: the map is the exact stride inverse (native p*stride -> preview p),
+    not an endpoint-normalised ratio.
+    """
     from paleo_workbench.viz.stratal_adapter import ms_to_preview_sample_index
 
     out = ms_to_preview_sample_index(
         np.asarray([100.0, 200.0, 300.0]),
         dt_ms=4.0,
         t0_ms=100.0,
-        n_samples=51,
-        n_sample_preview=21,
+        sample_stride=5,
     )
-    # t0 -> 0; t0 + 100ms (25 samples of 50) -> 10 of 20; t0+200ms -> 20.
+    # t0 -> 0; t0+100ms (native 25) -> preview 5; t0+200ms (native 50) -> 10.
     assert out[0] == pytest.approx(0.0)
-    assert out[1] == pytest.approx(10.0)
-    assert out[2] == pytest.approx(20.0)
+    assert out[1] == pytest.approx(5.0)
+    assert out[2] == pytest.approx(10.0)
 
 
 def test_volume_cache_put_does_not_freeze_caller_array():
