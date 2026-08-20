@@ -288,6 +288,19 @@ def _infer_stage(role: str | None, rtype: str) -> DataStage:
     return DataStage.RAW
 
 
+def path_exists_safe(path_obj: Path) -> bool:
+    """Public alias of :func:`_path_exists` for sibling UI modules (#891)."""
+    return _path_exists(path_obj)
+
+
+def path_is_dir_safe(path_obj: Path) -> bool:
+    """``Path.is_dir()`` that treats an unprobeable path as "not a dir"."""
+    try:
+        return path_obj.is_dir()
+    except OSError:
+        return False
+
+
 def _path_exists(path_obj: Path) -> bool:
     """``Path.exists()`` that treats an unprobeable path as absent, not an error.
 

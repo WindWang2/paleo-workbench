@@ -41,7 +41,12 @@ def _display_path(path: str, base_path: Path | None = None) -> str:
     candidate = Path(path)
     if candidate.is_absolute() or base_path is None:
         return path
-    return (base_path.parent / candidate).resolve().as_posix()
+    try:
+        return (base_path.parent / candidate).resolve().as_posix()
+    except OSError:
+        # resolve() can raise on over-long/unprobeable paths; showing the
+        # unresolved join keeps the detail panel alive (#891).
+        return (base_path.parent / candidate).as_posix()
 
 
 def _summary_lines(name: str, path: str, fmt: str, size: object = None) -> list[str]:
@@ -95,8 +100,15 @@ def preview_for_resource(
         "well_stratification",
     }
 
+    # Unprobeable paths (over-long, EACCES) count as absent rather than
+    # raising out of the detail-panel slot (#882/#891).
+    try:
+        path_exists = Path(path).exists()
+    except OSError:
+        path_exists = False
+
     if (
-        not Path(path).exists()
+        not path_exists
         and fmt in TEXT_FORMATS | TABLE_FORMATS | PDF_FORMATS | PROFESSIONAL_FORMATS | MARKDOWN_FORMATS | JSON_FORMATS
     ):
         return PreviewState("metadata", resource.name, lines, warning="文件不存在")
@@ -107,9 +119,9 @@ def preview_for_resource(
         return PreviewState("pdf", resource.name, lines, document_path=path)
     if fmt in AUDIO_FORMATS:
         return PreviewState("media", resource.name, lines)
-    if fmt in MARKDOWN_FORMATS and Path(path).exists():
+    if fmt in MARKDOWN_FORMATS and path_exists:
         return PreviewState("rich_text", resource.name, lines)
-    if fmt in JSON_FORMATS and Path(path).exists():
+    if fmt in JSON_FORMATS and path_exists:
         return PreviewState("json_tree", resource.name, lines)
     if fmt in TEXT_FORMATS:
         preview_lines, warning = _read_preview_lines(path)
