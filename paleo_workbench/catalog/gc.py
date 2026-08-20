@@ -85,6 +85,22 @@ def _walk_files(directory: Path) -> list[Path]:
     return [p for p in directory.rglob("*") if p.is_file()]
 
 
+def _temp_scan_roots(project_path: Path) -> tuple[tuple[Path, Path]]:
+    """Directory roots the temp-name scan must NOT descend into.
+
+    ``working/`` holds the only mutable copy of uncommitted user edits —
+    even a temp-named working copy is user work and may only be removed via
+    the explicit ``cleanup_working_copies`` hook (module invariant).
+    ``trash/`` payloads are recoverable by design and are governed by
+    step-3 version reachability instead.
+    """
+    return (working_dir_for(project_path), trash_dir_for(project_path))
+
+
+def _in_roots(path: Path, roots) -> bool:
+    return any(path == root or root in path.parents for root in roots)
+
+
 def _plan_auto_gc(service) -> GcReport:
     """Open-time plan: temp leftovers and empty dirs only (no full-tree orphan scan)."""
     report = GcReport()
@@ -92,8 +108,11 @@ def _plan_auto_gc(service) -> GcReport:
     document = service.document
     referenced = {v.path for v in document.versions if v.managed}
     stage_root = catalog_dir_for(project_path).parent
+    skip_roots = _temp_scan_roots(project_path)
     for path in _walk_files(stage_root):
         if not _is_temp_name(path.name):
+            continue
+        if _in_roots(path, skip_roots):
             continue
         try:
             rel = path.relative_to(stage_root.parent).as_posix()
@@ -167,10 +186,16 @@ def plan_gc(service, *, explicit: bool = True) -> GcReport:
     #    references it — an imported payload may legitimately be named
     #    ``data.tmp`` / ``.blob-x`` (review finding: auto-sweep deleted
     #    referenced payloads on open). Referenced files are NEVER classified
-    #    here (same referenced set as step 1).
+    #    here (same referenced set as step 1). The working/ and trash/
+    #    subtrees are skipped: temp-named working copies are uncommitted user
+    #    work (only ``cleanup_working_copies`` may touch them) and trash is
+    #    governed by step-3 reachability (#889).
     referenced = {v.path for v in document.versions if v.managed}
+    skip_roots = _temp_scan_roots(project_path)
     for path in _walk_files(stage_root):
         if not _is_temp_name(path.name):
+            continue
+        if _in_roots(path, skip_roots):
             continue
         try:
             rel = path.relative_to(stage_root.parent).as_posix()

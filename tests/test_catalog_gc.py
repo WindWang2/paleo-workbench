@@ -297,3 +297,37 @@ def test_plan_gc_does_not_classify_referenced_temp_named_payload(service, tmp_pa
     temp_items = [i for i in report.items if i.kind == TEMP_ORPHAN]
     assert not any(Path(i.path).name == "data.tmp" for i in temp_items)
     assert service.verify_integrity(version.id).status_for(version.id) == "verified"
+
+
+def test_open_sweep_keeps_temp_named_working_copy(tmp_path):
+    """A working copy whose file name matches the temp pattern (e.g. an
+    imported ``data.tmp`` edited via ``create_working_copy``) must survive
+    both the on-open auto sweep and an explicit plan/sweep: working copies
+    are uncommitted user work and only ``cleanup_working_copies`` may ever
+    remove them (#889: the auto sweep deleted the only mutable copy)."""
+    from paleo_workbench.catalog.gc import sweep_gc
+
+    project_path = tmp_path / "proj" / "demo.paleo.json"
+    project_path.parent.mkdir(parents=True)
+    project_path.write_text("{}", encoding="utf-8")
+    svc = DataCatalogService.open(project_path)
+    version = svc.import_raw(_make_source(tmp_path, "data.tmp", payload=b"original"))
+    working = svc.create_working_copy(version.id)
+    working.write_bytes(b"user edits not yet committed")
+    svc.close()
+
+    svc2 = DataCatalogService.open(project_path)
+    try:
+        assert working.exists(), "on-open auto sweep must not delete a temp-named working copy"
+        assert working.read_bytes() == b"user edits not yet committed"
+        report = svc2.plan_gc()
+        assert not any(
+            i.kind == TEMP_ORPHAN and working_dir_for(project_path) in Path(i.path).parents
+            for i in report.items
+        ), "explicit plan must not classify working copies as TEMP_ORPHAN"
+        from paleo_workbench.catalog.gc import sweep_gc as _sweep_gc
+        _sweep_gc(svc2, dry_run=False, explicit=True)
+        assert working.exists()
+        assert working.read_bytes() == b"user edits not yet committed"
+    finally:
+        svc2.close()
