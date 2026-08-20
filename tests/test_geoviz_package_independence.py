@@ -64,6 +64,10 @@ GEOVIZ_PUBLIC_FACADE = frozenset(
         "export_professional_figure",
         "CrossWellCanvas",
         "WellTieCanvas",
+        # Sonic slowness unit normalization. The single unit table, now called
+        # by viz/hosts/well_tie_host instead of a private host copy that could
+        # not recognise the µ/μ spellings (#879).
+        "normalize_sonic_units",
         "PlotWidget",
         "SurfaceWidget",
         "XYPreviewPayload",

@@ -117,5 +117,5 @@ def test_host_delegates_to_the_single_unit_table() -> None:
 
     assert "normalize_sonic_units" in inspect.getsource(well_tie_host), (
         "well_tie_host must delegate sonic unit resolution to "
-        "geoviz_well_tie.sonic_units instead of re-implementing it (#879)"
+        "geoviz.normalize_sonic_units instead of re-implementing it (#879)"
     )

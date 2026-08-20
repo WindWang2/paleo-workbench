@@ -46,8 +46,8 @@ def _curve_arrays(
 def _sonic_to_us_per_m(sonic: np.ndarray, unit: str) -> np.ndarray:
     """Convert sonic slowness to µs/m using the curve unit metadata (#406).
 
-    Delegates to :func:`geoviz_well_tie.sonic_units.normalize_sonic_units`, the
-    single unit table for sonic slowness, instead of re-implementing it here.
+    Delegates to :func:`geoviz.normalize_sonic_units`, the single unit table for
+    sonic slowness, instead of re-implementing it here.
     The local copy uppercased the unit before matching an ASCII-only alias set,
     and ``str.upper()`` maps both micro characters (U+00B5 MICRO SIGN and
     U+03BC GREEK SMALL MU) to U+039C GREEK CAPITAL MU — never to ``U``. So
@@ -61,7 +61,10 @@ def _sonic_to_us_per_m(sonic: np.ndarray, unit: str) -> np.ndarray:
     Unknown units still fall back to the engine's numeric heuristic, but that
     now returns a warning instead of silently passing values through.
     """
-    from geoviz_well_tie.sonic_units import normalize_sonic_units
+    # Imported from the public ``geoviz`` facade rather than
+    # ``geoviz_well_tie.sonic_units``: workbench production code may depend only
+    # on the facade, enforced by tests/test_geoviz_package_independence.py (#245).
+    from geoviz import normalize_sonic_units
 
     values, _resolved, warning = normalize_sonic_units(sonic, unit)
     if warning:
