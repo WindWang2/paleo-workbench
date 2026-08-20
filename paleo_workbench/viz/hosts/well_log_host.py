@@ -231,6 +231,12 @@ class WellLogHost:
         else:
             self.track_bar.setText("📋 显示中井道 (0 道): 已隐藏全部井道")
 
+    def has_data(self) -> bool:
+        """Return True when either the native engine or the legacy canvas holds data."""
+        if self._engine_plan is not None and self.view_stack.currentWidget() is self.engine_host:
+            return bool(self._engine_plan.curves)
+        return bool(self.canvas.tracks)
+
     def clear(self) -> None:
         self._release_engine_document()
         self.canvas.set_tracks([])

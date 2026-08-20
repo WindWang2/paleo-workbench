@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Any
+import unicodedata
 
 from pydantic import BaseModel, Field
 
@@ -172,8 +173,31 @@ class Tag(BaseModel):
 
 
 def normalize_tag_name(name: str) -> str:
-    """Normalize a tag name: collapse whitespace, casefold for uniqueness."""
-    return " ".join(str(name).split()).casefold()
+    """Normalize a tag name so one visual tag is one tag.
+
+    Collapses whitespace, applies Unicode NFKC, then casefolds.
+
+    ``casefold()`` alone handles case but not Unicode equivalence, so strings
+    that render identically produced *distinct* tags — defeating the very
+    uniqueness this function exists to provide (#884). NFKC folds both the
+    canonical and the compatibility differences that users actually paste:
+
+    * NFD vs NFC accents — ``cafe`` + U+0301 combining acute versus U+00E9 —
+      which macOS (APFS/HFS+) and some input methods produce;
+    * fullwidth versus ASCII Latin (U+FF43 ``ｃ`` versus ``c``), routinely
+      emitted by CJK IMEs and visually near-identical in a proportional font.
+
+    Without folding, the duplicates split ``asset_tags`` associations and tag
+    counts, and a tag search matched only the spelling the user happened to type.
+
+    NFKC (not NFC) is deliberate for this CJK-facing product so width variants
+    unify too; the trade-off is that it also folds some intentional typographic
+    distinctions (e.g. ``①`` -> ``1``), which is the right call for tag keys.
+    Note this is the key derivation shared by the canonical ``catalog.json`` and
+    the rebuildable SQLite index, so both agree by construction.
+    """
+    collapsed = " ".join(str(name).split())
+    return unicodedata.normalize("NFKC", collapsed).casefold()
 
 
 class CatalogDocument(BaseModel):

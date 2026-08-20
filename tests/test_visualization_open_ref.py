@@ -54,11 +54,10 @@ def test_open_ref_well_log_selects_well_tab(qtbot, tmp_path: Path):
     # #842: cold-cache LAS opens resolve on a worker thread; wait for the
     # payload to land instead of asserting mid-load.
     qtbot.waitUntil(
-        lambda: len(page.composite_panel.well_canvas.tracks) > 0, timeout=10_000
+        page.composite_panel.has_well_log_loaded, timeout=10_000
     )
     assert page.composite_panel.tabs.currentIndex() == 0  # 测井
-    assert page.composite_panel.well_canvas is not None
-    assert len(page.composite_panel.well_canvas.tracks) > 0
+    assert page.composite_panel.has_well_log_loaded()
     # Cross-well primary canvas also receives a well via package API
     assert page.composite_panel.cross_well_widget.canvas_count >= 1
 
@@ -199,9 +198,9 @@ def test_message_payload_clears_prior_well_tracks(qtbot, tmp_path: Path):
     page.open_ref(VizAdapter().ref_from_resource(res))
     # #842: cold-cache opens are asynchronous — wait for the payload to land.
     qtbot.waitUntil(
-        lambda: len(page.composite_panel.well_canvas.tracks) > 0, timeout=10_000
+        page.composite_panel.has_well_log_loaded, timeout=10_000
     )
-    assert len(page.composite_panel.well_canvas.tracks) > 0
+    assert page.composite_panel.has_well_log_loaded()
 
     missing = ResourceItem(
         name="gone.las",
@@ -214,9 +213,9 @@ def test_message_payload_clears_prior_well_tracks(qtbot, tmp_path: Path):
     page.open_ref(VizAdapter().ref_from_resource(missing))
 
     qtbot.waitUntil(
-        lambda: page.composite_panel.well_canvas.tracks == [], timeout=10_000
+        lambda: not page.composite_panel.has_well_log_loaded(), timeout=10_000
     )
-    assert page.composite_panel.well_canvas.tracks == []
+    assert not page.composite_panel.has_well_log_loaded()
     assert "不存在" in page.trace_panel.path_value.text() or "不可读" in page.trace_panel.path_value.text()
 
 
@@ -232,8 +231,8 @@ def test_refresh_without_ref_uses_prediction_fallback(qtbot):
     qtbot.addWidget(page)
     page.update_state([], [task], [])
     assert page._current_ref is None
-    assert len(page.composite_panel.well_canvas.tracks) > 0
+    assert page.composite_panel.has_well_log_loaded()
 
     page.trace_panel.refresh_btn.click()
     assert page._current_ref is None
-    assert len(page.composite_panel.well_canvas.tracks) > 0
+    assert page.composite_panel.has_well_log_loaded()

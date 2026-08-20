@@ -64,7 +64,8 @@ def test_data_page_jump_switches_to_visualization(qtbot, tmp_path: Path):
     assert viz._current_ref is not None
     assert viz._current_ref.source == "data_page"
     assert viz._current_ref.kind == "well_log"
-    assert len(viz.composite_panel.well_canvas.tracks) > 0
+    qtbot.waitUntil(viz.composite_panel.has_well_log_loaded, timeout=10_000)
+    assert viz.composite_panel.has_well_log_loaded()
     data_page._preview_controller.shutdown()
 
 

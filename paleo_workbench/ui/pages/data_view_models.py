@@ -288,6 +288,26 @@ def _infer_stage(role: str | None, rtype: str) -> DataStage:
     return DataStage.RAW
 
 
+def _path_exists(path_obj: Path) -> bool:
+    """``Path.exists()`` that treats an unprobeable path as absent, not an error.
+
+    ``pathlib`` only suppresses a small set of "not found" errnos (ENOENT,
+    ENOTDIR, EBADF, ELOOP), so an over-long path raises ``OSError``
+    (ENAMETOOLONG, errno 36 on Linux). That escaped the view builder and aborted
+    the entire data-page refresh because of one bad row (#882). Such a path is
+    reachable from persisted data — an external link, a long relative path joined
+    onto a long project root, or a project file written where limits differ; the
+    255-byte per-component limit is only ~86 CJK characters in UTF-8.
+
+    Reporting it as missing is the policy the adjacent ``stat()`` call already
+    applied to the very same exception type on the very same path.
+    """
+    try:
+        return path_obj.exists()
+    except OSError:
+        return False
+
+
 def asset_view_from_resource(resource: ResourceItem, project_root: Path | None = None) -> AssetView:
     stage = _infer_stage(resource.artifact_role, resource.type)
 
@@ -296,7 +316,7 @@ def asset_view_from_resource(resource: ResourceItem, project_root: Path | None =
     if not path_obj.is_absolute() and project_root is not None:
         path_obj = project_root / path_obj
 
-    file_exists = path_obj.exists()
+    file_exists = _path_exists(path_obj)
     if not file_exists or resource.status == "missing":
         integrity = IntegrityState.MISSING
     elif resource.external:
@@ -378,7 +398,7 @@ def asset_view_from_artifact(artifact: ExportArtifact, project_root: Path | None
     if not path_obj.is_absolute() and project_root is not None:
         path_obj = project_root / path_obj
 
-    file_exists = path_obj.exists()
+    file_exists = _path_exists(path_obj)
     if not file_exists:
         integrity = IntegrityState.MISSING
     else:

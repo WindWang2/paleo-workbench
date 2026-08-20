@@ -75,11 +75,11 @@ def test_open_ref_loads_las_into_well_log_canvas(qtbot, tmp_path: Path):
     page.open_ref(ref)
     # #842: cold-cache LAS opens are asynchronous — wait for the payload.
     qtbot.waitUntil(
-        lambda: len(page.composite_panel.well_canvas.tracks) > 0, timeout=10_000
+        page.composite_panel.has_well_log_loaded, timeout=10_000
     )
 
     assert page.composite_panel.tabs.tabText(page.composite_panel.tabs.currentIndex()) == "测井"
-    assert len(page.composite_panel.well_canvas.tracks) > 0
+    assert page.composite_panel.has_well_log_loaded()
     assert page.composite_panel.cross_well_widget.canvas_count >= 1
 
 

@@ -149,14 +149,19 @@ class DataAssetTable(QWidget):
         )
         self._visible_assets = [assets[i] for i in filtered]
         # Auto-fit column widths to content on data refresh.  Skip the
-        # O(rows×cols) content measurement on large tables — 1k rows measured
-        # ~0.5s offscreen with zero paint cost — mirroring the
-        # TablePreviewWidget ≤10k-cell guard (#850-3).
+        # O(rows×cols) content measurement on large tables.  The budget is in
+        # CELLS, but this table is only 8 columns wide, so a 10k-cell budget did
+        # not engage until ~1250 rows — leaving the 1k-row catalog that motivated
+        # the guard on the slow path at ~400ms, while 2k rows completed in ~46ms
+        # on the fast path (#883).  4k cells puts 1k rows on the fast path and
+        # keeps content fitting for the small tables where it is cheap.  Note the
+        # 50px seed below forces a full re-measure, so this branch's cost is not
+        # something Qt can short-circuit.
         header = self.table.horizontalHeader()
         prev_stretch = header.stretchLastSection()
         header.setStretchLastSection(False)
         cell_count = self.model.rowCount() * self.model.columnCount()
-        if cell_count <= 10_000:
+        if cell_count <= 4_000:
             for col in range(header.count()):
                 header.resizeSection(col, 50)
             self.table.resizeColumnsToContents()

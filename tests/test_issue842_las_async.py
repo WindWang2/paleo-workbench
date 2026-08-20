@@ -87,7 +87,7 @@ def test_visualization_page_parses_las_off_gui_thread(qtbot, tmp_path: Path, mon
 
     release.set()
     qtbot.waitUntil(
-        lambda: len(page.composite_panel.well_canvas.tracks) > 0, timeout=10_000
+        page.composite_panel.has_well_log_loaded, timeout=10_000
     )
     assert page.trace_panel.kind_value.text() == "well_log"
     page.shutdown_workers(2_000)
@@ -101,7 +101,7 @@ def test_visualization_page_well_log_cache_hit_stays_sync(qtbot, tmp_path: Path,
     page.update_state(project.resources, [], [])
     ref = VizAdapter().ref_from_resource(res)
     qtbot.waitUntil(
-        lambda: len(page.composite_panel.well_canvas.tracks) > 0, timeout=10_000
+        page.composite_panel.has_well_log_loaded, timeout=10_000
     )
 
     threads: list[str] = []
@@ -116,7 +116,7 @@ def test_visualization_page_well_log_cache_hit_stays_sync(qtbot, tmp_path: Path,
 
     # Warm cache → synchronous on the GUI thread, no worker spawned.
     assert threads == [threading.current_thread().name]
-    assert len(page.composite_panel.well_canvas.tracks) > 0
+    assert page.composite_panel.has_well_log_loaded()
     page.shutdown_workers(2_000)
 
 

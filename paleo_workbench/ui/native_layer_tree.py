@@ -11,7 +11,6 @@ import json
 import math
 from typing import Any
 
-import layer_model_core
 from PySide6.QtCore import QAbstractItemModel, QMimeData, QModelIndex, Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
@@ -26,6 +25,16 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench.ui import tokens
+
+# ``layer_model_core`` is an opt-in C++ build. Importing it at module scope made
+# this module — and every parent up to ``AppShell`` and the ``paleo-workbench``
+# entry point — unimportable on installs that did not build it (#878). Only the
+# ``LayerType`` enum is needed here, and always alongside a live registry that
+# cannot exist without the extension, so a guarded import is sufficient.
+try:  # pragma: no cover - exercised by the absent-extension contract test
+    import layer_model_core
+except ImportError:  # pragma: no cover
+    layer_model_core = None
 
 __all__ = ["NativeLayerModel", "NativeLayerTree"]
 

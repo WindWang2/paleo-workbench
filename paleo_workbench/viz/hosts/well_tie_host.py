@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from typing import Any
 
 import numpy as np
 from geoviz import WellTieCanvas
 
 from paleo_workbench.viz.models import VizPayload
+
+_log = logging.getLogger(__name__)
 
 # Common LAS mnemonics for sonic (µs/m or µs/ft) and bulk density (g/cm³).
 _SONIC_NAMES = frozenset(
@@ -40,26 +43,30 @@ def _curve_arrays(
     return None
 
 
-_SONIC_US_PER_FT = frozenset({"US/F", "US/FT", "USFT", "MICROSEC/FT"})
-
-
 def _sonic_to_us_per_m(sonic: np.ndarray, unit: str) -> np.ndarray:
     """Convert sonic slowness to µs/m using the curve unit metadata (#406).
 
-    Fast formations sit at 140–150 µs/m — exactly where the old numeric
-    ``median < 150`` heuristic guessed µs/ft and multiplied by 3.28084,
-    inflating TWT ~3.3x. Metadata decides; the heuristic remains only as a
-    last-resort fallback when the ~CURVE block carried no unit.
+    Delegates to :func:`geoviz_well_tie.sonic_units.normalize_sonic_units`, the
+    single unit table for sonic slowness, instead of re-implementing it here.
+    The local copy uppercased the unit before matching an ASCII-only alias set,
+    and ``str.upper()`` maps both micro characters (U+00B5 MICRO SIGN and
+    U+03BC GREEK SMALL MU) to U+039C GREEK CAPITAL MU — never to ``U``. So
+    ``µs/ft`` missed the table, fell through to the unknown-unit branch and was
+    returned unscaled, making TWT 3.28084x too small; ``USEC/FT`` was missing
+    from the table outright even though ``USEC/M`` was present (#879).
+
+    Note the contract in CONTEXT.md spells the canonical sonic unit ``μs/m``
+    with U+03BC, i.e. the exact spelling the old table could not recognise.
+
+    Unknown units still fall back to the engine's numeric heuristic, but that
+    now returns a warning instead of silently passing values through.
     """
-    u = unit.strip().upper().replace(" ", "")
-    if u in _SONIC_US_PER_FT:
-        return sonic * 3.28084
-    if u in {"US/M", "USM", "MICROSEC/M", "USEC/M"}:
-        return sonic
-    if not u:
-        if float(np.nanmedian(np.abs(sonic))) < 150.0:
-            return sonic * 3.28084  # unit metadata missing: numeric fallback
-    return sonic
+    from geoviz_well_tie.sonic_units import normalize_sonic_units
+
+    values, _resolved, warning = normalize_sonic_units(sonic, unit)
+    if warning:
+        _log.warning("well-tie sonic unit: %s", warning)
+    return values
 
 
 def _depth_axis(well_log: Any, n: int = 100) -> np.ndarray:

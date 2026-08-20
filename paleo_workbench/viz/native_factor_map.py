@@ -10,8 +10,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
 
-import grid_render_core
-import layer_model_core
 import numpy as np
 
 from paleo_workbench.catalog.grid_artifact import read_grid_artifact
@@ -20,11 +18,61 @@ from paleo_workbench.project.factor_grid_artifacts import factor_grid_result_for
 from paleo_workbench.viz.grid_render import default_rgba_lut
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 
+# The C++ layer model and grid rasteriser are OPT-IN builds (installed with
+# ``pip install -e native/layer_model_core native/grid_render_core``), so they
+# must never be imported at module scope: a top-level import made every page
+# that transitively reaches this module — and therefore ``AppShell`` and the
+# ``paleo-workbench`` entry point itself — fail with ModuleNotFoundError on any
+# install that did not build them (#878).
+#
+# Unlike the algorithm kernels in ``native_backend``, these are stateful C++
+# object models (``LayerRegistry``, ``ScalarGridLayer``) with no pure-Python
+# counterpart, so ``MapScene`` genuinely cannot operate without them. Importing
+# this module is therefore always safe; only constructing a scene requires the
+# extensions, and that failure is reported with actionable install guidance.
+try:  # pragma: no cover - exercised by the absent-extension contract test
+    import grid_render_core
+except ImportError:  # pragma: no cover
+    grid_render_core = None
+
+try:  # pragma: no cover
+    import layer_model_core
+except ImportError:  # pragma: no cover
+    layer_model_core = None
+
+_MISSING_NATIVE_HINT = (
+    "The native map scene requires the optional C++ extensions {missing}. "
+    "Build them from the checkout with:\n"
+    "    python -m pip install -e native/layer_model_core\n"
+    "    python -m pip install -e native/grid_render_core"
+)
+
+
+def native_scene_available() -> bool:
+    """True when both C++ extensions backing :class:`MapScene` are importable."""
+    return grid_render_core is not None and layer_model_core is not None
+
+
+def require_native_scene() -> None:
+    """Raise a diagnostic ``RuntimeError`` when the C++ scene backing is absent."""
+    missing = [
+        name
+        for name, module in (
+            ("layer_model_core", layer_model_core),
+            ("grid_render_core", grid_render_core),
+        )
+        if module is None
+    ]
+    if missing:
+        raise RuntimeError(_MISSING_NATIVE_HINT.format(missing=", ".join(missing)))
+
 __all__ = [
     "ContourGeometry",
     "MapScene",
     "NativeMapScene",
     "PointGeometry",
+    "native_scene_available",
+    "require_native_scene",
     "scene_from_factor_task",
 ]
 
@@ -106,8 +154,11 @@ class MapScene:
     """
 
     def __init__(self, registry=None):
-        self.registry = registry or layer_model_core.LayerRegistry()
-        self._scalars: dict[str, grid_render_core.ScalarGridLayer] = {}
+        if registry is None:
+            require_native_scene()
+            registry = layer_model_core.LayerRegistry()
+        self.registry = registry
+        self._scalars: dict[str, "grid_render_core.ScalarGridLayer"] = {}
         self._contours: dict[str, ContourGeometry] = {}
         self._points: dict[str, PointGeometry] = {}
         self._vectors: dict[str, tuple[dict, ...]] = {}
@@ -152,6 +203,7 @@ class MapScene:
         """
         if not isinstance(result, FactorGridResult):
             raise TypeError("result must be a FactorGridResult")
+        require_native_scene()
         native_layer = grid_render_core.ScalarGridLayer(
             *_north_up_grid(result.grid_z, result.mask)
         )
