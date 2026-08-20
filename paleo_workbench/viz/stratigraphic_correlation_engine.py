@@ -44,7 +44,7 @@ class StratigraphicCorrelationEngine:
         self._kb_elevations: dict[str, float] = {}
         self._x_positions: dict[str, float] = {}
         self._dtw_window: int | None = None
-        self._depth_step: float = 0.5
+        self._depth_step: float | None = None
 
     def with_wells(self, wells: list[dict[str, Any]]) -> Self:
         """Bind well section data objects to the pipeline."""
@@ -69,8 +69,14 @@ class StratigraphicCorrelationEngine:
         self._x_positions = x_positions
         return self
 
-    def with_dtw_config(self, window: int | None = None, depth_step: float = 0.5) -> Self:
-        """Configure Dynamic Time Warping curve matching parameters."""
+    def with_dtw_config(self, window: int | None = None, depth_step: float | None = None) -> Self:
+        """Configure Dynamic Time Warping curve matching parameters.
+
+        ``depth_step=None`` (the default) lets the correlator derive the step
+        from the reference curve's real depth axis; a fixed default such as
+        0.5 silently resamples half-foot LAS data and misplaces recommended
+        tops by up to ``0.5/step`` (#888).
+        """
         self._dtw_window = window
         self._depth_step = depth_step
         return self
