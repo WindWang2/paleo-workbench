@@ -36,6 +36,143 @@ from paleo_workbench.ui import tokens
 __all__ = ["UnifiedMapCanvas", "paint_map_decorations"]
 
 
+def _nice_scale_units_impl(value: float) -> float:
+    """Round a map-unit length down onto the 1/2/5 × 10ⁿ ladder."""
+    if value <= 0.0 or not math.isfinite(value):
+        return value
+    exponent = math.floor(math.log10(value))
+    fraction = value / (10.0**exponent)
+    for nice in (5.0, 2.0, 1.0):
+        if fraction >= nice:
+            return nice * (10.0**exponent)
+    return 10.0**exponent
+
+
+def _scale_bar_spec_impl(
+    extent: tuple[float, float, float, float], canvas_width: int, scale: float = 1.0,
+) -> tuple[float, float] | None:
+    """Return (nice unit length, matching pixel length) for a scale bar.
+
+    Bar length matches the printed label exactly (units → pixels via the
+    target's own extent), so the bar is a true measurement reference.
+    """
+    xmin, _, xmax, _ = extent
+    span = xmax - xmin
+    if span <= 0.0:
+        return None
+    target_units = _nice_scale_units_impl(span * 0.2)
+    if target_units <= 0.0:
+        return None
+    pixels = target_units / span * canvas_width
+    if pixels < 16 * scale:
+        return None
+    return target_units, pixels
+
+
+def _paint_scale_bar_impl(
+    painter: QPainter,
+    extent: tuple[float, float, float, float],
+    canvas_width: int,
+    canvas_height: int,
+    scale: float,
+) -> None:
+    spec = _scale_bar_spec_impl(extent, canvas_width, scale)
+    if spec is None:
+        return
+    target_units, pixels = spec
+    y = canvas_height - 24.0 * scale
+    painter.save()
+    painter.setPen(QPen(QColor("#ffffff"), 2.0 * scale))
+    painter.drawLine(QPointF(16 * scale, y), QPointF(16 * scale + pixels, y))
+    painter.drawLine(QPointF(16 * scale, y - 4 * scale), QPointF(16 * scale, y + 4 * scale))
+    painter.drawLine(QPointF(16 * scale + pixels, y - 4 * scale), QPointF(16 * scale + pixels, y + 4 * scale))
+    font = QFont(painter.font())
+    font.setPixelSize(max(8, round(10 * scale)))
+    painter.setFont(font)
+    label = f"{target_units:g} map units"
+    painter.drawText(QPointF(16 * scale, y - 7 * scale), label)
+    painter.restore()
+
+
+def _paint_decorations_impl(
+    painter: QPainter,
+    decorations: Mapping[str, Any],
+    *,
+    width: int,
+    height: int,
+    scale: float,
+    extent: tuple[float, float, float, float],
+) -> None:
+    """Paint chrome (title/scale bar/north arrow/legend) in device pixels.
+
+    ``scale`` is ``dpi / 96`` for exports: every fixed-size element —
+    including text, which is set in pixel sizes — scales with it.
+    ``extent`` is the extent actually rendered into this target (exports
+    letterbox the view extent); the scale bar reads it so its label always
+    matches the drawn bar length.
+    """
+    canvas_width = int(width)
+    canvas_height = int(height)
+    elements = {str(item) for item in decorations.get("elements") or ()}
+    title = str(decorations.get("title") or "")
+    title_font = QFont(painter.font())
+    title_font.setPixelSize(max(10, round(16 * scale)))
+    title_font.setBold(True)
+    if title and (not elements or "标题栏" in elements or "title" in elements):
+        painter.save()
+        painter.setPen(QColor("#f8f9fa"))
+        painter.setFont(title_font)
+        painter.drawText(
+            QRectF(14 * scale, 10 * scale, canvas_width - 28 * scale, canvas_height - 20 * scale),
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, title,
+        )
+        painter.restore()
+    if not elements or "比例尺" in elements or "scale_bar" in elements:
+        _paint_scale_bar_impl(painter, extent, canvas_width, canvas_height, scale)
+    if not elements or "指北针" in elements or "north_arrow" in elements:
+        painter.save()
+        center = QPointF(canvas_width - 28 * scale, 37 * scale)
+        painter.setPen(QPen(QColor("#ffffff"), 1.5 * scale))
+        painter.setBrush(QColor("#343a40"))
+        painter.drawPolygon(QPolygonF([
+            center + QPointF(0, -18 * scale),
+            center + QPointF(-6 * scale, 10 * scale),
+            center + QPointF(0, 5 * scale),
+            center + QPointF(6 * scale, 10 * scale),
+        ]))
+        font = QFont(painter.font())
+        font.setPixelSize(max(8, round(10 * scale)))
+        painter.setFont(font)
+        painter.drawText(center + QPointF(-5 * scale, -22 * scale), "N")
+        painter.restore()
+    if (not elements or "图例" in elements or "legend" in elements) and decorations.get("legend_items"):
+        items = [str(item) for item in decorations["legend_items"]][:8]
+        painter.save()
+        legend_width = 164 * scale
+        row_height = 18 * scale
+        swatch = 9 * scale
+        legend_height = 10 * scale + row_height * len(items)
+        painter.setPen(QPen(QColor("#dfe6ee"), 1.0 * scale))
+        painter.setBrush(QColor(24, 28, 34, 210))
+        rect = QRectF(
+            canvas_width - legend_width - 16 * scale,
+            canvas_height - legend_height - 16 * scale,
+            legend_width,
+            legend_height,
+        )
+        painter.drawRect(rect)
+        font = QFont(painter.font())
+        font.setPixelSize(max(8, round(11 * scale)))
+        for index, item in enumerate(items):
+            painter.setBrush(QColor("#6c8ebf"))
+            y = rect.top() + 14 * scale + index * row_height
+            painter.drawRect(QRectF(rect.left() + 8 * scale, y - swatch, swatch, swatch))
+            painter.setPen(QColor("#f8f9fa"))
+            painter.setFont(font)
+            painter.drawText(QPointF(rect.left() + 23 * scale, y), item)
+        painter.restore()
+
+
 def paint_map_decorations(
     painter: QPainter,
     decorations: Mapping[str, Any],
@@ -45,69 +182,17 @@ def paint_map_decorations(
     extent: tuple[float, float, float, float],
     dpi: float | None = None,
 ) -> None:
-    """Draw title / scale / north arrow / legend. ``dpi`` None keeps screen cosmetics."""
-    canvas_width = int(width)
-    canvas_height = int(height)
-    # Export overlays scale cosmetic sizes (fonts, pen widths, glyphs) with
-    # dpi/96 so a 300-dpi export matches the physical screen look; the
-    # screen path (dpi=None) stays unchanged.
+    """Draw title / scale / north arrow / legend. ``dpi`` None keeps screen cosmetics.
+
+    Delegates to the same implementation the on-screen canvas uses, so an
+    exported PNG matches the canvas/SVG/PDF decorations element-for-element;
+    previously the export copy skipped DPI scaling for the legend and used a
+    different scale-bar policy (#892).
+    """
     dpi_scale = (float(dpi) / 96.0) if dpi else 1.0
-    elements = {str(item) for item in decorations.get("elements") or ()}
-    title = str(decorations.get("title") or "")
-    if title and (not elements or "标题栏" in elements or "title" in elements):
-        painter.save()
-        painter.setPen(QColor("#f8f9fa"))
-        font = painter.font()
-        font.setPointSizeF(max(10, font.pointSize() + 3) * dpi_scale)
-        font.setBold(True)
-        painter.setFont(font)
-        painter.drawText(
-            QRectF(14, 10, canvas_width - 28, canvas_height - 20),
-            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
-            title,
-        )
-        painter.restore()
-    if not elements or "比例尺" in elements or "scale_bar" in elements:
-        width_units = extent[2] - extent[0]
-        target_units = width_units * 0.2
-        if target_units > 0.0:
-            pixels = max(35.0, canvas_width * 0.2)
-            y = canvas_height - 24.0
-            painter.save()
-            painter.setPen(QPen(QColor("#ffffff"), 2.0 * dpi_scale))
-            painter.drawLine(QPointF(16, y), QPointF(16 + pixels, y))
-            painter.drawLine(QPointF(16, y - 4 * dpi_scale), QPointF(16, y + 4 * dpi_scale))
-            painter.drawLine(QPointF(16 + pixels, y - 4 * dpi_scale), QPointF(16 + pixels, y + 4 * dpi_scale))
-            painter.drawText(QPointF(16, y - 7 * dpi_scale), f"{target_units:.3g} map units")
-            painter.restore()
-    if not elements or "指北针" in elements or "north_arrow" in elements:
-        painter.save()
-        center = QPointF(canvas_width - 28, 37)
-        painter.setPen(QPen(QColor("#ffffff"), 1.5 * dpi_scale))
-        painter.setBrush(QColor("#343a40"))
-        painter.drawPolygon(QPolygonF([
-            center + QPointF(0, -18 * dpi_scale),
-            center + QPointF(-6 * dpi_scale, 10 * dpi_scale),
-            center + QPointF(0, 5 * dpi_scale),
-            center + QPointF(6 * dpi_scale, 10 * dpi_scale),
-        ]))
-        painter.drawText(center + QPointF(-5 * dpi_scale, -22 * dpi_scale), "N")
-        painter.restore()
-    if (not elements or "图例" in elements or "legend" in elements) and decorations.get("legend_items"):
-        items = [str(item) for item in decorations["legend_items"]][:8]
-        painter.save()
-        painter.setPen(QPen(QColor("#dfe6ee"), 1.0 * dpi_scale))
-        painter.setBrush(QColor(24, 28, 34, 210))
-        box_height = 10 + 18 * len(items)
-        rect = QRectF(canvas_width - 180, canvas_height - box_height - 16, 164, box_height)
-        painter.drawRect(rect)
-        for index, item in enumerate(items):
-            painter.setBrush(QColor("#6c8ebf"))
-            y = rect.top() + 14 + index * 18
-            painter.drawRect(rect.left() + 8, y - 8, 9, 9)
-            painter.setPen(QColor("#f8f9fa"))
-            painter.drawText(QPointF(rect.left() + 23, y), item)
-        painter.restore()
+    _paint_decorations_impl(
+        painter, decorations, width=width, height=height, scale=dpi_scale, extent=extent,
+    )
 
 
 class UnifiedMapCanvas(QWidget):
@@ -494,108 +579,26 @@ class UnifiedMapCanvas(QWidget):
         height: int | None = None, scale: float = 1.0,
         extent: tuple[float, float, float, float] | None = None,
     ) -> None:
-        """Paint chrome (title/scale bar/north arrow/legend) in device pixels.
-
-        ``scale`` is ``dpi / 96`` for exports: every fixed-size element —
-        including text, which is set in pixel sizes — scales with it.
-        ``extent`` is the extent actually rendered into this target (exports
-        letterbox the view extent); the scale bar reads it so its label always
-        matches the drawn bar length.
-        """
+        """Screen/export chrome painting; delegates to the shared impl (#892)."""
         canvas_width = self.width() if width is None else int(width)
         canvas_height = self.height() if height is None else int(height)
         drawn_extent = self._view_extent if extent is None else extent
-        elements = {str(item) for item in decorations.get("elements") or ()}
-        title = str(decorations.get("title") or "")
-        title_font = QFont(painter.font())
-        title_font.setPixelSize(max(10, round(16 * scale)))
-        title_font.setBold(True)
-        if title and (not elements or "标题栏" in elements or "title" in elements):
-            painter.save()
-            painter.setPen(QColor("#f8f9fa"))
-            painter.setFont(title_font)
-            painter.drawText(
-                QRectF(14 * scale, 10 * scale, canvas_width - 28 * scale, canvas_height - 20 * scale),
-                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, title,
-            )
-            painter.restore()
-        if not elements or "比例尺" in elements or "scale_bar" in elements:
-            self._paint_scale_bar(painter, drawn_extent, canvas_width, canvas_height, scale)
-        if not elements or "指北针" in elements or "north_arrow" in elements:
-            painter.save()
-            center = QPointF(canvas_width - 28 * scale, 37 * scale)
-            painter.setPen(QPen(QColor("#ffffff"), 1.5 * scale))
-            painter.setBrush(QColor("#343a40"))
-            painter.drawPolygon(QPolygonF([
-                center + QPointF(0, -18 * scale),
-                center + QPointF(-6 * scale, 10 * scale),
-                center + QPointF(0, 5 * scale),
-                center + QPointF(6 * scale, 10 * scale),
-            ]))
-            font = QFont(painter.font())
-            font.setPixelSize(max(8, round(10 * scale)))
-            painter.setFont(font)
-            painter.drawText(center + QPointF(-5 * scale, -22 * scale), "N")
-            painter.restore()
-        if (not elements or "图例" in elements or "legend" in elements) and decorations.get("legend_items"):
-            items = [str(item) for item in decorations["legend_items"]][:8]
-            painter.save()
-            legend_width = 164 * scale
-            row_height = 18 * scale
-            swatch = 9 * scale
-            legend_height = 10 * scale + row_height * len(items)
-            painter.setPen(QPen(QColor("#dfe6ee"), 1.0 * scale))
-            painter.setBrush(QColor(24, 28, 34, 210))
-            rect = QRectF(
-                canvas_width - legend_width - 16 * scale,
-                canvas_height - legend_height - 16 * scale,
-                legend_width,
-                legend_height,
-            )
-            painter.drawRect(rect)
-            font = QFont(painter.font())
-            font.setPixelSize(max(8, round(11 * scale)))
-            for index, item in enumerate(items):
-                painter.setBrush(QColor("#6c8ebf"))
-                y = rect.top() + 14 * scale + index * row_height
-                painter.drawRect(QRectF(rect.left() + 8 * scale, y - swatch, swatch, swatch))
-                painter.setPen(QColor("#f8f9fa"))
-                painter.setFont(font)
-                painter.drawText(QPointF(rect.left() + 23 * scale, y), item)
-            painter.restore()
+        _paint_decorations_impl(
+            painter, decorations,
+            width=canvas_width, height=canvas_height, scale=scale, extent=drawn_extent,
+        )
 
     @staticmethod
     def _nice_scale_units(value: float) -> float:
         """Round a map-unit length down onto the 1/2/5 × 10ⁿ ladder."""
-        if value <= 0.0 or not math.isfinite(value):
-            return value
-        exponent = math.floor(math.log10(value))
-        fraction = value / (10.0**exponent)
-        for nice in (5.0, 2.0, 1.0):
-            if fraction >= nice:
-                return nice * (10.0**exponent)
-        return 10.0**exponent
+        return _nice_scale_units_impl(value)
 
     @classmethod
     def _scale_bar_spec(
         cls, extent: tuple[float, float, float, float], canvas_width: int, scale: float = 1.0,
     ) -> tuple[float, float] | None:
-        """Return (nice unit length, matching pixel length) for a scale bar.
-
-        Bar length matches the printed label exactly (units → pixels via the
-        target's own extent), so the bar is a true measurement reference.
-        """
-        xmin, _, xmax, _ = extent
-        span = xmax - xmin
-        if span <= 0.0:
-            return None
-        target_units = cls._nice_scale_units(span * 0.2)
-        if target_units <= 0.0:
-            return None
-        pixels = target_units / span * canvas_width
-        if pixels < 16 * scale:
-            return None
-        return target_units, pixels
+        """Return (nice unit length, matching pixel length) for a scale bar."""
+        return _scale_bar_spec_impl(extent, canvas_width, scale)
 
     def _paint_scale_bar(
         self,
@@ -605,22 +608,7 @@ class UnifiedMapCanvas(QWidget):
         canvas_height: int,
         scale: float,
     ) -> None:
-        spec = self._scale_bar_spec(extent, canvas_width, scale)
-        if spec is None:
-            return
-        target_units, pixels = spec
-        y = canvas_height - 24.0 * scale
-        painter.save()
-        painter.setPen(QPen(QColor("#ffffff"), 2.0 * scale))
-        painter.drawLine(QPointF(16 * scale, y), QPointF(16 * scale + pixels, y))
-        painter.drawLine(QPointF(16 * scale, y - 4 * scale), QPointF(16 * scale, y + 4 * scale))
-        painter.drawLine(QPointF(16 * scale + pixels, y - 4 * scale), QPointF(16 * scale + pixels, y + 4 * scale))
-        font = QFont(painter.font())
-        font.setPixelSize(max(8, round(10 * scale)))
-        painter.setFont(font)
-        label = f"{target_units:g} map units"
-        painter.drawText(QPointF(16 * scale, y - 7 * scale), label)
-        painter.restore()
+        _paint_scale_bar_impl(painter, extent, canvas_width, canvas_height, scale)
 
     def _letterboxed_extent(self, width: int, height: int) -> tuple[float, float, float, float]:
         """Expand the view extent so geometry keeps its aspect at any export size."""

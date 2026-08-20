@@ -117,3 +117,63 @@ def test_export_worker_cancel_after_render_removes_partial_file(
 
     assert emitted == ["cancelled"]
     assert not out.exists(), "a cancelled export must not leave a partial file"
+
+def test_worker_and_canvas_legend_agree_at_export_dpi(qtbot):
+    """#892: the async PNG export path must scale the legend like the canvas
+    path does — a 300-dpi export previously drew ~1 mm legend text because
+    the worker copy skipped DPI scaling and never set a font."""
+    from PySide6.QtGui import QImage, QPainter
+
+    from paleo_workbench.ui.unified_map_canvas import (
+        UnifiedMapCanvas,
+        paint_map_decorations,
+    )
+
+    decorations = {
+        "elements": ("图例",),
+        "legend_items": ("砂岩", "泥岩", "石灰岩"),
+    }
+    canvas = UnifiedMapCanvas()
+    qtbot.addWidget(canvas)
+    canvas.resize(2400, 1600)
+    canvas._view_extent = (0.0, 0.0, 1000.0, 500.0)
+
+    def render(kind: str) -> QImage:
+        img = QImage(2400, 1600, QImage.Format.Format_ARGB32)
+        img.fill(0)
+        painter = QPainter(img)
+        if kind == "worker":
+            paint_map_decorations(
+                painter, decorations, width=2400, height=1600,
+                extent=(0.0, 0.0, 1000.0, 500.0), dpi=300.0,
+            )
+        else:
+            canvas._paint_decorations(
+                painter, decorations, width=2400, height=1600,
+                scale=300.0 / 96.0, extent=(0.0, 0.0, 1000.0, 500.0),
+            )
+        painter.end()
+        return img
+
+    def swatch_height(img: QImage) -> int:
+        # Legend swatches are opaque blue-ish (#6c8ebf) squares; measure the
+        # tallest blue run in the bottom-right quadrant.
+        best = 0
+        for x in range(1840, 1990):
+            run = 0
+            for y in range(1300, 1599):
+                pixel = img.pixelColor(x, y)
+                if pixel.blue() > 120 and pixel.red() < 160 and pixel.green() < 160:
+                    run += 1
+                else:
+                    best = max(best, run)
+                    run = 0
+            best = max(best, run)
+        return best
+
+    worker_h = swatch_height(render("worker"))
+    canvas_h = swatch_height(render("canvas"))
+    # At 300 dpi the swatch is 9px * 300/96 ≈ 28px; before the fix the worker
+    # path drew a 9px swatch (ratio ~3.1).
+    assert abs(worker_h - canvas_h) <= 1
+    assert worker_h >= 20, f"worker legend swatch too small for 300 dpi: {worker_h}px"
