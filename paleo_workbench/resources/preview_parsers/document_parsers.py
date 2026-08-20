@@ -142,7 +142,9 @@ def markdown_rich_preview(resource: ResourceItem, settings: PreviewSettings) -> 
     """Markdown -> HTML -> QTextBrowser (rich_text mode, no WebEngine)."""
     path = Path(resource.path)
     preview_bytes, truncated = read_preview_chunk(path, settings.text_limit_kib)
-    markdown = preview_bytes.decode("utf-8", errors="replace")
+    # utf-8-sig strips a leading BOM so the first "# heading" line still
+    # matches the heading regex.
+    markdown = preview_bytes.decode("utf-8-sig", errors="replace")
     warning = f"仅显示前 {settings.text_limit_kib} KiB" if truncated else ""
     return PreviewResult(
         mode="rich_text",
@@ -247,7 +249,8 @@ def json_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewRe
             raw_bytes = handle.read(limit if truncated else limit + 1)
     except OSError:
         return parse_error_preview(resource, "文件不存在")
-    raw = raw_bytes.decode("utf-8", errors="replace")
+    # utf-8-sig strips a leading BOM (json.loads rejects it outright).
+    raw = raw_bytes.decode("utf-8-sig", errors="replace")
     try:
         payload = json_lib.loads(raw)
     except (json_lib.JSONDecodeError, ValueError) as exc:
