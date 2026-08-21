@@ -132,8 +132,15 @@ def search_assets(
     if not include_trashed:
         results = [a for a in results if not a.trashed]
     if text:
-        needle = text.casefold()
-        results = [a for a in results if needle in a.name.casefold()]
+        # Same NFKC+casefold normalization as the index path's name_search
+        # column (#897): scan and index must return identical rows for
+        # non-ASCII case variants.
+        from paleo_workbench.catalog.db import normalize_asset_search_name
+
+        needle = normalize_asset_search_name(text)
+        results = [
+            a for a in results if needle in normalize_asset_search_name(a.name)
+        ]
     if type:
         results = [a for a in results if a.type == type]
     if metadata_pairs:

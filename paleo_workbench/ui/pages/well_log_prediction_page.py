@@ -306,14 +306,16 @@ class WellLogPredictionPage(QWidget):
             error = "未知错误"
             if run is not None:
                 error = (run.parameters or {}).get("error", "未知错误")
-            QMessageBox.warning(self, "测井预测失败", f"推断失败: {error}")
+            # Async completion: in-page status instead of a modal dialog
+            # (the shell may be rebuilding, #897).
+            self.evidence_panel.set_status(f"推断失败: {error}")
             return
         result = payload.get("result")
         if not result:
             error = (getattr(run, "parameters", None) or {}).get("error") or (
                 "预测完成但未返回可用结果"
             )
-            QMessageBox.warning(self, "测井预测失败", f"推断失败: {error}")
+            self.evidence_panel.set_status(f"推断失败: {error}")
             return
         params = result.get("parameters") or {}
         factor_ids = [
@@ -360,7 +362,7 @@ class WellLogPredictionPage(QWidget):
 
     def _on_inference_failed(self, text: str) -> None:
         self.evidence_panel.set_inferring(False)
-        QMessageBox.critical(self, "测井预测失败", f"推断失败: {text}")
+        self.evidence_panel.set_status(f"推断失败: {text}")
 
     def _on_export(self, format_label: str = "PNG") -> None:
         if not self.canvas_panel.is_canvas_ready():

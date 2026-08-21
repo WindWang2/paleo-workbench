@@ -54,11 +54,27 @@ def like_escape_literal(text: str) -> str:
         str(text).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     )
 
+
+def normalize_asset_search_name(name: str) -> str:
+    """Unicode-folded search copy of an asset name (#897).
+
+    SQLite's LIKE is ASCII-only case-insensitive, while the canonical scan
+    (queries.py) matches on ``casefold()``; both paths now compare against
+    this NFKC+casefold form so non-ASCII names (e.g. ``Grünfeld`` vs
+    ``GRÜNFELD``) hit identically with or without the index.
+    """
+    import unicodedata
+
+    return unicodedata.normalize("NFKC", str(name)).casefold()
+
 # Version of the index table layout itself (distinct from the canonical
 # document's CATALOG_SCHEMA_VERSION). Bump whenever the index schema changes so
 # stale databases are rebuilt from the canonical store instead of being queried
 # with a missing column.
-INDEX_SCHEMA_VERSION = 3
+# v4: assets.name_search — Unicode-folded copy of name (NFKC + casefold) so the
+# LIKE text filter matches the canonical scan's casefold semantics for
+# non-ASCII names (#897); SQLite LIKE is ASCII-only case-insensitive.
+INDEX_SCHEMA_VERSION = 4
 
 # Table/DDL definitions. The index is deliberately FK-free: it is a disposable
 # projection of the canonical document, and delete order must never matter.
@@ -66,6 +82,7 @@ _SCHEMA_DDL = [
     """CREATE TABLE IF NOT EXISTS assets (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
+        name_search TEXT NOT NULL DEFAULT '',
         type TEXT NOT NULL DEFAULT 'unknown',
         description TEXT NOT NULL DEFAULT '',
         current_version_id TEXT,
@@ -77,6 +94,7 @@ _SCHEMA_DDL = [
         trashed_at TEXT
     )""",
     "CREATE INDEX IF NOT EXISTS idx_assets_name ON assets(name)",
+    "CREATE INDEX IF NOT EXISTS idx_assets_name_search ON assets(name_search)",
     "CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(type)",
     "CREATE INDEX IF NOT EXISTS idx_assets_trashed ON assets(trashed)",
     """CREATE TABLE IF NOT EXISTS versions (
@@ -380,13 +398,14 @@ class CatalogIndex:
                 conn.execute(f"DELETE FROM {table}")
 
             conn.executemany(
-                "INSERT INTO assets (id, name, type, description, current_version_id,"
+                "INSERT INTO assets (id, name, name_search, type, description, current_version_id,"
                 " legacy_resource_id, metadata, created_at, updated_at, trashed, trashed_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 [
                     (
                         asset.id,
                         asset.name,
+                        normalize_asset_search_name(asset.name),
                         asset.type,
                         asset.description,
                         asset.current_version_id,
@@ -533,6 +552,7 @@ class CatalogIndex:
         for asset in document.assets:
             assets[asset.id] = (
                 asset.name,
+                normalize_asset_search_name(asset.name),
                 asset.type,
                 asset.description,
                 asset.current_version_id,
@@ -752,9 +772,9 @@ class CatalogIndex:
             for asset_id, row in state["assets"].items():
                 if last["assets"].get(asset_id) != row:
                     conn.execute(
-                        "INSERT OR REPLACE INTO assets (id, name, type, description,"
+                        "INSERT OR REPLACE INTO assets (id, name, name_search, type, description,"
                         " current_version_id, legacy_resource_id, metadata, created_at,"
-                        " updated_at, trashed, trashed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                        " updated_at, trashed, trashed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                         (asset_id, *row),
                     )
             for version_id, row in state["versions"].items():
@@ -952,8 +972,13 @@ class CatalogIndex:
                     )
                     params.append(tag_name)
         if text:
-            wheres.append("a.name LIKE ? ESCAPE '\\'")
-            params.append(f"%{like_escape_literal(text)}%")
+            # Match the canonical scan's Unicode casefold semantics via the
+            # normalized name_search column (#897); plain LIKE on name is
+            # ASCII-only case-insensitive and diverged for non-ASCII names.
+            wheres.append("a.name_search LIKE ? ESCAPE '\\'")
+            params.append(
+                f"%{like_escape_literal(normalize_asset_search_name(text))}%"
+            )
         if type is not None:
             wheres.append("a.type = ?")
             params.append(str(type))

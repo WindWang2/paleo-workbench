@@ -35,6 +35,9 @@ class SeismicContextToolbar(QFrame):
         self.horizon_value = self._add_context_value(layout, "层位", "—")
         self.attribute_value = self._add_context_value(layout, "属性", "振幅")
         self.mode_value = self._add_context_value(layout, "显示", "vd")
+        # Async run outcome landing spot (#897): completions arrive on queued
+        # signals and must not open modal dialogs while the shell rebuilds.
+        self.status_value = self._add_context_value(layout, "状态", "—")
         layout.addStretch(1)
 
         self.run_btn = QPushButton("运行预测")
@@ -84,3 +87,9 @@ class SeismicContextToolbar(QFrame):
         self._inferring = bool(busy)
         self.run_btn.setEnabled(not self._inferring)
         self.demo_btn.setEnabled(not self._inferring)
+        if busy:
+            self.status_value.setText("推断中…")
+
+    def set_status(self, text: str) -> None:
+        """Show an async run outcome in-page (no modal dialogs, #897)."""
+        self.status_value.setText(text)

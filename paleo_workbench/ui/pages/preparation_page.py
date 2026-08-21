@@ -322,18 +322,16 @@ class PreparationPage(QWidget):
             return
         drafts = commit_contour_drafts(target, result)
         if not drafts:
-            QMessageBox.information(
-                self,
-                "等值线初稿",
-                "没有可提取的单因素网格。请先「批量生成单因素图」。",
+            # Async completions must not open a modal dialog (the shell may
+            # be rebuilding; same policy as _on_prepare_failed, #897).
+            self.task_panel.summary_label.setText(
+                "等值线初稿：没有可提取的单因素网格，请先「批量生成单因素图」。"
             )
             return
         self.update_state(self._project.factor_map_tasks)
         self.contour_drafts_updated.emit()
-        QMessageBox.information(
-            self,
-            "等值线初稿",
-            f"已生成 {len(drafts)} 份等值线初稿并推送到编图。",
+        self.task_panel.summary_label.setText(
+            f"等值线初稿：已生成 {len(drafts)} 份并推送到编图。"
         )
 
     def _on_contour_failed(self, message: str) -> None:

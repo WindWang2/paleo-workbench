@@ -356,6 +356,12 @@ class FreshnessService:
         if prod and prod in self.graph.runs:
             self._index_selected()
             for sel in self._selected_by_key.get(("parent", input_version_id), ()):
+                # Byte-identical branch-off must not invalidate downstream
+                # work (same tolerance as rules 1-3, #897): a copied
+                # interpretation with parent_version_id=P is a new version
+                # id with identical content.
+                if self._content_identical(sel, input_version_id):
+                    continue
                 return sel, self.graph.asset_id_for(sel)
 
         if input_version_id in self.context.selected_version_ids:

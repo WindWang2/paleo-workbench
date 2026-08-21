@@ -62,16 +62,14 @@ def test_complete_run_without_result_is_visible(qtbot, monkeypatch):
     """#635: complete + result=None must not be a silent no-op."""
     from types import SimpleNamespace
 
-    from PySide6.QtWidgets import QMessageBox
-
     page = WellLogPredictionPage()
     qtbot.addWidget(page)
     page._project = ProjectDocument.new("p")
-    seen: list[tuple] = []
+    seen: list[str] = []
     monkeypatch.setattr(
-        QMessageBox,
-        "warning",
-        lambda *args, **kwargs: seen.append((args, kwargs)),
+        page.evidence_panel,
+        "set_status",
+        lambda text: seen.append(text),
     )
     page._on_inference_completed(
         {

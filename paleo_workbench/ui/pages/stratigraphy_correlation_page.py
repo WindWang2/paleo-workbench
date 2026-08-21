@@ -641,16 +641,22 @@ class StratigraphyCorrelationPage(QWidget):
         visible = item.checkState() == Qt.CheckState.Checked
         self.cross_host.inner.set_track_visible_by_label(item.text(), visible)
 
-    def _inject_well_tops(self, names: list[str]) -> list[str]:
-        """Inject 井分层 tops into tops model + formation data. Returns notices."""
+    def _inject_well_tops(self, names: list[str], tops_by_well: dict[str, list[tuple[str, float]]] | None = None) -> list[str]:
+        """Inject 井分层 tops into tops model + formation data. Returns notices.
+
+        ``tops_by_well`` may be supplied by a caller that already read the
+        tops file this load — it was previously re-read on the GUI thread a
+        second time by the engine-plan builder (#897).
+        """
         canvas = self.cross_host.widget
         canvas.tops_model.clear()
         canvas.picks_model.clear()
         notices: list[str] = []
         if self._project is None:
             return notices
-        tops_by_well, warnings = load_well_tops(self._project)
-        notices.extend(warnings)
+        if tops_by_well is None:
+            tops_by_well, warnings = load_well_tops(self._project)
+            notices.extend(warnings)
         matched, unmatched = match_tops_to_wells(tops_by_well, names)
         for well, tops in matched.items():
             for top_name, depth in tops:
@@ -979,11 +985,13 @@ class StratigraphyCorrelationPage(QWidget):
             return
         logs, names, loaded_ids, warnings = result
         if not logs:
-            QMessageBox.warning(
-                self,
-                "地层对比",
-                "未能加载任何井曲线\n" + "\n".join(warnings[:5]),
+            # Async completion: keep the failure in-page instead of a modal
+            # dialog (the shell may be rebuilding, #897).
+            detail = "；".join(warnings[:5])
+            self.status_label.setText(
+                f"未能加载任何井曲线{('：' + detail) if detail else ''}"
             )
+            self.load_btn.setEnabled(True)
             return
         self._apply_load_result(logs, names, loaded_ids, warnings)
 
@@ -1081,23 +1089,34 @@ class StratigraphyCorrelationPage(QWidget):
             well_names=names,
         )
         ok = self.cross_host.apply(payload)
+        shared_tops: dict[str, list[tuple[str, float]]] | None = None
         if ok:
-            top_notices = self._inject_well_tops(names)
+            # Read the tops file once and share with the engine-plan builder
+            # below (#897: it was re-read synchronously a second time).
+            if self._project is not None:
+                shared_tops, warnings = load_well_tops(self._project)
+                top_notices.extend(warnings)
+            top_notices.extend(self._inject_well_tops(names, tops_by_well=shared_tops))
             self._refresh_track_list()
             # Keep spacing slider in sync for parity snapshot.
             self.cross_host.inner.set_well_spacing(self.spacing_slider.value())
         # Always build engine plan for parity even on Legacy (dual-path tests).
-        self._build_engine_plan_only(logs, names, ids)
+        self._build_engine_plan_only(logs, names, ids, raw_tops=shared_tops)
         return ok, top_notices, "Legacy"
 
     def _build_engine_plan_only(
-        self, logs: list[Any], names: list[str], resource_ids: list[str]
+        self,
+        logs: list[Any],
+        names: list[str],
+        resource_ids: list[str],
+        raw_tops: dict[str, list[tuple[str, float]]] | None = None,
     ) -> None:
-        tops_by_well: dict[str, list[tuple[str, float]]] = {}
+        matched: dict[str, list[tuple[str, float]]] = {}
         if self._project is not None:
-            raw_tops, _ = load_well_tops(self._project)
+            if raw_tops is None:
+                raw_tops, _ = load_well_tops(self._project)
             matched, _ = match_tops_to_wells(raw_tops, names)
-            tops_by_well = matched
+        tops_by_well = matched
         horizon = ""
         if self._project is not None:
             horizon = active_target_horizon(self._project) or ""

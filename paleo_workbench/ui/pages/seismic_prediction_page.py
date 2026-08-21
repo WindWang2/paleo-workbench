@@ -267,14 +267,16 @@ class SeismicPredictionPage(QWidget):
             error = "未知错误"
             if run is not None:
                 error = (run.parameters or {}).get("error", "未知错误")
-            QMessageBox.warning(self, "地震预测失败", f"推断失败: {error}")
+            # Async completion: in-page status instead of a modal dialog
+            # (the shell may be rebuilding, #897).
+            self.context_toolbar.set_status(f"推断失败: {error}")
             return
         result = payload.get("result")
         if not result:
             error = (getattr(run, "parameters", None) or {}).get("error") or (
                 "预测完成但未返回可用结果"
             )
-            QMessageBox.warning(self, "地震预测失败", f"推断失败: {error}")
+            self.context_toolbar.set_status(f"推断失败: {error}")
             return
         params = result.get("parameters") or {}
         factor_ids = [
@@ -320,4 +322,4 @@ class SeismicPredictionPage(QWidget):
 
     def _on_inference_failed(self, text: str) -> None:
         self.context_toolbar.set_inferring(False)
-        QMessageBox.critical(self, "地震预测失败", f"推断失败: {text}")
+        self.context_toolbar.set_status(f"推断失败: {text}")

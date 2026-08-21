@@ -68,6 +68,14 @@ class DTWLogMatcher:
         cost_matrix = np.full((d_n_ref + 1, d_n_target + 1), fill_value=np.inf)
         cost_matrix[0, 0] = 0.0
 
+        # A Sakoe-Chiba band of width `window` makes the DP endpoint
+        # unreachable when the length difference exceeds the band; the old
+        # backtracker then walked through inf cells and fabricated a
+        # monotone path (transfer_top_index returned meaningless indices).
+        # Return an empty alignment instead (#897).
+        if window is not None and abs(d_n_ref - d_n_target) > window:
+            return AlignmentResult(cost=float("inf"), path_ref=[], path_target=[])
+
         for i in range(1, d_n_ref + 1):
             for j in range(1, d_n_target + 1):
                 if window is not None and abs(i - j) > window:

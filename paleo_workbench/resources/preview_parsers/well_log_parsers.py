@@ -117,8 +117,15 @@ def las_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewRes
             data_rows = tuple(rows_list)
     except _UseLasio:
         data_headers, data_rows = _lasio_data_table(path)
-    except Exception:
-        pass
+    except Exception as exc:
+        # Fast-path failures other than the wrapped-file sentinel used to be
+        # swallowed (empty data table, no warning); fall back to lasio so the
+        # preview stays usable and the failure is visible (#897).
+        data_warning = f"快速解析失败已回退 lasio: {exc.__class__.__name__}"
+        try:
+            data_headers, data_rows = _lasio_data_table(path)
+        except Exception:
+            pass
 
     if data_warning:
         warning = "；".join(
@@ -197,9 +204,13 @@ def xml_well_log_preview(resource: ResourceItem, settings: PreviewSettings) -> P
                                     break
             if sheet_rows and len(sheet_rows) > 1:
                 s_headers = tuple(str(h).strip() for h in sheet_rows[0] if str(h).strip())
+                # Off-by-one (#897): the loop collected up to
+                # max_preview_rows + 1 data candidates after the header, but
+                # the slice kept only max_preview_rows - 1 of them — every
+                # sheet's preview lost its last row.
                 s_data_rows = tuple(
                     tuple(r[: len(s_headers)])
-                    for r in sheet_rows[1:max_preview_rows]
+                    for r in sheet_rows[1 : max_preview_rows + 1]
                 )
                 parsed_sheets.append((sheet_name, s_headers, s_data_rows))
                 if not all_rows and "测井曲线" in sheet_name:

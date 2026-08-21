@@ -85,6 +85,17 @@ def _depth_axis(well_log: Any, n: int = 100) -> np.ndarray:
     return np.linspace(top, bottom, max(n, 2), dtype=np.float64)
 
 
+def _interp_curve(depths: np.ndarray, d_src: np.ndarray, v_src: np.ndarray) -> np.ndarray:
+    """``np.interp`` wrapper tolerating a descending (deepest-first) source
+    axis — ``np.interp`` is undefined on decreasing ``xp`` (#897)."""
+    d_src = np.asarray(d_src, dtype=np.float64)
+    v_src = np.asarray(v_src, dtype=np.float64)
+    if d_src.size > 1 and float(np.median(np.diff(d_src))) < 0.0:
+        d_src = d_src[::-1]
+        v_src = v_src[::-1]
+    return np.interp(depths, d_src, v_src)
+
+
 def _twt_from_sonic(
     depths: np.ndarray, sonic: np.ndarray, depth_unit: str = "m"
 ) -> np.ndarray:
@@ -98,6 +109,14 @@ def _twt_from_sonic(
     sonic = np.asarray(sonic, dtype=np.float64)
     if depths.size < 2:
         return np.zeros_like(depths)
+    # Descending (deepest-first) LAS axes integrate to negative TWT and the
+    # np.interp gap bridge is undefined on decreasing xp (#897): integrate
+    # in ascending order and flip the result back to file order.
+    flipped = False
+    if depths.size > 1 and float(np.median(np.diff(depths))) < 0.0:
+        depths = depths[::-1]
+        sonic = sonic[::-1]
+        flipped = True
     # Gap-aware integral (#534): LAS nulls (-999.25 / blank fields) arrive
     # as NaN; a single NaN in the raw trapezoid poisoned every TWT sample
     # at and below the gap (NaN - x == NaN through cumsum), blanking the
@@ -116,6 +135,8 @@ def _twt_from_sonic(
     owt_us = dz * (sonic[:-1] + sonic[1:]) / 2.0
     twt = np.zeros_like(depths)
     twt[1:] = 2.0 * np.cumsum(owt_us) / 1000.0
+    if flipped:
+        twt = twt[::-1]
     return twt
 
 
@@ -177,7 +198,7 @@ def build_tie_arrays(
 
     if sonic_pair is not None:
         d_src, v_src = sonic_pair[0], sonic_pair[1]
-        sonic = np.interp(depths, d_src, v_src)
+        sonic = _interp_curve(depths, d_src, v_src)
         sonic = _sonic_to_us_per_m(sonic, sonic_unit)
     else:
         # Mild velocity increase with depth (µs/m).
@@ -185,7 +206,7 @@ def build_tie_arrays(
 
     if dens_pair is not None:
         d_src, v_src = dens_pair[0], dens_pair[1]
-        density = np.interp(depths, d_src, v_src)
+        density = _interp_curve(depths, d_src, v_src)
     else:
         density = np.linspace(2.15, 2.55, n, dtype=np.float64)
 

@@ -47,6 +47,10 @@ class SculptableHorizonMesh:
         rim, leaving a visible step at the brush boundary (#846).
         """
         cx, cy = center_xy
+        if radius <= 0.0:
+            # A non-positive brush touches nothing; the old code divided by
+            # sigma == radius * 0.5 == 0 and raised ZeroDivisionError (#897).
+            return self.vertices
         dx = self.vertices[:, 0] - cx
         dy = self.vertices[:, 1] - cy
         dist = np.hypot(dx, dy)

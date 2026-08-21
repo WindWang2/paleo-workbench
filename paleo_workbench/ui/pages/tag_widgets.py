@@ -296,6 +296,7 @@ class TagManagerDialog(QDialog):
         self.setMinimumSize(480, 420)
         self._service_provider = service_provider or (lambda: None)
         self._rows: list[dict[str, Any]] = []
+        self._load_error: str = ""
 
         layout = QVBoxLayout(self)
 
@@ -366,9 +367,13 @@ class TagManagerDialog(QDialog):
         service = self._service()
         if service is None:
             return []
+        error: str | None = None
         try:
             usage = service.tag_usage()
-        except Exception:
+        except Exception as exc:
+            # Catalog failures previously rendered as an empty table — the
+            # user could not tell "no tags" from a broken catalog (#897).
+            self._load_error = f"标签统计加载失败: {exc.__class__.__name__}"
             return []
         rows = [
             {
@@ -383,10 +388,13 @@ class TagManagerDialog(QDialog):
         if text:
             try:
                 matched = {tag.name for tag in service.search_tags(text)}
-            except Exception:
+            except Exception as exc:
+                error = f"标签搜索失败: {exc.__class__.__name__}"
                 matched = set()
             rows = [row for row in rows if row["name"] in matched]
         rows.sort(key=lambda row: row["display_name"].casefold())
+        if error is not None:
+            self._load_error = error
         return rows
 
     def _reload(self) -> None:
@@ -395,8 +403,19 @@ class TagManagerDialog(QDialog):
     def _reload_table(self) -> None:
         """Refresh usage rows (honouring the search filter) and re-render."""
         has_service = self._service() is not None
-        self.hint_label.setVisible(not has_service)
+        self._load_error = ""
         self._rows = self._usage_rows() if has_service else []
+        if has_service and self._load_error:
+            # Surface catalog failures instead of an indistinguishable
+            # "no tags" table (#897); row actions stay disabled.
+            self.hint_label.setText(self._load_error)
+            self.hint_label.setVisible(True)
+            self._rows = []
+        elif not has_service:
+            self.hint_label.setText("未连接数据目录 — 标签管理不可用")
+            self.hint_label.setVisible(True)
+        else:
+            self.hint_label.setVisible(False)
 
         self.table.setRowCount(len(self._rows))
         for r, row in enumerate(self._rows):
