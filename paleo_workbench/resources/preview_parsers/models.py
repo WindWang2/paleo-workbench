@@ -39,6 +39,7 @@ HTML_FORMATS = {"htm", "html"}
 JSON_FORMATS = {"json", "geojson"}
 GEOTIFF_FORMATS = {"tif", "tiff"}
 AUDIO_FORMATS = {"wav", "mp3", "flac", "ogg", "m4a"}
+VIDEO_FORMATS = {"mp4", "mov", "webm", "mkv", "avi"}
 MAX_JSON_PARSE_BYTES = 5 * 1024 * 1024
 JSON_ARRAY_COLLAPSE_THRESHOLD = 100
 

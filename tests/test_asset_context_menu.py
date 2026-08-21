@@ -119,3 +119,40 @@ def test_menu_trashed_asset_shows_restore_not_remove(qtbot):
     menu.build(trashed, viz_supported=False)
     assert menu.find_action("ctx_restore") is not None
     assert menu.find_action("ctx_remove") is None
+
+
+def test_menu_has_open_with_system_app(qtbot):
+    menu = AssetContextMenu()
+    menu.build(_res(), viz_supported=False)
+    act = menu.find_action("ctx_open_system")
+    assert act is not None
+    assert act.text() == "用系统应用打开"
+    assert act.isEnabled() is True
+
+
+def test_menu_open_system_disabled_when_no_path(qtbot):
+    empty = ResourceItem(name="x", path="", type="well_log", format="las", status="parsed")
+    menu = AssetContextMenu()
+    menu.build(empty, viz_supported=False)
+    act = menu.find_action("ctx_open_system")
+    assert act is not None
+    assert act.isEnabled() is False
+
+
+def test_menu_open_system_calls_openUrl(qtbot, monkeypatch):
+    from unittest.mock import MagicMock
+
+    import paleo_workbench.ui.pages.asset_context_menu as m
+
+    mock = MagicMock(return_value=True)
+    monkeypatch.setattr(m.QDesktopServices, "openUrl", mock)
+    res = ResourceItem(name="x", path="/tmp/foo.pdf", type="well_log", format="las", status="parsed")
+    menu = AssetContextMenu()
+    menu.build(res, viz_supported=False)
+    act = menu.find_action("ctx_open_system")
+    assert act is not None
+    act.trigger()
+    assert mock.called
+    # Verify the URL is a local file URL for the expected path
+    called_url = mock.call_args[0][0]
+    assert called_url.toLocalFile() == "/tmp/foo.pdf"

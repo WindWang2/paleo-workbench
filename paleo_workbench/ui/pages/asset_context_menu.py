@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from PySide6.QtGui import QAction
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import QMenu
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
@@ -57,6 +58,7 @@ class AssetContextMenu(QMenu):
             restore.setToolTip("从回收站恢复该数据资产及其版本")
             self.addSeparator()
             open_folder = self._add_action("ctx_open_folder", "打开目录")
+            self._add_open_system_action(view)
             return
 
         # 1. 预览 (Preview)
@@ -145,6 +147,9 @@ class AssetContextMenu(QMenu):
         # 7. 打开目录 (Open Folder)
         self._add_action("ctx_open_folder", "打开目录")
 
+        # 7b. 用系统应用打开 (Open with System App)
+        self._add_open_system_action(view)
+
         # 8. 在可视化页面打开 (Visualize)
         if viz_supported:
             self._add_action("ctx_visualize", "在可视化页面打开")
@@ -154,6 +159,21 @@ class AssetContextMenu(QMenu):
         # 9. 移出项目 (Remove from Project)
         remove = self._add_action("ctx_remove", "移出项目")
         self._style_destructive(remove)
+
+    def _add_open_system_action(self, view) -> QAction:
+        action = self._add_action("ctx_open_system", "用系统应用打开")
+        path = view.path if isinstance(getattr(view, "path", None), str) else str(getattr(view, "path", "") or "")
+        path = path.strip()
+        # Consider remote URLs as not local
+        is_remote = path.startswith("http://") or path.startswith("https://") or path.startswith("ftp://")
+        has_local = bool(path) and not is_remote
+        action.setEnabled(has_local)
+        if not has_local:
+            action.setToolTip("无本地文件路径")
+        else:
+            # Capture path at build time
+            action.triggered.connect(lambda checked=False, p=path: QDesktopServices.openUrl(QUrl.fromLocalFile(p)))
+        return action
 
     def _build_multi_selection_menu(self, items: list[object]) -> None:
         count = len(items)

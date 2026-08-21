@@ -3,12 +3,18 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
+    QHBoxLayout,
     QLabel,
+    QMenu,
+    QPushButton,
     QStackedWidget,
     QVBoxLayout,
+    QWidget,
 )
 
 
@@ -90,6 +96,21 @@ class DataReaderPanel(QFrame):
         self.meta_label.setWordWrap(True)
         self.meta_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;")
         layout.addWidget(self.meta_label)
+
+        # 复制全部 toolbar — 仅在表格预览时显示，匹配面板现有布局语义
+        self._table_toolbar = QWidget()
+        self._table_toolbar.setObjectName("TableCopyToolbar")
+        _tb_layout = QHBoxLayout(self._table_toolbar)
+        _tb_layout.setContentsMargins(0, 0, 0, 0)
+        _tb_layout.setSpacing(tokens.SPACE_1)
+        _tb_layout.addStretch()
+        self._table_copy_btn = QPushButton("复制全部")
+        self._table_copy_btn.setObjectName("SecondaryButton")
+        self._table_copy_btn.setToolTip("将当前表格以 TSV 复制到剪贴板")
+        self._table_copy_btn.clicked.connect(self._on_copy_table_all)
+        _tb_layout.addWidget(self._table_copy_btn)
+        self._table_toolbar.setVisible(False)
+        layout.addWidget(self._table_toolbar)
 
         self.stack = QStackedWidget()
         layout.addWidget(self.stack, 1)
@@ -196,6 +217,8 @@ class DataReaderPanel(QFrame):
         self.message_label.set_message("正在生成预览…")
         self.stack.setCurrentWidget(self.message_label)
         self.current_mode = "loading"
+        if hasattr(self, "_table_toolbar"):
+            self._table_toolbar.setVisible(False)
         self.reader_mode_changed.emit("loading")
 
     def update_asset(self, asset: ResourceItem | ExportArtifact | None) -> None:
@@ -431,6 +454,14 @@ class DataReaderPanel(QFrame):
         self.warning_label.setText(warning)
         self.stack.setCurrentWidget(target)
         self.current_mode = result.mode
+        # 表格复制工具栏仅在表格模式下可见
+        if hasattr(self, "_table_toolbar"):
+            is_table = target is self.table_preview
+            self._table_toolbar.setVisible(is_table)
+            if is_table and self.table_preview.truncated:
+                self._table_copy_btn.setToolTip(self.table_preview.truncation_message)
+            elif hasattr(self, "_table_copy_btn"):
+                self._table_copy_btn.setToolTip("将当前表格以 TSV 复制到剪贴板")
         self.reader_mode_changed.emit(result.mode)
 
     def apply_preview_settings(self, settings) -> None:
@@ -510,6 +541,45 @@ class DataReaderPanel(QFrame):
             result = self._geoviz_failure_result(self._current_result, error)
             self.message_label.set_message(result.message)
             self._commit_result(result, self.message_label)
+
+    def _on_copy_table_all(self) -> None:
+        """复制当前显示表格为 TSV 并给出成功反馈。"""
+        text = self.table_preview.copy_all()
+        if self.table_preview.truncated and self.table_preview.truncation_message:
+            text = f"{text}\n{self.table_preview.truncation_message}"
+            self._table_copy_btn.setToolTip(self.table_preview.truncation_message)
+        clipboard = QApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(text)
+        original = "复制全部"
+        btn = self._table_copy_btn
+        btn.setText("已复制")
+
+        def _restore() -> None:
+            try:
+                if btn.text() == "已复制":
+                    btn.setText(original)
+            except RuntimeError:
+                pass
+
+        QTimer.singleShot(1200, _restore)
+
+    def _open_with_system_app(self) -> None:
+        path = getattr(self._current_result, "path", "") or ""
+        if not path:
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def _build_preview_context_menu(self) -> QMenu:
+        menu = QMenu(self)
+        path = getattr(self._current_result, "path", "") or ""
+        action = menu.addAction("用系统应用打开")
+        action.setEnabled(bool(path))
+        action.triggered.connect(self._open_with_system_app)
+        return menu
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802
+        self._build_preview_context_menu().exec(event.globalPos())
 
     def _message_widget(self, text: str) -> MessagePreviewWidget:
         label = MessagePreviewWidget()

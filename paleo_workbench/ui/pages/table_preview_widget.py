@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont
-from PySide6.QtWidgets import QHeaderView, QSizePolicy, QTableWidget, QTableWidgetItem
+from PySide6.QtGui import QColor, QFont, QKeySequence
+from PySide6.QtWidgets import QApplication, QHeaderView, QSizePolicy, QTableWidget, QTableWidgetItem
 
 from paleo_workbench.ui import tokens
 
@@ -139,3 +139,54 @@ class TablePreviewWidget(QTableWidget):
                 width = max(self.columnWidth(col) + 16, 75)
                 self.setColumnWidth(col, width)
             hdr.setStretchLastSection(True)
+
+    def copy_all(self) -> str:
+        """返回当前显示表格的 TSV（含表头），仅复制已截断后的可见行。"""
+        n_cols = self.columnCount()
+        if n_cols == 0:
+            return ""
+        headers: list[str] = []
+        for c in range(n_cols):
+            item = self.horizontalHeaderItem(c)
+            headers.append(item.text() if item is not None else "")
+        lines: list[str] = ["\t".join(headers)]
+        for r in range(self.rowCount()):
+            vals: list[str] = []
+            for c in range(n_cols):
+                it = self.item(r, c)
+                vals.append(it.text() if it is not None else "")
+            lines.append("\t".join(vals))
+        # 无数据行时仅返回表头
+        if self.rowCount() == 0:
+            return "\t".join(headers)
+        return "\n".join(lines)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        is_copy = False
+        try:
+            if event.matches(QKeySequence.StandardKey.Copy):
+                is_copy = True
+        except Exception:
+            pass
+        if not is_copy and event.key() == Qt.Key_C and bool(event.modifiers() & Qt.ControlModifier):
+            is_copy = True
+        if is_copy:
+            ranges = self.selectedRanges()
+            if not ranges:
+                event.accept()
+                return
+            lines: list[str] = []
+            for rng in ranges:
+                for r in range(rng.topRow(), rng.bottomRow() + 1):
+                    row_vals: list[str] = []
+                    for c in range(rng.leftColumn(), rng.rightColumn() + 1):
+                        it = self.item(r, c)
+                        row_vals.append(it.text() if it is not None else "")
+                    lines.append("\t".join(row_vals))
+            text = "\n".join(lines)
+            clipboard = QApplication.clipboard()
+            if clipboard is not None:
+                clipboard.setText(text)
+            event.accept()
+            return
+        super().keyPressEvent(event)

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QPointF, QSize, Qt
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QPointF, QSize, Qt, QTimer
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
 try:
     from PySide6.QtPdf import QPdfDocument
@@ -56,9 +56,13 @@ class PdfPreviewWidget(QWidget):
         self.next_btn = QPushButton("下一页")
         self.next_btn.setObjectName("SecondaryButton")
         self.next_btn.clicked.connect(self.next_page)
+        self.copy_all_btn = QPushButton("复制全部文本")
+        self.copy_all_btn.setObjectName("SecondaryButton")
+        self.copy_all_btn.clicked.connect(self._copy_all_text)
         controls.addWidget(self.prev_btn)
         controls.addWidget(self.page_label, 1)
         controls.addWidget(self.next_btn)
+        controls.addWidget(self.copy_all_btn)
         layout.addLayout(controls)
 
         if self.document is None:
@@ -66,6 +70,8 @@ class PdfPreviewWidget(QWidget):
             self.page_label.setText("0 / 0")
             self.prev_btn.setEnabled(False)
             self.next_btn.setEnabled(False)
+            self.copy_all_btn.setEnabled(False)
+            self.copy_all_btn.setVisible(False)
 
     def apply_settings(self, settings) -> None:
         self.fit_mode = settings.pdf_fit_mode
@@ -231,6 +237,62 @@ class PdfPreviewWidget(QWidget):
         super().resizeEvent(event)
         if self._path and self.pdf_view is None and self.document is not None and self.document.pageCount() > 0:
             self._render_page()
+
+    def _copy_all_text(self) -> None:
+        if self.document is None:
+            return
+        try:
+            page_count = self.document.pageCount()
+        except Exception:
+            return
+        if page_count <= 0:
+            return
+        texts: list[str] = []
+        for i in range(page_count):
+            try:
+                sel = self.document.getAllText(i)
+            except Exception:
+                texts.append("")
+                continue
+            if sel is None:
+                texts.append("")
+                continue
+            if isinstance(sel, str):
+                texts.append(sel)
+                continue
+            # QPdfSelection case: .text is a method returning str
+            t_attr = getattr(sel, "text", None)
+            if callable(t_attr):
+                try:
+                    txt = t_attr()
+                except Exception:
+                    txt = str(sel)
+                texts.append(txt if isinstance(txt, str) else str(txt))
+            elif isinstance(t_attr, str):
+                texts.append(t_attr)
+            elif t_attr is not None:
+                texts.append(str(t_attr))
+            else:
+                texts.append(str(sel))
+        full = "\n".join(texts)
+        truncated = False
+        if len(full) > 1_000_000:
+            full = full[:1_000_000]
+            truncated = True
+        clipboard = QApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(full)
+        # feedback
+        self.copy_all_btn.setText("已复制（已截断）" if truncated else "已复制")
+
+        def _restore_copy_btn_text() -> None:
+            try:
+                self.copy_all_btn.setText("复制全部文本")
+            except RuntimeError:
+                # Widget may already be destroyed when the timer fires (tests).
+                pass
+
+        QTimer.singleShot(1500, _restore_copy_btn_text)
 
     def _show_fallback_message(self, text: str) -> None:
         self.fallback_image.clear()

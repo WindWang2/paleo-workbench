@@ -50,7 +50,7 @@ def classify_path(path: Path) -> tuple[str, str, str]:
     if ext == "csv":
         return "tabular", ext, "indexed"
 
-    if ext in {"pdf", "ppt", "pptx"}:
+    if ext in {"pdf", "ppt", "pptx", "docx", "doc"}:
         return "document", ext, "indexed_reference"
 
     if ext in {"png", "jpg", "jpeg", "tif", "tiff", "bmp"}:
@@ -70,6 +70,9 @@ def classify_path(path: Path) -> tuple[str, str, str]:
 
     if ext in {"wav", "mp3", "flac", "ogg", "m4a"}:
         return "unknown", ext, "indexed_reference"
+
+    if ext in {"mp4", "mov", "webm", "mkv", "avi"}:
+        return "video", ext, "indexed_reference"
 
     # Remaining: keep format for preview dispatch.
     return "unknown", ext or "none", "indexed_reference"

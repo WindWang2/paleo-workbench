@@ -8,11 +8,14 @@ from paleo_workbench.project.paths import is_within_directory, safe_file_stat
 from paleo_workbench.resources.preview_parsers.document_parsers import (
     artifact_preview,
     audio_preview,
+    doc_preview,
+    docx_preview,
     geotiff_preview,
     json_preview,
     markdown_rich_preview,
     read_preview_chunk,
     resource_revision_token,
+    video_preview,
 )
 from paleo_workbench.resources.preview_parsers.models import (
     AUDIO_FORMATS,
@@ -27,6 +30,7 @@ from paleo_workbench.resources.preview_parsers.models import (
     SEGY_FORMATS,
     TABLE_FORMATS,
     TEXT_FORMATS,
+    VIDEO_FORMATS,
     PreviewResult,
 )
 from paleo_workbench.resources.preview_parsers.office_parsers import (
@@ -204,6 +208,15 @@ class PreviewRegistry:
 
         if fmt in AUDIO_FORMATS:
             return audio_preview(asset)
+
+        if fmt in VIDEO_FORMATS:
+            return video_preview(asset)
+
+        if fmt == "docx":
+            return docx_preview(asset, settings)
+
+        if fmt == "doc":
+            return doc_preview(asset)
 
         if fmt == "xml":
             xml_log = xml_well_log_preview(asset, settings)

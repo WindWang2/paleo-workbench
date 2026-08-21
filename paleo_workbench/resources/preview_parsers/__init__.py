@@ -22,6 +22,7 @@ from paleo_workbench.resources.preview_parsers.models import (
     SEGY_FORMATS,
     TABLE_FORMATS,
     TEXT_FORMATS,
+    VIDEO_FORMATS,
     PreviewMode,
     PreviewResult,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "SEGY_FORMATS",
     "TABLE_FORMATS",
     "TEXT_FORMATS",
+    "VIDEO_FORMATS",
     "PreviewMode",
     "PreviewResult",
 ]
