@@ -90,6 +90,23 @@ class WellListModel(QAbstractListModel):
             return None
 
 
+def _geometry_rings(geometry: dict[str, Any]) -> list[list[tuple[Any, Any]]]:
+    """Extract drawable line rings from a GeoJSON geometry (project CRS)."""
+    gtype = str(geometry.get("type", ""))
+    coords = geometry.get("coordinates")
+    if coords is None:
+        return []
+    if gtype == "Polygon":
+        return [list(coords[0])] if coords else []
+    if gtype == "MultiPolygon":
+        return [list(polygon[0]) for polygon in coords if polygon]
+    if gtype == "LineString":
+        return [list(coords)]
+    if gtype == "MultiLineString":
+        return [list(line) for line in coords]
+    return []  # Points carry no line work for this view
+
+
 class _WellFilterProxy(QSortFilterProxyModel):
     """Case-insensitive substring filter (same UX as the preview well list)."""
 
@@ -181,7 +198,13 @@ class ProjectWellMapPage(QWidget):
         self.btn_zoom_all = QPushButton("缩放全部")
         self.btn_zoom_selection = QPushButton("缩放选中")
         self.btn_reset = QPushButton("复位")
-        for btn in (self.btn_zoom_all, self.btn_zoom_selection, self.btn_reset):
+        self.btn_reference = QPushButton("参考图层")
+        self.btn_reference.setCheckable(True)
+        self.btn_reference.setToolTip(
+            "叠加编图工程中的矢量参考图层（GDAL 重投影到工程 CRS）；栅格图层无法在此视图渲染"
+        )
+        self.btn_reference.toggled.connect(lambda _on: self._render_all())
+        for btn in (self.btn_zoom_all, self.btn_zoom_selection, self.btn_reset, self.btn_reference):
             toolbar.addWidget(btn)
         toolbar.addStretch(1)
         self.crs_label = QLabel("")
@@ -271,9 +294,16 @@ class ProjectWellMapPage(QWidget):
             width=1.0,
             style=Qt.PenStyle.DotLine,
         )
+        self._series_reference = LineSeries(
+            name="reference_layers",
+            color=QColor(_COLOR_BOUNDARY),
+            width=0.8,
+        )
+
         for series in (
             self._series_boundary,
             self._series_surveys,
+            self._series_reference,
             self._series_wells,
             self._series_flagged,
             self._series_selected,
@@ -376,8 +406,61 @@ class ProjectWellMapPage(QWidget):
         self._series_flagged.y = self._coord_y[split:total]
         self._render_boundary()
         self._render_survey_extents()
+        self._render_reference_layers()
         self._update_selected_series()
         self.plot.autofit()
+
+    # Reference-layer geometry cap (§24): the map stays interactive; huge
+    # cadastre files degrade to their first N vertices rather than freezing.
+    MAX_REFERENCE_VERTICES = 20_000
+
+    def _reference_layers(self) -> list[Any]:
+        """Vector reference layers declared by the project's 编图 documents."""
+        layers: dict[str, Any] = {}
+        for document in getattr(self.project, "paleomap_documents", None) or []:
+            for layer in getattr(document, "reference_layers", None) or []:
+                if getattr(layer, "source_kind", "") != "vector":
+                    continue
+                layers.setdefault(str(getattr(layer, "id", "")), layer)
+        return list(layers.values())
+
+    def _render_reference_layers(self) -> None:
+        xs: list[float] = []
+        ys: list[float] = []
+        enabled = self.btn_reference.isChecked()
+        budget = self.MAX_REFERENCE_VERTICES
+        if enabled and budget > 0:
+            from paleo_workbench.mapping.reference_layers import (
+                ReferenceLayerError,
+                ReferenceLayerService,
+            )
+
+            service = ReferenceLayerService()
+            for layer in self._reference_layers():
+                if budget <= 0:
+                    break
+                try:
+                    features, _extent = service.vector_render_payload(layer)
+                except (ReferenceLayerError, Exception):  # noqa: BLE001 - view must not die
+                    continue
+                for feature in features:
+                    if budget <= 0:
+                        break
+                    for ring in _geometry_rings(feature.get("geometry") or {}):
+                        for x, y in ring:
+                            if budget <= 0:
+                                break
+                            try:
+                                xs.append(float(x))
+                                ys.append(float(y))
+                                budget -= 1
+                            except (TypeError, ValueError):
+                                continue
+                        xs.append(np.nan)
+                        ys.append(np.nan)
+        self._series_reference.x = np.asarray(xs, dtype=np.float64)
+        self._series_reference.y = np.asarray(ys, dtype=np.float64)
+        self._series_reference.visible = enabled and bool(xs)
 
     def _refresh_crs_warnings(self, project_crs: str) -> None:
         """Surface (not hide) frames that don't match the project CRS.

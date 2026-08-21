@@ -485,3 +485,126 @@ class TestReviewFixesMapRound2:
         doc.wells[0].uwi = ""
         doc.wells[0].aliases.append("别名")
         assert domain_signature(doc) != sig1 or True  # aliases tuple changes
+
+
+class TestReferenceLayers:
+    """④ GDAL 矢量参考图层叠加（复用 ReferenceLayerService 重投影）。"""
+
+    def _doc_with_layer(self):
+        from paleo_workbench.project.models import MapReferenceLayer, PaleoMapDocument
+
+        doc = make_project(with_survey=False)
+        layer = MapReferenceLayer(
+            id="ref1", name="断层线", source_path="/tmp/fake.geojson",
+            source_kind="vector", source_crs="EPSG:4326",
+            project_crs="EPSG:4326", status="ready",
+        )
+        doc.paleomap_documents.append(
+            PaleoMapDocument(id="map1", name="m", linked_target_horizon="h",
+                              reference_layers=[layer])
+        )
+        return doc, layer
+
+    def test_toggle_off_hides_series(self, qtbot):
+        page, plot = make_page(qtbot)
+        doc, _layer = self._doc_with_layer()
+        page.set_project(doc)
+        assert page.btn_reference.isChecked() is False
+        assert plot.series["reference_layers"].visible is False
+
+    def test_vector_features_draw_as_lines(self, qtbot, monkeypatch):
+        page, plot = make_page(qtbot)
+        doc, _layer = self._doc_with_layer()
+        page.set_project(doc)
+
+        class FakeService:
+            def vector_render_payload(self, layer):  # noqa: ARG002
+                feature = {
+                    "id": "f1",
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [[[0.0, 0.0], [5.0, 0.0], [5.0, 5.0], [0.0, 0.0]]],
+                    },
+                    "properties": {},
+                }
+                return (feature,), (0.0, 5.0, 0.0, 5.0)
+
+        monkeypatch.setattr(
+            "paleo_workbench.mapping.reference_layers.ReferenceLayerService",
+            FakeService,
+        )
+        page.btn_reference.setChecked(True)
+        series = plot.series["reference_layers"]
+        assert series.visible is True
+        values = list(series.x)
+        assert [v for v in values if v == v] == [0.0, 5.0, 5.0, 0.0]
+        assert len(values) == 5 and values[-1] != values[-1]  # ring separator NaN
+
+    def test_raster_and_failed_layers_skipped(self, qtbot, monkeypatch):
+        from paleo_workbench.mapping.reference_layers import ReferenceLayerError
+        from paleo_workbench.project.models import MapReferenceLayer, PaleoMapDocument
+
+        page, plot = make_page(qtbot)
+        doc, layer = self._doc_with_layer()
+        raster = MapReferenceLayer(
+            id="ref2", name="影像", source_path="/tmp/t.tif",
+            source_kind="raster", source_crs="EPSG:4326",
+            project_crs="EPSG:4326", status="ready",
+        )
+        dead = MapReferenceLayer(
+            id="ref3", name="离线", source_path="/tmp/gone.geojson",
+            source_kind="vector", source_crs="EPSG:4326",
+            project_crs="EPSG:4326", status="offline",
+        )
+        doc.paleomap_documents.append(
+            PaleoMapDocument(id="map2", name="m2", linked_target_horizon="h",
+                             reference_layers=[raster, dead])
+        )
+        page.set_project(doc)
+
+        calls = {"n": 0}
+
+        class FakeService:
+            def vector_render_payload(self, lay):
+                if lay.id == "ref3":
+                    raise ReferenceLayerError("参考图不可用")
+                calls["n"] += 1
+                return (), (0, 0, 0, 0)
+
+        monkeypatch.setattr(
+            "paleo_workbench.mapping.reference_layers.ReferenceLayerService",
+            FakeService,
+        )
+        page.btn_reference.setChecked(True)
+        assert calls["n"] == 1  # only the ready vector layer queried
+        assert plot.series["reference_layers"].visible is False
+
+    def test_dedup_across_documents(self, qtbot, monkeypatch):
+        from paleo_workbench.project.models import PaleoMapDocument
+
+        page, plot = make_page(qtbot)
+        doc, layer = self._doc_with_layer()
+        doc.paleomap_documents.append(
+            PaleoMapDocument(id="map3", name="m3", linked_target_horizon="h",
+                             reference_layers=[layer])  # same id → deduped
+        )
+        page.set_project(doc)
+
+        seen = []
+
+        class FakeService:
+            def vector_render_payload(self, lay):
+                seen.append(lay.id)
+                return (
+                    [{"id": "x", "geometry": {"type": "LineString",
+                                              "coordinates": [[0, 0], [1, 1]]},
+                      "properties": {}}],
+                    (0, 1, 0, 1),
+                )
+
+        monkeypatch.setattr(
+            "paleo_workbench.mapping.reference_layers.ReferenceLayerService",
+            FakeService,
+        )
+        page.btn_reference.setChecked(True)
+        assert seen == ["ref1"]
