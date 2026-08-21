@@ -1,85 +1,152 @@
-# Technical Findings & Project Architecture State
+# Findings — QGIS Authoring Core
 
-## 项目重构成果与架构图谱
+## Environment facts
+- Vendored QGIS 4.2.0 at `third_party/qgis` (UPSTREAM.md pins final-4_2_0).
+  Only targets `resources qgis_core qgis_gui qgis_analysis` are built (2877 TUs,
+  ~40 min at -j8 on this 16-core/62 GB box). Desktop/server/python disabled.
+- System Qt 6.11.2 dev packages present (pkg-config Qt6Core/Gui/Widgets/Xml OK).
+  PySide6 in venv = 6.11.1 (same soname libQt6Core.so.6 → single-runtime symbol
+  resolution; this is how the existing bridge already works against the PySide6
+  QApplication: bridge requires `QCoreApplication::instance()` non-null).
+- venv: `/home/kevin/projects/paleo_project/main/.venv` (py3.12, PySide6, pytest,
+  pytest-qt, numpy, shapely). Worktree has no own venv; reuse main venv.
+- Bridge install: `PALEO_WITH_QGIS_RENDERER=1 pip install -e native/qgis_render_bridge`.
+  NOTE: setup.py currently links ONLY qgis_core → must add qgis_gui (+analysis)
+  for symbology GUI / geometry work. CMakeLists.txt path already links all three.
+- Tests conditionalized via `tests/qgis_support.py`, marker `qgis`, skip unless
+  extension importable. CI main gate does NOT build QGIS (dedicated workflow).
 
-经过 P1 – P4 四个阶段的整体重构，`paleo_workbench` 的依赖架构已彻底梳理清晰，消除了全部反向边与死代码。
+## Architecture archaeology (HEAD da1b9834)
+- Seam: `MapRenderSnapshot → MapRenderBackend` (map_render_backend.py).
+  `QgisMapRenderBackend` encodes layers to a narrow native payload
+  (`_qgis_snapshot`: id/name/crs/revisions/visible/opacity/style-dict/features
+  WKT+attrs); native `QgisRenderBridge` owns revision-keyed QgsMapLayer mirrors,
+  QgsMapRendererParallelJob, generation coalescing, cancellation. Host receives
+  RGBA bytes only. Fallback = QPainter pipeline (tests/minimal runtime only).
+- Native mirrors already revision-keyed (#519 semantics): vector rebuild only on
+  data_revision change; vector style re-applied in place on style_revision change;
+  raster rebuilds on either. Pan/zoom never rebuilds layers. GOOD — keep.
+- Symbol model today: `symbol_for()` in qgis_render_bridge.cpp uses
+  `Qgs{Fill,Line,Marker}Symbol::createSimple()` ONLY. Renderer kinds:
+  single/categorized/graduated. NO rule renderer, NO symbol layers, NO
+  serialization. This is the core gap (task §8-10).
+- Legacy style model: `VectorStyle` (map_styles.py, frozen dataclass, Qt-free)
+  + STYLE_LIBRARY presets (facies/well/contour/formation_boundary/fault/line/
+  annotation/label). Persisted inside PaleoMapDocument layer state dicts.
+  Fallback honors fill/stroke/stroke_width/patterns/markers/categories/ranges.
+- Edit authority: `VectorLayer` + `VectorEditSession` (vector_layer.py) own
+  working copy, undo/redo, commit→data_revision, audit. Geometry ops today =
+  Shapely in vector_operations.py (merge_selected_polygons, split_polygon_by_line)
+  applied THROUGH session commands. Keep transaction ownership; swap engine to
+  QGIS (P1).
+- Properties UI today: `MapLayerPropertiesDialog` (ui/map_layer_properties.py) —
+  simple form (fill/stroke/renderer combo/classes JSON textarea). This is the
+  "weak clone" Decision 2 forbids growing; replace symbology editing with QGIS
+  dialogs behind the same apply-payload seam.
+- Export today: PNG via backend.render_sync (QGIS when available);
+  SVG/PDF via `_paint_export_vector` → throwaway FALLBACK painter backend.
+  Export-parity gap for QGIS path (task §23).
+- Canvas: UnifiedMapCanvas keeps snapshot→backend→frame→display; decorations
+  painted host-side. Do not rewrite (§21).
 
-### 1. 核心依赖层级（无环、单向下沉）
+## Vendored QGIS 4.2 API inventory (verified in source)
+- Serialization: `QgsFeatureRenderer::save(QDomDocument&, QgsReadWriteContext&)`,
+  static `QgsFeatureRenderer::load(QDomElement&, ctx)`;
+  `QgsSymbolLayerUtils::saveSymbol/loadSymbol`. → payload = renderer XML string.
+- Symbology GUI (src/gui/symbology/, all vendored & built):
+  - `QgsSymbolSelectorWidget/QgsSymbolSelectorDialog(QgsSymbol*, QgsStyle*,
+    QgsVectorLayer*, QWidget*, bool embedded)`
+  - `QgsRendererPropertiesDialog(QgsVectorLayer*, QgsStyle*, bool embedded,
+    QWidget*)`; static-init `initRendererWidgetFunctions()` registers widgets for
+    singleSymbol/categorizedSymbol/graduatedSymbol/RuleRenderer/pointDisplacement/
+    pointCluster/invertedPolygon/mergedFeature/heatmap/null/embedded;
+    `apply()` writes renderer into the layer; `widgetChanged` signal.
+  - `QgsStyleManagerDialog(QgsStyle*, ...)`, `QgsStyle` core API:
+    addSymbol/symbol/addColorRamp/tagSymbol/addGroup/createDatabase/load.
+  - `QgsGui::instance()` lazy singleton constructs GUI registries.
+- Rule renderer: `QgsRuleBasedRenderer` (core) + widget registered above.
+- Geometry: `QgsGeometry` (union/difference/buffer/simplify/makeValid/...),
+  `qgsgeometryengine.h`, analysis lib for processing-style ops.
 
-```
-                     ┌───────────────────────┐
-                     │   ui (Qt 界面/页面)    │
-                     └──────────┬────────────┘
-                                │
-        ┌───────────────────────┼───────────────────────┐
-        ▼                       ▼                       ▼
-┌───────────────┐       ┌───────────────┐       ┌───────────────┐
-│     viz       │       │   workflow    │       │   resources   │
-│  (可视化引擎) │       │ (任务业务流程) │       │ (格式解析/导出)│
-└───────┬───────┘       └───────┬───────┘       └───────┬───────┘
-        │                       │                       │
-        └───────────────────────┼───────────────────────┘
-                                ▼
-                        ┌───────────────┐
-                        │    mapping    │
-                        │  (地图/几何)  │
-                        └───────┬───────┘
-                                ▼
-                        ┌───────────────┐
-                        │    project    │
-                        │ (文档模型/存储)│
-                        └───────────────┘
-```
+## Capability matrix
+| Capability | Paleo now | Native bridge now | Vendored QGIS | Gap | Target |
+|---|---|---|---|---|---|
+| Map renderer | fallback QPainter | QgsMapRendererParallelJob, RGBA frames | full | none | QGIS default path |
+| Point/Line/Polygon symbol | VectorStyle flat fields | createSimple only | full symbology | multilayer+types | renderer XML payload |
+| Symbol layers | none | none | Simple/SVG/Font/Filled/MarkerLine/Hashed/Arrow/Interpolated/Gradient/Shapeburst/PointPattern/LinePattern/Centroid/GeomGen | all | via XML roundtrip + editor |
+| Single renderer | yes (both backends) | yes | yes | – | keep |
+| Categorized | yes (both) | yes (value→color) | yes | labels/expr | XML |
+| Graduated | yes (both) | yes (ranges) | yes | – | XML |
+| Rule-based | NO | NO | yes | P0 | rules spec + XML |
+| Labeling | TextStyle point labels (fallback), basic PAL fields in bridge | fieldName/size/color/buffer | full PAL | placement/priority/collision | XML payload (schema first, UI later) |
+| Style manager | STYLE_LIBRARY JSON | none | QgsStyle+dialog | library | QgsStyle db + dialog (P1) |
+| Symbol selector UI | form dialog (weak) | none | QgsSymbolSelectorDialog | P0 | modal bridge call |
+| Renderer props UI | combo+JSON textarea | none | QgsRendererPropertiesDialog | P0 | modal bridge call |
+| Geometry ops | Shapely merge/split | none | QgsGeometry | engine swap | QgisGeometryService (P1) |
+| Snapping/topology | map_edit_snap/topology (host overlays) | n/a | advanced | keep host | unchanged |
+| Selection/editing/undo | VectorEditSession | none | edit buffer | keep Paleo authority | unchanged |
+| Undo bypass risk | – | none (read-only mirrors) | – | – | mirrors stay read-only |
+| Export | PNG=backend, SVG/PDF=fallback painter | render_sync only | CustomPainterJob | SVG/PDF parity | bridge export_vector (SVG/PDF) |
+| Legacy migration | n/a | n/a | – | old docs must open | legacy→XML lazy migrate |
 
-### 2. 模块下沉与精简明细
+## Key design decisions (made autonomously per mandate)
+1. Keep directory `native/qgis_render_bridge/`, split internal modules:
+   `style_codec.*`, `gui_service.*`, `geometry_service.*` + existing render
+   bridge (option B of §5; lowest-risk, same build system).
+2. GUI crossing = **modal dialog bridge**: Python calls
+   `bridge.run_renderer_properties(spec, renderer_xml)` etc. on the GUI thread;
+   C++ builds a temporary memory QgsVectorLayer mirror, creates the real QGIS
+   dialog, exec()s it, serializes result back to XML. No raw QWidget crosses
+   the Python boundary (avoids shiboken/ABI fragility; matches §13 sanctioned
+   pattern). Ownership entirely C++-side (RAII), zero leaks.
+3. Authoritative persisted style = QGIS renderer XML string stored in the map
+   document layer state as `qgis_style` payload {schema_version, renderer_xml,
+   name, tags, revision}. Legacy `style` dict kept in sync (single/categorized/
+   graduated projections) so fallback/tests/old projects keep working.
+4. Migration is lazy + lossless-forward: opening an old doc keeps working; first
+   QGIS edit materializes `qgis_style` via native `legacy_style_to_renderer_xml`.
+5. Export parity: bridge gains `export_vector(path, svg|pdf, ...)` using
+   QgsMapRendererCustomPainterJob inside the bridge's Qt runtime (raster-free
+   true-vector output; avoids passing QPainter* across pybind).
+6. Threading: dialogs asserted on QApplication thread; renders stay async;
+   geometry service is pure computation (no QObject creation off-thread).
 
-1. **`paleo_workbench/resources/preview_parsers/`**：
-   - `models.py`: PreviewResult, PreviewMode, 格式常量
-   - `table_parsers.py`: CSV, TSV, Excel, DAT 解析器
-   - `well_log_parsers.py`: LAS, XML/WITSML 解析器
-   - `seismic_parsers.py`: SEG-Y 解析器
-   - `office_parsers.py`: PPTX, DFB, ZIP, SpreadsheetML, WLP 解析器
-   - `document_parsers.py`: GeoTIFF, Markdown, JSON, Audio, HTML 解析器
-   - `registry.py`: PreviewRegistry 查表注册表
+## Risks
+- PySide6 Qt 6.11.1 vs system 6.11.2 headers: patch-level diff; existing bridge
+  proves load-time resolution works for core; GUI adds more surface — watch for
+  missing-symbol ImportError on first import after adding gui_service.
+- QgsStyleManagerDialog pulls heavy deps (browser widgets etc.) — verify link;
+  if too heavy, defer to P2 with QgsStyle API-only library management.
+- Test teardown crashes: keep process-global QGIS runtime (never exitQgis),
+  mirrors RAII-owned; follow #519/#447 patterns.
+- 100k-feature perf: mirror reuse already proven; new code must not touch the
+  per-feature encode path (payload cache keyed by data_revision stays).
 
-2. **`paleo_workbench/ui/pages/` (Map Edit Subsystem)**：
-   - `map_edit_factory.py`: 图形项（Facies, Well, Line, Label）创建纯函数工厂
-   - `map_edit_draft.py`: 草图绘制状态机 (`MapDraftManager`)
-   - `map_edit_snap.py`: 控制点吸附与候选点缓存 (`MapSnapManager`)
-   - `map_edit_topology.py`: 拓扑检验、缝隙检测、重建与合并/拆分编排
-   - `map_edit_scene.py`: 代码量从 1382 行降至 604 行
+## Performance baselines (to fill after benchmarks)
+- (pending local bench run)
 
-### 3. 测试覆盖率与兼容性
+## Test findings
+- Existing suites to keep green: test_map_render_backend, test_qgis_*,
+  test_unified_map_*, test_map_authoring*, test_map_styles, test_map_export_*,
+  test_layer_lifecycle, visual regression suite.
 
-* **单元测试**：163 个测试文件 / 1109 个 Pytest 用例 **100% 绿色通过**。
-* **兼容性**：100% 保留向后兼容门面，不破坏现有的单测及 monkeypatch 约定。
-
----
-
-## WellLogEngine C++ 子系统（`well-log-engine/`）— #154 Phase B 发现（2026-08-01）
-
-独立 C++ 子系统轨道（非 Python 重构）。分支 `agent/welllog-pdf-spike-185`。从交接文档接续 Phase A（已完成 review）。
-
-### 架构发现
-
-1. **Session 作为单一真相源（ADR 0024）**：`WellLogSession` 持有 document/presentation/viewport/crosshair/**selection** 命令 + `ViewEvent` observer。所有 UI 状态（viewport、crosshair、selection）都存于 session；`WellLogView` 与 `TableModel` 都是薄 adapter，读/写 session，不持有自身状态副本。新增 selection 完全沿用此模式（与 crosshair 一一对应）。
-
-2. **Selection Set 数据模型（ADR 0024）**：每个 document 一条 selection，基于身份而非屏幕坐标——`SelectionState{document_id, sampling_axis_id, reference_depth_range, [first_row,last_row), document_revision, valid}`。不存 Display Depth / LOD 点 / 屏幕像素。
-
-3. **Mapping 是纯 index projection**：depth-range↔row-span 通过线性扫描 axis 的原始 `BufferView`（零拷贝，复用 file-local `load_as_double`），处理 increasing & decreasing 轴。**无插值、无浮点近似 join、无 Display Depth 替换**（table-and-export.md §2.2/§4.1）。
-
-4. **Document 替换安全 remap（ADR 0024）**：`SetDocumentCommand` 时若 selection 存在，尝试在新 revision 的同 axis 上 remap（轴存活且深度范围仍在轴范围内 → 重算 row span，保持 `valid`；否则 `valid=false` + 发布 `selection_invalidated` 事件，宿主必须停止使用）。
-
-5. **GUI 线程跳转（ADR 0147）**：`WellLogView` 的 session event subscription 用 `QMetaObject::invokeMethod(QueuedConnection)` 把事件 marshal 到 GUI 线程；新 `selection_changed`/`selection_invalidated` 沿同一通路。signal 经现有 `signal_timer`（16ms）coalesce。
-
-### 关键约束（不得违反）
-- Core headers 不得含 Qt/Python/OpenGL token（`tests/cmake/check_core_boundary.cmake` 强制）→ selection 类型放 `session/session.hpp`（与 `DepthViewport`/`CrosshairState` 同层）。
-- Table copy 始终读原始 Buffer，**不读 LOD**（table-and-export.md §4.2）。
-- 超大选择不在 GUI 线程构造巨型字符串（Phase A 已实现 `default_clipboard_cell_limit` 守卫）。
-
-### Phase A 遗留打包 bug（本会话发现并修复）
-`welllog_table`（Phase A commit `d9ef433`）被 `welllog_qtwidgets` 链接且两者都在 install export set，但 `welllog_table` 自身从未加入 `install(TARGETS ... EXPORT WellLogTargets)`。cmake reconfigure 时报 "requires target welllog_table that is not in any export set"。原 build dir 因缓存目标集陈旧而掩盖了此问题。修复：加入主 install TARGETS 块。
-
-### 测试规模
-31/31 headless green（原 29；+`welllog.session-selection` 12 用例，+`welllog.qt-table-selection-sync` 8 用例）。3 个 env-blocked（`qt-widget`/`python.qt-embedding`/`qt.package.consumer`）需真实 GL / 非 conda libstdc++（`GLIBCXX_3.4.35` mismatch），与 #154 无关。
-
+## Build log (appendix)
+- gcc 16.2.1 ICEs on 4 qgis_gui TUs (deterministic; Arch gcc bug). Solution:
+  vendored QGIS rebuilt with clang 22.1.8 (-j8, ~35 min). Extension TU compile
+  stays on gcc — fine.
+- Extension build fixes: pybind11 MUST precede Qt/QGIS includes in bindings.cpp
+  (Qt `slots` macro corrupts Python.h PyType_Spec); qgis_render_bridge.hpp must
+  stay Qt-free for the same reason; `emit` is a Qt macro (renamed helper);
+  QgsFeatureRenderer::save() is non-const → serialize via clone;
+  symbols(QgsRenderContext&) signature in 4.2 needs a context; ui_* headers at
+  build/qgis-vendor/src/ui; Qt6Svg needed for QSvgGenerator export.
+- Runtime alignment: system Qt 6.11.2 + vendored QGIS(6.11.2 headers) vs
+  PySide6 6.11.1 private-symbol mismatch (_ZN14QObjectPrivateC2E16QtPrivate_…).
+  Fix = upgrade venv to PySide6 6.11.2 (repo allows pyside6>=6.6). CI legs pin
+  their own env so this is a local-env alignment only.
+- BASELINE FAILURE (pre-existing, pristine origin/main, unrelated to diff):
+  tests/test_map_export_consistency.py::test_export_png_matches_screen_frame_
+  and_carries_dpi_metadata fails on this machine with the fallback backend
+  (screen frame blank at probes while export renders content). Reproduced with
+  changes stashed AND in the main worktree. Recorded per §32; not introduced
+  by this branch.
