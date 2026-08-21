@@ -67,6 +67,14 @@ class DataAssetTable(QWidget):
         self.column_actions: dict[str, QAction] = {}
         self._syncing_column_actions = False
         self._index = FilterIndex()
+        # Column-width memory (#894-1): the header is Interactive, so a width
+        # change observed outside an auto-fit pass means the user dragged a
+        # section.  Those keys are exempt from later auto-fits, and auto-fit
+        # itself only runs on the first fill / when the column set changes —
+        # never on a routine data refresh.
+        self._user_resized_columns: set[str] = set()
+        self._auto_fit_columns_key: tuple[str, ...] | None = None
+        self._fitting_columns = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -101,6 +109,7 @@ class DataAssetTable(QWidget):
         # must never be mistaken for a user sort — #850-1).
         self.table.setSortingEnabled(False)
         self.table.horizontalHeader().sectionClicked.connect(self._on_header_clicked)
+        self.table.horizontalHeader().sectionResized.connect(self._on_section_resized)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -148,32 +157,53 @@ class DataAssetTable(QWidget):
             views=self._index.views,  # reuse the index's views (#527)
         )
         self._visible_assets = [assets[i] for i in filtered]
-        # Auto-fit column widths to content on data refresh.  Skip the
-        # O(rows×cols) content measurement on large tables.  The budget is in
-        # CELLS, but this table is only 8 columns wide, so a 10k-cell budget did
-        # not engage until ~1250 rows — leaving the 1k-row catalog that motivated
-        # the guard on the slow path at ~400ms, while 2k rows completed in ~46ms
-        # on the fast path (#883).  4k cells puts 1k rows on the fast path and
-        # keeps content fitting for the small tables where it is cheap.  Note the
-        # 50px seed below forces a full re-measure, so this branch's cost is not
-        # something Qt can short-circuit.
+        # Auto-fit column widths to content on the FIRST fill and whenever the
+        # column set changes — never on a routine data refresh, which would
+        # discard widths the user dragged (#894-1).  Skip the O(rows×cols)
+        # content measurement on large tables.  The budget is in CELLS, but
+        # this table is only 8 columns wide, so a 10k-cell budget did not
+        # engage until ~1250 rows — leaving the 1k-row catalog that motivated
+        # the guard on the slow path at ~400ms, while 2k rows completed in
+        # ~46ms on the fast path (#883).  4k cells puts 1k rows on the fast
+        # path and keeps content fitting for the small tables where it is
+        # cheap.  Note the 50px seed below forces a full re-measure, so this
+        # branch's cost is not something Qt can short-circuit.
         header = self.table.horizontalHeader()
-        prev_stretch = header.stretchLastSection()
-        header.setStretchLastSection(False)
-        cell_count = self.model.rowCount() * self.model.columnCount()
-        if cell_count <= 4_000:
-            for col in range(header.count()):
-                header.resizeSection(col, 50)
-            self.table.resizeColumnsToContents()
-            for col in range(header.count()):
-                w = header.sectionSize(col)
-                if w > 300:
-                    header.resizeSection(col, 300)
-        else:
-            # No content measurement on big tables; keep a readable fixed width.
-            for col in range(header.count()):
-                header.resizeSection(col, 120)
-        header.setStretchLastSection(prev_stretch)
+        columns_key = tuple(self._visible_column_keys)
+        if columns_key != self._auto_fit_columns_key:
+            self._auto_fit_columns_key = columns_key
+            self._user_resized_columns = {
+                key for key in self._user_resized_columns if key in columns_key
+            }
+            # Widths the user dragged survive even a column-set-change refit.
+            user_widths = {
+                col: header.sectionSize(col)
+                for col, key in enumerate(self._visible_column_keys)
+                if key in self._user_resized_columns and col < header.count()
+            }
+            self._fitting_columns = True
+            try:
+                prev_stretch = header.stretchLastSection()
+                header.setStretchLastSection(False)
+                cell_count = self.model.rowCount() * self.model.columnCount()
+                if cell_count <= 4_000:
+                    for col in range(header.count()):
+                        header.resizeSection(col, 50)
+                    self.table.resizeColumnsToContents()
+                    for col in range(header.count()):
+                        w = header.sectionSize(col)
+                        if w > 300:
+                            header.resizeSection(col, 300)
+                else:
+                    # No content measurement on big tables; keep a readable
+                    # fixed width.
+                    for col in range(header.count()):
+                        header.resizeSection(col, 120)
+                for col, w in user_widths.items():
+                    header.resizeSection(col, w)
+                header.setStretchLastSection(prev_stretch)
+            finally:
+                self._fitting_columns = False
         # The model rebuild above dropped the header sort; re-apply it so the
         # visible order stays honest with the indicator (#850-1).
         self._reapply_sort(pre_build_sort)
@@ -352,6 +382,22 @@ class DataAssetTable(QWidget):
             if (asset := self.model.asset_at(row)) is not None
         ]
         self._sync_selection()
+
+    def _on_section_resized(self, logical_index: int, _old_size: int, new_size: int) -> None:
+        """Record user-dragged column widths so auto-fit never rewrites them.
+
+        ``sectionResized`` fires for programmatic resizes too, so the
+        ``_fitting_columns`` guard (raised around every auto-fit pass in
+        :meth:`update_assets`) leaves only genuine Interactive drags — i.e.
+        anything Qt emits outside our own fitting — recorded here (#894-1).
+        """
+        if self._fitting_columns:
+            return
+        if not (0 <= logical_index < len(self._visible_column_keys)):
+            return
+        if new_size <= 0:
+            return
+        self._user_resized_columns.add(self._visible_column_keys[logical_index])
 
     def _on_header_clicked(self, column: int) -> None:
         """Sort by the clicked column, toggling direction on repeat clicks.

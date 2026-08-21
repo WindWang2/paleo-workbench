@@ -641,7 +641,14 @@ class MapEditScene(QGraphicsScene):
         ok = self._command_stack.undo()
         if ok:
             self._invalidate_snap_candidates()
-            self.set_dirty(True)
+            # Undoing all the way back to the (cleared-at-load) command stack
+            # returns the document to its baseline, so it is no longer dirty
+            # (#894-3).  Dirty tracks "there are un-undone commands, or the
+            # depth cap dropped some": once the cap trims, undoing can never
+            # reach the baseline again and the document must stay dirty.
+            self.set_dirty(
+                self._command_stack.can_undo() or self._command_stack.overflowed
+            )
             self.command_stack_changed.emit()
             self._refresh_vertex_handles()
         return ok
@@ -652,7 +659,12 @@ class MapEditScene(QGraphicsScene):
         ok = self._command_stack.redo()
         if ok:
             self._invalidate_snap_candidates()
-            self.set_dirty(True)
+            # A redone command re-applies an edit, so the document differs
+            # from the baseline again (the redone command sits on the undo
+            # stack, hence can_undo() is True here) — see undo() (#894-3).
+            self.set_dirty(
+                self._command_stack.can_undo() or self._command_stack.overflowed
+            )
             self.command_stack_changed.emit()
             self._refresh_vertex_handles()
         return ok

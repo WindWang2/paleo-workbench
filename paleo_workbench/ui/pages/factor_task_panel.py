@@ -87,6 +87,7 @@ class FactorTaskPanel(QFrame):
         self.horizon_label.setObjectName("MapDockTitle")
         header.addWidget(self.horizon_label)
         header.addStretch()
+        self._method_user_selected = False
         self.method_combo = QComboBox()
         self.method_combo.addItems(tokens.INTERPOLATION_METHODS)
         tooltips = getattr(tokens, "INTERPOLATION_METHOD_TOOLTIPS", {}) or {}
@@ -100,6 +101,10 @@ class FactorTaskPanel(QFrame):
             or "插值方法（克里金为真实变差函数普通克里金，含克里金方差）"
         )
         self.method_combo.currentTextChanged.connect(self._sync_method_tooltip)
+        # ``activated`` only fires on a real user selection (popup pick or
+        # keyboard activation), never on programmatic ``setCurrentIndex`` —
+        # so it is the reliable "the user chose a method" marker (#894-2).
+        self.method_combo.activated.connect(self._on_method_user_activated)
         header.addWidget(self.method_combo)
         outer.addLayout(header)
 
@@ -142,6 +147,10 @@ class FactorTaskPanel(QFrame):
             or "插值方法（克里金为真实变差函数普通克里金，含克里金方差）"
         )
 
+    def _on_method_user_activated(self, _index: int) -> None:
+        """Remember that the user picked a method; refreshes must not override."""
+        self._method_user_selected = True
+
     def _emit_generate(self) -> None:
         self.generate_requested.emit(self.method_combo.currentText() or "IDW")
 
@@ -160,19 +169,24 @@ class FactorTaskPanel(QFrame):
         tasks = list(tasks)
         if tasks:
             self.horizon_label.setText(f"层位: {tasks[0].target_horizon}")
-            methods = [t.method for t in tasks if t.method]
-            common = Counter(methods).most_common(1)[0][0] if methods else None
-            if common is not None:
-                idx = self.method_combo.findText(common)
-                if idx >= 0:
-                    self.method_combo.setCurrentIndex(idx)
+            # Seed the combo from the tasks' common method only until the user
+            # has picked one themselves; progress-poll refreshes must not
+            # stomp an explicit user choice (#894-2).
+            if not getattr(self, "_method_user_selected", False):
+                methods = [t.method for t in tasks if t.method]
+                common = Counter(methods).most_common(1)[0][0] if methods else None
+                if common is not None:
+                    idx = self.method_combo.findText(common)
+                    if idx >= 0:
+                        self.method_combo.setCurrentIndex(idx)
+                    else:
+                        self.method_combo.setCurrentIndex(0)
                 else:
                     self.method_combo.setCurrentIndex(0)
-            else:
-                self.method_combo.setCurrentIndex(0)
         else:
             self.horizon_label.setText("层位: —")
-            self.method_combo.setCurrentIndex(0)
+            if not getattr(self, "_method_user_selected", False):
+                self.method_combo.setCurrentIndex(0)
 
         self._clear_rows()
         insert_at = self.task_layout.count() - 1  # before the stretch
