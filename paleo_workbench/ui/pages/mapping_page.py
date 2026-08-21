@@ -1173,10 +1173,31 @@ class MappingPage(QWidget):
             else self.unified_scene.vector_style(str(layer_id))
         )
         dialog = MapLayerPropertiesDialog(
-            layer, style=style, parent=self
+            layer,
+            style=style,
+            parent=self,
+            features=self.unified_scene.vector_features(str(layer_id)),
+            fields=self._layer_field_names(str(layer_id)),
         )
         dialog.properties_applied.connect(self._apply_layer_properties)
         dialog.open()
+
+    def _layer_field_names(self, layer_id: str) -> tuple[str, ...]:
+        """Attribute names available for symbology expressions/classification."""
+        names: list[str] = []
+        seen: set[str] = set()
+        for feature in self.unified_scene.vector_features(str(layer_id)):
+            properties = (feature or {}).get("properties") or {}
+            if not isinstance(properties, dict):
+                continue
+            for key in properties:
+                text = str(key)
+                if text and text not in seen and not text.startswith("__"):
+                    seen.add(text)
+                    names.append(text)
+            if len(names) >= 64:
+                break
+        return tuple(names)
 
     def _apply_layer_properties(self, layer_id: str, payload: object) -> None:
         if not isinstance(payload, dict):
@@ -1223,6 +1244,12 @@ class MappingPage(QWidget):
             if key in requested_style:
                 style[key] = requested_style[key]
         style["labels"] = dict(requested_style.get("labels") or {})
+        # The authoritative QGIS payload arrives outside the legacy dict; it
+        # replaces any previous payload wholesale (native editor round-trip).
+        if "qgis_style" in payload:
+            qgis_payload = payload.get("qgis_style")
+            if isinstance(qgis_payload, dict) and qgis_payload.get("renderer_xml"):
+                style["qgis_style"] = dict(qgis_payload)
         if self.unified_scene.vector_features(str(layer_id)):
             self.unified_scene.set_vector_style(str(layer_id), style)
             authoring = self._authoring_document
