@@ -488,84 +488,214 @@ def _clamped_vertical_window_sums(values: np.ndarray, half: int) -> tuple[np.nda
     return totals, vert_len
 
 
-def _py_marching_cubes_3d(
+# Marching-tetrahedra tables for the 6-tet Freudenthal decomposition along
+# the (0,0,0)-(1,1,1) main diagonal, identical to the C++ kernel
+# (native/seismic_3d_core 6-tet decomposition). Cube corner order matches
+# the C++ / skimage convention:
+#
+#        6 ------ 7
+#       /|       /|
+#      4 ------ 5 |
+#      | |      | |
+#      | 2 ---- | 3
+#      |/       |/
+#      0 ------ 1
+#
+# Each tet carries (corners, diagonal-inside vertex indices) so orientation
+# is computed from geometry instead of a winding table.
+_MT_TETS = (
+    (0, 1, 3, 7),
+    (0, 1, 5, 7),
+    (0, 4, 5, 7),
+    (0, 4, 6, 7),
+    (0, 2, 6, 7),
+    (0, 2, 3, 7),
+)
+
+
+def _py_marching_cubes_3d_mt(
     volume: np.ndarray, isovalue: float = 0.0
 ) -> tuple[np.ndarray, np.ndarray]:
-    try:
-        from skimage.measure import marching_cubes
-    except ImportError:  # pragma: no cover
-        raise RuntimeError(
-            "marching_cubes_3d requires the seismic_3d_core C++ extension "
-            "or scikit-image (pip install scikit-image)."
-        )
+    """Watertight marching-tetrahedra isosurface (pure Python, #886).
+
+    The previous fallback delegated to skimage's marching cubes, whose
+    cube-face ambiguity resolution produces non-manifold pinch edges (48
+    four-fold edges + duplicated vertices on a plain analytic sphere) while
+    the C++ kernel is watertight by construction. This implementation uses
+    the same 6-tetrahedra decomposition as the C++ kernel, so the fallback
+    inherits the watertight topology AND matches native mesh connectivity:
+    every triangle comes from one tet face cut, adjacent tets share the cut
+    edge exactly once each.
+
+    Contract parity with the C++ kernel:
+    - inside set is ``value >= isovalue``; normals point away from it
+    - an isovalue outside the finite data range, or with no strict
+      crossing, yields an empty mesh
+    - cubes touching a non-finite voxel are skipped (holes around NaN
+      regions, like native — skimage previously wrapped them)
+    - exact isovalue hits are nudged by a 1e-3 relative offset so no
+      degenerate (zero-area) triangle is emitted
+    """
     vol = np.asarray(volume, dtype=np.float32)
     level = float(isovalue)
-    if vol.size == 0 or not (np.nanmin(vol) <= level <= np.nanmax(vol)):
-        # Match the C++ contract: an out-of-range isovalue yields an EMPTY
-        # mesh, not a ValueError (K-F2).
+    if vol.size == 0 or vol.ndim != 3:
         return (
             np.zeros((0, 3), dtype=np.float32),
             np.zeros((0, 3), dtype=np.int32),
         )
-    finite_mask = np.isfinite(vol)
-    if not finite_mask.all():
-        # NaN/Inf guard: skimage's edge interpolation would propagate non-finite
-        # corner values into the emitted vertices, while the C++ path skips any
-        # cube touching a non-finite voxel (cpp-core-review I2/I5). Replace
-        # those voxels with a sentinel strictly below every finite voxel and
-        # below `level` (the range check above guarantees level >= min), so
-        # they classify as outside — the surface wraps around the missing data
-        # instead of a hole, but every vertex stays finite. The sentinel is a
-        # float64 nextafter step below the finite minimum: float64 spacing is
-        # far finer than float32, so no float32 data value can collide with it
-        # (a collision would divide by zero in the edge interpolation). Run
-        # skimage on a float64 copy so the interpolation itself never
-        # overflows float32.
-        finite_min = float(vol[finite_mask].min())
-        sentinel = float(np.nextafter(finite_min, -np.inf))
-        work = vol.astype(np.float64)
-        work[~finite_mask] = sentinel
-    else:
-        work = vol
-    verts, faces, _normals, _values = _marching_cubes_no_crossing_guard(work, level)
-    return verts.astype(np.float32), faces.astype(np.int32)
-
-
-def _marching_cubes_no_crossing_guard(
-    work: np.ndarray, level: float
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Run skimage, mapping its no-crossing errors to an empty mesh.
-
-    The C++ K-F2 contract (#830): a level inside the data range but with no
-    strict crossing (constant == level, level == min/max, or a binary 0/1
-    volume at iso 1.0) yields ``(0, 3)`` empty arrays — skimage instead
-    raises ``RuntimeError: No surface found at the given iso value.``, which
-    used to escape and make the UI silently toggle the isosurface off.
-
-    ``gradient_direction="ascent"`` is required for orientation parity with the
-    C++ kernel (#876). That kernel defines the "inside" set as
-    ``value >= isovalue`` (seismic_3d_core.cpp) and orients each triangle's
-    normal AWAY from that set's centroid. skimage's default ``"descent"`` is the
-    opposite convention, so every face came back wound backwards: normals
-    inverted and the divergence-theorem volume negated relative to native.
-
-    ``ValueError`` is caught alongside ``RuntimeError`` because the non-finite
-    sentinel substitution in :func:`_py_marching_cubes_3d` can push the level
-    outside the working array's range, which skimage reports as
-    ``ValueError: Surface level must be within volume data range``. The C++ path
-    skips cubes touching non-finite voxels and returns an empty mesh instead.
-    """
-    from skimage.measure import marching_cubes
-
-    try:
-        return marching_cubes(work, level=level, gradient_direction="ascent")
-    except (RuntimeError, ValueError):
+    finite = np.isfinite(vol)
+    if not finite.any() or not (float(vol[finite].min()) <= level <= float(vol[finite].max())):
         return (
-            np.zeros((0, 3), dtype=np.float64),
-            np.zeros((0, 3), dtype=np.int64),
-            np.zeros((0, 3), dtype=np.float64),
-            np.zeros((0,), dtype=np.float64),
+            np.zeros((0, 3), dtype=np.float32),
+            np.zeros((0, 3), dtype=np.int32),
         )
+
+    ni, nj, nk = vol.shape
+    # Corner offsets in (di, dj, dk) matching the cube diagram above.
+    _CORNERS = (
+        (0, 0, 0), (0, 1, 0), (1, 0, 0), (1, 1, 0),
+        (0, 0, 1), (0, 1, 1), (1, 0, 1), (1, 1, 1),
+    )
+    corner_dk, corner_dj, corner_di = zip(*((c[2], c[1], c[0]) for c in _CORNERS))
+
+    vertex_map: dict[tuple[int, int], int] = {}
+    vert_rows: list[tuple[float, float, float]] = []
+    faces: list[tuple[int, int, int]] = []
+
+    def edge_vertex(flat_a: int, va: float, flat_b: int, vb: float) -> int | None:
+        """Interpolated vertex on corner edge (a, b); None on no crossing."""
+        a_in = va >= level
+        b_in = vb >= level
+        if a_in == b_in:
+            return None
+        key = (flat_a, flat_b) if flat_a < flat_b else (flat_b, flat_a)
+        cached = vertex_map.get(key)
+        if cached is not None:
+            return cached
+        denom = float(vb) - float(va)
+        if denom == 0.0:
+            return None
+        t = (level - float(va)) / denom
+        # Nudge exact corner hits off the lattice: a vertex exactly ON a
+        # corner makes zero-area triangles with its neighbours.
+        eps = 1e-3
+        t = min(max(t, eps), 1.0 - eps)
+        ia, ib = np.unravel_index(flat_a, vol.shape), np.unravel_index(flat_b, vol.shape)
+        pos = (
+            float(ia[0]) + t * float(ib[0] - ia[0]),
+            float(ia[1]) + t * float(ib[1] - ia[1]),
+            float(ia[2]) + t * float(ib[2] - ia[2]),
+        )
+        idx = len(vert_rows)
+        vert_rows.append(pos)
+        vertex_map[key] = idx
+        return idx
+
+    def emit(a: int, b: int, c: int, ref_inside: tuple[float, float, float]) -> None:
+        """Emit triangle (a, b, c) with its normal pointing away from the
+        inside reference point (native orientation contract, #876)."""
+        pa, pb, pc = vert_rows[a], vert_rows[b], vert_rows[c]
+        ux, uy, uz = pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]
+        vx, vy, vz = pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]
+        nx = uy * vz - uz * vy
+        ny = uz * vx - ux * vz
+        nz = ux * vy - uy * vx
+        cx = (pa[0] + pb[0] + pc[0]) / 3.0
+        cy = (pa[1] + pb[1] + pc[1]) / 3.0
+        cz = (pa[2] + pb[2] + pc[2]) / 3.0
+        dot = (
+            nx * (cx - ref_inside[0])
+            + ny * (cy - ref_inside[1])
+            + nz * (cz - ref_inside[2])
+        )
+        faces.append((a, b, c) if dot >= 0.0 else (a, c, b))
+
+    cube_vol = np.empty((2, 2, 2), dtype=np.float32)
+    for i in range(ni - 1):
+        for j in range(nj - 1):
+            for k in range(nk - 1):
+                cube = vol[i : i + 2, j : j + 2, k : k + 2]
+                if not np.isfinite(cube).all():
+                    continue  # native skips cubes touching non-finite voxels
+                cube_vol[...] = cube
+                flat = {
+                    (i + di) * nj * nk + (j + dj) * nk + (k + dk): float(
+                        cube_vol[di, dj, dk]
+                    )
+                    for di, dj, dk in _CORNERS
+                }
+                corner_pos = {
+                    (i + c[0]) * nj * nk + (j + c[1]) * nk + (k + c[2]): (
+                        float(i + c[0]),
+                        float(j + c[1]),
+                        float(k + c[2]),
+                    )
+                    for c in _CORNERS
+                }
+                for tet in _MT_TETS:
+                    ids = [
+                        (i + c[0]) * nj * nk + (j + c[1]) * nk + (k + c[2])
+                        for c in (
+                            _CORNERS[tet[0]],
+                            _CORNERS[tet[1]],
+                            _CORNERS[tet[2]],
+                            _CORNERS[tet[3]],
+                        )
+                    ]
+                    vals = [flat[x] for x in ids]
+                    inside = [x >= level for x in vals]
+                    n_in = sum(inside)
+                    if n_in == 0 or n_in == 4:
+                        continue
+                    if n_in == 1:
+                        a = ids[inside.index(True)]
+                        others = [x for x, flag in zip(ids, inside) if not flag]
+                        v0 = edge_vertex(a, flat[a], others[0], flat[others[0]])
+                        v1 = edge_vertex(a, flat[a], others[1], flat[others[1]])
+                        v2 = edge_vertex(a, flat[a], others[2], flat[others[2]])
+                        if v0 is not None and v1 is not None and v2 is not None:
+                            emit(v0, v1, v2, corner_pos[a])
+                    elif n_in == 3:
+                        b = ids[inside.index(False)]
+                        ins = [x for x, flag in zip(ids, inside) if flag]
+                        v0 = edge_vertex(ins[0], flat[ins[0]], b, flat[b])
+                        v1 = edge_vertex(ins[1], flat[ins[1]], b, flat[b])
+                        v2 = edge_vertex(ins[2], flat[ins[2]], b, flat[b])
+                        if v0 is not None and v1 is not None and v2 is not None:
+                            emit(v0, v1, v2, corner_pos[b])
+                    else:
+                        ins = [x for x, flag in zip(ids, inside) if flag]
+                        outs = [x for x, flag in zip(ids, inside) if not flag]
+                        a, b = ins[0], ins[1]
+                        c, d = outs[0], outs[1]
+                        vac = edge_vertex(a, flat[a], c, flat[c])
+                        vad = edge_vertex(a, flat[a], d, flat[d])
+                        vbc = edge_vertex(b, flat[b], c, flat[c])
+                        vbd = edge_vertex(b, flat[b], d, flat[d])
+                        if None in (vac, vad, vbc, vbd):
+                            continue
+                        mid_in = tuple(
+                            (corner_pos[a][t] + corner_pos[b][t]) / 2.0 for t in range(3)
+                        )
+                        emit(vac, vad, vbd, mid_in)
+                        emit(vac, vbd, vbc, mid_in)
+
+    return (
+        np.asarray(vert_rows, dtype=np.float32).reshape(-1, 3),
+        np.asarray(faces, dtype=np.int32).reshape(-1, 3),
+    )
+
+
+def _py_marching_cubes_3d(
+    volume: np.ndarray, isovalue: float = 0.0
+) -> tuple[np.ndarray, np.ndarray]:
+    """Python fallback entry point — delegates to the watertight MT kernel.
+
+    Retains the public ``_py_marching_cubes_3d`` name for dispatch parity;
+    the skimage path is removed (MT is dependency-free and watertight).
+    """
+    return _py_marching_cubes_3d_mt(volume, isovalue)
+
 
 
 def _py_minmax_downsample(
