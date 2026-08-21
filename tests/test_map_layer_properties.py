@@ -1,6 +1,7 @@
 """Unified properties dialog changes presentation only."""
 
 import layer_model_core
+import pytest
 
 from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
 from paleo_workbench.viz.native_factor_map import MapScene
@@ -16,7 +17,15 @@ def _layer():
     return layer
 
 
-def test_layer_properties_has_one_common_sectioned_surface_and_emits_style(qtbot) -> None:
+@pytest.fixture()
+def legacy_symbology(monkeypatch):
+    """Force the fallback symbology form regardless of a built QGIS bridge."""
+    from paleo_workbench.mapping import qgis_style
+
+    monkeypatch.setattr(qgis_style, "qgis_bridge_available", lambda: False)
+
+
+def test_layer_properties_has_one_common_sectioned_surface_and_emits_style(qtbot, legacy_symbology) -> None:
     layer = _layer()
     dialog = MapLayerPropertiesDialog(layer, style={"fill": "#123456", "labels": {"field": "name"}})
     qtbot.addWidget(dialog)
@@ -39,6 +48,32 @@ def test_layer_properties_has_one_common_sectioned_surface_and_emits_style(qtbot
     assert received[0][1]["opacity"] == 0.35
     assert received[0][1]["style"]["labels"]["field"] == "facies"
     assert received[0][1]["style"]["categories"]["delta"] == "#e03131"
+
+
+def test_layer_properties_qgis_path_offers_native_editor_and_payload(qtbot) -> None:
+    """With the bridge present the symbology tab routes through native QGIS."""
+    from PySide6.QtWidgets import QLabel
+
+    from paleo_workbench.mapping.qgis_style import QgisStylePayload, migrate_legacy_style
+
+    layer = _layer()
+    migrated = migrate_legacy_style({"fill": "#6c8ebf", "stroke": "#26364d"}, "Polygon")
+    assert migrated is not None
+    dialog = MapLayerPropertiesDialog(
+        layer,
+        style={"fill": "#123456", "qgis_style": {**migrated.to_dict(), "revision": 2}},
+    )
+    qtbot.addWidget(dialog)
+    # The legacy quick-fields are gone; the professional entry point exists.
+    assert not hasattr(dialog, "renderer_combo")
+    assert dialog.qgis_edit_button.isEnabled()
+    labels = [child.text() for child in dialog.findChildren(QLabel)]
+    assert any("singleSymbol" in text for text in labels)
+    # A pending native result flows into the emitted payload on apply.
+    dialog._pending_qgis_style = {**migrated.to_dict(), "revision": 3}
+    dialog.name_edit.setText("Updated Facies")
+    dialog.apply()
+    assert dialog.payload()["qgis_style"]["revision"] == 3
 
 
 def test_scalar_properties_change_native_display_style_without_grid_data_change(qtbot) -> None:

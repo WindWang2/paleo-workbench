@@ -114,8 +114,16 @@ def _vector_layer():
     )
 
 
-def test_layer_properties_apply_blocks_invalid_classes_json(qtbot):
+def _force_legacy_symbology(monkeypatch) -> None:
+    """Force the fallback symbology form regardless of a built QGIS bridge."""
+    from paleo_workbench.mapping import qgis_style
+
+    monkeypatch.setattr(qgis_style, "qgis_bridge_available", lambda: False)
+
+
+def test_layer_properties_apply_blocks_invalid_classes_json(qtbot, monkeypatch):
     """#652: Apply must not emit a style that silently dropped Classes JSON."""
+    _force_legacy_symbology(monkeypatch)
     dlg = MapLayerPropertiesDialog(_vector_layer())
     qtbot.addWidget(dlg)
     received = []
@@ -130,7 +138,8 @@ def test_layer_properties_apply_blocks_invalid_classes_json(qtbot):
     assert "Invalid Classes JSON" in dlg.classes_error_label.text()
 
 
-def test_layer_properties_ok_blocks_invalid_classes_json(qtbot):
+def test_layer_properties_ok_blocks_invalid_classes_json(qtbot, monkeypatch):
+    _force_legacy_symbology(monkeypatch)
     """Audit C83: OK must not silently close over unparseable Classes JSON;
     an inline error appears next to the field instead."""
     from PySide6.QtWidgets import QDialog
@@ -153,7 +162,8 @@ def test_layer_properties_ok_blocks_invalid_classes_json(qtbot):
     assert dlg.classes_json_error() is None
 
 
-def test_layer_properties_ok_applies_valid_classes_json(qtbot):
+def test_layer_properties_ok_applies_valid_classes_json(qtbot, monkeypatch):
+    _force_legacy_symbology(monkeypatch)
     """Valid Classes JSON still applies categories and closes the dialog."""
     from PySide6.QtWidgets import QDialog
 
