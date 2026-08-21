@@ -195,9 +195,11 @@ def test_provider_applies_table_limit_to_zip_directory(tmp_path):
 
     result = provider.preview(resource)
 
+    # #896: ZIP archive-name budget is MAX_ARCHIVE_NAMES (500), not table_max_rows (20).
+    # With 30 entries (<500) the provider must return all 30 and not truncate.
     assert result.mode == "table"
-    assert len(result.table_rows) == 20
-    assert result.truncated is True
+    assert len(result.table_rows) == 30
+    assert result.truncated is False
 
 
 def test_local_visualization_provider_uses_geoviz_settings_snapshot(tmp_path):

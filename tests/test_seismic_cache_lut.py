@@ -4,8 +4,15 @@ import numpy as np
 import pytest
 
 from geoviz_seismic.colormap import ColormapManager
-from geoviz_seismic.cache import DualLevelSeismicCache, SliceCacheKey, RamSliceCache
-from geoviz_seismic.preloader import SeismicPreloadManager, DragTracker, PreloadPriority
+from geoviz_seismic.cache import SliceCacheKey, RamSliceCache
+
+try:
+    from geoviz_seismic.preloader import DragTracker, PreloadPriority, SeismicPreloadManager
+
+    HAS_PRELOADER = True
+except ImportError:  # removed as dead code in GVE 53127a9b
+    HAS_PRELOADER = False
+    DragTracker = PreloadPriority = SeismicPreloadManager = None  # type: ignore
 
 
 def test_colormap_manager_lut_bytes():
@@ -43,19 +50,23 @@ def test_ram_slice_cache_byte_budget():
 
 
 def test_drag_tracker_velocity():
+    if not HAS_PRELOADER:
+        pytest.skip("geoviz_seismic.preloader removed as dead code in GVE 53127a9b")
     tracker = DragTracker()
     tracker.update(10, timestamp=1.0)
     v = tracker.update(20, timestamp=1.2)  # delta = +10 in 0.2s => velocity = 50 slices/s
-    
+
     assert v == pytest.approx(50.0)
     assert tracker.is_moving_positive()
 
 
 def test_preload_manager_token_invalidation():
+    if not HAS_PRELOADER:
+        pytest.skip("geoviz_seismic.preloader removed as dead code in GVE 53127a9b")
     manager = SeismicPreloadManager()
     token1 = manager.next_generation()
     assert not token1.is_cancelled()
-    
+
     token2 = manager.next_generation()
     assert token1.is_cancelled()
     assert not token2.is_cancelled()
