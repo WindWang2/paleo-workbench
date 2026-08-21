@@ -1,10 +1,16 @@
-"""Optional GEOS/Shapely vector operations applied through edit-buffer commands."""
+"""Optional GEOS/Shapely vector operations applied through edit-buffer commands.
+
+This is the FALLBACK geometry path for hosts without the QGIS bridge.  The
+professional implementation lives in :mod:`paleo_workbench.mapping.geometry_service`
+(vendored QGIS engine) and is preferred whenever the bridge is available.
+"""
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from paleo_workbench.mapping.geometry_schema import new_feature_id
+from paleo_workbench.mapping.qgis_style import qgis_bridge_available
 from paleo_workbench.mapping.vector_layer import VectorEditSession, VectorFeature
 
 __all__ = ["merge_selected_polygons", "split_polygon_by_line"]
@@ -25,6 +31,16 @@ def _feature_from_shape(feature_id: str, geometry, attributes) -> VectorFeature:
 
 
 def merge_selected_polygons(session: VectorEditSession, feature_ids: Iterable[str]) -> str:
+    if qgis_bridge_available():
+        from paleo_workbench.mapping.geometry_service import (
+            merge_selected_polygons as qgis_merge,
+        )
+
+        return qgis_merge(session, feature_ids)
+    return _shapely_merge(session, feature_ids)
+
+
+def _shapely_merge(session: VectorEditSession, feature_ids: Iterable[str]) -> str:
     ids = tuple(dict.fromkeys(str(feature_id) for feature_id in feature_ids))
     if len(ids) < 2:
         raise ValueError("select at least two polygons to merge")
@@ -45,6 +61,20 @@ def merge_selected_polygons(session: VectorEditSession, feature_ids: Iterable[st
 
 
 def split_polygon_by_line(
+    polygon_session: VectorEditSession,
+    polygon_feature_id: str,
+    line_feature: VectorFeature,
+) -> tuple[str, ...]:
+    if qgis_bridge_available():
+        from paleo_workbench.mapping.geometry_service import (
+            split_polygon_by_line as qgis_split,
+        )
+
+        return qgis_split(polygon_session, polygon_feature_id, line_feature)
+    return _shapely_split(polygon_session, polygon_feature_id, line_feature)
+
+
+def _shapely_split(
     polygon_session: VectorEditSession,
     polygon_feature_id: str,
     line_feature: VectorFeature,

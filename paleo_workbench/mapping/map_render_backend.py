@@ -190,6 +190,17 @@ class MapRenderBackend(ABC):
     def render_sync(self) -> RenderFrame:
         """Render the current snapshot exactly once into an owned RGBA frame."""
 
+    def export_map_body(self, path: str, format: str, width: int, height: int, dpi: float) -> bool:
+        """Export the map body (no host chrome) as a vector file.
+
+        Uses this backend's own style/renderer interpretation so exported
+        geometry shares one configuration with the screen frame.  Returns
+        False when the backend has no vector exporter; callers then fall back
+        to their painter pipeline.
+        """
+        del path, format, width, height, dpi
+        return False
+
     def identify(self, _x: float, _y: float) -> object | None:
         """Optional backend-assisted identify hook; host selection remains authoritative."""
         return None
@@ -1553,6 +1564,20 @@ class QgisMapRenderBackend(MapRenderBackend):
             render_ms=float(payload.get("render_ms", 0.0)),
         )
 
+    def export_map_body(self, path: str, format: str, width: int, height: int, dpi: float) -> bool:
+        """True-vector export through the same QGIS renderer configuration."""
+        if not self._initialized:
+            self.initialize()
+        assert self._bridge is not None
+        if format not in {"svg", "pdf"}:
+            return False
+        self._native_snapshot_pending = False
+        self._set_native_snapshot(self._snapshot)
+        written = self._bridge.export_vector(
+            str(path), format, self._extent, int(width), int(height), float(dpi)
+        )
+        return bool(written)
+
     def shutdown(self) -> None:
         if self._bridge is not None:
             self._bridge.shutdown()
@@ -1672,6 +1697,7 @@ def _qgis_snapshot(
         # they simply need no render mirror until their first feature arrives.
         if not features:
             continue
+        style = _flatten_qgis_style(layer.style)
         layers.append(
             {
                 "id": layer.id,
@@ -1681,11 +1707,32 @@ def _qgis_snapshot(
                 "style_revision": int(layer.style_revision),
                 "visible": bool(layer.visible),
                 "opacity": float(layer.opacity),
-                "style": dict(layer.style),
+                "style": style,
                 "features": features,
             }
         )
     return layers
+
+
+def _flatten_qgis_style(style: Mapping[str, Any]) -> dict[str, object]:
+    """Promote the authoritative qgis_style payload onto the native wire keys.
+
+    Persisted/host styles nest the payload under ``qgis_style`` so legacy
+    consumers (fallback renderer, old projects) keep their flat vocabulary.
+    The native bridge expects ``renderer_xml``/``labeling_xml`` at the top of
+    the style mapping.
+    """
+    result: dict[str, object] = dict(style)
+    payload = style.get("qgis_style")
+    if isinstance(payload, Mapping):
+        renderer_xml = payload.get("renderer_xml")
+        if isinstance(renderer_xml, str) and renderer_xml.strip():
+            result["renderer_xml"] = renderer_xml
+        labeling_xml = payload.get("labeling_xml")
+        if isinstance(labeling_xml, str) and labeling_xml.strip():
+            result["labeling_xml"] = labeling_xml
+    result.pop("qgis_style", None)
+    return result
 
 
 def _geometry_to_wkt(geometry: object) -> str:
