@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QTabWidget, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QSplitter, QTabWidget, QVBoxLayout, QWidget
 
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.table_preview_widget import TablePreviewWidget
@@ -56,8 +57,16 @@ class SummaryTablePreviewWidget(QWidget):
         self.summary_table = TablePreviewWidget()
         self.detail_table = TablePreviewWidget()
 
-        info_layout.addWidget(self.summary_table)
-        info_layout.addWidget(self.detail_table, 1)
+        # 元数据表与曲线定义表之间用可拖动分隔条：默认元数据表贴合内容高度，
+        # 剩余空间给曲线表；用户可上下拉动调整（分隔条样式来自全局 QSS）。
+        self.info_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.info_splitter.setChildrenCollapsible(False)
+        self.info_splitter.addWidget(self.summary_table)
+        self.info_splitter.addWidget(self.detail_table)
+        self.info_splitter.setStretchFactor(0, 0)
+        self.info_splitter.setStretchFactor(1, 1)
+
+        info_layout.addWidget(self.info_splitter, 1)
 
         self.tabs.addTab(self.info_tab, "曲线定义与元数据")
 
@@ -110,7 +119,10 @@ class SummaryTablePreviewWidget(QWidget):
         for row in range(self.summary_table.rowCount()):
             total += self.summary_table.rowHeight(row)
         total += 6
-        self.summary_table.setFixedHeight(min(max(total, 60), 120))
+        # 仅约束下限并让分隔条接管初始分配：内容少时表贴合内容，
+        # 内容多时可被用户拉大查看全部属性行。
+        self.summary_table.setMinimumHeight(min(max(total, 60), 120))
+        self.info_splitter.setSizes([self.summary_table.minimumHeight(), 10000])
 
     def load_summary(
         self,

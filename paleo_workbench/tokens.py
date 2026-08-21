@@ -441,7 +441,8 @@ def build_qss(density: str = "comfortable") -> str:
         border-radius: 5px;
     }}
     QSplitter::handle {{
-        background-color: transparent;
+        /* 淡色常显，提示可拖动；hover 天青高亮 */
+        background-color: rgba(203, 213, 225, 0.45);
     }}
     QSplitter::handle:horizontal {{
         width: 4px;
