@@ -131,6 +131,7 @@ class MenuBar(QFrame):
         self.search_box.setObjectName("SearchBox")
         self.search_box.setPlaceholderText("搜索井名 / 层位 / 功能…  Ctrl+F")
         self.search_box.setToolTip("搜索井名/层位/功能 (Ctrl+F)")
+        self.search_box.setClearButtonEnabled(True)
         self.search_box.setMaximumWidth(280)
         self._search_icon = self.search_box.addAction(
             _icon("menu-search.svg"), QLineEdit.ActionPosition.LeadingPosition

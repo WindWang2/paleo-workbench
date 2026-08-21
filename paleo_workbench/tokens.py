@@ -230,6 +230,11 @@ def build_qss(density: str = "comfortable") -> str:
     QPushButton:focus {{
         border: 1px solid {FOCUS_RING};
     }}
+    QPushButton:disabled {{
+        background-color: {BG_SIDEBAR};
+        color: {PRIMARY_DISABLED};
+        border-color: {BORDER};
+    }}
     QPushButton#PrimaryButton {{
         background-color: {PRIMARY};
         color: #ffffff;
@@ -259,15 +264,81 @@ def build_qss(density: str = "comfortable") -> str:
         min-height: {CONTROL_HEIGHT}px;
     }}
     QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{
-        border: 1px solid {PRIMARY};
+        border: 1px solid {FOCUS_RING};
+    }}
+    QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {{
+        background-color: {BG_SEARCH};
+        color: {PRIMARY_DISABLED};
+        border-color: {BORDER};
+    }}
+    QComboBox::drop-down {{
+        border: none;
+        width: 22px;
+    }}
+    QComboBox QAbstractItemView {{
+        background-color: {BG_SIDEBAR};
+        color: {TEXT_PRIMARY};
+        border: 1px solid {BORDER_STRONG};
+        border-radius: {RADIUS_BUTTON}px;
+        padding: 4px;
+        selection-background-color: {BG_NAV_ACTIVE};
+        selection-color: {TEXT_PRIMARY};
+        outline: none;
+    }}
+    QComboBox QAbstractItemView::item {{
+        min-height: 26px;
+        padding: 2px 8px;
+        border-radius: 4px;
+    }}
+    QCheckBox, QRadioButton {{
+        background: transparent;
+        spacing: 6px;
+    }}
+    QCheckBox::indicator, QRadioButton::indicator {{
+        width: 16px;
+        height: 16px;
+        background: {BG_SIDEBAR};
+        border: 1px solid {BORDER_STRONG};
+    }}
+    QCheckBox::indicator {{
+        border-radius: 4px;
+    }}
+    QRadioButton::indicator {{
+        border-radius: 8px;
+    }}
+    QCheckBox::indicator:hover, QRadioButton::indicator:hover {{
+        border-color: {ACCENT};
+    }}
+    QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
+        background: {PRIMARY};
+        border-color: {PRIMARY};
+    }}
+    QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {{
+        background: {BG_SEARCH};
+        border-color: {BORDER};
     }}
     QTableWidget, QTreeView, QListView, QTableView {{
         background-color: {BG_SIDEBAR};
+        alternate-background-color: {BG_RAIL_BOTTOM};
         border: 1px solid {BORDER};
         border-radius: {RADIUS_CARD}px;
         gridline-color: {BORDER_LIGHT};
         selection-background-color: {BG_SELECTION};
         selection-color: {TEXT_PRIMARY};
+        outline: none;
+    }}
+    QTableView::item, QTreeView::item, QListView::item {{
+        padding: 4px 6px;
+    }}
+    QTreeView::item, QListView::item {{
+        border-radius: 4px;
+    }}
+    QTreeView::item:selected, QListView::item:selected {{
+        background-color: {BG_SELECTION};
+        color: {TEXT_PRIMARY};
+    }}
+    QTreeView::item:hover, QListView::item:hover {{
+        background-color: {BG_SEARCH};
     }}
     QHeaderView::section {{
         background-color: {BG_SEARCH};
@@ -278,6 +349,10 @@ def build_qss(density: str = "comfortable") -> str:
         border-right: 1px solid {BORDER};
         font-weight: 600;
         min-height: {CONTROL_HEIGHT}px;
+    }}
+    QTableCornerButton::section {{
+        background-color: {BG_SEARCH};
+        border: none;
     }}
     QTabWidget::pane {{
         border: 1px solid {BORDER};
@@ -291,6 +366,10 @@ def build_qss(density: str = "comfortable") -> str:
         border-top-left-radius: {RADIUS_BUTTON}px;
         border-top-right-radius: {RADIUS_BUTTON}px;
         margin-right: 2px;
+    }}
+    QTabBar::tab:hover:!selected {{
+        background-color: {BG_NAV_ACTIVE};
+        color: {TEXT_PRIMARY};
     }}
     QTabBar::tab:selected {{
         background-color: {BG_SIDEBAR};
@@ -333,10 +412,85 @@ def build_qss(density: str = "comfortable") -> str:
         background-color: {BG_MENU_HOVER};
         color: {PRIMARY};
     }}
+    QMenu::item:disabled {{
+        color: {PRIMARY_DISABLED};
+    }}
     QMenu::separator {{
         height: 1px;
         background-color: {BORDER};
         margin: 4px 0px;
+    }}
+    QToolTip {{
+        background-color: {TEXT_DARK};
+        color: {TEXT_ON_CANVAS};
+        border: 1px solid {PRIMARY};
+        padding: 6px 8px;
+        font-size: 12px;
+    }}
+    QProgressBar {{
+        background-color: {BG_SEARCH};
+        border: 1px solid {BORDER};
+        border-radius: 6px;
+        color: {TEXT_SECONDARY};
+        text-align: center;
+        font-size: {FONT_SIZE_STATUS};
+        min-height: 14px;
+    }}
+    QProgressBar::chunk {{
+        background-color: {PRIMARY};
+        border-radius: 5px;
+    }}
+    QSplitter::handle {{
+        background-color: transparent;
+    }}
+    QSplitter::handle:horizontal {{
+        width: 4px;
+    }}
+    QSplitter::handle:vertical {{
+        height: 4px;
+    }}
+    QSplitter::handle:hover {{
+        background-color: rgba(14, 165, 233, 0.35);
+    }}
+    QGroupBox {{
+        font-weight: 600;
+    }}
+    QGroupBox::title {{
+        color: {TEXT_PRIMARY};
+    }}
+
+    QScrollBar:vertical {{
+        background: transparent;
+        width: 10px;
+        margin: 2px;
+    }}
+    QScrollBar::handle:vertical {{
+        background: {BORDER_STRONG};
+        border-radius: 4px;
+        min-height: 24px;
+    }}
+    QScrollBar::handle:vertical:hover {{
+        background: {PRIMARY_DISABLED};
+    }}
+    QScrollBar:horizontal {{
+        background: transparent;
+        height: 10px;
+        margin: 2px;
+    }}
+    QScrollBar::handle:horizontal {{
+        background: {BORDER_STRONG};
+        border-radius: 4px;
+        min-width: 24px;
+    }}
+    QScrollBar::handle:horizontal:hover {{
+        background: {PRIMARY_DISABLED};
+    }}
+    QScrollBar::add-line, QScrollBar::sub-line {{
+        width: 0px;
+        height: 0px;
+    }}
+    QScrollBar::add-page, QScrollBar::sub-page {{
+        background: transparent;
     }}
 
     QFrame#MenuBar {{
@@ -407,6 +561,13 @@ def build_qss(density: str = "comfortable") -> str:
         background: {BG_RAIL_GRADIENT};
         border-right: 1px solid {BORDER};
         min-width: {ICON_RAIL_WIDTH}px; max-width: {ICON_RAIL_WIDTH}px;
+    }}
+    QFrame#RailSeparator {{
+        background: {BORDER};
+        border: none;
+        min-height: 1px;
+        max-height: 1px;
+        margin: 3px 8px;
     }}
     QToolButton[navItem="true"] {{
         background: transparent; color: {TEXT_ON_RAIL}; border: none;

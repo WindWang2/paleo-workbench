@@ -26,7 +26,7 @@ class WorkflowStepper(QFrame):
 
         for idx, stage in enumerate(STAGE_DEFINITIONS):
             btn = QPushButton(f"{stage['badge']} {stage['name']}")
-            btn.setToolTip(f"阶段 {idx + 1}: {stage['name']}")
+            btn.setToolTip(f"阶段 {idx + 1}: {stage['name']} · 快捷键 Ctrl+{idx + 1}")
             btn.setProperty("stageItem", True)
             btn.setProperty("active", idx == 0)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)

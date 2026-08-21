@@ -51,7 +51,8 @@ class ContextSidebar(QFrame):
         # 2. Middle Section: Context Header & Lines
         self.context_label = QLabel(tokens.PAGE_NAMES[0])
         self.context_label.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 14px; font-weight: 600;"
+            f"color: {tokens.TEXT_PRIMARY}; font-size: {tokens.FONT_SIZE_TITLE};"
+            f" font-weight: {tokens.FONT_WEIGHT_TITLE};"
         )
         main_layout.addWidget(self.context_label)
 
@@ -295,11 +296,13 @@ class ContextSidebar(QFrame):
             label.setWordWrap(True)
             if heading:
                 label.setStyleSheet(
-                    f"color: {tokens.TEXT_PRIMARY}; font-size: 12px; font-weight: 600;"
+                    f"color: {tokens.TEXT_PRIMARY};"
+                    f" font-size: {tokens.FONT_SIZE_SIDEBAR_SECONDARY}; font-weight: 600;"
                 )
             else:
                 label.setStyleSheet(
-                    f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
+                    f"color: {tokens.TEXT_SECONDARY};"
+                    f" font-size: {tokens.FONT_SIZE_SIDEBAR_SECONDARY};"
                 )
             self.content_layout.addWidget(label)
             self._content_labels.append(label)
@@ -311,4 +314,3 @@ class TextSidebar(ContextSidebar):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("TextSidebar")
-

@@ -37,6 +37,8 @@ class PaleoWorkbenchWindow(QWidget):
         self.workflow_controller = WorkflowController(self)
 
         self.resize(1440, 900)
+        # 低于该尺寸时多页工作台（图标栏 + 页面栈）会挤压变形，禁止缩到不可用。
+        self.setMinimumSize(1180, 720)
 
         self.outer_layout = QVBoxLayout(self)
         self.outer_layout.setContentsMargins(0, 0, 0, 0)

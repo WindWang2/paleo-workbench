@@ -23,13 +23,20 @@ class IconRail(QFrame):
         layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
         layout.setSpacing(tokens.SPACE_1)
         for index, name in enumerate(tokens.PAGE_NAMES):
+            if index == 1:
+                # 首页与工作流页面之间的视觉分组分隔
+                sep = QFrame()
+                sep.setObjectName("RailSeparator")
+                sep.setFixedHeight(1)
+                layout.addWidget(sep)
             btn = QToolButton()
             btn.setText(name)
             btn.setToolTip(f"{name} · {tokens.PAGE_DESCRIPTIONS[index]}")
             btn.setProperty("navItem", True)
             btn.setProperty("active", index == 0)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-            btn.setIconSize(QSize(18, 18))
+            btn.setIconSize(QSize(20, 20))
             icon_path = _ICONS_DIR / tokens.ICON_FILES[index]
             if icon_path.exists():
                 btn.setIcon(QIcon(str(icon_path)))

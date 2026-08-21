@@ -137,6 +137,7 @@ class DataToolbar(QWidget):
         self.search_box.setObjectName("SearchBox")
         self.search_box.setPlaceholderText("搜索文件名 / 类型 / 阶段 / 标签 / 路径...")
         self.search_box.setToolTip("搜索文件名/类型/阶段/标签/路径")
+        self.search_box.setClearButtonEnabled(True)
         self.search_box.setMinimumHeight(tokens.CONTROL_HEIGHT)
         self.search_box.textChanged.connect(self._on_search_text_changed)
         layout.addWidget(self.search_box, 1)
