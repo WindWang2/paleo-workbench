@@ -1,5 +1,8 @@
 #pragma once
 
+// NOTE: this header must stay Qt-free. It is included by bindings.cpp before
+// pybind11, and Qt's `slots` macro corrupts Python.h (PyType_Spec).
+
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -29,6 +32,17 @@ struct RangeSpec {
     std::string label;
 };
 
+/// One attribute-driven rule for a QgsRuleBasedRenderer (legacy path).
+struct RuleSpec {
+    std::string name;
+    std::string expression;
+    std::string label;
+    std::string fill;
+    std::string stroke;
+    double stroke_width = 1.0;
+    double marker_size = 6.0;
+};
+
 struct VectorLayerSpec {
     enum class Kind : std::uint8_t { Vector, Raster };
 
@@ -42,7 +56,12 @@ struct VectorLayerSpec {
     double stroke_width = 1.0;
     double marker_size = 6.0;
     std::string renderer_kind = "single";
-    std::string classification_field;
+    /// Authoritative QGIS symbology payload. When non-empty it replaces every
+    /// legacy style field below after parsing; parse failure fails the
+    /// snapshot (previous mirrors stay live).
+    std::string renderer_xml;
+    /// Attribute-driven rules for the rule-based renderer legacy path.
+    std::vector<RuleSpec> rules;    std::string classification_field;
     std::vector<CategorySpec> categories;
     std::vector<RangeSpec> ranges;
     bool labels_enabled = false;
@@ -51,6 +70,9 @@ struct VectorLayerSpec {
     double label_size = 10.0;
     std::string label_color = "#ffffff";
     double label_buffer_size = 0.0;
+    /// Authoritative QGIS labeling payload (PAL configuration). Empty keeps
+    /// the simple field-based labeling above.
+    std::string labeling_xml;
     std::uint64_t data_revision = 0;
     std::uint64_t style_revision = 0;
     bool visible = true;
@@ -93,6 +115,20 @@ class QgisRenderBridge {
 
     [[nodiscard]] bool initialized() const noexcept;
     [[nodiscard]] std::string version() const;
+
+    struct Diagnostics {
+        std::uint64_t mirror_builds = 0;
+        std::uint64_t mirror_reuses = 0;
+        std::uint64_t style_reapplies = 0;
+    };
+    [[nodiscard]] Diagnostics diagnostics() const;
+
+    /// Export the current snapshot through the same QGIS renderer configuration
+    /// into a vector file ("svg" or "pdf").  Runs synchronously; returns the
+    /// bytes written (0 on failure).  Screen and export share one style path.
+    std::size_t export_vector(const std::string& path, const std::string& format,
+                              const std::array<double, 4>& extent, int width,
+                              int height, double dpi) const;
 
   private:
     class Impl;
