@@ -30,6 +30,7 @@ from paleo_workbench.resources.preview_parsers.models import (
     PreviewResult,
 )
 from paleo_workbench.resources.preview_parsers.office_parsers import (
+    MAX_ARCHIVE_NAMES,
     dfb_preview,
     pptx_preview,
     spreadsheetml_preview,
@@ -135,7 +136,10 @@ class PreviewRegistry:
             return dfb_preview(asset)
 
         if fmt == "zip":
-            return zip_preview(asset, max_rows=settings.table_max_rows)
+            # Archive-name budget decouples from table row budget (#896):
+            # production ZIP previews always cap at MAX_ARCHIVE_NAMES (500),
+            # not the table row preference (200).
+            return zip_preview(asset, max_rows=MAX_ARCHIVE_NAMES)
 
         if fmt == "wlp":
             return wlp_preview(asset)

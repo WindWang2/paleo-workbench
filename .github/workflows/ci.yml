@@ -185,15 +185,15 @@ jobs:
             --durations=25
 
       - name: Assert the slow family has not silently shrunk
-        # Packaging #442: the fast gate deliberately deselects `slow` (the only
+        # Packaging #442/#896: the fast gate deliberately deselects `slow` (the only
         # real-data end-to-end + interpolation-perf coverage). If the slow
-        # family ever drops below its 14-test baseline, every environment
-        # silently stops running those gates — fail instead. The nightly
+        # family ever drops below its 15-test baseline (14 + 1 fence probe), every
+        # environment silently stops running those gates — fail instead. The nightly
         # workflow (.github/workflows/slow-tests.yml) actually executes them.
         run: |
           count="$(python -m pytest --collect-only -q -m slow tests/ 2>&1 | grep -oE '[0-9]+ tests collected' | grep -oE '^[0-9]+')"
-          echo "slow tests collected: ${count} (baseline 14)"
-          test -n "${count}" && test "${count}" -ge 14
+          echo "slow tests collected: ${count} (baseline 15)"
+          test -n "${count}" && test "${count}" -ge 15
 
   # Focused job for Well Log Workstation (#207 / PR #233): no geo-viz submodule,
   # no map_edit_core. Host-only (engine optional) so the workstation suite is
