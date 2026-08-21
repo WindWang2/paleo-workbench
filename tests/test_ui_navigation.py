@@ -48,6 +48,7 @@ def test_get_stage_for_page():
 def test_get_subpages_for_stage():
     assert navigation.get_subpages_for_stage(0) == [
         navigation.PAGE_INDEX_DATA,
+        navigation.PAGE_INDEX_WELL_MAP,
         navigation.PAGE_INDEX_PREPARATION,
     ]
     assert navigation.get_subpages_for_stage(1) == [

@@ -74,7 +74,35 @@ def migrate_project_to_workarea(
     report = WorkAreaMigrationReport()
     if not project_needs_domain_migration(project):
         report.already_migrated = True
-        # Still keep the CRS projection honest when a workarea exists already.
+        # Late-binding pass: a previously migrated project may still carry
+        # resources whose catalog assets appeared only after the initial
+        # migration (e.g. first open had no catalog).  Bind ONLY resources
+        # whose asset is not referenced by any existing link — idempotent
+        # and free when everything is already linked.
+        mapping = dict(asset_id_by_legacy or {})
+        if mapping:
+            linked_assets = {link.asset_id for link in getattr(project, "entity_asset_links", [])}
+            pending = [
+                r
+                for r in sorted(
+                    getattr(project, "resources", []) or [],
+                    key=lambda item: str(getattr(item, "id", "")),
+                )
+                if str(getattr(r, "id", "")) in mapping
+                and mapping[str(r.id)] not in linked_assets
+            ]
+            if pending:
+                report.resources_scanned = len(pending)
+                try:
+                    report.binding = bind_resources(
+                        project,
+                        pending,
+                        asset_id_by_legacy=mapping,
+                        path_resolver=_default_path_resolver(project_path),
+                        engine=engine,
+                    )
+                except Exception as exc:
+                    report.binding.issues.append(f"补挂载失败: {exc.__class__.__name__}: {exc}")
         sync_workarea_with_coordinate(project)
         return report
 
