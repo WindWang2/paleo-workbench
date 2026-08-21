@@ -287,8 +287,16 @@ def bind_well_extracts(
     but defers linking — a later idempotent pass attaches links.
     """
     report = BindingReport()
+    from paleo_workbench.project.domain import well_identity_overrides
+
+    overrides = well_identity_overrides(project)
     for extract in extracts:
-        outcome = resolve_well(project, name=extract.name, uwi=extract.uwi)
+        outcome = resolve_well(
+            project,
+            name=extract.name,
+            uwi=extract.uwi,
+            overrides=overrides,
+        )
         if outcome.ambiguous:
             report.ambiguous_assets += 1
             report.issues.append(

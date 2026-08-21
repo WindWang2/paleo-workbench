@@ -478,6 +478,8 @@ def domain_signature(project: Any) -> tuple:
 
     Used by DataPage (tree rebuild gate) and the well map page so both stay
     consistent — review finding #5 (stale flags after coordinate changes).
+    Includes identity fields (uwi/aliases) and source coordinates so
+    governance edits and re-imports invalidate the caches too.
     """
     wells = getattr(project, "wells", None) or []
     surveys = getattr(project, "seismic_surveys", None) or []
@@ -486,8 +488,23 @@ def domain_signature(project: Any) -> tuple:
     coordinate = getattr(project, "coordinate", None)
     return (
         len(wells),
-        tuple((w.id, w.name, w.coordinate_status, w.project_x, w.project_y) for w in wells),
-        tuple(s.id for s in surveys),
+        tuple(
+            (
+                w.id,
+                w.name,
+                w.uwi,
+                tuple(w.aliases),
+                w.surface_x,
+                w.surface_y,
+                w.coordinate_status,
+                w.project_x,
+                w.project_y,
+            )
+            for w in wells
+        ),
+        tuple(
+            (s.id, s.name, s.crs, bool(getattr(s, "extent", None))) for s in surveys
+        ),
         len(links),
         str(getattr(coordinate, "project_crs", "") or ""),
         bool(getattr(workarea, "boundary", None)),
@@ -516,12 +533,19 @@ def resolve_well(
     name: str = "",
     uwi: str = "",
     well_id: str = "",
+    overrides: dict[str, str] | None = None,
 ) -> ResolutionOutcome:
     """Match incoming well data against the registry (§13 priority order).
 
-    Order: persisted id → UWI → normalized canonical name → alias.
-    Ambiguous name hits NEVER merge silently — ``ambiguous=True`` with all
-    candidate ids so callers can surface an unresolved state.
+    Order: persisted id → UWI → normalized canonical name → alias →
+    explicit mapping.  ``overrides`` maps a normalized name (or
+    ``uwi:<normalized uwi>`` key) to a Well.id and is consulted LAST — it
+    exists so governance UIs can settle cases the automatic chain cannot.
+    When omitted, project-level governance overrides
+    (``workarea.metadata["well_identity_overrides"]``) apply automatically;
+    pass an empty dict to disable.  Ambiguous name hits NEVER merge
+    silently — ``ambiguous=True`` with all candidate ids so callers can
+    surface an unresolved state.
     """
     registry = well_registry(project)
     if well_id:
@@ -550,4 +574,59 @@ def resolve_well(
                 candidates=[candidate.id for candidate in candidates],
                 strategy="ambiguous_name",
             )
+    if overrides is None:
+        overrides = well_identity_overrides(project)
+    if overrides:
+        well = _explicit_mapping_hit(registry, overrides, name=name, uwi=uwi)
+        if well is not None:
+            return ResolutionOutcome(matched=True, well_id=well.id, strategy="explicit_mapping")
     return ResolutionOutcome(strategy="none")
+
+
+def well_identity_overrides(project: Any) -> dict[str, str]:
+    """Governance-managed name/uwi → Well.id mappings (explicit mapping step)."""
+    workarea = getattr(project, "workarea", None)
+    overrides = getattr(workarea, "metadata", {}).get("well_identity_overrides") if workarea else None
+    return dict(overrides) if isinstance(overrides, dict) else {}
+
+
+def set_well_identity_override(project: Any, key: str, well_id: str) -> bool:
+    """Record an explicit identity mapping (governance action).
+
+    ``key`` may be a raw well name or UWI; it is stored normalized.  Returns
+    True when the mapping was written, False when the target well does not
+    exist or the key collides with the automatic chain (a mapping that the
+    UWI/name steps already resolve would be dead weight).
+    """
+    workarea = getattr(project, "workarea", None)
+    if workarea is None:
+        ensure_workarea(project)
+        workarea = project.workarea
+    registry = well_registry(project)
+    if registry.by_id(well_id) is None:
+        return False
+    normalized = normalize_well_name(key)
+    if not normalized:
+        return False
+    # Never store a mapping the automatic chain already resolves.
+    outcome = resolve_well(project, name=key, uwi=key)
+    if outcome.matched and outcome.strategy != "explicit_mapping":
+        return False
+    overrides = workarea.metadata.setdefault("well_identity_overrides", {})
+    overrides[normalized] = well_id
+    return True
+
+
+def _explicit_mapping_hit(
+    registry: WellRegistry, overrides: dict[str, str], *, name: str, uwi: str
+) -> WellEntity | None:
+    keys = [normalize_well_name(name)]
+    if uwi:
+        keys.append(f"uwi:{normalize_well_name(uwi)}")
+    for key in keys:
+        hit = overrides.get(key)
+        if hit:
+            well = registry.by_id(hit)
+            if well is not None:
+                return well
+    return None

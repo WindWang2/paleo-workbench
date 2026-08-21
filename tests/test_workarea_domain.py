@@ -18,6 +18,8 @@ from paleo_workbench.catalog.domain_binding import (
 from paleo_workbench.project.domain import (
     CoordinateStatus,
     DomainEntity,
+    set_well_identity_override,
+    well_identity_overrides,
     EntityAssetLink,
     SeismicSurveyEntity,
     WellEntity,
@@ -540,3 +542,55 @@ class TestReviewFixes:
         ProjectManager(pf).save(doc)
         saved = json.loads(pf.read_text(encoding="utf-8"))
         assert saved["workarea"]["project_crs"] == "EPSG:4546"
+
+
+class TestExplicitMapping:
+    def test_explicit_mapping_is_last_resort(self):
+        doc = make_project()
+        well = WellEntity(name="A")
+        doc.wells.append(well)
+        ensure_workarea(doc)
+        overrides = {"zzz": well.id}
+        outcome = resolve_well(doc, name="zzz", overrides=overrides)
+        assert outcome.matched and outcome.strategy == "explicit_mapping"
+        # Automatic chain still wins over mapping.
+        assert resolve_well(doc, name="A", overrides=overrides).strategy != "explicit_mapping"
+
+    def test_uwi_key_override(self):
+        doc = make_project()
+        well = WellEntity(name="X")  # no stored uwi: automatic chain can't fire
+        doc.wells.append(well)
+        ensure_workarea(doc)
+        overrides = {f"uwi:{normalize_well_name('LEGACY-77')}": well.id}
+        outcome = resolve_well(doc, name="陌生名", uwi="legacy-77", overrides=overrides)
+        assert outcome.matched and outcome.strategy == "explicit_mapping"
+
+    def test_set_override_rejects_automatic_and_unknown_targets(self):
+        doc = make_project()
+        w1 = WellEntity(name="A")
+        doc.wells.append(w1)
+        ensure_workarea(doc)
+        # Unknown target well → rejected.
+        assert set_well_identity_override(doc, "whatever", "well_nope") is False
+        # Key the automatic chain already resolves → rejected as dead weight.
+        assert set_well_identity_override(doc, "A", w1.id) is False
+        # Genuine governance case: alias-free mismatched name → accepted.
+        assert set_well_identity_override(doc, "老档案名", w1.id) is True
+        stored = well_identity_overrides(doc)
+        assert stored[normalize_well_name("老档案名")] == w1.id
+        # And resolution now flows through it.
+        outcome = resolve_well(doc, name="老档案名")
+        assert outcome.matched and outcome.strategy == "explicit_mapping"
+
+    def test_binding_uses_governance_overrides(self):
+        doc = make_project()
+        w1 = WellEntity(name="W-01")
+        doc.wells.append(w1)
+        ensure_workarea(doc)
+        set_well_identity_override(doc, "历史井名", w1.id)
+        report = bind_well_extracts(
+            doc, [WellExtract(name="历史井名", x=5.0, y=6.0)], asset_id="a9"
+        )
+        assert report.wells_created == 0
+        assert report.links_created == 1
+        assert [link.asset_id for link in links_for_entity(doc, "well", w1.id)] == ["a9"]

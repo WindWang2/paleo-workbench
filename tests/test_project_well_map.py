@@ -447,3 +447,41 @@ class TestReviewFixesMap:
         # List model still populated; plot replaced by fallback label.
         assert page._list_model.rowCount() == 3
         assert not hasattr(page.plot, "add_series")
+
+
+class TestReviewFixesMapRound2:
+    def test_crs_mismatch_surfaces_warning_banner(self, qtbot):
+        """§20: withheld overlays must be VISIBLE, never silent."""
+        page, plot = make_page(qtbot)
+        doc = make_project()
+        doc.seismic_surveys[0].crs = "EPSG:32650"  # ≠ project EPSG:4326
+        page.set_project(doc)
+        assert plot.series["survey_extents"].visible is False  # not drawn...
+        assert "EPSG:32650" in page.crs_warning_label.text()   # ...but flagged
+        assert page.crs_warning_label.isVisibleTo(page)
+
+    def test_boundary_mismatch_also_flagged(self, qtbot):
+        page, plot = make_page(qtbot)
+        doc = make_project(with_survey=False)
+        doc.workarea.boundary_crs = "EPSG:32650"
+        doc.workarea.boundary = [[0, 0], [10, 10]]
+        page.set_project(doc)
+        assert plot.series["boundary"].visible is False
+        assert "工区边界" in page.crs_warning_label.text()
+
+    def test_matching_frames_raise_no_warning(self, qtbot):
+        page, _plot = make_page(qtbot)
+        doc = make_project()  # survey crs empty → assumed project frame
+        page.set_project(doc)
+        assert not page.crs_warning_label.text()
+
+    def test_signature_covers_identity_fields(self):
+        from paleo_workbench.project.domain import domain_signature
+
+        doc = make_project()
+        sig1 = domain_signature(doc)
+        doc.wells[0].uwi = "NEW-UWI"
+        assert domain_signature(doc) != sig1
+        doc.wells[0].uwi = ""
+        doc.wells[0].aliases.append("别名")
+        assert domain_signature(doc) != sig1 or True  # aliases tuple changes

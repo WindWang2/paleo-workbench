@@ -189,6 +189,15 @@ class ProjectWellMapPage(QWidget):
             f"color: {tokens.TEXT_SECONDARY}; font-size: {tokens.FONT_SIZE_STATUS}px;"
         )
         toolbar.addWidget(self.crs_label)
+        # ⚠ banner for withheld overlays (CRS frames that don't match the
+        # project) — skipping silently would hide a real problem (§20).
+        self.crs_warning_label = QLabel("")
+        self.crs_warning_label.setWordWrap(True)
+        self.crs_warning_label.setStyleSheet(
+            f"color: {tokens.WARNING}; font-size: {tokens.FONT_SIZE_STATUS}px;"
+        )
+        self.crs_warning_label.setVisible(False)
+        center_layout.addWidget(self.crs_warning_label)
         self.coord_label = QLabel("")
         self.coord_label.setMinimumWidth(220)
         self.coord_label.setAlignment(
@@ -356,6 +365,7 @@ class ProjectWellMapPage(QWidget):
         coordinate = getattr(self.project, "coordinate", None) if self.project else None
         crs = str(getattr(coordinate, "project_crs", "") or "")
         self.crs_label.setText(f"工程 CRS: {crs or '未设置'}")
+        self._refresh_crs_warnings(crs)
         if self.plot is None or self._series_wells is None:
             return
         split = self._ok_count
@@ -368,6 +378,34 @@ class ProjectWellMapPage(QWidget):
         self._render_survey_extents()
         self._update_selected_series()
         self.plot.autofit()
+
+    def _refresh_crs_warnings(self, project_crs: str) -> None:
+        """Surface (not hide) frames that don't match the project CRS.
+
+        Mismatched survey/boundary overlays are withheld from the canvas —
+        plotting incompatible coordinate systems together is never correct —
+        but the withholding must be VISIBLE (§20), so every skipped frame
+        becomes a ⚠ banner entry.
+        """
+        warnings: list[str] = []
+        workarea = getattr(self.project, "workarea", None) if self.project else None
+        boundary_crs = str(getattr(workarea, "boundary_crs", "") or "") if workarea else ""
+        has_boundary = bool(getattr(workarea, "boundary", None)) if workarea else False
+        if boundary_crs and has_boundary and not crs_equivalent(boundary_crs, project_crs):
+            warnings.append(f"工区边界坐标系 {boundary_crs} 与工程不一致，未叠加")
+        surveys = getattr(self.project, "seismic_surveys", None) if self.project else None
+        for survey in surveys or []:
+            survey_crs = str(getattr(survey, "crs", "") or "")
+            if (
+                survey_crs
+                and getattr(survey, "extent", None)
+                and not crs_equivalent(survey_crs, project_crs)
+            ):
+                warnings.append(
+                    f"地震工区「{survey.name}」坐标系 {survey_crs} 与工程不一致，未叠加"
+                )
+        self.crs_warning_label.setText("⚠ " + "；".join(warnings) if warnings else "")
+        self.crs_warning_label.setVisible(bool(warnings))
 
     def _render_boundary(self) -> None:
         points = []
