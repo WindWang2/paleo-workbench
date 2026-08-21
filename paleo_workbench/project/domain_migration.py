@@ -101,15 +101,20 @@ def migrate_project_to_workarea(
             if pending_ids:
                 report.resources_scanned = len(pending_ids)
                 try:
-                    if staged is not None:
-                        pending = [s for s in staged if s.resource_id in pending_ids]
+                    pending = (
+                        [s for s in staged if s.resource_id in pending_ids]
+                        if staged
+                        else []
+                    )
+                    if pending:
                         report.binding = bind_staged(
                             project,
                             pending,
                             asset_id_by_legacy=mapping,
                         )
                     else:
-                        # Headless/sync path: extract inline (tests, scripts).
+                        # Staged snapshot predates these resources (or was
+                        # empty): extract inline so late links still bind.
                         pending_resources = [
                             r
                             for r in sorted(

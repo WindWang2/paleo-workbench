@@ -29,10 +29,12 @@ class _DomainMigrationBridge(QObject):
 
     The worker performs ONLY extraction (file parsing).  The live
     ProjectDocument is mutated exclusively inside the GUI-thread slot —
-    review finding #12 (cross-thread document mutation).
+    review finding #12 (cross-thread document mutation).  The session
+    generation travels with the payload so a queued callback from a replaced
+    project can never mutate the new document.
     """
 
-    migration_staged = Signal(str, object, object)  # project_path, mapping, staged
+    migration_staged = Signal(str, int, object, object)  # path, generation, mapping, staged
 
 
 class ProjectController:
@@ -340,16 +342,23 @@ class ProjectController:
             )
             if staged or mapping:
                 self._migration_bridge.migration_staged.emit(
-                    str(target), mapping, staged
+                    str(target), generation, mapping, staged
                 )
         except Exception:
             # A migration failure must never break the open project.
             return
 
-    def _on_domain_migration_staged(self, project_path: str, mapping: dict, staged: object) -> None:
+    def _on_domain_migration_staged(
+        self, project_path: str, generation: int, mapping: dict, staged: object
+    ) -> None:
         """GUI-thread binding pass after background extraction."""
         window = self.window
-        if window.project is None or str(window.project_path) != project_path:
+        if (
+            generation != self._session_generation
+            or window.project is None
+            or window.project_path is None
+            or str(window.project_path) != project_path
+        ):
             return
         try:
             from paleo_workbench.project.domain_migration import (
