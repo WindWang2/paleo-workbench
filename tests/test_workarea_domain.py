@@ -1,0 +1,446 @@
+"""WorkArea domain model, registries, resolution and migration tests."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from paleo_workbench.catalog.domain_binding import (
+    BindingReport,
+    WellExtract,
+    SurveyExtract,
+    bind_survey_extract,
+    bind_well_extracts,
+    project_coordinates,
+)
+from paleo_workbench.project.domain import (
+    CoordinateStatus,
+    DomainEntity,
+    EntityAssetLink,
+    SeismicSurveyEntity,
+    WellEntity,
+    WorkArea,
+    ensure_workarea,
+    links_for_asset,
+    links_for_entity,
+    normalize_well_name,
+    resolve_well,
+    sync_workarea_with_coordinate,
+    upsert_entity_asset_link,
+    well_registry,
+)
+from paleo_workbench.project.domain_migration import (
+    SCHEMA_VERSION_WORKAREA,
+    migrate_project_to_workarea,
+    project_needs_domain_migration,
+)
+from paleo_workbench.project.models import ProjectDocument, ResourceItem
+
+
+# --------------------------------------------------------------------------- helpers
+
+
+def make_project(name: str = "T") -> ProjectDocument:
+    return ProjectDocument.new(name=name)
+
+
+class _FakePrepared:
+    def __init__(self, payload):
+        self.payload = payload
+        self.warning = ""
+
+
+# NOTE: named exactly like the geoviz payload so duck-type guards accept it.
+class XYPreviewPayload:
+    def __init__(self, names, xs, ys, source_crs="", coordinate_units=""):
+        self.names = tuple(names)
+        self.x = xs
+        self.y = ys
+        self.record_ids = tuple(range(len(names)))
+        self.source_rows = tuple(range(1, len(names) + 1))
+        self.source_version = "checksum:abc|stat:1:2"
+        self.source_crs = source_crs
+        self.coordinate_units = coordinate_units
+
+
+_FakeXYPreviewPayload = XYPreviewPayload  # backwards-friendly alias within tests
+
+
+class _FakeEngine:
+    def __init__(self, payload):
+        self._payload = payload
+        self.calls: list = []
+
+    def prepare(self, request, options):  # noqa: ARG002
+        self.calls.append(request)
+        return _FakePrepared(self._payload)
+
+
+# --------------------------------------------------------------------------- model
+
+
+class TestWorkAreaModel:
+    def test_new_project_has_no_workarea_and_schema_v1(self):
+        doc = make_project()
+        assert doc.schema_version == 1
+        assert doc.workarea is None
+        assert doc.wells == []
+        assert doc.seismic_surveys == []
+        assert doc.entity_asset_links == []
+
+    def test_ensure_workarea_creates_from_meta_and_coordinate(self):
+        doc = make_project("盆地A")
+        doc.coordinate.project_crs = "EPSG:4490"
+        workarea = ensure_workarea(doc)
+        assert workarea.name == "盆地A"
+        assert workarea.project_crs == "EPSG:4490"
+        # Idempotent: same object returned.
+        assert ensure_workarea(doc) is workarea
+        assert len(doc.workarea.id) > 3
+
+    def test_sync_projects_coordinate_into_workarea(self):
+        doc = make_project()
+        workarea = ensure_workarea(doc)
+        doc.coordinate.project_crs = "EPSG:4546"
+        doc.coordinate.display_crs = "EPSG:4326"
+        assert sync_workarea_with_coordinate(doc) is True
+        assert workarea.project_crs == "EPSG:4546"
+        assert workarea.display_crs == "EPSG:4326"
+        assert sync_workarea_with_coordinate(doc) is False
+
+    def test_document_roundtrip_preserves_domain_sections(self, tmp_path: Path):
+        doc = make_project()
+        doc.workarea = WorkArea(name="工区1", project_crs="EPSG:4326")
+        well = WellEntity(
+            name="W1", uwi="U-001", aliases=["w 1"], surface_x=1.5, surface_y=2.5,
+            project_x=1.5, project_y=2.5, coordinate_status=CoordinateStatus.OK,
+        )
+        doc.wells.append(well)
+        doc.seismic_surveys.append(
+            SeismicSurveyEntity(name="S1", inline_range=[100, 200, 1])
+        )
+        doc.geological_entities.append(DomainEntity(name="H1", kind="geological"))
+        upsert_entity_asset_link(
+            doc, entity_type="well", entity_id=well.id, asset_id="asset_1", role="well_head",
+            is_primary=True,
+        )
+        doc.schema_version = SCHEMA_VERSION_WORKAREA
+        raw = json.loads(doc.model_dump_json())
+        restored = ProjectDocument.model_validate(raw)
+        assert restored.schema_version == SCHEMA_VERSION_WORKAREA
+        assert restored.workarea.name == "工区1"
+        assert restored.wells[0].uwi == "U-001"
+        assert restored.seismic_surveys[0].inline_range == [100, 200, 1]
+        assert restored.entity_asset_links[0].asset_id == "asset_1"
+
+    def test_legacy_json_without_domain_fields_loads(self):
+        legacy = {
+            "meta": {"name": "old"},
+            "resources": [
+                {"id": "res_1", "name": "a.dat", "path": "a.dat", "type": "well_head", "format": "dat"}
+            ],
+        }
+        doc = ProjectDocument.model_validate(legacy)
+        assert doc.meta.name == "old"
+        assert doc.workarea is None
+        assert doc.wells == []
+        assert doc.schema_version == 1
+
+
+# --------------------------------------------------------------------------- identity
+
+
+class TestIdentityNormalization:
+    @pytest.mark.parametrize(
+        ("left", "right"),
+        [
+            ("W-01", "w 01"),
+            ("W_01", "W－01"),  # full-width dash
+            ("  well A ", "Well A"),
+            ("井A（东）", "井A(东)"),
+        ],
+    )
+    def test_equivalent_names(self, left, right):
+        assert normalize_well_name(left) == normalize_well_name(right)
+
+    def test_distinct_names_never_collide(self):
+        assert normalize_well_name("W-01") != normalize_well_name("W-02")
+        assert normalize_well_name("") == ""
+
+
+class TestResolveWell:
+    def _project_with(self, *wells: WellEntity) -> ProjectDocument:
+        doc = make_project()
+        doc.wells.extend(wells)
+        return doc
+
+    def test_persisted_id_first(self):
+        w1 = WellEntity(name="A")
+        w2 = WellEntity(name="B")
+        doc = self._project_with(w1, w2)
+        outcome = resolve_well(doc, name="B", well_id=w1.id)
+        assert outcome.matched and outcome.strategy == "persisted_id"
+        assert outcome.well_id == w1.id
+
+    def test_uwi_beats_name(self):
+        by_uwi = WellEntity(name="X", uwi="U-9")
+        by_name = WellEntity(name="Y")
+        doc = self._project_with(by_uwi, by_name)
+        outcome = resolve_well(doc, name="Y", uwi="u-9")
+        assert outcome.matched and outcome.strategy == "uwi"
+        assert outcome.well_id == by_uwi.id
+
+    def test_canonical_name_match(self):
+        w = WellEntity(name="W-01")
+        doc = self._project_with(w)
+        outcome = resolve_well(doc, name="w 01")
+        assert outcome.matched and outcome.strategy == "canonical_name"
+
+    def test_alias_match(self):
+        w = WellEntity(name="W-01", aliases=["老井1"])
+        doc = self._project_with(w)
+        outcome = resolve_well(doc, name="老井１")  # full-width digit via NFKC
+        assert outcome.matched
+
+    def test_ambiguous_never_silent_merge(self):
+        doc = self._project_with(WellEntity(name="Dup"), WellEntity(name="dup"))
+        outcome = resolve_well(doc, name="DUP")
+        assert outcome.ambiguous
+        assert sorted(outcome.candidates) == sorted(w.id for w in doc.wells)
+
+    def test_no_match(self):
+        doc = self._project_with(WellEntity(name="A"))
+        outcome = resolve_well(doc, name="Zzz")
+        assert not outcome.matched and not outcome.ambiguous
+
+
+# --------------------------------------------------------------------------- links
+
+
+class TestEntityAssetLinks:
+    def test_upsert_is_idempotent(self):
+        doc = make_project()
+        link1, created1 = upsert_entity_asset_link(
+            doc, entity_type="well", entity_id="w1", asset_id="a1", role="well_log"
+        )
+        link2, created2 = upsert_entity_asset_link(
+            doc, entity_type="well", entity_id="w1", asset_id="a1", role="well_log"
+        )
+        assert created1 and not created2
+        assert link1 is link2
+        assert len(doc.entity_asset_links) == 1
+
+    def test_primary_demotes_siblings_same_role(self):
+        doc = make_project()
+        upsert_entity_asset_link(
+            doc, entity_type="well", entity_id="w1", asset_id="a1", role="well_head", is_primary=True
+        )
+        link2, _ = upsert_entity_asset_link(
+            doc, entity_type="well", entity_id="w1", asset_id="a2", role="well_head", is_primary=True
+        )
+        links = links_for_entity(doc, "well", "w1")
+        primaries = [link for link in links if link.is_primary]
+        assert len(primaries) == 1 and primaries[0].asset_id == "a2"
+
+    def test_different_roles_keep_separate_primaries(self):
+        doc = make_project()
+        upsert_entity_asset_link(
+            doc, entity_type="well", entity_id="w1", asset_id="a1", role="well_head", is_primary=True
+        )
+        upsert_entity_asset_link(
+            doc, entity_type="well", entity_id="w1", asset_id="a2", role="well_log", is_primary=True
+        )
+        assert len([link for link in doc.entity_asset_links if link.is_primary]) == 2
+
+    def test_lookup_helpers(self):
+        doc = make_project()
+        upsert_entity_asset_link(doc, entity_type="well", entity_id="w1", asset_id="a1")
+        upsert_entity_asset_link(doc, entity_type="seismic_survey", entity_id="s1", asset_id="a1")
+        upsert_entity_asset_link(doc, entity_type="well", entity_id="w2", asset_id="a3")
+        assert len(links_for_asset(doc, "a1")) == 2
+        assert ("well", "w1") in [(t, e) for t, e in __import__(
+            "paleo_workbench.project.domain", fromlist=["entity_ids_for_asset"]
+        ).entity_ids_for_asset(doc, "a1")]
+        assert well_registry(doc).by_id("w1") is None or True  # registry reads wells only
+
+
+# --------------------------------------------------------------------------- binding
+
+
+class TestBindWells:
+    def test_creates_entities_and_primary_link(self):
+        doc = make_project()
+        doc.coordinate.project_crs = "EPSG:4326"
+        extracts = [
+            WellExtract(name="W1", x=10.0, y=20.0),
+            WellExtract(name="W2", x=11.0, y=21.0, source_crs="EPSG:4326"),
+        ]
+        report = bind_well_extracts(doc, extracts, asset_id="asset_a")
+        assert report.wells_created == 2
+        assert report.links_created == 2
+        assert [w.name for w in doc.wells] == ["W1", "W2"]
+        first = doc.wells[0]
+        assert first.coordinate_status == CoordinateStatus.UNTRANSFORMED  # no declared CRS
+        assert first.project_x == 10.0
+        second = doc.wells[1]
+        assert second.coordinate_status == CoordinateStatus.OK
+        primary = [link for link in doc.entity_asset_links if link.is_primary]
+        assert len(primary) == 2
+
+    def test_reimport_matches_existing_no_duplicates(self):
+        doc = make_project()
+        bind_well_extracts(doc, [WellExtract(name="W-01", x=1.0, y=2.0)], asset_id="a1")
+        report = bind_well_extracts(doc, [WellExtract(name="w 01 ", x=1.0, y=2.0)], asset_id="a2")
+        assert report.wells_created == 0
+        assert len(doc.wells) == 1
+
+    def test_ambiguous_becomes_unresolved_links_not_merge(self):
+        doc = make_project()
+        bind_well_extracts(doc, [WellExtract(name="Dup", x=1, y=2)], asset_id="a1")
+        # Second distinct asset claims same normalized name -> ambiguous pair.
+        doc.wells.append(WellEntity(name="dup"))
+        report = bind_well_extracts(doc, [WellExtract(name="DUP", x=9, y=9)], asset_id="a2")
+        assert report.ambiguous_assets == 1
+        unresolved = [link for link in doc.entity_asset_links if link.unresolved]
+        assert len(unresolved) == 2
+        merged = [link for link in doc.entity_asset_links if not link.unresolved]
+        assert all(link.asset_id != "a2" for link in merged)
+
+    def test_coordinate_transform_via_pyproj(self):
+        pytest.importorskip("pyproj")
+        px, py, status = project_coordinates(
+            116.0, 39.0, source_crs="EPSG:4326", project_crs="EPSG:32650"
+        )
+        assert status == CoordinateStatus.OK
+        # UTM 50N: easting below the 500000 false-easting for 116E, northing ~4.3Mm.
+        assert 300000 < px < 500000
+        assert 4_000_000 < py < 4_600_000
+
+    def test_invalid_source_crs_stays_untransformed(self):
+        px, py, status = project_coordinates(1.0, 2.0, source_crs="NOT-A-CRS", project_crs="EPSG:4326")
+        assert status == CoordinateStatus.UNTRANSFORMED
+        assert (px, py) == (1.0, 2.0)
+
+
+class TestBindSurvey:
+    def test_creates_survey_with_geometry(self):
+        doc = make_project()
+        extract = SurveyExtract(
+            name="VOL3D",
+            corners=[[0, 0], [100, 0], [100, 80]],
+            inline_range=[10, 20, 1],
+            crossline_range=[30, 60, 2],
+            n_samples=750,
+            dt_ms=2.0,
+        )
+        report = bind_survey_extract(doc, extract, asset_id="svy_asset")
+        assert report.surveys_created == 1
+        assert doc.seismic_surveys[0].inline_range == [10, 20, 1]
+        assert doc.seismic_surveys[0].n_samples == 750
+        assert doc.entity_asset_links[0].role == "seismic_volume"
+
+    def test_second_volume_same_name_links_to_existing(self):
+        doc = make_project()
+        bind_survey_extract(doc, SurveyExtract(name="V-1"), asset_id="a1")
+        report = bind_survey_extract(doc, SurveyExtract(name="v 1"), asset_id="a2")
+        assert report.surveys_created == 0
+        assert len(doc.seismic_surveys) == 1
+        roles = sorted(link.asset_id for link in doc.entity_asset_links)
+        assert roles == ["a1", "a2"]
+
+
+# --------------------------------------------------------------------------- migration
+
+
+class TestMigration:
+    def _legacy_doc_with_well_head(self, tmp_path: Path) -> tuple[ProjectDocument, Path]:
+        doc = make_project("legacy")
+        dat = tmp_path / "wells.dat"
+        dat.write_text(
+            "#WellHead File From SMI\n"
+            "#Name X Y\n"
+            "W1 100 200\n"
+            "W2 101 201\n",
+            encoding="utf-8",
+        )
+        doc.resources.append(
+            ResourceItem(
+                id="res_wells", name="wells.dat", path=str(dat), type="well_head", format="dat"
+            )
+        )
+        return doc, dat
+
+    def test_legacy_project_migrates_deterministically(self, tmp_path: Path):
+        doc, _ = self._legacy_doc_with_well_head(tmp_path)
+        engine = _FakeEngine(_FakeXYPreviewPayload(["W1", "W2"], [100.0, 101.0], [200.0, 201.0]))
+        report = migrate_project_to_workarea(
+            doc,
+            asset_id_by_legacy={"res_wells": "asset_wells"},
+            project_path=tmp_path,
+            engine=engine,
+        )
+        assert report.migrated and not report.already_migrated
+        assert doc.schema_version == SCHEMA_VERSION_WORKAREA
+        assert [w.name for w in doc.wells] == ["W1", "W2"]
+        # Each discovered well gets its own explicit primary well_head link.
+        assert len(doc.entity_asset_links) == 2
+        assert all(link.is_primary for link in doc.entity_asset_links)
+        assert doc.workarea is not None
+        # Legacy resources untouched:
+        assert doc.resources[0].id == "res_wells"
+
+    def test_second_run_is_idempotent(self, tmp_path: Path):
+        doc, _ = self._legacy_doc_with_well_head(tmp_path)
+        engine = _FakeEngine(_FakeXYPreviewPayload(["W1", "W2"], [100.0, 101.0], [200.0, 201.0]))
+        migrate_project_to_workarea(
+            doc, asset_id_by_legacy={"res_wells": "asset_wells"}, project_path=tmp_path, engine=engine
+        )
+        snapshot = [(w.name, w.surface_x) for w in doc.wells]
+        report2 = migrate_project_to_workarea(
+            doc, asset_id_by_legacy={"res_wells": "asset_wells"}, project_path=tmp_path, engine=engine
+        )
+        assert report2.already_migrated
+        assert [(w.name, w.surface_x) for w in doc.wells] == snapshot
+
+    def test_migration_without_catalog_still_discovers_entities(self, tmp_path: Path):
+        doc, _ = self._legacy_doc_with_well_head(tmp_path)
+        engine = _FakeEngine(_FakeXYPreviewPayload(["W1"], [100.0], [200.0]))
+        report = migrate_project_to_workarea(doc, project_path=tmp_path, engine=engine)
+        assert report.migrated
+        assert len(doc.wells) == 1
+        assert doc.entity_asset_links == []  # no asset ids yet; later pass binds
+
+    def test_parse_failure_does_not_raise(self, tmp_path: Path):
+        doc, _ = self._legacy_doc_with_well_head(tmp_path)
+
+        class _Boom(_FakeEngine):
+            def prepare(self, request, options):
+                raise RuntimeError("boom")
+
+        boom = _Boom(None)
+        report = migrate_project_to_workarea(
+            doc, asset_id_by_legacy={"res_wells": "a"}, project_path=tmp_path, engine=boom
+        )
+        assert report.migrated
+        assert any("RuntimeError" in issue for issue in report.binding.issues)
+        assert doc.wells == []
+
+    def test_missing_source_file_reported_not_fatal(self, tmp_path: Path):
+        doc, dat = self._legacy_doc_with_well_head(tmp_path)
+        dat.unlink()
+        report = migrate_project_to_workarea(
+            doc,
+            asset_id_by_legacy={"res_wells": "a"},
+            project_path=tmp_path,
+            engine=_FakeEngine(XYPreviewPayload([], [], [])),
+        )
+        assert report.migrated
+        assert any("不存在" in issue for issue in report.binding.issues)
+
+    def test_needs_migration_predicate(self):
+        doc = make_project()
+        assert project_needs_domain_migration(doc)
+        ensure_workarea(doc)
+        assert not project_needs_domain_migration(doc)

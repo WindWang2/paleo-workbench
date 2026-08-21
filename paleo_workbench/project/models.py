@@ -6,6 +6,14 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from paleo_workbench.project.domain import (
+    DomainEntity,
+    EntityAssetLink,
+    SeismicSurveyEntity,
+    WellEntity,
+    WorkArea,
+)
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -462,9 +470,26 @@ class JointAnalysisState(BaseModel):
 
 
 class ProjectDocument(BaseModel):
+    """Portable project snapshot.
+
+    ``schema_version`` gates central migrations (see
+    :mod:`paleo_workbench.project.domain_migration`): legacy files load as
+    version 1 and are upgraded in memory; the new schema persists on the next
+    successful save only.
+    """
+
+    schema_version: int = 1
     meta: ProjectMeta
     coordinate: CoordinateReference = Field(default_factory=CoordinateReference)
     stratigraphy: StratigraphicFramework = Field(default_factory=StratigraphicFramework)
+    # WorkArea-centered domain layer (schema v2, additive & backward compatible:
+    # old projects simply carry empty/None domain sections until migrated).
+    workarea: WorkArea | None = None
+    wells: list[WellEntity] = Field(default_factory=list)
+    seismic_surveys: list[SeismicSurveyEntity] = Field(default_factory=list)
+    geological_entities: list[DomainEntity] = Field(default_factory=list)
+    auxiliary_entities: list[DomainEntity] = Field(default_factory=list)
+    entity_asset_links: list[EntityAssetLink] = Field(default_factory=list)
     resources: list[ResourceItem] = Field(default_factory=list)
     well_tables: list[WellTable] = Field(default_factory=list)
     constraint_layers: list[ConstraintLayers] = Field(default_factory=list)

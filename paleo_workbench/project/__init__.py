@@ -1,3 +1,11 @@
+from paleo_workbench.project.domain import (
+    CoordinateStatus,
+    DomainEntity,
+    EntityAssetLink,
+    SeismicSurveyEntity,
+    WellEntity,
+    WorkArea,
+)
 from paleo_workbench.project.models import (
     CompilationRun,
     ConstraintLayers,
@@ -29,6 +37,9 @@ __all__ = [
     "ContourDraft",
     "ContourSegment",
     "CoordinateReference",
+    "CoordinateStatus",
+    "DomainEntity",
+    "EntityAssetLink",
     "MapReferenceLayer",
     "ExportArtifact",
     "FactorMapTask",
@@ -38,10 +49,13 @@ __all__ = [
     "ProjectMeta",
     "QualityReport",
     "ResourceItem",
+    "SeismicSurveyEntity",
     "StratigraphicFramework",
     "VersionSet",
     "VersionSnapshot",
+    "WellEntity",
     "WellTable",
     "WellTableRow",
+    "WorkArea",
     "WorkflowStep",
 ]
