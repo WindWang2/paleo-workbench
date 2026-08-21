@@ -95,12 +95,13 @@ ICON_FILES = [
     "stratigraphy.svg",
     "visualization.svg", "preparation.svg", "mapping.svg", "review.svg",
     "visualization.svg",  # fallback for 3d-modeling icon (includes joint analysis)
+    "data.svg",  # well location map reuses the data icon (spatial data view)
 ]
 
 PAGE_NAMES = [
     "首页", "数据", "测井预测", "地震预测", "层序格架",
     "地层对比",
-    "可视化", "制备", "编图", "成图审核", "井震联合",
+    "可视化", "制备", "编图", "成图审核", "井震联合", "井位地图",
 ]
 # Brief Chinese descriptions for nav-icon tooltips.
 PAGE_DESCRIPTIONS = [
@@ -115,6 +116,7 @@ PAGE_DESCRIPTIONS = [
     "古地理图编制工作台",
     "成图质检与成果导出",
     "井震联合 3D 视口与 Time 连井剖面",
+    "工区级井位 GIS 空间视图",
 ]
 
 STEP_COLORS = ["#334155", "#0ea5e9", "#6366f1", WARNING, "#e2705b", "#7e8794"]

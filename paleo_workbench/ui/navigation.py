@@ -14,6 +14,8 @@ PAGE_INDEX_PREPARATION = 7
 PAGE_INDEX_MAPPING = 8
 PAGE_INDEX_REVIEW = 9
 PAGE_INDEX_GEOMODEL = 10
+# Project-level Well Location GIS (WorkArea registry fed, §16).
+PAGE_INDEX_WELL_MAP = 11
 # Joint analysis absorbed into PAGE_INDEX_GEOMODEL (PRD #85 / #91)
 
 # Stage indices (0 ~ 3)
@@ -28,7 +30,7 @@ STAGE_DEFINITIONS: list[dict] = [
         "index": STAGE_INDEX_DATA,
         "name": "数据与预处理",
         "badge": "❶",
-        "pages": [PAGE_INDEX_DATA, PAGE_INDEX_PREPARATION],
+        "pages": [PAGE_INDEX_DATA, PAGE_INDEX_WELL_MAP, PAGE_INDEX_PREPARATION],
     },
     {
         "index": STAGE_INDEX_INTERPRETATION,
