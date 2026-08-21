@@ -113,11 +113,11 @@ jobs:
           python -c "import well_log_core; assert hasattr(well_log_core, 'fast_las_parse_data'), 'well_log_core symbols missing'"
 
       - name: Assert the slow family has not silently shrunk
-        # Baseline 14 = 7 real-data smoke + 5 interpolation perf + 2 real SEGY axis contracts (#650).
+        # Baseline 15 = 7 real-data smoke + 5 interpolation perf + 2 real SEGY axis contracts (#650) + 1 fence probe (#896).
         run: |
           count="$(python -m pytest --collect-only -q -m slow tests/ 2>&1 | grep -oE '[0-9]+ tests collected' | grep -oE '^[0-9]+')"
-          echo "slow tests collected: ${count} (baseline 14)"
-          test -n "${count}" && test "${count}" -ge 14
+          echo "slow tests collected: ${count} (baseline 15)"
+          test -n "${count}" && test "${count}" -ge 15
 
       - name: Run slow tests (real-data smoke + interpolation perf gates)
         env:
@@ -132,18 +132,24 @@ jobs:
           python - <<'EOF'
           import re, sys
           text = open("/tmp/slow-run.txt").read()
-          absent = len(re.findall(r"representative data file is absent", text))
+          # Three skip phrases must all be fail-closed (#896): the smoke
+          # family uses "representative data file is absent", the axis
+          # contract uses "demo SEGY not available", the fence probe uses
+          # "no demo SEGY". Any of them skipping must fail the leg.
+          SLOW_SKIP_RE = r"representative data file is absent|demo SEGY not available|no demo SEGY"
+          absent = len(re.findall(SLOW_SKIP_RE, text))
           summary = re.findall(r"^=+ .* =+$", text, re.M)
           print("\n".join(summary[-3:]))
           if absent:
               print(
-                  "::error::packaging #442: "
-                  f"{absent} real-data smoke test(s) skipped - the representative "
-                  "data tree is absent (see _default_data_root in "
-                  "tests/test_geoviz_real_data_smoke.py; a gitignored data/ "
-                  "tree). Provide the data and re-run this workflow manually - "
-                  "otherwise the only end-to-end vendor-format coverage never runs."
+                  "::error::packaging #442/#896: "
+                  f"{absent} slow test(s) skipped - the representative "
+                  "data tree / demo SEGY is absent (see tests/test_geoviz_real_data_smoke.py, "
+                  "tests/test_seismic_timeslice_axis_contract.py, "
+                  "tests/test_well_seismic_fence_probe.py). Provide the data and "
+                  "re-run this workflow manually - otherwise the only end-to-end "
+                  "vendor-format / SEGY coverage never runs."
               )
               sys.exit(1)
-          print(f"real-data skips: {absent} (0 required for a green leg)")
+          print(f"slow skips (all 3 phrases): {absent} (0 required for a green leg)")
           EOF

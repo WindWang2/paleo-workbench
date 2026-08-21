@@ -86,3 +86,74 @@ def test_ci_windows_filename_guard_has_no_dead_allowlist() -> None:
     guard = guard[: guard.index("Setup Python")]
     assert "KNOWN" not in guard, "guard allowlist reintroduced; match real paths or drop it"
     assert "ui-ref" not in guard, "stale #441 offender referenced in the guard"
+
+
+def test_slow_tests_guard_covers_all_three_skip_phrases_and_baseline_15() -> None:
+    """#896: slow-tests.yml 必须同时覆盖三类 SEGY 缺失文案且基线为 15。
+
+    三个 skip 产地:
+    - tests/test_geoviz_real_data_smoke.py:     "representative data file is absent"
+    - tests/test_seismic_timeslice_axis_contract.py: "demo SEGY not available" (2 × @slow)
+    - tests/test_well_seismic_fence_probe.py:        "no demo SEGY" (1 × @slow)
+
+    守卫用 SLOW_SKIP_RE 汇总三者，遗漏任一都会让数据树缺失时静默绿。
+    基线 15 = 7 smoke + 5 perf + 2 axis + 1 fence，CI 与本地双侧一致。
+    """
+    import re
+
+    slow_yml = (WORKFLOW_DIR / "slow-tests.yml").read_text()
+    ci_yml = (WORKFLOW_DIR / "ci.yml").read_text()
+
+    # — Baseline 15 on both workflows —
+    for name, text in (("slow-tests.yml", slow_yml), ("ci.yml", ci_yml)):
+        assert "baseline 15" in text.lower() or "baseline 15" in text, f"{name} baseline not bumped to 15"
+        assert "-ge 15" in text, f"{name} -ge 15 guard missing"
+
+    # — Guard covers all three phrases (mirror of yml's SLOW_SKIP_RE) —
+    expected_phrases = [
+        "representative data file is absent",
+        "demo SEGY not available",
+        "no demo SEGY",
+    ]
+    for phrase in expected_phrases:
+        assert phrase in slow_yml, f"slow-tests.yml guard missing phrase: {phrase!r}"
+
+    # Validate that slow-tests.yml's guard regex is well-formed and matches
+    # each phrase (replicates the grep behaviour the CI python step uses).
+    m = re.search(r'SLOW_SKIP_RE\s*=\s*r"([^"]+)"', slow_yml)
+    assert m, "slow-tests.yml SLOW_SKIP_RE not found"
+    pattern = m.group(1)
+    compiled = re.compile(pattern)
+    for phrase in expected_phrases:
+        assert compiled.search(phrase), f"SLOW_SKIP_RE does not match {phrase!r}"
+
+    # Source-of-truth: the three skip sites still emit those exact phrases.
+    smoke = (REPO_ROOT / "tests/test_geoviz_real_data_smoke.py").read_text()
+    axis = (REPO_ROOT / "tests/test_seismic_timeslice_axis_contract.py").read_text()
+    fence = (REPO_ROOT / "tests/test_well_seismic_fence_probe.py").read_text()
+    assert "representative data file is absent" in smoke
+    assert "demo SEGY not available" in axis
+    assert '"no demo SEGY"' in fence or "'no demo SEGY'" in fence or "no demo SEGY" in fence
+
+
+def test_slow_family_collect_count_meets_baseline_15() -> None:
+    """#896: slow 家族实采数 ≥15（本地最小可测家族完整性）。"""
+    import subprocess
+    import sys as _sys
+
+    result = subprocess.run(
+        [_sys.executable, "-m", "pytest", "--collect-only", "-q", "-m", "slow", "tests/"],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+    )
+    combined = result.stdout + result.stderr
+    # Allow one known collection error path (e.g. missing map_edit_core) to not
+    # mask the baseline check — ignore the error line and parse collected count.
+    import re as _re
+
+    match = _re.search(r"(\d+) tests collected", combined)
+    # If collection fully failed (0 collected), surface the error loudly.
+    assert match, f"could not parse collected count from:\n{combined[:4000]}"
+    count = int(match.group(1))
+    assert count >= 15, f"slow family shrank to {count} (< 15); update baselines or restore tests"

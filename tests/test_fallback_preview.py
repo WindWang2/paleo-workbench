@@ -11,6 +11,7 @@ import pytest
 
 from paleo_workbench.project.models import ResourceItem
 from paleo_workbench.resources.preview_parsers.office_parsers import (
+    MAX_ARCHIVE_NAMES,
     dfb_preview,
     pptx_preview,
     spreadsheetml_preview,
@@ -355,7 +356,9 @@ def test_zip_lists_only_first_500_sorted_central_names_without_extracting(tmp_pa
         "extractall",
         side_effect=AssertionError("no extractall"),
     ):
-        result = zip_preview(_resource(path, "zip", "archive"))
+        # Production path decouples archive budget from table row budget (#896):
+        # registry always caps at MAX_ARCHIVE_NAMES (500), not table_max_rows (200).
+        result = zip_preview(_resource(path, "zip", "archive"), max_rows=MAX_ARCHIVE_NAMES)
 
     assert result.mode == "table"
     assert len(result.table_rows) == 500
@@ -363,6 +366,31 @@ def test_zip_lists_only_first_500_sorted_central_names_without_extracting(tmp_pa
     assert result.table_rows[-1] == ("item-499.txt",)
     assert result.truncated is True
     assert "截断" in result.warning
+
+
+def test_zip_preview_via_provider_caps_at_500_for_600_entries(tmp_path: Path):
+    """#896 regression: provider-level ZIP with 600 entries must surface 500 (MAX_ARCHIVE_NAMES).
+
+    Direct `zip_preview()` has its own `MAX_ARCHIVE_NAMES` default, but the production
+    path goes through `PreviewProvider → registry → zip_preview(max_rows=MAX_ARCHIVE_NAMES)`
+    which previously used `settings.table_max_rows` (200). This test pins the provider-level
+    budget (probe_zip.py reference: 600 → 500 rows).
+    """
+    from paleo_workbench.ui.pages.preview_provider import PreviewProvider
+
+    path = tmp_path / "provider-600.zip"
+    with zipfile.ZipFile(path, "w") as archive:
+        for number in reversed(range(600)):
+            archive.writestr(f"item-{number:03}.txt", "payload")
+
+    resource = _resource(path, "zip", "archive")
+    result = PreviewProvider().preview(resource)
+
+    assert result.mode == "table"
+    assert len(result.table_rows) == MAX_ARCHIVE_NAMES == 500
+    assert result.table_rows[0] == ("item-000.txt",)
+    assert result.table_rows[-1] == ("item-499.txt",)
+    assert result.truncated is True
 
 
 @pytest.mark.parametrize(
