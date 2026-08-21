@@ -594,3 +594,32 @@ class TestExplicitMapping:
         assert report.wells_created == 0
         assert report.links_created == 1
         assert [link.asset_id for link in links_for_entity(doc, "well", w1.id)] == ["a9"]
+
+
+class TestFileSideUWI:
+    """File-side UWI extraction (upstream payload ≥ gve 2a6b3bbf)."""
+
+    def test_payload_uwis_feed_extraction(self):
+        from paleo_workbench.catalog.domain_binding import _payload_wells
+
+        payload = XYPreviewPayload(
+            ["陌生名", "另一口"], [1.0, 2.0], [3.0, 4.0]
+        )
+        object.__setattr__(payload, "uwis", ("U-42", "-"))
+        extracts = _payload_wells(payload)
+        assert [e.uwi for e in extracts] == ["U-42", ""]
+        assert extracts[0].name == "陌生名"
+
+    def test_uwi_resolves_across_renamed_file(self):
+        """UWI beats a changed display name: same physical well, no duplicate."""
+        doc = make_project()
+        doc.wells.append(WellEntity(name="旧名", uwi="U-42"))
+        report = bind_well_extracts(
+            doc,
+            [WellExtract(name="文件里改叫新名了", x=9.0, y=9.0, uwi="u-42")],
+            asset_id="a2",
+        )
+        assert report.wells_created == 0
+        assert len(doc.wells) == 1
+        # Geometry refreshed on the matched master record.
+        assert doc.wells[0].surface_x == 9.0

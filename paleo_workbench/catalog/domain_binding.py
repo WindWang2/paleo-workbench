@@ -112,15 +112,24 @@ def _payload_wells(payload: Any) -> list[WellExtract]:
     source_rows = getattr(payload, "source_rows", None) or ()
     source_crs = str(getattr(payload, "source_crs", "") or "")
     units = str(getattr(payload, "coordinate_units", "") or "")
+    # File-side UWI (geo-viz-engine ≥ 2a6b3bbf): strong identity signal when
+    # the well_head file declares a UWI column; empty tuple otherwise.
+    uwis = getattr(payload, "uwis", None) or ()
     count = min(len(names), len(xs), len(ys))
     wells: list[WellExtract] = []
     for index in range(count):
         row = source_rows[index] if index < len(source_rows) else None
+        uwi = str(uwis[index]).strip() if index < len(uwis) else ""
+        # Placeholder tokens some exporters use for empty cells carry no
+        # identity — treat them as absent.
+        if uwi in {"-", "--", "N/A", "NA"}:
+            uwi = ""
         wells.append(
             WellExtract(
                 name=str(names[index]),
                 x=float(xs[index]),
                 y=float(ys[index]),
+                uwi=uwi,
                 source_crs=source_crs,
                 coordinate_units=units,
                 source_row=int(row) if row is not None else None,
