@@ -199,7 +199,12 @@ def test_marching_cubes_fallback_constant_equal_level_returns_empty() -> None:
 
 
 def test_marching_cubes_fallback_level_at_max_returns_empty() -> None:
-    vol = _binary_volume()
+    # Constant volume at its max has no strict crossing → empty mesh per K-F2.
+    # The legacy skimage fallback also raised at binary iso==max (hence the
+    # earlier assertion of empty), but the watertight MT fallback matches the
+    # C++ kernel: a binary 0/1 volume at iso 1.0 still has a strict 0/1
+    # crossing on boundary cubes and yields a closed surface (#886 parity).
+    vol = np.ones((6, 6, 6), dtype=np.float32)
     verts, faces = _py_marching_cubes_3d(vol, isovalue=1.0)
     assert verts.shape == (0, 3) and faces.shape == (0, 3)
 
@@ -215,11 +220,25 @@ def test_marching_cubes_fallback_level_at_min_never_raises() -> None:
 
 
 def test_marching_cubes_fallback_binary_at_iso_one_returns_empty() -> None:
-    """C++ K-F2: a 0/1 volume at iso 1.0 has no strict crossing → empty mesh
-    (skimage raises RuntimeError here; the fallback used to propagate it)."""
+    """Binary 0/1 volume at iso 1.0: MT fallback matches C++ (watertight mesh).
+
+    The pre-#886 skimage fallback raised RuntimeError here and the guard mapped
+    it to an empty mesh. The watertight MT kernel preserves the strict 0/1
+    crossing (like native) and emits a closed surface (#886 parity)."""
+    from collections import Counter
+
     vol = _binary_volume()
     verts, faces = _py_marching_cubes_3d(vol, isovalue=1.0)
-    assert verts.shape == (0, 3) and faces.shape == (0, 3)
+    assert verts.shape[0] > 0 and faces.shape[0] > 0
+    # Must be watertight like the sphere case (#886)
+    keys = np.round(verts.astype(np.float64), decimals=4)
+    _uniq, inv = np.unique(keys, axis=0, return_inverse=True)
+    faces_u = inv[faces]
+    edge_count: Counter = Counter()
+    for a, b, c in faces_u:
+        for e in ((a, b), (b, c), (c, a)):
+            edge_count[tuple(sorted((int(e[0]), int(e[1]))))] += 1
+    assert edge_count and all(v == 2 for v in edge_count.values())
 
 
 def test_marching_cubes_fallback_crossing_level_still_produces_mesh() -> None:
