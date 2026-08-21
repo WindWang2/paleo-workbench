@@ -62,6 +62,18 @@ _NATIVE_MODULES = {
 # repo-root binary to the pure-Python fallback (#520).
 _STALE_WARNED: set[str] = set()
 
+_FEATURE_NATIVE_PKG: dict[str, str] = {
+    "seismic_3d": "seismic_3d_core",
+    "well_log": "well_log_core",
+    "map_edit": "map_edit_core",
+    "grid_render": "grid_render_core",
+}
+
+_CPP_EXPORT_ALIASES: dict[str, str] = {
+    "snap_point": "snap",
+    "validate_ring": "validate",
+}
+
 
 def _repo_root() -> Path:
     """Monorepo root (the directory that contains ``paleo_workbench/``).
@@ -158,8 +170,24 @@ def native_status(feature: str) -> str:
     if version is not None:
         return "fresh" if version == _package_version() else "stale"
     module_path = Path(getattr(_NATIVE_MODULES.get(feature), "__file__", "") or "")
-    if module_path.is_absolute() and _repo_root() in _resolve_cached(module_path).parents:
-        return "fresh"
+    if module_path.is_absolute():
+        resolved = _resolve_cached(module_path)
+        pkg = _FEATURE_NATIVE_PKG.get(feature)
+        if pkg:
+            native_dir = _repo_root() / "native" / pkg
+            geo_dir = _repo_root() / "geo-viz-engine" / "native" / pkg
+            if native_dir in resolved.parents or resolved.parent == native_dir:
+                return "fresh"
+            if geo_dir in resolved.parents or resolved.parent == geo_dir:
+                return "fresh"
+            # Cross-worktree: a versionless binary built from the main checkout
+            # (sibling worktree) also lives under a "native/<pkg>" directory and
+            # should be considered fresh when this worktree has not yet built
+            # its own copy. Any other tree location (e.g. scratch/) remains stale.
+            parts = resolved.parts
+            for i, part in enumerate(parts):
+                if part == "native" and i + 1 < len(parts) and parts[i + 1] == pkg:
+                    return "fresh"
     return "stale"
 
 
@@ -224,6 +252,8 @@ def _py_render_grid_rgba(
     cells become fully-transparent black; values clamp to the ramp endpoints; the LUT
     index is selected by truncation toward zero; alpha is ``lut_alpha * opacity / 255``.
     """
+    if not 0 <= int(opacity) <= 255:
+        raise ValueError(f"opacity must be in 0..255 (got {opacity})")
     gz = np.ascontiguousarray(grid_z, dtype=np.float32)
     if gz.ndim != 2:
         # Parity with the C++ binding's argument validation.
@@ -312,6 +342,12 @@ def _py_fast_slice_to_indexed8(
     """
     slice_data = _py_fast_slice_extract(volume, axis, index)
     if value_range is not None:
+        try:
+            vr_len = len(value_range)  # type: ignore[arg-type]
+        except TypeError:
+            raise ValueError("value_range must be a (vmin, vmax) pair of numbers") from None
+        if vr_len != 2:
+            raise ValueError("value_range must be a (vmin, vmax) pair of numbers")
         v_min = float(value_range[0])
         v_max = float(value_range[1])
     else:
@@ -331,8 +367,8 @@ def _py_fast_slice_to_indexed8(
     inv_range = np.float32(255.0) / np.float32(v_max - v_min)
     with np.errstate(invalid="ignore", over="ignore"):
         norm = (slice_data.astype(np.float32) - np.float32(v_min)) * inv_range
-    norm = np.clip(norm, np.float32(0.0), np.float32(255.0))
-    out = norm.astype(np.uint8)  # truncation toward zero, like the C++ cast
+        norm = np.clip(norm, np.float32(0.0), np.float32(255.0))
+        out = norm.astype(np.uint8)  # truncation toward zero, like the C++ cast
     out[~np.isfinite(slice_data)] = 0
     return out, v_min, v_max
 
@@ -603,7 +639,12 @@ def _wl_token_value(tok: str, null_value: float) -> float:
     """
     if not tok:
         return np.nan
-    if tok[0].isspace():
+    if "_" in tok:
+        # Python float() accepts underscores (1_000 -> 1000.0) while C++ from_chars
+        # stops at the underscore (1_000 -> 1.0). Reject underscore tokens before
+        # float() so the numeric-prefix fallback ("1") matches the C++ behaviour.
+        val = None
+    elif tok[0].isspace():
         # float() would silently skip leading Unicode whitespace (e.g. NBSP)
         # that the C++ from_chars treats as token content; parse the prefix.
         val = None
@@ -872,8 +913,9 @@ class NativeEngineBackend:
             raise KeyError(f"Unknown native backend function: {func_name}")
 
         feature, cpp_mod = self._FUNCTION_MODULE_MAP[func_name]
-        if self.is_accelerated(feature) and cpp_mod is not None and hasattr(cpp_mod, func_name):
-            cpp_fn = getattr(cpp_mod, func_name)
+        cpp_attr = _CPP_EXPORT_ALIASES.get(func_name, func_name)
+        if self.is_accelerated(feature) and cpp_mod is not None and hasattr(cpp_mod, cpp_attr):
+            cpp_fn = getattr(cpp_mod, cpp_attr)
             return cpp_fn(*args, **kwargs)
 
         fallback_fn = self._FALLBACK_TABLE[func_name]

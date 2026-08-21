@@ -208,7 +208,7 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
             }
         }
 
-        if (min_val >= max_val || std::isinf(min_val) || std::isinf(max_val)) {
+        if (!(min_val < max_val) || !std::isfinite(min_val) || !std::isfinite(max_val)) {
             std::fill(dst, dst + total, static_cast<uint8_t>(0));
         } else {
             float inv_range = 255.0f / (max_val - min_val);
@@ -263,7 +263,7 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
         }
     }
 
-    if (min_val >= max_val || std::isinf(min_val) || std::isinf(max_val)) {
+    if (!(min_val < max_val) || !std::isfinite(min_val) || !std::isfinite(max_val)) {
         return py::make_tuple(u8_result, 0.0f, 0.0f);
     }
     return py::make_tuple(u8_result, min_val, max_val);
@@ -458,7 +458,8 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
                             size_t jj = j + dj - half_x;  // spans [j-half_x, j+half_x]
                             float v = src[ii * (nx * nt) + jj * nt + k];
                             trace_sum += v;
-                            trace_sq_sum += v * v;
+                            double vd = v;
+                            trace_sq_sum += vd * vd;
                         }
                     }
                     double mean_val = trace_sum / n_spatial;
@@ -477,59 +478,29 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
                 // currently contains and, when the last one exits, rebuild the
                 // window sums from scratch to recover — matching the Python
                 // fallback's per-window recompute semantics.
-                size_t k0 = 0;
-                size_t k1 = std::min(nt - 1, half_t);
-                double run_num = 0.0;
-                double run_den = 0.0;
-                size_t nonfinite_in_window = 0;
-                for (size_t k = k0; k <= k1; ++k) {
-                    run_num += mean_sq[k];
-                    run_den += sum_sq[k];
-                    if (!std::isfinite(mean_sq[k]) || !std::isfinite(sum_sq[k])) ++nonfinite_in_window;
-                }
+                // Per-k independent window sums (parity with Python fallback's
+                // _clamped_vertical_window_sums): incremental sliding sums lose
+                // precision when a 1e38 sample dwarfs the 1.0 neighbours
+                // (double 53-bit mantissa ~15 digits) and the subsequent
+                // subtraction cancels to 0 instead of the true finite sum.
                 for (size_t k = 0; k < nt; ++k) {
-                    // Semblance denominator: normalize by the SPATIAL trace
-                    // count J, not the vertical window length L (#823). The
-                    // old ÷L made a fully continuous body read L/J (0.333 at
-                    // the default 3x3x3 window) — scaling with window geometry
-                    // instead of geology. S = Σ_k(Σ_j v)²/(J·Σ_kΣ_j v²) gives
-                    // identical traces → 1.0 for any window shape.
-                    double den = run_den / n_spatial + 1e-12;
-                    // NaN propagates to 0.0 through the std::min/std::max clamp
-                    // chain whenever the window overlaps a non-finite sample,
-                    // matching the Python fallback's per-window recompute
-                    // semantics.
-                    float coh_val = static_cast<float>(std::min(1.0, std::max(0.0, run_num / den)));
-                    dst[i * (nx * nt) + j * nt + k] = coh_val;
-
-                    // Advance window for k+1.
-                    if (k + 1 < nt) {
-                        size_t new_lo = (k + 1 >= half_t) ? k + 1 - half_t : 0;
-                        size_t new_hi = std::min(nt - 1, k + 1 + half_t);
-                        while (k1 < new_hi) {
-                            ++k1;
-                            run_num += mean_sq[k1];
-                            run_den += sum_sq[k1];
-                            if (!std::isfinite(mean_sq[k1]) || !std::isfinite(sum_sq[k1])) ++nonfinite_in_window;
-                        }
-                        while (k0 < new_lo) {
-                            if (!std::isfinite(mean_sq[k0]) || !std::isfinite(sum_sq[k0])) --nonfinite_in_window;
-                            run_num -= mean_sq[k0];
-                            run_den -= sum_sq[k0];
-                            ++k0;
-                        }
-                        if (nonfinite_in_window == 0 &&
-                            (!std::isfinite(run_num) || !std::isfinite(run_den))) {
-                            // The window is finite again but the accumulators
-                            // were poisoned; rebuild them from the window data.
-                            run_num = 0.0;
-                            run_den = 0.0;
-                            for (size_t kk = k0; kk <= k1; ++kk) {
-                                run_num += mean_sq[kk];
-                                run_den += sum_sq[kk];
-                            }
-                        }
+                    size_t lo = (k >= half_t) ? k - half_t : 0;
+                    size_t hi = std::min(nt - 1, k + half_t);
+                    double run_num = 0.0;
+                    double run_den = 0.0;
+                    for (size_t kk = lo; kk <= hi; ++kk) {
+                        run_num += mean_sq[kk];
+                        run_den += sum_sq[kk];
                     }
+                    double den = run_den / n_spatial + 1e-12;
+                    float coh_val = static_cast<float>(std::min(1.0, std::max(0.0, run_num / den)));
+                    // NaN propagates to 0.0 through the clamp, matching the
+                    // Python fallback's per-window recompute semantics.
+                    if (!std::isfinite(run_num) || !std::isfinite(run_den) || std::isnan(run_num / den)) {
+                        // Window overlapped a non-finite sample; Python maps NaN to 0.0.
+                        if (std::isnan(run_num / den)) coh_val = 0.0f;
+                    }
+                    dst[i * (nx * nt) + j * nt + k] = coh_val;
                 }
             }
         }
