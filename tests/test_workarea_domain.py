@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from PySide6.QtCore import Qt
+
 import pytest
 
 from paleo_workbench.catalog.domain_binding import (
@@ -700,3 +702,65 @@ class TestWellIdentityAdapter:
         first = page.well_identity_adapter()
         second = page.well_identity_adapter()
         assert first is second
+
+
+class TestGeologicalEntityBinding:
+    """③ 地质/辅助实体：interpretation resources → DomainEntity + links."""
+
+    def test_horizon_resource_creates_geological_entity(self, tmp_path):
+        from paleo_workbench.catalog.domain_binding import bind_staged, stage_resources
+
+        dat = tmp_path / "H1.dat"
+        dat.write_text("x", encoding="utf-8")
+        resource = ResourceItem(
+            id="res_h1", name="H1", path=str(dat), type="horizon", format="dat"
+        )
+        doc = make_project()
+        ensure_workarea(doc)
+        staged = stage_resources(doc, [resource], path_resolver=lambda p: Path(p))
+        report = bind_staged(doc, staged, asset_id_by_legacy={"res_h1": "asset_h"})
+        assert report.entities_created == 1
+        entity = doc.geological_entities[0]
+        assert (entity.kind, entity.entity_kind) == ("geological", "horizon")
+        link = doc.entity_asset_links[0]
+        assert (link.entity_type, link.role) == ("geological_entity", "horizon")
+
+    def test_rebind_is_idempotent(self, tmp_path):
+        from paleo_workbench.catalog.domain_binding import bind_staged, stage_resources
+
+        dat = tmp_path / "Tops.dat"
+        dat.write_text("x", encoding="utf-8")
+        resource = ResourceItem(
+            id="res_t", name="Tops", path=str(dat), type="well_stratification", format="dat"
+        )
+        doc = make_project()
+        ensure_workarea(doc)
+        for _ in range(2):
+            staged = stage_resources(doc, [resource], path_resolver=lambda p: Path(p))
+            bind_staged(doc, staged, asset_id_by_legacy={"res_t": "a"})
+        assert len(doc.geological_entities) == 1
+        assert len(doc.entity_asset_links) == 1
+
+    def test_tree_renders_geological_children(self, qtbot):
+        from paleo_workbench.project.domain import DomainEntity as DE
+
+        from paleo_workbench.ui.pages.navigation_tree import NavigationTree
+
+        tree = NavigationTree()
+        qtbot.addWidget(tree)
+        doc = make_project()
+        doc.seismic_surveys.clear()
+        doc.geological_entities.append(DE(name="H1", kind="geological", entity_kind="horizon"))
+        upsert_entity_asset_link(
+            doc, entity_type="geological_entity", entity_id=doc.geological_entities[0].id,
+            asset_id="ah", role="horizon",
+        )
+        tree.set_project(doc)
+        geo = next(
+            (tree.topLevelItem(i) for i in range(tree.topLevelItemCount())
+             if tree.topLevelItem(i).text(0).endswith("地质解释")),
+            None,
+        )
+        assert geo is not None and geo.childCount() == 1
+        query = geo.child(0).data(0, Qt.ItemDataRole.UserRole)
+        assert query.node_type == "entity" and query.node_value.startswith("ent_")

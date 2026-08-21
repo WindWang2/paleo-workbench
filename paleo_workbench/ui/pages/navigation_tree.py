@@ -119,6 +119,7 @@ class NavigationTree(QTreeWidget):
         self._overview_item: QTreeWidgetItem | None = None
         self._well_group_item: QTreeWidgetItem | None = None
         self._survey_group_item: QTreeWidgetItem | None = None
+        self._geo_group_item: QTreeWidgetItem | None = None
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
         self.currentItemChanged.connect(self._on_current_changed)
@@ -129,6 +130,7 @@ class NavigationTree(QTreeWidget):
         self._overview_item = None
         self._well_group_item = None
         self._survey_group_item = None
+        self._geo_group_item = None
 
         # 1. 全部数据
         all_item = QTreeWidgetItem(self, ["全部数据 0"])
@@ -162,10 +164,13 @@ class NavigationTree(QTreeWidget):
             else:
                 self._survey_group_item = group
 
-        # 2b. 地质解释 / 辅助资料 / 工作数据 / 成果 smart views.
-        geo_group = QTreeWidgetItem(self, ["地质解释"])
-        geo_group.setFlags(geo_group.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-        geo_group.setData(0, Qt.ItemDataRole.UserRole + 1, "地质解释")
+        # 2b. 地质解释 (dynamic children from geological_entities) /
+        # 辅助资料 / 工作数据 / 成果 smart views.
+        self._geo_group_item = QTreeWidgetItem(self, ["地质解释"])
+        self._geo_group_item.setFlags(
+            self._geo_group_item.flags() & ~Qt.ItemFlag.ItemIsSelectable
+        )
+        self._geo_group_item.setData(0, Qt.ItemDataRole.UserRole + 1, "地质解释")
 
         aux_item = QTreeWidgetItem(self, ["辅助资料 0"])
         aux_item.setData(
@@ -289,6 +294,33 @@ class NavigationTree(QTreeWidget):
             self._entity_counts[("seismic_survey", survey.id)] = survey_counts.get(
                 survey.id, 0
             )
+        for entity in getattr(project, "geological_entities", None) or []:
+            self._entity_counts[("geological_entity", entity.id)] = sum(
+                1 for link in links if link.entity_id == entity.id
+            )
+
+        # 地质解释 children (same membership-filter mechanics as wells).
+        if self._geo_group_item is not None:
+            group = self._geo_group_item
+            group.takeChildren()
+            entities = list(getattr(project, "geological_entities", None) or [])
+            for entity in sorted(entities, key=lambda item: (item.name, item.id))[
+                :MAX_ENTITY_CHILDREN
+            ]:
+                count = self._entity_counts.get(("geological_entity", entity.id), 0)
+                child = QTreeWidgetItem(group, [f"⛰ {entity.name} {count}"])
+                child.setData(
+                    0,
+                    Qt.ItemDataRole.UserRole,
+                    FilterQuery(node_type=ENTITY_NODE, node_value=entity.id),
+                )
+                child.setData(0, Qt.ItemDataRole.UserRole + 1, f"entity:{entity.id}")
+                child.setToolTip(0, entity.entity_kind or entity.name)
+            if not entities:
+                empty = QTreeWidgetItem(group, ["暂无地质解释，导入层位数据后自动识别"])
+                empty.setFlags(empty.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+                empty.setDisabled(True)
+            group.setExpanded(0 < len(entities) <= 200)
 
         for group, entities, entity_type in (
             (self._well_group_item, wells, "well"),

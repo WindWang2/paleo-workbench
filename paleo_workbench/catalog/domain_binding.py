@@ -34,6 +34,13 @@ WELL_HEAD_TYPE = "well_head"
 SEISMIC_TYPES = {"seismic", "segy"}
 WELL_LOG_TYPES = {"well_log"}
 
+# Interpretation-type resources become geological DomainEntities:
+# resource type → (DomainEntity.kind, DomainEntity.entity_kind, link role)
+GEOLOGICAL_TYPE_MAP = {
+    "horizon": ("geological", "horizon", "horizon"),
+    "well_stratification": ("geological", "tops", "tops"),
+}
+
 PathResolver = Callable[[str], Path]
 
 
@@ -73,6 +80,7 @@ class BindingReport:
     wells_updated: int = 0
     surveys_created: int = 0
     surveys_updated: int = 0
+    entities_created: int = 0
     links_created: int = 0
     links_updated: int = 0
     ambiguous_assets: int = 0
@@ -83,6 +91,7 @@ class BindingReport:
         self.wells_updated += other.wells_updated
         self.surveys_created += other.surveys_created
         self.surveys_updated += other.surveys_updated
+        self.entities_created += other.entities_created
         self.links_created += other.links_created
         self.links_updated += other.links_updated
         self.ambiguous_assets += other.ambiguous_assets
@@ -467,6 +476,9 @@ class StagedResource:
     resource_name: str
     wells: list[WellExtract] = field(default_factory=list)
     survey: SurveyExtract | None = None
+    # Geological-entity hint (kind, entity_kind) for interpretation-type
+    # resources (horizons/tops): no IO needed, just identity bookkeeping.
+    geological: tuple[str, str] | None = None
     issues: list[str] = field(default_factory=list)
 
 
@@ -486,7 +498,12 @@ def stage_resources(
     project_crs = str(getattr(project.coordinate, "project_crs", "") or "")
     for resource in resources:
         rtype = str(getattr(resource, "type", "") or "")
-        if rtype not in (*SEISMIC_TYPES, WELL_HEAD_TYPE, *WELL_LOG_TYPES):
+        if rtype not in (
+            *SEISMIC_TYPES,
+            WELL_HEAD_TYPE,
+            *WELL_LOG_TYPES,
+            *GEOLOGICAL_TYPE_MAP,
+        ):
             continue
         item = StagedResource(resource_id=str(resource.id), resource_name=str(resource.name))
         path = path_resolver(str(resource.path))
@@ -522,8 +539,54 @@ def stage_resources(
                 # behaviour rather than inventing a new identity scheme.
                 well_name = path.stem
             item.wells = [WellExtract(name=well_name)]
+        elif rtype in GEOLOGICAL_TYPE_MAP:
+            kind, entity_kind, _role = GEOLOGICAL_TYPE_MAP[rtype]
+            item.geological = (kind, entity_kind)
         staged.append(item)
     return staged
+
+
+def _bind_geological(
+    project: Any,
+    item: "StagedResource",
+    *,
+    asset_id: str | None,
+) -> BindingReport:
+    """Resolve/create the geological DomainEntity for an interpretation asset."""
+    from paleo_workbench.project.domain import DomainEntity
+
+    report = BindingReport()
+    if item.geological is None:
+        return report
+    kind, entity_kind = item.geological
+    normalized = normalize_well_name(item.resource_name)
+    entity = next(
+        (
+            e
+            for e in getattr(project, "geological_entities", None) or []
+            if normalize_well_name(e.name) == normalized and e.kind == kind
+        ),
+        None,
+    ) if normalized else None
+    if entity is None:
+        entity = DomainEntity(kind=kind, name=item.resource_name, entity_kind=entity_kind)
+        project.geological_entities.append(entity)
+        report.entities_created += 1
+        _stamp(entity)
+    if asset_id is not None:
+        link, created = upsert_entity_asset_link(
+            project,
+            entity_type="geological_entity",
+            entity_id=entity.id,
+            asset_id=asset_id,
+            role=item.geological[1],
+            is_primary=True,
+        )
+        if created:
+            report.links_created += 1
+        else:
+            report.links_updated += 1
+    return report
 
 
 def bind_staged(
@@ -544,6 +607,8 @@ def bind_staged(
             report.merge(bind_well_extracts(project, item.wells, asset_id=asset_id))
         elif item.survey is not None:
             report.merge(bind_survey_extract(project, item.survey, asset_id=asset_id))
+        elif item.geological is not None:
+            report.merge(_bind_geological(project, item, asset_id=asset_id))
     return report
 
 

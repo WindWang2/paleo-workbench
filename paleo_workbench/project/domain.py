@@ -505,6 +505,7 @@ def domain_signature(project: Any) -> tuple:
         tuple(
             (s.id, s.name, s.crs, bool(getattr(s, "extent", None))) for s in surveys
         ),
+        tuple(e.id for e in getattr(project, "geological_entities", None) or []),
         len(links),
         str(getattr(coordinate, "project_crs", "") or ""),
         bool(getattr(workarea, "boundary", None)),
