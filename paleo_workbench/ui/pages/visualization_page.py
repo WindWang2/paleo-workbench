@@ -450,14 +450,26 @@ class VisualizationPage(QWidget):
                     register=self._project is not None,
                 )
                 return
-        result = export_widget_snapshot(
-            widget,
-            Path(path),
-            label,
-            project=self._project_stub() if self._project is not None else None,
-            linked_id=(self._current_ref.id if self._current_ref else "viz_view"),
-            register=self._project is not None,
-        )
+        # Vector exports render at full export resolution synchronously on
+        # the GUI thread; show a busy cursor + status while it runs (#897 —
+        # PNG has the worker path, SVG/PDF previously froze with no feedback).
+        saved_cursor = QApplication.overrideCursor()
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        self.composite_panel.status_label.setText(f"正在导出 {label} …")
+        QApplication.processEvents()
+        try:
+            result = export_widget_snapshot(
+                widget,
+                Path(path),
+                label,
+                project=self._project_stub() if self._project is not None else None,
+                linked_id=(self._current_ref.id if self._current_ref else "viz_view"),
+                register=self._project is not None,
+            )
+        finally:
+            QApplication.restoreOverrideCursor()
+            if saved_cursor is not None:
+                QApplication.setOverrideCursor(saved_cursor)
         if result.success:
             self.composite_panel.status_label.setText(result.message)
         else:

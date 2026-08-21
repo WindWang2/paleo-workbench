@@ -1,6 +1,7 @@
 """Qt host canvas that composes native scalar rasters with contours and sample points."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Slot
@@ -11,6 +12,8 @@ from paleo_workbench.ui import tokens
 from paleo_workbench.ui.native_render_worker import NativeRasterRequestController
 
 __all__ = ["NativeMapCanvas"]
+
+_logger = logging.getLogger(__name__)
 
 
 class NativeMapCanvas(QWidget):
@@ -31,6 +34,7 @@ class NativeMapCanvas(QWidget):
         self._raster_controller.raster_ready.connect(self._on_raster_ready)
         self._raster_controller.raster_failed.connect(self._on_raster_failed)
         self._last_raster_error = ""
+        self._logged_raster_errors: set[tuple[str, str]] = set()
         if scene is not None:
             self.set_scene(scene)
 
@@ -169,8 +173,23 @@ class NativeMapCanvas(QWidget):
 
     @Slot(object, str)
     def _on_raster_failed(self, request, message: str) -> None:
+        stale = self._scene is not None and request.scene_epoch != self._scene_epoch
+        if stale:
+            return
         if self._scene is not None and request.scene_epoch == self._scene_epoch:
             self._last_raster_error = message
+        # The stored error previously had no consumer at all: a failed
+        # native rasterization silently rendered as "no data" (#897).
+        # Log once per layer+raster_key so repeated failures don't spam.
+        key = (str(getattr(request, "layer_id", "")), str(getattr(request, "raster_key", "")))
+        if key not in self._logged_raster_errors:
+            self._logged_raster_errors.add(key)
+            _logger.warning(
+                "原生因子图层 %s 栅格化失败 (raster_key=%s): %s",
+                key[0] or "<unknown>",
+                key[1] or "<unknown>",
+                message,
+            )
 
     def prepare_for_export(self) -> None:
         """Synchronously populate any missing images before an explicit PNG export.

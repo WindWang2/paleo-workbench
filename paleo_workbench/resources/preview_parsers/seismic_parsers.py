@@ -73,13 +73,20 @@ def segy_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewRe
         table_rows.append(("Crossline", str(crossline)))
 
     volume = None
+    volume_warning = ""
     try:
         # Deferred: pulls in segyio/engine stack; keep lazy.
         from paleo_workbench.viz.seismic_load import load_seismic_volume_from_path
         volume, load_warning = load_seismic_volume_from_path(str(path))
-    except Exception:
-        pass
+        if load_warning:
+            volume_warning = str(load_warning)
+    except Exception as exc:
+        # The 3-D entry silently vanished when the volume loader failed
+        # while the metadata summary stayed green (#897): surface the
+        # failure class instead.
+        volume_warning = f"三维体加载失败: {exc.__class__.__name__}"
 
+    warning_parts = [p for p in (volume_warning,) if p]
     return PreviewResult(
         mode="seismic",
         title=resource.name,
@@ -92,4 +99,5 @@ def segy_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewRe
         table_headers=("字段", "值"),
         table_rows=tuple(table_rows),
         seismic_volume=volume,
+        warning="; ".join(warning_parts),
     )

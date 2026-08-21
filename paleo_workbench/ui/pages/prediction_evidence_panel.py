@@ -38,6 +38,9 @@ class PredictionEvidencePanel(QFrame):
         self.source_value = self._add_value(layout, "数据来源", "—")
         self.horizon_value = self._add_value(layout, "目标层位", "—")
         self.facies_count_value = self._add_value(layout, "相带段数", "—")
+        # Async run outcome landing spot (#897): completions/failures arrive
+        # on queued signals and must not open modal dialogs.
+        self.status_value = self._add_value(layout, "状态", "—")
 
         evidence_label = QLabel("证据贡献")
         evidence_label.setObjectName("WorkFieldLabel")
@@ -103,6 +106,12 @@ class PredictionEvidencePanel(QFrame):
         self._inferring = bool(busy)
         self.run_btn.setEnabled(not self._inferring)
         self.demo_btn.setEnabled(not self._inferring)
+        if busy:
+            self.status_value.setText("推断中…")
+
+    def set_status(self, text: str) -> None:
+        """Show an async run outcome in-page (no modal dialogs, #897)."""
+        self.status_value.setText(text)
 
     def update_state(self, task, *, bound_las: bool = False) -> None:
         summary = field_value(task, "result_summary", {}) or {}

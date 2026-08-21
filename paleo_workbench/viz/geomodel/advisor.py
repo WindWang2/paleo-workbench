@@ -85,15 +85,21 @@ def check_coplanar_faults(faults: list[FaultRecord]) -> dict:
             n1 = np.array(f1.normal, dtype=np.float64)
             n2 = np.array(f2.normal, dtype=np.float64)
 
-            n1 /= np.linalg.norm(n1)
-            n2 /= np.linalg.norm(n2)
+            n1_len = np.linalg.norm(n1)
+            n2_len = np.linalg.norm(n2)
+
+            n1 /= n1_len
+            n2 /= n2_len
 
             dot = np.dot(n1, n2)
             is_parallel = abs(abs(dot) - 1.0) < 0.05
 
             if is_parallel:
-                d2_adj = -f2.d if dot < 0 else f2.d
-                dist_diff = abs(f1.d - d2_adj)
+                # Plane offset is d / |n| for non-unit input normals; raw d
+                # comparison mis-ranked far/near planes both ways (#897).
+                d1_adj = f1.d / max(n1_len, 1e-12)
+                d2_adj = -f2.d / max(n2_len, 1e-12) if dot < 0 else f2.d / max(n2_len, 1e-12)
+                dist_diff = abs(d1_adj - d2_adj)
                 if dist_diff < 15.0:
                     issues.append({
                         "type": "warning",
