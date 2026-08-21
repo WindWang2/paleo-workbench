@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from paleo_workbench.project.domain import CoordinateStatus
+from paleo_workbench.project.domain import CoordinateStatus, crs_equivalent
 from paleo_workbench.ui import tokens
 
 _WELL_ID_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -283,26 +283,15 @@ class ProjectWellMapPage(QWidget):
 
     def refresh_domain(self, project: Any) -> None:
         """Domain entities changed → rebuild cached arrays + series."""
-        signature = self._signature(project)
+        from paleo_workbench.project.domain import domain_signature
+
+        signature = domain_signature(project)
         if signature == self._signature_cache:
             return
         self._signature_cache = signature
         self.project = project
         self._rebuild_cache()
         self._render_all()
-
-    @staticmethod
-    def _signature(project: Any) -> tuple:
-        wells = getattr(project, "wells", None) or []
-        surveys = getattr(project, "seismic_surveys", None) or []
-        workarea = getattr(project, "workarea", None)
-        return (
-            len(wells),
-            tuple((w.id, w.name, w.coordinate_status, w.project_x, w.project_y) for w in wells),
-            tuple(s.id for s in surveys),
-            str(getattr(getattr(project, "coordinate", None), "project_crs", "")),
-            bool(getattr(workarea, "boundary", None)),
-        )
 
     def _rebuild_cache(self) -> None:
         wells = list(getattr(self.project, "wells", None) or []) if self.project else []
@@ -384,12 +373,20 @@ class ProjectWellMapPage(QWidget):
         points = []
         workarea = getattr(self.project, "workarea", None) if self.project else None
         boundary = list(getattr(workarea, "boundary", None) or []) if workarea else []
-        for point in boundary:
-            try:
-                if len(point) >= 2:
-                    points.append((float(point[0]), float(point[1])))
-            except (TypeError, ValueError):
-                continue
+        # Only draw when the boundary frame matches the project frame —
+        # never silently overlay incompatible coordinate systems (§20).
+        boundary_crs = str(getattr(workarea, "boundary_crs", "") or "") if workarea else ""
+        project_crs = str(
+            getattr(getattr(self.project, "coordinate", None), "project_crs", "") or ""
+        )
+        frame_ok = (not boundary_crs) or crs_equivalent(boundary_crs, project_crs)
+        if boundary and frame_ok:
+            for point in boundary:
+                try:
+                    if len(point) >= 2:
+                        points.append((float(point[0]), float(point[1])))
+                except (TypeError, ValueError):
+                    continue
         if len(points) > 1 and points[0] != points[-1]:
             points.append(points[0])
         self._series_boundary.x = np.asarray([p[0] for p in points], dtype=np.float64)
@@ -400,7 +397,15 @@ class ProjectWellMapPage(QWidget):
         xs: list[float] = []
         ys: list[float] = []
         surveys = getattr(self.project, "seismic_surveys", None) if self.project else None
+        project_crs = str(
+            getattr(getattr(self.project, "coordinate", None), "project_crs", "") or ""
+        )
         for survey in surveys or []:
+            survey_crs = str(getattr(survey, "crs", "") or "")
+            # Survey corners live in the SURVEY frame; skip frames that don't
+            # match the project instead of mis-aligning them silently.
+            if survey_crs and not crs_equivalent(survey_crs, project_crs):
+                continue
             corners = []
             for corner in getattr(survey, "extent", None) or []:
                 try:

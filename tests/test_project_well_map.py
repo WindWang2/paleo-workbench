@@ -396,3 +396,54 @@ class TestShellGlue:
             shell.well_map_page.plot.focus_point = lambda x, y, zoom_factor=4.0: focused.append(x)
         shell.data_page.well_focus_requested.emit(shell.project.wells[0].id)
         assert focused or not hasattr(original, "focus_point")
+
+
+# --------------------------------------------------------------------------- review fixes
+
+
+class TestReviewFixesMap:
+    def test_survey_extent_skipped_on_crs_mismatch(self, qtbot):
+        page, plot = make_page(qtbot)
+        doc = make_project()
+        doc.seismic_surveys[0].crs = "EPSG:32650"  # ≠ project EPSG:4326
+        page.set_project(doc)
+        assert plot.series["survey_extents"].visible is False
+
+    def test_boundary_skipped_when_frame_differs(self, qtbot):
+        page, plot = make_page(qtbot)
+        doc = make_project()
+        doc.workarea.boundary_crs = "EPSG:32650"
+        doc.workarea.boundary = [[0, 0], [10, 10]]
+        page.set_project(doc)
+        assert plot.series["boundary"].visible is False
+
+    def test_tree_caps_entity_children(self, qtbot):
+        tree = NavigationTree()
+        qtbot.addWidget(tree)
+        doc = ProjectDocument.new("big")
+        for i in range(600):
+            doc.wells.append(WellEntity(name=f"B{i:04d}"))
+        tree.set_project(doc)
+        well_group = next(
+            (tree.topLevelItem(i) for i in range(tree.topLevelItemCount())
+             if tree.topLevelItem(i).text(0).endswith("井")),
+            None,
+        )
+        assert well_group is not None
+        # 500 rendered + 1 overflow placeholder.
+        assert well_group.childCount() == 501
+        assert "井位地图" in well_group.child(500).text(0)
+
+    def test_map_page_degrades_without_engine(self, qtbot):
+        from paleo_workbench.ui.pages.project_well_map_page import ProjectWellMapPage
+
+        class _BrokenEngine:
+            def create_widget(self, kind, parent=None):
+                raise RuntimeError("no engine")
+
+        page = ProjectWellMapPage(engine=_BrokenEngine())
+        qtbot.addWidget(page)
+        page.set_project(make_project())
+        # List model still populated; plot replaced by fallback label.
+        assert page._list_model.rowCount() == 3
+        assert not hasattr(page.plot, "add_series")

@@ -200,22 +200,35 @@ class EntityAssetLink(BaseModel):
 
 
 class WellRegistry:
-    """Read-only indexed view over ``project.wells`` (O(1) lookups)."""
+    """Read-only indexed view over ``project.wells`` (O(1) lookups).
+
+    ``by_key`` deliberately returns None for AMBIGUOUS keys (two+ wells
+    sharing a normalized identity): callers must go through
+    :func:`resolve_well` to handle ambiguity explicitly — silent first-wins
+    matching is how duplicate wells get merged by accident.
+    """
 
     def __init__(self, wells: Iterable[WellEntity]):
         self._by_id: dict[str, WellEntity] = {}
         self._by_key: dict[str, WellEntity] = {}
+        self._ambiguous_keys: set[str] = set()
         for well in wells:
             self._by_id[well.id] = well
             for key in well.match_keys():
-                # First registration wins; duplicates resolvable via find_all.
-                self._by_key.setdefault(key, well)
+                existing = self._by_key.get(key)
+                if existing is None:
+                    self._by_key[key] = well
+                elif existing.id != well.id:
+                    self._ambiguous_keys.add(key)
 
     def by_id(self, well_id: str) -> WellEntity | None:
         return self._by_id.get(well_id)
 
     def by_key(self, key: str) -> WellEntity | None:
-        return self._by_key.get(normalize_well_name(key))
+        normalized = normalize_well_name(key)
+        if normalized in self._ambiguous_keys:
+            return None
+        return self._by_key.get(normalized)
 
     def find_all_by_name(self, name: str) -> list[WellEntity]:
         normalized = normalize_well_name(name)
@@ -440,6 +453,45 @@ def sync_workarea_with_coordinate(project: Any) -> bool:
         workarea.display_crs = display_crs
         changed = True
     return changed
+
+
+def crs_equivalent(left: str, right: str) -> bool:
+    """pyproj ``CRS.equals`` semantics with a case-insensitive fallback.
+
+    Shared by binding (transform decisions) and views (render gating) so a
+    single definition of "same frame" exists.
+    """
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    try:
+        from pyproj import CRS  # noqa: PLC0415
+
+        return bool(CRS.from_user_input(left).equals(CRS.from_user_input(right)))
+    except Exception:
+        return left.strip().casefold() == right.strip().casefold()
+
+
+def domain_signature(project: Any) -> tuple:
+    """Cheap change key covering every domain field the UI renders.
+
+    Used by DataPage (tree rebuild gate) and the well map page so both stay
+    consistent — review finding #5 (stale flags after coordinate changes).
+    """
+    wells = getattr(project, "wells", None) or []
+    surveys = getattr(project, "seismic_surveys", None) or []
+    links = getattr(project, "entity_asset_links", None) or []
+    workarea = getattr(project, "workarea", None)
+    coordinate = getattr(project, "coordinate", None)
+    return (
+        len(wells),
+        tuple((w.id, w.name, w.coordinate_status, w.project_x, w.project_y) for w in wells),
+        tuple(s.id for s in surveys),
+        len(links),
+        str(getattr(coordinate, "project_crs", "") or ""),
+        bool(getattr(workarea, "boundary", None)),
+    )
 
 
 # ---------------------------------------------------------------------------

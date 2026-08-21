@@ -44,6 +44,7 @@ from paleo_workbench.ui.pages.data_view_models import (
     path_is_dir_safe,
 )
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
+from paleo_workbench.project.domain import domain_signature
 from paleo_workbench.ui.pages.filter_index import (
     CATEGORIES,
     FilterQuery,
@@ -138,13 +139,14 @@ class _RescanWorker(QObject):
 
 
 class _DomainBindWorker(QObject):
-    """Bind freshly imported resources to WorkArea domain entities (§12).
+    """Stage freshly imported resources for domain binding (§12).
 
-    Pure-Python work (well_head/SEG-Y metadata parsing + entity resolution)
-    off the GUI thread; mutates the project document's domain sections only.
+    Worker performs ONLY extraction (well_head/SEG-Y/LAS parsing).  The live
+    project document is mutated on the GUI thread in
+    ``_handle_domain_staged`` — never here (review finding #12).
     """
 
-    finished = Signal(object)  # BindingReport
+    finished = Signal(object)  # list[StagedResource]
     failed = Signal(str)
 
     def __init__(self, project, resources: list, parent=None):
@@ -155,12 +157,9 @@ class _DomainBindWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
-            from paleo_workbench.catalog.domain_binding import bind_resources
-            from paleo_workbench.project.domain_migration import build_asset_id_mapping
-            from paleo_workbench.catalog.runtime import get_catalog_service
+            from paleo_workbench.catalog.domain_binding import stage_resources
             from paleo_workbench.project.paths import resolve_project_path
 
-            mapping = build_asset_id_mapping(get_catalog_service())
             project_path = getattr(self, "_project_path", None)
 
             def resolver(relative: str) -> Path:
@@ -172,16 +171,15 @@ class _DomainBindWorker(QObject):
                 except Exception:
                     return raw
 
-            report = bind_resources(
+            staged = stage_resources(
                 self._project,
                 self._resources,
-                asset_id_by_legacy=mapping,
                 path_resolver=resolver,
             )
         except Exception as exc:  # pragma: no cover - defensive UI boundary
             self.failed.emit(str(exc))
             return
-        self.finished.emit(report)
+        self.finished.emit(staged)
 
 
 class _DeliveryWorker(QObject):
@@ -486,12 +484,8 @@ class DataPage(QWidget):
         )
         self.navigation_tree.set_trash_count(len(self._trashed_companions()))
         # WorkArea entity-first section: rebuild only when the domain
-        # signature changed (id tuples) so plain refreshes stay cheap.
-        signature = (
-            tuple(well.id for well in getattr(self.project, "wells", ()) or ()),
-            tuple(s.id for s in getattr(self.project, "seismic_surveys", ()) or ()),
-            len(getattr(self.project, "entity_asset_links", ()) or ()),
-        )
+        # signature changed (shared helper — must match the map page's gate).
+        signature = domain_signature(self.project)
         if signature != getattr(self, "_domain_signature", None):
             self._domain_signature = signature
             self.navigation_tree.set_project(self.project)
@@ -746,10 +740,10 @@ class DataPage(QWidget):
         )
 
     @Slot(object)
-    def _handle_domain_bind_finished_signal(self, report: object) -> None:
+    def _handle_domain_bind_finished_signal(self, staged: object) -> None:
         if self._domain_bind_job.target is not self.project:
             return
-        self._handle_domain_bind_finished(report)
+        self._handle_domain_staged(staged)
 
     @Slot(str)
     def _handle_domain_bind_failed_signal(self, message: str) -> None:
@@ -757,7 +751,24 @@ class DataPage(QWidget):
             return
         self._set_action_status(f"工区实体识别失败: {message}")
 
-    def _handle_domain_bind_finished(self, report: object) -> None:
+    def _handle_domain_staged(self, staged: list) -> None:
+        """GUI-thread binding: resolve entities + links from staged payloads."""
+        if not staged:
+            return
+        try:
+            from paleo_workbench.catalog.domain_binding import bind_staged
+            from paleo_workbench.project.domain_migration import build_asset_id_mapping
+            from paleo_workbench.catalog.runtime import get_catalog_service
+
+            mapping = build_asset_id_mapping(get_catalog_service())
+            report = bind_staged(
+                self.project,
+                staged,
+                asset_id_by_legacy=mapping,
+            )
+        except Exception as exc:
+            self._set_action_status(f"工区实体绑定失败: {exc.__class__.__name__}")
+            return
         wells = getattr(report, "wells_created", 0)
         surveys = getattr(report, "surveys_created", 0)
         ambiguous = getattr(report, "ambiguous_assets", 0)

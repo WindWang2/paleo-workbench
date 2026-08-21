@@ -25,9 +25,14 @@ _PROJECT_FILTER = "Project (*.paleo.json)"
 
 
 class _DomainMigrationBridge(QObject):
-    """Marshals background domain-migration completion onto the GUI thread."""
+    """Marshals background domain-migration staging onto the GUI thread.
 
-    migration_finished = Signal(str)
+    The worker performs ONLY extraction (file parsing).  The live
+    ProjectDocument is mutated exclusively inside the GUI-thread slot —
+    review finding #12 (cross-thread document mutation).
+    """
+
+    migration_staged = Signal(str, object, object)  # project_path, mapping, staged
 
 
 class ProjectController:
@@ -43,8 +48,8 @@ class ProjectController:
         self._session_generation = 0
         self._maintenance_thread: threading.Thread | None = None
         self._migration_bridge = _DomainMigrationBridge()
-        self._migration_bridge.migration_finished.connect(
-            self._on_domain_migration_finished
+        self._migration_bridge.migration_staged.connect(
+            self._on_domain_migration_staged
         )
 
     @property
@@ -257,9 +262,11 @@ class ProjectController:
         The authoritative project and canonical catalog have already opened.
         Legacy projection and the rebuildable SQLite index are deliberately
         deferred one event turn; identity checks make a queued callback from a
-        replaced project a no-op.
+        replaced project a no-op.  The resource snapshot is taken HERE on the
+        GUI thread so the worker never iterates a list the GUI may mutate.
         """
         generation = self._session_generation
+        resources_snapshot = list(getattr(loaded, "resources", []) or [])
 
         def kickoff() -> None:
             if (
@@ -270,7 +277,7 @@ class ProjectController:
                 return
             thread = threading.Thread(
                 target=self._run_catalog_maintenance,
-                args=(generation, target, loaded),
+                args=(generation, target, loaded, resources_snapshot),
                 name="catalog-maintenance",
                 daemon=True,
             )
@@ -280,7 +287,11 @@ class ProjectController:
         QTimer.singleShot(0, kickoff)
 
     def _run_catalog_maintenance(
-        self, generation: int, target: Path, loaded: ProjectDocument
+        self,
+        generation: int,
+        target: Path,
+        loaded: ProjectDocument,
+        resources_snapshot: list,
     ) -> None:
         if (
             generation != self._session_generation
@@ -288,6 +299,7 @@ class ProjectController:
             or self.window.project_path != target
         ):
             return
+        service = None
         try:
             from paleo_workbench.catalog import get_catalog_service
 
@@ -296,52 +308,74 @@ class ProjectController:
             service = None
         if service is not None:
             try:
-                service.migrate_legacy_resources(loaded.resources)
+                service.migrate_legacy_resources(resources_snapshot)
                 service.sweep_temp_on_open()
                 service.ensure_index_ready()
             except Exception:
                 # Canonical project/catalog remain available even if an
                 # optional acceleration rebuild cannot complete.
                 pass
-        # WorkArea domain migration (schema v1 → v2): deterministic +
-        # idempotent, mutates only the in-memory document; the new schema
-        # persists on the next successful save.  Runs on this background
-        # thread; UI refresh is marshalled via the bridge signal.
+        # WorkArea domain staging (schema v1 → v2): heavy file parsing only —
+        # NO document mutation on this thread.  Binding runs in the GUI slot.
         try:
-            from paleo_workbench.project.domain_migration import (
-                build_asset_id_mapping,
-                migrate_project_to_workarea,
-            )
+            from paleo_workbench.catalog.domain_binding import stage_resources
+            from paleo_workbench.project.domain_migration import build_asset_id_mapping
+            from paleo_workbench.project.paths import resolve_project_path
 
             mapping = build_asset_id_mapping(service)
-            report = migrate_project_to_workarea(
+
+            def resolver(relative: str):
+                raw = Path(relative)
+                if raw.is_absolute():
+                    return raw
+                try:
+                    return Path(resolve_project_path(relative, target))
+                except Exception:
+                    return raw
+
+            staged = stage_resources(
                 loaded,
-                asset_id_by_legacy=mapping,
-                project_path=target.parent,
+                resources_snapshot,
+                path_resolver=resolver,
             )
-            if report.migrated:
-                self._migration_bridge.migration_finished.emit(str(target))
+            if staged or mapping:
+                self._migration_bridge.migration_staged.emit(
+                    str(target), mapping, staged
+                )
         except Exception:
             # A migration failure must never break the open project.
             return
 
-    def _on_domain_migration_finished(self, project_path: str) -> None:
-        """GUI-thread refresh after the background WorkArea migration."""
+    def _on_domain_migration_staged(self, project_path: str, mapping: dict, staged: object) -> None:
+        """GUI-thread binding pass after background extraction."""
         window = self.window
-        if (
-            window.project_path is None
-            or str(window.project_path) != project_path
-            or getattr(window.project, "schema_version", 1) < 2
-        ):
+        if window.project is None or str(window.project_path) != project_path:
             return
-        shell = getattr(window, "app_shell", None)
-        data_page = getattr(shell, "data_page", None)
-        refresh = getattr(data_page, "refresh_domain_views", None)
-        if callable(refresh):
-            try:
-                refresh()
-            except Exception:
-                pass
+        try:
+            from paleo_workbench.project.domain_migration import (
+                migrate_project_to_workarea,
+            )
+
+            report = migrate_project_to_workarea(
+                window.project,
+                asset_id_by_legacy=dict(mapping or {}),
+                staged=staged,
+            )
+        except Exception:
+            return
+        changed = bool(getattr(report, "migrated", False)) or any(
+            (getattr(report.binding, attr, 0) for attr in
+             ("wells_created", "surveys_created", "links_created", "links_updated"))
+        )
+        if changed:
+            shell = getattr(window, "app_shell", None)
+            data_page = getattr(shell, "data_page", None)
+            refresh = getattr(data_page, "refresh_domain_views", None)
+            if callable(refresh):
+                try:
+                    refresh()
+                except Exception:
+                    pass
 
     def save_project(self) -> Path | None:
         if not self.window._flush_mapping_draft():

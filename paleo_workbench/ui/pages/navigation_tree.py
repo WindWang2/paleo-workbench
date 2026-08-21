@@ -89,6 +89,11 @@ _WELL_ROLE_LEAVES = [
     ("其他", "other"),
 ]
 
+# Tree rendering cap (§24): the DATA MANAGER tree is a navigation surface,
+# not a registry browser — beyond this many wells users navigate via search
+# in the 井位地图 page.  Prevents 50k QTreeWidgetItem allocations.
+MAX_ENTITY_CHILDREN = 500
+
 
 class NavigationTree(QTreeWidget):
     category_changed = Signal(str)
@@ -256,11 +261,16 @@ class NavigationTree(QTreeWidget):
         survey_counts: dict[str, int] = {}
         unresolved_wells: set[str] = set()
         invalid_coord_wells: set[str] = set()
+        # Single O(L) pass over links; per-(entity, role) counts precomputed
+        # so role sub-leaves never rescan the link list (review finding #7).
+        well_role_counts: dict[tuple[str, str], int] = {}
         for link in links:
             if link.entity_type == "well":
                 well_counts[link.entity_id] = well_counts.get(link.entity_id, 0) + 1
                 if link.unresolved:
                     unresolved_wells.add(link.entity_id)
+                key = (link.entity_id, link.role)
+                well_role_counts[key] = well_role_counts.get(key, 0) + 1
             elif link.entity_type == "seismic_survey":
                 survey_counts[link.entity_id] = survey_counts.get(link.entity_id, 0) + 1
         for well in wells:
@@ -294,7 +304,9 @@ class NavigationTree(QTreeWidget):
                     selected_key = query.node_value
             group.takeChildren()
             icon = _ENTITY_GROUPS[entity_type][1]
-            for entity in sorted(entities, key=lambda item: (item.name, item.id)):
+            ordered = sorted(entities, key=lambda item: (item.name, item.id))
+            rendered = ordered[:MAX_ENTITY_CHILDREN]
+            for entity in rendered:
                 flags = ""
                 if entity.id in unresolved_wells:
                     flags = " ⚠"
@@ -313,13 +325,7 @@ class NavigationTree(QTreeWidget):
                 child.setToolTip(0, getattr(entity, "uwi", "") or entity.name)
                 if entity_type == "well":
                     for role_label, role in _WELL_ROLE_LEAVES:
-                        role_count = sum(
-                            1
-                            for link in links
-                            if link.entity_id == entity.id
-                            and link.entity_type == "well"
-                            and link.role == role
-                        )
+                        role_count = well_role_counts.get((entity.id, role), 0)
                         if role_count == 0:
                             continue
                         role_child = QTreeWidgetItem(child, [f"{role_label} {role_count}"])
@@ -337,12 +343,19 @@ class NavigationTree(QTreeWidget):
                         )
                 if selected_key == entity.id:
                     self.setCurrentItem(child)
+            if len(ordered) > MAX_ENTITY_CHILDREN:
+                overflow = QTreeWidgetItem(
+                    group,
+                    [f"…另有 {len(ordered) - MAX_ENTITY_CHILDREN} 口井，请在井位地图中查看"],
+                )
+                overflow.setFlags(overflow.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+                overflow.setDisabled(True)
             empty_label = "暂无井，导入井位文件后自动识别" if entity_type == "well" else "暂无地震工区"
             if not entities:
                 empty = QTreeWidgetItem(group, [empty_label])
                 empty.setFlags(empty.flags() & ~Qt.ItemFlag.ItemIsSelectable)
                 empty.setDisabled(True)
-            group.setExpanded(entity_type == "well" and bool(entities))
+            group.setExpanded(entity_type == "well" and 0 < len(rendered) <= 200)
 
     def _find_entity_item(self, entity_id: str) -> QTreeWidgetItem | None:
         stack = [self.invisibleRootItem()]

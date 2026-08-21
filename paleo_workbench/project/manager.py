@@ -387,6 +387,15 @@ class ProjectManager:
         clean live document this method avoids factor-artifact probing, path
         translation, JSON encoding, fsync and replacement entirely.
         """
+        # Keep the WorkArea CRS projection honest at the persistence boundary
+        # (ADR 0059: coordinate stays canonical; workarea mirrors it).  A sync
+        # here means the section diff below sees the updated workarea too.
+        try:
+            from paleo_workbench.project.domain import sync_workarea_with_coordinate
+
+            sync_workarea_with_coordinate(project)
+        except Exception:
+            pass
 
         runtime_sections = _runtime_sections(project)
         snapshot = _snapshot_for(project)

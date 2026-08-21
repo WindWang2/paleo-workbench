@@ -26,7 +26,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from paleo_workbench.catalog.domain_binding import BindingReport, bind_resources
+from paleo_workbench.catalog.domain_binding import (
+    BindingReport,
+    bind_resources,
+    bind_staged,
+)
 from paleo_workbench.project.domain import ensure_workarea, sync_workarea_with_coordinate
 
 SCHEMA_VERSION_LEGACY = 1
@@ -64,12 +68,18 @@ def migrate_project_to_workarea(
     asset_id_by_legacy: dict[str, str] | None = None,
     project_path: Path | None = None,
     engine: Any | None = None,
+    staged: Any | None = None,
 ) -> WorkAreaMigrationReport:
     """Upgrade a legacy ProjectDocument to the WorkArea schema in memory.
 
     ``asset_id_by_legacy`` maps ResourceItem.id → catalog DataAsset.id.  When
     the catalog is unavailable the mapping may be empty/partial: entities are
     still created, links wait for a later pass (idempotent).
+
+    ``staged`` carries pre-extracted resource metadata (from
+    :func:`paleo_workbench.catalog.domain_binding.stage_resources`, produced
+    on a worker thread).  When given, no file IO happens here — this function
+    is then pure document mutation and MUST run on the GUI thread.
     """
     report = WorkAreaMigrationReport()
     if not project_needs_domain_migration(project):
@@ -82,25 +92,39 @@ def migrate_project_to_workarea(
         mapping = dict(asset_id_by_legacy or {})
         if mapping:
             linked_assets = {link.asset_id for link in getattr(project, "entity_asset_links", [])}
-            pending = [
-                r
-                for r in sorted(
-                    getattr(project, "resources", []) or [],
-                    key=lambda item: str(getattr(item, "id", "")),
-                )
+            pending_ids = {
+                str(r.id)
+                for r in getattr(project, "resources", []) or []
                 if str(getattr(r, "id", "")) in mapping
                 and mapping[str(r.id)] not in linked_assets
-            ]
-            if pending:
-                report.resources_scanned = len(pending)
+            }
+            if pending_ids:
+                report.resources_scanned = len(pending_ids)
                 try:
-                    report.binding = bind_resources(
-                        project,
-                        pending,
-                        asset_id_by_legacy=mapping,
-                        path_resolver=_default_path_resolver(project_path),
-                        engine=engine,
-                    )
+                    if staged is not None:
+                        pending = [s for s in staged if s.resource_id in pending_ids]
+                        report.binding = bind_staged(
+                            project,
+                            pending,
+                            asset_id_by_legacy=mapping,
+                        )
+                    else:
+                        # Headless/sync path: extract inline (tests, scripts).
+                        pending_resources = [
+                            r
+                            for r in sorted(
+                                getattr(project, "resources", []) or [],
+                                key=lambda item: str(getattr(item, "id", "")),
+                            )
+                            if str(getattr(r, "id", "")) in pending_ids
+                        ]
+                        report.binding = bind_resources(
+                            project,
+                            pending_resources,
+                            asset_id_by_legacy=mapping,
+                            path_resolver=_default_path_resolver(project_path),
+                            engine=engine,
+                        )
                 except Exception as exc:
                     report.binding.issues.append(f"补挂载失败: {exc.__class__.__name__}: {exc}")
         sync_workarea_with_coordinate(project)
@@ -114,20 +138,23 @@ def migrate_project_to_workarea(
         key=lambda item: str(getattr(item, "id", "")),
     )
     report.resources_scanned = len(resources)
+    report.resources_without_asset = sum(1 for r in resources if str(r.id) not in mapping)
 
     try:
-        report.binding = bind_resources(
-            project,
-            resources,
-            asset_id_by_legacy=mapping,
-            path_resolver=resolver,
-            engine=engine,
-        )
+        if staged is not None:
+            report.binding = bind_staged(project, staged, asset_id_by_legacy=mapping)
+        else:
+            report.binding = bind_resources(
+                project,
+                resources,
+                asset_id_by_legacy=mapping,
+                path_resolver=resolver,
+                engine=engine,
+            )
     except Exception as exc:  # never let migration break project open
         report.binding.issues.append(f"工区迁移中断: {exc.__class__.__name__}: {exc}")
         return report
 
-    report.resources_without_asset = sum(1 for r in resources if str(r.id) not in mapping)
     project.schema_version = SCHEMA_VERSION_WORKAREA
     workarea = project.workarea
     if workarea is not None:

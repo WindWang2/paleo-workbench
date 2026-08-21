@@ -244,7 +244,9 @@ def project_coordinates(
         return None, None, CoordinateStatus.MISSING
     if not source_crs:
         return float(x), float(y), CoordinateStatus.UNTRANSFORMED
-    if not project_crs or _crs_equivalent(source_crs, project_crs):
+    from paleo_workbench.project.domain import crs_equivalent
+
+    if not project_crs or crs_equivalent(source_crs, project_crs):
         return float(x), float(y), CoordinateStatus.OK
     try:
         import numpy as np  # noqa: PLC0415
@@ -258,18 +260,6 @@ def project_coordinates(
     if px != px or py != py or abs(px) == float("inf") or abs(py) == float("inf"):  # NaN/Inf guard
         return None, None, CoordinateStatus.INVALID
     return px, py, CoordinateStatus.OK
-
-
-def _crs_equivalent(left: str, right: str) -> bool:
-    """pyproj ``CRS.equals`` semantics with a case-insensitive fallback."""
-    if left == right:
-        return True
-    try:
-        from pyproj import CRS  # noqa: PLC0415
-
-        return bool(CRS.from_user_input(left).equals(CRS.from_user_input(right)))
-    except Exception:
-        return left.strip().casefold() == right.strip().casefold()
 
 
 # ---------------------------------------------------------------------------
@@ -436,8 +426,108 @@ def bind_survey_extract(
 
 
 # ---------------------------------------------------------------------------
-# Resource-level orchestration (import pipeline + migration share this)
+# Resource-level orchestration
+#
+# Split into two stages so heavy IO never touches the GUI thread AND the
+# live ProjectDocument is only ever mutated on the GUI thread (P0 review
+# finding #12):
+#
+#   stage_resources(...)   — worker thread: file parsing ONLY, returns plain
+#                            dataclasses; never touches the document.
+#   bind_staged(...)       — GUI thread: pure resolution/linking against the
+#                            registries (dict lookups, no IO).
+#
+# ``bind_resources`` keeps the synchronous convenience composition for tests
+# and headless callers.
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class StagedResource:
+    """Extraction result for one resource (plain data, document-free)."""
+
+    resource_id: str
+    resource_name: str
+    wells: list[WellExtract] = field(default_factory=list)
+    survey: SurveyExtract | None = None
+    issues: list[str] = field(default_factory=list)
+
+
+def stage_resources(
+    project: Any,
+    resources: Iterable[Any],
+    *,
+    path_resolver: PathResolver,
+    engine: Any | None = None,
+) -> list[StagedResource]:
+    """Parse geo-typed resources into plain payloads (worker-safe, no mutation).
+
+    Reads only immutable attributes of the resources; safe to run beside the
+    GUI thread as long as the caller passed a stable snapshot list.
+    """
+    staged: list[StagedResource] = []
+    project_crs = str(getattr(project.coordinate, "project_crs", "") or "")
+    for resource in resources:
+        rtype = str(getattr(resource, "type", "") or "")
+        if rtype not in (*SEISMIC_TYPES, WELL_HEAD_TYPE, *WELL_LOG_TYPES):
+            continue
+        item = StagedResource(resource_id=str(resource.id), resource_name=str(resource.name))
+        path = path_resolver(str(resource.path))
+        if not path.is_file():
+            item.issues.append(f"源文件不存在，跳过元数据解析: {item.resource_name}")
+            staged.append(item)
+            continue
+        if rtype == WELL_HEAD_TYPE:
+            extracts, warnings = extract_wells_from_dat(
+                resource,
+                path=path,
+                comparison_crs=project_crs,
+                engine=engine,
+            )
+            item.wells = extracts
+            item.issues.extend(warnings)
+        elif rtype in SEISMIC_TYPES:
+            extract, warnings = extract_survey_from_segy(path, crs=resource.crs or project_crs)
+            item.survey = extract
+            item.issues.extend(warnings)
+        elif rtype in WELL_LOG_TYPES:
+            well_name = ""
+            try:
+                from geoviz import inspect_las_file  # noqa: PLC0415
+
+                header = inspect_las_file(str(path))
+                well_name = str(getattr(header, "well_name", "") or "").strip()
+            except Exception:
+                well_name = ""
+            if not well_name:
+                # Low-confidence auxiliary signal only (§22): LAS engines
+                # themselves fall back to the stem, so this mirrors existing
+                # behaviour rather than inventing a new identity scheme.
+                well_name = path.stem
+            item.wells = [WellExtract(name=well_name)]
+        staged.append(item)
+    return staged
+
+
+def bind_staged(
+    project: Any,
+    staged: Iterable[StagedResource],
+    *,
+    asset_id_by_legacy: dict[str, str],
+) -> BindingReport:
+    """Apply staged extractions to the registries (pure, GUI-thread safe)."""
+    report = BindingReport()
+    ensure_workarea(project)
+    project_crs = str(getattr(project.coordinate, "project_crs", "") or "")
+    del project_crs  # projection happens inside _refresh_well_geometry
+    for item in staged:
+        asset_id: str | None = asset_id_by_legacy.get(item.resource_id)
+        report.issues.extend(item.issues)
+        if item.wells:
+            report.merge(bind_well_extracts(project, item.wells, asset_id=asset_id))
+        elif item.survey is not None:
+            report.merge(bind_survey_extract(project, item.survey, asset_id=asset_id))
+    return report
 
 
 def bind_resources(
@@ -448,60 +538,7 @@ def bind_resources(
     path_resolver: PathResolver,
     engine: Any | None = None,
 ) -> BindingReport:
-    """Bind imported/legacy resources to domain entities.
-
-    ``asset_id_by_legacy`` maps ``ResourceItem.id`` (== catalog
-    ``legacy_resource_id``) to the owning catalog DataAsset id.  Resources
-    without a catalog asset yet still produce entities; only the link waits
-    for a later idempotent pass once registration completes.
-    """
-    report = BindingReport()
+    """Synchronous convenience composition: stage + bind (tests/headless)."""
     ensure_workarea(project)
-    project_crs = str(getattr(project.coordinate, "project_crs", "") or "")
-    for resource in resources:
-        asset_id: str | None = asset_id_by_legacy.get(resource.id)
-        rtype = str(getattr(resource, "type", "") or "")
-        path = path_resolver(str(resource.path))
-        if rtype in (*SEISMIC_TYPES, WELL_HEAD_TYPE, *WELL_LOG_TYPES) and not path.is_file():
-            report.issues.append(f"源文件不存在，跳过元数据解析: {resource.name}")
-            continue
-        if rtype == WELL_HEAD_TYPE and path.is_file():
-            extracts, warnings = extract_wells_from_dat(
-                resource,
-                path=path,
-                comparison_crs=project_crs,
-                engine=engine,
-            )
-            report.issues.extend(warnings)
-            if extracts:
-                report.merge(bind_well_extracts(project, extracts, asset_id=asset_id))
-        elif rtype in SEISMIC_TYPES and path.is_file():
-            extract, warnings = extract_survey_from_segy(path, crs=resource.crs or project_crs)
-            report.issues.extend(warnings)
-            if extract is not None:
-                report.merge(bind_survey_extract(project, extract, asset_id=asset_id))
-        elif rtype in WELL_LOG_TYPES and path.is_file():
-            report.merge(_bind_well_log(project, resource, path=path, asset_id=asset_id))
-    return report
-
-
-def _bind_well_log(
-    project: Any,
-    resource: Any,
-    *,
-    path: Path,
-    asset_id: str,
-) -> BindingReport:
-    """Match a LAS/XML log against wells by header well_name (create when new)."""
-    well_name = ""
-    try:
-        from geoviz import inspect_las_file  # noqa: PLC0415
-
-        header = inspect_las_file(str(path))
-        well_name = str(getattr(header, "well_name", "") or "").strip()
-    except Exception:
-        well_name = ""
-    if not well_name:
-        well_name = path.stem
-    extracts = [WellExtract(name=well_name)]
-    return bind_well_extracts(project, extracts, asset_id=asset_id)
+    staged = stage_resources(project, resources, path_resolver=path_resolver, engine=engine)
+    return bind_staged(project, staged, asset_id_by_legacy=asset_id_by_legacy)

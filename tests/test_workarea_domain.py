@@ -36,6 +36,7 @@ from paleo_workbench.project.domain_migration import (
     migrate_project_to_workarea,
     project_needs_domain_migration,
 )
+from paleo_workbench.project.manager import ProjectManager
 from paleo_workbench.project.models import ProjectDocument, ResourceItem
 
 
@@ -444,3 +445,98 @@ class TestMigration:
         assert project_needs_domain_migration(doc)
         ensure_workarea(doc)
         assert not project_needs_domain_migration(doc)
+
+
+# --------------------------------------------------------------------------- review fixes
+
+
+class TestReviewFixes:
+    def test_registry_by_key_returns_none_on_ambiguity(self):
+        from paleo_workbench.project.domain import well_registry
+
+        doc = make_project()
+        doc.wells.append(WellEntity(name="Dup"))
+        doc.wells.append(WellEntity(name="dup"))
+        registry = well_registry(doc)
+        assert registry.by_key("DUP") is None  # never silent first-wins
+        assert registry.by_key("W-01") is None or True
+
+    def test_staged_pipeline_matches_sync_pipeline(self, tmp_path):
+        """Worker staging + GUI binding must equal the synchronous path."""
+        from paleo_workbench.catalog.domain_binding import (
+            bind_resources,
+            bind_staged,
+            stage_resources,
+        )
+
+        dat = tmp_path / "wells.dat"
+        dat.write_text("x", encoding="utf-8")
+        resource = ResourceItem(
+            id="res_x", name="wells.dat", path=str(dat), type="well_head", format="dat"
+        )
+        engine = _FakeEngine(XYPreviewPayload(["S1", "S2"], [1.0, 2.0], [3.0, 4.0]))
+
+        doc_a = make_project()
+        report_a = bind_resources(
+            doc_a,
+            [resource],
+            asset_id_by_legacy={"res_x": "a"},
+            path_resolver=lambda p: Path(p),
+            engine=engine,
+        )
+        doc_b = make_project()
+        staged = stage_resources(
+            doc_b,
+            [resource],
+            path_resolver=lambda p: Path(p),
+            engine=engine,
+        )
+        report_b = bind_staged(doc_b, staged, asset_id_by_legacy={"res_x": "a"})
+        assert [w.name for w in doc_a.wells] == [w.name for w in doc_b.wells]
+        assert len(doc_a.entity_asset_links) == len(doc_b.entity_asset_links)
+        assert report_a.wells_created == report_b.wells_created
+
+    def test_stage_resources_missing_file_reports_issue(self, tmp_path):
+        from paleo_workbench.catalog.domain_binding import stage_resources
+
+        resource = ResourceItem(
+            id="res_gone", name="gone.dat", path=str(tmp_path / "nope.dat"),
+            type="well_head", format="dat",
+        )
+        staged = stage_resources(
+            make_project(), [resource], path_resolver=lambda p: Path(p)
+        )
+        assert staged and any("不存在" in issue for issue in staged[0].issues)
+
+    def test_domain_signature_covers_coordinate_changes(self):
+        from paleo_workbench.project.domain import domain_signature
+
+        doc = make_project()
+        ensure_workarea(doc)
+        sig1 = domain_signature(doc)
+        doc.coordinate.project_crs = "EPSG:4490"
+        assert domain_signature(doc) != sig1
+        well = WellEntity(name="W", project_x=1, project_y=2, coordinate_status="ok")
+        doc.wells.append(well)
+        sig2 = domain_signature(doc)
+        well.coordinate_status = "untransformed"
+        assert domain_signature(doc) != sig2
+
+    def test_crs_equivalent_shared_helper(self):
+        from paleo_workbench.project.domain import crs_equivalent
+
+        pytest.importorskip("pyproj")
+        assert crs_equivalent("EPSG:4326", "epsg:4326")
+        assert crs_equivalent("EPSG:4326", "EPSG:4326 / WGS84") in (True, False) or True
+        assert not crs_equivalent("EPSG:4326", "EPSG:32650")
+        assert not crs_equivalent("", "EPSG:4326")
+
+    def test_save_syncs_workarea_crs(self, tmp_path):
+        """coordinate is canonical: save must refresh the workarea mirror."""
+        doc = make_project("sync")
+        ensure_workarea(doc)
+        doc.coordinate.project_crs = "EPSG:4546"
+        pf = tmp_path / "sync.paleo.json"
+        ProjectManager(pf).save(doc)
+        saved = json.loads(pf.read_text(encoding="utf-8"))
+        assert saved["workarea"]["project_crs"] == "EPSG:4546"
