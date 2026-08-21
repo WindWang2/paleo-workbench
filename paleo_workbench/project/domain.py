@@ -102,6 +102,26 @@ class CoordinateStatus:
     MISSING = "missing"
 
 
+# Single source of truth for the user-facing marker of each status — used by
+# the navigation tree, the well map list and the overview panel so a wording
+# change lands in exactly one place (standards review: Repeated Switches).
+COORDINATE_STATUS_FLAGS = {
+    CoordinateStatus.UNTRANSFORMED: " ⚠坐标未转换",
+    CoordinateStatus.INVALID: " ⚠坐标无效",
+    CoordinateStatus.MISSING: " ⚠无坐标",
+}
+
+
+def coordinate_status_flag(status: str) -> str:
+    """Display suffix for a well's coordinate status ('' when OK)."""
+    return COORDINATE_STATUS_FLAGS.get(status, "")
+
+
+def coordinate_status_is_flagged(status: str) -> bool:
+    """True when the status needs user attention (anything but OK)."""
+    return status != CoordinateStatus.OK
+
+
 class WellEntity(BaseModel):
     """Well master record — stable canonical identity for one physical well."""
 

@@ -35,7 +35,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from paleo_workbench.project.domain import CoordinateStatus, crs_equivalent
+from paleo_workbench.project.domain import (
+    CoordinateStatus,
+    coordinate_status_flag,
+    crs_equivalent,
+)
 from paleo_workbench.ui import tokens
 
 _WELL_ID_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -347,20 +351,16 @@ class ProjectWellMapPage(QWidget):
         for reg_row, well in enumerate(wells):
             ids.append(well.id)
             names.append(well.name or "(未命名井)")
-            status = well.coordinate_status
-            if status == CoordinateStatus.UNTRANSFORMED:
-                flags.append(" ⚠坐标未转换")
-            elif status == CoordinateStatus.INVALID:
-                flags.append(" ⚠坐标无效")
-            elif status == CoordinateStatus.MISSING:
-                flags.append(" ⚠无坐标")
-            else:
-                flags.append("")
+            flags.append(coordinate_status_flag(well.coordinate_status))
             px, py = well.project_x, well.project_y
             x, y = (px, py) if px is not None and py is not None else (well.surface_x, well.surface_y)
             if x is None or y is None or x != x or y != y:
                 continue
-            is_ok = status == CoordinateStatus.OK and px is not None and py is not None
+            is_ok = (
+                well.coordinate_status == CoordinateStatus.OK
+                and px is not None
+                and py is not None
+            )
             if is_ok:
                 ok_x.append(float(x))
                 ok_y.append(float(y))

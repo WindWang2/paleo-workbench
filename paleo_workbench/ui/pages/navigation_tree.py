@@ -279,12 +279,9 @@ class NavigationTree(QTreeWidget):
             elif link.entity_type == "seismic_survey":
                 survey_counts[link.entity_id] = survey_counts.get(link.entity_id, 0) + 1
         for well in wells:
-            from paleo_workbench.project.domain import CoordinateStatus
+            from paleo_workbench.project.domain import coordinate_status_is_flagged
 
-            if well.coordinate_status in (
-                CoordinateStatus.UNTRANSFORMED,
-                CoordinateStatus.INVALID,
-            ):
+            if coordinate_status_is_flagged(well.coordinate_status):
                 invalid_coord_wells.add(well.id)
 
         self._entity_counts = {}

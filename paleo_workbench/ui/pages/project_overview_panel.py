@@ -100,13 +100,10 @@ class ProjectOverviewPanel(QWidget):
         surveys = list(getattr(project, "seismic_surveys", None) or [])
         links = list(getattr(project, "entity_asset_links", None) or [])
         unresolved = sum(1 for link in links if link.unresolved)
-        from paleo_workbench.project.domain import CoordinateStatus
+        from paleo_workbench.project.domain import coordinate_status_is_flagged
 
         bad_coords = sum(
-            1
-            for well in wells
-            if well.coordinate_status
-            in (CoordinateStatus.UNTRANSFORMED, CoordinateStatus.INVALID)
+            1 for well in wells if coordinate_status_is_flagged(well.coordinate_status)
         )
 
         stages = dict(getattr(counts, "stages", {}) or {})
