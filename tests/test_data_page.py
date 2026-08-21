@@ -78,7 +78,9 @@ def test_data_page_uses_three_pane_splitter(qtbot):
     assert isinstance(page.main_splitter, QSplitter)
     assert page.main_splitter.count() == 3
     assert page.main_splitter.widget(0) is page.navigation_tree
-    assert page.main_splitter.widget(1) is page.asset_table
+    # Center pane hosts the table/overview stack (IA 3.0 工区概览).
+    center = page.main_splitter.widget(1)
+    assert page.workspace._center_stack.parentWidget() is center
     assert page.main_splitter.widget(2) is page.right_splitter
     assert page.right_splitter.widget(0) is page.reader_panel
     assert page.right_splitter.widget(1) is page.inspector_panel

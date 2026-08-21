@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 from pydantic import ValidationError
 
@@ -24,6 +24,12 @@ _PROJECT_SUFFIX = ".paleo.json"
 _PROJECT_FILTER = "Project (*.paleo.json)"
 
 
+class _DomainMigrationBridge(QObject):
+    """Marshals background domain-migration completion onto the GUI thread."""
+
+    migration_finished = Signal(str)
+
+
 class ProjectController:
     """Manages project lifecycle operations and file I/O for PaleoWorkbenchWindow."""
 
@@ -36,6 +42,10 @@ class ProjectController:
         # sole job is making project replacement an explicit lifecycle edge.
         self._session_generation = 0
         self._maintenance_thread: threading.Thread | None = None
+        self._migration_bridge = _DomainMigrationBridge()
+        self._migration_bridge.migration_finished.connect(
+            self._on_domain_migration_finished
+        )
 
     @property
     def session_generation(self) -> int:
@@ -282,15 +292,56 @@ class ProjectController:
             from paleo_workbench.catalog import get_catalog_service
 
             service = get_catalog_service()
-            if service is None:
-                return
-            service.migrate_legacy_resources(loaded.resources)
-            service.sweep_temp_on_open()
-            service.ensure_index_ready()
         except Exception:
-            # Canonical project/catalog remain available even if an
-            # optional acceleration rebuild cannot complete.
+            service = None
+        if service is not None:
+            try:
+                service.migrate_legacy_resources(loaded.resources)
+                service.sweep_temp_on_open()
+                service.ensure_index_ready()
+            except Exception:
+                # Canonical project/catalog remain available even if an
+                # optional acceleration rebuild cannot complete.
+                pass
+        # WorkArea domain migration (schema v1 → v2): deterministic +
+        # idempotent, mutates only the in-memory document; the new schema
+        # persists on the next successful save.  Runs on this background
+        # thread; UI refresh is marshalled via the bridge signal.
+        try:
+            from paleo_workbench.project.domain_migration import (
+                build_asset_id_mapping,
+                migrate_project_to_workarea,
+            )
+
+            mapping = build_asset_id_mapping(service)
+            report = migrate_project_to_workarea(
+                loaded,
+                asset_id_by_legacy=mapping,
+                project_path=target.parent,
+            )
+            if report.migrated:
+                self._migration_bridge.migration_finished.emit(str(target))
+        except Exception:
+            # A migration failure must never break the open project.
             return
+
+    def _on_domain_migration_finished(self, project_path: str) -> None:
+        """GUI-thread refresh after the background WorkArea migration."""
+        window = self.window
+        if (
+            window.project_path is None
+            or str(window.project_path) != project_path
+            or getattr(window.project, "schema_version", 1) < 2
+        ):
+            return
+        shell = getattr(window, "app_shell", None)
+        data_page = getattr(shell, "data_page", None)
+        refresh = getattr(data_page, "refresh_domain_views", None)
+        if callable(refresh):
+            try:
+                refresh()
+            except Exception:
+                pass
 
     def save_project(self) -> Path | None:
         if not self.window._flush_mapping_draft():
