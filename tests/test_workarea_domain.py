@@ -623,3 +623,80 @@ class TestFileSideUWI:
         assert len(doc.wells) == 1
         # Geometry refreshed on the matched master record.
         assert doc.wells[0].surface_x == 9.0
+
+
+class TestWellIdentityAdapter:
+    """Canonical Well.id surface for legacy modules (ADR 0059 §7)."""
+
+    def _adapter(self, doc, service=None):
+        from paleo_workbench.project.well_identity_adapter import WellIdentityAdapter
+
+        return WellIdentityAdapter(doc, service)
+
+    def test_resolve_by_name_uwi_and_id(self):
+        doc = make_project()
+        well = WellEntity(name="W-01", uwi="U-9")
+        doc.wells.append(well)
+        adapter = self._adapter(doc)
+        assert adapter.resolve(name="w 01") is well
+        assert adapter.resolve(uwi="u-9") is well
+        assert adapter.resolve(well_id=well.id) is well
+        assert adapter.resolve(name="nope") is None
+        assert adapter.display_name(well.id) == "W-01"
+
+    def test_resource_bridge_through_links_and_legacy_ids(self):
+        doc = make_project()
+        well = WellEntity(name="W1")
+        doc.wells.append(well)
+        upsert_entity_asset_link(
+            doc, entity_type="well", entity_id=well.id, asset_id="asset_1",
+            role="well_log", is_primary=True,
+        )
+
+        class Asset:
+            id = "asset_1"
+            legacy_resource_id = "res_1"
+
+        class Service:
+            def list_assets(self, include_trashed=False):  # noqa: ARG002
+                return [Asset()]
+
+        adapter = self._adapter(doc, Service())
+        # Direct asset-id hit:
+        assert adapter.well_ids_for_resource("asset_1") == [well.id]
+        # Legacy resource-id bridged through the catalog map:
+        assert adapter.well_for_resource("res_1") is well
+
+    def test_ambiguous_resource_returns_none_not_silent_pick(self):
+        doc = make_project()
+        w1 = WellEntity(name="A")
+        w2 = WellEntity(name="B")
+        doc.wells.extend([w1, w2])
+        for target in (w1, w2):
+            upsert_entity_asset_link(
+                doc, entity_type="well", entity_id=target.id, asset_id="shared_asset",
+                role="other",
+            )
+        adapter = self._adapter(doc)
+        assert adapter.well_for_resource("shared_asset") is None
+
+    def test_invalidate_refreshes_index(self):
+        doc = make_project()
+        well = WellEntity(name="W1")
+        doc.wells.append(well)
+        adapter = self._adapter(doc)
+        assert adapter.well_ids_for_resource("late_asset") == []
+        upsert_entity_asset_link(
+            doc, entity_type="well", entity_id=well.id, asset_id="late_asset"
+        )
+        adapter.invalidate()
+        assert adapter.well_ids_for_resource("late_asset") == [well.id]
+
+    def test_data_page_exposes_cached_adapter(self, qtbot):
+        from paleo_workbench.ui.pages.data_page import DataPage
+
+        page = DataPage(project=make_project())
+        qtbot.addWidget(page)
+        first = page.well_identity_adapter()
+        second = page.well_identity_adapter()
+        assert first is second

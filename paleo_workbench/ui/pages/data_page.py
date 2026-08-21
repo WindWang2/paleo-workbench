@@ -782,9 +782,25 @@ class DataPage(QWidget):
             self._set_action_status(issues[0])
         self.refresh_domain_views()
 
+    def well_identity_adapter(self):
+        """Canonical Well.id lookup surface for legacy modules (ADR 0059 §7)."""
+        from paleo_workbench.project.well_identity_adapter import WellIdentityAdapter
+
+        adapter = getattr(self, "_well_identity_adapter", None)
+        if adapter is None or adapter._project is not self.project:
+            adapter = WellIdentityAdapter(
+                self.project,
+                self._catalog_service(),
+            )
+            self._well_identity_adapter = adapter
+        return adapter
+
     def refresh_domain_views(self) -> None:
         """Re-read domain sections into tree/overview views (cheap, cached)."""
         self._refresh()
+        adapter = getattr(self, "_well_identity_adapter", None)
+        if adapter is not None:
+            adapter.invalidate()
         overview = getattr(self.workspace, "overview_panel", None)
         refresh_overview = getattr(overview, "refresh_from_project", None)
         if callable(refresh_overview):
