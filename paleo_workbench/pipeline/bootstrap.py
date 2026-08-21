@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -9,6 +10,8 @@ from paleo_workbench.project.manager import ProjectManager
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.resources.scanner import scan_resources
 from paleo_workbench.workflow.service import create_compilation_run
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_SKIP_CHECKSUM = 50 * 1024 * 1024
 
@@ -116,7 +119,11 @@ def bootstrap_sample_project(
                 try:
                     register_resource_input(resource)
                 except Exception:
-                    pass
+                    logger.warning(
+                        "catalog resource registration failed for %s",
+                        getattr(resource, "path", resource),
+                        exc_info=True,
+                    )
 
         service = get_catalog_service()
         if service is not None:
@@ -125,7 +132,7 @@ def bootstrap_sample_project(
         else:
             _register_all()
     except Exception:
-        pass
+        logger.warning("catalog bootstrap batch registration failed", exc_info=True)
 
     horizons = sorted(Path(r.name).stem for r in resources if r.type == "horizon")
     wells = sorted(Path(r.name).stem for r in resources if r.type == "well_log")
