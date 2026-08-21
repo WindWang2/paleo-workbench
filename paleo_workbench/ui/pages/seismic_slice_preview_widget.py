@@ -104,6 +104,12 @@ class SeismicSlicePreviewWidget(QWidget):
         self._stretch_range = None  # recomputed for the new volume on next render
 
         if volume is None:
+            # Drop the previous asset's rendered slice: a later resizeEvent
+            # would otherwise re-install the stale pixmap on top of the error
+            # text (#894-4).
+            self._last_pixmap = None
+            self._last_norm = None
+            self.image_label.setPixmap(QPixmap())
             self.image_label.setText(message or "无地震数据或无法解析")
             self.slider.setMaximum(0)
             self.slider.setEnabled(False)
@@ -184,6 +190,10 @@ class SeismicSlicePreviewWidget(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        # Re-scaling only makes sense while a volume is actually loaded; with
+        # the volume cleared the message text must survive resizes (#894-4).
+        if self._volume is None:
+            return
         last = getattr(self, "_last_pixmap", None)
         if last is not None and not last.isNull():
             self.image_label.setPixmap(last.scaled(

@@ -223,15 +223,25 @@ class EditCommandStack:
         self.max_depth = int(max_depth)
         self._undo: list[EditCommand] = []
         self._redo: list[EditCommand] = []
+        # True once the depth cap has dropped a command: undoing everything
+        # can then no longer return to the baseline, so callers deriving a
+        # dirty flag from ``can_undo()`` must stay dirty (#894-3).
+        self._overflowed = False
         self._on_push = on_push
         self._on_undo = on_undo
         self._on_redo = on_redo
+
+    @property
+    def overflowed(self) -> bool:
+        """Whether the depth cap has dropped commands since the last clear."""
+        return self._overflowed
 
     def push(self, command: EditCommand) -> None:
         command.do()
         self._undo.append(command)
         if len(self._undo) > self.max_depth:
             self._undo.pop(0)
+            self._overflowed = True
         self._redo.clear()
         if self._on_push is not None:
             self._on_push(command)
@@ -265,3 +275,4 @@ class EditCommandStack:
     def clear(self) -> None:
         self._undo.clear()
         self._redo.clear()
+        self._overflowed = False

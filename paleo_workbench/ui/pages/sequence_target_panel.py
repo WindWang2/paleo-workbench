@@ -152,4 +152,9 @@ class SequenceTargetPanel(QFrame):
             self.scheme_combo.addItem(scheme)
         self.scheme_combo.setCurrentText(scheme)
         self.scope_value.setText(f"{len(wells)} 口井 / {len(seismic_ranges)} 条测线")
+        # The committed-target cache tracks the project's target, not the last
+        # thing this widget emitted.  Without this resync a programmatic
+        # refresh to a different target left the cache stale, so re-committing
+        # the previously emitted target was deduped away and dropped (#894-5).
+        self._last_committed_target = target or None
         self._suppress = False

@@ -129,7 +129,14 @@ def test_asset_table_skips_content_resize_on_large_tables(qtbot, monkeypatch):
     assert calls["n"] == 0
     assert table_row_count(table) == 5000
 
-    # Small tables keep the fit-to-content behavior.
+    # A same-columns refresh no longer re-fits at all (#894-1: routine
+    # refreshes must not touch widths, so a user-dragged width survives).
+    table.update_assets(resources[:100], [])
+    assert calls["n"] == 0
+
+    # Small tables keep the fit-to-content behavior when auto-fit does run
+    # (first fill / column-set change, #894-1).
+    table.set_visible_columns([*table.visible_column_keys(), "format"])
     table.update_assets(resources[:100], [])
     assert calls["n"] >= 1
 
