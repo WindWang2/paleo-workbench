@@ -49,7 +49,11 @@ _STATUS_LABELS = {
 
 @dataclass
 class FilterQuery:
-    node_type: str = "all"  # "all", "stage", "type", "tag", "integrity", "review_status"
+    node_type: str = "all"
+    # Vocabulary: "all", "stage", "type", "tag", "integrity", "review_status",
+    # "trash", "legacy_category" — plus WorkArea-domain nodes:
+    #   "entity"       → one Well/Survey (node_value = canonical entity id)
+    #   "entity_group" → all entities of a kind (node_value = entity_type)
     node_value: str | None = None
     search_text: str = ""
     stage: str | None = None
@@ -64,6 +68,13 @@ class FilterQuery:
     # Governance filter: review_status vocabulary value (draft/pending_review/
     # approved/rejected).
     review_status: str | None = None
+    # Entity-node membership set (catalog DataAsset ids ∪ legacy ResourceItem
+    # ids).  Computed by DataPage at query time from EntityAssetLinks; None
+    # disables entity matching so plain queries stay allocation-free.
+    entity_asset_ids: frozenset[str] | None = None
+    # Optional EntityAssetLink.role refinement for entity nodes (e.g. a well's
+    # 测井/时深 sub-leaves).  None = every role of the entity.
+    entity_role: str | None = None
 
 
 @dataclass
@@ -166,6 +177,16 @@ class FilterIndex:
                 target_type = CATEGORIES.get(query.node_value)
                 if view.type != target_type:
                     return False
+        elif query.node_type in ("entity", "entity_group"):
+            if not query.entity_asset_ids:
+                return False
+            raw = view.raw_asset
+            row_ids = {
+                str(getattr(raw, "id", "") or ""),
+                str(getattr(raw, "legacy_resource_id", "") or ""),
+            }
+            if not row_ids & set(query.entity_asset_ids):
+                return False
 
         # 2. Multi-dimensional secondary criteria
         if query.stage and view.stage.value != query.stage:

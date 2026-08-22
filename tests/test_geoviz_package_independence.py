@@ -23,6 +23,11 @@ CORE_FOR_WORKBENCH = (
 PRIVATE_API_EXEMPTIONS: frozenset[tuple[str, None]] = frozenset(
     {
         ("geoviz_plots.map_edit.api", None),
+        # Project Well Location GIS (ADR 0059): the workbench composes its own
+        # batched ScatterSeries/LineSeries layers on the facade-exported
+        # PlotWidget; the chart series models are the supported surface for
+        # that (mirrors the map_edit.api precedent).
+        ("geoviz_plots.chart.series", None),
         ("geoviz_well_seismic_3d", None),
     }
 )

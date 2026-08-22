@@ -44,7 +44,12 @@ from paleo_workbench.ui.pages.data_view_models import (
     path_is_dir_safe,
 )
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
-from paleo_workbench.ui.pages.filter_index import CATEGORIES, FilterQuery
+from paleo_workbench.project.domain import domain_signature
+from paleo_workbench.ui.pages.filter_index import (
+    CATEGORIES,
+    FilterQuery,
+    compute_catalog_counts,
+)
 from paleo_workbench.ui.pages.catalog_health_dialog import CatalogHealthDialog
 from paleo_workbench.ui.pages.governance_dialog import GovernanceMetadataDialog
 from paleo_workbench.ui.pages.integrity_worker import IntegrityCheckReport
@@ -133,6 +138,50 @@ class _RescanWorker(QObject):
         self.finished.emit(scanned)
 
 
+class _DomainBindWorker(QObject):
+    """Stage freshly imported resources for domain binding (§12).
+
+    Worker performs ONLY extraction (well_head/SEG-Y/LAS parsing).  The live
+    project document is mutated on the GUI thread in
+    ``_handle_domain_staged`` — never here (review finding #12).
+    """
+
+    finished = Signal(object)  # list[StagedResource]
+    failed = Signal(str)
+
+    def __init__(self, project, resources: list, parent=None):
+        super().__init__(parent)
+        self._project = project
+        self._resources = resources
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            from paleo_workbench.catalog.domain_binding import stage_resources
+            from paleo_workbench.project.paths import resolve_project_path
+
+            project_path = getattr(self, "_project_path", None)
+
+            def resolver(relative: str) -> Path:
+                raw = Path(relative)
+                if raw.is_absolute() or project_path is None:
+                    return raw
+                try:
+                    return Path(resolve_project_path(relative, Path(project_path)))
+                except Exception:
+                    return raw
+
+            staged = stage_resources(
+                self._project,
+                self._resources,
+                path_resolver=resolver,
+            )
+        except Exception as exc:  # pragma: no cover - defensive UI boundary
+            self.failed.emit(str(exc))
+            return
+        self.finished.emit(staged)
+
+
 class _DeliveryWorker(QObject):
     """Delivery payload copy + checksum off the GUI thread (#379)."""
 
@@ -184,6 +233,11 @@ class DataPage(QWidget):
     import_finished = Signal(object)
     import_failed = Signal(str)
     open_in_visualization = Signal(object)  # VizRef
+    # Emitted whenever domain entities changed (import binding or migration)
+    # so map/overview views can refresh.  Carries the project document.
+    domain_entities_changed = Signal(object)
+    # Data → Map focus request carrying the canonical Well.id.
+    well_focus_requested = Signal(str)
 
     def __init__(
         self,
@@ -208,6 +262,7 @@ class DataPage(QWidget):
         self._deliver_job = OwnedWorkerJob(self)
         self._export_job = OwnedWorkerJob(self)
         self._verify_job = OwnedWorkerJob(self)
+        self._domain_bind_job = OwnedWorkerJob(self)
         self._last_import_report: ImportReport | None = None
         self._rescan_context: tuple | None = None
         self._delivery_context: tuple | None = None
@@ -428,6 +483,15 @@ class DataPage(QWidget):
             views=shared_views,
         )
         self.navigation_tree.set_trash_count(len(self._trashed_companions()))
+        # WorkArea entity-first section: rebuild only when the domain
+        # signature changed (shared helper — must match the map page's gate).
+        signature = domain_signature(self.project)
+        if signature != getattr(self, "_domain_signature", None):
+            self._domain_signature = signature
+            self.navigation_tree.set_project(self.project)
+        if self.workspace.overview_visible():
+            overview = self.workspace.overview_panel
+            overview.refresh_from_project(self.project, counts=None)
         table_views = (
             shared_views
             if len(display_resources) == len(self._resources)
@@ -657,6 +721,116 @@ class DataPage(QWidget):
         if report is not None:
             self._set_import_status(report)
         self.import_finished.emit(report)
+        self._start_domain_binding_worker(list(getattr(report, "added", []) or []))
+
+    def _start_domain_binding_worker(self, resources: list) -> None:
+        """Bind registered imports to Well/Survey entities (worker thread)."""
+        if not resources or self._domain_bind_job.is_running:
+            return
+        worker = _DomainBindWorker(self.project, resources)
+        worker._project_path = self.project_path  # noqa: SLF001 - worker input, not state
+        self._domain_bind_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed),
+            result_connections=(
+                (worker.finished, self._handle_domain_bind_finished_signal),
+                (worker.failed, self._handle_domain_bind_failed_signal),
+            ),
+            target=self.project,
+        )
+
+    @Slot(object)
+    def _handle_domain_bind_finished_signal(self, staged: object) -> None:
+        if self._domain_bind_job.target is not self.project:
+            return
+        self._handle_domain_staged(staged)
+
+    @Slot(str)
+    def _handle_domain_bind_failed_signal(self, message: str) -> None:
+        if self._domain_bind_job.target is not self.project:
+            return
+        self._set_action_status(f"工区实体识别失败: {message}")
+
+    def _handle_domain_staged(self, staged: list) -> None:
+        """GUI-thread binding: resolve entities + links from staged payloads."""
+        if not staged:
+            return
+        try:
+            from paleo_workbench.catalog.domain_binding import bind_staged
+            from paleo_workbench.project.domain_migration import build_asset_id_mapping
+            from paleo_workbench.catalog.runtime import get_catalog_service
+
+            mapping = build_asset_id_mapping(get_catalog_service())
+            report = bind_staged(
+                self.project,
+                staged,
+                asset_id_by_legacy=mapping,
+            )
+        except Exception as exc:
+            self._set_action_status(f"工区实体绑定失败: {exc.__class__.__name__}")
+            return
+        wells = getattr(report, "wells_created", 0)
+        surveys = getattr(report, "surveys_created", 0)
+        ambiguous = getattr(report, "ambiguous_assets", 0)
+        issues = list(getattr(report, "issues", []) or [])
+        if wells or surveys:
+            summary = f"工区识别: 新增井 {wells} 口、地震工区 {surveys} 个"
+            if ambiguous:
+                summary += f"，歧义待治理 {ambiguous} 项"
+            self._set_action_status(summary)
+        elif issues:
+            self._set_action_status(issues[0])
+        self.refresh_domain_views()
+
+    def well_identity_adapter(self):
+        """Canonical Well.id lookup surface for legacy modules (ADR 0059 §7)."""
+        from paleo_workbench.project.well_identity_adapter import WellIdentityAdapter
+
+        adapter = getattr(self, "_well_identity_adapter", None)
+        if adapter is None or adapter._project is not self.project:
+            adapter = WellIdentityAdapter(
+                self.project,
+                self._catalog_service(),
+            )
+            self._well_identity_adapter = adapter
+        return adapter
+
+    def refresh_domain_views(self) -> None:
+        """Re-read domain sections into tree/overview views (cheap, cached)."""
+        self._refresh()
+        adapter = getattr(self, "_well_identity_adapter", None)
+        if adapter is not None:
+            adapter.invalidate()
+        overview = getattr(self.workspace, "overview_panel", None)
+        refresh_overview = getattr(overview, "refresh_from_project", None)
+        if callable(refresh_overview):
+            try:
+                refresh_overview(self.project)
+            except Exception:
+                pass
+        self.domain_entities_changed.emit(self.project)
+
+    # ------------------------------------------------------------------
+    # Cross-view well selection (tree ↔ map sync via canonical Well.id)
+    # ------------------------------------------------------------------
+
+    def select_well(self, well_id: str, *, focus: bool = False) -> bool:
+        """Select a well entity: filter the table to its assets.
+
+        Returns True when the well exists.  ``focus`` requests that visible
+        map views zoom to the well (Data → Map direction).
+        """
+        well = next(
+            (item for item in self.project.wells if item.id == well_id), None
+        )
+        if well is None:
+            return False
+        query = FilterQuery(node_type="entity", node_value=well_id)
+        self.navigation_tree.highlight_well(well_id)
+        self._on_navigation_filter_query(query)
+        if focus:
+            self.well_focus_requested.emit(well_id)
+        return True
 
     def _finish_import_job(self) -> None:
         self._set_import_running(False)
@@ -1391,6 +1565,11 @@ class DataPage(QWidget):
         visible filter state (checked tags + operator) must never diverge from
         what the table actually shows (search text is preserved the same way
         inside ``set_filter_query``)."""
+        if query.node_type == "overview":
+            self.workspace.show_overview(True)
+            self._refresh_overview_panel()
+            return
+        self.workspace.show_overview(False)
         try:
             tags = self.data_toolbar.current_tag_selection()
             operator = self.data_toolbar.current_tag_operator()
@@ -1398,7 +1577,72 @@ class DataPage(QWidget):
             tags, operator = [], "and"
         if tags:
             query = replace(query, tags=list(tags), tag_operator=operator)
+        query = self._entity_query_with_ids(query)
         self.asset_table.set_filter_query(query)
+
+    # --- WorkArea entity filters (IA 3.0) ---
+
+    def _asset_legacy_map(self) -> dict[str, str]:
+        """catalog DataAsset.id → legacy ResourceItem.id (cached per revision)."""
+        service = self._catalog_service()
+        revision = getattr(service, "catalog_revision", None) if service else None
+        cached = getattr(self, "_asset_legacy_cache", None)
+        if cached is not None and cached[0] == revision and service is not None:
+            return cached[1]
+        mapping: dict[str, str] = {}
+        if service is not None:
+            try:
+                for asset in service.list_assets(include_trashed=False):
+                    legacy = getattr(asset, "legacy_resource_id", None)
+                    if legacy:
+                        mapping[asset.id] = str(legacy)
+            except Exception:
+                mapping = {}
+        self._asset_legacy_cache = (revision, mapping)
+        return mapping
+
+    def _entity_query_with_ids(self, query: FilterQuery) -> FilterQuery:
+        """Attach the EntityAssetLink membership set to entity queries."""
+        if query.node_type not in ("entity", "entity_group"):
+            return query
+        links = list(getattr(self.project, "entity_asset_links", None) or [])
+        if query.node_type == "entity":
+            matched = [
+                link
+                for link in links
+                if link.entity_id == query.node_value
+                and (query.entity_role is None or link.role == query.entity_role)
+            ]
+        else:
+            matched = [
+                link for link in links if link.entity_type == (query.node_value or "")
+            ]
+        ids = {link.asset_id for link in matched}
+        legacy_map = self._asset_legacy_map()
+        for asset_id in tuple(ids):
+            legacy = legacy_map.get(asset_id)
+            if legacy:
+                ids.add(legacy)
+        return replace(query, entity_asset_ids=frozenset(ids))
+
+    def _refresh_overview_panel(self) -> None:
+        overview = getattr(self.workspace, "overview_panel", None)
+        if overview is None:
+            return
+        try:
+            enricher = self._lifecycle.catalog_enricher()
+            catalog_rows = self._lifecycle.catalog_only_rows(enricher)
+            preview_root = self._preview_disk_project_root()
+            counts = compute_catalog_counts(
+                self._resources,
+                self._artifacts,
+                project_root=preview_root,
+                extra_assets=catalog_rows,
+                enricher=enricher,
+            )
+        except Exception:
+            counts = None
+        overview.refresh_from_project(self.project, counts=counts)
 
     def _on_tag_filter_changed(self, tags: list[str], operator: str) -> None:
         try:

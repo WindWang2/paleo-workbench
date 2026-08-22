@@ -9,10 +9,10 @@ from paleo_workbench.ui import navigation, tokens
 def test_geomodel_page_index_and_no_joint_rail(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
-    assert shell.page_stack.count() == 11
+    assert shell.page_stack.count() == 12
     assert navigation.PAGE_INDEX_GEOMODEL == 10
     assert tokens.PAGE_NAMES[10] == "井震联合"
-    assert len(tokens.PAGE_NAMES) == 11
+    assert len(tokens.PAGE_NAMES) == 12
     # The Well-Seismic-Joint page index was removed from the navigation module
     # when it merged into the geomodel page; the legacy name must be gone.
     assert not hasattr(navigation, "PAGE_INDEX_WELL_SEISMIC_JOINT")
