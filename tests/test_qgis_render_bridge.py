@@ -12,7 +12,6 @@ import pytest
 
 from tests.qgis_support import QGIS_SKIP_REASON
 
-
 pytestmark = pytest.mark.qgis
 
 qgis_render_bridge = pytest.importorskip("qgis_render_bridge", reason=QGIS_SKIP_REASON)

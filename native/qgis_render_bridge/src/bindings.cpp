@@ -1,5 +1,7 @@
 #include "qgis_render_bridge.hpp"
 
+// pybind11 (and therefore Python.h) must be included BEFORE any Qt/QGIS
+// header: Qt redefines `slots`, which corrupts PyType_Spec in object.h.
 #include <array>
 #include <stdexcept>
 #include <string>
@@ -9,11 +11,23 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <qgis.h>
+#include <qgsrenderer.h>
+#include <qgsrendercontext.h>
+#include <qgssymbol.h>
+
+#include "geometry_service.hpp"
+#include "gui_service.hpp"
+#include "style_codec.hpp"
+
 namespace py = pybind11;
-using pwb::qgis_render::FeatureSpec;
 using pwb::qgis_render::CategorySpec;
+using pwb::qgis_render::FeatureSpec;
+using pwb::qgis_render::GeometryServiceError;
+using pwb::qgis_render::GuiDialogRequest;
 using pwb::qgis_render::QgisRenderBridge;
 using pwb::qgis_render::RangeSpec;
+using pwb::qgis_render::RuleSpec;
 using pwb::qgis_render::VectorLayerSpec;
 
 namespace {
@@ -48,6 +62,27 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
             if (style.contains("marker_size")) layer.marker_size = py::cast<double>(style["marker_size"]);
             if (style.contains("renderer")) layer.renderer_kind = py::cast<std::string>(style["renderer"]);
             if (style.contains("field")) layer.classification_field = py::cast<std::string>(style["field"]);
+            if (style.contains("renderer_xml")) {
+                layer.renderer_xml = py::cast<std::string>(style["renderer_xml"]);
+            }
+            if (style.contains("labeling_xml")) {
+                layer.labeling_xml = py::cast<std::string>(style["labeling_xml"]);
+            }
+            if (style.contains("rules")) {
+                for (const py::handle rule_item :
+                     py::reinterpret_borrow<py::iterable>(style["rules"])) {
+                    const py::dict rule = as_dict(rule_item, "style rule");
+                    RuleSpec parsed;
+                    parsed.name = py::cast<std::string>(rule["name"]);
+                    parsed.expression = py::cast<std::string>(rule["expression"]);
+                    if (rule.contains("label")) parsed.label = py::cast<std::string>(rule["label"]);
+                    if (rule.contains("fill")) parsed.fill = py::cast<std::string>(rule["fill"]);
+                    if (rule.contains("stroke")) parsed.stroke = py::cast<std::string>(rule["stroke"]);
+                    if (rule.contains("stroke_width")) parsed.stroke_width = py::cast<double>(rule["stroke_width"]);
+                    if (rule.contains("marker_size")) parsed.marker_size = py::cast<double>(rule["marker_size"]);
+                    layer.rules.push_back(std::move(parsed));
+                }
+            }
             if (style.contains("categories")) {
                 const py::dict categories = as_dict(style["categories"], "style categories");
                 for (const auto item : categories) {
@@ -127,10 +162,124 @@ py::dict result_to_python(const pwb::qgis_render::RenderResult& result) {
     return output;
 }
 
+GuiDialogRequest parse_dialog_request(const py::dict& data) {
+    GuiDialogRequest request;
+    request.title = py::cast<std::string>(data.attr("get")("title", ""));
+    request.geometry_type = py::cast<std::string>(data["geometry_type"]);
+    request.crs = py::cast<std::string>(data.attr("get")("crs", ""));
+    if (data.contains("renderer_xml")) {
+        request.renderer_xml = py::cast<std::string>(data["renderer_xml"]);
+    }
+    if (data.contains("style_db_path")) {
+        request.style_db_path = py::cast<std::string>(data["style_db_path"]);
+    }
+    if (data.contains("fill")) request.fill = py::cast<std::string>(data["fill"]);
+    if (data.contains("stroke")) request.stroke = py::cast<std::string>(data["stroke"]);
+    if (data.contains("stroke_width")) request.stroke_width = py::cast<double>(data["stroke_width"]);
+    if (data.contains("marker_size")) request.marker_size = py::cast<double>(data["marker_size"]);
+    if (data.contains("fields")) {
+        for (const py::handle field : py::reinterpret_borrow<py::iterable>(data["fields"])) {
+            request.field_names.push_back(py::cast<std::string>(field));
+        }
+    }
+    return request;
+}
+
+py::dict dialog_result_to_python(const pwb::qgis_render::GuiDialogResult& result) {
+    py::dict output;
+    output["ok"] = result.ok;
+    output["renderer_xml"] = result.renderer_xml;
+    output["opacity"] = result.opacity;
+    return output;
+}
+
+/// Build a renderer from a legacy VectorStyle dict and serialize it.
+/// This is the legacy_to_qgis_renderer() migration entry point.
+py::object legacy_style_to_renderer_xml(const py::dict& style,
+                                        const std::string& geometry_type) {
+    VectorLayerSpec spec;
+    spec.id = "migration";
+    if (style.contains("fill")) spec.fill = py::cast<std::string>(style["fill"]);
+    if (style.contains("stroke")) spec.stroke = py::cast<std::string>(style["stroke"]);
+    if (style.contains("stroke_width")) spec.stroke_width = py::cast<double>(style["stroke_width"]);
+    if (style.contains("marker_size")) spec.marker_size = py::cast<double>(style["marker_size"]);
+    if (style.contains("renderer")) spec.renderer_kind = py::cast<std::string>(style["renderer"]);
+    if (style.contains("field")) spec.classification_field = py::cast<std::string>(style["field"]);
+    if (style.contains("categories")) {
+        const py::object raw = style["categories"];
+        if (py::isinstance<py::dict>(raw)) {
+            const py::dict categories = raw;
+            for (const auto item : categories) {
+                spec.categories.push_back({
+                    py::cast<std::string>(py::str(item.first)),
+                    py::cast<std::string>(py::str(item.second)),
+                    py::cast<std::string>(py::str(item.first)),
+                });
+            }
+        } else {
+            for (const py::handle entry : py::reinterpret_borrow<py::iterable>(raw)) {
+                const py::sequence item = py::reinterpret_borrow<py::sequence>(entry);
+                spec.categories.push_back({
+                    py::cast<std::string>(item[0]),
+                    py::cast<std::string>(item[1]),
+                    py::len(item) > 2 ? py::cast<std::string>(item[2]) : std::string(),
+                });
+            }
+        }
+    }
+    if (style.contains("ranges")) {
+        for (const py::handle entry : py::reinterpret_borrow<py::iterable>(style["ranges"])) {
+            const py::sequence item = py::reinterpret_borrow<py::sequence>(entry);
+            spec.ranges.push_back({
+                py::cast<double>(item[0]),
+                py::cast<double>(item[1]),
+                py::cast<std::string>(item[2]),
+                py::len(item) > 3 ? py::cast<std::string>(item[3]) : std::string(),
+            });
+        }
+    }
+    if (style.contains("rules")) {
+        for (const py::handle entry : py::reinterpret_borrow<py::iterable>(style["rules"])) {
+            const py::dict rule = as_dict(entry, "legacy rule");
+            RuleSpec parsed;
+            parsed.name = py::cast<std::string>(rule.attr("get")("name", ""));
+            parsed.expression = py::cast<std::string>(rule.attr("get")("expression", ""));
+            parsed.label = py::cast<std::string>(rule.attr("get")("label", ""));
+            parsed.fill = py::cast<std::string>(rule.attr("get")("fill", ""));
+            parsed.stroke = py::cast<std::string>(rule.attr("get")("stroke", ""));
+            if (rule.contains("stroke_width")) parsed.stroke_width = py::cast<double>(rule["stroke_width"]);
+            if (rule.contains("marker_size")) parsed.marker_size = py::cast<double>(rule["marker_size"]);
+            spec.rules.push_back(std::move(parsed));
+        }
+    }
+
+    Qgis::GeometryType geometry = Qgis::GeometryType::Null;
+    if (geometry_type == "Point" || geometry_type == "MultiPoint") geometry = Qgis::GeometryType::Point;
+    else if (geometry_type == "LineString" || geometry_type == "MultiLineString") geometry = Qgis::GeometryType::Line;
+    else if (geometry_type == "Polygon" || geometry_type == "MultiPolygon") geometry = Qgis::GeometryType::Polygon;
+    auto renderer = pwb::qgis_render::build_renderer_from_spec(geometry, spec);
+    if (!renderer) return py::none();
+    return py::str(pwb::qgis_render::renderer_to_xml(*renderer));
+}
+
+/// Describe a serialized renderer payload without instantiating host objects:
+/// {type, symbol_count} so Python UI can label layers without parsing XML.
+py::object renderer_info(const std::string& renderer_xml) {
+    auto renderer = pwb::qgis_render::renderer_from_xml(renderer_xml);
+    if (!renderer) return py::none();
+    QgsRenderContext context;
+    py::dict info;
+    info["type"] = renderer->type().toStdString();
+    info["symbol_count"] = static_cast<int>(renderer->symbols(context).size());
+    return info;
+}
+
 }  // namespace
 
 PYBIND11_MODULE(qgis_render_bridge, module) {
     module.doc() = "Narrow optional C++ QGIS map-render bridge";
+    py::register_exception<GeometryServiceError>(module, "QgisGeometryError");
+
     py::class_<QgisRenderBridge>(module, "QgisRenderBridge")
         .def(py::init<>())
         .def("initialize", &QgisRenderBridge::initialize, py::arg("prefix_path") = "")
@@ -139,8 +288,8 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
             bridge.set_layer_snapshot(parse_layers(layers), project_crs);
         })
         .def("request_render", [](QgisRenderBridge& bridge, const py::sequence& extent,
-                                  const int width, const int height, const double dpi,
-                                  const std::uint64_t generation) {
+                                   const int width, const int height, const double dpi,
+                                   const std::uint64_t generation) {
             bridge.request_render(parse_extent(extent), width, height, dpi, generation);
         })
         .def("take_completed_frame", [](QgisRenderBridge& bridge) -> py::object {
@@ -153,8 +302,139 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                                  const int width, const int height, const double dpi) {
             return result_to_python(bridge.render_sync(parse_extent(extent), width, height, dpi));
         })
+        .def("export_vector", [](const QgisRenderBridge& bridge, const std::string& path,
+                                  const std::string& format, const py::sequence& extent,
+                                  const int width, const int height, const double dpi) {
+            return bridge.export_vector(path, format, parse_extent(extent), width, height, dpi);
+        })
         .def("shutdown", &QgisRenderBridge::shutdown)
+        .def("diagnostics", [](const QgisRenderBridge& bridge) {
+            const auto diagnostics = bridge.diagnostics();
+            py::dict output;
+            output["mirror_builds"] = diagnostics.mirror_builds;
+            output["mirror_reuses"] = diagnostics.mirror_reuses;
+            output["style_reapplies"] = diagnostics.style_reapplies;
+            return output;
+        })
         .def_property_readonly("initialized", &QgisRenderBridge::initialized)
         .def_property_readonly("render_active", &QgisRenderBridge::render_active)
         .def_property_readonly("version", &QgisRenderBridge::version);
+
+    module.def("legacy_style_to_renderer_xml", &legacy_style_to_renderer_xml,
+               py::arg("style"), py::arg("geometry_type"),
+               "Build a QGIS renderer XML payload from a legacy VectorStyle dict.");
+
+    module.def("renderer_info", &renderer_info, py::arg("renderer_xml"),
+               "Describe a serialized renderer payload (type, symbol_count).");
+
+    module.def("run_renderer_properties_dialog",
+               [](const py::dict& request) {
+                   return dialog_result_to_python(
+                       pwb::qgis_render::run_renderer_properties_dialog(
+                           parse_dialog_request(request))
+                   );
+               },
+               py::arg("request"),
+               "Open the native QgsRendererPropertiesDialog; returns the updated payload.");
+
+    module.def("run_symbol_selector_dialog",
+               [](const py::dict& request, const int symbol_index) {
+                   return dialog_result_to_python(
+                       pwb::qgis_render::run_symbol_selector_dialog(
+                           parse_dialog_request(request), symbol_index)
+                   );
+               },
+               py::arg("request"), py::arg("symbol_index"),
+               "Open the native QgsSymbolSelectorDialog for one renderer symbol.");
+
+    module.def("run_style_manager_dialog",
+               [](const std::string& style_db_path) {
+                   return pwb::qgis_render::run_style_manager_dialog(style_db_path);
+               },
+               py::arg("style_db_path"),
+               "Open the native QgsStyleManagerDialog on a managed style database.");
+
+    auto geometry = module.def_submodule("geometry", "QGIS-backed vector geometry service");
+    // Geometry arguments accept GeoJSON dicts or JSON/WKT strings; results are
+    // always GeoJSON JSON strings.
+    auto geometry_arg = [](const py::handle& value) -> std::string {
+        if (py::isinstance<py::str>(value)) {
+            return py::cast<std::string>(value);
+        }
+        return py::module_::import("json").attr("dumps")(value).cast<std::string>();
+    };
+    auto geometry_list_arg = [geometry_arg](const py::iterable& values) {
+        std::vector<std::string> items;
+        for (const py::handle item : values) {
+            items.push_back(geometry_arg(item));
+        }
+        return items;
+    };
+    geometry.def("union", [&geometry_arg](const py::iterable& parts) {
+                      std::vector<std::string> items;
+                      for (const py::handle item : parts) {
+                          items.push_back(geometry_arg(item));
+                      }
+                      return pwb::qgis_render::geometry_union(items);
+                  }, py::arg("geometries"));
+    geometry.def("split_by_line", [&geometry_arg](const py::object& target,
+                                                   const py::object& cutter) {
+                      return pwb::qgis_render::geometry_split_by_line(
+                          geometry_arg(target), geometry_arg(cutter));
+                  }, py::arg("geometry"), py::arg("cutter"));
+    geometry.def("intersection", [&geometry_arg](const py::object& a, const py::object& b) {
+                      return pwb::qgis_render::geometry_intersection(
+                          geometry_arg(a), geometry_arg(b));
+                  });
+    geometry.def("difference", [&geometry_arg](const py::object& a, const py::object& b) {
+                      return pwb::qgis_render::geometry_difference(
+                          geometry_arg(a), geometry_arg(b));
+                  });
+    geometry.def("symdifference", [&geometry_arg](const py::object& a, const py::object& b) {
+                      return pwb::qgis_render::geometry_symdifference(
+                          geometry_arg(a), geometry_arg(b));
+                  });
+    geometry.def("buffer", [&geometry_arg](const py::object& source, const double distance,
+                              const int segments) {
+                      return pwb::qgis_render::geometry_buffer(
+                          geometry_arg(source), distance, segments);
+                  }, py::arg("geometry"), py::arg("distance"), py::arg("segments") = 8);
+    geometry.def("offset_curve", [&geometry_arg](const py::object& source, const double distance) {
+                      return pwb::qgis_render::geometry_offset_curve(
+                          geometry_arg(source), distance);
+                  });
+    geometry.def("simplify", [&geometry_arg](const py::object& source, const double tolerance) {
+                      return pwb::qgis_render::geometry_simplify(
+                          geometry_arg(source), tolerance);
+                  });
+    geometry.def("smooth", [&geometry_arg](const py::object& source, const unsigned int iterations,
+                              const double offset) {
+                      return pwb::qgis_render::geometry_smooth(
+                          geometry_arg(source), iterations, offset);
+                  }, py::arg("geometry"), py::arg("iterations") = 1, py::arg("offset") = 0.25);
+    geometry.def("densify", [&geometry_arg](const py::object& source, const double interval) {
+                      return pwb::qgis_render::geometry_densify(
+                          geometry_arg(source), interval);
+                  });
+    geometry.def("make_valid", [&geometry_arg](const py::object& source) {
+                      return pwb::qgis_render::geometry_make_valid(geometry_arg(source));
+                  });
+    geometry.def("is_valid", [&geometry_arg](const py::object& source) {
+                      return pwb::qgis_render::geometry_is_valid(geometry_arg(source));
+                  });
+    geometry.def("multipart_to_singlepart", [&geometry_arg](const py::object& source) {
+                      return pwb::qgis_render::geometry_multipart_to_singlepart(
+                          geometry_arg(source));
+                  });
+    geometry.def("singlepart_to_multipart", [&geometry_arg](const py::iterable& parts) {
+                      std::vector<std::string> items;
+                      for (const py::handle item : parts) {
+                          items.push_back(geometry_arg(item));
+                      }
+                      return pwb::qgis_render::geometry_singlepart_to_multipart(items);
+                  });
+    geometry.def("clip", [&geometry_arg](const py::object& source, const py::sequence& extent) {
+                      return pwb::qgis_render::geometry_clip(
+                          geometry_arg(source), parse_extent(extent));
+                  });
 }

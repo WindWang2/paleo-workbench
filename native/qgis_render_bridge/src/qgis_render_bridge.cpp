@@ -9,38 +9,44 @@
 #include <utility>
 
 #include <QCoreApplication>
+#include <QDomDocument>
+#include <QFile>
 #include <QFont>
 #include <QImage>
 #include <QList>
+#include <QMarginsF>
+#include <QPageSize>
+#include <QPdfWriter>
+#include <QPainter>
+#include <QRect>
 #include <QSet>
 #include <QSize>
 #include <QString>
+#include <QSvgGenerator>
 #include <QVariantMap>
 
 #include <qgsapplication.h>
-#include <qgscategorizedsymbolrenderer.h>
 #include <qgscoordinatereferencesystem.h>
 #include <qgsfield.h>
 #include <qgsfeature.h>
-#include <qgsfillsymbol.h>
-#include <qgsgraduatedsymbolrenderer.h>
 #include <qgsgeometry.h>
-#include <qgslinesymbol.h>
+#include <qgslabeling.h>
 #include <qgsmaplayer.h>
 #include <qgsmaprendererparalleljob.h>
+#include <qgsmaprenderercustompainterjob.h>
 #include <qgsmapsettings.h>
+#include <qgspallabeling.h>
+#include <qgsreadwritecontext.h>
 #include <qgsrectangle.h>
 #include <qgsrasterlayer.h>
-#include <qgsmarkersymbol.h>
-#include <qgspallabeling.h>
-#include <qgsrendererrange.h>
-#include <qgssinglesymbolrenderer.h>
-#include <qgssymbol.h>
+#include <qgsrendercontext.h>
 #include <qgstextbuffersettings.h>
 #include <qgstextformat.h>
 #include <qgsvectordataprovider.h>
 #include <qgsvectorlayer.h>
 #include <qgsvectorlayerlabeling.h>
+
+#include "style_codec.hpp"
 
 namespace pwb::qgis_render {
 namespace {
@@ -90,81 +96,45 @@ void validate_request(const int width, const int height, const double dpi) {
     }
 }
 
-std::unique_ptr<QgsSymbol> symbol_for(const Qgis::GeometryType geometry_type,
-                                      const VectorLayerSpec& spec,
-                                      const QString& requested_fill = {}) {
-    const QString fill = requested_fill.isEmpty() ? QString::fromStdString(spec.fill) : requested_fill;
-    const QString stroke = QString::fromStdString(spec.stroke);
-    const QString width = QString::number(std::max(0.0, spec.stroke_width), 'g', 12);
-    const QString marker_size = QString::number(std::max(0.1, spec.marker_size), 'g', 12);
-    QVariantMap properties;
-    switch (geometry_type) {
-        case Qgis::GeometryType::Polygon: {
-            properties.insert(QStringLiteral("color"), fill);
-            properties.insert(QStringLiteral("outline_color"), stroke);
-            properties.insert(QStringLiteral("outline_width"), width);
-            return QgsFillSymbol::createSimple(properties);
-        }
-        case Qgis::GeometryType::Line: {
-            properties.insert(QStringLiteral("line_color"), stroke);
-            properties.insert(QStringLiteral("color"), stroke);
-            properties.insert(QStringLiteral("line_width"), width);
-            properties.insert(QStringLiteral("width"), width);
-            return QgsLineSymbol::createSimple(properties);
-        }
-        case Qgis::GeometryType::Point: {
-            properties.insert(QStringLiteral("color"), fill);
-            properties.insert(QStringLiteral("outline_color"), stroke);
-            properties.insert(QStringLiteral("size"), marker_size);
-            return QgsMarkerSymbol::createSimple(properties);
-        }
-        default:
-            return {};
-    }
-}
-
 void apply_renderer_style(QgsVectorLayer& layer, const VectorLayerSpec& spec) {
     const Qgis::GeometryType geometry_type = layer.geometryType();
     if (geometry_type == Qgis::GeometryType::Null) return;
-    if (spec.renderer_kind == "categorized" && !spec.classification_field.empty()
-        && !spec.categories.empty()) {
-        QgsCategoryList categories;
-        for (const CategorySpec& category : spec.categories) {
-            auto symbol = symbol_for(geometry_type, spec, QString::fromStdString(category.color));
-            if (symbol) {
-                categories.emplace_back(
-                    QVariant(QString::fromStdString(category.value)), symbol.release(),
-                    QString::fromStdString(category.label)
-                );
-            }
+    // Authoritative path: a stored QGIS renderer payload owns the full
+    // symbol-layer tree.  The legacy flat fields only build renderers when no
+    // payload exists yet (legacy projects, minimal fallbacks).
+    if (!spec.renderer_xml.empty()) {
+        auto renderer = renderer_from_xml(spec.renderer_xml);
+        if (!renderer) {
+            throw std::runtime_error("invalid QGIS renderer payload for layer " + spec.id);
         }
-        layer.setRenderer(new QgsCategorizedSymbolRenderer(
-            QString::fromStdString(spec.classification_field), categories
-        ));
+        layer.setRenderer(renderer.release());
         return;
     }
-    if (spec.renderer_kind == "graduated" && !spec.classification_field.empty()
-        && !spec.ranges.empty()) {
-        QgsRangeList ranges;
-        for (const RangeSpec& range : spec.ranges) {
-            auto symbol = symbol_for(geometry_type, spec, QString::fromStdString(range.color));
-            if (symbol) {
-                ranges.emplace_back(
-                    range.lower, range.upper, symbol.release(),
-                    QString::fromStdString(range.label)
-                );
-            }
-        }
-        layer.setRenderer(new QgsGraduatedSymbolRenderer(
-            QString::fromStdString(spec.classification_field), ranges
-        ));
-        return;
-    }
-    auto symbol = symbol_for(geometry_type, spec);
-    if (symbol) layer.setRenderer(new QgsSingleSymbolRenderer(symbol.release()));
+    auto renderer = build_renderer_from_spec(geometry_type, spec);
+    if (renderer) layer.setRenderer(renderer.release());
 }
 
 void apply_label_style(QgsVectorLayer& layer, const VectorLayerSpec& spec) {
+    if (!spec.labeling_xml.empty()) {
+        QDomDocument document;
+        if (!document.setContent(QString::fromStdString(spec.labeling_xml))) {
+            throw std::runtime_error("invalid QGIS labeling payload for layer " + spec.id);
+        }
+        QDomElement element = document.firstChildElement();
+        if (element.isNull()) {
+            throw std::runtime_error("empty QGIS labeling payload for layer " + spec.id);
+        }
+        QgsReadWriteContext context;
+        auto labeling = std::unique_ptr<QgsAbstractVectorLayerLabeling>(
+            QgsAbstractVectorLayerLabeling::create(element, context)
+        );
+        if (!labeling) {
+            throw std::runtime_error("QGIS labeling payload could not be parsed for layer " + spec.id);
+        }
+        layer.setLabeling(labeling.release());
+        layer.setLabelsEnabled(true);
+        return;
+    }
     if (!spec.labels_enabled || spec.label_field.empty()) {
         layer.setLabelsEnabled(false);
         return;
@@ -216,6 +186,8 @@ class QgisRenderBridge::Impl {
         std::uint64_t generation = 0;
     };
 
+    Diagnostics diagnostics;
+
     bool initialized = false;
     std::string project_crs;
     std::vector<std::string> ordered_ids;
@@ -259,6 +231,7 @@ class QgisRenderBridge::Impl {
                     }
                     apply_renderer_style(*vector_layer, spec);
                     apply_label_style(*vector_layer, spec);
+                    diagnostics.style_reapplies += 1;
                 }
                 mirror.data_revision = spec.data_revision;
                 mirror.style_revision = spec.style_revision;
@@ -267,6 +240,7 @@ class QgisRenderBridge::Impl {
                 mirror.visible = spec.visible;
                 mirror.layer->setOpacity(std::clamp(spec.opacity, 0.0, 1.0));
                 reused.push_back(spec.id);
+                diagnostics.mirror_reuses += 1;
             } else {
                 Mirror mirror;
                 if (spec.kind == VectorLayerSpec::Kind::Raster) {
@@ -335,6 +309,7 @@ class QgisRenderBridge::Impl {
                 mirror.visible = spec.visible;
                 mirror.layer->setOpacity(std::clamp(spec.opacity, 0.0, 1.0));
                 next.emplace(spec.id, std::move(mirror));
+                diagnostics.mirror_builds += 1;
             }
             order.push_back(spec.id);
         }
@@ -353,12 +328,15 @@ class QgisRenderBridge::Impl {
     [[nodiscard]] QgsMapSettings settings_for(const Request& request) const {
         QgsMapSettings settings;
         QList<QgsMapLayer*> layers;
-        for (const std::string& id : ordered_ids) {
-            const auto it = mirrors.find(id);
+        // Host snapshots order layers bottom-to-top; QGIS renders its layer
+        // list in reverse (last entry first). Reverse here so screen frames
+        // compose exactly like the fallback pipeline (#519 contract).
+        for (auto it = ordered_ids.rbegin(); it != ordered_ids.rend(); ++it) {
+            const auto mirror = mirrors.find(*it);
             // The deferred-commit apply_snapshot guarantees non-null layers;
             // skip defensively so a null can never reach QGIS (#519).
-            if (it != mirrors.end() && it->second.visible && it->second.layer) {
-                layers.append(it->second.layer.get());
+            if (mirror != mirrors.end() && mirror->second.visible && mirror->second.layer) {
+                layers.append(mirror->second.layer.get());
             }
         }
         settings.setLayers(layers);
@@ -572,8 +550,71 @@ void QgisRenderBridge::shutdown() {
     impl_->initialized = false;
 }
 
+std::size_t QgisRenderBridge::export_vector(const std::string& path,
+                                             const std::string& format,
+                                             const std::array<double, 4>& extent,
+                                             const int width, const int height,
+                                             const double dpi) const {
+    if (!impl_->initialized) throw std::runtime_error("QGIS renderer is not initialized");
+    if (path.empty()) throw std::invalid_argument("export path is required");
+    if (format != "svg" && format != "pdf") {
+        throw std::invalid_argument("unsupported export format (svg or pdf)");
+    }
+    validate_request(width, height, dpi);
+    if (impl_->active_job) {
+        throw std::runtime_error("cannot export while an asynchronous QGIS job is active");
+    }
+
+    QgsMapSettings settings = impl_->settings_for(
+        Impl::Request{extent, width, height, dpi, 0}
+    );
+
+    std::unique_ptr<QPaintDevice> device;
+    if (format == "svg") {
+        auto generator = std::make_unique<QSvgGenerator>();
+        generator->setFileName(QString::fromStdString(path));
+        generator->setSize(QSize(width, height));
+        generator->setViewBox(QRect(0, 0, width, height));
+        generator->setResolution(static_cast<int>(std::lround(dpi)));
+        device = std::move(generator);
+    } else {
+        auto writer = std::make_unique<QPdfWriter>(QString::fromStdString(path));
+        writer->setResolution(static_cast<int>(std::lround(dpi)));
+        const QSizeF page_mm(width / dpi * 25.4, height / dpi * 25.4);
+        writer->setPageSize(QPageSize(page_mm, QPageSize::Unit::Millimeter));
+        writer->setPageMargins(QMarginsF(0, 0, 0, 0));
+        device = std::move(writer);
+    }
+
+    QPainter painter(device.get());
+    if (!painter.isActive()) {
+        throw std::runtime_error("could not begin QGIS vector export");
+    }
+    try {
+        painter.setRenderHint(QPainter::RenderHint::Antialiasing, true);
+        settings.setFlag(Qgis::MapSettingsFlag::DrawLabeling, true);
+        settings.setOutputSize(QSize(width, height));
+        settings.setOutputDpi(dpi);
+        QgsMapRendererCustomPainterJob job(settings, &painter);
+        // Synchronous export: the caller owns completion semantics and the
+        // file must be complete before this call returns.
+        job.renderSynchronously();
+    } catch (...) {
+        painter.end();
+        throw;
+    }
+    painter.end();
+
+    QFile output(QString::fromStdString(path));
+    return output.exists() ? static_cast<std::size_t>(output.size()) : 0;
+}
+
 bool QgisRenderBridge::initialized() const noexcept { return impl_->initialized; }
 
 std::string QgisRenderBridge::version() const { return _QGIS_VERSION; }
+
+QgisRenderBridge::Diagnostics QgisRenderBridge::diagnostics() const {
+    return impl_->diagnostics;
+}
 
 }  // namespace pwb::qgis_render

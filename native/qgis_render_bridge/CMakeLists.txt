@@ -15,7 +15,7 @@ if(PALEO_WITH_QGIS_RENDERER)
         message(FATAL_ERROR "PALEO_WITH_QGIS_RENDERER requires the vendored QGIS source at ${PALEO_QGIS_SOURCE_DIR}")
     endif()
 
-    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Xml)
+    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Xml Svg)
 
     set(PALEO_QGIS_OUTPUT_DIR "${PALEO_QGIS_BUILD_DIR}/output")
     set(PALEO_QGIS_LIBRARY_DIR "${PALEO_QGIS_OUTPUT_DIR}/lib")
@@ -89,7 +89,12 @@ if(PALEO_WITH_QGIS_RENDERER)
     endforeach()
     list(REMOVE_DUPLICATES PALEO_QGIS_CORE_INCLUDE_DIRS)
 
-    add_library(qgis_render_bridge_core STATIC src/qgis_render_bridge.cpp)
+    add_library(qgis_render_bridge_core STATIC
+        src/qgis_render_bridge.cpp
+        src/style_codec.cpp
+        src/gui_service.cpp
+        src/geometry_service.cpp
+    )
     target_include_directories(qgis_render_bridge_core SYSTEM PUBLIC
         "${PALEO_QGIS_SOURCE_DIR}/src/core"
         ${PALEO_QGIS_CORE_INCLUDE_DIRS}
@@ -109,6 +114,7 @@ if(PALEO_WITH_QGIS_RENDERER)
         Qt6::Gui
         Qt6::Widgets
         Qt6::Xml
+        Qt6::Svg
     )
     set_target_properties(qgis_render_bridge_core PROPERTIES
         BUILD_RPATH "${PALEO_QGIS_LIBRARY_DIR}"

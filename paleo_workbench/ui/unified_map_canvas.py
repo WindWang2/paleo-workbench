@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import math
+import os
+import tempfile
 from typing import Any, Mapping
 
 from PySide6.QtCore import QMarginsF, QPointF, QRect, QRectF, QSize, QSizeF, Qt, QTimer, Signal
@@ -21,7 +23,7 @@ from PySide6.QtGui import (
     QTransform,
     QWheelEvent,
 )
-from PySide6.QtSvg import QSvgGenerator
+from PySide6.QtSvg import QSvgGenerator, QSvgRenderer
 from PySide6.QtWidgets import QWidget
 
 from paleo_workbench.mapping.map_render_backend import (
@@ -694,6 +696,52 @@ class UnifiedMapCanvas(QWidget):
         if not image.save(path, "PNG"):
             raise RuntimeError("could not save unified map PNG")
 
+    def _export_via_backend(self, path: str, fmt: str, width: int, height: int, dpi: float) -> bool:
+        """Produce the map body through the backend's own vector exporter."""
+        backend = self._backend
+        if backend.render_active:
+            backend.cancel_render()
+        previous_size = backend._output_size
+        previous_dpi = backend._dpi
+        previous_extent = backend._extent
+        try:
+            backend.set_output_size(int(width), int(height))
+            backend.set_dpi(float(dpi))
+            backend.set_extent(self._letterboxed_extent(int(width), int(height)))
+            return bool(
+                backend.export_map_body(str(path), fmt, int(width), int(height), float(dpi))
+            )
+        finally:
+            backend.set_output_size(*previous_size)
+            backend.set_dpi(previous_dpi)
+            backend.set_extent(previous_extent)
+
+    def _paint_native_map_body(self, painter: QPainter, width: int, height: int, dpi: float) -> bool:
+        """Render the QGIS map body (true vector) onto an export painter.
+
+        The native bridge writes a map-only SVG to a temporary file, which is
+        replayed through QSvgRenderer so both SVG and PDF exports keep vector
+        geometry from the same renderer configuration as the screen.  Host
+        decorations stay painted on top by the caller.
+        """
+        handle, temp_path = tempfile.mkstemp(suffix=".svg", prefix="paleo-map-body-")
+        try:
+            os.close(handle)
+            if not self._export_via_backend(temp_path, "svg", width, height, dpi):
+                return False
+            renderer = QSvgRenderer(temp_path)
+            if not renderer.isValid():
+                return False
+            renderer.render(painter, QRectF(0, 0, float(width), float(height)))
+            return True
+        except Exception:  # noqa: BLE001 — export falls back to the painter pipeline
+            return False
+        finally:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
     def export_svg(
         self, path: str, *, width: int = 2400, height: int | None = None, dpi: float = 300.0
     ) -> None:
@@ -715,6 +763,9 @@ class UnifiedMapCanvas(QWidget):
             raise RuntimeError("could not begin unified map SVG export")
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            if self._paint_native_map_body(painter, int(width), int(height), dpi):
+                self._paint_export_decorations(painter, int(width), int(height), dpi)
+                return
             self._paint_export_vector(painter, int(width), int(height), dpi)
         finally:
             painter.end()
@@ -740,11 +791,35 @@ class UnifiedMapCanvas(QWidget):
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             page_rect = writer.pageLayout().paintRectPixels(writer.resolution())
+            if self._paint_native_map_body(
+                painter, int(page_rect.width()), int(page_rect.height()), dpi
+            ):
+                self._paint_export_decorations(
+                    painter, int(page_rect.width()), int(page_rect.height()), dpi,
+                    extent=self._letterboxed_extent(int(width), int(height)),
+                )
+                return
             self._paint_export_vector(
                 painter, int(page_rect.width()), int(page_rect.height()), dpi
             )
         finally:
             painter.end()
+
+    def _paint_export_decorations(
+        self, painter: QPainter, width: int, height: int, dpi: float,
+        extent: tuple[float, float, float, float] | None = None,
+    ) -> None:
+        """Paint host chrome over a natively exported map body."""
+        state = self._overlay_provider() if self._overlay_provider is not None else {}
+        export_extent = extent if extent is not None else self._letterboxed_extent(width, height)
+        self._paint_decorations(
+            painter,
+            (state or {}).get("decorations") or {},
+            width=width,
+            height=height,
+            scale=float(dpi) / 96.0,
+            extent=export_extent,
+        )
 
     def _paint_export_vector(self, painter: QPainter, width: int, height: int, dpi: float) -> None:
         """Run the backend's vector pipeline plus chrome at export resolution."""
