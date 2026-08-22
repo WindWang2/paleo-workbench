@@ -282,3 +282,85 @@ def test_qc_sync_adopts_single_unbound_legacy_task():
     updated = sync_well_table_to_linked_tasks(project, table)
     assert updated == [only]
     assert only.well_table_id == table.id
+
+
+# --------------------------------------------------------------------- #924
+
+
+def test_constrained_idw_gap_fill_survives_hull_raster_skip():
+    """#924: the vendored hull-raster skip must not disable default gap fill.
+
+    Fixture (14 wells, one direction line, 50x50 batch grid) diverged from the
+    upstream engine by 70 finite cells before the fix: skipping the hull raster
+    flipped ``data_hull_active`` and zeroed ``gap_iterations``. Post-fix the
+    finite-cell count matches upstream's 1652 for this SHApinned fixture.
+    """
+    import importlib
+
+    import numpy as np
+
+    from paleo_workbench.workflow.constrained_idw_adapter import _ensure_haiyou_engine
+
+    _ensure_haiyou_engine()
+    # The adapter put the vendored root on sys.path; its modules import as
+    # top-level ``drawing.*`` packages (Qt-free stubs).
+    fast_grid = importlib.import_module("drawing.single_factor.fast_grid")
+    corridor = importlib.import_module("drawing.single_factor.direction_corridor")
+
+    rng = np.random.default_rng(20260822)
+    n = 14
+    wells = np.stack(
+        [rng.uniform(8.0, 92.0, n), rng.uniform(8.0, 92.0, n)], axis=1
+    )
+    vals = 20.0 + 60.0 * (wells[:, 0] / 100.0) + rng.normal(0.0, 6.0, n)
+    well_array = np.stack([wells[:, 0], wells[:, 1], vals], axis=1)
+
+    dline = [(12.0, 20.0), (40.0, 45.0), (70.0, 62.0), (90.0, 88.0)]
+    specs = [
+        corridor.DirectionLineSpec(
+            line_id="d0",
+            points=tuple(dline),
+            active=True,
+            ratio=18.0,
+            influence_radius=0.0,
+            priority=1,
+            core_radius=0.0,
+            zone_id="",
+            extend_mode="auto",
+            transition=0.0,
+        )
+    ]
+    gx = np.linspace(-2.0, 102.0, 50)
+    gy = np.linspace(-2.0, 102.0, 50)
+    domain = np.ones((50, 50), dtype=bool)
+    spacing = corridor.estimate_mean_well_spacing(wells)
+    geoms = corridor.build_direction_geometries(
+        specs, search_radius=120.0, mean_well_spacing=spacing, map_extent=104.0
+    )
+    cache = corridor.build_grid_direction_cache(gx, gy, domain, geoms)
+    field = corridor.build_legacy_direction_field(cache)
+
+    grid = fast_grid.interpolate_idw_grid_batch(
+        gx,
+        gy,
+        well_array,
+        domain,
+        search_radius=120.0,
+        power=2.0,
+        min_points=3,
+        max_points=12,
+        density_weights=np.ones(n, dtype=float),
+        value_min=0.0,
+        value_max=100.0,
+        region_labels=None,
+        well_labels=None,
+        direction_field=field,
+        direction_corridor_strength=1.0,
+        direction_perpendicular_strength=1.0,
+        use_extended_search=True,
+        limit_search_radius=True,
+    )
+    finite = int(np.isfinite(grid).sum())
+    # Golden count verified bit-identical against upstream @ 5b8f8f98 with the
+    # gap-fill fix applied (pre-fix vendored produced 1582).
+    assert finite == 1652

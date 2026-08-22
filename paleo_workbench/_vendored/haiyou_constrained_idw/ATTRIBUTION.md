@@ -87,6 +87,19 @@ The copied modules are **byte-for-byte identical** to the upstream SHA above
 - `drawing/single_factor/fast_grid.py` reuses a module-level
   `ThreadPoolExecutor` across calls instead of constructing one per
   interpolation (same work distribution, no numerical change).
+- `drawing/single_factor/constrained_engine.py` — **gap-fill hull fix
+  (2026-08-22, issue #924)**: the host-added "skip the data-hull raster on the
+  default limit-to-coverage path" optimization accidentally fed
+  `data_hull_active = mask is not None` a `None`, which flipped
+  `gap_iterations` from upstream's `min(8, 3)` to `0` and left interior holes
+  unfilled. The skip branch now records `data_hull_present =
+  data_hull_exists(wells)` and the gap decision reads
+  `(mask non-empty) or data_hull_present`. Upstream parity restored: with this
+  fix the direction-line fixture that previously diverged (173 NaN cells) is
+  bit-identical to upstream again. Known approximation: in the skipped-raster
+  path, existence (`data_hull_exists`) stands in for "raster has any cell";
+  upstream would report inactive only if the materialised raster were empty,
+  which requires a hull containing zero grid-cell centers.
 
 ## What was NOT vendored
 

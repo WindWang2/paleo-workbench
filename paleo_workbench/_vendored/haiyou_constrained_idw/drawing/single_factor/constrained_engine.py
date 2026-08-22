@@ -756,6 +756,11 @@ def generate_constrained_idw(
             effective_mask_radius,
         )
     data_hull_mask = None
+    # "Was there a hull?" independent of whether the raster was materialised
+    # (audit fix #924): the default limit-to-coverage path skips the raster,
+    # but the downstream gap-fill decision must still see the hull exactly the
+    # way upstream — which always builds it — does.
+    data_hull_present = False
     hull_buffer = resolve_data_hull_buffer_meters(
         float(config.data_hull_buffer_meters),
         float(config.search_radius),
@@ -772,11 +777,13 @@ def generate_constrained_idw(
             buffer_meters=hull_buffer,
         )
         if data_hull_mask is not None:
+            data_hull_present = bool(np.any(data_hull_mask))
             diagnostics["data_hull_limited"] = 1
             diagnostics["data_hull_buffer_meters"] = float(hull_buffer)
     elif hull_requested and data_hull_exists(well_array[:, :2]):
         # Default limit-to-coverage path only needs "was there a hull?" —
         # the raster is discarded (domain_hull_mask = None) so skip it.
+        data_hull_present = True
         diagnostics["data_hull_limited"] = 1
         diagnostics["data_hull_buffer_meters"] = float(hull_buffer)
     # 限制外推时不用凸包扩域：井点沿边界分布时凸包会把内部无井区包进来。
@@ -1133,7 +1140,10 @@ def generate_constrained_idw(
         )
 
     gap_iterations = max(0, int(config.gap_fill_iterations))
-    data_hull_active = data_hull_mask is not None and bool(np.any(data_hull_mask))
+    data_hull_active = (
+        (data_hull_mask is not None and bool(np.any(data_hull_mask)))
+        or data_hull_present
+    )
     idw_support_mask = domain_mask & np.isfinite(grid_z)
     bfs_reach_cells = resolve_bfs_reach_cells(
         float(config.search_radius),
