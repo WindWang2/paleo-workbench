@@ -48,6 +48,27 @@ def qgis_bridge_available() -> bool:
     return True
 
 
+def qgis_scalar_pipeline_ready() -> tuple[bool, str]:
+    """Bridge AND the GDAL Python binding the scalar-raster mirror needs.
+
+    Audit #925: ``qgis_bridge_available`` alone reported "ready" on installs
+    where every scalar-grid composition then failed at runtime with a bare
+    RuntimeError because ``osgeo.gdal`` was missing. Capability probes must
+    cover what the feature actually imports.
+    """
+    if not qgis_bridge_available():
+        return False, "qgis_render_bridge 未构建（可选组件）"
+    try:
+        from osgeo import gdal  # noqa: F401
+    except ImportError:
+        return (
+            False,
+            "QGIS 标量栅格管线需要 GDAL Python 绑定（osgeo）；"
+            "当前环境未安装，栅格图层无法经 QGIS 渲染",
+        )
+    return True, ""
+
+
 @dataclass(frozen=True, slots=True)
 class QgisStylePayload:
     """One persisted QGIS authoring style with revision tracking."""

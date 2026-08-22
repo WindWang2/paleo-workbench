@@ -440,3 +440,55 @@ def test_constrained_idw_r_squared_is_cross_validated_not_anchored():
     )
     assert result["anchored_fidelity"] > 0.99
     assert result["r_squared"] != pytest.approx(result["anchored_fidelity"])
+
+
+# --------------------------------------------------------------------- #925
+
+
+def test_create_map_render_backend_degrades_on_broken_bridge(monkeypatch):
+    """#925: a bridge that imports but fails initialize() must not crash the
+    factory — the fallback engages with an actionable logged reason."""
+    import importlib
+
+    from paleo_workbench.mapping import map_render_backend as mrb
+
+    class BrokenBridge:
+        @staticmethod
+        def initialize():
+            raise RuntimeError("QGIS prefix broken")
+
+    monkeypatch.setattr(mrb.QgisMapRenderBackend, "is_available", property(lambda self: True))
+    # Replace the native module reference used inside initialize() so the
+    # guarded probe hits the broken-bridge path.
+    mrb_module = importlib.reload(mrb) if False else mrb
+    monkeypatch.setattr(
+        mrb_module.QgisMapRenderBackend,
+        "initialize",
+        lambda self: (_ for _ in ()).throw(RuntimeError("QGIS prefix broken")),
+    )
+    monkeypatch.setattr(mrb_module, "_QGIS_PROBE", {}, None)
+    backend = mrb_module.create_map_render_backend(prefer_qgis=True)
+    assert backend.backend_name != "qgis", "broken bridge must degrade to fallback"
+    ok, reason = mrb_module.qgis_backend_probe()
+    assert ok is False
+    assert "初始化失败" in reason
+
+
+def test_scalar_pipeline_probe_reports_gdal_gap(monkeypatch):
+    """#925: availability covers what the scalar pipeline actually imports."""
+    from paleo_workbench.mapping import qgis_style
+
+    monkeypatch.setattr(qgis_style, "qgis_bridge_available", lambda: True)
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_osgeo(name, *a, **k):
+        if name.startswith("osgeo"):
+            raise ImportError("No module named osgeo")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", no_osgeo)
+    ok, reason = qgis_style.qgis_scalar_pipeline_ready()
+    assert ok is False
+    assert "GDAL" in reason

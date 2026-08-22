@@ -14,6 +14,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
+import logging
 import math
 import os
 import threading
@@ -27,6 +28,8 @@ from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPolygon
 
 from paleo_workbench.mapping.map_styles import MarkerSymbol, VectorStyle
 
+logger = logging.getLogger(__name__)
+
 __all__ = [
     "FallbackMapRenderBackend",
     "MapLayerSnapshot",
@@ -35,6 +38,7 @@ __all__ = [
     "QgisMapRenderBackend",
     "RenderFrame",
     "create_map_render_backend",
+    "qgis_backend_probe",
     "shutdown_live_fallback_backends",
 ]
 
@@ -1455,6 +1459,13 @@ class QgisMapRenderBackend(MapRenderBackend):
     def _native_snapshot(self, snapshot: MapRenderSnapshot) -> list[dict[str, object]]:
         if any(layer.layer_type == "scalar_grid" for layer in snapshot.layers):
             if self._scalar_raster_cache is None:
+                from paleo_workbench.mapping.qgis_style import qgis_scalar_pipeline_ready
+
+                # Availability honesty (#925): fail with the shared actionable
+                # reason instead of a bare ImportError deep in the mirror.
+                ready, reason = qgis_scalar_pipeline_ready()
+                if not ready:
+                    raise RuntimeError(reason)
                 from paleo_workbench.mapping.scalar_raster_mirror import ScalarRasterMirrorCache
 
                 self._scalar_raster_cache = ScalarRasterMirrorCache()
@@ -1787,8 +1798,44 @@ def _geometry_to_wkt(geometry: object) -> str:
     return ""
 
 
+_QGIS_PROBE: dict[str, str] = {}
+
+
+def qgis_backend_probe() -> tuple[bool, str]:
+    """One-shot guarded QGIS runtime probe (audit #925).
+
+    Importability of the bridge is NOT usability: ``initialize()`` fails on a
+    broken QGIS prefix or an ABI-skewed binary (system Qt vs PySide6 minor
+    mismatch), which previously propagated out of ``UnifiedMapCanvas.__init__``
+    and killed app startup / project switching. The probe result is cached for
+    the process; the returned reason is actionable and empty on success.
+    """
+    if "ok" in _QGIS_PROBE:
+        return _QGIS_PROBE["ok"] == "1", _QGIS_PROBE.get("reason", "")
+    backend = QgisMapRenderBackend()
+    if not backend.is_available:
+        _QGIS_PROBE["ok"] = "0"
+        _QGIS_PROBE["reason"] = "qgis_render_bridge 未构建（可选组件）"
+        return False, _QGIS_PROBE["reason"]
+    try:
+        backend.initialize()
+    except Exception as exc:  # noqa: BLE001 — any init failure must degrade
+        _QGIS_PROBE["ok"] = "0"
+        _QGIS_PROBE["reason"] = f"QGIS 运行时初始化失败：{type(exc).__name__}: {exc}"
+        logger.warning("QGIS backend unusable, degrading to fallback: %s", _QGIS_PROBE["reason"])
+        return False, _QGIS_PROBE["reason"]
+    finally:
+        try:
+            backend.shutdown()
+        except Exception:  # noqa: BLE001 — teardown of a half-built runtime
+            pass
+    _QGIS_PROBE["ok"] = "1"
+    _QGIS_PROBE["reason"] = ""
+    return True, ""
+
+
 def create_map_render_backend(*, prefer_qgis: bool = True) -> MapRenderBackend:
-    """Select QGIS only when its optional native bridge is genuinely available.
+    """Select QGIS only when its optional native bridge is genuinely usable.
 
     The fallback is threaded by default: the UI canvas must never block on the
     first preparation of a large vector layer. Tests construct it directly and
@@ -1796,5 +1843,9 @@ def create_map_render_backend(*, prefer_qgis: bool = True) -> MapRenderBackend:
     """
     qgis = QgisMapRenderBackend()
     if prefer_qgis and qgis.is_available:
-        return qgis
+        usable, reason = qgis_backend_probe()
+        if usable:
+            return qgis
+        logger.warning("QGIS 不可用，已降级为回退渲染器：%s", reason)
+        return FallbackMapRenderBackend(threaded=True)
     return FallbackMapRenderBackend(threaded=True)
