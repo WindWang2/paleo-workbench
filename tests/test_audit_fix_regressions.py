@@ -364,3 +364,49 @@ def test_constrained_idw_gap_fill_survives_hull_raster_skip():
     # Golden count verified bit-identical against upstream @ 5b8f8f98 with the
     # gap-fill fix applied (pre-fix vendored produced 1582).
     assert finite == 1652
+
+
+# --------------------------------------------------------------------- #920
+
+
+def test_scene_from_factor_task_upserts_new_grid_payload():
+    """#920: re-overlaying a re-run task refreshes the scalar payload in place."""
+    from paleo_workbench.viz.native_factor_map import scene_from_factor_task
+    from paleo_workbench.workflow.factor_interpolation import (
+        apply_interpolation_to_task,
+    )
+
+    def mk_pts(shift=0.0):
+        rng = np.random.default_rng(7)
+        return [
+            {"x": float(x), "y": float(y), "value": float(v) + shift}
+            for x, y, v in zip(
+                rng.uniform(0, 50, 40), rng.uniform(0, 50, 40), rng.uniform(10, 60, 40)
+            )
+        ]
+
+    task = FactorMapTask(
+        name="f",
+        target_horizon="H1",
+        factor_type="t",
+        method="IDW",
+        parameters={"sample_points": mk_pts()},
+        status="pending",
+    )
+    apply_interpolation_to_task(task, grid_n=24)
+    scene = scene_from_factor_task(task, crs=None)
+    layer_id = str(task.id)
+    fp_first = scene.registry.get(layer_id).metadata.get("result_fingerprint")
+    revision_first = scene._scalars[layer_id].data_revision
+
+    # Re-run with different values → re-overlay must serve the NEW grid (#920).
+    task.parameters = {**task.parameters, "sample_points": mk_pts(20.0)}
+    apply_interpolation_to_task(task, grid_n=24)
+    scene_from_factor_task(task, crs=None, scene=scene)
+    assert scene.registry.get(layer_id).metadata.get("result_fingerprint") != fp_first
+    assert scene._scalars[layer_id].data_revision != revision_first
+
+    # Idempotent re-request with unchanged content must not touch the payload.
+    revision_third = scene._scalars[layer_id].data_revision
+    scene_from_factor_task(task, crs=None, scene=scene)
+    assert scene._scalars[layer_id].data_revision == revision_third

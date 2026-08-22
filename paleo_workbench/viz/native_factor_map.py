@@ -14,7 +14,10 @@ import numpy as np
 
 from paleo_workbench.catalog.grid_artifact import read_grid_artifact
 from paleo_workbench.mapping.map_render_backend import MapLayerSnapshot, MapRenderSnapshot
-from paleo_workbench.project.factor_grid_artifacts import factor_grid_result_for_task
+from paleo_workbench.project.factor_grid_artifacts import (
+    factor_grid_result_for_task,
+    grid_result_fingerprint,
+)
 from paleo_workbench.viz.grid_render import default_rgba_lut
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 
@@ -233,6 +236,9 @@ class MapScene:
         # artifact version id so exports can always cite a catalog DataVersion.
         map_layer.set_provenance_ref(result.run_ref or str(source_ref))
         map_layer.set_metadata("algorithm_id", result.algorithm_id)
+        # Content fingerprint so a later re-request can detect a re-run that
+        # produced a NEW grid for the same task id (#920 upsert contract).
+        map_layer.set_metadata("result_fingerprint", grid_result_fingerprint(result) or "")
         self._scalars[layer_id] = native_layer
         self._scalar_styles[layer_id] = {
             "color_ramp": "default",
@@ -696,6 +702,44 @@ class MapScene:
         )
 
 
+def _refresh_scalar_payload_if_stale(
+    scene: NativeMapScene, task_id: str, result: FactorGridResult
+) -> bool:
+    """Upsert the scene's scalar payload when a re-run produced a new grid.
+
+    The layer identity stays put (visibility/order/children preserved); only
+    the data, extent/CRS metadata and default color range track the fresh
+    result.  Content identity is the recorded ``result_fingerprint`` (#920).
+    """
+    map_layer = scene.registry.get(task_id)
+    if map_layer is None:
+        return False
+    new_fp = grid_result_fingerprint(result) or ""
+    metadata = map_layer.metadata
+    stored_fp = ""
+    if isinstance(metadata, dict):
+        stored_fp = str(metadata.get("result_fingerprint", "") or "")
+    if new_fp and stored_fp and new_fp == stored_fp:
+        return False
+    changed = scene.set_scalar_data(task_id, result.grid_z, mask=result.mask)
+    scalar = scene._scalars.get(task_id)
+    if scalar is not None:
+        lo, hi = result.statistics.min, result.statistics.max
+        if np.isfinite(lo) and np.isfinite(hi) and hi >= lo:
+            scalar.set_color_range(float(lo), float(hi))
+            style = dict(scene._scalar_styles.get(task_id) or {})
+            style["color_range"] = [float(lo), float(hi)]
+            scene._scalar_styles[task_id] = style
+    map_layer.extent = result.extent
+    map_layer.crs = result.crs or ""
+    if new_fp:
+        map_layer.set_metadata("result_fingerprint", new_fp)
+    if changed or new_fp != stored_fp:
+        map_layer.bump_data_revision()
+        scene._emit_changed()
+    return True
+
+
 def scene_from_factor_task(
     task,
     *,
@@ -712,11 +756,12 @@ def scene_from_factor_task(
     result = factor_grid_result_for_task(task, crs=crs)
     scene = scene or NativeMapScene()
     task_id = str(getattr(task, "id", "") or "factor_grid")
-    # Re-requesting an already integrated task only changes visibility/order at
-    # the caller; it must not recreate the finished scalar payload.  Derived
-    # child layers (sample points / contour drafts) are attached idempotently
-    # below regardless: this function is the only production upsert path for
-    # them, and drafts may arrive in a later call than the grid (#536).
+    # Re-requesting an already integrated task keeps the layer identity and
+    # visibility/order at the caller; derived child layers (sample points /
+    # contour drafts) are attached idempotently below regardless (#536).  But
+    # if a re-run produced a NEW grid for this task id, the scalar payload is
+    # refreshed in place — serving the superseded grid on canvas and export is
+    # exactly the #920 defect.
     if scene.registry.get(task_id) is None:
         outputs = list(getattr(task, "output_resource_ids", None) or [])
         group_id = f"{task_id}:group"
@@ -744,6 +789,7 @@ def scene_from_factor_task(
                 str(getattr(task, "name", "") or result.factor_name),
                 layer_model_core.LayerType.Group,
             )
+        _refresh_scalar_payload_if_stale(scene, task_id, result)
     points = []
     for sample in params.get("sample_points") or []:
         try:
