@@ -794,3 +794,50 @@ def test_single_factor_plan_kernel_matches_multi_path():
     assert np.array_equal(np.isnan(single), np.isnan(multi))
     finite = np.isfinite(single)
     assert np.allclose(single[finite], multi[finite], rtol=0, atol=1e-10)
+
+
+# --------------------------------------------------------------------- #926
+
+
+def test_plan_fault_mask_grid_aligned_fault_matches_single_task():
+    """#926: a grid-aligned vertical fault must not blank a whole column.
+
+    The plan's old cells_on/wells_on whole-row/column blocking severed every
+    node sitting on the fault line from every well (23/23 NaN column) while
+    the single-task geoviz kernel rendered 0 NaN (#118 semantics).
+    """
+    from paleo_workbench.project.factor_grid_artifacts import (
+        factor_grid_result_for_task,
+    )
+    from paleo_workbench.workflow.factor_interpolation import (
+        apply_interpolation_to_task,
+    )
+    from paleo_workbench.workflow.interpolation_plan import (
+        apply_idw_plan,
+        build_idw_plan,
+        extract_values_aligned,
+    )
+
+    rng = np.random.default_rng(5)
+    xs = rng.uniform(0, 100, 24)
+    ys = rng.uniform(0, 100, 24)
+    vals = rng.uniform(10, 60, 24)
+    samples = [
+        {"x": float(x), "y": float(y), "value": float(v)}
+        for x, y, v in zip(xs, ys, vals)
+    ]
+    fault = [[(50.0, -5.0), (50.0, 105.0)]]
+
+    plan = build_idw_plan(samples, grid_n=40, power=2.0, fault_polylines=fault)
+    plan_grid = apply_idw_plan(plan, extract_values_aligned(samples, plan))["grid_z"]
+    assert int(np.isnan(plan_grid).sum()) == 0
+
+    task = FactorMapTask(
+        name="t", target_horizon="H1", factor_type="t", method="IDW",
+        parameters={"sample_points": samples}, status="pending",
+    )
+    apply_interpolation_to_task(task, method="IDW", grid_n=40, fault_polylines=fault)
+    single_grid = factor_grid_result_for_task(task).grid_z
+    assert int(np.isnan(single_grid).sum()) == 0
+    # Same inputs, same production semantics: both paths agree on nodata.
+    assert np.array_equal(np.isnan(plan_grid), np.isnan(single_grid))

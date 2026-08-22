@@ -169,6 +169,14 @@ def _fault_blocked_mask(
             # a fault endpoint on some (cell → well) line, i.e. |o| <= tol for
             # some pair.  Generic geometry never satisfies that; scan only when
             # the cheap all() check fails.
+            #
+            # #926: contacts must lie STRICTLY between cell and well (the
+            # geoviz strict_interior_touch semantics, #118). A contact AT the
+            # cell or the well must not block — pre-fix the bbox test also
+            # matched endpoint contacts, and the cells_on/wells_on blocks
+            # below severed whole rows/columns whenever a node/well merely sat
+            # ON a fault line (a grid-aligned vertical fault blanked a 23-cell
+            # NaN column while the single-task path rendered 0 NaN).
             if not (s1 | s2).all():
                 rows, cols = np.nonzero(~(s1 | s2))
                 if rows.size:
@@ -176,12 +184,25 @@ def _fault_blocked_mask(
                     cys = cy[rows, 0]
                     wxs = wx[0, cols]
                     wys = wy[0, cols]
+                    # Strictly-between contact (#926): project the fault
+                    # endpoint onto cell→well and require 0 < t < 1 (geoviz
+                    # _contact_strictly_between). The bbox test alone also
+                    # matched contacts AT the endpoints.
+                    dx = wxs - cxs
+                    dy = wys - cys
+                    length_sq = dx * dx + dy * dy
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        t = ((q1x - cxs) * dx + (q1y - cys) * dy) / length_sq
                     ok = (
-                        (np.minimum(cxs, wxs) - tolerance <= q1x)
+                        (length_sq > 0.0)
+                        & (t > 0.0)
+                        & (t < 1.0)
+                        & (np.minimum(cxs, wxs) - tolerance <= q1x)
                         & (q1x <= np.maximum(cxs, wxs) + tolerance)
                         & (np.minimum(cys, wys) - tolerance <= q1y)
                         & (q1y <= np.maximum(cys, wys) + tolerance)
                     )
+                    ok = np.where(np.isfinite(t), ok, False)
                     if np.any(ok):
                         hit[rows[ok], cols[ok]] = True
             if not (s3 | s4).all():
@@ -191,34 +212,28 @@ def _fault_blocked_mask(
                     cys = cy[rows, 0]
                     wxs = wx[0, cols]
                     wys = wy[0, cols]
+                    dx = wxs - cxs
+                    dy = wys - cys
+                    length_sq = dx * dx + dy * dy
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        t = ((q2x - cxs) * dx + (q2y - cys) * dy) / length_sq
                     ok = (
-                        (np.minimum(cxs, wxs) - tolerance <= q2x)
+                        (length_sq > 0.0)
+                        & (t > 0.0)
+                        & (t < 1.0)
+                        & (np.minimum(cxs, wxs) - tolerance <= q2x)
                         & (q2x <= np.maximum(cxs, wxs) + tolerance)
                         & (np.minimum(cys, wys) - tolerance <= q2y)
                         & (q2y <= np.maximum(cys, wys) + tolerance)
                     )
+                    ok = np.where(np.isfinite(t), ok, False)
                     if np.any(ok):
                         hit[rows[ok], cols[ok]] = True
-            # Cell on the fault segment line (blocks the whole row) / well on
-            # the fault segment line (blocks the whole column).
-            o3_flat = o3[:, 0]
-            o4_flat = o4[0, :]
-            cells_on = (np.abs(o3_flat) <= tolerance) & (
-                (min(q1x, q2x) - tolerance <= cx[:, 0])
-                & (cx[:, 0] <= max(q1x, q2x) + tolerance)
-                & (min(q1y, q2y) - tolerance <= cy[:, 0])
-                & (cy[:, 0] <= max(q1y, q2y) + tolerance)
-            )
-            wells_on = (np.abs(o4_flat) <= tolerance) & (
-                (min(q1x, q2x) - tolerance <= wx[0, :])
-                & (wx[0, :] <= max(q1x, q2x) + tolerance)
-                & (min(q1y, q2y) - tolerance <= wy[0, :])
-                & (wy[0, :] <= max(q1y, q2y) + tolerance)
-            )
-            if np.any(cells_on):
-                hit[cells_on, :] = True
-            if np.any(wells_on):
-                hit[:, wells_on] = True
+            # #926: no whole-row/whole-column blocking. A node or well that
+            # merely sits ON a fault line is an endpoint contact for every
+            # pair through it — strict_interior_touch semantics keep it
+            # reachable from both walls (#118); the old cells_on/wells_on
+            # blocks here severed them from EVERYTHING.
             chunk_blocked |= hit
         blocked[start:stop] = chunk_blocked
     return blocked
@@ -600,3 +615,59 @@ def extract_values_aligned(
     ):
         raise ValueError("sample geometry does not match interpolation plan")
     return z
+
+
+def _contact_strictly_between(
+    ax: float, ay: float, bx: float, by: float, px: float, py: float
+) -> bool:
+    """True when collinear point (px, py) lies strictly inside segment a-b.
+
+    Mirrors geoviz ``_contact_strictly_between`` (projection parameter) so the
+    plan-side reference and the engine share one semantic (#926/#118).
+    """
+    abx = bx - ax
+    aby = by - ay
+    length_sq = abx * abx + aby * aby
+    if length_sq <= 0.0:
+        return False
+    t = ((px - ax) * abx + (py - ay) * aby) / length_sq
+    return 0.0 < t < 1.0
+
+
+def _segments_intersect_strict(
+    p1x: float, p1y: float,
+    p2x: float, p2y: float,
+    q1x: float, q1y: float,
+    q2x: float, q2y: float,
+    *,
+    tolerance: float = 1e-12,
+) -> bool:
+    """geoviz ``strict_interior_touch=True`` semantics (#926).
+
+    Proper crossings block; endpoint contacts count only when the contact
+    point lies STRICTLY between the cell and the sample. Contacts at the cell
+    or the sample itself never block — a node sitting exactly on a fault line
+    stays reachable from both walls (#118) instead of being severed from
+    every sample (the old cells_on/wells_on whole-row/column blocks).
+    """
+    o1 = _orientation_value((p1x, p1y), (p2x, p2y), (q1x, q1y))
+    o2 = _orientation_value((p1x, p1y), (p2x, p2y), (q2x, q2y))
+    o3 = _orientation_value((q1x, q1y), (q2x, q2y), (p1x, p1y))
+    o4 = _orientation_value((q1x, q1y), (q2x, q2y), (p2x, p2y))
+    if (
+        ((o1 > tolerance and o2 < -tolerance) or (o1 < -tolerance and o2 > tolerance))
+        and (
+            (o3 > tolerance and o4 < -tolerance)
+            or (o3 < -tolerance and o4 > tolerance)
+        )
+    ):
+        return True
+    return (
+        (abs(o1) <= tolerance and _contact_strictly_between(p1x, p1y, p2x, p2y, q1x, q1y))
+        or (abs(o2) <= tolerance and _contact_strictly_between(p1x, p1y, p2x, p2y, q2x, q2y))
+    )
+
+
+def _orientation_value(p1, p2, q) -> float:
+    """Cross product orientation of q w.r.t. the p1→p2 line."""
+    return (p2[0] - p1[0]) * (q[1] - p1[1]) - (p2[1] - p1[1]) * (q[0] - p1[0])
