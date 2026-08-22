@@ -294,3 +294,101 @@ def audio_preview(resource: ResourceItem) -> PreviewResult:
         type_label=resource.type,
         media_path=resource.path,
     )
+
+
+def video_preview(resource: ResourceItem) -> PreviewResult:
+    return PreviewResult(
+        mode="media",
+        title=resource.name,
+        path=resource.path,
+        revision=resource_revision_token(resource),
+        format=resource.format,
+        status=resource.status,
+        type_label=resource.type,
+        media_path=resource.path,
+    )
+
+
+def doc_preview(resource: ResourceItem) -> PreviewResult:
+    return PreviewResult(
+        mode="message",
+        title=resource.name,
+        path=resource.path,
+        revision=resource_revision_token(resource),
+        format=resource.format,
+        status=resource.status,
+        type_label=resource.type,
+        message="旧版二进制 .doc 不受支持，请另存为 .docx 后再预览",
+    )
+
+
+def docx_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewResult:
+    path = Path(resource.path)
+    revision = resource_revision_token(resource)
+    try:
+        from docx import Document
+        from docx.oxml.table import CT_Tbl
+        from docx.oxml.text.paragraph import CT_P
+        from docx.table import Table
+        from docx.text.paragraph import Paragraph
+    except ImportError:
+        return PreviewResult(
+            mode="message",
+            title=resource.name,
+            path=resource.path,
+            revision=revision,
+            format=resource.format,
+            status=resource.status,
+            type_label=resource.type,
+            message="docx 预览依赖缺失，请安装 python-docx",
+        )
+    try:
+        document = Document(str(path))
+    except Exception:
+        return parse_error_preview(resource, "docx 解析失败")
+
+    blocks: list[str] = []
+    try:
+        body = document.element.body
+        for child in body.iterchildren():
+            if isinstance(child, CT_P):
+                para = Paragraph(child, document)
+                # Preserve paragraph text as-is (including empty paragraphs)
+                blocks.append(para.text)
+            elif isinstance(child, CT_Tbl):
+                tbl = Table(child, document)
+                rows: list[str] = []
+                for row in tbl.rows:
+                    cells = [cell.text for cell in row.cells]
+                    rows.append("\t".join(cells))
+                blocks.append("\n".join(rows))
+            else:
+                continue
+    except Exception:
+        return parse_error_preview(resource, "docx 解析失败")
+
+    raw_text = "\n".join(blocks)
+    # Bounded size: reuse text preview caps (settings.text_limit_kib)
+    limit_bytes = settings.text_limit_kib * 1024
+    encoded = raw_text.encode("utf-8")
+    truncated = len(encoded) > limit_bytes
+    if truncated:
+        # Truncate on byte boundary, decode with replace to avoid splitting
+        truncated_bytes = encoded[:limit_bytes]
+        text = truncated_bytes.decode("utf-8", errors="replace")
+        warning = f"仅显示前 {settings.text_limit_kib} KiB"
+    else:
+        text = raw_text
+        warning = ""
+    return PreviewResult(
+        mode="text",
+        title=resource.name,
+        path=resource.path,
+        revision=revision,
+        format=resource.format,
+        status=resource.status,
+        type_label=resource.type,
+        text=text,
+        warning=warning,
+        truncated=truncated,
+    )
