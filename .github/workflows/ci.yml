@@ -181,7 +181,7 @@ jobs:
           python -m pytest -v --tb=line \
             --timeout=45 \
             --timeout-method=thread \
-            -m "not slow" \
+            -m "not slow and not welllog_binding" \
             --durations=25
 
       - name: Assert the slow family has not silently shrunk
@@ -194,6 +194,17 @@ jobs:
           count="$(python -m pytest --collect-only -q -m slow tests/ 2>&1 | grep -oE '[0-9]+ tests collected' | grep -oE '^[0-9]+')"
           echo "slow tests collected: ${count} (baseline 15)"
           test -n "${count}" && test "${count}" -ge 15
+
+      - name: Assert the welllog binding contract still exists (#917)
+        # Audit #896/#917: the workbench↔engine binding contract needs a BUILT
+        # welllog pybind module, which no CI leg installs — running it here made
+        # the required gate permanently red. It is deselected above, but its
+        # PRESENCE is asserted (baseline: 1 contract + 1 guard) so the contract
+        # cannot silently vanish; execution happens where the binding is built.
+        run: |
+          count="$(python -m pytest --collect-only -q -m welllog_binding tests/ 2>&1 | grep -oE '[0-9]+ tests collected' | grep -oE '^[0-9]+')"
+          echo "welllog_binding tests collected: ${count} (baseline 2)"
+          test -n "${count}" && test "${count}" -ge 2
 
   # Focused job for Well Log Workstation (#207 / PR #233): no geo-viz submodule,
   # no map_edit_core. Host-only (engine optional) so the workstation suite is

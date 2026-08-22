@@ -31,6 +31,7 @@ def _well() -> WellLogData:
     )
 
 
+@pytest.mark.welllog_binding
 def test_workbench_plan_uses_native_multitrack_append_and_patch(qtbot):
     _, view_class, _ = adapter.try_import_welllog()
     if view_class is None:
@@ -69,14 +70,15 @@ def test_workbench_plan_uses_native_multitrack_append_and_patch(qtbot):
     assert np.isfinite(second.primary.depth).all()
 
 
+@pytest.mark.welllog_binding
 def test_binding_contract_not_silently_skipped() -> None:
     """#896: workbench↔engine 集成契约不可静默零覆盖。
 
     该文件是唯一的 workbench↔engine 契约；三条 CI 腿都不装 welllog 绑定
     (主 gate 只装 geoviz; WLWS 腿 WLWS_DISABLE_ENGINE=1; WLE 腿纯 ctest)，
-    原 skip 会让契约在 CI 永久跳绿。本守卫统计同模块的 collected vs
-    skipped：若除本守卫外全部因绑定缺失被 skip，则显式 fail 并提示
-    “绑定契约零覆盖”。有绑定环境正常通过；无绑定 CI 显式红出。
+    原 skip 会让契约在 CI 永久跳绿。#917 起本守卫带 ``welllog_binding``
+    marker：主 gate deselect 本家族但**断言收集数 ≥2**（契约 + 守卫，
+    防止契约被静默删除），执行发生在装有绑定环境（本地 / 后续绑定腿）。
     """
 
     import pathlib
@@ -97,8 +99,11 @@ def test_binding_contract_not_silently_skipped() -> None:
         env["LD_PRELOAD"] = os.environ["LD_PRELOAD"]
     else:
         # Default to system libstdc++ if the child would otherwise fail to
-        # import welllog on this host. No effect on CI where binding is absent.
-        env.setdefault("LD_PRELOAD", "/usr/lib/libstdc++.so.6")
+        # import welllog on this host — but only when that shim actually
+        # exists (#917): hardcoding it flipped failure branches on hosts
+        # without /usr/lib/libstdc++.so.6.
+        if os.path.exists("/usr/lib/libstdc++.so.6"):
+            env.setdefault("LD_PRELOAD", "/usr/lib/libstdc++.so.6")
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "-rS", "-v", "tests/test_welllog_engine_native_integration.py::test_workbench_plan_uses_native_multitrack_append_and_patch"],
         capture_output=True,

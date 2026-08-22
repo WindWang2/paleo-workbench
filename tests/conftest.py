@@ -23,6 +23,15 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "qgis: QGIS production-renderer tests (opt-in bridge build)"
     )
+    # WellLog native-binding contract (#917): needs a BUILT welllog pybind
+    # module, which no CI leg installs today. The fast gate deselects the
+    # family but asserts its collection so the contract cannot silently
+    # vanish (same fail-closed pattern as the `slow` family).
+    config.addinivalue_line(
+        "markers",
+        "welllog_binding: workbench↔WellLogEngine native binding contract "
+        "(requires built binding; deselected in binding-less gates)",
+    )
 
 
 @pytest.fixture(autouse=True)
