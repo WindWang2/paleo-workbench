@@ -263,6 +263,9 @@ class DataPage(QWidget):
         self._export_job = OwnedWorkerJob(self)
         self._verify_job = OwnedWorkerJob(self)
         self._domain_bind_job = OwnedWorkerJob(self)
+        # #931: heavy catalog copy/hash actions (派生副本/纳管/新建版本/提升)
+        # run off the GUI thread like import/rescan/delivery/export.
+        self._catalog_copy_job = OwnedWorkerJob(self)
         self._last_import_report: ImportReport | None = None
         self._rescan_context: tuple | None = None
         self._delivery_context: tuple | None = None
