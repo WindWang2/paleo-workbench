@@ -92,7 +92,25 @@ def main() -> int:
 
     window = PaleoWorkbenchWindow(project=project)
     window.show()
+    # #941-7: the render backends' explicit teardown had no production caller
+    # (canvas closeEvent never fires on quit). Flush threaded fallback workers
+    # and cached layers on application quit instead of relying on interpreter
+    # teardown — QGIS mirrors rely on it for a clean exit.
+    app.aboutToQuit.connect(_shutdown_render_backends)
     return app.exec()
+
+
+def _shutdown_render_backends() -> None:
+    try:
+        from paleo_workbench.mapping.map_render_backend import (
+            shutdown_live_fallback_backends,
+        )
+
+        shutdown_live_fallback_backends()
+    except Exception:  # noqa: BLE001 — teardown must never break quitting
+        logging.getLogger("paleo_workbench").debug(
+            "render backend shutdown failed", exc_info=True
+        )
 
 
 if __name__ == "__main__":

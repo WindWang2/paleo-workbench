@@ -185,6 +185,10 @@ class MapExportWorker(QObject):
                 self._discard_partial()
                 self.cancelled.emit()
                 return
+            # A FAILED (non-cancelled) render may equally have written a
+            # partial file before raising — never leave it behind (#937-11,
+            # #852 covered cancellation only).
+            self._discard_partial()
             self.failed.emit(f"{exc.__class__.__name__}: {exc}")
             return
         if self._cancel_event.is_set():

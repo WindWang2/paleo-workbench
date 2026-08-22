@@ -47,7 +47,9 @@ def read_preview_chunk(path: Path, limit_kib: int) -> tuple[bytes, bool]:
 def text_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewResult:
     path = Path(resource.path)
     preview_bytes, truncated = read_preview_chunk(path, settings.text_limit_kib)
-    text = preview_bytes.decode("utf-8", errors="replace")
+    # utf-8-sig strips a leading BOM (#893 residual: plain .txt/.log/.xml
+    # previews kept showing \ufeff in the first line).
+    text = preview_bytes.decode("utf-8-sig", errors="replace")
     warning = f"仅显示前 {settings.text_limit_kib} KiB" if truncated else ""
     return PreviewResult(
         mode="text",
