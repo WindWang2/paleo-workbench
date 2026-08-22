@@ -60,6 +60,7 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
             if (style.contains("stroke")) layer.stroke = py::cast<std::string>(style["stroke"]);
             if (style.contains("stroke_width")) layer.stroke_width = py::cast<double>(style["stroke_width"]);
             if (style.contains("marker_size")) layer.marker_size = py::cast<double>(style["marker_size"]);
+            if (style.contains("line_pattern")) layer.line_pattern = py::cast<std::string>(style["line_pattern"]);
             if (style.contains("renderer")) layer.renderer_kind = py::cast<std::string>(style["renderer"]);
             if (style.contains("field")) layer.classification_field = py::cast<std::string>(style["field"]);
             if (style.contains("renderer_xml")) {
@@ -106,7 +107,14 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
             }
             if (style.contains("labels")) {
                 const py::dict labels = as_dict(style["labels"], "style labels");
-                layer.labels_enabled = labels.contains("field") && !py::cast<std::string>(labels["field"]).empty();
+                // #922: an explicit labels.visible=false must hide labels even
+                // when a field is configured (previously dropped → drawn anyway).
+                const bool visible = labels.contains("visible")
+                                         ? py::cast<bool>(labels["visible"])
+                                         : true;
+                layer.labels_enabled =
+                    visible && labels.contains("field")
+                    && !py::cast<std::string>(labels["field"]).empty();
                 if (labels.contains("field")) layer.label_field = py::cast<std::string>(labels["field"]);
                 if (labels.contains("font_family")) layer.label_font_family = py::cast<std::string>(labels["font_family"]);
                 if (labels.contains("size")) layer.label_size = py::cast<double>(labels["size"]);
@@ -117,6 +125,16 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
         layer.data_revision = py::cast<std::uint64_t>(data["data_revision"]);
         layer.style_revision = py::cast<std::uint64_t>(data["style_revision"]);
         layer.visible = py::cast<bool>(data["visible"]);
+        // #929: scale visibility travels with the layer payload (the fallback
+        // honours VectorStyle.scale_range; the QGIS wire used to drop it).
+        if (data.contains("scale_range") && !data["scale_range"].is_none()) {
+            const py::sequence range = py::reinterpret_borrow<py::sequence>(data["scale_range"]);
+            if (py::len(range) == 2) {
+                layer.has_scale_range = true;
+                layer.scale_range_min_denom = py::cast<double>(range[0]);
+                layer.scale_range_max_denom = py::cast<double>(range[1]);
+            }
+        }
         layer.opacity = py::cast<double>(data["opacity"]);
         for (const py::handle feature_item : py::reinterpret_borrow<py::iterable>(data["features"])) {
             const py::dict feature = as_dict(feature_item, "feature");

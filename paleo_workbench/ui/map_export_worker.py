@@ -30,6 +30,10 @@ class MapExportSpec:
     dpi: float
     decorations: Mapping[str, Any]
     path: str
+    # #923: True when the LIVE canvas backend is the QGIS renderer, so the
+    # worker must interpret the same renderer payloads instead of the legacy
+    # painter vocabulary (which silently drops qgis_style.renderer_xml).
+    prefer_native_renderer: bool = False
 
 
 def unified_map_canvas_from(widget: object) -> UnifiedMapCanvas | None:
@@ -66,6 +70,7 @@ def snapshot_map_export(
     provider = getattr(canvas, "_overlay_provider", None)
     state = provider() if provider is not None else {}
     decorations = dict((state or {}).get("decorations") or {})
+    backend = getattr(canvas, "backend", None)
     return MapExportSpec(
         snapshot=canvas.backend._snapshot,
         extent=(extent[0], extent[1], extent[2], extent[3]),
@@ -74,18 +79,62 @@ def snapshot_map_export(
         dpi=float(dpi),
         decorations=decorations,
         path=str(path),
+        prefer_native_renderer=getattr(backend, "backend_name", "") == "qgis",
     )
 
 
-def render_and_save_map_export(spec: MapExportSpec) -> None:
-    """Paint into a throwaway Fallback backend (no live-widget QObject affinity)."""
-    backend = FallbackMapRenderBackend()
+def _render_frame_native(spec: MapExportSpec):
+    """Render the snapshot through a throwaway QGIS backend on this thread.
+
+    The bridge's ``render_sync`` blocks on ``waitForFinished()`` (no caller
+    event loop needed), and every native object here is born and torn down on
+    the calling worker thread, so there is no cross-thread QObject affinity.
+    This keeps export on ONE style interpreter with the screen (#923): the
+    legacy painter vocabulary cannot express qgis_style.renderer_xml.
+    """
+    from paleo_workbench.mapping.map_render_backend import QgisMapRenderBackend
+
+    backend = QgisMapRenderBackend()
     backend.initialize()
-    backend.set_layer_snapshot(spec.snapshot)
-    backend.set_extent(spec.extent)
-    backend.set_output_size(spec.width, spec.height)
-    backend.set_dpi(spec.dpi)
-    frame = backend.render_sync()
+    try:
+        backend.set_layer_snapshot(spec.snapshot)
+        backend.set_extent(spec.extent)
+        backend.set_output_size(spec.width, spec.height)
+        backend.set_dpi(spec.dpi)
+        return backend.render_sync()
+    finally:
+        try:
+            backend.shutdown()
+        except Exception:  # noqa: BLE001 — teardown must not mask the export
+            pass
+
+
+def render_and_save_map_export(spec: MapExportSpec) -> None:
+    """Render the map body with the same interpreter as the screen (#923).
+
+    When the live canvas is the QGIS renderer the frame comes from a throwaway
+    QGIS backend on this worker thread; anything that fails (bridge missing,
+    scalar pipeline unready, native error) degrades to the legacy painter
+    path exactly as before.
+    """
+    frame = None
+    if spec.prefer_native_renderer:
+        try:
+            frame = _render_frame_native(spec)
+        except Exception as exc:  # noqa: BLE001 — degrade, never lose the export
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "PNG 导出回退到回退渲染器（QGIS 渲染失败：%s）", exc
+            )
+    if frame is None:
+        backend = FallbackMapRenderBackend()
+        backend.initialize()
+        backend.set_layer_snapshot(spec.snapshot)
+        backend.set_extent(spec.extent)
+        backend.set_output_size(spec.width, spec.height)
+        backend.set_dpi(spec.dpi)
+        frame = backend.render_sync()
     image = QImage(
         frame.rgba,
         frame.width,

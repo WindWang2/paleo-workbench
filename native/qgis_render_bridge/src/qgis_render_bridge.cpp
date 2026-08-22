@@ -96,8 +96,51 @@ void validate_request(const int width, const int height, const double dpi) {
     }
 }
 
-void apply_renderer_style(QgsVectorLayer& layer, const VectorLayerSpec& spec) {
-    const Qgis::GeometryType geometry_type = layer.geometryType();
+/// Scale visibility (#929): VectorStyle.scale_range as 1:denominator bounds,
+/// matching the fallback renderer's semantics. 0 disables a bound.
+void apply_scale_range(QgsMapLayer& layer, const VectorLayerSpec& spec) {
+    if (!spec.has_scale_range) {
+        layer.setScaleBasedVisibility(false);
+        return;
+    }
+    // QGIS semantics: minimumScale = the MOST zoomed-out bound (largest
+    // denominator), maximumScale = most zoomed-in. VectorStyle.scale_range is
+    // (min_denominator, max_denominator) with the same meaning.
+    layer.setMinimumScale(spec.scale_range_max_denom);
+    layer.setMaximumScale(spec.scale_range_min_denom);
+    layer.setScaleBasedVisibility(true);
+}
+
+/// Pre-flight the style payloads of a spec WITHOUT touching any layer
+/// (#929/#519 residual): mirrors that survive a failed snapshot update must
+/// not keep half-applied styles. Mirrors apply_renderer_style's parse steps.
+void validate_style_payloads(const VectorLayerSpec& spec) {
+    if (!spec.renderer_xml.empty()) {
+        auto renderer = renderer_from_xml(spec.renderer_xml);
+        if (!renderer) {
+            throw std::runtime_error("invalid QGIS renderer payload for layer " + spec.id);
+        }
+    }
+    if (!spec.labeling_xml.empty()) {
+        QDomDocument document;
+        if (!document.setContent(QString::fromStdString(spec.labeling_xml))) {
+            throw std::runtime_error("invalid QGIS labeling payload for layer " + spec.id);
+        }
+        const QDomElement element = document.firstChildElement();
+        if (element.isNull()) {
+            throw std::runtime_error("empty QGIS labeling payload for layer " + spec.id);
+        }
+        QgsReadWriteContext context;
+        auto labeling = std::unique_ptr<QgsAbstractVectorLayerLabeling>(
+            QgsAbstractVectorLayerLabeling::create(element, context)
+        );
+        if (!labeling) {
+            throw std::runtime_error("QGIS labeling payload could not be parsed for layer " + spec.id);
+        }
+    }
+}
+
+void apply_renderer_style(QgsVectorLayer& layer, const VectorLayerSpec& spec) {    const Qgis::GeometryType geometry_type = layer.geometryType();
     if (geometry_type == Qgis::GeometryType::Null) return;
     // Authoritative path: a stored QGIS renderer payload owns the full
     // symbol-layer tree.  The legacy flat fields only build renderers when no
@@ -201,6 +244,23 @@ class QgisRenderBridge::Impl {
     std::chrono::steady_clock::time_point active_started;
 
     void apply_snapshot(std::vector<VectorLayerSpec> layers, std::string destination_crs) {
+        // #929 (#519 residual): style application to REUSED mirrors mutates
+        // live layers.  Validate every pending style payload up front so a
+        // bad snapshot cannot leave half-applied styles behind on mirrors
+        // that stay live when the update throws.
+        for (const VectorLayerSpec& spec : layers) {
+            auto existing = mirrors.find(spec.id);
+            if (existing == mirrors.end()) continue;
+            const bool rebuild = existing->second.data_revision != spec.data_revision
+                || (spec.kind == VectorLayerSpec::Kind::Raster
+                    && existing->second.style_revision != spec.style_revision)
+                || existing->second.kind != spec.kind
+                || existing->second.source_path != spec.source_path;
+            if (!rebuild && spec.kind == VectorLayerSpec::Kind::Vector
+                && existing->second.style_revision != spec.style_revision) {
+                validate_style_payloads(spec);
+            }
+        }
         std::unordered_map<std::string, Mirror> next;
         std::vector<std::string> order;
         std::vector<std::string> reused;
@@ -239,6 +299,7 @@ class QgisRenderBridge::Impl {
                 mirror.source_path = spec.source_path;
                 mirror.visible = spec.visible;
                 mirror.layer->setOpacity(std::clamp(spec.opacity, 0.0, 1.0));
+                apply_scale_range(*mirror.layer, spec);
                 reused.push_back(spec.id);
                 diagnostics.mirror_reuses += 1;
             } else {
@@ -308,6 +369,7 @@ class QgisRenderBridge::Impl {
                 mirror.source_path = spec.source_path;
                 mirror.visible = spec.visible;
                 mirror.layer->setOpacity(std::clamp(spec.opacity, 0.0, 1.0));
+                apply_scale_range(*mirror.layer, spec);
                 next.emplace(spec.id, std::move(mirror));
                 diagnostics.mirror_builds += 1;
             }

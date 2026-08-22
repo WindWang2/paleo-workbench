@@ -492,3 +492,259 @@ def test_scalar_pipeline_probe_reports_gdal_gap(monkeypatch):
     ok, reason = qgis_style.qgis_scalar_pipeline_ready()
     assert ok is False
     assert "GDAL" in reason
+
+
+# ------------------------------------------------- #922 / #929 / #923 (QGIS)
+
+
+def _qgis_env_ready() -> bool:
+    try:
+        import qgis_render_bridge  # noqa: F401
+
+        from osgeo import gdal  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def _render_layer_pixels(backend, style, scale_range=None):
+    """Render one legacy-styled line layer through the real QGIS backend."""
+    from paleo_workbench.mapping.map_render_backend import (
+        MapLayerSnapshot,
+        MapRenderSnapshot,
+    )
+
+    if not hasattr(_render_layer_pixels, "_rev"):
+        _render_layer_pixels._rev = [0]
+    _render_layer_pixels._rev[0] += 1
+    rev = _render_layer_pixels._rev
+    layer = MapLayerSnapshot(
+        id=f"audit{rev[0]}",
+        name="L",
+        layer_type="vector",
+        data_revision=1,
+        style_revision=rev[0],
+        visible=True,
+        opacity=1.0,
+        extent=(0.0, 0.0, 1000.0, 1000.0),
+        crs="EPSG:3857",
+        features=(
+            {
+                "id": "f1",
+                "geometry": {"type": "LineString", "coordinates": [[100.0, 500.0], [900.0, 500.0]]},
+                "properties": {},
+            },
+        ),
+        style=style,
+        scale_range=scale_range,
+    )
+    backend.set_layer_snapshot(MapRenderSnapshot(layers=[layer], project_crs="EPSG:3857"))
+    backend.set_extent((0.0, 0.0, 1000.0, 1000.0))
+    backend.set_output_size(800, 800)
+    backend.set_dpi(96.0)
+    frame = backend.render_sync()
+    height = frame.height
+    width = frame.width
+    arr = np.frombuffer(bytes(frame.rgba), dtype=np.uint8)[: height * width * 4].reshape(
+        height, width, 4
+    )
+    return arr
+
+
+@pytest.mark.qgis
+@pytest.mark.skipif(not _qgis_env_ready(), reason="requires built bridge + osgeo.gdal")
+def test_legacy_px_sizes_dash_and_scale_range_on_qgis_path(qtbot):
+    """#922/#929: legacy sizes stay pixels (96dpi), dash stays dashed, scale gates."""
+    from paleo_workbench.mapping.map_render_backend import QgisMapRenderBackend
+
+    backend = QgisMapRenderBackend()
+    if not backend.is_available:
+        pytest.skip("bridge not built")
+    backend.initialize()
+    try:
+        # stroke_width=4 px must render ~4 px thick (pre-fix: ~15 px as mm).
+        arr = _render_layer_pixels(
+            backend,
+            {"fill": "transparent", "stroke": "#0000ff", "stroke_width": 4.0,
+             "line_pattern": "solid"},
+        )
+        blue = (arr[..., 2] > 200) & (arr[..., 0] < 100) & (arr[..., 3] > 200)
+        col = int(np.argmax(blue.any(axis=0)))
+        thickness = int(blue[:, col].sum())
+        assert 3 <= thickness <= 6, f"stroke 4px rendered {thickness}px"
+
+        # dash must produce real gaps along the line (pre-fix: solid).
+        arr = _render_layer_pixels(
+            backend,
+            {"fill": "transparent", "stroke": "#00ff00", "stroke_width": 4.0,
+             "line_pattern": "dash"},
+        )
+        green = (arr[..., 1] > 150) & (arr[..., 3] > 200)
+        colmask = green.any(axis=0)
+        idx = np.where(colmask)[0]
+        segment = colmask[idx[0]: idx[-1] + 1]
+        gaps = np.split(np.where(~segment)[0], np.where(~segment)[0])
+        gap_runs = [len(g) for g in gaps if len(g) > 0]
+        assert gap_runs and max(gap_runs) >= 3, "dash pattern produced no gaps"
+
+        # scale_range max 1:500 must hide the layer at 1:1000 (pre-fix: drawn).
+        arr = _render_layer_pixels(
+            backend,
+            {"fill": "transparent", "stroke": "#ff0000", "stroke_width": 4.0,
+             "line_pattern": "solid"},
+            scale_range=(1.0, 500.0),
+        )
+        red = (arr[..., 0] > 200) & (arr[..., 3] > 200)
+        assert int(red.sum()) == 0, "scale-gated layer rendered"
+    finally:
+        backend.shutdown()
+
+
+@pytest.mark.qgis
+@pytest.mark.skipif(not _qgis_env_ready(), reason="requires built bridge + osgeo.gdal")
+def test_failed_snapshot_does_not_leak_style_into_reused_mirror(qtbot):
+    """#929 (#519 residual): a rejected snapshot leaves mirror styles intact."""
+    from paleo_workbench.mapping.map_render_backend import (
+        MapLayerSnapshot,
+        MapRenderSnapshot,
+        QgisMapRenderBackend,
+    )
+
+    def layer(lid, srev, stroke, renderer_xml=None):
+        style = {"fill": "transparent", "stroke": stroke, "stroke_width": 4.0,
+                 "line_pattern": "solid"}
+        if renderer_xml is not None:
+            style["renderer_xml"] = renderer_xml
+        return MapLayerSnapshot(
+            id=lid, name=lid, layer_type="vector",
+            data_revision=1, style_revision=srev, visible=True, opacity=1.0,
+            extent=(0.0, 0.0, 1000.0, 1000.0), crs="EPSG:3857",
+            features=({"id": "f", "geometry": {"type": "LineString",
+                       "coordinates": [[100.0, 500.0], [900.0, 500.0]]}, "properties": {}},),
+            style=style,
+        )
+
+    def push_and_count(snap, target_channel):
+        backend.set_layer_snapshot(snap)
+        backend.set_extent((0.0, 0.0, 1000.0, 1000.0))
+        backend.set_output_size(800, 800)
+        backend.set_dpi(96.0)
+        frame = backend.render_sync()
+        height, width = frame.height, frame.width
+        arr = np.frombuffer(bytes(frame.rgba), dtype=np.uint8)[
+            : height * width * 4
+        ].reshape(height, width, 4)
+        return int(target_channel(arr).sum())
+
+    backend = QgisMapRenderBackend()
+    if not backend.is_available:
+        pytest.skip("bridge not built")
+    backend.initialize()
+    try:
+        blue = lambda a: (a[..., 2] > 200) & (a[..., 0] < 100) & (a[..., 3] > 200)  # noqa: E731
+        red = lambda a: (a[..., 0] > 200) & (a[..., 3] > 200)  # noqa: E731
+        base = MapRenderSnapshot(layers=[layer("L", 1, "#0000ff")], project_crs="EPSG:3857")
+        assert push_and_count(base, blue) > 500
+
+        # Rejected update: L flips to red AND a second layer carries an invalid
+        # renderer payload — the whole snapshot must throw BEFORE any style is
+        # applied to L (pre-fix: L leaked red).
+        bad = MapRenderSnapshot(
+            layers=[
+                layer("L", 2, "#ff0000"),
+                layer("X", 1, "#00ff00", renderer_xml="</not-xml>"),
+            ],
+            project_crs="EPSG:3857",
+        )
+        with pytest.raises(RuntimeError):
+            backend.set_layer_snapshot(bad)
+
+        retry = MapRenderSnapshot(layers=[layer("L", 1, "#0000ff")], project_crs="EPSG:3857")
+        assert push_and_count(retry, red) == 0, "leaked red style into reused mirror"
+        assert push_and_count(retry, blue) > 500
+    finally:
+        backend.shutdown()
+
+
+def test_layer_properties_payload_preserves_labels_on_qgis_path(qtbot, monkeypatch):
+    """#929-3: Apply on the native symbology path must not wipe label config."""
+    import layer_model_core
+
+    from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
+
+    from paleo_workbench.mapping import qgis_style
+
+    monkeypatch.setattr(qgis_style, "qgis_bridge_available", lambda: True)
+    registry = layer_model_core.LayerRegistry()
+    layer = registry.add_layer("facies", "Facies", layer_model_core.LayerType.Vector)
+    dialog = MapLayerPropertiesDialog(
+        layer,
+        style={"fill": "#123456", "labels": {"field": "name", "visible": True}},
+    )
+    qtbot.addWidget(dialog)
+    dialog._qgis_symbology = True  # force the native path even without a bridge
+    dialog._pending_qgis_style = {"renderer_xml": "<renderer-v2/>", "revision": 3}
+    dialog.apply()
+    payload = dialog.payload()
+    assert payload["labels"] == {"field": "name", "visible": True}
+
+
+def test_export_spec_prefers_native_renderer_for_qgis_canvas():
+    """#923: the export worker must know the live backend is the QGIS renderer."""
+    from types import SimpleNamespace
+
+    from paleo_workbench.ui.map_export_worker import snapshot_map_export
+
+    canvas = SimpleNamespace(
+        view_extent=(0.0, 0.0, 100.0, 100.0),
+        _overlay_provider=None,
+        backend=SimpleNamespace(backend_name="qgis", _snapshot=SimpleNamespace()),
+    )
+    spec = snapshot_map_export(canvas, "/tmp/x.png", width=100, height=100)
+    assert spec.prefer_native_renderer is True
+    canvas.backend.backend_name = "fallback"
+    spec = snapshot_map_export(canvas, "/tmp/x.png", width=100, height=100)
+    assert spec.prefer_native_renderer is False
+
+
+def test_export_degrades_to_fallback_when_native_unavailable(tmp_path, monkeypatch):
+    """#923: a failing QGIS render must still produce the PNG via fallback."""
+    from paleo_workbench.ui import map_export_worker as mew
+    from paleo_workbench.mapping.map_render_backend import (
+        MapLayerSnapshot,
+        MapRenderSnapshot,
+    )
+
+    class ExplodingBackend:
+        backend_name = "qgis"
+
+        def initialize(self):
+            raise RuntimeError("no QGIS here")
+
+    monkeypatch.setattr(
+        "paleo_workbench.mapping.map_render_backend.QgisMapRenderBackend",
+        ExplodingBackend,
+    )
+    snap = MapRenderSnapshot(
+        layers=[
+            MapLayerSnapshot(
+                id="v", name="v", layer_type="vector",
+                data_revision=1, style_revision=1, visible=True, opacity=1.0,
+                extent=(0.0, 0.0, 100.0, 100.0), crs="EPSG:3857",
+                features=({"id": "f", "geometry": {"type": "LineString",
+                           "coordinates": [[10.0, 50.0], [90.0, 50.0]]}, "properties": {}},),
+                style={"fill": "transparent", "stroke": "#ff0000", "stroke_width": 2.0,
+                       "line_pattern": "solid"},
+            )
+        ],
+        project_crs="EPSG:3857",
+    )
+    out = tmp_path / "export.png"
+    mew.render_and_save_map_export(
+        mew.MapExportSpec(
+            snapshot=snap, extent=(0.0, 0.0, 100.0, 100.0), width=100, height=100,
+            dpi=96.0, decorations={}, path=str(out), prefer_native_renderer=True,
+        )
+    )
+    assert out.exists() and out.stat().st_size > 0

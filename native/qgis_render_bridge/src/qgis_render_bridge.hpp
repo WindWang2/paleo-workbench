@@ -55,6 +55,10 @@ struct VectorLayerSpec {
     std::string stroke = "#26364d";
     double stroke_width = 1.0;
     double marker_size = 6.0;
+    /// Host LinePattern enum value ("solid" | "dash" | "dot" | "dash_dot").
+    /// Legacy path only (#922): mapped onto the simple-line ``line_style``
+    /// property so dashed fault lines stay dashed on the QGIS path.
+    std::string line_pattern = "solid";
     std::string renderer_kind = "single";
     /// Authoritative QGIS symbology payload. When non-empty it replaces every
     /// legacy style field below after parsing; parse failure fails the
@@ -77,6 +81,12 @@ struct VectorLayerSpec {
     std::uint64_t style_revision = 0;
     bool visible = true;
     double opacity = 1.0;
+    /// Scale visibility (1:denominator range) — audit #929: the fallback
+    /// renderer honours VectorStyle.scale_range while the QGIS wire dropped
+    /// it, so scale-dependent layers were always visible. 0 disables a bound.
+    bool has_scale_range = false;
+    double scale_range_min_denom = 0.0;
+    double scale_range_max_denom = 0.0;
     std::vector<FeatureSpec> features;
 };
 

@@ -1718,6 +1718,14 @@ def _qgis_snapshot(
                 "style_revision": int(layer.style_revision),
                 "visible": bool(layer.visible),
                 "opacity": float(layer.opacity),
+                # #929: scale visibility must reach the QGIS wire exactly as
+                # the fallback path sees it (VectorStyle.scale_range semantics:
+                # 1:denominator bounds; None = always visible).
+                "scale_range": (
+                    [float(layer.scale_range[0]), float(layer.scale_range[1])]
+                    if layer.scale_range is not None
+                    else None
+                ),
                 "style": style,
                 "features": features,
             }

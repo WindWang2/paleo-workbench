@@ -312,6 +312,12 @@ class MapLayerPropertiesDialog(QDialog):
             }
             if self._pending_qgis_style is not None:
                 result["qgis_style"] = dict(self._pending_qgis_style)
+            # The native symbology editor owns renderer payloads only; Apply
+            # must carry through the layer's existing label configuration or
+            # every OK click silently wipes it (#929).
+            existing_labels = (self._style or {}).get("labels")
+            if isinstance(existing_labels, Mapping) and existing_labels:
+                result["labels"] = dict(existing_labels)
             return result
         style: dict[str, object] = {
             "fill": self.fill_edit.text().strip(),
