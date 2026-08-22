@@ -211,6 +211,9 @@ def _build_directions(
                 ratio = max(1.0, float(semi_major) / float(semi_minor))
         except (TypeError, ValueError):
             pass
+        # Upstream fb513c2: weak ratios (shapefile-imported 1.0/0.5 etc.) must
+        # still produce a visible full-line stretch — floor at 16.
+        ratio = max(float(ratio), 16.0)
         directions.append(
             Direction(
                 line_id=str(param.get("id") or f"dir-{i}"),
@@ -579,17 +582,36 @@ def run_constrained_idw(
     value_min, value_max = _value_range_from_wells(wells)
     search_radius, decluster_radius = _search_radii_from_wells(wells)
 
+    # Upstream production recipe (workflow.py @ 5b8f8f98) whenever direction
+    # lines are active (#927): strong along-track stretching (fb513c2 was
+    # dormant here), corridor/perpendicular strengths, and declustering OFF —
+    # the local direction distance already supplies the intended anisotropy,
+    # and boosting isolated wells distorts the surface. Without directions the
+    # engine defaults apply unchanged.
+    use_dirs = bool(directions)
     config = Config(
         grid_resolution=resolution,
         power=float(power),
         search_radius=search_radius,
-        decluster_radius=decluster_radius,
+        decluster_radius=decluster_radius if not use_dirs else 0.0,
+        decluster_strength=2.0 if not use_dirs else 0.0,
         value_min=value_min,
         value_max=value_max,
+        anisotropic_fill=True,
+        use_curve_direction_distance=True,
+        along_track_blend_strength=1.0 if use_dirs else 0.0,
+        along_track_min_cell_g=0.025 if use_dirs else 0.05,
+        along_track_exp_k=8.0 if use_dirs else 6.0,
+        direction_taper_plateau=0.95 if use_dirs else 0.85,
+        direction_smoothing_strength=3.0 if use_dirs else 1.8,
+        direction_perpendicular_strength=1.85 if use_dirs else 1.0,
+        direction_corridor_strength=2.65 if use_dirs else 1.0,
+        well_anchor_preserve_anisotropy=True,
         # We only need the interpolated surface (host re-derives contours via
-        # its own marching-squares contour-draft pipeline, consistent with the
-        # other methods). Skip haiyou's contour extraction to keep the import
-        # graph narrow (no contour_extractor) and avoid duplicate contour logic.
+        # its own marching-squares contour-draft pipeline, consistent with
+        # the other methods). Skip haiyou's contour extraction to keep the
+        # import graph narrow (no contour_extractor) and avoid duplicate
+        # contour logic.
         extract_contours=False,
         # Geographic (degree) CRS: the engine's auto barrier buffer is
         # metre-calibrated; pass an explicit ~300 m buffer in degrees instead

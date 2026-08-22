@@ -748,3 +748,49 @@ def test_export_degrades_to_fallback_when_native_unavailable(tmp_path, monkeypat
         )
     )
     assert out.exists() and out.stat().st_size > 0
+
+
+# ------------------------------------------------------------- #927 / #934
+
+
+def test_direction_defaults_use_haiyou_ratio_not_placeholder():
+    """#927: unset semi axes must not collapse anisotropy to 2:1."""
+    from paleo_workbench.workflow.constrained_idw_adapter import _build_directions
+    from types import SimpleNamespace
+
+    line = SimpleNamespace(
+        id="d1", name="dir", role="direction", target_horizon="H1",
+        coordinates=[(0.0, 0.0), (10.0, 10.0)],
+        azimuth_deg=None, semi_major=None, semi_minor=None, active=True,
+    )
+    layer = SimpleNamespace(lines=[line], target_horizon="H1")
+    dirs = _build_directions([layer], target_horizon="H1")
+    assert len(dirs) == 1
+    assert dirs[0].ratio >= 16.0  # haiyou default 18 with fb513c2 floor 16
+
+
+def test_single_factor_plan_kernel_matches_multi_path():
+    """#934: the single-factor fast path produces the multi-path numbers."""
+    from paleo_workbench.workflow.interpolation_plan import (
+        apply_idw_plan,
+        apply_idw_plan_multi,
+        build_idw_plan,
+        extract_values_aligned,
+    )
+
+    rng = np.random.default_rng(11)
+    n = 30
+    xs = rng.uniform(0, 1000, n)
+    ys = rng.uniform(0, 1000, n)
+    vals = rng.uniform(10, 60, n)
+    samples = [
+        {"x": float(x), "y": float(y), "value": float(v)}
+        for x, y, v in zip(xs, ys, vals)
+    ]
+    plan = build_idw_plan(samples, grid_n=96, power=2.0)
+    values = extract_values_aligned(samples, plan)
+    single = apply_idw_plan(plan, values)["grid_z"]
+    multi = apply_idw_plan_multi(plan, np.stack([values, values], axis=0))[0]["grid_z"]
+    assert np.array_equal(np.isnan(single), np.isnan(multi))
+    finite = np.isfinite(single)
+    assert np.allclose(single[finite], multi[finite], rtol=0, atol=1e-10)

@@ -95,8 +95,12 @@ def direction_line_params(
                 "id": line.id,
                 "name": line.name,
                 "azimuth_deg": az,
-                "semi_major": line.semi_major if line.semi_major is not None else 1.0,
-                "semi_minor": line.semi_minor if line.semi_minor is not None else 0.5,
+                # Unset axes stay None so the engine adapter applies haiyou's
+                # default anisotropy ratio (18:1). The old 1.0/0.5 placeholder
+                # collapsed the ratio to 2:1 and made direction lines nearly
+                # decorative (#927).
+                "semi_major": line.semi_major,
+                "semi_minor": line.semi_minor,
                 "coordinates": [[p[0], p[1]] for p in pts],
             }
         )
