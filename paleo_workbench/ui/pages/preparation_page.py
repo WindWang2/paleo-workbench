@@ -31,6 +31,7 @@ from paleo_workbench.workflow.well_qc import qc_summary, run_well_table_qc
 from paleo_workbench.workflow.well_table import (
     attach_well_table_to_factor_task,
     sample_points_from_well_table,
+    sync_well_table_to_linked_tasks,
     well_table_from_factor_task,
 )
 
@@ -181,20 +182,21 @@ class PreparationPage(QWidget):
             self._project.well_tables.append(table)
         else:
             self._project.well_tables[0] = table
-        # Sync cleaned sample_points back onto linked tasks
-        for task in self._project.factor_map_tasks:
-            if task.well_table_id == table.id or task is self._project.factor_map_tasks[0]:
-                params = dict(task.parameters or {})
-                params["sample_points"] = sample_points_from_well_table(table)
-                task.parameters = params
-                task.well_table_id = table.id
+        # Sync cleaned sample_points back onto tasks explicitly bound to this
+        # table (#936 — never inject into an unrelated task).
+        linked = sync_well_table_to_linked_tasks(self._project, table)
         self._refresh_well_table_view()
         summary = qc_summary(table)
+        if linked:
+            bind_note = ""
+        else:
+            bind_note = "\n注意：没有绑定该井表的任务，清洗结果未写回任何任务。"
         QMessageBox.information(
             self,
             "井点 QC",
             f"完成：ok={summary.get('ok', 0)} outlier={summary.get('outlier', 0)} "
-            f"invalid_ratio={summary.get('invalid_ratio', 0)} missing={summary.get('missing', 0)}",
+            f"invalid_ratio={summary.get('invalid_ratio', 0)} missing={summary.get('missing', 0)}"
+            f"{bind_note}",
         )
 
     def _on_generate_requested(self, method: str) -> None:

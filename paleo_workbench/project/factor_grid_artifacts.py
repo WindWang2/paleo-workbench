@@ -534,6 +534,22 @@ def factor_grid_result_for_task(
     )
 
 
+def _committed_result_fingerprint(task) -> str | None:
+    """The result fingerprint of the version a task's artifact metadata carries.
+
+    ``grid_metadata`` is the descriptor of the result that produced the
+    committed artifact, so its ``result_fingerprint`` identifies that content.
+    """
+    metadata = getattr(task, "grid_metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+    params = metadata.get("algorithm_parameters")
+    if not isinstance(params, dict):
+        return None
+    fp = params.get("result_fingerprint")
+    return str(fp) if fp else None
+
+
 def persist_factor_grid_artifacts(
     project: "ProjectDocument",
     project_path: Path | str,
@@ -553,6 +569,7 @@ def persist_factor_grid_artifacts(
         with _LIVE_FACTOR_GRIDS_LOCK:
             has_live = task_id in _LIVE_FACTOR_GRIDS
             live_identity = _LIVE_ARTIFACT_IDENTITY.get(task_id)
+            live_grid = _LIVE_FACTOR_GRIDS.get(task_id) if has_live else None
         has_inline = parameters.get("grid_z") is not None
         if not has_inline and not has_live:
             # A task marked complete whose grid was evicted from the bounded
@@ -584,8 +601,16 @@ def persist_factor_grid_artifacts(
             if live_identity is not None and path_identity == live_identity:
                 skip = True
             elif existing_version and path_identity is not None:
-                # Managed catalog path still on disk; re-key live identity.
-                skip = True
+                # The catalog may rehome a registered payload (its file identity
+                # changes) while the sealed live buffer still IS that version's
+                # content — re-key instead of rewriting.  But only when the
+                # live grid provably carries the committed result fingerprint:
+                # a newer unsaved run (e.g. produced by a cancelled/superseded
+                # prepare) must fall through and be persisted, never silently
+                # re-branded as the old artifact (#918 torn pairing).
+                committed_fp = _committed_result_fingerprint(task)
+                if committed_fp and grid_result_fingerprint(live_grid) == committed_fp:
+                    skip = True
             if skip:
                 if path_identity is not None and path_identity != live_identity:
                     with _LIVE_FACTOR_GRIDS_LOCK:
