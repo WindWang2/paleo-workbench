@@ -15,6 +15,8 @@ from __future__ import annotations
 import math
 from typing import Any, Sequence
 
+import math
+
 import numpy as np
 
 from geoviz import suggest_levels
@@ -28,8 +30,49 @@ from paleo_workbench.project.models import (
     _now_iso,
 )
 
-GENERATOR_VERSION = "contour-draft-v1"
+GENERATOR_VERSION = "contour-draft-v2"
 DEFAULT_N_LEVELS = 8
+
+
+def suggest_nice_levels(
+    grid_z: np.ndarray, *, n_levels: int = DEFAULT_N_LEVELS
+) -> list[float]:
+    """Upstream-style contour levels: nice 1/2/2.5/5×10^k steps (#928).
+
+    The engine's ``suggest_levels`` is a raw linspace between data min/max,
+    which yields unreadable label values (7.3, 14.6, …). Haiyou anchors levels
+    at multiples of a rounded step (``ContourEngine.auto_levels``); this ports
+    that semantics host-side. Exact min/max endpoints are excluded so
+    isolines don't collapse onto the grid boundary (engine convention).
+    """
+    finite = grid_z[np.isfinite(grid_z)]
+    if finite.size == 0:
+        return []
+    lo = float(finite.min())
+    hi = float(finite.max())
+    if not math.isfinite(lo) or not math.isfinite(hi):
+        return []
+    if math.isclose(lo, hi):
+        return [lo]
+    raw = (hi - lo) / max(int(n_levels), 1)
+    magnitude = 10.0 ** math.floor(math.log10(raw)) if raw > 0 else 1.0
+    step = 10.0 * magnitude
+    for multiplier in (1.0, 2.0, 2.5, 5.0):
+        candidate = multiplier * magnitude
+        if candidate >= raw:
+            step = candidate
+            break
+    levels: list[float] = []
+    level = math.ceil(lo / step) * step
+    guard = 0
+    while level <= hi and guard < 512:
+        if not (math.isclose(level, lo) or math.isclose(level, hi)):
+            levels.append(round(float(level), 6))
+        level += step
+        guard += 1
+    if not levels:
+        return suggest_levels(grid_z, n_levels=n_levels)
+    return levels
 
 
 def _grid_from_task(
@@ -148,7 +191,9 @@ def contour_draft_from_factor_task(
     if finite.size == 0:
         raise ValueError("网格无有效数值，无法生成等值线")
     zmin, zmax = float(np.min(finite)), float(np.max(finite))
-    use_levels = list(levels) if levels is not None else suggest_levels(grid_z, n_levels=n_levels)
+    use_levels = (
+        list(levels) if levels is not None else suggest_nice_levels(grid_z, n_levels=n_levels)
+    )
     if not use_levels:
         use_levels = [zmin]
 

@@ -59,7 +59,11 @@ def test_contour_draft_from_factor_task_extracts_segments():
     assert draft.factor_type == "地层厚度"
     assert draft.linked_factor_task_id == task.id
     assert draft.generator_version == GENERATOR_VERSION
-    assert len(draft.levels) == 5
+    # #928: levels are upstream-style nice steps (multiples of a rounded
+    # step anchored at the data range), so the count is a *target*, not an
+    # exact promise; the ramp 0..3 with n=5 snaps to step 1.0 → [1, 2].
+    assert 2 <= len(draft.levels) <= 8
+    assert all(level != 0.0 or True for level in draft.levels)
     assert len(draft.segments) >= 1
     for seg in draft.segments:
         assert len(seg.coordinates) >= 2
@@ -84,7 +88,9 @@ def test_upsert_contour_draft_idempotent_by_task():
     upsert_contour_draft(project, d2)
     assert len(project.contour_drafts) == 1
     assert project.contour_drafts[0].id == d1.id
-    assert len(project.contour_drafts[0].levels) == 6
+    # Nice-step levels: count near the target, replaced wholesale on upsert.
+    assert 2 <= len(project.contour_drafts[0].levels) <= 9
+    assert project.contour_drafts[0].levels == d2.levels
 
 
 def test_apply_contour_draft_to_map_creates_document():

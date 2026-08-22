@@ -11,6 +11,8 @@ Each test pins one specific defect found by the 2026-08-22 audit:
 
 from __future__ import annotations
 
+import time
+
 import numpy as np
 import pytest
 
@@ -841,3 +843,92 @@ def test_plan_fault_mask_grid_aligned_fault_matches_single_task():
     assert int(np.isnan(single_grid).sum()) == 0
     # Same inputs, same production semantics: both paths agree on nodata.
     assert np.array_equal(np.isnan(plan_grid), np.isnan(single_grid))
+
+
+# ------------------------------------------------------------- #928 / #930
+
+
+def test_user_boundary_ring_constrains_constrained_idw_domain():
+    """#928: an explicit boundary ring wins over the synthesized sample hull."""
+    from types import SimpleNamespace
+
+    from paleo_workbench.workflow.constrained_idw_adapter import run_constrained_idw
+
+    rng = np.random.default_rng(9)
+    xs = rng.uniform(0, 100, 20)
+    ys = rng.uniform(0, 100, 20)
+    vs = rng.uniform(10, 60, 20)
+    pts = [
+        {"well": f"w{i}", "x": float(x), "y": float(y), "value": float(v)}
+        for i, (x, y, v) in enumerate(zip(xs, ys, vs))
+    ]
+    ring = [(25.0, 25.0), (75.0, 25.0), (75.0, 75.0), (25.0, 75.0), (25.0, 25.0)]
+    line = SimpleNamespace(
+        id="b1", name="user-boundary", role="boundary", target_horizon="H1",
+        coordinates=ring, azimuth_deg=None, semi_major=None, semi_minor=None,
+        active=True,
+    )
+    layer = SimpleNamespace(lines=[line], target_horizon="H1")
+    result = run_constrained_idw(
+        pts, grid_n=60, power=2.0, layers=[layer], target_horizon="H1"
+    )
+    gx, gy = result["grid_x"], result["grid_y"]
+    finite = np.isfinite(result["grid_z"])
+    outside = 0
+    for j, y in enumerate(gy):
+        for i, x in enumerate(gx):
+            if finite[j, i] and not (25.0 - 1e-6 <= x <= 75.0 + 1e-6 and 25.0 - 1e-6 <= y <= 75.0 + 1e-6):
+                outside += 1
+    assert outside == 0, f"{outside} finite cells outside the user boundary ring"
+    assert int(finite.sum()) > 0
+
+
+def test_contour_levels_are_nice_steps():
+    """#928: default draft levels snap to 1/2/2.5/5x10^k multiples."""
+    from paleo_workbench.workflow.contour_draft import suggest_nice_levels
+
+    grid = np.array([[3.7, 11.2], [17.9, 28.4]])
+    levels = suggest_nice_levels(grid, n_levels=8)
+    assert levels == [5.0, 10.0, 15.0, 20.0, 25.0]
+
+
+def test_register_produced_keeps_lock_free_during_payload_copy(tmp_path):
+    """#930: concurrent catalog calls must not block for the copy window."""
+    import threading
+
+    from paleo_workbench.catalog.adapter import CoreCatalogAdapter
+    from paleo_workbench.catalog.service import DataCatalogService
+
+    project_dir = tmp_path / "p"
+    project_dir.mkdir()
+    svc = DataCatalogService.open(project_dir)
+    run = svc.register_run("r", input_version_ids=(), parameters={})
+    adapter = CoreCatalogAdapter(svc)
+    payload = tmp_path / "payload.bin"
+    payload.write_bytes(b"x" * (48 * 1024 * 1024))
+
+    latencies = []
+    stop = threading.Event()
+
+    def probe() -> None:
+        while not stop.is_set():
+            t0 = time.perf_counter()
+            svc.list_assets()
+            latencies.append(time.perf_counter() - t0)
+
+    thread = threading.Thread(target=probe)
+    thread.start()
+    try:
+        adapter.register_intermediate(
+            run_id=run.id,
+            name="big",
+            path=str(payload),
+        )
+    finally:
+        stop.set()
+        thread.join()
+    latencies.sort()
+    p95 = latencies[int(len(latencies) * 0.95)] if latencies else 0.0
+    # Pre-fix the whole copy+SHA window held the lock (audit: 84.8 ms @120MiB).
+    # Allow generous headroom for CI noise; the copy itself takes ~100+ ms.
+    assert p95 < 0.050, f"concurrent catalog call p95 {p95*1000:.1f} ms — lock held during copy"

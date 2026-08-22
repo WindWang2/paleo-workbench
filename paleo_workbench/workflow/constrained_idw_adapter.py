@@ -33,6 +33,7 @@ from typing import Any, Iterable, Sequence
 import numpy as np
 
 from paleo_workbench.workflow.constraints import (
+    boundary_rings_for_engine,
     break_polylines_for_idw,
     direction_line_params,
 )
@@ -404,7 +405,7 @@ def _cross_validated_r_squared(
         try:
             fold_result = generate(
                 list(train),
-                [boundary],
+                list(boundary) if isinstance(boundary, list) else [boundary],
                 barriers,
                 directions,
                 levels=[],
@@ -574,7 +575,17 @@ def run_constrained_idw(
     barriers = _build_barriers(barriers_in)
     directions = _build_directions(layers, target_horizon=target_horizon)
 
+    # #928: an explicit user-drawn boundary is the geological intent and wins
+    # over the synthesized sample hull; without one the hull fallback keeps
+    # the historical behavior.
     boundary, boundary_xy = _boundary_from_samples(points, wells)
+    user_rings = boundary_rings_for_engine(layers, target_horizon=target_horizon)
+    if user_rings:
+        Boundary = _ensure_haiyou_engine()["Boundary"]
+        boundary = [
+            Boundary(exterior=tuple((float(x), float(y)) for x, y in ring))
+            for ring in user_rings
+        ]
 
     resolution = int(round(grid_n))
     resolution = max(_MIN_GRID_RESOLUTION, min(_MAX_GRID_RESOLUTION, resolution))
@@ -624,7 +635,9 @@ def run_constrained_idw(
 
     result = generate(
         wells,
-        [boundary],
+        # Engine takes a list of boundary polygons (#928): user rings when
+        # drawn, else the single synthesized hull.
+        list(boundary) if isinstance(boundary, list) else [boundary],
         barriers,
         directions,
         levels=[],  # unused with extract_contours=False
