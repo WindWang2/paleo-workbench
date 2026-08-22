@@ -68,8 +68,13 @@ def test_369_hull_wells_anchored_finite_and_equal_to_observations():
         assert float(gz[row, col]) == pytest.approx(p["value"], rel=1e-6, abs=1e-4)
 
 
-def test_369_exact_surface_r_squared_approaches_one():
-    """LOO R² on an exactly reproduced plane must be ≈1.0 (was 0.12–0.69)."""
+def test_369_exact_surface_anchored_fidelity_approaches_one():
+    """Anchored fidelity on an exactly reproduced plane must be ≈1.0 (was 0.12–0.69).
+
+    #921: the shared ``r_squared`` key now carries honest spatial-4-fold
+    cross-validation (comparable with plain IDW/kriging LOO); the anchoring
+    quality is reported separately as ``anchored_fidelity``.
+    """
     pts = _pts(
         (0.0, 0.0, 0.5),
         (10.0, 0.0, 5.5),
@@ -80,8 +85,13 @@ def test_369_exact_surface_r_squared_approaches_one():
         (8.0, 2.0, 5.5),
     )
     result = run_constrained_idw(pts, grid_n=50, power=2.0)
-    assert result["r_squared"] > 0.99
-    assert result["r_squared_n_skipped"] == 0
+    assert result["anchored_fidelity"] > 0.99
+    # Held-out R² is honest: IDW from 7 sparse training wells does NOT
+    # reproduce held-out plane values near-perfectly, so it stays well below
+    # the old fabricated in-sample ≈0.9999.
+    assert result["r_squared_method"] == "spatial_4_fold"
+    assert -1.0 <= result["r_squared"] <= 1.0
+    assert result["r_squared"] < 0.99
     # Grid max must express the observed max (10.5) — not fall short of it.
     assert result["max"] == pytest.approx(10.5, rel=0.02)
     # and the surface must actually reach it somewhere on the map.

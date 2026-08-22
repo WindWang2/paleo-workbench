@@ -27,6 +27,7 @@ from paleo_workbench.workflow.factor_interpolation import (
     batch_prepare_factor_maps,
     interpolation_params_from_task,
 )
+from paleo_workbench.workflow.constrained_idw_adapter import run_constrained_idw
 from paleo_workbench.workflow.factor_prepare_scheduler import (
     build_prepare_snapshot,
     commit_prepare_batch_result,
@@ -410,3 +411,32 @@ def test_scene_from_factor_task_upserts_new_grid_payload():
     revision_third = scene._scalars[layer_id].data_revision
     scene_from_factor_task(task, crs=None, scene=scene)
     assert scene._scalars[layer_id].data_revision == revision_third
+
+
+# --------------------------------------------------------------------- #921
+
+
+def test_constrained_idw_r_squared_is_cross_validated_not_anchored():
+    """#921: the shared r_squared key must not carry the ≈1 anchored fidelity.
+
+    On a smooth plane sampled at 7 wells the old in-sample metric reported
+    ≈0.9999 while honest held-out validation scores far lower (plain-IDW LOO
+    on the same data was 0.31 in the audit). The two metrics must now differ
+    and travel under distinct keys.
+    """
+    pts = [
+        {"well": "w1", "x": 0.0, "y": 0.0, "value": 0.5},
+        {"well": "w2", "x": 10.0, "y": 0.0, "value": 5.5},
+        {"well": "w3", "x": 0.0, "y": 10.0, "value": 5.5},
+        {"well": "w4", "x": 10.0, "y": 10.0, "value": 10.5},
+        {"well": "w5", "x": 5.0, "y": 5.0, "value": 5.5},
+        {"well": "w6", "x": 2.0, "y": 2.0, "value": 2.5},
+        {"well": "w7", "x": 8.0, "y": 2.0, "value": 5.5},
+    ]
+    result = run_constrained_idw(pts, grid_n=50, power=2.0)
+    assert result["r_squared_method"] == "spatial_4_fold"
+    assert result["r_squared"] < 0.99, (
+        "held-out R² must stay below the old fabricated in-sample value"
+    )
+    assert result["anchored_fidelity"] > 0.99
+    assert result["r_squared"] != pytest.approx(result["anchored_fidelity"])
