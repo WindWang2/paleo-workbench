@@ -457,7 +457,7 @@ class WellSeismicJointHost(QObject):
         self,
         *,
         preferred_domain: str | None = None,
-        auto_default_fence: bool = True,
+        auto_default_fence: bool = False,
     ) -> None:
         """Reload hybrid assets into the scene.
 
@@ -552,7 +552,7 @@ class WellSeismicJointHost(QObject):
     @property
     def auto_default_fence(self) -> bool:
         """Whether reload will auto-create a default well pair fence when empty."""
-        return bool(getattr(self, "_auto_default_fence", True))
+        return bool(getattr(self, "_auto_default_fence", False))
 
     def add_well_to_well_fence(self, well_a: str, well_b: str, *, name: str | None = None) -> None:
         if self._scene is None:
@@ -568,6 +568,36 @@ class WellSeismicJointHost(QObject):
             self.scene_updated.emit()
         except Exception as exc:
             self.status_changed.emit(f"创建剖面失败: {exc}")
+
+    def append_fence_well(self, well_ref: str) -> None:
+        if self._scene is None:
+            return
+        ref = (well_ref or "").strip()
+        if not ref:
+            return
+        try:
+            added = self._scene.append_fence_well(ref)
+        except Exception as exc:
+            self.status_changed.emit(str(exc))
+            return
+        if not added:
+            return
+        names = []
+        by_id = {item.id: item.display_name for item in self._scene.well_presentations()}
+        for well_id in self._scene.fence_well_ids:
+            names.append(by_id.get(well_id, str(well_id)))
+        self.status_changed.emit("井序: " + " → ".join(names))
+        self.scene_updated.emit()
+
+    def pop_fence_well(self) -> bool:
+        if self._scene is None:
+            return False
+        popped = self._scene.pop_fence_well()
+        if popped is None:
+            return False
+        self.status_changed.emit("已撤销最后一口井")
+        self.scene_updated.emit()
+        return True
 
     def remove_active_fence(self) -> None:
         """Delete active fence; leave remaining fences (new active = last)."""
@@ -1003,7 +1033,7 @@ class WellSeismicJointHost(QObject):
         self._volume_lod = int(lod)
         names = list(self._scene.well_trajectories().keys())
         if (
-            getattr(self, "_auto_default_fence", True)
+            getattr(self, "_auto_default_fence", False)
             and len(names) >= 2
             and not self._scene.fences
         ):

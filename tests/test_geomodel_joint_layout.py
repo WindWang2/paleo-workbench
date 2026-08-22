@@ -25,6 +25,18 @@ def test_geomodel_page_chrome_two_columns(qtbot):
         assert page.gl_widget.parent() is page or not page.gl_widget.isVisible()
 
 
+def test_geomodel_toolbar_has_orthogonal_or_volume_mode(qtbot):
+    from paleo_workbench.ui.pages.geological_modeling_3d_page import GeologicalModeling3DPage
+
+    page = GeologicalModeling3DPage()
+    qtbot.addWidget(page)
+    combo = page._joint_3d_mode
+    assert combo.objectName() == "Joint3DMode"
+    assert combo.findData("planes") >= 0
+    assert combo.findData("volume") >= 0
+    assert combo.currentData() == "planes"
+
+
 def test_geomodel_page_has_joint_host_regions(qtbot):
     from paleo_workbench.ui.pages.geological_modeling_3d_page import GeologicalModeling3DPage
 
@@ -356,7 +368,7 @@ def test_profile_follows_scene_extract_domain(qtbot):
         page_policy_clear(None)
     profile.set_scene(scene)
     # Not empty: has fence + volume
-    assert profile._label.pixmap() is not None and not profile._label.pixmap().isNull()
+    assert profile._image is not None and not profile._image.isNull()
     assert scene.vertical_domain is VerticalDomain.DEPTH
     # The profile's z range matches the scene-domain (depth) extraction axis,
     # i.e. 2D and 3D describe the same physical vertical extent.

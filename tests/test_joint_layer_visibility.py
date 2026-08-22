@@ -26,6 +26,24 @@ def test_set_layer_visibility_keeps_renderer_visible_when_volume_off():
     r.set_planes_visible.assert_called_with(False)
 
 
+def test_set_planes_visible_does_not_unhide_volume_in_planes_mode(qtbot):
+    """Joint '地震预览体' toggles orthogonal planes, not DualGL volume fill."""
+    from geoviz_seismic.renderer_3d import Renderer3D
+    import numpy as np
+
+    widget = Renderer3D()
+    qtbot.addWidget(widget)
+    widget.load_volume(np.random.randn(8, 9, 12).astype(np.float32))
+    vol = widget._volume_visual
+    assert vol is not None
+    assert widget._mode == "planes"
+    assert vol.visible() is False
+    widget.set_planes_visible(True)
+    assert vol.visible() is False
+    widget.set_planes_visible(False)
+    assert vol.visible() is False
+
+
 def test_renderer_set_planes_visible_toggles_plane_attrs():
     from geoviz_seismic.renderer_3d import Renderer3D
 
