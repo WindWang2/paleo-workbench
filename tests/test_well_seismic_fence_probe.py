@@ -33,6 +33,11 @@ def _scene_with_volume() -> WellSeismicScene:
     vol = rng.standard_normal((8, 8, 16)).astype(np.float32)
     scene.set_volume_access(InMemoryVolumeAccess(vol))
     scene.set_preview_mode(True)
+    td = TimeDepthTable(
+        well_name="A1",
+        time_ms=np.array([0.0, 1000.0], dtype=np.float64),
+        md_m=np.array([0.0, 100.0], dtype=np.float64),
+    )
     scene.set_wells(
         [
             WellHead(
@@ -53,7 +58,12 @@ def _scene_with_volume() -> WellSeismicScene:
                 100,
                 id=JointWellId("source:a2"),
             ),
-        ]
+        ],
+        td_tables={"A1": td, "A2": TimeDepthTable(
+            well_name="A2",
+            time_ms=np.array([0.0, 1000.0], dtype=np.float64),
+            md_m=np.array([0.0, 100.0], dtype=np.float64),
+        )},
     )
     return scene
 
@@ -137,6 +147,11 @@ def test_multi_fence_active_and_well_to_well():
 
 def test_well_to_well_fence_accepts_joint_well_ids_for_duplicate_names():
     scene = _scene_with_volume()
+    td = TimeDepthTable(
+        well_name="A1",
+        time_ms=np.array([0.0, 1000.0], dtype=np.float64),
+        md_m=np.array([0.0, 100.0], dtype=np.float64),
+    )
     scene.set_wells(
         [
             WellHead(
@@ -157,7 +172,8 @@ def test_well_to_well_fence_accepts_joint_well_ids_for_duplicate_names():
                 100,
                 id=JointWellId("source:a1-right"),
             ),
-        ]
+        ],
+        td_tables={"A1": td},
     )
 
     fence = scene.add_well_to_well_fence(
@@ -492,6 +508,8 @@ def test_profile_renders_thick_depth_varying_gr_well_and_two_legends(qtbot):
     )
     profile = FenceProfile2D()
     qtbot.addWidget(profile)
+    profile.resize(800, 280)
+    profile.show()
     profile.set_extract_domain(VerticalDomain.TIME)
     profile.set_scene(scene)
 

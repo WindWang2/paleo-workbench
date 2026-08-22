@@ -66,7 +66,7 @@ def _opengl_widget_supported() -> bool:
 
 
 # ---- Camera Presets (eliminates duplicated lambdas) ----
-_CAMERA_PERSPECTIVE = dict(distance=250, elevation=30, azimuth=45)
+_CAMERA_PERSPECTIVE = dict(distance=250, elevation=30, azimuth=-45)
 _CAMERA_TOP_DOWN = dict(distance=250, elevation=90, azimuth=0)
 
 
@@ -245,11 +245,19 @@ class GeologicalModeling3DPage(QWidget):
         self._joint_domain.addItems(["Time", "Depth"])
         self._joint_domain.currentTextChanged.connect(self._on_joint_domain_changed)
         f_layout.addWidget(self._joint_domain)
-        self._joint_slice_card_btn = QPushButton("正交切片")
+        f_layout.addWidget(QLabel("3D"))
+        self._joint_3d_mode = QComboBox()
+        self._joint_3d_mode.setObjectName("Joint3DMode")
+        self._joint_3d_mode.addItem("正交切片", "planes")
+        self._joint_3d_mode.addItem("三维体", "volume")
+        self._joint_3d_mode.setToolTip("三维视口显示正交切片或三维体")
+        self._joint_3d_mode.currentIndexChanged.connect(self._on_joint_3d_mode_changed)
+        f_layout.addWidget(self._joint_3d_mode)
+        self._joint_slice_card_btn = QPushButton("切片位置")
         self._joint_slice_card_btn.setCheckable(True)
         self._joint_slice_card_btn.setChecked(True)
         self._joint_slice_card_btn.setToolTip(
-            "设置 Inline、Crossline 与多张 Time 切片"
+            "打开 Inline / Crossline / Time 切片位置条"
         )
         f_layout.addWidget(self._joint_slice_card_btn)
         # Professional analysis tab panel (stratal slices / well-tie / facies / export).
@@ -346,7 +354,7 @@ class GeologicalModeling3DPage(QWidget):
         j2_layout.setContentsMargins(tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1)
         j2_layout.setSpacing(tokens.SPACE_1)
         j2_header = QHBoxLayout()
-        self._joint_2d_title = QLabel("井震剖面 (2D)")
+        self._joint_2d_title = QLabel("Time 平面 / 井间剖面")
         self._joint_2d_title.setStyleSheet(
             "font-weight: 600; color: %s;" % tokens.TEXT_PRIMARY
         )
@@ -438,8 +446,8 @@ class GeologicalModeling3DPage(QWidget):
         j2_host_layout = QVBoxLayout(self.joint_2d_host)
         j2_host_layout.setContentsMargins(0, 0, 0, 0)
         self._joint_2d_placeholder = QLabel(
-            "无活动剖面。加载后将自动建默认井对 fence；"
-            "也可在 3D 点选两口井或用顶栏「井间剖面」。"
+            "无活动剖面。加载后在左侧 Time 平面或 3D Time 面上点击井点连线；"
+            "也可用顶栏井对 +「井间剖面」。Esc 撤销最后一口井。"
         )
         self._joint_2d_placeholder.setAlignment(Qt.AlignCenter)
         self._joint_2d_placeholder.setWordWrap(True)
@@ -816,6 +824,22 @@ class GeologicalModeling3DPage(QWidget):
             sizes = getattr(self, "_joint_2d_expanded_sizes", None) or [700, 220]
             self._center_v_split.setSizes(sizes)
 
+    def _on_joint_3d_mode_changed(self, _index: int = 0) -> None:
+        if self._joint_widget is None:
+            self._ensure_joint_widget()
+        widget = self._joint_widget
+        if widget is None:
+            return
+        mode = str(self._joint_3d_mode.currentData() or "planes")
+        set_mode = getattr(widget, "set_seismic_render_mode", None)
+        if callable(set_mode):
+            set_mode(mode)
+        else:
+            renderer = getattr(widget, "renderer", None)
+            if renderer is not None:
+                getattr(renderer, "set_render_mode", lambda _m: None)(mode)
+        self._sync_joint_visibility_from_tree()
+
     def _apply_joint_camera_preset(self, preset: dict) -> None:
         """Map toolbar camera buttons to joint widget public set_camera_pose."""
         if self._joint_widget is None:
@@ -829,7 +853,7 @@ class GeologicalModeling3DPage(QWidget):
                 set_pose(
                     distance=float(preset.get("distance", 250) or 250),
                     elevation=float(preset.get("elevation", 30) or 30),
-                    azimuth=float(preset.get("azimuth", 45) or 45),
+                    azimuth=float(preset.get("azimuth", -45) or -45),
                 )
             except Exception:
                 logger.debug("joint camera preset failed", exc_info=True)
@@ -1703,10 +1727,20 @@ class GeologicalModeling3DPage(QWidget):
 
     def _sync_joint_slice_renderer(self) -> None:
         widget = self._joint_widget
-        if widget is not None:
-            sync = getattr(widget, "sync_orthogonal_slices", None)
-            if callable(sync):
-                sync()
+        if widget is None:
+            return
+        sync = getattr(widget, "sync_orthogonal_slices", None)
+        if callable(sync):
+            sync()
+        pierce = getattr(widget, "set_time_pierce_overlays", None)
+        if callable(pierce):
+            pierce()
+        time_map = getattr(self, "_joint_time_map", None)
+        if time_map is not None and hasattr(time_map, "refresh"):
+            time_map.refresh()
+        profile = getattr(self, "_joint_profile", None)
+        if profile is not None and hasattr(profile, "refresh"):
+            profile.refresh()
 
     def _on_joint_inline_slice_changed(self, value: int) -> None:
         self._joint_host.scene.set_orthogonal_slice_indices(
@@ -1849,6 +1883,9 @@ class GeologicalModeling3DPage(QWidget):
         scene.set_display_settings(settings)
         if self._joint_widget is not None:
             self._joint_widget.set_scene(scene)
+        time_map = getattr(self, "_joint_time_map", None)
+        if time_map is not None:
+            time_map.set_scene(scene)
         profile = getattr(self, "_joint_profile", None)
         if profile is not None:
             profile.set_scene(scene)
@@ -1887,7 +1924,7 @@ class GeologicalModeling3DPage(QWidget):
                 restoring_fence = len(wells) >= 2
             self._joint_host.reload(
                 preferred_domain=domain,
-                auto_default_fence=not restoring_fence,
+                auto_default_fence=False,
             )
             self._restore_joint_fence_from_project()
             self._update_domain_z_guard(domain)
@@ -1932,7 +1969,9 @@ class GeologicalModeling3DPage(QWidget):
                 "Depth" if scene.vertical_domain.value.startswith("depth") else "Time"
             )
         wells: list[str] = []
-        if hasattr(self, "_joint_well_a"):
+        if scene is not None and getattr(scene, "fence_well_ids", None):
+            wells = [str(well_id) for well_id in scene.fence_well_ids]
+        elif hasattr(self, "_joint_well_a"):
             a = self._joint_well_a.currentData() or self._joint_well_a.currentText()
             b = self._joint_well_b.currentData() or self._joint_well_b.currentText()
             if a and b:
@@ -2051,15 +2090,38 @@ class GeologicalModeling3DPage(QWidget):
             return
         state = getattr(self._project, "joint_analysis", None)
         wells = list(getattr(state, "active_fence_wells", None) or [])
-        if len(wells) >= 2:
-            self._joint_host.add_well_to_well_fence(wells[0], wells[1])
-            self._select_joint_wells(wells[0], wells[1])
+        if len(wells) < 2:
+            return
+        scene = self._joint_host.scene
+        name = getattr(state, "active_fence_name", None) or "Wells"
+        if scene is not None and hasattr(scene, "add_well_to_well_fence"):
+            try:
+                scene.add_well_to_well_fence(wells, name=name)
+                self._joint_host.scene_updated.emit()
+            except Exception:
+                self._joint_host.add_well_to_well_fence(wells[0], wells[1], name=name)
+        else:
+            self._joint_host.add_well_to_well_fence(wells[0], wells[1], name=name)
+        self._select_joint_wells(wells[0], wells[1])
 
     def _select_joint_wells(self, well_a: str, well_b: str) -> None:
         """Set toolbar combos to a saved well pair without resetting to index 0/1."""
         if not hasattr(self, "_joint_well_a"):
             return
         self._rebuild_joint_well_combos(well_a, well_b)
+
+    def _wrap_joint_bottom_pane(self, title: str, widget: QWidget) -> QWidget:
+        pane = QWidget()
+        layout = QVBoxLayout(pane)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        header = QLabel(title)
+        header.setStyleSheet(
+            "font-weight: 600; color: %s; padding: 2px 4px;" % tokens.TEXT_PRIMARY
+        )
+        layout.addWidget(header)
+        layout.addWidget(widget, 1)
+        return pane
 
     def _ensure_joint_widget(self) -> None:
         """Mount WellSeismicJointWidget into joint 3D host (profile may sit in 2D host)."""
@@ -2085,6 +2147,8 @@ class GeologicalModeling3DPage(QWidget):
             # Public detach of fence profile into bottom strip
             take = getattr(self._joint_widget, "take_profile_widget", None)
             profile = take() if callable(take) else self._joint_widget.profile_widget
+            take_map = getattr(self._joint_widget, "take_time_map_widget", None)
+            time_map = take_map() if callable(take_map) else None
             layout_3d = self.joint_3d_host.layout()
             # Capture the placeholder locally before nulling the attribute: a
             # later exception must still be able to surface on it instead of
@@ -2094,14 +2158,30 @@ class GeologicalModeling3DPage(QWidget):
                 placeholder.setParent(None)
                 self._joint_3d_placeholder = None
             layout_3d.addWidget(self._joint_widget, 1)
-            if profile is not None:
+            if profile is not None or time_map is not None:
                 if self._joint_2d_placeholder is not None:
                     self._joint_2d_placeholder.setParent(None)
                     self._joint_2d_placeholder = None
-                profile.setParent(self.joint_2d_host)
-                self.joint_2d_host.layout().insertWidget(0, profile, 1)
-                self._joint_profile = profile
-                self._apply_profile_time_only_policy(profile)
+                split = QSplitter(Qt.Orientation.Horizontal)
+                split.setChildrenCollapsible(False)
+                if time_map is not None:
+                    pane = self._wrap_joint_bottom_pane("Time 平面（点井连线）", time_map)
+                    split.addWidget(pane)
+                    self._joint_time_map = time_map
+                    if self._joint_host.scene is not None:
+                        time_map.set_scene(self._joint_host.scene)
+                if profile is not None:
+                    pane = self._wrap_joint_bottom_pane("井间剖面", profile)
+                    split.addWidget(pane)
+                    self._joint_profile = profile
+                    self._apply_profile_time_only_policy(profile)
+                    if self._joint_host.scene is not None:
+                        profile.set_scene(self._joint_host.scene)
+                split.setStretchFactor(0, 1)
+                split.setStretchFactor(1, 1)
+                split.setSizes([520, 520])
+                self._joint_2d_split = split
+                self.joint_2d_host.layout().insertWidget(0, split, 1)
             self._install_joint_well_pick()
         except Exception as exc:
             logger.exception("joint widget mount failed")
@@ -2153,6 +2233,8 @@ class GeologicalModeling3DPage(QWidget):
                         if msg:
                             page._on_joint_status(msg)
                             return True
+                        if page._joint_host.pop_fence_well():
+                            return True
                 return False
 
         filt = _PickFilter(self)
@@ -2180,14 +2262,15 @@ class GeologicalModeling3DPage(QWidget):
         self._joint_host.remove_active_fence()
 
     def _on_joint_3d_click(self, sx: float, sy: float, view_widget) -> bool:
-        """Hit-test wells; two-click builds fence via host. Returns True if consumed."""
-        name = self._hit_test_well_at(sx, sy, view_widget)
-        if name is None:
+        """Hit-test ActiveTimeSlice pierce points and append to the well-order fence."""
+        well_id = self._hit_test_pierce_at(sx, sy, view_widget)
+        if well_id is None:
             if self._well_pick.half_select is not None:
                 self._on_joint_status(self._well_pick.on_blank_click())
                 return True
             return False
-        self._handle_joint_well_pick(name)
+        self._joint_host.append_fence_well(well_id)
+        self.well_selected.emit(well_id)
         return True
 
     def _on_joint_3d_draw_press(self, sx: float, sy: float, view_widget) -> bool:
@@ -2286,7 +2369,58 @@ class GeologicalModeling3DPage(QWidget):
                 self._on_joint_status(msg)
                 event.accept()
                 return
+            if self._joint_host.pop_fence_well():
+                event.accept()
+                return
         super().keyPressEvent(event)
+
+    def _hit_test_pierce_at(self, sx: float, sy: float, view_widget) -> str | None:
+        """Return JointWellId of the nearest ActiveTimeSlice pierce point, if any."""
+        scene = self._joint_host.scene
+        widget = self._joint_widget
+        if scene is None or widget is None:
+            return None
+        try:
+            pierces = scene.pierce_points_on_active_time()
+        except Exception:
+            return None
+        if not pierces:
+            return None
+        w = float(getattr(view_widget, "width", lambda: 0)() or 0)
+        h = float(getattr(view_widget, "height", lambda: 0)() or 0)
+        if w <= 0 or h <= 0:
+            return None
+        try:
+            vm = view_widget.viewMatrix()
+            pm = view_widget.projectionMatrix()
+        except Exception:
+            return None
+        mapper = getattr(widget, "_index_xyz_to_world", None)
+        trajs = {
+            pierce.well_id: type(
+                "T", (), {"points": np.asarray([[pierce.x, pierce.y, pierce.z]])}
+            )()
+            for pierce in pierces
+        }
+
+        def w2r(x, y, z):
+            idx = scene.world_to_render_xyz(float(x), float(y), float(z))
+            if callable(mapper):
+                world = mapper(idx)
+                return float(world[0]), float(world[1]), float(world[2])
+            return idx
+
+        screen = build_well_screen_geoms(
+            trajs,
+            world_to_render=w2r,
+            view_matrix=vm,
+            projection_matrix=pm,
+            width=w,
+            height=h,
+        )
+        return pick_well_name(
+            sx, sy, screen, head_radius_px=16.0, traj_radius_px=0.0, head_only=True
+        )
 
     def _apply_profile_time_only_policy(self, profile) -> None:
         """2D profile follows the scene domain (single display domain).
@@ -2344,7 +2478,9 @@ class GeologicalModeling3DPage(QWidget):
         self._ensure_joint_widget()
         if self._joint_widget is not None and self._joint_host.scene is not None:
             self._joint_widget.set_scene(self._joint_host.scene)
-            # Profile may have been detached into bottom host
+            time_map = getattr(self, "_joint_time_map", None)
+            if time_map is not None and hasattr(time_map, "set_scene"):
+                time_map.set_scene(self._joint_host.scene)
             profile = getattr(self, "_joint_profile", None)
             if profile is not None and hasattr(profile, "set_scene"):
                 self._apply_profile_time_only_policy(profile)

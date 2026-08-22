@@ -52,17 +52,17 @@ def test_host_preferred_domain_not_forced_to_time(qtbot, tmp_path, monkeypatch):
     assert host.scene.vertical_domain is VerticalDomain.DEPTH
 
 
-def test_host_auto_default_fence_defaults_true(tmp_path, monkeypatch):
-    """#122: keep auto default fence on reload unless restore disables it."""
+def test_host_auto_default_fence_defaults_false(tmp_path, monkeypatch):
+    """Time-slice well-connect: do not auto-pair the first two wells."""
     from paleo_workbench.viz import joint_host as mod
 
     monkeypatch.setattr(mod, "_repo_root", lambda: tmp_path)
     host = WellSeismicJointHost()
-    assert host.auto_default_fence is True
-    host.reload(auto_default_fence=False)
     assert host.auto_default_fence is False
     host.reload(auto_default_fence=True)
     assert host.auto_default_fence is True
+    host.reload(auto_default_fence=False)
+    assert host.auto_default_fence is False
 
 
 def test_host_depth_unavailable_status_and_unified_domain(tmp_path, monkeypatch):
