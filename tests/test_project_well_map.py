@@ -535,7 +535,7 @@ class TestReferenceLayers:
         )
         page.btn_reference.setChecked(True)
         series = plot.series["reference_layers"]
-        assert series.visible is True
+        assert series.visible is True, f"errors={page._reference_errors}"
         values = list(series.x)
         assert [v for v in values if v == v] == [0.0, 5.0, 5.0, 0.0]
         assert len(values) == 5 and values[-1] != values[-1]  # ring separator NaN

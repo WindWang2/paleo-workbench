@@ -167,6 +167,19 @@ def test_reference_layers_imports_cleanly_without_gdal(monkeypatch, tmp_path) ->
 
     import paleo_workbench.mapping.reference_layers as rl
 
+    # The re-import below replaces sys.modules AND the parent-package
+    # attribute; both must be restored or later monkeypatch targets and
+    # ``from ... import`` resolve to different module objects (leak seen by
+    # the project well-map reference-layer tests).
+    original_module = rl
+    parent_package = sys.modules["paleo_workbench.mapping"]
+    monkeypatch.setattr(parent_package, "reference_layers", original_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "paleo_workbench.mapping.reference_layers",
+        original_module,
+    )
+
     monkeypatch.setitem(sys.modules, "osgeo", None)
     monkeypatch.setitem(sys.modules, "osgeo.gdal", None)
     monkeypatch.setitem(sys.modules, "osgeo.osr", None)

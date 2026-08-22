@@ -427,11 +427,12 @@ class ProjectWellMapPage(QWidget):
     def _render_reference_layers(self) -> None:
         xs: list[float] = []
         ys: list[float] = []
+        self._reference_errors: list[str] = getattr(self, "_reference_errors", [])
+        self._reference_errors.clear()
         enabled = self.btn_reference.isChecked()
         budget = self.MAX_REFERENCE_VERTICES
         if enabled and budget > 0:
             from paleo_workbench.mapping.reference_layers import (
-                ReferenceLayerError,
                 ReferenceLayerService,
             )
 
@@ -441,7 +442,12 @@ class ProjectWellMapPage(QWidget):
                     break
                 try:
                     features, _extent = service.vector_render_payload(layer)
-                except (ReferenceLayerError, Exception):  # noqa: BLE001 - view must not die
+                except Exception as exc:  # noqa: BLE001 - view must not die
+                    # Keep the reason inspectable (tests/diagnostics); the UI
+                    # treats an unreadable layer as simply not drawn.
+                    self._reference_errors.append(
+                        f"{getattr(layer, 'name', layer)}: {exc.__class__.__name__}"
+                    )
                     continue
                 for feature in features:
                     if budget <= 0:
