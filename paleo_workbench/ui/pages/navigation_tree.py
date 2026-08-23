@@ -375,7 +375,7 @@ class NavigationTree(QTreeWidget):
             if len(ordered) > MAX_ENTITY_CHILDREN:
                 overflow = QTreeWidgetItem(
                     group,
-                    [f"…另有 {len(ordered) - MAX_ENTITY_CHILDREN} 口井，请在井位地图中查看"],
+                    [f"…另有 {len(ordered) - MAX_ENTITY_CHILDREN} 口井，请展开下方井位地图面板查看"],
                 )
                 overflow.setFlags(overflow.flags() & ~Qt.ItemFlag.ItemIsSelectable)
                 overflow.setDisabled(True)

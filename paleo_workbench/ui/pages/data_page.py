@@ -45,6 +45,7 @@ from paleo_workbench.ui.pages.data_view_models import (
 )
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
 from paleo_workbench.project.domain import domain_signature
+from paleo_workbench.project.well_location_map import sync_well_location_map
 from paleo_workbench.ui.pages.filter_index import (
     CATEGORIES,
     FilterQuery,
@@ -295,6 +296,12 @@ class DataPage(QWidget):
         self.inspector_panel = self.workspace.inspector_panel
         self.main_splitter = self.workspace.main_splitter
         self.right_splitter = self.workspace.right_splitter
+        # Embedded well-location map (former standalone page): lives in the
+        # center column as a collapsible panel, synced from refresh paths.
+        self.well_map_panel = self.workspace.well_map_panel
+        self.well_focus_requested.connect(self.well_map_panel.expand_and_focus)
+        self.well_map_panel.map_page.well_selected.connect(self._on_well_map_well_picked)
+        self.well_map_panel.map_page.well_activated.connect(self._on_well_map_well_picked)
 
         self.column_settings_btn = self.asset_table.column_settings_btn
         self.column_settings_menu = self.asset_table.column_settings_menu
@@ -383,6 +390,8 @@ class DataPage(QWidget):
         self.reader_panel.visualization_requested.connect(self._request_selected_visualization)
 
         self._refresh()
+        # Initial domain binding for the embedded well-location map.
+        self.refresh_well_map_panel()
 
         QShortcut(
             QKeySequence("Delete"),
@@ -795,6 +804,24 @@ class DataPage(QWidget):
             self._well_identity_adapter = adapter
         return adapter
 
+    def refresh_well_map_panel(self) -> None:
+        """Sync the embedded well-location map with the current document.
+
+        Refreshes the panel canvas (signature-gated) and persists the wells
+        as the project's dedicated 井位图 vector map document.
+        """
+        panel = getattr(self, "well_map_panel", None)
+        if panel is not None:
+            panel.refresh_domain(self.project)
+        try:
+            sync_well_location_map(self.project)
+        except Exception:
+            pass
+
+    def _on_well_map_well_picked(self, well_id: str) -> None:
+        """Embedded map → tree/table selection (same page now, §18)."""
+        self.select_well(well_id)
+
     def refresh_domain_views(self) -> None:
         """Re-read domain sections into tree/overview views (cheap, cached)."""
         self._refresh()
@@ -808,6 +835,7 @@ class DataPage(QWidget):
                 refresh_overview(self.project)
             except Exception:
                 pass
+        self.refresh_well_map_panel()
         self.domain_entities_changed.emit(self.project)
 
     # ------------------------------------------------------------------

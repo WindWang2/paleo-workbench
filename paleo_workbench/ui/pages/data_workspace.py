@@ -8,6 +8,7 @@ from paleo_workbench.ui.pages.data_reader_panel import DataReaderPanel
 from paleo_workbench.ui.pages.inspector_panel import InspectorPanel
 from paleo_workbench.ui.pages.navigation_tree import NavigationTree
 from paleo_workbench.ui.pages.project_overview_panel import ProjectOverviewPanel
+from paleo_workbench.ui.pages.well_map_panel import WellMapPanel
 
 
 class DataWorkspace(QWidget):
@@ -58,7 +59,10 @@ class DataWorkspace(QWidget):
         center_container = QWidget()
         center_layout = QVBoxLayout(center_container)
         center_layout.setContentsMargins(0, 0, 0, 0)
-        center_layout.addWidget(self._center_stack)
+        center_layout.addWidget(self._center_stack, 1)
+        # 井位地图 collapsible panel under the table (§18: absorbed page).
+        self.well_map_panel = WellMapPanel()
+        center_layout.addWidget(self.well_map_panel, 0)
         self.main_splitter.addWidget(center_container)
         self.main_splitter.addWidget(self.right_splitter)
         self.main_splitter.setStretchFactor(0, 0)
