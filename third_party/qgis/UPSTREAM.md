@@ -33,5 +33,11 @@ directories remain when they are required by the Core/GUI build closure.
 
 Only `CMakeLists.txt` differs from upstream: four non-runtime subdirectories
 (`doc`, `i18n`, `postinstall`, and `linux`) are not added because their source
-is intentionally not part of this minimal runtime closure. No imported C++
-source is modified.
+is intentionally not part of this minimal runtime closure. One imported C++
+header carries a documented compatibility patch:
+
+- `src/core/qgsconnectionpool.h` — `QSemaphore::tryAcquire(int,
+  QDeadlineTimer)` does not exist before Qt 6.6; on older Qt runtimes (the
+  CI leg builds against Ubuntu noble's Qt 6.4) the call falls back to the
+  identical milliseconds overload, guarded by `QT_VERSION`. Semantics are
+  unchanged (both forms time out after `timeout` ms).
