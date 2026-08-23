@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 
 from paleo_workbench.project.models import FactorMapTask, ProjectDocument
@@ -151,3 +153,114 @@ def test_project_serializes_contour_drafts():
     restored = ProjectDocument.model_validate(project.model_dump())
     assert len(restored.contour_drafts) == 1
     assert restored.contour_drafts[0].segments
+
+
+# --------------------------------------------------------------------------- #
+# #928 — vendored upstream contour pipeline activation
+# --------------------------------------------------------------------------- #
+
+
+def _constrained_task_with_breaks(grid_n: int = 96) -> FactorMapTask:
+    rng = np.random.default_rng(4242)
+    pts = [
+        {"well": f"w{i}", "x": float(x), "y": float(y), "value": float(v)}
+        for i, (x, y, v) in enumerate(
+            zip(rng.uniform(0, 1000, 40), rng.uniform(0, 1000, 40), rng.uniform(10, 60, 40))
+        )
+    ]
+    task = FactorMapTask(
+        name="约束IDW",
+        target_horizon="H1",
+        factor_type="厚度",
+        method="约束IDW",
+        parameters={
+            "sample_points": pts,
+            "break_polylines": [[(500.0, -50.0), (510.0, 1050.0)]],
+        },
+    )
+    apply_interpolation_to_task(
+        task, method="约束IDW", grid_n=grid_n,
+        fault_polylines=[[(500.0, -50.0), (510.0, 1050.0)]],
+    )
+    return task
+
+
+def test_constrained_idw_run_stores_engine_contours_and_keeps_grid(tmp_path):
+    """#928: prepare-time engine contours ride the grid result; the surface is
+    bit-identical to the surface-only pass (extraction must not move values)."""
+    from paleo_workbench.workflow.constrained_idw_adapter import run_constrained_idw
+    import dataclasses
+
+    rng = np.random.default_rng(11)
+    pts = [
+        {"well": f"w{i}", "x": float(x), "y": float(y), "value": float(v)}
+        for i, (x, y, v) in enumerate(
+            zip(rng.uniform(0, 1000, 30), rng.uniform(0, 1000, 30), rng.uniform(10, 60, 30))
+        )
+    ]
+    breaks = [[(500.0, -50.0), (510.0, 1050.0)]]
+    with_contours = run_constrained_idw(
+        pts, grid_n=64, power=2.0, break_polylines=breaks
+    )
+    assert with_contours["contours"], "engine contours missing from result"
+    assert with_contours["contour_levels"]
+    # The extraction stage must not alter the surface: rerun surface-only via
+    # the engine contract used by the adapter and compare grids bitwise.
+    surface_only = run_constrained_idw_surface_only(pts, grid_n=64, power=2.0, break_polylines=breaks)
+    assert np.array_equal(
+        np.asarray(with_contours["grid_z"]), np.asarray(surface_only), equal_nan=True
+    )
+
+
+def run_constrained_idw_surface_only(pts, *, grid_n, power, break_polylines):
+    """Adapter run with extraction off — mirrors the pre-#928 contract."""
+    from paleo_workbench.workflow.constrained_idw_adapter import run_constrained_idw
+    import paleo_workbench.workflow.constrained_idw_adapter as cia
+
+    engine = cia._ensure_haiyou_engine()
+    generate = engine["generate_constrained_idw"]
+
+    def generate_no_contours(*args, **kwargs):
+        cfg = kwargs.get("config") or args[5]
+        kwargs["config"] = dataclasses.replace(cfg, extract_contours=False)
+        kwargs["levels"] = []
+        return generate(*args, **kwargs)
+
+    engine["generate_constrained_idw"] = generate_no_contours
+    try:
+        return run_constrained_idw(
+            pts, grid_n=grid_n, power=power, break_polylines=break_polylines
+        )["grid_z"]
+    finally:
+        engine["generate_constrained_idw"] = generate
+
+
+def test_draft_prefers_engine_contours_and_survives_reopen(tmp_path):
+    """#928: the default draft uses the stored refined isolines; a reopen
+    (artifact-backed read) keeps them; mismatched explicit levels re-extract."""
+    project = ProjectDocument.new("C928")
+    task = _constrained_task_with_breaks()
+    project.factor_map_tasks.append(task)
+
+    draft = compile_contour_draft_from_task(project, task)
+    assert draft.segments, "draft has no segments"
+    assert all(
+        seg.properties.get("refined") for seg in draft.segments
+    ), "draft did not use the engine-refined contours"
+
+    # Explicit identical levels still use the stored contours.
+    stored = [seg.level for seg in draft.segments]
+    draft_same = compile_contour_draft_from_task(
+        project, task, levels=sorted(set(stored))
+    )
+    assert draft_same.segments and all(
+        seg.properties.get("refined") for seg in draft_same.segments
+    )
+
+    # A different explicit level set must re-extract (raw pipeline).
+    off = [min(stored) - 1.5] if stored else [1.0]
+    draft_other = compile_contour_draft_from_task(project, task, levels=off)
+    assert draft_other.segments
+    assert not any(
+        seg.properties.get("refined") for seg in draft_other.segments
+    )

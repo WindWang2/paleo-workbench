@@ -13,6 +13,9 @@ from paleo_workbench.ui.pages.workflow_contract_panel import WorkflowContractPan
 
 class HomePage(QWidget):
     navigation_requested = Signal(int)
+    new_project_requested = Signal()
+    open_project_requested = Signal()
+    open_sample_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -41,7 +44,18 @@ class HomePage(QWidget):
         )
         layout.setSpacing(tokens.SPACE_3)
 
+        from paleo_workbench.ui.pages.onboarding_report_card import OnboardingReportCard
+        from paleo_workbench.ui.pages.start_guide_card import StartGuideCard
+
+        self.start_guide_card = StartGuideCard()
+        self.start_guide_card.new_project_requested.connect(self.new_project_requested.emit)
+        self.start_guide_card.open_project_requested.connect(self.open_project_requested.emit)
+        self.start_guide_card.open_sample_requested.connect(self.open_sample_requested.emit)
+        self.onboarding_report_card = OnboardingReportCard()
+
         self.workflow_progress = WorkflowProgress()
+        layout.addWidget(self.start_guide_card)
+        layout.addWidget(self.onboarding_report_card)
         layout.addWidget(self.workflow_progress)
 
         # Title of the module relationship diagram
@@ -113,3 +127,27 @@ class HomePage(QWidget):
                 }:
                     self.contract_panel.set_contract_id(cid)
                     break
+        # Start guide visibility: no resources and no onboarding report
+        resource_counts = state.get("resource_counts") if isinstance(state, dict) else None
+        total_resources = 0
+        if isinstance(resource_counts, dict):
+            try:
+                total_resources = sum(int(v) for v in resource_counts.values())
+            except Exception:
+                total_resources = 0
+        onboarding = {}
+        proj = project if project is not None else self._project
+        if proj is not None:
+            onboarding = getattr(proj, "onboarding_report", {}) or {}
+        has_report = bool(onboarding)
+        if hasattr(self, "start_guide_card"):
+            show_guide = (total_resources == 0 and not has_report)
+            self.start_guide_card.setVisible(show_guide)
+        if hasattr(self, "onboarding_report_card"):
+            report = onboarding if has_report else None
+            # Also handle project is None case
+            if proj is None:
+                report = None
+            else:
+                report = onboarding if has_report else None
+            self.onboarding_report_card.set_report(report)

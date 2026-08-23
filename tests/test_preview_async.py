@@ -488,7 +488,10 @@ def test_data_page_clear_cache_does_not_strand_visualization_loading(
     assert tabs.message_label.text() == "visual complete"
 
 
-def test_data_page_defers_visualization_until_tab_activation(qtbot, tmp_path):
+def test_data_page_prefetches_visualization_on_selection(qtbot, tmp_path):
+    """Selection kicks a background visualization build; the 数据列表 tab
+    keeps focus and the result is ready when the user opens 可视化预览."""
+
     class PagePurposeProvider(PreviewProvider):
         def __init__(self):
             super().__init__()
@@ -535,20 +538,19 @@ def test_data_page_defers_visualization_until_tab_activation(qtbot, tmp_path):
 
     page._set_selected_asset(resource)
     qtbot.waitUntil(lambda: provider.summary_calls == ["points.dat"], timeout=3000)
-    _wait_controller_idle(qtbot, page._preview_controller)
-
-    tabs = page.reader_panel.lazy_visualization_tabs
-    assert provider.visualization_calls == []
-    assert tabs.currentIndex() == 0
-    assert tabs._host is None
-
-    tabs.setCurrentIndex(1)
     qtbot.waitUntil(
         lambda: provider.visualization_calls == ["points.dat"], timeout=3000
     )
     _wait_controller_idle(qtbot, page._visualization_controller)
+
+    # Prefetch completed in the background without stealing the tab.
+    tabs = page.reader_panel.lazy_visualization_tabs
+    assert tabs.currentIndex() == 0
     assert tabs.message_label.text() == "visual:points.dat"
 
+    # Opening the tab shows the prefetched result; the controller cache
+    # prevents a rebuild on re-entry.
+    tabs.setCurrentIndex(1)
     tabs.setCurrentIndex(0)
     tabs.setCurrentIndex(1)
     qtbot.wait(50)
@@ -599,20 +601,27 @@ def test_data_page_selection_discards_obsolete_visualization(qtbot, tmp_path):
     page._preview_controller.provider = provider
     page._visualization_controller.provider = provider
 
+    # Selection prefetches in the background; the blocking provider holds
+    # asset A's visualization build until released.
     page._set_selected_asset(resources[0])
     qtbot.waitUntil(lambda: page.reader_panel.title_label.text() == "a.dat")
-    page.reader_panel.lazy_visualization_tabs.setCurrentIndex(1)
     assert entered.wait(timeout=2.0)
 
     page._set_selected_asset(resources[1])
     qtbot.waitUntil(lambda: page.reader_panel.title_label.text() == "b.dat")
     release.set()
+    qtbot.waitUntil(
+        lambda: page.reader_panel.lazy_visualization_tabs.message_label.text()
+        == "stale:b.dat",
+        timeout=3000,
+    )
     _wait_controller_idle(qtbot, page._visualization_controller)
 
     tabs = page.reader_panel.lazy_visualization_tabs
     assert page.reader_panel.title_label.text() == "b.dat"
+    # No tab steal, and A's stale result never surfaced over B's preview.
     assert tabs.currentIndex() == 0
-    assert tabs.visual_stack.currentWidget() is tabs.prompt_label
+    assert tabs.message_label.text() == "stale:b.dat"
 
 
 def test_preload_media_rejects_files_above_budget(tmp_path):

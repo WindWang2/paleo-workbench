@@ -26,10 +26,11 @@ class MapCanvasPanel(QFrame):
         outer.addWidget(self.title_label)
 
         host = QFrame()
+        host.setObjectName("MapCanvasHost")
         host.setStyleSheet(
-            f"QFrame {{ background: {tokens.BG_SEARCH};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px; }}"
+            f"QFrame {{ background: {tokens.BG_BODY};"
+            f" border: 1px solid {tokens.BORDER_LIGHT};"
+            f" border-radius: {tokens.RADIUS_CARD}px; }}"
         )
         self.stack = QStackedLayout(host)
         self.stack.setContentsMargins(0, 0, 0, 0)
@@ -37,6 +38,10 @@ class MapCanvasPanel(QFrame):
         self.empty_label = QLabel("未选择古地理图")
         self.empty_label.setObjectName("EmptyStateLabel")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_label.setStyleSheet(
+            f"color: {tokens.TEXT_SECONDARY}; background: transparent; border: none;"
+            f" font-size: {tokens.FONT_SIZE_TITLE}; padding: 32px;"
+        )
         self.stack.addWidget(self.empty_label)
 
         self.canvas = PaleoMapCanvas()

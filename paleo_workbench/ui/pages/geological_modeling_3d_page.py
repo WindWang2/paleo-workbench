@@ -671,6 +671,14 @@ class GeologicalModeling3DPage(QWidget):
         self.btn_export.setObjectName("SecondaryButton")
         self.btn_export.clicked.connect(self._export_mesh)
         exp_layout.addWidget(self.btn_export)
+        # #937-6: async export/advisor outcomes report here instead of modal
+        # dialogs (worker completion slots must not stack modals, #897 family).
+        self.export_status = QLabel("")
+        self.export_status.setWordWrap(True)
+        self.export_status.setStyleSheet(
+            "font-size: 12px; color: %s; border: none;" % tokens.TEXT_SECONDARY
+        )
+        exp_layout.addWidget(self.export_status)
 
         right_layout.addWidget(card_export)
 
@@ -3098,13 +3106,14 @@ class GeologicalModeling3DPage(QWidget):
         )
 
     def _on_export_completed(self, filepath: str) -> None:
+        # #937-6: async completion — in-page status instead of a modal.
         self.btn_export.setEnabled(True)
         self._register_mesh_export(filepath)
-        QMessageBox.information(self, "导出成功", f"数值模拟网格模型已成功导出:\n{filepath}")
+        self.export_status.setText(f"导出成功：{filepath}")
 
     def _on_export_failed(self, err: str) -> None:
         self.btn_export.setEnabled(True)
-        QMessageBox.critical(self, "导出失败", f"网格模型导出失败:\n{err}")
+        self.export_status.setText(f"网格模型导出失败：{err}")
 
     def _register_mesh_export(self, filepath: str) -> None:
         """Best-effort OUTPUT DataVersion registration for FLAC3D/Abaqus mesh
@@ -3158,8 +3167,9 @@ class GeologicalModeling3DPage(QWidget):
         dialog.activateWindow()
 
     def _on_advisor_failed(self, err: str) -> None:
+        # #937-6: async completion — in-page status instead of a modal.
         self.btn_ai_advisor.setEnabled(True)
-        QMessageBox.warning(self, "诊断分析失败", f"一致性复核诊断遇到错误:\n{err}")
+        self.export_status.setText(f"一致性复核诊断失败：{err}")
 
     # ------------------------------------------------------------------ #
     # Well-Seismic Tie Calibration

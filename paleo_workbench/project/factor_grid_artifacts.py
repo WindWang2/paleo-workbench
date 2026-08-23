@@ -241,6 +241,7 @@ def _seal_result_arrays(result: FactorGridResult) -> FactorGridResult:
         created_at=result.created_at,
         variance_grid=var,
         boundary=list(result.boundary) if result.boundary is not None else None,
+        contours=dict(result.contours) if result.contours else None,
     )
     # Preserve trusted statistics if the constructor re-scanned a sealed buffer
     # that already had matching stats (artifact load path).
@@ -439,6 +440,7 @@ def _shell_from_live(
         created_at=live.created_at,
         variance_grid=live.variance_grid,
         boundary=list(live.boundary) if live.boundary is not None else None,
+        contours=dict(live.contours) if live.contours else None,
     )
     shell.grid_z = live.grid_z if shell.grid_z is live.grid_z else _freeze_array(shell.grid_z)
     shell.grid_x = live.grid_x

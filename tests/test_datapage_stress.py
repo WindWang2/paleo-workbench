@@ -66,9 +66,22 @@ def test_stress_s1_update_state(qtbot):
     model = page.asset_table.model
     assert model is not None
     assert model.rowCount() == n
-    # 8x rows ⇒ ≤~5x time (+floor); an O(N²) refresh would blow this wide.
-    assert timing.ms < SCALE_CEILING * timing_small.ms + FLOOR_MS, (
-        f"S1_update scaling: {timing.ms:.1f}ms at n={n} vs "
+    # Superlinearity gate, per-row form: at 8x rows an O(N²) refresh costs
+    # 8x more per row; the ceiling allows 4x per-row headroom for runner
+    # memory-pressure noise (the absolute total form was machine-bound and
+    # flaked on slow CI even though the code is linear — measured locally
+    # 125..4000 rows at a constant ~21 µs/row; see FsProbeCache for the CI
+    # stat-pressure half of #917).
+    per_row_big = timing.ms / n
+    per_row_small = timing_small.ms / max(1, n // 8)
+    assert per_row_big < 4.0 * per_row_small + 0.02, (
+        f"S1_update per-row scaling: {per_row_big * 1000:.1f}µs/row at n={n} vs "
+        f"{per_row_small * 1000:.1f}µs/row at n={n // 8}"
+    )
+    # Keep the absolute ceiling as a backstop against gross regressions
+    # (5x the extrapolated linear cost + a generous floor).
+    assert timing.ms < SCALE_CEILING * timing_small.ms * 8 + FLOOR_MS, (
+        f"S1_update total: {timing.ms:.1f}ms at n={n} vs "
         f"{timing_small.ms:.1f}ms at n={n // 8}"
     )
 

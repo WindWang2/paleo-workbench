@@ -9,22 +9,28 @@ from __future__ import annotations
 
 import json
 import math
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QAbstractItemModel, QMimeData, QModelIndex, Qt, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QFrame,
-    QHBoxLayout,
     QHeaderView,
     QLabel,
     QMenu,
-    QToolButton,
     QTreeView,
     QVBoxLayout,
 )
 
 from paleo_workbench.ui import tokens
+
+_ICONS_DIR = Path(__file__).parent / "assets" / "icons" / "map"
+
+
+def _tree_icon(name: str) -> QIcon:
+    path = _ICONS_DIR / f"{name}.svg"
+    return QIcon(str(path)) if path.exists() else QIcon()
 
 # ``layer_model_core`` is an opt-in C++ build. Importing it at module scope made
 # this module — and every parent up to ``AppShell`` and the ``paleo-workbench``
@@ -372,24 +378,15 @@ class NativeLayerTree(QFrame):
         title.setObjectName("MapDockTitle")
         layout.addWidget(title)
 
-        controls = QHBoxLayout()
-        controls.setSpacing(tokens.SPACE_1)
-        self.add_layer_action = QAction("Add Layer", self)
-        self.add_group_action = QAction("Add Group", self)
-        self.remove_action = QAction("Remove", self)
-        self.move_up_action = QAction("Move Up", self)
-        self.move_down_action = QAction("Move Down", self)
-        self.zoom_action = QAction("Zoom to Layer", self)
-        self.properties_action = QAction("Properties", self)
-        for action in (
-            self.add_layer_action, self.add_group_action, self.remove_action,
-            self.move_up_action, self.move_down_action, self.zoom_action, self.properties_action,
-        ):
-            button = QToolButton(self)
-            button.setDefaultAction(action)
-            controls.addWidget(button)
-        controls.addStretch(1)
-        layout.addLayout(controls)
+        # Layer management lives entirely on the tree's right-click menu — no
+        # always-visible button row (the panel stays a clean layer list).
+        self.add_layer_action = QAction(_tree_icon("tree-add-layer"), "添加图层", self)
+        self.add_group_action = QAction(_tree_icon("tree-add-group"), "添加分组", self)
+        self.remove_action = QAction(_tree_icon("tree-remove"), "移除图层", self)
+        self.move_up_action = QAction(_tree_icon("tree-move-up"), "上移", self)
+        self.move_down_action = QAction(_tree_icon("tree-move-down"), "下移", self)
+        self.zoom_action = QAction(_tree_icon("tree-zoom"), "缩放至图层", self)
+        self.properties_action = QAction(_tree_icon("tree-properties"), "属性", self)
 
         self.model = NativeLayerModel(registry, self)
         self.tree = QTreeView()
@@ -481,17 +478,37 @@ class NativeLayerTree(QFrame):
         if layer_id:
             self.properties_requested.emit(layer_id)
 
-    def _show_context_menu(self, position) -> None:
+    def _select_row_at(self, position) -> None:
+        """Right-click selects the layer under the cursor (QGIS panel behavior)."""
+        index = self.tree.indexAt(position)
+        if index.isValid():
+            self.tree.setCurrentIndex(index)
+
+    def _build_context_menu(self) -> QMenu:
+        """All layer management actions, icon-labeled, for the tree's right-click menu."""
         menu = QMenu(self)
-        for action in (
-            self.zoom_action, self.properties_action, self.move_up_action,
-            self.move_down_action, self.remove_action,
-        ):
-            menu.addAction(action)
+        menu.addAction(self.add_layer_action)
+        menu.addAction(self.add_group_action)
+        menu.addSeparator()
+        menu.addAction(self.zoom_action)
+        menu.addAction(self.properties_action)
+        menu.addSeparator()
+        menu.addAction(self.move_up_action)
+        menu.addAction(self.move_down_action)
+        menu.addAction(self.remove_action)
         layer_id = self._current_layer_id()
         if layer_id:
-            menu.addAction("Export Layer", lambda: self.export_layer_requested.emit(layer_id))
-        menu.exec(self.tree.viewport().mapToGlobal(position))
+            menu.addSeparator()
+            menu.addAction(
+                _tree_icon("tree-export"),
+                "导出图层",
+                lambda: self.export_layer_requested.emit(layer_id),
+            )
+        return menu
+
+    def _show_context_menu(self, position) -> None:
+        self._select_row_at(position)
+        self._build_context_menu().exec(self.tree.viewport().mapToGlobal(position))
 
     def set_active_layer(self, layer_id: str | None) -> bool:
         if not self.model.set_active_layer(layer_id):

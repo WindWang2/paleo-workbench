@@ -1311,6 +1311,10 @@ class DataLifecycleController:
                 (worker.failed, page._on_verify_failed),
             ),
             cancel=worker.cancel,
+            # #937-10: bind the job to the current project so a completion from
+            # a PREVIOUS project cannot mutate the new one (the sibling
+            # import/export/delivery jobs all carry target=).
+            target=page.project,
         )
         page.data_toolbar.set_verify_running(True)
         page._set_action_status(f"正在后台校验 {len(items)} 项数据资产完整性...")

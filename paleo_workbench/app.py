@@ -203,6 +203,18 @@ class PaleoWorkbenchWindow(QWidget):
         menu_bar.new_project_requested.connect(self._on_new_project)
         menu_bar.open_project_requested.connect(self._on_open_project)
         menu_bar.open_sample_project_requested.connect(self._on_open_sample_project)
+        # HomePage start guide cards (recreated on each _refresh_shell)
+        try:
+            home_page = self.app_shell.home_page_widget()
+            if home_page is not None:
+                if hasattr(home_page, "new_project_requested"):
+                    home_page.new_project_requested.connect(self._on_new_project)
+                if hasattr(home_page, "open_project_requested"):
+                    home_page.open_project_requested.connect(self._on_open_project)
+                if hasattr(home_page, "open_sample_requested"):
+                    home_page.open_sample_requested.connect(self._on_open_sample_project)
+        except Exception:
+            pass
         menu_bar.save_project_requested.connect(self._on_save_project)
         menu_bar.properties_requested.connect(self._on_properties)
         menu_bar.preview_settings_requested.connect(self._show_preview_settings)

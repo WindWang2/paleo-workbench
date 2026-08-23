@@ -7,16 +7,24 @@ from __future__ import annotations
 
 import pytest
 
-import geoviz as api
+# #940-2: a bare module-level import made the whole file a collection ERROR
+# (not a skip) wherever the geoviz graph is absent; importorskip keeps the
+# skip semantics intact.
+api = pytest.importorskip("geoviz", reason="geoviz facade not installed")
+_map_edit_api = pytest.importorskip(
+    "geoviz_plots.map_edit.api", reason="geoviz_plots not installed"
+)
 # Private pure-core helper (not part of the facade surface).
-from geoviz_plots.map_edit.api import _hit_test_python
+_hit_test_python = _map_edit_api._hit_test_python
 
 pytestmark = pytest.mark.skipif(
     not api.HAS_CPP,
     reason="map_edit_core C++ extension not installed",
 )
 
-import map_edit_core  # noqa: E402
+map_edit_core = pytest.importorskip(
+    "map_edit_core", reason="map_edit_core C++ extension not installed"
+)
 
 
 # ---------------------------------------------------------------------------
