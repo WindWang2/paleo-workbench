@@ -116,7 +116,12 @@ jobs:
       # and made this leg fail on every trigger.
       - name: Install QGIS test deps
         run: |
-          python -m pip install "PySide6==6.11.1" "pytest-qt>=4.5.0" "pytest-timeout>=2.3.1" "numpy>=1.26"
+          python -m pip install "PySide6==6.11.1" "pytest-qt>=4.5.0" "pytest-timeout>=2.3.1" "numpy>=1.26" \
+            "pydantic>=2" \
+            "gdal==$(gdal-config --version)"
+          # pydantic: tests/conftest.py's autouse session fixture imports the
+          # paleo_workbench package (project.models). gdal: the map backend's
+          # optional-import surface (bridge capability probe).
 
       - name: Build vendored QGIS + qgis_render_bridge (opt-in)
         env:
