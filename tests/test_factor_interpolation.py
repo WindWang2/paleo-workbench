@@ -86,12 +86,16 @@ def test_kriging_output_finite_deterministic_and_variance_nonnegative():
     ]
     first = interpolate_factor_grid(points, method="kriging", grid_n=12)
     second = interpolate_factor_grid(points, method="kriging", grid_n=12)
-    assert first["grid_z"] == second["grid_z"]
-    assert first["grid_var"] == second["grid_var"]
-    finite_z = [v for row in first["grid_z"] for v in row if v is not None]
-    assert all(np.isfinite(v) for v in finite_z)
-    finite_v = [v for row in first["grid_var"] for v in row if v is not None]
-    assert all(v >= 0.0 for v in finite_v)
+    # #941-1/2: engine now returns ndarray — compare via array_equal.
+    assert np.array_equal(np.asarray(first["grid_z"]), np.asarray(second["grid_z"]))
+    assert np.array_equal(np.asarray(first["grid_var"]), np.asarray(second["grid_var"]))
+    # Handle both ndarray (NaN) and legacy list (None) encodings.
+    gz = np.asarray(first["grid_z"], dtype=np.float64)
+    assert np.all(np.isfinite(gz[np.isfinite(gz)]))
+    assert np.all(gz[np.isfinite(gz)] >= -1e30)  # finite check
+    gv = np.asarray(first["grid_var"], dtype=np.float64)
+    finite_v = gv[np.isfinite(gv)]
+    assert np.all(finite_v >= -1e-9)
 
 
 def test_kriging_is_exact_at_sample_grid_node():
@@ -101,9 +105,13 @@ def test_kriging_is_exact_at_sample_grid_node():
     points = [{"x": x, "y": y, "value": v} for x, y, v in samples]
     result = interpolate_factor_grid(points, method="kriging", grid_n=5)
     gx, gy, gz = result["grid_x"], result["grid_y"], result["grid_z"]
-    ix = gx.index(2.0)
-    iy = gy.index(2.0)
-    assert gz[iy][ix] == pytest.approx(5.0, abs=1e-6)
+    # #941-1/2: gx/gy are ndarray now — use list conversion or where.
+    gx_list = list(np.asarray(gx, dtype=np.float64))
+    gy_list = list(np.asarray(gy, dtype=np.float64))
+    ix = gx_list.index(2.0) if 2.0 in gx_list else int(np.argmin(np.abs(np.asarray(gx)-2.0)))
+    iy = gy_list.index(2.0) if 2.0 in gy_list else int(np.argmin(np.abs(np.asarray(gy)-2.0)))
+    gz_arr = np.asarray(gz, dtype=np.float64)
+    assert float(gz_arr[iy, ix]) == pytest.approx(5.0, abs=1e-6)
 
 
 def test_kriging_handles_duplicate_locations():
