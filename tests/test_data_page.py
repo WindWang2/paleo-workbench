@@ -1610,3 +1610,68 @@ def test_data_page_open_selected_folder_survives_pathlib_oserror(qtbot, tmp_path
     assert folder is not None
     status = page.data_toolbar.operation_status_label.text()
     assert status.startswith(("目录: ", "目录不存在"))
+
+
+# --------------------------------------------------------------------------- #
+# #917 CI stress follow-up — per-refresh filesystem probe cache
+# --------------------------------------------------------------------------- #
+
+
+def test_fs_probe_cache_prunes_missing_subtrees(tmp_path):
+    """One stat per distinct path; a missing root prunes the whole subtree."""
+    import os
+
+    from paleo_workbench.ui.pages.data_view_models import FsProbeCache
+
+    existing = tmp_path / "real" / "file.las"
+    existing.parent.mkdir()
+    existing.write_text("x")
+
+    cache = FsProbeCache()
+    stats_before = 0
+
+    def count_stats():
+        # probe() only syscalls on cache misses; count via monkeypatching os.stat
+        return stats_before
+
+    import unittest.mock as mock
+
+    with mock.patch("os.stat", wraps=os.stat) as wrapped:
+        first = cache.probe(existing)
+        assert first is not None
+        after_first = wrapped.call_count
+
+        # Repeated probes must not re-stat.
+        assert cache.probe(existing) is first
+        assert wrapped.call_count == after_first
+
+        # 2000 probes under a dead prefix: the prefix dir is probed once,
+        # every child short-circuits (O(1) syscalls, not O(N)).
+        for i in range(2000):
+            assert cache.probe(tmp_path / "gone" / f"a{i}.las") is None
+        assert wrapped.call_count - after_first <= 3, wrapped.call_count - after_first
+
+
+def test_fs_probe_cache_matches_legacy_semantics(tmp_path):
+    from paleo_workbench.ui.pages.data_view_models import (
+        FsProbeCache,
+        asset_view_from_resource,
+    )
+    from paleo_workbench.resources.scanner import ResourceItem
+
+    existing = tmp_path / "in" / "ok.las"
+    existing.parent.mkdir()
+    existing.write_text("hello")
+    missing = tmp_path / "in" / "gone.las"
+
+    for path, expect_exists in ((existing, True), (missing, False)):
+        resource = ResourceItem(
+            name=path.name, path=str(path), type="测井", format="las",
+            status="indexed", checksum=None,
+        )
+        view_cached = asset_view_from_resource(resource, fs_probe=FsProbeCache())
+        view_legacy = asset_view_from_resource(resource)
+        assert (view_cached.integrity_state != view_cached.integrity_state.MISSING) is expect_exists
+        assert view_cached.integrity_state == view_legacy.integrity_state
+        assert view_cached.modified_at == view_legacy.modified_at
+        assert view_cached.size_bytes == view_legacy.size_bytes

@@ -78,6 +78,7 @@ jobs:
             qt6-base-dev \
             libqt6svg6-dev \
             qt6-5compat-dev \
+            qt6-multimedia-dev \
             libqca-qt6-dev \
             libsqlite3-dev \
             libexpat1-dev \

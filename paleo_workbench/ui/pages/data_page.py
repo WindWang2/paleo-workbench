@@ -38,6 +38,7 @@ from paleo_workbench.ui.pages.asset_table_model import RESOURCE_TYPE_LABELS
 from paleo_workbench.ui.pages.data_toolbar import DataToolbar
 from paleo_workbench.ui.pages.data_view_models import (
     AssetView,
+    FsProbeCache,
     asset_view_from_object,
     enrich_view_from_catalog,
     path_exists_safe,
@@ -483,10 +484,11 @@ class DataPage(QWidget):
         # falls back to building its own via the filter index.
         _stage('enrich')
         counts_assets = [*self._resources, *self._artifacts, *(catalog_rows or [])]
+        fs_probe = FsProbeCache()
         shared_views = [
-            enricher(asset_view_from_object(a, project_root=preview_root))
+            enricher(asset_view_from_object(a, project_root=preview_root, fs_probe=fs_probe))
             if enricher is not None
-            else asset_view_from_object(a, project_root=preview_root)
+            else asset_view_from_object(a, project_root=preview_root, fs_probe=fs_probe)
             for a in counts_assets
         ]
         # project_root lets the tree counts and the table resolve

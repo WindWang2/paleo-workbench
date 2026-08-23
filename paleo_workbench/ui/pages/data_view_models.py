@@ -6,6 +6,8 @@ and seamlessly connect to future DataCatalogCore DataAsset objects.
 """
 from __future__ import annotations
 
+import os
+import stat as stat_module
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -301,6 +303,50 @@ def path_is_dir_safe(path_obj: Path) -> bool:
         return False
 
 
+class FsProbeCache:
+    """Per-refresh filesystem probe cache (#917 CI data-page stress).
+
+    One ``os.stat`` per distinct path (the legacy path paid ``exists`` +
+    ``is_file`` + ``stat`` per asset per refresh), shared results for repeated
+    paths, and missing-directory pruning: once a directory is known absent,
+    every probe beneath it short-circuits without a syscall. A dead prefix
+    (unmounted NAS root, gone import root) costs O(1) probes per refresh
+    instead of O(assets) — the CI superlinear blowup was stat pressure under
+    exactly this shape.
+    """
+
+    def __init__(self) -> None:
+        self._nodes: dict[str, os.StatResult | None] = {}
+        self._dirs: dict[str, bool] = {}
+
+    def probe(self, path: Path) -> os.StatResult | None:
+        key = str(path)
+        if key in self._nodes:
+            return self._nodes[key]
+        result: os.StatResult | None = None
+        if self._dir_exists(path.parent):
+            try:
+                result = os.stat(path)
+            except OSError:
+                result = None
+        self._nodes[key] = result
+        return result
+
+    def _dir_exists(self, directory: Path) -> bool:
+        key = str(directory)
+        if key in self._dirs:
+            return self._dirs[key]
+        if directory == directory.parent:
+            exists = True
+        elif not self._dir_exists(directory.parent):
+            exists = False
+        else:
+            node = self.probe(directory)
+            exists = node is not None and stat_module.S_ISDIR(node.st_mode)
+        self._dirs[key] = exists
+        return exists
+
+
 def _path_exists(path_obj: Path) -> bool:
     """``Path.exists()`` that treats an unprobeable path as absent, not an error.
 
@@ -321,15 +367,35 @@ def _path_exists(path_obj: Path) -> bool:
         return False
 
 
-def asset_view_from_resource(resource: ResourceItem, project_root: Path | None = None) -> AssetView:
+def asset_view_from_resource(
+    resource: ResourceItem,
+    project_root: Path | None = None,
+    fs_probe: "FsProbeCache | None" = None,
+) -> AssetView:
     stage = _infer_stage(resource.artifact_role, resource.type)
 
-    # Check file existence & integrity
+    # Check file existence & integrity. With a per-refresh FsProbeCache this
+    # is ONE stat per distinct path (missing directories prune whole
+    # subtrees); the legacy path paid exists + is_file + stat per asset.
     path_obj = Path(resource.path)
     if not path_obj.is_absolute() and project_root is not None:
         path_obj = project_root / path_obj
 
-    file_exists = _path_exists(path_obj)
+    stat_result = None
+    file_exists = False
+    if fs_probe is not None:
+        node = fs_probe.probe(path_obj)
+        if node is not None:
+            file_exists = True
+            if stat_module.S_ISREG(node.st_mode):
+                stat_result = node
+    else:
+        file_exists = _path_exists(path_obj)
+        if file_exists and path_obj.is_file():
+            try:
+                stat_result = path_obj.stat()
+            except OSError:
+                stat_result = None
     if not file_exists or resource.status == "missing":
         integrity = IntegrityState.MISSING
     elif resource.external:
@@ -338,17 +404,6 @@ def asset_view_from_resource(resource: ResourceItem, project_root: Path | None =
         integrity = IntegrityState.VERIFIED
     else:
         integrity = IntegrityState.UNKNOWN
-
-    # Single stat() pass shared by size + mtime (previously two filesystem
-    # round-trips per asset per refresh, executed ≥2× per refresh across the
-    # filter-index rebuild and model rebuild — UI stalls scaled with NAS
-    # latency × asset count).
-    stat_result = None
-    if file_exists and path_obj.is_file():
-        try:
-            stat_result = path_obj.stat()
-        except OSError:
-            stat_result = None
 
     size_bytes = resource.parsed_summary.get("size_bytes")
     if size_bytes is None and stat_result is not None:
@@ -470,11 +525,15 @@ def asset_view_from_artifact(artifact: ExportArtifact, project_root: Path | None
     )
 
 
-def asset_view_from_object(asset: Any, project_root: Path | None = None) -> AssetView:
+def asset_view_from_object(
+    asset: Any,
+    project_root: Path | None = None,
+    fs_probe: "FsProbeCache | None" = None,
+) -> AssetView:
     if isinstance(asset, AssetView):
         return asset
     if isinstance(asset, ResourceItem):
-        return asset_view_from_resource(asset, project_root=project_root)
+        return asset_view_from_resource(asset, project_root=project_root, fs_probe=fs_probe)
     if isinstance(asset, ExportArtifact):
         return asset_view_from_artifact(artifact=asset, project_root=project_root)
 
