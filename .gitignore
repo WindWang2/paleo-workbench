@@ -41,8 +41,13 @@ native/**/*.so
 native/**/*.pyd
 native/**/build/
 native/**/*.egg-info/
-# Standalone g++ selftest executables (built from *_test.cpp, verified in CI)
+# Standalone g++/cl selftest executables (built from *_test.cpp, verified in CI)
 native/**/*_selftest
+native/**/*_selftest.exe
+native/bin/
+*.obj
+*.exp
+*.lib
 
 # AI agent workspace directories
 .gemini/

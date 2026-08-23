@@ -3,16 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
-from pybind11.setup_helpers import Pybind11Extension, build_ext
+from pybind11.setup_helpers import Pybind11Extension
 from setuptools import setup
 
 HERE = Path(__file__).resolve().parent
-
-
-def _compile_args() -> list[str]:
-    if sys.platform == "win32":
-        return ["/O2"]
-    return ["-O3"]
+_NATIVE = HERE.parent
+if str(_NATIVE) not in sys.path:
+    sys.path.insert(0, str(_NATIVE))
+from native_compile_flags import NativeBuildExt  # noqa: E402
 
 
 setup(
@@ -27,10 +25,9 @@ setup(
                 str(HERE / "src" / "bindings.cpp"),
             ],
             cxx_std=17,
-            extra_compile_args=_compile_args(),
         )
     ],
-    cmdclass={"build_ext": build_ext},
+    cmdclass={"build_ext": NativeBuildExt},
     zip_safe=False,
     python_requires=">=3.12",
 )

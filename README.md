@@ -14,12 +14,31 @@ and well-log engine **submodules**:
 
 ## Setup
 
+### Linux / macOS
+
 ```bash
 # From the repository root
 git submodule update --init --recursive
 python -m pip install -e .
 python -m pip install -r requirements-geoviz.txt   # editable geoviz_* packages
 python -m pip install -e ".[dev]"                  # pytest / pytest-qt
+```
+
+### Windows (MSVC 2022)
+
+Requirements: Visual Studio 2022 with "Desktop development with C++" workload (MSVC `cl.exe`), CMake ≥ 3.24, Ninja, and Python 3.10+.
+
+```powershell
+# From the repository root in PowerShell
+git submodule update --init --recursive
+
+# Automated one-click build (native C++ extensions, WellLogEngine SDK, tests):
+powershell -ExecutionPolicy Bypass -File .\scripts\build_and_test_windows.ps1
+
+# Or manual step-by-step setup:
+python -m pip install -e .
+python -m pip install -r requirements-geoviz.txt
+python -m pip install -e ".[dev]"
 ```
 
 Editable installs are the **preferred** way to make `import geoviz` work for any
@@ -35,9 +54,33 @@ Windows-invalid submodule path so a broken gitlink cannot be re-pinned
 silently. A full recursive checkout
 (`git submodule update --init --recursive`) works on Windows.
 
-When packages are not installed, `paleo_workbench.env_bootstrap` prepends the
-checkout's `geo-viz-engine` package roots on import of `paleo_workbench` and
-again at the app entry points.
+### Native C++ Extensions (`[native]`)
+
+High-performance computational kernels (rasterization, 3D seismic slicing/coherence, LAS parsing, and map topological editing) provide optional C++ accelerated backends:
+
+- `grid_render_core`: fast scalar raster rendering hot path
+- `layer_model_core`: layer hierarchy and visibility evaluation
+- `seismic_3d_core`: 3D volume slicing with OpenMP multithreading
+- `well_log_core`: fast min-max downsampling and streaming LAS parser
+- `map_edit_core` (in `geo-viz-engine`): topological hit test, vertex snapping, and intersection validation
+
+To build all native extensions:
+
+```bash
+# Linux / macOS (GCC / Clang):
+python -m pip install -e native/grid_render_core
+python -m pip install -e native/layer_model_core
+python -m pip install -e native/seismic_3d_core
+python -m pip install -e native/well_log_core
+python -m pip install -e geo-viz-engine/native/map_edit_core
+
+# Windows (PowerShell with MSVC 2022):
+.\scripts\build_and_test_windows.ps1
+```
+
+When native extensions are not built, the workbench transparently falls back to pure Python / NumPy / SciPy implementations.
+
+### Running the Application
 
 ```bash
 # Entry points (after `pip install .` / `pip install -e .`, or from a source
