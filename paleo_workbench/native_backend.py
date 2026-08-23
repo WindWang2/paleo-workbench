@@ -50,12 +50,20 @@ except ImportError:  # pragma: no cover
     grid_render_core = None  # type: ignore
     _HAS_GRID_RENDER_CPP = False
 
+try:
+    import layer_model_core
+    _HAS_LAYER_MODEL_CPP = True
+except ImportError:  # pragma: no cover
+    layer_model_core = None  # type: ignore
+    _HAS_LAYER_MODEL_CPP = False
+
 # Feature -> loaded module (may be None) for source-origin classification.
 _NATIVE_MODULES = {
     "seismic_3d": seismic_3d_core,
     "well_log": well_log_core,
     "map_edit": map_edit_core,
     "grid_render": grid_render_core,
+    "layer_model": layer_model_core,
 }
 
 # One-time warning per feature when dispatch / is_accelerated divert a stale
@@ -67,6 +75,7 @@ _FEATURE_NATIVE_PKG: dict[str, str] = {
     "well_log": "well_log_core",
     "map_edit": "map_edit_core",
     "grid_render": "grid_render_core",
+    "layer_model": "layer_model_core",
 }
 
 _CPP_EXPORT_ALIASES: dict[str, str] = {
@@ -149,17 +158,20 @@ def native_status(feature: str) -> str:
     and :meth:`NativeEngineBackend.is_accelerated` refuse them.
 
     An otherwise "installed" module is only ``"fresh"`` when its build
-    metadata agrees with this package (#833): editable installs, sibling
+    metadata agrees with this package (#938-1): editable installs, sibling
     worktrees and stale wheels used to be trusted blindly, so a pre-#621
     binary without ``__version__`` (or an old wheel with a mismatched one)
     was dispatched as fresh with zero diagnostics. Now:
 
+    * a missing ``__version__`` is always ``"stale"`` (all native modules
+      now carry build metadata, including ``layer_model_core`` #938-7);
     * a present ``__version__`` that differs from ``paleo_workbench.__version__``
       is ``"stale"``;
-    * a module with no ``__version__`` at all is trusted only when its binary
-      lives inside this checkout's tree (the geo-viz-engine-built
-      ``map_edit_core`` predates build metadata by design); anything else —
-      site-packages, foreign worktrees, old wheels — is ``"stale"``.
+    * a matching ``__version__`` is ``"fresh"`` for normal installs
+      (site-packages / editable). A non-worktree ``native/<pkg>`` copy
+      without a ``.git`` link (scratch copy) stays ``"stale"`` even when
+      the version matches, so a scratch-placed ``.so`` cannot masquerade as
+      accelerated (probe: scratch → ``is_accelerated('map_edit')==True``).
     """
     origin = _module_origin(_NATIVE_MODULES.get(feature))
     if origin == "repo_root":
@@ -167,32 +179,46 @@ def native_status(feature: str) -> str:
     if origin == "missing":
         return "missing"
     version = native_version(feature)
-    if version is not None:
-        return "fresh" if version == _package_version() else "stale"
+    if version is None:
+        return "stale"
+    if version != _package_version():
+        return "stale"
+    # Version matches — verify provenance. Site-packages / editable installs
+    # with a matching version are fresh; only a suspicious "native/<pkg>"
+    # copy outside a genuine worktree (no .git link) is treated as stale
+    # so a scratch copy cannot masquerade as fresh (#938-1).
     module_path = Path(getattr(_NATIVE_MODULES.get(feature), "__file__", "") or "")
-    if module_path.is_absolute():
-        resolved = _resolve_cached(module_path)
-        pkg = _FEATURE_NATIVE_PKG.get(feature)
-        if pkg:
-            native_dir = _repo_root() / "native" / pkg
-            geo_dir = _repo_root() / "geo-viz-engine" / "native" / pkg
-            if native_dir in resolved.parents or resolved.parent == native_dir:
+    if not module_path.is_absolute():
+        return "fresh"
+    resolved = _resolve_cached(module_path)
+    pkg = _FEATURE_NATIVE_PKG.get(feature)
+    if not pkg:
+        return "fresh"
+    native_dir = _repo_root() / "native" / pkg
+    geo_dir = _repo_root() / "geo-viz-engine" / "native" / pkg
+    if native_dir in resolved.parents or resolved.parent == native_dir:
+        return "fresh"
+    if geo_dir in resolved.parents or resolved.parent == geo_dir:
+        return "fresh"
+    # Cross-worktree or scratch copy: path contains "native/<pkg>".
+    parts = resolved.parts
+    for i, part in enumerate(parts):
+        if part == "native" and i + 1 < len(parts) and parts[i + 1] == pkg:
+            candidate_root = Path(*parts[:i])
+            # A genuine worktree carries a .git file/dir or at least the
+            # checkout marker `paleo_workbench/__init__.py`. Bare-repo setups
+            # (this repo uses `.bare`) have no `.git` at the main checkout, so
+            # also accept the checkout marker to recognise sibling worktrees.
+            is_worktree = (
+                (candidate_root / ".git").exists()
+                or (candidate_root / "paleo_workbench" / "__init__.py").exists()
+            )
+            if is_worktree:
                 return "fresh"
-            if geo_dir in resolved.parents or resolved.parent == geo_dir:
-                return "fresh"
-            # Cross-worktree: a versionless binary built from the main checkout
-            # (sibling worktree) also lives under a "native/<pkg>" directory and
-            # should be considered fresh when this worktree has not yet built
-            # its own copy. Provenance matters (#938-1): a genuine worktree of
-            # this repo carries a .git link at its root — a scratch copy of
-            # the build tree does not and must stay stale.
-            parts = resolved.parts
-            for i, part in enumerate(parts):
-                if part == "native" and i + 1 < len(parts) and parts[i + 1] == pkg:
-                    candidate_root = Path(*parts[:i])
-                    if (candidate_root / ".git").exists():
-                        return "fresh"
-    return "stale"
+            # A "native/<pkg>" tree without worktree provenance is a scratch copy.
+            return "stale"
+    # No suspicious native/<pkg> pattern (e.g. site-packages) → fresh if version matches.
+    return "fresh"
 
 
 def _warn_stale_native(feature: str) -> None:
@@ -346,11 +372,22 @@ def _py_fast_slice_to_indexed8(
     """
     slice_data = _py_fast_slice_extract(volume, axis, index)
     if value_range is not None:
+        # Parity with native py::cast<std::pair<double,double>>: a bare
+        # string like "55" must raise, not be treated as a 2-element
+        # sequence of characters (#938-4).
+        if isinstance(value_range, (str, bytes, bytearray)):
+            raise ValueError("value_range must be a (vmin, vmax) pair of numbers")
         try:
             vr_len = len(value_range)  # type: ignore[arg-type]
         except TypeError:
             raise ValueError("value_range must be a (vmin, vmax) pair of numbers") from None
         if vr_len != 2:
+            raise ValueError("value_range must be a (vmin, vmax) pair of numbers")
+        # Native casts through float (double) then to float; string elements
+        # would have failed the pair cast, so reject them explicitly.
+        if isinstance(value_range[0], (str, bytes, bytearray)) or isinstance(
+            value_range[1], (str, bytes, bytearray)
+        ):
             raise ValueError("value_range must be a (vmin, vmax) pair of numbers")
         v_min = float(value_range[0])
         v_max = float(value_range[1])
@@ -362,19 +399,23 @@ def _py_fast_slice_to_indexed8(
             v_max = float(finite.max())
         else:
             v_min = v_max = 0.0
+    # Degenerate-range check uses float32 semantics to match the native
+    # `float min_val < max_val` / `isfinite(float)` (#938-3).
+    v_min32 = np.float32(v_min)
+    v_max32 = np.float32(v_max)
     if (
-        v_min >= v_max
-        or not math.isfinite(v_min)
-        or not math.isfinite(v_max)
+        not (v_min32 < v_max32)
+        or not math.isfinite(float(v_min32))
+        or not math.isfinite(float(v_max32))
     ):
         return np.zeros(slice_data.shape, dtype=np.uint8), 0.0, 0.0
-    inv_range = np.float32(255.0) / np.float32(v_max - v_min)
+    inv_range = np.float32(255.0) / np.float32(float(v_max32) - float(v_min32))
     with np.errstate(invalid="ignore", over="ignore"):
-        norm = (slice_data.astype(np.float32) - np.float32(v_min)) * inv_range
+        norm = (slice_data.astype(np.float32) - v_min32) * inv_range
         norm = np.clip(norm, np.float32(0.0), np.float32(255.0))
         out = norm.astype(np.uint8)  # truncation toward zero, like the C++ cast
     out[~np.isfinite(slice_data)] = 0
-    return out, v_min, v_max
+    return out, float(v_min32), float(v_max32)
 
 
 def _py_fast_resample_volume_3d(
@@ -851,7 +892,10 @@ def _py_fast_las_parse_data(
         stripped = line.lstrip(" \t\r\v\f")
         if not stripped or stripped.startswith("#"):
             continue
-        if stripped.startswith("~"):
+        # C++ only treats "~" as a section header when there is a following
+        # character (begin+1 < line_end); a lone "~" inside ~CURVE is a bare
+        # mnemonic and must be parsed as such (#938-2: native produces 3 cols).
+        if stripped.startswith("~") and len(stripped) > 1:
             section = stripped[1:2].lower()
             if section == "c":
                 # ~CURVE block: the authoritative curve list (CWLS ~C section),
@@ -963,6 +1007,7 @@ class NativeEngineBackend:
         "well_log": ("_HAS_WELL_LOG_CPP", well_log_core),
         "map_edit": ("_HAS_MAP_EDIT_CPP", map_edit_core),
         "grid_render": ("_HAS_GRID_RENDER_CPP", grid_render_core),
+        "layer_model": ("_HAS_LAYER_MODEL_CPP", layer_model_core),
     }
 
     _FALLBACK_TABLE: dict[str, Callable] = {
@@ -1010,6 +1055,7 @@ class NativeEngineBackend:
             "well_log": _HAS_WELL_LOG_CPP,
             "map_edit": _HAS_MAP_EDIT_CPP,
             "grid_render": _HAS_GRID_RENDER_CPP,
+            "layer_model": _HAS_LAYER_MODEL_CPP,
         }
         return feature_map.get(feature, False)
 

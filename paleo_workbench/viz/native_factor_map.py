@@ -52,12 +52,26 @@ _MISSING_NATIVE_HINT = (
 
 
 def native_scene_available() -> bool:
-    """True when both C++ extensions backing :class:`MapScene` are importable."""
-    return grid_render_core is not None and layer_model_core is not None
+    """True when both C++ extensions backing :class:`MapScene` are importable and fresh."""
+
+    if grid_render_core is None or layer_model_core is None:
+        return False
+    # Stale-gate (#938-7): import success alone is not enough; a stale
+    # committed binary (repo-root .so) or mismatched wheel must not be used.
+    try:
+        from paleo_workbench.native_backend import native_status
+
+        if native_status("grid_render") != "fresh":
+            return False
+        if native_status("layer_model") != "fresh":
+            return False
+    except Exception:  # pragma: no cover — fallback to import-only check
+        pass
+    return True
 
 
 def require_native_scene() -> None:
-    """Raise a diagnostic ``RuntimeError`` when the C++ scene backing is absent."""
+    """Raise a diagnostic ``RuntimeError`` when the C++ scene backing is absent or stale."""
     missing = [
         name
         for name, module in (
@@ -68,6 +82,20 @@ def require_native_scene() -> None:
     ]
     if missing:
         raise RuntimeError(_MISSING_NATIVE_HINT.format(missing=", ".join(missing)))
+    # Stale-gate: a present but stale module is treated as missing until rebuilt.
+    try:
+        from paleo_workbench.native_backend import native_status
+
+        stale = [name for name in ("grid_render", "layer_model") if native_status(name) == "stale"]
+        if stale:
+            raise RuntimeError(
+                _MISSING_NATIVE_HINT.format(missing=", ".join(stale))
+                + " (stale build — rebuild the extension)"
+            )
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
 
 __all__ = [
     "ContourGeometry",

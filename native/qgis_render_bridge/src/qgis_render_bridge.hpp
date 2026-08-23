@@ -121,12 +121,22 @@ class QgisRenderBridge {
     void initialize(const std::string& requested_prefix = {});
     void set_layer_snapshot(std::vector<VectorLayerSpec> layers, std::string project_crs);
     /// Starts or coalesces a non-blocking QGIS render for the newest generation.
+    ///
+    /// Threading contract (#938-5): the underlying QGIS parallel job reports
+    /// completion via queued signals on the thread that created the bridge
+    /// (the GUI thread).  Callers must pump that thread's event loop (e.g.
+    /// via the host's frame poll timer) or use :meth:`render_sync` for
+    /// synchronous rendering.  Without an event loop ``render_active()`` stays
+    /// true indefinitely and ``take_completed_frame()`` never delivers.
     void request_render(const std::array<double, 4>& extent, int width, int height,
                         double dpi, std::uint64_t generation);
     /// Polls for the newest completed frame. Superseded generations are discarded.
     [[nodiscard]] std::optional<RenderResult> take_completed_frame();
     /// Cancels in-flight work without tearing down the process-global QGIS runtime.
     void cancel_render();
+    /// Whether a render job is currently active.  Guard: when no QGIS event
+    /// loop is running, this remains true until :meth:`cancel_render` or
+    /// :meth:`shutdown` is called (#938-5).
     [[nodiscard]] bool render_active() const noexcept;
     [[nodiscard]] RenderResult render_sync(const std::array<double, 4>& extent,
                                            int width, int height, double dpi) const;
