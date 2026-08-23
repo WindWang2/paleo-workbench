@@ -1,10 +1,21 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
+from urllib.parse import urlsplit, urlunsplit
 
 from PySide6.QtCore import Signal, Slot
 from PySide6.QtGui import QCloseEvent
-from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QMessageBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from paleo_workbench.catalog import get_catalog_service
 from paleo_workbench.prediction.inference_service import (
@@ -15,9 +26,9 @@ from paleo_workbench.prediction.inference_service import (
 )
 from paleo_workbench.prediction.inference_worker import InferenceWorker
 from paleo_workbench.prediction.providers import (
-    CAPABILITY_FACIES,
     MODEL_ID_DEMO,
     ensure_default_models,
+    ensure_geoviz_online_model,
 )
 from paleo_workbench.resources.export_service import default_export_dir
 from paleo_workbench.ui import tokens
@@ -32,11 +43,47 @@ from paleo_workbench.ui.pages.well_log_canvas_panel import WellLogCanvasPanel
 from paleo_workbench.workflow.stratigraphy import active_target_horizon
 
 
+_AUTHORIZATION_RE = re.compile(
+    r"(?i)(authorization\s*:\s*bearer\s+)[^\s,;]+"
+)
+_SECRET_VALUE_RE = re.compile(
+    r"(?i)\b(api[_-]?key|token|secret|password)\s*([=:])\s*[^\s,;&]+"
+)
+
+
+def _redact_endpoint(value) -> str:
+    """Strip credentials and query values before rendering a remote endpoint."""
+    endpoint = str(value or "").strip()
+    if not endpoint:
+        return ""
+    try:
+        parsed = urlsplit(endpoint)
+    except ValueError:
+        return "<无效地址>"
+    if not parsed.scheme or not parsed.hostname:
+        return _SECRET_VALUE_RE.sub(r"\1\2<REDACTED>", endpoint)
+    host = parsed.hostname
+    if parsed.port is not None:
+        host = f"{host}:{parsed.port}"
+    return urlunsplit((parsed.scheme, host, parsed.path, "", ""))
+
+
+def _redact_diagnostic_text(value) -> str:
+    """Keep useful failure content while ensuring auth material cannot reach UI logs."""
+    text = str(value or "")
+    text = _AUTHORIZATION_RE.sub(r"\1<REDACTED>", text)
+    text = _SECRET_VALUE_RE.sub(r"\1\2<REDACTED>", text)
+    return text[:3_000]
+
+
 class WellLogPredictionPage(QWidget):
     """测井预测 page: LAS-bound well + lithology/facies tracks + export."""
 
     prediction_updated = Signal()
     send_to_preparation_requested = Signal()
+    # Keep importing owned by DataPage so the imported file follows the same
+    # catalog, provenance and domain-binding lifecycle as a normal data import.
+    well_log_import_requested = Signal(object)  # list[str]
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -49,6 +96,7 @@ class WellLogPredictionPage(QWidget):
         self._inference_job = OwnedWorkerJob(self)
         self._session_token = object()
         self._active_inference_context = None
+        self._selected_well_resource_id: str | None = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -58,6 +106,26 @@ class WellLogPredictionPage(QWidget):
             tokens.PAGE_MARGIN,
         )
         outer.setSpacing(tokens.SPACE_4)
+
+        source_row = QHBoxLayout()
+        source_label = QLabel("测井数据源")
+        source_label.setObjectName("WorkFieldLabel")
+        source_row.addWidget(source_label)
+        self.well_source_combo = QComboBox()
+        self.well_source_combo.setObjectName("WellPredictionSourceCombo")
+        self.well_source_combo.setToolTip(
+            "选择数据管理中已归档的 LAS 或 XML 测井数据，加载后可直接运行预测"
+        )
+        self.well_source_combo.currentIndexChanged.connect(self._on_well_source_changed)
+        source_row.addWidget(self.well_source_combo, 1)
+        self.import_well_btn = QPushButton("导入 LAS / XML…")
+        self.import_well_btn.setObjectName("SecondaryButton")
+        self.import_well_btn.setToolTip(
+            "导入外部 LAS、WITSML 或 SpreadsheetML XML 测井数据，并纳入数据管理"
+        )
+        self.import_well_btn.clicked.connect(self._on_import_well_logs)
+        source_row.addWidget(self.import_well_btn)
+        outer.addLayout(source_row)
 
         content = QHBoxLayout()
         content.setSpacing(tokens.SPACE_4)
@@ -86,6 +154,7 @@ class WellLogPredictionPage(QWidget):
     def set_project(self, project) -> None:
         if project is not self._project:
             self._session_token = object()
+            self._selected_well_resource_id = None
         self._project = project
 
     def set_project_path(self, path) -> None:
@@ -119,16 +188,30 @@ class WellLogPredictionPage(QWidget):
         if project is not None:
             self.set_project(project)
         self._tasks = list(prediction_tasks or [])
+        self._sync_well_sources()
         if self._selected_index is not None and not (
             0 <= self._selected_index < len(self._tasks)
         ):
             self._selected_index = None
         task = self._current_task()
         self.task_panel.update_state(self._tasks, selected_index=self._selected_index)
-        self.canvas_panel.update_state(task, project=self._project)
-        self.evidence_panel.update_state(
-            task, bound_las=self.canvas_panel.has_bound_las()
-        )
+        if task is not None:
+            self.canvas_panel.update_state(task, project=self._project)
+            self.evidence_panel.update_state(
+                task, bound_las=self.canvas_panel.has_bound_las()
+            )
+            return
+        resource = self._selected_well_resource()
+        if resource is not None:
+            self.canvas_panel.show_resource(resource, self._project)
+            self.evidence_panel.update_state(
+                None,
+                bound_las=self.canvas_panel.has_bound_las(),
+                selected_source=True,
+            )
+            return
+        self.canvas_panel.update_state(None, project=self._project)
+        self.evidence_panel.update_state(None, bound_las=False)
 
     def _current_task(self):
         if self._selected_index is not None and 0 <= self._selected_index < len(
@@ -139,9 +222,16 @@ class WellLogPredictionPage(QWidget):
 
     def _on_canvas_ready(self, _ready: bool) -> None:
         task = self._current_task()
-        self.evidence_panel.update_state(
-            task, bound_las=self.canvas_panel.has_bound_las()
-        )
+        if task is not None:
+            self.evidence_panel.update_state(
+                task, bound_las=self.canvas_panel.has_bound_las()
+            )
+        elif self._selected_well_resource() is not None:
+            self.evidence_panel.update_state(
+                None,
+                bound_las=self.canvas_panel.has_bound_las(),
+                selected_source=True,
+            )
 
     def _on_task_selected(self, index: int) -> None:
         self._selected_index = index
@@ -151,6 +241,115 @@ class WellLogPredictionPage(QWidget):
         self.evidence_panel.update_state(
             task, bound_las=self.canvas_panel.has_bound_las()
         )
+
+    def _sync_well_sources(self) -> None:
+        previous = self._selected_well_resource_id
+        resources = [
+            resource
+            for resource in (getattr(self._project, "resources", None) or [])
+            if getattr(resource, "type", "") == "well_log"
+        ]
+        self.well_source_combo.blockSignals(True)
+        self.well_source_combo.clear()
+        for resource in resources:
+            name = str(getattr(resource, "name", "未命名测井"))
+            format_label = str(getattr(resource, "format", "") or "").upper()
+            self.well_source_combo.addItem(
+                f"{name} · {format_label}" if format_label else name,
+                str(getattr(resource, "id", "")),
+            )
+        if not resources:
+            self.well_source_combo.addItem("数据管理中暂无 LAS / XML 测井数据", None)
+            self._selected_well_resource_id = None
+        else:
+            selected_index = next(
+                (
+                    index
+                    for index, resource in enumerate(resources)
+                    if str(getattr(resource, "id", "")) == previous
+                ),
+                -1,
+            )
+            self.well_source_combo.setCurrentIndex(selected_index)
+            if selected_index < 0:
+                self._selected_well_resource_id = None
+        self.well_source_combo.blockSignals(False)
+
+    def _selected_well_resource(self):
+        if not self._selected_well_resource_id or self._project is None:
+            return None
+        return next(
+            (
+                resource
+                for resource in (getattr(self._project, "resources", None) or [])
+                if str(getattr(resource, "id", "")) == self._selected_well_resource_id
+                and getattr(resource, "type", "") == "well_log"
+            ),
+            None,
+        )
+
+    def selected_well_resource_id(self) -> str | None:
+        """The direct Data Management input currently selected for prediction."""
+        return self._selected_well_resource_id
+
+    def _on_well_source_changed(self, _index: int) -> None:
+        resource_id = self.well_source_combo.currentData()
+        if resource_id:
+            self.select_well_resource(str(resource_id))
+
+    def _on_import_well_logs(self) -> None:
+        """Ask the DataPage owner to import external well logs asynchronously."""
+        if self._project is None:
+            QMessageBox.warning(self, "导入测井数据", "请先打开或创建工程")
+            return
+        paths, _selected_filter = QFileDialog.getOpenFileNames(
+            self,
+            "导入测井数据",
+            "",
+            "测井数据 (*.las *.LAS *.xml *.XML)",
+        )
+        if paths:
+            self.well_log_import_requested.emit([str(Path(path)) for path in paths])
+
+    def set_source_import_status(self, text: str) -> None:
+        """Expose import lifecycle feedback without duplicating DataPage UI."""
+        self.evidence_panel.set_status(str(text or ""))
+
+    def select_well_resource(self, resource_id: str) -> bool:
+        """Load one Data Management well into the prediction canvas.
+
+        This intentionally clears the selected task: before inference there is
+        no prediction overlay, only the user-selected source well.
+        """
+        if self._project is None:
+            return False
+        resource = next(
+            (
+                item
+                for item in (getattr(self._project, "resources", None) or [])
+                if str(getattr(item, "id", "")) == str(resource_id)
+                and getattr(item, "type", "") == "well_log"
+            ),
+            None,
+        )
+        if resource is None:
+            return False
+        self._selected_well_resource_id = str(resource.id)
+        combo_index = self.well_source_combo.findData(self._selected_well_resource_id)
+        if combo_index >= 0 and combo_index != self.well_source_combo.currentIndex():
+            self.well_source_combo.blockSignals(True)
+            self.well_source_combo.setCurrentIndex(combo_index)
+            self.well_source_combo.blockSignals(False)
+        self._selected_index = None
+        self.task_panel.update_state(self._tasks, selected_index=None)
+        self.canvas_panel.show_resource(resource, self._project)
+        self.evidence_panel.update_state(
+            None,
+            bound_las=self.canvas_panel.has_bound_las(),
+            selected_source=True,
+        )
+        self._restore_latest_failed_online_run(resource.id)
+        return True
 
     def set_selected_well(self, well_name: str) -> bool:
         """Cross-page seam: select the prediction task whose name matches *well_name*.
@@ -184,36 +383,58 @@ class WellLogPredictionPage(QWidget):
         return False
 
     def _on_run(self) -> None:
-        """Production inference: resolve a production model, never auto-run mock."""
+        """Run the explicit authenticated online single-well prediction route."""
         if self._project is None:
             QMessageBox.warning(self, "测井预测", "未绑定工程，无法运行")
+            return
+        resource = self._selected_well_resource()
+        if resource is None:
+            QMessageBox.warning(self, "测井预测", "请先从数据管理选择一口井数据")
             return
         service = get_catalog_service()
         if service is None:
             QMessageBox.warning(self, "测井预测", "未连接数据目录，无法运行推断")
             return
-        ensure_default_models(service)
-        model_version = service.find_production_model(CAPABILITY_FACIES)
-        if model_version is None:
+        try:
+            model_version = ensure_geoviz_online_model(service)
+            from paleo_workbench.prediction.geoviz_online import (
+                online_endpoint,
+                online_model_version_id,
+                online_poll_timeout_seconds,
+                online_timeout_seconds,
+                online_wait_timeout_seconds,
+            )
+        except Exception as exc:
             QMessageBox.warning(
                 self,
                 "测井预测",
-                "未配置生产模型，无法运行科学预测。\n"
-                "请先注册生产模型（ModelRegistry），或通过「运行演示预测」查看演示结果。",
+                f"无法准备线上测井预测: {exc}",
             )
             return
         self._start_inference(
             service,
             model_version.id,
-            workflow="well_log_facies",
-            name_prefix="测井相预测",
+            workflow="inference_api_well_log_facies",
+            name_prefix="线上测井相预测",
             demo=False,
+            well_log_resource_id=resource.id,
+            extra_parameters={
+                "online_endpoint": online_endpoint(),
+                "online_model_version_id": online_model_version_id(),
+                "online_wait_timeout_seconds": online_wait_timeout_seconds(),
+                "online_request_timeout_seconds": online_timeout_seconds(),
+                "online_poll_timeout_seconds": online_poll_timeout_seconds(),
+            },
         )
 
     def _on_demo(self) -> None:
         """Explicit demo mode: run the registered DemoModelProvider."""
         if self._project is None:
             QMessageBox.warning(self, "测井预测", "未绑定工程，无法运行")
+            return
+        resource = self._selected_well_resource()
+        if resource is None:
+            QMessageBox.warning(self, "测井预测", "请先从数据管理选择一口井数据")
             return
         service = get_catalog_service()
         if service is None:
@@ -231,6 +452,7 @@ class WellLogPredictionPage(QWidget):
             workflow="well_log_facies",
             name_prefix="测井相预测(Demo)",
             demo=True,
+            well_log_resource_id=resource.id,
         )
 
     def _start_inference(
@@ -241,11 +463,13 @@ class WellLogPredictionPage(QWidget):
         workflow: str,
         name_prefix: str,
         demo: bool,
-    ) -> None:
+        well_log_resource_id: str | None = None,
+        extra_parameters: dict | None = None,
+    ):
         if self._inference_job.is_running:
-            return
+            return None
         self._inference_service = service
-        if demo:
+        if demo and not well_log_resource_id:
             input_ids = []
         else:
             from paleo_workbench.prediction.inference_service import (
@@ -255,26 +479,49 @@ class WellLogPredictionPage(QWidget):
 
             try:
                 input_ids = resolve_inputs_for_model(
-                    self._project, service, model_version_id, strict=True
+                    self._project,
+                    service,
+                    model_version_id,
+                    strict=True,
+                    resource_ids=[well_log_resource_id]
+                    if well_log_resource_id
+                    else None,
                 )
+                if workflow == "inference_api_well_log_facies":
+                    from paleo_workbench.prediction.inference_service import (
+                        resolve_prediction_postprocess_inputs,
+                    )
+
+                    input_ids.extend(
+                        resolve_prediction_postprocess_inputs(self._project, service)
+                    )
+                    input_ids = list(dict.fromkeys(input_ids))
             except InputContractError as exc:
                 QMessageBox.warning(self, "测井预测", f"输入不满足模型契约: {exc}")
-                return
+                return None
+        run_parameters = {
+            "seed": len(self._tasks),
+            "workflow": workflow,
+            "name_prefix": name_prefix,
+            "demo": demo,
+            "well_log_resource_ids": [well_log_resource_id]
+            if well_log_resource_id
+            else [],
+        }
+        run_parameters.update(dict(extra_parameters or {}))
         run = start_inference(
             service,
             model_version_id=model_version_id,
             input_version_ids=input_ids,
-            parameters={
-                "seed": len(self._tasks),
-                "workflow": workflow,
-                "name_prefix": name_prefix,
-                "demo": demo,
-            },
+            parameters=run_parameters,
         )
         worker = InferenceWorker(service, run.id)
         self._active_inference_context = (self._session_token, self._project, service)
         # #850-7: expose the busy state instead of silently swallowing clicks.
         self.evidence_panel.set_inferring(True)
+        if workflow in {"geoviz_online_well_log_facies", "inference_api_well_log_facies"}:
+            self.evidence_panel.set_status("正在调用线上测井预测服务…")
+        self._write_run_diagnostic(run, status="推断中")
         self._inference_job.start(
             worker,
             terminal_signals=(worker.terminal,),
@@ -284,6 +531,7 @@ class WellLogPredictionPage(QWidget):
             ),
             target=name_prefix,
         )
+        return run
 
     @Slot(object)
     def _on_inference_completed_if_current(self, payload) -> None:
@@ -306,16 +554,19 @@ class WellLogPredictionPage(QWidget):
             error = "未知错误"
             if run is not None:
                 error = (run.parameters or {}).get("error", "未知错误")
+            safe_error = _redact_diagnostic_text(error)
             # Async completion: in-page status instead of a modal dialog
             # (the shell may be rebuilding, #897).
-            self.evidence_panel.set_status(f"推断失败: {error}")
+            self.evidence_panel.set_status(f"推断失败: {safe_error}")
+            self._write_run_diagnostic(run, status="失败", error=error)
             return
         result = payload.get("result")
         if not result:
             error = (getattr(run, "parameters", None) or {}).get("error") or (
                 "预测完成但未返回可用结果"
             )
-            self.evidence_panel.set_status(f"推断失败: {error}")
+            self.evidence_panel.set_status(f"推断失败: {_redact_diagnostic_text(error)}")
+            self._write_run_diagnostic(run, status="失败", error=error)
             return
         params = result.get("parameters") or {}
         factor_ids = [
@@ -335,6 +586,9 @@ class WellLogPredictionPage(QWidget):
                 or ""
             ),
             factor_map_ids=factor_ids,
+            well_log_resource_ids=list(
+                (params.get("well_log_resource_ids") or [])
+            ),
             run_id=str(getattr(run, "id", "") or ""),
             output_version_id=str(out_vids[0]) if out_vids else "",
         )
@@ -358,11 +612,88 @@ class WellLogPredictionPage(QWidget):
         self._tasks = list(self._project.prediction_tasks)
         self._selected_index = len(self._tasks) - 1
         self.update_state(self._tasks, project=self._project)
+        if (task.result_summary or {}).get("model_type") in {
+            "geoviz_online",
+            "inference_api_online",
+        }:
+            self.evidence_panel.set_status(
+                "线上测井预测完成，结果已保存到数据管理"
+            )
+        else:
+            self.evidence_panel.set_status("预测完成，结果已保存到数据管理")
+        self._write_run_diagnostic(run, status="完成")
         self.prediction_updated.emit()
 
     def _on_inference_failed(self, text: str) -> None:
         self.evidence_panel.set_inferring(False)
-        self.evidence_panel.set_status(f"推断失败: {text}")
+        self.evidence_panel.set_status(f"推断失败: {_redact_diagnostic_text(text)}")
+        self._write_run_diagnostic(None, status="异常中断", error=text)
+
+    def _restore_latest_failed_online_run(self, resource_id: str) -> None:
+        """Show the selected well's newest persisted online failure, if any."""
+        if self._inference_job.is_running or not resource_id:
+            return
+        service = get_catalog_service()
+        if service is None:
+            return
+        try:
+            failed_runs = [
+                run
+                for run in service.list_runs()
+                if str(getattr(run, "status", "") or "").lower() == "failed"
+                and (getattr(run, "parameters", None) or {}).get("workflow")
+                in {"geoviz_online_well_log_facies", "inference_api_well_log_facies"}
+                and str(resource_id)
+                in {
+                    str(item)
+                    for item in (
+                        (getattr(run, "parameters", None) or {}).get(
+                            "well_log_resource_ids", []
+                        )
+                        or []
+                    )
+                }
+            ]
+        except Exception:
+            return
+        if not failed_runs:
+            return
+        run = max(failed_runs, key=lambda item: str(getattr(item, "created_at", "")))
+        error = (getattr(run, "parameters", None) or {}).get("error", "未知错误")
+        self.evidence_panel.set_status(
+            f"上次推断失败: {_redact_diagnostic_text(error)}"
+        )
+        self._write_run_diagnostic(run, status="失败（历史运行）", error=error)
+
+    def _write_run_diagnostic(self, run, *, status: str, error: str = "") -> None:
+        """Render one user-copyable, credential-safe prediction diagnostic."""
+        params = dict(getattr(run, "parameters", None) or {})
+        resource = self._selected_well_resource()
+        resource_name = str(getattr(resource, "name", "") or "未解析")
+        resource_id = str(getattr(resource, "id", "") or "")
+        endpoint = _redact_endpoint(params.get("online_endpoint"))
+        lines = [
+            "线上测井预测运行日志",
+            f"状态: {status}",
+            f"运行 ID: {str(getattr(run, 'id', '') or '未创建')}",
+            f"井数据: {resource_name}{f' ({resource_id})' if resource_id else ''}",
+            f"模型版本: {str(params.get('model_version') or '未记录')}",
+        ]
+        if endpoint:
+            lines.append(f"服务地址: {endpoint}")
+        if params.get("online_model_version_id"):
+            lines.append(f"远端模型 ID: {params['online_model_version_id']}")
+        if params.get("online_wait_timeout_seconds"):
+            lines.append(f"同步等待: {params['online_wait_timeout_seconds']} 秒")
+        if params.get("online_request_timeout_seconds"):
+            lines.append(f"请求超时: {params['online_request_timeout_seconds']} 秒")
+        elif params.get("online_timeout_seconds"):
+            lines.append(f"请求超时: {params['online_timeout_seconds']} 秒")
+        if params.get("online_poll_timeout_seconds"):
+            lines.append(f"轮询超时: {params['online_poll_timeout_seconds']} 秒")
+        if error:
+            lines.extend(("错误:", _redact_diagnostic_text(error)))
+        self.evidence_panel.set_diagnostic_log("\n".join(lines))
 
     def _on_export(self, format_label: str = "PNG") -> None:
         if not self.canvas_panel.is_canvas_ready():

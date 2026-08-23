@@ -89,12 +89,12 @@ class TrackVisibilityDialog(QDialog):
 
 
 class WellLogHost:
-    """Primary retained-native well-log host with a QPainter compatibility fallback.
+    """Standalone single-well viewer, intentionally rendered by Legacy QPainter.
 
-    Workbench business data remains the source of truth; when the optional
-    binding is available the visible surface is a ``WellLogView`` backed by
-    one retained document/session.  The previous QPainter canvas is kept only
-    for unavailable/disabled native backends and backwards-compatible callers.
+    The visualisation workspace defaults to the mature, fully exportable
+    GeoViz QPainter canvas. Native WellLogEngine support remains available to
+    specialised hosts, but must not change the single-well screen according to
+    environment configuration.
     """
 
     tab_title = "测井"
@@ -354,11 +354,9 @@ class WellLogHost:
             except Exception:
                 pass
 
-        if engine_adapter.welllog_engine_env_enabled() and self._show_engine(data):
-            return True
-
-        # Native initialization/submission failure always drops the retained
-        # session before returning to the legacy compatibility surface.
+        # Single-well visualisation is deliberately Legacy by default (and
+        # independent of PALEO_USE_WELLLOG_ENGINE). This also keeps its
+        # editable display tracks and vector exports consistently available.
         self._release_engine_document()
         tracks = build_qpainter_tracks(data)
         self.canvas.set_tracks(tracks)

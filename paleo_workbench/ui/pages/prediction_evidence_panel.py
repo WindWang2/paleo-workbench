@@ -1,7 +1,17 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QComboBox, QFrame, QLabel, QListWidget, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QFrame,
+    QLabel,
+    QListWidget,
+    QPlainTextEdit,
+    QProgressBar,
+    QPushButton,
+    QVBoxLayout,
+)
 
 from paleo_workbench.ui import tokens
 from paleo_workbench.viz.prediction_helpers import field_value
@@ -38,9 +48,26 @@ class PredictionEvidencePanel(QFrame):
         self.source_value = self._add_value(layout, "数据来源", "—")
         self.horizon_value = self._add_value(layout, "目标层位", "—")
         self.facies_count_value = self._add_value(layout, "相带段数", "—")
+        self.class_distribution_value = self._add_value(layout, "预测相带", "—")
         # Async run outcome landing spot (#897): completions/failures arrive
         # on queued signals and must not open modal dialogs.
         self.status_value = self._add_value(layout, "状态", "—")
+        self.waiting_label = QLabel("正在提交并等待线上推理结果…")
+        self.waiting_label.setObjectName("WorkFieldLabel")
+        self.waiting_label.setAccessibleName("线上测井预测等待状态")
+        self.waiting_label.hide()
+        layout.addWidget(self.waiting_label)
+        # A 0..0 QProgressBar is Qt's native indeterminate animation.  It is
+        # deliberately in the evidence panel (rather than a dialog), so the
+        # user can continue to inspect the selected well and diagnostic log.
+        self.waiting_indicator = QProgressBar()
+        self.waiting_indicator.setObjectName("PredictionWaitIndicator")
+        self.waiting_indicator.setRange(0, 0)
+        self.waiting_indicator.setTextVisible(False)
+        self.waiting_indicator.setFixedHeight(6)
+        self.waiting_indicator.setAccessibleName("线上测井预测进行中")
+        self.waiting_indicator.hide()
+        layout.addWidget(self.waiting_indicator)
 
         evidence_label = QLabel("证据贡献")
         evidence_label.setObjectName("WorkFieldLabel")
@@ -49,6 +76,23 @@ class PredictionEvidencePanel(QFrame):
         self.evidence_list = QListWidget()
         self.evidence_list.setObjectName("WorkListWidget")
         layout.addWidget(self.evidence_list, 1)
+
+        diagnostic_label = QLabel("运行日志")
+        diagnostic_label.setObjectName("WorkFieldLabel")
+        layout.addWidget(diagnostic_label)
+        self.diagnostic_log = QPlainTextEdit()
+        self.diagnostic_log.setObjectName("PredictionDiagnosticLog")
+        self.diagnostic_log.setReadOnly(True)
+        self.diagnostic_log.setPlaceholderText("尚无运行日志")
+        self.diagnostic_log.setMinimumHeight(100)
+        self.diagnostic_log.setMaximumHeight(140)
+        self.diagnostic_log.setMaximumBlockCount(200)
+        layout.addWidget(self.diagnostic_log)
+        self.copy_diagnostic_btn = QPushButton("复制运行日志")
+        self.copy_diagnostic_btn.setObjectName("SecondaryButton")
+        self.copy_diagnostic_btn.setEnabled(False)
+        self.copy_diagnostic_btn.clicked.connect(self.copy_diagnostic_log)
+        layout.addWidget(self.copy_diagnostic_btn)
 
         export_label = QLabel("导出格式")
         export_label.setObjectName("WorkFieldLabel")
@@ -64,11 +108,11 @@ class PredictionEvidencePanel(QFrame):
         )
         layout.addWidget(self.export_btn)
 
-        self.run_btn = QPushButton("运行测井预测")
+        self.run_btn = QPushButton("运行线上测井预测")
         self.run_btn.setObjectName("SecondaryButton")
         self.run_btn.setToolTip(
-            "通过 ModelRegistry 解析生产模型后运行科学预测；"
-            "未配置生产模型时不会自动运行 mock"
+            "将所选井的模型要求曲线记录发送到认证线上单井预测服务；"
+            "结果将保存到数据管理"
         )
         self.run_btn.clicked.connect(self.run_requested.emit)
         layout.addWidget(self.run_btn)
@@ -106,6 +150,8 @@ class PredictionEvidencePanel(QFrame):
         self._inferring = bool(busy)
         self.run_btn.setEnabled(not self._inferring)
         self.demo_btn.setEnabled(not self._inferring)
+        self.waiting_label.setVisible(self._inferring)
+        self.waiting_indicator.setVisible(self._inferring)
         if busy:
             self.status_value.setText("推断中…")
 
@@ -113,21 +159,45 @@ class PredictionEvidencePanel(QFrame):
         """Show an async run outcome in-page (no modal dialogs, #897)."""
         self.status_value.setText(text)
 
-    def update_state(self, task, *, bound_las: bool = False) -> None:
+    def set_diagnostic_log(self, text: str) -> None:
+        """Display a redacted run diagnostic that a user can copy verbatim."""
+        value = str(text or "").strip()
+        self.diagnostic_log.setPlainText(value)
+        self.copy_diagnostic_btn.setEnabled(bool(value))
+
+    def copy_diagnostic_log(self) -> None:
+        """Copy the whole diagnostic without requiring text selection first."""
+        clipboard = QApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(self.diagnostic_log.toPlainText())
+
+    def update_state(
+        self,
+        task,
+        *,
+        bound_las: bool = False,
+        selected_source: bool = False,
+    ) -> None:
         summary = field_value(task, "result_summary", {}) or {}
         meta = field_value(task, "model_metadata", {}) or {}
         if task is None:
             self.mock_value.setText("—")
-            self.source_value.setText("—")
+            self.source_value.setText("数据管理井数据" if selected_source else "—")
             self.horizon_value.setText("—")
             self.facies_count_value.setText("—")
+            self.class_distribution_value.setText("—")
+            self.class_distribution_value.setToolTip("")
             self.evidence_list.clear()
-            self.set_actions_enabled(can_export=False, can_send=False)
+            self.set_actions_enabled(
+                can_export=bool(selected_source and bound_las), can_send=False
+            )
             return
 
         # Honest output labeling (P2): random/mock output must never display
         # as 真实, and heuristic output is not a scientific prediction.
-        if summary.get("is_mock"):
+        if summary.get("model_type") in {"geoviz_online", "inference_api_online"}:
+            nature = "线上测井预测"
+        elif summary.get("is_mock"):
             nature = "Mock"
         elif not summary.get("final_scientific_prediction", False):
             nature = "启发式"
@@ -137,7 +207,9 @@ class PredictionEvidencePanel(QFrame):
             nature = f"Demo · {nature}"
         replaceable = "可替换" if summary.get("is_replaceable", False) else "固定"
         self.mock_value.setText(f"{nature} · {replaceable}")
-        if summary.get("demo") or summary.get("source") == "synthetic/demo":
+        if summary.get("model_type") in {"geoviz_online", "inference_api_online"}:
+            self.source_value.setText("认证线上推理服务")
+        elif summary.get("demo") or summary.get("source") == "synthetic/demo":
             self.source_value.setText("合成演示数据")
         elif bound_las:
             self.source_value.setText("绑定 LAS")
@@ -151,6 +223,34 @@ class PredictionEvidencePanel(QFrame):
         self.horizon_value.setText(horizon or "—")
         regions = summary.get("predicted_regions") or []
         self.facies_count_value.setText(str(len(regions)))
+        remote_summary = summary.get("remote_summary") or {}
+        class_counts = remote_summary.get("classCounts") if isinstance(remote_summary, dict) else {}
+        if isinstance(class_counts, dict) and class_counts:
+            total = sum(
+                float(value)
+                for value in class_counts.values()
+                if isinstance(value, (int, float))
+            )
+            ranked = sorted(
+                (
+                    (str(name), float(value))
+                    for name, value in class_counts.items()
+                    if isinstance(value, (int, float))
+                ),
+                key=lambda item: item[1],
+                reverse=True,
+            )
+            summary_text = "、".join(
+                f"{name} {count / total:.1%}" if total else f"{name} {count:g}"
+                for name, count in ranked[:2]
+            )
+            self.class_distribution_value.setText(summary_text)
+            self.class_distribution_value.setToolTip(
+                "\n".join(f"{name}: {count:g}" for name, count in ranked)
+            )
+        else:
+            self.class_distribution_value.setText("—")
+            self.class_distribution_value.setToolTip("")
 
         self.evidence_list.clear()
         for item in field_value(task, "evidence_contribution", []) or []:

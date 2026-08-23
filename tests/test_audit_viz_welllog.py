@@ -143,6 +143,77 @@ def test_required_curves_skip_las_reread_when_summary_covers(tmp_path, monkeypat
     assert calls == []
 
 
+def test_required_curves_are_found_beyond_the_preview_curve_limit(tmp_path):
+    """Prediction preflight must not hide a required curve after 12 headers.
+
+    A2.Las has GR after its first 12 curves.  The old bounded preview fallback
+    therefore rejected an otherwise valid selected well before its full online
+    payload could be built.
+    """
+    las = tmp_path / "gr-after-preview-limit.las"
+    curve_lines = [" DEPT.M :"] + [f" C{index:02d}. :" for index in range(1, 13)] + [" GR.GAPI :"]
+    rows = [
+        "1000.0 " + " ".join(["1"] * 13),
+        "1000.5 " + " ".join(["2"] * 13),
+    ]
+    las.write_text(
+        "\n".join(
+            [
+                "~VERSION INFORMATION",
+                " VERS. 2.0:",
+                "~WELL INFORMATION",
+                " WELL. GR-LATE:",
+                "~CURVE INFORMATION",
+                *curve_lines,
+                "~ASCII",
+                *rows,
+            ]
+        ),
+        encoding="utf-8",
+    )
+    project = _project_with_well(tmp_path)
+    project.resources[0].path = str(las)
+    service = _service_for(project)
+    model_version = SimpleNamespace(
+        input_schema={"required_asset_types": ["well_log"], "required_curves": ["GR"]}
+    )
+
+    ids = resolve_model_inputs(project, service, model_version, strict=True)
+
+    assert ids
+
+
+def test_required_curves_are_read_from_xml_well_log(tmp_path):
+    """XML must use its own preview parser instead of the LAS-only reader."""
+    xml = tmp_path / "17.xml"
+    xml.write_text(
+        """<?xml version="1.0"?>
+<WITSMLComposite xmlns="http://www.witsml.org/schemas/1series">
+  <log>
+    <nameWell>A17</nameWell>
+    <logCurveInfo><mnemonic>DEPT</mnemonic><unit>m</unit></logCurveInfo>
+    <logCurveInfo><mnemonic>GR</mnemonic><unit>gAPI</unit></logCurveInfo>
+    <logData><data>1000.0, 40.0</data><data>1000.125, 45.0</data></logData>
+  </log>
+</WITSMLComposite>
+""",
+        encoding="utf-8",
+    )
+    project = _project_with_well(tmp_path)
+    resource = project.resources[0]
+    resource.name = xml.name
+    resource.path = str(xml)
+    resource.format = "xml"
+    service = _service_for(project)
+    model_version = SimpleNamespace(
+        input_schema={"required_asset_types": ["well_log"], "required_curves": ["GR"]}
+    )
+
+    ids = resolve_model_inputs(project, service, model_version, strict=True)
+
+    assert ids
+
+
 def test_required_curves_not_enforced_when_not_strict(tmp_path):
     project = _project_with_well(tmp_path, parsed_curves=["GR"])
     service = _service_for(project)

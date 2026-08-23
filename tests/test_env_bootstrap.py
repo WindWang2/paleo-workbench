@@ -63,3 +63,22 @@ def test_bootstrap_skips_engine_root_when_stale_so_present(tmp_path, monkeypatch
     finally:
         if inserted in sys.path:
             sys.path.remove(inserted)
+
+
+def test_load_local_env_reads_ignored_dotenv_without_overriding_real_environment(
+    tmp_path, monkeypatch
+):
+    from paleo_workbench import env_bootstrap as boot
+
+    (tmp_path / ".env").write_text(
+        "PALEO_GEOVIZ_API_KEY=ak_from_dotenv\nPALEO_GEOVIZ_MODEL_VERSION_ID=local-model\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(boot, "_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(boot, "_LOCAL_ENV_LOADED", False)
+    monkeypatch.delenv("PALEO_GEOVIZ_API_KEY", raising=False)
+    monkeypatch.setenv("PALEO_GEOVIZ_MODEL_VERSION_ID", "shell-model")
+
+    assert boot.load_local_env() is True
+    assert boot.os.environ["PALEO_GEOVIZ_API_KEY"] == "ak_from_dotenv"
+    assert boot.os.environ["PALEO_GEOVIZ_MODEL_VERSION_ID"] == "shell-model"

@@ -141,6 +141,10 @@ class WellEntity(BaseModel):
     kb: float | None = None
     td: float | None = None
     status: str = "active"
+    # A physical well can be retained as regional/context evidence without
+    # becoming part of the active WorkArea well set. Existing projects default
+    # to ``workarea`` for complete backward compatibility.
+    spatial_scope: Literal["workarea", "reference"] = "workarea"
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str = ""
@@ -157,6 +161,71 @@ class WellEntity(BaseModel):
             if normalized:
                 keys.add(normalized)
         return {key for key in keys if key}
+
+
+def is_reference_well(well: Any) -> bool:
+    """Whether a well is retained as external/regional reference context."""
+    return str(getattr(well, "spatial_scope", "workarea") or "workarea") == "reference"
+
+
+def _point_in_ring(x: float, y: float, ring: Iterable[Iterable[float]]) -> bool:
+    """Inclusive ray-cast containment for one WorkArea boundary ring."""
+    points: list[tuple[float, float]] = []
+    for point in ring:
+        try:
+            px, py = list(point)[:2]
+            points.append((float(px), float(py)))
+        except (TypeError, ValueError):
+            continue
+    if len(points) < 3:
+        return False
+    inside = False
+    previous_x, previous_y = points[-1]
+    for current_x, current_y in points:
+        # A point on an edge belongs to the WorkArea; floating point epsilon
+        # keeps boundary wells from oscillating between categories.
+        cross = (current_x - previous_x) * (y - previous_y) - (
+            current_y - previous_y
+        ) * (x - previous_x)
+        if abs(cross) <= 1e-9 and min(previous_x, current_x) - 1e-9 <= x <= max(
+            previous_x, current_x
+        ) + 1e-9 and min(previous_y, current_y) - 1e-9 <= y <= max(
+            previous_y, current_y
+        ) + 1e-9:
+            return True
+        intersects = (current_y > y) != (previous_y > y)
+        if intersects:
+            crossing_x = (previous_x - current_x) * (y - current_y) / (
+                previous_y - current_y
+            ) + current_x
+            if x < crossing_x:
+                inside = not inside
+        previous_x, previous_y = current_x, current_y
+    return inside
+
+
+def classify_well_spatial_scope(project: Any, well: WellEntity) -> str | None:
+    """Return a safe WorkArea/reference scope, or ``None`` when unknown.
+
+    Only projected, CRS-valid coordinates can be compared to a WorkArea
+    boundary.  A missing boundary/CRS does not mean "outside" and therefore
+    never silently relegates a well to the reference category.
+    """
+    workarea = getattr(project, "workarea", None)
+    boundary = list(getattr(workarea, "boundary", None) or []) if workarea else []
+    if len(boundary) < 3 or well.coordinate_status != CoordinateStatus.OK:
+        return None
+    if well.project_x is None or well.project_y is None:
+        return None
+    boundary_crs = str(getattr(workarea, "boundary_crs", "") or "")
+    project_crs = str(getattr(getattr(project, "coordinate", None), "project_crs", "") or "")
+    if boundary_crs and project_crs and not crs_equivalent(boundary_crs, project_crs):
+        return None
+    try:
+        contained = _point_in_ring(float(well.project_x), float(well.project_y), boundary)
+    except (TypeError, ValueError):
+        return None
+    return "workarea" if contained else "reference"
 
 
 class SeismicSurveyEntity(BaseModel):
@@ -390,6 +459,66 @@ def remove_links_for_asset(project: Any, asset_id: str) -> int:
     return before - len(project.entity_asset_links)
 
 
+def remove_well_entity(project: Any, well_id: str) -> tuple[int, int]:
+    """Remove one canonical well and any residual links owned by that well."""
+    target_id = str(well_id or "")
+    if not target_id:
+        return 0, 0
+    links = list(getattr(project, "entity_asset_links", None) or [])
+    wells = list(getattr(project, "wells", None) or [])
+    project.entity_asset_links[:] = [
+        link
+        for link in links
+        if not (link.entity_type == "well" and link.entity_id == target_id)
+    ]
+    project.wells[:] = [well for well in wells if well.id != target_id]
+    return (
+        len(links) - len(project.entity_asset_links),
+        len(wells) - len(project.wells),
+    )
+
+
+def remove_asset_links_and_prune_reference_wells(
+    project: Any,
+    asset_ids: Iterable[str],
+) -> tuple[int, int]:
+    """Unlink removed assets and drop reference wells that lose every source.
+
+    Only wells touched by one of the removed links are candidates, and only
+    reference wells with no remaining entity links are pruned. This keeps
+    manually maintained/unrelated wells and reference wells shared by another
+    imported file intact.
+    """
+    removed_asset_ids = {str(asset_id) for asset_id in asset_ids if str(asset_id)}
+    if not removed_asset_ids:
+        return 0, 0
+    links = list(getattr(project, "entity_asset_links", None) or [])
+    touched_reference_ids = {
+        link.entity_id
+        for link in links
+        if link.entity_type == "well" and link.asset_id in removed_asset_ids
+    }
+    kept_links = [link for link in links if link.asset_id not in removed_asset_ids]
+    removed_link_count = len(links) - len(kept_links)
+    project.entity_asset_links[:] = kept_links
+
+    still_linked_well_ids = {
+        link.entity_id for link in kept_links if link.entity_type == "well"
+    }
+    orphan_ids = {
+        well.id
+        for well in getattr(project, "wells", None) or []
+        if well.id in touched_reference_ids
+        and is_reference_well(well)
+        and well.id not in still_linked_well_ids
+    }
+    if not orphan_ids:
+        return removed_link_count, 0
+    wells = list(project.wells)
+    project.wells[:] = [well for well in wells if well.id not in orphan_ids]
+    return removed_link_count, len(wells) - len(project.wells)
+
+
 def links_for_entity(project: Any, entity_type: str, entity_id: str) -> list[EntityAssetLink]:
     return [
         link
@@ -519,6 +648,7 @@ def domain_signature(project: Any) -> tuple:
                 w.coordinate_status,
                 w.project_x,
                 w.project_y,
+                w.spatial_scope,
             )
             for w in wells
         ),
@@ -555,6 +685,7 @@ def resolve_well(
     uwi: str = "",
     well_id: str = "",
     overrides: dict[str, str] | None = None,
+    candidate_wells: Iterable[WellEntity] | None = None,
 ) -> ResolutionOutcome:
     """Match incoming well data against the registry (§13 priority order).
 
@@ -566,9 +697,15 @@ def resolve_well(
     (``workarea.metadata["well_identity_overrides"]``) apply automatically;
     pass an empty dict to disable.  Ambiguous name hits NEVER merge
     silently — ``ambiguous=True`` with all candidate ids so callers can
-    surface an unresolved state.
+    surface an unresolved state. ``candidate_wells`` can restrict resolution
+    to one domain scope (for example reference-only imports) without changing
+    the project registry.
     """
-    registry = well_registry(project)
+    registry = WellRegistry(
+        candidate_wells
+        if candidate_wells is not None
+        else (getattr(project, "wells", []) or [])
+    )
     if well_id:
         well = registry.by_id(well_id)
         if well is not None:

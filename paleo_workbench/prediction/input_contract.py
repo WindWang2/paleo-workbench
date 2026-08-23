@@ -8,6 +8,7 @@ heuristic compatibility — production packages must declare schemas.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from paleo_workbench.project.models import ProjectDocument
@@ -69,6 +70,7 @@ def resolve_model_inputs(
     model_version,
     *,
     strict: bool = True,
+    resource_ids: list[str] | tuple[str, ...] | set[str] | None = None,
 ) -> list[str]:
     """Resolve exact DataVersion ids for a model version's input_schema.
 
@@ -82,6 +84,11 @@ def resolve_model_inputs(
     from paleo_workbench.catalog.lifecycle import _versions_for_domain_tasks
 
     schema = parse_input_schema(getattr(model_version, "input_schema", None) or {})
+    selected_ids = (
+        {str(resource_id) for resource_id in resource_ids if str(resource_id)}
+        if resource_ids is not None
+        else None
+    )
     required_types = schema["required_asset_types"]
 
     # Empty schema → legacy global gather (heuristic / unscoped models).
@@ -102,7 +109,11 @@ def resolve_model_inputs(
                 "input_schema 使用了未识别的结构，无法按契约解析输入："
                 + ", ".join(sorted(str(k) for k in raw_schema.keys()))
             )
-        input_ids = resolve_prediction_inputs(project, service)
+        input_ids = resolve_prediction_inputs(
+            project, service, resource_ids=resource_ids
+        )
+        if selected_ids and strict and not input_ids:
+            raise InputContractError("所选井数据尚未纳管为可用版本，无法运行预测")
         if schema["required_curves"] and strict:
             _enforce_required_curves(project, service, input_ids, schema["required_curves"])
         return input_ids
@@ -123,10 +134,12 @@ def resolve_model_inputs(
     }
 
     for resource in project.resources:
+        if selected_ids is not None and str(getattr(resource, "id", "")) not in selected_ids:
+            continue
         rtype = getattr(resource, "type", "") or ""
         if rtype not in resource_types:
             continue
-        version_id = _resolve_resource_version_id(service, resource.id)
+        version_id = _resolve_resource_version_id(service, resource)
         if version_id is None:
             continue
         _add(version_id)
@@ -232,9 +245,10 @@ def _enforce_required_curves(
     """Raise :class:`InputContractError` when resolved inputs lack required curves.
 
     Curve availability is best-effort: recorded ``parsed_summary["curves"]``
-    first, otherwise the LAS header is read via the shared lightweight preview
-    loader. Fail closed: unreadable or missing well-log inputs cannot satisfy
-    the contract.
+    first, otherwise the complete LAS header is inspected.  A display preview
+    is deliberately not used for LAS here: it is bounded to its first curves,
+    whereas model-required curves may occur later in the file.  Fail closed:
+    unreadable or missing well-log inputs cannot satisfy the contract.
     """
     required = [str(curve) for curve in required_curves]
     names, inspected = _resolved_well_curve_names(
@@ -270,7 +284,7 @@ def _resolved_well_curve_names(
     for resource in project.resources:
         if getattr(resource, "type", "") != "well_log":
             continue
-        version_id = _resolve_resource_version_id(service, resource.id)
+        version_id = _resolve_resource_version_id(service, resource)
         if version_id is None or version_id not in resolved:
             continue
         inspected += 1
@@ -292,27 +306,46 @@ def _resolved_well_curve_names(
     for resource in project.resources:
         if getattr(resource, "type", "") != "well_log":
             continue
-        version_id = _resolve_resource_version_id(service, resource.id)
+        version_id = _resolve_resource_version_id(service, resource)
         if version_id is None or version_id not in resolved:
             continue
         path = _resolve_resource_path(resource, project)
         if path is None:
             continue
-        try:
-            from geoviz import load_las_preview
-
-            data = load_las_preview(str(path), fast=True)
-        except Exception:
-            continue
-        for curve in getattr(data, "curves", None) or []:
-            name = str(
-                getattr(curve, "name", "") or getattr(curve, "mnemonic", "") or ""
-            ).strip()
-            if name:
-                names.add(name.upper())
+        names.update(_curve_names_from_resource_path(path))
         if required and required.issubset(names):
             return names, inspected
     return names, inspected
+
+
+def _curve_names_from_resource_path(path: Path) -> set[str]:
+    """Return all declared curve mnemonics without applying display limits."""
+    try:
+        if path.suffix.lower() == ".las":
+            from geoviz import inspect_las_file
+
+            data = inspect_las_file(str(path), header_only=True)
+        elif path.suffix.lower() == ".xml":
+            # XML logs use the dedicated WITSML / SpreadsheetML parser.  The
+            # LAS preview loader rejects these files before it can discover GR.
+            from geoviz import load_xml_preview
+
+            data = load_xml_preview(
+                str(path), max_curves=30, max_samples=100_000
+            )
+        else:
+            return set()
+    except Exception:
+        return set()
+
+    names: set[str] = set()
+    for curve in getattr(data, "curves", None) or []:
+        name = str(
+            getattr(curve, "name", "") or getattr(curve, "mnemonic", "") or ""
+        ).strip()
+        if name:
+            names.add(name.upper())
+    return names
 
 
 def _asset_type_for_version(service, version_id: str) -> str:

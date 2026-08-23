@@ -263,7 +263,7 @@ class ProjectWellMapPage(QWidget):
         self.btn_zoom_selection.clicked.connect(self.zoom_to_selection)
         center_layout.addWidget(self.plot, 1)
 
-        self.empty_label = QLabel("暂无井。在数据页导入井位文件后自动识别并显示。")
+        self.empty_label = QLabel("暂无测区井。在数据页导入井位文件后自动识别；其他参考井在数据树中单独管理。")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
         self.empty_label.setVisible(True)
@@ -355,7 +355,12 @@ class ProjectWellMapPage(QWidget):
         self._render_all()
 
     def _rebuild_cache(self) -> None:
-        wells = list(getattr(self.project, "wells", None) or []) if self.project else []
+        from paleo_workbench.project.domain import is_reference_well
+
+        all_wells = list(getattr(self.project, "wells", None) or []) if self.project else []
+        # Reference wells remain governed project data but are deliberately
+        # withheld from the WorkArea map and its autofit extent.
+        wells = [well for well in all_wells if not is_reference_well(well)]
         ids: list[str] = []
         names: list[str] = []
         flags: list[str] = []

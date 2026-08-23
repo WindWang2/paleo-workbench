@@ -44,7 +44,9 @@ def _require_geoviz() -> None:
     Keeps the SystemExit(2) contract of the previous module-level gate, but
     only when an entry point actually starts the app (ISS-ENV-01).
     """
-    from paleo_workbench.env_bootstrap import ensure_geoviz_on_path
+    from paleo_workbench.env_bootstrap import ensure_geoviz_on_path, load_local_env
+
+    load_local_env()
 
     if not ensure_geoviz_on_path():
         print(

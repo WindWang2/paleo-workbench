@@ -33,6 +33,8 @@ RESOURCE_TYPE_LABELS = {
     "image_reference": "影像",
     "reference_map": "参考图",
     "well_reference": "测井参考",
+    "geojson": "GeoJSON矢量",
+    "vector": "矢量",
     "unknown": "未知",
 }
 

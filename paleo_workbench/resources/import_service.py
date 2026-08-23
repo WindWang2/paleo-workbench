@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from paleo_workbench.project.models import ResourceItem
 from paleo_workbench.project.paths import relativize_path
-from paleo_workbench.resources.classifier import classify_path
+from paleo_workbench.resources.classifier import classify_import_path
+from paleo_workbench.resources.geojson_layers import (
+    annotate_facies_product_groups,
+    geojson_document_summary,
+)
 from paleo_workbench.resources.io_registry import (
     PREFERRED_IMPORT_EXTENSIONS,
     ROLE_BY_TYPE,
@@ -39,6 +43,17 @@ class ImportReport:
     def by_type(self) -> dict[str, int]:
         return dict(Counter(r.type for r in self.added))
 
+    @property
+    def facies_product_count(self) -> int:
+        return len(
+            {
+                str(resource.parsed_summary.get("facies_product_group_id"))
+                for resource in self.added
+                if resource.parsed_summary.get("facies_product_complete")
+                and resource.parsed_summary.get("facies_product_group_id")
+            }
+        )
+
     def summary_text(self) -> str:
         parts = [f"新增 {self.added_count}"]
         if self.skipped_path:
@@ -53,6 +68,8 @@ class ImportReport:
                 f"{TYPE_LABELS.get(t, t)} {n}" for t, n in top
             )
             parts.append(f"类型: {labels}")
+        if self.facies_product_count:
+            parts.append(f"相图成果 {self.facies_product_count} 组（相/亚相/微相）")
         return " · ".join(parts)
 
 
@@ -103,7 +120,7 @@ def _probe_summary(path: Path, resource_type: str, resource_format: str) -> dict
         stat = path.stat()
         summary["size_bytes"] = int(stat.st_size)
         summary["mtime"] = datetime.fromtimestamp(
-            stat.st_mtime, tz=timezone.utc
+            stat.st_mtime, tz=UTC
         ).isoformat()
     except OSError:
         return summary
@@ -116,7 +133,9 @@ def _probe_summary(path: Path, resource_type: str, resource_format: str) -> dict
             "size_bytes", 0
         ) < 2_000_000:
             text = path.read_text(encoding="utf-8", errors="replace")
-            summary["line_count"] = text.count("\n") + (1 if text and not text.endswith("\n") else 0)
+            summary["line_count"] = text.count("\n") + (
+                1 if text and not text.endswith("\n") else 0
+            )
             if resource_format in {"json", "geojson"}:
                 import json as _json
 
@@ -125,11 +144,21 @@ def _probe_summary(path: Path, resource_type: str, resource_format: str) -> dict
                     summary["json_type"] = data.get("type", "object")
                     if data.get("type") == "FeatureCollection":
                         summary["feature_count"] = len(data.get("features") or [])
+                if resource_format == "geojson" or (
+                    isinstance(data, dict)
+                    and data.get("type") == "FeatureCollection"
+                ):
+                    # GeoJSON is commonly delivered with a plain .json suffix.
+                    # For an explicit .geojson suffix, also record malformed
+                    # roots so they cannot be promoted into a facies product.
+                    summary.update(geojson_document_summary(data, path.name))
                 elif isinstance(data, list):
                     summary["json_type"] = "array"
                     summary["row_count"] = len(data)
-    except Exception:
-        pass
+    except (OSError, ValueError) as exc:
+        if resource_format == "geojson":
+            summary["geojson_valid"] = False
+            summary["geojson_error"] = exc.__class__.__name__
     return summary
 
 
@@ -143,9 +172,12 @@ def _collect_resource(
         ext = path.suffix.lower().lstrip(".")
         if ext and ext not in PREFERRED_IMPORT_EXTENSIONS:
             return None
-    resource_type, resource_format, status = classify_path(path)
+    resource_type, resource_format, status = classify_import_path(path)
     resolved_path = path.resolve()
     summary = _probe_summary(resolved_path, resource_type, resource_format)
+    if summary.get("geojson_valid") is True:
+        resource_type = "geojson"
+        summary["type_label"] = TYPE_LABELS["geojson"]
     stored_path = resolved_path.as_posix()
     external = False
     if project_path is not None:
@@ -231,6 +263,7 @@ def import_files(
             warnings.append(f"{path}: {exc}")
 
     report = _filter_new(candidates, existing, project_path)
+    report.warnings.extend(annotate_facies_product_groups(report.added, existing))
     report.warnings.extend(warnings)
     report.skipped_filter.extend(filtered)
     return report
@@ -247,6 +280,7 @@ def import_folder(
         root, project_path, preferred_only=preferred_only
     )
     report = _filter_new(candidates, existing, project_path)
+    report.warnings.extend(annotate_facies_product_groups(report.added, existing))
     report.warnings.extend(warnings)
     report.skipped_filter.extend(filtered)
     return report

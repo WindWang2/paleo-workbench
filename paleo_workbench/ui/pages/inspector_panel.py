@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMenu,
     QPushButton,
+    QSizePolicy,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -44,14 +45,33 @@ from paleo_workbench.ui.pages.preview_widgets import TablePreviewWidget
 from paleo_workbench.ui.pages.tag_widgets import TagContainerWidget, TagInputDialog
 
 
-def _fit_key_value_table(table: TablePreviewWidget, *, cap_height: bool) -> None:
+def _fit_key_value_table(
+    table: TablePreviewWidget,
+    *,
+    cap_height: bool,
+    key_column_cap: int | None = None,
+) -> None:
     """键/值两列表：键列贴合内容宽度（不随面板拉伸），值列占剩余空间。
 
     元数据页三个表上下叠放，再按行数收拢表高，避免每个表摊出大片空白、
     把真正的内容挤出视野。
     """
     hdr = table.horizontalHeader()
-    hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+    if key_column_cap is None:
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+    else:
+        # Catalog keys can be long machine-style names.  Letting
+        # ResizeToContents claim the whole inspector makes the actual metadata
+        # values hard to read, so keep the key header compact and stretch its
+        # value column into the remaining width.
+        key_width = min(
+            max(78, table.sizeHintForColumn(0) + 12),
+            max(78, int(key_column_cap)),
+        )
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        table.setColumnWidth(0, key_width)
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        hdr.setStretchLastSection(False)
     if cap_height:
         # 高度必须容纳：表头 + 全部行 + 边框 + 可能弹出的水平滚动条，
         # 否则水平条会吃掉行高，表格只剩表头、内容行被挤出可视区。
@@ -308,22 +328,56 @@ class InspectorPanel(QFrame):
         metadata_layout.setContentsMargins(tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1)
         metadata_layout.setSpacing(tokens.SPACE_1)
 
-        gov_hdr = QLabel("治理信息 (来源 / 区域 / 负责人 / 学科 / 可信等级 / 审核状态):")
-        gov_hdr.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;")
-        metadata_layout.addWidget(gov_hdr)
+        self.governance_header_label = QLabel(
+            "治理信息 (来源 / 区域 / 负责人 / 学科 / 可信等级 / 审核状态):"
+        )
+        self.governance_header_label.setStyleSheet(
+            f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
+        )
+        self.governance_header_label.setMinimumWidth(0)
+        self.governance_header_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
         self.governance_table = TablePreviewWidget()
-        metadata_layout.addWidget(self.governance_table)
-        self.governance_edit_btn = QPushButton("编辑治理信息")
-        self.governance_edit_btn.setObjectName("SecondaryButton")
-        self.governance_edit_btn.setFixedHeight(24)
+        self.governance_edit_btn = QPushButton("编辑")
+        self.governance_edit_btn.setObjectName("GovernanceEditLink")
+        self.governance_edit_btn.setAccessibleName("编辑治理信息")
+        self.governance_edit_btn.setFixedHeight(18)
+        self.governance_edit_btn.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
+        self.governance_edit_btn.setStyleSheet(
+            f"""
+            QPushButton#GovernanceEditLink {{
+                color: {tokens.TEXT_SECONDARY};
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: {tokens.RADIUS_BUTTON}px;
+                font-size: 11px;
+                font-weight: 400;
+                padding: 0 3px;
+                min-width: 28px;
+            }}
+            QPushButton#GovernanceEditLink:hover {{
+                color: {tokens.PRIMARY};
+                background: {tokens.BG_SELECTION};
+            }}
+            QPushButton#GovernanceEditLink:focus {{
+                color: {tokens.PRIMARY};
+                border-color: {tokens.PRIMARY};
+            }}
+            """
+        )
         self.governance_edit_btn.setToolTip("编辑标准治理字段（写入数据目录，受控词表校验）")
         self.governance_edit_btn.clicked.connect(self._on_governance_edit_clicked)
-        # 按钮保持自然宽度，不通栏占满挤压内容区
-        gov_btn_row = QHBoxLayout()
-        gov_btn_row.setContentsMargins(0, 0, 0, 0)
-        gov_btn_row.addWidget(self.governance_edit_btn)
-        gov_btn_row.addStretch(1)
-        metadata_layout.addLayout(gov_btn_row)
+        # 把紧邻的编辑动作收进标题行，避免额外占用元数据页面的一整行。
+        self.governance_header_layout = QHBoxLayout()
+        self.governance_header_layout.setContentsMargins(0, 0, 0, 0)
+        self.governance_header_layout.setSpacing(tokens.SPACE_2)
+        self.governance_header_layout.addWidget(self.governance_header_label, 1)
+        self.governance_header_layout.addWidget(self.governance_edit_btn, 0)
+        metadata_layout.addLayout(self.governance_header_layout)
+        metadata_layout.addWidget(self.governance_table)
 
         cat_hdr = QLabel("目录元数据 (Catalog):")
         cat_hdr.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;")
@@ -504,7 +558,9 @@ class InspectorPanel(QFrame):
         if not gov_rows:
             gov_rows = [("提示", "未填写（点击下方按钮编辑）")]
         self.governance_table.load_table(("字段", "值"), tuple(gov_rows))
-        _fit_key_value_table(self.governance_table, cap_height=True)
+        _fit_key_value_table(
+            self.governance_table, cap_height=True, key_column_cap=156
+        )
 
         catalog_rows: list[tuple[str, str]] = []
         for key in sorted(view.catalog_metadata or {}):
@@ -514,16 +570,51 @@ class InspectorPanel(QFrame):
         if not catalog_rows:
             catalog_rows = [("提示", "暂无目录扩展元数据")]
         self.catalog_metadata_table.load_table(("属性", "值"), tuple(catalog_rows))
-        _fit_key_value_table(self.catalog_metadata_table, cap_height=True)
+        _fit_key_value_table(
+            self.catalog_metadata_table, cap_height=True, key_column_cap=156
+        )
+
+        parsed_labels = {
+            "geojson_valid": "GeoJSON 有效",
+            "geojson_error": "GeoJSON 错误",
+            "feature_count": "要素数量",
+            "geometry_types": "几何类型",
+            "geojson_layer_role": "图层角色",
+            "geojson_layer_label": "图层层级",
+            "geojson_layer_level": "层级序号",
+            "facies_product_source_id": "工具成果 ID",
+            "facies_product_group_id": "成果组 ID",
+            "facies_product_complete": "三层成果完整",
+            "facies_product_layer_count": "成果图层数",
+        }
+        role_labels = {
+            "facies": "相",
+            "subfacies": "亚相",
+            "microfacies": "微相",
+        }
+
+        def display_parsed_value(key: str, value: object) -> str:
+            if isinstance(value, bool):
+                return "是" if value else "否"
+            if key == "geojson_layer_role":
+                return role_labels.get(str(value), str(value))
+            if isinstance(value, (list, tuple)):
+                return "、".join(str(item) for item in value) or "—"
+            return str(value)
 
         rows: list[tuple[str, str]] = []
         if view.parsed_summary:
             for k, v in view.parsed_summary.items():
-                rows.append((str(k), str(v)))
+                key = str(k)
+                rows.append(
+                    (parsed_labels.get(key, key), display_parsed_value(key, v))
+                )
         if not rows:
             rows = [("提示", "暂无附加解析元数据")]
         self.metadata_table.load_table(("属性", "值"), tuple(rows))
-        _fit_key_value_table(self.metadata_table, cap_height=True)
+        _fit_key_value_table(
+            self.metadata_table, cap_height=True, key_column_cap=156
+        )
 
     def set_governance_enabled(self, enabled: bool) -> None:
         """Governance editing needs an active catalog (page toggles it)."""

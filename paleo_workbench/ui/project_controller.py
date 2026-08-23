@@ -397,7 +397,14 @@ class ProjectController:
             return
         changed = bool(getattr(report, "migrated", False)) or any(
             (getattr(report.binding, attr, 0) for attr in
-             ("wells_created", "surveys_created", "links_created", "links_updated"))
+             (
+                 "wells_created",
+                 "wells_updated",
+                 "surveys_created",
+                 "surveys_updated",
+                 "links_created",
+                 "links_updated",
+             ))
         )
         if changed:
             shell = getattr(window, "app_shell", None)

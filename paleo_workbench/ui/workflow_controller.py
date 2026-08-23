@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QMessageBox
 
@@ -48,16 +50,7 @@ class _RecomputeWorker(QObject):
 
     def __init__(self, project, generation=0, parent=None):
         super().__init__(parent)
-        # #939-7: snapshot on the GUI thread before the worker starts — the
-        # worker must not read live project state off-thread (data race with
-        # concurrent GUI mutations). A deep copy isolates the freshness scan
-        # and factor interpolation from live edits.
-        try:
-            self._project = project.model_copy(deep=True)  # type: ignore[attr-defined]
-        except Exception:
-            import copy as _copy
-
-            self._project = _copy.deepcopy(project)
+        self._project = project
         # Process-global run identity (#834): a prepare/send-to-prep entry
         # that starts later must supersede this recompute's staged results.
         self.generation = int(generation)
@@ -134,6 +127,7 @@ class WorkflowController:
         self._prepare_job = OwnedWorkerJob(job_parent)
         self._prepare_generation = 0
         self._recompute_job = OwnedWorkerJob(job_parent)
+        self._pending_well_log_import_paths: set[str] = set()
 
     def show_preview_settings(self) -> None:
         """Open the shared preview settings for the current DataPage."""
@@ -307,6 +301,20 @@ class WorkflowController:
         page = self.window.app_shell.data_page_widget()
         if hasattr(page, "open_in_visualization"):
             page.open_in_visualization.connect(self._on_open_in_visualization)
+        if hasattr(page, "open_in_well_prediction"):
+            page.open_in_well_prediction.connect(self._on_open_in_well_prediction)
+        if hasattr(page, "open_in_seismic_prediction"):
+            page.open_in_seismic_prediction.connect(
+                self._on_open_in_seismic_prediction
+            )
+        # Only imports started by the prediction source picker are selected
+        # back into that page; ordinary Data Manager imports remain untouched.
+        if not getattr(page, "_well_prediction_import_wired", False):
+            if hasattr(page, "import_finished"):
+                page.import_finished.connect(self._on_prediction_source_import_finished)
+            if hasattr(page, "import_failed"):
+                page.import_failed.connect(self._on_prediction_source_import_failed)
+            page._well_prediction_import_wired = True
 
     def wire_mapping_page(self) -> None:
         page = self.window.app_shell.mapping_page_widget()
@@ -361,6 +369,8 @@ class WorkflowController:
             page.prediction_updated.connect(self._on_well_log_prediction_updated)
         if hasattr(page, "send_to_preparation_requested"):
             page.send_to_preparation_requested.connect(self._on_well_log_send_to_prep)
+        if hasattr(page, "well_log_import_requested"):
+            page.well_log_import_requested.connect(self._on_well_log_import_requested)
 
     def wire_geomodel_page(self) -> None:
         """Wire the 3D well-seismic joint page (project + cross-page well sync)."""
@@ -689,6 +699,91 @@ class WorkflowController:
         viz = self.window.app_shell.page_stack.widget(PAGE_INDEX_VISUALIZATION)
         if hasattr(viz, "open_ref"):
             viz.open_ref(ref)
+
+    def _on_open_in_well_prediction(self, resource) -> None:
+        """Route a selected Data Management well to the prediction page."""
+        resource_id = str(getattr(resource, "id", "") or "")
+        page = self.window.app_shell.well_log_prediction_page_widget()
+        selector = getattr(page, "select_well_resource", None)
+        if not resource_id or not callable(selector) or not selector(resource_id):
+            return
+        self.window.app_shell.icon_rail.set_active(PAGE_INDEX_WELL_LOG)
+        self.window.app_shell._switch_page(PAGE_INDEX_WELL_LOG)
+
+    def _on_open_in_seismic_prediction(self, resource) -> None:
+        """Route a selected Data Management SEG-Y volume to seismic prediction."""
+        resource_id = str(getattr(resource, "id", "") or "")
+        page = self.window.app_shell.seismic_prediction_page_widget()
+        selector = getattr(page, "select_seismic_resource", None)
+        if not resource_id or not callable(selector) or not selector(resource_id):
+            return
+        self.window.app_shell.icon_rail.set_active(PAGE_INDEX_SEISMIC)
+        self.window.app_shell._switch_page(PAGE_INDEX_SEISMIC)
+
+    @staticmethod
+    def _well_log_import_path_key(path: str | Path) -> str:
+        return Path(path).expanduser().resolve(strict=False).as_posix()
+
+    def _well_log_page(self):
+        return self.window.app_shell.well_log_prediction_page_widget()
+
+    def _on_well_log_import_requested(self, raw_paths) -> None:
+        """Route prediction-page imports through DataPage's async lifecycle."""
+        paths = [Path(str(path)) for path in (raw_paths or []) if str(path).strip()]
+        if not paths:
+            return
+        data_page = self.window.app_shell.data_page_widget()
+        begin_import = getattr(data_page, "begin_import_well_log_paths", None)
+        page = self._well_log_page()
+        if not callable(begin_import):
+            if page is not None and hasattr(page, "set_source_import_status"):
+                page.set_source_import_status("当前数据管理页不支持从预测页导入测井数据")
+            return
+        self._pending_well_log_import_paths = {
+            self._well_log_import_path_key(path) for path in paths
+        }
+        if not begin_import(paths):
+            self._pending_well_log_import_paths.clear()
+            if page is not None and hasattr(page, "set_source_import_status"):
+                page.set_source_import_status("测井数据导入未启动，请稍后重试")
+            return
+        if page is not None and hasattr(page, "set_source_import_status"):
+            page.set_source_import_status("正在导入测井数据…")
+
+    def _on_prediction_source_import_finished(self, report) -> None:
+        if not self._pending_well_log_import_paths:
+            return
+        self._pending_well_log_import_paths = set()
+        added = list(getattr(report, "added", []) or [])
+        resources = [
+            resource
+            for resource in added
+            if getattr(resource, "type", "") == "well_log"
+        ]
+        page = self._well_log_page()
+        if not resources:
+            if page is not None and hasattr(page, "set_source_import_status"):
+                page.set_source_import_status("未导入可用的测井数据；请检查格式或是否已在数据管理中归档")
+            return
+        self.window.app_shell.update_well_log_prediction_page(
+            self.window.project.prediction_tasks,
+            project=self.window.project,
+        )
+        resource = resources[0]
+        selector = getattr(page, "select_well_resource", None)
+        if callable(selector) and selector(str(getattr(resource, "id", ""))):
+            if hasattr(page, "set_source_import_status"):
+                page.set_source_import_status(
+                    f"已导入并加载测井数据：{getattr(resource, 'name', '未命名测井')}"
+                )
+
+    def _on_prediction_source_import_failed(self, message: str) -> None:
+        if not self._pending_well_log_import_paths:
+            return
+        self._pending_well_log_import_paths.clear()
+        page = self._well_log_page()
+        if page is not None and hasattr(page, "set_source_import_status"):
+            page.set_source_import_status(f"测井数据导入失败：{message}")
 
     def _on_home_navigation(self, index: int) -> None:
         self.window.app_shell.icon_rail.set_active(index)

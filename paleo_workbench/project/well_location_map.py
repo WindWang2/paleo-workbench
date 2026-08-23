@@ -22,6 +22,8 @@ def _well_overlays(project: Any) -> list[dict[str, Any]]:
     """Project-CRS points first, source coords as fallback; skip coord-less."""
     overlays: list[dict[str, Any]] = []
     for well in getattr(project, "wells", None) or []:
+        if getattr(well, "spatial_scope", "workarea") == "reference":
+            continue
         x = getattr(well, "project_x", None)
         y = getattr(well, "project_y", None)
         if x is None or y is None:

@@ -31,6 +31,8 @@ class AssetContextMenu(QMenu):
         self,
         target: object | Sequence[object] | None,
         viz_supported: bool = False,
+        well_prediction_supported: bool = False,
+        seismic_prediction_supported: bool = False,
     ) -> None:
         self.clear()
         self._action_registry = {}
@@ -153,6 +155,10 @@ class AssetContextMenu(QMenu):
         # 8. 在可视化页面打开 (Visualize)
         if viz_supported:
             self._add_action("ctx_visualize", "在可视化页面打开")
+        if well_prediction_supported:
+            self._add_action("ctx_well_prediction", "在测井预测中打开")
+        if seismic_prediction_supported:
+            self._add_action("ctx_seismic_prediction", "在地震预测中打开")
 
         self.addSeparator()
 

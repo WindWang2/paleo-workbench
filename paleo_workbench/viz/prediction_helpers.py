@@ -59,6 +59,13 @@ def regions_to_depth_intervals(
     otherwise split ``[top, bottom]`` evenly.
     """
     items = list(regions or [])
+    # Early online runs stored every per-depth API label as ``depth ± 0.5m``.
+    # At normal 0.125m sampling those bands overlap eight-fold and whichever
+    # interval paints last visually wins.  Reconstruct adjacent sample cells
+    # for display without mutating the persisted prediction result.
+    items = normalize_sampled_prediction_regions(
+        items, minimum_depth=float(top), maximum_depth=float(bottom)
+    )
     if not items:
         items = [{"facies": "未分类", "probability": 0.0}]
     # If any region carries depth, use those; clamp into [top, bottom].
@@ -105,6 +112,102 @@ def regions_to_depth_intervals(
             }
         )
     return out
+
+
+def normalize_sampled_prediction_regions(
+    regions: list[dict[str, Any]] | None,
+    *,
+    minimum_depth: float | None = None,
+    maximum_depth: float | None = None,
+    force: bool = False,
+    depth_key: str = "depth",
+) -> list[dict[str, Any]]:
+    """Convert overlapping point predictions into contiguous depth cells.
+
+    Remote inference returns one label per sampled depth.  Interval renderers
+    need cell bounds instead, so adjacent boundaries are the midpoints between
+    sample depths.  ``force`` handles fresh API records carrying a depth field;
+    otherwise only legacy ``inference_api_*`` regions that actually overlap
+    are normalized.  Explicit user-defined regions are never rewritten.
+    """
+    source = [dict(item) for item in (regions or []) if isinstance(item, dict)]
+    if len(source) < 2:
+        if force and len(source) == 1:
+            center = _prediction_sample_center(source[0], depth_key=depth_key)
+            if center is not None:
+                source[0]["top"] = center - 0.5
+                source[0]["bottom"] = center + 0.5
+        return source
+    if not force and not all(
+        str(item.get("region_id") or "").startswith("inference_api_")
+        for item in source
+    ):
+        return source
+
+    samples: list[tuple[float, int, dict[str, Any]]] = []
+    for index, item in enumerate(source):
+        center = _prediction_sample_center(item, depth_key=depth_key)
+        if center is None:
+            return source
+        samples.append((center, index, item))
+    samples.sort(key=lambda entry: (entry[0], entry[1]))
+    if any(next_center <= center for (center, _, _), (next_center, _, _) in zip(samples, samples[1:])):
+        return source
+
+    if not force and not any(
+        _interval_bounds(item) is not None
+        and _interval_bounds(next_item) is not None
+        and _interval_bounds(item)[1] > _interval_bounds(next_item)[0]
+        for (_center, _index, item), (_next_center, _next_index, next_item) in zip(
+            samples, samples[1:]
+        )
+    ):
+        return source
+
+    normalized: list[dict[str, Any]] = []
+    for position, (center, _index, item) in enumerate(samples):
+        previous_center = samples[position - 1][0] if position else None
+        next_center = samples[position + 1][0] if position + 1 < len(samples) else None
+        if previous_center is None:
+            assert next_center is not None
+            interval_top = center - (next_center - center) / 2.0
+        else:
+            interval_top = (previous_center + center) / 2.0
+        if next_center is None:
+            assert previous_center is not None
+            interval_bottom = center + (center - previous_center) / 2.0
+        else:
+            interval_bottom = (center + next_center) / 2.0
+        if minimum_depth is not None:
+            interval_top = max(float(minimum_depth), interval_top)
+        if maximum_depth is not None:
+            interval_bottom = min(float(maximum_depth), interval_bottom)
+        if interval_bottom <= interval_top:
+            return source
+        normalized_item = dict(item)
+        normalized_item["top"] = round(interval_top, 6)
+        normalized_item["bottom"] = round(interval_bottom, 6)
+        normalized.append(normalized_item)
+    return normalized
+
+
+def _prediction_sample_center(item: dict[str, Any], *, depth_key: str) -> float | None:
+    try:
+        if item.get(depth_key) is not None:
+            return float(item[depth_key])
+        bounds = _interval_bounds(item)
+        if bounds is None:
+            return None
+        return (bounds[0] + bounds[1]) / 2.0
+    except (TypeError, ValueError):
+        return None
+
+
+def _interval_bounds(item: dict[str, Any]) -> tuple[float, float] | None:
+    try:
+        return float(item["top"]), float(item["bottom"])
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def merge_prediction_onto_well_log(well_log: Any, task: Any) -> Any:
@@ -182,6 +285,62 @@ def merge_prediction_onto_well_log(well_log: Any, task: Any) -> Any:
     for key, value in updates.items():
         setattr(well_log, key, value)
     return well_log
+
+
+def build_ai_prediction_tracks(well_log: Any, task: Any) -> list[Any]:
+    """Build GeoViz's dedicated facies and confidence tracks for a prediction.
+
+    GeoViz's historical well-log prediction screen presents the prediction in
+    two explicit interval columns: facies labels and percentage confidence.
+    The workbench keeps the result in ``PredictionTask`` rather than a
+    spreadsheet, so this adapter converts the same normalized depth intervals
+    into the native QPainter tracks at render time.
+    """
+    if well_log is None or task is None:
+        return []
+    regions = (getattr(task, "result_summary", None) or {}).get(
+        "predicted_regions"
+    ) or []
+    if not regions:
+        return []
+
+    top = float(getattr(well_log, "top_depth", 0.0) or 0.0)
+    bottom = float(getattr(well_log, "bottom_depth", 0.0) or 0.0)
+    intervals = regions_to_depth_intervals(regions, top=top, bottom=bottom)
+    if not intervals:
+        return []
+
+    # Facies is categorical (stable style + project-owned texture), while
+    # confidence is continuous (a sequential 0–1 heatmap).  Do not send both
+    # through generic IntervalTrack: it cycles colours for arbitrary text.
+    from geoviz import IntervalItem
+    from paleo_workbench.viz.prediction_tracks import (
+        ConfidenceHeatmapTrack,
+        FaciesTextureTrack,
+    )
+
+    facies_items = [
+        IntervalItem(top=item["top"], bottom=item["bottom"], name=item["facies"])
+        for item in intervals
+    ]
+    confidence_items = []
+    for item in intervals:
+        probability = float(item.get("probability", 0.0) or 0.0)
+        label = f"{probability:.0%}" if 0.0 <= probability <= 1.0 else str(probability)
+        confidence_items.append(
+            IntervalItem(top=item["top"], bottom=item["bottom"], name=label)
+        )
+
+    tracks = [
+        FaciesTextureTrack(facies_items),
+        ConfidenceHeatmapTrack(
+            confidence_items,
+            [float(item.get("probability", 0.0) or 0.0) for item in intervals],
+        ),
+    ]
+    for track in tracks:
+        track.set_depth_range(top, bottom)
+    return tracks
 
 
 def well_log_data_from_prediction(task) -> WellLogData:

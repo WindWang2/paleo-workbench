@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from paleo_workbench.resources.classifier import classify_path
+from paleo_workbench.resources.classifier import classify_import_path, classify_path
 
 
 def test_classifies_core_data_formats():
@@ -88,3 +88,30 @@ def test_zip_is_classified_from_its_extension_without_content_guessing():
         "bin",
         "indexed_reference",
     )
+
+
+def test_import_classifies_generic_named_witsml_from_content(tmp_path):
+    path = tmp_path / "regional_delivery.xml"
+    path.write_text(
+        """<WITSMLComposite><log><nameWell>REF-1</nameWell>
+<logCurveInfo><mnemonic>DEPT</mnemonic></logCurveInfo>
+<logCurveInfo><mnemonic>GR</mnemonic></logCurveInfo>
+<logData><data>1000,40</data><data>1001,41</data></logData>
+</log></WITSMLComposite>""",
+        encoding="utf-8",
+    )
+
+    assert classify_import_path(path) == ("well_log", "xml", "indexed")
+
+
+def test_import_keeps_ordinary_xml_spreadsheet_out_of_well_logs(tmp_path):
+    path = tmp_path / "regional_delivery.xml"
+    path.write_text(
+        """<Workbook><Worksheet Name="普通资料"><Table>
+<Row><Cell><Data>名称</Data></Cell><Cell><Data>值</Data></Cell></Row>
+<Row><Cell><Data>A</Data></Cell><Cell><Data>1</Data></Cell></Row>
+</Table></Worksheet></Workbook>""",
+        encoding="utf-8",
+    )
+
+    assert classify_import_path(path) == ("spreadsheet", "xml", "indexed")

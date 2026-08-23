@@ -12,7 +12,7 @@ def test_prediction_evidence_panel_empty_state(qtbot):
     assert panel.objectName() == "PredictionEvidencePanel"
     assert panel.mock_value.text() == "—"
     assert panel.evidence_list.count() == 0
-    assert panel.run_btn.text() == "运行测井预测"
+    assert panel.run_btn.text() == "运行线上测井预测"
     assert panel.send_btn.text() == "发送制备"
     assert panel.export_btn.text() == "导出单井剖面"
 

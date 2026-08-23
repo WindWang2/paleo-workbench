@@ -36,6 +36,39 @@ def test_ui2_lifecycle_navigation(qtbot):
     assert page.asset_table.asset_at(0).name == "der1.las"
 
 
+def test_ui2_smart_navigation_categories_show_exact_matching_assets(qtbot):
+    """Tree smart views must not be overwritten by their legacy category event."""
+    page = DataPage(project=ProjectDocument.new("Smart categories"))
+    qtbot.addWidget(page)
+
+    page.project.resources.extend(
+        [
+            ResourceItem(name="notes.pdf", path="/notes.pdf", type="document", format="pdf"),
+            ResourceItem(name="photo.png", path="/photo.png", type="image_reference", format="png"),
+            ResourceItem(name="base-map.tif", path="/base-map.tif", type="reference_map", format="tif"),
+            ResourceItem(name="samples.csv", path="/samples.csv", type="tabular", format="csv"),
+            ResourceItem(name="derived.las", path="/derived.las", type="well_log", format="las", artifact_role="derived"),
+            ResourceItem(name="intermediate.dat", path="/intermediate.dat", type="horizon", format="dat", artifact_role="intermediate"),
+            ResourceItem(name="result.json", path="/result.json", type="prediction_result", format="json", artifact_role="output"),
+        ]
+    )
+    page._refresh()
+
+    expected_names = {
+        "辅助资料": {"notes.pdf", "photo.png", "base-map.tif", "samples.csv"},
+        "工作数据": {"derived.las", "intermediate.dat"},
+        "成果": {"result.json"},
+    }
+    for label, expected in expected_names.items():
+        item = page.navigation_tree.find_category_item(label)
+        assert item is not None, f"missing navigation category: {label}"
+        page.navigation_tree.setCurrentItem(item)
+        assert {
+            page.asset_table.asset_at(row).name
+            for row in range(page.asset_table.visible_asset_count())
+        } == expected
+
+
 def test_ui2_tag_filtering_and_search(qtbot):
     page = DataPage(project=ProjectDocument.new("UI2 Test"))
     qtbot.addWidget(page)

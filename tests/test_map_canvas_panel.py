@@ -1,5 +1,8 @@
 from paleo_workbench.project.models import PaleoMapDocument
+from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.map_canvas_panel import MapCanvasPanel
+from paleo_workbench.ui.pages.map_edit_view import MapEditView
+from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 from paleo_workbench.viz.native_factor_map import NativeMapScene
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 
@@ -81,3 +84,14 @@ def test_map_canvas_panel_can_host_native_factor_scene(qtbot):
     panel.load_native_scene(scene)
     assert panel.stack.currentWidget() is panel.native_canvas
     assert panel.native_canvas.scene is scene
+
+
+def test_map_document_display_surfaces_keep_a_light_background(qtbot):
+    """Mapping must not regress to a black document display surface."""
+    for canvas in (MapEditView(), UnifiedMapCanvas()):
+        qtbot.addWidget(canvas)
+        canvas.resize(320, 220)
+        canvas.show()
+        image = canvas.grab().toImage()
+        center = image.pixelColor(image.width() // 2, image.height() // 2)
+        assert center.name() == tokens.BG_SEARCH

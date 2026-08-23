@@ -31,8 +31,9 @@ def test_native_canvas_composes_layers_and_reuses_scalar_cache(qtbot):
     qtbot.waitUntil(lambda: scalar.rasterize_count == 1, timeout=3000)
     image = canvas.grab().toImage()
     assert scalar.rasterize_count == 1
-    assert image.size().width() == 320
-    assert image.pixelColor(160, 100) != QColor("#000000")
+    assert image.deviceIndependentSize().toSize() == canvas.size()
+    center = image.pixelColor(image.width() // 2, image.height() // 2)
+    assert center != QColor("#000000")
 
     scene.set_layer_opacity("surface", 0.25)
     canvas.repaint()

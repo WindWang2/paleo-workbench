@@ -54,6 +54,8 @@ def test_composite_visualization_panel_loads_prediction(qtbot):
 
 
 def test_composite_well_host_prefers_retained_engine_when_available(qtbot, monkeypatch):
+    """Single-well surface is deliberately Legacy QPainter even when a native
+    engine is importable (editable tracks + consistent vector exports)."""
     import paleo_workbench.viz.hosts.well_log_host as host_module
 
     class FakeNativeView(QFrame):
@@ -76,11 +78,10 @@ def test_composite_well_host_prefers_retained_engine_when_available(qtbot, monke
     panel.update_state(project.prediction_tasks)
 
     host = panel.well_host
-    assert host._engine_view is not None
-    assert host.view_stack.currentWidget() is host.engine_host
-    assert host._engine_load["curve_count"] >= 1
-    # No parallel legacy scene is maintained while the native surface is live.
-    assert host.canvas.tracks == []
+    # Native engine never takes over the single-well screen.
+    assert host._engine_view is None
+    assert host.view_stack.currentWidget() is host.scroll_area
+    assert len(host.canvas.tracks) > 0
 
 
 def test_visualization_workspace_load_vizref_returns_payload(qtbot, tmp_path):

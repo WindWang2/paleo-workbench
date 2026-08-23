@@ -258,6 +258,28 @@ class SeismicViewPanel(QFrame):
             self.set_horizon_context(self._horizon_name)
         self.view_ready.emit(True)
 
+    def show_resource(self, resource, project=None) -> bool:
+        """Display one Data Management seismic resource without a prediction task."""
+        if resource is None or getattr(resource, "type", "") != "seismic":
+            self._show_empty("所选资源不是地震数据")
+            return False
+        adapter = VizAdapter()
+        ref = adapter.ref_from_resource(resource)
+        if ref is None:
+            self._show_empty("所选资源不支持地震体可视化")
+            return False
+        payload = adapter.resolve(ref, project)
+        if payload.seismic_volume is not None:
+            self._show_volume(payload.seismic_volume)
+            return True
+        path = (payload.seismic_path or "").strip()
+        if path:
+            self._show_segy_loading(path)
+            return True
+        message = (payload.message or "").strip() or "无法加载地震体数据"
+        self._show_empty(message)
+        return False
+
     def update_state(self, task, project=None) -> None:
         if task is None:
             self._show_empty("未选择预测任务")
@@ -278,21 +300,7 @@ class SeismicViewPanel(QFrame):
             if resource is None:
                 self._show_empty("未找到绑定的地震数据资源")
                 return
-            adapter = VizAdapter()
-            ref = adapter.ref_from_resource(resource)
-            if ref is None:
-                self._show_empty("绑定资源不支持地震体可视化")
-                return
-            payload = adapter.resolve(ref, project)
-            if payload.seismic_volume is not None:
-                self._show_volume(payload.seismic_volume)
-                return
-            path = (payload.seismic_path or "").strip()
-            if path:
-                self._show_segy_loading(path)
-                return
-            message = (payload.message or "").strip() or "无法加载地震体数据"
-            self._show_empty(message)
+            self.show_resource(resource, project)
             return
 
         volume = seismic_volume_from_prediction(task)

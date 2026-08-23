@@ -8,7 +8,15 @@ from dataclasses import replace
 from PySide6.QtCore import QEvent, QObject, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QFileDialog, QLineEdit, QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
+    QApplication,
+    QDialog,
+    QFileDialog,
+    QLineEdit,
+    QMessageBox,
+    QTextBrowser,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
 
 from paleo_workbench.catalog import normalize_tag_name
@@ -101,7 +109,7 @@ class _RegisterWorker(QObject):
     window on the import-finished slot (#379).
     """
 
-    finished = Signal(list)  # registration failure descriptions
+    finished = Signal(object)  # (failure descriptions, ResourceItem.id → asset id)
     failed = Signal(str)
 
     def __init__(self, lifecycle, resources: list, parent=None):
@@ -112,8 +120,13 @@ class _RegisterWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
-            self._lifecycle.register_imported_resources(self._resources)
-            self.finished.emit(list(self._lifecycle.last_registration_failures))
+            mapping = self._lifecycle.register_imported_resources(self._resources)
+            self.finished.emit(
+                (
+                    list(self._lifecycle.last_registration_failures),
+                    dict(mapping or {}),
+                )
+            )
         except Exception as exc:  # pragma: no cover - defensive UI boundary
             self.failed.emit(str(exc))
 
@@ -235,6 +248,11 @@ class DataPage(QWidget):
     import_finished = Signal(object)
     import_failed = Signal(str)
     open_in_visualization = Signal(object)  # VizRef
+    # A selected Data Management well-log resource can seed the prediction
+    # page directly. The workflow controller owns page navigation.
+    open_in_well_prediction = Signal(object)  # ResourceItem
+    # A selected WorkArea SEG-Y volume can seed seismic prediction directly.
+    open_in_seismic_prediction = Signal(object)  # ResourceItem
     # Emitted whenever domain entities changed (import binding or migration)
     # so map/overview views can refresh.  Carries the project document.
     domain_entities_changed = Signal(object)
@@ -269,6 +287,7 @@ class DataPage(QWidget):
         # run off the GUI thread like import/rescan/delivery/export.
         self._catalog_copy_job = OwnedWorkerJob(self)
         self._last_import_report: ImportReport | None = None
+        self._last_registered_asset_ids: dict[str, str] = {}
         self._rescan_context: tuple | None = None
         self._delivery_context: tuple | None = None
         self._import_in_progress = False
@@ -379,6 +398,7 @@ class DataPage(QWidget):
         self.data_toolbar.tag_filter_changed.connect(self._on_tag_filter_changed)
         self.data_toolbar.tag_manager_requested.connect(self._open_tag_manager)
         self.navigation_tree.manage_tags_requested.connect(self._open_tag_manager)
+        self.navigation_tree.delete_well_requested.connect(self.delete_well)
         self._sync_toolbar_toggle_state()
 
         # Wire inspector panel interactive signals
@@ -613,7 +633,16 @@ class DataPage(QWidget):
         return report
 
     def _choose_import_files(self) -> list[Path]:
-        paths, _selected_filter = QFileDialog.getOpenFileNames(self, "导入受管文件")
+        paths, _selected_filter = QFileDialog.getOpenFileNames(
+            self,
+            "导入受管文件",
+            filter=(
+                "GeoJSON 矢量 (*.geojson *.json);;"
+                "地学数据 (*.las *.xml *.sgy *.segy *.dat *.csv *.xlsx *.xls);;"
+                "矢量数据 (*.geojson *.json *.shp *.gpkg);;"
+                "所有文件 (*)"
+            ),
+        )
         return [Path(path) for path in paths]
 
     def _choose_import_folder(self) -> Path | None:
@@ -669,6 +698,38 @@ class DataPage(QWidget):
             lambda: import_files(paths, existing, project_path=project_path)
         )
 
+    def begin_import_well_log_paths(self, paths: list[Path]) -> bool:
+        """Import an explicitly selected LAS/XML source as a managed well log.
+
+        XML names in the field are often numeric or vendor-specific, so they
+        cannot reliably satisfy the generic filename classifier.  This entry
+        point is only used by the prediction-page *导入测井* action, whose file
+        picker restricts input to LAS/XML and whose intent is unambiguous.
+        """
+        if self._import_in_progress:
+            self._set_action_status("正在导入，请稍候")
+            return False
+        allowed = [
+            Path(path)
+            for path in paths
+            if Path(path).suffix.lower() in {".las", ".xml"}
+        ]
+        if not allowed:
+            self._set_action_status("请选择 LAS 或 XML 格式的测井数据")
+            return False
+        existing = list(self.project.resources)
+        project_path = self._project_file_for_io()
+
+        def import_well_logs() -> ImportReport:
+            report = import_files(allowed, existing, project_path=project_path)
+            for resource in report.added:
+                resource.type = "well_log"
+                resource.artifact_role = ROLE_BY_TYPE.get("well_log")
+                resource.tags = [resource.artifact_role] if resource.artifact_role else []
+            return report
+
+        return self._start_import_job(import_well_logs)
+
     def begin_import_folder_path(self, path: Path) -> bool:
         if self._import_in_progress:
             self._set_action_status("正在导入，请稍候")
@@ -680,6 +741,7 @@ class DataPage(QWidget):
         )
 
     def _start_import_job(self, task: Callable[[], ImportReport]) -> bool:
+        self._last_registered_asset_ids = {}
         worker = _ImportWorker(task)
         self._import_job.start(
             worker,
@@ -724,7 +786,7 @@ class DataPage(QWidget):
 
     def _start_registration_worker(self, resources: list) -> None:
         if not resources:
-            self._handle_registration_finished([])
+            self._handle_registration_finished([], {})
             return
         worker = _RegisterWorker(self._lifecycle, resources)
         self._register_job.start(
@@ -739,19 +801,34 @@ class DataPage(QWidget):
         self._set_action_status("正在登记目录元数据...")
 
     @Slot(object)
-    def _handle_registration_finished_signal(self, failures: list) -> None:
+    def _handle_registration_finished_signal(self, result: object) -> None:
         if self._register_job.target is not self.project:
             return
-        self._handle_registration_finished(failures)
+        failures, mapping = result
+        self._handle_registration_finished(failures, mapping)
 
     @Slot(str)
     def _handle_registration_failed_signal(self, message: str) -> None:
         if self._register_job.target is not self.project:
             return
-        self._handle_registration_finished([message])
+        self._handle_registration_finished([message], {})
 
-    def _handle_registration_finished(self, failures: list) -> None:
+    def _handle_registration_finished(
+        self, failures: list, mapping: dict[str, str]
+    ) -> None:
         self._lifecycle.last_registration_failures = list(failures or [])
+        self._last_registered_asset_ids = dict(mapping or {})
+        # Persist the exact registration result on the project resource.  A
+        # catalog asset reused by source/checksum retains the first import's
+        # one-to-one legacy bridge, so later prediction runs cannot recover
+        # this association from ``ResourceItem.id`` alone.
+        for resource in self.project.resources:
+            asset_id = self._last_registered_asset_ids.get(str(resource.id))
+            if not asset_id:
+                continue
+            summary = dict(resource.parsed_summary or {})
+            summary["catalog_asset_id"] = str(asset_id)
+            resource.parsed_summary = summary
         self._refresh()
         report = self._last_import_report
         if report is not None:
@@ -797,6 +874,16 @@ class DataPage(QWidget):
             from paleo_workbench.catalog.runtime import get_catalog_service
 
             mapping = build_asset_id_mapping(get_catalog_service())
+            # The registration result is authoritative for THIS import.  A
+            # catalog asset reused by path/checksum may deliberately retain an
+            # older one-to-one legacy bridge, which cannot identify the fresh
+            # ResourceItem id by scanning catalog metadata afterward.
+            mapping.update(self._last_registered_asset_ids)
+            # Catalog-less or failed-registration mode still keeps the domain
+            # entity connected to its visible legacy ResourceItem.
+            for item in staged:
+                mapping.setdefault(item.resource_id, item.resource_id)
+            self._last_registered_asset_ids = {}
             report = bind_staged(
                 self.project,
                 staged,
@@ -885,6 +972,139 @@ class DataPage(QWidget):
         self._on_navigation_filter_query(query)
         if focus:
             self.well_focus_requested.emit(well_id)
+        return True
+
+    def _items_for_domain_asset_ids(
+        self, asset_ids: set[str]
+    ) -> tuple[list[object], set[str]]:
+        """Resolve linked catalog/legacy ids to lifecycle-removable objects."""
+        wanted = {str(asset_id) for asset_id in asset_ids if str(asset_id)}
+        found: dict[str, object] = {}
+        candidates = [*self.project.resources, *self.project.export_artifacts]
+        for item in candidates:
+            direct_id = str(getattr(item, "id", "") or "")
+            if direct_id in wanted:
+                found[direct_id] = item
+            try:
+                catalog_id = self._lifecycle.resolve_catalog_asset_id(item)
+            except Exception:
+                catalog_id = None
+            if catalog_id is not None and str(catalog_id) in wanted:
+                found[str(catalog_id)] = item
+
+        service = self._catalog_service()
+        for asset_id in wanted - set(found):
+            if service is None:
+                continue
+            try:
+                asset = service.get_asset(asset_id)
+            except Exception:
+                continue
+            if not getattr(asset, "trashed", False):
+                found[asset_id] = asset
+
+        items: list[object] = []
+        seen: set[tuple[type, str]] = set()
+        for asset_id in sorted(found):
+            item = found[asset_id]
+            key = (type(item), str(getattr(item, "id", "") or id(item)))
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(item)
+        return items, wanted - set(found)
+
+    def delete_well(self, well_id: str) -> bool:
+        """Delete one well after a guarded, combined linked-file removal."""
+        from paleo_workbench.project.domain import remove_well_entity
+
+        well = next(
+            (item for item in self.project.wells if item.id == well_id), None
+        )
+        if well is None:
+            removed_links, _removed_wells = remove_well_entity(
+                self.project, well_id
+            )
+            if removed_links:
+                self.refresh_domain_views()
+                self._set_action_status(
+                    f"井记录已不存在，已清理 {removed_links} 条残留关联"
+                )
+            else:
+                self._set_action_status("井记录已不存在，无残留记录")
+            return True
+
+        links = [
+            link
+            for link in self.project.entity_asset_links
+            if link.entity_type == "well" and link.entity_id == well_id
+        ]
+        asset_ids = {str(link.asset_id) for link in links if str(link.asset_id)}
+        if asset_ids:
+            name_map = self._asset_name_map()
+            names = sorted(
+                {name_map.get(asset_id, asset_id) for asset_id in asset_ids}
+            )
+            shown = "、".join(names[:3])
+            if len(names) > 3:
+                shown += f" 等 {len(names)} 个文件"
+            other_wells = {
+                link.entity_id
+                for link in self.project.entity_asset_links
+                if link.entity_type == "well"
+                and link.asset_id in asset_ids
+                and link.entity_id != well_id
+            }
+            message = (
+                f"井“{well.name}”关联 {len(asset_ids)} 个文件：\n{shown}\n\n"
+                "删除该井必须同步将关联文件移出项目并放入回收站。"
+            )
+            if other_wells:
+                message += (
+                    f"\n其中的文件还关联 {len(other_wells)} 口井；"
+                    "移除后，无其他来源的参考井也会一并移除。"
+                )
+            message += "\n\n是否继续？"
+        else:
+            message = f"井“{well.name}”没有关联文件。确定删除该井点吗？"
+
+        reply = QMessageBox.question(
+            self,
+            "删除井",
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return False
+
+        if asset_ids:
+            items, missing = self._items_for_domain_asset_ids(asset_ids)
+            if items and not self.remove_assets(items):
+                return False
+        else:
+            missing = set()
+
+        removed_links, removed_wells = remove_well_entity(self.project, well_id)
+        if removed_wells or removed_links:
+            self.refresh_domain_views()
+        elif any(item.id == well_id for item in self.project.wells):
+            return False
+
+        all_item = self.navigation_tree.topLevelItem(0)
+        if all_item is not None:
+            self.navigation_tree.setCurrentItem(all_item)
+        if missing:
+            self._set_action_status(
+                f"已删除井“{well.name}”；同步移除 {len(asset_ids) - len(missing)} 个文件，"
+                f"清理 {len(missing)} 条失效关联"
+            )
+        elif asset_ids:
+            self._set_action_status(
+                f"已删除井“{well.name}”并同步移除 {len(asset_ids)} 个文件"
+            )
+        else:
+            self._set_action_status(f"已删除井“{well.name}”")
         return True
 
     def _finish_import_job(self) -> None:
@@ -1069,8 +1289,24 @@ class DataPage(QWidget):
         if isinstance(first, ResourceItem):
             viz_supported = self._viz_adapter.supports_resource(first)
 
+        well_prediction_supported = bool(
+            isinstance(first, ResourceItem) and first.type == "well_log"
+        )
+        seismic_prediction_supported = bool(
+            isinstance(first, ResourceItem)
+            and first.type == "seismic"
+            and (
+                str(first.format or "").lower() in {"sgy", "segy"}
+                or str(first.path or "").lower().endswith((".sgy", ".segy"))
+            )
+        )
         menu = AssetContextMenu(self)
-        menu.build(target, viz_supported)
+        menu.build(
+            target,
+            viz_supported,
+            well_prediction_supported=well_prediction_supported,
+            seismic_prediction_supported=seismic_prediction_supported,
+        )
 
         # Catalog gating: an action is available when the row resolves to a
         # catalog version — bridged resources AND catalog-only product rows
@@ -1148,6 +1384,16 @@ class DataPage(QWidget):
         visualize_act = menu.find_action("ctx_visualize")
         if visualize_act:
             visualize_act.triggered.connect(self._emit_open_visualization)
+
+        well_prediction_act = menu.find_action("ctx_well_prediction")
+        if well_prediction_act:
+            well_prediction_act.triggered.connect(self._emit_open_in_well_prediction)
+
+        seismic_prediction_act = menu.find_action("ctx_seismic_prediction")
+        if seismic_prediction_act:
+            seismic_prediction_act.triggered.connect(
+                self._emit_open_in_seismic_prediction
+            )
 
         remove_act = menu.find_action("ctx_remove")
         if remove_act:
@@ -1652,9 +1898,18 @@ class DataPage(QWidget):
     def _asset_legacy_map(self) -> dict[str, str]:
         """catalog DataAsset.id → legacy ResourceItem.id (cached per revision)."""
         service = self._catalog_service()
-        revision = getattr(service, "catalog_revision", None) if service else None
+        revision = (
+            getattr(getattr(service, "document", None), "catalog_revision", None)
+            if service is not None
+            else None
+        )
+        cache_key = (
+            (id(service), revision)
+            if service is not None and revision is not None
+            else None
+        )
         cached = getattr(self, "_asset_legacy_cache", None)
-        if cached is not None and cached[0] == revision and service is not None:
+        if cache_key is not None and cached is not None and cached[0] == cache_key:
             return cached[1]
         mapping: dict[str, str] = {}
         if service is not None:
@@ -1665,7 +1920,9 @@ class DataPage(QWidget):
                         mapping[asset.id] = str(legacy)
             except Exception:
                 mapping = {}
-        self._asset_legacy_cache = (revision, mapping)
+        self._asset_legacy_cache = (
+            (cache_key, mapping) if cache_key is not None else None
+        )
         return mapping
 
     def _entity_query_with_ids(self, query: FilterQuery) -> FilterQuery:
@@ -1689,8 +1946,25 @@ class DataPage(QWidget):
                 and (query.entity_role is None or link.role == query.entity_role)
             ]
         else:
+            entity_type = query.node_value or ""
+            entity_ids: set[str] | None = None
+            if entity_type in {"well", "reference_well"}:
+                from paleo_workbench.project.domain import is_reference_well
+
+                wants_reference = entity_type == "reference_well"
+                entity_ids = {
+                    well.id
+                    for well in (getattr(self.project, "wells", None) or [])
+                    if is_reference_well(well) == wants_reference
+                }
+                # Reference wells share the canonical link type ``well``;
+                # spatial scope belongs to WellEntity, not EntityAssetLink.
+                entity_type = "well"
             matched = [
-                link for link in links if link.entity_type == (query.node_value or "")
+                link
+                for link in links
+                if link.entity_type == entity_type
+                and (entity_ids is None or link.entity_id in entity_ids)
             ]
         ids = {link.asset_id for link in matched}
         for asset_id in tuple(ids):
@@ -1853,35 +2127,84 @@ class DataPage(QWidget):
             # for the current asset; without this branch a rendered preview
             # kept the old profile while the status bar claimed the settings
             # were applied (#427).
-            asset = self._selected_asset
-            if isinstance(asset, ResourceItem) and self._viz_adapter.supports_resource(asset):
-                self._visualization_controller.request(asset)
+            resource = self._resource_for_preview(self._selected_asset)
+            if resource is not None and self._viz_adapter.supports_resource(resource):
+                self._visualization_controller.request(resource)
         self._set_action_status("预览设置已应用")
 
     def _request_summary(self, asset: object | None) -> None:
         self._visualization_controller.invalidate()
-        self._preview_controller.request(asset)
+        self._preview_controller.request(self._resource_for_preview(asset) or asset)
+
+    def _resource_for_preview(self, asset: object | None) -> ResourceItem | None:
+        """Resolve table/catalog rows to the file-backed preview contract.
+
+        Re-importing an already catalogued file can legitimately reuse an
+        asset whose one-to-one ``legacy_resource_id`` belongs to an earlier
+        import.  Entity filters then surface the canonical catalog ``AssetView``
+        instead of the fresh project ``ResourceItem``.  Preview and prediction
+        consumers require a ``ResourceItem``; reconstruct a read-only companion
+        from the catalog without changing the selected governance row.
+        """
+        unwrapped = self._unwrap_asset(asset) if asset is not None else None
+        if isinstance(unwrapped, ResourceItem):
+            return unwrapped
+
+        from paleo_workbench.catalog.models import DataAsset
+
+        if not isinstance(unwrapped, DataAsset):
+            return None
+        service = self._catalog_service()
+        if service is None:
+            return None
+        companion = self._lifecycle.resource_from_catalog_asset(service, unwrapped)
+        if companion is None or unwrapped.current_version_id is None:
+            return companion
+        try:
+            version = service.get_version(unwrapped.current_version_id)
+            resolved_path = service.resolve_path(version)
+        except Exception:
+            return companion
+        return companion.model_copy(update={"path": str(resolved_path)})
 
     def _request_selected_visualization(self) -> None:
-        asset = self._selected_asset
-        if not isinstance(asset, ResourceItem):
+        resource = self._resource_for_preview(self._selected_asset)
+        if resource is None:
             self.reader_panel.show_visualization_error("当前数据不支持可视化预览")
             return
-        self._visualization_controller.request(asset)
+        self._visualization_controller.request(resource)
 
     def _sync_visualization_button(self) -> None:
-        asset = self._selected_asset
-        ok = isinstance(asset, ResourceItem) and self._viz_adapter.supports_resource(asset)
+        resource = self._resource_for_preview(self._selected_asset)
+        ok = resource is not None and self._viz_adapter.supports_resource(resource)
         self.open_visualization_btn.setEnabled(ok)
 
     def _emit_open_visualization(self) -> None:
-        asset = self._selected_asset
-        if not isinstance(asset, ResourceItem):
+        resource = self._resource_for_preview(self._selected_asset)
+        if resource is None:
             return
-        ref = self._viz_adapter.ref_from_resource(asset)
+        ref = self._viz_adapter.ref_from_resource(resource)
         if ref is None:
             return
         self.open_in_visualization.emit(replace(ref, source="data_page"))
+
+    def _emit_open_in_well_prediction(self) -> None:
+        resource = self._resource_for_preview(self._selected_asset)
+        if resource is None or resource.type != "well_log":
+            return
+        self.open_in_well_prediction.emit(resource)
+
+    def _emit_open_in_seismic_prediction(self) -> None:
+        resource = self._resource_for_preview(self._selected_asset)
+        if resource is None or resource.type != "seismic":
+            return
+        format_name = str(resource.format or "").lower()
+        path = str(resource.path or "").lower()
+        if format_name not in {"sgy", "segy"} and not path.endswith(
+            (".sgy", ".segy")
+        ):
+            return
+        self.open_in_seismic_prediction.emit(resource)
 
     def _on_summary_ready(self, result) -> None:
         self.reader_panel.render(result)
@@ -1896,20 +2219,20 @@ class DataPage(QWidget):
         the background; completion renders with ``activate=False`` and the
         loading spinner no longer steals the 数据列表 tab.
         """
-        asset = self._selected_asset
-        if not isinstance(asset, ResourceItem):
+        resource = self._resource_for_preview(self._selected_asset)
+        if resource is None:
             return
         if not getattr(result, "visualization_available", False):
             return
         # Stale summary arriving after the user moved to another asset.
-        if result.path and str(result.path) != str(getattr(asset, "path", "")):
+        if result.path and str(result.path) != str(resource.path):
             return
-        if not self._viz_adapter.supports_resource(asset):
+        if not self._viz_adapter.supports_resource(resource):
             return
-        if self._prefetched_viz_asset is asset:
+        if self._prefetched_viz_asset is resource:
             return
-        self._prefetched_viz_asset = asset
-        self._visualization_controller.request(asset)
+        self._prefetched_viz_asset = resource
+        self._visualization_controller.request(resource)
 
     def _handle_preview_failed(self, message: str) -> None:
         self.reader_panel.render(

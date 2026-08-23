@@ -2,21 +2,19 @@ from __future__ import annotations
 
 from PySide6.QtCore import Signal, Slot
 from PySide6.QtGui import QCloseEvent
-from PySide6.QtWidgets import QHBoxLayout, QMessageBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QVBoxLayout,
+    QWidget,
+)
 
-from paleo_workbench.ui import tokens
-from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
-from paleo_workbench.viz.prediction_helpers import active_prediction_task
-from paleo_workbench.ui.pages.seismic_attribute_panel import SeismicAttributePanel
-from paleo_workbench.ui.pages.seismic_control_panel import SeismicControlPanel
-from paleo_workbench.ui.pages.seismic_context_toolbar import SeismicContextToolbar
-from paleo_workbench.ui.pages.seismic_view_panel import SeismicViewPanel
-from paleo_workbench.workflow.stratigraphy import active_target_horizon
 from paleo_workbench.catalog import get_catalog_service
 from paleo_workbench.prediction.inference_service import (
     link_run_to_domain_task,
     materialize_prediction_task,
-    resolve_prediction_inputs,
     start_inference,
 )
 from paleo_workbench.prediction.inference_worker import InferenceWorker
@@ -25,6 +23,14 @@ from paleo_workbench.prediction.providers import (
     MODEL_ID_DEMO,
     ensure_default_models,
 )
+from paleo_workbench.ui import tokens
+from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+from paleo_workbench.ui.pages.seismic_attribute_panel import SeismicAttributePanel
+from paleo_workbench.ui.pages.seismic_context_toolbar import SeismicContextToolbar
+from paleo_workbench.ui.pages.seismic_control_panel import SeismicControlPanel
+from paleo_workbench.ui.pages.seismic_view_panel import SeismicViewPanel
+from paleo_workbench.viz.prediction_helpers import active_prediction_task
+from paleo_workbench.workflow.stratigraphy import active_target_horizon
 
 
 class SeismicPredictionPage(QWidget):
@@ -42,6 +48,8 @@ class SeismicPredictionPage(QWidget):
         self._inference_job = OwnedWorkerJob(self)
         self._session_token = object()
         self._active_inference_context = None
+        self._selected_seismic_resource_id: str | None = None
+        self._showing_selected_source = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -51,6 +59,22 @@ class SeismicPredictionPage(QWidget):
             tokens.PAGE_MARGIN,
         )
         outer.setSpacing(tokens.SPACE_4)
+
+        source_row = QHBoxLayout()
+        source_label = QLabel("工区地震体")
+        source_label.setObjectName("WorkFieldLabel")
+        source_row.addWidget(source_label)
+        self.seismic_source_combo = QComboBox()
+        self.seismic_source_combo.setObjectName("SeismicPredictionSourceCombo")
+        self.seismic_source_combo.setPlaceholderText("选择数据管理中的 SEG-Y 地震体")
+        self.seismic_source_combo.setToolTip(
+            "选择工区数据中已归档的 .sgy / .segy 地震体，加载后可直接运行预测"
+        )
+        self.seismic_source_combo.currentIndexChanged.connect(
+            self._on_seismic_source_changed
+        )
+        source_row.addWidget(self.seismic_source_combo, 1)
+        outer.addLayout(source_row)
 
         self.context_toolbar = SeismicContextToolbar()
         outer.addWidget(self.context_toolbar)
@@ -80,6 +104,8 @@ class SeismicPredictionPage(QWidget):
     def set_project(self, project) -> None:
         if project is not self._project:
             self._session_token = object()
+            self._selected_seismic_resource_id = None
+            self._showing_selected_source = False
         self._project = project
 
     def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
@@ -109,14 +135,110 @@ class SeismicPredictionPage(QWidget):
         if project is not None:
             self.set_project(project)
         self._tasks = list(prediction_tasks or [])
-        task = self._current_task()
-        self.view_panel.update_state(task, project=self._project)
+        self._sync_seismic_sources()
+        task = None if self._showing_selected_source else self._current_task()
+        resource = self._selected_seismic_resource()
+        if self._showing_selected_source and resource is not None:
+            self.view_panel.show_resource(resource, self._project)
+        else:
+            self.view_panel.update_state(task, project=self._project)
         self.control_panel.update_state(task, self.view_panel.volume_shape)
         self._sync_workbench_context(task)
         self.control_panel.set_controls_enabled(self.view_panel.is_view_ready())
 
     def _current_task(self):
         return active_prediction_task(self._tasks)
+
+    @staticmethod
+    def _is_segy_resource(resource) -> bool:
+        if getattr(resource, "type", "") != "seismic":
+            return False
+        format_name = str(getattr(resource, "format", "") or "").lower()
+        path = str(getattr(resource, "path", "") or "").lower()
+        return format_name in {"sgy", "segy"} or path.endswith((".sgy", ".segy"))
+
+    def _sync_seismic_sources(self) -> None:
+        previous = self._selected_seismic_resource_id
+        resources = [
+            resource
+            for resource in (getattr(self._project, "resources", None) or [])
+            if self._is_segy_resource(resource)
+        ]
+        self.seismic_source_combo.blockSignals(True)
+        self.seismic_source_combo.clear()
+        for resource in resources:
+            name = str(getattr(resource, "name", "未命名地震体"))
+            format_label = str(getattr(resource, "format", "") or "").upper()
+            self.seismic_source_combo.addItem(
+                f"{name} · {format_label}" if format_label else name,
+                str(getattr(resource, "id", "")),
+            )
+        selected_index = next(
+            (
+                index
+                for index, resource in enumerate(resources)
+                if str(getattr(resource, "id", "")) == previous
+            ),
+            -1,
+        )
+        self.seismic_source_combo.setCurrentIndex(selected_index)
+        if not resources or selected_index < 0:
+            self._selected_seismic_resource_id = None
+            self._showing_selected_source = False
+        self.seismic_source_combo.blockSignals(False)
+
+    def _selected_seismic_resource(self):
+        if not self._selected_seismic_resource_id or self._project is None:
+            return None
+        return next(
+            (
+                resource
+                for resource in (getattr(self._project, "resources", None) or [])
+                if str(getattr(resource, "id", ""))
+                == self._selected_seismic_resource_id
+                and self._is_segy_resource(resource)
+            ),
+            None,
+        )
+
+    def selected_seismic_resource_id(self) -> str | None:
+        """Return the WorkArea SEG-Y volume currently selected for prediction."""
+        return self._selected_seismic_resource_id
+
+    def _on_seismic_source_changed(self, _index: int) -> None:
+        resource_id = self.seismic_source_combo.currentData()
+        if resource_id:
+            self.select_seismic_resource(str(resource_id))
+
+    def select_seismic_resource(self, resource_id: str) -> bool:
+        """Select and preview one catalogued WorkArea SEG-Y seismic volume."""
+        if self._project is None:
+            return False
+        resource = next(
+            (
+                item
+                for item in (getattr(self._project, "resources", None) or [])
+                if str(getattr(item, "id", "")) == str(resource_id)
+                and self._is_segy_resource(item)
+            ),
+            None,
+        )
+        if resource is None:
+            return False
+        self._selected_seismic_resource_id = str(resource.id)
+        self._showing_selected_source = True
+        combo_index = self.seismic_source_combo.findData(
+            self._selected_seismic_resource_id
+        )
+        if combo_index >= 0 and combo_index != self.seismic_source_combo.currentIndex():
+            self.seismic_source_combo.blockSignals(True)
+            self.seismic_source_combo.setCurrentIndex(combo_index)
+            self.seismic_source_combo.blockSignals(False)
+        loaded = self.view_panel.show_resource(resource, self._project)
+        self.control_panel.update_state(None, self.view_panel.volume_shape)
+        self._sync_workbench_context(None)
+        self.control_panel.set_controls_enabled(self.view_panel.is_view_ready())
+        return bool(loaded is not False)
 
     def _on_attribute(self, label: str) -> None:
         self.view_panel.set_attribute_label(label)
@@ -126,7 +248,8 @@ class SeismicPredictionPage(QWidget):
     def _on_view_ready(self, enabled: bool) -> None:
         self.control_panel.set_controls_enabled(enabled)
         if enabled:
-            self._sync_workbench_context(self._current_task())
+            task = None if self._showing_selected_source else self._current_task()
+            self._sync_workbench_context(task)
 
     def _sync_workbench_context(self, task) -> None:
         attribute = self.view_panel.attribute_label()
@@ -169,6 +292,7 @@ class SeismicPredictionPage(QWidget):
             workflow="seismic_facies",
             name_prefix="地震相预测",
             demo=False,
+            seismic_resource_id=self._selected_seismic_resource_id,
         )
 
     def _on_demo(self) -> None:
@@ -192,6 +316,7 @@ class SeismicPredictionPage(QWidget):
             workflow="seismic_facies",
             name_prefix="地震相预测(Demo)",
             demo=True,
+            seismic_resource_id=self._selected_seismic_resource_id,
         )
 
     def _start_inference(
@@ -202,11 +327,12 @@ class SeismicPredictionPage(QWidget):
         workflow: str,
         name_prefix: str,
         demo: bool,
+        seismic_resource_id: str | None = None,
     ) -> None:
         if self._inference_job.is_running:
             return
         self._inference_service = service
-        if demo:
+        if demo and not seismic_resource_id:
             input_ids = []
         else:
             from paleo_workbench.prediction.inference_service import (
@@ -216,7 +342,13 @@ class SeismicPredictionPage(QWidget):
 
             try:
                 input_ids = resolve_inputs_for_model(
-                    self._project, service, model_version_id, strict=True
+                    self._project,
+                    service,
+                    model_version_id,
+                    strict=True,
+                    resource_ids=[seismic_resource_id]
+                    if seismic_resource_id
+                    else None,
                 )
             except InputContractError as exc:
                 QMessageBox.warning(self, "地震预测", f"输入不满足模型契约: {exc}")
@@ -230,6 +362,9 @@ class SeismicPredictionPage(QWidget):
                 "workflow": workflow,
                 "name_prefix": name_prefix,
                 "demo": demo,
+                "seismic_resource_ids": [seismic_resource_id]
+                if seismic_resource_id
+                else [],
             },
         )
         worker = InferenceWorker(service, run.id)
@@ -296,6 +431,7 @@ class SeismicPredictionPage(QWidget):
                 or ""
             ),
             factor_map_ids=factor_ids,
+            seismic_resource_ids=list(params.get("seismic_resource_ids") or []),
             run_id=str(getattr(run, "id", "") or ""),
             output_version_id=str(out_vids[0]) if out_vids else "",
         )
@@ -317,6 +453,7 @@ class SeismicPredictionPage(QWidget):
                 task.model_metadata = dict(task.model_metadata or {})
                 task.model_metadata["link_failed"] = True
         self._tasks = list(self._project.prediction_tasks)
+        self._showing_selected_source = False
         self.update_state(self._tasks, project=self._project)
         self.prediction_updated.emit()
 

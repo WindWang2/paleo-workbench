@@ -6,7 +6,8 @@ and Qt-free; the result dict is JSON-serializable and is what the
 :mod:`paleo_workbench.prediction.inference_service` persists as the run's
 DERIVED output version.
 
-The registry ships TWO providers — both are honest about what they are:
+The registry ships local/demo providers plus an explicit GeoVizEngine online
+single-well provider:
 
 - :class:`DemoModelProvider` — ``demo_only=True``. Deterministic synthetic
   facies regions. NEVER presented as production output.
@@ -15,7 +16,7 @@ The registry ships TWO providers — both are honest about what they are:
   ``final_scientific_prediction=False`` + ``model_type="heuristic"`` with
   uncalibrated probabilities; random template output is ``is_mock=True``.
 
-:func:`ensure_default_models` registers both models in the catalog with
+:func:`ensure_default_models` registers the two local models in the catalog with
 ``status="demo"`` — the repo ships NO production model, so
 ``find_production_model`` returns None and the UI surfaces an honest
 "未配置生产模型" state instead of auto-running a mock.
@@ -23,6 +24,7 @@ The registry ships TWO providers — both are honest about what they are:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from paleo_workbench.catalog.models import Model, ModelVersion
@@ -30,10 +32,13 @@ from paleo_workbench.prediction.adapters import run_heuristic_facies
 
 DEMO_GENERATOR_VERSION = "demo-facies-v1"
 HEURISTIC_GENERATOR_VERSION = "local-asset-heuristic-v1"
+GEOVIZ_ONLINE_GENERATOR_VERSION = "inference-api-single-well-v1"
 
 # Stable logical model ids.
 MODEL_ID_DEMO = "demo-facies-v1"
 MODEL_ID_HEURISTIC = "facies-heuristic-v1"
+MODEL_ID_GEOVIZ_ONLINE = "geoviz-online-single-well"
+MODEL_VERSION_GEOVIZ_ONLINE = "inference-api-v20260823"
 
 # Capability shared by the seismic / well-log facies prediction pages.
 CAPABILITY_FACIES = "facies_prediction"
@@ -41,6 +46,7 @@ CAPABILITY_FACIES = "facies_prediction"
 # Provider names stored on ``Model.provider`` and used for dispatch.
 PROVIDER_DEMO = "demo"
 PROVIDER_LOCAL_ASSET = "local_asset"
+PROVIDER_GEOVIZ_ONLINE = "geoviz_online"
 
 
 class InferenceInputError(RuntimeError):
@@ -219,6 +225,160 @@ class LocalAssetProvider:
         }
 
 
+class GeoVizOnlineProvider:
+    """Authenticated external single-well facies service.
+
+    This is intentionally not a default production model: the user explicitly
+    invokes it from the well-log prediction page, which is also the point at
+    which the selected well's curve rows leave the workstation.  The provider
+    still runs through DataRun so success and failure are fully catalogued.
+    """
+
+    model_id = MODEL_ID_GEOVIZ_ONLINE
+    model_version = MODEL_VERSION_GEOVIZ_ONLINE
+    demo_only = False
+
+    def run(
+        self,
+        inputs: dict[str, dict[str, Any]],
+        parameters: dict[str, Any],
+    ) -> dict[str, Any]:
+        well_inputs = [
+            info
+            for info in inputs.values()
+            if str(info.get("asset_type") or "") == "well_log"
+        ]
+        if len(well_inputs) != 1:
+            raise InferenceInputError(
+                "线上测井预测一次只能接收一口已纳管的测井数据"
+            )
+        info = well_inputs[0]
+        path = Path(str(info.get("path") or ""))
+        if not path.is_file():
+            raise InferenceInputError("所选测井文件不可读取，无法发送线上测井预测")
+
+        from paleo_workbench.prediction.geoviz_online import (
+            online_api_key,
+            online_endpoint,
+            online_model_version_id,
+            online_poll_timeout_seconds,
+            run_single_well_prediction,
+            online_timeout_seconds,
+            online_wait_timeout_seconds,
+        )
+        from paleo_workbench.viz.well_log_load import load_well_log_from_path
+
+        well_log = load_well_log_from_path(str(path))
+        if well_log is None:
+            raise InferenceInputError("无法解析所选测井文件，无法发送线上测井预测")
+        well_name = str(getattr(well_log, "well_name", "") or path.stem)
+        endpoint = str(parameters.get("online_endpoint") or online_endpoint())
+        model_version_id = str(
+            parameters.get("online_model_version_id") or online_model_version_id()
+        )
+        remote = run_single_well_prediction(
+            well_name,
+            well_log,
+            api_key=online_api_key(),
+            base_url=endpoint,
+            model_version_id=model_version_id,
+            wait_timeout_seconds=parameters.get("online_wait_timeout_seconds")
+            or online_wait_timeout_seconds(),
+            request_timeout_seconds=parameters.get("online_request_timeout_seconds")
+            or online_timeout_seconds(),
+            poll_timeout_seconds=parameters.get("online_poll_timeout_seconds")
+            or online_poll_timeout_seconds(),
+        )
+        from paleo_workbench.prediction.postprocess import (
+            postprocess_prediction_regions,
+            resolve_formation_boundaries,
+        )
+
+        formation_boundaries, postprocess_diagnostics = resolve_formation_boundaries(
+            well_name,
+            well_log=well_log,
+            inputs=inputs,
+        )
+        regions, postprocess_summary = postprocess_prediction_regions(
+            list(remote["predicted_regions"]),
+            formation_boundaries=formation_boundaries,
+        )
+        postprocess_summary["formation_boundaries"] = formation_boundaries
+        if postprocess_diagnostics:
+            postprocess_summary["diagnostics"] = postprocess_diagnostics
+        api_summary = dict(remote.get("api_summary") or {})
+        class_counts = api_summary.get("classCounts")
+        if not isinstance(class_counts, dict):
+            class_counts = {}
+        remote_summary = {
+            "meanConfidence": api_summary.get("meanConfidence"),
+            "formationGroup": api_summary.get("formationGroup"),
+            "classCounts": {
+                str(name): int(count)
+                for name, count in class_counts.items()
+                if isinstance(name, str) and isinstance(count, (int, float))
+            },
+        }
+        # Consolidated intervals represent unequal depths. Preserve the
+        # probability summary's physical meaning rather than averaging a few
+        # long merged bands as though each were one original sample.
+        weighted_probabilities = []
+        for item in regions:
+            try:
+                thickness = max(
+                    0.0, float(item.get("bottom")) - float(item.get("top"))
+                )
+                probability = float(item.get("probability", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if thickness > 0.0:
+                weighted_probabilities.append((probability, thickness))
+        total_thickness = sum(thickness for _probability, thickness in weighted_probabilities)
+        mean_probability = round(
+            sum(
+                probability * thickness
+                for probability, thickness in weighted_probabilities
+            )
+            / total_thickness,
+            3,
+        ) if total_thickness else 0.0
+        return {
+            # ``PredictionTask``'s persisted adapter vocabulary calls all
+            # network-backed providers ``http``.
+            "adapter_kind": "http",
+            "generator_version": GEOVIZ_ONLINE_GENERATOR_VERSION,
+            "demo": False,
+            "source": "inference_service_online",
+            "result_summary": {
+                "predicted_regions": regions,
+                "is_mock": False,
+                "is_replaceable": False,
+                "final_scientific_prediction": False,
+                "demo": False,
+                "source": "inference_service_online",
+                "model_type": "inference_api_online",
+                "online_endpoint": remote["endpoint"],
+                "remote_model_version": remote["remote_model_version"],
+                "remote_model_name": remote.get("remote_model_name", ""),
+                "remote_model_display_version": remote.get(
+                    "remote_model_display_version", ""
+                ),
+                "remote_job_id": remote.get("job_id", ""),
+                "request_row_count": remote["request_row_count"],
+                "remote_summary": remote_summary,
+                "postprocess": postprocess_summary,
+            },
+            "probability_summary": {"mean_probability": mean_probability},
+            "evidence_contribution": [
+                {"name": "认证线上单井模型", "weight": 1.0},
+            ],
+            "review_areas": [
+                item for item in regions if float(item.get("probability", 1.0)) < 0.7
+            ],
+            "seed": int(parameters.get("seed", 0) or 0),
+        }
+
+
 def _is_file(path: Any) -> bool:
     try:
         from pathlib import Path
@@ -231,6 +391,7 @@ def _is_file(path: Any) -> bool:
 PROVIDER_BY_NAME: dict[str, type[ModelProvider]] = {
     PROVIDER_DEMO: DemoModelProvider,
     PROVIDER_LOCAL_ASSET: LocalAssetProvider,
+    PROVIDER_GEOVIZ_ONLINE: GeoVizOnlineProvider,
 }
 
 
@@ -272,6 +433,59 @@ def _existing_model(service, model_id: str) -> Model | None:
         return service.get_model(model_id)
     except Exception:
         return None
+
+
+def ensure_geoviz_online_model(service) -> ModelVersion:
+    """Register the explicitly-invoked authenticated online model if needed.
+
+    This is deliberately not promoted to the generic production-model slot:
+    no background workflow can send data remotely, and the well-log page
+    supplies an explicit action before a selected well is submitted.
+    """
+    from paleo_workbench.prediction.geoviz_online import (
+        DEFAULT_MODEL_VERSION_ID,
+        INFERENCE_API_BASE_URL,
+    )
+
+    model = _existing_model(service, MODEL_ID_GEOVIZ_ONLINE)
+    if model is None:
+        # Catalog only distinguishes demo and production states.  Keep this
+        # externally hosted test endpoint out of automatic production lookup;
+        # its explicit well-log action is still a real remote provider.
+        service.register_model(
+            model_id=MODEL_ID_GEOVIZ_ONLINE,
+            model_name="单井线上沉积相预测",
+            model_type="remote",
+            capability=CAPABILITY_FACIES,
+            provider=PROVIDER_GEOVIZ_ONLINE,
+            status="demo",
+            metadata={
+                "source": "inference_service_online",
+                "online": True,
+                "endpoint": INFERENCE_API_BASE_URL,
+                "explicit_only": True,
+            },
+        )
+    return _ensure_model_version(
+        service,
+        MODEL_ID_GEOVIZ_ONLINE,
+        MODEL_VERSION_GEOVIZ_ONLINE,
+        artifact_uri=INFERENCE_API_BASE_URL,
+        input_schema={
+            "required_asset_types": ["well_log"],
+            "required_curves": ["GR"],
+            "min_wells": 1,
+        },
+        runtime="http",
+        deterministic=False,
+        demo_only=False,
+        status="demo",
+        metadata={
+            "source": "inference_service_online",
+            "online": True,
+            "remote_model_version": DEFAULT_MODEL_VERSION_ID,
+        },
+    )
 
 
 def ensure_default_models(service) -> tuple[Model, Model, ModelVersion, ModelVersion]:

@@ -24,7 +24,7 @@ TYPE_LABELS: dict[str, str] = {
     "well_reference": "测井参考",
     "archive": "压缩包",
     "vector": "矢量",
-    "geojson": "GeoJSON",
+    "geojson": "GeoJSON矢量",
     "unknown": "未知",
 }
 

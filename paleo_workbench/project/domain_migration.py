@@ -30,6 +30,7 @@ from paleo_workbench.catalog.domain_binding import (
     BindingReport,
     bind_resources,
     bind_staged,
+    reconcile_reference_only_staged,
 )
 from paleo_workbench.project.domain import ensure_workarea, sync_workarea_with_coordinate
 
@@ -90,6 +91,14 @@ def migrate_project_to_workarea(
         # whose asset is not referenced by any existing link — idempotent
         # and free when everything is already linked.
         mapping = dict(asset_id_by_legacy or {})
+        if mapping and staged:
+            report.binding.merge(
+                reconcile_reference_only_staged(
+                    project,
+                    staged,
+                    asset_id_by_legacy=mapping,
+                )
+            )
         if mapping:
             linked_assets = {link.asset_id for link in getattr(project, "entity_asset_links", [])}
             pending_ids = {
@@ -107,10 +116,12 @@ def migrate_project_to_workarea(
                         else []
                     )
                     if pending:
-                        report.binding = bind_staged(
-                            project,
-                            pending,
-                            asset_id_by_legacy=mapping,
+                        report.binding.merge(
+                            bind_staged(
+                                project,
+                                pending,
+                                asset_id_by_legacy=mapping,
+                            )
                         )
                     else:
                         # Staged snapshot predates these resources (or was
@@ -123,12 +134,14 @@ def migrate_project_to_workarea(
                             )
                             if str(getattr(r, "id", "")) in pending_ids
                         ]
-                        report.binding = bind_resources(
-                            project,
-                            pending_resources,
-                            asset_id_by_legacy=mapping,
-                            path_resolver=_default_path_resolver(project_path),
-                            engine=engine,
+                        report.binding.merge(
+                            bind_resources(
+                                project,
+                                pending_resources,
+                                asset_id_by_legacy=mapping,
+                                path_resolver=_default_path_resolver(project_path),
+                                engine=engine,
+                            )
                         )
                 except Exception as exc:
                     report.binding.issues.append(f"补挂载失败: {exc.__class__.__name__}: {exc}")

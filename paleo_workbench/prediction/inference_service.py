@@ -67,7 +67,12 @@ def _input_info(service, version_id: str) -> dict[str, Any]:
     }
 
 
-def resolve_prediction_inputs(project: ProjectDocument, service) -> list[str]:
+def resolve_prediction_inputs(
+    project: ProjectDocument,
+    service,
+    *,
+    resource_ids: list[str] | tuple[str, ...] | set[str] | None = None,
+) -> list[str]:
     """Version ids of a project's well-log/seismic resources + factor tasks.
 
     Mirrors the catalog legacy bridge: an asset whose id (or
@@ -83,16 +88,51 @@ def resolve_prediction_inputs(project: ProjectDocument, service) -> list[str]:
 
     input_ids: list[str] = []
     seen: set[str] = set()
+    selected_ids = (
+        {str(resource_id) for resource_id in resource_ids if str(resource_id)}
+        if resource_ids is not None
+        else None
+    )
     for resource in project.resources:
+        if selected_ids is not None and str(getattr(resource, "id", "")) not in selected_ids:
+            continue
         if getattr(resource, "type", "") not in ("well_log", "seismic"):
             continue
-        version_id = _resolve_resource_version_id(service, resource.id)
+        version_id = _resolve_resource_version_id(service, resource)
         if version_id is not None and version_id not in seen:
             seen.add(version_id)
             input_ids.append(version_id)
-    task_ids = [t.id for t in project.factor_map_tasks]
-    for version_id in _versions_for_domain_tasks(task_ids, catalog=_ServiceRunView(service)):
-        if version_id not in seen:
+    # An explicit resource scope is a single-well request from the prediction
+    # page. Do not silently add unrelated factor-map versions to that run.
+    if selected_ids is None:
+        task_ids = [t.id for t in project.factor_map_tasks]
+        for version_id in _versions_for_domain_tasks(
+            task_ids, catalog=_ServiceRunView(service)
+        ):
+            if version_id not in seen:
+                seen.add(version_id)
+                input_ids.append(version_id)
+    return input_ids
+
+
+def resolve_prediction_postprocess_inputs(
+    project: ProjectDocument,
+    service,
+) -> list[str]:
+    """Return catalogued per-well stratification inputs for prediction output.
+
+    The model contract remains intentionally limited to its declared well-log
+    input.  These optional versions provide reproducible formation boundaries
+    for the persisted, local post-processing step after a remote prediction
+    completes.
+    """
+    input_ids: list[str] = []
+    seen: set[str] = set()
+    for resource in project.resources:
+        if getattr(resource, "type", "") != "well_stratification":
+            continue
+        version_id = _resolve_resource_version_id(service, resource)
+        if version_id is not None and version_id not in seen:
             seen.add(version_id)
             input_ids.append(version_id)
     return input_ids
@@ -104,20 +144,69 @@ def resolve_inputs_for_model(
     model_version_id: str,
     *,
     strict: bool = True,
+    resource_ids: list[str] | tuple[str, ...] | set[str] | None = None,
 ) -> list[str]:
     """Schema-driven input resolution for a registered model version (Stage 13)."""
     from paleo_workbench.prediction.input_contract import resolve_model_inputs
 
     model_version = service.get_model_version_by_id(model_version_id)
-    return resolve_model_inputs(project, service, model_version, strict=strict)
+    return resolve_model_inputs(
+        project,
+        service,
+        model_version,
+        strict=strict,
+        resource_ids=resource_ids,
+    )
 
 
-def _resolve_resource_version_id(service, resource_id: str) -> str | None:
-    """Adapter-equivalent legacy bridge over the service document."""
+def _resolve_resource_version_id(service, resource_or_id) -> str | None:
+    """Resolve a project resource to its current catalog version.
+
+    The ordinary identity path is the catalog asset id / one-to-one legacy
+    bridge.  A reimport may reuse an existing immutable catalog asset whose
+    legacy bridge belongs to the first import, so newer ResourceItems also
+    carry an explicit ``catalog_asset_id``.  Older project documents predate
+    that field; for those, the catalog's canonical source URI provides a
+    deterministic compatibility lookup.
+    """
+    resource_id = str(getattr(resource_or_id, "id", resource_or_id) or "")
+    summary = getattr(resource_or_id, "parsed_summary", None) or {}
+    catalog_asset_id = str(summary.get("catalog_asset_id") or "")
+
     for asset in service.document.assets:
-        if asset.id == resource_id or asset.legacy_resource_id == resource_id:
+        if (
+            asset.id == resource_id
+            or asset.legacy_resource_id == resource_id
+            or (catalog_asset_id and asset.id == catalog_asset_id)
+        ):
             if asset.current_version_id is not None:
                 return asset.current_version_id
+
+    raw_path = str(getattr(resource_or_id, "path", "") or "")
+    if not raw_path:
+        return None
+    candidate = Path(raw_path).expanduser()
+    if not candidate.is_absolute():
+        return None
+    source_uri = candidate.resolve(strict=False).as_posix()
+    resource_type = str(getattr(resource_or_id, "type", "") or "")
+    matches: list[str] = []
+    for asset in service.document.assets:
+        if resource_type and str(getattr(asset, "type", "") or "") != resource_type:
+            continue
+        version_id = asset.current_version_id
+        if version_id is None:
+            continue
+        try:
+            version = service.get_version(version_id)
+        except Exception:
+            continue
+        if getattr(version, "trashed", False):
+            continue
+        if str(getattr(version, "source_uri", "") or "") == source_uri:
+            matches.append(version.id)
+    if len(matches) == 1:
+        return matches[0]
     return None
 
 
@@ -400,6 +489,8 @@ def materialize_prediction_task(
     workflow: str,
     target_horizon: str = "",
     factor_map_ids: list[str] | None = None,
+    well_log_resource_ids: list[str] | None = None,
+    seismic_resource_ids: list[str] | None = None,
     run_id: str = "",
     output_version_id: str = "",
 ) -> PredictionTask:
@@ -433,6 +524,14 @@ def materialize_prediction_task(
         name=f"{name_prefix} · {horizon or 'demo'}",
         adapter_kind=adapter_kind,
         input_factor_map_ids=list(factor_map_ids or []),
+        input_refs={
+            "well_log_resource_ids": list(
+                dict.fromkeys(str(resource_id) for resource_id in (well_log_resource_ids or []))
+            ),
+            "seismic_resource_ids": list(
+                dict.fromkeys(str(resource_id) for resource_id in (seismic_resource_ids or []))
+            ),
+        },
         model_metadata={
             "workflow": workflow,
             "target_horizon": horizon,

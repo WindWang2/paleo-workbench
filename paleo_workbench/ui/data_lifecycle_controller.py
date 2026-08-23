@@ -426,6 +426,7 @@ class DataLifecycleController:
         removed_count = 0
         trashed_count = 0
         target_ids = {getattr(it, "id", None) for it in items if getattr(it, "id", None)}
+        domain_asset_ids = {str(item_id) for item_id in target_ids if item_id}
 
         # Catalog-only rows (no legacy companion) trash directly in the
         # catalog. They surface as AssetView rows whose raw_asset is a Core
@@ -441,6 +442,7 @@ class DataLifecycleController:
                 try:
                     service.trash_asset(unwrapped.id, reason="移出项目")
                     trashed_count += 1
+                    domain_asset_ids.add(str(unwrapped.id))
                     target_ids.discard(unwrapped.id)
                 except Exception as exc:
                     page._set_action_status(f"移入回收站失败，未移除: {exc}")
@@ -457,6 +459,7 @@ class DataLifecycleController:
             try:
                 service.trash_asset(ref.asset_id, reason="移出项目")
                 trashed_count += 1
+                domain_asset_ids.add(str(ref.asset_id))
             except Exception as exc:
                 # Never leave a ghost: abort the whole removal visibly.
                 page._set_action_status(f"移入回收站失败，未移除: {exc}")
@@ -476,8 +479,19 @@ class DataLifecycleController:
         removed_count += before_art - len(page.project.export_artifacts)
 
         if removed_count > 0 or trashed_count > 0:
+            from paleo_workbench.project.domain import (
+                remove_asset_links_and_prune_reference_wells,
+            )
+
+            removed_links, removed_wells = remove_asset_links_and_prune_reference_wells(
+                page.project,
+                domain_asset_ids,
+            )
             page._set_selected_asset(None)
-            page._refresh()
+            if removed_links or removed_wells:
+                page.refresh_domain_views()
+            else:
+                page._refresh()
             if trashed_count:
                 page._set_action_status(f"已移至回收站 ({trashed_count} 项)")
             else:
@@ -1397,7 +1411,9 @@ class DataLifecycleController:
     # Import → catalog registration
     # ------------------------------------------------------------------ #
 
-    def register_imported_resources(self, resources: list[ResourceItem]) -> None:
+    def register_imported_resources(
+        self, resources: list[ResourceItem]
+    ) -> dict[str, str]:
         """Register imported resources as catalog INPUT versions (RAW/EXTERNAL)
         with the legacy bridge so downstream runs can resolve them. Best-effort:
         the catalog seam must never break the import path. Each resource is
@@ -1405,8 +1421,15 @@ class DataLifecycleController:
 
         Failures are never silent: each one is logged and summarized on
         ``last_registration_failures`` (reset per call) so the import status
-        surface can report how many registrations were lost."""
+        surface can report how many registrations were lost.
+
+        Returns the exact ``ResourceItem.id → DataAsset.id`` values produced by
+        this registration pass.  A reused catalog asset may retain an older
+        legacy bridge, so callers must not try to reconstruct this result from
+        the catalog's one-to-one legacy index.
+        """
         self.last_registration_failures = []
+        registered_asset_ids: dict[str, str] = {}
         try:
             from paleo_workbench.catalog.lifecycle import register_resource_input
         except Exception as exc:
@@ -1416,7 +1439,7 @@ class DataLifecycleController:
             logging.getLogger(__name__).warning(
                 "import catalog registration unavailable: %s", exc
             )
-            return
+            return registered_asset_ids
         # Bulk path (audit #849-3): register every file inside ONE batch so
         # the canonical document is written (serialize + fsync) once, not once
         # per file (O(N²) bytes on large folders). Per-resource failures are
@@ -1441,7 +1464,9 @@ class DataLifecycleController:
         try:
             for resource in resources:
                 try:
-                    register_resource_input(resource)
+                    ref = register_resource_input(resource)
+                    if ref is not None:
+                        registered_asset_ids[str(resource.id)] = str(ref.asset_id)
                 except Exception as exc:
                     failure = f"{resource.name} ({resource.id}): {exc}"
                     self.last_registration_failures.append(failure)
@@ -1455,7 +1480,9 @@ class DataLifecycleController:
                 try:
                     batch.__exit__(None, None, None)
                 except Exception as exc:
+                    registered_asset_ids.clear()
                     self.last_registration_failures.append(f"批提交失败: {exc}")
                     logging.getLogger(__name__).warning(
                         "import catalog batch commit failed: %s", exc
                     )
+        return registered_asset_ids

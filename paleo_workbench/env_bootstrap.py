@@ -12,10 +12,14 @@ entry point and other ``paleo_workbench`` imports.
 
 from __future__ import annotations
 
+import os
+import re
 import sys
 from pathlib import Path
 
 _BOOTSTRAPPED = False
+_LOCAL_ENV_LOADED = False
+_ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 # Package roots only — same as pyproject.toml pytest.pythonpath.
 # The bare geo-viz-engine root is inserted separately (and skipped when it
@@ -55,6 +59,53 @@ def _geoviz_importable() -> bool:
         return True
     except ImportError:
         return False
+
+
+def load_local_env() -> bool:
+    """Load the repository-local ignored ``.env`` file once, if it exists.
+
+    Shell/desktop-launcher environment variables always win. The parser only
+    accepts ``KEY=value`` lines, avoiding a runtime dependency and never
+    executing shell syntax from a local configuration file.
+    """
+    global _LOCAL_ENV_LOADED
+    if _LOCAL_ENV_LOADED:
+        return False
+    _LOCAL_ENV_LOADED = True
+
+    root = _repo_root()
+    path = root / ".env" if root is not None else None
+    if path is None or not path.is_file():
+        return False
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+
+    loaded = False
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        if "=" not in line:
+            continue
+        key, raw_value = line.split("=", 1)
+        key = key.strip()
+        if not _ENV_KEY_RE.fullmatch(key) or key in os.environ:
+            continue
+        os.environ[key] = _dotenv_value(raw_value)
+        loaded = True
+    return loaded
+
+
+def _dotenv_value(value: str) -> str:
+    """Decode the small, non-executing subset of dotenv values we accept."""
+    text = str(value).strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'}:
+        return text[1:-1]
+    return text.split(" #", 1)[0].rstrip()
 
 
 def ensure_geoviz_on_path() -> bool:

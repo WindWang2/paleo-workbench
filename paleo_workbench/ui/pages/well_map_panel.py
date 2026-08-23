@@ -97,4 +97,11 @@ class WellMapPanel(QFrame):
         except Exception:
             pass
         wells = getattr(project, "wells", None) or []
-        self.count_label.setText(f"{len(wells)} 口井" if wells else "")
+        reference_count = sum(
+            1 for well in wells if getattr(well, "spatial_scope", "workarea") == "reference"
+        )
+        workarea_count = len(wells) - reference_count
+        if reference_count:
+            self.count_label.setText(f"{workarea_count} 口测区井 · {reference_count} 口参考井")
+        else:
+            self.count_label.setText(f"{workarea_count} 口井" if workarea_count else "")

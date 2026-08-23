@@ -254,6 +254,7 @@ RESOURCE_TYPE_DISPLAY_LABELS = {
     "fault": "断层",
     "raster": "栅格",
     "vector": "矢量",
+    "geojson": "GeoJSON矢量",
     # Catalog-produced scientific products (catalog-only rows; keys follow
     # the ``kind`` values business modules register).
     "factor_map": "因子图",

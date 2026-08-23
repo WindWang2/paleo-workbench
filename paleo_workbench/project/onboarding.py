@@ -55,6 +55,10 @@ def boundary_from_wells(doc: ProjectDocument) -> list[list[float]]:
     """
     points: list[tuple[float, float]] = []
     for well in getattr(doc, "wells", None) or []:
+        # Regional/reference wells provide context but cannot define or expand
+        # the target WorkArea boundary.
+        if getattr(well, "spatial_scope", "workarea") == "reference":
+            continue
         x = getattr(well, "project_x", None)
         y = getattr(well, "project_y", None)
         if x is None or y is None:

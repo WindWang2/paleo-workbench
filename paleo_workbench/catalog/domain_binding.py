@@ -23,6 +23,8 @@ from paleo_workbench.project.domain import (
     CoordinateStatus,
     SeismicSurveyEntity,
     WellEntity,
+    asset_ids_for_entity,
+    classify_well_spatial_scope,
     ensure_workarea,
     normalize_well_name,
     resolve_well,
@@ -183,6 +185,30 @@ def extract_wells_from_dat(
     return _payload_wells(payload), warnings
 
 
+def extract_wells_from_xml(
+    path: Path,
+) -> tuple[list[WellExtract], list[str]]:
+    """Parse a completed XML well-location delivery without a DAT engine path."""
+    try:
+        from paleo_workbench.resources.well_location_xml import (
+            extract_well_locations_xml,
+        )
+    except Exception as exc:  # pragma: no cover - import boundary only
+        return [], [f"XML 井位解析器不可用: {exc.__class__.__name__}"]
+    records, warnings = extract_well_locations_xml(path)
+    return [
+        WellExtract(
+            name=record.name,
+            x=record.x,
+            y=record.y,
+            z=record.z,
+            uwi=record.uwi,
+            source_crs=record.source_crs,
+        )
+        for record in records
+    ], warnings
+
+
 def extract_survey_from_segy(path: Path, *, crs: str = "") -> tuple[SurveyExtract | None, list[str]]:
     """Header-only SEG-Y survey geometry extraction (no trace decode)."""
     try:
@@ -298,6 +324,8 @@ def bind_well_extracts(
     extracts: Iterable[WellExtract],
     *,
     asset_id: str | None,
+    spatial_scope: str | None = None,
+    asset_role: str = "well_head",
 ) -> BindingReport:
     """Resolve/create Well entities for extracted rows and link the asset.
 
@@ -309,11 +337,19 @@ def bind_well_extracts(
 
     overrides = well_identity_overrides(project)
     for extract in extracts:
+        candidate_wells = None
+        if spatial_scope is not None:
+            candidate_wells = [
+                well
+                for well in project.wells
+                if str(getattr(well, "spatial_scope", "") or "") == spatial_scope
+            ]
         outcome = resolve_well(
             project,
             name=extract.name,
             uwi=extract.uwi,
             overrides=overrides,
+            candidate_wells=candidate_wells,
         )
         if outcome.ambiguous:
             report.ambiguous_assets += 1
@@ -350,13 +386,19 @@ def bind_well_extracts(
                 well.uwi = extract.uwi
 
         _refresh_well_geometry(well, extract, project)
+        if spatial_scope is not None:
+            well.spatial_scope = spatial_scope
+        else:
+            inferred_scope = classify_well_spatial_scope(project, well)
+            if inferred_scope is not None:
+                well.spatial_scope = inferred_scope
         if asset_id is not None:
             link, created = upsert_entity_asset_link(
                 project,
                 entity_type="well",
                 entity_id=well.id,
                 asset_id=asset_id,
-                role="well_head",
+                role=asset_role,
                 is_primary=True,
             )
             if created:
@@ -475,6 +517,10 @@ class StagedResource:
     resource_id: str
     resource_name: str
     wells: list[WellExtract] = field(default_factory=list)
+    # XML well files are regional/reference deliveries by product contract.
+    # Preserve that source semantic across the worker → GUI binding boundary.
+    well_spatial_scope: str | None = None
+    well_asset_role: str = "well_head"
     survey: SurveyExtract | None = None
     # Geological-entity hint (kind, entity_kind) for interpretation-type
     # resources (horizons/tops): no IO needed, just identity bookkeeping.
@@ -507,17 +553,24 @@ def stage_resources(
             continue
         item = StagedResource(resource_id=str(resource.id), resource_name=str(resource.name))
         path = path_resolver(str(resource.path))
+        if path.suffix.lower() == ".xml" and (
+            rtype == WELL_HEAD_TYPE or rtype in WELL_LOG_TYPES
+        ):
+            item.well_spatial_scope = "reference"
         if not path.is_file():
             item.issues.append(f"源文件不存在，跳过元数据解析: {item.resource_name}")
             staged.append(item)
             continue
         if rtype == WELL_HEAD_TYPE:
-            extracts, warnings = extract_wells_from_dat(
-                resource,
-                path=path,
-                comparison_crs=project_crs,
-                engine=engine,
-            )
+            if path.suffix.lower() == ".xml":
+                extracts, warnings = extract_wells_from_xml(path)
+            else:
+                extracts, warnings = extract_wells_from_dat(
+                    resource,
+                    path=path,
+                    comparison_crs=project_crs,
+                    engine=engine,
+                )
             item.wells = extracts
             item.issues.extend(warnings)
         elif rtype in SEISMIC_TYPES:
@@ -525,14 +578,30 @@ def stage_resources(
             item.survey = extract
             item.issues.extend(warnings)
         elif rtype in WELL_LOG_TYPES:
+            item.well_asset_role = "well_log"
             well_name = ""
-            try:
-                from geoviz import inspect_las_file  # noqa: PLC0415
+            if path.suffix.lower() == ".xml":
+                try:
+                    from geoviz import load_xml_preview  # noqa: PLC0415
 
-                header = inspect_las_file(str(path))
-                well_name = str(getattr(header, "well_name", "") or "").strip()
-            except Exception:
-                well_name = ""
+                    data = load_xml_preview(
+                        str(path), max_curves=30, max_samples=100_000
+                    )
+                    well_name = str(
+                        getattr(data, "well_name", "") or ""
+                    ).strip()
+                except Exception:
+                    well_name = ""
+            else:
+                try:
+                    from geoviz import inspect_las_file  # noqa: PLC0415
+
+                    header = inspect_las_file(str(path))
+                    well_name = str(
+                        getattr(header, "well_name", "") or ""
+                    ).strip()
+                except Exception:
+                    well_name = ""
             if not well_name:
                 # Low-confidence auxiliary signal only (§22): LAS engines
                 # themselves fall back to the stem, so this mirrors existing
@@ -604,11 +673,88 @@ def bind_staged(
         asset_id: str | None = asset_id_by_legacy.get(item.resource_id)
         report.issues.extend(item.issues)
         if item.wells:
-            report.merge(bind_well_extracts(project, item.wells, asset_id=asset_id))
+            report.merge(
+                bind_well_extracts(
+                    project,
+                    item.wells,
+                    asset_id=asset_id,
+                    spatial_scope=item.well_spatial_scope,
+                    asset_role=item.well_asset_role,
+                )
+            )
         elif item.survey is not None:
             report.merge(bind_survey_extract(project, item.survey, asset_id=asset_id))
         elif item.geological is not None:
             report.merge(_bind_geological(project, item, asset_id=asset_id))
+    return report
+
+
+def reconcile_reference_only_staged(
+    project: Any,
+    staged: Iterable[StagedResource],
+    *,
+    asset_id_by_legacy: dict[str, str],
+) -> BindingReport:
+    """Repair XML wells persisted before the reference-only import contract.
+
+    An old XML-only well can be safely reclassified in place. If the same
+    entity also owns non-XML assets, preserve that WorkArea well, detach only
+    the XML link, and let scoped binding create/reuse a separate reference
+    well. Re-running is idempotent.
+    """
+    report = BindingReport()
+    items = [
+        item for item in staged
+        if item.well_spatial_scope == "reference"
+        and item.resource_id in asset_id_by_legacy
+    ]
+    reference_asset_ids = {
+        asset_id_by_legacy[item.resource_id] for item in items
+    }
+    if not reference_asset_ids:
+        return report
+    wells_by_id = {
+        well.id: well for well in getattr(project, "wells", None) or []
+    }
+    for item in items:
+        asset_id = asset_id_by_legacy[item.resource_id]
+        linked_well_ids = {
+            link.entity_id
+            for link in getattr(project, "entity_asset_links", None) or []
+            if link.entity_type == "well" and link.asset_id == asset_id
+        }
+        for well_id in linked_well_ids:
+            well = wells_by_id.get(well_id)
+            if well is None:
+                continue
+            other_assets = (
+                set(asset_ids_for_entity(project, "well", well_id))
+                - reference_asset_ids
+            )
+            if other_assets:
+                project.entity_asset_links[:] = [
+                    link
+                    for link in project.entity_asset_links
+                    if not (
+                        link.entity_type == "well"
+                        and link.entity_id == well_id
+                        and link.asset_id == asset_id
+                    )
+                ]
+            elif well.spatial_scope != "reference":
+                well.spatial_scope = "reference"
+                _stamp(well)
+                report.wells_updated += 1
+        if item.wells:
+            report.merge(
+                bind_well_extracts(
+                    project,
+                    item.wells,
+                    asset_id=asset_id,
+                    spatial_scope="reference",
+                    asset_role=item.well_asset_role,
+                )
+            )
     return report
 
 

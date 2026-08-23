@@ -56,6 +56,28 @@ def test_data_page_assembles_management_panels(qtbot):
     assert page.inspector_panel is not None
 
 
+def test_import_file_dialog_explicitly_offers_geojson(qtbot, monkeypatch):
+    page = DataPage(project=ProjectDocument.new("Demo"))
+    qtbot.addWidget(page)
+    captured = {}
+
+    def fake_get_open_file_names(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return [], ""
+
+    monkeypatch.setattr(
+        data_page_mod.QFileDialog,
+        "getOpenFileNames",
+        fake_get_open_file_names,
+    )
+
+    assert page._choose_import_files() == []
+    filter_text = captured["kwargs"].get("filter") or captured["args"][3]
+    assert "GeoJSON" in filter_text
+    assert "*.geojson" in filter_text
+
+
 def test_shutdown_wait_budget_never_below_test_budget():
     """The production close wait budget must not be smaller than the pytest
     branch (C18).

@@ -4,6 +4,7 @@ from paleo_workbench.prediction.adapters import MockPredictionAdapter
 from paleo_workbench.project.models import PredictionTask, ProjectDocument, ResourceItem
 from paleo_workbench.ui.pages.well_log_canvas_panel import WellLogCanvasPanel
 from paleo_workbench.viz.models import VizPayload
+from paleo_workbench.viz.prediction_helpers import regions_to_depth_intervals
 from paleo_workbench.viz import welllog_engine_adapter as engine_adapter
 
 def test_well_log_canvas_panel_empty_state(qtbot):
@@ -51,6 +52,47 @@ def test_well_log_canvas_unbound_uses_mock(qtbot, monkeypatch):
     assert panel.well_log_data.well_name == "m"
 
 
+def test_legacy_prediction_canvas_adds_geoviz_prediction_tracks(qtbot, monkeypatch):
+    monkeypatch.setenv("PALEO_USE_WELLLOG_ENGINE", "0")
+    task = PredictionTask(
+        name="m",
+        status="complete",
+        result_summary={
+            "predicted_regions": [
+                {"top": 0.0, "bottom": 50.0, "facies": "砂体", "probability": 0.81},
+                {"top": 50.0, "bottom": 100.0, "facies": "泥岩", "probability": 0.64},
+            ]
+        },
+    )
+    panel = WellLogCanvasPanel()
+    qtbot.addWidget(panel)
+
+    panel.update_state(task)
+
+    labels = [getattr(track, "label", "") for track in panel.canvas.tracks]
+    assert "AI预测相" in labels
+    assert "AI预测置信度" in labels
+
+
+def test_legacy_inference_samples_are_deoverlapped_for_saved_results():
+    """Existing ±0.5 m API rows must render as adjacent sample cells."""
+    intervals = regions_to_depth_intervals(
+        [
+            {"region_id": "inference_api_1", "top": 999.5, "bottom": 1000.5, "facies": "分流间湾"},
+            {"region_id": "inference_api_2", "top": 999.625, "bottom": 1000.625, "facies": "分流河道"},
+            {"region_id": "inference_api_3", "top": 999.75, "bottom": 1000.75, "facies": "分流间湾"},
+        ],
+        top=999.0,
+        bottom=1001.0,
+    )
+
+    assert [(item["top"], item["bottom"]) for item in intervals] == [
+        (999.938, 1000.062),
+        (1000.062, 1000.188),
+        (1000.188, 1000.312),
+    ]
+
+
 def test_well_log_canvas_uses_bound_las(qtbot, monkeypatch):
     project = ProjectDocument.new("Bound")
     resource = ResourceItem(
@@ -95,11 +137,17 @@ def test_well_log_canvas_uses_bound_las(qtbot, monkeypatch):
         lambda: panel.well_log_data is not None and panel.has_bound_las(),
         timeout=10_000,
     )
-    # Merge prediction facies onto a copy of LAS data (identity not preserved).
+    # Prediction remains in its two dedicated tracks.  It must not be
+    # reinterpreted as a source lithology column: a remote “分流河道” label
+    # would otherwise manufacture a yellow sandstone interval in this panel.
     assert panel.well_log_data is not None
     assert panel.well_log_data.well_name == "from-adapter"
     assert panel.has_bound_las() is True
-    assert len(panel.well_log_data.lithology) >= 1
+    assert list(panel.well_log_data.lithology) == []
+    labels = [getattr(track, "label", "") for track in panel.canvas.tracks]
+    assert "岩性" not in labels
+    assert "AI预测相" in labels
+    assert "AI预测置信度" in labels
     assert panel.stack.currentWidget() is panel.canvas_scroll
     assert panel.empty_label.isHidden()
     panel.shutdown()

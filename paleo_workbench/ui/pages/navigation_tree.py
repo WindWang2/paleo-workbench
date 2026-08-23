@@ -4,7 +4,7 @@ Top-level order (IA 3.0, when a WorkArea exists):
 
 - 全部数据 / 回收站
 - 工区概览 (project overview panel node)
-- 井 (per-well leaves → canonical Well.id entity filters;
+- 井 / 其他参考井 (per-well leaves → canonical Well.id entity filters;
   each well expands to its concrete linked data files)
 - 地震 (per-survey leaves)
 - 地质解释 / 辅助资料 / 工作数据 / 成果
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import QMenu, QTreeWidget, QTreeWidgetItem
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.data_view_models import DataStage, IntegrityState
 from paleo_workbench.ui.pages.filter_index import (
+    AUXILIARY_TYPES,
     CATEGORIES,
     CatalogCounts,
     FilterQuery,
@@ -40,6 +41,8 @@ TYPE_LEAVES = [
     ("影像", "image_reference"),
     ("参考图", "reference_map"),
     ("测井参考", "well_reference"),
+    ("GeoJSON矢量", "geojson"),
+    ("矢量", "vector"),
     ("未知", "unknown"),
 ]
 
@@ -77,9 +80,6 @@ _ENTITY_GROUPS = {
     "seismic_survey": ("地震", "🌊"),
 }
 
-# Non-linked auxiliary material types shown under 辅助资料.
-AUXILIARY_TYPES = {"document", "image_reference", "reference_map", "tabular"}
-
 # Per-well file-leaf cap: keeps tree allocation bounded when one well has
 # an unusual number of linked files (same spirit as MAX_ENTITY_CHILDREN).
 MAX_WELL_FILE_CHILDREN = 30
@@ -95,6 +95,8 @@ class NavigationTree(QTreeWidget):
     filter_query_changed = Signal(object)  # FilterQuery
     # Right-click "管理标签" on the 标签 group header (Tag Manager entry).
     manage_tags_requested = Signal()
+    # Right-click on one concrete WorkArea/reference well row.
+    delete_well_requested = Signal(str)  # canonical Well.id
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -116,6 +118,7 @@ class NavigationTree(QTreeWidget):
         self._entity_counts: dict[tuple[str, str], int] = {}
         self._overview_item: QTreeWidgetItem | None = None
         self._well_group_item: QTreeWidgetItem | None = None
+        self._reference_well_group_item: QTreeWidgetItem | None = None
         self._survey_group_item: QTreeWidgetItem | None = None
         self._geo_group_item: QTreeWidgetItem | None = None
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -127,6 +130,7 @@ class NavigationTree(QTreeWidget):
         self.clear()
         self._overview_item = None
         self._well_group_item = None
+        self._reference_well_group_item = None
         self._survey_group_item = None
         self._geo_group_item = None
 
@@ -155,12 +159,28 @@ class NavigationTree(QTreeWidget):
 
         for entity_type, (label, icon) in _ENTITY_GROUPS.items():
             group = QTreeWidgetItem(self, [f"{icon} {label}"])
-            group.setFlags(group.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            group.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                FilterQuery(node_type=ENTITY_GROUP_NODE, node_value=entity_type),
+            )
             group.setData(0, Qt.ItemDataRole.UserRole + 1, label)
             if entity_type == "well":
                 self._well_group_item = group
             else:
                 self._survey_group_item = group
+
+        reference_group = QTreeWidgetItem(self, ["📍 其他参考井"])
+        reference_group.setData(
+            0,
+            Qt.ItemDataRole.UserRole,
+            FilterQuery(
+                node_type=ENTITY_GROUP_NODE,
+                node_value="reference_well",
+            ),
+        )
+        reference_group.setData(0, Qt.ItemDataRole.UserRole + 1, "其他参考井")
+        self._reference_well_group_item = reference_group
 
         # 2b. 地质解释 (dynamic children from geological_entities) /
         # 辅助资料 / 工作数据 / 成果 smart views.
@@ -193,7 +213,13 @@ class NavigationTree(QTreeWidget):
             Qt.ItemDataRole.UserRole,
             FilterQuery(node_type="stage", node_value=DataStage.OUTPUT.value),
         )
-        output_item.setData(0, Qt.ItemDataRole.UserRole + 1, "成果")
+        # Keep the legacy signal on the canonical lifecycle vocabulary.  A
+        # human label such as “成果” is not a legacy category and would
+        # otherwise overwrite the correct ``stage=output`` filter with zero
+        # rows after the FilterQuery signal has already selected its results.
+        output_item.setData(
+            0, Qt.ItemDataRole.UserRole + 1, DataStage.OUTPUT.value
+        )
 
         # 3. 生命阶段 (Group)
         stage_group = QTreeWidgetItem(self, ["生命阶段"])
@@ -271,7 +297,11 @@ class NavigationTree(QTreeWidget):
 
     def _rebuild_entity_groups(self) -> None:
         project = self._domain_project
-        wells = list(getattr(project, "wells", None) or []) if project else []
+        all_wells = list(getattr(project, "wells", None) or []) if project else []
+        from paleo_workbench.project.domain import is_reference_well
+
+        wells = [well for well in all_wells if not is_reference_well(well)]
+        reference_wells = [well for well in all_wells if is_reference_well(well)]
         surveys = list(getattr(project, "seismic_surveys", None) or []) if project else []
         links = list(getattr(project, "entity_asset_links", None) or []) if project else []
 
@@ -290,14 +320,14 @@ class NavigationTree(QTreeWidget):
                     unresolved_wells.add(link.entity_id)
             elif link.entity_type == "seismic_survey":
                 survey_counts[link.entity_id] = survey_counts.get(link.entity_id, 0) + 1
-        for well in wells:
+        for well in all_wells:
             from paleo_workbench.project.domain import coordinate_status_is_flagged
 
             if coordinate_status_is_flagged(well.coordinate_status):
                 invalid_coord_wells.add(well.id)
 
         self._entity_counts = {}
-        for well in wells:
+        for well in all_wells:
             self._entity_counts[("well", well.id)] = well_counts.get(well.id, 0)
         for survey in surveys:
             self._entity_counts[("seismic_survey", survey.id)] = survey_counts.get(
@@ -333,6 +363,7 @@ class NavigationTree(QTreeWidget):
 
         for group, entities, entity_type in (
             (self._well_group_item, wells, "well"),
+            (self._reference_well_group_item, reference_wells, "reference_well"),
             (self._survey_group_item, surveys, "seismic_survey"),
         ):
             if group is None:
@@ -344,7 +375,11 @@ class NavigationTree(QTreeWidget):
                 if query and query.node_type == ENTITY_NODE:
                     selected_key = query.node_value
             group.takeChildren()
-            icon = _ENTITY_GROUPS[entity_type][1]
+            icon = (
+                "📍"
+                if entity_type == "reference_well"
+                else _ENTITY_GROUPS[entity_type][1]
+            )
             ordered = sorted(entities, key=lambda item: (item.name, item.id))
             rendered = ordered[:MAX_ENTITY_CHILDREN]
             for entity in rendered:
@@ -353,7 +388,8 @@ class NavigationTree(QTreeWidget):
                     flags = " ⚠"
                 elif entity.id in invalid_coord_wells:
                     flags = " ⚠坐标"
-                count = self._entity_counts.get((entity_type, entity.id), 0)
+                count_key = "well" if entity_type == "reference_well" else entity_type
+                count = self._entity_counts.get((count_key, entity.id), 0)
                 child = QTreeWidgetItem(
                     group, [f"{icon} {entity.name}{flags} {count}"]
                 )
@@ -364,7 +400,7 @@ class NavigationTree(QTreeWidget):
                 )
                 child.setData(0, Qt.ItemDataRole.UserRole + 1, f"entity:{entity.id}")
                 child.setToolTip(0, getattr(entity, "uwi", "") or entity.name)
-                if entity_type == "well":
+                if entity_type in {"well", "reference_well"}:
                     # 下一层：该井的具体数据文件（可折叠，点击过滤到单个资产）
                     file_links = sorted(
                         well_links.get(entity.id, []),
@@ -398,13 +434,26 @@ class NavigationTree(QTreeWidget):
                 if selected_key == entity.id:
                     self.setCurrentItem(child)
             if len(ordered) > MAX_ENTITY_CHILDREN:
+                if entity_type == "reference_well":
+                    overflow_text = (
+                        f"…另有 {len(ordered) - MAX_ENTITY_CHILDREN} 口参考井，请使用搜索定位"
+                    )
+                else:
+                    overflow_text = (
+                        f"…另有 {len(ordered) - MAX_ENTITY_CHILDREN} 口井，请展开下方井位地图面板查看"
+                    )
                 overflow = QTreeWidgetItem(
                     group,
-                    [f"…另有 {len(ordered) - MAX_ENTITY_CHILDREN} 口井，请展开下方井位地图面板查看"],
+                    [overflow_text],
                 )
                 overflow.setFlags(overflow.flags() & ~Qt.ItemFlag.ItemIsSelectable)
                 overflow.setDisabled(True)
-            empty_label = "暂无井，导入井位文件后自动识别" if entity_type == "well" else "暂无地震工区"
+            if entity_type == "well":
+                empty_label = "暂无测区井，导入井位文件后自动识别"
+            elif entity_type == "reference_well":
+                empty_label = "暂无其他参考井"
+            else:
+                empty_label = "暂无地震工区"
             if not entities:
                 empty = QTreeWidgetItem(group, [empty_label])
                 empty.setFlags(empty.flags() & ~Qt.ItemFlag.ItemIsSelectable)
@@ -632,15 +681,33 @@ class NavigationTree(QTreeWidget):
         return query or FilterQuery(node_type="all")
 
     def _on_context_menu(self, pos) -> None:
-        """Right-click menu on the 标签 group header → 管理标签 (Tag Manager)."""
+        """Context actions for tag management and concrete well rows."""
         item = self.itemAt(pos)
-        if item is None or item is not self.tag_parent_item:
+        if item is None:
             return
+        if item is self.tag_parent_item:
+            menu = QMenu(self)
+            manage_action = menu.addAction("管理标签")
+            action = menu.exec(self.viewport().mapToGlobal(pos))
+            if action is manage_action:
+                self.manage_tags_requested.emit()
+            return
+
+        query: FilterQuery | None = item.data(0, Qt.ItemDataRole.UserRole)
+        if (
+            query is None
+            or query.node_type != ENTITY_NODE
+            or query.asset_id is not None
+            or item.parent()
+            not in (self._well_group_item, self._reference_well_group_item)
+        ):
+            return
+        self.setCurrentItem(item)
         menu = QMenu(self)
-        manage_action = menu.addAction("管理标签")
+        delete_action = menu.addAction("删除井…")
         action = menu.exec(self.viewport().mapToGlobal(pos))
-        if action is manage_action:
-            self.manage_tags_requested.emit()
+        if action is delete_action and query.node_value:
+            self.delete_well_requested.emit(query.node_value)
 
     def _on_current_changed(
         self, current: QTreeWidgetItem, _previous: QTreeWidgetItem
@@ -652,10 +719,15 @@ class NavigationTree(QTreeWidget):
 
         if query is not None:
             self.filter_query_changed.emit(query)
-            # Entity/asset nodes are fully handled by the FilterQuery channel;
-            # emitting their key as a legacy "category" would be re-parsed
-            # into a legacy_category query and clobber the entity filter.
-            if query.node_type in (ENTITY_NODE, ENTITY_GROUP_NODE):
+            # Domain nodes are fully handled by the FilterQuery channel;
+            # emitting their label as a legacy "category" would be re-parsed
+            # into an incompatible legacy query and clobber the smart filter.
+            if query.node_type in (
+                ENTITY_NODE,
+                ENTITY_GROUP_NODE,
+                AUXILIARY_NODE,
+                WORKING_DATA_NODE,
+            ):
                 return
             emit_str = legacy_key or query.node_value or "全部"
             if emit_str in ("全部数据", "all"):

@@ -76,3 +76,29 @@ def classify_path(path: Path) -> tuple[str, str, str]:
 
     # Remaining: keep format for preview dispatch.
     return "unknown", ext or "none", "indexed_reference"
+
+
+def classify_import_path(path: Path) -> tuple[str, str, str]:
+    """Classify an import candidate, using XML content only when necessary.
+
+    Filename-only XML hints cannot distinguish WITSML curves from finished
+    well-location deliveries.  The bounded extractor claims XML as a
+    ``well_head`` only when it finds a well identity together with X/Y.
+    """
+    if path.suffix.lower() == ".xml":
+        try:
+            from paleo_workbench.resources.well_location_xml import (
+                is_well_location_xml,
+            )
+
+            if is_well_location_xml(path):
+                return "well_head", "xml", "indexed"
+            from paleo_workbench.resources.well_log_xml import is_well_log_xml
+
+            if is_well_log_xml(path):
+                return "well_log", "xml", "indexed"
+        except Exception:
+            # Preserve import robustness; the normal filename fallback still
+            # indexes unreadable/vendor-specific XML as a generic resource.
+            pass
+    return classify_path(path)

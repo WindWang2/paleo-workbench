@@ -18,6 +18,10 @@ from paleo_workbench.ui.pages.data_view_models import (
 
 ISSUE_STATUSES = {"missing", "warning", "failed", "error"}
 REFERENCE_TYPES = {"document", "image_reference", "reference_map", "well_reference"}
+# Non-linked material shown by the Data Manager's “辅助资料” smart view.
+# NavigationTree imports this canonical set so its count and the table filter
+# cannot drift apart.
+AUXILIARY_TYPES = {"document", "image_reference", "reference_map", "tabular"}
 
 # Canonical category vocabulary mapping for backward compatibility.
 CATEGORIES = {
@@ -32,6 +36,8 @@ CATEGORIES = {
     "影像": "image_reference",
     "参考图": "reference_map",
     "测井参考": "well_reference",
+    "GeoJSON矢量": "geojson",
+    "矢量": "vector",
     "未知": "unknown",
 }
 
@@ -155,6 +161,14 @@ class FilterIndex:
         if query.node_type == "stage":
             if query.node_value and view.stage.value != query.node_value:
                 return False
+        elif query.node_type == "stage_any":
+            stages = {
+                value.strip()
+                for value in (query.node_value or "").split(",")
+                if value.strip()
+            }
+            if not stages or view.stage.value not in stages:
+                return False
         elif query.node_type == "type":
             if query.node_value and view.type != query.node_value:
                 # Handle special "other" or "reference" type groupings if needed
@@ -162,6 +176,9 @@ class FilterIndex:
                     return False
                 elif query.node_value != "other" and view.type != query.node_value:
                     return False
+        elif query.node_type == "auxiliary":
+            if view.type not in AUXILIARY_TYPES:
+                return False
         elif query.node_type == "tag":
             if query.node_value:
                 normalized_target = normalize_tag_name(query.node_value)
