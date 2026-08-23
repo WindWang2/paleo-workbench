@@ -49,6 +49,85 @@ def _authoring_style(document, kind: str) -> dict[str, Any]:
     return {}
 
 
+def _fast_feature_collection_hash(features: object) -> int | None:
+    """Fast incremental hash for large feature collections (#941-4).
+
+    Legacy snapshots without authoring revisions hashed the full feature tuple
+    via recursive ``freeze`` + ``hash`` — 6.1s @ 100k features. This path
+    hashes incrementally (id, geometry type, coordinates, sorted properties)
+    without building a single large tuple. Used only when ``value`` is a long
+    sequence of feature-like mappings; callers fall back to ``freeze`` when
+    this returns ``None``.
+    """
+    if not isinstance(features, (list, tuple)):
+        return None
+    try:
+        n = len(features)  # type: ignore[arg-type]
+    except Exception:
+        return None
+    if n <= 1000:
+        return None
+    try:
+        first = features[0]  # type: ignore[index]
+    except Exception:
+        return None
+    if not isinstance(first, Mapping) or "geometry" not in first or "id" not in first:
+        return None
+    import hashlib
+    import struct
+
+    h = hashlib.blake2b(digest_size=8)
+    h.update(str(n).encode("utf-8"))
+    h.update(b"|")
+    for feat in features:  # type: ignore[union-attr]
+        if not isinstance(feat, Mapping):
+            # Unexpected shape — fall back to generic freeze for correctness.
+            return None
+        fid = str(feat.get("id") or "")
+        h.update(fid.encode("utf-8"))
+        h.update(b"|")
+        geom = feat.get("geometry")
+        if isinstance(geom, Mapping):
+            gtype = str(geom.get("type") or "")
+            h.update(gtype.encode("utf-8"))
+            h.update(b"|")
+            coords = geom.get("coordinates")
+            stack: list[object] = [coords]
+            while stack:
+                cur = stack.pop()
+                if isinstance(cur, (list, tuple)):
+                    if not cur:
+                        continue
+                    # Point detection: first element is a number (two finite floats).
+                    if len(cur) >= 2 and isinstance(cur[0], (int, float)) and isinstance(cur[1], (int, float)):
+                        try:
+                            x = float(cur[0]); y = float(cur[1])
+                        except (TypeError, ValueError):
+                            continue
+                        # Pack as little-endian doubles for stability.
+                        try:
+                            h.update(struct.pack("<dd", x, y))
+                        except Exception:
+                            h.update(f"{x},{y}".encode("utf-8"))
+                        continue
+                    for item in reversed(cur):
+                        stack.append(item)
+        props = feat.get("properties")
+        if isinstance(props, Mapping) and props:
+            for key in sorted(str(k) for k in props.keys()):
+                h.update(str(key).encode("utf-8"))
+                h.update(b"=")
+                try:
+                    h.update(str(props[key]).encode("utf-8"))
+                except Exception:
+                    h.update(b"?")
+                h.update(b";")
+        h.update(b"\n")
+    digest = h.digest()
+    # Convert to signed 64-bit int to mimic ``hash()`` range (stable within process).
+    return int.from_bytes(digest, "little", signed=True)
+
+
 def _stable_revision(value: object) -> int:
     """Content-stable revision via recursive tuple freezing (no JSON round-trip).
 
@@ -56,6 +135,10 @@ def _stable_revision(value: object) -> int:
     unhashable attribute values fall back to their string form so arbitrary
     persisted properties never raise here.
     """
+
+    fast = _fast_feature_collection_hash(value)
+    if fast is not None:
+        return fast
 
     def freeze(item: object) -> object:
         if isinstance(item, Mapping):
