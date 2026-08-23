@@ -31,6 +31,23 @@ def scientific_fingerprint_fault(payload: FaultInterpretationPayload) -> str:
     return stable_sha256(payload.scientific_dict())
 
 
+def _atomic_write_json(path: Path, body: dict[str, Any]) -> None:
+    """Torn-write-proof JSON artifact write (#939-3): tmp file + os.replace.
+
+    A crash mid-write must never leave a truncated artifact that parses as
+    valid-but-partial JSON; readers see either the previous file or the new
+    one.
+    """
+    import os
+
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(
+        json.dumps(body, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(tmp, path)
+
+
 def write_correlation_artifact(
     payload: CorrelationScientificPayload,
     directory: Path | str,
@@ -47,10 +64,7 @@ def write_correlation_artifact(
         "fingerprint": scientific_fingerprint_correlation(payload),
         "descriptor": dict(extra_descriptor or {}),
     }
-    path.write_text(
-        json.dumps(body, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    _atomic_write_json(path, body)
     return path
 
 
@@ -79,10 +93,7 @@ def write_fault_artifact(
         "fingerprint": scientific_fingerprint_fault(payload),
         "descriptor": dict(extra_descriptor or {}),
     }
-    path.write_text(
-        json.dumps(body, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    _atomic_write_json(path, body)
     return path
 
 

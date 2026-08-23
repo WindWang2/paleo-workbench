@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QVBoxLayout, QWidget
 
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.factor_preview_grid import FactorPreviewGrid
+
+_ICONS_DIR = Path(__file__).parent.parent.parent / "ui" / "assets" / "icons" / "map"
+
+
+def _panel_icon(name: str) -> QIcon:
+    path = _ICONS_DIR / f"{name}.svg"
+    return QIcon(str(path)) if path.exists() else QIcon()
 
 
 class MapFactorShelf(QWidget):
@@ -21,7 +31,7 @@ class MapFactorShelf(QWidget):
 
         actions = QHBoxLayout()
         actions.setContentsMargins(tokens.SPACE_2, tokens.SPACE_1, tokens.SPACE_2, 0)
-        self.contour_draft_btn = QPushButton("从单因素生成等值线初稿")
+        self.contour_draft_btn = QPushButton(_panel_icon("btn-contour-draft"), "从单因素生成等值线初稿")
         self.contour_draft_btn.setObjectName("SecondaryButton")
         self.contour_draft_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
         self.contour_draft_btn.setToolTip(

@@ -3,6 +3,11 @@
 Cheap, cached reads only — never triggers filesystem scans or catalog
 rebuilds.  Numbers come from the in-memory domain registries plus the
 CatalogCounts the data page already computed for the navigation tree.
+
+Layout: identity header + a compact stat strip on top; the work-area
+well-location map fills the rest (installed via ``set_map_widget`` from the
+data workspace, which reparents the shared collapsible map panel here while
+the 工区概览 node is active).
 """
 
 from __future__ import annotations
@@ -10,25 +15,20 @@ from __future__ import annotations
 from typing import Any
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGridLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from paleo_workbench.ui import tokens
 
 
-def _stat_label() -> QLabel:
-    label = QLabel("—")
-    label.setStyleSheet(f"font-size: {tokens.FONT_SIZE_BASE}px; font-weight: 600;")
-    return label
-
-
 def _caption(text: str) -> QLabel:
     label = QLabel(text)
+    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
     label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
     return label
 
 
 class ProjectOverviewPanel(QWidget):
-    """工区概览: identity, CRS, extent and lifecycle counts at a glance."""
+    """工区概览: identity + counts strip on top, 工区图 filling the page."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -38,16 +38,17 @@ class ProjectOverviewPanel(QWidget):
         root.setSpacing(tokens.SPACE_4)
 
         self.title_label = QLabel("工区概览")
-        self.title_label.setStyleSheet(f"font-size: {tokens.FONT_SIZE_TITLE}px; font-weight: 700;")
+        self.title_label.setStyleSheet(f"font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 700;")
         root.addWidget(self.title_label)
 
         self.meta_label = QLabel("未打开工程")
         self.meta_label.setWordWrap(True)
         root.addWidget(self.meta_label)
 
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(tokens.SPACE_4)
-        grid.setVerticalSpacing(tokens.SPACE_3)
+        # Compact stat strip: one "value over caption" block per metric,
+        # evenly spread across the header row.
+        strip = QHBoxLayout()
+        strip.setSpacing(tokens.SPACE_4)
         self._values: dict[str, QLabel] = {}
         specs = [
             ("wells", "井"),
@@ -59,23 +60,33 @@ class ProjectOverviewPanel(QWidget):
             ("unresolved", "待治理实体"),
             ("recent", "最近任务"),
         ]
-        for index, (key, caption) in enumerate(specs):
-            value = _stat_label()
+        for key, caption in specs:
+            block = QWidget()
+            block_layout = QVBoxLayout(block)
+            block_layout.setContentsMargins(0, 0, 0, 0)
+            block_layout.setSpacing(tokens.SPACE_1)
+            value = QLabel("—")
+            value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            value.setStyleSheet(f"font-size: {tokens.FONT_SIZE_BASE}; font-weight: 600;")
             self._values[key] = value
-            grid.addWidget(value, index // 2, (index % 2) * 2)
-            grid.addWidget(_caption(caption), index // 2, (index % 2) * 2 + 1)
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(2, 1)
-        root.addLayout(grid)
+            block_layout.addWidget(value)
+            block_layout.addWidget(_caption(caption))
+            strip.addWidget(block, 1)
+        root.addLayout(strip)
 
         self.hint_label = QLabel("")
         self.hint_label.setWordWrap(True)
         self.hint_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
         self.hint_label.setVisible(False)
         root.addWidget(self.hint_label)
-        root.addStretch(1)
+        # The 工区内容 (well-location map) goes below via set_map_widget.
 
     # ------------------------------------------------------------------
+
+    def set_map_widget(self, widget: QWidget) -> None:
+        """Install the shared well-map panel as the overview main content."""
+        self.layout().addWidget(widget)
+        widget.setVisible(True)
 
     def refresh_from_project(
         self,

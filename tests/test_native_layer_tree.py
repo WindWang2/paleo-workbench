@@ -124,6 +124,52 @@ def test_native_layer_panel_exposes_real_actions_for_layer_management(qtbot):
     assert tree.properties_action.isEnabled()
 
 
+def test_layer_management_actions_live_on_the_context_menu(qtbot):
+    """The panel shows no always-visible button row; every management action
+    is an icon-labeled QAction on the tree's right-click menu."""
+    from PySide6.QtWidgets import QToolButton
+
+    tree = NativeLayerTree(_registry())
+    qtbot.addWidget(tree)
+    tree.show()
+    tree.expand_all()
+
+    assert tree.findChildren(QToolButton) == []
+
+    menu = tree._build_context_menu()
+    entries = [a for a in menu.actions() if not a.isSeparator()]
+    assert [a.text() for a in entries] == [
+        "添加图层", "添加分组", "缩放至图层", "属性", "上移", "下移", "移除图层",
+    ]
+    for action in entries:
+        assert not action.icon().isNull()
+
+    tree.tree.setCurrentIndex(tree.model._index_for_id("surface"))
+    menu = tree._build_context_menu()
+    entries = [a for a in menu.actions() if not a.isSeparator()]
+    assert entries[-1].text() == "导出图层"
+    assert not entries[-1].icon().isNull()
+
+
+def test_right_click_selects_the_layer_under_the_cursor(qtbot):
+    """Context-menu actions must apply to the clicked row, not only to the
+    previously current one."""
+    tree = NativeLayerTree(_registry())
+    qtbot.addWidget(tree)
+    tree.show()
+    tree.resize(360, 320)
+    tree.expand_all()
+
+    group = tree.model._index_for_id("factor")
+    surface = tree.model._index_for_id("surface")
+    tree.tree.setCurrentIndex(group)
+    assert tree._current_layer_id() == "factor"
+
+    center = tree.tree.visualRect(surface).center()
+    tree._select_row_at(center)
+    assert tree._current_layer_id() == "surface"
+
+
 # --- display convention: panel top = topmost layer (#422) --------------------
 
 def _display_order(model, parent=None) -> list[str]:

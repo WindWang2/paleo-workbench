@@ -59,3 +59,9 @@ CMakeFiles/
 # #435). Native modules are built in-place under native/<pkg> and installed
 # editable, or from the geo-viz-engine submodule.
 *.cpython-3*-x86_64-linux-gnu.so
+
+
+# Stale in-tree build residue from before map_edit_core moved to the
+# geo-viz-engine submodule (48d774e1); never let it reappear untracked.
+native/map_edit_core/
+native/gdal-vendored/

@@ -75,6 +75,10 @@ class FilterQuery:
     # Optional EntityAssetLink.role refinement for entity nodes (e.g. a well's
     # 测井/时深 sub-leaves).  None = every role of the entity.
     entity_role: str | None = None
+    # Optional single-asset refinement for entity file leaves (a concrete
+    # file under one well node).  Carries the catalog DataAsset id; DataPage
+    # resolves the legacy ResourceItem id alongside.
+    asset_id: str | None = None
 
 
 @dataclass

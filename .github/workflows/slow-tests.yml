@@ -38,13 +38,14 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: System libraries (Qt / offscreen / GDAL)
+      - name: System libraries (Qt / offscreen)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential \
-            gdal-bin \
-            libgdal-dev \
+            ninja-build \
+            swig \
+            libsqlite3-dev \
             libgl1 \
             libglib2.0-0 \
             libxkbcommon0 \
@@ -62,24 +63,22 @@ jobs:
             libxkbcommon-x11-0 \
             libfontconfig1 \
             libfreetype6
-          echo "GDAL_CONFIG=$(command -v gdal-config)" >> "$GITHUB_ENV"
-          gdal-config --version
 
       - name: Install Python dependencies
-        env:
-          GDAL_CONFIG: ${{ env.GDAL_CONFIG }}
         run: |
           python -m pip install --upgrade pip
-          # Pin Python GDAL bindings to the system libgdal (same as ci.yml).
-          SYS_GDAL="$(gdal-config --version)"
-          echo "gdal==${SYS_GDAL}" > /tmp/gdal-constraint.txt
-          python -m pip install "numpy>=1.26"
-          python -m pip install --no-cache-dir "gdal==${SYS_GDAL}"
-          python -m pip install --prefer-binary -c /tmp/gdal-constraint.txt -e ".[dev,native]"
+          python -m pip install --prefer-binary -e ".[dev,native]"
           # Fail-closed geoviz graph (packaging #442): requirements-geoviz.txt
           # is the single source of truth; a broken graph fails this step.
           python -m pip install --prefer-binary -r requirements-geoviz.txt
           python -c "import geoviz, geoviz_well_seismic_3d"
+
+      - name: Build vendored GDAL (+PROJ) from third_party sources
+        # ADR 0060: same superbuild as ci.yml — no system libgdal.
+        run: |
+          scripts/build_vendored_gdal.sh "$(command -v python)"
+          source native/gdal-vendored/install/env.sh
+          python -c "from osgeo import gdal; assert gdal.__version__"
 
       # The nightly collects the whole tests/ tree (`-m slow` still imports
       # every module), and 55 modules import the native cores at collection
@@ -125,6 +124,8 @@ jobs:
           PYTHONFAULTHANDLER: "1"
         run: |
           set -o pipefail
+          # Vendored GDAL env (ADR 0060).
+          source native/gdal-vendored/install/env.sh
           python -m pytest -v --tb=short --timeout=300 -m slow tests/ 2>&1 | tee /tmp/slow-run.txt
           # Fail-closed on data availability: the real-data tests self-skip
           # when the representative data tree is absent (gitignored `data/`).

@@ -95,13 +95,12 @@ ICON_FILES = [
     "stratigraphy.svg",
     "visualization.svg", "preparation.svg", "mapping.svg", "review.svg",
     "visualization.svg",  # fallback for 3d-modeling icon (includes joint analysis)
-    "data.svg",  # well location map reuses the data icon (spatial data view)
 ]
 
 PAGE_NAMES = [
     "首页", "数据", "测井预测", "地震预测", "层序格架",
     "地层对比",
-    "可视化", "制备", "编图", "成图审核", "井震联合", "井位地图",
+    "可视化", "制备", "编图", "成图审核", "井震联合",
 ]
 # Brief Chinese descriptions for nav-icon tooltips.
 PAGE_DESCRIPTIONS = [
@@ -116,7 +115,6 @@ PAGE_DESCRIPTIONS = [
     "古地理图编制工作台",
     "成图质检与成果导出",
     "井震联合 3D 视口与 Time 连井剖面",
-    "工区级井位 GIS 空间视图",
 ]
 
 STEP_COLORS = ["#334155", "#0ea5e9", "#6366f1", WARNING, "#e2705b", "#7e8794"]
@@ -318,6 +316,40 @@ def build_qss(density: str = "comfortable") -> str:
     QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {{
         background: {BG_SEARCH};
         border-color: {BORDER};
+    }}
+    QToolBar {{
+        background-color: {BG_SIDEBAR};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_BUTTON}px;
+        spacing: 2px;
+        padding: 3px;
+    }}
+    QToolBar::separator {{
+        width: 1px;
+        background: {BORDER};
+        margin: 4px 6px;
+    }}
+    QToolButton {{
+        background-color: transparent;
+        border: 1px solid transparent;
+        border-radius: 5px;
+        padding: 3px;
+    }}
+    QToolButton:hover {{
+        background-color: {BG_SEARCH};
+        border: 1px solid {BORDER_LIGHT};
+    }}
+    QToolButton:pressed {{
+        background-color: {BG_NAV_ACTIVE};
+        border: 1px solid {BORDER_STRONG};
+    }}
+    QToolButton:checked {{
+        background-color: {BG_NAV_ACTIVE};
+        border: 1px solid {PRIMARY};
+    }}
+    QToolButton:disabled {{
+        background-color: transparent;
+        border: 1px solid transparent;
     }}
     QTableWidget, QTreeView, QListView, QTableView {{
         background-color: {BG_SIDEBAR};
@@ -551,6 +583,26 @@ def build_qss(density: str = "comfortable") -> str:
         border: 1px solid {BORDER};
         border-radius: {RADIUS_CARD}px;
     }}
+    QFrame#WellMapPanel {{
+        background: {BG_SIDEBAR};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_CARD}px;
+    }}
+    QFrame#WellMapPanelHeader {{
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid {BORDER};
+    }}
+    QToolButton#WellMapPanelToggle {{
+        background: transparent;
+        border: none;
+        color: {TEXT_PRIMARY};
+        font-weight: 600;
+        padding: 2px 4px;
+    }}
+    QLabel#WellMapPanelCount {{
+        color: {TEXT_SECONDARY};
+    }}
     QFrame#ToolbarStrip {{
         background: {BG_SIDEBAR};
         border: 1px solid {BORDER};
@@ -595,6 +647,13 @@ def build_qss(density: str = "comfortable") -> str:
         min-height: {STATUS_BAR_HEIGHT}px; max-height: {STATUS_BAR_HEIGHT}px;
         font-size: {FONT_SIZE_STATUS}; color: {TEXT_SECONDARY};
     }}
+    QFrame#MapStatusBar {{
+        background: {BG_SIDEBAR};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_BUTTON}px;
+        font-size: {FONT_SIZE_STATUS};
+        color: {TEXT_SECONDARY};
+    }}
     QFrame#PagePlaceholder {{ background: {BG_BODY}; }}
     QWidget#MapEditToolbar {{
         background: {BG_SIDEBAR};
@@ -621,7 +680,48 @@ def build_qss(density: str = "comfortable") -> str:
         font-size: {FONT_SIZE_TITLE};
         font-weight: {FONT_WEIGHT_TITLE};
         border: none;
+        border-left: 3px solid {PRIMARY};
+        padding-left: 8px;
         background: transparent;
+    }}
+    QFrame#MapDockRail {{
+        background: {BG_RAIL_GRADIENT};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_CARD}px;
+    }}
+    QFrame#MapDockArea {{
+        background: transparent;
+        border: none;
+    }}
+    QToolButton[dockRailItem="true"] {{
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: {RADIUS_BUTTON}px;
+    }}
+    QToolButton[dockRailItem="true"]:hover {{
+        background: {BG_SEARCH};
+        border: 1px solid {BORDER_LIGHT};
+    }}
+    QToolButton[dockRailItem="true"]:checked {{
+        background: {BG_NAV_ACTIVE};
+        border: 1px solid {PRIMARY};
+    }}
+    QToolButton[dockRailItem="true"]:focus {{
+        border: 1px solid {FOCUS_RING};
+    }}
+    QToolButton#MapPanelsMenuButton {{
+        background: {BG_SIDEBAR};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_BUTTON}px;
+        padding: 4px;
+    }}
+    QToolButton#MapPanelsMenuButton:hover {{
+        background: {BG_SEARCH};
+        border-color: {BORDER_STRONG};
+    }}
+    QToolButton#MapPanelsMenuButton::menu-indicator {{
+        image: none;
+        width: 0px;
     }}
     QTreeWidget#MapLayerTreeWidget {{
         background: {BG_SIDEBAR};

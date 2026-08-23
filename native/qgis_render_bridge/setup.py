@@ -97,6 +97,11 @@ def _qgis_core_include_dirs(build_dir: Path) -> list[str]:
         str(gui_source),
         str(analysis_source),
         *[str(path) for path in sorted(header_dirs)],
+        # Public QGIS headers pull vendored external headers (e.g.
+        # qgsabstractgeometry.h → nlohmann/json_fwd.hpp); the QGIS build
+        # itself consumed them via -isystem, the binding compile needs them
+        # here too.
+        str(QGIS_SOURCE / "external" / "nlohmann"),
         str(build_dir),
         str(build_dir / "src" / "core"),
         str(build_dir / "src" / "gui"),
@@ -142,6 +147,12 @@ def _build_vendored_qgis() -> tuple[Path, Path]:
         # dev package is not in the CI apt list — the vendored default (ON)
         # made every bridge configure fail at FindPDAL (#935 follow-up).
         "-DWITH_PDAL=OFF",
+        # Draco (mesh compression) likewise: default ON, fatal FindDraco on
+        # runners without libdraco-dev.
+        "-DWITH_DRACO=OFF",
+        # Qt6SerialPort is GPS-field hardware support; default ON and a hard
+        # requirement the runner image lacks.
+        "-DWITH_QTSERIALPORT=OFF",
         "-DWITH_INTERNAL_SPATIALINDEX=ON",
         "-DUSE_OPENCL=OFF",
         "-DENABLE_TESTS=OFF",
@@ -214,10 +225,10 @@ def _extension() -> Pybind11Extension:
 
 setup(
     name="qgis_render_bridge",
-    version="0.3.0a0",
+    version="0.2.17a0",
     description="Optional narrow C++ QGIS renderer bridge for paleo-workbench",
     ext_modules=[_extension()] if _enabled() else [],
     cmdclass={"build_ext": build_ext},
     zip_safe=False,
-    python_requires=">=3.12",
+    python_requires=">=3.12,<3.13",
 )

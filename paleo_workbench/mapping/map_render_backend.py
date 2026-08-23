@@ -1560,8 +1560,12 @@ class QgisMapRenderBackend(MapRenderBackend):
         if not self._initialized:
             self.initialize()
         assert self._bridge is not None
-        self._native_snapshot_pending = False
-        self._set_native_snapshot(self._snapshot)
+        # #941-6: only push when a snapshot arrived before the bridge existed
+        # (set_layer_snapshot already pushes eagerly otherwise) — re-pushing
+        # every sync frame re-parsed the full payload (≈100 ms @ 100k features).
+        if self._native_snapshot_pending:
+            self._native_snapshot_pending = False
+            self._set_native_snapshot(self._snapshot)
         generation = self._next_generation()
         payload = self._bridge.render_sync(
             self._extent, self._output_size[0], self._output_size[1], self._dpi

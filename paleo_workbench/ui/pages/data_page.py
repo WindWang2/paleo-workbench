@@ -38,6 +38,7 @@ from paleo_workbench.ui.pages.asset_table_model import RESOURCE_TYPE_LABELS
 from paleo_workbench.ui.pages.data_toolbar import DataToolbar
 from paleo_workbench.ui.pages.data_view_models import (
     AssetView,
+    FsProbeCache,
     asset_view_from_object,
     enrich_view_from_catalog,
     path_exists_safe,
@@ -45,6 +46,7 @@ from paleo_workbench.ui.pages.data_view_models import (
 )
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
 from paleo_workbench.project.domain import domain_signature
+from paleo_workbench.project.well_location_map import sync_well_location_map
 from paleo_workbench.ui.pages.filter_index import (
     CATEGORIES,
     FilterQuery,
@@ -270,6 +272,7 @@ class DataPage(QWidget):
         self._rescan_context: tuple | None = None
         self._delivery_context: tuple | None = None
         self._import_in_progress = False
+        self._prefetched_viz_asset: object | None = None
         self._viz_adapter = VizAdapter()
         # Business orchestration (catalog-aware lifecycle actions) lives in the
         # controller; the page keeps thin delegating methods for every name
@@ -293,11 +296,18 @@ class DataPage(QWidget):
         layout.addWidget(self.workspace, 1)
 
         self.navigation_tree = self.workspace.navigation_tree
+        self.navigation_tree.set_asset_label_provider(self._asset_display_name)
         self.asset_table = self.workspace.asset_table
         self.reader_panel = self.workspace.reader_panel
         self.inspector_panel = self.workspace.inspector_panel
         self.main_splitter = self.workspace.main_splitter
         self.right_splitter = self.workspace.right_splitter
+        # Embedded well-location map (former standalone page): lives in the
+        # center column as a collapsible panel, synced from refresh paths.
+        self.well_map_panel = self.workspace.well_map_panel
+        self.well_focus_requested.connect(self.well_map_panel.expand_and_focus)
+        self.well_map_panel.map_page.well_selected.connect(self._on_well_map_well_picked)
+        self.well_map_panel.map_page.well_activated.connect(self._on_well_map_well_picked)
 
         self.column_settings_btn = self.asset_table.column_settings_btn
         self.column_settings_menu = self.asset_table.column_settings_menu
@@ -321,7 +331,7 @@ class DataPage(QWidget):
         self._preview_controller.loading.connect(
             lambda: self.reader_panel.show_loading(self._selected_asset)
         )
-        self._preview_controller.result_ready.connect(self.reader_panel.render)
+        self._preview_controller.result_ready.connect(self._on_summary_ready)
         self._preview_controller.failed.connect(self._handle_preview_failed)
 
         self._visualization_controller = PreviewRequestController(
@@ -386,6 +396,8 @@ class DataPage(QWidget):
         self.reader_panel.visualization_requested.connect(self._request_selected_visualization)
 
         self._refresh()
+        # Initial domain binding for the embedded well-location map.
+        self.refresh_well_map_panel()
 
         QShortcut(
             QKeySequence("Delete"),
@@ -447,11 +459,27 @@ class DataPage(QWidget):
         resources: list[ResourceItem],
         artifacts: list[ExportArtifact] | None = None,
     ) -> None:
+        import os as _os, time as _time
+        _dbg = _os.environ.get("DATAPAGE_UPDATE_DEBUG") == "1"
+        _t0 = _time.perf_counter()
+        _last = [_t0]
+        def _stage(name):
+            if _dbg:
+                now = _time.perf_counter()
+                print(
+                    f"[update_state:{name}] +{1000*(now-_last[0]):.1f}ms total={1000*(now-_t0):.1f}ms",
+                    flush=True,
+                )
+                _last[0] = now
+        # #937-9: the trash view and the trash count both rebuild companion
+        # items per refresh; compute once.
+        trashed_companions = self._trashed_companions()
         self._resources = resources
         self._artifacts = artifacts or []
         preview_root = self._preview_disk_project_root()
         self._preview_controller.set_project_root(preview_root)
         self._visualization_controller.set_project_root(preview_root)
+        _stage('pre_summary')
         self.summary_bar.update_state(state)
         # Catalog enrichment (one batch pass): stage/version/integrity truth,
         # lineage status, governance values for the table rows.
@@ -459,7 +487,7 @@ class DataPage(QWidget):
         catalog_rows = self._lifecycle.catalog_only_rows(enricher)
         display_resources = list(self._resources)
         if self._trash_view_active():
-            display_resources.extend(self._trashed_companions())
+            display_resources.extend(trashed_companions)
         # Build the enriched row views ONCE per refresh (#527): every build
         # probes the filesystem (exists/stat per resource), and the counts
         # pass, the filter index and the table model each used to rebuild
@@ -468,11 +496,13 @@ class DataPage(QWidget):
         # catalog_rows]; when the table shows the same list (trash view
         # inactive) both consumers share these views, otherwise the table
         # falls back to building its own via the filter index.
+        _stage('enrich')
         counts_assets = [*self._resources, *self._artifacts, *(catalog_rows or [])]
+        fs_probe = FsProbeCache()
         shared_views = [
-            enricher(asset_view_from_object(a, project_root=preview_root))
+            enricher(asset_view_from_object(a, project_root=preview_root, fs_probe=fs_probe))
             if enricher is not None
-            else asset_view_from_object(a, project_root=preview_root)
+            else asset_view_from_object(a, project_root=preview_root, fs_probe=fs_probe)
             for a in counts_assets
         ]
         # project_root lets the tree counts and the table resolve
@@ -485,7 +515,7 @@ class DataPage(QWidget):
             enricher=enricher,
             views=shared_views,
         )
-        self.navigation_tree.set_trash_count(len(self._trashed_companions()))
+        self.navigation_tree.set_trash_count(len(trashed_companions))
         # WorkArea entity-first section: rebuild only when the domain
         # signature changed (shared helper — must match the map page's gate).
         signature = domain_signature(self.project)
@@ -495,6 +525,7 @@ class DataPage(QWidget):
         if self.workspace.overview_visible():
             overview = self.workspace.overview_panel
             overview.refresh_from_project(self.project, counts=None)
+        _stage('counts')
         table_views = (
             shared_views
             if len(display_resources) == len(self._resources)
@@ -508,9 +539,11 @@ class DataPage(QWidget):
             enricher=enricher,
             views=table_views,
         )
+        _stage('table')
         self.data_toolbar.set_tag_candidates(self._collect_tag_candidates())
         self._update_selection_action_state()
         self._sync_visualization_button()
+        _stage('toolbar')
         self._emit_data_context()
 
     def _refresh(self) -> None:
@@ -798,6 +831,24 @@ class DataPage(QWidget):
             self._well_identity_adapter = adapter
         return adapter
 
+    def refresh_well_map_panel(self) -> None:
+        """Sync the embedded well-location map with the current document.
+
+        Refreshes the panel canvas (signature-gated) and persists the wells
+        as the project's dedicated 井位图 vector map document.
+        """
+        panel = getattr(self, "well_map_panel", None)
+        if panel is not None:
+            panel.refresh_domain(self.project)
+        try:
+            sync_well_location_map(self.project)
+        except Exception:
+            pass
+
+    def _on_well_map_well_picked(self, well_id: str) -> None:
+        """Embedded map → tree/table selection (same page now, §18)."""
+        self.select_well(well_id)
+
     def refresh_domain_views(self) -> None:
         """Re-read domain sections into tree/overview views (cheap, cached)."""
         self._refresh()
@@ -811,6 +862,7 @@ class DataPage(QWidget):
                 refresh_overview(self.project)
             except Exception:
                 pass
+        self.refresh_well_map_panel()
         self.domain_entities_changed.emit(self.project)
 
     # ------------------------------------------------------------------
@@ -1582,6 +1634,18 @@ class DataPage(QWidget):
             query = replace(query, tags=list(tags), tag_operator=operator)
         query = self._entity_query_with_ids(query)
         self.asset_table.set_filter_query(query)
+        if getattr(query, "asset_id", None):
+            # 文件叶：网格过滤到单个资产后直接选中它，预览/检查器立即联动
+            wanted = set(query.entity_asset_ids or ())
+            for asset in getattr(self.asset_table, "_visible_assets", []) or []:
+                row_ids = {
+                    str(getattr(asset, "id", "") or ""),
+                    str(getattr(asset, "legacy_resource_id", "") or ""),
+                }
+                if row_ids & wanted:
+                    self._set_selected_asset(asset)
+                    self._update_inspector(asset)
+                    break
 
     # --- WorkArea entity filters (IA 3.0) ---
 
@@ -1608,6 +1672,14 @@ class DataPage(QWidget):
         """Attach the EntityAssetLink membership set to entity queries."""
         if query.node_type not in ("entity", "entity_group"):
             return query
+        legacy_map = self._asset_legacy_map()
+        if query.node_type == "entity" and query.asset_id:
+            # 单文件叶：只命中该资产（含其 legacy ResourceItem id）
+            ids = {query.asset_id}
+            legacy = legacy_map.get(query.asset_id)
+            if legacy:
+                ids.add(legacy)
+            return replace(query, entity_asset_ids=frozenset(ids))
         links = list(getattr(self.project, "entity_asset_links", None) or [])
         if query.node_type == "entity":
             matched = [
@@ -1621,12 +1693,39 @@ class DataPage(QWidget):
                 link for link in links if link.entity_type == (query.node_value or "")
             ]
         ids = {link.asset_id for link in matched}
-        legacy_map = self._asset_legacy_map()
         for asset_id in tuple(ids):
             legacy = legacy_map.get(asset_id)
             if legacy:
                 ids.add(legacy)
         return replace(query, entity_asset_ids=frozenset(ids))
+
+    def _asset_display_name(self, asset_id: str) -> str:
+        """Label provider for the navigation tree's per-well file leaves."""
+        return self._asset_name_map().get(str(asset_id), "")
+
+    def _asset_name_map(self) -> dict[str, str]:
+        """catalog DataAsset.id / legacy ResourceItem.id → display name."""
+        service = self._catalog_service()
+        revision = getattr(service, "catalog_revision", None) if service else None
+        resource_count = len(self._resources) if self._resources is not None else 0
+        cached = getattr(self, "_asset_name_cache", None)
+        if cached is not None and cached[0] == (revision, resource_count):
+            return cached[1]
+        mapping: dict[str, str] = {}
+        if service is not None:
+            try:
+                for asset in service.list_assets(include_trashed=True):
+                    name = getattr(asset, "name", "") or ""
+                    if name:
+                        mapping[str(asset.id)] = str(name)
+            except Exception:
+                mapping = {}
+        for resource in self._resources or []:
+            name = str(getattr(resource, "name", "") or "")
+            if name:
+                mapping.setdefault(str(resource.id), name)
+        self._asset_name_cache = ((revision, resource_count), mapping)
+        return mapping
 
     def _refresh_overview_panel(self) -> None:
         overview = getattr(self.workspace, "overview_panel", None)
@@ -1719,6 +1818,8 @@ class DataPage(QWidget):
 
     @Slot(object)
     def _on_verify_finished(self, report: IntegrityCheckReport) -> None:
+        if self._verify_job.target is not self.project:
+            return
         if report.checksum_updates:
             for res in self._resources:
                 if res.id in report.checksum_updates:
@@ -1733,6 +1834,8 @@ class DataPage(QWidget):
 
     @Slot(str)
     def _on_verify_failed(self, message: str) -> None:
+        if self._verify_job.target is not self.project:
+            return
         self.data_toolbar.set_verify_running(False)
         self._set_action_status(f"完整性校验失败: {message}")
 
@@ -1779,6 +1882,34 @@ class DataPage(QWidget):
         if ref is None:
             return
         self.open_in_visualization.emit(replace(ref, source="data_page"))
+
+    def _on_summary_ready(self, result) -> None:
+        self.reader_panel.render(result)
+        self._prefetch_visualization_preview(result)
+
+    def _prefetch_visualization_preview(self, result) -> None:
+        """选中即后台生成可视化预览，打开选项卡即得。
+
+        The 可视化预览 tab used to sit on a "点击此选项卡生成" prompt until
+        clicked, which reads as "预览没有了".  When the summary says a
+        professional preview exists, kick the visualization controller in
+        the background; completion renders with ``activate=False`` and the
+        loading spinner no longer steals the 数据列表 tab.
+        """
+        asset = self._selected_asset
+        if not isinstance(asset, ResourceItem):
+            return
+        if not getattr(result, "visualization_available", False):
+            return
+        # Stale summary arriving after the user moved to another asset.
+        if result.path and str(result.path) != str(getattr(asset, "path", "")):
+            return
+        if not self._viz_adapter.supports_resource(asset):
+            return
+        if self._prefetched_viz_asset is asset:
+            return
+        self._prefetched_viz_asset = asset
+        self._visualization_controller.request(asset)
 
     def _handle_preview_failed(self, message: str) -> None:
         self.reader_panel.render(

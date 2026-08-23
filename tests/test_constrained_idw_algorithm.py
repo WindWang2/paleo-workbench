@@ -404,7 +404,11 @@ def test_400_degree_crs_has_no_kilometre_corridor():
     row2 = int(np.argmin(np.abs(np.asarray(gy) - 0.5)))
     central2 = (np.asarray(gx2) >= 0.45) & (np.asarray(gx2) <= 0.55)
     n_without = int((~np.isfinite(gz2[row2, :]))[central2].sum())
-    assert n_without >= 5, "sanity: old auto buffer must produce a wide corridor"
+    # #939-4: with no declared CRS the units are unknowable; the auto buffer
+    # still applies in map units (the #370 corridor contract) but the result
+    # must be labelled unit-ambiguous so it can never be read as metres.
+    assert without_crs["barrier_buffer_mode"] == "auto_map_units_unknown_crs"
+    assert with_crs["barrier_buffer_mode"] == "degrees"
     assert n_with <= 1, f"degree CRS corridor too wide: {n_with} cells (~{n_with*0.018} deg)"
 
 

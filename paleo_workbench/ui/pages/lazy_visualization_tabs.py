@@ -110,7 +110,9 @@ class LazyVisualizationTabs(QTabWidget):
     def show_loading(self) -> None:
         self._requested = True
         self.visual_stack.setCurrentWidget(self.loading_label)
-        self.setCurrentIndex(1)
+        # No setCurrentIndex(1) here: background prefetches also emit loading,
+        # and a user-initiated click has already switched to this tab.
+        # Completion (show_preview) owns the same no-steal contract (#630).
 
     def show_preview(self, prepared, *, activate: bool = True) -> None:
         was_visual = self.currentIndex() == 1
