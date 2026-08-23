@@ -538,6 +538,13 @@ def build_qss(density: str = "comfortable") -> str:
     QPushButton#HelpMenuButton {{
         background: transparent; border: none; color: {TEXT_PRIMARY}; padding: 0;
     }}
+    /* 顶部菜单条按标准菜单栏处理：隐藏下拉指示箭头，避免与文字重叠 */
+    QPushButton#ProjectMenuButton::menu-indicator,
+    QPushButton#ViewMenuButton::menu-indicator,
+    QPushButton#ToolsMenuButton::menu-indicator,
+    QPushButton#HelpMenuButton::menu-indicator {{
+        image: none; width: 0;
+    }}
     QPushButton#ProjectMenuButton:hover,
     QPushButton#ViewMenuButton:hover,
     QPushButton#ToolsMenuButton:hover,

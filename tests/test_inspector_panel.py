@@ -50,6 +50,37 @@ def test_inspector_artifact_rows(qtbot):
     assert "路径" in texts
 
 
+def test_inspector_key_value_tables_fit_content(qtbot):
+    """键/值表：键列贴合内容不拉伸；元数据页表格高度按行数收拢。"""
+    from PySide6.QtWidgets import QHeaderView
+
+    panel = InspectorPanel()
+    qtbot.addWidget(panel)
+    res = ResourceItem(
+        name="well1.las", path="/data/well1.las", type="well_log", format="LAS",
+        status="parsed",
+    )
+    panel.update_asset(res)
+    for table in (
+        panel.overview_table,
+        panel.governance_table,
+        panel.catalog_metadata_table,
+        panel.metadata_table,
+    ):
+        assert table.horizontalHeader().sectionResizeMode(0) == (
+            QHeaderView.ResizeMode.ResizeToContents
+        )
+    assert panel.metadata_table.maximumHeight() <= 320
+    assert panel.overview_table.maximumHeight() >= 1_000_000  # 概要页不限高
+
+
+def test_menu_bar_buttons_hide_dropdown_indicator():
+    """顶部菜单条隐藏下拉箭头（箭头与文字重叠回归）。"""
+    from paleo_workbench.ui import tokens
+
+    assert "ProjectMenuButton::menu-indicator" in tokens.QSS_TEMPLATE
+
+
 def test_format_size():
     from paleo_workbench.ui.tokens import format_size
     assert format_size(None) == "—"
