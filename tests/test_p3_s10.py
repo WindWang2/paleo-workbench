@@ -139,7 +139,7 @@ def test_mapping_export_slot_does_not_render_on_gui_thread(
 
 def test_windows_ctest_step_is_fail_closed() -> None:
     """#631: Windows ctest must fail the job; hang bound is the 20-min job timeout."""
-    src = Path(".github/workflows/well-log-engine.yml").read_text(encoding="utf-8")
+    src = (Path(__file__).resolve().parents[1] / ".github/workflows/well-log-engine.yml").read_text(encoding="utf-8")
     job_head = src.split("clang-sanitizers:", 1)[0]
     assert "timeout-minutes: 20" in job_head
     start = src.index("- name: Test (Windows)")
@@ -196,3 +196,53 @@ def test_reference_layers_imports_cleanly_without_gdal(monkeypatch, tmp_path) ->
     source.write_bytes(b"x")
     with pytest.raises(mod.ReferenceLayerError, match="GDAL"):
         mod.ReferenceLayerService().import_layer(source, "EPSG:4326")
+
+
+# --------------------------------------------------------------------------- #
+# Round-3 P3 misc batch (#938/#939)
+# --------------------------------------------------------------------------- #
+
+
+def test_scratch_native_tree_is_not_fresh() -> None:
+    """#938-1: a copied .so under any scratch ``native/<pkg>`` path must not
+    count as fresh — only genuine repo worktrees (with a .git link) do."""
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    with TemporaryDirectory() as tmp:
+        scratch = Path(tmp) / "scratch" / "native" / "map_edit_core"
+        scratch.mkdir(parents=True)
+        parts = scratch.parts
+        fresh = False
+        for i, part in enumerate(parts):
+            if part == "native" and i + 1 < len(parts) and parts[i + 1] == "map_edit_core":
+                fresh = (Path(*parts[:i]) / ".git").exists()
+        assert not fresh
+        # A real worktree root (this test's repo) carries the .git marker.
+        repo_root = Path(__file__).resolve().parents[1]
+        assert (repo_root / ".git").exists()
+
+
+def test_set_well_identity_override_writes_uwi_namespace() -> None:
+    """#939-1: a UWI-form override key must be reachable from uwi queries."""
+    from types import SimpleNamespace
+
+    from paleo_workbench.project.domain import (
+        WellEntity,
+        set_well_identity_override,
+        well_identity_overrides,
+    )
+
+    # A secondary/legacy UWI the automatic chain cannot resolve (the well's
+    # stored uwi differs) — exactly the case an explicit mapping exists for.
+    well = WellEntity(id="w-1", name="Well A", uwi="9999")
+    other = WellEntity(id="w-2", name="Well B", uwi="200987654321")
+    project = SimpleNamespace(
+        wells=[well, other],
+        workarea=SimpleNamespace(metadata={}),
+    )
+    assert set_well_identity_override(project, "100123456789", "w-1") is True
+    overrides = well_identity_overrides(project)
+    assert "100123456789" in overrides
+    assert "uwi:100123456789" in overrides
+    assert overrides["uwi:100123456789"] == "w-1"

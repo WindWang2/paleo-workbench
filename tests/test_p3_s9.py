@@ -153,13 +153,15 @@ def test_snapshot_and_adapter_rebuild_only_the_edited_layer(monkeypatch):
     import paleo_workbench.mapping.map_document_snapshot as snap
 
     kinds: list[str] = []
-    orig = snap._features_for_kind
+    # #941-3: the cold path builds via the one-pass grouped walker; spy there
+    # (previously _features_for_kind, which the walker replaced).
+    orig = snap._grouped_features
 
-    def spy(records, kind):
-        kinds.append(kind)
-        return orig(records, kind)
+    def spy(records, needed):
+        kinds.extend(sorted(needed))
+        return orig(records, needed)
 
-    monkeypatch.setattr(snap, "_features_for_kind", spy)
+    monkeypatch.setattr(snap, "_grouped_features", spy)
 
     facies = [
         {

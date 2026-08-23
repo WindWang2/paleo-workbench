@@ -636,7 +636,10 @@ def run_constrained_idw(
         extract_contours=False,
         # Geographic (degree) CRS: the engine's auto barrier buffer is
         # metre-calibrated; pass an explicit ~300 m buffer in degrees instead
-        # of letting the metre constants expand to kilometres.
+        # of letting the metre constants expand to kilometres. With no CRS the
+        # auto buffer stays on in MAP UNITS (the #370 corridor contract), but
+        # the result is labelled unit-ambiguous (#939-4) so consumers never
+        # read it as a metre value on possibly-degree data.
         barrier_buffer_distance=barrier_buffer_distance_for_crs(crs) or 0.0,
     )
 
@@ -711,6 +714,10 @@ def run_constrained_idw(
         # Keep the resolved domain boundary so downstream consumers can show
         # the constrained interpolation extent (e.g. as a reference outline).
         "boundary": [[float(x), float(y)] for x, y in boundary_xy],
+        "barrier_buffer_mode": (
+            "degrees" if (crs and barrier_buffer_distance_for_crs(crs)) else
+            ("auto_map_units" if crs else "auto_map_units_unknown_crs")
+        ),
         "n_direction_lines": len(directions),
         "search_radius": search_radius,
         "decluster_radius": decluster_radius,
