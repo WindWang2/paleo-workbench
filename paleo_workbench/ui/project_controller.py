@@ -24,6 +24,22 @@ _PROJECT_SUFFIX = ".paleo.json"
 _PROJECT_FILTER = "Project (*.paleo.json)"
 
 
+def _default_project_start_dir(window) -> str:
+    """打开/保存工程对话框的起始目录。
+
+    优先当前工程所在目录；否则定位工作区布局下的 ``data/project_area``
+    （仓库 ``main/`` 与 ``data/`` 同级）；都没有时回退用户主目录。
+    """
+    project_path = getattr(window, "project_path", None)
+    if project_path:
+        return str(Path(project_path).parent)
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "data" / "project_area"
+        if candidate.is_dir():
+            return str(candidate)
+    return str(Path.home())
+
+
 class _DomainMigrationBridge(QObject):
     """Marshals background domain-migration staging onto the GUI thread.
 
@@ -718,23 +734,14 @@ class ProjectController:
         self.window._show_properties()
 
     def _choose_open_project(self) -> Path | None:
-        start_dir = (
-            str(self.window.project_path.parent)
-            if self.window.project_path
-            else str(Path.home())
-        )
         path, _ = QFileDialog.getOpenFileName(
-            self.window, "打开工程", start_dir, _PROJECT_FILTER
+            self.window, "打开工程", _default_project_start_dir(self.window), _PROJECT_FILTER
         )
         return Path(path) if path else None
 
     def _choose_save_project(self) -> Path | None:
         suggested = f"{self.window.project.meta.name}{_PROJECT_SUFFIX}"
-        start_dir = (
-            str(self.window.project_path.parent)
-            if self.window.project_path
-            else str(Path.home())
-        )
+        start_dir = _default_project_start_dir(self.window)
         path, _ = QFileDialog.getSaveFileName(
             self.window, "保存工程", str(Path(start_dir) / suggested), _PROJECT_FILTER
         )

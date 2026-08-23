@@ -291,6 +291,12 @@ class ProjectWellMapPage(QWidget):
             self._series_wells = None
             return None
         plot.set_equal_aspect(True)
+        # Engine default is a dark chart theme; the workbench is light.
+        plot.bg_color = QColor(tokens.BG_HEADER)
+        plot.plot_bg_color = QColor("#f8fafc")
+        plot.grid_color = QColor(tokens.BORDER)
+        plot.axis_color = QColor(tokens.BORDER_STRONG)
+        plot.text_color = QColor(tokens.TEXT_SECONDARY)
         self._series_wells = ScatterSeries(name="wells", color=QColor(_COLOR_OK), size=6.0)
         self._series_flagged = ScatterSeries(
             name="wells_flagged", color=QColor(_COLOR_FLAGGED), size=6.0

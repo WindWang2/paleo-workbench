@@ -20,6 +20,46 @@ def test_new_project_clears_path(qtbot):
     assert "Untitled" in window.windowTitle()
 
 
+def test_open_dialog_defaults_to_workspace_project_area(qtbot, monkeypatch):
+    """打开工程对话框默认定位到工作区 data/project_area（无工程路径时）。"""
+    window = PaleoWorkbenchWindow()
+    qtbot.addWidget(window)
+    window.project_path = None
+
+    captured: dict[str, str] = {}
+
+    def fake_dialog(parent, title, start_dir, filt):  # noqa: ARG001
+        captured["start_dir"] = start_dir
+        return "", ""
+
+    monkeypatch.setattr(
+        "paleo_workbench.ui.project_controller.QFileDialog.getOpenFileName",
+        fake_dialog,
+    )
+    assert window.project_controller._choose_open_project() is None
+    assert captured["start_dir"].endswith("data/project_area")
+
+
+def test_open_dialog_prefers_current_project_dir(qtbot, monkeypatch, tmp_path: Path):
+    """已保存工程存在时，对话框起始目录取工程文件所在目录。"""
+    window = PaleoWorkbenchWindow()
+    qtbot.addWidget(window)
+    window.project_path = tmp_path / "X.paleo.json"
+
+    captured: dict[str, str] = {}
+
+    def fake_dialog(parent, title, start_dir, filt):  # noqa: ARG001
+        captured["start_dir"] = start_dir
+        return "", ""
+
+    monkeypatch.setattr(
+        "paleo_workbench.ui.project_controller.QFileDialog.getOpenFileName",
+        fake_dialog,
+    )
+    assert window.project_controller._choose_open_project() is None
+    assert captured["start_dir"] == str(tmp_path)
+
+
 def test_new_project_uses_custom_name(qtbot):
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
