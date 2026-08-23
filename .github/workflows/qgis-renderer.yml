@@ -77,7 +77,7 @@ jobs:
             ninja-build \
             qt6-base-dev \
             libqt6svg6-dev \
-            qt6-core5compat-dev \
+            qt6-5compat-dev \
             libqca-qt6-dev \
             libsqlite3-dev \
             libexpat1-dev \
