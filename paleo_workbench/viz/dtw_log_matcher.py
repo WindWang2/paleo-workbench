@@ -25,15 +25,10 @@ class DTWLogMatcher:
 
     @staticmethod
     def _normalized(curve: np.ndarray) -> np.ndarray:
-        """Z-normalize a curve, imputing LAS nulls (NaN/±inf) with the finite mean.
-
-        Raw NaN samples poison ``std``/``mean`` (NaN is truthy, so the ``or 1.0``
-        guard never engaged) and turn every DTW cost into NaN, which degrades
-        the backtracked path to a degenerate transfer result. Imputation keeps
-        every original sample index addressable; null intervals simply stop
-        contributing shape information.
-        """
+        """Z-normalize a curve, imputing LAS nulls (NaN/±inf) with the finite mean."""
         values = np.asarray(curve, dtype=np.float64).reshape(-1)
+        if values.size == 0:
+            return values
         finite = values[np.isfinite(values)]
         fill = float(finite.mean()) if finite.size else 0.0
         values = np.where(np.isfinite(values), values, fill)
@@ -54,15 +49,22 @@ class DTWLogMatcher:
         n_ref = c_ref.size
         n_target = c_target.size
 
+        # Guard against empty / degenerate curves
+        if n_ref == 0 or n_target == 0:
+            return AlignmentResult(cost=float("inf"), path_ref=[], path_target=[])
+
         # Decimate over-long curves so the cost matrix stays bounded; path
         # indices are mapped back to original sample space below.
         stride = 1
-        if n_ref * n_target > _MAX_COST_CELLS:
-            stride = int(math.ceil(math.sqrt(n_ref * n_target / _MAX_COST_CELLS)))
+        if _MAX_COST_CELLS > 0 and n_ref * n_target > _MAX_COST_CELLS:
+            stride = max(1, int(math.ceil(math.sqrt(float(n_ref * n_target) / float(_MAX_COST_CELLS)))))
         d_ref = c_ref[::stride]
         d_target = c_target[::stride]
         d_n_ref = d_ref.size
         d_n_target = d_target.size
+
+        if d_n_ref == 0 or d_n_target == 0:
+            return AlignmentResult(cost=float("inf"), path_ref=[], path_target=[])
 
         # Construct pairwise distance matrix
         cost_matrix = np.full((d_n_ref + 1, d_n_target + 1), fill_value=np.inf)
