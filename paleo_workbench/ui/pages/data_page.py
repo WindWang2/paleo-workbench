@@ -1609,6 +1609,18 @@ class DataPage(QWidget):
             query = replace(query, tags=list(tags), tag_operator=operator)
         query = self._entity_query_with_ids(query)
         self.asset_table.set_filter_query(query)
+        if getattr(query, "asset_id", None):
+            # 文件叶：网格过滤到单个资产后直接选中它，预览/检查器立即联动
+            wanted = set(query.entity_asset_ids or ())
+            for asset in getattr(self.asset_table, "_visible_assets", []) or []:
+                row_ids = {
+                    str(getattr(asset, "id", "") or ""),
+                    str(getattr(asset, "legacy_resource_id", "") or ""),
+                }
+                if row_ids & wanted:
+                    self._set_selected_asset(asset)
+                    self._update_inspector(asset)
+                    break
 
     # --- WorkArea entity filters (IA 3.0) ---
 

@@ -219,3 +219,21 @@ def test_well_file_leaves_capped(qtbot):
     overflow = well_item.child(MAX_WELL_FILE_CHILDREN)
     assert "另有" in overflow.text(0)
     assert not (overflow.flags() & Qt.ItemFlag.ItemIsSelectable)
+
+
+def test_entity_node_does_not_emit_legacy_category(qtbot):
+    """实体/文件节点走 FilterQuery 通道；若再发 category_changed，
+    DataPage 会把 'entity:…'/'asset:…' 解析成 legacy_category 查询
+    覆盖掉实体过滤（网格变空的回归）。"""
+    doc, well = _well_doc()
+    tree = NavigationTree()
+    qtbot.addWidget(tree)
+    tree.set_project(doc)
+
+    categories: list[str] = []
+    tree.category_changed.connect(categories.append)
+    well_item = tree._well_group_item.child(0)
+    tree.setCurrentItem(well_item)
+    assert not categories
+    tree.setCurrentItem(well_item.child(0))
+    assert not categories

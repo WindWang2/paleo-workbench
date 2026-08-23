@@ -1682,3 +1682,40 @@ def test_entity_query_with_single_asset_id(qtbot):
     query = FilterQuery(node_type="entity", node_value="w1", asset_id="asset_9")
     resolved = page._entity_query_with_ids(query)
     assert resolved.entity_asset_ids == frozenset({"asset_9"})
+
+
+def test_file_leaf_filters_grid_and_selects_asset(qtbot):
+    """点击井下的文件叶：网格过滤到该单个资产并自动选中（联动预览）。"""
+    from PySide6.QtWidgets import QApplication
+
+    from paleo_workbench.project.domain import EntityAssetLink, WellEntity
+
+    doc = ProjectDocument.new("Demo")
+    well = WellEntity(name="A1")
+    doc.wells.append(well)
+    res = ResourceItem(name="A1.las", path="/tmp/A1.las", type="well_log", format="las")
+    other = ResourceItem(name="A2.las", path="/tmp/A2.las", type="well_log", format="las")
+    doc.resources.extend([res, other])
+    doc.entity_asset_links.append(
+        EntityAssetLink(
+            entity_type="well",
+            entity_id=well.id,
+            asset_id=str(res.id),
+            role="well_head",
+        )
+    )
+    page = DataPage(project=doc)
+    qtbot.addWidget(page)
+    page.show()
+    QApplication.processEvents()
+
+    tree = page.navigation_tree
+    tree.set_project(doc)
+    well_item = tree._well_group_item.child(0)
+    leaf = well_item.child(0)
+    tree.setCurrentItem(leaf)
+    QApplication.processEvents()
+
+    assert _table_row_count(page) == 1
+    assert _table_text(page, 0, 0) == "A1.las"
+    assert page._selected_asset is res

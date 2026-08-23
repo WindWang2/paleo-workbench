@@ -652,6 +652,11 @@ class NavigationTree(QTreeWidget):
 
         if query is not None:
             self.filter_query_changed.emit(query)
+            # Entity/asset nodes are fully handled by the FilterQuery channel;
+            # emitting their key as a legacy "category" would be re-parsed
+            # into a legacy_category query and clobber the entity filter.
+            if query.node_type in (ENTITY_NODE, ENTITY_GROUP_NODE):
+                return
             emit_str = legacy_key or query.node_value or "全部"
             if emit_str in ("全部数据", "all"):
                 emit_str = "全部"
