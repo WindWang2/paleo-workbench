@@ -59,6 +59,55 @@ def test_well_head_asset_identity_uses_project_resource_id(tmp_path: Path):
     assert paths.well_head_asset_id == "res:stable-wells"
 
 
+def test_project_relative_paths_resolve_against_project_root(tmp_path: Path):
+    """Saved projects store project-relative paths; the joint resolver must
+    resolve them against ``meta.project_root`` (never the process CWD) so the
+    reopened project still finds BOTH its wells and seismic data."""
+    (tmp_path / "cube.sgy").write_bytes(b"x")
+    (tmp_path / "ExportWellHead.dat").write_text("A 1 2 3 4 5 6\n", encoding="utf-8")
+    (tmp_path / "w1.las").write_text("~VERSION INFORMATION\n", encoding="utf-8")
+    project = ProjectDocument.new("t")
+    project.meta.project_root = str(tmp_path)
+    project.resources.extend(
+        [
+            ResourceItem(name="cube.sgy", path="cube.sgy", type="seismic", format="sgy"),
+            ResourceItem(
+                name="ExportWellHead.dat",
+                path="ExportWellHead.dat",
+                type="well_head",
+                format="dat",
+            ),
+            ResourceItem(name="w1.las", path="w1.las", type="well_log", format="las"),
+        ]
+    )
+
+    paths = resolve_joint_assets(project)
+
+    assert paths.segy == tmp_path / "cube.sgy"
+    assert paths.well_head == tmp_path / "ExportWellHead.dat"
+    assert paths.las_files == [tmp_path / "w1.las"]
+    assert paths.source == "project"
+    assert paths.has_minimum()
+
+
+def test_project_relative_path_escape_stays_outside(tmp_path: Path):
+    project = ProjectDocument.new("t")
+    project.meta.project_root = str(tmp_path)
+    project.resources.append(
+        ResourceItem(
+            name="escape",
+            path="../../outside.dat",
+            type="well_head",
+            format="dat",
+        )
+    )
+    paths = resolve_joint_assets(project)
+    # The join escapes the project root → not adopted (path stays as-is and
+    # the CWD-relative existence check drops it).
+    assert paths.well_head is None
+    assert paths.source == "empty"
+
+
 def test_path_hints_override_when_files_exist(tmp_path: Path):
     from paleo_workbench.project.models import JointAnalysisState
 

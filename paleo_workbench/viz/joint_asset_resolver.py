@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
 
+from paleo_workbench.project.paths import is_within_directory
 from paleo_workbench.project.models import ProjectDocument, ResourceItem
 
 
@@ -26,6 +27,26 @@ class JointAssetPaths:
     def has_minimum(self) -> bool:
         """Need at least SEGY or wells to attempt a useful scene."""
         return self.segy is not None or self.well_head is not None
+
+
+def _resolve_resource_path(path: Path, project: ProjectDocument) -> Path:
+    """Resolve a resource path against the project root when it is relative.
+
+    Saved projects store project-relative paths; checking them against the
+    process CWD silently dropped every joint asset after reopen. Absolute
+    paths pass through unchanged; relative joins are confined to the project
+    root (no ``..`` escape).
+    """
+    if path.is_absolute() or path.exists():
+        return path
+    root = str(getattr(getattr(project, "meta", None), "project_root", "") or "").strip()
+    if not root or root in {".", ".."}:
+        return path
+    root_path = Path(root).expanduser().resolve()
+    joined = (root_path / path).resolve()
+    if not is_within_directory(joined, root_path):
+        return path  # escape attempt — do not open files outside the project root
+    return joined
 
 
 def resolve_joint_assets(
@@ -125,7 +146,7 @@ def _from_project(project: ProjectDocument) -> JointAssetPaths:
     for res in resources:
         if not isinstance(res, ResourceItem):
             continue
-        path = Path(res.path)
+        path = _resolve_resource_path(Path(res.path), project)
         if not path.exists():
             continue
         rtype = (res.type or "").lower()
