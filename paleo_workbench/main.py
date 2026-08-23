@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import sys
 from pathlib import Path
 
@@ -71,26 +70,7 @@ def main() -> int:
     from paleo_workbench.viz.render_accel import install_geoviz_acceleration
 
     install_geoviz_acceleration()
-    try:
-        # Deferred: keep CLI startup light (pulls in pipeline + project stack).
-        from paleo_workbench.pipeline.bootstrap import (
-            bootstrap_sample_project,
-            resolve_sample_data_root,
-        )
-
-        data_root = resolve_sample_data_root()
-        project = bootstrap_sample_project(data_root).document
-    except Exception:
-        # A failed sample bootstrap should never crash startup, but silently
-        # swallowing it hid real config/data-root problems; log so a missing
-        # sample tree is diagnosable instead of an empty window with no clue.
-        logging.getLogger("paleo_workbench").warning(
-            "sample project bootstrap failed; starting with no project",
-            exc_info=True,
-        )
-        project = None
-
-    window = PaleoWorkbenchWindow(project=project)
+    window = PaleoWorkbenchWindow(project=None)
     window.show()
     return app.exec()
 
