@@ -25,6 +25,7 @@ Public surface (host contract):
 
 from __future__ import annotations
 
+import dataclasses
 import math
 import logging
 import sys
@@ -49,6 +50,9 @@ CONSTRAINED_IDW_ENGINE_LABEL = "constrained_idw"
 # well within budget.
 _MAX_GRID_RESOLUTION = 200
 _MIN_GRID_RESOLUTION = 20
+# Default level count for generation-time engine contours; matches
+# contour_draft.DEFAULT_N_LEVELS (#928).
+DEFAULT_CONTOUR_LEVELS = 8
 
 # Repository layout: the pure algorithm is vendored under
 # paleo_workbench/_vendored/haiyou_constrained_idw/ (Qt-free package roots).
@@ -410,7 +414,10 @@ def _cross_validated_r_squared(
                 barriers,
                 directions,
                 levels=[],
-                config=config,
+                # Folds only need the held-out surface sample; keep the
+                # upstream contour stage off so CV cost stays surface-only
+                # even though the main pass extracts contours (#928).
+                config=dataclasses.replace(config, extract_contours=False),
                 cancellation_token=cancellation_token,
             )
         except Exception:
@@ -628,16 +635,26 @@ def run_constrained_idw(
         direction_perpendicular_strength=1.85 if use_dirs else 1.0,
         direction_corridor_strength=2.65 if use_dirs else 1.0,
         well_anchor_preserve_anisotropy=True,
-        # We only need the interpolated surface (host re-derives contours via
-        # its own marching-squares contour-draft pipeline, consistent with
-        # the other methods). Skip haiyou's contour extraction to keep the
-        # import graph narrow (no contour_extractor) and avoid duplicate
-        # contour logic.
-        extract_contours=False,
+        # #928: run the vendored upstream contour pipeline (smooth / prune /
+        # join / barrier interruption) in the same engine pass — its refined
+        # isolines are an algorithm output, not a view-time re-derivation.
+        # The grid is bit-identical to the surface-only pass (verified by
+        # tests), and the R² folds below disable extraction explicitly.
+        extract_contours=True,
         # Geographic (degree) CRS: the engine's auto barrier buffer is
         # metre-calibrated; pass an explicit ~300 m buffer in degrees instead
         # of letting the metre constants expand to kilometres.
         barrier_buffer_distance=barrier_buffer_distance_for_crs(crs) or 0.0,
+    )
+
+    # Generation-time levels share the host's nice-step semantics (#928), so
+    # the stored engine contours match what the default draft would ask for.
+    from paleo_workbench.workflow.contour_draft import (
+        suggest_nice_levels_from_range,
+    )
+
+    contour_levels = suggest_nice_levels_from_range(
+        value_min, value_max, n_levels=DEFAULT_CONTOUR_LEVELS
     )
 
     if cancellation_token is not None:
@@ -650,7 +667,7 @@ def run_constrained_idw(
         list(boundary) if isinstance(boundary, list) else [boundary],
         barriers,
         directions,
-        levels=[],  # unused with extract_contours=False
+        levels=list(contour_levels),
         config=config,
         cancellation_token=cancellation_token,
     )
@@ -711,6 +728,17 @@ def run_constrained_idw(
         # Keep the resolved domain boundary so downstream consumers can show
         # the constrained interpolation extent (e.g. as a reference outline).
         "boundary": [[float(x), float(y)] for x, y in boundary_xy],
+        # #928: refined isolines from the vendored upstream pipeline. Level
+        # keys are strings so the payload is JSON/descriptor safe.
+        "contours": {
+            str(float(level)): [
+                [[float(p[0]), float(p[1])] for p in line]
+                for line in lines or []
+            ]
+            for level, lines in (getattr(result, "contours", None) or {}).items()
+        }
+        or None,
+        "contour_levels": [float(v) for v in contour_levels],
         "n_direction_lines": len(directions),
         "search_radius": search_radius,
         "decluster_radius": decluster_radius,

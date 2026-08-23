@@ -190,6 +190,7 @@ def read_grid_artifact(path: Path | str) -> FactorGridResult:
         created_at=descriptor.get("created_at"),
         variance_grid=variance_grid,
         boundary=boundary,
+        contours=descriptor.get("contours") or None,
     )
     # Prefer writer-produced statistics for immutable artifacts (avoids O(grid) scan).
     version = int(descriptor.get("artifact_version") or 1)

@@ -263,6 +263,10 @@ class FactorGridResult:
     # --- optional algorithm outputs (only when the method actually produces them)
     variance_grid: np.ndarray | None = None  # Kriging variance, float32 (height, width)
     boundary: list[tuple[float, float]] | None = None  # closed domain ring (constrained-IDW)
+    # Refined isolines from the vendored upstream contour pipeline (#928):
+    # {level_str: [[[x, y], ...], ...]} — JSON-safe; present only for
+    # constrained-IDW runs that generated contours at prepare time.
+    contours: dict[str, list[list[list[float]]]] | None = None
 
     # --- cached statistics (set by ``_finalise``) ------------------------------
     statistics: GridStatistics = field(init=False)
@@ -453,7 +457,20 @@ class FactorGridResult:
             "n_points": data.get("n_points"),
             "n_break_lines": data.get("n_break_lines", 0),
             "n_direction_lines": data.get("n_direction_lines", 0),
+            # Levels the engine contours were generated at (#928) — the draft
+            # prefers the stored refined isolines when its request matches.
+            "contour_levels": data.get("contour_levels"),
         }
+        raw_contours = data.get("contours")
+        contours = None
+        if isinstance(raw_contours, dict) and raw_contours:
+            contours = {
+                str(level): [
+                    [[float(x), float(y)] for x, y in line] for line in lines
+                ]
+                for level, lines in raw_contours.items()
+                if lines
+            } or None
         return cls(
             grid_z=grid_z,
             grid_x=grid_x,
@@ -468,6 +485,7 @@ class FactorGridResult:
             run_ref=run_ref,
             created_at=created_at,
             boundary=boundary,
+            contours=contours,
         )
 
     @classmethod
@@ -567,6 +585,10 @@ class FactorGridResult:
             "has_boundary": self.boundary is not None,
             "statistics": self.statistics.to_dict(),
         })
+        # Engine-refined contours (#928) ride the descriptor like the boundary
+        # ring: JSON-safe, small relative to the grid, and algorithm output.
+        if self.contours:
+            payload["contours"] = self.contours
 
     def to_legacy_dict(self) -> dict[str, Any]:
         """Backward-compatible dict for any legacy consumer.
