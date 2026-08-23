@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from PySide6.QtCore import QBuffer, QByteArray, QEvent, QIODevice, QPointF, QSize, Qt, QTimer
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from paleo_workbench.ui import tokens
 
@@ -38,7 +47,8 @@ class PdfPreviewWidget(QWidget):
         self._load_failed = False
         self._load_pending = False
         self._source_buffer: QBuffer | None = None
-        self.fit_mode = "page"
+        # 默认以宽度为主拉伸页面（连续滚动视图下最自然的阅读方式）
+        self.fit_mode = "width"
         self.zoom_percent = 100
 
         layout = QVBoxLayout(self)
@@ -50,6 +60,19 @@ class PdfPreviewWidget(QWidget):
         if status_changed is not None:
             status_changed.connect(self._on_document_status_changed)
         self._content_stack.addWidget(self.fallback_image)
+        # fallback 连续页面：所有页按宽度渲染进滚动区
+        self._fallback_page_labels: list[QLabel] = []
+        self._fallback_pages = QWidget()
+        self._fallback_pages_layout = QVBoxLayout(self._fallback_pages)
+        self._fallback_pages_layout.setContentsMargins(0, 0, 0, 0)
+        self._fallback_pages_layout.setSpacing(tokens.SPACE_1)
+        self._fallback_scroll = QScrollArea(self)
+        self._fallback_scroll.setWidgetResizable(True)
+        self._fallback_scroll.setWidget(self._fallback_pages)
+        scrollbar = self._fallback_scroll.verticalScrollBar()
+        if scrollbar is not None:
+            scrollbar.valueChanged.connect(self._on_fallback_scroll)
+        self._content_stack.addWidget(self._fallback_scroll)
         self._content_stack.setCurrentWidget(self.pdf_view or self.fallback_image)
         layout.addWidget(self._content_stack, 1)
 
@@ -109,6 +132,10 @@ class PdfPreviewWidget(QWidget):
                 signal = getattr(navigator, "currentZoomChanged", None)
                 if signal is not None:
                     signal.connect(self._on_current_zoom_changed)
+                # 连续滚动时同步当前页码显示
+                page_signal = getattr(navigator, "currentPageChanged", None)
+                if page_signal is not None:
+                    page_signal.connect(self._on_current_page_changed)
             except Exception:
                 pass
 
@@ -225,6 +252,28 @@ class PdfPreviewWidget(QWidget):
             self.zoom_label.setText(f"{self.zoom_percent}%")
         except Exception:
             pass
+
+    def _on_current_page_changed(self, page) -> None:
+        """连续滚动模式下，QPdfView 滚动时同步页码显示。"""
+        try:
+            page = int(page)
+        except Exception:
+            return
+        if page < 0 or page == self._page:
+            return
+        self._page = page
+        self._update_page_status()
+
+    def _update_page_status(self) -> None:
+        page_count = 0
+        if self.document is not None:
+            try:
+                page_count = self.document.pageCount()
+            except Exception:
+                page_count = 0
+        self.page_label.setText(f"{self._page + 1} / {page_count}")
+        self.prev_btn.setEnabled(self._page > 0)
+        self.next_btn.setEnabled(self._page < page_count - 1)
 
     def eventFilter(self, obj, event) -> bool:  # type: ignore[override]
         if obj is self.pdf_view and event.type() == QEvent.Type.Wheel:
@@ -376,14 +425,26 @@ class PdfPreviewWidget(QWidget):
             return
         if self._page < self.document.pageCount() - 1:
             self._page += 1
-            self._render_page()
+            self._goto_page()
 
     def previous_page(self) -> None:
         if self.document is None or self._load_failed:
             return
         if self._page > 0:
             self._page -= 1
-            self._render_page()
+            self._goto_page()
+
+    def _goto_page(self) -> None:
+        """连续模式下翻页 = 滚动定位到目标页，不重新渲染。"""
+        if self.pdf_view is not None:
+            navigator = self.pdf_view.pageNavigator()
+            navigator.jump(self._page, QPointF(), navigator.currentZoom())
+        elif 0 <= self._page < len(self._fallback_page_labels):
+            label = self._fallback_page_labels[self._page]
+            scrollbar = self._fallback_scroll.verticalScrollBar()
+            if scrollbar is not None:
+                scrollbar.setValue(label.y())
+        self._update_page_status()
 
     def _render_page(self) -> None:
         if self.document is None:
@@ -404,31 +465,88 @@ class PdfPreviewWidget(QWidget):
             self._content_stack.setCurrentWidget(self.pdf_view)
             import paleo_workbench.ui.pages.preview_widgets as preview_widgets
             view_cls = getattr(preview_widgets, "QPdfView", QPdfView)
-            page_mode = getattr(getattr(view_cls, "PageMode", None), "SinglePage", None)
+            page_mode_cls = getattr(view_cls, "PageMode", None)
+            # 连续页面滚动优先；旧 fake/环境无 MultiPage 时退回单页
+            page_mode = getattr(page_mode_cls, "MultiPage", None)
+            if page_mode is None:
+                page_mode = getattr(page_mode_cls, "SinglePage", None)
             if hasattr(self.pdf_view, "setPageMode") and page_mode is not None:
                 self.pdf_view.setPageMode(page_mode)
             navigator = self.pdf_view.pageNavigator()
             navigator.jump(self._page, QPointF(), navigator.currentZoom())
         else:
-            # fallback：render 尺寸乘以缩放因子
-            base_w = max(self.width(), 420)
-            base_h = max(self.height(), 560)
-            try:
-                factor = self.zoom_percent / 100.0
-                target = QSize(int(base_w * factor), int(base_h * factor))
-            except Exception:
-                target = QSize(base_w, base_h)
-            image = self.document.render(
-                self._page,
-                target,
-            )
-            if image.isNull():
-                self._show_fallback_message("PDF 页面渲染失败")
+            self._render_fallback_pages()
+        self._update_page_status()
+
+    def _render_fallback_pages(self) -> None:
+        """无 QPdfView 时的降级路径：所有页按宽度连续渲染进滚动区。"""
+        assert self.document is not None
+        page_count = self.document.pageCount()
+        try:
+            factor = self.zoom_percent / 100.0
+        except Exception:
+            factor = 1.0
+        viewport = self._fallback_scroll.viewport()
+        base_w = max(
+            viewport.width() if viewport is not None else 0,
+            self.width(),
+            420,
+        )
+        width = max(1, int(base_w * factor))
+        point_size = getattr(self.document, "pagePointSize", None)
+        first_failed = False
+        for i in range(page_count):
+            height = 0
+            if callable(point_size):
+                try:
+                    ps = point_size(i)
+                    if ps.width() > 0:
+                        height = int(width * ps.height() / ps.width())
+                except Exception:
+                    height = 0
+            if height <= 0:
+                height = int(width * 1.414)  # 默认 A4 纵向纵横比
+            image = self.document.render(i, QSize(width, height))
+            if i == 0 and (image is None or image.isNull()):
+                first_failed = True
+                break
+            label = self._ensure_fallback_label(i)
+            if image is None or image.isNull():
+                label.setText(f"第 {i + 1} 页渲染失败")
             else:
-                self._show_fallback_pixmap(QPixmap.fromImage(image))
-        self.page_label.setText(f"{self._page + 1} / {page_count}")
-        self.prev_btn.setEnabled(self._page > 0)
-        self.next_btn.setEnabled(self._page < page_count - 1)
+                label.setPixmap(QPixmap.fromImage(image))
+        if first_failed:
+            self._show_fallback_message("PDF 页面渲染失败")
+            return
+        # 尾页裁掉多余的 label（换到页数更少的文档时）
+        while len(self._fallback_page_labels) > page_count:
+            label = self._fallback_page_labels.pop()
+            self._fallback_pages_layout.removeWidget(label)
+            label.deleteLater()
+        self._content_stack.setCurrentWidget(self._fallback_scroll)
+
+    def _ensure_fallback_label(self, index: int) -> QLabel:
+        while len(self._fallback_page_labels) <= index:
+            label = QLabel()
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            label.setStyleSheet(f"background: {tokens.BG_HEADER};")
+            self._fallback_pages_layout.addWidget(label)
+            self._fallback_page_labels.append(label)
+        return self._fallback_page_labels[index]
+
+    def _on_fallback_scroll(self, value: int) -> None:
+        """fallback 连续滚动时按可视区中点更新当前页码。"""
+        if not self._fallback_page_labels:
+            return
+        viewport = self._fallback_scroll.viewport()
+        midpoint = value + (viewport.height() // 2 if viewport is not None else 0)
+        page = 0
+        for idx, label in enumerate(self._fallback_page_labels):
+            if midpoint >= label.y():
+                page = idx
+        if page != self._page:
+            self._page = page
+            self._update_page_status()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -494,9 +612,4 @@ class PdfPreviewWidget(QWidget):
     def _show_fallback_message(self, text: str) -> None:
         self.fallback_image.clear()
         self.fallback_image.setText(text)
-        self._content_stack.setCurrentWidget(self.fallback_image)
-
-    def _show_fallback_pixmap(self, pixmap: QPixmap) -> None:
-        self.fallback_image.clear()
-        self.fallback_image.setPixmap(pixmap)
         self._content_stack.setCurrentWidget(self.fallback_image)

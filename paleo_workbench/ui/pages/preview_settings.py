@@ -50,7 +50,7 @@ class PreviewSettings:
     smooth_images: bool = True
     geotiff_thumbnail_px: int = 256
     show_geo_metadata: bool = True
-    pdf_fit_mode: Literal["page", "width", "custom"] = "page"
+    pdf_fit_mode: Literal["page", "width", "custom"] = "width"
     pdf_zoom_percent: int = 100
     json_limit_mib: int = 5
     json_array_collapse_threshold: int = 100

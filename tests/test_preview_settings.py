@@ -39,7 +39,7 @@ def test_preview_settings_defaults_match_recommended_profile():
     assert settings.smooth_images is True
     assert settings.geotiff_thumbnail_px == 256
     assert settings.show_geo_metadata is True
-    assert settings.pdf_fit_mode == "page"
+    assert settings.pdf_fit_mode == "width"
     assert settings.pdf_zoom_percent == 100
     assert settings.json_limit_mib == 5
     assert settings.json_array_collapse_threshold == 100

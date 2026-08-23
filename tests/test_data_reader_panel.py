@@ -926,6 +926,7 @@ def test_reader_panel_uses_qpdfview_branch_for_successful_pdf_load(
     class FakePdfView(QLabel):
         class PageMode:
             SinglePage = "single-page"
+            MultiPage = "multi-page"
 
         def __init__(self, parent=None):
             super().__init__(parent)
@@ -981,7 +982,8 @@ def test_reader_panel_uses_qpdfview_branch_for_successful_pdf_load(
     assert panel.pdf_preview_widget.pdf_view is panel.pdf_widget.pdf_view
     assert panel.pdf_widget.pdf_view.document is panel.pdf_widget.document
     assert panel.pdf_widget.document.loaded_paths == [str(pdf_path)]
-    assert panel.pdf_widget.pdf_view.page_mode == FakePdfView.PageMode.SinglePage
+    # 连续页面滚动模式
+    assert panel.pdf_widget.pdf_view.page_mode == FakePdfView.PageMode.MultiPage
     assert panel.pdf_widget.pdf_view.navigator.jumps
     assert panel.pdf_widget.pdf_view.isVisible()
     assert not panel.pdf_widget.fallback_image.isVisible()
