@@ -26,6 +26,14 @@ export LIBGL_ALWAYS_SOFTWARE=1
 # even under the offscreen QPA plugin, so hide it.
 unset DISPLAY
 
+# Vendored GDAL (+PROJ) prefix: when present it replaces the system libgdal
+# for osgeo imports (scripts/build_vendored_gdal.sh, ADR 0060).
+GDAL_PREFIX="$ROOT/native/gdal-vendored/install"
+if [ -f "$GDAL_PREFIX/env.sh" ]; then
+    # shellcheck disable=SC1091
+    source "$GDAL_PREFIX/env.sh"
+fi
+
 engine_pythonpath() {
     # Omit the bare engine root when it contains a committed native .so
     # (same rule as paleo_workbench.env_bootstrap / packaging #435).

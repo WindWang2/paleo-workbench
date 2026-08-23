@@ -59,3 +59,4 @@ CMakeFiles/
 # #435). Native modules are built in-place under native/<pkg> and installed
 # editable, or from the geo-viz-engine submodule.
 *.cpython-3*-x86_64-linux-gnu.so
+native/gdal-vendored/
