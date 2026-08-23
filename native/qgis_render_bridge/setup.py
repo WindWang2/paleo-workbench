@@ -138,6 +138,10 @@ def _build_vendored_qgis() -> tuple[Path, Path]:
         "-DWITH_QUICK=OFF",
         "-DWITH_QTWEBENGINE=OFF",
         "-DWITH_QTPOSITIONING=OFF",
+        # PDAL (point clouds) is irrelevant to the 2D render bridge and its
+        # dev package is not in the CI apt list — the vendored default (ON)
+        # made every bridge configure fail at FindPDAL (#935 follow-up).
+        "-DWITH_PDAL=OFF",
         "-DWITH_INTERNAL_SPATIALINDEX=ON",
         "-DUSE_OPENCL=OFF",
         "-DENABLE_TESTS=OFF",
