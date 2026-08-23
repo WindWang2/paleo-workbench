@@ -132,25 +132,23 @@ class MappingPage(QWidget):
         self.map_toolbars.setObjectName("MapAuthoringToolbars")
         toolbar_layout = QVBoxLayout(self.map_toolbars)
         toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        toolbar_layout.setSpacing(0)
+        toolbar_layout.setSpacing(tokens.SPACE_1)
+        # Two icon-only rows (QGIS-theme icons): navigation + selection, then
+        # editing. Groups inside a row are separated by toolbar separators.
         toolbar_layout.addWidget(self.action_controller.toolbar(
-            "Map Navigation", (
-                "pan", "zoom_in", "zoom_out", "full_extent", "previous_extent", "next_extent", "refresh",
+            "Map Navigate and Select", (
+                ("pan", "zoom_in", "zoom_out", "full_extent", "previous_extent", "next_extent", "refresh"),
+                ("identify", "select", "select_rectangle", "measure_distance", "clear_selection", "select_all", "invert_selection"),
             ), self.map_toolbars
         ))
         toolbar_layout.addWidget(self.action_controller.toolbar(
-            "Selection", (
-                "identify", "select", "select_rectangle", "measure_distance", "clear_selection", "select_all", "invert_selection",
+            "Map Digitize", (
+                ("toggle_editing", "save_edits", "rollback"),
+                ("add_point", "add_line", "add_polygon", "move_feature", "vertex"),
+                ("undo", "redo", "delete_selected"),
+                ("split", "merge"),
+                ("snapping", "topology", "cancel"),
             ), self.map_toolbars
-        ))
-        toolbar_layout.addWidget(self.action_controller.toolbar(
-            "Digitizing", (
-                "toggle_editing", "save_edits", "rollback", "add_point", "add_line",
-                "add_polygon", "move_feature", "vertex", "delete_selected", "undo", "redo",
-            ), self.map_toolbars
-        ))
-        toolbar_layout.addWidget(self.action_controller.toolbar(
-            "Advanced Editing", ("split", "merge", "snapping", "topology", "cancel"), self.map_toolbars
         ))
         outer.addWidget(self.map_toolbars)
 

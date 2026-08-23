@@ -319,6 +319,35 @@ def build_qss(density: str = "comfortable") -> str:
         background: {BG_SEARCH};
         border-color: {BORDER};
     }}
+    QToolBar {{
+        background-color: {BG_SIDEBAR};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_BUTTON}px;
+        spacing: 2px;
+        padding: 3px;
+    }}
+    QToolBar::separator {{
+        width: 1px;
+        background: {BORDER};
+        margin: 4px 6px;
+    }}
+    QToolButton {{
+        background-color: transparent;
+        border: none;
+        border-radius: 4px;
+        padding: 3px;
+    }}
+    QToolButton:hover {{
+        background-color: {BG_SEARCH};
+        border: 1px solid {BORDER_LIGHT};
+    }}
+    QToolButton:pressed, QToolButton:checked {{
+        background-color: {BG_NAV_ACTIVE};
+        border: 1px solid {BORDER_STRONG};
+    }}
+    QToolButton:disabled {{
+        background-color: transparent;
+    }}
     QTableWidget, QTreeView, QListView, QTableView {{
         background-color: {BG_SIDEBAR};
         alternate-background-color: {BG_RAIL_BOTTOM};
