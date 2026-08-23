@@ -1,7 +1,9 @@
 """Tests for the workbench stratal adapter (workflow glue over geoviz facade).
 
-These use the synthetic demo volume/horizons so they run without a real SEGY or
-OpenGL context. The engine math they delegate to is covered in the engine repo.
+Most tests use the synthetic demo volume/horizons so they run without a real
+SEGY or OpenGL context. The single Renderer3D test is marked ``opengl`` and
+is skipped on the offscreen CI platform (no software-GL leg today — #940-1);
+engine math it delegates to is covered in the engine repo.
 """
 
 from __future__ import annotations
@@ -114,8 +116,14 @@ def test_stratal_ms_to_sample_index_endpoints_and_monotonicity():
     assert degenerate == pytest.approx(30.0 / stride)
 
 
+@pytest.mark.opengl  # #940-1: requires real GL; skipped on offscreen CI (no coverage leg today)
 def test_stratal_adapter_end_to_end_with_demo_and_renderer(qtbot):
-    """The full demo path: synthetic volume + horizons -> Renderer3D planes."""
+    """The full demo path: synthetic volume + horizons -> Renderer3D planes.
+
+    #940-1: this is the only stratal test that needs a real OpenGL context.
+    # Pure-math stratal tests above run everywhere; this one is permanently
+    # skipped on offscreen CI and has no dedicated software-GL leg today.
+    """
     from geoviz_seismic.renderer_3d import Renderer3D
     from paleo_workbench.viz.stratal_adapter import (
         build_stratal_surfaces,

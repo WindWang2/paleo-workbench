@@ -29,6 +29,9 @@ requires_real_opengl = pytest.mark.skipif(
     not _opengl_widget_supported(),
     reason="GLViewWidget show()/teardown segfaults without a real OpenGL context (offscreen platform)",
 )
+# #940-1: unified ``opengl`` marker — no CI leg covers opengl today (offscreen
+# platform has no software-GL leg; these tests are permanently skipped on CI).
+opengl_only = pytest.mark.opengl
 from paleo_workbench.ui.pages.geological_modeling_workers import (
     GeologicalModelingWorker,
     ExportWorker,
@@ -167,6 +170,7 @@ def test_geological_modeling_3d_page_clip_and_tie_without_show(qtbot):
     assert page.bh_raw_data == []
 
 
+@opengl_only
 @requires_real_opengl
 def test_geological_modeling_3d_page_splitter_layout(qtbot):
     page = GeologicalModeling3DPage()
