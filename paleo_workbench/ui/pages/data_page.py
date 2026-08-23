@@ -460,6 +460,9 @@ class DataPage(QWidget):
                     flush=True,
                 )
                 _last[0] = now
+        # #937-9: the trash view and the trash count both rebuild companion
+        # items per refresh; compute once.
+        trashed_companions = self._trashed_companions()
         self._resources = resources
         self._artifacts = artifacts or []
         preview_root = self._preview_disk_project_root()
@@ -473,7 +476,7 @@ class DataPage(QWidget):
         catalog_rows = self._lifecycle.catalog_only_rows(enricher)
         display_resources = list(self._resources)
         if self._trash_view_active():
-            display_resources.extend(self._trashed_companions())
+            display_resources.extend(trashed_companions)
         # Build the enriched row views ONCE per refresh (#527): every build
         # probes the filesystem (exists/stat per resource), and the counts
         # pass, the filter index and the table model each used to rebuild
@@ -501,7 +504,7 @@ class DataPage(QWidget):
             enricher=enricher,
             views=shared_views,
         )
-        self.navigation_tree.set_trash_count(len(self._trashed_companions()))
+        self.navigation_tree.set_trash_count(len(trashed_companions))
         # WorkArea entity-first section: rebuild only when the domain
         # signature changed (shared helper — must match the map page's gate).
         signature = domain_signature(self.project)
@@ -1738,6 +1741,8 @@ class DataPage(QWidget):
 
     @Slot(object)
     def _on_verify_finished(self, report: IntegrityCheckReport) -> None:
+        if self._verify_job.target is not self.project:
+            return
         if report.checksum_updates:
             for res in self._resources:
                 if res.id in report.checksum_updates:
@@ -1752,6 +1757,8 @@ class DataPage(QWidget):
 
     @Slot(str)
     def _on_verify_failed(self, message: str) -> None:
+        if self._verify_job.target is not self.project:
+            return
         self.data_toolbar.set_verify_running(False)
         self._set_action_status(f"完整性校验失败: {message}")
 
