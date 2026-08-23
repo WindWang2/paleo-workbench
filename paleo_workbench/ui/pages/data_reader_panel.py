@@ -112,6 +112,37 @@ class DataReaderPanel(QFrame):
         self._table_toolbar.setVisible(False)
         layout.addWidget(self._table_toolbar)
 
+        # 图片缩放 toolbar — 仅在图片预览时显示
+        self._image_toolbar = QWidget()
+        self._image_toolbar.setObjectName("ImageZoomToolbar")
+        _img_tb_layout = QHBoxLayout(self._image_toolbar)
+        _img_tb_layout.setContentsMargins(0, 0, 0, 0)
+        _img_tb_layout.setSpacing(tokens.SPACE_1)
+        _img_tb_layout.addStretch()
+        self._image_fit_btn = QPushButton("适应窗口")
+        self._image_fit_btn.setObjectName("SecondaryButton")
+        self._image_fit_btn.setCheckable(True)
+        self._image_fit_btn.setChecked(True)
+        self._image_fit_btn.setToolTip("适应窗口大小")
+        self._image_fit_btn.clicked.connect(self._on_image_fit_toggled)
+        _img_tb_layout.addWidget(self._image_fit_btn)
+        self._image_zoom_out_btn = QPushButton("−")
+        self._image_zoom_out_btn.setObjectName("SecondaryButton")
+        self._image_zoom_out_btn.setToolTip("缩小")
+        self._image_zoom_out_btn.clicked.connect(self._on_image_zoom_out)
+        _img_tb_layout.addWidget(self._image_zoom_out_btn)
+        self._image_zoom_label = QLabel("100%")
+        self._image_zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._image_zoom_label.setMinimumWidth(48)
+        _img_tb_layout.addWidget(self._image_zoom_label)
+        self._image_zoom_in_btn = QPushButton("+")
+        self._image_zoom_in_btn.setObjectName("SecondaryButton")
+        self._image_zoom_in_btn.setToolTip("放大")
+        self._image_zoom_in_btn.clicked.connect(self._on_image_zoom_in)
+        _img_tb_layout.addWidget(self._image_zoom_in_btn)
+        self._image_toolbar.setVisible(False)
+        layout.addWidget(self._image_toolbar)
+
         self.stack = QStackedWidget()
         layout.addWidget(self.stack, 1)
 
@@ -182,6 +213,11 @@ class DataReaderPanel(QFrame):
 
         self.stack.setCurrentWidget(self.empty_label)
         self.apply_preview_settings(self.preview_settings)
+        # 图片缩放变化时同步百分比标签
+        try:
+            self.image_preview_widget.zoom_changed.connect(self._sync_image_zoom_ui)
+        except Exception:
+            pass
 
         # Dispatch table for _load_target_widget: each handler loads the result
         # into its widget and returns the widget. Unknown modes fall through to
@@ -219,6 +255,8 @@ class DataReaderPanel(QFrame):
         self.current_mode = "loading"
         if hasattr(self, "_table_toolbar"):
             self._table_toolbar.setVisible(False)
+        if hasattr(self, "_image_toolbar"):
+            self._image_toolbar.setVisible(False)
         self.reader_mode_changed.emit("loading")
 
     def update_asset(self, asset: ResourceItem | ExportArtifact | None) -> None:
@@ -462,6 +500,12 @@ class DataReaderPanel(QFrame):
                 self._table_copy_btn.setToolTip(self.table_preview.truncation_message)
             elif hasattr(self, "_table_copy_btn"):
                 self._table_copy_btn.setToolTip("将当前表格以 TSV 复制到剪贴板")
+        # 图片缩放工具栏仅在图片模式下可见
+        if hasattr(self, "_image_toolbar"):
+            is_image = target is self.image_preview_widget
+            self._image_toolbar.setVisible(is_image)
+            if is_image:
+                self._sync_image_zoom_ui()
         self.reader_mode_changed.emit(result.mode)
 
     def apply_preview_settings(self, settings) -> None:
@@ -563,6 +607,36 @@ class DataReaderPanel(QFrame):
                 pass
 
         QTimer.singleShot(1200, _restore)
+
+    def _on_image_fit_toggled(self, checked: bool) -> None:
+        self.image_preview_widget.set_fit_mode(checked)
+        self._sync_image_zoom_ui()
+
+    def _on_image_zoom_in(self) -> None:
+        self.image_preview_widget.zoom_in()
+        self._sync_image_zoom_ui()
+
+    def _on_image_zoom_out(self) -> None:
+        self.image_preview_widget.zoom_out()
+        self._sync_image_zoom_ui()
+
+    def _sync_image_zoom_ui(self, *_args) -> None:
+        factor = getattr(self.image_preview_widget, "_zoom_factor", 1.0)
+        fit = getattr(self.image_preview_widget, "_fit_mode", True)
+        if hasattr(self, "_image_zoom_label"):
+            try:
+                self._image_zoom_label.setText(f"{int(round(float(factor) * 100))}%")
+            except Exception:
+                pass
+        if hasattr(self, "_image_fit_btn"):
+            try:
+                self._image_fit_btn.blockSignals(True)
+                self._image_fit_btn.setChecked(bool(fit))
+            finally:
+                try:
+                    self._image_fit_btn.blockSignals(False)
+                except Exception:
+                    pass
 
     def _open_with_system_app(self) -> None:
         path = getattr(self._current_result, "path", "") or ""

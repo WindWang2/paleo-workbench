@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QPixmap
 from PySide6.QtPdf import QPdfDocument
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui import tokens
@@ -18,6 +18,18 @@ from paleo_workbench.ui.pages.preview_strategy import (
 
 
 class PdfPreviewPanel(QWidget):
+    """Detail-card PDF preview with interactive zoom.
+
+    渲染尺寸 = 基准 QSize(420,560) × factor，步进 ×1.25/次，夹紧 10%–800%。
+    image_label 置于 QScrollArea 中以支持放大后的平移滚动；翻页保持当前 factor；
+    Ctrl+滚轮可缩放（仅影响当前会话）。
+    """
+
+    _BASE_SIZE = QSize(420, 560)
+    _ZOOM_STEP = 1.25
+    _MIN_FACTOR = 0.10
+    _MAX_FACTOR = 8.00
+
     def __init__(self, document: QPdfDocument, parent=None):
         super().__init__(parent)
         self.setObjectName("PdfPreviewPanel")
@@ -27,6 +39,7 @@ class PdfPreviewPanel(QWidget):
         if document is not None:
             document.setParent(self)
         self._page_index = 0
+        self._zoom_factor = 1.0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -35,7 +48,12 @@ class PdfPreviewPanel(QWidget):
         self.image_label = QLabel()
         self.image_label.setObjectName("DataPreviewPdf")
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.image_label)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setObjectName("DataPreviewPdfScrollArea")
+        self.scroll_area.setWidgetResizable(False)
+        self.scroll_area.setWidget(self.image_label)
+        layout.addWidget(self.scroll_area, 1)
 
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
@@ -44,6 +62,24 @@ class PdfPreviewPanel(QWidget):
         self.prev_button.setObjectName("DataPreviewPdfPrevious")
         self.prev_button.clicked.connect(self.previous_page)
         controls.addWidget(self.prev_button)
+
+        self.zoom_out_button = QPushButton("\u2212")
+        self.zoom_out_button.setObjectName("SecondaryButton")
+        self.zoom_out_button.setToolTip("缩小")
+        self.zoom_out_button.clicked.connect(self.zoom_out)
+        controls.addWidget(self.zoom_out_button)
+
+        self.zoom_label = QLabel("100%")
+        self.zoom_label.setObjectName("DataPreviewPdfZoomLabel")
+        self.zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.zoom_label.setMinimumWidth(48)
+        controls.addWidget(self.zoom_label)
+
+        self.zoom_in_button = QPushButton("+")
+        self.zoom_in_button.setObjectName("SecondaryButton")
+        self.zoom_in_button.setToolTip("放大")
+        self.zoom_in_button.clicked.connect(self.zoom_in)
+        controls.addWidget(self.zoom_in_button)
 
         self.page_label = QLabel()
         self.page_label.setObjectName("DataPreviewPdfPageLabel")
@@ -56,10 +92,67 @@ class PdfPreviewPanel(QWidget):
         controls.addWidget(self.next_button)
         layout.addLayout(controls)
 
+        # Ctrl+wheel zoom: viewport consumes wheel events, filter it.
+        self.scroll_area.viewport().installEventFilter(self)
+
+        self._update_zoom_label()
         self._render_page()
 
+    def zoom_in(self) -> None:
+        self._set_zoom_factor(self._zoom_factor * self._ZOOM_STEP)
+
+    def zoom_out(self) -> None:
+        self._set_zoom_factor(self._zoom_factor / self._ZOOM_STEP)
+
+    def _set_zoom_factor(self, factor: float) -> None:
+        clamped = max(self._MIN_FACTOR, min(self._MAX_FACTOR, factor))
+        # avoid redundant render when already clamped at boundary
+        if abs(clamped - self._zoom_factor) < 1e-9:
+            self._update_zoom_label()
+            return
+        self._zoom_factor = clamped
+        self._update_zoom_label()
+        self._render_page()
+
+    def _update_zoom_label(self) -> None:
+        percent = int(round(self._zoom_factor * 100))
+        self.zoom_label.setText(f"{percent}%")
+
+    def eventFilter(self, obj, event):  # type: ignore[override]
+        try:
+            from PySide6.QtCore import QEvent
+            if obj is self.scroll_area.viewport() and event.type() == QEvent.Type.Wheel:
+                if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                    delta = event.angleDelta().y()
+                    if delta > 0:
+                        self.zoom_in()
+                    elif delta < 0:
+                        self.zoom_out()
+                    event.accept()
+                    return True
+        except Exception:
+            pass
+        return super().eventFilter(obj, event)
+
+    def wheelEvent(self, event):  # type: ignore[override]
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            delta = event.angleDelta().y()
+            if delta > 0:
+                self.zoom_in()
+            elif delta < 0:
+                self.zoom_out()
+            event.accept()
+            return
+        super().wheelEvent(event)
+
     def next_page(self) -> None:
-        if self._page_index < self._document.pageCount() - 1:
+        if self._document is None:
+            return
+        try:
+            count = self._document.pageCount()
+        except Exception:
+            return
+        if self._page_index < count - 1:
             self._page_index += 1
             self._render_page()
 
@@ -69,13 +162,35 @@ class PdfPreviewPanel(QWidget):
             self._render_page()
 
     def _render_page(self) -> None:
-        image = self._document.render(self._page_index, QSize(420, 560))
-        if not image.isNull():
-            self.image_label.setPixmap(QPixmap.fromImage(image))
-        page_count = self._document.pageCount()
-        self.page_label.setText(f"{self._page_index + 1} / {page_count}")
+        if self._document is None:
+            self.page_label.setText(f"{self._page_index + 1} / 0")
+            self.prev_button.setEnabled(False)
+            self.next_button.setEnabled(False)
+            self._update_zoom_label()
+            return
+        try:
+            page_count = self._document.pageCount()
+        except Exception:
+            page_count = 0
+        w = int(round(self._BASE_SIZE.width() * self._zoom_factor))
+        h = int(round(self._BASE_SIZE.height() * self._zoom_factor))
+        render_size = QSize(max(1, w), max(1, h))
+        try:
+            image = self._document.render(self._page_index, render_size)
+        except Exception:
+            image = None
+        if image is not None and not image.isNull():
+            pix = QPixmap.fromImage(image)
+            self.image_label.setPixmap(pix)
+            # QLabel size must track pixmap for scrollbars to appear (widgetResizable=False)
+            self.image_label.resize(pix.size())
+        if page_count <= 0:
+            self.page_label.setText(f"{self._page_index + 1} / 0")
+        else:
+            self.page_label.setText(f"{self._page_index + 1} / {page_count}")
         self.prev_button.setEnabled(self._page_index > 0)
-        self.next_button.setEnabled(self._page_index < page_count - 1)
+        self.next_button.setEnabled(page_count > 0 and self._page_index < page_count - 1)
+        self._update_zoom_label()
 
 
 class DataDetailPanel(QFrame):

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QPointF, QSize, Qt, QTimer
+from PySide6.QtCore import QBuffer, QByteArray, QEvent, QIODevice, QPointF, QSize, Qt, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
+
+from paleo_workbench.ui import tokens
 
 try:
     from PySide6.QtPdf import QPdfDocument
@@ -13,6 +15,10 @@ try:
     from PySide6.QtPdfWidgets import QPdfView
 except ImportError:  # pragma: no cover
     QPdfView = None
+
+_ZOOM_MIN = 10
+_ZOOM_MAX = 800
+_ZOOM_STEP = 1.25
 
 
 class PdfPreviewWidget(QWidget):
@@ -48,6 +54,7 @@ class PdfPreviewWidget(QWidget):
         layout.addWidget(self._content_stack, 1)
 
         controls = QHBoxLayout()
+        controls.setSpacing(tokens.SPACE_2)
         self.prev_btn = QPushButton("上一页")
         self.prev_btn.setObjectName("SecondaryButton")
         self.prev_btn.clicked.connect(self.previous_page)
@@ -59,11 +66,53 @@ class PdfPreviewWidget(QWidget):
         self.copy_all_btn = QPushButton("复制全部文本")
         self.copy_all_btn.setObjectName("SecondaryButton")
         self.copy_all_btn.clicked.connect(self._copy_all_text)
+
+        # 缩放控件
+        self.fit_page_btn = QPushButton("适应窗口")
+        self.fit_page_btn.setObjectName("SecondaryButton")
+        self.fit_page_btn.setCheckable(True)
+        self.fit_width_btn = QPushButton("适应宽度")
+        self.fit_width_btn.setObjectName("SecondaryButton")
+        self.fit_width_btn.setCheckable(True)
+        self.zoom_out_btn = QPushButton("−")
+        self.zoom_out_btn.setObjectName("SecondaryButton")
+        self.zoom_in_btn = QPushButton("+")
+        self.zoom_in_btn.setObjectName("SecondaryButton")
+        self.zoom_label = QLabel(f"{self.zoom_percent}%")
+        self.zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.zoom_label.setMinimumWidth(48)
+
+        self.fit_page_btn.clicked.connect(self._on_fit_page_clicked)
+        self.fit_width_btn.clicked.connect(self._on_fit_width_clicked)
+        self.zoom_out_btn.clicked.connect(self._zoom_out)
+        self.zoom_in_btn.clicked.connect(self._zoom_in)
+
         controls.addWidget(self.prev_btn)
         controls.addWidget(self.page_label, 1)
         controls.addWidget(self.next_btn)
+        controls.addWidget(self.fit_page_btn)
+        controls.addWidget(self.fit_width_btn)
+        controls.addWidget(self.zoom_out_btn)
+        controls.addWidget(self.zoom_label)
+        controls.addWidget(self.zoom_in_btn)
         controls.addWidget(self.copy_all_btn)
         layout.addLayout(controls)
+
+        if self.pdf_view is not None:
+            try:
+                self.pdf_view.installEventFilter(self)
+            except Exception:
+                pass
+            # 同步缩放百分比显示：监听 pageNavigator currentZoomChanged（fake 环境无此信号）
+            try:
+                navigator = self.pdf_view.pageNavigator()
+                signal = getattr(navigator, "currentZoomChanged", None)
+                if signal is not None:
+                    signal.connect(self._on_current_zoom_changed)
+            except Exception:
+                pass
+
+        self._sync_zoom_ui()
 
         if self.document is None:
             self._show_fallback_message("PDF 预览不可用")
@@ -73,20 +122,160 @@ class PdfPreviewWidget(QWidget):
             self.copy_all_btn.setEnabled(False)
             self.copy_all_btn.setVisible(False)
 
+    # -- 缩放核心 --
+
+    def _clamp_zoom(self, value: int) -> int:
+        return max(_ZOOM_MIN, min(_ZOOM_MAX, int(value)))
+
+    def _sync_zoom_ui(self) -> None:
+        if hasattr(self, "zoom_label"):
+            try:
+                self.zoom_label.setText(f"{self.zoom_percent}%")
+            except Exception:
+                pass
+        if hasattr(self, "fit_page_btn") and hasattr(self, "fit_width_btn"):
+            try:
+                self.fit_page_btn.blockSignals(True)
+                self.fit_width_btn.blockSignals(True)
+                self.fit_page_btn.setChecked(self.fit_mode == "page")
+                self.fit_width_btn.setChecked(self.fit_mode == "width")
+            finally:
+                try:
+                    self.fit_page_btn.blockSignals(False)
+                except Exception:
+                    pass
+                try:
+                    self.fit_width_btn.blockSignals(False)
+                except Exception:
+                    pass
+
+    def _apply_fit_mode(self) -> None:
+        self._sync_zoom_ui()
+        if self.pdf_view is not None:
+            try:
+                import paleo_workbench.ui.pages.preview_widgets as preview_widgets
+                view_cls = getattr(preview_widgets, "QPdfView", QPdfView)
+                if view_cls is None:
+                    view_cls = QPdfView
+                if view_cls is not None and hasattr(view_cls, "ZoomMode") and hasattr(self.pdf_view, "setZoomMode"):
+                    if self.fit_mode == "page":
+                        self.pdf_view.setZoomMode(view_cls.ZoomMode.FitInView)
+                    elif self.fit_mode == "width":
+                        self.pdf_view.setZoomMode(view_cls.ZoomMode.FitToWidth)
+            except Exception:
+                pass
+        else:
+            # fallback 路径：重新渲染以反映 fit 切换（fit 下按基础尺寸渲染）
+            if self._path and self.document is not None and self.document.pageCount() > 0:
+                self._render_page()
+
+    def _apply_custom_zoom(self) -> None:
+        self._sync_zoom_ui()
+        if self.pdf_view is not None:
+            try:
+                import paleo_workbench.ui.pages.preview_widgets as preview_widgets
+                view_cls = getattr(preview_widgets, "QPdfView", QPdfView)
+                if view_cls is None:
+                    view_cls = QPdfView
+                if view_cls is not None and hasattr(view_cls, "ZoomMode") and hasattr(self.pdf_view, "setZoomMode"):
+                    self.pdf_view.setZoomMode(view_cls.ZoomMode.Custom)
+                if hasattr(self.pdf_view, "setZoomFactor"):
+                    self.pdf_view.setZoomFactor(self.zoom_percent / 100.0)
+            except Exception:
+                pass
+        else:
+            if self._path and self.document is not None and self.document.pageCount() > 0:
+                self._render_page()
+
+    def _on_fit_page_clicked(self) -> None:
+        # 手写互斥：点击即进入 page 模式
+        self.fit_mode = "page"
+        self._apply_fit_mode()
+
+    def _on_fit_width_clicked(self) -> None:
+        self.fit_mode = "width"
+        self._apply_fit_mode()
+
+    def _zoom_in(self) -> None:
+        new_percent = self._clamp_zoom(int(round(self.zoom_percent * _ZOOM_STEP)))
+        if new_percent == self.zoom_percent:
+            return
+        self.zoom_percent = new_percent
+        self.fit_mode = "custom"
+        self._apply_custom_zoom()
+
+    def _zoom_out(self) -> None:
+        new_percent = self._clamp_zoom(int(round(self.zoom_percent / _ZOOM_STEP)))
+        if new_percent == self.zoom_percent:
+            # 已在边界，避免死循环
+            return
+        self.zoom_percent = new_percent
+        self.fit_mode = "custom"
+        self._apply_custom_zoom()
+
+    def _on_current_zoom_changed(self, zoom: float) -> None:
+        try:
+            percent = int(round(float(zoom) * 100))
+        except Exception:
+            return
+        percent = self._clamp_zoom(percent)
+        # 仅更新标签显示，保持 fit_mode 不变（由交互逻辑驱动 fit_mode）
+        self.zoom_percent = percent
+        try:
+            self.zoom_label.setText(f"{self.zoom_percent}%")
+        except Exception:
+            pass
+
+    def eventFilter(self, obj, event) -> bool:  # type: ignore[override]
+        if obj is self.pdf_view and event.type() == QEvent.Type.Wheel:
+            try:
+                mods = event.modifiers()
+            except Exception:
+                mods = Qt.KeyboardModifier.NoModifier
+            if mods & Qt.KeyboardModifier.ControlModifier:
+                try:
+                    delta = event.angleDelta().y()
+                except Exception:
+                    delta = 0
+                # 滚轮向上放大，向下缩小
+                if delta > 0:
+                    self._zoom_in()
+                elif delta < 0:
+                    self._zoom_out()
+                return True
+        return super().eventFilter(obj, event)
+
     def apply_settings(self, settings) -> None:
         self.fit_mode = settings.pdf_fit_mode
-        self.zoom_percent = settings.pdf_zoom_percent
+        self.zoom_percent = self._clamp_zoom(settings.pdf_zoom_percent)
+        self._sync_zoom_ui()
         if self.pdf_view is None or QPdfView is None:
+            # fallback 仍需重绘以应用缩放
+            if self.pdf_view is None and self.document is not None and self._path and self.document.pageCount() > 0:
+                try:
+                    self._render_page()
+                except Exception:
+                    pass
             return
-        if not hasattr(self.pdf_view, "setZoomMode") or not hasattr(QPdfView, "ZoomMode"):
+        if not hasattr(self.pdf_view, "setZoomMode"):
             return
-        if self.fit_mode == "page":
-            self.pdf_view.setZoomMode(QPdfView.ZoomMode.FitInView)
-        elif self.fit_mode == "width":
-            self.pdf_view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
-        else:
-            self.pdf_view.setZoomMode(QPdfView.ZoomMode.Custom)
-            self.pdf_view.setZoomFactor(self.zoom_percent / 100.0)
+        import paleo_workbench.ui.pages.preview_widgets as preview_widgets
+        view_cls = getattr(preview_widgets, "QPdfView", QPdfView)
+        if view_cls is None:
+            view_cls = QPdfView
+        if view_cls is None or not hasattr(view_cls, "ZoomMode"):
+            return
+        try:
+            if self.fit_mode == "page":
+                self.pdf_view.setZoomMode(view_cls.ZoomMode.FitInView)
+            elif self.fit_mode == "width":
+                self.pdf_view.setZoomMode(view_cls.ZoomMode.FitToWidth)
+            else:
+                self.pdf_view.setZoomMode(view_cls.ZoomMode.Custom)
+                if hasattr(self.pdf_view, "setZoomFactor"):
+                    self.pdf_view.setZoomFactor(self.zoom_percent / 100.0)
+        except Exception:
+            pass
 
     def load(
         self,
@@ -221,9 +410,17 @@ class PdfPreviewWidget(QWidget):
             navigator = self.pdf_view.pageNavigator()
             navigator.jump(self._page, QPointF(), navigator.currentZoom())
         else:
+            # fallback：render 尺寸乘以缩放因子
+            base_w = max(self.width(), 420)
+            base_h = max(self.height(), 560)
+            try:
+                factor = self.zoom_percent / 100.0
+                target = QSize(int(base_w * factor), int(base_h * factor))
+            except Exception:
+                target = QSize(base_w, base_h)
             image = self.document.render(
                 self._page,
-                QSize(max(self.width(), 420), max(self.height(), 560)),
+                target,
             )
             if image.isNull():
                 self._show_fallback_message("PDF 页面渲染失败")
