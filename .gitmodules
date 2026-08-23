@@ -4,3 +4,9 @@
 [submodule "well-log-engine"]
 	path = well-log-engine
 	url = https://github.com/WindWang2/well-log-engine.git
+[submodule "third_party/gdal"]
+	path = third_party/gdal
+	url = https://github.com/OSGeo/gdal.git
+[submodule "third_party/proj"]
+	path = third_party/proj
+	url = https://github.com/OSGeo/PROJ.git

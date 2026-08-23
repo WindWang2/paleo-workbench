@@ -1675,3 +1675,112 @@ def test_fs_probe_cache_matches_legacy_semantics(tmp_path):
         assert view_cached.integrity_state == view_legacy.integrity_state
         assert view_cached.modified_at == view_legacy.modified_at
         assert view_cached.size_bytes == view_legacy.size_bytes
+
+
+def test_summary_ready_prefetches_visualization_preview(qtbot, tmp_path: Path):
+    """选中即后台预取：可视化预览选项卡打开时内容已就绪，不再停留在提示语。"""
+    las = tmp_path / "well.las"
+    las.write_text("~V\n~W\n~C\n~A\n 0.0 1.0\n", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    resource = ResourceItem(
+        name="well.las", type="well_log", format="las", path=str(las)
+    )
+    project.resources.append(resource)
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page._set_selected_asset(resource)
+
+    requested: list[object] = []
+    page._visualization_controller.request = lambda asset: requested.append(asset)
+
+    from paleo_workbench.resources.preview_parsers import PreviewResult
+
+    page._on_summary_ready(
+        PreviewResult(
+            mode="well_log",
+            title="well.las",
+            path=str(las),
+            visualization_available=True,
+        )
+    )
+    assert requested == [resource]
+
+    # Same asset again → no duplicate prefetch.
+    page._on_summary_ready(
+        PreviewResult(
+            mode="well_log",
+            title="well.las",
+            path=str(las),
+            visualization_available=True,
+        )
+    )
+    assert requested == [resource]
+
+
+def test_summary_ready_without_visualization_support_skips_prefetch(qtbot, tmp_path: Path):
+    doc = tmp_path / "notes.txt"
+    doc.write_text("hello", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    resource = ResourceItem(
+        name="notes.txt", type="document", format="txt", path=str(doc)
+    )
+    project.resources.append(resource)
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page._set_selected_asset(resource)
+
+    requested: list[object] = []
+    page._visualization_controller.request = lambda asset: requested.append(asset)
+
+    from paleo_workbench.resources.preview_parsers import PreviewResult
+
+    page._on_summary_ready(
+        PreviewResult(mode="text", title="notes.txt", path=str(doc), text="hello")
+    )
+    assert requested == []
+
+
+def test_entity_query_with_single_asset_id(qtbot):
+    """井文件叶：asset_id 查询只命中该资产（含 legacy id 旁路）。"""
+    page = DataPage(project=ProjectDocument.new("Demo"))
+    qtbot.addWidget(page)
+    query = FilterQuery(node_type="entity", node_value="w1", asset_id="asset_9")
+    resolved = page._entity_query_with_ids(query)
+    assert resolved.entity_asset_ids == frozenset({"asset_9"})
+
+
+def test_file_leaf_filters_grid_and_selects_asset(qtbot):
+    """点击井下的文件叶：网格过滤到该单个资产并自动选中（联动预览）。"""
+    from PySide6.QtWidgets import QApplication
+
+    from paleo_workbench.project.domain import EntityAssetLink, WellEntity
+
+    doc = ProjectDocument.new("Demo")
+    well = WellEntity(name="A1")
+    doc.wells.append(well)
+    res = ResourceItem(name="A1.las", path="/tmp/A1.las", type="well_log", format="las")
+    other = ResourceItem(name="A2.las", path="/tmp/A2.las", type="well_log", format="las")
+    doc.resources.extend([res, other])
+    doc.entity_asset_links.append(
+        EntityAssetLink(
+            entity_type="well",
+            entity_id=well.id,
+            asset_id=str(res.id),
+            role="well_head",
+        )
+    )
+    page = DataPage(project=doc)
+    qtbot.addWidget(page)
+    page.show()
+    QApplication.processEvents()
+
+    tree = page.navigation_tree
+    tree.set_project(doc)
+    well_item = tree._well_group_item.child(0)
+    leaf = well_item.child(0)
+    tree.setCurrentItem(leaf)
+    QApplication.processEvents()
+
+    assert _table_row_count(page) == 1
+    assert _table_text(page, 0, 0) == "A1.las"
+    assert page._selected_asset is res

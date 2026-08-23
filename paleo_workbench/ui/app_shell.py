@@ -24,7 +24,6 @@ from paleo_workbench.ui.pages.stratigraphy_correlation_page import StratigraphyC
 from paleo_workbench.ui.pages.visualization_page import VisualizationPage
 from paleo_workbench.ui.pages.well_log_prediction_page import WellLogPredictionPage
 from paleo_workbench.ui.pages.geological_modeling_3d_page import GeologicalModeling3DPage
-from paleo_workbench.ui.pages.project_well_map_page import ProjectWellMapPage
 from paleo_workbench.viz.hosts.well_location_preview import (
     WellLocationPreviewStateStore,
 )
@@ -46,7 +45,6 @@ from paleo_workbench.ui.navigation import (
     PAGE_INDEX_STRATIGRAPHY,
     PAGE_INDEX_VISUALIZATION,
     PAGE_INDEX_WELL_LOG,
-    PAGE_INDEX_WELL_MAP,
     PAGE_INDEX_GEOMODEL,
 )
 
@@ -126,18 +124,8 @@ class AppShell(QWidget):
             lambda: self.geomodel_page.set_project(self.project),
         )
         self.page_stack.addWidget(self.geomodel_page)  # index 10 = 井震联合
-        # Project-level Well Location GIS (§16): fed by the WorkArea Well
-        # Registry, bidirectionally synced with the Data Manager tree.
-        self.well_map_page = ProjectWellMapPage()
-        self.page_stack.addWidget(self.well_map_page)  # index 11 = 井位地图
-        self.data_page.well_focus_requested.connect(self.well_map_page.focus_well)
-        self.well_map_page.well_selected.connect(self._locate_well_in_data)
-        self.well_map_page.well_activated.connect(self._open_well_in_data)
-        self.data_page.domain_entities_changed.connect(
-            lambda _project: self.well_map_page.refresh_domain(self.project)
-        )
-        # Initial domain binding (update_data_page also refreshes on open).
-        self.refresh_well_map(self.project)
+        # 井位地图 lives inside the Data page as a collapsible panel (§18);
+        # DataPage wires its own map ↔ tree sync and initial domain binding.
         self._mapping_context = self._build_mapping_context()
         middle.addWidget(self.icon_rail)
         middle.addWidget(self.sidebar)
@@ -368,29 +356,8 @@ class AppShell(QWidget):
         self.status_bar.set_project_name(name)
 
     # --- Well Location GIS ↔ Data Manager sync (§18) -----------------
-
-    def _locate_well_in_data(self, well_id: str) -> None:
-        """Map → Data: highlight the well in tree + filter its assets."""
-        select = getattr(self.data_page, "select_well", None)
-        if callable(select):
-            try:
-                select(well_id)
-            except Exception:
-                pass
-
-    def _open_well_in_data(self, well_id: str) -> None:
-        """Map double-click → jump to the Data page with the well selected."""
-        self._switch_page(PAGE_INDEX_DATA)
-        self._locate_well_in_data(well_id)
-
-    def refresh_well_map(self, project=None) -> None:
-        """Push the current document into the GIS page (cheap, cached)."""
-        refresh = getattr(self.well_map_page, "refresh_domain", None)
-        if callable(refresh):
-            try:
-                refresh(project if project is not None else self.project)
-            except Exception:
-                pass
+    # The map is embedded in the Data page (WellMapPanel); sync is wired
+    # inside DataPage itself.
 
 
     def update_home_page(self, state: dict, steps: list, project=None) -> None:
@@ -421,8 +388,10 @@ class AppShell(QWidget):
         )
         if self.page_stack.currentIndex() == PAGE_INDEX_DATA:
             self.sidebar.update_data_context(**self._data_context)
-        # Keep the GIS page in sync with the bound document (§16).
-        self.refresh_well_map(self.project)
+        # Keep the embedded well-location map in sync with the document (§18).
+        refresh_map = getattr(page, "refresh_well_map_panel", None)
+        if callable(refresh_map):
+            refresh_map()
 
     def set_data_project_path(self, path) -> None:
         """Propagate the open ``*.paleo.json`` path to every project-bound page.
