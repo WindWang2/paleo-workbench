@@ -473,11 +473,10 @@ class MappingPage(QWidget):
             return
         drafts = commit_contour_drafts(target, result)
         if not drafts:
-            QMessageBox.information(
-                self,
-                "等值线初稿",
-                "没有可提取的单因素网格。请先在制备页生成单因素图。",
-            )
+            # #937-6: async completion — in-page status instead of a modal
+            # (the Save/Discard/Cancel guard below stays interactive: it
+            # protects unsaved edits from silent disposal, #532).
+            self.status_bar.scale.setText("没有可提取的单因素网格。请先在制备页生成单因素图。")
             return
         # Prefer the map linked to the last draft as active document.  The
         # preference is passed to update_state instead of mutating
