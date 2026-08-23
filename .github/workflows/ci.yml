@@ -16,8 +16,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.12 = package baseline; 3.13 = host/dev drift coverage (T-ENV-01)
-        python-version: ["3.12", "3.13"]
+        # Unified on CPython 3.12 (single supported runtime).
+        python-version: ["3.12"]
 
     steps:
       - name: Checkout
@@ -60,13 +60,14 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: System libraries (Qt / offscreen / GDAL)
+      - name: System libraries (Qt / offscreen)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential \
-            gdal-bin \
-            libgdal-dev \
+            ninja-build \
+            swig \
+            libsqlite3-dev \
             libgl1 \
             libglib2.0-0 \
             libxkbcommon0 \
@@ -84,27 +85,11 @@ jobs:
             libxkbcommon-x11-0 \
             libfontconfig1 \
             libfreetype6
-          # Make pip build of osgeo.gdal find the system library.
-          echo "GDAL_CONFIG=$(command -v gdal-config)" >> "$GITHUB_ENV"
-          gdal-config --version
 
       - name: Install Python dependencies
-        env:
-          GDAL_CONFIG: ${{ env.GDAL_CONFIG }}
         run: |
           python -m pip install --upgrade pip
-          # Pin Python GDAL bindings to the system libgdal (Ubuntu runners ship ~3.8.x).
-          # Unconstrained pip otherwise picks the latest sdist (e.g. 3.13) which fails to build.
-          SYS_GDAL="$(gdal-config --version)"
-          echo "System libgdal: ${SYS_GDAL}"
-          echo "gdal==${SYS_GDAL}" > /tmp/gdal-constraint.txt
-          # numpy first, then rebuild gdal so optional _gdal_array can link.
-          # Pip wheels/sdists installed without numpy often omit the extension.
-          python -m pip install "numpy>=1.26"
-          python -m pip install --no-cache-dir "gdal==${SYS_GDAL}"
-          python -m pip install --prefer-binary \
-            -c /tmp/gdal-constraint.txt \
-            -e ".[dev,native]"
+          python -m pip install --prefer-binary -e ".[dev,native]"
           # geo-viz-engine subpackages (may pull shapely, scipy, …). These
           # installs MUST fail closed (packaging #442): the previous `|| true`
           # best-effort silently shrank the tested surface (broken dependency
@@ -116,6 +101,16 @@ jobs:
           # Import smoke: prove the geoviz graph actually installed.
           python -c "import geoviz, geoviz_well_seismic_3d"
           python -m pip install shapely
+
+      - name: Build vendored GDAL (+PROJ) from third_party sources
+        # ADR 0060: GDAL is compiled from the third_party/gdal +
+        # third_party/proj submodules into native/gdal-vendored — no system
+        # libgdal, no pip gdal sdist, no version-mismatch class (#851).
+        run: |
+          scripts/build_vendored_gdal.sh "$(command -v python)"
+          # Fail closed if the bindings did not land.
+          source native/gdal-vendored/install/env.sh
+          python -c "from osgeo import gdal; assert gdal.__version__"
 
       - name: Build map_edit_core (required)
         run: |
@@ -174,6 +169,8 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           PYTHONFAULTHANDLER: "1"
         run: |
+          # Vendored GDAL env (GDAL_DATA/PROJ_DATA/LD_LIBRARY_PATH/PYTHONPATH).
+          source native/gdal-vendored/install/env.sh
           # Per-test timeout (thread: better for pure-Python hangs; native still
           # may need the job-level ceiling). -v prints the last started test
           # when the suite dies so the hung case is identifiable in CI logs.
@@ -216,7 +213,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.12"]
 
     steps:
       - name: Checkout
@@ -280,7 +277,7 @@ jobs:
             well-log-engine/apps/wellplot-desktop/tests
 
   # Explicit product merge gate. See docs/ci-merge-policy.md.
-  # Requires the FULL monorepo Tests matrix (3.12 + 3.13) plus the Well Log
+  # Requires the FULL monorepo Tests matrix (CPython 3.12) plus the Well Log
   # Workstation host matrix. Cross-workflow: WellLogEngine C++ must also be
   # green (separate workflow well-log-engine.yml — required, not edited here).
   merge-gate:
@@ -296,7 +293,7 @@ jobs:
     steps:
       - name: Confirm product gates
         run: |
-          echo "Full monorepo Tests (Python 3.12 + 3.13) matrix is green."
+          echo "Full monorepo Tests (CPython 3.12) matrix is green."
           echo "Well Log Workstation (host) matrix is green."
           echo "Also require workflow 'WellLogEngine C++' on the same SHA."
           echo "Policy: docs/ci-merge-policy.md."

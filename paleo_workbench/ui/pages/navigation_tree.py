@@ -4,7 +4,8 @@ Top-level order (IA 3.0, when a WorkArea exists):
 
 - 全部数据 / 回收站
 - 工区概览 (project overview panel node)
-- 井 (per-well leaves → canonical Well.id entity filters)
+- 井 (per-well leaves → canonical Well.id entity filters;
+  each well expands to its concrete linked data files)
 - 地震 (per-survey leaves)
 - 地质解释 / 辅助资料 / 工作数据 / 成果
 - Legacy smart views stay available as secondary navigation:
@@ -79,15 +80,9 @@ _ENTITY_GROUPS = {
 # Non-linked auxiliary material types shown under 辅助资料.
 AUXILIARY_TYPES = {"document", "image_reference", "reference_map", "tabular"}
 
-# Well asset-role sub-leaves (§14): label → EntityAssetLink.role
-_WELL_ROLE_LEAVES = [
-    ("测井", "well_log"),
-    ("井轨迹", "trajectory"),
-    ("分层", "tops"),
-    ("时深", "time_depth"),
-    ("解释", "interpretation"),
-    ("其他", "other"),
-]
+# Per-well file-leaf cap: keeps tree allocation bounded when one well has
+# an unusual number of linked files (same spirit as MAX_ENTITY_CHILDREN).
+MAX_WELL_FILE_CHILDREN = 30
 
 # Tree rendering cap (§24): the DATA MANAGER tree is a navigation surface,
 # not a registry browser — beyond this many wells users navigate via search
@@ -115,6 +110,9 @@ class NavigationTree(QTreeWidget):
         self.tag_parent_item: QTreeWidgetItem | None = None
         # WorkArea domain state (None until a project with entities arrives).
         self._domain_project = None
+        # asset_id → display name for per-well file leaves; supplied by
+        # DataPage (catalog-aware).  None → fall back to raw asset id.
+        self._asset_label_provider = None
         self._entity_counts: dict[tuple[str, str], int] = {}
         self._overview_item: QTreeWidgetItem | None = None
         self._well_group_item: QTreeWidgetItem | None = None
@@ -256,6 +254,21 @@ class NavigationTree(QTreeWidget):
             if restored is not None:
                 self.setCurrentItem(restored)
 
+    def set_asset_label_provider(self, provider) -> None:
+        """Register a ``asset_id → display name`` callable for file leaves."""
+        self._asset_label_provider = provider
+
+    def _asset_label(self, asset_id: str) -> str:
+        provider = self._asset_label_provider
+        if provider is not None:
+            try:
+                label = str(provider(asset_id) or "")
+            except Exception:
+                label = ""
+            if label:
+                return label
+        return str(asset_id)
+
     def _rebuild_entity_groups(self) -> None:
         project = self._domain_project
         wells = list(getattr(project, "wells", None) or []) if project else []
@@ -266,16 +279,15 @@ class NavigationTree(QTreeWidget):
         survey_counts: dict[str, int] = {}
         unresolved_wells: set[str] = set()
         invalid_coord_wells: set[str] = set()
-        # Single O(L) pass over links; per-(entity, role) counts precomputed
-        # so role sub-leaves never rescan the link list (review finding #7).
-        well_role_counts: dict[tuple[str, str], int] = {}
+        # Single O(L) pass over links; per-well link lists precomputed so
+        # file leaves never rescan the link list (review finding #7).
+        well_links: dict[str, list] = {}
         for link in links:
             if link.entity_type == "well":
                 well_counts[link.entity_id] = well_counts.get(link.entity_id, 0) + 1
+                well_links.setdefault(link.entity_id, []).append(link)
                 if link.unresolved:
                     unresolved_wells.add(link.entity_id)
-                key = (link.entity_id, link.role)
-                well_role_counts[key] = well_role_counts.get(key, 0) + 1
             elif link.entity_type == "seismic_survey":
                 survey_counts[link.entity_id] = survey_counts.get(link.entity_id, 0) + 1
         for well in wells:
@@ -353,29 +365,42 @@ class NavigationTree(QTreeWidget):
                 child.setData(0, Qt.ItemDataRole.UserRole + 1, f"entity:{entity.id}")
                 child.setToolTip(0, getattr(entity, "uwi", "") or entity.name)
                 if entity_type == "well":
-                    for role_label, role in _WELL_ROLE_LEAVES:
-                        role_count = well_role_counts.get((entity.id, role), 0)
-                        if role_count == 0:
-                            continue
-                        role_child = QTreeWidgetItem(child, [f"{role_label} {role_count}"])
-                        role_child.setData(
+                    # 下一层：该井的具体数据文件（可折叠，点击过滤到单个资产）
+                    file_links = sorted(
+                        well_links.get(entity.id, []),
+                        key=lambda link: (self._asset_label(link.asset_id), link.asset_id),
+                    )
+                    for link in file_links[:MAX_WELL_FILE_CHILDREN]:
+                        label = self._asset_label(link.asset_id)
+                        file_child = QTreeWidgetItem(child, [f"📄 {label}"])
+                        file_child.setData(
                             0,
                             Qt.ItemDataRole.UserRole,
                             FilterQuery(
                                 node_type=ENTITY_NODE,
                                 node_value=entity.id,
-                                entity_role=role,
+                                asset_id=link.asset_id,
                             ),
                         )
-                        role_child.setData(
-                            0, Qt.ItemDataRole.UserRole + 1, f"entity:{entity.id}:{role}"
+                        file_child.setData(
+                            0, Qt.ItemDataRole.UserRole + 1, f"asset:{link.asset_id}"
                         )
+                        file_child.setToolTip(0, label)
+                    if len(file_links) > MAX_WELL_FILE_CHILDREN:
+                        overflow = QTreeWidgetItem(
+                            child,
+                            [f"…另有 {len(file_links) - MAX_WELL_FILE_CHILDREN} 个文件"],
+                        )
+                        overflow.setFlags(
+                            overflow.flags() & ~Qt.ItemFlag.ItemIsSelectable
+                        )
+                        overflow.setDisabled(True)
                 if selected_key == entity.id:
                     self.setCurrentItem(child)
             if len(ordered) > MAX_ENTITY_CHILDREN:
                 overflow = QTreeWidgetItem(
                     group,
-                    [f"…另有 {len(ordered) - MAX_ENTITY_CHILDREN} 口井，请在井位地图中查看"],
+                    [f"…另有 {len(ordered) - MAX_ENTITY_CHILDREN} 口井，请展开下方井位地图面板查看"],
                 )
                 overflow.setFlags(overflow.flags() & ~Qt.ItemFlag.ItemIsSelectable)
                 overflow.setDisabled(True)
@@ -627,6 +652,11 @@ class NavigationTree(QTreeWidget):
 
         if query is not None:
             self.filter_query_changed.emit(query)
+            # Entity/asset nodes are fully handled by the FilterQuery channel;
+            # emitting their key as a legacy "category" would be re-parsed
+            # into a legacy_category query and clobber the entity filter.
+            if query.node_type in (ENTITY_NODE, ENTITY_GROUP_NODE):
+                return
             emit_str = legacy_key or query.node_value or "全部"
             if emit_str in ("全部数据", "all"):
                 emit_str = "全部"

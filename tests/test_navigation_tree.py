@@ -113,3 +113,127 @@ def test_deleted_tag_leaf_resets_filter_to_all(qtbot):
     assert current_query.node_type == "all"
     assert queries
     assert queries[-1].node_type == "all"
+
+
+# ---------------------------------------------------------------------------
+# 井节点 → 具体数据文件叶
+# ---------------------------------------------------------------------------
+
+
+def _well_doc():
+    from paleo_workbench.project.domain import EntityAssetLink, WellEntity
+    from paleo_workbench.project.models import ProjectDocument
+
+    doc = ProjectDocument.new("W")
+    well = WellEntity(name="A1")
+    doc.wells.append(well)
+    doc.entity_asset_links.append(
+        EntityAssetLink(
+            entity_type="well",
+            entity_id=well.id,
+            asset_id="asset_head",
+            role="well_head",
+        )
+    )
+    doc.entity_asset_links.append(
+        EntityAssetLink(
+            entity_type="well",
+            entity_id=well.id,
+            asset_id="asset_las",
+            role="well_head",
+        )
+    )
+    return doc, well
+
+
+def test_well_node_expands_to_file_leaves(qtbot):
+    from PySide6.QtCore import Qt
+
+    from paleo_workbench.ui.pages.navigation_tree import ENTITY_NODE
+
+    doc, well = _well_doc()
+    tree = NavigationTree()
+    qtbot.addWidget(tree)
+    labels = {"asset_head": "A1_head.dat", "asset_las": "A1.las"}
+    tree.set_asset_label_provider(lambda aid: labels.get(aid, aid))
+    tree.set_project(doc)
+
+    group = tree._well_group_item  # 顶层标签带 🛢 前缀，find_group("井") 会误中“井分层”
+    assert group is not None
+    well_item = group.child(0)
+    assert well_item is not None
+    assert well_item.childCount() == 2
+
+    leaf_texts = sorted(well_item.child(i).text(0) for i in range(2))
+    assert leaf_texts == ["📄 A1.las", "📄 A1_head.dat"]
+    leaf = well_item.child(0)
+    query = leaf.data(0, Qt.ItemDataRole.UserRole)
+    assert query is not None
+    assert query.node_type == ENTITY_NODE
+    assert query.node_value == well.id
+    assert query.asset_id in {"asset_head", "asset_las"}
+    # 选中文件叶 → 发射带 asset_id 的过滤查询
+    emitted: list[FilterQuery] = []
+    tree.filter_query_changed.connect(emitted.append)
+    tree.setCurrentItem(leaf)
+    assert emitted and emitted[-1].asset_id == query.asset_id
+
+
+def test_well_file_leaf_falls_back_to_asset_id(qtbot):
+    doc, well = _well_doc()
+    tree = NavigationTree()
+    qtbot.addWidget(tree)
+    # 无 provider：显示原始 asset_id
+    tree.set_project(doc)
+
+    group = tree._well_group_item
+    well_item = group.child(0)
+    assert well_item is not None
+    texts = [well_item.child(i).text(0) for i in range(well_item.childCount())]
+    assert any("asset_las" in text for text in texts)
+
+
+def test_well_file_leaves_capped(qtbot):
+    from PySide6.QtCore import Qt
+
+    from paleo_workbench.project.domain import EntityAssetLink
+    from paleo_workbench.ui.pages.navigation_tree import MAX_WELL_FILE_CHILDREN
+
+    doc, well = _well_doc()
+    for idx in range(MAX_WELL_FILE_CHILDREN + 5):
+        doc.entity_asset_links.append(
+            EntityAssetLink(
+                entity_type="well",
+                entity_id=well.id,
+                asset_id=f"asset_x{idx}",
+            )
+        )
+    tree = NavigationTree()
+    qtbot.addWidget(tree)
+    tree.set_project(doc)
+
+    group = tree._well_group_item
+    well_item = group.child(0)
+    #  capped leaves + 1 overflow row
+    assert well_item.childCount() == MAX_WELL_FILE_CHILDREN + 1
+    overflow = well_item.child(MAX_WELL_FILE_CHILDREN)
+    assert "另有" in overflow.text(0)
+    assert not (overflow.flags() & Qt.ItemFlag.ItemIsSelectable)
+
+
+def test_entity_node_does_not_emit_legacy_category(qtbot):
+    """实体/文件节点走 FilterQuery 通道；若再发 category_changed，
+    DataPage 会把 'entity:…'/'asset:…' 解析成 legacy_category 查询
+    覆盖掉实体过滤（网格变空的回归）。"""
+    doc, well = _well_doc()
+    tree = NavigationTree()
+    qtbot.addWidget(tree)
+    tree.set_project(doc)
+
+    categories: list[str] = []
+    tree.category_changed.connect(categories.append)
+    well_item = tree._well_group_item.child(0)
+    tree.setCurrentItem(well_item)
+    assert not categories
+    tree.setCurrentItem(well_item.child(0))
+    assert not categories

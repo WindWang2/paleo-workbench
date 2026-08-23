@@ -82,8 +82,10 @@ def test_grid_card_hides_missing_rsquared(qtbot):
     )
     card = FactorPreviewGrid.FactorPreviewCard(task)
     qtbot.addWidget(card)
-    assert card.rsquared_label.text() == ""
-    assert card.rsquared_label.isHidden()
+    # #939-5: metrics present without R² (the plan/batch contract) now show
+    # an explicit "not computed" label instead of silently hiding the metric.
+    assert card.rsquared_label.text() == "R² 本轮未计算"
+    assert not card.rsquared_label.isHidden()
 
 
 def test_grid_default_grid_metric(qtbot):

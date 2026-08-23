@@ -503,6 +503,8 @@ class ProjectDocument(BaseModel):
     fault_interpretations: list[FaultInterpretationRef] = Field(default_factory=list)
     prediction_tasks: list[PredictionTask] = Field(default_factory=list)
     paleomap_documents: list[PaleoMapDocument] = Field(default_factory=list)
+    # 新建工程向导盘点报告 — 持久化 onboarding 阶段的导入/识别统计
+    onboarding_report: dict[str, Any] = Field(default_factory=dict)
     quality_reports: list[QualityReport] = Field(default_factory=list)
     version_sets: list[VersionSet] = Field(default_factory=list)
     export_artifacts: list[ExportArtifact] = Field(default_factory=list)

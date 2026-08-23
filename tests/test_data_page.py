@@ -1610,3 +1610,177 @@ def test_data_page_open_selected_folder_survives_pathlib_oserror(qtbot, tmp_path
     assert folder is not None
     status = page.data_toolbar.operation_status_label.text()
     assert status.startswith(("目录: ", "目录不存在"))
+
+
+# --------------------------------------------------------------------------- #
+# #917 CI stress follow-up — per-refresh filesystem probe cache
+# --------------------------------------------------------------------------- #
+
+
+def test_fs_probe_cache_prunes_missing_subtrees(tmp_path):
+    """One stat per distinct path; a missing root prunes the whole subtree."""
+    import os
+
+    from paleo_workbench.ui.pages.data_view_models import FsProbeCache
+
+    existing = tmp_path / "real" / "file.las"
+    existing.parent.mkdir()
+    existing.write_text("x")
+
+    cache = FsProbeCache()
+    stats_before = 0
+
+    def count_stats():
+        # probe() only syscalls on cache misses; count via monkeypatching os.stat
+        return stats_before
+
+    import unittest.mock as mock
+
+    with mock.patch("os.stat", wraps=os.stat) as wrapped:
+        first = cache.probe(existing)
+        assert first is not None
+        after_first = wrapped.call_count
+
+        # Repeated probes must not re-stat.
+        assert cache.probe(existing) is first
+        assert wrapped.call_count == after_first
+
+        # 2000 probes under a dead prefix: the prefix dir is probed once,
+        # every child short-circuits (O(1) syscalls, not O(N)).
+        for i in range(2000):
+            assert cache.probe(tmp_path / "gone" / f"a{i}.las") is None
+        assert wrapped.call_count - after_first <= 3, wrapped.call_count - after_first
+
+
+def test_fs_probe_cache_matches_legacy_semantics(tmp_path):
+    from paleo_workbench.ui.pages.data_view_models import (
+        FsProbeCache,
+        asset_view_from_resource,
+    )
+    from paleo_workbench.resources.scanner import ResourceItem
+
+    existing = tmp_path / "in" / "ok.las"
+    existing.parent.mkdir()
+    existing.write_text("hello")
+    missing = tmp_path / "in" / "gone.las"
+
+    for path, expect_exists in ((existing, True), (missing, False)):
+        resource = ResourceItem(
+            name=path.name, path=str(path), type="测井", format="las",
+            status="indexed", checksum=None,
+        )
+        view_cached = asset_view_from_resource(resource, fs_probe=FsProbeCache())
+        view_legacy = asset_view_from_resource(resource)
+        assert (view_cached.integrity_state != view_cached.integrity_state.MISSING) is expect_exists
+        assert view_cached.integrity_state == view_legacy.integrity_state
+        assert view_cached.modified_at == view_legacy.modified_at
+        assert view_cached.size_bytes == view_legacy.size_bytes
+
+
+def test_summary_ready_prefetches_visualization_preview(qtbot, tmp_path: Path):
+    """选中即后台预取：可视化预览选项卡打开时内容已就绪，不再停留在提示语。"""
+    las = tmp_path / "well.las"
+    las.write_text("~V\n~W\n~C\n~A\n 0.0 1.0\n", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    resource = ResourceItem(
+        name="well.las", type="well_log", format="las", path=str(las)
+    )
+    project.resources.append(resource)
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page._set_selected_asset(resource)
+
+    requested: list[object] = []
+    page._visualization_controller.request = lambda asset: requested.append(asset)
+
+    from paleo_workbench.resources.preview_parsers import PreviewResult
+
+    page._on_summary_ready(
+        PreviewResult(
+            mode="well_log",
+            title="well.las",
+            path=str(las),
+            visualization_available=True,
+        )
+    )
+    assert requested == [resource]
+
+    # Same asset again → no duplicate prefetch.
+    page._on_summary_ready(
+        PreviewResult(
+            mode="well_log",
+            title="well.las",
+            path=str(las),
+            visualization_available=True,
+        )
+    )
+    assert requested == [resource]
+
+
+def test_summary_ready_without_visualization_support_skips_prefetch(qtbot, tmp_path: Path):
+    doc = tmp_path / "notes.txt"
+    doc.write_text("hello", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    resource = ResourceItem(
+        name="notes.txt", type="document", format="txt", path=str(doc)
+    )
+    project.resources.append(resource)
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page._set_selected_asset(resource)
+
+    requested: list[object] = []
+    page._visualization_controller.request = lambda asset: requested.append(asset)
+
+    from paleo_workbench.resources.preview_parsers import PreviewResult
+
+    page._on_summary_ready(
+        PreviewResult(mode="text", title="notes.txt", path=str(doc), text="hello")
+    )
+    assert requested == []
+
+
+def test_entity_query_with_single_asset_id(qtbot):
+    """井文件叶：asset_id 查询只命中该资产（含 legacy id 旁路）。"""
+    page = DataPage(project=ProjectDocument.new("Demo"))
+    qtbot.addWidget(page)
+    query = FilterQuery(node_type="entity", node_value="w1", asset_id="asset_9")
+    resolved = page._entity_query_with_ids(query)
+    assert resolved.entity_asset_ids == frozenset({"asset_9"})
+
+
+def test_file_leaf_filters_grid_and_selects_asset(qtbot):
+    """点击井下的文件叶：网格过滤到该单个资产并自动选中（联动预览）。"""
+    from PySide6.QtWidgets import QApplication
+
+    from paleo_workbench.project.domain import EntityAssetLink, WellEntity
+
+    doc = ProjectDocument.new("Demo")
+    well = WellEntity(name="A1")
+    doc.wells.append(well)
+    res = ResourceItem(name="A1.las", path="/tmp/A1.las", type="well_log", format="las")
+    other = ResourceItem(name="A2.las", path="/tmp/A2.las", type="well_log", format="las")
+    doc.resources.extend([res, other])
+    doc.entity_asset_links.append(
+        EntityAssetLink(
+            entity_type="well",
+            entity_id=well.id,
+            asset_id=str(res.id),
+            role="well_head",
+        )
+    )
+    page = DataPage(project=doc)
+    qtbot.addWidget(page)
+    page.show()
+    QApplication.processEvents()
+
+    tree = page.navigation_tree
+    tree.set_project(doc)
+    well_item = tree._well_group_item.child(0)
+    leaf = well_item.child(0)
+    tree.setCurrentItem(leaf)
+    QApplication.processEvents()
+
+    assert _table_row_count(page) == 1
+    assert _table_text(page, 0, 0) == "A1.las"
+    assert page._selected_asset is res

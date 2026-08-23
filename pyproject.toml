@@ -3,8 +3,8 @@ name = "paleo-workbench"
 version = "0.2.17a0"
 description = "Paleogeographic map compilation desktop workbench"
 license = {file = "LICENSE"}
-# Support CPython 3.12 (CI baseline) and 3.13 (common host / developer runtime).
-requires-python = ">=3.12,<3.14"
+# Project unified on CPython 3.12 only (cp312/cp313 mix previously caused .so shadowing; see #435/#851).
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "pyside6>=6.6",
     "pydantic>=2.0",
@@ -14,9 +14,11 @@ dependencies = [
     "lasio>=0.14",
     "markdown>=3.5",
     "rasterio>=1.3",
-    # Bindings must match the system libgdal at runtime. CI pins via gdal-config
-    # (see .github/workflows/ci.yml). Developers: pip install gdal==$(gdal-config --version).
-    "gdal>=3.6",
+    # GDAL is NOT a pip dependency: the workbench compiles a vendored GDAL
+    # (+PROJ) from the third_party/ submodules into native/gdal-vendored
+    # (scripts/build_vendored_gdal.sh). That build provides the osgeo
+    # bindings, so the runtime never depends on the system libgdal version
+    # (ADR 0060; previously #851-class wheel/system mismatches).
     "pillow>=10.0",
     # Mapping topology merge/split (map_edit_api) requires shapely.
     "shapely>=2.0",
@@ -83,6 +85,7 @@ include = ["paleo_workbench*"]
 [tool.setuptools.package-data]
 paleo_workbench = [
     "ui/assets/icons/*.svg",
+    "ui/assets/icons/map/*.svg",
     "ui/pages/prototypes/*.html",
     "mapping/*.md",
     "_vendored/haiyou_constrained_idw/*.md",
@@ -98,7 +101,7 @@ markers = [
 pythonpath = [
     ".",
     # NOTE: the bare geo-viz-engine root is deliberately NOT on the path:
-    # it hosts committed cpython-313 .so binaries that shadow the freshly
+    # it hosts committed cpython-312 .so binaries that shadow the freshly
     # built extensions (packaging #435). `geoviz` itself resolves from the
     # editable installs in requirements-geoviz.txt.
     "geo-viz-engine/packages/geoviz_common",
