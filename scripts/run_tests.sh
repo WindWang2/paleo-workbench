@@ -13,8 +13,19 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENGINE="$ROOT/geo-viz-engine"
 
-export CONDA_PREFIX=/opt/miniconda3
-export PYTHONHOME=/opt/miniconda3
+# The project is unified on CPython 3.12: prefer the paleo312 conda env,
+# fall back to the conda base, and allow an explicit override via
+# PALEO_CONDA_PREFIX for CI or custom setups.
+if [ -z "${PALEO_CONDA_PREFIX:-}" ]; then
+    for candidate in "$HOME/.conda/envs/paleo312" /opt/miniconda3/envs/paleo312; do
+        if [ -x "$candidate/bin/python" ]; then
+            PALEO_CONDA_PREFIX="$candidate"
+            break
+        fi
+    done
+fi
+export CONDA_PREFIX="${PALEO_CONDA_PREFIX:-/opt/miniconda3}"
+export PYTHONHOME="$CONDA_PREFIX"
 # Put the conda interpreter first on PATH: the shell's default `python3`
 # (/usr/sbin/python3, 3.14 here) has no PySide6, and setting PYTHONHOME alone
 # leaves it resolving to that interpreter and failing with
