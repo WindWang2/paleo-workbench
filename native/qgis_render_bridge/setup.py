@@ -142,6 +142,9 @@ def _build_vendored_qgis() -> tuple[Path, Path]:
         # dev package is not in the CI apt list — the vendored default (ON)
         # made every bridge configure fail at FindPDAL (#935 follow-up).
         "-DWITH_PDAL=OFF",
+        # Draco (mesh compression) likewise: default ON, fatal FindDraco on
+        # runners without libdraco-dev.
+        "-DWITH_DRACO=OFF",
         "-DWITH_INTERNAL_SPATIALINDEX=ON",
         "-DUSE_OPENCL=OFF",
         "-DENABLE_TESTS=OFF",

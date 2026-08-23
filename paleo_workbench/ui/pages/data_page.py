@@ -447,11 +447,24 @@ class DataPage(QWidget):
         resources: list[ResourceItem],
         artifacts: list[ExportArtifact] | None = None,
     ) -> None:
+        import os as _os, time as _time
+        _dbg = _os.environ.get("DATAPAGE_UPDATE_DEBUG") == "1"
+        _t0 = _time.perf_counter()
+        _last = [_t0]
+        def _stage(name):
+            if _dbg:
+                now = _time.perf_counter()
+                print(
+                    f"[update_state:{name}] +{1000*(now-_last[0]):.1f}ms total={1000*(now-_t0):.1f}ms",
+                    flush=True,
+                )
+                _last[0] = now
         self._resources = resources
         self._artifacts = artifacts or []
         preview_root = self._preview_disk_project_root()
         self._preview_controller.set_project_root(preview_root)
         self._visualization_controller.set_project_root(preview_root)
+        _stage('pre_summary')
         self.summary_bar.update_state(state)
         # Catalog enrichment (one batch pass): stage/version/integrity truth,
         # lineage status, governance values for the table rows.
@@ -468,6 +481,7 @@ class DataPage(QWidget):
         # catalog_rows]; when the table shows the same list (trash view
         # inactive) both consumers share these views, otherwise the table
         # falls back to building its own via the filter index.
+        _stage('enrich')
         counts_assets = [*self._resources, *self._artifacts, *(catalog_rows or [])]
         shared_views = [
             enricher(asset_view_from_object(a, project_root=preview_root))
@@ -495,6 +509,7 @@ class DataPage(QWidget):
         if self.workspace.overview_visible():
             overview = self.workspace.overview_panel
             overview.refresh_from_project(self.project, counts=None)
+        _stage('counts')
         table_views = (
             shared_views
             if len(display_resources) == len(self._resources)
@@ -508,9 +523,11 @@ class DataPage(QWidget):
             enricher=enricher,
             views=table_views,
         )
+        _stage('table')
         self.data_toolbar.set_tag_candidates(self._collect_tag_candidates())
         self._update_selection_action_state()
         self._sync_visualization_button()
+        _stage('toolbar')
         self._emit_data_context()
 
     def _refresh(self) -> None:

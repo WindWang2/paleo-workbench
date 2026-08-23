@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import os
 
+# TEMP DEBUG (#917 follow-up): stage timings for update_state on CI
+os.environ.setdefault("DATAPAGE_UPDATE_DEBUG", "1")
+
 from PySide6.QtWidgets import QApplication
 
 from paleo_workbench.project.models import ProjectDocument
