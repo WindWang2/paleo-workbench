@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QCheckBox, QFrame, QLabel, QLineEdit, QPushButton, QVBoxLayout
 
 from paleo_workbench.ui import tokens
 from paleo_workbench.viz.mapping_helpers import field_value
+
+_ICONS_DIR = Path(__file__).parent.parent.parent / "ui" / "assets" / "icons" / "map"
+
+
+def _panel_icon(name: str) -> QIcon:
+    path = _ICONS_DIR / f"{name}.svg"
+    return QIcon(str(path)) if path.exists() else QIcon()
 
 
 DEFAULT_CHROME_ELEMENTS = ["图例", "指北针", "比例尺", "标题栏"]
@@ -43,10 +53,10 @@ class MapChromePanel(QFrame):
         self.title_edit.editingFinished.connect(self._emit_changed)
 
         layout.addStretch()
-        self.save_btn = QPushButton("保存编图草稿")
+        self.save_btn = QPushButton(_panel_icon("btn-save-draft"), "保存编图草稿")
         self.save_btn.setObjectName("SecondaryButton")
         layout.addWidget(self.save_btn)
-        self.review_btn = QPushButton("发送成图审核")
+        self.review_btn = QPushButton(_panel_icon("btn-review"), "发送成图审核")
         self.review_btn.setObjectName("PrimaryButton")
         layout.addWidget(self.review_btn)
 
