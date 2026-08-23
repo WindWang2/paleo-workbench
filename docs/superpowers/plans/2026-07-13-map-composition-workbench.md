@@ -6,7 +6,7 @@
 
 **Architecture:** Preserve `MapEditView`/`MapEditScene` as the editable source of truth. Add a GDAL reference-layer service and persist descriptors on `PaleoMapDocument`; compose reference and factor-map viewers around the same scene/view transform. Put expensive import, render-cache, and topology work behind generation-tagged background jobs; keep edit/save coordinates unmodified.
 
-**Tech Stack:** Python 3.12, PySide6, GDAL (`osgeo.gdal`, `osgeo.ogr`, `osgeo.osr`), rasterio, Shapely, optional `map_edit_core` pybind11 extension, pytest + pytest-qt.
+**Tech Stack:** CPython 3.12, PySide6, GDAL (`osgeo.gdal`, `osgeo.ogr`, `osgeo.osr`), rasterio, Shapely, optional `map_edit_core` pybind11 extension, pytest + pytest-qt.
 
 ## Global Constraints
 

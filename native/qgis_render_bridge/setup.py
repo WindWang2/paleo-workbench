@@ -215,5 +215,5 @@ setup(
     ext_modules=[_extension()] if _enabled() else [],
     cmdclass={"build_ext": build_ext},
     zip_safe=False,
-    python_requires=">=3.12",
+    python_requires=">=3.12,<3.13",
 )

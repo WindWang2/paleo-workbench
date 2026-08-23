@@ -10,8 +10,8 @@ A PR is merge-ready when these are green on the head SHA:
 | Gate | Workflow / job |
 |------|----------------|
 | **WellLogEngine C++ (Ubuntu)** | `WellLogEngine C++` — shared ON/OFF, ASan, Qt Mesa, wheels, vcpkg, benchmark as configured |
-| **Full monorepo Tests (Python 3.12 + 3.13)** | `CI` → `Tests (Python *)` matrix |
-| **Well Log Workstation (host)** | `CI` → `Well Log Workstation (host)` (3.12 + 3.13) |
+| **Full monorepo Tests (CPython 3.12)** | `CI` → `Tests (CPython 3.12)` matrix |
+| **Well Log Workstation (host)** | `CI` → `Well Log Workstation (host)` (CPython 3.12) |
 | **Merge gate** | `CI` → `Merge gate (full monorepo + workstation)` — `needs:` the full Tests matrix and the workstation host matrix |
 
 Cross-workflow: GitHub does not `needs:` across workflows; reviewers confirm **WellLogEngine C++** on the same commit as the CI host gate. The `WellLogEngine C++` workflow (`well-log-engine.yml`) is triggered on well-log-engine submodule **gitlink bumps** (paths cover the bare `well-log-engine` entry and `well-log-engine/**`), so any engine-pointer change re-runs it.
