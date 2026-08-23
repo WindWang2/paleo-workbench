@@ -101,6 +101,19 @@ The copied modules are **byte-for-byte identical** to the upstream SHA above
   upstream would report inactive only if the materialised raster were empty,
   which requires a hull containing zero grid-cell centers.
 
+- `drawing/single_factor/constrained_engine.py` — **cell-batched Euclidean
+  kernel (2026-08-23, issue #933)**: no-direction barrier runs now execute the
+  whole point-path domain through `_interpolate_euclidean_cells_batch`
+  (cell-dimension vectorization: distance matrix, label/LOS block accounting,
+  radius passes with per-pass relaxation, stable top-k, grouped-by-k exact
+  pairwise reductions). Bit-for-bit identical to the per-cell path — verified
+  by `tests/test_constrained_idw_algorithm.py` (values and blocked-well
+  counters, incl. exact-hit, zero-decluster and label-gating branches) and an
+  end-to-end 200²×300-well grid comparison against the pre-change engine
+  (bitwise-equal `grid_z`, identical diagnostics). Kernel 1.9 s → 279 ms;
+  end-to-end `generate` 2.24 s → 0.94 s. Direction-active runs keep the
+  per-cell path (their curve-corridor caches are genuinely per-cell).
+
 ## What was NOT vendored
 
 The full `haiyou-visualization` application (PyQt6 GUI, `workflow.py`, contour
