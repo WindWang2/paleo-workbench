@@ -697,7 +697,27 @@ void QgisRenderBridge::cancel_render() {
         impl_->discard_active_result = true;
         // Explicit cancellation is used by deterministic export/shutdown paths,
         // where it is safer to wait than to let a stale QGIS job race a sync job.
-        impl_->wait_for_active_job();
+        // Preserve an already-delivered pending snapshot: it is the newest layer
+        // state and must survive cancellation, otherwise the next render would
+        // compose a stale mirror image (#938-6).
+        auto pending_snapshot = std::move(impl_->pending_snapshot);
+        impl_->pending_snapshot.reset();
+        impl_->active_job->cancelWithoutBlocking();
+        impl_->active_job->waitForFinished();
+        impl_->active_job.reset();
+        impl_->active_request.reset();
+        impl_->completed.reset();
+        impl_->discard_active_result = false;
+        if (pending_snapshot) {
+            try {
+                impl_->apply_snapshot(
+                    std::move(pending_snapshot->layers),
+                    std::move(pending_snapshot->project_crs));
+            } catch (...) {
+                impl_->pending_request.reset();
+                throw;
+            }
+        }
         return;
     }
     impl_->finish_active_if_done();

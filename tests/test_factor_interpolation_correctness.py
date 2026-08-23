@@ -38,7 +38,8 @@ def test_two_observations_idw_deterministic():
     points = _pts((0.0, 0.0, 1.0), (1.0, 0.0, 2.0))
     a = interpolate_factor_grid(points, method="IDW", grid_n=8, power=2.0)
     b = interpolate_factor_grid(points, method="IDW", grid_n=8, power=2.0)
-    assert a["grid_z"] == b["grid_z"]
+    # #941-1/2: engine now returns ndarray
+    assert np.array_equal(np.asarray(a["grid_z"]), np.asarray(b["grid_z"]))
     assert a["backend"] == "idw"
     assert len(a["grid_x"]) == 8 and len(a["grid_y"]) == 8
 
@@ -52,10 +53,10 @@ def test_multi_observation_regular_grid():
         (0.5, 0.5, 2.5),
     )
     result = interpolate_factor_grid(points, method="IDW", grid_n=12)
-    gz = np.array(
-        [[np.nan if v is None else v for v in row] for row in result["grid_z"]],
-        dtype=np.float64,
-    )
+    gz = np.asarray(result["grid_z"], dtype=np.float64)
+    # Handle legacy None encoding if present
+    if gz.dtype == object:
+        gz = np.array([[np.nan if v is None else v for v in row] for row in result["grid_z"]], dtype=np.float64)
     assert gz.shape == (12, 12)
     assert np.isfinite(gz).all()
     assert result["min"] <= result["max"]
@@ -125,10 +126,9 @@ def test_optimized_apply_matches_public_engine_dict_path():
     )
     apply_interpolation_to_task(task, method="IDW", grid_n=16, power=2.0)
     live = factor_grid_result_for_task(task)
-    public_z = np.array(
-        [[np.nan if v is None else v for v in row] for row in public["grid_z"]],
-        dtype=np.float64,
-    )
+    public_z = np.asarray(public["grid_z"], dtype=np.float64)
+    if public_z.dtype == object:
+        public_z = np.array([[np.nan if v is None else v for v in row] for row in public["grid_z"]], dtype=np.float64)
     np.testing.assert_allclose(live.grid_z, public_z, rtol=1e-6, atol=1e-6, equal_nan=True)
     np.testing.assert_allclose(
         live.grid_x, np.asarray(public["grid_x"], dtype=np.float64), rtol=0, atol=0
@@ -177,10 +177,9 @@ def test_axis_order_height_width_and_negative_extent():
     result = interpolate_factor_grid(points, method="IDW", grid_n=7)
     gx = np.asarray(result["grid_x"])
     gy = np.asarray(result["grid_y"])
-    gz = np.array(
-        [[np.nan if v is None else v for v in row] for row in result["grid_z"]],
-        dtype=np.float64,
-    )
+    gz = np.asarray(result["grid_z"], dtype=np.float64)
+    if gz.dtype == object:
+        gz = np.array([[np.nan if v is None else v for v in row] for row in result["grid_z"]], dtype=np.float64)
     assert gz.shape == (len(gy), len(gx))
     assert np.all(np.diff(gx) > 0)
     assert np.all(np.diff(gy) > 0)
@@ -279,5 +278,5 @@ def test_repeated_run_identical_for_fixed_seed_samples():
     for method in ("IDW",):
         first = interpolate_factor_grid(points, method=method, grid_n=14)
         second = interpolate_factor_grid(points, method=method, grid_n=14)
-        assert first["grid_z"] == second["grid_z"]
+        assert np.array_equal(np.asarray(first["grid_z"]), np.asarray(second["grid_z"]))
         assert first["r_squared"] == second["r_squared"]

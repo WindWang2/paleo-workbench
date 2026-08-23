@@ -59,11 +59,14 @@ all QGIS tests (marker `qgis`, 9 sites) self-skip there.
 
 Coverage statement: QGIS bridge changes are gated by the dedicated
 `QGIS renderer` workflow (`.github/workflows/qgis-renderer.yml`) — fail-closed
-build + import smoke + vendor-integrity checks, triggered on manual dispatch
-or on paths `native/qgis_render_bridge/**` / `third_party/qgis/**`. It does
-**not** run QGIS rendering tests (no QGIS runtime leg today); that remains an
-open follow-up (see #437). Any QGIS-path change must keep the `qgis` marker
-selection intact — the workflow asserts ≥ 9 `qgis` tests are collected.
+build + import smoke + vendor-integrity checks plus the ``qgis``-marked test
+execution (≥9 tests collected and executed) when the bridge is built,
+triggered on manual dispatch or on paths
+`native/qgis_render_bridge/**` / `third_party/qgis/**`. The main `CI` `Tests`
+matrix still has no QGIS runtime leg, so all ``qgis`` tests self-skip there
+— that split is intentional (see #437, #935). Any QGIS-path change must keep
+the `qgis` marker selection intact — both the doc baseline and the workflow's
+``≥ 9`` collect+pass gate enforce it.
 
 ## Windows WellLogEngine
 

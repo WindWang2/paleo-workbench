@@ -3,6 +3,11 @@
 Stage-3 acceptance: the stage-2 capability has a clickable entry in the main
 program and produces a minimum observable result (≥1 proportional slice visible
 in the 3D viewport), even in an offscreen/no-SEGY environment (demo fallback).
+
+#940-1: the two renderer-dependent tests below need a real GL context and are
+marked ``opengl``; they are permanently skipped on offscreen CI and have no
+dedicated software-GL leg today. Pure-logic stratal tests (card structure,
+worker without GL) run everywhere.
 """
 
 from __future__ import annotations
@@ -67,6 +72,7 @@ def test_analysis_button_toggles_card_visibility(qtbot):
 
 # ---------- minimum observable result: demo fallback path ----------
 
+@pytest.mark.opengl  # #940-1: needs real GL; skipped on offscreen CI (no leg covers this today)
 def test_stratal_generate_demo_produces_visible_slices(qtbot):
     """The minimum-observable-result acceptance criterion.
 
@@ -109,6 +115,7 @@ def test_stratal_generate_demo_produces_visible_slices(qtbot):
     assert "比例切片" in page._stratal_status.text()
 
 
+@pytest.mark.opengl  # #940-1: needs real GL; skipped on offscreen CI (no leg covers this today)
 def test_stratal_clear_removes_all_slices(qtbot):
     from paleo_workbench.ui.pages.geological_modeling_3d_page import (
         GeologicalModeling3DPage,

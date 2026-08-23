@@ -203,8 +203,10 @@ class DataReaderPanel(QFrame):
         self.geotiff_preview = GeoTiffPreviewWidget()
         self.stack.addWidget(self.geotiff_preview)
 
-        self.media_preview = MediaPreviewWidget()
-        self.stack.addWidget(self.media_preview)
+        # MediaPreviewWidget is lazily constructed on first media render
+        # to avoid initializing QtMultimedia (QMediaPlayer) during app-shell
+        # startup — the backend is UB on no-audio CI runners (#951).
+        self.media_preview: MediaPreviewWidget | None = None
 
         self.warning_label = QLabel("")
         self.warning_label.setWordWrap(True)
@@ -380,7 +382,10 @@ class DataReaderPanel(QFrame):
             )
 
     def _stop_media_if_needed(self) -> None:
-        stop = getattr(self.media_preview, "stop", None)
+        mp = getattr(self, "media_preview", None)
+        if mp is None:
+            return
+        stop = getattr(mp, "stop", None)
         if callable(stop):
             stop()
 
@@ -475,7 +480,16 @@ class DataReaderPanel(QFrame):
 
     def _render_media(self, result: PreviewResult):
         # QMediaPlayer is UI-thread-only: the provider only returns the path;
-        # setSource happens here on the UI thread.
+        # setSource happens here on the UI thread. The widget (and its
+        # QMediaPlayer) are created lazily on first media preview (#951).
+        if self.media_preview is None:
+            from paleo_workbench.ui.pages.media_preview_widget import MediaPreviewWidget
+
+            self.media_preview = MediaPreviewWidget()
+            apply_settings = getattr(self.media_preview, "apply_settings", None)
+            if callable(apply_settings):
+                apply_settings(self.preview_settings)
+            self.stack.addWidget(self.media_preview)
         self.media_preview.set_media_path(result.media_path)
         return self.media_preview
 
@@ -521,7 +535,6 @@ class DataReaderPanel(QFrame):
             self.pdf_preview_widget,
             self.json_tree_preview,
             self.geotiff_preview,
-            self.media_preview,
             self.lazy_visualization_tabs,
         ):
             apply = getattr(widget, "apply_settings", None)
@@ -529,6 +542,8 @@ class DataReaderPanel(QFrame):
                 apply(settings)
         if self.web_document_preview is not None:
             self.web_document_preview.apply_settings(settings)
+        if self.media_preview is not None:
+            self.media_preview.apply_settings(settings)
 
     def set_preview_settings(self, settings) -> None:
         """Apply settings supplied by the application-level dialog."""

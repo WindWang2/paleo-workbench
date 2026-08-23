@@ -328,6 +328,10 @@ py::object renderer_info(const std::string& renderer_xml) {
 
 PYBIND11_MODULE(qgis_render_bridge, module) {
     module.doc() = "Narrow optional C++ QGIS map-render bridge";
+    // Build metadata for freshness checks (#938-8): aligns with
+    // paleo_workbench.__version__ ("0.2.17a0"); previously missing and drifted.
+    module.attr("__version__") = "0.2.17a0";
+    module.attr("__build_commit__") = "unknown";
     py::register_exception<GeometryServiceError>(module, "QgisGeometryError");
 
     py::class_<QgisRenderBridge>(module, "QgisRenderBridge")
@@ -347,7 +351,10 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
             if (result) return result_to_python(*result);
             return py::none();
         })
-        .def("cancel_render", &QgisRenderBridge::cancel_render)
+        .def("cancel_render", &QgisRenderBridge::cancel_render,
+             "Cancel any in-flight async render. Threading contract: async "
+             "completion requires the GUI event loop; without it, "
+             "render_active stays true until cancel_render/shutdown (#938-5).")
         .def("render_sync", [](const QgisRenderBridge& bridge, const py::sequence& extent,
                                  const int width, const int height, const double dpi) {
             return result_to_python(bridge.render_sync(parse_extent(extent), width, height, dpi));
@@ -370,7 +377,11 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
             return output;
         })
         .def_property_readonly("initialized", &QgisRenderBridge::initialized)
-        .def_property_readonly("render_active", &QgisRenderBridge::render_active)
+        .def_property_readonly(
+            "render_active", &QgisRenderBridge::render_active,
+            "Whether an async render is in flight. Without a running Qt "
+            "event loop on the GUI thread, remains true until cancel_render "
+            "or shutdown (#938-5). Use render_sync() for loop-free contexts.")
         .def_property_readonly("version", &QgisRenderBridge::version);
 
     module.def("legacy_style_to_renderer_xml", &legacy_style_to_renderer_xml,

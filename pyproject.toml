@@ -96,6 +96,9 @@ testpaths = ["tests"]
 qt_api = "pyside6"
 markers = [
     "slow: opt-in real-data or graphics tests; skip in fast CI with -m 'not slow'",
+    "opengl: requires a real OpenGL context (skipped on offscreen/CI; no CI leg covers this today — see #940-1)",
+    "qgis: requires the optional qgis_render_bridge extension (see docs/ci-merge-policy.md)",
+    "welllog_binding: requires the built welllog pybind module",
     "timeout: per-test timeout (requires pytest-timeout plugin)",
 ]
 pythonpath = [

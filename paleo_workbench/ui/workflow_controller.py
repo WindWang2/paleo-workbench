@@ -48,7 +48,16 @@ class _RecomputeWorker(QObject):
 
     def __init__(self, project, generation=0, parent=None):
         super().__init__(parent)
-        self._project = project
+        # #939-7: snapshot on the GUI thread before the worker starts — the
+        # worker must not read live project state off-thread (data race with
+        # concurrent GUI mutations). A deep copy isolates the freshness scan
+        # and factor interpolation from live edits.
+        try:
+            self._project = project.model_copy(deep=True)  # type: ignore[attr-defined]
+        except Exception:
+            import copy as _copy
+
+            self._project = _copy.deepcopy(project)
         # Process-global run identity (#834): a prepare/send-to-prep entry
         # that starts later must supersede this recompute's staged results.
         self.generation = int(generation)

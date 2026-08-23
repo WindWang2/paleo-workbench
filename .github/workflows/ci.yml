@@ -16,8 +16,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Unified on CPython 3.12 (single supported runtime).
-        python-version: ["3.12"]
+        # Unified on CPython 3.12 (single supported runtime); 3.13 added as
+        # diagnostic leg for QtMultimedia SIGSEGV triage (#951). See
+        # QT_MEDIA_BACKEND notes on the Run tests step.
+        python-version: ["3.12", "3.13"]
+        # Diagnostic variant for #951: run 3.13 with explicit media backend.
+        # Qt 6.5+ documents QT_MEDIA_BACKEND=ffmpeg/gstreamer/windows/darwin/
+        # android; "none" is undocumented and may be ignored — listed here as
+        # a commented对照 for future runner without pulseaudio/ffmpeg.
+        include:
+          - python-version: "3.13"
+            qt-media-backend: "ffmpeg"
 
     steps:
       - name: Checkout
@@ -167,6 +176,14 @@ jobs:
       - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
+          # #951 triage: QtMultimedia on headless runners may SIGSEGV in
+          # QMediaPlayer teardown (pytest-qt _process_events → Qt event
+          # dispatch use-after-free). Documented backends: ffmpeg,
+          # gstreamer, windows, darwin, android (Qt 6.5+). "none" is
+          # undocumented — if needed, set QT_MEDIA_BACKEND=none or empty
+          # here and compare runs; ffmpeg is the explicit default forced
+          # for the diagnostic variant.
+          QT_MEDIA_BACKEND: ${{ matrix.qt-media-backend || '' }}
           PYTHONFAULTHANDLER: "1"
         run: |
           # Vendored GDAL env (GDAL_DATA/PROJ_DATA/LD_LIBRARY_PATH/PYTHONPATH).
