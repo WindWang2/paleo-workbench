@@ -268,6 +268,7 @@ class DataPage(QWidget):
         self._rescan_context: tuple | None = None
         self._delivery_context: tuple | None = None
         self._import_in_progress = False
+        self._prefetched_viz_asset: object | None = None
         self._viz_adapter = VizAdapter()
         # Business orchestration (catalog-aware lifecycle actions) lives in the
         # controller; the page keeps thin delegating methods for every name
@@ -325,7 +326,7 @@ class DataPage(QWidget):
         self._preview_controller.loading.connect(
             lambda: self.reader_panel.show_loading(self._selected_asset)
         )
-        self._preview_controller.result_ready.connect(self.reader_panel.render)
+        self._preview_controller.result_ready.connect(self._on_summary_ready)
         self._preview_controller.failed.connect(self._handle_preview_failed)
 
         self._visualization_controller = PreviewRequestController(
@@ -1804,6 +1805,34 @@ class DataPage(QWidget):
         if ref is None:
             return
         self.open_in_visualization.emit(replace(ref, source="data_page"))
+
+    def _on_summary_ready(self, result) -> None:
+        self.reader_panel.render(result)
+        self._prefetch_visualization_preview(result)
+
+    def _prefetch_visualization_preview(self, result) -> None:
+        """选中即后台生成可视化预览，打开选项卡即得。
+
+        The 可视化预览 tab used to sit on a "点击此选项卡生成" prompt until
+        clicked, which reads as "预览没有了".  When the summary says a
+        professional preview exists, kick the visualization controller in
+        the background; completion renders with ``activate=False`` and the
+        loading spinner no longer steals the 数据列表 tab.
+        """
+        asset = self._selected_asset
+        if not isinstance(asset, ResourceItem):
+            return
+        if not getattr(result, "visualization_available", False):
+            return
+        # Stale summary arriving after the user moved to another asset.
+        if result.path and str(result.path) != str(getattr(asset, "path", "")):
+            return
+        if not self._viz_adapter.supports_resource(asset):
+            return
+        if self._prefetched_viz_asset is asset:
+            return
+        self._prefetched_viz_asset = asset
+        self._visualization_controller.request(asset)
 
     def _handle_preview_failed(self, message: str) -> None:
         self.reader_panel.render(

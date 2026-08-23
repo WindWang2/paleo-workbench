@@ -1610,3 +1610,66 @@ def test_data_page_open_selected_folder_survives_pathlib_oserror(qtbot, tmp_path
     assert folder is not None
     status = page.data_toolbar.operation_status_label.text()
     assert status.startswith(("目录: ", "目录不存在"))
+
+
+def test_summary_ready_prefetches_visualization_preview(qtbot, tmp_path: Path):
+    """选中即后台预取：可视化预览选项卡打开时内容已就绪，不再停留在提示语。"""
+    las = tmp_path / "well.las"
+    las.write_text("~V\n~W\n~C\n~A\n 0.0 1.0\n", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    resource = ResourceItem(
+        name="well.las", type="well_log", format="las", path=str(las)
+    )
+    project.resources.append(resource)
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page._set_selected_asset(resource)
+
+    requested: list[object] = []
+    page._visualization_controller.request = lambda asset: requested.append(asset)
+
+    from paleo_workbench.resources.preview_parsers import PreviewResult
+
+    page._on_summary_ready(
+        PreviewResult(
+            mode="well_log",
+            title="well.las",
+            path=str(las),
+            visualization_available=True,
+        )
+    )
+    assert requested == [resource]
+
+    # Same asset again → no duplicate prefetch.
+    page._on_summary_ready(
+        PreviewResult(
+            mode="well_log",
+            title="well.las",
+            path=str(las),
+            visualization_available=True,
+        )
+    )
+    assert requested == [resource]
+
+
+def test_summary_ready_without_visualization_support_skips_prefetch(qtbot, tmp_path: Path):
+    doc = tmp_path / "notes.txt"
+    doc.write_text("hello", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    resource = ResourceItem(
+        name="notes.txt", type="document", format="txt", path=str(doc)
+    )
+    project.resources.append(resource)
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page._set_selected_asset(resource)
+
+    requested: list[object] = []
+    page._visualization_controller.request = lambda asset: requested.append(asset)
+
+    from paleo_workbench.resources.preview_parsers import PreviewResult
+
+    page._on_summary_ready(
+        PreviewResult(mode="text", title="notes.txt", path=str(doc), text="hello")
+    )
+    assert requested == []
