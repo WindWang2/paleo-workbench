@@ -18,7 +18,7 @@ import zipfile
 from setuptools import build_meta
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_SVG = 69
+EXPECTED_SVG = 77
 EXPECTED_HTML = 3
 EXPECTED_MD = 2
 
