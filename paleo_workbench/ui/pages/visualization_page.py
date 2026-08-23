@@ -191,7 +191,7 @@ class VisualizationPage(QWidget):
         for res in self._resources:
             ref = self._adapter.ref_from_resource(res)
             if ref is not None:
-                icon = "📋 " if ref.kind == "well_log" else "📈 "
+                icon = {"well_log": "📋 ", "map": "🗺️ "}.get(ref.kind, "📈 ")
                 self.asset_combo.addItem(f"{icon}{ref.label}", ref)
         for doc in self._map_documents:
             ref = self._adapter.ref_from_map_document(doc)

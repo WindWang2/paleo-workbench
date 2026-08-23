@@ -7,7 +7,16 @@ import paleo_workbench.viz.prediction_helpers as prediction_helpers
 import paleo_workbench.viz.seismic_prediction_helpers as seismic_prediction_helpers
 from paleo_workbench.pipeline.assets import SEISMIC_KEY
 from paleo_workbench.project.paths import is_within_directory
-from paleo_workbench.viz.map_load import load_map_payload_from_document
+from paleo_workbench.resources.geojson_layers import (
+    FACIES_LAYER_SPECS,
+    facies_group_members,
+    facies_layer_role,
+)
+from paleo_workbench.viz.map_load import (
+    load_map_payload_from_document,
+    load_map_payload_from_geojson_path,
+    load_facies_group_payload,
+)
 from paleo_workbench.viz.models import VizPayload, VizRef
 from paleo_workbench.viz.preview_request import request_from_resource
 from paleo_workbench.viz.well_log_load import load_well_log_from_path
@@ -34,6 +43,9 @@ class VizAdapter:
     WELL_FORMATS = {"las", "xml"}
     SEISMIC_TYPES = {"seismic"}
     SEISMIC_FORMATS = {"sgy", "segy"}
+    # GeoJSON 相图 layers open in the 古地理 tab.
+    MAP_TYPES = {"geojson"}
+    MAP_FORMATS = {"geojson", "json"}
     # Formats that go through GeoVizEngine PreviewKind backends.
     ENGINE_FORMATS = {
         "dat",
@@ -54,6 +66,8 @@ class VizAdapter:
             return True
         if rtype in self.SEISMIC_TYPES and fmt in self.SEISMIC_FORMATS:
             return True
+        if rtype in self.MAP_TYPES and fmt in self.MAP_FORMATS:
+            return True
         if rtype in _ENGINE_PREVIEW_TYPES:
             return True
         # SEGY also openable as 2D engine preview (slice scrub) when type is seismic —
@@ -69,6 +83,8 @@ class VizAdapter:
             kind: str = "well_log"
         elif rtype in self.SEISMIC_TYPES and fmt in self.SEISMIC_FORMATS:
             kind = "seismic"
+        elif rtype in self.MAP_TYPES and fmt in self.MAP_FORMATS:
+            kind = "map"
         elif rtype in _ENGINE_PREVIEW_TYPES:
             kind = "engine_preview"
         else:
@@ -241,13 +257,50 @@ class VizAdapter:
 
     def _resolve_map(self, ref: VizRef, project: Any, label: str) -> VizPayload:
         doc = self._find_map_document(ref, project)
-        if doc is None:
+        warning = ""
+        if doc is not None:
+            features, wells, period = load_map_payload_from_document(doc)
+        elif ref.path:
+            # GeoJSON 相图 resource — load the file directly into the 古地理 tab.
+            path = self._absolute_path(ref.path, project)
+            if not path or not Path(path).is_file():
+                return VizPayload(
+                    kind="message",
+                    label=label,
+                    message="相图文件不存在或不可读",
+                )
+            resource = self._find_resource(ref, project)
+            members = (
+                facies_group_members(
+                    resource, getattr(project, "resources", None) or []
+                )
+                if resource is not None
+                else []
+            )
+            entries: list[tuple[str, str | None]] = []
+            for member in members:
+                member_path = self._absolute_path(
+                    str(getattr(member, "path", "") or ""), project
+                )
+                if member_path and Path(member_path).is_file():
+                    entries.append((member_path, facies_layer_role(member)))
+            if len(entries) > 1:
+                # 打开其中一层时自动带上同组的相/亚相/微相（如存在）。
+                features, wells, period = load_facies_group_payload(
+                    entries, clicked_path=path
+                )
+                loaded = "、".join(
+                    FACIES_LAYER_SPECS[role][0] for _p, role in entries if role
+                )
+                warning = f"已同时加载 {len(entries)} 层相图（{loaded}）"
+            else:
+                features, wells, period = load_map_payload_from_geojson_path(path)
+        else:
             return VizPayload(
                 kind="message",
                 label=label,
                 message="未找到对应的古地理图文档",
             )
-        features, wells, period = load_map_payload_from_document(doc)
         if not features and not wells:
             return VizPayload(
                 kind="map",
@@ -264,6 +317,7 @@ class VizAdapter:
             map_features=features,
             map_wells=wells,
             period_name=period or "",
+            warning=warning,
         )
 
     def _resolve_cross_well(self, ref: VizRef, project: Any, label: str) -> VizPayload:
