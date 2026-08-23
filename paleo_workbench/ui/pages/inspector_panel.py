@@ -53,8 +53,16 @@ def _fit_key_value_table(table: TablePreviewWidget, *, cap_height: bool) -> None
     hdr = table.horizontalHeader()
     hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
     if cap_height:
-        height = hdr.sizeHint().height() + table.rowCount() * 28 + 6
-        table.setMaximumHeight(max(72, min(height, 320)))
+        # 高度必须容纳：表头 + 全部行 + 边框 + 可能弹出的水平滚动条，
+        # 否则水平条会吃掉行高，表格只剩表头、内容行被挤出可视区。
+        height = (
+            hdr.sizeHint().height()
+            + table.rowCount() * 28
+            + table.horizontalScrollBar().sizeHint().height()
+            + table.frameWidth() * 2
+            + 2
+        )
+        table.setMaximumHeight(min(height, 340))
 
 
 class LineageTreeWidget(QWidget):

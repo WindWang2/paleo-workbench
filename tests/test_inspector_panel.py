@@ -70,7 +70,13 @@ def test_inspector_key_value_tables_fit_content(qtbot):
         assert table.horizontalHeader().sectionResizeMode(0) == (
             QHeaderView.ResizeMode.ResizeToContents
         )
-    assert panel.metadata_table.maximumHeight() <= 320
+    assert panel.metadata_table.maximumHeight() <= 340
+    # 高度必须足够显示 表头 + 全部行（水平滚动条空间已预留）
+    rows = panel.metadata_table.rowCount()
+    min_needed = (
+        panel.metadata_table.horizontalHeader().sizeHint().height() + rows * 28
+    )
+    assert panel.metadata_table.maximumHeight() >= min_needed
     assert panel.overview_table.maximumHeight() >= 1_000_000  # 概要页不限高
 
 
