@@ -588,11 +588,20 @@ def test_reader_panel_visualization_loading_and_error_preserve_data_list(qtbot):
     )
     tabs = panel.lazy_visualization_tabs
 
+    # Background prefetch also emits loading: the spinner must appear inside
+    # the 可视化预览 tab WITHOUT stealing the 数据列表 tab.
     panel.show_visualization_loading()
 
-    assert tabs.currentIndex() == 1
+    assert tabs.currentIndex() == 0
+    assert tabs.visual_stack.currentWidget() is tabs.loading_label
     assert "正在生成可视化预览" in tabs.loading_label.text()
     assert tabs.summary.item(0, 0).text() == "1"
+
+    # User-initiated click already sits on the viz tab: spinner shows in place.
+    tabs.setCurrentIndex(1)
+    panel.show_visualization_loading()
+    assert tabs.currentIndex() == 1
+    assert tabs.visual_stack.currentWidget() is tabs.loading_label
 
     panel.show_visualization_error("prepare failed")
 

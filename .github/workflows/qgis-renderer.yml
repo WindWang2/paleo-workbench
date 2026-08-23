@@ -116,7 +116,12 @@ jobs:
       # and made this leg fail on every trigger.
       - name: Install QGIS test deps
         run: |
-          python -m pip install "PySide6==6.11.1" "pytest-qt>=4.5.0" "pytest-timeout>=2.3.1" "numpy>=1.26"
+          python -m pip install "PySide6==6.11.1" "pytest-qt>=4.5.0" "pytest-timeout>=2.3.1" "numpy>=1.26" \
+            "pydantic>=2" \
+            "gdal==$(gdal-config --version)"
+          # pydantic: tests/conftest.py's autouse session fixture imports the
+          # paleo_workbench package (project.models). gdal: the map backend's
+          # optional-import surface (bridge capability probe).
 
       - name: Build vendored QGIS + qgis_render_bridge (opt-in)
         env:
@@ -133,6 +138,17 @@ jobs:
         run: |
           python -m pytest -q tests/test_qgis_vendor_source.py --timeout=60 --timeout-method=thread
 
+      - name: Unify the Qt runtime (PySide6's bundled Qt wins)
+        # The bridge's vendored QGIS was built against noble's system Qt 6.4
+        # while PySide6 bundles its own 6.11: letting the loader mix both
+        # yields undefined-symbol errors (QRingBuffer). Qt guarantees
+        # backward compatibility inside a major version — a 6.4-built
+        # libqgis_core loads fine on the 6.11 runtime.
+        run: |
+          QT_LIB="$(python -c "import PySide6, os; print(os.path.join(os.path.dirname(PySide6.__file__), 'Qt', 'lib'))")"
+          echo "QT_LIB=$QT_LIB" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$QT_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+
       - name: QGIS tests are selected, not silently skipped — and executed
         # The leg must fail if the QGIS test set ever stops being selected
         # (e.g. a rename), so the production path cannot silently lose
@@ -143,8 +159,20 @@ jobs:
         # prints, and its double-backslash pattern could never match).
         run: |
           set -o pipefail
-          QT_QPA_PLATFORM=offscreen python -m pytest -v --tb=short --timeout=120 -m qgis tests/ 2>&1 | tee /tmp/qgis-run.txt
-          collected="$(QT_QPA_PLATFORM=offscreen python -m pytest --collect-only -q -m qgis tests/ 2>/dev/null | grep -oE '[0-9]+ tests collected' | grep -oE '^[0-9]+')"
+          # Collect ONLY the files that carry the qgis marker: a bare
+          # `tests/` walk collection-errors on modules importing the geoviz
+          # graph, which this focused leg deliberately does not install.
+          # The file list is derived from the marker itself (rename-safe:
+          # a renamed file drops out of the list and the >=9 count guard
+          # below fails loudly).
+          mapfile -t QGIS_FILES < <(
+            for f in $(grep -rl "pytest.mark.qgis" tests --include='*.py' | sort); do
+              grep -qE "^(from|import) (geoviz|grid_render_core|layer_model_core|seismic_3d_core|well_log_core|map_edit_core)" "$f" || echo "$f"
+            done
+          )
+          echo "qgis marker files: ${QGIS_FILES[*]}"
+          QT_QPA_PLATFORM=offscreen python -m pytest -v --tb=short --timeout=120 -m qgis "${QGIS_FILES[@]}" 2>&1 | tee /tmp/qgis-run.txt
+          collected="$(QT_QPA_PLATFORM=offscreen python -m pytest --collect-only -q -m qgis "${QGIS_FILES[@]}" 2>/dev/null | grep -oE '[0-9]+ tests collected' | grep -oE '^[0-9]+')"
           test -n "${collected}" && test "${collected}" -ge 9
           python - <<'EOF'
           import re

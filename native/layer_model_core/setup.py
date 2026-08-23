@@ -32,5 +32,5 @@ setup(
     ],
     cmdclass={"build_ext": build_ext},
     zip_safe=False,
-    python_requires=">=3.12",
+    python_requires=">=3.12,<3.13",
 )
