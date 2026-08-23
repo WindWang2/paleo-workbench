@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -66,7 +67,7 @@ class NewProjectWizardDialog(QDialog):
         self.setObjectName("NewProjectWizard")
         self.setWindowTitle("新建工程")
         self.setMinimumWidth(640)
-        self.resize(720, 560)
+        self.resize(860, 640)
         self._engine = engine
         self._result_document: ProjectDocument | None = None
         self._report: dict[str, Any] | None = None
@@ -179,6 +180,10 @@ class NewProjectWizardDialog(QDialog):
         self._inventory_table.verticalHeader().setVisible(False)
         self._inventory_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._inventory_table.setAlternatingRowColors(True)
+        # 表格高度随内容收敛，剩余空间留给井位地图
+        self._inventory_table.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
+        )
         self._inventory_table.hide()
         self._step2_layout.addWidget(self._inventory_table)
 
@@ -194,8 +199,6 @@ class NewProjectWizardDialog(QDialog):
         self._step2_error.setStyleSheet(f"color: {tokens.ERROR_RED}; font-size: 11px;")
         self._step2_error.hide()
         self._step2_layout.addWidget(self._step2_error)
-
-        self._step2_layout.addStretch(1)
 
         self._stack.addWidget(self._page1)
 
@@ -426,6 +429,15 @@ class NewProjectWizardDialog(QDialog):
         for row, (k, v) in enumerate(by_type.items()):
             self._inventory_table.setItem(row, 0, QTableWidgetItem(str(k)))
             self._inventory_table.setItem(row, 1, QTableWidgetItem(str(v)))
+        # 高度贴合内容（封顶 260px），多余空间留给井位地图
+        self._inventory_table.resizeRowsToContents()
+        header_h = self._inventory_table.horizontalHeader().height()
+        rows_h = sum(
+            self._inventory_table.rowHeight(r)
+            for r in range(self._inventory_table.rowCount())
+        )
+        frame = 2 * self._inventory_table.frameWidth()
+        self._inventory_table.setMaximumHeight(min(header_h + rows_h + frame + 4, 260))
         self._inventory_table.show()
         issues = list(report.get("issues", []) or [])
         warnings = list(report.get("warnings", []) or [])
