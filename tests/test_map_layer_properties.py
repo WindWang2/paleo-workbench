@@ -7,6 +7,8 @@ from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
 from paleo_workbench.viz.native_factor_map import MapScene
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 
+from tests.qgis_support import QGIS_SKIP_REASON, qgis_bridge_available
+
 
 def _layer():
     registry = layer_model_core.LayerRegistry()
@@ -50,6 +52,11 @@ def test_layer_properties_has_one_common_sectioned_surface_and_emits_style(qtbot
     assert received[0][1]["style"]["categories"]["delta"] == "#e03131"
 
 
+# Needs the built bridge: migrate_legacy_style() returns None without it, so
+# this test must self-skip in bridge-less environments exactly like the rest
+# of the qgis-marked family (audit #917 — its absence made the main gate red).
+@pytest.mark.qgis
+@pytest.mark.skipif(not qgis_bridge_available(), reason=QGIS_SKIP_REASON)
 def test_layer_properties_qgis_path_offers_native_editor_and_payload(qtbot) -> None:
     """With the bridge present the symbology tab routes through native QGIS."""
     from PySide6.QtWidgets import QLabel

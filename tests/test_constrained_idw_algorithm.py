@@ -68,8 +68,13 @@ def test_369_hull_wells_anchored_finite_and_equal_to_observations():
         assert float(gz[row, col]) == pytest.approx(p["value"], rel=1e-6, abs=1e-4)
 
 
-def test_369_exact_surface_r_squared_approaches_one():
-    """LOO R² on an exactly reproduced plane must be ≈1.0 (was 0.12–0.69)."""
+def test_369_exact_surface_anchored_fidelity_approaches_one():
+    """Anchored fidelity on an exactly reproduced plane must be ≈1.0 (was 0.12–0.69).
+
+    #921: the shared ``r_squared`` key now carries honest spatial-4-fold
+    cross-validation (comparable with plain IDW/kriging LOO); the anchoring
+    quality is reported separately as ``anchored_fidelity``.
+    """
     pts = _pts(
         (0.0, 0.0, 0.5),
         (10.0, 0.0, 5.5),
@@ -80,8 +85,13 @@ def test_369_exact_surface_r_squared_approaches_one():
         (8.0, 2.0, 5.5),
     )
     result = run_constrained_idw(pts, grid_n=50, power=2.0)
-    assert result["r_squared"] > 0.99
-    assert result["r_squared_n_skipped"] == 0
+    assert result["anchored_fidelity"] > 0.99
+    # Held-out R² is honest: IDW from 7 sparse training wells does NOT
+    # reproduce held-out plane values near-perfectly, so it stays well below
+    # the old fabricated in-sample ≈0.9999.
+    assert result["r_squared_method"] == "spatial_4_fold"
+    assert -1.0 <= result["r_squared"] <= 1.0
+    assert result["r_squared"] < 0.99
     # Grid max must express the observed max (10.5) — not fall short of it.
     assert result["max"] == pytest.approx(10.5, rel=0.02)
     # and the surface must actually reach it somewhere on the map.
@@ -394,7 +404,11 @@ def test_400_degree_crs_has_no_kilometre_corridor():
     row2 = int(np.argmin(np.abs(np.asarray(gy) - 0.5)))
     central2 = (np.asarray(gx2) >= 0.45) & (np.asarray(gx2) <= 0.55)
     n_without = int((~np.isfinite(gz2[row2, :]))[central2].sum())
-    assert n_without >= 5, "sanity: old auto buffer must produce a wide corridor"
+    # #939-4: with no declared CRS the units are unknowable; the auto buffer
+    # still applies in map units (the #370 corridor contract) but the result
+    # must be labelled unit-ambiguous so it can never be read as metres.
+    assert without_crs["barrier_buffer_mode"] == "auto_map_units_unknown_crs"
+    assert with_crs["barrier_buffer_mode"] == "degrees"
     assert n_with <= 1, f"degree CRS corridor too wide: {n_with} cells (~{n_with*0.018} deg)"
 
 
@@ -411,3 +425,115 @@ def test_400_metre_crs_behavior_unchanged():
     )
     auto = run_constrained_idw(pts, grid_n=60, power=2.0, break_polylines=breaks)
     np.testing.assert_array_equal(with_crs["grid_z"], auto["grid_z"])
+
+
+# --------------------------------------------------------------------------- #
+# #933 — cell-batched pure-Euclidean kernel is bit-for-bit the per-cell path
+# --------------------------------------------------------------------------- #
+
+
+def _vendored_engine():
+    import sys
+
+    root = (
+        __import__("pathlib").Path(__file__).resolve().parents[1]
+        / "paleo_workbench"
+        / "_vendored"
+        / "haiyou_constrained_idw"
+    )
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from drawing.single_factor import constrained_engine as ce
+
+    return ce
+
+
+@pytest.mark.parametrize(
+    "min_points,max_points,limit_radius,decluster",
+    [
+        (3, 12, True, "ones"),
+        (3, 12, True, "random"),
+        (8, 12, True, "ones"),
+        (3, 3, True, "ones"),
+        (3, 12, False, "ones"),
+    ],
+)
+def test_cell_batch_kernel_bitwise_matches_per_cell(min_points, max_points, limit_radius, decluster):
+    """#933: the cell-dimension batch must reproduce the per-cell loop exactly.
+
+    Covers exact well hits, label blocking, barrier LOS masks, radius-pass
+    relaxation, top-k selection and the zero-decluster None branch; values and
+    blocked-well counters are compared bitwise (ULP drift is a regression —
+    it would silently change contours on recompute).
+    """
+    ce = _vendored_engine()
+    rng = np.random.default_rng(20260823)
+    n_wells, n_cells = 90, 700
+    wells = np.column_stack([
+        rng.uniform(0, 1000, n_wells),
+        rng.uniform(0, 1000, n_wells),
+        rng.uniform(10, 60, n_wells),
+    ])
+    cx = rng.uniform(-50, 1050, n_cells)
+    cy = rng.uniform(-50, 1050, n_cells)
+    for i in range(0, n_cells, 97):
+        cx[i] = wells[i % n_wells, 0]
+        cy[i] = wells[i % n_wells, 1]
+    blocked = rng.random((n_cells, n_wells)) < 0.25
+    well_labels = rng.integers(-1, 3, n_wells).astype(int)
+    cell_labels = rng.integers(-1, 3, n_cells).astype(int)
+    density = (
+        np.ones(n_wells) if decluster == "ones" else rng.uniform(0.5, 2.0, n_wells)
+    )
+    cfg = ce.ConstrainedIDWConfig(
+        power=2.0, search_radius=250.0, min_points=min_points,
+        max_points=max_points, limit_interpolation_to_search_radius=limit_radius,
+    )
+    batch_vals, batch_blocked = ce._interpolate_euclidean_cells_batch(
+        cx, cy, cell_labels, wells, cfg, density,
+        well_labels=well_labels, blocked_mask=blocked, barriers_active=True,
+    )
+    barrier = [
+        ce.BarrierLine(line_id="probe", points=((-1e5, -1e5), (1e5, -1e5)))
+    ]
+    for i in range(n_cells):
+        value, n_blocked, _ = ce._interpolate_grid_point(
+            (float(cx[i]), float(cy[i])), wells, barrier, [], cfg, density,
+            int(cell_labels[i]), well_labels, blocked_mask=blocked, cell_index=i,
+        )
+        ref = float(value) if value is not None and math.isfinite(value) else float("nan")
+        got = float(batch_vals[i])
+        assert (math.isnan(ref) and math.isnan(got)) or (
+            not math.isnan(ref) and not math.isnan(got) and ref == got
+        ), f"cell {i}: per-cell {ref!r} vs batch {got!r}"
+        assert int(n_blocked) == int(batch_blocked[i]), f"cell {i}: blocked count"
+
+
+def test_generate_uses_cell_batch_for_no_direction_barrier_case(monkeypatch):
+    """#933: barrier-only runs must take the batched kernel, not the per-cell
+    loop — if the batch condition regresses, the per-cell path is ~65 µs/cell
+    (1.9 s @ 200²) and this test fails loudly via the planted guard."""
+    ce = _vendored_engine()
+
+    def _no_per_cell(*args, **kwargs):
+        raise AssertionError("per-cell path used for a no-direction run")
+
+    monkeypatch.setattr(ce, "_interpolate_grid_point", _no_per_cell)
+    rng = np.random.default_rng(7)
+    wells = [
+        ce.ConstraintWell(well_id=f"w{i}", x=float(x), y=float(y), value=float(v))
+        for i, (x, y, v) in enumerate(
+            zip(rng.uniform(0, 1000, 24), rng.uniform(0, 1000, 24), rng.uniform(10, 60, 24))
+        )
+    ]
+    boundary = ce.BoundaryPolygon(
+        exterior=((-100.0, -100.0), (1100.0, -100.0), (1100.0, 1100.0),
+                  (-100.0, 1100.0), (-100.0, -100.0))
+    )
+    barriers = [ce.BarrierLine(line_id="b1", points=((500.0, -100.0), (500.0, 1100.0)))]
+    cfg = ce.ConstrainedIDWConfig(grid_resolution=48, power=2.0, search_radius=400.0)
+    result = ce.generate_constrained_idw(wells, [boundary], barriers, [], [], cfg)
+    finite = int(np.isfinite(result.grid_z).sum())
+    assert finite > 0
+    # Later gap-fill/anchoring stages may fill more cells than the IDW pass.
+    assert 0 < result.diagnostics["plain_distance_grid_points"] <= finite

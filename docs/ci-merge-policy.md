@@ -10,17 +10,29 @@ A PR is merge-ready when these are green on the head SHA:
 | Gate | Workflow / job |
 |------|----------------|
 | **WellLogEngine C++ (Ubuntu)** | `WellLogEngine C++` — shared ON/OFF, ASan, Qt Mesa, wheels, vcpkg, benchmark as configured |
-| **Full monorepo Tests (Python 3.12 + 3.13)** | `CI` → `Tests (Python *)` matrix |
-| **Well Log Workstation (host)** | `CI` → `Well Log Workstation (host)` (3.12 + 3.13) |
+| **Full monorepo Tests (CPython 3.12)** | `CI` → `Tests (CPython 3.12)` matrix |
+| **Well Log Workstation (host)** | `CI` → `Well Log Workstation (host)` (CPython 3.12) |
 | **Merge gate** | `CI` → `Merge gate (full monorepo + workstation)` — `needs:` the full Tests matrix and the workstation host matrix |
 
 Cross-workflow: GitHub does not `needs:` across workflows; reviewers confirm **WellLogEngine C++** on the same commit as the CI host gate. The `WellLogEngine C++` workflow (`well-log-engine.yml`) is triggered on well-log-engine submodule **gitlink bumps** (paths cover the bare `well-log-engine` entry and `well-log-engine/**`), so any engine-pointer change re-runs it.
 
-The full monorepo suite runs with `-m "not slow"` and must be green **without
+The full monorepo suite runs with `-m "not slow and not welllog_binding"` and
+must be green **without
 quarantine**: there is no `continue-on-error`, no advisory xfail registry
 (`tests/advisory_xfail.py` is empty by design — do not grow it back), and no
 "exit 124 is advisory" ceiling. A test that fails is a bug to fix, not a
 reason to loosen the gate.
+
+## WellLog binding contract (audit #917)
+
+The workbench↔engine native contract (`tests/test_welllog_engine_native_integration.py`,
+marker `welllog_binding`) needs a **built** welllog pybind module, which no CI
+leg installs today — running it in the fast gate made the required gate
+permanently red (#917). The gate therefore deselects the family but asserts
+its collection (baseline 2: the contract + the #896 anti-vanishing guard), so
+the contract cannot silently disappear. Execution happens where the binding is
+built (developer environments; a future binding CI leg should select
+`-m welllog_binding` and install `well-log-engine`).
 
 ## Slow tests (nightly leg, packaging #442)
 

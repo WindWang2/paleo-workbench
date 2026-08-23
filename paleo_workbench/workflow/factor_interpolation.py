@@ -315,6 +315,32 @@ def _apply_interpolation_isolated(
         return task
 
 
+def interpolation_params_from_task(task: "FactorMapTask") -> tuple[str, int, float]:
+    """Recover ``(method, grid_n, power)`` previously recorded on *task*.
+
+    Recompute entry points must re-run a task with ITS OWN algorithm
+    parameters, not the function defaults (#919): ``task.method`` and the
+    ``grid_n``/``power`` keys written by :func:`_attach_result_to_task` are
+    the recorded truth; anything missing falls back to the same defaults the
+    preparation page starts from.
+    """
+    params = dict(getattr(task, "parameters", None) or {})
+    method = str(
+        params.get("method")
+        or getattr(task, "method", None)
+        or "IDW"
+    )
+    try:
+        grid_n = max(8, int(params.get("grid_n") or DEFAULT_GRID_N))
+    except (TypeError, ValueError):
+        grid_n = DEFAULT_GRID_N
+    try:
+        power = float(params.get("power") or 2.0)
+    except (TypeError, ValueError):
+        power = 2.0
+    return method, grid_n, power
+
+
 def apply_interpolation_to_task(
     task: FactorMapTask,
     *,

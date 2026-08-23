@@ -72,17 +72,22 @@ QT_QPA_PLATFORM=offscreen python -m pytest -q
 python -m pytest -q
 ```
 
-## QGIS renderer (opt-in)
+## QGIS renderer (primary authoring core, optional build)
 
-`paleo_workbench.mapping.map_render_backend` prefers the QGIS production
-renderer when `prefer_qgis=True`, but that backend requires the optional
-`qgis_render_bridge` extension (a vendored-QGIS build under
-`native/qgis_render_bridge`; QGIS sources are fixed in `third_party/qgis`).
-It is **not** part of the default install and the main CI gate does **not**
-cover it — the CI `Tests` matrix installs neither QGIS nor the bridge, so the
-fallback renderer is the effectively-gated path and every QGIS test
-self-skips there (they carry the `qgis` pytest marker; skip reasons show the
-exact enablement commands).
+Per ADR 0059 the QGIS renderer is the **primary professional 2-D cartographic
+authoring core**: `create_map_render_backend()` defaults to
+`prefer_qgis=True`, so a built bridge is used automatically (screen, export
+PNG/SVG/PDF). The legacy QPainter fallback remains the always-available path
+for tests/headless/minimal runtimes and gains no new professional features.
+
+The bridge itself requires the optional `qgis_render_bridge` extension (a
+vendored-QGIS build under `native/qgis_render_bridge`; QGIS sources are fixed
+in `third_party/qgis`). It is **not** part of the default install, so a
+bridge-less environment transparently runs the fallback (with a logged,
+actionable reason when a broken bridge fails the one-shot runtime probe).
+The main CI gate does **not** build the bridge — every QGIS test self-skips
+there (they carry the `qgis` pytest marker; skip reasons show the exact
+enablement commands).
 
 Build it explicitly (needs Qt6 dev headers, cmake and ninja on the system):
 
@@ -93,9 +98,9 @@ python -m pytest -q -m qgis tests/   # run the QGIS renderer tests
 ```
 
 A dedicated CI leg (`.github/workflows/qgis-renderer.yml`) builds the bridge
-and runs an import smoke plus the vendor-integrity checks. It is fail-closed
-but only runs on manual dispatch or on changes touching
-`native/qgis_render_bridge/**` / `third_party/qgis/**` — normal PRs skip it.
+and executes the qgis-marked tests (fail-closed, count-gated). It runs on
+manual dispatch and on changes touching `native/qgis_render_bridge/**`,
+`third_party/qgis/**`, `paleo_workbench/mapping/**`, or the QGIS test family.
 See `docs/ci-merge-policy.md` for the coverage statement.
 
 ## 3D Geological Modeling (`viz/geomodel`)

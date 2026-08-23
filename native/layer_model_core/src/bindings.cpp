@@ -17,6 +17,10 @@ namespace lm = pwb::layer_model;
 
 PYBIND11_MODULE(layer_model_core, m) {
     m.doc() = "Authoritative C++ map-layer registry for paleo-workbench native maps.";
+    // #938-7: build metadata for the native-backend freshness gate (matches
+    // the package version; grid_render_core/seismic_3d_core/well_log_core
+    // carry the same attribute).
+    m.attr("__version__") = "0.2.17a0";
 
     py::enum_<lm::LayerType>(m, "LayerType")
         .value("ScalarGrid", lm::LayerType::ScalarGrid)

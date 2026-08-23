@@ -197,6 +197,30 @@ def _optional_float(value: Any) -> float | None:
         return None
 
 
+def sync_well_table_to_linked_tasks(
+    project: ProjectDocument, table: WellTable
+) -> list[FactorMapTask]:
+    """Write cleaned sample_points back to tasks explicitly bound to *table*.
+
+    Audit #936: the previous fallback injected the table's samples into
+    ``factor_map_tasks[0]`` even when that task belonged to a different
+    horizon/factor.  Only explicit bindings are honoured now; a legacy
+    single-task project with no binding yet keeps the convenience of adopting
+    the table.  Returns the tasks that were updated.
+    """
+    linked = [
+        task for task in project.factor_map_tasks if task.well_table_id == table.id
+    ]
+    if not linked and len(project.factor_map_tasks) == 1:
+        linked = list(project.factor_map_tasks)
+    for task in linked:
+        params = dict(task.parameters or {})
+        params["sample_points"] = sample_points_from_well_table(table)
+        task.parameters = params
+        task.well_table_id = table.id
+    return linked
+
+
 def well_table_to_arrays(
     table: WellTable,
     *,

@@ -60,6 +60,7 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
             if (style.contains("stroke")) layer.stroke = py::cast<std::string>(style["stroke"]);
             if (style.contains("stroke_width")) layer.stroke_width = py::cast<double>(style["stroke_width"]);
             if (style.contains("marker_size")) layer.marker_size = py::cast<double>(style["marker_size"]);
+            if (style.contains("line_pattern")) layer.line_pattern = py::cast<std::string>(style["line_pattern"]);
             if (style.contains("renderer")) layer.renderer_kind = py::cast<std::string>(style["renderer"]);
             if (style.contains("field")) layer.classification_field = py::cast<std::string>(style["field"]);
             if (style.contains("renderer_xml")) {
@@ -106,7 +107,14 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
             }
             if (style.contains("labels")) {
                 const py::dict labels = as_dict(style["labels"], "style labels");
-                layer.labels_enabled = labels.contains("field") && !py::cast<std::string>(labels["field"]).empty();
+                // #922: an explicit labels.visible=false must hide labels even
+                // when a field is configured (previously dropped → drawn anyway).
+                const bool visible = labels.contains("visible")
+                                         ? py::cast<bool>(labels["visible"])
+                                         : true;
+                layer.labels_enabled =
+                    visible && labels.contains("field")
+                    && !py::cast<std::string>(labels["field"]).empty();
                 if (labels.contains("field")) layer.label_field = py::cast<std::string>(labels["field"]);
                 if (labels.contains("font_family")) layer.label_font_family = py::cast<std::string>(labels["font_family"]);
                 if (labels.contains("size")) layer.label_size = py::cast<double>(labels["size"]);
@@ -117,7 +125,48 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
         layer.data_revision = py::cast<std::uint64_t>(data["data_revision"]);
         layer.style_revision = py::cast<std::uint64_t>(data["style_revision"]);
         layer.visible = py::cast<bool>(data["visible"]);
+        // #929: scale visibility travels with the layer payload (the fallback
+        // honours VectorStyle.scale_range; the QGIS wire used to drop it).
+        if (data.contains("scale_range") && !data["scale_range"].is_none()) {
+            const py::sequence range = py::reinterpret_borrow<py::sequence>(data["scale_range"]);
+            if (py::len(range) == 2) {
+                layer.has_scale_range = true;
+                layer.scale_range_min_denom = py::cast<double>(range[0]);
+                layer.scale_range_max_denom = py::cast<double>(range[1]);
+            }
+        }
         layer.opacity = py::cast<double>(data["opacity"]);
+        // #932: an incremental delta replaces the feature list. Parse it with
+        // the same FeatureSpec conversion the full path uses.
+        if (data.contains("delta") && !data["delta"].is_none()) {
+            const py::dict delta = as_dict(data["delta"], "layer delta");
+            VectorLayerSpec::FeatureDelta parsed_delta;
+            parsed_delta.base_revision = py::cast<std::uint64_t>(delta["base_revision"]);
+            for (const py::handle feature_item :
+                 py::reinterpret_borrow<py::iterable>(delta["changed_features"])) {
+                const py::dict feature = as_dict(feature_item, "delta feature");
+                FeatureSpec parsed{
+                    py::cast<std::string>(feature["id"]),
+                    py::cast<std::string>(feature["wkt"]),
+                    {},
+                };
+                if (feature.contains("attributes")) {
+                    const py::dict attributes = as_dict(feature["attributes"], "feature attributes");
+                    for (const auto attribute : attributes) {
+                        parsed.attributes.emplace_back(
+                            py::cast<std::string>(py::str(attribute.first)),
+                            py::cast<std::string>(py::str(attribute.second))
+                        );
+                    }
+                }
+                parsed_delta.changed.push_back(std::move(parsed));
+            }
+            for (const py::handle removed :
+                 py::reinterpret_borrow<py::iterable>(delta["removed_ids"])) {
+                parsed_delta.removed_ids.push_back(py::cast<std::string>(removed));
+            }
+            layer.delta = std::move(parsed_delta);
+        } else {
         for (const py::handle feature_item : py::reinterpret_borrow<py::iterable>(data["features"])) {
             const py::dict feature = as_dict(feature_item, "feature");
             FeatureSpec parsed{
@@ -135,6 +184,7 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
                 }
             }
             layer.features.push_back(std::move(parsed));
+        }
         }
         layers.push_back(std::move(layer));
     }
@@ -314,6 +364,9 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
             output["mirror_builds"] = diagnostics.mirror_builds;
             output["mirror_reuses"] = diagnostics.mirror_reuses;
             output["style_reapplies"] = diagnostics.style_reapplies;
+            output["feature_deltas"] = diagnostics.feature_deltas;
+            output["delta_changed_features"] = diagnostics.delta_changed_features;
+            output["delta_removed_features"] = diagnostics.delta_removed_features;
             return output;
         })
         .def_property_readonly("initialized", &QgisRenderBridge::initialized)

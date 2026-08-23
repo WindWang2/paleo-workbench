@@ -429,7 +429,11 @@ def run_factor_prepare_schedule(
                     task=task.model_copy(deep=True),
                     scheduled_result_fingerprint=result_fp,
                     error=error,
-                    grid=peek_live_factor_grid(task.id),
+                    # A failed run computed nothing this round; carrying the
+                    # PEEKED (previous run's) grid would let the commit's
+                    # fingerprint-conditional invalidation evict that still
+                    # valid payload (#918). Only successful runs own a grid.
+                    grid=peek_live_factor_grid(task.id) if error is None else None,
                 )
             _emit(
                 total=total,
@@ -485,6 +489,7 @@ def run_factor_prepare_schedule(
                 out: list[FactorPrepareTaskResult] = []
                 for task, state, result_fp in items:
                     updated = id_map[task.id]
+                    error = _task_failure(updated)
                     out.append(
                         FactorPrepareTaskResult(
                             task_id=task.id,
@@ -492,8 +497,15 @@ def run_factor_prepare_schedule(
                             reused=False,
                             task=updated.model_copy(deep=True),
                             scheduled_result_fingerprint=result_fp,
-                            error=_task_failure(updated),
-                            grid=peek_live_factor_grid(task.id),
+                            error=error,
+                            # Same contract as the serial path (#918): a failed
+                            # run owns no grid and must not carry the peeked
+                            # previous-run payload into commit invalidation.
+                            grid=(
+                                peek_live_factor_grid(task.id)
+                                if error is None
+                                else None
+                            ),
                         )
                     )
                 return out

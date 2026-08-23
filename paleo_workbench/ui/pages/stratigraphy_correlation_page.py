@@ -1033,8 +1033,9 @@ class StratigraphyCorrelationPage(QWidget):
     def _on_load_failed(self, message: str) -> None:
         if self._active_load_seq != self._load_seq:
             return
+        # #937-6: async completion — in-page status instead of a modal
+        # dialog (the shell may be rebuilding, #897 family).
         self.status_label.setText(f"加载失败: {message}")
-        QMessageBox.warning(self, "地层对比", f"未能加载连井剖面\n{message}")
 
     def _on_load_cancelled(self) -> None:
         if "正在加载" in self.status_label.text():

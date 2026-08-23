@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence
+from PySide6.QtCore import QObject, QSize, Qt, Signal
+from PySide6.QtGui import QAction, QActionGroup, QIcon, QKeySequence
 from PySide6.QtWidgets import QToolBar, QWidget
 
 __all__ = ["MapActionController", "MapActionState"]
+
+_MAP_ICONS_DIR = Path(__file__).parent / "assets" / "icons" / "map"
+
+
+def _map_icon(action_id: str) -> QIcon:
+    """Load a QGIS-theme toolbar icon, returning an empty QIcon if absent."""
+    path = _MAP_ICONS_DIR / f"{action_id}.svg"
+    return QIcon(str(path)) if path.exists() else QIcon()
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,17 +45,19 @@ class MapActionController(QObject):
     )
 
     _LABELS = {
-        "pan": "Pan", "zoom_in": "Zoom In", "zoom_out": "Zoom Out",
-        "full_extent": "Full Extent", "previous_extent": "Previous Extent", "next_extent": "Next Extent", "refresh": "Refresh", "identify": "Identify", "select": "Select",
-        "select_rectangle": "Rectangle Select", "measure_distance": "Measure Distance", "clear_selection": "Clear Selection", "select_all": "Select All", "invert_selection": "Invert Selection",
-        "toggle_editing": "Toggle Editing", "save_edits": "Save Edits", "rollback": "Rollback",
-        "add_point": "Add Point", "add_line": "Add Line", "add_polygon": "Add Polygon",
-        "move_feature": "Move Feature", "vertex": "Vertex Tool", "delete_selected": "Delete Selected",
-        "undo": "Undo", "redo": "Redo", "split": "Split", "merge": "Merge",
-        "snapping": "Snapping", "topology": "Topological Editing", "cancel": "Cancel",
+        "pan": "平移", "zoom_in": "放大", "zoom_out": "缩小",
+        "full_extent": "全图", "previous_extent": "上一视图", "next_extent": "下一视图",
+        "refresh": "刷新", "identify": "识别", "select": "选择",
+        "select_rectangle": "框选", "measure_distance": "测距",
+        "clear_selection": "清除选择", "select_all": "全选", "invert_selection": "反选",
+        "toggle_editing": "开始编辑", "save_edits": "保存编辑", "rollback": "回滚",
+        "add_point": "添加点", "add_line": "添加线", "add_polygon": "添加面",
+        "move_feature": "移动要素", "vertex": "节点编辑", "delete_selected": "删除所选",
+        "undo": "撤销", "redo": "重做", "split": "分割", "merge": "合并",
+        "snapping": "捕捉", "topology": "拓扑编辑", "cancel": "取消",
     }
 
-    def __init__(self, parent: QObject | None = None) -> None:
+    def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
         self.actions: dict[str, QAction] = {}
         self._tool_group = QActionGroup(self)
@@ -55,12 +66,11 @@ class MapActionController(QObject):
         self.update_state(MapActionState())
 
     def _action(self, action_id: str, *, checkable: bool = False, shortcut: str = "") -> QAction:
-        action = QAction(self._LABELS[action_id], self)
+        action = QAction(_map_icon(action_id), self._LABELS[action_id], self)
         action.setObjectName(f"MapAction:{action_id}")
         action.setCheckable(checkable)
         action.setToolTip(self._LABELS[action_id])
         action.setStatusTip(self._LABELS[action_id])
-        action.setIconText(self._LABELS[action_id])
         if shortcut:
             action.setShortcut(QKeySequence(shortcut))
             # The window also binds Ctrl+S to project save. Keep this mapping
@@ -108,10 +118,27 @@ class MapActionController(QObject):
         self.actions["next_extent"].setEnabled(state.can_next_extent)
         self.actions["cancel"].setEnabled(True)
 
-    def toolbar(self, title: str, action_ids: tuple[str, ...], parent: QWidget | None = None) -> QToolBar:
+    def toolbar(
+        self,
+        title: str,
+        action_ids: tuple[str | tuple[str, ...], ...],
+        parent: QWidget | None = None,
+    ) -> QToolBar:
+        """Build an icon-only toolbar.
+
+        ``action_ids`` entries are either a single action id or a nested tuple
+        of ids forming a logical group; a separator is inserted between groups.
+        Flat tuples of ids remain supported for compatibility.
+        """
         toolbar = QToolBar(title, parent)
         toolbar.setObjectName(f"MapToolbar:{title.replace(' ', '')}")
         toolbar.setMovable(False)
-        for action_id in action_ids:
-            toolbar.addAction(self.actions[action_id])
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        toolbar.setIconSize(QSize(18, 18))
+        for index, entry in enumerate(action_ids):
+            ids = entry if isinstance(entry, tuple) else (entry,)
+            if index and isinstance(entry, tuple):
+                toolbar.addSeparator()
+            for action_id in ids:
+                toolbar.addAction(self.actions[action_id])
         return toolbar

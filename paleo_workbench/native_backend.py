@@ -183,11 +183,15 @@ def native_status(feature: str) -> str:
             # Cross-worktree: a versionless binary built from the main checkout
             # (sibling worktree) also lives under a "native/<pkg>" directory and
             # should be considered fresh when this worktree has not yet built
-            # its own copy. Any other tree location (e.g. scratch/) remains stale.
+            # its own copy. Provenance matters (#938-1): a genuine worktree of
+            # this repo carries a .git link at its root — a scratch copy of
+            # the build tree does not and must stay stale.
             parts = resolved.parts
             for i, part in enumerate(parts):
                 if part == "native" and i + 1 < len(parts) and parts[i + 1] == pkg:
-                    return "fresh"
+                    candidate_root = Path(*parts[:i])
+                    if (candidate_root / ".git").exists():
+                        return "fresh"
     return "stale"
 
 

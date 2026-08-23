@@ -17,6 +17,7 @@ from paleo_workbench.workflow.interpolation_plan import (
     _fault_blocked_mask,
     _fault_segments,
     _segments_intersect,
+    _segments_intersect_strict,
     apply_idw_plan,
     apply_idw_plan_multi,
     build_idw_plan,
@@ -182,14 +183,20 @@ def _reference_fault_mask(
     ys: np.ndarray,
     fault_segments,
 ) -> np.ndarray:
-    """Reference triple-loop mask (the pre-vectorization implementation)."""
+    """Reference triple-loop mask under geoviz strict_interior_touch semantics.
+
+    #926: the plan mask must match the single-task geoviz kernel (#118), so
+    the reference uses the STRICT predicate — proper crossings plus endpoint
+    contacts strictly between node and sample. A node/well sitting exactly on
+    a fault line stays reachable; it is never severed wholesale.
+    """
     blocked = np.zeros((cell_x.size, xs.size), dtype=bool)
     for i, (node_x, node_y) in enumerate(zip(cell_x, cell_y)):
         node = (float(node_x), float(node_y))
         for j, (sx, sy) in enumerate(zip(xs, ys)):
             control = (float(sx), float(sy))
             if any(
-                _segments_intersect(node, control, s0, s1)
+                _segments_intersect_strict(node[0], node[1], control[0], control[1], s0[0], s0[1], s1[0], s1[1])
                 for s0, s1 in fault_segments
             ):
                 blocked[i, j] = True

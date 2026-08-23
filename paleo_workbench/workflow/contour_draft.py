@@ -28,8 +28,62 @@ from paleo_workbench.project.models import (
     _now_iso,
 )
 
-GENERATOR_VERSION = "contour-draft-v1"
+GENERATOR_VERSION = "contour-draft-v2"
 DEFAULT_N_LEVELS = 8
+
+
+def suggest_nice_levels_from_range(
+    lo: float, hi: float, *, n_levels: int = DEFAULT_N_LEVELS
+) -> list[float]:
+    """Nice 1/2/2.5/5×10^k levels for an explicit [lo, hi] value range.
+
+    Shared core of :func:`suggest_nice_levels`; the constrained-IDW adapter
+    uses it to pick generation-time levels from the well value range before
+    the grid exists (#928 upstream contour pipeline activation).
+    """
+    if not math.isfinite(lo) or not math.isfinite(hi):
+        return []
+    if math.isclose(lo, hi):
+        return [lo]
+    raw = (hi - lo) / max(int(n_levels), 1)
+    magnitude = 10.0 ** math.floor(math.log10(raw)) if raw > 0 else 1.0
+    step = 10.0 * magnitude
+    for multiplier in (1.0, 2.0, 2.5, 5.0):
+        candidate = multiplier * magnitude
+        if candidate >= raw:
+            step = candidate
+            break
+    levels: list[float] = []
+    level = math.ceil(lo / step) * step
+    guard = 0
+    while level <= hi and guard < 512:
+        if not (math.isclose(level, lo) or math.isclose(level, hi)):
+            levels.append(round(float(level), 6))
+        level += step
+        guard += 1
+    return levels
+
+
+def suggest_nice_levels(
+    grid_z: np.ndarray, *, n_levels: int = DEFAULT_N_LEVELS
+) -> list[float]:
+    """Upstream-style contour levels: nice 1/2/2.5/5×10^k steps (#928).
+
+    The engine's ``suggest_levels`` is a raw linspace between data min/max,
+    which yields unreadable label values (7.3, 14.6, …). Haiyou anchors levels
+    at multiples of a rounded step (``ContourEngine.auto_levels``); this ports
+    that semantics host-side. Exact min/max endpoints are excluded so
+    isolines don't collapse onto the grid boundary (engine convention).
+    """
+    finite = grid_z[np.isfinite(grid_z)]
+    if finite.size == 0:
+        return []
+    levels = suggest_nice_levels_from_range(
+        float(finite.min()), float(finite.max()), n_levels=n_levels
+    )
+    if not levels:
+        return suggest_levels(grid_z, n_levels=n_levels)
+    return levels
 
 
 def _grid_from_task(
@@ -81,6 +135,64 @@ def _grid_from_task(
     if grid_z.ndim != 2:
         raise ValueError(f"grid_z 维数错误: {grid_z.shape}")
     return grid_x, grid_y, grid_z
+
+
+def _engine_contours_for_task(
+    task: FactorMapTask, requested_levels: Sequence[float] | None
+) -> tuple[list[ContourSegment], list[float]] | None:
+    """Refined isolines stored on the task's grid result (#928).
+
+    Returns ``(segments, stored_levels)`` when the constrained-IDW engine
+    contours exist and the request matches the levels they were generated at
+    (default request, or an explicit identical level list). Any mismatch
+    returns ``None`` so the caller re-extracts from the grid via the raw
+    pipeline.
+    """
+    try:
+        from paleo_workbench.project.factor_grid_artifacts import (
+            factor_grid_result_for_task,
+        )
+
+        result = factor_grid_result_for_task(task)
+    except (FileNotFoundError, ValueError, KeyError, TypeError, OSError):
+        return None
+    contours = getattr(result, "contours", None)
+    if not contours:
+        return None
+    stored_levels_raw = (result.algorithm_parameters or {}).get("contour_levels")
+    if not stored_levels_raw:
+        return None
+    stored_levels = [float(v) for v in stored_levels_raw]
+    if requested_levels is not None and not (
+        len(requested_levels) == len(stored_levels)
+        and all(
+            math.isclose(float(a), float(b), rel_tol=0, abs_tol=1e-6)
+            for a, b in zip(requested_levels, stored_levels)
+        )
+    ):
+        return None
+    segments: list[ContourSegment] = []
+    for level_str, lines in sorted(contours.items(), key=lambda kv: float(kv[0])):
+        for line in lines or []:
+            coords = [[float(p[0]), float(p[1])] for p in line]
+            if len(coords) < 2:
+                continue
+            closed = (
+                len(coords) >= 3
+                and math.isclose(coords[0][0], coords[-1][0], abs_tol=1e-9)
+                and math.isclose(coords[0][1], coords[-1][1], abs_tol=1e-9)
+            )
+            segments.append(
+                ContourSegment(
+                    level=float(level_str),
+                    coordinates=coords,
+                    closed=closed,
+                    properties={"level": float(level_str), "refined": True},
+                )
+            )
+    if not segments:
+        return None
+    return segments, stored_levels
 
 
 def _extract_via_engine(
@@ -148,18 +260,31 @@ def contour_draft_from_factor_task(
     if finite.size == 0:
         raise ValueError("网格无有效数值，无法生成等值线")
     zmin, zmax = float(np.min(finite)), float(np.max(finite))
-    use_levels = list(levels) if levels is not None else suggest_levels(grid_z, n_levels=n_levels)
+    use_levels = (
+        list(levels) if levels is not None else suggest_nice_levels(grid_z, n_levels=n_levels)
+    )
     if not use_levels:
         use_levels = [zmin]
 
-    lines_dict = _extract_via_engine(
-        grid_x,
-        grid_y,
-        grid_z,
-        use_levels,
-        cancellation_token=cancellation_token,
+    # #928: prefer the engine-refined isolines stored at prepare time (the
+    # vendored upstream pipeline: smooth / prune / join / barrier
+    # interruption) over a raw marching-squares re-extraction when the level
+    # request matches what was generated. The draft then reports the levels
+    # the contours actually carry.
+    engine = _engine_contours_for_task(
+        task, list(levels) if levels is not None else None
     )
-    segments = _segments_from_lines_dict(lines_dict)
+    if engine is not None:
+        segments, use_levels = engine
+    else:
+        lines_dict = _extract_via_engine(
+            grid_x,
+            grid_y,
+            grid_z,
+            use_levels,
+            cancellation_token=cancellation_token,
+        )
+        segments = _segments_from_lines_dict(lines_dict)
     title = name or f"{task.target_horizon} {task.factor_type or task.name} 等值线初稿"
     return ContourDraft(
         name=title,

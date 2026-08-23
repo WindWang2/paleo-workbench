@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QListView, QWidget
 
 from paleo_workbench.project.domain import (
@@ -143,6 +143,18 @@ class TestWellMapPage:
         page.set_project(doc)
         assert list(plot.series["wells"].x) == [100.0, 101.0]
         assert list(plot.series["wells_flagged"].x) == [102.0]
+
+    def test_well_name_labels_follow_series_split(self, qtbot):
+        page, plot = make_page(qtbot)
+        doc = make_project()
+        doc.wells[2].coordinate_status = CoordinateStatus.UNTRANSFORMED
+        doc.wells[2].project_x = doc.wells[2].project_y = None
+        page.set_project(doc)
+        assert plot.series["wells"].labels == ["W000", "W001"]
+        assert plot.series["wells_flagged"].labels == ["W002"]
+        page.btn_labels.setChecked(False)
+        assert plot.series["wells"].labels is None
+        assert plot.series["wells_flagged"].labels is None
 
     def test_empty_state_visible_without_wells(self, qtbot):
         page, _plot = make_page(qtbot)
@@ -364,18 +376,20 @@ class TestEntityFilterMatching:
 
 
 class TestShellGlue:
-    def test_app_shell_registers_map_page_and_syncs(self, qtbot):
+    def test_data_page_embeds_well_map_panel_and_syncs(self, qtbot):
         from paleo_workbench.ui.app_shell import AppShell
-        from paleo_workbench.ui.navigation import PAGE_INDEX_WELL_MAP
 
         shell = AppShell(project=make_project())
         qtbot.addWidget(shell)
-        assert shell.page_stack.count() >= 12
-        assert shell.page_stack.widget(PAGE_INDEX_WELL_MAP) is shell.well_map_page
-        assert isinstance(shell.well_map_page, ProjectWellMapPage)
-        assert shell.well_map_page._list_model.rowCount() == 3
+        # No standalone page: the map lives inside the Data page panel.
+        assert not hasattr(shell, "well_map_page")
+        panel = shell.data_page.well_map_panel
+        assert isinstance(panel.map_page, ProjectWellMapPage)
+        assert panel.is_collapsed()  # folded by default
+        assert panel.map_page._list_model.rowCount() == 3
+        assert panel.count_label.text() == "3 口井"
         # Map → Data: clicking a well highlights the tree leaf.
-        shell.well_map_page.select_well(shell.project.wells[1].id, emit=True)
+        panel.map_page.select_well(shell.project.wells[1].id, emit=True)
         current = shell.data_page.navigation_tree.currentItem()
         assert current is not None
         query = current.data(0, Qt.ItemDataRole.UserRole)
@@ -386,15 +400,16 @@ class TestShellGlue:
 
         shell = AppShell(project=make_project())
         qtbot.addWidget(shell)
-        focused: list[str] = []
-
-        class _SpyPlot(QObject):
-            pass
-
-        original = shell.well_map_page.plot
+        panel = shell.data_page.well_map_panel
+        focused: list[tuple[float, float]] = []
+        original = panel.map_page.plot
         if hasattr(original, "focus_point"):
-            shell.well_map_page.plot.focus_point = lambda x, y, zoom_factor=4.0: focused.append(x)
+            panel.map_page.plot.focus_point = (
+                lambda x, y, zoom_factor=4.0: focused.append((x, y))
+            )
         shell.data_page.well_focus_requested.emit(shell.project.wells[0].id)
+        # Focus request unfolds the panel and centers the map.
+        assert not panel.is_collapsed()
         assert focused or not hasattr(original, "focus_point")
 
 
@@ -608,3 +623,90 @@ class TestReferenceLayers:
         )
         page.btn_reference.setChecked(True)
         assert seen == ["ref1"]
+
+
+# ------------------------------------------------------------- embedded panel
+
+
+class TestWellMapPanel:
+    def test_collapse_toggle_hides_map(self, qtbot):
+        from paleo_workbench.ui.pages.well_map_panel import WellMapPanel
+
+        panel = WellMapPanel()
+        qtbot.addWidget(panel)
+        assert panel.is_collapsed()
+        assert not panel.map_page.isVisible()
+        panel.set_collapsed(False)
+        assert not panel.is_collapsed()
+        panel.show()
+        assert panel.map_page.isVisible()
+
+    def test_expand_and_focus_unfolds(self, qtbot):
+        from paleo_workbench.ui.pages.well_map_panel import WellMapPanel
+
+        page, plot = make_page(qtbot)
+        panel = WellMapPanel(map_page=page)
+        qtbot.addWidget(panel)
+        page.set_project(make_project())
+        well_id = page._list_model.well_id_at(0)
+        panel.expand_and_focus(well_id)
+        assert not panel.is_collapsed()
+        assert plot.focused == (100.0, 200.0)
+
+    def test_refresh_domain_updates_count_label(self, qtbot):
+        from paleo_workbench.ui.pages.well_map_panel import WellMapPanel
+
+        page, _plot = make_page(qtbot)
+        panel = WellMapPanel(map_page=page)
+        qtbot.addWidget(panel)
+        panel.refresh_domain(make_project(well_count=5))
+        assert panel.count_label.text() == "5 口井"
+
+
+# ------------------------------------------------- vector map persistence
+
+
+class TestWellLocationMapSync:
+    def test_creates_document_from_wells(self):
+        from paleo_workbench.project.well_location_map import (
+            WELL_LOCATION_MAP_ID,
+            sync_well_location_map,
+        )
+
+        doc = make_project(well_count=3)
+        document, changed = sync_well_location_map(doc)
+        assert changed
+        assert document is doc.paleomap_documents[-1]
+        assert document.id == WELL_LOCATION_MAP_ID
+        assert document.map_crs == "EPSG:4326"
+        assert [o["name"] for o in document.well_overlays] == ["W000", "W001", "W002"]
+        assert document.well_overlays[0]["x"] == 100.0
+
+    def test_empty_project_creates_nothing(self):
+        from paleo_workbench.project.well_location_map import sync_well_location_map
+
+        doc = make_project(well_count=0, with_survey=False)
+        document, changed = sync_well_location_map(doc)
+        assert document is None
+        assert not changed
+        assert doc.paleomap_documents == []
+
+    def test_idempotent_when_unchanged(self):
+        from paleo_workbench.project.well_location_map import sync_well_location_map
+
+        doc = make_project()
+        sync_well_location_map(doc)
+        document, changed = sync_well_location_map(doc)
+        assert document is not None
+        assert not changed
+        assert len(doc.paleomap_documents) == 1
+
+    def test_updates_on_coordinate_change(self):
+        from paleo_workbench.project.well_location_map import sync_well_location_map
+
+        doc = make_project(well_count=1)
+        sync_well_location_map(doc)
+        doc.wells[0].project_x = 555.0
+        document, changed = sync_well_location_map(doc)
+        assert changed
+        assert document.well_overlays[0]["x"] == 555.0

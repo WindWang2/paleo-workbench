@@ -635,6 +635,10 @@ def set_well_identity_override(project: Any, key: str, well_id: str) -> bool:
         return False
     overrides = workarea.metadata.setdefault("well_identity_overrides", {})
     overrides[normalized] = well_id
+    # #939-1: the probe side looks UWI queries up under the "uwi:" namespace;
+    # store the prefixed twin so a UWI-form key is reachable from both
+    # namespaces (a raw-only key was dead for UWI queries).
+    overrides[f"uwi:{normalized}"] = well_id
     return True
 
 

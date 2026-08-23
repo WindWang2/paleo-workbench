@@ -95,8 +95,12 @@ def direction_line_params(
                 "id": line.id,
                 "name": line.name,
                 "azimuth_deg": az,
-                "semi_major": line.semi_major if line.semi_major is not None else 1.0,
-                "semi_minor": line.semi_minor if line.semi_minor is not None else 0.5,
+                # Unset axes stay None so the engine adapter applies haiyou's
+                # default anisotropy ratio (18:1). The old 1.0/0.5 placeholder
+                # collapsed the ratio to 2:1 and made direction lines nearly
+                # decorative (#927).
+                "semi_major": line.semi_major,
+                "semi_minor": line.semi_minor,
                 "coordinates": [[p[0], p[1]] for p in pts],
             }
         )
@@ -225,3 +229,26 @@ def _float_or_none(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def boundary_rings_for_engine(
+    layers: ConstraintLayers | Iterable[ConstraintLayers] | None,
+    *,
+    target_horizon: str | None = None,
+) -> list[list[tuple[float, float]]]:
+    """Export active user-drawn boundary rings for the interpolation domain.
+
+    #928: the ``boundary`` constraint role previously had no consumer — the
+    constrained-IDW adapter silently replaced the user's geological intent
+    with a synthesized sample hull. Rings need >= 4 points (closed polygon)
+    to be a usable domain.
+    """
+    rings: list[list[tuple[float, float]]] = []
+    for line in active_lines(layers, role="boundary", target_horizon=target_horizon):
+        pts = _as_xy_ring(line.coordinates)
+        # Close the ring if the drawer left it open (first != last).
+        if len(pts) >= 3 and pts[0] != pts[-1]:
+            pts = list(pts) + [pts[0]]
+        if len(pts) >= 4:
+            rings.append(pts)
+    return rings

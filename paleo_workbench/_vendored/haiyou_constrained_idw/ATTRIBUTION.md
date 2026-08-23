@@ -87,6 +87,32 @@ The copied modules are **byte-for-byte identical** to the upstream SHA above
 - `drawing/single_factor/fast_grid.py` reuses a module-level
   `ThreadPoolExecutor` across calls instead of constructing one per
   interpolation (same work distribution, no numerical change).
+- `drawing/single_factor/constrained_engine.py` — **gap-fill hull fix
+  (2026-08-22, issue #924)**: the host-added "skip the data-hull raster on the
+  default limit-to-coverage path" optimization accidentally fed
+  `data_hull_active = mask is not None` a `None`, which flipped
+  `gap_iterations` from upstream's `min(8, 3)` to `0` and left interior holes
+  unfilled. The skip branch now records `data_hull_present =
+  data_hull_exists(wells)` and the gap decision reads
+  `(mask non-empty) or data_hull_present`. Upstream parity restored: with this
+  fix the direction-line fixture that previously diverged (173 NaN cells) is
+  bit-identical to upstream again. Known approximation: in the skipped-raster
+  path, existence (`data_hull_exists`) stands in for "raster has any cell";
+  upstream would report inactive only if the materialised raster were empty,
+  which requires a hull containing zero grid-cell centers.
+
+- `drawing/single_factor/constrained_engine.py` — **cell-batched Euclidean
+  kernel (2026-08-23, issue #933)**: no-direction barrier runs now execute the
+  whole point-path domain through `_interpolate_euclidean_cells_batch`
+  (cell-dimension vectorization: distance matrix, label/LOS block accounting,
+  radius passes with per-pass relaxation, stable top-k, grouped-by-k exact
+  pairwise reductions). Bit-for-bit identical to the per-cell path — verified
+  by `tests/test_constrained_idw_algorithm.py` (values and blocked-well
+  counters, incl. exact-hit, zero-decluster and label-gating branches) and an
+  end-to-end 200²×300-well grid comparison against the pre-change engine
+  (bitwise-equal `grid_z`, identical diagnostics). Kernel 1.9 s → 279 ms;
+  end-to-end `generate` 2.24 s → 0.94 s. Direction-active runs keep the
+  per-cell path (their curve-corridor caches are genuinely per-cell).
 
 ## What was NOT vendored
 

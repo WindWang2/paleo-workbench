@@ -26,9 +26,9 @@ def test_context_sidebar_initialization(qapp):
 
 def test_context_sidebar_set_stage(qapp):
     sidebar = ContextSidebar()
-    # Stage 0: Data & Preparation -> [DATA, WELL_MAP, PREPARATION]
+    # Stage 0: Data & Preparation -> [DATA, PREPARATION] (map panel is in-page)
     sidebar.set_stage(0, active_page_index=navigation.PAGE_INDEX_DATA)
-    assert len(sidebar.subpage_buttons) == 3
+    assert len(sidebar.subpage_buttons) == 2
     assert sidebar.subpage_buttons[0].property("active") is True
     assert sidebar.subpage_buttons[1].property("active") is False
 
@@ -44,8 +44,8 @@ def test_context_sidebar_subpage_click(qapp):
     emitted = []
     sidebar.subpage_selected.connect(lambda page_idx: emitted.append(page_idx))
 
-    # Click third subpage button (PAGE_INDEX_PREPARATION; second is 井位地图)
-    sidebar.subpage_buttons[2].click()
+    # Click second subpage button (PAGE_INDEX_PREPARATION)
+    sidebar.subpage_buttons[1].click()
     assert emitted == [navigation.PAGE_INDEX_PREPARATION]
 
 

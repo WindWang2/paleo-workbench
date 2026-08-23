@@ -44,6 +44,27 @@ from paleo_workbench.ui.pages.preview_widgets import TablePreviewWidget
 from paleo_workbench.ui.pages.tag_widgets import TagContainerWidget, TagInputDialog
 
 
+def _fit_key_value_table(table: TablePreviewWidget, *, cap_height: bool) -> None:
+    """键/值两列表：键列贴合内容宽度（不随面板拉伸），值列占剩余空间。
+
+    元数据页三个表上下叠放，再按行数收拢表高，避免每个表摊出大片空白、
+    把真正的内容挤出视野。
+    """
+    hdr = table.horizontalHeader()
+    hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+    if cap_height:
+        # 高度必须容纳：表头 + 全部行 + 边框 + 可能弹出的水平滚动条，
+        # 否则水平条会吃掉行高，表格只剩表头、内容行被挤出可视区。
+        height = (
+            hdr.sizeHint().height()
+            + table.rowCount() * 28
+            + table.horizontalScrollBar().sizeHint().height()
+            + table.frameWidth() * 2
+            + 2
+        )
+        table.setMaximumHeight(min(height, 340))
+
+
 class LineageTreeWidget(QWidget):
     """Full-chain lineage view: 上游追溯 (to RAW) + 下游衍生 as a tree with
     interleaved run nodes; selection shows version/run details."""
@@ -297,7 +318,12 @@ class InspectorPanel(QFrame):
         self.governance_edit_btn.setFixedHeight(24)
         self.governance_edit_btn.setToolTip("编辑标准治理字段（写入数据目录，受控词表校验）")
         self.governance_edit_btn.clicked.connect(self._on_governance_edit_clicked)
-        metadata_layout.addWidget(self.governance_edit_btn)
+        # 按钮保持自然宽度，不通栏占满挤压内容区
+        gov_btn_row = QHBoxLayout()
+        gov_btn_row.setContentsMargins(0, 0, 0, 0)
+        gov_btn_row.addWidget(self.governance_edit_btn)
+        gov_btn_row.addStretch(1)
+        metadata_layout.addLayout(gov_btn_row)
 
         cat_hdr = QLabel("目录元数据 (Catalog):")
         cat_hdr.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;")
@@ -310,6 +336,7 @@ class InspectorPanel(QFrame):
         metadata_layout.addWidget(parsed_hdr)
         self.metadata_table = TablePreviewWidget()
         metadata_layout.addWidget(self.metadata_table)
+        metadata_layout.addStretch(1)
         self.tabs.addTab(metadata_tab, "元数据")
 
         # Tab 3: 标签 Tags
@@ -458,6 +485,7 @@ class InspectorPanel(QFrame):
         if view.crs:
             rows.append(("CRS", view.crs))
         self.overview_table.load_table(("属性", "值"), tuple(rows))
+        _fit_key_value_table(self.overview_table, cap_height=False)
 
     def _populate_metadata(self, view: AssetView) -> None:
         from paleo_workbench.catalog.governance import (
@@ -476,6 +504,7 @@ class InspectorPanel(QFrame):
         if not gov_rows:
             gov_rows = [("提示", "未填写（点击下方按钮编辑）")]
         self.governance_table.load_table(("字段", "值"), tuple(gov_rows))
+        _fit_key_value_table(self.governance_table, cap_height=True)
 
         catalog_rows: list[tuple[str, str]] = []
         for key in sorted(view.catalog_metadata or {}):
@@ -485,6 +514,7 @@ class InspectorPanel(QFrame):
         if not catalog_rows:
             catalog_rows = [("提示", "暂无目录扩展元数据")]
         self.catalog_metadata_table.load_table(("属性", "值"), tuple(catalog_rows))
+        _fit_key_value_table(self.catalog_metadata_table, cap_height=True)
 
         rows: list[tuple[str, str]] = []
         if view.parsed_summary:
@@ -493,6 +523,7 @@ class InspectorPanel(QFrame):
         if not rows:
             rows = [("提示", "暂无附加解析元数据")]
         self.metadata_table.load_table(("属性", "值"), tuple(rows))
+        _fit_key_value_table(self.metadata_table, cap_height=True)
 
     def set_governance_enabled(self, enabled: bool) -> None:
         """Governance editing needs an active catalog (page toggles it)."""

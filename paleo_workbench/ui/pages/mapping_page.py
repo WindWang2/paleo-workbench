@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QTimer, Qt, Signal
+from PySide6.QtCore import QPointF, QSize, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -11,7 +11,9 @@ from PySide6.QtWidgets import (
     QGraphicsView,
     QHBoxLayout,
     QMessageBox,
+    QSplitter,
     QStackedWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -43,6 +45,7 @@ from paleo_workbench.ui.pages.map_chrome_panel import MapChromePanel
 from paleo_workbench.ui.pages.map_edit_scene import MapEditScene
 from paleo_workbench.ui.pages.map_edit_toolbar import MapEditToolbar
 from paleo_workbench.ui.pages.map_edit_view import MapEditView
+from paleo_workbench.ui.pages.map_dock_manager import MapDockManager, panel_icon
 from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
 from paleo_workbench.ui.pages.map_reference_panel import MapReferencePanel
 from paleo_workbench.ui.pages.map_workbench_bottom import MapWorkbenchBottom
@@ -125,50 +128,49 @@ class MappingPage(QWidget):
         )
         outer.setSpacing(tokens.SPACE_2)
 
-        # True QAction/QToolBar command surface.  ``MapEditToolbar`` remains a
-        # hidden compatibility shim while downstream callers migrate to actions.
+        # True QAction/QToolBar command surface: one icon-only strip carrying
+        # every map action.  ``MapEditToolbar`` remains a hidden compatibility
+        # shim while downstream callers migrate to actions.
         self.action_controller = MapActionController(self)
         self.map_toolbars = QWidget(self)
         self.map_toolbars.setObjectName("MapAuthoringToolbars")
-        toolbar_layout = QVBoxLayout(self.map_toolbars)
+        toolbar_layout = QHBoxLayout(self.map_toolbars)
         toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        toolbar_layout.setSpacing(0)
+        toolbar_layout.setSpacing(tokens.SPACE_1)
+        # Single command strip (QGIS-theme icons); logical groups are
+        # separated by toolbar separators.
         toolbar_layout.addWidget(self.action_controller.toolbar(
-            "Map Navigation", (
-                "pan", "zoom_in", "zoom_out", "full_extent", "previous_extent", "next_extent", "refresh",
+            "Map Authoring", (
+                ("pan", "zoom_in", "zoom_out", "full_extent", "previous_extent", "next_extent", "refresh"),
+                ("identify", "select", "select_rectangle", "measure_distance", "clear_selection", "select_all", "invert_selection"),
+                ("toggle_editing", "save_edits", "rollback"),
+                ("add_point", "add_line", "add_polygon", "move_feature", "vertex"),
+                ("undo", "redo", "delete_selected"),
+                ("split", "merge"),
+                ("snapping", "topology", "cancel"),
             ), self.map_toolbars
-        ))
-        toolbar_layout.addWidget(self.action_controller.toolbar(
-            "Selection", (
-                "identify", "select", "select_rectangle", "measure_distance", "clear_selection", "select_all", "invert_selection",
-            ), self.map_toolbars
-        ))
-        toolbar_layout.addWidget(self.action_controller.toolbar(
-            "Digitizing", (
-                "toggle_editing", "save_edits", "rollback", "add_point", "add_line",
-                "add_polygon", "move_feature", "vertex", "delete_selected", "undo", "redo",
-            ), self.map_toolbars
-        ))
-        toolbar_layout.addWidget(self.action_controller.toolbar(
-            "Advanced Editing", ("split", "merge", "snapping", "topology", "cancel"), self.map_toolbars
-        ))
+        ), 1)
         outer.addWidget(self.map_toolbars)
 
         self.toolbar = MapEditToolbar()
         self.toolbar.setVisible(False)
         outer.addWidget(self.toolbar)
 
-        mid = QHBoxLayout()
-        mid.setSpacing(tokens.SPACE_2)
+        # Panel manager: collapsible side docks (icon rails) around the central
+        # canvas, plus a checkable 面板 menu exposed on the toolbar strip.
+        self.dock_manager = MapDockManager(self)
 
         self.layer_tree_stack = QStackedWidget()
         self.layer_tree = MapLayerTree()
         self.layer_tree_stack.addWidget(self.layer_tree)
         self._native_layer_tree = None
-        mid.addWidget(self.layer_tree_stack, 0)
+        self.dock_manager.add_panel(
+            "layers", "图层面板", "panel-layers", self.layer_tree_stack, side="left", checked=True
+        )
 
         self.center_stack = QStackedWidget()
         self.center_stack.setObjectName("MappingCenterStack")
+        self.center_stack.setMinimumWidth(360)
 
         self.edit_view = MapEditView()
         self.center_stack.addWidget(self.edit_view)
@@ -187,12 +189,33 @@ class MappingPage(QWidget):
         self.preview_canvas_stack.addWidget(self.unified_canvas)
         self.chrome_panel = MapChromePanel()
         preview_layout.addWidget(self.preview_canvas_stack, 1)
-        preview_layout.addWidget(self.chrome_panel, 0)
         self.center_stack.addWidget(preview_host)
 
-        mid.addWidget(self.center_stack, 1)
         self.reference_panel = MapReferencePanel()
-        mid.addWidget(self.reference_panel, 0)
+        self.dock_manager.add_panel(
+            "reference", "参考图面板", "panel-reference", self.reference_panel, side="right", checked=True
+        )
+        self.dock_manager.add_panel(
+            "chrome", "图面要素面板", "panel-chrome", self.chrome_panel, side="right", checked=False
+        )
+
+        # Rails sit outside the splitter so collapsing a docked panel area
+        # returns its space to the central canvas.
+        mid = QHBoxLayout()
+        mid.setContentsMargins(0, 0, 0, 0)
+        mid.setSpacing(tokens.SPACE_1)
+        mid.addWidget(self.dock_manager.left_dock.rail, 0)
+        mid_splitter = QSplitter(Qt.Orientation.Horizontal)
+        mid_splitter.setObjectName("MappingDockSplitter")
+        mid_splitter.addWidget(self.dock_manager.left_dock.area)
+        mid_splitter.addWidget(self.center_stack)
+        mid_splitter.addWidget(self.dock_manager.right_dock.area)
+        mid_splitter.setStretchFactor(0, 0)
+        mid_splitter.setStretchFactor(1, 1)
+        mid_splitter.setStretchFactor(2, 0)
+        mid_splitter.setSizes([300, 1000, 280])
+        mid.addWidget(mid_splitter, 1)
+        mid.addWidget(self.dock_manager.right_dock.rail, 0)
         outer.addLayout(mid, 1)
 
         self.status_bar = MapStatusBar(self)
@@ -203,6 +226,19 @@ class MappingPage(QWidget):
         self.attribute_table = self.bottom_workbench.attribute_table
         self.attribute_table.setMaximumHeight(220)
         outer.addWidget(self.bottom_workbench, 0)
+        self.dock_manager.register_bottom(
+            "bottom", "底部工作区", "panel-bottom", self.bottom_workbench, self._apply_mode_ui
+        )
+
+        # Panels menu lives on the right end of the command strip.
+        panels_button = QToolButton(self.map_toolbars)
+        panels_button.setObjectName("MapPanelsMenuButton")
+        panels_button.setIcon(panel_icon("panel-manager"))
+        panels_button.setIconSize(QSize(18, 18))
+        panels_button.setToolTip("面板")
+        panels_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        panels_button.setMenu(self.dock_manager.panels_menu(panels_button))
+        toolbar_layout.addWidget(panels_button, 0)
 
         self.toolbar.tool_changed.connect(self._on_tool_changed)
         self.toolbar.undo_requested.connect(self._on_undo)
@@ -309,14 +345,13 @@ class MappingPage(QWidget):
         self._canvas_priority = enabled
         # Preserve the established explicit-widget visibility contract for the
         # legacy tree (tests and accessibility consumers query it directly), while
-        # applying the same state to the optional native replacement.
+        # the dock manager reflects the same state on its rail buttons.
+        self.dock_manager.set_panel_visible("layers", not enabled)
         self.layer_tree.setVisible(not enabled)
         if self._native_layer_tree is not None:
             self._native_layer_tree.setVisible(not enabled)
-        self.layer_tree_stack.setVisible(not enabled)
-        self.reference_panel.setVisible(not enabled)
-        if not self._preview_mode:
-            self.bottom_workbench.setVisible(not enabled)
+        self.dock_manager.set_panel_visible("reference", not enabled)
+        self._apply_mode_ui()
         if self.toolbar.canvas_priority_btn.isChecked() != enabled:
             self.toolbar.canvas_priority_btn.blockSignals(True)
             self.toolbar.canvas_priority_btn.setChecked(enabled)
@@ -473,11 +508,10 @@ class MappingPage(QWidget):
             return
         drafts = commit_contour_drafts(target, result)
         if not drafts:
-            QMessageBox.information(
-                self,
-                "等值线初稿",
-                "没有可提取的单因素网格。请先在制备页生成单因素图。",
-            )
+            # #937-6: async completion — in-page status instead of a modal
+            # (the Save/Discard/Cancel guard below stays interactive: it
+            # protects unsaved edits from silent disposal, #532).
+            self.status_bar.scale.setText("没有可提取的单因素网格。请先在制备页生成单因素图。")
             return
         # Prefer the map linked to the last draft as active document.  The
         # preference is passed to update_state instead of mutating
@@ -718,10 +752,13 @@ class MappingPage(QWidget):
         self.center_stack.setCurrentIndex(1 if self._preview_mode or self._unified_authoring_mode else 0)
         if self._preview_mode or self._unified_authoring_mode:
             self.preview_canvas_stack.setCurrentWidget(self.unified_canvas)
-        if self._canvas_priority:
-            self.bottom_workbench.setVisible(False)
-        else:
-            self.bottom_workbench.setVisible(not self._preview_mode)
+        # Bottom workbench visibility combines the user's panel-manager
+        # preference with the mode flags (preview / canvas priority hide it).
+        self.bottom_workbench.setVisible(
+            self.dock_manager.bottom_user_visible()
+            and not self._canvas_priority
+            and not self._preview_mode
+        )
 
     def _refresh_preview(self) -> None:
         self._refresh_unified_composition()

@@ -338,6 +338,14 @@ class _StubNewVersionDialog:
         return "edited copy"
 
 
+def _wait_catalog_copy_job(qtbot, page, needle: str, timeout: int = 15000) -> None:
+    """Wait for the off-thread catalog copy action (#931) to land its status."""
+    qtbot.waitUntil(
+        lambda: needle in page.data_toolbar.operation_status_label.text(),
+        timeout=timeout,
+    )
+
+
 def test_working_copy_commit_records_run_with_output(qtbot, tmp_path, core, monkeypatch):
     page = _make_page(qtbot)
     resource = _make_managed_resource(page, tmp_path)
@@ -346,6 +354,7 @@ def test_working_copy_commit_records_run_with_output(qtbot, tmp_path, core, monk
     monkeypatch.setattr(dlc.QDesktopServices, "openUrl", lambda url: True)
 
     page._new_version_from_asset(resource)
+    _wait_catalog_copy_job(qtbot, page, "已提交新版本")
 
     runs = [r for r in core.list_runs() if r.operation == "working_copy_commit"]
     assert len(runs) == 1
@@ -374,6 +383,7 @@ def test_working_copy_commit_survives_run_booking_failure(
     monkeypatch.setattr(core, "register_run", boom)
 
     page._new_version_from_asset(resource)
+    _wait_catalog_copy_job(qtbot, page, "已提交新版本")
 
     assert [r for r in core.list_runs() if r.operation == "working_copy_commit"] == []
     asset = core.get_asset(resource.id)
@@ -387,6 +397,7 @@ def test_materialize_records_run_with_output(qtbot, tmp_path, core):
     core.migrate_legacy_resources(page.project.resources)
 
     page._materialize_asset(resource)
+    _wait_catalog_copy_job(qtbot, page, "已纳管至项目")
 
     runs = [r for r in core.list_runs() if r.operation == "materialize"]
     assert len(runs) == 1

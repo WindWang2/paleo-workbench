@@ -17,7 +17,7 @@ import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QObject, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QComboBox,
@@ -185,6 +185,30 @@ class _DeliveryDialog(QDialog):
 
     def note(self) -> str | None:
         return self.note_edit.text().strip() or None
+
+
+class _CatalogActionWorker(QObject):
+    """Run one heavy catalog payload action (copy + SHA) off the GUI thread.
+
+    #931: 派生副本/纳管/新建版本/提升 used to execute the full payload copy
+    on the GUI thread (400 MB measured 0.37-0.56 s freeze). Mirrors the
+    import/rescan/delivery/export worker pattern: the closure runs on the
+    OwnedWorkerJob thread; results return via queued signals.
+    """
+
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, fn) -> None:
+        super().__init__(None)  # parentless: moveToThread must be able to relocate
+        self._fn = fn
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.finished.emit(self._fn())
+        except Exception as exc:  # noqa: BLE001 — surfaced via failed signal
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
 
 
 class DataLifecycleController:
@@ -594,6 +618,41 @@ class DataLifecycleController:
     # Derived copy via catalog
     # ------------------------------------------------------------------ #
 
+    def _run_catalog_action(self, label: str, fn, on_result, on_fail=None) -> None:
+        """Run heavy catalog *fn* on the copy worker; *on_result* back on GUI.
+
+        #931: shared off-thread runner for the payload-copy actions. The
+        status line keeps the user informed; failures surface via *on_fail*
+        (default: status line), never half-states. Concurrent invocations are
+        refused while running.
+        """
+        page = self.page
+        job = getattr(page, "_catalog_copy_job", None)
+        if job is None:
+            # Defensive: pages constructed before the job existed.
+            on_result(fn())
+            return
+        if job.is_running:
+            page._set_action_status(f"{label}：上一个数据操作仍在进行，请稍候…")
+            return
+
+        def _on_fail(message: str) -> None:
+            if on_fail is not None:
+                on_fail(message)
+            else:
+                page._set_action_status(f"{label}失败: {message}")
+
+        worker = _CatalogActionWorker(fn)
+        job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed),
+            result_connections=(
+                (worker.finished, on_result),
+                (worker.failed, _on_fail),
+            ),
+        )
+        page._set_action_status(f"{label}中…（大数据可能需要数秒）")
+
     def create_derived_copy(self, asset: object) -> None:
         """Create a derived data copy from a locked RAW asset.
 
@@ -611,41 +670,46 @@ class DataLifecycleController:
             return
         service, asset_id, version_id, name = target
         if isinstance(asset, ResourceItem):
-            try:
-                derived_item = self.create_derived_via_catalog(
-                    asset, service=service, ref=SimpleNamespace(
-                        asset_id=asset_id, version_id=version_id
-                    )
-                )
-            except Exception as exc:
-                page._set_action_status(f"创建派生副本失败: {exc}")
-                return
-            if derived_item is None:
-                page._set_action_status("创建派生副本失败: 无法解析源版本")
-                return
-            page.project.resources.append(derived_item)
-            page._refresh()
-            page._set_selected_asset(derived_item)
-            page._set_action_status(f"已从 🔒 RAW 建立派生副本: {derived_item.name}")
+            def _derived_companion(_service=service, _ref=SimpleNamespace(
+                asset_id=asset_id, version_id=version_id
+            )):
+                return self.create_derived_via_catalog(asset, service=_service, ref=_ref)
+
+            def _derived_done(derived_item) -> None:
+                if derived_item is None:
+                    page._set_action_status("创建派生副本失败: 无法解析源版本")
+                    return
+                page.project.resources.append(derived_item)
+                page._refresh()
+                page._set_selected_asset(derived_item)
+                page._set_action_status(f"已从 🔒 RAW 建立派生副本: {derived_item.name}")
+
+            self._run_catalog_action("创建派生副本", _derived_companion, _derived_done)
             return
-        try:
+
+        def _derived_version():
             source_version = service.get_version(version_id)
             payload = service.resolve_path(source_version)
             if not payload.is_file():
-                page._set_action_status("创建派生副本失败: 无法解析源版本")
-                return
-            version = service.create_derived(
+                return None
+            return service.create_derived(
                 source_path=payload,
                 parent_version_ids=[source_version.id],
                 name=f"{name}_derived",
                 operation="derived_copy",
                 generator="data_manager",
             )
-        except Exception as exc:
-            page._set_action_status(f"创建派生副本失败: {exc}")
-            return
-        page._refresh()
-        page._set_action_status(f"已建立派生副本: {name}_derived (v{version.version_number})")
+
+        def _version_done(version) -> None:
+            if version is None:
+                page._set_action_status("创建派生副本失败: 无法解析源版本")
+                return
+            page._refresh()
+            page._set_action_status(
+                f"已建立派生副本: {name}_derived (v{version.version_number})"
+            )
+
+        self._run_catalog_action("创建派生副本", _derived_version, _version_done)
 
     def create_derived_via_catalog(
         self,
@@ -735,23 +799,30 @@ class DataLifecycleController:
             run_id = run.id
         except Exception:
             run_id = None
-        try:
+
+        def _materialize():
             version = service.materialize_external(ref.version_id, run_id=run_id)
-            managed_path = service.resolve_path(version)
-        except Exception as exc:
+            return version, service.resolve_path(version)
+
+        def _materialize_done(result) -> None:
+            version, managed_path = result
+            stored_path, _outside = relativize_path(
+                managed_path.as_posix(), service.project_path
+            )
+            asset.external = False
+            asset.path = stored_path
+            asset.checksum = version.sha256
+            page._refresh()
+            page._set_action_status(f"已纳管至项目: {asset.name}")
+
+        def _materialize_fail(message: str) -> None:
             self._fail_booked_run(service, run_id)
-            page._set_action_status(f"纳管失败: {exc}")
-            return
-        # Keep the legacy ResourceItem in sync with the new managed version.
-        # Project-relative storage keeps .paleo.json relocatable.
-        stored_path, _outside = relativize_path(
-            managed_path.as_posix(), service.project_path
+            page._set_action_status(f"纳管失败: {message}")
+
+        # Run the payload copy off the GUI thread (#931).
+        self._run_catalog_action(
+            "纳管", _materialize, _materialize_done, on_fail=_materialize_fail
         )
-        asset.external = False
-        asset.path = stored_path
-        asset.checksum = version.sha256
-        page._refresh()
-        page._set_action_status(f"已纳管至项目: {asset.name}")
 
     # ------------------------------------------------------------------ #
     # Working copies / new versions / promote / delivery
@@ -792,22 +863,28 @@ class DataLifecycleController:
             run_id = run.id
         except Exception:
             run_id = None
-        try:
-            version = service.commit_working_copy(
+
+        def _commit():
+            return service.commit_working_copy(
                 working_path,
                 asset_id=asset_id,
                 name=dlg.version_name(),
                 stage=dlg.stage(),
                 run_id=run_id,
             )
-        except Exception as exc:
+
+        def _commit_done(version) -> None:
+            page._refresh()
+            page._set_action_status(
+                f"已提交新版本: {version.id} (v{version.version_number}, {version.stage.value})"
+            )
+
+        def _commit_fail(message: str) -> None:
             self._fail_booked_run(service, run_id)
-            page._set_action_status(f"提交新版本失败: {exc}")
-            return
-        page._refresh()
-        page._set_action_status(
-            f"已提交新版本: {version.id} (v{version.version_number}, {version.stage.value})"
-        )
+            page._set_action_status(f"提交新版本失败: {message}")
+
+        # Commit (payload copy + SHA) off the GUI thread (#931).
+        self._run_catalog_action("提交新版本", _commit, _commit_done, on_fail=_commit_fail)
 
     def promote_asset(self, asset: object) -> None:
         """提升为正式数据: copy the current version to a new immutable OUTPUT
@@ -822,18 +899,24 @@ class DataLifecycleController:
         dlg = _PromoteDialog(page, asset_name=name)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        try:
-            version = self.catalog_service().promote_version(
+        service = self.catalog_service()
+
+        def _promote():
+            return service.promote_version(
                 version_id,
                 to_stage=dlg.stage(),
                 reviewed_by=dlg.reviewed_by(),
                 note=dlg.note(),
             )
-        except Exception as exc:
-            page._set_action_status(f"提升失败: {exc}")
-            return
-        page._refresh()
-        page._set_action_status(f"已提升为正式数据: {version.id} (v{version.version_number})")
+
+        def _promote_done(version) -> None:
+            page._refresh()
+            page._set_action_status(
+                f"已提升为正式数据: {version.id} (v{version.version_number})"
+            )
+
+        # Promote copies the payload to a new immutable version (#931).
+        self._run_catalog_action("提升为正式数据", _promote, _promote_done)
 
     def prepare_delivery(self, asset: object):
         """Resolve the payload source and ask for a destination (GUI thread).
@@ -1228,6 +1311,10 @@ class DataLifecycleController:
                 (worker.failed, page._on_verify_failed),
             ),
             cancel=worker.cancel,
+            # #937-10: bind the job to the current project so a completion from
+            # a PREVIOUS project cannot mutate the new one (the sibling
+            # import/export/delivery jobs all carry target=).
+            target=page.project,
         )
         page.data_toolbar.set_verify_running(True)
         page._set_action_status(f"正在后台校验 {len(items)} 项数据资产完整性...")

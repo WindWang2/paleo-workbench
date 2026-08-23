@@ -64,6 +64,12 @@ class FactorPreviewGrid(QWidget):
             if r_squared is not None:
                 self.rsquared_label.setText(f"R² {r_squared}")
                 self.rsquared_label.show()
+            elif metrics:
+                # #939-5: the plan/batch path legitimately omits LOO R² while
+                # the single-run path reports it — show the reason instead of
+                # hiding the metric (same card, different meaning before).
+                self.rsquared_label.setText("R² 本轮未计算")
+                self.rsquared_label.show()
             else:
                 self.rsquared_label.hide()
             layout.addWidget(self.rsquared_label)

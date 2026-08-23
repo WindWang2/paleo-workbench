@@ -55,6 +55,10 @@ struct VectorLayerSpec {
     std::string stroke = "#26364d";
     double stroke_width = 1.0;
     double marker_size = 6.0;
+    /// Host LinePattern enum value ("solid" | "dash" | "dot" | "dash_dot").
+    /// Legacy path only (#922): mapped onto the simple-line ``line_style``
+    /// property so dashed fault lines stay dashed on the QGIS path.
+    std::string line_pattern = "solid";
     std::string renderer_kind = "single";
     /// Authoritative QGIS symbology payload. When non-empty it replaces every
     /// legacy style field below after parsing; parse failure fails the
@@ -77,7 +81,23 @@ struct VectorLayerSpec {
     std::uint64_t style_revision = 0;
     bool visible = true;
     double opacity = 1.0;
+    /// Scale visibility (1:denominator range) — audit #929: the fallback
+    /// renderer honours VectorStyle.scale_range while the QGIS wire dropped
+    /// it, so scale-dependent layers were always visible. 0 disables a bound.
+    bool has_scale_range = false;
+    double scale_range_min_denom = 0.0;
+    double scale_range_max_denom = 0.0;
     std::vector<FeatureSpec> features;
+    /// #932: incremental payload. When present the host omitted ``features``
+    /// and expects the existing mirror at ``base_revision`` to be updated in
+    /// place (changed = added-or-modified full specs; removed = host ids).
+    /// The bridge validates the base revision before mutating any mirror.
+    struct FeatureDelta {
+        std::uint64_t base_revision = 0;
+        std::vector<FeatureSpec> changed;
+        std::vector<std::string> removed_ids;
+    };
+    std::optional<FeatureDelta> delta;
 };
 
 struct RenderResult {
@@ -120,6 +140,10 @@ class QgisRenderBridge {
         std::uint64_t mirror_builds = 0;
         std::uint64_t mirror_reuses = 0;
         std::uint64_t style_reapplies = 0;
+        /// #932: incremental feature-delta applications on live mirrors.
+        std::uint64_t feature_deltas = 0;
+        std::uint64_t delta_changed_features = 0;
+        std::uint64_t delta_removed_features = 0;
     };
     [[nodiscard]] Diagnostics diagnostics() const;
 

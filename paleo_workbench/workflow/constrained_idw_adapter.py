@@ -25,7 +25,9 @@ Public surface (host contract):
 
 from __future__ import annotations
 
+import dataclasses
 import math
+import logging
 import sys
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -33,6 +35,7 @@ from typing import Any, Iterable, Sequence
 import numpy as np
 
 from paleo_workbench.workflow.constraints import (
+    boundary_rings_for_engine,
     break_polylines_for_idw,
     direction_line_params,
 )
@@ -47,6 +50,9 @@ CONSTRAINED_IDW_ENGINE_LABEL = "constrained_idw"
 # well within budget.
 _MAX_GRID_RESOLUTION = 200
 _MIN_GRID_RESOLUTION = 20
+# Default level count for generation-time engine contours; matches
+# contour_draft.DEFAULT_N_LEVELS (#928).
+DEFAULT_CONTOUR_LEVELS = 8
 
 # Repository layout: the pure algorithm is vendored under
 # paleo_workbench/_vendored/haiyou_constrained_idw/ (Qt-free package roots).
@@ -211,6 +217,9 @@ def _build_directions(
                 ratio = max(1.0, float(semi_major) / float(semi_minor))
         except (TypeError, ValueError):
             pass
+        # Upstream fb513c2: weak ratios (shapefile-imported 1.0/0.5 etc.) must
+        # still produce a visible full-line stretch — floor at 16.
+        ratio = max(float(ratio), 16.0)
         directions.append(
             Direction(
                 line_id=str(param.get("id") or f"dir-{i}"),
@@ -273,73 +282,174 @@ def _boundary_from_samples(
 # --------------------------------------------------------------------------- #
 
 
-def _leave_one_out_grid_fidelity(
+def _bilinear_sample_grid(
+    grid_z: np.ndarray,
+    grid_x: np.ndarray,
+    grid_y: np.ndarray,
+    px: float,
+    py: float,
+) -> float | None:
+    """Bilinearly sample *grid_z* at map coordinates (px, py); NaN → None."""
+    gx = np.asarray(grid_x, dtype=float)
+    gy = np.asarray(grid_y, dtype=float)
+    z = np.asarray(grid_z, dtype=float)
+    x0, x1 = gx[0], gx[-1]
+    y0, y1 = gy[0], gy[-1]
+    nx, ny = gx.size, gy.size
+    fi = (px - x0) / (x1 - x0) * (nx - 1) if nx > 1 else 0.0
+    fj = (py - y0) / (y1 - y0) * (ny - 1) if ny > 1 else 0.0
+    i = min(max(int(math.floor(fi)), 0), nx - 2)
+    j = min(max(int(math.floor(fj)), 0), ny - 2)
+    a = fi - i
+    b = fj - j
+    # rows index y (grid_z shape = (len(grid_y), len(grid_x)))
+    v = (
+        z[j, i] * (1 - a) * (1 - b)
+        + z[j, i + 1] * a * (1 - b)
+        + z[j + 1, i] * (1 - a) * b
+        + z[j + 1, i + 1] * a * b
+    )
+    if not math.isfinite(float(v)):
+        return None
+    return float(v)
+
+
+def _signed_r_squared(observed: np.ndarray, predicted: np.ndarray) -> float:
+    """Signed R² over paired samples (never clamped; issue #844 convention)."""
+    ss_res = float(np.sum((observed - predicted) ** 2))
+    ss_tot = float(np.sum((observed - observed.mean()) ** 2))
+    if ss_tot < 1e-12:
+        return 1.0
+    return float(1.0 - ss_res / ss_tot)
+
+
+def _anchored_grid_fidelity(
     grid_z: np.ndarray, grid_x: np.ndarray, grid_y: np.ndarray, wells
 ) -> tuple[float, int]:
-    """In-sample R² of the interpolated surface at the well locations.
+    """In-sample anchored fidelity of the surface at the well locations.
 
-    Constrained-IDW re-anchors wells (``well_anchor_enabled``), so the grid
-    should reproduce well values closely. We bilinearly sample the grid at each
-    well and report 1 - SS_res/SS_tot. Cheap (O(n_wells)) and an honest quality
-    indicator consistent with the other methods' reported R².
-
-    Wells whose bilinear window touches nodata cells are *counted as missing*
-    and excluded from the R² — never replaced by a fabricated prediction.
-    Returns ``(r_squared, n_skipped)``.
+    NOT a cross-validated R² (#921): constrained-IDW re-anchors wells
+    (``well_anchor_enabled``), so sampling the grid at the wells measures how
+    well the anchoring reproduced them — by construction ≈ 1. It is reported
+    separately as ``anchored_fidelity``; the shared ``r_squared`` key now comes
+    from :func:`_cross_validated_r_squared`. Wells whose bilinear window hits
+    nodata are excluded, never faked. Returns ``(value, n_skipped)``.
     """
     values = np.array([w.value for w in wells], dtype=float)
     if values.size < 2 or float(values.std()) < 1e-12:
         return 1.0, 0
-    gx = np.asarray(grid_x, dtype=float)
-    gy = np.asarray(grid_y, dtype=float)
-    z = np.asarray(grid_z, dtype=float)
+
     pred = np.full(values.shape, np.nan, dtype=float)
-    x0, x1 = gx[0], gx[-1]
-    y0, y1 = gy[0], gy[-1]
-    nx = gx.size
-    ny = gy.size
-
-    def _sample(px: float, py: float) -> float | None:
-        fi = (px - x0) / (x1 - x0) * (nx - 1) if nx > 1 else 0.0
-        fj = (py - y0) / (y1 - y0) * (ny - 1) if ny > 1 else 0.0
-        i = min(max(int(math.floor(fi)), 0), nx - 2)
-        j = min(max(int(math.floor(fj)), 0), ny - 2)
-        a = fi - i
-        b = fj - j
-        # rows index y (grid_z shape = (len(grid_y), len(grid_x)))
-        v = (
-            z[j, i] * (1 - a) * (1 - b)
-            + z[j, i + 1] * a * (1 - b)
-            + z[j + 1, i] * (1 - a) * b
-            + z[j + 1, i + 1] * a * b
-        )
-        if not math.isfinite(float(v)):
-            return None
-        return float(v)
-
     n_skipped = 0
     for k, w in enumerate(wells):
-        sampled = _sample(w.x, w.y)
+        sampled = _bilinear_sample_grid(grid_z, grid_x, grid_y, w.x, w.y)
         if sampled is None:
             n_skipped += 1
             continue
         pred[k] = sampled
     valid = np.isfinite(pred)
     if int(valid.sum()) < 2:
-        # R² is undefined with fewer than two samplable wells; keep the
+        # Undefined with fewer than two samplable wells; keep the
         # degenerate-input convention (1.0) but report how many were skipped.
         return 1.0, n_skipped
-    v_obs = values[valid]
-    v_pred = pred[valid]
-    ss_res = float(np.sum((v_obs - v_pred) ** 2))
-    ss_tot = float(np.sum((v_obs - v_obs.mean()) ** 2))
-    if ss_tot < 1e-12:
-        return 1.0, n_skipped
-    # Signed R² (never clamped to [0, 1]): a fit worse than the constant
-    # mean must report a negative value, matching the gve methods that write
-    # the same ``r_squared`` key (issue #844). The old max(0, ...) clamp made
-    # a bad fit indistinguishable from an exactly-mean fit.
-    return float(1.0 - ss_res / ss_tot), n_skipped
+    return _signed_r_squared(values[valid], pred[valid]), n_skipped
+
+
+# Historical name (pre-#921) kept so external callers/tests keep working; the
+# honest cross-validated metric now feeds the shared ``r_squared`` key.
+_leave_one_out_grid_fidelity = _anchored_grid_fidelity
+
+
+_CV_FOLDS = 4
+
+
+def _spatial_fold_assignment(wells) -> list[np.ndarray]:
+    """Deterministic spatial fold ids (round-robin by angle around centroid)."""
+    xs = np.array([w.x for w in wells], dtype=float)
+    ys = np.array([w.y for w in wells], dtype=float)
+    angle = np.arctan2(ys - ys.mean(), xs - xs.mean())
+    order = np.argsort(angle, kind="stable")
+    folds: list[list[int]] = [[] for _ in range(_CV_FOLDS)]
+    for rank, idx in enumerate(order):
+        folds[rank % _CV_FOLDS].append(int(idx))
+    return [np.array(fold, dtype=int) for fold in folds]
+
+
+def _cross_validated_r_squared(
+    wells,
+    boundary,
+    barriers,
+    directions,
+    config,
+    generate,
+    cancellation_token=None,
+):
+    """Honest spatial K-fold cross-validated R² for constrained-IDW (#921).
+
+    Each fold holds out every K-th angular sector of the wells, re-runs the
+    engine on the remainder with the SAME configuration, and bilinearly scores
+    the held-out wells. Signed result (worse-than-mean fits report negative),
+    directly comparable with the LOO R² plain IDW / kriging report under the
+    same key. Returns ``None`` when it cannot be computed honestly (too few
+    training wells per fold, no scorable held-out samples); the preview then
+    hides the metric instead of faking it.
+    """
+    if len(wells) < _CV_FOLDS + 2:
+        return None
+    values = np.array([w.value for w in wells], dtype=float)
+    if values.size < 2 or float(values.std()) < 1e-12:
+        return None
+    observed_parts: list[np.ndarray] = []
+    predicted_parts: list[np.ndarray] = []
+    for fold_idx in _spatial_fold_assignment(wells):
+        test_idx = set(int(i) for i in fold_idx)
+        train = [w for i, w in enumerate(wells) if i not in test_idx]
+        held = [wells[i] for i in sorted(test_idx)]
+        if len(train) < 3 or not held:
+            continue
+        try:
+            fold_result = generate(
+                list(train),
+                list(boundary) if isinstance(boundary, list) else [boundary],
+                barriers,
+                directions,
+                levels=[],
+                # Folds only need the held-out surface sample; keep the
+                # upstream contour stage off so CV cost stays surface-only
+                # even though the main pass extracts contours (#928).
+                config=dataclasses.replace(config, extract_contours=False),
+                cancellation_token=cancellation_token,
+            )
+        except Exception:
+            # A fold engine failure must not silently masquerade as "too few
+            # samples" — log it so the hidden metric is explainable (#921).
+            logging.getLogger(__name__).warning(
+                "cross-validated R² unavailable: fold interpolation failed",
+                exc_info=True,
+            )
+            return None
+        preds = [
+            _bilinear_sample_grid(
+                fold_result.grid_z, fold_result.grid_x, fold_result.grid_y, w.x, w.y
+            )
+            for w in held
+        ]
+        obs = np.array([w.value for w in held], dtype=float)
+        pred = np.array(
+            [p if p is not None else np.nan for p in preds], dtype=float
+        )
+        ok = np.isfinite(pred)
+        if int(ok.sum()) == 0:
+            continue
+        observed_parts.append(obs[ok])
+        predicted_parts.append(pred[ok])
+    if len(observed_parts) < 2:
+        return None
+    observed = np.concatenate(observed_parts)
+    predicted = np.concatenate(predicted_parts)
+    if observed.size < 2:
+        return None
+    return _signed_r_squared(observed, predicted)
 
 
 def _value_range_from_wells(wells: Sequence[Any]) -> tuple[float | None, float | None]:
@@ -479,7 +589,20 @@ def run_constrained_idw(
     barriers = _build_barriers(barriers_in)
     directions = _build_directions(layers, target_horizon=target_horizon)
 
+    # #928: an explicit user-drawn boundary is the geological intent and wins
+    # over the synthesized sample hull; without one the hull fallback keeps
+    # the historical behavior.
     boundary, boundary_xy = _boundary_from_samples(points, wells)
+    user_rings = boundary_rings_for_engine(layers, target_horizon=target_horizon)
+    if user_rings:
+        Boundary = _ensure_haiyou_engine()["Boundary"]
+        boundary = [
+            Boundary(exterior=tuple((float(x), float(y)) for x, y in ring))
+            for ring in user_rings
+        ]
+        # Report the ring actually handed to the engine, not the synthesized
+        # hull — consumers show this key as the constrained extent.
+        boundary_xy = [(float(x), float(y)) for x, y in user_rings[0]]
 
     resolution = int(round(grid_n))
     resolution = max(_MIN_GRID_RESOLUTION, min(_MAX_GRID_RESOLUTION, resolution))
@@ -487,22 +610,54 @@ def run_constrained_idw(
     value_min, value_max = _value_range_from_wells(wells)
     search_radius, decluster_radius = _search_radii_from_wells(wells)
 
+    # Upstream production recipe (workflow.py @ 5b8f8f98) whenever direction
+    # lines are active (#927): strong along-track stretching (fb513c2 was
+    # dormant here), corridor/perpendicular strengths, and declustering OFF —
+    # the local direction distance already supplies the intended anisotropy,
+    # and boosting isolated wells distorts the surface. Without directions the
+    # engine defaults apply unchanged.
+    use_dirs = bool(directions)
     config = Config(
         grid_resolution=resolution,
         power=float(power),
         search_radius=search_radius,
-        decluster_radius=decluster_radius,
+        decluster_radius=decluster_radius if not use_dirs else 0.0,
+        decluster_strength=2.0 if not use_dirs else 0.0,
         value_min=value_min,
         value_max=value_max,
-        # We only need the interpolated surface (host re-derives contours via
-        # its own marching-squares contour-draft pipeline, consistent with the
-        # other methods). Skip haiyou's contour extraction to keep the import
-        # graph narrow (no contour_extractor) and avoid duplicate contour logic.
-        extract_contours=False,
+        anisotropic_fill=True,
+        use_curve_direction_distance=True,
+        along_track_blend_strength=1.0 if use_dirs else 0.0,
+        along_track_min_cell_g=0.025 if use_dirs else 0.05,
+        along_track_exp_k=8.0 if use_dirs else 6.0,
+        direction_taper_plateau=0.95 if use_dirs else 0.85,
+        direction_smoothing_strength=3.0 if use_dirs else 1.8,
+        direction_perpendicular_strength=1.85 if use_dirs else 1.0,
+        direction_corridor_strength=2.65 if use_dirs else 1.0,
+        well_anchor_preserve_anisotropy=True,
+        # #928: run the vendored upstream contour pipeline (smooth / prune /
+        # join / barrier interruption) in the same engine pass — its refined
+        # isolines are an algorithm output, not a view-time re-derivation.
+        # The grid is bit-identical to the surface-only pass (verified by
+        # tests), and the R² folds below disable extraction explicitly.
+        extract_contours=True,
         # Geographic (degree) CRS: the engine's auto barrier buffer is
         # metre-calibrated; pass an explicit ~300 m buffer in degrees instead
-        # of letting the metre constants expand to kilometres.
+        # of letting the metre constants expand to kilometres. With no CRS the
+        # auto buffer stays on in MAP UNITS (the #370 corridor contract), but
+        # the result is labelled unit-ambiguous (#939-4) so consumers never
+        # read it as a metre value on possibly-degree data.
         barrier_buffer_distance=barrier_buffer_distance_for_crs(crs) or 0.0,
+    )
+
+    # Generation-time levels share the host's nice-step semantics (#928), so
+    # the stored engine contours match what the default draft would ask for.
+    from paleo_workbench.workflow.contour_draft import (
+        suggest_nice_levels_from_range,
+    )
+
+    contour_levels = suggest_nice_levels_from_range(
+        value_min, value_max, n_levels=DEFAULT_CONTOUR_LEVELS
     )
 
     if cancellation_token is not None:
@@ -510,10 +665,12 @@ def run_constrained_idw(
 
     result = generate(
         wells,
-        [boundary],
+        # Engine takes a list of boundary polygons (#928): user rings when
+        # drawn, else the single synthesized hull.
+        list(boundary) if isinstance(boundary, list) else [boundary],
         barriers,
         directions,
-        levels=[],  # unused with extract_contours=False
+        levels=list(contour_levels),
         config=config,
         cancellation_token=cancellation_token,
     )
@@ -532,8 +689,21 @@ def run_constrained_idw(
     z_min = float(finite.min())
     z_max = float(finite.max())
     z_mean = float(finite.mean())
-    r_squared, r_squared_n_skipped = _leave_one_out_grid_fidelity(
+    # #921: the shared ``r_squared`` key must carry the same semantics as the
+    # other methods (held-out validation), so it is computed by spatial 4-fold
+    # cross-validation. The by-construction-≈1 anchored fidelity is reported
+    # separately for transparency.
+    anchored_fidelity, anchored_n_skipped = _anchored_grid_fidelity(
         grid_z, grid_x, grid_y, wells
+    )
+    r_squared = _cross_validated_r_squared(
+        wells,
+        boundary,
+        barriers,
+        directions,
+        config,
+        generate,
+        cancellation_token=cancellation_token,
     )
 
     return {
@@ -551,14 +721,31 @@ def run_constrained_idw(
         "min": z_min,
         "max": z_max,
         "mean": z_mean,
+        # Honest held-out quality; None when it cannot be computed honestly.
         "r_squared": r_squared,
-        # Transparency for the quality metric: how many wells were excluded
-        # from the R² because their sampling window hit nodata (never faked).
-        "r_squared_n_sampled": int(len(wells) - r_squared_n_skipped),
-        "r_squared_n_skipped": r_squared_n_skipped,
+        "r_squared_method": "spatial_4_fold" if r_squared is not None else "unavailable",
+        # Transparency: anchoring makes in-sample fidelity ≈1 by construction;
+        # kept under its own key so it can never be mistaken for R² (#921).
+        "anchored_fidelity": anchored_fidelity,
+        "anchored_fidelity_n_skipped": anchored_n_skipped,
         # Keep the resolved domain boundary so downstream consumers can show
         # the constrained interpolation extent (e.g. as a reference outline).
         "boundary": [[float(x), float(y)] for x, y in boundary_xy],
+        # #928: refined isolines from the vendored upstream pipeline. Level
+        # keys are strings so the payload is JSON/descriptor safe.
+        "contours": {
+            str(float(level)): [
+                [[float(p[0]), float(p[1])] for p in line]
+                for line in lines or []
+            ]
+            for level, lines in (getattr(result, "contours", None) or {}).items()
+        }
+        or None,
+        "contour_levels": [float(v) for v in contour_levels],
+        "barrier_buffer_mode": (
+            "degrees" if (crs and barrier_buffer_distance_for_crs(crs)) else
+            ("auto_map_units" if crs else "auto_map_units_unknown_crs")
+        ),
         "n_direction_lines": len(directions),
         "search_radius": search_radius,
         "decluster_radius": decluster_radius,

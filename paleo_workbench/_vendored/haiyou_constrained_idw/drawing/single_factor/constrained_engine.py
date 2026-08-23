@@ -756,6 +756,11 @@ def generate_constrained_idw(
             effective_mask_radius,
         )
     data_hull_mask = None
+    # "Was there a hull?" independent of whether the raster was materialised
+    # (audit fix #924): the default limit-to-coverage path skips the raster,
+    # but the downstream gap-fill decision must still see the hull exactly the
+    # way upstream — which always builds it — does.
+    data_hull_present = False
     hull_buffer = resolve_data_hull_buffer_meters(
         float(config.data_hull_buffer_meters),
         float(config.search_radius),
@@ -772,11 +777,13 @@ def generate_constrained_idw(
             buffer_meters=hull_buffer,
         )
         if data_hull_mask is not None:
+            data_hull_present = bool(np.any(data_hull_mask))
             diagnostics["data_hull_limited"] = 1
             diagnostics["data_hull_buffer_meters"] = float(hull_buffer)
     elif hull_requested and data_hull_exists(well_array[:, :2]):
         # Default limit-to-coverage path only needs "was there a hull?" —
         # the raster is discarded (domain_hull_mask = None) so skip it.
+        data_hull_present = True
         diagnostics["data_hull_limited"] = 1
         diagnostics["data_hull_buffer_meters"] = float(hull_buffer)
     # 限制外推时不用凸包扩域：井点沿边界分布时凸包会把内部无井区包进来。
@@ -919,7 +926,47 @@ def generate_constrained_idw(
             endpoint_tolerance=config.endpoint_tolerance,
             cancellation_token=cancellation_token,
         )
+        # No-direction case: every cell takes the pure-Euclidean selection, so
+        # the whole domain can run through the cell-batched kernel (#933) —
+        # bit-for-bit the per-cell loop, minus its ~65 µs/cell Python overhead.
+        # Any direction context (curve corridor or legacy fixed-angle) keeps
+        # the per-cell path: its per-cell caches are genuinely data-dependent.
+        plain_batch_ok = not resolved_directions and not well_curve_coords
+        if plain_batch_ok:
+            cell_labels_batch = (
+                np.asarray(region_labels[point_rows, point_cols], dtype=int)
+                if region_labels is not None
+                else None
+            )
+            batch_values, batch_blocked = _interpolate_euclidean_cells_batch(
+                grid_x[point_cols],
+                grid_y[point_rows],
+                cell_labels_batch,
+                well_array,
+                config,
+                density_weights,
+                well_labels=well_labels,
+                blocked_mask=point_path_blocked,
+                barriers_active=bool(active_barriers),
+                cancellation_token=cancellation_token,
+            )
+            diagnostics["blocked_well_grid_relations"] += int(batch_blocked.sum())
+            diagnostics["被打断线过滤的井点-网格关系数量"] += int(batch_blocked.sum())
+            finite = np.isfinite(batch_values)
+            diagnostics["普通距离网格点数"] += int(finite.sum())
+            diagnostics["plain_distance_grid_points"] += int(finite.sum())
+            if config.value_min is not None:
+                batch_values = np.maximum(batch_values, float(config.value_min))
+            if config.value_max is not None:
+                # NaN cells must survive the clamp (per-cell loop skips them).
+                over = np.isfinite(batch_values) & (
+                    batch_values > float(config.value_max)
+                )
+                batch_values = np.where(over, float(config.value_max), batch_values)
+            grid_z[point_rows, point_cols] = batch_values
         for cell_index, (row, col) in enumerate(zip(point_rows, point_cols)):
+            if plain_batch_ok:
+                continue  # already covered by the cell batch above
             if cell_index % 64 == 0:
                 _raise_if_cancelled(cancellation_token)
             pt = (float(grid_x[col]), float(grid_y[row]))
@@ -1133,7 +1180,10 @@ def generate_constrained_idw(
         )
 
     gap_iterations = max(0, int(config.gap_fill_iterations))
-    data_hull_active = data_hull_mask is not None and bool(np.any(data_hull_mask))
+    data_hull_active = (
+        (data_hull_mask is not None and bool(np.any(data_hull_mask)))
+        or data_hull_present
+    )
     idw_support_mask = domain_mask & np.isfinite(grid_z)
     bfs_reach_cells = resolve_bfs_reach_cells(
         float(config.search_radius),
@@ -1808,6 +1858,149 @@ def _interpolate_grid_point_euclidean(
     if weight_sum <= 0:
         return None, n_blocked, False
     return float(np.sum(weights * values) / weight_sum), n_blocked, False
+
+
+def _interpolate_euclidean_cells_batch(
+    cell_xs: np.ndarray,
+    cell_ys: np.ndarray,
+    cell_labels: Optional[np.ndarray],
+    well_array: np.ndarray,
+    config: ConstrainedIDWConfig,
+    density_weights: np.ndarray,
+    well_labels: Optional[np.ndarray] = None,
+    blocked_mask: Optional[np.ndarray] = None,
+    barriers_active: bool = True,
+    cancellation_token: Optional[object] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Cell-dimension vectorized pure-Euclidean constrained IDW (#933).
+
+    Bit-for-bit equivalent to running :func:`_interpolate_grid_point` /
+    :func:`_interpolate_grid_point_euclidean` per cell over the same inputs
+    (no-direction case only): same exact-hit rule, same label/LOS block
+    accounting, same radius passes with per-pass ``min_points`` relaxation,
+    same stable top-k selection, same weighting arithmetic. Elementwise IEEE
+    ops and contiguous per-row ``np.sum``/``argsort(kind="stable")`` keep the
+    reduction orders identical to the per-cell code.
+
+    Returns ``(values, blocked_counts)``; ``values`` is NaN exactly where the
+    per-cell path returns ``None`` (not enough candidates or a non-positive
+    weight sum).
+    """
+    n_cells = int(len(cell_xs))
+    n_wells = len(well_array)
+    values = np.full(n_cells, np.nan, dtype=float)
+    blocked_counts = np.zeros(n_cells, dtype=np.int64)
+    if n_cells == 0 or n_wells == 0:
+        return values, blocked_counts
+
+    wx = np.asarray(well_array[:, 0], dtype=float)
+    wy = np.asarray(well_array[:, 1], dtype=float)
+    wv = np.asarray(well_array[:, 2], dtype=float)
+    if density_weights.size:
+        decluster_all = np.asarray(density_weights, dtype=float)
+    else:
+        decluster_all = np.ones(n_wells, dtype=float)
+    if well_labels is not None:
+        wl = np.asarray(well_labels, dtype=int)
+    else:
+        wl = None
+    base_radius = max(float(config.search_radius), 1e-9)
+    radius_scales = (
+        (1.0,)
+        if bool(config.limit_interpolation_to_search_radius)
+        else (1.0, 1.5, 2.25, 3.0)
+    )
+    max_points = max(1, int(config.max_points))
+    power = float(config.power)
+
+    # Chunk cells to bound the (chunk, wells) temporaries (~7 arrays).
+    chunk = int(max(256, min(8192, 8_000_000 // max(1, n_wells))))
+    for start in range(0, n_cells, chunk):
+        _raise_if_cancelled(cancellation_token)
+        stop = min(start + chunk, n_cells)
+        cx = np.asarray(cell_xs[start:stop], dtype=float)[:, None]
+        cy = np.asarray(cell_ys[start:stop], dtype=float)[:, None]
+        dx = wx[None, :] - cx
+        dy = wy[None, :] - cy
+        euclidean = np.sqrt(dx * dx + dy * dy)
+
+        # Exact well hit: first well within 1e-9 wins, no block accounting
+        # (mirrors the early return in _interpolate_grid_point).
+        exact_rows = np.nonzero((euclidean <= 1e-9).any(axis=1))[0]
+        first_exact = np.argmax(euclidean <= 1e-9, axis=1)
+        has_exact = np.zeros(stop - start, dtype=bool)
+        if exact_rows.size:
+            has_exact[exact_rows] = True
+            values[start + exact_rows] = wv[first_exact[exact_rows]]
+
+        work = np.nonzero(~has_exact)[0]
+        if work.size == 0:
+            continue
+
+        blocked = np.zeros((work.size, n_wells), dtype=bool)
+        # Parity: the per-cell path only consults blocked_mask when barriers
+        # are actually active (empty barrier list ⇒ label filtering only).
+        if blocked_mask is not None and barriers_active:
+            blocked |= np.asarray(blocked_mask[start + work, :], dtype=bool)
+        if wl is not None and cell_labels is not None:
+            cl = np.asarray(cell_labels[start + work], dtype=int)
+            # Parity: label blocking only applies to labelled cells; a -2
+            # (global) cell sees every well regardless of well labels.
+            label_block = (wl[None, :] >= 0) & (wl[None, :] != cl[:, None])
+            blocked |= label_block & (cl[:, None] >= 0)
+        blocked_counts[start + work] = blocked.sum(axis=1, dtype=np.int64)
+
+        dist = euclidean[work]
+        free = ~blocked
+        # Radius passes with per-pass min_points relaxation; a row freezes at
+        # the pass where its candidate count first meets the requirement.
+        candidate = np.zeros((work.size, n_wells), dtype=bool)
+        settled = np.zeros(work.size, dtype=bool)
+        for pass_index, radius_scale in enumerate(radius_scales):
+            active = ~settled
+            if not active.any():
+                break
+            candidate[active] |= free[active] & (
+                dist[active] <= base_radius * radius_scale
+            )
+            required = max(1, int(config.min_points) - pass_index)
+            counts = candidate.sum(axis=1, dtype=np.int64)
+            settled = counts >= required
+        ok = settled.copy()
+        # Rows that never met any (relaxed) pass requirement keep NaN, same
+        # as the per-cell None return; settled rows keep the candidate mask
+        # frozen at their settling pass (only unsettled rows are updated).
+
+        # Stable top-k: non-candidates sit at +inf so a full-row stable
+        # argsort reproduces per-row nonzero()+stable-sort+[:k] exactly.
+        sort_dist = np.where(candidate, dist, np.inf)
+        order = np.argsort(sort_dist, axis=1, kind="stable")[:, :max_points]
+        counts = candidate.sum(axis=1, dtype=np.int64)
+        # Row reductions must run over EXACTLY min(count, max_points) columns:
+        # numpy's pairwise summation tree depends on array length, so padding
+        # short rows with zeros to a constant width would reorder additions
+        # and drift the last ULP away from the per-cell np.sum.
+        row_values = np.full(work.size, np.nan)
+        selected_k = np.minimum(counts, max_points)
+        for k in np.unique(selected_k[ok]):
+            group = np.nonzero(ok & (selected_k == k))[0]
+            if k <= 0:
+                continue
+            g_order = order[group, :k]
+            g_dist = np.take_along_axis(dist[group], g_order, axis=1)
+            g_weights = decluster_all[g_order] / np.power(
+                np.maximum(g_dist, 1e-9), power
+            )
+            g_weight_sums = g_weights.sum(axis=1)
+            g_vals = wv[g_order]
+            with np.errstate(invalid="ignore", divide="ignore"):
+                g_out = (g_weights * g_vals).sum(axis=1) / np.where(
+                    g_weight_sums > 0, g_weight_sums, 1.0
+                )
+            row_values[group] = np.where(g_weight_sums > 0, g_out, np.nan)
+        targets = start + work
+        values[targets] = row_values
+    return values, blocked_counts
 
 
 def _interpolate_grid_point_curve(

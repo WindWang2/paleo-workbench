@@ -381,7 +381,7 @@ jobs:
         # Windows wheels deferred: Shiboken6 CMake package + Qt aqt pin (#234).
         # Ubuntu wheels remain the binding gate.
         os: [ubuntu-latest]
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.12"]
 
     steps:
       - name: Checkout

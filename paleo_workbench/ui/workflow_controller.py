@@ -61,6 +61,7 @@ class _RecomputeWorker(QObject):
         try:
             from paleo_workbench.workflow.factor_interpolation import (
                 apply_interpolation_to_task,
+                interpolation_params_from_task,
             )
             from paleo_workbench.workflow.recompute_plan import PlanExecutor
             from paleo_workbench.workflow.service import (
@@ -91,7 +92,17 @@ class _RecomputeWorker(QObject):
                 # project after the worker finishes (never mutate the shared
                 # project off the GUI thread).
                 staged = task.model_copy(deep=True)
-                apply_interpolation_to_task(staged, project=project)
+                # Re-run with the task's OWN recorded algorithm parameters —
+                # the function defaults (IDW/50/2.0) silently converted e.g.
+                # kriging tasks (#919).
+                method, grid_n, power = interpolation_params_from_task(staged)
+                apply_interpolation_to_task(
+                    staged,
+                    project=project,
+                    method=method,
+                    grid_n=grid_n,
+                    power=power,
+                )
                 self.grids[task_id] = peek_live_factor_grid(task_id)
                 updates.append((task_id, staged))
 
@@ -404,6 +415,9 @@ class WorkflowController:
         try:
             # Snapshot on the host thread so scientific inputs match Stage-4
             # fingerprints (same as preparation_page._start_prepare_worker).
+            # method="IDW" is deliberate: 发送制备 derives fresh factor maps
+            # from prediction results with the documented default algorithm;
+            # the preparation page owns user-selected methods.
             snapshot = build_prepare_snapshot(
                 project, generation=generation, method="IDW"
             )

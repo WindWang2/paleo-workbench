@@ -255,11 +255,12 @@ def document_render_snapshot(
                 _, features, extent = cached_entry
                 data_revision = int(revision)
             else:
-                source_records = (
-                    records if records is not None else features_from_document(document)
-                )
-                features = _features_for_kind(source_records, kind)
-                extent = _extent_for_features(features)
+                # #941-3: build via the one-pass grouped walker — the previous
+                # per-kind path re-scanned every record per layer kind (4 full
+                # walks + a coordinate re-walk per kind for extents).
+                grouped_features({kind})
+                features = grouped[kind]
+                extent = _positive_extent(_extent_from_bounds(bounds[kind]))
                 data_revision = int(revision) if revision is not None else _stable_revision(features)
                 if cache_key is not None:
                     _FEATURE_CACHE[cache_key] = (cache_owner, features, extent)

@@ -12,7 +12,7 @@ import os
 
 import numpy as np
 
-from PySide6.QtCore import QRectF, Qt, QObject, QEvent, Signal
+from PySide6.QtCore import QRectF, Qt, QObject, QEvent, Signal, QTimer
 from PySide6.QtGui import QBrush, QColor, QIcon, QLinearGradient, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QFrame, QLabel, QPushButton,
@@ -671,6 +671,14 @@ class GeologicalModeling3DPage(QWidget):
         self.btn_export.setObjectName("SecondaryButton")
         self.btn_export.clicked.connect(self._export_mesh)
         exp_layout.addWidget(self.btn_export)
+        # #937-6: async export/advisor outcomes report here instead of modal
+        # dialogs (worker completion slots must not stack modals, #897 family).
+        self.export_status = QLabel("")
+        self.export_status.setWordWrap(True)
+        self.export_status.setStyleSheet(
+            "font-size: 12px; color: %s; border: none;" % tokens.TEXT_SECONDARY
+        )
+        exp_layout.addWidget(self.export_status)
 
         right_layout.addWidget(card_export)
 
@@ -3098,13 +3106,14 @@ class GeologicalModeling3DPage(QWidget):
         )
 
     def _on_export_completed(self, filepath: str) -> None:
+        # #937-6: async completion — in-page status instead of a modal.
         self.btn_export.setEnabled(True)
         self._register_mesh_export(filepath)
-        QMessageBox.information(self, "导出成功", f"数值模拟网格模型已成功导出:\n{filepath}")
+        self.export_status.setText(f"导出成功：{filepath}")
 
     def _on_export_failed(self, err: str) -> None:
         self.btn_export.setEnabled(True)
-        QMessageBox.critical(self, "导出失败", f"网格模型导出失败:\n{err}")
+        self.export_status.setText(f"网格模型导出失败：{err}")
 
     def _register_mesh_export(self, filepath: str) -> None:
         """Best-effort OUTPUT DataVersion registration for FLAC3D/Abaqus mesh
@@ -3158,19 +3167,37 @@ class GeologicalModeling3DPage(QWidget):
         dialog.activateWindow()
 
     def _on_advisor_failed(self, err: str) -> None:
+        # #937-6: async completion — in-page status instead of a modal.
         self.btn_ai_advisor.setEnabled(True)
-        QMessageBox.warning(self, "诊断分析失败", f"一致性复核诊断遇到错误:\n{err}")
+        self.export_status.setText(f"一致性复核诊断失败：{err}")
 
     # ------------------------------------------------------------------ #
     # Well-Seismic Tie Calibration
     # ------------------------------------------------------------------ #
 
     def _on_tie_params_changed(self) -> None:
-        """Re-generate well-seismic overlays when frequency or T-D shift changes."""
+        """Re-generate well-seismic overlays when frequency or T-D shift changes.
+
+        #937-8: slider drags fire per tick; the overlay rebuild is ~39ms each
+        (30 wells ≈ 2.7s of GPU rebuild per drag) — debounce to one rebuild
+        after the drag settles (150ms) plus an immediate repaint for feedback.
+        """
         freq = self.slider_wavelet_freq.value()
         shift = self.slider_td_shift.value()
         logger.info("Well-Seismic calibration updated: freq=%dHz, shift=%dms", freq, shift)
+        timer = getattr(self, "_tie_rebuild_timer", None)
+        if timer is None:
+            from PySide6.QtCore import QTimer as _QTimer
 
+            timer = _QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(150)
+            timer.timeout.connect(self._rebuild_well_seismic_overlays)
+            self._tie_rebuild_timer = timer
+        timer.start()
+        self.gl_widget.update()
+
+    def _rebuild_well_seismic_overlays(self) -> None:
         if self.bh_raw_data:
             self._clear_well_seismic_overlays()
             self._generate_well_curve_overlays()

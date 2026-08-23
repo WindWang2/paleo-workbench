@@ -37,6 +37,29 @@ def test_workspace_overview_stack_swap(qtbot):
     assert not ws.overview_visible()
 
 
+def test_workspace_overview_hosts_well_map_panel(qtbot):
+    """工区概览 mode: the shared map panel moves into the overview page,
+    expanded and headerless; table mode restores it under the table."""
+    ws = DataWorkspace()
+    qtbot.addWidget(ws)
+    panel = ws.well_map_panel
+    center = ws._center_stack.parentWidget()
+    # Default: collapsible panel under the table.
+    assert panel.parentWidget() is center
+    assert panel.is_collapsed()
+    assert not panel._header.isHidden()
+
+    ws.show_overview(True)
+    assert panel.parentWidget() is ws.overview_panel
+    assert not panel.is_collapsed()
+    assert panel._header.isHidden()
+
+    ws.show_overview(False)
+    assert panel.parentWidget() is center
+    assert panel.is_collapsed()
+    assert not panel._header.isHidden()
+
+
 def test_workspace_right_splitter_two_segments(qtbot):
     ws = DataWorkspace()
     qtbot.addWidget(ws)

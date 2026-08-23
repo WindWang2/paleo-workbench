@@ -5,6 +5,7 @@
 
 #include <QDomDocument>
 #include <QString>
+#include <QStringList>
 #include <QVariantMap>
 
 #include <qgscategorizedsymbolrenderer.h>
@@ -38,28 +39,59 @@ Qgis::GeometryType geometry_type_from_name(const std::string& name) {
 /// Legacy compatibility symbol construction.  Professional authoring never
 /// calls this: it exists so legacy VectorStyle payloads and minimal fallbacks
 /// keep rendering while the authoritative model is the renderer XML payload.
+///
+/// Audit #922: legacy VectorStyle sizes are logical PIXELS at 96 dpi
+/// (map_styles.py), while createSimple properties default to MILLIMETERS — so
+/// every size carries an explicit ``*_unit = Pixel`` property, otherwise QGIS
+/// inflates it by 96/25.4 ≈ 3.78×. *line_pattern* is applied as a custom dash
+/// vector so both backends draw identical n × width pixel strokes: QGIS
+/// built-in "dash"/"dot" use QGIS-internal lengths, and "fault" (the default
+/// fault-trace pattern) has no built-in equivalent at all — it rendered solid.
 std::unique_ptr<QgsSymbol> legacy_symbol_for(
     Qgis::GeometryType geometry_type, const QString& fill, const QString& stroke,
-    double stroke_width, double marker_size
+    double stroke_width, double marker_size, const std::string& line_pattern = "solid"
 ) {
     QVariantMap properties;
     const QString width = QString::number(std::max(0.0, stroke_width), 'g', 12);
+    const char* dash_units = nullptr;
+    if (line_pattern == "dash") dash_units = "4;2";
+    else if (line_pattern == "dot") dash_units = "1;2";
+    else if (line_pattern == "dash_dot") dash_units = "4;2;1;2";
+    else if (line_pattern == "fault") dash_units = "6;2";
     switch (geometry_type) {
         case Qgis::GeometryType::Polygon:
             properties.insert(QStringLiteral("color"), fill);
             properties.insert(QStringLiteral("outline_color"), stroke);
             properties.insert(QStringLiteral("outline_width"), width);
+            properties.insert(QStringLiteral("outline_width_unit"), QStringLiteral("Pixel"));
             return QgsFillSymbol::createSimple(properties);
         case Qgis::GeometryType::Line:
             properties.insert(QStringLiteral("line_color"), stroke);
             properties.insert(QStringLiteral("color"), stroke);
             properties.insert(QStringLiteral("line_width"), width);
             properties.insert(QStringLiteral("width"), width);
+            properties.insert(QStringLiteral("line_width_unit"), QStringLiteral("Pixel"));
+            if (dash_units != nullptr) {
+                // The fallback QPen dashes are n × pen-width pixels; QGIS
+                // rescales the customdash vector by dividing by the pen
+                // width (qgslinesymbollayer.cpp), so pre-multiply here. The
+                // fallback clamps its pen to >= 0.5 px — mirror that floor
+                // so thin lines keep the same dash rhythm on both paths.
+                const double dash_width = std::max(0.5, stroke_width);
+                QStringList lengths;
+                for (const QString& unit : QString::fromLatin1(dash_units).split(QLatin1Char(';'))) {
+                    lengths << QString::number(unit.toDouble() * dash_width, 'g', 12);
+                }
+                properties.insert(QStringLiteral("use_custom_dash"), QStringLiteral("1"));
+                properties.insert(QStringLiteral("customdash"), lengths.join(QLatin1Char(';')));
+                properties.insert(QStringLiteral("customdash_unit"), QStringLiteral("Pixel"));
+            }
             return QgsLineSymbol::createSimple(properties);
         case Qgis::GeometryType::Point:
             properties.insert(QStringLiteral("color"), fill);
             properties.insert(QStringLiteral("outline_color"), stroke);
             properties.insert(QStringLiteral("size"), QString::number(std::max(0.1, marker_size), 'g', 12));
+            properties.insert(QStringLiteral("size_unit"), QStringLiteral("Pixel"));
             return QgsMarkerSymbol::createSimple(properties);
         default:
             return {};
@@ -111,7 +143,8 @@ std::unique_ptr<QgsFeatureRenderer> build_renderer_from_spec(
                 rule.fill.empty() ? default_fill : QString::fromStdString(rule.fill),
                 rule.stroke.empty() ? default_stroke : QString::fromStdString(rule.stroke),
                 rule.stroke_width,
-                rule.marker_size
+                rule.marker_size,
+                spec.line_pattern
             );
             if (!symbol) continue;
             auto node = std::make_unique<QgsRuleBasedRenderer::Rule>(
@@ -131,7 +164,7 @@ std::unique_ptr<QgsFeatureRenderer> build_renderer_from_spec(
         for (const CategorySpec& category : spec.categories) {
             auto symbol = legacy_symbol_for(
                 geometry_type, QString::fromStdString(category.color), default_stroke,
-                spec.stroke_width, spec.marker_size
+                spec.stroke_width, spec.marker_size, spec.line_pattern
             );
             if (symbol) {
                 categories.emplace_back(
@@ -152,7 +185,7 @@ std::unique_ptr<QgsFeatureRenderer> build_renderer_from_spec(
         for (const RangeSpec& range : spec.ranges) {
             auto symbol = legacy_symbol_for(
                 geometry_type, QString::fromStdString(range.color), default_stroke,
-                spec.stroke_width, spec.marker_size
+                spec.stroke_width, spec.marker_size, spec.line_pattern
             );
             if (symbol) {
                 ranges.emplace_back(
@@ -168,7 +201,8 @@ std::unique_ptr<QgsFeatureRenderer> build_renderer_from_spec(
     }
 
     auto symbol = legacy_symbol_for(
-        geometry_type, default_fill, default_stroke, spec.stroke_width, spec.marker_size
+        geometry_type, default_fill, default_stroke, spec.stroke_width,
+        spec.marker_size, spec.line_pattern
     );
     if (!symbol) return nullptr;
     return std::make_unique<QgsSingleSymbolRenderer>(symbol.release());

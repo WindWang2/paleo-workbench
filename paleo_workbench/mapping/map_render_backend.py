@@ -14,6 +14,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
+import logging
 import math
 import os
 import threading
@@ -27,6 +28,8 @@ from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPolygon
 
 from paleo_workbench.mapping.map_styles import MarkerSymbol, VectorStyle
 
+logger = logging.getLogger(__name__)
+
 __all__ = [
     "FallbackMapRenderBackend",
     "MapLayerSnapshot",
@@ -35,6 +38,7 @@ __all__ = [
     "QgisMapRenderBackend",
     "RenderFrame",
     "create_map_render_backend",
+    "qgis_backend_probe",
     "shutdown_live_fallback_backends",
 ]
 
@@ -1408,10 +1412,15 @@ class QgisMapRenderBackend(MapRenderBackend):
         self._vector_feature_entries: dict[
             str, dict[str, tuple[object, object, dict[str, object]]]
         ] = {}
+        # #932: last data_revision the BRIDGE mirror provably holds per layer —
+        # the base for incremental feature-delta ships.
+        self._qgis_shipped_revisions: dict[str, int] = {}
+        self._qgis_force_full: set[str] = set()
         self._feature_encoding_cache_hits = 0
         self._feature_encoding_cache_misses = 0
         self._feature_payload_reuse_hits = 0
         self._feature_payload_reencode_misses = 0
+        self._feature_delta_ships = 0
 
     @property
     def is_available(self) -> bool:
@@ -1455,6 +1464,13 @@ class QgisMapRenderBackend(MapRenderBackend):
     def _native_snapshot(self, snapshot: MapRenderSnapshot) -> list[dict[str, object]]:
         if any(layer.layer_type == "scalar_grid" for layer in snapshot.layers):
             if self._scalar_raster_cache is None:
+                from paleo_workbench.mapping.qgis_style import qgis_scalar_pipeline_ready
+
+                # Availability honesty (#925): fail with the shared actionable
+                # reason instead of a bare ImportError deep in the mirror.
+                ready, reason = qgis_scalar_pipeline_ready()
+                if not ready:
+                    raise RuntimeError(reason)
                 from paleo_workbench.mapping.scalar_raster_mirror import ScalarRasterMirrorCache
 
                 self._scalar_raster_cache = ScalarRasterMirrorCache()
@@ -1464,6 +1480,8 @@ class QgisMapRenderBackend(MapRenderBackend):
             vector_feature_payloads=self._vector_feature_payloads,
             vector_feature_entries=self._vector_feature_entries,
             encoding_stats=self,
+            shipped_revisions=self._qgis_shipped_revisions,
+            force_full_ids=self._qgis_force_full,
         )
         active_vector_ids = {
             layer.id for layer in snapshot.layers if layer.layer_type == "vector"
@@ -1478,6 +1496,11 @@ class QgisMapRenderBackend(MapRenderBackend):
             for layer_id, entries in self._vector_feature_entries.items()
             if layer_id in active_vector_ids
         }
+        self._qgis_shipped_revisions = {
+            layer_id: rev
+            for layer_id, rev in self._qgis_shipped_revisions.items()
+            if layer_id in active_vector_ids
+        }
         if self._scalar_raster_cache is not None:
             self._scalar_raster_cache.retain_layer_ids(
                 {layer.id for layer in snapshot.layers if layer.layer_type == "scalar_grid"}
@@ -1486,7 +1509,34 @@ class QgisMapRenderBackend(MapRenderBackend):
 
     def _set_native_snapshot(self, snapshot: MapRenderSnapshot) -> None:
         assert self._bridge is not None
-        self._bridge.set_layer_snapshot(self._native_snapshot(snapshot), snapshot.project_crs)
+        shipped = False
+        try:
+            try:
+                self._bridge.set_layer_snapshot(
+                    self._native_snapshot(snapshot), snapshot.project_crs
+                )
+                shipped = True
+            except RuntimeError as exc:
+                if "feature delta" not in str(exc).lower():
+                    raise
+                # The delta's base revision no longer matches the bridge mirror
+                # (e.g. the runtime restarted under us). Reship fully once; the
+                # bridge validates deltas before mutating mirrors, so the
+                # half-applied state is impossible (#932).
+                self._qgis_force_full = {
+                    layer.id for layer in snapshot.layers if layer.layer_type == "vector"
+                }
+                try:
+                    self._bridge.set_layer_snapshot(
+                        self._native_snapshot(snapshot), snapshot.project_crs
+                    )
+                    shipped = True
+                finally:
+                    self._qgis_force_full = set()
+        finally:
+            if shipped:
+                for layer in snapshot.layers:
+                    self._qgis_shipped_revisions[layer.id] = int(layer.data_revision)
         # A replacement can arrive while QGIS still renders an old raster source.
         # It is only safe to unlink deferred /vsimem or disk sources once the bridge
         # has no active job and has applied the replacement snapshot.
@@ -1549,8 +1599,12 @@ class QgisMapRenderBackend(MapRenderBackend):
         if not self._initialized:
             self.initialize()
         assert self._bridge is not None
-        self._native_snapshot_pending = False
-        self._set_native_snapshot(self._snapshot)
+        # #941-6: only push when a snapshot arrived before the bridge existed
+        # (set_layer_snapshot already pushes eagerly otherwise) — re-pushing
+        # every sync frame re-parsed the full payload (≈100 ms @ 100k features).
+        if self._native_snapshot_pending:
+            self._native_snapshot_pending = False
+            self._set_native_snapshot(self._snapshot)
         generation = self._next_generation()
         payload = self._bridge.render_sync(
             self._extent, self._output_size[0], self._output_size[1], self._dpi
@@ -1597,8 +1651,17 @@ def _qgis_snapshot(
     vector_feature_payloads: dict[str, tuple[int, tuple[dict[str, object], ...]]] | None = None,
     vector_feature_entries: dict[str, dict[str, tuple[object, object, dict[str, object]]]] | None = None,
     encoding_stats: object | None = None,
+    shipped_revisions: dict[str, int] | None = None,
+    force_full_ids: set[str] | None = None,
 ) -> list[dict[str, object]]:
-    """Encode host snapshots into the small native bridge payload."""
+    """Encode host snapshots into the small native bridge payload.
+
+    ``shipped_revisions`` enables the #932 incremental channel: when a layer's
+    revision moved but the bridge mirror provably holds the previous revision,
+    the payload ships only the changed/removed features (``delta``) and omits
+    the full feature list — the 100k-feature mirror then updates in place
+    instead of re-parsing every WKT on each single-feature edit.
+    """
     layers: list[dict[str, object]] = []
     for layer in snapshot.layers:
         if layer.layer_type == "scalar_grid":
@@ -1645,12 +1708,14 @@ def _qgis_snapshot(
             if vector_feature_payloads is not None
             else None
         )
+        delta_payload = None
         if cached is not None and cached[0] == int(layer.data_revision):
             features = cached[1]
             if encoding_stats is not None:
                 encoding_stats._feature_encoding_cache_hits += 1
         else:
             encoded_features: list[dict[str, object]] = []
+            changed_encoded: list[dict[str, object]] = []
             previous_entries = (
                 vector_feature_entries.get(layer.id, {})
                 if vector_feature_entries is not None
@@ -1681,11 +1746,37 @@ def _qgis_snapshot(
                         "wkt": wkt,
                         "attributes": attributes,
                     }
+                    changed_encoded.append(encoded)
                     if encoding_stats is not None:
                         encoding_stats._feature_payload_reencode_misses += 1
                 encoded_features.append(encoded)
                 next_entries[feature_id] = (geometry, properties, encoded)
             features = tuple(encoded_features)
+            removed_ids = [
+                fid for fid in previous_entries if fid not in next_entries
+            ]
+            # #932: single-feature edits must not re-ship (and the bridge must
+            # not re-parse) the whole layer. Ship a delta when the bridge
+            # mirror provably holds the previous revision and the delta is
+            # smaller than a full payload.
+            delta_payload = None
+            if (
+                shipped_revisions is not None
+                and cached is not None
+                and layer.id not in (force_full_ids or ())
+                and shipped_revisions.get(layer.id) == int(cached[0])
+                and (changed_encoded or removed_ids)
+                and len(changed_encoded) + len(removed_ids) < len(features)
+            ):
+                delta_payload = {
+                    "base_revision": int(cached[0]),
+                    "changed_features": list(changed_encoded),
+                    "removed_ids": removed_ids,
+                }
+                if encoding_stats is not None:
+                    encoding_stats._feature_delta_ships = (
+                        getattr(encoding_stats, "_feature_delta_ships", 0) + 1
+                    )
             if vector_feature_payloads is not None:
                 vector_feature_payloads[layer.id] = (int(layer.data_revision), features)
             if vector_feature_entries is not None:
@@ -1707,8 +1798,20 @@ def _qgis_snapshot(
                 "style_revision": int(layer.style_revision),
                 "visible": bool(layer.visible),
                 "opacity": float(layer.opacity),
+                # #929: scale visibility must reach the QGIS wire exactly as
+                # the fallback path sees it (VectorStyle.scale_range semantics:
+                # 1:denominator bounds; None = always visible).
+                "scale_range": (
+                    [float(layer.scale_range[0]), float(layer.scale_range[1])]
+                    if layer.scale_range is not None
+                    else None
+                ),
                 "style": style,
-                "features": features,
+                # #932: a delta ship replaces the feature list — the bridge
+                # updates the existing mirror in place (host ids ride
+                # __pwb_id); a full ship re-parses every WKT.
+                "features": () if delta_payload is not None else features,
+                **({"delta": delta_payload} if delta_payload is not None else {}),
             }
         )
     return layers
@@ -1787,8 +1890,44 @@ def _geometry_to_wkt(geometry: object) -> str:
     return ""
 
 
+_QGIS_PROBE: dict[str, str] = {}
+
+
+def qgis_backend_probe() -> tuple[bool, str]:
+    """One-shot guarded QGIS runtime probe (audit #925).
+
+    Importability of the bridge is NOT usability: ``initialize()`` fails on a
+    broken QGIS prefix or an ABI-skewed binary (system Qt vs PySide6 minor
+    mismatch), which previously propagated out of ``UnifiedMapCanvas.__init__``
+    and killed app startup / project switching. The probe result is cached for
+    the process; the returned reason is actionable and empty on success.
+    """
+    if "ok" in _QGIS_PROBE:
+        return _QGIS_PROBE["ok"] == "1", _QGIS_PROBE.get("reason", "")
+    backend = QgisMapRenderBackend()
+    if not backend.is_available:
+        _QGIS_PROBE["ok"] = "0"
+        _QGIS_PROBE["reason"] = "qgis_render_bridge 未构建（可选组件）"
+        return False, _QGIS_PROBE["reason"]
+    try:
+        backend.initialize()
+    except Exception as exc:  # noqa: BLE001 — any init failure must degrade
+        _QGIS_PROBE["ok"] = "0"
+        _QGIS_PROBE["reason"] = f"QGIS 运行时初始化失败：{type(exc).__name__}: {exc}"
+        logger.warning("QGIS backend unusable, degrading to fallback: %s", _QGIS_PROBE["reason"])
+        return False, _QGIS_PROBE["reason"]
+    finally:
+        try:
+            backend.shutdown()
+        except Exception:  # noqa: BLE001 — teardown of a half-built runtime
+            pass
+    _QGIS_PROBE["ok"] = "1"
+    _QGIS_PROBE["reason"] = ""
+    return True, ""
+
+
 def create_map_render_backend(*, prefer_qgis: bool = True) -> MapRenderBackend:
-    """Select QGIS only when its optional native bridge is genuinely available.
+    """Select QGIS only when its optional native bridge is genuinely usable.
 
     The fallback is threaded by default: the UI canvas must never block on the
     first preparation of a large vector layer. Tests construct it directly and
@@ -1796,5 +1935,9 @@ def create_map_render_backend(*, prefer_qgis: bool = True) -> MapRenderBackend:
     """
     qgis = QgisMapRenderBackend()
     if prefer_qgis and qgis.is_available:
-        return qgis
+        usable, reason = qgis_backend_probe()
+        if usable:
+            return qgis
+        logger.warning("QGIS 不可用，已降级为回退渲染器：%s", reason)
+        return FallbackMapRenderBackend(threaded=True)
     return FallbackMapRenderBackend(threaded=True)

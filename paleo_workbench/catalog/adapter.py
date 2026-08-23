@@ -404,11 +404,15 @@ class CoreCatalogAdapter:
         reuse_legacy_id: str | None = None,
     ) -> DataVersionRef:
         service = self._service
-        # Hold the catalog lock across append + register (#517): a concurrent
-        # locked _save between the unlocked _add_asset and register_version
-        # persisted a zero-version asset — this path backs every pipeline/
-        # prediction/export/qc output registration. The lock is reentrant, so
-        # the locked register_version/add_tag calls below nest safely.
+        # #930 (re-introduction of #617 via the #517 fix): the previous
+        # `with service._lock:` wrapper made register_version's careful
+        # lock-free payload copy run UNDER the reentrant outer lock — 120 MiB
+        # registrations froze every concurrent catalog call for the whole
+        # copy+SHA+fsync window. Structure now mirrors
+        # register_result_asset: short locked resolution phase, copy/hash with
+        # NO lock, short locked commit phase. The #517 zero-version invariant
+        # is preserved because the new asset is only added to the document in
+        # the same locked save that commits its version.
         with service._lock:
             run = service.get_run(run_id)
             asset = None
@@ -421,8 +425,8 @@ class CoreCatalogAdapter:
                         asset = None
             if asset is None:
                 asset = self._domain_task_asset(run)
-            created = False
-            if asset is None:
+            created = asset is None
+            if created:
                 asset = service._new_asset(name, kind or None, format or None, None)
                 if (
                     reuse_legacy_id
@@ -432,23 +436,52 @@ class CoreCatalogAdapter:
                     # same reuse key appends a version instead of spawning an
                     # asset.
                     asset.legacy_resource_id = reuse_legacy_id
+            parents = list(run.input_version_ids)
+
+        if not created:
+            # Existing asset: register_version already keeps copy+hash outside
+            # its own locks and re-validates existence atomically.
+            version = service.register_version(
+                asset.id,
+                path,
+                stage,
+                parent_version_ids=parents,
+                run_id=run.id,
+                known_sha256=checksum,
+            )
+        else:
+            # New asset: build the version with no lock held, then commit
+            # asset+version+run linkage in one locked save (the
+            # register_result_asset pattern — no zero-version window).
+            version, payload = service._build_version(
+                asset,
+                Path(path),
+                stage,
+                version_id=None,
+                parent_version_ids=parents,
+                run_id=run.id,
+                metadata=None,
+                move=False,
+                known_sha256=checksum,
+            )
+            with service._lock:
+                run_output_added = False
                 service._add_asset(asset)
-                created = True
-            try:
-                # register_version links the run's output in the same atomic
-                # save.
-                version = service.register_version(
-                    asset.id,
-                    path,
-                    stage,
-                    parent_version_ids=list(run.input_version_ids),
-                    run_id=run.id,
-                    known_sha256=checksum,
-                )
-            except Exception:
-                if created and asset in service.document.assets:
-                    service._remove_asset(asset)
-                raise
+                try:
+                    service._add_version(version)
+                    asset.current_version_id = version.id
+                    if version.id not in run.output_version_ids:
+                        run.output_version_ids.append(version.id)
+                        run_output_added = True
+                    service._save()
+                except Exception:
+                    if run_output_added:
+                        run.output_version_ids.remove(version.id)
+                    if asset in service.document.assets:
+                        service._remove_asset(asset)
+                    service._rollback(payload=payload)
+                    raise
+        with service._lock:
             for tag in tags or []:
                 if tag:
                     service.add_tag(tag, version_id=version.id)

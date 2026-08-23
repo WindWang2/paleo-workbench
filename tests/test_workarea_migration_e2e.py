@@ -217,9 +217,6 @@ class TestImportDefaultsManagedRaw:
             service.close()
 
 
-class TestRawImmutabilityPreserved:
-    """§26: domain entities never bypass catalog lifecycle authority."""
-
-    @pytest.mark.skipif(True, reason="covered by existing catalog suite; smoke check here")
-    def test_placeholder(self):
-        pass
+# #940-3: the former skipif(True) placeholder ("covered elsewhere") is
+# removed — a permanent skip asserts nothing and hides the gap. The catalog
+# suite owns the behavior; nothing needs to live here.

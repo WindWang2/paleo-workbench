@@ -120,8 +120,10 @@ def test_boundary_falls_back_to_bbox_for_collinear_points():
 def test_build_directions_from_constraint_layers():
     dirs = cia._build_directions([_direction_layer()], target_horizon=None)
     assert len(dirs) == 1
-    # ratio derived from semi_major/semi_minor (2.0 / 0.5 = 4.0).
-    assert dirs[0].ratio == pytest.approx(4.0)
+    # #927: weak ratios (2.0/0.5 = 4.0) are floored at 16 exactly like
+    # upstream fb513c2 ("weak shapefile ratios must still produce a visible
+    # full-line stretch"); strong ratios pass through untouched.
+    assert dirs[0].ratio == pytest.approx(16.0)
     assert len(dirs[0].points) == 2
 
 

@@ -24,6 +24,22 @@ _PROJECT_SUFFIX = ".paleo.json"
 _PROJECT_FILTER = "Project (*.paleo.json)"
 
 
+def _default_project_start_dir(window) -> str:
+    """打开/保存工程对话框的起始目录。
+
+    优先当前工程所在目录；否则定位工作区布局下的 ``data/project_area``
+    （仓库 ``main/`` 与 ``data/`` 同级）；都没有时回退用户主目录。
+    """
+    project_path = getattr(window, "project_path", None)
+    if project_path:
+        return str(Path(project_path).parent)
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "data" / "project_area"
+        if candidate.is_dir():
+            return str(candidate)
+    return str(Path.home())
+
+
 class _DomainMigrationBridge(QObject):
     """Marshals background domain-migration staging onto the GUI thread.
 
@@ -644,14 +660,51 @@ class ProjectController:
         )
         return reply == QMessageBox.StandardButton.Yes
 
+    def create_project_from_document(self, doc, intermediate_dir) -> bool:
+        """向导产出文档 → 落盘 <intermediate_dir>/<工程名>.paleo.json → 成为当前工程。"""
+        if not self._end_current_session():
+            self._restore_current_shell_after_failed_stop()
+            self.window._show_project_error("切换工程失败", "当前工程仍有未停止的后台任务。")
+            return False
+        target = Path(intermediate_dir) / f"{doc.meta.name}{_PROJECT_SUFFIX}"
+        # Normalize suffix without double-appending
+        target = self._normalize_project_path(target)
+        if target.exists():
+            self.window._show_project_error("新建工程失败", f"目标已存在：\n{target}")
+            return False
+        try:
+            ProjectManager(target).save(doc)
+        except Exception as e:
+            self.window._show_project_error("新建工程失败", str(e))
+            return False
+        self.window.project = doc
+        self.window.project_path = target
+        catalog_error = None
+        try:
+            catalog_error = self._open_catalog(target, doc)
+        except Exception as e:
+            catalog_error = f"{e.__class__.__name__}: {e}"
+        if catalog_error is not None:
+            self.window._show_project_error(
+                "目录元数据不可用",
+                "工程已创建，但数据目录元数据不可用（分类 / 标签 / 溯源功能受限）。\n"
+                f"{target}\n{catalog_error}",
+            )
+        refresh = getattr(self.window, "_refresh_shell", None)
+        if callable(refresh):
+            refresh(defer_nonvisible_bindings=True)
+        try:
+            self._schedule_catalog_maintenance(target, doc)
+        except Exception:
+            pass
+        return True
+
     def _on_new_project(self) -> None:
-        self.window._confirm_title = "新建工程"
-        self.window._confirm_message = (
-            "将创建新工程并替换当前内容（未保存更改会丢失）。是否继续？"
-        )
-        if not self.window._confirm_replace_project():
-            return
-        self.new_project()
+        from paleo_workbench.ui.pages.new_project_wizard import NewProjectWizardDialog
+
+        dlg = NewProjectWizardDialog(self.window)
+        if dlg.exec() and dlg.result_document is not None:
+            self.create_project_from_document(dlg.result_document, dlg.intermediate_dir)
 
     def _on_open_project(self) -> None:
         path = self.window._choose_open_project()
@@ -681,23 +734,14 @@ class ProjectController:
         self.window._show_properties()
 
     def _choose_open_project(self) -> Path | None:
-        start_dir = (
-            str(self.window.project_path.parent)
-            if self.window.project_path
-            else str(Path.home())
-        )
         path, _ = QFileDialog.getOpenFileName(
-            self.window, "打开工程", start_dir, _PROJECT_FILTER
+            self.window, "打开工程", _default_project_start_dir(self.window), _PROJECT_FILTER
         )
         return Path(path) if path else None
 
     def _choose_save_project(self) -> Path | None:
         suggested = f"{self.window.project.meta.name}{_PROJECT_SUFFIX}"
-        start_dir = (
-            str(self.window.project_path.parent)
-            if self.window.project_path
-            else str(Path.home())
-        )
+        start_dir = _default_project_start_dir(self.window)
         path, _ = QFileDialog.getSaveFileName(
             self.window, "保存工程", str(Path(start_dir) / suggested), _PROJECT_FILTER
         )

@@ -128,6 +128,14 @@ def test_tag_mirror_failure_does_not_break_ui(qtbot, tmp_path, catalog):
 # --- derived copy via Core ---------------------------------------------------
 
 
+def _wait_catalog_copy(qtbot, page, needle: str, timeout: int = 15000) -> None:
+    """Wait for the off-thread catalog payload action (#931) to land."""
+    qtbot.waitUntil(
+        lambda: needle in page.data_toolbar.operation_status_label.text(),
+        timeout=timeout,
+    )
+
+
 def test_derived_copy_goes_through_core(qtbot, tmp_path, catalog):
     page = _make_page(qtbot)
     resource = _make_managed_resource(page, tmp_path)
@@ -136,6 +144,7 @@ def test_derived_copy_goes_through_core(qtbot, tmp_path, catalog):
     raw_sha_before = raw_version.sha256
 
     page._create_derived_copy(resource)
+    _wait_catalog_copy(qtbot, page, "建立派生副本")
 
     # RAW version untouched (immutable).
     assert catalog.get_version(raw_version.id).sha256 == raw_sha_before
@@ -181,6 +190,7 @@ def test_derived_copy_without_catalog_fails_visibly_no_raw_alias(qtbot, tmp_path
     resource = _make_managed_resource(page, tmp_path)
 
     page._create_derived_copy(resource)
+    _wait_catalog_copy(qtbot, page, "需要活动数据目录")
 
     # No phantom derived companion is appended, and nothing aliases the RAW path.
     assert len(page.project.resources) == 1
@@ -274,6 +284,7 @@ def test_materialize_external_via_service(qtbot, tmp_path, catalog):
     assert external_version.managed is False
 
     page._materialize_asset(resource)
+    _wait_catalog_copy(qtbot, page, "已纳管至项目")
 
     # Catalog: new managed RAW snapshot with lineage back to the external link.
     asset = catalog.get_asset(resource.id)
@@ -297,6 +308,7 @@ def test_materialize_without_catalog_reports_unavailable(qtbot, tmp_path):
     resource = _make_external_resource(page, tmp_path)
 
     page._materialize_asset(resource)
+    _wait_catalog_copy(qtbot, page, "未连接数据目录")
 
     assert resource.external is True  # unchanged
     assert "未连接数据目录" in page.data_toolbar.operation_status_label.text()
@@ -351,6 +363,7 @@ def test_inspector_enriched_from_catalog(qtbot, tmp_path, catalog):
     catalog.migrate_legacy_resources(page.project.resources)
     catalog.add_tag("重点", asset_id=resource.id)
     page._create_derived_copy(resource)  # adds a DERIVED child + run
+    _wait_catalog_copy(qtbot, page, "建立派生副本")
 
     page._update_inspector(resource)
 
@@ -375,6 +388,7 @@ def test_inspector_enrichment_for_derived_asset_shows_parents_and_run(
     resource = _make_managed_resource(page, tmp_path)
     catalog.migrate_legacy_resources(page.project.resources)
     page._create_derived_copy(resource)
+    _wait_catalog_copy(qtbot, page, "建立派生副本")
     companion = page.project.resources[1]
 
     derived_version = catalog.get_version(companion.parsed_summary["catalog_version_id"])
