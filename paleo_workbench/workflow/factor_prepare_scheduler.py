@@ -526,8 +526,10 @@ def run_factor_prepare_schedule(
                         # One failing group must not discard the OTHER groups'
                         # completed results (audit #848): record the group's
                         # tasks as failed and keep collecting. (The serial
-                        # path already had per-task isolation.)
-                        failed_n += 1
+                        # path already had per-task isolation.) #939-7 parallel
+                        # count must be per-task, not per-group.
+                        group_size = len(group_items_by_key.get(group_key, ()))
+                        failed_n += max(1, group_size)
                         logging.getLogger(__name__).warning(
                             "factor prepare group %r failed: %s",
                             str(group_key),
