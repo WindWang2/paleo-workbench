@@ -16,8 +16,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.12 = package baseline; 3.13 = host/dev drift coverage (T-ENV-01)
-        python-version: ["3.12", "3.13"]
+        # Unified on CPython 3.12 (single supported runtime).
+        python-version: ["3.12"]
 
     steps:
       - name: Checkout
@@ -213,7 +213,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.12"]
 
     steps:
       - name: Checkout
@@ -277,7 +277,7 @@ jobs:
             well-log-engine/apps/wellplot-desktop/tests
 
   # Explicit product merge gate. See docs/ci-merge-policy.md.
-  # Requires the FULL monorepo Tests matrix (3.12 + 3.13) plus the Well Log
+  # Requires the FULL monorepo Tests matrix (CPython 3.12) plus the Well Log
   # Workstation host matrix. Cross-workflow: WellLogEngine C++ must also be
   # green (separate workflow well-log-engine.yml — required, not edited here).
   merge-gate:
@@ -293,7 +293,7 @@ jobs:
     steps:
       - name: Confirm product gates
         run: |
-          echo "Full monorepo Tests (Python 3.12 + 3.13) matrix is green."
+          echo "Full monorepo Tests (CPython 3.12) matrix is green."
           echo "Well Log Workstation (host) matrix is green."
           echo "Also require workflow 'WellLogEngine C++' on the same SHA."
           echo "Policy: docs/ci-merge-policy.md."
