@@ -5,6 +5,7 @@
 
 #include <QDomDocument>
 #include <QString>
+#include <QStringList>
 #include <QVariantMap>
 
 #include <qgscategorizedsymbolrenderer.h>
@@ -42,21 +43,21 @@ Qgis::GeometryType geometry_type_from_name(const std::string& name) {
 /// Audit #922: legacy VectorStyle sizes are logical PIXELS at 96 dpi
 /// (map_styles.py), while createSimple properties default to MILLIMETERS — so
 /// every size carries an explicit ``*_unit = Pixel`` property, otherwise QGIS
-/// inflates it by 96/25.4 ≈ 3.78×. *line_pattern* maps the host LinePattern
-/// enum onto the simple-line ``line_style`` vocabulary so dashed fault lines
-/// stay dashed instead of silently solid.
+/// inflates it by 96/25.4 ≈ 3.78×. *line_pattern* is applied as a custom dash
+/// vector so both backends draw identical n × width pixel strokes: QGIS
+/// built-in "dash"/"dot" use QGIS-internal lengths, and "fault" (the default
+/// fault-trace pattern) has no built-in equivalent at all — it rendered solid.
 std::unique_ptr<QgsSymbol> legacy_symbol_for(
     Qgis::GeometryType geometry_type, const QString& fill, const QString& stroke,
     double stroke_width, double marker_size, const std::string& line_pattern = "solid"
 ) {
     QVariantMap properties;
     const QString width = QString::number(std::max(0.0, stroke_width), 'g', 12);
-    const QString line_style = QString::fromStdString(
-        line_pattern == "dash" ? "dash"
-        : line_pattern == "dot" ? "dot"
-        : line_pattern == "dash_dot" ? "dash dot"
-        : "solid"
-    );
+    const char* dash_units = nullptr;
+    if (line_pattern == "dash") dash_units = "4;2";
+    else if (line_pattern == "dot") dash_units = "1;2";
+    else if (line_pattern == "dash_dot") dash_units = "4;2;1;2";
+    else if (line_pattern == "fault") dash_units = "6;2";
     switch (geometry_type) {
         case Qgis::GeometryType::Polygon:
             properties.insert(QStringLiteral("color"), fill);
@@ -70,9 +71,20 @@ std::unique_ptr<QgsSymbol> legacy_symbol_for(
             properties.insert(QStringLiteral("line_width"), width);
             properties.insert(QStringLiteral("width"), width);
             properties.insert(QStringLiteral("line_width_unit"), QStringLiteral("Pixel"));
-            if (line_style != QLatin1String("solid")) {
-                properties.insert(QStringLiteral("line_style"), line_style);
-                properties.insert(QStringLiteral("style"), line_style);
+            if (dash_units != nullptr) {
+                // The fallback QPen dashes are n × pen-width pixels; QGIS
+                // rescales the customdash vector by dividing by the pen
+                // width (qgslinesymbollayer.cpp), so pre-multiply here. The
+                // fallback clamps its pen to >= 0.5 px — mirror that floor
+                // so thin lines keep the same dash rhythm on both paths.
+                const double dash_width = std::max(0.5, stroke_width);
+                QStringList lengths;
+                for (const QString& unit : QString::fromLatin1(dash_units).split(QLatin1Char(';'))) {
+                    lengths << QString::number(unit.toDouble() * dash_width, 'g', 12);
+                }
+                properties.insert(QStringLiteral("use_custom_dash"), QStringLiteral("1"));
+                properties.insert(QStringLiteral("customdash"), lengths.join(QLatin1Char(';')));
+                properties.insert(QStringLiteral("customdash_unit"), QStringLiteral("Pixel"));
             }
             return QgsLineSymbol::createSimple(properties);
         case Qgis::GeometryType::Point:

@@ -26,6 +26,7 @@ Public surface (host contract):
 from __future__ import annotations
 
 import math
+import logging
 import sys
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -413,6 +414,12 @@ def _cross_validated_r_squared(
                 cancellation_token=cancellation_token,
             )
         except Exception:
+            # A fold engine failure must not silently masquerade as "too few
+            # samples" — log it so the hidden metric is explainable (#921).
+            logging.getLogger(__name__).warning(
+                "cross-validated R² unavailable: fold interpolation failed",
+                exc_info=True,
+            )
             return None
         preds = [
             _bilinear_sample_grid(
@@ -586,6 +593,9 @@ def run_constrained_idw(
             Boundary(exterior=tuple((float(x), float(y)) for x, y in ring))
             for ring in user_rings
         ]
+        # Report the ring actually handed to the engine, not the synthesized
+        # hull — consumers show this key as the constrained extent.
+        boundary_xy = [(float(x), float(y)) for x, y in user_rings[0]]
 
     resolution = int(round(grid_n))
     resolution = max(_MIN_GRID_RESOLUTION, min(_MAX_GRID_RESOLUTION, resolution))

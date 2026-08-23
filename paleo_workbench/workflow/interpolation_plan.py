@@ -486,7 +486,10 @@ def _idw_multi_chunked(
             # the single-task plan kernel measured 31-53% slower without it.
             z = z_stack[0]
             safe_totals = np.where(populated, totals, 1.0)
-            out[0, start:stop] = (weights @ z) / safe_totals
+            # Fault-blocked cells (totals == 0) must stay NaN like the
+            # multi-factor path; writing (0 @ z) / 1.0 would inject a bogus
+            # 0.0 surface into min/max and contour levels.
+            np.copyto(out[0, start:stop], (weights @ z) / safe_totals, where=populated)
             continue
         # weights[populated]: (P, N); z_stack: (F, N) → (F, P)
         if np.any(populated):

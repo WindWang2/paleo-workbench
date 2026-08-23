@@ -190,7 +190,10 @@ def test_save_persists_uncommitted_grid_instead_of_rebranding(tmp_path):
     assert new_mean != pytest.approx(committed_mean)
 
     changed = persist_factor_grid_artifacts(project, project_path)
-    assert task in changed or not changed  # rewrite path exercised either way
+    # The session grid differs from the committed v1 artifact, so persist must
+    # actually rewrite this task (the old `or not changed` form asserted
+    # nothing).
+    assert task in changed
     served_after_save = factor_grid_result_for_task(task)
     assert float(np.nanmean(served_after_save.grid_z)) == pytest.approx(new_mean)
 
@@ -590,6 +593,22 @@ def test_legacy_px_sizes_dash_and_scale_range_on_qgis_path(qtbot):
         gap_runs = [len(g) for g in gaps if len(g) > 0]
         assert gap_runs and max(gap_runs) >= 3, "dash pattern produced no gaps"
 
+        # "fault" (the default fault-trace pattern) must dash too — it has no
+        # QGIS built-in equivalent and previously fell through to solid.
+        arr = _render_layer_pixels(
+            backend,
+            {"fill": "transparent", "stroke": "#00a0a0", "stroke_width": 4.0,
+             "line_pattern": "fault"},
+        )
+        cyan = (arr[..., 1] > 120) & (arr[..., 2] > 120) & (arr[..., 3] > 200)
+        colmask = cyan.any(axis=0)
+        idx = np.where(colmask)[0]
+        assert idx.size > 0, "fault pattern produced no line at all"
+        segment = colmask[idx[0]: idx[-1] + 1]
+        gaps = np.split(np.where(~segment)[0], np.where(~segment)[0])
+        gap_runs = [len(g) for g in gaps if len(g) > 0]
+        assert gap_runs and max(gap_runs) >= 3, "fault pattern rendered solid"
+
         # scale_range max 1:500 must hide the layer at 1:1000 (pre-fix: drawn).
         arr = _render_layer_pixels(
             backend,
@@ -798,6 +817,47 @@ def test_single_factor_plan_kernel_matches_multi_path():
     assert np.allclose(single[finite], multi[finite], rtol=0, atol=1e-10)
 
 
+def test_single_factor_plan_kernel_with_faults_keeps_nan_parity():
+    """Fault-blocked cells must stay NaN on the single-factor fast path.
+
+    The pre-fix fast path wrote ``(0 @ z) / 1.0 == 0.0`` into cells whose
+    weight row the fault mask had fully zeroed, shifting plan min/max and
+    contour levels with a bogus 0 surface; the multi path left NaN.
+    """
+    from paleo_workbench.workflow.interpolation_plan import (
+        apply_idw_plan,
+        apply_idw_plan_multi,
+        build_idw_plan,
+        extract_values_aligned,
+    )
+
+    rng = np.random.default_rng(7)
+    n = 30
+    xs = rng.uniform(0, 600, n)
+    ys = rng.uniform(0, 1000, n)
+    vals = rng.uniform(10, 60, n)
+    samples = [
+        {"x": float(x), "y": float(y), "value": float(v)}
+        for x, y, v in zip(xs, ys, vals)
+    ]
+    # Vertical wall at x=610, just right of the sample bbox (max 600): the
+    # 5% grid padding reaches ~630, so the last columns sit beyond the wall
+    # with EVERY well on the far side — their weight rows are fully zeroed.
+    fault = [(610.0, -100.0), (610.0, 1100.0)]
+    plan = build_idw_plan(samples, grid_n=64, power=2.0, fault_polylines=[fault])
+    values = extract_values_aligned(samples, plan)
+    single = apply_idw_plan(plan, values)["grid_z"]
+    multi = apply_idw_plan_multi(plan, np.stack([values, values], axis=0))[0][
+        "grid_z"
+    ]
+    assert np.array_equal(np.isnan(single), np.isnan(multi))
+    assert np.isnan(single).any(), "test setup must produce blocked cells"
+    finite = np.isfinite(single)
+    assert np.allclose(single[finite], multi[finite], rtol=0, atol=1e-10)
+    # The regression signature: bogus 0.0 among the blocked cells.
+    assert np.nanmin(single) > 1.0
+
+
 # --------------------------------------------------------------------- #926
 
 
@@ -881,6 +941,13 @@ def test_user_boundary_ring_constrains_constrained_idw_domain():
                 outside += 1
     assert outside == 0, f"{outside} finite cells outside the user boundary ring"
     assert int(finite.sum()) > 0
+    # The reported boundary must be the ring actually used, not the
+    # synthesized sample hull (extent displays read this key).
+    reported = result["boundary"]
+    rx = [p[0] for p in reported]
+    ry = [p[1] for p in reported]
+    assert max(rx) <= 75.0 + 1e-6 and min(rx) >= 25.0 - 1e-6
+    assert max(ry) <= 75.0 + 1e-6 and min(ry) >= 25.0 - 1e-6
 
 
 def test_contour_levels_are_nice_steps():
