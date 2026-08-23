@@ -666,6 +666,45 @@ def build_qss(density: str = "comfortable") -> str:
         padding-left: 8px;
         background: transparent;
     }}
+    QFrame#MapDockRail {{
+        background: {BG_RAIL_GRADIENT};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_CARD}px;
+    }}
+    QFrame#MapDockArea {{
+        background: transparent;
+        border: none;
+    }}
+    QToolButton[dockRailItem="true"] {{
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: {RADIUS_BUTTON}px;
+    }}
+    QToolButton[dockRailItem="true"]:hover {{
+        background: {BG_SEARCH};
+        border: 1px solid {BORDER_LIGHT};
+    }}
+    QToolButton[dockRailItem="true"]:checked {{
+        background: {BG_NAV_ACTIVE};
+        border: 1px solid {PRIMARY};
+    }}
+    QToolButton[dockRailItem="true"]:focus {{
+        border: 1px solid {FOCUS_RING};
+    }}
+    QToolButton#MapPanelsMenuButton {{
+        background: {BG_SIDEBAR};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_BUTTON}px;
+        padding: 4px;
+    }}
+    QToolButton#MapPanelsMenuButton:hover {{
+        background: {BG_SEARCH};
+        border-color: {BORDER_STRONG};
+    }}
+    QToolButton#MapPanelsMenuButton::menu-indicator {{
+        image: none;
+        width: 0px;
+    }}
     QTreeWidget#MapLayerTreeWidget {{
         background: {BG_SIDEBAR};
         border: 1px solid {BORDER};
