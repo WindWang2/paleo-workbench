@@ -148,8 +148,16 @@ jobs:
         # prints, and its double-backslash pattern could never match).
         run: |
           set -o pipefail
-          QT_QPA_PLATFORM=offscreen python -m pytest -v --tb=short --timeout=120 -m qgis tests/ 2>&1 | tee /tmp/qgis-run.txt
-          collected="$(QT_QPA_PLATFORM=offscreen python -m pytest --collect-only -q -m qgis tests/ 2>/dev/null | grep -oE '[0-9]+ tests collected' | grep -oE '^[0-9]+')"
+          # Collect ONLY the files that carry the qgis marker: a bare
+          # `tests/` walk collection-errors on modules importing the geoviz
+          # graph, which this focused leg deliberately does not install.
+          # The file list is derived from the marker itself (rename-safe:
+          # a renamed file drops out of the list and the >=9 count guard
+          # below fails loudly).
+          mapfile -t QGIS_FILES < <(grep -rl "pytest.mark.qgis" tests --include='*.py' | sort)
+          echo "qgis marker files: ${QGIS_FILES[*]}"
+          QT_QPA_PLATFORM=offscreen python -m pytest -v --tb=short --timeout=120 -m qgis "${QGIS_FILES[@]}" 2>&1 | tee /tmp/qgis-run.txt
+          collected="$(QT_QPA_PLATFORM=offscreen python -m pytest --collect-only -q -m qgis "${QGIS_FILES[@]}" 2>/dev/null | grep -oE '[0-9]+ tests collected' | grep -oE '^[0-9]+')"
           test -n "${collected}" && test "${collected}" -ge 9
           python - <<'EOF'
           import re
