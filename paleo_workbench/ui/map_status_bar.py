@@ -22,9 +22,17 @@ class MapStatusBar(QFrame):
         self.render = QLabel("Renderer: —", self)
         self.selection = QLabel("Selection: 0", self)
         self.edit = QLabel("Read-only", self)
-        for label in (self.coordinate, self.scale, self.crs, self.render, self.selection, self.edit):
-            label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; border: none; background: transparent;")
+        for label in (self.coordinate, self.scale, self.crs, self.render, self.selection):
+            label.setStyleSheet(
+                f"color: {tokens.TEXT_SECONDARY}; border: none; background: transparent; padding: 0 2px;"
+            )
             layout.addWidget(label)
+        # Read-only/Editing reads as a compact pill at the row end.
+        self.edit.setStyleSheet(
+            f"color: {tokens.TEXT_SECONDARY}; background: {tokens.BG_SEARCH};"
+            f" border: 1px solid {tokens.BORDER_LIGHT}; border-radius: 4px; padding: 1px 8px;"
+        )
+        layout.addWidget(self.edit)
         layout.addStretch(1)
 
     def update_state(
@@ -46,3 +54,9 @@ class MapStatusBar(QFrame):
         self.render.setText(f"Renderer: {renderer or '—'}")
         self.selection.setText(f"Selection: {int(selection_count)}")
         self.edit.setText("Editing" if editing else "Read-only")
+        self.edit.setStyleSheet(
+            f"color: {'#ffffff' if editing else tokens.TEXT_SECONDARY};"
+            f" background: {tokens.PRIMARY if editing else tokens.BG_SEARCH};"
+            f" border: 1px solid {tokens.PRIMARY if editing else tokens.BORDER_LIGHT};"
+            " border-radius: 4px; padding: 1px 8px;"
+        )

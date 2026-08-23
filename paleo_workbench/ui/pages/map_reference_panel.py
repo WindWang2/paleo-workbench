@@ -26,6 +26,11 @@ class MapReferencePanel(QFrame):
         title.setObjectName("MapDockTitle")
         layout.addWidget(title)
         self.status_label = QLabel("暂无参考图")
+        self.status_label.setStyleSheet(
+            f"color: {tokens.TEXT_SECONDARY}; background: {tokens.BG_SEARCH};"
+            f" border: 1px solid {tokens.BORDER_LIGHT}; border-radius: 4px; padding: 3px 8px;"
+        )
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.status_label)
         self.layer_list = QListWidget()
         self.layer_list.itemChanged.connect(self._on_item_changed)

@@ -333,20 +333,25 @@ def build_qss(density: str = "comfortable") -> str:
     }}
     QToolButton {{
         background-color: transparent;
-        border: none;
-        border-radius: 4px;
+        border: 1px solid transparent;
+        border-radius: 5px;
         padding: 3px;
     }}
     QToolButton:hover {{
         background-color: {BG_SEARCH};
         border: 1px solid {BORDER_LIGHT};
     }}
-    QToolButton:pressed, QToolButton:checked {{
+    QToolButton:pressed {{
         background-color: {BG_NAV_ACTIVE};
         border: 1px solid {BORDER_STRONG};
     }}
+    QToolButton:checked {{
+        background-color: {BG_NAV_ACTIVE};
+        border: 1px solid {PRIMARY};
+    }}
     QToolButton:disabled {{
         background-color: transparent;
+        border: 1px solid transparent;
     }}
     QTableWidget, QTreeView, QListView, QTableView {{
         background-color: {BG_SIDEBAR};
@@ -624,6 +629,13 @@ def build_qss(density: str = "comfortable") -> str:
         min-height: {STATUS_BAR_HEIGHT}px; max-height: {STATUS_BAR_HEIGHT}px;
         font-size: {FONT_SIZE_STATUS}; color: {TEXT_SECONDARY};
     }}
+    QFrame#MapStatusBar {{
+        background: {BG_SIDEBAR};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_BUTTON}px;
+        font-size: {FONT_SIZE_STATUS};
+        color: {TEXT_SECONDARY};
+    }}
     QFrame#PagePlaceholder {{ background: {BG_BODY}; }}
     QWidget#MapEditToolbar {{
         background: {BG_SIDEBAR};
@@ -650,6 +662,8 @@ def build_qss(density: str = "comfortable") -> str:
         font-size: {FONT_SIZE_TITLE};
         font-weight: {FONT_WEIGHT_TITLE};
         border: none;
+        border-left: 3px solid {PRIMARY};
+        padding-left: 8px;
         background: transparent;
     }}
     QTreeWidget#MapLayerTreeWidget {{
