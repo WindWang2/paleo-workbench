@@ -17,6 +17,7 @@ import hashlib
 import os
 import shutil
 import stat
+import sys
 import tempfile
 from pathlib import Path
 
@@ -281,8 +282,11 @@ def _relpath_for(project_path: Path, absolute: Path) -> str:
 
 def fsync_dir(directory: Path) -> None:
     """Best-effort fsync of a directory so rename metadata survives a crash."""
+    flag = getattr(os, "O_DIRECTORY", 0)
+    if sys.platform == "win32" or not flag:
+        return
     try:
-        fd = os.open(str(directory), os.O_RDONLY | os.O_DIRECTORY)
+        fd = os.open(str(directory), os.O_RDONLY | flag)
     except OSError:
         return
     try:
