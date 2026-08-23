@@ -1673,3 +1673,12 @@ def test_summary_ready_without_visualization_support_skips_prefetch(qtbot, tmp_p
         PreviewResult(mode="text", title="notes.txt", path=str(doc), text="hello")
     )
     assert requested == []
+
+
+def test_entity_query_with_single_asset_id(qtbot):
+    """井文件叶：asset_id 查询只命中该资产（含 legacy id 旁路）。"""
+    page = DataPage(project=ProjectDocument.new("Demo"))
+    qtbot.addWidget(page)
+    query = FilterQuery(node_type="entity", node_value="w1", asset_id="asset_9")
+    resolved = page._entity_query_with_ids(query)
+    assert resolved.entity_asset_ids == frozenset({"asset_9"})

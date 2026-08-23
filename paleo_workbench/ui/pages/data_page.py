@@ -292,6 +292,7 @@ class DataPage(QWidget):
         layout.addWidget(self.workspace, 1)
 
         self.navigation_tree = self.workspace.navigation_tree
+        self.navigation_tree.set_asset_label_provider(self._asset_display_name)
         self.asset_table = self.workspace.asset_table
         self.reader_panel = self.workspace.reader_panel
         self.inspector_panel = self.workspace.inspector_panel
@@ -1634,6 +1635,14 @@ class DataPage(QWidget):
         """Attach the EntityAssetLink membership set to entity queries."""
         if query.node_type not in ("entity", "entity_group"):
             return query
+        legacy_map = self._asset_legacy_map()
+        if query.node_type == "entity" and query.asset_id:
+            # 单文件叶：只命中该资产（含其 legacy ResourceItem id）
+            ids = {query.asset_id}
+            legacy = legacy_map.get(query.asset_id)
+            if legacy:
+                ids.add(legacy)
+            return replace(query, entity_asset_ids=frozenset(ids))
         links = list(getattr(self.project, "entity_asset_links", None) or [])
         if query.node_type == "entity":
             matched = [
@@ -1647,12 +1656,39 @@ class DataPage(QWidget):
                 link for link in links if link.entity_type == (query.node_value or "")
             ]
         ids = {link.asset_id for link in matched}
-        legacy_map = self._asset_legacy_map()
         for asset_id in tuple(ids):
             legacy = legacy_map.get(asset_id)
             if legacy:
                 ids.add(legacy)
         return replace(query, entity_asset_ids=frozenset(ids))
+
+    def _asset_display_name(self, asset_id: str) -> str:
+        """Label provider for the navigation tree's per-well file leaves."""
+        return self._asset_name_map().get(str(asset_id), "")
+
+    def _asset_name_map(self) -> dict[str, str]:
+        """catalog DataAsset.id / legacy ResourceItem.id → display name."""
+        service = self._catalog_service()
+        revision = getattr(service, "catalog_revision", None) if service else None
+        resource_count = len(self._resources) if self._resources is not None else 0
+        cached = getattr(self, "_asset_name_cache", None)
+        if cached is not None and cached[0] == (revision, resource_count):
+            return cached[1]
+        mapping: dict[str, str] = {}
+        if service is not None:
+            try:
+                for asset in service.list_assets(include_trashed=True):
+                    name = getattr(asset, "name", "") or ""
+                    if name:
+                        mapping[str(asset.id)] = str(name)
+            except Exception:
+                mapping = {}
+        for resource in self._resources or []:
+            name = str(getattr(resource, "name", "") or "")
+            if name:
+                mapping.setdefault(str(resource.id), name)
+        self._asset_name_cache = ((revision, resource_count), mapping)
+        return mapping
 
     def _refresh_overview_panel(self) -> None:
         overview = getattr(self.workspace, "overview_panel", None)
