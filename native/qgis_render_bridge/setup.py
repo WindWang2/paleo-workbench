@@ -145,6 +145,9 @@ def _build_vendored_qgis() -> tuple[Path, Path]:
         # Draco (mesh compression) likewise: default ON, fatal FindDraco on
         # runners without libdraco-dev.
         "-DWITH_DRACO=OFF",
+        # Qt6SerialPort is GPS-field hardware support; default ON and a hard
+        # requirement the runner image lacks.
+        "-DWITH_QTSERIALPORT=OFF",
         "-DWITH_INTERNAL_SPATIALINDEX=ON",
         "-DUSE_OPENCL=OFF",
         "-DENABLE_TESTS=OFF",
