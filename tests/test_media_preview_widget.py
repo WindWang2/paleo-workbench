@@ -98,6 +98,9 @@ def _make_widget_with_fakes(qtbot, monkeypatch):
 
     w = MediaPreviewWidget()
     qtbot.addWidget(w)
+    # MediaPreviewWidget is lazy (#951): player is created on first media use.
+    # Ensure it for tests that inspect the video surface attachment.
+    w.ensure_player()
     return w
 
 
