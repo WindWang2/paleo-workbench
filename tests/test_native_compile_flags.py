@@ -39,7 +39,8 @@ def test_win32_missing_compiler_type_defaults_to_msvc():
 
 def test_openmp_dialect_follows_compiler():
     compile_args_for, link_args_for = _load_helper()
-    assert "/openmp" in compile_args_for("msvc", platform="win32", openmp=True)
+    msvc_args = compile_args_for("msvc", platform="win32", openmp=True)
+    assert any("openmp" in flag for flag in msvc_args)
     assert "-fopenmp" in compile_args_for("unix", platform="win32", openmp=True)
     assert link_args_for("msvc", platform="win32", openmp=True) == []
     assert "-fopenmp" in link_args_for("unix", platform="linux", openmp=True)

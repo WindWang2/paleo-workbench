@@ -46,7 +46,7 @@ def test_all_workflow_files_parse_as_yaml() -> None:
     assert files, "no workflow files found; test layout is wrong"
     parsed = {}
     for path in files:
-        parsed[path.name] = yaml.safe_load(path.read_text())  # raises on invalid YAML
+        parsed[path.name] = yaml.safe_load(path.read_text(encoding="utf-8"))  # raises on invalid YAML
     for name, doc in parsed.items():
         assert isinstance(doc, dict), f"{name} must be a mapping"
         assert "jobs" in doc and doc["jobs"], f"{name} has no jobs"
@@ -81,7 +81,7 @@ def test_ci_windows_filename_guard_has_no_dead_allowlist() -> None:
     components — a comparison that is false for every possible file, i.e.
     dead code providing false confidence.
     """
-    ci = (WORKFLOW_DIR / "ci.yml").read_text()
+    ci = (WORKFLOW_DIR / "ci.yml").read_text(encoding="utf-8")
     guard = ci[ci.index("Guard against Windows-invalid submodule filenames"):]
     guard = guard[: guard.index("Setup Python")]
     assert "KNOWN" not in guard, "guard allowlist reintroduced; match real paths or drop it"
@@ -101,8 +101,8 @@ def test_slow_tests_guard_covers_all_three_skip_phrases_and_baseline_15() -> Non
     """
     import re
 
-    slow_yml = (WORKFLOW_DIR / "slow-tests.yml").read_text()
-    ci_yml = (WORKFLOW_DIR / "ci.yml").read_text()
+    slow_yml = (WORKFLOW_DIR / "slow-tests.yml").read_text(encoding="utf-8")
+    ci_yml = (WORKFLOW_DIR / "ci.yml").read_text(encoding="utf-8")
 
     # — Baseline 15 on both workflows —
     for name, text in (("slow-tests.yml", slow_yml), ("ci.yml", ci_yml)):
@@ -128,9 +128,9 @@ def test_slow_tests_guard_covers_all_three_skip_phrases_and_baseline_15() -> Non
         assert compiled.search(phrase), f"SLOW_SKIP_RE does not match {phrase!r}"
 
     # Source-of-truth: the three skip sites still emit those exact phrases.
-    smoke = (REPO_ROOT / "tests/test_geoviz_real_data_smoke.py").read_text()
-    axis = (REPO_ROOT / "tests/test_seismic_timeslice_axis_contract.py").read_text()
-    fence = (REPO_ROOT / "tests/test_well_seismic_fence_probe.py").read_text()
+    smoke = (REPO_ROOT / "tests/test_geoviz_real_data_smoke.py").read_text(encoding="utf-8")
+    axis = (REPO_ROOT / "tests/test_seismic_timeslice_axis_contract.py").read_text(encoding="utf-8")
+    fence = (REPO_ROOT / "tests/test_well_seismic_fence_probe.py").read_text(encoding="utf-8")
     assert "representative data file is absent" in smoke
     assert "demo SEGY not available" in axis
     assert '"no demo SEGY"' in fence or "'no demo SEGY'" in fence or "no demo SEGY" in fence

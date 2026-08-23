@@ -21,9 +21,9 @@ def compile_args_for(
     plat = sys.platform if platform is None else platform
     is_msvc = plat == "win32" and compiler_type != "unix"
     if is_msvc:
-        args = ["/O2", "/fp:fast"]
+        args = ["/O2", "/fp:fast", "/std:c++17", "/utf-8", "/EHsc"]
         if openmp:
-            args.append("/openmp")
+            args.append("-openmp:llvm")
         return args
     args = ["-O3", "-ffast-math", "-fno-finite-math-only"]
     if openmp:
@@ -54,7 +54,12 @@ class NativeBuildExt(build_ext):
         compile_args = compile_args_for(compiler_type, openmp=self.openmp)
         link_args = link_args_for(compiler_type, openmp=self.openmp)
         for ext in self.extensions:
-            ext.extra_compile_args = list(compile_args)
+            current_compile = list(ext.extra_compile_args or [])
+            for flag in compile_args:
+                if flag not in current_compile:
+                    current_compile.append(flag)
+            ext.extra_compile_args = current_compile
+
             extra_link = list(ext.extra_link_args or [])
             for flag in link_args:
                 if flag not in extra_link:
