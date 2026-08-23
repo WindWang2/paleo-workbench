@@ -148,7 +148,16 @@ def _paint_decorations_impl(
         painter.drawText(center + QPointF(-5 * scale, -22 * scale), "N")
         painter.restore()
     if (not elements or "图例" in elements or "legend" in elements) and decorations.get("legend_items"):
-        items = [str(item) for item in decorations["legend_items"]][:8]
+        raw_items = list(decorations["legend_items"])[:8]
+        # Accept both legacy str items and dicts with explicit color (#937-4).
+        items: list[tuple[str, str]] = []
+        for entry in raw_items:
+            if isinstance(entry, Mapping):
+                label = str(entry.get("label") or entry.get("name") or entry.get("text") or "")
+                color = str(entry.get("color") or entry.get("fill") or "#6c8ebf")
+                items.append((label or str(entry), color))
+            else:
+                items.append((str(entry), "#6c8ebf"))
         painter.save()
         legend_width = 164 * scale
         row_height = 18 * scale
@@ -165,13 +174,20 @@ def _paint_decorations_impl(
         painter.drawRect(rect)
         font = QFont(painter.font())
         font.setPixelSize(max(8, round(11 * scale)))
-        for index, item in enumerate(items):
-            painter.setBrush(QColor("#6c8ebf"))
+        for index, (label, color) in enumerate(items):
+            # Use the layer's real fill color when available (#937-4).
+            try:
+                swatch_color = QColor(color)
+                if not swatch_color.isValid():
+                    swatch_color = QColor("#6c8ebf")
+            except Exception:
+                swatch_color = QColor("#6c8ebf")
+            painter.setBrush(swatch_color)
             y = rect.top() + 14 * scale + index * row_height
             painter.drawRect(QRectF(rect.left() + 8 * scale, y - swatch, swatch, swatch))
             painter.setPen(QColor("#f8f9fa"))
             painter.setFont(font)
-            painter.drawText(QPointF(rect.left() + 23 * scale, y), item)
+            painter.drawText(QPointF(rect.left() + 23 * scale, y), label)
         painter.restore()
 
 

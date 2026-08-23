@@ -530,11 +530,11 @@ class MappingPage(QWidget):
             prefer_id=prefer_id,
         )
         self.contour_drafts_updated.emit()
-        QMessageBox.information(
-            self,
-            "等值线初稿",
-            f"已生成 {len(drafts)} 份等值线并加载到编图。",
-        )
+        # #937-6: async completion — in-page status instead of a modal
+        # (shell may be rebuilding, #897 family). Success is visible in the
+        # persistent scale/status surface, not a stacked dialog.
+        if getattr(self, "status_bar", None) is not None:
+            self.status_bar.scale.setText(f"等值线初稿：已生成 {len(drafts)} 份并加载到编图。")
 
     def _on_contour_failed(self, message: str) -> None:
         if self._contour_job.target is not self._project:
@@ -1387,7 +1387,14 @@ class MappingPage(QWidget):
                 "title": chrome.get("title") or getattr(self._active_document, "name", ""),
                 "elements": list(chrome.get("elements") or ("图例", "指北针", "比例尺", "标题栏")),
                 "legend_items": [
-                    layer.name
+                    {
+                        "label": layer.name,
+                        "color": (
+                            (self.unified_scene.vector_style(layer.id) or {}).get("fill")
+                            or (self.unified_scene.vector_style(layer.id) or {}).get("stroke")
+                            or "#6c8ebf"
+                        ),
+                    }
                     for layer in self.unified_scene.registry.layers()
                     if layer.visible and layer.type.name != "Group"
                 ],

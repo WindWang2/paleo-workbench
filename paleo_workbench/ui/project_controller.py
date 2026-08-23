@@ -91,7 +91,14 @@ class ProjectController:
         self._session_generation += 1
         thread = self._maintenance_thread
         if thread is not None and thread.is_alive() and thread is not threading.current_thread():
-            thread.join(timeout=5.0)
+            # #937-7: GUI-thread project open/close/switch must never block 5 s
+            # on the maintenance thread. Probe briefly then treat a lingering
+            # thread as non-cooperative — the caller aborts the replacement and
+            # the thread drains via detached keeper.
+            thread.join(timeout=0.2)
+            if thread.is_alive():
+                self._session_generation += 1
+                return False
         shell = getattr(self.window, "app_shell", None)
         shutdown = getattr(shell, "shutdown_workers", None)
         if callable(shutdown):

@@ -94,6 +94,20 @@ def open_renderer_properties(
     del parent  # dialogs are owned natively; the shell only anchors modality
     native = _native()
     style = dict(style or {})
+    # Empty mirror / unclassified image guard (#937-2): a categorized/
+    # graduated request with no fields and no categories would open an empty
+    # categorized dialog. Downgrade to single-symbol or block with a clear
+    # error so the user gets a usable single-symbol editor.
+    renderer_kind = str(style.get("renderer") or "").strip().lower()
+    has_field = bool(str(style.get("field") or "").strip())
+    has_fields = bool(fields)
+    if renderer_kind in ("categorized", "graduated") and not has_fields and not has_field:
+        # No attribute to classify by — force single-symbol legacy migration.
+        style = dict(style)
+        style["renderer"] = "single"
+        style.pop("field", None)
+        style.pop("categories", None)
+        style.pop("ranges", None)
     payload = QgisStylePayload.from_dict(style.get("qgis_style"))
     geometry_type = _geometry_type_for_layer({"features": features})
     request: dict[str, Any] = {
@@ -117,6 +131,21 @@ def open_renderer_properties(
         migrated = native.legacy_style_to_renderer_xml(style, geometry_type)
         if migrated:
             request["renderer_xml"] = str(migrated)
+        # If the layer still has features but no payload, seed a minimal
+        # categorized request from the first feature's properties so the
+        # native dialog doesn't open empty when a field is present but the
+        # style has no categories yet (#937-2 alternative path).
+        if not request.get("renderer_xml") and features and has_fields:
+            first_props = None
+            for feat in features:
+                props = feat.get("properties") if isinstance(feat, Mapping) else None
+                if isinstance(props, Mapping) and props:
+                    first_props = props
+                    break
+            if first_props is not None and style.get("field"):
+                vals = {str(v) for v in first_props.values() if v is not None}
+                if vals:
+                    request.setdefault("seed_values", sorted(vals)[:8])
     try:
         result = native.run_renderer_properties_dialog(request)
     except Exception as exc:
@@ -126,9 +155,13 @@ def open_renderer_properties(
     renderer_xml = str(result.get("renderer_xml") or "")
     if not renderer_xml.strip():
         raise SymbologyBridgeError("the symbology editor returned an empty renderer")
+    # Consume labeling_xml from the dialog result when present (#937-3).
+    labeling_xml = str(result.get("labeling_xml") or "")
+    if not labeling_xml and payload is not None:
+        labeling_xml = payload.labeling_xml
     updated = QgisStylePayload(
         renderer_xml=renderer_xml,
-        labeling_xml=payload.labeling_xml if payload is not None else "",
+        labeling_xml=labeling_xml,
         name=payload.name if payload is not None else "",
         tags=payload.tags if payload is not None else (),
         revision=payload.revision + 1 if payload is not None else 1,
@@ -171,9 +204,10 @@ def open_symbol_selector(
     renderer_xml = str(result.get("renderer_xml") or "")
     if not renderer_xml.strip():
         raise SymbologyBridgeError("the symbol editor returned an empty renderer")
+    labeling_xml = str(result.get("labeling_xml") or payload.labeling_xml)
     updated = QgisStylePayload(
         renderer_xml=renderer_xml,
-        labeling_xml=payload.labeling_xml,
+        labeling_xml=labeling_xml,
         name=payload.name,
         tags=payload.tags,
         revision=payload.revision + 1,

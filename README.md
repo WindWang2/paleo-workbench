@@ -97,6 +97,11 @@ PALEO_WITH_QGIS_RENDERER=1 python -m pip install -e native/qgis_render_bridge
 python -m pytest -q -m qgis tests/   # run the QGIS renderer tests
 ```
 
+Runtime opt-out (without rebuilding): set `PALEO_DISABLE_QGIS_RENDERER=1` (or
+`PALEO_USE_QGIS_RENDERER=0`) to force `create_map_render_backend()` to the
+fallback even when the bridge is built — useful for headless/tests or a
+broken bridge. The call-site `prefer_qgis=False` does the same programmatically.
+
 A dedicated CI leg (`.github/workflows/qgis-renderer.yml`) builds the bridge
 and executes the qgis-marked tests (fail-closed, count-gated). It runs on
 manual dispatch and on changes touching `native/qgis_render_bridge/**`,
