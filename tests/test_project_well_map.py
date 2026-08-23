@@ -144,6 +144,18 @@ class TestWellMapPage:
         assert list(plot.series["wells"].x) == [100.0, 101.0]
         assert list(plot.series["wells_flagged"].x) == [102.0]
 
+    def test_well_name_labels_follow_series_split(self, qtbot):
+        page, plot = make_page(qtbot)
+        doc = make_project()
+        doc.wells[2].coordinate_status = CoordinateStatus.UNTRANSFORMED
+        doc.wells[2].project_x = doc.wells[2].project_y = None
+        page.set_project(doc)
+        assert plot.series["wells"].labels == ["W000", "W001"]
+        assert plot.series["wells_flagged"].labels == ["W002"]
+        page.btn_labels.setChecked(False)
+        assert plot.series["wells"].labels is None
+        assert plot.series["wells_flagged"].labels is None
+
     def test_empty_state_visible_without_wells(self, qtbot):
         page, _plot = make_page(qtbot)
         page.set_project(make_project(well_count=0))

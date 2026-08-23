@@ -58,6 +58,7 @@ class WellMapPanel(QFrame):
         header_layout.addStretch(1)
         header_layout.addWidget(self.count_label)
 
+        self._header = header
         self.map_page = map_page or ProjectWellMapPage()
 
         layout.addWidget(header)
@@ -79,6 +80,10 @@ class WellMapPanel(QFrame):
 
     def is_collapsed(self) -> bool:
         return not self.toggle_button.isChecked()
+
+    def set_header_visible(self, visible: bool) -> None:
+        """Hide the fold header while the map is a page's main content."""
+        self._header.setVisible(visible)
 
     def expand_and_focus(self, well_id: str) -> None:
         """Tree/table → map: unfold the panel and center on the well."""

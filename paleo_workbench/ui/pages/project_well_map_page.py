@@ -148,6 +148,7 @@ class ProjectWellMapPage(QWidget):
         self._coord_y: np.ndarray = np.array([], dtype=np.float64)
         self._ok_count = 0                      # first `_ok_count` points are OK
         self._selected_well_ids: set[str] = set()
+        self._ordered_labels: list[str] = []    # array index → display name
         self._engine = engine
         self._signature_cache: tuple | None = None
 
@@ -208,7 +209,18 @@ class ProjectWellMapPage(QWidget):
             "叠加编图工程中的矢量参考图层（GDAL 重投影到工程 CRS）；栅格图层无法在此视图渲染"
         )
         self.btn_reference.toggled.connect(lambda _on: self._render_all())
-        for btn in (self.btn_zoom_all, self.btn_zoom_selection, self.btn_reset, self.btn_reference):
+        self.btn_labels = QPushButton("井名标注")
+        self.btn_labels.setCheckable(True)
+        self.btn_labels.setChecked(True)
+        self.btn_labels.setToolTip("在地图上显示井名标注")
+        self.btn_labels.toggled.connect(lambda _on: self._apply_labels())
+        for btn in (
+            self.btn_zoom_all,
+            self.btn_zoom_selection,
+            self.btn_reset,
+            self.btn_reference,
+            self.btn_labels,
+        ):
             toolbar.addWidget(btn)
         toolbar.addStretch(1)
         self.crs_label = QLabel("")
@@ -387,6 +399,7 @@ class ProjectWellMapPage(QWidget):
             reg_row: arr_idx for arr_idx, reg_row in enumerate(self._ordered_array_rows)
         }
         self._flagged_array_set = frozenset(range(self._ok_count, len(ordered)))
+        self._ordered_labels = [names[row] for row in self._ordered_array_rows]
 
         self._list_model.set_rows(ids, names, flags)
         self.empty_label.setVisible(not wells)
@@ -408,7 +421,23 @@ class ProjectWellMapPage(QWidget):
         self._render_survey_extents()
         self._render_reference_layers()
         self._update_selected_series()
+        self._apply_labels()
         self.plot.autofit()
+
+    def _apply_labels(self) -> None:
+        """Push per-point well-name labels into the scatter series."""
+        if self._series_wells is None:
+            return
+        split = self._ok_count
+        if self.btn_labels.isChecked():
+            self._series_wells.labels = list(self._ordered_labels[:split])
+            self._series_flagged.labels = list(self._ordered_labels[split:])
+        else:
+            self._series_wells.labels = None
+            self._series_flagged.labels = None
+        update = getattr(self.plot, "update", None)
+        if callable(update):
+            update()
 
     # Reference-layer geometry cap (§24): the map stays interactive; huge
     # cadastre files degrade to their first N vertices rather than freezing.
