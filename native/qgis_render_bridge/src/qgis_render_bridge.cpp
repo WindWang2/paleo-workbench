@@ -214,6 +214,9 @@ class QgisRenderBridge::Impl {
         std::string source_path;
         bool visible = true;
         std::unique_ptr<QgsMapLayer> layer;
+        /// #932: host id (__pwb_id) → QGIS fid for incremental deltas. QGIS
+        /// owns fid assignment; the host identity travels as an attribute.
+        std::unordered_map<std::string, QgsFeatureId> host_feature_ids;
     };
 
     struct SnapshotInput {
@@ -243,6 +246,105 @@ class QgisRenderBridge::Impl {
     bool discard_active_result = false;
     std::chrono::steady_clock::time_point active_started;
 
+    /// #932: apply an incremental feature delta to a live vector mirror.
+    /// All WKTs are parsed (and validated) before anything is deleted, so a
+    /// malformed payload cannot leave the mirror half-updated. QGIS owns fid
+    /// assignment; host identity is the __pwb_id attribute, indexed here.
+    void apply_feature_delta(Mirror& mirror, const VectorLayerSpec::FeatureDelta& delta) {
+        auto* vector_layer = dynamic_cast<QgsVectorLayer*>(mirror.layer.get());
+        if (vector_layer == nullptr) {
+            throw std::runtime_error("QGIS vector mirror has an unexpected layer type");
+        }
+        auto* provider = vector_layer->dataProvider();
+
+        // A delta may introduce attributes the layer does not have yet.
+        QSet<QString> missing_fields;
+        const QgsFields fields = vector_layer->fields();
+        for (const FeatureSpec& feature_spec : delta.changed) {
+            for (const auto& attribute : feature_spec.attributes) {
+                const QString name = QString::fromStdString(attribute.first);
+                if (fields.indexOf(name) < 0) missing_fields.insert(name);
+            }
+        }
+        if (!missing_fields.isEmpty()) {
+            QList<QgsField> new_fields;
+            for (const QString& name : missing_fields) {
+                new_fields.append(QgsField(name, QMetaType::Type::QString));
+            }
+            if (!provider->addAttributes(new_fields)) {
+                throw std::runtime_error(
+                    "QGIS could not add delta fields to layer ");
+            }
+            vector_layer->updateFields();
+        }
+
+        // Validate every geometry BEFORE mutating the mirror.
+        struct ParsedDeltaFeature {
+            std::string host_id;
+            QgsGeometry geometry;
+            const FeatureSpec* spec;
+        };
+        std::vector<ParsedDeltaFeature> parsed;
+        parsed.reserve(delta.changed.size());
+        for (const FeatureSpec& feature_spec : delta.changed) {
+            QgsGeometry geometry = QgsGeometry::fromWkt(
+                QString::fromStdString(feature_spec.wkt));
+            if (geometry.isNull()) {
+                throw std::invalid_argument(
+                    "invalid WKT in feature delta for layer ");
+            }
+            parsed.push_back({feature_spec.id, std::move(geometry), &feature_spec});
+        }
+
+        QgsFeatureIds remove_fids;
+        for (const std::string& host_id : delta.removed_ids) {
+            const auto it = mirror.host_feature_ids.find(host_id);
+            if (it != mirror.host_feature_ids.end()) {
+                remove_fids.insert(it->second);
+                mirror.host_feature_ids.erase(it);
+            }
+        }
+        // Changed features are delete + re-add: identical rendering outcome,
+        // no changeGeometry/attribute-update branching.
+        for (const ParsedDeltaFeature& item : parsed) {
+            const auto it = mirror.host_feature_ids.find(item.host_id);
+            if (it != mirror.host_feature_ids.end()) {
+                remove_fids.insert(it->second);
+                mirror.host_feature_ids.erase(it);
+            }
+        }
+        if (!remove_fids.empty() && !provider->deleteFeatures(remove_fids)) {
+            throw std::runtime_error(
+                "QGIS could not delete delta features from layer ");
+        }
+        QgsFeatureList features;
+        for (const ParsedDeltaFeature& item : parsed) {
+            QgsFeature feature(vector_layer->fields());
+            feature.setGeometry(item.geometry);
+            feature.setAttribute(
+                QStringLiteral("__pwb_id"), QString::fromStdString(item.host_id));
+            for (const auto& attribute : item.spec->attributes) {
+                feature.setAttribute(
+                    QString::fromStdString(attribute.first),
+                    QString::fromStdString(attribute.second));
+            }
+            features.push_back(std::move(feature));
+        }
+        if (!features.empty() && !provider->addFeatures(features)) {
+            throw std::runtime_error(
+                "QGIS could not add delta features to layer ");
+        }
+        for (const QgsFeature& feature : features) {
+            mirror.host_feature_ids[feature.attribute(
+                QStringLiteral("__pwb_id")).toString().toStdString()] = feature.id();
+        }
+        vector_layer->updateExtents();
+        vector_layer->triggerRepaint();
+        diagnostics.feature_deltas += 1;
+        diagnostics.delta_changed_features += delta.changed.size();
+        diagnostics.delta_removed_features += delta.removed_ids.size();
+    }
+
     void apply_snapshot(std::vector<VectorLayerSpec> layers, std::string destination_crs) {
         // #929 (#519 residual): style application to REUSED mirrors mutates
         // live layers.  Validate every pending style payload up front so a
@@ -261,20 +363,43 @@ class QgisRenderBridge::Impl {
                 validate_style_payloads(spec);
             }
         }
+        // #932: feature deltas mutate live mirrors; validate every delta's
+        // base revision BEFORE any mutation so a stale snapshot throws with
+        // mirrors untouched (the host then reships fully).
+        for (const VectorLayerSpec& spec : layers) {
+            if (!spec.delta) continue;
+            const auto existing = mirrors.find(spec.id);
+            if (existing == mirrors.end()
+                || existing->second.kind != VectorLayerSpec::Kind::Vector
+                || existing->second.data_revision != spec.delta->base_revision) {
+                throw std::runtime_error(
+                    "stale mirror for feature delta on layer " + spec.id
+                );
+            }
+        }
         std::unordered_map<std::string, Mirror> next;
         std::vector<std::string> order;
         std::vector<std::string> reused;
         for (VectorLayerSpec& spec : layers) {
             if (spec.id.empty()) throw std::invalid_argument("QGIS vector layer id is required");
             auto existing = mirrors.find(spec.id);
-            const bool rebuild = existing == mirrors.end()
-                || existing->second.data_revision != spec.data_revision
+            // #932: a feature delta keeps the mirror — the revision change is
+            // applied in place (validated above).
+            const bool delta_applies = spec.delta.has_value()
+                && existing != mirrors.end()
+                && existing->second.kind == VectorLayerSpec::Kind::Vector
+                && existing->second.data_revision == spec.delta->base_revision;
+            const bool revision_changed = existing == mirrors.end()
+                || existing->second.data_revision != spec.data_revision;
+            const bool rebuild = (revision_changed && !delta_applies)
                 // Vector style can be reapplied to its existing memory layer;
                 // retain the former conservative behavior for raster styles.
                 || (spec.kind == VectorLayerSpec::Kind::Raster
+                    && existing != mirrors.end()
                     && existing->second.style_revision != spec.style_revision)
-                || existing->second.kind != spec.kind
-                || existing->second.source_path != spec.source_path;
+                || (existing != mirrors.end() && existing->second.kind != spec.kind)
+                || (existing != mirrors.end()
+                    && existing->second.source_path != spec.source_path);
 
             if (!rebuild) {
                 // Keep the live mirror in `mirrors` until the whole snapshot
@@ -283,6 +408,9 @@ class QgisRenderBridge::Impl {
                 // would hand to QGIS, and must not delete the previously valid
                 // layers (#519).
                 Mirror& mirror = existing->second;
+                if (spec.delta) {
+                    apply_feature_delta(mirror, *spec.delta);
+                }
                 if (spec.kind == VectorLayerSpec::Kind::Vector
                     && mirror.style_revision != spec.style_revision) {
                     auto* vector_layer = dynamic_cast<QgsVectorLayer*>(mirror.layer.get());
@@ -357,6 +485,12 @@ class QgisRenderBridge::Impl {
                     }
                     if (!features.empty() && !vector_layer->dataProvider()->addFeatures(features)) {
                         throw std::runtime_error("QGIS could not add features for layer " + spec.id);
+                    }
+                    // #932: index host ids → fids so later deltas can address
+                    // features without a provider scan.
+                    for (const QgsFeature& feature : features) {
+                        mirror.host_feature_ids[feature.attribute(
+                            QStringLiteral("__pwb_id")).toString().toStdString()] = feature.id();
                     }
                     vector_layer->updateExtents();
                     apply_renderer_style(*vector_layer, spec);

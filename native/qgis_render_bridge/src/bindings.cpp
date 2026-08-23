@@ -136,6 +136,37 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
             }
         }
         layer.opacity = py::cast<double>(data["opacity"]);
+        // #932: an incremental delta replaces the feature list. Parse it with
+        // the same FeatureSpec conversion the full path uses.
+        if (data.contains("delta") && !data["delta"].is_none()) {
+            const py::dict delta = as_dict(data["delta"], "layer delta");
+            VectorLayerSpec::FeatureDelta parsed_delta;
+            parsed_delta.base_revision = py::cast<std::uint64_t>(delta["base_revision"]);
+            for (const py::handle feature_item :
+                 py::reinterpret_borrow<py::iterable>(delta["changed_features"])) {
+                const py::dict feature = as_dict(feature_item, "delta feature");
+                FeatureSpec parsed{
+                    py::cast<std::string>(feature["id"]),
+                    py::cast<std::string>(feature["wkt"]),
+                    {},
+                };
+                if (feature.contains("attributes")) {
+                    const py::dict attributes = as_dict(feature["attributes"], "feature attributes");
+                    for (const auto attribute : attributes) {
+                        parsed.attributes.emplace_back(
+                            py::cast<std::string>(py::str(attribute.first)),
+                            py::cast<std::string>(py::str(attribute.second))
+                        );
+                    }
+                }
+                parsed_delta.changed.push_back(std::move(parsed));
+            }
+            for (const py::handle removed :
+                 py::reinterpret_borrow<py::iterable>(delta["removed_ids"])) {
+                parsed_delta.removed_ids.push_back(py::cast<std::string>(removed));
+            }
+            layer.delta = std::move(parsed_delta);
+        } else {
         for (const py::handle feature_item : py::reinterpret_borrow<py::iterable>(data["features"])) {
             const py::dict feature = as_dict(feature_item, "feature");
             FeatureSpec parsed{
@@ -153,6 +184,7 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
                 }
             }
             layer.features.push_back(std::move(parsed));
+        }
         }
         layers.push_back(std::move(layer));
     }
@@ -332,6 +364,9 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
             output["mirror_builds"] = diagnostics.mirror_builds;
             output["mirror_reuses"] = diagnostics.mirror_reuses;
             output["style_reapplies"] = diagnostics.style_reapplies;
+            output["feature_deltas"] = diagnostics.feature_deltas;
+            output["delta_changed_features"] = diagnostics.delta_changed_features;
+            output["delta_removed_features"] = diagnostics.delta_removed_features;
             return output;
         })
         .def_property_readonly("initialized", &QgisRenderBridge::initialized)

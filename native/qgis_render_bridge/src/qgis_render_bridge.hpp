@@ -88,6 +88,16 @@ struct VectorLayerSpec {
     double scale_range_min_denom = 0.0;
     double scale_range_max_denom = 0.0;
     std::vector<FeatureSpec> features;
+    /// #932: incremental payload. When present the host omitted ``features``
+    /// and expects the existing mirror at ``base_revision`` to be updated in
+    /// place (changed = added-or-modified full specs; removed = host ids).
+    /// The bridge validates the base revision before mutating any mirror.
+    struct FeatureDelta {
+        std::uint64_t base_revision = 0;
+        std::vector<FeatureSpec> changed;
+        std::vector<std::string> removed_ids;
+    };
+    std::optional<FeatureDelta> delta;
 };
 
 struct RenderResult {
@@ -130,6 +140,10 @@ class QgisRenderBridge {
         std::uint64_t mirror_builds = 0;
         std::uint64_t mirror_reuses = 0;
         std::uint64_t style_reapplies = 0;
+        /// #932: incremental feature-delta applications on live mirrors.
+        std::uint64_t feature_deltas = 0;
+        std::uint64_t delta_changed_features = 0;
+        std::uint64_t delta_removed_features = 0;
     };
     [[nodiscard]] Diagnostics diagnostics() const;
 
