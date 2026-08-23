@@ -996,6 +996,16 @@ def _py_validate_ring(ring: list[list[float]]) -> list[dict[str, Any]]:
     return _validate_ring_python(ring)
 
 
+def _py_dtw_match_curves(
+    curve_ref: np.ndarray,
+    curve_target: np.ndarray,
+    window: int | None = None,
+) -> tuple[float, list[int], list[int]]:
+    from paleo_workbench.viz.dtw_log_matcher import DTWLogMatcher
+    res = DTWLogMatcher().match_curves(curve_ref, curve_target, window=window)
+    return res.cost, res.path_ref, res.path_target
+
+
 # ---------------------------------------------------------------------------
 # Deep NativeEngineBackend Class
 # ---------------------------------------------------------------------------
@@ -1022,6 +1032,7 @@ class NativeEngineBackend:
         "snap_point": _py_snap_point,
         "validate_ring": _py_validate_ring,
         "render_grid_rgba": _py_render_grid_rgba,
+        "dtw_match_curves": _py_dtw_match_curves,
     }
 
     _FUNCTION_MODULE_MAP = {
@@ -1036,6 +1047,7 @@ class NativeEngineBackend:
         "snap_point": ("map_edit", map_edit_core),
         "validate_ring": ("map_edit", map_edit_core),
         "render_grid_rgba": ("grid_render", grid_render_core),
+        "dtw_match_curves": ("well_log", well_log_core),
     }
 
     def __init__(self) -> None:

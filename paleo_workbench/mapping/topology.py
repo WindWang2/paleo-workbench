@@ -125,3 +125,46 @@ class TopologyService:
                 session.set_vertex(feature_id, path, replacement)
                 changed.append((layer.id, feature_id, path))
         return TopologyEditResult(changed=tuple(changed))
+
+
+def repair_invalid_geometry(geometry: dict[str, object]) -> dict[str, object]:
+    """Auto-heal invalid Polygon / MultiPolygon geometries (self-intersection, ring unclosed)."""
+    if not isinstance(geometry, dict):
+        return geometry
+    geom_type = geometry.get("type")
+    if geom_type not in {"Polygon", "MultiPolygon"}:
+        return geometry
+
+    # First ensure ring closure in coordinates
+    coords = geometry.get("coordinates")
+    if geom_type == "Polygon" and isinstance(coords, list):
+        fixed_coords = []
+        for ring in coords:
+            if isinstance(ring, (list, tuple)) and len(ring) >= 3:
+                r = [list(pt) for pt in ring]
+                if r[0] != r[-1]:
+                    r.append(list(r[0]))
+                fixed_coords.append(r)
+            else:
+                fixed_coords.append(ring)
+        geometry = {"type": "Polygon", "coordinates": fixed_coords}
+
+    try:
+        from shapely.geometry import mapping, shape
+        from shapely.validation import make_valid
+
+        cand = shape(geometry)
+        if not cand.is_valid:
+            repaired = make_valid(cand) if make_valid is not None else cand.buffer(0)
+            if not repaired.is_empty:
+                res = mapping(repaired)
+                return dict(res)
+        else:
+            res = mapping(cand)
+            return dict(res)
+    except Exception:
+        pass
+
+    return geometry
+
+

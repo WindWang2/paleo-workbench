@@ -219,3 +219,70 @@ def sync_well_table_to_linked_tasks(
         task.parameters = params
         task.well_table_id = table.id
     return linked
+
+
+def well_table_to_arrays(
+    table: WellTable,
+    *,
+    include_flagged: bool = False,
+) -> dict[str, Any]:
+    """Export WellTable columns directly to contiguous NumPy arrays."""
+    import numpy as np
+
+    valid_rows = [r for r in table.rows if include_flagged or r.qc_flag == "ok"]
+    n = len(valid_rows)
+    if n == 0:
+        return {
+            "names": np.array([], dtype=object),
+            "x": np.array([], dtype=np.float64),
+            "y": np.array([], dtype=np.float64),
+            "z": np.array([], dtype=np.float64),
+            "q": np.array([], dtype=np.float64),
+            "b_i": np.array([], dtype=np.float64),
+            "qc_flags": np.array([], dtype=object),
+        }
+
+    names = [r.name for r in valid_rows]
+    x = np.fromiter((r.x for r in valid_rows), dtype=np.float64, count=n)
+    y = np.fromiter((r.y for r in valid_rows), dtype=np.float64, count=n)
+    z = np.fromiter(
+        (
+            (r.z if r.z is not None else (r.R_s if r.R_s is not None else (r.H_t if r.H_t is not None else np.nan)))
+            for r in valid_rows
+        ),
+        dtype=np.float64,
+        count=n,
+    )
+    q = np.fromiter((r.q for r in valid_rows), dtype=np.float64, count=n)
+    b_i = np.fromiter((r.b_i for r in valid_rows), dtype=np.float64, count=n)
+    qc_flags = [r.qc_flag for r in valid_rows]
+
+    return {
+        "names": np.array(names, dtype=object),
+        "x": x,
+        "y": y,
+        "z": z,
+        "q": q,
+        "b_i": b_i,
+        "qc_flags": np.array(qc_flags, dtype=object),
+    }
+
+
+def well_table_to_dataframe(table: WellTable, *, include_flagged: bool = True):
+    """Convert WellTable to a pandas DataFrame."""
+    import pandas as pd
+
+    data = well_table_to_arrays(table, include_flagged=include_flagged)
+    df = pd.DataFrame(
+        {
+            "name": data["names"],
+            "x": data["x"],
+            "y": data["y"],
+            "value": data["z"],
+            "q": data["q"],
+            "b_i": data["b_i"],
+            "qc_flag": data["qc_flags"],
+        }
+    )
+    return df
+
