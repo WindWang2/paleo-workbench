@@ -39,6 +39,19 @@ class ImagePreviewWidget(QLabel):
         self._drag_start_pos: QPoint | None = None
         self._drag_start_offset = QPoint(0, 0)
 
+    def sizeHint(self) -> QSize:  # noqa: N802
+        # 缩放模式下 pixmap 远大于可视区，默认 sizeHint（=pixmap 大小）会把
+        # 外层布局（stack/分隔条）撑开；平移在 paintEvent 内完成，widget 只
+        # 需占用布局分配的空间。fit 模式 pixmap 本就贴合 widget，沿用默认。
+        if not self._fit_mode:
+            return QSize(240, 180)
+        return super().sizeHint()
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        if not self._fit_mode:
+            return QSize(240, 180)
+        return super().minimumSizeHint()
+
     def apply_settings(self, settings) -> None:
         self.transformation_mode = (
             Qt.TransformationMode.SmoothTransformation
