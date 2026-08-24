@@ -199,8 +199,12 @@ class AppShell(QWidget):
     def _switch_page(self, index: int) -> None:
         if not 0 <= index < self.page_stack.count():
             return
-        self.page_stack.setCurrentIndex(index)
         self._flush_page_updates(index)
+        self.page_stack.setCurrentIndex(index)
+        page = self.page_stack.widget(index)
+        activate = getattr(page, "activate_page", None)
+        if callable(activate):
+            activate()
 
         # Update Stage & Subpage state memory
         stage_idx = navigation.get_stage_for_page(index)

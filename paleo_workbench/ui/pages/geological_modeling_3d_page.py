@@ -981,6 +981,8 @@ class GeologicalModeling3DPage(QWidget):
             self.faults_raw_data = []
             # Drop the previous project's rendered brick/overlays immediately.
             self._on_joint_scene_updated()
+        if self.isVisible() and not self._joint_loaded_once:
+            self._ensure_joint_data_loaded()
 
     def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
         """Join the page's OwnedWorkerJobs on project switch / app close.
@@ -1898,61 +1900,69 @@ class GeologicalModeling3DPage(QWidget):
         if profile is not None:
             profile.set_scene(scene)
 
-    def showEvent(self, event) -> None:  # noqa: N802
-        super().showEvent(event)
-        if not self._joint_loaded_once and self.isVisible():
-            self._joint_loaded_once = True
-            self._ensure_joint_widget()
-            # Apply tree checks first; domain via preferred_domain so reload
-            # does not force Time (code-review Spec fix).
-            self._apply_joint_tree_checks_from_project()
-            domain = "Time"
-            if self._project is not None:
-                state = getattr(self._project, "joint_analysis", None)
-                domain = getattr(state, "vertical_domain", None) or "Time"
-            if hasattr(self, "_joint_domain"):
-                scene = self._joint_host.scene
-                if (
-                    scene is not None
-                    and str(domain).lower().startswith("depth")
-                    and not scene.depth_available
-                ):
-                    # Saved Depth is unrealizable without a transform.
-                    domain = "Time"
+    def _ensure_joint_data_loaded(self) -> None:
+        if self._joint_loaded_once:
+            return
+        self._joint_loaded_once = True
+        self._ensure_joint_widget()
+        # Apply tree checks first; domain via preferred_domain so reload
+        # does not force Time (code-review Spec fix).
+        self._apply_joint_tree_checks_from_project()
+        domain = "Time"
+        if self._project is not None:
+            state = getattr(self._project, "joint_analysis", None)
+            domain = getattr(state, "vertical_domain", None) or "Time"
+        if hasattr(self, "_joint_domain"):
+            scene = self._joint_host.scene
+            if (
+                scene is not None
+                and str(domain).lower().startswith("depth")
+                and not scene.depth_available
+            ):
+                # Saved Depth is unrealizable without a transform.
+                domain = "Time"
+            self._joint_domain.blockSignals(True)
+            idx = self._joint_domain.findText(domain)
+            if idx >= 0:
+                self._joint_domain.setCurrentIndex(idx)
+            self._joint_domain.blockSignals(False)
+            self._update_domain_combo_availability()
+        restoring_fence = False
+        if self._project is not None:
+            state = getattr(self._project, "joint_analysis", None)
+            wells = list(getattr(state, "active_fence_wells", None) or [])
+            restoring_fence = len(wells) >= 2
+        self._joint_host.reload(
+            preferred_domain=domain,
+            auto_default_fence=False,
+        )
+        self._restore_joint_fence_from_project()
+        self._update_domain_z_guard(domain)
+        # Reload may have left the scene on a different domain than the
+        # saved combo text (e.g. empty-data early exit): re-sync the
+        # combo from the scene so UI and scene cannot diverge.
+        scene = self._joint_host.scene
+        if scene is not None and hasattr(self, "_joint_domain"):
+            actual = (
+                "Depth"
+                if scene.vertical_domain.value.startswith("depth")
+                else "Time"
+            )
+            if self._joint_domain.currentText() != actual:
                 self._joint_domain.blockSignals(True)
-                idx = self._joint_domain.findText(domain)
+                idx = self._joint_domain.findText(actual)
                 if idx >= 0:
                     self._joint_domain.setCurrentIndex(idx)
                 self._joint_domain.blockSignals(False)
-                self._update_domain_combo_availability()
-            restoring_fence = False
-            if self._project is not None:
-                state = getattr(self._project, "joint_analysis", None)
-                wells = list(getattr(state, "active_fence_wells", None) or [])
-                restoring_fence = len(wells) >= 2
-            self._joint_host.reload(
-                preferred_domain=domain,
-                auto_default_fence=False,
-            )
-            self._restore_joint_fence_from_project()
-            self._update_domain_z_guard(domain)
-            # Reload may have left the scene on a different domain than the
-            # saved combo text (e.g. empty-data early exit): re-sync the
-            # combo from the scene so UI and scene cannot diverge.
-            scene = self._joint_host.scene
-            if scene is not None and hasattr(self, "_joint_domain"):
-                actual = (
-                    "Depth"
-                    if scene.vertical_domain.value.startswith("depth")
-                    else "Time"
-                )
-                if self._joint_domain.currentText() != actual:
-                    self._joint_domain.blockSignals(True)
-                    idx = self._joint_domain.findText(actual)
-                    if idx >= 0:
-                        self._joint_domain.setCurrentIndex(idx)
-                    self._joint_domain.blockSignals(False)
-                self._update_domain_combo_availability()
+            self._update_domain_combo_availability()
+
+    def activate_page(self) -> None:
+        """Called when this page is navigated to."""
+        self._ensure_joint_data_loaded()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._ensure_joint_data_loaded()
 
     def collect_joint_analysis_state(self):
         """Snapshot joint UI into project model (no voxels) — #90."""
