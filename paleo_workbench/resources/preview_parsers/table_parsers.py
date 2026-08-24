@@ -44,12 +44,23 @@ def read_preview_chunk(path: Path, limit_kib: int) -> tuple[bytes, bool]:
     return data, stat.st_size > limit
 
 
+def decode_text_with_fallback(raw_bytes: bytes) -> str:
+    """Decode bytes attempting UTF-8-sig, then GB18030/GBK, then replace (#1004)."""
+    try:
+        return raw_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        pass
+    try:
+        return raw_bytes.decode("gb18030")
+    except UnicodeDecodeError:
+        pass
+    return raw_bytes.decode("utf-8-sig", errors="replace")
+
+
 def text_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewResult:
     path = Path(resource.path)
     preview_bytes, truncated = read_preview_chunk(path, settings.text_limit_kib)
-    # utf-8-sig strips a leading BOM (#893 residual: plain .txt/.log/.xml
-    # previews kept showing \ufeff in the first line).
-    text = preview_bytes.decode("utf-8-sig", errors="replace")
+    text = decode_text_with_fallback(preview_bytes)
     warning = f"仅显示前 {settings.text_limit_kib} KiB" if truncated else ""
     return PreviewResult(
         mode="text",

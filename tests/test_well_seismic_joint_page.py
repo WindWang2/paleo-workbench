@@ -74,3 +74,23 @@ def test_joint_page_combos_preserve_user_selection(qtbot):
     page._fill_well_combos()
     assert page._well_a.currentText() == "W1"
     assert page._well_b.currentText() == "W1"
+
+
+def test_geomodel_page_loads_on_first_switch(qtbot):
+    """Geomodel page must load its joint data on the very first page switch with deferred bindings."""
+    from paleo_workbench.project.models import ProjectDocument
+
+    doc = ProjectDocument.new("DeferredTestProject")
+    shell = AppShell(project=doc, defer_nonvisible_bindings=True)
+    qtbot.addWidget(shell)
+
+    geomodel_page = shell.geomodel_page
+    assert geomodel_page._joint_loaded_once is False
+
+    # Switch to 3D page for the first time
+    shell._switch_page(10)
+
+    assert shell.page_stack.currentIndex() == 10
+    assert geomodel_page._project is doc
+    assert geomodel_page._joint_loaded_once is True
+

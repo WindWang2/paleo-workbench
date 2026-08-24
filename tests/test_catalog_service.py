@@ -1155,3 +1155,39 @@ def test_register_modeling_run_failure_fails_the_run(service, tmp_path):
     runs = [r for r in service.document.runs if r.operation == "modeling"]
     assert runs, "the run was booked"
     assert runs[-1].status == "failed", runs[-1].status
+
+
+def test_resolve_path_cross_platform_and_relative(service, tmp_path):
+    """resolve_path must resolve unmanaged paths across platforms and relative to project_dir."""
+    from paleo_workbench.catalog.models import DataAsset, DataStage, DataVersion
+
+    project_dir = service.project_path.parent
+    wells_dir = project_dir / "井曲线"
+    wells_dir.mkdir(parents=True, exist_ok=True)
+    real_file = wells_dir / "A16.Las"
+    real_file.write_text("~A 1000.0 50.0", encoding="utf-8")
+
+    # 1. Stored as foreign Linux absolute path
+    v1 = DataVersion(
+        id="v1",
+        asset_id="a1",
+        version_number=1,
+        stage=DataStage.RAW,
+        managed=False,
+        path="/home/kevin/projects/data/proj/井曲线/A16.Las",
+        format="las",
+    )
+    assert service.resolve_path(v1) == real_file.resolve()
+
+    # 2. Stored as relative path
+    v2 = DataVersion(
+        id="v2",
+        asset_id="a2",
+        version_number=1,
+        stage=DataStage.RAW,
+        managed=False,
+        path="井曲线/A16.Las",
+        format="las",
+    )
+    assert service.resolve_path(v2) == real_file.resolve()
+

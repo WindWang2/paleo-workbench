@@ -88,7 +88,7 @@ class VisualizationWorkspace(QFrame):
         self._project = None
         self.well_host = WellLogHost()
         self.well_section_host = WellSectionHost()
-        self.seismic_host = SeismicHost()
+        self.seismic_host = SeismicHost(self)
         self.cross_well_host = CrossWellHost()
         self.map_host = PaleoMapHost()
         self.well_tie_host = WellTieHost()

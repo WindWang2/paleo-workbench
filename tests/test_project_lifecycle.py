@@ -37,7 +37,7 @@ def test_open_dialog_defaults_to_workspace_project_area(qtbot, monkeypatch):
         fake_dialog,
     )
     assert window.project_controller._choose_open_project() is None
-    assert captured["start_dir"].endswith("data/project_area")
+    assert Path(captured["start_dir"]).parts[-2:] == ("data", "project_area")
 
 
 def test_open_dialog_prefers_current_project_dir(qtbot, monkeypatch, tmp_path: Path):

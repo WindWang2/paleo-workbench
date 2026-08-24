@@ -4,14 +4,16 @@ from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.ui.pages.seismic_prediction_page import SeismicPredictionPage
 
 
-def test_app_shell_page_three_is_seismic_prediction_page(qtbot):
+def test_app_shell_page_three_is_seismic_prediction_page(qtbot, monkeypatch):
+    monkeypatch.setattr("paleo_workbench.viz.native_factor_map.require_native_scene", lambda: None)
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
     page = window.app_shell.page_stack.widget(3)
     assert isinstance(page, SeismicPredictionPage)
 
 
-def test_seismic_prediction_page_receives_project_prediction_tasks(qtbot):
+def test_seismic_prediction_page_receives_project_prediction_tasks(qtbot, monkeypatch):
+    monkeypatch.setattr("paleo_workbench.viz.native_factor_map.require_native_scene", lambda: None)
     project = ProjectDocument.new("Test")
     task = MockPredictionAdapter().run(project, [], seed=3)
 

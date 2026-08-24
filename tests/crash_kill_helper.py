@@ -34,14 +34,21 @@ def main() -> None:
     real_replace = store_mod.os.replace
     armed = {"on": False}
 
+    def _kill_self() -> None:
+        if hasattr(signal, "SIGKILL"):
+            os.kill(os.getpid(), signal.SIGKILL)
+        else:
+            # On Windows, signal.SIGTERM triggers Win32 TerminateProcess
+            os.kill(os.getpid(), signal.SIGTERM)
+
     def _killer(src, dst):
         dst_str = str(dst)
         if not armed["on"]:
             return real_replace(src, dst)
         if "catalog.json.bak" in dst_str and mode == "bak":
-            os.kill(os.getpid(), signal.SIGKILL)
+            _kill_self()
         if dst_str.endswith("catalog.json") and mode == "replace":
-            os.kill(os.getpid(), signal.SIGKILL)
+            _kill_self()
         return real_replace(src, dst)
 
     store_mod.os.replace = _killer  # type: ignore[assignment]

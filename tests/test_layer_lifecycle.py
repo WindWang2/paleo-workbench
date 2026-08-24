@@ -25,7 +25,7 @@ def _records(count: int = 3) -> list[dict]:
 
 
 def test_full_layer_lifecycle_create_style_visibility_remove() -> None:
-    import layer_model_core
+    layer_model_core = pytest.importorskip("layer_model_core")
 
     adapter = LegacyDocumentSceneAdapter()
     document = _document()
@@ -83,7 +83,7 @@ def test_adapter_reuses_features_when_revision_unchanged() -> None:
 
 
 def test_snapshot_carries_catalog_provenance_metadata_and_scale_range() -> None:
-    import layer_model_core
+    layer_model_core = pytest.importorskip("layer_model_core")
 
     from paleo_workbench.viz.native_factor_map import MapScene
 

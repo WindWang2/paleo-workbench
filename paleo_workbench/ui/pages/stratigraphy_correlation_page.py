@@ -416,7 +416,13 @@ class StratigraphyCorrelationPage(QWidget):
         if self._WellLogView is None:
             return None
         try:
-            view = self._WellLogView()
+            view = self._WellLogView(self.engine_host)
+        except TypeError:
+            try:
+                view = self._WellLogView()
+            except Exception as exc:  # noqa: BLE001 — surface to placeholder
+                self._engine_error = f"{exc.__class__.__name__}: {exc}"
+                return None
         except Exception as exc:  # noqa: BLE001 — surface to placeholder
             self._engine_error = f"{exc.__class__.__name__}: {exc}"
             return None
@@ -429,6 +435,7 @@ class StratigraphyCorrelationPage(QWidget):
 
     def _release_engine_view(self) -> None:
         if self._engine_view is not None:
+            self._engine_view.hide()
             clear = getattr(self._engine_view, "clear_multi_well_section", None)
             if callable(clear):
                 try:
@@ -451,13 +458,12 @@ class StratigraphyCorrelationPage(QWidget):
         so AppShell.shutdown_workers reclaims the engine view instead of
         relying on widget destruction.
         """
-        if self._dtw_job.is_running:
-            self._dtw_job.shutdown(wait_ms)
-        if self._load_job.is_running:
-            self._load_seq += 1
-            self._load_job.shutdown(wait_ms)
-        self._release_engine_view()
-        return True
+        dtw_joined = self._dtw_job.shutdown(wait_ms)
+        self._load_seq += 1
+        load_joined = self._load_job.shutdown(wait_ms)
+        if dtw_joined and load_joined:
+            self._release_engine_view()
+        return dtw_joined and load_joined
 
     def update_state(self, project=None) -> None:
         if project is not None:

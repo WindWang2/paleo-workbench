@@ -8,6 +8,7 @@ queries fall back to empty results, with ``rebuild()`` recreating everything.
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -149,7 +150,9 @@ def test_missing_db_revision_none_and_rebuild_recovers(tmp_path: Path):
     index.rebuild(make_document())
     assert index.revision() == 7
 
-    # Deleting the file (even while the connection is open) reads as stale.
+    # Deleting the file reads as stale.
+    if sys.platform == "win32":
+        index.close()
     index.db_path.unlink()
     assert index.revision() is None
     assert index.is_fresh(make_document()) is False

@@ -32,3 +32,9 @@ def sha256_file_or_none(path: str | Path) -> str | None:
         return sha256_file(Path(path))
     except OSError:
         return None
+
+
+def sha256_text(text: str) -> str:
+    """Return hex SHA-256 digest of text normalized to LF line endings (#998)."""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()

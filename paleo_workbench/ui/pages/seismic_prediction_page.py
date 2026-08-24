@@ -60,23 +60,11 @@ class SeismicPredictionPage(QWidget):
         )
         outer.setSpacing(tokens.SPACE_4)
 
-        source_row = QHBoxLayout()
-        source_label = QLabel("工区地震体")
-        source_label.setObjectName("WorkFieldLabel")
-        source_row.addWidget(source_label)
-        self.seismic_source_combo = QComboBox()
-        self.seismic_source_combo.setObjectName("SeismicPredictionSourceCombo")
-        self.seismic_source_combo.setPlaceholderText("选择数据管理中的 SEG-Y 地震体")
-        self.seismic_source_combo.setToolTip(
-            "选择工区数据中已归档的 .sgy / .segy 地震体，加载后可直接运行预测"
-        )
+        self.context_toolbar = SeismicContextToolbar()
+        self.seismic_source_combo = self.context_toolbar.seismic_source_combo
         self.seismic_source_combo.currentIndexChanged.connect(
             self._on_seismic_source_changed
         )
-        source_row.addWidget(self.seismic_source_combo, 1)
-        outer.addLayout(source_row)
-
-        self.context_toolbar = SeismicContextToolbar()
         outer.addWidget(self.context_toolbar)
 
         content = QHBoxLayout()
@@ -95,6 +83,9 @@ class SeismicPredictionPage(QWidget):
 
         self.context_toolbar.run_requested.connect(self._on_run)
         self.context_toolbar.demo_requested.connect(self._on_demo)
+        self.context_toolbar.attribute_changed.connect(self._on_attribute)
+        self.context_toolbar.display_mode_changed.connect(self.view_panel.set_display_mode)
+        self.context_toolbar.display_mode_changed.connect(self.control_panel.mode_combo.setCurrentText)
         self.control_panel.send_requested.connect(self.send_to_mapping_requested.emit)
         self.control_panel.display_mode_changed.connect(self.view_panel.set_display_mode)
         self.attribute_panel.attribute_changed.connect(self._on_attribute)
@@ -144,6 +135,14 @@ class SeismicPredictionPage(QWidget):
             self.view_panel.update_state(task, project=self._project)
         self.control_panel.update_state(task, self.view_panel.volume_shape)
         self._sync_workbench_context(task)
+        if hasattr(self.context_toolbar, "shape_value"):
+            self.context_toolbar.shape_value.setText(
+                self.control_panel.shape_value.text()
+            )
+        if hasattr(self.context_toolbar, "mock_value"):
+            self.context_toolbar.mock_value.setText(
+                self.control_panel.mock_value.text()
+            )
         self.control_panel.set_controls_enabled(self.view_panel.is_view_ready())
 
     def _current_task(self):

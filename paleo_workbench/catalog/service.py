@@ -58,6 +58,7 @@ from paleo_workbench.catalog.storage import (
     place_managed_file,
     purge_trashed_payload,
     restore_payload as _restore_trashed_payload,
+    safe_unlink,
     trash_dir_for as _trash_dir_for,
     trash_payload as _move_to_trash,
 )
@@ -669,10 +670,36 @@ class DataCatalogService:
 
     def resolve_path(self, version: DataVersion) -> Path:
         """Runtime absolute path for a version's payload."""
+        project_dir = self.project_path.expanduser().resolve().parent
         if version.managed:
-            project_dir = self.project_path.expanduser().resolve().parent
             return project_dir / version.path
-        return Path(version.path)
+        raw_path = Path(version.path)
+        if raw_path.is_file():
+            return raw_path.resolve()
+        rel_candidate = (project_dir / raw_path).resolve()
+        if rel_candidate.is_file():
+            return rel_candidate
+        posix_str = raw_path.as_posix()
+        parts = [p for p in posix_str.split("/") if p]
+        proj_name = project_dir.name
+        if proj_name in parts:
+            idx = parts.index(proj_name)
+            subpath = "/".join(parts[idx + 1:])
+            if subpath:
+                cand = (project_dir / subpath).resolve()
+                if cand.is_file():
+                    return cand
+        if len(parts) >= 2:
+            two_part = "/".join(parts[-2:])
+            cand = (project_dir / two_part).resolve()
+            if cand.is_file():
+                return cand
+        if parts:
+            one_part = parts[-1]
+            cand = (project_dir / one_part).resolve()
+            if cand.is_file():
+                return cand
+        return raw_path
 
     # -- rollback helper ----------------------------------------------------
 
@@ -709,10 +736,7 @@ class DataCatalogService:
                 except OSError:
                     pass
             else:
-                try:
-                    payload.unlink()
-                except OSError:
-                    pass
+                safe_unlink(payload)
                 # Prune the now-empty version/asset directories.
                 for directory in (payload.parent, payload.parent.parent):
                     try:

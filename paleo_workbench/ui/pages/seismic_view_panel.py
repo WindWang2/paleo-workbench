@@ -47,7 +47,7 @@ class SeismicViewPanel(QFrame):
 
         self.title_label = QLabel("地震预测体")
         self.title_label.setObjectName("MapDockTitle")
-        outer.addWidget(self.title_label)
+        self.title_label.hide()
 
         self.attribute_strip = QFrame()
         self.attribute_strip.setObjectName("SeismicAttributeStrip")
@@ -61,7 +61,7 @@ class SeismicViewPanel(QFrame):
             ("构造特征", "可选"),
         ):
             attribute_layout.addWidget(self._attribute_card(label, status))
-        outer.addWidget(self.attribute_strip)
+        self.attribute_strip.hide()
 
         host = QFrame()
         host.setObjectName("SeismicViewHost")

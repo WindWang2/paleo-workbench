@@ -43,7 +43,7 @@ class PaleoWorkbenchWindow(QWidget):
         self.outer_layout = QVBoxLayout(self)
         self.outer_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.app_shell = AppShell(project=self.project)
+        self.app_shell = AppShell(project=self.project, parent=self)
         self._apply_project_to_shell()
         self.outer_layout.addWidget(self.app_shell)
         self._wire_menu_bar()
@@ -294,12 +294,14 @@ class PaleoWorkbenchWindow(QWidget):
 
     def _refresh_shell(self, *, defer_nonvisible_bindings: bool = False) -> None:
         """Tear down the current app shell and build a fresh one for ``self.project``."""
+        self.app_shell.hide()
         self.app_shell.shutdown_workers()
         self.outer_layout.removeWidget(self.app_shell)
         self.app_shell.setParent(None)
         self.app_shell.deleteLater()
         self.app_shell = AppShell(
             project=self.project,
+            parent=self,
             defer_nonvisible_bindings=defer_nonvisible_bindings,
         )
         self._apply_project_to_shell()

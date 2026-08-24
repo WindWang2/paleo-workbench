@@ -388,8 +388,6 @@ class DataDetailPanel(QFrame):
             child = layout.takeAt(0)
             widget = child.widget()
             if widget is not None:
+                widget.hide()
                 widget.setParent(None)
-                # Schedule teardown so parented children (e.g. the QPdfDocument
-                # owned by a PdfPreviewPanel) are actually released instead of
-                # accumulating one-per-selection across the session.
                 widget.deleteLater()
