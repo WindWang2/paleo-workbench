@@ -20,7 +20,7 @@ import weakref
 
 from pydantic import ValidationError
 
-from paleo_workbench.catalog.storage import fsync_dir
+from paleo_workbench.catalog.storage import fsync_dir, safe_unlink
 from paleo_workbench.project.factor_grid_artifacts import persist_factor_grid_artifacts
 from paleo_workbench.project.models import ProjectDocument, _now_iso
 from paleo_workbench.project.paths import (
@@ -368,10 +368,7 @@ class ProjectManager:
             # unsupported.  The file itself has already been flushed.
             fsync_dir(self.project_path.parent)
         except Exception:
-            try:
-                os.unlink(tmp_name)
-            except OSError:
-                pass
+            safe_unlink(tmp_name)
             if old_moved and not self.project_path.exists() and backup.exists():
                 try:
                     os.replace(backup, self.project_path)

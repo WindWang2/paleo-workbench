@@ -22,6 +22,7 @@ from paleo_workbench.catalog.storage import (
     catalog_dir_for,
     ensure_catalog_layout,
     fsync_dir,
+    safe_unlink,
 )
 
 
@@ -177,10 +178,7 @@ class CatalogStore:
             os.replace(tmp_name, path)
             fsync_dir(path.parent)
         except Exception:
-            try:
-                os.unlink(tmp_name)
-            except OSError:
-                pass
+            safe_unlink(tmp_name)
             if old_moved and not path.exists() and bak.exists():
                 # The canonical file was moved aside but the new one never
                 # landed: put the previous revision back (best-effort).

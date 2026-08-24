@@ -16,8 +16,8 @@ class SeismicHost:
 
     tab_title = "地震"
 
-    def __init__(self) -> None:
-        self.widget = SeismicView(auto_load=False)
+    def __init__(self, parent=None) -> None:
+        self.widget = SeismicView(parent=parent, auto_load=False)
         self._overlay_conn = None
         self._overlay_expected_path: str | None = None
 

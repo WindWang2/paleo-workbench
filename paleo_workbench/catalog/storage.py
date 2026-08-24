@@ -17,6 +17,7 @@ import hashlib
 import os
 import shutil
 import stat
+import sys
 import tempfile
 from pathlib import Path
 
@@ -137,10 +138,7 @@ def _place_blob_bytes(project_path: Path, digest: str, source: Path) -> None:
         os.replace(tmp_name, target)
         fsync_dir(target_dir)
     except Exception:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
+        safe_unlink(tmp_name)
         raise
     _make_readonly(target)
 
@@ -240,6 +238,21 @@ def restore_payload(
     return target.relative_to(_project_dir(project)).as_posix()
 
 
+def safe_unlink(path: Path | str) -> None:
+    """Safely unlink a file, handling Windows NTFS read-only attributes."""
+    p = Path(path)
+    try:
+        p.unlink()
+    except PermissionError:
+        try:
+            p.chmod(stat.S_IWRITE | stat.S_IREAD)
+            p.unlink()
+        except OSError:
+            pass
+    except (FileNotFoundError, OSError):
+        pass
+
+
 def purge_trashed_payload(
     project_path: Path, version_path: Path, *, shared: bool = False
 ) -> None:
@@ -256,20 +269,10 @@ def purge_trashed_payload(
     if is_cas_path(project, _relpath_for(project, source)):
         if shared:
             return
-        try:
-            source.unlink()
-        except FileNotFoundError:
-            return
-        except OSError:
-            return
+        safe_unlink(source)
         fsync_dir(source.parent)
         return
-    try:
-        source.unlink()
-    except FileNotFoundError:
-        return
-    except OSError:
-        return
+    safe_unlink(source)
     fsync_dir(source.parent)
     _prune_empty_ancestors(source.parent, 1)
 
@@ -281,8 +284,11 @@ def _relpath_for(project_path: Path, absolute: Path) -> str:
 
 def fsync_dir(directory: Path) -> None:
     """Best-effort fsync of a directory so rename metadata survives a crash."""
+    flag = getattr(os, "O_DIRECTORY", 0)
+    if sys.platform == "win32" or not flag:
+        return
     try:
-        fd = os.open(str(directory), os.O_RDONLY | os.O_DIRECTORY)
+        fd = os.open(str(directory), os.O_RDONLY | flag)
     except OSError:
         return
     try:
@@ -355,10 +361,7 @@ def place_managed_file(
                 if not keep_source:
                     # Dedup hit must not orphan the source working file in
                     # working/{version_id}/ (same move semantics as below).
-                    try:
-                        source.unlink()
-                    except OSError:
-                        pass
+                    safe_unlink(source)
                 project_dir = _project_dir(project)
                 return blob.relative_to(project_dir).as_posix(), blob.stat().st_size, known_sha256
         except OSError:
@@ -384,19 +387,13 @@ def place_managed_file(
         os.replace(tmp_name, target)
         fsync_dir(target_dir)
     except Exception:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
+        safe_unlink(tmp_name)
         raise
     hex_digest = digest.hexdigest()
     if known_sha256 is not None and known_sha256 != hex_digest:
         # Honest checksum: never silently adopt a caller-provided digest that
         # does not match the bytes actually placed.
-        try:
-            target.unlink()
-        except OSError:
-            pass
+        safe_unlink(target)
         raise CatalogError(
             f"Checksum mismatch for {source}: caller reported {known_sha256},"
             f" actual {hex_digest}"
@@ -405,10 +402,7 @@ def place_managed_file(
     if register_blob:
         place_blob(project, target, hex_digest)
     if not keep_source:
-        try:
-            source.unlink()
-        except OSError:
-            pass
+        safe_unlink(source)
     project_dir = _project_dir(project)
     return target.relative_to(project_dir).as_posix(), size, hex_digest
 
@@ -423,10 +417,19 @@ def create_working_copy(project_path: Path, version_path: Path, version_id: str)
     target_dir = working_dir_for(Path(project_path)) / version_id
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / version_path.name
-    if target.exists():
+    fd, tmp_name = tempfile.mkstemp(prefix=".work-", dir=str(target_dir))
+    try:
+        with os.fdopen(fd, "wb") as out, version_path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(CHUNK_SIZE), b""):
+                out.write(chunk)
+            out.flush()
+            os.fsync(out.fileno())
+        if target.exists():
+            _make_writable(target)
+        os.replace(tmp_name, target)
         _make_writable(target)
-        target.unlink()
-    shutil.copyfile(version_path, target)
-    _make_writable(target)
-    fsync_dir(target_dir)
+        fsync_dir(target_dir)
+    except Exception:
+        safe_unlink(tmp_name)
+        raise
     return target

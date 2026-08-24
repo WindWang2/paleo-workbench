@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import layer_model_core
 import numpy as np
+import pytest
+
+layer_model_core = pytest.importorskip("layer_model_core")
 
 from paleo_workbench.viz.native_factor_map import MapScene, NativeMapScene
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult

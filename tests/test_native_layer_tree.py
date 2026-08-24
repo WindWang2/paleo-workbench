@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import layer_model_core
 import pytest
+
+layer_model_core = pytest.importorskip("layer_model_core")
 from PySide6.QtCore import QModelIndex, Qt
 from PySide6.QtWidgets import QTreeView
 

@@ -222,6 +222,20 @@ class CatalogIndex:
         """Alias for :meth:`open` (whichever name the caller prefers)."""
         return self.open()
 
+    def _prune_dead_threads(self) -> None:
+        """Close and remove connections for threads that have exited."""
+        alive_tids = {t.ident for t in threading.enumerate()}
+        dead_conns = []
+        with self._conns_lock:
+            for tid in list(self._conns.keys()):
+                if tid not in alive_tids:
+                    dead_conns.append(self._conns.pop(tid))
+        for conn in dead_conns:
+            try:
+                conn.close()
+            except (sqlite3.Error, Exception):
+                pass
+
     def close(self) -> None:
         """Close ALL cached connections (one per thread), if any.
 
@@ -235,7 +249,7 @@ class CatalogIndex:
         for conn in conns:
             try:
                 conn.close()
-            except sqlite3.DatabaseError:
+            except (sqlite3.Error, Exception):
                 pass
 
     def _drop_current_connection(self) -> None:
@@ -252,7 +266,7 @@ class CatalogIndex:
         if conn is not None:
             try:
                 conn.close()
-            except sqlite3.DatabaseError:
+            except (sqlite3.Error, Exception):
                 pass
 
     def reset(self) -> None:
@@ -266,7 +280,7 @@ class CatalogIndex:
             path = Path(f"{self.db_path}{suffix}")
             try:
                 path.unlink()
-            except FileNotFoundError:
+            except (FileNotFoundError, OSError):
                 pass
 
     def _connect(self) -> sqlite3.Connection:
@@ -276,8 +290,9 @@ class CatalogIndex:
             conn = self._conns.get(tid)
         if conn is not None:
             return conn
+        self._prune_dead_threads()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(self.db_path))
+        conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         # WAL is safe here: writes are single-writer (the service serializes
         # saves under its lock) and WAL gives readers a consistent snapshot

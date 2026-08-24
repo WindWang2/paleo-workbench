@@ -1,7 +1,6 @@
-"""Unified properties dialog changes presentation only."""
-
-import layer_model_core
 import pytest
+
+layer_model_core = pytest.importorskip("layer_model_core")
 
 from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
 from paleo_workbench.viz.native_factor_map import MapScene

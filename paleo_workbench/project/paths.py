@@ -28,6 +28,37 @@ def artifact_dir_for(project_path: Path) -> Path:
     return project_path.with_name(f"{project_name}.artifacts")
 
 
+import os
+import stat
+import sys
+
+
+def _handle_remove_readonly(func, path, exc_info=None):
+    """Clear readonly bit and reattempt removal on Windows NTFS."""
+    try:
+        os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+        func(path)
+    except Exception:
+        pass
+
+
+def safe_rmtree(path: Path | str) -> None:
+    """Safely remove a directory tree, clearing Windows read-only flags on demand."""
+    p = Path(path)
+    if not p.exists():
+        return
+    try:
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(p, onexc=lambda func, path, exc: _handle_remove_readonly(func, path, exc))
+        else:
+            shutil.rmtree(p, onerror=_handle_remove_readonly)
+    except Exception:
+        try:
+            shutil.rmtree(p, ignore_errors=True)
+        except Exception:
+            pass
+
+
 @dataclass
 class StagedArtifactRelocation:
     """A reversible Save As artifact move/copy transaction.
@@ -58,7 +89,7 @@ class StagedArtifactRelocation:
         """Finalize a source-preserving copy only after target metadata is durable."""
         if not (self.copied_root or self.preserved_source):
             return
-        shutil.rmtree(self.source)
+        safe_rmtree(self.source)
 
     def rollback(self) -> None:
         """Best-effort reversal limited to entries this transaction owns."""
@@ -69,7 +100,7 @@ class StagedArtifactRelocation:
                 pass
         elif (self.copied_root or self.preserved_source) and self.target.exists():
             try:
-                shutil.rmtree(self.target)
+                safe_rmtree(self.target)
             except OSError:
                 pass
         for source, target in reversed(self.moved_children):
@@ -109,7 +140,7 @@ def stage_artifact_relocation(
         except Exception:
             try:
                 if target.exists():
-                    shutil.rmtree(target)
+                    safe_rmtree(target)
             except OSError:
                 pass
             raise

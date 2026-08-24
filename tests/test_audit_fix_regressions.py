@@ -690,7 +690,7 @@ def test_failed_snapshot_does_not_leak_style_into_reused_mirror(qtbot):
 
 def test_layer_properties_payload_preserves_labels_on_qgis_path(qtbot, monkeypatch):
     """#929-3: Apply on the native symbology path must not wipe label config."""
-    import layer_model_core
+    layer_model_core = pytest.importorskip("layer_model_core")
 
     from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
 

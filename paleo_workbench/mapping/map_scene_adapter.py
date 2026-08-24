@@ -26,7 +26,10 @@ class LegacyDocumentSceneAdapter:
     """Keep one ``MapScene`` synchronized with the active legacy document."""
 
     def __init__(self) -> None:
-        self.scene = MapScene()
+        try:
+            self.scene = MapScene()
+        except Exception:
+            self.scene = None
         self._document_id: str | None = None
         self._legacy_layer_ids: set[str] = set()
         # layer_id → (data_revision, style_revision, visible, opacity, name, crs, extent)
@@ -34,7 +37,10 @@ class LegacyDocumentSceneAdapter:
         self._last_snapshot = None
 
     def clear(self) -> None:
-        self.scene = MapScene()
+        try:
+            self.scene = MapScene()
+        except Exception:
+            self.scene = None
         self._document_id = None
         self._legacy_layer_ids.clear()
         self._synced_state.clear()
@@ -53,8 +59,12 @@ class LegacyDocumentSceneAdapter:
         cache_owner: object | None = None,
     ):
         """Synchronize revisions into the scene and return its render snapshot."""
+        if self.scene is None:
+            return None
         if document is None:
             self.clear()
+            if self.scene is None:
+                return None
             return self.scene.render_snapshot(project_crs=str(project_crs or ""))
         document_id = str(getattr(document, "id", "") or "map")
         if document_id != self._document_id:
