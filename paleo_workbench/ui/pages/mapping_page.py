@@ -822,6 +822,8 @@ class MappingPage(QWidget):
 
     def _refresh_unified_composition(self) -> None:
         """Project current live editor records into the unified renderer seam."""
+        if self.unified_scene is None:
+            return
         document = self._active_document
         scene = self._edit_scene()
         records = None
@@ -876,6 +878,8 @@ class MappingPage(QWidget):
 
     def _install_native_layer_tree(self, scene) -> None:
         """Swap the left dock to the C++ registry-backed tree for native overlays."""
+        if scene is None or getattr(scene, "registry", None) is None:
+            return
         if self._native_layer_tree is not None and self._native_layer_tree.model.registry is scene.registry:
             self._native_layer_tree.model.refresh()
             return

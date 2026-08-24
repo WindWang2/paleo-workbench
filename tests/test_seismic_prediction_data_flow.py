@@ -158,6 +158,7 @@ def test_data_page_emits_selected_segy_for_seismic_prediction(qtbot, tmp_path):
 def test_data_manager_segy_opens_seismic_prediction_page(qtbot, tmp_path, monkeypatch):
     from paleo_workbench.app import PaleoWorkbenchWindow
 
+    monkeypatch.setattr("paleo_workbench.viz.native_factor_map.require_native_scene", lambda: None)
     project = ProjectDocument.new("P")
     resource = _seismic_resource(tmp_path, "seis-1", "cube.sgy")
     project.resources.append(resource)
