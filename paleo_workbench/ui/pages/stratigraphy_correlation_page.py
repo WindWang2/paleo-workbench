@@ -416,7 +416,13 @@ class StratigraphyCorrelationPage(QWidget):
         if self._WellLogView is None:
             return None
         try:
-            view = self._WellLogView()
+            view = self._WellLogView(self.engine_host)
+        except TypeError:
+            try:
+                view = self._WellLogView()
+            except Exception as exc:  # noqa: BLE001 — surface to placeholder
+                self._engine_error = f"{exc.__class__.__name__}: {exc}"
+                return None
         except Exception as exc:  # noqa: BLE001 — surface to placeholder
             self._engine_error = f"{exc.__class__.__name__}: {exc}"
             return None
@@ -429,6 +435,7 @@ class StratigraphyCorrelationPage(QWidget):
 
     def _release_engine_view(self) -> None:
         if self._engine_view is not None:
+            self._engine_view.hide()
             clear = getattr(self._engine_view, "clear_multi_well_section", None)
             if callable(clear):
                 try:

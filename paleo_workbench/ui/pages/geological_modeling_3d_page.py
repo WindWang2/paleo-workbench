@@ -2163,12 +2163,16 @@ class GeologicalModeling3DPage(QWidget):
             # raising AttributeError on the now-None attribute.
             placeholder = self._joint_3d_placeholder
             if placeholder is not None:
+                placeholder.hide()
                 placeholder.setParent(None)
+                placeholder.deleteLater()
                 self._joint_3d_placeholder = None
             layout_3d.addWidget(self._joint_widget, 1)
             if profile is not None or time_map is not None:
                 if self._joint_2d_placeholder is not None:
+                    self._joint_2d_placeholder.hide()
                     self._joint_2d_placeholder.setParent(None)
+                    self._joint_2d_placeholder.deleteLater()
                     self._joint_2d_placeholder = None
                 split = QSplitter(Qt.Orientation.Horizontal)
                 split.setChildrenCollapsible(False)

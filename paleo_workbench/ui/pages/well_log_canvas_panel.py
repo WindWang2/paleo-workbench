@@ -359,7 +359,13 @@ class WellLogCanvasPanel(QFrame):
         if self._WellLogView is None:
             return None
         try:
-            view = self._WellLogView()
+            view = self._WellLogView(self.engine_host)
+        except TypeError:
+            try:
+                view = self._WellLogView()
+            except Exception as exc:  # pragma: no cover - env dependent
+                self._engine_error = f"WellLogView 创建失败: {exc}"
+                return None
         except Exception as exc:  # pragma: no cover - env dependent
             self._engine_error = f"WellLogView 创建失败: {exc}"
             return None
@@ -372,10 +378,10 @@ class WellLogCanvasPanel(QFrame):
 
     def _release_engine_document(self) -> None:
         if self._engine_view is not None:
+            self._engine_view.hide()
             layout = self.engine_host.layout()
             if layout is not None:
                 layout.removeWidget(self._engine_view)
-            self._engine_view.hide()
             self._engine_view.setParent(None)
             self._engine_view.deleteLater()
             self._engine_view = None

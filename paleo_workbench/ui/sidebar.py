@@ -92,8 +92,10 @@ class ContextSidebar(QFrame):
 
         # Clear existing buttons
         for btn in self.subpage_buttons:
+            btn.hide()
             self.subpage_layout.removeWidget(btn)
             btn.setParent(None)
+            btn.deleteLater()
         self.subpage_buttons.clear()
 
         for page_idx in subpage_indices:
@@ -287,8 +289,10 @@ class ContextSidebar(QFrame):
     def _render_lines(self, lines: list[tuple[str, bool]]) -> None:
         # Clear existing content labels
         for label in self._content_labels:
+            label.hide()
             self.content_layout.removeWidget(label)
             label.setParent(None)
+            label.deleteLater()
         self._content_labels.clear()
 
         for text, heading in lines:

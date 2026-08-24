@@ -81,43 +81,45 @@ class AppShell(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        self.menu_bar = MenuBar()
+        self.menu_bar = MenuBar(self)
         outer.addWidget(self.menu_bar)
 
-        self.workflow_stepper = WorkflowStepper()
+        self.workflow_stepper = WorkflowStepper(self)
         outer.addWidget(self.workflow_stepper)
 
         middle = QHBoxLayout()
         middle.setContentsMargins(0, 0, 0, 0)
         middle.setSpacing(0)
-        self.icon_rail = IconRail()
+        self.icon_rail = IconRail(self)
         self.icon_rail.setVisible(True)
-        self.sidebar = ContextSidebar()
+        self.sidebar = ContextSidebar(self)
         self.sidebar.setVisible(True)
-        self.page_stack = QStackedWidget()
-        self.page_stack.addWidget(HomePage())        # index 0 = 首页
+        self.page_stack = QStackedWidget(self)
+        self.page_stack.addWidget(HomePage(self.page_stack))        # index 0 = 首页
         self.data_page = DataPage(
             project=self.project,
             well_state_store=self._well_location_state_store,
+            parent=self.page_stack,
         )
         self.data_page.data_context_changed.connect(self.update_data_context)
         self.page_stack.addWidget(self.data_page)        # index 1 = 数据
         self._data_context = self._build_data_context()
-        self.page_stack.addWidget(WellLogPredictionPage()) # index 2 = 测井预测
-        self.page_stack.addWidget(SeismicPredictionPage()) # index 3 = 地震预测
-        self.page_stack.addWidget(SequenceFrameworkPage()) # index 4 = 层序格架
-        self.page_stack.addWidget(StratigraphyCorrelationPage())  # index 5 = 地层对比
+        self.page_stack.addWidget(WellLogPredictionPage(self.page_stack)) # index 2 = 测井预测
+        self.page_stack.addWidget(SeismicPredictionPage(self.page_stack)) # index 3 = 地震预测
+        self.page_stack.addWidget(SequenceFrameworkPage(self.page_stack)) # index 4 = 层序格架
+        self.page_stack.addWidget(StratigraphyCorrelationPage(self.page_stack))  # index 5 = 地层对比
         self.page_stack.addWidget(
             VisualizationPage(
                 well_state_store=self._well_location_state_store,
+                parent=self.page_stack,
             )
         ) # index 6 = 可视化
-        self.page_stack.addWidget(PreparationPage()) # index 7 = 制备
-        self.mapping_page = MappingPage()
+        self.page_stack.addWidget(PreparationPage(self.page_stack)) # index 7 = 制备
+        self.mapping_page = MappingPage(self.page_stack)
         self.mapping_page.mapping_context_changed.connect(self.update_mapping_context)
         self.page_stack.addWidget(self.mapping_page)  # index 8 = 编图
-        self.page_stack.addWidget(ReviewExportPage()) # index 9 = 成图审核
-        self.geomodel_page = GeologicalModeling3DPage()
+        self.page_stack.addWidget(ReviewExportPage(self.page_stack)) # index 9 = 成图审核
+        self.geomodel_page = GeologicalModeling3DPage(self.page_stack)
         self._run_or_defer_page_update(
             PAGE_INDEX_GEOMODEL,
             "project",
@@ -132,7 +134,7 @@ class AppShell(QWidget):
         middle.addWidget(self.page_stack, 1)
         outer.addLayout(middle, 1)
 
-        self.status_bar = StatusBar()
+        self.status_bar = StatusBar(self)
         outer.addWidget(self.status_bar)
 
         # Signal connections
