@@ -65,6 +65,7 @@ class ProjectController:
         # sole job is making project replacement an explicit lifecycle edge.
         self._session_generation = 0
         self._maintenance_thread: threading.Thread | None = None
+        self._maintenance_cancel: threading.Event | None = None
         self._migration_bridge = _DomainMigrationBridge()
         self._migration_bridge.migration_staged.connect(
             self._on_domain_migration_staged
@@ -89,13 +90,12 @@ class ProjectController:
         the user closes again afterwards (documented UX).
         """
         self._session_generation += 1
+        if self._maintenance_cancel is not None:
+            self._maintenance_cancel.set()
         thread = self._maintenance_thread
         if thread is not None and thread.is_alive() and thread is not threading.current_thread():
-            # #937-7: GUI-thread project open/close/switch must never block 5 s
-            # on the maintenance thread. Probe briefly then treat a lingering
-            # thread as non-cooperative — the caller aborts the replacement and
-            # the thread drains via detached keeper.
-            thread.join(timeout=0.2)
+            # Signal cooperative cancellation and join with a short grace window
+            thread.join(timeout=0.5)
             if thread.is_alive():
                 self._session_generation += 1
                 return False
@@ -300,9 +300,13 @@ class ProjectController:
                 or self.window.project_path != target
             ):
                 return
+            if self._maintenance_cancel is not None:
+                self._maintenance_cancel.set()
+            cancel_event = threading.Event()
+            self._maintenance_cancel = cancel_event
             thread = threading.Thread(
                 target=self._run_catalog_maintenance,
-                args=(generation, target, loaded, resources_snapshot),
+                args=(generation, target, loaded, resources_snapshot, cancel_event),
                 name="catalog-maintenance",
                 daemon=True,
             )
@@ -317,9 +321,11 @@ class ProjectController:
         target: Path,
         loaded: ProjectDocument,
         resources_snapshot: list,
+        cancel_event: threading.Event | None = None,
     ) -> None:
         if (
             generation != self._session_generation
+            or (cancel_event is not None and cancel_event.is_set())
             or self.window.project is not loaded
             or self.window.project_path != target
         ):
@@ -331,6 +337,8 @@ class ProjectController:
             service = get_catalog_service()
         except Exception:
             service = None
+        if (cancel_event is not None and cancel_event.is_set()) or generation != self._session_generation:
+            return
         if service is not None:
             try:
                 service.migrate_legacy_resources(resources_snapshot)
@@ -340,6 +348,8 @@ class ProjectController:
                 # Canonical project/catalog remain available even if an
                 # optional acceleration rebuild cannot complete.
                 pass
+        if (cancel_event is not None and cancel_event.is_set()) or generation != self._session_generation:
+            return
         # WorkArea domain staging (schema v1 → v2): heavy file parsing only —
         # NO document mutation on this thread.  Binding runs in the GUI slot.
         try:
@@ -362,7 +372,10 @@ class ProjectController:
                 loaded,
                 resources_snapshot,
                 path_resolver=resolver,
+                cancel_event=cancel_event,
             )
+            if (cancel_event is not None and cancel_event.is_set()) or generation != self._session_generation:
+                return
             if staged or mapping:
                 self._migration_bridge.migration_staged.emit(
                     str(target), generation, mapping, staged

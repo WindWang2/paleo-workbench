@@ -11,7 +11,9 @@ from decimal import Decimal
 import logging
 import math
 from pathlib import Path
+import os
 import re
+import sys
 from typing import Any, Callable, Generator
 import warnings
 
@@ -100,6 +102,28 @@ def _repo_root() -> Path:
 _REPO_ROOT_CACHE: Path | None = None
 
 
+def _ensure_windows_dll_directories() -> None:
+    """Register native DLL directories for Python 3.8+ on Windows (#988)."""
+    if sys.platform != "win32" or not hasattr(os, "add_dll_directory"):
+        return
+    root = _repo_root()
+    candidate_dirs = [
+        root / "bin",
+        root / "native" / "bin",
+        root / "well-log-engine" / "bin",
+        root / "native" / "build",
+    ]
+    for d in candidate_dirs:
+        if d.is_dir():
+            try:
+                os.add_dll_directory(str(d.resolve()))
+            except OSError:
+                pass
+
+
+_ensure_windows_dll_directories()
+
+
 def _package_version() -> str:
     """Version the native extensions are expected to be built against."""
     import paleo_workbench
@@ -139,7 +163,9 @@ def _module_origin(mod: Any) -> str:
     module_path = Path(getattr(mod, "__file__", "") or "")
     if not module_path.is_absolute():
         return "installed"
-    if _resolve_cached(module_path).parent == _repo_root():
+    mod_parent_str = os.path.normcase(os.path.normpath(str(_resolve_cached(module_path).parent)))
+    repo_root_str = os.path.normcase(os.path.normpath(str(_repo_root())))
+    if mod_parent_str == repo_root_str:
         return "repo_root"
     return "installed"
 

@@ -58,6 +58,7 @@ from paleo_workbench.catalog.storage import (
     place_managed_file,
     purge_trashed_payload,
     restore_payload as _restore_trashed_payload,
+    safe_unlink,
     trash_dir_for as _trash_dir_for,
     trash_payload as _move_to_trash,
 )
@@ -735,10 +736,7 @@ class DataCatalogService:
                 except OSError:
                     pass
             else:
-                try:
-                    payload.unlink()
-                except OSError:
-                    pass
+                safe_unlink(payload)
                 # Prune the now-empty version/asset directories.
                 for directory in (payload.parent, payload.parent.parent):
                     try:

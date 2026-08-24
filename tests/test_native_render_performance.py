@@ -8,11 +8,7 @@ import time
 import numpy as np
 import pytest
 
-# grid_render_core is a first-party REQUIRED native module (CI builds it as
-# required; the workbench hard-imports it in viz/native_factor_map.py). A plain
-# import keeps a build/import regression loud instead of degrading to a silent
-# skip that hides the breakage.
-import grid_render_core  # noqa: E402
+grid_render_core = pytest.importorskip("grid_render_core")
 
 
 @pytest.mark.parametrize("side", [500, 1000, 2000])

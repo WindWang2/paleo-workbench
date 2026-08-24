@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import threading
 from typing import Any, Callable, Iterable
 
 from paleo_workbench.project.domain import (
@@ -534,6 +535,7 @@ def stage_resources(
     *,
     path_resolver: PathResolver,
     engine: Any | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> list[StagedResource]:
     """Parse geo-typed resources into plain payloads (worker-safe, no mutation).
 
@@ -543,6 +545,8 @@ def stage_resources(
     staged: list[StagedResource] = []
     project_crs = str(getattr(project.coordinate, "project_crs", "") or "")
     for resource in resources:
+        if cancel_event is not None and cancel_event.is_set():
+            break
         rtype = str(getattr(resource, "type", "") or "")
         if rtype not in (
             *SEISMIC_TYPES,

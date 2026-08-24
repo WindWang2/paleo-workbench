@@ -13,7 +13,7 @@ import os
 import numpy as np
 
 from PySide6.QtCore import QRectF, Qt, QObject, QEvent, Signal, QTimer
-from PySide6.QtGui import QBrush, QColor, QIcon, QLinearGradient, QPainter, QPixmap
+from PySide6.QtGui import QBrush, QCloseEvent, QColor, QIcon, QLinearGradient, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QFrame, QLabel, QPushButton,
     QTreeWidget, QTreeWidgetItem, QComboBox, QSlider, QSplitter, QProgressBar,
@@ -3324,21 +3324,6 @@ class GeologicalModeling3DPage(QWidget):
     # Cleanup
     # ------------------------------------------------------------------ #
 
-    def __del__(self) -> None:
-        # Prevent thread cleanup race conditions on widget disposal
-        try:
-            self._modeling_job.shutdown()
-        except Exception:
-            pass
-        try:
-            self._export_job.shutdown()
-        except Exception:
-            pass
-        try:
-            self._advisor_job.shutdown()
-        except Exception:
-            pass
-        try:
-            self._stratal_job.shutdown()
-        except Exception:
-            pass
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self.shutdown_workers()
+        super().closeEvent(event)

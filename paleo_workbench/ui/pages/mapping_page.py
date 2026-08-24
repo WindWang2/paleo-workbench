@@ -559,16 +559,19 @@ class MappingPage(QWidget):
         # never receives a QCloseEvent when the window/shell is torn down —
         # without this the QThread is destroyed while running (qFatal abort on
         # exit, H12). Shut it down explicitly on the same hook.
+        raster_ok = True
         try:
             canvas_panel = getattr(self, "canvas_panel", None)
             native_canvas = getattr(canvas_panel, "native_canvas", None)
             if native_canvas is not None:
                 controller = getattr(native_canvas, "_raster_controller", None)
                 if controller is not None:
-                    controller.shutdown(wait_ms)
+                    res = controller.shutdown(wait_ms)
+                    if res is False:
+                        raster_ok = False
         except Exception:
             pass
-        return joined and export_ok
+        return joined and export_ok and raster_ok
 
     def save_draft(self) -> bool:
         """Write scene features back into the active PaleoMapDocument and clear dirty."""

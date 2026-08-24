@@ -47,5 +47,8 @@ def cleanup_qt_deferred_deletes():
     shutdown_live_fallback_backends()
     app = QApplication.instance()
     if app is not None:
-        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-        app.processEvents()
+        try:
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            app.processEvents()
+        except Exception:
+            pass

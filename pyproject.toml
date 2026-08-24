@@ -92,7 +92,13 @@ paleo_workbench = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = [
+    "tests",
+    "geo-viz-engine/packages/geoviz_cross_well/tests",
+    "geo-viz-engine/packages/geoviz_well_log/tests",
+    "geo-viz-engine/packages/geoviz_well_seismic_3d/tests",
+    "geo-viz-engine/packages/geoviz_well_tie/tests",
+]
 qt_api = "pyside6"
 markers = [
     "slow: opt-in real-data or graphics tests; skip in fast CI with -m 'not slow'",

@@ -392,6 +392,29 @@ def _prepare_geometry(geometry: object) -> tuple[str, tuple[np.ndarray, ...]] | 
                 if ring is not None and len(ring) >= 3
             )
         return ("polygon", tuple(parts)) if parts else None
+    if geometry_type == "GeometryCollection":
+        geometries = geometry.get("geometries") or ()
+        poly_parts: list[np.ndarray] = []
+        l_parts: list[np.ndarray] = []
+        pt_parts: list[np.ndarray] = []
+        for subgeom in geometries:
+            prep = _prepare_geometry(subgeom)
+            if prep is None:
+                continue
+            kind, subparts = prep
+            if kind == "polygon":
+                poly_parts.extend(subparts)
+            elif kind == "line":
+                l_parts.extend(subparts)
+            elif kind == "point":
+                pt_parts.extend(subparts)
+        if poly_parts:
+            return ("polygon", tuple(poly_parts))
+        if l_parts:
+            return ("line", tuple(l_parts))
+        if pt_parts:
+            return ("point", tuple(pt_parts))
+        return None
     return None
 
 

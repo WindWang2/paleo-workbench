@@ -441,14 +441,19 @@ class DataPage(QWidget):
             self._shutdown_workers()
         return super().event(event)
 
-    def _shutdown_workers(self) -> bool:
-        wait_ms = _SHUTDOWN_WAIT_MS
+    def shutdown_workers(self, wait_ms: int = _SHUTDOWN_WAIT_MS) -> bool:
+        """Public teardown hook matching AppShell shutdown protocol."""
+        return self._shutdown_workers(wait_ms=wait_ms)
+
+    def _shutdown_workers(self, wait_ms: int = _SHUTDOWN_WAIT_MS) -> bool:
         preview_joined = self._preview_controller.shutdown(wait_ms)
         visualization_joined = self._visualization_controller.shutdown(wait_ms)
         import_joined = self._shutdown_import_jobs(wait_ms)
         deliver_joined = self._deliver_job.shutdown(wait_ms)
         export_joined = self._export_job.shutdown(wait_ms)
         verify_joined = self._verify_job.shutdown(wait_ms)
+        domain_bind_joined = self._domain_bind_job.shutdown(wait_ms)
+        catalog_copy_joined = self._catalog_copy_job.shutdown(wait_ms)
         joined = all(
             result is not False
             for result in (
@@ -458,6 +463,8 @@ class DataPage(QWidget):
                 deliver_joined,
                 export_joined,
                 verify_joined,
+                domain_bind_joined,
+                catalog_copy_joined,
             )
         )
         # Do not tear down active-engine widgets if a project switch is about

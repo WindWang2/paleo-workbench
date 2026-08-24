@@ -12,14 +12,22 @@ import sys
 from pybind11.setup_helpers import build_ext
 
 
+def _is_msvc_compiler(compiler_type: str | None, platform: str | None = None) -> bool:
+    plat = sys.platform if platform is None else platform
+    if plat != "win32":
+        return False
+    if compiler_type in ("unix", "mingw32", "cygwin"):
+        return False
+    return True
+
+
 def compile_args_for(
     compiler_type: str | None,
     *,
     platform: str | None = None,
     openmp: bool = False,
 ) -> list[str]:
-    plat = sys.platform if platform is None else platform
-    is_msvc = plat == "win32" and compiler_type != "unix"
+    is_msvc = _is_msvc_compiler(compiler_type, platform)
     if is_msvc:
         args = ["/O2", "/fp:fast", "/std:c++17", "/utf-8", "/EHsc"]
         if openmp:
@@ -37,8 +45,7 @@ def link_args_for(
     platform: str | None = None,
     openmp: bool = False,
 ) -> list[str]:
-    plat = sys.platform if platform is None else platform
-    is_msvc = plat == "win32" and compiler_type != "unix"
+    is_msvc = _is_msvc_compiler(compiler_type, platform)
     if is_msvc or not openmp:
         return []
     return ["-fopenmp"]

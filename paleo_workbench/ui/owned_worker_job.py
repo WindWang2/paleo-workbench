@@ -132,6 +132,12 @@ class OwnedWorkerJob(QObject):
             thread.finished.disconnect(self._on_thread_stopped)
         except (RuntimeError, TypeError):
             pass
+        if self._destroyed_conn is not None:
+            try:
+                QObject.disconnect(self._destroyed_conn)
+            except (RuntimeError, TypeError):
+                pass
+            self._destroyed_conn = None
         cancel = self._cancel
         if cancel is not None:
             try:

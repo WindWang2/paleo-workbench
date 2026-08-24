@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -24,7 +25,7 @@ import pytest
 
 from paleo_workbench.catalog.models import CatalogError
 from paleo_workbench.catalog.service import DataCatalogService
-from paleo_workbench.catalog.storage import catalog_dir_for
+from paleo_workbench.catalog.storage import catalog_dir_for, safe_unlink
 from paleo_workbench.catalog.store import (
     CatalogStore,
     catalog_bak_file_for,
@@ -116,7 +117,10 @@ def test_sigkill_mid_save_reopens_consistent(tmp_path: Path, mode: str):
         env=env,
         timeout=120,
     )
-    assert proc.returncode == -9, proc.stderr.decode()  # killed by SIGKILL
+    if sys.platform == "win32":
+        assert proc.returncode == signal.SIGTERM, proc.stderr.decode()
+    else:
+        assert proc.returncode in (-signal.SIGKILL, -9), proc.stderr.decode()
 
     path = catalog_file_for(project)
     if path.is_file():
@@ -300,7 +304,7 @@ def test_committed_version_never_claims_missing_payload(service):
     assert payload.is_file()
 
     # Simulate post-commit loss: integrity reports missing, never fabricates.
-    payload.unlink()
+    safe_unlink(payload)
     assert service.verify_integrity(version.id).status_for(version.id) == "missing"
     # The canonical document is untouched (report-only).
     assert service.get_version(version.id).sha256 is not None

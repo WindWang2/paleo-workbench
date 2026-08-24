@@ -59,6 +59,14 @@ class SeismicVolumeMetadata:
     def shape(self) -> tuple[int, int, int]:
         return (self.n_inlines, self.n_crosslines, self.n_samples)
 
+    @property
+    def is_valid(self) -> bool:
+        return self.n_inlines > 0 and self.n_crosslines > 0 and self.n_samples > 0
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.is_valid
+
     def iline_number(self, index: int) -> int:
         return int(self.iline_start + index * self.iline_step)
 
@@ -94,9 +102,11 @@ def preview_strides(
     max_budget: int = DEFAULT_PREVIEW_BUDGET,
 ) -> tuple[int, int, int]:
     """Compute positive strides so downsampled volume fits max_dim / budget."""
-    fi = max(1, math.ceil(n_il / max_dim)) if n_il > 0 else 1
-    fx = max(1, math.ceil(n_xl / max_dim)) if n_xl > 0 else 1
-    ft = max(1, math.ceil(n_s / max_dim)) if n_s > 0 else 1
+    if n_il <= 0 or n_xl <= 0 or n_s <= 0:
+        return (1, 1, 1)
+    fi = max(1, math.ceil(n_il / max_dim))
+    fx = max(1, math.ceil(n_xl / max_dim))
+    ft = max(1, math.ceil(n_s / max_dim))
     # Grow strides if voxel budget still exceeds.
     while True:
         out_il = max(1, math.ceil(n_il / fi)) if n_il else 1
@@ -281,6 +291,10 @@ class SeismicVolumeSource:
         if self._closed:
             raise RuntimeError("SeismicVolumeSource is closed")
         meta = self.metadata()
+        if meta.is_empty:
+            raise ValueError(
+                f"Cannot read trace from empty or corrupt SEGY volume ({meta.shape})"
+            )
         if (
             meta.is_pseudo
             or self._loader is None
@@ -316,6 +330,10 @@ class SeismicVolumeSource:
         if self._closed:
             raise RuntimeError("SeismicVolumeSource is closed")
         meta = self.metadata()
+        if meta.is_empty:
+            raise ValueError(
+                f"Cannot read slice from empty or corrupt SEGY volume ({meta.shape})"
+            )
         if (
             meta.is_pseudo
             or self._loader is None
@@ -371,6 +389,8 @@ class SeismicVolumeSource:
         if self._closed:
             raise RuntimeError("SeismicVolumeSource is closed")
         meta = self.metadata()
+        if meta.is_empty and not Path(self._path).is_file():
+            return None, "SEGY 文件不存在"
         strides = preview_strides(
             meta.n_inlines,
             meta.n_crosslines,
