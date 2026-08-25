@@ -176,7 +176,7 @@ jobs:
             libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
             libxcb-xfixes0 libxcb-xinerama0 libxkbcommon-x11-0 \
             libfontconfig1 libfreetype6 \
-            libasan8
+            libasan8 clang
 
       - name: Install Python dependencies
         run: |
@@ -208,9 +208,20 @@ jobs:
           python -m pip install -e native/well_log_core
 
       - name: Run suite under ASan interposition
+        # Prefer clang's runtime: gcc-13 libasan's __cxa_throw interceptor
+        # CHECK-fails ("real___cxa_throw == 0") on the first C++ exception
+        # thrown by an UNINSTRUMENTED bundled lib (pyproj's libproj) — runs
+        # 2/3 died at the first CRS parse (exit 86, no real finding;
+        # intercept_cxa_throw=0 is not honored by this runtime). Newer
+        # clang_rt falls back gracefully there; it is ABI-compatible with
+        # the gcc-built instrumented cores.
         run: |
           source native/gdal-vendored/install/env.sh
-          ASAN_LIB="$(gcc -print-file-name=libasan.so)"
+          ASAN_LIB="$(clang -print-file-name=libclang_rt.asan-x86_64.so)"
+          if [ ! -f "$ASAN_LIB" ]; then
+            ASAN_LIB="$(gcc -print-file-name=libasan.so)"
+          fi
+          echo "ASan runtime: $ASAN_LIB"
           ls -l "$ASAN_LIB"
           set +e
           LD_PRELOAD="$ASAN_LIB" python -m pytest -v --tb=line \
