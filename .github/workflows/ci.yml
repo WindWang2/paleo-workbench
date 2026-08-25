@@ -13,6 +13,13 @@ jobs:
     name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # pyproject (and the geoviz/native subpackages) pin requires-python to
+    # >=3.12,<3.13 by policy (cp312/cp313 .so shadowing, #435/#851), but the
+    # 3.13 legs below are deliberate #951 diagnostics: bypass the metadata
+    # gate for every pip invocation in this job instead of flagging each
+    # install line. Harmless on the 3.12 legs (all pins already satisfied).
+    env:
+      PIP_IGNORE_REQUIRES_PYTHON: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -98,11 +105,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          # --ignore-requires-python: pyproject pins requires-python to
-          # >=3.12,<3.13 by policy (cp312/cp313 .so shadowing, #435/#851),
-          # but this job's 3.13 legs are deliberate #951 diagnostics — the
-          # metadata gate must not kill them at install time.
-          python -m pip install --prefer-binary --ignore-requires-python -e ".[dev,native]"
+          python -m pip install --prefer-binary -e ".[dev,native]"
           # geo-viz-engine subpackages (may pull shapely, scipy, …). These
           # installs MUST fail closed (packaging #442): the previous `|| true`
           # best-effort silently shrank the tested surface (broken dependency
