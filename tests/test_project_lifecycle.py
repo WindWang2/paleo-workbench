@@ -37,7 +37,19 @@ def test_open_dialog_defaults_to_workspace_project_area(qtbot, monkeypatch):
         fake_dialog,
     )
     assert window.project_controller._choose_open_project() is None
-    assert Path(captured["start_dir"]).parts[-2:] == ("data", "project_area")
+    # The contract under test: the dialog opens in the workspace project area
+    # when one exists in the checkout, and in the user's home otherwise (CI
+    # checkouts have no data/project_area). Derive the expectation from the
+    # same resolver instead of hardcoding workspace layout parts.
+    from paleo_workbench.ui import project_controller
+
+    expected = str(Path.home())
+    for parent in Path(project_controller.__file__).resolve().parents:
+        candidate = parent / "data" / "project_area"
+        if candidate.is_dir():
+            expected = str(candidate)
+            break
+    assert captured["start_dir"] == expected
 
 
 def test_open_dialog_prefers_current_project_dir(qtbot, monkeypatch, tmp_path: Path):

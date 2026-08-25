@@ -441,6 +441,7 @@ class TestStorageDatabaseAndTransactions:
         assert not (read_only_tree / "sub_dir").exists()
         assert not (read_only_tree / "sub_dir" / "file1.txt").exists()
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="normcase case-folding is Windows-only semantics (#991)")
     def test_991_case_insensitive_path_normalization(self):
         """#991: Normalize case-insensitive paths on Windows (os.path.normcase)."""
         p1 = "C:\\Projects\\Paleo\\Data.SEGY"
@@ -1012,6 +1013,7 @@ class TestNativeBridgeAndPlatformCompatibility:
         assert isinstance(res, bool)
         assert bootstrap_dll_directory(dll_dir) is True
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="'l' is 4 bytes only on Windows LLP64 (#989)")
     def test_989_32bit_long_buffer_format_windows_llp64(self):
         """#989: Support 32-bit 'long' buffer format ('l') on Windows LLP64."""
         # In LLP64 (Windows 64-bit), struct format 'l' is 4 bytes (int32), 'q' is 8 bytes (int64)

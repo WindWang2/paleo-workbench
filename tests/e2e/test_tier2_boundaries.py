@@ -448,6 +448,7 @@ class TestStorageAndWindowsBoundaries:
         assert isinstance(handle_remove_readonly, object)
         assert True
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="normcase case-folding is Windows-only semantics (#991)")
     def test_991_normcase_mixed_slashes_and_special_chars(self):
         """#991 boundary: Mixed slashes /\\/\\, unicode case-folding, trailing slashes."""
         p1 = "C:/Projects/Paleo/Data/../Data/File.DAT"
@@ -1020,6 +1021,7 @@ class TestNativeAndPlatformBoundaries:
         assert True
         assert True
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="'l' is 4 bytes only on Windows LLP64 (#989)")
     def test_989_32bit_long_format_min_max_overflow(self):
         """#989 boundary: 32-bit signed integer limits (-2^31 to 2^31-1) in 'l' format."""
         INT32_MAX = 2147483647

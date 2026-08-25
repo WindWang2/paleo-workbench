@@ -1386,6 +1386,28 @@ class MappingPage(QWidget):
         capture = list(getattr(tool, "points", ()) or ())
         snap = self._snapping.last_match.point if self._snapping.last_match is not None else None
         chrome = dict(getattr(self._active_document, "map_chrome", None) or {})
+        # This runs inside QWidget::paintEvent via the canvas overlay provider.
+        # Without the optional native scene modules (#1001 degradation)
+        # unified_scene is None: an exception here aborts the painter mid-paint
+        # ("QBackingStore::endPaint with active painter" → heap corruption,
+        # observed as SIGSEGV under GC in the full suite). Degrade to an empty
+        # legend instead.
+        scene = self.unified_scene
+        if scene is None:
+            legend_items: list[dict[str, object]] = []
+        else:
+            legend_items = [
+                {
+                    "label": layer.name,
+                    "color": (
+                        (scene.vector_style(layer.id) or {}).get("fill")
+                        or (scene.vector_style(layer.id) or {}).get("stroke")
+                        or "#6c8ebf"
+                    ),
+                }
+                for layer in scene.registry.layers()
+                if layer.visible and layer.type.name != "Group"
+            ]
         return {
             "selected_features": selected,
             "capture_points": capture,
@@ -1393,18 +1415,7 @@ class MappingPage(QWidget):
             "decorations": {
                 "title": chrome.get("title") or getattr(self._active_document, "name", ""),
                 "elements": list(chrome.get("elements") or ("图例", "指北针", "比例尺", "标题栏")),
-                "legend_items": [
-                    {
-                        "label": layer.name,
-                        "color": (
-                            (self.unified_scene.vector_style(layer.id) or {}).get("fill")
-                            or (self.unified_scene.vector_style(layer.id) or {}).get("stroke")
-                            or "#6c8ebf"
-                        ),
-                    }
-                    for layer in self.unified_scene.registry.layers()
-                    if layer.visible and layer.type.name != "Group"
-                ],
+                "legend_items": legend_items,
             },
         }
 

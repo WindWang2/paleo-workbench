@@ -239,16 +239,28 @@ class CatalogIndex:
     def close(self) -> None:
         """Close ALL cached connections (one per thread), if any.
 
-        A connection owned by another thread cannot be closed from here; it
-        is dropped from the pool and garbage-collected, and the owning thread
-        reconnects lazily on its next use.
+        A connection owned by another thread cannot be closed from here:
+        freeing the handle under an in-flight statement in the owner thread
+        is use-after-free at the sqlite3 C layer (SIGSEGV; #394 / C31,
+        reproduced by the Save As rollback racing a catalog-maintenance
+        rebuild). Foreign connections are interrupted — the one cross-thread
+        API sqlite3 guarantees — dropped from the pool, and closed by their
+        owner (or the garbage collector); the owning thread reconnects
+        lazily on its next use.
         """
+        tid = threading.get_ident()
         with self._conns_lock:
-            conns = list(self._conns.values())
+            mine = self._conns.pop(tid, None)
+            foreign = list(self._conns.values())
             self._conns.clear()
-        for conn in conns:
+        if mine is not None:
             try:
-                conn.close()
+                mine.close()
+            except (sqlite3.Error, Exception):
+                pass
+        for conn in foreign:
+            try:
+                conn.interrupt()
             except (sqlite3.Error, Exception):
                 pass
 

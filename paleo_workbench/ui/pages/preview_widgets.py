@@ -10,7 +10,7 @@ compatibility for existing imports and monkeypatches in tests.
 from paleo_workbench.ui.pages.geotiff_preview_widget import GeoTiffPreviewWidget
 from paleo_workbench.ui.pages.image_preview_widget import ImagePreviewWidget
 from paleo_workbench.ui.pages.json_tree_preview_widget import JsonTreePreviewWidget
-from paleo_workbench.ui.pages.media_preview_widget import MediaPreviewWidget, QAudioOutput, QMediaPlayer
+from paleo_workbench.ui.pages.media_preview_widget import MediaPreviewWidget
 from paleo_workbench.ui.pages.message_preview_widget import MessagePreviewWidget
 from paleo_workbench.ui.pages.pdf_preview_widget import QPdfDocument, QPdfView, PdfPreviewWidget
 from paleo_workbench.ui.pages.rich_text_preview_widget import RichTextPreviewWidget
@@ -44,3 +44,19 @@ __all__ = [
     "_LocalOnlyPage",
     "_LocalOnlyRequestInterceptor",
 ]
+
+
+def __getattr__(name):
+    """Lazy QtMultimedia re-exports (#951).
+
+    ``QMediaPlayer``/``QAudioOutput``/``QVideoWidget`` resolve on first
+    attribute access — importing this facade (which every app-shell test
+    does) must not initialize the media backend plugins. Explicit
+    ``setattr`` (e.g. test monkeypatches) lands in this module's __dict__
+    and shadows this hook, preserving the existing seams.
+    """
+    if name in ("QMediaPlayer", "QAudioOutput", "QVideoWidget"):
+        from paleo_workbench.ui.pages import media_preview_widget
+
+        return getattr(media_preview_widget, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

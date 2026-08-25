@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from paleo_workbench.mapping.map_scene_adapter import LegacyDocumentSceneAdapter
 
 

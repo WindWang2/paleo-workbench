@@ -110,6 +110,11 @@ def test_single_factor_pipeline_contours_and_facies():
     assert contours[0]["geometry"]["type"] == "LineString"
 
     facies = extract_facies_polygons(grid, extent)
-    assert len(facies) == 3
+    # #977 marching-squares + polygonization: on this diagonal ramp the same
+    # facies band (三角洲前缘砂) forms TWO disconnected components at opposite
+    # corners, so 4 polygons across 3 distinct facies. The old synthetic
+    # striping collapsed them into 3 with distorted geometry.
+    assert len(facies) == 4
+    assert len({f["properties"]["facies_name"] for f in facies}) == 3
     assert facies[0]["geometry"]["type"] in {"Polygon", "MultiPolygon"}
     assert "facies_name" in facies[0]["properties"]

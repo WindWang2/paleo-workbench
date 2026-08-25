@@ -378,9 +378,10 @@ class TestInteractionWindowsPlatformInfrastructure:
         assert "\\" not in posix_layer_path
         assert "dataset_project.json" in posix_layer_path
 
-        # 4. Case-insensitive normalization
-        norm_case_key = os.path.normcase(raw_win_path)
-        assert norm_case_key == os.path.normcase(raw_win_path.upper())
+        # 4. Case-insensitive normalization (Windows-only case folding)
+        if sys.platform == "win32":
+            norm_case_key = os.path.normcase(raw_win_path)
+            assert norm_case_key == os.path.normcase(raw_win_path.upper())
 
         # 5. CRLF vs LF hash calculation on stored project
         file_crlf = "name: Permian Facies\r\nversion: 2.1\r\nauthor: Geologist\r\n"
@@ -472,11 +473,12 @@ class TestInteractionNativeBridgeDecoupling:
         compiler_info = NativeBackendService.get_compiler_info()
         assert "type" in compiler_info
 
-        # 3. Buffer protocol 32-bit 'l' format on LLP64
-        int32_val = 987654
-        packed = struct.pack("l", int32_val)
-        assert len(packed) == 4
-        assert struct.unpack("l", packed)[0] == int32_val
+        # 3. Buffer protocol 32-bit 'l' format (Windows LLP64 only; 8 bytes on LP64)
+        if sys.platform == "win32":
+            int32_val = 987654
+            packed = struct.pack("l", int32_val)
+            assert len(packed) == 4
+            assert struct.unpack("l", packed)[0] == int32_val
 
         # 4. GIL-safe progress callback invocation
         progress_records = []

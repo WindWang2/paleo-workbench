@@ -13,7 +13,7 @@ def test_seismic_host_never_invokes_synchronous_segy_load(monkeypatch, tmp_path)
     calls = []
 
     class FakeView:
-        def __init__(self, *, auto_load=False):
+        def __init__(self, *, auto_load=False, parent=None):
             pass
 
         def load_segy(self, path):
@@ -44,7 +44,7 @@ def test_seismic_host_overlay_closure_only_fires_for_requested_path(monkeypatch,
     class FakeView(QObject):
         segy_loaded = Signal(object)
 
-        def __init__(self, *, auto_load=False):
+        def __init__(self, *, auto_load=False, parent=None):
             super().__init__()
 
         def load_segy_async(self, path):
@@ -95,7 +95,7 @@ def test_seismic_host_clear_disconnects_pending_overlay(monkeypatch, tmp_path):
     class FakeView(QObject):
         segy_loaded = Signal(object)
 
-        def __init__(self, *, auto_load=False):
+        def __init__(self, *, auto_load=False, parent=None):
             super().__init__()
 
         def load_segy_async(self, path):
@@ -131,7 +131,7 @@ def test_seismic_panel_empty_state_cancels_pending_file_load(monkeypatch, qtbot)
     class FakeView(QWidget):
         segy_loaded = Signal(object)
 
-        def __init__(self, *, auto_load=False):
+        def __init__(self, *, auto_load=False, parent=None):
             super().__init__()
 
         def cancel_pending_segy_load(self):

@@ -55,6 +55,19 @@ def _show_page(qtbot, page) -> None:
     qtbot.waitUntil(lambda: page.unified_canvas.width() > 100 and page.unified_canvas.height() > 100)
 
 
+def _native_scene_available() -> bool:
+    try:
+        from paleo_workbench.viz.native_factor_map import MapScene
+
+        MapScene()
+        return True
+    except Exception:
+        return False
+
+
+HAS_NATIVE_SCENE = _native_scene_available()
+
+
 def test_measure_drag_moves_build_zero_render_snapshots(qtbot, monkeypatch) -> None:
     """A measure-tool drag is pure pointer feedback: no document recomposition."""
     page = MappingPage()
@@ -91,6 +104,7 @@ def test_select_click_updates_selection_without_recomposing(qtbot, monkeypatch) 
     assert page.attribute_table.feature_combo.currentData() == "f1"
 
 
+@pytest.mark.skipif(not HAS_NATIVE_SCENE, reason="native scene modules (layer_model_core/grid_render_core) not installed")
 def test_digitize_commits_build_one_snapshot_and_touch_only_the_edited_layer(qtbot, monkeypatch) -> None:
     """Each digitized vertex commits one snapshot and only the layer revision."""
     page = MappingPage()
