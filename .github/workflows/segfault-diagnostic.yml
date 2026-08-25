@@ -148,9 +148,12 @@ jobs:
       OMP_NUM_THREADS: "1"
       # Leak detection off (Qt/runner noise, ptrace restricted on hosted
       # runners); stop at the first real heap error, dump 30 alloc frames,
-      # write the report to a file as well (the first validation run died
-      # silently — exitcode=86 marks an ASan halt unmistakably).
-      ASAN_OPTIONS: detect_leaks=0:detect_odr_violation=0:halt_on_error=1:abort_on_error=0:malloc_context_size=30:exitcode=86:log_path=/tmp/asan-report
+      # write the report to a file as well. intercept_cxa_throw=0: the
+      # preloaded runtime intercepting __cxa_throw from UNINSTRUMENTED
+      # bundled C++ libs (pyproj's libproj) trips asan_interceptors.cpp
+      # CHECK "real___cxa_throw != 0" and silently kills the run (observed
+      # run 2, exit 86 with a CHECK report, no real finding).
+      ASAN_OPTIONS: detect_leaks=0:detect_odr_violation=0:halt_on_error=1:abort_on_error=0:malloc_context_size=30:exitcode=86:log_path=/tmp/asan-report:intercept_cxa_throw=0
     steps:
       - name: Checkout
         uses: actions/checkout@v4
