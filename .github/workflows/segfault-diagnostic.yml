@@ -1,25 +1,34 @@
 # Segfault diagnostics for #951 (3.13-only SIGSEGV under pytestqt
 # _process_events → Qt event dispatch, no project frames).
 #
-# Two non-blocking legs that mirror the main gate environment exactly
-# (same deps, vendored GDAL, freshly built cores) and add instrumentation:
+# crash-watchdog — full suite with a hang watchdog: an external ABRT
+#   fires after 45 min without completion (under a plain gdb wrapper the
+#   suite HUNG at ~44% where the bare run SIGSEGVs at ~46% — timing-
+#   sensitive UB). Either way (crash or hang) a core dump is taken and
+#   gdb prints the crashing C backtrace plus all threads into the job
+#   log; faulthandler prints the Python frames first.
 #
-#   crash-watchdog — full suite with a hang watchdog: an external ABRT
-#     fires after 45 min without completion (the first validation run
-#     HUNG at ~44% under gdb where the bare run SIGSEGVs at ~46% —
-#     timing-sensitive UB). Either way (crash or hang) a core dump is
-#     taken and gdb prints the crashing C backtrace plus all threads
-#     into the job log; faulthandler prints the Python frames first.
+#   Run 2 deliverable (posted to #951): the SIGSEGV fires inside
+#   QTimerInfoList::activateTimers → QCoreApplication::notifyInternal2
+#   during inter-test event processing — a stale QTimer delivering into
+#   a destroyed QObject.
 #
-#   asan — rebuild the five native cores with -fsanitize=address, run the
-#     full suite with libasan preloaded and PYTHONMALLOC=malloc so the
-#     Python object heap goes through the interposed allocator. Catches
-#     heap corruption (double free / invalid free / UAF-on-free, plus
-#     redzone violations inside our instrumented cores) at the moment it
-#     happens instead of at the later, drifting crash site.
+# ASan leg: REMOVED after three iterations — LD_PRELOAD-style ASan
+#   interposition is structurally incompatible with this dependency
+#   stack on hosted runners:
+#     1. gcc-13 libasan: the __cxa_throw interceptor CHECK-fails
+#        ("real___cxa_throw == 0") the first time pyproj's bundled
+#        libproj throws a C++ exception (exit 86 at the first CRS parse).
+#     2. ASAN_OPTIONS=intercept_cxa_throw=0: not honored by that
+#        runtime — identical failure.
+#     3. clang-18 libclang_rt: dies silently (exit 86, zero output)
+#        during pytest collection.
+#   The crash-watchdog leg above is the primary instrument; it works for
+#   both manifestations and needs no allocator interposition.
 #
-# Both legs are diagnostics: continue-on-error, never gate merges. The
-# main gate stays in ci.yml (3.12 product gate + non-blocking 3.13 legs).
+# This workflow is a diagnostic: continue-on-error, never gates merges.
+# The main gate stays in ci.yml (3.12 product gate + non-blocking 3.13
+# legs).
 
 name: Segfault diagnostic (#951)
 
@@ -34,10 +43,6 @@ concurrency:
 
 permissions:
   contents: read
-
-# Shared environment/dependency steps are duplicated per job on purpose:
-# YAML anchors are not available in GitHub Actions, and a reusable
-# composite action for a diagnostic workflow is not worth the indirection.
 
 jobs:
   crash-watchdog:
@@ -71,7 +76,7 @@ jobs:
             libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
             libxcb-xfixes0 libxcb-xinerama0 libxkbcommon-x11-0 \
             libfontconfig1 libfreetype6 \
-            gdb libasan8
+            gdb
 
       - name: Install Python dependencies
         run: |
@@ -127,112 +132,4 @@ jobs:
               -ex "echo \\n===== ALL THREADS (30 frames) =====\\n" \
               -ex "thread apply all bt 30" \
               "$(command -v python)" "$c" 2>&1 | tail -n +1
-          done
-
-  asan:
-    name: ASan (3.13, instrumented cores + interposed allocator)
-    runs-on: ubuntu-latest
-    timeout-minutes: 75
-    continue-on-error: true
-    env:
-      PIP_IGNORE_REQUIRES_PYTHON: "1"
-      QT_QPA_PLATFORM: offscreen
-      PYTHONFAULTHANDLER: "1"
-      # pymalloc would hide the C heap from the interposed allocator; route
-      # Python object allocation through malloc so ASan sees it.
-      PYTHONMALLOC: malloc
-      # OpenBLAS worker threads + the ASan-preloaded allocator are a known
-      # bad combination; keep BLAS single-threaded so only real findings in
-      # OUR code surface.
-      OPENBLAS_NUM_THREADS: "1"
-      OMP_NUM_THREADS: "1"
-      # Leak detection off (Qt/runner noise, ptrace restricted on hosted
-      # runners); stop at the first real heap error, dump 30 alloc frames,
-      # write the report to a file as well. intercept_cxa_throw=0: the
-      # preloaded runtime intercepting __cxa_throw from UNINSTRUMENTED
-      # bundled C++ libs (pyproj's libproj) trips asan_interceptors.cpp
-      # CHECK "real___cxa_throw != 0" and silently kills the run (observed
-      # run 2, exit 86 with a CHECK report, no real finding).
-      ASAN_OPTIONS: detect_leaks=0:detect_odr_violation=0:halt_on_error=1:abort_on_error=0:malloc_context_size=30:exitcode=86:log_path=/tmp/asan-report:intercept_cxa_throw=0
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-
-      - name: System libraries (Qt / offscreen / ASan runtime)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential ninja-build swig \
-            libsqlite3-dev libgl1 libglib2.0-0 libxkbcommon0 libdbus-1-3 \
-            libegl1 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
-            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
-            libxcb-xfixes0 libxcb-xinerama0 libxkbcommon-x11-0 \
-            libfontconfig1 libfreetype6 \
-            libasan8 clang
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install --prefer-binary -e ".[dev,native]"
-          python -m pip install --prefer-binary -r requirements-geoviz.txt
-          python -c "import geoviz, geoviz_well_seismic_3d"
-          python -m pip install shapely
-
-      - name: Build vendored GDAL (+PROJ)
-        # Deliberately NOT instrumented: compiling all of GDAL+PROJ with
-        # ASan would add ~15min and a second allocator universe; the
-        # interposed runtime still watches its allocations.
-        run: |
-          scripts/build_vendored_gdal.sh "$(command -v python)"
-          source native/gdal-vendored/install/env.sh
-          python -c "from osgeo import gdal; assert gdal.__version__"
-
-      - name: Build native cores with ASan instrumentation
-        env:
-          CFLAGS: -fsanitize=address -fno-omit-frame-pointer -g -O1
-          CXXFLAGS: -fsanitize=address -fno-omit-frame-pointer -g -O1
-          LDFLAGS: -fsanitize=address
-        run: |
-          python -m pip install -e geo-viz-engine/native/map_edit_core
-          python -m pip install -e native/grid_render_core
-          python -m pip install -e native/layer_model_core
-          python -m pip install -e native/seismic_3d_core
-          python -m pip install -e native/well_log_core
-
-      - name: Run suite under ASan interposition
-        # Prefer clang's runtime: gcc-13 libasan's __cxa_throw interceptor
-        # CHECK-fails ("real___cxa_throw == 0") on the first C++ exception
-        # thrown by an UNINSTRUMENTED bundled lib (pyproj's libproj) — runs
-        # 2/3 died at the first CRS parse (exit 86, no real finding;
-        # intercept_cxa_throw=0 is not honored by this runtime). Newer
-        # clang_rt falls back gracefully there; it is ABI-compatible with
-        # the gcc-built instrumented cores.
-        run: |
-          source native/gdal-vendored/install/env.sh
-          ASAN_LIB="$(clang -print-file-name=libclang_rt.asan-x86_64.so)"
-          if [ ! -f "$ASAN_LIB" ]; then
-            ASAN_LIB="$(gcc -print-file-name=libasan.so)"
-          fi
-          echo "ASan runtime: $ASAN_LIB"
-          ls -l "$ASAN_LIB"
-          set +e
-          LD_PRELOAD="$ASAN_LIB" python -m pytest -v --tb=line \
-            --timeout=180 --timeout-method=thread \
-            -m "not slow and not welllog_binding"
-          code=$?
-          echo "pytest exit: $code  (86=ASan halted on a heap finding)"
-          # log_path writes /tmp/asan-report.<pid>; surface it either way.
-          shopt -s nullglob
-          for f in /tmp/asan-report.*; do
-            echo ""
-            echo "===== ASAN REPORT: $f ====="
-            cat "$f"
           done
