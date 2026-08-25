@@ -259,6 +259,9 @@ class MappingPage(QWidget):
         self.unified_canvas.backend_status_changed.connect(lambda _status: self._sync_map_status())
         self.chrome_panel.save_btn.clicked.connect(self.save_draft)
         self.chrome_panel.chrome_changed.connect(self._on_chrome_changed)
+        self.bottom_workbench.factor_shelf.create_factor_map_requested.connect(
+            self._on_create_factor_map_requested
+        )
         self.bottom_workbench.factor_shelf.contour_draft_requested.connect(
             self._on_contour_draft_requested
         )
@@ -476,6 +479,21 @@ class MappingPage(QWidget):
         if self._preview_mode:
             self._refresh_preview()
         self._emit_mapping_context()
+
+    def _on_create_factor_map_requested(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        from paleo_workbench.ui.pages.create_factor_map_dialog import CreateFactorMapDialog
+
+        if self._project is None:
+            QMessageBox.information(self, "地质单因素编图", "请先打开或绑定工程。")
+            return
+        dialog = CreateFactorMapDialog(self._project, parent=self)
+        dialog.map_created.connect(self._on_geological_factor_map_created)
+        dialog.exec()
+
+    def _on_geological_factor_map_created(self, map_doc) -> None:
+        self.load_project(self._project, project_crs=self._project_crs)
+        self.contour_drafts_updated.emit()
 
     def _on_contour_draft_requested(self) -> None:
         """Schedule ContourDraft extraction and commit on the GUI thread."""

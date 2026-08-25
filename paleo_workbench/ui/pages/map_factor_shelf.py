@@ -18,10 +18,11 @@ def _panel_icon(name: str) -> QIcon:
 
 
 class MapFactorShelf(QWidget):
-    """Mapping bottom-tab shelf: factor cards + contour draft action."""
+    """Mapping bottom-tab shelf: factor cards + geological factor mapping actions."""
 
     contour_draft_requested = Signal()
     factor_overlay_requested = Signal(str)
+    create_factor_map_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -31,6 +32,14 @@ class MapFactorShelf(QWidget):
 
         actions = QHBoxLayout()
         actions.setContentsMargins(tokens.SPACE_2, tokens.SPACE_1, tokens.SPACE_2, 0)
+
+        self.create_factor_map_btn = QPushButton("新建单因素地质编图")
+        self.create_factor_map_btn.setObjectName("PrimaryButton")
+        self.create_factor_map_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        self.create_factor_map_btn.setToolTip("从井点属性执行空间克里金插值，生成包含栅格、等值线及井位标注的 GIS 图件")
+        self.create_factor_map_btn.clicked.connect(self.create_factor_map_requested.emit)
+        actions.addWidget(self.create_factor_map_btn)
+
         self.contour_draft_btn = QPushButton(_panel_icon("btn-contour-draft"), "从单因素生成等值线初稿")
         self.contour_draft_btn.setObjectName("SecondaryButton")
         self.contour_draft_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
