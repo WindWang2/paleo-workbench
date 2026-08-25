@@ -80,8 +80,10 @@ def test_seismic_side_panels_dock_titles(qtbot):
     qtbot.addWidget(context)
     qtbot.addWidget(control)
     assert _dock_titles(attributes)
-    assert _dock_titles(context)
     assert _dock_titles(control)
+    # The context toolbar was reworked into a compact single row (seismic
+    # 设置/属性单行化): it intentionally carries no dock-chrome title label.
+    assert not _dock_titles(context)
     assert attributes.objectName() == "SeismicAttributePanel"
     assert context.objectName() == "SeismicContextToolbar"
     assert control.objectName() == "SeismicControlPanel"

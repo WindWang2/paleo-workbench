@@ -313,17 +313,19 @@ def test_native_status_matching_version_outside_repo_is_fresh(monkeypatch, tmp_p
     assert nb.native_status("seismic_3d") == "fresh"
 
 
-def test_native_status_in_repo_module_without_version_is_fresh(monkeypatch) -> None:
-    """The geo-viz-engine-built map_edit_core predates build metadata by
-    design; an in-tree binary stays trusted."""
+def test_native_status_in_repo_module_without_version_is_stale(monkeypatch) -> None:
+    """#938-1 tightening: ALL native modules now carry build metadata, so a
+    module without ``__version__`` is stale even when the binary sits in-tree
+    (geo-viz-engine/native). The pre-#938 contract trusted such binaries —
+    that trust was the "fresh 误判" the #938 batch closed."""
     in_tree = _repo_root() / "geo-viz-engine" / "native" / "map_edit_core" / "map_edit_core.so"
     mod = _fake_native_module(in_tree, None)
     _patch_feature(monkeypatch, "map_edit", mod)
     from paleo_workbench import native_backend as nb
 
-    assert nb.native_status("map_edit") == "fresh"
+    assert nb.native_status("map_edit") == "stale"
     monkeypatch.setattr(nb, "_HAS_MAP_EDIT_CPP", True)
-    assert native_backend.is_accelerated("map_edit") is True
+    assert native_backend.is_accelerated("map_edit") is False
 
 
 def test_repo_root_resolution_is_cached(monkeypatch) -> None:

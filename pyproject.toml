@@ -45,6 +45,9 @@ dev = [
     # boundary contract via scikit-image when no native module is available.
     # Without it CI fails with "No module named 'skimage'" (#859 follow-up).
     "scikit-image>=0.22",
+    # tests/test_issue_940_misc.py parses .github/workflows/*.yaml as part of
+    # the CI contract checks; pyyaml is not pulled in by any runtime dep.
+    "pyyaml>=6.0",
 ]
 native = [
     "pybind11>=2.12",
