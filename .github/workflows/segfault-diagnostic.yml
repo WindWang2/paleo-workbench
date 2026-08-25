@@ -4,10 +4,12 @@
 # Two non-blocking legs that mirror the main gate environment exactly
 # (same deps, vendored GDAL, freshly built cores) and add instrumentation:
 #
-#   gdb-backtrace — full suite under gdb; on SIGSEGV print the crashing
-#     C backtrace and all threads directly into the job log. This is the
-#     "#951 recommendation 2" coredump analysis, minus the artifact
-#     download: the backtrace lands in the log.
+#   crash-watchdog — full suite with a hang watchdog: an external ABRT
+#     fires after 45 min without completion (the first validation run
+#     HUNG at ~44% under gdb where the bare run SIGSEGVs at ~46% —
+#     timing-sensitive UB). Either way (crash or hang) a core dump is
+#     taken and gdb prints the crashing C backtrace plus all threads
+#     into the job log; faulthandler prints the Python frames first.
 #
 #   asan — rebuild the five native cores with -fsanitize=address, run the
 #     full suite with libasan preloaded and PYTHONMALLOC=malloc so the
@@ -38,10 +40,10 @@ permissions:
 # composite action for a diagnostic workflow is not worth the indirection.
 
 jobs:
-  gdb-backtrace:
-    name: gdb backtrace (3.13, full suite)
+  crash-watchdog:
+    name: Crash watchdog (3.13, core dump + backtrace)
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 75
     continue-on-error: true
     env:
       PIP_IGNORE_REQUIRES_PYTHON: "1"
@@ -93,29 +95,44 @@ jobs:
           python -m pip install -e native/seismic_3d_core
           python -m pip install -e native/well_log_core
 
-      - name: Run suite under gdb (SIGSEGV → C backtrace in log)
+      - name: Run suite with crash/hang watchdog
+        # The bare suite SIGSEGVs at ~46% (3.13 only); under a debugger it
+        # HANGS at ~44% instead. Both must produce evidence in the log:
+        #   - crash: kernel core dump on the faulting signal
+        #   - hang:  external ABRT after WATCHDOG_S, forcing faulthandler
+        #            Python frames + a core dump of the stuck process
         run: |
           source native/gdal-vendored/install/env.sh
+          sudo sysctl -w "kernel.core_pattern=/tmp/core.%e.%p" || true
+          ulimit -c unlimited
+          WATCHDOG_S=2700   # 45 min; a healthy suite finishes in ~15
           set +e
-          gdb -q -batch \
-            -ex "set pagination off" \
-            -ex "set print thread-events off" \
-            -ex "handle SIGSEGV stop print nopass" \
-            -ex "handle SIGABRT stop print nopass" \
-            -ex "run" \
-            -ex "echo \n\n===== INFERIOR STOPPED: C BACKTRACE =====\n" \
-            -ex "bt" \
-            -ex "echo \n\n===== ALL THREADS (30 frames) =====\n" \
-            -ex "thread apply all bt 30" \
-            --args python -m pytest -v --tb=line \
-              --timeout=90 --timeout-method=thread \
+          timeout --signal=ABRT --kill-after=60 "$WATCHDOG_S" \
+            python -m pytest -v --tb=line \
+              --timeout=120 --timeout-method=thread \
               -m "not slow and not welllog_binding"
-          echo "gdb batch finished (exit $?) — if a crash stopped the inferior, the backtraces above are the #951 evidence."
+          code=$?
+          echo "pytest exit: $code  (124=hang watchdog fired, 134=SIGABRT, 139=SIGSEGV)"
+          shopt -s nullglob
+          cores=(/tmp/core.*)
+          if [ ${#cores[@]} -eq 0 ]; then
+            echo "no core dumps found"
+          fi
+          for c in "${cores[@]}"; do
+            echo ""
+            echo "===== CORE DUMP: $c ====="
+            gdb -q -batch \
+              -ex "set pagination off" \
+              -ex "bt" \
+              -ex "echo \\n===== ALL THREADS (30 frames) =====\\n" \
+              -ex "thread apply all bt 30" \
+              "$(command -v python)" "$c" 2>&1 | tail -n +1
+          done
 
   asan:
     name: ASan (3.13, instrumented cores + interposed allocator)
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 75
     continue-on-error: true
     env:
       PIP_IGNORE_REQUIRES_PYTHON: "1"
@@ -124,9 +141,16 @@ jobs:
       # pymalloc would hide the C heap from the interposed allocator; route
       # Python object allocation through malloc so ASan sees it.
       PYTHONMALLOC: malloc
-      # Leak detection off (Qt/runner noise, and ptrace is restricted on
-      # hosted runners); stop at the first real heap error with full context.
-      ASAN_OPTIONS: detect_leaks=0:detect_odr_violation=0:halt_on_error=1:abort_on_error=0:malloc_context_size=30
+      # OpenBLAS worker threads + the ASan-preloaded allocator are a known
+      # bad combination; keep BLAS single-threaded so only real findings in
+      # OUR code surface.
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+      # Leak detection off (Qt/runner noise, ptrace restricted on hosted
+      # runners); stop at the first real heap error, dump 30 alloc frames,
+      # write the report to a file as well (the first validation run died
+      # silently — exitcode=86 marks an ASan halt unmistakably).
+      ASAN_OPTIONS: detect_leaks=0:detect_odr_violation=0:halt_on_error=1:abort_on_error=0:malloc_context_size=30:exitcode=86:log_path=/tmp/asan-report
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -187,6 +211,14 @@ jobs:
           ls -l "$ASAN_LIB"
           set +e
           LD_PRELOAD="$ASAN_LIB" python -m pytest -v --tb=line \
-            --timeout=120 --timeout-method=thread \
+            --timeout=180 --timeout-method=thread \
             -m "not slow and not welllog_binding"
-          echo "pytest finished (exit $?) — ASan findings, if any, are printed above as ERROR: AddressSanitizer blocks."
+          code=$?
+          echo "pytest exit: $code  (86=ASan halted on a heap finding)"
+          # log_path writes /tmp/asan-report.<pid>; surface it either way.
+          shopt -s nullglob
+          for f in /tmp/asan-report.*; do
+            echo ""
+            echo "===== ASAN REPORT: $f ====="
+            cat "$f"
+          done
