@@ -5,18 +5,48 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSlider, QVBoxLayout, QWidget
 
-try:
-    from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
-except ImportError:  # pragma: no cover
-    QAudioOutput = None
-    QMediaPlayer = None
-
-try:
-    from PySide6.QtMultimediaWidgets import QVideoWidget
-except ImportError:  # pragma: no cover
-    QVideoWidget = None
-
 from paleo_workbench.tokens import SPACE_2
+
+# QtMultimedia is imported lazily, on first actual media preview use: the
+# import itself loads the media backend plugins (ffmpeg/pipewire probing),
+# the prime suspect for the #951 SIGSEGV on no-audio runners. Loading the
+# preview facade must not initialize it.
+_media_classes: tuple | None = None
+
+_MEDIA_ATTRS = ("QMediaPlayer", "QAudioOutput", "QVideoWidget")
+
+
+def _load_media_classes() -> tuple:
+    """Return cached ``(QMediaPlayer, QAudioOutput, QVideoWidget)`` classes.
+
+    Entries are None where PySide6 ships without the module. The failed
+    lookup is cached too — same semantics as the old module-level try/except.
+    """
+    global _media_classes
+    if _media_classes is None:
+        player = audio = video = None
+        try:
+            from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+
+            player, audio = QMediaPlayer, QAudioOutput
+        except ImportError:  # pragma: no cover
+            pass
+        try:
+            from PySide6.QtMultimediaWidgets import QVideoWidget
+
+            video = QVideoWidget
+        except ImportError:  # pragma: no cover
+            pass
+        _media_classes = (player, audio, video)
+    return _media_classes
+
+
+def __getattr__(name):
+    """PEP 562 lazy re-exports: ``media_preview_widget.QMediaPlayer`` and
+    friends keep working for importers without loading the backend."""
+    if name in _MEDIA_ATTRS:
+        return _load_media_classes()[_MEDIA_ATTRS.index(name)]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class MediaPreviewWidget(QWidget):
@@ -102,9 +132,11 @@ class MediaPreviewWidget(QWidget):
             return False
         import paleo_workbench.ui.pages.preview_widgets as preview_widgets
 
-        player_cls = getattr(preview_widgets, "QMediaPlayer", QMediaPlayer)
-        audio_cls = getattr(preview_widgets, "QAudioOutput", QAudioOutput)
-        video_cls = getattr(preview_widgets, "QVideoWidget", QVideoWidget)
+        player_cls, audio_cls, video_cls = _load_media_classes()
+        # Test-seam compatibility: explicit overrides on the facade win.
+        player_cls = getattr(preview_widgets, "QMediaPlayer", player_cls)
+        audio_cls = getattr(preview_widgets, "QAudioOutput", audio_cls)
+        video_cls = getattr(preview_widgets, "QVideoWidget", video_cls)
 
         if player_cls is None:
             self._player_init_attempted = True
@@ -244,7 +276,18 @@ class MediaPreviewWidget(QWidget):
                 return
             if not self._current_path:
                 return
-        if self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:  # type: ignore[union-attr]
+        state = self._player.playbackState()  # type: ignore[union-attr]
+        playback_enum = getattr(type(self._player), "PlaybackState", None)
+        playing_state = getattr(playback_enum, "PlayingState", None) if playback_enum is not None else None
+        if playing_state is not None:
+            is_playing = state == playing_state
+        else:
+            # Qt enum fallback: Stopped=0, Playing=1, Paused=2.
+            try:
+                is_playing = int(state) == 1  # type: ignore[arg-type]
+            except Exception:
+                is_playing = False
+        if is_playing:
             self._player.pause()  # type: ignore[union-attr]
             self.play_btn.setText("播放")
         else:
@@ -276,7 +319,7 @@ class MediaPreviewWidget(QWidget):
         # Detect InvalidMedia without hard dependency on enum import.
         # Support both real Qt enum and test fakes: compare by value and identity.
         invalid_candidates: list[object] = []
-        for src in (self._player, QMediaPlayer):
+        for src in (self._player, _load_media_classes()[0]):
             if src is None:
                 continue
             try:

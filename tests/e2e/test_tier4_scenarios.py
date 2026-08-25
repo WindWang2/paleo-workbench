@@ -377,8 +377,9 @@ class TestScenario4WindowsStorageAndDisasterRecovery:
         assert isinstance(extended_project_path, str)
 
         # Step 2: Case-insensitive normcase and path separator normalization (#991, #995)
-        norm_key = os.path.normcase(raw_path_str)
-        assert norm_key == os.path.normcase(raw_path_str.upper())
+        if sys.platform == "win32":  # normcase case-folding is Windows-only
+            norm_key = os.path.normcase(raw_path_str)
+            assert norm_key == os.path.normcase(raw_path_str.upper())
 
         posix_rel_path = "storage/archives/data.dat"
         clean_path = posix_rel_path.replace("\\", "/")
