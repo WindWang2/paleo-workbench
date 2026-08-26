@@ -9,6 +9,7 @@ Provides bidirectional conversions across:
 from __future__ import annotations
 
 import math
+import threading
 from dataclasses import dataclass, field
 from typing import Sequence
 
@@ -116,6 +117,7 @@ class CoordinateTransformHub:
     """Central coordinate transformation service bridging Map, Well, and Seismic spaces."""
 
     def __init__(self) -> None:
+        self._lock = threading.RLock()
         self._wells: dict[str, WellTrajectoryData] = {}
         # Default seismic grid geometry
         self._seismic_origin: tuple[float, float] = (100.0, 200.0)
@@ -148,7 +150,7 @@ class CoordinateTransformHub:
             md_arr, tvd_arr, x_arr, y_arr = _compute_minimum_curvature_trajectory(
                 surface_x, surface_y, kb_m, td_m, stations
             )
-            self._wells[well_id] = WellTrajectoryData(
+            data = WellTrajectoryData(
                 well_id=well_id,
                 surface_x=surface_x,
                 surface_y=surface_y,
@@ -161,7 +163,7 @@ class CoordinateTransformHub:
                 is_deviated=True,
             )
         else:
-            self._wells[well_id] = WellTrajectoryData(
+            data = WellTrajectoryData(
                 well_id=well_id,
                 surface_x=surface_x,
                 surface_y=surface_y,
@@ -169,19 +171,24 @@ class CoordinateTransformHub:
                 total_depth_m=td_m,
                 is_deviated=False,
             )
+        with self._lock:
+            self._wells[well_id] = data
 
     def unregister_well(self, well_id: str) -> bool:
         """Remove a well from the registry. Returns True if removed, False otherwise."""
-        if well_id in self._wells:
-            del self._wells[well_id]
-            return True
-        return False
+        with self._lock:
+            if well_id in self._wells:
+                del self._wells[well_id]
+                return True
+            return False
 
     def map_to_well(self, x: float, y: float, max_radius: float = 50.0) -> str | None:
         """Find the nearest registered well within max_radius (Euclidean surface distance)."""
         best_id: str | None = None
         min_dist = float("inf")
-        for wid, well in self._wells.items():
+        with self._lock:
+            wells_snapshot = list(self._wells.items())
+        for wid, well in wells_snapshot:
             dist = math.hypot(x - well.surface_x, y - well.surface_y)
             if dist <= max_radius and dist < min_dist:
                 min_dist = dist
@@ -190,9 +197,10 @@ class CoordinateTransformHub:
 
     def well_depth_to_map(self, well_id: str, md: float) -> tuple[float, float, float]:
         """Convert well measured depth (MD) to 3D Map coordinates (x, y, tvd)."""
-        if well_id not in self._wells:
-            raise KeyError(f"Well {well_id} not found in transform hub")
-        well = self._wells[well_id]
+        with self._lock:
+            if well_id not in self._wells:
+                raise KeyError(f"Well {well_id} not found in transform hub")
+            well = self._wells[well_id]
         md_val = float(md)
 
         if not well.is_deviated or len(well.md) == 0:
@@ -205,17 +213,19 @@ class CoordinateTransformHub:
 
     def well_depth_to_tvdss(self, well_id: str, md: float) -> float:
         """Convert well measured depth (MD) to true vertical depth subsea (TVDSS = KB - TVD)."""
-        if well_id not in self._wells:
-            raise KeyError(f"Well {well_id} not found in transform hub")
-        well = self._wells[well_id]
+        with self._lock:
+            if well_id not in self._wells:
+                raise KeyError(f"Well {well_id} not found in transform hub")
+            well = self._wells[well_id]
         _, _, tvd = self.well_depth_to_map(well_id, md)
         return float(well.kb_m - tvd)
 
     def map_to_well_depth(self, well_id: str, tvd: float) -> float:
         """Convert TVD back to MD for a given well."""
-        if well_id not in self._wells:
-            raise KeyError(f"Well {well_id} not found in transform hub")
-        well = self._wells[well_id]
+        with self._lock:
+            if well_id not in self._wells:
+                raise KeyError(f"Well {well_id} not found in transform hub")
+            well = self._wells[well_id]
         tvd_val = float(tvd)
 
         if not well.is_deviated or len(well.tvd) == 0:
