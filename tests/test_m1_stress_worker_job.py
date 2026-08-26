@@ -195,13 +195,21 @@ def test_stress_rapid_cancellation_and_late_result_suppression(qtbot):
 
 def test_stress_qobject_destruction_under_active_execution(qtbot):
     """Parent QObject deletion during heavy worker execution safely adopts threads into keeper."""
+    import shiboken6
+
     keeper = detached_job_keeper()
+    baseline_jobs = keeper.job_count()
     threads: list[QThread] = []
 
+    # Long-lived on purpose (~10 min of stepped work): the destroy below must
+    # happen while the worker is PROVABLY still executing. With the old
+    # 200ms budget a loaded CI runner occasionally let the worker finish
+    # before the destroy, taking the normal-completion path instead of
+    # keeper adoption (#1023).
     for i in range(20):
         parent_widget = QWidget()
         started_event = Event()
-        worker = _ControllableWorker(total_steps=100, step_delay_ms=2.0, started_evt=started_event)
+        worker = _ControllableWorker(total_steps=300_000, step_delay_ms=2.0, started_evt=started_event)
         job = OwnedWorkerJob(parent_widget)
         job.start(
             worker,
@@ -217,11 +225,41 @@ def test_stress_qobject_destruction_under_active_execution(qtbot):
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         QApplication.processEvents()
 
-        # Thread must have been adopted into keeper
-        assert keeper.owns(t) is True
+        # Thread must end up tracked by the keeper. Adoption plus its
+        # cooperative interruption can run the FULL lifecycle (finish ->
+        # release -> untrack) inside one event pump on a loaded runner, so
+        # "owns() right now" is racy: accept either still-tracked or already
+        # finished through the keeper. What must never happen is a live,
+        # untracked, unfinished thread — with a 300k-step worker there is no
+        # natural-completion path, so neither branch means the job was lost.
+        def _adopted_or_released():
+            if keeper.owns(t):
+                return True
+            try:
+                return t.isFinished()
+            except RuntimeError:
+                # Wrapper already deleted == tracked, then released.
+                return True
 
-    # Wait for all 20 threads to complete and be drained from keeper
+        qtbot.waitUntil(_adopted_or_released, timeout=5_000)
+        if not (_adopted_or_released()):
+            thread_valid = bool(shiboken6.isValid(t))
+            raise AssertionError(
+                "thread neither adopted nor finished after parent destruction "
+                f"(iteration={i}, thread_valid={thread_valid}, "
+                f"thread_isRunning={t.isRunning() if thread_valid else 'n/a'}, "
+                f"job_released={job._state.get('released')}, "
+                f"keeper_jobs={keeper.job_count()}, baseline={baseline_jobs})"
+            )
+
+    # Wait for every adopted worker to finish and be released from the
+    # keeper. Count the REGISTRY, not the wrappers: released threads are
+    # deleteLater'd, so touching them here races shiboken deletion.
     qtbot.waitUntil(
-        lambda: all(not keeper.owns(t) for t in threads),
+        lambda: keeper.job_count() <= baseline_jobs,
         timeout=15_000,
     )
+    # Flush the queued DeferredDelete for the released threads before the
+    # conftest fence tears anything down.
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    QApplication.processEvents()
