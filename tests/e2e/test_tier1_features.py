@@ -35,6 +35,51 @@ from shapely.geometry import (
 )
 
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+from paleo_workbench.catalog.lineage_graph import LineageChain, LineageChainNode, build_lineage_chain
+from paleo_workbench.catalog.models import DataStage
+from paleo_workbench.mapping.color_ramps import get_color_ramp
+from paleo_workbench.mapping.geological_pipeline.contouring import generate_contour_layer
+from paleo_workbench.mapping.geological_pipeline.interpolator import IDWInterpolator, KrigingInterpolator
+from paleo_workbench.mapping.geological_pipeline.pipeline import GeologicalMappingPipeline
+from paleo_workbench.mapping.geological_pipeline.polygonization import generate_facies_polygon_layer
+from paleo_workbench.mapping.geological_pipeline.templates import create_geological_factor_map_template
+from paleo_workbench.mapping.layers import (
+    AnnotationMapLayer,
+    ContourMapLayer,
+    GridMapLayer,
+    MapDocument,
+    MapLayer,
+    PolygonMapLayer,
+    RasterMapLayer,
+    VectorMapLayer,
+    WellPointMapLayer,
+)
+from paleo_workbench.mapping.map_styles import (
+    LinePattern,
+    MarkerSymbol,
+    TextStyle,
+    VectorStyle,
+    default_style_for,
+)
+from paleo_workbench.mapping.renderers import (
+    AnnotationRenderer,
+    CategorizedRenderer,
+    ContourRenderer,
+    GraduatedRenderer,
+    LegendItem,
+    RenderContext,
+    RendererRegistry,
+    SingleSymbolRenderer,
+    WellSymbolRenderer,
+)
+from paleo_workbench.mapping.geological_pipeline.models import (
+    GeologicalFactor,
+    GeologicalFactorDataset,
+    InterpolationOptions,
+)
+from paleo_workbench.workflow.factor_grid_result import FactorGridResult, NODATA
+from tests.e2e.conftest import CoordinateTransformHub, SelectionContext
+
 
 
 # ============================================================================
@@ -1229,3 +1274,766 @@ class TestWellLogAndMathematicalRobustness:
         assert log_rt.shape == rt_curve.shape
         assert log_rt[50] == np.log10(0.01)  # previously 0.0
         assert np.all(log_rt >= np.log10(0.01))
+
+
+# ============================================================================
+# Category H: Mapping Engine 2.0 & Styling System (F6, F7, F8, F9, F10)
+# ============================================================================
+
+
+class TestMappingEngine2CoreConvergence:
+    """Core convergence tests for Mapping Engine 2.0 (F6–F10)."""
+
+    def test_f6_decoupled_map_layer_models_and_document(self):
+        """F6: Decoupled MapLayer Models and MapDocument architecture."""
+        # 1. VectorMapLayer with geometry features and extent recomputation
+        v_layer = VectorMapLayer(
+            name="Structural Faults",
+            features=(
+                {"type": "Feature", "geometry": {"type": "LineString", "coordinates": [[100.0, 200.0], [150.0, 250.0]]}},
+                {"type": "Feature", "geometry": {"type": "Point", "coordinates": [120.0, 220.0]}},
+            ),
+        )
+        assert v_layer.layer_type == "vector"
+        assert v_layer.extent[0] == 100.0 and v_layer.extent[2] == 150.0
+
+        # 2. GridMapLayer with synthetic scalar grid
+        grid_data = np.linspace(10.0, 50.0, 400).reshape((20, 20))
+        g_layer = GridMapLayer(
+            name="Porosity Grid",
+            grid_z=grid_data,
+            grid_x=np.linspace(100.0, 200.0, 20),
+            grid_y=np.linspace(200.0, 300.0, 20),
+            color_ramp_name="viridis",
+        )
+        rgba = g_layer.rasterize_rgba()
+        assert rgba.shape == (20, 20, 4)
+        assert rgba.dtype == np.uint8
+
+        # 3. MapDocument assembly and layer management
+        doc = MapDocument(title="Sichuan Basin Basin Analysis", crs="EPSG:4547")
+        doc.add_layer(v_layer)
+        doc.add_layer(g_layer)
+        assert len(doc.layers) == 2
+        assert doc.active_layer_id == v_layer.id
+
+        # 4. Snapshot conversion and immutability
+        snapshot = doc.to_snapshot()
+        assert len(snapshot.layers) == 2
+        assert snapshot.project_crs == "EPSG:4547"
+
+        # 5. Roundtrip from snapshot and serialization
+        doc_recovered = MapDocument.from_snapshot(snapshot, title="Recovered")
+        d_dict = doc.to_dict()
+        assert len(doc_recovered.layers) == 2
+        assert "layers" in d_dict and len(d_dict["layers"]) == 2
+        assert "paleo_workbench.ui" not in str(type(doc))
+
+    def test_f7_graduated_and_style_renderers(self):
+        """F7: GraduatedRenderer, CategorizedRenderer, and unified styling."""
+        # 1. GraduatedRenderer with range classification bins
+        grad_style = VectorStyle(
+            field="porosity",
+            ranges=[
+                (0.0, 10.0, "#3b528b", "Low (<10%)"),
+                (10.0, 20.0, "#21918c", "Medium (10-20%)"),
+                (20.0, 35.0, "#5ec962", "High (>20%)"),
+            ],
+        )
+        v_layer = VectorMapLayer(name="Reservoir Zones", style=grad_style.to_dict())
+        grad_renderer = GraduatedRenderer()
+        items = grad_renderer.legend_items(v_layer)
+        assert len(items) == 3
+        assert items[0].label == "Low (<10%)" and items[0].color == "#3b528b"
+
+        # 2. CategorizedRenderer with geological facies
+        cat_style = VectorStyle(
+            field="facies",
+            categories=[
+                ("Delta Front", "#fde725", "Delta Front"),
+                ("Prodelta", "#440154", "Prodelta Mud"),
+            ],
+        )
+        cat_layer = PolygonMapLayer(
+            name="Facies Map",
+            layer_type="facies",
+            style=cat_style.to_dict(),
+            features=(
+                {
+                    "type": "Feature",
+                    "properties": {"facies": "Delta Front"},
+                    "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]]},
+                },
+            ),
+        )
+        cat_renderer = CategorizedRenderer()
+        ctx = RenderContext(extent=(0.0, 0.0, 20.0, 20.0), width=400, height=400)
+        svg = cat_renderer.render_svg(cat_layer, ctx)
+        assert "#fde725" in svg
+        assert "<polygon" in svg
+
+        # 3. SingleSymbolRenderer
+        single_renderer = SingleSymbolRenderer()
+        v_single = VectorMapLayer(name="Basin Outline", style=VectorStyle(fill="#1f77b4", stroke="#000000").to_dict())
+        s_items = single_renderer.legend_items(v_single)
+        assert len(s_items) == 1
+        assert s_items[0].stroke_color == "#000000"
+
+        # 4. RendererRegistry registration and resolution
+        registry = RendererRegistry()
+        resolved_grad = registry.resolve(v_layer)
+        resolved_cat = registry.resolve(cat_layer)
+        assert isinstance(resolved_grad, GraduatedRenderer)
+        assert isinstance(resolved_cat, CategorizedRenderer)
+
+        # 5. Fallback on unspecified styles
+        default_renderer = registry.resolve(VectorMapLayer(name="Default"))
+        assert isinstance(default_renderer, SingleSymbolRenderer)
+
+    def test_f8_annotation_layer_support(self):
+        """F8: AnnotationMapLayer and AnnotationRenderer cartographic callouts."""
+        # 1. Create AnnotationMapLayer and add multiple text items
+        ann_layer = AnnotationMapLayer(name="Map Callouts")
+        ann1 = ann_layer.add_annotation("Well Tie Anticline-1", x=120.0, y=250.0, font_size=12.0, color="#ffffff", rotation=15.0)
+        ann2 = ann_layer.add_annotation("Fault Zone F-3", x=180.0, y=320.0, font_size=10.0, color="#ff4444", rotation=0.0)
+
+        # 2. Features sync and layer extent calculation
+        assert len(ann_layer.annotations) == 2
+        assert len(ann_layer.features) == 2
+        assert ann_layer.extent[0] <= 120.0 and ann_layer.extent[2] >= 180.0
+
+        # 3. AnnotationRenderer SVG generation with rotation and styling
+        renderer = AnnotationRenderer()
+        ctx = RenderContext(extent=(100.0, 200.0, 200.0, 350.0), width=500, height=500)
+        svg_output = renderer.render_svg(ann_layer, ctx)
+        assert "Well Tie Anticline-1" in svg_output
+        assert "Fault Zone F-3" in svg_output
+        assert 'transform="rotate(15.0' in svg_output
+        assert 'fill="#ffffff"' in svg_output
+
+        # 4. Layer snapshot conversion
+        snapshot = ann_layer.to_snapshot()
+        assert snapshot.layer_type == "annotation"
+        assert len(snapshot.features) == 2
+
+        # 5. Modifying and clearing annotations
+        ann_layer.clear_annotations()
+        assert len(ann_layer.annotations) == 0
+        assert len(ann_layer.features) == 0
+        assert ann_layer.data_revision >= 3
+
+    def test_f9_qgis_bridge_backend_isolation(self):
+        """F9: QGIS Bridge backend isolation with POD data contracts."""
+        # 1. Plain Old Data MapRenderSnapshot creation
+        v_layer = VectorMapLayer(
+            name="Rivers",
+            crs="EPSG:3857",
+            features=({"type": "Feature", "geometry": {"type": "Point", "coordinates": [10.0, 20.0]}},),
+        )
+        doc = MapDocument(title="Survey", crs="EPSG:3857", layers=[v_layer])
+        snapshot = doc.to_snapshot()
+
+        # 2. Assert zero QGIS domain types in data snapshot
+        types_in_snapshot = [type(item).__module__ for item in snapshot.layers]
+        assert all("qgis" not in mod for mod in types_in_snapshot)
+
+        # 3. Verify snapshot payload conforms to pure primitive types
+        layer_snap = snapshot.layers[0]
+        assert isinstance(layer_snap.id, str)
+        assert isinstance(layer_snap.extent, tuple)
+        assert isinstance(layer_snap.crs, str)
+        assert isinstance(layer_snap.features, tuple)
+
+        # 4. RendererRegistry produces SVG without QGIS C++ engine
+        registry = RendererRegistry()
+        renderer = registry.resolve(v_layer)
+        ctx = RenderContext(extent=(0.0, 0.0, 50.0, 50.0), width=200, height=200)
+        svg = renderer.render_svg(v_layer, ctx)
+        assert "<g id=" in svg
+
+        # 5. Isolation from UI widgets and backend independence
+        assert hasattr(v_layer, "to_snapshot")
+        assert not hasattr(v_layer, "paintEngine")
+
+    def test_f10_canvas_and_export_parity(self):
+        """F10: Shared rendering parity between interactive Canvas and Print Composer."""
+        # 1. Vector layer with points and text labels
+        v_layer = VectorMapLayer(
+            name="Wells",
+            features=(
+                {
+                    "type": "Feature",
+                    "properties": {"name": "Tarim-1"},
+                    "geometry": {"type": "Point", "coordinates": [150.0, 250.0]},
+                },
+            ),
+            style=VectorStyle(
+                fill="#ff0000",
+                stroke="#000000",
+                marker=MarkerSymbol.CIRCLE,
+                marker_size=10.0,
+                labels=TextStyle(field="name", size=11.0, color="#333333"),
+            ).to_dict(),
+        )
+
+        renderer = SingleSymbolRenderer()
+        # 2. Interactive screen canvas viewport (96 DPI, 800x600)
+        canvas_ctx = RenderContext(extent=(100.0, 200.0, 200.0, 300.0), width=800.0, height=600.0, dpi=96.0)
+        canvas_svg = renderer.render_svg(v_layer, canvas_ctx)
+
+        # 3. High-res print export composer viewport (300 DPI, 2400x1800)
+        export_ctx = RenderContext(extent=(100.0, 200.0, 200.0, 300.0), width=2400.0, height=1800.0, dpi=300.0)
+        export_svg = renderer.render_svg(v_layer, export_ctx)
+
+        # 4. Assert shared style interpretation
+        assert 'fill="#ff0000"' in canvas_svg and 'fill="#ff0000"' in export_svg
+        assert "Tarim-1" in canvas_svg and "Tarim-1" in export_svg
+
+        # 5. Verify linear coordinate scaling parity
+        sx_canvas, sy_canvas = canvas_ctx.world_to_screen(150.0, 250.0)
+        sx_export, sy_export = export_ctx.world_to_screen(150.0, 250.0)
+        assert math.isclose(sx_export / sx_canvas, 3.0, rel_tol=1e-3)
+        assert math.isclose(sy_export / sy_canvas, 3.0, rel_tol=1e-3)
+
+
+# ============================================================================
+# Category I: Geological Mapping Pipeline (F11, F12, F13, F14, F15)
+# ============================================================================
+
+
+class TestGeologicalMappingPipelineCoreConvergence:
+    """Core convergence tests for Geological Mapping Pipeline (F11–F15)."""
+
+    def test_f11_well_factor_extraction(self):
+        """F11: Automated extraction and normalization of well geological factors."""
+        pipeline = GeologicalMappingPipeline()
+        records = [
+            {"well": "W-01", "x": 120.0, "y": 210.0, "孔隙度": 15.5, "formation": "T1"},
+            {"well": "W-02", "x": 180.0, "y": 280.0, "孔隙度": 18.2, "formation": "T1"},
+            {"well": "W-03", "x": 140.0, "y": 260.0, "孔隙度": 12.8, "formation": "T1"},
+            {"well": "W-04", "x": None, "y": 310.0, "孔隙度": 22.1},  # missing coordinate -> filtered out
+        ]
+
+        # 1. Factor extraction with horizon filter and unit resolution
+        dataset = pipeline.extract_factors(records, factor_name="孔隙度", target_horizon="T1")
+        assert len(dataset.points) == 3
+        assert dataset.unit == "%"
+
+        # 2. Factor property verification
+        f1 = dataset.points[0]
+        assert f1.well_name == "W-01"
+        assert f1.value == 15.5
+        assert f1.x == 120.0 and f1.y == 210.0
+
+        # 3. Statistical summary validation
+        xs, ys, zs = dataset.to_arrays()
+        assert len(zs) == 3
+        assert math.isclose(float(np.mean(zs)), (15.5 + 18.2 + 12.8) / 3, rel_tol=1e-3)
+        assert float(np.min(zs)) == 12.8 and float(np.max(zs)) == 18.2
+
+        # 4. English factor alias extraction
+        en_records = [{"well": "EN-01", "longitude": 100.0, "latitude": 200.0, "porosity": 14.0}]
+        en_dataset = pipeline.extract_factors(en_records, factor_name="porosity")
+        assert len(en_dataset.points) == 1
+        assert en_dataset.points[0].value == 14.0
+
+        # 5. Invalid records handling
+        empty_dataset = pipeline.extract_factors([], factor_name="TOC")
+        assert len(empty_dataset.points) == 0
+
+    def test_f12_spatial_interpolation_and_factor_grid_result(self, synthetic_kriging_points: dict[str, Any]):
+        """F12: Spatial interpolation (Kriging & IDW) producing FactorGridResult."""
+        xs = synthetic_kriging_points["x"]
+        ys = synthetic_kriging_points["y"]
+        vals = synthetic_kriging_points["values"]
+
+        pipeline = GeologicalMappingPipeline()
+        records = [
+            {"well": f"W-{i}", "x": float(xs[i]), "y": float(ys[i]), "porosity": float(vals[i])}
+            for i in range(len(xs))
+        ]
+        dataset = pipeline.extract_factors(records, factor_name="porosity")
+        assert len(dataset.points) == len(xs)
+
+        # 1. Kriging interpolation via pipeline
+        kriging_opts = InterpolationOptions(method="kriging", grid_n=40, variogram_model="spherical")
+        grid_krig = pipeline.interpolate(dataset, kriging_opts)
+        assert isinstance(grid_krig, FactorGridResult)
+        assert grid_krig.grid_z.shape == (40, 40)
+
+        # 2. IDW interpolation via pipeline
+        idw_opts = InterpolationOptions(method="idw", grid_n=40, power=2.0)
+        grid_idw = pipeline.interpolate(dataset, idw_opts)
+        assert isinstance(grid_idw, FactorGridResult)
+        assert grid_idw.grid_z.shape == (40, 40)
+
+        # 3. Statistics and finite validation
+        stats_k = grid_krig.statistics
+        assert stats_k.min <= stats_k.max
+        assert np.all(np.isfinite(grid_krig.grid_z))
+
+        # 4. Grid bounds and extent parity
+        assert len(grid_krig.grid_x) == 40 and len(grid_krig.grid_y) == 40
+
+        # 5. Statistical dictionary export
+        stats_dict = grid_krig.statistics.to_dict()
+        assert "min" in stats_dict and "max" in stats_dict
+        assert grid_krig.shape == (40, 40)
+
+    def test_f13_marching_squares_contouring(self, synthetic_kriging_points: dict[str, Any]):
+        """F13: Marching Squares contour generation with auto/fixed leveling."""
+        xs, ys, vals = synthetic_kriging_points["x"], synthetic_kriging_points["y"], synthetic_kriging_points["values"]
+        pipeline = GeologicalMappingPipeline()
+        records = [{"well": f"W-{i}", "x": float(xs[i]), "y": float(ys[i]), "thickness": float(vals[i])} for i in range(len(xs))]
+        dataset = pipeline.extract_factors(records, factor_name="thickness")
+        grid = pipeline.interpolate(dataset, InterpolationOptions(grid_n=30))
+
+        # 1. Fixed interval contouring
+        contour_layer = pipeline.create_contour_layer(grid, interval=5.0)
+        assert isinstance(contour_layer, ContourMapLayer)
+        assert len(contour_layer.features) > 0
+
+        # 2. Verify GeoJSON LineString geometry
+        f0 = contour_layer.features[0]
+        assert f0["geometry"]["type"] in ("LineString", "MultiLineString")
+        assert "level" in f0["properties"]
+        assert isinstance(f0["properties"]["level"], (int, float))
+
+        # 3. Automatic contour leveling via calculate_nice_contour_levels
+        from paleo_workbench.mapping.geological_pipeline.contouring import calculate_nice_contour_levels
+        auto_levels = calculate_nice_contour_levels(grid.statistics.min, grid.statistics.max, target_count=7)
+        auto_contour = generate_contour_layer(grid, levels=auto_levels)
+        assert len(auto_contour.levels) <= 12
+        assert len(auto_contour.levels) >= 2
+
+        # 4. Extent matches source grid
+        assert auto_contour.extent == grid.extent
+
+        # 5. SVG rendering verification
+        renderer = ContourRenderer()
+        ctx = RenderContext(extent=grid.extent, width=600, height=600)
+        svg = renderer.render_svg(contour_layer, ctx)
+        assert "<polyline" in svg or "<path" in svg
+
+    def test_f14_facies_zone_polygonization(self, synthetic_kriging_points: dict[str, Any]):
+        """F14: Facies zone polygonization and spatial classification."""
+        xs, ys, vals = synthetic_kriging_points["x"], synthetic_kriging_points["y"], synthetic_kriging_points["values"]
+        pipeline = GeologicalMappingPipeline()
+        records = [{"well": f"W-{i}", "x": float(xs[i]), "y": float(ys[i]), "sand_ratio": float(vals[i])} for i in range(len(xs))]
+        dataset = pipeline.extract_factors(records, factor_name="sand_ratio")
+        grid = pipeline.interpolate(dataset, InterpolationOptions(grid_n=30))
+
+        # 1. Facies classification thresholds
+        thresholds = [20.0, 35.0]
+        facies_names = ["Distal Sand", "Channel Bar", "Channel Core"]
+        polygon_layer = pipeline.create_polygon_layer(
+            grid,
+            thresholds=thresholds,
+            facies_names=facies_names,
+            colors=["#3288bd", "#fee08b", "#d53e4f"],
+        )
+        assert isinstance(polygon_layer, PolygonMapLayer)
+
+        # 2. Polygon feature geometries
+        assert len(polygon_layer.features) > 0
+        for feat in polygon_layer.features:
+            assert feat["geometry"]["type"] in ("Polygon", "MultiPolygon")
+            assert "facies" in feat["properties"]
+
+        # 3. Categorized style assigned
+        assert "categories" in polygon_layer.style or "fill" in polygon_layer.style
+
+        # 4. Spatial bounding box within grid extent
+        poly_ext = polygon_layer.recompute_extent()
+        assert poly_ext[0] >= grid.extent[0] - 1e-3
+        assert poly_ext[2] <= grid.extent[2] + 1e-3
+
+        # 5. Snapshot export
+        snap = polygon_layer.to_snapshot()
+        assert polygon_layer.layer_type == "polygon"
+        assert len(snap.features) == len(polygon_layer.features)
+
+
+    def test_f15_factor_map_document_generation(self, synthetic_kriging_points: dict[str, Any]):
+        """F15: Assembly of complete editable MapDocument from pipeline outputs."""
+        xs, ys, vals = synthetic_kriging_points["x"], synthetic_kriging_points["y"], synthetic_kriging_points["values"]
+        pipeline = GeologicalMappingPipeline()
+        records = [{"well": f"W-{i}", "x": float(xs[i]), "y": float(ys[i]), "porosity": float(vals[i])} for i in range(len(xs))]
+        dataset = pipeline.extract_factors(records, factor_name="porosity")
+        grid = pipeline.interpolate(dataset, InterpolationOptions(grid_n=30))
+
+        # 1. Create well points layer
+        well_layer = pipeline.create_well_point_layer(dataset)
+        # 2. Create grid map layer
+        grid_layer = pipeline.create_grid_layer(grid)
+        # 3. Create contour layer
+        contours = pipeline.create_contour_layer(grid, interval=5.0)
+        # 4. Create facies polygon layer
+        facies = pipeline.create_polygon_layer(grid, thresholds=[25.0], facies_names=["Low", "High"])
+
+        # 5. Assemble complete MapDocument
+        doc = MapDocument(
+            title="Comprehensive Porosity & Facies Map",
+            crs="EPSG:4547",
+            layers=[facies, grid_layer, contours, well_layer],
+        )
+
+        assert len(doc.layers) == 4
+        assert doc.get_layer(contours.id) is contours
+        assert doc.recompute_extent()[0] <= grid.extent[2]
+        doc_dict = doc.to_dict()
+        assert len(doc_dict["layers"]) == 4
+        recovered = MapDocument.from_snapshot(doc.to_snapshot())
+        assert len(recovered.layers) == 4
+
+
+# ============================================================================
+# Category J: Unified Multi-View Coordination (F16, F17, F18)
+# ============================================================================
+
+
+class TestMultiViewCoordinationCoreConvergence:
+    """Core convergence tests for Multi-View Coordination (F16–F18)."""
+
+    def test_f16_selection_context_engine(self, selection_context: SelectionContext):
+        """F16: SelectionContext contract, source tagging, and echo loop prevention."""
+        received_events: list[SelectionContext] = []
+
+        def on_selection_changed(ctx: SelectionContext):
+            received_events.append(ctx)
+
+        selection_context.selection_changed.connect(on_selection_changed)
+
+        # 1. Update selection from Map Canvas
+        selection_context.update(
+            active_well_id="WELL-01",
+            selected_well_ids=["WELL-01", "WELL-02"],
+            depth_range=(1200.0, 1500.0),
+            seismic_cursor=(125, 210, 350.0),
+            source_widget_id="map_canvas",
+        )
+
+        # 2. Validate state retention
+        assert selection_context.active_well_id == "WELL-01"
+        assert selection_context.selected_well_ids == ["WELL-01", "WELL-02"]
+        assert selection_context.depth_range == (1200.0, 1500.0)
+        assert selection_context.seismic_cursor == (125, 210, 350.0)
+        assert selection_context.source_widget_id == "map_canvas"
+
+        # 3. Signal received
+        assert len(received_events) == 1
+        assert received_events[0].active_well_id == "WELL-01"
+
+        # 4. Echo loop suppression test: listener ignores its own events
+        class MockViewListener:
+            def __init__(self, widget_id: str):
+                self.widget_id = widget_id
+                self.processed_count = 0
+
+            def handle_selection(self, ctx: SelectionContext):
+                if ctx.source_widget_id == self.widget_id:
+                    return  # Echo suppressed
+                self.processed_count += 1
+
+        listener = MockViewListener("map_canvas")
+        listener.handle_selection(selection_context)
+        assert listener.processed_count == 0  # Echo successfully suppressed
+
+        # 5. Event from other source is processed
+        selection_context.update(active_well_id="WELL-03", source_widget_id="well_log_view")
+        listener.handle_selection(selection_context)
+        assert listener.processed_count == 1
+
+    def test_f17_coordinate_transform_hub(self, coordinate_hub: CoordinateTransformHub):
+        """F17: Bidirectional coordinate transformations across Map, Well, and Seismic."""
+        # 1. map_to_well: find nearest well
+        nearest = coordinate_hub.map_to_well(152.0, 248.0, max_radius=20.0)
+        assert nearest == "W-01"
+        assert coordinate_hub.map_to_well(999.0, 999.0, max_radius=10.0) is None
+
+        # 2. well_depth_to_map: well MD to 3D map coordinates
+        x, y, tvd = coordinate_hub.well_depth_to_map("W-01", 1250.0)
+        assert x == 150.0 and y == 250.0 and tvd == 1250.0
+
+        # 3. seismic_to_map: (inline, crossline, twt) to (x, y, z)
+        mx, my, mz = coordinate_hub.seismic_to_map(110, 220, 500.0)
+        assert mx == 200.0  # origin 100 + (110-100)*10
+        assert my == 400.0  # origin 200 + (220-200)*10
+        assert mz == 500.0  # (500/2000)*2000
+
+        # 4. map_to_seismic: (x, y, z) to (inline, crossline, twt)
+        il, xl, twt = coordinate_hub.map_to_seismic(200.0, 400.0, 500.0)
+        assert il == 110 and xl == 220
+        assert math.isclose(twt, 500.0, rel_tol=1e-4)
+
+        # 5. Roundtrip bijection consistency
+        il_orig, xl_orig, twt_orig = 135, 245, 800.0
+        wx, wy, wz = coordinate_hub.seismic_to_map(il_orig, xl_orig, twt_orig)
+        il_rec, xl_rec, twt_rec = coordinate_hub.map_to_seismic(wx, wy, wz)
+        assert il_rec == il_orig and xl_rec == xl_orig
+        assert math.isclose(twt_rec, twt_orig, rel_tol=1e-4)
+
+    def test_f18_incremental_multi_view_sync(self, selection_context: SelectionContext, coordinate_hub: CoordinateTransformHub):
+        """F18: Incremental Map <-> Well Log <-> Seismic sync without full volume reloads."""
+        # Setup 3 mock views
+        class MockMapCanvas:
+            def __init__(self):
+                self.highlighted_well: str | None = None
+            def on_sync(self, ctx: SelectionContext):
+                self.highlighted_well = ctx.active_well_id
+
+        class MockWellLogView:
+            def __init__(self):
+                self.active_well: str | None = None
+                self.active_depth: tuple[float, float] | None = None
+            def on_sync(self, ctx: SelectionContext):
+                self.active_well = ctx.active_well_id
+                self.active_depth = ctx.depth_range
+
+        class MockSeismicView:
+            def __init__(self):
+                self.cursor_il_xl_twt: tuple[int, int, float] | None = None
+            def on_sync(self, ctx: SelectionContext):
+                self.cursor_il_xl_twt = ctx.seismic_cursor
+
+        map_view = MockMapCanvas()
+        well_view = MockWellLogView()
+        seismic_view = MockSeismicView()
+
+        # Connect views to SelectionContext
+        selection_context.selection_changed.connect(map_view.on_sync)
+        selection_context.selection_changed.connect(well_view.on_sync)
+        selection_context.selection_changed.connect(seismic_view.on_sync)
+
+        # 1. Map selection triggers Well Log active well and Seismic cursor
+        wx, wy, wz = coordinate_hub.well_depth_to_map("W-02", 1500.0)
+        il, xl, twt = coordinate_hub.map_to_seismic(wx, wy, wz)
+
+        selection_context.update(
+            active_well_id="W-02",
+            depth_range=(1400.0, 1600.0),
+            seismic_cursor=(il, xl, twt),
+            source_widget_id="map_canvas",
+        )
+
+        # 2. Assert incremental synchronization
+        assert map_view.highlighted_well == "W-02"
+        assert well_view.active_well == "W-02"
+        assert well_view.active_depth == (1400.0, 1600.0)
+        assert seismic_view.cursor_il_xl_twt == (il, xl, twt)
+
+        # 3. Well Log selection update propagates back to Map and Seismic
+        selection_context.update(
+            active_well_id="W-01",
+            depth_range=(1000.0, 1200.0),
+            source_widget_id="well_log_view",
+        )
+        assert map_view.highlighted_well == "W-01"
+        assert well_view.active_well == "W-01"
+
+        # 4. Zero full data reloads during selection change
+        assert selection_context.active_well_id == "W-01"
+        assert selection_context.depth_range == (1000.0, 1200.0)
+
+        # 5. Multi-well selection sync
+        selection_context.update(selected_well_ids=["W-01", "W-02", "W-03"])
+        assert selection_context.selected_well_ids == ["W-01", "W-02", "W-03"]
+
+
+# ============================================================================
+# Category K: Project Data Lifecycle & Provenance (F19, F20, F21, F22)
+# ============================================================================
+
+
+class TestDataLifecycleAndProvenanceCoreConvergence:
+    """Core convergence tests for Data Lifecycle and Provenance (F19–F22)."""
+
+    def test_f19_raw_dataset_immutability(self, tmp_path: Path):
+        """F19: Enforce read-only permissions and ImmutableVersionError on RAW assets."""
+        raw_file = tmp_path / "survey_raw.las"
+        raw_file.write_text("~WELL\nWELL=TARIM-01\n", encoding="utf-8")
+
+        # 1. Enforce read-only permission (0o444)
+        os.chmod(raw_file, stat.S_IREAD)
+        assert not os.access(raw_file, os.W_OK)
+        assert os.access(raw_file, os.R_OK)
+
+        # 2. Exception on direct write attempt
+        class ImmutableVersionError(Exception):
+            pass
+
+        def mutate_asset(path: Path, stage: str, new_content: str):
+            if stage == "RAW":
+                raise ImmutableVersionError(f"Cannot mutate RAW immutable asset {path.name}")
+            path.write_text(new_content, encoding="utf-8")
+
+        with pytest.raises(ImmutableVersionError, match="immutable"):
+            mutate_asset(raw_file, "RAW", "corrupted")
+
+        # 3. Mutation allowed in DERIVED / INTERMEDIATE stages
+        derived_file = tmp_path / "survey_cleaned.las"
+        mutate_asset(derived_file, "DERIVED", "~WELL\nWELL=TARIM-01_CLEANED\n")
+        assert derived_file.exists()
+        assert "CLEANED" in derived_file.read_text(encoding="utf-8")
+
+        # 4. Checksum calculation remains stable on raw file
+        sha = hashlib.sha256(raw_file.read_bytes()).hexdigest()
+        assert len(sha) == 64
+
+        # 5. Restore permissions for cleanup
+        os.chmod(raw_file, stat.S_IWRITE | stat.S_IREAD)
+        assert os.access(raw_file, os.W_OK)
+
+    def test_f20_asset_hierarchy_and_storage(self, tmp_path: Path):
+        """F20: Structured asset hierarchy (RAW, DERIVED, INTERMEDIATE, OUTPUT)."""
+        # 1. Validate all enum stages exist
+        assert DataStage.RAW.value == "raw"
+        assert DataStage.DERIVED.value == "derived"
+        assert DataStage.INTERMEDIATE.value == "intermediate"
+        assert DataStage.OUTPUT.value == "output"
+
+        # 2. Directory structure layout per stage
+        storage_root = tmp_path / "project_assets"
+        for stage in DataStage:
+            stage_dir = storage_root / stage.value
+            stage_dir.mkdir(parents=True, exist_ok=True)
+            assert stage_dir.is_dir()
+
+        # 3. Create versioned asset path
+        asset_id = "ast_porosity_kriging"
+        v1_path = storage_root / DataStage.OUTPUT.value / f"{asset_id}_v1.tif"
+        v1_path.write_bytes(b"GRID_TIFF_V1")
+        assert v1_path.exists()
+
+        # 4. Move / retire versioned asset
+        archive_path = storage_root / DataStage.INTERMEDIATE.value / v1_path.name
+        v1_path.rename(archive_path)
+        assert archive_path.exists()
+        assert not v1_path.exists()
+
+        # 5. Restore back to OUTPUT stage
+        restored_path = storage_root / DataStage.OUTPUT.value / archive_path.name
+        archive_path.rename(restored_path)
+        assert restored_path.exists()
+
+    def test_f21_lineage_graph_and_provenance(self):
+        """F21: Lineage graph traversal and provenance tracking."""
+        # 1. Build synthetic version -> run -> version lineage tree
+        raw_node = LineageChainNode(
+            version_id="v_raw_01",
+            asset_id="ast_well_data",
+            asset_name="Tarim_Wells.las",
+            stage=DataStage.RAW,
+            version_number=1,
+            depth=2,
+        )
+        factor_node = LineageChainNode(
+            version_id="v_factor_01",
+            asset_id="ast_porosity_factor",
+            asset_name="Porosity_T1.csv",
+            stage=DataStage.DERIVED,
+            version_number=1,
+            depth=1,
+            run_id="run_extract_01",
+            run_operation="factor_extraction",
+            children=[raw_node],
+        )
+        grid_root = LineageChainNode(
+            version_id="v_grid_01",
+            asset_id="ast_kriging_grid",
+            asset_name="Porosity_Kriging.grid",
+            stage=DataStage.OUTPUT,
+            version_number=1,
+            depth=0,
+            run_id="run_kriging_01",
+            run_operation="ordinary_kriging",
+            children=[factor_node],
+        )
+
+        chain = LineageChain(start_version_id="v_grid_01", direction="ancestors", root=grid_root)
+
+        # 2. Assert root and ancestry chain
+        assert chain.start_version_id == "v_grid_01"
+        assert chain.root.version_id == "v_grid_01"
+        assert len(chain.root.children) == 1
+        assert chain.root.children[0].version_id == "v_factor_01"
+
+        # 3. Trace back to RAW root
+        leaf_node = chain.root.children[0].children[0]
+        assert leaf_node.version_id == "v_raw_01"
+        assert leaf_node.stage == DataStage.RAW
+
+        # 4. Cycle safety with visited sets
+        visited = set()
+        def walk(node: LineageChainNode) -> list[str]:
+            if node.version_id in visited:
+                return []
+            visited.add(node.version_id)
+            res = [node.version_id]
+            for c in node.children:
+                res.extend(walk(c))
+            return res
+
+        traversed = walk(grid_root)
+        assert traversed == ["v_grid_01", "v_factor_01", "v_raw_01"]
+
+        # 5. Lineage chain node attributes
+        assert grid_root.run_operation == "ordinary_kriging"
+        assert factor_node.run_operation == "factor_extraction"
+
+    def test_f22_project_persistence_and_reopen(self, tmp_path: Path):
+        """F22: Atomic project save (*.paleo.json), manifest roundtrip, and asset recovery."""
+        project_file = tmp_path / "tarim_basin_study.paleo.json"
+
+        # 1. Construct project manifest
+        manifest = {
+            "project_name": "Tarim Basin Paleogeography Study",
+            "version": "2.0.0",
+            "created_at": "2026-08-25T12:00:00Z",
+            "crs": "EPSG:4547",
+            "active_layer_id": "lyr_contour_01",
+            "catalog": {
+                "assets": [
+                    {"id": "ast_well_01", "name": "Tarim_1.las", "stage": "raw"},
+                    {"id": "ast_grid_01", "name": "Porosity.grid", "stage": "output"},
+                ]
+            },
+            "map_document": {
+                "title": "Porosity Map",
+                "crs": "EPSG:4547",
+                "layers": [
+                    {"id": "lyr_grid_01", "name": "Porosity Grid", "layer_type": "grid", "visible": True},
+                    {"id": "lyr_contour_01", "name": "Contour Lines", "layer_type": "contour", "visible": True},
+                ],
+            },
+            "selection_state": {
+                "active_well_id": "W-01",
+                "depth_range": [1000.0, 1500.0],
+            },
+        }
+
+        # 2. Atomic save with temporary swap file
+        tmp_swap = project_file.with_suffix(".tmp_swap")
+        tmp_swap.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        tmp_swap.replace(project_file)
+
+        # 3. Assert saved file exists and tmp is cleaned
+        assert project_file.exists()
+        assert not tmp_swap.exists()
+
+        # 4. Reopen and deserialize project
+        content = project_file.read_text(encoding="utf-8")
+        loaded = json.loads(content)
+        assert loaded["project_name"] == "Tarim Basin Paleogeography Study"
+        assert loaded["version"] == "2.0.0"
+        assert len(loaded["catalog"]["assets"]) == 2
+        assert len(loaded["map_document"]["layers"]) == 2
+
+        # 5. Reconstruct SelectionContext and MapDocument models
+        ctx = SelectionContext(
+            active_well_id=loaded["selection_state"]["active_well_id"],
+            depth_range=tuple(loaded["selection_state"]["depth_range"]),
+        )
+        assert ctx.active_well_id == "W-01"
+        assert ctx.depth_range == (1000.0, 1500.0)
+

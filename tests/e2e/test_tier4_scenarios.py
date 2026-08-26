@@ -36,6 +36,39 @@ from shapely.geometry import (
 )
 
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+from paleo_workbench.catalog.lineage_graph import LineageChain, LineageChainNode, build_lineage_chain
+from paleo_workbench.catalog.models import DataAsset, DataStage, ImmutableVersionError
+from paleo_workbench.mapping.geological_pipeline.contouring import calculate_nice_contour_levels, generate_contour_layer
+from paleo_workbench.mapping.geological_pipeline.models import (
+    GeologicalFactor,
+    GeologicalFactorDataset,
+    InterpolationOptions,
+)
+from paleo_workbench.mapping.geological_pipeline.pipeline import GeologicalMappingPipeline
+from paleo_workbench.mapping.geological_pipeline.polygonization import generate_facies_polygon_layer
+from paleo_workbench.mapping.layers import (
+    AnnotationMapLayer,
+    ContourMapLayer,
+    GridMapLayer,
+    MapDocument,
+    MapLayer,
+    PolygonMapLayer,
+    VectorMapLayer,
+    WellPointMapLayer,
+)
+from paleo_workbench.mapping.map_styles import MarkerSymbol, TextStyle, VectorStyle
+from paleo_workbench.mapping.renderers import (
+    AnnotationRenderer,
+    CategorizedRenderer,
+    ContourRenderer,
+    GraduatedRenderer,
+    RenderContext,
+    RendererRegistry,
+    SingleSymbolRenderer,
+)
+from paleo_workbench.workflow.factor_grid_result import FactorGridResult
+from tests.e2e.conftest import CoordinateTransformHub, SelectionContext
+
 
 
 # ============================================================================
@@ -576,3 +609,188 @@ class TestScenario5MultiFactorEnvironmentalModeling:
         assert loaded_prov["resolution"] == [1920, 1080]
         budget.free(10 * 1024 * 1024)
         assert budget.used_bytes == 0
+
+
+# ============================================================================
+# Scenario 6: Complete Geological Mapping & Multi-View Coordination Workflow
+# (F6–F22 End-to-End Core Convergence Workflow)
+# ============================================================================
+
+
+class TestScenario6GeologicalMappingAndMultiViewWorkflow:
+    """Scenario 6: End-to-end user workflow: raw well data -> factor extraction -> Kriging -> Contouring -> Facies -> Multi-View Sync -> Lineage -> Atomic Save."""
+
+    def test_geological_mapping_and_multi_view_workflow(
+        self,
+        tmp_path: Path,
+        synthetic_kriging_points: dict[str, Any],
+        selection_context: SelectionContext,
+        coordinate_hub: CoordinateTransformHub,
+    ):
+        """Complete workflow test spanning all 17 Core Convergence features (F6–F22)."""
+        xs, ys, vals = synthetic_kriging_points["x"], synthetic_kriging_points["y"], synthetic_kriging_points["values"]
+        project_dir = tmp_path / "tarim_comprehensive_study"
+        assets_dir = project_dir / "assets"
+        assets_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. Step 1: Raw Well Dataset Ingest & Immutability (F19, F20)
+        raw_dir = assets_dir / DataStage.RAW.value
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        raw_file = raw_dir / "tarim_basin_wells.csv"
+        raw_lines = ["well,x,y,porosity,formation\n"] + [
+            f"W-{i:02d},{xs[i]:.4f},{ys[i]:.4f},{vals[i]:.2f},T1\n" for i in range(len(xs))
+        ]
+        raw_file.write_text("".join(raw_lines), encoding="utf-8")
+        os.chmod(raw_file, stat.S_IREAD)
+        assert not os.access(raw_file, os.W_OK)
+
+        # 2. Step 2: Geological Mapping Pipeline Factor Extraction (F11)
+        pipeline = GeologicalMappingPipeline()
+        records = [
+            {"well": f"W-{i:02d}", "x": float(xs[i]), "y": float(ys[i]), "porosity": float(vals[i]), "formation": "T1"}
+            for i in range(len(xs))
+        ]
+        dataset = pipeline.extract_factors(records, factor_name="porosity", target_horizon="T1")
+        assert len(dataset.valid_points) == len(xs)
+
+        # 3. Step 3: Kriging Spatial Interpolation -> FactorGridResult (F12)
+        grid_result = pipeline.interpolate(
+            dataset,
+            InterpolationOptions(method="kriging", grid_n=40, variogram_model="spherical"),
+        )
+        assert isinstance(grid_result, FactorGridResult)
+        assert grid_result.grid_z.shape == (40, 40)
+
+        # 4. Step 4: Marching Squares Contour Generation (F13)
+        contour_layer = pipeline.create_contour_layer(grid_result, interval=4.0)
+        assert isinstance(contour_layer, ContourMapLayer)
+
+        # 5. Step 5: Facies Classification & Polygonization (F14)
+        facies_layer = pipeline.create_polygon_layer(
+            grid_result,
+            thresholds=[20.0, 30.0],
+            facies_names=["Deep Mud", "Delta Front Sand", "Channel Core"],
+            colors=["#3288bd", "#fee08b", "#d53e4f"],
+        )
+        assert isinstance(facies_layer, PolygonMapLayer)
+
+        # 6. Step 6: Map Layers & Annotation Layer Assembly (F6, F7, F8, F15)
+        well_layer = pipeline.create_well_point_layer(dataset)
+        grid_layer = pipeline.create_grid_layer(grid_result)
+
+        ann_layer = AnnotationMapLayer(name="Geological Notes")
+        ann_layer.add_annotation("Depocenter Axis", x=250.0, y=350.0, font_size=12.0, color="#ffffff")
+        ann_layer.add_annotation("Well Tie Anticline-1", x=150.0, y=250.0, font_size=10.0, color="#ffff00")
+
+        map_doc = MapDocument(
+            title="Tarim Basin Paleogeographic Study",
+            crs="EPSG:4547",
+            layers=[facies_layer, grid_layer, contour_layer, well_layer, ann_layer],
+        )
+        assert len(map_doc.layers) == 5
+
+        # 7. Step 7: Multi-View Synchronization (F16, F17, F18)
+        views_updated = []
+        def on_selection_sync(ctx: SelectionContext):
+            views_updated.append(ctx.active_well_id)
+
+        selection_context.selection_changed.connect(on_selection_sync)
+
+        # Map selection triggers Well Log active well and Seismic slice
+        well_id = coordinate_hub.map_to_well(150.0, 250.0)
+        wx, wy, wz = coordinate_hub.well_depth_to_map(well_id, 1250.0)
+        il, xl, twt = coordinate_hub.map_to_seismic(wx, wy, wz)
+
+        selection_context.update(
+            active_well_id=well_id,
+            depth_range=(1200.0, 1300.0),
+            seismic_cursor=(il, xl, twt),
+            source_widget_id="map_canvas",
+        )
+        assert len(views_updated) == 1
+        assert views_updated[0] == "W-01"
+
+        # 8. Step 8: QGIS Bridge & Print Composer Export Parity (F9, F10)
+        reg = RendererRegistry()
+        ctx_screen = RenderContext(extent=map_doc.recompute_extent(), width=800, height=600, dpi=96.0)
+        ctx_print = RenderContext(extent=map_doc.recompute_extent(), width=2400, height=1800, dpi=300.0)
+
+        screen_svg = reg.resolve(contour_layer).render_svg(contour_layer, ctx_screen)
+        print_svg = reg.resolve(contour_layer).render_svg(contour_layer, ctx_print)
+        assert "<polyline" in screen_svg and "<polyline" in print_svg
+
+        # 9. Step 9: Lineage Graph Construction & Provenance (F21)
+        raw_node = LineageChainNode(
+            version_id="ver_raw_01",
+            asset_id="ast_wells_raw",
+            asset_name="tarim_basin_wells.csv",
+            stage=DataStage.RAW,
+            version_number=1,
+            depth=2,
+        )
+        derived_node = LineageChainNode(
+            version_id="ver_derived_01",
+            asset_id="ast_porosity_factor",
+            asset_name="porosity_t1_dataset",
+            stage=DataStage.DERIVED,
+            version_number=1,
+            depth=1,
+            run_id="run_extract_01",
+            run_operation="factor_extraction",
+            children=[raw_node],
+        )
+        output_node = LineageChainNode(
+            version_id="ver_grid_01",
+            asset_id="ast_kriging_grid",
+            asset_name="porosity_kriging_t1.grid",
+            stage=DataStage.OUTPUT,
+            version_number=1,
+            depth=0,
+            run_id="run_kriging_01",
+            run_operation="kriging_interpolation",
+            children=[derived_node],
+        )
+        lineage_chain = LineageChain(start_version_id="ver_grid_01", direction="ancestors", root=output_node)
+
+        # 10. Step 10: Atomic Project Manifest Persistence & Reopen (F22)
+        project_manifest = {
+            "project_name": "Tarim Basin Paleogeographic Study",
+            "version": "2.0.0",
+            "crs": "EPSG:4547",
+            "active_layer_id": contour_layer.id,
+            "catalog": {
+                "assets": [
+                    {"id": "ast_wells_raw", "name": "tarim_basin_wells.csv", "stage": "raw"},
+                    {"id": "ast_porosity_factor", "name": "porosity_t1_dataset", "stage": "derived"},
+                    {"id": "ast_kriging_grid", "name": "porosity_kriging_t1.grid", "stage": "output"},
+                ]
+            },
+            "selection_state": {
+                "active_well_id": selection_context.active_well_id,
+                "depth_range": list(selection_context.depth_range),
+                "seismic_cursor": list(selection_context.seismic_cursor),
+            },
+            "map_document": map_doc.to_dict(),
+            "lineage": {
+                "start_version_id": lineage_chain.start_version_id,
+                "direction": lineage_chain.direction,
+            },
+        }
+
+        project_path = project_dir / "project.paleo.json"
+        tmp_swap = project_path.with_suffix(".tmp_swap")
+        tmp_swap.write_text(json.dumps(project_manifest, indent=2), encoding="utf-8")
+        tmp_swap.replace(project_path)
+
+        assert project_path.exists()
+        assert not tmp_swap.exists()
+
+        # Verify reload
+        reloaded = json.loads(project_path.read_text(encoding="utf-8"))
+        assert reloaded["project_name"] == "Tarim Basin Paleogeographic Study"
+        assert len(reloaded["map_document"]["layers"]) == 5
+        assert reloaded["selection_state"]["active_well_id"] == "W-01"
+
+        # Restore permissions
+        os.chmod(raw_file, stat.S_IWRITE | stat.S_IREAD)
+

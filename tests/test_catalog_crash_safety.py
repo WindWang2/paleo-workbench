@@ -109,7 +109,8 @@ def test_load_returns_empty_when_both_missing(tmp_path):
 def test_sigkill_mid_save_reopens_consistent(tmp_path: Path, mode: str):
     project = _make_project(tmp_path)
     env = dict(os.environ)
-    env["PYTHONPATH"] = str(_PROJECT_ROOT)
+    existing_pythonpath = os.environ.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{_PROJECT_ROOT}:{existing_pythonpath}" if existing_pythonpath else str(_PROJECT_ROOT)
     proc = subprocess.run(
         [_PYTHON, str(_HELPER), mode, str(project)],
         capture_output=True,

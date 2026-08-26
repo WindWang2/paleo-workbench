@@ -33,6 +33,7 @@ from paleo_workbench.project.models import (
     WellTableRow,
 )
 from paleo_workbench.services.geological_mapping_service import GeologicalMappingService
+from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 
 
 @pytest.fixture
@@ -236,3 +237,275 @@ def test_geological_mapping_service_with_project():
     assert task.factor_type == "砂岩厚度"
     assert len(project.factor_map_tasks) == 1
     assert len(project.paleomap_documents) == 1
+
+
+def test_factor_extraction_all_types():
+    pipeline = GeologicalMappingPipeline()
+    records = [
+        {"well_id": "W1", "name": "井-1", "x": 100.0, "y": 20.0, "POR": 18.5, "PERM": 45.2, "NET_PAY": 12.0, "TOP_DEPTH": 1500.0, "BASE_DEPTH": 1550.0},
+        {"well_id": "W2", "name": "井-2", "x": 102.0, "y": 22.0, "porosity": 22.1, "permeability": 120.0, "net_pay": 18.5, "top_md": 1520.0, "base_md": 1580.0},
+        {"well_id": "W3", "name": "井-3", "x": 104.0, "y": 21.0, "孔隙度": 15.3, "渗透率": 25.0, "有效厚度": 8.0, "地层顶界": 1490.0, "地层底界": 1545.0},
+    ]
+
+    # 1. Porosity extraction with mnemonics
+    ds_por = pipeline.extract_factors(records, "porosity")
+    assert len(ds_por.valid_points) == 3
+    assert ds_por.unit == "%"
+    vals_por = [p.value for p in ds_por.valid_points]
+    assert np.allclose(vals_por, [18.5, 22.1, 15.3])
+
+    # 2. Permeability extraction
+    ds_perm = pipeline.extract_factors(records, "permeability")
+    assert len(ds_perm.valid_points) == 3
+    assert ds_perm.unit == "mD"
+    assert np.allclose([p.value for p in ds_perm.valid_points], [45.2, 120.0, 25.0])
+
+    # 3. Net pay extraction
+    ds_pay = pipeline.extract_factors(records, "net_pay")
+    assert len(ds_pay.valid_points) == 3
+    assert ds_pay.unit == "m"
+    assert np.allclose([p.value for p in ds_pay.valid_points], [12.0, 18.5, 8.0])
+
+    # 4. Top depth extraction
+    ds_top = pipeline.extract_factors(records, "top_depth")
+    assert len(ds_top.valid_points) == 3
+    assert ds_top.unit == "m"
+    assert np.allclose([p.value for p in ds_top.valid_points], [1500.0, 1520.0, 1490.0])
+
+    # 5. Derived formation thickness
+    ds_thick = pipeline.extract_factors(records, "formation_thickness")
+    assert len(ds_thick.valid_points) == 3
+    assert np.allclose([p.value for p in ds_thick.valid_points], [50.0, 60.0, 55.0])
+
+
+def test_extraction_from_well_entities():
+    from paleo_workbench.project.domain import WellEntity
+
+    project = ProjectDocument(meta=ProjectMeta(name="实体工程"))
+    project.wells = [
+        WellEntity(name="WELL_A", project_x=10.0, project_y=20.0, metadata={"porosity": 19.5, "formation": "T1"}),
+        WellEntity(name="WELL_B", project_x=12.0, project_y=22.0, metadata={"porosity": 24.0, "formation": "T1"}),
+        WellEntity(name="WELL_C", project_x=15.0, project_y=25.0, metadata={"porosity": 16.2, "formation": "T1"}),
+    ]
+
+    service = GeologicalMappingService()
+    dataset = service.extract_well_factors(project, "porosity")
+    assert len(dataset.valid_points) == 3
+    assert np.allclose([p.value for p in dataset.valid_points], [19.5, 24.0, 16.2])
+
+
+def test_idw_search_radius_and_neighbors():
+    dataset = GeologicalFactorDataset(
+        factor_name="渗透率",
+        unit="mD",
+        points=[
+            GeologicalFactor(name="渗透率", value=10.0, x=0.0, y=0.0),
+            GeologicalFactor(name="渗透率", value=50.0, x=10.0, y=0.0),
+            GeologicalFactor(name="渗透率", value=100.0, x=0.0, y=10.0),
+            GeologicalFactor(name="渗透率", value=200.0, x=10.0, y=10.0),
+        ],
+    )
+
+    # 1. Search radius that is small should leave far corners as NaN
+    opts = InterpolationOptions(
+        method="idw",
+        grid_n=20,
+        search_radius=3.0,
+        min_neighbors=1,
+    )
+    res = IDWInterpolator().interpolate(dataset, opts)
+    assert np.isnan(res.grid_z).any()
+    # Near corners should be finite
+    assert np.isfinite(res.grid_z[0, 0])
+    assert np.isfinite(res.grid_z[-1, -1])
+
+    # 2. Min neighbors = 3 with small radius should leave center as NaN
+    opts2 = InterpolationOptions(
+        method="idw",
+        grid_n=20,
+        search_radius=5.0,
+        min_neighbors=3,
+    )
+    res2 = IDWInterpolator().interpolate(dataset, opts2)
+    assert np.isnan(res2.grid_z).any()
+
+
+def test_kriging_variogram_models(sample_well_dataset):
+    from paleo_workbench.mapping.geological_pipeline.interpolator import _pure_numpy_kriging
+
+    xs, ys, zs = sample_well_dataset.to_arrays()
+    gx = np.linspace(114.1, 114.5, 20)
+    gy = np.linspace(22.4, 22.9, 20)
+
+    for model in ("spherical", "exponential", "gaussian"):
+        z_pred, v_grid, params = _pure_numpy_kriging(xs, ys, zs, gx, gy, model=model)
+        assert z_pred.shape == (20, 20)
+        assert v_grid.shape == (20, 20)
+        assert np.isfinite(z_pred).all()
+        assert np.isfinite(v_grid).all()
+        assert (v_grid >= 0.0).all()
+        assert params["model"] == model
+
+
+def test_factor_grid_result_properties_and_descriptor(sample_well_dataset):
+    options = InterpolationOptions(method="idw", grid_n=25)
+    result = interpolate_factor(sample_well_dataset, options)
+
+    assert result.dx > 0.0
+    assert result.dy > 0.0
+    assert result.cell_size == (result.dx, result.dy)
+    assert isinstance(result.input_points, list)
+    assert len(result.input_points) == 8
+
+    # Set mock contours and verify descriptor
+    result.contours = {"20.0": [[[114.1, 22.5], [114.3, 22.7]]]}
+    descriptor = result.to_descriptor()
+    assert "contours" in descriptor
+    assert "20.0" in descriptor["contours"]
+    assert descriptor["width"] == 25
+    assert descriptor["height"] == 25
+
+
+def test_marching_squares_saddle_disambiguation():
+    from paleo_workbench.mapping.geological_pipeline.contouring import _marching_squares_pure_python
+
+    # Create a 2x2 saddle grid:
+    # Corner 0 (bottom-left) = 10, Corner 1 (bottom-right) = 0
+    # Corner 3 (top-left) = 0,    Corner 2 (top-right) = 10
+    # Center average = (10 + 0 + 10 + 0) / 4 = 5.0
+    grid_x = np.array([0.0, 1.0], dtype=np.float64)
+    grid_y = np.array([0.0, 1.0], dtype=np.float64)
+    grid_z = np.array([[10.0, 0.0], [0.0, 10.0]], dtype=np.float64)
+
+    # Test level = 4.0: v_center (5.0) >= level (4.0) -> high corners connect
+    lines_high = _marching_squares_pure_python(grid_z, grid_x, grid_y, level=4.0)
+    assert len(lines_high) >= 1
+
+    # Test level = 6.0: v_center (5.0) < level (6.0) -> low corners connect
+    lines_low = _marching_squares_pure_python(grid_z, grid_x, grid_y, level=6.0)
+    assert len(lines_low) >= 1
+
+
+def test_marching_squares_simplification_and_smoothing():
+    from paleo_workbench.mapping.geological_pipeline.contouring import (
+        chaikin_smooth,
+        douglas_peucker_2d,
+    )
+
+    # Collinear points on straight line
+    straight = [[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0], [4.0, 4.0]]
+    simplified = douglas_peucker_2d(straight, tolerance=0.1)
+    assert len(simplified) == 2
+    assert simplified[0] == [0.0, 0.0]
+    assert simplified[1] == [4.0, 4.0]
+
+    # Smoothing corner
+    corner = [[0.0, 0.0], [0.0, 10.0], [10.0, 10.0]]
+    smoothed = chaikin_smooth(corner, iterations=1)
+    assert len(smoothed) > len(corner)
+    assert smoothed[0] == [0.0, 0.0]
+    assert smoothed[-1] == [10.0, 10.0]
+
+
+def test_quantile_and_fixed_interval_contour_levels(sample_well_dataset):
+    options = InterpolationOptions(method="kriging", grid_n=30)
+    grid_result = interpolate_factor(sample_well_dataset, options)
+
+    # 1. Quantile leveling
+    layer_quantile = generate_contour_layer(grid_result, leveling_mode="quantile")
+    assert len(layer_quantile.levels) > 0
+    assert len(layer_quantile.features) > 0
+
+    # 2. Fixed interval leveling
+    layer_fixed = generate_contour_layer(grid_result, interval=2.0)
+    assert len(layer_fixed.levels) > 0
+    # Every 5th interval should be an index contour
+    index_contours = [f for f in layer_fixed.features if f["properties"].get("is_index_contour")]
+    assert len(index_contours) >= 0
+
+
+def test_facies_polygonization_pure_python_metrics(sample_well_dataset):
+    options = InterpolationOptions(method="idw", grid_n=20)
+    grid_result = interpolate_factor(sample_well_dataset, options)
+
+    poly_layer = generate_facies_polygon_layer(
+        grid_result,
+        thresholds=[18.0, 22.0],
+        facies_names=["低值相", "中值相", "高值相"],
+    )
+
+    assert len(poly_layer.features) > 0
+    total_area_pct = 0.0
+    for feat in poly_layer.features:
+        props = feat["properties"]
+        assert "area" in props
+        assert "area_percent" in props
+        assert "mean_value" in props
+        assert "facies_id" in props
+        assert props["area"] >= 0.0
+        total_area_pct += props["area_percent"]
+
+    assert total_area_pct > 0.0
+
+
+def test_facies_polygonization_with_holes():
+    # Construct a 5x5 grid with a high ring surrounding a low center hole
+    # Grid: border is 30.0, center (row 2, col 2) is 5.0
+    z = np.full((7, 7), 30.0, dtype=np.float32)
+    z[2:5, 2:5] = 5.0
+
+    result = FactorGridResult(
+        grid_z=z,
+        grid_x=np.linspace(0.0, 70.0, 7),
+        grid_y=np.linspace(0.0, 70.0, 7),
+        factor_name="孔隙度",
+        algorithm_id="mock",
+        algorithm_parameters={},
+    )
+
+    poly_layer = generate_facies_polygon_layer(
+        result,
+        thresholds=[15.0],
+        facies_names=["低孔穴", "高孔背景"],
+    )
+
+    assert len(poly_layer.features) >= 2
+    names = [f["properties"]["facies_name"] for f in poly_layer.features]
+    assert "高孔背景" in names
+    assert "低孔穴" in names
+
+
+def test_edge_cases_nans_uniform_and_degenerates():
+    # 1. 100% NaN grid
+    nan_z = np.full((10, 10), np.nan, dtype=np.float32)
+    nan_result = FactorGridResult(
+        grid_z=nan_z,
+        grid_x=np.linspace(0.0, 10.0, 10),
+        grid_y=np.linspace(0.0, 10.0, 10),
+        factor_name="测试NaN",
+        algorithm_id="mock",
+        algorithm_parameters={},
+    )
+
+    c_layer = generate_contour_layer(nan_result)
+    assert len(c_layer.features) == 0
+    p_layer = generate_facies_polygon_layer(nan_result)
+    assert len(p_layer.features) == 0
+
+    # 2. Uniform constant grid
+    const_z = np.full((10, 10), 20.0, dtype=np.float32)
+    const_result = FactorGridResult(
+        grid_z=const_z,
+        grid_x=np.linspace(0.0, 10.0, 10),
+        grid_y=np.linspace(0.0, 10.0, 10),
+        factor_name="测试常量",
+        algorithm_id="mock",
+        algorithm_parameters={},
+    )
+
+    c_const = generate_contour_layer(const_result)
+    assert len(c_const.features) == 0
+    p_const = generate_facies_polygon_layer(const_result)
+    assert len(p_const.features) == 1
+    assert p_const.features[0]["properties"]["area_percent"] == 100.0
+

@@ -211,6 +211,15 @@ class VectorStyle:
                     )
                 except (TypeError, ValueError):
                     continue
+            elif isinstance(entry, Mapping):
+                try:
+                    lo = float(entry.get("min", entry.get("lo", 0.0)))
+                    hi = float(entry.get("max", entry.get("hi", 1.0)))
+                    fill = str(entry.get("fill", entry.get("color", "#6c8ebf")))
+                    lbl = str(entry.get("label", ""))
+                    ranges.append((lo, hi, fill, lbl))
+                except (TypeError, ValueError):
+                    continue
         if ranges:
             replacements["ranges"] = tuple(ranges)
         if values.get("labels") is not None:

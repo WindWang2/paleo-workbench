@@ -309,6 +309,46 @@ class FactorGridResult:
     def crs_is_known(self) -> bool:
         return self.crs is not None
 
+    @property
+    def dx(self) -> float:
+        """Spacing between grid columns along X axis."""
+        xs = self.grid_x
+        return float((np.max(xs) - np.min(xs)) / max(1, self.width - 1)) if self.width > 1 else 0.0
+
+    @property
+    def dy(self) -> float:
+        """Spacing between grid rows along Y axis."""
+        ys = self.grid_y
+        return float((np.max(ys) - np.min(ys)) / max(1, self.height - 1)) if self.height > 1 else 0.0
+
+    @property
+    def cell_size(self) -> tuple[float, float]:
+        """Grid cell spacing as (dx, dy)."""
+        return (self.dx, self.dy)
+
+    @property
+    def input_points(self) -> list[dict[str, Any]]:
+        """Sample points recorded in algorithm parameters, if available."""
+        return list(self.algorithm_parameters.get("sample_points") or [])
+
+    @property
+    def input_version_ids(self) -> list[str]:
+        """Convenience alias for source_refs adhering to Lineage Contract."""
+        return self.source_refs
+
+    @input_version_ids.setter
+    def input_version_ids(self, ids: list[str]) -> None:
+        self.source_refs = list(ids)
+
+    @property
+    def run_id(self) -> str | None:
+        """Convenience alias for run_ref adhering to Lineage Contract."""
+        return self.run_ref
+
+    @run_id.setter
+    def run_id(self, val: str | None) -> None:
+        self.run_ref = val
+
     # ----- construction --------------------------------------------------------
     def __post_init__(self) -> None:
         self._finalise()
@@ -567,7 +607,7 @@ class FactorGridResult:
         artifact (catalog INTERMEDIATE/DERIVED version). Persisting huge grids inline in
         ``.paleo.json`` is what this contract replaces.
         """
-        return _json_safe({
+        payload: dict[str, Any] = {
             "factor_name": self.factor_name,
             "algorithm_id": self.algorithm_id,
             "algorithm_parameters": self.algorithm_parameters,
@@ -579,16 +619,19 @@ class FactorGridResult:
             "extent": list(self.extent),
             "generator_version": self.generator_version,
             "source_refs": list(self.source_refs),
+            "input_version_ids": list(self.source_refs),
             "run_ref": self.run_ref,
+            "run_id": self.run_ref,
             "created_at": self.created_at,
             "has_variance_grid": self.variance_grid is not None,
             "has_boundary": self.boundary is not None,
             "statistics": self.statistics.to_dict(),
-        })
+        }
         # Engine-refined contours (#928) ride the descriptor like the boundary
         # ring: JSON-safe, small relative to the grid, and algorithm output.
         if self.contours:
             payload["contours"] = self.contours
+        return _json_safe(payload)
 
     def to_legacy_dict(self) -> dict[str, Any]:
         """Backward-compatible dict for any legacy consumer.

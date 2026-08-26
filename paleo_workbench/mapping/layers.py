@@ -16,7 +16,13 @@ from uuid import uuid4
 import numpy as np
 
 from paleo_workbench.mapping.color_ramps import ColorRamp, get_color_ramp
-from paleo_workbench.mapping.map_render_backend import MapLayerSnapshot, MapRenderSnapshot
+
+try:
+    from paleo_workbench.mapping.map_render_backend import MapLayerSnapshot, MapRenderSnapshot
+except (ImportError, Exception):  # pragma: no cover
+    MapLayerSnapshot = Any  # type: ignore[assignment,misc]
+    MapRenderSnapshot = Any  # type: ignore[assignment,misc]
+
 from paleo_workbench.mapping.map_styles import (
     MarkerSymbol,
     TextStyle,
@@ -152,6 +158,7 @@ class VectorMapLayer(MapLayer):
                 extract_pts(geom)
 
         if not coords:
+            self.extent = (0.0, 0.0, 1.0, 1.0)
             return self.extent
         xs = [p[0] for p in coords]
         ys = [p[1] for p in coords]
@@ -171,7 +178,7 @@ class VectorMapLayer(MapLayer):
         return MapLayerSnapshot(
             id=self.id,
             name=self.name,
-            layer_type="vector",
+            layer_type=self.layer_type,
             extent=self.extent,
             crs=self.crs,
             data_revision=self.data_revision,
@@ -360,6 +367,106 @@ class PolygonMapLayer(VectorMapLayer):
 
 
 @dataclass
+class AnnotationMapLayer(VectorMapLayer):
+    """Text labels, coordinate annotations, and cartographic callouts."""
+
+    layer_type: str = "annotation"
+    annotations: tuple[Mapping[str, Any], ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.style:
+            self.style = default_style_for("annotation").to_dict()
+        if self.annotations and not self.features:
+            self._sync_features_from_annotations()
+        super().__post_init__()
+
+    def _sync_features_from_annotations(self) -> None:
+        feat_list: list[dict[str, Any]] = []
+        for idx, ann in enumerate(self.annotations):
+            x = float(ann.get("x", ann.get("longitude", 0.0)))
+            y = float(ann.get("y", ann.get("latitude", 0.0)))
+            text = str(ann.get("text", ann.get("label", "")))
+            props = dict(ann)
+            props.setdefault("text", text)
+            feat_list.append({
+                "type": "Feature",
+                "id": str(ann.get("id", f"ann_{idx}")),
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [x, y],
+                },
+                "properties": props,
+            })
+        self.features = tuple(feat_list)
+
+    def add_annotation(
+        self,
+        text: str,
+        x: float,
+        y: float,
+        font_size: float = 10.0,
+        color: str = "#f8f9fa",
+        rotation: float = 0.0,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Add an annotation text item with coordinates, style and rotation."""
+        ann_item: dict[str, Any] = {
+            "id": f"ann_{uuid4().hex[:6]}",
+            "text": str(text),
+            "x": float(x),
+            "y": float(y),
+            "font_size": float(font_size),
+            "color": str(color),
+            "rotation": float(rotation),
+            **kwargs,
+        }
+        self.annotations = (*self.annotations, ann_item)
+        self._sync_features_from_annotations()
+        self.recompute_extent()
+        self.bump_data_revision()
+        return ann_item
+
+    def set_annotations(self, annotations: Iterable[Mapping[str, Any]]) -> None:
+        """Replace all annotations."""
+        self.annotations = tuple(dict(a) for a in annotations)
+        self._sync_features_from_annotations()
+        self.recompute_extent()
+        self.bump_data_revision()
+
+    def clear_annotations(self) -> None:
+        """Clear all annotations."""
+        self.annotations = ()
+        self.features = ()
+        self.recompute_extent()
+        self.bump_data_revision()
+
+    def to_snapshot(self) -> MapLayerSnapshot:
+        if self.annotations and not self.features:
+            self._sync_features_from_annotations()
+        return MapLayerSnapshot(
+            id=self.id,
+            name=self.name,
+            layer_type="annotation",
+            extent=self.extent,
+            crs=self.crs,
+            data_revision=self.data_revision,
+            style_revision=self.style_revision,
+            features=self.features,
+            style=dict(self.style),
+            visible=self.visible,
+            opacity=self.opacity,
+            source_version_id=self.source_version_id,
+            metadata=dict(self.metadata),
+            scale_range=self.scale_range,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        d = super().to_dict()
+        d["annotations"] = [dict(a) for a in self.annotations]
+        return d
+
+
+@dataclass
 class RasterMapLayer(MapLayer):
     """External or georeferenced raster image layer."""
 
@@ -401,6 +508,28 @@ class MapDocument:
     layers: list[MapLayer] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     active_layer_id: str | None = None
+
+    @property
+    def input_version_ids(self) -> list[str]:
+        """Aggregate input version IDs from metadata and individual layer sources."""
+        vids: list[str] = list(self.metadata.get("input_version_ids") or [])
+        for lyr in self.layers:
+            if lyr.source_version_id and lyr.source_version_id not in vids:
+                vids.append(lyr.source_version_id)
+        return vids
+
+    @input_version_ids.setter
+    def input_version_ids(self, ids: list[str]) -> None:
+        self.metadata["input_version_ids"] = list(ids)
+
+    @property
+    def run_id(self) -> str | None:
+        """Producing DataRun ID stored in metadata, if available."""
+        return self.metadata.get("run_id")
+
+    @run_id.setter
+    def run_id(self, val: str | None) -> None:
+        self.metadata["run_id"] = val
 
     def add_layer(self, layer: MapLayer, position: int | None = None) -> MapLayer:
         """Add a layer to the document."""
@@ -479,6 +608,66 @@ class MapDocument:
                     style=dict(s.style),
                     metadata=dict(s.metadata),
                 )
+            elif s.layer_type == "annotation":
+                lyr = AnnotationMapLayer(
+                    id=s.id,
+                    name=s.name,
+                    extent=s.extent,
+                    crs=s.crs,
+                    data_revision=s.data_revision,
+                    style_revision=s.style_revision,
+                    visible=s.visible,
+                    opacity=s.opacity,
+                    features=s.features,
+                    style=dict(s.style),
+                    metadata=dict(s.metadata),
+                    scale_range=s.scale_range,
+                )
+            elif s.layer_type == "contour":
+                lyr = ContourMapLayer(
+                    id=s.id,
+                    name=s.name,
+                    extent=s.extent,
+                    crs=s.crs,
+                    data_revision=s.data_revision,
+                    style_revision=s.style_revision,
+                    visible=s.visible,
+                    opacity=s.opacity,
+                    features=s.features,
+                    style=dict(s.style),
+                    metadata=dict(s.metadata),
+                    scale_range=s.scale_range,
+                )
+            elif s.layer_type in ("well_point", "well"):
+                lyr = WellPointMapLayer(
+                    id=s.id,
+                    name=s.name,
+                    extent=s.extent,
+                    crs=s.crs,
+                    data_revision=s.data_revision,
+                    style_revision=s.style_revision,
+                    visible=s.visible,
+                    opacity=s.opacity,
+                    features=s.features,
+                    style=dict(s.style),
+                    metadata=dict(s.metadata),
+                    scale_range=s.scale_range,
+                )
+            elif s.layer_type in ("polygon", "facies"):
+                lyr = PolygonMapLayer(
+                    id=s.id,
+                    name=s.name,
+                    extent=s.extent,
+                    crs=s.crs,
+                    data_revision=s.data_revision,
+                    style_revision=s.style_revision,
+                    visible=s.visible,
+                    opacity=s.opacity,
+                    features=s.features,
+                    style=dict(s.style),
+                    metadata=dict(s.metadata),
+                    scale_range=s.scale_range,
+                )
             elif s.layer_type == "raster_source":
                 lyr = RasterMapLayer(
                     id=s.id,
@@ -492,6 +681,7 @@ class MapDocument:
                     source_path=str(s.renderer_payload or ""),
                     style=dict(s.style),
                     metadata=dict(s.metadata),
+                    scale_range=s.scale_range,
                 )
             else:
                 lyr = VectorMapLayer(
@@ -506,6 +696,7 @@ class MapDocument:
                     features=s.features,
                     style=dict(s.style),
                     metadata=dict(s.metadata),
+                    scale_range=s.scale_range,
                 )
             doc.layers.append(lyr)
         doc.recompute_extent()

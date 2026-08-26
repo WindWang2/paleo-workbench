@@ -1,168 +1,105 @@
-# E2E Test Infrastructure Specification: Paleogeography Workbench
-**Remediation Audit Test Architecture (#962–#1012)**
-**Document Version:** 1.0.0  
-**Status:** ACTIVE / BASELINE  
-**Workspace Root:** `C:\Users\wangj.KEVIN\projects\paleo-workbench`
+# Testing Infrastructure & E2E Test Suite Architecture
 
----
+## Overview
 
-## 1. Test Philosophy & Architectural Principles
-
-The Paleogeography Workbench test architecture is engineered to provide rigorous, opaque-box end-to-end verification across the desktop application, visualization subsystems (`geo-viz-engine`), native acceleration layers (`native/`), and Windows platform integration.
-
-### Core Testing Pillars
-1. **Opaque-Box Verification (Contract-Driven)**: Tests evaluate observable behaviors, data contracts, and public APIs rather than internal implementation state.
-2. **Progressive Testability & Headless Execution**: All test cases are fully executable in headless CI environments (e.g. `QT_QPA_PLATFORM=offscreen`, Mesa software OpenGL) and handle optional native C++ compilation gracefully with fail-closed or skipped contracts (`pytest.importorskip`).
-3. **Cross-Platform & Windows Resilience**: Explicit verification of Windows filesystem semantics (NTFS read-only ACLs, extended-length `\\?\` paths, case-insensitivity, CRLF line endings, DLL search paths) alongside POSIX compatibility.
-4. **Adversarial & Boundary Robustness**: Systematic stress testing of numerical edge conditions (singular matrices, division by zero, non-positive logarithms, non-finite float serialization), corrupted/GB18030 encoded files, and concurrent thread teardown.
-5. **Deterministic Isolation**: Every test is self-contained, sets up dedicated temporary resources (`tmp_path`), executes without reliance on prior state, and cleans up background threads and QObjects safely.
-
----
-
-## 2. 4-Tier Test Methodology & Coverage Taxonomy
-
-The test suite is structured into four distinct hierarchical tiers:
+The Paleogeography Workbench (Paleo Workbench) uses a 4-tier end-to-end (E2E) testing framework designed for rigorous verification across all architectural layers: Runtime Stability, Mapping Engine 2.0, Geological Pipeline, Multi-View Coordination, and Data Lifecycle & Provenance.
 
 ```
-                  ┌──────────────────────────────────────────────────┐
-                  │    Tier 4: Real-World Application Scenarios       │
-                  │    - 5 Complex Multi-Subsystem Workflows         │
-                  └─────────────────────────┬────────────────────────┘
-                                            │
-                  ┌─────────────────────────┴────────────────────────┐
-                  │    Tier 3: Cross-Feature Interactions (Pairwise)  │
-                  │    - Multi-Module Integration & Concurrency      │
-                  └─────────────────────────┬────────────────────────┘
-                                            │
-                  ┌─────────────────────────┴────────────────────────┐
-                  │    Tier 2: Boundary & Corner Cases (>=5 / feat)  │
-                  │    - Extreme inputs, zero dims, NaN, encodings   │
-                  └─────────────────────────┬────────────────────────┘
-                                            │
-                  ┌─────────────────────────┴────────────────────────┐
-                  │    Tier 1: Core Feature Coverage (>=5 / feat)    │
-                  │    - 51 Audit Features (#962 to #1012)           │
-                  └──────────────────────────────────────────────────┘
-```
-
-- **Tier 1: Feature Coverage (`tests/e2e/test_tier1_features.py`)**:
-  - Direct behavioral verification of each individual audit item (#962 to #1012).
-  - Target: $\ge 5$ concrete assertions / test cases per feature ($51 \times 5 = \ge 255$ verification points).
-- **Tier 2: Boundary & Corner Cases (`tests/e2e/test_tier2_boundaries.py`)**:
-  - Edge conditions: zero dimensions, null/empty collections, extreme numerical ranges, invalid encodings, NTFS read-only locks, long paths, concurrent teardown race conditions.
-  - Target: $\ge 5$ boundary assertions / test cases per feature ($51 \times 5 = \ge 255$ verification points).
-- **Tier 3: Cross-Feature Interactions (`tests/e2e/test_tier3_interactions.py`)**:
-  - Pairwise and multi-feature combinations validating module interplay (e.g. worker shutdown + atomic save + NTFS unlink; GB18030 decoding + depth normalization + log10 clipping; Kriging fallback + NaN sanitization + ContextVar CRS).
-- **Tier 4: Real-World Application Scenarios (`tests/e2e/test_tier4_scenarios.py`)**:
-  - 5 comprehensive, multi-step real-world workflows:
-    1. Seismic Exploration & 3D Interpretation Pipeline
-    2. Multi-Well Chinese Stratigraphy & Well-Log QC Workflow
-    3. Quantitative Paleogeographic Facies Mapping & SVG Map Publishing
-    4. Windows Enterprise Storage Lifecycle & Disaster Recovery
-    5. Multi-Factor Environmental Prediction & Provenance Export
-
----
-
-## 3. Feature Inventory Matrix (#962–#1012)
-
-| # | Issue | Feature / Defect Description | Subsystem / Area | Milestone | Primary Interface / Contract |
-|---|---|---|---|---|---|
-| 1 | #962 | `DataPage._shutdown_workers()` complete worker list | UI / Workers | M1 | `DataPage.shutdown_workers(wait_ms) -> bool` |
-| 2 | #963 | Move `PreviewSettings` to domain layer to eliminate inverted imports | Domain Model | M4 | `paleo_workbench.model.preview_settings.PreviewSettings` |
-| 3 | #964 | Enforce native acceleration checks through `NativeBackendService` | Domain / Native | M4 | `NativeBackendService.is_acceleration_available() -> bool` |
-| 4 | #965 | Disconnect signals in `OwnedWorkerJob.shutdown()` before join | UI / Workers | M1 | `OwnedWorkerJob.shutdown(wait_ms)` disconnects result signals |
-| 5 | #966 | `StratigraphyCorrelationPage` & `MappingPage` aggregated worker shutdown | UI / Workers | M1 | `shutdown_workers(wait_ms) -> bool` on all page controllers |
-| 6 | #967 | Remove blocking thread joins from `__del__` finalizers | Concurrency | M1 | Destructors avoid blocking `thread.join()` or `wait()` |
-| 7 | #968 | Bounded LRU cache for seismic slice loader | Seismic Viz | M4 | `SeismicSliceLRUCache(max_size=N)` evicts oldest entries |
-| 8 | #969 | Dynamic memory management for preview rendering | Viz / Graphics | M4 | `PreviewMemoryBudgetManager.allocate(bytes) -> bool` |
-| 9 | #970 | Cancellation event in `ProjectController` catalog maintenance thread | Catalog / UI | M1 | `threading.Event` checked during database maintenance |
-| 10 | #971 | Catch `sqlite3.Error` during cross-thread session teardown in `CatalogIndex.close()` | Storage / DB | M1 | `CatalogIndex.close()` handles concurrent SQLite errors |
-| 11 | #972 | Atomic file swap replacement for project saves | Storage / IO | M1 | Temp file write + `os.replace` atomic commit |
-| 12 | #973 | Replace silent exception passes with structured logging | Infrastructure | M4 | Structured `logging.getLogger()` calls on caught exceptions |
-| 13 | #974 | OpenGL texture delete queueing when context is inactive in `DualGLVolumeItem.clean()` | 3D Graphics | M1 | `queue_gl_texture_delete(tex_id)` on inactive context |
-| 14 | #975 | 3D normal map gradient axis mapping `[-d_inline, -d_crossline, -d_time]` | 3D Graphics | M2 | Normal gradient formula & axis orientation |
-| 15 | #976 | Polyline click coordinate transformation with zoom/pan matrix in `ProfileVD` | Seismic Viz | M2 | Viewport transform matrix applied to mouse click events |
-| 16 | #977 | Marching Squares isolines and shapely facies polygons | Mapping / GIS | M2 | Isoline extraction & polygonization via Shapely |
-| 17 | #978 | Dynamic SVG layer rendering and legend generation in Map Composer | Mapping / GIS | M2 | `MapComposerSvgExporter.export_svg()` dynamic tags & legend |
-| 18 | #979 | Connect GPU instanced `WiggleTraceRenderer` in `ProfileWidget` | Seismic Viz | M2 | GPU instanced wiggle trace vertex buffer rendering |
-| 19 | #980 | Descending inline binary search direction handling | Seismic Viz | M2 | Monotonically decreasing coordinate binary search |
-| 20 | #981 | Reset active texture to `GL_TEXTURE0` in `GLImageLutItem.paint()` | 3D Graphics | M2 | `glActiveTexture(GL_TEXTURE0)` restored after custom LUT |
-| 21 | #982 | Subtract track header height from well-log zoom depth anchor | Well-Log Viz | M2 | Depth anchor calculation: `(y - header_height) / scale` |
-| 22 | #983 | Two-sided lighting on 3D fence curtains | 3D Graphics | M2 | Two-sided lighting calculation in fence curtain shaders |
-| 23 | #984 | Dynamic volume downsampling based on GPU VRAM | 3D Graphics | M2 | Downsampling step calculation from available VRAM budget |
-| 24 | #985 | Filter horizon pick projections by distance tolerance to current slice | Seismic Viz | M2 | Filter picks where `abs(pick_coord - slice_coord) <= tol` |
-| 25 | #986 | Implement `safe_unlink` for read-only files on Windows NTFS | Windows Platform| M3 | Clear `stat.S_IWRITE` before `os.unlink` |
-| 26 | #987 | Fix MinGW GCC vs MSVC compiler detection in `native_compile_flags.py` | Native Build | M3 | Compiler detection `/O2` vs `-O3` |
-| 27 | #988 | Add `os.add_dll_directory` for Python 3.8+ Windows companion DLLs | Windows Platform| M3 | Register companion DLL directory on Python 3.8+ Windows |
-| 28 | #989 | Support 32-bit `long` buffer format (`format == "l"`) on Windows LLP64 | Native Bridge | M3 | Buffer protocol parsing for `'l'` (32-bit int on LLP64) |
-| 29 | #990 | `shutil.rmtree(..., onexc=handle_remove_readonly)` for directory cleanup | Windows Platform| M3 | Recursive removal clearing read-only attributes on error |
-| 30 | #991 | Normalize case-insensitive paths on Windows (`os.path.normcase`) | Windows Platform| M3 | Path comparisons use `os.path.normcase` on Windows |
-| 31 | #992 | Enforce explicit `encoding="utf-8"` on all text/CSV exports | Storage / IO | M3 | Text file exports explicitly specify `encoding="utf-8"` |
-| 32 | #993 | Fix QGIS native bridge Windows build configuration & macro escaping | Native Build | M3 | CMake / compiler macro escaping on Windows |
-| 33 | #994 | Long path truncation protection with `\\?\` prefix | Windows Platform| M3 | Prefix extended paths (>260 chars) with `\\?\` |
-| 34 | #995 | Normalize POSIX `/` vs Windows `\` in native layer model | Native Bridge | M3 | Path normalization in native layer model serialization |
-| 35 | #996 | `py::gil_scoped_acquire` in C++ progress callbacks | Native Bridge | M3 | Native threads acquire GIL before invoking Python callbacks |
-| 36 | #997 | Dynamic drive letter assignment for virtual subst drives | Windows Platform| M3 | Dynamic free drive letter detection for subst drives |
-| 37 | #998 | CRLF vs LF normalization in stored project text hash calculation | Storage / Integrity| M3 | Line-ending normalization (`\r\n` -> `\n`) before hashing |
-| 38 | #999 | Zero-dimension validation guard in `SeismicVolumeSource` against C++ crash | Seismic Viz | M1 | Validate `inline > 0, crossline > 0, samples > 0` |
-| 39 | #1000 | Connect `geo-viz-engine` test paths in `pyproject.toml` | CI / Build | M1 | `pythonpath` and testpaths include `geo-viz-engine` |
-| 40 | #1001 | Guard native C++ test imports with `pytest.importorskip` | CI / Testing | M1 | Tests requiring C++ modules skip gracefully when unbuilt |
-| 41 | #1002 | Cross-platform process termination in crash test helpers | Concurrency | M1 | Cross-platform process termination (`process.kill()`) |
-| 42 | #1003 | Flatten `GeometryCollection` into constituent shapes in vector map renderer | Mapping / GIS | M2 | Flatten GeometryCollection into Points, Lines, Polygons |
-| 43 | #1004 | Automatic character encoding detection with `gb18030` fallback for Chinese | Storage / IO | M4 | Fallback from UTF-8 to GB18030 on UnicodeDecodeError |
-| 44 | #1005 | Sanitize `NaN`/`Inf` in Factor LOO $R^2$ before JSON serialization | Domain / Math | M4 | Replace non-finite floats with `None` or `0.0` for JSON |
-| 45 | #1006 | Add nugget regularization / fallback for singular matrices in Kriging | Domain / Math | M4 | Nugget jitter diagonal regularization or IDW fallback |
-| 46 | #1007 | Configure Mesa software OpenGL in CI workflows | CI / Graphics | M4 | Mesa llvmpipe / software rasterization configuration |
-| 47 | #1008 | Replace process-global mutable CRS state with ContextVar/explicit passing | Mapping / GIS | M4 | `ContextVar` or explicit argument passing for CRS |
-| 48 | #1009 | Thread-exit hooks to clean SQLite connections | Storage / DB | M1 | Thread-local SQLite connection automatic cleanup |
-| 49 | #1010 | Auto-normalize inverted/zero depth ranges in well-log curve track | Well-Log Viz | M4 | Normalize depth intervals when `top >= bottom` |
-| 50 | #1011 | Eliminate hardcoded `/tmp/` paths in tests using `tmp_path` fixture | CI / Testing | M4 | Cross-platform `tmp_path` fixture usage in all tests |
-| 51 | #1012 | Clip non-positive values before log10 in curve track renderer | Well-Log Viz | M4 | Clip $x \le 0$ to positive $\epsilon$ or mask before log10 |
-
----
-
-## 4. Test Suite Architecture & Directory Layout
-
-```
-tests/
-├── e2e/
-│   ├── __init__.py
-│   ├── conftest.py                   # Reusable mock fixtures, synthetic data generators, headless Qt setup
-│   ├── test_tier1_features.py        # Tier 1: 51 Feature unit-contract test suites (>=5 assertions/feat)
-│   ├── test_tier2_boundaries.py      # Tier 2: 51 Feature boundary & corner cases (>=5 assertions/feat)
-│   ├── test_tier3_interactions.py    # Tier 3: Cross-feature pairwise & multi-module integration suites
-│   └── test_tier4_scenarios.py       # Tier 4: Real-world complex end-to-end application workflows
-├── conftest.py                       # Root Qt session policy & deferred deletion cleanup
-└── ... (existing unit and integration suites)
+tests/e2e/
+├── conftest.py                   # Shared synthetic test fixtures, mock views & coordination hubs
+├── test_tier1_features.py        # Tier 1: Feature Coverage (>=5 test cases per feature in isolation)
+├── test_tier2_boundaries.py      # Tier 2: Boundary, Corner Case & Adversarial Stress Tests
+├── test_tier3_interactions.py    # Tier 3: Cross-Feature Pairwise Integration Tests
+└── test_tier4_scenarios.py       # Tier 4: Real-World End-to-End User Application Scenarios
 ```
 
 ---
 
-## 5. Execution Commands & Coverage Thresholds
+## Environment & Execution
 
-### Running the E2E Test Suite
-To execute the complete E2E test suite across all 4 tiers:
+### Python Environment
+- **Path**: `/home/kevin/.conda/envs/paleo312/bin/python`
+- **Framework**: `pytest 9.1.1`, `pytest-qt 4.5.0`, `pytest-mock 3.15.1`
+- **Scientific Stack**: `numpy`, `scipy`, `shapely`, `rasterio`, `pillow`, `matplotlib`, `pydantic`
+- **UI Framework**: `PySide6 6.11.2` (Qt 6.11.2 offscreen/headless)
+
+### Run Commands
+
 ```bash
-pytest tests/e2e -v
-```
+# Run the entire E2E test suite
+pytest tests/e2e/ -v
 
-To execute individual tiers:
-```bash
-# Tier 1: Feature Coverage
+# Run individual tiers
 pytest tests/e2e/test_tier1_features.py -v
-
-# Tier 2: Boundary & Corner Cases
 pytest tests/e2e/test_tier2_boundaries.py -v
-
-# Tier 3: Cross-Feature Interactions
 pytest tests/e2e/test_tier3_interactions.py -v
-
-# Tier 4: Real-World Application Scenarios
 pytest tests/e2e/test_tier4_scenarios.py -v
+
+# Run with short traceback
+pytest tests/e2e/ -v --tb=short
 ```
 
-### Coverage & Quality Thresholds
-- **Feature Coverage**: 100% of all 51 features (#962–#1012) must have explicit Tier 1 and Tier 2 test coverage.
-- **Pass Rate**: 100% pass rate (0 failures, 0 errors, 0 unhandled warnings/crashes) in standard CI headless environment.
-- **Independence**: 0 test ordering dependencies; all tests execute in arbitrary order.
-- **Resource Hygiene**: 0 leaked threads, 0 unhandled SQLite locks, 0 dangling file handles on Windows NTFS.
+---
+
+## 4-Tier Test Architecture
+
+### Tier 1 — Isolated Feature Coverage (`test_tier1_features.py`)
+Validates individual functional units, classes, and algorithms in isolation with deterministic synthetic inputs.
+- **Coverage**: All features F1 through F22 (including bug fix features #962–#1012 and Core Convergence F6–F22).
+- **Assertions per feature**: >= 5 distinct functional assertions covering inputs, transformations, and outputs.
+
+### Tier 2 — Boundary, Corner Case & Adversarial Stress (`test_tier2_boundaries.py`)
+Validates edge cases, numerical singularities, non-finite values, and failure modes:
+- Zero, negative, and extreme dimensions (aspect ratio 10,000:1, high DPI 1200).
+- Inverted depth ranges, collinear interpolation singularities, and 100% NaN/nodata grids.
+- Circular lineage graphs, locked/read-only file mutations, and corrupted JSON manifests.
+- Multi-listener echo suppression under high-frequency selection updates.
+
+### Tier 3 — Cross-Feature Pairwise Interactions (`test_tier3_interactions.py`)
+Validates interaction contracts between decoupled modules:
+- **Suite 10**: `Well Factor Extraction -> Kriging Interpolator -> Marching Squares Contours -> Facies Polygons -> MapDocument -> High-Res SVG Export`.
+- **Suite 11**: `Map Click Selection -> CoordinateTransformHub (Well MD <-> 3D Map <-> Seismic Inline/TWT) -> SelectionContext -> Multi-View Synchronization (Map, Well Log, Seismic)`.
+- **Suite 12**: `RAW Asset Ingest (0o444) -> Lineage Tracking -> Multi-Stage Asset Storage (Raw, Derived, Intermediate, Output) -> Atomic Project Manifest Persistence`.
+
+### Tier 4 — Real-World Application Scenarios (`test_tier4_scenarios.py`)
+Validates complete end-to-end production workflows:
+- **Scenario 1**: Petroleum Exploration 3D Seismic Interpretation Pipeline.
+- **Scenario 2**: Multi-Well Correlation & Chinese Well-Log Interpretation.
+- **Scenario 3**: Multi-Horizon Facies Reconstruction & SVG Cartographic Publishing.
+- **Scenario 4**: Enterprise Storage Resilience & Atomic Disaster Recovery.
+- **Scenario 5**: Multi-Factor Environmental Spatial Modeling & Provenance Export.
+- **Scenario 6**: Complete Geological Mapping & Multi-View Coordination Workflow (F6–F22 Full Cycle).
+
+---
+
+## Core Convergence Feature Matrix & Test Mapping
+
+| Feature ID | Feature Description | Tier 1 Test Method | Tier 2 Boundary Method | Tier 3 / 4 Scenario |
+|---|---|---|---|---|
+| **F6** | Decoupled Map Layer Model & Document | `test_f6_decoupled_map_layer_models_and_document` | `test_f6_map_layer_zero_extent_empty_features` | Suite 10 / Scenario 6 |
+| **F7** | Graduated & Categorized Renderers | `test_f7_graduated_and_style_renderers` | `test_f7_graduated_renderer_overlapping_and_inverted_bins` | Suite 10 / Scenario 6 |
+| **F8** | Annotation Layer & Callout Symbology | `test_f8_annotation_layer_support` | `test_f8_annotation_layer_empty_text_extreme_rotations` | Suite 10 / Scenario 6 |
+| **F9** | QGIS Bridge Backend Isolation | `test_f9_qgis_bridge_backend_isolation` | `test_f9_qgis_bridge_null_geometry_and_crs_mismatch` | Scenario 6 |
+| **F10** | Canvas & Print Export Parity | `test_f10_canvas_and_export_parity` | `test_f10_canvas_export_extreme_scale_and_dpi` | Suite 10 / Scenario 6 |
+| **F11** | Well Geological Factor Extraction | `test_f11_well_factor_extraction` | `test_f11_factor_extraction_missing_columns_and_all_nan_values` | Suite 10 / Scenario 6 |
+| **F12** | Spatial Interpolation (Kriging / IDW) | `test_f12_spatial_interpolation_and_factor_grid_result` | `test_f12_interpolation_zero_points_and_collinear_singularities` | Suite 10 / Scenario 6 |
+| **F13** | Marching Squares Vector Contouring | `test_f13_marching_squares_contouring` | `test_f13_marching_squares_all_nodata_and_constant_grids` | Suite 10 / Scenario 6 |
+| **F14** | Facies Zone Polygonization | `test_f14_facies_zone_polygonization` | `test_f14_facies_polygonization_all_single_class_and_noisy_zones` | Suite 10 / Scenario 6 |
+| **F15** | MapDocument Output Assembly | `test_f15_factor_map_document_generation` | `test_f15_map_document_generation_missing_layers_and_conflicting_crs` | Suite 10 / Scenario 6 |
+| **F16** | Shared SelectionContext & Echo Guard | `test_f16_selection_context_engine` | `test_f16_selection_context_extreme_and_invalid_inputs` | Suite 11 / Scenario 6 |
+| **F17** | CoordinateTransformHub (Map/Well/Seismic) | `test_f17_coordinate_transform_hub` | `test_f17_coordinate_transform_hub_out_of_bounds_and_singularities` | Suite 11 / Scenario 6 |
+| **F18** | Incremental Multi-View Synchronization | `test_f18_incremental_multi_view_sync` | `test_f18_incremental_multi_view_sync_rapid_events_and_echo_cycles` | Suite 11 / Scenario 6 |
+| **F19** | Raw Dataset Immutability (`0o444`) | `test_f19_raw_dataset_immutability` | `test_f19_raw_dataset_immutability_violation_rejection` | Suite 12 / Scenario 6 |
+| **F20** | Asset Hierarchy (Raw/Derived/Inter/Out) | `test_f20_asset_hierarchy_and_storage` | `test_f20_asset_hierarchy_invalid_stages_and_trash_recovery` | Suite 12 / Scenario 6 |
+| **F21** | Lineage Graph & Provenance Traversal | `test_f21_lineage_graph_and_provenance` | `test_f21_lineage_graph_circular_dependencies_and_orphan_nodes` | Suite 12 / Scenario 6 |
+| **F22** | Atomic Project Persistence (*.paleo.json) | `test_f22_project_persistence_and_reopen` | `test_f22_project_persistence_corrupted_json_and_atomic_failure_recovery` | Suite 12 / Scenario 6 |
+
+---
+
+## Test Harness & Fixtures (`conftest.py`)
+
+- `selection_context`: Thread-safe Qt signal-based `SelectionContext` fixture with source tagging and echo suppression.
+- `coordinate_hub`: Bidirectional `CoordinateTransformHub` mapping between 2D/3D Map CRS, Well MD depths, and Seismic inline/crossline/TWT coordinates.
+- `synthetic_kriging_points`: Deterministic 25-well spatial factor point distribution.
+- `synthetic_seismic_cube`: 3D synthetic seismic volume `(50, 60, 100)` with descending inline indexes.
+- `synthetic_well_logs`: Multi-curve well logs with Chinese curve name aliases and GB18030 encodings.

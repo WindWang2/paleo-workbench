@@ -1,95 +1,85 @@
-# Project: Paleogeography Workbench Remediation (51 Audit Issues #962–#1012)
+# Project: Paleo Workbench Core Convergence
 
 ## Architecture
-- **Desktop UI Layer (`paleo_workbench/ui`)**: PySide6 widgets, pages (`DataPage`, `StratigraphyCorrelationPage`, `MappingPage`, `GeologicalModeling3DPage`), project controller, worker lifecycle managers.
-- **Domain & Model Layer (`paleo_workbench/model`)**: Project metadata, domain configs, data contracts, business adapters.
-- **Storage & Catalog Layer (`paleo_workbench/catalog`)**: SQLite indexing, SHA-256 deduplication, garbage collection, atomic file swaps.
-- **Mapping & GIS Engine (`paleo_workbench/mapping`)**: Vector/raster map scenes, Marching Squares isoline extraction, shapely polygonization, Map Composer SVG export.
-- **Visualization Subsystems (`geo-viz-engine`, `well-log-engine`)**:
-  - `geoviz_seismic`: 2D profile view, 3D OpenGL volume/slice renderer, instanced wiggle trace renderer.
-  - `geoviz_well_log`: Multi-track well curve rendering, zoom/pan interaction.
-  - `geoviz_well_seismic_3d`: Joint 3D scene, seismic fence curtains, two-sided lighting.
-  - `geoviz_plots`: Factor LOO analysis, Kriging spatial interpolation, CRS transforms.
-- **Native Acceleration Layer (`native/`)**: C++ pybind11 modules (`seismic_3d_core`, `layer_model_core`, `grid_render_core`, `well_log_core`, `qgis_render_bridge`).
+Paleo Workbench is a unified desktop scientific workstation integrating geological mapping, well log analysis, 3D seismic visualization, and spatial data science. The core convergence architecture consists of:
+1. **Runtime Stability Layer**: `OwnedWorkerJob` thread lifecycle management, thread-confined SQLite database sessions in WAL mode, context-scoped deferred OpenGL resource deallocation, and GIL-safe pybind11 C++ bindings.
+2. **Mapping Engine 2.0**: Pure-data decoupled `MapLayer` models (`VectorMapLayer`, `GridMapLayer`, `ContourMapLayer`, `WellPointMapLayer`, `PolygonMapLayer`, `AnnotationMapLayer`, `RasterMapLayer`) and `MapDocument`, extensible `RendererRegistry` (`SingleSymbolRenderer`, `CategorizedRenderer`, `GraduatedRenderer`, `GridRenderer`, `ContourRenderer`, `WellSymbolRenderer`), isolated QGIS C++ backend adapter (`QgisRenderBridge`), and unified Canvas/Composer rendering pipelines.
+3. **Geological Mapping Pipeline**: End-to-end scientific workflow: well factor extraction (`GeologicalMappingService`), spatial interpolation (Ordinary Kriging, IDW) producing structured `FactorGridResult` objects, Marching Squares contouring (auto/fixed intervals), facies zone polygonization, and editable `MapDocument` compilation.
+4. **Unified Multi-View Coordination**: Central `SelectionContext` managing cross-view selections (active well, depth intervals, seismic cursors) with source tagging to prevent echo loops, coupled with `CoordinateTransformHub` bridging Map CRS, Well Trajectory (XY, MD, TVD, TVDSS), and Seismic Grid (Inline, Crossline, TWT) coordinates.
+5. **Project Data Lifecycle & Provenance**: Dual-tier storage (canonical `catalog.json` + SQLite query cache `catalog.sqlite`), strict raw dataset immutability (`chmod 0o444`, `ImmutableVersionError`), asset hierarchy (RAW, DERIVED, INTERMEDIATE, OUTPUT, WORKING, TRASH), cycle-safe lineage graph traversal (`build_lineage_chain`), and atomic project save/reopen persistence.
+6. **Infrastructure & Delivery**: Worktree `feat/core-convergence`, bounded compilation (`CMAKE_BUILD_PARALLEL_LEVEL=2`), unified Python 3.12 environment, docs in `docs/development/core-convergence/`.
 
 ## Feature Inventory
-Every issue from the master audit is inventoried below with its assigned milestone. No feature is unassigned.
-
-| # | Issue | Feature / Defect Description | Milestone | Source |
-|---|-------|------------------------------|-----------|--------|
-| 1 | #962 | `DataPage._shutdown_workers()` complete worker list | M1 | Audit R1-04 |
-| 2 | #963 | Move `PreviewSettings` to domain layer to eliminate UI inverted imports | M4 | Audit R1-01 |
-| 3 | #964 | Enforce native acceleration checks through `NativeBackendService` | M4 | Audit R1-02 |
-| 4 | #965 | Disconnect signals in `OwnedWorkerJob.shutdown()` before join | M1 | Audit R1-03 |
-| 5 | #966 | `StratigraphyCorrelationPage` and `MappingPage` aggregated worker shutdown | M1 | Audit R1-05 |
-| 6 | #967 | Remove blocking thread joins from `__del__` finalizers | M1 | Audit R1-06 |
-| 7 | #968 | Bounded LRU cache for seismic slice loader | M4 | Audit R1-08 |
-| 8 | #969 | Dynamic memory management for preview rendering | M4 | Audit R1-08b |
-| 9 | #970 | Cancellation event in `ProjectController` catalog maintenance thread | M1 | Audit R1-09 |
-| 10 | #971 | Catch `sqlite3.Error` during cross-thread session teardown in `CatalogIndex.close()` | M1 | Audit R1-10 |
-| 11 | #972 | Atomic file swap replacement for project saves | M1 | Audit R1-11 |
-| 12 | #973 | Replace silent exception passes with structured logging | M4 | Audit R1-12 |
-| 13 | #974 | OpenGL texture delete queueing when context is inactive in `DualGLVolumeItem.clean()` | M1 | Audit R2-BUG-01 |
-| 14 | #975 | 3D normal map gradient axis mapping `[-d_inline, -d_crossline, -d_time]` & memory optimization | M2 | Audit R2-BUG-02 |
-| 15 | #976 | Polyline click coordinate transformation with zoom/pan matrix in `ProfileVD` | M2 | Audit R2-BUG-03 |
-| 16 | #977 | Replace synthetic striping with Marching Squares isolines and shapely facies polygons | M2 | Audit R2-BUG-04 |
-| 17 | #978 | Dynamic SVG layer rendering and legend generation in Map Composer | M2 | Audit R2-BUG-05 |
-| 18 | #979 | Connect GPU instanced `WiggleTraceRenderer` in `ProfileWidget` | M2 | Audit R2-BUG-06 |
-| 19 | #980 | Descending inline binary search direction handling | M2 | Audit R2-BUG-07 |
-| 20 | #981 | Reset active texture to `GL_TEXTURE0` in `GLImageLutItem.paint()` | M2 | Audit R2-BUG-08 |
-| 21 | #982 | Subtract track header height from well-log zoom depth anchor | M2 | Audit R2-BUG-09 |
-| 22 | #983 | Two-sided lighting on 3D fence curtains | M2 | Audit R2-BUG-10 |
-| 23 | #984 | Dynamic volume downsampling based on GPU VRAM | M2 | Audit R2-BUG-11 |
-| 24 | #985 | Filter horizon pick projections by distance tolerance to current slice | M2 | Audit R2-BUG-12 |
-| 25 | #986 | Implement `safe_unlink` for read-only files on Windows NTFS | M3 | Audit R3-01 |
-| 26 | #987 | Fix MinGW GCC vs MSVC compiler detection in `native_compile_flags.py` | M3 | Audit R3-03 |
-| 27 | #988 | Add `os.add_dll_directory` for Python 3.8+ Windows companion DLLs | M3 | Audit R3-02 |
-| 28 | #989 | Support 32-bit `long` buffer format (`format == "l"`) on Windows LLP64 in `numpy_bridge.cpp` | M3 | Audit R3-04 |
-| 29 | #990 | `shutil.rmtree(..., onexc=handle_remove_readonly)` for directory cleanup | M3 | Audit R3-05 |
-| 30 | #991 | Normalize case-insensitive paths on Windows (`os.path.normcase`) | M3 | Audit R3-06 |
-| 31 | #992 | Enforce explicit `encoding="utf-8"` on all text/CSV exports | M3 | Audit R3-07 |
-| 32 | #993 | Fix QGIS native bridge Windows build configuration & macro escaping | M3 | Audit R3-08 |
-| 33 | #994 | Long path truncation protection with `\\?\` prefix | M3 | Audit R3-09 |
-| 34 | #995 | Normalize POSIX `/` vs Windows `\` in native layer model | M3 | Audit R3-10 |
-| 35 | #996 | `py::gil_scoped_acquire` in C++ progress callbacks | M3 | Audit R3-11 |
-| 36 | #997 | Dynamic drive letter assignment for virtual subst drives | M3 | Audit R3-12 |
-| 37 | #998 | CRLF vs LF normalization in stored project text hash calculation | M3 | Audit R3-13 |
-| 38 | #999 | Zero-dimension validation guard in `SeismicVolumeSource` against C++ crash | M1 | Audit R4-05 |
-| 39 | #1000 | Connect `geo-viz-engine` test paths in `pyproject.toml` | M1 | Audit R4-01 |
-| 40 | #1001 | Guard native C++ test imports with `pytest.importorskip` | M1 | Audit R4-02 |
-| 41 | #1002 | Cross-platform process termination in crash test helpers (`signal.SIGKILL` replacement) | M1 | Audit R4-09 |
-| 42 | #1003 | Flatten `GeometryCollection` into constituent shapes in vector map renderer | M2 | Audit R4-06 |
-| 43 | #1004 | Automatic character encoding detection with `gb18030` fallback for Chinese well logs/tables | M4 | Audit R4-07 |
-| 44 | #1005 | Sanitize `NaN`/`Inf` in Factor LOO $R^2$ before JSON serialization | M4 | Audit R4-08/12 |
-| 45 | #1006 | Add nugget regularization / fallback for singular matrices in Kriging | M4 | Audit R4-13 |
-| 46 | #1007 | Configure Mesa software OpenGL in CI workflows | M4 | Audit R4-03 |
-| 47 | #1008 | Replace process-global mutable CRS state with ContextVar/explicit passing | M4 | Audit R4-04 |
-| 48 | #1009 | Thread-exit hooks to clean SQLite connections | M1 | Audit R4-10 |
-| 49 | #1010 | Auto-normalize inverted/zero depth ranges in well-log curve track | M4 | Audit R4-08 |
-| 50 | #1011 | Eliminate hardcoded `/tmp/` paths in tests using `tmp_path` fixture | M4 | Audit R4-11 |
-| 51 | #1012 | Clip non-positive values before log10 in curve track renderer | M4 | Audit R4-14 |
+| # | Feature | Description | Milestone | Source |
+|---|---------|-------------|-----------|--------|
+| F1 | Worker Lifecycle & Cancellation | `OwnedWorkerJob` lifecycle, interruptible worker threads in dialogs, safe teardown | M1 | Survey R1 |
+| F2 | SQLite Thread Confinement | Thread-confined connections with robust cleanup for exited Qt worker threads | M1 | Survey R1 |
+| F3 | Deferred OpenGL Cleanup | Context-scoped deferred GPU resource deletion queue | M1 | Survey R1 |
+| F4 | Native C++ pybind11 Safety | GIL safety, memory buffers, and version metadata in `map_edit_core` | M1 | Survey R1 |
+| F5 | Infrastructure & Build Control | Bounded parallel build (`CMAKE_BUILD_PARALLEL_LEVEL=2`), worktree setup, docs | M1 | Survey R6 |
+| F6 | Decoupled MapLayer Models | Pure dataclass Layer models & `MapDocument` with zero UI widget dependencies | M2 | Survey R2 |
+| F7 | Graduated & Style Renderers | `GraduatedRenderer` implementation and full style system support | M2 | Survey R2 |
+| F8 | Annotation Layer Support | Explicit `AnnotationMapLayer` model and renderer support | M2 | Survey R2 |
+| F9 | QGIS Bridge Backend Isolation | POD-based C++ bridge with zero domain model type leakage | M2 | Survey R2 |
+| F10 | Canvas & Export Parity | Shared rendering logic between Map Canvas and Composer/Exporters (SVG/PNG/PDF) | M2 | Survey R2 |
+| F11 | Well Factor Extraction | Automated extraction of geological factors (porosity, thickness, tops) | M3 | Survey R3 |
+| F12 | Spatial Interpolation & Grid Result | Kriging & IDW algorithms outputting structured `FactorGridResult` | M3 | Survey R3 |
+| F13 | Marching Squares Contouring | Contouring with automatic and fixed-interval leveling | M3 | Survey R3 |
+| F14 | Facies Polygonization | Reclassification and polygon generation for geological zones | M3 | Survey R3 |
+| F15 | Factor MapDocument Generation | Integration of Grid, Contour, Well, and Polygon layers into editable MapDocument | M3 | Survey R3 |
+| F16 | SelectionContext Engine | Shared selection context (wells, depth ranges, seismic cursors) with source tagging | M4 | Survey R4 |
+| F17 | CoordinateTransformHub | Bidirectional coordinate transforms (Map CRS <-> Well XY/MD/TVD <-> Seismic IL/XL/TWT) | M4 | Survey R4 |
+| F18 | Incremental Multi-View Sync | Map <-> Well Log <-> Seismic synchronization without full volume/map reloads | M4 | Survey R4 |
+| F19 | Raw Dataset Immutability | Enforce read-only permissions (`0o444`) and `ImmutableVersionError` on RAW assets | M5 | Survey R5 |
+| F20 | Asset Hierarchy & Storage | Structured storage layout (Raw, Derived, Intermediate, Output, Working, Trash) | M5 | Survey R5 |
+| F21 | Lineage Graph & Provenance | Lineage chain tracking from raw data through factors to grids and MapDocuments | M5 | Survey R5 |
+| F22 | Project Persistence & Reopen | Atomic project save (`*.paleo.json`), clean session teardown, and asset recovery | M5 | Survey R5 |
+| F23 | E2E 4-Tier Test Suite Pass | 100% pass across Tier 1, Tier 2, Tier 3, and Tier 4 acceptance tests | M6 | Survey R6 |
+| F24 | Adversarial Coverage Hardening | Tier 5 Challenger stress tests and edge case coverage | M6 | Survey R6 |
+| F25 | Convergence Documentation & PR | Complete documentation in `docs/development/core-convergence/` & clean PR | M6 | Survey R6 |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| E2E | E2E Testing Track | Requirement-driven test suite infra & test cases (Tiers 1-4) | None | IN_PROGRESS |
-| M1 | Concurrency & Storage Safety | #962, #965, #966, #967, #970, #971, #972, #974, #999, #1000, #1001, #1002, #1009 | None | IN_PROGRESS |
-| M2 | 2D/3D Viz & GIS Mapping | #975, #976, #977, #978, #979, #980, #981, #982, #983, #984, #985, #1003 | None | PLANNED |
-| M3 | Windows Platform & Native Bridges | #986, #987, #988, #989, #990, #991, #992, #993, #994, #995, #996, #997, #998 | None | PLANNED |
-| M4 | Architecture Decoupling & CI/Math | #963, #964, #968, #969, #973, #1004, #1005, #1006, #1007, #1008, #1010, #1011, #1012 | M1 | PLANNED |
-| M5 | Full E2E Verification & Hardening | 100% test pass on Windows + Tier 5 adversarial testing | M1, M2, M3, M4, E2E | PLANNED |
+| M1 | Runtime Stability & Native Safety Foundation | F1, F2, F3, F4, F5 | none | DONE |
+| M2 | Mapping Engine 2.0 & Styling System | F6, F7, F8, F9, F10 | none | DONE |
+| M3 | Geological Mapping Pipeline | F11, F12, F13, F14, F15 | M2 | DONE |
+| M4 | Unified Multi-View Coordination | F16, F17, F18 | M2 | DONE |
+| M5 | Project Data Lifecycle & Provenance | F19, F20, F21, F22 | M3 | DONE |
+| M6 | Final Convergence, E2E Verification & Delivery | F23, F24, F25 | M1, M2, M3, M4, M5 | DONE |
 
 ## Interface Contracts
-- **Thread Shutdown Contract**: All UI pages (`DataPage`, `StratigraphyCorrelationPage`, `MappingPage`) implement `shutdown_workers(wait_ms: int = 1500) -> bool` returning `True` only when all managed child jobs have terminated cleanly.
-- **Worker Signal Contract**: `OwnedWorkerJob.shutdown()` disconnects all outbound Qt signal connections before blocking on `wait()`.
-- **GL Cleanup Contract**: When `QOpenGLContext.currentContext()` is `None`, OpenGL texture deletions are queued in `queue_gl_texture_delete(tex_id)` rather than dropped.
-- **File System Unlink Contract**: `safe_unlink(path: Path)` safely handles read-only files on Windows NTFS by clearing `stat.S_IWRITE` before unlinking.
-- **Encoding Contract**: All text-based file operations explicitly declare `encoding="utf-8"`, while input parsers employ `gb18030` fallback for non-UTF-8 Chinese datasets.
+
+### 1. Runtime & Worker Thread Contract
+- `OwnedWorkerJob`: Accepts `worker: QObject`, manages `QThread` lifecycle, forces `worker.moveToThread(thread)`, emits typed PyQt/PySide signals, handles `closeEvent` and cancel gracefully.
+- `CatalogIndex`: Thread-local connection pool guarded by re-entrant mutex. Worker threads release connection on termination or use scoped session context manager.
+
+### 2. MapLayer & Renderer Contract
+- `MapLayer`: Pure dataclass `id: str`, `name: str`, `layer_type: str`, `extent: tuple[float, float, float, float]`, `crs: str`, `visible: bool`, `opacity: float`, `style: dict | VectorStyle`, `metadata: dict`.
+- `LayerRenderer`: `render(layer: MapLayer, painter: QPainter, ctx: RenderContext)` and `render_svg(layer: MapLayer, ctx: SvgRenderContext) -> list[str]`.
+- `RendererRegistry`: `register(renderer_type: str, renderer: LayerRenderer)` and `resolve(layer: MapLayer) -> LayerRenderer`.
+
+### 3. SelectionContext & Coordinate Hub Contract
+- `SelectionContext`: `active_well_id: str | None`, `selected_well_ids: list[str]`, `depth_range: tuple[float, float] | None`, `seismic_cursor: tuple[int, int, float] | None`, `source_widget_id: str | None`. Emits `selection_changed(SelectionContext)`.
+- `CoordinateTransformHub`:
+  - `map_to_well(x: float, y: float) -> str | None` (nearest well)
+  - `well_depth_to_map(well_id: str, md: float) -> tuple[float, float, float]` (x, y, tvd)
+  - `seismic_to_map(il: int, xl: int, twt: float) -> tuple[float, float, float]` (x, y, z)
+  - `map_to_seismic(x: float, y: float, z: float) -> tuple[int, int, float]` (il, xl, twt)
+
+### 4. Data Catalog & Lineage Contract
+- `DataCatalogService.register_run(run: DataRun) -> str` (run_id)
+- `DataCatalogService.create_version(asset_id: str, stage: DataStage, source_path: Path, run_id: str | None, tags: dict) -> DataVersion`
+- Lineage: Every `FactorGridResult` and `MapDocument` stores `input_version_ids: list[str]` and `run_id: str`.
 
 ## Code Layout
-- `paleo_workbench/`: Main application code (UI, catalog, model, resources, mapping, viz).
-- `geo-viz-engine/`: Visualization engine subsystem (`packages/geoviz_seismic`, `packages/geoviz_well_log`, `packages/geoviz_well_seismic_3d`, `packages/geoviz_plots`).
-- `well-log-engine/`: Native well log processing engine (`src/`, `python/`).
-- `native/`: Native C++ acceleration modules (`seismic_3d_core`, `layer_model_core`, `grid_render_core`, `qgis_render_bridge`).
-- `tests/`: Monorepo test suites.
-- `.agents/`: Agent metadata only.
+- `paleo_workbench/ui/owned_worker_job.py`: Thread management & worker lifecycle
+- `paleo_workbench/catalog/`: Data catalog, SQLite DB, storage, lineage graph
+- `paleo_workbench/mapping/`: Layers, renderers, map styles, render backends, composer
+- `paleo_workbench/mapping/geological_pipeline/`: Factor extraction, Kriging/IDW interpolator, Marching Squares contouring, polygonization
+- `paleo_workbench/viz/`: SelectionContext, coordinate hub, multi-view hosts
+- `native/`: Native C++ pybind11 extensions
+- `geo-viz-engine/`: Core GIS & 3D seismic rendering engine
+- `well-log-engine/`: Native well log rendering & session engine
+- `tests/`: Unit, integration, and E2E regression test suites
+- `docs/development/core-convergence/`: Architecture documentation and verification reports

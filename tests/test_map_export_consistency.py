@@ -176,3 +176,85 @@ def test_snapshot_source_version_ids_flow_from_layer_provenance(qtbot) -> None:
     canvas.set_layer_snapshot(snapshot)
 
     assert canvas.snapshot_source_version_ids == ("dv-123",)
+
+
+def test_export_graduated_and_annotation_layers_consistency(qtbot, tmp_path) -> None:
+    from paleo_workbench.mapping.map_render_backend import MapLayerSnapshot, MapRenderSnapshot
+    snapshot = MapRenderSnapshot(
+        project_crs="EPSG:3857",
+        layers=(
+            MapLayerSnapshot(
+                id="grad",
+                name="Graduated Layer",
+                layer_type="vector",
+                extent=(0.0, 0.0, 20.0, 20.0),
+                crs="EPSG:3857",
+                data_revision=1,
+                style_revision=1,
+                features=(
+                    {
+                        "id": "poly",
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[[2.0, 2.0], [18.0, 2.0], [18.0, 18.0], [2.0, 18.0], [2.0, 2.0]]],
+                        },
+                        "properties": {"val": 15.0},
+                    },
+                ),
+                style={
+                    "renderer": "graduated",
+                    "field": "val",
+                    "fill": "#333333",
+                    "stroke": "#000000",
+                    "ranges": [
+                        [0.0, 10.0, "#ff0000", "Low"],
+                        [10.0, 20.0, "#00ff00", "Med"],
+                    ],
+                },
+            ),
+            MapLayerSnapshot(
+                id="ann",
+                name="Annotation Layer",
+                layer_type="annotation",
+                extent=(0.0, 0.0, 20.0, 20.0),
+                crs="EPSG:3857",
+                data_revision=1,
+                style_revision=1,
+                features=(
+                    {
+                        "id": "ann1",
+                        "geometry": {"type": "Point", "coordinates": [10.0, 10.0]},
+                        "properties": {"text": "Basin Center", "color": "#ffffff"},
+                    },
+                ),
+                style={
+                    "fill": "#ffffff",
+                    "stroke": "#000000",
+                    "labels": {"field": "text", "size": 10.0, "color": "#ffffff", "visible": True},
+                },
+            ),
+        ),
+    )
+    canvas = UnifiedMapCanvas(backend=FallbackMapRenderBackend())
+    qtbot.addWidget(canvas)
+    canvas.resize(320, 240)
+    canvas.show()
+    canvas.set_layer_snapshot(snapshot)
+    canvas.set_extent((0.0, 0.0, 20.0, 20.0))
+    qtbot.waitUntil(lambda: canvas.last_frame is not None, timeout=5_000)
+
+    # Export PNG, SVG, PDF
+    png_path = tmp_path / "grad_map.png"
+    svg_path = tmp_path / "grad_map.svg"
+    pdf_path = tmp_path / "grad_map.pdf"
+
+    canvas.export_png(str(png_path), width=320, height=240, dpi=96.0)
+    canvas.export_svg(str(svg_path), width=320, height=240, dpi=96.0)
+    canvas.export_pdf(str(pdf_path), width=320, height=240, dpi=150.0)
+
+    assert png_path.exists()
+    assert svg_path.exists()
+    assert pdf_path.exists()
+    assert "<svg" in svg_path.read_text(encoding="utf-8")
+    assert pdf_path.read_bytes().startswith(b"%PDF")
+

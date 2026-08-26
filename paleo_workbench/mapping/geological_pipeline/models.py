@@ -103,6 +103,9 @@ class InterpolationOptions:
     resolution: float | None = None
     variogram_model: str = "spherical"  # spherical | exponential | gaussian
     power: float = 2.0  # For IDW
+    search_radius: float | None = None
+    min_neighbors: int = 1
+    max_neighbors: int | None = None
     color_ramp: str = "porosity"
     contour_levels: list[float] | None = None
     contour_interval: float | None = None

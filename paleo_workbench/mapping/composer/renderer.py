@@ -5,6 +5,7 @@ Unifies Map Canvas and Composer SVG export using the LayerRenderer pipeline.
 
 from __future__ import annotations
 
+import html
 import math
 from typing import Any, Mapping
 
@@ -15,6 +16,7 @@ from paleo_workbench.mapping.composer.models import (
     MapCompositionDocument,
 )
 from paleo_workbench.mapping.layers import (
+    AnnotationMapLayer,
     ContourMapLayer,
     GridMapLayer,
     MapDocument,
@@ -67,9 +69,10 @@ class MapComposerRenderer:
             return self._render_main_map_svg(elem)
         elif t == ElementType.TITLE:
             title_text = elem.properties.get("text", "古地理图")
+            escaped_title = html.escape(str(title_text))
             return (
                 f'<g id="{elem.id}">'
-                f'<text x="{x + w/2}" y="{y + h - 2}" font-family="SimSun, Times New Roman, sans-serif" font-size="8" font-weight="bold" fill="#000000" text-anchor="middle">{title_text}</text>'
+                f'<text x="{x + w/2}" y="{y + h - 2}" font-family="SimSun, Times New Roman, sans-serif" font-size="8" font-weight="bold" fill="#000000" text-anchor="middle">{escaped_title}</text>'
                 f'</g>'
             )
         elif t == ElementType.NORTH_ARROW:
@@ -162,7 +165,8 @@ class MapComposerRenderer:
                     inner_svg.append(rendered)
         else:
             title = elem.properties.get("title", "主图画布 (Main Map Canvas)")
-            inner_svg.append(f'<text x="{x + w/2}" y="{y + h/2}" font-family="Arial, sans-serif" font-size="5" fill="#888888" text-anchor="middle">{title}</text>')
+            escaped_title = html.escape(str(title))
+            inner_svg.append(f'<text x="{x + w/2}" y="{y + h/2}" font-family="Arial, sans-serif" font-size="5" fill="#888888" text-anchor="middle">{escaped_title}</text>')
 
         return f'<g id="{elem.id}">\n' + "\n".join(inner_svg) + f'\n</g>'
 
@@ -217,22 +221,23 @@ class MapComposerRenderer:
 
         for idx, it in enumerate(legend_items):
             iy = y + 9.0 + idx * item_h
+            escaped_label = html.escape(str(it.label))
             if it.symbol_type == "gradient" and it.gradient_stops:
                 # Continuous color bar in legend
                 grad_id = f"grad_{idx}_{abs(hash(it.label)) % 10000}"
                 stops_svg = "".join(f'<stop offset="{pos*100:.1f}%" stop-color="{col}"/>' for pos, col in it.gradient_stops)
                 svg_lines.append(f'<defs><linearGradient id="{grad_id}" x1="0%" y1="0%" x2="100%" y2="0%">{stops_svg}</linearGradient></defs>')
                 svg_lines.append(f'<rect x="{x + 4}" y="{iy}" width="14" height="3" fill="url(#{grad_id})" stroke="#333333" stroke-width="0.1"/>')
-                svg_lines.append(f'<text x="{x + 21}" y="{iy + 2.5}" font-family="SimSun, Arial, sans-serif" font-size="2.6" fill="#000000">{it.label}</text>')
+                svg_lines.append(f'<text x="{x + 21}" y="{iy + 2.5}" font-family="SimSun, Arial, sans-serif" font-size="2.6" fill="#000000">{escaped_label}</text>')
             elif it.symbol_type == "line":
                 svg_lines.append(f'<line x1="{x + 4}" y1="{iy + 1.5}" x2="{x + 10}" y2="{iy + 1.5}" stroke="{it.color}" stroke-width="1.2"/>')
-                svg_lines.append(f'<text x="{x + 13}" y="{iy + 2.5}" font-family="SimSun, Arial, sans-serif" font-size="2.8" fill="#000000">{it.label}</text>')
+                svg_lines.append(f'<text x="{x + 13}" y="{iy + 2.5}" font-family="SimSun, Arial, sans-serif" font-size="2.8" fill="#000000">{escaped_label}</text>')
             elif it.symbol_type == "point":
                 svg_lines.append(f'<circle cx="{x + 7}" cy="{iy + 1.5}" r="2" fill="{it.color}" stroke="{it.stroke_color}" stroke-width="0.5"/>')
-                svg_lines.append(f'<text x="{x + 13}" y="{iy + 2.5}" font-family="SimSun, Arial, sans-serif" font-size="2.8" fill="#000000">{it.label}</text>')
+                svg_lines.append(f'<text x="{x + 13}" y="{iy + 2.5}" font-family="SimSun, Arial, sans-serif" font-size="2.8" fill="#000000">{escaped_label}</text>')
             else:
                 svg_lines.append(f'<rect x="{x + 4}" y="{iy}" width="6" height="3" fill="{it.color}" stroke="{it.stroke_color}" stroke-width="0.1"/>')
-                svg_lines.append(f'<text x="{x + 13}" y="{iy + 2.5}" font-family="SimSun, Arial, sans-serif" font-size="2.8" fill="#000000">{it.label}</text>')
+                svg_lines.append(f'<text x="{x + 13}" y="{iy + 2.5}" font-family="SimSun, Arial, sans-serif" font-size="2.8" fill="#000000">{escaped_label}</text>')
 
         svg_lines.append('</g>')
         return "\n".join(svg_lines)

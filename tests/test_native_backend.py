@@ -207,3 +207,34 @@ def test_install_all_hooks_registers_cpp_providers():
         set_downsample_provider(prev[0])
         set_isosurface_extractor(prev[1])
         set_las_parser_provider(prev[2])
+
+
+def test_map_edit_core_version_and_acceleration():
+    """Verify map_edit_core exports version 0.2.17a0 and is recognized as accelerated."""
+    import map_edit_core
+    assert hasattr(map_edit_core, "__version__")
+    assert map_edit_core.__version__ == "0.2.17a0"
+    assert native_version("map_edit") == "0.2.17a0"
+    assert native_status("map_edit") == "fresh"
+    assert is_accelerated("map_edit") is True
+
+
+def test_map_edit_core_hit_test_and_snap_parity():
+    """Verify snap_point and validate_ring produce identical results between C++ and pure-Python fallback."""
+    # Snap test
+    candidates = [(0.0, 0.0), (10.0, 10.0), (20.0, 20.0)]
+    snap_acc = native_backend.dispatch("snap_point", candidates, 9.8, 10.1, 0.5)
+    with disabled_acceleration():
+        snap_py = native_backend.dispatch("snap_point", candidates, 9.8, 10.1, 0.5)
+    assert snap_acc == (10.0, 10.0)
+    assert snap_py == (10.0, 10.0)
+
+    # Validate self-intersecting ring (bowtie)
+    bowtie = [[0.0, 0.0], [1.0, 1.0], [1.0, 0.0], [0.0, 1.0], [0.0, 0.0]]
+    val_acc = native_backend.dispatch("validate_ring", bowtie)
+    with disabled_acceleration():
+        val_py = native_backend.dispatch("validate_ring", bowtie)
+    assert any(i.get("code") == "self_intersection" for i in val_acc)
+    assert any(i.get("code") == "self_intersection" for i in val_py)
+
+
