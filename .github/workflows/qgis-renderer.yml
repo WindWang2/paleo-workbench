@@ -152,6 +152,18 @@ jobs:
         run: |
           /tmp/qgisqt/bin/python -m pip install -e native/qgis_render_bridge
 
+      - name: Unify the Qt runtime (conda prefix wins, from here on)
+        # Every libQt6*.so.6 — including libQt6Core5Compat.so.6, which only
+        # exists inside the conda prefix — must resolve to the prefix's single
+        # 6.11.1 build. Without this, the loader mixes noble's 6.4 Qt
+        # (libQt6Network dies on the removed QRingBuffer::clear) or noble's
+        # 6.4 Core5Compat (removed QUtf8::convertFromUnicode) with the
+        # conda 6.11 QtCore that any PySide6 import brings in. Set BEFORE the
+        # first import of the bridge; the build above stays un-unified so it
+        # links the same system Qt 6.4 it compiled against.
+        run: |
+          echo "LD_LIBRARY_PATH=/tmp/qgisqt/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+
       - name: Import smoke (bridge must load with the vendored QGIS runtime)
         run: |
           /tmp/qgisqt/bin/python -c "import qgis_render_bridge; print('qgis_render_bridge imported from', qgis_render_bridge.__file__)"
@@ -159,15 +171,6 @@ jobs:
       - name: Vendor integrity + bridge source contract checks
         run: |
           /tmp/qgisqt/bin/python -m pytest -q tests/test_qgis_vendor_source.py --timeout=60 --timeout-method=thread
-
-      - name: Unify the Qt runtime (conda prefix wins)
-        # Every libQt6*.so.6 — including libQt6Core5Compat.so.6, which only
-        # exists inside the conda prefix — must resolve to the prefix's single
-        # 6.11.1 build; otherwise the loader mixes noble's 6.4 Core5Compat
-        # with a 6.11 QtCore and bridge imports die on the removed
-        # QUtf8::convertFromUnicode symbol.
-        run: |
-          echo "LD_LIBRARY_PATH=/tmp/qgisqt/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
       - name: QGIS tests are selected, not silently skipped — and executed
         # The leg must fail if the QGIS test set ever stops being selected
