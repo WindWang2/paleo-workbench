@@ -143,12 +143,7 @@ jobs:
           # Fail fast (before the ~50 min vendored QGIS build) if the runtime
           # set is incomplete: Core5Compat present, offscreen Qt importable.
           ls /tmp/qgisqt/lib/libQt6Core5Compat.so.6
-          QT_QPA_PLATFORM=offscreen /tmp/qgisqt/bin/python -c "
-            from PySide6.QtCore import qVersion
-            from PySide6.QtWidgets import QApplication
-            QApplication([])
-            print('qgisqt runtime OK, Qt', qVersion())
-          "
+          QT_QPA_PLATFORM=offscreen /tmp/qgisqt/bin/python -c "from PySide6.QtCore import qVersion; from PySide6.QtWidgets import QApplication; QApplication([]); print('qgisqt runtime OK, Qt', qVersion())"
 
       - name: Build vendored QGIS + qgis_render_bridge (opt-in)
         env:
