@@ -16,20 +16,30 @@ name: QGIS renderer
 # Runtime layout (the hard-won part — read before touching):
 # - BUILD: the vendored QGIS + bridge compile against noble's system Qt 6.4
 #   (apt qt6-base-dev & friends below).
-# - RUNTIME: the test process loads BOTH the bridge (whose vendored QGIS
-#   hard-requires Qt6Core5Compat — find_package REQUIRED) and a PySide6 that
-#   supports Python 3.12 (>= 6.6, so bundled Qt >= 6.6). noble only ships
-#   Core5Compat for Qt 6.4, and a 6.4-built Core5Compat dies on a >= 6.6
-#   QtCore (removed QUtf8::convertFromUnicode symbol), so the runtime must be
-#   a COMPLETE >= 6.6 Qt set including Core5Compat. That combination is not
-#   installable via apt (noble is stuck on 6.4), pip (PySide6 wheels bundle
-#   no Core5Compat) or aqtinstall (upstream repo metadata no longer parses),
-#   but conda-forge's qt6-main ships Core5Compat inside the package. Hence
-#   the /tmp/qgisqt conda env (python 3.12 + PySide6 6.11.1 + the whole Qt
-#   6.11.1 runtime in ONE prefix) and the test steps putting that prefix's
-#   lib/ first on LD_LIBRARY_PATH so every libQt6*.so.6 — Core5Compat
-#   included — resolves to the same 6.11.1 build. The 6.4-built libqgis_core
-#   runs on it per Qt's forward binary compatibility within Qt 6.
+# - RUNTIME: one process must load BOTH the bridge (which hard-requires
+#   Qt6Core5Compat, third_party/qgis/CMakeLists.txt find_package REQUIRED)
+#   and a PySide6 that supports Python 3.12 (>= 6.6, so bundled Qt >= 6.6).
+#   noble only ships Core5Compat for Qt 6.4, and a 6.4-built Core5Compat dies
+#   on a >= 6.6 QtCore (removed QUtf8::convertFromUnicode symbol) — so the
+#   runtime must be a COMPLETE >= 6.6 Qt set including Core5Compat. That
+#   combination is not installable via apt (noble is stuck on 6.4), pip
+#   (PySide6 wheels bundle no Core5Compat) or aqtinstall (upstream repo
+#   metadata no longer parses), but conda-forge's qt6-main ships Core5Compat
+#   inside the package. Hence: a conda env provides python 3.12, PySide6
+#   6.11.1 and the whole 6.11.1 Qt runtime in ONE prefix, and the test steps
+#   put that prefix's lib/ first on LD_LIBRARY_PATH so every libQt6*.so.6 —
+#   Core5Compat included — resolves to the same 6.11.1 build.
+# - KNOWN REMAINING GAP (2026-08-26): the vendored QGIS gui hard-requires
+#   Qt6Multimedia & friends (src/gui/CMakeLists.txt find_package REQUIRED)
+#   and links the SYSTEM 6.4 builds of them; system 6.4 Multimedia uses
+#   Qt PRIVATE API (QObjectPrivate, Qt_6_PRIVATE_API), which is not stable
+#   across minors — so it cannot resolve against the conda 6.11 QtCore and
+#   the import smoke dies. Finishing this leg requires building the whole
+#   closure (vendored QGIS + bridge + qca/qscintilla/qtkeychain) against
+#   the conda Qt (CMAKE_PREFIX_PATH=/tmp/qgisqt — qt6-main ships dev files),
+#   instead of only unifying the runtime. Every cheaper permutation
+#   (PySide6 6.4.2 on 3.11/3.12, late unification, runtime-only unification)
+#   has been tried and is documented in the git history of this file.
 #
 # Note: the system package list below follows QGIS 4.x build requirements
 # (core + gui + analysis, WITH_AUTH=ON). If a future QGIS vendor bump changes
