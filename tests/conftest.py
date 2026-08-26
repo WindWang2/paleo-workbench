@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent
+from PySide6.QtCore import QCoreApplication, QEvent, QTimer
 from PySide6.QtWidgets import QApplication
 
 
@@ -32,6 +32,30 @@ def pytest_configure(config):
         "welllog_binding: workbench↔WellLogEngine native binding contract "
         "(requires built binding; deselected in binding-less gates)",
     )
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_teardown(item):
+    """Timer fence (#951): stop every still-armed QTimer BEFORE pytest-qt's
+    qtbot tears the test's widgets down.
+
+    The CI 3.13 SIGSEGV signature is QTimerInfoList::activateTimers() →
+    QCoreApplication::notifyInternal2() on a QObject whose C++ side is already
+    destroyed: a timer left running by a finished test fires during a LATER
+    test's event processing, with zero project frames to trace. Stopping the
+    timers while their targets are still alive closes that window; the
+    DeferredDelete flush in ``cleanup_qt_deferred_deletes`` (which runs after
+    qtbot's own teardown) remains the second line of defense.
+    """
+    app = QApplication.instance()
+    if app is not None:
+        try:
+            for timer in app.findChildren(QTimer):
+                if timer.isActive():
+                    timer.stop()
+        except Exception:
+            pass
+    yield
 
 
 @pytest.fixture(autouse=True)

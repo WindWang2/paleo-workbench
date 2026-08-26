@@ -621,7 +621,12 @@ class DataReaderPanel(QFrame):
             except RuntimeError:
                 pass
 
-        QTimer.singleShot(1200, _restore)
+        # Parented single-shot so the restore callback dies with this panel
+        # instead of surviving test teardown (#951).
+        restore_timer = QTimer(self)
+        restore_timer.setSingleShot(True)
+        restore_timer.timeout.connect(_restore)
+        restore_timer.start(1200)
 
     def _on_image_fit_toggled(self, checked: bool) -> None:
         self.image_preview_widget.set_fit_mode(checked)

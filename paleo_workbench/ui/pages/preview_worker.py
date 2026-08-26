@@ -479,7 +479,12 @@ class PreviewRequestController(QObject):
             return
         # Defer so Shiboken can finish deleteLater of the prior worker/thread
         # before we spawn another QThread (avoids intermittent offscreen segfaults).
-        QTimer.singleShot(0, self._pump_pending)
+        # Parented single-shot so the callback dies with this controller and
+        # cannot fire into it after teardown (#951).
+        pump_timer = QTimer(self)
+        pump_timer.setSingleShot(True)
+        pump_timer.timeout.connect(self._pump_pending)
+        pump_timer.start(0)
 
     def _pump_pending(self) -> None:
         if self._shutting_down or self._active_job.thread is not None:
