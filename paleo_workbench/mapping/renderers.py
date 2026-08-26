@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+import html
 import math
 from typing import Any, Callable, Mapping, Sequence
 
@@ -16,6 +17,7 @@ import numpy as np
 
 from paleo_workbench.mapping.color_ramps import ColorRamp, get_color_ramp
 from paleo_workbench.mapping.layers import (
+    AnnotationMapLayer,
     ContourMapLayer,
     GridMapLayer,
     MapLayer,
@@ -174,8 +176,9 @@ class SingleSymbolRenderer(LayerRenderer):
                 if style.labels and style.labels.visible and style.labels.field:
                     lbl_text = str(props.get(style.labels.field) or props.get("name") or "").strip()
                     if lbl_text:
+                        escaped_lbl = html.escape(lbl_text)
                         parts.append(
-                            f'<text x="{sx + r + 2:.2f}" y="{sy + 3:.2f}" font-family="{style.labels.font_family or "Arial"}" font-size="{style.labels.size:.1f}" fill="{style.labels.color}">{lbl_text}</text>'
+                            f'<text x="{sx + r + 2:.2f}" y="{sy + 3:.2f}" font-family="{style.labels.font_family or "Arial"}" font-size="{style.labels.size:.1f}" fill="{style.labels.color}">{escaped_lbl}</text>'
                         )
 
         parts.append("</g>")
@@ -195,9 +198,10 @@ class CategorizedRenderer(LayerRenderer):
                 LegendItem(
                     label=str(lbl or val),
                     color=fill,
-                    symbol_type="polygon",
+                    symbol_type="polygon" if getattr(layer, "layer_type", "") in ("polygon", "facies") else "point",
                     stroke_color=style.stroke,
                     stroke_width=style.stroke_width,
+                    marker_symbol=style.marker.value,
                 )
             )
         return items
@@ -218,7 +222,7 @@ class CategorizedRenderer(LayerRenderer):
             if not geom:
                 continue
             props = feat.get("properties") or {}
-            val_key = str(props.get(field_name) or props.get("facies") or "")
+            val_key = str(props.get(field_name) or props.get("facies") or props.get("category") or "")
             fill_color = cat_map.get(val_key, style.fill)
 
             gtype = geom.get("type", "")
@@ -239,6 +243,148 @@ class CategorizedRenderer(LayerRenderer):
                             parts.append(
                                 f'<polygon points="{" ".join(pts)}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="{style.stroke_width:.2f}"/>'
                             )
+            elif gtype == "LineString" and coords:
+                pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in coords if len(p) >= 2]
+                if pts:
+                    parts.append(
+                        f'<polyline points="{" ".join(pts)}" fill="none" stroke="{fill_color}" stroke-width="{style.stroke_width:.2f}"/>'
+                    )
+            elif gtype == "Point" and coords and len(coords) >= 2:
+                sx, sy = ctx.world_to_screen(float(coords[0]), float(coords[1]))
+                r = max(1.0, style.marker_size / 2.0)
+                parts.append(
+                    f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="0.5"/>'
+                )
+
+        parts.append("</g>")
+        return "\n".join(parts)
+
+
+class GraduatedRenderer(LayerRenderer):
+    """Renders vector features classified by numerical range bins."""
+
+    renderer_type: str = "graduated"
+
+    def legend_items(self, layer: MapLayer) -> list[LegendItem]:
+        style = VectorStyle.from_dict(layer.style)
+        items: list[LegendItem] = []
+        ranges = style.ranges
+        for entry in ranges:
+            lo, hi, fill = entry[0], entry[1], entry[2]
+            lbl = entry[3] if len(entry) > 3 and entry[3] else f"{lo:.1f} ~ {hi:.1f}"
+            items.append(
+                LegendItem(
+                    label=lbl,
+                    color=fill,
+                    symbol_type="polygon" if getattr(layer, "layer_type", "") in ("polygon", "facies") else "point",
+                    stroke_color=style.stroke,
+                    stroke_width=style.stroke_width,
+                    marker_symbol=style.marker.value,
+                )
+            )
+        if not items:
+            items.append(
+                LegendItem(
+                    label=layer.name,
+                    color=style.fill,
+                    symbol_type="polygon",
+                    stroke_color=style.stroke,
+                    stroke_width=style.stroke_width,
+                )
+            )
+        return items
+
+    def _match_range(self, val: float, ranges: Sequence[tuple[float, float, str, ...]]) -> tuple[str, str] | None:
+        """Find matching range and return (fill_color, label)."""
+        for entry in ranges:
+            if len(entry) >= 3:
+                lo, hi, col = float(entry[0]), float(entry[1]), str(entry[2])
+                lbl = str(entry[3]) if len(entry) > 3 else ""
+                if lo <= val <= hi:
+                    return col, lbl
+        return None
+
+    def render_svg(self, layer: MapLayer, ctx: RenderContext) -> str:
+        if not layer.visible or layer.opacity <= 0.0:
+            return ""
+        style = VectorStyle.from_dict(layer.style)
+        ranges = style.ranges
+        field_name = style.field or "value"
+        features = getattr(layer, "features", ())
+        if not features:
+            return ""
+
+        parts = [f'<g id="layer_{layer.id}" opacity="{layer.opacity:.2f}">']
+        for feat in features:
+            geom = feat.get("geometry") if isinstance(feat, Mapping) else None
+            if not geom:
+                continue
+            props = feat.get("properties") or {}
+            raw_val = props.get(field_name) if props.get(field_name) is not None else props.get("value")
+            fill_color = style.fill
+            if raw_val is not None:
+                try:
+                    v = float(raw_val)
+                    matched = self._match_range(v, ranges)
+                    if matched is not None:
+                        fill_color = matched[0]
+                except (TypeError, ValueError):
+                    pass
+
+            gtype = geom.get("type", "")
+            coords = geom.get("coordinates", [])
+
+            if gtype == "Polygon" and coords:
+                ring = coords[0]
+                pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in ring if len(p) >= 2]
+                if pts:
+                    parts.append(
+                        f'<polygon points="{" ".join(pts)}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="{style.stroke_width:.2f}"/>'
+                    )
+            elif gtype == "MultiPolygon" and coords:
+                for poly in coords:
+                    if poly:
+                        ring = poly[0]
+                        pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in ring if len(p) >= 2]
+                        if pts:
+                            parts.append(
+                                f'<polygon points="{" ".join(pts)}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="{style.stroke_width:.2f}"/>'
+                            )
+            elif gtype == "LineString" and coords:
+                pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in coords if len(p) >= 2]
+                if pts:
+                    dash_attr = ""
+                    if style.line_pattern is LinePattern.FAULT or style.line_pattern is LinePattern.DASH:
+                        dash_attr = ' stroke-dasharray="6,2"'
+                    elif style.line_pattern is LinePattern.DOT:
+                        dash_attr = ' stroke-dasharray="2,2"'
+                    parts.append(
+                        f'<polyline points="{" ".join(pts)}" fill="none" stroke="{fill_color}" stroke-width="{style.stroke_width:.2f}"{dash_attr}/>'
+                    )
+            elif gtype == "Point" and coords and len(coords) >= 2:
+                sx, sy = ctx.world_to_screen(float(coords[0]), float(coords[1]))
+                r = max(1.0, style.marker_size / 2.0)
+                if style.marker is MarkerSymbol.WELL:
+                    parts.append(
+                        f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="none" stroke="{style.stroke}" stroke-width="1"/>'
+                        f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{max(0.5, r*0.4):.2f}" fill="{fill_color}" stroke="none"/>'
+                    )
+                elif style.marker is MarkerSymbol.SQUARE:
+                    parts.append(
+                        f'<rect x="{sx - r:.2f}" y="{sy - r:.2f}" width="{r*2:.2f}" height="{r*2:.2f}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="0.5"/>'
+                    )
+                else:
+                    parts.append(
+                        f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="0.5"/>'
+                    )
+
+                if style.labels and style.labels.visible and style.labels.field:
+                    lbl_text = str(props.get(style.labels.field) or props.get("name") or "").strip()
+                    if lbl_text:
+                        escaped_lbl = html.escape(lbl_text)
+                        parts.append(
+                            f'<text x="{sx + r + 2:.2f}" y="{sy + 3:.2f}" font-family="{style.labels.font_family or "Arial"}" font-size="{style.labels.size:.1f}" fill="{style.labels.color}">{escaped_lbl}</text>'
+                        )
 
         parts.append("</g>")
         return "\n".join(parts)
@@ -363,8 +509,9 @@ class ContourRenderer(LayerRenderer):
                 if style.labels and style.labels.visible and level is not None:
                     mid_idx = len(coords) // 2
                     mx, my = ctx.world_to_screen(coords[mid_idx][0], coords[mid_idx][1])
+                    escaped_level = html.escape(f"{float(level):.1f}")
                     parts.append(
-                        f'<text x="{mx:.2f}" y="{my:.2f}" font-family="{style.labels.font_family or "Arial"}" font-size="{style.labels.size:.1f}" fill="{style.labels.color}" text-anchor="middle">{float(level):.1f}</text>'
+                        f'<text x="{mx:.2f}" y="{my:.2f}" font-family="{style.labels.font_family or "Arial"}" font-size="{style.labels.size:.1f}" fill="{style.labels.color}" text-anchor="middle">{escaped_level}</text>'
                     )
 
         parts.append("</g>")
@@ -421,9 +568,86 @@ class WellSymbolRenderer(LayerRenderer):
             val_str = f" ({val:.2f})" if (val is not None and isinstance(val, (int, float))) else ""
             display_text = f"{well_name}{val_str}"
             if display_text and style.labels and style.labels.visible:
+                escaped_text = html.escape(display_text)
                 parts.append(
-                    f'<text x="{sx + r + 3:.2f}" y="{sy + 3:.2f}" font-family="{style.labels.font_family or "Arial"}" font-size="{style.labels.size:.1f}" fill="{style.labels.color}">{display_text}</text>'
+                    f'<text x="{sx + r + 3:.2f}" y="{sy + 3:.2f}" font-family="{style.labels.font_family or "Arial"}" font-size="{style.labels.size:.1f}" fill="{style.labels.color}">{escaped_text}</text>'
                 )
+
+        parts.append("</g>")
+        return "\n".join(parts)
+
+
+class AnnotationRenderer(LayerRenderer):
+    """Renders cartographic text annotations, labels, and marker callouts."""
+
+    renderer_type: str = "annotation"
+
+    def legend_items(self, layer: MapLayer) -> list[LegendItem]:
+        style = VectorStyle.from_dict(layer.style)
+        return [
+            LegendItem(
+                label=layer.name,
+                color=style.fill if style.fill != "transparent" else style.stroke,
+                symbol_type="point",
+                stroke_color=style.stroke,
+                stroke_width=style.stroke_width,
+            )
+        ]
+
+    def render_svg(self, layer: MapLayer, ctx: RenderContext) -> str:
+        if not layer.visible or layer.opacity <= 0.0:
+            return ""
+        style = VectorStyle.from_dict(layer.style)
+        features = getattr(layer, "features", ())
+        if not features:
+            return ""
+
+        parts = [f'<g id="layer_{layer.id}" opacity="{layer.opacity:.2f}">']
+        for feat in features:
+            geom = feat.get("geometry") if isinstance(feat, Mapping) else None
+            if not geom:
+                continue
+            props = feat.get("properties") or {}
+            gtype = geom.get("type", "")
+            coords = geom.get("coordinates", [])
+
+            text = str(props.get("text") or props.get("label") or props.get("name") or "").strip()
+            font_size = float(props.get("font_size") or props.get("size") or (style.labels.size if style.labels else 10.0))
+            color = str(props.get("color") or (style.labels.color if style.labels else style.stroke or "#000000"))
+            font_family = str(props.get("font_family") or (style.labels.font_family if style.labels else "Arial, sans-serif"))
+            bold = bool(props.get("bold") or (style.labels.bold if style.labels else False))
+            font_weight = "bold" if bold else "normal"
+            rotation = float(props.get("rotation") or 0.0)
+
+            escaped_text = html.escape(text) if text else ""
+
+            if gtype == "Point" and coords and len(coords) >= 2:
+                sx, sy = ctx.world_to_screen(float(coords[0]), float(coords[1]))
+                transform_attr = f' transform="rotate({rotation:.1f} {sx:.2f} {sy:.2f})"' if rotation != 0.0 else ""
+
+                if style.marker_size > 0 and style.fill != "transparent" and props.get("show_marker", False):
+                    r = max(1.0, style.marker_size / 2.0)
+                    parts.append(
+                        f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="{style.fill}" stroke="{style.stroke}" stroke-width="0.5"/>'
+                    )
+
+                if escaped_text:
+                    parts.append(
+                        f'<text x="{sx:.2f}" y="{sy:.2f}" font-family="{font_family}" font-size="{font_size:.1f}" font-weight="{font_weight}" fill="{color}"{transform_attr}>{escaped_text}</text>'
+                    )
+            elif gtype == "LineString" and coords:
+                pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in coords if len(p) >= 2]
+                if pts:
+                    parts.append(
+                        f'<polyline points="{" ".join(pts)}" fill="none" stroke="{color}" stroke-width="{style.stroke_width:.2f}"/>'
+                    )
+                if escaped_text and len(coords) >= 2:
+                    mid_idx = len(coords) // 2
+                    mx, my = ctx.world_to_screen(coords[mid_idx][0], coords[mid_idx][1])
+                    transform_attr = f' transform="rotate({rotation:.1f} {mx:.2f} {my:.2f})"' if rotation != 0.0 else ""
+                    parts.append(
+                        f'<text x="{mx:.2f}" y="{my:.2f}" font-family="{font_family}" font-size="{font_size:.1f}" font-weight="{font_weight}" fill="{color}" text-anchor="middle"{transform_attr}>{escaped_text}</text>'
+                    )
 
         parts.append("</g>")
         return "\n".join(parts)
@@ -439,12 +663,17 @@ class RendererRegistry:
     def _register_builtins(self) -> None:
         single = SingleSymbolRenderer()
         cat = CategorizedRenderer()
+        grad = GraduatedRenderer()
+        annotation = AnnotationRenderer()
         grid = GridRenderer()
         contour = ContourRenderer()
         well = WellSymbolRenderer()
 
         self._renderers["single"] = single
         self._renderers["categorized"] = cat
+        self._renderers["graduated"] = grad
+        self._renderers["annotation"] = annotation
+        self._renderers["label"] = annotation
         self._renderers["grid"] = grid
         self._renderers["scalar_grid"] = grid
         self._renderers["contour"] = contour
@@ -463,7 +692,7 @@ class RendererRegistry:
         ltype = str(layer.layer_type).lower()
 
         # 1. Specialized layer types take precedence
-        if ltype in ("grid", "scalar_grid", "contour", "well_point", "well"):
+        if ltype in ("grid", "scalar_grid", "contour", "well_point", "well", "annotation"):
             return self._renderers.get(ltype, self._renderers["single"])
 
         # 2. Check if style specifies an explicit non-single renderer keyword (e.g. categorized, graduated)
@@ -471,11 +700,15 @@ class RendererRegistry:
         if style_renderer and style_renderer in self._renderers and style_renderer != "single":
             return self._renderers[style_renderer]
 
-        # 3. Check general layer type (vector, polygon, facies)
+        # 3. Check if layer style specifies ranges or categories directly
+        if layer.style.get("ranges"):
+            return self._renderers["graduated"]
+
+        # 4. Check general layer type (vector, polygon, facies)
         if ltype in self._renderers:
             return self._renderers[ltype]
 
-        # 4. Fallback to single symbol
+        # 5. Fallback to single symbol
         return self._renderers["single"]
 
 

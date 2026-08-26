@@ -8,7 +8,7 @@ from typing import Iterable
 
 from paleo_workbench.mapping.vector_layer import VectorLayer
 
-__all__ = ["TopologyEditResult", "TopologyService"]
+__all__ = ["TopologyEditResult", "TopologyService", "repair_invalid_geometry"]
 
 Point = tuple[float, float]
 
@@ -150,17 +150,28 @@ def repair_invalid_geometry(geometry: dict[str, object]) -> dict[str, object]:
         geometry = {"type": "Polygon", "coordinates": fixed_coords}
 
     try:
-        from shapely.geometry import mapping, shape
+        from shapely.geometry import MultiPolygon, Polygon, mapping, shape
+        from shapely.geometry.polygon import orient
         from shapely.validation import make_valid
 
         cand = shape(geometry)
         if not cand.is_valid:
             repaired = make_valid(cand) if make_valid is not None else cand.buffer(0)
-            if not repaired.is_empty:
-                res = mapping(repaired)
-                return dict(res)
         else:
-            res = mapping(cand)
+            repaired = cand
+
+        if not repaired.is_empty:
+            if repaired.geom_type == "Polygon":
+                repaired = orient(repaired, sign=1.0)
+            elif repaired.geom_type == "MultiPolygon":
+                repaired = MultiPolygon([orient(p, sign=1.0) for p in repaired.geoms if p.geom_type == "Polygon"])
+            elif repaired.geom_type == "GeometryCollection":
+                polys = [orient(p, sign=1.0) for p in repaired.geoms if p.geom_type == "Polygon"]
+                if len(polys) == 1:
+                    repaired = polys[0]
+                elif len(polys) > 1:
+                    repaired = MultiPolygon(polys)
+            res = mapping(repaired)
             return dict(res)
     except Exception:
         pass

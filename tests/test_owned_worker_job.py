@@ -188,3 +188,102 @@ def test_owned_worker_job_adopts_running_thread_on_destroy(qtbot):
     # Let the thread finish.
     release.set()
     qtbot.waitUntil(lambda: not keeper.owns(thread), timeout=3_000)
+
+
+def test_factor_map_worker_lifecycle_with_owned_worker_job(qtbot, monkeypatch):
+    """Verify _FactorMapWorker operates safely with OwnedWorkerJob off the GUI thread."""
+    from unittest.mock import Mock
+    from paleo_workbench.mapping.layers import MapDocument
+    from paleo_workbench.project.models import ProjectDocument, ProjectMeta
+    from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+    from paleo_workbench.ui.pages.create_factor_map_dialog import _FactorMapWorker
+
+    fake_map_doc = MapDocument(id="doc_1", title="Test Factor Map")
+    fake_task = object()
+    mock_service = Mock()
+    mock_service.create_factor_map.return_value = (fake_map_doc, fake_task)
+    project = ProjectDocument(meta=ProjectMeta(name="test_proj"))
+
+    params = {
+        "factor_name": "孔隙度",
+        "target_horizon": "T1",
+        "method": "kriging",
+        "grid_n": 50,
+    }
+    worker = _FactorMapWorker(mock_service, project, params)
+    assert worker.parent() is None
+
+    job = OwnedWorkerJob()
+    results = []
+    job.start(
+        worker,
+        terminal_signals=(worker.finished, worker.failed),
+        result_connections=((worker.finished, lambda doc, task: results.append((doc, task))),),
+    )
+
+    qtbot.waitUntil(lambda: len(results) == 1, timeout=3_000)
+    assert results[0][0] is fake_map_doc
+    assert results[0][1] is fake_task
+    qtbot.waitUntil(lambda: not job.is_running, timeout=3_000)
+
+
+def test_factor_map_worker_handles_failure(qtbot, monkeypatch):
+    """Verify _FactorMapWorker failure emits failed signal and shuts down cleanly."""
+    from unittest.mock import Mock
+    from paleo_workbench.project.models import ProjectDocument, ProjectMeta
+    from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+    from paleo_workbench.ui.pages.create_factor_map_dialog import _FactorMapWorker
+
+    mock_service = Mock()
+    mock_service.create_factor_map.side_effect = ValueError("Insufficient well data points")
+    project = ProjectDocument(meta=ProjectMeta(name="test_proj"))
+
+    params = {"factor_name": "孔隙度"}
+    worker = _FactorMapWorker(mock_service, project, params)
+
+    job = OwnedWorkerJob()
+    failures = []
+    job.start(
+        worker,
+        terminal_signals=(worker.finished, worker.failed),
+        result_connections=((worker.failed, failures.append),),
+    )
+
+    qtbot.waitUntil(lambda: len(failures) == 1, timeout=3_000)
+    assert "Insufficient well data points" in failures[0]
+    qtbot.waitUntil(lambda: not job.is_running, timeout=3_000)
+
+
+def test_create_factor_map_dialog_reject_and_close_shutdown(qtbot, monkeypatch):
+    """Verify CreateFactorMapDialog closeEvent and reject cleanly terminate active jobs."""
+    from unittest.mock import Mock
+    from paleo_workbench.project.models import ProjectDocument, ProjectMeta
+    from paleo_workbench.ui.pages.create_factor_map_dialog import CreateFactorMapDialog
+
+    started = Event()
+    release = Event()
+
+    def _slow_create_factor_map(*args, **kwargs):
+        started.set()
+        release.wait(timeout=5.0)
+        return Mock(), Mock()
+
+    mock_service = Mock()
+    mock_service.create_factor_map.side_effect = _slow_create_factor_map
+
+    project = ProjectDocument(meta=ProjectMeta(name="test_proj"))
+    dialog = CreateFactorMapDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.service = mock_service
+
+    # Trigger create
+    dialog._on_create_clicked()
+    assert started.wait(timeout=2.0)
+    assert dialog._job.is_running is True
+
+    # Reject dialog while worker is running
+    dialog.reject()
+    assert not dialog._job.is_running
+
+    release.set()
+

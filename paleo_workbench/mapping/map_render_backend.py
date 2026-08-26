@@ -26,7 +26,7 @@ import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPolygonF
 
-from paleo_workbench.mapping.map_styles import MarkerSymbol, VectorStyle
+from paleo_workbench.mapping.map_styles import MarkerSymbol, TextStyle, VectorStyle
 
 logger = logging.getLogger(__name__)
 
@@ -286,13 +286,20 @@ class _PreparedLayer:
         "path_offsets",
         "path_feature",
         "path_is_ring",
+        "layer_type",
     )
 
     _KIND_IDS = {"point": 0, "line": 1, "polygon": 2}
 
-    def __init__(self, features: tuple[_PreparedFeature, ...], revision: int) -> None:
+    def __init__(
+        self,
+        features: tuple[_PreparedFeature, ...],
+        revision: int,
+        layer_type: str = "vector",
+    ) -> None:
         self.features = features
         self.revision = revision
+        self.layer_type = layer_type
         count = len(features)
         self.feature_kinds = np.fromiter(
             (self._KIND_IDS[feature.kind] for feature in features),
@@ -423,6 +430,23 @@ def _category_colors(style: VectorStyle) -> dict[str, str] | None:
     if style.renderer != "categorized" or not style.categories:
         return None
     return {str(value): str(fill) for value, fill, _label in style.categories}
+
+
+def _range_color(value: Any, style: VectorStyle) -> str | None:
+    """Find matching range fill for a numerical value in a graduated style."""
+    if not style.ranges or value is None:
+        return None
+    try:
+        val = float(value)
+    except (TypeError, ValueError):
+        return None
+    for entry in style.ranges:
+        if len(entry) >= 3:
+            lo, hi, fill = float(entry[0]), float(entry[1]), str(entry[2])
+            if lo <= val <= hi:
+                return fill
+    return None
+
 
 
 def _bbox_for(parts: tuple[np.ndarray, ...]) -> tuple[float, float, float, float]:
@@ -707,7 +731,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
         for layer in self._snapshot.layers:
             if not layer.visible or layer.opacity <= 0.0:
                 continue
-            if layer.layer_type == "vector" and layer.features:
+            if layer.layer_type not in ("scalar_grid", "grid", "raster_source") and layer.features:
                 self._prepared_layer(layer)
 
     def _rasterize_frame_offthread(self) -> tuple[QImage, tuple, list, float]:
@@ -816,7 +840,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
                     # throwaway fallback backend even on QGIS installs, and a
                     # missing branch silently dropped the raster (#832).
                     self._draw_raster_source(painter, layer)
-                elif layer.layer_type == "vector" and layer.features:
+                elif layer.layer_type not in ("scalar_grid", "grid", "raster_source") and layer.features:
                     self._paint_vector_layer(
                         painter, layer, xmin, ymin, span_x, span_y, width, height, dpi_scale,
                         label_specs=label_specs,
@@ -850,7 +874,11 @@ class FallbackMapRenderBackend(MapRenderBackend):
                     feature.get("properties") or {},
                 )
             )
-        prepared_layer = _PreparedLayer(tuple(items), int(layer.data_revision))
+        prepared_layer = _PreparedLayer(
+            tuple(items),
+            int(layer.data_revision),
+            layer_type=str(layer.layer_type),
+        )
         with self._prepared_lock:
             existing = self._prepared.get(layer.id)
             if existing is not None and existing.revision == int(layer.data_revision):
@@ -1071,6 +1099,19 @@ class FallbackMapRenderBackend(MapRenderBackend):
                         path = None
                         current_feature = -1
                         return
+                elif style.ranges and current_feature >= 0:
+                    val = prepared.features[current_feature].properties.get(style.field)
+                    if val is None:
+                        val = prepared.features[current_feature].properties.get("value")
+                    color_name = _range_color(val, style)
+                    if color_name is not None:
+                        painter.save()
+                        painter.setBrush(self._color(color_name, style.fill))
+                        painter.drawPath(path)
+                        painter.restore()
+                        path = None
+                        current_feature = -1
+                        return
                 painter.drawPath(path)
             path = None
             current_feature = -1
@@ -1146,10 +1187,13 @@ class FallbackMapRenderBackend(MapRenderBackend):
             feature_indices = feature_indices[np.sort(unique_at)]
             count = len(points)
         self._diagnostics["points_drawn"] += count
-        # Categorical grouping is a Python loop over visible points; past the
+        # Categorical or graduated grouping is a Python loop over visible points; past the
         # cap the layer degrades to its single-symbol fill instead.
         categorized = (
             _category_colors(style) if count <= _CATEGORY_POINT_CAP else None
+        )
+        has_graduated = (
+            bool(style.ranges) if count <= _CATEGORY_POINT_CAP else False
         )
         batch_dots = marker_radius < 1.0 or (
             style.marker is MarkerSymbol.CIRCLE and marker_radius <= 4.0
@@ -1182,6 +1226,30 @@ class FallbackMapRenderBackend(MapRenderBackend):
                     self._draw_dots(painter, selected, marker_radius)
             painter.restore()
             return
+        elif has_graduated and not transparent_fill:
+            groups = {}
+            for position, feature_index in enumerate(feature_indices):
+                val = prepared.features[feature_index].properties.get(style.field)
+                if val is None:
+                    val = prepared.features[feature_index].properties.get("value")
+                c_name = _range_color(val, style) or style.fill
+                groups.setdefault(c_name, []).append(position)
+            painter.save()
+            symbol_pen = QPen(painter.pen())
+            symbol_pen.setStyle(Qt.PenStyle.SolidLine)
+            symbol_pen.setWidthF(max(1.0, stroke_width))
+            painter.setPen(symbol_pen)
+            for c_name, positions in groups.items():
+                painter.setBrush(self._color(c_name, style.fill))
+                selected = points[positions]
+                if symbol_loop:
+                    for px, py in selected.tolist():
+                        self._draw_point_symbol(painter, QPointF(px, py), marker_radius, style.marker)
+                else:
+                    self._draw_dots(painter, selected, marker_radius)
+            painter.restore()
+            return
+
         if symbol_loop:
             painter.save()
             symbol_pen = QPen(painter.pen())
@@ -1193,13 +1261,18 @@ class FallbackMapRenderBackend(MapRenderBackend):
             painter.restore()
         else:
             self._draw_dots(painter, points, marker_radius)
-        labels = style.labels
-        if labels is not None and labels.visible and labels.field and count <= 1_500:
+        labels = style.labels or (
+            TextStyle(field="text", size=10.0, color="#f8f9fa")
+            if getattr(prepared, "layer_type", "vector") == "annotation"
+            else None
+        )
+        if labels is not None and labels.visible and count <= 1_500:
+            effective_style = style if style.labels is not None else replace(style, labels=labels)
             for position, (px, py) in enumerate(points.tolist()):
                 feature = prepared.features[feature_indices[position]]
                 anchor = QPointF(px, py)
                 self._draw_label_text(
-                    painter, anchor, feature, labels.field, style, dpi_scale,
+                    painter, anchor, feature, labels.field or "text", effective_style, dpi_scale,
                     label_specs=label_specs,
                 )
 
@@ -1507,7 +1580,9 @@ class QgisMapRenderBackend(MapRenderBackend):
             force_full_ids=self._qgis_force_full,
         )
         active_vector_ids = {
-            layer.id for layer in snapshot.layers if layer.layer_type == "vector"
+            layer.id
+            for layer in snapshot.layers
+            if layer.layer_type not in ("scalar_grid", "grid", "raster_source")
         }
         self._vector_feature_payloads = {
             layer_id: payload
@@ -1547,7 +1622,9 @@ class QgisMapRenderBackend(MapRenderBackend):
                 # bridge validates deltas before mutating mirrors, so the
                 # half-applied state is impossible (#932).
                 self._qgis_force_full = {
-                    layer.id for layer in snapshot.layers if layer.layer_type == "vector"
+                    layer.id
+                    for layer in snapshot.layers
+                    if layer.layer_type not in ("scalar_grid", "grid", "raster_source")
                 }
                 try:
                     self._bridge.set_layer_snapshot(
@@ -1724,7 +1801,7 @@ def _qgis_snapshot(
                 }
             )
             continue
-        if layer.layer_type != "vector":
+        if layer.layer_type in ("scalar_grid", "grid", "raster_source"):
             continue
         cached = (
             vector_feature_payloads.get(layer.id)

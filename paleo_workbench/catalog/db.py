@@ -183,6 +183,25 @@ _DELETE_ORDER = [
 ]
 
 
+class ThreadSafeCatalogSession:
+    """Explicit context manager ensuring thread-confined SQLite connection cleanup upon exit.
+
+    Used by worker threads (including PySide6 QThread workers and background tasks)
+    to safely acquire a thread-confined connection and guarantee its disposal upon block exit.
+    """
+
+    def __init__(self, index: CatalogIndex) -> None:
+        self._index = index
+        self._conn: sqlite3.Connection | None = None
+
+    def __enter__(self) -> sqlite3.Connection:
+        self._conn = self._index.open()
+        return self._conn
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self._index._drop_current_connection()
+
+
 class CatalogIndex:
     """Project-local SQLite query index over a :class:`CatalogDocument`.
 
@@ -222,13 +241,27 @@ class CatalogIndex:
         """Alias for :meth:`open` (whichever name the caller prefers)."""
         return self.open()
 
+    def session(self) -> ThreadSafeCatalogSession:
+        """Context manager yielding a thread-local connection and safely dropping it on exit."""
+        return ThreadSafeCatalogSession(self)
+
+    def prune_dead_threads(self) -> None:
+        """Close and remove connections for threads that have exited."""
+        self._prune_dead_threads()
+
     def _prune_dead_threads(self) -> None:
         """Close and remove connections for threads that have exited."""
-        alive_tids = {t.ident for t in threading.enumerate()}
+        alive_tids = {t.ident for t in threading.enumerate() if t.is_alive()}
         dead_conns = []
         with self._conns_lock:
             for tid in list(self._conns.keys()):
-                if tid not in alive_tids:
+                is_alive = tid in alive_tids
+                if not is_alive:
+                    # Check Linux /proc/self/task/<tid> if available for native/QThread lifecycles
+                    proc_task = Path(f"/proc/self/task/{tid}")
+                    if proc_task.exists():
+                        is_alive = True
+                if not is_alive:
                     dead_conns.append(self._conns.pop(tid))
         for conn in dead_conns:
             try:
@@ -263,6 +296,10 @@ class CatalogIndex:
                 conn.interrupt()
             except (sqlite3.Error, Exception):
                 pass
+
+    def drop_current_connection(self) -> None:
+        """Close and forget the CURRENT thread's connection."""
+        self._drop_current_connection()
 
     def _drop_current_connection(self) -> None:
         """Close and forget the CURRENT thread's connection.

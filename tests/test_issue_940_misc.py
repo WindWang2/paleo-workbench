@@ -52,6 +52,8 @@ def test_no_skipif_true_placeholder():
     """#940-3: no permanent ``skipif(True)`` placeholder may remain."""
     repo = Path(__file__).resolve().parents[1]
     for p in repo.rglob("tests/**/*.py"):
+        if any(part in p.parts for part in (".venv", "site-packages", "build", "dist", ".tox")):
+            continue
         txt = p.read_text(encoding="utf-8", errors="ignore")
         if "skipif(True" in txt:
             # Allow the explanatory comment that mentions the former placeholder

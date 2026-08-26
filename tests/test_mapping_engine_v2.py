@@ -18,6 +18,7 @@ from paleo_workbench.mapping.composer.models import (
 )
 from paleo_workbench.mapping.composer.renderer import MapComposerRenderer
 from paleo_workbench.mapping.layers import (
+    AnnotationMapLayer,
     ContourMapLayer,
     GridMapLayer,
     LayerType,
@@ -35,8 +36,10 @@ from paleo_workbench.mapping.map_styles import (
 )
 from paleo_workbench.mapping.renderers import (
     DEFAULT_RENDERER_REGISTRY,
+    AnnotationRenderer,
     CategorizedRenderer,
     ContourRenderer,
+    GraduatedRenderer,
     GridRenderer,
     LegendItem,
     RenderContext,
@@ -165,18 +168,183 @@ def test_renderer_registry_resolution():
     c_layer = ContourMapLayer(id="c", name="Contour")
     w_layer = WellPointMapLayer(id="w", name="Wells")
     p_layer = PolygonMapLayer(id="p", name="Facies", style={"renderer": "categorized"})
+    grad_layer = VectorMapLayer(id="grad", name="Graduated", style={"renderer": "graduated", "ranges": [(0.0, 10.0, "#ff0000")]})
+    ann_layer = AnnotationMapLayer(id="ann", name="Annotations")
 
     r_v = registry.resolve(v_layer)
     r_g = registry.resolve(g_layer)
     r_c = registry.resolve(c_layer)
     r_w = registry.resolve(w_layer)
     r_p = registry.resolve(p_layer)
+    r_grad = registry.resolve(grad_layer)
+    r_ann = registry.resolve(ann_layer)
 
     assert isinstance(r_v, SingleSymbolRenderer)
     assert isinstance(r_g, GridRenderer)
     assert isinstance(r_c, ContourRenderer)
     assert isinstance(r_w, WellSymbolRenderer)
     assert isinstance(r_p, CategorizedRenderer)
+    assert isinstance(r_grad, GraduatedRenderer)
+    assert isinstance(r_ann, AnnotationRenderer)
+
+
+def test_graduated_renderer_and_svg_export():
+    ranges = (
+        (0.0, 10.0, "#e0f2fe", "0 - 10 m"),
+        (10.0, 20.0, "#38bdf8", "10 - 20 m"),
+        (20.0, 30.0, "#0369a1", "20 - 30 m"),
+    )
+    style = VectorStyle(
+        renderer="graduated",
+        field="thickness",
+        ranges=ranges,
+        stroke="#0f172a",
+        stroke_width=1.5,
+    )
+    features = (
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0]]],
+            },
+            "properties": {"thickness": 5.0, "name": "Zone Low"},
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[10.0, 0.0], [20.0, 0.0], [20.0, 10.0], [10.0, 10.0], [10.0, 0.0]]],
+            },
+            "properties": {"thickness": 15.0, "name": "Zone Med"},
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[20.0, 0.0], [30.0, 0.0], [30.0, 10.0], [20.0, 10.0], [20.0, 0.0]]],
+            },
+            "properties": {"thickness": 25.0, "name": "Zone High"},
+        },
+    )
+    layer = VectorMapLayer(
+        id="poly_grad",
+        name="砂层厚度分级",
+        features=features,
+        style=style.to_dict(),
+        extent=(0.0, 0.0, 30.0, 10.0),
+    )
+
+    renderer = GraduatedRenderer()
+    items = renderer.legend_items(layer)
+    assert len(items) == 3
+    assert items[0].label == "0 - 10 m"
+    assert items[0].color == "#e0f2fe"
+    assert items[1].label == "10 - 20 m"
+    assert items[1].color == "#38bdf8"
+    assert items[2].label == "20 - 30 m"
+    assert items[2].color == "#0369a1"
+
+    ctx = RenderContext(extent=(0.0, 0.0, 30.0, 10.0), width=300.0, height=100.0)
+    svg = renderer.render_svg(layer, ctx)
+    assert f'fill="#e0f2fe"' in svg
+    assert f'fill="#38bdf8"' in svg
+    assert f'fill="#0369a1"' in svg
+    assert f'stroke="#0f172a"' in svg
+
+
+def test_annotation_map_layer_and_renderer():
+    layer = AnnotationMapLayer(
+        id="ann_test",
+        name="构造注记",
+        crs="EPSG:4326",
+    )
+    assert layer.layer_type == "annotation"
+
+    # Add text annotations
+    ann1 = layer.add_annotation(
+        text="中央背斜带",
+        x=105.5,
+        y=31.2,
+        font_size=12.0,
+        color="#f59e0b",
+        rotation=15.0,
+    )
+    ann2 = layer.add_annotation(
+        text="洼陷生烃中心",
+        x=106.8,
+        y=32.0,
+        font_size=10.0,
+        color="#10b981",
+        rotation=0.0,
+    )
+
+    assert len(layer.annotations) == 2
+    assert len(layer.features) == 2
+    assert layer.extent[0] <= 105.5
+    assert layer.extent[2] >= 106.8
+    assert layer.extent[1] <= 31.2
+    assert layer.extent[3] >= 32.0
+
+    # Snapshot serialization & reconstruction
+    snapshot = layer.to_snapshot()
+    assert snapshot.id == "ann_test"
+    assert snapshot.layer_type == "annotation"
+    assert len(snapshot.features) == 2
+
+    doc = MapDocument(id="doc_ann", title="注记图", crs="EPSG:4326")
+    doc.add_layer(layer)
+    doc_snap = doc.to_snapshot()
+
+    restored_doc = MapDocument.from_snapshot(doc_snap)
+    restored_layer = restored_doc.get_layer("ann_test")
+    assert restored_layer is not None
+    assert isinstance(restored_layer, AnnotationMapLayer)
+    assert restored_layer.layer_type == "annotation"
+
+    # Render to SVG
+    renderer = AnnotationRenderer()
+    ctx = RenderContext(extent=layer.extent, width=400.0, height=300.0)
+    svg = renderer.render_svg(layer, ctx)
+
+    assert "<text" in svg
+    assert "中央背斜带" in svg
+    assert "洼陷生烃中心" in svg
+    assert 'fill="#f59e0b"' in svg
+    assert 'rotate(15.0' in svg
+
+
+def test_pure_data_layer_decoupling():
+    import sys
+    # Verify that mapping data models do not import or depend on PySide6 widgets
+    from paleo_workbench.mapping.layers import (
+        AnnotationMapLayer,
+        ContourMapLayer,
+        GridMapLayer,
+        MapDocument,
+        MapLayer,
+        PolygonMapLayer,
+        RasterMapLayer,
+        VectorMapLayer,
+        WellPointMapLayer,
+    )
+    from paleo_workbench.mapping.composer.models import MapCompositionDocument, ComposerElement
+
+    # Check classes are pure dataclasses
+    l = AnnotationMapLayer(id="a", name="A")
+    assert hasattr(l, "to_snapshot")
+    assert hasattr(l, "to_dict")
+    assert isinstance(l.to_dict(), dict)
+
+    doc = MapDocument(id="d", title="D")
+    doc.add_layer(l)
+    d_dict = doc.to_dict()
+    assert d_dict["id"] == "d"
+    assert len(d_dict["layers"]) == 1
+
+    comp = MapCompositionDocument(id="c", title="C")
+    c_dict = comp.to_dict()
+    assert c_dict["id"] == "c"
 
 
 def test_composer_renderer_with_map_document():
@@ -200,8 +368,16 @@ def test_composer_renderer_with_map_document():
             {"type": "Feature", "geometry": {"type": "LineString", "coordinates": [[10.0, 20.0], [50.0, 50.0], [90.0, 80.0]]}, "properties": {"level": 20.0}},
         ),
     )
+    # Add AnnotationLayer
+    annotations = AnnotationMapLayer(
+        id="ann_comp",
+        name="地质注记",
+    )
+    annotations.add_annotation(text="断陷盆地", x=50.0, y=85.0, font_size=14.0, color="#ffffff")
+
     doc.add_layer(contours)
     doc.add_layer(wells)
+    doc.add_layer(annotations)
 
     comp = MapCompositionDocument(
         id="comp_1",
@@ -241,3 +417,5 @@ def test_composer_renderer_with_map_document():
     assert "井-1" in svg
     assert "井-2" in svg
     assert "20.0" in svg
+    assert "断陷盆地" in svg
+

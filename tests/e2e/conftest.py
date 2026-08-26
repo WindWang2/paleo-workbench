@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import stat
 import struct
@@ -186,3 +187,23 @@ def read_only_tree(tmp_path: Path) -> Generator[Path, None, None]:
             pass
 
     _force_rm(root)
+
+from paleo_workbench.viz import CoordinateTransformHub, SelectionContext, SelectionState, WellTrajectoryData
+
+
+
+@pytest.fixture
+def selection_context() -> SelectionContext:
+    """Fixture providing a fresh SelectionContext instance."""
+    return SelectionContext()
+
+
+@pytest.fixture
+def coordinate_hub() -> CoordinateTransformHub:
+    """Fixture providing an initialized CoordinateTransformHub."""
+    hub = CoordinateTransformHub()
+    hub.register_well("W-01", 150.0, 250.0, 50.0)
+    hub.register_well("W-02", 300.0, 400.0, 60.0)
+    hub.register_well("W-03", 450.0, 550.0, 45.0)
+    return hub
+

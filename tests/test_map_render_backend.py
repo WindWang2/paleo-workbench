@@ -586,3 +586,186 @@ def test_fallback_backend_renders_raster_source_reference(tmp_path) -> None:
         ((np.abs(pixels[:, :, 0] - 0xFF) < 40) & (np.abs(pixels[:, :, 1] - 0x88) < 40)).sum()
     )
     assert orange > 64 * 64 // 2
+
+
+def test_fallback_backend_renders_graduated_ranges() -> None:
+    snapshot = MapRenderSnapshot(
+        project_crs="EPSG:3857",
+        layers=(
+            MapLayerSnapshot(
+                id="grad_layer",
+                name="Graduated Ranges",
+                layer_type="vector",
+                extent=(0.0, 0.0, 20.0, 20.0),
+                crs="EPSG:3857",
+                data_revision=1,
+                style_revision=1,
+                features=(
+                    {
+                        "id": "poly1",
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[[2.0, 2.0], [9.0, 2.0], [9.0, 18.0], [2.0, 18.0], [2.0, 2.0]]],
+                        },
+                        "properties": {"value": 5.0},
+                    },
+                    {
+                        "id": "poly2",
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[[11.0, 2.0], [18.0, 2.0], [18.0, 18.0], [11.0, 18.0], [11.0, 2.0]]],
+                        },
+                        "properties": {"value": 25.0},
+                    },
+                ),
+                style={
+                    "renderer": "graduated",
+                    "field": "value",
+                    "fill": "#333333",
+                    "stroke": "#000000",
+                    "stroke_width": 1.0,
+                    "ranges": [
+                        [0.0, 10.0, "#ff0000", "0-10"],
+                        [20.0, 30.0, "#00ff00", "20-30"],
+                    ],
+                },
+            ),
+        ),
+    )
+    backend = FallbackMapRenderBackend()
+    backend.initialize()
+    backend.set_layer_snapshot(snapshot)
+    backend.set_extent((0.0, 0.0, 20.0, 20.0))
+    backend.set_output_size(100, 100)
+    frame = backend.render_sync()
+
+    pixels = np.frombuffer(frame.rgba, dtype=np.uint8).reshape(100, 100, 4)
+    # Left polygon should be colored with red (#ff0000)
+    red_pixels = int(((pixels[:, :50, 0] > 200) & (pixels[:, :50, 1] < 50)).sum())
+    # Right polygon should be colored with green (#00ff00)
+    green_pixels = int(((pixels[:, 50:, 1] > 200) & (pixels[:, 50:, 0] < 50)).sum())
+
+    assert red_pixels > 100
+    assert green_pixels > 100
+
+
+def test_fallback_backend_renders_annotation_layer() -> None:
+    snapshot = MapRenderSnapshot(
+        project_crs="EPSG:3857",
+        layers=(
+            MapLayerSnapshot(
+                id="ann_layer",
+                name="Annotation",
+                layer_type="annotation",
+                extent=(0.0, 0.0, 20.0, 20.0),
+                crs="EPSG:3857",
+                data_revision=1,
+                style_revision=1,
+                features=(
+                    {
+                        "id": "ann1",
+                        "geometry": {"type": "Point", "coordinates": [10.0, 10.0]},
+                        "properties": {"text": "Fault A", "color": "#f8f9fa", "font_size": 12.0},
+                    },
+                ),
+                style={
+                    "fill": "#ffffff",
+                    "stroke": "#ffffff",
+                    "marker_size": 6.0,
+                    "labels": {"field": "text", "size": 12.0, "color": "#f8f9fa", "visible": True},
+                },
+            ),
+        ),
+    )
+    backend = FallbackMapRenderBackend()
+    backend.initialize()
+    backend.set_layer_snapshot(snapshot)
+    backend.set_extent((0.0, 0.0, 20.0, 20.0))
+    backend.set_output_size(100, 100)
+    frame = backend.render_sync()
+
+    assert frame is not None
+    assert frame.width == 100
+    assert frame.height == 100
+    # Text or marker must have drawn pixels differing from background
+    pixels = np.frombuffer(frame.rgba, dtype=np.uint8).reshape(100, 100, 4)
+    non_bg = int((pixels[:, :, :3] != np.array([24, 28, 34])).any(axis=-1).sum())
+    assert non_bg > 0
+
+
+def test_fallback_backend_renders_and_exports_annotation_layer_with_none_labels(tmp_path) -> None:
+    """Verify rendering and exporting of an AnnotationMapLayer where style.labels is None
+    and style={'fill': '#ffffff', 'labels': None} without raising NameError or AssertionError."""
+    from PySide6.QtCore import QMarginsF, QRect, QSize, QSizeF
+    from PySide6.QtGui import QImage, QPageLayout, QPageSize, QPainter, QPdfWriter
+    from PySide6.QtSvg import QSvgGenerator
+    from paleo_workbench.mapping.layers import AnnotationMapLayer, MapDocument
+
+    ann = AnnotationMapLayer(
+        id="ann_none_labels",
+        name="Annotation None Labels",
+        style={"fill": "#ffffff", "labels": None},
+    )
+    ann.add_annotation("Fault Alpha", 10.0, 10.0)
+    assert ann.style.get("labels") is None
+
+    doc = MapDocument(layers=[ann])
+    backend = FallbackMapRenderBackend()
+    backend.initialize()
+    backend.set_layer_snapshot(doc.to_snapshot())
+    backend.set_extent((0.0, 0.0, 20.0, 20.0))
+    backend.set_output_size(100, 100)
+
+    # 1. Screen / Sync rendering
+    frame = backend.render_sync()
+    assert frame is not None
+    assert (frame.width, frame.height) == (100, 100)
+    pixels = np.frombuffer(frame.rgba, dtype=np.uint8).reshape(100, 100, 4)
+    non_bg = int((pixels[:, :, :3] != np.array([24, 28, 34])).any(axis=-1).sum())
+    assert non_bg > 0
+
+    # 2. Raster painter export
+    img = QImage(100, 100, QImage.Format.Format_ARGB32_Premultiplied)
+    painter = QPainter(img)
+    try:
+        backend.render_to_painter(painter, 100, 100, dpi=96.0)
+    finally:
+        painter.end()
+    assert not img.isNull()
+
+    # 3. SVG vector export
+    svg_path = str(tmp_path / "annotation_none_labels.svg")
+    generator = QSvgGenerator()
+    generator.setFileName(svg_path)
+    generator.setSize(QSize(100, 100))
+    generator.setViewBox(QRect(0, 0, 100, 100))
+    generator.setResolution(96)
+    svg_painter = QPainter(generator)
+    try:
+        backend.render_to_painter(svg_painter, 100, 100, dpi=96.0)
+    finally:
+        svg_painter.end()
+    assert (tmp_path / "annotation_none_labels.svg").exists()
+    assert (tmp_path / "annotation_none_labels.svg").stat().st_size > 0
+
+    # 4. PDF vector export
+    pdf_path = str(tmp_path / "annotation_none_labels.pdf")
+    writer = QPdfWriter(pdf_path)
+    writer.setResolution(96)
+    writer.setPageLayout(
+        QPageLayout(
+            QPageSize(QSizeF(100, 100), QPageSize.Unit.Point),
+            QPageLayout.Orientation.Portrait,
+            QMarginsF(0, 0, 0, 0),
+        )
+    )
+    pdf_painter = QPainter(writer)
+    try:
+        backend.render_to_painter(pdf_painter, 100, 100, dpi=96.0)
+    finally:
+        pdf_painter.end()
+    assert (tmp_path / "annotation_none_labels.pdf").exists()
+    assert (tmp_path / "annotation_none_labels.pdf").stat().st_size > 0
+
+    backend.shutdown()
+

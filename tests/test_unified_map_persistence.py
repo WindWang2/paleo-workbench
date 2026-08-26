@@ -61,6 +61,7 @@ def test_unified_canvas_persists_style_chrome_extent_and_layer_exclusions(tmp_pa
 
 
 def test_unified_canvas_reopens_reference_source_through_the_same_composition(tmp_path, qtbot) -> None:
+    pytest.importorskip("osgeo.gdal")
     source = tmp_path / "faults.geojson"
     source.write_text(
         json.dumps(

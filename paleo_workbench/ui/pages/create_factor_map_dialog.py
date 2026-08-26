@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from PySide6.QtCore import QThread, Signal, Qt
+from PySide6.QtCore import QObject, QThread, Signal, Slot, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -30,11 +30,12 @@ from paleo_workbench.services.geological_mapping_service import (
     GeologicalMappingService,
 )
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 
 logger = logging.getLogger(__name__)
 
 
-class _FactorMapWorker(QThread):
+class _FactorMapWorker(QObject):
     """Background worker executing Kriging, Grid generation, and Contouring."""
 
     finished = Signal(object, object)  # map_doc, task
@@ -45,15 +46,18 @@ class _FactorMapWorker(QThread):
         service: GeologicalMappingService,
         project: ProjectDocument,
         params: dict[str, Any],
-        parent=None,
-    ):
+        parent: QObject | None = None,
+    ) -> None:
         super().__init__(parent)
         self.service = service
         self.project = project
         self.params = params
 
+    @Slot()
     def run(self) -> None:
         try:
+            if QThread.currentThread().isInterruptionRequested():
+                return
             map_doc, task = self.service.create_factor_map(
                 self.project,
                 factor_name=self.params["factor_name"],
@@ -66,8 +70,12 @@ class _FactorMapWorker(QThread):
                 include_wells=self.params.get("include_wells", True),
                 include_polygons=self.params.get("include_polygons", False),
             )
+            if QThread.currentThread().isInterruptionRequested():
+                return
             self.finished.emit(map_doc, task)
         except Exception as exc:
+            if QThread.currentThread().isInterruptionRequested():
+                return
             logger.exception("Factor map generation failed")
             self.failed.emit(str(exc))
 
@@ -82,6 +90,7 @@ class CreateFactorMapDialog(QDialog):
         self.project = project
         self.service = DEFAULT_GEOLOGICAL_MAPPING_SERVICE
         self.created_map_doc: MapDocument | None = None
+        self._job = OwnedWorkerJob(self)
         self._worker: _FactorMapWorker | None = None
 
         self.setWindowTitle("创建地质单因素图件 (Geological Factor Map)")
@@ -173,9 +182,23 @@ class CreateFactorMapDialog(QDialog):
 
         layout.addLayout(btn_layout)
 
+    def closeEvent(self, event) -> None:
+        """Cleanly request worker cancellation and shutdown thread before dialog destruction."""
+        if self._job.is_running:
+            self._job.shutdown(wait_ms=1000)
+        super().closeEvent(event)
+
+    def reject(self) -> None:
+        """Cleanly abort background computation on dialog cancel/reject."""
+        if self._job.is_running:
+            self._job.shutdown(wait_ms=1000)
+        super().reject()
+
     def _on_create_clicked(self) -> None:
+        if self._job.is_running:
+            return
         self.btn_create.setEnabled(False)
-        self.btn_cancel.setEnabled(False)
+        self.btn_cancel.setEnabled(True)
         self.progress_bar.setVisible(True)
 
         params = {
@@ -190,10 +213,16 @@ class CreateFactorMapDialog(QDialog):
             "include_polygons": self.chk_polygons.isChecked(),
         }
 
-        self._worker = _FactorMapWorker(self.service, self.project, params, self)
-        self._worker.finished.connect(self._on_worker_finished)
-        self._worker.failed.connect(self._on_worker_failed)
-        self._worker.start()
+        worker = _FactorMapWorker(self.service, self.project, params)
+        self._worker = worker
+        self._job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed),
+            result_connections=(
+                (worker.finished, self._on_worker_finished),
+                (worker.failed, self._on_worker_failed),
+            ),
+        )
 
     def _on_worker_finished(self, map_doc: MapDocument, task) -> None:
         self.progress_bar.setVisible(False)

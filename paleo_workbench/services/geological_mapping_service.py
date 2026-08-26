@@ -7,6 +7,7 @@ designed for direct invocation by UI controllers, batch background workers, and 
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any, Sequence
 
 from paleo_workbench.mapping.geological_pipeline import (
@@ -73,7 +74,44 @@ class GeologicalMappingService:
                     "properties": r.attributes,
                 })
 
-        # 2. If no well table records, extract from sample points in existing factor tasks or well entities
+        # 2. Search in project domain wells (WellEntity)
+        if not records:
+            domain_wells = getattr(project, "wells", None) or []
+            if not domain_wells and hasattr(project, "workarea") and project.workarea is not None:
+                domain_wells = getattr(project.workarea, "wells", None) or []
+            for well in domain_wells:
+                wx = well.project_x if well.project_x is not None else well.surface_x
+                wy = well.project_y if well.project_y is not None else well.surface_y
+                if wx is None or wy is None:
+                    continue
+                try:
+                    fx, fy = float(wx), float(wy)
+                    if not (math.isfinite(fx) and math.isfinite(fy)):
+                        continue
+                except (TypeError, ValueError):
+                    continue
+
+                status = str(getattr(well, "coordinate_status", "ok") or "ok").lower()
+                if status == "invalid":
+                    continue
+
+                meta = dict(getattr(well, "metadata", None) or {})
+                attrs = dict(getattr(well, "attributes", None) or {})
+                props = {**meta, **attrs}
+
+                records.append({
+                    "well_id": getattr(well, "id", "") or getattr(well, "uwi", "") or well.name,
+                    "name": getattr(well, "name", "") or getattr(well, "uwi", "") or getattr(well, "id", ""),
+                    "x": fx,
+                    "y": fy,
+                    "z": getattr(well, "surface_z", None),
+                    "qc_flag": "ok",
+                    "attributes": props,
+                    "properties": props,
+                    **props,
+                })
+
+        # 3. If no well table or domain well records, extract from sample points in existing factor tasks
         if not records:
             for task in project.factor_map_tasks:
                 if (not task.target_horizon or task.target_horizon == resolved_horizon) and task.factor_type == factor_name:
@@ -89,14 +127,14 @@ class GeologicalMappingService:
                     if records:
                         break
 
-        # 3. Fallback: synthesize realistic sample points across project extent if project has 0 well records
+        # 4. Fallback: synthesize realistic sample points across project extent if project has 0 well records
         if not records:
             from geoviz import synthetic_sample_points
-            raw_pts = synthetic_sample_points(seed=42, n=12)
+            raw_pts = synthetic_sample_points(seed=42, factor_type=factor_name, count=12)
             for i, p in enumerate(raw_pts):
                 records.append({
-                    "well_id": f"W{i+1}",
-                    "name": f"井-{i+1}",
+                    "well_id": str(p.get("well") or f"W{i+1}"),
+                    "name": str(p.get("well") or f"井-{i+1}"),
                     "x": p["x"],
                     "y": p["y"],
                     "value": p["value"],

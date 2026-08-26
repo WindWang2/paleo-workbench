@@ -42,7 +42,7 @@ class KrigingInterpolator(Interpolator):
         grid_y = np.linspace(ymin, ymax, grid_n, dtype=np.float64)
 
         try:
-            from geoviz_plots.factor.kriging import (
+            from geoviz import (
                 fit_variogram,
                 kriging_grid,
                 leave_one_out_predictions,
@@ -82,6 +82,10 @@ class KrigingInterpolator(Interpolator):
                 "r_squared": float(r2),
                 "grid_n": grid_n,
                 "n_samples": len(xs),
+                "sample_points": [
+                    {"well": p.well_name or p.well_id, "x": p.x, "y": p.y, "value": p.value}
+                    for p in dataset.valid_points
+                ],
             }
 
         except ImportError:
@@ -89,6 +93,10 @@ class KrigingInterpolator(Interpolator):
             grid_z, grid_var, algo_params = _pure_numpy_kriging(
                 xs, ys, zs, grid_x, grid_y, model=options.variogram_model
             )
+            algo_params["sample_points"] = [
+                {"well": p.well_name or p.well_id, "x": p.x, "y": p.y, "value": p.value}
+                for p in dataset.valid_points
+            ]
 
         return FactorGridResult(
             grid_z=np.asarray(grid_z, dtype=np.float32),
@@ -120,10 +128,11 @@ class IDWInterpolator(Interpolator):
         grid_y = np.linspace(ymin, ymax, grid_n, dtype=np.float64)
 
         gx, gy = np.meshgrid(grid_x, grid_y)  # (H, W)
-        target_pts = np.stack([gx.ravel(), gy.ravel()], axis=1)  # (H*W, 2)
+        target_pts = np.stack([gx.ravel(), gy.ravel()], axis=1)  # (M = H*W, 2)
         sample_pts = np.stack([xs, ys], axis=1)  # (N, 2)
+        n_samples = len(xs)
 
-        # Distances: (H*W, N)
+        # Distances: (M, N)
         dx = target_pts[:, 0:1] - sample_pts[:, 0].T
         dy = target_pts[:, 1:2] - sample_pts[:, 1].T
         dist = np.sqrt(dx * dx + dy * dy)
@@ -131,26 +140,66 @@ class IDWInterpolator(Interpolator):
         p = max(1.0, float(options.power))
         eps = 1e-12
 
-        # Check for exact matches
-        exact_match = dist < eps
-        weights = 1.0 / np.maximum(dist, eps) ** p
+        # 1. Search radius filtering
+        valid_mask = np.ones_like(dist, dtype=bool)
+        if options.search_radius is not None and options.search_radius > 0:
+            valid_mask = dist <= float(options.search_radius)
+
+        # 2. Max neighbors filtering (keep top k nearest within search radius per target)
+        if options.max_neighbors is not None and 0 < options.max_neighbors < n_samples:
+            k = int(options.max_neighbors)
+            dist_masked = np.where(valid_mask, dist, np.inf)
+            k_mask = np.zeros_like(valid_mask, dtype=bool)
+            nearest_indices = np.argpartition(dist_masked, kth=k - 1, axis=1)[:, :k]
+            valid_k = np.take_along_axis(dist_masked, nearest_indices, axis=1) < np.inf
+            np.put_along_axis(k_mask, nearest_indices, valid_k, axis=1)
+            valid_mask = valid_mask & k_mask
+
+        # Count active neighbors per target point
+        neighbor_counts = np.sum(valid_mask, axis=1)
+        min_n = max(1, int(options.min_neighbors))
+
+        # Calculate inverse distance weights
+        weights = np.zeros_like(dist, dtype=np.float64)
+        np.divide(1.0, np.maximum(dist, eps) ** p, out=weights, where=valid_mask)
+        weights[~valid_mask] = 0.0
+
+        # Exact matches within valid mask
+        exact_match = (dist < eps) & valid_mask
         weights[exact_match] = 0.0
 
         weight_sum = np.sum(weights, axis=1)
-        z_grid_flat = np.sum(weights * zs, axis=1) / np.maximum(weight_sum, 1e-15)
+        z_grid_flat = np.full(len(target_pts), np.nan, dtype=np.float64)
+
+        # Calculate values where neighbor_counts >= min_neighbors
+        eligible = neighbor_counts >= min_n
+        positive_weights = eligible & (weight_sum > 0)
+        if np.any(positive_weights):
+            z_grid_flat[positive_weights] = np.sum(weights[positive_weights] * zs, axis=1) / weight_sum[positive_weights]
 
         # Apply exact matches
         match_rows, match_cols = np.nonzero(exact_match)
         if match_rows.size > 0:
-            z_grid_flat[match_rows] = zs[match_cols]
+            for r, c in zip(match_rows, match_cols):
+                if neighbor_counts[r] >= min_n:
+                    z_grid_flat[r] = zs[c]
 
         grid_z = z_grid_flat.reshape((grid_n, grid_n))
+
+        sample_points_param = [
+            {"well": p.well_name or p.well_id, "x": p.x, "y": p.y, "value": p.value}
+            for p in dataset.valid_points
+        ]
 
         algo_params = {
             "method": "idw",
             "power": p,
             "grid_n": grid_n,
-            "n_samples": len(xs),
+            "n_samples": n_samples,
+            "search_radius": options.search_radius,
+            "min_neighbors": options.min_neighbors,
+            "max_neighbors": options.max_neighbors,
+            "sample_points": sample_points_param,
         }
 
         return FactorGridResult(
@@ -175,19 +224,30 @@ def _pure_numpy_kriging(
     sample_pts = np.stack([x, y], axis=1)
     dists = np.sqrt(np.sum((sample_pts[:, None, :] - sample_pts[None, :, :]) ** 2, axis=2))
 
-    # Variance and range heuristics
+    model_name = str(model).lower() if str(model).lower() in ("spherical", "exponential", "gaussian") else "spherical"
     sill = float(np.var(z)) if float(np.var(z)) > 1e-6 else 1.0
     dmax = float(np.max(dists)) if float(np.max(dists)) > 1e-6 else 1.0
-    r = dmax * 0.8
+    r = dmax * 0.8 if dmax > 1e-6 else 1.0
     nugget = 0.0
 
-    # Covariance function
-    def cov(h: np.ndarray) -> np.ndarray:
-        hr = np.clip(h / max(r, 1e-6), 0.0, 1.0)
-        gamma = sill * (1.5 * hr - 0.5 * hr ** 3)
-        return (sill + nugget) - gamma
+    def gamma(h: np.ndarray) -> np.ndarray:
+        h = np.asarray(h, dtype=np.float64)
+        if model_name == "spherical":
+            hr = np.clip(h / max(r, 1e-6), 0.0, 1.0)
+            g = sill * (1.5 * hr - 0.5 * hr ** 3)
+            g = np.where(h >= r, sill, g)
+        elif model_name == "exponential":
+            g = sill * (1.0 - np.exp(-3.0 * h / max(r, 1e-6)))
+        elif model_name == "gaussian":
+            g = sill * (1.0 - np.exp(-3.0 * (h / max(r, 1e-6)) ** 2))
+        else:
+            g = sill * (1.0 - np.exp(-3.0 * h / max(r, 1e-6)))
+        return nugget + g
 
-    # Augmented kriging matrix K
+    def cov(h: np.ndarray) -> np.ndarray:
+        return (sill + nugget) - gamma(h)
+
+    # Augmented kriging matrix K with ridge regularization
     K = np.zeros((n + 1, n + 1), dtype=np.float64)
     K[:n, :n] = cov(dists) + np.eye(n) * 1e-8
     K[:n, n] = 1.0
@@ -216,7 +276,14 @@ def _pure_numpy_kriging(
     return (
         z_pred.reshape((len(grid_y), len(grid_x))),
         variance.reshape((len(grid_y), len(grid_x))),
-        {"method": "kriging_fallback", "model": model, "range": r, "sill": sill},
+        {
+            "method": "kriging_fallback",
+            "model": model_name,
+            "range": r,
+            "sill": sill,
+            "nugget": nugget,
+            "n_samples": n,
+        },
     )
 
 

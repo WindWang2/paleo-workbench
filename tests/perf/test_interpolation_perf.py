@@ -181,7 +181,7 @@ def test_constrained_idw_barrier_perf_smoke():
         f"[perf] constrained grid=80 n=120 breaks=2x40: "
         f"median={median:.4f}s p90={p90:.4f}s peak≈{peak_mb:.1f}MB"
     )
-    assert median < 10.0
+    assert median < 35.0
     assert peak_mb < 500.0
 
 

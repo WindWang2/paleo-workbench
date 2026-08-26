@@ -13,6 +13,34 @@ name: QGIS renderer
 # Normal PRs skip this leg entirely and only exercise the fallback renderer —
 # see README "QGIS renderer (opt-in)" for the coverage statement.
 #
+# Runtime layout (the hard-won part — read before touching):
+# - BUILD: the vendored QGIS + bridge compile against noble's system Qt 6.4
+#   (apt qt6-base-dev & friends below).
+# - RUNTIME: one process must load BOTH the bridge (which hard-requires
+#   Qt6Core5Compat, third_party/qgis/CMakeLists.txt find_package REQUIRED)
+#   and a PySide6 that supports Python 3.12 (>= 6.6, so bundled Qt >= 6.6).
+#   noble only ships Core5Compat for Qt 6.4, and a 6.4-built Core5Compat dies
+#   on a >= 6.6 QtCore (removed QUtf8::convertFromUnicode symbol) — so the
+#   runtime must be a COMPLETE >= 6.6 Qt set including Core5Compat. That
+#   combination is not installable via apt (noble is stuck on 6.4), pip
+#   (PySide6 wheels bundle no Core5Compat) or aqtinstall (upstream repo
+#   metadata no longer parses), but conda-forge's qt6-main ships Core5Compat
+#   inside the package. Hence: a conda env provides python 3.12, PySide6
+#   6.11.1 and the whole 6.11.1 Qt runtime in ONE prefix, and the test steps
+#   put that prefix's lib/ first on LD_LIBRARY_PATH so every libQt6*.so.6 —
+#   Core5Compat included — resolves to the same 6.11.1 build.
+# - KNOWN REMAINING GAP (2026-08-26): the vendored QGIS gui hard-requires
+#   Qt6Multimedia & friends (src/gui/CMakeLists.txt find_package REQUIRED)
+#   and links the SYSTEM 6.4 builds of them; system 6.4 Multimedia uses
+#   Qt PRIVATE API (QObjectPrivate, Qt_6_PRIVATE_API), which is not stable
+#   across minors — so it cannot resolve against the conda 6.11 QtCore and
+#   the import smoke dies. Finishing this leg requires building the whole
+#   closure (vendored QGIS + bridge + qca/qscintilla/qtkeychain) against
+#   the conda Qt (CMAKE_PREFIX_PATH=/tmp/qgisqt — qt6-main ships dev files),
+#   instead of only unifying the runtime. Every cheaper permutation
+#   (PySide6 6.4.2 on 3.11/3.12, late unification, runtime-only unification)
+#   has been tried and is documented in the git history of this file.
+#
 # Note: the system package list below follows QGIS 4.x build requirements
 # (core + gui + analysis, WITH_AUTH=ON). If a future QGIS vendor bump changes
 # requirements, adjust the apt list here; the job failing loudly is the point.
@@ -51,11 +79,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: false
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
 
       - name: System libraries (Qt6 / QGIS build deps / bridge build tools)
         run: |
@@ -104,50 +127,60 @@ jobs:
             bison \
             flex
 
-      - name: Install Python build deps
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "pybind11>=2.12" "ninja>=1.11" "pytest>=8.0"
+      - name: Conda (just to drive `conda create`; env is used by absolute path)
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          auto-activate-base: false
 
-      # Audit #935: every pytest step below needs pytest-timeout, PySide6 (the
-      # bridge requires a live Qt runtime) and numpy (qgis test modules import
-      # it at module level). Install them ONCE, before the first pytest step —
-      # the previous order ran pytest with --timeout before its plugin existed
-      # and made this leg fail on every trigger.
-      - name: Install QGIS test deps
+      - name: Create the qgisqt runtime env (python 3.12 + PySide6 6.11.1 + full Qt 6.11.1 incl. Core5Compat)
+        # See the workflow header for why this env exists. All later steps
+        # call /tmp/qgisqt/bin/python explicitly — no conda activation.
         run: |
-          python -m pip install "PySide6==6.11.1" "pytest-qt>=4.5.0" "pytest-timeout>=2.3.1" "numpy>=1.26" \
+          conda create -y -p /tmp/qgisqt -c conda-forge python=3.12 "pyside6=6.11.1"
+          /tmp/qgisqt/bin/python -m pip install --upgrade pip
+          # Deps land in the SAME env. PySide6 itself comes from conda (NOT
+          # pip) so its Qt stays the prefix's single 6.11.1 set.
+          # pydantic: tests/conftest.py's autouse session fixture imports the
+          # paleo_workbench package (project.models). gdal (sdist build against
+          # the libgdal-dev installed above, pinned to noble's gdal-config):
+          # the map backend's optional-import surface (bridge capability probe).
+          /tmp/qgisqt/bin/python -m pip install \
+            "pybind11>=2.12" "ninja>=1.11" "pytest>=8.0" \
+            "pytest-qt>=4.5.0" "pytest-timeout>=2.3.1" "numpy>=1.26" \
             "pydantic>=2" \
             "gdal==$(gdal-config --version)"
-          # pydantic: tests/conftest.py's autouse session fixture imports the
-          # paleo_workbench package (project.models). gdal: the map backend's
-          # optional-import surface (bridge capability probe).
+          # Fail fast (before the ~50 min vendored QGIS build) if the runtime
+          # set is incomplete: Core5Compat present, offscreen Qt importable.
+          ls /tmp/qgisqt/lib/libQt6Core5Compat.so.6
+          QT_QPA_PLATFORM=offscreen /tmp/qgisqt/bin/python -c "from PySide6.QtCore import qVersion; from PySide6.QtWidgets import QApplication; QApplication([]); print('qgisqt runtime OK, Qt', qVersion())"
 
       - name: Build vendored QGIS + qgis_render_bridge (opt-in)
         env:
           PALEO_WITH_QGIS_RENDERER: "1"
           PALEO_QGIS_BUILD_JOBS: "4"
         run: |
-          python -m pip install -e native/qgis_render_bridge
+          /tmp/qgisqt/bin/python -m pip install -e native/qgis_render_bridge
+
+      - name: Unify the Qt runtime (conda prefix wins, from here on)
+        # Every libQt6*.so.6 — including libQt6Core5Compat.so.6, which only
+        # exists inside the conda prefix — must resolve to the prefix's single
+        # 6.11.1 build. Without this, the loader mixes noble's 6.4 Qt
+        # (libQt6Network dies on the removed QRingBuffer::clear) or noble's
+        # 6.4 Core5Compat (removed QUtf8::convertFromUnicode) with the
+        # conda 6.11 QtCore that any PySide6 import brings in. Set BEFORE the
+        # first import of the bridge; the build above stays un-unified so it
+        # links the same system Qt 6.4 it compiled against.
+        run: |
+          echo "LD_LIBRARY_PATH=/tmp/qgisqt/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
       - name: Import smoke (bridge must load with the vendored QGIS runtime)
         run: |
-          python -c "import qgis_render_bridge; print('qgis_render_bridge imported from', qgis_render_bridge.__file__)"
+          /tmp/qgisqt/bin/python -c "import qgis_render_bridge; print('qgis_render_bridge imported from', qgis_render_bridge.__file__)"
 
       - name: Vendor integrity + bridge source contract checks
         run: |
-          python -m pytest -q tests/test_qgis_vendor_source.py --timeout=60 --timeout-method=thread
-
-      - name: Unify the Qt runtime (PySide6's bundled Qt wins)
-        # The bridge's vendored QGIS was built against noble's system Qt 6.4
-        # while PySide6 bundles its own 6.11: letting the loader mix both
-        # yields undefined-symbol errors (QRingBuffer). Qt guarantees
-        # backward compatibility inside a major version — a 6.4-built
-        # libqgis_core loads fine on the 6.11 runtime.
-        run: |
-          QT_LIB="$(python -c "import PySide6, os; print(os.path.join(os.path.dirname(PySide6.__file__), 'Qt', 'lib'))")"
-          echo "QT_LIB=$QT_LIB" >> "$GITHUB_ENV"
-          echo "LD_LIBRARY_PATH=$QT_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+          /tmp/qgisqt/bin/python -m pytest -q tests/test_qgis_vendor_source.py --timeout=60 --timeout-method=thread
 
       - name: QGIS tests are selected, not silently skipped — and executed
         # The leg must fail if the QGIS test set ever stops being selected
@@ -167,14 +200,22 @@ jobs:
           # below fails loudly).
           mapfile -t QGIS_FILES < <(
             for f in $(grep -rl "pytest.mark.qgis" tests --include='*.py' | sort); do
-              grep -qE "^(from|import) (geoviz|grid_render_core|layer_model_core|seismic_3d_core|well_log_core|map_edit_core)" "$f" || echo "$f"
+              # Exclude files that import the native engines directly OR via a
+              # known transitive carrier. A plain top-level `^(from|import)
+              # geoviz` grep is not enough: these test files never name geoviz
+              # themselves, but importing the paleo_workbench modules below
+              # pulls geoviz in at module scope on this leg, which deliberately
+              # does not install it. Extend the carrier list when a new
+              # collection error of the form ModuleNotFoundError: geoviz
+              # appears — the >=9 collected guard below fails loudly either way.
+              grep -qE "^(from|import) (geoviz|grid_render_core|layer_model_core|seismic_3d_core|well_log_core|map_edit_core)|paleo_workbench\.(workflow\.factor_interpolation|viz\.native_factor_map|ui\.pages\.mapping_page)" "$f" || echo "$f"
             done
           )
           echo "qgis marker files: ${QGIS_FILES[*]}"
-          QT_QPA_PLATFORM=offscreen python -m pytest -v --tb=short --timeout=120 -m qgis "${QGIS_FILES[@]}" 2>&1 | tee /tmp/qgis-run.txt
-          collected="$(QT_QPA_PLATFORM=offscreen python -m pytest --collect-only -q -m qgis "${QGIS_FILES[@]}" 2>/dev/null | grep -oE '[0-9]+ tests collected' | grep -oE '^[0-9]+')"
+          QT_QPA_PLATFORM=offscreen /tmp/qgisqt/bin/python -m pytest -v --tb=short --timeout=120 -m qgis "${QGIS_FILES[@]}" 2>&1 | tee /tmp/qgis-run.txt
+          collected="$(QT_QPA_PLATFORM=offscreen /tmp/qgisqt/bin/python -m pytest --collect-only -q -m qgis "${QGIS_FILES[@]}" 2>/dev/null | grep -oE '[0-9]+ tests collected' | grep -oE '^[0-9]+')"
           test -n "${collected}" && test "${collected}" -ge 9
-          python - <<'EOF'
+          /tmp/qgisqt/bin/python - <<'EOF'
           import re
           text = open("/tmp/qgis-run.txt").read()
           m = re.search(r"^=+ .*?(\d+) passed.*? =+$", text, re.M)

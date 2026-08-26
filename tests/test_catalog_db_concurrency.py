@@ -91,3 +91,82 @@ def test_catalog_index_prunes_dead_threads(tmp_path: Path):
     index.open()
     assert t.ident not in index._conns
     index.close()
+
+
+def test_thread_safe_catalog_session_context_manager(tmp_path: Path):
+    """ThreadSafeCatalogSession opens a thread connection and safely drops it upon exit."""
+    from paleo_workbench.catalog.db import ThreadSafeCatalogSession
+
+    index = CatalogIndex(tmp_path)
+    tid = threading.get_ident()
+
+    assert tid not in index._conns
+    with ThreadSafeCatalogSession(index) as conn:
+        assert tid in index._conns
+        assert conn is not None
+        row = conn.execute("SELECT 42 AS val").fetchone()
+        assert row["val"] == 42
+
+    # Upon exit from context manager, the thread connection must be explicitly dropped
+    assert tid not in index._conns
+
+
+def test_catalog_index_session_method(tmp_path: Path):
+    """CatalogIndex.session() provides a context manager that drops connection on exit."""
+    index = CatalogIndex(tmp_path)
+    tid = threading.get_ident()
+
+    with index.session() as conn:
+        assert tid in index._conns
+        conn.execute("CREATE TABLE IF NOT EXISTS test_table (id INT)")
+        conn.execute("INSERT INTO test_table VALUES (1)")
+
+    assert tid not in index._conns
+
+
+def test_drop_current_connection_explicit(tmp_path: Path):
+    """Calling drop_current_connection explicitly frees the connection from the pool."""
+    index = CatalogIndex(tmp_path)
+    tid = threading.get_ident()
+
+    conn = index.open()
+    assert tid in index._conns
+    conn.execute("SELECT 1")
+
+    index.drop_current_connection()
+    assert tid not in index._conns
+
+
+def test_concurrent_worker_threads_with_sessions(tmp_path: Path):
+    """Multiple concurrent worker threads using sessions perform queries cleanly with zero leaks."""
+    index = CatalogIndex(tmp_path)
+    # Initialize table in main thread
+    with index.session() as conn:
+        conn.execute("CREATE TABLE items (id INTEGER PRIMARY KEY, val TEXT)")
+        for i in range(50):
+            conn.execute("INSERT INTO items VALUES (?, ?)", (i, f"item_{i}"))
+        conn.commit()
+
+    errors = []
+    thread_count = 10
+
+    def reader_task(worker_id: int):
+        try:
+            with index.session() as conn:
+                for _ in range(20):
+                    rows = conn.execute("SELECT count(*) as cnt FROM items").fetchone()
+                    assert rows["cnt"] == 50
+                    time.sleep(0.001)
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=reader_task, args=(i,)) for i in range(thread_count)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    assert errors == []
+    # All worker connections dropped on session exit
+    assert len(index._conns) == 0
+

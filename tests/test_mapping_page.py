@@ -72,6 +72,7 @@ def test_mapping_page_syncs_the_active_document_into_the_unified_scene(qtbot):
 def test_native_layer_tree_add_layer_imports_an_immutable_reference_into_unified_composition(
     tmp_path, monkeypatch, qtbot
 ):
+    pytest.importorskip("osgeo.gdal")
     source = tmp_path / "faults.geojson"
     source.write_text(
         json.dumps(

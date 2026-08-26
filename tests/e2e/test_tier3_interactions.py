@@ -36,6 +36,38 @@ from shapely.geometry import (
 )
 
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+from paleo_workbench.catalog.lineage_graph import LineageChain, LineageChainNode, build_lineage_chain
+from paleo_workbench.catalog.models import DataAsset, DataStage, ImmutableVersionError
+from paleo_workbench.mapping.geological_pipeline.contouring import calculate_nice_contour_levels, generate_contour_layer
+from paleo_workbench.mapping.geological_pipeline.models import (
+    GeologicalFactor,
+    GeologicalFactorDataset,
+    InterpolationOptions,
+)
+from paleo_workbench.mapping.geological_pipeline.pipeline import GeologicalMappingPipeline
+from paleo_workbench.mapping.geological_pipeline.polygonization import generate_facies_polygon_layer
+from paleo_workbench.mapping.layers import (
+    AnnotationMapLayer,
+    ContourMapLayer,
+    GridMapLayer,
+    MapDocument,
+    MapLayer,
+    PolygonMapLayer,
+    VectorMapLayer,
+    WellPointMapLayer,
+)
+from paleo_workbench.mapping.map_styles import MarkerSymbol, TextStyle, VectorStyle
+from paleo_workbench.mapping.renderers import (
+    CategorizedRenderer,
+    ContourRenderer,
+    GraduatedRenderer,
+    RenderContext,
+    RendererRegistry,
+    SingleSymbolRenderer,
+)
+from paleo_workbench.workflow.factor_grid_result import FactorGridResult
+from tests.e2e.conftest import CoordinateTransformHub, SelectionContext
+
 
 
 # ============================================================================
@@ -540,3 +572,271 @@ class TestInteractionVectorMapSVGAndTempHygiene:
         assert svg_file.exists()
         assert "Map Symbology" in svg_file.read_text(encoding="utf-8")
         assert svg_file.stat().st_size > 0
+
+
+# ============================================================================
+# Suite 10: Geological Pipeline End-to-End Pairwise
+# (F11 -> F12 -> F13 -> F14 -> F15 -> SVG/Print Composer Export)
+# ============================================================================
+
+
+class TestInteractionGeologicalPipelineFullCycle:
+    """End-to-end integration: Factor Extraction -> Kriging Grid -> Contours -> Facies -> MapDocument -> Export."""
+
+    def test_pipeline_extraction_kriging_contour_facies_to_map_document(self, tmp_path: Path, synthetic_kriging_points: dict[str, Any]):
+        """Pairwise: Raw well table -> Extract porosity -> Kriging interpolate -> Marching Squares -> Facies Polygons -> MapDocument -> SVG Export."""
+        xs, ys, vals = synthetic_kriging_points["x"], synthetic_kriging_points["y"], synthetic_kriging_points["values"]
+        pipeline = GeologicalMappingPipeline()
+
+        # 1. Step 1: Well Factor Extraction (F11)
+        raw_records = [
+            {"well": f"W-{i:02d}", "x": float(xs[i]), "y": float(ys[i]), "porosity": float(vals[i]), "formation": "T1"}
+            for i in range(len(xs))
+        ]
+        factor_dataset = pipeline.extract_factors(raw_records, factor_name="porosity", target_horizon="T1")
+        assert len(factor_dataset.valid_points) == len(xs)
+        assert factor_dataset.unit == "%"
+
+        # 2. Step 2: Kriging Spatial Interpolation -> FactorGridResult (F12)
+        grid_result = pipeline.interpolate(
+            factor_dataset,
+            InterpolationOptions(method="kriging", grid_n=35, variogram_model="spherical"),
+        )
+        assert isinstance(grid_result, FactorGridResult)
+        assert grid_result.grid_z.shape == (35, 35)
+        assert grid_result.statistics.valid_count == 35 * 35
+
+        # 3. Step 3: Marching Squares Contour Extraction (F13)
+        contour_layer = pipeline.create_contour_layer(grid_result, interval=4.0)
+        assert isinstance(contour_layer, ContourMapLayer)
+        assert len(contour_layer.features) > 0
+
+        # 4. Step 4: Facies Classification & Polygonization (F14)
+        thresholds = [18.0, 28.0]
+        facies_layer = pipeline.create_polygon_layer(
+            grid_result,
+            thresholds=thresholds,
+            facies_names=["Deep Facies", "Transitional", "Shallow Facies"],
+            colors=["#2b83ba", "#ffffbf", "#d7191c"],
+        )
+        assert isinstance(facies_layer, PolygonMapLayer)
+        assert len(facies_layer.features) > 0
+
+        # 5. Step 5: Well Points & Grid Layer Assembly into MapDocument (F15)
+        well_layer = pipeline.create_well_point_layer(factor_dataset)
+        grid_layer = pipeline.create_grid_layer(grid_result)
+
+        doc = MapDocument(
+            title="Integrated Porosity & Facies Analysis",
+            crs="EPSG:4547",
+            layers=[facies_layer, grid_layer, contour_layer, well_layer],
+        )
+        assert len(doc.layers) == 4
+
+        # 6. Step 6: Render to High-Resolution SVG and verify layer stack ordering
+        ctx = RenderContext(extent=doc.recompute_extent(), width=1600.0, height=1200.0, dpi=150.0)
+        reg = RendererRegistry()
+
+        svg_parts = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1200">']
+        for layer in doc.layers:
+            renderer = reg.resolve(layer)
+            layer_svg = renderer.render_svg(layer, ctx)
+            svg_parts.append(layer_svg)
+        svg_parts.append("</svg>")
+        full_svg = "\n".join(svg_parts)
+
+        # 7. Write out composition and verify elements
+        out_svg = tmp_path / "integrated_porosity_map.svg"
+        out_svg.write_text(full_svg, encoding="utf-8")
+        assert out_svg.exists()
+        assert "<polygon" in full_svg or "<path" in full_svg
+        assert "W-01" in full_svg or "<circle" in full_svg
+
+
+# ============================================================================
+# Suite 11: Multi-View Synchronized Coordination
+# (F16 SelectionContext <-> F17 CoordinateTransformHub <-> F18 Multi-View Sync)
+# ============================================================================
+
+
+class TestInteractionMultiViewCoordinationHub:
+    """Interactions between SelectionContext, CoordinateTransformHub, and Multi-View synchronization."""
+
+    def test_selection_context_coordinate_hub_multi_view_roundtrip(self, selection_context: SelectionContext, coordinate_hub: CoordinateTransformHub):
+        """Pairwise: Map click -> Hub to Well/Seismic -> Context signal -> Well Log focus + Seismic line move -> Inverse transform."""
+        # 1. Coordinate hub well registration check
+        assert coordinate_hub.map_to_well(150.0, 250.0) == "W-01"
+
+        # 2. View tracking simulators
+        class SimulatedMapView:
+            def __init__(self):
+                self.selected_well = None
+                self.highlight_count = 0
+            def on_selection(self, ctx: SelectionContext):
+                if ctx.source_widget_id != "map":
+                    self.selected_well = ctx.active_well_id
+                    self.highlight_count += 1
+
+        class SimulatedWellLogView:
+            def __init__(self):
+                self.active_well = None
+                self.depth_span = None
+            def on_selection(self, ctx: SelectionContext):
+                if ctx.source_widget_id != "well_log":
+                    self.active_well = ctx.active_well_id
+                    self.depth_span = ctx.depth_range
+
+        class SimulatedSeismicView:
+            def __init__(self):
+                self.inline = None
+                self.crossline = None
+                self.twt = None
+            def on_selection(self, ctx: SelectionContext):
+                if ctx.source_widget_id != "seismic":
+                    if ctx.seismic_cursor:
+                        self.inline, self.crossline, self.twt = ctx.seismic_cursor
+
+        map_v = SimulatedMapView()
+        well_v = SimulatedWellLogView()
+        seismic_v = SimulatedSeismicView()
+
+        selection_context.selection_changed.connect(map_v.on_selection)
+        selection_context.selection_changed.connect(well_v.on_selection)
+        selection_context.selection_changed.connect(seismic_v.on_selection)
+
+        # 3. Simulate User clicking well on Map Canvas
+        well_id = coordinate_hub.map_to_well(150.0, 250.0)
+        assert well_id == "W-01"
+        wx, wy, wz = coordinate_hub.well_depth_to_map(well_id, 1250.0)
+        il, xl, twt = coordinate_hub.map_to_seismic(wx, wy, wz)
+
+        selection_context.update(
+            active_well_id=well_id,
+            depth_range=(1200.0, 1300.0),
+            seismic_cursor=(il, xl, twt),
+            source_widget_id="map",
+        )
+
+        # 4. Verify views synchronized
+        assert map_v.highlight_count == 0  # echo suppressed
+        assert well_v.active_well == "W-01"
+        assert well_v.depth_span == (1200.0, 1300.0)
+        assert seismic_v.inline == il and seismic_v.crossline == xl
+
+        # 5. Simulate User dragging cursor in Seismic View -> Updates Map & Well Log
+        new_wx, new_wy, new_wz = coordinate_hub.seismic_to_map(120, 230, 600.0)
+        nearest_well = coordinate_hub.map_to_well(new_wx, new_wy, max_radius=200.0)
+        selection_context.update(
+            active_well_id=nearest_well,
+            depth_range=(1500.0, 1600.0),
+            seismic_cursor=(120, 230, 600.0),
+            source_widget_id="seismic",
+        )
+
+        assert map_v.highlight_count == 1
+        assert well_v.active_well == nearest_well
+        assert well_v.depth_span == (1500.0, 1600.0)
+
+
+# ============================================================================
+# Suite 12: Project Data Lifecycle & Provenance End-to-End
+# (F19 Immutability <-> F20 Asset Hierarchy <-> F21 Lineage Graph <-> F22 Persistence)
+# ============================================================================
+
+
+class TestInteractionDataLifecycleAndPersistence:
+    """Interactions between RAW immutability, asset hierarchies, lineage graphs, and atomic project persistence."""
+
+    def test_data_lifecycle_provenance_and_atomic_save_roundtrip(self, tmp_path: Path):
+        """Pairwise: Ingest RAW file (read-only) -> Derive factor asset -> Lineage run -> Project manifest save -> Reopen verification."""
+        project_dir = tmp_path / "study_project"
+        assets_dir = project_dir / "assets"
+        assets_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. Ingest RAW well dataset and lock permissions (F19)
+        raw_dir = assets_dir / DataStage.RAW.value
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        raw_file = raw_dir / "tarim_wells.las"
+        raw_file.write_text("~WELL\nWELL=TARIM-01\n", encoding="utf-8")
+        os.chmod(raw_file, stat.S_IREAD)
+
+        # 2. Derive factor dataset in DERIVED stage (F20)
+        derived_dir = assets_dir / DataStage.DERIVED.value
+        derived_dir.mkdir(parents=True, exist_ok=True)
+        derived_file = derived_dir / "porosity_t1.csv"
+        derived_file.write_text("well,x,y,porosity\nT1,100,200,15.5\n", encoding="utf-8")
+
+        # 3. Create Kriging grid output in OUTPUT stage (F20)
+        output_dir = assets_dir / DataStage.OUTPUT.value
+        output_dir.mkdir(parents=True, exist_ok=True)
+        grid_file = output_dir / "porosity_kriging.grid"
+        grid_file.write_bytes(b"GRID_BINARY_DATA_V1")
+
+        # 4. Build Provenance Lineage Graph (F21)
+        raw_node = LineageChainNode(
+            version_id="ver_raw_01",
+            asset_id="ast_tarim_wells",
+            asset_name="tarim_wells.las",
+            stage=DataStage.RAW,
+            version_number=1,
+            depth=2,
+        )
+        factor_node = LineageChainNode(
+            version_id="ver_factor_01",
+            asset_id="ast_porosity_t1",
+            asset_name="porosity_t1.csv",
+            stage=DataStage.DERIVED,
+            version_number=1,
+            depth=1,
+            run_id="run_extract_01",
+            run_operation="factor_extraction",
+            children=[raw_node],
+        )
+        grid_node = LineageChainNode(
+            version_id="ver_grid_01",
+            asset_id="ast_kriging_grid",
+            asset_name="porosity_kriging.grid",
+            stage=DataStage.OUTPUT,
+            version_number=1,
+            depth=0,
+            run_id="run_kriging_01",
+            run_operation="ordinary_kriging",
+            children=[factor_node],
+        )
+        chain = LineageChain(start_version_id="ver_grid_01", direction="ancestors", root=grid_node)
+        assert chain.root.children[0].children[0].stage == DataStage.RAW
+
+        # 5. Assemble and atomically save *.paleo.json project manifest (F22)
+        project_manifest = {
+            "project_name": "Tarim Full Study",
+            "version": "2.0.0",
+            "crs": "EPSG:4547",
+            "catalog": {
+                "assets": [
+                    {"id": "ast_tarim_wells", "name": "tarim_wells.las", "stage": "raw", "path": str(raw_file.relative_to(project_dir))},
+                    {"id": "ast_porosity_t1", "name": "porosity_t1.csv", "stage": "derived", "path": str(derived_file.relative_to(project_dir))},
+                    {"id": "ast_kriging_grid", "name": "porosity_kriging.grid", "stage": "output", "path": str(grid_file.relative_to(project_dir))},
+                ]
+            },
+            "lineage": {
+                "start_version_id": chain.start_version_id,
+                "direction": chain.direction,
+            },
+        }
+
+        manifest_file = project_dir / "project.paleo.json"
+        tmp_swap = manifest_file.with_suffix(".tmp_swap")
+        tmp_swap.write_text(json.dumps(project_manifest, indent=2), encoding="utf-8")
+        tmp_swap.replace(manifest_file)
+
+        assert manifest_file.exists()
+        assert not tmp_swap.exists()
+
+        # 6. Reopen project and verify data integrity
+        reopened = json.loads(manifest_file.read_text(encoding="utf-8"))
+        assert reopened["project_name"] == "Tarim Full Study"
+        assert len(reopened["catalog"]["assets"]) == 3
+
+        # 7. Cleanup permissions
+        os.chmod(raw_file, stat.S_IWRITE | stat.S_IREAD)
+
