@@ -313,7 +313,16 @@ class ProjectController:
             self._maintenance_thread = thread
             thread.start()
 
-        QTimer.singleShot(0, kickoff)
+        # The callback dereferences self.window, so the zero-delay timer must
+        # not outlive the controller (#951 — late timer delivery into
+        # destroyed Qt objects). Parenting it to the controller's migration
+        # bridge (a QObject with the controller's own lifetime) also keeps the
+        # timer alive until it fires; a bare local QTimer would be collected
+        # before its 0ms timeout is ever delivered.
+        kickoff_timer = QTimer(self._migration_bridge)
+        kickoff_timer.setSingleShot(True)
+        kickoff_timer.timeout.connect(kickoff)
+        kickoff_timer.start(0)
 
     def _run_catalog_maintenance(
         self,

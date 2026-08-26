@@ -607,7 +607,12 @@ class PdfPreviewWidget(QWidget):
                 # Widget may already be destroyed when the timer fires (tests).
                 pass
 
-        QTimer.singleShot(1500, _restore_copy_btn_text)
+        # Parented single-shot so the restore callback dies with this widget
+        # instead of surviving test teardown (#951).
+        restore_timer = QTimer(self)
+        restore_timer.setSingleShot(True)
+        restore_timer.timeout.connect(_restore_copy_btn_text)
+        restore_timer.start(1500)
 
     def _show_fallback_message(self, text: str) -> None:
         self.fallback_image.clear()
