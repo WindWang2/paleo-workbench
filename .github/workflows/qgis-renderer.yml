@@ -55,7 +55,9 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          # 3.11 is the newest CPython officially supported by the pinned
+          # PySide6 6.4.2 below (Qt 6.4.2, matching noble's system Qt).
+          python-version: "3.11"
 
       - name: System libraries (Qt6 / QGIS build deps / bridge build tools)
         run: |
@@ -116,9 +118,19 @@ jobs:
       # and made this leg fail on every trigger.
       - name: Install QGIS test deps
         run: |
-          python -m pip install "PySide6==6.11.1" "pytest-qt>=4.5.0" "pytest-timeout>=2.3.1" "numpy>=1.26" \
+          python -m pip install "PySide6==6.4.2" "pytest-qt>=4.5.0" "pytest-timeout>=2.3.1" "numpy>=1.26" \
             "pydantic>=2" \
             "gdal==$(gdal-config --version)"
+          # PySide6 is pinned to 6.4.2 ON PURPOSE: its bundled Qt 6.4.2 is an
+          # exact version match for noble's system Qt (qt6-base-dev). The
+          # vendored QGIS hard-requires Qt6Core5Compat (find_package ...
+          # REQUIRED), and PySide6 wheels do not bundle libQt6Core5Compat, so
+          # that library always resolves to the system 6.4.2 build. Under the
+          # "Unify the Qt runtime" step the system Core5Compat must resolve
+          # its symbols against PySide6's bundled QtCore: that only works when
+          # both are the same Qt version. With PySide6 6.11 the loader mixed
+          # system Core5Compat 6.4.2 with QtCore 6.11 and every bridge import
+          # died on the removed QUtf8::convertFromUnicode symbol.
           # pydantic: tests/conftest.py's autouse session fixture imports the
           # paleo_workbench package (project.models). gdal: the map backend's
           # optional-import surface (bridge capability probe).
@@ -139,11 +151,15 @@ jobs:
           python -m pytest -q tests/test_qgis_vendor_source.py --timeout=60 --timeout-method=thread
 
       - name: Unify the Qt runtime (PySide6's bundled Qt wins)
-        # The bridge's vendored QGIS was built against noble's system Qt 6.4
-        # while PySide6 bundles its own 6.11: letting the loader mix both
-        # yields undefined-symbol errors (QRingBuffer). Qt guarantees
-        # backward compatibility inside a major version — a 6.4-built
-        # libqgis_core loads fine on the 6.11 runtime.
+        # The bridge's vendored QGIS is built against noble's system Qt 6.4;
+        # PySide6 is pinned to 6.4.2 (same version, see the install step):
+        # letting the loader mix two different Qt builds yields
+        # undefined-symbol errors (QRingBuffer; Core5Compat's
+        # QUtf8::convertFromUnicode). With LD_LIBRARY_PATH pointing at
+        # PySide6's Qt/lib first, every libQt6*.so.6 that PySide6 bundles
+        # resolves to the single 6.4.2 copy, and the system-only
+        # libQt6Core5Compat.so.6 (6.4.2) resolves against the same-version
+        # QtCore.
         run: |
           QT_LIB="$(python -c "import PySide6, os; print(os.path.join(os.path.dirname(PySide6.__file__), 'Qt', 'lib'))")"
           echo "QT_LIB=$QT_LIB" >> "$GITHUB_ENV"
@@ -167,7 +183,15 @@ jobs:
           # below fails loudly).
           mapfile -t QGIS_FILES < <(
             for f in $(grep -rl "pytest.mark.qgis" tests --include='*.py' | sort); do
-              grep -qE "^(from|import) (geoviz|grid_render_core|layer_model_core|seismic_3d_core|well_log_core|map_edit_core)" "$f" || echo "$f"
+              # Exclude files that import the native engines directly OR via a
+              # known transitive carrier. A plain top-level `^(from|import)
+              # geoviz` grep is not enough: these test files never name geoviz
+              # themselves, but importing the paleo_workbench modules below
+              # pulls geoviz in at module scope on this leg, which deliberately
+              # does not install it. Extend the carrier list when a new
+              # collection error of the form ModuleNotFoundError: geoviz
+              # appears — the >=9 collected guard below fails loudly either way.
+              grep -qE "^(from|import) (geoviz|grid_render_core|layer_model_core|seismic_3d_core|well_log_core|map_edit_core)|paleo_workbench\.(workflow\.factor_interpolation|viz\.native_factor_map|ui\.pages\.mapping_page)" "$f" || echo "$f"
             done
           )
           echo "qgis marker files: ${QGIS_FILES[*]}"
