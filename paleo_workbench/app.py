@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
@@ -315,11 +316,19 @@ class PaleoWorkbenchWindow(QWidget):
         """Close project-owned workers/catalog deterministically on app exit."""
         if not self.project_controller.shutdown_current_session():
             self.project_controller._restore_current_shell_after_failed_stop()
-            QMessageBox.warning(
-                self,
-                "无法关闭",
-                "后台任务尚未停止。工程保持打开，等待任务结束后请再次关闭。",
-            )
+            if QApplication.platformName() == "offscreen":
+                # Headless runs (offscreen CI): a modal here would block the
+                # process forever until the test timeout kills it — log
+                # instead and leave the window open, same semantics.
+                logging.getLogger(__name__).warning(
+                    "closeEvent: background tasks still running; window left open (offscreen: no modal)"
+                )
+            else:
+                QMessageBox.warning(
+                    self,
+                    "无法关闭",
+                    "后台任务尚未停止。工程保持打开，等待任务结束后请再次关闭。",
+                )
             event.ignore()
             return
         super().closeEvent(event)
