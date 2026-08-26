@@ -184,6 +184,13 @@ def test_stress_catalog_index_rebuild_and_sync_under_heavy_concurrent_reads(tmp_
     for r_err in reader_errors:
         assert isinstance(r_err, sqlite3.Error), f"Unexpected non-sqlite error: {type(r_err)}: {r_err}"
     assert read_count[0] > 100, f"Expected >100 successful reads, got {read_count[0]}"
+    # Readers interrupted mid-statement by design leave their per-thread
+    # connection cached for LAZY pruning; no catalog operation runs after the
+    # readers join, so prune explicitly (the product API for exactly this)
+    # before asserting the pool is empty — otherwise the count depends on
+    # whether the last interrupt landed before or after the session manager
+    # dropped the connection.
+    index.prune_dead_threads()
     index.drop_current_connection()
     assert len(index._conns) == 0
 
