@@ -2,7 +2,7 @@
 
 UI and business code must go through this service instead of appending to
 ``project.resources`` or hand-editing artifact files. The service hides file
-layout, hashing, transactions, canonical persistence, and the SQLite index
+layout, hashing, transactions, canonical persistence, and the SQLite store
 behind a small stable API.
 
 Invariants enforced:
@@ -12,8 +12,10 @@ Invariants enforced:
   :class:`ImmutableVersionError`.
 - Every committed DataVersion is immutable; change produces a new version.
 - Checksum mismatches are reported, never silently adopted.
-- The canonical store (``metadata/catalog.json``) is the source of truth; the
-  SQLite index is rebuilt whenever it is missing, stale, or corrupt.
+- The canonical store is ``metadata/catalog.sqlite`` (WAL, one transaction
+  per mutation, row-level writes driven by dirty sets — #1027);
+  ``metadata/catalog.json`` is a checkpoint/export manifest written on
+  close/explicit export and by legacy app versions.
 
 The API is synchronous and IO-bound; UI integration should wrap calls in a
 worker thread (all state lives in this object, no globals).
@@ -31,7 +33,11 @@ from paleo_workbench.catalog import lineage_graph as _lineage
 from paleo_workbench.catalog import queries as _queries
 from paleo_workbench.catalog import tags as _tags
 from paleo_workbench.catalog.checksum import sha256_file
-from paleo_workbench.catalog.db import CatalogIndex
+from paleo_workbench.catalog.db import (
+    STORE_SCHEMA_VERSION,
+    CatalogIndex,
+    DirtySet,
+)
 from paleo_workbench.catalog.gc import (
     GcReport,
     cleanup_working_copies as _gc_cleanup_working_copies,
@@ -105,20 +111,19 @@ class _CatalogMaps:
 class _BatchSave:
     """Context manager returned by :meth:`DataCatalogService.batch_save`.
 
-    Defers the canonical store write until the outermost batch exits; on a
-    failed body (or failed flush) the document is restored to a deep copy of
-    its pre-batch state so memory never diverges from the unwritten disk.
+    Accumulates the mutations' dirty sets and persists them in ONE SQLite
+    transaction at outermost exit — no full-document serialization, no
+    in-memory deep copy (#1027). Atomicity comes from the transaction: when
+    the body (or the flush) fails, the database rolls back and the in-memory
+    document is reloaded from the store, so memory never diverges from disk.
     """
 
     def __init__(self, service: "DataCatalogService") -> None:
         self._service = service
-        self._snapshot: CatalogDocument | None = None
 
     def __enter__(self) -> "DataCatalogService":
         service = self._service
         with service._lock:
-            if service._batch_depth == 0:
-                self._snapshot = service.document.model_copy(deep=True)
             service._batch_depth += 1
         return service
 
@@ -126,35 +131,35 @@ class _BatchSave:
         service = self._service
         with service._lock:
             service._batch_depth -= 1
-            if exc_type is not None:
-                # Body failed: nothing was written; restore the pre-batch
-                # document so the in-memory state matches the disk.
-                if service._batch_depth == 0 and self._snapshot is not None:
-                    service.document = self._snapshot
-                    service._invalidate_maps()
-                return False
             if service._batch_depth:
                 return False  # an outer batch still owns the flush
+            if exc_type is not None or (
+                service._pending_dirty.is_empty() and not service._pending_reconcile
+            ):
+                # Body failed or nothing changed: nothing may persist —
+                # reload the (untouched) canonical state so memory matches
+                # the store again.
+                service._reload_document_locked()
+                return False
+            combined = service._pending_dirty
+            reconcile = service._pending_reconcile
+            service._pending_dirty = DirtySet()
+            service._pending_reconcile = False
             try:
-                # Through the guarded flush (#516): the direct _store.save
-                # skipped the #411 stale-write check and never refreshed
-                # _disk_mtime_ns, so the NEXT regular save always raised a
-                # spurious CatalogStaleWriteError after any batch.
-                service._flush_canonical_locked()
+                service._flush_canonical_locked(combined, reconcile=reconcile)
             except Exception:
-                if self._snapshot is not None:
-                    service.document = self._snapshot
-                    service._invalidate_maps()
+                service._reload_document_locked()
                 raise
-            service._sync_index_best_effort()
+            service._maybe_checkpoint_manifest_locked()
             return False
 class CatalogStaleWriteError(OSError):
-    """Raised when the canonical catalog advanced past this session's baseline.
+    """Raised when the canonical store advanced past this session's baseline.
 
-    The catalog is rewritten as a whole document; without an ownership
-    protocol a second process holding an older in-memory snapshot silently
-    overwrites (last-writer-wins) everything the first process committed
-    (#411).  Save-time stale detection refuses the overwrite instead.
+    Without an ownership protocol a second process holding an older
+    in-memory snapshot silently overwrites (last-writer-wins) everything the
+    first process committed (#411). Flush-time stale detection compares the
+    store's committed revision against this session's baseline and refuses
+    the overwrite instead.
     """
 
 
@@ -163,6 +168,32 @@ def _disk_mtime_ns(path: Path) -> int | None:
         return path.stat().st_mtime_ns
     except OSError:
         return None
+
+
+def _recorded_manifest_mtime_ns(index: CatalogIndex) -> int | None:
+    """mtime the manifest had when we (or nobody) last wrote it."""
+    raw = index._read_sync_state("manifest_mtime_ns")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+def _record_manifest_mtime_ns(index: CatalogIndex, path: Path) -> None:
+    mtime = _disk_mtime_ns(path)
+    if mtime is None:
+        return
+    conn = index.open()
+    try:
+        with conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO sync_state (key, value) VALUES (?,?)",
+                ("manifest_mtime_ns", str(mtime)),
+            )
+    except Exception:
+        pass  # bookkeeping only; never fails a checkpoint
 
 
 class DataCatalogService:
@@ -183,12 +214,22 @@ class DataCatalogService:
         # payloads (verify_integrity) on a worker thread while the UI thread
         # may be saving. Re-entrant so public methods can nest under _save.
         self._lock = threading.RLock()
-        # Active :meth:`batch_save` nesting depth: >0 defers canonical writes.
+        # Active :meth:`batch_save` nesting depth: >0 accumulates dirty sets.
         self._batch_depth = 0
-        # Cross-process stale-write baseline: mtime of the canonical file as
-        # of open / last successful save. A save whose file advanced past it
-        # means another process wrote since we last looked (#411).
-        self._disk_mtime_ns: int | None = None
+        # Dirty entities accumulated by the current (outermost) batch, and
+        # whether any unmarked mutation requires a full reconcile at exit.
+        self._pending_dirty = DirtySet()
+        self._pending_reconcile = False
+        # Cross-process stale-write baseline: the store's catalog_revision as
+        # of open / last successful flush. A flush whose on-disk revision
+        # differs means another process committed since we last looked
+        # (#411); the revision is read from the store itself, which is both
+        # portable and immune to mtime granularity.
+        self._flushed_revision: int | None = None
+        # Mutations since the last catalog.json manifest checkpoint; the
+        # manifest is rewritten only at close / explicit export / throttled
+        # checkpoints so single-row mutations never pay an O(N) rewrite.
+        self._mutations_since_manifest = 0
         # Maintained id→object indexes (P4): every document list mutation goes
         # through ``_add_*`` / ``_remove_*`` so lookups stay O(1) instead of
         # linear scans. ``None`` = not yet built (built lazily from the
@@ -382,21 +423,57 @@ class DataCatalogService:
     ) -> "DataCatalogService":
         """Open (or initialize) the catalog for *project_path*.
 
-        A missing, stale, or corrupt SQLite index is rebuilt from the
-        canonical store when ``ensure_index`` is true.  Project-session open
-        may set it false because all catalog reads have a canonical in-memory
-        fallback; the next write rebuilds/synchronizes the disposable index.
-        ``sweep_temp`` is likewise optional session maintenance, never a
-        prerequisite for canonical catalog availability.
+        Storage resolution (#1027):
+
+        1. A canonical ``catalog.sqlite`` (store layout ≥ 5) is loaded
+           directly — unless the JSON manifest changed externally (an OLD
+           app version still writing it), in which case the newer revision
+           wins and is re-imported transactionally.
+        2. Otherwise a legacy ``catalog.json`` project is MIGRATED: the
+           document is imported in one transaction; only the verified
+           result becomes canonical. The legacy file is never modified, so a
+           crash mid-migration leaves the source project fully recoverable.
+        3. Neither present → an empty canonical store is initialized.
+
+        ``sweep_temp`` is optional session maintenance, never a prerequisite
+        for canonical catalog availability.
         """
         project_path = Path(project_path)
         store = CatalogStore(project_path)
-        document = store.load()
         index = CatalogIndex(project_path)
+
+        document: CatalogDocument | None = None
+        json_path = catalog_file_for(project_path)
+        if index.store_version() == STORE_SCHEMA_VERSION:
+            document = index.load_document()
+        if document is not None and json_path.is_file():
+            # The manifest should be exactly what we last checkpointed. A
+            # different mtime means an old (json-canonical) app version wrote
+            # it behind our back — honor the newer revision. A CORRUPT
+            # manifest never blocks open: the store is canonical, so the
+            # damage is healed by the next checkpoint instead.
+            recorded = _recorded_manifest_mtime_ns(index)
+            current = _disk_mtime_ns(json_path)
+            if recorded is None or current is None or recorded != current:
+                try:
+                    legacy = store.load()
+                except CatalogError:
+                    legacy = None
+                if (
+                    legacy is not None
+                    and legacy.catalog_revision > document.catalog_revision
+                ):
+                    index.write_all(legacy)
+                    document = legacy
+        if document is None:
+            document = store.load()
+            # Transactional migration / initialization. A failure propagates:
+            # the legacy json is untouched and the retry starts clean.
+            index.write_all(document)
+
         service = cls(project_path, document, store, index)
-        service._disk_mtime_ns = _disk_mtime_ns(catalog_file_for(project_path))
-        if ensure_index:
-            service._ensure_index_fresh()
+        service._flushed_revision = document.catalog_revision
+        service._ensure_maps()  # eager: the first mutation stays O(Δ)
         if sweep_temp:
             service.sweep_temp_on_open()
         return service
@@ -415,71 +492,122 @@ class DataCatalogService:
             pass
 
     def close(self) -> None:
+        """Checkpoint the JSON manifest, then release the store."""
+        try:
+            self.export_manifest()
+        except Exception:
+            # A manifest failure must never block closing the canonical store.
+            pass
         try:
             self._index.close()
         except Exception:
             pass
 
+    def export_manifest(self) -> None:
+        """Write ``catalog.json`` as a portable manifest of the current state.
+
+        The manifest keeps the project openable by older app versions and
+        doubles as a human-readable export artifact; the SQLite store remains
+        the only authority (#1027). Atomic write + ``.bak`` via CatalogStore.
+        """
+        with self._lock:
+            self._store.save(self.document)
+            _record_manifest_mtime_ns(self._index, catalog_file_for(self.project_path))
+            self._mutations_since_manifest = 0
+
     # -- persistence --------------------------------------------------------
 
-    def _save(self) -> None:
-        """Persist canonical document and sync the index.
+    def _save(self, dirty: DirtySet | None = None) -> None:
+        """Persist the canonical document (dirty rows only when known).
 
-        The revision only advances if the canonical save succeeds, so a
-        failed save leaves no half-bumped state. Inside :meth:`batch_save`
-        the canonical write is deferred to the context exit (one write for
-        the whole batch); the index still syncs incrementally so index-backed
-        reads and import dedup stay fresh during the batch.
-        failed save leaves no half-bumped state.  Before writing, the file's
-        mtime is compared against this session's baseline: a document that
-        advanced on disk since we last read/wrote it was committed by another
+        The revision only advances if the flush succeeds. Inside
+        :meth:`batch_save` the write is deferred to the context exit (one
+        transaction for the whole batch). Before writing, the store's
+        on-disk revision is compared against this session's baseline: a
+        store that advanced since we last wrote was committed by another
         process, and overwriting it would silently drop that process's data
         (last-writer-wins, #411) — refuse instead.
         """
         with self._lock:
             self.document.catalog_revision += 1
             if self._batch_depth:
-                self._sync_index_best_effort()
+                if dirty is None:
+                    # Unknown mutation scope: the batch exit must reconcile.
+                    self._pending_reconcile = True
+                else:
+                    self._pending_dirty.merge(dirty)
                 return
             try:
-                self._flush_canonical_locked()
+                self._flush_canonical_locked(
+                    dirty or DirtySet(), reconcile=dirty is None
+                )
             except Exception:
                 self.document.catalog_revision -= 1
                 raise
-            self._sync_index_best_effort()
+            self._mutations_since_manifest += 1
+            self._maybe_checkpoint_manifest_locked()
 
-    def _flush_canonical_locked(self) -> None:
-        """Write the canonical catalog under the #411 stale-write guard.
+    def _flush_canonical_locked(
+        self, dirty: DirtySet, *, reconcile: bool = False
+    ) -> None:
+        """Write the canonical store under the #411 stale-write guard.
 
-        Caller must hold ``_lock``. Refuses to overwrite a file that advanced
-        on disk since this session's baseline, writes the document, and
-        REFRESHES the baseline so the next save does not false-positive
-        against our own write. The batch_save exit used to call
-        ``_store.save`` directly — skipping both the guard and the baseline
-        refresh, so the first post-batch save always raised a spurious
-        CatalogStaleWriteError (#516).
+        Caller must hold ``_lock``. Refuses to overwrite a store that
+        advanced since this session's baseline, commits *dirty*'s rows in
+        ONE transaction, then refreshes the baseline.
         """
-        baseline = self._disk_mtime_ns
-        current = _disk_mtime_ns(catalog_file_for(self.project_path))
-        if baseline is None:
-            # The canonical file did not exist when this session opened
-            # (or first saved); if it exists now, another process created
-            # it since and an overwrite would drop its commits.
-            if current is not None:
-                raise CatalogStaleWriteError(
-                    "数据目录元数据已被其他实例创建；为避免覆盖他人提交，"
-                    "本次保存已中止。请重新打开工程后重试。"
-                )
-        elif current is not None and current != baseline:
+        stored = self._index.revision()
+        if stored is not None and stored != self._flushed_revision:
             raise CatalogStaleWriteError(
                 "数据目录元数据已被其他实例修改；为避免覆盖他人提交，"
                 "本次保存已中止。请重新打开工程后重试。"
             )
+        if reconcile:
+            self._index.reconcile(self.document)
+        else:
+            maps = self._ensure_maps()
+            self._index.apply_changes(
+                self.document,
+                dirty,
+                lookups={
+                    "assets": maps.asset_by_id,
+                    "versions": maps.version_by_id,
+                    "runs": maps.run_by_id,
+                },
+            )
+        self._flushed_revision = self.document.catalog_revision
+
+    def _reload_document_locked(self) -> None:
+        """Restore the in-memory document from the canonical store.
+
+        Failure/rollback path: after a rolled-back transaction the store
+        still holds the last committed state, so reloading it is the exact
+        pre-batch snapshot — without ever deep-copying the graph (#1027).
+        """
+        reloaded = self._index.load_document()
+        if reloaded is not None:
+            self.document = reloaded
+            self._invalidate_maps()
+        self._pending_dirty = DirtySet()
+        self._flushed_revision = self._index.revision()
+
+    def _maybe_checkpoint_manifest_locked(self) -> None:
+        """Throttled manifest rewrite; O(1) checks, never per mutation.
+
+        One exception keeps fresh projects immediately portable: when NO
+        manifest exists yet (brand-new project, or legacy file deleted), the
+        first successful flush writes one. A new project's document is small,
+        so this is never the multi-megabyte rewrite #1027 removes; at scale
+        the manifest already exists and this is a no-op until close/export.
+        """
+        if self._mutations_since_manifest > 1:
+            return
+        if catalog_file_for(self.project_path).exists():
+            return
         try:
-            self._store.save(self.document)
+            self.export_manifest()
         except Exception:
-            raise
-        self._disk_mtime_ns = _disk_mtime_ns(catalog_file_for(self.project_path))
+            pass  # the manifest is a convenience artifact, never a gate
 
     def _sync_index_best_effort(self) -> None:
         try:
@@ -489,55 +617,51 @@ class DataCatalogService:
                 self._index.reset()
                 self._index.rebuild(self.document)
             except Exception:
-                # The index is a cache; canonical truth is already saved.
+                # The store self-heals on the next write; canonical truth is
+                # already committed.
                 pass
 
     def batch_save(self) -> "_BatchSave":
-        """Context manager merging many mutator calls into ONE canonical write.
+        """Context manager merging many mutator calls into ONE transaction.
 
-        While active, :meth:`_save` bumps the revision and keeps the SQLite
-        index incrementally fresh (so index-backed dedup/reads stay O(log N))
-        but DEFERS the canonical ``catalog.json`` write; a single store write
-        happens at context exit. Bulk registration / recompute loops therefore
-        pay one full-document serialization + fsync instead of one per version
-        commit (the O(N²) write path, C38).
+        While active, :meth:`_save` accumulates the touched entities; the
+        outermost exit commits them all in a single SQLite transaction (one
+        WAL fsync) instead of one per mutation. Bulk registration /
+        recompute loops therefore pay O(Δ) rows + one commit, never a
+        full-document serialization (the O(N²) write path, C38 / #1027).
 
-        Atomicity is preserved: when the body raises, the document is restored
-        to its pre-batch state and nothing is persisted; a failed flush
-        likewise restores and re-raises. Nested batches are supported — only
-        the outermost exit flushes.
+        Atomicity is preserved: when the body raises, nothing is committed
+        and the in-memory document is reloaded from the store; a failed
+        flush likewise rolls back, reloads, and re-raises. Nested batches
+        are supported — only the outermost exit flushes.
         """
         return _BatchSave(self)
 
     def _ensure_index_fresh(self) -> None:
+        """Compatibility shim: the store IS the canonical source now.
+
+        Kept for callers that historically forced index readiness; with the
+        SQLite-canonical open path the store is loaded directly and this is
+        a no-op unless the document somehow diverged.
+        """
         try:
-            if self._index.is_fresh(self.document):
-                # Record the row snapshot so the first save of this process
-                # syncs incrementally instead of a full rebuild.
-                self._index.prime(self.document)
-                return
-            self._index.rebuild(self.document)
+            if not self._index.is_fresh(self.document):
+                self._index.reconcile(self.document)
         except Exception:
-            try:
-                self._index.reset()
-                self._index.rebuild(self.document)
-            except Exception:
-                pass
+            pass
 
     def ensure_index_ready(self) -> None:
-        """Synchronously rebuild/prime the disposable index on explicit demand.
-
-        Most catalogue operations can use their canonical-document fallback,
-        so this method is intentionally opt-in for session startup.  It is
-        public to give UI/controller code an honest point at which to request
-        index readiness without making SQLite authoritative.
-        """
+        """Explicitly verify/repair store consistency with the document."""
         self._ensure_index_fresh()
 
     def rebuild_index(self) -> None:
-        """Force a full index rebuild from the canonical store."""
+        """Force a full store rewrite from the in-memory document."""
         self._index.reset()
         self._index.rebuild(self.document)
+        self._flushed_revision = self.document.catalog_revision
+        # The maintained maps reflect the document that was loaded at open;
+        # a caller swapping ``document`` before rebuilding leaves them stale.
+        self._invalidate_maps()
 
     def index_revision(self) -> int | None:
         return self._index.revision()
@@ -895,8 +1019,11 @@ class DataCatalogService:
             if run is not None and version.id not in run.output_version_ids:
                 run.output_version_ids.append(version.id)
                 run_output_added = True
+            _dirty = DirtySet(assets={asset.id}, versions={version.id})
+            if run is not None:
+                _dirty.mark_runs(run.id)
             try:
-                self._save()
+                self._save(_dirty)
             except Exception:
                 if run is not None and run_output_added:
                     run.output_version_ids.remove(version.id)
@@ -983,8 +1110,11 @@ class DataCatalogService:
             if run is not None and version.id not in run.output_version_ids:
                 run.output_version_ids.append(version.id)
                 run_output_added = True
+            _dirty = DirtySet(assets={asset.id}, versions={version.id})
+            if run is not None:
+                _dirty.mark_runs(run.id)
             try:
-                self._save()
+                self._save(_dirty)
             except Exception:
                 if run_output_added:
                     run.output_version_ids.remove(version.id)
@@ -1077,7 +1207,7 @@ class DataCatalogService:
             self._add_version(version)
             asset.current_version_id = version.id
             try:
-                self._save()
+                self._save(DirtySet(assets={asset.id}, versions={version.id}))
             except Exception:
                 self._rollback(
                     assets=[asset], versions=[version], payload=payload,
@@ -1132,7 +1262,7 @@ class DataCatalogService:
             self._add_asset(asset)
             self._add_version(version)
             try:
-                self._save()
+                self._save(DirtySet(assets={asset.id}, versions={version.id}))
             except Exception:
                 self._rollback(assets=[asset], versions=[version])
                 raise
@@ -1289,8 +1419,11 @@ class DataCatalogService:
             asset.current_version_id = version.id
             if run is not None:
                 self._add_run(run)
+            _dirty = DirtySet(assets={asset.id}, versions={version.id})
+            if run is not None:
+                _dirty.mark_runs(run.id)
             try:
-                self._save()
+                self._save(_dirty)
             except Exception:
                 self._rollback(
                     assets=[asset], versions=[version],
@@ -1321,7 +1454,7 @@ class DataCatalogService:
         )
         self._add_run(run)
         try:
-            self._save()
+            self._save(DirtySet(runs={run.id}))
         except Exception:
             self._rollback(runs=[run])
             raise
@@ -1360,7 +1493,7 @@ class DataCatalogService:
             if extra_parameters:
                 run.parameters.update(extra_parameters)
             try:
-                self._save()
+                self._save(DirtySet(runs={run.id}))
             except Exception:
                 # Snapshot-rollback: a failed save must not leave the run
                 # half-updated in memory while the disk keeps the old state
@@ -1467,7 +1600,7 @@ class DataCatalogService:
                 changed = True
             if changed:
                 try:
-                    self._save()
+                    self._save(DirtySet(models={existing.id}))
                 except Exception:
                     (
                         existing.model_name,
@@ -1492,7 +1625,7 @@ class DataCatalogService:
         )
         self.document.models.append(model)
         try:
-            self._save()
+            self._save(DirtySet(models={model.id}))
         except Exception:
             if model in self.document.models:
                 self.document.models.remove(model)
@@ -1566,7 +1699,7 @@ class DataCatalogService:
         with self._lock:
             self.document.model_versions.append(version)
             try:
-                self._save()
+                self._save(DirtySet(model_versions={version.id}))
             except Exception:
                 if version in self.document.model_versions:
                     self.document.model_versions.remove(version)
@@ -1637,7 +1770,9 @@ class DataCatalogService:
             version.status = "production"
             version.demo_only = False
             try:
-                self._save()
+                self._save(
+                    DirtySet(models={model.id}, model_versions={version.id})
+                )
             except Exception:
                 model.status = before_model_status
                 version.status = before_version_status
@@ -1774,7 +1909,7 @@ class DataCatalogService:
                 return asset
             asset.updated_at = _now_iso()
             try:
-                self._save()
+                self._save(DirtySet(assets={asset.id}))
             except Exception:
                 asset.metadata = before_metadata
                 asset.updated_at = before_updated
@@ -1921,14 +2056,15 @@ class DataCatalogService:
             self._tombstone_version(version, reason)
             if asset.current_version_id == version.id:
                 asset.current_version_id = self._active_current_candidate(asset, version.id)
+            _dirty = DirtySet(assets={asset.id}, versions={version.id})
             try:
-                self._save()
+                self._save(_dirty)
             except Exception:
                 self._rollback_tombstone(version, asset, previous_current)
                 raise
             if self._move_payload_to_trash(version):
                 try:
-                    self._save()
+                    self._save(DirtySet(assets={asset.id}, versions={version.id}))
                 except Exception:
                     self._rollback_trash_move(version)
                     raise
@@ -1952,8 +2088,11 @@ class DataCatalogService:
             asset.trashed = True
             asset.trashed_at = _now_iso()
             asset.current_version_id = None
+            _dirty = DirtySet(
+                assets={asset.id}, versions={v.id for v in versions}
+            )
             try:
-                self._save()
+                self._save(_dirty)
             except Exception:
                 for version in versions:
                     self._rollback_tombstone(version, asset, previous_current)
@@ -1963,7 +2102,9 @@ class DataCatalogService:
             moved = [v for v in versions if self._move_payload_to_trash(v)]
             if moved:
                 try:
-                    self._save()
+                    self._save(
+                        DirtySet(assets={asset.id}, versions={v.id for v in moved})
+                    )
                 except Exception:
                     for version in moved:
                         self._rollback_trash_move(version)
@@ -1999,7 +2140,7 @@ class DataCatalogService:
             ):
                 asset.current_version_id = version.id
             try:
-                self._save()
+                self._save(DirtySet(assets={asset.id}, versions={version.id}))
             except Exception:
                 self._rollback_untombstone(
                     version, asset, previous_current, reason=reason
@@ -2030,7 +2171,12 @@ class DataCatalogService:
                 active = [v for v in versions if not v.trashed]
                 asset.current_version_id = active[-1].id if active else None
             try:
-                self._save()
+                self._save(
+                    DirtySet(
+                        assets={asset.id},
+                        versions={v.id for v, _ in restore_targets},
+                    )
+                )
             except Exception:
                 asset.trashed = previous_trashed
                 asset.trashed_at = previous_trashed_at
@@ -2145,7 +2291,17 @@ class DataCatalogService:
             for aid in removed_asset_tags:
                 self.document.asset_tags.pop(aid, None)
             try:
-                self._save()
+                self._save(
+                    DirtySet(
+                        versions={v.id for v in trashed_versions},
+                        assets=(
+                            {a.id for a in trashed_assets}
+                            | {a.id for a in zombie_assets}
+                        ),
+                        version_tags=set(removed_version_tags),
+                        asset_tags=set(removed_asset_tags),
+                    )
+                )
             except Exception:
                 for version in trashed_versions:
                     self._add_version(version)
@@ -2232,7 +2388,11 @@ class DataCatalogService:
             self._add_run(run)
             asset.current_version_id = version.id
             try:
-                self._save()
+                self._save(
+                    DirtySet(
+                        assets={asset.id}, versions={version.id}, runs={run.id}
+                    )
+                )
             except Exception:
                 self._rollback(
                     versions=[version], runs=[run], payload=payload,
@@ -2338,6 +2498,9 @@ class DataCatalogService:
             }
             result: list[Tag] = []
             changed = False
+            created_tags: list[Tag] = []
+            touched_assets: set[str] = set()
+            touched_versions: set[str] = set()
             try:
                 for name in names:
                     if not str(name or "").strip():
@@ -2350,20 +2513,29 @@ class DataCatalogService:
                             display_name=" ".join(str(name).split()),
                         )
                         self.document.tags.append(tag)
+                        created_tags.append(tag)
                         changed = True
                     if asset_id is not None:
                         ids = self.document.asset_tags.setdefault(asset_id, [])
                         if tag.id not in ids:
                             ids.append(tag.id)
                             changed = True
+                            touched_assets.add(asset_id)
                     if version_id is not None:
                         ids = self.document.version_tags.setdefault(version_id, [])
                         if tag.id not in ids:
                             ids.append(tag.id)
                             changed = True
+                            touched_versions.add(version_id)
                     result.append(tag)
                 if changed:
-                    self._save()
+                    self._save(
+                        DirtySet(
+                            tags={t.id for t in created_tags},
+                            asset_tags=touched_assets,
+                            version_tags=touched_versions,
+                        )
+                    )
                 return result
             except Exception:
                 self.document.tags = before_tags
@@ -2579,7 +2751,7 @@ class DataCatalogService:
                 model_version.artifact_uri = rewritten
                 changed = True
         if changed:
-            self._save()
+            self._save()  # bulk path-rewrite: full reconcile by design
         return changed
 
     # -- legacy migration ---------------------------------------------------------

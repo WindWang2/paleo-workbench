@@ -1,13 +1,14 @@
-"""Rebuildable SQLite query index over the canonical catalog (ADR 0056).
+"""Canonical SQLite store for the catalog (ADR 0056, amended by #1027).
 
-``<project>.artifacts/metadata/catalog.sqlite`` is a pure cache: the canonical
-``catalog.json`` (see ``store.py``) is the single source of truth. Every write
-happens inside :meth:`CatalogIndex.rebuild` — a full delete-and-rewrite of all
-tables within one transaction, keyed by the document's ``catalog_revision`` and
-``schema_version`` (stored in ``sync_state``). Missing, stale, or corrupt
-databases never block project open: ``revision()`` returns ``None`` and query
-methods fall back to empty results, after which the caller (or ``rebuild``
-itself) recreates the index from the canonical document.
+``<project>.artifacts/metadata/catalog.sqlite`` (WAL) is the canonical
+metadata store: mutations commit row-level changes in one transaction
+(:meth:`apply_changes`, driven by the service's dirty sets), the legacy
+``catalog.json`` project migrates via a single transactional import
+(:meth:`write_all`), and reopening reconstructs the document directly
+(:meth:`load_document`). ``catalog.json`` (see ``store.py``) is demoted to a
+checkpoint/export manifest. A corrupt database is still recoverable: the
+manifest checkpoint plus :meth:`rebuild` recreate the store, and
+:meth:`reconcile` repairs drift between the store and the in-memory document.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import json
 import sqlite3
 import sys
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -69,17 +70,22 @@ def normalize_asset_search_name(name: str) -> str:
 
     return unicodedata.normalize("NFKC", str(name)).casefold()
 
-# Version of the index table layout itself (distinct from the canonical
-# document's CATALOG_SCHEMA_VERSION). Bump whenever the index schema changes so
-# stale databases are rebuilt from the canonical store instead of being queried
-# with a missing column.
+# Version of the store's table layout itself (distinct from the canonical
+# document's CATALOG_SCHEMA_VERSION). Bump whenever the schema changes so
+# stale databases are rebuilt instead of being queried with a missing column.
 # v4: assets.name_search — Unicode-folded copy of name (NFKC + casefold) so the
 # LIKE text filter matches the canonical scan's casefold semantics for
 # non-ASCII names (#897); SQLite LIKE is ASCII-only case-insensitive.
-INDEX_SCHEMA_VERSION = 4
+# v5: SQLite becomes the CANONICAL store (#1027): models + model_versions
+# tables were added (the registry previously lived only in catalog.json) and
+# sync_state gains a manifest_mtime_ns bookkeeping key. A v4 database is a
+# legacy rebuildable index and is migrated by a full transactional re-import
+# from catalog.json on first open.
+INDEX_SCHEMA_VERSION = 5
+STORE_SCHEMA_VERSION = 5  # first version with canonical semantics
 
-# Table/DDL definitions. The index is deliberately FK-free: it is a disposable
-# projection of the canonical document, and delete order must never matter.
+# Table/DDL definitions. Deliberately FK-free: the store is a projection of
+# the in-memory document, and delete order must never matter.
 _SCHEMA_DDL = [
     """CREATE TABLE IF NOT EXISTS assets (
         id TEXT PRIMARY KEY,
@@ -114,7 +120,8 @@ _SCHEMA_DDL = [
         metadata TEXT NOT NULL DEFAULT '{}',
         created_at TEXT NOT NULL DEFAULT '',
         trashed INTEGER NOT NULL DEFAULT 0,
-        trashed_at TEXT
+        trashed_at TEXT,
+        parent_ids TEXT NOT NULL DEFAULT '[]'
     )""",
     "CREATE INDEX IF NOT EXISTS idx_versions_asset_id ON versions(asset_id)",
     "CREATE INDEX IF NOT EXISTS idx_versions_stage ON versions(stage)",
@@ -144,6 +151,7 @@ _SCHEMA_DDL = [
         parameters TEXT NOT NULL DEFAULT '{}',
         generator TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'completed',
+        model_ref TEXT,
         created_at TEXT NOT NULL DEFAULT ''
     )""",
     """CREATE TABLE IF NOT EXISTS run_inputs (
@@ -164,6 +172,37 @@ _SCHEMA_DDL = [
         PRIMARY KEY (parent_version_id, child_version_id)
     )""",
     "CREATE INDEX IF NOT EXISTS idx_lineage_child ON lineage(child_version_id)",
+    """CREATE TABLE IF NOT EXISTS models (
+        id TEXT PRIMARY KEY,
+        model_id TEXT NOT NULL,
+        model_name TEXT NOT NULL,
+        model_type TEXT NOT NULL DEFAULT 'unknown',
+        capability TEXT NOT NULL DEFAULT '',
+        provider TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'demo',
+        metadata TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT '',
+        provenance TEXT NOT NULL DEFAULT '{}'
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_models_model_id ON models(model_id)",
+    """CREATE TABLE IF NOT EXISTS model_versions (
+        id TEXT PRIMARY KEY,
+        model_id TEXT NOT NULL,
+        model_version TEXT NOT NULL DEFAULT '1',
+        artifact_uri TEXT NOT NULL DEFAULT '',
+        checksum TEXT,
+        input_schema TEXT NOT NULL DEFAULT '{}',
+        output_schema TEXT NOT NULL DEFAULT '{}',
+        preprocessing_version TEXT NOT NULL DEFAULT '',
+        runtime TEXT NOT NULL DEFAULT '',
+        deterministic INTEGER NOT NULL DEFAULT 1,
+        demo_only INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'production',
+        metadata TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT '',
+        provenance TEXT NOT NULL DEFAULT '{}'
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_model_versions_model_id ON model_versions(model_id)",
     """CREATE TABLE IF NOT EXISTS sync_state (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -181,8 +220,272 @@ _DELETE_ORDER = [
     "runs",
     "tags",
     "assets",
+    "model_versions",
+    "models",
     "sync_state",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Row builders — ONE serialization per table shared by rebuild / load /
+# incremental write so all three agree by construction.
+# ---------------------------------------------------------------------------
+
+
+def _asset_row(asset) -> tuple:
+    return (
+        asset.name,
+        normalize_asset_search_name(asset.name),
+        asset.type,
+        asset.description,
+        asset.current_version_id,
+        asset.legacy_resource_id,
+        json.dumps(asset.metadata, ensure_ascii=False),
+        asset.created_at,
+        asset.updated_at,
+        int(asset.trashed),
+        asset.trashed_at,
+    )
+
+
+# Upserts use ON CONFLICT DO UPDATE (not INSERT OR REPLACE): REPLACE
+# reassigns the rowid, floating updated rows to the table tail and breaking
+# the rowid == document-insertion-order invariant load_document relies on.
+_ASSET_UPSERT_SQL = (
+    "INSERT INTO assets (id, name, name_search, type, description,"
+    " current_version_id, legacy_resource_id, metadata, created_at, updated_at,"
+    " trashed, trashed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
+    " ON CONFLICT(id) DO UPDATE SET name=excluded.name,"
+    " name_search=excluded.name_search, type=excluded.type,"
+    " description=excluded.description,"
+    " current_version_id=excluded.current_version_id,"
+    " legacy_resource_id=excluded.legacy_resource_id,"
+    " metadata=excluded.metadata, created_at=excluded.created_at,"
+    " updated_at=excluded.updated_at, trashed=excluded.trashed,"
+    " trashed_at=excluded.trashed_at"
+)
+
+
+def _version_row(version) -> tuple:
+    return (
+        version.asset_id,
+        version.version_number,
+        version.stage.value,
+        int(version.managed),
+        version.path,
+        version.source_uri,
+        version.format,
+        version.size_bytes,
+        version.sha256,
+        version.run_id,
+        json.dumps(version.metadata, ensure_ascii=False),
+        version.created_at,
+        int(version.trashed),
+        version.trashed_at,
+        json.dumps(list(version.parent_version_ids)),
+    )
+
+
+_VERSION_UPSERT_SQL = (
+    "INSERT INTO versions (id, asset_id, version_number, stage,"
+    " managed, path, source_uri, format, size_bytes, sha256, run_id, metadata,"
+    " created_at, trashed, trashed_at, parent_ids)"
+    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+    " ON CONFLICT(id) DO UPDATE SET asset_id=excluded.asset_id,"
+    " version_number=excluded.version_number, stage=excluded.stage,"
+    " managed=excluded.managed, path=excluded.path,"
+    " source_uri=excluded.source_uri, format=excluded.format,"
+    " size_bytes=excluded.size_bytes, sha256=excluded.sha256,"
+    " run_id=excluded.run_id, metadata=excluded.metadata,"
+    " created_at=excluded.created_at, trashed=excluded.trashed,"
+    " trashed_at=excluded.trashed_at, parent_ids=excluded.parent_ids"
+)
+
+
+def _run_row(run) -> tuple:
+    return (
+        run.operation,
+        json.dumps(run.parameters, ensure_ascii=False),
+        run.generator,
+        run.status,
+        json.dumps(run.model_ref, ensure_ascii=False) if run.model_ref else None,
+        run.created_at,
+    )
+
+
+_RUN_UPSERT_SQL = (
+    "INSERT INTO runs (id, operation, parameters, generator, status,"
+    " model_ref, created_at) VALUES (?,?,?,?,?,?,?)"
+    " ON CONFLICT(id) DO UPDATE SET operation=excluded.operation,"
+    " parameters=excluded.parameters, generator=excluded.generator,"
+    " status=excluded.status, model_ref=excluded.model_ref,"
+    " created_at=excluded.created_at"
+)
+
+
+def _tag_row(tag) -> tuple:
+    return (
+        tag.name,
+        tag.display_name,
+        json.dumps(tag.metadata, ensure_ascii=False),
+    )
+
+
+_TAG_UPSERT_SQL = (
+    "INSERT INTO tags (id, name, display_name, metadata)"
+    " VALUES (?,?,?,?)"
+    " ON CONFLICT(id) DO UPDATE SET name=excluded.name,"
+    " display_name=excluded.display_name, metadata=excluded.metadata"
+)
+
+
+def _model_row(model) -> tuple:
+    return (
+        model.model_id,
+        model.model_name,
+        model.model_type,
+        model.capability,
+        model.provider,
+        model.status,
+        json.dumps(model.metadata, ensure_ascii=False),
+        model.created_at,
+        json.dumps(model.provenance, ensure_ascii=False),
+    )
+
+
+_MODEL_UPSERT_SQL = (
+    "INSERT INTO models (id, model_id, model_name, model_type,"
+    " capability, provider, status, metadata, created_at, provenance)"
+    " VALUES (?,?,?,?,?,?,?,?,?,?)"
+    " ON CONFLICT(id) DO UPDATE SET model_id=excluded.model_id,"
+    " model_name=excluded.model_name, model_type=excluded.model_type,"
+    " capability=excluded.capability, provider=excluded.provider,"
+    " status=excluded.status, metadata=excluded.metadata,"
+    " created_at=excluded.created_at, provenance=excluded.provenance"
+)
+
+
+def _model_version_row(mv) -> tuple:
+    return (
+        mv.model_id,
+        mv.model_version,
+        mv.artifact_uri,
+        mv.checksum,
+        json.dumps(mv.input_schema, ensure_ascii=False),
+        json.dumps(mv.output_schema, ensure_ascii=False),
+        mv.preprocessing_version,
+        mv.runtime,
+        int(mv.deterministic),
+        int(mv.demo_only),
+        mv.status,
+        json.dumps(mv.metadata, ensure_ascii=False),
+        mv.created_at,
+        json.dumps(mv.provenance, ensure_ascii=False),
+    )
+
+
+_MODEL_VERSION_UPSERT_SQL = (
+    "INSERT INTO model_versions (id, model_id, model_version,"
+    " artifact_uri, checksum, input_schema, output_schema, preprocessing_version,"
+    " runtime, deterministic, demo_only, status, metadata, created_at, provenance)"
+    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+    " ON CONFLICT(id) DO UPDATE SET model_id=excluded.model_id,"
+    " model_version=excluded.model_version, artifact_uri=excluded.artifact_uri,"
+    " checksum=excluded.checksum, input_schema=excluded.input_schema,"
+    " output_schema=excluded.output_schema,"
+    " preprocessing_version=excluded.preprocessing_version,"
+    " runtime=excluded.runtime, deterministic=excluded.deterministic,"
+    " demo_only=excluded.demo_only, status=excluded.status,"
+    " metadata=excluded.metadata, created_at=excluded.created_at,"
+    " provenance=excluded.provenance"
+)
+
+
+def _symmetric_diff(db_rows: dict[str, tuple], doc_rows: dict[str, tuple]) -> set[str]:
+    """Ids whose row differs between the store and the document."""
+    changed: set[str] = set()
+    for entity_id, row in doc_rows.items():
+        if db_rows.get(entity_id) != row:
+            changed.add(entity_id)
+    changed.update(set(db_rows) - set(doc_rows))
+    return changed
+
+
+@dataclass
+class DirtySet:
+    """Entity ids touched by a mutation batch (drives :meth:`apply_changes`).
+
+    Collections are insertion-ordered dicts: ids are marked in document
+    mutation order, which ``apply_changes`` relies on so rows inserted in one
+    transaction keep document order. ``asset_tags`` / ``version_tags`` hold
+    OWNER ids whose tag association changed. An id absent from the document
+    means "delete".
+    """
+
+    assets: dict[str, None] = field(default_factory=dict)
+    versions: dict[str, None] = field(default_factory=dict)
+    runs: dict[str, None] = field(default_factory=dict)
+    tags: dict[str, None] = field(default_factory=dict)
+    models: dict[str, None] = field(default_factory=dict)
+    model_versions: dict[str, None] = field(default_factory=dict)
+    asset_tags: dict[str, None] = field(default_factory=dict)
+    version_tags: dict[str, None] = field(default_factory=dict)
+
+    def mark_assets(self, entity_id: str) -> None:
+        self.assets[entity_id] = None
+
+    def mark_versions(self, entity_id: str) -> None:
+        self.versions[entity_id] = None
+
+    def mark_runs(self, entity_id: str) -> None:
+        self.runs[entity_id] = None
+
+    def mark_tags(self, entity_id: str) -> None:
+        self.tags[entity_id] = None
+
+    def mark_models(self, entity_id: str) -> None:
+        self.models[entity_id] = None
+
+    def mark_model_versions(self, entity_id: str) -> None:
+        self.model_versions[entity_id] = None
+
+    def mark_asset_tags(self, entity_id: str) -> None:
+        self.asset_tags[entity_id] = None
+
+    def mark_version_tags(self, entity_id: str) -> None:
+        self.version_tags[entity_id] = None
+
+    def merge(self, other: "DirtySet") -> None:
+        for field_name in (
+            "assets",
+            "versions",
+            "runs",
+            "tags",
+            "models",
+            "model_versions",
+            "asset_tags",
+            "version_tags",
+        ):
+            incoming = getattr(other, field_name)
+            # Callers may hand a plain set of ids; normalize so dict.update
+            # never misreads an id string as a (key, value) pair.
+            if not isinstance(incoming, dict):
+                incoming = dict.fromkeys(incoming)
+            getattr(self, field_name).update(incoming)
+
+    def is_empty(self) -> bool:
+        return not any(
+            (
+                self.assets,
+                self.versions,
+                self.runs,
+                self.tags,
+                self.models,
+                self.model_versions,
+                self.asset_tags,
+                self.version_tags,
+            )
+        )
 
 
 class ThreadSafeCatalogSession:
@@ -285,11 +588,6 @@ class CatalogIndex:
         # and enumerate()-based liveness never sees foreign threads (#1026).
         self._conns: dict[int, _ConnEntry] = {}
         self._conns_lock = threading.Lock()
-        # In-memory snapshot of the last-synced document rows
-        # (``{table: {id: tuple-of-columns}}``), used by the incremental sync
-        # to upsert only changed rows. ``None`` = unknown state (first sync in
-        # this process must rebuild). Rebuild/prime always repopulate it.
-        self._last_state: dict[str, dict[str, tuple]] | None = None
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -508,22 +806,23 @@ class CatalogIndex:
             return False
 
     def sync(self, document: CatalogDocument) -> bool:
-        """Bring the index up to date with *document*; True when it changed.
+        """Bring the store up to date with *document*; True when it changed.
 
-        Fast path: when the database is exactly one revision behind and the
-        in-memory row snapshot is available, only the changed rows are
-        upserted (``INSERT OR REPLACE`` keyed by primary key, deleted rows
-        removed) instead of a full delete-and-rewrite. Anything else — a
-        bigger gap, a missing/corrupt database, an unknown snapshot — falls
-        back to :meth:`rebuild`, so the rebuildable-index guarantee and
-        self-healing are unchanged.
+        Reconciliation path (fallback for callers without dirty-set
+        knowledge): compares the store's rows against the document and
+        applies exactly the difference through :meth:`apply_changes`, so the
+        result always equals :meth:`write_all`. The canonical hot path is
+        :meth:`apply_changes` driven by the service's dirty sets (#1027).
         """
         if self.is_fresh(document):
             return False
-        if self._can_incremental(document):
-            self._sync_incremental(document)
-            return True
-        self.rebuild(document)
+        try:
+            self.reconcile(document)
+        except sqlite3.DatabaseError:
+            # Self-healing: a corrupt database file is recreated from the
+            # document (the rebuildable-store guarantee is unchanged).
+            self.reset()
+            self.rebuild(document)
         return True
 
     # -- rebuild ---------------------------------------------------------------
@@ -545,18 +844,594 @@ class CatalogIndex:
                 if attempt:
                     raise
                 self.reset()
-        self._last_state = self._state_of(document)
 
     def prime(self, document: CatalogDocument) -> "CatalogIndex":
-        """Record *document*'s row snapshot WITHOUT touching the database.
+        """Compatibility no-op retained for the pre-canonical API surface.
 
-        Call after confirming the index is fresh (e.g. on project open) so the
-        first save of this process syncs incrementally instead of rebuilding.
-        The snapshot equals the fresh database because revision + schema
-        equality implies identical document content in this codebase.
+        The row-snapshot fast path this used to feed was removed with the
+        legacy incremental sync; :meth:`sync` now reconciles against the
+        store itself, which needs no primed snapshot.
         """
-        self._last_state = self._state_of(document)
         return self
+
+    # -- canonical store (#1027) ----------------------------------------------
+
+    def store_version(self) -> int | None:
+        """The store's layout version, or None when absent/unreadable."""
+        raw = self._read_sync_state("index_schema_version")
+        if raw is None:
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            return None
+
+    def write_all(self, document: CatalogDocument) -> None:
+        """Transactionally (re)initialize the store from *document*.
+
+        Used by the legacy-JSON migration and by recovery: one atomic
+        delete-and-rewrite, so a crash mid-write leaves the previous database
+        contents intact (SQLite rollback) and the legacy ``catalog.json``
+        untouched — the source project stays recoverable (#1027).
+        """
+        self.rebuild(document)
+
+    def load_document(self) -> CatalogDocument | None:
+        """Reconstruct the :class:`CatalogDocument` from the store.
+
+        Returns None when the database is missing, not yet migrated to
+        canonical layout (``STORE_SCHEMA_VERSION``), or unreadable — callers
+        fall back to the legacy JSON load/migration path.
+        """
+        if not self.db_path.is_file():
+            return None
+        if self.store_version() != STORE_SCHEMA_VERSION:
+            return None
+        try:
+            return self._load_document_once()
+        except (sqlite3.DatabaseError, OSError, ValueError, TypeError):
+            return None
+
+    def _load_document_once(self) -> CatalogDocument:
+        from paleo_workbench.catalog.models import (
+            DataAsset,
+            DataRun,
+            DataStage,
+            DataVersion,
+            Model,
+            ModelVersion,
+            Tag,
+        )
+
+        conn = self._connect()
+        conn.execute("BEGIN")
+        try:
+            assets = [
+                DataAsset(
+                    id=row["id"],
+                    name=row["name"],
+                    type=row["type"],
+                    description=row["description"],
+                    current_version_id=row["current_version_id"],
+                    legacy_resource_id=row["legacy_resource_id"],
+                    metadata=json.loads(row["metadata"]),
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"],
+                    trashed=bool(row["trashed"]),
+                    trashed_at=row["trashed_at"],
+                )
+                for row in conn.execute(
+                    "SELECT * FROM assets"
+                )
+            ]
+            versions = [
+                DataVersion(
+                    id=row["id"],
+                    asset_id=row["asset_id"],
+                    version_number=row["version_number"],
+                    stage=DataStage(row["stage"]),
+                    managed=bool(row["managed"]),
+                    path=row["path"],
+                    source_uri=row["source_uri"],
+                    format=row["format"],
+                    size_bytes=row["size_bytes"],
+                    sha256=row["sha256"],
+                    run_id=row["run_id"],
+                    metadata=json.loads(row["metadata"]),
+                    created_at=row["created_at"],
+                    trashed=bool(row["trashed"]),
+                    trashed_at=row["trashed_at"],
+                    parent_version_ids=json.loads(row["parent_ids"]),
+                )
+                for row in conn.execute("SELECT * FROM versions")
+            ]
+            inputs_by_run: dict[str, list[str]] = {}
+            outputs_by_run: dict[str, list[str]] = {}
+            for row in conn.execute("SELECT run_id, version_id FROM run_inputs"):
+                inputs_by_run.setdefault(row["run_id"], []).append(row["version_id"])
+            for row in conn.execute("SELECT run_id, version_id FROM run_outputs"):
+                outputs_by_run.setdefault(row["run_id"], []).append(row["version_id"])
+            runs = [
+                DataRun(
+                    id=row["id"],
+                    operation=row["operation"],
+                    parameters=json.loads(row["parameters"]),
+                    generator=row["generator"],
+                    status=row["status"],
+                    model_ref=json.loads(row["model_ref"])
+                    if row["model_ref"]
+                    else None,
+                    created_at=row["created_at"],
+                )
+                for row in conn.execute("SELECT * FROM runs")
+            ]
+            for run in runs:
+                run.input_version_ids = inputs_by_run.get(run.id, [])
+                run.output_version_ids = outputs_by_run.get(run.id, [])
+            tags = [
+                Tag(
+                    id=row["id"],
+                    name=row["name"],
+                    display_name=row["display_name"],
+                    metadata=json.loads(row["metadata"]),
+                )
+                for row in conn.execute("SELECT * FROM tags")
+            ]
+            asset_tags: dict[str, list[str]] = {}
+            for row in conn.execute("SELECT asset_id, tag_id FROM asset_tags"):
+                asset_tags.setdefault(row["asset_id"], []).append(row["tag_id"])
+            version_tags: dict[str, list[str]] = {}
+            for row in conn.execute("SELECT version_id, tag_id FROM version_tags"):
+                version_tags.setdefault(row["version_id"], []).append(row["tag_id"])
+            models = [
+                Model(
+                    id=row["id"],
+                    model_id=row["model_id"],
+                    model_name=row["model_name"],
+                    model_type=row["model_type"],
+                    capability=row["capability"],
+                    provider=row["provider"],
+                    status=row["status"],
+                    metadata=json.loads(row["metadata"]),
+                    created_at=row["created_at"],
+                    provenance=json.loads(row["provenance"]),
+                )
+                for row in conn.execute("SELECT * FROM models")
+            ]
+            model_versions = [
+                ModelVersion(
+                    id=row["id"],
+                    model_id=row["model_id"],
+                    model_version=row["model_version"],
+                    artifact_uri=row["artifact_uri"],
+                    checksum=row["checksum"],
+                    input_schema=json.loads(row["input_schema"]),
+                    output_schema=json.loads(row["output_schema"]),
+                    preprocessing_version=row["preprocessing_version"],
+                    runtime=row["runtime"],
+                    deterministic=bool(row["deterministic"]),
+                    demo_only=bool(row["demo_only"]),
+                    status=row["status"],
+                    metadata=json.loads(row["metadata"]),
+                    created_at=row["created_at"],
+                    provenance=json.loads(row["provenance"]),
+                )
+                for row in conn.execute("SELECT * FROM model_versions")
+            ]
+            revision = self.revision()
+            document = CatalogDocument(
+                catalog_revision=revision if revision is not None else 0,
+                assets=assets,
+                versions=versions,
+                runs=runs,
+                tags=tags,
+                models=models,
+                model_versions=model_versions,
+                asset_tags=asset_tags,
+                version_tags=version_tags,
+            )
+            conn.execute("ROLLBACK")  # read-only snapshot; release it
+            return document
+        except Exception:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+
+    def apply_changes(
+        self,
+        document: CatalogDocument,
+        dirty: "DirtySet",
+        *,
+        lookups: dict[str, dict] | None = None,
+    ) -> None:
+        """Persist *dirty*'s entities in ONE transaction (#1027).
+
+        For every id in *dirty*: present in *document* → upsert its row;
+        absent → delete it plus its dependents. Lineage edges are reconciled
+        per touched version/run with the same keep-rules a full rebuild
+        encodes (run-derived edges survive version purges). The result is
+        identical to :meth:`write_all` restricted to the dirty set.
+        """
+        conn = self._connect()
+        # O(Δ) lookups: the caller (the service) passes its incrementally
+        # maintained id→object maps for the large collections; tags and the
+        # model registry are small enough to scan. Building full-document
+        # dicts here would put an O(N) cost on every single-row mutation —
+        # exactly what #1027 removes.
+        lookups = lookups or {}
+        asset_by_id = lookups.get("assets") or {
+            a.id: a for a in document.assets
+        }
+        version_by_id = lookups.get("versions") or {
+            v.id: v for v in document.versions
+        }
+        run_by_id = lookups.get("runs") or {r.id: r for r in document.runs}
+        tag_by_id = {t.id: t for t in document.tags}
+        model_by_id = {m.id: m for m in document.models}
+        mver_by_id = {mv.id: mv for mv in document.model_versions}
+
+        def _ordered(ids, table: str) -> list[str]:
+            """Document-order iteration for one table's dirty ids.
+
+            Existing rows keep their rowid (== document insertion order);
+            ids not yet in the store are NEW appends and stay in mark order
+            after the existing ones — both match how load_document restores
+            list order from rowid order.
+            """
+            marks = list(ids)
+            if not marks:
+                return []
+            rowid_of: dict[str, int] = {}
+            for chunk_start in range(0, len(marks), 500):
+                chunk = marks[chunk_start : chunk_start + 500]
+                placeholders = ",".join("?" * len(chunk))
+                rowid_of.update(
+                    conn.execute(
+                        f"SELECT id, rowid FROM {table} WHERE id IN ({placeholders})",
+                        chunk,
+                    ).fetchall()
+                )
+            existing = sorted(
+                (rowid_of[e], e) for e in marks if e in rowid_of
+            )
+            appended = [e for e in marks if e not in rowid_of]
+            return [e for _, e in existing] + appended
+
+        with conn:
+            for asset_id in _ordered(dirty.assets, "assets"):
+                asset = asset_by_id.get(asset_id)
+                if asset is None:
+                    conn.execute("DELETE FROM assets WHERE id = ?", (asset_id,))
+                    conn.execute(
+                        "DELETE FROM asset_tags WHERE asset_id = ?", (asset_id,)
+                    )
+                else:
+                    conn.execute(
+                        _ASSET_UPSERT_SQL, (asset_id, *_asset_row(asset))
+                    )
+            for version_id in _ordered(dirty.versions, "versions"):
+                version = version_by_id.get(version_id)
+                if version is None:
+                    self._delete_version_keep_run_edges(conn, version_id)
+                else:
+                    conn.execute(
+                        _VERSION_UPSERT_SQL, (version_id, *_version_row(version))
+                    )
+                    self._reconcile_version_parents(conn, version)
+            for run_id in _ordered(dirty.runs, "runs"):
+                run = run_by_id.get(run_id)
+                if run is None:
+                    self._delete_run_keep_version_edges(conn, run_id)
+                else:
+                    conn.execute(_RUN_UPSERT_SQL, (run_id, *_run_row(run)))
+                    conn.execute(
+                        "DELETE FROM run_inputs WHERE run_id = ?", (run_id,)
+                    )
+                    conn.execute(
+                        "DELETE FROM run_outputs WHERE run_id = ?", (run_id,)
+                    )
+                    conn.executemany(
+                        "INSERT OR IGNORE INTO run_inputs (run_id, version_id)"
+                        " VALUES (?,?)",
+                        [(run_id, vid) for vid in run.input_version_ids],
+                    )
+                    conn.executemany(
+                        "INSERT OR IGNORE INTO run_outputs (run_id, version_id)"
+                        " VALUES (?,?)",
+                        [(run_id, vid) for vid in run.output_version_ids],
+                    )
+                    self._reconcile_run_edges(conn, run)
+            for tag_id in _ordered(dirty.tags, "tags"):
+                tag = tag_by_id.get(tag_id)
+                if tag is None:
+                    conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
+                    conn.execute(
+                        "DELETE FROM asset_tags WHERE tag_id = ?", (tag_id,)
+                    )
+                    conn.execute(
+                        "DELETE FROM version_tags WHERE tag_id = ?", (tag_id,)
+                    )
+                else:
+                    conn.execute(
+                        _TAG_UPSERT_SQL,
+                        (
+                            tag_id,
+                            normalize_tag_name(tag.name),
+                            tag.display_name,
+                            json.dumps(tag.metadata, ensure_ascii=False),
+                        ),
+                    )
+            for asset_id in dirty.asset_tags:
+                conn.execute("DELETE FROM asset_tags WHERE asset_id = ?", (asset_id,))
+                conn.executemany(
+                    "INSERT OR IGNORE INTO asset_tags (asset_id, tag_id) VALUES (?,?)",
+                    [
+                        (asset_id, tid)
+                        for tid in document.asset_tags.get(asset_id, ())
+                    ],
+                )
+            for version_id in dirty.version_tags:
+                conn.execute(
+                    "DELETE FROM version_tags WHERE version_id = ?", (version_id,)
+                )
+                conn.executemany(
+                    "INSERT OR IGNORE INTO version_tags (version_id, tag_id)"
+                    " VALUES (?,?)",
+                    [
+                        (version_id, tid)
+                        for tid in document.version_tags.get(version_id, ())
+                    ],
+                )
+            for model_id in _ordered(dirty.models, "models"):
+                model = model_by_id.get(model_id)
+                if model is None:
+                    conn.execute("DELETE FROM models WHERE id = ?", (model_id,))
+                else:
+                    conn.execute(_MODEL_UPSERT_SQL, (model_id, *_model_row(model)))
+            for mv_id in _ordered(dirty.model_versions, "model_versions"):
+                mv = mver_by_id.get(mv_id)
+                if mv is None:
+                    conn.execute(
+                        "DELETE FROM model_versions WHERE id = ?", (mv_id,)
+                    )
+                else:
+                    conn.execute(
+                        _MODEL_VERSION_UPSERT_SQL, (mv_id, *_model_version_row(mv))
+                    )
+            conn.executemany(
+                "INSERT OR REPLACE INTO sync_state (key, value) VALUES (?,?)",
+                [
+                    ("schema_version", str(document.schema_version)),
+                    ("catalog_revision", str(document.catalog_revision)),
+                    ("index_schema_version", str(INDEX_SCHEMA_VERSION)),
+                ],
+            )
+
+    def _reconcile_version_parents(
+        self, conn: sqlite3.Connection, version
+    ) -> None:
+        """Make the lineage rows for *version* equal its parent_version_ids.
+
+        Old parent edges are dropped unless a retained run also produces them
+        (the purge-keeps-provenance rule shared with :meth:`_delete_entity`).
+        """
+        old_parents = {
+            row[0]
+            for row in conn.execute(
+                "SELECT parent_version_id FROM lineage WHERE child_version_id = ?",
+                (version.id,),
+            )
+        }
+        new_parents = set(version.parent_version_ids)
+        for parent in old_parents - new_parents:
+            if self._run_covers_edge(conn, parent, version.id):
+                continue
+            conn.execute(
+                "DELETE FROM lineage WHERE parent_version_id = ?"
+                " AND child_version_id = ?",
+                (parent, version.id),
+            )
+        conn.executemany(
+            "INSERT OR IGNORE INTO lineage (parent_version_id, child_version_id)"
+            " VALUES (?,?)",
+            [(parent, version.id) for parent in new_parents],
+        )
+
+    def _delete_version_keep_run_edges(
+        self, conn: sqlite3.Connection, version_id: str
+    ) -> None:
+        conn.execute("DELETE FROM versions WHERE id = ?", (version_id,))
+        conn.execute("DELETE FROM version_tags WHERE version_id = ?", (version_id,))
+        # Run input/output link rows are NOT deleted: they are owned by the
+        # run record, which retains purged version ids as historical
+        # provenance (service.purge_trashed keeps runs) — a full rebuild
+        # re-creates them from the run.
+        for (parent,) in conn.execute(
+            "SELECT parent_version_id FROM lineage WHERE child_version_id = ?",
+            (version_id,),
+        ).fetchall():
+            if not self._run_covers_edge(conn, parent, version_id):
+                conn.execute(
+                    "DELETE FROM lineage WHERE parent_version_id = ?"
+                    " AND child_version_id = ?",
+                    (parent, version_id),
+                )
+
+    def _reconcile_run_edges(self, conn: sqlite3.Connection, run) -> None:
+        """Make run-derived lineage rows equal the run's io product.
+
+        Dropped io pairs survive when a version-owned parent edge still
+        covers them (the union rule a rebuild encodes).
+        """
+        new_pairs = {
+            (i, o) for i in run.input_version_ids for o in run.output_version_ids
+        }
+        old_pairs = {
+            (row[0], row[1])
+            for row in conn.execute(
+                "SELECT ri.version_id, ro.version_id FROM run_inputs ri"
+                " JOIN run_outputs ro ON ro.run_id = ri.run_id WHERE ri.run_id = ?",
+                (run.id,),
+            )
+        }
+        for parent, child in old_pairs - new_pairs:
+            if self._version_owns_edge(conn, parent, child):
+                continue
+            conn.execute(
+                "DELETE FROM lineage WHERE parent_version_id = ?"
+                " AND child_version_id = ?",
+                (parent, child),
+            )
+        conn.executemany(
+            "INSERT OR IGNORE INTO lineage (parent_version_id, child_version_id)"
+            " VALUES (?,?)",
+            list(new_pairs),
+        )
+
+    def _delete_run_keep_version_edges(
+        self, conn: sqlite3.Connection, run_id: str
+    ) -> None:
+        io_pairs = [
+            (row[0], row[1])
+            for row in conn.execute(
+                "SELECT ri.version_id, ro.version_id FROM run_inputs ri"
+                " JOIN run_outputs ro ON ro.run_id = ri.run_id WHERE ri.run_id = ?",
+                (run_id,),
+            )
+        ]
+        conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+        conn.execute("DELETE FROM run_inputs WHERE run_id = ?", (run_id,))
+        conn.execute("DELETE FROM run_outputs WHERE run_id = ?", (run_id,))
+        for parent, child in io_pairs:
+            if self._version_owns_edge(conn, parent, child):
+                continue
+            conn.execute(
+                "DELETE FROM lineage WHERE parent_version_id = ?"
+                " AND child_version_id = ?",
+                (parent, child),
+            )
+
+    def _version_owns_edge(
+        self, conn: sqlite3.Connection, parent: str, child: str
+    ) -> bool:
+        """True when *child*'s own parent_ids list contains *parent*."""
+        row = conn.execute(
+            "SELECT parent_ids FROM versions WHERE id = ?", (child,)
+        ).fetchone()
+        if row is None:
+            return False
+        try:
+            return parent in json.loads(row[0])
+        except (ValueError, TypeError):
+            return False
+
+    def _run_covers_edge(
+        self, conn: sqlite3.Connection, parent: str, child: str
+    ) -> bool:
+        row = conn.execute(
+            "SELECT 1 FROM run_inputs ri JOIN run_outputs ro ON ro.run_id = ri.run_id"
+            " WHERE ri.version_id = ? AND ro.version_id = ? LIMIT 1",
+            (parent, child),
+        ).fetchone()
+        return row is not None
+
+    def reconcile(self, document: CatalogDocument) -> None:
+        """Full compare-and-repair against the document (safe fallback).
+
+        O(N) read of the store, then applies exactly the differing entities
+        through :meth:`apply_changes` — the same writer the dirty-set path
+        uses, so unmarked mutations stay correct (only slower).
+        """
+        dirty = DirtySet()
+        if not self.db_path.is_file():
+            self.write_all(document)
+            return
+        conn = self._connect()
+
+        def rows(table: str) -> dict[str, tuple]:
+            return {
+                row[0]: tuple(row[1:])
+                for row in conn.execute(f"SELECT * FROM {table}")
+            }
+
+        db_assets = rows("assets")
+        doc_assets = {a.id: _asset_row(a) for a in document.assets}
+        dirty.assets = dict.fromkeys(_symmetric_diff(db_assets, doc_assets))
+        db_versions = rows("versions")
+        doc_versions = {v.id: _version_row(v) for v in document.versions}
+        dirty.versions = dict.fromkeys(_symmetric_diff(db_versions, doc_versions))
+        db_runs = rows("runs")
+        doc_runs = {r.id: _run_row(r) for r in document.runs}
+        dirty.runs = dict.fromkeys(_symmetric_diff(db_runs, doc_runs))
+        db_tags = rows("tags")
+        doc_tags = {t.id: _tag_row(t) for t in document.tags}
+        dirty.tags = dict.fromkeys(_symmetric_diff(db_tags, doc_tags))
+        db_models = rows("models")
+        doc_models = {m.id: _model_row(m) for m in document.models}
+        dirty.models = dict.fromkeys(_symmetric_diff(db_models, doc_models))
+        db_mvers = rows("model_versions")
+        doc_mvers = {mv.id: _model_version_row(mv) for mv in document.model_versions}
+        dirty.model_versions = dict.fromkeys(_symmetric_diff(db_mvers, doc_mvers))
+
+        db_asset_tags = {
+            row[0]: row[1]
+            for row in conn.execute(
+                "SELECT asset_id, group_concat(tag_id) FROM asset_tags"
+                " GROUP BY asset_id"
+            )
+        }
+        for asset_id in set(db_asset_tags) | set(document.asset_tags):
+            db_set = set((db_asset_tags.get(asset_id) or "").split(","))
+            db_set.discard("")
+            if db_set != set(document.asset_tags.get(asset_id, [])):
+                dirty.mark_asset_tags(asset_id)
+        db_version_tags = {
+            row[0]: row[1]
+            for row in conn.execute(
+                "SELECT version_id, group_concat(tag_id) FROM version_tags"
+                " GROUP BY version_id"
+            )
+        }
+        for version_id in set(db_version_tags) | set(document.version_tags):
+            db_set = set((db_version_tags.get(version_id) or "").split(","))
+            db_set.discard("")
+            if db_set != set(document.version_tags.get(version_id, [])):
+                dirty.mark_version_tags(version_id)
+
+        # Run io drift: one grouped join read, compared per run.
+        db_run_io: dict[str, set[tuple[str, str]]] = {}
+        for run_id, i, o in conn.execute(
+            "SELECT ri.run_id, ri.version_id, ro.version_id FROM run_inputs ri"
+            " JOIN run_outputs ro ON ro.run_id = ri.run_id"
+        ):
+            db_run_io.setdefault(run_id, set()).add((i, o))
+        for run in document.runs:
+            expected = {
+                (i, o) for i in run.input_version_ids for o in run.output_version_ids
+            }
+            if db_run_io.get(run.id, set()) != expected:
+                dirty.mark_runs(run.id)
+
+        if dirty.is_empty():
+            # Still refresh the revision stamp (the caller bumped it).
+            conn.execute("BEGIN")
+            try:
+                conn.executemany(
+                    "INSERT OR REPLACE INTO sync_state (key, value) VALUES (?,?)",
+                    [
+                        ("schema_version", str(document.schema_version)),
+                        ("catalog_revision", str(document.catalog_revision)),
+                        ("index_schema_version", str(INDEX_SCHEMA_VERSION)),
+                    ],
+                )
+                conn.commit()
+            except sqlite3.Error:
+                conn.execute("ROLLBACK")
+                raise
+            return
+        self.apply_changes(document, dirty)
 
     def _rebuild_once(self, document: CatalogDocument) -> None:
         conn = self._connect()
@@ -567,57 +1442,17 @@ class CatalogIndex:
                 conn.execute(f"DELETE FROM {table}")
 
             conn.executemany(
-                "INSERT INTO assets (id, name, name_search, type, description, current_version_id,"
-                " legacy_resource_id, metadata, created_at, updated_at, trashed, trashed_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                [
-                    (
-                        asset.id,
-                        asset.name,
-                        normalize_asset_search_name(asset.name),
-                        asset.type,
-                        asset.description,
-                        asset.current_version_id,
-                        asset.legacy_resource_id,
-                        json.dumps(asset.metadata, ensure_ascii=False),
-                        asset.created_at,
-                        asset.updated_at,
-                        int(asset.trashed),
-                        asset.trashed_at,
-                    )
-                    for asset in document.assets
-                ],
+                _ASSET_UPSERT_SQL,
+                [(asset.id, *_asset_row(asset)) for asset in document.assets],
             )
             conn.executemany(
-                "INSERT INTO versions (id, asset_id, version_number, stage, managed,"
-                " path, source_uri, format, size_bytes, sha256, run_id, metadata,"
-                " created_at, trashed, trashed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                [
-                    (
-                        version.id,
-                        version.asset_id,
-                        version.version_number,
-                        version.stage.value,
-                        int(version.managed),
-                        version.path,
-                        version.source_uri,
-                        version.format,
-                        version.size_bytes,
-                        version.sha256,
-                        version.run_id,
-                        json.dumps(version.metadata, ensure_ascii=False),
-                        version.created_at,
-                        int(version.trashed),
-                        version.trashed_at,
-                    )
-                    for version in document.versions
-                ],
+                _VERSION_UPSERT_SQL,
+                [(version.id, *_version_row(version)) for version in document.versions],
             )
             # Tag name is stored normalized so lookups are case/whitespace-safe;
             # the display form lives in display_name.
             conn.executemany(
-                "INSERT OR IGNORE INTO tags (id, name, display_name, metadata)"
-                " VALUES (?,?,?,?)",
+                _TAG_UPSERT_SQL,
                 [
                     (
                         tag.id,
@@ -645,19 +1480,8 @@ class CatalogIndex:
                 ],
             )
             conn.executemany(
-                "INSERT INTO runs (id, operation, parameters, generator, status,"
-                " created_at) VALUES (?,?,?,?,?,?)",
-                [
-                    (
-                        run.id,
-                        run.operation,
-                        json.dumps(run.parameters, ensure_ascii=False),
-                        run.generator,
-                        run.status,
-                        run.created_at,
-                    )
-                    for run in document.runs
-                ],
+                _RUN_UPSERT_SQL,
+                [(run.id, *_run_row(run)) for run in document.runs],
             )
             conn.executemany(
                 "INSERT OR IGNORE INTO run_inputs (run_id, version_id) VALUES (?,?)",
@@ -673,6 +1497,17 @@ class CatalogIndex:
                     (run.id, version_id)
                     for run in document.runs
                     for version_id in run.output_version_ids
+                ],
+            )
+            conn.executemany(
+                _MODEL_UPSERT_SQL,
+                [(model.id, *_model_row(model)) for model in document.models],
+            )
+            conn.executemany(
+                _MODEL_VERSION_UPSERT_SQL,
+                [
+                    (mv.id, *_model_version_row(mv))
+                    for mv in document.model_versions
                 ],
             )
 
@@ -706,345 +1541,6 @@ class CatalogIndex:
                     ("index_schema_version", str(INDEX_SCHEMA_VERSION)),
                 ],
             )
-
-    # -- incremental sync -------------------------------------------------------
-
-    def _state_of(self, document: CatalogDocument) -> dict[str, dict[str, tuple]]:
-        """Snapshot each row as an id→column-tuple map (the diff source).
-
-        Tuples include derived columns (parent ids, run input/output ids, tag
-        id sets) so a change in any stored column or derived join row is
-        detected by tuple inequality. JSON columns are serialized with the
-        same kwargs as ``_rebuild_once`` for byte-identical comparison.
-        """
-        assets: dict[str, tuple] = {}
-        for asset in document.assets:
-            assets[asset.id] = (
-                asset.name,
-                normalize_asset_search_name(asset.name),
-                asset.type,
-                asset.description,
-                asset.current_version_id,
-                asset.legacy_resource_id,
-                json.dumps(asset.metadata, ensure_ascii=False),
-                asset.created_at,
-                asset.updated_at,
-                int(asset.trashed),
-                asset.trashed_at,
-            )
-        versions: dict[str, tuple] = {}
-        for version in document.versions:
-            versions[version.id] = (
-                version.asset_id,
-                version.version_number,
-                version.stage.value,
-                int(version.managed),
-                version.path,
-                version.source_uri,
-                version.format,
-                version.size_bytes,
-                version.sha256,
-                version.run_id,
-                json.dumps(version.metadata, ensure_ascii=False),
-                version.created_at,
-                int(version.trashed),
-                version.trashed_at,
-                tuple(version.parent_version_ids),
-            )
-        runs: dict[str, tuple] = {}
-        for run in document.runs:
-            runs[run.id] = (
-                run.operation,
-                json.dumps(run.parameters, ensure_ascii=False),
-                run.generator,
-                run.status,
-                run.created_at,
-                tuple(run.input_version_ids),
-                tuple(run.output_version_ids),
-            )
-        tags: dict[str, tuple] = {}
-        for tag in document.tags:
-            tags[tag.id] = (
-                tag.name,
-                tag.display_name,
-                json.dumps(tag.metadata, ensure_ascii=False),
-            )
-        asset_tags = {
-            asset_id: frozenset(tag_ids)
-            for asset_id, tag_ids in document.asset_tags.items()
-        }
-        version_tags = {
-            version_id: frozenset(tag_ids)
-            for version_id, tag_ids in document.version_tags.items()
-        }
-        return {
-            "assets": assets,
-            "versions": versions,
-            "runs": runs,
-            "tags": tags,
-            "asset_tags": asset_tags,
-            "version_tags": version_tags,
-        }
-
-    def _can_incremental(self, document: CatalogDocument) -> bool:
-        """True when the DB is exactly one revision behind and diffable."""
-        if self._last_state is None:
-            return False
-        try:
-            revision = self.revision()
-            schema = self._read_sync_state("schema_version")
-            layout = self._read_sync_state("index_schema_version")
-        except Exception:
-            return False
-        if revision is None or revision != document.catalog_revision - 1:
-            return False
-        if schema != str(document.schema_version):
-            return False
-        return layout == str(INDEX_SCHEMA_VERSION)
-
-    def _delete_entity(
-        self,
-        conn: sqlite3.Connection,
-        table: str,
-        entity_id: str,
-        last_row: tuple | None,
-        lineage_keep: tuple[set[tuple[str, str]], set[tuple[str, str]]] | None = None,
-    ) -> None:
-        """Remove one entity row plus its dependent rows (exact per-table).
-
-        Lineage edges are the union of version-parent edges and retained-run
-        edges. ``lineage_keep`` is ``(run_pairs, version_pairs)`` from the
-        *current* document state; a version's old parent edges are deleted only
-        when not also covered by a retained run (so purging a version never
-        drops a run-derived edge a full rebuild would keep).
-        """
-        if table == "assets":
-            conn.execute("DELETE FROM assets WHERE id = ?", (entity_id,))
-            conn.execute("DELETE FROM asset_tags WHERE asset_id = ?", (entity_id,))
-        elif table == "versions":
-            conn.execute("DELETE FROM versions WHERE id = ?", (entity_id,))
-            conn.execute("DELETE FROM version_tags WHERE version_id = ?", (entity_id,))
-            # Run input/output link rows are NOT deleted here: they are owned
-            # by the run record, which retains purged version ids as historical
-            # provenance (service.purge_trashed keeps runs). A full rebuild
-            # re-creates those rows from the run, so deleting them would make
-            # the incremental index diverge from a rebuild.
-            if last_row is not None and lineage_keep is not None:
-                run_pairs, _version_pairs = lineage_keep
-                for parent_id in last_row[-1]:
-                    if (parent_id, entity_id) not in run_pairs:
-                        conn.execute(
-                            "DELETE FROM lineage WHERE parent_version_id = ?"
-                            " AND child_version_id = ?",
-                            (parent_id, entity_id),
-                        )
-        elif table == "runs":
-            conn.execute("DELETE FROM runs WHERE id = ?", (entity_id,))
-            conn.execute("DELETE FROM run_inputs WHERE run_id = ?", (entity_id,))
-            conn.execute("DELETE FROM run_outputs WHERE run_id = ?", (entity_id,))
-            if last_row is not None and lineage_keep is not None:
-                run_pairs, version_pairs = lineage_keep
-                for input_id in last_row[-2]:
-                    for output_id in last_row[-1]:
-                        if (input_id, output_id) not in run_pairs and (
-                            input_id, output_id
-                        ) not in version_pairs:
-                            conn.execute(
-                                "DELETE FROM lineage WHERE parent_version_id = ?"
-                                " AND child_version_id = ?",
-                                (input_id, output_id),
-                            )
-        elif table == "tags":
-            conn.execute("DELETE FROM tags WHERE id = ?", (entity_id,))
-            conn.execute("DELETE FROM asset_tags WHERE tag_id = ?", (entity_id,))
-            conn.execute("DELETE FROM version_tags WHERE tag_id = ?", (entity_id,))
-
-    def _sync_incremental(self, document: CatalogDocument) -> None:
-        """Upsert changed rows (and remove deleted ones) in one transaction.
-
-        The result is byte-equivalent to a full :meth:`rebuild`: only the
-        write set shrinks to the actually-changed rows. Any failure raises
-        inside the transaction, rolling the database back to the previous
-        revision, after which ``sync`` self-heals via :meth:`rebuild`.
-        """
-        state = self._state_of(document)
-        last = self._last_state
-        assert last is not None
-        conn = self._connect()
-        # Lineage-affecting change detection: any version parents / run io
-        # differ, or any version/run was added or removed. When nothing
-        # lineage-affecting changed, the lineage table is left untouched
-        # (the import-folder path adds parent-less RAW versions → O(Δ) sync).
-        version_lin_changed = (
-            set(last["versions"]) != set(state["versions"])
-            or any(
-                last["versions"].get(vid) is None
-                or last["versions"][vid][-1] != row[-1]
-                for vid, row in state["versions"].items()
-            )
-        )
-        run_lin_changed = (
-            set(last["runs"]) != set(state["runs"])
-            or any(
-                last["runs"].get(rid) is None
-                or last["runs"][rid][-2:] != row[-2:]
-                for rid, row in state["runs"].items()
-            )
-        )
-        lineage_keep: tuple[set[tuple[str, str]], set[tuple[str, str]]] | None = None
-        if version_lin_changed or run_lin_changed:
-            # Current (post-change) edge sets: lineage deletion must keep any
-            # pair still covered by a version-parent edge or a retained run.
-            run_pairs = {
-                (input_id, output_id)
-                for rid, row in state["runs"].items()
-                for input_id in row[-2]
-                for output_id in row[-1]
-            }
-            version_pairs = {
-                (parent_id, vid)
-                for vid, row in state["versions"].items()
-                for parent_id in row[-1]
-            }
-            lineage_keep = (run_pairs, version_pairs)
-        with conn:
-            # 1. Deletions first (ids present last sync, gone from the document).
-            for table in ("assets", "versions", "runs", "tags"):
-                for entity_id in set(last[table]) - set(state[table]):
-                    self._delete_entity(
-                        conn, table, entity_id, last[table].get(entity_id), lineage_keep
-                    )
-
-            # 2. Tag associations: full per-owner refresh on change.
-            for asset_id in set(last["asset_tags"]) | set(state["asset_tags"]):
-                if last["asset_tags"].get(asset_id) != state["asset_tags"].get(asset_id):
-                    conn.execute(
-                        "DELETE FROM asset_tags WHERE asset_id = ?", (asset_id,)
-                    )
-                    conn.executemany(
-                        "INSERT OR IGNORE INTO asset_tags (asset_id, tag_id)"
-                        " VALUES (?,?)",
-                        [(asset_id, tid) for tid in state["asset_tags"].get(asset_id, ())],
-                    )
-            for version_id in set(last["version_tags"]) | set(state["version_tags"]):
-                if last["version_tags"].get(version_id) != state["version_tags"].get(version_id):
-                    conn.execute(
-                        "DELETE FROM version_tags WHERE version_id = ?", (version_id,)
-                    )
-                    conn.executemany(
-                        "INSERT OR IGNORE INTO version_tags (version_id, tag_id)"
-                        " VALUES (?,?)",
-                        [(version_id, tid) for tid in state["version_tags"].get(version_id, ())],
-                    )
-
-            # 3. Row upserts + dependent join rows.
-            for asset_id, row in state["assets"].items():
-                if last["assets"].get(asset_id) != row:
-                    conn.execute(
-                        "INSERT OR REPLACE INTO assets (id, name, name_search, type, description,"
-                        " current_version_id, legacy_resource_id, metadata, created_at,"
-                        " updated_at, trashed, trashed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                        (asset_id, *row),
-                    )
-            for version_id, row in state["versions"].items():
-                old = last["versions"].get(version_id)
-                if old == row:
-                    continue
-                if old is None or old[-1] != row[-1]:
-                    # Lineage edges owned by this version's parent ids. Old
-                    # parents come from the snapshot; a pair still covered by a
-                    # retained run is kept (a full rebuild would re-create it).
-                    if old is not None and lineage_keep is not None:
-                        run_pairs, _version_pairs = lineage_keep
-                        for parent_id in old[-1]:
-                            if (parent_id, version_id) not in run_pairs:
-                                conn.execute(
-                                    "DELETE FROM lineage WHERE parent_version_id = ?"
-                                    " AND child_version_id = ?",
-                                    (parent_id, version_id),
-                                )
-                    conn.executemany(
-                        "INSERT OR IGNORE INTO lineage (parent_version_id,"
-                        " child_version_id) VALUES (?,?)",
-                        [(parent_id, version_id) for parent_id in row[-1]],
-                    )
-                conn.execute(
-                    "INSERT OR REPLACE INTO versions (id, asset_id, version_number,"
-                    " stage, managed, path, source_uri, format, size_bytes, sha256,"
-                    " run_id, metadata, created_at, trashed, trashed_at)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (version_id, *row[:-1]),
-                )
-            for run_id, row in state["runs"].items():
-                old = last["runs"].get(run_id)
-                if old == row:
-                    continue
-                # The runs row itself must be upserted (same pattern as the
-                # versions/tags loops): a run that first appears in an
-                # incremental revision would otherwise never land in the
-                # ``runs`` table — only a full rebuild writes it (DATA-1).
-                conn.execute(
-                    "INSERT OR REPLACE INTO runs (id, operation, parameters,"
-                    " generator, status, created_at) VALUES (?,?,?,?,?,?)",
-                    (run_id, *row[:-2]),
-                )
-                conn.execute("DELETE FROM run_inputs WHERE run_id = ?", (run_id,))
-                conn.execute("DELETE FROM run_outputs WHERE run_id = ?", (run_id,))
-                conn.executemany(
-                    "INSERT OR IGNORE INTO run_inputs (run_id, version_id)"
-                    " VALUES (?,?)",
-                    [(run_id, vid) for vid in row[-2]],
-                )
-                conn.executemany(
-                    "INSERT OR IGNORE INTO run_outputs (run_id, version_id)"
-                    " VALUES (?,?)",
-                    [(run_id, vid) for vid in row[-1]],
-                )
-                # Run-derived lineage edges: remove old pairs no longer covered
-                # by any source, add new pairs (deduped).
-                new_pairs = [(i, o) for i in row[-2] for o in row[-1]]
-                run_pairs, version_pairs = lineage_keep or (set(), set())
-                if old is not None:
-                    for input_id in old[-2]:
-                        for output_id in old[-1]:
-                            pair = (input_id, output_id)
-                            if pair not in run_pairs and pair not in version_pairs:
-                                conn.execute(
-                                    "DELETE FROM lineage WHERE parent_version_id = ?"
-                                    " AND child_version_id = ?",
-                                    pair,
-                                )
-                    for pair in new_pairs:
-                        if pair not in version_pairs:
-                            conn.execute(
-                                "INSERT OR IGNORE INTO lineage (parent_version_id,"
-                                " child_version_id) VALUES (?,?)",
-                                pair,
-                            )
-                else:
-                    conn.executemany(
-                        "INSERT OR IGNORE INTO lineage (parent_version_id,"
-                        " child_version_id) VALUES (?,?)",
-                        new_pairs,
-                    )
-            for tag_id, row in state["tags"].items():
-                if last["tags"].get(tag_id) != row:
-                    conn.execute(
-                        "INSERT OR REPLACE INTO tags (id, name, display_name,"
-                        " metadata) VALUES (?,?,?,?)",
-                        (tag_id, *row),
-                    )
-
-            # 4. Sync state (revision advances with the canonical document).
-            conn.executemany(
-                "INSERT OR REPLACE INTO sync_state (key, value) VALUES (?,?)",
-                [
-                    ("schema_version", str(document.schema_version)),
-                    ("catalog_revision", str(document.catalog_revision)),
-                    ("index_schema_version", str(INDEX_SCHEMA_VERSION)),
-                ],
-            )
-        self._last_state = state
 
     # -- queries ----------------------------------------------------------------
 

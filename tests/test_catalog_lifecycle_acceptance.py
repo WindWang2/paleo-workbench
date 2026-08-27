@@ -600,10 +600,10 @@ def test_acceptance_18_save_failure_rollback(catalog, tmp_path: Path, monkeypatc
     payload = catalog.service.resolve_path(version)
     before_revision = catalog.service.document.catalog_revision
 
-    def boom(self, document):
+    def boom(_self, _dirty, **_kw):
         raise OSError("disk full")
 
-    monkeypatch.setattr(CatalogStore, "save", boom)
+    monkeypatch.setattr(DataCatalogService, "_flush_canonical_locked", boom)
     with pytest.raises(OSError):
         catalog.service.trash_asset(asset_id, reason="cleanup")
 
@@ -627,10 +627,10 @@ def test_acceptance_18b_restore_save_failure_rollback(
     trash_path = catalog.service.resolve_path(trashed)
     assert trash_path.is_file()
 
-    def boom(self, document):
+    def boom(_self, _dirty, **_kw):
         raise OSError("disk full")
 
-    monkeypatch.setattr(CatalogStore, "save", boom)
+    monkeypatch.setattr(DataCatalogService, "_flush_canonical_locked", boom)
     with pytest.raises(OSError):
         catalog.service.restore_asset(asset_id)
 

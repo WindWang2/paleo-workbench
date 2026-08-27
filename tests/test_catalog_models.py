@@ -40,10 +40,10 @@ def test_register_model_failed_save_rolls_back_in_memory(service, monkeypatch):
         provider="python_callable",
     )
 
-    def boom(_self, _document):
+    def boom(_self, _dirty, **_kw):
         raise OSError("disk full")
 
-    monkeypatch.setattr(CatalogStore, "save", boom)
+    monkeypatch.setattr(DataCatalogService, "_flush_canonical_locked", boom)
     with pytest.raises(OSError):
         service.register_model(model_id="m1", model_name="B")
     assert model.model_name == "A"
@@ -68,10 +68,10 @@ def test_promote_model_failed_save_rolls_back_in_memory(service, monkeypatch):
         input_schema={"required_asset_types": ["well_log"]},
     )
 
-    def boom(_self, _document):
+    def boom(_self, _dirty, **_kw):
         raise OSError("disk full")
 
-    monkeypatch.setattr(CatalogStore, "save", boom)
+    monkeypatch.setattr(DataCatalogService, "_flush_canonical_locked", boom)
     with pytest.raises(OSError):
         service.promote_model("pkg-v1", "1")
     assert service.get_model("pkg-v1").status == "demo"
@@ -262,6 +262,7 @@ def test_model_registry_persists_and_reloads(service):
         model_id="m1", model_name="A", capability="cap", provider="p", status="demo"
     )
     service.register_model_version("m1", model_version="1", demo_only=True)
+    service.export_manifest()  # checkpoint the manifest for the legacy-format check
     store_path = catalog_file_for(service.project_path)
     raw = json.loads(store_path.read_text(encoding="utf-8"))
     assert len(raw["models"]) == 1
