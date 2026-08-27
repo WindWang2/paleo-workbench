@@ -84,10 +84,14 @@ _ENTITY_GROUPS = {
 # an unusual number of linked files (same spirit as MAX_ENTITY_CHILDREN).
 MAX_WELL_FILE_CHILDREN = 30
 
-# Tree rendering cap (§24): the DATA MANAGER tree is a navigation surface,
-# not a registry browser — beyond this many wells users navigate via search
-# in the 井位地图 page.  Prevents 50k QTreeWidgetItem allocations.
-MAX_ENTITY_CHILDREN = 500
+# Paged entity population (#1046): groups materialize one page at a time as
+# the user keeps browsing — a 100k-well project never allocates 100k
+# QTreeWidgetItems up front, yet every entity stays reachable (paging
+# appends; nothing is hidden behind a hard cap anymore).
+ENTITY_PAGE_SIZE = 500
+
+# Marker role identifying the "show more" affordance inside a group.
+_ROLE_SHOW_MORE = Qt.ItemDataRole.UserRole + 2
 
 
 class NavigationTree(QTreeWidget):
@@ -121,9 +125,14 @@ class NavigationTree(QTreeWidget):
         self._reference_well_group_item: QTreeWidgetItem | None = None
         self._survey_group_item: QTreeWidgetItem | None = None
         self._geo_group_item: QTreeWidgetItem | None = None
+        # Paged entity population state (#1046): group key -> (sorted
+        # entities, rendered count, per-group render aux). Children
+        # materialize page-by-page; nothing beyond the first page is lost.
+        self._entity_pages: dict[str, dict] = {}
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
         self.currentItemChanged.connect(self._on_current_changed)
+        self.itemClicked.connect(self._on_item_clicked)
         self._build_tree()
 
     def _build_tree(self) -> None:
@@ -338,28 +347,32 @@ class NavigationTree(QTreeWidget):
                 1 for link in links if link.entity_id == entity.id
             )
 
-        # 地质解释 children (same membership-filter mechanics as wells).
+        # 地质解释 + entity groups: paged lazy population (#1046). One page
+        # materializes up front; the "show more" affordance appends the next
+        # page on demand, so every entity is reachable without ever
+        # allocating the full population.
+        self._entity_pages = {}
         if self._geo_group_item is not None:
-            group = self._geo_group_item
-            group.takeChildren()
-            entities = list(getattr(project, "geological_entities", None) or [])
-            for entity in sorted(entities, key=lambda item: (item.name, item.id))[
-                :MAX_ENTITY_CHILDREN
-            ]:
-                count = self._entity_counts.get(("geological_entity", entity.id), 0)
-                child = QTreeWidgetItem(group, [f"⛰ {entity.name} {count}"])
-                child.setData(
-                    0,
-                    Qt.ItemDataRole.UserRole,
-                    FilterQuery(node_type=ENTITY_NODE, node_value=entity.id),
-                )
-                child.setData(0, Qt.ItemDataRole.UserRole + 1, f"entity:{entity.id}")
-                child.setToolTip(0, entity.entity_kind or entity.name)
+            entities = sorted(
+                list(getattr(project, "geological_entities", None) or []),
+                key=lambda item: (item.name, item.id),
+            )
+            self._entity_pages["geological_entity"] = {
+                "group": self._geo_group_item,
+                "entities": entities,
+                "rendered": 0,
+                "icon": "⛰",
+                "count_key": "geological_entity",
+                "well_links": {},
+                "unresolved": set(),
+                "invalid_coord": set(),
+            }
+            self._append_entity_page("geological_entity")
             if not entities:
-                empty = QTreeWidgetItem(group, ["暂无地质解释，导入层位数据后自动识别"])
+                empty = QTreeWidgetItem(self._geo_group_item, ["暂无地质解释，导入层位数据后自动识别"])
                 empty.setFlags(empty.flags() & ~Qt.ItemFlag.ItemIsSelectable)
                 empty.setDisabled(True)
-            group.setExpanded(0 < len(entities) <= 200)
+            self._geo_group_item.setExpanded(0 < len(entities) <= 200)
 
         for group, entities, entity_type in (
             (self._well_group_item, wells, "well"),
@@ -374,80 +387,19 @@ class NavigationTree(QTreeWidget):
                 query = current.data(0, Qt.ItemDataRole.UserRole)
                 if query and query.node_type == ENTITY_NODE:
                     selected_key = query.node_value
-            group.takeChildren()
-            icon = (
-                "📍"
-                if entity_type == "reference_well"
-                else _ENTITY_GROUPS[entity_type][1]
-            )
             ordered = sorted(entities, key=lambda item: (item.name, item.id))
-            rendered = ordered[:MAX_ENTITY_CHILDREN]
-            for entity in rendered:
-                flags = ""
-                if entity.id in unresolved_wells:
-                    flags = " ⚠"
-                elif entity.id in invalid_coord_wells:
-                    flags = " ⚠坐标"
-                count_key = "well" if entity_type == "reference_well" else entity_type
-                count = self._entity_counts.get((count_key, entity.id), 0)
-                child = QTreeWidgetItem(
-                    group, [f"{icon} {entity.name}{flags} {count}"]
-                )
-                child.setData(
-                    0,
-                    Qt.ItemDataRole.UserRole,
-                    FilterQuery(node_type=ENTITY_NODE, node_value=entity.id),
-                )
-                child.setData(0, Qt.ItemDataRole.UserRole + 1, f"entity:{entity.id}")
-                child.setToolTip(0, getattr(entity, "uwi", "") or entity.name)
-                if entity_type in {"well", "reference_well"}:
-                    # 下一层：该井的具体数据文件（可折叠，点击过滤到单个资产）
-                    file_links = sorted(
-                        well_links.get(entity.id, []),
-                        key=lambda link: (self._asset_label(link.asset_id), link.asset_id),
-                    )
-                    for link in file_links[:MAX_WELL_FILE_CHILDREN]:
-                        label = self._asset_label(link.asset_id)
-                        file_child = QTreeWidgetItem(child, [f"📄 {label}"])
-                        file_child.setData(
-                            0,
-                            Qt.ItemDataRole.UserRole,
-                            FilterQuery(
-                                node_type=ENTITY_NODE,
-                                node_value=entity.id,
-                                asset_id=link.asset_id,
-                            ),
-                        )
-                        file_child.setData(
-                            0, Qt.ItemDataRole.UserRole + 1, f"asset:{link.asset_id}"
-                        )
-                        file_child.setToolTip(0, label)
-                    if len(file_links) > MAX_WELL_FILE_CHILDREN:
-                        overflow = QTreeWidgetItem(
-                            child,
-                            [f"…另有 {len(file_links) - MAX_WELL_FILE_CHILDREN} 个文件"],
-                        )
-                        overflow.setFlags(
-                            overflow.flags() & ~Qt.ItemFlag.ItemIsSelectable
-                        )
-                        overflow.setDisabled(True)
-                if selected_key == entity.id:
-                    self.setCurrentItem(child)
-            if len(ordered) > MAX_ENTITY_CHILDREN:
-                if entity_type == "reference_well":
-                    overflow_text = (
-                        f"…另有 {len(ordered) - MAX_ENTITY_CHILDREN} 口参考井，请使用搜索定位"
-                    )
-                else:
-                    overflow_text = (
-                        f"…另有 {len(ordered) - MAX_ENTITY_CHILDREN} 口井，请展开下方井位地图面板查看"
-                    )
-                overflow = QTreeWidgetItem(
-                    group,
-                    [overflow_text],
-                )
-                overflow.setFlags(overflow.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-                overflow.setDisabled(True)
+            self._entity_pages[entity_type] = {
+                "group": group,
+                "entities": ordered,
+                "rendered": 0,
+                "icon": "📍" if entity_type == "reference_well" else _ENTITY_GROUPS[entity_type][1],
+                "count_key": "well" if entity_type == "reference_well" else entity_type,
+                "well_links": well_links if entity_type in {"well", "reference_well"} else {},
+                "unresolved": unresolved_wells,
+                "invalid_coord": invalid_coord_wells,
+                "selected_key": selected_key,
+            }
+            self._append_entity_page(entity_type)
             if entity_type == "well":
                 empty_label = "暂无测区井，导入井位文件后自动识别"
             elif entity_type == "reference_well":
@@ -458,7 +410,121 @@ class NavigationTree(QTreeWidget):
                 empty = QTreeWidgetItem(group, [empty_label])
                 empty.setFlags(empty.flags() & ~Qt.ItemFlag.ItemIsSelectable)
                 empty.setDisabled(True)
-            group.setExpanded(entity_type == "well" and 0 < len(rendered) <= 200)
+            group.setExpanded(entity_type == "well" and 0 < len(ordered) <= 200)
+
+    # ------------------------------------------------------------------
+    # Paged entity population (#1046)
+    # ------------------------------------------------------------------
+
+    def entity_population(self, group_key: str) -> int:
+        """Total entities tracked for *group_key* (rendered or not)."""
+        page = self._entity_pages.get(group_key)
+        return len(page["entities"]) if page else 0
+
+    def _append_entity_page(self, group_key: str) -> None:
+        """Materialize the next page of children for *group_key*."""
+        page = self._entity_pages.get(group_key)
+        if page is None:
+            return
+        group: QTreeWidgetItem = page["group"]
+        entities = page["entities"]
+        start = page["rendered"]
+        stop = min(start + ENTITY_PAGE_SIZE, len(entities))
+        icon = page["icon"]
+        count_key = page["count_key"]
+        well_links = page["well_links"]
+        unresolved = page["unresolved"]
+        invalid_coord = page["invalid_coord"]
+        selected_key = page.get("selected_key")
+        for entity in entities[start:stop]:
+            flags = ""
+            if entity.id in unresolved:
+                flags = " ⚠"
+            elif entity.id in invalid_coord:
+                flags = " ⚠坐标"
+            count = self._entity_counts.get((count_key, entity.id), 0)
+            child = QTreeWidgetItem(group, [f"{icon} {entity.name}{flags} {count}"])
+            child.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                FilterQuery(node_type=ENTITY_NODE, node_value=entity.id),
+            )
+            child.setData(0, Qt.ItemDataRole.UserRole + 1, f"entity:{entity.id}")
+            child.setToolTip(0, getattr(entity, "uwi", "") or entity.name)
+            if well_links:
+                # 下一层：该井的具体数据文件（可折叠，点击过滤到单个资产）
+                file_links = sorted(
+                    well_links.get(entity.id, []),
+                    key=lambda link: (self._asset_label(link.asset_id), link.asset_id),
+                )
+                for link in file_links[:MAX_WELL_FILE_CHILDREN]:
+                    label = self._asset_label(link.asset_id)
+                    file_child = QTreeWidgetItem(child, [f"📄 {label}"])
+                    file_child.setData(
+                        0,
+                        Qt.ItemDataRole.UserRole,
+                        FilterQuery(
+                            node_type=ENTITY_NODE,
+                            node_value=entity.id,
+                            asset_id=link.asset_id,
+                        ),
+                    )
+                    file_child.setData(
+                        0, Qt.ItemDataRole.UserRole + 1, f"asset:{link.asset_id}"
+                    )
+                    file_child.setToolTip(0, label)
+                if len(file_links) > MAX_WELL_FILE_CHILDREN:
+                    overflow = QTreeWidgetItem(
+                        child,
+                        [f"…另有 {len(file_links) - MAX_WELL_FILE_CHILDREN} 个文件"],
+                    )
+                    overflow.setFlags(
+                        overflow.flags() & ~Qt.ItemFlag.ItemIsSelectable
+                    )
+                    overflow.setDisabled(True)
+            if selected_key == entity.id:
+                self.setCurrentItem(child)
+                page["selected_key"] = None
+        page["rendered"] = stop
+        if stop < len(entities):
+            more = QTreeWidgetItem(
+                group,
+                [f"📂 显示更多（已显示 {stop}/{len(entities)}）"],
+            )
+            more.setData(0, _ROLE_SHOW_MORE, group_key)
+
+    def _activate_next_entity_page(self, group_key: str) -> bool:
+        """Append the next page; True when more pages remain after it."""
+        page = self._entity_pages.get(group_key)
+        if page is None:
+            return False
+        group: QTreeWidgetItem = page["group"]
+        # drop the current affordance node before appending
+        for i in range(group.childCount() - 1, -1, -1):
+            if group.child(i).data(0, _ROLE_SHOW_MORE) is not None:
+                group.removeChild(group.child(i))
+                break
+        self._append_entity_page(group_key)
+        return page["rendered"] < len(page["entities"])
+
+    def _on_item_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
+        group_key = item.data(0, _ROLE_SHOW_MORE)
+        if group_key is not None:
+            self._activate_next_entity_page(str(group_key))
+
+    def _materialize_entity_page_for(self, group_key: str, entity_id: str) -> None:
+        """Render pages until *entity_id* is materialized (Map → Data)."""
+        page = self._entity_pages.get(group_key)
+        if page is None:
+            return
+        index = next(
+            (i for i, e in enumerate(page["entities"]) if e.id == entity_id), None
+        )
+        if index is None:
+            return
+        while page["rendered"] <= index:
+            if not self._activate_next_entity_page(group_key):
+                break
 
     def _find_entity_item(self, entity_id: str) -> QTreeWidgetItem | None:
         stack = [self.invisibleRootItem()]
@@ -477,7 +543,19 @@ class NavigationTree(QTreeWidget):
         return None
 
     def highlight_well(self, well_id: str) -> bool:
-        """Select the tree leaf of ``well_id`` (Map → Data direction)."""
+        """Select the tree leaf of ``well_id`` (Map → Data direction).
+
+        Wells beyond the materialized pages are paged in on demand — the
+        highlight never fails just because the target sits on page 40
+        (#1046).
+        """
+        for group_key in ("well", "reference_well"):
+            page = self._entity_pages.get(group_key)
+            if page is None:
+                continue
+            if any(e.id == well_id for e in page["entities"]):
+                self._materialize_entity_page_for(group_key, well_id)
+                break
         item = self._find_entity_item(well_id)
         if item is None:
             return False

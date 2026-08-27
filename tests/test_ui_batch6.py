@@ -7,11 +7,13 @@ from paleo_workbench.ui.theme import ThemeMode, theme_manager
 
 
 def test_theme_manager_switching():
-    # Initial state
+    # #1047: every theme renders through the single token sheet; the manager
+    # owns only the switching state (no parallel mini-QSS anymore).
+    from paleo_workbench import tokens
+
     theme_manager.set_theme(ThemeMode.DARK)
     assert theme_manager.current_theme == ThemeMode.DARK
-    dark_qss = theme_manager.get_qss()
-    assert "#181c22" in dark_qss
+    assert theme_manager.get_qss() == tokens.build_qss(theme="dark")
 
     # Switch to Light
     emitted = []
@@ -20,14 +22,12 @@ def test_theme_manager_switching():
     assert theme_manager.current_theme == ThemeMode.LIGHT
     assert len(emitted) == 1
     assert emitted[0] == "light"
-    light_qss = theme_manager.get_qss()
-    assert "#f8fafc" in light_qss
+    assert theme_manager.get_qss() == tokens.build_qss()
 
     # Switch to High Contrast
     theme_manager.set_theme(ThemeMode.HIGH_CONTRAST)
     assert theme_manager.current_theme == ThemeMode.HIGH_CONTRAST
-    hc_qss = theme_manager.get_qss()
-    assert "#000000" in hc_qss
+    assert theme_manager.get_qss() == tokens.build_qss(theme="high_contrast")
 
 
 def test_dock_manager_layouts():
