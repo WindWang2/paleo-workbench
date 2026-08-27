@@ -222,9 +222,9 @@ def test_open_without_index_keeps_canonical_catalog_queryable(tmp_path):
         project_path, ensure_index=False, sweep_temp=False
     )
     try:
+        # The deleted store is recovered from the manifest checkpoint: the
+        # catalog stays fully queryable with no data loss (#1027).
         assert deferred.get_version(version.id).id == version.id
-        assert deferred.index_revision() is None
-        deferred.ensure_index_ready()
         assert deferred.index_revision() == deferred.document.catalog_revision
     finally:
         deferred.close()
@@ -383,10 +383,10 @@ def test_failed_save_leaves_no_partial_state(service, tmp_path, monkeypatch):
     src = _make_source(tmp_path)
     before_revision = service.document.catalog_revision
 
-    def boom(self, document):
+    def boom(_service, _dirty, **_kw):
         raise OSError("disk full")
 
-    monkeypatch.setattr(CatalogStore, "save", boom)
+    monkeypatch.setattr(DataCatalogService, "_flush_canonical_locked", boom)
     with pytest.raises(OSError):
         service.import_raw(src)
 
@@ -402,7 +402,9 @@ def test_failed_save_leaves_no_partial_state(service, tmp_path, monkeypatch):
 def test_failed_save_rolls_back_new_asset(service, tmp_path, monkeypatch):
     src = _make_source(tmp_path)
     monkeypatch.setattr(
-        CatalogStore, "save", lambda self, doc: (_ for _ in ()).throw(OSError("x"))
+        DataCatalogService,
+        "_flush_canonical_locked",
+        lambda self, dirty, **kw: (_ for _ in ()).throw(OSError("x")),
     )
     with pytest.raises(OSError):
         service.import_raw(src)
@@ -517,10 +519,10 @@ def test_create_derived_failure_leaves_no_orphans(service, tmp_path, monkeypatch
     derived_src = _make_source(tmp_path, name="derived.csv", payload=b"derived")
     before_versions = len(service.document.versions)
 
-    def boom(self, document):
+    def boom(_service, _dirty, **_kw):
         raise OSError("disk full")
 
-    monkeypatch.setattr(CatalogStore, "save", boom)
+    monkeypatch.setattr(DataCatalogService, "_flush_canonical_locked", boom)
     with pytest.raises(OSError):
         service.create_derived(
             derived_src, parent_version_ids=[parent.id], operation="filter"
@@ -545,10 +547,10 @@ def test_failed_commit_restores_working_copy(service, tmp_path, monkeypatch):
     working = service.create_working_copy(parent.id)
     working.write_bytes(b"precious-data-edited")
 
-    def boom(self, document):
+    def boom(_service, _dirty, **_kw):
         raise OSError("disk full")
 
-    monkeypatch.setattr(CatalogStore, "save", boom)
+    monkeypatch.setattr(DataCatalogService, "_flush_canonical_locked", boom)
     with pytest.raises(OSError):
         service.commit_working_copy(working)
 
@@ -607,14 +609,14 @@ def test_batch_save_merges_many_imports_into_one_canonical_write(service, tmp_pa
     """200 imports inside one batch must persist with a SINGLE canonical
     store write (O(N²) full-document rewrite + fsync per version otherwise)."""
     calls = 0
-    real_save = service._store.save
+    real_save = type(service)._flush_canonical_locked
 
-    def counted(document):
+    def counted(_service, _dirty, **_kw):
         nonlocal calls
         calls += 1
-        return real_save(document)
+        return real_save(_service, _dirty, **_kw)
 
-    monkeypatch.setattr(service._store, "save", counted)
+    monkeypatch.setattr(type(service), "_flush_canonical_locked", counted)
 
     with service.batch_save():
         for i in range(200):
@@ -630,21 +632,21 @@ def test_batch_save_merges_many_imports_into_one_canonical_write(service, tmp_pa
         any(v.asset_id == a.id for v in service.document.versions)
         for a in service.document.assets
     )
-    disk = CatalogStore(tmp_path / "proj" / "demo.paleo.json").load()
+    disk = DataCatalogService.open(service.project_path).document
     assert disk.model_dump(mode="json") == service.document.model_dump(mode="json")
     assert service.index_revision() == service.document.catalog_revision
 
 
 def test_batch_save_body_failure_persists_nothing_and_restores(service, tmp_path, monkeypatch):
     calls = 0
-    real_save = service._store.save
+    real_save = type(service)._flush_canonical_locked
 
-    def counted(document):
+    def counted(_service, _dirty, **_kw):
         nonlocal calls
         calls += 1
-        return real_save(document)
+        return real_save(_service, _dirty, **_kw)
 
-    monkeypatch.setattr(service._store, "save", counted)
+    monkeypatch.setattr(type(service), "_flush_canonical_locked", counted)
 
     with pytest.raises(RuntimeError):
         with service.batch_save():
@@ -654,15 +656,15 @@ def test_batch_save_body_failure_persists_nothing_and_restores(service, tmp_path
     assert calls == 0  # nothing was ever written to the canonical store
     assert service.document.assets == []
     assert service.document.versions == []
-    disk = CatalogStore(tmp_path / "proj" / "demo.paleo.json").load()
+    disk = DataCatalogService.open(service.project_path).document
     assert disk.model_dump(mode="json") == service.document.model_dump(mode="json")
 
 
 def test_batch_save_flush_failure_restores_document(service, tmp_path, monkeypatch):
-    def boom(document):
+    def boom(_service, _dirty, **_kw):
         raise OSError("disk full")
 
-    monkeypatch.setattr(service._store, "save", boom)
+    monkeypatch.setattr(type(service), "_flush_canonical_locked", boom)
 
     with pytest.raises(OSError):
         with service.batch_save():
@@ -676,14 +678,14 @@ def test_batch_save_flush_failure_restores_document(service, tmp_path, monkeypat
 
 def test_batch_save_nested_batches_flush_once(service, tmp_path, monkeypatch):
     calls = 0
-    real_save = service._store.save
+    real_save = type(service)._flush_canonical_locked
 
-    def counted(document):
+    def counted(_service, _dirty, **_kw):
         nonlocal calls
         calls += 1
-        return real_save(document)
+        return real_save(_service, _dirty, **_kw)
 
-    monkeypatch.setattr(service._store, "save", counted)
+    monkeypatch.setattr(type(service), "_flush_canonical_locked", counted)
 
     with service.batch_save():
         service.import_raw(_make_source(tmp_path, name="a.las"))
@@ -731,14 +733,14 @@ def test_open_without_index_keeps_canonical_queries_usable(tmp_path: Path):
 def test_add_tags_batches_one_canonical_write(service, tmp_path, monkeypatch):
     version = service.import_raw(_make_source(tmp_path))
     calls = 0
-    real_save = service._store.save
+    real_save = type(service)._flush_canonical_locked
 
-    def counted(document):
+    def counted(_service, _dirty, **_kw):
         nonlocal calls
         calls += 1
-        return real_save(document)
+        return real_save(_service, _dirty, **_kw)
 
-    monkeypatch.setattr(service._store, "save", counted)
+    monkeypatch.setattr(type(service), "_flush_canonical_locked", counted)
     service.add_tags(["one", "two", "three"], version_id=version.id)
 
     assert calls == 1
@@ -749,10 +751,10 @@ def test_add_tags_batches_one_canonical_write(service, tmp_path, monkeypatch):
 def test_add_tags_batch_rolls_back_on_canonical_failure(service, tmp_path, monkeypatch):
     version = service.import_raw(_make_source(tmp_path))
 
-    def fail(_document):
+    def fail(_service, _dirty, **_kw):
         raise OSError("injected catalog failure")
 
-    monkeypatch.setattr(service._store, "save", fail)
+    monkeypatch.setattr(type(service), "_flush_canonical_locked", fail)
     with pytest.raises(OSError):
         service.add_tags(["one", "two"], version_id=version.id)
 
@@ -796,19 +798,19 @@ def test_concurrent_import_and_tag_untag_never_persists_zombie(service, tmp_path
     anchor = service.import_raw(_make_source(tmp_path, name="anchor.las"))
 
     saves = []
-    real_save = service._store.save
+    real_save = type(service)._flush_canonical_locked
 
-    def checked(document):
+    def checked(service_, dirty_, **kw_):
         # Every persisted snapshot must be consistent: no asset may exist
         # without at least one version (the zombie torn state).
-        assets = {a.id for a in document.assets}
-        versions = {v.asset_id for v in document.versions}
+        assets = {a.id for a in service_.document.assets}
+        versions = {v.asset_id for v in service_.document.versions}
         zombies = assets - versions
         assert not zombies, f"save persisted zombie asset(s): {zombies}"
-        saves.append(document.catalog_revision)
-        return real_save(document)
+        saves.append(service_.document.catalog_revision)
+        return real_save(service_, dirty_, **kw_)
 
-    monkeypatch.setattr(service._store, "save", checked)
+    monkeypatch.setattr(type(service), "_flush_canonical_locked", checked)
 
     rounds = 200
     errors: list[BaseException] = []
@@ -849,7 +851,7 @@ def test_concurrent_import_and_tag_untag_never_persists_zombie(service, tmp_path
         any(v.asset_id == a.id for v in service.document.versions)
         for a in service.document.assets
     )
-    disk = CatalogStore(tmp_path / "proj" / "demo.paleo.json").load()
+    disk = DataCatalogService.open(service.project_path).document
     assert disk.model_dump(mode="json") == service.document.model_dump(mode="json")
 def test_result_asset_registration_does_not_hold_lock_across_payload_io(
     service, tmp_path, monkeypatch
@@ -1045,14 +1047,19 @@ def test_batch_flush_stale_write_raises_and_restores(service, tmp_path):
     seed = service.import_raw(_make_source(tmp_path, name="seed.las"))
     n_assets_before = len(service.document.assets)
 
+    import sqlite3
+
     with pytest.raises(CatalogStaleWriteError):
         with service.batch_save():
             service.import_raw(_make_source(tmp_path, name="a.las"))
-            catalog_file = catalog_file_for(service.project_path)
-            stat = catalog_file.stat()
-            os.utime(
-                catalog_file, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000)
-            )
+            db = catalog_dir_for(service.project_path) / "catalog.sqlite"
+            conn = sqlite3.connect(db)
+            with conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO sync_state (key, value)"
+                    " VALUES ('catalog_revision', '999')"
+                )
+            conn.close()
 
     # Snapshot restored: the batch's mutation is gone, the seed survives.
     assert len(service.document.assets) == n_assets_before

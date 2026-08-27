@@ -135,10 +135,10 @@ def test_purge_trashed_failed_save_keeps_payloads_restorable(service, tmp_path, 
     trash_paths = [service.resolve_path(v) for v in (v1, v2)]
     assert all(p.is_file() for p in trash_paths)
 
-    def boom(_self, _document):
+    def boom(_self, _dirty, **_kw):
         raise OSError("disk full")
 
-    monkeypatch.setattr(CatalogStore, "save", boom)
+    monkeypatch.setattr(DataCatalogService, "_flush_canonical_locked", boom)
     with pytest.raises(OSError):
         service.purge_trashed()
 
@@ -169,10 +169,10 @@ def test_purge_trashed_failed_save_restores_asset_tombstone(
     assert v1.trashed is False
     assert v2.trashed is True
 
-    def boom(_self, _document):
+    def boom(_self, _dirty, **_kw):
         raise OSError("disk full")
 
-    monkeypatch.setattr(CatalogStore, "save", boom)
+    monkeypatch.setattr(DataCatalogService, "_flush_canonical_locked", boom)
     with pytest.raises(OSError):
         service.purge_trashed()
 
@@ -197,10 +197,10 @@ def test_restore_asset_failed_save_keeps_live_version_live(service, tmp_path, mo
     live_path = service.resolve_path(v1)
     assert live_path.is_file()
 
-    def boom(_self, _document):
+    def boom(_self, _dirty, **_kw):
         raise OSError("disk full")
 
-    monkeypatch.setattr(CatalogStore, "save", boom)
+    monkeypatch.setattr(DataCatalogService, "_flush_canonical_locked", boom)
     with pytest.raises(OSError):
         service.restore_asset(v1.asset_id)
 
@@ -219,10 +219,10 @@ def test_restore_version_failed_save_preserves_reason(service, tmp_path, monkeyp
     v = service.import_raw(_make_source(tmp_path))
     service.trash_version(v.id, reason="duplicate")
 
-    def boom(_self, _document):
+    def boom(_self, _dirty, **_kw):
         raise OSError("disk full")
 
-    monkeypatch.setattr(CatalogStore, "save", boom)
+    monkeypatch.setattr(DataCatalogService, "_flush_canonical_locked", boom)
     with pytest.raises(OSError):
         service.restore_version(v.id)
 
