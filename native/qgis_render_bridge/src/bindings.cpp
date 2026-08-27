@@ -357,12 +357,28 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
              "render_active stays true until cancel_render/shutdown (#938-5).")
         .def("render_sync", [](const QgisRenderBridge& bridge, const py::sequence& extent,
                                  const int width, const int height, const double dpi) {
-            return result_to_python(bridge.render_sync(parse_extent(extent), width, height, dpi));
+            // Convert Python input while holding the GIL, then release it for
+            // the long C++-only parallel render so other Python threads keep
+            // running (#1031). Python objects are only built after the
+            // release scope closes.
+            const auto parsed = parse_extent(extent);
+            const pwb::qgis_render::RenderResult result = [&]() {
+                py::gil_scoped_release release;
+                return bridge.render_sync(parsed, width, height, dpi);
+            }();
+            return result_to_python(result);
         })
         .def("export_vector", [](const QgisRenderBridge& bridge, const std::string& path,
                                   const std::string& format, const py::sequence& extent,
                                   const int width, const int height, const double dpi) {
-            return bridge.export_vector(path, format, parse_extent(extent), width, height, dpi);
+            // Same contract as render_sync: synchronous vector export plus
+            // file I/O must not stall the interpreter (#1031).
+            const auto parsed = parse_extent(extent);
+            const std::size_t written = [&]() {
+                py::gil_scoped_release release;
+                return bridge.export_vector(path, format, parsed, width, height, dpi);
+            }();
+            return written;
         })
         .def("shutdown", &QgisRenderBridge::shutdown)
         .def("diagnostics", [](const QgisRenderBridge& bridge) {

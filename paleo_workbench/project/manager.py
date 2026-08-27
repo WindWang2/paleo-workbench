@@ -122,6 +122,24 @@ class ProjectSaveStats:
     factor_artifacts_persisted: int = 0
 
 
+@dataclass(frozen=True)
+class PreparedSave:
+    """Detached, write-ready state captured by :meth:`ProjectManager.prepare_save`.
+
+    Everything here is plain JSON-compatible data copied out of the live
+    document on the GUI thread, so :meth:`ProjectManager.execute_save` can run
+    on a worker thread without racing user edits (#1040). ``runtime_sections``
+    is the comparison view the commit snapshot publishes: mutations landing
+    after the prepare call stay dirty for the next save.
+    """
+
+    payload_data: dict[str, Any]
+    runtime_sections: dict[str, Any]
+    changed_sections: frozenset[str]
+    updated_at: str
+    factor_changes: int = 0
+
+
 # Pydantic documents are mutable and intentionally do not carry persistence
 # bookkeeping.  A weak identity map gives a document one ephemeral snapshot
 # without changing its JSON schema or keeping closed projects alive.
@@ -383,6 +401,29 @@ class ProjectManager:
         A full portable JSON is still written for a changed project.  For a
         clean live document this method avoids factor-artifact probing, path
         translation, JSON encoding, fsync and replacement entirely.
+
+        Composed of the three #1040 phases: :meth:`prepare_save` (GUI thread —
+        diff, stale guard, detached payload build), :meth:`execute_save`
+        (worker thread — serialize + atomic write), :meth:`commit_save`
+        (GUI thread — publish snapshot). Synchronous callers keep this facade.
+        """
+        prepared = self.prepare_save(project)
+        if prepared is None:
+            self.last_save_stats = ProjectSaveStats(False, frozenset())
+            return False
+        stats = self.execute_save(prepared)
+        self.commit_save(project, prepared, stats)
+        return True
+
+    def prepare_save(self, project: ProjectDocument) -> PreparedSave | None:
+        """GUI-phase of a save: decide what to write and build a detached payload.
+
+        Performs the WorkArea sync, section diff, stale-write guard and factor
+        artifact externalization, then materializes the JSON-ready payload.
+        Heavy file I/O (serialize + write + fsync) is deliberately left to
+        :meth:`execute_save` so this phase is safe on the GUI thread (#1040).
+        Returns ``None`` when the live document is clean and nothing needs
+        rewriting.
         """
         # Keep the WorkArea CRS projection honest at the persistence boundary
         # (ADR 0059: coordinate stays canonical; workarea mirrors it).  A sync
@@ -401,8 +442,7 @@ class ProjectManager:
             snapshot.changed_sections(runtime_sections) if same_path else set(runtime_sections)
         )
         if same_path and not changed_sections:
-            self.last_save_stats = ProjectSaveStats(False, frozenset())
-            return False
+            return None
 
         if same_path and snapshot.disk_mtime_ns is not None:
             current = _file_mtime_ns(self.project_path)
@@ -436,31 +476,53 @@ class ProjectManager:
         # concrete root from ProjectController on open, while document paths
         # have already been resolved independently of this hint.
         payload_data["meta"]["project_root"] = "."
+        # The commit snapshot must compare equal against the next live dump:
+        # mirror the meta overrides onto the runtime view captured here.
+        runtime_sections["meta"] = dict(runtime_sections["meta"])
+        runtime_sections["meta"]["updated_at"] = updated_at
+        runtime_sections["meta"]["project_root"] = "."
+        return PreparedSave(
+            payload_data=payload_data,
+            runtime_sections=runtime_sections,
+            changed_sections=frozenset(changed_sections),
+            updated_at=updated_at,
+            factor_changes=factor_changes,
+        )
+
+    def execute_save(self, prepared: PreparedSave) -> ProjectSaveStats:
+        """Worker-phase of a save: serialize and atomically write the payload.
+
+        Touches only the detached data captured by :meth:`prepare_save` plus
+        the project file itself — never the live ``ProjectDocument`` — so it
+        is safe to run on an ``OwnedWorkerJob`` thread while the GUI keeps
+        serving the user (#1040).
+        """
         # Ensure a new project owns the same durable artifact layout before its
         # portable metadata references it. Existing clean sessions do not reach
         # this point and therefore do no directory/artifact work.
         ensure_artifact_layout(self.project_path)
-        payload = json.dumps(payload_data, ensure_ascii=False, indent=2)
+        payload = json.dumps(prepared.payload_data, ensure_ascii=False, indent=2)
         self._write_payload(payload)
+        dirty_domains = frozenset(
+            _DOMAIN_BY_SECTION.get(section, ProjectDirtyDomain.PROJECT_METADATA)
+            for section in prepared.changed_sections
+        )
+        return ProjectSaveStats(True, dirty_domains, prepared.factor_changes)
 
-        project.meta.updated_at = updated_at
-        committed_runtime = _runtime_sections(project)
+    def commit_save(self, project: ProjectDocument, prepared: PreparedSave, stats: ProjectSaveStats) -> None:
+        """GUI-phase after the write: publish post-save state onto the document."""
+        project.meta.updated_at = prepared.updated_at
         _remember_snapshot(
             project,
             ProjectPersistenceSnapshot(
                 project_path=self.project_path,
-                runtime_sections=committed_runtime,
-                portable_sections=payload_data,
+                runtime_sections=prepared.runtime_sections,
+                portable_sections=prepared.payload_data,
                 disk_mtime_ns=_file_mtime_ns(self.project_path),
                 pending_sections=frozenset(),
             ),
         )
-        dirty_domains = frozenset(
-            _DOMAIN_BY_SECTION.get(section, ProjectDirtyDomain.PROJECT_METADATA)
-            for section in changed_sections
-        )
-        self.last_save_stats = ProjectSaveStats(True, dirty_domains, factor_changes)
-        return True
+        self.last_save_stats = stats
 
     def _load_data(self) -> tuple[dict[str, Any], ProjectDocument, bool]:
         """Read canonical metadata, falling back to one last-known-good copy."""

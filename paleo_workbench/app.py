@@ -105,7 +105,8 @@ class PaleoWorkbenchWindow(QWidget):
         Parented to ``self`` (the window) so they survive shell rebuilds; the
         callbacks read the current ``self.app_shell`` at call-time.
         """
-        QShortcut(QKeySequence("Ctrl+S"), self, self.save_project)
+        # Interactive save runs its heavy I/O off the GUI thread (#1040).
+        QShortcut(QKeySequence("Ctrl+S"), self, self._on_save_project)
         QShortcut(QKeySequence("Ctrl+N"), self, self._on_new_project)
         QShortcut(QKeySequence("Ctrl+O"), self, self._on_open_project)
         QShortcut(QKeySequence("Ctrl+F"), self, self._shortcut_focus_search)

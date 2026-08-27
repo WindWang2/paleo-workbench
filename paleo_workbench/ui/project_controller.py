@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from pathlib import Path
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -22,6 +23,7 @@ from paleo_workbench.pipeline.bootstrap import (
 
 _PROJECT_SUFFIX = ".paleo.json"
 _PROJECT_FILTER = "Project (*.paleo.json)"
+_SAVE_LOGGER = logging.getLogger("paleo_workbench.project_save")
 
 
 def _default_project_start_dir(window) -> str:
@@ -70,6 +72,9 @@ class ProjectController:
         self._migration_bridge.migration_staged.connect(
             self._on_domain_migration_staged
         )
+        # One background save at a time (#1040): the OwnedWorkerJob executing
+        # ProjectManager.execute_save while the GUI keeps serving input.
+        self._save_job = None
 
     @property
     def session_generation(self) -> int:
@@ -92,6 +97,11 @@ class ProjectController:
         self._session_generation += 1
         if self._maintenance_cancel is not None:
             self._maintenance_cancel.set()
+        # An in-flight background save must finish (or refuse) before the
+        # catalog underneath it closes (#1040).
+        if not self._drain_save_job():
+            self._session_generation += 1
+            return False
         thread = self._maintenance_thread
         if thread is not None and thread.is_alive() and thread is not threading.current_thread():
             # Signal cooperative cancellation and join with a short grace window
@@ -439,6 +449,11 @@ class ProjectController:
                     pass
 
     def save_project(self) -> Path | None:
+        """Blocking save facade (tests, programmatic flows, save-as fallback).
+
+        The interactive Ctrl+S / menu path uses :meth:`save_project_async`
+        (#1040); both share the same prepare → execute → commit phases.
+        """
         if not self.window._flush_mapping_draft():
             self.window._show_project_error(
                 "保存工程失败",
@@ -460,6 +475,100 @@ class ProjectController:
         # No path yet: ask the user via the save dialog, then save to that path.
         chosen = self.window._choose_save_project()
         return self.save_project_as(chosen)
+
+    def save_project_async(self) -> bool:
+        """Interactive save: run the heavy I/O phase on a worker thread (#1040).
+
+        ``prepare_save`` (document diff + detached payload build) and the
+        post-write commit stay on the GUI thread because they touch the live
+        ``ProjectDocument``; only ``execute_save`` (serialize + write + fsync)
+        moves off-thread. Returns ``False`` when a save is already in flight,
+        the mapping draft rejects the save, or preparation fails.
+        """
+        if self.save_job_running():
+            _SAVE_LOGGER.info("保存已在进行中，忽略重复的保存请求")
+            return False
+        if not self.window._flush_mapping_draft():
+            self.window._show_project_error(
+                "保存工程失败",
+                "编图草稿未通过拓扑检查，工程文件未写入。请修复拓扑问题后重试。",
+            )
+            return False
+        self._flush_joint_analysis_state()
+        path = self.window.project_path
+        if path is None:
+            # Save-as relocates artifacts and rebinds the catalog; keep it on
+            # the synchronous path until that flow is split too.
+            chosen = self.window._choose_save_project()
+            return self.save_project_as(chosen) is not None
+        try:
+            self.window.project.meta.project_root = str(Path(path).resolve().parent)
+            manager = ProjectManager(path)
+            prepared = manager.prepare_save(self.window.project)
+        except (OSError, ValueError, TypeError, ValidationError) as e:
+            self.window._show_project_error("保存工程失败", str(e))
+            return False
+        if prepared is None:
+            _SAVE_LOGGER.info("工程无变更，无需保存")
+            return True
+
+        from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+        from paleo_workbench.ui.project_save_worker import ProjectSaveTask
+
+        generation = self._session_generation
+        task = ProjectSaveTask(manager, prepared)
+        job = OwnedWorkerJob()
+        job.start(
+            task,
+            terminal_signals=(task.terminal,),
+            result_connections=(
+                (
+                    task.saved,
+                    lambda stats, _manager=manager, _prepared=prepared, _gen=generation:
+                        self._finish_async_save(_manager, _prepared, stats, _gen),
+                ),
+                (task.failed, self._on_async_save_failed),
+            ),
+        )
+        self._save_job = job
+        _SAVE_LOGGER.info("工程保存已在后台线程启动: %s", path)
+        return True
+
+    def save_job_running(self) -> bool:
+        job = self._save_job
+        return job is not None and job.is_running
+
+    def _finish_async_save(self, manager, prepared, stats, generation: int) -> None:
+        """GUI-thread completion slot: commit snapshot + register artifacts."""
+        if generation != self._session_generation:
+            # The project was switched/replaced mid-save. The file write for
+            # the old path already completed; committing the persistence
+            # snapshot onto the NEW live document would corrupt its dirty
+            # tracking, so drop the commit and let the next save re-diff.
+            _SAVE_LOGGER.warning(
+                "后台保存完成时会话已切换，丢弃提交: %s", manager.project_path
+            )
+            return
+        try:
+            manager.commit_save(self.window.project, prepared, stats)
+            self._register_persisted_factor_grids(Path(manager.project_path))
+        except (OSError, ValueError, TypeError, ValidationError) as e:
+            self.window._show_project_error("保存工程失败", str(e))
+            return
+        _SAVE_LOGGER.info("工程已保存: %s", manager.project_path)
+
+    def _on_async_save_failed(self, message: str) -> None:
+        self.window._show_project_error("保存工程失败", message)
+
+    def _drain_save_job(self, wait_ms: int = 2_000) -> bool:
+        """Join an in-flight background save; False when it refuses to stop."""
+        job = self._save_job
+        if job is None or not job.is_running:
+            self._save_job = None
+            return True
+        joined = job.shutdown(wait_ms)
+        self._save_job = None
+        return joined
 
     def save_project_as(self, path: str | Path | None) -> Path | None:
         if path is None:
@@ -764,7 +873,8 @@ class ProjectController:
         self.open_sample_project()
 
     def _on_save_project(self) -> None:
-        self.save_project()
+        # Menu/shortcut entry: keep the GUI responsive during the I/O phase.
+        self.save_project_async()
 
     def _on_properties(self) -> None:
         self.window._show_properties()
