@@ -62,13 +62,13 @@ def test_refresh_path_budgets_at_100k(qtbot) -> None:
     t0 = time.perf_counter()
     model.set_assets(assets)
     initial = time.perf_counter() - t0
-    assert initial < 20.0, f"initial set_assets took {initial:.1f}s at {N_ASSETS} assets (budget 20s)"
+    assert initial < 15.0, f"initial set_assets took {initial:.1f}s at {N_ASSETS} assets (budget 15s)"
 
     # The capacity contract: an unchanged refresh must be cheap (#1063).
     t0 = time.perf_counter()
     model.set_assets(list(assets))
     unchanged = time.perf_counter() - t0
-    assert unchanged < 2.0, f"no-change re-apply took {unchanged:.2f}s (budget 2s; full rebuild cost 4.5-8.9s)"
+    assert unchanged < 1.0, f"no-change re-apply took {unchanged:.2f}s (budget 1s; full rebuild cost 4.5-8.9s)"
 
     # A small mixed delta stays near the no-change cost.
     mutated = list(assets)
@@ -81,7 +81,7 @@ def test_refresh_path_budgets_at_100k(qtbot) -> None:
     t0 = time.perf_counter()
     model.set_assets(mutated)
     partial = time.perf_counter() - t0
-    assert partial < 3.0, f"partial update took {partial:.2f}s (budget 3s)"
+    assert partial < 2.0, f"partial update took {partial:.2f}s (budget 2s)"
     assert model.rowCount() == N_ASSETS
 
     # The host-side index shares the same reuse contract.
@@ -89,11 +89,11 @@ def test_refresh_path_budgets_at_100k(qtbot) -> None:
     t0 = time.perf_counter()
     index.rebuild(mutated)
     index_initial = time.perf_counter() - t0
-    assert index_initial < 25.0, f"initial FilterIndex.rebuild took {index_initial:.1f}s (budget 25s)"
+    assert index_initial < 20.0, f"initial FilterIndex.rebuild took {index_initial:.1f}s (budget 20s)"
     t0 = time.perf_counter()
     index.rebuild(list(mutated))
     index_reuse = time.perf_counter() - t0
-    assert index_reuse < 2.0, f"no-change FilterIndex.rebuild took {index_reuse:.2f}s (budget 2s; full rebuild cost 3.8s)"
+    assert index_reuse < 1.0, f"no-change FilterIndex.rebuild took {index_reuse:.2f}s (budget 1s; full rebuild cost 3.8s)"
 
 
 @pytest.mark.skipif(not _CAN_MEASURE_RSS, reason="/proc/self/statm unavailable (non-Linux)")
@@ -125,3 +125,63 @@ def test_repeated_refreshes_do_not_grow_memory(qtbot) -> None:
     assert _peak_rss_mb() < _current_rss_mb() + 250.0, (
         "transient refresh peak far exceeds the working set — double residency is back"
     )
+
+
+def test_document_shaped_refresh_stays_cheap_and_single_copy(qtbot) -> None:
+    """The #1065 fixture shape: a synthetic project document (10万资产 +
+    10万版本 + 1000 标签) drives the model; refresh budgets and the
+    single-residency contract (#1062) hold through the document's asset
+    list — the runtime row source holds the document's objects, not a
+    second materialized copy."""
+    import gc
+    import time
+
+    from paleo_workbench.catalog.models import (
+        CatalogDocument,
+        DataAsset,
+        DataRun,
+        DataStage,
+        DataVersion,
+        Tag,
+    )
+
+    document = CatalogDocument(
+        catalog_revision=1,
+        assets=[
+            DataAsset(id=f"ast_{i:06d}", name=f"well-{i:06d}", type="sensor")
+            for i in range(N_ASSETS)
+        ],
+        versions=[
+            DataVersion(
+                id=f"ver_{i:06d}_v1",
+                asset_id=f"ast_{i:06d}",
+                version_number=1,
+                stage=DataStage.RAW,
+            )
+            for i in range(N_ASSETS)
+        ],
+        tags=[Tag(id=f"tag_{i:04d}", name=f"标签{i:04d}") for i in range(1000)],
+        runs=[DataRun(id="run_1", operation="capacity-guard", status="completed")],
+    )
+
+    model = AssetTableModel()
+    model.set_column_keys(list(DEFAULT_COLUMN_KEYS))
+    model.set_assets(document.assets)
+    assert model.asset_at(0) is document.assets[0], "row source must reference the document's objects"
+
+    t0 = time.perf_counter()
+    model.set_assets(document.assets)
+    unchanged = time.perf_counter() - t0
+    assert unchanged < 1.0, f"document no-change refresh took {unchanged:.2f}s (budget 1s)"
+
+    # Version rows are part of the document, not the table; the model must
+    # not have materialized a second asset copy (identity check above), and
+    # repeated refreshes must not grow RSS (#1062).
+    if _CAN_MEASURE_RSS:
+        gc.collect()
+        base = _current_rss_mb()
+        for _ in range(3):
+            model.set_assets(document.assets)
+        gc.collect()
+        growth = _current_rss_mb() - base
+        assert growth < 120.0, f"RSS grew {growth:.0f}MB over 3 document refreshes (budget 120MB)"

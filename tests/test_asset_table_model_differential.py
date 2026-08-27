@@ -137,6 +137,42 @@ def test_no_change_reapplication_is_stable(qtbot, seed) -> None:
     assert _state_snapshot(model) == before
 
 
+@pytest.mark.parametrize(
+    "operation",
+    ["pure_add", "pure_delete", "pure_update", "empty_change"],
+)
+def test_pure_change_operations_equivalent(qtbot, operation) -> None:
+    """Each isolated change class: add-only, delete-only, update-only, and
+    the empty change (identical list instance), per #1061's coverage list."""
+    rng = random.Random(21)
+    base = _initial_assets(rng, 50)
+    if operation == "pure_add":
+        next_gen = list(base)
+        next_gen.extend(_resource(i) for i in range(50, 60))
+    elif operation == "pure_delete":
+        next_gen = base[: len(base) // 2]
+    elif operation == "pure_update":
+        next_gen = list(base)
+        for idx in range(0, len(next_gen), 2):
+            old = next_gen[idx]
+            next_gen[idx] = _resource(int(old.id.split("_")[1]), name=f"井-改-{old.id}")
+    else:  # empty_change
+        next_gen = list(base)
+
+    incremental = AssetTableModel()
+    incremental.set_column_keys(list(_COMPARED_COLUMNS))
+    incremental.set_assets(base)
+    incremental.set_assets(next_gen)
+
+    fresh = AssetTableModel()
+    fresh.set_column_keys(list(_COMPARED_COLUMNS))
+    fresh.set_assets(next_gen)
+
+    _drive_terminal_ops(incremental, next_gen)
+    _drive_terminal_ops(fresh, next_gen)
+    assert _state_snapshot(incremental) == _state_snapshot(fresh)
+
+
 def test_empty_and_single_asset_generations(qtbot) -> None:
     """Degenerate generations: empty list, then one asset, back to empty."""
     rng = random.Random(99)
@@ -155,7 +191,68 @@ def test_empty_and_single_asset_generations(qtbot) -> None:
     assert model.asset_at(0) is None
 
 
-# -- interaction-state continuity (#1064) -----------------------------------
+# -- host-level interaction continuity (#1064) -------------------------------
+
+
+def _host_table(qtbot):
+    from paleo_workbench.ui.pages.data_asset_table import DataAssetTable
+
+    table = DataAssetTable()
+    qtbot.addWidget(table)
+    return table
+
+
+def _host_assets(count: int) -> list:
+    return [_resource(i) for i in range(count)]
+
+
+def test_host_selection_survives_incremental_refresh(qtbot) -> None:
+    """未受变更影响的行保持选中；被删除行的选中项干净移除 (#1064)。"""
+    table = _host_table(qtbot)
+    assets = _host_assets(30)
+    table.update_assets(assets, [])
+    table.set_selected_asset(assets[7])
+    assert table.selected_assets() == [assets[7]]
+
+    # Refresh keeping the selected object (plus content changes elsewhere).
+    mutated = list(assets)
+    mutated[0] = _resource(0, name="井-改")
+    mutated.pop(20)  # delete an unrelated row
+    table.update_assets(mutated, [])
+    assert table.selected_assets() == [assets[7]], "surviving selection must persist"
+
+    # Refresh that removes the selected asset: selection clears without
+    # dangling references.
+    without = [a for a in mutated if a is not assets[7]]
+    table.update_assets(without, [])
+    assert all(a is not assets[7] for a in table.selected_assets())
+    assert all(a in without for a in table.selected_assets()), "no dangling selection"
+
+
+def test_host_filter_survives_incremental_refresh(qtbot) -> None:
+    """既有过滤条件在增量刷新后继续生效 (#1064)。"""
+    table = _host_table(qtbot)
+    assets = _host_assets(40)
+    table.update_assets(assets, [])
+    table.set_search_text("tag_3")
+    filtered_count = table_row_count(table)
+    assert 0 < filtered_count < 40
+
+    # Same objects + one changed row AND one new row carrying the filter
+    # term: the filter must re-evaluate against the new content (+2 rows).
+    mutated = list(assets)
+    mutated[0] = _resource(0, name="井-改", tags=["tag_3"])
+    mutated.append(_resource(999, tags=["tag_3"]))
+    table.update_assets(mutated, [])
+    after = table_row_count(table)
+    assert after == filtered_count + 2, "filter must re-apply over the delta"
+
+
+def table_row_count(table) -> int:
+    return table.table.model().rowCount()
+
+
+# -- differential core -------------------------------------------------------
 
 
 def _visible_names(model: AssetTableModel) -> list[str]:

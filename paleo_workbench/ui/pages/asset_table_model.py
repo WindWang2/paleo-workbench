@@ -99,6 +99,17 @@ def _match_positions_by_identity(
     return matches
 
 
+def _recycle_views(old_assets: list, old_views: list, new_assets: list, build_view) -> list:
+    """Views for *new_assets*, recycling the previous view of any row that
+    arrives as the very same object (identity = exact unchanged content);
+    every other row gets a freshly built view (#1063)."""
+    matches = _match_positions_by_identity(old_assets, new_assets)
+    return [
+        old_views[m] if m is not None else build_view(asset)
+        for m, asset in zip(matches, new_assets)
+    ]
+
+
 class AssetTableModel(QAbstractTableModel):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -149,17 +160,11 @@ class AssetTableModel(QAbstractTableModel):
         new_assets = list(assets)
         token = self._view_inputs_token()
         can_reuse = token == self._view_build_token
-        old_views = self._views
-        matches = (
-            _match_positions_by_identity(self._raw_assets, new_assets)
-            if can_reuse
-            else [None] * len(new_assets)
-        )
         self.beginResetModel()
-        self._views = [
-            old_views[m] if m is not None else self._build_view(asset)
-            for m, asset in zip(matches, new_assets)
-        ]
+        if can_reuse:
+            self._views = _recycle_views(self._raw_assets, self._views, new_assets, self._build_view)
+        else:
+            self._views = [self._build_view(a) for a in new_assets]
         self._raw_assets = new_assets
         self._view_build_token = token
         self._filtered_rows = list(range(len(new_assets)))
@@ -197,15 +202,10 @@ class AssetTableModel(QAbstractTableModel):
         """
         new_assets = list(assets)
         token = self._view_inputs_token()
-        old_views = self._views
         if views is not None and len(views) == len(new_assets):
             new_views = list(views)  # shared prebuilt views (#527)
         elif token == self._view_build_token:
-            matches = _match_positions_by_identity(self._raw_assets, new_assets)
-            new_views = [
-                old_views[m] if m is not None else self._build_view(asset)
-                for m, asset in zip(matches, new_assets)
-            ]
+            new_views = _recycle_views(self._raw_assets, self._views, new_assets, self._build_view)
         else:
             new_views = [self._build_view(a) for a in new_assets]
         self.beginResetModel()

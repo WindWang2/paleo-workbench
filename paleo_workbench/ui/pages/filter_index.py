@@ -108,7 +108,7 @@ class FilterIndex:
         self._haystacks: list[str] = []
         # View-reuse token (#1063): recycling is only valid while the
         # view-building inputs are unchanged.
-        self._build_token: tuple | None = None
+        self._view_build_token: tuple | None = None
 
     def rebuild(
         self,
@@ -125,6 +125,10 @@ class FilterIndex:
         search haystack; everything else rebuilds (#1063). Caller-provided
         views (#527) always win verbatim.
         """
+        def _build(asset) -> AssetView:
+            view = asset_view_from_object(asset, project_root=project_root)
+            return enricher(view) if enricher is not None else view
+
         new_assets = list(assets)
         token = (project_root, enricher)
         if views is not None and len(views) == len(new_assets):
@@ -134,35 +138,33 @@ class FilterIndex:
             # per-pass multiplication.
             self._views = list(views)
             self._haystacks = [self._haystack(view) for view in self._views]
-        elif token == self._build_token and self._assets:
+        elif token == self._view_build_token and self._assets:
+            # Recycle views and haystacks together: the haystack is derived
+            # from the view, so a recycled view keeps its haystack too.
             matches = _match_positions_by_identity(self._assets, new_assets)
             old_views = self._views
             old_haystacks = self._haystacks
-            new_views: list[AssetView] = []
-            new_haystacks: list[str] = []
-            for m, asset in zip(matches, new_assets):
-                if m is not None:
-                    new_views.append(old_views[m])
-                    new_haystacks.append(old_haystacks[m])
-                else:
-                    view = asset_view_from_object(asset, project_root=project_root)
-                    if enricher is not None:
-                        view = enricher(view)
-                    new_views.append(view)
-                    new_haystacks.append(self._haystack(view))
-            self._views = new_views
-            self._haystacks = new_haystacks
+            pairs = [
+                (old_views[m], old_haystacks[m]) if m is not None else (None, None)
+                for m in matches
+            ]
+            self._views = []
+            self._haystacks = []
+            for (view, haystack), asset in zip(pairs, new_assets):
+                if view is None:
+                    view = _build(asset)
+                    haystack = self._haystack(view)
+                self._views.append(view)
+                self._haystacks.append(haystack)
         else:
             self._views = []
             self._haystacks = []
             for asset in new_assets:
-                view = asset_view_from_object(asset, project_root=project_root)
-                if enricher is not None:
-                    view = enricher(view)
+                view = _build(asset)
                 self._views.append(view)
                 self._haystacks.append(self._haystack(view))
         self._assets = new_assets
-        self._build_token = token
+        self._view_build_token = token
 
     @property
     def views(self) -> list:
