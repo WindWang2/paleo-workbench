@@ -90,35 +90,19 @@ class TestConcurrencyBoundaries:
     """Boundary tests for #962, #965, #966, #967, #970."""
 
     def test_962_data_page_worker_edge_cases(self):
-        """#962 boundary: Empty worker list, already-terminated jobs, zero-timeout shutdown."""
-        class MockDataPage:
-            def __init__(self):
-                self._workers: list[OwnedWorkerJob] = []
+        """#962 boundary: real DataPage shutdown contract on a fresh page.
 
-            def shutdown_workers(self, wait_ms: int = 1500) -> bool:
-                results = [w.shutdown(wait_ms=wait_ms) for w in list(self._workers)]
-                self._workers.clear()
-                return all(results) if results else True
+        The old body verified a local MockDataPage stand-in; the production
+        page must satisfy the same protocol AppShell relies on — repeated
+        shutdown is idempotent and reports success when idle."""
+        from paleo_workbench.project.models import ProjectDocument
+        from paleo_workbench.ui.pages.data_page import DataPage
 
-        page = MockDataPage()
-        # 1. Empty list shutdown returns True immediately
-        assert page.shutdown_workers(wait_ms=0) is True
+        page = DataPage(project=ProjectDocument.new("e2e-workers-bnd"))
+        assert page.shutdown_workers(wait_ms=300) is True
+        # idempotent: a second teardown of already-joined controllers
+        assert page.shutdown_workers(wait_ms=300) is True
 
-        # 2. Add unstarted jobs and shutdown with wait_ms=0
-        j1 = OwnedWorkerJob()
-        page._workers.append(j1)
-        assert page.shutdown_workers(wait_ms=0) is True
-
-        # 3. Double shutdown on cleared page
-        assert page.shutdown_workers(wait_ms=0) is True
-        assert len(page._workers) == 0
-
-        # 4. Adding already released job
-        page._workers.append(j1)
-        assert page.shutdown_workers(wait_ms=10) is True
-
-        # 5. Page holds 0 workers after operations
-        assert len(page._workers) == 0
 
     def test_965_owned_worker_job_boundary_conditions(self):
         """#965 boundary: Double start exception, rapid consecutive shutdowns, zero wait."""
@@ -187,8 +171,6 @@ class TestConcurrencyBoundaries:
         assert collected >= 0
         assert gc.garbage == []
         assert threading.active_count() >= 1
-        assert True
-        assert True
 
     def test_970_catalog_maintenance_immediate_cancel(self):
         """#970 boundary: Maintenance cancellation flag set BEFORE thread start."""
@@ -226,36 +208,20 @@ class TestDomainArchitectureBoundaries:
     """Boundary tests for #963, #964, #968, #969, #973."""
 
     def test_963_preview_settings_extreme_dimensions(self):
-        """#963 boundary: 0x0 dims, extreme aspect ratio (10000:1), negative quality."""
-        class PreviewSettings:
-            def __init__(self, max_w: int = 1024, max_h: int = 768, quality: float = 0.8):
-                self.max_w = max(1, max_w)
-                self.max_h = max(1, max_h)
-                self.quality = min(1.0, max(0.0, quality))
+        """#963 boundary: the REAL PreviewSettings clamps its integer ranges
+        at construction (the old body scaled pixels through a local
+        look-alike that no production code ever called)."""
+        from paleo_workbench.resources.preview_settings import PreviewSettings
 
-            def compute_scaled_dims(self, w: int, h: int) -> tuple[int, int]:
-                if w <= 0 or h <= 0:
-                    return (1, 1)
-                scale = min(self.max_w / w, self.max_h / h, 1.0)
-                return max(1, int(w * scale)), max(1, int(h * scale))
+        ok = PreviewSettings(table_max_rows=2000, table_max_columns=200)
+        assert ok.table_max_rows == 2000
+        assert ok.table_max_columns == 200
 
-        ps = PreviewSettings(0, -100, -0.5)
-        # 1. Clamped initialization
-        assert ps.max_w == 1 and ps.max_h == 1 and ps.quality == 0.0
+        with pytest.raises(ValueError):
+            PreviewSettings(table_max_rows=10)  # below the documented minimum
+        with pytest.raises(TypeError):
+            PreviewSettings(show_metadata="yes")  # booleans are strict
 
-        # 2. 0x0 input handled gracefully
-        assert ps.compute_scaled_dims(0, 0) == (1, 1)
-
-        # 3. Extreme aspect ratio (10000x1)
-        ps_wide = PreviewSettings(1000, 1000, 1.5)
-        w, h = ps_wide.compute_scaled_dims(10000, 1)
-        assert w == 1000 and h == 1
-
-        # 4. Quality capped at 1.0
-        assert ps_wide.quality == 1.0
-
-        # 5. Scaled dims never 0
-        assert w > 0 and h > 0
 
     def test_964_native_backend_service_fallback_when_all_disabled(self):
         """#964 boundary: Fallback engine resolution when all acceleration is unavailable."""
@@ -404,7 +370,6 @@ class TestStorageAndWindowsBoundaries:
         assert safe_close(conn) is True
         assert safe_close(None) is True
         assert isinstance(conn, sqlite3.Connection)
-        assert True
 
     def test_972_atomic_file_swap_target_in_nonexistent_dir(self, tmp_path: Path):
         """#972 boundary: Atomic save failure handling when target directory is invalid."""
@@ -490,7 +455,6 @@ class TestStorageAndWindowsBoundaries:
         assert not (tmp_path / "deep_tree" / "level_0").exists()
         assert tmp_path.exists()
         assert isinstance(handle_remove_readonly, object)
-        assert True
 
     @pytest.mark.skipif(sys.platform != "win32", reason="normcase case-folding is Windows-only semantics (#991)")
     def test_991_normcase_mixed_slashes_and_special_chars(self):
@@ -1026,23 +990,21 @@ class TestNativeAndPlatformBoundaries:
     """Boundary tests for #987, #988, #989, #993, #995, #996, #1000, #1001, #1002, #1011."""
 
     def test_987_compiler_detection_unknown_and_empty(self):
-        """#987 boundary: Compiler type detection on empty string and custom flags."""
-        def classify_compiler(c_name: str | None) -> str:
-            if not c_name:
-                return "unknown"
-            low = c_name.lower()
-            if "msvc" in low or "cl.exe" in low:
-                return "msvc"
-            if "gcc" in low or "g++" in low or "clang" in low or "mingw" in low:
-                return "gnu_compatible"
-            return "unknown"
+        """#987 boundary: REAL flag selection degrades safely for unknown or
+        empty compiler types (the old body classified strings with a local
+        re-implementation of the decision table)."""
+        from native.native_compile_flags import compile_args_for
 
-        # Assertions 1-5
-        assert classify_compiler(None) == "unknown"
-        assert classify_compiler("") == "unknown"
-        assert classify_compiler("x86_64-w64-mingw32-gcc") == "gnu_compatible"
-        assert classify_compiler("C:\\MSVC\\bin\\cl.exe") == "msvc"
-        assert classify_compiler("custom_cc") == "unknown"
+        unknown = compile_args_for(None, platform="win32")
+        empty = compile_args_for("", platform="win32")
+        unix_side = compile_args_for(None, platform="linux")
+
+        # Windows + unknown compiler conservatively takes MSVC-style flags
+        assert "/std:c++17" in unknown
+        assert unknown == empty
+        # non-Windows always takes the GCC-style table
+        assert "-O3" in unix_side
+
 
     def test_988_dll_directory_non_existent_and_relative(self):
         """#988 boundary: os.add_dll_directory on non-existent path and relative path."""
@@ -1062,8 +1024,6 @@ class TestNativeAndPlatformBoundaries:
         assert safe_add_dll_dir("C:\\ghost_dir_12345") is (False if sys.platform == "win32" else True)
         assert safe_add_dll_dir(os.getcwd()) is True
         assert isinstance(safe_add_dll_dir("."), bool)
-        assert True
-        assert True
 
     @pytest.mark.skipif(sys.platform != "win32", reason="'l' is 4 bytes only on Windows LLP64 (#989)")
     def test_989_32bit_long_format_min_max_overflow(self):
@@ -1131,8 +1091,6 @@ class TestNativeAndPlatformBoundaries:
         assert callback_error_caught is True
         assert not t.is_alive()
         assert threading.active_count() >= 1
-        assert True
-        assert True
 
     def test_1000_geo_viz_paths_relative_and_absolute(self):
         """#1000 boundary: geo-viz-engine subpackage discovery paths."""
@@ -1151,11 +1109,20 @@ class TestNativeAndPlatformBoundaries:
         assert all(p.startswith("geoviz_") for p in expected_pkgs)
 
     def test_1001_importorskip_missing_modules_returns_skip(self):
-        """#1001 boundary: pytest.importorskip with version requirements on non-existent package."""
-        mod = pytest.importorskip("completely_unknown_super_core_9999", minversion="1.0.0")
+        """#1001 boundary: optional native acceleration degrades, never blocks.
 
-        # Assertions 1-5
-        assert mod is None
+        The old body skipped forever on a module that cannot exist. The real
+        boundary: the production backend's disabled-acceleration seam lets
+        callers run pure-Python paths regardless of build state.
+        """
+        from paleo_workbench import native_backend
+
+        with native_backend.disabled_acceleration():
+            # every feature reports un-accelerated inside the seam
+            for feature in ("seismic_3d", "well_log", "map_edit"):
+                assert native_backend.is_accelerated(feature) is False
+
+
 
     def test_1002_process_termination_already_dead_process(self):
         """#1002 boundary: Terminating a process that has already exited."""

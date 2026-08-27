@@ -481,15 +481,12 @@ class TestInteractionNativeBridgeDecoupling:
 
     def test_native_bridge_preview_settings_and_buffer_exchange(self):
         """Pairwise: PreviewSettings domain configuration -> NativeBackendService -> LLP64 buffer -> Callback."""
-        # 1. Domain PreviewSettings
-        class PreviewSettings:
-            def __init__(self, w: int, h: int, quality: float):
-                self.w = w
-                self.h = h
-                self.quality = quality
+        # 1. Domain PreviewSettings — the REAL production class (#1028: the
+        # old body redefined a local look-alike that production never ran)
+        from paleo_workbench.resources.preview_settings import PreviewSettings
 
-        ps = PreviewSettings(1024, 768, 0.85)
-        assert ps.w == 1024 and ps.h == 768
+        ps = PreviewSettings(font_size=14, table_max_rows=500)
+        assert ps.font_size == 14 and ps.table_max_rows == 500
 
         # 2. NativeBackendService check
         class NativeBackendService:
