@@ -214,64 +214,243 @@ class IDWInterpolator(Interpolator):
         )
 
 
+# Memory guard for the target-evaluation broadcast (#1036): rows of
+# (chunk x n_samples) float64 distances; 2**18 rows keeps a 500-sample solve
+# under ~1 GiB while amortizing the per-chunk solve cost.
+_KRIGE_TARGET_CHUNK = 1 << 18
+
+_KRIGE_MODELS = ("spherical", "exponential", "gaussian")
+
+
+def _deduplicate_samples(
+    x: np.ndarray, y: np.ndarray, z: np.ndarray, tol: float = 1e-9
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+    """Collapse coincident samples onto their mean value.
+
+    Duplicate locations make the kriging covariance block exactly singular;
+    geology treats repeated measurements at one point as one averaged
+    observation.
+    """
+    order = np.lexsort((y, x))
+    xs, ys, zs = x[order], y[order], z[order]
+    keep_x: list[float] = []
+    keep_y: list[float] = []
+    sums: list[float] = []
+    counts: list[int] = []
+    i = 0
+    n = len(zs)
+    while i < n:
+        j = i + 1
+        total = float(zs[i])
+        while j < n and abs(xs[j] - xs[i]) <= tol and abs(ys[j] - ys[i]) <= tol:
+            total += float(zs[j])
+            j += 1
+        keep_x.append(float(xs[i]))
+        keep_y.append(float(ys[i]))
+        sums.append(total)
+        counts.append(j - i)
+        i = j
+    merged = np.array(sums, dtype=np.float64) / np.array(counts, dtype=np.float64)
+    duplicates = n - len(keep_x)
+    return (
+        np.asarray(keep_x, dtype=np.float64),
+        np.asarray(keep_y, dtype=np.float64),
+        merged,
+        duplicates,
+    )
+
+
+def _empirical_variogram(
+    dists: np.ndarray, semivariance: np.ndarray, max_lag: float, n_bins: int = 12
+) -> tuple[np.ndarray, np.ndarray]:
+    """Bin pairwise semivariances into lag classes up to *max_lag*."""
+    mask = (dists > 1e-12) & (dists <= max_lag)
+    h = dists[mask]
+    sv = semivariance[mask]
+    if h.size < n_bins:
+        return np.empty(0), np.empty(0)
+    edges = np.linspace(0.0, max_lag, n_bins + 1)
+    idx = np.clip(np.digitize(h, edges) - 1, 0, n_bins - 1)
+    sums = np.bincount(idx, weights=sv, minlength=n_bins)
+    counts = np.bincount(idx, minlength=n_bins)
+    valid = counts > 0
+    return (edges[:-1] + edges[1:])[valid] * 0.5, sums[valid] / counts[valid]
+
+
+def _model_semivariance(h: np.ndarray, nugget: float, psill: float, r: float, model: str) -> np.ndarray:
+    """Standardized two-parameter semivariance models (effective range r)."""
+    r = max(r, 1e-9)
+    if model == "spherical":
+        hr = np.clip(h / r, 0.0, 1.0)
+        shape = 1.5 * hr - 0.5 * hr**3
+    elif model == "gaussian":
+        shape = 1.0 - np.exp(-3.0 * (h / r) ** 2)
+    else:  # exponential
+        shape = 1.0 - np.exp(-3.0 * h / r)
+    return nugget + psill * shape
+
+
+def _fit_variogram_numpy(
+    dists: np.ndarray, z: np.ndarray, model: str, max_lag: float
+) -> tuple[float, float, float, int]:
+    """Fit (nugget, sill, effective range) to the empirical variogram.
+
+    For each (range, nugget) candidate the optimal partial sill has a
+    closed least-squares form, so a two-level grid refinement over the pair
+    is dependency-free and deterministic.
+    """
+    iu = np.triu_indices_from(dists, k=1)
+    h_pairs = dists[iu]
+    sv_pairs = 0.5 * (z[:, None] - z[None, :]) [iu] ** 2
+    lag, sv = _empirical_variogram(h_pairs, sv_pairs, max_lag)
+    total_sill = max(float(np.var(z)), 1e-12)
+    if lag.size < 3:
+        return 0.0, total_sill, max(max_lag, 1e-6), int(lag.size)
+
+    sv_max = float(sv.max())
+    nugget_grid = np.linspace(0.0, min(0.5 * sv_max, 0.9 * total_sill), 6)
+    lo, hi = max(1e-3 * max_lag, 1e-6), max_lag
+    best = (0.0, total_sill, max(max_lag, 1e-6))
+    best_sse = np.inf
+    for _round in range(4):
+        ranges = np.linspace(lo, hi, 12)
+        for r in ranges:
+            for nugget in nugget_grid:
+                shape_sv = _model_semivariance(lag, nugget, 1.0, float(r), model) - nugget
+                denom = float(np.sum(shape_sv**2))
+                if denom < 1e-18:
+                    continue
+                psill = float(np.sum((sv - nugget) * shape_sv) / denom)
+                psill = max(psill, 1e-9)
+                fitted = nugget + psill * shape_sv
+                sse = float(np.sum((sv - fitted) ** 2))
+                if sse < best_sse:
+                    best_sse = sse
+                    best = (float(nugget), float(psill), float(r))
+        nugget, psill, r = best
+        # refine around the winner
+        lo, hi = max(1e-6, r * 0.5), min(max_lag, r * 1.5) if r < max_lag else max_lag
+        span = max(hi - lo, 1e-6)
+        lo, hi = max(1e-6, r - span * 0.25), min(max_lag, r + span * 0.25)
+        nugget_grid = np.linspace(
+            max(0.0, nugget - 0.1 * sv_max), min(nugget + 0.1 * sv_max, 0.9 * total_sill), 5
+        )
+    nugget, psill, r = best
+    return nugget, psill, r, int(lag.size)
+
+
 def _pure_numpy_kriging(
     x: np.ndarray, y: np.ndarray, z: np.ndarray,
     grid_x: np.ndarray, grid_y: np.ndarray,
     model: str = "spherical",
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
-    """Self-contained numpy Ordinary Kriging fallback."""
+    """Self-contained numpy Ordinary Kriging fallback (#1036 remediation).
+
+    Differences from the legacy fallback, mirroring the geoviz engine's
+    semantics:
+
+    * coincident samples are merged onto their mean (singular-matrix guard);
+    * variogram parameters are FITTED to the empirical variogram (closed-form
+      sill inside a deterministic (range, nugget) grid refinement) instead of
+      ``sill = var(z), range = 0.8 * dmax`` magic constants;
+    * the augmented ordinary-kriging system is solved with a symmetrized LU
+      (``np.linalg.solve``) plus a scaled ridge fallback — never ``pinv`` on
+      the indefinite saddle matrix, whose minimum-norm solution can violate
+      the unbiasedness constraint;
+    * target evaluation is chunked so the (M x N) broadcast stays
+      memory-bounded for large grids.
+    """
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    z = np.asarray(z, dtype=np.float64)
+    model_name = str(model).lower() if str(model).lower() in _KRIGE_MODELS else "spherical"
+
+    x, y, z, duplicates = _deduplicate_samples(x, y, z)
     n = len(z)
+    if n == 0:
+        raise ValueError("kriging requires at least one sample")
     sample_pts = np.stack([x, y], axis=1)
     dists = np.sqrt(np.sum((sample_pts[:, None, :] - sample_pts[None, :, :]) ** 2, axis=2))
 
-    model_name = str(model).lower() if str(model).lower() in ("spherical", "exponential", "gaussian") else "spherical"
-    sill = float(np.var(z)) if float(np.var(z)) > 1e-6 else 1.0
-    dmax = float(np.max(dists)) if float(np.max(dists)) > 1e-6 else 1.0
-    r = dmax * 0.8 if dmax > 1e-6 else 1.0
-    nugget = 0.0
+    dmax = float(np.max(dists)) if n > 1 else 1.0
+    max_lag = max(0.5 * dmax, 1e-6)
+    nugget, psill, r, bins = _fit_variogram_numpy(dists, z, model_name, max_lag)
+    sill = psill  # partial sill (structure variance) on top of the nugget
 
     def gamma(h: np.ndarray) -> np.ndarray:
-        h = np.asarray(h, dtype=np.float64)
-        if model_name == "spherical":
-            hr = np.clip(h / max(r, 1e-6), 0.0, 1.0)
-            g = sill * (1.5 * hr - 0.5 * hr ** 3)
-            g = np.where(h >= r, sill, g)
-        elif model_name == "exponential":
-            g = sill * (1.0 - np.exp(-3.0 * h / max(r, 1e-6)))
-        elif model_name == "gaussian":
-            g = sill * (1.0 - np.exp(-3.0 * (h / max(r, 1e-6)) ** 2))
-        else:
-            g = sill * (1.0 - np.exp(-3.0 * h / max(r, 1e-6)))
-        return nugget + g
+        return _model_semivariance(np.asarray(h, dtype=np.float64), nugget, psill, r, model_name)
 
     def cov(h: np.ndarray) -> np.ndarray:
         return (sill + nugget) - gamma(h)
 
-    # Augmented kriging matrix K with ridge regularization
+    # Constant field shortcut: unbiasedness makes every estimate the sample
+    # mean and the variance collapses to the nugget — also guards the
+    # degenerate zero-variance fit.
+    if float(np.var(z)) <= 1e-12 or n == 1:
+        z_const = float(np.mean(z))
+        gxm, gym = np.meshgrid(grid_x, grid_y)
+        var_const = np.full(gxm.shape, max(nugget, 0.0), dtype=np.float64)
+        return (
+            np.full_like(gxm, z_const),
+            var_const,
+            {
+                "method": "kriging_fallback",
+                "model": model_name,
+                "range": r,
+                "sill": float(sill),
+                "nugget": float(nugget),
+                "n_samples": n,
+                "duplicates_merged": duplicates,
+                "variogram_bins": bins,
+            },
+        )
+
+    # Augmented ordinary-kriging system. The scaled ridge (relative to the
+    # covariance diagonal) regularizes nearly-coincident geometry without
+    # flattening genuine structure the way a fixed 1e-8 would under UTM
+    # magnitudes.
     K = np.zeros((n + 1, n + 1), dtype=np.float64)
-    K[:n, :n] = cov(dists) + np.eye(n) * 1e-8
+    K[:n, :n] = cov(dists)
+    np.fill_diagonal(K[:n, :n], K[0, 0])
     K[:n, n] = 1.0
     K[n, :n] = 1.0
-    K[n, n] = 0.0
 
-    inv_K = np.linalg.pinv(K)
+    def solve_system(rhs_matrix: np.ndarray) -> np.ndarray:
+        ridge = 1e-10 * float(K[0, 0]) if K[0, 0] > 0 else 1e-10
+        try:
+            return np.linalg.solve(K, rhs_matrix)
+        except np.linalg.LinAlgError:
+            regularized = K.copy()
+            regularized[:n, :n] += np.eye(n) * ridge * float(n)
+            try:
+                return np.linalg.solve(regularized, rhs_matrix)
+            except np.linalg.LinAlgError:
+                weights, *_ = np.linalg.lstsq(regularized, rhs_matrix, rcond=None)
+                return weights
 
-    # Grid targets
+    # Grid targets — chunked to bound the (chunk x N) broadcast (#1036).
     gx, gy = np.meshgrid(grid_x, grid_y)
     targets = np.stack([gx.ravel(), gy.ravel()], axis=1)  # (M, 2)
     m = len(targets)
-
-    # Target distances: (M, N)
-    tdists = np.sqrt(np.sum((targets[:, None, :] - sample_pts[None, :, :]) ** 2, axis=2))
-    k = np.zeros((m, n + 1), dtype=np.float64)
-    k[:, :n] = cov(tdists)
-    k[:, n] = 1.0
-
-    # Weights: (M, N+1) = k @ inv_K
-    w = k @ inv_K
-    z_pred = np.sum(w[:, :n] * z, axis=1)
-    variance = (sill + nugget) - np.sum(w * k, axis=1)
-    variance = np.maximum(0.0, variance)
+    z_pred = np.empty(m, dtype=np.float64)
+    variance = np.empty(m, dtype=np.float64)
+    total_sill = sill + nugget
+    for start in range(0, m, _KRIGE_TARGET_CHUNK):
+        stop = min(start + _KRIGE_TARGET_CHUNK, m)
+        chunk = targets[start:stop]
+        tdists = np.sqrt(
+            np.sum((chunk[:, None, :] - sample_pts[None, :, :]) ** 2, axis=2)
+        )
+        rhs = np.empty((n + 1, chunk.shape[0]), dtype=np.float64)
+        rhs[:n] = cov(tdists).T
+        rhs[n] = 1.0
+        w = solve_system(rhs)  # (n+1, chunk)
+        w = w.T  # (chunk, n+1)
+        z_pred[start:stop] = w[:, :n] @ z
+        k_row = np.concatenate([cov(tdists), np.ones((chunk.shape[0], 1))], axis=1)
+        variance[start:stop] = np.maximum(
+            0.0, total_sill - np.sum(w * k_row, axis=1)
+        )
 
     return (
         z_pred.reshape((len(grid_y), len(grid_x))),
@@ -279,10 +458,12 @@ def _pure_numpy_kriging(
         {
             "method": "kriging_fallback",
             "model": model_name,
-            "range": r,
-            "sill": sill,
-            "nugget": nugget,
+            "range": float(r),
+            "sill": float(sill),
+            "nugget": float(nugget),
             "n_samples": n,
+            "duplicates_merged": duplicates,
+            "variogram_bins": bins,
         },
     )
 
