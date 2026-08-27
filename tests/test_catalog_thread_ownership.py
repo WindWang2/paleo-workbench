@@ -16,6 +16,7 @@ The connection pool must obey one invariant set:
 from __future__ import annotations
 
 import sqlite3
+import sys
 import threading
 import time
 from pathlib import Path
@@ -25,6 +26,11 @@ import pytest
 from paleo_workbench.catalog.db import CatalogIndex
 
 pytestmark = pytest.mark.usefixtures("qapp")
+
+# Liveness proofs read /proc/self/task — Linux only.
+_linux_only = pytest.mark.skipif(
+    not Path("/proc/self/task").is_dir(), reason="requires /proc"
+)
 
 
 def _open_conn_in_thread(
@@ -56,6 +62,7 @@ def _open_conn_in_thread(
 # ---------------------------------------------------------------------------
 
 
+@_linux_only
 def test_prune_closes_only_provably_dead_threads(tmp_path: Path):
     """Live managed threads keep their connections; dead ones are reaped."""
     index = CatalogIndex(tmp_path)
@@ -86,6 +93,7 @@ def test_prune_closes_only_provably_dead_threads(tmp_path: Path):
     index.close()
 
 
+@_linux_only
 def test_prune_actually_closes_dead_thread_connections(tmp_path: Path):
     """After the owner dies and pruning runs, the handle is closed for good."""
     index = CatalogIndex(tmp_path)
@@ -184,6 +192,7 @@ def _pooled_conn(index: CatalogIndex, ident: int):
     return getattr(entry, "conn", entry)
 
 
+@_linux_only
 def test_recycled_ident_never_inherits_dead_threads_connection(tmp_path: Path):
     """A new thread that recycles a dead ident must not reuse its handle.
 
@@ -239,6 +248,7 @@ def _find_dead_native_id() -> int:
 # ---------------------------------------------------------------------------
 
 
+@_linux_only
 def test_pool_drains_after_many_worker_threads_finish(tmp_path: Path):
     """The pool returns to zero after workers exit and pruning runs."""
     index = CatalogIndex(tmp_path)
@@ -272,8 +282,8 @@ def test_close_leaves_no_handles_and_survives_concurrent_use(tmp_path: Path):
                 try:
                     conn = index.open()
                     conn.execute("SELECT 1").fetchall()
-                except sqlite3.Error:
-                    pass  # interrupted/closed mid-flight is acceptable
+                except sqlite3.OperationalError:
+                    pass  # interrupted mid-flight is acceptable
         except BaseException as exc:  # pragma: no cover - failure signal
             failures.append(exc)
 
@@ -315,7 +325,8 @@ def _run_worker_storm(project_dir: Path, worker_count: int, stop: threading.Even
     errors: list[BaseException] = []
     start = threading.Barrier(worker_count)
     # Cooperative cancellation deadline: readers must observe and exit.
-    threading.Timer(1.5, stop.set).start()
+    cancel = threading.Timer(1.5, stop.set)
+    cancel.start()
 
     def reader(wid: int) -> None:
         try:
@@ -354,6 +365,7 @@ def _run_worker_storm(project_dir: Path, worker_count: int, stop: threading.Even
     for t in threads:
         t.join(timeout=30.0)
         assert not t.is_alive(), "worker thread hung under stress"
+    cancel.cancel()  # the deadline fired during the storm; nothing pending
     return service, errors
 
 
@@ -375,7 +387,7 @@ def test_worker_storm_no_crash_no_leak_across_project_switch(tmp_path: Path):
     project_b = tmp_path / "proj-b"
     project_b.mkdir()
     stop_b = threading.Event()
-    service_b, errors_b = _run_worker_storm(project_b, 48, stop_b)
+    service_b, errors_b = _run_worker_storm(project_b, 56, stop_b)
     stop_b.set()
     service_b._index.prune_dead_threads()
 
@@ -418,5 +430,6 @@ def test_shutdown_during_active_statement_interrupts_cleanly(tmp_path: Path):
     t.join(timeout=15.0)
 
     assert not t.is_alive()
-    assert all(isinstance(e, sqlite3.Error) for e in observed), observed
+    assert observed, "worker finished before close() — test did not race"
+    assert all(isinstance(e, sqlite3.OperationalError) for e in observed), observed
     assert len(service._index._conns) == 0

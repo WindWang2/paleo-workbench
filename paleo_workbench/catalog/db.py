@@ -242,13 +242,18 @@ def native_thread_alive(native_id: int) -> bool | None:
 
         THREAD_QUERY_LIMITED_INFORMATION = 0x1000
         STILL_ACTIVE = 259
-        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        ERROR_INVALID_PARAMETER = 87
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+        kernel32.OpenThread.restype = ctypes.c_void_p  # HANDLE is pointer-sized
         handle = kernel32.OpenThread(
             THREAD_QUERY_LIMITED_INFORMATION, False, ctypes.c_ulong(native_id)
         )
         if not handle:
-            # ERROR_INVALID_PARAMETER means the id is gone; anything else
-            # (e.g. access denied) is indistinguishable from alive.
+            # ERROR_INVALID_PARAMETER (87) means the thread id no longer
+            # exists — the provable-death signal. Anything else (e.g. access
+            # denied) is indistinguishable from alive: assume alive.
+            if ctypes.get_last_error() == ERROR_INVALID_PARAMETER:
+                return False
             return None
         try:
             exit_code = ctypes.c_ulong()
@@ -256,7 +261,7 @@ def native_thread_alive(native_id: int) -> bool | None:
                 return None
             return exit_code.value == STILL_ACTIVE
         finally:
-            kernel32.CloseHandle(handle)
+            kernel32.CloseHandle(ctypes.c_void_p(handle))
     return None
 
 
@@ -422,10 +427,15 @@ class CatalogIndex:
         # saves under its lock) and WAL gives readers a consistent snapshot
         # without blocking. ``reset()`` cleans up -wal/-shm files.
         try:
-            conn.execute("PRAGMA journal_mode=WAL")
-            # Bound contention instead of failing instantly when a foreign
-            # process/connection holds the write lock mid-checkpoint.
+            # Bound contention when a foreign process/connection holds the
+            # write lock mid-checkpoint (python's sqlite3 default timeout
+            # already provides this; the pragma pins it against future
+            # timeout=0 calls).
             conn.execute("PRAGMA busy_timeout=5000")
+        except sqlite3.DatabaseError:
+            pass
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
         except sqlite3.DatabaseError:
             pass  # e.g. read-only media — DELETE journal still works
         with self._conns_lock:
