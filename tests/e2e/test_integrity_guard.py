@@ -1,7 +1,7 @@
 """#1028 — anti-mirage guard for the E2E suite.
 
-`tests/test_issue_940_misc.py` already bans `skipif(True)` placeholders; the
-2026-08 audit still found `assert True` padding, `or True` tautologies and
+`tests/test_issue_940_misc.py` already bans always-true skip markers; the
+2026-08 audit still found assert-True padding, or-True tautologies and
 `importorskip` calls on modules that can never exist (permanently-skipped
 tests verifying nothing). This guard scans the E2E tree so those shapes
 cannot quietly return.
