@@ -221,7 +221,30 @@ class CoordinateTransformHub:
         return float(well.kb_m - tvd)
 
     def map_to_well_depth(self, well_id: str, tvd: float) -> float:
-        """Convert TVD back to MD for a given well."""
+        """Convert TVD back to MD along the well's surveyed trajectory (#1037).
+
+        Horizontal and undulating trajectories (incidence > 90°) cross one
+        TVD several times. The trajectory is walked segment-by-segment in
+        survey (MD) order and the FIRST crossing is returned — the depth
+        first reached while drilling. Use :meth:`map_to_well_depth_all` when
+        the caller must disambiguate multi-crossing levels. TVD outside the
+        surveyed range clamps onto the trajectory endpoint (the MD of the
+        TVD minimum/maximum), matching the legacy endpoint behaviour.
+        """
+        crossings = self.map_to_well_depth_all(well_id, tvd)
+        if not crossings:
+            return float(tvd)
+        return crossings[0]
+
+    def map_to_well_depth_all(self, well_id: str, tvd: float) -> list[float]:
+        """Every MD at which the trajectory crosses *tvd*, in MD order.
+
+        Piecewise-linear segment model over the survey stations: each segment
+        whose TVD interval spans the target contributes one linearly
+        interpolated MD. ``np.interp`` cannot be used here — it requires
+        strictly increasing TVD and silently corrupts on non-monotonic
+        trajectories (#1037).
+        """
         with self._lock:
             if well_id not in self._wells:
                 raise KeyError(f"Well {well_id} not found in transform hub")
@@ -229,10 +252,40 @@ class CoordinateTransformHub:
         tvd_val = float(tvd)
 
         if not well.is_deviated or len(well.tvd) == 0:
-            return tvd_val
+            return [tvd_val]
 
-        md_val = float(np.interp(tvd_val, well.tvd, well.md))
-        return md_val
+        md_arr = well.md
+        tvd_arr = well.tvd
+        crossings: list[float] = []
+        for i in range(len(md_arr) - 1):
+            md0, md1 = float(md_arr[i]), float(md_arr[i + 1])
+            tvd0, tvd1 = float(tvd_arr[i]), float(tvd_arr[i + 1])
+            if md1 <= md0:
+                continue
+            lo, hi = (tvd0, tvd1) if tvd0 <= tvd1 else (tvd1, tvd0)
+            if lo <= tvd_val <= hi:
+                span = tvd1 - tvd0
+                if abs(span) < 1e-12:
+                    # Constant-TVD segment (lateral): the whole segment sits
+                    # at the target — report its entry MD once.
+                    if not crossings or crossings[-1] < md0:
+                        crossings.append(md0)
+                else:
+                    fraction = (tvd_val - tvd0) / span
+                    fraction = min(1.0, max(0.0, fraction))
+                    candidate = md0 + fraction * (md1 - md0)
+                    if not crossings or candidate - crossings[-1] > 1e-9:
+                        crossings.append(candidate)
+
+        if not crossings:
+            # Out of the surveyed TVD range: clamp onto the extremal station
+            # (deepest crossing available), mirroring np.interp's endpoint
+            # clamping instead of extrapolating fabricating depth.
+            extremal_index = int(np.argmax(tvd_arr)) if tvd_val > float(
+                np.max(tvd_arr)
+            ) else int(np.argmin(tvd_arr))
+            crossings.append(float(md_arr[extremal_index]))
+        return crossings
 
     # -------------------------------------------------------------------------
     # Seismic Grid Geometry & Transformations

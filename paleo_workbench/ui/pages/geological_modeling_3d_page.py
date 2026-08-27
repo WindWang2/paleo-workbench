@@ -2122,6 +2122,13 @@ class GeologicalModeling3DPage(QWidget):
             self._joint_host.add_well_to_well_fence(wells[0], wells[1], name=name)
         self._select_joint_wells(wells[0], wells[1])
 
+    def highlight_well(self, well_id: str) -> None:
+        """Cross-view highlight (Map/Well Log → 3D): load the well into the
+        joint correlation pair without emitting a selection (#1029)."""
+        if not well_id:
+            return
+        self._select_joint_wells(well_id, "")
+
     def _select_joint_wells(self, well_a: str, well_b: str) -> None:
         """Set toolbar combos to a saved well pair without resetting to index 0/1."""
         if not hasattr(self, "_joint_well_a"):
