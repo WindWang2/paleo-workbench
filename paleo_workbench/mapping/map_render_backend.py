@@ -1367,7 +1367,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
             return
         painter.save()
         font = painter.font()
-        font.setPointSizeF(max(6.0, style.labels.size * dpi_scale))
+        font.setPixelSize(max(8, round(style.labels.size * dpi_scale)))
         font.setBold(style.labels.bold)
         if style.labels.font_family:
             font.setFamily(style.labels.font_family)
@@ -1392,7 +1392,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
         painter.save()
         font = painter.font()
         for spec in specs:
-            font.setPointSizeF(max(6.0, spec.size * spec.dpi_scale))
+            font.setPixelSize(max(8, round(spec.size * spec.dpi_scale)))
             font.setBold(spec.bold)
             if spec.family:
                 font.setFamily(spec.family)
@@ -1934,6 +1934,19 @@ def _flatten_qgis_style(style: Mapping[str, Any]) -> dict[str, object]:
         labeling_xml = payload.get("labeling_xml")
         if isinstance(labeling_xml, str) and labeling_xml.strip():
             result["labeling_xml"] = labeling_xml
+    # Unit parity (#1025): QgsTextFormat sizes are POINTS by default while
+    # our TextStyle authors logical pixels at 96 DPI; convert at the wire.
+    # The halo/buffer keys likewise cross as QGIS's buffer vocabulary.
+    labels = result.get("labels")
+    if isinstance(labels, Mapping):
+        labels = dict(labels)
+        if "size" in labels:
+            labels["size"] = float(labels["size"]) * (72.0 / 96.0)
+        if "buffer" not in labels and labels.get("halo_width"):
+            labels["buffer"] = labels["halo_width"] * (72.0 / 96.0)
+        if "buffer_color" not in labels and labels.get("halo_color"):
+            labels["buffer_color"] = labels["halo_color"]
+        result["labels"] = labels
     result.pop("qgis_style", None)
     return result
 

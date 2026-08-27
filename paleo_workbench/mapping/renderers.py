@@ -8,6 +8,7 @@ the exact same symbol and style interpretation.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from enum import Enum
 from dataclasses import dataclass, field
 import html
 import math
@@ -47,6 +48,28 @@ class LegendItem:
     gradient_stops: tuple[tuple[float, str], ...] = ()
 
 
+class RenderUnit(str, Enum):
+    """Coordinate space of a :class:`RenderContext` (#1025).
+
+    All style quantities (stroke widths, marker sizes, font sizes, dash
+    lengths, label offsets) are authored as logical pixels at 96 DPI. The
+    context's unit says which space ``width``/``height`` — and therefore the
+    emitted SVG/painter numbers — live in; :meth:`RenderContext.to_target`
+    is the ONE conversion every renderer uses so canvas, composer SVG, PDF,
+    and the QGIS backend stay physically consistent.
+    """
+
+    PX = "px"  # logical pixels at 96 DPI (screen canvas, PNG export)
+    MM = "mm"  # millimetres (composer SVG viewBox, print layouts)
+    PT = "pt"  # PostScript points, 1/72 inch (PDF text)
+
+
+# Millimetres per logical pixel at the 96 DPI authoring baseline.
+_MM_PER_PX = 25.4 / 96.0
+# Points per logical pixel at the 96 DPI authoring baseline.
+_PT_PER_PX = 72.0 / 96.0
+
+
 @dataclass(frozen=True, slots=True)
 class RenderContext:
     """Viewport context for coordinate transformations during rendering."""
@@ -56,6 +79,7 @@ class RenderContext:
     dpi: float = 96.0
     x_offset: float = 0.0
     y_offset: float = 0.0
+    units: RenderUnit = RenderUnit.PX
 
     @property
     def scale_x(self) -> float:
@@ -68,6 +92,35 @@ class RenderContext:
         _, ymin, _, ymax = self.extent
         dy = ymax - ymin
         return self.height / dy if dy > 0 else 1.0
+
+    def to_target(self, px: float) -> float:
+        """Convert a 96-DPI logical-pixel length into this context's units.
+
+        ``1.0 px`` stays ``1.0`` on the canvas, becomes ``0.2646 mm`` in a
+        millimetre composer frame, and ``0.75 pt`` in PDF text space.
+        """
+        if self.units is RenderUnit.MM:
+            return px * _MM_PER_PX
+        if self.units is RenderUnit.PT:
+            return px * _PT_PER_PX
+        return px
+
+    def dash_array(self, pattern: LinePattern, stroke_px: float) -> str:
+        """SVG stroke-dasharray for *pattern* in this context's units.
+
+        Mirrors the Qt semantics of :meth:`LinePattern.dash_pattern` (Qt dash
+        units are multiples of the pen width), so SVG export and the QPainter
+        canvas draw the same physical dash lengths.
+        """
+        units_per_px = (
+            _MM_PER_PX if self.units is RenderUnit.MM
+            else _PT_PER_PX if self.units is RenderUnit.PT
+            else 1.0
+        )
+        absolute = [u * stroke_px for u in pattern.dash_pattern(stroke_px)]
+        if not absolute:
+            return ""
+        return ",".join(f"{v * units_per_px:.2f}" for v in absolute)
 
     def world_to_screen(self, x: float, y: float) -> tuple[float, float]:
         """Transform world coordinates (x, y) to screen pixels."""
@@ -134,7 +187,7 @@ class SingleSymbolRenderer(LayerRenderer):
                 pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in ring if len(p) >= 2]
                 if pts:
                     parts.append(
-                        f'<polygon points="{" ".join(pts)}" fill="{style.fill}" stroke="{style.stroke}" stroke-width="{style.stroke_width:.2f}"/>'
+                        f'<polygon points="{" ".join(pts)}" fill="{style.fill}" stroke="{style.stroke}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"/>'
                     )
             elif gtype == "MultiPolygon" and coords:
                 for poly in coords:
@@ -143,34 +196,33 @@ class SingleSymbolRenderer(LayerRenderer):
                         pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in ring if len(p) >= 2]
                         if pts:
                             parts.append(
-                                f'<polygon points="{" ".join(pts)}" fill="{style.fill}" stroke="{style.stroke}" stroke-width="{style.stroke_width:.2f}"/>'
+                                f'<polygon points="{" ".join(pts)}" fill="{style.fill}" stroke="{style.stroke}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"/>'
                             )
             elif gtype == "LineString" and coords:
                 pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in coords if len(p) >= 2]
                 if pts:
                     dash_attr = ""
-                    if style.line_pattern is LinePattern.FAULT or style.line_pattern is LinePattern.DASH:
-                        dash_attr = ' stroke-dasharray="6,2"'
-                    elif style.line_pattern is LinePattern.DOT:
-                        dash_attr = ' stroke-dasharray="2,2"'
+                    dash = ctx.dash_array(style.line_pattern, style.stroke_width)
+                    if dash:
+                        dash_attr = f' stroke-dasharray="{dash}"'
                     parts.append(
-                        f'<polyline points="{" ".join(pts)}" fill="none" stroke="{style.stroke}" stroke-width="{style.stroke_width:.2f}"{dash_attr}/>'
+                        f'<polyline points="{" ".join(pts)}" fill="none" stroke="{style.stroke}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"{dash_attr}/>'
                     )
             elif gtype == "Point" and coords and len(coords) >= 2:
                 sx, sy = ctx.world_to_screen(float(coords[0]), float(coords[1]))
-                r = max(1.0, style.marker_size / 2.0)
+                r = ctx.to_target(max(1.0, style.marker_size / 2.0))
                 if style.marker is MarkerSymbol.WELL:
                     parts.append(
-                        f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="none" stroke="{style.stroke}" stroke-width="1"/>'
+                        f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="none" stroke="{style.stroke}" stroke-width="{ctx.to_target(1):.2f}"/>'
                         f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{max(0.5, r*0.4):.2f}" fill="{style.fill}" stroke="none"/>'
                     )
                 elif style.marker is MarkerSymbol.SQUARE:
                     parts.append(
-                        f'<rect x="{sx - r:.2f}" y="{sy - r:.2f}" width="{r*2:.2f}" height="{r*2:.2f}" fill="{style.fill}" stroke="{style.stroke}" stroke-width="0.5"/>'
+                        f'<rect x="{sx - r:.2f}" y="{sy - r:.2f}" width="{r*2:.2f}" height="{r*2:.2f}" fill="{style.fill}" stroke="{style.stroke}" stroke-width="{ctx.to_target(0.5):.2f}"/>'
                     )
                 else:
                     parts.append(
-                        f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="{style.fill}" stroke="{style.stroke}" stroke-width="0.5"/>'
+                        f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="{style.fill}" stroke="{style.stroke}" stroke-width="{ctx.to_target(0.5):.2f}"/>'
                     )
 
                 if style.labels and style.labels.visible and style.labels.field:
@@ -178,7 +230,7 @@ class SingleSymbolRenderer(LayerRenderer):
                     if lbl_text:
                         escaped_lbl = html.escape(lbl_text)
                         parts.append(
-                            f'<text x="{sx + r + 2:.2f}" y="{sy + 3:.2f}" font-family="{style.labels.font_family or "Arial"}" font-size="{style.labels.size:.1f}" fill="{style.labels.color}">{escaped_lbl}</text>'
+                            f'<text x="{sx + r + ctx.to_target(2):.2f}" y="{sy + ctx.to_target(3):.2f}" font-family="{style.labels.font_family or "Arial"}" font-size="{ctx.to_target(style.labels.size):.2f}" fill="{style.labels.color}">{escaped_lbl}</text>'
                         )
 
         parts.append("</g>")
@@ -232,7 +284,7 @@ class CategorizedRenderer(LayerRenderer):
                 pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in ring if len(p) >= 2]
                 if pts:
                     parts.append(
-                        f'<polygon points="{" ".join(pts)}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="{style.stroke_width:.2f}"/>'
+                        f'<polygon points="{" ".join(pts)}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"/>'
                     )
             elif gtype == "MultiPolygon" and coords:
                 for poly in coords:
@@ -241,19 +293,19 @@ class CategorizedRenderer(LayerRenderer):
                         pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in ring if len(p) >= 2]
                         if pts:
                             parts.append(
-                                f'<polygon points="{" ".join(pts)}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="{style.stroke_width:.2f}"/>'
+                                f'<polygon points="{" ".join(pts)}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"/>'
                             )
             elif gtype == "LineString" and coords:
                 pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in coords if len(p) >= 2]
                 if pts:
                     parts.append(
-                        f'<polyline points="{" ".join(pts)}" fill="none" stroke="{fill_color}" stroke-width="{style.stroke_width:.2f}"/>'
+                        f'<polyline points="{" ".join(pts)}" fill="none" stroke="{fill_color}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"/>'
                     )
             elif gtype == "Point" and coords and len(coords) >= 2:
                 sx, sy = ctx.world_to_screen(float(coords[0]), float(coords[1]))
-                r = max(1.0, style.marker_size / 2.0)
+                r = ctx.to_target(max(1.0, style.marker_size / 2.0))
                 parts.append(
-                    f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="0.5"/>'
+                    f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="{ctx.to_target(0.5):.2f}"/>'
                 )
 
         parts.append("</g>")
@@ -339,7 +391,7 @@ class GraduatedRenderer(LayerRenderer):
                 pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in ring if len(p) >= 2]
                 if pts:
                     parts.append(
-                        f'<polygon points="{" ".join(pts)}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="{style.stroke_width:.2f}"/>'
+                        f'<polygon points="{" ".join(pts)}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"/>'
                     )
             elif gtype == "MultiPolygon" and coords:
                 for poly in coords:
@@ -348,34 +400,33 @@ class GraduatedRenderer(LayerRenderer):
                         pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in ring if len(p) >= 2]
                         if pts:
                             parts.append(
-                                f'<polygon points="{" ".join(pts)}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="{style.stroke_width:.2f}"/>'
+                                f'<polygon points="{" ".join(pts)}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"/>'
                             )
             elif gtype == "LineString" and coords:
                 pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in coords if len(p) >= 2]
                 if pts:
                     dash_attr = ""
-                    if style.line_pattern is LinePattern.FAULT or style.line_pattern is LinePattern.DASH:
-                        dash_attr = ' stroke-dasharray="6,2"'
-                    elif style.line_pattern is LinePattern.DOT:
-                        dash_attr = ' stroke-dasharray="2,2"'
+                    dash = ctx.dash_array(style.line_pattern, style.stroke_width)
+                    if dash:
+                        dash_attr = f' stroke-dasharray="{dash}"'
                     parts.append(
-                        f'<polyline points="{" ".join(pts)}" fill="none" stroke="{fill_color}" stroke-width="{style.stroke_width:.2f}"{dash_attr}/>'
+                        f'<polyline points="{" ".join(pts)}" fill="none" stroke="{fill_color}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"{dash_attr}/>'
                     )
             elif gtype == "Point" and coords and len(coords) >= 2:
                 sx, sy = ctx.world_to_screen(float(coords[0]), float(coords[1]))
-                r = max(1.0, style.marker_size / 2.0)
+                r = ctx.to_target(max(1.0, style.marker_size / 2.0))
                 if style.marker is MarkerSymbol.WELL:
                     parts.append(
-                        f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="none" stroke="{style.stroke}" stroke-width="1"/>'
+                        f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="none" stroke="{style.stroke}" stroke-width="{ctx.to_target(1):.2f}"/>'
                         f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{max(0.5, r*0.4):.2f}" fill="{fill_color}" stroke="none"/>'
                     )
                 elif style.marker is MarkerSymbol.SQUARE:
                     parts.append(
-                        f'<rect x="{sx - r:.2f}" y="{sy - r:.2f}" width="{r*2:.2f}" height="{r*2:.2f}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="0.5"/>'
+                        f'<rect x="{sx - r:.2f}" y="{sy - r:.2f}" width="{r*2:.2f}" height="{r*2:.2f}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="{ctx.to_target(0.5):.2f}"/>'
                     )
                 else:
                     parts.append(
-                        f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="0.5"/>'
+                        f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="{ctx.to_target(0.5):.2f}"/>'
                     )
 
                 if style.labels and style.labels.visible and style.labels.field:
@@ -383,7 +434,7 @@ class GraduatedRenderer(LayerRenderer):
                     if lbl_text:
                         escaped_lbl = html.escape(lbl_text)
                         parts.append(
-                            f'<text x="{sx + r + 2:.2f}" y="{sy + 3:.2f}" font-family="{style.labels.font_family or "Arial"}" font-size="{style.labels.size:.1f}" fill="{style.labels.color}">{escaped_lbl}</text>'
+                            f'<text x="{sx + r + ctx.to_target(2):.2f}" y="{sy + ctx.to_target(3):.2f}" font-family="{style.labels.font_family or "Arial"}" font-size="{ctx.to_target(style.labels.size):.2f}" fill="{style.labels.color}">{escaped_lbl}</text>'
                         )
 
         parts.append("</g>")
@@ -503,7 +554,7 @@ class ContourRenderer(LayerRenderer):
             pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in coords if len(p) >= 2]
             if len(pts) >= 2:
                 parts.append(
-                    f'<polyline points="{" ".join(pts)}" fill="none" stroke="{style.stroke}" stroke-width="{style.stroke_width:.2f}"/>'
+                    f'<polyline points="{" ".join(pts)}" fill="none" stroke="{style.stroke}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"/>'
                 )
                 # Label middle point
                 if style.labels and style.labels.visible and level is not None:
@@ -511,7 +562,7 @@ class ContourRenderer(LayerRenderer):
                     mx, my = ctx.world_to_screen(coords[mid_idx][0], coords[mid_idx][1])
                     escaped_level = html.escape(f"{float(level):.1f}")
                     parts.append(
-                        f'<text x="{mx:.2f}" y="{my:.2f}" font-family="{style.labels.font_family or "Arial"}" font-size="{style.labels.size:.1f}" fill="{style.labels.color}" text-anchor="middle">{escaped_level}</text>'
+                        f'<text x="{mx:.2f}" y="{my:.2f}" font-family="{style.labels.font_family or "Arial"}" font-size="{ctx.to_target(style.labels.size):.2f}" fill="{style.labels.color}" text-anchor="middle">{escaped_level}</text>'
                     )
 
         parts.append("</g>")
@@ -554,11 +605,11 @@ class WellSymbolRenderer(LayerRenderer):
             if not coords or len(coords) < 2:
                 continue
             sx, sy = ctx.world_to_screen(float(coords[0]), float(coords[1]))
-            r = max(1.5, style.marker_size / 2.0)
+            r = ctx.to_target(max(1.5, style.marker_size / 2.0))
 
             # Geological well point symbol
             parts.append(
-                f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="#ffffff" stroke="{style.stroke}" stroke-width="1"/>'
+                f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="#ffffff" stroke="{style.stroke}" stroke-width="{ctx.to_target(1):.2f}"/>'
                 f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{max(0.8, r*0.4):.2f}" fill="{style.fill}" stroke="none"/>'
             )
 
@@ -570,7 +621,7 @@ class WellSymbolRenderer(LayerRenderer):
             if display_text and style.labels and style.labels.visible:
                 escaped_text = html.escape(display_text)
                 parts.append(
-                    f'<text x="{sx + r + 3:.2f}" y="{sy + 3:.2f}" font-family="{style.labels.font_family or "Arial"}" font-size="{style.labels.size:.1f}" fill="{style.labels.color}">{escaped_text}</text>'
+                    f'<text x="{sx + r + ctx.to_target(3):.2f}" y="{sy + ctx.to_target(3):.2f}" font-family="{style.labels.font_family or "Arial"}" font-size="{ctx.to_target(style.labels.size):.2f}" fill="{style.labels.color}">{escaped_text}</text>'
                 )
 
         parts.append("</g>")
@@ -626,27 +677,27 @@ class AnnotationRenderer(LayerRenderer):
                 transform_attr = f' transform="rotate({rotation:.1f} {sx:.2f} {sy:.2f})"' if rotation != 0.0 else ""
 
                 if style.marker_size > 0 and style.fill != "transparent" and props.get("show_marker", False):
-                    r = max(1.0, style.marker_size / 2.0)
+                    r = ctx.to_target(max(1.0, style.marker_size / 2.0))
                     parts.append(
-                        f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="{style.fill}" stroke="{style.stroke}" stroke-width="0.5"/>'
+                        f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="{style.fill}" stroke="{style.stroke}" stroke-width="{ctx.to_target(0.5):.2f}"/>'
                     )
 
                 if escaped_text:
                     parts.append(
-                        f'<text x="{sx:.2f}" y="{sy:.2f}" font-family="{font_family}" font-size="{font_size:.1f}" font-weight="{font_weight}" fill="{color}"{transform_attr}>{escaped_text}</text>'
+                        f'<text x="{sx:.2f}" y="{sy:.2f}" font-family="{font_family}" font-size="{ctx.to_target(font_size):.2f}" font-weight="{font_weight}" fill="{color}"{transform_attr}>{escaped_text}</text>'
                     )
             elif gtype == "LineString" and coords:
                 pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in coords if len(p) >= 2]
                 if pts:
                     parts.append(
-                        f'<polyline points="{" ".join(pts)}" fill="none" stroke="{color}" stroke-width="{style.stroke_width:.2f}"/>'
+                        f'<polyline points="{" ".join(pts)}" fill="none" stroke="{color}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"/>'
                     )
                 if escaped_text and len(coords) >= 2:
                     mid_idx = len(coords) // 2
                     mx, my = ctx.world_to_screen(coords[mid_idx][0], coords[mid_idx][1])
                     transform_attr = f' transform="rotate({rotation:.1f} {mx:.2f} {my:.2f})"' if rotation != 0.0 else ""
                     parts.append(
-                        f'<text x="{mx:.2f}" y="{my:.2f}" font-family="{font_family}" font-size="{font_size:.1f}" font-weight="{font_weight}" fill="{color}" text-anchor="middle"{transform_attr}>{escaped_text}</text>'
+                        f'<text x="{mx:.2f}" y="{my:.2f}" font-family="{font_family}" font-size="{ctx.to_target(font_size):.2f}" font-weight="{font_weight}" fill="{color}" text-anchor="middle"{transform_attr}>{escaped_text}</text>'
                     )
 
         parts.append("</g>")
