@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -190,7 +192,7 @@ class ThreadSafeCatalogSession:
     to safely acquire a thread-confined connection and guarantee its disposal upon block exit.
     """
 
-    def __init__(self, index: CatalogIndex) -> None:
+    def __init__(self, index: "CatalogIndex") -> None:
         self._index = index
         self._conn: sqlite3.Connection | None = None
 
@@ -200,6 +202,62 @@ class ThreadSafeCatalogSession:
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self._index._drop_current_connection()
+
+
+@dataclass(frozen=True)
+class _ConnEntry:
+    """One pooled connection together with the OS thread that owns it.
+
+    ``ident`` (the dict key) is only unique among *simultaneously existing*
+    threads — ``threading.get_ident()`` values are recycled after exit — so
+    the entry also carries the OS-native thread id used for liveness proofs
+    (see :func:`native_thread_alive`).
+    """
+
+    conn: sqlite3.Connection
+    native_id: int
+
+
+def native_thread_alive(native_id: int) -> bool | None:
+    """Best-effort proof that the OS thread *native_id* still exists.
+
+    Returns True/False where the platform allows an exact answer and None
+    when liveness cannot be determined; callers must treat None as "assume
+    alive" (leak) because closing a live connection from a foreign thread is
+    the one unrecoverable mistake.
+
+    ``threading.enumerate()`` is deliberately NOT consulted: foreign threads
+    (PySide QThreads executing Python slots) only appear there after someone
+    calls ``threading.current_thread()``, and their ``_DummyThread.is_alive()``
+    misreports — so enumerate-based pruning closed connections of *running*
+    workers (#1026).
+    """
+    try:
+        if Path("/proc/self/task").is_dir():  # Linux: exact per-thread listing
+            return Path(f"/proc/self/task/{native_id}").exists()
+    except OSError:
+        return None
+    if sys.platform == "win32":
+        import ctypes
+
+        THREAD_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.OpenThread(
+            THREAD_QUERY_LIMITED_INFORMATION, False, ctypes.c_ulong(native_id)
+        )
+        if not handle:
+            # ERROR_INVALID_PARAMETER means the id is gone; anything else
+            # (e.g. access denied) is indistinguishable from alive.
+            return None
+        try:
+            exit_code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeThread(handle, ctypes.byref(exit_code)):
+                return None
+            return exit_code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    return None
 
 
 class CatalogIndex:
@@ -218,7 +276,9 @@ class CatalogIndex:
         # which used to be swallowed into a silently stale index — issue
         # #394 / C31). WAL keeps readers on other threads consistent without
         # blocking the single writer (the service serializes saves).
-        self._conns: dict[int, sqlite3.Connection] = {}
+        # Values carry the owning OS thread id: the ident key is recyclable
+        # and enumerate()-based liveness never sees foreign threads (#1026).
+        self._conns: dict[int, _ConnEntry] = {}
         self._conns_lock = threading.Lock()
         # In-memory snapshot of the last-synced document rows
         # (``{table: {id: tuple-of-columns}}``), used by the incremental sync
@@ -250,36 +310,41 @@ class CatalogIndex:
         self._prune_dead_threads()
 
     def _prune_dead_threads(self) -> None:
-        """Close and remove connections for threads that have exited."""
-        alive_tids = {t.ident for t in threading.enumerate() if t.is_alive()}
-        dead_conns = []
+        """Close and remove connections whose OWNING OS thread has exited.
+
+        Liveness is proven per entry via :func:`native_thread_alive` (the OS
+        thread id recorded when the connection was created). Entries whose
+        liveness cannot be proven are left in place: a leaked descriptor is
+        recoverable, closing a connection while its (possibly foreign) owner
+        is mid-statement is not — that is use-after-free at the sqlite3 C
+        layer (#1026, #394 / C31).
+        """
+        provably_dead: list[_ConnEntry] = []
         with self._conns_lock:
-            for tid in list(self._conns.keys()):
-                is_alive = tid in alive_tids
-                if not is_alive:
-                    # Check Linux /proc/self/task/<tid> if available for native/QThread lifecycles
-                    proc_task = Path(f"/proc/self/task/{tid}")
-                    if proc_task.exists():
-                        is_alive = True
-                if not is_alive:
-                    dead_conns.append(self._conns.pop(tid))
-        for conn in dead_conns:
+            for tid, entry in list(self._conns.items()):
+                if native_thread_alive(entry.native_id) is False:
+                    provably_dead.append(self._conns.pop(tid))
+        for entry in provably_dead:
+            # The owner OS thread no longer exists, so nobody can be
+            # executing a statement on this handle; closing it from here is
+            # the documented-safe post-mortem reaping.
             try:
-                conn.close()
-            except (sqlite3.Error, Exception):
+                entry.conn.close()
+            except sqlite3.Error:
                 pass
 
     def close(self) -> None:
         """Close ALL cached connections (one per thread), if any.
 
-        A connection owned by another thread cannot be closed from here:
-        freeing the handle under an in-flight statement in the owner thread
-        is use-after-free at the sqlite3 C layer (SIGSEGV; #394 / C31,
+        A connection owned by another *live* thread cannot be closed from
+        here: freeing the handle under an in-flight statement in the owner
+        thread is use-after-free at the sqlite3 C layer (SIGSEGV; #394 / C31,
         reproduced by the Save As rollback racing a catalog-maintenance
-        rebuild). Foreign connections are interrupted — the one cross-thread
-        API sqlite3 guarantees — dropped from the pool, and closed by their
-        owner (or the garbage collector); the owning thread reconnects
-        lazily on its next use.
+        rebuild). Live foreign connections are interrupted — the one
+        cross-thread API sqlite3 guarantees — dropped from the pool, and
+        closed by their owner (or the garbage collector); the owning thread
+        reconnects lazily on its next use. Connections whose owner OS thread
+        provably exited are closed outright.
         """
         tid = threading.get_ident()
         with self._conns_lock:
@@ -288,13 +353,16 @@ class CatalogIndex:
             self._conns.clear()
         if mine is not None:
             try:
-                mine.close()
-            except (sqlite3.Error, Exception):
+                mine.conn.close()
+            except sqlite3.Error:
                 pass
-        for conn in foreign:
+        for entry in foreign:
             try:
-                conn.interrupt()
-            except (sqlite3.Error, Exception):
+                if native_thread_alive(entry.native_id) is False:
+                    entry.conn.close()
+                else:
+                    entry.conn.interrupt()
+            except sqlite3.Error:
                 pass
 
     def drop_current_connection(self) -> None:
@@ -311,11 +379,11 @@ class CatalogIndex:
         """
         tid = threading.get_ident()
         with self._conns_lock:
-            conn = self._conns.pop(tid, None)
-        if conn is not None:
+            entry = self._conns.pop(tid, None)
+        if entry is not None:
             try:
-                conn.close()
-            except (sqlite3.Error, Exception):
+                entry.conn.close()
+            except sqlite3.Error:
                 pass
 
     def reset(self) -> None:
@@ -335,10 +403,17 @@ class CatalogIndex:
     def _connect(self) -> sqlite3.Connection:
         """Return the CURRENT thread's cached connection (create on demand)."""
         tid = threading.get_ident()
+        native_id = threading.get_native_id()
         with self._conns_lock:
-            conn = self._conns.get(tid)
-        if conn is not None:
-            return conn
+            entry = self._conns.get(tid)
+        if entry is not None:
+            if entry.native_id == native_id:
+                return entry.conn
+            # The ident was recycled: this is a NEW OS thread reusing the id
+            # of a previous (exited) one. Never hand the old thread's handle
+            # across — that silently shares one connection between two OS
+            # threads (#1026). Disown it, then connect fresh below.
+            self._disown_recycled_entry(tid, entry)
         self._prune_dead_threads()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
@@ -348,11 +423,31 @@ class CatalogIndex:
         # without blocking. ``reset()`` cleans up -wal/-shm files.
         try:
             conn.execute("PRAGMA journal_mode=WAL")
+            # Bound contention instead of failing instantly when a foreign
+            # process/connection holds the write lock mid-checkpoint.
+            conn.execute("PRAGMA busy_timeout=5000")
         except sqlite3.DatabaseError:
             pass  # e.g. read-only media — DELETE journal still works
         with self._conns_lock:
-            self._conns[tid] = conn
+            self._conns[tid] = _ConnEntry(conn=conn, native_id=native_id)
         return conn
+
+    def _disown_recycled_entry(self, tid: int, entry: _ConnEntry) -> None:
+        """Drop a pooled entry whose ident was inherited by a new thread."""
+        with self._conns_lock:
+            if self._conns.get(tid) is entry:
+                del self._conns[tid]
+        try:
+            if native_thread_alive(entry.native_id) is False:
+                entry.conn.close()
+            else:
+                # Unreachable in practice (an ident is only recycled after
+                # its thread exits); if a probe ever disagrees, interrupt —
+                # the guaranteed-safe cross-thread call — and abandon the
+                # handle rather than risk closing it under use.
+                entry.conn.interrupt()
+        except sqlite3.Error:
+            pass
 
     # -- state ----------------------------------------------------------------
 
