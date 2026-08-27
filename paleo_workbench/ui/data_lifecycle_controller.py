@@ -427,6 +427,7 @@ class DataLifecycleController:
         trashed_count = 0
         target_ids = {getattr(it, "id", None) for it in items if getattr(it, "id", None)}
         domain_asset_ids = {str(item_id) for item_id in target_ids if item_id}
+        trashed_assets: list = []
 
         # Catalog-only rows (no legacy companion) trash directly in the
         # catalog. They surface as AssetView rows whose raw_asset is a Core
@@ -440,7 +441,9 @@ class DataLifecycleController:
                 if not isinstance(unwrapped, _DataAsset):
                     continue
                 try:
-                    service.trash_asset(unwrapped.id, reason="移出项目")
+                    trashed_assets.append(
+                        service.trash_asset(unwrapped.id, reason="移出项目")
+                    )
                     trashed_count += 1
                     domain_asset_ids.add(str(unwrapped.id))
                     target_ids.discard(unwrapped.id)
@@ -457,7 +460,9 @@ class DataLifecycleController:
             if service is None or ref is None:
                 continue
             try:
-                service.trash_asset(ref.asset_id, reason="移出项目")
+                trashed_assets.append(
+                    service.trash_asset(ref.asset_id, reason="移出项目")
+                )
                 trashed_count += 1
                 domain_asset_ids.add(str(ref.asset_id))
             except Exception as exc:
@@ -467,16 +472,22 @@ class DataLifecycleController:
                 return False
 
         before_res = len(page.project.resources)
-        page.project.resources[:] = [
-            r for r in page.project.resources if r.id not in target_ids
-        ]
-        removed_count += before_res - len(page.project.resources)
-
         before_art = len(page.project.export_artifacts)
-        page.project.export_artifacts[:] = [
-            a for a in page.project.export_artifacts if a.id not in target_ids
-        ]
-        removed_count += before_art - len(page.project.export_artifacts)
+        # Legacy rows are a projection of catalog state (#1032): drop them by
+        # the bridge ids of the assets the catalog actually trashed, plus any
+        # UI-only selections that never had a catalog companion. Deriving the
+        # set from the trashed assets (not a parallel UI computation) keeps
+        # the two worlds from diverging when the bridge id differs.
+        from paleo_workbench.catalog.legacy_projection import (
+            remove_legacy_resources_for_assets,
+            remove_legacy_resources_by_ids,
+        )
+
+        remove_legacy_resources_for_assets(page.project, trashed_assets)
+        remove_legacy_resources_by_ids(page.project, target_ids)
+        removed_count += (
+            before_res - len(page.project.resources)
+        ) + (before_art - len(page.project.export_artifacts))
 
         if removed_count > 0 or trashed_count > 0:
             from paleo_workbench.project.domain import (
@@ -527,10 +538,9 @@ class DataLifecycleController:
             page._set_action_status(f"还原失败: {exc}")
             return False
         restored = self.resource_from_catalog_asset(service, asset)
-        if restored is not None:
-            existing = {r.id for r in page.project.resources}
-            if restored.id not in existing:
-                page.project.resources.append(restored)
+        from paleo_workbench.catalog.legacy_projection import upsert_legacy_resource
+
+        upsert_legacy_resource(page.project, restored)
         page._set_selected_asset(None)
         page._refresh()
         page._set_action_status("已从回收站还原")
@@ -693,7 +703,11 @@ class DataLifecycleController:
                 if derived_item is None:
                     page._set_action_status("创建派生副本失败: 无法解析源版本")
                     return
-                page.project.resources.append(derived_item)
+                from paleo_workbench.catalog.legacy_projection import (
+                    upsert_legacy_resource,
+                )
+
+                upsert_legacy_resource(page.project, derived_item)
                 page._refresh()
                 page._set_selected_asset(derived_item)
                 page._set_action_status(f"已从 🔒 RAW 建立派生副本: {derived_item.name}")

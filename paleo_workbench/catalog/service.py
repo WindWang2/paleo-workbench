@@ -165,6 +165,19 @@ def _disk_mtime_ns(path: Path) -> int | None:
         return None
 
 
+def _discard_by_identity(items: list, target: object) -> None:
+    """Remove *target* from *items* by identity in one pointer-compare scan.
+
+    ``list.remove`` matches by value — for pydantic models that is an
+    O(fields) comparison per probe and can evict a different-but-equal twin
+    (#1044). Identity is the correct key for entities owned by the document.
+    """
+    for index, item in enumerate(items):
+        if item is target:
+            del items[index]
+            return
+
+
 class DataCatalogService:
     """Unified lifecycle service for one project."""
 
@@ -312,23 +325,75 @@ class DataCatalogService:
                         )
 
     def _remove_asset(self, asset: DataAsset) -> None:
-        if asset in self.document.assets:
-            self.document.assets.remove(asset)
+        """Drop one asset by identity without touching sibling mappings.
+
+        Pydantic value-equality (``in``/``list.remove``) costs an O(N)
+        field-comparing scan per probe and can even discard a *different but
+        equal* object; identity removal plus a targeted legacy-bridge
+        rebridge keeps single deletions O(N) with cheap pointer compares and
+        batch deletions near O(N + M) via :meth:`_remove_assets_bulk` (#1044).
+        """
+        _discard_by_identity(self.document.assets, asset)
         if self._asset_by_id is not None:
             self._asset_by_id.pop(asset.id, None)
         if self._assets_by_legacy_id is not None:
-            # Removing the (first-wins) claimant must reveal the next claimant;
-            # rebuild this small index from the remaining assets. A live
-            # asset takes the bridge over a trashed one (I2).
-            legacy: dict[str, DataAsset] = {}
-            for a in self.document.assets:
-                legacy[a.id] = a
-            for a in sorted(
-                self.document.assets, key=lambda x: int(bool(x.trashed))
-            ):
-                if a.legacy_resource_id is not None:
-                    legacy.setdefault(a.legacy_resource_id, a)
-            self._assets_by_legacy_id = legacy
+            affected_keys = {asset.id}
+            if asset.legacy_resource_id is not None:
+                affected_keys.add(asset.legacy_resource_id)
+            self._rebridge_legacy_keys(affected_keys)
+
+    def _remove_assets_bulk(self, assets: list[DataAsset]) -> None:
+        """Remove many assets in one pass; legacy bridge rebridged once.
+
+        A purge of M assets from an N-asset document must cost O(N + M), not
+        M full reindex-and-sort rounds (#1044). Order of survivors is
+        preserved.
+        """
+        if not assets:
+            return
+        targets = {id(a) for a in assets}
+        remaining = [a for a in self.document.assets if id(a) not in targets]
+        self.document.assets[:] = remaining
+        if self._asset_by_id is not None:
+            for asset in assets:
+                self._asset_by_id.pop(asset.id, None)
+        if self._assets_by_legacy_id is not None:
+            affected = {a.id for a in assets}
+            for asset in assets:
+                if asset.legacy_resource_id is not None:
+                    affected.add(asset.legacy_resource_id)
+            self._rebridge_legacy_keys(affected, survivors=remaining)
+
+    def _rebridge_legacy_keys(
+        self,
+        keys: set[str],
+        survivors: list[DataAsset] | None = None,
+    ) -> None:
+        """Recompute legacy-bridge holders for *keys* only.
+
+        A live claimant takes the bridge over a trashed one; otherwise the
+        first remaining claimant wins (I2). Keys whose holder survived are
+        left untouched, so the common no-claim removal does no scanning.
+        """
+        bridge = self._assets_by_legacy_id
+        if bridge is None:
+            return
+        if survivors is None:
+            survivors = self.document.assets
+        candidates: dict[str, list[DataAsset]] = {key: [] for key in keys}
+        for asset in survivors:
+            if asset.id in candidates:
+                candidates[asset.id].append(asset)
+            legacy_id = asset.legacy_resource_id
+            if legacy_id is not None and legacy_id in candidates:
+                candidates[legacy_id].append(asset)
+        for key, claimants in candidates.items():
+            if claimants:
+                live = [a for a in claimants if not a.trashed]
+                bridge[key] = live[0] if live else claimants[0]
+            else:
+                # No claimant remains among survivors — drop the stale entry.
+                bridge.pop(key, None)
 
     def _add_version(self, version: DataVersion) -> None:
         self.document.versions.append(version)
@@ -339,17 +404,41 @@ class DataCatalogService:
                 self._children_by_parent.setdefault(pid, []).append(version)
 
     def _remove_version(self, version: DataVersion) -> None:
-        if version in self.document.versions:
-            self.document.versions.remove(version)
+        _discard_by_identity(self.document.versions, version)
         if self._version_by_id is not None:
             self._version_by_id.pop(version.id, None)
             bucket = self._versions_by_asset.get(version.asset_id)
-            if bucket is not None and version in bucket:
-                bucket.remove(version)
+            if bucket is not None:
+                _discard_by_identity(bucket, version)
             for pid in version.parent_version_ids:
                 children = self._children_by_parent.get(pid)
-                if children is not None and version in children:
-                    children.remove(version)
+                if children is not None:
+                    _discard_by_identity(children, version)
+
+    def _remove_versions_bulk(self, versions: list[DataVersion]) -> None:
+        """Remove many versions in one pass over each affected container (#1044)."""
+        if not versions:
+            return
+        targets = {id(v) for v in versions}
+        self.document.versions[:] = [
+            v for v in self.document.versions if id(v) not in targets
+        ]
+        if self._version_by_id is None:
+            return
+        affected_assets: set[str] = set()
+        affected_parents: set[str] = set()
+        for version in versions:
+            self._version_by_id.pop(version.id, None)
+            affected_assets.add(version.asset_id)
+            affected_parents.update(version.parent_version_ids)
+        for asset_id in affected_assets:
+            bucket = self._versions_by_asset.get(asset_id)
+            if bucket is not None:
+                bucket[:] = [v for v in bucket if id(v) not in targets]
+        for pid in affected_parents:
+            children = self._children_by_parent.get(pid)
+            if children is not None:
+                children[:] = [v for v in children if id(v) not in targets]
 
     def _add_run(self, run: DataRun) -> None:
         self.document.runs.append(run)
@@ -357,8 +446,7 @@ class DataCatalogService:
             self._run_by_id[run.id] = run
 
     def _remove_run(self, run: DataRun) -> None:
-        if run in self.document.runs:
-            self.document.runs.remove(run)
+        _discard_by_identity(self.document.runs, run)
         if self._run_by_id is not None:
             self._run_by_id.pop(run.id, None)
 
@@ -2095,8 +2183,7 @@ class DataCatalogService:
                 for version in trashed_versions
                 if version.managed
             ]
-            for version in trashed_versions:
-                self._remove_version(version)
+            self._remove_versions_bulk(trashed_versions)
             # A live asset whose EVERY version was individually trashed and
             # purged is a zombie (zero versions, current_version_id=None):
             # drop it so listings cannot show an empty asset row (I3).
@@ -2111,8 +2198,8 @@ class DataCatalogService:
                 for aid, tags in list(self.document.asset_tags.items())
                 if aid in {a.id for a in zombie_assets}
             }
+            self._remove_assets_bulk(zombie_assets)
             for asset in zombie_assets:
-                self._remove_asset(asset)
                 self.document.asset_tags.pop(asset.id, None)
             # An asset is removed only when NONE of its versions survives the
             # purge. restore_version() can untrash a single version of a
@@ -2125,6 +2212,7 @@ class DataCatalogService:
             untrashed_snapshots: list[
                 tuple[DataAsset, bool, str | None, dict[str, Any]]
             ] = []
+            removed_trashed_assets: list[DataAsset] = []
             for asset in trashed_assets:
                 if asset.id in surviving_asset_ids:
                     untrashed_snapshots.append(
@@ -2139,7 +2227,8 @@ class DataCatalogService:
                     asset.trashed_at = None
                     asset.metadata.pop("trash", None)
                     continue
-                self._remove_asset(asset)
+                removed_trashed_assets.append(asset)
+            self._remove_assets_bulk(removed_trashed_assets)
             for vid in removed_version_tags:
                 self.document.version_tags.pop(vid, None)
             for aid in removed_asset_tags:
@@ -2154,7 +2243,7 @@ class DataCatalogService:
                 for asset in trashed_assets:
                     # Only re-add assets actually removed (un-trashed assets
                     # stayed in the document the whole time).
-                    if asset not in self.document.assets:
+                    if not any(existing is asset for existing in self.document.assets):
                         self._add_asset(asset)
                 for asset, was_trashed, was_at, was_meta in untrashed_snapshots:
                     asset.trashed = was_trashed
