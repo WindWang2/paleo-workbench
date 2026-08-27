@@ -73,6 +73,43 @@ def _sort_tuple(view: AssetView, key: str, format_cell) -> tuple:
     return (0, val)
 
 
+def _match_positions_by_identity(
+    old_assets: list, new_assets: list
+) -> list[int | None]:
+    """Per-position old-index matches for identical asset objects.
+
+    Returns, for each entry of *new_assets*, the index of the equal-by-
+    identity (``is``) entry in *old_assets*, or None. Duplicate objects
+    consume old positions greedily in order, so a repeated object beyond its
+    old multiplicity gets None (conservative: rebuild). Object identity is
+    the only reuse key — the same object cannot have changed content, so
+    reusing its view is exact; everything else rebuilds (#1063).
+    """
+    if not old_assets:
+        return [None] * len(new_assets)
+    from collections import deque
+
+    positions: dict[int, deque] = {}
+    for idx, asset in enumerate(old_assets):
+        positions.setdefault(id(asset), deque()).append(idx)
+    matches: list[int | None] = []
+    for asset in new_assets:
+        bucket = positions.get(id(asset))
+        matches.append(bucket.popleft() if bucket else None)
+    return matches
+
+
+def _recycle_views(old_assets: list, old_views: list, new_assets: list, build_view) -> list:
+    """Views for *new_assets*, recycling the previous view of any row that
+    arrives as the very same object (identity = exact unchanged content);
+    every other row gets a freshly built view (#1063)."""
+    matches = _match_positions_by_identity(old_assets, new_assets)
+    return [
+        old_views[m] if m is not None else build_view(asset)
+        for m, asset in zip(matches, new_assets)
+    ]
+
+
 class AssetTableModel(QAbstractTableModel):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -88,6 +125,10 @@ class AssetTableModel(QAbstractTableModel):
         # Survives model rebuilds so the host can re-apply the user's sort
         # after a filter/refresh reset (#850-1).
         self._last_sort: tuple[int, object] | None = None
+        # View-reuse is only valid while the view-building inputs are
+        # unchanged: a different project root or enricher would render
+        # recycled views stale (#1063).
+        self._view_build_token: tuple | None = None
 
     def set_project_root(self, root: Path | str | None) -> None:
         if root:
@@ -98,6 +139,9 @@ class AssetTableModel(QAbstractTableModel):
     def set_view_enricher(self, enricher) -> None:
         self._view_enricher = enricher
 
+    def _view_inputs_token(self) -> tuple:
+        return (self._project_root, self._view_enricher)
+
     def set_column_keys(self, keys: list[str]) -> None:
         self.beginResetModel()
         self._column_keys = list(keys)
@@ -105,13 +149,29 @@ class AssetTableModel(QAbstractTableModel):
         self.endResetModel()
 
     def set_assets(self, assets: list[object]) -> None:
+        """Install a full asset list; identical objects keep their views.
+
+        The list-level API is unchanged — incrementality is internal
+        (#1063): rows arriving as the very same object as before reuse the
+        previously built AssetView (exact, since an unchanged object cannot
+        have new content), everything else rebuilds. The user's last sort
+        is re-applied after the rebuild instead of being dropped (#1064).
+        """
+        new_assets = list(assets)
+        token = self._view_inputs_token()
+        can_reuse = token == self._view_build_token
         self.beginResetModel()
-        self._raw_assets = list(assets)
-        self._views = [self._build_view(a) for a in self._raw_assets]
-        self._filtered_rows = list(range(len(self._raw_assets)))
-        # The reset-time view auto-sort mutates stale rows; drop the recorded
-        # sort so it is never mistaken for a user sort (#850-1).
-        self._last_sort = None
+        if can_reuse:
+            self._views = _recycle_views(self._raw_assets, self._views, new_assets, self._build_view)
+        else:
+            self._views = [self._build_view(a) for a in new_assets]
+        self._raw_assets = new_assets
+        self._view_build_token = token
+        self._filtered_rows = list(range(len(new_assets)))
+        # #850-1 dropped the sort because the reset-time view auto-sort
+        # mutated stale rows; re-sorting explicitly after the rebuild is
+        # safe and keeps the user's ordering across refreshes (#1064).
+        self._apply_last_sort()
         self.endResetModel()
 
     def _build_view(self, asset: object) -> AssetView:
@@ -123,7 +183,7 @@ class AssetTableModel(QAbstractTableModel):
     def set_filtered_rows(self, rows: list[int]) -> None:
         self.beginResetModel()
         self._filtered_rows = list(rows)
-        self._last_sort = None
+        self._apply_last_sort()
         self.endResetModel()
 
     def set_assets_filtered(
@@ -133,19 +193,50 @@ class AssetTableModel(QAbstractTableModel):
         column_keys: list[str] | None = None,
         views: list[object] | None = None,
     ) -> None:
+        """Filtered variant of :meth:`set_assets` (host refresh entry).
+
+        Same incremental semantics (#1063): caller-provided views win for
+        their rows; rows without one reuse the previous view when the asset
+        object is identical, else rebuild. The caller's row selection is
+        respected verbatim; the user's last sort is re-applied (#1064).
+        """
+        new_assets = list(assets)
+        token = self._view_inputs_token()
+        if views is not None and len(views) == len(new_assets):
+            new_views = list(views)  # shared prebuilt views (#527)
+        elif token == self._view_build_token:
+            new_views = _recycle_views(self._raw_assets, self._views, new_assets, self._build_view)
+        else:
+            new_views = [self._build_view(a) for a in new_assets]
         self.beginResetModel()
         if column_keys is not None:
             self._column_keys = list(column_keys)
-        self._raw_assets = list(assets)
-        if views is not None and len(views) == len(self._raw_assets):
-            self._views = list(views)  # shared prebuilt views (#527)
-        else:
-            self._views = [self._build_view(a) for a in self._raw_assets]
+        self._raw_assets = new_assets
+        self._views = new_views
+        self._view_build_token = token
         self._filtered_rows = list(rows)
-        # The reset-time view auto-sort mutates stale rows; drop the recorded
-        # sort so it is never mistaken for a user sort (#850-1).
-        self._last_sort = None
+        self._apply_last_sort()
         self.endResetModel()
+
+    def _apply_last_sort(self) -> None:
+        """Re-order the current filtered rows by the user's last sort.
+
+        No-op until the user has sorted once. Applied inside every row-set
+        mutation so ordering survives refreshes and filter changes (#1064).
+        """
+        last = self._last_sort
+        if last is None:
+            return
+        column, order = last
+        if column < 0 or column >= len(self._column_keys):
+            return
+        key = self._column_keys[column]
+        reverse = order == Qt.SortOrder.DescendingOrder
+
+        def sort_key(row_idx: int) -> tuple:
+            return _sort_tuple(self._views[row_idx], key, self._format_cell_display)
+
+        self._filtered_rows.sort(key=sort_key, reverse=reverse)
 
     def asset_at(self, view_row: int) -> object | None:
         if view_row < 0 or view_row >= len(self._filtered_rows):
@@ -277,14 +368,7 @@ class AssetTableModel(QAbstractTableModel):
     def sort(self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder) -> None:
         if column < 0 or column >= len(self._column_keys):
             return
-        key = self._column_keys[column]
-        reverse = (order == Qt.SortOrder.DescendingOrder)
         self._last_sort = (column, order)
         self.beginResetModel()
-
-        def sort_key(row_idx: int) -> tuple:
-            view = self._views[row_idx]
-            return _sort_tuple(view, key, self._format_cell_display)
-
-        self._filtered_rows.sort(key=sort_key, reverse=reverse)
+        self._apply_last_sort()
         self.endResetModel()

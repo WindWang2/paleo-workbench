@@ -109,6 +109,7 @@ markers = [
     "qgis: requires the optional qgis_render_bridge extension (see docs/ci-merge-policy.md)",
     "welllog_binding: requires the built welllog pybind module",
     "timeout: per-test timeout (requires pytest-timeout plugin)",
+    "capacity: 10万-scale data-management budgets (#1060); runs in the fast CI selection",
 ]
 pythonpath = [
     ".",
