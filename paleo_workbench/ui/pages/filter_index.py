@@ -7,7 +7,10 @@ from typing import Any, Sequence
 
 from paleo_workbench.catalog import normalize_tag_name
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
-from paleo_workbench.ui.pages.asset_table_model import RESOURCE_TYPE_LABELS
+from paleo_workbench.ui.pages.asset_table_model import (
+    RESOURCE_TYPE_LABELS,
+    _match_positions_by_identity,
+)
 from paleo_workbench.ui.pages.data_view_models import (
     AssetView,
     DataStage,
@@ -103,6 +106,9 @@ class FilterIndex:
         self._assets: list[ResourceItem | ExportArtifact | Any] = []
         self._views: list[AssetView] = []
         self._haystacks: list[str] = []
+        # View-reuse token (#1063): recycling is only valid while the
+        # view-building inputs are unchanged.
+        self._build_token: tuple | None = None
 
     def rebuild(
         self,
@@ -111,21 +117,52 @@ class FilterIndex:
         enricher: Any = None,
         views: Sequence[Any] | None = None,
     ) -> None:
-        self._assets = list(assets)
-        if views is not None and len(views) == len(self._assets):
+        """(Re)build the index; identical asset objects keep their views.
+
+        Every AssetView build probes the filesystem (exists/stat per
+        resource), which dominated refresh time at 10万-scale. Rows arriving
+        as the same object as the previous rebuild reuse their view AND
+        search haystack; everything else rebuilds (#1063). Caller-provided
+        views (#527) always win verbatim.
+        """
+        new_assets = list(assets)
+        token = (project_root, enricher)
+        if views is not None and len(views) == len(new_assets):
             # Shared prebuilt views (#527): every AssetView build probes the
             # filesystem (exists/stat per resource) — building them once per
             # refresh and threading them through the consumers removed the
             # per-pass multiplication.
             self._views = list(views)
+            self._haystacks = [self._haystack(view) for view in self._views]
+        elif token == self._build_token and self._assets:
+            matches = _match_positions_by_identity(self._assets, new_assets)
+            old_views = self._views
+            old_haystacks = self._haystacks
+            new_views: list[AssetView] = []
+            new_haystacks: list[str] = []
+            for m, asset in zip(matches, new_assets):
+                if m is not None:
+                    new_views.append(old_views[m])
+                    new_haystacks.append(old_haystacks[m])
+                else:
+                    view = asset_view_from_object(asset, project_root=project_root)
+                    if enricher is not None:
+                        view = enricher(view)
+                    new_views.append(view)
+                    new_haystacks.append(self._haystack(view))
+            self._views = new_views
+            self._haystacks = new_haystacks
         else:
             self._views = []
-            for asset in self._assets:
+            self._haystacks = []
+            for asset in new_assets:
                 view = asset_view_from_object(asset, project_root=project_root)
                 if enricher is not None:
                     view = enricher(view)
                 self._views.append(view)
-        self._haystacks = [self._haystack(view) for view in self._views]
+                self._haystacks.append(self._haystack(view))
+        self._assets = new_assets
+        self._build_token = token
 
     @property
     def views(self) -> list:
