@@ -78,6 +78,14 @@ class SeismicViewPanel(QFrame):
             self.view.segy_loaded.connect(self._on_segy_loaded)
         self.stack.addWidget(self.view)
         outer.addWidget(host, 1)
+        # #1079: auto-switch 2-D browsing to the chunked store the moment a
+        # background transcode of the displayed SEG-Y completes.
+        try:
+            from paleo_workbench.seismic_lifecycle import add_derived_hook
+
+            add_derived_hook(self._on_derived_store_registered)
+        except Exception:
+            pass
 
     def __del__(self) -> None:
         # pytest and other non-interactive owners may drop the Python wrapper
@@ -177,6 +185,39 @@ class SeismicViewPanel(QFrame):
         self.stack.setCurrentWidget(self.empty_label)
         self.view_ready.emit(False)
 
+    def _attach_chunked_store_if_available(self, segy_path) -> None:
+        """Switch 2-D browsing to the chunked store for this SEG-Y, if the
+        project has a fresh DERIVED zarr for it (#1079 auto-switch)."""
+        if not segy_path or not hasattr(self.view, "set_chunked_volume"):
+            return
+        try:
+            from paleo_workbench.catalog import get_catalog_service
+            from paleo_workbench.seismic_lifecycle import derived_store_for_path
+
+            catalog = get_catalog_service()
+            if catalog is None:
+                return
+            store = derived_store_for_path(catalog, segy_path)
+            if store is not None and store.is_dir():
+                self.view.set_chunked_volume(str(store))
+        except Exception:
+            pass  # browsing stays on the RAW fallback path — never fatal
+
+    def _on_derived_store_registered(self, raw_version_id, raw_path, store_path) -> None:
+        """Lifecycle hook: a transcode finished; swap browsing if it is the
+        volume this panel is currently showing."""
+        if (
+            self._segy_session_active
+            and raw_path
+            and self._expected_segy_path
+            and str(raw_path) == str(self._expected_segy_path)
+            and hasattr(self.view, "set_chunked_volume")
+        ):
+            try:
+                self.view.set_chunked_volume(str(store_path))
+            except Exception:
+                pass
+
     def shutdown(self) -> None:
         """Cancel retained SEGY/slice work before the project session closes."""
 
@@ -254,6 +295,7 @@ class SeismicViewPanel(QFrame):
         self.volume_shape = tuple(int(value) for value in volume.shape)
         self.empty_label.setHidden(True)
         self.stack.setCurrentWidget(self.view)
+        self._attach_chunked_store_if_available(getattr(result, "path", None))
         if self._horizon_name:
             self.set_horizon_context(self._horizon_name)
         self.view_ready.emit(True)

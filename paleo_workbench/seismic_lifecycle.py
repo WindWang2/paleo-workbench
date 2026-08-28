@@ -34,6 +34,53 @@ logger = logging.getLogger(__name__)
 TRANSCODE_OPERATION = "segy-to-zarr"
 TRANSCODE_KIND = "seismic.transcode"
 
+# Notified as f(raw_version_id, raw_payload_path, derived_store_path) when a
+# transcode completes (#1079 auto-switch: the seismic view can swap its 2-D
+# browsing to the chunked store without user action).
+_derived_hooks: list = []
+
+
+def add_derived_hook(hook) -> None:
+    """Register a callable(raw_version_id, raw_path, store_path) invoked after
+    each DERIVED store registration. Exceptions in hooks are logged and
+    ignored (UI conveniences must never fail the catalog write)."""
+    _derived_hooks.append(hook)
+
+
+def derived_store_for_path(
+    catalog: DataCatalogService, segy_path: str | Path
+) -> Path | None:
+    """Newest non-stale DERIVED zarr store whose RAW payload is *segy_path*."""
+    from pathlib import Path as _P
+
+    target = _P(segy_path).resolve()
+    try:
+        version_id = catalog._index.find_external_by_path(target.as_posix())
+    except Exception:
+        version_id = None
+    if version_id is None:
+        # Managed RAW payloads resolve through the document instead.
+        for v in catalog.document.versions:
+            if v.stage.value == "raw" and not v.trashed and v.path:
+                try:
+                    if _P(catalog.resolve_path(v)).resolve() == target:
+                        version_id = v.id
+                        break
+                except Exception:
+                    continue
+    if version_id is None:
+        return None
+    for v in catalog.document.versions:
+        if (
+            v.stage.value == "derived"
+            and v.format == "zarr-v3"
+            and version_id in v.parent_version_ids
+            and not v.metadata.get("stale")
+            and not v.trashed
+        ):
+            return Path(catalog.resolve_path(v))
+    return None
+
 
 @dataclass
 class TranscodeJob:
@@ -205,6 +252,16 @@ class SeismicLifecycleService:
         logger.info(
             "transcode %s -> derived version %s complete", raw_version_id, version.id
         )
+        raw_path = None
+        try:
+            raw_path = str(catalog.resolve_path(catalog.get_version(raw_version_id)))
+        except Exception:
+            pass
+        for hook in list(_derived_hooks):
+            try:
+                hook(raw_version_id, raw_path, str(catalog.resolve_path(version)))
+            except Exception:
+                logger.exception("derived hook failed for %s", raw_version_id)
 
     def _finish_run(
         self, run_id: str, status: str, *, error: str | None = None, extra: dict | None = None
