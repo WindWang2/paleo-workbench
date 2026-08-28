@@ -27,9 +27,11 @@ from paleo_workbench.mapping.layers import (
     WellPointMapLayer,
 )
 from paleo_workbench.mapping.renderers import (
+    _MM_PER_PX,
     DEFAULT_RENDERER_REGISTRY,
     LegendItem,
     RenderContext,
+    RenderUnit,
 )
 
 
@@ -112,7 +114,10 @@ class MapComposerRenderer:
         # 1. If a MapDocument instance is supplied
         if isinstance(map_doc, MapDocument):
             extent = map_doc.extent
-            ctx = RenderContext(extent=extent, width=w, height=h, x_offset=x, y_offset=y)
+            ctx = RenderContext(
+                extent=extent, width=w, height=h, x_offset=x, y_offset=y,
+                units=RenderUnit.MM,
+            )
             for layer in map_doc.layers:
                 if not layer.visible:
                     continue
@@ -131,7 +136,10 @@ class MapComposerRenderer:
                 xmaxs = [lyr.extent[2] for lyr in layers if lyr.extent]
                 ymaxs = [lyr.extent[3] for lyr in layers if lyr.extent]
                 extent = (min(xmins), min(ymins), max(xmaxs), max(ymaxs)) if xmins else (0.0, 0.0, 1.0, 1.0)
-            ctx = RenderContext(extent=extent, width=w, height=h, x_offset=x, y_offset=y)
+            ctx = RenderContext(
+                extent=extent, width=w, height=h, x_offset=x, y_offset=y,
+                units=RenderUnit.MM,
+            )
             for layer in layers:
                 if not layer.visible:
                     continue
@@ -144,7 +152,10 @@ class MapComposerRenderer:
         # 3. Fallback to dictionary layers (legacy compatibility)
         if layers and extent and len(extent) == 4:
             # Convert raw dicts into VectorMapLayer / GridMapLayer and render through registry
-            ctx = RenderContext(extent=extent, width=w, height=h, x_offset=x, y_offset=y)
+            ctx = RenderContext(
+                extent=extent, width=w, height=h, x_offset=x, y_offset=y,
+                units=RenderUnit.MM,
+            )
             for lyr_dict in layers:
                 if not isinstance(lyr_dict, Mapping):
                     continue
@@ -219,6 +230,7 @@ class MapComposerRenderer:
             f'<text x="{x + 4}" y="{y + 5.5}" font-family="SimSun, Arial, sans-serif" font-size="4" font-weight="bold" fill="#000000">图 例</text>',
         ]
 
+        swatch_mm = _MM_PER_PX  # px → mm at the 96 DPI authoring baseline
         for idx, it in enumerate(legend_items):
             iy = y + 9.0 + idx * item_h
             escaped_label = html.escape(str(it.label))
@@ -230,10 +242,10 @@ class MapComposerRenderer:
                 svg_lines.append(f'<rect x="{x + 4}" y="{iy}" width="14" height="3" fill="url(#{grad_id})" stroke="#333333" stroke-width="0.1"/>')
                 svg_lines.append(f'<text x="{x + 21}" y="{iy + 2.5}" font-family="SimSun, Arial, sans-serif" font-size="2.6" fill="#000000">{escaped_label}</text>')
             elif it.symbol_type == "line":
-                svg_lines.append(f'<line x1="{x + 4}" y1="{iy + 1.5}" x2="{x + 10}" y2="{iy + 1.5}" stroke="{it.color}" stroke-width="1.2"/>')
+                svg_lines.append(f'<line x1="{x + 4}" y1="{iy + 1.5}" x2="{x + 10}" y2="{iy + 1.5}" stroke="{it.color}" stroke-width="{max(0.2, it.stroke_width * swatch_mm):.2f}"/>')
                 svg_lines.append(f'<text x="{x + 13}" y="{iy + 2.5}" font-family="SimSun, Arial, sans-serif" font-size="2.8" fill="#000000">{escaped_label}</text>')
             elif it.symbol_type == "point":
-                svg_lines.append(f'<circle cx="{x + 7}" cy="{iy + 1.5}" r="2" fill="{it.color}" stroke="{it.stroke_color}" stroke-width="0.5"/>')
+                svg_lines.append(f'<circle cx="{x + 7}" cy="{iy + 1.5}" r="2" fill="{it.color}" stroke="{it.stroke_color}" stroke-width="{max(0.1, it.stroke_width * swatch_mm):.2f}"/>')
                 svg_lines.append(f'<text x="{x + 13}" y="{iy + 2.5}" font-family="SimSun, Arial, sans-serif" font-size="2.8" fill="#000000">{escaped_label}</text>')
             else:
                 svg_lines.append(f'<rect x="{x + 4}" y="{iy}" width="6" height="3" fill="{it.color}" stroke="{it.stroke_color}" stroke-width="0.1"/>')

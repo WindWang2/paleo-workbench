@@ -506,7 +506,8 @@ class TestReviewFixesMapRound2:
         assert domain_signature(doc) != sig1
         doc.wells[0].uwi = ""
         doc.wells[0].aliases.append("别名")
-        assert domain_signature(doc) != sig1 or True  # aliases tuple changes
+        # aliases participate in the domain signature (tree rebuild gate)
+        assert domain_signature(doc) != sig1
 
 
 class TestReferenceLayers:

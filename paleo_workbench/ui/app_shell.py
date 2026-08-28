@@ -67,6 +67,19 @@ class AppShell(QWidget):
         self.theme_manager = theme_manager
         self.setStyleSheet(self.theme_manager.get_qss())
         self.theme_manager.theme_changed.connect(self._on_theme_changed)
+
+        # Multi-view coordination engines (#1029): AppShell is the single
+        # owner; pages receive these via attribute injection and the
+        # ViewCoordinationController mediates every selection sync.
+        from paleo_workbench.viz.coordinate_hub import CoordinateTransformHub
+        from paleo_workbench.viz.selection_context import SelectionContext
+        from paleo_workbench.ui.view_coordination import ViewCoordinationController
+
+        self.selection_context = SelectionContext()
+        self.coordinate_hub = CoordinateTransformHub()
+        self.view_coordination = ViewCoordinationController(
+            self.selection_context, self.coordinate_hub, parent=self
+        )
         self.project = project or ProjectDocument.new("Untitled Project")
         self._well_location_state_store = WellLocationPreviewStateStore()
         self._fade_anim: QPropertyAnimation | None = None
@@ -143,6 +156,9 @@ class AppShell(QWidget):
 
         self.status_bar = StatusBar(self)
         outer.addWidget(self.status_bar)
+
+        # Bridge every page's selection surface onto the shared context (#1029).
+        self.view_coordination.attach_app_shell(self)
 
         # Signal connections
         self.workflow_stepper.stage_changed.connect(self._on_stepper_stage_changed)

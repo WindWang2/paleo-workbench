@@ -111,33 +111,29 @@ class TestWorkerLifecycleAndShutdown:
     """Tests for #962, #965, #966, #967, #970."""
 
     def test_962_data_page_worker_list_tracking(self, qtbot):
-        """#962: DataPage tracks and shuts down all active worker jobs."""
-        class MockDataPage:
-            def __init__(self):
-                self._workers: list[OwnedWorkerJob] = []
+        """#962: the REAL DataPage shutdown protocol.
 
-            def register_worker(self, job: OwnedWorkerJob):
-                self._workers.append(job)
+        The old body invented a register_worker API on a local MockDataPage;
+        production DataPage owns typed worker controllers and exposes the
+        shutdown_workers protocol AppShell drives — verify that contract on
+        the real page, plus the real OwnedWorkerJob it manages."""
+        from paleo_workbench.project.models import ProjectDocument
+        from paleo_workbench.ui.pages.data_page import DataPage
 
-            def shutdown_workers(self, wait_ms: int = 1500) -> bool:
-                results = []
-                for w in list(self._workers):
-                    results.append(w.shutdown(wait_ms=wait_ms))
-                self._workers.clear()
-                return all(results)
+        page = DataPage(project=ProjectDocument.new("e2e-workers"))
+        qtbot.addWidget(page)
 
-        page = MockDataPage()
-        job1 = OwnedWorkerJob()
-        job2 = OwnedWorkerJob()
-        page.register_worker(job1)
-        page.register_worker(job2)
-
-        # Assertions 1-5
-        assert len(page._workers) == 2
+        # idle page: every owned controller reports joined
         assert page.shutdown_workers(wait_ms=500) is True
-        assert len(page._workers) == 0
-        assert job1.is_running is False
-        assert job2.is_running is False
+
+        # the page's real controllers are the production OwnedWorkerJobs
+        from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
+
+        preview_job = page._preview_controller._active_job
+        assert preview_job is not None, "preview controller owns a job"
+        assert isinstance(preview_job, OwnedWorkerJob)
+        assert preview_job.is_running is False
+
 
     def test_965_owned_worker_job_signal_disconnect(self, qtbot):
         """#965: OwnedWorkerJob disconnects signals before thread join."""
@@ -246,29 +242,34 @@ class TestDomainAndArchitectureDecoupling:
     """Tests for #963, #964, #968, #969, #973."""
 
     def test_963_preview_settings_domain_layer_decoupling(self):
-        """#963: PreviewSettings is defined in domain layer without UI dependencies."""
-        class PreviewSettings:
-            def __init__(self, max_width: int = 1024, max_height: int = 768, quality: float = 0.85):
-                self.max_width = max_width
-                self.max_height = max_height
-                self.quality = quality
+        """#963: the REAL PreviewSettings lives in the resources domain layer
+        with zero UI dependencies (the old body asserted against a local
+        look-alike class, which proved nothing about production)."""
+        import importlib.util
+        from pathlib import Path as _Path
 
-            def compute_scaled_dims(self, width: int, height: int) -> tuple[int, int]:
-                scale = min(self.max_width / max(1, width), self.max_height / max(1, height), 1.0)
-                return int(width * scale), int(height * scale)
+        from paleo_workbench.resources import preview_settings as ps_mod
 
-            def to_dict(self) -> dict[str, Any]:
-                return {"max_width": self.max_width, "max_height": self.max_height, "quality": self.quality}
+        spec = importlib.util.find_spec("paleo_workbench.resources.preview_settings")
+        source = _Path(spec.origin).read_text(encoding="utf-8")
+        assert "PySide6" not in source, "domain layer must not import Qt"
+        assert "paleo_workbench.ui" not in source, "domain layer must not import UI"
 
-        ps = PreviewSettings(1920, 1080, 0.9)
-        w, h = ps.compute_scaled_dims(3840, 2160)
+        ps = ps_mod.PreviewSettings.defaults()
+        assert ps.font_size == 12
+        assert ps.table_max_rows == 200
 
-        # Assertions 1-5
-        assert ps.max_width == 1920
-        assert ps.max_height == 1080
-        assert w == 1920 and h == 1080
-        assert ps.to_dict()["quality"] == 0.9
-        assert "paleo_workbench.ui" not in str(type(ps))
+        # from_mapping round-trips known keys and drops unknown ones
+        restored = ps_mod.PreviewSettings.from_mapping(
+            {"table_max_rows": 500, "bogus_key": 1}
+        )
+        assert restored.table_max_rows == 500
+        assert not hasattr(restored, "bogus_key")
+
+        # invalid values are rejected at construction
+        with pytest.raises(ValueError):
+            ps_mod.PreviewSettings(density="nope")
+
 
     def test_964_native_backend_service_acceleration_check(self):
         """#964: NativeBackendService provides explicit runtime acceleration checks."""
@@ -927,15 +928,22 @@ class TestGraphics2D3DAndVizSubsystems:
 
     def test_1007_configure_mesa_software_opengl_in_ci(self):
         """#1007: Configure Mesa software OpenGL rasterization in CI workflows."""
-        # Verify headless offscreen platform policy
+        # The headless legs must force software GL before Qt initializes.
         qpa_platform = os.environ.get("QT_QPA_PLATFORM", "offscreen")
-
-        # Assertions 1-5
         assert qpa_platform in ("offscreen", "windows", "wayland", "xcb")
-        assert isinstance(qpa_platform, str)
-        assert len(qpa_platform) > 0
-        assert "mesa" not in qpa_platform or True
-        assert True
+
+        ci = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
+        assert ci.exists(), "workflow file must exist for the config check"
+        if ci.exists():
+            workflow = ci.read_text(encoding="utf-8")
+            # the Qt legs pin the offscreen platform (#1007 headless policy)
+            assert "QT_QPA_PLATFORM: offscreen" in workflow
+
+        # Production policy: the session platform configurator exposes the
+        # headless policy the workflow relies on.
+        from paleo_workbench import qt_platform
+
+        assert callable(qt_platform.configure_qt_platform_for_session)
 
 
 # ============================================================================
@@ -1019,21 +1027,22 @@ class TestNativeBridgeAndPlatformCompatibility:
     """Tests for #987, #988, #989, #993, #995, #996, #1000, #1001, #1002, #1011."""
 
     def test_987_mingw_gcc_vs_msvc_compiler_detection(self):
-        """#987: Fix MinGW GCC vs MSVC compiler detection in native_compile_flags.py."""
-        def get_compiler_flags(compiler_type: str) -> list[str]:
-            if "msvc" in compiler_type.lower():
-                return ["/O2", "/std:c++17", "/EHsc"]
-            return ["-O3", "-std=c++17", "-fPIC"]
+        """#987: the REAL compiler-flag selection in native_compile_flags —
+        the old body asserted against a local re-implementation of the
+        decision table, never touching production."""
+        from native.native_compile_flags import compile_args_for, link_args_for
 
-        msvc_flags = get_compiler_flags("msvc")
-        gcc_flags = get_compiler_flags("mingw_gcc")
+        msvc = compile_args_for("msvc", platform="win32")
+        mingw = compile_args_for("mingw32", platform="win32")
+        unix = compile_args_for("unix", platform="linux")
 
-        # Assertions 1-5
-        assert "/O2" in msvc_flags
-        assert "-O3" in gcc_flags
-        assert "/std:c++17" in msvc_flags
-        assert "-std=c++17" in gcc_flags
-        assert msvc_flags != gcc_flags
+        assert "/std:c++17" in msvc and "/O2" in msvc
+        assert "-O3" in mingw
+        assert mingw != msvc, "MinGW-on-Windows must NOT take MSVC flags (#987)"
+        assert "-O3" in unix
+        assert unix != msvc
+        assert callable(link_args_for)
+
 
     def test_988_os_add_dll_directory_bootstrap(self, tmp_path: Path):
         """#988: Add os.add_dll_directory bootstrap for Python 3.8+ Windows companion DLLs."""
@@ -1123,7 +1132,6 @@ class TestNativeBridgeAndPlatformCompatibility:
         assert isinstance(callback_invoked, bool)
         assert threading.active_count() >= 1
         assert sys.getrefcount(progress_callback) >= 1
-        assert True
 
     def test_1000_geo_viz_engine_paths_in_pyproject(self):
         """#1000: Connect geo-viz-engine test paths in pyproject.toml pythonpath."""
@@ -1137,12 +1145,22 @@ class TestNativeBridgeAndPlatformCompatibility:
             assert "testpaths" in content
 
     def test_1001_guard_native_cpp_test_imports_with_importorskip(self):
-        """#1001: Guard native C++ test imports with pytest.importorskip."""
-        # Non-existent native module should be skipped gracefully
-        mod = pytest.importorskip("non_existent_paleo_native_extension_xyz", reason="Optional native core unbuilt")
+        """#1001: optional native C++ extensions degrade through the backend seam.
 
-        # Assertions 1-5
-        assert mod is None
+        The old body importorskipped a module that can never exist — a
+        permanently-skipped test verifying nothing. The real contract: the
+        production native backend reports its optional modules and offers
+        the acceleration-disabled seam tests use to exercise the pure-Python
+        fallbacks.
+        """
+        from paleo_workbench import native_backend
+
+        assert hasattr(native_backend, "disabled_acceleration")
+        for feature in ("seismic_3d", "well_log", "map_edit", "grid_render", "layer_model"):
+            # feature registry entries degrade to None when unbuilt
+            assert feature in native_backend._NATIVE_MODULES
+            assert native_backend.native_status(feature) in ("fresh", "stale", "missing")
+
 
     def test_1002_cross_platform_process_termination(self):
         """#1002: Cross-platform process termination in crash test helpers."""

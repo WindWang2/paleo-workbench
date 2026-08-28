@@ -506,7 +506,6 @@ class TestScenario4WindowsStorageAndDisasterRecovery:
         res = FinalizerSafeResource()
         del res
         gc.collect()
-        assert True
 
 
 # ============================================================================
@@ -522,15 +521,12 @@ class TestScenario5MultiFactorEnvironmentalModeling:
         """Executes multi-factor modeling under memory budget with structured logs and UTF-8 export."""
         logger = logging.getLogger("paleo_workbench.factor_model")
 
-        # Step 1: PreviewSettings domain layer instantiation (#963)
-        class PreviewSettings:
-            def __init__(self, w: int, h: int, quality: float):
-                self.width = w
-                self.height = h
-                self.quality = quality
+        # Step 1: REAL PreviewSettings domain instantiation (#963/#1028: the
+        # old body redefined a local look-alike that production never ran)
+        from paleo_workbench.resources.preview_settings import PreviewSettings
 
-        ps = PreviewSettings(1920, 1080, 0.95)
-        assert ps.width == 1920 and ps.height == 1080
+        ps = PreviewSettings(geoviz_max_curves=20, density="compact")
+        assert ps.geoviz_max_curves == 20 and ps.density == "compact"
 
         # Step 2: Dynamic memory budget management (#969)
         class MemoryBudgetManager:
@@ -582,7 +578,7 @@ class TestScenario5MultiFactorEnvironmentalModeling:
 
         # Step 7: Structured logging replacing silent passes (#973)
         with caplog.at_level(logging.INFO):
-            logger.info("Multi-factor interpolation completed", extra={"stages": 5, "quality": ps.quality})
+            logger.info("Multi-factor interpolation completed", extra={"stages": 5, "curves": ps.geoviz_max_curves})
 
         assert "Multi-factor interpolation completed" in caplog.text
 
@@ -594,8 +590,11 @@ class TestScenario5MultiFactorEnvironmentalModeling:
         provenance_file = tmp_path / "modeling_provenance_report.json"
         provenance_data = {
             "pipeline": "SingleFactorInterpolation",
-            "resolution": [ps.width, ps.height],
-            "quality": ps.quality,
+            "preview_limits": {
+                "max_curves": ps.geoviz_max_curves,
+                "max_depth_samples": ps.geoviz_max_depth_samples,
+            },
+            "density": ps.density,
             "runtime_engine": "native_cpp",
             "progress_completed": True,
             "basin_target": "鄂尔多斯盆地延长组 (Ordos Basin)",
@@ -606,7 +605,8 @@ class TestScenario5MultiFactorEnvironmentalModeling:
 
         loaded_prov = json.loads(provenance_file.read_text(encoding="utf-8"))
         assert loaded_prov["basin_target"] == "鄂尔多斯盆地延长组 (Ordos Basin)"
-        assert loaded_prov["resolution"] == [1920, 1080]
+        assert loaded_prov["preview_limits"]["max_curves"] == 20
+        assert loaded_prov["density"] == "compact"
         budget.free(10 * 1024 * 1024)
         assert budget.used_bytes == 0
 

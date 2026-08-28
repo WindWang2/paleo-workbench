@@ -69,14 +69,18 @@ def test_geomodel_page_emits_well_selected_on_pick(qtbot):
 
 
 def test_workflow_controller_forwards_well_to_welllog(qtbot):
-    """End-to-end (controller glue): geomodel well_selected -> welllog setter."""
+    """End-to-end (coordination glue): geomodel well_selected -> context ->
+    welllog setter. The old page→page wire through WorkflowController was
+    replaced by the shared SelectionContext (#1029)."""
     from paleo_workbench.ui.pages.well_log_prediction_page import (
         WellLogPredictionPage,
     )
     from paleo_workbench.ui.pages.geological_modeling_3d_page import (
         GeologicalModeling3DPage,
     )
-    from paleo_workbench.ui.workflow_controller import WorkflowController
+    from paleo_workbench.ui.view_coordination import ViewCoordinationController
+    from paleo_workbench.viz.coordinate_hub import CoordinateTransformHub
+    from paleo_workbench.viz.selection_context import SelectionContext
 
     geomodel = GeologicalModeling3DPage()
     welllog = WellLogPredictionPage()
@@ -84,27 +88,17 @@ def test_workflow_controller_forwards_well_to_welllog(qtbot):
     qtbot.addWidget(welllog)
     welllog.update_state([SimpleNamespace(name="A1")])
 
-    # Minimal fake window/app_shell exposing what the controller touches.
-    class _Stack:
-        def __init__(self, gm):
-            self._gm = gm
+    context = SelectionContext()
+    hub = CoordinateTransformHub()
+    coordination = ViewCoordinationController(context, hub)
+    coordination.attach_well_log_page(welllog)
+    if hasattr(geomodel, "well_selected"):
+        geomodel.well_selected.connect(
+            lambda well_id: coordination.publish_well_selection(
+                well_id, source=ViewCoordinationController.SOURCE_3D
+            )
+        )
 
-        def widget(self, index):
-            return self._gm  # PAGE_INDEX_GEOMODEL lookup
-
-    class _AppShell:
-        def __init__(self, gm, wl):
-            self.page_stack = _Stack(gm)
-            self._wl = wl
-
-        def well_log_prediction_page_widget(self):
-            return self._wl
-
-    class _Window:
-        def __init__(self, gm, wl):
-            self.app_shell = _AppShell(gm, wl)
-            self.project = None
-
-    controller = WorkflowController(_Window(geomodel, welllog))
-    controller._on_geomodel_well_selected("A1")
+    geomodel.well_selected.emit("A1")
+    assert context.snapshot().active_well_id == "A1"
     assert welllog._selected_index == 0

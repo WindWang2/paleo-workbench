@@ -450,7 +450,7 @@ class MappingPage(QWidget):
                 scene.load_document(document)
                 self._restore_view_state_from_document(document)
             for key in ("facies", "well", "line", "label"):
-                scene.set_layer_visible(key, self.layer_tree.layer_is_visible(key))
+                scene.set_layer_visible(key, self._kind_visibility(key))
             self._sync_reference_snap_points(scene, document)
         if document is None:
             self._authoring_document = None
@@ -841,6 +841,42 @@ class MappingPage(QWidget):
             revisions[kind] = self._unified_effective_revisions.get(kind, 1)
         return revisions
 
+    def _kind_visibility(self, kind: str) -> bool:
+        """Visibility for a compatibility kind from the authority chain (#1033).
+
+        Resolution order: live ``LayerRegistry`` entry → persisted
+        ``layer_state["composition"]`` → legacy tree checkbox. The legacy
+        ``MapLayerTree`` widget is a view that only SEEDS a kind the registry
+        has no layer for; its state can never overwrite an authored native
+        toggle.
+        """
+        document = self._active_document
+        registry = (
+            getattr(self.unified_scene, "registry", None)
+            if self.unified_scene is not None
+            else None
+        )
+        if registry is not None and document is not None:
+            document_id = str(getattr(document, "id", "") or "")
+            layer = registry.get(f"{document_id}:{kind}")
+            if layer is not None:
+                return bool(layer.visible)
+            wanted_id = f"{document_id}:{kind}"
+            composition = (getattr(document, "layer_state", None) or {}).get(
+                "composition"
+            )
+            for entry in composition or ():
+                if (
+                    isinstance(entry, dict)
+                    and str(entry.get("id") or "") == wanted_id
+                    and "visible" in entry
+                ):
+                    return bool(entry["visible"])
+        return self.layer_tree.layer_is_visible(kind)
+
+    def _composition_visibility(self) -> dict[str, bool]:
+        return {key: self._kind_visibility(key) for key in ("facies", "well", "line", "label")}
+
     def _refresh_unified_composition(self) -> None:
         """Project current live editor records into the unified renderer seam."""
         if self.unified_scene is None:
@@ -854,10 +890,7 @@ class MappingPage(QWidget):
             layer_revisions = self._authoring_document.data_revisions()
         elif scene is not None and document is not None:
             records = scene.export_features()
-        visibility = {
-            key: self.layer_tree.layer_is_visible(key)
-            for key in ("facies", "well", "line", "label")
-        }
+        visibility = self._composition_visibility()
         self._unified_scene_adapter.sync(
             document,
             project_crs=self._project_crs,
@@ -1487,6 +1520,21 @@ class MappingPage(QWidget):
         scene = self._edit_scene()
         if scene is not None:
             scene.set_layer_visible(kind, visible)
+        # The registry is authoritative (#1033): a legacy-tree toggle must
+        # write through, or the next composition refresh would silently drop
+        # it once a native layer exists for the kind.
+        registry = (
+            getattr(self.unified_scene, "registry", None)
+            if self.unified_scene is not None
+            else None
+        )
+        document = self._active_document
+        if registry is not None and document is not None:
+            layer = registry.get(
+                f"{str(getattr(document, 'id', '') or '')}:{kind}"
+            )
+            if layer is not None:
+                layer.visible = bool(visible)
         if self._active_document is not None:
             self._presentation_dirty = True
         self._refresh_unified_composition()
@@ -1527,7 +1575,7 @@ class MappingPage(QWidget):
             scene.load_document(document)
             self._restore_view_state_from_document(document)
             for key in ("facies", "well", "line", "label"):
-                scene.set_layer_visible(key, self.layer_tree.layer_is_visible(key))
+                scene.set_layer_visible(key, self._kind_visibility(key))
         self._authoring_document = (
             MapAuthoringDocument.from_document(document, project_crs=self._project_crs)
             if document is not None
