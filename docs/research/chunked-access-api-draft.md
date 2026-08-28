@@ -38,13 +38,17 @@ class ChunkedVolumeReader:
 | read_inline/crossline/timeslice（g100 冷 lod0） | 4.3 / 3.6 / 12.4 s（与 #1070 一致；UI 必须走 LOD+预读路径） |
 | read_arbitrary_line 100 点双线性 | 3258 ms ← **已知短板** |
 
-## 3. 已知短板与规格书待决
+## 3. 已定案的设计点（原型会话与用户确认）
 
-1. **任意线慢**（3.3 s/100 点）：原型逐点 4 次 trace 读（Python 循环）。生产版应按线的 chunk 覆盖盒批量 `read_voxel_window` 后内存插值——预期 <200 ms，列入 #1072 后续实施而非新决策。
-2. **LOD 采样策略**三选一待定：`stride`（保真振幅，可闪烁）/ `mean`（平滑但极性抵消）/ `maxabs`（保最强同相轴，QC 友好）。原型默认 stride。
-3. g100 的 `read_trace` 9 ms 疑似暖副作用（同 shard 先被 inline 读过）——冷单道仍按 #1070 的 78 ms 规划 well-tie 批量路径。
+1. **LOD 采样策略：统一 stride + 停止后精化**——拖动中显示 lod1/2 stride 降采样（振幅真实，可接受混叠），停止后自动精化到 lod0；不引入混合策略的层间语义差异。
+2. **落位：geoviz_seismic 新模块 `chunked.py` + 工厂 `open_volume(path)`**——按路径类型自动返回 SEG-Y loader 或 chunked reader，消费方改一行 import；loader.py 不动。
 
-## 4. 给三张契约工单的输入
+## 4. 已知短板与实施项
+
+1. **任意线慢**（3.3 s/100 点）：原型逐点 4 次 trace 读（Python 循环）。生产版按线的 chunk 覆盖盒批量 `read_voxel_window` 后内存插值——预期 <200 ms，属实施优化而非新决策。
+2. g100 的 `read_trace` 9 ms 疑似暖副作用（同 shard 先被 inline 读过）——冷单道仍按 #1070 的 78 ms 规划 well-tie 批量路径。
+
+## 5. 给三张契约工单的输入
 
 - **#1073 属性 out-of-core**：`read_voxel_window` 实测 25 ms（64³ 邻域），brick 流式模型可行；halo 读取直接用窗口读，不要逐道。
 - **#1074 AI 分块推理**：tile 组装 = `read_voxel_window`；ProbMap 写回建议同 chunk/shard 配置的 zarr 数组（写入路径与 #1071 转码器对称）。
