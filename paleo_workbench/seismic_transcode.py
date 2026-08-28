@@ -1,4 +1,5 @@
-"""Production SEG-Y → Zarr v3 transcoder (#1077, spec §1-§2 / ADR 0061-0062).
+"""Production SEG-Y → Zarr v3 transcoder (#1077; decisions #1070/#1071,
+spec branch spec/100g-seismic-architecture — merge PR #1096 for §refs).
 
 Writes the chunked store defined by the 100G-volume architecture spec:
 chunk (64, 128, 128), shard (128, 512, 512), zstd clevel 5 without
@@ -18,9 +19,11 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NamedTuple
 from typing import Callable, Iterator
 
 import numpy as np
@@ -65,6 +68,11 @@ class TranscodeStats:
     traces_read: int = 0
     bytes_read: int = 0
     store_bytes: int = 0
+    elapsed_s: float = 0.0
+
+    @property
+    def throughput_mb_s(self) -> float:
+        return self.bytes_read / self.elapsed_s / 1e6 if self.elapsed_s else 0.0
 
 
 @dataclass
@@ -74,25 +82,52 @@ class TranscodeResult:
     stats: TranscodeStats = field(default_factory=TranscodeStats)
 
 
+class ShardBox(NamedTuple):
+    """Half-open shard extent plus its grid indices in the store."""
+
+    il0: int
+    il1: int
+    xl0: int
+    xl1: int
+    t0: int
+    t1: int
+    gi: int  # shard-grid column (inline axis)
+    gj: int  # shard-grid row (crossline axis)
+    gk: int  # shard-grid depth (time axis)
+
+
 def default_workers() -> int:
-    return max(1, min((os.cpu_count() or 4) - 2, 8))
+    """Physical cores preferred (spec §2 says min(物理核−2, 8)); logical
+    cores are the fallback when psutil can't tell them apart."""
+    cpus: int | None = None
+    try:
+        import psutil
+
+        cpus = psutil.cpu_count(logical=False)
+    except Exception:
+        cpus = None
+    cpus = cpus or os.cpu_count() or 4
+    return max(1, min(cpus - 2, 8))
 
 
 def shard_boxes(
     shape: tuple[int, int, int], params: TranscodeParams
-) -> Iterator[tuple[int, int, int, int, int, int]]:
-    """Half-open (il0, il1, xl0, xl1, t0, t1) boxes, one per shard."""
+) -> Iterator[ShardBox]:
+    """One ShardBox per shard in the store's grid."""
     nil, nxl, nt = shape
-    for i0 in range(0, nil, params.shard[0]):
-        for j0 in range(0, nxl, params.shard[1]):
-            for t0 in range(0, nt, params.shard[2]):
-                yield (
+    for gi, i0 in enumerate(range(0, nil, params.shard[0])):
+        for gj, j0 in enumerate(range(0, nxl, params.shard[1])):
+            for gk, t0 in enumerate(range(0, nt, params.shard[2])):
+                yield ShardBox(
                     i0,
                     min(i0 + params.shard[0], nil),
                     j0,
                     min(j0 + params.shard[1], nxl),
                     t0,
                     min(t0 + params.shard[2], nt),
+                    gi,
+                    gj,
+                    gk,
                 )
 
 
@@ -144,7 +179,7 @@ def _open_or_create(dst: Path, shape, params: TranscodeParams, source: Path):
 def _validate_existing(dst: Path, shape, params: TranscodeParams) -> None:
     """Reopened arrays report inner chunks via ``arr.chunks``, so validate
     against the zarr.json itself: outer chunk grid == shard, sharding
-    codec's inner chunk_shape == chunk."""
+    codec's inner chunk_shape == chunk, codec settings == params."""
     import json
 
     try:
@@ -162,27 +197,46 @@ def _validate_existing(dst: Path, shape, params: TranscodeParams) -> None:
             f"existing store at {dst} has shard grid {grid}; expected "
             f"{list(params.shard)}"
         )
+    sharding = None
     for codec in meta.get("codecs", []):
         if codec.get("name") == "sharding_indexed":
-            inner = codec.get("configuration", {}).get("chunk_shape")
-            if inner != list(params.chunk):
-                raise TranscodeError(
-                    f"existing store at {dst} has inner chunk {inner}; "
-                    f"expected {list(params.chunk)}"
-                )
-            return
-    raise TranscodeError(f"existing store at {dst} is not sharded")
+            sharding = codec
+            break
+    if sharding is None:
+        raise TranscodeError(f"existing store at {dst} is not sharded")
+    inner = sharding.get("configuration", {}).get("chunk_shape")
+    if inner != list(params.chunk):
+        raise TranscodeError(
+            f"existing store at {dst} has inner chunk {inner}; "
+            f"expected {list(params.chunk)}"
+        )
+    blosc = next(
+        (
+            c
+            for c in sharding.get("configuration", {}).get("codecs", [])
+            if c.get("name") == "blosc"
+        ),
+        None,
+    )
+    if blosc is not None:
+        cfg = blosc.get("configuration", {})
+        want_shuffle = "bitshuffle" if params.bitshuffle else "shuffle"
+        if (
+            cfg.get("cname") != params.cname
+            or cfg.get("clevel") != params.clevel
+            or cfg.get("shuffle") != want_shuffle
+        ):
+            raise TranscodeError(
+                f"existing store at {dst} was written with {cfg.get('cname')}"
+                f"/{cfg.get('clevel')}/{cfg.get('shuffle')}; refusing to mix "
+                f"codecs within one store"
+            )
 
 
-def _shard_file(dst: Path, i: int, j: int, k: int) -> Path:
-    return dst / "c" / str(i) / str(j) / str(k)
-
-
-def _shard_is_complete(arr, box) -> bool:
+def _shard_is_complete(arr, box: ShardBox) -> bool:
     """Probe with a single-element read; a truncated shard fails to parse."""
-    i0, _i1, j0, _j1, t0, _t1 = box
     try:
-        np.asarray(arr[i0, j0, t0])
+        np.asarray(arr[box.il0, box.xl0, box.t0])
         return True
     except Exception:
         return False
@@ -213,26 +267,28 @@ def transcode_segy_to_zarr(
     stats = stats or TranscodeStats()
     stats.shards_total = len(boxes)
 
-    todo: list[tuple[int, int, int, int, int, int]] = []
+    todo: list[ShardBox] = []
     for box in boxes:
-        i0, _i1, j0, _j1, t0, _t1 = box
-        key = _shard_file(dst, i0 // params.shard[0], j0 // params.shard[1], t0 // params.shard[2])
-        if key.exists():
+        shard_path = dst / "c" / str(box.gi) / str(box.gj) / str(box.gk)
+        if shard_path.exists():
             if _shard_is_complete(arr, box):
                 stats.shards_skipped += 1
                 continue
-            key.unlink()  # truncated mid-write: redo from scratch
+            shard_path.unlink()  # truncated mid-write: redo from scratch
         todo.append(box)
 
-    nil, nxl, nt = shape
+    nxl = shape[1]
     n_workers = max(1, workers or default_workers())
     tls = threading.local()
     handles: list = []
     handles_lock = threading.Lock()
     done_lock = threading.Lock()
-    done = 0
+    # Already-complete shards count toward progress so a resumed run still
+    # reaches 1.0.
+    done = stats.shards_skipped
+    t_start = time.perf_counter()
 
-    def handle():
+    def thread_segy():
         f = getattr(tls, "segy", None)
         if f is None:
             f = segyio.open(str(src), "r", ignore_geometry=False)
@@ -241,22 +297,26 @@ def transcode_segy_to_zarr(
                 handles.append(f)
         return f
 
-    def work(box):
+    def work(box: ShardBox):
         nonlocal done
         if cancel is not None and cancel():
             return  # never started: stays todo for the resumed run
-        i0, i1, j0, j1, t0, t1 = box
-        f = handle()
-        slab = np.empty((i1 - i0, j1 - j0, t1 - t0), dtype=np.float32)
-        for il in range(i0, i1):
+        f = thread_segy()
+        slab = np.empty(
+            (box.il1 - box.il0, box.xl1 - box.xl0, box.t1 - box.t0),
+            dtype=np.float32,
+        )
+        for il in range(box.il0, box.il1):
             traces = segyio.tools.collect(
-                f.trace[il * nxl + j0 : il * nxl + j0 + (j1 - j0)]
+                f.trace[il * nxl + box.xl0 : il * nxl + box.xl0 + (box.xl1 - box.xl0)]
             ).astype(np.float32, copy=False)
-            slab[il - i0] = traces[:, t0:t1]
-        arr[i0:i1, j0:j1, t0:t1] = slab
+            slab[il - box.il0] = traces[:, box.t0 : box.t1]
+        arr[box.il0 : box.il1, box.xl0 : box.xl1, box.t0 : box.t1] = slab
         with done_lock:
-            stats.traces_read += (i1 - i0) * (j1 - j0)
-            stats.bytes_read += (i1 - i0) * (j1 - j0) * (t1 - t0) * 4
+            stats.traces_read += (box.il1 - box.il0) * (box.xl1 - box.xl0)
+            stats.bytes_read += (
+                (box.il1 - box.il0) * (box.xl1 - box.xl0) * (box.t1 - box.t0) * 4
+            )
             stats.shards_written += 1
             done += 1
             if progress is not None:
@@ -278,6 +338,7 @@ def transcode_segy_to_zarr(
                 for fut in futures:
                     fut.result()
     finally:
+        stats.elapsed_s = time.perf_counter() - t_start
         for f in handles:
             try:
                 f.close()

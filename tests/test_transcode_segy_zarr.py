@@ -96,7 +96,7 @@ def test_attributes_record_source(segy_volume, tmp_path):
 
 
 def test_resume_skips_completed_shards(segy_volume, tmp_path):
-    src, _ = segy_volume
+    src, cube = segy_volume
     dst = tmp_path / "store"
 
     # Run 1: cancel after the first shard completes.
@@ -117,19 +117,18 @@ def test_resume_skips_completed_shards(segy_volume, tmp_path):
     # Run 2: full run over the partial store; only remaining shards read traces.
     result = transcode_segy_to_zarr(src, dst)
     expected_max = sum(
-        (i1 - i0) * (j1 - j0) for (i0, i1, j0, j1, _t0, _t1) in boxes[1:]
+        (b.il1 - b.il0) * (b.xl1 - b.xl0) for b in boxes[1:]
     )
     assert result.stats.shards_skipped == 1
     assert result.stats.traces_read <= expected_max
     assert result.stats.traces_read > 0
 
     arr = zarr.open(str(dst), mode="r")
-    cube = _write_segy(tmp_path / "again.segy", seed=7)  # deterministic source
     np.testing.assert_array_equal(np.asarray(arr[:, :, :]), cube)
 
 
 def test_truncated_shard_is_redone(segy_volume, tmp_path):
-    src, _ = segy_volume
+    src, cube = segy_volume
     dst = tmp_path / "store"
     transcode_segy_to_zarr(src, dst)
     # Corrupt one shard file: truncate to simulate a kill mid-write.
@@ -142,7 +141,6 @@ def test_truncated_shard_is_redone(segy_volume, tmp_path):
     result = transcode_segy_to_zarr(src, dst)
     assert result.stats.shards_written >= 1  # the corrupt one was redone
     arr = zarr.open(str(dst), mode="r")
-    cube = _write_segy(tmp_path / "again2.segy", seed=7)
     np.testing.assert_array_equal(np.asarray(arr[:, :, :]), cube)
 
 
@@ -172,14 +170,33 @@ def test_rejects_mismatched_existing_store(segy_volume, tmp_path):
         transcode_segy_to_zarr(src, dst, params=bad)
 
 
+import os  # noqa: E402
+
 QUICK2G = Path(
-    "/home/kevin/projects/paleo_project/data/bench/synthetic_quick2g.segy"
+    os.environ.get(
+        "PALEO_QUICK2G_SEGY",
+        "/home/kevin/projects/paleo_project/data/bench/synthetic_quick2g.segy",
+    )
 )
 
 
 @pytest.mark.skipif(not QUICK2G.exists(), reason="quick2g volume not present")
-def test_quick2g_compression_ratio(tmp_path):
+def test_quick2g_end_to_end(tmp_path):
+    """Local-NVMe integration gate (#1077 acceptance): bit-exact readback,
+    >=1.2x on-disk ratio, parallel throughput above the 95 MB/s single-thread
+    benchmark baseline."""
     result = transcode_segy_to_zarr(QUICK2G, tmp_path / "q2g")
-    src_bytes = QUICK2G.stat().st_size - 3600 - 240 * (1024 * 1024)
-    ratio = src_bytes / max(result.stats.store_bytes, 1)
-    assert ratio >= 1.2  # spec acceptance: >= 1.2x on the synthetic volume
+    nil, nxl, nt = result.shape
+    src_data_bytes = nil * nxl * nt * 4
+    ratio = src_data_bytes / max(result.stats.store_bytes, 1)
+    assert ratio >= 1.2
+
+    arr = zarr.open(str(tmp_path / "q2g"), mode="r")
+    with segyio.open(str(QUICK2G), "r", ignore_geometry=False) as f:
+        for il_idx in (0, nil // 2, nil - 1):  # slab-wise, memory-bounded
+            expected = np.asarray(f.iline[il_idx + 1], dtype=np.float32)
+            np.testing.assert_array_equal(
+                np.asarray(arr[il_idx, :, :]), expected
+            )
+
+    assert result.stats.throughput_mb_s > 95  # beats single-thread baseline
