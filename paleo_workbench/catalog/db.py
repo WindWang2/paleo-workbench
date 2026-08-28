@@ -74,7 +74,7 @@ def normalize_asset_search_name(name: str) -> str:
 # v4: assets.name_search — Unicode-folded copy of name (NFKC + casefold) so the
 # LIKE text filter matches the canonical scan's casefold semantics for
 # non-ASCII names (#897); SQLite LIKE is ASCII-only case-insensitive.
-INDEX_SCHEMA_VERSION = 4
+INDEX_SCHEMA_VERSION = 5
 
 # Table/DDL definitions. The index is deliberately FK-free: it is a disposable
 # projection of the canonical document, and delete order must never matter.
@@ -118,6 +118,11 @@ _SCHEMA_DDL = [
     "CREATE INDEX IF NOT EXISTS idx_versions_stage ON versions(stage)",
     "CREATE INDEX IF NOT EXISTS idx_versions_trashed ON versions(trashed)",
     "CREATE INDEX IF NOT EXISTS idx_versions_source_sha ON versions(source_uri, sha256)",
+    # #1043: find_external_by_path dedups every external registration with
+    # ``managed = 0 AND trashed = 0 AND path = ?``; the partial index matches
+    # the exact predicate (planner proves coverage without statistics) and
+    # managed versions skip index maintenance on insert.
+    "CREATE INDEX IF NOT EXISTS idx_versions_external_path ON versions(path) WHERE managed = 0 AND trashed = 0",
     """CREATE TABLE IF NOT EXISTS tags (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
@@ -1146,9 +1151,13 @@ class CatalogIndex:
         return self._safe(None, self._find_external_by_path, path)
 
     def _find_external_by_path(self, path: str) -> str | None:
+        # INDEXED BY pins the partial covering index (#1043): without it the
+        # planner prefers idx_versions_trashed (matching ~all rows → an
+        # effective full scan, 7-9 ms at 100k versions). The schema-version
+        # bump guarantees the index exists on any database this code opens.
         row = self._connect().execute(
-            "SELECT id FROM versions WHERE managed = 0 AND trashed = 0"
-            " AND path = ? LIMIT 1",
+            "SELECT id FROM versions INDEXED BY idx_versions_external_path"
+            " WHERE managed = 0 AND trashed = 0 AND path = ? LIMIT 1",
             (path,),
         ).fetchone()
         return row[0] if row is not None else None
