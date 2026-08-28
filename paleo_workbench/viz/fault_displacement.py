@@ -9,9 +9,16 @@ import numpy as np
 
 @dataclass
 class FaultSpec:
-    """Encapsulates 3D fault plane geometry and throw magnitude parameters."""
+    """Encapsulates 3D fault plane geometry and throw magnitude parameters.
+
+    ``fault_line_x``/``fault_line_y`` anchor a point on the fault trace in
+    the SAME coordinate domain as the mesh vertices — UTM/Gauss-Krüger
+    surveys pass absolute projected coordinates (#1038); local grids keep
+    the (x, 0) origin convention.
+    """
     fault_line_x: float
     throw_z: float
+    fault_line_y: float = 0.0
     throw_x: float = 0.0
     dip_deg: float = 60.0
     strike_deg: float = 0.0
@@ -24,8 +31,9 @@ class FaultDisplacement:
     def apply_fault_throw(
         self,
         vertices: np.ndarray,
-        fault_line_x: float,
-        throw_z: float,
+        fault_line_x: float = 0.0,
+        throw_z: float = 0.0,
+        fault_line_y: float = 0.0,
         throw_x: float = 0.0,
         dip_deg: float = 60.0,
         strike_deg: float = 0.0,
@@ -35,6 +43,7 @@ class FaultDisplacement:
         """Displace hanging-wall vertices according to fault plane vectors and distance decay."""
         if spec is not None:
             fault_line_x = spec.fault_line_x
+            fault_line_y = spec.fault_line_y
             throw_z = spec.throw_z
             throw_x = spec.throw_x
             dip_deg = spec.dip_deg
@@ -51,8 +60,13 @@ class FaultDisplacement:
         nx = math.cos(rad_strike)
         ny = math.sin(rad_strike)
 
-        # Distance to fault plane normal line
-        dist_normal = nx * (res[:, 0] - fault_line_x) + ny * res[:, 1]
+        # Signed distance to the fault plane's normal line, anchored at
+        # (fault_line_x, fault_line_y). Both terms must be anchored: in
+        # projected CRS (UTM Y ~ 3e6) an unanchored ny * y term displaces
+        # the fault trace hundreds of kilometres (#1038).
+        dist_normal = nx * (res[:, 0] - fault_line_x) + ny * (
+            res[:, 1] - fault_line_y
+        )
         hanging_wall = dist_normal >= 0
 
         if throw_x == 0.0 and dip_deg > 0 and dip_deg < 90:

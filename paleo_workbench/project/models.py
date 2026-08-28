@@ -347,6 +347,10 @@ class PaleoMapDocument(BaseModel):
     linked_target_horizon: str
     linked_prediction_task_id: str | None = None
     linked_contour_draft_id: str | None = None
+    # #1034: keeps the interpolation GridMapLayer reachable from the legacy
+    # compatibility record — the continuous raster lives on the factor task
+    # (artifact-first), never inline in the project JSON.
+    linked_factor_task_id: str | None = None
     facies_polygons: list[dict[str, Any]] = Field(default_factory=list)
     facies_style: dict[str, Any] = Field(default_factory=dict)
     well_overlays: list[dict[str, Any]] = Field(default_factory=list)
