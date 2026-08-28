@@ -1,11 +1,72 @@
 from __future__ import annotations
 
+import threading
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
 _MAX_CACHE_SIZE = 16
-_las_cache: OrderedDict[tuple[str, float], Any] = OrderedDict()
+
+
+class WellLogCache:
+    """Thread-safe bounded LRU cache for parsed well-log documents (#1041).
+
+    GUI-thread cache hits (``is_well_log_cached`` + the synchronous fast path
+    in ``load_well_log_from_path``) race worker-thread inserts and evictions
+    (``WellLogLoadWorker`` / ``CorrelationLoadWorker`` / prediction loaders),
+    so every entry operation — lookup, insert, LRU reorder, eviction, clear —
+    runs under one re-entrant lock. Values are never ``None``: the loader
+    only caches successfully parsed documents, which keeps ``get``'s
+    miss sentinel unambiguous.
+    """
+
+    def __init__(self, max_entries: int = _MAX_CACHE_SIZE) -> None:
+        if max_entries < 1:
+            raise ValueError("max_entries must be >= 1")
+        self._lock = threading.RLock()
+        self._max_entries = int(max_entries)
+        self._entries: OrderedDict[tuple[str, float], Any] = OrderedDict()
+
+    @property
+    def max_entries(self) -> int:
+        return self._max_entries
+
+    def contains(self, key: tuple[str, float]) -> bool:
+        with self._lock:
+            return key in self._entries
+
+    def get(self, key: tuple[str, float]) -> Any | None:
+        """Return the cached value (promoting it to most-recent), or None."""
+        with self._lock:
+            value = self._entries.get(key)
+            if value is not None:
+                self._entries.move_to_end(key)
+            return value
+
+    def put(self, key: tuple[str, float], value: Any) -> None:
+        if value is None:
+            return
+        with self._lock:
+            self._entries[key] = value
+            self._entries.move_to_end(key)
+            while len(self._entries) > self._max_entries:
+                self._entries.popitem(last=False)
+
+    def evict(self, key: tuple[str, float]) -> bool:
+        """Drop one entry explicitly (e.g. the file changed on disk)."""
+        with self._lock:
+            return self._entries.pop(key, None) is not None
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._entries)
+
+
+_las_cache = WellLogCache(_MAX_CACHE_SIZE)
 
 
 class WellLogDataWithDepthUnit:
@@ -76,7 +137,7 @@ def is_well_log_cached(path: str) -> bool:
         mtime = file_path.stat().st_mtime
     except OSError:
         return False
-    return (str(file_path), mtime) in _las_cache
+    return _las_cache.contains((str(file_path), mtime))
 
 
 def load_well_log_from_path(path: str) -> Any | None:
@@ -96,9 +157,9 @@ def load_well_log_from_path(path: str) -> Any | None:
         return None
 
     cache_key = (str(file_path), mtime)
-    if cache_key in _las_cache:
-        _las_cache.move_to_end(cache_key)
-        return _las_cache[cache_key]
+    cached = _las_cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     try:
         from geoviz import load_las_preview, load_xml_preview
@@ -124,10 +185,7 @@ def load_well_log_from_path(path: str) -> Any | None:
             depth_unit = detect_depth_unit(str(file_path))
             if depth_unit != "m":
                 result = WellLogDataWithDepthUnit(result, depth_unit)
-            _las_cache[cache_key] = result
-            _las_cache.move_to_end(cache_key)
-            while len(_las_cache) > _MAX_CACHE_SIZE:
-                _las_cache.popitem(last=False)
+            _las_cache.put(cache_key, result)
         return result
     except Exception:
         return None

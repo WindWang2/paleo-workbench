@@ -140,10 +140,16 @@ class NativeRasterRequestController(QObject):
         if self._active is not None:
             self._job.cancel()
 
-    def shutdown(self, wait_ms: int = 3_000) -> None:
+    def shutdown(self, wait_ms: int = 3_000) -> bool:
+        """Tear the raster worker down and report whether its thread joined.
+
+        ``False`` means the worker was detached while still running native
+        raster work (#1042) — callers gate catalog close / export success on
+        this instead of silently proceeding.
+        """
         self._shutdown = True
         self.invalidate()
-        self._job.shutdown(wait_ms)
+        return self._job.shutdown(wait_ms)
 
     def _start(self, request: _Request) -> None:
         self._active = request
