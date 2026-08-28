@@ -42,7 +42,7 @@ class ViewCoordinationController(QObject):
         self.coordinate_hub = coordinate_hub
         self._shell = None
         self._well_log_page = None
-        self._well_log_row_guard = False
+        self._last_snapshot = None
         selection_context.selection_changed.connect(self._on_selection_changed)
 
     # ------------------------------------------------------------------
@@ -51,6 +51,8 @@ class ViewCoordinationController(QObject):
 
     def attach_app_shell(self, shell) -> None:
         """Bridge every page's selection surfaces onto the context."""
+        if self._shell is shell:
+            return  # idempotent: never double-connect the bridges
         self._shell = shell
         shell.selection_context = self.selection_context
         shell.coordinate_hub = self.coordinate_hub
@@ -83,44 +85,41 @@ class ViewCoordinationController(QObject):
             self.attach_well_log_page(well_log_page)
 
     def attach_well_log_page(self, page) -> None:
-        """Wire the well-log page as both subscriber and publisher."""
+        """Wire the well-log page as both subscriber and publisher.
+
+        Publishing subscribes to the panel's semantic ``task_selected``
+        signal — NOT the raw ``currentRowChanged``, which also fires for
+        every programmatic list rebuild (``update_state`` clear/reselect on
+        refreshes): those are not user selections and must not fan out to
+        the map/3D views (review BLOCKER). ``task_selected`` is explicitly
+        suppressed during refreshes by the panel itself.
+        """
         if self._well_log_page is page:
-            return  # idempotent: never connect the same list twice
+            return  # idempotent: never connect the same panel twice
         previous = self._well_log_page
         if previous is not None:
-            task_list = getattr(getattr(previous, "task_panel", None), "task_list", None)
-            if task_list is not None and hasattr(task_list, "currentRowChanged"):
+            previous_panel = getattr(previous, "task_panel", None)
+            if previous_panel is not None and hasattr(previous_panel, "task_selected"):
                 try:
-                    task_list.currentRowChanged.disconnect(self._on_well_log_row_changed)
+                    previous_panel.task_selected.disconnect(self._on_well_log_row_selected)
                 except (RuntimeError, TypeError):
                     pass
         self._well_log_page = page
-        task_list = getattr(getattr(page, "task_panel", None), "task_list", None)
-        if task_list is not None and hasattr(task_list, "currentRowChanged"):
-            task_list.currentRowChanged.connect(self._on_well_log_row_changed)
+        panel = getattr(page, "task_panel", None)
+        if panel is not None and hasattr(panel, "task_selected"):
+            panel.task_selected.connect(self._on_well_log_row_selected)
 
-    def _on_well_log_row_changed(self, row: int) -> None:
-        """User picked a task on the well-log page → publish its well name.
-
-        Re-entrant emissions are suppressed: selecting a row makes the page
-        push ``update_state(selected_index=...)`` back into the panel, which
-        re-fires ``currentRowChanged`` for the row this handler just
-        processed.
-        """
-        if self._well_log_row_guard or self._well_log_page is None or row < 0:
+    def _on_well_log_row_selected(self, row: int) -> None:
+        """User picked a task on the well-log page → publish its well name."""
+        if self._well_log_page is None or row < 0:
             return
         page = self._well_log_page
         tasks = getattr(page, "_tasks", None) or []
         if row >= len(tasks):
             return
         name = getattr(tasks[row], "name", None)
-        if not name:
-            return
-        self._well_log_row_guard = True
-        try:
+        if name:
             self.publish_well_selection(str(name), source=self.SOURCE_WELL_LOG)
-        finally:
-            self._well_log_row_guard = False
 
     # ------------------------------------------------------------------
     # Publishing
@@ -156,14 +155,26 @@ class ViewCoordinationController(QObject):
     # ------------------------------------------------------------------
 
     def _on_selection_changed(self, selection) -> None:
+        """Route only the fields that CHANGED in this update.
+
+        SelectionContext emits its whole state on every update; routing
+        unchanged fields re-dispatched stale selections (a cursor publish
+        used to re-run set_selected_well for the previous well — review
+        MAJOR).
+        """
+        previous = self._last_snapshot
+        self._last_snapshot = selection.snapshot()
+
         source = getattr(selection, "source_widget_id", None)
 
         well_id = getattr(selection, "active_well_id", None)
-        if well_id:
+        well_changed = well_id != getattr(previous, "active_well_id", None)
+        if well_id and well_changed:
             self._route_well_selection(str(well_id), source)
 
         cursor = getattr(selection, "seismic_cursor", None)
-        if cursor is not None:
+        cursor_changed = cursor != getattr(previous, "seismic_cursor", None)
+        if cursor is not None and cursor_changed:
             self._route_seismic_cursor(cursor)
 
     def _route_well_selection(self, well_id: str, source: str | None) -> None:
@@ -189,12 +200,20 @@ class ViewCoordinationController(QObject):
                 map_page.select_well(well_id, emit=False)
 
     def _route_seismic_cursor(self, cursor: tuple[int, int, float]) -> None:
-        """Seismic → Well: resolve the cursor to the nearest well + MD."""
+        """Seismic → Well: resolve the cursor to the nearest well + MD.
+
+        The resolved MD travels in ``custom_attributes`` so depth-cursor
+        consumers can read it without a second transform.
+        """
         try:
-            well_id, _md = self.coordinate_hub.seismic_to_well(*cursor)
+            well_id, md = self.coordinate_hub.seismic_to_well(*cursor)
         except Exception:
             return
-        if well_id and self._well_log_page is not None:
-            setter = getattr(self._well_log_page, "set_selected_well", None)
-            if callable(setter):
-                setter(well_id)
+        if well_id:
+            self.selection_context.update(
+                custom_attributes={"seismic_well_id": well_id, "seismic_well_md": md}
+            )
+            if self._well_log_page is not None:
+                setter = getattr(self._well_log_page, "set_selected_well", None)
+                if callable(setter):
+                    setter(well_id)

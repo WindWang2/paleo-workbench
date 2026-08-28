@@ -2123,11 +2123,21 @@ class GeologicalModeling3DPage(QWidget):
         self._select_joint_wells(wells[0], wells[1])
 
     def highlight_well(self, well_id: str) -> None:
-        """Cross-view highlight (Map/Well Log → 3D): load the well into the
-        joint correlation pair without emitting a selection (#1029)."""
-        if not well_id:
+        """Cross-view preselection (Map/Well Log → 3D, #1029).
+
+        Non-destructive: sets joint-pair well A only when the well exists in
+        the joint scene, PRESERVES the user's well B, and is a no-op for
+        unknown wells (never a silent jump to the first option).
+        """
+        if not well_id or not hasattr(self, "_joint_well_a"):
             return
-        self._select_joint_wells(well_id, "")
+        options = dict(self._joint_well_options())
+        if well_id not in options:
+            return
+        current_b = ""
+        if hasattr(self, "_joint_well_b"):
+            current_b = str(self._joint_well_b.currentData() or "")
+        self._rebuild_joint_well_combos(well_id, current_b)
 
     def _select_joint_wells(self, well_a: str, well_b: str) -> None:
         """Set toolbar combos to a saved well pair without resetting to index 0/1."""

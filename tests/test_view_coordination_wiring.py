@@ -21,8 +21,6 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QPoint, Qt
-
 from paleo_workbench.ui.app_shell import AppShell
 from paleo_workbench.ui.view_coordination import ViewCoordinationController
 
@@ -175,8 +173,10 @@ def test_well_log_selection_publishes_to_other_views(shell, monkeypatch):
     from types import SimpleNamespace
 
     page = shell.well_log_prediction_page_widget()
-    # simulate the user picking a task row (task name == well name)
+    # simulate the user picking a task row through the panel's semantic,
+    # refresh-suppressed signal (task name == well name)
     page._tasks = [SimpleNamespace(name="W-900")]
-    page.task_panel.task_list.currentRowChanged.emit(0)
+    page.task_panel.task_selected.emit(0)
 
     assert map_calls == ["W-900"], "well-log selection must publish to the map"
+
