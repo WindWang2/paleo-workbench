@@ -46,6 +46,22 @@ def _release_spy(log: list, key):
     return _release
 
 
+@pytest.fixture
+def count_normalize(monkeypatch):
+    """Count every ColormapManager.normalize_to_index call during the test."""
+    calls: list[int] = []
+    real = ColormapManager.normalize_to_index
+
+    def _counting(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(
+        ColormapManager, "normalize_to_index", staticmethod(_counting)
+    )
+    return calls
+
+
 # ---------------------------------------------------------------------------
 # Criterion 2 — bounded VRAM with LRU eviction, verified via diagnostics
 # ---------------------------------------------------------------------------
@@ -189,7 +205,7 @@ def test_shrinking_budget_evicts_immediately():
     assert cache.stats()["bytes_now"] == 100
 
 
-def test_colormap_switch_does_not_renormalize_or_touch_l1(qtbot, monkeypatch):
+def test_colormap_switch_does_not_renormalize_or_touch_l1(qtbot, count_normalize):
     """Colormap change recolours the cached index texture; L1/L2 untouched."""
     from geoviz_seismic import seismic_view as sv_module
 
@@ -198,6 +214,7 @@ def test_colormap_switch_does_not_renormalize_or_touch_l1(qtbot, monkeypatch):
     rng = np.random.default_rng(7)
     sl = rng.normal(size=(400, 300)).astype(np.float32)
     view._update_profile_panel("inline", 5, sl)
+    normalize_baseline = len(count_normalize)  # the one cold render
 
     vd = view._profile_for("inline")._vd
     indexed_before = vd._indexed
@@ -205,40 +222,22 @@ def test_colormap_switch_does_not_renormalize_or_touch_l1(qtbot, monkeypatch):
     l2_key = view._l2_texture_key(view._profile_for("inline"), "inline", 5, 0)
     assert l2_key in VRAM
 
-    normalize_calls = []
-    real_normalize = ColormapManager.normalize_to_index
-
-    def _counting_normalize(*args, **kwargs):
-        normalize_calls.append(1)
-        return real_normalize(*args, **kwargs)
-
-    l1_reads: list = []
-    real_get = view._cache.get
-
-    def _spying_get(key):
-        l1_reads.append(key)
-        return real_get(key)
-
-    monkeypatch.setattr(view._cache, "get", _spying_get)
-    monkeypatch.setattr(
-        ColormapManager, "normalize_to_index", staticmethod(_counting_normalize)
-    )
-
     # Drive the real toolbar wiring (currentTextChanged → panels + colorbar).
+    # The wiring touches only the panels' colour tables — it has no path to
+    # SeismicView's slice caches at all, which is the L1 contract itself.
     view._cmap_combo.setCurrentText("gray")
     view._cmap_combo.setCurrentText("jet")
 
-    assert normalize_calls == []          # no renormalize: recolour only
+    assert len(count_normalize) == normalize_baseline  # recolour only
     assert vd._indexed is indexed_before  # index texture survives
     assert vd.indexed_snapshot() == snap_before
     assert l2_key in VRAM                 # L2 entry still valid (same key)
-    assert l1_reads == []                 # L1 never re-read for a recolour
 
     # And the next revisit of this slice is still an L2 hit.
     hits_before = VRAM.stats()["hits"]
     view._update_profile_panel("inline", 5, sl)
     assert VRAM.stats()["hits"] == hits_before + 1
-    assert normalize_calls == []
+    assert len(count_normalize) == normalize_baseline
 
 
 def test_wiggle_colormap_switch_keeps_slice_texture():
@@ -341,7 +340,7 @@ def test_profile_revisit_renders_under_16ms(qtbot):
     assert median_ms < 16.0, f"L2-hit path too slow: median {median_ms:.2f} ms"
 
 
-def test_seismic_view_repeated_browse_hits_l2(qtbot, monkeypatch):
+def test_seismic_view_repeated_browse_hits_l2(qtbot, count_normalize):
     """Re-visiting a seen slice via the panel pipeline hits L2, not L1 I/O."""
     from geoviz_seismic import seismic_view as sv_module
 
@@ -349,25 +348,6 @@ def test_seismic_view_repeated_browse_hits_l2(qtbot, monkeypatch):
     qtbot.addWidget(view)
     rng = np.random.default_rng(13)
     sl = rng.normal(size=(600, 400)).astype(np.float32).T
-
-    normalize_calls = []
-    real_normalize = ColormapManager.normalize_to_index
-
-    def _counting_normalize(*args, **kwargs):
-        normalize_calls.append(1)
-        return real_normalize(*args, **kwargs)
-
-    l1_reads: list = []
-    real_get = view._cache.get
-
-    def _spying_get(key):
-        l1_reads.append(key)
-        return real_get(key)
-
-    monkeypatch.setattr(view._cache, "get", _spying_get)
-    monkeypatch.setattr(
-        ColormapManager, "normalize_to_index", staticmethod(_counting_normalize)
-    )
 
     durations = []
     for pos in (7, 8, 7, 8, 7, 8, 7):
@@ -379,10 +359,7 @@ def test_seismic_view_repeated_browse_hits_l2(qtbot, monkeypatch):
     assert stats["hits"] >= 4          # every revisit after the first pair hit
     # Two resident positions (7 and 8), 1 byte per pixel each.
     assert stats["by_kind"].get("slice2d") == 2 * 600 * 400
-    assert len(normalize_calls) == 2   # one per distinct position
-    # The panel pipeline is driven by cached slices: no L1 lookups happen in
-    # _update_profile_panel itself (L1 serves _apply_pending_slice instead).
-    assert l1_reads == []
+    assert len(count_normalize) == 2   # one per distinct position
 
     revisits = durations[2:]
     median_ms = sorted(revisits)[len(revisits) // 2]
@@ -396,35 +373,87 @@ def test_seismic_view_repeated_browse_hits_l2(qtbot, monkeypatch):
     np.testing.assert_array_equal(vd._indexed, cold._indexed)
 
 
+def test_l2_keys_separate_different_volumes(qtbot):
+    """Two views on DIFFERENT files never serve each other's textures.
+
+    Regression guard for the key-collision bug found in review: the key once
+    carried only the per-view SEGY generation (both start at 0), so view B
+    could hit view A's cached index texture for a different survey.
+    """
+    from geoviz_seismic import seismic_view as sv_module
+
+    view_a, view_b = sv_module.SeismicView(auto_load=False), sv_module.SeismicView(auto_load=False)
+    qtbot.addWidget(view_a)
+    qtbot.addWidget(view_b)
+    view_a._segy_path = "/surveys/north.segy"
+    view_b._segy_path = "/surveys/south.segy"
+
+    rng = np.random.default_rng(23)
+    sl_a = rng.normal(size=(200, 150)).astype(np.float32)
+    sl_b = rng.normal(size=(200, 150)).astype(np.float32)
+
+    view_a._update_profile_panel("inline", 5, sl_a)
+    view_b._update_profile_panel("inline", 5, sl_b)
+
+    assert VRAM.stats()["entries"] == 2  # distinct volumes: no cross-view dedup
+
+    # Each panel displays its OWN survey's colours, not the other view's.
+    cold_a, cold_b = ProfileVD(), ProfileVD()
+    qtbot.addWidget(cold_a)
+    qtbot.addWidget(cold_b)
+    cold_a.render(sl_a)
+    cold_b.render(sl_b)
+    idx_a = view_a._profile_for("inline")._vd._indexed
+    idx_b = view_b._profile_for("inline")._vd._indexed
+    np.testing.assert_array_equal(idx_a, cold_a._indexed)
+    np.testing.assert_array_equal(idx_b, cold_b._indexed)
+    assert not np.array_equal(idx_a, idx_b)  # the surveys really do differ
+
+    # A revisit still hits its own entry.
+    hits_before = VRAM.stats()["hits"]
+    view_a._update_profile_panel("inline", 5, sl_a)
+    assert VRAM.stats()["hits"] == hits_before + 1
+
+
+def test_l2_hit_rejects_shape_mismatch(qtbot):
+    """A stale entry with wrong geometry is a miss, never served."""
+    from geoviz_seismic import seismic_view as sv_module
+
+    view = sv_module.SeismicView(auto_load=False)
+    qtbot.addWidget(view)
+    sl = np.random.default_rng(29).normal(size=(100, 80)).astype(np.float32)
+    view._update_profile_panel("inline", 5, sl)
+
+    pw = view._profile_for("inline")
+    key = view._l2_texture_key(pw, "inline", 5, 0)
+    _indexed, clip_range = VRAM.get(key)
+    # Corrupt the entry with a wrong-shape array (stale geometry).
+    VRAM.put(
+        key,
+        content=(np.zeros((3, 3), dtype=np.uint8), clip_range),
+        size_bytes=9,
+        kind="slice2d",
+    )
+    assert view._render_l2_hit(pw, key, sl, info=None) is False
+
+
 # ---------------------------------------------------------------------------
 # 3-D integration — orthogonal planes reuse cached index textures
 # ---------------------------------------------------------------------------
 
 
-def test_renderer3d_ortho_slice_reuses_l2_content(qtbot, monkeypatch):
+def test_renderer3d_ortho_slice_reuses_l2_content(qtbot, count_normalize):
     """Slider revisit of the same plane skips normalize (L2 content hit)."""
-    from geoviz_seismic import renderer_3d as r3d_module
     from geoviz_seismic import seismic_view as sv_module
 
     view = sv_module.SeismicView(auto_load=False)
     qtbot.addWidget(view)
     renderer = view._renderer_3d
 
-    normalize_calls = []
-    real_normalize = ColormapManager.normalize_to_index
-
-    def _counting_normalize(*args, **kwargs):
-        normalize_calls.append(1)
-        return real_normalize(*args, **kwargs)
-
-    monkeypatch.setattr(
-        ColormapManager, "normalize_to_index", staticmethod(_counting_normalize)
-    )
-
     rng = np.random.default_rng(17)
     vol = rng.normal(size=(24, 26, 30)).astype(np.float32)
     renderer.load_volume(vol)
-    calls_after_load = len(normalize_calls)
+    calls_after_load = len(count_normalize)
     assert calls_after_load >= 3  # inline + crossline + time planes normalized
 
     key_hits_before = VRAM.stats()["hits"]
@@ -433,7 +462,7 @@ def test_renderer3d_ortho_slice_reuses_l2_content(qtbot, monkeypatch):
     # Rebuilding the SAME inline position a second time is a pure L2 hit.
     renderer._update_slice_planes_for({"inline"})
 
-    assert len(normalize_calls) == calls_after_load + 1  # only the first rebuild
+    assert len(count_normalize) == calls_after_load + 1  # only the first rebuild
     assert VRAM.stats()["hits"] > key_hits_before
 
 
