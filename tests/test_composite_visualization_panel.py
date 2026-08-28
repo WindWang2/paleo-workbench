@@ -54,8 +54,9 @@ def test_composite_visualization_panel_loads_prediction(qtbot):
 
 
 def test_composite_well_host_prefers_retained_engine_when_available(qtbot, monkeypatch):
-    """Single-well surface is deliberately Legacy QPainter even when a native
-    engine is importable (editable tracks + consistent vector exports)."""
+    """#1053: with a native binding importable and the engine env enabled
+    (default), the single-well surface renders through the native engine —
+    the QPainter canvas remains the automatic fallback, not a forced path."""
     import paleo_workbench.viz.hosts.well_log_host as host_module
 
     class FakeNativeView(QFrame):
@@ -65,6 +66,7 @@ def test_composite_well_host_prefers_retained_engine_when_available(qtbot, monke
                 "track_count": len(payload["tracks"]),
             }
 
+    monkeypatch.delenv("PALEO_USE_WELLLOG_ENGINE", raising=False)
     monkeypatch.setattr(
         host_module.engine_adapter,
         "try_import_welllog",
@@ -78,10 +80,11 @@ def test_composite_well_host_prefers_retained_engine_when_available(qtbot, monke
     panel.update_state(project.prediction_tasks)
 
     host = panel.well_host
-    # Native engine never takes over the single-well screen.
-    assert host._engine_view is None
-    assert host.view_stack.currentWidget() is host.scroll_area
-    assert len(host.canvas.tracks) > 0
+    # Native engine owns the single-well screen when available (#1053).
+    assert isinstance(host._engine_view, FakeNativeView)
+    assert host.view_stack.currentWidget() is host.engine_host
+    # Legacy canvas is the fallback and stays empty while the engine owns it.
+    assert host.canvas.tracks == []
 
 
 def test_visualization_workspace_load_vizref_returns_payload(qtbot, tmp_path):
