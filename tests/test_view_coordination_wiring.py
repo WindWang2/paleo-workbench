@@ -161,6 +161,52 @@ def test_source_tag_prevents_echo_processing(shell, monkeypatch):
     assert welllog_calls == ["W-700"]
 
 
+def test_well_log_refresh_does_not_publish_selection(shell):
+    """Routine ``update_state`` refreshes rebuild the task list; those are
+    NOT user selections and must not hijack map/3D selection state (the raw
+    currentRowChanged subscription did exactly that — review BLOCKER)."""
+    from types import SimpleNamespace
+
+    page = shell.well_log_prediction_page_widget()
+    published = []
+    shell.selection_context.selection_changed.connect(
+        lambda sel: published.append(sel.active_well_id)
+    )
+
+    page.update_state([SimpleNamespace(name="refresh-only-task")])
+
+    assert not published, f"refresh leaked into selection context: {published}"
+
+
+def test_seismic_cursor_after_prior_selection_dispatches_once(shell):
+    """A cursor publish must route ONLY the cursor — not re-dispatch the
+    stale active well through a full canvas rebind (review MAJOR)."""
+    shell.coordinate_hub.register_well("W-CUR", x=100.0, y=200.0, total_depth_m=1000.0)
+    shell.view_coordination.publish_well_selection(
+        "W-PREV", source=ViewCoordinationController.SOURCE_MAP
+    )
+
+    calls = []
+    page = shell.well_log_prediction_page_widget()
+    original = page.set_selected_well
+    page.set_selected_well = lambda name: calls.append(name) or True
+    try:
+        shell.view_coordination.publish_seismic_cursor(100, 200, 1000.0)
+    finally:
+        page.set_selected_well = original
+
+    assert calls == ["W-CUR"], f"cursor routing double-dispatched: {calls}"
+    attrs = shell.selection_context.snapshot().custom_attributes
+    assert attrs.get("seismic_well_md") is not None
+
+
+def test_workflow_controller_direct_wire_is_gone():
+    """#1029: the page→page handler was removed; the context routes."""
+    from paleo_workbench.ui.workflow_controller import WorkflowController
+
+    assert not hasattr(WorkflowController, "_on_geomodel_well_selected")
+
+
 def test_well_log_selection_publishes_to_other_views(shell, monkeypatch):
     """Well → Map direction: choosing a task on the well-log page highlights
     the well on the map."""
