@@ -351,3 +351,38 @@ def test_bulk_purge_keeps_maps_consistent(service):
     assert service._maps_consistent()
     assert {a.id for a in service.document.assets} == {f"live-{i}" for i in range(6)}
     assert set(service._versions_by_asset) == {f"live-{i}" for i in range(6)}
+
+
+def test_rebridge_id_keys_follow_survivor_order_not_trash_preference(service):
+    """Re-review pin: id-keys mirror _ensure_maps (survivor order wins
+    unconditionally); live-over-trashed promotion applies to legacy-bridge
+    keys only."""
+    from paleo_workbench.catalog.models import DataAsset as _DA
+
+    trashed_owner = _asset("trashed-id")  # id == key
+    trashed_owner.trashed = True
+    legacy_live = _DA.model_construct(
+        id="other-1",
+        name="x",
+        type="well_log",
+        legacy_resource_id="trashed-id",
+        created_at="2026-01-01",
+        updated_at="2026-01-01",
+    )
+    service._add_asset(legacy_live)
+    service._add_asset(trashed_owner)
+    service._ensure_maps()
+
+    # removing a DIFFERENT asset triggers a rebridge of affected keys only;
+    # force the key into scope by removing the live legacy claimant
+    service._remove_asset(legacy_live)
+
+    holder = service._assets_by_legacy_id.get("trashed-id")
+    # id-key semantics: the asset whose id IS the key holds it (survivor
+    # order), regardless of trash state — matching a full _ensure_maps rebuild
+    assert holder is trashed_owner
+
+    # cross-check against the rebuild the rebridge is supposed to mirror
+    service._invalidate_maps()
+    service._ensure_maps()
+    assert service._assets_by_legacy_id.get("trashed-id") is trashed_owner
