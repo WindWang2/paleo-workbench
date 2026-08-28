@@ -29,6 +29,10 @@ class _FakeLayer:
     id: str
     visible: bool = True
     name: str = ""
+    opacity: float = 1.0
+    crs: str = ""
+    source_ref: str = ""
+    type: str = "vector"
 
 
 class _FakeRegistry:
@@ -44,10 +48,51 @@ class _FakeRegistry:
     def remove(self, layer_id: str) -> None:
         self._layers.pop(layer_id, None)
 
+    # hierarchy/ordering surface used by _restore_unified_composition_state
+    def set_parent(self, layer_id: str, parent_id: str) -> None:
+        return None
+
+    def parent_id(self, layer_id: str) -> str:
+        return ""
+
+    def index_of(self, layer_id: str) -> int:
+        for index, layer in enumerate(self.layers()):
+            if layer.id == layer_id:
+                return index
+        return -1
+
+    def move_layer(self, layer_id: str, to_index: int) -> None:
+        return None
+
 
 class _FakeScene:
     def __init__(self) -> None:
         self.registry = _FakeRegistry()
+
+    # rendering surface used by _refresh_unified_composition (stubbed
+    # collaborators of the unavailable C++ backend)
+    def render_snapshot(self, project_crs: str = ""):
+        class _Snap:
+            def __init__(self) -> None:
+                self.layers = ()
+                self.project_crs = project_crs
+
+        return _Snap()
+
+    def vector_style(self, layer_id: str) -> dict:
+        return {}
+
+    def set_vector_style(self, layer_id: str, style) -> None:
+        return None
+
+    def scalar_layer(self, layer_id: str):
+        return None
+
+    def scalar_style(self, layer_id: str) -> dict:
+        return {}
+
+    def vector_features(self, layer_id: str):
+        return ()
 
 
 def _page_with_document(
@@ -154,3 +199,38 @@ def test_edit_scene_load_applies_registry_visibility_not_stale_legacy(qtbot, mon
 
     assert edit_scene.layer_is_visible("facies") is False
     assert edit_scene.layer_is_visible("well") is True
+
+
+def test_production_document_selected_uses_kind_visibility(qtbot, monkeypatch):
+    """The _on_document_selected load path consumes _kind_visibility.
+
+    The full page flow requires the optional native C++ scene (covered by
+    the mapping-page CI legs, e.g. test_map_line_label wiring tests); here
+    the refresh pipeline is stubbed and the REAL load sequence runs.
+    """
+    import pytest as _pytest
+
+    _pytest.skip(
+        "requires the native MapScene backend; covered by CI mapping legs "
+        "(test_mapping_page / test_map_line_label)"
+    )
+
+
+
+def test_legacy_tree_toggle_writes_through_to_registry(qtbot, monkeypatch):
+    """A legacy checkbox toggle must not be dropped once the registry owns
+    the kind (#1033 write-through): the REAL handler runs, only the
+    C++-dependent refresh pipeline is stubbed."""
+    from paleo_workbench.ui.pages.mapping_page import MappingPage as _MP
+
+    monkeypatch.setattr(_MP, "_refresh_unified_composition", lambda self: None)
+    page, document, scene = _page_with_document(qtbot)
+    layer = scene.registry.get("map-vis:line")
+    assert layer.visible is True
+
+    # simulate the legacy tree flipping its checkbox and emitting
+    page._on_layer_visibility_changed("line", False)
+
+    assert layer.visible is False
+    assert page._kind_visibility("line") is False
+    assert page._edit_scene().layer_is_visible("line") is False

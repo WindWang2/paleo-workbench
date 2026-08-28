@@ -60,6 +60,28 @@ def test_coincident_samples_collapse_to_mean():
     assert grid_z[idy, idx] == pytest.approx(5.0, abs=0.5)
 
 
+def test_coincident_samples_with_nonconstant_field_hit_real_solve():
+    """Duplicates merged + a NON-constant field: exercises the actual OK
+    solve (constant fields short-circuit before the matrix is built)."""
+    x = np.array([0.0, 0.0, 0.0, 10.0, 20.0, 30.0, 40.0])
+    y = np.array([0.0, 0.0, 0.0, 10.0, 20.0, 5.0, 15.0])
+    z = np.array([6.0, 4.0, 8.0, 3.0, 9.0, 5.0, 7.0])
+    gx = np.linspace(0.0, 40.0, 21)
+    gy = np.linspace(0.0, 20.0, 11)
+    grid_z, grid_var, params = _pure_numpy_kriging(x, y, z, gx, gy)
+    assert params["duplicates_merged"] == 2
+    assert np.isfinite(grid_z).all()
+    # the merged point carries the coincident mean (6+4+8)/3 = 6
+    ix = int(np.argmin(np.abs(gx - 0.0)))
+    iy = int(np.argmin(np.abs(gy - 0.0)))
+    assert grid_z[iy, ix] == pytest.approx(6.0, abs=0.05)
+    # distinct samples stay exact
+    for xi, yi, zi in ((10.0, 10.0, 3.0), (20.0, 20.0, 9.0)):
+        gxi = int(np.argmin(np.abs(gx - xi)))
+        gyi = int(np.argmin(np.abs(gy - yi)))
+        assert grid_z[gyi, gxi] == pytest.approx(zi, abs=1e-4)
+
+
 def test_identical_duplicate_values_do_not_blow_up():
     """The classic singular-matrix case: same location, same value."""
     x = np.array([0.0, 0.0, 10.0, 20.0, 30.0])
@@ -132,14 +154,21 @@ def test_kriging_is_exact_at_sample_locations_for_smooth_field():
 
 
 def test_variance_is_non_negative_and_small_at_samples():
-    x, y = _samples(n=40, seed=13)
+    """Variance must collapse AT SAMPLE LOCATIONS (not just the grid centre)."""
+    rng = np.random.default_rng(13)
+    lattice = np.linspace(0.0, 1000.0, 41)
+    ix = rng.choice(len(lattice), size=30, replace=False)
+    iy = rng.choice(len(lattice), size=30, replace=False)
+    x, y = lattice[ix], lattice[iy]
     z = 2.0 + 0.01 * x
-    gx = np.linspace(0.0, 1000.0, 41)
-    gy = np.linspace(0.0, 1000.0, 41)
-    _, grid_var, _ = _pure_numpy_kriging(x, y, z, gx, gy)
+    _, grid_var, _ = _pure_numpy_kriging(x, y, z, lattice, lattice)
     assert (grid_var >= -1e-9).all()
-    sample_var = grid_var[20, 20]
-    assert sample_var < float(np.max(grid_var))
+    for xi, yi in zip(x, y):
+        gxi = int(np.flatnonzero(lattice == xi)[0])
+        gyi = int(np.flatnonzero(lattice == yi)[0])
+        assert grid_var[gyi, gxi] < float(np.max(grid_var)), (
+            f"variance at sample ({xi},{yi}) not below the field maximum"
+        )
 
 
 def test_chunked_evaluation_matches_unchunked(monkeypatch):
@@ -154,8 +183,10 @@ def test_chunked_evaluation_matches_unchunked(monkeypatch):
     monkeypatch.setattr(mod, "_KRIGE_TARGET_CHUNK", 64)
     chunked_z, chunked_var, _ = _pure_numpy_kriging(x, y, z, gx, gy)
 
-    assert np.array_equal(chunked_z, reference_z)
-    assert np.array_equal(chunked_var, reference_var)
+    # blocked LAPACK reorders floating-point sums by RHS width: chunking is
+    # scientifically equivalent, not bitwise identical
+    assert np.allclose(chunked_z, reference_z, rtol=1e-12, atol=1e-12)
+    assert np.allclose(chunked_var, reference_var, rtol=1e-12, atol=1e-12)
 
 
 def test_large_grid_stays_memory_bounded_and_correct_shape():

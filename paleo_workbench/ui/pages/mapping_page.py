@@ -1520,6 +1520,21 @@ class MappingPage(QWidget):
         scene = self._edit_scene()
         if scene is not None:
             scene.set_layer_visible(kind, visible)
+        # The registry is authoritative (#1033): a legacy-tree toggle must
+        # write through, or the next composition refresh would silently drop
+        # it once a native layer exists for the kind.
+        registry = (
+            getattr(self.unified_scene, "registry", None)
+            if self.unified_scene is not None
+            else None
+        )
+        document = self._active_document
+        if registry is not None and document is not None:
+            layer = registry.get(
+                f"{str(getattr(document, 'id', '') or '')}:{kind}"
+            )
+            if layer is not None:
+                layer.visible = bool(visible)
         if self._active_document is not None:
             self._presentation_dirty = True
         self._refresh_unified_composition()

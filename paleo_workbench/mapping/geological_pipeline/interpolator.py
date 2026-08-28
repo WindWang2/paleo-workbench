@@ -214,10 +214,14 @@ class IDWInterpolator(Interpolator):
         )
 
 
-# Memory guard for the target-evaluation broadcast (#1036): rows of
-# (chunk x n_samples) float64 distances; 2**18 rows keeps a 500-sample solve
-# under ~1 GiB while amortizing the per-chunk solve cost.
-_KRIGE_TARGET_CHUNK = 1 << 18
+# Memory guard for the target-evaluation broadcast (#1036). Each chunk
+# transiently holds several (chunk x n_samples) float64 arrays (deltas,
+# squared deltas, distances, covariance, weights), so the chunk length
+# adapts to the sample count: a fixed 2**18 rows measured ~1.45 GiB at
+# n=100 (review finding) — the n-scaled budget below keeps the peak in the
+# same band for any n while amortizing the per-chunk solve cost.
+_KRIGE_TARGET_CELLS = 1 << 26  # ~64M float64 elements ≈ 512 MiB per array
+_KRIGE_TARGET_CHUNK = 1 << 18  # lower bound for tiny sample sets
 
 _KRIGE_MODELS = ("spherical", "exponential", "gaussian")
 
@@ -435,22 +439,29 @@ def _pure_numpy_kriging(
     z_pred = np.empty(m, dtype=np.float64)
     variance = np.empty(m, dtype=np.float64)
     total_sill = sill + nugget
-    for start in range(0, m, _KRIGE_TARGET_CHUNK):
-        stop = min(start + _KRIGE_TARGET_CHUNK, m)
+    chunk_rows = max(64, min(_KRIGE_TARGET_CHUNK, _KRIGE_TARGET_CELLS // max(n, 1)))
+    for start in range(0, m, chunk_rows):
+        stop = min(start + chunk_rows, m)
         chunk = targets[start:stop]
-        tdists = np.sqrt(
-            np.sum((chunk[:, None, :] - sample_pts[None, :, :]) ** 2, axis=2)
-        )
+        deltas = chunk[:, None, :] - sample_pts[None, :, :]
+        deltas *= deltas  # in-place square: no third (chunk, n, 2) temp
+        tdists = np.sqrt(np.sum(deltas, axis=2))
+        del deltas
+        cov_matrix = cov(tdists)
         rhs = np.empty((n + 1, chunk.shape[0]), dtype=np.float64)
-        rhs[:n] = cov(tdists).T
+        rhs[:n] = cov_matrix.T
         rhs[n] = 1.0
         w = solve_system(rhs)  # (n+1, chunk)
         w = w.T  # (chunk, n+1)
         z_pred[start:stop] = w[:, :n] @ z
-        k_row = np.concatenate([cov(tdists), np.ones((chunk.shape[0], 1))], axis=1)
+        # reuse the chunk covariance for the kriging variance row (review:
+        # the previous loop recomputed cov(tdists) identically)
         variance[start:stop] = np.maximum(
-            0.0, total_sill - np.sum(w * k_row, axis=1)
+            0.0,
+            total_sill
+            - (np.sum(w[:, :n] * cov_matrix, axis=1) + w[:, n]),
         )
+        del cov_matrix
 
     return (
         z_pred.reshape((len(grid_y), len(grid_x))),
