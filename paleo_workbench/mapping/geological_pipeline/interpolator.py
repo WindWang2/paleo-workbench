@@ -112,7 +112,20 @@ class KrigingInterpolator(Interpolator):
 
 
 class IDWInterpolator(Interpolator):
-    """Inverse Distance Weighting (IDW) interpolation."""
+    """Inverse Distance Weighting (IDW) interpolation.
+
+    #1048: neighbour selection runs through ``scipy.spatial.cKDTree`` with
+    chunked target queries (k nearest neighbours + optional search radius)
+    instead of materialising the full (M, N) target-by-sample distance
+    matrix, which allocated several 40000x2000 float64 arrays (~640 MiB
+    each) for a 2000-well / 200x200-grid map. Weighting semantics (power,
+    eps clamp, exact sample hits, min/max neighbours, radius pruning and
+    NaN nodata where a target lacks the required neighbours) are unchanged.
+    """
+
+    #: Target rows per cKDTree query chunk: bounds the transient (chunk, k)
+    #: work arrays while amortising per-call query overhead.
+    QUERY_CHUNK = 8192
 
     def interpolate(
         self, dataset: GeologicalFactorDataset, options: InterpolationOptions
@@ -128,67 +141,35 @@ class IDWInterpolator(Interpolator):
         grid_y = np.linspace(ymin, ymax, grid_n, dtype=np.float64)
 
         gx, gy = np.meshgrid(grid_x, grid_y)  # (H, W)
-        target_pts = np.stack([gx.ravel(), gy.ravel()], axis=1)  # (M = H*W, 2)
+        target_pts = np.stack([gx.ravel(), gy.ravel()], axis=1)  # (M, 2)
         sample_pts = np.stack([xs, ys], axis=1)  # (N, 2)
         n_samples = len(xs)
 
-        # Distances: (M, N)
-        dx = target_pts[:, 0:1] - sample_pts[:, 0].T
-        dy = target_pts[:, 1:2] - sample_pts[:, 1].T
-        dist = np.sqrt(dx * dx + dy * dy)
-
         p = max(1.0, float(options.power))
         eps = 1e-12
-
-        # 1. Search radius filtering
-        valid_mask = np.ones_like(dist, dtype=bool)
-        if options.search_radius is not None and options.search_radius > 0:
-            valid_mask = dist <= float(options.search_radius)
-
-        # 2. Max neighbors filtering (keep top k nearest within search radius per target)
+        min_n = max(1, int(options.min_neighbors))
+        radius = (
+            float(options.search_radius)
+            if options.search_radius is not None and options.search_radius > 0
+            else None
+        )
+        k = n_samples
         if options.max_neighbors is not None and 0 < options.max_neighbors < n_samples:
             k = int(options.max_neighbors)
-            dist_masked = np.where(valid_mask, dist, np.inf)
-            k_mask = np.zeros_like(valid_mask, dtype=bool)
-            nearest_indices = np.argpartition(dist_masked, kth=k - 1, axis=1)[:, :k]
-            valid_k = np.take_along_axis(dist_masked, nearest_indices, axis=1) < np.inf
-            np.put_along_axis(k_mask, nearest_indices, valid_k, axis=1)
-            valid_mask = valid_mask & k_mask
 
-        # Count active neighbors per target point
-        neighbor_counts = np.sum(valid_mask, axis=1)
-        min_n = max(1, int(options.min_neighbors))
-
-        # Calculate inverse distance weights
-        weights = np.zeros_like(dist, dtype=np.float64)
-        np.divide(1.0, np.maximum(dist, eps) ** p, out=weights, where=valid_mask)
-        weights[~valid_mask] = 0.0
-
-        # Exact matches within valid mask
-        exact_match = (dist < eps) & valid_mask
-        weights[exact_match] = 0.0
-
-        weight_sum = np.sum(weights, axis=1)
-        z_grid_flat = np.full(len(target_pts), np.nan, dtype=np.float64)
-
-        # Calculate values where neighbor_counts >= min_neighbors
-        eligible = neighbor_counts >= min_n
-        positive_weights = eligible & (weight_sum > 0)
-        if np.any(positive_weights):
-            z_grid_flat[positive_weights] = np.sum(weights[positive_weights] * zs, axis=1) / weight_sum[positive_weights]
-
-        # Apply exact matches
-        match_rows, match_cols = np.nonzero(exact_match)
-        if match_rows.size > 0:
-            for r, c in zip(match_rows, match_cols):
-                if neighbor_counts[r] >= min_n:
-                    z_grid_flat[r] = zs[c]
-
-        grid_z = z_grid_flat.reshape((grid_n, grid_n))
+        if k >= n_samples and radius is None:
+            # Every sample neighbours every target, so the neighbour search
+            # degenerates to the identity — compute the (chunk, N) distances
+            # directly in place and accumulate with one BLAS gemv (no index
+            # gather, which dominates the k == N tree path).
+            z_flat = _idw_all_neighbors(target_pts, sample_pts, zs, p, eps, min_n)
+        else:
+            z_flat = self._idw_knn(target_pts, sample_pts, zs, k, radius, p, eps, min_n)
+        grid_z = z_flat.reshape((grid_n, grid_n))
 
         sample_points_param = [
-            {"well": p.well_name or p.well_id, "x": p.x, "y": p.y, "value": p.value}
-            for p in dataset.valid_points
+            {"well": p_.well_name or p_.well_id, "x": p_.x, "y": p_.y, "value": p_.value}
+            for p_ in dataset.valid_points
         ]
 
         algo_params = {
@@ -212,6 +193,137 @@ class IDWInterpolator(Interpolator):
             crs=dataset.crs or options.crs,
             unit=dataset.unit,
         )
+
+    def _idw_knn(
+        self,
+        target_pts: np.ndarray,
+        sample_pts: np.ndarray,
+        zs: np.ndarray,
+        k: int,
+        radius: float | None,
+        p: float,
+        eps: float,
+        min_n: int,
+    ) -> np.ndarray:
+        """IDW over the k nearest samples (optionally radius-pruned).
+
+        Missing neighbours (beyond ``radius`` or fewer than k samples exist)
+        come back from cKDTree as ``inf`` distance with index == n_samples;
+        ``1 / inf**p == 0`` then yields exactly the masked weight the previous
+        full-matrix implementation produced.
+        """
+        try:
+            from scipy.spatial import cKDTree
+        except ImportError as exc:  # pragma: no cover - scipy ships with the app
+            raise RuntimeError("IDW interpolation requires scipy (scipy.spatial.cKDTree)") from exc
+
+        n_samples = len(zs)
+        k = max(1, min(int(k), n_samples))
+        tree = cKDTree(sample_pts)
+        m = len(target_pts)
+        out = np.full(m, np.nan, dtype=np.float64)
+        chunk_len = max(1, min(self.QUERY_CHUNK, m)) if m else 0
+        for start in range(0, m, chunk_len):
+            stop = min(start + chunk_len, m)
+            rows = stop - start
+            dist, idx = tree.query(
+                target_pts[start:stop],
+                k=k,
+                distance_upper_bound=radius if radius is not None else np.inf,
+                workers=1,
+            )
+            dist = np.asarray(dist, dtype=np.float64).reshape(rows, k)
+            idx = np.asarray(idx).reshape(rows, k)
+            valid = np.isfinite(dist)
+            neighbor_counts = valid.sum(axis=1)
+            # Exact sample hits drop out of the weighted mean (their weight
+            # is 0) and are re-applied below, matching the legacy contract.
+            exact = valid & (dist < eps)
+            # weights = 1 / max(dist, eps) ** p; inf (no neighbour) -> 0
+            weights = 1.0 / np.power(np.maximum(dist, eps), p)
+            weights[exact] = 0.0
+            weight_sum = weights.sum(axis=1)
+            eligible = neighbor_counts >= min_n
+            positive = eligible & (weight_sum > 0)
+            if positive.any():
+                idx_safe = np.where(valid, idx, 0)
+                values = (weights * zs[idx_safe]).sum(axis=1)
+                denom = np.where(positive, weight_sum, 1.0)
+                out[start:stop] = np.where(positive, values / denom, np.nan)
+            # Exact matches take the sample value outright (only when the
+            # target still meets min_neighbors); row-major order keeps the
+            # last-hit-wins tie behaviour of the full-matrix loop.
+            hit_rows, hit_cols = np.nonzero(exact & eligible[:, None])
+            for r, c in zip(hit_rows, hit_cols):
+                out[start + r] = zs[idx[r, c]]
+        return out
+
+
+# Memory guard for the IDW all-neighbour path (#1048): squared distances and
+# one work copy live per (chunk x n_samples) block, so the chunk length adapts
+# to the sample count (mirrors the kriging target-chunk budget below).
+_IDW_TARGET_CELLS = 1 << 23  # ~8M float64 elements ≈ 64 MiB per work array
+_IDW_TARGET_CHUNK = 1 << 16  # upper bound for tiny sample sets
+
+
+def _idw_all_neighbors(
+    target_pts: np.ndarray,
+    sample_pts: np.ndarray,
+    zs: np.ndarray,
+    p: float,
+    eps: float,
+    min_n: int,
+) -> np.ndarray:
+    """IDW using every sample, computed in chunked (chunk, N) work arrays.
+
+    Specialisation of the k-nearest query for ``k == N`` with no search
+    radius: the neighbour set is every sample, so distances are formed
+    directly (no index gather) and the weighted numerator accumulates through
+    one BLAS matrix-vector product. Semantics — power weighting on
+    ``max(dist, eps)``, exact hits taking the sample value, ``NaN`` nodata
+    when ``min_neighbors`` is unmet or no positive weight remains — match the
+    previous full-matrix implementation exactly.
+    """
+    m = len(target_pts)
+    n = len(zs)
+    out = np.full(m, np.nan, dtype=np.float64)
+    if m == 0 or n == 0:
+        return out
+    if n < min_n:
+        return out  # no target can meet min_neighbors -> all nodata
+    sx = np.ascontiguousarray(sample_pts[:, 0])
+    sy = np.ascontiguousarray(sample_pts[:, 1])
+    eps_sq = eps * eps
+    chunk_len = max(256, min(_IDW_TARGET_CHUNK, _IDW_TARGET_CELLS // n))
+    for start in range(0, m, chunk_len):
+        stop = min(start + chunk_len, m)
+        chunk = target_pts[start:stop]
+        dx = chunk[:, 0:1] - sx[None, :]
+        dy = chunk[:, 1:2] - sy[None, :]
+        dx *= dx
+        dy *= dy
+        dx += dy  # squared distances, in place
+        # dist < eps  <=>  dist² < eps² (both non-negative)
+        exact = dx < eps_sq
+        # weight = 1 / max(dist, eps) ** p = max(dist², eps²) ** (-p / 2)
+        np.maximum(dx, eps_sq, out=dx)
+        if p == 2.0:
+            np.reciprocal(dx, out=dx)
+        else:
+            np.power(dx, -0.5 * p, out=dx)
+        dx[exact] = 0.0
+        weight_sum = dx.sum(axis=1)
+        positive = weight_sum > 0.0
+        if positive.any():
+            values = dx @ zs  # (chunk,) weighted sums, no gather
+            denom = np.where(positive, weight_sum, 1.0)
+            out[start:stop] = np.where(positive, values / denom, np.nan)
+        # neighbour count is n >= min_n for every row here, so every exact
+        # hit applies; row-major order keeps last-hit-wins tie behaviour.
+        hit_rows, hit_cols = np.nonzero(exact)
+        for r, c in zip(hit_rows, hit_cols):
+            out[start + r] = zs[c]
+    return out
 
 
 # Memory guard for the target-evaluation broadcast (#1036). Each chunk

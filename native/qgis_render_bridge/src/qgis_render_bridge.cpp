@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include <QColor>
 #include <QCoreApplication>
 #include <QDomDocument>
 #include <QFile>
@@ -36,6 +37,8 @@
 #include <qgsmaprenderercustompainterjob.h>
 #include <qgsmapsettings.h>
 #include <qgspallabeling.h>
+#include <qgsproperty.h>
+#include <qgspropertycollection.h>
 #include <qgsreadwritecontext.h>
 #include <qgsrectangle.h>
 #include <qgsrasterlayer.h>
@@ -195,10 +198,36 @@ void apply_label_style(QgsVectorLayer& layer, const VectorLayerSpec& spec) {
         QgsTextBufferSettings buffer;
         buffer.setEnabled(true);
         buffer.setSize(spec.label_buffer_size);
-        buffer.setColor(Qt::white);
+        // #1102: the buffer colour rides the wire (labels.buffer_color).
+        // An absent or unparseable value keeps the historical white halo.
+        const QColor buffer_color(QString::fromStdString(spec.label_buffer_color));
+        buffer.setColor(buffer_color.isValid() ? buffer_color : QColor(Qt::white));
         format.setBuffer(buffer);
     }
     settings.setFormat(format);
+    // #1052: per-feature data-defined label properties. Field-based
+    // properties are evaluated per feature by QGIS PAL (rotation in degrees
+    // clockwise, size in points, colour as a colour string) and override the
+    // fixed format above; an empty field name leaves the fixed value.
+    QgsPropertyCollection& data_defined = settings.dataDefinedProperties();
+    if (!spec.label_rotation_field.empty()) {
+        data_defined.setProperty(
+            QgsPalLayerSettings::Property::LabelRotation,
+            QgsProperty::fromField(QString::fromStdString(spec.label_rotation_field))
+        );
+    }
+    if (!spec.label_size_field.empty()) {
+        data_defined.setProperty(
+            QgsPalLayerSettings::Property::Size,
+            QgsProperty::fromField(QString::fromStdString(spec.label_size_field))
+        );
+    }
+    if (!spec.label_color_field.empty()) {
+        data_defined.setProperty(
+            QgsPalLayerSettings::Property::Color,
+            QgsProperty::fromField(QString::fromStdString(spec.label_color_field))
+        );
+    }
     layer.setLabeling(new QgsVectorLayerSimpleLabeling(settings));
     layer.setLabelsEnabled(true);
 }
