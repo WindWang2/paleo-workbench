@@ -27,7 +27,6 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPolygonF
 
 from paleo_workbench.mapping.map_styles import MarkerSymbol, TextStyle, VectorStyle
-from paleo_workbench.mapping.renderers import RenderContext
 
 logger = logging.getLogger(__name__)
 
@@ -814,7 +813,13 @@ class FallbackMapRenderBackend(MapRenderBackend):
             return
         scale_denominator = self._scale_denominator(width)
         # DPI contract (#1103): the painter regime folds device DPI in
-        # through the one named conversion on RenderContext.
+        # through the one named conversion on RenderContext. Imported here,
+        # not at module level: renderers imports layers, and layers'
+        # snapshot models live in this module — a module-level import would
+        # close a cycle whose ImportError layers silently swallows into
+        # ``MapLayerSnapshot = Any``.
+        from paleo_workbench.mapping.renderers import RenderContext
+
         dpi_scale = max(0.05, RenderContext.device_px_per_logical_px(dpi))
         self._diagnostics["features_total"] = 0
         self._diagnostics["features_drawn"] = 0
