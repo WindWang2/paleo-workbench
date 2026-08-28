@@ -317,7 +317,7 @@ def test_purge_rollback_restores_document_and_maps(service, monkeypatch):
     service._ensure_maps()
     assert service._maps_consistent()
 
-    def _failing_save(self):
+    def _failing_save(self, dirty=None):
         raise OSError("disk full during purge save")
 
     monkeypatch.setattr(type(service), "_save", _failing_save)
