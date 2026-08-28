@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -67,7 +68,12 @@ def main() -> int:
     from paleo_workbench.ui import tokens
 
     app = QApplication(sys.argv)
-    app.setStyleSheet(tokens.QSS_TEMPLATE)
+    # Theme the whole application through the manager (#1047): a frozen
+    # light template here would fight every later theme switch on any
+    # top-level window outside AppShell.
+    from paleo_workbench.ui.theme import theme_manager
+
+    app.setStyleSheet(theme_manager.get_qss())
 
     from paleo_workbench.viz.render_accel import install_geoviz_acceleration
 

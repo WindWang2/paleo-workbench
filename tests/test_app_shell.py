@@ -55,17 +55,34 @@ def test_app_shell_geological_modeling_3d_page_navigation(qtbot):
 
 
 def test_app_shell_hides_sidebar_on_data_page_and_restores_on_navigation(qtbot):
+    """#1047: the sidebar keeps user state across page switches.
+
+    It used to be unconditionally hidden on every navigation; now visible
+    stays visible, a user collapse survives switches, and context updates
+    continue in both cases.
+    """
     shell = AppShell()
     qtbot.addWidget(shell)
 
     shell.icon_rail.nav_buttons[1].click()
     assert shell.page_stack.currentIndex() == PAGE_INDEX_DATA
-    assert shell.sidebar.isHidden()
+    # page switch must NOT forcibly hide the sidebar anymore
+    assert not shell.sidebar.isHidden()
 
-    shell.icon_rail.nav_buttons[4].click()
-    assert shell.page_stack.currentIndex() == 4
-    assert shell.sidebar.isHidden()
-    assert shell.sidebar.context_label.text() == tokens.PAGE_NAMES[4]
+    # user collapse survives navigation
+    shell.sidebar.toggle_collapse()
+    assert shell.sidebar.is_collapsed is True
+    shell.icon_rail.nav_buttons[0].click()
+    shell.icon_rail.nav_buttons[1].click()
+    assert shell.sidebar.is_collapsed is True
+
+    # expanding again also survives
+    shell.sidebar.toggle_collapse()
+    assert shell.sidebar.is_collapsed is False
+    shell.icon_rail.nav_buttons[0].click()
+    assert shell.sidebar.is_collapsed is False
+    assert not shell.sidebar.isHidden()
+
 
 
 def test_app_shell_data_sidebar_receives_resource_counts(qtbot):

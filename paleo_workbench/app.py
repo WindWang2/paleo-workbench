@@ -105,7 +105,8 @@ class PaleoWorkbenchWindow(QWidget):
         Parented to ``self`` (the window) so they survive shell rebuilds; the
         callbacks read the current ``self.app_shell`` at call-time.
         """
-        QShortcut(QKeySequence("Ctrl+S"), self, self.save_project)
+        # Interactive save runs its heavy I/O off the GUI thread (#1040).
+        QShortcut(QKeySequence("Ctrl+S"), self, self._on_save_project)
         QShortcut(QKeySequence("Ctrl+N"), self, self._on_new_project)
         QShortcut(QKeySequence("Ctrl+O"), self, self._on_open_project)
         QShortcut(QKeySequence("Ctrl+F"), self, self._shortcut_focus_search)
@@ -255,7 +256,10 @@ class PaleoWorkbenchWindow(QWidget):
         stylesheet, so the compact rebuild must be re-applied on the shell too
         or the comfortable padding silently stays for the whole main window.
         """
-        qss = tokens.build_qss(density=density)
+        # Route through the ThemeManager so density and the ACTIVE THEME
+        # compose — a direct tokens.build_qss(density=...) would silently
+        # reset a dark/high-contrast session back to light (#1047 review).
+        qss = self.app_shell.theme_manager.get_qss(density=density)
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(qss)

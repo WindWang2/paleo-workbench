@@ -217,11 +217,26 @@ class GeologicalMappingService:
         )
         project.factor_map_tasks.append(task)
 
-        # 3. Create or update PaleoMapDocument compatibility record
+        # 3. Create or update PaleoMapDocument compatibility record.
+        # The vector features below are the interoperable payload; the
+        # continuous GridMapLayer stays reachable through the factor task
+        # link instead of being silently dropped by the bridge (#1034).
+        # The grid is registered live under the task id (same seam the
+        # workflow interpolation paths use) so overlay rendering and the
+        # save-time artifact externalization both resolve it.
+        for lyr in map_doc.layers:
+            if getattr(lyr, "layer_type", "") == "grid" and getattr(lyr, "grid_result", None) is not None:
+                from paleo_workbench.project.factor_grid_artifacts import (
+                    store_live_factor_grid,
+                )
+
+                store_live_factor_grid(task.id, lyr.grid_result)
+                break
         paleo_map = PaleoMapDocument(
             id=map_doc.id,
             name=doc_title,
             linked_target_horizon=resolved_horizon,
+            linked_factor_task_id=task.id,
             map_crs=map_doc.crs,
         )
         # Store layer representations

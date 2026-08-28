@@ -1,4 +1,4 @@
-"""Unit tests for Batch 5: GIS & Cartography (Map Composer & Single-Factor Pipeline)."""
+"""Unit tests for Batch 5: GIS & Cartography (Map Composer & Single-Factor geoprocessing)."""
 
 import numpy as np
 import pytest
@@ -9,10 +9,13 @@ from paleo_workbench.mapping.composer import (
     MapCompositionDocument,
     composer_renderer,
 )
-from paleo_workbench.mapping.single_factor_pipeline import (
-    extract_facies_polygons,
-    extract_grid_contours,
+from paleo_workbench.mapping.geological_pipeline.contouring import (
+    generate_contour_layer,
 )
+from paleo_workbench.mapping.geological_pipeline.polygonization import (
+    generate_facies_polygon_layer,
+)
+from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 
 
 def test_map_composition_document_and_elements():
@@ -94,6 +97,10 @@ def test_map_composition_document_and_elements():
 
 
 def test_single_factor_pipeline_contours_and_facies():
+    """#1035: the degenerate single_factor_pipeline stubs (horizontal-line
+    "contours", 1-pixel-box "polygons" behind ImportError fallbacks) were
+    removed; the geological_pipeline marching-squares contouring and
+    polygonization engines are the single scientific implementation."""
     grid = np.array(
         [
             [0.1, 0.2, 0.3, 0.4],
@@ -103,13 +110,38 @@ def test_single_factor_pipeline_contours_and_facies():
         ],
         dtype=np.float64,
     )
+    extent = (500000.0, 3400000.0, 5200000.0 - 4680000.0 + 500000.0, 3420000.0)
+    # keep the original extent values
     extent = (500000.0, 3400000.0, 520000.0, 3420000.0)
+    grid_x = np.linspace(extent[0], extent[2], grid.shape[1])
+    grid_y = np.linspace(extent[1], extent[3], grid.shape[0])
+    result = FactorGridResult(
+        grid_z=grid.astype(np.float32),
+        grid_x=grid_x,
+        grid_y=grid_y,
+        factor_name="砂岩厚度",
+        algorithm_id="kriging",
+    )
 
-    contours = extract_grid_contours(grid, extent, levels=[0.3, 0.6])
-    assert len(contours) > 0
-    assert contours[0]["geometry"]["type"] == "LineString"
+    contour_layer = generate_contour_layer(result, levels=[0.3, 0.6])
+    assert len(contour_layer.features) > 0
+    lines: list[list[list[float]]] = []
+    for feature in contour_layer.features:
+        geom = feature["geometry"]
+        if geom["type"] == "LineString":
+            lines.append(geom["coordinates"])
+        else:  # MultiLineString
+            lines.extend(geom["coordinates"])
+    assert lines, "contour layer must carry actual line geometry"
+    for line in lines:
+        # real marching-squares geometry has interpolated vertices and spans
+        # actual distance — never one constant-Y horizontal segment per cell
+        assert len(line) >= 2
+        ys = [pt[1] for pt in line]
+        assert max(ys) - min(ys) > 0.0 or len(line) > 2
 
-    facies = extract_facies_polygons(grid, extent)
+    facies_layer = generate_facies_polygon_layer(result)
+    facies = list(facies_layer.features)
     # #977 marching-squares + polygonization: on this diagonal ramp the same
     # facies band (三角洲前缘砂) forms TWO disconnected components at opposite
     # corners, so 4 polygons across 3 distinct facies. The old synthetic

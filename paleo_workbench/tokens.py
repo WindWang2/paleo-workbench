@@ -193,96 +193,209 @@ SEQUENCE_SCHEMES = ["三级层序格架（推荐）", "四级高频层序", "体
 SYSTEMS_TRACT_LABELS = ["LST", "TST", "HST"]
 
 
-def build_qss(density: str = "comfortable") -> str:
+
+# ---------------------------------------------------------------------------
+# Theme palettes (#1047): one token vocabulary, three curated palettes.
+# LIGHT is the extracted production look; DARK / HIGH_CONTRAST override the
+# color-carrying tokens while inheriting every structural token unchanged.
+# ---------------------------------------------------------------------------
+
+_DARK_OVERRIDES = {
+    "PRIMARY": "#94a3b8",
+    "ACCENT": "#38bdf8",
+    "BG_BODY": "#0f1216",
+    "BG_HEADER": "#161b22",
+    "BG_SIDEBAR": "#161b22",
+    "BG_SEARCH": "#1f2630",
+    "BG_RAIL": "#12161c",
+    "BG_RAIL_GRADIENT": (
+        "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #161b22, stop:1 #0f1216)"
+    ),
+    "BG_RAIL_TOP": "#161b22",
+    "BG_RAIL_BOTTOM": "#0f1216",
+    "TEXT_PRIMARY": "#e6edf3",
+    "TEXT_SECONDARY": "#9aa7b4",
+    "TEXT_DARK": "#f8fafc",
+    "TEXT_ON_RAIL": "#9aa7b4",
+    "TEXT_ON_RAIL_ACTIVE": "#e6edf3",
+    "BORDER": "#2b333d",
+    "BORDER_STRONG": "#3d4753",
+    "BORDER_LIGHT": "#222932",
+    "BG_CANVAS": "#0b0e13",
+    "BG_CANVAS_PANEL": "rgba(13, 17, 23, 0.9)",
+    "TEXT_ON_CANVAS": "#e6edf3",
+    "BORDER_CANVAS": "rgba(61, 71, 83, 0.85)",
+    "BG_NAV_ACTIVE": "#2b333d",
+    "BG_MENU_HOVER": "#1f2630",
+    "BG_SELECTION": "#1e3a5f",
+    "BADGE_WARNING": "#d97706",
+    "BADGE_SUCCESS": "#059669",
+    "BADGE_PRIMARY": "#3b82f6",
+    "PRIMARY_HOVER": "#1f2630",
+    "PRIMARY_PRESSED": "#2b333d",
+    "PRIMARY_DISABLED": "#4b5563",
+    "BG_GLASS": "rgba(22, 27, 34, 0.9)",
+    "BG_GLASS_BORDER": "rgba(42, 50, 60, 0.6)",
+}
+
+_HIGH_CONTRAST_OVERRIDES = {
+    "PRIMARY": "#000000",
+    "ACCENT": "#005fd0",
+    "BG_BODY": "#ffffff",
+    "BG_HEADER": "#ffffff",
+    "BG_SIDEBAR": "#ffffff",
+    "BG_SEARCH": "#ffffff",
+    "BG_RAIL": "#ffffff",
+    "BG_RAIL_GRADIENT": "none",
+    "BG_RAIL_TOP": "#ffffff",
+    "BG_RAIL_BOTTOM": "#ffffff",
+    "TEXT_PRIMARY": "#000000",
+    "TEXT_SECONDARY": "#1a1a1a",
+    "TEXT_DARK": "#000000",
+    "TEXT_ON_RAIL": "#000000",
+    "TEXT_ON_RAIL_ACTIVE": "#000000",
+    "BORDER": "#000000",
+    "BORDER_STRONG": "#000000",
+    "BORDER_LIGHT": "#000000",
+    "BG_NAV_ACTIVE": "#e0e0e0",
+    "BG_MENU_HOVER": "#f0f0f0",
+    "BG_SELECTION": "#cfe4ff",
+    "PRIMARY_HOVER": "#e0e0e0",
+    "PRIMARY_PRESSED": "#cfe0ef",
+    "PRIMARY_DISABLED": "#757575",
+    "BG_GLASS": "rgba(255, 255, 255, 0.96)",
+    "BG_GLASS_BORDER": "rgba(0, 0, 0, 0.8)",
+}
+
+_THEME_OVERRIDES = {
+    "light": {},
+    "dark": _DARK_OVERRIDES,
+    "high_contrast": _HIGH_CONTRAST_OVERRIDES,
+}
+
+
+def palette_for(theme: str = "light") -> dict:
+    """Full token palette for *theme* (``light`` / ``dark`` / ``high_contrast``).
+
+    Light is the extracted production palette itself; the other themes are
+    curated overrides of the same token names — never a separate vocabulary.
+    """
+    key = str(theme).lower().replace("-", "_")
+    if key not in _THEME_OVERRIDES:
+        key = "light"
+    palette = {
+        name: value
+        for name, value in globals().items()
+        if name.isupper()
+        and not name.startswith("_")
+        and isinstance(value, (str, int, float))
+        and name not in {"INTERPOLATION_METHODS", "SMOOTHING_LEVELS", "SEQUENCE_SCHEMES", "SYSTEMS_TRACT_LABELS"}
+    }
+    palette.update(_THEME_OVERRIDES[key])
+    return palette
+
+
+
+def build_qss(density: str = "comfortable", theme: str = "light") -> str:
+    """Render the application stylesheet from the *theme* palette (#1047).
+
+    The stylesheet below is the single production sheet; every theme
+    (light / dark / high_contrast) is a palette of the same token
+    vocabulary resolved through :func:`palette_for` — never a second,
+    parallel mini-stylesheet.
+    """
+    from types import SimpleNamespace
+
+    t = SimpleNamespace(**palette_for(theme))
     padding_y = 6 if density == "comfortable" else 3
     padding_x = 12 if density == "comfortable" else 8
     btn_height = 30 if density == "comfortable" else 24
 
     return f'''
     QWidget {{
-        font-family: {FONT_FAMILY};
-        color: {TEXT_PRIMARY};
-        background-color: {BG_BODY};
-        font-size: {FONT_SIZE_BASE};
+        font-family: {t.FONT_FAMILY};
+        color: {t.TEXT_PRIMARY};
+        background-color: {t.BG_BODY};
+        font-size: {t.FONT_SIZE_BASE};
     }}
     QLabel {{
         background-color: transparent;
     }}
     QMainWindow, QDialog, QStackedWidget, QScrollArea, QWidget#AppShell, QWidget#HomePage, QWidget#HomeContainer, QWidget#ModuleRelationshipWidget, QWidget#ModuleRelationshipCanvas {{
-        background-color: {BG_BODY};
+        background-color: {t.BG_BODY};
     }}
     QPushButton {{
-        background-color: {BG_SIDEBAR};
-        color: {TEXT_PRIMARY};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_BUTTON}px;
+        background-color: {t.BG_SIDEBAR};
+        color: {t.TEXT_PRIMARY};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_BUTTON}px;
         padding: {padding_y}px {padding_x}px;
         min-height: {btn_height}px;
         font-weight: 500;
     }}
     QPushButton:hover {{
-        background-color: {BG_SEARCH};
-        border-color: {BORDER_STRONG};
+        background-color: {t.BG_SEARCH};
+        border-color: {t.BORDER_STRONG};
     }}
     QPushButton:pressed {{
-        background-color: {BORDER_LIGHT};
+        background-color: {t.BORDER_LIGHT};
     }}
     QPushButton:focus {{
-        border: 1px solid {FOCUS_RING};
+        border: 1px solid {t.FOCUS_RING};
     }}
     QPushButton:disabled {{
-        background-color: {BG_SIDEBAR};
-        color: {PRIMARY_DISABLED};
-        border-color: {BORDER};
+        background-color: {t.BG_SIDEBAR};
+        color: {t.PRIMARY_DISABLED};
+        border-color: {t.BORDER};
     }}
     QPushButton#PrimaryButton {{
-        background-color: {PRIMARY};
+        background-color: {t.PRIMARY};
         color: #ffffff;
-        border: 1px solid {PRIMARY};
+        border: 1px solid {t.PRIMARY};
     }}
     QPushButton#PrimaryButton:hover {{
-        background-color: {PRIMARY_HOVER};
-        border-color: {PRIMARY_HOVER};
+        background-color: {t.PRIMARY_HOVER};
+        border-color: {t.PRIMARY_HOVER};
     }}
     QPushButton#PrimaryButton:pressed {{
-        background-color: {PRIMARY_PRESSED};
+        background-color: {t.PRIMARY_PRESSED};
     }}
     QPushButton#PrimaryButton:disabled {{
-        background-color: {BG_SEARCH}; color: {TEXT_SECONDARY}; border: 1px solid {BORDER};
+        background-color: {t.BG_SEARCH}; color: {t.TEXT_SECONDARY}; border: 1px solid {t.BORDER};
     }}
     QPushButton#PrimaryButton:focus {{
-        border: 1px solid {FOCUS_RING};
+        border: 1px solid {t.FOCUS_RING};
     }}
     QLineEdit, QComboBox, QSpinBox {{
-        background-color: {BG_SIDEBAR};
-        color: {TEXT_PRIMARY};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_BUTTON}px;
+        background-color: {t.BG_SIDEBAR};
+        color: {t.TEXT_PRIMARY};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_BUTTON}px;
         padding: {padding_y}px {padding_x}px;
-        selection-background-color: {PRIMARY};
+        selection-background-color: {t.PRIMARY};
         selection-color: #ffffff;
-        min-height: {CONTROL_HEIGHT}px;
+        min-height: {t.CONTROL_HEIGHT}px;
     }}
     QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{
-        border: 1px solid {FOCUS_RING};
+        border: 1px solid {t.FOCUS_RING};
     }}
     QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {{
-        background-color: {BG_SEARCH};
-        color: {PRIMARY_DISABLED};
-        border-color: {BORDER};
+        background-color: {t.BG_SEARCH};
+        color: {t.PRIMARY_DISABLED};
+        border-color: {t.BORDER};
     }}
     QComboBox::drop-down {{
         border: none;
         width: 22px;
     }}
     QComboBox QAbstractItemView {{
-        background-color: {BG_SIDEBAR};
-        color: {TEXT_PRIMARY};
-        border: 1px solid {BORDER_STRONG};
-        border-radius: {RADIUS_BUTTON}px;
+        background-color: {t.BG_SIDEBAR};
+        color: {t.TEXT_PRIMARY};
+        border: 1px solid {t.BORDER_STRONG};
+        border-radius: {t.RADIUS_BUTTON}px;
         padding: 4px;
-        selection-background-color: {BG_NAV_ACTIVE};
-        selection-color: {TEXT_PRIMARY};
+        selection-background-color: {t.BG_NAV_ACTIVE};
+        selection-color: {t.TEXT_PRIMARY};
         outline: none;
     }}
     QComboBox QAbstractItemView::item {{
@@ -297,8 +410,8 @@ def build_qss(density: str = "comfortable") -> str:
     QCheckBox::indicator, QRadioButton::indicator {{
         width: 16px;
         height: 16px;
-        background: {BG_SIDEBAR};
-        border: 1px solid {BORDER_STRONG};
+        background: {t.BG_SIDEBAR};
+        border: 1px solid {t.BORDER_STRONG};
     }}
     QCheckBox::indicator {{
         border-radius: 4px;
@@ -307,26 +420,26 @@ def build_qss(density: str = "comfortable") -> str:
         border-radius: 8px;
     }}
     QCheckBox::indicator:hover, QRadioButton::indicator:hover {{
-        border-color: {ACCENT};
+        border-color: {t.ACCENT};
     }}
     QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
-        background: {PRIMARY};
-        border-color: {PRIMARY};
+        background: {t.PRIMARY};
+        border-color: {t.PRIMARY};
     }}
     QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {{
-        background: {BG_SEARCH};
-        border-color: {BORDER};
+        background: {t.BG_SEARCH};
+        border-color: {t.BORDER};
     }}
     QToolBar {{
-        background-color: {BG_SIDEBAR};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_BUTTON}px;
+        background-color: {t.BG_SIDEBAR};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_BUTTON}px;
         spacing: 2px;
         padding: 3px;
     }}
     QToolBar::separator {{
         width: 1px;
-        background: {BORDER};
+        background: {t.BORDER};
         margin: 4px 6px;
     }}
     QToolButton {{
@@ -336,29 +449,29 @@ def build_qss(density: str = "comfortable") -> str:
         padding: 3px;
     }}
     QToolButton:hover {{
-        background-color: {BG_SEARCH};
-        border: 1px solid {BORDER_LIGHT};
+        background-color: {t.BG_SEARCH};
+        border: 1px solid {t.BORDER_LIGHT};
     }}
     QToolButton:pressed {{
-        background-color: {BG_NAV_ACTIVE};
-        border: 1px solid {BORDER_STRONG};
+        background-color: {t.BG_NAV_ACTIVE};
+        border: 1px solid {t.BORDER_STRONG};
     }}
     QToolButton:checked {{
-        background-color: {BG_NAV_ACTIVE};
-        border: 1px solid {PRIMARY};
+        background-color: {t.BG_NAV_ACTIVE};
+        border: 1px solid {t.PRIMARY};
     }}
     QToolButton:disabled {{
         background-color: transparent;
         border: 1px solid transparent;
     }}
     QTableWidget, QTreeView, QListView, QTableView {{
-        background-color: {BG_SIDEBAR};
-        alternate-background-color: {BG_RAIL_BOTTOM};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_CARD}px;
-        gridline-color: {BORDER_LIGHT};
-        selection-background-color: {BG_SELECTION};
-        selection-color: {TEXT_PRIMARY};
+        background-color: {t.BG_SIDEBAR};
+        alternate-background-color: {t.BG_RAIL_BOTTOM};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_CARD}px;
+        gridline-color: {t.BORDER_LIGHT};
+        selection-background-color: {t.BG_SELECTION};
+        selection-color: {t.TEXT_PRIMARY};
         outline: none;
     }}
     QTableView::item, QTreeView::item, QListView::item {{
@@ -368,71 +481,71 @@ def build_qss(density: str = "comfortable") -> str:
         border-radius: 4px;
     }}
     QTreeView::item:selected, QListView::item:selected {{
-        background-color: {BG_SELECTION};
-        color: {TEXT_PRIMARY};
+        background-color: {t.BG_SELECTION};
+        color: {t.TEXT_PRIMARY};
     }}
     QTreeView::item:hover, QListView::item:hover {{
-        background-color: {BG_SEARCH};
+        background-color: {t.BG_SEARCH};
     }}
     QHeaderView::section {{
-        background-color: {BG_SEARCH};
-        color: {TEXT_SECONDARY};
+        background-color: {t.BG_SEARCH};
+        color: {t.TEXT_SECONDARY};
         padding: 6px 10px;
         border: none;
-        border-bottom: 1px solid {BORDER};
-        border-right: 1px solid {BORDER};
+        border-bottom: 1px solid {t.BORDER};
+        border-right: 1px solid {t.BORDER};
         font-weight: 600;
-        min-height: {CONTROL_HEIGHT}px;
+        min-height: {t.CONTROL_HEIGHT}px;
     }}
     QTableCornerButton::section {{
-        background-color: {BG_SEARCH};
+        background-color: {t.BG_SEARCH};
         border: none;
     }}
     QTabWidget::pane {{
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_CARD}px;
-        background-color: {BG_SIDEBAR};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_CARD}px;
+        background-color: {t.BG_SIDEBAR};
     }}
     QTabBar::tab {{
-        background-color: {BG_SEARCH};
-        color: {TEXT_SECONDARY};
+        background-color: {t.BG_SEARCH};
+        color: {t.TEXT_SECONDARY};
         padding: 8px 16px;
-        border-top-left-radius: {RADIUS_BUTTON}px;
-        border-top-right-radius: {RADIUS_BUTTON}px;
+        border-top-left-radius: {t.RADIUS_BUTTON}px;
+        border-top-right-radius: {t.RADIUS_BUTTON}px;
         margin-right: 2px;
     }}
     QTabBar::tab:hover:!selected {{
-        background-color: {BG_NAV_ACTIVE};
-        color: {TEXT_PRIMARY};
+        background-color: {t.BG_NAV_ACTIVE};
+        color: {t.TEXT_PRIMARY};
     }}
     QTabBar::tab:selected {{
-        background-color: {BG_SIDEBAR};
-        color: {PRIMARY};
+        background-color: {t.BG_SIDEBAR};
+        color: {t.PRIMARY};
         font-weight: 600;
-        border-bottom: 2px solid {PRIMARY};
+        border-bottom: 2px solid {t.PRIMARY};
     }}
     QTabBar::tab:focus {{
-        border-bottom: 2px solid {FOCUS_RING};
+        border-bottom: 2px solid {t.FOCUS_RING};
     }}
     QMenuBar {{
-        background-color: {BG_HEADER};
-        color: {TEXT_PRIMARY};
-        border-bottom: 1px solid {BORDER};
+        background-color: {t.BG_HEADER};
+        color: {t.TEXT_PRIMARY};
+        border-bottom: 1px solid {t.BORDER};
     }}
     QMenuBar::item {{
         background-color: transparent;
         padding: 6px 12px;
-        color: {TEXT_PRIMARY};
+        color: {t.TEXT_PRIMARY};
         border-radius: 4px;
     }}
     QMenuBar::item:selected, QMenuBar::item:pressed {{
-        background-color: {BG_SEARCH};
-        color: {PRIMARY};
+        background-color: {t.BG_SEARCH};
+        color: {t.PRIMARY};
     }}
     QMenu {{
-        background-color: {BG_HEADER};
-        color: {TEXT_PRIMARY};
-        border: 1px solid {BORDER_STRONG};
+        background-color: {t.BG_HEADER};
+        color: {t.TEXT_PRIMARY};
+        border: 1px solid {t.BORDER_STRONG};
         border-radius: 8px;
         padding: 4px;
     }}
@@ -440,38 +553,38 @@ def build_qss(density: str = "comfortable") -> str:
         background-color: transparent;
         padding: 6px 24px 6px 12px;
         border-radius: 4px;
-        color: {TEXT_PRIMARY};
+        color: {t.TEXT_PRIMARY};
     }}
     QMenu::item:selected {{
-        background-color: {BG_MENU_HOVER};
-        color: {PRIMARY};
+        background-color: {t.BG_MENU_HOVER};
+        color: {t.PRIMARY};
     }}
     QMenu::item:disabled {{
-        color: {PRIMARY_DISABLED};
+        color: {t.PRIMARY_DISABLED};
     }}
     QMenu::separator {{
         height: 1px;
-        background-color: {BORDER};
+        background-color: {t.BORDER};
         margin: 4px 0px;
     }}
     QToolTip {{
-        background-color: {TEXT_DARK};
-        color: {TEXT_ON_CANVAS};
-        border: 1px solid {PRIMARY};
+        background-color: {t.TEXT_DARK};
+        color: {t.TEXT_ON_CANVAS};
+        border: 1px solid {t.PRIMARY};
         padding: 6px 8px;
         font-size: 12px;
     }}
     QProgressBar {{
-        background-color: {BG_SEARCH};
-        border: 1px solid {BORDER};
+        background-color: {t.BG_SEARCH};
+        border: 1px solid {t.BORDER};
         border-radius: 6px;
-        color: {TEXT_SECONDARY};
+        color: {t.TEXT_SECONDARY};
         text-align: center;
-        font-size: {FONT_SIZE_STATUS};
+        font-size: {t.FONT_SIZE_STATUS};
         min-height: 14px;
     }}
     QProgressBar::chunk {{
-        background-color: {PRIMARY};
+        background-color: {t.PRIMARY};
         border-radius: 5px;
     }}
     QSplitter::handle {{
@@ -491,7 +604,7 @@ def build_qss(density: str = "comfortable") -> str:
         font-weight: 600;
     }}
     QGroupBox::title {{
-        color: {TEXT_PRIMARY};
+        color: {t.TEXT_PRIMARY};
     }}
 
     QScrollBar:vertical {{
@@ -500,12 +613,12 @@ def build_qss(density: str = "comfortable") -> str:
         margin: 2px;
     }}
     QScrollBar::handle:vertical {{
-        background: {BORDER_STRONG};
+        background: {t.BORDER_STRONG};
         border-radius: 4px;
         min-height: 24px;
     }}
     QScrollBar::handle:vertical:hover {{
-        background: {PRIMARY_DISABLED};
+        background: {t.PRIMARY_DISABLED};
     }}
     QScrollBar:horizontal {{
         background: transparent;
@@ -513,12 +626,12 @@ def build_qss(density: str = "comfortable") -> str:
         margin: 2px;
     }}
     QScrollBar::handle:horizontal {{
-        background: {BORDER_STRONG};
+        background: {t.BORDER_STRONG};
         border-radius: 4px;
         min-width: 24px;
     }}
     QScrollBar::handle:horizontal:hover {{
-        background: {PRIMARY_DISABLED};
+        background: {t.PRIMARY_DISABLED};
     }}
     QScrollBar::add-line, QScrollBar::sub-line {{
         width: 0px;
@@ -529,14 +642,14 @@ def build_qss(density: str = "comfortable") -> str:
     }}
 
     QFrame#MenuBar {{
-        background: {BG_HEADER}; border-bottom: 1px solid {BORDER_STRONG};
-        min-height: {MENU_BAR_HEIGHT}px; max-height: {MENU_BAR_HEIGHT}px;
+        background: {t.BG_HEADER}; border-bottom: 1px solid {t.BORDER_STRONG};
+        min-height: {t.MENU_BAR_HEIGHT}px; max-height: {t.MENU_BAR_HEIGHT}px;
     }}
     QPushButton#ProjectMenuButton,
     QPushButton#ViewMenuButton,
     QPushButton#ToolsMenuButton,
     QPushButton#HelpMenuButton {{
-        background: transparent; border: none; color: {TEXT_PRIMARY}; padding: 0;
+        background: transparent; border: none; color: {t.TEXT_PRIMARY}; padding: 0;
     }}
     /* 顶部菜单条按标准菜单栏处理：隐藏下拉指示箭头，避免与文字重叠 */
     QPushButton#ProjectMenuButton::menu-indicator,
@@ -548,127 +661,127 @@ def build_qss(density: str = "comfortable") -> str:
     QPushButton#ProjectMenuButton:hover,
     QPushButton#ViewMenuButton:hover,
     QPushButton#ToolsMenuButton:hover,
-    QPushButton#HelpMenuButton:hover {{ color: {PRIMARY}; }}
+    QPushButton#HelpMenuButton:hover {{ color: {t.PRIMARY}; }}
     QPushButton#DataPreviewPdfPrevious,
     QPushButton#DataPreviewPdfNext {{
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_BUTTON}px;
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_BUTTON}px;
         padding: 4px 12px;
-        min-height: {CONTROL_HEIGHT}px;
-        background: {BG_SIDEBAR};
+        min-height: {t.CONTROL_HEIGHT}px;
+        background: {t.BG_SIDEBAR};
     }}
     QPushButton#DataPreviewPdfPrevious:focus,
     QPushButton#DataPreviewPdfNext:focus {{
-        border: 1px solid {FOCUS_RING};
+        border: 1px solid {t.FOCUS_RING};
     }}
     QPushButton#SecondaryButton {{
-        background: {BG_SIDEBAR}; color: {TEXT_PRIMARY};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_BUTTON}px;
+        background: {t.BG_SIDEBAR}; color: {t.TEXT_PRIMARY};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_BUTTON}px;
         padding: 4px 12px;
-        min-height: {CONTROL_HEIGHT}px;
+        min-height: {t.CONTROL_HEIGHT}px;
     }}
-    QPushButton#SecondaryButton:hover {{ background: {BG_SEARCH}; }}
-    QPushButton#SecondaryButton:pressed {{ background: {BORDER_LIGHT}; }}
+    QPushButton#SecondaryButton:hover {{ background: {t.BG_SEARCH}; }}
+    QPushButton#SecondaryButton:pressed {{ background: {t.BORDER_LIGHT}; }}
     QPushButton#SecondaryButton:disabled {{
-        color: {TEXT_SECONDARY}; border-color: {BORDER};
+        color: {t.TEXT_SECONDARY}; border-color: {t.BORDER};
     }}
     QPushButton#SecondaryButton:checked {{
-        background: {BG_SEARCH}; border-color: {PRIMARY}; color: {TEXT_PRIMARY};
+        background: {t.BG_SEARCH}; border-color: {t.PRIMARY}; color: {t.TEXT_PRIMARY};
     }}
     QPushButton#SecondaryButton:focus {{
-        border: 1px solid {FOCUS_RING};
+        border: 1px solid {t.FOCUS_RING};
     }}
     QLineEdit#SearchBox {{
-        background: {BG_SEARCH}; border: 1px solid {BORDER};
-        border-radius: {RADIUS_BUTTON}px; padding: 4px 8px; color: {TEXT_PRIMARY};
-        min-height: {CONTROL_HEIGHT}px;
+        background: {t.BG_SEARCH}; border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_BUTTON}px; padding: 4px 8px; color: {t.TEXT_PRIMARY};
+        min-height: {t.CONTROL_HEIGHT}px;
     }}
-    QLineEdit#SearchBox:focus {{ border: 1px solid {FOCUS_RING}; }}
+    QLineEdit#SearchBox:focus {{ border: 1px solid {t.FOCUS_RING}; }}
     QFrame#PanelCard {{
-        background: {BG_SIDEBAR};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_CARD}px;
+        background: {t.BG_SIDEBAR};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_CARD}px;
     }}
     QFrame#WellMapPanel {{
-        background: {BG_SIDEBAR};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_CARD}px;
+        background: {t.BG_SIDEBAR};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_CARD}px;
     }}
     QFrame#WellMapPanelHeader {{
         background: transparent;
         border: none;
-        border-bottom: 1px solid {BORDER};
+        border-bottom: 1px solid {t.BORDER};
     }}
     QToolButton#WellMapPanelToggle {{
         background: transparent;
         border: none;
-        color: {TEXT_PRIMARY};
+        color: {t.TEXT_PRIMARY};
         font-weight: 600;
         padding: 2px 4px;
     }}
     QLabel#WellMapPanelCount {{
-        color: {TEXT_SECONDARY};
+        color: {t.TEXT_SECONDARY};
     }}
     QFrame#ToolbarStrip {{
-        background: {BG_SIDEBAR};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_CARD}px;
+        background: {t.BG_SIDEBAR};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_CARD}px;
     }}
     QLabel#EmptyStateLabel {{
-        color: {TEXT_SECONDARY};
-        font-size: {FONT_SIZE_BASE};
+        color: {t.TEXT_SECONDARY};
+        font-size: {t.FONT_SIZE_BASE};
     }}
     QFrame#IconRail {{
-        background: {BG_RAIL_GRADIENT};
-        border-right: 1px solid {BORDER};
-        min-width: {ICON_RAIL_WIDTH}px; max-width: {ICON_RAIL_WIDTH}px;
+        background: {t.BG_RAIL_GRADIENT};
+        border-right: 1px solid {t.BORDER};
+        min-width: {t.ICON_RAIL_WIDTH}px; max-width: {t.ICON_RAIL_WIDTH}px;
     }}
     QFrame#RailSeparator {{
-        background: {BORDER};
+        background: {t.BORDER};
         border: none;
         min-height: 1px;
         max-height: 1px;
         margin: 3px 8px;
     }}
     QToolButton[navItem="true"] {{
-        background: transparent; color: {TEXT_ON_RAIL}; border: none;
-        border-radius: {RADIUS_NAV_ITEM}px;
-        min-width: {ICON_RAIL_ITEM_SIZE}px; max-width: {ICON_RAIL_ITEM_SIZE}px;
-        min-height: {ICON_RAIL_ITEM_SIZE}px; max-height: {ICON_RAIL_ITEM_SIZE}px;
-        font-size: {FONT_SIZE_NAV_LABEL}; font-weight: {FONT_WEIGHT_NAV_LABEL};
+        background: transparent; color: {t.TEXT_ON_RAIL}; border: none;
+        border-radius: {t.RADIUS_NAV_ITEM}px;
+        min-width: {t.ICON_RAIL_ITEM_SIZE}px; max-width: {t.ICON_RAIL_ITEM_SIZE}px;
+        min-height: {t.ICON_RAIL_ITEM_SIZE}px; max-height: {t.ICON_RAIL_ITEM_SIZE}px;
+        font-size: {t.FONT_SIZE_NAV_LABEL}; font-weight: {t.FONT_WEIGHT_NAV_LABEL};
     }}
-    QToolButton[navItem="true"]:hover {{ background: {BG_SEARCH}; color: {PRIMARY}; }}
-    QToolButton[navItem="true"]:focus {{ outline: 2px solid {FOCUS_RING}; }}
+    QToolButton[navItem="true"]:hover {{ background: {t.BG_SEARCH}; color: {t.PRIMARY}; }}
+    QToolButton[navItem="true"]:focus {{ outline: 2px solid {t.FOCUS_RING}; }}
     QToolButton[navItem="true"][active="true"] {{
-        background: {BG_NAV_ACTIVE}; color: {TEXT_ON_RAIL_ACTIVE}; font-weight: 600;
+        background: {t.BG_NAV_ACTIVE}; color: {t.TEXT_ON_RAIL_ACTIVE}; font-weight: 600;
     }}
     /* Generic QToolButton focus (covers QToolButton beyond the icon rail) */
-    QToolButton:focus {{ border: 1px solid {FOCUS_RING}; }}
+    QToolButton:focus {{ border: 1px solid {t.FOCUS_RING}; }}
     QFrame#TextSidebar {{
-        background: {BG_SIDEBAR}; border-right: 1px solid {BORDER};
-        min-width: {TEXT_SIDEBAR_WIDTH}px; max-width: {TEXT_SIDEBAR_WIDTH}px;
+        background: {t.BG_SIDEBAR}; border-right: 1px solid {t.BORDER};
+        min-width: {t.TEXT_SIDEBAR_WIDTH}px; max-width: {t.TEXT_SIDEBAR_WIDTH}px;
     }}
     QFrame#StatusBar {{
-        background: {BG_SEARCH}; border-top: 1px solid {BORDER_STRONG};
-        min-height: {STATUS_BAR_HEIGHT}px; max-height: {STATUS_BAR_HEIGHT}px;
-        font-size: {FONT_SIZE_STATUS}; color: {TEXT_SECONDARY};
+        background: {t.BG_SEARCH}; border-top: 1px solid {t.BORDER_STRONG};
+        min-height: {t.STATUS_BAR_HEIGHT}px; max-height: {t.STATUS_BAR_HEIGHT}px;
+        font-size: {t.FONT_SIZE_STATUS}; color: {t.TEXT_SECONDARY};
     }}
     QFrame#MapStatusBar {{
-        background: {BG_SIDEBAR};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_BUTTON}px;
-        font-size: {FONT_SIZE_STATUS};
-        color: {TEXT_SECONDARY};
+        background: {t.BG_SIDEBAR};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_BUTTON}px;
+        font-size: {t.FONT_SIZE_STATUS};
+        color: {t.TEXT_SECONDARY};
     }}
-    QFrame#PagePlaceholder {{ background: {BG_BODY}; }}
+    QFrame#PagePlaceholder {{ background: {t.BG_BODY}; }}
     QWidget#MapEditToolbar {{
-        background: {BG_SIDEBAR};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_CARD}px;
+        background: {t.BG_SIDEBAR};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_CARD}px;
     }}
     QFrame#ToolbarSeparator {{
-        background: {BORDER};
+        background: {t.BORDER};
         border: none;
         max-width: 1px;
         min-width: 1px;
@@ -678,23 +791,23 @@ def build_qss(density: str = "comfortable") -> str:
     QFrame#MapReferencePanel,
     QFrame#MapCanvasPanel,
     QFrame#MapChromePanel {{
-        background: {BG_SIDEBAR};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_CARD}px;
+        background: {t.BG_SIDEBAR};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_CARD}px;
     }}
     QLabel#MapDockTitle {{
-        color: {TEXT_PRIMARY};
-        font-size: {FONT_SIZE_TITLE};
-        font-weight: {FONT_WEIGHT_TITLE};
+        color: {t.TEXT_PRIMARY};
+        font-size: {t.FONT_SIZE_TITLE};
+        font-weight: {t.FONT_WEIGHT_TITLE};
         border: none;
-        border-left: 3px solid {PRIMARY};
+        border-left: 3px solid {t.PRIMARY};
         padding-left: 8px;
         background: transparent;
     }}
     QFrame#MapDockRail {{
-        background: {BG_RAIL_GRADIENT};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_CARD}px;
+        background: {t.BG_RAIL_GRADIENT};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_CARD}px;
     }}
     QFrame#MapDockArea {{
         background: transparent;
@@ -703,47 +816,47 @@ def build_qss(density: str = "comfortable") -> str:
     QToolButton[dockRailItem="true"] {{
         background: transparent;
         border: 1px solid transparent;
-        border-radius: {RADIUS_BUTTON}px;
+        border-radius: {t.RADIUS_BUTTON}px;
     }}
     QToolButton[dockRailItem="true"]:hover {{
-        background: {BG_SEARCH};
-        border: 1px solid {BORDER_LIGHT};
+        background: {t.BG_SEARCH};
+        border: 1px solid {t.BORDER_LIGHT};
     }}
     QToolButton[dockRailItem="true"]:checked {{
-        background: {BG_NAV_ACTIVE};
-        border: 1px solid {PRIMARY};
+        background: {t.BG_NAV_ACTIVE};
+        border: 1px solid {t.PRIMARY};
     }}
     QToolButton[dockRailItem="true"]:focus {{
-        border: 1px solid {FOCUS_RING};
+        border: 1px solid {t.FOCUS_RING};
     }}
     QToolButton#MapPanelsMenuButton {{
-        background: {BG_SIDEBAR};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_BUTTON}px;
+        background: {t.BG_SIDEBAR};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_BUTTON}px;
         padding: 4px;
     }}
     QToolButton#MapPanelsMenuButton:hover {{
-        background: {BG_SEARCH};
-        border-color: {BORDER_STRONG};
+        background: {t.BG_SEARCH};
+        border-color: {t.BORDER_STRONG};
     }}
     QToolButton#MapPanelsMenuButton::menu-indicator {{
         image: none;
         width: 0px;
     }}
     QTreeWidget#MapLayerTreeWidget {{
-        background: {BG_SIDEBAR};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_BUTTON}px;
+        background: {t.BG_SIDEBAR};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_BUTTON}px;
         padding: 2px;
     }}
     QTableWidget#MapAttributeTableWidget {{
-        background: {BG_SIDEBAR};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_BUTTON}px;
+        background: {t.BG_SIDEBAR};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_BUTTON}px;
     }}
     QLabel#StatusCoordLabel {{
-        color: {TEXT_SECONDARY};
-        font-size: {FONT_SIZE_STATUS};
+        color: {t.TEXT_SECONDARY};
+        font-size: {t.FONT_SIZE_STATUS};
         font-family: "SF Mono", "Menlo", "Consolas", "Courier New", monospace;
     }}
     QFrame#PredictionTaskPanel,
@@ -763,103 +876,103 @@ def build_qss(density: str = "comfortable") -> str:
     QFrame#SequenceBoundaryTable,
     QFrame#QCIssueTable,
     QFrame#FactorPreviewCard {{
-        background: {BG_SIDEBAR};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_CARD}px;
+        background: {t.BG_SIDEBAR};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_CARD}px;
     }}
     QListWidget#WorkListWidget {{
-        background: {BG_SIDEBAR};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_BUTTON}px;
+        background: {t.BG_SIDEBAR};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_BUTTON}px;
         padding: 2px;
     }}
     QFrame#WorkflowStepper {{
-        background: {BG_HEADER};
-        border-bottom: 1px solid {BORDER};
+        background: {t.BG_HEADER};
+        border-bottom: 1px solid {t.BORDER};
     }}
     QPushButton[stageItem="true"] {{
         background: transparent;
-        color: {TEXT_SECONDARY};
-        font-size: {FONT_SIZE_BASE};
+        color: {t.TEXT_SECONDARY};
+        font-size: {t.FONT_SIZE_BASE};
         font-weight: 500;
         border: 1px solid transparent;
         border-radius: 18px;
         padding: 4px 12px;
     }}
     QPushButton[stageItem="true"]:hover {{
-        background: {BG_SEARCH};
-        color: {TEXT_PRIMARY};
+        background: {t.BG_SEARCH};
+        color: {t.TEXT_PRIMARY};
     }}
     QPushButton[stageItem="true"][active="true"] {{
-        background: {PRIMARY};
+        background: {t.PRIMARY};
         color: #ffffff;
         font-weight: 600;
     }}
     QLabel#StepperArrow {{
-        color: {TEXT_SECONDARY};
+        color: {t.TEXT_SECONDARY};
         font-size: 13px;
         font-weight: bold;
     }}
     QFrame#ContextSidebar {{
-        background: {BG_SIDEBAR};
-        border-right: 1px solid {BORDER};
+        background: {t.BG_SIDEBAR};
+        border-right: 1px solid {t.BORDER};
     }}
     QPushButton[subpageItem="true"] {{
-        background: {BG_SEARCH};
-        color: {TEXT_PRIMARY};
-        font-size: {FONT_SIZE_STATUS};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_BUTTON}px;
+        background: {t.BG_SEARCH};
+        color: {t.TEXT_PRIMARY};
+        font-size: {t.FONT_SIZE_STATUS};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_BUTTON}px;
         padding: 4px 8px;
     }}
     QPushButton[subpageItem="true"]:hover {{
-        border-color: {PRIMARY};
+        border-color: {t.PRIMARY};
     }}
     QPushButton[subpageItem="true"][active="true"] {{
-        background: {PRIMARY};
+        background: {t.PRIMARY};
         color: #ffffff;
-        border-color: {PRIMARY};
+        border-color: {t.PRIMARY};
         font-weight: 600;
     }}
     QPushButton#SidebarCollapseBtn {{
         background: transparent;
-        color: {TEXT_SECONDARY};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_BUTTON}px;
+        color: {t.TEXT_SECONDARY};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_BUTTON}px;
     }}
     QPushButton#SidebarCollapseBtn:hover {{
-        background: {BG_SEARCH};
-        color: {TEXT_PRIMARY};
+        background: {t.BG_SEARCH};
+        color: {t.TEXT_PRIMARY};
     }}
     QLabel#WorkFieldLabel {{
-        color: {TEXT_SECONDARY};
-        font-size: {FONT_SIZE_STATUS};
+        color: {t.TEXT_SECONDARY};
+        font-size: {t.FONT_SIZE_STATUS};
         border: none;
         background: transparent;
     }}
     QLabel#WorkFieldValue {{
-        color: {TEXT_PRIMARY};
-        font-size: {FONT_SIZE_TITLE};
+        color: {t.TEXT_PRIMARY};
+        font-size: {t.FONT_SIZE_TITLE};
         font-weight: 500;
         border: none;
         background: transparent;
     }}
 
     QWidget#SeismicPredictionPage {{
-        background: {BG_BODY};
+        background: {t.BG_BODY};
     }}
     QWidget#SeismicPredictionPage QLabel#MapDockTitle,
     QWidget#SeismicPredictionPage QLabel#WorkFieldValue {{
-        color: {TEXT_PRIMARY};
+        color: {t.TEXT_PRIMARY};
     }}
     QWidget#SeismicPredictionPage QLabel#WorkFieldLabel {{
-        color: {TEXT_SECONDARY};
+        color: {t.TEXT_SECONDARY};
     }}
     QTreeWidget#SeismicAttributeTree {{
-        background: {BG_SIDEBAR};
-        color: {TEXT_PRIMARY};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_BUTTON}px;
+        background: {t.BG_SIDEBAR};
+        color: {t.TEXT_PRIMARY};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_BUTTON}px;
         padding: 4px;
     }}
     QTreeWidget#SeismicAttributeTree::item {{
@@ -867,40 +980,40 @@ def build_qss(density: str = "comfortable") -> str:
         border-radius: 3px;
     }}
     QTreeWidget#SeismicAttributeTree::item:selected {{
-        background: {PRIMARY};
+        background: {t.PRIMARY};
         color: #ffffff;
     }}
     QTreeWidget#SeismicAttributeTree::item:hover {{
-        background: {BG_SEARCH};
+        background: {t.BG_SEARCH};
     }}
     QFrame#SeismicAttributeCard {{
-        background: {BG_SEARCH};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_BUTTON}px;
+        background: {t.BG_SEARCH};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_BUTTON}px;
     }}
     QFrame#SeismicViewHost {{
-        background: {BG_SIDEBAR};
-        border: 1px solid {BORDER};
-        border-radius: {RADIUS_BUTTON}px;
+        background: {t.BG_SIDEBAR};
+        border: 1px solid {t.BORDER};
+        border-radius: {t.RADIUS_BUTTON}px;
     }}
     QLabel#SeismicAttributeCardLabel {{
-        color: {TEXT_PRIMARY};
+        color: {t.TEXT_PRIMARY};
         font-weight: 600;
-        font-size: {FONT_SIZE_STATUS};
+        font-size: {t.FONT_SIZE_STATUS};
     }}
     QLabel#SeismicAttributeCardStatus {{
-        color: {SUCCESS};
-        font-size: {FONT_SIZE_STATUS};
+        color: {t.SUCCESS};
+        font-size: {t.FONT_SIZE_STATUS};
     }}
     QWidget#SeismicPredictionPage QPushButton#SecondaryButton {{
-        background: {BG_SIDEBAR};
-        color: {TEXT_PRIMARY};
-        border-color: {BORDER};
+        background: {t.BG_SIDEBAR};
+        color: {t.TEXT_PRIMARY};
+        border-color: {t.BORDER};
     }}
     QWidget#SeismicPredictionPage QComboBox {{
-        background: {BG_SIDEBAR};
-        color: {TEXT_PRIMARY};
-        border-color: {BORDER};
+        background: {t.BG_SIDEBAR};
+        color: {t.TEXT_PRIMARY};
+        border-color: {t.BORDER};
     }}
     '''
 
