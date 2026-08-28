@@ -432,7 +432,8 @@ class TestReviewFixesMap:
         page.set_project(doc)
         assert plot.series["boundary"].visible is False
 
-    def test_tree_caps_entity_children(self, qtbot):
+    def test_tree_pages_entity_children(self, qtbot):
+        """#1046: groups page in 500-entity chunks; nothing is unreachable."""
         tree = NavigationTree()
         qtbot.addWidget(tree)
         doc = ProjectDocument.new("big")
@@ -445,9 +446,15 @@ class TestReviewFixesMap:
             None,
         )
         assert well_group is not None
-        # 500 rendered + 1 overflow placeholder.
+        # First page: 500 wells + one affordance node; the population is
+        # tracked in full either way.
         assert well_group.childCount() == 501
-        assert "井位地图" in well_group.child(500).text(0)
+        assert "显示更多" in well_group.child(500).text(0)
+        assert tree.entity_population("well") == 600
+        # Activating the affordance materializes the remaining 100 wells.
+        tree._on_item_clicked(well_group.child(500), 0)
+        assert well_group.childCount() == 600
+        assert tree.entity_population("well") == 600
 
     def test_map_page_degrades_without_engine(self, qtbot):
         from paleo_workbench.ui.pages.project_well_map_page import ProjectWellMapPage
