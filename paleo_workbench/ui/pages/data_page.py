@@ -911,6 +911,18 @@ class DataPage(QWidget):
         elif issues:
             self._set_action_status(issues[0])
         self.refresh_domain_views()
+        # #1079: freshly bound SEG-Y surveys start their background transcode
+        # (browse keeps working through the RAW segyio fallback path).
+        try:
+            from paleo_workbench.seismic_lifecycle import autostart_for_staged
+
+            autostart_for_staged(staged, mapping, get_catalog_service())
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "auto transcode start failed after domain bind"
+            )
 
     def well_identity_adapter(self):
         """Canonical Well.id lookup surface for legacy modules (ADR 0059 §7)."""

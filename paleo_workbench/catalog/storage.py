@@ -193,6 +193,18 @@ def trash_payload(project_path: Path, version_path: Path, version_id: str) -> st
     project = Path(project_path)
     if is_cas_path(project, _relpath_for(project, source)):
         return _relpath_for(project, source)
+    if source.is_dir():
+        # Directory-backed derived stores (e.g. zarr): same atomic move,
+        # whole-tree. ``version_id`` keeps trash entries unique.
+        root = ensure_catalog_layout(project)
+        trash_dir = root / "trash" / version_id
+        trash_dir.mkdir(parents=True, exist_ok=True)
+        target = trash_dir / source.name
+        os.replace(source, target)
+        fsync_dir(trash_dir)
+        fsync_dir(source.parent)
+        _prune_empty_ancestors(source.parent, 2)
+        return target.relative_to(_project_dir(project)).as_posix()
     if not source.is_file():
         raise CatalogError(f"Managed payload not found: {source}")
     root = ensure_catalog_layout(project)
@@ -225,6 +237,15 @@ def restore_payload(
     project = Path(project_path)
     if is_cas_path(project, _relpath_for(project, source)):
         return _relpath_for(project, source)
+    if source.is_dir():
+        target = _project_dir(project) / original_rel_path
+        if target.exists():
+            raise CatalogError(f"Restore target already exists: {target}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(source, target)
+        fsync_dir(target.parent)
+        _prune_empty_ancestors(source.parent, 1)
+        return target.relative_to(_project_dir(project)).as_posix()
     if not source.is_file():
         raise CatalogError(f"Trashed payload not found: {source}")
     target = _project_dir(project) / original_rel_path
@@ -266,6 +287,11 @@ def purge_trashed_payload(
     """
     source = Path(version_path)
     project = Path(project_path)
+    if source.is_dir():
+        # Directory-backed derived store: purge removes the whole tree.
+        shutil.rmtree(source, ignore_errors=True)
+        _prune_empty_ancestors(source.parent, 1)
+        return
     if is_cas_path(project, _relpath_for(project, source)):
         if shared:
             return

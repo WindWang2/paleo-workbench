@@ -185,10 +185,16 @@ class TaskScheduler:
                 self._heap = [e for e in self._heap if e[2] != task_id]
                 heapq.heapify(self._heap)
                 self._finish_locked(handle, TaskState.CANCELLED)
+                on_cancel = handle.spec.on_cancel
             else:
                 self._cancel_events[task_id].set()
                 return True
         self._wakeup.set()
+        if on_cancel is not None:
+            try:
+                on_cancel()
+            except Exception:
+                logger.exception("on_cancel callback failed for %s", task_id)
         return True
 
     def boost(self, task_id: str, priority: int | None = None) -> bool:
@@ -286,38 +292,48 @@ class TaskScheduler:
         try:
             result = handle.spec.callable(ctx)
         except TaskCancelled:
-            with self._lock:
-                self._finish_locked(handle, TaskState.CANCELLED)
             if handle.spec.on_cancel is not None:
                 try:
                     handle.spec.on_cancel()
                 except Exception:
                     logger.exception("on_cancel callback failed for %s", task_id)
-        except BaseException as exc:  # noqa: BLE001 - failure state is part of the contract
             with self._lock:
-                handle.error = f"{type(exc).__name__}: {exc}"
-                self._finish_locked(handle, TaskState.FAILED)
+                self._finish_locked(handle, TaskState.CANCELLED)
+        except BaseException as exc:  # noqa: BLE001 - failure state is part of the contract
             logger.exception("heavy task %s (%s) failed", task_id, handle.spec.title)
             if handle.spec.on_fail is not None:
                 try:
                     handle.spec.on_fail(exc)
                 except Exception:
                     logger.exception("on_fail callback failed for %s", task_id)
-        else:
             with self._lock:
-                handle.result = result
-                if ctx.cancelled.is_set():
-                    # Task returned at a safe point after cancel: treat its
-                    # return value as a partial result, not a completion.
+                handle.error = f"{type(exc).__name__}: {exc}"
+                self._finish_locked(handle, TaskState.FAILED)
+        else:
+            if ctx.cancelled.is_set():
+                # Task returned at a safe point after cancel: its return
+                # value is a partial result, not a completion.
+                if handle.spec.on_cancel is not None:
+                    try:
+                        handle.spec.on_cancel()
+                    except Exception:
+                        logger.exception("on_cancel callback failed for %s", task_id)
+                with self._lock:
+                    handle.result = result
                     self._finish_locked(handle, TaskState.CANCELLED)
-                else:
-                    handle.progress = 1.0
-                    self._finish_locked(handle, TaskState.DONE)
-            if handle.spec.on_done is not None and handle.state == TaskState.DONE:
+                return
+            handle.result = result
+            # Callbacks run BEFORE the terminal state lands: observers that
+            # see DONE (e.g. derived-version registration) can rely on the
+            # on_done side effects having completed.
+            if handle.spec.on_done is not None:
                 try:
                     handle.spec.on_done(result)
                 except Exception:
                     logger.exception("on_done callback failed for %s", task_id)
+            with self._lock:
+                handle.progress = 1.0
+                self._finish_locked(handle, TaskState.DONE)
         finally:
             with self._lock:
                 self._cancel_events.pop(task_id, None)
@@ -341,11 +357,19 @@ class TaskScheduler:
             self._shutdown = True
             for ev in self._cancel_events.values():
                 ev.set()
+            queued_cancels = []
             for h in self._handles.values():
                 if h.state == TaskState.QUEUED:
                     self._finish_locked(h, TaskState.CANCELLED)
+                    if h.spec.on_cancel is not None:
+                        queued_cancels.append(h.spec.on_cancel)
             self._heap.clear()
         self._wakeup.set()
+        for cb in queued_cancels:
+            try:
+                cb()
+            except Exception:
+                logger.exception("on_cancel callback failed during shutdown")
         if wait:
             deadline = None if timeout is None else time.monotonic() + timeout
             for t in self._threads:

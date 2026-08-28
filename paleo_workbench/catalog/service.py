@@ -60,6 +60,7 @@ from paleo_workbench.catalog.models import (
 from paleo_workbench.catalog.queries import IntegrityReport
 from paleo_workbench.catalog.storage import (
     create_working_copy as _place_working_copy,
+    ensure_catalog_layout as _ensure_catalog_layout,
     is_cas_path,
     place_managed_file,
     purge_trashed_payload,
@@ -1283,6 +1284,106 @@ class DataCatalogService:
             return version
 
     # -- import / link / materialize -----------------------------------------
+
+    def register_derived_store(
+        self,
+        *,
+        name: str,
+        store_path: str | Path,
+        run_id: str | None = None,
+        parent_version_ids: Iterable[str] = (),
+        type: str | None = None,
+        format: str = "zarr-v3",
+        asset_metadata: dict[str, Any] | None = None,
+        version_metadata: dict[str, Any] | None = None,
+        store_dirname: str = "store",
+    ) -> DataVersion:
+        """Register a DIRECTORY-backed DERIVED payload (e.g. a chunked zarr
+        store, #1079) as a managed version.
+
+        Unlike :meth:`register_result_asset` there is no copy+hash: the store
+        is MOVED atomically into ``derived/{asset_id}/{version_id}/`` (same
+        filesystem as the working area), and integrity is recorded as a
+        structural fingerprint (file count + total bytes) instead of a
+        payload sha256 — a 100 GB store is never re-read just to register.
+        Lineage: parents come from ``parent_version_ids`` (or the run's
+        inputs when ``run_id`` is given), mirroring register_result_asset.
+        """
+        store = Path(store_path)
+        if not store.is_dir():
+            raise CatalogError(f"Derived store directory not found: {store}")
+        # Size/fingerprint scan outside the lock (large trees).
+        n_files = 0
+        total = 0
+        for f in store.rglob("*"):
+            if f.is_file():
+                n_files += 1
+                total += f.stat().st_size
+        with self._lock:
+            known = self._ensure_maps().version_by_id
+            parents = [pid for pid in parent_version_ids if pid in known]
+            run = None
+            if run_id is not None:
+                run = self.get_run(run_id)
+                for pid in run.input_version_ids:
+                    if pid in known and pid not in parents:
+                        parents.append(pid)
+            asset = self._new_asset(name, type, format, asset_metadata)
+            version = DataVersion(
+                asset_id=asset.id,
+                version_number=self._next_version_number(asset.id),
+                stage=DataStage.DERIVED,
+                managed=True,
+                source_uri=store.resolve().as_posix(),
+                format=format,
+                parent_version_ids=parents,
+                run_id=run_id,
+                metadata=dict(version_metadata or {}),
+            )
+            version.metadata["store_fingerprint"] = {
+                "files": n_files,
+                "bytes": total,
+            }
+            layout = _ensure_catalog_layout(self.project_path)
+            target = layout / "derived" / asset.id / version.id
+            target.mkdir(parents=True, exist_ok=True)
+            final = target / store_dirname
+            if final.exists():
+                raise CatalogError(f"derived store target already exists: {final}")
+            try:
+                os.replace(store, final)
+            except OSError as exc:
+                raise CatalogError(
+                    f"cannot move derived store into managed layout: {exc}"
+                ) from exc
+            version.path = final.relative_to(
+                Path(self.project_path).expanduser().resolve().parent
+            ).as_posix()
+            version.size_bytes = total
+            asset.current_version_id = version.id
+            self._add_asset(asset)
+            self._add_version(version)
+            run_output_added = False
+            if run is not None and version.id not in run.output_version_ids:
+                run.output_version_ids.append(version.id)
+                run_output_added = True
+            _dirty = DirtySet(assets={asset.id: None}, versions={version.id: None})
+            if run is not None:
+                _dirty.mark_runs(run.id)
+            try:
+                self._save(_dirty)
+            except Exception:
+                if run_output_added:
+                    run.output_version_ids.remove(version.id)
+                self._rollback(assets=[asset], versions=[version])
+                # put the store back where it came from (best effort)
+                try:
+                    os.replace(final, store)
+                    target.rmdir()
+                except OSError:
+                    pass
+                raise
+            return version
 
     def _new_asset(
         self,
