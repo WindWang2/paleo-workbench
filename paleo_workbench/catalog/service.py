@@ -371,9 +371,12 @@ class DataCatalogService:
     ) -> None:
         """Recompute legacy-bridge holders for *keys* only.
 
-        A live claimant takes the bridge over a trashed one; otherwise the
-        first remaining claimant wins (I2). Keys whose holder survived are
-        left untouched, so the common no-claim removal does no scanning.
+        A live claimant takes a legacy-bridge key over a trashed one;
+        otherwise the first remaining claimant wins (I2). id-keys mirror
+        ``_ensure_maps`` survivor order. Only the affected keys are
+        normalized — unaffected keys keep their current holder (unlike the
+        old full rebuild, which re-sorted everything). One O(N) survivor
+        scan per call; the per-deletion sort is gone.
         """
         bridge = self._assets_by_legacy_id
         if bridge is None:
@@ -388,12 +391,19 @@ class DataCatalogService:
             if legacy_id is not None and legacy_id in candidates:
                 candidates[legacy_id].append(asset)
         for key, claimants in candidates.items():
-            if claimants:
-                live = [a for a in claimants if not a.trashed]
-                bridge[key] = live[0] if live else claimants[0]
-            else:
+            if not claimants:
                 # No claimant remains among survivors — drop the stale entry.
                 bridge.pop(key, None)
+                continue
+            if any(a.id == key for a in claimants):
+                # id-keys mirror _ensure_maps: survivor order wins
+                # unconditionally (no trash preference — review finding C1).
+                bridge[key] = next(a for a in claimants if a.id == key)
+                continue
+            # legacy-bridge keys keep the removal-path semantics: a live
+            # claimant takes over a trashed one (I2).
+            live = [a for a in claimants if not a.trashed]
+            bridge[key] = live[0] if live else claimants[0]
 
     def _add_version(self, version: DataVersion) -> None:
         self.document.versions.append(version)
@@ -435,6 +445,11 @@ class DataCatalogService:
             bucket = self._versions_by_asset.get(asset_id)
             if bucket is not None:
                 bucket[:] = [v for v in bucket if id(v) not in targets]
+                if not bucket:
+                    # no versions left for this asset: drop the stale bucket
+                    # key so versions-for lookups cannot report on removed
+                    # assets (review finding on bulk purge maps)
+                    del self._versions_by_asset[asset_id]
         for pid in affected_parents:
             children = self._children_by_parent.get(pid)
             if children is not None:

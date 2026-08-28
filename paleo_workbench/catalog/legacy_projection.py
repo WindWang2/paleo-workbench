@@ -6,7 +6,9 @@ split historically forced every UI mutation site to hand-maintain *both*
 worlds with its own filtering/appending rules — the "dual data world"
 divergence surface.
 
-This module is the single owner of that boundary. Direction is fixed:
+This module owns the catalog→legacy mirror direction of that boundary.
+(Registration flows still create legacy rows first and hand them to the
+catalog — that direction lives in the catalog adapter.) Direction here is fixed:
 **the catalog is authoritative; ``resources[]`` is a derived mirror**. Every
 operation takes the catalog entities that actually changed and projects them
 onto the legacy list:

@@ -260,3 +260,94 @@ def test_bulk_purge_keeps_asset_with_one_restored_version(service):
     kept = next(a for a in service.document.assets if a.id == "keep")
     assert kept.trashed is False
     assert any(existing is v for existing in service.document.versions)
+
+
+# ---------------------------------------------------------------------------
+# Review round-4 additions: schema upgrade + purge rollback coverage
+# ---------------------------------------------------------------------------
+
+
+def test_v4_database_rebuilds_and_gains_the_partial_index(service):
+    """T2a: a database stamped with schema version 4 must rebuild (not stay
+    stale) and end up with idx_versions_external_path present."""
+    index = service._index
+    conn = index._connect()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO sync_state (key, value) VALUES"
+            " ('index_schema_version', '4')"
+        )
+        conn.commit()
+    finally:
+        index.drop_current_connection()
+
+    # v4 layout forces the rebuild path on the next freshness check
+    index.rebuild(service.document)
+
+    conn = index._connect()
+    try:
+        row = conn.execute(
+            "SELECT value FROM sync_state WHERE key='index_schema_version'"
+        ).fetchone()
+        assert row is not None and int(row[0]) >= 5
+        sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='index'"
+            " AND name='idx_versions_external_path'"
+        ).fetchone()
+        assert sql is not None
+        plan = conn.execute(
+            "EXPLAIN QUERY PLAN "
+            "SELECT id FROM versions INDEXED BY idx_versions_external_path"
+            " WHERE managed = 0 AND trashed = 0 AND path = ? LIMIT 1",
+            ("/x",),
+        ).fetchall()
+        assert "idx_versions_external_path" in " ".join(str(r[-1]) for r in plan)
+    finally:
+        index.drop_current_connection()
+
+
+def test_purge_rollback_restores_document_and_maps(service, monkeypatch):
+    """T3a: a failed purge save rolls the document AND the lookup maps back."""
+    n = 20
+    for i in range(n):
+        service._add_asset(_asset(f"dead-{i}", trashed=True, trashed_at="t"))
+        service._add_version(
+            _version(f"vd-{i}", f"dead-{i}").model_copy(update={"trashed": True})
+        )
+    service._ensure_maps()
+    assert service._maps_consistent()
+
+    def _failing_save(self):
+        raise OSError("disk full during purge save")
+
+    monkeypatch.setattr(type(service), "_save", _failing_save)
+    with pytest.raises(OSError):
+        service.purge_trashed()
+    monkeypatch.undo()
+
+    # everything came back: document lists, id maps, per-asset buckets
+    assert len(service.document.assets) == n
+    assert len(service.document.versions) == n
+    assert service._maps_consistent()
+    assert service._asset_by_id.get("dead-0") is not None
+    assert service._versions_by_asset.get("dead-0")
+
+
+def test_bulk_purge_keeps_maps_consistent(service):
+    """Post-purge map invariants (stale buckets would silently pass the
+    document-list assertions alone)."""
+    for i in range(6):
+        service._add_asset(_asset(f"live-{i}"))
+        service._add_version(_version(f"vl-{i}", f"live-{i}"))
+    for i in range(3):
+        service._add_asset(_asset(f"dead-{i}", trashed=True, trashed_at="t"))
+        service._add_version(
+            _version(f"vd-{i}", f"dead-{i}").model_copy(update={"trashed": True})
+        )
+    service._ensure_maps()
+
+    service.purge_trashed()
+
+    assert service._maps_consistent()
+    assert {a.id for a in service.document.assets} == {f"live-{i}" for i in range(6)}
+    assert set(service._versions_by_asset) == {f"live-{i}" for i in range(6)}
