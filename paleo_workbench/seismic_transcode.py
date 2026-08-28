@@ -131,15 +131,48 @@ def shard_boxes(
                 )
 
 
-def _volume_shape(src: Path) -> tuple[int, int, int]:
+def _volume_geometry(src: Path) -> tuple[tuple[int, int, int], dict]:
+    """Shape plus the regular-grid coordinate spec for store attributes.
+
+    The iline/xline start/step land in zarr.json so ``open_volume`` can map
+    logical inline/crossline VALUES without re-reading the SEG-Y headers
+    (#1080). Samples keep index semantics (segyio regular grids only).
+    """
     try:
         with segyio.open(str(src), "r", ignore_geometry=False) as f:
-            return len(f.ilines), len(f.xlines), len(f.samples)
+            shape = (len(f.ilines), len(f.xlines), len(f.samples))
+            ilines = np.asarray(f.ilines)
+            xlines = np.asarray(f.xlines)
+
+            def _axis(vals: np.ndarray) -> tuple[int, int]:
+                if len(vals) >= 2 and int(vals[1] - vals[0]) > 0:
+                    return int(vals[0]), int(vals[1] - vals[0])
+                return int(vals[0]) if len(vals) else 1, 1
+
+            il_start, il_step = _axis(ilines)
+            xl_start, xl_step = _axis(xlines)
     except Exception as exc:  # unstructured or unreadable input
         raise TranscodeError(f"cannot read 3-D grid from {src}: {exc}") from exc
+    attrs = {
+        "source_format": "seg-y",
+        "shape": list(shape),
+        "iline": {"start": il_start, "step": il_step},
+        "xline": {"start": xl_start, "step": xl_step},
+    }
+    return shape, attrs
 
 
-def _open_or_create(dst: Path, shape, params: TranscodeParams, source: Path):
+def _volume_shape(src: Path) -> tuple[int, int, int]:
+    return _volume_geometry(src)[0]
+
+
+def _open_or_create(
+    dst: Path,
+    shape,
+    params: TranscodeParams,
+    source: Path,
+    grid_attrs: dict | None = None,
+):
     import zarr
     from zarr.codecs import BloscCodec
 
@@ -147,6 +180,20 @@ def _open_or_create(dst: Path, shape, params: TranscodeParams, source: Path):
     if meta_path.exists():
         _validate_existing(dst, shape, params)
         return zarr.open(str(dst), mode="a")
+    attributes = {
+        "source_path": str(source),
+        "source_format": "seg-y",
+        "shape": list(shape),
+        "transcode": {
+            "chunk": list(params.chunk),
+            "shard": list(params.shard),
+            "cname": params.cname,
+            "clevel": params.clevel,
+            "bitshuffle": params.bitshuffle,
+        },
+    }
+    if grid_attrs:
+        attributes.update(grid_attrs)
     return zarr.create_array(
         str(dst),
         shape=shape,
@@ -161,18 +208,7 @@ def _open_or_create(dst: Path, shape, params: TranscodeParams, source: Path):
             )
         ],
         overwrite=False,
-        attributes={
-            "source_path": str(source),
-            "source_format": "seg-y",
-            "shape": list(shape),
-            "transcode": {
-                "chunk": list(params.chunk),
-                "shard": list(params.shard),
-                "cname": params.cname,
-                "clevel": params.clevel,
-                "bitshuffle": params.bitshuffle,
-            },
-        },
+        attributes=attributes,
     )
 
 
@@ -259,9 +295,9 @@ def transcode_segy_to_zarr(
     before the next shard and keeps the partial store resumable.
     """
     src, dst = Path(src), Path(dst)
-    shape = _volume_shape(src)
+    shape, grid_attrs = _volume_geometry(src)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    arr = _open_or_create(dst, shape, params, src)
+    arr = _open_or_create(dst, shape, params, src, grid_attrs)
 
     boxes = list(shard_boxes(shape, params))
     stats = stats or TranscodeStats()
