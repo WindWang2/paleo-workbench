@@ -268,7 +268,8 @@ class TestEntityAssetLinks:
         assert ("well", "w1") in [(t, e) for t, e in __import__(
             "paleo_workbench.project.domain", fromlist=["entity_ids_for_asset"]
         ).entity_ids_for_asset(doc, "a1")]
-        assert well_registry(doc).by_id("w1") is None or True  # registry reads wells only
+        # registry reads the wells list only — w1 exists solely as a link id
+        assert well_registry(doc).by_id("w1") is None
 
 
 # --------------------------------------------------------------------------- binding
@@ -463,7 +464,8 @@ class TestReviewFixes:
         doc.wells.append(WellEntity(name="dup"))
         registry = well_registry(doc)
         assert registry.by_key("DUP") is None  # never silent first-wins
-        assert registry.by_key("W-01") is None or True
+        # a name absent from the registry resolves to None
+        assert registry.by_key("W-01") is None
 
     def test_staged_pipeline_matches_sync_pipeline(self, tmp_path):
         """Worker staging + GUI binding must equal the synchronous path."""
@@ -531,7 +533,8 @@ class TestReviewFixes:
 
         pytest.importorskip("pyproj")
         assert crs_equivalent("EPSG:4326", "epsg:4326")
-        assert crs_equivalent("EPSG:4326", "EPSG:4326 / WGS84") in (True, False) or True
+        # pyproj CRS.equals semantics (exact identity first)
+        assert crs_equivalent("EPSG:4326", "EPSG:4326") is True
         assert not crs_equivalent("EPSG:4326", "EPSG:32650")
         assert not crs_equivalent("", "EPSG:4326")
 

@@ -127,15 +127,12 @@ class TestWorkerLifecycleAndShutdown:
         assert page.shutdown_workers(wait_ms=500) is True
 
         # the page's real controllers are the production OwnedWorkerJobs
-        controllers = [
-            page._preview_controller,
-            page._visualization_controller,
-        ]
-        for controller in controllers:
-            job = getattr(controller, "_job", None)
-            if job is not None:
-                assert isinstance(job, OwnedWorkerJob)
-                assert job.is_running is False
+        from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
+
+        preview_job = page._preview_controller._active_job
+        assert preview_job is not None, "preview controller owns a job"
+        assert isinstance(preview_job, OwnedWorkerJob)
+        assert preview_job.is_running is False
 
 
     def test_965_owned_worker_job_signal_disconnect(self, qtbot):
@@ -935,7 +932,8 @@ class TestGraphics2D3DAndVizSubsystems:
         qpa_platform = os.environ.get("QT_QPA_PLATFORM", "offscreen")
         assert qpa_platform in ("offscreen", "windows", "wayland", "xcb")
 
-        ci = Path(".github/workflows/ci.yml")
+        ci = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
+        assert ci.exists(), "workflow file must exist for the config check"
         if ci.exists():
             workflow = ci.read_text(encoding="utf-8")
             # the Qt legs pin the offscreen platform (#1007 headless policy)
@@ -1161,7 +1159,7 @@ class TestNativeBridgeAndPlatformCompatibility:
         for feature in ("seismic_3d", "well_log", "map_edit", "grid_render", "layer_model"):
             # feature registry entries degrade to None when unbuilt
             assert feature in native_backend._NATIVE_MODULES
-            assert native_backend.native_status(feature) in ("native", "fresh", "stale", "missing", "fallback")
+            assert native_backend.native_status(feature) in ("fresh", "stale", "missing")
 
 
     def test_1002_cross_platform_process_termination(self):

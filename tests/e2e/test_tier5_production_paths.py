@@ -15,8 +15,6 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("PySide6")
-
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.ui.app_shell import AppShell
 from paleo_workbench.ui.navigation import (
@@ -53,17 +51,17 @@ def test_production_page_switch_drives_real_pages(shell):
     assert shell.page_stack.currentIndex() == PAGE_INDEX_MAPPING
 
 
-def test_production_data_page_update_state_roundtrip(shell):
+def test_production_data_page_update_state_roundtrip(shell, tmp_path):
     """Project state flows into the REAL DataPage through the shell seam."""
     project = ProjectDocument.new("e2e-roundtrip")
     shell.update_data_page(
         {"project_name": project.meta.name},
         project.resources,
         project.export_artifacts,
-        project_path=None,
+        project_path=tmp_path / "e2e.paleo.json",
     )
-    # the real page kept its bound project documents in sync
-    assert shell.data_page is not None
+    # observable state: the page bound exactly the resources handed over
+    assert list(shell.data_page._resources) == list(project.resources)
 
 
 def test_production_catalog_roundtrip_on_real_project(tmp_path: Path):

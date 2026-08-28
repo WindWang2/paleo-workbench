@@ -208,9 +208,10 @@ class TestDomainArchitectureBoundaries:
     """Boundary tests for #963, #964, #968, #969, #973."""
 
     def test_963_preview_settings_extreme_dimensions(self):
-        """#963 boundary: the REAL PreviewSettings clamps its integer ranges
-        at construction (the old body scaled pixels through a local
-        look-alike that no production code ever called)."""
+        """#963 boundary: the REAL PreviewSettings VALIDATES its integer
+        ranges at construction (rejecting out-of-range values) — the old
+        body scaled pixels through a local look-alike no production code
+        ever called."""
         from paleo_workbench.resources.preview_settings import PreviewSettings
 
         ok = PreviewSettings(table_max_rows=2000, table_max_columns=200)
