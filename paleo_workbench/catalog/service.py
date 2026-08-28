@@ -548,6 +548,15 @@ class DataCatalogService:
         document: CatalogDocument | None = None
         json_path = catalog_file_for(project_path)
         health = index.store_health()
+        if health == "canonical":
+            document = index.load_document()
+            if document is None:
+                # Partial corruption: the store passed the health probes
+                # but its rows cannot be read (e.g. a data page the probes
+                # did not touch). Downgrade to the corrupt flow — forensics
+                # + manifest rebuild — instead of silently falling into it
+                # (#1027 review, path B).
+                health = "corrupt"
         if health == "error":
             # The store EXISTS but is transiently unreadable (busy/locked).
             # Falling through to the manifest would silently overwrite
@@ -574,8 +583,6 @@ class DataCatalogService:
             except OSError:
                 pass  # best-effort forensics; reset() removes the bytes anyway
             index.reset()
-        if health == "canonical":
-            document = index.load_document()
         if document is not None and json_path.is_file():
             # The manifest should be exactly what we last checkpointed. A
             # different mtime means an old (json-canonical) app version wrote
@@ -720,6 +727,8 @@ class DataCatalogService:
         """
         reloaded = self._index.load_document()
         if reloaded is None:
+            self._pending_dirty = DirtySet()
+            self._pending_reconcile = False
             raise CatalogError(
                 "Canonical store became unreadable while rolling back; "
                 "in-memory state may diverge from disk. Reopen the project."
@@ -2681,7 +2690,7 @@ class DataCatalogService:
                 if changed:
                     self._save(
                         DirtySet(
-                            tags={t.id for t in created_tags},
+                            tags=dict.fromkeys(t.id for t in created_tags),
                             asset_tags=touched_assets,
                             version_tags=touched_versions,
                         )

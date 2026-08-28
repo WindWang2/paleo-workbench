@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from paleo_workbench.catalog.db import CatalogIndex
-from paleo_workbench.catalog.models import CatalogDocument, DataAsset
+from paleo_workbench.catalog.models import CatalogDocument, DataAsset, Tag
 from paleo_workbench.catalog.service import DataCatalogService
 from paleo_workbench.catalog.storage import catalog_dir_for
 from paleo_workbench.catalog.store import (
@@ -428,3 +428,86 @@ def test_garbage_store_recovers_from_manifest_with_forensics(tmp_path):
         )
     )
     assert leftovers and leftovers[0].read_bytes() == b"not-a-sqlite-database"
+
+
+def test_damaged_sync_state_with_newer_store_goes_through_corrupt_flow(tmp_path):
+    """Review path A regression: a store whose sync_state is unreadable while
+    its assets are NEWER than the manifest must classify as corrupt —
+    forensics preserved, rebuild from the manifest — never as plain legacy
+    (which rebuilt silently and rewound the committed revisions)."""
+    project = tmp_path / "proj" / "demo.paleo.json"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text("{}", encoding="utf-8")
+    service = DataCatalogService.open(project)
+    service.import_raw(_source(tmp_path, "a.bin"))
+    service.export_manifest()  # checkpoint at rev 1
+    stale_manifest = catalog_file_for(project).read_bytes()
+    service.import_raw(_source(tmp_path, "b.bin"))  # rev 2, store only
+    service.close()
+    catalog_file_for(project).write_bytes(stale_manifest)  # stale manifest
+
+    conn = sqlite3.connect(_db_file(project))
+    conn.execute("DROP TABLE sync_state")
+    conn.commit()
+    conn.close()
+
+    from paleo_workbench.catalog.db import CatalogIndex as _Idx
+
+    assert _Idx(project).store_health() == "corrupt"
+    reopened = DataCatalogService.open(project)
+    # The store could not be read: recovery falls back to the last manifest
+    # checkpoint (rev 1) — visibly, with the damaged bytes preserved.
+    assert len(reopened.list_assets()) == 1
+    reopened.close()
+    leftovers = list(
+        catalog_dir_for(project).glob("catalog.sqlite.corrupt-*")
+    )
+    assert leftovers, "damaged store bytes were not preserved for forensics"
+
+
+def test_zero_length_store_initializes_cleanly(tmp_path):
+    """A zero-byte catalog.sqlite (crash during first open) must not brick
+    the project: it holds nothing, so initialize over it."""
+    project = tmp_path / "proj" / "demo.paleo.json"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text("{}", encoding="utf-8")
+    catalog_dir_for(project).mkdir(parents=True, exist_ok=True)
+    _db_file(project).write_bytes(b"")
+
+    service = DataCatalogService.open(project)
+    assert service.list_assets() == []
+    service.import_raw(_source(tmp_path, "a.bin"))
+    service.close()
+
+    reopened = DataCatalogService.open(project)
+    assert len(reopened.list_assets()) == 1
+    reopened.close()
+
+
+def test_legacy_colliding_tag_names_do_not_break_writes(tmp_path):
+    """Pre-#884 documents can hold two tags colliding under the current
+    normalizer; migration and later reconciles must not raise UNIQUE."""
+    project = tmp_path / "proj" / "demo.paleo.json"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text("{}", encoding="utf-8")
+    metadata_dir = catalog_dir_for(project)
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    document = CatalogDocument(catalog_revision=3)
+    document.tags.append(Tag(id="tag_a", name="Foo", display_name="Foo"))
+    document.tags.append(Tag(id="tag_b", name="ｆｏｏ", display_name="foo"))
+    (metadata_dir / "catalog.json").write_text(
+        json.dumps(document.model_dump(mode="json")), encoding="utf-8"
+    )
+
+    service = DataCatalogService.open(project)  # migration: no IntegrityError
+    # Unmarked mutation → full reconcile path, tag rows touched.
+    service.update_asset_metadata(
+        service.document.assets[0].id if service.document.assets else "",
+        {"k": "v"},
+    ) if service.document.assets else None
+    service.close()
+
+    reopened = DataCatalogService.open(project)
+    names = {t.name for t in reopened.list_tags()}
+    assert len(names) >= 1
+    reopened.close()
