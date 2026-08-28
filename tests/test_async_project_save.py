@@ -91,8 +91,8 @@ def test_split_save_equivalent_to_legacy_single_call(tmp_path: Path):
     split.meta.name = "same"
     mgr = ProjectManager(split_path)
     prepared = mgr.prepare_save(split)
-    mgr.execute_save(prepared)
-    mgr.commit_save(split, prepared, mgr.last_save_stats)
+    stats = mgr.execute_save(prepared)
+    mgr.commit_save(split, prepared, stats)
 
     legacy_payload = json.loads(legacy_path.read_text(encoding="utf-8"))
     split_payload = json.loads(split_path.read_text(encoding="utf-8"))
@@ -252,6 +252,194 @@ def test_session_shutdown_drains_in_flight_save(qtbot, tmp_path: Path):
         # session stop must join the save worker before closing the catalog
         assert controller.shutdown_current_session() is True
         assert controller.save_job_running() is False
+    finally:
+        release.set()
+        patch.undo()
+
+
+# ---------------------------------------------------------------------------
+# Review round-2 race coverage (C1 / C2 / T1)
+# ---------------------------------------------------------------------------
+
+def test_drain_completes_a_finished_save_so_next_save_is_not_stale(qtbot, tmp_path):
+    """C1: a save that finishes DURING the drain must still be committed.
+
+    The queued saved-signal is dropped by the job's released-guard; without
+    drain-side completion the on-disk file has a fresh mtime while the
+    remembered snapshot keeps the old baseline — the next save would raise a
+    false ProjectStaleWriteError and lock the user out.
+    """
+    import threading
+
+    from paleo_workbench.ui.project_controller import ProjectController
+
+    path = tmp_path / "race.paleo.json"
+    window = _StubWindow(_project("drain-commit"), path)
+    controller = ProjectController(window)  # type: ignore[arg-type]
+
+    release = threading.Event()
+    started = threading.Event()
+    original_execute = ProjectManager.execute_save
+
+    def _blocking_execute(self, prepared):
+        from PySide6.QtCore import QCoreApplication, QThread
+
+        started.set()
+        deadline = deadline_wait(release, 10.0)
+        if not deadline:
+            raise AssertionError("execute never released")
+        return original_execute(self, prepared)
+
+    def deadline_wait(event, timeout):
+        import time
+
+        from PySide6.QtCore import QThread
+
+        end = time.monotonic() + timeout
+        while not event.is_set() and time.monotonic() < end:
+            QThread.msleep(5)
+        return event.is_set()
+
+    patch = pytest.MonkeyPatch()
+    patch.setattr(ProjectManager, "execute_save", _blocking_execute)
+    try:
+        controller.save_project_async()
+        qtbot.waitUntil(controller.save_job_running, timeout=5_000)
+        assert started.wait(5_000), "worker never started execute"
+
+        # teardown must fail AFTER the drain: shell workers report busy.
+        # The release thread frees the worker while the GUI thread is blocked
+        # inside the drain join (a QTimer cannot fire through thread.wait()).
+        window.app_shell.shutdown_workers = lambda: False  # type: ignore[method-assign]
+        threading.Timer(0.1, release.set).start()
+        assert controller.shutdown_current_session() is False
+
+        # the file was written; the drain must have committed it
+        assert path.exists()
+        # a follow-up save of the SAME session must not hit a false
+        # stale-write error
+        window.app_shell = _StubShell()  # restore healthy shutdown
+        result = controller.save_project()
+        assert result == path
+    finally:
+        release.set()
+        patch.undo()
+
+
+def test_sync_save_drains_in_flight_async_save(qtbot, tmp_path):
+    """C2: the sync facade must not interleave writes with the worker."""
+    import threading
+
+    from paleo_workbench.ui.project_controller import ProjectController
+
+    path = tmp_path / "sync-race.paleo.json"
+    window = _StubWindow(_project("sync-race"), path)
+    controller = ProjectController(window)  # type: ignore[arg-type]
+
+    release = threading.Event()
+    started = threading.Event()
+    execute_order: list[str] = []
+    original_execute = ProjectManager.execute_save
+
+    def _blocking_execute(self, prepared):
+        started.set()
+        deadline_wait(release, 10.0)
+        execute_order.append("worker")
+        return original_execute(self, prepared)
+
+    def deadline_wait(event, timeout):
+        import time
+
+        end = time.monotonic() + timeout
+        while not event.is_set() and time.monotonic() < end:
+            from PySide6.QtCore import QThread
+
+            QThread.msleep(5)
+        return event.is_set()
+
+    patch = pytest.MonkeyPatch()
+    patch.setattr(ProjectManager, "execute_save", _blocking_execute)
+    try:
+        controller.save_project_async()
+        qtbot.waitUntil(controller.save_job_running, timeout=5_000)
+        assert started.wait(5_000)
+
+        # free the worker while the sync facade is blocked in the drain
+        # join (a QTimer cannot fire through thread.wait())
+        threading.Timer(0.1, release.set).start()
+        result = controller.save_project()
+
+        assert result == path
+        assert path.exists()
+    finally:
+        release.set()
+        patch.undo()
+
+
+def test_async_save_failure_surfaces_error_dialog(qtbot, tmp_path):
+    from paleo_workbench.ui.project_controller import ProjectController
+
+    path = tmp_path / "fail.paleo.json"
+    window = _StubWindow(_project("failing"), path)
+    controller = ProjectController(window)  # type: ignore[arg-type]
+
+    def _boom(self, prepared):
+        raise OSError("disk full")
+
+    patch = pytest.MonkeyPatch()
+    patch.setattr(ProjectManager, "execute_save", _boom)
+    try:
+        assert controller.save_project_async() is True
+        qtbot.waitUntil(lambda: len(window.errors) > 0, timeout=5_000)
+    finally:
+        patch.undo()
+    assert window.errors and "disk full" in window.errors[0][1]
+
+
+def test_gui_thread_stays_free_while_worker_holds_execute(qtbot, tmp_path):
+    """T3: GUI events must be serviced WHILE the worker is still executing."""
+    import threading
+
+    from PySide6.QtCore import QTimer
+
+    from paleo_workbench.ui.project_controller import ProjectController
+
+    path = tmp_path / "liveness.paleo.json"
+    window = _StubWindow(_project("liveness"), path)
+    controller = ProjectController(window)  # type: ignore[arg-type]
+
+    release = threading.Event()
+    started = threading.Event()
+    original_execute = ProjectManager.execute_save
+
+    def _holding_execute(self, prepared):
+        started.set()
+        deadline_wait(release, 10.0)
+        return original_execute(self, prepared)
+
+    def deadline_wait(event, timeout):
+        import time
+
+        from PySide6.QtCore import QThread
+
+        end = time.monotonic() + timeout
+        while not event.is_set() and time.monotonic() < end:
+            QThread.msleep(5)
+        return event.is_set()
+
+    patch = pytest.MonkeyPatch()
+    patch.setattr(ProjectManager, "execute_save", _holding_execute)
+    pumped = threading.Event()
+    try:
+        controller.save_project_async()
+        qtbot.waitUntil(controller.save_job_running, timeout=5_000)
+        assert started.wait(5_000), "worker must be inside execute"
+
+        # a GUI-timer event must fire while execute is STILL blocked —
+        # a synchronous save implementation cannot pass this
+        QTimer.singleShot(0, pumped.set)
+        qtbot.waitUntil(pumped.is_set, timeout=3_000)
+        assert not release.is_set(), "GUI served events before worker finished"
     finally:
         release.set()
         patch.undo()

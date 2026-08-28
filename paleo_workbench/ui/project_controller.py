@@ -75,6 +75,9 @@ class ProjectController:
         # One background save at a time (#1040): the OwnedWorkerJob executing
         # ProjectManager.execute_save while the GUI keeps serving input.
         self._save_job = None
+        # Drains that timed out: the worker still owns the file write and is
+        # adopted by the detached-job keeper; kept here for observability.
+        self._detached_save_jobs: list = []
 
     @property
     def session_generation(self) -> int:
@@ -453,7 +456,14 @@ class ProjectController:
 
         The interactive Ctrl+S / menu path uses :meth:`save_project_async`
         (#1040); both share the same prepare → execute → commit phases.
+        Drains any in-flight async save first so the two writers can never
+        interleave ``os.replace`` sequences on the same file (review C2).
         """
+        if not self._drain_save_job():
+            self.window._show_project_error(
+                "保存工程失败", "后台保存线程未能停止，请稍后重试。"
+            )
+            return None
         if not self.window._flush_mapping_draft():
             self.window._show_project_error(
                 "保存工程失败",
@@ -516,7 +526,7 @@ class ProjectController:
         from paleo_workbench.ui.project_save_worker import ProjectSaveTask
 
         generation = self._session_generation
-        task = ProjectSaveTask(manager, prepared)
+        task = ProjectSaveTask(manager, prepared, generation=generation)
         job = OwnedWorkerJob()
         job.start(
             task,
@@ -524,8 +534,11 @@ class ProjectController:
             result_connections=(
                 (
                     task.saved,
-                    lambda stats, _manager=manager, _prepared=prepared, _gen=generation:
-                        self._finish_async_save(_manager, _prepared, stats, _gen),
+                    lambda stats, _manager=manager, _prepared=prepared,
+                    _gen=generation, _task=task:
+                        self._finish_async_save(
+                            _manager, _prepared, stats, _gen, task=_task
+                        ),
                 ),
                 (task.failed, self._on_async_save_failed),
             ),
@@ -538,7 +551,7 @@ class ProjectController:
         job = self._save_job
         return job is not None and job.is_running
 
-    def _finish_async_save(self, manager, prepared, stats, generation: int) -> None:
+    def _finish_async_save(self, manager, prepared, stats, generation: int, *, task=None) -> None:
         """GUI-thread completion slot: commit snapshot + register artifacts."""
         if generation != self._session_generation:
             # The project was switched/replaced mid-save. The file write for
@@ -551,6 +564,8 @@ class ProjectController:
             return
         try:
             manager.commit_save(self.window.project, prepared, stats)
+            if task is not None:
+                task.committed = True
             self._register_persisted_factor_grids(Path(manager.project_path))
         except (OSError, ValueError, TypeError, ValidationError) as e:
             self.window._show_project_error("保存工程失败", str(e))
@@ -561,17 +576,48 @@ class ProjectController:
         self.window._show_project_error("保存工程失败", message)
 
     def _drain_save_job(self, wait_ms: int = 2_000) -> bool:
-        """Join an in-flight background save; False when it refuses to stop."""
+        """Join an in-flight background save; False when it refuses to stop.
+
+        When the join succeeds but the queued ``saved`` delivery was dropped
+        by the job's released-guard (the drain beat the GUI slot), the
+        completed write is committed HERE: the file on disk already changed
+        (fresh mtime) while the remembered snapshot still holds the old
+        baseline — dropping the commit would make the next save raise a
+        false ProjectStaleWriteError and lock the user out (review C1).
+        """
         job = self._save_job
         if job is None or not job.is_running:
             self._save_job = None
             return True
         joined = job.shutdown(wait_ms)
         self._save_job = None
+        if not joined:
+            # The detached worker still writes the project file; the
+            # detached-keeper gate in _end_current_session keeps teardown
+            # from proceeding underneath it. Retain it for observability.
+            self._detached_save_jobs.append(job)
+            return False
+        task = getattr(job, "worker", None)
+        if (
+            task is not None
+            and getattr(task, "committed", False) is False
+            and getattr(task, "outcome_stats", None) is not None
+            and task.generation == self._session_generation
+        ):
+            self._finish_async_save(
+                task.manager, task.prepared, task.outcome_stats, task.generation
+            )
         return joined
 
     def save_project_as(self, path: str | Path | None) -> Path | None:
         if path is None:
+            return None
+        # Same-writer guarantee as save_project (review C2): even a
+        # same-path Save As must not race the in-flight async write.
+        if not self._drain_save_job():
+            self.window._show_project_error(
+                "另存为失败", "后台保存线程未能停止，请稍后重试。"
+            )
             return None
         if not self.window._flush_mapping_draft():
             self.window._show_project_error(

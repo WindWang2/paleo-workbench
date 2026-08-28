@@ -52,6 +52,11 @@ class WellLogCache:
             while len(self._entries) > self._max_entries:
                 self._entries.popitem(last=False)
 
+    def evict(self, key: tuple[str, float]) -> bool:
+        """Drop one entry explicitly (e.g. the file changed on disk)."""
+        with self._lock:
+            return self._entries.pop(key, None) is not None
+
     def clear(self) -> None:
         with self._lock:
             self._entries.clear()

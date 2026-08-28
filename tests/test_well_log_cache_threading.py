@@ -178,3 +178,23 @@ def test_is_well_log_cached_is_race_free_against_load(thread_count, tmp_path):
         assert not t.is_alive()
 
     assert not errors, errors
+
+
+def test_cache_evict_removes_single_entry():
+    cache = WellLogCache(max_entries=4)
+    cache.put(("a", 0.0), 1)
+    cache.put(("b", 0.0), 2)
+    assert cache.evict(("a", 0.0)) is True
+    assert cache.evict(("a", 0.0)) is False
+    assert cache.get(("a", 0.0)) is None
+    assert cache.get(("b", 0.0)) == 2
+
+
+def test_cache_rejects_invalid_capacity_and_none_payload():
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError):
+        WellLogCache(max_entries=0)
+    cache = WellLogCache(max_entries=2)
+    cache.put(("nil", 0.0), None)
+    assert len(cache) == 0
