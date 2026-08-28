@@ -33,6 +33,7 @@ from paleo_workbench.mapping.map_render_backend import (
     RenderFrame,
     create_map_render_backend,
 )
+from paleo_workbench.mapping.renderers import RenderContext
 from paleo_workbench.ui import tokens
 
 __all__ = ["UnifiedMapCanvas", "paint_map_decorations"]
@@ -207,7 +208,7 @@ def paint_map_decorations(
     previously the export copy skipped DPI scaling for the legend and used a
     different scale-bar policy (#892).
     """
-    dpi_scale = (float(dpi) / 96.0) if dpi else 1.0
+    dpi_scale = RenderContext.device_px_per_logical_px(dpi) if dpi else 1.0
     _paint_decorations_impl(
         painter, decorations, width=width, height=height, scale=dpi_scale, extent=extent,
     )
@@ -670,7 +671,7 @@ class UnifiedMapCanvas(QWidget):
             state = self._overlay_provider() if self._overlay_provider is not None else {}
             self._paint_decorations(
                 painter, (state or {}).get("decorations") or {}, width=width, height=height,
-                scale=float(dpi) / 96.0,
+                scale=RenderContext.device_px_per_logical_px(dpi),
                 extent=self._letterboxed_extent(int(width), int(height)) if preserve_aspect else self._view_extent,
             )
             painter.end()
@@ -833,7 +834,7 @@ class UnifiedMapCanvas(QWidget):
             (state or {}).get("decorations") or {},
             width=width,
             height=height,
-            scale=float(dpi) / 96.0,
+            scale=RenderContext.device_px_per_logical_px(dpi),
             extent=export_extent,
         )
 
@@ -865,7 +866,7 @@ class UnifiedMapCanvas(QWidget):
             state = self._overlay_provider() if self._overlay_provider is not None else {}
             self._paint_decorations(
                 painter, (state or {}).get("decorations") or {}, width=width, height=height,
-                scale=float(dpi) / 96.0, extent=export_extent,
+                scale=RenderContext.device_px_per_logical_px(dpi), extent=export_extent,
             )
         finally:
             self._backend.set_output_size(*previous_size)
