@@ -589,6 +589,10 @@ class ProjectController:
         if job is None or not job.is_running:
             self._save_job = None
             return True
+        # Capture the task BEFORE shutdown: OwnedWorkerJob.shutdown releases
+        # its identity (worker becomes None) while joining, so reading it
+        # afterwards always misses the completed outcome (re-review finding).
+        task = getattr(job, "worker", None)
         joined = job.shutdown(wait_ms)
         self._save_job = None
         if not joined:
@@ -597,16 +601,31 @@ class ProjectController:
             # from proceeding underneath it. Retain it for observability.
             self._detached_save_jobs.append(job)
             return False
-        task = getattr(job, "worker", None)
         if (
             task is not None
             and getattr(task, "committed", False) is False
             and getattr(task, "outcome_stats", None) is not None
-            and task.generation == self._session_generation
+            and task.manager.project_path == self.window.project_path
         ):
-            self._finish_async_save(
-                task.manager, task.prepared, task.outcome_stats, task.generation
-            )
+            # The session generation may legitimately have advanced (a
+            # teardown attempt bumps it BEFORE draining); what matters for a
+            # safe commit is that the save targeted the LIVE project —
+            # verified by path — and its prepared data came from this
+            # document. _finish_async_save's own generation guard is bypassed
+            # by calling the commit steps directly.
+            try:
+                task.manager.commit_save(
+                    self.window.project, task.prepared, task.outcome_stats
+                )
+                task.committed = True
+                self._register_persisted_factor_grids(
+                    Path(task.manager.project_path)
+                )
+                _SAVE_LOGGER.info(
+                    "后台保存于 drain 中完成提交: %s", task.manager.project_path
+                )
+            except (OSError, ValueError, TypeError, ValidationError) as e:
+                self.window._show_project_error("保存工程失败", str(e))
         return joined
 
     def save_project_as(self, path: str | Path | None) -> Path | None:

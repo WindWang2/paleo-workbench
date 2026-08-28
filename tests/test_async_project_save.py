@@ -262,12 +262,12 @@ def test_session_shutdown_drains_in_flight_save(qtbot, tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 def test_drain_completes_a_finished_save_so_next_save_is_not_stale(qtbot, tmp_path):
-    """C1: a save that finishes DURING the drain must still be committed.
-
-    The queued saved-signal is dropped by the job's released-guard; without
-    drain-side completion the on-disk file has a fresh mtime while the
-    remembered snapshot keeps the old baseline — the next save would raise a
-    false ProjectStaleWriteError and lock the user out.
+    """C1 (discriminating): baseline save → in-flight async save drained by a
+    same-session SYNC save. The drain's shutdown disconnects the queued
+    ``saved`` delivery AFTER the worker already wrote the file, so the drain
+    itself must complete the commit — otherwise the next save hits a false
+    ProjectStaleWriteError (fresh mtime vs stale snapshot baseline) and the
+    user is locked out of saving. This test fails on the pre-fix tree.
     """
     import threading
 
@@ -277,53 +277,52 @@ def test_drain_completes_a_finished_save_so_next_save_is_not_stale(qtbot, tmp_pa
     window = _StubWindow(_project("drain-commit"), path)
     controller = ProjectController(window)  # type: ignore[arg-type]
 
+    # 1. baseline save establishes the remembered snapshot (mtime baseline)
+    assert controller.save_project() == path
+
+    # 2. dirty the document so the async save has work to do
+    window.project.meta.region = "changed-after-baseline"
+
     release = threading.Event()
     started = threading.Event()
     original_execute = ProjectManager.execute_save
 
     def _blocking_execute(self, prepared):
-        from PySide6.QtCore import QCoreApplication, QThread
-
-        started.set()
-        deadline = deadline_wait(release, 10.0)
-        if not deadline:
-            raise AssertionError("execute never released")
-        return original_execute(self, prepared)
-
-    def deadline_wait(event, timeout):
-        import time
-
         from PySide6.QtCore import QThread
 
-        end = time.monotonic() + timeout
-        while not event.is_set() and time.monotonic() < end:
+        started.set()
+        end = __import__("time").monotonic() + 10.0
+        while not release.is_set() and __import__("time").monotonic() < end:
             QThread.msleep(5)
-        return event.is_set()
+        return original_execute(self, prepared)
 
     patch = pytest.MonkeyPatch()
     patch.setattr(ProjectManager, "execute_save", _blocking_execute)
     try:
-        controller.save_project_async()
+        assert controller.save_project_async() is True
         qtbot.waitUntil(controller.save_job_running, timeout=5_000)
         assert started.wait(5_000), "worker never started execute"
 
-        # teardown must fail AFTER the drain: shell workers report busy.
-        # The release thread frees the worker while the GUI thread is blocked
-        # inside the drain join (a QTimer cannot fire through thread.wait()).
-        window.app_shell.shutdown_workers = lambda: False  # type: ignore[method-assign]
-        threading.Timer(0.1, release.set).start()
-        assert controller.shutdown_current_session() is False
+        # free the worker just before the sync save drains it; the GUI thread
+        # is blocked inside the drain join, so the queued saved-signal is
+        # disconnected-and-dropped exactly in the C1 window
+        threading.Timer(0.05, release.set).start()
 
-        # the file was written; the drain must have committed it
-        assert path.exists()
-        # a follow-up save of the SAME session must not hit a false
-        # stale-write error
-        window.app_shell = _StubShell()  # restore healthy shutdown
+        # 3. the same-session sync save drains the async writer
         result = controller.save_project()
-        assert result == path
+
+        assert result == path, (
+            "sync save after a drained async write must succeed — "
+            "ProjectStaleWriteError indicates the dropped commit (C1)"
+        )
+        assert not window.errors, window.errors
+
+        # 4. a further save of the same session stays healthy
+        assert controller.save_project() == path
     finally:
         release.set()
         patch.undo()
+
 
 
 def test_sync_save_drains_in_flight_async_save(qtbot, tmp_path):
