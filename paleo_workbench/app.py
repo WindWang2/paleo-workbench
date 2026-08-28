@@ -339,6 +339,11 @@ class PaleoWorkbenchWindow(QWidget):
 
     def _apply_project_to_shell(self) -> None:
         """Push ``self.project`` into the current shell's pages (set in __init__/_refresh)."""
+        # Re-bind the coordination hub to this project document first so
+        # well/seismic registrations exist before any page refresh can route
+        # a selection through them; re-binding fully replaces the previous
+        # project's registrations (no cross-project residue, #1029).
+        self.app_shell.view_coordination.bind_project(self.project)
         state = dashboard_state(self.project)
         self.app_shell.set_project_name(
             state.get("project_name", self.project.meta.name)
