@@ -877,30 +877,69 @@ class CatalogIndex:
         """Classify the store: "absent" | "legacy" | "canonical" | "corrupt"
         | "error".
 
-        "corrupt" is DETERMINISTIC damage (not a database / malformed disk
-        image): the file provably holds no readable committed data, so
-        rebuilding from the manifest checkpoint loses nothing (the bytes are
-        preserved aside for forensics). "error" means unreadable for
-        TRANSIENT reasons (busy/locked) — overwriting in that state is the
-        silent last-writer-wins #1027/#411 exist to prevent, so callers must
-        refuse and surface.
+        "corrupt" is DETERMINISTIC damage (torn page, malformed image): the
+        file provably cannot yield its committed rows, so rebuilding from
+        the manifest checkpoint loses nothing readable — the bytes are kept
+        aside for forensics by the caller. "error" is a TRANSIENT read
+        failure (busy/locked): overwriting in that state is the silent
+        last-writer-wins #1027/#411 exist to prevent, so callers refuse.
+        "legacy" means safe-to-(re)initialize: no schema yet, a pre-canonical
+        layout, or zero bytes from a crashed first open.
         """
         if not self.db_path.is_file():
             return "absent"
         try:
+            if self.db_path.stat().st_size == 0:
+                return "legacy"  # crashed first-open: nothing to lose
+        except OSError:
+            return "error"
+        try:
             conn = self._connect()
-            conn.execute("SELECT count(*) FROM assets").fetchone()
-            conn.execute("SELECT count(*) FROM versions").fetchone()
-            version = self.store_version()
-        except sqlite3.OperationalError:
+            # Force a DATA-PAGE read: count(*) is answerable from the PK
+            # autoindex alone and would miss a smashed table page.
+            conn.execute("SELECT count(metadata) FROM assets").fetchone()
+            conn.execute("SELECT count(path) FROM versions").fetchone()
+        except sqlite3.OperationalError as exc:
             self._drop_current_connection()
+            if "no such table" in str(exc).lower():
+                return "legacy"  # schema never initialized
             return "error"  # busy/locked: transient, refuse to overwrite
         except (sqlite3.DatabaseError, OSError, ValueError, TypeError):
             self._drop_current_connection()
-            return "corrupt"  # not-a-database / malformed: deterministic
-        if version == STORE_SCHEMA_VERSION:
-            return "canonical"
-        return "legacy"
+            return "corrupt"
+        # sync_state must be STRICTLY readable on a healthy store: a damaged
+        # page here used to classify as "legacy" and silently rebuild from a
+        # possibly-stale manifest (#1027 review, path A).
+        try:
+            row = conn.execute(
+                "SELECT value FROM sync_state WHERE key = 'index_schema_version'"
+            ).fetchone()
+        except sqlite3.OperationalError as exc:
+            self._drop_current_connection()
+            if "no such table" in str(exc).lower():
+                # An UNINITIALIZED store has no tables at all; one holding
+                # populated assets but no sync_state is damaged/tampered —
+                # rebuilding it from the manifest must go through the
+                # forensics-preserving corrupt flow, not silent legacy.
+                try:
+                    probe = self._connect()
+                    n = probe.execute(
+                        "SELECT count(metadata) FROM assets"
+                    ).fetchone()[0]
+                    return "legacy" if n == 0 else "corrupt"
+                except sqlite3.Error:
+                    return "corrupt"
+            return "error"
+        except (sqlite3.DatabaseError, OSError, ValueError, TypeError):
+            self._drop_current_connection()
+            return "corrupt"
+        if row is None:
+            return "legacy"
+        try:
+            version = int(row[0])
+        except ValueError:
+            return "corrupt"
+        return "canonical" if version == STORE_SCHEMA_VERSION else "legacy"
 
     def write_all(self, document: CatalogDocument) -> None:
         """Transactionally (re)initialize the store from *document*.
@@ -1190,11 +1229,20 @@ class CatalogIndex:
                         "DELETE FROM version_tags WHERE tag_id = ?", (tag_id,)
                     )
                 else:
+                    normalized = normalize_tag_name(tag.name)
+                    # A legacy document can carry two tags colliding under
+                    # the current normalizer (pre-#884); the plain upsert
+                    # would violate tags.name UNIQUE. The document's object
+                    # is the survivor — drop the stale colliding row first.
+                    conn.execute(
+                        "DELETE FROM tags WHERE name = ? AND id <> ?",
+                        (normalized, tag_id),
+                    )
                     conn.execute(
                         _TAG_UPSERT_SQL,
                         (
                             tag_id,
-                            normalize_tag_name(tag.name),
+                            normalized,
                             tag.display_name,
                             json.dumps(tag.metadata, ensure_ascii=False),
                         ),
