@@ -389,6 +389,100 @@ def shutdown_lifecycle(catalog: DataCatalogService) -> None:
         svc.shutdown_jobs()
 
 
+def start_attribute_job(
+    catalog: DataCatalogService,
+    source_version_id: str,
+    attribute: str = "c3",
+    *,
+    scheduler: TaskScheduler | None = None,
+) -> TaskHandle:
+    """Queue a full-volume attribute job (#1084) over a chunked DERIVED store.
+
+    ``source_version_id`` must resolve to a zarr-v3 store (a transcode
+    output). The job streams inline bands through the SAME kernel as ROI
+    (#1083) into a fresh attribute store, then registers it as a DERIVED
+    DataVersion under DataRun(operation="attribute:<name>"). Resumable:
+    completed bands carry marker files and are skipped on re-run.
+    """
+    from geoviz_seismic import open_volume as _open_volume
+    from paleo_workbench.runtime import get_scheduler
+    from paleo_workbench.seismic_attributes import VolumeAttributeJob
+
+    sched = scheduler or get_scheduler()
+    version = catalog.get_version(source_version_id)
+    src_store = Path(catalog.resolve_path(version))
+    if not src_store.is_dir():
+        raise FileNotFoundError(
+            f"attribute source must be a chunked store directory: {src_store}"
+        )
+    life = get_lifecycle_service(catalog)
+    work_root = src_store.parent / f"{src_store.name}.attr-{attribute}"
+    reader = _open_volume(src_store)
+    job = VolumeAttributeJob(reader, work_root, attribute)
+
+    run = catalog.register_run(
+        f"attribute:{attribute}",
+        input_version_ids=[source_version_id],
+        parameters={"source_store": str(src_store), "attribute": attribute},
+        generator="paleo_workbench.seismic_attributes",
+        status="running",
+    )
+
+    def on_done(stats):
+        if stats is None:
+            return
+        derived = catalog.register_derived_store(
+            name=f"{attribute} attribute volume",
+            store_path=work_root,
+            run_id=run.id,
+            parent_version_ids=[source_version_id],
+            type="seismic-attribute",
+            format="zarr-v3",
+            version_metadata={
+                "attribute": attribute,
+                "source_version_id": source_version_id,
+                "shape": stats.get("bands") and list(reader.shape),
+            },
+        )
+        try:
+            catalog.update_run_status(
+                run.id, "complete", extra_parameters={"derived_version_id": derived.id}
+            )
+        except Exception:
+            logger.exception("attribute run status update failed")
+        for hook in list(_derived_hooks):
+            try:
+                hook(source_version_id, str(src_store), str(catalog.resolve_path(derived)))
+            except Exception:
+                logger.exception("derived hook failed for attribute %s", attribute)
+
+    def on_fail(exc):
+        try:
+            catalog.update_run_status(
+                run.id, "failed", extra_parameters={"error": f"{type(exc).__name__}: {exc}"}
+            )
+        except Exception:
+            logger.exception("attribute run status update failed")
+
+    def on_cancel():
+        try:
+            catalog.update_run_status(run.id, "cancelled")
+        except Exception:
+            logger.exception("attribute run status update failed")
+
+    return sched.submit(
+        TaskSpec(
+            callable=job.run,
+            kind="seismic.attribute",
+            title=f"{attribute} full-volume ({source_version_id})",
+            task_key=f"attribute/{attribute}/{source_version_id}",
+            on_done=on_done,
+            on_fail=on_fail,
+            on_cancel=on_cancel,
+        )
+    )
+
+
 def autostart_for_staged(
     staged_items: list[Any],
     asset_id_by_legacy: dict[str, str],
