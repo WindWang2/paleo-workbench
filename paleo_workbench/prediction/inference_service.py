@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,8 @@ from typing import Any
 from paleo_workbench.catalog.models import CatalogError, DataRun, DataStage
 from paleo_workbench.prediction.providers import get_provider
 from paleo_workbench.project.models import PredictionTask, ProjectDocument
+
+logger = logging.getLogger(__name__)
 
 INFERENCE_GENERATOR = "inference-service-v1"
 
@@ -446,6 +449,30 @@ def _persist_result(service, run_id: str, model, payload: dict[str, Any]) -> Any
             Path(tmp_path).unlink()
         except OSError:
             pass
+    # Volume outputs (tiled ONNX, #1085): register the class/prob zarr
+    # stores as DERIVED versions with lineage through the same run.
+    for spec in payload.get("volume_outputs") or []:
+        try:
+            store = Path(str(spec.get("path", "")))
+            if not store.is_dir():
+                continue
+            service.register_derived_store(
+                name=str(spec.get("name") or "inference volume"),
+                store_path=store,
+                run_id=run_id,
+                type="prediction-volume",
+                format="zarr-v3",
+                version_metadata={
+                    "kind": spec.get("kind", "volume"),
+                    "dtype": spec.get("dtype", ""),
+                    "device_mode": payload.get("device_mode", ""),
+                    "model_id": model.model_id,
+                },
+            )
+        except Exception:
+            logger.exception(
+                "volume output registration failed for run %s", run_id
+            )
     return output
 
 
