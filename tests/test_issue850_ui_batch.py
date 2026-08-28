@@ -172,9 +172,12 @@ def test_reader_panel_shows_table_truncation_in_warning_label(qtbot):
     panel = DataReaderPanel()
     qtbot.addWidget(panel)
     headers = tuple(f"c{i}" for i in range(10))
+    # #1039 raised the defensive cap from 50k to 1M cells (the virtualized
+    # model removed the per-cell allocation that made 50k the freeze
+    # threshold); exceed the NEW cap so the truncation contract still holds
     rows = tuple(
-        tuple(str(i * 10 + j) for j in range(10)) for i in range(6000)
-    )  # 60k cells > 50k preview cap
+        tuple(str(i * 10 + j) for j in range(10)) for i in range(120_000)
+    )  # 1.2M cells > 1M preview cap
     panel.render(
         PreviewResult(
             mode="table",

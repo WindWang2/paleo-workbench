@@ -184,19 +184,27 @@ def test_grid_direction_cache_matches_scalar_and_stays_fast():
     assert elapsed < 1.0, f"direction cache took {elapsed:.2f}s"
 
 
-def test_table_preview_caps_cells_and_notes_truncation(qtbot):
-    """#658: preview must not materialize the 2000×200 item grid."""
-    from paleo_workbench.ui.pages.table_preview_widget import (
-        MAX_PREVIEW_CELLS,
-        TablePreviewWidget,
-    )
+def test_table_preview_serves_full_grid_with_lazy_model(qtbot, monkeypatch):
+    """#658 → #1039: the model serves the whole grid lazily; the only cap
+    left is the cell-count safety valve, not per-cell materialization."""
+    from paleo_workbench.ui.pages import table_preview_widget as tpw
+    from paleo_workbench.ui.pages.table_preview_widget import TablePreviewWidget
 
     widget = TablePreviewWidget()
     qtbot.addWidget(widget)
     headers = tuple(f"c{i}" for i in range(200))
     rows = tuple(tuple(str(c) for c in range(200)) for _ in range(400))
     widget.load_table(headers, rows)
-    assert widget.rowCount() * widget.columnCount() <= MAX_PREVIEW_CELLS
-    assert widget.rowCount() < 400
+    # 80k cells sit far under the valve: every row/column stays reachable.
+    assert widget.rowCount() == 400
+    assert widget.columnCount() == 200
+    assert widget.truncated is False
+    assert not widget.truncation_message
+    model = widget.model()
+    assert model.data(model.index(399, 199)) == "199"
+    # The valve itself still guards pathological inputs.
+    monkeypatch.setattr(tpw, "MAX_PREVIEW_CELLS", 2_000)
+    widget.load_table(headers, rows)
     assert widget.truncated is True
-    assert widget.truncation_message
+    assert widget.rowCount() == 10  # 2_000 // 200 columns
+    assert "截断" in widget.truncation_message

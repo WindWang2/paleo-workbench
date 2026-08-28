@@ -7,7 +7,7 @@ import textwrap
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import QLabel, QTableWidget
+from PySide6.QtWidgets import QLabel, QTableView
 
 from paleo_workbench.project.models import ResourceItem
 from paleo_workbench.ui.pages.data_reader_panel import DataReaderPanel
@@ -442,7 +442,9 @@ def test_reader_panel_renders_table_resource(qtbot, tmp_path: Path):
 
     assert panel.current_mode == "table"
     table = panel.table_preview
-    assert isinstance(table, QTableWidget)
+    # #1039: virtualized preview — a QTableView + QAbstractTableModel, no
+    # per-cell QTableWidgetItem materialization
+    assert isinstance(table, QTableView)
     assert table.rowCount() == 1
     assert table.columnCount() == 2
 

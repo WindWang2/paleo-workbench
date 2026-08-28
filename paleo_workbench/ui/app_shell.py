@@ -59,7 +59,14 @@ class AppShell(QWidget):
     ):
         super().__init__(parent)
         self.setObjectName("AppShell")
-        self.setStyleSheet(tokens.build_qss())
+        # One theme system (#1047): the manager renders the token sheet for
+        # the active palette; AppShell never bypasses it with a direct
+        # tokens.build_qss() call.
+        from paleo_workbench.ui.theme import theme_manager
+
+        self.theme_manager = theme_manager
+        self.setStyleSheet(self.theme_manager.get_qss())
+        self.theme_manager.theme_changed.connect(self._on_theme_changed)
 
         # Multi-view coordination engines (#1029): AppShell is the single
         # owner; pages receive these via attribute injection and the
@@ -212,6 +219,20 @@ class AppShell(QWidget):
         )
         self._switch_page(target_page)
 
+    def set_theme(self, mode) -> None:
+        """Switch the application theme (#1047): palette change, same tokens."""
+        self.theme_manager.set_theme(mode)
+
+    def _on_theme_changed(self, _theme: str) -> None:
+        qss = self.theme_manager.get_qss()
+        self.setStyleSheet(qss)
+        # top-level windows outside this shell (dialogs) follow the theme too
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(qss)
+
     def _switch_page(self, index: int) -> None:
         if not 0 <= index < self.page_stack.count():
             return
@@ -229,9 +250,9 @@ class AppShell(QWidget):
         self.sidebar.set_stage(stage_idx, active_page_index=index)
         self.icon_rail.set_active(index)
 
-        self.sidebar.setVisible(False)
-        # The sidebar is hidden but still holds context state (restored on any
-        # later reveal, and asserted by tests), so keep the context updates.
+        # The sidebar keeps the user's state across page switches (#1047):
+        # visible stays visible, collapsed stays collapsed, and context
+        # updates continue so any later reveal is already current.
         if index == PAGE_INDEX_DATA:
             self.sidebar.update_data_context(**self._data_context)
         elif index == PAGE_INDEX_MAPPING:
