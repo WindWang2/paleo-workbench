@@ -378,17 +378,9 @@ class WorkflowController:
         if page is None:
             return
         self.window.app_shell.defer_page_project_binding(PAGE_INDEX_GEOMODEL, page)
-        if hasattr(page, "well_selected"):
-            page.well_selected.connect(self._on_geomodel_well_selected)
-
-    def _on_geomodel_well_selected(self, well_name: str) -> None:
-        """Sync a well picked on the 3D page into the WellLog page selection."""
-        page = self.window.app_shell.well_log_prediction_page_widget()
-        if page is None:
-            return
-        setter = getattr(page, "set_selected_well", None)
-        if callable(setter):
-            setter(well_name)
+        # Cross-page well sync is mediated by the shared SelectionContext
+        # (#1029): the page publishes through ViewCoordinationController and
+        # every other view follows — no page→page wire here anymore.
 
     def wire_review_page(self) -> None:
         page = self.window.app_shell.review_export_page_widget()
