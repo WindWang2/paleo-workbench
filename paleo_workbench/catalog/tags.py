@@ -72,7 +72,7 @@ def add_tag(
                 ids.append(tag.id)
                 changed = True
         if created or changed:
-            dirty = DirtySet(tags={tag.id} if created else set())
+            dirty = DirtySet(tags={tag.id: None} if created else {})
             if asset_id is not None and changed:
                 dirty.mark_asset_tags(asset_id)
             if version_id is not None and changed:
@@ -160,7 +160,7 @@ def rename_tag(
             snapshot = _usage_snapshot(service)
             try:
                 tag.display_name = " ".join(str(new_name).split())
-                service._save(DirtySet(tags={tag.id}))
+                service._save(DirtySet(tags={tag.id: None}))
                 return tag
             except Exception:
                 _restore_snapshot(service, snapshot)
@@ -176,7 +176,7 @@ def rename_tag(
         try:
             tag.name = normalized_new
             tag.display_name = " ".join(str(new_name).split())
-            service._save(DirtySet(tags={tag.id}))
+            service._save(DirtySet(tags={tag.id: None}))
             return tag
         except Exception:
             tag.name, tag.display_name = old_name_value, old_display
@@ -191,18 +191,18 @@ def merge_tag_into(service, source: Tag, target: Tag) -> Tag:
     a "failed" merge can never be silently persisted by a later write.
     """
     snapshot = _usage_snapshot(service)
-    touched_assets: set[str] = set()
-    touched_versions: set[str] = set()
+    touched_assets: dict[str, None] = {}
+    touched_versions: dict[str, None] = {}
     try:
         for owner, ids in service.document.asset_tags.items():
             if source.id in ids:
-                touched_assets.add(owner)
+                touched_assets[owner] = None
                 ids[:] = [i for i in ids if i != source.id]
                 if target.id not in ids:
                     ids.append(target.id)
         for owner, ids in service.document.version_tags.items():
             if source.id in ids:
-                touched_versions.add(owner)
+                touched_versions[owner] = None
                 ids[:] = [i for i in ids if i != source.id]
                 if target.id not in ids:
                     ids.append(target.id)
@@ -253,7 +253,7 @@ def create_tag(service, name: str) -> Tag:
         tag = Tag(name=normalized, display_name=" ".join(str(name).split()))
         service.document.tags.append(tag)
         try:
-            service._save(DirtySet(tags={tag.id}))
+            service._save(DirtySet(tags={tag.id: None}))
             return tag
         except Exception:
             if tag in service.document.tags:
@@ -326,9 +326,9 @@ def bulk_add_tag(
             if changed:
                 service._save(
                     DirtySet(
-                        tags={tag.id} if created else set(),
-                        asset_tags=set(asset_ids),
-                        version_tags=set(version_ids),
+                        tags={tag.id: None} if created else {},
+                        asset_tags=dict.fromkeys(asset_ids),
+                        version_tags=dict.fromkeys(version_ids),
                     )
                 )
             return tag
@@ -374,7 +374,8 @@ def bulk_remove_tag(
                 _drop_empty_associations(service.document)
                 service._save(
                     DirtySet(
-                        asset_tags=set(asset_ids), version_tags=set(version_ids)
+                        asset_tags=dict.fromkeys(asset_ids),
+                        version_tags=dict.fromkeys(version_ids)
                     )
                 )
         except Exception:
@@ -442,7 +443,7 @@ def delete_unused_tag(service, name: str) -> Tag:
         snapshot = _usage_snapshot(service)
         try:
             service.document.tags.remove(tag)
-            service._save(DirtySet(tags={tag.id}))
+            service._save(DirtySet(tags={tag.id: None}))
             return tag
         except Exception:
             _restore_snapshot(service, snapshot)
@@ -468,7 +469,7 @@ def prune_unused_tags(service) -> list[Tag]:
         try:
             for tag in unused:
                 service.document.tags.remove(tag)
-            service._save(DirtySet(tags={t.id for t in unused}))
+            service._save(DirtySet(tags=dict.fromkeys(t.id for t in unused)))
             return unused
         except Exception:
             _restore_snapshot(service, snapshot)

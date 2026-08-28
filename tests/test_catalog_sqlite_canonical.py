@@ -345,8 +345,86 @@ def test_external_writer_advancing_db_blocks_overwrite(service):
         )
     conn.close()
 
-    with pytest.raises(Exception) as excinfo:
+    from paleo_workbench.catalog.service import CatalogStaleWriteError
+
+    with pytest.raises(CatalogStaleWriteError):
         service.update_asset_metadata(version.asset_id, {"k": "v"})
-    assert "stale" in str(excinfo.value).lower() or excinfo.value.__class__.__name__ == (
-        "CatalogStaleWriteError"
+
+
+def test_transiently_unreadable_store_refuses_open_not_overwrite(tmp_path, monkeypatch):
+    """Review BLOCKER regression: a BUSY store must never be replaced by the
+    stale manifest (the silent last-writer-wins #1027/#411 exists to kill).
+
+    Session 1 commits rev 2; the manifest is still at rev 1. Session 2's
+    open() hits a transient OperationalError (busy/locked) reading the
+    store: open must REFUSE, leaving the rev-2 store byte-identical.
+    """
+    project = tmp_path / "proj" / "demo.paleo.json"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text("{}", encoding="utf-8")
+    service = DataCatalogService.open(project)
+    service.import_raw(_source(tmp_path, "a.bin"))
+    service.export_manifest()  # manifest checkpoint at rev 1
+    manifest_before = catalog_file_for(project).read_bytes()
+    service.import_raw(_source(tmp_path, "b.bin"))  # rev 2, store only
+    service.close()
+    # Rewind the manifest to the rev-1 checkpoint: an old-style stale
+    # manifest that MUST NOT replace the rev-2 canonical store.
+    catalog_file_for(project).write_bytes(manifest_before)
+
+    from paleo_workbench.catalog import db as db_module
+
+    real_connect = CatalogIndex._connect
+
+    def busy_once(self):
+        if not getattr(busy_once, "armed", False):
+            return real_connect(self)
+        busy_once.armed = False  # fail exactly one connection attempt
+        raise sqlite3.OperationalError("database is locked")
+
+    busy_once.armed = True
+    monkeypatch.setattr(CatalogIndex, "_connect", busy_once)
+
+    from paleo_workbench.catalog.models import CatalogError
+
+    with pytest.raises(CatalogError, match="unreadable"):
+        DataCatalogService.open(project)
+    monkeypatch.undo()
+
+    # The store was NOT overwritten with the stale manifest: the committed
+    # revision survived (byte-identity is not required — connecting for the
+    # health probe may checkpoint the WAL — but the DATA must be rev 2).
+    conn = sqlite3.connect(_db_file(project))
+    rev = conn.execute(
+        "SELECT value FROM sync_state WHERE key='catalog_revision'"
+    ).fetchone()[0]
+    n_assets = conn.execute("SELECT count(*) FROM assets").fetchone()[0]
+    conn.close()
+    assert (int(rev), n_assets) >= (2, 2)
+    assert catalog_file_for(project).read_bytes() == manifest_before
+    reopened = DataCatalogService.open(project)
+    assert len(reopened.list_assets()) == 2
+    reopened.close()
+    del db_module
+
+
+def test_garbage_store_recovers_from_manifest_with_forensics(tmp_path):
+    """Deterministic corruption heals: rebuild from the manifest, keep the
+    damaged bytes aside (the old disposable-index behaviour, preserved)."""
+    project = tmp_path / "proj" / "demo.paleo.json"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text("{}", encoding="utf-8")
+    service = DataCatalogService.open(project)
+    service.import_raw(_source(tmp_path, "a.bin"))
+    service.close()
+
+    _db_file(project).write_bytes(b"not-a-sqlite-database")
+    reopened = DataCatalogService.open(project)
+    assert len(reopened.list_assets()) == 1
+    reopened.close()
+    leftovers = list(
+        (tmp_path / "proj" / "demo.artifacts" / "metadata").glob(
+            "catalog.sqlite.corrupt-*"
+        )
     )
+    assert leftovers and leftovers[0].read_bytes() == b"not-a-sqlite-database"
