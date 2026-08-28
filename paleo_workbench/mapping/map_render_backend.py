@@ -1935,15 +1935,17 @@ def _flatten_qgis_style(style: Mapping[str, Any]) -> dict[str, object]:
         if isinstance(labeling_xml, str) and labeling_xml.strip():
             result["labeling_xml"] = labeling_xml
     # Unit parity (#1025): QgsTextFormat sizes are POINTS by default while
-    # our TextStyle authors logical pixels at 96 DPI; convert at the wire.
-    # The halo/buffer keys likewise cross as QGIS's buffer vocabulary.
+    # QgsTextBufferSettings::setSize defaults to MILLIMETRES (vendored
+    # qgstextrenderer_p.h) — each quantity converts with its OWN factor.
+    # The buffer_color key is forward-compat only: the current native
+    # bridge does not read it (halos render white).
     labels = result.get("labels")
     if isinstance(labels, Mapping):
         labels = dict(labels)
         if "size" in labels:
             labels["size"] = float(labels["size"]) * (72.0 / 96.0)
         if "buffer" not in labels and labels.get("halo_width"):
-            labels["buffer"] = labels["halo_width"] * (72.0 / 96.0)
+            labels["buffer"] = float(labels["halo_width"]) * (25.4 / 96.0)
         if "buffer_color" not in labels and labels.get("halo_color"):
             labels["buffer_color"] = labels["halo_color"]
         result["labels"] = labels

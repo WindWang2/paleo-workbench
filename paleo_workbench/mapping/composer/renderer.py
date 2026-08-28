@@ -27,6 +27,7 @@ from paleo_workbench.mapping.layers import (
     WellPointMapLayer,
 )
 from paleo_workbench.mapping.renderers import (
+    _MM_PER_PX,
     DEFAULT_RENDERER_REGISTRY,
     LegendItem,
     RenderContext,
@@ -229,7 +230,7 @@ class MapComposerRenderer:
             f'<text x="{x + 4}" y="{y + 5.5}" font-family="SimSun, Arial, sans-serif" font-size="4" font-weight="bold" fill="#000000">图 例</text>',
         ]
 
-        swatch_mm = 25.4 / 96.0  # px → mm at the 96 DPI authoring baseline
+        swatch_mm = _MM_PER_PX  # px → mm at the 96 DPI authoring baseline
         for idx, it in enumerate(legend_items):
             iy = y + 9.0 + idx * item_h
             escaped_label = html.escape(str(it.label))

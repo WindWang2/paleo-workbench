@@ -55,8 +55,10 @@ class RenderUnit(str, Enum):
     lengths, label offsets) are authored as logical pixels at 96 DPI. The
     context's unit says which space ``width``/``height`` — and therefore the
     emitted SVG/painter numbers — live in; :meth:`RenderContext.to_target`
-    is the ONE conversion every renderer uses so canvas, composer SVG, PDF,
-    and the QGIS backend stay physically consistent.
+    is the one conversion every renderer uses so the canvas, composer SVG,
+    and painter exports stay physically consistent. (The QGIS backend does
+    not render through RenderContext; its wire boundary converts units
+    separately in ``map_render_backend._flatten_qgis_style``.)
     """
 
     PX = "px"  # logical pixels at 96 DPI (screen canvas, PNG export)
@@ -214,7 +216,7 @@ class SingleSymbolRenderer(LayerRenderer):
                 if style.marker is MarkerSymbol.WELL:
                     parts.append(
                         f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="none" stroke="{style.stroke}" stroke-width="{ctx.to_target(1):.2f}"/>'
-                        f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{max(0.5, r*0.4):.2f}" fill="{style.fill}" stroke="none"/>'
+                        f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{max(ctx.to_target(0.5), r*0.4):.2f}" fill="{style.fill}" stroke="none"/>'
                     )
                 elif style.marker is MarkerSymbol.SQUARE:
                     parts.append(
@@ -418,7 +420,7 @@ class GraduatedRenderer(LayerRenderer):
                 if style.marker is MarkerSymbol.WELL:
                     parts.append(
                         f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="none" stroke="{style.stroke}" stroke-width="{ctx.to_target(1):.2f}"/>'
-                        f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{max(0.5, r*0.4):.2f}" fill="{fill_color}" stroke="none"/>'
+                        f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{max(ctx.to_target(0.5), r*0.4):.2f}" fill="{fill_color}" stroke="none"/>'
                     )
                 elif style.marker is MarkerSymbol.SQUARE:
                     parts.append(
@@ -610,7 +612,7 @@ class WellSymbolRenderer(LayerRenderer):
             # Geological well point symbol
             parts.append(
                 f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="#ffffff" stroke="{style.stroke}" stroke-width="{ctx.to_target(1):.2f}"/>'
-                f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{max(0.8, r*0.4):.2f}" fill="{style.fill}" stroke="none"/>'
+                f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{max(ctx.to_target(0.8), r*0.4):.2f}" fill="{style.fill}" stroke="none"/>'
             )
 
             # Well Name & Value Labels

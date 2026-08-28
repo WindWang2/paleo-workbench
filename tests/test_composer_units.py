@@ -268,5 +268,44 @@ def test_qgis_wire_converts_label_px_to_points():
     labels = flat["labels"]
     # QgsTextFormat.setSize uses points; 12 px @96dpi == 9 pt.
     assert labels["size"] == pytest.approx(9.0)
-    assert labels["buffer"] == pytest.approx(1.5)
+    # QgsTextBufferSettings.setSize defaults to MILLIMETRES; 2 px == 0.529 mm.
+    assert labels["buffer"] == pytest.approx(2.0 * MM_PER_PX)
     assert labels["buffer_color"] == "#ffff00"
+
+
+def test_well_symbol_inner_dot_stays_proportional_in_mm():
+    """Review F1 regression: the well symbol's centre-dot floors (0.5/0.8 px)
+    must convert with the ring radius, or the ring+dot symbol degenerates to
+    a solid disc in the mm composer (dot >= ring at small marker sizes)."""
+    from paleo_workbench.mapping.renderers import DEFAULT_RENDERER_REGISTRY
+
+    for marker_px in (6.0, 7.0):
+        layer = VectorMapLayer(
+            name="well",
+            features=[
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [0.5, 0.5]},
+                    "properties": {},
+                }
+            ],
+            style={
+                "stroke": "#000000",
+                "fill": "#ffffff",
+                "marker_size": marker_px,
+                "marker": "well",
+            },
+        )
+        svg = DEFAULT_RENDERER_REGISTRY.resolve(layer).render_svg(
+            layer,
+            RenderContext(
+                extent=(0, 0, 1, 1), width=150, height=120, units=RenderUnit.MM
+            ),
+        )
+        radii = [float(m) for m in re.findall(r'<circle[^>]*r="([0-9.]+)"', svg)]
+        assert len(radii) >= 2, "well symbol must draw ring + inner dot"
+        ring, dot = max(radii), min(radii)
+        assert dot < 0.86 * ring, (
+            f"marker_size={marker_px}: dot {dot:.3f}mm vs ring {ring:.3f}mm "
+            f"— symbol collapsed to a solid disc"
+        )
