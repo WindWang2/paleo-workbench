@@ -444,7 +444,34 @@ class DataCatalogService:
 
         document: CatalogDocument | None = None
         json_path = catalog_file_for(project_path)
-        if index.store_version() == STORE_SCHEMA_VERSION:
+        health = index.store_health()
+        if health == "error":
+            # The store EXISTS but is transiently unreadable (busy/locked).
+            # Falling through to the manifest would silently overwrite
+            # committed canonical data with a stale checkpoint — the exact
+            # last-writer-wins #411 refuses. Surface and retry.
+            raise CatalogError(
+                f"Canonical catalog store exists but is unreadable: "
+                f"{index.db_path}. Not overwriting it with the manifest; "
+                f"resolve the read failure (close other instances, retry) "
+                f"and reopen."
+            )
+        if health == "corrupt":
+            # Deterministic damage (torn/garbage bytes): the store provably
+            # holds nothing readable. Isolate the bytes for forensics, then
+            # rebuild transactionally from the manifest checkpoint — the
+            # disposable-store recovery the project has always had.
+            from datetime import datetime as _datetime
+
+            isolated = index.db_path.with_name(
+                f"{index.db_path.name}.corrupt-{_datetime.now():%Y%m%d-%H%M%S-%f}"
+            )
+            try:
+                os.replace(index.db_path, isolated)
+            except OSError:
+                pass  # best-effort forensics; reset() removes the bytes anyway
+            index.reset()
+        if health == "canonical":
             document = index.load_document()
         if document is not None and json_path.is_file():
             # The manifest should be exactly what we last checkpointed. A
@@ -470,6 +497,10 @@ class DataCatalogService:
             # Transactional migration / initialization. A failure propagates:
             # the legacy json is untouched and the retry starts clean.
             index.write_all(document)
+            # F8: record the manifest baseline now so subsequent opens skip
+            # the full manifest parse.
+            if json_path.is_file():
+                _record_manifest_mtime_ns(index, json_path)
 
         service = cls(project_path, document, store, index)
         service._flushed_revision = document.catalog_revision
@@ -585,10 +616,15 @@ class DataCatalogService:
         pre-batch snapshot — without ever deep-copying the graph (#1027).
         """
         reloaded = self._index.load_document()
-        if reloaded is not None:
-            self.document = reloaded
-            self._invalidate_maps()
+        if reloaded is None:
+            raise CatalogError(
+                "Canonical store became unreadable while rolling back; "
+                "in-memory state may diverge from disk. Reopen the project."
+            )
+        self.document = reloaded
+        self._invalidate_maps()
         self._pending_dirty = DirtySet()
+        self._pending_reconcile = False
         self._flushed_revision = self._index.revision()
 
     def _maybe_checkpoint_manifest_locked(self) -> None:
@@ -638,15 +674,25 @@ class DataCatalogService:
         return _BatchSave(self)
 
     def _ensure_index_fresh(self) -> None:
-        """Compatibility shim: the store IS the canonical source now.
+        """Verify/repair store consistency with the document — guarded.
 
-        Kept for callers that historically forced index readiness; with the
-        SQLite-canonical open path the store is loaded directly and this is
-        a no-op unless the document somehow diverged.
+        Honors the #411 stale-write rule like every other write path: a
+        store that advanced past this session's baseline belongs to another
+        process, and reconciling over it would silently drop that process's
+        commits.
         """
         try:
-            if not self._index.is_fresh(self.document):
-                self._index.reconcile(self.document)
+            if self._index.is_fresh(self.document):
+                return
+            stored = self._index.revision()
+            if stored is not None and stored != self._flushed_revision:
+                raise CatalogStaleWriteError(
+                    "数据目录元数据已被其他实例修改；为避免覆盖他人提交，"
+                    "本次同步已中止。请重新打开工程后重试。"
+                )
+            self._index.reconcile(self.document)
+        except CatalogStaleWriteError:
+            raise
         except Exception:
             pass
 
@@ -1019,7 +1065,7 @@ class DataCatalogService:
             if run is not None and version.id not in run.output_version_ids:
                 run.output_version_ids.append(version.id)
                 run_output_added = True
-            _dirty = DirtySet(assets={asset.id}, versions={version.id})
+            _dirty = DirtySet(assets={asset.id: None}, versions={version.id: None})
             if run is not None:
                 _dirty.mark_runs(run.id)
             try:
@@ -1110,7 +1156,7 @@ class DataCatalogService:
             if run is not None and version.id not in run.output_version_ids:
                 run.output_version_ids.append(version.id)
                 run_output_added = True
-            _dirty = DirtySet(assets={asset.id}, versions={version.id})
+            _dirty = DirtySet(assets={asset.id: None}, versions={version.id: None})
             if run is not None:
                 _dirty.mark_runs(run.id)
             try:
@@ -1207,7 +1253,7 @@ class DataCatalogService:
             self._add_version(version)
             asset.current_version_id = version.id
             try:
-                self._save(DirtySet(assets={asset.id}, versions={version.id}))
+                self._save(DirtySet(assets={asset.id: None}, versions={version.id: None}))
             except Exception:
                 self._rollback(
                     assets=[asset], versions=[version], payload=payload,
@@ -1262,7 +1308,7 @@ class DataCatalogService:
             self._add_asset(asset)
             self._add_version(version)
             try:
-                self._save(DirtySet(assets={asset.id}, versions={version.id}))
+                self._save(DirtySet(assets={asset.id: None}, versions={version.id: None}))
             except Exception:
                 self._rollback(assets=[asset], versions=[version])
                 raise
@@ -1419,7 +1465,7 @@ class DataCatalogService:
             asset.current_version_id = version.id
             if run is not None:
                 self._add_run(run)
-            _dirty = DirtySet(assets={asset.id}, versions={version.id})
+            _dirty = DirtySet(assets={asset.id: None}, versions={version.id: None})
             if run is not None:
                 _dirty.mark_runs(run.id)
             try:
@@ -1454,7 +1500,7 @@ class DataCatalogService:
         )
         self._add_run(run)
         try:
-            self._save(DirtySet(runs={run.id}))
+            self._save(DirtySet(runs={run.id: None}))
         except Exception:
             self._rollback(runs=[run])
             raise
@@ -1493,7 +1539,7 @@ class DataCatalogService:
             if extra_parameters:
                 run.parameters.update(extra_parameters)
             try:
-                self._save(DirtySet(runs={run.id}))
+                self._save(DirtySet(runs={run.id: None}))
             except Exception:
                 # Snapshot-rollback: a failed save must not leave the run
                 # half-updated in memory while the disk keeps the old state
@@ -1600,7 +1646,7 @@ class DataCatalogService:
                 changed = True
             if changed:
                 try:
-                    self._save(DirtySet(models={existing.id}))
+                    self._save(DirtySet(models={existing.id: None}))
                 except Exception:
                     (
                         existing.model_name,
@@ -1625,7 +1671,7 @@ class DataCatalogService:
         )
         self.document.models.append(model)
         try:
-            self._save(DirtySet(models={model.id}))
+            self._save(DirtySet(models={model.id: None}))
         except Exception:
             if model in self.document.models:
                 self.document.models.remove(model)
@@ -1699,7 +1745,7 @@ class DataCatalogService:
         with self._lock:
             self.document.model_versions.append(version)
             try:
-                self._save(DirtySet(model_versions={version.id}))
+                self._save(DirtySet(model_versions={version.id: None}))
             except Exception:
                 if version in self.document.model_versions:
                     self.document.model_versions.remove(version)
@@ -1771,7 +1817,7 @@ class DataCatalogService:
             version.demo_only = False
             try:
                 self._save(
-                    DirtySet(models={model.id}, model_versions={version.id})
+                    DirtySet(models={model.id: None}, model_versions={version.id: None})
                 )
             except Exception:
                 model.status = before_model_status
@@ -1909,7 +1955,7 @@ class DataCatalogService:
                 return asset
             asset.updated_at = _now_iso()
             try:
-                self._save(DirtySet(assets={asset.id}))
+                self._save(DirtySet(assets={asset.id: None}))
             except Exception:
                 asset.metadata = before_metadata
                 asset.updated_at = before_updated
@@ -2056,7 +2102,7 @@ class DataCatalogService:
             self._tombstone_version(version, reason)
             if asset.current_version_id == version.id:
                 asset.current_version_id = self._active_current_candidate(asset, version.id)
-            _dirty = DirtySet(assets={asset.id}, versions={version.id})
+            _dirty = DirtySet(assets={asset.id: None}, versions={version.id: None})
             try:
                 self._save(_dirty)
             except Exception:
@@ -2064,7 +2110,7 @@ class DataCatalogService:
                 raise
             if self._move_payload_to_trash(version):
                 try:
-                    self._save(DirtySet(assets={asset.id}, versions={version.id}))
+                    self._save(DirtySet(assets={asset.id: None}, versions={version.id: None}))
                 except Exception:
                     self._rollback_trash_move(version)
                     raise
@@ -2089,7 +2135,7 @@ class DataCatalogService:
             asset.trashed_at = _now_iso()
             asset.current_version_id = None
             _dirty = DirtySet(
-                assets={asset.id}, versions={v.id for v in versions}
+                assets={asset.id: None}, versions=dict.fromkeys(v.id for v in versions)
             )
             try:
                 self._save(_dirty)
@@ -2103,7 +2149,7 @@ class DataCatalogService:
             if moved:
                 try:
                     self._save(
-                        DirtySet(assets={asset.id}, versions={v.id for v in moved})
+                        DirtySet(assets={asset.id: None}, versions=dict.fromkeys(v.id for v in moved))
                     )
                 except Exception:
                     for version in moved:
@@ -2140,7 +2186,7 @@ class DataCatalogService:
             ):
                 asset.current_version_id = version.id
             try:
-                self._save(DirtySet(assets={asset.id}, versions={version.id}))
+                self._save(DirtySet(assets={asset.id: None}, versions={version.id: None}))
             except Exception:
                 self._rollback_untombstone(
                     version, asset, previous_current, reason=reason
@@ -2173,8 +2219,8 @@ class DataCatalogService:
             try:
                 self._save(
                     DirtySet(
-                        assets={asset.id},
-                        versions={v.id for v, _ in restore_targets},
+                        assets={asset.id: None},
+                        versions=dict.fromkeys(v.id for v, _ in restore_targets),
                     )
                 )
             except Exception:
@@ -2293,13 +2339,13 @@ class DataCatalogService:
             try:
                 self._save(
                     DirtySet(
-                        versions={v.id for v in trashed_versions},
-                        assets=(
-                            {a.id for a in trashed_assets}
-                            | {a.id for a in zombie_assets}
+                        versions=dict.fromkeys(v.id for v in trashed_versions),
+                        assets=dict.fromkeys(
+                            [a.id for a in trashed_assets]
+                            + [a.id for a in zombie_assets]
                         ),
-                        version_tags=set(removed_version_tags),
-                        asset_tags=set(removed_asset_tags),
+                        version_tags=dict.fromkeys(removed_version_tags),
+                        asset_tags=dict.fromkeys(removed_asset_tags),
                     )
                 )
             except Exception:
@@ -2499,8 +2545,8 @@ class DataCatalogService:
             result: list[Tag] = []
             changed = False
             created_tags: list[Tag] = []
-            touched_assets: set[str] = set()
-            touched_versions: set[str] = set()
+            touched_assets: dict[str, None] = {}
+            touched_versions: dict[str, None] = {}
             try:
                 for name in names:
                     if not str(name or "").strip():
@@ -2520,13 +2566,13 @@ class DataCatalogService:
                         if tag.id not in ids:
                             ids.append(tag.id)
                             changed = True
-                            touched_assets.add(asset_id)
+                            touched_assets[asset_id] = None
                     if version_id is not None:
                         ids = self.document.version_tags.setdefault(version_id, [])
                         if tag.id not in ids:
                             ids.append(tag.id)
                             changed = True
-                            touched_versions.add(version_id)
+                            touched_versions[version_id] = None
                     result.append(tag)
                 if changed:
                     self._save(

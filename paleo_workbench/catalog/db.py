@@ -325,7 +325,7 @@ _RUN_UPSERT_SQL = (
 
 def _tag_row(tag) -> tuple:
     return (
-        tag.name,
+        normalize_tag_name(tag.name),
         tag.display_name,
         json.dumps(tag.metadata, ensure_ascii=False),
     )
@@ -401,13 +401,20 @@ _MODEL_VERSION_UPSERT_SQL = (
 )
 
 
-def _symmetric_diff(db_rows: dict[str, tuple], doc_rows: dict[str, tuple]) -> set[str]:
-    """Ids whose row differs between the store and the document."""
-    changed: set[str] = set()
+def _symmetric_diff(
+    db_rows: dict[str, tuple], doc_rows: dict[str, tuple]
+) -> dict[str, None]:
+    """Ids whose row differs between the store and the document.
+
+    Document-ordered (doc_rows is built in document order): re-inserted rows
+    keep the rowid == document-order invariant ``_ordered`` relies on.
+    """
+    changed: dict[str, None] = {}
     for entity_id, row in doc_rows.items():
         if db_rows.get(entity_id) != row:
-            changed.add(entity_id)
-    changed.update(set(db_rows) - set(doc_rows))
+            changed[entity_id] = None
+    for entity_id in set(db_rows) - set(doc_rows):
+        changed[entity_id] = None
     return changed
 
 
@@ -866,6 +873,35 @@ class CatalogIndex:
         except ValueError:
             return None
 
+    def store_health(self) -> str:
+        """Classify the store: "absent" | "legacy" | "canonical" | "corrupt"
+        | "error".
+
+        "corrupt" is DETERMINISTIC damage (not a database / malformed disk
+        image): the file provably holds no readable committed data, so
+        rebuilding from the manifest checkpoint loses nothing (the bytes are
+        preserved aside for forensics). "error" means unreadable for
+        TRANSIENT reasons (busy/locked) — overwriting in that state is the
+        silent last-writer-wins #1027/#411 exist to prevent, so callers must
+        refuse and surface.
+        """
+        if not self.db_path.is_file():
+            return "absent"
+        try:
+            conn = self._connect()
+            conn.execute("SELECT count(*) FROM assets").fetchone()
+            conn.execute("SELECT count(*) FROM versions").fetchone()
+            version = self.store_version()
+        except sqlite3.OperationalError:
+            self._drop_current_connection()
+            return "error"  # busy/locked: transient, refuse to overwrite
+        except (sqlite3.DatabaseError, OSError, ValueError, TypeError):
+            self._drop_current_connection()
+            return "corrupt"  # not-a-database / malformed: deterministic
+        if version == STORE_SCHEMA_VERSION:
+            return "canonical"
+        return "legacy"
+
     def write_all(self, document: CatalogDocument) -> None:
         """Transactionally (re)initialize the store from *document*.
 
@@ -943,7 +979,7 @@ class CatalogIndex:
                     trashed_at=row["trashed_at"],
                     parent_version_ids=json.loads(row["parent_ids"]),
                 )
-                for row in conn.execute("SELECT * FROM versions")
+                for row in conn.execute("SELECT * FROM versions ORDER BY rowid")
             ]
             inputs_by_run: dict[str, list[str]] = {}
             outputs_by_run: dict[str, list[str]] = {}
@@ -963,7 +999,7 @@ class CatalogIndex:
                     else None,
                     created_at=row["created_at"],
                 )
-                for row in conn.execute("SELECT * FROM runs")
+                for row in conn.execute("SELECT * FROM runs ORDER BY rowid")
             ]
             for run in runs:
                 run.input_version_ids = inputs_by_run.get(run.id, [])
@@ -975,7 +1011,7 @@ class CatalogIndex:
                     display_name=row["display_name"],
                     metadata=json.loads(row["metadata"]),
                 )
-                for row in conn.execute("SELECT * FROM tags")
+                for row in conn.execute("SELECT * FROM tags ORDER BY rowid")
             ]
             asset_tags: dict[str, list[str]] = {}
             for row in conn.execute("SELECT asset_id, tag_id FROM asset_tags"):
@@ -996,7 +1032,7 @@ class CatalogIndex:
                     created_at=row["created_at"],
                     provenance=json.loads(row["provenance"]),
                 )
-                for row in conn.execute("SELECT * FROM models")
+                for row in conn.execute("SELECT * FROM models ORDER BY rowid")
             ]
             model_versions = [
                 ModelVersion(
@@ -1016,7 +1052,7 @@ class CatalogIndex:
                     created_at=row["created_at"],
                     provenance=json.loads(row["provenance"]),
                 )
-                for row in conn.execute("SELECT * FROM model_versions")
+                for row in conn.execute("SELECT * FROM model_versions ORDER BY rowid")
             ]
             revision = self.revision()
             document = CatalogDocument(
@@ -1358,22 +1394,22 @@ class CatalogIndex:
 
         db_assets = rows("assets")
         doc_assets = {a.id: _asset_row(a) for a in document.assets}
-        dirty.assets = dict.fromkeys(_symmetric_diff(db_assets, doc_assets))
+        dirty.assets = _symmetric_diff(db_assets, doc_assets)
         db_versions = rows("versions")
         doc_versions = {v.id: _version_row(v) for v in document.versions}
-        dirty.versions = dict.fromkeys(_symmetric_diff(db_versions, doc_versions))
+        dirty.versions = _symmetric_diff(db_versions, doc_versions)
         db_runs = rows("runs")
         doc_runs = {r.id: _run_row(r) for r in document.runs}
-        dirty.runs = dict.fromkeys(_symmetric_diff(db_runs, doc_runs))
+        dirty.runs = _symmetric_diff(db_runs, doc_runs)
         db_tags = rows("tags")
         doc_tags = {t.id: _tag_row(t) for t in document.tags}
-        dirty.tags = dict.fromkeys(_symmetric_diff(db_tags, doc_tags))
+        dirty.tags = _symmetric_diff(db_tags, doc_tags)
         db_models = rows("models")
         doc_models = {m.id: _model_row(m) for m in document.models}
-        dirty.models = dict.fromkeys(_symmetric_diff(db_models, doc_models))
+        dirty.models = _symmetric_diff(db_models, doc_models)
         db_mvers = rows("model_versions")
         doc_mvers = {mv.id: _model_version_row(mv) for mv in document.model_versions}
-        dirty.model_versions = dict.fromkeys(_symmetric_diff(db_mvers, doc_mvers))
+        dirty.model_versions = _symmetric_diff(db_mvers, doc_mvers)
 
         db_asset_tags = {
             row[0]: row[1]
@@ -1401,6 +1437,10 @@ class CatalogIndex:
                 dirty.mark_version_tags(version_id)
 
         # Run io drift: one grouped join read, compared per run.
+        # Known limit: the lineage table itself is not diffed — edges are
+        # re-derived from parent_ids/run-io, so externally-injected lineage
+        # rows that neither source covers are not repaired here
+        # (apply_changes maintains the table for all service flows).
         db_run_io: dict[str, set[tuple[str, str]]] = {}
         for run_id, i, o in conn.execute(
             "SELECT ri.run_id, ri.version_id, ro.version_id FROM run_inputs ri"
@@ -1451,8 +1491,12 @@ class CatalogIndex:
             )
             # Tag name is stored normalized so lookups are case/whitespace-safe;
             # the display form lives in display_name.
+            # INSERT OR IGNORE (not the upsert): a legacy document can hold
+            # two tags colliding under the current normalizer (pre-#884);
+            # migration must tolerate them instead of bricking project open.
             conn.executemany(
-                _TAG_UPSERT_SQL,
+                "INSERT OR IGNORE INTO tags (id, name, display_name, metadata)"
+                " VALUES (?,?,?,?)",
                 [
                     (
                         tag.id,
