@@ -309,3 +309,66 @@ def test_well_symbol_inner_dot_stays_proportional_in_mm():
             f"marker_size={marker_px}: dot {dot:.3f}mm vs ring {ring:.3f}mm "
             f"— symbol collapsed to a solid disc"
         )
+
+
+# ---------------------------------------------------------------------------
+# DPI contract (Issue #1103): one authoritative home for device-DPI scaling
+# ---------------------------------------------------------------------------
+
+
+def test_to_target_is_dpi_blind_by_contract():
+    """Logical-unit conversion must never fold device DPI in.
+
+    ``to_target`` converts 96-DPI authoring pixels into the context's
+    *logical* units. A context at 600 DPI describes the same physical page
+    as one at 96 DPI — only the device raster differs — so every converted
+    quantity (strokes, markers, fonts, dashes) must be byte-identical.
+    """
+    from paleo_workbench.mapping.map_styles import LinePattern
+
+    pattern = LinePattern.DASH
+    for units in (RenderUnit.MM, RenderUnit.PT, RenderUnit.PX):
+        low = RenderContext(extent=(0, 0, 1, 1), width=150, height=120, dpi=96, units=units)
+        high = RenderContext(extent=(0, 0, 1, 1), width=150, height=120, dpi=600, units=units)
+        assert low.to_target(1.0) == high.to_target(1.0), units
+        assert low.dash_array(pattern, 2.0) != ""  # DASH must yield dashes
+        assert low.dash_array(pattern, 2.0) == high.dash_array(pattern, 2.0), units
+
+
+def test_svg_output_is_dpi_independent_logical_units():
+    """Renderer SVG output must not change with the context's device DPI.
+
+    Pins the composer/vector regime: if anyone later folds ``dpi`` into
+    ``to_target``, composer exports silently change physical size and this
+    goes red before any print deliverable does.
+    """
+    from paleo_workbench.mapping.renderers import DEFAULT_RENDERER_REGISTRY
+
+    layer = _layer(stroke_width=2.0)
+    renderer = DEFAULT_RENDERER_REGISTRY.resolve(layer)
+    outputs = []
+    for dpi in (96.0, 150.0, 300.0, 600.0):
+        outputs.append(
+            renderer.render_svg(
+                layer,
+                RenderContext(
+                    extent=(0, 0, 1, 1), width=150, height=120, dpi=dpi, units=RenderUnit.MM
+                ),
+            )
+        )
+    assert all(out == outputs[0] for out in outputs)
+
+
+def test_device_px_per_logical_px_is_the_named_dpi_fold():
+    """The painter regime scales by exactly dpi/96 — through ONE named API.
+
+    ``RenderContext.device_px_per_logical_px`` is the only sanctioned way
+    device DPI enters any conversion; the QPainter export path uses it, the
+    SVG/composer paths never do.
+    """
+    assert RenderContext.device_px_per_logical_px(192.0) == 2.0
+    assert RenderContext.device_px_per_logical_px(300.0) == pytest.approx(300.0 / 96.0)
+    # 96 is the authoring constant (LOGICAL_BASE_DPI), not an environment default.
+    from paleo_workbench.mapping.renderers import LOGICAL_BASE_DPI
+    assert LOGICAL_BASE_DPI == 96.0
+    assert RenderContext.device_px_per_logical_px(LOGICAL_BASE_DPI) == 1.0
