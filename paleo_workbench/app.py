@@ -255,7 +255,10 @@ class PaleoWorkbenchWindow(QWidget):
         stylesheet, so the compact rebuild must be re-applied on the shell too
         or the comfortable padding silently stays for the whole main window.
         """
-        qss = tokens.build_qss(density=density)
+        # Route through the ThemeManager so density and the ACTIVE THEME
+        # compose — a direct tokens.build_qss(density=...) would silently
+        # reset a dark/high-contrast session back to light (#1047 review).
+        qss = self.app_shell.theme_manager.get_qss(density=density)
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(qss)

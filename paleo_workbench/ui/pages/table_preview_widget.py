@@ -24,12 +24,28 @@ _MONO = QFont("Cascadia Code", 9)
 _MONO_BOLD = QFont("Cascadia Code", 9)
 _MONO_BOLD.setBold(True)
 
-_DEPTH_FOREGROUND = QBrush(QColor(tokens.PRIMARY))
-_DEPTH_BACKGROUND = QBrush(QColor(tokens.BG_SELECTION))
-_CURVE_TAG_FOREGROUND = QBrush(QColor(tokens.TEAL))
-_CURVE_TAG_BACKGROUND = QBrush(QColor(tokens.BG_SEARCH))
-_UNIT_FOREGROUND = QBrush(QColor(tokens.TEXT_SECONDARY))
-_NAN_FOREGROUND = QBrush(QColor(tokens.PRIMARY_DISABLED))
+# Highlight brushes resolve from the ACTIVE theme palette (#1047): fixed
+# light-token brushes left dark themes with unreadable tints.
+_THEMED_BRUSHES: dict[str, dict[str, QBrush]] = {}
+
+
+def _themed_brushes() -> dict[str, QBrush]:
+    from paleo_workbench.ui.theme import theme_manager
+
+    theme = theme_manager.current_theme.value
+    cached = _THEMED_BRUSHES.get(theme)
+    if cached is None:
+        palette = tokens.palette_for(theme)
+        cached = {
+            "depth_fg": QBrush(QColor(palette["PRIMARY"])),
+            "depth_bg": QBrush(QColor(palette["BG_SELECTION"])),
+            "tag_fg": QBrush(QColor(palette["TEAL"])),
+            "tag_bg": QBrush(QColor(palette["BG_SEARCH"])),
+            "unit_fg": QBrush(QColor(palette["TEXT_SECONDARY"])),
+            "nan_fg": QBrush(QColor(palette["PRIMARY_DISABLED"])),
+        }
+        _THEMED_BRUSHES[theme] = cached
+    return cached
 
 _ALIGN_RIGHT = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 _ALIGN_CENTER = Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
@@ -130,14 +146,16 @@ class TablePreviewModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.DisplayRole:
             return val_str
 
+        brushes = _themed_brushes()
+
         # 1. Depth column (DEPT / DEPTH / 深度)
         if column == self._depth_column:
             if role == Qt.ItemDataRole.FontRole:
                 return _MONO_BOLD
             if role == Qt.ItemDataRole.ForegroundRole:
-                return _DEPTH_FOREGROUND
+                return brushes["depth_fg"]
             if role == Qt.ItemDataRole.BackgroundRole:
-                return _DEPTH_BACKGROUND
+                return brushes["depth_bg"]
             if role == Qt.ItemDataRole.TextAlignmentRole:
                 return int(_ALIGN_RIGHT)
 
@@ -146,9 +164,9 @@ class TablePreviewModel(QAbstractTableModel):
             if role == Qt.ItemDataRole.FontRole:
                 return _MONO_BOLD
             if role == Qt.ItemDataRole.ForegroundRole:
-                return _CURVE_TAG_FOREGROUND
+                return brushes["tag_fg"]
             if role == Qt.ItemDataRole.BackgroundRole:
-                return _CURVE_TAG_BACKGROUND
+                return brushes["tag_bg"]
             if role == Qt.ItemDataRole.TextAlignmentRole:
                 return int(_ALIGN_CENTER)
 
@@ -157,7 +175,7 @@ class TablePreviewModel(QAbstractTableModel):
             if role == Qt.ItemDataRole.FontRole:
                 return _MONO
             if role == Qt.ItemDataRole.ForegroundRole:
-                return _UNIT_FOREGROUND
+                return brushes["unit_fg"]
             if role == Qt.ItemDataRole.TextAlignmentRole:
                 return int(_ALIGN_CENTER)
 
@@ -168,7 +186,7 @@ class TablePreviewModel(QAbstractTableModel):
             if role == Qt.ItemDataRole.TextAlignmentRole:
                 return int(_ALIGN_RIGHT)
             if role == Qt.ItemDataRole.ForegroundRole and val_str == "NaN":
-                return _NAN_FOREGROUND
+                return brushes["nan_fg"]
 
         return None
 
@@ -210,18 +228,10 @@ class TablePreviewWidget(QTableView):
         self.truncated = False
         self.truncation_message = ""
 
-        # The global QSS (tokens.build_qss) already styles QTableView /
-        # QTableWidget (background, border, radius, gridline, selection) and
-        # QHeaderView::section. We only add the alternating-row tint here,
-        # since setAlternatingRowColors(True) is enabled and the global sheet
-        # has no alternate-background-color rule.
-        self.setStyleSheet(
-            f"""
-            QTableView {{
-                alternate-background-color: {tokens.BG_SEARCH};
-            }}
-            """
-        )
+        # Alternating-row tint comes from the global themed sheet
+        # (tokens.build_qss provides alternate-background-color for
+        # QTableView across every palette — a widget-level light tint here
+        # broke dark/high-contrast themes, #1047 review).
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.horizontalHeader().setStretchLastSection(True)
         self.verticalHeader().setDefaultSectionSize(28)

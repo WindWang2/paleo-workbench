@@ -107,11 +107,7 @@ class NavigationTree(QTreeWidget):
         self.setObjectName("NavigationTree")
         self.setHeaderHidden(True)
         self.setRootIsDecorated(True)
-        self.setStyleSheet(
-            f"QTreeWidget#NavigationTree {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
+        self._apply_themed_sheet()
         self.setMinimumWidth(200)
         self.tag_parent_item: QTreeWidgetItem | None = None
         # WorkArea domain state (None until a project with entities arrives).
@@ -134,6 +130,25 @@ class NavigationTree(QTreeWidget):
         self.currentItemChanged.connect(self._on_current_changed)
         self.itemClicked.connect(self._on_item_clicked)
         self._build_tree()
+        # follow theme switches instead of baking a light-only sheet (#1047)
+        from paleo_workbench.ui.theme import theme_manager
+
+        self._theme_conn = theme_manager.theme_changed.connect(
+            self._on_theme_changed
+        )
+
+    def _apply_themed_sheet(self) -> None:
+        from paleo_workbench.ui.theme import theme_manager
+
+        palette = tokens.palette_for(theme_manager.current_theme.value)
+        self.setStyleSheet(
+            f"QTreeWidget#NavigationTree {{ background: {palette['BG_SIDEBAR']};"
+            f" border: 1px solid {palette['BORDER']};"
+            f" border-radius: {tokens.RADIUS_CARD}px; }}"
+        )
+
+    def _on_theme_changed(self, _theme: str) -> None:
+        self._apply_themed_sheet()
 
     def _build_tree(self) -> None:
         self.clear()
@@ -352,6 +367,17 @@ class NavigationTree(QTreeWidget):
         # page on demand, so every entity is reachable without ever
         # allocating the full population.
         self._entity_pages = {}
+        # Rebuild from a clean slate: repeated set_project calls (every
+        # domain refresh) must not append onto the previous project's
+        # children (review BLOCKER — duplicates + stale wells).
+        for group in (
+            self._geo_group_item,
+            self._well_group_item,
+            self._reference_well_group_item,
+            self._survey_group_item,
+        ):
+            if group is not None:
+                group.takeChildren()
         if self._geo_group_item is not None:
             entities = sorted(
                 list(getattr(project, "geological_entities", None) or []),
@@ -359,6 +385,7 @@ class NavigationTree(QTreeWidget):
             )
             self._entity_pages["geological_entity"] = {
                 "group": self._geo_group_item,
+                "key": "geological_entity",
                 "entities": entities,
                 "rendered": 0,
                 "icon": "⛰",
@@ -366,6 +393,7 @@ class NavigationTree(QTreeWidget):
                 "well_links": {},
                 "unresolved": set(),
                 "invalid_coord": set(),
+                "selected_key": None,
             }
             self._append_entity_page("geological_entity")
             if not entities:
@@ -390,6 +418,7 @@ class NavigationTree(QTreeWidget):
             ordered = sorted(entities, key=lambda item: (item.name, item.id))
             self._entity_pages[entity_type] = {
                 "group": group,
+                "key": entity_type,
                 "entities": ordered,
                 "rendered": 0,
                 "icon": "📍" if entity_type == "reference_well" else _ENTITY_GROUPS[entity_type][1],
@@ -400,6 +429,18 @@ class NavigationTree(QTreeWidget):
                 "selected_key": selected_key,
             }
             self._append_entity_page(entity_type)
+            # Restore the selection deterministically NOW (pages materialize
+            # up to the selected entity) instead of leaving a deferred
+            # re-select that would refilter the DataPage mid-browsing when
+            # the user pages to it later (review MAJOR).
+            if selected_key is not None:
+                page_state = self._entity_pages[entity_type]
+                already = any(
+                    e.id == selected_key
+                    for e in page_state["entities"][: page_state["rendered"]]
+                )
+                if not already:
+                    self._materialize_entity_page_for(entity_type, selected_key)
             if entity_type == "well":
                 empty_label = "暂无测区井，导入井位文件后自动识别"
             elif entity_type == "reference_well":

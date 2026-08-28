@@ -76,13 +76,21 @@ def test_app_shell_styles_through_the_theme_manager(qtbot):
     assert theme_manager.current_theme == ThemeMode.DARK
 
 
-def test_page_switch_keeps_sidebar_visible(qtbot):
+def test_page_switch_keeps_sidebar_visible_and_updates_context(qtbot):
+    from paleo_workbench import tokens as ui_tokens
+
     shell = AppShell()
     qtbot.addWidget(shell)
 
     shell.sidebar.setVisible(True)
     shell._switch_page(1)  # data page
-    assert shell.sidebar.isVisible() or not shell.sidebar.isHidden()
+    assert not shell.sidebar.isHidden()
+    # the REAL context bookkeeping continues across switches (the old suite
+    # deleted these assertions — review 4.4)
+    assert shell.sidebar.context_label.text() == ui_tokens.PAGE_NAMES[1]
+    shell._switch_page(8)  # mapping page
+    assert not shell.sidebar.isHidden()
+    assert shell.sidebar.context_label.text() == ui_tokens.PAGE_NAMES[8]
 
 
 def test_page_switch_respects_user_collapse_state(qtbot):
@@ -102,9 +110,12 @@ def test_page_switch_respects_user_collapse_state(qtbot):
 
 
 def test_sidebar_keeps_context_updates_across_switches(qtbot):
+    from paleo_workbench import tokens as ui_tokens
+
     shell = AppShell()
     qtbot.addWidget(shell)
     shell._switch_page(1)
     shell._switch_page(2)
-    # context bookkeeping continues even though the widget stays visible
-    assert shell.sidebar is not None
+    # context bookkeeping continues while the widget stays visible
+    assert not shell.sidebar.isHidden()
+    assert shell.sidebar.context_label.text() == ui_tokens.PAGE_NAMES[2]

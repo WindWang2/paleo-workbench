@@ -6,6 +6,16 @@ from paleo_workbench.ui.dock_manager import WorkspacePreset, dock_manager
 from paleo_workbench.ui.theme import ThemeMode, theme_manager
 
 
+@pytest.fixture(autouse=True)
+def _restore_theme_singleton():
+    """The module singleton now styles every AppShell — never leak a test
+    theme into later suites (review 4.7)."""
+    from paleo_workbench.ui.theme import ThemeMode
+
+    yield
+    theme_manager.set_theme(ThemeMode.LIGHT)
+
+
 def test_theme_manager_switching():
     # #1047: every theme renders through the single token sheet; the manager
     # owns only the switching state (no parallel mini-QSS anymore).

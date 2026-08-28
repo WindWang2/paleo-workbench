@@ -129,3 +129,73 @@ def test_100k_well_project_builds_fast(qtbot):
     group = _group_by_label(tree, "🛢 井")
     assert group.childCount() <= 501
     assert tree.entity_population("well") == 100_000
+
+
+# ---------------------------------------------------------------------------
+# Review round-2 regression coverage (rebuild semantics)
+# ---------------------------------------------------------------------------
+
+
+def test_repeated_set_project_does_not_duplicate_children(qtbot):
+    wells = [_Well(f"well-{i:04d}", f"井-{i:04d}") for i in range(30)]
+    tree = NavigationTree()
+    qtbot.addWidget(tree)
+
+    tree.set_project(_Project(wells))
+    tree.set_project(_Project(wells))
+    tree.set_project(_Project(wells))
+
+    group = _group_by_label(tree, "🛢 井")
+    assert group.childCount() == 30, group.childCount()
+    assert tree.entity_population("well") == 30
+
+
+def test_set_project_with_new_population_replaces_children(qtbot):
+    tree = NavigationTree()
+    qtbot.addWidget(tree)
+    tree.set_project(_Project([_Well(f"old-{i}", f"旧井{i}") for i in range(10)]))
+    tree.set_project(_Project([_Well("new-1", "新井1")]))
+
+    group = _group_by_label(tree, "🛢 井")
+    texts = [group.child(i).text(0) for i in range(group.childCount())]
+    assert len(texts) == 1
+    assert "新井1" in texts[0]
+    assert not any("旧井" in t for t in texts)
+
+
+def test_set_project_none_clears_wells(qtbot):
+    tree = NavigationTree()
+    qtbot.addWidget(tree)
+    tree.set_project(_Project([_Well(f"w-{i}", f"井{i}") for i in range(5)]))
+
+    tree.set_project(_Project([]))
+
+    group = _group_by_label(tree, "🛢 井")
+    texts = [group.child(i).text(0) for i in range(group.childCount())]
+    assert tree.entity_population("well") == 0
+    assert any("暂无" in t for t in texts), texts
+
+
+def test_selection_beyond_page_one_is_restored_without_later_refilter(qtbot):
+    """The selected well beyond page 1 must be restored during the rebuild —
+    and paging further must NOT re-emit a filter for the stale selection."""
+    wells = [_Well(f"well-{i:05d}", f"井-{i:05d}") for i in range(1_500)]
+    tree = NavigationTree()
+    qtbot.addWidget(tree)
+    tree.set_project(_Project(wells))
+    tree.highlight_well("well-01499")  # selection deep in page 3
+    assert tree.currentItem() is not None
+
+    filter_events: list[object] = []
+    tree.filter_query_changed.connect(lambda q: filter_events.append(q))
+    # a domain refresh rebuilds with the selection preserved
+    tree.set_project(_Project(wells))
+    current = tree.currentItem()
+    assert current is not None
+
+    # paging further must not spontaneously re-select/refilter
+    filter_events.clear()
+    while tree._activate_next_entity_page("well"):
+        pass
+    stray = [q for q in filter_events if q.node_type == "entity" and q.node_value == "well-01499"]
+    assert not stray, "paging re-fired the stale selection filter"

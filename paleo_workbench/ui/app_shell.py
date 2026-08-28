@@ -208,7 +208,14 @@ class AppShell(QWidget):
         self.theme_manager.set_theme(mode)
 
     def _on_theme_changed(self, _theme: str) -> None:
-        self.setStyleSheet(self.theme_manager.get_qss())
+        qss = self.theme_manager.get_qss()
+        self.setStyleSheet(qss)
+        # top-level windows outside this shell (dialogs) follow the theme too
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(qss)
 
     def _switch_page(self, index: int) -> None:
         if not 0 <= index < self.page_stack.count():
