@@ -18,7 +18,11 @@ jobs:
     # green on identical code). They are diagnostics, not product gates: a
     # crashing diagnostic must not block every merge until #951 is root-caused
     # (that would freeze the repo). Results stay visible on each run.
-    continue-on-error: ${{ matrix.python-version == '3.13' || matrix.os == 'windows-latest' }}
+    # The windows-latest row was continue-on-error during its convergence
+    # (#1109/#1111) and is REQUIRED since 2026-08-29: the full suite is
+    # green there (native extensions built under MSVC, platform divergences
+    # fixed) and the product targets Windows desktops.
+    continue-on-error: ${{ matrix.python-version == '3.13' }}
     # pyproject (and the geoviz/native subpackages) pin requires-python to
     # >=3.12,<3.13 by policy (cp312/cp313 .so shadowing, #435/#851), but the
     # 3.13 legs below are deliberate #951 diagnostics: bypass the metadata
