@@ -66,15 +66,35 @@ class RenderUnit(str, Enum):
     PT = "pt"  # PostScript points, 1/72 inch (PDF text)
 
 
+# The DPI all style quantities are authored against (the logical baseline).
+LOGICAL_BASE_DPI = 96.0
+
 # Millimetres per logical pixel at the 96 DPI authoring baseline.
-_MM_PER_PX = 25.4 / 96.0
+_MM_PER_PX = 25.4 / LOGICAL_BASE_DPI
 # Points per logical pixel at the 96 DPI authoring baseline.
-_PT_PER_PX = 72.0 / 96.0
+_PT_PER_PX = 72.0 / LOGICAL_BASE_DPI
 
 
 @dataclass(frozen=True, slots=True)
 class RenderContext:
-    """Viewport context for coordinate transformations during rendering."""
+    """Viewport context for coordinate transformations during rendering.
+
+    **DPI contract (#1103 — single source of truth).** Style quantities are
+    authored as logical pixels at :data:`LOGICAL_BASE_DPI` (96). Two
+    conversion regimes exist and they must never mix:
+
+    - **Logical units (SVG/composer/PDF-text paths):** conversions between
+      logical spaces are DPI-blind. :meth:`to_target` turns logical px into
+      the context's px/mm/pt via fixed physical constants; ``self.dpi`` is
+      deliberately unread there. A 600-DPI device frames the *same*
+      physical page as a 96-DPI one — only the raster differs.
+    - **Device pixels (QPainter raster paths):** device DPI enters through
+      exactly one named fold, :meth:`device_px_per_logical_px` (``dpi/96``),
+      which scales pen widths, marker sizes and font pixel sizes.
+
+    A renderer that wants device pixels must call the fold explicitly; a
+    renderer that emits SVG/PDF logical units must not call it at all.
+    """
     extent: tuple[float, float, float, float]
     width: float
     height: float
@@ -95,11 +115,24 @@ class RenderContext:
         dy = ymax - ymin
         return self.height / dy if dy > 0 else 1.0
 
+    @staticmethod
+    def device_px_per_logical_px(dpi: float) -> float:
+        """Device pixels per logical pixel for a device running at *dpi*.
+
+        The one sanctioned way device DPI enters any conversion (the
+        QPainter raster regime). Logical-unit paths must not call this.
+        """
+        return float(dpi) / LOGICAL_BASE_DPI
+
     def to_target(self, px: float) -> float:
         """Convert a 96-DPI logical-pixel length into this context's units.
 
         ``1.0 px`` stays ``1.0`` on the canvas, becomes ``0.2646 mm`` in a
         millimetre composer frame, and ``0.75 pt`` in PDF text space.
+
+        DPI-blind by contract (#1103): this converts between *logical*
+        spaces and never reads ``self.dpi`` — device scaling belongs to
+        :meth:`device_px_per_logical_px` alone.
         """
         if self.units is RenderUnit.MM:
             return px * _MM_PER_PX

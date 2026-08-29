@@ -44,7 +44,6 @@ __all__ = [
 
 
 _BACKGROUND = QColor("#181c22")
-_BASE_DPI = 96.0
 # Beyond this many visible points, categorical grouping falls back to the
 # single-symbol fill so the Python grouping loop cannot dominate a frame.
 _CATEGORY_POINT_CAP = 50_000
@@ -813,7 +812,15 @@ class FallbackMapRenderBackend(MapRenderBackend):
         if span_x <= 0.0 or span_y <= 0.0:
             return
         scale_denominator = self._scale_denominator(width)
-        dpi_scale = max(0.05, float(dpi) / _BASE_DPI)
+        # DPI contract (#1103): the painter regime folds device DPI in
+        # through the one named conversion on RenderContext. Imported here,
+        # not at module level: renderers imports layers, and layers'
+        # snapshot models live in this module — a module-level import would
+        # close a cycle whose ImportError layers silently swallows into
+        # ``MapLayerSnapshot = Any``.
+        from paleo_workbench.mapping.renderers import RenderContext
+
+        dpi_scale = max(0.05, RenderContext.device_px_per_logical_px(dpi))
         self._diagnostics["features_total"] = 0
         self._diagnostics["features_drawn"] = 0
         self._diagnostics["points_drawn"] = 0
