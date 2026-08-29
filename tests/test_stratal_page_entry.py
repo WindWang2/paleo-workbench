@@ -104,6 +104,15 @@ def test_stratal_generate_demo_produces_visible_slices(qtbot):
     ) as blocker:
         pass
     assert blocker.args is not None and blocker.args[0]["demo"] is True
+    # [DEBUG-3d-soak] temporary: identify why planes never register
+    result = blocker.args[0]
+    print(
+        f"[DEBUG-3d-soak] surfaces={len(result.get('surfaces') or [])} "
+        f"shapes={[getattr(s, 'shape', None) for s in (result.get('surfaces') or [])[:3]]} "
+        f"volume={type(result.get('volume')).__name__} "
+        f"loaded={getattr(renderer, '_loaded', None)} "
+        f"vol_cpu={None if getattr(renderer, '_volume_data_cpu', None) is None else renderer._volume_data_cpu.shape}"
+    )
 
     snap = renderer.get_stratal_slices()
     assert len(snap) == 3  # three proportional slices
