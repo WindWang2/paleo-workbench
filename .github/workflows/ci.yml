@@ -178,7 +178,6 @@ jobs:
           python -c "import layer_model_core; assert hasattr(layer_model_core, 'LayerRegistry'), 'layer_model_core.LayerRegistry missing in CI'"
 
       - name: Build seismic_3d_core (required)
-        if: runner.os == 'Linux'
         # Round-2 review (K-F1): these two extensions previously had NO CI
         # build step — the committed root binaries shadowed source on 3.13 and
         # skipped every native test on 3.12, so source-only changes shipped
