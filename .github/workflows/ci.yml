@@ -253,10 +253,18 @@ jobs:
           QT_OPENGL: software
           PYTHONFAULTHANDLER: "1"
         run: |
+          # --ignore=tests/perf: the perf budgets (catalog scale, tag-update,
+          # interpolation) are calibrated on Linux runner fsync throughput.
+          # Windows + Defender makes every place_managed_file fsync ~an order
+          # slower, so the budgets measure the filesystem, not the code — and
+          # the per-test 45s timeout killed the suite at 3%, masking every
+          # real Windows failure behind it. The perf family stays gated on
+          # the Linux leg (and nightly slow-tests.yml).
           python -m pytest -v --tb=line `
             --timeout=45 `
             --timeout-method=thread `
             -m "not slow and not welllog_binding" `
+            --ignore=tests/perf `
             --durations=25
 
       - name: Assert the slow family has not silently shrunk
