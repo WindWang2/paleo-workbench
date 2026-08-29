@@ -14,7 +14,7 @@ from paleo_workbench.resources.preview_parsers.models import (
 )
 
 if TYPE_CHECKING:
-    from paleo_workbench.ui.pages.preview_settings import PreviewSettings
+    from paleo_workbench.resources.preview_settings import PreviewSettings
 
 
 # Backward-compatible alias: several modules import ``safe_stat`` from here.

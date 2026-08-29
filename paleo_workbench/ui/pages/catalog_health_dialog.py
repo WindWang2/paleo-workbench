@@ -8,6 +8,8 @@ an audit — findings are reported for the user to act on.
 """
 from __future__ import annotations
 
+import threading
+
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
@@ -53,6 +55,7 @@ class CatalogHealthDialog(QDialog):
         self.resize(760, 520)
         self._service_provider = service_provider
         self._job = OwnedWorkerJob(self)
+        self._cancel_event: threading.Event | None = None
 
         layout = QVBoxLayout(self)
         layout.setSpacing(tokens.SPACE_2)
@@ -103,11 +106,17 @@ class CatalogHealthDialog(QDialog):
             return
         if getattr(self._job, "is_running", False):
             return
+        # Cooperative cancellation token: the dialog hands a set() callable
+        # to the job (fired by shutdown()/cancel()) and the is_set probe to
+        # the audit itself, which checks it between payload hashes (#1056 —
+        # closing the dialog must abort the worker, not adopt it forever).
+        cancel_event = threading.Event()
+        self._cancel_event = cancel_event
         self._set_running(True)
         self.summary_label.setText(
             "正在深度检查全部数据校验和..." if deep else "正在检查目录结构与数据完整性..."
         )
-        worker = _AuditWorker(lambda: service.audit(deep=deep))
+        worker = _AuditWorker(lambda: service.audit(deep=deep, cancel=cancel_event.is_set))
         self._job.start(
             worker,
             terminal_signals=(worker.finished, worker.failed),
@@ -115,7 +124,33 @@ class CatalogHealthDialog(QDialog):
                 (worker.finished, self._on_audit_finished),
                 (worker.failed, self._on_audit_failed),
             ),
+            cancel=cancel_event.set,
         )
+
+    def _cancel_running_audit(self) -> None:
+        """Stop an in-flight audit cooperatively (deep hashing checks the
+        event between payloads), then tear the job down.
+
+        Without this, closing the dialog adopted the hashing worker into
+        ``detached_job_keeper`` where it kept running to completion —
+        blocking project switching for the whole audit (#1056).
+        """
+        self._cancel_event = None
+        job = self._job
+        if job is not None and job.is_running:
+            # Bounded join on the GUI thread: the cooperative cancel makes
+            # the worker return between payload checks; if a single huge
+            # payload overshoots the wait, the job detaches to the keeper
+            # with the cancel token already set, so it still stops promptly.
+            job.shutdown(wait_ms=3_000)
+
+    def closeEvent(self, event) -> None:
+        self._cancel_running_audit()
+        super().closeEvent(event)
+
+    def reject(self) -> None:
+        self._cancel_running_audit()
+        super().reject()
 
     def _set_running(self, running: bool) -> None:
         self.progress.setVisible(running)

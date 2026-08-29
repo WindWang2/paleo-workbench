@@ -9,6 +9,7 @@ is composed by the service's thin delegator methods — the PUBLIC API of
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from paleo_workbench.catalog.checksum import sha256_file
@@ -27,6 +28,9 @@ class IntegrityReport:
     """
 
     statuses: dict[str, str] = field(default_factory=dict)
+    # True when a cooperative cancel callback stopped hashing early — the
+    # statuses dict is then PARTIAL, not a full pass over the versions.
+    cancelled: bool = False
 
     def status_for(self, version_id: str) -> str:
         return self.statuses.get(version_id, "unknown")
@@ -36,12 +40,20 @@ class IntegrityReport:
         return all(s in ("verified", "unknown") for s in self.statuses.values())
 
 
-def verify_integrity(service, version_id: str | None = None) -> IntegrityReport:
+def verify_integrity(
+    service,
+    version_id: str | None = None,
+    cancel: Callable[[], bool] | None = None,
+) -> IntegrityReport:
     """Re-hash payloads and compare against recorded SHA-256.
 
     Reports only; a mismatch never updates the catalog. Hashing streams in
     chunks; wrap in a worker thread for large batches in UI contexts.
     Trashed versions are skipped (their payloads live in ``trash/``).
+
+    ``cancel``: optional ``Callable[[], bool]`` polled before each payload;
+    when it returns True hashing stops and ``report.cancelled`` is set (the
+    status dict is then partial, never wrong).  #1056 deep-audit teardown.
     """
     with service._lock:
         if version_id is not None:
@@ -52,6 +64,9 @@ def verify_integrity(service, version_id: str | None = None) -> IntegrityReport:
             versions = list(service.document.versions)
     report = IntegrityReport()
     for version in versions:
+        if cancel is not None and cancel():
+            report.cancelled = True
+            return report
         if version.trashed:
             continue
         payload = service.resolve_path(version)

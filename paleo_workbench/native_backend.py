@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from decimal import Decimal
 import logging
 import math
+import threading
 from pathlib import Path
 import os
 import re
@@ -1077,7 +1078,13 @@ class NativeEngineBackend:
     }
 
     def __init__(self) -> None:
-        self._force_python = False
+        # #1101: depth counter instead of a save/restore bool.  The bool
+        # leaked under cross-thread interleaving — an inner context exiting
+        # after its outer restored the captured prev=True, permanently
+        # disabling acceleration.  A depth count makes exit order irrelevant:
+        # any live context keeps fallbacks forced, the last exit restores.
+        self._force_depth = 0
+        self._force_lock = threading.Lock()
         self._installed_hooks = False
 
     def has_cpp(self, feature: str) -> bool:
@@ -1104,7 +1111,7 @@ class NativeEngineBackend:
         repo-root binaries are classified ``"stale"`` by :func:`native_status`
         and must not be dispatched (#520).
         """
-        if self._force_python:
+        if self._force_depth > 0:
             return False
         if not self.has_cpp(feature):
             return False
@@ -1117,13 +1124,20 @@ class NativeEngineBackend:
 
     @contextmanager
     def disabled_acceleration(self) -> Generator[None, None, None]:
-        """Context manager seam to temporarily force Pure-Python fallbacks."""
-        prev = self._force_python
-        self._force_python = True
+        """Context manager seam to temporarily force Pure-Python fallbacks.
+
+        Reentrant and thread-interleaving safe (#1101): entering increments a
+        shared depth, exiting decrements it — no captured previous state, so
+        an inner context exiting after its outer can never leak the forced
+        fallback.
+        """
+        with self._force_lock:
+            self._force_depth += 1
         try:
             yield
         finally:
-            self._force_python = prev
+            with self._force_lock:
+                self._force_depth -= 1
 
     def dispatch(self, func_name: str, *args: Any, **kwargs: Any) -> Any:
         """Dispatch algorithm execution to C++ native extension or Python fallback."""

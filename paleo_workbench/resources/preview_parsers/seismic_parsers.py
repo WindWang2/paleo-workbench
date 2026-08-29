@@ -8,7 +8,7 @@ from paleo_workbench.resources.preview_parsers.models import PreviewResult
 from paleo_workbench.resources.preview_parsers.table_parsers import parse_error_preview, safe_stat
 
 if TYPE_CHECKING:
-    from paleo_workbench.ui.pages.preview_settings import PreviewSettings
+    from paleo_workbench.resources.preview_settings import PreviewSettings
 
 try:
     import segyio
@@ -33,8 +33,7 @@ def field_value(container, key) -> object:
 
 def segy_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewResult:
     del settings
-    import paleo_workbench.ui.pages.preview_provider as preview_provider
-    segyio_obj = getattr(preview_provider, "segyio", None) or segyio
+    segyio_obj = segyio
     if segyio_obj is None:
         return parse_error_preview(resource, "SEG-Y 预览依赖不可用")
 

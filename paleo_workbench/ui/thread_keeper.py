@@ -6,6 +6,23 @@ from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from PySide6.QtWidgets import QApplication
 
 
+def _move_worker_to_app_thread(worker: QObject) -> None:
+    """Push a finished worker back to the app thread from its own thread.
+
+    Must execute on the thread the worker currently belongs to (Qt only
+    permits pushing out of the *current* thread), i.e. from a
+    DirectConnection on ``QThread.finished`` while the worker thread is
+    still winding down — never from the GUI thread (#1057).
+    """
+    app = QApplication.instance()
+    if app is None or worker.thread() is app.thread():
+        return
+    try:
+        worker.moveToThread(app.thread())
+    except RuntimeError:
+        pass
+
+
 class DetachedJobKeeper(QObject):
     """Keep QThread/worker wrappers alive until their thread actually finishes."""
 
@@ -28,6 +45,18 @@ class DetachedJobKeeper(QObject):
         except RuntimeError:
             pass
         self._jobs[key] = (thread, worker)
+        # #1057: Qt only allows pushing a QObject out of the thread it
+        # currently belongs to.  Wire the worker's move back to the app
+        # thread NOW, as a DirectConnection on finished — it then executes
+        # on the still-valid worker thread, which is the legal push
+        # direction.  A pull from _release (running on the GUI thread after
+        # the thread died) fails with "Cannot move objects that belong to
+        # another thread" and leaves any deleteLater posted to a finished
+        # thread's event queue forever undelivered (leaked QObject).
+        thread.finished.connect(
+            lambda: _move_worker_to_app_thread(worker),
+            Qt.ConnectionType.DirectConnection,
+        )
         # QThread.finished may be emitted from the managed thread.  Emit a
         # relay signal so registry mutation and deleteLater happen on the
         # keeper/QApplication thread.
@@ -56,9 +85,9 @@ class DetachedJobKeeper(QObject):
             return
         thread, worker = job
         try:
-            app = QApplication.instance()
-            if app is not None and worker.thread() is not app.thread():
-                worker.moveToThread(app.thread())
+            # The worker was already pushed back to the app thread by the
+            # DirectConnection finished hook installed in adopt(); moving it
+            # here would be an invalid cross-thread pull (#1057).
             worker.deleteLater()
             thread.deleteLater()
         except Exception:

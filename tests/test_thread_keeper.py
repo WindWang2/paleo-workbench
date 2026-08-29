@@ -86,3 +86,37 @@ def test_timed_out_shutdown_stress_never_leaks_keeper_entries(qtbot):
     # All detached threads finish within a few ms of their randomized sleep;
     # every adopted thread must be released (registry returns to zero).
     qtbot.waitUntil(lambda: keeper.job_count() == 0, timeout=10_000)
+
+
+def test_detached_worker_returns_to_app_thread_and_is_deleted(qtbot):
+    """#1057: a detached worker must be pushed back to the app thread from
+    its own thread (DirectConnection on ``finished``) and then deleted via
+    ``deleteLater`` on the app thread.
+
+    Regression: ``_release`` used to pull the worker with
+    ``moveToThread(app.thread())`` while running on the GUI thread — Qt
+    rejects that cross-thread pull, so ``deleteLater`` was posted to the
+    finished thread's event queue and the QObject leaked.
+    """
+    import shiboken6
+
+    from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+    from paleo_workbench.ui.thread_keeper import detached_job_keeper
+
+    started = Event()
+    worker = _SleepyWorker(started, 80)
+    job = OwnedWorkerJob()
+    job.start(worker, terminal_signals=(worker.finished,))
+    assert started.wait(timeout=2.0)
+    # Time the shutdown out so the running job is handed to the keeper.
+    assert job.shutdown(wait_ms=1) is False
+    keeper = detached_job_keeper()
+    assert keeper.job_count() >= 1
+
+    # The worker thread outlives the timed-out shutdown; once it finishes,
+    # the keeper releases the entry and the worker must actually be
+    # destroyed — proving the deleteLater landed on a live (app-thread)
+    # event queue.  Under the pre-#1057 bug the deleteLater was posted to
+    # the finished thread's dead queue and the QObject leaked forever.
+    qtbot.waitUntil(lambda: keeper.job_count() == 0, timeout=10_000)
+    qtbot.waitUntil(lambda: not shiboken6.isValid(worker), timeout=10_000)

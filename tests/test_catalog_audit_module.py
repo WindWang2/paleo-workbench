@@ -413,3 +413,38 @@ def test_statistics_aggregates_counts_and_severities(service, tmp_path):
     assert stats["kind_unprovenanced_version"] >= 1
     assert stats["issues_medium"] >= 1
     assert stats["issues_high"] == len(report.by_severity("high"))
+
+
+# --- cooperative cancellation (#1056) ---------------------------------------
+
+
+def test_audit_cancel_stops_between_payloads(service, tmp_path):
+    """cancel() returning True stops hashing early and marks the report."""
+    _seed_catalog(service, tmp_path)
+    calls = {"n": 0}
+
+    def cancel_after_first() -> bool:
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    report = service.audit(deep=True, cancel=cancel_after_first)
+    assert report.cancelled is True
+    # The audit still reports what it saw before the cancel point.
+    assert report.checked["assets"] >= 1
+
+    report_full = service.audit(deep=True, cancel=lambda: False)
+    assert report_full.cancelled is False
+
+
+def test_audit_without_cancel_is_not_marked_cancelled(service, tmp_path):
+    _seed_catalog(service, tmp_path)
+    report = service.audit(deep=True)
+    assert report.cancelled is False
+
+
+def test_immediate_cancel_returns_partial_report_promptly(service, tmp_path):
+    """A never-satisfied cancel probe must not mark the audit cancelled."""
+    _seed_catalog(service, tmp_path)
+    report = service.audit(deep=True, cancel=lambda: False)
+    assert report.cancelled is False
+    assert report.ok is True

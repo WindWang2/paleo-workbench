@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -2693,16 +2694,26 @@ class DataCatalogService:
         """
         return _queries.verify_integrity(self, version_id=version_id)
 
-    def audit(self, *, deep: bool = False) -> "_audit.AuditReport":
+    def audit(
+        self,
+        *,
+        deep: bool = False,
+        cancel: Callable[[], bool] | None = None,
+    ) -> "_audit.AuditReport":
         """Structural audit of the catalog (detection only, never mutates).
 
         Checks payload existence, lineage references, tag associations,
         ``current_version_id`` validity, storage layout, and orphan files.
         ``deep=True`` additionally re-hashes payloads (integrity mismatches).
 
+        ``cancel``: optional ``Callable[[], bool]`` polled between payload
+        checks so a closing dialog can stop a long deep audit promptly
+        (#1056); the returned report carries ``cancelled=True`` and a
+        partial issue list.
+
         Delegates to :func:`paleo_workbench.catalog.audit.audit_catalog`.
         """
-        return _audit.audit_catalog(self, deep=deep)
+        return _audit.audit_catalog(self, deep=deep, cancel=cancel)
 
     # -- tags ------------------------------------------------------------------
 

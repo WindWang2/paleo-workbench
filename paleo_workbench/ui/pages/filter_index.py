@@ -109,6 +109,11 @@ class FilterIndex:
         # View-reuse token (#1063): recycling is only valid while the
         # view-building inputs are unchanged.
         self._view_build_token: tuple | None = None
+        # Views actually constructed by the most recent rebuild() call.
+        # A no-change rebuild must report 0 — the deterministic form of the
+        # reuse contract (#1063); wall-clock budgets are too noisy to pin
+        # it (#1107).
+        self.last_rebuild_view_builds: int = 0
 
     def rebuild(
         self,
@@ -125,7 +130,11 @@ class FilterIndex:
         search haystack; everything else rebuilds (#1063). Caller-provided
         views (#527) always win verbatim.
         """
+        builds = 0
+
         def _build(asset) -> AssetView:
+            nonlocal builds
+            builds += 1
             view = asset_view_from_object(asset, project_root=project_root)
             return enricher(view) if enricher is not None else view
 
@@ -165,6 +174,7 @@ class FilterIndex:
                 self._haystacks.append(self._haystack(view))
         self._assets = new_assets
         self._view_build_token = token
+        self.last_rebuild_view_builds = builds
 
     @property
     def views(self) -> list:

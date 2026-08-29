@@ -10,7 +10,7 @@ from paleo_workbench.resources.preview_parsers.table_parsers import parse_error_
 from paleo_workbench.viz.well_log_api import fast_las_parse_data
 
 if TYPE_CHECKING:
-    from paleo_workbench.ui.pages.preview_settings import PreviewSettings
+    from paleo_workbench.resources.preview_settings import PreviewSettings
 
 
 class _UseLasio(Exception):

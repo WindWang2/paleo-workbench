@@ -75,7 +75,10 @@ def test_refresh_path_budgets_at_100k(qtbot) -> None:
     t0 = time.perf_counter()
     model.set_assets(list(assets))
     unchanged = time.perf_counter() - t0
-    assert unchanged < 1.0, f"no-change re-apply took {unchanged:.2f}s (budget 1s; full rebuild cost 4.5-8.9s)"
+    # 2.5s wall-clock is a smoke bound (~25% of a full rebuild); the exact
+    # reuse contract is pinned deterministically on FilterIndex below
+    # (#1107: 1.0s had zero headroom and flaked at ~1.06s).
+    assert unchanged < 2.5, f"no-change re-apply took {unchanged:.2f}s (budget 2.5s; full rebuild cost 4.5-8.9s)"
 
     # A small mixed delta stays near the no-change cost.
     mutated = list(assets)
@@ -100,7 +103,12 @@ def test_refresh_path_budgets_at_100k(qtbot) -> None:
     t0 = time.perf_counter()
     index.rebuild(list(mutated))
     index_reuse = time.perf_counter() - t0
-    assert index_reuse < 1.0, f"no-change FilterIndex.rebuild took {index_reuse:.2f}s (budget 1s; full rebuild cost 3.8s)"
+    assert index_reuse < 2.5, f"no-change FilterIndex.rebuild took {index_reuse:.2f}s (budget 2.5s; full rebuild cost 3.8s)"
+    # Deterministic contract (#1107): a no-change rebuild recycles every
+    # view — zero filesystem probes, zero haystack rebuilds.
+    assert index.last_rebuild_view_builds == 0, (
+        f"no-change FilterIndex.rebuild built {index.last_rebuild_view_builds} views; must recycle all"
+    )
 
 
 @pytest.mark.skipif(not _CAN_MEASURE_RSS, reason="/proc/self/statm unavailable (non-Linux)")

@@ -213,7 +213,7 @@ def test_dat_preview_keeps_last_row_when_byte_limit_ends_on_newline(tmp_path: Pa
 
 def test_preview_provider_preserves_quoted_csv_newlines(tmp_path: Path):
     path = tmp_path / "quoted-newlines.csv"
-    path.write_text('name,note\nalpha,"line one\nline two"\nbeta,plain', encoding="utf-8")
+    path.write_bytes(b'name,note\nalpha,"line one\nline two"\nbeta,plain')
     resource = ResourceItem(name="quoted-newlines.csv", path=str(path), type="tabular", format="csv")
 
     result = PreviewProvider().preview(resource)
@@ -485,7 +485,9 @@ def test_preview_provider_reads_segy_metadata_with_optional_library(
             assert ignore_geometry is True
             return FakeSegyFile()
 
-    monkeypatch.setattr("paleo_workbench.ui.pages.preview_provider.segyio", FakeSegyio)
+    monkeypatch.setattr(
+        "paleo_workbench.resources.preview_parsers.seismic_parsers.segyio", FakeSegyio
+    )
     resource = ResourceItem(name="cube.sgy", path=str(path), type="seismic", format="sgy")
 
     result = PreviewProvider().preview(resource)

@@ -15,7 +15,7 @@ from paleo_workbench.resources.scanner import scan_resources as _scan_resources
 
 if TYPE_CHECKING:
     from paleo_workbench.resources.preview_parsers.models import PreviewResult
-    from paleo_workbench.ui.pages.preview_settings import PreviewSettings
+    from paleo_workbench.resources.preview_settings import PreviewSettings
 
 
 @dataclass

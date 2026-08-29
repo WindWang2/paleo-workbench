@@ -15,7 +15,7 @@ from paleo_workbench.resources.preview_parsers.table_parsers import (
 )
 
 if TYPE_CHECKING:
-    from paleo_workbench.ui.pages.preview_settings import PreviewSettings
+    from paleo_workbench.resources.preview_settings import PreviewSettings
 
 # Upper bound (px per side) for GeoTIFF preview reads: overview levels that
 # would decode more than this are not used.

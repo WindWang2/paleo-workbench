@@ -157,3 +157,44 @@ def test_slow_family_collect_count_meets_baseline_15() -> None:
     assert match, f"could not parse collected count from:\n{combined[:4000]}"
     count = int(match.group(1))
     assert count >= 15, f"slow family shrank to {count} (< 15); update baselines or restore tests"
+
+
+def test_ci_3d_opengl_leg_contract() -> None:
+    """#1058: the dedicated 3D OpenGL leg must exist and select the opengl
+    family on a real X server (xcb), not the offscreen platform where every
+    marked test skips unconditionally."""
+    import yaml
+
+    wf = yaml.safe_load((WORKFLOW_DIR / "ci.yml").read_text(encoding="utf-8"))
+    job = wf["jobs"]["test-3d-opengl"]
+    assert job["runs-on"] == "ubuntu-latest"
+    env = job["env"]
+    # Real GL context: xcb on Xvfb + software Mesa — NOT offscreen.
+    assert env["QT_QPA_PLATFORM"] == "xcb"
+    assert env["LIBGL_ALWAYS_SOFTWARE"] == "1"
+    run_steps = [
+        step.get("run", "") for step in job["steps"] if isinstance(step, dict)
+    ]
+    assert any("-m opengl" in run for run in run_steps), (
+        "the 3D leg must select the opengl marker family"
+    )
+    # Observability leg by policy until GHA llvmpipe soak completes.
+    assert job.get("continue-on-error") is True
+
+
+def test_ci_main_leg_does_not_run_opengl_family() -> None:
+    """The offscreen main legs must keep deselecting the opengl marker (they
+    cannot provide a GL context), so the 3D leg is the only coverage."""
+    import yaml
+
+    wf = yaml.safe_load((WORKFLOW_DIR / "ci.yml").read_text(encoding="utf-8"))
+    test_job = wf["jobs"]["test"]
+    run_steps = [
+        step.get("run", "") for step in test_job["steps"] if isinstance(step, dict)
+    ]
+    pytest_runs = [r for r in run_steps if "pytest" in r]
+    assert pytest_runs, "main test job must run pytest"
+    for run in pytest_runs:
+        assert "-m opengl" not in run and "-m=opengl" not in run, (
+            "main offscreen leg must not select the opengl family"
+        )

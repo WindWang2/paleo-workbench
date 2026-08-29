@@ -51,7 +51,7 @@ from paleo_workbench.resources.preview_parsers.table_parsers import (
 from paleo_workbench.resources.preview_parsers.well_log_parsers import las_preview, xml_well_log_preview
 
 if TYPE_CHECKING:
-    from paleo_workbench.ui.pages.preview_settings import PreviewSettings
+    from paleo_workbench.resources.preview_settings import PreviewSettings
 
 PreviewParserCallable = Callable[[ResourceItem, "PreviewSettings"], PreviewResult]
 

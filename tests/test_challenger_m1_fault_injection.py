@@ -501,8 +501,16 @@ def test_cpp_exception_handling_in_dispatch(monkeypatch):
 
 
 def test_nested_and_multithreaded_disabled_acceleration():
-    """Verify disabled_acceleration context manager correctly handles nesting and thread safety."""
-    assert is_accelerated("map_edit") is True
+    """Verify disabled_acceleration context manager correctly handles nesting and thread safety.
+
+    Self-contained (#1101): the old version asserted the AMBIENT acceleration
+    state, which is an environment property (module present and status
+    "fresh") and an ordering property (a prior test's leaked toggle).  The
+    toggle contract itself only needs the acceleration to be observable —
+    skip cleanly where the C++ module is absent/stale.
+    """
+    if not is_accelerated("map_edit"):
+        pytest.skip("map_edit native acceleration not available/fresh in this environment")
 
     with disabled_acceleration():
         assert is_accelerated("map_edit") is False
@@ -511,6 +519,50 @@ def test_nested_and_multithreaded_disabled_acceleration():
         assert is_accelerated("map_edit") is False
 
     assert is_accelerated("map_edit") is True
+
+
+def test_disabled_acceleration_exit_order_cannot_leak():
+    """Regression #1101: exiting contexts in reverse order (the cross-thread
+    interleaving worst case) must restore acceleration exactly once the LAST
+    context exits — never leave the forced fallback stuck on."""
+    from paleo_workbench.native_backend import native_backend
+
+    if not is_accelerated("map_edit"):
+        pytest.skip("map_edit native acceleration not available/fresh in this environment")
+
+    outer = native_backend.disabled_acceleration()
+    inner = native_backend.disabled_acceleration()
+    outer.__enter__()
+    inner.__enter__()
+    try:
+        assert is_accelerated("map_edit") is False
+    finally:
+        # Outer exits BEFORE inner — under the old save/restore bool this
+        # restored prev=True and leaked the disabled state permanently.
+        outer.__exit__(None, None, None)
+        inner.__exit__(None, None, None)
+    assert is_accelerated("map_edit") is True
+
+
+def test_disabled_acceleration_depth_transitions_are_environment_independent():
+    """#1101: the depth counter must count in/out exactly, even on hosts
+    without any native module (where is_accelerated is False regardless) —
+    this pins the toggle mechanics the skip-guarded tests cannot reach."""
+    from paleo_workbench.native_backend import native_backend
+
+    assert native_backend._force_depth == 0
+    outer = native_backend.disabled_acceleration()
+    inner = native_backend.disabled_acceleration()
+    outer.__enter__()
+    inner.__enter__()
+    try:
+        assert native_backend._force_depth == 2
+        assert is_accelerated("map_edit") is False
+    finally:
+        outer.__exit__(None, None, None)
+        assert native_backend._force_depth == 1
+        inner.__exit__(None, None, None)
+    assert native_backend._force_depth == 0
 
 
 def test_adversarial_inputs_to_native_fallbacks():

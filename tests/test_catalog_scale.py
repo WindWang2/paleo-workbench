@@ -51,10 +51,13 @@ TRASH_LEVELS = [max(BASE_N // 4, 16), min(BASE_N // 2, 64), min(BASE_N, 128)]
 CHAIN_DEPTH = max(8, BASE_N // 4)
 REPS = 3
 # Generous ratio ceilings over a 4x data increase (linear ⇒ ~4x, quadratic ⇒
-# ~16x, sub-linear ⇒ ≲1x). +FLOOR absorbs noise at tiny sizes.
+# ~16x, sub-linear ⇒ ≲1x). +FLOOR absorbs noise at tiny sizes — where the
+# baseline itself is ~5ms, a 10ms floor left the ceiling within scheduler
+# noise of the measured value (40.5ms vs 38ms, #1107); 20ms restores the
+# intended margin without weakening the quadratic tripwire (16x ⇒ 90ms+).
 LINEAR_CEILING = 5.0
 SUB_LINEAR_CEILING = 2.5
-FLOOR_MS = 10.0
+FLOOR_MS = 20.0
 
 
 def _measure(fn, reps: int = REPS) -> float:

@@ -417,7 +417,8 @@ def test_catalog_only_row_preview_path_is_absolute(qtbot, tmp_path, catalog):
     for row in range(page.asset_table.model.rowCount()):
         view = page.asset_table.model.view_at(row)
         if view is not None and view.name == "paleomap":
-            assert view.path.startswith("/")
+            # POSIX '/' vs Windows 'C:\' both count as absolute (#1045).
+            assert Path(view.path).is_absolute()
             break
     else:
         raise AssertionError("paleomap row not found")
@@ -446,3 +447,80 @@ def test_governance_save_refreshes_catalog_only_row_inspector(qtbot, tmp_path, c
     for row in range(table.rowCount()):
         body.append(table.item(row, 1).text())
     assert any("已通过" in cell for cell in body)
+
+
+# --- health dialog cooperative cancel (#1056) -------------------------------------
+
+
+def _stuck_audit_stub(entered, cancelled):
+    """Stand-in for DataCatalogService.audit: blocks until the cancel token
+    the dialog is expected to hand down (via OwnedWorkerJob) fires."""
+
+    import time
+
+    def _audit(*, deep: bool = False, cancel=None) -> object:
+        entered.append(True)
+        while not (cancel is not None and cancel()):
+            time.sleep(0.02)
+        cancelled.append(True)
+        return None
+
+    return _audit
+
+
+def test_health_dialog_close_event_cancels_running_audit(qtbot, tmp_path, catalog):
+    """Closing the dialog must stop an in-flight deep audit promptly.
+
+    Regression (#1056): close/reject left the hashing worker adopted by
+    detached_job_keeper, hashing the whole catalog to completion and
+    blocking project switching until it finished.
+    """
+    from paleo_workbench.ui.thread_keeper import detached_job_keeper
+
+    dialog = CatalogHealthDialog(None, service_provider=lambda: catalog)
+    dialog.show()
+    entered: list = []
+    cancelled: list = []
+    catalog.audit = _stuck_audit_stub(entered, cancelled)
+    try:
+        dialog.run_audit(deep=True)
+        qtbot.waitUntil(lambda: bool(entered), timeout=5_000)
+        assert dialog._job.is_running
+
+        dialog.close()  # QDialog.close() → closeEvent → cooperative cancel
+
+        qtbot.waitUntil(lambda: not dialog._job.is_running, timeout=10_000)
+        # The worker returned because the dialog's cancel token reached it.
+        qtbot.waitUntil(lambda: bool(cancelled), timeout=10_000)
+        assert detached_job_keeper().job_count() == 0
+    finally:
+        try:
+            del catalog.audit
+        except AttributeError:
+            pass
+
+
+def test_health_dialog_reject_cancels_running_audit(qtbot, tmp_path, catalog):
+    """Esc/reject during a deep audit also tears the job down (#1056)."""
+    from paleo_workbench.ui.thread_keeper import detached_job_keeper
+
+    dialog = CatalogHealthDialog(None, service_provider=lambda: catalog)
+    dialog.show()
+    entered: list = []
+    cancelled: list = []
+    catalog.audit = _stuck_audit_stub(entered, cancelled)
+    try:
+        dialog.run_audit(deep=True)
+        qtbot.waitUntil(lambda: bool(entered), timeout=5_000)
+
+        dialog.reject()
+
+        qtbot.waitUntil(lambda: not dialog._job.is_running, timeout=10_000)
+        qtbot.waitUntil(lambda: bool(cancelled), timeout=10_000)
+        assert dialog._cancel_event is None
+        assert detached_job_keeper().job_count() == 0
+    finally:
+        try:
+            del catalog.audit
+        except AttributeError:
+            pass

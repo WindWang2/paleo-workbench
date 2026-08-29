@@ -286,6 +286,68 @@ jobs:
   # Focused job for Well Log Workstation (#207 / PR #233): no geo-viz submodule,
   # no map_edit_core. Host-only (engine optional) so the workstation suite is
   # isolated from the monorepo install (see docs/ci-merge-policy.md).
+  # Dedicated 3D leg (#1058/#940-1): the main `test` job runs with
+  # QT_QPA_PLATFORM=offscreen, where every ``opengl``-marked 3D viewport test
+  # skips unconditionally — 3D visualization had zero CI coverage. This job
+  # boots the same suite subset on a real (virtual) X server with software
+  # Mesa (llvmpipe), mirroring well-log-engine.yml's "Test with Mesa" leg.
+  # continue-on-error OBSERVABILITY until the leg has soak time on GHA
+  # llvmpipe (pixel tests are known-flaky there — see the exclusions in
+  # well-log-engine.yml); promote to the required gate once stable.
+  test-3d-opengl:
+    name: 3D OpenGL viewport (software Mesa)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    env:
+      PIP_IGNORE_REQUIRES_PYTHON: "1"
+      # Real X display (not offscreen) so QOpenGLContext is creatable; the
+      # _opengl_widget_supported() guard reads exactly this env var.
+      QT_QPA_PLATFORM: xcb
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      GALLIUM_DRIVER: llvmpipe
+      MESA_GL_VERSION_OVERRIDE: "3.3"
+      MESA_GLSL_VERSION_OVERRIDE: "330"
+      QT_OPENGL: software
+      QT_MEDIA_BACKEND: none
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: System libraries (Qt / Xvfb / Mesa)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends             build-essential             ninja-build             libsqlite3-dev             libgl1             libgl1-mesa-dri             libegl1             mesa-utils             xvfb             libglib2.0-0             libxkbcommon0             libxkbcommon-x11-0             libdbus-1-3             libxcb-cursor0             libxcb-icccm4             libxcb-image0             libxcb-keysyms1             libxcb-randr0             libxcb-render-util0             libxcb-shape0             libxcb-xfixes0             libxcb-xinerama0             libfontconfig1             libfreetype6
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --prefer-binary -e ".[dev,native]"
+          python -m pip install --prefer-binary -r requirements-geoviz.txt
+          python -c "import geoviz, geoviz_well_seismic_3d"
+          python -m pip install shapely
+
+      - name: Run 3D viewport tests (opengl marker)
+        # The marker selects exactly the 3D viewport family that the
+        # offscreen main leg cannot cover; every unmarked test is skipped by
+        # -m, so this leg stays small and focused.
+        run: |
+          python -m pytest -v --tb=line             --timeout=120             --timeout-method=thread             -m opengl             --durations=15
+
+      - name: Assert the opengl family has not silently shrunk
+        run: |
+          count=$(python -m pytest -m opengl --collect-only -q 2>/dev/null | tail -1 | grep -oE '[0-9]+' | head -1)
+          echo "opengl-marked tests: ${count}"
+          test -n "${count}" && test "${count}" -ge 4
+
   well-log-workstation:
     name: Well Log Workstation (host)
     runs-on: ubuntu-latest

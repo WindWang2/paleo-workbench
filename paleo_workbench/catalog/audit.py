@@ -49,6 +49,7 @@ mismatch is reported, not auto-fixed).
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -84,6 +85,9 @@ class AuditReport:
 
     issues: list[AuditIssue] = field(default_factory=list)
     checked: dict[str, int] = field(default_factory=dict)
+    # True when a cooperative cancel callback stopped the audit early — the
+    # issue list is then PARTIAL (the dialog shows it as "已取消").  #1056.
+    cancelled: bool = False
 
     def by_kind(self, kind: str) -> list[AuditIssue]:
         return [issue for issue in self.issues if issue.kind == kind]
@@ -116,7 +120,11 @@ class AuditReport:
 
 
 def audit_catalog(
-    service, *, deep: bool = False, stale_run_after_seconds: int | None = None
+    service,
+    *,
+    deep: bool = False,
+    stale_run_after_seconds: int | None = None,
+    cancel: Callable[[], bool] | None = None,
 ) -> AuditReport:
     """Run all structural checks over the canonical document.
 
@@ -124,6 +132,11 @@ def audit_catalog(
     (delegates to ``verify_integrity``) and reports ``integrity_mismatch``.
     Structural checks run under the service lock; payload stat/hash work runs
     outside it so a deep audit cannot block concurrent catalog writes.
+
+    ``cancel``: optional ``Callable[[], bool]`` returning True when the audit
+    should stop early (checked between payload checks — hashing is the long
+    pole; the in-memory structural checks always run).  A cancelled audit
+    reports ``cancelled=True`` and a partial issue list (#1056).
     """
     report = AuditReport()
     with service._lock:
@@ -161,7 +174,7 @@ def audit_catalog(
         _check_tags(report, document, asset_ids, version_ids)
         _check_paths(report, service, versions)
 
-    _check_payloads(report, service, versions, deep)
+    _check_payloads(report, service, versions, deep, cancel)
 
     return report
 
@@ -601,7 +614,7 @@ def _check_paths(report: AuditReport, service, versions) -> None:
 
 
 def _check_payloads(
-    report: AuditReport, service, versions, deep: bool
+    report: AuditReport, service, versions, deep: bool, cancel=None
 ) -> None:
     """Existence/orphan checks (stat only) + optional deep hashing.
 
@@ -610,6 +623,9 @@ def _check_payloads(
     every catalog write for the duration.
     """
     for version in versions:
+        if cancel is not None and cancel():
+            report.cancelled = True
+            return
         if not version.managed:
             # External files are outside catalog custody, but a missing
             # source still breaks every consumer — report it (stat only).
@@ -650,7 +666,9 @@ def _check_payloads(
     if deep:
         from paleo_workbench.catalog.queries import verify_integrity
 
-        integrity = verify_integrity(service)
+        integrity = verify_integrity(service, cancel=cancel)
+        if integrity.cancelled:
+            report.cancelled = True
         for version_id, status in integrity.statuses.items():
             if status == "modified":
                 report.issues.append(
