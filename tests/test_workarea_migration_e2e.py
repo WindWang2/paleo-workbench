@@ -212,7 +212,7 @@ class TestImportDefaultsManagedRaw:
             version = service.link_external(str(external), name="big.sgy", type="seismic")
             assert version.managed is False
             assert version.stage == DataStage.RAW
-            assert str(external) in version.path
+            assert external.as_posix() in version.path
         finally:
             service.close()
 

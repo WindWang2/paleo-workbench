@@ -162,7 +162,10 @@ def test_malformed_named_layer_is_not_promoted_into_complete_product(tmp_path):
     report = import_files([*paths, malformed], existing=[])
 
     assert report.facies_product_count == 0
-    invalid = next(resource for resource in report.added if resource.path == str(malformed))
+    invalid = next(
+        resource for resource in report.added
+        if Path(resource.path) == malformed
+    )
     assert invalid.parsed_summary["geojson_valid"] is False
     assert "geojson_layer_role" not in invalid.parsed_summary
     assert all(resource.artifact_role == "input" for resource in report.added)

@@ -97,7 +97,17 @@ def test_catalog_index_prunes_dead_threads(tmp_path: Path):
         index.open()
         if t.ident in index._conns:
             _time.sleep(0.02)
-    assert t.ident not in index._conns
+    from paleo_workbench.catalog.db import native_thread_alive
+
+    probe_state = {
+        tid: native_thread_alive(entry.native_id)
+        for tid, entry in index._conns.items()
+    }
+    assert t.ident not in index._conns, (
+        f"[DEBUG-win-prune] worker ident {t.ident} survived poll; "
+        f"pool={ {tid: e.native_id for tid, e in index._conns.items()} } "
+        f"probes={probe_state}"
+    )
     index.close()
 
 

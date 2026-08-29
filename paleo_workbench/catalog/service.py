@@ -586,8 +586,12 @@ class DataCatalogService:
             index.close()
             try:
                 os.replace(index.db_path, isolated)
-            except OSError:
-                pass  # best-effort forensics; reset() removes the bytes anyway
+            except OSError as exc:
+                # best-effort forensics; reset() removes the bytes anyway.
+                # [DEBUG-win-forensics] temporary: identify the holder.
+                print(f"[DEBUG-win-forensics] replace failed: {exc!r}")
+            else:
+                print(f"[DEBUG-win-forensics] isolated -> {isolated.name}")
             index.reset()
         if document is not None and json_path.is_file():
             # The manifest should be exactly what we last checkpointed. A

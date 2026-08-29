@@ -40,7 +40,7 @@ def test_project_round_trip_uses_relative_paths(tmp_path: Path):
     project_path = tmp_path / "demo.paleo.json"
     data_file = tmp_path / "data" / "well.las"
     data_file.parent.mkdir()
-    data_file.write_text("~Version\n", encoding="utf-8")
+    data_file.write_text("~Version\n", encoding="utf-8", newline="")
 
     project = ProjectDocument.new(name="Demo")
     project.resources.append(
@@ -66,7 +66,7 @@ def test_lightweight_import_classification_round_trips_as_project_content(tmp_pa
     project_path = tmp_path / "demo.paleo.json"
     source = tmp_path / "data" / "well.las"
     source.parent.mkdir()
-    source.write_text("~Version\n", encoding="utf-8")
+    source.write_text("~Version\n", encoding="utf-8", newline="")
 
     project = ProjectDocument.new(name="Demo")
     project.resources.extend(
@@ -86,7 +86,7 @@ def test_resaving_loaded_project_keeps_relative_resource_paths(tmp_path: Path):
     project_path = tmp_path / "demo.paleo.json"
     data_file = tmp_path / "data" / "well.las"
     data_file.parent.mkdir()
-    data_file.write_text("~Version\n", encoding="utf-8")
+    data_file.write_text("~Version\n", encoding="utf-8", newline="")
 
     project = ProjectDocument.new(name="Demo")
     project.resources.append(
@@ -113,7 +113,7 @@ def test_clean_save_after_load_is_a_true_noop(tmp_path: Path, monkeypatch):
     project_path = tmp_path / "demo.paleo.json"
     resource = tmp_path / "data" / "well.las"
     resource.parent.mkdir()
-    resource.write_text("~Version\n", encoding="utf-8")
+    resource.write_text("~Version\n", encoding="utf-8", newline="")
     project = ProjectDocument.new("Demo")
     project.resources.append(
         ResourceItem(name="well", path=str(resource), type="well_log", format="las")
@@ -139,7 +139,7 @@ def test_metadata_only_save_reuses_resource_path_section(tmp_path: Path, monkeyp
     project_path = tmp_path / "demo.paleo.json"
     resource = tmp_path / "data" / "well.las"
     resource.parent.mkdir()
-    resource.write_text("~Version\n", encoding="utf-8")
+    resource.write_text("~Version\n", encoding="utf-8", newline="")
     project = ProjectDocument.new("Before")
     project.resources.append(
         ResourceItem(name="well", path=str(resource), type="well_log", format="las")
@@ -171,7 +171,7 @@ def test_project_backup_recovers_corrupt_canonical_json(tmp_path: Path):
     backup = project_backup_path(project_path)
     assert backup.is_file()
 
-    project_path.write_text("{ truncated", encoding="utf-8")
+    project_path.write_text("{ truncated", encoding="utf-8", newline="")
     recovered = ProjectManager(project_path)
     loaded = recovered.load()
 
@@ -186,8 +186,8 @@ def test_load_cleans_only_owned_project_temp_files(tmp_path: Path):
     manager.save(ProjectDocument.new("Demo"))
     owned = tmp_path / ".demo.paleo.json.interrupted.tmp"
     unrelated = tmp_path / ".other.paleo.json.interrupted.tmp"
-    owned.write_text("partial", encoding="utf-8")
-    unrelated.write_text("user file", encoding="utf-8")
+    owned.write_text("partial", encoding="utf-8", newline="")
+    unrelated.write_text("user file", encoding="utf-8", newline="")
 
     manager.load()
 
@@ -227,7 +227,7 @@ def test_external_resource_paths_remain_absolute_and_external(tmp_path: Path):
     project_path = tmp_path / "demo.paleo.json"
     external_file = tmp_path.parent / "shared" / "regional.las"
     external_file.parent.mkdir(parents=True, exist_ok=True)
-    external_file.write_text("~Version\n", encoding="utf-8")
+    external_file.write_text("~Version\n", encoding="utf-8", newline="")
 
     project = ProjectDocument.new(name="Demo")
     project.resources.append(
@@ -299,7 +299,7 @@ def test_export_artifact_output_path_is_relativized_when_inside_project(tmp_path
     project_path = tmp_path / "demo.paleo.json"
     export_file = tmp_path / "exports" / "demo.png"
     export_file.parent.mkdir()
-    export_file.write_text("png", encoding="utf-8")
+    export_file.write_text("png", encoding="utf-8", newline="")
 
     project = ProjectDocument.new(name="Demo")
     project.export_artifacts.append(

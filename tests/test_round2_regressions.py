@@ -130,7 +130,7 @@ def test_readiness_excludes_missing_and_absent_resources(tmp_path: Path):
     project.resources.append(
         ResourceItem(
             name="gone.las",
-            path="/no/such/absolute/path/gone.las",
+            path=str(tmp_path / "no-such-gone.las"),
             type="well_log",
             format="las",
             status="missing",
@@ -139,7 +139,7 @@ def test_readiness_excludes_missing_and_absent_resources(tmp_path: Path):
     project.resources.append(
         ResourceItem(
             name="offline.sgy",
-            path="/no/such/absolute/path/offline.sgy",
+            path=str(tmp_path / "no-such-offline.sgy"),
             type="seismic",
             format="sgy",
             external=True,

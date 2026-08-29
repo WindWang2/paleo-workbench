@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from pathlib import Path
+
 import pytest
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QKeyEvent
@@ -211,7 +213,7 @@ def test_data_reader_panel_context_menu_open_with_system_app(qtbot, tmp_path):
     args, _ = mock_open.call_args
     url = args[0]
     assert isinstance(url, QUrl)
-    assert url.toLocalFile() == str(path)
+    assert url.toLocalFile() == Path(path).as_posix()
 
 
 def test_data_reader_panel_context_menu_disabled_when_no_path(qtbot):

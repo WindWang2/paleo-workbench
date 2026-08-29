@@ -12,11 +12,11 @@ from paleo_workbench.pipeline.bootstrap import (
 
 def _make_sample_tree(root: Path) -> None:
     (root / "井曲线").mkdir(parents=True)
-    (root / "井曲线" / "A1.Las").write_text("~Version\n", encoding="utf-8")
-    (root / "井曲线" / "A2.Las").write_text("~Version\n", encoding="utf-8")
+    (root / "井曲线" / "A1.Las").write_text("~Version\n", encoding="utf-8", newline="")
+    (root / "井曲线" / "A2.Las").write_text("~Version\n", encoding="utf-8", newline="")
     (root / "层位").mkdir()
-    (root / "层位" / "C6.dat").write_text("h", encoding="utf-8")
-    (root / "层位" / "D71.dat").write_text("h", encoding="utf-8")
+    (root / "层位" / "C6.dat").write_text("h", encoding="utf-8", newline="")
+    (root / "层位" / "D71.dat").write_text("h", encoding="utf-8", newline="")
     (root / "地震体").mkdir()
     (root / "地震体" / "200P_seismic.sgy").write_bytes(b"x" * 100)
 
@@ -61,7 +61,7 @@ def test_bootstrap_default_keeps_full_scan_checksums(tmp_path: Path):
     data_root = tmp_path / "data"
     data_root.mkdir()
     source = data_root / "well.las"
-    source.write_text("~Version\n", encoding="utf-8")
+    source.write_text("~Version\n", encoding="utf-8", newline="")
 
     result = bootstrap_sample_project(data_root)
 

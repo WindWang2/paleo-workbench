@@ -102,13 +102,13 @@ def test_register_model_still_updates_identity_when_values_given(service):
     assert updated.capability == "cap2"
 
 
-def test_readiness_blocks_missing_absolute_payload():
+def test_readiness_blocks_missing_absolute_payload(tmp_path):
     project = ProjectDocument(
         meta=ProjectMeta(name="missing-payload"),
         resources=[
             ResourceItem(
                 name="ghost-well",
-                path="/tmp/does-not-exist-r3-well.las",
+                path=str(tmp_path / "does-not-exist-r3-well.las"),
                 type="well_log",
                 format="las",
                 status="indexed",

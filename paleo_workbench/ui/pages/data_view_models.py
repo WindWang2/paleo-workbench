@@ -921,7 +921,7 @@ def asset_view_from_catalog_overview(
     path = overview.path
     if overview.resolved_path:
         path = overview.resolved_path
-    elif project_root is not None and path and not path.startswith("/"):
+    elif project_root is not None and path and not Path(path).is_absolute():
         path = str(Path(project_root) / path)
     modified = overview.created_at or "—"
     stage = overview.stage

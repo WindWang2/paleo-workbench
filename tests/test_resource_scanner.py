@@ -19,9 +19,9 @@ def test_classify_known_and_reference_formats():
 
 def test_scan_resources_indexes_nested_data(tmp_path: Path):
     (tmp_path / "井曲线").mkdir()
-    (tmp_path / "井曲线" / "A1.Las").write_text("~Version\n", encoding="utf-8")
+    (tmp_path / "井曲线" / "A1.Las").write_text("~Version\n", encoding="utf-8", newline="")
     (tmp_path / "外委资料").mkdir()
-    (tmp_path / "外委资料" / "相图.dfb").write_text("binary-like", encoding="utf-8")
+    (tmp_path / "外委资料" / "相图.dfb").write_text("binary-like", encoding="utf-8", newline="")
 
     resources = scan_resources(tmp_path)
 
@@ -38,7 +38,7 @@ def test_scan_resources_without_project_path_preserves_canonical_source_path(tmp
     source_file = tmp_path / "external" / "logs" / "A1.Las"
     source_file.parent.mkdir(parents=True)
     content = "~Version\n"
-    source_file.write_text(content, encoding="utf-8")
+    source_file.write_text(content, encoding="utf-8", newline="")
 
     resources = scan_resources(tmp_path / "external")
 
@@ -52,8 +52,8 @@ def test_scan_resources_relativizes_paths_and_skips_macos_sidecars(tmp_path: Pat
     project_path = tmp_path / "demo.paleo.json"
     data_dir = tmp_path / "data" / "外委资料"
     data_dir.mkdir(parents=True)
-    (data_dir / "03-惠西南区域构造图.pptx").write_text("ppt", encoding="utf-8")
-    (data_dir / "._03-惠西南区域构造图.pptx").write_text("sidecar", encoding="utf-8")
+    (data_dir / "03-惠西南区域构造图.pptx").write_text("ppt", encoding="utf-8", newline="")
+    (data_dir / "._03-惠西南区域构造图.pptx").write_text("sidecar", encoding="utf-8", newline="")
 
     resources = scan_resources(tmp_path / "data", project_path=project_path)
 
@@ -85,7 +85,7 @@ def test_scan_resources_skips_checksum_over_threshold(tmp_path: Path):
     big = tmp_path / "vol.sgy"
     big.write_bytes(b"x" * 100)
     small = tmp_path / "A1.Las"
-    small.write_text("~Version\n", encoding="utf-8")
+    small.write_text("~Version\n", encoding="utf-8", newline="")
 
     resources = scan_resources(tmp_path, skip_checksum_over_bytes=50)
     by_name = {r.name: r for r in resources}
@@ -100,7 +100,7 @@ def test_scan_resources_skips_checksum_over_threshold(tmp_path: Path):
 def test_scan_resources_default_still_checksums(tmp_path: Path):
     f = tmp_path / "A1.Las"
     content = "~Version\n"
-    f.write_text(content, encoding="utf-8")
+    f.write_text(content, encoding="utf-8", newline="")
     resources = scan_resources(tmp_path)
     assert resources[0].checksum == hashlib.sha256(content.encode("utf-8")).hexdigest()
 
