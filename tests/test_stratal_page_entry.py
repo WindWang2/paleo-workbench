@@ -115,6 +115,21 @@ def test_stratal_generate_demo_produces_visible_slices(qtbot):
     )
 
     snap = renderer.get_stratal_slices()
+    # [DEBUG-3d-soak] the completed-handler's load_volume never landed
+    # (loaded=False, vol_cpu=None): call it directly to surface the
+    # exception the Qt slot swallowed.
+    import traceback as _tb
+
+    try:
+        renderer.load_volume(result["volume"])
+        print(
+            f"[DEBUG-3d-soak] direct load ok: "
+            f"loaded={renderer._loaded} "
+            f"vol={renderer._volume_data_cpu.shape}"
+        )
+    except Exception:
+        print("[DEBUG-3d-soak] direct load RAISED:")
+        _tb.print_exc()
     assert len(snap) == 3  # three proportional slices
     # Each registered plane pair is added to the GL view.
     assert len(renderer._stratal_plane_items) == 3
