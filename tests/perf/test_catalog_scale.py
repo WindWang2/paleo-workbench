@@ -18,7 +18,10 @@ import pytest
 from paleo_workbench.catalog.service import DataCatalogService
 from paleo_workbench.catalog.store import catalog_file_for
 
-pytestmark = [pytest.mark.capacity]
+# `slow` as well: the fsync-heavy budgets need the nightly's 300s per-test
+# timeout — the fast gate's 45s ceiling turned them into repeated
+# runner-load timeouts (2026-08-29, twice on this branch, once on main).
+pytestmark = [pytest.mark.capacity, pytest.mark.slow]
 
 N_ASSETS = 20_000
 

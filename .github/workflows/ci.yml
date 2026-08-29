@@ -235,10 +235,14 @@ jobs:
           # may need the job-level ceiling). -v prints the last started test
           # when the suite dies so the hung case is identifiable in CI logs.
           # A green suite fits well inside the 60m job timeout (locally ~2m).
+          # tests/perf is owned by the nightly slow leg (300s per-test
+          # timeout): the fsync-heavy budgets repeatedly blew the fast
+          # gate's 45s ceiling under runner load.
           xvfb-run -a python -m pytest -v --tb=line \
             --timeout=45 \
             --timeout-method=thread \
             -m "not slow and not welllog_binding" \
+            --ignore=tests/perf \
             --durations=25
 
       - name: Run tests (Windows)
@@ -248,13 +252,12 @@ jobs:
           QT_OPENGL: software
           PYTHONFAULTHANDLER: "1"
         run: |
-          # --ignore=tests/perf: the perf budgets (catalog scale, tag-update,
-          # interpolation) are calibrated on Linux runner fsync throughput.
-          # Windows + Defender makes every place_managed_file fsync ~an order
-          # slower, so the budgets measure the filesystem, not the code — and
-          # the per-test 45s timeout killed the suite at 3%, masking every
-          # real Windows failure behind it. The perf family stays gated on
-          # the Linux leg (and nightly slow-tests.yml).
+          # --ignore=tests/perf on BOTH legs: the fsync-heavy budgets
+          # repeatedly blew the 45s per-test ceiling (Windows: Defender
+          # makes every place_managed_file fsync ~an order slower and the
+          # timeout killed the suite at 3%, masking real failures; Linux:
+          # runner-load timeouts on 2026-08-29). The nightly slow-tests.yml
+          # owns the whole family with a 300s ceiling.
           python -m pytest -v --tb=line `
             --timeout=45 `
             --timeout-method=thread `
