@@ -7,6 +7,7 @@ methods — the PUBLIC API of ``DataCatalogService`` stays identical.
 """
 from __future__ import annotations
 
+from paleo_workbench.catalog.db import DirtySet
 from paleo_workbench.catalog.models import CatalogError, Tag, normalize_tag_name
 
 
@@ -16,6 +17,19 @@ def _tag_by_name(service, name: str) -> Tag | None:
         if tag.name == normalized:
             return tag
     return None
+
+
+def _drop_empty_associations(document) -> None:
+    """Remove association keys whose id list became empty.
+
+    The SQLite store represents associations as rows: an empty key has no
+    representation, so keeping it in memory would make reload ≠ memory
+    (#1027). The empty key carries no information (``.get(id, [])`` callers
+    are unaffected).
+    """
+    for mapping in (document.asset_tags, document.version_tags):
+        for key in [k for k, ids in mapping.items() if not ids]:
+            del mapping[key]
 
 
 def add_tag(
@@ -58,8 +72,13 @@ def add_tag(
                 ids.append(tag.id)
                 changed = True
         if created or changed:
+            dirty = DirtySet(tags={tag.id: None} if created else {})
+            if asset_id is not None and changed:
+                dirty.mark_asset_tags(asset_id)
+            if version_id is not None and changed:
+                dirty.mark_version_tags(version_id)
             try:
-                service._save()
+                service._save(dirty)
             except Exception:
                 if created and tag in service.document.tags:
                     service.document.tags.remove(tag)
@@ -102,7 +121,13 @@ def remove_tag(
                 service.document.version_tags[version_id].remove(tag.id)
                 changed = True
             if changed:
-                service._save()
+                _drop_empty_associations(service.document)
+                dirty = DirtySet()
+                if asset_id is not None:
+                    dirty.mark_asset_tags(asset_id)
+                if version_id is not None:
+                    dirty.mark_version_tags(version_id)
+                service._save(dirty)
         except Exception:
             _restore_snapshot(service, snapshot)
             raise
@@ -135,7 +160,7 @@ def rename_tag(
             snapshot = _usage_snapshot(service)
             try:
                 tag.display_name = " ".join(str(new_name).split())
-                service._save()
+                service._save(DirtySet(tags={tag.id: None}))
                 return tag
             except Exception:
                 _restore_snapshot(service, snapshot)
@@ -151,7 +176,7 @@ def rename_tag(
         try:
             tag.name = normalized_new
             tag.display_name = " ".join(str(new_name).split())
-            service._save()
+            service._save(DirtySet(tags={tag.id: None}))
             return tag
         except Exception:
             tag.name, tag.display_name = old_name_value, old_display
@@ -166,20 +191,31 @@ def merge_tag_into(service, source: Tag, target: Tag) -> Tag:
     a "failed" merge can never be silently persisted by a later write.
     """
     snapshot = _usage_snapshot(service)
+    touched_assets: dict[str, None] = {}
+    touched_versions: dict[str, None] = {}
     try:
-        for ids in service.document.asset_tags.values():
+        for owner, ids in service.document.asset_tags.items():
             if source.id in ids:
+                touched_assets[owner] = None
                 ids[:] = [i for i in ids if i != source.id]
                 if target.id not in ids:
                     ids.append(target.id)
-        for ids in service.document.version_tags.values():
+        for owner, ids in service.document.version_tags.items():
             if source.id in ids:
+                touched_versions[owner] = None
                 ids[:] = [i for i in ids if i != source.id]
                 if target.id not in ids:
                     ids.append(target.id)
         if source in service.document.tags:
             service.document.tags.remove(source)
-        service._save()
+        _drop_empty_associations(service.document)
+        service._save(
+            DirtySet(
+                tags={source.id, target.id},
+                asset_tags=touched_assets,
+                version_tags=touched_versions,
+            )
+        )
         return target
     except Exception:
         _restore_snapshot(service, snapshot)
@@ -217,7 +253,7 @@ def create_tag(service, name: str) -> Tag:
         tag = Tag(name=normalized, display_name=" ".join(str(name).split()))
         service.document.tags.append(tag)
         try:
-            service._save()
+            service._save(DirtySet(tags={tag.id: None}))
             return tag
         except Exception:
             if tag in service.document.tags:
@@ -271,9 +307,11 @@ def bulk_add_tag(
         try:
             tag = _tag_by_name(service, normalized)
             changed = False
+            created = False
             if tag is None:
                 tag = Tag(name=normalized, display_name=" ".join(str(name).split()))
                 service.document.tags.append(tag)
+                created = True
                 changed = True
             for asset_id in asset_ids:
                 ids = service.document.asset_tags.setdefault(asset_id, [])
@@ -286,7 +324,13 @@ def bulk_add_tag(
                     ids.append(tag.id)
                     changed = True
             if changed:
-                service._save()
+                service._save(
+                    DirtySet(
+                        tags={tag.id: None} if created else {},
+                        asset_tags=dict.fromkeys(asset_ids),
+                        version_tags=dict.fromkeys(version_ids),
+                    )
+                )
             return tag
         except Exception:
             _restore_snapshot(service, snapshot)
@@ -327,7 +371,13 @@ def bulk_remove_tag(
                     ids.remove(tag.id)
                     changed = True
             if changed:
-                service._save()
+                _drop_empty_associations(service.document)
+                service._save(
+                    DirtySet(
+                        asset_tags=dict.fromkeys(asset_ids),
+                        version_tags=dict.fromkeys(version_ids)
+                    )
+                )
         except Exception:
             _restore_snapshot(service, snapshot)
             raise
@@ -393,7 +443,7 @@ def delete_unused_tag(service, name: str) -> Tag:
         snapshot = _usage_snapshot(service)
         try:
             service.document.tags.remove(tag)
-            service._save()
+            service._save(DirtySet(tags={tag.id: None}))
             return tag
         except Exception:
             _restore_snapshot(service, snapshot)
@@ -419,7 +469,7 @@ def prune_unused_tags(service) -> list[Tag]:
         try:
             for tag in unused:
                 service.document.tags.remove(tag)
-            service._save()
+            service._save(DirtySet(tags=dict.fromkeys(t.id for t in unused)))
             return unused
         except Exception:
             _restore_snapshot(service, snapshot)

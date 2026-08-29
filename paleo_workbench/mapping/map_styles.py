@@ -79,6 +79,16 @@ class TextStyle:
     halo_color: str = "#182431"
     halo_width: float = 1.0
     visible: bool = True
+    # #1052: per-feature data-defined overrides honoured by the QGIS PAL
+    # backend — attribute FIELD names (rotation in degrees clockwise, size
+    # in points, colour as a colour string); "" disables each override and
+    # the fixed values above apply.
+    rotation_field: str = ""
+    size_field: str = ""
+    color_field: str = ""
+    # #1102: explicit buffer (halo) colour. "" falls back to halo_color on
+    # the QGIS wire; the native bridge defaults to white when neither is set.
+    buffer_color: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -90,6 +100,10 @@ class TextStyle:
             "halo_color": self.halo_color,
             "halo_width": self.halo_width,
             "visible": self.visible,
+            "rotation_field": self.rotation_field,
+            "size_field": self.size_field,
+            "color_field": self.color_field,
+            "buffer_color": self.buffer_color,
         }
 
     @classmethod
@@ -99,7 +113,16 @@ class TextStyle:
         values = dict(data)
         style = cls()
         replacements: dict[str, Any] = {}
-        for key in ("field", "color", "font_family", "halo_color"):
+        for key in (
+            "field",
+            "color",
+            "font_family",
+            "halo_color",
+            "rotation_field",
+            "size_field",
+            "color_field",
+            "buffer_color",
+        ):
             if values.get(key) is not None:
                 replacements[key] = str(values[key])
         for key in ("size", "halo_width"):

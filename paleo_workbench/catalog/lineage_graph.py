@@ -16,6 +16,7 @@ per query) and are cycle-safe via visited sets.
 """
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -64,31 +65,30 @@ class LineageChain:
     truncated: bool = False
 
 
-def _version_tags(service: Any, version_id: str) -> list[str]:
+def _version_tags(tag_by_id: dict[str, Any], version_tags: Any, version_id: str) -> list[str]:
     try:
-        tag_ids = service.document.version_tags.get(version_id, [])
-        by_id = {t.id: t for t in service.document.tags}
+        tag_ids = version_tags.get(version_id, [])
         return [
-            by_id[tid].display_name or by_id[tid].name
+            tag_by_id[tid].display_name or tag_by_id[tid].name
             for tid in tag_ids
-            if tid in by_id
+            if tid in tag_by_id
         ]
     except Exception:
         return []
 
 
-def _make_node(service: Any, version: Any, depth: int) -> LineageChainNode:
+def _make_node(
+    maps: Any,
+    tag_by_id: dict[str, Any],
+    version_tags: Any,
+    version: Any,
+    depth: int,
+) -> LineageChainNode:
     try:
-        asset_name = service.get_asset(version.asset_id).name
+        asset_name = maps.asset_by_id[version.asset_id].name
     except Exception:
         asset_name = version.asset_id
-    run_id = version.run_id
-    run = None
-    if run_id is not None:
-        try:
-            run = service.get_run(run_id)
-        except Exception:
-            run = None
+    run = maps.run_by_id.get(version.run_id) if version.run_id is not None else None
     return LineageChainNode(
         version_id=version.id,
         asset_id=version.asset_id,
@@ -101,8 +101,8 @@ def _make_node(service: Any, version: Any, depth: int) -> LineageChainNode:
         path=version.path,
         sha256=version.sha256,
         created_at=version.created_at or "",
-        tags=_version_tags(service, version.id),
-        run_id=run_id,
+        tags=_version_tags(tag_by_id, version_tags, version.id),
+        run_id=version.run_id,
         run_operation=run.operation if run is not None else None,
         run_status=run.status if run is not None else None,
         run_generator=run.generator if run is not None else None,
@@ -132,13 +132,17 @@ def build_lineage_chain(
         maps = service._ensure_maps()
         by_id = maps.version_by_id
         children_index = maps.children_by_parent
+        # One precomputed index set per traversal (#1059): rebuilding the tag
+        # map per node cost O(V×T) and get_asset/get_run re-locked per lookup.
+        tag_by_id = {t.id: t for t in service.document.tags}
+        version_tags = service.document.version_tags
 
-        root = _make_node(service, start, 0)
+        root = _make_node(maps, tag_by_id, version_tags, start, 0)
         seen = {start.id}
         truncated = False
-        queue = [root]
+        queue = deque([root])
         while queue:
-            node = queue.pop(0)
+            node = queue.popleft()
             version = by_id.get(node.version_id)
             if version is None:
                 continue
@@ -158,7 +162,7 @@ def build_lineage_chain(
                     truncated = True
                     break
                 seen.add(next_id)
-                child = _make_node(service, child_version, node.depth + 1)
+                child = _make_node(maps, tag_by_id, version_tags, child_version, node.depth + 1)
                 node.children.append(child)
                 queue.append(child)
         return LineageChain(

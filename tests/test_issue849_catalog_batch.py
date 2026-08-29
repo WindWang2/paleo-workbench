@@ -208,14 +208,14 @@ def test_folder_import_registration_uses_single_canonical_write(
     """
     service = catalog.service
     calls = 0
-    real_save = service._store.save
+    real_save = type(service)._flush_canonical_locked
 
-    def counted(document):
+    def counted(_service, _dirty, **_kw):
         nonlocal calls
         calls += 1
-        return real_save(document)
+        return real_save(_service, _dirty, **_kw)
 
-    monkeypatch.setattr(service._store, "save", counted)
+    monkeypatch.setattr(type(service), "_flush_canonical_locked", counted)
 
     controller = DataLifecycleController(None)
     resources = []

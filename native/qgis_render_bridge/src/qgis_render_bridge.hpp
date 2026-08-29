@@ -74,6 +74,16 @@ struct VectorLayerSpec {
     double label_size = 10.0;
     std::string label_color = "#ffffff";
     double label_buffer_size = 0.0;
+    /// #1102: label buffer (halo) colour, same wire format as label_color
+    /// ("#rrggbb" or a named colour). Empty keeps the white default.
+    std::string label_buffer_color;
+    /// #1052: per-feature data-defined label properties (attribute field
+    /// names; empty disables the override). Rotation is degrees clockwise,
+    /// size is points, colour is any QColor-parseable string — QGIS PAL
+    /// evaluates them per feature and they override the fixed format.
+    std::string label_rotation_field;
+    std::string label_size_field;
+    std::string label_color_field;
     /// Authoritative QGIS labeling payload (PAL configuration). Empty keeps
     /// the simple field-based labeling above.
     std::string labeling_xml;

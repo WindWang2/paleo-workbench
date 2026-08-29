@@ -395,6 +395,26 @@ PROVIDER_BY_NAME: dict[str, type[ModelProvider]] = {
 }
 
 
+def _install_bundled_providers() -> None:
+    """Register in-tree providers that need optional dependencies (#1085).
+
+    Imported lazily so a missing onnxruntime never breaks provider module
+    import; registration failures surface at get_provider() time instead.
+    """
+    try:
+        from paleo_workbench.prediction.tiled_onnx import (
+            PROVIDER_TILED_ONNX,
+            TiledOnnxProvider,
+        )
+
+        PROVIDER_BY_NAME.setdefault(PROVIDER_TILED_ONNX, TiledOnnxProvider)
+    except Exception:  # pragma: no cover - optional dependency path
+        pass
+
+
+_install_bundled_providers()
+
+
 def register_provider(name: str, provider_cls: type[ModelProvider]) -> None:
     """Plugin seam: register a provider class under *name* (e.g. tests/fakes).
 

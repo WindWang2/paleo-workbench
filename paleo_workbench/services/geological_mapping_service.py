@@ -140,12 +140,18 @@ class GeologicalMappingService:
                     "value": p["value"],
                 })
 
+        # #1050: the authoritative CRS is project.coordinate.project_crs
+        # (pydantic schema, project/models.py) — ProjectDocument has no `crs`
+        # attribute, so the previous `hasattr(project, "crs")` guard was always
+        # False and every factor dataset silently rendered as EPSG:4326.
+        # Fallback only when the field is absent/empty.
+        project_crs = str(getattr(project.coordinate, "project_crs", "") or "").strip()
         return self.pipeline.extract_factors(
             records,
             factor_name=factor_name,
             target_horizon=resolved_horizon,
             unit=unit,
-            crs=project.crs.project_crs if hasattr(project, "crs") else "EPSG:4326",
+            crs=project_crs or "EPSG:4326",
         )
 
     def create_factor_map(

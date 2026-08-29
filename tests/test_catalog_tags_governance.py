@@ -227,7 +227,7 @@ def test_failed_merge_rolls_back_in_memory_state(service, tmp_path, monkeypatch)
     def _boom(*_a, **_k):
         raise OSError("injected disk failure")
 
-    monkeypatch.setattr(service._store, "save", _boom)
+    monkeypatch.setattr(type(service), "_flush_canonical_locked", _boom)
     with pytest.raises(OSError):
         service.merge_tags("源", "目标")
     monkeypatch.undo()
@@ -245,7 +245,7 @@ def test_failed_rename_rolls_back_name(service, tmp_path, monkeypatch):
     def _boom(*_a, **_k):
         raise OSError("injected disk failure")
 
-    monkeypatch.setattr(service._store, "save", _boom)
+    monkeypatch.setattr(type(service), "_flush_canonical_locked", _boom)
     with pytest.raises(OSError):
         service.rename_tag("原名", "新名")
     monkeypatch.undo()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from PySide6.QtCore import QEvent, Qt, Signal
@@ -12,6 +13,44 @@ from paleo_workbench.pipeline.assets import SEISMIC_KEY
 from paleo_workbench.ui import tokens
 from paleo_workbench.viz.seismic_prediction_helpers import seismic_volume_from_prediction
 from paleo_workbench.viz.adapter import VizAdapter
+
+
+class SeismicCursorGate:
+    """Debounce gate for seismic cursor publications (#1029 producer).
+
+    A publication goes out when at least ``min_interval_ms`` elapsed since
+    the previous one OR the inline moved by more than ``il_jump`` lines —
+    slow drags stay quiet while big jumps never wait out the timer. Pure
+    logic with an injectable clock so the behaviour is unit-testable.
+    """
+
+    def __init__(
+        self,
+        min_interval_ms: float = 30.0,
+        il_jump: float = 1.0,
+        clock=None,
+    ) -> None:
+        self.min_interval_ms = float(min_interval_ms)
+        self.il_jump = float(il_jump)
+        self._clock = clock or time.monotonic
+        self._last_pub_ms: float | None = None
+        self._last_il: float | None = None
+
+    def should_publish(self, il: float) -> bool:
+        now_ms = self._clock() * 1000.0
+        il_val = float(il)
+        if self._last_pub_ms is None:
+            publish = True
+        else:
+            elapsed = now_ms - self._last_pub_ms
+            jumped = (
+                self._last_il is None or abs(il_val - self._last_il) > self.il_jump
+            )
+            publish = elapsed >= self.min_interval_ms or jumped
+        if publish:
+            self._last_pub_ms = now_ms
+            self._last_il = il_val
+        return publish
 
 
 def _primary_resource(project: Any, task: Any, key: str):
@@ -77,7 +116,22 @@ class SeismicViewPanel(QFrame):
         if hasattr(self.view, "segy_loaded"):
             self.view.segy_loaded.connect(self._on_segy_loaded)
         self.stack.addWidget(self.view)
+        # Multi-view cursor producer (#1029): tap the engine's EXISTING
+        # per-profile cursor signals — the same ones that drive the internal
+        # crosshair linking — and republish them on the coordination bus.
+        # No engine subclassing/patching; missing internals degrade to a no-op.
+        self._coordination = None
+        self._cursor_gate = SeismicCursorGate()
+        self._connect_engine_cursor_signals()
         outer.addWidget(host, 1)
+        # #1079: auto-switch 2-D browsing to the chunked store the moment a
+        # background transcode of the displayed SEG-Y completes.
+        try:
+            from paleo_workbench.seismic_lifecycle import add_derived_hook
+
+            add_derived_hook(self._on_derived_store_registered)
+        except Exception:
+            pass
 
     def __del__(self) -> None:
         # pytest and other non-interactive owners may drop the Python wrapper
@@ -155,6 +209,96 @@ class SeismicViewPanel(QFrame):
         btn.setChecked(bool(enabled))
         return True
 
+    # ------------------------------------------------------------------
+    # Multi-view cursor producer (#1029)
+    # ------------------------------------------------------------------
+
+    def attach_coordination(self, controller) -> None:
+        """Receive the shell's coordination controller (app_shell wires this).
+
+        The panel never reaches for a global singleton; without an attached
+        controller cursor moves simply stay panel-local.
+        """
+        self._coordination = controller
+
+    def notify_cursor(self, iline_value: float, xl_value: float, twt_ms: float) -> bool:
+        """Publish a seismic cursor position to the coordination bus.
+
+        Values must be LOGICAL survey numbers (inline/crossline) plus TWT in
+        milliseconds — the same units the engine's coordinate readout uses.
+        Debounced by ``SeismicCursorGate`` (30 ms or >1 inline jump). Returns
+        True when a publication actually went out.
+        """
+        controller = self._coordination
+        if controller is None:
+            return False
+        try:
+            il = float(iline_value)
+            xl = float(xl_value)
+            twt = float(twt_ms)
+        except (TypeError, ValueError):
+            return False
+        if not self._cursor_gate.should_publish(il):
+            return False
+        publish = getattr(controller, "publish_seismic_cursor", None)
+        if not callable(publish):
+            return False
+        publish(int(round(il)), int(round(xl)), twt)
+        return True
+
+    def _connect_engine_cursor_signals(self) -> None:
+        """Connect the engine's existing ``cursor_moved_3d`` profile signals.
+
+        The three orthogonal profile canvases (IL/XL/T) each emit
+        ``cursor_moved_3d(h, v, slice_type)`` on mouse move, in survey units.
+        Guarded by ``hasattr`` so engine internals evolving never breaks the
+        panel — the producer then simply stays disconnected.
+        """
+        for profile_name in ("_profile_il", "_profile_xl", "_profile_t"):
+            vd = getattr(getattr(self.view, profile_name, None), "_vd", None)
+            signal = getattr(vd, "cursor_moved_3d", None)
+            if signal is None:
+                continue
+            try:
+                signal.connect(self._on_engine_cursor)
+            except (RuntimeError, TypeError):
+                continue
+
+    def _on_engine_cursor(self, h_val: float, v_val: float, slice_type: str) -> None:
+        """Republish an engine cursor move as logical (IL, XL, TWT ms).
+
+        Mirrors the engine's own ``_on_cursor_3d`` mapping: the moved panel
+        contributes two axes, the third comes from the current slice sliders,
+        converted to survey numbers through the engine's existing
+        ``_preview_to_survey_coords`` (handles downsample + iline_start/step).
+        """
+        view = self.view
+        current = getattr(view, "_current_il_xl_t", None)
+        if callable(current):
+            il_pos, xl_pos, _t_pos = current()
+        else:
+            renderer = getattr(view, "_renderer_3d", None)
+            il_pos = getattr(renderer, "_il_pos", 0)
+            xl_pos = getattr(renderer, "_xl_pos", 0)
+            _t_pos = getattr(renderer, "_t_pos", 0)
+        to_survey = getattr(view, "_preview_to_survey_coords", None)
+        if callable(to_survey):
+            try:
+                il_val, xl_val, t_val = to_survey("inline", il_pos)
+            except Exception:
+                il_val, xl_val, t_val = float(il_pos), float(xl_pos), float(_t_pos)
+        else:
+            il_val, xl_val, t_val = float(il_pos), float(xl_pos), float(_t_pos)
+        if slice_type == "inline":
+            # h = crossline number, v = TWT ms; inline from the slider
+            self.notify_cursor(il_val, h_val, v_val)
+        elif slice_type == "crossline":
+            # h = inline number, v = TWT ms; crossline from the slider
+            self.notify_cursor(h_val, xl_val, v_val)
+        elif slice_type == "time":
+            # h = inline number, v = crossline number; TWT from the slider
+            self.notify_cursor(h_val, v_val, t_val)
+
     def set_horizon_context(self, horizon: str) -> None:
         """Show target horizon context on the panel title / view slice label."""
         self._horizon_name = str(horizon or "").strip()
@@ -176,6 +320,39 @@ class SeismicViewPanel(QFrame):
         self.empty_label.setHidden(False)
         self.stack.setCurrentWidget(self.empty_label)
         self.view_ready.emit(False)
+
+    def _attach_chunked_store_if_available(self, segy_path) -> None:
+        """Switch 2-D browsing to the chunked store for this SEG-Y, if the
+        project has a fresh DERIVED zarr for it (#1079 auto-switch)."""
+        if not segy_path or not hasattr(self.view, "set_chunked_volume"):
+            return
+        try:
+            from paleo_workbench.catalog import get_catalog_service
+            from paleo_workbench.seismic_lifecycle import derived_store_for_path
+
+            catalog = get_catalog_service()
+            if catalog is None:
+                return
+            store = derived_store_for_path(catalog, segy_path)
+            if store is not None and store.is_dir():
+                self.view.set_chunked_volume(str(store))
+        except Exception:
+            pass  # browsing stays on the RAW fallback path — never fatal
+
+    def _on_derived_store_registered(self, raw_version_id, raw_path, store_path) -> None:
+        """Lifecycle hook: a transcode finished; swap browsing if it is the
+        volume this panel is currently showing."""
+        if (
+            self._segy_session_active
+            and raw_path
+            and self._expected_segy_path
+            and str(raw_path) == str(self._expected_segy_path)
+            and hasattr(self.view, "set_chunked_volume")
+        ):
+            try:
+                self.view.set_chunked_volume(str(store_path))
+            except Exception:
+                pass
 
     def shutdown(self) -> None:
         """Cancel retained SEGY/slice work before the project session closes."""
@@ -254,6 +431,7 @@ class SeismicViewPanel(QFrame):
         self.volume_shape = tuple(int(value) for value in volume.shape)
         self.empty_label.setHidden(True)
         self.stack.setCurrentWidget(self.view)
+        self._attach_chunked_store_if_available(getattr(result, "path", None))
         if self._horizon_name:
             self.set_horizon_context(self._horizon_name)
         self.view_ready.emit(True)

@@ -1,12 +1,14 @@
-"""Portable canonical store for the catalog (ADR 0056).
+"""Portable manifest writer for the catalog (ADR 0056, amended by #1027).
 
-``metadata/catalog.json`` is the single source of truth for catalog data.
-Writes are atomic (temp file + fsync + rename + directory fsync), matching the
-ProjectManager save pattern. Before replacing the canonical file, the previous
+``metadata/catalog.json`` is a checkpoint/export MANIFEST of the catalog:
+``catalog.sqlite`` (see ``db.py``) is the canonical store, and this file is
+written on close / explicit export so the project stays openable by older app
+versions and remains a human-readable, diffable export artifact. Writes are
+atomic (temp file + fsync + rename + directory fsync), matching the
+ProjectManager save pattern. Before replacing the manifest, the previous
 revision is kept as ``metadata/catalog.json.bak`` so a crash mid-save can
-never lose more than the in-flight revision: ``load()`` falls back to the
-``.bak`` when the canonical file is missing or unreadable. The SQLite database
-is only a rebuildable index over this document — see ``db.py``.
+never lose more than the in-flight checkpoint: ``load()`` falls back to the
+``.bak`` when the manifest is missing or unreadable.
 """
 
 from __future__ import annotations

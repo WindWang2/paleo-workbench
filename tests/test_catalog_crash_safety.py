@@ -64,17 +64,19 @@ def _source(tmp_path: Path, name: str, payload: bytes) -> Path:
 
 def test_save_keeps_previous_revision_as_bak(service):
     service.import_raw(_source(service.project_path.parent, "a.bin", b"v1"))
+    service.export_manifest()  # checkpoint #1
     path = catalog_file_for(service.project_path)
     first_rev = json.loads(path.read_text(encoding="utf-8"))["catalog_revision"]
 
     service.import_raw(_source(service.project_path.parent, "b.bin", b"v2"))
+    service.export_manifest()  # checkpoint #2
     second_rev = json.loads(path.read_text(encoding="utf-8"))["catalog_revision"]
-    assert second_rev == first_rev + 1
+    assert second_rev > first_rev
 
     bak = catalog_bak_file_for(service.project_path)
     assert bak.is_file()
     bak_rev = json.loads(bak.read_text(encoding="utf-8"))["catalog_revision"]
-    assert bak_rev == first_rev  # backup holds the PREVIOUS revision
+    assert bak_rev < second_rev  # backup holds the PREVIOUS checkpoint
 
 
 def test_load_falls_back_to_bak_when_canonical_missing(tmp_path):
@@ -127,23 +129,23 @@ def test_sigkill_mid_save_reopens_consistent(tmp_path: Path, mode: str):
     if path.is_file():
         data = json.loads(path.read_text(encoding="utf-8"))
         assert isinstance(data["catalog_revision"], int)  # never half-written
-    # The previous revision is recoverable (either as canonical or backup).
-    assert path.is_file() or catalog_bak_file_for(project).is_file()
 
-    # Reopen: the catalog must be consistent and functional.
+    # Reopen: the catalog must be consistent and functional. The store is
+    # SQLite-canonical (#1027): a mid-transaction kill rolls the second
+    # import back (exactly one version), a post-commit kill keeps both.
     svc = DataCatalogService.open(project)
     try:
         assert svc.document.catalog_revision >= 1
         if mode == "replace":
-            # The killer struck after catalog.json moved aside but before the
-            # new file landed → backup recovery, first import present.
             assert len(svc.document.versions) == 1
+        else:
+            assert len(svc.document.versions) == 2
         assert svc.document.versions[0].path.endswith("x.bin")
         for version in svc.document.versions:
             assert svc.resolve_path(version).is_file()
             status = svc.verify_integrity(version.id).status_for(version.id)
             assert status in ("verified", "unknown")
-        # The index rebuilt/primed from the recovered document.
+        # The store is in step with the recovered document.
         assert svc.index_revision() == svc.document.catalog_revision
         # The project is writable again (self-healing).
         extra = svc.import_raw(_source(tmp_path, "c.bin", b"post-crash"))
@@ -215,17 +217,17 @@ def test_rename_failure_restores_previous_revision(service):
 
 def test_failed_metadata_save_rolls_back_version_and_payload(service):
     src = _source(service.project_path.parent, "a.bin", b"v1")
-    real_save = service._store.save
+    real_save = type(service)._flush_canonical_locked
 
-    def _boom(document):
+    def _boom(_service, _dirty, **_kw):
         raise OSError("injected metadata failure")
 
-    service._store.save = _boom  # type: ignore[method-assign]
+    type(service)._flush_canonical_locked = _boom  # type: ignore[method-assign]
     try:
         with pytest.raises(OSError):
             service.import_raw(src)
     finally:
-        service._store.save = real_save  # type: ignore[method-assign]
+        type(service)._flush_canonical_locked = real_save  # type: ignore[method-assign]
 
     # Nothing committed: no version, no asset, no payload.
     assert len(service.document.versions) == 0
@@ -316,7 +318,7 @@ def test_committed_version_never_claims_missing_payload(service):
 
 def _assert_memory_matches_disk(service) -> None:
     """Reload the canonical store and require byte-identical state."""
-    disk = CatalogStore(service.project_path).load()
+    disk = DataCatalogService.open(service.project_path).document
     assert disk.model_dump(mode="json") == service.document.model_dump(mode="json")
 
 
@@ -325,15 +327,15 @@ def test_remove_tag_rolls_back_on_failed_save(service, monkeypatch):
     service.add_tag("qc", asset_id=version.asset_id)
     before = list(service.document.asset_tags[version.asset_id])
 
-    real_save = service._store.save
+    real_save = type(service)._flush_canonical_locked
 
-    def boom(_document):
+    def boom(_service, _dirty, **_kw):
         raise OSError("disk full")
 
-    monkeypatch.setattr(service._store, "save", boom)
+    monkeypatch.setattr(type(service), "_flush_canonical_locked", boom)
     with pytest.raises(OSError):
         service.remove_tag("qc", asset_id=version.asset_id)
-    monkeypatch.setattr(service._store, "save", real_save)
+    monkeypatch.setattr(type(service), "_flush_canonical_locked", real_save)
 
     # No half-applied removal in memory; disk agrees.
     assert service.document.asset_tags[version.asset_id] == before
@@ -343,15 +345,15 @@ def test_remove_tag_rolls_back_on_failed_save(service, monkeypatch):
 def test_update_run_status_rolls_back_on_failed_save(service, monkeypatch):
     run = service.register_run("op", status="running", parameters={"k": "v"})
 
-    real_save = service._store.save
+    real_save = type(service)._flush_canonical_locked
 
-    def boom(_document):
+    def boom(_service, _dirty, **_kw):
         raise OSError("disk full")
 
-    monkeypatch.setattr(service._store, "save", boom)
+    monkeypatch.setattr(type(service), "_flush_canonical_locked", boom)
     with pytest.raises(OSError):
         service.update_run_status(run.id, "failed", extra_parameters={"x": "1"})
-    monkeypatch.setattr(service._store, "save", real_save)
+    monkeypatch.setattr(type(service), "_flush_canonical_locked", real_save)
 
     # The run must not be half-updated (stuck-RUNNING compensation contract):
     # status/parameters revert in memory and match the disk.
@@ -369,15 +371,15 @@ def test_attach_lineage_rolls_back_on_failed_save(service, monkeypatch):
     v2 = service.import_raw(src2)
     adapter = CoreCatalogAdapter(service)
 
-    real_save = service._store.save
+    real_save = type(service)._flush_canonical_locked
 
-    def boom(_document):
+    def boom(_service, _dirty, **_kw):
         raise OSError("disk full")
 
-    monkeypatch.setattr(service._store, "save", boom)
+    monkeypatch.setattr(type(service), "_flush_canonical_locked", boom)
     with pytest.raises(OSError):
         adapter.attach_lineage(source_version_id=v1.id, target_version_id=v2.id)
-    monkeypatch.setattr(service._store, "save", real_save)
+    monkeypatch.setattr(type(service), "_flush_canonical_locked", real_save)
 
     # The edge must not linger in memory; disk agrees (reopen would drop it).
     assert v1.id not in service.get_version(v2.id).parent_version_ids
@@ -395,15 +397,15 @@ def test_attach_lineage_children_map_rolls_back_with_edge(service, monkeypatch):
     adapter = CoreCatalogAdapter(service)
     service._ensure_maps()
 
-    real_save = service._store.save
+    real_save = type(service)._flush_canonical_locked
 
-    def boom(_document):
+    def boom(_service, _dirty, **_kw):
         raise OSError("disk full")
 
-    monkeypatch.setattr(service._store, "save", boom)
+    monkeypatch.setattr(type(service), "_flush_canonical_locked", boom)
     with pytest.raises(OSError):
         adapter.attach_lineage(source_version_id=v1.id, target_version_id=v2.id)
-    monkeypatch.setattr(service._store, "save", real_save)
+    monkeypatch.setattr(type(service), "_flush_canonical_locked", real_save)
 
     # The maintained children index must not keep a phantom child entry.
     assert service._children_by_parent.get(v1.id, []) == []
@@ -490,32 +492,32 @@ def test_trash_crash_after_payload_move_restores_from_trash(service, tmp_path):
 
 
 def test_load_falls_back_to_bak_when_canonical_corrupt(tmp_path):
-    """A corrupt-but-present catalog.json (torn write / manual edit) must not
-    block project open: the previous revision is recovered from .bak (review
-    finding M3)."""
+    """A corrupt manifest must not block project open nor lose committed
+    data: the SQLite store is canonical (#1027), so BOTH imports survive —
+    strictly better than the old .bak recovery — and the next checkpoint
+    overwrites the corrupt bytes with a valid manifest."""
     project_path = _make_project(tmp_path)
     svc = DataCatalogService.open(project_path)
     src = _source(tmp_path, "a.bin", b"precious")
     svc.import_raw(src)
     svc.import_raw(_source(tmp_path, "b.bin", b"also precious"))
-    svc.close()
 
-    # Corrupt the canonical file but keep the .bak intact.
+    # Corrupt the manifest (torn write / manual edit); the store is intact.
     canonical = catalog_file_for(project_path)
-    bak = catalog_bak_file_for(project_path)
-    assert bak.is_file()
     canonical.write_text("{ this is not valid json !!!", encoding="utf-8")
 
     svc2 = DataCatalogService.open(project_path)
     try:
-        # The project opens with the backup revision (assets preserved).
-        assert len(svc2.document.assets) == 1
-        assert svc2.document.versions
-        # The canonical file was re-promoted from the backup.
+        # The project opens with EVERY committed mutation intact.
+        assert len(svc2.document.assets) == 2
+        assert len(svc2.document.versions) == 2
+        # The next checkpoint heals the corrupt manifest.
+        svc2.export_manifest()
         import json as _json
         _json.loads(canonical.read_text(encoding="utf-8"))
     finally:
         svc2.close()
+        svc.close()
 
 
 # ------------------------------------------------ first-save backup + corrupt

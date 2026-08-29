@@ -182,6 +182,18 @@ class CoordinateTransformHub:
                 return True
             return False
 
+    def clear_all_wells(self) -> int:
+        """Remove every registered well (project switch/close). Returns the count removed."""
+        with self._lock:
+            removed = len(self._wells)
+            self._wells.clear()
+            return removed
+
+    def registered_well_ids(self) -> tuple[str, ...]:
+        """Snapshot of currently registered well ids (diagnostics/tests)."""
+        with self._lock:
+            return tuple(self._wells.keys())
+
     def map_to_well(self, x: float, y: float, max_radius: float = 50.0) -> str | None:
         """Find the nearest registered well within max_radius (Euclidean surface distance)."""
         best_id: str | None = None

@@ -120,6 +120,24 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
                 if (labels.contains("size")) layer.label_size = py::cast<double>(labels["size"]);
                 if (labels.contains("color")) layer.label_color = py::cast<std::string>(labels["color"]);
                 if (labels.contains("buffer")) layer.label_buffer_size = py::cast<double>(labels["buffer"]);
+                // #1102: the buffer (halo) colour uses the same wire format
+                // as "color" (a colour string); previously decoded away and
+                // dropped, leaving the C++ side hardcoding white halos.
+                if (labels.contains("buffer_color")) {
+                    layer.label_buffer_color = py::cast<std::string>(labels["buffer_color"]);
+                }
+                // #1052: per-feature data-defined label styling. The values
+                // are attribute FIELD names evaluated per feature by QGIS
+                // PAL (rotation degrees clockwise / size points / colour).
+                if (labels.contains("rotation_field")) {
+                    layer.label_rotation_field = py::cast<std::string>(labels["rotation_field"]);
+                }
+                if (labels.contains("size_field")) {
+                    layer.label_size_field = py::cast<std::string>(labels["size_field"]);
+                }
+                if (labels.contains("color_field")) {
+                    layer.label_color_field = py::cast<std::string>(labels["color_field"]);
+                }
             }
         }
         layer.data_revision = py::cast<std::uint64_t>(data["data_revision"]);

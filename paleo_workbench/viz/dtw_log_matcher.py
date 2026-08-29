@@ -37,6 +37,58 @@ class DTWLogMatcher:
             std = 1.0
         return (values - float(np.mean(values))) / std
 
+    @staticmethod
+    def _min_max_downsample(
+        curve: np.ndarray, bin_size: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Min-max peak-preserving downsampling of a 1-D curve (#1054).
+
+        Each ``bin_size``-sample segment contributes its minimum sample and
+        its maximum sample, ordered by original index, so the segment's global
+        extrema can never be dropped.  Uniform striding (``curve[::stride]``)
+        silently deleted 1-2 sample thin-bed spikes and left DTW correlating
+        decimated curves without their most distinctive markers.
+
+        Returns:
+            (downsampled_values, original_indices) where ``original_indices``
+            is strictly increasing and maps each kept sample back to its
+            position in the input curve.
+        """
+        n = curve.size
+        if n == 0 or bin_size <= 1:
+            return curve, np.arange(n, dtype=np.int64)
+
+        downsampled_vals: list[float] = []
+        orig_indices: list[int] = []
+
+        for start in range(0, n, bin_size):
+            end = min(start + bin_size, n)
+            chunk = curve[start:end]
+            min_rel = int(np.argmin(chunk))
+            max_rel = int(np.argmax(chunk))
+            min_idx = start + min_rel
+            max_idx = start + max_rel
+
+            if min_idx < max_idx:
+                downsampled_vals.append(float(chunk[min_rel]))
+                orig_indices.append(min_idx)
+                downsampled_vals.append(float(chunk[max_rel]))
+                orig_indices.append(max_idx)
+            elif max_idx < min_idx:
+                downsampled_vals.append(float(chunk[max_rel]))
+                orig_indices.append(max_idx)
+                downsampled_vals.append(float(chunk[min_rel]))
+                orig_indices.append(min_idx)
+            else:
+                # Flat segment: minimum and maximum coincide.
+                downsampled_vals.append(float(chunk[min_rel]))
+                orig_indices.append(min_idx)
+
+        return (
+            np.asarray(downsampled_vals, dtype=np.float64),
+            np.asarray(orig_indices, dtype=np.int64),
+        )
+
     def match_curves(
         self,
         curve_ref: np.ndarray,
@@ -53,13 +105,24 @@ class DTWLogMatcher:
         if n_ref == 0 or n_target == 0:
             return AlignmentResult(cost=float("inf"), path_ref=[], path_target=[])
 
-        # Decimate over-long curves so the cost matrix stays bounded; path
-        # indices are mapped back to original sample space below.
+        # Decimate over-long curves with min-max peak-preserving downsampling
+        # so the cost matrix stays bounded while thin-bed extrema survive;
+        # path indices are mapped back to original sample space below (#1054).
+        # Each segment keeps up to two samples, hence the 2x scale factor.
         stride = 1
         if _MAX_COST_CELLS > 0 and n_ref * n_target > _MAX_COST_CELLS:
-            stride = max(1, int(math.ceil(math.sqrt(float(n_ref * n_target) / float(_MAX_COST_CELLS)))))
-        d_ref = c_ref[::stride]
-        d_target = c_target[::stride]
+            scale = math.sqrt(float(n_ref * n_target) / float(_MAX_COST_CELLS))
+            stride = max(2, int(math.ceil(scale * 2.0)))
+        if stride > 1:
+            d_ref, ref_indices = self._min_max_downsample(c_ref, stride)
+            d_target, target_indices = self._min_max_downsample(c_target, stride)
+            # The kept extrema redistribute the value statistics; renormalize
+            # so both decimated sequences stay comparable.
+            d_ref = self._normalized(d_ref)
+            d_target = self._normalized(d_target)
+        else:
+            d_ref, ref_indices = c_ref, np.arange(n_ref, dtype=np.int64)
+            d_target, target_indices = c_target, np.arange(n_target, dtype=np.int64)
         d_n_ref = d_ref.size
         d_n_target = d_target.size
 
@@ -118,9 +181,12 @@ class DTWLogMatcher:
         path_ref.reverse()
         path_target.reverse()
 
+        # Map the warping path from decimated sample space back to original
+        # curve indices. ``ref_indices``/``target_indices`` are strictly
+        # increasing, so the mapped path stays monotone in original space.
         if stride > 1:
-            path_ref = [min(idx * stride, n_ref - 1) for idx in path_ref]
-            path_target = [min(idx * stride, n_target - 1) for idx in path_target]
+            path_ref = [int(ref_indices[idx]) for idx in path_ref]
+            path_target = [int(target_indices[idx]) for idx in path_target]
 
         return AlignmentResult(
             cost=float(cost_matrix[d_n_ref, d_n_target]),

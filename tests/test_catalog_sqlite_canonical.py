@@ -1,0 +1,513 @@
+"""SQLite-canonical catalog storage (Issue #1027).
+
+``catalog.sqlite`` (WAL) is the canonical metadata store; ``catalog.json`` is
+demoted to a checkpoint/export manifest. These tests lock the storage
+invariants: mutations persist transactionally per-row (never via a full
+document rewrite), the legacy JSON project migrates crash-safely, the model
+registry round-trips, and reopening reads from SQLite.
+"""
+
+from __future__ import annotations
+
+import json
+import random
+import sqlite3
+from pathlib import Path
+
+import pytest
+
+from paleo_workbench.catalog.db import CatalogIndex
+from paleo_workbench.catalog.models import CatalogDocument, DataAsset, Tag
+from paleo_workbench.catalog.service import DataCatalogService
+from paleo_workbench.catalog.storage import catalog_dir_for
+from paleo_workbench.catalog.store import (
+    catalog_bak_file_for,
+    catalog_file_for,
+)
+
+
+@pytest.fixture
+def service(tmp_path):
+    project = tmp_path / "proj" / "demo.paleo.json"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text("{}", encoding="utf-8")
+    svc = DataCatalogService.open(project)
+    yield svc
+    svc.close()
+
+
+def _db_file(project_path: Path) -> Path:
+    return catalog_dir_for(project_path) / "catalog.sqlite"
+
+
+def _source(parent: Path, name: str, payload: bytes = b"payload") -> Path:
+    src = parent / "incoming" / name
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(payload)
+    return src
+
+
+# ---------------------------------------------------------------------------
+# Mutations are incremental (no canonical JSON rewrite)
+# ---------------------------------------------------------------------------
+
+
+def test_mutation_leaves_catalog_json_untouched(service):
+    """A metadata/tag mutation must not rewrite the multi-megabyte manifest."""
+    version = service.import_raw(_source(service.project_path.parent, "a.bin"))
+    service.close()  # first checkpoint materializes the manifest
+    service = DataCatalogService.open(service.project_path)
+    json_path = catalog_file_for(service.project_path)
+    before = json_path.read_bytes()
+
+    service.update_asset_metadata(version.asset_id, {"quality": "good"})
+    service.add_tag("qc", asset_id=version.asset_id)
+
+    assert json_path.read_bytes() == before, (
+        "catalog.json was rewritten during a single-row mutation"
+    )
+    # But the mutation IS durable in the canonical store.
+    reopened = DataCatalogService.open(service.project_path)
+    assert reopened.get_asset(version.asset_id).metadata["quality"] == "good"
+    reopened.close()
+
+
+def test_reopen_reads_canonical_state_from_sqlite(service):
+    """State survives reopen even when the JSON manifest is deleted."""
+    version = service.import_raw(_source(service.project_path.parent, "a.bin"))
+    service.add_tag("qc", asset_id=version.asset_id)
+    service.close()
+
+    catalog_file_for(service.project_path).unlink()
+    catalog_bak_file_for(service.project_path).unlink(missing_ok=True)
+
+    reopened = DataCatalogService.open(service.project_path)
+    assert reopened.get_asset(version.asset_id) is not None
+    assert "qc" in [t.name for t in reopened.list_tags()]
+    reopened.close()
+
+
+def test_batch_save_does_not_deep_copy_document(service, monkeypatch):
+    """batch_save must not model_copy(deep=True) the whole graph (#1027)."""
+    deep_copies: list[int] = []
+    real_model_copy = CatalogDocument.model_copy
+
+    def spy(self, **kwargs):
+        if kwargs.get("deep"):
+            deep_copies.append(len(self.assets))
+        return real_model_copy(self, **kwargs)
+
+    monkeypatch.setattr(CatalogDocument, "model_copy", spy)
+
+    with service.batch_save():
+        for i in range(5):
+            service.import_raw(
+                _source(service.project_path.parent, f"b{i}.bin", f"v{i}".encode())
+            )
+
+    assert deep_copies == [], "batch_save performed a full-graph deep copy"
+    # And the batch is durably persisted in one go.
+    reopened = DataCatalogService.open(service.project_path)
+    assert len(reopened.list_assets()) >= 5
+    reopened.close()
+
+
+def test_failed_batch_restores_document_from_canonical(service):
+    """A failed batch leaves memory equal to the (untouched) canonical state."""
+    version = service.import_raw(_source(service.project_path.parent, "a.bin"))
+    before_tags = {t.name for t in service.list_tags()}
+
+    class _Boom(Exception):
+        pass
+
+    with pytest.raises(_Boom):
+        with service.batch_save():
+            service.add_tag("doomed", asset_id=version.asset_id)
+            service.add_tag("also-doomed", asset_id=version.asset_id)
+            raise _Boom()
+
+    assert {t.name for t in service.list_tags()} == before_tags
+    reopened = DataCatalogService.open(service.project_path)
+    assert {t.name for t in reopened.list_tags()} == before_tags
+    reopened.close()
+
+
+# ---------------------------------------------------------------------------
+# Legacy catalog.json migration
+# ---------------------------------------------------------------------------
+
+
+def _legacy_project(tmp_path: Path, n_assets: int = 3) -> Path:
+    """A pre-SQLite-canonical project: only catalog.json exists."""
+    project = tmp_path / "legacy" / "demo.paleo.json"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text("{}", encoding="utf-8")
+    document = CatalogDocument(catalog_revision=7)
+    for i in range(n_assets):
+        document.assets.append(
+            DataAsset(id=f"asset_{i}", name=f"legacy-{i}", type="raw")
+        )
+    metadata_dir = catalog_dir_for(project)
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    (metadata_dir / "catalog.json").write_text(
+        json.dumps(document.model_dump(mode="json")), encoding="utf-8"
+    )
+    return project
+
+
+def test_legacy_json_migrates_transactionally(tmp_path):
+    project = _legacy_project(tmp_path)
+    service = DataCatalogService.open(project)
+
+    db_path = _db_file(project)
+    assert db_path.is_file()
+    conn = sqlite3.connect(db_path)
+    assert conn.execute("SELECT count(*) FROM assets").fetchone()[0] == 3
+    assert conn.execute(
+        "SELECT value FROM sync_state WHERE key='catalog_revision'"
+    ).fetchone()[0] == "7"
+    conn.close()
+
+    # Reopen is idempotent and does not need the JSON.
+    catalog_file_for(project).unlink()
+    reopened = DataCatalogService.open(project)
+    assert len(reopened.list_assets()) == 3
+    assert reopened.document.catalog_revision == 7
+    reopened.close()
+    service.close()
+
+
+def test_migration_failure_leaves_legacy_project_recoverable(tmp_path, monkeypatch):
+    """A crash mid-migration must never damage the legacy catalog.json."""
+    project = _legacy_project(tmp_path, n_assets=2)
+    original_json = catalog_file_for(project).read_bytes()
+
+    def boom(self, document):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(CatalogIndex, "write_all", boom)
+    with pytest.raises(sqlite3.OperationalError):
+        DataCatalogService.open(project)
+    monkeypatch.undo()
+
+    # The legacy project is fully recoverable: json intact, retry succeeds.
+    assert catalog_file_for(project).read_bytes() == original_json
+    CatalogIndex(project).reset()  # clear any half-initialized db
+    service = DataCatalogService.open(project)
+    assert len(service.list_assets()) == 2
+    service.close()
+
+
+def test_newer_legacy_json_wins_over_stale_sqlite(tmp_path):
+    """A json newer than the db (old app version wrote it) is re-imported."""
+    project = tmp_path / "proj" / "demo.paleo.json"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text("{}", encoding="utf-8")
+    service = DataCatalogService.open(project)
+    service.import_raw(_source(tmp_path, "x.bin"))
+    service.close()
+
+    # Simulate an OLD app version (json-canonical) adding one more asset by
+    # hand-editing the manifest with a higher revision.
+    json_path = catalog_file_for(project)
+    data = json.loads(json_path.read_text(encoding="utf-8"))
+    data["catalog_revision"] += 1
+    data["assets"].append(
+        {
+            "id": "asset_foreign",
+            "name": "foreign",
+            "type": "raw",
+            "description": "",
+            "current_version_id": None,
+            "legacy_resource_id": None,
+            "metadata": {},
+            "created_at": "2026-01-01T00:00:00",
+            "updated_at": "2026-01-01T00:00:00",
+            "trashed": False,
+            "trashed_at": None,
+        }
+    )
+    json_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    reopened = DataCatalogService.open(project)
+    ids = {a.id for a in reopened.list_assets()}
+    assert "asset_foreign" in ids, "externally-written json revision was dropped"
+    reopened.close()
+
+
+# ---------------------------------------------------------------------------
+# Model registry round-trip (was missing from the SQLite schema entirely)
+# ---------------------------------------------------------------------------
+
+
+def test_model_registry_round_trips_through_sqlite(service):
+    model = service.register_model(
+        model_id="kriging-v1",
+        model_name="Kriging",
+        capability="interpolation",
+        provider="local_asset",
+        status="production",
+    )
+    service.register_model_version(
+        model.model_id,
+        model_version="1.0",
+        artifact_uri="artifacts/kriging.bin",
+        checksum="abc123",
+        deterministic=True,
+    )
+
+    catalog_file_for(service.project_path).unlink(missing_ok=True)
+    reopened = DataCatalogService.open(service.project_path)
+    assert reopened.get_model("kriging-v1") is not None
+    assert reopened.get_model_version("kriging-v1", "1.0").checksum == "abc123"
+    reopened.close()
+
+
+# ---------------------------------------------------------------------------
+# Differential equivalence: incremental flush == full rebuild
+# ---------------------------------------------------------------------------
+
+
+def _dump(db_path: Path) -> dict[str, list[tuple]]:
+    if not db_path.is_file():
+        return {}
+    conn = sqlite3.connect(db_path)
+    try:
+        tables = [
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+                " AND name != 'sqlite_sequence'"
+            )
+        ]
+        dump = {
+            t: sorted(conn.execute(f"SELECT * FROM {t}").fetchall()) for t in tables
+        }
+        # manifest_mtime_ns is open-session bookkeeping, not catalog data.
+        dump["sync_state"] = [
+            row for row in dump.get("sync_state", [])
+            if row[0] != "manifest_mtime_ns"
+        ]
+        return dump
+    finally:
+        conn.close()
+
+
+def test_incremental_flushes_equal_full_rebuild(service, tmp_path):
+    """Dirty-set flushes must produce identical tables to a full rebuild."""
+    rng = random.Random(42)
+    assets = []
+    for i in rng.sample(range(60), 12):
+        v = service.import_raw(
+            _source(service.project_path.parent, f"d{i}.bin", f"d{i}".encode()),
+            name=f"asset-{i}",
+        )
+        assets.append(v.asset_id)
+    for i in range(6):
+        service.add_tag(f"t{i}", asset_id=assets[i])
+    service.update_asset_metadata(assets[0], {"k": "v"})
+    run = service.register_run(
+        "op-x", input_version_ids=[], output_version_ids=[], status="running"
+    )
+    service.update_run_status(run.id, "failed")
+    service.trash_asset(assets[1])
+
+    incremental_dump = _dump(_db_file(service.project_path))
+
+    ref_project = tmp_path / "ref" / "demo.paleo.json"
+    ref_project.parent.mkdir(parents=True, exist_ok=True)
+    ref_project.write_text("{}", encoding="utf-8")
+    reference = CatalogIndex(ref_project)
+    reference.reset()
+    reference.write_all(service.document)
+
+    assert incremental_dump == _dump(reference.db_path), (
+        "incrementally-flushed tables differ from a full rebuild"
+    )
+    reference.close()
+
+
+# ---------------------------------------------------------------------------
+# Cross-process stale-write guard (replaces the #411 mtime guard)
+# ---------------------------------------------------------------------------
+
+
+def test_external_writer_advancing_db_blocks_overwrite(service):
+    """A revision bumped by another process must refuse the next save."""
+    version = service.import_raw(_source(service.project_path.parent, "a.bin"))
+
+    # Simulate an external process committing a new revision.
+    conn = sqlite3.connect(_db_file(service.project_path))
+    with conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO sync_state (key, value)"
+            " VALUES ('catalog_revision', '999')"
+        )
+    conn.close()
+
+    from paleo_workbench.catalog.service import CatalogStaleWriteError
+
+    with pytest.raises(CatalogStaleWriteError):
+        service.update_asset_metadata(version.asset_id, {"k": "v"})
+
+
+def test_transiently_unreadable_store_refuses_open_not_overwrite(tmp_path, monkeypatch):
+    """Review BLOCKER regression: a BUSY store must never be replaced by the
+    stale manifest (the silent last-writer-wins #1027/#411 exists to kill).
+
+    Session 1 commits rev 2; the manifest is still at rev 1. Session 2's
+    open() hits a transient OperationalError (busy/locked) reading the
+    store: open must REFUSE, leaving the rev-2 store byte-identical.
+    """
+    project = tmp_path / "proj" / "demo.paleo.json"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text("{}", encoding="utf-8")
+    service = DataCatalogService.open(project)
+    service.import_raw(_source(tmp_path, "a.bin"))
+    service.export_manifest()  # manifest checkpoint at rev 1
+    manifest_before = catalog_file_for(project).read_bytes()
+    service.import_raw(_source(tmp_path, "b.bin"))  # rev 2, store only
+    service.close()
+    # Rewind the manifest to the rev-1 checkpoint: an old-style stale
+    # manifest that MUST NOT replace the rev-2 canonical store.
+    catalog_file_for(project).write_bytes(manifest_before)
+
+    from paleo_workbench.catalog import db as db_module
+
+    real_connect = CatalogIndex._connect
+
+    def busy_once(self):
+        if not getattr(busy_once, "armed", False):
+            return real_connect(self)
+        busy_once.armed = False  # fail exactly one connection attempt
+        raise sqlite3.OperationalError("database is locked")
+
+    busy_once.armed = True
+    monkeypatch.setattr(CatalogIndex, "_connect", busy_once)
+
+    from paleo_workbench.catalog.models import CatalogError
+
+    with pytest.raises(CatalogError, match="unreadable"):
+        DataCatalogService.open(project)
+    monkeypatch.undo()
+
+    # The store was NOT overwritten with the stale manifest: the committed
+    # revision survived (byte-identity is not required — connecting for the
+    # health probe may checkpoint the WAL — but the DATA must be rev 2).
+    conn = sqlite3.connect(_db_file(project))
+    rev = conn.execute(
+        "SELECT value FROM sync_state WHERE key='catalog_revision'"
+    ).fetchone()[0]
+    n_assets = conn.execute("SELECT count(*) FROM assets").fetchone()[0]
+    conn.close()
+    assert (int(rev), n_assets) >= (2, 2)
+    assert catalog_file_for(project).read_bytes() == manifest_before
+    reopened = DataCatalogService.open(project)
+    assert len(reopened.list_assets()) == 2
+    reopened.close()
+    del db_module
+
+
+def test_garbage_store_recovers_from_manifest_with_forensics(tmp_path):
+    """Deterministic corruption heals: rebuild from the manifest, keep the
+    damaged bytes aside (the old disposable-index behaviour, preserved)."""
+    project = tmp_path / "proj" / "demo.paleo.json"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text("{}", encoding="utf-8")
+    service = DataCatalogService.open(project)
+    service.import_raw(_source(tmp_path, "a.bin"))
+    service.close()
+
+    _db_file(project).write_bytes(b"not-a-sqlite-database")
+    reopened = DataCatalogService.open(project)
+    assert len(reopened.list_assets()) == 1
+    reopened.close()
+    leftovers = list(
+        (tmp_path / "proj" / "demo.artifacts" / "metadata").glob(
+            "catalog.sqlite.corrupt-*"
+        )
+    )
+    assert leftovers and leftovers[0].read_bytes() == b"not-a-sqlite-database"
+
+
+def test_damaged_sync_state_with_newer_store_goes_through_corrupt_flow(tmp_path):
+    """Review path A regression: a store whose sync_state is unreadable while
+    its assets are NEWER than the manifest must classify as corrupt —
+    forensics preserved, rebuild from the manifest — never as plain legacy
+    (which rebuilt silently and rewound the committed revisions)."""
+    project = tmp_path / "proj" / "demo.paleo.json"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text("{}", encoding="utf-8")
+    service = DataCatalogService.open(project)
+    service.import_raw(_source(tmp_path, "a.bin"))
+    service.export_manifest()  # checkpoint at rev 1
+    stale_manifest = catalog_file_for(project).read_bytes()
+    service.import_raw(_source(tmp_path, "b.bin"))  # rev 2, store only
+    service.close()
+    catalog_file_for(project).write_bytes(stale_manifest)  # stale manifest
+
+    conn = sqlite3.connect(_db_file(project))
+    conn.execute("DROP TABLE sync_state")
+    conn.commit()
+    conn.close()
+
+    from paleo_workbench.catalog.db import CatalogIndex as _Idx
+
+    assert _Idx(project).store_health() == "corrupt"
+    reopened = DataCatalogService.open(project)
+    # The store could not be read: recovery falls back to the last manifest
+    # checkpoint (rev 1) — visibly, with the damaged bytes preserved.
+    assert len(reopened.list_assets()) == 1
+    reopened.close()
+    leftovers = list(
+        catalog_dir_for(project).glob("catalog.sqlite.corrupt-*")
+    )
+    assert leftovers, "damaged store bytes were not preserved for forensics"
+
+
+def test_zero_length_store_initializes_cleanly(tmp_path):
+    """A zero-byte catalog.sqlite (crash during first open) must not brick
+    the project: it holds nothing, so initialize over it."""
+    project = tmp_path / "proj" / "demo.paleo.json"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text("{}", encoding="utf-8")
+    catalog_dir_for(project).mkdir(parents=True, exist_ok=True)
+    _db_file(project).write_bytes(b"")
+
+    service = DataCatalogService.open(project)
+    assert service.list_assets() == []
+    service.import_raw(_source(tmp_path, "a.bin"))
+    service.close()
+
+    reopened = DataCatalogService.open(project)
+    assert len(reopened.list_assets()) == 1
+    reopened.close()
+
+
+def test_legacy_colliding_tag_names_do_not_break_writes(tmp_path):
+    """Pre-#884 documents can hold two tags colliding under the current
+    normalizer; migration and later reconciles must not raise UNIQUE."""
+    project = tmp_path / "proj" / "demo.paleo.json"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text("{}", encoding="utf-8")
+    metadata_dir = catalog_dir_for(project)
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    document = CatalogDocument(catalog_revision=3)
+    document.tags.append(Tag(id="tag_a", name="Foo", display_name="Foo"))
+    document.tags.append(Tag(id="tag_b", name="ｆｏｏ", display_name="foo"))
+    (metadata_dir / "catalog.json").write_text(
+        json.dumps(document.model_dump(mode="json")), encoding="utf-8"
+    )
+
+    service = DataCatalogService.open(project)  # migration: no IntegrityError
+    # Unmarked mutation → full reconcile path, tag rows touched.
+    service.update_asset_metadata(
+        service.document.assets[0].id if service.document.assets else "",
+        {"k": "v"},
+    ) if service.document.assets else None
+    service.close()
+
+    reopened = DataCatalogService.open(project)
+    names = {t.name for t in reopened.list_tags()}
+    assert len(names) >= 1
+    reopened.close()

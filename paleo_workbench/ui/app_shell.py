@@ -159,6 +159,13 @@ class AppShell(QWidget):
 
         # Bridge every page's selection surface onto the shared context (#1029).
         self.view_coordination.attach_app_shell(self)
+        # Seismic cursor producer (#1029): the panel publishes (IL, XL, TWT)
+        # cursor picks through the coordination controller. Wired HERE so the
+        # panel never reaches for a global singleton.
+        self._wire_seismic_cursor_producer()
+        # Register the open project's wells + seismic geometry into the
+        # coordinate hub so seismic→well routing has a registry (#1029).
+        self.view_coordination.bind_project(self.project)
 
         # Signal connections
         self.workflow_stepper.stage_changed.connect(self._on_stepper_stage_changed)
@@ -312,6 +319,13 @@ class AppShell(QWidget):
         self._fade_finalize_timer.timeout.connect(finalize_fade)
         self._fade_finalize_timer.start(self._fade_anim.duration())
         self._fade_anim.start()
+
+    def _wire_seismic_cursor_producer(self) -> None:
+        """Hand the coordination controller to the seismic view panel."""
+        panel = getattr(self.seismic_prediction_page_widget(), "view_panel", None)
+        attach = getattr(panel, "attach_coordination", None)
+        if callable(attach):
+            attach(self.view_coordination)
 
     def data_page_widget(self):
         return self.page_stack.widget(PAGE_INDEX_DATA)

@@ -238,6 +238,15 @@ class ProjectController:
 
             service = get_catalog_service()
             if service is not None:
+                # #1079: cancel still-running background transcodes before
+                # their catalog handle disappears (partial stores stay
+                # resumable; runs are marked cancelled).
+                try:
+                    from paleo_workbench.seismic_lifecycle import shutdown_lifecycle
+
+                    shutdown_lifecycle(service)
+                except Exception:
+                    pass
                 service.close()
         except Exception:
             pass

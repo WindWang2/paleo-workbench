@@ -17,6 +17,7 @@ from dataclasses import dataclass, field, replace
 import logging
 import math
 import os
+import re
 import threading
 import time
 from typing import Any, Mapping
@@ -38,7 +39,9 @@ __all__ = [
     "QgisMapRenderBackend",
     "RenderFrame",
     "create_map_render_backend",
+    "make_crs_transformer",
     "qgis_backend_probe",
+    "reproject_xy",
     "shutdown_live_fallback_backends",
 ]
 
@@ -482,6 +485,101 @@ def fit_extent_to_aspect(
     return (cx - adj_w / 2, cy - adj_h / 2, cx + adj_w / 2, cy + adj_h / 2)
 
 
+def _normalize_crs_name(value: str) -> str:
+    """Canonicalise a CRS name for comparison ("EPSG:4326 / WGS84" → "EPSG:4326").
+
+    Project documents carry descriptive names ("EPSG:4326 / WGS84"); layers
+    and renderers use the bare authority code. The leading ``EPSG:<code>``
+    token is the stable comparison key across both spellings.
+    """
+    text = str(value or "").strip()
+    match = re.match(r"^(EPSG:\d+)\b", text, re.IGNORECASE)
+    return match.group(1).upper() if match else text
+
+
+def make_crs_transformer(layer_crs: str, project_crs: str):
+    """Build an always-xy pyproj Transformer from *layer_crs* to *project_crs*.
+
+    Returns ``None`` when both names resolve to the same CRS (identity — no
+    reprojection needed). Raises ``ValueError`` when either name cannot be
+    resolved or the transformer cannot be built (including a missing pyproj):
+    callers must then degrade to drawing in the layer's own coordinates and
+    surface the layer through :attr:`FallbackMapRenderBackend.crs_warnings`
+    instead of silently mixing coordinate systems (#1051).
+    """
+    try:
+        from pyproj import CRS, Transformer
+        from pyproj.exceptions import CRSError
+    except ImportError as exc:
+        raise ValueError("pyproj 不可用,无法进行 CRS 重投影") from exc
+    source_name = _normalize_crs_name(layer_crs)
+    target_name = _normalize_crs_name(project_crs)
+    try:
+        source = CRS.from_user_input(source_name)
+        target = CRS.from_user_input(target_name)
+        if source == target:
+            return None
+        return Transformer.from_crs(source, target, always_xy=True)
+    except CRSError as exc:
+        raise ValueError(
+            f"无法解析 CRS({source_name!r} → {target_name!r}):{exc}"
+        ) from exc
+
+
+def reproject_xy(xy: np.ndarray, transformer: Any) -> np.ndarray:
+    """Transform an (N, 2) ``[x, y]`` vertex array through an always-xy transformer."""
+    array = np.asarray(xy, dtype=np.float64).reshape(-1, 2)
+    if len(array) == 0:
+        return array.copy()
+    tx, ty = transformer.transform(array[:, 0], array[:, 1])
+    return np.stack(
+        [np.asarray(tx, dtype=np.float64), np.asarray(ty, dtype=np.float64)], axis=1
+    )
+
+
+def _reprojected_prepared_layer(
+    prepared: "_PreparedLayer", transformer: Any
+) -> "_PreparedLayer":
+    """Reproject every prepared vertex of one layer into the project CRS.
+
+    The concatenated coordinate arrays transform in a single call; feature
+    bboxes are rebuilt from the transformed vertices so viewport culling and
+    scale-based visibility stay exact in the destination CRS.
+    """
+    point_xy = (
+        reproject_xy(prepared.point_xy, transformer)
+        if prepared.point_xy is not None
+        else None
+    )
+    path_xy = (
+        reproject_xy(prepared.path_xy, transformer)
+        if prepared.path_xy is not None
+        else None
+    )
+    features: list[_PreparedFeature] = []
+    point_cursor = 0
+    path_cursor = 0
+    for feature in prepared.features:
+        if feature.kind == "point":
+            parts = []
+            for part in feature.parts:
+                parts.append(point_xy[point_cursor : point_cursor + len(part)])
+                point_cursor += len(part)
+        else:
+            parts = []
+            for part in feature.parts:
+                parts.append(path_xy[path_cursor : path_cursor + len(part)])
+                path_cursor += len(part)
+        new_parts = tuple(parts)
+        bbox = _bbox_for(new_parts) if new_parts else feature.bbox
+        features.append(
+            _PreparedFeature(
+                feature.feature_id, feature.kind, new_parts, bbox, feature.properties
+            )
+        )
+    return _PreparedLayer(tuple(features), prepared.revision, prepared.layer_type)
+
+
 class FallbackMapRenderBackend(MapRenderBackend):
     """Explicit QPainter renderer for tests and hosts without a QGIS bridge.
 
@@ -517,6 +615,16 @@ class FallbackMapRenderBackend(MapRenderBackend):
         self._render_pending = False
         self._prepared_lock = threading.Lock()
         self._prepared: dict[str, _PreparedLayer] = {}
+        # #1051: per-(layer, revision, CRS-pair) reprojected geometry. Keyed
+        # separately from _prepared because the transform depends on the
+        # PROJECT CRS, which can change without a data revision bump.
+        self._reprojected: dict[tuple[str, int, str, str], _PreparedLayer] = {}
+        #: Public per-frame warnings (#1051): layers whose CRS differs from
+        #: the project CRS and could not be reprojected (pyproj missing or
+        #: unresolvable CRS name). Rebuilt by every composition paint so it
+        #: always describes the CURRENT frame — mixed-CRS output is never
+        #: silent.
+        self.crs_warnings: list[str] = []
         self._frame_cache: tuple[tuple, RenderFrame] | None = None
         _LIVE_FALLBACKS.add(self)
         self._diagnostics = {
@@ -667,6 +775,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
             executor.shutdown(wait=True, cancel_futures=True)
         with self._prepared_lock:
             self._prepared.clear()
+            self._reprojected.clear()
         self._frame_cache = None
         super().shutdown()
 
@@ -705,6 +814,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
                 bool(layer.visible),
                 round(float(layer.opacity), 6),
                 layer.scale_range,
+                layer.crs,
             )
             for layer in self._snapshot.layers
         )
@@ -825,6 +935,11 @@ class FallbackMapRenderBackend(MapRenderBackend):
         self._diagnostics["features_drawn"] = 0
         self._diagnostics["points_drawn"] = 0
         self._diagnostics["vertices_simplified"] = 0
+        # #1051: warnings describe the frame being painted, not history —
+        # rebuild them on every composition (screen frame and export share
+        # this pipeline).
+        project_crs = self._snapshot.project_crs or ""
+        self.crs_warnings.clear()
         seen_layers: set[str] = set()
         for layer in self._snapshot.layers:
             seen_layers.add(layer.id)
@@ -840,12 +955,14 @@ class FallbackMapRenderBackend(MapRenderBackend):
             painter.setOpacity(max(0.0, min(1.0, float(layer.opacity))))
             try:
                 if layer.layer_type == "scalar_grid":
+                    self._warn_raster_unprojected(layer, project_crs, "标量格网")
                     self._draw_scalar_grid(painter, layer)
                 elif layer.layer_type == "raster_source":
                     # Reference basemaps must survive the fallback pipeline
                     # too — the off-thread export worker renders through a
                     # throwaway fallback backend even on QGIS installs, and a
                     # missing branch silently dropped the raster (#832).
+                    self._warn_raster_unprojected(layer, project_crs, "栅格")
                     self._draw_raster_source(painter, layer)
                 elif layer.layer_type not in ("scalar_grid", "grid", "raster_source") and layer.features:
                     self._paint_vector_layer(
@@ -860,6 +977,73 @@ class FallbackMapRenderBackend(MapRenderBackend):
             for layer_id in list(self._prepared):
                 if layer_id not in seen_layers:
                     del self._prepared[layer_id]
+            for key in list(self._reprojected):
+                if key[0] not in seen_layers:
+                    del self._reprojected[key]
+
+    def _warn_raster_unprojected(
+        self, layer: MapLayerSnapshot, project_crs: str, kind: str
+    ) -> None:
+        """Flag a raster layer drawn in a foreign CRS (#1051).
+
+        Raster reprojection (warp) is out of scope for the QPainter fallback,
+        so the layer draws as-is — but never silently: the mismatch lands in
+        the public ``crs_warnings`` list for the frame.
+        """
+        target = _normalize_crs_name(project_crs)
+        layer_crs = _normalize_crs_name(layer.crs or "") or target
+        if not target or not layer_crs or layer_crs == target:
+            return
+        self.crs_warnings.append(
+            f"{kind}图层“{layer.name or layer.id}”的 CRS({layer_crs})与工程 CRS"
+            f"({target})不同且未重投影,输出可能存在坐标混绘"
+        )
+
+    def _reprojected_prepared(
+        self, prepared: _PreparedLayer, layer: MapLayerSnapshot
+    ) -> _PreparedLayer:
+        """Reproject a prepared vector layer into the project CRS (#1051).
+
+        An empty ``layer.crs`` counts as the project CRS. A differing CRS is
+        reprojected through pyproj (always_xy) when possible; when pyproj is
+        unavailable or either CRS name cannot be resolved, the layer still
+        draws (degraded, in its own coordinates) and a message lands in the
+        public ``crs_warnings`` list. Transformed geometry caches per
+        (layer, revision, CRS pair) — the transform is vertex-proportional.
+        """
+        project_crs = self._snapshot.project_crs or ""
+        layer_crs = str(layer.crs or "").strip() or project_crs
+        if not project_crs or not layer_crs:
+            return prepared
+        source_name = _normalize_crs_name(layer_crs)
+        target_name = _normalize_crs_name(project_crs)
+        if not source_name or not target_name or source_name == target_name:
+            return prepared
+        key = (layer.id, int(layer.data_revision), source_name, target_name)
+        with self._prepared_lock:
+            cached = self._reprojected.get(key)
+        if cached is not None:
+            return cached
+        try:
+            transformer = make_crs_transformer(layer_crs, project_crs)
+            reprojected = (
+                _reprojected_prepared_layer(prepared, transformer)
+                if transformer is not None
+                else prepared
+            )
+        except ValueError as exc:
+            self.crs_warnings.append(
+                f"矢量图层“{layer.name or layer.id}”({layer_crs})无法重投影到工程 CRS"
+                f"({project_crs}):{exc};已按图层原坐标降级绘制,输出可能存在坐标混绘"
+            )
+            return prepared
+        with self._prepared_lock:
+            # Keep one entry per layer: a revision bump replaces, not
+            # accumulates, the cached transform.
+            for stale in [k for k in self._reprojected if k[0] == layer.id]:
+                del self._reprojected[stale]
+            self._reprojected[key] = reprojected
+        return reprojected
 
     def _prepared_layer(self, layer: MapLayerSnapshot) -> _PreparedLayer:
         cached = self._prepared.get(layer.id)
@@ -936,6 +1120,10 @@ class FallbackMapRenderBackend(MapRenderBackend):
         transparent_fill = style.fill == "transparent" or fill.alpha() == 0
         painter.setBrush(Qt.BrushStyle.NoBrush if transparent_fill else fill)
         prepared = self._prepared_layer(layer)
+        # #1051: geometry must be in the project CRS before the world→screen
+        # transform; a foreign layer CRS reprojects here (see
+        # _reprojected_prepared for the degraded/warned path).
+        prepared = self._reprojected_prepared(prepared, layer)
         self._diagnostics["features_total"] += len(prepared.features)
         visible_features = self._cull_features(prepared, view)
         self._diagnostics["features_drawn"] += int(visible_features.sum())
@@ -1944,8 +2132,9 @@ def _flatten_qgis_style(style: Mapping[str, Any]) -> dict[str, object]:
     # Unit parity (#1025): QgsTextFormat sizes are POINTS by default while
     # QgsTextBufferSettings::setSize defaults to MILLIMETRES (vendored
     # qgstextrenderer_p.h) — each quantity converts with its OWN factor.
-    # The buffer_color key is forward-compat only: the current native
-    # bridge does not read it (halos render white).
+    # Buffer colour (#1102): an explicit labels.buffer_color wins; otherwise
+    # the halo colour rides the wire under the same key, and the native
+    # bridge colours the halo with it (white only when neither is set).
     labels = result.get("labels")
     if isinstance(labels, Mapping):
         labels = dict(labels)
@@ -1953,7 +2142,7 @@ def _flatten_qgis_style(style: Mapping[str, Any]) -> dict[str, object]:
             labels["size"] = float(labels["size"]) * (72.0 / 96.0)
         if "buffer" not in labels and labels.get("halo_width"):
             labels["buffer"] = float(labels["halo_width"]) * (25.4 / 96.0)
-        if "buffer_color" not in labels and labels.get("halo_color"):
+        if not labels.get("buffer_color") and labels.get("halo_color"):
             labels["buffer_color"] = labels["halo_color"]
         result["labels"] = labels
     result.pop("qgis_style", None)

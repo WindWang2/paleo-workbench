@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -89,13 +91,19 @@ class TrackVisibilityDialog(QDialog):
 
 
 class WellLogHost:
-    """Standalone single-well viewer, intentionally rendered by Legacy QPainter.
+    """Standalone single-well viewer following the product backend default.
 
-    The visualisation workspace defaults to the mature, fully exportable
-    GeoViz QPainter canvas. Native WellLogEngine support remains available to
-    specialised hosts, but must not change the single-well screen according to
-    environment configuration.
+    Since #1053 the single-well screen honours ``PALEO_USE_WELLLOG_ENGINE``
+    (default on): when the native ``welllog`` binding imports and the env
+    default is enabled, ``apply`` renders through the retained WellLogEngine
+    document (same submission contract as the prediction panel).  Any engine
+    failure — binding missing, no submittable curves, or a render exception —
+    falls back to the Legacy QPainter canvas so the screen never goes blank,
+    and legacy remains fully selectable via ``PALEO_USE_WELLLOG_ENGINE=0``
+    with its editable tracks and vector exports.
     """
+
+    _LOG = logging.getLogger("paleo_workbench.viz.hosts.well_log_host")
 
     tab_title = "测井"
 
@@ -304,6 +312,11 @@ class WellLogHost:
             )
         except Exception as exc:
             self._engine_error = f"{exc.__class__.__name__}: {exc}"
+            self._LOG.warning(
+                "WellLogEngine document submission failed, falling back to "
+                "Legacy QPainter: %s",
+                self._engine_error,
+            )
             self._release_engine_document()
             return False
         self._engine_plan = plan
@@ -360,9 +373,32 @@ class WellLogHost:
             except Exception:
                 pass
 
-        # Single-well visualisation is deliberately Legacy by default (and
-        # independent of PALEO_USE_WELLLOG_ENGINE). This also keeps its
-        # editable display tracks and vector exports consistently available.
+        # #1053: the single-well screen follows the product backend default.
+        # When the native ``welllog`` binding imports and the env default is
+        # enabled, render through the retained WellLogEngine document; every
+        # engine failure falls back to the Legacy QPainter canvas below (no
+        # crash, no blank screen, and the failure is logged).
+        if self._engine_selected():
+            try:
+                if self._show_engine(data):
+                    return True
+            except Exception as exc:
+                self._engine_error = f"{exc.__class__.__name__}: {exc}"
+                self._LOG.warning(
+                    "WellLogEngine path raised, falling back to Legacy "
+                    "QPainter: %s",
+                    self._engine_error,
+                )
+            else:
+                self._LOG.info(
+                    "WellLogEngine path declined (%s); rendering Legacy fallback",
+                    self._engine_error or "no submittable curves",
+                )
+            # _show_engine already released its document on failure; the
+            # legacy branch below renders the fallback surface.
+
+        # Legacy QPainter path: explicit selection (env off) or the engine
+        # fallback. Keeps editable display tracks and vector exports available.
         self._release_engine_document()
         tracks = build_qpainter_tracks(data)
         self.canvas.set_tracks(tracks)
@@ -371,3 +407,15 @@ class WellLogHost:
         self._update_track_bar()
 
         return True
+
+    def _engine_selected(self) -> bool:
+        """Return whether ``apply`` must attempt the native engine path.
+
+        Selection only (#1053): the binding probe treats ``ImportError`` as
+        "not installed" (fallback) while any other exception propagates per
+        the H13 no-silent-degradation contract.
+        """
+        if not engine_adapter.welllog_engine_env_enabled():
+            return False
+        self._probe_engine()
+        return self._WellLogView is not None
