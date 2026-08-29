@@ -161,6 +161,65 @@ def test_missing_snapshot_falls_back_to_full_rebuild(tmp_path: Path):
     assert {a["id"] for a in index.search_assets()} == {"a1", "a2", "a3", "a4", "a5"}
 
 
+def test_apply_changes_self_heals_deleted_or_schemaless_store(tmp_path: Path):
+    """The canonical hot path must honor the rebuildable-store guarantee.
+
+    When the sqlite file is deleted (or left schema-less) mid-session, the
+    next incremental ``apply_changes`` write must recreate the whole store
+    from the document instead of querying tables that no longer exist
+    (service-level regression: ``no such table: assets`` from
+    ``_flush_canonical_locked → apply_changes`` after #1108 made sqlite the
+    canonical store).
+    """
+    from paleo_workbench.catalog.db import DirtySet
+
+    for mode in ("deleted", "schemaless"):
+        index = CatalogIndex(tmp_path / mode)
+        document = CatalogDocument(catalog_revision=0)
+        _seed(document)
+        index.rebuild(document)
+        assert index.is_fresh(document)
+
+        # Mutate the document exactly like the service does before a flush.
+        _seed_document_extra(document, start=6, count=2)
+        document.catalog_revision = 2
+        dirty = DirtySet()
+        dirty.assets = {f"a{i}" for i in range(6, 8)}
+        dirty.versions = {f"v{i}" for i in range(6, 8)}
+
+        index.close()
+        if mode == "deleted":
+            index.db_path.unlink()
+        else:
+            # A previous failed flush already recreated an empty file
+            # (sqlite3.connect touches the path): present but schema-less.
+            index.db_path.write_bytes(b"")
+
+        index.apply_changes(document, dirty)
+
+        assert index.is_fresh(document)
+        assert {a["id"] for a in index.search_assets()} == {
+            "a1", "a2", "a3", "a4", "a5", "a6", "a7",
+        }
+        index.close()
+
+
+def _seed_document_extra(document: CatalogDocument, *, start: int, count: int) -> None:
+    for i in range(start, start + count):
+        asset = DataAsset(id=f"a{i}", name=f"asset {i}", type="well_log")
+        version = DataVersion(
+            id=f"v{i}",
+            asset_id=asset.id,
+            version_number=1,
+            stage=DataStage.RAW,
+            path=f"raw/a{i}/v{i}/f.bin",
+            sha256=f"h{i}",
+            parent_version_ids=[],
+        )
+        document.assets.append(asset)
+        document.versions.append(version)
+
+
 def test_incremental_matches_rebuild_after_mutation_sequence(tmp_path: Path):
     """The realistic lifecycle: many single-revision mutations (imports, tags,
     trash, lineage, runs, purge) must leave the index query-equivalent to a
