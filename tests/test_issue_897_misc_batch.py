@@ -187,7 +187,7 @@ def test_segy_preview_volume_failure_visible(tmp_path, monkeypatch):
 
 
 # 13. XML well-log preview: every sheet shows max_preview_rows data rows.
-def test_xml_well_log_preview_full_row_budget():
+def test_xml_well_log_preview_full_row_budget(tmp_path):
     from paleo_workbench.resources.preview_parsers.well_log_parsers import (
         xml_well_log_preview,
     )
@@ -208,7 +208,7 @@ def test_xml_well_log_preview_full_row_budget():
         + "".join(rows_xml)
         + "</Table></Worksheet></Workbook>"
     )
-    path = Path("/tmp/issue897_sheet.xml")
+    path = tmp_path / "issue897_sheet.xml"
     path.write_text(doc, encoding="utf-8")
     resource = ResourceItem(
         name="sheet.xml", type="well_log", format="xml", path=str(path)

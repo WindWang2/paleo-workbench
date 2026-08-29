@@ -7,7 +7,7 @@ def test_uwi_override_namespace_both_keys():
     # Probe that set_well_identity_override stores both namespaces and _explicit_mapping_hit finds via uwi:
     import pathlib
 
-    src = pathlib.Path("paleo_workbench/project/domain.py").read_text()
+    src = pathlib.Path("paleo_workbench/project/domain.py").read_text(encoding="utf-8")
     assert 'overrides[f"uwi:{normalized}"]' in src or "uwi:{normalized}" in src
     assert "_explicit_mapping_hit" in src
     assert "uwi:" in src
@@ -34,9 +34,9 @@ def test_correlation_artifact_atomic_write(tmp_path):
     out = tmp_path / "a.json"
     _atomic_write_json(out, {"x": 1})
     assert out.exists()
-    assert json.loads(out.read_text())["x"] == 1
+    assert json.loads(out.read_text(encoding="utf-8"))["x"] == 1
     assert not (tmp_path / "a.json.tmp").exists()
-    src = _P("paleo_workbench/workflow/correlation_artifact.py").read_text()
+    src = _P("paleo_workbench/workflow/correlation_artifact.py").read_text(encoding="utf-8")
     assert "os.replace" in src or "replace" in src
 
 
@@ -73,7 +73,7 @@ def test_preview_card_r_squared_none_shows_placeholder(qtbot=None):
         # If Qt not available, just verify logic via code inspect
         import pathlib
 
-        src = pathlib.Path("paleo_workbench/ui/pages/factor_preview_grid.py").read_text()
+        src = pathlib.Path("paleo_workbench/ui/pages/factor_preview_grid.py").read_text(encoding="utf-8")
         assert "本轮未计算" in src
 
 
@@ -81,13 +81,13 @@ def test_parallel_failed_count_per_task():
     # The fix counts per-task failures when a group throws
     import pathlib
 
-    src = pathlib.Path("paleo_workbench/workflow/factor_prepare_scheduler.py").read_text()
+    src = pathlib.Path("paleo_workbench/workflow/factor_prepare_scheduler.py").read_text(encoding="utf-8")
     assert "group_size" in src or "len(group_items" in src
 
 
 def test_recompute_worker_snapshots_project():
     import pathlib
 
-    src = pathlib.Path("paleo_workbench/ui/workflow_controller.py").read_text()
+    src = pathlib.Path("paleo_workbench/ui/workflow_controller.py").read_text(encoding="utf-8")
     assert "model_copy(deep=True)" in src
     assert "snapshot" in src.lower() or "_project" in src
