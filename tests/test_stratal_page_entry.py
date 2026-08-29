@@ -104,32 +104,13 @@ def test_stratal_generate_demo_produces_visible_slices(qtbot):
     ) as blocker:
         pass
     assert blocker.args is not None and blocker.args[0]["demo"] is True
-    # [DEBUG-3d-soak] temporary: identify why planes never register
-    result = blocker.args[0]
-    print(
-        f"[DEBUG-3d-soak] surfaces={len(result.get('surfaces') or [])} "
-        f"shapes={[getattr(s, 'shape', None) for s in (result.get('surfaces') or [])[:3]]} "
-        f"volume={type(result.get('volume')).__name__} "
-        f"loaded={getattr(renderer, '_loaded', None)} "
-        f"vol_cpu={None if getattr(renderer, '_volume_data_cpu', None) is None else renderer._volume_data_cpu.shape}"
+    # The completed signal fires on the WORKER thread; the UI applies the
+    # result via a queued slot (_on_stratal_completed). Waiting for the
+    # signal alone races the handler — wait for the applied state.
+    qtbot.waitUntil(
+        lambda: len(renderer.get_stratal_slices()) == 3, timeout=5_000
     )
-
     snap = renderer.get_stratal_slices()
-    # [DEBUG-3d-soak] the completed-handler's load_volume never landed
-    # (loaded=False, vol_cpu=None): call it directly to surface the
-    # exception the Qt slot swallowed.
-    import traceback as _tb
-
-    try:
-        renderer.load_volume(result["volume"])
-        print(
-            f"[DEBUG-3d-soak] direct load ok: "
-            f"loaded={renderer._loaded} "
-            f"vol={renderer._volume_data_cpu.shape}"
-        )
-    except Exception:
-        print("[DEBUG-3d-soak] direct load RAISED:")
-        _tb.print_exc()
     assert len(snap) == 3  # three proportional slices
     # Each registered plane pair is added to the GL view.
     assert len(renderer._stratal_plane_items) == 3
@@ -160,6 +141,11 @@ def test_stratal_clear_removes_all_slices(qtbot):
     ) as blocker:
         pass
     assert blocker.args is not None and blocker.args[0]["demo"] is True
+    # Same queued-handler race as the generate test: the plane items are
+    # registered by _on_stratal_completed, not by the worker signal.
+    qtbot.waitUntil(
+        lambda: bool(renderer._stratal_plane_items), timeout=5_000
+    )
     assert renderer._stratal_plane_items
     page._on_clear_stratal_slices()
     assert renderer._stratal_plane_items == {}
