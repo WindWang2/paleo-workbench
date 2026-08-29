@@ -29,6 +29,17 @@ PRIVATE_API_EXEMPTIONS: frozenset[tuple[str, None]] = frozenset(
         # that (mirrors the map_edit.api precedent).
         ("geoviz_plots.chart.series", None),
         ("geoviz_well_seismic_3d", None),
+        # Seismic out-of-core integration (#1080-#1085, landed via #1108):
+        # the chunked volume reader (open_volume), the global VRAM texture
+        # budget (#1078) and the C3 coherence attribute are engine-internal
+        # capabilities the facade does not re-export; the workbench imports
+        # them lazily at the call site (seismic_lifecycle /
+        # seismic_attributes / prediction.tiled_onnx /
+        # runtime.resource_budget). Narrow per-submodule entries, mirroring
+        # the map_edit.api precedent.
+        ("geoviz_seismic", None),
+        ("geoviz_seismic.vram_cache", None),
+        ("geoviz_seismic.attributes", None),
     }
 )
 GEOVIZ_PUBLIC_FACADE = frozenset(
