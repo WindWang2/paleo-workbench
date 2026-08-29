@@ -179,3 +179,41 @@ def test_flatten_qgis_style_promotes_nested_label_payload() -> None:
     assert flat["labeling_xml"] == "<labeling/>"
     assert flat["labels"]["rotation_field"] == "dip"
     assert flat["labels"]["buffer_color"] == "#0b7285"
+
+
+def test_annotation_default_style_binds_per_feature_fields() -> None:
+    """#1052: AnnotationMapLayer features carry rotation/font_size/color
+    properties; the annotation default style must opt into the QGIS
+    data-defined label bindings so per-feature angle/size/colour survive
+    the native backend instead of flattening to the fixed format."""
+    from paleo_workbench.mapping.layers import AnnotationMapLayer
+    from paleo_workbench.mapping.map_styles import default_style_for
+
+    style = default_style_for("annotation")
+    assert style.labels.rotation_field == "rotation"
+    assert style.labels.size_field == "font_size"
+    assert style.labels.color_field == "color"
+
+    layer = AnnotationMapLayer(id="ann", name="ann")
+    layer.add_annotation("断层F1", 110.0, 35.0, font_size=14.0, color="#ffaa00", rotation=30.0)
+
+    snapshot_layer = MapLayerSnapshot(
+        id=layer.id,
+        name=layer.name,
+        layer_type=layer.layer_type,
+        extent=layer.extent,
+        crs="EPSG:4326",
+        data_revision=layer.data_revision,
+        style_revision=1,
+        features=tuple(layer.features),
+        style=layer.style,
+    )
+    wire = _wire_layer(snapshot_layer)
+    labels = wire["style"]["labels"]
+    assert labels["rotation_field"] == "rotation"
+    assert labels["size_field"] == "font_size"
+    assert labels["color_field"] == "color"
+    # The per-feature values ride the feature attributes the bridge turns
+    # into QgsFields (QgsProperty::fromField evaluates against them).
+    first_attrs = wire["features"][0]["attributes"]
+    assert first_attrs["rotation"] == "30.0" or first_attrs["rotation"] == 30.0

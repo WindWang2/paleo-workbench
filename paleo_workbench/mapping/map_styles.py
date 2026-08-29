@@ -274,14 +274,34 @@ STYLE_LIBRARY: dict[str, VectorStyle] = {
     ),
     "annotation": VectorStyle(
         fill="#eff3f8", stroke="#182431", marker=MarkerSymbol.CIRCLE, marker_size=4.0,
-        labels=TextStyle(field="text", size=10.0, color="#f8f9fa"),
+        labels=TextStyle(
+            field="text", size=10.0, color="#f8f9fa",
+            # #1052: annotation features carry per-feature `rotation`,
+            # `font_size`, and `color` properties (AnnotationMapLayer
+            # ._sync_features_from_annotations); binding them here lets the
+            # QGIS PAL backend honour each annotation's own angle/size/
+            # colour instead of flattening every label to the fixed format.
+            rotation_field="rotation",
+            size_field="font_size",
+            color_field="color",
+        ),
     ),
     "label": VectorStyle(
         fill="#eff3f8", stroke="#182431", marker=MarkerSymbol.CIRCLE, marker_size=4.0,
     ),
 }
 
-_STYLE_FOR_KIND = {"facies": "facies", "well": "well", "line": "line", "label": "label"}
+_STYLE_FOR_KIND = {
+    "facies": "facies",
+    "well": "well",
+    "line": "line",
+    "label": "label",
+    # #1052: AnnotationMapLayer.__post_init__ resolves its preset through
+    # this map — without the entry it silently fell back to the facies
+    # preset (labels=None), so annotation labels never had a default style
+    # or the per-feature data-defined field bindings.
+    "annotation": "annotation",
+}
 
 
 def default_style_for(kind: str) -> VectorStyle:
