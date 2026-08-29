@@ -10,15 +10,15 @@ jobs:
   # Full monorepo suite — required product gate (see docs/ci-merge-policy.md).
   # The suite must be green without quarantine; no continue-on-error.
   test:
-    name: Tests (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     # The 3.13 legs exist to OBSERVE the #951 SIGSEGV (3.13-only, crash under
     # pytestqt _process_events, semi-deterministic ~mid-suite; 3.12 is fully
     # green on identical code). They are diagnostics, not product gates: a
     # crashing diagnostic must not block every merge until #951 is root-caused
     # (that would freeze the repo). Results stay visible on each run.
-    continue-on-error: ${{ matrix.python-version == '3.13' }}
+    continue-on-error: ${{ matrix.python-version == '3.13' || matrix.os == 'windows-latest' }}
     # pyproject (and the geoviz/native subpackages) pin requires-python to
     # >=3.12,<3.13 by policy (cp312/cp313 .so shadowing, #435/#851), but the
     # 3.13 legs below are deliberate #951 diagnostics: bypass the metadata
@@ -29,23 +29,40 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Unified on CPython 3.12 (single supported runtime); 3.13 added as
-        # diagnostic leg for QtMultimedia SIGSEGV triage (#951). See
-        # QT_MEDIA_BACKEND notes on the Run tests step.
-        python-version: ["3.12", "3.13"]
-        # Diagnostic variant for #951: run 3.13 with explicit media backend.
-        # Qt 6.5+ documents QT_MEDIA_BACKEND=ffmpeg/gstreamer/windows/darwin/
-        # android; "none" is undocumented and may be ignored — listed here as
-        # a commented对照 for future runner without pulseaudio/ffmpeg.
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12"]
         include:
-          - python-version: "3.13"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: ubuntu-latest
+            python-version: "3.13"
             qt-media-backend: "ffmpeg"
 
     steps:
-      - name: Checkout
+      # Split checkout by OS: Windows runner hits MAX_PATH on third_party/gdal's deep
+      # sentinel2 fixtures (autotest/gdrivers/data/... >260 chars) — fatal for
+      # actions/checkout's recursive init. The Windows python leg does not need
+      # vendored GDAL (seismic chunked path / fallback renderers cover it), so
+      # fetch only the geo-viz-engine (+ well-log-engine) submodules there.
+      # Linux keeps the full recursive graph for the vendored GDAL build.
+      - name: Checkout (Linux)
+        if: runner.os == 'Linux'
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Checkout (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Init submodules (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          git submodule update --init geo-viz-engine well-log-engine
+          echo "Windows checkout: geo-viz-engine + well-log-engine only (skip third_party/gdal long paths)" 
 
       - name: Guard against Windows-invalid submodule filenames
         # Packaging #441 (resolved upstream): the geo-viz-engine rename landed
@@ -54,6 +71,7 @@ jobs:
         # stays as the fail-closed tripwire: re-pinning a submodule that ships
         # Windows-invalid paths fails this step instead of breaking recursive
         # checkouts on Windows silently.
+        shell: bash
         run: |
           python - <<'EOF'
           import pathlib, sys
@@ -83,6 +101,7 @@ jobs:
           cache: pip
 
       - name: System libraries (Qt / offscreen)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -91,6 +110,9 @@ jobs:
             swig \
             libsqlite3-dev \
             libgl1 \
+            libgl1-mesa-dri \
+            mesa-utils \
+            xvfb \
             libglib2.0-0 \
             libxkbcommon0 \
             libdbus-1-3 \
@@ -128,6 +150,7 @@ jobs:
         # ADR 0060: GDAL is compiled from the third_party/gdal +
         # third_party/proj submodules into native/gdal-vendored — no system
         # libgdal, no pip gdal sdist, no version-mismatch class (#851).
+        if: runner.os == 'Linux'
         run: |
           scripts/build_vendored_gdal.sh "$(command -v python)"
           # Fail closed if the bindings did not land.
@@ -135,6 +158,7 @@ jobs:
           python -c "from osgeo import gdal; assert gdal.__version__"
 
       - name: Build map_edit_core (required)
+        if: runner.os == 'Linux'
         run: |
           python -m pip install -e geo-viz-engine/native/map_edit_core
           python -c "from geoviz_plots.map_edit import HAS_CPP; assert HAS_CPP is True, 'HAS_CPP must be True in CI'"
@@ -144,17 +168,20 @@ jobs:
           python -c "import map_edit_core; assert 'native/map_edit_core' in map_edit_core.__file__, 'map_edit_core must resolve to the freshly built module, not a committed root binary'"
 
       - name: Build grid_render_core (required)
+        if: runner.os == 'Linux'
         run: |
           python -m pip install -e native/grid_render_core
           python -c "import grid_render_core; assert hasattr(grid_render_core, 'render_grid_rgba'), 'grid_render_core.render_grid_rgba missing in CI'"
           python -c "import grid_render_core; assert 'native/grid_render_core' in grid_render_core.__file__, 'grid_render_core must resolve to the freshly built module'; assert hasattr(grid_render_core, '__version__'), 'grid_render_core.__version__ missing in CI'"
 
       - name: Build layer_model_core (required)
+        if: runner.os == 'Linux'
         run: |
           python -m pip install -e native/layer_model_core
           python -c "import layer_model_core; assert hasattr(layer_model_core, 'LayerRegistry'), 'layer_model_core.LayerRegistry missing in CI'"
 
       - name: Build seismic_3d_core (required)
+        if: runner.os == 'Linux'
         # Round-2 review (K-F1): these two extensions previously had NO CI
         # build step — the committed root binaries shadowed source on 3.13 and
         # skipped every native test on 3.12, so source-only changes shipped
@@ -168,12 +195,14 @@ jobs:
           python -c "import seismic_3d_core; assert 'native/seismic_3d_core' in seismic_3d_core.__file__, 'seismic_3d_core must resolve to the freshly built module, not a committed root binary'; assert hasattr(seismic_3d_core, '__version__'), 'seismic_3d_core.__version__ missing in CI'"
 
       - name: Build well_log_core (required)
+        if: runner.os == 'Linux'
         run: |
           python -m pip install -e native/well_log_core
           python -c "import well_log_core; assert hasattr(well_log_core, 'fast_las_parse_data'), 'well_log_core symbols missing in CI'"
           python -c "import well_log_core; assert 'native/well_log_core' in well_log_core.__file__, 'well_log_core must resolve to the freshly built module, not a committed root binary'; assert hasattr(well_log_core, '__version__'), 'well_log_core.__version__ missing in CI'"
 
       - name: Native C++ selftests (algorithm verification)
+        if: runner.os == 'Linux'
         run: |
           set -e
           g++ -std=c++17 -O2 -Wall -Wextra \
@@ -186,9 +215,15 @@ jobs:
             native/layer_model_core/src/standalone_test.cpp \
             -o /tmp/layer_model_selftest && /tmp/layer_model_selftest
 
-      - name: Run tests
+      - name: Run tests (Linux)
+        if: runner.os == 'Linux'
         env:
           QT_QPA_PLATFORM: offscreen
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GALLIUM_DRIVER: llvmpipe
+          MESA_GL_VERSION_OVERRIDE: "3.3"
+          MESA_GLSL_VERSION_OVERRIDE: "330"
+          QT_OPENGL: software
           # #951 triage: QtMultimedia on headless runners may SIGSEGV in
           # QMediaPlayer teardown (pytest-qt _process_events → Qt event
           # dispatch use-after-free). Documented backends: ffmpeg,
@@ -205,13 +240,27 @@ jobs:
           # may need the job-level ceiling). -v prints the last started test
           # when the suite dies so the hung case is identifiable in CI logs.
           # A green suite fits well inside the 60m job timeout (locally ~2m).
-          python -m pytest -v --tb=line \
+          xvfb-run -a python -m pytest -v --tb=line \
             --timeout=45 \
             --timeout-method=thread \
             -m "not slow and not welllog_binding" \
             --durations=25
 
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_OPENGL: software
+          PYTHONFAULTHANDLER: "1"
+        run: |
+          python -m pytest -v --tb=line `
+            --timeout=45 `
+            --timeout-method=thread `
+            -m "not slow and not welllog_binding" `
+            --durations=25
+
       - name: Assert the slow family has not silently shrunk
+        if: runner.os == 'Linux'
         # Packaging #442/#896: the fast gate deliberately deselects `slow` (the only
         # real-data end-to-end + interpolation-perf coverage). If the slow
         # family ever drops below its 15-test baseline (14 + 1 fence probe), every
@@ -223,6 +272,7 @@ jobs:
           test -n "${count}" && test "${count}" -ge 15
 
       - name: Assert the welllog binding contract still exists (#917)
+        if: runner.os == 'Linux'
         # Audit #896/#917: the workbench↔engine binding contract needs a BUILT
         # welllog pybind module, which no CI leg installs — running it here made
         # the required gate permanently red. It is deselected above, but its

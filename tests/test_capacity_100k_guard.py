@@ -13,8 +13,13 @@ generous headroom over local measurements (2026-08-27, 100k ResourceItems):
 
 from __future__ import annotations
 
-import resource
+import sys
 from pathlib import Path
+
+try:
+    import resource  # POSIX only; Windows raises at import time
+except ImportError:  # pragma: no cover
+    resource = None  # type: ignore[assignment]
 
 import pytest
 
@@ -48,6 +53,8 @@ def _current_rss_mb() -> float:
 
 
 def _peak_rss_mb() -> float:
+    if resource is None:
+        return 0.0
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
 
 
