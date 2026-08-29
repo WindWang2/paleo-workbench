@@ -1,6 +1,6 @@
 # CI merge policy
 
-Last updated 2026-08-09 with the production-readiness quality convergence
+Last updated 2026-08-29 with the production-readiness quality convergence
 (advisory suite promoted to a required gate).
 
 ## Product merge gates (required)
@@ -10,7 +10,7 @@ A PR is merge-ready when these are green on the head SHA:
 | Gate | Workflow / job |
 |------|----------------|
 | **WellLogEngine C++ (Ubuntu)** | `WellLogEngine C++` — shared ON/OFF, ASan, Qt Mesa, wheels, vcpkg, benchmark as configured |
-| **Full monorepo Tests (CPython 3.12)** | `CI` → `Tests (CPython 3.12)` matrix |
+| **Full monorepo Tests (CPython 3.12)** | `CI` → `Tests (ubuntu-latest + windows-latest, Python 3.12)` matrix |
 | **Well Log Workstation (host)** | `CI` → `Well Log Workstation (host)` (CPython 3.12) |
 | **Merge gate** | `CI` → `Merge gate (full monorepo + workstation)` — `needs:` the full Tests matrix and the workstation host matrix |
 
@@ -79,9 +79,7 @@ sibling geo-viz-engine checkout is unnecessary build time for those jobs),
 no longer a filesystem workaround. The main CI `Tests` job runs a guard step
 (with a local twin in `tests/test_workflow_integrity.py`) that fails on any
 Windows-invalid submodule path, so a broken gitlink can never be re-pinned
-silently. The application CI (ci.yml) remains Ubuntu-only; whether to add a
-windows-latest application leg is an open product decision, no longer blocked
-by #441.
+silently. The application CI (ci.yml) now runs the Python suite on **both `ubuntu-latest` and `windows-latest`** (CPython 3.12; 3.13 diagnostic legs remain `ubuntu-latest`-only, #951). Linux-only steps (vendored GDAL, native C++ selftests, Mesa/Xvfb + `LIBGL_ALWAYS_SOFTWARE`/`GALLIUM_DRIVER`) are gated with `if: runner.os == 'Linux'`; the Windows leg runs the same `pytest -m "not slow and not welllog_binding"` suite with `QT_QPA_PLATFORM=offscreen` / `QT_OPENGL=software` (#1045, packaging #441 no longer blocks Windows checkouts).
 
 **Status (as of #236):** matrix row **re-enabled** (`os: [ubuntu-latest, windows-latest]`) for `shared=OFF` and `shared=ON` in `.github/workflows/well-log-engine.yml`. Windows path runs with `WELLLOG_BUILD_TEXT=OFF` and `WELLLOG_BUILD_ARROW=OFF` (HarfBuzz/FreeType/ICU and Arrow not on stock Windows runners), `WELLLOG_WARNINGS_AS_ERRORS=OFF`, and a locally built zlib prefix.
 
