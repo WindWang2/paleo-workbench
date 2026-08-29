@@ -215,7 +215,11 @@ def main() -> int:
     import tempfile
 
     from paleo_workbench.catalog.service import DataCatalogService
-    from paleo_workbench.seismic_lifecycle import start_attribute_job, start_transcode  # noqa: F401
+    from paleo_workbench.seismic_lifecycle import (  # noqa: F401
+        TranscodeJob,
+        get_lifecycle_service,
+        start_attribute_job,
+    )
 
     with tempfile.TemporaryDirectory(dir=work) as td:
         proj = Path(td) / "p" / "demo.paleo.json"
