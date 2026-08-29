@@ -32,7 +32,10 @@ def test_data_toolbar_search_is_debounced(qtbot):
     toolbar.search_box.setText("well")
     assert received == []
 
-    qtbot.wait(200)
+    # Debounced (~180ms): under runner load a fixed 200ms window is not
+    # guaranteed — wait for the emission to land (Windows-gate flake,
+    # 2026-08-29).
+    qtbot.waitUntil(lambda: received == ["well"], timeout=2_000)
     assert received == ["well"]
 
 
