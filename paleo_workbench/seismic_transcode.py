@@ -20,7 +20,6 @@ from __future__ import annotations
 import os
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NamedTuple
@@ -320,8 +319,9 @@ def transcode_segy_to_zarr(
     handles_lock = threading.Lock()
     done_lock = threading.Lock()
     # Already-complete shards count toward progress so a resumed run still
-    # reaches 1.0.
-    done = stats.shards_skipped
+    # reaches 1.0.  Boxed in a list so nested closures can bump it without
+    # a `nonlocal` chain across the reader/writer split (#1077 pipeline).
+    done_box = [stats.shards_skipped]
     t_start = time.perf_counter()
 
     def thread_segy():
@@ -333,11 +333,7 @@ def transcode_segy_to_zarr(
                 handles.append(f)
         return f
 
-    def work(box: ShardBox):
-        nonlocal done
-        if cancel is not None and cancel():
-            return  # never started: stays todo for the resumed run
-        f = thread_segy()
+    def read_slab(box: ShardBox, f) -> np.ndarray:
         slab = np.empty(
             (box.il1 - box.il0, box.xl1 - box.xl0, box.t1 - box.t0),
             dtype=np.float32,
@@ -347,6 +343,12 @@ def transcode_segy_to_zarr(
                 f.trace[il * nxl + box.xl0 : il * nxl + box.xl0 + (box.xl1 - box.xl0)]
             ).astype(np.float32, copy=False)
             slab[il - box.il0] = traces[:, box.t0 : box.t1]
+        return slab
+
+    def write_slab(box: ShardBox, slab: np.ndarray) -> bool:
+        """Write one shard; returns False when cancelled before the write."""
+        if cancel is not None and cancel():
+            return False  # never written: stays todo for the resumed run
         arr[box.il0 : box.il1, box.xl0 : box.xl1, box.t0 : box.t1] = slab
         with done_lock:
             stats.traces_read += (box.il1 - box.il0) * (box.xl1 - box.xl0)
@@ -354,25 +356,60 @@ def transcode_segy_to_zarr(
                 (box.il1 - box.il0) * (box.xl1 - box.xl0) * (box.t1 - box.t0) * 4
             )
             stats.shards_written += 1
-            done += 1
+            done_box[0] += 1
             if progress is not None:
-                progress(done / stats.shards_total)
+                progress(done_box[0] / stats.shards_total)
+        return True
 
     try:
         if n_workers == 1:
+            f = thread_segy()
             for box in todo:
                 if cancel is not None and cancel():
                     return _result(dst, shape, stats)
-                work(box)
+                write_slab(box, read_slab(box, f))
         else:
-            with ThreadPoolExecutor(max_workers=n_workers) as pool:
-                futures = []
-                for box in todo:
-                    if cancel is not None and cancel():
+            # #1077: the zarr v3 sharded-write path (zstd compress + shard
+            # index) serializes internally — measured on reference hardware
+            # AND this host, thread-pooling the whole work() call is net
+            # SLOWER than serial (GIL contention on segyio reads plus shard
+            # locks inside zarr).  Overlapping stages does scale: one
+            # reader thread streams slabs (segyio, ~400 MB/s) ahead of the
+            # write stage, so disk reads hide under compression.  The
+            # queue depth bounds in-flight slabs to ~workers x shard bytes.
+            from queue import Queue
+
+            max_in_flight = max(2, min(n_workers, max(1, (1 << 30) // (
+                (todo[0].il1 - todo[0].il0) * (todo[0].xl1 - todo[0].xl0)
+                * (todo[0].t1 - todo[0].t0) * 4
+            ))) if todo else 2)
+            q: "Queue[tuple[ShardBox, np.ndarray] | None]" = Queue(
+                maxsize=max_in_flight
+            )
+
+            def reader() -> None:
+                f = thread_segy()
+                try:
+                    for box in todo:
+                        if cancel is not None and cancel():
+                            break
+                        q.put((box, read_slab(box, f)))
+                finally:
+                    q.put(None)
+
+            reader_thread = threading.Thread(
+                target=reader, name="segy-transcode-reader", daemon=True
+            )
+            reader_thread.start()
+            try:
+                while True:
+                    item = q.get()
+                    if item is None:
                         break
-                    futures.append(pool.submit(work, box))
-                for fut in futures:
-                    fut.result()
+                    if not write_slab(item[0], item[1]):
+                        break  # cancelled: partial store stays resumable
+            finally:
+                reader_thread.join(timeout=30)
     finally:
         stats.elapsed_s = time.perf_counter() - t_start
         for f in handles:
