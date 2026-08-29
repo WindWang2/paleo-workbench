@@ -151,7 +151,7 @@ def test_controller_save_as_registers_and_rebases_managed_grid(tmp_path: Path):
     assert second is not None
     task = window.project.factor_map_tasks[0]
     assert task.grid_artifact_path and task.grid_artifact_path.startswith(
-        str(tmp_path / "second.artifacts")
+        (tmp_path / "second.artifacts").as_posix()
     )
     reopened = ProjectManager(second).load()
     assert factor_grid_result_for_task(reopened.factor_map_tasks[0]).shape == (2, 3)

@@ -18,7 +18,11 @@ jobs:
     # green on identical code). They are diagnostics, not product gates: a
     # crashing diagnostic must not block every merge until #951 is root-caused
     # (that would freeze the repo). Results stay visible on each run.
-    continue-on-error: ${{ matrix.python-version == '3.13' || matrix.os == 'windows-latest' }}
+    # The windows-latest row was continue-on-error during its convergence
+    # (#1109/#1111) and is REQUIRED since 2026-08-29: the full suite is
+    # green there (native extensions built under MSVC, platform divergences
+    # fixed) and the product targets Windows desktops.
+    continue-on-error: ${{ matrix.python-version == '3.13' }}
     # pyproject (and the geoviz/native subpackages) pin requires-python to
     # >=3.12,<3.13 by policy (cp312/cp313 .so shadowing, #435/#851), but the
     # 3.13 legs below are deliberate #951 diagnostics: bypass the metadata
@@ -158,30 +162,26 @@ jobs:
           python -c "from osgeo import gdal; assert gdal.__version__"
 
       - name: Build map_edit_core (required)
-        if: runner.os == 'Linux'
         run: |
           python -m pip install -e geo-viz-engine/native/map_edit_core
           python -c "from geoviz_plots.map_edit import HAS_CPP; assert HAS_CPP is True, 'HAS_CPP must be True in CI'"
           # __version__ on map_edit_core is added on the geo-viz-engine side
           # (packaging #435 cross-repo todo); only the source resolution check
           # applies here.
-          python -c "import map_edit_core; assert 'native/map_edit_core' in map_edit_core.__file__, 'map_edit_core must resolve to the freshly built module, not a committed root binary'"
+          python -c "import map_edit_core; assert 'native/map_edit_core' in map_edit_core.__file__.replace(chr(92), '/'), 'map_edit_core must resolve to the freshly built module, not a committed root binary'"
 
       - name: Build grid_render_core (required)
-        if: runner.os == 'Linux'
         run: |
           python -m pip install -e native/grid_render_core
           python -c "import grid_render_core; assert hasattr(grid_render_core, 'render_grid_rgba'), 'grid_render_core.render_grid_rgba missing in CI'"
-          python -c "import grid_render_core; assert 'native/grid_render_core' in grid_render_core.__file__, 'grid_render_core must resolve to the freshly built module'; assert hasattr(grid_render_core, '__version__'), 'grid_render_core.__version__ missing in CI'"
+          python -c "import grid_render_core; assert 'native/grid_render_core' in grid_render_core.__file__.replace(chr(92), '/'), 'grid_render_core must resolve to the freshly built module'; assert hasattr(grid_render_core, '__version__'), 'grid_render_core.__version__ missing in CI'"
 
       - name: Build layer_model_core (required)
-        if: runner.os == 'Linux'
         run: |
           python -m pip install -e native/layer_model_core
           python -c "import layer_model_core; assert hasattr(layer_model_core, 'LayerRegistry'), 'layer_model_core.LayerRegistry missing in CI'"
 
       - name: Build seismic_3d_core (required)
-        if: runner.os == 'Linux'
         # Round-2 review (K-F1): these two extensions previously had NO CI
         # build step — the committed root binaries shadowed source on 3.13 and
         # skipped every native test on 3.12, so source-only changes shipped
@@ -192,14 +192,13 @@ jobs:
         run: |
           python -m pip install -e native/seismic_3d_core
           python -c "import seismic_3d_core; assert hasattr(seismic_3d_core, 'fast_slice_to_indexed8'), 'seismic_3d_core symbols missing in CI'"
-          python -c "import seismic_3d_core; assert 'native/seismic_3d_core' in seismic_3d_core.__file__, 'seismic_3d_core must resolve to the freshly built module, not a committed root binary'; assert hasattr(seismic_3d_core, '__version__'), 'seismic_3d_core.__version__ missing in CI'"
+          python -c "import seismic_3d_core; assert 'native/seismic_3d_core' in seismic_3d_core.__file__.replace(chr(92), '/'), 'seismic_3d_core must resolve to the freshly built module, not a committed root binary'; assert hasattr(seismic_3d_core, '__version__'), 'seismic_3d_core.__version__ missing in CI'"
 
       - name: Build well_log_core (required)
-        if: runner.os == 'Linux'
         run: |
           python -m pip install -e native/well_log_core
           python -c "import well_log_core; assert hasattr(well_log_core, 'fast_las_parse_data'), 'well_log_core symbols missing in CI'"
-          python -c "import well_log_core; assert 'native/well_log_core' in well_log_core.__file__, 'well_log_core must resolve to the freshly built module, not a committed root binary'; assert hasattr(well_log_core, '__version__'), 'well_log_core.__version__ missing in CI'"
+          python -c "import well_log_core; assert 'native/well_log_core' in well_log_core.__file__.replace(chr(92), '/'), 'well_log_core must resolve to the freshly built module, not a committed root binary'; assert hasattr(well_log_core, '__version__'), 'well_log_core.__version__ missing in CI'"
 
       - name: Native C++ selftests (algorithm verification)
         if: runner.os == 'Linux'
@@ -240,10 +239,14 @@ jobs:
           # may need the job-level ceiling). -v prints the last started test
           # when the suite dies so the hung case is identifiable in CI logs.
           # A green suite fits well inside the 60m job timeout (locally ~2m).
+          # tests/perf is owned by the nightly slow leg (300s per-test
+          # timeout): the fsync-heavy budgets repeatedly blew the fast
+          # gate's 45s ceiling under runner load.
           xvfb-run -a python -m pytest -v --tb=line \
             --timeout=45 \
             --timeout-method=thread \
             -m "not slow and not welllog_binding" \
+            --ignore=tests/perf \
             --durations=25
 
       - name: Run tests (Windows)
@@ -253,10 +256,17 @@ jobs:
           QT_OPENGL: software
           PYTHONFAULTHANDLER: "1"
         run: |
+          # --ignore=tests/perf on BOTH legs: the fsync-heavy budgets
+          # repeatedly blew the 45s per-test ceiling (Windows: Defender
+          # makes every place_managed_file fsync ~an order slower and the
+          # timeout killed the suite at 3%, masking real failures; Linux:
+          # runner-load timeouts on 2026-08-29). The nightly slow-tests.yml
+          # owns the whole family with a 300s ceiling.
           python -m pytest -v --tb=line `
             --timeout=45 `
             --timeout-method=thread `
             -m "not slow and not welllog_binding" `
+            --ignore=tests/perf `
             --durations=25
 
       - name: Assert the slow family has not silently shrunk

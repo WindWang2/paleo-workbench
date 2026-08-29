@@ -580,8 +580,30 @@ class DataCatalogService:
             isolated = index.db_path.with_name(
                 f"{index.db_path.name}.corrupt-{_datetime.now():%Y%m%d-%H%M%S-%f}"
             )
+            # Windows: the health probe's pooled connection holds the file
+            # open and blocks the rename — drop the pool first (open-time
+            # path is single-threaded; connections reconnect lazily).
+            index.close()
             try:
                 os.replace(index.db_path, isolated)
+            except PermissionError:
+                # A reference-cycled sqlite handle (e.g. the throwaway
+                # health-probe index) is only released at the next gc
+                # collection, and Windows refuses to rename a file an
+                # open handle holds. Collect and retry briefly; if a real
+                # holder persists, stay best-effort (reset removes the
+                # bytes anyway).
+                import gc as _gc
+                import time as _time
+
+                for _ in range(10):
+                    _gc.collect()
+                    _time.sleep(0.05)
+                    try:
+                        os.replace(index.db_path, isolated)
+                        break
+                    except PermissionError:
+                        continue
             except OSError:
                 pass  # best-effort forensics; reset() removes the bytes anyway
             index.reset()

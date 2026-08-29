@@ -18,6 +18,7 @@ hook. Invariants:
 
 from __future__ import annotations
 
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -276,6 +277,19 @@ def sweep_gc(service, *, dry_run: bool = True, explicit: bool = False) -> GcRepo
             else:
                 item.path.unlink()
             removed.append(item)
+        except PermissionError:
+            # Read-only payload (blobs are content-addressed and immutable
+            # by contract): Windows refuses to unlink read-only files —
+            # clear the bit and retry once.
+            try:
+                item.path.chmod(item.path.stat().st_mode | stat.S_IWUSR)
+                if item.path.is_dir():
+                    item.path.rmdir()
+                else:
+                    item.path.unlink()
+                removed.append(item)
+            except OSError:
+                continue
         except OSError:
             continue
     return GcReport(removed)

@@ -348,6 +348,7 @@ def test_inmemory_fallback_paths_linear_and_correct(tmp_path: Path):
     def _fallback_search_time(n: int) -> float:
         project, svc = _open_scaled(tmp_path / str(n), n)
         try:
+            svc._index.close()  # Windows: pooled handles block deletion
             _db_path(project).unlink()  # force the fallback path
             assert svc.index_revision() is None
             results = svc.search_assets(type="bulk_3")
@@ -375,6 +376,11 @@ def test_rebuild_self_heals_deleted_index_with_scale(tmp_path: Path):
     svc.document = _scaled_document(BASE_N)
     svc.rebuild_index()
     try:
+        # Simulate an EXTERNAL deletion: pooled connections must be closed
+        # first (Windows refuses to delete a file any handle holds; the
+        # service reconnects lazily on the next write — the contract under
+        # test is the self-heal, not raw unlink semantics).
+        svc._index.close()
         _db_path(project).unlink()
         # A save after index loss must recover the index (self-heal).
         svc.document.assets[0].name = "renamed"

@@ -566,7 +566,11 @@ def _check_paths(report: AuditReport, service, versions) -> None:
     artifacts_name = artifact_dir_for(service.project_path).name
     for version in versions:
         if not version.managed:
-            if version.path and not version.path.startswith("/"):
+            # Platform-correct absoluteness: a Windows drive path
+            # ("C:/...") does not start with "/", so the old POSIX-only
+            # startswith("/") check false-positived every external link
+            # on Windows.
+            if version.path and not Path(version.path).is_absolute():
                 report.issues.append(
                     AuditIssue(
                         "path_mismatch",

@@ -115,7 +115,10 @@ def test_rewrite_image_paths_copies_into_plot_assets(tmp_path) -> None:
     out = rewrite_image_paths(records, tmp_path, "c1")
 
     rel = out[0]["props"]["path"]
-    assert rel.startswith("plots/assets/c1/")
+    # well_log_workstation builds the rel path via Path.relative_to, which
+    # yields backslashes on Windows; the stored-posix normalization is a
+    # cross-repo (well-log-engine) follow-up. Compare normalized.
+    assert rel.replace("\\", "/").startswith("plots/assets/c1/")
     assert (tmp_path / rel).is_file()
     assert (tmp_path / rel).read_bytes() == b"fake-png"
     # The input record is never mutated.

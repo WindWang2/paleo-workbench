@@ -233,12 +233,12 @@ def _workbench_geoviz_import_violations(root: Path) -> list[str]:
                     continue
                 if node.module == "geoviz":
                     if any(item.name not in GEOVIZ_PUBLIC_FACADE for item in node.names):
-                        violations.append(str(path.relative_to(root.parent)))
+                        violations.append(path.relative_to(root.parent).as_posix())
                 elif node.module.startswith("geoviz.") or node.module.split(
                     ".", 1
                 )[0].startswith("geoviz_"):
                     if (node.module, None) not in PRIVATE_API_EXEMPTIONS:
-                        violations.append(str(path.relative_to(root.parent)))
+                        violations.append(path.relative_to(root.parent).as_posix())
             elif isinstance(node, ast.Import):
                 for item in node.names:
                     if _is_type_checking_guarded(node):
@@ -247,7 +247,7 @@ def _workbench_geoviz_import_violations(root: Path) -> list[str]:
                         ".", 1
                     )[0].startswith("geoviz_"):
                         if (item.name, None) not in PRIVATE_API_EXEMPTIONS:
-                            violations.append(str(path.relative_to(root.parent)))
+                            violations.append(path.relative_to(root.parent).as_posix())
     return violations
 
 

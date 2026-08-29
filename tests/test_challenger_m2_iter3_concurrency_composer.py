@@ -718,5 +718,14 @@ class TestExportFidelityAll7LayerTypes:
             root = tree.getroot()
             assert root.tag.endswith("svg")
         finally:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
+            # QSvgGenerator's QFile can outlive QPainter.end() briefly;
+            # Windows refuses to remove a file an open handle holds —
+            # bounded retry, then leave the tempfile to the OS.
+            import time as _time
+
+            for _ in range(20):
+                try:
+                    os.remove(tmp_path)
+                    break
+                except PermissionError:
+                    _time.sleep(0.05)

@@ -6,7 +6,7 @@ from paleo_workbench.resources.import_service import import_files, import_folder
 
 def test_import_files_adds_new_resources(tmp_path: Path):
     well = tmp_path / "well.las"
-    well.write_text("~Version\n", encoding="utf-8")
+    well.write_text("~Version\n", encoding="utf-8", newline="")
 
     report = import_files([well], existing=[])
 
@@ -18,7 +18,7 @@ def test_import_files_adds_new_resources(tmp_path: Path):
 
 def test_import_files_skips_duplicate_path(tmp_path: Path):
     well = tmp_path / "well.las"
-    well.write_text("~Version\n", encoding="utf-8")
+    well.write_text("~Version\n", encoding="utf-8", newline="")
     existing = [
         ResourceItem(
             name="well.las",
@@ -40,7 +40,7 @@ def test_import_files_never_opens_file_or_calculates_checksum(
     tmp_path: Path, monkeypatch
 ):
     well = tmp_path / "well.las"
-    well.write_text("~Version\n", encoding="utf-8")
+    well.write_text("~Version\n", encoding="utf-8", newline="")
 
     def fail_open(*_args, **_kwargs):
         raise AssertionError("import must not open file content")
@@ -88,7 +88,7 @@ def test_import_files_dedupes_relative_project_paths(tmp_path: Path):
     project_path = tmp_path / "demo.paleo.json"
     well = tmp_path / "data" / "well.las"
     well.parent.mkdir()
-    well.write_text("~Version\n", encoding="utf-8")
+    well.write_text("~Version\n", encoding="utf-8", newline="")
     existing = [
         ResourceItem(
             name="well.las",

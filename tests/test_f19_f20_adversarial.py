@@ -505,13 +505,15 @@ class TestSqliteCorruptionAndSelfHealing:
         index = CatalogIndex(tmp_path)
         index.rebuild(doc)
 
-        # Write garbage to WAL and SHM
         wal_file = Path(f"{index.db_path}-wal")
         shm_file = Path(f"{index.db_path}-shm")
+        # Close pooled connections BEFORE corrupting: SQLite holds -wal
+        # and the shared-memory -shm mapped, and Windows rejects writes to
+        # a mapped file (OSError 22).
+        index.close()
         wal_file.write_bytes(b"GARBAGE_WAL_CONTENT")
         shm_file.write_bytes(b"GARBAGE_SHM_CONTENT")
 
-        index.close()
         index.reset()
         assert not wal_file.exists()
         assert not shm_file.exists()

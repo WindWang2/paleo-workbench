@@ -87,9 +87,30 @@ def test_catalog_index_prunes_dead_threads(tmp_path: Path):
     # Worker thread is now dead, but connection is in _conns
     assert t.ident in index._conns
 
-    # Calling open/connect from main thread prunes dead thread
-    index.open()
-    assert t.ident not in index._conns
+    # Calling open/connect from main thread prunes dead thread. Bounded
+    # poll: Thread.join() may return before OS-thread termination
+    # completes, so the first probe can still see the owner alive.
+    import time as _time
+
+    deadline = _time.monotonic() + 5.0
+    while t.ident in index._conns and _time.monotonic() < deadline:
+        # Prune DIRECTLY: open()/_connect() early-returns the main
+        # thread's pooled connection and would never reach the pruning
+        # pass on subsequent iterations.
+        index.prune_dead_threads()
+        if t.ident in index._conns:
+            _time.sleep(0.02)
+    from paleo_workbench.catalog.db import native_thread_alive
+
+    probe_state = {
+        tid: native_thread_alive(entry.native_id)
+        for tid, entry in index._conns.items()
+    }
+    assert t.ident not in index._conns, (
+        f"[DEBUG-win-prune] worker ident {t.ident} survived poll; "
+        f"pool={ {tid: e.native_id for tid, e in index._conns.items()} } "
+        f"probes={probe_state}"
+    )
     index.close()
 
 

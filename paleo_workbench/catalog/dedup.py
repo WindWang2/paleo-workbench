@@ -195,6 +195,17 @@ def sweep_unreferenced_blobs(
             path.unlink()
         except FileNotFoundError:
             continue
+        except PermissionError:
+            # Blobs are deliberately read-only (content-addressed, immutable
+            # by contract). POSIX unlinks regardless of the mode bits;
+            # Windows refuses to delete a read-only file — clear the
+            # attribute and retry. Anything else still failing (a genuine
+            # open handle) stays conservative: skip, next sweep retries.
+            try:
+                path.chmod(path.stat().st_mode | stat.S_IWUSR)
+                path.unlink()
+            except OSError:
+                continue
         except OSError:
             continue
         removed.append(digest)
