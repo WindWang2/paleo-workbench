@@ -18,6 +18,7 @@ hook. Invariants:
 
 from __future__ import annotations
 
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 

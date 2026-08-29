@@ -10,8 +10,9 @@ def test_data_toolbar_exposes_actions_and_search(qtbot):
     toolbar.search_changed.connect(received.append)
 
     toolbar.search_box.setText("well")
-    # Search is debounced (~180ms); wait for emit.
-    qtbot.wait(200)
+    # Search is debounced (~180ms); wait for the emit to land (timer
+    # granularity under load makes a fixed sleep flaky).
+    qtbot.waitUntil(lambda: bool(received), timeout=2_000)
 
     assert toolbar.import_btn.text() == "导入文件"
     assert toolbar.import_folder_btn.text() == "导入目录"

@@ -586,12 +586,26 @@ class DataCatalogService:
             index.close()
             try:
                 os.replace(index.db_path, isolated)
-            except OSError as exc:
-                # best-effort forensics; reset() removes the bytes anyway.
-                # [DEBUG-win-forensics] temporary: identify the holder.
-                print(f"[DEBUG-win-forensics] replace failed: {exc!r}")
-            else:
-                print(f"[DEBUG-win-forensics] isolated -> {isolated.name}")
+            except PermissionError:
+                # A reference-cycled sqlite handle (e.g. the throwaway
+                # health-probe index) is only released at the next gc
+                # collection, and Windows refuses to rename a file an
+                # open handle holds. Collect and retry briefly; if a real
+                # holder persists, stay best-effort (reset removes the
+                # bytes anyway).
+                import gc as _gc
+                import time as _time
+
+                for _ in range(10):
+                    _gc.collect()
+                    _time.sleep(0.05)
+                    try:
+                        os.replace(index.db_path, isolated)
+                        break
+                    except PermissionError:
+                        continue
+            except OSError:
+                pass  # best-effort forensics; reset() removes the bytes anyway
             index.reset()
         if document is not None and json_path.is_file():
             # The manifest should be exactly what we last checkpointed. A

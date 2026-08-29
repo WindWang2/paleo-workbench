@@ -94,7 +94,10 @@ def test_catalog_index_prunes_dead_threads(tmp_path: Path):
 
     deadline = _time.monotonic() + 5.0
     while t.ident in index._conns and _time.monotonic() < deadline:
-        index.open()
+        # Prune DIRECTLY: open()/_connect() early-returns the main
+        # thread's pooled connection and would never reach the pruning
+        # pass on subsequent iterations.
+        index.prune_dead_threads()
         if t.ident in index._conns:
             _time.sleep(0.02)
     from paleo_workbench.catalog.db import native_thread_alive
