@@ -158,24 +158,21 @@ jobs:
           python -c "from osgeo import gdal; assert gdal.__version__"
 
       - name: Build map_edit_core (required)
-        if: runner.os == 'Linux'
         run: |
           python -m pip install -e geo-viz-engine/native/map_edit_core
           python -c "from geoviz_plots.map_edit import HAS_CPP; assert HAS_CPP is True, 'HAS_CPP must be True in CI'"
           # __version__ on map_edit_core is added on the geo-viz-engine side
           # (packaging #435 cross-repo todo); only the source resolution check
           # applies here.
-          python -c "import map_edit_core; assert 'native/map_edit_core' in map_edit_core.__file__, 'map_edit_core must resolve to the freshly built module, not a committed root binary'"
+          python -c "import map_edit_core; assert 'native/map_edit_core' in map_edit_core.__file__.replace('\\', '/'), 'map_edit_core must resolve to the freshly built module, not a committed root binary'"
 
       - name: Build grid_render_core (required)
-        if: runner.os == 'Linux'
         run: |
           python -m pip install -e native/grid_render_core
           python -c "import grid_render_core; assert hasattr(grid_render_core, 'render_grid_rgba'), 'grid_render_core.render_grid_rgba missing in CI'"
-          python -c "import grid_render_core; assert 'native/grid_render_core' in grid_render_core.__file__, 'grid_render_core must resolve to the freshly built module'; assert hasattr(grid_render_core, '__version__'), 'grid_render_core.__version__ missing in CI'"
+          python -c "import grid_render_core; assert 'native/grid_render_core' in grid_render_core.__file__.replace('\\', '/'), 'grid_render_core must resolve to the freshly built module'; assert hasattr(grid_render_core, '__version__'), 'grid_render_core.__version__ missing in CI'"
 
       - name: Build layer_model_core (required)
-        if: runner.os == 'Linux'
         run: |
           python -m pip install -e native/layer_model_core
           python -c "import layer_model_core; assert hasattr(layer_model_core, 'LayerRegistry'), 'layer_model_core.LayerRegistry missing in CI'"
@@ -192,14 +189,13 @@ jobs:
         run: |
           python -m pip install -e native/seismic_3d_core
           python -c "import seismic_3d_core; assert hasattr(seismic_3d_core, 'fast_slice_to_indexed8'), 'seismic_3d_core symbols missing in CI'"
-          python -c "import seismic_3d_core; assert 'native/seismic_3d_core' in seismic_3d_core.__file__, 'seismic_3d_core must resolve to the freshly built module, not a committed root binary'; assert hasattr(seismic_3d_core, '__version__'), 'seismic_3d_core.__version__ missing in CI'"
+          python -c "import seismic_3d_core; assert 'native/seismic_3d_core' in seismic_3d_core.__file__.replace('\\', '/'), 'seismic_3d_core must resolve to the freshly built module, not a committed root binary'; assert hasattr(seismic_3d_core, '__version__'), 'seismic_3d_core.__version__ missing in CI'"
 
       - name: Build well_log_core (required)
-        if: runner.os == 'Linux'
         run: |
           python -m pip install -e native/well_log_core
           python -c "import well_log_core; assert hasattr(well_log_core, 'fast_las_parse_data'), 'well_log_core symbols missing in CI'"
-          python -c "import well_log_core; assert 'native/well_log_core' in well_log_core.__file__, 'well_log_core must resolve to the freshly built module, not a committed root binary'; assert hasattr(well_log_core, '__version__'), 'well_log_core.__version__ missing in CI'"
+          python -c "import well_log_core; assert 'native/well_log_core' in well_log_core.__file__.replace('\\', '/'), 'well_log_core must resolve to the freshly built module, not a committed root binary'; assert hasattr(well_log_core, '__version__'), 'well_log_core.__version__ missing in CI'"
 
       - name: Native C++ selftests (algorithm verification)
         if: runner.os == 'Linux'
