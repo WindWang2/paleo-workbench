@@ -1,8 +1,8 @@
-"""Tests for Native QPainter Well Log, 1:1 Export & Cross-Well LOD (Issues #15, #17)."""
+"""Tests for Native QPainter Well Log 1:1 Export (#646)."""
 import os
 import tempfile
+
 import numpy as np
-import pytest
 from PySide6.QtCore import QSize, QRectF
 from PySide6.QtGui import QImage, QPainter, QPixmap
 
@@ -10,14 +10,6 @@ from geoviz import CurveData, WellLogData, build_qpainter_tracks
 from geoviz_well_log.renderer.canvas import WellLogCanvas
 from geoviz_well_log.export_qpainter import export_svg, export_pdf, export_png
 from geoviz_cross_well.correlation_layer import CorrelationLayer
-
-try:
-    from geoviz_cross_well.correlation_layer import depth_range_clip_filter, douglas_peucker_simplify
-
-    HAS_CORRELATION_HELPERS = True
-except ImportError:  # removed as dead code in GVE 53127a9b
-    HAS_CORRELATION_HELPERS = False
-    depth_range_clip_filter = douglas_peucker_simplify = None  # type: ignore
 
 
 def _paint_nonwhite_pixels(canvas: WellLogCanvas) -> int:
@@ -84,38 +76,3 @@ def test_well_log_canvas_paint_all_and_exports(qtbot):
         # is the content path export_svg uses. Loaded tracks must ink pixels.
         assert _paint_nonwhite_pixels(empty) == 0
         assert _paint_nonwhite_pixels(canvas) > 0
-
-
-def test_depth_range_clip_filter():
-    if not HAS_CORRELATION_HELPERS:
-        pytest.skip("depth_range_clip_filter removed as dead code in GVE 53127a9b")
-    # Tie lines with (min_depth, max_depth)
-    ties = [
-        {"id": "tie1", "top_depth": 1000.0, "bottom_depth": 1100.0},  # In range (1000-1500)
-        {"id": "tie2", "top_depth": 500.0, "bottom_depth": 800.0},    # Offscreen above
-        {"id": "tie3", "top_depth": 1800.0, "bottom_depth": 2000.0},  # Offscreen below
-        {"id": "tie4", "top_depth": 1400.0, "bottom_depth": 1600.0},  # Partially overlaps
-    ]
-
-    visible = depth_range_clip_filter(ties, vp_top_depth=1000.0, vp_bottom_depth=1500.0)
-
-    visible_ids = {t["id"] for t in visible}
-    assert "tie1" in visible_ids
-    assert "tie4" in visible_ids
-    assert "tie2" not in visible_ids
-    assert "tie3" not in visible_ids
-
-
-def test_douglas_peucker_simplify():
-    if not HAS_CORRELATION_HELPERS:
-        pytest.skip("douglas_peucker_simplify removed as dead code in GVE 53127a9b")
-    # Create a dense collinear polyline with slight jitter < 0.5px
-    x = np.linspace(0, 100, 1000)
-    y = 2.0 * x + np.sin(x) * 0.1  # jitter amplitude 0.1px (< 0.5px tolerance)
-    points = np.column_stack([x, y])
-
-    simplified = douglas_peucker_simplify(points, epsilon=0.5)
-
-    # 1000 points simplified down to < 50 points (95%+ reduction)
-    assert len(simplified) < 50
-    assert len(simplified) < len(points)
