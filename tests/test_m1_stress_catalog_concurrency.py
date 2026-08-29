@@ -227,7 +227,15 @@ def test_stress_concurrent_catalog_close_races(tmp_path: Path):
     for w in workers:
         w.join(timeout=5.0)
 
-    # All connections must be cleared from pool
+    # All connections must be cleared from pool. Bounded prune poll:
+    # join() can return before OS-thread termination completes, so an
+    # immediate single probe may still see owners alive (Windows race);
+    # reconnected worker entries must still drain once teardown finishes.
+    deadline = time.monotonic() + 5.0
+    while index._conns and time.monotonic() < deadline:
+        index.prune_dead_threads()
+        if index._conns:
+            time.sleep(0.02)
     assert len(index._conns) == 0
     # Any exceptions captured should be benign SQLite interrupt/error, never crashes
     for exc in worker_exceptions:

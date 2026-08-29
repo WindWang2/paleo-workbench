@@ -299,8 +299,16 @@ def test_close_leaves_no_handles_and_survives_concurrent_use(tmp_path: Path):
 
     assert failures == []
     # Workers may legitimately have reconnected after close(); once they are
-    # all joined, one prune must return the pool to zero.
-    index.prune_dead_threads()
+    # all joined, pruning must return the pool to zero. Bounded poll:
+    # join() can return before OS-thread termination finishes, so the
+    # first probe may still see owners alive (Windows teardown race).
+    import time as _time
+
+    deadline = _time.monotonic() + 5.0
+    while index._conns and _time.monotonic() < deadline:
+        index.prune_dead_threads()
+        if index._conns:
+            _time.sleep(0.02)
     assert len(index._conns) == 0
 
 

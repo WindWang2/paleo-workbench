@@ -366,6 +366,9 @@ def test_story5_tags_persist_across_reopen_and_index_rebuild(
         # Delete the SQLite index and rebuild it from the canonical store.
         db_path = catalog_dir_for(project_path) / DB_FILENAME
         assert db_path.exists()
+        # Simulate external deletion: close pooled connections first
+        # (Windows cannot delete a file an open handle holds).
+        service2._index.close()
         db_path.unlink()
         service2.rebuild_index()
 

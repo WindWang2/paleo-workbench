@@ -87,8 +87,16 @@ def test_catalog_index_prunes_dead_threads(tmp_path: Path):
     # Worker thread is now dead, but connection is in _conns
     assert t.ident in index._conns
 
-    # Calling open/connect from main thread prunes dead thread
-    index.open()
+    # Calling open/connect from main thread prunes dead thread. Bounded
+    # poll: Thread.join() may return before OS-thread termination
+    # completes, so the first probe can still see the owner alive.
+    import time as _time
+
+    deadline = _time.monotonic() + 5.0
+    while t.ident in index._conns and _time.monotonic() < deadline:
+        index.open()
+        if t.ident in index._conns:
+            _time.sleep(0.02)
     assert t.ident not in index._conns
     index.close()
 

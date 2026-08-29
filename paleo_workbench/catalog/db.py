@@ -556,7 +556,6 @@ def native_thread_alive(native_id: int) -> bool | None:
         import ctypes
 
         THREAD_QUERY_LIMITED_INFORMATION = 0x1000
-        STILL_ACTIVE = 259
         ERROR_INVALID_PARAMETER = 87
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
         kernel32.OpenThread.restype = ctypes.c_void_p  # HANDLE is pointer-sized
@@ -571,10 +570,20 @@ def native_thread_alive(native_id: int) -> bool | None:
                 return False
             return None
         try:
-            exit_code = ctypes.c_ulong()
-            if not kernel32.GetExitCodeThread(handle, ctypes.byref(exit_code)):
-                return None
-            return exit_code.value == STILL_ACTIVE
+            # WAIT_OBJECT_0: the thread handle is signalled — the exact,
+            # race-free "OS thread has terminated" signal. WAIT_TIMEOUT:
+            # still running. (GetExitCodeThread was rejected here: a thread
+            # whose real exit code is 259 is indistinguishable from live.)
+            WAIT_OBJECT_0 = 0
+            WAIT_TIMEOUT = 258
+            result = kernel32.WaitForSingleObject(
+                ctypes.c_void_p(handle), 0
+            )
+            if result == WAIT_OBJECT_0:
+                return False
+            if result == WAIT_TIMEOUT:
+                return True
+            return None
         finally:
             kernel32.CloseHandle(ctypes.c_void_p(handle))
     return None

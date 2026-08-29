@@ -580,6 +580,10 @@ class DataCatalogService:
             isolated = index.db_path.with_name(
                 f"{index.db_path.name}.corrupt-{_datetime.now():%Y%m%d-%H%M%S-%f}"
             )
+            # Windows: the health probe's pooled connection holds the file
+            # open and blocks the rename — drop the pool first (open-time
+            # path is single-threaded; connections reconnect lazily).
+            index.close()
             try:
                 os.replace(index.db_path, isolated)
             except OSError:

@@ -381,6 +381,23 @@ def test_drop_current_connection_on_unopened_and_closed_conn(tmp_path):
     assert len(index._conns) == 0
 
 
+def _prune_until_empty(index, timeout_s: float = 5.0) -> None:
+    """Bounded prune poll: Thread.join() can return before the OS thread
+    finishes terminating (CPython releases the join lock inside thread
+    bootstrap), so a single immediate prune legitimately still sees the
+    thread alive. Poll until the pool drains or the deadline — the
+    contract under test is "pruned after teardown", not "within
+    microseconds of join()".
+    """
+    import time as _time
+
+    deadline = _time.monotonic() + timeout_s
+    while index._conns and _time.monotonic() < deadline:
+        index.prune_dead_threads()
+        if index._conns:
+            _time.sleep(0.02)
+
+
 def test_dead_thread_pruning_under_proc_task(tmp_path):
     """Verify dead thread connections are correctly pruned even when threads terminate abruptly."""
     index = CatalogIndex(tmp_path)
@@ -398,8 +415,8 @@ def test_dead_thread_pruning_under_proc_task(tmp_path):
 
     assert dead_tids[0] in index._conns
 
-    # Trigger prune
-    index.prune_dead_threads()
+    # Trigger prune (bounded poll — see _prune_until_empty)
+    _prune_until_empty(index)
     assert dead_tids[0] not in index._conns
 
 
