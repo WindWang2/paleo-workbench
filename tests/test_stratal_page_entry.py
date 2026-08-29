@@ -104,7 +104,12 @@ def test_stratal_generate_demo_produces_visible_slices(qtbot):
     ) as blocker:
         pass
     assert blocker.args is not None and blocker.args[0]["demo"] is True
-
+    # The completed signal fires on the WORKER thread; the UI applies the
+    # result via a queued slot (_on_stratal_completed). Waiting for the
+    # signal alone races the handler — wait for the applied state.
+    qtbot.waitUntil(
+        lambda: len(renderer.get_stratal_slices()) == 3, timeout=5_000
+    )
     snap = renderer.get_stratal_slices()
     assert len(snap) == 3  # three proportional slices
     # Each registered plane pair is added to the GL view.
@@ -136,6 +141,11 @@ def test_stratal_clear_removes_all_slices(qtbot):
     ) as blocker:
         pass
     assert blocker.args is not None and blocker.args[0]["demo"] is True
+    # Same queued-handler race as the generate test: the plane items are
+    # registered by _on_stratal_completed, not by the worker signal.
+    qtbot.waitUntil(
+        lambda: bool(renderer._stratal_plane_items), timeout=5_000
+    )
     assert renderer._stratal_plane_items
     page._on_clear_stratal_slices()
     assert renderer._stratal_plane_items == {}

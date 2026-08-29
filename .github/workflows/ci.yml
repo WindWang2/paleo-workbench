@@ -349,8 +349,11 @@ jobs:
         # The marker selects exactly the 3D viewport family that the
         # offscreen main leg cannot cover; every unmarked test is skipped by
         # -m, so this leg stays small and focused.
+        # xvfb-run is REQUIRED: QT_QPA_PLATFORM=xcb with no X server makes
+        # the first QOpenGLWidget creation abort the whole process (SIGABRT
+        # in the GLX path) — the apt step already installs xvfb.
         run: |
-          python -m pytest -v --tb=line             --timeout=120             --timeout-method=thread             -m opengl             --durations=15
+          xvfb-run -a python -m pytest -v --tb=line             --timeout=120             --timeout-method=thread             -m opengl             --durations=15
 
       - name: Assert the opengl family has not silently shrunk
         run: |
