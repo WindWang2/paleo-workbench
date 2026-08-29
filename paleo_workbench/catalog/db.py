@@ -771,6 +771,21 @@ class CatalogIndex:
 
     # -- state ----------------------------------------------------------------
 
+    def _schema_present(self, conn: sqlite3.Connection) -> bool:
+        """True when the canonical schema exists in the connected database.
+
+        ``_connect`` recreates an empty file when the store was deleted
+        mid-session (and a failed flush can leave a zero-byte one behind),
+        so callers that read or write tables must gate on this — the
+        rebuildable-store guarantee is ``write_all`` from the document,
+        never a query against tables that are not there.
+        """
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master"
+            " WHERE type = 'table' AND name = 'sync_state'"
+        ).fetchone()
+        return row is not None
+
     def _read_sync_state(self, key: str) -> str | None:
         """Read one sync_state value; None when missing/unreadable/corrupt."""
         if not self.db_path.is_file():
@@ -1135,6 +1150,13 @@ class CatalogIndex:
         identical to :meth:`write_all` restricted to the dirty set.
         """
         conn = self._connect()
+        if not self._schema_present(conn):
+            # The store file was deleted (or left schema-less by an earlier
+            # failed flush) mid-session; ``_connect`` has just recreated an
+            # empty database, so the tables below do not exist. Fall back to
+            # a full rewrite from the document — the canonical truth.
+            self.write_all(document)
+            return
         # O(Δ) lookups: the caller (the service) passes its incrementally
         # maintained id→object maps for the large collections; tags and the
         # model registry are small enough to scan. Building full-document
@@ -1434,10 +1456,13 @@ class CatalogIndex:
         uses, so unmarked mutations stay correct (only slower).
         """
         dirty = DirtySet()
-        if not self.db_path.is_file():
+        conn = self._connect()
+        if not self._schema_present(conn):
+            # Deleted mid-session, or present but schema-less (an earlier
+            # failed flush already recreated the path): either way the
+            # full-compare below has no tables to read.
             self.write_all(document)
             return
-        conn = self._connect()
 
         def rows(table: str) -> dict[str, tuple]:
             return {
