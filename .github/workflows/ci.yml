@@ -71,6 +71,7 @@ jobs:
         # stays as the fail-closed tripwire: re-pinning a submodule that ships
         # Windows-invalid paths fails this step instead of breaking recursive
         # checkouts on Windows silently.
+        shell: bash
         run: |
           python - <<'EOF'
           import pathlib, sys
