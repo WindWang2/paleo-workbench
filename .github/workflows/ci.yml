@@ -301,14 +301,15 @@ jobs:
   # skips unconditionally — 3D visualization had zero CI coverage. This job
   # boots the same suite subset on a real (virtual) X server with software
   # Mesa (llvmpipe), mirroring well-log-engine.yml's "Test with Mesa" leg.
-  # continue-on-error OBSERVABILITY until the leg has soak time on GHA
-  # llvmpipe (pixel tests are known-flaky there — see the exclusions in
-  # well-log-engine.yml); promote to the required gate once stable.
+  # REQUIRED since 2026-08-29: three consecutive green legs after the
+  # xvfb fix and the queued-handler test race fix (#1112), the same
+  # promotion bar the windows-latest row met in #1111. llvmpipe pixel
+  # fidelity stays a known soft spot — if it flakes, fix or narrow the
+  # pixel asserts rather than demoting the whole leg.
   test-3d-opengl:
     name: 3D OpenGL viewport (software Mesa)
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    continue-on-error: true
     env:
       PIP_IGNORE_REQUIRES_PYTHON: "1"
       # Real X display (not offscreen) so QOpenGLContext is creatable; the
@@ -437,7 +438,7 @@ jobs:
   # green (separate workflow well-log-engine.yml — required, not edited here).
   merge-gate:
     name: Merge gate (full monorepo + workstation)
-    needs: [test, well-log-workstation]
+    needs: [test, well-log-workstation, test-3d-opengl]
     # Fail closed (#436): the implicit `if: success()` on a `needs` job makes
     # it SKIP — never fail — whenever a needed job fails, so the gate could
     # not block merging while the workstation matrix was red. `if: always()`
@@ -450,13 +451,15 @@ jobs:
         run: |
           echo "Full monorepo Tests (CPython 3.12) matrix is green."
           echo "Well Log Workstation (host) matrix is green."
+          echo "3D OpenGL viewport (software Mesa) leg is green."
           echo "Also require workflow 'WellLogEngine C++' on the same SHA."
           echo "Policy: docs/ci-merge-policy.md."
 
       - name: Fail closed unless every product gate is green
-        if: ${{ needs.test.result != 'success' || needs.well-log-workstation.result != 'success' }}
+        if: ${{ needs.test.result != 'success' || needs.well-log-workstation.result != 'success' || needs.test-3d-opengl.result != 'success' }}
         run: |
           echo "A required product gate is not green:"
           echo "  Tests: ${{ needs.test.result }}"
           echo "  Well Log Workstation: ${{ needs.well-log-workstation.result }}"
+          echo "  3D OpenGL viewport: ${{ needs.test-3d-opengl.result }}"
           exit 1

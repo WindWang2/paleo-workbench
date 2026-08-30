@@ -178,8 +178,21 @@ def test_ci_3d_opengl_leg_contract() -> None:
     assert any("-m opengl" in run for run in run_steps), (
         "the 3D leg must select the opengl marker family"
     )
-    # Observability leg by policy until GHA llvmpipe soak completes.
-    assert job.get("continue-on-error") is True
+    # REQUIRED gate since 2026-08-29 (three green legs post-#1112; the
+    # promotion bar the windows-latest row set in #1111): no
+    # continue-on-error, and the merge gate must fail closed on it.
+    assert job.get("continue-on-error") is None
+    gate = wf["jobs"]["merge-gate"]
+    assert "test-3d-opengl" in gate["needs"], (
+        "the merge gate must depend on the 3D leg"
+    )
+    fail_step = next(
+        step for step in gate["steps"]
+        if step.get("name", "").startswith("Fail closed")
+    )
+    assert "needs.test-3d-opengl.result" in fail_step["if"], (
+        "the fail-closed step must check the 3D leg result"
+    )
 
 
 def test_ci_main_leg_does_not_run_opengl_family() -> None:
