@@ -240,7 +240,11 @@ def test_verify_integrity_linear_in_total_bytes(tmp_path: Path):
     import hashlib
 
     n = min(BASE_N * 2, 256)
-    small_bytes, big_bytes = 16 * 1024, 32 * 1024  # 2x total payload bytes
+    # 8/16 KiB ladder (was 16/32): the ratio, not the absolute bytes, is the
+    # contract; the bigger ladder blew the 45s per-test budget on
+    # fsync-bound Windows CI runners (observed on main 2026-08-30) — same
+    # treatment the trash ladder got under #841.
+    small_bytes, big_bytes = 8 * 1024, 16 * 1024  # 2x total payload bytes
 
     def _verify_time(payload_size: int) -> float:
         project = _make_project(tmp_path / str(payload_size), n)
