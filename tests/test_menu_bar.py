@@ -120,6 +120,28 @@ def test_view_and_help_menu_buttons_use_menu_bar_button_style():
     assert "QPushButton#HelpMenuButton" in tokens.QSS_TEMPLATE
 
 
+def test_header_center_slot_mounts_and_clears(qtbot):
+    """M2: the command header hosts the workflow stepper in its center slot."""
+    from PySide6.QtWidgets import QLabel
+
+    bar = MenuBar()
+    qtbot.addWidget(bar)
+
+    center = QLabel("center")
+    bar.set_header_center(center)
+    assert bar._header_center is center
+    lay = bar.layout()
+    idx_center = lay.indexOf(center)
+    idx_search = lay.indexOf(bar.search_box)
+    assert 0 < idx_center < idx_search
+    # trailing stretch keeps the widget centered
+    assert lay.itemAt(idx_center + 1).spacerItem() is not None
+
+    bar.set_header_center(None)
+    assert bar._header_center is None
+    assert lay.indexOf(bar.search_box) == lay.count() - 1
+
+
 def test_search_box_has_leading_icon(qtbot):
     bar = MenuBar()
     qtbot.addWidget(bar)

@@ -13,7 +13,7 @@ class ContextSidebar(QFrame):
     """Dynamic context-sensitive ergonomic sidebar.
 
     Structure (Inverted-L Flow):
-    1. Top Sub-page Segmented Control (switching sub-pages within current stage)
+    1. Top Stage Caption + Sub-page Segmented Control (sub-pages of the stage)
     2. Middle Context Information & Quick Actions
     3. Bottom Collapse/Expand Toggle
     """
@@ -25,6 +25,7 @@ class ContextSidebar(QFrame):
         super().__init__(parent)
         self.setObjectName("ContextSidebar")
         self._is_collapsed = False
+        self._theme = "light"
         self._current_stage_index = 0
         self._active_page_index = navigation.PAGE_INDEX_DATA
         self.subpage_buttons: list[QPushButton] = []
@@ -41,7 +42,11 @@ class ContextSidebar(QFrame):
         )
         main_layout.setSpacing(tokens.SPACE_2)
 
-        # 1. Top Section: Sub-page Segmented Navigation Bar
+        # 1. Top Section: Stage caption + Sub-page Segmented Navigation Bar
+        self.stage_caption = QLabel("")
+        self.stage_caption.setObjectName("WorkFieldLabel")
+        main_layout.addWidget(self.stage_caption)
+
         self.subpage_container = QWidget()
         self.subpage_layout = QVBoxLayout(self.subpage_container)
         self.subpage_layout.setContentsMargins(0, 0, 0, 0)
@@ -50,10 +55,7 @@ class ContextSidebar(QFrame):
 
         # 2. Middle Section: Context Header & Lines
         self.context_label = QLabel(tokens.PAGE_NAMES[0])
-        self.context_label.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: {tokens.FONT_SIZE_TITLE};"
-            f" font-weight: {tokens.FONT_WEIGHT_TITLE};"
-        )
+        self._apply_header_accent()
         main_layout.addWidget(self.context_label)
 
         self.content_container = QWidget()
@@ -81,6 +83,21 @@ class ContextSidebar(QFrame):
     def is_collapsed(self) -> bool:
         return self._is_collapsed
 
+    def _apply_header_accent(self) -> None:
+        """Accent-bar page header (inline from palette values; QSS has no
+        generic hook for this chrome yet — coordinated with M1)."""
+        palette = tokens.palette_for(self._theme)
+        self.context_label.setStyleSheet(
+            f"color: {palette['TEXT_PRIMARY']}; font-size: {tokens.FONT_SIZE_TITLE};"
+            f" font-weight: {tokens.FONT_WEIGHT_TITLE};"
+            f" border-left: 3px solid {palette['PRIMARY']}; padding-left: 8px;"
+        )
+
+    def refresh_theme(self, theme: str = "light") -> None:
+        """Switch the palette backing the inline accent colors."""
+        self._theme = theme
+        self._apply_header_accent()
+
     def set_stage(self, stage_index: int, active_page_index: int = -1) -> None:
         """Update segmented sub-page control buttons for the selected Stage."""
         self._current_stage_index = stage_index
@@ -89,6 +106,13 @@ class ContextSidebar(QFrame):
         if active_page_index not in subpage_indices and subpage_indices:
             active_page_index = subpage_indices[0]
         self._active_page_index = active_page_index
+
+        stage_name = (
+            navigation.STAGE_DEFINITIONS[stage_index]["name"]
+            if 0 <= stage_index < len(navigation.STAGE_DEFINITIONS)
+            else ""
+        )
+        self.stage_caption.setText(f"阶段 {stage_index + 1} · {stage_name}")
 
         # Clear existing buttons
         for btn in self.subpage_buttons:
@@ -109,7 +133,9 @@ class ContextSidebar(QFrame):
             self.subpage_buttons.append(btn)
             self.subpage_layout.addWidget(btn)
 
-        self.subpage_container.setVisible(not self._is_collapsed and len(self.subpage_buttons) > 1)
+        visible = not self._is_collapsed and len(self.subpage_buttons) > 1
+        self.stage_caption.setVisible(not self._is_collapsed)
+        self.subpage_container.setVisible(visible)
 
     def _on_subpage_clicked(self, page_index: int) -> None:
         if page_index == self._active_page_index:
@@ -137,13 +163,15 @@ class ContextSidebar(QFrame):
             self.context_label.hide()
             self.content_container.hide()
             self.subpage_container.hide()
+            self.stage_caption.hide()
             self.collapse_btn.setText("▶")
         else:
             self.setMinimumWidth(180)
             self.setMaximumWidth(260)
-            self.setFixedWidth(200)
+            self.setFixedWidth(192)
             self.context_label.show()
             self.content_container.show()
+            self.stage_caption.show()
             self.subpage_container.setVisible(len(self.subpage_buttons) > 1)
             self.collapse_btn.setText("◀ 收起")
 
@@ -295,19 +323,12 @@ class ContextSidebar(QFrame):
             label.deleteLater()
         self._content_labels.clear()
 
+        # Themed roles from the token sheet: section captions render as
+        # secondary WorkFieldLabel lines, values as WorkFieldValue lines.
         for text, heading in lines:
             label = QLabel(text)
             label.setWordWrap(True)
-            if heading:
-                label.setStyleSheet(
-                    f"color: {tokens.TEXT_PRIMARY};"
-                    f" font-size: {tokens.FONT_SIZE_SIDEBAR_SECONDARY}; font-weight: 600;"
-                )
-            else:
-                label.setStyleSheet(
-                    f"color: {tokens.TEXT_SECONDARY};"
-                    f" font-size: {tokens.FONT_SIZE_SIDEBAR_SECONDARY};"
-                )
+            label.setObjectName("WorkFieldLabel" if heading else "WorkFieldValue")
             self.content_layout.addWidget(label)
             self._content_labels.append(label)
 

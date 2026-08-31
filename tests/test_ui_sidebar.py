@@ -26,15 +26,18 @@ def test_context_sidebar_initialization(qapp):
 
 def test_context_sidebar_set_stage(qapp):
     sidebar = ContextSidebar()
-    # Stage 0: Data & Preparation -> [DATA, PREPARATION] (map panel is in-page)
+    # Stage 0: 数据与预处理 opens on 首页 -> [HOME, DATA, PREPARATION]
     sidebar.set_stage(0, active_page_index=navigation.PAGE_INDEX_DATA)
-    assert len(sidebar.subpage_buttons) == 2
-    assert sidebar.subpage_buttons[0].property("active") is True
-    assert sidebar.subpage_buttons[1].property("active") is False
+    assert len(sidebar.subpage_buttons) == 3
+    assert sidebar.subpage_buttons[0].property("active") is False
+    assert sidebar.subpage_buttons[1].property("active") is True
+    assert sidebar.subpage_buttons[2].property("active") is False
+    assert sidebar.stage_caption.text() == "阶段 1 · 数据与预处理"
 
     # Stage 1: Interpretation -> 4 subpages (joint absorbed into 三维建模)
     sidebar.set_stage(1, active_page_index=navigation.PAGE_INDEX_WELL_LOG)
     assert len(sidebar.subpage_buttons) == 4
+    assert sidebar.stage_caption.text() == "阶段 2 · 综合解释"
 
 
 def test_context_sidebar_subpage_click(qapp):
@@ -44,8 +47,8 @@ def test_context_sidebar_subpage_click(qapp):
     emitted = []
     sidebar.subpage_selected.connect(lambda page_idx: emitted.append(page_idx))
 
-    # Click second subpage button (PAGE_INDEX_PREPARATION)
-    sidebar.subpage_buttons[1].click()
+    # Click third subpage button (PAGE_INDEX_PREPARATION)
+    sidebar.subpage_buttons[2].click()
     assert emitted == [navigation.PAGE_INDEX_PREPARATION]
 
 
