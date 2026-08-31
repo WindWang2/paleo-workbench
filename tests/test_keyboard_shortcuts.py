@@ -105,17 +105,15 @@ def test_app_shell_registers_ten_digit_shortcuts(qtbot):
     ]
 
 
-def test_direct_page_switch_out_of_range_preserves_page_and_sidebar(qtbot):
+def test_direct_page_switch_out_of_range_preserves_page(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
     original_page = shell.page_stack.currentIndex()
-    original_context = shell.sidebar.context_label.text()
 
     shell._switch_page(-1)
     shell._switch_page(999)
 
     assert shell.page_stack.currentIndex() == original_page
-    assert shell.sidebar.context_label.text() == original_context
 
 
 # --- PaleoWorkbenchWindow project shortcuts -------------------------------

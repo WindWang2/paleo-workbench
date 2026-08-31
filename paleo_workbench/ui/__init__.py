@@ -7,7 +7,6 @@ __all__ = [
     "IconRail",
     "MenuBar",
     "StatusBar",
-    "TextSidebar",
 ]
 
 _EXPORTS = {
@@ -15,7 +14,6 @@ _EXPORTS = {
     "IconRail": "paleo_workbench.ui.icon_rail",
     "MenuBar": "paleo_workbench.ui.menu_bar",
     "StatusBar": "paleo_workbench.ui.status_bar",
-    "TextSidebar": "paleo_workbench.ui.sidebar",
 }
 
 

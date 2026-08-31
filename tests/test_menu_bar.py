@@ -63,27 +63,13 @@ def test_tools_menu_button_uses_menu_bar_button_style():
     assert "QPushButton#ToolsMenuButton" in tokens.QSS_TEMPLATE
 
 
-def test_view_menu_contains_layout_actions(qtbot):
+def test_view_menu_contains_density_submenu(qtbot):
     bar = MenuBar()
     qtbot.addWidget(bar)
 
     assert bar.view_menu_button.text() == "视图"
     texts = [action.text() for action in bar.view_menu.actions()]
-    assert "重置布局" in texts
-    assert "收起/展开侧栏" in texts
-    # the separator renders as an empty-text action
-    assert "" in texts
-    assert "界面密度" in texts
-
-
-def test_view_menu_actions_emit_semantic_signals(qtbot):
-    bar = MenuBar()
-    qtbot.addWidget(bar)
-
-    with qtbot.waitSignal(bar.reset_layout_requested, timeout=1000):
-        bar.reset_layout_action.trigger()
-    with qtbot.waitSignal(bar.toggle_sidebar_requested, timeout=1000):
-        bar.toggle_sidebar_action.trigger()
+    assert texts == ["界面密度"]
 
 
 def test_density_submenu_emits_density_changed(qtbot):

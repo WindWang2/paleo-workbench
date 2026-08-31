@@ -41,12 +41,7 @@ class MenuBar(QFrame):
     properties_requested = Signal()
     preview_settings_requested = Signal()
     # View menu signals
-    reset_layout_requested = Signal()
-    toggle_sidebar_requested = Signal()
     density_changed = Signal(str)  # "comfortable" | "compact"
-    # Panel/layout menu signals (M7)
-    sidebar_float_requested = Signal()
-    reset_panels_layout_requested = Signal()
     # Help menu signal
     about_requested = Signal()
     # Global search
@@ -88,11 +83,6 @@ class MenuBar(QFrame):
         self.view_menu_button = QPushButton("视图")
         self.view_menu_button.setObjectName("ViewMenuButton")
         self.view_menu = QMenu(self.view_menu_button)
-        self.reset_layout_action = self.view_menu.addAction("重置布局")
-        self.reset_layout_action.triggered.connect(self.reset_layout_requested)
-        self.toggle_sidebar_action = self.view_menu.addAction("收起/展开侧栏")
-        self.toggle_sidebar_action.triggered.connect(self.toggle_sidebar_requested)
-        self.view_menu.addSeparator()
         self._density_menu = self.view_menu.addMenu("界面密度")
         # QActionGroup enforces mutual exclusivity (one-at-a-time) natively,
         # replacing fragile manual setChecked bookkeeping.
@@ -111,18 +101,6 @@ class MenuBar(QFrame):
         )
         self._density_group.addAction(self.density_comfortable_action)
         self._density_group.addAction(self.density_compact_action)
-        # --- 面板 submenu (M7): shell sidebar float/dock + persisted-layout
-        # reset. A submenu of 视图 rather than a top-level button — the
-        # command row's button set is pinned by tests/test_menu_bar.py.
-        self.panels_menu = self.view_menu.addMenu("面板")
-        self.float_sidebar_action = self.panels_menu.addAction("侧边栏浮动窗口")
-        self.float_sidebar_action.setCheckable(True)
-        self.float_sidebar_action.triggered.connect(self.sidebar_float_requested)
-        self.panels_menu.addSeparator()
-        self.reset_panels_layout_action = self.panels_menu.addAction("重置面板布局")
-        self.reset_panels_layout_action.triggered.connect(
-            self.reset_panels_layout_requested
-        )
         self.view_menu_button.setMenu(self.view_menu)
         self.labels.append(self.view_menu_button)
         layout.addWidget(self.view_menu_button)
@@ -220,7 +198,3 @@ class MenuBar(QFrame):
         """Keep the density menu check state in sync with the active density."""
         self.density_comfortable_action.setChecked(density == "comfortable")
         self.density_compact_action.setChecked(density == "compact")
-
-    def set_sidebar_float_checked(self, floated: bool) -> None:
-        """Keep the 面板 float action in sync with the sidebar's real state."""
-        self.float_sidebar_action.setChecked(floated)

@@ -214,7 +214,7 @@ def test_build_qss_density_and_theme_matrix(theme, density, padding, min_height)
         assert selector in qss
     # shell hooks the app-shell mission consumes must survive the redesign
     for hook in ("QWidget#AppShell", "QFrame#IconRail", '[navItem="true"]',
-                 '[active="true"]', '[stageItem="true"]', '[subpageItem="true"]',
+                 '[active="true"]', '[stageItem="true"]',
                  "QPushButton#PrimaryButton", "QPushButton#SecondaryButton",
                  "QLineEdit#SearchBox"):
         assert hook in qss, f"{theme}/{density} lost {hook}"

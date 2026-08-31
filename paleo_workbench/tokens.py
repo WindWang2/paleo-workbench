@@ -827,10 +827,6 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     }}
     /* Generic QToolButton focus (covers QToolButton beyond the icon rail) */
     QToolButton:focus {{ border: 1px solid {t.FOCUS_RING}; }}
-    QFrame#TextSidebar {{
-        background: {t.BG_SIDEBAR}; border-right: 1px solid {t.BORDER};
-        min-width: {t.TEXT_SIDEBAR_WIDTH}px; max-width: {t.TEXT_SIDEBAR_WIDTH}px;
-    }}
     QFrame#StatusBar {{
         background: {t.BG_SEARCH}; border-top: 1px solid {t.BORDER_STRONG};
         min-height: {t.STATUS_BAR_HEIGHT}px; max-height: {t.STATUS_BAR_HEIGHT}px;
@@ -984,37 +980,6 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         color: {t.TEXT_SECONDARY};
         font-size: 13px;
         font-weight: bold;
-    }}
-    QFrame#ContextSidebar {{
-        background: {t.BG_SIDEBAR};
-        border-right: 1px solid {t.BORDER};
-    }}
-    QPushButton[subpageItem="true"] {{
-        background: {t.BG_SEARCH};
-        color: {t.TEXT_PRIMARY};
-        font-size: {t.FONT_SIZE_STATUS};
-        border: 1px solid {t.BORDER};
-        border-radius: {t.RADIUS_BUTTON}px;
-        padding: 4px 8px;
-    }}
-    QPushButton[subpageItem="true"]:hover {{
-        border-color: {t.PRIMARY};
-    }}
-    QPushButton[subpageItem="true"][active="true"] {{
-        background: {t.PRIMARY};
-        color: {t.ON_PRIMARY};
-        border-color: {t.PRIMARY};
-        font-weight: 600;
-    }}
-    QPushButton#SidebarCollapseBtn {{
-        background: transparent;
-        color: {t.TEXT_SECONDARY};
-        border: 1px solid {t.BORDER};
-        border-radius: {t.RADIUS_BUTTON}px;
-    }}
-    QPushButton#SidebarCollapseBtn:hover {{
-        background: {t.BG_SEARCH};
-        color: {t.TEXT_PRIMARY};
     }}
     QLabel#WorkFieldLabel {{
         color: {t.TEXT_SECONDARY};

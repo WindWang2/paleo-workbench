@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
-from PySide6.QtCore import Qt, QEvent, QPoint, QPropertyAnimation, QEasingCurve, QTimer, Signal
+from PySide6.QtCore import Qt, QEvent, QPropertyAnimation, QEasingCurve, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLineEdit,
@@ -29,15 +26,10 @@ from paleo_workbench.ui.pages.geological_modeling_3d_page import GeologicalModel
 from paleo_workbench.viz.hosts.well_location_preview import (
     WellLocationPreviewStateStore,
 )
-from paleo_workbench.ui.sidebar import (
-    SIDEBAR_DEFAULT_WIDTH,
-    ContextSidebar,
-    TextSidebar,
-)
 from paleo_workbench.ui.status_bar import StatusBar
 from paleo_workbench.ui.workflow_stepper import WorkflowStepper
 from paleo_workbench import tokens
-from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
+from paleo_workbench.project.models import ProjectDocument
 
 from paleo_workbench.ui import navigation
 from paleo_workbench.ui.navigation import (
@@ -181,95 +173,13 @@ class CommandPalette(QFrame):
         return super().eventFilter(source, event)
 
 
-_SIDEBAR_FLOAT_KEY = "shell:sidebar"  # M4 page:panel key convention
-
-
-def _offscreen_platform() -> bool:
-    """True on the headless CI platform (same check the 3D page uses).
-
-    Float actions are inert here: a top-level FloatingPanel would open a real
-    window, which offscreen CI must never do.
-    """
-    return os.environ.get("QT_QPA_PLATFORM", "") == "offscreen"
-
-
-def _load_float_framework():
-    """Load M4's float framework (feat/float-panel-framework).
-
-    Returns ``(FloatController, LayoutPersistence)`` or ``None`` while that
-    branch is unmerged — the shell then stays docked-only (float actions
-    inert) instead of failing to import.
-    """
-    try:
-        from paleo_workbench.ui.layout_persistence import LayoutPersistence
-        from paleo_workbench.ui.panel_float_controller import FloatController
-    except ImportError:
-        return None
-    return FloatController, LayoutPersistence
-
-
-class SidebarResizeHandle(QFrame):
-    """Thin draggable handle between the ContextSidebar and the page stack.
-
-    Dragging applies the sidebar's docked width (clamped to the sidebar's
-    sane bounds via ``set_user_width``); release emits the final width so the
-    shell can persist it. Replaces the old fixed-width expanded sidebar.
-    """
-
-    drag_finished = Signal(int)
-
-    _HANDLE_WIDTH = 6
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("SidebarResizeHandle")
-        self.setFixedWidth(self._HANDLE_WIDTH)
-        self.setCursor(Qt.CursorShape.SplitHCursor)
-        self._drag_active = False
-
-    def refresh_theme(self, theme: str = "light") -> None:
-        """Inline handle chrome (no generic QFrame rule in the token sheet)."""
-        palette = tokens.palette_for(theme)
-        self.setStyleSheet(
-            f"QFrame#SidebarResizeHandle {{ background: {palette['BORDER']}; }}"
-            f"QFrame#SidebarResizeHandle:hover {{ background: {palette['PRIMARY']}; }}"
-        )
-
-    def _sidebar(self):
-        return getattr(self.parentWidget(), "sidebar", None)
-
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_active = True
-            event.accept()
-
-    def mouseMoveEvent(self, event) -> None:
-        if not self._drag_active:
-            return
-        sidebar = self._sidebar()
-        if sidebar is None:
-            return
-        cursor_x = event.globalPosition().toPoint().x()
-        sidebar_left = sidebar.mapToGlobal(QPoint(0, 0)).x()
-        sidebar.set_user_width(cursor_x - sidebar_left)
-        event.accept()
-
-    def mouseReleaseEvent(self, event) -> None:
-        if self._drag_active and event.button() == Qt.MouseButton.LeftButton:
-            self._drag_active = False
-            sidebar = self._sidebar()
-            if sidebar is not None:
-                self.drag_finished.emit(sidebar.user_width())
-            event.accept()
-
-
 class AppShell(QWidget):
     """Application shell (M2 layout).
 
     One command header (MenuBar hosting menus · workflow stepper · global
     search in a single menu-bar-height row), a content row of [IconRail |
-    ContextSidebar | QStackedWidget with the 11 eagerly constructed pages],
-    and a StatusBar. Page ordinals and contracts are stable — see
+    QStackedWidget with the 11 eagerly constructed pages], and a StatusBar.
+    Page ordinals and contracts are stable — see
     :mod:`paleo_workbench.ui.navigation` for the stage model.
     """
 
@@ -340,8 +250,6 @@ class AppShell(QWidget):
         middle.setSpacing(0)
         self.icon_rail = IconRail(self)
         self.icon_rail.setVisible(True)
-        self.sidebar = ContextSidebar(self)
-        self.sidebar.setVisible(True)
         self.page_stack = QStackedWidget(self)
         self.page_stack.addWidget(HomePage(self.page_stack))        # index 0 = 首页
         self.data_page = DataPage(
@@ -349,9 +257,7 @@ class AppShell(QWidget):
             well_state_store=self._well_location_state_store,
             parent=self.page_stack,
         )
-        self.data_page.data_context_changed.connect(self.update_data_context)
         self.page_stack.addWidget(self.data_page)        # index 1 = 数据
-        self._data_context = self._build_data_context()
         self.page_stack.addWidget(WellLogPredictionPage(self.page_stack)) # index 2 = 测井预测
         self.page_stack.addWidget(SeismicPredictionPage(self.page_stack)) # index 3 = 地震预测
         self.page_stack.addWidget(SequenceFrameworkPage(self.page_stack)) # index 4 = 层序格架
@@ -364,7 +270,6 @@ class AppShell(QWidget):
         ) # index 6 = 可视化
         self.page_stack.addWidget(PreparationPage(self.page_stack)) # index 7 = 制备
         self.mapping_page = MappingPage(self.page_stack)
-        self.mapping_page.mapping_context_changed.connect(self.update_mapping_context)
         self.page_stack.addWidget(self.mapping_page)  # index 8 = 编图
         self.page_stack.addWidget(ReviewExportPage(self.page_stack)) # index 9 = 成图审核
         self.geomodel_page = GeologicalModeling3DPage(self.page_stack)
@@ -376,12 +281,7 @@ class AppShell(QWidget):
         self.page_stack.addWidget(self.geomodel_page)  # index 10 = 井震联合
         # 井位地图 lives inside the Data page as a collapsible panel (§18);
         # DataPage wires its own map ↔ tree sync and initial domain binding.
-        self._mapping_context = self._build_mapping_context()
-        self._middle_layout = middle
         middle.addWidget(self.icon_rail)
-        middle.addWidget(self.sidebar)
-        self.sidebar_resize_handle = SidebarResizeHandle(self)
-        middle.addWidget(self.sidebar_resize_handle)
         middle.addWidget(self.page_stack, 1)
         outer.addLayout(middle, 1)
 
@@ -409,47 +309,14 @@ class AppShell(QWidget):
         # switches, so sync the inline palette colors once here (p2-1 r1).
         current_theme = self.theme_manager.current_theme.value
         self.workflow_stepper.refresh_theme(current_theme)
-        self.sidebar.refresh_theme(current_theme)
-        self.sidebar_resize_handle.refresh_theme(current_theme)
 
         # Signal connections
         self.workflow_stepper.stage_changed.connect(self._on_stepper_stage_changed)
-        self.sidebar.subpage_selected.connect(self._switch_page)
         self.icon_rail.page_changed.connect(self._switch_page)
-        self.sidebar.float_requested.connect(self._toggle_sidebar_float)
-        self.sidebar_resize_handle.drag_finished.connect(
-            self._persist_sidebar_docked_width
-        )
-
-        # 面板 menu (M7, shell-level wiring: every _refresh_shell rebuild
-        # constructs a fresh MenuBar inside a fresh AppShell, so this stays
-        # connected without app.py changes).
-        self.menu_bar.sidebar_float_requested.connect(self._toggle_sidebar_float)
-        self.menu_bar.reset_panels_layout_requested.connect(self._reset_panels_layout)
-
-        # Shell sidebar float via M4's framework (registered under a stable
-        # page:panel key; unmerged framework degrades to a docked-only sidebar).
-        self._float_framework = _load_float_framework()
-        self.sidebar_float_controller = None
-        if self._float_framework is not None:
-            float_controller_cls, persistence_cls = self._float_framework
-            self._layout_persistence = persistence_cls()
-            self.sidebar_float_controller = float_controller_cls(
-                resolver=self._resolve_float_panel_widget,
-                persistence=self._layout_persistence,
-                title_for=lambda key: "上下文侧栏",
-                parent=self,
-            )
-            self.sidebar_float_controller.float_changed.connect(
-                self._on_sidebar_float_changed
-            )
-            self._restore_sidebar_layout()
-        self.menu_bar.set_sidebar_float_checked(self.sidebar_is_floated())
 
         # Sync initial stage with the landing page (index 0 -> Stage 1: 数据与预处理)
         initial_stage = navigation.get_stage_for_page(0)
         self.workflow_stepper.set_active_stage(initial_stage)
-        self.sidebar.set_stage(initial_stage, active_page_index=0)
 
         self._setup_shortcuts()
 
@@ -523,87 +390,12 @@ class AppShell(QWidget):
         # Components with inline token colors re-resolve against the new
         # palette so nothing stays styled for the previous theme.
         self.workflow_stepper.refresh_theme(theme)
-        self.sidebar.refresh_theme(theme)
-        self.sidebar_resize_handle.refresh_theme(theme)
         # top-level windows outside this shell (dialogs) follow the theme too
         from PySide6.QtWidgets import QApplication
 
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(qss)
-
-    # --- Sidebar float / dock / reset (M7) ----------------------------
-
-    def sidebar_is_floated(self) -> bool:
-        if self.sidebar_float_controller is None:
-            return False
-        return self.sidebar_float_controller.is_floating(_SIDEBAR_FLOAT_KEY)
-
-    def _toggle_sidebar_float(self) -> None:
-        self._set_sidebar_floating(not self.sidebar_is_floated())
-
-    def _set_sidebar_floating(self, floated: bool) -> None:
-        # Offscreen CI must never open real windows: the float action stays
-        # inert there (the same guard pattern as the 3D GL pages).
-        if _offscreen_platform() or self.sidebar_float_controller is None:
-            return
-        if floated:
-            self.sidebar_float_controller.float_panel(_SIDEBAR_FLOAT_KEY)
-        else:
-            self.sidebar_float_controller.dock_panel(_SIDEBAR_FLOAT_KEY)
-
-    def _on_sidebar_float_changed(self, key: str, floating: bool) -> None:
-        if key != _SIDEBAR_FLOAT_KEY:
-            return
-        self.sidebar.set_floated(floating)
-        if floating:
-            self.sidebar_resize_handle.setVisible(False)
-        else:
-            # FloatController reparented the sidebar back to the shell; the
-            # middle QHBoxLayout does not manage plain children, so re-insert
-            # at the slot between IconRail and the page stack here.
-            self._middle_layout.insertWidget(1, self.sidebar)
-            self._middle_layout.insertWidget(2, self.sidebar_resize_handle)
-            self.sidebar_resize_handle.setVisible(True)
-            self._persist_sidebar_docked_width(self.sidebar.user_width())
-        self.menu_bar.set_sidebar_float_checked(floating)
-
-    def _resolve_float_panel_widget(self, key: str):
-        """M4 resolver: the shell floats exactly one panel — the sidebar."""
-        return self.sidebar if key == _SIDEBAR_FLOAT_KEY else None
-
-    def _persist_sidebar_docked_width(self, width: int) -> None:
-        """Record the docked width; float geometry is persisted by the
-        FloatController itself."""
-        if self.sidebar_float_controller is None or self.sidebar_is_floated():
-            return
-        self.sidebar.set_user_width(width)  # idempotent clamp
-        self._layout_persistence.save_docked_sizes(
-            _SIDEBAR_FLOAT_KEY, (self.sidebar.user_width(),)
-        )
-
-    def _restore_sidebar_layout(self) -> None:
-        record = self._layout_persistence.load(_SIDEBAR_FLOAT_KEY)
-        if record.docked_sizes:
-            self.sidebar.set_user_width(record.docked_sizes[0])
-        if record.floating and not _offscreen_platform():
-            # restore_saved re-floats at the saved geometry and honours a
-            # user-closed (hidden) panel.
-            self.sidebar_float_controller.restore_saved(
-                _SIDEBAR_FLOAT_KEY, self.sidebar
-            )
-
-    def _reset_panels_layout(self) -> None:
-        """面板 → 重置面板布局: clear this shell's persisted layout key and
-        restore the sidebar's docked defaults. The default width is
-        re-persisted last: a floated reset docks in between, which re-records
-        the pre-reset width (p2-1 r1)."""
-        if self.sidebar_float_controller is not None:
-            self._layout_persistence.clear(_SIDEBAR_FLOAT_KEY)
-        self._set_sidebar_floating(False)
-        self.sidebar.set_user_width(SIDEBAR_DEFAULT_WIDTH)
-        self.sidebar.toggle_collapse(False)
-        self._persist_sidebar_docked_width(SIDEBAR_DEFAULT_WIDTH)
 
     def _switch_page(self, index: int) -> None:
         if not 0 <= index < self.page_stack.count():
@@ -621,18 +413,7 @@ class AppShell(QWidget):
         stage_idx = navigation.get_stage_for_page(index)
         self._stage_subpage_memory[stage_idx] = index
         self.workflow_stepper.set_active_stage(stage_idx)
-        self.sidebar.set_stage(stage_idx, active_page_index=index)
         self.icon_rail.set_active(index)
-
-        # The sidebar keeps the user's state across page switches (#1047):
-        # visible stays visible, collapsed stays collapsed, and context
-        # updates continue so any later reveal is already current.
-        if index == PAGE_INDEX_DATA:
-            self.sidebar.update_data_context(**self._data_context)
-        elif index == PAGE_INDEX_MAPPING:
-            self.sidebar.update_mapping_context(**self._mapping_context)
-        else:
-            self.sidebar.set_context(tokens.PAGE_NAMES[index])
         self._animate_page_fade(index)
 
     def _animate_page_fade(self, index: int) -> None:
@@ -839,11 +620,6 @@ class AppShell(QWidget):
             page.set_project_path(project_path)
         if hasattr(page, "update_state"):
             page.update_state(state, resources, current_artifacts)
-        self._data_context = self._build_data_context(
-            resources=resources, artifacts=current_artifacts
-        )
-        if self.page_stack.currentIndex() == PAGE_INDEX_DATA:
-            self.sidebar.update_data_context(**self._data_context)
         # Keep the embedded well-location map in sync with the document (§18).
         refresh_map = getattr(page, "refresh_well_map_panel", None)
         if callable(refresh_map):
@@ -867,55 +643,6 @@ class AppShell(QWidget):
                 page.set_project_path(path)
             except Exception:
                 continue
-
-    def update_data_context(self, context: dict) -> None:
-        self._data_context = {
-            "resource_count": context.get("resource_count", 0),
-            "artifact_count": context.get("artifact_count", 0),
-            "issue_count": context.get("issue_count", 0),
-            "selected_name": context.get("selected_name", "未选择"),
-            "selected_type": context.get("selected_type", ""),
-            "selected_format": context.get("selected_format", ""),
-            "reader_mode": context.get("reader_mode", "empty"),
-        }
-        if self.page_stack.currentIndex() == 1:
-            self.sidebar.update_data_context(**self._data_context)
-
-    def _build_data_context(
-        self,
-        resources: list[ResourceItem] | None = None,
-        artifacts: list[ExportArtifact] | None = None,
-    ) -> dict:
-        current_resources = resources if resources is not None else self.project.resources
-        current_artifacts = (
-            artifacts if artifacts is not None else self.project.export_artifacts
-        )
-        issue_count = sum(
-            1
-            for resource in current_resources
-            if resource.status in {"missing", "warning", "failed", "error"}
-        )
-        selected = getattr(self.data_page, "_selected_asset", None)
-        selected_name = "未选择"
-        selected_type = ""
-        selected_format = ""
-        if isinstance(selected, ResourceItem):
-            selected_name = selected.name
-            selected_type = selected.type
-            selected_format = selected.format
-        elif isinstance(selected, ExportArtifact):
-            selected_name = Path(selected.output_path).name
-            selected_type = "成果"
-            selected_format = selected.format
-        return {
-            "resource_count": len(current_resources),
-            "artifact_count": len(current_artifacts),
-            "issue_count": issue_count,
-            "selected_name": selected_name,
-            "selected_type": selected_type,
-            "selected_format": selected_format,
-            "reader_mode": self.data_page.current_reader_mode(),
-        }
 
     def update_well_log_prediction_page(self, prediction_tasks: list, project=None) -> None:
         page = self.page_stack.widget(PAGE_INDEX_WELL_LOG)
@@ -1027,32 +754,8 @@ class AppShell(QWidget):
                     factor_tasks=factor_tasks,
                     project_crs=project_crs,
                 )
-            self._mapping_context = self._build_mapping_context()
-            if self.page_stack.currentIndex() == PAGE_INDEX_MAPPING:
-                self.sidebar.update_mapping_context(**self._mapping_context)
 
         self._update_or_defer_page(PAGE_INDEX_MAPPING, "state", update)
-
-    def update_mapping_context(self, context: dict) -> None:
-        self._mapping_context = self._normalize_mapping_context(context)
-        if self.page_stack.currentIndex() == PAGE_INDEX_MAPPING:
-            self.sidebar.update_mapping_context(**self._mapping_context)
-
-    def _build_mapping_context(self) -> dict:
-        page = self.mapping_page_widget()
-        if hasattr(page, "mapping_context"):
-            return self._normalize_mapping_context(page.mapping_context())
-        return self._normalize_mapping_context({})
-
-    @staticmethod
-    def _normalize_mapping_context(context: dict | None) -> dict:
-        ctx = context or {}
-        return {
-            "map_name": ctx.get("map_name", "未选择") or "未选择",
-            "horizon": ctx.get("horizon", "") or "",
-            "dirty": bool(ctx.get("dirty", False)),
-            "preview": bool(ctx.get("preview", False)),
-        }
 
     def update_review_export_page(self, reports: list, map_documents: list, artifacts: list) -> None:
         page = self.page_stack.widget(PAGE_INDEX_REVIEW)

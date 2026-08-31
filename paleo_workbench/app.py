@@ -220,8 +220,6 @@ class PaleoWorkbenchWindow(QWidget):
         menu_bar.save_project_requested.connect(self._on_save_project)
         menu_bar.properties_requested.connect(self._on_properties)
         menu_bar.preview_settings_requested.connect(self._show_preview_settings)
-        menu_bar.reset_layout_requested.connect(self._on_reset_layout)
-        menu_bar.toggle_sidebar_requested.connect(self._on_toggle_sidebar)
         menu_bar.density_changed.connect(self._on_density_changed)
         menu_bar.about_requested.connect(self._on_about)
         menu_bar.search_submitted.connect(self._on_global_search)
@@ -236,17 +234,6 @@ class PaleoWorkbenchWindow(QWidget):
         self.workflow_controller.wire_review_page()
 
     # --- view / help / search handlers ---
-
-    def _on_reset_layout(self) -> None:
-        """Reset the contextual sidebar to its expanded state."""
-        sidebar = getattr(self.app_shell, "sidebar", None)
-        if sidebar is not None and hasattr(sidebar, "toggle_collapse"):
-            sidebar.toggle_collapse(False)
-
-    def _on_toggle_sidebar(self) -> None:
-        sidebar = getattr(self.app_shell, "sidebar", None)
-        if sidebar is not None and hasattr(sidebar, "toggle_collapse"):
-            sidebar.toggle_collapse()
 
     def _on_density_changed(self, density: str) -> None:
         """Rebuild the global QSS at the requested density (comfortable|compact).
