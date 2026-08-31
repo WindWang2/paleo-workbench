@@ -20,14 +20,14 @@ Domain services: DataCatalogService(CatalogPort) / well loader+track layout /
 open_volume / GeologicalMappingService / composition+export / workflow dashboard
 ```
 
-## Action inventory (22 actions, coarse-grained)
+## Action inventory (25 actions, coarse-grained)
 
 | domain | actions | risk |
 |---|---|---|
 | workspace | list_assets, search, get_lineage, get_versions, describe_context | READ |
 | well | list, open, list_curves, create_display, apply_template | READ/COMPUTE |
 | seismic | open_volume, get_slice, compute_attribute | READ/COMPUTE |
-| map | create_factor_map, create_well_location_map, add_layer, set_style, apply_template, add_component, validate, export | READ/COMPUTE/WRITE |
+| map | create_factor_map, create_well_location_map, add_layer, set_style, apply_template, add_component, validate, export (8) | READ/COMPUTE/WRITE |
 | geology | list_horizons, list_faults, create_interpretation | READ/WRITE |
 | workflow | status | READ |
 
