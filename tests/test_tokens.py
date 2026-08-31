@@ -111,6 +111,33 @@ def test_icon_rail_stays_dark_in_every_theme():
         )
 
 
+def test_rail_hover_pair_is_readable_in_every_theme():
+    """Round-1 review P1: HC hover paired BG_RAIL_HOVER #1f1f1f with
+    TEXT_ON_RAIL_ACTIVE #000000 → 1.27:1. Pin the palette pair AND verify
+    both QSS hover rules (navItem + dockRailItem) actually pair those two
+    tokens, so the sheet cannot silently re-pair them."""
+    import re
+
+    for theme in ("light", "dark", "high_contrast"):
+        p = tokens.palette_for(theme)
+        ratio = _ratio(p["TEXT_ON_RAIL_ACTIVE"], p["BG_RAIL_HOVER"])
+        assert ratio >= 4.5, f"{theme} rail hover text: {ratio:.2f} < 4.5"
+        # hover surface must read as a distinct step on the rail — strong in
+        # HC (review P1 flagged #1f1f1f-on-#000000 = 1.15:1), subtle-but-present
+        # in light/dark like the old sheet
+        surface = _ratio(p["BG_RAIL_HOVER"], p["BG_RAIL"])
+        floor = 3.0 if theme == "high_contrast" else 1.1
+        assert surface >= floor, f"{theme} hover surface vs rail: {surface:.2f} < {floor}"
+        qss = tokens.build_qss(theme=theme)
+        for selector in (r'QToolButton\[navItem="true"\]:hover',
+                         r'QToolButton\[dockRailItem="true"\]:hover'):
+            m = re.search(selector + r" \{([^}]*)\}", qss)
+            assert m, f"{theme} missing rule {selector}"
+            block = m.group(1)
+            assert p["BG_RAIL_HOVER"] in block, f"{selector} lost hover surface"
+            assert p["TEXT_ON_RAIL_ACTIVE"] in block, f"{selector} lost hover text"
+
+
 # ---------------------------------------------------------------------------
 # WCAG contrast floors (at or above the old slate sheet's ratios)
 # ---------------------------------------------------------------------------

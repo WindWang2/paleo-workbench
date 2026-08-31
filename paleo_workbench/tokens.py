@@ -299,7 +299,7 @@ _HIGH_CONTRAST_OVERRIDES = {
     ),
     "BG_RAIL_TOP": "#000000",
     "BG_RAIL_BOTTOM": "#000000",
-    "BG_RAIL_HOVER": "#1f1f1f",
+    "BG_RAIL_HOVER": "#e6e6e6",
     "BG_RAIL_ACTIVE": "#ffffff",
     "RAIL_SEPARATOR": "rgba(255, 255, 255, 0.60)",
     "TEXT_PRIMARY": "#000000",
