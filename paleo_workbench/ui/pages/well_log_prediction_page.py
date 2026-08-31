@@ -4,7 +4,7 @@ from pathlib import Path
 import re
 from urllib.parse import urlsplit, urlunsplit
 
-from PySide6.QtCore import Signal, Slot
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QComboBox,
@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QSplitter,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -32,7 +34,10 @@ from paleo_workbench.prediction.providers import (
 )
 from paleo_workbench.resources.export_service import default_export_dir
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.dock_manager import dock_manager
+from paleo_workbench.ui.layout_persistence import LayoutPersistence
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+from paleo_workbench.ui.panel_float_controller import FloatController
 from paleo_workbench.ui.pages.prediction_evidence_panel import PredictionEvidencePanel
 from paleo_workbench.viz.prediction_helpers import (
     active_prediction_task,
@@ -49,6 +54,48 @@ _AUTHORIZATION_RE = re.compile(
 _SECRET_VALUE_RE = re.compile(
     r"(?i)\b(api[_-]?key|token|secret|password)\s*([=:])\s*[^\s,;&]+"
 )
+
+# QWIDGETSIZE_MAX: lifts a side panel's setFixedWidth upper bound (the
+# designed width stays as the minimum) so the splitter handle can resize it.
+_PANEL_MAX_WIDTH = 16_777_215
+
+#: Delay before a splitter drag is persisted (avoid a QSettings sync per tick).
+_DOCKED_SIZES_DELAY_MS = 400
+
+
+class PanelFloatButton(QToolButton):
+    """Corner button floating one side panel via a FloatController.
+
+    Docked side of the FloatingPanel ⇲ dock-back chrome: pinned to the
+    panel's top-right corner through an event filter and hidden while the
+    panel is afloat (the floating window carries its own dock-back button).
+    """
+
+    def __init__(self, key: str, panel: QWidget, controller: FloatController):
+        super().__init__(panel)
+        self._key = key
+        self._panel = panel
+        self._controller = controller
+        self.setObjectName("PanelFloatButton")
+        self.setText("⇱")
+        self.setToolTip("浮动面板 (Float panel)")
+        self.setFixedSize(18, 18)
+        self.clicked.connect(lambda: self._controller.toggle(self._key))
+        panel.installEventFilter(self)
+        controller.float_changed.connect(self._on_float_changed)
+        self._reposition()
+
+    def _reposition(self) -> None:
+        self.move(self._panel.width() - self.width() - 4, 2)
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 (Qt override)
+        if obj is self._panel and event.type() == QEvent.Type.Resize:
+            self._reposition()
+        return False
+
+    def _on_float_changed(self, key: str, floating: bool) -> None:
+        if key == self._key:
+            self.setVisible(not floating)
 
 
 def _redact_endpoint(value) -> str:
@@ -85,7 +132,7 @@ class WellLogPredictionPage(QWidget):
     # catalog, provenance and domain-binding lifecycle as a normal data import.
     well_log_import_requested = Signal(object)  # list[str]
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, persistence: LayoutPersistence | None = None):
         super().__init__(parent)
         self.setObjectName("WellLogPredictionPage")
         self._project = None
@@ -127,19 +174,51 @@ class WellLogPredictionPage(QWidget):
         source_row.addWidget(self.import_well_btn)
         outer.addLayout(source_row)
 
-        content = QHBoxLayout()
-        content.setSpacing(tokens.SPACE_4)
+        self.content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.content_splitter.setObjectName("WellLogPredictionSplitter")
+        self.content_splitter.setChildrenCollapsible(False)
 
         self.task_panel = PredictionTaskPanel()
-        content.addWidget(self.task_panel, 0)
+        # 任务 | 画布 | 证据: canvas stays the stretchy center; the side
+        # panels keep their design width as a resizable minimum.
+        self.task_panel.setMaximumWidth(_PANEL_MAX_WIDTH)
+        self.content_splitter.addWidget(self.task_panel)
 
         self.canvas_panel = WellLogCanvasPanel()
-        content.addWidget(self.canvas_panel, 1)
+        self.content_splitter.addWidget(self.canvas_panel)
 
         self.evidence_panel = PredictionEvidencePanel()
-        content.addWidget(self.evidence_panel, 0)
+        self.evidence_panel.setMaximumWidth(_PANEL_MAX_WIDTH)
+        self.content_splitter.addWidget(self.evidence_panel)
 
-        outer.addLayout(content, 1)
+        self.content_splitter.setStretchFactor(0, 0)
+        self.content_splitter.setStretchFactor(1, 1)
+        self.content_splitter.setStretchFactor(2, 0)
+        self.content_splitter.setSizes([280, 860, 260])
+
+        outer.addWidget(self.content_splitter, 1)
+
+        # M6: task/evidence float through the shared FloatController. The GL
+        # canvas is never registered — reparenting native views between
+        # windows is the known fragile case.
+        self._float_persistence = (
+            persistence if persistence is not None else LayoutPersistence()
+        )
+        self._floatable: dict[str, QWidget] = {}
+        self.float_controller = FloatController(
+            resolver=self._floatable.get,
+            persistence=self._float_persistence,
+            parent=self,
+        )
+        self._make_floatable("well_log:task", self.task_panel, "预测任务")
+        self._make_floatable("well_log:evidence", self.evidence_panel, "证据与运行")
+        self._float_sizes_timer = QTimer(self)
+        self._float_sizes_timer.setSingleShot(True)
+        self._float_sizes_timer.setInterval(_DOCKED_SIZES_DELAY_MS)
+        self._float_sizes_timer.timeout.connect(self._persist_docked_sizes)
+        self.content_splitter.splitterMoved.connect(self._on_splitter_moved)
+        for key in self._floatable:
+            self.float_controller.restore_saved(key)
 
         self.task_panel.task_selected.connect(self._on_task_selected)
         self.evidence_panel.run_requested.connect(self._on_run)
@@ -150,6 +229,22 @@ class WellLogPredictionPage(QWidget):
         # evidence summary once it lands so the "绑定 LAS" source label and the
         # export gating track the actual canvas state.
         self.canvas_panel.canvas_ready.connect(self._on_canvas_ready)
+
+    def _make_floatable(self, key: str, panel: QWidget, title: str) -> None:
+        """Register a side panel for float/dock and give it a float button."""
+        dock_manager.register_panel(key, title)
+        self._floatable[key] = panel
+        PanelFloatButton(key, panel, self.float_controller)
+
+    def _on_splitter_moved(self, *_pos: int) -> None:
+        self._float_sizes_timer.start()
+
+    def _persist_docked_sizes(self) -> None:
+        """Persist the splitter distribution for every docked side panel."""
+        sizes = list(self.content_splitter.sizes())
+        for key, panel in self._floatable.items():
+            if panel.parentWidget() is self.content_splitter:
+                self._float_persistence.save_docked_sizes(key, sizes)
 
     def set_project(self, project) -> None:
         if project is not self._project:

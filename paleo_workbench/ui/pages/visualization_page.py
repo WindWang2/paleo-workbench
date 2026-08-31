@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QSplitter,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -25,12 +27,15 @@ from paleo_workbench.resources.export_service import (
     view_export_capabilities,
 )
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.dock_manager import dock_manager
+from paleo_workbench.ui.layout_persistence import LayoutPersistence
 from paleo_workbench.ui.map_export_worker import (
     snapshot_map_export,
     start_map_export_job,
     unified_map_canvas_from,
 )
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+from paleo_workbench.ui.panel_float_controller import FloatController
 from paleo_workbench.ui.pages.composite_visualization_panel import CompositeVisualizationPanel
 from paleo_workbench.ui.pages.geoviz_preview_provider import LocalVisualizationProvider
 from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
@@ -40,6 +45,48 @@ from paleo_workbench.ui.pages.well_log_load_worker import WellLogLoadWorker
 from paleo_workbench.viz.adapter import VizAdapter
 from paleo_workbench.viz.models import VizRef
 from paleo_workbench.viz.well_log_load import is_well_log_cached
+
+# QWIDGETSIZE_MAX: lifts a side panel's setFixedWidth upper bound (the
+# designed width stays as the minimum) so the splitter handle can resize it.
+_PANEL_MAX_WIDTH = 16_777_215
+
+#: Delay before a splitter drag is persisted (avoid a QSettings sync per tick).
+_DOCKED_SIZES_DELAY_MS = 400
+
+
+class PanelFloatButton(QToolButton):
+    """Corner button floating one side panel via a FloatController.
+
+    Docked side of the FloatingPanel ⇲ dock-back chrome: pinned to the
+    panel's top-right corner through an event filter and hidden while the
+    panel is afloat (the floating window carries its own dock-back button).
+    """
+
+    def __init__(self, key: str, panel: QWidget, controller: FloatController):
+        super().__init__(panel)
+        self._key = key
+        self._panel = panel
+        self._controller = controller
+        self.setObjectName("PanelFloatButton")
+        self.setText("⇱")
+        self.setToolTip("浮动面板 (Float panel)")
+        self.setFixedSize(18, 18)
+        self.clicked.connect(lambda: self._controller.toggle(self._key))
+        panel.installEventFilter(self)
+        controller.float_changed.connect(self._on_float_changed)
+        self._reposition()
+
+    def _reposition(self) -> None:
+        self.move(self._panel.width() - self.width() - 4, 2)
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 (Qt override)
+        if obj is self._panel and event.type() == QEvent.Type.Resize:
+            self._reposition()
+        return False
+
+    def _on_float_changed(self, key: str, floating: bool) -> None:
+        if key == self._key:
+            self.setVisible(not floating)
 
 
 class VisualizationPage(QWidget):
@@ -51,6 +98,7 @@ class VisualizationPage(QWidget):
         *,
         well_state_store=None,
         preview_provider=None,
+        persistence: LayoutPersistence | None = None,
     ):
         super().__init__(parent)
         self.setObjectName("VisualizationPage")
@@ -122,8 +170,9 @@ class VisualizationPage(QWidget):
 
         outer.addLayout(top_bar)
 
-        content = QHBoxLayout()
-        content.setSpacing(tokens.SPACE_4)
+        self.content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.content_splitter.setObjectName("VisualizationSplitter")
+        self.content_splitter.setChildrenCollapsible(False)
 
         self.summary_panel = VisualizationSummaryPanel()
         self.summary_panel.setHidden(True)
@@ -131,12 +180,41 @@ class VisualizationPage(QWidget):
         self.composite_panel = CompositeVisualizationPanel(
             well_state_store=well_state_store,
         )
-        content.addWidget(self.composite_panel, 1)
+        # 综合可视化 stays the stretchy center; the trace list is the
+        # resizable side panel.
+        self.content_splitter.addWidget(self.composite_panel)
 
         self.trace_panel = VisualizationTracePanel()
-        content.addWidget(self.trace_panel, 0)
+        self.trace_panel.setMaximumWidth(_PANEL_MAX_WIDTH)
+        self.content_splitter.addWidget(self.trace_panel)
 
-        outer.addLayout(content, 1)
+        self.content_splitter.setStretchFactor(0, 1)
+        self.content_splitter.setStretchFactor(1, 0)
+        self.content_splitter.setSizes([1000, 260])
+
+        outer.addWidget(self.content_splitter, 1)
+
+        # M6: the trace list floats through the shared FloatController. The
+        # composite visualization center is never registered — reparenting
+        # its native views between windows is the known fragile case. The
+        # summary panel stays hidden (dormant feature, not floatable).
+        self._float_persistence = (
+            persistence if persistence is not None else LayoutPersistence()
+        )
+        self._floatable: dict[str, QWidget] = {}
+        self.float_controller = FloatController(
+            resolver=self._floatable.get,
+            persistence=self._float_persistence,
+            parent=self,
+        )
+        self._make_floatable("visualization:trace", self.trace_panel, "追踪记录")
+        self._float_sizes_timer = QTimer(self)
+        self._float_sizes_timer.setSingleShot(True)
+        self._float_sizes_timer.setInterval(_DOCKED_SIZES_DELAY_MS)
+        self._float_sizes_timer.timeout.connect(self._persist_docked_sizes)
+        self.content_splitter.splitterMoved.connect(self._on_splitter_moved)
+        for key in self._floatable:
+            self.float_controller.restore_saved(key)
 
         self.summary_panel.asset_selected.connect(self.open_ref)
         self.trace_panel.refresh_requested.connect(self._reload_current)
@@ -145,6 +223,22 @@ class VisualizationPage(QWidget):
             lambda _index: self._sync_export_capabilities()
         )
         self._sync_export_capabilities()
+
+    def _make_floatable(self, key: str, panel: QWidget, title: str) -> None:
+        """Register a side panel for float/dock and give it a float button."""
+        dock_manager.register_panel(key, title)
+        self._floatable[key] = panel
+        PanelFloatButton(key, panel, self.float_controller)
+
+    def _on_splitter_moved(self, *_pos: int) -> None:
+        self._float_sizes_timer.start()
+
+    def _persist_docked_sizes(self) -> None:
+        """Persist the splitter distribution for every docked side panel."""
+        sizes = list(self.content_splitter.sizes())
+        for key, panel in self._floatable.items():
+            if panel.parentWidget() is self.content_splitter:
+                self._float_persistence.save_docked_sizes(key, sizes)
 
     def set_project_path(self, path) -> None:
         """Bind the real ``*.paleo.json`` path for export/artifact routing."""
