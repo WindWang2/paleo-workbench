@@ -140,3 +140,21 @@ def test_theme_change_reapplies_inline_token_colors(qtbot):
     assert tokens.palette_for("dark")["BORDER_STRONG"] in dark_connector
     assert tokens.palette_for("dark")["PRIMARY"] in dark_accent
     assert dark_accent != light_accent
+
+
+def test_shell_constructed_under_dark_gets_dark_inline_colors(qtbot):
+    """r1 p2-1: theme_changed only fires on switches — a shell constructed
+    while the manager is already dark/high-contrast must start with the dark
+    palette's inline colors, not light ones."""
+    theme_manager.set_theme(ThemeMode.DARK)
+    try:
+        shell = AppShell()
+        qtbot.addWidget(shell)
+
+        assert shell.theme_manager.current_theme == ThemeMode.DARK
+        dark = tokens.palette_for("dark")
+        assert dark["BORDER_STRONG"] in shell.workflow_stepper._connectors[0].styleSheet()
+        assert tokens.BORDER_STRONG not in shell.workflow_stepper._connectors[0].styleSheet()
+        assert dark["PRIMARY"] in shell.sidebar.context_label.styleSheet()
+    finally:
+        theme_manager.set_theme(ThemeMode.LIGHT)

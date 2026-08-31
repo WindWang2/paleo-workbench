@@ -80,6 +80,7 @@ class CommandPalette(QFrame):
         self.result_list = QListWidget(self)
         self.result_list.itemActivated.connect(self._activate_item)
         self.result_list.itemClicked.connect(self._activate_item)
+        self.result_list.installEventFilter(self)
         layout.addWidget(self.result_list, 1)
 
         self.filter_input.textChanged.connect(self._apply_filter)
@@ -148,24 +149,30 @@ class CommandPalette(QFrame):
     # --- keyboard -----------------------------------------------------
 
     def eventFilter(self, source, event):  # noqa: N802 (Qt override)
-        if source is self.filter_input and event.type() == QEvent.Type.KeyPress:
-            key = event.key()
-            if key == Qt.Key.Key_Escape:
+        if event.type() == QEvent.Type.KeyPress:
+            # Esc dismisses from both the filter box and the result list;
+            # all other keys are only intercepted in the filter box (the
+            # list keeps native Up/Down/Enter navigation).
+            if event.key() == Qt.Key.Key_Escape:
                 self.dismiss()
                 return True
-            if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                item = self.result_list.currentItem()
-                if item is not None:
-                    self._activate_item(item)
+            if source is self.filter_input:
+                key = event.key()
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    item = self.result_list.currentItem()
+                    if item is not None:
+                        self._activate_item(item)
+                        return True
+                if key == Qt.Key.Key_Down:
+                    row = self.result_list.currentRow()
+                    self.result_list.setCurrentRow(
+                        min(row + 1, self.result_list.count() - 1)
+                    )
                     return True
-            if key == Qt.Key.Key_Down:
-                row = self.result_list.currentRow()
-                self.result_list.setCurrentRow(min(row + 1, self.result_list.count() - 1))
-                return True
-            if key == Qt.Key.Key_Up:
-                row = self.result_list.currentRow()
-                self.result_list.setCurrentRow(max(row - 1, 0))
-                return True
+                if key == Qt.Key.Key_Up:
+                    row = self.result_list.currentRow()
+                    self.result_list.setCurrentRow(max(row - 1, 0))
+                    return True
         return super().eventFilter(source, event)
 
 
@@ -307,6 +314,12 @@ class AppShell(QWidget):
             navigate_page=self._switch_page,
             navigate_stage=self._on_stepper_stage_changed,
         )
+
+        # Constructed under a non-default theme: theme_changed only fires on
+        # switches, so sync the inline palette colors once here (p2-1 r1).
+        current_theme = self.theme_manager.current_theme.value
+        self.workflow_stepper.refresh_theme(current_theme)
+        self.sidebar.refresh_theme(current_theme)
 
         # Signal connections
         self.workflow_stepper.stage_changed.connect(self._on_stepper_stage_changed)

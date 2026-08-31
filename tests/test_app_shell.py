@@ -390,10 +390,16 @@ def test_command_palette_stage_result_respects_memory(qtbot):
 def test_command_palette_escape_dismisses(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
-    shell.command_palette.popup()
     palette = shell.command_palette
 
+    # Esc works from the filter box…
+    palette.popup()
     assert palette.eventFilter(palette.filter_input, _palette_escape_event()) is True
+    assert palette.isHidden()
+
+    # …and from the result list (r1 p3: keyboard users on the list keep Esc).
+    palette.popup()
+    assert palette.eventFilter(palette.result_list, _palette_escape_event()) is True
     assert palette.isHidden()
 
 

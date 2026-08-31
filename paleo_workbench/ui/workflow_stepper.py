@@ -26,6 +26,12 @@ class WorkflowStepper(QFrame):
         self.setObjectName("WorkflowStepper")
         # The header row sizes this bar; keep a sane standalone default.
         self.setFixedHeight(self._HEIGHT)
+        # Legacy token-sheet rule (QFrame#WorkflowStepper, M1 scope) paints a
+        # standalone-row border-bottom; embedded in the MenuBar command
+        # header it would double the header's border line, so the bar
+        # neutralizes it in its own (higher-precedence) stylesheet.
+        # Selector-scoped so children (stage pills, connectors) are untouched.
+        self.setStyleSheet("QFrame#WorkflowStepper { border: none; }")
         self._active_stage_index = 0
         self._theme = "light"
         self.stage_buttons: list[QPushButton] = []

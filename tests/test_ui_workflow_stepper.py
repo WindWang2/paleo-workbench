@@ -28,6 +28,10 @@ def test_workflow_stepper_initialization(qapp):
     # Progressive connectors between the 4 stages, unfilled at stage 1.
     assert len(stepper._connectors) == 3
     assert tokens.BORDER_STRONG in stepper._connectors[0].styleSheet()
+    # Legacy token-sheet QFrame#WorkflowStepper border is neutralized (r1
+    # p2-2): the bar lives inside the header row and must not paint a
+    # second border-bottom line under it.
+    assert "border: none" in stepper.styleSheet()
 
 
 def test_workflow_stepper_connectors_fill_with_progress(qapp):
