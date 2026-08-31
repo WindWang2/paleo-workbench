@@ -97,7 +97,13 @@ class DockManager:
         area: str = "left",
         visible: bool = True,
     ) -> DockPanelConfig:
-        """Register (or retitle) a panel id and return its config."""
+        """Register (or retitle) a panel id and return its config.
+
+        Existing ids are aliased, not replaced: the returned config is the
+        stored instance (for preset-seeded ids, the preset's own
+        ``DockPanelConfig``), so a retitle propagates to the preset layout —
+        and ``area``/``visible`` are silently ignored for existing ids.
+        """
         existing = self._panels.get(panel_id)
         if existing is not None:
             if title:
