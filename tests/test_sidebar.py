@@ -260,3 +260,23 @@ def test_sidebar_set_floated_relaxes_width_bounds(qtbot):
     assert bar.user_width() == 200
     assert bar.minimumWidth() == 200
     assert bar.maximumWidth() == 200
+
+
+def test_sidebar_dock_after_collapse_while_floated_pins_rail(qtbot):
+    """p3-1 r1: docking after a collapse-while-floated pins the 40px rail —
+    not the expanded user width, which left a blank 192px collapsed rail."""
+    bar = TextSidebar()
+    qtbot.addWidget(bar)
+    bar.set_user_width(200)
+
+    bar.set_floated(True)
+    bar.toggle_collapse(True)
+    bar.set_floated(False)
+    assert bar.is_collapsed is True
+    assert bar.minimumWidth() == SIDEBAR_COLLAPSED_WIDTH
+    assert bar.maximumWidth() == SIDEBAR_COLLAPSED_WIDTH
+
+    bar.toggle_collapse(False)
+    assert bar.user_width() == 200
+    assert bar.minimumWidth() == 200
+    assert bar.maximumWidth() == 200

@@ -595,12 +595,15 @@ class AppShell(QWidget):
 
     def _reset_panels_layout(self) -> None:
         """面板 → 重置面板布局: clear this shell's persisted layout key and
-        restore the sidebar's docked defaults."""
+        restore the sidebar's docked defaults. The default width is
+        re-persisted last: a floated reset docks in between, which re-records
+        the pre-reset width (p2-1 r1)."""
         if self.sidebar_float_controller is not None:
             self._layout_persistence.clear(_SIDEBAR_FLOAT_KEY)
         self._set_sidebar_floating(False)
         self.sidebar.set_user_width(SIDEBAR_DEFAULT_WIDTH)
         self.sidebar.toggle_collapse(False)
+        self._persist_sidebar_docked_width(SIDEBAR_DEFAULT_WIDTH)
 
     def _switch_page(self, index: int) -> None:
         if not 0 <= index < self.page_stack.count():

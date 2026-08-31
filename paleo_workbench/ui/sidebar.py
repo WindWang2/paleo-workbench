@@ -122,11 +122,14 @@ class ContextSidebar(QFrame):
 
     def set_floated(self, floated: bool) -> None:
         """Relax the width clamp while floated (the top-level window resizes
-        freely); pin back to the clamped user width on dock."""
+        freely); on dock pin back to the collapsed rail or the clamped user
+        width, matching the current expand state."""
         if floated:
             self.setMaximumWidth(16777215)  # QWIDGETSIZE_MAX
         else:
-            self.setFixedWidth(self._user_width)
+            self.setFixedWidth(
+                SIDEBAR_COLLAPSED_WIDTH if self._is_collapsed else self._user_width
+            )
 
     def _apply_header_accent(self) -> None:
         """Accent-bar page header (inline from palette values; QSS has no

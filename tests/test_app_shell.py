@@ -662,6 +662,35 @@ def test_sidebar_float_round_trip(qtbot, float_store, windowed_platform):
     assert dock_state["docked_sizes"] == (SIDEBAR_DEFAULT_WIDTH,)
 
 
+def test_reset_panels_layout_while_floated_persists_defaults(
+    qtbot, float_store, windowed_platform
+):
+    """p2-1 r1: resetting from a FLOATED state must persist the defaults.
+
+    The dock transition re-records the pre-reset width; the reset must
+    therefore write the default width to the store afterwards."""
+    float_store[_SIDEBAR_FLOAT_KEY] = {
+        "floating": False,
+        "geometry": None,
+        "docked_sizes": (250,),
+        "visible": True,
+    }
+    shell = AppShell()
+    qtbot.addWidget(shell)
+    assert shell.sidebar.user_width() == 250
+    shell._toggle_sidebar_float()
+    assert shell.sidebar_is_floated()
+
+    shell.menu_bar.reset_panels_layout_action.trigger()
+
+    assert not shell.sidebar_is_floated()
+    assert shell.sidebar.parent() is shell
+    assert shell.sidebar.user_width() == SIDEBAR_DEFAULT_WIDTH
+    state = float_store[_SIDEBAR_FLOAT_KEY]
+    assert state["floating"] is False
+    assert state["docked_sizes"] == (SIDEBAR_DEFAULT_WIDTH,)
+
+
 def test_drag_finish_persists_sidebar_width(qtbot, float_store):
     shell = AppShell()
     qtbot.addWidget(shell)
@@ -716,8 +745,11 @@ def test_reset_panels_layout_clears_persisted_keys(
 
     shell.menu_bar.reset_panels_layout_action.trigger()
 
-    # this shell's key is cleared; other consumers' keys are not touched
-    assert _SIDEBAR_FLOAT_KEY not in float_store
+    # this shell's key is re-persisted with the DEFAULTS (p2-1 r1: the store
+    # must match the reset); other consumers' keys are not touched
+    state = float_store[_SIDEBAR_FLOAT_KEY]
+    assert state["floating"] is False
+    assert state["docked_sizes"] == (SIDEBAR_DEFAULT_WIDTH,)
     assert float_store["other:page"] == {"floating": True, "geometry": None}
     assert shell.sidebar.user_width() == SIDEBAR_DEFAULT_WIDTH
     assert shell.sidebar.is_collapsed is False
