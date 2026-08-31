@@ -221,6 +221,32 @@ class SeismicViewPanel(QFrame):
         """
         self._coordination = controller
 
+    def locate_position(self, il: int, xl: int, twt: float | None = None) -> bool:
+        """Navigate the seismic profiles to a survey position (scenario A/B).
+
+        ``twt`` may be None when no calibration authored a time — only the
+        inline/crossline slices move then. Safe no-op (False) when no volume
+        is loaded or the engine internals needed for the survey→voxel
+        mapping are unavailable.
+        """
+        view = self.view
+        if not self.is_view_ready():
+            return False
+        to_voxel = getattr(view, "_survey_to_voxel", None)
+        renderer = getattr(view, "_renderer_3d", None)
+        set_position = getattr(renderer, "set_position_external", None)
+        if not callable(to_voxel) or not callable(set_position):
+            return False
+        try:
+            il_idx, xl_idx, t_idx = to_voxel(float(il), float(xl), float(twt or 0.0))
+            set_position("inline", int(il_idx))
+            set_position("crossline", int(xl_idx))
+            if twt is not None:
+                set_position("time", int(t_idx))
+        except Exception:
+            return False
+        return True
+
     def notify_cursor(self, iline_value: float, xl_value: float, twt_ms: float) -> bool:
         """Publish a seismic cursor position to the coordination bus.
 

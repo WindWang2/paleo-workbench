@@ -326,6 +326,17 @@ class AppShell(QWidget):
         attach = getattr(panel, "attach_coordination", None)
         if callable(attach):
             attach(self.view_coordination)
+        # Scenario A/B sinks: well selection elsewhere navigates the seismic
+        # profiles; a seismic cursor focuses them (via the same 3D renderer).
+        locate = getattr(panel, "locate_position", None)
+        if callable(locate):
+            self.view_coordination.set_seismic_sink(locate)
+            self.view_coordination.set_seismic_focus_sink(locate)
+        # Scenario B map marker: the well map shows the picked seismic position.
+        map_page = getattr(getattr(self.data_page, "well_map_panel", None), "map_page", None)
+        show_cursor = getattr(map_page, "show_spatial_cursor", None)
+        if callable(show_cursor):
+            self.view_coordination.set_spatial_cursor_sink(show_cursor)
 
     def data_page_widget(self):
         return self.page_stack.widget(PAGE_INDEX_DATA)
