@@ -78,6 +78,16 @@ def main() -> int:
     from paleo_workbench.viz.render_accel import install_geoviz_acceleration
 
     install_geoviz_acceleration()
+    # P1-C: push the machine-derived VRAM cap into the engine's texture
+    # ledger at boot so every 3D view shares ONE bounded budget instead of
+    # running on the engine default (#1078 contract: 1 GiB at ≥16 GB RAM,
+    # 512 MiB below). A missing engine ledger logs and continues.
+    from paleo_workbench.runtime.resource_budget import active_budget, apply_vram_budget
+
+    if not apply_vram_budget(active_budget()):
+        logging.getLogger(__name__).debug(
+            "VRAM budget not applied (engine ledger unavailable)"
+        )
     window = PaleoWorkbenchWindow(project=None)
     window.show()
     # #941-7: the render backends' explicit teardown had no production caller
