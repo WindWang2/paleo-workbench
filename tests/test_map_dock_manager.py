@@ -12,6 +12,16 @@ from paleo_workbench.ui.pages.map_dock_manager import MapDockManager
 from paleo_workbench.ui.pages.mapping_page import MappingPage
 
 
+class _FakeFloatingWindow(QFrame):
+    """QFrame stand-in for FloatingPanel (carries visibility_changed)."""
+
+    visibility_changed = Signal(str, bool)
+
+    def __init__(self, key: str):
+        super().__init__()
+        self._key = key
+
+
 class _FakeFloatController(QObject):
     """Minimal M4-shaped FloatController surface for dock-manager tests."""
 
@@ -20,13 +30,13 @@ class _FakeFloatController(QObject):
     def __init__(self):
         super().__init__()
         self.floating: dict[str, bool] = {}
-        self.panels: dict[str, QFrame] = {}
+        self.panels: dict[str, _FakeFloatingWindow] = {}
         self.toggled_keys: list[str] = []
 
     def is_floating(self, key: str) -> bool:
         return self.floating.get(key, False)
 
-    def floating_panel(self, key: str) -> QFrame | None:
+    def floating_panel(self, key: str) -> _FakeFloatingWindow | None:
         return self.panels.get(key)
 
     def toggle(self, key: str) -> bool:
@@ -38,7 +48,7 @@ class _FakeFloatController(QObject):
                 panel.deleteLater()
         else:
             self.floating[key] = True
-            self.panels[key] = QFrame()
+            self.panels[key] = _FakeFloatingWindow(key)
         self.float_changed.emit(key, self.floating[key])
         return self.floating[key]
 
@@ -283,6 +293,32 @@ def test_dock_back_restores_button_visibility_semantics(qtbot) -> None:
     manager.panel_button("layers").setChecked(False)
     controller.toggle("layers")
     assert widgets["layers"].isHidden()
+
+
+def test_floating_window_visibility_syncs_the_rail_button(qtbot) -> None:
+    """FloatingPanel reports visibility from show/hide events; the rail
+    button must follow hides that happen outside the rail (hide button,
+    Alt+F4, restore of a saved-hidden panel)."""
+    manager, widgets = _bare_manager(qtbot)
+    controller = _FakeFloatController()
+    manager.attach_float_controller(controller)
+    menu = manager.panels_menu()
+    visibility_action = next(
+        a for a in menu.actions() if a.objectName() == "MapPanelMenu:layers"
+    )
+
+    controller.toggle("layers")
+    assert manager.panel_button("layers").isChecked()
+
+    controller.panels["layers"].visibility_changed.emit("layers", False)
+    assert manager.panel_button("layers").isChecked() is False
+    assert visibility_action.isChecked() is False
+    assert controller.panels["layers"].isHidden()
+    assert not widgets["layers"].isHidden()  # bare widget untouched while floating
+
+    controller.panels["layers"].visibility_changed.emit("layers", True)
+    assert manager.panel_button("layers").isChecked() is True
+    assert visibility_action.isChecked() is True
 
 
 def test_namespaced_float_keys_reach_the_controller(qtbot) -> None:

@@ -303,6 +303,20 @@ class MapDockManager(QObject):
             # "panel visible", so it flips on and shows the floating window.
             entry["button"].setChecked(True)
             entry["widget"].setVisible(True)
+            # Mirror externally-driven window visibility (the panel's hide
+            # button, Alt+F4, restore of a saved-hidden panel) on the rail
+            # button. Each float creates a fresh FloatingPanel, so this
+            # connects exactly once per window.
+            controller = self._float_controller
+            panel = (
+                controller.floating_panel(float_key)
+                if controller is not None
+                else None
+            )
+            if panel is not None:
+                panel.visibility_changed.connect(
+                    lambda _key, visible, fk=float_key: self._on_floating_window_visibility(fk, visible)
+                )
         else:
             # Docked again: restore the plain setVisible semantics (hidden
             # until the button — or the page's apply callback — says otherwise).
@@ -312,6 +326,29 @@ class MapDockManager(QObject):
             # The reparent moved the widget out of (or back into) the area.
             dock.sync_area_visibility()
         self._sync_float_menu_action(key, floating)
+
+    def _on_floating_window_visibility(self, float_key: str, visible: bool) -> None:
+        """Track the floating window's visibility on the rail button.
+
+        FloatingPanel reports visibility from showEvent/hideEvent; the rail
+        button keeps meaning "panel visible", so a window hidden outside the
+        rail (hide button, Alt+F4, restore, mode-forced hide) unchecks it —
+        and a re-shown window checks it again. This mirrors state only: it
+        must not re-trigger the rail toggled path (the bottom workbench's
+        apply callback would read the mirrored button as a user preference
+        change and fight the mode that caused the hide).
+        """
+        key = self._key_for_float_key(float_key)
+        if key is None:
+            return
+        entry = self._panels[key]
+        button = entry["button"]
+        if button.isChecked() != bool(visible):
+            button.blockSignals(True)
+            button.setChecked(bool(visible))
+            button.blockSignals(False)
+            self._sync_menu_action(key, bool(visible))
+            self.panel_toggled.emit(key, bool(visible))
 
     def _sync_float_menu_action(self, key: str, floating: bool) -> None:
         action = self._panels[key].get("float_menu_action")
