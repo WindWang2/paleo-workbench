@@ -62,6 +62,11 @@ class FloatController(QObject):
     Offscreen CI stays inert: nothing floats until :meth:`float_panel` or
     :meth:`toggle` is called, so no top-level window is ever created at
     startup.
+
+    Caveat: the recorded splitter index (and sizes) are exact only while the
+    splitter's membership is unchanged between float and dock-back —
+    float/dock of *other* panels in between shifts or clamps the restore
+    slot (dock-back clamps the index to the current child count).
     """
 
     float_changed = Signal(str, bool)  # (panel key, is_floating)
@@ -190,6 +195,11 @@ class FloatController(QObject):
                 panel = self._panels.get(key)
                 if panel is not None:
                     panel.hide()
+                # Belt and suspenders: hideEvent already reports the hide,
+                # but keep the explicit write so the store can never disagree
+                # with the UI (P1-1: a desync would revive a panel the user
+                # hid on the next launch).
+                self._persistence.save_visibility(key, False)
             return True
 
         widget = widget if widget is not None else self._resolve(key)
@@ -245,7 +255,12 @@ class FloatController(QObject):
 
     def _reinsert(self, record: _FloatRecord) -> None:
         """Put the widget back into its dock context (raises RuntimeError
-        when the dock parent's C++ side is gone)."""
+        when the dock parent's C++ side is gone).
+
+        The recorded index is used as-is, clamped to the current child count:
+        it is exact only while the splitter's membership is unchanged since
+        the float (see the class docstring caveat).
+        """
         widget = record.widget
         splitter = record.splitter
         if splitter is not None and record.splitter_index is not None:

@@ -29,8 +29,11 @@ class FloatingPanel(QWidget):
     Signals:
         dock_back_requested(str): the dock-back button was clicked; carries
             the panel key.
-        visibility_changed(str, bool): the window was closed while hosting
-            content (user hid the panel); carries key and new visibility.
+        visibility_changed(str, bool): the panel became visible or hidden
+            while hosting content; carries key and new visibility. Emitted
+            from ``showEvent``/``hideEvent`` (so close, hide, and any future
+            hiding path all report), but never for an empty window — an
+            empty panel's lifecycle is controller cleanup, not panel state.
     """
 
     dock_back_requested = Signal(str)
@@ -93,7 +96,13 @@ class FloatingPanel(QWidget):
     # --- content slot ---------------------------------------------------
 
     def set_content(self, widget: QWidget) -> None:
-        """Reparent ``widget`` into the central slot."""
+        """Reparent ``widget`` into the central slot.
+
+        No replace semantics: the slot hosts exactly one widget per float,
+        and a second ``set_content`` call stacks another widget instead of
+        swapping (the caller is expected to dock-back or ``take_content``
+        first).
+        """
         self._content_layout.addWidget(widget)
 
     def take_content(self) -> QWidget | None:
@@ -110,13 +119,22 @@ class FloatingPanel(QWidget):
 
     # --- window behaviour -------------------------------------------------
 
-    def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
-        # Closing while hosting content means the user hid the panel (button,
-        # Alt+F4, …); an empty window closing is the controller's cleanup, so
-        # the visibility signal must not fire then.
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        self._emit_visibility(True)
+        super().showEvent(event)
+
+    def hideEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        # close() hides too, so dock-back-close, the hide button, Alt+F4 and
+        # any direct hide() all report exactly once through here.
+        self._emit_visibility(False)
+        super().hideEvent(event)
+
+    def _emit_visibility(self, visible: bool) -> None:
+        # Only panels hosting content report visibility: an empty window's
+        # show/hide is controller lifecycle, not user-visible panel state
+        # (dock-back closes an emptied window and must stay silent).
         if self._content_layout.count():
-            self.visibility_changed.emit(self._key, False)
-        super().closeEvent(event)
+            self.visibility_changed.emit(self._key, visible)
 
     def _emit_dock_back(self) -> None:
         self.dock_back_requested.emit(self._key)
