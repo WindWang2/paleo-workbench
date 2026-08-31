@@ -111,6 +111,7 @@ class TaskHandle:
     message: str = ""
     error: str | None = None
     result: Any = None
+    cancel_requested: bool = False  # cancel() raced the claim window
     submitted_at: float = field(default_factory=time.monotonic)
     started_at: float | None = None
     finished_at: float | None = None
@@ -323,7 +324,14 @@ class TaskScheduler:
                 self._finish_locked(handle, TaskState.CANCELLED)
                 on_cancel = handle.spec.on_cancel
             else:
-                self._cancel_events[task_id].set()
+                # Claimed-but-not-yet-armed window: the event may not be
+                # registered yet — mark the handle so _run_task_inner arms
+                # an already-set event via the shared dict lookup below.
+                event = self._cancel_events.get(task_id)
+                if event is not None:
+                    event.set()
+                else:
+                    handle.cancel_requested = True
                 return True
         self._wakeup.set()
         if on_cancel is not None:
@@ -496,6 +504,8 @@ class TaskScheduler:
             # State/started_at were set at claim time (atomic claim in the
             # worker loop); here we only arm the cancel event + progress.
             ctx = TaskContext(task_id=task_id)
+            if handle.cancel_requested:
+                ctx.cancelled.set()  # cancel() fired in the claim window
             self._cancel_events[task_id] = ctx.cancelled
 
             def report(ratio: float, message: str) -> None:
