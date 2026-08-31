@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QEvent, QPropertyAnimation, QEasingCurve, QTimer
+from PySide6.QtCore import Qt, QEvent, QPoint, QPropertyAnimation, QEasingCurve, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLineEdit,
@@ -28,7 +29,11 @@ from paleo_workbench.ui.pages.geological_modeling_3d_page import GeologicalModel
 from paleo_workbench.viz.hosts.well_location_preview import (
     WellLocationPreviewStateStore,
 )
-from paleo_workbench.ui.sidebar import ContextSidebar, TextSidebar
+from paleo_workbench.ui.sidebar import (
+    SIDEBAR_DEFAULT_WIDTH,
+    ContextSidebar,
+    TextSidebar,
+)
 from paleo_workbench.ui.status_bar import StatusBar
 from paleo_workbench.ui.workflow_stepper import WorkflowStepper
 from paleo_workbench import tokens
@@ -176,6 +181,88 @@ class CommandPalette(QFrame):
         return super().eventFilter(source, event)
 
 
+_SIDEBAR_FLOAT_KEY = "shell:sidebar"  # M4 page:panel key convention
+
+
+def _offscreen_platform() -> bool:
+    """True on the headless CI platform (same check the 3D page uses).
+
+    Float actions are inert here: a top-level FloatingPanel would open a real
+    window, which offscreen CI must never do.
+    """
+    return os.environ.get("QT_QPA_PLATFORM", "") == "offscreen"
+
+
+def _load_float_framework():
+    """Load M4's float framework (feat/float-panel-framework).
+
+    Returns ``(FloatController, LayoutPersistence)`` or ``None`` while that
+    branch is unmerged — the shell then stays docked-only (float actions
+    inert) instead of failing to import.
+    """
+    try:
+        from paleo_workbench.ui.layout_persistence import LayoutPersistence
+        from paleo_workbench.ui.panel_float_controller import FloatController
+    except ImportError:
+        return None
+    return FloatController, LayoutPersistence
+
+
+class SidebarResizeHandle(QFrame):
+    """Thin draggable handle between the ContextSidebar and the page stack.
+
+    Dragging applies the sidebar's docked width (clamped to the sidebar's
+    sane bounds via ``set_user_width``); release emits the final width so the
+    shell can persist it. Replaces the old fixed-width expanded sidebar.
+    """
+
+    drag_finished = Signal(int)
+
+    _HANDLE_WIDTH = 6
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("SidebarResizeHandle")
+        self.setFixedWidth(self._HANDLE_WIDTH)
+        self.setCursor(Qt.CursorShape.SplitHCursor)
+        self._drag_active = False
+
+    def refresh_theme(self, theme: str = "light") -> None:
+        """Inline handle chrome (no generic QFrame rule in the token sheet)."""
+        palette = tokens.palette_for(theme)
+        self.setStyleSheet(
+            f"QFrame#SidebarResizeHandle {{ background: {palette['BORDER']}; }}"
+            f"QFrame#SidebarResizeHandle:hover {{ background: {palette['PRIMARY']}; }}"
+        )
+
+    def _sidebar(self):
+        return getattr(self.parentWidget(), "sidebar", None)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_active = True
+            event.accept()
+
+    def mouseMoveEvent(self, event) -> None:
+        if not self._drag_active:
+            return
+        sidebar = self._sidebar()
+        if sidebar is None:
+            return
+        cursor_x = event.globalPosition().toPoint().x()
+        sidebar_left = sidebar.mapToGlobal(QPoint(0, 0)).x()
+        sidebar.set_user_width(cursor_x - sidebar_left)
+        event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._drag_active and event.button() == Qt.MouseButton.LeftButton:
+            self._drag_active = False
+            sidebar = self._sidebar()
+            if sidebar is not None:
+                self.drag_finished.emit(sidebar.user_width())
+            event.accept()
+
+
 class AppShell(QWidget):
     """Application shell (M2 layout).
 
@@ -290,8 +377,11 @@ class AppShell(QWidget):
         # 井位地图 lives inside the Data page as a collapsible panel (§18);
         # DataPage wires its own map ↔ tree sync and initial domain binding.
         self._mapping_context = self._build_mapping_context()
+        self._middle_layout = middle
         middle.addWidget(self.icon_rail)
         middle.addWidget(self.sidebar)
+        self.sidebar_resize_handle = SidebarResizeHandle(self)
+        middle.addWidget(self.sidebar_resize_handle)
         middle.addWidget(self.page_stack, 1)
         outer.addLayout(middle, 1)
 
@@ -320,11 +410,41 @@ class AppShell(QWidget):
         current_theme = self.theme_manager.current_theme.value
         self.workflow_stepper.refresh_theme(current_theme)
         self.sidebar.refresh_theme(current_theme)
+        self.sidebar_resize_handle.refresh_theme(current_theme)
 
         # Signal connections
         self.workflow_stepper.stage_changed.connect(self._on_stepper_stage_changed)
         self.sidebar.subpage_selected.connect(self._switch_page)
         self.icon_rail.page_changed.connect(self._switch_page)
+        self.sidebar.float_requested.connect(self._toggle_sidebar_float)
+        self.sidebar_resize_handle.drag_finished.connect(
+            self._persist_sidebar_docked_width
+        )
+
+        # 面板 menu (M7, shell-level wiring: every _refresh_shell rebuild
+        # constructs a fresh MenuBar inside a fresh AppShell, so this stays
+        # connected without app.py changes).
+        self.menu_bar.sidebar_float_requested.connect(self._toggle_sidebar_float)
+        self.menu_bar.reset_panels_layout_requested.connect(self._reset_panels_layout)
+
+        # Shell sidebar float via M4's framework (registered under a stable
+        # page:panel key; unmerged framework degrades to a docked-only sidebar).
+        self._float_framework = _load_float_framework()
+        self.sidebar_float_controller = None
+        if self._float_framework is not None:
+            float_controller_cls, persistence_cls = self._float_framework
+            self._layout_persistence = persistence_cls()
+            self.sidebar_float_controller = float_controller_cls(
+                resolver=self._resolve_float_panel_widget,
+                persistence=self._layout_persistence,
+                title_for=lambda key: "上下文侧栏",
+                parent=self,
+            )
+            self.sidebar_float_controller.float_changed.connect(
+                self._on_sidebar_float_changed
+            )
+            self._restore_sidebar_layout()
+        self.menu_bar.set_sidebar_float_checked(self.sidebar_is_floated())
 
         # Sync initial stage with the landing page (index 0 -> Stage 1: 数据与预处理)
         initial_stage = navigation.get_stage_for_page(0)
@@ -404,12 +524,86 @@ class AppShell(QWidget):
         # palette so nothing stays styled for the previous theme.
         self.workflow_stepper.refresh_theme(theme)
         self.sidebar.refresh_theme(theme)
+        self.sidebar_resize_handle.refresh_theme(theme)
         # top-level windows outside this shell (dialogs) follow the theme too
         from PySide6.QtWidgets import QApplication
 
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(qss)
+
+    # --- Sidebar float / dock / reset (M7) ----------------------------
+
+    def sidebar_is_floated(self) -> bool:
+        if self.sidebar_float_controller is None:
+            return False
+        return self.sidebar_float_controller.is_floating(_SIDEBAR_FLOAT_KEY)
+
+    def _toggle_sidebar_float(self) -> None:
+        self._set_sidebar_floating(not self.sidebar_is_floated())
+
+    def _set_sidebar_floating(self, floated: bool) -> None:
+        # Offscreen CI must never open real windows: the float action stays
+        # inert there (the same guard pattern as the 3D GL pages).
+        if _offscreen_platform() or self.sidebar_float_controller is None:
+            return
+        if floated:
+            self.sidebar_float_controller.float_panel(_SIDEBAR_FLOAT_KEY)
+        else:
+            self.sidebar_float_controller.dock_panel(_SIDEBAR_FLOAT_KEY)
+
+    def _on_sidebar_float_changed(self, key: str, floating: bool) -> None:
+        if key != _SIDEBAR_FLOAT_KEY:
+            return
+        self.sidebar.set_floated(floating)
+        if floating:
+            self.sidebar_resize_handle.setVisible(False)
+        else:
+            # FloatController reparented the sidebar back to the shell; the
+            # middle QHBoxLayout does not manage plain children, so re-insert
+            # at the slot between IconRail and the page stack here.
+            self._middle_layout.insertWidget(1, self.sidebar)
+            self._middle_layout.insertWidget(2, self.sidebar_resize_handle)
+            self.sidebar_resize_handle.setVisible(True)
+            self._persist_sidebar_docked_width(self.sidebar.user_width())
+        self.menu_bar.set_sidebar_float_checked(floating)
+
+    def _resolve_float_panel_widget(self, key: str):
+        """M4 resolver: the shell floats exactly one panel — the sidebar."""
+        return self.sidebar if key == _SIDEBAR_FLOAT_KEY else None
+
+    def _persist_sidebar_docked_width(self, width: int) -> None:
+        """Record the docked width; float geometry is persisted by the
+        FloatController itself."""
+        if self.sidebar_float_controller is None or self.sidebar_is_floated():
+            return
+        self.sidebar.set_user_width(width)  # idempotent clamp
+        self._layout_persistence.save_docked_sizes(
+            _SIDEBAR_FLOAT_KEY, (self.sidebar.user_width(),)
+        )
+
+    def _restore_sidebar_layout(self) -> None:
+        record = self._layout_persistence.load(_SIDEBAR_FLOAT_KEY)
+        if record.docked_sizes:
+            self.sidebar.set_user_width(record.docked_sizes[0])
+        if record.floating and not _offscreen_platform():
+            # restore_saved re-floats at the saved geometry and honours a
+            # user-closed (hidden) panel.
+            self.sidebar_float_controller.restore_saved(
+                _SIDEBAR_FLOAT_KEY, self.sidebar
+            )
+
+    def _reset_panels_layout(self) -> None:
+        """面板 → 重置面板布局: clear this shell's persisted layout key and
+        restore the sidebar's docked defaults. The default width is
+        re-persisted last: a floated reset docks in between, which re-records
+        the pre-reset width (p2-1 r1)."""
+        if self.sidebar_float_controller is not None:
+            self._layout_persistence.clear(_SIDEBAR_FLOAT_KEY)
+        self._set_sidebar_floating(False)
+        self.sidebar.set_user_width(SIDEBAR_DEFAULT_WIDTH)
+        self.sidebar.toggle_collapse(False)
+        self._persist_sidebar_docked_width(SIDEBAR_DEFAULT_WIDTH)
 
     def _switch_page(self, index: int) -> None:
         if not 0 <= index < self.page_stack.count():

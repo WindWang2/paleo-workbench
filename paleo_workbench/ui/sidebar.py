@@ -8,18 +8,26 @@ from PySide6.QtWidgets import (
 from paleo_workbench import tokens
 from paleo_workbench.ui import navigation
 
+# Docked width model (M7): the expanded sidebar is user-resizable via the
+# shell's drag handle within these bounds; collapsing still pins the rail.
+SIDEBAR_COLLAPSED_WIDTH = 40
+SIDEBAR_MIN_WIDTH = 180
+SIDEBAR_MAX_WIDTH = 260
+SIDEBAR_DEFAULT_WIDTH = 192
+
 
 class ContextSidebar(QFrame):
     """Dynamic context-sensitive ergonomic sidebar.
 
     Structure (Inverted-L Flow):
-    1. Top Stage Caption + Sub-page Segmented Control (sub-pages of the stage)
+    1. Top Stage Caption + float button + Sub-page Segmented Control
     2. Middle Context Information & Quick Actions
     3. Bottom Collapse/Expand Toggle
     """
 
     subpage_selected = Signal(int)
     collapsed_changed = Signal(bool)
+    float_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -28,6 +36,7 @@ class ContextSidebar(QFrame):
         self._theme = "light"
         self._current_stage_index = 0
         self._active_page_index = navigation.PAGE_INDEX_DATA
+        self._user_width = SIDEBAR_DEFAULT_WIDTH
         self.subpage_buttons: list[QPushButton] = []
         self._content_labels: list[QLabel] = []
 
@@ -42,10 +51,23 @@ class ContextSidebar(QFrame):
         )
         main_layout.setSpacing(tokens.SPACE_2)
 
-        # 1. Top Section: Stage caption + Sub-page Segmented Navigation Bar
+        # 1. Top Section: Stage caption (left) + float toggle (right), then
+        # the Sub-page Segmented Navigation Bar
         self.stage_caption = QLabel("")
         self.stage_caption.setObjectName("WorkFieldLabel")
-        main_layout.addWidget(self.stage_caption)
+        self.float_btn = QPushButton("⇱")
+        self.float_btn.setObjectName("SidebarFloatBtn")
+        self.float_btn.setToolTip("浮动 / 停靠侧边栏")
+        self.float_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.float_btn.setFixedSize(26, 26)
+        self.float_btn.clicked.connect(lambda: self.float_requested.emit())
+        self._header_row = QWidget()
+        header_layout = QHBoxLayout(self._header_row)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(tokens.SPACE_1)
+        header_layout.addWidget(self.stage_caption, 1)
+        header_layout.addWidget(self.float_btn)
+        main_layout.addWidget(self._header_row)
 
         self.subpage_container = QWidget()
         self.subpage_layout = QVBoxLayout(self.subpage_container)
@@ -75,13 +97,39 @@ class ContextSidebar(QFrame):
         self.collapse_btn.clicked.connect(lambda: self.toggle_collapse())
         main_layout.addWidget(self.collapse_btn)
 
-        # Initialize for default stage 0
+        # Initialize for default stage 0 (docked width = user-resizable default)
+        self.setFixedWidth(self._user_width)
         self.set_stage(navigation.STAGE_INDEX_DATA, navigation.PAGE_INDEX_DATA)
         self._render_context(tokens.PAGE_NAMES[0])
 
     @property
     def is_collapsed(self) -> bool:
         return self._is_collapsed
+
+    def user_width(self) -> int:
+        """The clamped docked width (drag-handle target), not live geometry."""
+        return self._user_width
+
+    def set_user_width(self, width: int) -> None:
+        """Apply a user-chosen docked width (drag handle / restore), clamped
+        to the sane bounds. While collapsed the value is remembered for the
+        next expand but not applied, so the 40px rail stays exact."""
+        self._user_width = max(
+            SIDEBAR_MIN_WIDTH, min(SIDEBAR_MAX_WIDTH, int(width))
+        )
+        if not self._is_collapsed:
+            self.setFixedWidth(self._user_width)
+
+    def set_floated(self, floated: bool) -> None:
+        """Relax the width clamp while floated (the top-level window resizes
+        freely); on dock pin back to the collapsed rail or the clamped user
+        width, matching the current expand state."""
+        if floated:
+            self.setMaximumWidth(16777215)  # QWIDGETSIZE_MAX
+        else:
+            self.setFixedWidth(
+                SIDEBAR_COLLAPSED_WIDTH if self._is_collapsed else self._user_width
+            )
 
     def _apply_header_accent(self) -> None:
         """Accent-bar page header (inline from palette values; QSS has no
@@ -159,19 +207,21 @@ class ContextSidebar(QFrame):
 
         self._is_collapsed = collapsed
         if collapsed:
-            self.setFixedWidth(40)
+            self.setFixedWidth(SIDEBAR_COLLAPSED_WIDTH)
             self.context_label.hide()
             self.content_container.hide()
             self.subpage_container.hide()
             self.stage_caption.hide()
+            # the 40px rail has no room for the 26px float button; the
+            # 视图 → 面板 menu still toggles float while collapsed
+            self.float_btn.hide()
             self.collapse_btn.setText("▶")
         else:
-            self.setMinimumWidth(180)
-            self.setMaximumWidth(260)
-            self.setFixedWidth(192)
+            self.setFixedWidth(self._user_width)
             self.context_label.show()
             self.content_container.show()
             self.stage_caption.show()
+            self.float_btn.show()
             self.subpage_container.setVisible(len(self.subpage_buttons) > 1)
             self.collapse_btn.setText("◀ 收起")
 

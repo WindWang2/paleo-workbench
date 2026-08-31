@@ -1,5 +1,11 @@
 from paleo_workbench.ui import tokens
-from paleo_workbench.ui.sidebar import TextSidebar
+from paleo_workbench.ui.sidebar import (
+    SIDEBAR_COLLAPSED_WIDTH,
+    SIDEBAR_DEFAULT_WIDTH,
+    SIDEBAR_MAX_WIDTH,
+    SIDEBAR_MIN_WIDTH,
+    TextSidebar,
+)
 
 
 def _label_texts(bar):
@@ -177,3 +183,100 @@ def test_sidebar_render_context_backwards_compat(qtbot):
     sb._render_context("可视化")
     texts = [lbl.text() for lbl in sb._content_labels]
     assert any("综合可视化" in t for t in texts)
+
+
+# --- M7: float button + user-resizable docked width --------------------------
+
+
+def test_sidebar_float_button_emits_float_requested(qtbot):
+    bar = TextSidebar()
+    qtbot.addWidget(bar)
+    emitted = []
+    bar.float_requested.connect(lambda: emitted.append(True))
+    assert bar.float_btn.objectName() == "SidebarFloatBtn"
+    bar.float_btn.click()
+    assert emitted == [True]
+
+
+def test_sidebar_default_docked_width(qtbot):
+    bar = TextSidebar()
+    qtbot.addWidget(bar)
+    assert bar.user_width() == SIDEBAR_DEFAULT_WIDTH
+    assert bar.minimumWidth() == SIDEBAR_DEFAULT_WIDTH
+    assert bar.maximumWidth() == SIDEBAR_DEFAULT_WIDTH
+
+
+def test_sidebar_user_width_clamped_to_bounds(qtbot):
+    bar = TextSidebar()
+    qtbot.addWidget(bar)
+    bar.set_user_width(SIDEBAR_MIN_WIDTH - 100)
+    assert bar.user_width() == SIDEBAR_MIN_WIDTH
+    bar.set_user_width(SIDEBAR_MAX_WIDTH + 500)
+    assert bar.user_width() == SIDEBAR_MAX_WIDTH
+    bar.set_user_width(220)
+    assert bar.user_width() == 220
+    assert bar.minimumWidth() == 220
+    assert bar.maximumWidth() == 220
+
+
+def test_sidebar_collapse_pins_rail_and_expand_restores_user_width(qtbot):
+    bar = TextSidebar()
+    qtbot.addWidget(bar)
+    bar.set_user_width(240)
+
+    bar.toggle_collapse(True)
+    assert bar.is_collapsed is True
+    assert bar.minimumWidth() == SIDEBAR_COLLAPSED_WIDTH
+    assert bar.maximumWidth() == SIDEBAR_COLLAPSED_WIDTH
+
+    bar.toggle_collapse(False)
+    assert bar.is_collapsed is False
+    assert bar.user_width() == 240
+    assert bar.minimumWidth() == 240
+    assert bar.maximumWidth() == 240
+
+
+def test_sidebar_set_user_width_while_collapsed_only_remembers(qtbot):
+    bar = TextSidebar()
+    qtbot.addWidget(bar)
+    bar.toggle_collapse(True)
+    bar.set_user_width(250)
+    assert bar.user_width() == 250
+    assert bar.maximumWidth() == SIDEBAR_COLLAPSED_WIDTH
+    bar.toggle_collapse(False)
+    assert bar.maximumWidth() == 250
+
+
+def test_sidebar_set_floated_relaxes_width_bounds(qtbot):
+    """The floated top-level window resizes freely; docking restores clamps."""
+    bar = TextSidebar()
+    qtbot.addWidget(bar)
+    bar.set_user_width(200)
+
+    bar.set_floated(True)
+    assert bar.maximumWidth() > SIDEBAR_MAX_WIDTH
+
+    bar.set_floated(False)
+    assert bar.user_width() == 200
+    assert bar.minimumWidth() == 200
+    assert bar.maximumWidth() == 200
+
+
+def test_sidebar_dock_after_collapse_while_floated_pins_rail(qtbot):
+    """p3-1 r1: docking after a collapse-while-floated pins the 40px rail —
+    not the expanded user width, which left a blank 192px collapsed rail."""
+    bar = TextSidebar()
+    qtbot.addWidget(bar)
+    bar.set_user_width(200)
+
+    bar.set_floated(True)
+    bar.toggle_collapse(True)
+    bar.set_floated(False)
+    assert bar.is_collapsed is True
+    assert bar.minimumWidth() == SIDEBAR_COLLAPSED_WIDTH
+    assert bar.maximumWidth() == SIDEBAR_COLLAPSED_WIDTH
+
+    bar.toggle_collapse(False)
+    assert bar.user_width() == 200
+    assert bar.minimumWidth() == 200
+    assert bar.maximumWidth() == 200

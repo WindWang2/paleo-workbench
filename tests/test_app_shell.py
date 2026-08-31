@@ -1,7 +1,22 @@
-from PySide6.QtGui import QShortcut
+from types import SimpleNamespace
 
-from paleo_workbench.ui.app_shell import AppShell, PAGE_INDEX_DATA
+import pytest
+from PySide6.QtCore import QEvent, QPointF, QPoint, QRect, Qt
+from PySide6.QtGui import QMouseEvent, QShortcut
+from PySide6.QtWidgets import QApplication
+
+from paleo_workbench.ui import app_shell as app_shell_module
+from paleo_workbench.ui.app_shell import (
+    _SIDEBAR_FLOAT_KEY,
+    AppShell,
+    PAGE_INDEX_DATA,
+)
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.sidebar import (
+    SIDEBAR_DEFAULT_WIDTH,
+    SIDEBAR_MAX_WIDTH,
+    SIDEBAR_MIN_WIDTH,
+)
 from paleo_workbench.project.models import (
     ExportArtifact,
     PaleoMapDocument,
@@ -424,3 +439,319 @@ def test_switch_page_dismisses_palette(qtbot):
     shell.command_palette.popup()
     shell._switch_page(1)
     assert shell.command_palette.isHidden()
+
+
+# --- Sidebar float / resize / 面板 menu (M7) ---------------------------------
+
+
+@pytest.fixture
+def float_store(monkeypatch):
+    """Real M4 FloatController + in-memory LayoutPersistence stand-in.
+
+    Keeps QSettings clean and skips when the framework branch
+    (feat/float-panel-framework) has not been merged into this worktree yet.
+    The stand-in mirrors the LayoutPersistence class interface.
+    """
+    framework = app_shell_module._load_float_framework()
+    if framework is None:
+        pytest.skip("M4 float framework not merged yet")
+    controller_cls = framework[0]
+    store: dict = {}
+
+    def save_float(key, geometry):
+        store[key] = {
+            "floating": True,
+            "geometry": QRect(geometry),
+            "docked_sizes": None,
+            "visible": True,
+        }
+
+    def save_dock(key, sizes):
+        state = store.setdefault(
+            key,
+            {
+                "floating": False,
+                "geometry": None,
+                "docked_sizes": None,
+                "visible": True,
+            },
+        )
+        state["floating"] = False
+        state["geometry"] = None
+        state["docked_sizes"] = tuple(sizes)
+
+    def save_docked_sizes(key, sizes):
+        state = store.setdefault(
+            key,
+            {
+                "floating": False,
+                "geometry": None,
+                "docked_sizes": None,
+                "visible": True,
+            },
+        )
+        state["docked_sizes"] = tuple(sizes)
+
+    def save_visibility(key, visible):
+        state = store.setdefault(
+            key,
+            {
+                "floating": False,
+                "geometry": None,
+                "docked_sizes": None,
+                "visible": True,
+            },
+        )
+        state["visible"] = bool(visible)
+
+    def load(key):
+        from paleo_workbench.ui.layout_persistence import PanelLayoutRecord
+
+        state = store.get(key)
+        if state is None:
+            return PanelLayoutRecord()
+        return PanelLayoutRecord(
+            floating=state["floating"],
+            geometry=state["geometry"],
+            docked_sizes=state["docked_sizes"],
+            visible=state["visible"],
+        )
+
+    def clear(key):
+        store.pop(key, None)
+
+    fake_instance = SimpleNamespace(
+        save_float=save_float,
+        save_dock=save_dock,
+        save_docked_sizes=save_docked_sizes,
+        save_visibility=save_visibility,
+        load=load,
+        clear=clear,
+    )
+    monkeypatch.setattr(
+        app_shell_module,
+        "_load_float_framework",
+        lambda: (controller_cls, lambda settings=None: fake_instance),
+    )
+    return store
+
+
+@pytest.fixture
+def windowed_platform(monkeypatch):
+    """Clear the offscreen env so the float guard unblocks.
+
+    The Qt platform plugin was already chosen at QApplication creation — no
+    real window can appear because the tests never call show().
+    """
+    monkeypatch.setenv("QT_QPA_PLATFORM", "")
+
+
+def test_shell_has_sidebar_resize_handle_between_sidebar_and_pages(
+    qtbot, float_store
+):
+    shell = AppShell()
+    qtbot.addWidget(shell)
+    handle = shell.sidebar_resize_handle
+    assert handle.parent() is shell
+    assert not handle.isHidden()
+    middle = shell._middle_layout
+    assert (
+        middle.indexOf(shell.sidebar)
+        < middle.indexOf(handle)
+        < middle.indexOf(shell.page_stack)
+    )
+    assert shell.sidebar.user_width() == SIDEBAR_DEFAULT_WIDTH
+
+
+def _mouse_event(event_type, handle, global_x):
+    local = handle.rect().center()
+    return QMouseEvent(
+        event_type,
+        local,
+        QPointF(global_x, local.y()),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+
+def test_handle_drag_resizes_sidebar_within_bounds(qtbot, float_store):
+    """Press → move → release on the handle applies a clamped docked width."""
+    shell = AppShell()
+    qtbot.addWidget(shell)
+    handle = shell.sidebar_resize_handle
+    sidebar_left = shell.sidebar.mapToGlobal(QPoint(0, 0)).x()
+
+    def drag_to(width):
+        global_x = sidebar_left + width
+        QApplication.sendEvent(handle, _mouse_event(QEvent.Type.MouseButtonPress, handle, global_x))
+        QApplication.sendEvent(handle, _mouse_event(QEvent.Type.MouseMove, handle, global_x))
+        QApplication.sendEvent(handle, _mouse_event(QEvent.Type.MouseButtonRelease, handle, global_x))
+
+    drag_to(500)
+    assert shell.sidebar.user_width() == SIDEBAR_MAX_WIDTH
+    drag_to(50)
+    assert shell.sidebar.user_width() == SIDEBAR_MIN_WIDTH
+    drag_to(230)
+    assert shell.sidebar.user_width() == 230
+
+
+def test_panels_menu_actions_emit_shell_signals(qtbot, float_store):
+    shell = AppShell()
+    qtbot.addWidget(shell)
+    float_requests, reset_requests = [], []
+    shell.menu_bar.sidebar_float_requested.connect(
+        lambda: float_requests.append(True)
+    )
+    shell.menu_bar.reset_panels_layout_requested.connect(
+        lambda: reset_requests.append(True)
+    )
+    shell.menu_bar.float_sidebar_action.trigger()
+    shell.menu_bar.reset_panels_layout_action.trigger()
+    assert float_requests == [True]
+    assert reset_requests == [True]
+
+
+def test_float_actions_inert_without_framework(qtbot, monkeypatch):
+    monkeypatch.setattr(app_shell_module, "_load_float_framework", lambda: None)
+    shell = AppShell()
+    qtbot.addWidget(shell)
+    assert shell.sidebar_float_controller is None
+    shell.sidebar.float_btn.click()
+    shell._toggle_sidebar_float()
+    shell.menu_bar.reset_panels_layout_action.trigger()
+    assert shell.sidebar.parent() is shell
+    assert shell.sidebar.user_width() == SIDEBAR_DEFAULT_WIDTH
+
+
+def test_float_stays_inert_under_offscreen(qtbot, float_store, monkeypatch):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    shell = AppShell()
+    qtbot.addWidget(shell)
+    shell.sidebar.float_btn.click()
+    shell.menu_bar.float_sidebar_action.trigger()
+    assert not shell.sidebar_is_floated()
+    assert shell.sidebar.parent() is shell
+
+
+def test_sidebar_float_round_trip(qtbot, float_store, windowed_platform):
+    shell = AppShell()
+    qtbot.addWidget(shell)
+    assert not shell.sidebar_is_floated()
+
+    shell.sidebar.float_btn.click()
+    assert shell.sidebar_is_floated()
+    panel = shell.sidebar.window()
+    assert panel.isWindow() and panel is not shell
+    assert shell._middle_layout.indexOf(shell.sidebar) == -1
+    assert shell.sidebar_resize_handle.isHidden()
+    assert shell.menu_bar.float_sidebar_action.isChecked()
+    float_state = float_store[_SIDEBAR_FLOAT_KEY]
+    assert float_state["floating"] is True
+    assert isinstance(float_state["geometry"], QRect)
+
+    shell.menu_bar.float_sidebar_action.trigger()
+    assert not shell.sidebar_is_floated()
+    assert shell.sidebar.parent() is shell
+    assert shell._middle_layout.indexOf(shell.sidebar) == 1
+    assert shell._middle_layout.indexOf(shell.sidebar_resize_handle) == 2
+    assert not shell.sidebar_resize_handle.isHidden()
+    assert not shell.menu_bar.float_sidebar_action.isChecked()
+    dock_state = float_store[_SIDEBAR_FLOAT_KEY]
+    assert dock_state["floating"] is False
+    assert dock_state["docked_sizes"] == (SIDEBAR_DEFAULT_WIDTH,)
+
+
+def test_reset_panels_layout_while_floated_persists_defaults(
+    qtbot, float_store, windowed_platform
+):
+    """p2-1 r1: resetting from a FLOATED state must persist the defaults.
+
+    The dock transition re-records the pre-reset width; the reset must
+    therefore write the default width to the store afterwards."""
+    float_store[_SIDEBAR_FLOAT_KEY] = {
+        "floating": False,
+        "geometry": None,
+        "docked_sizes": (250,),
+        "visible": True,
+    }
+    shell = AppShell()
+    qtbot.addWidget(shell)
+    assert shell.sidebar.user_width() == 250
+    shell._toggle_sidebar_float()
+    assert shell.sidebar_is_floated()
+
+    shell.menu_bar.reset_panels_layout_action.trigger()
+
+    assert not shell.sidebar_is_floated()
+    assert shell.sidebar.parent() is shell
+    assert shell.sidebar.user_width() == SIDEBAR_DEFAULT_WIDTH
+    state = float_store[_SIDEBAR_FLOAT_KEY]
+    assert state["floating"] is False
+    assert state["docked_sizes"] == (SIDEBAR_DEFAULT_WIDTH,)
+
+
+def test_drag_finish_persists_sidebar_width(qtbot, float_store):
+    shell = AppShell()
+    qtbot.addWidget(shell)
+    shell.sidebar_resize_handle.drag_finished.emit(230)
+    assert float_store[_SIDEBAR_FLOAT_KEY]["docked_sizes"] == (230,)
+    shell.sidebar_resize_handle.drag_finished.emit(10_000)
+    assert float_store[_SIDEBAR_FLOAT_KEY]["docked_sizes"] == (SIDEBAR_MAX_WIDTH,)
+
+
+def test_shell_restores_persisted_sidebar_width(qtbot, float_store):
+    float_store[_SIDEBAR_FLOAT_KEY] = {
+        "floating": False,
+        "geometry": None,
+        "docked_sizes": (240,),
+        "visible": True,
+    }
+    shell = AppShell()
+    qtbot.addWidget(shell)
+    assert shell.sidebar.user_width() == 240
+
+
+def test_shell_restores_floated_state_on_windowed_platform(
+    qtbot, float_store, windowed_platform
+):
+    float_store[_SIDEBAR_FLOAT_KEY] = {
+        "floating": True,
+        "geometry": QRect(100, 100, 300, 500),
+        "docked_sizes": (200,),
+        "visible": True,
+    }
+    shell = AppShell()
+    qtbot.addWidget(shell)
+    assert shell.sidebar_is_floated()
+    assert shell.sidebar.window().isWindow()
+    assert shell.menu_bar.float_sidebar_action.isChecked()
+    shell._toggle_sidebar_float()  # menu/dock path returns it
+    assert shell.sidebar.parent() is shell
+
+
+def test_reset_panels_layout_clears_persisted_keys(
+    qtbot, float_store, windowed_platform
+):
+    float_store[_SIDEBAR_FLOAT_KEY] = {
+        "floating": False,
+        "geometry": None,
+        "docked_sizes": (250,),
+        "visible": True,
+    }
+    float_store["other:page"] = {"floating": True, "geometry": None}
+    shell = AppShell()
+    qtbot.addWidget(shell)
+
+    shell.menu_bar.reset_panels_layout_action.trigger()
+
+    # this shell's key is re-persisted with the DEFAULTS (p2-1 r1: the store
+    # must match the reset); other consumers' keys are not touched
+    state = float_store[_SIDEBAR_FLOAT_KEY]
+    assert state["floating"] is False
+    assert state["docked_sizes"] == (SIDEBAR_DEFAULT_WIDTH,)
+    assert float_store["other:page"] == {"floating": True, "geometry": None}
+    assert shell.sidebar.user_width() == SIDEBAR_DEFAULT_WIDTH
+    assert shell.sidebar.is_collapsed is False
+    assert not shell.sidebar_is_floated()
+    assert shell.sidebar.parent() is shell

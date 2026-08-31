@@ -21,6 +21,8 @@ def test_context_sidebar_initialization(qapp):
     assert sidebar.objectName() == "ContextSidebar"
     assert hasattr(sidebar, "subpage_selected")
     assert hasattr(sidebar, "collapsed_changed")
+    assert hasattr(sidebar, "float_requested")
+    assert sidebar.float_btn.objectName() == "SidebarFloatBtn"
     assert sidebar.is_collapsed is False
 
 
