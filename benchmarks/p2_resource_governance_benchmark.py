@@ -100,7 +100,7 @@ def scenario_catalog(assets: int) -> None:
         print(f"  seeded {assets} assets in {time.perf_counter() - t0:.1f}s", flush=True)
 
         doc = service.document
-        version_ids = [v.id for v in list(doc.versions.values())[:40]]
+        version_ids = [v.id for v in list(doc.versions)[:40]]
         sched = get_scheduler()
         ensure_global_governance()
 
@@ -128,13 +128,13 @@ def scenario_catalog(assets: int) -> None:
         for i in range(60):
             t_submit = time.monotonic()
             handle = sched.submit_callable(
-                lambda ctx: service.search_assets("well-1", limit=20),
+                lambda ctx: service.search_assets(text="well-1"),
                 kind="interactive.query",
                 priority=90,
             )
             handles.append((t_submit, handle))
             t_direct = time.perf_counter()
-            service.search_assets("well-1", limit=20)
+            service.search_assets(text="well-1")
             direct.append(time.perf_counter() - t_direct)
             time.sleep(0.01)
 
