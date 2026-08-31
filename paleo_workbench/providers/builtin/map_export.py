@@ -122,11 +122,12 @@ class MapRenderBackendProvider:
         from pathlib import Path
 
         out_path = Path(str(output))
+        if out_path.suffix.lower() != ".png":
+            raise ProviderRejectedInputError(
+                self.descriptor.provider_id, "backend render outputs PNG (use export.map_product for svg/pdf)"
+            )
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        from paleo_workbench.mapping.map_render_backend import (
-            FallbackMapRenderBackend,
-            MapRenderSnapshot,
-        )
+        from paleo_workbench.mapping.map_render_backend import FallbackMapRenderBackend
 
         if self._backend_name == "qgis":
             from paleo_workbench.mapping.map_render_backend import (
@@ -136,23 +137,21 @@ class MapRenderBackendProvider:
             backend = create_map_render_backend(prefer_qgis=True)
         else:
             backend = FallbackMapRenderBackend()
-        backend.initialize()
-        backend.set_layer_snapshot(document.to_snapshot())
-        extent = document.extent or (0.0, 0.0, 1.0, 1.0)
-        backend.set_extent(tuple(float(v) for v in extent))
-        backend.set_output_size(int(parameters.get("width", 1200)), int(parameters.get("height", 900)))
-        frame = backend.render_sync()
-        if out_path.suffix.lower() != ".png":
-            raise ProviderRejectedInputError(
-                self.descriptor.provider_id, "backend render outputs PNG (use export.map_product for svg/pdf)"
-            )
-        from PySide6.QtGui import QImage
+        try:
+            backend.initialize()
+            backend.set_layer_snapshot(document.to_snapshot())
+            extent = document.extent or (0.0, 0.0, 1.0, 1.0)
+            backend.set_extent(tuple(float(v) for v in extent))
+            backend.set_output_size(int(parameters.get("width", 1200)), int(parameters.get("height", 900)))
+            frame = backend.render_sync()
+            from PySide6.QtGui import QImage
 
-        image = QImage(
-            frame.rgba, frame.width, frame.height, frame.stride, QImage.Format_RGBA8888
-        )
-        image.save(str(out_path))
-        backend.shutdown()
+            image = QImage(
+                frame.rgba, frame.width, frame.height, frame.stride, QImage.Format_RGBA8888
+            )
+            image.save(str(out_path))
+        finally:
+            backend.shutdown()
         return ProviderResult(
             artifacts=[
                 ArtifactRef(name=out_path.name, kind="file", path=str(out_path),

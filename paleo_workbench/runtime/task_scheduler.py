@@ -230,8 +230,13 @@ class TaskScheduler:
             pass
 
     def set_background_nice(self, nice: int) -> None:
-        """Configure OS niceness for heavy lanes (applies to new workers;
-        call before submitting work — normally via the budget at startup)."""
+        """Configure OS niceness for heavy lanes.
+
+        Niceness is applied once per worker at loop entry and is cumulative
+        per thread on Linux, so this only affects workers that have not
+        started yet — configure through the budget (before scheduler
+        creation) in practice.
+        """
         self._background_nice = max(0, int(nice))
 
     # ---------------------------------------------------------- admission --
@@ -462,6 +467,12 @@ class TaskScheduler:
                                 except Exception:
                                     logger.exception("admission lease release failed for %s", tid)
                         continue
+                    # Atomic claim: RUNNING lands inside this critical
+                    # section, so a second worker cannot double-claim and a
+                    # cancel() arriving now cooperates via the event instead
+                    # of racing the state transition.
+                    h.state = TaskState.RUNNING
+                    h.started_at = self._clock()
                     if lease is not None:
                         self._leases[tid] = lease
                 self._run_task(tid)
@@ -482,8 +493,8 @@ class TaskScheduler:
     def _run_task_inner(self, task_id: str) -> None:
         with self._lock:
             handle = self._handles[task_id]
-            handle.state = TaskState.RUNNING
-            handle.started_at = self._clock()
+            # State/started_at were set at claim time (atomic claim in the
+            # worker loop); here we only arm the cancel event + progress.
             ctx = TaskContext(task_id=task_id)
             self._cancel_events[task_id] = ctx.cancelled
 

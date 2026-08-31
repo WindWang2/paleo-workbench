@@ -263,16 +263,24 @@ def _create_factor_map(context: ActionContext, parameters: dict) -> dict:
                 },
                 generator_version="geological-mapping-service",
             )
-            version = context.catalog.register_intermediate(
-                run_id=run.run_id,
-                name=f"{parameters['factor_name']} grid",
-                path=str(artifact_path),
-                kind="factor_grid",
-                format="npz",
-            )
-            context.catalog.complete_run(run.run_id, status="complete")
-            version_identity = getattr(version, "version_id", None)
-            run_id_out = run.run_id
+            try:
+                version = context.catalog.register_intermediate(
+                    run_id=run.run_id,
+                    name=f"{parameters['factor_name']} grid",
+                    path=str(artifact_path),
+                    kind="factor_grid",
+                    format="npz",
+                )
+                context.catalog.complete_run(run.run_id, status="complete")
+                version_identity = getattr(version, "version_id", None)
+                run_id_out = run.run_id
+            except Exception:
+                # Never leave a forever-running DataRun behind.
+                try:
+                    context.catalog.complete_run(run.run_id, status="failed")
+                except Exception:
+                    pass
+                raise
         except Exception:
             import logging
 
@@ -531,16 +539,15 @@ def _resolve_export_path(context: ActionContext, raw: str) -> str:
 
     raw_path = Path(raw).expanduser()
     root = Path(context.project_path).parent if context.project_path else Path.cwd()
-    if raw_path.is_absolute():
-        try:
-            resolved = raw_path.resolve()
-            resolved.relative_to(root.resolve())
-        except ValueError:
-            raise PermissionError(
-                f"export path must stay under the project workspace ({root})"
-            ) from None
-    else:
-        resolved = (root / raw_path).resolve()
+    resolved = raw_path.resolve() if raw_path.is_absolute() else (root / raw_path).resolve()
+    try:
+        # Containment AFTER resolution: relative traversal ("../..") must
+        # not escape the workspace either.
+        resolved.relative_to(root.resolve())
+    except ValueError:
+        raise PermissionError(
+            f"export path must stay under the project workspace ({root})"
+        ) from None
     if resolved.exists():
         raise PermissionError(f"refusing to overwrite existing file {resolved}")
     return str(resolved)

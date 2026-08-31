@@ -24,16 +24,16 @@ def _resolve_volume_path(context: ActionContext, raw: str) -> str:
 
     raw_path = Path(raw).expanduser()
     root = Path(context.project_path).parent if context.project_path else Path.cwd()
-    if raw_path.is_absolute():
-        try:
-            resolved = raw_path.resolve()
-            resolved.relative_to(root.resolve())
-        except ValueError:
-            raise PermissionError(
-                f"volume path must stay under the project workspace ({root})"
-            ) from None
-        return str(resolved)
-    return str((root / raw_path).resolve())
+    resolved = raw_path.resolve() if raw_path.is_absolute() else (root / raw_path).resolve()
+    try:
+        # Containment AFTER resolution: relative traversal ("../..") must
+        # not escape the workspace either.
+        resolved.relative_to(root.resolve())
+    except ValueError:
+        raise PermissionError(
+            f"volume path must stay under the project workspace ({root})"
+        ) from None
+    return str(resolved)
 
 
 def register(registry) -> None:
