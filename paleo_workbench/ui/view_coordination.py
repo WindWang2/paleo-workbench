@@ -108,6 +108,12 @@ class ViewCoordinationController(QObject):
         registered = 0
         td_assets = self._time_depth_assets(project)
         for well_name, path in td_assets:
+            # Project-model paths arrive as str (ResourceItem.path is a str
+            # deserialized straight from the project JSON, and the catalog
+            # resolver also hands back str); normalize here so the Path
+            # usage below (``path.name``) can never AttributeError on a
+            # legacy/str-pathed project.
+            path = Path(path)
             try:
                 from paleo_workbench.viz.joint_well_parsers import parse_td_table
 
@@ -151,7 +157,12 @@ class ViewCoordinationController(QObject):
                 if str(getattr(well, "id", "")) == str(getattr(link, "entity_id", "")):
                     well_name = str(getattr(well, "name", "") or "")
                     break
-            path = self._resolve_asset_path(project, getattr(link, "asset_id", ""))
+            # staticmethod body: reference the sibling helper through the
+            # class (a bare ``self`` here has always been a NameError — any
+            # project with time_depth entity links crashed bind_project).
+            path = ViewCoordinationController._resolve_asset_path(
+                project, getattr(link, "asset_id", "")
+            )
             if path and well_name:
                 key = str(path)
                 if key not in seen_paths:
