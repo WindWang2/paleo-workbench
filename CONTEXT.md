@@ -39,6 +39,18 @@ A centralized, event-driven state observer module (`paleo_workbench/viz/seismic_
 ### FormatSpec
 A single-point registration specification data structure that bundles an asset format's classification rules (extensions/magic bytes), preview parser callable, and exporter provider into one place.
 
+### ResourceGovernor（全局资源治理）
+P2-A 单一准入权威（ADR 0064，`paleo_workbench/runtime/resource_governor.py`）：把 ResourceBudget 的 CPU/RAM/VRAM/IO 列变成准入决策（`try_admit` 调度器路径 / `admit` 直调路径抛 `ResourceExhausted`），压力三态（NORMAL/PRESSURE/CRITICAL，`MemoryPressureMonitor` 懒采样 + 缓存救济），`cpu_allowance` 是所有并行旋钮（transcode/prepare/ONNX/扫描池）唯一该问的问题。TaskScheduler 保持唯一 heavy 队列（IO 并发 1）+ 1 条交互专用车道 + 有界优先级老化。
+_Avoid_: 第二套 scheduler/budget/monitor；各模块自行 `os.cpu_count()` 开满
+
+### CapabilityProvider / ProviderRegistry（Provider SDK）
+P2-B 扩展单元（ADR 0065，`paleo_workbench/providers/`）：`ProviderDescriptor`（结构化元数据 + JSON-schema + typed refs + ResourceProfile）+ `execute(inputs, parameters, context)`；注册表显式注册、重复/版本隔离、entry-point 发现 opt-in（`PALEO_PROVIDER_ENTRY_POINTS=1`）；统一执行管线 = schema 校验 → typed 输入检查 → governor admission → DataRun provenance。内置 provider 包裹既有生产 seam（kriging/idw、KERNELS 逐 kernel、tiled_onnx 委托、map export、render backends probe）。
+_Avoid_: 巨型 BasePlugin；inspect 签名猜契约；anonymous dict 输入；绕过 catalog 的数据产出
+
+### ActionSpec / ActionRegistry / HarnessExecutor（Geological Harness）
+P2-C 稳定专业动作层（ADR 0066，`paleo_workbench/harness/`）：ActionSpec 是单一事实源（schema/风险/资源画像/上下文要求，tool schema 由其派生）；守卫执行 = lookup → 校验 → 权限（DESTRUCTIVE 拒装）→ 上下文 → governor admission → 领域服务/provider 执行 → 科学/图验证 → ActionResult。Agent 只读 ActionContext（SelectionSnapshot 快照），写操作只在 WRITE 风险动作内经领域服务；地图导出路径限制工作区内且拒绝覆盖。LLM 经 ToolSource/ChatModel 协议接入，零厂商耦合。
+_Avoid_: agent 驱动 UI/findChild；agent 直连 SQLite/项目文件；prompt 里手写第二套 tool schema
+
 ### WorkflowOrchestrator
 A legacy headless step-cursor helper (`paleo_workbench/workflow/orchestrator.py`) that exposes `next_step` / `get_step_context` for scripting/tests. It never persists or infers authoritative state: the single source of truth for workflow step status is the evidence/freshness inference in `paleo_workbench/workflow/service.py` (`home_workflow_steps`), which production UI reads. `next_step` refuses to advance past a step that has no evidence-backed validity.
 
