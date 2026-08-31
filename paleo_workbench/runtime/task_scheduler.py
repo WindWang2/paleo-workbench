@@ -120,17 +120,36 @@ class TaskHandle:
 
 
 class TaskScheduler:
-    """FIFO + priority scheduler with cooperative cancel and crash-safe work dirs."""
+    """FIFO + priority scheduler with cooperative cancel and crash-safe work dirs.
+
+    P2-A additions (all optional, inactive by default so the scheduler stays
+    usable standalone):
+
+    - **Admission hook** (:meth:`set_admission`): before a queued task starts,
+      the hook may reserve resources and return a lease-like object (with a
+      ``release()`` method). Returning a falsy value defers the task — it
+      stays queued and is retried; lower-priority admissible tasks may pass
+      it. The scheduler releases the lease when the task reaches a terminal
+      state. The :class:`ResourceGovernor` installs exactly such a hook.
+    - **Aging**: a task's effective priority grows while it waits
+      (``AGING_STEP`` per ``AGING_INTERVAL_S``, capped at ``AGING_MAX_BOOST``)
+      so a continuous stream of higher-priority interactive work cannot
+      starve background jobs forever.
+    """
 
     HISTORY_LIMIT = 200
+    AGING_INTERVAL_S = 5.0
+    AGING_STEP = 5
+    AGING_MAX_BOOST = 50
 
-    def __init__(self, *, max_workers: int = 1, work_root: str | Path | None = None):
+    def __init__(self, *, max_workers: int = 1, work_root: str | Path | None = None, clock: Callable[[], float] = time.monotonic):
         if max_workers < 1:
             raise ValueError("max_workers must be >= 1 (I/O-heavy default is 1)")
         self.max_workers = max_workers
         self._work_root = Path(work_root) if work_root else None
         self._lock = threading.Lock()
         self._wakeup = threading.Event()
+        self._clock = clock
         # Heap entries: (-priority, seq, task_id). seq keeps FIFO order.
         self._heap: list[tuple[int, int, str]] = []
         self._seq = itertools.count()
@@ -140,15 +159,60 @@ class TaskScheduler:
         self._work_dirs: dict[str, Path] = {}
         self._threads: list[threading.Thread] = []
         self._shutdown = False
+        self._admission: Callable[[TaskSpec, str], Any] | None = None
+        self._leases: dict[str, Any] = {}
+        self._last_rekey = clock()
         for _ in range(max_workers):
             t = threading.Thread(target=self._worker_loop, name="paleo-heavy-task", daemon=True)
             t.start()
             self._threads.append(t)
 
+    # ---------------------------------------------------------- admission --
+    def set_admission(self, hook: Callable[[TaskSpec, str], Any] | None) -> None:
+        """Install/replace/clear the admission hook (lease protocol above).
+
+        The hook runs without the scheduler lock held; it must be fast
+        (counter checks, no IO) to keep the interactive queue-delay budget.
+        """
+        with self._lock:
+            self._admission = hook
+        self._wakeup.set()
+
+    def _release_lease(self, task_id: str) -> None:
+        with self._lock:
+            lease = self._leases.pop(task_id, None)
+        if lease is not None:
+            release = getattr(lease, "release", None)
+            if callable(release):
+                try:
+                    release()
+                except Exception:
+                    logger.exception("admission lease release failed for %s", task_id)
+
+    def _effective_priority(self, handle: TaskHandle) -> int:
+        """Base priority plus bounded aging so background work is not starved."""
+        wait = max(0.0, self._clock() - handle.submitted_at)
+        boost = min(
+            int(wait // self.AGING_INTERVAL_S) * self.AGING_STEP, self.AGING_MAX_BOOST
+        )
+        return handle.spec.priority + boost
+
+    def _rekey_heap_locked(self) -> None:
+        """Rebuild the heap with current effective priorities (seq preserved)."""
+        entries: list[tuple[int, str]] = []
+        while self._heap:
+            _, seq, tid = heapq.heappop(self._heap)
+            h = self._handles.get(tid)
+            if h is not None and h.state == TaskState.QUEUED:
+                entries.append((seq, tid))
+        for seq, tid in entries:
+            heapq.heappush(self._heap, (-self._effective_priority(self._handles[tid]), seq, tid))
+        self._last_rekey = self._clock()
+
     # ------------------------------------------------------------ submit --
     def submit(self, spec: TaskSpec) -> TaskHandle:
         task_id = uuid.uuid4().hex[:12]
-        handle = TaskHandle(task_id=task_id, spec=spec)
+        handle = TaskHandle(task_id=task_id, spec=spec, submitted_at=self._clock())
         key = handle.task_key
         with self._lock:
             if self._shutdown:
@@ -259,28 +323,60 @@ class TaskScheduler:
     # ------------------------------------------------------------ worker --
     def _worker_loop(self) -> None:  # pragma: no cover - exercised via tests
         while True:
+            deferred: list[str] = []
+            task_id: str | None = None
+            admission = self._admission  # snapshot; hooks may swap mid-loop
             with self._lock:
                 if self._shutdown and not self._heap:
                     return
-                task_id = None
+                if self._heap and (self._clock() - self._last_rekey) >= self.AGING_INTERVAL_S / 2:
+                    self._rekey_heap_locked()
                 while self._heap:
                     _, _, tid = heapq.heappop(self._heap)
                     h = self._handles.get(tid)
+                    if h is None or h.state != TaskState.QUEUED:
+                        continue
+                    if admission is not None:
+                        lease = None
+                        try:
+                            lease = admission(h.spec, tid)
+                        except Exception:
+                            logger.exception("admission hook failed for %s", tid)
+                        if not lease:
+                            deferred.append(tid)
+                            continue
+                        self._leases[tid] = lease
+                    task_id = tid
+                    break
+                # Deferred candidates go back regardless of whether another
+                # task was admitted — dropping them would lose the task.
+                for tid in deferred:
+                    h = self._handles.get(tid)
                     if h is not None and h.state == TaskState.QUEUED:
-                        task_id = tid
-                        break
+                        heapq.heappush(
+                            self._heap, (-self._effective_priority(h), next(self._seq), tid)
+                        )
                 if task_id is None:
                     self._wakeup.clear()
             if task_id is None:
-                self._wakeup.wait(timeout=0.2)
+                # Deferred tasks may become admissible the moment a lease is
+                # released; poll them faster than fresh submits wake us.
+                timeout = 0.05 if deferred else 0.2
+                self._wakeup.wait(timeout=timeout)
                 continue
             self._run_task(task_id)
 
     def _run_task(self, task_id: str) -> None:
+        try:
+            self._run_task_inner(task_id)
+        finally:
+            self._release_lease(task_id)
+
+    def _run_task_inner(self, task_id: str) -> None:
         with self._lock:
             handle = self._handles[task_id]
             handle.state = TaskState.RUNNING
-            handle.started_at = time.monotonic()
+            handle.started_at = self._clock()
             ctx = TaskContext(task_id=task_id)
             self._cancel_events[task_id] = ctx.cancelled
 
@@ -341,7 +437,7 @@ class TaskScheduler:
 
     def _finish_locked(self, handle: TaskHandle, state: TaskState) -> None:
         handle.state = state
-        handle.finished_at = time.monotonic()
+        handle.finished_at = self._clock()
         self._active_keys.discard(handle.task_key)
         # Bounded history: drop the oldest finished handles.
         finished = [h for h in self._handles.values() if h.finished_at is not None]

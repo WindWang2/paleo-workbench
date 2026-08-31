@@ -73,7 +73,18 @@ def scan_resources(
     )
     if not candidates:
         return []
-    workers = max_workers or min(32, (os.cpu_count() or 1) + 4)
+    if max_workers:
+        workers = max_workers
+    else:
+        # P2-A: background scanning shares the governor's IO-slot budget
+        # instead of opening cpu_count+4 threads that fight interactive
+        # slice reads for the disk.
+        try:
+            from paleo_workbench.runtime.resource_governor import get_governor
+
+            workers = max(2, min(32, int(get_governor().io_slots()) + 2))
+        except Exception:
+            workers = min(32, (os.cpu_count() or 1) + 4)
     with ThreadPoolExecutor(max_workers=workers) as pool:
         processed = list(
             pool.map(

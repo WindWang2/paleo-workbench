@@ -67,6 +67,19 @@ def main() -> int:
     from paleo_workbench.app import PaleoWorkbenchWindow
     from paleo_workbench.ui import tokens
 
+    # P2-A: one call wires the global resource governance — active budget
+    # pushed into the engine caches, pressure monitor bound, governor
+    # admission installed on the global TaskScheduler. Idempotent and cheap;
+    # failures degrade to ungoverned (previous behaviour), never block boot.
+    try:
+        from paleo_workbench.runtime import ensure_global_governance
+
+        ensure_global_governance()
+    except Exception:  # noqa: BLE001 — governance must never block startup
+        logging.getLogger("paleo_workbench").warning(
+            "resource governance unavailable; running ungoverned", exc_info=True
+        )
+
     app = QApplication(sys.argv)
     # Theme the whole application through the manager (#1047): a frozen
     # light template here would fight every later theme switch on any
