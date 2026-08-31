@@ -105,6 +105,24 @@ def register(registry) -> None:
     )
     registry.register(
         ActionSpec(
+            action_id="map.apply_template",
+            description="将制图模板应用到当前图（样式/要素齐备性：图例+比例尺+指北针+标题，可自定义标题）。",
+            handler=_apply_template,
+            risk=ActionRisk.WRITE,
+            category="background.compute",
+            resource_profile={"estimated_cpu_cores": 0.2, "io_weight": 0.0},
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "template": {"type": "string", "enum": ["standard", "minimal"], "description": "standard=齐备四要素; minimal=仅标题"},
+                    "title": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+        )
+    )
+    registry.register(
+        ActionSpec(
             action_id="map.add_component",
             description="向当前图的版面添加制图要素（图例/色标/比例尺/指北针/标题/图框）。",
             handler=_add_component,
@@ -199,13 +217,75 @@ def _create_factor_map(context: ActionContext, parameters: dict) -> dict:
         title=parameters.get("title"),
     )
     document_id = f"factor-{parameters['factor_name']}-{uuid.uuid4().hex[:6]}"
-    _publish(context, document, document_id)
     grid_layers = [l for l in document.layers if getattr(l, "layer_type", "") == "grid"]
     grid = getattr(grid_layers[0], "grid_result", None) if grid_layers else None
+
+    # Side-effect guard (ADR 0066): validate BEFORE publishing/registering —
+    # an invalid grid never commits a successful run or a derived version.
+    from paleo_workbench.harness.validation import ScientificValidator
+
+    verification = ScientificValidator().validate_grid(
+        grid, label=f"factor_map.{parameters['factor_name']}"
+    )
+    if not verification.passed:
+        raise ValueError(
+            f"interpolated grid failed scientific validation: {verification.reasons}"
+        )
+
+    _publish(context, document, document_id)
+
+    # Provenance: DataRun + INTERMEDIATE grid artifact through the catalog
+    # (the single write authority); version identity returned to the caller.
+    version_identity = None
+    run_id_out = None
+    if grid is not None and context.catalog is not None:
+        try:
+            import numpy as np
+            from pathlib import Path
+
+            root = Path(context.project_path).parent if context.project_path else Path.cwd()
+            artifact_dir = root / "demo.artifacts" / "intermediate"
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            artifact_path = artifact_dir / f"{document_id}.npz"
+            np.savez_compressed(
+                artifact_path,
+                grid_z=grid.grid_z,
+                grid_x=grid.grid_x,
+                grid_y=grid.grid_y,
+            )
+            run = context.catalog.begin_run(
+                operation="factor_map.interpolate",
+                input_version_ids=[],
+                parameters={
+                    "factor_name": parameters["factor_name"],
+                    "method": parameters.get("method", "kriging"),
+                    "grid_n": int(parameters.get("grid_n", 50)),
+                },
+                generator_version="geological-mapping-service",
+            )
+            version = context.catalog.register_intermediate(
+                run_id=run.run_id,
+                name=f"{parameters['factor_name']} grid",
+                path=str(artifact_path),
+                kind="factor_grid",
+                format="npz",
+            )
+            context.catalog.complete_run(run.run_id, status="complete")
+            version_identity = getattr(version, "version_id", None)
+            run_id_out = run.run_id
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "factor-map provenance registration failed (map document kept)"
+            )
+
     return {
         "map_document": document,
         "document_id": document_id,
         "task_id": getattr(task, "id", None),
+        "version_id": version_identity,
+        "run_id": run_id_out,
         "layers": [
             {"name": getattr(l, "name", ""), "type": getattr(l, "layer_type", ""), "visible": getattr(l, "visible", True)}
             for l in document.layers
@@ -213,6 +293,7 @@ def _create_factor_map(context: ActionContext, parameters: dict) -> dict:
         "extent": list(document.extent) if document.extent else None,
         "values": [grid] if grid is not None else [],
         "layer_count": len(document.layers),
+        "verification": verification.to_dict(),
     }
 
 
@@ -308,6 +389,60 @@ def _set_style(context: ActionContext, parameters: dict) -> dict:
         target.style = style_dict
         target.bump_style_revision()
     return {"layer": parameters.get("layer_name"), "style": style_dict}
+
+
+def _apply_template(context: ActionContext, parameters: dict) -> dict:
+    """Apply a named composition template to the current map document."""
+    document = _current_document(context)
+    template = parameters.get("template", "standard")
+    title = parameters.get("title") or getattr(document, "title", "") or "地质图件"
+    from paleo_workbench.mapping.composer.models import (
+        ComposerElement,
+        ElementType,
+        MapCompositionDocument,
+    )
+
+    document_id = context.current_map_id or ""
+    composition = MapCompositionDocument(id=f"composition-{document_id[:12]}", title=title)
+    composition.add_element(
+        ComposerElement(
+            id="main-map", element_type=ElementType.MAIN_MAP,
+            x_mm=10.0, y_mm=10.0, width_mm=200.0, height_mm=150.0, z_index=-1,
+            properties={"frame": "neatline"},
+        )
+    )
+    if template == "standard":
+        layout = [
+            ("legend", ElementType.LEGEND, 5.0, 165.0, {"binding": "layers"}),
+            ("scale-bar", ElementType.SCALE_BAR, 120.0, 165.0, {"units": "km"}),
+            ("north-arrow", ElementType.NORTH_ARROW, 265.0, 15.0, {}),
+            ("title", ElementType.TITLE, 10.0, 3.0, {"text": title}),
+        ]
+        for elem_id, element_type, x, y, props in layout:
+            composition.add_element(
+                ComposerElement(
+                    id=elem_id, element_type=element_type,
+                    x_mm=x, y_mm=y, width_mm=60.0, height_mm=28.0,
+                    properties=props,
+                )
+            )
+    elif template == "minimal":
+        composition.add_element(
+            ComposerElement(
+                id="title", element_type=ElementType.TITLE,
+                x_mm=10.0, y_mm=3.0, width_mm=120.0, height_mm=20.0,
+                properties={"text": title},
+            )
+        )
+    else:
+        raise ValueError(f"unknown template {template!r}")
+    context.compositions[document_id] = composition
+    document.title = title
+    return {
+        "document_id": document_id,
+        "template": template,
+        "components": [str(e.element_type).split(".")[-1].lower() for e in composition.elements],
+    }
 
 
 def _add_component(context: ActionContext, parameters: dict) -> dict:
@@ -422,11 +557,12 @@ def _export(context: ActionContext, parameters: dict) -> dict:
             require_components=True,
         )
         if not report.passed:
-            return {
-                "exported": False,
-                "reason": "map failed validation; fix before export",
-                "verification": report.to_dict(),
-            }
+            # FAIL cannot claim completion (ADR 0066): surface as a failed
+            # action with the verification reasons, never a success-shaped
+            # refusal.
+            raise ValueError(
+                "map failed validation; fix before export: " + "; ".join(report.reasons)
+            )
     from paleo_workbench.providers import ProviderContext, execute_provider, get_provider_registry
 
     provider_context = ProviderContext(

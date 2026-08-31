@@ -48,6 +48,23 @@ def _request_for_spec(spec, task_id: str) -> TaskRequest:
     )
 
 
+def clamp_workers(category_value: str, requested: int) -> int:
+    """One question for every parallelism knob: how many workers fit the budget?
+
+    Replaces the repeated try-import-governor-clamp-except-fallback shape at
+    the transcode / factor-prepare / scanner call sites (and any future
+    one): the requested default is the ungoverned answer, the governor may
+    shrink it (background ceiling, pressure scale) but never below 1.
+    """
+    try:
+        from paleo_workbench.runtime.resource_governor import get_governor
+        from paleo_workbench.runtime.task_categories import TaskCategory
+
+        return get_governor().cpu_allowance(TaskCategory(category_value), requested=requested)
+    except Exception:
+        return max(1, int(requested))
+
+
 def scheduler_admission_hook(governor: ResourceGovernor):
     """Admission hook adapting the governor to the TaskScheduler lease protocol."""
 

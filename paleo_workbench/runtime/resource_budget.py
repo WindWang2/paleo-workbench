@@ -125,7 +125,13 @@ _ACTIVE: ResourceBudget | None = None
 
 
 def active_budget() -> ResourceBudget:
-    """The process budget (env override: PALEO_BUDGET_RAM_GB)."""
+    """The process budget.
+
+    Stable configuration path (P2-A): RAM via ``PALEO_BUDGET_RAM_GB``; the
+    CPU/IO columns via ``PALEO_BUDGET_CORES`` / ``PALEO_IO_SLOTS`` /
+    ``PALEO_BACKGROUND_NICE`` on top of the detected budget. Runtime API:
+    :func:`set_budget` / :func:`configure_runtime_budget`.
+    """
     global _ACTIVE
     if _ACTIVE is None:
         env = os.environ.get("PALEO_BUDGET_RAM_GB")
@@ -136,7 +142,32 @@ def active_budget() -> ResourceBudget:
                 _ACTIVE = ResourceBudget()
         else:
             _ACTIVE = ResourceBudget.for_total_ram_gb(_detect_ram_gb())
+        _ACTIVE = _apply_env_overrides(_ACTIVE)
     return _ACTIVE
+
+
+def _env_int(name: str) -> int | None:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+def _apply_env_overrides(budget: ResourceBudget) -> ResourceBudget:
+    cores = _env_int("PALEO_BUDGET_CORES")
+    io_slots = _env_int("PALEO_IO_SLOTS")
+    nice = _env_int("PALEO_BACKGROUND_NICE")
+    if cores is None and io_slots is None and nice is None:
+        return budget
+    return replace(
+        budget,
+        logical_cores=cores if cores else budget.logical_cores,
+        io_slots=float(io_slots) if io_slots else budget.io_slots,
+        background_nice=nice if nice is not None else budget.background_nice,
+    )
 
 
 def set_budget(budget: ResourceBudget) -> None:

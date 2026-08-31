@@ -66,14 +66,9 @@ def prepare_worker_count() -> int:
         value = int(raw)
     except ValueError:
         value = 1
-    requested = max(1, min(4, value))
-    try:
-        from paleo_workbench.runtime.resource_governor import get_governor
-        from paleo_workbench.runtime.task_categories import TaskCategory
+    from paleo_workbench.runtime.governance import clamp_workers
 
-        return get_governor().cpu_allowance(TaskCategory.BACKGROUND_COMPUTE, requested=requested)
-    except Exception:
-        return requested
+    return clamp_workers("background.compute", max(1, min(4, value)))
 
 
 @dataclass(frozen=True, slots=True)

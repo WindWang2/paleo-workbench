@@ -20,19 +20,26 @@ Domain services: DataCatalogService(CatalogPort) / well loader+track layout /
 open_volume / GeologicalMappingService / composition+export / workflow dashboard
 ```
 
-## Action inventory (20 actions, coarse-grained)
+## Action inventory (22 actions, coarse-grained)
 
 | domain | actions | risk |
 |---|---|---|
 | workspace | list_assets, search, get_lineage, get_versions, describe_context | READ |
 | well | list, open, list_curves, create_display, apply_template | READ/COMPUTE |
 | seismic | open_volume, get_slice, compute_attribute | READ/COMPUTE |
-| map | create_factor_map, create_well_location_map, add_layer, set_style, add_component, validate, export | READ/COMPUTE/WRITE |
-| geology | list_horizons, list_faults | READ |
+| map | create_factor_map, create_well_location_map, add_layer, set_style, apply_template, add_component, validate, export | READ/COMPUTE/WRITE |
+| geology | list_horizons, list_faults, create_interpretation | READ/WRITE |
 | workflow | status | READ |
 
 `ActionSpec.tool_schema()` derives OpenAI/Gemini function schemas 1:1 — single source
 (no hand-written prompt schema anywhere).
+
+Review-round hardening: default permissions are READ+COMPUTE (from_app grants WRITE
+for app sessions); export/volume paths confined to the workspace with no-overwrite;
+invalid maps FAIL export instead of success-shaped refusal; factor-map grids are
+scientifically validated BEFORE any catalog commit, which now registers a DataRun +
+INTERMEDIATE grid artifact and returns the version identity; attribute providers
+probe output validity before registering derived stores.
 
 ## Security boundaries (04-security-boundaries.md for detail)
 

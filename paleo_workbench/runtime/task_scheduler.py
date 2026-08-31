@@ -120,6 +120,22 @@ class TaskHandle:
         return self.spec.task_key or self.task_id
 
 
+def default_background_nice() -> int:
+    """Budget-derived niceness for heavy lanes, read once at construction.
+
+    Reading the budget here (instead of defaulting to 0 and configuring
+    later) removes the start-up race: worker threads apply their niceness
+    at loop entry, before any task runs. ``background_nice`` is cumulative
+    per thread on Linux, so it is set exactly once per thread.
+    """
+    try:
+        from paleo_workbench.runtime.resource_budget import active_budget
+
+        return active_budget().background_nice
+    except Exception:
+        return 0
+
+
 class TaskScheduler:
     """FIFO + priority scheduler with cooperative cancel and crash-safe work dirs.
 
@@ -166,7 +182,6 @@ class TaskScheduler:
         self.max_workers = max_workers
         self.interactive_workers = interactive_workers
         self._is_interactive = is_interactive
-        self._background_nice = 0
         self._work_root = Path(work_root) if work_root else None
         self._lock = threading.Lock()
         self._wakeup = threading.Event()
@@ -183,6 +198,7 @@ class TaskScheduler:
         self._admission: Callable[[TaskSpec, str], Any] | None = None
         self._leases: dict[str, Any] = {}
         self._last_rekey = clock()
+        self._background_nice = default_background_nice()
         for lane in range(max_workers + interactive_workers):
             name = (
                 "paleo-interactive-task"
@@ -392,9 +408,8 @@ class TaskScheduler:
         if not interactive_only:
             self._apply_background_nice()
         while True:
-            deferred: list[str] = []
             skipped: list[tuple[int, int, str]] = []
-            task_id: str | None = None
+            candidates: list[tuple[int, int, str]] = []
             admission = self._admission  # snapshot; hooks may swap mid-loop
             with self._lock:
                 if self._shutdown and not self._heap:
@@ -413,37 +428,50 @@ class TaskScheduler:
                         # cannot take work it does not serve.
                         skipped.append(entry)
                         continue
-                    if admission is not None:
-                        lease = None
-                        try:
-                            lease = admission(h.spec, tid)
-                        except Exception:
-                            logger.exception("admission hook failed for %s", tid)
-                        if not lease:
-                            deferred.append(tid)
-                            continue
-                        self._leases[tid] = lease
-                    task_id = tid
-                    break
-                # Deferred candidates go back regardless of whether another
-                # task was admitted — dropping them would lose the task.
-                for tid in deferred:
-                    h = self._handles.get(tid)
-                    if h is not None and h.state == TaskState.QUEUED:
-                        heapq.heappush(
-                            self._heap, (-self._effective_priority(h), next(self._seq), tid)
-                        )
+                    candidates.append(entry)
                 for entry in skipped:
                     heapq.heappush(self._heap, entry)
-                if task_id is None:
+                for entry in candidates:
+                    heapq.heappush(self._heap, entry)
+                if not candidates:
                     self._wakeup.clear()
-            if task_id is None:
-                # Deferred tasks may become admissible the moment a lease is
-                # released; poll them faster than fresh submits wake us.
-                timeout = 0.05 if deferred else 0.2
-                self._wakeup.wait(timeout=timeout)
+            # Admission runs WITHOUT the scheduler lock (documented contract):
+            # a slow hook must not serialize submissions or the other lane.
+            # Entries were pushed back above, so an unadmitted candidate
+            # simply stays queued; a claimed one is re-checked under the lock.
+            for entry in candidates:
+                _, seq, tid = entry
+                lease = None
+                if admission is not None:
+                    try:
+                        lease = admission(self._handles[tid].spec, tid)
+                    except Exception:
+                        logger.exception("admission hook failed for %s", tid)
+                    if not lease:
+                        continue
+                with self._lock:
+                    h = self._handles.get(tid)
+                    if h is None or h.state != TaskState.QUEUED:
+                        # Cancelled/claimed while we asked for admission —
+                        # release the lease we speculatively acquired.
+                        if lease is not None:
+                            release = getattr(lease, "release", None)
+                            if callable(release):
+                                try:
+                                    release()
+                                except Exception:
+                                    logger.exception("admission lease release failed for %s", tid)
+                        continue
+                    if lease is not None:
+                        self._leases[tid] = lease
+                self._run_task(tid)
+                break
+            else:
+                # Deferred (unadmitted) candidates: poll faster than fresh
+                # submits wake us — a lease release may unblock them.
+                self._wakeup.wait(timeout=0.05 if candidates else 0.2)
                 continue
-            self._run_task(task_id)
+            continue
 
     def _run_task(self, task_id: str) -> None:
         try:

@@ -65,7 +65,16 @@ class MapRenderBackendProvider:
             capabilities=("map_render", name),
             input_types=("MapDocumentRef", "MapDocument"),
             output_types=("PathRef",),
-            parameters_schema={"type": "object", "additionalProperties": False},
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    "output_path": {"type": "string", "description": "PNG 输出路径"},
+                    "width": {"type": "integer", "minimum": 16, "maximum": 8192},
+                    "height": {"type": "integer", "minimum": 16, "maximum": 8192},
+                },
+                "required": ["output_path"],
+                "additionalProperties": False,
+            },
             resource_profile=ResourceProfile(
                 estimated_cpu_cores=1.0,
                 estimated_ram_bytes=256 * 1024**2,
@@ -86,12 +95,70 @@ class MapRenderBackendProvider:
         parameters: Mapping[str, Any],
         context: ProviderContext,
     ) -> ProviderResult:
-        # Backend *selection* happens through create_map_render_backend at
-        # consumption sites; this provider's execute renders a document
-        # snapshot via the same probe-selected backend (see exporter below).
-        raise ProviderExecutionError(
-            self.descriptor.provider_id,
-            NotImplementedError("render backend selection metadata; use map.export for rendering"),
+        """Render a MapDocument snapshot to a PNG through THIS backend.
+
+        Real execution, not metadata: a throwaway backend instance of this
+        family renders the snapshot (the same contract the canvas uses);
+        unavailable backends (probe failed) reject honestly.
+        """
+        document = inputs.get("document")
+        if not self._available:
+            raise ProviderRejectedInputError(
+                self.descriptor.provider_id,
+                f"backend {self._backend_name!r} unavailable on this host (probe failed)",
+            )
+        from paleo_workbench.mapping.layers import MapDocument
+
+        if not isinstance(document, MapDocument):
+            raise ProviderRejectedInputError(
+                self.descriptor.provider_id,
+                f"input 'document' must be a MapDocument, got {type(document).__name__}",
+            )
+        output = parameters.get("output_path")
+        if not output:
+            raise ProviderRejectedInputError(
+                self.descriptor.provider_id, "output_path parameter required"
+            )
+        from pathlib import Path
+
+        out_path = Path(str(output))
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        from paleo_workbench.mapping.map_render_backend import (
+            FallbackMapRenderBackend,
+            MapRenderSnapshot,
+        )
+
+        if self._backend_name == "qgis":
+            from paleo_workbench.mapping.map_render_backend import (
+                create_map_render_backend,
+            )
+
+            backend = create_map_render_backend(prefer_qgis=True)
+        else:
+            backend = FallbackMapRenderBackend()
+        backend.initialize()
+        backend.set_layer_snapshot(document.to_snapshot())
+        extent = document.extent or (0.0, 0.0, 1.0, 1.0)
+        backend.set_extent(tuple(float(v) for v in extent))
+        backend.set_output_size(int(parameters.get("width", 1200)), int(parameters.get("height", 900)))
+        frame = backend.render_sync()
+        if out_path.suffix.lower() != ".png":
+            raise ProviderRejectedInputError(
+                self.descriptor.provider_id, "backend render outputs PNG (use export.map_product for svg/pdf)"
+            )
+        from PySide6.QtGui import QImage
+
+        image = QImage(
+            frame.rgba, frame.width, frame.height, frame.stride, QImage.Format_RGBA8888
+        )
+        image.save(str(out_path))
+        backend.shutdown()
+        return ProviderResult(
+            artifacts=[
+                ArtifactRef(name=out_path.name, kind="file", path=str(out_path),
+                            metadata={"backend": self._backend_name})
+            ],
+            diagnostics={"backend": self._backend_name, "bytes": out_path.stat().st_size},
         )
 
 

@@ -23,9 +23,11 @@ class ActionRisk(str, Enum):
     DESTRUCTIVE = "destructive"  # purge/overwrite; never a default agent action
 
 
-#: Default agent permission set: READ + COMPUTE always; WRITE passes through
-#: domain services with provenance; DESTRUCTIVE is not installable by default.
-DEFAULT_PERMISSIONS = frozenset({ActionRisk.READ, ActionRisk.COMPUTE, ActionRisk.WRITE})
+#: Default permission set for programmatic/headless contexts: READ + COMPUTE.
+#: WRITE is granted explicitly (the app context grants it — a user session
+#: sits behind the UI and writes go through domain services either way);
+#: DESTRUCTIVE is not installable at all.
+DEFAULT_PERMISSIONS = frozenset({ActionRisk.READ, ActionRisk.COMPUTE})
 
 
 @dataclass(frozen=True, slots=True)

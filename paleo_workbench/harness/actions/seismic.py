@@ -12,6 +12,30 @@ from paleo_workbench.harness.context import ActionContext
 from paleo_workbench.harness.spec import ActionRisk, ActionSpec
 
 
+def _resolve_volume_path(context: ActionContext, raw: str) -> str:
+    """Volume paths stay inside the workspace (read boundary).
+
+    Absolute paths must live under the project root; relative paths resolve
+    against it. Catalog-managed derived stores (project-relative) fit the
+    same rule. This keeps agent-supplied strings from opening arbitrary
+    host files.
+    """
+    from pathlib import Path
+
+    raw_path = Path(raw).expanduser()
+    root = Path(context.project_path).parent if context.project_path else Path.cwd()
+    if raw_path.is_absolute():
+        try:
+            resolved = raw_path.resolve()
+            resolved.relative_to(root.resolve())
+        except ValueError:
+            raise PermissionError(
+                f"volume path must stay under the project workspace ({root})"
+            ) from None
+        return str(resolved)
+    return str((root / raw_path).resolve())
+
+
 def register(registry) -> None:
     registry.register(
         ActionSpec(
@@ -76,7 +100,7 @@ def register(registry) -> None:
 def _open_volume(context: ActionContext, parameters: dict) -> dict:
     from geoviz_seismic import open_volume
 
-    path = parameters["path"]
+    path = _resolve_volume_path(context, parameters["path"])
     reader = open_volume(path)
     geometry = reader.geometry
     volume_id = parameters.get("volume_id") or path
@@ -149,10 +173,17 @@ def _compute_attribute(context: ActionContext, parameters: dict) -> dict:
     volume = context.active_volume
     if volume is None or not isinstance(volume, SeismicVolumeRef):
         raise LookupError("no active seismic volume (call seismic.open_volume first)")
+    from pathlib import Path
+
+    root = Path(context.project_path).parent if context.project_path else None
     output_dir = parameters.get("output_dir")
-    if output_dir is None:
+    if output_dir is not None:
+        output_dir = _resolve_volume_path(context, output_dir)
+    elif root is not None:
+        # Derived outputs land in the workspace artifacts area (never /tmp-only).
+        output_dir = str(root / "demo.artifacts" / "derived" / "attr.zarr")
+    else:
         import tempfile
-        from pathlib import Path
 
         output_dir = str(Path(tempfile.mkdtemp(prefix="p2-attribute-")) / "attr.zarr")
     provider_parameters = {"output_dir": output_dir}

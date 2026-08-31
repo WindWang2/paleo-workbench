@@ -40,6 +40,12 @@ PRIVATE_API_EXEMPTIONS: frozenset[tuple[str, None]] = frozenset(
         ("geoviz_seismic", None),
         ("geoviz_seismic.vram_cache", None),
         ("geoviz_seismic.attributes", None),
+        # Global resource governance (P2-A, ADR 0064): the RamSliceCache
+        # shared-ledger budget setter is an engine-internal capability the
+        # facade does not re-export; runtime.resource_budget /
+        # memory_pressure / telemetry push and read it lazily at the call
+        # site (mirrors the vram_cache precedent above).
+        ("geoviz_seismic.cache", None),
     }
 )
 GEOVIZ_PUBLIC_FACADE = frozenset(

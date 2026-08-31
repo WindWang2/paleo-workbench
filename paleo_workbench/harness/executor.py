@@ -140,8 +140,9 @@ class HarnessExecutor:
             result.elapsed_ms = (time.perf_counter() - t0) * 1000
             return result
 
-        lease = self._admit(spec)
+        lease = None
         try:
+            lease = self._admit(spec)
             payload = self._execute_spec(spec, parameters, context, result)
             verification = self._verify(spec, payload, parameters, context)
             result.verification = verification
@@ -185,31 +186,14 @@ class HarnessExecutor:
                       context: ActionContext, result: ActionResult) -> Any:
         if spec.provider_id is not None:
             from paleo_workbench.providers import ProviderContext, execute_provider
-            from paleo_workbench.providers.refs import (
-                FactorDatasetRef, MapDocumentRef, PathRef, SeismicVolumeRef,
-            )
+            from paleo_workbench.providers.refs import PathRef, SeismicVolumeRef
 
+            # Provider-declared actions resolve their typed inputs from the
+            # context (never smuggled through the schema-validated params).
             inputs = {}
             volume = context.active_volume
             if isinstance(volume, (SeismicVolumeRef, PathRef)):
                 inputs["volume"] = volume
-            if parameters.get("_document") is not None:
-                document = parameters.pop("_document")
-                inputs["document"] = (
-                    MapDocumentRef(document_id=str(id(document)))
-                    if not isinstance(document, (MapDocumentRef,)) and hasattr(document, "to_snapshot")
-                    else document
-                )
-                context.map_documents.setdefault(inputs["document"].document_id if hasattr(inputs["document"], "document_id") else "current", document)
-            dataset = parameters.pop("_dataset", None)
-            if dataset is not None:
-                inputs["dataset"] = (
-                    FactorDatasetRef(factor_name=getattr(dataset, "factor_name", "factor"))
-                    if not hasattr(dataset, "points")
-                    else dataset
-                )
-                if hasattr(inputs["dataset"], "factor_name") and not hasattr(inputs["dataset"], "points"):
-                    context.factor_datasets[inputs["dataset"].factor_name] = dataset
             provider_context = ProviderContext(
                 catalog=context.catalog,
                 emit_progress=context.progress,

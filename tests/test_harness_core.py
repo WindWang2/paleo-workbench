@@ -267,3 +267,102 @@ def test_map_validation_hook_requires_components():
     report = MapValidationHook().validate(document, None, require_components=True)
     assert report.verdict == "fail"  # no composition
     assert any("composition" in r for r in report.reasons)
+
+
+# ------------------------------------------------- review-round additions --
+def test_default_permissions_are_read_compute_only():
+    from paleo_workbench.harness.spec import DEFAULT_PERMISSIONS
+
+    assert DEFAULT_PERMISSIONS == frozenset({ActionRisk.READ, ActionRisk.COMPUTE})
+
+
+def test_map_apply_template_and_geology_interpretation(tmp_path):
+    from paleo_workbench.harness.spec import ActionRisk
+    from paleo_workbench.project.models import ProjectDocument
+
+    registry = get_action_registry()
+    try:
+        executor = HarnessExecutor(registry)
+        context = ActionContext(
+            project=ProjectDocument.new(name="t", region="r"),
+            project_path=str(tmp_path / "t.paleo.json"),
+            permissions=frozenset({ActionRisk.READ, ActionRisk.COMPUTE, ActionRisk.WRITE}),
+        )
+        (tmp_path / "t.paleo.json").write_text("{}", encoding="utf-8")
+        created = executor.execute(
+            "map.create_well_location_map", {"title": "T"}, context
+        )
+        if not created.ok:  # project has no coordinate wells — use a factor map path instead
+            pytest.skip("needs wells; covered by e2e")
+
+        templated = executor.execute("map.apply_template", {"template": "standard", "title": "模板图"}, context)
+        assert templated.ok, templated.error
+        assert set(templated.outputs["components"]) >= {"legend", "scale_bar", "north_arrow", "title", "main_map"}
+
+        interpretation = executor.execute(
+            "geology.create_interpretation", {"name": "F1 断层", "horizon": "T2"}, context
+        )
+        assert interpretation.ok, interpretation.error
+        assert interpretation.outputs["saved"] is False  # session-scope draft
+        assert any(f.name == "F1 断层" for f in context.project.fault_interpretations)
+    finally:
+        set_action_registry(None)
+
+
+def test_visualization_provider_executes_fallback_render(tmp_path, qapp):
+    from paleo_workbench.mapping.layers import MapDocument, WellPointMapLayer
+    from paleo_workbench.providers import execute_provider, get_provider_registry
+    from paleo_workbench.providers.errors import ProviderRejectedInputError
+
+    document = MapDocument(title="viz")
+    layer = WellPointMapLayer(name="井位")
+    layer.features = [
+        {"type": "Feature", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}, "properties": {"name": "W1"}}
+    ]
+    document.add_layer(layer)
+    document.recompute_extent()
+
+    provider = get_provider_registry().get("viz.map_render.fallback")
+    out = tmp_path / "render.png"
+    result = execute_provider(
+        provider,
+        inputs={"document": document},
+        parameters={"output_path": str(out), "width": 200, "height": 150},
+        context=None,
+    )
+    assert out.exists() and out.stat().st_size > 0
+    assert result.diagnostics["backend"] == "fallback"
+
+    # Unavailable backends reject honestly instead of raising garbage.
+    qgis = get_provider_registry().find("viz.map_render.qgis")
+    if qgis is not None and not qgis.available:
+        with pytest.raises(ProviderRejectedInputError):
+            execute_provider(
+                qgis, inputs={"document": document},
+                parameters={"output_path": str(tmp_path / "q.png")}, context=None,
+            )
+
+
+def test_compute_attribute_rejects_paths_outside_workspace(tmp_path):
+    from paleo_workbench.harness.spec import ActionRisk
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.providers.refs import SeismicVolumeRef
+
+    registry = get_action_registry()
+    try:
+        executor = HarnessExecutor(registry)
+        context = ActionContext(
+            project=ProjectDocument.new(name="t", region="r"),
+            project_path=str(tmp_path / "t.paleo.json"),
+            permissions=frozenset({ActionRisk.READ, ActionRisk.COMPUTE, ActionRisk.WRITE}),
+        )
+        context.active_volume = SeismicVolumeRef(volume_id="v", path=str(tmp_path / "v.zarr"))
+        outside = executor.execute(
+            "seismic.compute_attribute",
+            {"attribute": "c3", "output_dir": "/definitely-outside/attr.zarr"},
+            context,
+        )
+        assert outside.status == "fail"
+        assert "workspace" in outside.error
+    finally:
+        set_action_registry(None)

@@ -103,12 +103,17 @@ def harness_project(tmp_path_factory):
     zarr_store = root / "tiny.zarr"
     transcode_segy_to_zarr(segy, zarr_store, params=TranscodeParams())
 
+    from paleo_workbench.harness.spec import DEFAULT_PERMISSIONS, ActionRisk
+
     context = ActionContext(
         workspace_id="P2-E2E",
         project_path=str(project_path),
         catalog=adapter,
         project=document,
         selection=SelectionSnapshot(active_well_id=None),
+        # App-level session semantics: WRITE granted (headless default is
+        # READ+COMPUTE; from_app grants WRITE the same way).
+        permissions=DEFAULT_PERMISSIONS | {ActionRisk.WRITE},
     )
     yield {
         "root": root,
@@ -194,12 +199,12 @@ def test_scenario_c_coherence_on_active_volume(executor, harness_project, tmp_pa
     assert first_slice.ok, first_slice.error
     assert first_slice.outputs["finite_ratio"] > 0.99
 
-    out_dir = tmp_path / "attr" / "c3.zarr"
     computed = executor.execute(
         "seismic.compute_attribute",
-        {"attribute": "c3", "output_dir": str(out_dir)},
+        {"attribute": "c3", "output_dir": "artifacts/attr-c3.zarr"},
         ctx,
     )
+    out_dir = harness_project["root"] / "artifacts" / "attr-c3.zarr"
     assert computed.ok, computed.error
     assert computed.outputs["artifacts"], "derived store artifact expected"
     artifact = computed.outputs["artifacts"][0]
@@ -270,13 +275,15 @@ def test_scenario_e_export_map_product(executor, harness_project, tmp_path, qapp
     # Catalog OUTPUT version registered (production export path).
     assert artifact["version"], "catalog OUTPUT version expected"
 
-    # An invalid map must NOT export (fail-closed validation gate).
+    # An invalid map must NOT export (fail-closed validation gate): the
+    # action FAILS with the verification reasons — never a success-shaped
+    # refusal.
     ctx.map_documents[ctx.current_map_id].layers.clear()
     rejected = executor.execute(
         "map.export", {"output_path": "exports/bad.png"}, ctx
     )
-    assert rejected.ok  # action completed...
-    assert rejected.outputs["exported"] is False  # ...but refused to export
+    assert rejected.status == "fail"
+    assert "validation" in rejected.error
 
     # Boundary checks need a VALID map (the validation gate short-circuits first).
     rebuilt = executor.execute(

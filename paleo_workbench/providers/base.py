@@ -68,4 +68,6 @@ class ProviderContext:
             if callable(raise_if):
                 raise_if()
             elif getattr(self.cancel, "is_cancelled", False):
-                raise RuntimeError("provider execution cancelled")
+                from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
+                raise TaskCancelled("provider execution cancelled")

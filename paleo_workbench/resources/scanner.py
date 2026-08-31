@@ -85,6 +85,7 @@ def scan_resources(
             workers = max(2, min(32, int(get_governor().io_slots()) + 2))
         except Exception:
             workers = min(32, (os.cpu_count() or 1) + 4)
+        workers = max(workers, 2)
     with ThreadPoolExecutor(max_workers=workers) as pool:
         processed = list(
             pool.map(

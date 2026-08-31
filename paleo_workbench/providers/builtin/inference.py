@@ -87,7 +87,7 @@ class TiledOnnxCapabilityProvider:
                 self.descriptor.provider_id, f"tiled ONNX stack unavailable: {exc}"
             ) from exc
 
-        volume = inputs.get("volume") or inputs.get("model")
+        volume = inputs.get("volume")
         model_ref = inputs.get("model_file")
         if model_ref is not None and not isinstance(model_ref, PathRef):
             raise ProviderRejectedInputError(

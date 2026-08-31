@@ -18,7 +18,7 @@ import time
 logger = logging.getLogger(__name__)
 
 
-def _safe(label: str, fn):
+def _safe(fn):
     try:
         value = fn()
         return value if isinstance(value, dict) else {"value": value}
@@ -94,7 +94,7 @@ def snapshot() -> dict:
         },
         "vram_budget": {"budget_mb": governor.budget.vram_budget_mb},
         "io_slots": governor.io_slots(),
-        "scheduler": _safe("scheduler", _scheduler_stats),
+        "scheduler": _safe(_scheduler_stats),
         "governor": governor.runtime_status(),
-        "caches": _safe("caches", _cache_stats),
+        "caches": _safe(_cache_stats),
     }

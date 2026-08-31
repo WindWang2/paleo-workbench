@@ -76,6 +76,11 @@ class MemoryPressureMonitor:
         with self._lock:
             self._evictables.pop(name, None)
 
+    def rebind_budget(self, budget: ResourceBudget) -> None:
+        """Follow a new budget's thresholds (public; state survives)."""
+        with self._lock:
+            self._budget = budget
+
     # ----------------------------------------------------------- sample --
     def state(self, *, refresh: bool = False) -> PressureState:
         """Current state; re-samples if the cached sample is stale.

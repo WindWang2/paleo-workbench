@@ -102,10 +102,12 @@ class ActionContext:
         """Build a context from the live application window (read-only view).
 
         Pulls from the P1 coordination singletons (SelectionContext via the
-        window's controller, catalog adapter, project document). Never
-        touches widget internals: only the public controller surface.
+        window's public selection surface, catalog adapter, project
+        document) and grants WRITE — an app session sits behind the UI and
+        WRITE actions still go through domain services with provenance.
+        Headless/programmatic contexts start with READ+COMPUTE only.
         """
-        context = cls()
+        context = cls(permissions=frozenset({ActionRisk.READ, ActionRisk.COMPUTE, ActionRisk.WRITE}))
         controller = getattr(window, "project_controller", None)
         project = getattr(controller, "project", None) if controller is not None else None
         if project is not None:
@@ -123,9 +125,10 @@ class ActionContext:
             catalog = None
         context.catalog = catalog
         try:
-            selection_context = getattr(window, "_selection_context", None)
+            # Public surface first (property on the window), shell fallback.
+            selection_context = getattr(window, "selection_context", None)
             if selection_context is None:
-                shell = getattr(window, "_shell", None)
+                shell = getattr(window, "shell", None) or getattr(window, "_shell", None)
                 selection_context = getattr(shell, "selection_context", None)
             if selection_context is not None:
                 state = selection_context.snapshot()

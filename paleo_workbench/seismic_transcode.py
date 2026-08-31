@@ -111,14 +111,9 @@ def default_workers() -> int:
     except Exception:
         cpus = None
     cpus = cpus or os.cpu_count() or 4
-    requested = max(1, min(cpus - 2, 8))
-    try:
-        from paleo_workbench.runtime.resource_governor import get_governor
-        from paleo_workbench.runtime.task_categories import TaskCategory
+    from paleo_workbench.runtime.governance import clamp_workers
 
-        return get_governor().cpu_allowance(TaskCategory.TRANSCODE, requested=requested)
-    except Exception:
-        return requested
+    return clamp_workers("seismic.transcode", max(1, min(cpus - 2, 8)))
 
 
 def shard_boxes(

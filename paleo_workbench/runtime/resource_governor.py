@@ -448,6 +448,6 @@ def configure_runtime_budget(budget: ResourceBudget) -> dict[str, bool]:
     monitor = get_pressure_monitor()
     governor = get_governor()
     governor.set_budget(budget)
-    # Rebind the monitor's budget so thresholds follow the new policy.
-    monitor._budget = budget  # noqa: SLF001 - same-module policy rebinding
+    # Thresholds follow the new policy (public rebinding, state survives).
+    monitor.rebind_budget(budget)
     return applied

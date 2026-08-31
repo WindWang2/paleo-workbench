@@ -156,6 +156,27 @@ class SeismicAttributeProvider:
         except Exception as exc:
             raise ProviderExecutionError(self.descriptor.provider_id, exc) from exc
 
+        # Verification BEFORE commit (invalid output must not register a
+        # successful run / derived version — ADR 0066 guard): probe the first
+        # band's finite ratio through the same reader contract.
+        try:
+            probe = open_volume(dst)
+            sample = probe.read_inline(probe.geometry.iline_start)
+            import numpy as np
+
+            if sample.size and not bool(np.isfinite(sample).any()):
+                raise ProviderExecutionError(
+                    self.descriptor.provider_id,
+                    ValueError("attribute output is entirely non-finite; refusing to register"),
+                )
+        except ProviderExecutionError:
+            raise
+        except Exception as exc:
+            raise ProviderExecutionError(
+                self.descriptor.provider_id,
+                ValueError(f"attribute output unreadable after compute: {exc}"),
+            ) from exc
+
         # Register the derived store in the catalog when one is bound; the
         # catalog stays the single write authority for data artifacts.
         version = None
