@@ -742,6 +742,16 @@ class CatalogIndex:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         conn.row_factory = sqlite3.Row
+        # Paged browsing orders by (name, id); older stores lack the composite
+        # index and would sort the whole filtered set on every page. The IF
+        # NOT EXISTS create is idempotent; a locked store just skips it and
+        # pages run on the plain name index (correct, only slower).
+        try:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_assets_name_id ON assets(name, id)"
+            )
+        except sqlite3.Error:
+            pass
         # WAL is safe here: writes are single-writer (the service serializes
         # saves under its lock) and WAL gives readers a consistent snapshot
         # without blocking. ``reset()`` cleans up -wal/-shm files.
@@ -1792,6 +1802,278 @@ class CatalogIndex:
         sql = f"SELECT DISTINCT a.* FROM assets a {' '.join(joins)} {where}"
         rows = self._connect().execute(sql, params).fetchall()
         return [self._decode(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # Paged browsing (explorer virtualization, P0-B)
+    # ------------------------------------------------------------------
+
+    def _paged_predicates(
+        self,
+        text: str | None = None,
+        stage: DataStage | str | None = None,
+        tags: list[str] | tuple[str, ...] | None = None,
+        tag_op: str = "and",
+        type: str | None = None,
+        asset_id: str | None = None,
+        include_trashed: bool = False,
+    ) -> tuple[list[str], list[str]]:
+        """WHERE fragments + params over the assets table only.
+
+        The paged path deliberately never joins ``versions`` into the paging
+        SELECT: a join defeats the ``idx_assets_name`` order and forces a
+        sort of the whole filtered set on every page. Version-dependent
+        predicates (stage) go through an ``a.current_version_id IN (SELECT
+        …)`` subquery instead, and current-version columns are batch-fetched
+        for the page's rows afterwards.
+        """
+        wheres: list[str] = []
+        params: list[str] = []
+        if not include_trashed:
+            wheres.append("a.trashed = 0")
+        if text:
+            wheres.append("a.name_search LIKE ? ESCAPE '\\'")
+            params.append(
+                f"%{like_escape_literal(normalize_asset_search_name(text))}%"
+            )
+        if stage is not None:
+            wheres.append("a.current_version_id IN (SELECT id FROM versions WHERE stage = ?)")
+            params.append(stage.value if isinstance(stage, DataStage) else str(stage))
+        if type is not None:
+            wheres.append("a.type = ?")
+            params.append(str(type))
+        tag_list = [normalize_tag_name(t) for t in (tags or []) if str(t).strip()]
+        if tag_list:
+            if tag_op == "or":
+                placeholders = ", ".join("?" for _ in tag_list)
+                wheres.append(
+                    "a.id IN (SELECT at_p.asset_id FROM asset_tags at_p"
+                    " JOIN tags t_p ON t_p.id = at_p.tag_id"
+                    f" WHERE t_p.name IN ({placeholders}))"
+                )
+                params.extend(tag_list)
+            else:
+                for tag_name in tag_list:
+                    wheres.append(
+                        "a.id IN (SELECT at_a.asset_id FROM asset_tags at_a"
+                        " JOIN tags t_a ON t_a.id = at_a.tag_id"
+                        " WHERE t_a.name = ?)"
+                    )
+                    params.append(tag_name)
+        if asset_id:
+            wheres.append("a.id = ?")
+            params.append(str(asset_id))
+        return wheres, params
+
+    _PAGE_ORDER_COLUMNS = {
+        "name": "a.name",
+        "name_desc": "a.name DESC",
+        "type": "a.type, a.name",
+        "stage": "v.stage, a.name",
+        "size": "v.size_bytes, a.name",
+        "modified": "a.updated_at, a.name",
+        "version": "v.version_number, a.name",
+    }
+
+    def search_assets_page(
+        self,
+        text: str | None = None,
+        stage: DataStage | str | None = None,
+        tags: list[str] | tuple[str, ...] | None = None,
+        tag_op: str = "and",
+        type: str | None = None,
+        asset_id: str | None = None,
+        include_trashed: bool = False,
+        order_by: str | None = None,
+        limit: int = 500,
+        offset: int = 0,
+        after: tuple[str, str] | None = None,
+    ) -> list[dict]:
+        """One deterministic page of catalog assets joined with the current
+        version. ``order_by`` is a :data:`_PAGE_ORDER_COLUMNS` key; unknown
+        keys fall back to name order. Rows carry the asset columns plus the
+        current version's stage/version_number/size_bytes/sha256/managed/
+        format/path/created_at under ``current_*`` keys.
+
+        ``after`` is a keyset cursor ``(name, id)`` for the default name
+        order: the page starts strictly after that key, letting the index
+        serve deep pages in O(log n) instead of scanning OFFSET rows.
+        """
+        return self._safe(
+            [],
+            self._search_assets_page,
+            text=text,
+            stage=stage,
+            tags=tags,
+            tag_op=tag_op,
+            type=type,
+            asset_id=asset_id,
+            include_trashed=include_trashed,
+            order_by=order_by,
+            limit=limit,
+            offset=offset,
+            after=after,
+        )
+
+    def _search_assets_page(
+        self,
+        text: str | None = None,
+        stage: DataStage | str | None = None,
+        tags: list[str] | tuple[str, ...] | None = None,
+        tag_op: str = "and",
+        type: str | None = None,
+        asset_id: str | None = None,
+        include_trashed: bool = False,
+        order_by: str | None = None,
+        limit: int = 500,
+        offset: int = 0,
+        after: tuple[str, str] | None = None,
+    ) -> list[dict]:
+        wheres, params = self._paged_predicates(
+            text=text,
+            stage=stage,
+            tags=tags,
+            tag_op=tag_op,
+            type=type,
+            asset_id=asset_id,
+            include_trashed=include_trashed,
+        )
+        order = self._PAGE_ORDER_COLUMNS.get(order_by or "name", self._PAGE_ORDER_COLUMNS["name"])
+        if after is not None and order_by in (None, "name"):
+            cursor_name, cursor_id = str(after[0]), str(after[1])
+            wheres.append("(a.name > ? OR (a.name = ? AND a.id > ?))")
+            params.extend([cursor_name, cursor_name, cursor_id])
+        where = f"WHERE {' AND '.join(wheres)}" if wheres else ""
+        # Step 1: page the assets table alone (index order, no join).
+        sql = (
+            f"SELECT a.* FROM assets a {where}"
+            f" ORDER BY {order}, a.id LIMIT ? OFFSET ?"
+        )
+        params_extended = [*params, int(max(0, limit)), int(max(0, offset))]
+        asset_rows = self._connect().execute(sql, params_extended).fetchall()
+        if not asset_rows:
+            return []
+        # Step 2: batch-fetch the page's current versions by primary key.
+        version_ids = [row["current_version_id"] for row in asset_rows if row["current_version_id"]]
+        versions_by_id: dict[str, sqlite3.Row] = {}
+        for start in range(0, len(version_ids), 100):
+            chunk = version_ids[start : start + 100]
+            placeholders = ", ".join("?" for _ in chunk)
+            for vrow in self._connect().execute(
+                f"SELECT * FROM versions WHERE id IN ({placeholders})", chunk
+            ).fetchall():
+                versions_by_id[str(vrow["id"])] = vrow
+        rows: list[dict] = []
+        for arow in asset_rows:
+            row = dict(arow)
+            vrow = versions_by_id.get(str(row.get("current_version_id") or ""))
+            row["current_stage"] = vrow["stage"] if vrow is not None else None
+            row["current_version_number"] = vrow["version_number"] if vrow is not None else None
+            row["current_size_bytes"] = vrow["size_bytes"] if vrow is not None else None
+            row["current_sha256"] = vrow["sha256"] if vrow is not None else None
+            row["current_managed"] = vrow["managed"] if vrow is not None else None
+            row["current_format"] = vrow["format"] if vrow is not None else None
+            row["current_path"] = vrow["path"] if vrow is not None else None
+            row["current_created_at"] = vrow["created_at"] if vrow is not None else None
+            rows.append(row)
+        return rows
+
+    def count_assets(
+        self,
+        text: str | None = None,
+        stage: DataStage | str | None = None,
+        tags: list[str] | tuple[str, ...] | None = None,
+        tag_op: str = "and",
+        type: str | None = None,
+        asset_id: str | None = None,
+        include_trashed: bool = False,
+    ) -> int:
+        """Count of assets matching the paged-path predicates (index-backed)."""
+        return self._safe(
+            0,
+            self._count_assets,
+            text=text,
+            stage=stage,
+            tags=tags,
+            tag_op=tag_op,
+            type=type,
+            asset_id=asset_id,
+            include_trashed=include_trashed,
+        )
+
+    def _count_assets(
+        self,
+        text: str | None = None,
+        stage: DataStage | str | None = None,
+        tags: list[str] | tuple[str, ...] | None = None,
+        tag_op: str = "and",
+        type: str | None = None,
+        asset_id: str | None = None,
+        include_trashed: bool = False,
+    ) -> int:
+        wheres, params = self._paged_predicates(
+            text=text,
+            stage=stage,
+            tags=tags,
+            tag_op=tag_op,
+            type=type,
+            asset_id=asset_id,
+            include_trashed=include_trashed,
+        )
+        where = f"WHERE {' AND '.join(wheres)}" if wheres else ""
+        sql = f"SELECT count(*) FROM assets a {where}"
+        return int(self._connect().execute(sql, params).fetchone()[0])
+
+    def catalog_aggregates(self, include_trashed: bool = False) -> dict:
+        """Group-by counts for explorer tree badges (stage/type/tag/review).
+
+        Integrity counts are deliberately absent: MISSING/FAILED need a
+        filesystem probe the index cannot answer. Callers in paged mode show
+        the integrity smart view through the materialized path instead.
+        """
+        return self._safe({}, self._catalog_aggregates, include_trashed=include_trashed)
+
+    def _catalog_aggregates(self, include_trashed: bool = False) -> dict:
+        conn = self._connect()
+        trash_sql = "" if include_trashed else " WHERE a.trashed = 0"
+        stages = dict(
+            conn.execute(
+                "SELECT v.stage, count(*) FROM assets a"
+                " JOIN versions v ON v.id = a.current_version_id"
+                f"{trash_sql} GROUP BY v.stage"
+            ).fetchall()
+        )
+        types = dict(
+            conn.execute(
+                f"SELECT a.type, count(*) FROM assets a{trash_sql} GROUP BY a.type"
+            ).fetchall()
+        )
+        tags = {}
+        for name, display, count in conn.execute(
+            "SELECT t.name, t.display_name, count(at_c.asset_id) FROM tags t"
+            " JOIN asset_tags at_c ON at_c.tag_id = t.id"
+            " JOIN assets a ON a.id = at_c.asset_id"
+            + (" WHERE a.trashed = 0" if not include_trashed else "")
+            + " GROUP BY t.id"
+        ).fetchall():
+            tags[str(display or name)] = int(count)
+        review = {}
+        for value, count in conn.execute(
+            "SELECT json_extract(a.metadata, '$.review_status'), count(*)"
+            f" FROM assets a{trash_sql}"
+            " GROUP BY 1"
+        ).fetchall():
+            if value:
+                review[str(value)] = int(count)
+        total = int(
+            conn.execute(f"SELECT count(*) FROM assets a{trash_sql}").fetchone()[0]
+        )
+        return {
+            "total": total,
+            "stages": {str(k): int(v) for k, v in stages.items()},
+            "types": {str(k): int(v) for k, v in types.items()},
+            "tags": tags,
+            "review_status": review,
+        }
 
     def list_versions(self, asset_id: str) -> list[dict]:
         """All versions of *asset_id*, ordered by ``version_number``."""

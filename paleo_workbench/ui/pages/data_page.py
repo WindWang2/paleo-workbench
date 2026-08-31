@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 
@@ -57,6 +59,7 @@ from paleo_workbench.project.domain import domain_signature
 from paleo_workbench.project.well_location_map import sync_well_location_map
 from paleo_workbench.ui.pages.filter_index import (
     CATEGORIES,
+    CatalogCounts,
     FilterQuery,
     compute_catalog_counts,
 )
@@ -64,6 +67,8 @@ from paleo_workbench.ui.pages.catalog_health_dialog import CatalogHealthDialog
 from paleo_workbench.ui.pages.governance_dialog import GovernanceMetadataDialog
 from paleo_workbench.ui.pages.integrity_worker import IntegrityCheckReport
 from paleo_workbench.ui.pages.preview_provider import PreviewResult
+
+logger = logging.getLogger(__name__)
 from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
 from paleo_workbench.ui.pages.resource_summary import ResourceSummaryBar
 from paleo_workbench.ui.pages.tag_widgets import (
@@ -508,6 +513,14 @@ class DataPage(QWidget):
         self._visualization_controller.set_project_root(preview_root)
         _stage('pre_summary')
         self.summary_bar.update_state(state)
+        # P0-B large-catalog fast path: above the threshold the explorer must
+        # not materialize one enriched view per asset on the GUI thread. The
+        # SQLite index serves pages + counts instead; the materialized path
+        # below stays exactly as-is for every smaller project.
+        if self._try_paged_catalog_mode(preview_root):
+            _stage('paged_mode')
+            self._emit_data_context()
+            return
         # Catalog enrichment (one batch pass): stage/version/integrity truth,
         # lineage status, governance values for the table rows.
         enricher = self._lifecycle.catalog_enricher()
@@ -579,21 +592,6 @@ class DataPage(QWidget):
             self.project.resources,
             self.project.export_artifacts,
         )
-        # A model reset rebuilds every row view; a stale selection object
-        # (e.g. the pre-edit AssetView of a catalog-only row) would keep
-        # feeding the inspector old data. Re-point the selection at the
-        # CURRENT row object with the same id.
-        if self._selected_asset is not None:
-            selected_id = getattr(self._unwrap_asset(self._selected_asset), "id", None)
-            if selected_id is not None:
-                for row in range(self.asset_table.model.rowCount()):
-                    current = self.asset_table.model.asset_at(row)
-                    if current is not None and getattr(
-                        self._unwrap_asset(current), "id", None
-                    ) == selected_id:
-                        self._selected_asset = current
-                        self._selected_assets = [current]
-                        break
 
     def _trash_view_active(self) -> bool:
         """True when the navigation tree's 回收站 filter is active."""
@@ -602,6 +600,107 @@ class DataPage(QWidget):
         except Exception:
             return False
         return getattr(query, "node_type", "") == "trash"
+
+    # ------------------------------------------------------------------
+    # Paged catalog mode (P0-B large-project fast path)
+    # ------------------------------------------------------------------
+
+    def _paged_provider(self, project_root):
+        """A SQL page provider over the open catalog index, or None."""
+        service = self._lifecycle.catalog_service()
+        index = getattr(service, "index", None) if service is not None else None
+        if index is None:
+            return None
+        from paleo_workbench.ui.pages.paged_asset_model import CatalogPageProvider
+
+        return CatalogPageProvider(index, project_root)
+
+    def _try_paged_catalog_mode(self, project_root) -> bool:
+        """Serve the explorer from SQL pages when the catalog is large.
+
+        Enters paged mode only when the non-trashed catalog asset count
+        exceeds :data:`PAGED_MODE_THRESHOLD`; in that regime the legacy
+        resources/artifacts are catalog projections (idempotent migration)
+        so the paged table still lists them. Tree badges come from index
+        aggregates. Integrity/entity smart views are unmappable and fall
+        back to the materialized path. Returns True when paged mode served
+        this refresh.
+        """
+        from paleo_workbench.ui.pages.paged_asset_model import PAGED_MODE_THRESHOLD
+
+        provider = self._paged_provider(project_root)
+        if provider is None:
+            return False
+        try:
+            total = provider.total()
+        except Exception:
+            return False
+        if total < PAGED_MODE_THRESHOLD:
+            return False
+        try:
+            self.asset_table.update_paged(provider)
+        except Exception:
+            logger.debug("paged catalog mode failed; falling back", exc_info=True)
+            return False
+        self._apply_paged_tree_counts(project_root, total)
+        self.data_toolbar.set_tag_candidates(self._collect_tag_candidates())
+        self._update_selection_action_state()
+        self._sync_visualization_button()
+        return True
+
+    def _apply_paged_tree_counts(self, project_root, total: int) -> None:
+        """Tree badges from SQL aggregates (+ small legacy side counts)."""
+        provider = self._paged_provider(project_root)
+        aggregates = provider.index.catalog_aggregates() if provider is not None else {}
+        stages = dict(aggregates.get("stages") or {})
+        types = dict(aggregates.get("types") or {})
+        tags = dict(aggregates.get("tags") or {})
+        review = dict(aggregates.get("review_status") or {})
+        # Legacy category leaves still read the (small) resource list.
+        legacy_type_counts = Counter(r.type for r in self._resources)
+        category_counts = {"全部": total}
+        for label, rtype in CATEGORIES.items():
+            if label == "全部":
+                continue
+            category_counts[label] = (
+                legacy_type_counts.get(rtype, 0)
+                or types.get(rtype, 0)
+                if rtype
+                else 0
+            )
+        counts = CatalogCounts(
+            total=total,
+            stages=stages,
+            types=types,
+            tags=tags,
+            integrity={},
+            categories=category_counts,
+            review_status=review,
+        )
+        self.navigation_tree._update_tree_counts(counts)
+
+    def _refresh(self) -> None:
+        self.update_state(
+            dashboard_state(self.project),
+            self.project.resources,
+            self.project.export_artifacts,
+        )
+        # A model reset rebuilds every row view; a stale selection object
+        # (e.g. the pre-edit AssetView of a catalog-only row) would keep
+        # feeding the inspector old data. Re-point the selection at the
+        # CURRENT row object with the same id.
+        active_model = self.asset_table._active_model()
+        if self._selected_asset is not None:
+            selected_id = getattr(self._unwrap_asset(self._selected_asset), "id", None)
+            if selected_id is not None:
+                for row in range(active_model.rowCount()):
+                    current = active_model.asset_at(row)
+                    if current is not None and getattr(
+                        self._unwrap_asset(current), "id", None
+                    ) == selected_id:
+                        self._selected_asset = current
+                        self._selected_assets = [current]
+                        break
 
     def _on_navigation_category_changed(self, category: str) -> None:
         self.asset_table.set_category(category)
