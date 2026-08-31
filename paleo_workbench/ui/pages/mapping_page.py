@@ -476,6 +476,13 @@ class MappingPage(QWidget):
         except Exception as exc:
             QMessageBox.warning(self, "古地理成果", f"成果装配失败: {exc}")
             return
+        finally:
+            # The catalog copies the payload into the managed OUTPUT store;
+            # the staging file must not linger in /tmp.
+            try:
+                staged.unlink(missing_ok=True)
+            except OSError:
+                pass
         QMessageBox.information(
             self,
             "古地理成果",
@@ -586,6 +593,7 @@ class MappingPage(QWidget):
                 if not self.save_draft():
                     document = previous
         self._active_document = document
+        self._bind_composition_main_map(document)
         if document is not previous:
             self._presentation_dirty = False
         self.layer_tree.set_documents(documents)
@@ -650,6 +658,17 @@ class MappingPage(QWidget):
         self.load_project(self._project, project_crs=self._project_crs)
         self.contour_drafts_updated.emit()
         self._sync_composition_bindings()
+
+    def _bind_composition_main_map(self, document) -> None:
+        """Keep the composition panel's MAIN_MAP bound to the active map
+        document (P1-D: factor layers reach the professional layout through
+        a live binding, not exported copies)."""
+        panel = getattr(self, "composition_panel", None)
+        if panel is not None and document is not None:
+            try:
+                panel.set_main_map(document)
+            except Exception:
+                pass
 
     def _sync_composition_bindings(self) -> None:
         """Resolve the composition's declarative data bindings from the
@@ -1760,6 +1779,7 @@ class MappingPage(QWidget):
                     self.layer_tree.set_active_document(self._active_document)
                     return
         self._active_document = document
+        self._bind_composition_main_map(document)
         self._native_factor_scene = None
         self._show_legacy_layer_tree()
         if scene is not None:

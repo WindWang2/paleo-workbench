@@ -33,7 +33,7 @@ def test_single_toolbar_strip_carries_every_action(qtbot) -> None:
         action.objectName().removeprefix("MapPanelMenu:")
         for action in menu_button.menu().actions()
     }
-    assert keys == {"layers", "reference", "chrome", "bottom"}
+    assert keys == {"layers", "reference", "chrome", "composer", "bottom"}
 
 
 def test_default_panel_visibility(qtbot) -> None:

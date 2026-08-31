@@ -337,6 +337,27 @@ class AppShell(QWidget):
         show_cursor = getattr(map_page, "show_spatial_cursor", None)
         if callable(show_cursor):
             self.view_coordination.set_spatial_cursor_sink(show_cursor)
+        # Scenario B 3D half: the joint scene's slices follow the cursor too
+        # (the IL/XL focus, sample only when the TWT maps onto the volume).
+        from paleo_workbench.ui.navigation import PAGE_INDEX_GEOMODEL
+
+        geo_page = self.page_stack.widget(PAGE_INDEX_GEOMODEL)
+        focus_3d = getattr(geo_page, "focus_seismic_position", None)
+        if callable(focus_3d):
+            # Both consumers run from the same publish; the seismic panel
+            # keeps its own debounce on the producer side.
+            existing = self.view_coordination._seismic_focus_sink
+
+            def _focus_both(il, xl, twt=None, _existing=existing, _focus3d=focus_3d):
+                if callable(_existing):
+                    _existing(il, xl, twt)
+                _focus3d(il, xl, twt)
+
+            self.view_coordination.set_seismic_focus_sink(_focus_both)
+        # Scenario D: the active horizon identity reaches the 3D workbench.
+        highlight_interp = getattr(geo_page, "highlight_interpretation", None)
+        if callable(highlight_interp):
+            self.view_coordination.set_horizon_sink(highlight_interp)
 
     def data_page_widget(self):
         return self.page_stack.widget(PAGE_INDEX_DATA)

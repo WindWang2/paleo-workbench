@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from paleo_workbench.viz.horizon_sculpting import SculptableHorizonMesh, SparseDeltaPatch
+from paleo_workbench.viz.horizon_sculpting import SculptableHorizonMesh
 from paleo_workbench.viz.interpretation_artifact import scientific_fingerprint
 
 
@@ -149,13 +149,7 @@ class HorizonInterpretationDraft:
         if len(rows_arr) == 0:
             return self.working_z()
         flat = rows_arr * ncols + cols_arr
-        old_z = self._mesh.vertices[flat, 2].copy()
-        new_z = values_arr.copy()
-        self._mesh.vertices[flat, 2] = new_z
-        self._mesh._undo_stack.append(
-            SparseDeltaPatch(indices=flat, old_z=old_z, new_z=new_z)
-        )
-        self._mesh._redo_stack.clear()
+        self._mesh.set_heights(flat, values_arr)
         self.generation += 1
         self.refresh_status()
         return self.working_z()

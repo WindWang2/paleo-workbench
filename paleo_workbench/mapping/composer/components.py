@@ -268,6 +268,18 @@ class CompositionEditSession:
 
     # -- z-order -------------------------------------------------------------
 
+    def set_element_visible(self, element_id: str, visible: bool) -> None:
+        element = self._require(element_id)
+        old = element.visible
+
+        def apply_visibility() -> None:
+            element.visible = bool(visible)
+
+        def revert_visibility() -> None:
+            element.visible = old
+
+        self._execute("visibility", apply_fn=apply_visibility, revert_fn=revert_visibility)
+
     def bring_to_front(self, element_id: str) -> None:
         element = self._require(element_id)
         top = max((e.z_index for e in self.document.elements), default=0)
@@ -387,3 +399,31 @@ def bind_template(
         element.properties.update(copy.deepcopy(updates))
         resolved += 1
     return resolved
+
+def bind_map_documents(
+    document: MapCompositionDocument,
+    documents_by_id: Mapping[Any, Any],
+) -> int:
+    """Re-bind live MapDocuments into MAIN_MAP/INSET_MAP elements after a
+    ``from_dict`` round-trip.
+
+    Serialization reduces live map documents to reference stubs (id +
+    layer_count) — data is bound, never silently embedded. The host resolves
+    the stub ids against its open documents here; unresolvable stubs are
+    left in place (the element honestly renders its unbound placeholder).
+    Returns the number of re-bound elements.
+    """
+    rebound = 0
+    for element in document.elements:
+        if element.element_type not in (
+            ElementType.MAIN_MAP,
+            ElementType.INSET_MAP,
+        ):
+            continue
+        stub = element.properties.get("map_document")
+        if isinstance(stub, Mapping) and stub.get("__ref__") == "map_document":
+            live = documents_by_id.get(stub.get("id"))
+            if live is not None:
+                element.properties["map_document"] = live
+                rebound += 1
+    return rebound

@@ -76,6 +76,23 @@ class SculptableHorizonMesh:
 
         return self.vertices
 
+    def set_heights(self, flat_indices: np.ndarray, new_z: np.ndarray) -> None:
+        """Write vertex heights at flat indices as ONE undoable patch.
+
+        The single sanctioned mutation path for picked values (horizon
+        interpretation writes): callers never touch the undo stacks.
+        """
+        indices = np.asarray(flat_indices, dtype=np.int64)
+        values = np.asarray(new_z, dtype=np.float32)
+        if len(indices) == 0:
+            return
+        old_z = self.vertices[indices, 2].copy()
+        self.vertices[indices, 2] = values
+        self._undo_stack.append(
+            SparseDeltaPatch(indices=indices, old_z=old_z, new_z=values.copy())
+        )
+        self._redo_stack.clear()
+
     def smooth_anneal(self, iterations: int = 1) -> np.ndarray:
         """Apply laplacian smooth annealing to mesh height values.
 

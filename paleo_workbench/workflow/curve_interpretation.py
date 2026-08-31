@@ -137,9 +137,15 @@ def apply_curve_operation(
         las.curves[curve].data = new_values
     del new_values
 
-    # Stage the derived payload in a temp sibling; create_derived moves it
-    # into the managed derived store and registers the run atomically.
-    staged = input_path.parent / f"{input_path.stem}_{operation}_derived.las"
+    # Stage the derived payload OUTSIDE the managed store (a RAW version's
+    # directory is immutable); create_derived copies it into the derived
+    # store, and the staging file is removed on every path.
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".las", delete=False, encoding="utf-8"
+    ) as handle:
+        staged = Path(handle.name)
     _ensure_writable_well_header(las)
     las.write(str(staged))
     try:
@@ -153,18 +159,18 @@ def apply_curve_operation(
             type="well_log",
             format="las",
         )
-    except Exception:
+    finally:
         try:
             staged.unlink(missing_ok=True)
         except OSError:
             pass
-        raise
 
-    run_id = ""
-    for run in service.document.runs:
-        if derived.id in (run.output_version_ids or ()):
-            run_id = run.id
-            break
+    run_id = str(getattr(derived, "run_id", "") or "")
+    if not run_id:
+        for run in service.document.runs:
+            if derived.id in (run.output_version_ids or ()):
+                run_id = run.id
+                break
     return CurveInterpretationResult(
         operation=operation,
         curve=curve,

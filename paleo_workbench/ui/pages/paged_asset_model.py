@@ -280,6 +280,10 @@ class PagedAssetTableModel(AssetTableModel):
         self._fetched: list[AssetView] = []
         self._total: int = 0
 
+    @property
+    def provider(self) -> CatalogPageProvider:
+        return self._provider
+
     # -- configuration -----------------------------------------------------
 
     def refresh(self) -> None:

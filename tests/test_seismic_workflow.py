@@ -22,9 +22,14 @@ def test_workbench_controls_emit_mode_attribute_and_auto_tie(qtbot):
     panel.well_tie_toggled.connect(ties.append)
 
     panel.mode_combo.setCurrentText("wiggle")
-    attributes.attribute_tree.itemClicked.emit(
-        attributes.attribute_tree.topLevelItem(0).child(1), 0
-    )
+    envelope_item = None
+    tree = attributes.attribute_tree
+    for g in range(tree.topLevelItemCount()):
+        for c in range(tree.topLevelItem(g).childCount()):
+            if tree.topLevelItem(g).child(c).text(0) == "包络":
+                envelope_item = tree.topLevelItem(g).child(c)
+    assert envelope_item is not None
+    tree.itemClicked.emit(envelope_item, 0)
     panel.well_tie_btn.setChecked(True)
 
     assert modes[-1] == "wiggle"

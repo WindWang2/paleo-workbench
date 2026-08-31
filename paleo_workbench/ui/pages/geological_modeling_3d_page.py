@@ -2207,6 +2207,61 @@ class GeologicalModeling3DPage(QWidget):
         self._rebuild_joint_well_combos(well_id, current_b)
         self._probe_highlight_well(well_id)
 
+    def focus_seismic_position(self, il: int, xl: int, twt: float | None = None) -> bool:
+        """Scenario B sink: navigate the joint 3D slices to a survey position.
+
+        TWT converts to a sample index through the loaded volume's sampling
+        when available; without it only the IL/XL slices move (never an
+        invented sample). Safe no-op when the joint widget is not mounted.
+        """
+        widget = getattr(self, "_joint_widget", None)
+        set_slices = getattr(widget, "set_slice_indices", None)
+        if not callable(set_slices):
+            return False
+        sample = 0
+        if twt is not None:
+            renderer = getattr(widget, "renderer", None)
+            volume = renderer.volume_data() if renderer is not None else None
+            meta = getattr(self._joint_host, "survey_meta", None) or {}
+            dt_ms = float(meta.get("dt_ms") or 0.0)
+            t0_ms = float(meta.get("t0_ms") or 0.0)
+            if volume is not None and dt_ms > 0.0:
+                sample = int(max(0, (float(twt) - t0_ms) / dt_ms))
+                sample = min(sample, int(volume.shape[2]) - 1)
+        try:
+            set_slices(int(il), int(xl), int(sample))
+        except Exception:
+            return False
+        return True
+
+    def highlight_interpretation(self, interpretation_id: str) -> bool:
+        """Scenario D sink: reflect the active horizon identity in the 3D
+        workbench by preselecting its stratal combo entry when present."""
+        combos = (
+            getattr(self, "_stratal_top_combo", None),
+            getattr(self, "_stratal_bot_combo", None),
+        )
+        if all(c is None for c in combos):
+            return False
+        matched = False
+        for combo in combos:
+            if combo is None:
+                continue
+            for i in range(combo.count()):
+                data = combo.itemData(i)
+                if (
+                    isinstance(data, (tuple, list))
+                    and len(data) == 2
+                    and data[0] == "interp"
+                    and data[1]
+                    and interpretation_id
+                    and interpretation_id in str(data[1])
+                ):
+                    combo.setCurrentIndex(i)
+                    matched = True
+                    break
+        return matched
+
     def _probe_highlight_well(self, well_name: str) -> bool:
         """Move the 3D probe marker onto a well's mid-trajectory point."""
         scene = getattr(self._joint_host, "scene", None)

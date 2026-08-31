@@ -179,6 +179,12 @@ class TestTablePagedMode:
         table.update_paged(provider)
         assert table.in_paged_mode()
         assert table._active_model().rowCount() == 100_000
+        # A SECOND refresh with a (rebuilt) provider must stay in paged mode
+        # — the mode switch used to crash on the missing provider attribute
+        # and silently fall back to full materialization.
+        table.update_paged(CatalogPageProvider(index))
+        assert table.in_paged_mode()
+        assert table._active_model().rowCount() == 100_000
         table.update_assets([], [])
         assert not table.in_paged_mode()
 

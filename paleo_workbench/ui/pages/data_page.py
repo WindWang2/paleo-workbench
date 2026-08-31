@@ -586,13 +586,6 @@ class DataPage(QWidget):
         _stage('toolbar')
         self._emit_data_context()
 
-    def _refresh(self) -> None:
-        self.update_state(
-            dashboard_state(self.project),
-            self.project.resources,
-            self.project.export_artifacts,
-        )
-
     def _trash_view_active(self) -> bool:
         """True when the navigation tree's 回收站 filter is active."""
         try:

@@ -18,6 +18,7 @@ No page ever connects directly to another page for selection sync anymore.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from PySide6.QtCore import QObject
 
@@ -77,7 +78,9 @@ class ViewCoordinationController(QObject):
 
         Called when a project document is opened or switched. Re-binding is a
         full replacement: the previous project's wells are unregistered first
-        so no well ever leaks across projects.
+        so no well ever leaks across projects. Time-depth calibration assets
+        (role ``time_depth``) are parsed and attached to their wells so the
+        scenario-C depth→time route has a real production author.
         """
         self.clear_project()
         for well in list(getattr(project, "wells", None) or []):
@@ -85,10 +88,110 @@ class ViewCoordinationController(QObject):
         survey = self._first_seismic_survey(project)
         if survey is not None:
             self._configure_hub_seismic_geometry(survey)
+        calibrations = self._register_time_depth_calibrations(project)
         logger.debug(
-            "bind_project: registered %d well(s) into the coordinate hub",
+            "bind_project: registered %d well(s) and %d time-depth "
+            "calibration(s) into the coordinate hub",
             len(self._bound_well_ids),
+            calibrations,
         )
+
+    def _register_time_depth_calibrations(self, project) -> int:
+        """Parse time_depth assets into hub calibrations (scenario C author).
+
+        Only assets carrying the ``time_depth`` role enter calibration — a
+        plain file with a similar name is not an authority. Unparseable
+        tables are skipped with a debug log, never guessed.
+        """
+        from paleo_workbench.viz.coordinate_hub import TimeDepthCalibration
+
+        registered = 0
+        td_assets = self._time_depth_assets(project)
+        for well_name, path in td_assets:
+            try:
+                from paleo_workbench.viz.joint_well_parsers import parse_td_table
+
+                table = parse_td_table(path, well_name=well_name)
+            except Exception:
+                logger.debug("time-depth table %s failed to parse", path, exc_info=True)
+                continue
+            if table is None:
+                continue
+            pairs = list(zip(table.md_m, table.time_ms))
+            try:
+                calibration = TimeDepthCalibration.from_pairs(
+                    str(well_name), pairs, provenance=f"td-table:{path.name}"
+                )
+            except ValueError:
+                logger.debug(
+                    "time-depth table %s rejected (non-monotonic)", path
+                )
+                continue
+            self.coordinate_hub.set_time_depth_calibration(calibration)
+            registered += 1
+        return registered
+
+    @staticmethod
+    def _time_depth_assets(project):
+        """(well_name, path) pairs for time_depth assets, hub-keyed by well name.
+
+        Resolution order: WorkArea EntityAssetLinks (well entity display name
+        + role time_depth) falling back to legacy ResourceItems typed
+        ``time_depth`` keyed by their own file stem.
+        """
+        results: list[tuple[str, str]] = []
+        seen_paths: set[str] = set()
+        for link in list(getattr(project, "entity_asset_links", None) or []):
+            if str(getattr(link, "role", "")) != "time_depth":
+                continue
+            if getattr(link, "unresolved", False):
+                continue
+            well_name = ""
+            for well in list(getattr(project, "wells", None) or []):
+                if str(getattr(well, "id", "")) == str(getattr(link, "entity_id", "")):
+                    well_name = str(getattr(well, "name", "") or "")
+                    break
+            path = self._resolve_asset_path(project, getattr(link, "asset_id", ""))
+            if path and well_name:
+                key = str(path)
+                if key not in seen_paths:
+                    seen_paths.add(key)
+                    results.append((well_name, path))
+        for resource in list(getattr(project, "resources", None) or []):
+            if str(getattr(resource, "type", "")) != "time_depth":
+                continue
+            path = str(getattr(resource, "path", "") or "")
+            if not path:
+                continue
+            key = str(path)
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            name = str(getattr(resource, "name", "") or "") or Path(path).stem
+            results.append((name, path))
+        return results
+
+    @staticmethod
+    def _resolve_asset_path(project, asset_id: str) -> str | None:
+        """Best-effort payload path for a catalog asset id via the catalog."""
+        try:
+            from paleo_workbench.catalog import get_catalog
+
+            cat = get_catalog()
+        except Exception:
+            return None
+        if cat is None:
+            return None
+        try:
+            for asset in cat.document.assets:
+                if str(asset.id) == str(asset_id):
+                    version_id = asset.current_version_id
+                    for version in cat.document.versions:
+                        if version.id == version_id:
+                            return str(cat.resolve_path(version))
+        except Exception:
+            return None
+        return None
 
     def clear_project(self) -> None:
         """Unregister every project-bound well and reset the seismic grid.
@@ -569,8 +672,15 @@ class ViewCoordinationController(QObject):
                 cursor,
             )
             return
+        # ``seismic_well_md`` is a constant-velocity APPROXIMATION kept for
+        # readout context only — calibrated depth↔time goes through
+        # TimeDepthCalibration (publish_depth_cursor), never this value.
         self.selection_context.update(
-            custom_attributes={"seismic_well_id": well_id, "seismic_well_md": md}
+            custom_attributes={
+                "seismic_well_id": well_id,
+                "seismic_well_md": md,
+                "seismic_well_md_is_approximate": True,
+            }
         )
         if self._well_log_page is not None:
             setter = getattr(self._well_log_page, "set_selected_well", None)

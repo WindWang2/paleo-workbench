@@ -26,7 +26,11 @@ class SelectionState:
     ``DomainEntity``/interpretation ids the project store and the catalog
     versions use — never display names, so every view resolves one object
     through one key (scenario D). ``spatial_cursor`` is a map-space (x, y)
-    position; ``depth_cursor`` is ``(well_id, md_m)`` from the well-log side.
+    position; ``depth_cursor`` is ``(well_key, md_m)`` from the well-log
+    side, where *well_key* is the cross-view well key registered in the
+    CoordinateTransformHub (the well's display name today — the established
+    #1029 key; unique within one project, and the ONLY key every view
+    publishes). ``active_well_id`` follows the same key convention.
     """
 
     active_well_id: str | None = None

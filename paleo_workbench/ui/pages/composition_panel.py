@@ -295,6 +295,28 @@ class CompositionPanel(QFrame):
         self._refresh_preview()
         return resolved
 
+    def set_main_map(self, map_document) -> bool:
+        """Bind the live map document into the composition's MAIN_MAP.
+
+        The data connection is a BINDING, not an undoable content edit —
+        the layout history owns geometry/properties; the data source is the
+        host's current document. Unbind with ``map_document=None``.
+        """
+        session = self._require_session()
+        if session is None:
+            return False
+        target = None
+        for element in session.document.elements:
+            if element.element_type is ElementType.MAIN_MAP:
+                target = element
+                break
+        if target is None:
+            target = session.add_element(ElementType.MAIN_MAP)
+        target.properties["map_document"] = map_document
+        self._refresh_preview()
+        self.composition_changed.emit(session.revision)
+        return True
+
     # ------------------------------------------------------------------
     # element operations
     # ------------------------------------------------------------------
@@ -365,11 +387,13 @@ class CompositionPanel(QFrame):
             None,
         )
         if title_elem is not None:
-            title_elem.properties["text"] = title
+            session.configure_element(title_elem.id, {"text": title})
         self._refresh_preview()
         self.composition_changed.emit(session.revision)
 
     def _apply_geometry(self, field: str, value: float) -> None:
+        """Move/scale through the edit session — never a raw field write,
+        so every geometry change stays undoable (component contract)."""
         session = self._require_session()
         if session is None:
             return
@@ -379,14 +403,18 @@ class CompositionPanel(QFrame):
         element = session.document.get_element(element_id)
         if element is None:
             return
-        if field == "x":
-            element.x_mm = float(value)
-        elif field == "y":
-            element.y_mm = float(value)
-        elif field == "w":
-            element.width_mm = max(1.0, float(value))
-        elif field == "h":
-            element.height_mm = max(1.0, float(value))
+        if field in ("x", "y"):
+            session.move_element(
+                element_id,
+                float(value) if field == "x" else element.x_mm,
+                float(value) if field == "y" else element.y_mm,
+            )
+        else:
+            session.scale_element(
+                element_id,
+                max(1.0, float(value)) if field == "w" else element.width_mm,
+                max(1.0, float(value)) if field == "h" else element.height_mm,
+            )
         self._refresh_preview()
         self.composition_changed.emit(session.revision)
 
@@ -484,7 +512,7 @@ class CompositionPanel(QFrame):
         back = menu.addAction("置底")
         chosen = menu.exec(self.element_list.mapToGlobal(pos))
         if chosen is toggle:
-            element.visible = not element.visible
+            session.set_element_visible(element_id, not element.visible)
             self._refresh_all()
         elif chosen is duplicate:
             self.session.duplicate_element(element_id)
