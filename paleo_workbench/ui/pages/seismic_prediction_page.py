@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Signal, Slot
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
-    QComboBox,
-    QHBoxLayout,
-    QLabel,
     QMessageBox,
+    QSplitter,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -24,13 +23,58 @@ from paleo_workbench.prediction.providers import (
     ensure_default_models,
 )
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.dock_manager import dock_manager
+from paleo_workbench.ui.layout_persistence import LayoutPersistence
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+from paleo_workbench.ui.panel_float_controller import FloatController
 from paleo_workbench.ui.pages.seismic_attribute_panel import SeismicAttributePanel
 from paleo_workbench.ui.pages.seismic_context_toolbar import SeismicContextToolbar
 from paleo_workbench.ui.pages.seismic_control_panel import SeismicControlPanel
 from paleo_workbench.ui.pages.seismic_view_panel import SeismicViewPanel
 from paleo_workbench.viz.prediction_helpers import active_prediction_task
 from paleo_workbench.workflow.stratigraphy import active_target_horizon
+
+# QWIDGETSIZE_MAX: lifts a side panel's setFixedWidth upper bound (the
+# designed width stays as the minimum) so the splitter handle can resize it.
+_PANEL_MAX_WIDTH = 16_777_215
+
+#: Delay before a splitter drag is persisted (avoid a QSettings sync per tick).
+_DOCKED_SIZES_DELAY_MS = 400
+
+
+class PanelFloatButton(QToolButton):
+    """Corner button floating one side panel via a FloatController.
+
+    Docked side of the FloatingPanel ⇲ dock-back chrome: pinned to the
+    panel's top-right corner through an event filter and hidden while the
+    panel is afloat (the floating window carries its own dock-back button).
+    """
+
+    def __init__(self, key: str, panel: QWidget, controller: FloatController):
+        super().__init__(panel)
+        self._key = key
+        self._panel = panel
+        self._controller = controller
+        self.setObjectName("PanelFloatButton")
+        self.setText("⇱")
+        self.setToolTip("浮动面板 (Float panel)")
+        self.setFixedSize(18, 18)
+        self.clicked.connect(lambda: self._controller.toggle(self._key))
+        panel.installEventFilter(self)
+        controller.float_changed.connect(self._on_float_changed)
+        self._reposition()
+
+    def _reposition(self) -> None:
+        self.move(self._panel.width() - self.width() - 4, 2)
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 (Qt override)
+        if obj is self._panel and event.type() == QEvent.Type.Resize:
+            self._reposition()
+        return False
+
+    def _on_float_changed(self, key: str, floating: bool) -> None:
+        if key == self._key:
+            self.setVisible(not floating)
 
 
 class SeismicPredictionPage(QWidget):
@@ -39,7 +83,7 @@ class SeismicPredictionPage(QWidget):
     prediction_updated = Signal()
     send_to_mapping_requested = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, persistence: LayoutPersistence | None = None):
         super().__init__(parent)
         self.setObjectName("SeismicPredictionPage")
         self._project = None
@@ -67,19 +111,50 @@ class SeismicPredictionPage(QWidget):
         )
         outer.addWidget(self.context_toolbar)
 
-        content = QHBoxLayout()
-        content.setSpacing(tokens.SPACE_4)
+        self.content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.content_splitter.setObjectName("SeismicPredictionSplitter")
+        self.content_splitter.setChildrenCollapsible(False)
 
         self.attribute_panel = SeismicAttributePanel()
-        content.addWidget(self.attribute_panel, 0)
+        # 属性 | 视图 | 控制: SeismicViewPanel stays the stretchy center.
+        self.attribute_panel.setMaximumWidth(_PANEL_MAX_WIDTH)
+        self.content_splitter.addWidget(self.attribute_panel)
 
         self.view_panel = SeismicViewPanel()
-        content.addWidget(self.view_panel, 1)
+        self.content_splitter.addWidget(self.view_panel)
 
         self.control_panel = SeismicControlPanel()
-        content.addWidget(self.control_panel, 0)
+        self.control_panel.setMaximumWidth(_PANEL_MAX_WIDTH)
+        self.content_splitter.addWidget(self.control_panel)
 
-        outer.addLayout(content, 1)
+        self.content_splitter.setStretchFactor(0, 0)
+        self.content_splitter.setStretchFactor(1, 1)
+        self.content_splitter.setStretchFactor(2, 0)
+        self.content_splitter.setSizes([280, 900, 280])
+
+        outer.addWidget(self.content_splitter, 1)
+
+        # M6: attribute/control float through the shared FloatController. The
+        # seismic view is never registered — reparenting its GL viewport
+        # between windows is the known fragile case.
+        self._float_persistence = (
+            persistence if persistence is not None else LayoutPersistence()
+        )
+        self._floatable: dict[str, QWidget] = {}
+        self.float_controller = FloatController(
+            resolver=self._floatable.get,
+            persistence=self._float_persistence,
+            parent=self,
+        )
+        self._make_floatable("seismic:attribute", self.attribute_panel, "属性面板")
+        self._make_floatable("seismic:control", self.control_panel, "预测控制")
+        self._float_sizes_timer = QTimer(self)
+        self._float_sizes_timer.setSingleShot(True)
+        self._float_sizes_timer.setInterval(_DOCKED_SIZES_DELAY_MS)
+        self._float_sizes_timer.timeout.connect(self._persist_docked_sizes)
+        self.content_splitter.splitterMoved.connect(self._on_splitter_moved)
+        for key in self._floatable:
+            self.float_controller.restore_saved(key)
 
         self.context_toolbar.run_requested.connect(self._on_run)
         self.context_toolbar.demo_requested.connect(self._on_demo)
@@ -91,6 +166,22 @@ class SeismicPredictionPage(QWidget):
         self.attribute_panel.attribute_changed.connect(self._on_attribute)
         self.control_panel.well_tie_toggled.connect(self.view_panel.set_well_tie_enabled)
         self.view_panel.view_ready.connect(self._on_view_ready)
+
+    def _make_floatable(self, key: str, panel: QWidget, title: str) -> None:
+        """Register a side panel for float/dock and give it a float button."""
+        dock_manager.register_panel(key, title)
+        self._floatable[key] = panel
+        PanelFloatButton(key, panel, self.float_controller)
+
+    def _on_splitter_moved(self, *_pos: int) -> None:
+        self._float_sizes_timer.start()
+
+    def _persist_docked_sizes(self) -> None:
+        """Persist the splitter distribution for every docked side panel."""
+        sizes = list(self.content_splitter.sizes())
+        for key, panel in self._floatable.items():
+            if panel.parentWidget() is self.content_splitter:
+                self._float_persistence.save_docked_sizes(key, sizes)
 
     def set_project(self, project) -> None:
         if project is not self._project:

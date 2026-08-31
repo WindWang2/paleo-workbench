@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 _LOG = logging.getLogger(__name__)
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -29,7 +29,9 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSlider,
+    QSplitter,
     QStackedLayout,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -38,7 +40,10 @@ from geoviz import FormationTop
 
 from paleo_workbench.resources.export_service import default_export_dir
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.dock_manager import dock_manager
+from paleo_workbench.ui.layout_persistence import LayoutPersistence
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+from paleo_workbench.ui.panel_float_controller import FloatController
 from paleo_workbench.ui.pages.correlation_load_worker import CorrelationLoadWorker
 from paleo_workbench.ui.pages.cross_well_export_dialog import CrossWellExportDialog
 from paleo_workbench.ui.pages.dtw_propagation_worker import (
@@ -62,13 +67,51 @@ from paleo_workbench.workflow.stratigraphy_correlation import (
 
 BackendName = Literal["legacy", "engine"]
 
+#: Delay before a splitter drag is persisted (avoid a QSettings sync per tick).
+_DOCKED_SIZES_DELAY_MS = 400
+
+
+class PanelFloatButton(QToolButton):
+    """Corner button floating one side panel via a FloatController.
+
+    Docked side of the FloatingPanel ⇲ dock-back chrome: pinned to the
+    panel's top-right corner through an event filter and hidden while the
+    panel is afloat (the floating window carries its own dock-back button).
+    """
+
+    def __init__(self, key: str, panel: QWidget, controller: FloatController):
+        super().__init__(panel)
+        self._key = key
+        self._panel = panel
+        self._controller = controller
+        self.setObjectName("PanelFloatButton")
+        self.setText("⇱")
+        self.setToolTip("浮动面板 (Float panel)")
+        self.setFixedSize(18, 18)
+        self.clicked.connect(lambda: self._controller.toggle(self._key))
+        panel.installEventFilter(self)
+        controller.float_changed.connect(self._on_float_changed)
+        self._reposition()
+
+    def _reposition(self) -> None:
+        self.move(self._panel.width() - self.width() - 4, 2)
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 (Qt override)
+        if obj is self._panel and event.type() == QEvent.Type.Resize:
+            self._reposition()
+        return False
+
+    def _on_float_changed(self, key: str, floating: bool) -> None:
+        if key == self._key:
+            self.setVisible(not floating)
+
 
 class StratigraphyCorrelationPage(QWidget):
     """Multi-well stratigraphic correlation using geo-viz CrossWell engine."""
 
     section_updated = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, persistence: LayoutPersistence | None = None):
         super().__init__(parent)
         self.setObjectName("StratigraphyCorrelationPage")
         self._project = None
@@ -103,13 +146,14 @@ class StratigraphyCorrelationPage(QWidget):
         )
         outer.setSpacing(tokens.SPACE_4)
 
-        content = QHBoxLayout()
-        content.setSpacing(tokens.SPACE_4)
+        self.content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.content_splitter.setObjectName("StratigraphyCorrelationSplitter")
+        self.content_splitter.setChildrenCollapsible(False)
 
         # Left: well picker
         self.well_panel = QFrame()
         self.well_panel.setObjectName("StratWellPanel")
-        self.well_panel.setFixedWidth(240)
+        self.well_panel.setMinimumWidth(200)
         left = QVBoxLayout(self.well_panel)
         left.setContentsMargins(
             tokens.PANEL_PADDING,
@@ -135,7 +179,7 @@ class StratigraphyCorrelationPage(QWidget):
         self.select_bound_btn.setObjectName("SecondaryButton")
         self.select_bound_btn.clicked.connect(self._select_bound_wells)
         left.addWidget(self.select_bound_btn)
-        content.addWidget(self.well_panel, 0)
+        self.content_splitter.addWidget(self.well_panel)
 
         # Center: CrossWell host
         self.cross_host = CrossWellHost()
@@ -266,12 +310,12 @@ class StratigraphyCorrelationPage(QWidget):
         self.view_stack.addWidget(self.engine_host)  # 1 engine
 
         center_layout.addWidget(self.view_stack_host, 1)
-        content.addWidget(center, 1)
+        self.content_splitter.addWidget(center)
 
         # Right: actions
         self.action_panel = QFrame()
         self.action_panel.setObjectName("StratActionPanel")
-        self.action_panel.setFixedWidth(220)
+        self.action_panel.setMinimumWidth(200)
         right = QVBoxLayout(self.action_panel)
         right.setContentsMargins(
             tokens.PANEL_PADDING,
@@ -329,13 +373,57 @@ class StratigraphyCorrelationPage(QWidget):
         self.clear_btn.setObjectName("SecondaryButton")
         self.clear_btn.clicked.connect(self.clear_section)
         right.addWidget(self.clear_btn)
-        content.addWidget(self.action_panel, 0)
+        self.content_splitter.addWidget(self.action_panel)
         self._correlation_draft = None
         self._project_path: Path | None = None
 
-        outer.addLayout(content, 1)
+        # 井选择 | 剖面 | 操作: cross-section host stays the stretchy center.
+        self.content_splitter.setStretchFactor(0, 0)
+        self.content_splitter.setStretchFactor(1, 1)
+        self.content_splitter.setStretchFactor(2, 0)
+        self.content_splitter.setSizes([260, 940, 260])
+        outer.addWidget(self.content_splitter, 1)
+
+        # M6: the picker/action side panels float through the shared
+        # FloatController; the CrossWellHost center is never registered —
+        # reparenting its GL views between windows is the fragile case.
+        self._float_persistence = (
+            persistence if persistence is not None else LayoutPersistence()
+        )
+        self._floatable: dict[str, QWidget] = {}
+        self.float_controller = FloatController(
+            resolver=self._floatable.get,
+            persistence=self._float_persistence,
+            parent=self,
+        )
+        self._make_floatable("stratigraphy:wells", self.well_panel, "对比井选择")
+        self._make_floatable("stratigraphy:actions", self.action_panel, "对比操作")
+        self._float_sizes_timer = QTimer(self)
+        self._float_sizes_timer.setSingleShot(True)
+        self._float_sizes_timer.setInterval(_DOCKED_SIZES_DELAY_MS)
+        self._float_sizes_timer.timeout.connect(self._persist_docked_sizes)
+        self.content_splitter.splitterMoved.connect(self._on_splitter_moved)
+        for key in self._floatable:
+            self.float_controller.restore_saved(key)
+
         self._probe_engine()
         self._sync_backend_stack()
+
+    def _make_floatable(self, key: str, panel: QWidget, title: str) -> None:
+        """Register a side panel for float/dock and give it a float button."""
+        dock_manager.register_panel(key, title)
+        self._floatable[key] = panel
+        PanelFloatButton(key, panel, self.float_controller)
+
+    def _on_splitter_moved(self, *_pos: int) -> None:
+        self._float_sizes_timer.start()
+
+    def _persist_docked_sizes(self) -> None:
+        """Persist the splitter distribution for every docked side panel."""
+        sizes = list(self.content_splitter.sizes())
+        for key, panel in self._floatable.items():
+            if panel.parentWidget() is self.content_splitter:
+                self._float_persistence.save_docked_sizes(key, sizes)
 
     def set_project(self, project) -> None:
         if project is not self._project and self._load_job.is_running:

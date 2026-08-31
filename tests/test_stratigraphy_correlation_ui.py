@@ -4,11 +4,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSettings, Qt
+from PySide6.QtWidgets import QApplication, QScrollArea, QSplitter
 
 from geoviz import CurveData, WellLogData
 
 from paleo_workbench.project.models import ProjectDocument, ResourceItem
+from paleo_workbench.ui.layout_persistence import LayoutPersistence
 from paleo_workbench.ui.pages.stratigraphy_correlation_page import StratigraphyCorrelationPage
 
 DAT = (
@@ -83,6 +85,59 @@ def test_toolbar_defaults(qtbot):
     assert page.snap_combo.currentData() == "none"
     assert page.tops_visible_box.isChecked()
     assert page.spacing_slider.value() == 150
+
+
+def test_page_uses_resizable_splitter_with_sensible_initial_sizes(qtbot):
+    page = StratigraphyCorrelationPage()
+    qtbot.addWidget(page)
+
+    splitter = page.content_splitter
+    assert isinstance(splitter, QSplitter)
+    assert splitter.objectName() == "StratigraphyCorrelationSplitter"
+    assert splitter.count() == 3
+    assert splitter.widget(0) is page.well_panel
+    assert splitter.widget(2) is page.action_panel
+    # The stretchy center hosts the cross-section view stack.
+    center_widget = splitter.widget(1)
+    assert center_widget is not None
+    assert center_widget.findChild(QScrollArea) is page.scroll_area
+    # setFixedWidth is gone: side panels are resizable around a minimum.
+    assert page.well_panel.minimumWidth() < page.well_panel.maximumWidth()
+    assert page.action_panel.minimumWidth() < page.action_panel.maximumWidth()
+
+    page.resize(1280, 800)
+    page.show()
+    before = splitter.sizes()
+    page.resize(1680, 800)
+    QApplication.processEvents()
+    after = splitter.sizes()
+
+    # 井选择 | 剖面 | 操作: the cross-section host absorbs the extra width.
+    assert before[1] > before[0]
+    assert before[1] > before[2]
+    assert after[1] - before[1] > after[0] - before[0]
+    assert after[1] - before[1] > after[2] - before[2]
+
+
+def test_side_panel_float_round_trip_keeps_cross_host_docked(qtbot, tmp_path):
+    settings = QSettings(str(tmp_path / "layout.ini"), QSettings.Format.IniFormat)
+    page = StratigraphyCorrelationPage(persistence=LayoutPersistence(settings))
+    qtbot.addWidget(page)
+    page.resize(1280, 800)
+    page.show()
+
+    key = "stratigraphy:wells"
+    assert page.float_controller.toggle(key) is True
+    floating = page.float_controller.floating_panel(key)
+    qtbot.addWidget(floating)
+    assert page.well_panel.parentWidget() is floating.content_host
+    # The CrossWellHost never floats — no entry point exists for it and its
+    # view stays docked in the center scroll area.
+    assert "stratigraphy:cross_host" not in page._floatable
+    assert page.scroll_area.widget() is page.cross_host.widget
+
+    assert page.float_controller.toggle(key) is True
+    assert page.content_splitter.widget(0) is page.well_panel
 
 
 def test_pick_mode_toggle(qtbot):

@@ -1,8 +1,10 @@
 import pytest
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtCore import QSettings
+from PySide6.QtWidgets import QApplication, QMessageBox, QSplitter
 
 from paleo_workbench.catalog import CoreCatalogAdapter, DataCatalogService, reset_catalog, set_catalog
 from paleo_workbench.prediction.providers import ensure_default_models
+from paleo_workbench.ui.layout_persistence import LayoutPersistence
 from paleo_workbench.ui.pages.seismic_control_panel import SeismicControlPanel
 from paleo_workbench.ui.pages.seismic_attribute_panel import SeismicAttributePanel
 from paleo_workbench.ui.pages.seismic_context_toolbar import SeismicContextToolbar
@@ -21,6 +23,65 @@ def test_seismic_prediction_page_assembles_analysis_workbench(qtbot):
     assert isinstance(page.view_panel, SeismicViewPanel)
     assert isinstance(page.control_panel, SeismicControlPanel)
     assert not hasattr(page, "task_panel")
+
+
+def test_seismic_prediction_page_uses_resizable_splitter(qtbot):
+    page = SeismicPredictionPage()
+    qtbot.addWidget(page)
+
+    splitter = page.content_splitter
+    assert isinstance(splitter, QSplitter)
+    assert splitter.objectName() == "SeismicPredictionSplitter"
+    assert splitter.count() == 3
+    assert splitter.widget(0) is page.attribute_panel
+    assert splitter.widget(1) is page.view_panel
+    assert splitter.widget(2) is page.control_panel
+    # Side panels keep their design widths as draggable minimums; the
+    # stretchy view panel carries no width clamp of its own.
+    assert page.attribute_panel.minimumWidth() < page.attribute_panel.maximumWidth()
+    assert page.control_panel.minimumWidth() < page.control_panel.maximumWidth()
+    assert page.view_panel.minimumWidth() == 0
+
+
+def test_seismic_prediction_page_splitter_sizes_favor_view(qtbot):
+    page = SeismicPredictionPage()
+    qtbot.addWidget(page)
+    splitter = page.content_splitter
+
+    page.resize(1280, 800)
+    page.show()
+    before = splitter.sizes()
+    page.resize(1680, 800)
+    QApplication.processEvents()
+    after = splitter.sizes()
+
+    # 属性 | 视图 | 控制: the view stays dominant and absorbs extra width.
+    assert before[1] > before[0]
+    assert before[1] > before[2]
+    assert after[1] - before[1] > after[0] - before[0]
+    assert after[1] - before[1] > after[2] - before[2]
+
+
+def test_seismic_prediction_page_side_panel_float_round_trip(qtbot, tmp_path):
+    settings = QSettings(str(tmp_path / "layout.ini"), QSettings.Format.IniFormat)
+    page = SeismicPredictionPage(persistence=LayoutPersistence(settings))
+    qtbot.addWidget(page)
+    page.resize(1280, 800)
+    page.show()
+
+    key = "seismic:attribute"
+    assert page.float_controller.toggle(key) is True
+    assert page.float_controller.is_floating(key)
+    floating = page.float_controller.floating_panel(key)
+    qtbot.addWidget(floating)
+    assert page.attribute_panel.parentWidget() is floating.content_host
+    # The seismic view never floats — no entry point exists for it.
+    assert "seismic:view" not in page._floatable
+    assert page.view_panel.parentWidget() is page.content_splitter
+
+    assert page.float_controller.toggle(key) is True
+    assert not page.float_controller.is_floating(key)
+    assert page.content_splitter.widget(0) is page.attribute_panel
 
 
 def test_seismic_prediction_page_update_delegates(qtbot):

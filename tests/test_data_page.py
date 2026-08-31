@@ -56,6 +56,82 @@ def test_data_page_assembles_management_panels(qtbot):
     assert page.inspector_panel is not None
 
 
+def test_data_workspace_navigation_float_round_trip(qtbot, tmp_path):
+    from PySide6.QtCore import QSettings
+
+    from paleo_workbench.ui.layout_persistence import LayoutPersistence
+
+    settings = QSettings(str(tmp_path / "layout.ini"), QSettings.Format.IniFormat)
+    workspace = DataWorkspace(persistence=LayoutPersistence(settings))
+    qtbot.addWidget(workspace)
+    workspace.resize(1400, 900)
+    workspace.show()
+
+    key = "data:navigation"
+    assert workspace.float_controller.toggle(key) is True
+    floating = workspace.float_controller.floating_panel(key)
+    qtbot.addWidget(floating)
+    assert workspace.navigation_tree.parentWidget() is floating.content_host
+    # The center table/overview stack stays docked — no float entry point.
+    assert "data:center" not in workspace._floatable
+
+    assert workspace.float_controller.toggle(key) is True
+    assert workspace.main_splitter.widget(0) is workspace.navigation_tree
+
+
+def test_data_workspace_reader_and_inspector_float_round_trip(qtbot, tmp_path):
+    from PySide6.QtCore import QSettings
+
+    from paleo_workbench.ui.layout_persistence import LayoutPersistence
+
+    settings = QSettings(str(tmp_path / "layout.ini"), QSettings.Format.IniFormat)
+    workspace = DataWorkspace(persistence=LayoutPersistence(settings))
+    qtbot.addWidget(workspace)
+    workspace.resize(1400, 900)
+    workspace.show()
+
+    for key in ("data:reader", "data:inspector"):
+        assert workspace.float_controller.toggle(key) is True
+    assert workspace.reader_panel.parentWidget().objectName() == "FloatingPanelContent"
+    assert (
+        workspace.inspector_panel.parentWidget().objectName()
+        == "FloatingPanelContent"
+    )
+
+    # Dock back in reverse float order: the controller re-inserts at the
+    # splitter index recorded at float time.
+    for key in ("data:inspector", "data:reader"):
+        assert workspace.float_controller.toggle(key) is True
+    assert workspace.right_splitter.widget(0) is workspace.reader_panel
+    assert workspace.right_splitter.widget(1) is workspace.inspector_panel
+
+
+def test_data_workspace_well_map_float_keeps_center_swap_safe(qtbot, tmp_path):
+    from PySide6.QtCore import QSettings
+
+    from paleo_workbench.ui.layout_persistence import LayoutPersistence
+
+    settings = QSettings(str(tmp_path / "layout.ini"), QSettings.Format.IniFormat)
+    workspace = DataWorkspace(persistence=LayoutPersistence(settings))
+    qtbot.addWidget(workspace)
+    workspace.resize(1400, 900)
+    workspace.show()
+
+    key = "data:well_map"
+    assert workspace.float_controller.toggle(key) is True
+    floating = workspace.float_controller.floating_panel(key)
+    qtbot.addWidget(floating)
+    assert workspace.well_map_panel.parentWidget() is floating.content_host
+
+    # While afloat, the 工区概览 swap must not rip the map out of its window.
+    workspace.show_overview(True)
+    assert workspace.well_map_panel.parentWidget() is floating.content_host
+    workspace.show_overview(False)
+
+    assert workspace.float_controller.toggle(key) is True
+    assert workspace._center_layout.indexOf(workspace.well_map_panel) != -1
+
+
 def test_import_file_dialog_explicitly_offers_geojson(qtbot, monkeypatch):
     page = DataPage(project=ProjectDocument.new("Demo"))
     qtbot.addWidget(page)

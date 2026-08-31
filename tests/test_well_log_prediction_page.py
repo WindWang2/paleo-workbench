@@ -1,8 +1,20 @@
+from PySide6.QtCore import QSettings
+from PySide6.QtWidgets import QApplication, QSplitter
+
+from paleo_workbench.ui.layout_persistence import LayoutPersistence
 from paleo_workbench.ui.pages.prediction_evidence_panel import PredictionEvidencePanel
 from paleo_workbench.ui.pages.prediction_task_panel import PredictionTaskPanel
 from paleo_workbench.ui.pages.well_log_canvas_panel import WellLogCanvasPanel
 from paleo_workbench.ui.pages.well_log_prediction_page import WellLogPredictionPage
 from paleo_workbench.project.models import PredictionTask, ProjectDocument
+
+
+def _tracked_page(qtbot, tmp_path):
+    """A page whose float persistence is bound to a throwaway ini store."""
+    settings = QSettings(str(tmp_path / "layout.ini"), QSettings.Format.IniFormat)
+    page = WellLogPredictionPage(persistence=LayoutPersistence(settings))
+    qtbot.addWidget(page)
+    return page
 
 
 def test_well_log_prediction_page_assembles_three_widgets(qtbot):
@@ -13,6 +25,87 @@ def test_well_log_prediction_page_assembles_three_widgets(qtbot):
     assert isinstance(page.task_panel, PredictionTaskPanel)
     assert isinstance(page.canvas_panel, WellLogCanvasPanel)
     assert isinstance(page.evidence_panel, PredictionEvidencePanel)
+
+
+def test_well_log_prediction_page_uses_resizable_splitter(qtbot):
+    page = WellLogPredictionPage()
+    qtbot.addWidget(page)
+
+    splitter = page.content_splitter
+    assert isinstance(splitter, QSplitter)
+    assert splitter.objectName() == "WellLogPredictionSplitter"
+    assert splitter.count() == 3
+    assert splitter.widget(0) is page.task_panel
+    assert splitter.widget(1) is page.canvas_panel
+    assert splitter.widget(2) is page.evidence_panel
+    # Side panels keep their design width as a draggable minimum.
+    assert page.task_panel.minimumWidth() < page.task_panel.maximumWidth()
+    assert page.evidence_panel.minimumWidth() < page.evidence_panel.maximumWidth()
+
+
+def test_well_log_prediction_page_splitter_sizes_favor_canvas(qtbot):
+    page = WellLogPredictionPage()
+    qtbot.addWidget(page)
+    splitter = page.content_splitter
+
+    page.resize(1280, 800)
+    page.show()
+    before = splitter.sizes()
+    page.resize(1680, 800)
+    QApplication.processEvents()
+    after = splitter.sizes()
+
+    # 任务 | 画布 | 证据: the canvas is dominant and absorbs the extra width.
+    assert before[1] > before[0]
+    assert before[1] > before[2]
+    assert after[1] - before[1] > after[0] - before[0]
+    assert after[1] - before[1] > after[2] - before[2]
+
+
+def test_well_log_prediction_page_side_panel_float_round_trip(qtbot, tmp_path):
+    page = _tracked_page(qtbot, tmp_path)
+    page.resize(1280, 800)
+    page.show()
+
+    key = "well_log:evidence"
+    assert page.float_controller.toggle(key) is True
+    assert page.float_controller.is_floating(key)
+    floating = page.float_controller.floating_panel(key)
+    qtbot.addWidget(floating)
+    assert page.evidence_panel.parentWidget() is floating.content_host
+    # The canvas never floats — no entry point exists for it.
+    assert "well_log:canvas" not in page._floatable
+    assert page.canvas_panel.parentWidget() is page.content_splitter
+
+    assert page.float_controller.toggle(key) is True
+    assert not page.float_controller.is_floating(key)
+    assert page.content_splitter.widget(2) is page.evidence_panel
+
+
+def test_well_log_prediction_page_float_layout_persists(qtbot, tmp_path):
+    ini_path = tmp_path / "layout.ini"
+
+    def build():
+        settings = QSettings(str(ini_path), QSettings.Format.IniFormat)
+        page = WellLogPredictionPage(persistence=LayoutPersistence(settings))
+        qtbot.addWidget(page)
+        return page
+
+    page = build()
+    page.resize(1280, 800)
+    page.show()
+    page.float_controller.toggle("well_log:task")
+    page.content_splitter.moveSplitter(600, 1)
+    page._persist_docked_sizes()
+
+    restored = build()
+    assert restored.float_controller.is_floating("well_log:task")
+    floating = restored.float_controller.floating_panel("well_log:task")
+    qtbot.addWidget(floating)
+    assert restored.task_panel.parentWidget() is floating.content_host
+    # The undocked evidence panel stays docked, at its persisted share.
+    assert not restored.float_controller.is_floating("well_log:evidence")
+    assert restored._float_persistence.load("well_log:evidence").docked_sizes
 
 
 def test_online_prediction_evidence_shows_remote_class_distribution(qtbot):

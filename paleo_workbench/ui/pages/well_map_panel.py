@@ -59,6 +59,7 @@ class WellMapPanel(QFrame):
         header_layout.addWidget(self.count_label)
 
         self._header = header
+        self._header_layout = header_layout
         self.map_page = map_page or ProjectWellMapPage()
 
         layout.addWidget(header)
@@ -84,6 +85,10 @@ class WellMapPanel(QFrame):
     def set_header_visible(self, visible: bool) -> None:
         """Hide the fold header while the map is a page's main content."""
         self._header.setVisible(visible)
+
+    def add_header_button(self, button: QToolButton) -> None:
+        """Insert an extra header action (e.g. the float toggle) before the count."""
+        self._header_layout.insertWidget(self._header_layout.count() - 1, button)
 
     def expand_and_focus(self, well_id: str) -> None:
         """Tree/table → map: unfold the panel and center on the well."""
