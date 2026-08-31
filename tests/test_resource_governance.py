@@ -304,6 +304,58 @@ def test_scheduler_admission_hook_leases_released_on_completion():
         sched.shutdown(wait=True, timeout=5)
 
 
+def test_interactive_lane_meets_delay_budget_behind_long_background_task():
+    """P2-A acceptance: interactive queue delay < 50 ms even while the heavy
+    lane is occupied by a long-running background task."""
+    release_bg = threading.Event()
+    sched = TaskScheduler(max_workers=1, interactive_workers=1)
+    try:
+        bg = sched.submit_callable(
+            lambda ctx: release_bg.wait(timeout=15), kind="seismic.transcode", priority=45
+        )
+        time.sleep(0.05)  # let the heavy lane pick it up
+        delays: list[float] = []
+        handles = []
+        for _ in range(20):
+            t_submit = time.monotonic()
+            h = sched.submit_callable(
+                lambda ctx: None, kind="interactive.query", priority=90
+            )
+            handles.append((t_submit, h))
+            time.sleep(0.005)
+        for t_submit, h in handles:
+            while h.started_at is None and h.state.value == "queued":
+                time.sleep(0.001)
+            delays.append((h.started_at or time.monotonic()) - t_submit)
+        release_bg.set()
+        p99 = max(delays) * 1000.0
+        assert p99 < 50.0, f"interactive p99 {p99:.1f} ms exceeds budget"
+        assert bg.state.value in {"running", "done"}
+    finally:
+        release_bg.set()
+        sched.shutdown(wait=True, timeout=5)
+
+
+def test_interactive_lane_does_not_take_background_work():
+    release_bg = threading.Event()
+    sched = TaskScheduler(max_workers=1, interactive_workers=1)
+    try:
+        # Interactive lane idles; background work still runs on the heavy lane.
+        release = threading.Event()
+        ui = sched.submit_callable(lambda ctx: release.wait(timeout=10), kind="interactive.query")
+        bg = sched.submit_callable(lambda ctx: "bg", kind="maintenance")
+        deadline = time.monotonic() + 5
+        while bg.state.value != "done" and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert bg.state.value == "done"  # heavy lane served it despite busy interactive lane
+        release.set()
+        assert ui.state.value in {"running", "done"}
+    finally:
+        release_bg.set()
+        release.set()
+        sched.shutdown(wait=True, timeout=5)
+
+
 def test_scheduler_admission_hook_deferred_task_runs_after_release():
     state = {"capacity": 0}
     lock = threading.Lock()

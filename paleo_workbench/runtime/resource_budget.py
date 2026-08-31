@@ -44,6 +44,10 @@ class ResourceBudget:
     background_core_ceiling: int = 0  # 0 -> logical_cores - interactive_reserve
     # --- IO column (P2-A) -------------------------------------------------
     io_slots: float = 4.0
+    # OS niceness applied to background scheduler threads (0 disables; only
+    # takes effect on platforms with per-thread nice, i.e. Linux). Under CPU
+    # contention the OS then favours the interactive lane.
+    background_nice: int = 5
     # --- RAM pressure thresholds (P2-A), fractions of total RAM -----------
     ram_pressure_frac: float = 0.85
     ram_critical_frac: float = 0.95

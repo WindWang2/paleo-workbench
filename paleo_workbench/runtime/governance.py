@@ -67,10 +67,29 @@ def ensure_global_governance(
 
         configure_runtime_budget(budget)
     sched = scheduler if scheduler is not None else get_scheduler()
+    sched.set_background_nice(governor.budget.background_nice)
     sched.set_admission(scheduler_admission_hook(governor))
+    _apply_gil_latency_policy()
     logger.debug(
         "global resource governance active (background_cores=%d, io_slots=%.1f)",
         governor.budget.background_cores,
         governor.budget.io_slots,
     )
     return governor
+
+
+def _apply_gil_latency_policy() -> None:
+    """Bound how long a CPU-saturated background thread can hold the GIL.
+
+    CPython's default switch interval (5 ms) lets one pure-Python burn loop
+    delay interactive threads by multiples of 5 ms under contention; 2 ms
+    keeps dispatch tail latencies low at negligible throughput cost. Only
+    ever lowers the interval, never raises a user-chosen tighter value.
+    """
+    import sys
+
+    try:
+        if sys.getswitchinterval() > 0.002:
+            sys.setswitchinterval(0.002)
+    except Exception:  # pragma: no cover - exotic interpreters
+        pass

@@ -72,6 +72,9 @@ CATEGORY_POLICIES: dict[TaskCategory, CategoryPolicy] = {
 
 
 _KIND_PREFIX_MAP: tuple[tuple[str, TaskCategory], ...] = (
+    # Longest prefixes first — "interactive.render" must win over "render".
+    ("interactive.render", TaskCategory.INTERACTIVE_RENDER),
+    ("interactive.query", TaskCategory.INTERACTIVE_QUERY),
     ("seismic.transcode", TaskCategory.TRANSCODE),
     ("seismic.attribute", TaskCategory.ATTRIBUTE),
     ("prediction.inference", TaskCategory.INFERENCE),
@@ -83,6 +86,7 @@ _KIND_PREFIX_MAP: tuple[tuple[str, TaskCategory], ...] = (
     ("maintenance", TaskCategory.MAINTENANCE),
     ("preview", TaskCategory.PREVIEW),
     ("render", TaskCategory.INTERACTIVE_RENDER),
+    ("query", TaskCategory.INTERACTIVE_QUERY),
 )
 
 

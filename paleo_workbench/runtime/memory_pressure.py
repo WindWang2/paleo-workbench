@@ -56,6 +56,7 @@ class MemoryPressureMonitor:
         self._clock = clock
         self._sampler = sampler or _read_memory
         self._lock = threading.Lock()
+        self._sample_gate = threading.Lock()
         self._evictables: dict[str, Evictable] = {}
         self._state = PressureState.NORMAL
         self._sampled_at: float = float("-inf")
@@ -77,26 +78,46 @@ class MemoryPressureMonitor:
 
     # ----------------------------------------------------------- sample --
     def state(self, *, refresh: bool = False) -> PressureState:
-        """Current state; re-samples if the cached sample is stale."""
+        """Current state; re-samples if the cached sample is stale.
+
+        Never blocks on sampling: one caller becomes the sampler (gated);
+        everyone else immediately reads the cached state. This keeps the
+        governor's admission path lock-cheap under load — a slow psutil
+        read must not serialize every admission.
+        """
         with self._lock:
-            if refresh or (self._clock() - self._sampled_at) >= self._interval:
-                self._sample()
+            stale = refresh or (self._clock() - self._sampled_at) >= self._interval
+            if not stale:
+                return self._state
+        if not self._sample_gate.acquire(blocking=False):
+            # Someone else is sampling; the cached state is fresh enough.
+            with self._lock:
+                return self._state
+        try:
+            self._sample()
+        finally:
+            self._sample_gate.release()
+        with self._lock:
             return self._state
 
     def refresh(self) -> PressureState:
         return self.state(refresh=True)
 
     def _sample(self) -> None:
-        """Must be called under ``self._lock``."""
-        self._sampled_at = self._clock()
+        """Read memory (unlocked), then commit state and run relief outside
+        the state lock so readers stay fast."""
         system_used, rss, total = self._sampler(self._budget)
-        self._system_used_frac = system_used
-        self._rss_bytes = rss
-        self._total_bytes = total
-        previous, self._state = self._state, _classify(
-            system_used, self._budget.ram_pressure_frac, self._budget.ram_critical_frac
-        )
-        if self._state != previous:
+        with self._lock:
+            self._sampled_at = self._clock()
+            self._system_used_frac = system_used
+            self._rss_bytes = rss
+            self._total_bytes = total
+            previous, self._state = self._state, _classify(
+                system_used, self._budget.ram_pressure_frac, self._budget.ram_critical_frac
+            )
+            transitioned = self._state != previous
+            needs_relief = self._state is not PressureState.NORMAL
+        if transitioned:
             logger.warning(
                 "memory pressure %s -> %s (system used %.1f%%)",
                 previous.value,
@@ -105,18 +126,21 @@ class MemoryPressureMonitor:
             )
         # State *transitions* and re-entries into PRESSURE both trigger
         # relief; NORMAL is the only state where relief is a no-op.
-        if self._state is not PressureState.NORMAL:
-            self._run_relief_locked()
+        if needs_relief:
+            self._run_relief()
 
-    def _run_relief_locked(self) -> None:
+    def _run_relief(self) -> None:
         freed_total = 0
-        for name, evict in list(self._evictables.items()):
+        with self._lock:
+            evictables = list(self._evictables.items())
+        for name, evict in evictables:
             try:
                 freed_total += int(evict() or 0)
             except Exception:  # relief must never take the app down
                 logger.exception("pressure relief evictable %r failed", name)
-        self._relief_bytes_total += freed_total
-        self._relief_runs += 1
+        with self._lock:
+            self._relief_bytes_total += freed_total
+            self._relief_runs += 1
 
     # ------------------------------------------------------------ facts --
     def snapshot(self) -> dict:

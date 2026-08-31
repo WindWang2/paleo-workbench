@@ -31,6 +31,7 @@ from __future__ import annotations
 import heapq
 import itertools
 import logging
+import os
 import threading
 import time
 import uuid
@@ -135,6 +136,13 @@ class TaskScheduler:
       (``AGING_STEP`` per ``AGING_INTERVAL_S``, capped at ``AGING_MAX_BOOST``)
       so a continuous stream of higher-priority interactive work cannot
       starve background jobs forever.
+    - **Interactive lane** (``interactive_workers``): extra workers that only
+      pick interactive tasks (kinds classified as interactive by
+      :mod:`paleo_workbench.runtime.task_categories`). Background concurrency
+      stays ``max_workers`` (the #1081 contract — I/O-heavy work runs at
+      concurrency 1), while interactive submissions get their own worker and
+      meet the <50 ms queue-delay budget even while a long background task
+      is running.
     """
 
     HISTORY_LIMIT = 200
@@ -142,10 +150,23 @@ class TaskScheduler:
     AGING_STEP = 5
     AGING_MAX_BOOST = 50
 
-    def __init__(self, *, max_workers: int = 1, work_root: str | Path | None = None, clock: Callable[[], float] = time.monotonic):
+    def __init__(
+        self,
+        *,
+        max_workers: int = 1,
+        interactive_workers: int = 0,
+        work_root: str | Path | None = None,
+        is_interactive: Callable[[TaskSpec], bool] | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ):
         if max_workers < 1:
             raise ValueError("max_workers must be >= 1 (I/O-heavy default is 1)")
+        if interactive_workers < 0:
+            raise ValueError("interactive_workers must be >= 0")
         self.max_workers = max_workers
+        self.interactive_workers = interactive_workers
+        self._is_interactive = is_interactive
+        self._background_nice = 0
         self._work_root = Path(work_root) if work_root else None
         self._lock = threading.Lock()
         self._wakeup = threading.Event()
@@ -162,10 +183,40 @@ class TaskScheduler:
         self._admission: Callable[[TaskSpec, str], Any] | None = None
         self._leases: dict[str, Any] = {}
         self._last_rekey = clock()
-        for _ in range(max_workers):
-            t = threading.Thread(target=self._worker_loop, name="paleo-heavy-task", daemon=True)
+        for lane in range(max_workers + interactive_workers):
+            name = (
+                "paleo-interactive-task"
+                if lane >= max_workers
+                else "paleo-heavy-task"
+            )
+            t = threading.Thread(
+                target=self._worker_loop, name=name, daemon=True, args=(lane,)
+            )
             t.start()
             self._threads.append(t)
+
+    def _apply_background_nice(self) -> None:
+        """Yield background threads to interactive work under CPU contention.
+
+        Linux-only, best-effort: heavy-lane threads raise their niceness so
+        the OS favours the interactive lane when both want CPU. Failure is
+        silently ignored (platforms without per-thread nice keep old behaviour).
+        """
+        if self._background_nice <= 0:
+            return
+        try:
+            import sys
+
+            if sys.platform != "linux":
+                return
+            os.nice(self._background_nice)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+    def set_background_nice(self, nice: int) -> None:
+        """Configure OS niceness for heavy lanes (applies to new workers;
+        call before submitting work — normally via the budget at startup)."""
+        self._background_nice = max(0, int(nice))
 
     # ---------------------------------------------------------- admission --
     def set_admission(self, hook: Callable[[TaskSpec, str], Any] | None) -> None:
@@ -321,9 +372,28 @@ class TaskScheduler:
             shutil.rmtree(d, ignore_errors=True)
 
     # ------------------------------------------------------------ worker --
-    def _worker_loop(self) -> None:  # pragma: no cover - exercised via tests
+    def _task_is_interactive(self, spec: TaskSpec) -> bool:
+        """Lane classification: caller predicate, else the category policy."""
+        if self._is_interactive is not None:
+            try:
+                return bool(self._is_interactive(spec))
+            except Exception:
+                logger.exception("interactive predicate failed; treating as background")
+                return False
+        try:
+            from paleo_workbench.runtime.task_categories import category_for_kind, policy_for
+
+            return policy_for(category_for_kind(spec.kind)).interactive
+        except Exception:
+            return False
+
+    def _worker_loop(self, lane: int = 0) -> None:  # pragma: no cover - exercised via tests
+        interactive_only = lane >= self.max_workers
+        if not interactive_only:
+            self._apply_background_nice()
         while True:
             deferred: list[str] = []
+            skipped: list[tuple[int, int, str]] = []
             task_id: str | None = None
             admission = self._admission  # snapshot; hooks may swap mid-loop
             with self._lock:
@@ -332,9 +402,16 @@ class TaskScheduler:
                 if self._heap and (self._clock() - self._last_rekey) >= self.AGING_INTERVAL_S / 2:
                     self._rekey_heap_locked()
                 while self._heap:
-                    _, _, tid = heapq.heappop(self._heap)
+                    entry = heapq.heappop(self._heap)
+                    _, seq, tid = entry
                     h = self._handles.get(tid)
                     if h is None or h.state != TaskState.QUEUED:
+                        continue
+                    if self._task_is_interactive(h.spec) != interactive_only:
+                        # Strict lanes: a long interactive task must never
+                        # block background work (and vice versa) — a lane
+                        # cannot take work it does not serve.
+                        skipped.append(entry)
                         continue
                     if admission is not None:
                         lease = None
@@ -356,6 +433,8 @@ class TaskScheduler:
                         heapq.heappush(
                             self._heap, (-self._effective_priority(h), next(self._seq), tid)
                         )
+                for entry in skipped:
+                    heapq.heappush(self._heap, entry)
                 if task_id is None:
                     self._wakeup.clear()
             if task_id is None:
@@ -483,11 +562,13 @@ _GLOBAL_LOCK = threading.Lock()
 
 
 def get_scheduler() -> TaskScheduler:
-    """Process-wide scheduler (I/O concurrency 1). Created lazily."""
+    """Process-wide scheduler: background I/O concurrency 1 (#1081) plus one
+    dedicated interactive lane (P2-A) so interactive submissions meet the
+    <50 ms queue-delay budget while a long background task is running."""
     global _GLOBAL
     with _GLOBAL_LOCK:
         if _GLOBAL is None:
-            _GLOBAL = TaskScheduler(max_workers=1)
+            _GLOBAL = TaskScheduler(max_workers=1, interactive_workers=1)
         return _GLOBAL
 
 
