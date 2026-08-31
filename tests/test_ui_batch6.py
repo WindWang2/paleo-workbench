@@ -2,7 +2,8 @@
 
 import pytest
 
-from paleo_workbench.ui.dock_manager import WorkspacePreset, dock_manager
+from paleo_workbench.ui.dock_manager import DockManager, WorkspacePreset, dock_manager
+from paleo_workbench.ui.panel_float_controller import _registry_title
 from paleo_workbench.ui.theme import ThemeMode, theme_manager
 
 
@@ -50,3 +51,39 @@ def test_dock_manager_layouts():
     active = dock_manager.active_layout
     assert active.preset == WorkspacePreset.WELL_LOG_INTERPRETATION
     assert len(active.docks) >= 3
+
+
+# --- panel-id registry (FloatController vocabulary, M4) ------------------
+
+
+def test_panel_registry_seeded_from_default_presets():
+    manager = DockManager()
+    for panel_id in ("layer_tree", "map_tools", "property_inspector", "well_tree", "crossplot"):
+        assert manager.has_panel(panel_id)
+        assert manager.panel_title(panel_id)
+    assert "layer_tree" in manager.panel_ids()
+
+
+def test_panel_registry_register_and_namespaced_lookup():
+    manager = DockManager()
+    config = manager.register_panel("factor_grid", "单因素网格编辑器", area="right")
+    assert config.title == "单因素网格编辑器"
+    assert config.area == "right"
+    assert manager.panel_title("mapping:factor_grid") == "单因素网格编辑器"
+    assert manager.panel_title("missing_panel") is None
+
+    # Re-registering an existing id only retitles it.
+    manager.register_panel("factor_grid", "网格编辑器")
+    assert manager.panel_title("factor_grid") == "网格编辑器"
+    assert len(manager.panel_ids()) == len({*manager.panel_ids()})
+
+
+def test_panel_registry_matches_controller_title_resolution():
+    manager = DockManager()
+    controller_default = _registry_title("mapping:layer_tree")
+    assert controller_default == "图层管理树"
+
+    manager.register_panel("custom", "自定义面板")
+    assert manager.panel_title("page:custom") == "自定义面板"
+    # Unknown ids fall through to the raw key.
+    assert manager.panel_title("page:unknown") is None
