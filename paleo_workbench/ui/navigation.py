@@ -1,8 +1,15 @@
-"""Stable page indices and workflow stage definitions for AppShell navigation (avoid magic numbers)."""
+"""Stable page indices and workflow stage definitions for AppShell navigation (avoid magic numbers).
+
+Stage model (M2 redesign): the workflow opens on the 首页 overview, so the
+home page belongs to stage ❶ and the stepper highlights stage 1 on launch
+(it used to highlight the *last* stage because home was filed under
+成图与审核). 井震联合 stays OUT of the interpretation stage by external
+contract (test_well_seismic_joint_page) — it is a map-verification surface.
+"""
 
 from __future__ import annotations
 
-# Individual page indices (0 ~ 9)
+# Individual page indices (0 ~ 10)
 PAGE_INDEX_HOME = 0
 PAGE_INDEX_DATA = 1
 PAGE_INDEX_WELL_LOG = 2
@@ -29,7 +36,7 @@ STAGE_DEFINITIONS: list[dict] = [
         "index": STAGE_INDEX_DATA,
         "name": "数据与预处理",
         "badge": "❶",
-        "pages": [PAGE_INDEX_DATA, PAGE_INDEX_PREPARATION],
+        "pages": [PAGE_INDEX_HOME, PAGE_INDEX_DATA, PAGE_INDEX_PREPARATION],
     },
     {
         "index": STAGE_INDEX_INTERPRETATION,
@@ -52,7 +59,7 @@ STAGE_DEFINITIONS: list[dict] = [
         "index": STAGE_INDEX_REVIEW,
         "name": "成图与审核",
         "badge": "❹",
-        "pages": [PAGE_INDEX_REVIEW, PAGE_INDEX_HOME, PAGE_INDEX_GEOMODEL],
+        "pages": [PAGE_INDEX_REVIEW, PAGE_INDEX_GEOMODEL],
     },
 ]
 

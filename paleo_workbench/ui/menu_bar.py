@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMenu,
     QPushButton,
+    QWidget,
 )
 
 from paleo_workbench.ui import tokens
@@ -24,6 +25,15 @@ def _icon(name: str) -> QIcon:
 
 
 class MenuBar(QFrame):
+    """Command header: menus left, optional center widget, search right.
+
+    The row height comes from the token sheet (the ``QFrame#MenuBar`` rule),
+    so this header tracks M1 metric changes automatically. M2 redesign: the
+    workflow stepper lives in this row (``set_header_center``) so the shell
+    spends one command strip on the whole command surface instead of a menu
+    row plus a separate stepper row.
+    """
+
     new_project_requested = Signal()
     open_project_requested = Signal()
     open_sample_project_requested = Signal()
@@ -43,6 +53,7 @@ class MenuBar(QFrame):
         super().__init__(parent)
         self.setObjectName("MenuBar")
         self.labels: list[QPushButton] = []
+        self._header_center: QWidget | None = None
         layout = QHBoxLayout(self)
         layout.setContentsMargins(tokens.PAGE_MARGIN, 0, tokens.PAGE_MARGIN, 0)
         layout.setSpacing(tokens.SPACE_4)
@@ -145,6 +156,30 @@ class MenuBar(QFrame):
         self._search_timer.timeout.connect(self._emit_search)
         self.search_box.textChanged.connect(self._on_search_text_changed)
         self.search_box.returnPressed.connect(self._emit_search_now)
+
+    def set_header_center(self, widget: QWidget | None) -> None:
+        """Mount *widget* in the header's flexible center slot (stepper).
+
+        Layout becomes: menus · stretch · center · stretch · search. Passing
+        ``None`` clears the slot. The stretch pair keeps the widget centered
+        regardless of menu/search widths.
+        """
+        lay = self.layout()
+        if self._header_center is not None:
+            idx = lay.indexOf(self._header_center)
+            lay.takeAt(idx)
+            self._header_center.setParent(None)
+            self._header_center = None
+            # Drop the trailing stretch inserted with the previous widget.
+            item = lay.itemAt(idx)
+            if item is not None and item.spacerItem() is not None:
+                lay.takeAt(idx)
+        if widget is None:
+            return
+        self._header_center = widget
+        idx = lay.indexOf(self.search_box)
+        lay.insertWidget(idx, widget)
+        lay.insertStretch(idx + 1)
 
     # ------------------------------------------------------------------ #
     # Helpers

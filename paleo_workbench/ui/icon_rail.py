@@ -12,6 +12,12 @@ _ICONS_DIR = Path(__file__).parent / "assets" / "icons"
 
 
 class IconRail(QFrame):
+    """Left 60px quick-jump rail: one button per page, in page-index order.
+
+    Sizing/active styling come from the ``QToolButton[navItem]`` rules in the
+    token sheet; this class only supplies content and shortcut hints.
+    """
+
     page_changed = Signal(int)
 
     def __init__(self, parent=None):
@@ -31,7 +37,7 @@ class IconRail(QFrame):
                 layout.addWidget(sep)
             btn = QToolButton()
             btn.setText(name)
-            btn.setToolTip(f"{name} · {tokens.PAGE_DESCRIPTIONS[index]}")
+            btn.setToolTip(self._page_tooltip(index))
             btn.setProperty("navItem", True)
             btn.setProperty("active", index == 0)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -44,6 +50,17 @@ class IconRail(QFrame):
             self.nav_buttons.append(btn)
             layout.addWidget(btn)
         layout.addStretch()
+
+    @staticmethod
+    def _page_tooltip(index: int) -> str:
+        """Name · description, plus the digit shortcut when one is mapped.
+
+        Digit shortcuts cover pages 1-9 (keys 1-9) and page 10 (key 0); the
+        11th page has no digit shortcut, so no hint line for it.
+        """
+        shortcut = str(index + 1) if index < 9 else ("0" if index == 9 else "")
+        hint = f"\n快捷键 {shortcut}" if shortcut else ""
+        return f"{tokens.PAGE_NAMES[index]} · {tokens.PAGE_DESCRIPTIONS[index]}{hint}"
 
     @property
     def active_index(self) -> int:

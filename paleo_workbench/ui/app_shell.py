@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPropertyAnimation, QEasingCurve, QTimer
+from PySide6.QtCore import Qt, QEvent, QPropertyAnimation, QEasingCurve, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QApplication, QGraphicsOpacityEffect, QHBoxLayout, QLineEdit,
-    QStackedWidget, QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
+    QApplication, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLineEdit,
+    QListWidget, QListWidgetItem, QStackedWidget, QTextBrowser, QTextEdit,
+    QVBoxLayout, QWidget,
 )
 
 from paleo_workbench.ui.icon_rail import IconRail
@@ -49,7 +50,135 @@ from paleo_workbench.ui.navigation import (
 )
 
 
+class CommandPalette(QFrame):
+    """Ctrl+K quick-jump palette: searchable list of pages and stages.
+
+    A plain child widget of the shell (no window flags, no modality), so it
+    is safe under the offscreen CI platform. Filter matches page names and
+    descriptions; Enter or click navigates, Esc dismisses.
+    """
+
+    _WIDTH = 360
+    _HEIGHT = 320
+
+    def __init__(self, parent, *, navigate_page, navigate_stage):
+        super().__init__(parent)
+        self.setObjectName("PanelCard")  # themed card chrome from the token sheet
+        self._navigate_page = navigate_page
+        self._navigate_stage = navigate_stage
+        self._commands: list[dict] = []
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
+        layout.setSpacing(tokens.SPACE_2)
+
+        self.filter_input = QLineEdit(self)
+        self.filter_input.setPlaceholderText("跳转到页面 / 阶段…")
+        self.filter_input.installEventFilter(self)
+        layout.addWidget(self.filter_input)
+
+        self.result_list = QListWidget(self)
+        self.result_list.itemActivated.connect(self._activate_item)
+        self.result_list.itemClicked.connect(self._activate_item)
+        layout.addWidget(self.result_list, 1)
+
+        self.filter_input.textChanged.connect(self._apply_filter)
+        self.hide()
+
+    # --- open / close -------------------------------------------------
+
+    def popup(self) -> None:
+        shell = self.parentWidget()
+        self._rebuild_commands()
+        self._apply_filter(self.filter_input.text())
+        self.resize(self._WIDTH, self._HEIGHT)
+        if shell is not None:
+            self.move(
+                max(tokens.SPACE_2, (shell.width() - self.width()) // 2),
+                tokens.MENU_BAR_HEIGHT + tokens.SPACE_2,
+            )
+        self.show()
+        self.raise_()
+        self.filter_input.setFocus()
+
+    def dismiss(self) -> None:
+        self.hide()
+        self.filter_input.clear()
+
+    # --- commands -----------------------------------------------------
+
+    def _rebuild_commands(self) -> None:
+        commands: list[dict] = []
+        for index, name in enumerate(tokens.PAGE_NAMES):
+            commands.append(
+                {
+                    "label": name,
+                    "hint": tokens.PAGE_DESCRIPTIONS[index],
+                    "run": lambda i=index: self._navigate_page(i),
+                }
+            )
+        for stage in navigation.STAGE_DEFINITIONS:
+            commands.append(
+                {
+                    "label": f"阶段 {stage['badge']} {stage['name']}",
+                    "hint": "切换工作流阶段",
+                    "run": lambda s=stage["index"]: self._navigate_stage(s),
+                }
+            )
+        self._commands = commands
+
+    def _apply_filter(self, text: str) -> None:
+        text = (text or "").strip()
+        self.result_list.clear()
+        for command in self._commands:
+            if text and text not in command["label"] and text not in command["hint"]:
+                continue
+            item = QListWidgetItem(f"{command['label']}  —  {command['hint']}")
+            item.setData(Qt.ItemDataRole.UserRole, command)
+            self.result_list.addItem(item)
+        if self.result_list.count():
+            self.result_list.setCurrentRow(0)
+
+    def _activate_item(self, item: QListWidgetItem) -> None:
+        command = item.data(Qt.ItemDataRole.UserRole)
+        self.dismiss()
+        if command is not None:
+            command["run"]()
+
+    # --- keyboard -----------------------------------------------------
+
+    def eventFilter(self, source, event):  # noqa: N802 (Qt override)
+        if source is self.filter_input and event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            if key == Qt.Key.Key_Escape:
+                self.dismiss()
+                return True
+            if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                item = self.result_list.currentItem()
+                if item is not None:
+                    self._activate_item(item)
+                    return True
+            if key == Qt.Key.Key_Down:
+                row = self.result_list.currentRow()
+                self.result_list.setCurrentRow(min(row + 1, self.result_list.count() - 1))
+                return True
+            if key == Qt.Key.Key_Up:
+                row = self.result_list.currentRow()
+                self.result_list.setCurrentRow(max(row - 1, 0))
+                return True
+        return super().eventFilter(source, event)
+
+
 class AppShell(QWidget):
+    """Application shell (M2 layout).
+
+    One command header (MenuBar hosting menus · workflow stepper · global
+    search in a single menu-bar-height row), a content row of [IconRail |
+    ContextSidebar | QStackedWidget with the 11 eagerly constructed pages],
+    and a StatusBar. Page ordinals and contracts are stable — see
+    :mod:`paleo_workbench.ui.navigation` for the stage model.
+    """
+
     def __init__(
         self,
         project: ProjectDocument | None = None,
@@ -89,23 +218,28 @@ class AppShell(QWidget):
         self._defer_nonvisible_bindings = defer_nonvisible_bindings
         self._deferred_page_bindings = DeferredPageBindings()
 
-        # Stage memory: track the last visited page for each stage
+        # Stage memory: track the last visited page for each stage. The
+        # landing page (首页) belongs to stage ❶, so the stepper highlights
+        # the first stage on launch instead of the last one.
         self._stage_subpage_memory: dict[int, int] = {
-            navigation.STAGE_INDEX_DATA: PAGE_INDEX_DATA,
+            navigation.STAGE_INDEX_DATA: PAGE_INDEX_HOME,
             navigation.STAGE_INDEX_INTERPRETATION: PAGE_INDEX_WELL_LOG,
             navigation.STAGE_INDEX_MAPPING: PAGE_INDEX_MAPPING,
-            navigation.STAGE_INDEX_REVIEW: PAGE_INDEX_HOME,
+            navigation.STAGE_INDEX_REVIEW: PAGE_INDEX_REVIEW,
         }
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
+        # Command header (M2): menus left, workflow stepper centered in the
+        # same command row, global search right — one strip for the whole
+        # command surface instead of a menu row plus a stepper row.
         self.menu_bar = MenuBar(self)
         outer.addWidget(self.menu_bar)
 
         self.workflow_stepper = WorkflowStepper(self)
-        outer.addWidget(self.workflow_stepper)
+        self.menu_bar.set_header_center(self.workflow_stepper)
 
         middle = QHBoxLayout()
         middle.setContentsMargins(0, 0, 0, 0)
@@ -167,12 +301,19 @@ class AppShell(QWidget):
         # coordinate hub so seismic→well routing has a registry (#1029).
         self.view_coordination.bind_project(self.project)
 
+        # Ctrl+K quick-jump palette (non-modal child; offscreen safe).
+        self.command_palette = CommandPalette(
+            self,
+            navigate_page=self._switch_page,
+            navigate_stage=self._on_stepper_stage_changed,
+        )
+
         # Signal connections
         self.workflow_stepper.stage_changed.connect(self._on_stepper_stage_changed)
         self.sidebar.subpage_selected.connect(self._switch_page)
         self.icon_rail.page_changed.connect(self._switch_page)
 
-        # Sync initial stage with default HomePage (index 0 -> Stage 3: 成图与审核)
+        # Sync initial stage with the landing page (index 0 -> Stage 1: 数据与预处理)
         initial_stage = navigation.get_stage_for_page(0)
         self.workflow_stepper.set_active_stage(initial_stage)
         self.sidebar.set_stage(initial_stage, active_page_index=0)
@@ -180,7 +321,8 @@ class AppShell(QWidget):
         self._setup_shortcuts()
 
     def _setup_shortcuts(self) -> None:
-        """Register Stage (Ctrl+1~4), Subpage (Alt+1~4), and 1-9/0 digit shortcuts."""
+        """Register Stage (Ctrl+1~4), Subpage (Alt+1~4), digit (1-9/0), and
+        Ctrl+K command-palette shortcuts."""
         # 1-9 and 0 digit shortcuts (backward compatibility)
         for i in range(min(10, len(tokens.PAGE_NAMES))):  # keys 1-9,0 only
             digit = str(i + 1) if i < 9 else "0"
@@ -196,6 +338,18 @@ class AppShell(QWidget):
         for p in range(4):
             QShortcut(QKeySequence(f"Alt+{p + 1}"), self,
                       lambda sub_idx=p: self._shortcut_switch_subpage(sub_idx))
+
+        # Command palette (works from text fields too — standard toggle).
+        QShortcut(QKeySequence("Ctrl+K"), self, self._toggle_command_palette)
+
+    def _toggle_command_palette(self) -> None:
+        # isHidden (not isVisible): a hidden shell window keeps children
+        # isVisible() False even after popup(), which would break toggling
+        # under offscreen CI.
+        if not self.command_palette.isHidden():
+            self.command_palette.dismiss()
+        else:
+            self.command_palette.popup()
 
     def _shortcut_switch_stage(self, stage_idx: int) -> None:
         focus = QApplication.focusWidget()
@@ -230,9 +384,13 @@ class AppShell(QWidget):
         """Switch the application theme (#1047): palette change, same tokens."""
         self.theme_manager.set_theme(mode)
 
-    def _on_theme_changed(self, _theme: str) -> None:
+    def _on_theme_changed(self, theme: str) -> None:
         qss = self.theme_manager.get_qss()
         self.setStyleSheet(qss)
+        # Components with inline token colors re-resolve against the new
+        # palette so nothing stays styled for the previous theme.
+        self.workflow_stepper.refresh_theme(theme)
+        self.sidebar.refresh_theme(theme)
         # top-level windows outside this shell (dialogs) follow the theme too
         from PySide6.QtWidgets import QApplication
 
@@ -249,6 +407,8 @@ class AppShell(QWidget):
         activate = getattr(page, "activate_page", None)
         if callable(activate):
             activate()
+
+        self.command_palette.dismiss()
 
         # Update Stage & Subpage state memory
         stage_idx = navigation.get_stage_for_page(index)

@@ -29,6 +29,8 @@ def test_stage_definitions_structure():
 
 
 def test_get_stage_for_page():
+    # 首页 opens the workflow: stage 1 owns the landing page.
+    assert navigation.get_stage_for_page(navigation.PAGE_INDEX_HOME) == 0
     assert navigation.get_stage_for_page(navigation.PAGE_INDEX_DATA) == 0
     assert navigation.get_stage_for_page(navigation.PAGE_INDEX_PREPARATION) == 0
 
@@ -36,17 +38,18 @@ def test_get_stage_for_page():
     assert navigation.get_stage_for_page(navigation.PAGE_INDEX_SEISMIC) == 1
     assert navigation.get_stage_for_page(navigation.PAGE_INDEX_SEQUENCE) == 1
     assert navigation.get_stage_for_page(navigation.PAGE_INDEX_STRATIGRAPHY) == 1
+    # 井震联合 is a map-verification surface, not an interpretation subpage.
     assert navigation.get_stage_for_page(navigation.PAGE_INDEX_GEOMODEL) == 3
 
     assert navigation.get_stage_for_page(navigation.PAGE_INDEX_MAPPING) == 2
     assert navigation.get_stage_for_page(navigation.PAGE_INDEX_VISUALIZATION) == 2
 
     assert navigation.get_stage_for_page(navigation.PAGE_INDEX_REVIEW) == 3
-    assert navigation.get_stage_for_page(navigation.PAGE_INDEX_HOME) == 3
 
 
 def test_get_subpages_for_stage():
     assert navigation.get_subpages_for_stage(0) == [
+        navigation.PAGE_INDEX_HOME,
         navigation.PAGE_INDEX_DATA,
         navigation.PAGE_INDEX_PREPARATION,
     ]
@@ -62,6 +65,12 @@ def test_get_subpages_for_stage():
     ]
     assert navigation.get_subpages_for_stage(3) == [
         navigation.PAGE_INDEX_REVIEW,
-        navigation.PAGE_INDEX_HOME,
         navigation.PAGE_INDEX_GEOMODEL,
     ]
+
+
+def test_geomodel_never_joins_interpretation_stage():
+    """External contract (test_well_seismic_joint_page): the joint-analysis
+    page stays out of the interpretation stage after the merge into GEOMODEL."""
+    interp = navigation.get_subpages_for_stage(navigation.STAGE_INDEX_INTERPRETATION)
+    assert navigation.PAGE_INDEX_GEOMODEL not in interp
