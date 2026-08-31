@@ -1,22 +1,47 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import QFrame, QLabel, QTreeWidget, QTreeWidgetItem, QVBoxLayout
 
+from paleo_workbench.seismic_attributes import available_kernels
 from paleo_workbench.ui import tokens
 
+# Kernel ids the attribute pipeline can actually compute today, with their
+# user-facing labels. Anything not wired here must NOT appear as a selectable
+# option — the old list advertised 17 labels with exactly 1 implementation.
+_COMPUTABLE_LABELS = {
+    "c3": "相干(C3)",
+    "envelope": "包络",
+    "rms_amplitude": "RMS振幅",
+    "instantaneous_frequency": "瞬时频率",
+    "instantaneous_phase": "瞬时相位",
+    "sweetness": "甜点",
+    "relative_impedance": "相对阻抗",
+    "dip_il": "Dip_IL",
+    "dip_xl": "Dip_XL",
+    "dip_azimuth": "方位角",
+    "curvature_mean": "平均曲率",
+}
 
 _ATTRIBUTE_GROUPS = (
-    ("振幅属性", ("振幅", "包络", "RMS振幅")),
-    ("频率属性", ("瞬时频率",)),
-    ("连续性属性", ("甜点", "相对阻抗")),
-    ("结构属性", ("瞬时相位", "Dip_IL", "Dip_XL", "方位角", "平均曲率", "高斯曲率", "最大曲率")),
-    ("多属性融合", ("RGB融合",)),
+    ("振幅属性", ("包络", "RMS振幅", "相对阻抗")),
+    ("频率属性", ("瞬时频率", "瞬时相位", "甜点")),
+    ("连续性属性", ("相干(C3)",)),
+    ("构造属性", ("Dip_IL", "Dip_XL", "方位角", "平均曲率")),
+    ("未实现", ("高斯曲率", "最大曲率", "RGB融合")),
 )
+
+_LABEL_TO_KERNEL = {label: kernel for kernel, label in _COMPUTABLE_LABELS.items()}
 
 
 class SeismicAttributePanel(QFrame):
-    """Reference-style seismic attribute selector without new analysis logic."""
+    """Attribute selector over the kernels the pipeline can really compute.
+
+    Every enabled leaf maps to a wired kernel id; unimplemented reference
+    labels are greyed out under an explicit 未实现 group instead of
+    pretending to be options.
+    """
 
     attribute_changed = Signal(str)
 
@@ -47,14 +72,20 @@ class SeismicAttributePanel(QFrame):
         layout.addWidget(self.attribute_tree, 1)
 
     def _populate_tree(self) -> None:
+        computable = set(available_kernels())
         for group_label, labels in _ATTRIBUTE_GROUPS:
             group = QTreeWidgetItem([group_label])
             for label in labels:
-                group.addChild(QTreeWidgetItem([label]))
+                item = QTreeWidgetItem([label])
+                kernel = _LABEL_TO_KERNEL.get(label)
+                if kernel is None or kernel not in computable:
+                    item.setDisabled(True)
+                    item.setForeground(0, QBrush(QColor(tokens.TEXT_SECONDARY)))
+                group.addChild(item)
             self.attribute_tree.addTopLevelItem(group)
 
     def _on_item_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
-        if item.childCount() == 0:
+        if item.childCount() == 0 and not item.isDisabled():
             self.attribute_changed.emit(item.text(0))
 
     def set_selected_attribute(self, label: str) -> None:

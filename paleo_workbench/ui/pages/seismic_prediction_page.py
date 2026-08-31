@@ -122,6 +122,10 @@ class SeismicPredictionPage(QWidget):
         self.shutdown_workers()
         event.accept()
 
+    def set_project_path(self, path) -> None:
+        """Route the open project file path to the seismic view panel."""
+        self.view_panel.set_project_path(path)
+
     def update_state(self, prediction_tasks: list | tuple | None, project=None) -> None:
         if project is not None:
             self.set_project(project)

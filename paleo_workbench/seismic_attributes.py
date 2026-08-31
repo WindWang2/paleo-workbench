@@ -39,10 +39,105 @@ def _kernel_c3(block: np.ndarray, **kw) -> np.ndarray:
     return compute_coherence_c3(block, **kw)
 
 
+def _time_axis_kernel(fn_name: str, **defaults):
+    """Wrap an engine along-time-axis attribute into the kernel contract.
+
+    The engine's envelope/phase/frequency/impedance family takes
+    ``(data, axis=-1, ...)`` and has no GPU switch — the wrapper absorbs
+    ``use_gpu`` so :func:`compute_block` can call every kernel uniformly.
+    """
+    def kernel(block: np.ndarray, **kw) -> np.ndarray:
+        from geoviz_seismic import attributes as engine_attributes
+
+        kw.pop("use_gpu", None)
+        fn = getattr(engine_attributes, fn_name)
+        return fn(block, **{**defaults, **kw})
+
+    return kernel
+
+
+def _dip_kernel(component: str):
+    """dip_il / dip_xl / dip_azimuth from the engine's structural suite."""
+
+    def kernel(block: np.ndarray, **kw) -> np.ndarray:
+        from geoviz_seismic.attributes import compute_azimuth, compute_dip
+
+        kw.pop("use_gpu", None)
+        dip_il, dip_xl = compute_dip(block, axis_il=0, axis_xl=1, axis_t=2)
+        if component == "dip_il":
+            return dip_il
+        if component == "dip_xl":
+            return dip_xl
+        return compute_azimuth(dip_il, dip_xl)
+
+    return kernel
+
+
+def _curvature_kernel(block: np.ndarray, **kw) -> np.ndarray:
+    from geoviz_seismic.attributes import compute_curvature
+
+    return compute_curvature(block, **kw)
+
+
 # name -> (callable, default half-window kwargs, per-axis half-window sizes)
+# Halos are the minimal per-axis neighborhoods each operator reads (a
+# gradient costs 1 sample; smoothing windows cost their half-window), so a
+# halo block reproduces full-volume output exactly at every interior sample.
 KERNELS: dict[str, tuple[Callable[..., np.ndarray], dict, tuple[int, int, int]]] = {
     "c3": (_kernel_c3, {"win_il": 5, "win_xl": 5, "win_t": 5}, (5, 5, 5)),
+    "envelope": (_time_axis_kernel("compute_envelope", axis=-1), {}, (0, 0, 2)),
+    "instantaneous_phase": (
+        _time_axis_kernel("compute_instantaneous_phase", axis=-1),
+        {},
+        (0, 0, 2),
+    ),
+    "instantaneous_frequency": (
+        _time_axis_kernel("compute_instantaneous_frequency", sample_interval=1.0, axis=-1),
+        {},
+        (0, 0, 4),
+    ),
+    "rms_amplitude": (
+        _time_axis_kernel("compute_rms_amplitude", window=10, axis=-1),
+        {},
+        (0, 0, 10),
+    ),
+    "sweetness": (
+        _time_axis_kernel("compute_sweetness", sample_interval=1.0, axis=-1),
+        {},
+        (0, 0, 4),
+    ),
+    "relative_impedance": (
+        _time_axis_kernel("compute_relative_impedance", axis=-1),
+        {},
+        (0, 0, 2),
+    ),
+    "dip_il": (_dip_kernel("dip_il"), {}, (2, 2, 2)),
+    "dip_xl": (_dip_kernel("dip_xl"), {}, (2, 2, 2)),
+    "dip_azimuth": (_dip_kernel("dip_azimuth"), {}, (2, 2, 2)),
+    "curvature_mean": (
+        _curvature_kernel,
+        # Reach per axis: slope gradient ±1 + slope smoothing ±win + double
+        # second derivative ±2 ⇒ ±(1 + win + 2).
+        {"kind": "mean", "win_il": 3, "win_xl": 3, "win_t": 3},
+        (6, 6, 6),
+    ),
 }
+
+
+# Trace-global kernels operate through a full-trace FFT (Hilbert transform):
+# their value at ANY sample depends on the whole trace, so no finite halo can
+# reproduce full-volume output inside a cropped TIME window. They are exact
+# in the banded full-volume job (bands slice inlines only — every trace is
+# complete) and MUST NOT be offered on cropped-time ROIs.
+TRACE_GLOBAL_KERNELS = frozenset(
+    {
+        "envelope",
+        "instantaneous_phase",
+        "instantaneous_frequency",
+        "sweetness",
+        "relative_impedance",
+    }
+)
 
 
 def attribute_halo(name: str) -> tuple[int, int, int]:
@@ -158,8 +253,20 @@ def roi_attribute(
     use_gpu: bool = False,
 ) -> np.ndarray:
     """Interactive ROI attribute (#1083). ``bounds`` are half-open base-index
-    inline/xline/time bounds — one halo-expanded batch read, kernel, crop."""
+    inline/xline/time bounds — one halo-expanded batch read, kernel, crop.
+
+    Trace-global (FFT) kernels are refused for cropped time windows: their
+    output would silently differ from the full-volume computation, which is
+    exactly the seam this module exists to prevent. Expand the ROI to the
+    full time extent (caller's choice) to use them honestly.
+    """
     il0, il1, xl0, xl1, t0, t1 = (int(b) for b in bounds)
+    if name in TRACE_GLOBAL_KERNELS and (t0 != 0 or t1 != int(reader.shape[2])):
+        raise ValueError(
+            f"attribute {name!r} is trace-global (full-trace FFT); "
+            "crop the map extent instead of the time window, or compute it "
+            "as a full-volume attribute job"
+        )
     return compute_block(
         reader, name, il0, il1, xl0, xl1, t0, t1, use_gpu=use_gpu
     )

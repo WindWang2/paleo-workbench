@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from paleo_workbench.viz.horizon_sculpting import SculptableHorizonMesh
+from paleo_workbench.viz.horizon_sculpting import SculptableHorizonMesh, SparseDeltaPatch
 from paleo_workbench.viz.interpretation_artifact import scientific_fingerprint
 
 
@@ -121,6 +121,45 @@ class HorizonInterpretationDraft:
         return self.status
 
     # ------------------------------------------------------------------ edit
+    def set_picks(
+        self,
+        rows: "np.ndarray",
+        cols: "np.ndarray",
+        values: "np.ndarray",
+    ) -> "np.ndarray":
+        """Write picked Z values at grid nodes as ONE undoable sparse patch.
+
+        Rows/cols are grid indices (inline row, crossline column); values are
+        in the draft's vertical domain (time ms or depth m). Indices outside
+        the grid raise IndexError — callers clip, never silently drop picks.
+        """
+        rows_arr = np.asarray(rows, dtype=np.int64)
+        cols_arr = np.asarray(cols, dtype=np.int64)
+        values_arr = np.asarray(values, dtype=np.float32)
+        if not (len(rows_arr) == len(cols_arr) == len(values_arr)):
+            raise ValueError("rows/cols/values length mismatch")
+        nrows, ncols = self.shape
+        if len(rows_arr) and (
+            rows_arr.min() < 0
+            or rows_arr.max() >= nrows
+            or cols_arr.min() < 0
+            or cols_arr.max() >= ncols
+        ):
+            raise IndexError("pick indices outside the horizon grid")
+        if len(rows_arr) == 0:
+            return self.working_z()
+        flat = rows_arr * ncols + cols_arr
+        old_z = self._mesh.vertices[flat, 2].copy()
+        new_z = values_arr.copy()
+        self._mesh.vertices[flat, 2] = new_z
+        self._mesh._undo_stack.append(
+            SparseDeltaPatch(indices=flat, old_z=old_z, new_z=new_z)
+        )
+        self._mesh._redo_stack.clear()
+        self.generation += 1
+        self.refresh_status()
+        return self.working_z()
+
     def sculpt(
         self,
         center_xy: tuple[float, float],

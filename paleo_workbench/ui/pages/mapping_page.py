@@ -84,6 +84,7 @@ class MappingPage(QWidget):
         self.setObjectName("MappingPage")
         self._active_document = None
         self._project = None
+        self._project_path: str | None = None
         self._project_crs: str | None = None
         self._factor_tasks_by_overlay_id: dict[str, object] = {}
         self._native_factor_scene = None
@@ -273,6 +274,9 @@ class MappingPage(QWidget):
         self.bottom_workbench.factor_shelf.contour_draft_requested.connect(
             self._on_contour_draft_requested
         )
+        self.bottom_workbench.factor_shelf.fault_interpretation_requested.connect(
+            self._on_fault_interpretation_requested
+        )
         self.bottom_workbench.factor_shelf.factor_overlay_requested.connect(
             self._on_overlay_requested
         )
@@ -375,6 +379,58 @@ class MappingPage(QWidget):
     def set_project(self, project) -> None:
         """Bind live ProjectDocument for ContourDraft generation from factor shelf."""
         self._project = project
+
+    def set_project_path(self, path) -> None:
+        """Receive the open ``*.paleo.json`` path (AppShell broadcast).
+
+        Fault interpretation saves derive their artifact directory from the
+        real project file; without the path the action stays disabled rather
+        than writing into a phantom artifacts tree.
+        """
+        self._project_path = str(path) if path else None
+        has = self._project_path is not None
+        self.bottom_workbench.factor_shelf.fault_interpretation_btn.setEnabled(has)
+
+    def _on_fault_interpretation_requested(self) -> None:
+        """Lift the active map's break/fault polylines into a versioned fault
+        interpretation (P1-B): map-plane coordinates stay the scientific
+        authority, the lifecycle mints the immutable version + lineage."""
+        from PySide6.QtWidgets import QMessageBox
+
+        from paleo_workbench.workflow.constraints import constraints_from_map_document
+        from paleo_workbench.workflow.fault_lifecycle import (
+            draft_from_constraint_layers,
+            save_fault_draft,
+        )
+
+        if self._project is None or not getattr(self, "_project_path", None):
+            QMessageBox.information(self, "断层解释", "请先打开并保存工程。")
+            return
+        document = self._active_document
+        if document is None:
+            QMessageBox.information(self, "断层解释", "当前没有活动图件。")
+            return
+        layers = constraints_from_map_document(document)
+        draft = draft_from_constraint_layers(
+            layers, crs=str(getattr(document, "map_crs", "") or "")
+        )
+        if not draft.payload.traces:
+            QMessageBox.information(
+                self, "断层解释", "当前图件没有断线/断层多段线，无可保存的断层解释。"
+            )
+            return
+        ref, message = save_fault_draft(draft, self._project, self._project_path)
+        if ref is None:
+            QMessageBox.warning(self, "断层解释", f"保存失败: {message}")
+            return
+        # Announce the fault identity on the coordination bus (scenario D).
+        controller = getattr(self, "view_coordination", None)
+        publish = getattr(controller, "publish_fault_selection", None)
+        if callable(publish):
+            publish(str(ref.id), source="map")
+        QMessageBox.information(
+            self, "断层解释", f"已保存断层解释版本（{len(draft.payload.traces)} 条断层）"
+        )
 
     def mapping_context(self) -> dict:
         """Snapshot of active map name / horizon / dirty for the sidebar."""
