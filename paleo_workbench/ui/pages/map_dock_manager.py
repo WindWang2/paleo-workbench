@@ -6,15 +6,25 @@ icon rail per side that expands/collapses the panel area, plus a checkable
 panels menu so every panel can be toggled from one central place (the toolbar's
 面板 button). Panel instances, signals, and explicit-visibility semantics are
 untouched — collapsing is plain ``setVisible`` on the registered widget.
+
+Panels can additionally *float* through the shared FloatController
+(panel float framework): the panels menu gains a checkable 浮动 toggle per
+panel, every rail button gets a context menu with the same toggle, and while a
+panel is floating its rail button keeps meaning "panel visible" — it shows and
+hides the floating window instead of the docked widget.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QFrame, QMenu, QToolButton, QVBoxLayout, QWidget
+
+if TYPE_CHECKING:
+    from paleo_workbench.ui.panel_float_controller import FloatController
 
 __all__ = ["DockRail", "MapDockManager"]
 
@@ -92,6 +102,18 @@ class MapDockManager(QObject):
         self._bottom_widget: QWidget | None = None
         self._bottom_apply = None
         self._bottom_user_visible = True
+        self._bottom_programmatic = False
+        self._float_controller: FloatController | None = None
+
+    def attach_float_controller(self, controller: FloatController) -> None:
+        """Enable panel floating: float toggles appear in the panels menu and
+        in each rail button's context menu, kept in sync with the controller."""
+        if controller is self._float_controller:
+            return
+        self._float_controller = controller
+        controller.float_changed.connect(self._on_float_changed)
+        for key in self._panels:
+            self._install_rail_context_menu(key)
 
     def add_panel(
         self,
@@ -102,19 +124,40 @@ class MapDockManager(QObject):
         *,
         side: str,
         checked: bool,
+        float_key: str | None = None,
     ) -> None:
-        """Dock ``widget`` into a side rail under a checkable rail button."""
+        """Dock ``widget`` into a side rail under a checkable rail button.
+
+        ``float_key`` is the namespaced key used with the FloatController
+        (defaults to ``key``).
+        """
         dock = self.left_dock if side == "left" else self.right_dock
         button = dock.rail_button(title, icon_name)
         button.toggled.connect(lambda on, k=key: self._on_rail_toggled(k, on))
         dock.area_layout.addWidget(widget, 1)
-        self._panels[key] = {"title": title, "icon": icon_name, "widget": widget, "dock": dock, "button": button}
+        self._panels[key] = {
+            "title": title,
+            "icon": icon_name,
+            "widget": widget,
+            "dock": dock,
+            "button": button,
+            "float_key": float_key or key,
+        }
         dock.rail_layout.addWidget(button)
         button.setChecked(checked)
         widget.setVisible(checked)
         dock.sync_area_visibility()
+        self._install_rail_context_menu(key)
 
-    def register_bottom(self, key: str, title: str, icon_name: str, widget: QWidget, apply) -> None:
+    def register_bottom(
+        self,
+        key: str,
+        title: str,
+        icon_name: str,
+        widget: QWidget,
+        apply,
+        float_key: str | None = None,
+    ) -> None:
         """Register the bottom workbench: a left-rail bottom toggle plus menu entry.
 
         ``apply`` recomputes the widget's real visibility from the user
@@ -124,12 +167,20 @@ class MapDockManager(QObject):
         self._bottom_apply = apply
         button = self.left_dock.rail_button(title, icon_name)
         button.toggled.connect(lambda on, k=key: self._on_bottom_toggled(k, on))
-        self._panels[key] = {"title": title, "icon": icon_name, "widget": widget, "dock": None, "button": button}
+        self._panels[key] = {
+            "title": title,
+            "icon": icon_name,
+            "widget": widget,
+            "dock": None,
+            "button": button,
+            "float_key": float_key or key,
+        }
         rail_layout = self.left_dock.rail_layout
         stretch_index = rail_layout.count()
         rail_layout.insertStretch(stretch_index, 1)
         rail_layout.addWidget(button)
         button.setChecked(True)
+        self._install_rail_context_menu(key)
 
     def set_panel_visible(self, key: str, visible: bool) -> None:
         entry = self._panels[key]
@@ -144,8 +195,55 @@ class MapDockManager(QObject):
     def bottom_user_visible(self) -> bool:
         return self._bottom_user_visible
 
+    def set_bottom_window_visible(self, visible: bool) -> None:
+        """Programmatic (preference/mode-derived) visibility for a floating
+        bottom workbench window.
+
+        The visibility mirror ignores this transition — it is not a user
+        close, so it must not write back into ``_bottom_user_visible`` (the
+        apply callback would otherwise fight the mode that caused the hide).
+        """
+        self._bottom_programmatic = True
+        try:
+            if self._float_controller is not None:
+                panel = self._float_controller.floating_panel(self._float_key("bottom"))
+                if panel is not None:
+                    panel.setVisible(bool(visible))
+        finally:
+            self._bottom_programmatic = False
+
+    def panel_title(self, key: str) -> str:
+        """Display title for a panel key or float key (the floating window's title)."""
+        entry = self._panels.get(key)
+        if entry is None:
+            entry = next(
+                (e for e in self._panels.values() if e["float_key"] == key), None
+            )
+        if entry is not None:
+            return entry["title"]
+        return key.rpartition(":")[2] or key
+
+    def _float_key(self, key: str) -> str:
+        return self._panels[key]["float_key"]
+
+    def _key_for_float_key(self, float_key: str) -> str | None:
+        for key, entry in self._panels.items():
+            if entry["float_key"] == float_key:
+                return key
+        return None
+
+    def is_floating(self, key: str) -> bool:
+        if self._float_controller is None:
+            return False
+        return bool(self._float_controller.is_floating(self._float_key(key)))
+
+    def toggle_float(self, key: str) -> None:
+        """Float a docked panel / dock back a floating one via the controller."""
+        if self._float_controller is not None:
+            self._float_controller.toggle(self._float_key(key))
+
     def panels_menu(self, parent: QWidget | None = None) -> QMenu:
-        """Checkable 面板 menu: one action per registered panel."""
+        """Checkable 面板 menu: one visibility action plus one 浮动 toggle per panel."""
         menu = QMenu("面板", parent)
         for key, entry in self._panels.items():
             action = QAction(panel_icon(entry["icon"]), entry["title"], menu)
@@ -155,17 +253,138 @@ class MapDockManager(QObject):
             action.toggled.connect(lambda on, k=key: self.set_panel_visible(k, on))
             menu.addAction(action)
             entry["menu_action"] = action
+            if self._float_controller is not None:
+                float_action = self._float_menu_action(menu, key)
+                entry["float_menu_action"] = float_action
+                menu.addAction(float_action)
         self._menu = menu
         return menu
 
+    def _install_rail_context_menu(self, key: str) -> None:
+        """Give a rail button a right-click menu (currently: the float toggle)."""
+        if self._float_controller is None:
+            return
+        button = self._panels[key]["button"]
+        button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        button.customContextMenuRequested.connect(lambda pos, k=key: self._show_rail_menu(k, pos))
+
+    def rail_context_menu(self, key: str) -> QMenu:
+        """The context menu a rail button shows (currently: the float toggle)."""
+        menu = QMenu(self._panels[key]["button"])
+        menu.addAction(self._float_menu_action(menu, key))
+        return menu
+
+    def _show_rail_menu(self, key: str, pos) -> None:
+        button = self._panels[key]["button"]
+        menu = self.rail_context_menu(key)
+        # Right-click menus are transient: delete menu + actions on close
+        # instead of leaking one pair per right-click.
+        menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        menu.exec(button.mapToGlobal(pos))
+
+    def _float_menu_action(self, parent: QObject, key: str) -> QAction:
+        """Checkable 浮动 toggle for one panel, shared by menu and context menu."""
+        entry = self._panels[key]
+        action = QAction(panel_icon(entry["icon"]), f"浮动 · {entry['title']}", parent)
+        action.setObjectName(f"MapPanelFloat:{key}")
+        action.setCheckable(True)
+        action.setChecked(self.is_floating(key))
+        action.toggled.connect(lambda on, k=key: self._on_float_action_toggled(k, on))
+        return action
+
+    def _on_float_action_toggled(self, key: str, on: bool) -> None:
+        controller = self._float_controller
+        if controller is None or self.is_floating(key) == bool(on):
+            return
+        controller.toggle(self._float_key(key))
+
     def _on_rail_toggled(self, key: str, on: bool) -> None:
         entry = self._panels[key]
-        entry["widget"].setVisible(on)
+        controller = self._float_controller
+        if controller is not None and self.is_floating(key):
+            # The widget currently lives in its floating window; the rail
+            # button shows/hides that window instead of the bare widget.
+            panel = controller.floating_panel(entry["float_key"])
+            if panel is not None:
+                panel.setVisible(on)
+        else:
+            entry["widget"].setVisible(on)
         dock = entry["dock"]
         if dock is not None:
             dock.sync_area_visibility()
         self._sync_menu_action(key, on)
         self.panel_toggled.emit(key, on)
+
+    def _on_float_changed(self, float_key: str, floating: bool) -> None:
+        key = self._key_for_float_key(float_key)
+        if key is None:
+            return
+        entry = self._panels[key]
+        if floating:
+            # Floating implies showing the panel; the rail button keeps meaning
+            # "panel visible", so it flips on and shows the floating window.
+            entry["button"].setChecked(True)
+            entry["widget"].setVisible(True)
+            # Mirror externally-driven window visibility (the panel's hide
+            # button, Alt+F4, restore of a saved-hidden panel) on the rail
+            # button. Each float creates a fresh FloatingPanel, so this
+            # connects exactly once per window.
+            controller = self._float_controller
+            panel = (
+                controller.floating_panel(float_key)
+                if controller is not None
+                else None
+            )
+            if panel is not None:
+                panel.visibility_changed.connect(
+                    lambda _key, visible, fk=float_key: self._on_floating_window_visibility(fk, visible)
+                )
+        else:
+            # Docked again: restore the plain setVisible semantics (hidden
+            # until the button — or the page's apply callback — says otherwise).
+            entry["widget"].setVisible(entry["button"].isChecked())
+        dock = entry["dock"]
+        if dock is not None:
+            # The reparent moved the widget out of (or back into) the area.
+            dock.sync_area_visibility()
+        self._sync_float_menu_action(key, floating)
+
+    def _on_floating_window_visibility(self, float_key: str, visible: bool) -> None:
+        """Track the floating window's visibility on the rail button.
+
+        FloatingPanel reports visibility from showEvent/hideEvent; the rail
+        button keeps meaning "panel visible", so a window hidden outside the
+        rail unchecks it — and a re-shown window checks it again. This mirrors
+        state without re-triggering the rail toggled path. For the bottom
+        workbench, whose visibility preference lives in this manager, a
+        *genuine* user close/open of the window (✕ / Alt+F4) is a preference
+        change and feeds ``_bottom_user_visible``; programmatic transitions
+        (the page's apply callback deriving visibility from the preference
+        and mode flags) are skipped via the re-entrancy guard so the mirror
+        cannot fight the mode that caused the hide.
+        """
+        key = self._key_for_float_key(float_key)
+        if key is None:
+            return
+        entry = self._panels[key]
+        button = entry["button"]
+        if button.isChecked() != bool(visible):
+            button.blockSignals(True)
+            button.setChecked(bool(visible))
+            button.blockSignals(False)
+            self._sync_menu_action(key, bool(visible))
+            self.panel_toggled.emit(key, bool(visible))
+        if entry["dock"] is None and not self._bottom_programmatic:
+            self._bottom_user_visible = bool(visible)
+            if self._bottom_apply is not None:
+                self._bottom_apply()
+
+    def _sync_float_menu_action(self, key: str, floating: bool) -> None:
+        action = self._panels[key].get("float_menu_action")
+        if action is not None and action.isChecked() != bool(floating):
+            action.blockSignals(True)
+            action.setChecked(bool(floating))
+            action.blockSignals(False)
 
     def _on_bottom_toggled(self, key: str, on: bool) -> None:
         self._bottom_user_visible = on

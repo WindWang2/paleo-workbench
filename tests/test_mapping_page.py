@@ -2,19 +2,45 @@ import json
 
 import pytest
 
-from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, QSettings, Qt
+from PySide6.QtWidgets import QToolButton
 
 from paleo_workbench.project.models import FactorMapTask, MapReferenceLayer, PaleoMapDocument
+from paleo_workbench.ui.layout_persistence import LayoutPersistence
 from paleo_workbench.ui.pages.map_attribute_table import MapAttributeTable
 from paleo_workbench.ui.pages.map_edit_toolbar import MapEditToolbar
 from paleo_workbench.ui.pages.map_edit_view import MapEditView
 from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
 from paleo_workbench.ui.pages.map_reference_panel import MapReferencePanel
 from paleo_workbench.ui.pages.factor_preview_grid import FactorPreviewGrid
-from paleo_workbench.ui.pages.mapping_page import MappingPage
+from paleo_workbench.ui.pages.mapping_page import (
+    BOTTOM_DOCKED_MAX_HEIGHT,
+    FLOAT_KEYS,
+    QWIDGETSIZE_MAX,
+    MappingPage,
+)
+from paleo_workbench.ui.panel_float_controller import FloatController, FloatingPanel
 from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 from tests.qgis_support import QGIS_SKIP_REASON
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_layout_store(monkeypatch, tmp_path):
+    """Isolate the QSettings-backed layout store per test.
+
+    Every page built in a test binds its FloatController and dock-splitter
+    persistence to a throwaway ini file, so float/dock actions never touch
+    (or read) the developer's real workbench settings.
+    """
+    import paleo_workbench.ui.pages.mapping_page as mapping_page_module
+
+    settings = QSettings(str(tmp_path / "layout.ini"), QSettings.Format.IniFormat)
+    monkeypatch.setattr(
+        mapping_page_module,
+        "LayoutPersistence",
+        lambda: LayoutPersistence(settings),
+    )
 
 
 def test_mapping_page_assembles_gis_shell(qtbot):
@@ -846,3 +872,206 @@ def test_on_contour_completed_defers_document_switch_to_update_state(qtbot, monk
     # preference only flows through update_state's own guard.
     assert page.active_document() is doc_a
 
+
+
+# ---------------------------------------------------------------------------
+# Panel float (浮动) integration on the mapping page
+# ---------------------------------------------------------------------------
+
+def _float_page(qtbot) -> MappingPage:
+    page = MappingPage()
+    qtbot.addWidget(page)
+    page.resize(1600, 900)
+    page.show()
+    return page
+
+
+def test_mapping_page_registers_exactly_the_five_floatable_panels(qtbot):
+    page = _float_page(qtbot)
+    assert isinstance(page.float_controller, FloatController)
+    assert set(page._float_panel_widgets) == set(FLOAT_KEYS)
+    for key in FLOAT_KEYS:
+        assert page.float_controller.is_floating(key) is False
+    # The center canvas stack (MapEditView / UnifiedMapCanvas) is not
+    # resolvable by the controller, so the map viewport can never float.
+    assert page.center_stack.parent() is page.mid_splitter
+    assert page.float_controller.toggle("mapping:center") is False
+    assert page.float_controller.is_floating("mapping:center") is False
+
+
+def test_panels_menu_and_rail_context_menus_offer_float_toggles(qtbot):
+    page = _float_page(qtbot)
+    menu_button = page.map_toolbars.findChild(QToolButton, "MapPanelsMenuButton")
+    menu = menu_button.menu()
+    float_keys = {
+        action.objectName().removeprefix("MapPanelFloat:")
+        for action in menu.actions()
+        if action.objectName().startswith("MapPanelFloat:")
+    }
+    assert float_keys == {key.rpartition(":")[2] for key in FLOAT_KEYS}
+    for short_key in float_keys:
+        context_menu = page.dock_manager.rail_context_menu(short_key)
+        assert f"MapPanelFloat:{short_key}" in [a.objectName() for a in context_menu.actions()]
+    # Floating window titles resolve through the dock manager.
+    assert page.dock_manager.panel_title("mapping:layers") == "图层面板"
+
+
+def test_float_and_dock_round_trip_offscreen(qtbot):
+    page = _float_page(qtbot)
+    qtbot.waitExposed(page)
+    page.dock_manager.set_panel_visible("chrome", True)
+    page.dock_manager.set_panel_visible("composer", True)
+    cases = [
+        ("mapping:layers", page.layer_tree_stack, page.dock_manager.left_dock.area),
+        ("mapping:reference", page.reference_panel, page.dock_manager.right_dock.area),
+        ("mapping:chrome", page.chrome_panel, page.dock_manager.right_dock.area),
+        ("mapping:composer", page.composition_panel, page.dock_manager.right_dock.area),
+        ("mapping:bottom", page.bottom_workbench, page),
+    ]
+    for key, widget, dock_host in cases:
+        sizes_before = list(page.mid_splitter.sizes())
+        page.float_controller.toggle(key)
+        assert page.float_controller.is_floating(key) is True
+        assert page.dock_manager.is_floating(key.rpartition(":")[2]) is True
+        floating_window = page.float_controller.floating_panel(key)
+        assert isinstance(floating_window, FloatingPanel)
+        assert widget.parent() is floating_window.content_host
+        # The panel stays visible inside its floating window; the rail button
+        # keeps meaning "panel visible".
+        assert widget.isHidden() is False
+        assert page.dock_manager.panel_button(key.rpartition(":")[2]).isChecked() is True
+
+        page.float_controller.toggle(key)
+        assert page.float_controller.is_floating(key) is False
+        # Dock-back recovery re-places the panel into its registered host
+        # (dock area layout / page layout) and re-applies the pre-float
+        # splitter snapshot. Qt may clamp the applied values by the widgets'
+        # size hints, so assert the persisted snapshot + the splitter total
+        # rather than the literal per-section geometry.
+        assert widget.parent() is dock_host
+        assert widget.isHidden() is False
+        if dock_host is not page:
+            # Side panels live in the dock splitter: their pre-float snapshot
+            # is persisted and the splitter total survives the round trip.
+            # (The bottom workbench is not splitter-hosted, so the framework
+            # intentionally records no snapshot for it.)
+            assert tuple(page._layout_persistence.load(key).docked_sizes or ()) == tuple(sizes_before)
+            assert abs(sum(page.mid_splitter.sizes()) - sum(sizes_before)) <= 8
+    # Docked everything back: leave no floating state persisted behind.
+    assert all(page.float_controller.is_floating(key) is False for key in FLOAT_KEYS)
+
+
+def test_center_canvas_stays_docked_while_panels_float(qtbot):
+    page = _float_page(qtbot)
+    for key in FLOAT_KEYS:
+        page.float_controller.toggle(key)
+    assert page.center_stack.parent() is page.mid_splitter
+    assert page.edit_view.parent() is page.center_stack
+    for key in FLOAT_KEYS:
+        page.float_controller.toggle(key)
+
+
+def test_bottom_workbench_cap_only_applies_while_docked(qtbot):
+    page = _float_page(qtbot)
+    assert page.bottom_workbench.maximumHeight() == BOTTOM_DOCKED_MAX_HEIGHT
+    assert page.attribute_table.maximumHeight() == BOTTOM_DOCKED_MAX_HEIGHT
+
+    page.float_controller.toggle("mapping:bottom")
+    assert page.bottom_workbench.maximumHeight() == QWIDGETSIZE_MAX
+    assert page.attribute_table.maximumHeight() == QWIDGETSIZE_MAX
+
+    page.float_controller.toggle("mapping:bottom")
+    assert page.bottom_workbench.maximumHeight() == BOTTOM_DOCKED_MAX_HEIGHT
+    assert page.attribute_table.maximumHeight() == BOTTOM_DOCKED_MAX_HEIGHT
+    # Dock-back puts the workbench back into the page layout (its last row).
+    assert page.layout().indexOf(page.bottom_workbench) >= 0
+
+
+def test_floating_bottom_rides_out_preview_mode_through_the_controller(qtbot, monkeypatch):
+    page = _float_page(qtbot)
+    page.float_controller.toggle("mapping:bottom")
+    panel = page.float_controller.floating_panel("mapping:bottom")
+    calls = []
+    real_set_visible = panel.setVisible
+
+    def spy(visible):
+        calls.append(visible)
+        real_set_visible(visible)
+
+    monkeypatch.setattr(panel, "setVisible", spy)
+    page.set_preview_mode(True)
+    assert calls[-1] is False
+    # The bare widget stays visible inside its (hidden) floating window —
+    # hiding it would leave an empty window frame.
+    assert page.bottom_workbench.isHidden() is False
+
+    page.set_preview_mode(False)
+    assert calls[-1] is True
+    page.float_controller.toggle("mapping:bottom")  # dock back, no float state left
+
+
+def test_mapping_page_restores_float_state_on_build(qtbot, monkeypatch):
+    called = []
+    monkeypatch.setattr(FloatController, "restore_saved", lambda self, key, widget=None: called.append(key))
+    _float_page(qtbot)
+    assert sorted(called) == sorted(FLOAT_KEYS)
+
+
+def test_dock_splitter_sizes_persist_and_restore(qtbot):
+    page = _float_page(qtbot)
+    page.mid_splitter.setSizes([200, 1100, 260])
+    page._save_dock_splitter_sizes()
+    saved = list(page.mid_splitter.sizes())
+
+    restored = _float_page(qtbot)
+    # The restore applies on first show, once the splitter has real geometry.
+    assert list(restored.mid_splitter.sizes()) == saved
+
+
+def test_dock_back_after_floating_close_stays_hidden(qtbot):
+    """p2-1: a floating-window ✕ is a genuine user close — the mirror records
+    the preference, so dock-back must not resurrect the workbench while the
+    rail button and visibility menu action say hidden."""
+    page = _float_page(qtbot)
+    page.float_controller.toggle("mapping:bottom")
+    panel = page.float_controller.floating_panel("mapping:bottom")
+
+    panel.close()  # the window's ✕ / Alt+F4 path (close routes through hide)
+    assert page.dock_manager.panel_button("bottom").isChecked() is False
+    assert page.dock_manager.is_panel_visible("bottom") is False
+    assert page.dock_manager.bottom_user_visible() is False
+    assert page.bottom_workbench.isHidden() is False  # bare widget untouched
+
+    page.float_controller.toggle("mapping:bottom")  # dock back via float toggle
+    assert page.float_controller.is_floating("mapping:bottom") is False
+    assert page.bottom_workbench.isHidden() is True
+    assert page.dock_manager.panel_button("bottom").isChecked() is False
+    assert page.layout().indexOf(page.bottom_workbench) >= 0  # host recovered
+    # Rail toggle re-shows it (preference path still intact).
+    page.dock_manager.set_panel_visible("bottom", True)
+    assert page.bottom_workbench.isHidden() is False
+
+
+def test_launch_keeps_seeded_hidden_floating_bottom(qtbot, tmp_path):
+    """p2-2: a saved floating=True / visible=False bottom restores floating
+    but hidden, the rail reads hidden, and the launch sequence does not
+    clobber the persisted visible=False back to True."""
+    seed = QSettings(str(tmp_path / "layout.ini"), QSettings.Format.IniFormat)
+    seed.setValue("panel_layout/mapping:bottom/floating", True)
+    seed.setValue("panel_layout/mapping:bottom/visible", False)
+    seed.setValue("panel_layout/mapping:bottom/geometry", "120,120,480,360")
+    seed.sync()
+
+    page = _float_page(qtbot)
+
+    assert page.float_controller.is_floating("mapping:bottom") is True
+    assert page.dock_manager.panel_button("bottom").isChecked() is False
+    assert page.dock_manager.is_panel_visible("bottom") is False
+    assert page.dock_manager.bottom_user_visible() is False
+    assert page.float_controller.floating_panel("mapping:bottom").isHidden() is True
+    # Un-capped: the floating window carries no docked height cap even hidden.
+    assert page.bottom_workbench.maximumHeight() == QWIDGETSIZE_MAX
+
+    after = QSettings(str(tmp_path / "layout.ini"), QSettings.Format.IniFormat)
+    assert after.value("panel_layout/mapping:bottom/visible", True, type=bool) is False
+    assert after.value("panel_layout/mapping:bottom/floating", False, type=bool) is True

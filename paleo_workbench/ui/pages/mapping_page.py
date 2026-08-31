@@ -39,6 +39,7 @@ from paleo_workbench.mapping.map_tools import (
 from paleo_workbench.mapping.topology import TopologyService
 from paleo_workbench.mapping.reference_layers import ReferenceLayerError, ReferenceLayerService
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.layout_persistence import LayoutPersistence
 from paleo_workbench.ui.pages.map_attribute_table import MapAttributeTable
 from paleo_workbench.ui.pages.map_canvas_panel import MapCanvasPanel
 from paleo_workbench.ui.pages.map_chrome_panel import MapChromePanel
@@ -49,6 +50,7 @@ from paleo_workbench.ui.pages.map_dock_manager import MapDockManager, panel_icon
 from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
 from paleo_workbench.ui.pages.map_reference_panel import MapReferencePanel
 from paleo_workbench.ui.pages.map_workbench_bottom import MapWorkbenchBottom
+from paleo_workbench.ui.panel_float_controller import FloatController
 from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 from paleo_workbench.ui.map_action_controller import MapActionController, MapActionState
 from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
@@ -69,6 +71,22 @@ from paleo_workbench.ui.map_export_worker import snapshot_map_export, start_map_
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 
 logger = logging.getLogger(__name__)
+
+# Docked height cap for the bottom workbench (uncapped while floating).
+BOTTOM_DOCKED_MAX_HEIGHT = 220
+# Not exported by this PySide6 build; Qt's "no maximum size" sentinel.
+QWIDGETSIZE_MAX = 16777215
+
+# Namespaced FloatController keys of the mapping page's floatable panels and
+# the pseudo-panel key under which the dock splitter sizes are persisted.
+FLOAT_KEYS = (
+    "mapping:layers",
+    "mapping:reference",
+    "mapping:chrome",
+    "mapping:composer",
+    "mapping:bottom",
+)
+_DOCK_SPLITTER_KEY = "mapping:dock_splitter"
 
 
 class MappingPage(QWidget):
@@ -166,7 +184,8 @@ class MappingPage(QWidget):
         self.layer_tree_stack.addWidget(self.layer_tree)
         self._native_layer_tree = None
         self.dock_manager.add_panel(
-            "layers", "图层面板", "panel-layers", self.layer_tree_stack, side="left", checked=True
+            "layers", "图层面板", "panel-layers", self.layer_tree_stack,
+            side="left", checked=True, float_key="mapping:layers",
         )
 
         self.center_stack = QStackedWidget()
@@ -194,10 +213,12 @@ class MappingPage(QWidget):
 
         self.reference_panel = MapReferencePanel()
         self.dock_manager.add_panel(
-            "reference", "参考图面板", "panel-reference", self.reference_panel, side="right", checked=True
+            "reference", "参考图面板", "panel-reference", self.reference_panel,
+            side="right", checked=True, float_key="mapping:reference",
         )
         self.dock_manager.add_panel(
-            "chrome", "图面要素面板", "panel-chrome", self.chrome_panel, side="right", checked=False
+            "chrome", "图面要素面板", "panel-chrome", self.chrome_panel,
+            side="right", checked=False, float_key="mapping:chrome",
         )
         # Composition authoring (P0-D): template-driven professional layout
         # with component CRUD/undo and physical-size PNG/SVG/PDF export.
@@ -205,7 +226,8 @@ class MappingPage(QWidget):
 
         self.composition_panel = CompositionPanel()
         self.dock_manager.add_panel(
-            "composer", "组图面板", "panel-chrome", self.composition_panel, side="right", checked=False
+            "composer", "组图面板", "panel-chrome", self.composition_panel,
+            side="right", checked=False, float_key="mapping:composer",
         )
 
         # Rails sit outside the splitter so collapsing a docked panel area
@@ -223,6 +245,10 @@ class MappingPage(QWidget):
         mid_splitter.setStretchFactor(1, 1)
         mid_splitter.setStretchFactor(2, 0)
         mid_splitter.setSizes([300, 1000, 280])
+        self.mid_splitter = mid_splitter
+        self._last_dock_sizes = [300, 1000, 280]
+        self._dock_sizes_pending_restore = True
+        mid_splitter.splitterMoved.connect(self._save_dock_splitter_sizes)
         mid.addWidget(mid_splitter, 1)
         mid.addWidget(self.dock_manager.right_dock.rail, 0)
         outer.addLayout(mid, 1)
@@ -231,13 +257,52 @@ class MappingPage(QWidget):
         outer.addWidget(self.status_bar)
 
         self.bottom_workbench = MapWorkbenchBottom()
-        self.bottom_workbench.setMaximumHeight(220)
+        self.bottom_workbench.setMaximumHeight(BOTTOM_DOCKED_MAX_HEIGHT)
         self.attribute_table = self.bottom_workbench.attribute_table
-        self.attribute_table.setMaximumHeight(220)
+        self.attribute_table.setMaximumHeight(BOTTOM_DOCKED_MAX_HEIGHT)
         outer.addWidget(self.bottom_workbench, 0)
         self.dock_manager.register_bottom(
-            "bottom", "底部工作区", "panel-bottom", self.bottom_workbench, self._apply_mode_ui
+            "bottom", "底部工作区", "panel-bottom", self.bottom_workbench,
+            self._apply_mode_ui, float_key="mapping:bottom",
         )
+
+        # Panel floating: every registered dock panel plus the bottom
+        # workbench is floatable through the shared FloatController. The
+        # center canvas stack (MapEditView / UnifiedMapCanvas) is deliberately
+        # NOT resolvable, so the map viewport can never leave the splitter.
+        # Widget -> dock host mapping also drives dock-back recovery: our
+        # panels live inside dock areas / the page layout, not as direct
+        # splitter children, so _on_float_changed re-places them after the
+        # framework's generic reinsert.
+        self._float_panel_widgets = {
+            "mapping:layers": self.layer_tree_stack,
+            "mapping:reference": self.reference_panel,
+            "mapping:chrome": self.chrome_panel,
+            "mapping:composer": self.composition_panel,
+            "mapping:bottom": self.bottom_workbench,
+        }
+        self._float_panel_hosts = {
+            "mapping:layers": self.dock_manager.left_dock.area,
+            "mapping:reference": self.dock_manager.right_dock.area,
+            "mapping:chrome": self.dock_manager.right_dock.area,
+            "mapping:composer": self.dock_manager.right_dock.area,
+            "mapping:bottom": self,
+        }
+        self._layout_persistence = LayoutPersistence()
+        self.float_controller = FloatController(
+            resolver=self._float_panel_widgets.get,
+            persistence=self._layout_persistence,
+            title_for=self.dock_manager.panel_title,
+            parent=self,
+        )
+        self.dock_manager.attach_float_controller(self.float_controller)
+        # Dock-manager slot first (fixes up rail/menu state), then the page's
+        # dock-back recovery, caps and mode-visibility handling.
+        self.float_controller.float_changed.connect(self._on_float_changed)
+        # NOTE: restore_saved runs after the final _apply_mode_ui() below —
+        # a floating-window show there must not be resurrected by the launch
+        # visibility pass (and its showEvent would clobber a saved
+        # visible=False back to True).
 
         # Panels menu lives on the right end of the command strip.
         panels_button = QToolButton(self.map_toolbars)
@@ -325,7 +390,24 @@ class MappingPage(QWidget):
         self._sync_map_status()
         self._on_tool_changed(self.toolbar.current_tool())
         self._apply_mode_ui()
+        # Restore persisted float state after the launch visibility pass:
+        # everything docked is already in its final mode-derived state, and a
+        # restored floating window's show/hide now feeds the bottom
+        # preference through the mirror instead of being resurrected here.
+        for float_key in FLOAT_KEYS:
+            self.float_controller.restore_saved(float_key)
         self._emit_mapping_context()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._dock_sizes_pending_restore:
+            # Restore persisted dock splitter sizes at real geometry — a
+            # restore before first show is clamped by the un-laid-out splitter.
+            self._dock_sizes_pending_restore = False
+            sizes = self._saved_dock_splitter_sizes()
+            if len(sizes) == self.mid_splitter.count():
+                self.mid_splitter.setSizes(sizes)
+                self._last_dock_sizes = list(sizes)
 
     def is_dirty(self) -> bool:
         if self._presentation_dirty:
@@ -985,11 +1067,86 @@ class MappingPage(QWidget):
             self.preview_canvas_stack.setCurrentWidget(self.unified_canvas)
         # Bottom workbench visibility combines the user's panel-manager
         # preference with the mode flags (preview / canvas priority hide it).
-        self.bottom_workbench.setVisible(
+        # While floating, show/hide the floating window itself — hiding the
+        # bare widget inside a visible window would only draw an empty frame.
+        visible = (
             self.dock_manager.bottom_user_visible()
             and not self._canvas_priority
             and not self._preview_mode
         )
+        if self.dock_manager.is_floating("bottom"):
+            # Programmatic: routed through the manager so the visibility
+            # mirror knows this is not a user close.
+            self.dock_manager.set_bottom_window_visible(visible)
+        else:
+            self.bottom_workbench.setVisible(visible)
+
+    def _save_dock_splitter_sizes(self, *_args) -> None:
+        sizes = list(self.mid_splitter.sizes())
+        self._last_dock_sizes = sizes
+        self._layout_persistence.save_docked_sizes(_DOCK_SPLITTER_KEY, sizes)
+
+    def _on_float_changed(self, float_key: str, floating: bool) -> None:
+        """Dock-back recovery plus bottom-cap handling.
+
+        The mapping panels are not direct splitter children (they live inside
+        the dock areas) and the bottom workbench lives in the page layout, so
+        the framework's generic reinsert cannot fully restore them: place each
+        widget back into its registered host and re-apply the docked splitter
+        sizes. The bottom workbench also keeps its docked height cap only
+        while docked.
+        """
+        widget = self._float_panel_widgets.get(float_key)
+        if widget is None:
+            return
+        if floating:
+            if float_key == "mapping:bottom":
+                self._set_bottom_height_cap(QWIDGETSIZE_MAX)
+            return
+        host = self._float_panel_hosts[float_key]
+        host_layout = host.layout()
+        if host_layout is None or host_layout.indexOf(widget) < 0:
+            # The framework's generic reinsert leaves the widget parented to
+            # the host but outside its layout (or in the wrong container):
+            # put it back at its registered slot.
+            if host is self:
+                host_layout.addWidget(widget)
+            else:
+                # Dock areas add their panels with stretch 1.
+                host_layout.addWidget(widget, 1)
+            # The area may have collapsed while the panel was floating.
+            self.dock_manager.left_dock.sync_area_visibility()
+            self.dock_manager.right_dock.sync_area_visibility()
+            if float_key != "mapping:bottom":
+                # Reparenting through the mis-sized splitter can leave an
+                # explicit hide behind; the rail button is the visibility
+                # source of truth.
+                widget.setVisible(
+                    self.dock_manager.is_panel_visible(float_key.rpartition(":")[2])
+                )
+        if float_key == "mapping:bottom":
+            self._set_bottom_height_cap(BOTTOM_DOCKED_MAX_HEIGHT)
+            self._apply_mode_ui()
+        else:
+            sizes = self._saved_dock_splitter_sizes()
+            if len(sizes) == self.mid_splitter.count():
+                self.mid_splitter.setSizes(sizes)
+
+    def _saved_dock_splitter_sizes(self) -> list[int]:
+        """Best-known docked splitter sizes: the user's last drag arrangement
+        (persisted on splitterMoved), else the framework's pre-float snapshot,
+        else the in-memory default."""
+        record = self._layout_persistence.load(_DOCK_SPLITTER_KEY)
+        if record.docked_sizes:
+            return list(record.docked_sizes)
+        panel_record = self._layout_persistence.load("mapping:layers")
+        if panel_record.docked_sizes:
+            return list(panel_record.docked_sizes)
+        return list(self._last_dock_sizes)
+
+    def _set_bottom_height_cap(self, height: int) -> None:
+        self.bottom_workbench.setMaximumHeight(height)
+        self.attribute_table.setMaximumHeight(height)
 
     def _refresh_preview(self) -> None:
         self._refresh_unified_composition()
