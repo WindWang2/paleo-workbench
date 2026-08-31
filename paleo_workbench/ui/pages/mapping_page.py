@@ -277,6 +277,9 @@ class MappingPage(QWidget):
         self.bottom_workbench.factor_shelf.fault_interpretation_requested.connect(
             self._on_fault_interpretation_requested
         )
+        self.bottom_workbench.factor_shelf.map_product_requested.connect(
+            self._on_map_product_requested
+        )
         self.bottom_workbench.factor_shelf.factor_overlay_requested.connect(
             self._on_overlay_requested
         )
@@ -390,6 +393,94 @@ class MappingPage(QWidget):
         self._project_path = str(path) if path else None
         has = self._project_path is not None
         self.bottom_workbench.factor_shelf.fault_interpretation_btn.setEnabled(has)
+
+    def _on_map_product_requested(self) -> None:
+        """Assemble the multi-factor paleogeographic product (P1-D): valid
+        factor grids + interpretation refs + composition → ONE catalog
+        OUTPUT version with full lineage. Fail-closed; nothing is laundered."""
+        import json as _json
+        import tempfile
+        from PySide6.QtWidgets import QMessageBox
+
+        from paleo_workbench.workflow.map_product import (
+            MapProductAssembly,
+            assemble_map_product,
+        )
+
+        if self._project is None or not getattr(self, "_project_path", None):
+            QMessageBox.information(self, "古地理成果", "请先打开并保存工程。")
+            return
+        tasks = [
+            t
+            for t in (getattr(self._project, "factor_map_tasks", None) or [])
+            if getattr(t, "status", "") == "complete"
+            and getattr(t, "grid_artifact_version_id", None)
+            and str(getattr(t, "source_kind", "")) not in ("mock", "mixed")
+        ]
+        if not tasks:
+            QMessageBox.information(
+                self, "古地理成果", "没有可用的真实单因素成果（需完成插值并持久化网格版本）。"
+            )
+            return
+        service = None
+        try:
+            from paleo_workbench.catalog import get_catalog_service
+
+            service = get_catalog_service()
+        except Exception:
+            service = None
+        if service is None:
+            QMessageBox.information(self, "古地理成果", "未打开数据目录，无法注册成果版本。")
+            return
+        composition_ref = None
+        panel = getattr(self, "composition_panel", None)
+        document = panel.document() if panel is not None else None
+        if document is not None:
+            composition_ref = str(document.id)
+        interpretation_refs = [
+            str(ref.id)
+            for ref in (getattr(self._project, "horizon_interpretations", None) or [])
+        ]
+        assembly = MapProductAssembly(
+            product_name=f"{getattr(self._project.stratigraphy, 'target_horizon', '') or '综合'} 古地理成果图",
+            factor_task_ids=[str(t.id) for t in tasks],
+            interpretation_refs=interpretation_refs,
+            composition_ref=composition_ref,
+            notes="多因素古地理综合成果",
+        )
+        manifest = {
+            "product_name": assembly.product_name,
+            "factor_tasks": [
+                {
+                    "id": str(t.id),
+                    "name": str(t.name),
+                    "grid_version": str(t.grid_artifact_version_id),
+                }
+                for t in tasks
+            ],
+            "interpretation_refs": interpretation_refs,
+            "composition_ref": composition_ref,
+        }
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8"
+        ) as handle:
+            _json.dump(manifest, handle, ensure_ascii=False, indent=2)
+            staged = Path(handle.name)
+        try:
+            result = assemble_map_product(
+                self._project,
+                assembly=assembly,
+                catalog=service,
+                payload_path=staged,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "古地理成果", f"成果装配失败: {exc}")
+            return
+        QMessageBox.information(
+            self,
+            "古地理成果",
+            f"已注册古地理成果 OUTPUT 版本\n{len(tasks)} 个因素 · {len(interpretation_refs)} 项解释\n输出版本: {result.output_version_id[:18]}…",
+        )
 
     def _on_fault_interpretation_requested(self) -> None:
         """Lift the active map's break/fault polylines into a versioned fault
@@ -558,6 +649,42 @@ class MappingPage(QWidget):
     def _on_geological_factor_map_created(self, map_doc) -> None:
         self.load_project(self._project, project_crs=self._project_crs)
         self.contour_drafts_updated.emit()
+        self._sync_composition_bindings()
+
+    def _sync_composition_bindings(self) -> None:
+        """Resolve the composition's declarative data bindings from the
+        project's factor tasks (P1-D: factor maps drive professional layouts
+        through bindings, not copy-pasted values)."""
+        panel = getattr(self, "composition_panel", None)
+        if panel is None or self._project is None:
+            return
+        binding_context: dict = {}
+        for task in getattr(self._project, "factor_map_tasks", None) or []:
+            descriptor = getattr(task, "grid_metadata", None) or {}
+            stats = descriptor.get("statistics") or {}
+            if "min" not in stats or "max" not in stats:
+                continue
+            ramp_name = str(
+                (getattr(task, "parameters", None) or {}).get("color_ramp") or "viridis"
+            )
+            try:
+                from paleo_workbench.mapping.color_ramps import get_color_ramp
+
+                stops = tuple(
+                    (float(stop.position), str(stop.color))
+                    for stop in get_color_ramp(ramp_name).stops
+                )
+            except Exception:
+                stops = ((0.0, "#053061"), (0.5, "#f7f7f7"), (1.0, "#67001f"))
+            binding_context["factor.colorbar"] = {
+                "title": f"{task.name} ({descriptor.get('unit') or ''})".strip(),
+                "min": float(stats["min"]),
+                "max": float(stats["max"]),
+                "stops": stops,
+            }
+            break  # the active factor defines the primary colorbar binding
+        if binding_context:
+            panel.apply_bindings(binding_context)
 
     def _on_contour_draft_requested(self) -> None:
         """Schedule ContourDraft extraction and commit on the GUI thread."""

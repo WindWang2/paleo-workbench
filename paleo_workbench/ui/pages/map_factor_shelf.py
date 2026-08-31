@@ -24,6 +24,7 @@ class MapFactorShelf(QWidget):
     factor_overlay_requested = Signal(str)
     create_factor_map_requested = Signal()
     fault_interpretation_requested = Signal()
+    map_product_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -58,6 +59,15 @@ class MapFactorShelf(QWidget):
         )
         self.fault_interpretation_btn.clicked.connect(self.fault_interpretation_requested.emit)
         actions.addWidget(self.fault_interpretation_btn)
+
+        self.map_product_btn = QPushButton("装配古地理成果 (MapProduct)")
+        self.map_product_btn.setObjectName("PrimaryButton")
+        self.map_product_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        self.map_product_btn.setToolTip(
+            "多因素 + 解释 + 组图 → 一个带完整血缘的 OUTPUT 成果版本（拒绝合成数据）"
+        )
+        self.map_product_btn.clicked.connect(self.map_product_requested.emit)
+        actions.addWidget(self.map_product_btn)
         actions.addStretch(1)
         layout.addLayout(actions)
 
