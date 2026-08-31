@@ -56,13 +56,19 @@ def prepare_worker_count() -> int:
     Default 1: multi-factor reuse already amortises same-geometry work; NumPy
     kernels often oversubscribe when many groups run in parallel.  Override with
     ``PALEO_PREPARE_WORKERS`` (clamped 1..4).
+
+    P2-A: the env override still wins, but the final value is additionally
+    clamped by the ResourceGovernor's BACKGROUND_COMPUTE allowance so
+    factor preparation sheds cores under memory pressure.
     """
     raw = os.environ.get("PALEO_PREPARE_WORKERS", "1").strip()
     try:
         value = int(raw)
     except ValueError:
         value = 1
-    return max(1, min(4, value))
+    from paleo_workbench.runtime.governance import clamp_workers
+
+    return clamp_workers("background.compute", max(1, min(4, value)))
 
 
 @dataclass(frozen=True, slots=True)

@@ -531,10 +531,38 @@ class CoreCatalogAdapter:
         format: str = "",
         tags: list[str] | None = None,
     ) -> DataVersionRef:
+        # Directory-backed stores (zarr) are NOT single managed files: they
+        # register through the store path (structural fingerprint integrity)
+        # instead of the managed-file move. P2 attribute/inference providers
+        # rely on this branch.
+        from pathlib import Path
+
+        if Path(path).is_dir():
+            return self.register_derived_store(
+                name=name,
+                store_path=path,
+                run_id=run_id,
+                type=kind or None,
+                format=format or "zarr-v3",
+            )
         return self._register_produced(
             run_id, name, path, DataStage.DERIVED, kind, format, tags,
             checksum=checksum,
         )
+
+    def register_derived_store(self, *, name, store_path, run_id=None, parent_version_ids=(), type=None, format="zarr-v3", asset_metadata=None, version_metadata=None) -> DataVersionRef:
+        """Port-level view of the service's directory-store DERIVED path."""
+        version = self._service.register_derived_store(
+            name=name,
+            store_path=store_path,
+            run_id=run_id,
+            parent_version_ids=parent_version_ids,
+            type=type,
+            format=format,
+            asset_metadata=asset_metadata,
+            version_metadata=version_metadata,
+        )
+        return self._version_ref(version)
 
     # --------------------------------------------------------------- lineage
     def attach_lineage(

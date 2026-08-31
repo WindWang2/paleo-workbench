@@ -69,12 +69,23 @@ def _make_session(model_path: str | Path, prefer_gpu: bool):
     if prefer_gpu:
         providers.append("CUDAExecutionProvider")
     providers.append("CPUExecutionProvider")
+    sess_options = ort.SessionOptions()
+    # P2-A: ORT defaults its intra-op pool to every logical core; the
+    # governor's INFERENCE allowance keeps the GUI/OS reserve intact.
     try:
-        sess = ort.InferenceSession(str(model_path), providers=providers)
+        from paleo_workbench.runtime.resource_governor import get_governor
+
+        sess_options.intra_op_num_threads = get_governor().onnx_thread_allowance()
+    except Exception:
+        pass
+    try:
+        sess = ort.InferenceSession(str(model_path), providers=providers, sess_options=sess_options)
     except Exception:
         if not prefer_gpu:
             raise
-        sess = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
+        sess = ort.InferenceSession(
+            str(model_path), providers=["CPUExecutionProvider"], sess_options=sess_options
+        )
         return sess, "cpu"
     active = sess.get_providers()
     mode = "cuda" if any("CUDA" in p for p in active) else "cpu"

@@ -115,6 +115,26 @@ QT_QPA_PLATFORM=offscreen python -m pytest -q
 python -m pytest -q
 ```
 
+## Resource governance, Provider SDK & Agent Harness (P2)
+
+- **Global resource governance** (ADR 0064): one governor over the existing
+  TaskScheduler/ResourceBudget — admission control (CPU/RAM/VRAM/IO), memory
+  pressure states with cache relief, a dedicated interactive scheduler lane
+  (background I/O stays at concurrency 1), bounded priority aging, and runtime
+  telemetry (`paleo_workbench.runtime`).
+- **Capability Provider SDK** (ADR 0065, `paleo_workbench.providers`):
+  descriptor-driven providers over typed refs with schema validation,
+  registry isolation and DataRun provenance; built-ins wrap the production
+  interpolation engines, seismic attribute kernels, tiled ONNX inference, map
+  export and render backends. Extension example:
+  `docs/extension/provider-and-action-examples.md`.
+- **Geological Agent Harness** (ADR 0066, `paleo_workbench.harness`): 20
+  stable professional actions (workspace/well/seismic/map/geology/workflow)
+  behind a guarded executor (validate → permissions → context → admission →
+  execute → scientific/map verification), with vendor-agnostic
+  ToolSource/ChatModel protocols for any agent runtime. Agents never drive
+  UI, never touch SQLite, and every data output enters the catalog.
+
 ## QGIS renderer (primary authoring core, optional build)
 
 Per ADR 0059 the QGIS renderer is the **primary professional 2-D cartographic

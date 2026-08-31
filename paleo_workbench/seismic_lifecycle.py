@@ -212,6 +212,15 @@ class SeismicLifecycleService:
                 kind=TRANSCODE_KIND,
                 title=f"SEG-Y → Zarr ({raw_version_id})",
                 task_key=f"transcode/{raw_version_id}",
+                payload={
+                    # P2-A: admission estimates for the governor. Transcode
+                    # is sequential streaming IO: 1 core of orchestration,
+                    # in-flight window bounded by the streaming buffer.
+                    "resources": {
+                        "estimated_cpu_cores": 1.0,
+                        "io_weight": 4.0,
+                    }
+                },
                 on_done=on_done,
                 on_fail=on_fail,
                 on_cancel=on_cancel,
@@ -476,6 +485,14 @@ def start_attribute_job(
             kind="seismic.attribute",
             title=f"{attribute} full-volume ({source_version_id})",
             task_key=f"attribute/{attribute}/{source_version_id}",
+            payload={
+                # P2-A: banded attribute jobs are compute-bound with one
+                # banded IO stream per band group.
+                "resources": {
+                    "estimated_cpu_cores": 2.0,
+                    "io_weight": 1.0,
+                }
+            },
             on_done=on_done,
             on_fail=on_fail,
             on_cancel=on_cancel,

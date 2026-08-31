@@ -31,6 +31,7 @@ from __future__ import annotations
 import heapq
 import itertools
 import logging
+import os
 import threading
 import time
 import uuid
@@ -110,6 +111,7 @@ class TaskHandle:
     message: str = ""
     error: str | None = None
     result: Any = None
+    cancel_requested: bool = False  # cancel() raced the claim window
     submitted_at: float = field(default_factory=time.monotonic)
     started_at: float | None = None
     finished_at: float | None = None
@@ -119,18 +121,72 @@ class TaskHandle:
         return self.spec.task_key or self.task_id
 
 
+def default_background_nice() -> int:
+    """Budget-derived niceness for heavy lanes, read once at construction.
+
+    Reading the budget here (instead of defaulting to 0 and configuring
+    later) removes the start-up race: worker threads apply their niceness
+    at loop entry, before any task runs. ``background_nice`` is cumulative
+    per thread on Linux, so it is set exactly once per thread.
+    """
+    try:
+        from paleo_workbench.runtime.resource_budget import active_budget
+
+        return active_budget().background_nice
+    except Exception:
+        return 0
+
+
 class TaskScheduler:
-    """FIFO + priority scheduler with cooperative cancel and crash-safe work dirs."""
+    """FIFO + priority scheduler with cooperative cancel and crash-safe work dirs.
+
+    P2-A additions (all optional, inactive by default so the scheduler stays
+    usable standalone):
+
+    - **Admission hook** (:meth:`set_admission`): before a queued task starts,
+      the hook may reserve resources and return a lease-like object (with a
+      ``release()`` method). Returning a falsy value defers the task — it
+      stays queued and is retried; lower-priority admissible tasks may pass
+      it. The scheduler releases the lease when the task reaches a terminal
+      state. The :class:`ResourceGovernor` installs exactly such a hook.
+    - **Aging**: a task's effective priority grows while it waits
+      (``AGING_STEP`` per ``AGING_INTERVAL_S``, capped at ``AGING_MAX_BOOST``)
+      so a continuous stream of higher-priority interactive work cannot
+      starve background jobs forever.
+    - **Interactive lane** (``interactive_workers``): extra workers that only
+      pick interactive tasks (kinds classified as interactive by
+      :mod:`paleo_workbench.runtime.task_categories`). Background concurrency
+      stays ``max_workers`` (the #1081 contract — I/O-heavy work runs at
+      concurrency 1), while interactive submissions get their own worker and
+      meet the <50 ms queue-delay budget even while a long background task
+      is running.
+    """
 
     HISTORY_LIMIT = 200
+    AGING_INTERVAL_S = 5.0
+    AGING_STEP = 5
+    AGING_MAX_BOOST = 50
 
-    def __init__(self, *, max_workers: int = 1, work_root: str | Path | None = None):
+    def __init__(
+        self,
+        *,
+        max_workers: int = 1,
+        interactive_workers: int = 0,
+        work_root: str | Path | None = None,
+        is_interactive: Callable[[TaskSpec], bool] | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ):
         if max_workers < 1:
             raise ValueError("max_workers must be >= 1 (I/O-heavy default is 1)")
+        if interactive_workers < 0:
+            raise ValueError("interactive_workers must be >= 0")
         self.max_workers = max_workers
+        self.interactive_workers = interactive_workers
+        self._is_interactive = is_interactive
         self._work_root = Path(work_root) if work_root else None
         self._lock = threading.Lock()
         self._wakeup = threading.Event()
+        self._clock = clock
         # Heap entries: (-priority, seq, task_id). seq keeps FIFO order.
         self._heap: list[tuple[int, int, str]] = []
         self._seq = itertools.count()
@@ -140,15 +196,96 @@ class TaskScheduler:
         self._work_dirs: dict[str, Path] = {}
         self._threads: list[threading.Thread] = []
         self._shutdown = False
-        for _ in range(max_workers):
-            t = threading.Thread(target=self._worker_loop, name="paleo-heavy-task", daemon=True)
+        self._admission: Callable[[TaskSpec, str], Any] | None = None
+        self._leases: dict[str, Any] = {}
+        self._last_rekey = clock()
+        self._background_nice = default_background_nice()
+        for lane in range(max_workers + interactive_workers):
+            name = (
+                "paleo-interactive-task"
+                if lane >= max_workers
+                else "paleo-heavy-task"
+            )
+            t = threading.Thread(
+                target=self._worker_loop, name=name, daemon=True, args=(lane,)
+            )
             t.start()
             self._threads.append(t)
+
+    def _apply_background_nice(self) -> None:
+        """Yield background threads to interactive work under CPU contention.
+
+        Linux-only, best-effort: heavy-lane threads raise their niceness so
+        the OS favours the interactive lane when both want CPU. Failure is
+        silently ignored (platforms without per-thread nice keep old behaviour).
+        """
+        if self._background_nice <= 0:
+            return
+        try:
+            import sys
+
+            if sys.platform != "linux":
+                return
+            os.nice(self._background_nice)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+    def set_background_nice(self, nice: int) -> None:
+        """Configure OS niceness for heavy lanes.
+
+        Niceness is applied once per worker at loop entry and is cumulative
+        per thread on Linux, so this only affects workers that have not
+        started yet — configure through the budget (before scheduler
+        creation) in practice.
+        """
+        self._background_nice = max(0, int(nice))
+
+    # ---------------------------------------------------------- admission --
+    def set_admission(self, hook: Callable[[TaskSpec, str], Any] | None) -> None:
+        """Install/replace/clear the admission hook (lease protocol above).
+
+        The hook runs without the scheduler lock held; it must be fast
+        (counter checks, no IO) to keep the interactive queue-delay budget.
+        """
+        with self._lock:
+            self._admission = hook
+        self._wakeup.set()
+
+    def _release_lease(self, task_id: str) -> None:
+        with self._lock:
+            lease = self._leases.pop(task_id, None)
+        if lease is not None:
+            release = getattr(lease, "release", None)
+            if callable(release):
+                try:
+                    release()
+                except Exception:
+                    logger.exception("admission lease release failed for %s", task_id)
+
+    def _effective_priority(self, handle: TaskHandle) -> int:
+        """Base priority plus bounded aging so background work is not starved."""
+        wait = max(0.0, self._clock() - handle.submitted_at)
+        boost = min(
+            int(wait // self.AGING_INTERVAL_S) * self.AGING_STEP, self.AGING_MAX_BOOST
+        )
+        return handle.spec.priority + boost
+
+    def _rekey_heap_locked(self) -> None:
+        """Rebuild the heap with current effective priorities (seq preserved)."""
+        entries: list[tuple[int, str]] = []
+        while self._heap:
+            _, seq, tid = heapq.heappop(self._heap)
+            h = self._handles.get(tid)
+            if h is not None and h.state == TaskState.QUEUED:
+                entries.append((seq, tid))
+        for seq, tid in entries:
+            heapq.heappush(self._heap, (-self._effective_priority(self._handles[tid]), seq, tid))
+        self._last_rekey = self._clock()
 
     # ------------------------------------------------------------ submit --
     def submit(self, spec: TaskSpec) -> TaskHandle:
         task_id = uuid.uuid4().hex[:12]
-        handle = TaskHandle(task_id=task_id, spec=spec)
+        handle = TaskHandle(task_id=task_id, spec=spec, submitted_at=self._clock())
         key = handle.task_key
         with self._lock:
             if self._shutdown:
@@ -187,7 +324,14 @@ class TaskScheduler:
                 self._finish_locked(handle, TaskState.CANCELLED)
                 on_cancel = handle.spec.on_cancel
             else:
-                self._cancel_events[task_id].set()
+                # Claimed-but-not-yet-armed window: the event may not be
+                # registered yet — mark the handle so _run_task_inner arms
+                # an already-set event via the shared dict lookup below.
+                event = self._cancel_events.get(task_id)
+                if event is not None:
+                    event.set()
+                else:
+                    handle.cancel_requested = True
                 return True
         self._wakeup.set()
         if on_cancel is not None:
@@ -257,31 +401,111 @@ class TaskScheduler:
             shutil.rmtree(d, ignore_errors=True)
 
     # ------------------------------------------------------------ worker --
-    def _worker_loop(self) -> None:  # pragma: no cover - exercised via tests
+    def _task_is_interactive(self, spec: TaskSpec) -> bool:
+        """Lane classification: caller predicate, else the category policy."""
+        if self._is_interactive is not None:
+            try:
+                return bool(self._is_interactive(spec))
+            except Exception:
+                logger.exception("interactive predicate failed; treating as background")
+                return False
+        try:
+            from paleo_workbench.runtime.task_categories import category_for_kind, policy_for
+
+            return policy_for(category_for_kind(spec.kind)).interactive
+        except Exception:
+            return False
+
+    def _worker_loop(self, lane: int = 0) -> None:  # pragma: no cover - exercised via tests
+        interactive_only = lane >= self.max_workers
+        if not interactive_only:
+            self._apply_background_nice()
         while True:
+            skipped: list[tuple[int, int, str]] = []
+            candidates: list[tuple[int, int, str]] = []
+            admission = self._admission  # snapshot; hooks may swap mid-loop
             with self._lock:
                 if self._shutdown and not self._heap:
                     return
-                task_id = None
+                if self._heap and (self._clock() - self._last_rekey) >= self.AGING_INTERVAL_S / 2:
+                    self._rekey_heap_locked()
                 while self._heap:
-                    _, _, tid = heapq.heappop(self._heap)
+                    entry = heapq.heappop(self._heap)
+                    _, seq, tid = entry
                     h = self._handles.get(tid)
-                    if h is not None and h.state == TaskState.QUEUED:
-                        task_id = tid
-                        break
-                if task_id is None:
+                    if h is None or h.state != TaskState.QUEUED:
+                        continue
+                    if self._task_is_interactive(h.spec) != interactive_only:
+                        # Strict lanes: a long interactive task must never
+                        # block background work (and vice versa) — a lane
+                        # cannot take work it does not serve.
+                        skipped.append(entry)
+                        continue
+                    candidates.append(entry)
+                for entry in skipped:
+                    heapq.heappush(self._heap, entry)
+                for entry in candidates:
+                    heapq.heappush(self._heap, entry)
+                if not candidates:
                     self._wakeup.clear()
-            if task_id is None:
-                self._wakeup.wait(timeout=0.2)
+            # Admission runs WITHOUT the scheduler lock (documented contract):
+            # a slow hook must not serialize submissions or the other lane.
+            # Entries were pushed back above, so an unadmitted candidate
+            # simply stays queued; a claimed one is re-checked under the lock.
+            for entry in candidates:
+                _, seq, tid = entry
+                lease = None
+                if admission is not None:
+                    try:
+                        lease = admission(self._handles[tid].spec, tid)
+                    except Exception:
+                        logger.exception("admission hook failed for %s", tid)
+                    if not lease:
+                        continue
+                with self._lock:
+                    h = self._handles.get(tid)
+                    if h is None or h.state != TaskState.QUEUED:
+                        # Cancelled/claimed while we asked for admission —
+                        # release the lease we speculatively acquired.
+                        if lease is not None:
+                            release = getattr(lease, "release", None)
+                            if callable(release):
+                                try:
+                                    release()
+                                except Exception:
+                                    logger.exception("admission lease release failed for %s", tid)
+                        continue
+                    # Atomic claim: RUNNING lands inside this critical
+                    # section, so a second worker cannot double-claim and a
+                    # cancel() arriving now cooperates via the event instead
+                    # of racing the state transition.
+                    h.state = TaskState.RUNNING
+                    h.started_at = self._clock()
+                    if lease is not None:
+                        self._leases[tid] = lease
+                self._run_task(tid)
+                break
+            else:
+                # Deferred (unadmitted) candidates: poll faster than fresh
+                # submits wake us — a lease release may unblock them.
+                self._wakeup.wait(timeout=0.05 if candidates else 0.2)
                 continue
-            self._run_task(task_id)
+            continue
 
     def _run_task(self, task_id: str) -> None:
+        try:
+            self._run_task_inner(task_id)
+        finally:
+            self._release_lease(task_id)
+
+    def _run_task_inner(self, task_id: str) -> None:
         with self._lock:
             handle = self._handles[task_id]
-            handle.state = TaskState.RUNNING
-            handle.started_at = time.monotonic()
+            # State/started_at were set at claim time (atomic claim in the
+            # worker loop); here we only arm the cancel event + progress.
             ctx = TaskContext(task_id=task_id)
+            if handle.cancel_requested:
+                ctx.cancelled.set()  # cancel() fired in the claim window
             self._cancel_events[task_id] = ctx.cancelled
 
             def report(ratio: float, message: str) -> None:
@@ -341,7 +565,7 @@ class TaskScheduler:
 
     def _finish_locked(self, handle: TaskHandle, state: TaskState) -> None:
         handle.state = state
-        handle.finished_at = time.monotonic()
+        handle.finished_at = self._clock()
         self._active_keys.discard(handle.task_key)
         # Bounded history: drop the oldest finished handles.
         finished = [h for h in self._handles.values() if h.finished_at is not None]
@@ -387,11 +611,13 @@ _GLOBAL_LOCK = threading.Lock()
 
 
 def get_scheduler() -> TaskScheduler:
-    """Process-wide scheduler (I/O concurrency 1). Created lazily."""
+    """Process-wide scheduler: background I/O concurrency 1 (#1081) plus one
+    dedicated interactive lane (P2-A) so interactive submissions meet the
+    <50 ms queue-delay budget while a long background task is running."""
     global _GLOBAL
     with _GLOBAL_LOCK:
         if _GLOBAL is None:
-            _GLOBAL = TaskScheduler(max_workers=1)
+            _GLOBAL = TaskScheduler(max_workers=1, interactive_workers=1)
         return _GLOBAL
 
 

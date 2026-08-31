@@ -97,7 +97,12 @@ class ShardBox(NamedTuple):
 
 def default_workers() -> int:
     """Physical cores preferred (spec §2 says min(物理核−2, 8)); logical
-    cores are the fallback when psutil can't tell them apart."""
+    cores are the fallback when psutil can't tell them apart.
+
+    P2-A: the answer is additionally clamped by the ResourceGovernor's
+    TRANSCODE allowance so one transcode cannot claim the whole machine
+    when attribute/inference work is admitted too, and sheds cores under
+    memory pressure."""
     cpus: int | None = None
     try:
         import psutil
@@ -106,7 +111,9 @@ def default_workers() -> int:
     except Exception:
         cpus = None
     cpus = cpus or os.cpu_count() or 4
-    return max(1, min(cpus - 2, 8))
+    from paleo_workbench.runtime.governance import clamp_workers
+
+    return clamp_workers("seismic.transcode", max(1, min(cpus - 2, 8)))
 
 
 def shard_boxes(
@@ -379,7 +386,16 @@ def transcode_segy_to_zarr(
             # queue depth bounds in-flight slabs to ~workers x shard bytes.
             from queue import Queue
 
-            max_in_flight = max(2, min(n_workers, max(1, (1 << 30) // (
+            # P2-A: the in-flight window derives from the budget's streaming
+            # buffer cap (was a hardcoded 1 GiB) so pressure-time budget
+            # changes actually shrink the transcode working set.
+            try:
+                from paleo_workbench.runtime.resource_budget import active_budget
+
+                window_bytes = active_budget().streaming_buffer_bytes
+            except Exception:
+                window_bytes = 1 << 30
+            max_in_flight = max(2, min(n_workers, max(1, window_bytes // (
                 (todo[0].il1 - todo[0].il0) * (todo[0].xl1 - todo[0].xl0)
                 * (todo[0].t1 - todo[0].t0) * 4
             ))) if todo else 2)
