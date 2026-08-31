@@ -299,8 +299,10 @@ class MappingPage(QWidget):
         # Dock-manager slot first (fixes up rail/menu state), then the page's
         # dock-back recovery, caps and mode-visibility handling.
         self.float_controller.float_changed.connect(self._on_float_changed)
-        for float_key in FLOAT_KEYS:
-            self.float_controller.restore_saved(float_key)
+        # NOTE: restore_saved runs after the final _apply_mode_ui() below —
+        # a floating-window show there must not be resurrected by the launch
+        # visibility pass (and its showEvent would clobber a saved
+        # visible=False back to True).
 
         # Panels menu lives on the right end of the command strip.
         panels_button = QToolButton(self.map_toolbars)
@@ -388,6 +390,12 @@ class MappingPage(QWidget):
         self._sync_map_status()
         self._on_tool_changed(self.toolbar.current_tool())
         self._apply_mode_ui()
+        # Restore persisted float state after the launch visibility pass:
+        # everything docked is already in its final mode-derived state, and a
+        # restored floating window's show/hide now feeds the bottom
+        # preference through the mirror instead of being resurrected here.
+        for float_key in FLOAT_KEYS:
+            self.float_controller.restore_saved(float_key)
         self._emit_mapping_context()
 
     def showEvent(self, event) -> None:
@@ -1067,9 +1075,9 @@ class MappingPage(QWidget):
             and not self._preview_mode
         )
         if self.dock_manager.is_floating("bottom"):
-            panel = self.float_controller.floating_panel("mapping:bottom")
-            if panel is not None:
-                panel.setVisible(visible)
+            # Programmatic: routed through the manager so the visibility
+            # mirror knows this is not a user close.
+            self.dock_manager.set_bottom_window_visible(visible)
         else:
             self.bottom_workbench.setVisible(visible)
 

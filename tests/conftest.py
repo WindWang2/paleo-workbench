@@ -1,8 +1,23 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, QTimer
+from PySide6.QtCore import QCoreApplication, QEvent, QSettings, QTimer
 from PySide6.QtWidgets import QApplication
+
+
+@pytest.fixture(autouse=True, scope="session")
+def isolate_qsettings(tmp_path_factory):
+    """Keep QSettings-backed stores off the real user profile for the suite.
+
+    Default-constructed ``QSettings(organization, application)`` instances —
+    e.g. the workbench layout persistence — write to the user's real config
+    dir. Redirecting the default path to a session temp dir makes every test
+    hermetic suite-wide; tests that need stricter per-test isolation (or a
+    pre-seeded store) bind their own explicit ini on top.
+    """
+    settings_dir = tmp_path_factory.mktemp("qsettings")
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(settings_dir))
+    QSettings.setDefaultFormat(QSettings.Format.IniFormat)
 
 
 def pytest_configure(config):

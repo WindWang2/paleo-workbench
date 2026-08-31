@@ -1027,3 +1027,51 @@ def test_dock_splitter_sizes_persist_and_restore(qtbot):
     # The restore applies on first show, once the splitter has real geometry.
     assert list(restored.mid_splitter.sizes()) == saved
 
+
+def test_dock_back_after_floating_close_stays_hidden(qtbot):
+    """p2-1: a floating-window ✕ is a genuine user close — the mirror records
+    the preference, so dock-back must not resurrect the workbench while the
+    rail button and visibility menu action say hidden."""
+    page = _float_page(qtbot)
+    page.float_controller.toggle("mapping:bottom")
+    panel = page.float_controller.floating_panel("mapping:bottom")
+
+    panel.close()  # the window's ✕ / Alt+F4 path (close routes through hide)
+    assert page.dock_manager.panel_button("bottom").isChecked() is False
+    assert page.dock_manager.is_panel_visible("bottom") is False
+    assert page.dock_manager.bottom_user_visible() is False
+    assert page.bottom_workbench.isHidden() is False  # bare widget untouched
+
+    page.float_controller.toggle("mapping:bottom")  # dock back via float toggle
+    assert page.float_controller.is_floating("mapping:bottom") is False
+    assert page.bottom_workbench.isHidden() is True
+    assert page.dock_manager.panel_button("bottom").isChecked() is False
+    assert page.layout().indexOf(page.bottom_workbench) >= 0  # host recovered
+    # Rail toggle re-shows it (preference path still intact).
+    page.dock_manager.set_panel_visible("bottom", True)
+    assert page.bottom_workbench.isHidden() is False
+
+
+def test_launch_keeps_seeded_hidden_floating_bottom(qtbot, tmp_path):
+    """p2-2: a saved floating=True / visible=False bottom restores floating
+    but hidden, the rail reads hidden, and the launch sequence does not
+    clobber the persisted visible=False back to True."""
+    seed = QSettings(str(tmp_path / "layout.ini"), QSettings.Format.IniFormat)
+    seed.setValue("panel_layout/mapping:bottom/floating", True)
+    seed.setValue("panel_layout/mapping:bottom/visible", False)
+    seed.setValue("panel_layout/mapping:bottom/geometry", "120,120,480,360")
+    seed.sync()
+
+    page = _float_page(qtbot)
+
+    assert page.float_controller.is_floating("mapping:bottom") is True
+    assert page.dock_manager.panel_button("bottom").isChecked() is False
+    assert page.dock_manager.is_panel_visible("bottom") is False
+    assert page.dock_manager.bottom_user_visible() is False
+    assert page.float_controller.floating_panel("mapping:bottom").isHidden() is True
+    # Un-capped: the floating window carries no docked height cap even hidden.
+    assert page.bottom_workbench.maximumHeight() == QWIDGETSIZE_MAX
+
+    after = QSettings(str(tmp_path / "layout.ini"), QSettings.Format.IniFormat)
+    assert after.value("panel_layout/mapping:bottom/visible", True, type=bool) is False
+    assert after.value("panel_layout/mapping:bottom/floating", False, type=bool) is True

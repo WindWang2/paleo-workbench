@@ -102,6 +102,7 @@ class MapDockManager(QObject):
         self._bottom_widget: QWidget | None = None
         self._bottom_apply = None
         self._bottom_user_visible = True
+        self._bottom_programmatic = False
         self._float_controller: FloatController | None = None
 
     def attach_float_controller(self, controller: FloatController) -> None:
@@ -194,6 +195,23 @@ class MapDockManager(QObject):
     def bottom_user_visible(self) -> bool:
         return self._bottom_user_visible
 
+    def set_bottom_window_visible(self, visible: bool) -> None:
+        """Programmatic (preference/mode-derived) visibility for a floating
+        bottom workbench window.
+
+        The visibility mirror ignores this transition — it is not a user
+        close, so it must not write back into ``_bottom_user_visible`` (the
+        apply callback would otherwise fight the mode that caused the hide).
+        """
+        self._bottom_programmatic = True
+        try:
+            if self._float_controller is not None:
+                panel = self._float_controller.floating_panel(self._float_key("bottom"))
+                if panel is not None:
+                    panel.setVisible(bool(visible))
+        finally:
+            self._bottom_programmatic = False
+
     def panel_title(self, key: str) -> str:
         """Display title for a panel key or float key (the floating window's title)."""
         entry = self._panels.get(key)
@@ -258,7 +276,11 @@ class MapDockManager(QObject):
 
     def _show_rail_menu(self, key: str, pos) -> None:
         button = self._panels[key]["button"]
-        self.rail_context_menu(key).exec(button.mapToGlobal(pos))
+        menu = self.rail_context_menu(key)
+        # Right-click menus are transient: delete menu + actions on close
+        # instead of leaking one pair per right-click.
+        menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        menu.exec(button.mapToGlobal(pos))
 
     def _float_menu_action(self, parent: QObject, key: str) -> QAction:
         """Checkable 浮动 toggle for one panel, shared by menu and context menu."""
@@ -332,11 +354,14 @@ class MapDockManager(QObject):
 
         FloatingPanel reports visibility from showEvent/hideEvent; the rail
         button keeps meaning "panel visible", so a window hidden outside the
-        rail (hide button, Alt+F4, restore, mode-forced hide) unchecks it —
-        and a re-shown window checks it again. This mirrors state only: it
-        must not re-trigger the rail toggled path (the bottom workbench's
-        apply callback would read the mirrored button as a user preference
-        change and fight the mode that caused the hide).
+        rail unchecks it — and a re-shown window checks it again. This mirrors
+        state without re-triggering the rail toggled path. For the bottom
+        workbench, whose visibility preference lives in this manager, a
+        *genuine* user close/open of the window (✕ / Alt+F4) is a preference
+        change and feeds ``_bottom_user_visible``; programmatic transitions
+        (the page's apply callback deriving visibility from the preference
+        and mode flags) are skipped via the re-entrancy guard so the mirror
+        cannot fight the mode that caused the hide.
         """
         key = self._key_for_float_key(float_key)
         if key is None:
@@ -349,6 +374,10 @@ class MapDockManager(QObject):
             button.blockSignals(False)
             self._sync_menu_action(key, bool(visible))
             self.panel_toggled.emit(key, bool(visible))
+        if entry["dock"] is None and not self._bottom_programmatic:
+            self._bottom_user_visible = bool(visible)
+            if self._bottom_apply is not None:
+                self._bottom_apply()
 
     def _sync_float_menu_action(self, key: str, floating: bool) -> None:
         action = self._panels[key].get("float_menu_action")
