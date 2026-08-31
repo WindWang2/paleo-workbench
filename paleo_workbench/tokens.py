@@ -1,94 +1,127 @@
 """Design tokens for the AppShell — single source of truth.
 
-All values extracted from the standalone prototype via headless browser
-computed-CSS inspection. See docs/superpowers/specs/2026-07-05-appshell-design.md.
+「Stratum」design language (M1 design-system overhaul): a geological-field
+identity for the workstation. The previous slate/ArcGIS look is replaced by
+
+* warm paper canvas (``BG_BODY``  porcelain, not cool gray),
+* petrol-ink primary + burnt-copper accent (stratigraphic ink & mineral),
+* a *dark petrol icon rail anchored in all three themes* — nav icons stay
+  legible without per-theme icon swaps (the old sheet shipped black
+  ``currentColor`` icons on a near-black dark-theme rail),
+* crisper technical radii (4/8px) and an airier spacing rhythm.
+
+Every theme — light / dark / high_contrast — is a curated palette of the
+same token vocabulary resolved through :func:`palette_for`; the stylesheet
+below is rendered from that palette by :func:`build_qss`. Structural tokens
+(metrics, spacing, type scale) are shared; color-carrying tokens are
+overridden per theme. WCAG: badge chips keep white-text ratios ≥ 4.5:1 and
+all primary text pairs improve on the old slate sheet (pinned in
+``tests/test_tokens.py``).
 """
 from __future__ import annotations
 
-# Slate 石墨专业调色板 (ArcGIS Pro 浅色质感): 深板岩蓝主色 + 天青强调。
-PRIMARY = "#334155"        # 深板岩蓝 — 主色 / 强调控件 / 激活态
-ACCENT = "#0ea5e9"         # 天青 — hover 强调 / 微交互高光
-SUCCESS = "#059669"
-WARNING = "#d97706"
-ERROR = "#dc2626"          # general error color
+# ---------------------------------------------------------------------------
+# Stratum palette — signal colors
+# ---------------------------------------------------------------------------
+PRIMARY = "#0c3f3b"        # 石化墨绿 — 主色 / 激活态 / 主按钮
+ACCENT = "#c2410c"         # 烧铜 — 焦点环 / hover 高光 / 导航指示条
+SUCCESS = "#15803d"
+WARNING = "#b45309"
+ERROR = "#d31f1f"          # general error color
 ERROR_RED = "#b91c1c"      # severe/QC error color
-TEAL = "#0d9488"
-# UI 框架背景层（浅色）
-BG_BODY = "#f1f5f9"        # 冷灰 — 页面画布区底色
-BG_HEADER = "#ffffff"
-BG_SIDEBAR = "#ffffff"
-BG_SEARCH = "#f1f5f9"      # 输入框 / hover 底色
-BG_RAIL = "#ffffff"
-BG_RAIL_GRADIENT = "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f8fafc)"
-BG_RAIL_TOP = "#ffffff"
-BG_RAIL_BOTTOM = "#f8fafc"
-TEXT_PRIMARY = "#0f172a"
-TEXT_SECONDARY = "#475569"
-TEXT_DARK = "#020617"
-TEXT_ON_RAIL = "#475569"
-TEXT_ON_RAIL_ACTIVE = "#334155"
-BORDER = "#e2e8f0"
-BORDER_STRONG = "#cbd5e1"
-BORDER_LIGHT = "#f1f5f9"
+TEAL = "#0f766e"
+# UI 框架背景层（浅色 = 暖纸面）
+BG_BODY = "#f6f3ec"        # 暖瓷 — 页面画布区底色
+BG_HEADER = "#fbf8f1"
+BG_SIDEBAR = "#fffdf9"
+BG_SEARCH = "#efe9db"      # 输入框 / hover / 下沉底色
+# 图标栏在三套主题下均为深色石板（导航图标无需随主题换色）
+BG_RAIL = "#132a28"
+BG_RAIL_GRADIENT = "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #16302c, stop:1 #0e211e)"
+BG_RAIL_TOP = "#16302c"
+BG_RAIL_BOTTOM = "#0e211e"
+TEXT_PRIMARY = "#141210"
+TEXT_SECONDARY = "#514c45"
+TEXT_DARK = "#0f0d0b"
+TEXT_ON_RAIL = "#b9cec8"           # 深色栏上的次要文字
+TEXT_ON_RAIL_ACTIVE = "#f2f7f5"    # 深色栏上的激活文字
+BORDER = "#e2dac8"                 # 暖色发丝线
+BORDER_STRONG = "#cec4ac"
+BORDER_LIGHT = "#eee8d9"
 
 # 数据画布深色区语义令牌（地图编辑 / 3D 视口 / 地震剖面背景）
-BG_CANVAS = "#1e293b"                # 画布深色底
-BG_CANVAS_PANEL = "rgba(15, 23, 42, 0.88)"   # 画布上浮层栏
-TEXT_ON_CANVAS = "#f1f5f9"           # 画布上文字
-BORDER_CANVAS = "rgba(51, 65, 85, 0.85)"     # 画布上边框
+BG_CANVAS = "#131d1b"                # 画布深色底（石板绿调）
+BG_CANVAS_PANEL = "rgba(10, 16, 15, 0.88)"   # 画布上浮层栏
+TEXT_ON_CANVAS = "#eef4f1"           # 画布上文字
+BORDER_CANVAS = "rgba(120, 146, 140, 0.55)"  # 画布上边框
 # QSS 内联语义色（菜单/nav 激活底 / 表格选中）
-BG_NAV_ACTIVE = "#e2e8f0"            # 冷灰中性激活底（非蓝调）
-BG_MENU_HOVER = "#f1f5f9"
-BG_SELECTION = "#dbeafe"             # 表格选中（天青浅）
-# 徽章专用深色（配白字达 WCAG 3:1+；主 WARNING/SUCCESS 用于正文文字色用浅色）
-BADGE_WARNING = "#b45309"            # white-on ≈ 4.0:1
-BADGE_SUCCESS = "#047857"            # white-on ≈ 4.5:1
-BADGE_PRIMARY = "#1e40af"            # white-on ≈ 7.4:1
+BG_NAV_ACTIVE = "#eae2cd"            # 暖沙中性激活底
+BG_MENU_HOVER = "#f1ebdc"
+BG_SELECTION = "#f3e3d3"             # 表格选中（铜洗暖色）
+# 徽章专用深色（配白字达 WCAG ≥ 4.5:1；主 WARNING/SUCCESS 用于正文文字色）
+BADGE_WARNING = "#92400e"            # white-on ≈ 7.1:1
+BADGE_SUCCESS = "#166534"            # white-on ≈ 7.1:1
+BADGE_PRIMARY = "#134e4a"            # white-on ≈ 9.5:1
 
-PRIMARY_HOVER = "#1e293b"
-PRIMARY_PRESSED = "#0f172a"
-PRIMARY_DISABLED = "#94a3b8"
+PRIMARY_HOVER = "#09302c"
+PRIMARY_PRESSED = "#062220"
+PRIMARY_DISABLED = "#a49d8e"
+# 主色面上的文字色（浅色主题=白，深色主题=深墨，高对比=白）
+ON_PRIMARY = "#ffffff"
+
+# 图标栏交互态（深色栏专用，三主题各自策展）
+BG_RAIL_HOVER = "#1b3632"
+BG_RAIL_ACTIVE = "#24514b"
+RAIL_SEPARATOR = "rgba(185, 206, 200, 0.35)"
+
+# 工具提示 / 分隔手柄（主题感知，修复旧深色主题下浅字浅底的提示框）
+TOOLTIP_BG = "#2b2622"
+TOOLTIP_TEXT = "#f6f1e7"
+SPLITTER_HANDLE = "rgba(122, 112, 94, 0.40)"
+SPLITTER_HANDLE_HOVER = "rgba(194, 65, 12, 0.45)"
+
 FOCUS_RING = ACCENT
 
 # Glassmorphism & Micro-interaction Tokens
-BG_GLASS = "rgba(255, 255, 255, 0.88)"
-BG_GLASS_BORDER = "rgba(255, 255, 255, 0.6)"
-SHADOW_SOFT = "0 4px 16px rgba(15, 23, 42, 0.08)"
-SHADOW_CARD = "0 2px 8px rgba(15, 23, 42, 0.05)"
-SHADOW_CARD_HOVER = "0 6px 20px rgba(14, 165, 233, 0.14)"
-HOVER_GLOW = "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(14, 165, 233, 0.08), stop:1 rgba(51, 65, 85, 0.04))"
+BG_GLASS = "rgba(255, 253, 249, 0.88)"
+BG_GLASS_BORDER = "rgba(255, 255, 255, 0.55)"
+SHADOW_SOFT = "0 4px 16px rgba(41, 35, 26, 0.10)"
+SHADOW_CARD = "0 2px 8px rgba(41, 35, 26, 0.06)"
+SHADOW_CARD_HOVER = "0 6px 20px rgba(194, 65, 12, 0.16)"
+HOVER_GLOW = "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(194, 65, 12, 0.08), stop:1 rgba(12, 63, 59, 0.05))"
 
-FONT_FAMILY = '"PingFang SC", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", sans-serif'
+FONT_FAMILY = '"Inter", "SF Pro Text", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif'
 # Modular type scale (base 13px, Minor Third 1.2): ms(-2)=9, ms(-1)=11, ms(0)=13.
-# Professional GIS density: 13px body (not 16px); title distinguished by weight.
+# Professional GIS density: 13px body (not 16px); title distinguished by
+# weight 700 + one step up (14px) for stronger hierarchy than the old sheet.
 FONT_SIZE_BASE = "13px"              # ms(0) — 正文 / 默认
 FONT_SIZE_STATUS = "11px"            # ms(-1) — 状态栏 / 次要 / 徽章
-FONT_SIZE_SIDEBAR_SECONDARY = "11px"  # ms(-1) — 对齐刻度（原 10.5）
+FONT_SIZE_SIDEBAR_SECONDARY = "11px"  # ms(-1) — 对齐刻度
 FONT_SIZE_NAV_LABEL = "9px"          # ms(-2) — 导航标签
-FONT_WEIGHT_NAV_LABEL = "500"
-FONT_SIZE_TITLE = "13px"             # ms(0) — 标题靠 weight(600) 区分，非 size
-FONT_WEIGHT_TITLE = "600"
+FONT_WEIGHT_NAV_LABEL = "600"        # 加重以在深色栏上保持小字可读
+FONT_SIZE_TITLE = "14px"             # ms(0)+1 — 面板标题抬升一档
+FONT_WEIGHT_TITLE = "700"
 
-MENU_BAR_HEIGHT = 36
-HEADER_TOOLBAR_HEIGHT = 36
-ICON_RAIL_WIDTH = 60
-TEXT_SIDEBAR_WIDTH = 248
-STATUS_BAR_HEIGHT = 24
-ICON_RAIL_ITEM_SIZE = 46
-RADIUS_BUTTON = 6
-RADIUS_CARD = 10
-RADIUS_BADGE = 8
-RADIUS_PANEL = 10
-RADIUS_NAV_ITEM = 8
+MENU_BAR_HEIGHT = 40
+HEADER_TOOLBAR_HEIGHT = 40
+ICON_RAIL_WIDTH = 64
+TEXT_SIDEBAR_WIDTH = 256
+STATUS_BAR_HEIGHT = 26
+ICON_RAIL_ITEM_SIZE = 48
+RADIUS_BUTTON = 4
+RADIUS_CARD = 8
+RADIUS_BADGE = 4
+RADIUS_PANEL = 8
+RADIUS_NAV_ITEM = 10
 
 SPACE_1 = 4
 SPACE_2 = 8
 SPACE_3 = 12
-SPACE_4 = 16
-PAGE_MARGIN = 12
-PANEL_PADDING = 10
-CONTROL_HEIGHT = 28
-CONTROL_HEIGHT_LG = 32
+SPACE_4 = 20
+PAGE_MARGIN = 16
+PANEL_PADDING = 12
+CONTROL_HEIGHT = 30
+CONTROL_HEIGHT_LG = 34
 
 ICON_FILES = [
     "home.svg", "data.svg", "well-log.svg", "seismic.svg", "sequence.svg",
@@ -117,7 +150,8 @@ PAGE_DESCRIPTIONS = [
     "井震联合 3D 视口与 Time 连井剖面",
 ]
 
-STEP_COLORS = ["#334155", "#0ea5e9", "#6366f1", WARNING, "#e2705b", "#7e8794"]
+# 工作流阶段色（白字徽章底色，全部 ≥ 4.5:1）
+STEP_COLORS = ["#0c3f3b", "#c2410c", "#4a5899", "#4d6b2f", "#a44a3f", "#5d564b"]
 STEP_LABELS = [
     "数据管理", "数据转换", "制图数据制备",
     "沉积相预测", "古地理图编制", "质控与导出",
@@ -195,76 +229,104 @@ SYSTEMS_TRACT_LABELS = ["LST", "TST", "HST"]
 
 
 # ---------------------------------------------------------------------------
-# Theme palettes (#1047): one token vocabulary, three curated palettes.
-# LIGHT is the extracted production look; DARK / HIGH_CONTRAST override the
+# Theme palettes: one token vocabulary, three curated palettes.
+# LIGHT is the Stratum production look; DARK / HIGH_CONTRAST override the
 # color-carrying tokens while inheriting every structural token unchanged.
+# The icon rail stays dark in all three themes so one nav icon set serves
+# every theme without recoloring.
 # ---------------------------------------------------------------------------
 
 _DARK_OVERRIDES = {
-    "PRIMARY": "#94a3b8",
-    "ACCENT": "#38bdf8",
-    "BG_BODY": "#0f1216",
-    "BG_HEADER": "#161b22",
-    "BG_SIDEBAR": "#161b22",
-    "BG_SEARCH": "#1f2630",
-    "BG_RAIL": "#12161c",
+    "PRIMARY": "#2dd4bf",            # 亮石化青 — 深底上的主色/文字/按钮底
+    "ACCENT": "#e8863d",             # 亮铜 — 深底上的焦点/hover
+    "ON_PRIMARY": "#06201d",         # 亮主色按钮上用深墨字（GitHub-dark 式）
+    "BG_BODY": "#0e1514",
+    "BG_HEADER": "#141c1b",
+    "BG_SIDEBAR": "#151d1c",
+    "BG_SEARCH": "#1d2624",
+    "BG_RAIL": "#0a1211",
     "BG_RAIL_GRADIENT": (
-        "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #161b22, stop:1 #0f1216)"
+        "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0f1a18, stop:1 #0a1211)"
     ),
-    "BG_RAIL_TOP": "#161b22",
-    "BG_RAIL_BOTTOM": "#0f1216",
-    "TEXT_PRIMARY": "#e6edf3",
-    "TEXT_SECONDARY": "#9aa7b4",
-    "TEXT_DARK": "#f8fafc",
-    "TEXT_ON_RAIL": "#9aa7b4",
-    "TEXT_ON_RAIL_ACTIVE": "#e6edf3",
-    "BORDER": "#2b333d",
-    "BORDER_STRONG": "#3d4753",
-    "BORDER_LIGHT": "#222932",
-    "BG_CANVAS": "#0b0e13",
-    "BG_CANVAS_PANEL": "rgba(13, 17, 23, 0.9)",
-    "TEXT_ON_CANVAS": "#e6edf3",
-    "BORDER_CANVAS": "rgba(61, 71, 83, 0.85)",
-    "BG_NAV_ACTIVE": "#2b333d",
-    "BG_MENU_HOVER": "#1f2630",
-    "BG_SELECTION": "#1e3a5f",
-    "BADGE_WARNING": "#d97706",
-    "BADGE_SUCCESS": "#059669",
-    "BADGE_PRIMARY": "#3b82f6",
-    "PRIMARY_HOVER": "#1f2630",
-    "PRIMARY_PRESSED": "#2b333d",
-    "PRIMARY_DISABLED": "#4b5563",
-    "BG_GLASS": "rgba(22, 27, 34, 0.9)",
-    "BG_GLASS_BORDER": "rgba(42, 50, 60, 0.6)",
+    "BG_RAIL_TOP": "#0f1a18",
+    "BG_RAIL_BOTTOM": "#0a1211",
+    "BG_RAIL_HOVER": "#16221f",
+    "BG_RAIL_ACTIVE": "#1c3a36",
+    "RAIL_SEPARATOR": "rgba(169, 195, 189, 0.30)",
+    "TEXT_PRIMARY": "#e8ece9",
+    "TEXT_SECONDARY": "#a8b5b0",
+    "TEXT_DARK": "#f2f5f2",
+    "TEXT_ON_RAIL": "#a9c3bd",
+    "TEXT_ON_RAIL_ACTIVE": "#e8f4f1",
+    "BORDER": "#2b3432",
+    "BORDER_STRONG": "#3c4744",
+    "BORDER_LIGHT": "#202927",
+    "BG_CANVAS": "#0b1110",
+    "BG_CANVAS_PANEL": "rgba(9, 14, 13, 0.9)",
+    "TEXT_ON_CANVAS": "#e8ece9",
+    "BORDER_CANVAS": "rgba(78, 94, 90, 0.60)",
+    "BG_NAV_ACTIVE": "#24302d",
+    "BG_MENU_HOVER": "#1d2624",
+    "BG_SELECTION": "#1f403c",
+    "BADGE_WARNING": "#b45309",      # white-on ≈ 5.0:1（深色面板上 ≥ 3:1）
+    "BADGE_SUCCESS": "#15803d",
+    "BADGE_PRIMARY": "#0f766e",
+    "PRIMARY_HOVER": "#5adcc9",
+    "PRIMARY_PRESSED": "#1fa898",
+    "PRIMARY_DISABLED": "#455350",
+    "FOCUS_RING": "#e8863d",
+    "TOOLTIP_BG": "#0a1211",
+    "TOOLTIP_TEXT": "#e8ece9",
+    "SPLITTER_HANDLE": "rgba(120, 140, 134, 0.45)",
+    "SPLITTER_HANDLE_HOVER": "rgba(232, 134, 61, 0.50)",
+    "BG_GLASS": "rgba(21, 29, 28, 0.90)",
+    "BG_GLASS_BORDER": "rgba(60, 71, 68, 0.55)",
 }
 
 _HIGH_CONTRAST_OVERRIDES = {
     "PRIMARY": "#000000",
     "ACCENT": "#005fd0",
+    "ON_PRIMARY": "#ffffff",
     "BG_BODY": "#ffffff",
     "BG_HEADER": "#ffffff",
     "BG_SIDEBAR": "#ffffff",
     "BG_SEARCH": "#ffffff",
-    "BG_RAIL": "#ffffff",
-    "BG_RAIL_GRADIENT": "none",
-    "BG_RAIL_TOP": "#ffffff",
-    "BG_RAIL_BOTTOM": "#ffffff",
+    "BG_RAIL": "#000000",
+    # solid-black gradient: "none" would paint the rail transparent and hide
+    # the light-stroke nav icons — the rail must stay a dark surface in HC too
+    "BG_RAIL_GRADIENT": (
+        "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #000000, stop:1 #000000)"
+    ),
+    "BG_RAIL_TOP": "#000000",
+    "BG_RAIL_BOTTOM": "#000000",
+    "BG_RAIL_HOVER": "#1f1f1f",
+    "BG_RAIL_ACTIVE": "#ffffff",
+    "RAIL_SEPARATOR": "rgba(255, 255, 255, 0.60)",
     "TEXT_PRIMARY": "#000000",
     "TEXT_SECONDARY": "#1a1a1a",
     "TEXT_DARK": "#000000",
-    "TEXT_ON_RAIL": "#000000",
+    "TEXT_ON_RAIL": "#ffffff",
     "TEXT_ON_RAIL_ACTIVE": "#000000",
     "BORDER": "#000000",
     "BORDER_STRONG": "#000000",
     "BORDER_LIGHT": "#000000",
+    "BG_CANVAS": "#000000",
+    "BG_CANVAS_PANEL": "rgba(0, 0, 0, 0.95)",
+    "TEXT_ON_CANVAS": "#ffffff",
+    "BORDER_CANVAS": "rgba(255, 255, 255, 0.90)",
     "BG_NAV_ACTIVE": "#e0e0e0",
     "BG_MENU_HOVER": "#f0f0f0",
-    "BG_SELECTION": "#cfe4ff",
-    "PRIMARY_HOVER": "#e0e0e0",
-    "PRIMARY_PRESSED": "#cfe0ef",
+    "BG_SELECTION": "#e0e0e0",
+    "PRIMARY_HOVER": "#262626",
+    "PRIMARY_PRESSED": "#404040",
     "PRIMARY_DISABLED": "#757575",
+    "FOCUS_RING": "#005fd0",
+    "TOOLTIP_BG": "#ffffff",
+    "TOOLTIP_TEXT": "#000000",
+    "SPLITTER_HANDLE": "rgba(0, 0, 0, 0.60)",
+    "SPLITTER_HANDLE_HOVER": "rgba(0, 95, 208, 0.80)",
     "BG_GLASS": "rgba(255, 255, 255, 0.96)",
-    "BG_GLASS_BORDER": "rgba(0, 0, 0, 0.8)",
+    "BG_GLASS_BORDER": "rgba(0, 0, 0, 0.80)",
 }
 
 _THEME_OVERRIDES = {
@@ -277,7 +339,7 @@ _THEME_OVERRIDES = {
 def palette_for(theme: str = "light") -> dict:
     """Full token palette for *theme* (``light`` / ``dark`` / ``high_contrast``).
 
-    Light is the extracted production palette itself; the other themes are
+    Light is the Stratum production palette itself; the other themes are
     curated overrides of the same token names — never a separate vocabulary.
     """
     key = str(theme).lower().replace("-", "_")
@@ -297,7 +359,7 @@ def palette_for(theme: str = "light") -> dict:
 
 
 def build_qss(density: str = "comfortable", theme: str = "light") -> str:
-    """Render the application stylesheet from the *theme* palette (#1047).
+    """Render the application stylesheet from the *theme* palette.
 
     The stylesheet below is the single production sheet; every theme
     (light / dark / high_contrast) is a palette of the same token
@@ -312,6 +374,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     btn_height = 30 if density == "comfortable" else 24
 
     return f'''
+    /* ── Stratum base ─────────────────────────────────────────────── */
     QWidget {{
         font-family: {t.FONT_FAMILY};
         color: {t.TEXT_PRIMARY};
@@ -350,8 +413,9 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     }}
     QPushButton#PrimaryButton {{
         background-color: {t.PRIMARY};
-        color: #ffffff;
+        color: {t.ON_PRIMARY};
         border: 1px solid {t.PRIMARY};
+        font-weight: 600;
     }}
     QPushButton#PrimaryButton:hover {{
         background-color: {t.PRIMARY_HOVER};
@@ -373,7 +437,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         border-radius: {t.RADIUS_BUTTON}px;
         padding: {padding_y}px {padding_x}px;
         selection-background-color: {t.PRIMARY};
-        selection-color: #ffffff;
+        selection-color: {t.ON_PRIMARY};
         min-height: {t.CONTROL_HEIGHT}px;
     }}
     QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{
@@ -401,7 +465,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     QComboBox QAbstractItemView::item {{
         min-height: 26px;
         padding: 2px 8px;
-        border-radius: 4px;
+        border-radius: 3px;
     }}
     QCheckBox, QRadioButton {{
         background: transparent;
@@ -414,7 +478,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         border: 1px solid {t.BORDER_STRONG};
     }}
     QCheckBox::indicator {{
-        border-radius: 4px;
+        border-radius: 3px;
     }}
     QRadioButton::indicator {{
         border-radius: 8px;
@@ -445,7 +509,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     QToolButton {{
         background-color: transparent;
         border: 1px solid transparent;
-        border-radius: 5px;
+        border-radius: 4px;
         padding: 3px;
     }}
     QToolButton:hover {{
@@ -466,7 +530,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     }}
     QTableWidget, QTreeView, QListView, QTableView {{
         background-color: {t.BG_SIDEBAR};
-        alternate-background-color: {t.BG_RAIL_BOTTOM};
+        alternate-background-color: {t.BG_BODY};
         border: 1px solid {t.BORDER};
         border-radius: {t.RADIUS_CARD}px;
         gridline-color: {t.BORDER_LIGHT};
@@ -478,7 +542,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         padding: 4px 6px;
     }}
     QTreeView::item, QListView::item {{
-        border-radius: 4px;
+        border-radius: 3px;
     }}
     QTreeView::item:selected, QListView::item:selected {{
         background-color: {t.BG_SELECTION};
@@ -536,10 +600,10 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         background-color: transparent;
         padding: 6px 12px;
         color: {t.TEXT_PRIMARY};
-        border-radius: 4px;
+        border-radius: 3px;
     }}
     QMenuBar::item:selected, QMenuBar::item:pressed {{
-        background-color: {t.BG_SEARCH};
+        background-color: {t.BG_MENU_HOVER};
         color: {t.PRIMARY};
     }}
     QMenu {{
@@ -552,7 +616,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     QMenu::item {{
         background-color: transparent;
         padding: 6px 24px 6px 12px;
-        border-radius: 4px;
+        border-radius: 3px;
         color: {t.TEXT_PRIMARY};
     }}
     QMenu::item:selected {{
@@ -568,16 +632,16 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         margin: 4px 0px;
     }}
     QToolTip {{
-        background-color: {t.TEXT_DARK};
-        color: {t.TEXT_ON_CANVAS};
-        border: 1px solid {t.PRIMARY};
+        background-color: {t.TOOLTIP_BG};
+        color: {t.TOOLTIP_TEXT};
+        border: 1px solid {t.ACCENT};
         padding: 6px 8px;
         font-size: 12px;
     }}
     QProgressBar {{
         background-color: {t.BG_SEARCH};
         border: 1px solid {t.BORDER};
-        border-radius: 6px;
+        border-radius: 5px;
         color: {t.TEXT_SECONDARY};
         text-align: center;
         font-size: {t.FONT_SIZE_STATUS};
@@ -585,11 +649,11 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     }}
     QProgressBar::chunk {{
         background-color: {t.PRIMARY};
-        border-radius: 5px;
+        border-radius: 4px;
     }}
     QSplitter::handle {{
-        /* 淡色常显，提示可拖动；hover 天青高亮 */
-        background-color: rgba(203, 213, 225, 0.45);
+        /* 暖色常显，提示可拖动；hover 铜色高亮 */
+        background-color: {t.SPLITTER_HANDLE};
     }}
     QSplitter::handle:horizontal {{
         width: 4px;
@@ -598,7 +662,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         height: 4px;
     }}
     QSplitter::handle:hover {{
-        background-color: rgba(14, 165, 233, 0.35);
+        background-color: {t.SPLITTER_HANDLE_HOVER};
     }}
     QGroupBox {{
         font-weight: 600;
@@ -641,6 +705,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         background: transparent;
     }}
 
+    /* ── App shell chrome ─────────────────────────────────────────── */
     QFrame#MenuBar {{
         background: {t.BG_HEADER}; border-bottom: 1px solid {t.BORDER_STRONG};
         min-height: {t.MENU_BAR_HEIGHT}px; max-height: {t.MENU_BAR_HEIGHT}px;
@@ -732,13 +797,15 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         color: {t.TEXT_SECONDARY};
         font-size: {t.FONT_SIZE_BASE};
     }}
+
+    /* 深色图标栏：三主题统一深石板底，激活项带铜色指示条 */
     QFrame#IconRail {{
         background: {t.BG_RAIL_GRADIENT};
         border-right: 1px solid {t.BORDER};
         min-width: {t.ICON_RAIL_WIDTH}px; max-width: {t.ICON_RAIL_WIDTH}px;
     }}
     QFrame#RailSeparator {{
-        background: {t.BORDER};
+        background: {t.RAIL_SEPARATOR};
         border: none;
         min-height: 1px;
         max-height: 1px;
@@ -746,15 +813,17 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     }}
     QToolButton[navItem="true"] {{
         background: transparent; color: {t.TEXT_ON_RAIL}; border: none;
+        border-left: 3px solid transparent;
         border-radius: {t.RADIUS_NAV_ITEM}px;
         min-width: {t.ICON_RAIL_ITEM_SIZE}px; max-width: {t.ICON_RAIL_ITEM_SIZE}px;
         min-height: {t.ICON_RAIL_ITEM_SIZE}px; max-height: {t.ICON_RAIL_ITEM_SIZE}px;
         font-size: {t.FONT_SIZE_NAV_LABEL}; font-weight: {t.FONT_WEIGHT_NAV_LABEL};
     }}
-    QToolButton[navItem="true"]:hover {{ background: {t.BG_SEARCH}; color: {t.PRIMARY}; }}
+    QToolButton[navItem="true"]:hover {{ background: {t.BG_RAIL_HOVER}; color: {t.TEXT_ON_RAIL_ACTIVE}; }}
     QToolButton[navItem="true"]:focus {{ outline: 2px solid {t.FOCUS_RING}; }}
     QToolButton[navItem="true"][active="true"] {{
-        background: {t.BG_NAV_ACTIVE}; color: {t.TEXT_ON_RAIL_ACTIVE}; font-weight: 600;
+        background: {t.BG_RAIL_ACTIVE}; color: {t.TEXT_ON_RAIL_ACTIVE};
+        border-left: 3px solid {t.ACCENT}; font-weight: 600;
     }}
     /* Generic QToolButton focus (covers QToolButton beyond the icon rail) */
     QToolButton:focus {{ border: 1px solid {t.FOCUS_RING}; }}
@@ -800,7 +869,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         font-size: {t.FONT_SIZE_TITLE};
         font-weight: {t.FONT_WEIGHT_TITLE};
         border: none;
-        border-left: 3px solid {t.PRIMARY};
+        border-left: 3px solid {t.ACCENT};
         padding-left: 8px;
         background: transparent;
     }}
@@ -815,16 +884,19 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     }}
     QToolButton[dockRailItem="true"] {{
         background: transparent;
+        color: {t.TEXT_ON_RAIL};
         border: 1px solid transparent;
         border-radius: {t.RADIUS_BUTTON}px;
     }}
     QToolButton[dockRailItem="true"]:hover {{
-        background: {t.BG_SEARCH};
+        background: {t.BG_RAIL_HOVER};
+        color: {t.TEXT_ON_RAIL_ACTIVE};
         border: 1px solid {t.BORDER_LIGHT};
     }}
     QToolButton[dockRailItem="true"]:checked {{
-        background: {t.BG_NAV_ACTIVE};
-        border: 1px solid {t.PRIMARY};
+        background: {t.BG_RAIL_ACTIVE};
+        color: {t.TEXT_ON_RAIL_ACTIVE};
+        border: 1px solid {t.ACCENT};
     }}
     QToolButton[dockRailItem="true"]:focus {{
         border: 1px solid {t.FOCUS_RING};
@@ -857,7 +929,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     QLabel#StatusCoordLabel {{
         color: {t.TEXT_SECONDARY};
         font-size: {t.FONT_SIZE_STATUS};
-        font-family: "SF Mono", "Menlo", "Consolas", "Courier New", monospace;
+        font-family: "JetBrains Mono", "SF Mono", "Menlo", "Consolas", "Courier New", monospace;
     }}
     QFrame#PredictionTaskPanel,
     QFrame#PredictionEvidencePanel,
@@ -896,7 +968,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         font-size: {t.FONT_SIZE_BASE};
         font-weight: 500;
         border: 1px solid transparent;
-        border-radius: 18px;
+        border-radius: 16px;
         padding: 4px 12px;
     }}
     QPushButton[stageItem="true"]:hover {{
@@ -905,7 +977,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     }}
     QPushButton[stageItem="true"][active="true"] {{
         background: {t.PRIMARY};
-        color: #ffffff;
+        color: {t.ON_PRIMARY};
         font-weight: 600;
     }}
     QLabel#StepperArrow {{
@@ -930,7 +1002,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     }}
     QPushButton[subpageItem="true"][active="true"] {{
         background: {t.PRIMARY};
-        color: #ffffff;
+        color: {t.ON_PRIMARY};
         border-color: {t.PRIMARY};
         font-weight: 600;
     }}
@@ -981,7 +1053,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     }}
     QTreeWidget#SeismicAttributeTree::item:selected {{
         background: {t.PRIMARY};
-        color: #ffffff;
+        color: {t.ON_PRIMARY};
     }}
     QTreeWidget#SeismicAttributeTree::item:hover {{
         background: {t.BG_SEARCH};
