@@ -1348,6 +1348,77 @@ class DataPage(QWidget):
 
     # --- working copies / new versions ---------------------------------------
 
+    def _open_curve_interpretation_dialog(self, asset, catalog_version_id: str) -> None:
+        """P1-A UI: explicit curve corrections → DERIVED version (RAW untouched)."""
+        from PySide6.QtWidgets import (
+            QComboBox,
+            QDialog,
+            QDialogButtonBox,
+            QDoubleSpinBox,
+            QFormLayout,
+            QLineEdit,
+            QMessageBox,
+        )
+
+        from paleo_workbench.workflow.curve_interpretation import apply_curve_operation
+
+        service = self._catalog_service()
+        if service is None:
+            QMessageBox.information(self, "曲线解释", "未打开数据目录。")
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("曲线解释操作 → 派生版本")
+        form = QFormLayout(dialog)
+        operation_combo = QComboBox()
+        operation_labels = {
+            "despike": "去尖峰（滚动中值 + 稳健 MAD 阈值）",
+            "depth_shift": "深度平移（校正深度误差）",
+            "baseline_shift": "基线校正（加常数偏移）",
+        }
+        for op_id, label in operation_labels.items():
+            operation_combo.addItem(label, op_id)
+        form.addRow("操作", operation_combo)
+        curve_edit = QLineEdit("GR")
+        curve_edit.setToolTip("曲线助记符（如 GR / RT / DEN）")
+        form.addRow("曲线", curve_edit)
+        param_a = QDoubleSpinBox()
+        param_a.setRange(-100000.0, 100000.0)
+        param_a.setDecimals(3)
+        param_a.setValue(3.0)
+        form.addRow("参数A (σ/m)", param_a)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        operation = operation_combo.currentData()
+        parameters = (
+            {"threshold_sigma": param_a.value()}
+            if operation == "despike"
+            else ({"delta_m": param_a.value()} if operation == "depth_shift" else {"delta": param_a.value()})
+        )
+        try:
+            result = apply_curve_operation(
+                service,
+                catalog_version_id,
+                operation=operation,
+                curve=curve_edit.text().strip() or "GR",
+                parameters=parameters,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "曲线解释", f"操作失败: {exc}")
+            return
+        QMessageBox.information(
+            self,
+            "曲线解释",
+            f"已生成派生版本\n输入版本: {result.input_version_ids[0][:18]}…\n"
+            f"输出版本: {result.output_version_id[:18]}…\nRun: {result.run_id[:18]}…",
+        )
+        self.refresh()
+
     def _new_version_from_asset(self, asset: object) -> None:
         """新建版本 / 工作副本 (orchestration in DataLifecycleController)."""
         self._lifecycle.new_version_from_asset(asset)
@@ -1448,6 +1519,16 @@ class DataPage(QWidget):
                 create_derived_act.setToolTip("创建派生副本需要活动数据目录")
             else:
                 create_derived_act.triggered.connect(lambda: self._create_derived_copy(first))
+
+        curve_interp_act = menu.find_action("ctx_curve_interpretation")
+        if curve_interp_act:
+            if catalog_version_id is None:
+                curve_interp_act.setEnabled(False)
+                curve_interp_act.setToolTip("曲线解释操作需要活动数据目录（数据未桥接）")
+            else:
+                curve_interp_act.triggered.connect(
+                    lambda: self._open_curve_interpretation_dialog(first, catalog_version_id)
+                )
 
         new_version_act = menu.find_action("ctx_new_version")
         if new_version_act:
