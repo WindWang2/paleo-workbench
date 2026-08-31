@@ -49,6 +49,7 @@ _COLOR_FLAGGED = "#f59e0b"
 _COLOR_SELECTED = "#e11d48"
 _COLOR_BOUNDARY = "#64748b"
 _COLOR_SURVEY = "#0d9488"
+_COLOR_SPATIAL_CURSOR = "#7c3aed"
 
 
 class WellListModel(QAbstractListModel):
@@ -151,6 +152,10 @@ class ProjectWellMapPage(QWidget):
         self._ordered_labels: list[str] = []    # array index → display name
         self._engine = engine
         self._signature_cache: tuple | None = None
+        # Cross-view spatial cursor (scenario B) — None until the engine plot
+        # exists; the API degrades to a no-op instead of crashing.
+        self._series_spatial_cursor = None
+        self._spatial_cursor_xy: tuple[float, float] | None = None
 
         root = QHBoxLayout(self)
         root.setContentsMargins(
@@ -321,6 +326,15 @@ class ProjectWellMapPage(QWidget):
             color=QColor(_COLOR_BOUNDARY),
             width=0.8,
         )
+        # Cross-view spatial cursor (scenario B): one clearly-styled marker
+        # moved by the coordination controller when a seismic pick happens.
+        # Lives outside the well series so well selection never rebuilds it.
+        self._series_spatial_cursor = ScatterSeries(
+            name="spatial_cursor",
+            color=QColor(_COLOR_SPATIAL_CURSOR),
+            size=11.0,
+        )
+        self._spatial_cursor_xy: tuple[float, float] | None = None
 
         for series in (
             self._series_boundary,
@@ -329,6 +343,7 @@ class ProjectWellMapPage(QWidget):
             self._series_wells,
             self._series_flagged,
             self._series_selected,
+            self._series_spatial_cursor,
         ):
             plot.add_series(series)
         return plot
@@ -671,6 +686,28 @@ class ProjectWellMapPage(QWidget):
 
     def selected_well_ids(self) -> list[str]:
         return sorted(self._selected_well_ids)
+
+    # -- cross-view spatial cursor (scenario B) ------------------------
+
+    def show_spatial_cursor(self, x: float, y: float) -> None:
+        """Move the cross-view spatial cursor marker to map coordinates."""
+        if self._series_spatial_cursor is None:
+            return
+        self._spatial_cursor_xy = (float(x), float(y))
+        self._series_spatial_cursor.x = np.array([float(x)], dtype=np.float64)
+        self._series_spatial_cursor.y = np.array([float(y)], dtype=np.float64)
+        self.coord_label.setText(f"地震光标  X: {x:.2f}  Y: {y:.2f}")
+
+    def clear_spatial_cursor(self) -> None:
+        """Hide the spatial cursor marker (does not touch well selection)."""
+        if self._series_spatial_cursor is None:
+            return
+        self._spatial_cursor_xy = None
+        self._series_spatial_cursor.x = np.array([], dtype=np.float64)
+        self._series_spatial_cursor.y = np.array([], dtype=np.float64)
+
+    def spatial_cursor_position(self) -> tuple[float, float] | None:
+        return self._spatial_cursor_xy
 
     def clear_selection(self) -> None:
         self._selected_well_ids.clear()

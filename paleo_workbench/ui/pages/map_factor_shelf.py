@@ -23,6 +23,8 @@ class MapFactorShelf(QWidget):
     contour_draft_requested = Signal()
     factor_overlay_requested = Signal(str)
     create_factor_map_requested = Signal()
+    fault_interpretation_requested = Signal()
+    map_product_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -48,6 +50,24 @@ class MapFactorShelf(QWidget):
         )
         self.contour_draft_btn.clicked.connect(self.contour_draft_requested.emit)
         actions.addWidget(self.contour_draft_btn)
+
+        self.fault_interpretation_btn = QPushButton("断层约束→解释版本")
+        self.fault_interpretation_btn.setObjectName("SecondaryButton")
+        self.fault_interpretation_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        self.fault_interpretation_btn.setToolTip(
+            "把当前图件中断线/断层多段线提升为正式断层解释，保存为不可变解释版本（目录血缘）"
+        )
+        self.fault_interpretation_btn.clicked.connect(self.fault_interpretation_requested.emit)
+        actions.addWidget(self.fault_interpretation_btn)
+
+        self.map_product_btn = QPushButton("装配古地理成果 (MapProduct)")
+        self.map_product_btn.setObjectName("PrimaryButton")
+        self.map_product_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        self.map_product_btn.setToolTip(
+            "多因素 + 解释 + 组图 → 一个带完整血缘的 OUTPUT 成果版本（拒绝合成数据）"
+        )
+        self.map_product_btn.clicked.connect(self.map_product_requested.emit)
+        actions.addWidget(self.map_product_btn)
         actions.addStretch(1)
         layout.addLayout(actions)
 

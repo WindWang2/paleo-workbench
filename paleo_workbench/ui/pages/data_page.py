@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 
@@ -57,6 +59,7 @@ from paleo_workbench.project.domain import domain_signature
 from paleo_workbench.project.well_location_map import sync_well_location_map
 from paleo_workbench.ui.pages.filter_index import (
     CATEGORIES,
+    CatalogCounts,
     FilterQuery,
     compute_catalog_counts,
 )
@@ -64,6 +67,8 @@ from paleo_workbench.ui.pages.catalog_health_dialog import CatalogHealthDialog
 from paleo_workbench.ui.pages.governance_dialog import GovernanceMetadataDialog
 from paleo_workbench.ui.pages.integrity_worker import IntegrityCheckReport
 from paleo_workbench.ui.pages.preview_provider import PreviewResult
+
+logger = logging.getLogger(__name__)
 from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
 from paleo_workbench.ui.pages.resource_summary import ResourceSummaryBar
 from paleo_workbench.ui.pages.tag_widgets import (
@@ -508,6 +513,14 @@ class DataPage(QWidget):
         self._visualization_controller.set_project_root(preview_root)
         _stage('pre_summary')
         self.summary_bar.update_state(state)
+        # P0-B large-catalog fast path: above the threshold the explorer must
+        # not materialize one enriched view per asset on the GUI thread. The
+        # SQLite index serves pages + counts instead; the materialized path
+        # below stays exactly as-is for every smaller project.
+        if self._try_paged_catalog_mode(preview_root):
+            _stage('paged_mode')
+            self._emit_data_context()
+            return
         # Catalog enrichment (one batch pass): stage/version/integrity truth,
         # lineage status, governance values for the table rows.
         enricher = self._lifecycle.catalog_enricher()
@@ -573,6 +586,92 @@ class DataPage(QWidget):
         _stage('toolbar')
         self._emit_data_context()
 
+    def _trash_view_active(self) -> bool:
+        """True when the navigation tree's 回收站 filter is active."""
+        try:
+            query = self.navigation_tree.current_filter_query()
+        except Exception:
+            return False
+        return getattr(query, "node_type", "") == "trash"
+
+    # ------------------------------------------------------------------
+    # Paged catalog mode (P0-B large-project fast path)
+    # ------------------------------------------------------------------
+
+    def _paged_provider(self, project_root):
+        """A SQL page provider over the open catalog index, or None."""
+        service = self._lifecycle.catalog_service()
+        index = getattr(service, "index", None) if service is not None else None
+        if index is None:
+            return None
+        from paleo_workbench.ui.pages.paged_asset_model import CatalogPageProvider
+
+        return CatalogPageProvider(index, project_root)
+
+    def _try_paged_catalog_mode(self, project_root) -> bool:
+        """Serve the explorer from SQL pages when the catalog is large.
+
+        Enters paged mode only when the non-trashed catalog asset count
+        exceeds :data:`PAGED_MODE_THRESHOLD`; in that regime the legacy
+        resources/artifacts are catalog projections (idempotent migration)
+        so the paged table still lists them. Tree badges come from index
+        aggregates. Integrity/entity smart views are unmappable and fall
+        back to the materialized path. Returns True when paged mode served
+        this refresh.
+        """
+        from paleo_workbench.ui.pages.paged_asset_model import PAGED_MODE_THRESHOLD
+
+        provider = self._paged_provider(project_root)
+        if provider is None:
+            return False
+        try:
+            total = provider.total()
+        except Exception:
+            return False
+        if total < PAGED_MODE_THRESHOLD:
+            return False
+        try:
+            self.asset_table.update_paged(provider)
+        except Exception:
+            logger.debug("paged catalog mode failed; falling back", exc_info=True)
+            return False
+        self._apply_paged_tree_counts(project_root, total)
+        self.data_toolbar.set_tag_candidates(self._collect_tag_candidates())
+        self._update_selection_action_state()
+        self._sync_visualization_button()
+        return True
+
+    def _apply_paged_tree_counts(self, project_root, total: int) -> None:
+        """Tree badges from SQL aggregates (+ small legacy side counts)."""
+        provider = self._paged_provider(project_root)
+        aggregates = provider.index.catalog_aggregates() if provider is not None else {}
+        stages = dict(aggregates.get("stages") or {})
+        types = dict(aggregates.get("types") or {})
+        tags = dict(aggregates.get("tags") or {})
+        review = dict(aggregates.get("review_status") or {})
+        # Legacy category leaves still read the (small) resource list.
+        legacy_type_counts = Counter(r.type for r in self._resources)
+        category_counts = {"全部": total}
+        for label, rtype in CATEGORIES.items():
+            if label == "全部":
+                continue
+            category_counts[label] = (
+                legacy_type_counts.get(rtype, 0)
+                or types.get(rtype, 0)
+                if rtype
+                else 0
+            )
+        counts = CatalogCounts(
+            total=total,
+            stages=stages,
+            types=types,
+            tags=tags,
+            integrity={},
+            categories=category_counts,
+            review_status=review,
+        )
+        self.navigation_tree._update_tree_counts(counts)
+
     def _refresh(self) -> None:
         self.update_state(
             dashboard_state(self.project),
@@ -583,25 +682,18 @@ class DataPage(QWidget):
         # (e.g. the pre-edit AssetView of a catalog-only row) would keep
         # feeding the inspector old data. Re-point the selection at the
         # CURRENT row object with the same id.
+        active_model = self.asset_table._active_model()
         if self._selected_asset is not None:
             selected_id = getattr(self._unwrap_asset(self._selected_asset), "id", None)
             if selected_id is not None:
-                for row in range(self.asset_table.model.rowCount()):
-                    current = self.asset_table.model.asset_at(row)
+                for row in range(active_model.rowCount()):
+                    current = active_model.asset_at(row)
                     if current is not None and getattr(
                         self._unwrap_asset(current), "id", None
                     ) == selected_id:
                         self._selected_asset = current
                         self._selected_assets = [current]
                         break
-
-    def _trash_view_active(self) -> bool:
-        """True when the navigation tree's 回收站 filter is active."""
-        try:
-            query = self.navigation_tree.current_filter_query()
-        except Exception:
-            return False
-        return getattr(query, "node_type", "") == "trash"
 
     def _on_navigation_category_changed(self, category: str) -> None:
         self.asset_table.set_category(category)
@@ -1249,6 +1341,77 @@ class DataPage(QWidget):
 
     # --- working copies / new versions ---------------------------------------
 
+    def _open_curve_interpretation_dialog(self, asset, catalog_version_id: str) -> None:
+        """P1-A UI: explicit curve corrections → DERIVED version (RAW untouched)."""
+        from PySide6.QtWidgets import (
+            QComboBox,
+            QDialog,
+            QDialogButtonBox,
+            QDoubleSpinBox,
+            QFormLayout,
+            QLineEdit,
+            QMessageBox,
+        )
+
+        from paleo_workbench.workflow.curve_interpretation import apply_curve_operation
+
+        service = self._catalog_service()
+        if service is None:
+            QMessageBox.information(self, "曲线解释", "未打开数据目录。")
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("曲线解释操作 → 派生版本")
+        form = QFormLayout(dialog)
+        operation_combo = QComboBox()
+        operation_labels = {
+            "despike": "去尖峰（滚动中值 + 稳健 MAD 阈值）",
+            "depth_shift": "深度平移（校正深度误差）",
+            "baseline_shift": "基线校正（加常数偏移）",
+        }
+        for op_id, label in operation_labels.items():
+            operation_combo.addItem(label, op_id)
+        form.addRow("操作", operation_combo)
+        curve_edit = QLineEdit("GR")
+        curve_edit.setToolTip("曲线助记符（如 GR / RT / DEN）")
+        form.addRow("曲线", curve_edit)
+        param_a = QDoubleSpinBox()
+        param_a.setRange(-100000.0, 100000.0)
+        param_a.setDecimals(3)
+        param_a.setValue(3.0)
+        form.addRow("参数A (σ/m)", param_a)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        operation = operation_combo.currentData()
+        parameters = (
+            {"threshold_sigma": param_a.value()}
+            if operation == "despike"
+            else ({"delta_m": param_a.value()} if operation == "depth_shift" else {"delta": param_a.value()})
+        )
+        try:
+            result = apply_curve_operation(
+                service,
+                catalog_version_id,
+                operation=operation,
+                curve=curve_edit.text().strip() or "GR",
+                parameters=parameters,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "曲线解释", f"操作失败: {exc}")
+            return
+        QMessageBox.information(
+            self,
+            "曲线解释",
+            f"已生成派生版本\n输入版本: {result.input_version_ids[0][:18]}…\n"
+            f"输出版本: {result.output_version_id[:18]}…\nRun: {result.run_id[:18]}…",
+        )
+        self.refresh()
+
     def _new_version_from_asset(self, asset: object) -> None:
         """新建版本 / 工作副本 (orchestration in DataLifecycleController)."""
         self._lifecycle.new_version_from_asset(asset)
@@ -1349,6 +1512,16 @@ class DataPage(QWidget):
                 create_derived_act.setToolTip("创建派生副本需要活动数据目录")
             else:
                 create_derived_act.triggered.connect(lambda: self._create_derived_copy(first))
+
+        curve_interp_act = menu.find_action("ctx_curve_interpretation")
+        if curve_interp_act:
+            if catalog_version_id is None:
+                curve_interp_act.setEnabled(False)
+                curve_interp_act.setToolTip("曲线解释操作需要活动数据目录（数据未桥接）")
+            else:
+                curve_interp_act.triggered.connect(
+                    lambda: self._open_curve_interpretation_dialog(first, catalog_version_id)
+                )
 
         new_version_act = menu.find_action("ctx_new_version")
         if new_version_act:

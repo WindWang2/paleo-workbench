@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 
 import numpy as np
 
@@ -103,6 +104,7 @@ class GeologicalModeling3DPage(QWidget):
 
         # Joint analysis host (geoviz) — PRD #85 / #88
         self._project: ProjectDocument | None = None
+        self._project_path: str | None = None
         # Lineage sources for mesh exports (E7): the input versions declared by
         # the most recent modeling run. Empty for synthetic demo runs (honest:
         # a synthetic grid has no source data to trace back to).
@@ -981,8 +983,18 @@ class GeologicalModeling3DPage(QWidget):
             self.faults_raw_data = []
             # Drop the previous project's rendered brick/overlays immediately.
             self._on_joint_scene_updated()
+        self._populate_stratal_interpretations()
         if self.isVisible() and not self._joint_loaded_once:
             self._ensure_joint_data_loaded()
+
+    def set_project_path(self, path) -> None:
+        """Receive the open ``*.paleo.json`` path (AppShell broadcast).
+
+        Interpretation artifact paths are project-relative; the absolute
+        resolution needs the real project file location.
+        """
+        self._project_path = str(path) if path else None
+        self._populate_stratal_interpretations()
 
     def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
         """Join the page's OwnedWorkerJobs on project switch / app close.
@@ -1318,6 +1330,51 @@ class GeologicalModeling3DPage(QWidget):
             combo.clear()
             combo.addItem(path, path)
 
+    @staticmethod
+    def _is_interp_entry(data) -> bool:
+        return (
+            isinstance(data, (tuple, list))
+            and len(data) == 2
+            and data[0] == "interp"
+            and bool(data[1])
+        )
+
+    def _populate_stratal_interpretations(self) -> None:
+        """Offer the project's versioned horizon interpretations as stratal
+        inputs (P1-C: the 3D scene consumes versioned artifacts, not just
+        loose .dat files). Entries carry ("interp", artifact_path); the
+        interpretation's immutable Z grid replaces the .dat parse."""
+        combos = (
+            getattr(self, "_stratal_top_combo", None),
+            getattr(self, "_stratal_bot_combo", None),
+        )
+        if any(c is None for c in combos):
+            return
+        project = getattr(self, "_project", None)
+        refs = list(getattr(project, "horizon_interpretations", None) or [])
+        for combo in combos:
+            # Drop stale interpretation entries, keep file entries.
+            for i in range(combo.count() - 1, -1, -1):
+                if self._is_interp_entry(combo.itemData(i)):
+                    combo.removeItem(i)
+        if not refs:
+            return
+        import copy as _copy
+
+        project_path = getattr(self, "_project_path", None)
+        for ref in refs:
+            artifact = str(getattr(ref, "artifact_path", "") or "")
+            if not artifact:
+                continue
+            candidate = Path(artifact)
+            if not candidate.is_file() and project_path:
+                candidate = Path(project_path).resolve().parent / artifact
+            if not candidate.is_file():
+                continue
+            label = f"解释: {getattr(ref, 'name', '') or getattr(ref, 'horizon_key', '')}"
+            for combo in combos:
+                combo.addItem(label, ("interp", str(candidate)))
+
     def _on_generate_stratal_slices(self) -> None:
         """Generate stratal/proportional slices in a background worker and
         overlay them in the 3D view.
@@ -1369,11 +1426,16 @@ class GeologicalModeling3DPage(QWidget):
             )
             return
 
-        # Real-data path.
-        top_path = self._stratal_top_combo.currentData()
-        bot_path = self._stratal_bot_combo.currentData()
-        if not top_path or not bot_path:
-            self._stratal_status.setText("请先选择顶部与底部 horizon 文件。")
+        # Real-data path. Combo data is either a .dat path (str) or an
+        # ("interp", artifact_path) pair from a saved horizon interpretation.
+        top_sel = self._stratal_top_combo.currentData()
+        bot_sel = self._stratal_bot_combo.currentData()
+        top_path = top_sel if isinstance(top_sel, str) else None
+        bot_path = bot_sel if isinstance(bot_sel, str) else None
+        top_interp = top_sel[1] if self._is_interp_entry(top_sel) else None
+        bot_interp = bot_sel[1] if self._is_interp_entry(bot_sel) else None
+        if not (top_path or top_interp) or not (bot_path or bot_interp):
+            self._stratal_status.setText("请先选择顶部与底部 horizon（.dat 或解释版本）。")
             return
         vol = renderer.volume_data()
         scene = self._joint_host.scene
@@ -1388,6 +1450,8 @@ class GeologicalModeling3DPage(QWidget):
             volume=vol,
             top_path=top_path,
             bottom_path=bot_path,
+            top_interp_path=top_interp,
+            bottom_interp_path=bot_interp,
         )
         self._stratal_job.start(
             worker,
@@ -2127,7 +2191,10 @@ class GeologicalModeling3DPage(QWidget):
 
         Non-destructive: sets joint-pair well A only when the well exists in
         the joint scene, PRESERVES the user's well B, and is a no-op for
-        unknown wells (never a silent jump to the first option).
+        unknown wells (never a silent jump to the first option). The
+        trajectory also gets a real GEOMETRY highlight — the 3D probe marker
+        lands on the highlighted well's mid-trajectory point so the eye
+        finds it in the scene, not just in a combo box.
         """
         if not well_id or not hasattr(self, "_joint_well_a"):
             return
@@ -2138,6 +2205,84 @@ class GeologicalModeling3DPage(QWidget):
         if hasattr(self, "_joint_well_b"):
             current_b = str(self._joint_well_b.currentData() or "")
         self._rebuild_joint_well_combos(well_id, current_b)
+        self._probe_highlight_well(well_id)
+
+    def focus_seismic_position(self, il: int, xl: int, twt: float | None = None) -> bool:
+        """Scenario B sink: navigate the joint 3D slices to a survey position.
+
+        TWT converts to a sample index through the loaded volume's sampling
+        when available; without it only the IL/XL slices move (never an
+        invented sample). Safe no-op when the joint widget is not mounted.
+        """
+        widget = getattr(self, "_joint_widget", None)
+        set_slices = getattr(widget, "set_slice_indices", None)
+        if not callable(set_slices):
+            return False
+        sample = 0
+        if twt is not None:
+            renderer = getattr(widget, "renderer", None)
+            volume = renderer.volume_data() if renderer is not None else None
+            meta = getattr(self._joint_host, "survey_meta", None) or {}
+            dt_ms = float(meta.get("dt_ms") or 0.0)
+            t0_ms = float(meta.get("t0_ms") or 0.0)
+            if volume is not None and dt_ms > 0.0:
+                sample = int(max(0, (float(twt) - t0_ms) / dt_ms))
+                sample = min(sample, int(volume.shape[2]) - 1)
+        try:
+            set_slices(int(il), int(xl), int(sample))
+        except Exception:
+            return False
+        return True
+
+    def highlight_interpretation(self, interpretation_id: str) -> bool:
+        """Scenario D sink: reflect the active horizon identity in the 3D
+        workbench by preselecting its stratal combo entry when present."""
+        combos = (
+            getattr(self, "_stratal_top_combo", None),
+            getattr(self, "_stratal_bot_combo", None),
+        )
+        if all(c is None for c in combos):
+            return False
+        matched = False
+        for combo in combos:
+            if combo is None:
+                continue
+            for i in range(combo.count()):
+                data = combo.itemData(i)
+                if (
+                    isinstance(data, (tuple, list))
+                    and len(data) == 2
+                    and data[0] == "interp"
+                    and data[1]
+                    and interpretation_id
+                    and interpretation_id in str(data[1])
+                ):
+                    combo.setCurrentIndex(i)
+                    matched = True
+                    break
+        return matched
+
+    def _probe_highlight_well(self, well_name: str) -> bool:
+        """Move the 3D probe marker onto a well's mid-trajectory point."""
+        scene = getattr(self._joint_host, "scene", None)
+        widget = getattr(self, "_joint_widget", None)
+        set_marker = getattr(widget, "set_probe_marker", None)
+        if scene is None or not callable(set_marker):
+            return False
+        try:
+            trajectories = scene.well_trajectories()
+        except Exception:
+            return False
+        for _well_id, trajectory in trajectories.items():
+            if str(getattr(trajectory, "name", "")) != str(well_name):
+                continue
+            points = getattr(trajectory, "points", None)
+            if points is None or len(points) == 0:
+                return False
+            middle = points[len(points) // 2]
+            set_marker((float(middle[0]), float(middle[1]), float(middle[2])))
+            return True
+        return False
 
     def _select_joint_wells(self, well_a: str, well_b: str) -> None:
         """Set toolbar combos to a saved well pair without resetting to index 0/1."""

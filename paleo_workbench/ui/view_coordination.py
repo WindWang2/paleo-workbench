@@ -18,6 +18,7 @@ No page ever connects directly to another page for selection sync anymore.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from PySide6.QtCore import QObject
 
@@ -59,6 +60,13 @@ class ViewCoordinationController(QObject):
         self._well_log_page = None
         self._last_snapshot = None
         self._bound_well_ids: set[str] = set()
+        # Scenario sinks. Pages register callables; the controller owns no
+        # page references it was not handed, and a missing sink is a no-op
+        # (never an error) so views stay optional.
+        self._seismic_sink = None            # (il, xl, twt|None) → locate/navigate
+        self._spatial_cursor_sink = None     # (x, y) → map marker
+        self._seismic_focus_sink = None      # (il, xl, twt) → 3D slice focus
+        self._horizon_sink = None            # horizon id → highlight in views
         selection_context.selection_changed.connect(self._on_selection_changed)
 
     # ------------------------------------------------------------------
@@ -70,7 +78,9 @@ class ViewCoordinationController(QObject):
 
         Called when a project document is opened or switched. Re-binding is a
         full replacement: the previous project's wells are unregistered first
-        so no well ever leaks across projects.
+        so no well ever leaks across projects. Time-depth calibration assets
+        (role ``time_depth``) are parsed and attached to their wells so the
+        scenario-C depth→time route has a real production author.
         """
         self.clear_project()
         for well in list(getattr(project, "wells", None) or []):
@@ -78,10 +88,110 @@ class ViewCoordinationController(QObject):
         survey = self._first_seismic_survey(project)
         if survey is not None:
             self._configure_hub_seismic_geometry(survey)
+        calibrations = self._register_time_depth_calibrations(project)
         logger.debug(
-            "bind_project: registered %d well(s) into the coordinate hub",
+            "bind_project: registered %d well(s) and %d time-depth "
+            "calibration(s) into the coordinate hub",
             len(self._bound_well_ids),
+            calibrations,
         )
+
+    def _register_time_depth_calibrations(self, project) -> int:
+        """Parse time_depth assets into hub calibrations (scenario C author).
+
+        Only assets carrying the ``time_depth`` role enter calibration — a
+        plain file with a similar name is not an authority. Unparseable
+        tables are skipped with a debug log, never guessed.
+        """
+        from paleo_workbench.viz.coordinate_hub import TimeDepthCalibration
+
+        registered = 0
+        td_assets = self._time_depth_assets(project)
+        for well_name, path in td_assets:
+            try:
+                from paleo_workbench.viz.joint_well_parsers import parse_td_table
+
+                table = parse_td_table(path, well_name=well_name)
+            except Exception:
+                logger.debug("time-depth table %s failed to parse", path, exc_info=True)
+                continue
+            if table is None:
+                continue
+            pairs = list(zip(table.md_m, table.time_ms))
+            try:
+                calibration = TimeDepthCalibration.from_pairs(
+                    str(well_name), pairs, provenance=f"td-table:{path.name}"
+                )
+            except ValueError:
+                logger.debug(
+                    "time-depth table %s rejected (non-monotonic)", path
+                )
+                continue
+            self.coordinate_hub.set_time_depth_calibration(calibration)
+            registered += 1
+        return registered
+
+    @staticmethod
+    def _time_depth_assets(project):
+        """(well_name, path) pairs for time_depth assets, hub-keyed by well name.
+
+        Resolution order: WorkArea EntityAssetLinks (well entity display name
+        + role time_depth) falling back to legacy ResourceItems typed
+        ``time_depth`` keyed by their own file stem.
+        """
+        results: list[tuple[str, str]] = []
+        seen_paths: set[str] = set()
+        for link in list(getattr(project, "entity_asset_links", None) or []):
+            if str(getattr(link, "role", "")) != "time_depth":
+                continue
+            if getattr(link, "unresolved", False):
+                continue
+            well_name = ""
+            for well in list(getattr(project, "wells", None) or []):
+                if str(getattr(well, "id", "")) == str(getattr(link, "entity_id", "")):
+                    well_name = str(getattr(well, "name", "") or "")
+                    break
+            path = self._resolve_asset_path(project, getattr(link, "asset_id", ""))
+            if path and well_name:
+                key = str(path)
+                if key not in seen_paths:
+                    seen_paths.add(key)
+                    results.append((well_name, path))
+        for resource in list(getattr(project, "resources", None) or []):
+            if str(getattr(resource, "type", "")) != "time_depth":
+                continue
+            path = str(getattr(resource, "path", "") or "")
+            if not path:
+                continue
+            key = str(path)
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            name = str(getattr(resource, "name", "") or "") or Path(path).stem
+            results.append((name, path))
+        return results
+
+    @staticmethod
+    def _resolve_asset_path(project, asset_id: str) -> str | None:
+        """Best-effort payload path for a catalog asset id via the catalog."""
+        try:
+            from paleo_workbench.catalog import get_catalog
+
+            cat = get_catalog()
+        except Exception:
+            return None
+        if cat is None:
+            return None
+        try:
+            for asset in cat.document.assets:
+                if str(asset.id) == str(asset_id):
+                    version_id = asset.current_version_id
+                    for version in cat.document.versions:
+                        if version.id == version_id:
+                            return str(cat.resolve_path(version))
+        except Exception:
+            return None
+        return None
 
     def clear_project(self) -> None:
         """Unregister every project-bound well and reset the seismic grid.
@@ -95,6 +205,9 @@ class ViewCoordinationController(QObject):
             self.coordinate_hub.configure_seismic_grid()
         except Exception:  # pragma: no cover - defaults are always valid
             logger.debug("clear_project: grid reset failed", exc_info=True)
+        # Cross-project bleed covers the geological slots too: a horizon or
+        # interpretation selected in the closed project must not survive.
+        self.selection_context.clear()
         if removed:
             logger.debug("clear_project: unregistered %d well(s)", removed)
 
@@ -272,10 +385,34 @@ class ViewCoordinationController(QObject):
                     previous_panel.task_selected.disconnect(self._on_well_log_row_selected)
                 except (RuntimeError, TypeError):
                     pass
+            previous_canvas = getattr(previous, "canvas_panel", None)
+            previous_depth = getattr(previous_canvas, "depth_cursor_moved", None)
+            if previous_depth is not None:
+                try:
+                    previous_depth.disconnect(self._on_well_depth_cursor)
+                except (RuntimeError, TypeError):
+                    pass
         self._well_log_page = page
         panel = getattr(page, "task_panel", None)
         if panel is not None and hasattr(panel, "task_selected"):
             panel.task_selected.connect(self._on_well_log_row_selected)
+        # Scenario C producer: the canvas crosshair publishes MD; the page's
+        # displayed well names it. publish_depth_cursor gates the seismic
+        # time navigation on a real time-depth calibration.
+        canvas_panel = getattr(page, "canvas_panel", None)
+        depth_signal = getattr(canvas_panel, "depth_cursor_moved", None)
+        if depth_signal is not None:
+            try:
+                depth_signal.connect(self._on_well_depth_cursor)
+            except (RuntimeError, TypeError):
+                pass
+
+    def _on_well_depth_cursor(self, md: float) -> None:
+        canvas_panel = getattr(self._well_log_page, "canvas_panel", None)
+        well_name = getattr(canvas_panel, "current_well_name", lambda: "")()
+        if not well_name:
+            return
+        self.publish_depth_cursor(str(well_name), float(md), source=self.SOURCE_WELL_LOG)
 
     def _on_well_log_row_selected(self, row: int) -> None:
         """User picked a task on the well-log page → publish its well name."""
@@ -312,11 +449,108 @@ class ViewCoordinationController(QObject):
         )
 
     def publish_seismic_cursor(self, il: int, xl: int, twt: float) -> None:
-        """Publish an (IL, XL, TWT) cursor picked on a seismic view."""
+        """Publish an (IL, XL, TWT) cursor picked on a seismic view.
+
+        The same update carries the resolved map-space position in
+        ``spatial_cursor`` (scenario B): consumers read one consistent
+        snapshot instead of each re-deriving the transform, and no second
+        context update is needed (no re-entrant routing).
+        """
+        spatial = None
+        try:
+            x, y, _z = self.coordinate_hub.seismic_to_map(int(il), int(xl), float(twt))
+            spatial = (float(x), float(y))
+        except Exception:
+            logger.debug("seismic cursor %s: map position unavailable", (il, xl, twt))
         self.selection_context.update(
             seismic_cursor=(int(il), int(xl), float(twt)),
+            spatial_cursor=spatial,
             source_widget_id=self.SOURCE_SEISMIC,
         )
+
+    def publish_horizon_selection(self, horizon_id: str, *, source: str) -> None:
+        """Publish the active horizon's stable identity (scenario D)."""
+        if not horizon_id:
+            return
+        self.selection_context.update(
+            active_horizon_id=str(horizon_id), source_widget_id=source
+        )
+
+    def publish_fault_selection(self, fault_id: str, *, source: str) -> None:
+        if not fault_id:
+            return
+        self.selection_context.update(
+            active_fault_id=str(fault_id), source_widget_id=source
+        )
+
+    def publish_interpretation_selection(self, interpretation_id: str, *, source: str) -> None:
+        if not interpretation_id:
+            return
+        self.selection_context.update(
+            active_interpretation_id=str(interpretation_id), source_widget_id=source
+        )
+
+    def publish_depth_cursor(self, well_id: str, md: float, *, source: str) -> bool:
+        """Publish a well-log depth cursor (scenario C), calibration-gated.
+
+        The depth itself always lands in ``depth_cursor``. The seismic time
+        navigation happens ONLY when the hub holds a valid time-depth
+        calibration for this well — without one the route refuses (returns
+        False) rather than guessing depth==time through a default velocity.
+        """
+        if not well_id:
+            return False
+        md_val = float(md)
+        self.selection_context.update(
+            depth_cursor=(str(well_id), md_val), source_widget_id=source
+        )
+        try:
+            il, xl, twt = self.coordinate_hub.well_md_to_seismic_cursor(well_id, md_val)
+        except Exception:
+            logger.debug(
+                "depth cursor %s@%s: calibrated seismic lookup failed",
+                well_id,
+                md_val,
+                exc_info=True,
+            )
+            return False
+        if il is None:
+            cal = self.coordinate_hub.time_depth_calibration(well_id)
+            logger.debug(
+                "depth cursor %s@%s: refused — no valid time-depth calibration%s",
+                well_id,
+                md_val,
+                f" ({cal.provenance} does not cover this depth)" if cal else "",
+            )
+            return False
+        if source != self.SOURCE_SEISMIC and self._seismic_focus_sink is not None:
+            self._seismic_focus_sink(il, xl, twt)
+        return True
+
+    # ------------------------------------------------------------------
+    # Scenario sinks (views register interest)
+    # ------------------------------------------------------------------
+
+    def set_seismic_sink(self, sink) -> None:
+        """Register the seismic locator: ``(il, xl, twt=None) → navigate``.
+
+        Scenario A: a well selected elsewhere navigates the seismic view to
+        the well's inline/crossline. ``twt`` stays None unless a calibration
+        provided it — the locator must not invent a time.
+        """
+        self._seismic_sink = sink
+
+    def set_spatial_cursor_sink(self, sink) -> None:
+        """Register the map spatial-cursor marker: ``(x, y)``."""
+        self._spatial_cursor_sink = sink
+
+    def set_seismic_focus_sink(self, sink) -> None:
+        """Register the 3D/section slice focus: ``(il, xl, twt)``."""
+        self._seismic_focus_sink = sink
+
+    def set_horizon_sink(self, sink) -> None:
+        """Register the horizon highlight target: ``(horizon_id)``."""
+        self._horizon_sink = sink
 
     # ------------------------------------------------------------------
     # Routing
@@ -345,6 +579,20 @@ class ViewCoordinationController(QObject):
         if cursor is not None and cursor_changed:
             self._route_seismic_cursor(cursor)
 
+        horizon_id = getattr(selection, "active_horizon_id", None)
+        horizon_changed = horizon_id != getattr(previous, "active_horizon_id", None)
+        if horizon_id and horizon_changed:
+            self._route_horizon_selection(str(horizon_id), source)
+
+        spatial = getattr(selection, "spatial_cursor", None)
+        spatial_changed = spatial != getattr(previous, "spatial_cursor", None)
+        if spatial is not None and spatial_changed and source != self.SOURCE_MAP:
+            if self._spatial_cursor_sink is not None:
+                try:
+                    self._spatial_cursor_sink(float(spatial[0]), float(spatial[1]))
+                except Exception:
+                    logger.debug("spatial cursor routing failed", exc_info=True)
+
     def _route_well_selection(self, well_id: str, source: str | None) -> None:
         # Map → Well Log (auto-switch the log page to the picked well)
         if source != self.SOURCE_WELL_LOG and self._well_log_page is not None:
@@ -366,6 +614,38 @@ class ViewCoordinationController(QObject):
             if map_page is not None and hasattr(map_page, "select_well"):
                 # emit=False: the map must not re-publish its own highlight
                 map_page.select_well(well_id, emit=False)
+        # Any view → Seismic (locate the well's inline/crossline; scenario A)
+        if source != self.SOURCE_SEISMIC:
+            self._locate_well_in_seismic(well_id)
+
+    def _locate_well_in_seismic(self, well_id: str) -> bool:
+        """Navigate the seismic view to a well through the hub geometry.
+
+        TWT is passed only when the well has a time-depth calibration whose
+        range covers its current depth reference; otherwise the locator gets
+        (il, xl, None) and must not invent a time. Failures log at debug and
+        stay non-fatal — the seismic view may simply not be open.
+        """
+        if self._seismic_sink is None:
+            return False
+        try:
+            x, y, _tvd = self.coordinate_hub.well_depth_to_map(well_id, 0.0)
+            il, xl, _twt = self.coordinate_hub.map_to_seismic(x, y, 0.0)
+        except Exception:
+            logger.debug(
+                "seismic locate for well %r: geometry unavailable", well_id, exc_info=True
+            )
+            return False
+        self._seismic_sink(int(il), int(xl), None)
+        return True
+
+    def _route_horizon_selection(self, horizon_id: str, source: str | None) -> None:
+        """Scenario D: one stable horizon identity reaches every interested view."""
+        if self._horizon_sink is not None:
+            try:
+                self._horizon_sink(horizon_id)
+            except Exception:
+                logger.debug("horizon routing failed for %r", horizon_id, exc_info=True)
 
     def _route_seismic_cursor(self, cursor: tuple[int, int, float]) -> None:
         """Seismic → Well: resolve the cursor to the nearest well + MD.
@@ -392,10 +672,26 @@ class ViewCoordinationController(QObject):
                 cursor,
             )
             return
+        # ``seismic_well_md`` is a constant-velocity APPROXIMATION kept for
+        # readout context only — calibrated depth↔time goes through
+        # TimeDepthCalibration (publish_depth_cursor), never this value.
         self.selection_context.update(
-            custom_attributes={"seismic_well_id": well_id, "seismic_well_md": md}
+            custom_attributes={
+                "seismic_well_id": well_id,
+                "seismic_well_md": md,
+                "seismic_well_md_is_approximate": True,
+            }
         )
         if self._well_log_page is not None:
             setter = getattr(self._well_log_page, "set_selected_well", None)
             if callable(setter):
                 setter(well_id)
+        # Scenario B: the same cursor focuses the 3D/section views. The
+        # well-MD above is a constant-velocity approximation used only for
+        # readout context; the 3D focus gets the raw (IL, XL, TWT) so no
+        # approximate depth ever masquerades as a calibrated one.
+        if self._seismic_focus_sink is not None:
+            try:
+                self._seismic_focus_sink(int(cursor[0]), int(cursor[1]), float(cursor[2]))
+            except Exception:
+                logger.debug("seismic cursor 3D focus failed", exc_info=True)

@@ -94,6 +94,38 @@ def build_stratal_grids(
     top_ms = _ms_grid(top_path)
     bot_ms = _ms_grid(bottom_path)
 
+    return _ms_grids_to_preview_sample_indices(scene, volume, top_ms, bot_ms)
+
+
+def build_stratal_grids_from_ms_grids(
+    scene: "WellSeismicScene",
+    volume: np.ndarray,
+    top_ms: np.ndarray,
+    bot_ms: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Versioned-interpretation path: ms grids replace .dat parsing.
+
+    The grids are full-survey ``(nI_full, nX_full)`` milliseconds arrays —
+    exactly what a saved horizon interpretation's Z grid is — with NaN where
+    the horizon is absent. Same alignment semantics as the .dat path.
+    """
+    return _ms_grids_to_preview_sample_indices(scene, volume, top_ms, bot_ms)
+
+
+def _ms_grids_to_preview_sample_indices(
+    scene: "WellSeismicScene",
+    volume: np.ndarray,
+    top_ms: np.ndarray,
+    bot_ms: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    survey = getattr(scene, "survey", None)
+    reg = getattr(scene, "registration", None)
+    if survey is None or reg is None or volume.ndim != 3:
+        return None
+    n_i_prev, n_x_prev, n_s_prev = volume.shape
+    if n_i_prev < 2 or n_x_prev < 2 or n_s_prev < 2:
+        return None
+
     # Resample the full (nI_full, nX_full) ms grid onto the preview shape using
     # bilinear interpolation in IL/XL index space, then map ms -> preview sample.
     ii_prev, xx_prev = np.meshgrid(

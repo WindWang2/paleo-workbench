@@ -84,6 +84,7 @@ class MappingPage(QWidget):
         self.setObjectName("MappingPage")
         self._active_document = None
         self._project = None
+        self._project_path: str | None = None
         self._project_crs: str | None = None
         self._factor_tasks_by_overlay_id: dict[str, object] = {}
         self._native_factor_scene = None
@@ -198,6 +199,14 @@ class MappingPage(QWidget):
         self.dock_manager.add_panel(
             "chrome", "图面要素面板", "panel-chrome", self.chrome_panel, side="right", checked=False
         )
+        # Composition authoring (P0-D): template-driven professional layout
+        # with component CRUD/undo and physical-size PNG/SVG/PDF export.
+        from paleo_workbench.ui.pages.composition_panel import CompositionPanel
+
+        self.composition_panel = CompositionPanel()
+        self.dock_manager.add_panel(
+            "composer", "组图面板", "panel-chrome", self.composition_panel, side="right", checked=False
+        )
 
         # Rails sit outside the splitter so collapsing a docked panel area
         # returns its space to the central canvas.
@@ -264,6 +273,12 @@ class MappingPage(QWidget):
         )
         self.bottom_workbench.factor_shelf.contour_draft_requested.connect(
             self._on_contour_draft_requested
+        )
+        self.bottom_workbench.factor_shelf.fault_interpretation_requested.connect(
+            self._on_fault_interpretation_requested
+        )
+        self.bottom_workbench.factor_shelf.map_product_requested.connect(
+            self._on_map_product_requested
         )
         self.bottom_workbench.factor_shelf.factor_overlay_requested.connect(
             self._on_overlay_requested
@@ -368,6 +383,153 @@ class MappingPage(QWidget):
         """Bind live ProjectDocument for ContourDraft generation from factor shelf."""
         self._project = project
 
+    def set_project_path(self, path) -> None:
+        """Receive the open ``*.paleo.json`` path (AppShell broadcast).
+
+        Fault interpretation saves derive their artifact directory from the
+        real project file; without the path the action stays disabled rather
+        than writing into a phantom artifacts tree.
+        """
+        self._project_path = str(path) if path else None
+        has = self._project_path is not None
+        self.bottom_workbench.factor_shelf.fault_interpretation_btn.setEnabled(has)
+
+    def _on_map_product_requested(self) -> None:
+        """Assemble the multi-factor paleogeographic product (P1-D): valid
+        factor grids + interpretation refs + composition → ONE catalog
+        OUTPUT version with full lineage. Fail-closed; nothing is laundered."""
+        import json as _json
+        import tempfile
+        from PySide6.QtWidgets import QMessageBox
+
+        from paleo_workbench.workflow.map_product import (
+            MapProductAssembly,
+            assemble_map_product,
+        )
+
+        if self._project is None or not getattr(self, "_project_path", None):
+            QMessageBox.information(self, "古地理成果", "请先打开并保存工程。")
+            return
+        tasks = [
+            t
+            for t in (getattr(self._project, "factor_map_tasks", None) or [])
+            if getattr(t, "status", "") == "complete"
+            and getattr(t, "grid_artifact_version_id", None)
+            and str(getattr(t, "source_kind", "")) not in ("mock", "mixed")
+        ]
+        if not tasks:
+            QMessageBox.information(
+                self, "古地理成果", "没有可用的真实单因素成果（需完成插值并持久化网格版本）。"
+            )
+            return
+        service = None
+        try:
+            from paleo_workbench.catalog import get_catalog_service
+
+            service = get_catalog_service()
+        except Exception:
+            service = None
+        if service is None:
+            QMessageBox.information(self, "古地理成果", "未打开数据目录，无法注册成果版本。")
+            return
+        composition_ref = None
+        panel = getattr(self, "composition_panel", None)
+        document = panel.document() if panel is not None else None
+        if document is not None:
+            composition_ref = str(document.id)
+        interpretation_refs = [
+            str(ref.id)
+            for ref in (getattr(self._project, "horizon_interpretations", None) or [])
+        ]
+        assembly = MapProductAssembly(
+            product_name=f"{getattr(self._project.stratigraphy, 'target_horizon', '') or '综合'} 古地理成果图",
+            factor_task_ids=[str(t.id) for t in tasks],
+            interpretation_refs=interpretation_refs,
+            composition_ref=composition_ref,
+            notes="多因素古地理综合成果",
+        )
+        manifest = {
+            "product_name": assembly.product_name,
+            "factor_tasks": [
+                {
+                    "id": str(t.id),
+                    "name": str(t.name),
+                    "grid_version": str(t.grid_artifact_version_id),
+                }
+                for t in tasks
+            ],
+            "interpretation_refs": interpretation_refs,
+            "composition_ref": composition_ref,
+        }
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8"
+        ) as handle:
+            _json.dump(manifest, handle, ensure_ascii=False, indent=2)
+            staged = Path(handle.name)
+        try:
+            result = assemble_map_product(
+                self._project,
+                assembly=assembly,
+                catalog=service,
+                payload_path=staged,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "古地理成果", f"成果装配失败: {exc}")
+            return
+        finally:
+            # The catalog copies the payload into the managed OUTPUT store;
+            # the staging file must not linger in /tmp.
+            try:
+                staged.unlink(missing_ok=True)
+            except OSError:
+                pass
+        QMessageBox.information(
+            self,
+            "古地理成果",
+            f"已注册古地理成果 OUTPUT 版本\n{len(tasks)} 个因素 · {len(interpretation_refs)} 项解释\n输出版本: {result.output_version_id[:18]}…",
+        )
+
+    def _on_fault_interpretation_requested(self) -> None:
+        """Lift the active map's break/fault polylines into a versioned fault
+        interpretation (P1-B): map-plane coordinates stay the scientific
+        authority, the lifecycle mints the immutable version + lineage."""
+        from PySide6.QtWidgets import QMessageBox
+
+        from paleo_workbench.workflow.constraints import constraints_from_map_document
+        from paleo_workbench.workflow.fault_lifecycle import (
+            draft_from_constraint_layers,
+            save_fault_draft,
+        )
+
+        if self._project is None or not getattr(self, "_project_path", None):
+            QMessageBox.information(self, "断层解释", "请先打开并保存工程。")
+            return
+        document = self._active_document
+        if document is None:
+            QMessageBox.information(self, "断层解释", "当前没有活动图件。")
+            return
+        layers = constraints_from_map_document(document)
+        draft = draft_from_constraint_layers(
+            layers, crs=str(getattr(document, "map_crs", "") or "")
+        )
+        if not draft.payload.traces:
+            QMessageBox.information(
+                self, "断层解释", "当前图件没有断线/断层多段线，无可保存的断层解释。"
+            )
+            return
+        ref, message = save_fault_draft(draft, self._project, self._project_path)
+        if ref is None:
+            QMessageBox.warning(self, "断层解释", f"保存失败: {message}")
+            return
+        # Announce the fault identity on the coordination bus (scenario D).
+        controller = getattr(self, "view_coordination", None)
+        publish = getattr(controller, "publish_fault_selection", None)
+        if callable(publish):
+            publish(str(ref.id), source="map")
+        QMessageBox.information(
+            self, "断层解释", f"已保存断层解释版本（{len(draft.payload.traces)} 条断层）"
+        )
+
     def mapping_context(self) -> dict:
         """Snapshot of active map name / horizon / dirty for the sidebar."""
         doc = self._active_document
@@ -431,6 +593,7 @@ class MappingPage(QWidget):
                 if not self.save_draft():
                     document = previous
         self._active_document = document
+        self._bind_composition_main_map(document)
         if document is not previous:
             self._presentation_dirty = False
         self.layer_tree.set_documents(documents)
@@ -494,6 +657,53 @@ class MappingPage(QWidget):
     def _on_geological_factor_map_created(self, map_doc) -> None:
         self.load_project(self._project, project_crs=self._project_crs)
         self.contour_drafts_updated.emit()
+        self._sync_composition_bindings()
+
+    def _bind_composition_main_map(self, document) -> None:
+        """Keep the composition panel's MAIN_MAP bound to the active map
+        document (P1-D: factor layers reach the professional layout through
+        a live binding, not exported copies)."""
+        panel = getattr(self, "composition_panel", None)
+        if panel is not None and document is not None:
+            try:
+                panel.set_main_map(document)
+            except Exception:
+                pass
+
+    def _sync_composition_bindings(self) -> None:
+        """Resolve the composition's declarative data bindings from the
+        project's factor tasks (P1-D: factor maps drive professional layouts
+        through bindings, not copy-pasted values)."""
+        panel = getattr(self, "composition_panel", None)
+        if panel is None or self._project is None:
+            return
+        binding_context: dict = {}
+        for task in getattr(self._project, "factor_map_tasks", None) or []:
+            descriptor = getattr(task, "grid_metadata", None) or {}
+            stats = descriptor.get("statistics") or {}
+            if "min" not in stats or "max" not in stats:
+                continue
+            ramp_name = str(
+                (getattr(task, "parameters", None) or {}).get("color_ramp") or "viridis"
+            )
+            try:
+                from paleo_workbench.mapping.color_ramps import get_color_ramp
+
+                stops = tuple(
+                    (float(stop.position), str(stop.color))
+                    for stop in get_color_ramp(ramp_name).stops
+                )
+            except Exception:
+                stops = ((0.0, "#053061"), (0.5, "#f7f7f7"), (1.0, "#67001f"))
+            binding_context["factor.colorbar"] = {
+                "title": f"{task.name} ({descriptor.get('unit') or ''})".strip(),
+                "min": float(stats["min"]),
+                "max": float(stats["max"]),
+                "stops": stops,
+            }
+            break  # the active factor defines the primary colorbar binding
+        if binding_context:
+            panel.apply_bindings(binding_context)
 
     def _on_contour_draft_requested(self) -> None:
         """Schedule ContourDraft extraction and commit on the GUI thread."""
@@ -1569,6 +1779,7 @@ class MappingPage(QWidget):
                     self.layer_tree.set_active_document(self._active_document)
                     return
         self._active_document = document
+        self._bind_composition_main_map(document)
         self._native_factor_scene = None
         self._show_legacy_layer_tree()
         if scene is not None:

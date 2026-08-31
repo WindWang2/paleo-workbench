@@ -34,6 +34,10 @@ from paleo_workbench.ui.pages.filter_index import (
     FilterIndex,
     FilterQuery,
 )
+from paleo_workbench.ui.pages.paged_asset_model import (
+    CatalogPageProvider,
+    PagedAssetTableModel,
+)
 
 __all__ = [
     "COLUMN_BY_KEY",
@@ -51,6 +55,9 @@ class DataAssetTable(QWidget):
     selected_asset_changed = Signal(object)
     selected_assets_changed = Signal(list)
     context_menu_requested = Signal(QPoint, object)  # (global_pos, asset or list of assets)
+    # Paged mode could not serve the requested view (unmappable filter);
+    # the host must rebuild through the materialized path.
+    paged_mode_unavailable = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -93,6 +100,8 @@ class DataAssetTable(QWidget):
 
         self.model = AssetTableModel(self)
         self.model.set_column_keys(self._visible_column_keys)
+        self._paged_model: PagedAssetTableModel | None = None
+        self._in_paged_mode = False
         self.table = QTableView()
         self.table.setObjectName("DataAssetGrid")
         self.table.setModel(self.model)
@@ -134,6 +143,10 @@ class DataAssetTable(QWidget):
         enricher=None,
         views: list[object] | None = None,
     ) -> None:
+        # A materialized rebuild always leaves paged mode: the host decided
+        # to serve rows itself (small project, or an unmappable filter).
+        if self._in_paged_mode:
+            self.exit_paged_mode()
         self._resources = list(resources)
         self._artifacts = list(artifacts)
         self._project_root = project_root
@@ -218,24 +231,81 @@ class DataAssetTable(QWidget):
         query = self._index._parse_legacy_category(category, self._search_text)
         self.set_filter_query(query)
 
+    # ------------------------------------------------------------------
+    # Paged mode (large catalogs, P0-B)
+    # ------------------------------------------------------------------
+
+    def update_paged(self, provider: CatalogPageProvider) -> None:
+        """Serve the table from SQL pages instead of materialized rows.
+
+        The classic model stays constructed (small projects never see this
+        path); the view simply displays the paged model. Filter/search
+        changes re-query through the provider; unmappable queries emit
+        :attr:`paged_mode_unavailable` so the host can fall back.
+        """
+        if self._paged_model is None or self._paged_model.provider is not provider:
+            self._paged_model = PagedAssetTableModel(provider, self)
+            self._paged_model.set_column_keys(self._visible_column_keys)
+            self._paged_model.modelReset.connect(self._on_model_reset)
+        self._in_paged_mode = True
+        self._filter_query.search_text = self._search_text
+        if not self._paged_model.apply_query(self._filter_query):
+            self.exit_paged_mode()
+            self.paged_mode_unavailable.emit()
+            return
+        self._install_model(self._paged_model)
+        self._visible_assets = list(self._paged_model.assets())
+        self._sync_selection()
+
+    def exit_paged_mode(self) -> None:
+        """Return to the classic materialized model (host rebuilds rows)."""
+        if not self._in_paged_mode:
+            return
+        self._in_paged_mode = False
+        self._install_model(self.model)
+        self._visible_assets = []
+        self._selected_assets = []
+        self._selected_asset = None
+
+    def in_paged_mode(self) -> bool:
+        return self._in_paged_mode
+
+    def _install_model(self, model) -> None:
+        if self.table.model() is model:
+            return
+        self.table.setModel(model)
+        # setModel creates a fresh selection model: rewire the emitters.
+        self.table.selectionModel().selectionChanged.connect(self._emit_selection)
+
     def set_filter_query(self, query: FilterQuery) -> None:
         self._filter_query = query
         self._filter_query.search_text = self._search_text
+        if self._in_paged_mode and self._paged_model is not None:
+            if self._paged_model.apply_query(self._filter_query):
+                self._visible_assets = list(self._paged_model.assets())
+                self._sync_selection()
+                return
+            self.exit_paged_mode()
+            self.paged_mode_unavailable.emit()
+            return
         self._apply_filter()
 
     def set_search_text(self, text: str) -> None:
         self._search_text = text.strip().lower()
-        self._filter_query.search_text = self._search_text
-        self._apply_filter()
+        self.set_filter_query(self._filter_query)
 
     def visible_asset_count(self) -> int:
         return len(self._visible_assets)
 
+    def _active_model(self):
+        """The model currently installed in the view (classic or paged)."""
+        return self.table.model() if self.table.model() is not None else self.model
+
     def asset_at(self, view_row: int) -> object | None:
-        return self.model.asset_at(view_row)
+        return self._active_model().asset_at(view_row)
 
     def view_at(self, view_row: int) -> AssetView | None:
-        return self.model.view_at(view_row)
+        return self._active_model().view_at(view_row)
 
     def selected_assets(self) -> list[object]:
         return list(self._selected_assets)
@@ -376,10 +446,11 @@ class DataAssetTable(QWidget):
         (or any reset) can never leave highlight and selection on different
         rows (see #412).
         """
+        active = self._active_model()
         self._visible_assets = [
             asset
-            for row in range(self.model.rowCount())
-            if (asset := self.model.asset_at(row)) is not None
+            for row in range(active.rowCount())
+            if (asset := active.asset_at(row)) is not None
         ]
         self._sync_selection()
 
@@ -415,23 +486,26 @@ class DataAssetTable(QWidget):
             order = Qt.SortOrder.AscendingOrder
         header.setSortIndicator(column, order)
         header.setSortIndicatorShown(True)
-        self.model.sort(column, order)
+        self._active_model().sort(column, order)
 
     def _reapply_sort(self, pre_build_sort=None) -> None:
         """Re-apply the user's header sort after a filter/refresh model rebuild.
 
         A model rebuild resets the rows (canonical order) while the header
         keeps its indicator; re-sorting keeps the shown order honest with the
-        indicator instead of silently resetting it (#850-1).  *pre_build_sort*
+        indicator instead of silently resetting it (#850-1). *pre_build_sort*
         is the sort captured before the rebuild — the rebuild itself clears the
         model's recorded sort so Qt's reset-time auto-sort is never mistaken
         for a user action.
         """
-        last = pre_build_sort if pre_build_sort is not None else self.model.last_sort
+        active = self._active_model()
+        last = pre_build_sort if pre_build_sort is not None else getattr(
+            active, "last_sort", None
+        )
         if last is None:
             return
         column, order = last
-        if not (0 <= column < self.model.columnCount()):
+        if not (0 <= column < active.columnCount()):
             return
         self.table.sortByColumn(column, order)
 

@@ -160,7 +160,13 @@ def test_seismic_page_routes_attribute_and_toolbar_actions(qtbot):
     page.update_state([], project=project)
 
     page.attribute_panel.set_selected_attribute("包络")
-    item = page.attribute_panel.attribute_tree.topLevelItem(0).child(1)
-    page.attribute_panel.attribute_tree.itemClicked.emit(item, 0)
+    item = None
+    tree = page.attribute_panel.attribute_tree
+    for g in range(tree.topLevelItemCount()):
+        for c in range(tree.topLevelItem(g).childCount()):
+            if tree.topLevelItem(g).child(c).text(0) == "包络":
+                item = tree.topLevelItem(g).child(c)
+    assert item is not None
+    tree.itemClicked.emit(item, 0)
 
     assert page.view_panel.attribute_label() == "包络"

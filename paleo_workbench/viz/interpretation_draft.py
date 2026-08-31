@@ -121,6 +121,39 @@ class HorizonInterpretationDraft:
         return self.status
 
     # ------------------------------------------------------------------ edit
+    def set_picks(
+        self,
+        rows: "np.ndarray",
+        cols: "np.ndarray",
+        values: "np.ndarray",
+    ) -> "np.ndarray":
+        """Write picked Z values at grid nodes as ONE undoable sparse patch.
+
+        Rows/cols are grid indices (inline row, crossline column); values are
+        in the draft's vertical domain (time ms or depth m). Indices outside
+        the grid raise IndexError — callers clip, never silently drop picks.
+        """
+        rows_arr = np.asarray(rows, dtype=np.int64)
+        cols_arr = np.asarray(cols, dtype=np.int64)
+        values_arr = np.asarray(values, dtype=np.float32)
+        if not (len(rows_arr) == len(cols_arr) == len(values_arr)):
+            raise ValueError("rows/cols/values length mismatch")
+        nrows, ncols = self.shape
+        if len(rows_arr) and (
+            rows_arr.min() < 0
+            or rows_arr.max() >= nrows
+            or cols_arr.min() < 0
+            or cols_arr.max() >= ncols
+        ):
+            raise IndexError("pick indices outside the horizon grid")
+        if len(rows_arr) == 0:
+            return self.working_z()
+        flat = rows_arr * ncols + cols_arr
+        self._mesh.set_heights(flat, values_arr)
+        self.generation += 1
+        self.refresh_status()
+        return self.working_z()
+
     def sculpt(
         self,
         center_xy: tuple[float, float],

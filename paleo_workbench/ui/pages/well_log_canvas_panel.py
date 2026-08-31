@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any, Literal
 
 from PySide6.QtCore import Qt, Signal
@@ -55,6 +56,13 @@ class WellLogCanvasPanel(QFrame):
 
     canvas_ready = Signal(bool)
     backend_changed = Signal(str)
+    # Scenario C producer: MD under the mouse cursor (m). Emitted through a
+    # ~120 ms gate so crosshair drags don't flood the coordination bus.
+    depth_cursor_moved = Signal(float)
+
+    # Depth publications are advisory only: consumers must gate any
+    # depth→time conversion on a real time-depth calibration.
+    DEPTH_GATE_MS = 120.0
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -77,6 +85,7 @@ class WellLogCanvasPanel(QFrame):
         self._load_seq = 0
         self._curve_track_layout: CurveTrackLayout | None = None
         self._prediction_task = None
+        self._depth_last_pub_ms: float | None = None
 
         # Default backend from env; host may still switch explicitly.
         self._backend: BackendName = (
@@ -144,6 +153,15 @@ class WellLogCanvasPanel(QFrame):
         )
         self.canvas_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.stack.addWidget(self.canvas_scroll)  # 1 legacy
+        # Scenario C producer: the engine canvas reports crosshair y in
+        # pixels; convert to MD and publish (gated). Missing signal degrades
+        # to a no-op — the panel simply never publishes depth cursors.
+        mouse_moved = getattr(self.canvas, "mouse_moved", None)
+        if mouse_moved is not None:
+            try:
+                mouse_moved.connect(self._on_canvas_mouse_moved)
+            except (RuntimeError, TypeError):
+                pass
 
         self.engine_host = QFrame()
         self.engine_host.setObjectName("WellLogEngineHost")
@@ -221,6 +239,58 @@ class WellLogCanvasPanel(QFrame):
     def curve_track_layout(self) -> CurveTrackLayout | None:
         """Current session-only Legacy curve visibility/grouping layout."""
         return self._curve_track_layout
+
+    def current_well_name(self) -> str:
+        """Well name of the displayed log document ("" when none)."""
+        return str(getattr(self.well_log_data, "well_name", "") or "")
+
+    # --- depth cursor producer (scenario C) ------------------------------
+
+    def _on_canvas_mouse_moved(self, y_px: float) -> None:
+        """Engine crosshair y (px) → MD (m), published through the gate.
+
+        ``y < 0`` is the canvas's own "cursor left the plot" marker — no
+        depth exists there, so nothing is published.
+        """
+        if y_px is None or float(y_px) < 0.0:
+            return
+        now_ms = time.monotonic() * 1000.0
+        if (
+            self._depth_last_pub_ms is not None
+            and now_ms - self._depth_last_pub_ms < self.DEPTH_GATE_MS
+        ):
+            return
+        depth = self.depth_at_pixel(float(y_px))
+        if depth is None:
+            return
+        self._depth_last_pub_ms = now_ms
+        self.depth_cursor_moved.emit(float(depth))
+
+    def depth_at_pixel(self, y_px: float) -> float | None:
+        """Map a canvas content y (px) to MD using the visible depth range.
+
+        Mirrors the engine canvas's own pan math (header height excluded,
+        linear over [depth_top, depth_bottom]). Returns None when no track
+        with a usable depth range is displayed.
+        """
+        tracks = list(getattr(self.canvas, "tracks", None) or [])
+        if not tracks:
+            return None
+        track = tracks[0]
+        try:
+            top = float(track.depth_top)
+            bottom = float(track.depth_bottom)
+            header_h = float(getattr(track, "header_height", 56) or 56)
+        except (TypeError, ValueError, AttributeError):
+            return None
+        if not bottom > top:
+            return None
+        content_h = max(1.0, float(self.canvas.height()) - header_h)
+        y = float(y_px) - header_h
+        if y < 0.0:
+            return None
+        fraction = min(1.0, max(0.0, y / content_h))
+        return top + fraction * (bottom - top)
 
     def set_curve_track_layout(self, layout: CurveTrackLayout) -> None:
         """Apply a validated curve layout to the visible Legacy canvas."""

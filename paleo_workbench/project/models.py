@@ -473,6 +473,27 @@ class JointAnalysisState(BaseModel):
     path_hints: dict[str, str] = Field(default_factory=dict)
 
 
+class MapProductRecord(BaseModel):
+    """A finalized paleogeographic product: multiple factor maps +
+    interpretations + manual adjustments + cartographic composition,
+    registered as ONE catalog OUTPUT version with full lineage (P1-D).
+
+    References are ids only — the catalog owns every payload and version;
+    this record is the project-side index of what was produced and from
+    what."""
+
+    id: str = Field(default_factory=lambda: _id("mapprod"))
+    product_name: str
+    factor_task_ids: list[str] = Field(default_factory=list)
+    interpretation_refs: list[str] = Field(default_factory=list)
+    composition_ref: str | None = None
+    notes: str = ""
+    output_version_id: str = ""
+    run_id: str = ""
+    scientific_fingerprint: str = ""
+    created_at: str = Field(default_factory=_now_iso)
+
+
 class ProjectDocument(BaseModel):
     """Portable project snapshot.
 
@@ -497,6 +518,7 @@ class ProjectDocument(BaseModel):
     resources: list[ResourceItem] = Field(default_factory=list)
     well_tables: list[WellTable] = Field(default_factory=list)
     constraint_layers: list[ConstraintLayers] = Field(default_factory=list)
+    map_products: list[MapProductRecord] = Field(default_factory=list)
     contour_drafts: list[ContourDraft] = Field(default_factory=list)
     compilation_runs: list[CompilationRun] = Field(default_factory=list)
     factor_map_tasks: list[FactorMapTask] = Field(default_factory=list)

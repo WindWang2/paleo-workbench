@@ -128,6 +128,7 @@ class GeologicalMappingService:
                         break
 
         # 4. Fallback: synthesize realistic sample points across project extent if project has 0 well records
+        synthesized = False
         if not records:
             from geoviz import synthetic_sample_points
             raw_pts = synthetic_sample_points(seed=42, factor_type=factor_name, count=12)
@@ -139,6 +140,7 @@ class GeologicalMappingService:
                     "y": p["y"],
                     "value": p["value"],
                 })
+            synthesized = True
 
         # #1050: the authoritative CRS is project.coordinate.project_crs
         # (pydantic schema, project/models.py) — ProjectDocument has no `crs`
@@ -146,13 +148,18 @@ class GeologicalMappingService:
         # False and every factor dataset silently rendered as EPSG:4326.
         # Fallback only when the field is absent/empty.
         project_crs = str(getattr(project.coordinate, "project_crs", "") or "").strip()
-        return self.pipeline.extract_factors(
+        dataset = self.pipeline.extract_factors(
             records,
             factor_name=factor_name,
             target_horizon=resolved_horizon,
             unit=unit,
             crs=project_crs or "EPSG:4326",
         )
+        # Anti-laundering (#848 discipline): a dataset synthesized for an
+        # empty project must never be stamped "real" downstream.
+        dataset.metadata["synthesized"] = synthesized
+        dataset.metadata["source_table_ids"] = [wt.id for wt in matched_tables]
+        return dataset
 
     def create_factor_map(
         self,
@@ -219,8 +226,13 @@ class GeologicalMappingService:
                 "sample_count": len(dataset.valid_points),
             },
             status="complete",
-            source_kind="real",
+            source_kind="mock" if dataset.metadata.get("synthesized") else "real",
         )
+        if dataset.metadata.get("synthesized"):
+            task.quality_metrics = {
+                **(task.quality_metrics or {}),
+                "synthesized_fallback": True,
+            }
         project.factor_map_tasks.append(task)
 
         # 3. Create or update PaleoMapDocument compatibility record.

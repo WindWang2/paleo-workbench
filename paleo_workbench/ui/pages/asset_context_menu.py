@@ -72,6 +72,14 @@ class AssetContextMenu(QMenu):
             create_derived = self._add_action("ctx_create_derived", "创建派生副本 (Create Derived Copy)")
             create_derived.setToolTip("从锁定原始输入创建可编辑派生数据")
 
+            # Curve interpretation (P1-A): explicit corrections on a RAW
+            # curve dataset produce DERIVED versions with full provenance.
+            if view.type in ("well_log", "las"):
+                curve_op = self._add_action("ctx_curve_interpretation", "曲线解释操作…")
+                curve_op.setToolTip(
+                    "深度平移 / 去尖峰 / 基线校正 → 派生曲线版本（原始数据保持不可变）"
+                )
+
             # Direct edit disabled for RAW
             edit_raw = self._add_action("ctx_edit_original", "编辑原始数据 (已锁定 🔒)")
             edit_raw.setEnabled(False)

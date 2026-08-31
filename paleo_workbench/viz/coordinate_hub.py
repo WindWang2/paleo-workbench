@@ -16,6 +16,73 @@ from typing import Sequence
 import numpy as np
 
 
+@dataclass(frozen=True)
+class TimeDepthCalibration:
+    """Explicit, provenance-carrying time-depth relationship for one well.
+
+    A piecewise-linear checkshot-style calibration over strictly increasing
+    (MD m, TWT ms) pairs. Deliberately narrow:
+
+    * conversions are interpolated ONLY inside the calibrated range — no
+      extrapolation, no constant-velocity fallback (out-of-range → None);
+    * ``provenance`` records where the relationship came from
+      (``checkshot:<asset>``, ``td-table:<path>``, …) so any depth↔time
+      routing can state its authority.
+    """
+
+    well_id: str
+    pairs: tuple[tuple[float, float], ...]
+    provenance: str
+
+    def __post_init__(self) -> None:
+        if len(self.pairs) < 2:
+            raise ValueError("time-depth calibration needs at least two pairs")
+        for (md0, twt0), (md1, twt1) in zip(self.pairs, self.pairs[1:]):
+            if not md1 > md0:
+                raise ValueError(f"calibration MD values must strictly increase ({md0} → {md1})")
+            if not twt1 > twt0:
+                raise ValueError(
+                    f"calibration TWT values must strictly increase ({twt0} → {twt1})"
+                )
+
+    @classmethod
+    def from_pairs(
+        cls,
+        well_id: str,
+        pairs: Sequence[tuple[float, float]],
+        *,
+        provenance: str,
+    ) -> "TimeDepthCalibration":
+        cleaned = tuple(
+            (float(md), float(twt)) for md, twt in sorted(pairs, key=lambda p: float(p[0]))
+        )
+        return cls(well_id=str(well_id), pairs=cleaned, provenance=str(provenance))
+
+    def md_to_twt(self, md: float) -> float | None:
+        md_val = float(md)
+        if md_val < self.pairs[0][0] or md_val > self.pairs[-1][0]:
+            return None
+        for (md0, twt0), (md1, twt1) in zip(self.pairs, self.pairs[1:]):
+            if md0 <= md_val <= md1:
+                if md1 == md0:
+                    return float(twt0)
+                frac = (md_val - md0) / (md1 - md0)
+                return float(twt0 + frac * (twt1 - twt0))
+        return float(self.pairs[-1][1])
+
+    def twt_to_md(self, twt: float) -> float | None:
+        twt_val = float(twt)
+        if twt_val < self.pairs[0][1] or twt_val > self.pairs[-1][1]:
+            return None
+        for (md0, twt0), (md1, twt1) in zip(self.pairs, self.pairs[1:]):
+            if twt0 <= twt_val <= twt1:
+                if twt1 == twt0:
+                    return float(md0)
+                frac = (twt_val - twt0) / (twt1 - twt0)
+                return float(md0 + frac * (md1 - md0))
+        return float(self.pairs[-1][0])
+
+
 @dataclass
 class WellTrajectoryData:
     """Well trajectory survey and 3D spatial positioning data."""
@@ -119,6 +186,7 @@ class CoordinateTransformHub:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._wells: dict[str, WellTrajectoryData] = {}
+        self._calibrations: dict[str, TimeDepthCalibration] = {}
         # Default seismic grid geometry
         self._seismic_origin: tuple[float, float] = (100.0, 200.0)
         self._seismic_il_step: tuple[float, float] = (10.0, 0.0)
@@ -187,7 +255,63 @@ class CoordinateTransformHub:
         with self._lock:
             removed = len(self._wells)
             self._wells.clear()
+            self._calibrations.clear()
             return removed
+
+    # -------------------------------------------------------------------------
+    # Time-Depth Calibration (fail-closed)
+    # -------------------------------------------------------------------------
+
+    def set_time_depth_calibration(self, calibration: TimeDepthCalibration) -> None:
+        """Attach an explicit time-depth relationship to its well."""
+        if not getattr(calibration, "well_id", ""):
+            raise ValueError("calibration must name its well")
+        with self._lock:
+            self._calibrations[str(calibration.well_id)] = calibration
+
+    def clear_time_depth_calibration(self, well_id: str) -> bool:
+        with self._lock:
+            return self._calibrations.pop(str(well_id), None) is not None
+
+    def time_depth_calibration(self, well_id: str) -> TimeDepthCalibration | None:
+        with self._lock:
+            return self._calibrations.get(str(well_id))
+
+    def well_md_to_twt(self, well_id: str, md: float) -> float | None:
+        """MD (m) → TWT (ms) through the well's calibration; None without one.
+
+        This is the fail-closed conversion: no calibration, no answer. It
+        never falls back to the average velocity — depth==time guessing is
+        exactly what the calibration gate exists to prevent.
+        """
+        cal = self.time_depth_calibration(well_id)
+        if cal is None:
+            return None
+        return cal.md_to_twt(md)
+
+    def twt_to_well_md(self, well_id: str, twt: float) -> float | None:
+        """TWT (ms) → MD (m) through the well's calibration; None without one."""
+        cal = self.time_depth_calibration(well_id)
+        if cal is None:
+            return None
+        return cal.twt_to_md(twt)
+
+    def well_md_to_seismic_cursor(
+        self, well_id: str, md: float
+    ) -> tuple[int, int, float] | None:
+        """Well MD → (inline, crossline, twt) with a calibration-authoritative time.
+
+        The (IL, XL) part is pure geometry (trajectory + bin grid) and always
+        available; the TWT part exists only through the well's calibration,
+        so the whole conversion is None when the calibration is missing or
+        the MD is outside the calibrated range.
+        """
+        twt = self.well_md_to_twt(well_id, md)
+        if twt is None:
+            return None
+        x, y, _tvd = self.well_depth_to_map(well_id, md)
+        il, xl, _ = self.map_to_seismic(x, y, 0.0)
+        return (il, xl, float(twt))
 
     def registered_well_ids(self) -> tuple[str, ...]:
         """Snapshot of currently registered well ids (diagnostics/tests)."""

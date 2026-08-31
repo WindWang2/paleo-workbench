@@ -196,6 +196,8 @@ class StratalWorker(QObject):
         volume=None,
         top_path: str | None = None,
         bottom_path: str | None = None,
+        top_interp_path: str | None = None,
+        bottom_interp_path: str | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -205,6 +207,11 @@ class StratalWorker(QObject):
         self.volume = volume
         self.top_path = top_path
         self.bottom_path = bottom_path
+        # Versioned horizon interpretation artifacts (NPZ Z grids in ms) —
+        # the same scientific content as .dat picks, but with catalog
+        # lineage. Loaded here so the IO stays off the UI thread.
+        self.top_interp_path = top_interp_path
+        self.bottom_interp_path = bottom_interp_path
 
     def run(self) -> None:
         try:
@@ -232,12 +239,16 @@ class StratalWorker(QObject):
 
             from paleo_workbench.viz.stratal_adapter import (
                 build_stratal_grids,
+                build_stratal_grids_from_ms_grids,
                 build_stratal_surfaces,
             )
 
-            grids = build_stratal_grids(
-                self.scene, self.volume, self.top_path, self.bottom_path
-            )
+            if self.top_interp_path or self.bottom_interp_path:
+                grids = self._grids_from_interpretations()
+            else:
+                grids = build_stratal_grids(
+                    self.scene, self.volume, self.top_path, self.bottom_path
+                )
             if grids is None:
                 self.failed.emit("survey/registration 不可用或体数据未就绪，无法对齐 horizon。")
                 return
@@ -261,6 +272,25 @@ class StratalWorker(QObject):
             self.failed.emit(str(e))
         finally:
             self.terminal.emit()
+
+    def _grids_from_interpretations(self):
+        from paleo_workbench.viz.interpretation_artifact import (
+            read_interpretation_artifact,
+        )
+        from paleo_workbench.viz.stratal_adapter import (
+            build_stratal_grids_from_ms_grids,
+        )
+
+        top_ms = bot_ms = None
+        if self.top_interp_path:
+            top_ms, _desc = read_interpretation_artifact(self.top_interp_path)
+        if self.bottom_interp_path:
+            bot_ms, _desc = read_interpretation_artifact(self.bottom_interp_path)
+        if top_ms is None or bot_ms is None:
+            raise ValueError("解释工件读取失败：顶部/底部 horizon 缺失。")
+        return build_stratal_grids_from_ms_grids(
+            self.scene, self.volume, top_ms, bot_ms
+        )
 
 
 class ExportWorker(QObject):

@@ -3,9 +3,19 @@ from __future__ import annotations
 import time
 from typing import Any
 
+import numpy as np
+
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QCloseEvent
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QStackedLayout, QVBoxLayout
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QStackedLayout,
+    QVBoxLayout,
+    QWidget,
+)
 
 from geoviz import SeismicView
 
@@ -116,6 +126,54 @@ class SeismicViewPanel(QFrame):
         if hasattr(self.view, "segy_loaded"):
             self.view.segy_loaded.connect(self._on_segy_loaded)
         self.stack.addWidget(self.view)
+        # ------------------------------------------------------------------
+        # Interpretation lifecycle (P1-B): the engine already picks points;
+        # this bar turns picks into a versioned horizon interpretation.
+        interp_row = QWidget()
+        interp_layout = QHBoxLayout(interp_row)
+        interp_layout.setContentsMargins(0, 0, 0, 0)
+        interp_layout.setSpacing(tokens.SPACE_2)
+        self.interp_draft_btn = QPushButton("开始层位解释")
+        self.interp_draft_btn.setObjectName("SecondaryButton")
+        self.interp_draft_btn.setToolTip("将拾取点收集为层位解释草稿（可撤销编辑）")
+        self.interp_draft_btn.clicked.connect(self._start_interpretation_draft)
+        self.interp_sync_btn = QPushButton("同步拾取→草稿")
+        self.interp_sync_btn.setObjectName("SecondaryButton")
+        self.interp_sync_btn.setToolTip("把当前剖面拾取点写入解释草稿（稀疏可撤销）")
+        self.interp_sync_btn.clicked.connect(self._sync_picks_to_draft)
+        self.interp_undo_btn = QPushButton("撤销")
+        self.interp_undo_btn.clicked.connect(self._undo_interpretation)
+        self.interp_redo_btn = QPushButton("重做")
+        self.interp_redo_btn.clicked.connect(self._redo_interpretation)
+        self.interp_save_btn = QPushButton("保存解释版本")
+        self.interp_save_btn.setObjectName("SecondaryButton")
+        self.interp_save_btn.setToolTip("冻结草稿为不可变解释版本（目录血缘 + 工程引用）")
+        self.interp_save_btn.clicked.connect(self._save_interpretation_version)
+        self.interp_reload_btn = QPushButton("重开解释")
+        self.interp_reload_btn.setObjectName("SecondaryButton")
+        self.interp_reload_btn.setToolTip("从工程引用重开最新解释版本为草稿")
+        self.interp_reload_btn.clicked.connect(self._reopen_interpretation)
+        for btn in (
+            self.interp_draft_btn,
+            self.interp_sync_btn,
+            self.interp_undo_btn,
+            self.interp_redo_btn,
+            self.interp_save_btn,
+            self.interp_reload_btn,
+        ):
+            interp_layout.addWidget(btn)
+        interp_layout.addStretch(1)
+        self.interp_status_label = QLabel("")
+        self.interp_status_label.setStyleSheet(
+            f"color: {tokens.TEXT_SECONDARY}; font-size: {tokens.FONT_SIZE_STATUS}px;"
+        )
+        interp_layout.addWidget(self.interp_status_label)
+        outer.addWidget(interp_row)
+        self._interp_draft = None
+        self._picking_controller = None
+        self._interp_project = None
+        self._interp_project_path = None
+        self._sync_interp_buttons()
         # Multi-view cursor producer (#1029): tap the engine's EXISTING
         # per-profile cursor signals — the same ones that drive the internal
         # crosshair linking — and republish them on the coordination bus.
@@ -221,6 +279,32 @@ class SeismicViewPanel(QFrame):
         """
         self._coordination = controller
 
+    def locate_position(self, il: int, xl: int, twt: float | None = None) -> bool:
+        """Navigate the seismic profiles to a survey position (scenario A/B).
+
+        ``twt`` may be None when no calibration authored a time — only the
+        inline/crossline slices move then. Safe no-op (False) when no volume
+        is loaded or the engine internals needed for the survey→voxel
+        mapping are unavailable.
+        """
+        view = self.view
+        if not self.is_view_ready():
+            return False
+        to_voxel = getattr(view, "_survey_to_voxel", None)
+        renderer = getattr(view, "_renderer_3d", None)
+        set_position = getattr(renderer, "set_position_external", None)
+        if not callable(to_voxel) or not callable(set_position):
+            return False
+        try:
+            il_idx, xl_idx, t_idx = to_voxel(float(il), float(xl), float(twt or 0.0))
+            set_position("inline", int(il_idx))
+            set_position("crossline", int(xl_idx))
+            if twt is not None:
+                set_position("time", int(t_idx))
+        except Exception:
+            return False
+        return True
+
     def notify_cursor(self, iline_value: float, xl_value: float, twt_ms: float) -> bool:
         """Publish a seismic cursor position to the coordination bus.
 
@@ -312,6 +396,187 @@ class SeismicViewPanel(QFrame):
             if "目标层位" not in current:
                 label.setText(f"{current}  目标层位:{self._horizon_name}".strip())
 
+    # ------------------------------------------------------------------
+    # Interpretation lifecycle (P1-B)
+    # ------------------------------------------------------------------
+
+    def set_project_path(self, path) -> None:
+        """Receive the open ``*.paleo.json`` path (AppShell broadcast)."""
+        self._interp_project_path = str(path) if path else None
+
+    def interpretation_draft(self):
+        return self._interp_draft
+
+    def picked_points(self) -> list:
+        """Engine picks in survey coordinates (IL, XL, TWT ms)."""
+        return list(getattr(self.view, "_picked_points", None) or [])
+
+    def refresh_pick_overlay(self, points) -> None:
+        """Re-push survey-coordinate picks onto the engine panels (reopen path)."""
+        clear = getattr(self.view, "_on_clear_picks", None)
+        if callable(clear):
+            clear()
+        else:
+            for profile in ("_profile_il", "_profile_xl", "_profile_t"):
+                vd = getattr(getattr(self.view, profile, None), "_vd", None)
+                if vd is not None:
+                    vd.clear_picked_points()
+        to_voxel = getattr(self.view, "_survey_to_voxel", None)
+        renderer = getattr(self.view, "_renderer_3d", None)
+        set_picks = getattr(renderer, "set_horizon_picks", None)
+        voxel_points = []
+        for il, xl, twt in points:
+            try:
+                self.view._profile_il._vd.add_picked_point(float(xl), float(twt))
+                self.view._profile_xl._vd.add_picked_point(float(il), float(twt))
+                self.view._profile_t._vd.add_picked_point(float(il), float(xl))
+                if callable(to_voxel):
+                    voxel_points.append(to_voxel(float(il), float(xl), float(twt)))
+            except Exception:
+                continue
+        if callable(set_picks) and voxel_points:
+            set_picks(voxel_points)
+        readout = getattr(self.view, "_readout_label", None)
+        if readout is not None:
+            readout.setText(f"已载入解释 {len(points)} 点")
+
+    def _interpretation_grid(self):
+        from paleo_workbench.viz.picking_controller import SurveyGridGeometry
+
+        return SurveyGridGeometry.from_engine_meta(getattr(self.view, "_meta", None))
+
+    def _start_interpretation_draft(self) -> None:
+        from paleo_workbench.viz.picking_controller import HorizonPickingController
+        from paleo_workbench.viz.interpretation_lifecycle import open_draft_from_array
+
+        grid = self._interpretation_grid()
+        if grid is None or self.volume_shape is None:
+            self.interp_status_label.setText("无地震体几何，无法开始解释")
+            return
+        n_il, n_xl = self.volume_shape[0], self.volume_shape[1]
+        # A fresh interpretation is undefined everywhere until picked; NaN is
+        # the honest "not interpreted" value (never 0 ms).
+        baseline = np.full((n_il, n_xl), np.nan, dtype=np.float32)
+        horizon_key = self._horizon_name or "H1"
+        self._interp_draft = open_draft_from_array(
+            baseline,
+            horizon_key=horizon_key,
+            name=horizon_key,
+            vertical_domain="time",
+        )
+        self._picking_controller = HorizonPickingController(self, self._interp_draft)
+        self._picking_controller.set_grid(grid)
+        self.interp_status_label.setText(
+            f"解释草稿 {horizon_key}（{n_il}×{n_xl}）— 在剖面拾取后点击「同步拾取→草稿」"
+        )
+        self._sync_interp_buttons()
+
+    def _sync_picks_to_draft(self) -> None:
+        if self._picking_controller is None:
+            self._start_interpretation_draft()
+            if self._picking_controller is None:
+                return
+        written = self._picking_controller.sync_picks_into_draft()
+        draft = self._interp_draft
+        if draft is None:
+            return
+        status = draft.refresh_status()
+        self.interp_status_label.setText(
+            f"已写入 {written} 个网格节点 · 草稿状态: {status}"
+        )
+        self._publish_horizon_selection(draft)
+        self._sync_interp_buttons()
+
+    def _undo_interpretation(self) -> None:
+        if self._interp_draft is not None and self._interp_draft.undo():
+            self._refresh_draft_overlay()
+
+    def _redo_interpretation(self) -> None:
+        if self._interp_draft is not None and self._interp_draft.redo():
+            self._refresh_draft_overlay()
+
+    def _refresh_draft_overlay(self) -> None:
+        if self._picking_controller is None or self._interp_draft is None:
+            return
+        self._picking_controller.push_draft_to_panel()
+        self.interp_status_label.setText(
+            f"草稿状态: {self._interp_draft.refresh_status()}"
+        )
+        self._sync_interp_buttons()
+
+    def _save_interpretation_version(self) -> None:
+        from paleo_workbench.viz.interpretation_lifecycle import save_draft_as_new_version
+
+        draft = self._interp_draft
+        if draft is None:
+            self.interp_status_label.setText("尚无解释草稿")
+            return
+        if self._interp_project is None or self._interp_project_path is None:
+            self.interp_status_label.setText("未绑定工程，无法保存解释版本")
+            return
+        ref, message = save_draft_as_new_version(
+            draft, self._interp_project, self._interp_project_path
+        )
+        if ref is None:
+            self.interp_status_label.setText(f"保存失败: {message}")
+            return
+        self.interp_status_label.setText(
+            f"已保存版本 {ref.current_version_id[:14]}… ({message})"
+        )
+        self._publish_horizon_selection(draft)
+        self._sync_interp_buttons()
+
+    def _reopen_interpretation(self) -> None:
+        from paleo_workbench.viz.interpretation_lifecycle import (
+            restore_draft_from_project_ref,
+        )
+        from paleo_workbench.viz.picking_controller import HorizonPickingController
+
+        if self._interp_project is None or self._interp_project_path is None:
+            self.interp_status_label.setText("未绑定工程，无法重开解释")
+            return
+        draft = restore_draft_from_project_ref(
+            self._interp_project, self._interp_project_path
+        )
+        if draft is None:
+            self.interp_status_label.setText("工程中尚无层位解释")
+            return
+        grid = self._interpretation_grid()
+        shape = getattr(draft, "shape", None)
+        if grid is not None and shape is not None and (grid.n_il, grid.n_xl) != tuple(shape):
+            self.interp_status_label.setText(
+                "解释网格与当前数据体几何不一致，已取消载入"
+            )
+            return
+        self._interp_draft = draft
+        if grid is not None:
+            self._picking_controller = HorizonPickingController(self, draft)
+            self._picking_controller.set_grid(grid)
+            self._picking_controller.push_draft_to_panel()
+        self.interp_status_label.setText(f"已重开解释 {draft.name}")
+        self._publish_horizon_selection(draft)
+        self._sync_interp_buttons()
+
+    def _publish_horizon_selection(self, draft) -> None:
+        """Announce the active horizon identity on the coordination bus (D)."""
+        controller = self._coordination
+        publish = getattr(controller, "publish_horizon_selection", None)
+        if callable(publish) and draft is not None:
+            publish(str(draft.interpretation_id), source="seismic_view")
+
+    def _sync_interp_buttons(self) -> None:
+        draft = self._interp_draft
+        has_draft = draft is not None
+        self.interp_sync_btn.setEnabled(has_draft)
+        self.interp_undo_btn.setEnabled(has_draft and draft.can_undo())
+        self.interp_redo_btn.setEnabled(has_draft and draft.can_redo())
+        self.interp_save_btn.setEnabled(
+            has_draft and self._interp_project is not None and self._interp_project_path is not None
+        )
+        self.interp_reload_btn.setEnabled(
+            self._interp_project is not None and self._interp_project_path is not None
+        )
+
     def _show_empty(self, message: str) -> None:
         self._expected_segy_path = None
         self.view.cancel_pending_segy_load()
@@ -359,6 +624,10 @@ class SeismicViewPanel(QFrame):
 
         self._segy_session_active = False
         self._expected_segy_path = None
+        self._interp_draft = None
+        self._picking_controller = None
+        self._interp_project = None
+        self._interp_project_path = None
         cleanup = getattr(self.view, "cleanup", None)
         if callable(cleanup):
             cleanup()
@@ -459,6 +728,8 @@ class SeismicViewPanel(QFrame):
         return False
 
     def update_state(self, task, project=None) -> None:
+        if project is not None:
+            self._interp_project = project
         if task is None:
             self._show_empty("未选择预测任务")
             return
