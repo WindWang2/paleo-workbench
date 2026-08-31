@@ -33,10 +33,19 @@ class WorkspaceLayout:
 
 
 class DockManager:
-    """Manages dockable panel configurations and workspace layout presets."""
+    """Manages dockable panel configurations and workspace layout presets.
+
+    Also owns the panel-id registry: the canonical id → title vocabulary the
+    :class:`~paleo_workbench.ui.panel_float_controller.FloatController`
+    consults when it needs a floating window title. Register a page's panels
+    here either bare (``"layer_tree"``) or namespaced
+    (``"mapping:layer_tree"``); :meth:`panel_title` tries the exact key first,
+    then the suffix after the last ``':'``.
+    """
 
     def __init__(self) -> None:
         self._layouts: dict[WorkspacePreset, WorkspaceLayout] = {}
+        self._panels: dict[str, DockPanelConfig] = {}
         self._active_preset: WorkspacePreset = WorkspacePreset.MAP_AUTHORING
         self._register_default_presets()
 
@@ -61,6 +70,11 @@ class DockManager:
                 DockPanelConfig("crossplot", "岩性交会图", visible=True, area="bottom"),
             ],
         )
+        # The preset docks seed the panel-id registry: ids are unique across
+        # presets (first registration wins on collision).
+        for layout in self._layouts.values():
+            for dock in layout.docks:
+                self._panels.setdefault(dock.id, dock)
 
     def get_layout(self, preset: WorkspacePreset) -> WorkspaceLayout | None:
         return self._layouts.get(preset)
@@ -72,6 +86,43 @@ class DockManager:
     @property
     def active_layout(self) -> WorkspaceLayout:
         return self._layouts[self._active_preset]
+
+    # --- panel-id registry (FloatController vocabulary) ----------------
+
+    def register_panel(
+        self,
+        panel_id: str,
+        title: str,
+        *,
+        area: str = "left",
+        visible: bool = True,
+    ) -> DockPanelConfig:
+        """Register (or retitle) a panel id and return its config."""
+        existing = self._panels.get(panel_id)
+        if existing is not None:
+            if title:
+                existing.title = title
+            return existing
+        config = DockPanelConfig(
+            id=panel_id, title=title, visible=visible, area=area
+        )
+        self._panels[panel_id] = config
+        return config
+
+    def panel_title(self, panel_id: str) -> str | None:
+        """Resolve a panel title by exact id, then by ``':'`` suffix."""
+        config = self._panels.get(panel_id)
+        if config is None:
+            suffix = panel_id.rpartition(":")[2]
+            if suffix and suffix != panel_id:
+                config = self._panels.get(suffix)
+        return config.title if config is not None else None
+
+    def has_panel(self, panel_id: str) -> bool:
+        return panel_id in self._panels
+
+    def panel_ids(self) -> tuple[str, ...]:
+        return tuple(self._panels)
 
 
 dock_manager = DockManager()
