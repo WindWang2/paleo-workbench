@@ -42,6 +42,38 @@ A single-point registration specification data structure that bundles an asset f
 ### WorkflowOrchestrator
 A legacy headless step-cursor helper (`paleo_workbench/workflow/orchestrator.py`) that exposes `next_step` / `get_step_context` for scripting/tests. It never persists or infers authoritative state: the single source of truth for workflow step status is the evidence/freshness inference in `paleo_workbench/workflow/service.py` (`home_workflow_steps`), which production UI reads. `next_step` refuses to advance past a step that has no evidence-backed validity.
 
+### Geological Selection Slots
+The cross-view state vocabulary on `SelectionContext` (P0-C): `active_horizon_id` / `active_fault_id` / `active_interpretation_id` carry STABLE domain identities (interpretation ids / DomainEntity ids — never display names); `spatial_cursor` is a map-space (x, y) position resolved from a seismic pick; `depth_cursor` is `(well_id, md_m)` from the well-log crosshair. One bus, partial updates, differential routing.
+_Avoid_: 第二套 selection bus；以井名/显示名充当层位或断层身份
+
+### TimeDepthCalibration
+An explicit, provenance-carrying piecewise-linear time-depth relationship per well (`viz/coordinate_hub.py`). Conversions interpolate ONLY inside the calibrated range and fail closed (None) without a calibration — the depth==time constant-velocity guess can never masquerade as a calibrated answer. `provenance` records the authority (checkshot/td-table/…).
+_Avoid_: 无校准的 depth↔time 换算；外推校准范围
+
+### Paged Catalog Browsing
+Above 25k non-trashed catalog assets the Data Explorer serves its table from the SQLite index (`paged_asset_model.py`): deterministic (name, id) pages with a keyset cursor, index-backed counts and group-by aggregates, `canFetchMore`/`fetchMore` lazy rows. Integrity/entity smart views are unmappable by design (fs probe / in-memory joins) and fall back to the materialized path; sorting re-queries through SQL order — never a fetched-prefix sort.
+_Avoid_: 在 GUI 线程为 10 万资产逐行物化视图；对已取回前缀排序冒充全序
+
+### Composition Component Contract
+Every cartographic component (`mapping/composer/`) is creatable, deletable, movable, scalable, configurable, serializable, copyable, z-orderable, and undoable through one `CompositionEditSession` (command pattern, monotonic revision). Elements include MAIN_MAP/LEGEND/NORTH_ARROW/SCALE_BAR/GRID/TITLE/ANNOTATION/TIMESCALE/TEXT/IMAGE/INSET_MAP/STAT_CHART/METADATA/COLORBAR. Serialization round-trips deterministically (schema_version 2); unknown future element types survive as carriers. Templates are layout + component definitions + style bindings + data bindings — never bitmaps; `bind_template` resolves declarative bindings (e.g. `factor.colorbar`) against host context. Export: PNG/SVG/PDF share one physical-size contract (mm paper + DPI fold).
+_Avoid_: 位图模板；第二套组图编辑历史；绕过 RenderContext 的 DPI 换算
+
+### Horizon Interpretation Picking
+`HorizonInterpretationDraft.set_picks` writes picked Z values as ONE undoable sparse patch (`viz/picking_controller.py` line-interpolates consecutive picks so sections leave no node gaps); `SurveyGridGeometry` maps survey numbering to grid indices and rejects between-node picks. A fresh draft is NaN everywhere — "not interpreted" is a value, not zero.
+_Avoid_: 拾取点静默丢弃或吸附到非节点；以 0 冒充未解释
+
+### Trace-Global Attributes
+FFT-family attributes (envelope, instantaneous phase/frequency, sweetness, relative impedance) depend on the WHOLE trace: no finite halo reproduces full-volume output in a cropped TIME window, so `roi_attribute` refuses them there while the banded full-volume job keeps exact parity with complete traces. Window-local kernels (c3, rms, dip, azimuth, curvature) keep the strict halo-parity contract.
+_Avoid_: 在截断时间窗上提供 FFT 属性并声称与全体积一致
+
+### Curve Interpretation Operation
+An explicit, attributable correction on a cataloged curve dataset (`workflow/curve_interpretation.py`): depth_shift / despike (rolling-median + robust MAD threshold) / baseline_shift → a DERIVED version with the full provenance set through the catalog's single write path. The RAW payload's bytes and record are untouched.
+_Avoid_: 直接改写 RAW 曲线；无 run 记录的"静默修正"
+
+### MapProduct
+One finalized paleogeographic product (`workflow/map_product.py` + `MapProductRecord`): validated factor tasks + interpretation refs + composition ref + manual adjustment notes → ONE catalog OUTPUT version with full lineage. Fail-closed: mock/mixed factors refused, unpersisted grids refused, order-sensitive scientific fingerprint.
+_Avoid_: 把合成因素洗白进成果；无血缘的成果文件
+
 ---
 
 ## Domain Concepts

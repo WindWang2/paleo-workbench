@@ -42,6 +42,11 @@ WELL_LOG_TYPES = {"well_log"}
 GEOLOGICAL_TYPE_MAP = {
     "horizon": ("geological", "horizon", "horizon"),
     "well_stratification": ("geological", "tops", "tops"),
+    # Fault data files (map-plane polylines / fault picks) bind as geological
+    # entities exactly like horizons — previously only FaultInterpretationRef
+    # records existed, leaving imported fault files outside the domain model.
+    "fault": ("geological", "fault", "fault"),
+    "faults": ("geological", "fault", "fault"),
 }
 
 PathResolver = Callable[[str], Path]
