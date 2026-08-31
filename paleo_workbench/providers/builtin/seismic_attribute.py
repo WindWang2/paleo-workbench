@@ -159,12 +159,11 @@ class SeismicAttributeProvider:
         # Register the derived store in the catalog when one is bound; the
         # catalog stays the single write authority for data artifacts.
         version = None
+        registered_path = str(dst)
         catalog = context.catalog
         run_id = context.run_id
         if catalog is not None and run_id:
             try:
-                from paleo_workbench.catalog.types import DataStage  # noqa: F401  (documentation)
-
                 version = catalog.register_derived(
                     run_id=run_id,
                     name=f"{self._kernel} attribute",
@@ -172,6 +171,11 @@ class SeismicAttributeProvider:
                     kind="seismic_attribute",
                     format="zarr",
                 )
+                # The catalog may relocate the store into managed storage;
+                # report the authoritative path.
+                managed = getattr(version, "path", None)
+                if managed:
+                    registered_path = str(managed)
             except Exception:  # catalog registration must not lose the compute
                 import logging
 
@@ -185,7 +189,7 @@ class SeismicAttributeProvider:
                     name=f"{self._kernel}-volume",
                     kind="derived_store",
                     version=version,
-                    path=str(dst),
+                    path=registered_path,
                     metadata={"kernel": self._kernel},
                 )
             ],

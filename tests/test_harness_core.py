@@ -1,0 +1,269 @@
+"""P2-C harness core tests: registry, executor guards, validation hooks."""
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from paleo_workbench.harness import (
+    ActionContext,
+    ActionRisk,
+    ActionSpec,
+    HarnessExecutor,
+    MapValidationHook,
+    ScientificValidator,
+    get_action_registry,
+    set_action_registry,
+)
+from paleo_workbench.harness.registry import ActionRegistry
+from paleo_workbench.harness.spec import validate_action_spec
+
+
+def _spec(**overrides) -> ActionSpec:
+    base = dict(
+        action_id="demo.answer",
+        description="Answer.",
+        handler=lambda ctx, p: {"value": p.get("x", 1)},
+        risk=ActionRisk.READ,
+        input_schema={
+            "type": "object",
+            "properties": {"x": {"type": "number", "minimum": 0.0}},
+            "required": ["x"],
+            "additionalProperties": False,
+        },
+    )
+    base.update(overrides)
+    return ActionSpec(**base)
+
+
+# ------------------------------------------------------------------ spec --
+@pytest.mark.parametrize(
+    "overrides,problem",
+    [
+        ({"action_id": "NoDot"}, "action_id"),
+        ({"description": ""}, "description"),
+        ({"handler": None, "provider_id": None}, "handler"),
+        ({"input_schema": {"type": "string"}}, "input_schema"),
+        ({"resource_profile": {"estimated_cpu_cores": 0}}, "estimated_cpu_cores"),
+    ],
+)
+def test_action_spec_validation(overrides, problem):
+    found = validate_action_spec(_spec(**overrides))
+    assert any(problem in f for f in found)
+
+
+def test_tool_schema_derived_from_spec():
+    schema = _spec().tool_schema()
+    assert schema["type"] == "function"
+    assert schema["function"]["name"] == "demo__answer"
+    assert schema["function"]["parameters"]["required"] == ["x"]
+    assert "risk: read" in schema["function"]["description"]
+
+
+# -------------------------------------------------------------- registry --
+def test_registry_rejects_duplicates_and_invalid():
+    registry = ActionRegistry()
+    registry.register(_spec())
+    from paleo_workbench.harness import DuplicateActionError, InvalidActionSpecError
+
+    with pytest.raises(DuplicateActionError):
+        registry.register(_spec())
+    with pytest.raises(InvalidActionSpecError):
+        registry.register(_spec(action_id="bad spec"))
+    with pytest.raises(InvalidActionSpecError):
+        registry.register(_spec(action_id="demo.purge", risk=ActionRisk.DESTRUCTIVE))
+
+
+def test_default_registry_has_domain_actions():
+    registry = get_action_registry()
+    try:
+        ids = [s.action_id for s in registry.specs()]
+        for expected in (
+            "workspace.list_assets",
+            "workspace.search",
+            "workspace.get_lineage",
+            "workspace.get_versions",
+            "well.list",
+            "well.open",
+            "well.list_curves",
+            "well.create_display",
+            "seismic.open_volume",
+            "seismic.get_slice",
+            "seismic.compute_attribute",
+            "map.create_factor_map",
+            "map.add_layer",
+            "map.set_style",
+            "map.add_component",
+            "map.validate",
+            "map.export",
+            "geology.list_horizons",
+            "geology.list_faults",
+            "workflow.status",
+        ):
+            assert expected in ids, f"{expected} missing"
+        # no destructive actions installed
+        assert all(s.risk is not ActionRisk.DESTRUCTIVE for s in registry.specs())
+        # tool schemas cover every action 1:1
+        assert len(registry.tool_schemas()) == len(ids)
+    finally:
+        set_action_registry(None)
+
+
+# -------------------------------------------------------------- executor --
+def test_execute_unknown_action_fails_explicitly():
+    result = HarnessExecutor(ActionRegistry()).execute("nope.nothing", {})
+    assert result.status == "fail"
+    assert "unknown" in (result.error or "")
+
+
+def test_execute_validates_parameters():
+    registry = ActionRegistry()
+    registry.register(_spec())
+    result = HarnessExecutor(registry).execute("demo.answer", {})
+    assert result.status == "fail"
+    assert "required" in result.error
+
+
+def test_execute_permission_gate():
+    registry = ActionRegistry()
+    registry.register(_spec(action_id="demo.write", risk=ActionRisk.WRITE))
+    context = ActionContext(permissions=frozenset({ActionRisk.READ}))
+    result = HarnessExecutor(registry).execute("demo.write", {"x": 1.0}, context)
+    assert result.status == "fail"
+    assert "permission" in result.error
+
+
+def test_execute_required_context_gate():
+    registry = ActionRegistry()
+    registry.register(
+        _spec(action_id="demo.need", required_context=("project",))
+    )
+    result = HarnessExecutor(registry).execute("demo.need", {"x": 1.0}, ActionContext())
+    assert result.status == "fail"
+    assert "project" in result.error
+
+
+def test_execute_happy_path_metrics():
+    registry = ActionRegistry()
+    registry.register(_spec())
+    result = HarnessExecutor(registry).execute("demo.answer", {"x": 4.5})
+    assert result.status == "ok"
+    assert result.outputs["value"] == 4.5
+    assert result.elapsed_ms >= 0.0
+
+
+def test_execute_handler_exception_isolated():
+    def boom(ctx, p):
+        raise ValueError("kaboom")
+
+    registry = ActionRegistry()
+    registry.register(_spec(action_id="demo.boom", handler=boom))
+    result = HarnessExecutor(registry).execute("demo.boom", {"x": 1.0})
+    assert result.status == "fail"
+    assert "kaboom" in result.error
+
+
+def test_execute_admission_lease_released():
+    from paleo_workbench.runtime import (
+        ResourceBudget,
+        ResourceGovernor,
+        set_governor,
+    )
+    from paleo_workbench.runtime.memory_pressure import MemoryPressureMonitor
+
+    monitor = MemoryPressureMonitor(ResourceBudget(), sampler=lambda b: (0.1, 0, 0))
+    gov = ResourceGovernor(ResourceBudget(logical_cores=8), pressure_monitor=monitor)
+    set_governor(gov)
+    registry = ActionRegistry()
+    registry.register(_spec())
+    try:
+        result = HarnessExecutor(registry).execute("demo.answer", {"x": 1.0})
+        assert result.ok
+        assert gov.runtime_status()["reserved"]["cores"] == 0
+    finally:
+        set_governor(None)
+
+
+def test_read_action_dispatch_overhead_budget():
+    """§38: pure READ action overhead < 10 ms excluding business IO."""
+    import time
+
+    registry = ActionRegistry()
+    registry.register(_spec())
+    executor = HarnessExecutor(registry)
+    executor.execute("demo.answer", {"x": 1.0})  # warm
+    samples = []
+    for _ in range(50):
+        t0 = time.perf_counter()
+        executor.execute("demo.answer", {"x": 1.0})
+        samples.append((time.perf_counter() - t0) * 1000)
+    assert sorted(samples)[len(samples) // 2] < 10.0
+
+
+def test_registry_lookup_is_o1_fast():
+    import time
+
+    registry = get_action_registry()
+    try:
+        t0 = time.perf_counter()
+        for _ in range(10_000):
+            registry.get("map.create_factor_map")
+        elapsed = (time.perf_counter() - t0) * 1000
+        assert elapsed < 200.0  # ~O(1) dict lookups
+    finally:
+        set_action_registry(None)
+
+
+# ------------------------------------------------------------ validation --
+def test_scientific_validator_all_nan_fails():
+    report = ScientificValidator().validate_grid(np.full((5, 5), np.nan), label="g")
+    assert report.verdict == "fail"
+    assert not report.passed
+
+
+def test_scientific_validator_thin_coverage_warns():
+    values = np.full((10, 10), np.nan)
+    values[0, 0] = 1.0
+    report = ScientificValidator().validate_grid(values, label="g")
+    assert report.verdict == "warning"
+    assert report.passed
+
+
+def test_scientific_validator_good_grid_passes():
+    rng = np.random.default_rng(0)
+    report = ScientificValidator().validate_grid(rng.random((8, 8)), label="g")
+    assert report.verdict == "pass"
+
+
+def test_scientific_validator_inverted_axis_fails():
+    class FakeGrid:
+        grid_z = np.ones((4, 4))
+        grid_x = np.array([1.0, 0.0, 2.0, 3.0])
+        grid_y = np.array([0.0, 1.0, 2.0, 3.0])
+        crs = None
+        unit = None
+
+    report = ScientificValidator().validate_grid(FakeGrid(), label="g")
+    assert report.verdict == "fail"
+
+
+def test_map_validation_hook_empty_map_fails():
+    from paleo_workbench.mapping.layers import MapDocument
+
+    report = MapValidationHook().validate(MapDocument(title="x"))
+    assert report.verdict == "fail"
+
+
+def test_map_validation_hook_requires_components():
+    from paleo_workbench.mapping.layers import MapDocument, WellPointMapLayer
+
+    document = MapDocument(title="井位图")
+    layer = WellPointMapLayer(name="井位")
+    layer.features = [
+        {"type": "Feature", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}, "properties": {"name": "W1"}}
+    ]
+    document.add_layer(layer)
+    document.recompute_extent()
+
+    report = MapValidationHook().validate(document, None, require_components=True)
+    assert report.verdict == "fail"  # no composition
+    assert any("composition" in r for r in report.reasons)
