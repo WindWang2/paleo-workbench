@@ -198,6 +198,14 @@ class MappingPage(QWidget):
         self.dock_manager.add_panel(
             "chrome", "图面要素面板", "panel-chrome", self.chrome_panel, side="right", checked=False
         )
+        # Composition authoring (P0-D): template-driven professional layout
+        # with component CRUD/undo and physical-size PNG/SVG/PDF export.
+        from paleo_workbench.ui.pages.composition_panel import CompositionPanel
+
+        self.composition_panel = CompositionPanel()
+        self.dock_manager.add_panel(
+            "composer", "组图面板", "panel-chrome", self.composition_panel, side="right", checked=False
+        )
 
         # Rails sit outside the splitter so collapsing a docked panel area
         # returns its space to the central canvas.
