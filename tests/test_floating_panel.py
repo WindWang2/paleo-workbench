@@ -108,6 +108,21 @@ def test_floating_panel_close_while_empty_is_silent(qapp, tracked):
     assert emitted == []
 
 
+def test_floating_panel_visibility_tracked_through_show_and_hide(qapp, tracked):
+    """p2-3: show/hide (not just close) report visibility while hosting."""
+    panel = FloatingPanel("p:key", "面板")
+    tracked.append(panel)
+    panel.set_content(QWidget())
+
+    emitted = []
+    panel.visibility_changed.connect(lambda key, visible: emitted.append((key, visible)))
+    panel.show()
+    panel.hide()
+    # close() on the already-hidden panel must not re-emit.
+    panel.close()
+    assert emitted == [("p:key", True), ("p:key", False)]
+
+
 # --- FloatController ----------------------------------------------------
 
 
@@ -165,6 +180,30 @@ def test_float_panel_uses_saved_geometry(qapp, tracked, layout_persistence):
     assert controller.floating_panel("w2").geometry() == saved_rect
 
     controller.dock_panel("w2")
+
+
+def test_restore_saved_hidden_floating_keeps_store_in_sync(qapp, tracked, layout_persistence):
+    """P1-1 regression: restoring a floating+hidden record must not leave
+    ``visible:True`` in the store — the next launch would revive a panel the
+    user hid."""
+    layout_persistence.save_float("w1", QRect(10, 20, 300, 200))
+    layout_persistence.save_visibility("w1", False)
+
+    splitter, widgets = _make_splitter()
+    tracked.append(splitter)
+    controller = FloatController(resolver={"w1": widgets[1]}.get, persistence=layout_persistence)
+    assert controller.restore_saved("w1") is True
+    assert controller.is_floating("w1")
+    assert not controller.floating_panel("w1").isVisible()
+
+    # Probe: the store must agree with the UI after the restore.
+    probe = layout_persistence.load("w1")
+    assert probe.floating is True
+    assert probe.visible is False
+
+    # And docking back heals the record to visible again.
+    assert controller.dock_panel("w1") is True
+    assert layout_persistence.load("w1").visible is True
 
 
 def test_restore_saved_is_noop_without_record(qapp, tracked, layout_persistence):

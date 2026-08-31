@@ -299,11 +299,22 @@ class PaleoWorkbenchWindow(QWidget):
 
     def _refresh_shell(self, *, defer_nonvisible_bindings: bool = False) -> None:
         """Tear down the current app shell and build a fresh one for ``self.project``."""
-        self.app_shell.hide()
-        self.app_shell.shutdown_workers()
-        self.outer_layout.removeWidget(self.app_shell)
-        self.app_shell.setParent(None)
-        self.app_shell.deleteLater()
+        # A failed rebuild (an exception escaping AppShell construction, e.g.
+        # a project document that crashes a page binding) leaves ``app_shell``
+        # pointing at a wrapper whose C++ object the deleteLater() already
+        # destroyed. Every Qt call on that wrapper then raises RuntimeError
+        # ("C++ object already deleted") — which turned the NEXT failed-stop
+        # restore into a second crash that killed the window. Skip the
+        # teardown of an already-destroyed shell; only a live one needs
+        # hiding, worker shutdown and detach.
+        import shiboken6
+
+        if shiboken6.isValid(self.app_shell):
+            self.app_shell.hide()
+            self.app_shell.shutdown_workers()
+            self.outer_layout.removeWidget(self.app_shell)
+            self.app_shell.setParent(None)
+            self.app_shell.deleteLater()
         self.app_shell = AppShell(
             project=self.project,
             parent=self,
