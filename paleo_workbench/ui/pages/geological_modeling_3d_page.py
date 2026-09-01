@@ -786,9 +786,11 @@ class GeologicalModeling3DPage(QWidget):
         # tabs (well-tie / facies / export proxy to those controls).
         self._populate_joint_analysis_tabs()
 
-        # Constrain left tree; center takes remaining width
+        # Constrain left tree; center takes remaining width. The cap is
+        # QWIDGETSIZE_MAX (like the other pages' _PANEL_MAX_WIDTH idiom) so
+        # the splitter handle can widen the tree beyond the default.
         left_widget.setMinimumWidth(220)
-        left_widget.setMaximumWidth(320)
+        left_widget.setMaximumWidth(16_777_215)
 
         # Two columns: left tree | center (joint 3D + 2D)
         splitter.addWidget(left_widget)

@@ -232,6 +232,9 @@ class UnifiedMapCanvas(QWidget):
     frame_ready = Signal(object)
     extent_changed = Signal(tuple)
     map_position_changed = Signal(tuple)
+    # Left-click (press+release without drag) in map coordinates, for hosts
+    # without a tool controller (read-only maps) to hit-test features.
+    map_clicked = Signal(tuple)
     # Emitted when a tool operation is handled.  The boolean argument is True
     # only when the operation mutated document data (composition must resync);
     # pointer/selection feedback (measure hover, select clicks, zoom) emits
@@ -255,6 +258,7 @@ class UnifiedMapCanvas(QWidget):
         self._image_buffer: bytes | None = None
         self._navigation_transform = QTransform()
         self._drag_pos: QPointF | None = None
+        self._press_pos: QPointF | None = None
         self._space_pan = False
         self._tool_controller = None
         self._overlay_provider: Callable[[], Mapping[str, Any]] | None = None
@@ -967,6 +971,8 @@ class UnifiedMapCanvas(QWidget):
         super().keyReleaseEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._press_pos = event.position()
         if event.button() == Qt.MouseButton.MiddleButton or (
             self._space_pan and event.button() == Qt.MouseButton.LeftButton
         ):
@@ -1034,6 +1040,14 @@ class UnifiedMapCanvas(QWidget):
             if handled:
                 self.tool_operation.emit(self._active_tool_edits_data())
                 self.update()
+                event.accept()
+                return
+        # A bare left-click (no drag, no tool claim) is a map click.
+        if event.button() == Qt.MouseButton.LeftButton and self._press_pos is not None:
+            press = self._press_pos
+            self._press_pos = None
+            if (event.position() - press).manhattanLength() < 6:
+                self.map_clicked.emit(self.screen_to_map(event.position()))
                 event.accept()
                 return
         super().mouseReleaseEvent(event)

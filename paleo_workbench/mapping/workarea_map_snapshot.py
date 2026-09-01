@@ -121,7 +121,7 @@ _WELL_OK_STYLE = VectorStyle(
     marker=MarkerSymbol.WELL,
     marker_size=11.0,
     labels=TextStyle(
-        field="name", size=8.0, color="#0f172a", halo_color="#f8fafc", halo_width=1.6
+        field="name", size=16.0, bold=True, color="#0f172a", halo_color="#f8fafc", halo_width=2.6
     ),
 ).to_dict()
 
@@ -132,7 +132,7 @@ _WELL_FLAGGED_STYLE = VectorStyle(
     marker=MarkerSymbol.WELL,
     marker_size=11.0,
     labels=TextStyle(
-        field="name", size=8.0, color="#0f172a", halo_color="#f8fafc", halo_width=1.6
+        field="name", size=16.0, bold=True, color="#0f172a", halo_color="#f8fafc", halo_width=2.6
     ),
 ).to_dict()
 

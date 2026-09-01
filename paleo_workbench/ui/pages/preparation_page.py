@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QMessageBox, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QMessageBox, QSplitter, QVBoxLayout, QWidget
 
 from paleo_workbench.ui import tokens
 from paleo_workbench.project.factor_grid_artifacts import (
@@ -71,11 +71,14 @@ class PreparationPage(QWidget):
         )
         outer.setSpacing(tokens.SPACE_4)
 
-        content = QHBoxLayout()
-        content.setSpacing(tokens.SPACE_4)
+        # QSplitter: 左右面板（任务/边界）可拖拽调宽 — 固定宽只作最小宽，
+        # 上限解除为 QWIDGETSIZE_MAX（同其它页面的 _PANEL_MAX_WIDTH 做法）。
+        content = QSplitter(Qt.Orientation.Horizontal)
+        content.setChildrenCollapsible(False)
 
         self.task_panel = FactorTaskPanel()
-        content.addWidget(self.task_panel, 0)
+        self.task_panel.setMaximumWidth(16_777_215)
+        content.addWidget(self.task_panel)
 
         center = QSplitter(Qt.Orientation.Vertical)
         self.preview_grid = FactorPreviewGrid()
@@ -84,12 +87,18 @@ class PreparationPage(QWidget):
         center.addWidget(self.well_table_panel)
         center.setStretchFactor(0, 3)
         center.setStretchFactor(1, 2)
-        content.addWidget(center, 1)
+        content.addWidget(center)
 
         self.boundary_panel = BoundaryPanel()
-        content.addWidget(self.boundary_panel, 0)
+        self.boundary_panel.setMaximumWidth(16_777_215)
+        content.addWidget(self.boundary_panel)
 
-        outer.addLayout(content, 1)
+        content.setStretchFactor(0, 0)
+        content.setStretchFactor(1, 1)
+        content.setStretchFactor(2, 0)
+        content.setSizes([240, 900, 240])
+
+        outer.addWidget(content, 1)
 
         self.task_panel.generate_requested.connect(self._on_generate_requested)
         self.task_panel.contour_draft_requested.connect(self._on_contour_draft_requested)

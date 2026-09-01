@@ -216,6 +216,8 @@ class PaleoWorkbenchWindow(QWidget):
                     home_page.open_project_requested.connect(self._on_open_project)
                 if hasattr(home_page, "open_sample_requested"):
                     home_page.open_sample_requested.connect(self._on_open_sample_project)
+                if hasattr(home_page, "well_activated"):
+                    home_page.well_activated.connect(self._on_home_well_activated)
         except Exception:
             pass
         ribbon.save_project_requested.connect(self._on_save_project)
@@ -282,6 +284,13 @@ class PaleoWorkbenchWindow(QWidget):
                     toolbar.search_box.blockSignals(True)
                     toolbar.search_box.setText(text)
                     toolbar.search_box.blockSignals(False)
+
+    def _on_home_well_activated(self, well_id: str) -> None:
+        """首页工区地图井位点击 → 数据页定位该井。"""
+        from paleo_workbench.ui import navigation  # noqa: PLC0415
+
+        self.app_shell.navigate_to(navigation.PAGE_INDEX_DATA, "management")
+        self.app_shell.data_page.select_well(well_id, focus=True)
 
     # --- shell rebuild helpers ---
 

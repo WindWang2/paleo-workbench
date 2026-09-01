@@ -138,6 +138,13 @@ class ReviewExportPage(QWidget):
         self.action_header.config_requested.connect(self._on_config)
         self.action_header.finalize_requested.connect(self.finalize_version)
 
+
+    def ribbon_panel_entries(self) -> list[dict]:
+        """Ribbon 右键面板菜单：本页可浮动面板的显隐/浮动管理。"""
+        from paleo_workbench.ui.panel_float_controller import floatable_panel_entries
+
+        return floatable_panel_entries(self.float_controller, self._floatable)
+
     def _make_floatable(self, key: str, panel: QWidget, title: str) -> None:
         """Register a side panel for float/dock and give it a float button."""
         dock_manager.register_panel(key, title)

@@ -215,6 +215,8 @@ class AppShell(QWidget):
         outer.setSpacing(0)
 
         self.ribbon = RibbonBar(navigation.HUB_NAMES, self)
+        # Ribbon 右键菜单管理当前页面的内容面板（显隐/浮动）。
+        self.ribbon.set_panel_provider(self._current_panel_entries)
         outer.addWidget(self.ribbon)
 
         # --- hub pages -------------------------------------------------
@@ -850,6 +852,14 @@ class AppShell(QWidget):
         if isinstance(page, HubPage):
             return page.page(page.current_key())
         return page
+
+    def _current_panel_entries(self) -> list[dict]:
+        """Ribbon 右键菜单的数据源：当前页面的可管理面板。"""
+        page = self.current_content_page()
+        getter = getattr(page, "ribbon_panel_entries", None)
+        if not callable(getter):
+            return []
+        return getter()
 
     # --- page state updates (called by app.py's project binding) ---------
 

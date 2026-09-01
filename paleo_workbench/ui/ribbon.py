@@ -140,6 +140,7 @@ class RibbonBar(QFrame):
 
     def __init__(self, tab_titles: list[str], parent=None):
         super().__init__(parent)
+        self._panel_provider = None
         self.setObjectName("RibbonBar")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -257,6 +258,7 @@ class RibbonBar(QFrame):
         self.search_box.returnPressed.connect(self._emit_search_now)
 
         self._active_tab = -1
+        self._current_key = ""
 
     # --- collapse ---------------------------------------------------------
 
@@ -292,7 +294,46 @@ class RibbonBar(QFrame):
     def set_context(self, key: str) -> None:
         body = self._contexts.get(key)
         if body is not None:
+            self._current_key = key
             self._body_stack.setCurrentWidget(body)
+
+    # --- panel show/hide (right-click menu) ------------------------------
+
+    def set_panel_provider(self, provider) -> None:
+        """Install the shell callback returning the CURRENT page's panel
+        entries (see ``floatable_panel_entries`` for the entry shape)."""
+        self._panel_provider = provider
+
+    def contextMenuEvent(self, event) -> None:
+        """Right-click: manage the current page's panels (显隐/浮动)."""
+        self._build_context_menu().exec(event.globalPos())
+
+    def _build_context_menu(self) -> QMenu:
+        menu = QMenu(self)
+        entries = self._panel_provider() if self._panel_provider else []
+        if entries:
+            for entry in entries:
+                action = menu.addAction(entry["title"])
+                action.setCheckable(True)
+                action.setChecked(bool(entry["visible"]))
+                action.toggled.connect(
+                    lambda checked, e=entry: e["set_visible"](checked)
+                )
+                float_action = menu.addAction(f"浮动 · {entry['title']}")
+                float_action.setCheckable(True)
+                float_action.setChecked(bool(entry["floating"]))
+                float_action.toggled.connect(
+                    lambda _checked, e=entry: e["toggle_float"]()
+                )
+            menu.addSeparator()
+            show_all = menu.addAction("全部显示")
+            show_all.triggered.connect(
+                lambda: [e["set_visible"](True) for e in entries]
+            )
+            menu.addSeparator()
+        collapse = menu.addAction("折叠功能区" if not self._collapsed else "展开功能区")
+        collapse.triggered.connect(self.toggle_collapsed)
+        return menu
 
     def context(self, key: str) -> _RibbonContextBody | None:
         return self._contexts.get(key)

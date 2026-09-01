@@ -17,12 +17,15 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QScrollArea,
+    QSplitter,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from paleo_workbench.mapping.workarea_map_snapshot import (
+    WELLS_FLAGGED_LAYER_ID,
+    WELLS_LAYER_ID,
     WORKAREA_LEGEND_ITEMS,
     build_workarea_map_snapshot,
     domain_signature,
@@ -44,6 +47,7 @@ from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 _MAP_UNBOUND = object()
 
 _SIDE_COLUMN_WIDTH = 340
+_SIDE_COLUMN_MIN_WIDTH = 260
 _MAP_MIN_HEIGHT = 380
 
 
@@ -52,11 +56,14 @@ class HomePage(QWidget):
     new_project_requested = Signal()
     open_project_requested = Signal()
     open_sample_requested = Signal()
+    # 井位点击 → 数据页定位（well_id）
+    well_activated = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("HomePage")
         self._project = None
+        self._map_snapshot = None
         self._map_signature: object = _MAP_UNBOUND
 
         main_layout = QVBoxLayout(self)
@@ -86,8 +93,9 @@ class HomePage(QWidget):
         from paleo_workbench.ui.pages.start_guide_card import StartGuideCard
 
         # ---- centerpiece: work-area map + right-hand onboarding column ----
-        map_row = QHBoxLayout()
-        map_row.setSpacing(tokens.SPACE_3)
+        # QSplitter: 右侧面板可拖拽调宽（原有固定 340px 改为初始宽）。
+        map_row = QSplitter(Qt.Orientation.Horizontal)
+        map_row.setChildrenCollapsible(False)
 
         map_panel = QFrame()
         map_panel.setObjectName("PanelCard")
@@ -109,13 +117,14 @@ class HomePage(QWidget):
         self.map_canvas = UnifiedMapCanvas()
         # Read-only embedding: no tool controller, navigation (pan/zoom) only.
         self.map_canvas.set_overlay_provider(self._map_overlay_state)
+        self.map_canvas.map_clicked.connect(self._on_map_clicked)
         self.map_stack.addWidget(self.map_canvas)
         self.map_empty_state = self._build_empty_state()
         self.map_stack.addWidget(self.map_empty_state)
         self.map_stack.setMinimumHeight(_MAP_MIN_HEIGHT)
         map_layout.addWidget(self.map_stack, 1)
 
-        map_row.addWidget(map_panel, 1)
+        map_row.addWidget(map_panel)
 
         self._side_column = QWidget()
         side_layout = QVBoxLayout(self._side_column)
@@ -129,10 +138,16 @@ class HomePage(QWidget):
         side_layout.addWidget(self.start_guide_card)
         side_layout.addWidget(self.onboarding_report_card)
         side_layout.addStretch(1)
-        self._side_column.setFixedWidth(_SIDE_COLUMN_WIDTH)
-        map_row.addWidget(self._side_column, 0)
+        self._side_column.setMinimumWidth(_SIDE_COLUMN_MIN_WIDTH)
+        map_row.addWidget(self._side_column)
+        map_row.setStretchFactor(0, 1)
+        map_row.setStretchFactor(1, 0)
+        map_row.setSizes([900, _SIDE_COLUMN_WIDTH])
 
-        layout.addLayout(map_row, 1)
+        # 上下分割条：工区地图与模块关系图之间可拖拽调整高度。
+        v_splitter = QSplitter(Qt.Orientation.Vertical)
+        v_splitter.setChildrenCollapsible(True)
+        v_splitter.addWidget(map_row)
 
         # Title of the module relationship diagram
         title_container = QHBoxLayout()
@@ -151,13 +166,24 @@ class HomePage(QWidget):
         self.legend = LegendWidget()
         title_container.addWidget(self.legend)
 
-        layout.addLayout(title_container)
+        # 关系图区域（标题 + 图）作为竖向分割条的下半部分。
+        diagram_panel = QWidget()
+        diagram_layout = QVBoxLayout(diagram_panel)
+        diagram_layout.setContentsMargins(0, 0, 0, 0)
+        diagram_layout.setSpacing(tokens.SPACE_3)
+        diagram_layout.addLayout(title_container)
 
         # Add relationship widget
         self.relationship_widget = ModuleRelationshipWidget()
         self.relationship_widget.setMinimumWidth(1100)
         self.relationship_widget.navigation_requested.connect(self.navigation_requested.emit)
-        layout.addWidget(self.relationship_widget, 0)
+        diagram_layout.addWidget(self.relationship_widget, 1)
+
+        v_splitter.addWidget(diagram_panel)
+        v_splitter.setStretchFactor(0, 1)
+        v_splitter.setStretchFactor(1, 1)
+        v_splitter.setSizes([420, 620])
+        layout.addWidget(v_splitter, 1)
 
         # Set minimum width on container to prevent horizontal compression in scroll area
         container.setMinimumWidth(1140)
@@ -228,6 +254,7 @@ class HomePage(QWidget):
             return
         self._map_signature = signature
         snapshot = build_workarea_map_snapshot(project)
+        self._map_snapshot = snapshot
         self.map_canvas.set_layer_snapshot(snapshot)
         extent = workarea_view_extent(snapshot)
         if extent is not None:
@@ -239,6 +266,42 @@ class HomePage(QWidget):
         warnings = workarea_crs_warnings(project)
         self.crs_warning_label.setText("⚠ " + "；".join(warnings) if warnings else "")
         self.crs_warning_label.setVisible(bool(warnings))
+
+    # 命中半径（屏幕像素）：以井符号为圆心的拾取容差
+    _WELL_PICK_RADIUS_PX = 16.0
+
+    def _on_map_clicked(self, point) -> None:
+        """Left-click on the map: pick the nearest well within tolerance."""
+        snapshot = self._map_snapshot
+        if snapshot is None:
+            return
+        try:
+            click_screen = self.map_canvas.map_to_screen(
+                (float(point[0]), float(point[1]))
+            )
+        except (TypeError, ValueError, IndexError):
+            return
+        best_id = ""
+        best_dist = self._WELL_PICK_RADIUS_PX
+        for layer in snapshot.layers:
+            if layer.id not in (WELLS_LAYER_ID, WELLS_FLAGGED_LAYER_ID):
+                continue
+            for feature in layer.features:
+                geometry = feature.get("geometry") or {}
+                coords = geometry.get("coordinates")
+                if geometry.get("type") != "Point" or not coords:
+                    continue
+                screen = self.map_canvas.map_to_screen(
+                    (float(coords[0]), float(coords[1]))
+                )
+                dx = screen.x() - click_screen.x()
+                dy = screen.y() - click_screen.y()
+                dist = (dx * dx + dy * dy) ** 0.5
+                if dist <= best_dist:
+                    best_dist = dist
+                    best_id = str(feature.get("properties", {}).get("well_id") or "")
+        if best_id:
+            self.well_activated.emit(best_id)
 
     # ------------------------------------------------------------------
     # page contract

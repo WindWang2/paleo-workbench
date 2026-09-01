@@ -272,3 +272,43 @@ class FloatController(QObject):
             widget.setParent(record.dock_parent)
             widget.setGeometry(record.dock_geometry)
         widget.setVisible(True)
+
+
+def floatable_panel_entries(
+    controller: FloatController, panels: dict[str, QWidget]
+) -> list[dict]:
+    """Ribbon 右键面板菜单 entries for a page's floatable panels.
+
+    Each entry: ``key``/``title``/``visible``/``floating`` plus the
+    ``set_visible(bool)`` and ``toggle_float()`` actions. Visibility reads
+    the explicit-hide flag for docked widgets (``isVisible()`` is False for
+    everything before the window shows) and the floating window's own
+    visibility once afloat.
+    """
+    entries: list[dict] = []
+    for key, widget in panels.items():
+        floating = controller.is_floating(key)
+        if floating:
+            window = controller.floating_panel(key)
+            visible = window.isVisible() if window is not None else False
+
+            def set_visible(on: bool, w=window) -> None:
+                if w is not None:
+                    w.setVisible(bool(on))
+        else:
+            visible = not widget.isHidden()
+
+            def set_visible(on: bool, w=widget) -> None:
+                w.setVisible(bool(on))
+
+        entries.append(
+            {
+                "key": key,
+                "title": dock_manager.panel_title(key) or key,
+                "visible": visible,
+                "set_visible": set_visible,
+                "floating": floating,
+                "toggle_float": (lambda k=key: lambda: controller.toggle(k))(),
+            }
+        )
+    return entries

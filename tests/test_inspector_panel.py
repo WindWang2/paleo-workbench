@@ -83,7 +83,14 @@ def test_inspector_key_value_tables_keep_metadata_keys_compact(qtbot):
         panel.metadata_table.horizontalHeader().sizeHint().height() + rows * 28
     )
     assert panel.metadata_table.maximumHeight() >= min_needed
-    assert panel.overview_table.maximumHeight() >= 1_000_000  # 概要页不限高
+    # 概要页同样限高（防止空白网格占比过大），但必须容得下全部行。
+    overview_rows = panel.overview_table.rowCount()
+    overview_needed = (
+        panel.overview_table.horizontalHeader().sizeHint().height()
+        + overview_rows * 28
+    )
+    assert panel.overview_table.maximumHeight() <= 520
+    assert panel.overview_table.maximumHeight() >= overview_needed
 
 
 def test_inspector_localizes_geojson_facies_product_metadata(qtbot):

@@ -449,6 +449,10 @@ class DataPage(QWidget):
             context=Qt.ShortcutContext.WidgetWithChildrenShortcut,
         )
 
+    def ribbon_panel_entries(self) -> list[dict]:
+        """Ribbon 右键面板菜单：导航树/预览/检查器/井位地图的显隐与浮动。"""
+        return self.workspace.ribbon_panel_entries()
+
     def _shortcut_remove_asset(self) -> None:
         focus = QApplication.focusWidget()
         if isinstance(focus, (QLineEdit, QTextEdit, QTextBrowser)):

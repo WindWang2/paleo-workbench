@@ -50,6 +50,7 @@ def _fit_key_value_table(
     *,
     cap_height: bool,
     key_column_cap: int | None = None,
+    max_height: int = 340,
 ) -> None:
     """键/值两列表：键列贴合内容宽度（不随面板拉伸），值列占剩余空间。
 
@@ -57,6 +58,8 @@ def _fit_key_value_table(
     把真正的内容挤出视野。
     """
     hdr = table.horizontalHeader()
+    # 键值表不显示行号列：纯展示数据，行号只会让各 tab 的左缘对不齐。
+    table.verticalHeader().setVisible(False)
     if key_column_cap is None:
         hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
     else:
@@ -82,7 +85,10 @@ def _fit_key_value_table(
             + table.frameWidth() * 2
             + 2
         )
-        table.setMaximumHeight(min(height, 340))
+        table.setMaximumHeight(min(height, max_height))
+        # QTableView 的 sizeHint 偏小且不含行数信息，布局只会给 sizeHint
+        # 高度；最小高度一并钉住，内容行才不会被折进滚动条里。
+        table.setMinimumHeight(min(height, max_height))
 
 
 class LineageTreeWidget(QWidget):
@@ -94,7 +100,7 @@ class LineageTreeWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1)
+        layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
         layout.setSpacing(tokens.SPACE_1)
 
         self.tree = QTreeWidget()
@@ -318,14 +324,20 @@ class InspectorPanel(QFrame):
             f" QTabBar::tab:selected {{ color: {tokens.PRIMARY}; border-bottom: 2px solid {tokens.PRIMARY}; font-weight: 600; }}"
         )
 
-        # Tab 1: 概要 Overview
+        # Tab 1: 概要 Overview（表高贴合内容，下方不拖出空白网格）
+        overview_tab = QWidget()
+        overview_layout = QVBoxLayout(overview_tab)
+        overview_layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
+        overview_layout.setSpacing(tokens.SPACE_1)
         self.overview_table = TablePreviewWidget()
-        self.tabs.addTab(self.overview_table, "概要")
+        overview_layout.addWidget(self.overview_table)
+        overview_layout.addStretch(1)
+        self.tabs.addTab(overview_tab, "概要")
 
         # Tab 2: 元数据 Metadata (治理信息 + 目录元数据 + 解析摘要)
         metadata_tab = QWidget()
         metadata_layout = QVBoxLayout(metadata_tab)
-        metadata_layout.setContentsMargins(tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1)
+        metadata_layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
         metadata_layout.setSpacing(tokens.SPACE_1)
 
         self.governance_header_label = QLabel(
@@ -396,7 +408,7 @@ class InspectorPanel(QFrame):
         # Tab 3: 标签 Tags
         self.tags_widget = QWidget()
         tags_layout = QVBoxLayout(self.tags_widget)
-        tags_layout.setContentsMargins(tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3)
+        tags_layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
         tags_layout.setSpacing(tokens.SPACE_2)
         tags_hdr = QLabel("资产关联标签:")
         tags_hdr.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;")
@@ -412,7 +424,7 @@ class InspectorPanel(QFrame):
         # Tab 4: 版本 Versions
         version_tab = QWidget()
         version_layout = QVBoxLayout(version_tab)
-        version_layout.setContentsMargins(tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1)
+        version_layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
         version_layout.setSpacing(tokens.SPACE_1)
 
         self.versions_table = QTableWidget()
@@ -422,11 +434,13 @@ class InspectorPanel(QFrame):
         )
         self.versions_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.versions_table.verticalHeader().setVisible(False)
+        self.versions_table.verticalHeader().setDefaultSectionSize(28)
         self.versions_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.versions_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.versions_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.versions_table.itemSelectionChanged.connect(self._on_version_selection_changed)
-        version_layout.addWidget(self.versions_table)
+        # 表高贴合内容：版本少时不向下拖出大片空白网格。
+        version_layout.addWidget(self.versions_table, 0)
 
         # Version tag editor (F6): +/- on the selected version row.
         self.version_tags_bar = QWidget()
@@ -450,6 +464,7 @@ class InspectorPanel(QFrame):
         tag_row.addWidget(self.version_tag_remove_btn)
         tag_row.addStretch()
         version_layout.addWidget(self.version_tags_bar)
+        version_layout.addStretch(1)
 
         self.tabs.addTab(version_tab, "版本")
 
@@ -461,7 +476,7 @@ class InspectorPanel(QFrame):
         # Tab 6: 完整性 Integrity
         self.integrity_widget = QWidget()
         int_layout = QVBoxLayout(self.integrity_widget)
-        int_layout.setContentsMargins(tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3)
+        int_layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
         int_layout.setSpacing(tokens.SPACE_2)
 
         self.integrity_status_lbl = QLabel("状态: 未校验")
@@ -539,7 +554,8 @@ class InspectorPanel(QFrame):
         if view.crs:
             rows.append(("CRS", view.crs))
         self.overview_table.load_table(("属性", "值"), tuple(rows))
-        _fit_key_value_table(self.overview_table, cap_height=False)
+        # 概要行数较多（11+），上限放宽到 520，尽量避免出现纵向滚动条。
+        _fit_key_value_table(self.overview_table, cap_height=True, max_height=520)
 
     def _populate_metadata(self, view: AssetView) -> None:
         from paleo_workbench.catalog.governance import (
@@ -645,6 +661,16 @@ class InspectorPanel(QFrame):
         row = self.versions_table.currentRow()
         if 0 <= row < len(view.versions):
             self._selected_version = view.versions[row]
+        # 表高贴合内容（含表头与可能的水平滚动条），上限 340px。
+        hdr = self.versions_table.horizontalHeader()
+        height = (
+            hdr.sizeHint().height()
+            + len(view.versions) * 28
+            + self.versions_table.horizontalScrollBar().sizeHint().height()
+            + self.versions_table.frameWidth() * 2
+            + 2
+        )
+        self.versions_table.setMaximumHeight(min(max(height, 60), 340))
         self._sync_version_tag_controls()
 
     # --- Version tags (F6) ---------------------------------------------------

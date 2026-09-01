@@ -398,6 +398,23 @@ class MappingPage(QWidget):
             self.float_controller.restore_saved(float_key)
         self._emit_mapping_context()
 
+    def ribbon_panel_entries(self) -> list[dict]:
+        """Ribbon 右键面板菜单：侧栏面板（图层/属性等）的显隐与浮动。"""
+        mgr = self.dock_manager
+        entries: list[dict] = []
+        for key in mgr._panels:
+            entries.append(
+                {
+                    "key": key,
+                    "title": mgr.panel_title(key),
+                    "visible": mgr.is_panel_visible(key),
+                    "set_visible": (lambda k=key: lambda on: mgr.set_panel_visible(k, on))(),
+                    "floating": mgr.is_floating(key),
+                    "toggle_float": (lambda k=key: lambda: mgr.toggle_float(k))(),
+                }
+            )
+        return entries
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
         if self._dock_sizes_pending_restore:
