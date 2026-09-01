@@ -140,18 +140,31 @@ def _well_entity(context: ActionContext, name_or_id: str) -> Any:
 
 
 def _well_resource_path(context: ActionContext, well: Any) -> str | None:
+    from pathlib import Path
+
+    def resolved(resource_path: Any) -> str:
+        path = Path(str(resource_path)).expanduser()
+        if path.is_absolute():
+            return str(path)
+        project_file = Path(context.project_path).expanduser() if context.project_path else None
+        root_value = getattr(getattr(context.project, "meta", None), "project_root", "")
+        root = Path(str(root_value or ".")).expanduser()
+        if not root.is_absolute() and project_file is not None:
+            root = project_file.parent / root
+        elif not root.is_absolute():
+            root = Path.cwd() / root
+        return str((root / path).resolve())
+
     name = well.name
     for resource in getattr(context.project, "resources", []) or []:
         if getattr(resource, "type", "") != "well_log":
             continue
-        from pathlib import Path
-
         if Path(str(resource.path)).stem.upper() == name.upper():
-            return str(resource.path)
+            return resolved(resource.path)
     # Fall back to any resource whose name contains the well name.
     for resource in getattr(context.project, "resources", []) or []:
         if getattr(resource, "type", "") == "well_log" and name.upper() in str(resource.name).upper():
-            return str(resource.path)
+            return resolved(resource.path)
     return None
 
 

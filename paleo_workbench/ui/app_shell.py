@@ -1,44 +1,57 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QEvent, QPropertyAnimation, QEasingCurve, QTimer
+from PySide6.QtCore import QEasingCurve, QEvent, QPropertyAnimation, Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QApplication, QFrame, QGraphicsOpacityEffect,
-    QLineEdit, QListWidget, QListWidgetItem, QStackedWidget, QTextBrowser,
-    QTextEdit, QVBoxLayout, QWidget,
+    QApplication,
+    QFrame,
+    QGraphicsOpacityEffect,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QSizePolicy,
+    QStackedWidget,
+    QTextBrowser,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
 
-from paleo_workbench.ui.deferred_page_bindings import DeferredPageBindings
-from paleo_workbench.ui.ribbon import RibbonBar
-from paleo_workbench.ui.pages.data_page import DataPage
-from paleo_workbench.ui.pages.home_page import HomePage
-from paleo_workbench.ui.pages.hub_page import HubPage
-from paleo_workbench.ui.pages.mapping_page import MappingPage
-from paleo_workbench.ui.pages.preparation_page import PreparationPage
-from paleo_workbench.ui.pages.review_export_page import ReviewExportPage
-from paleo_workbench.ui.pages.sequence_framework_page import SequenceFrameworkPage
-from paleo_workbench.ui.pages.seismic_prediction_page import SeismicPredictionPage
-from paleo_workbench.ui.pages.stratigraphy_correlation_page import StratigraphyCorrelationPage
-from paleo_workbench.ui.pages.visualization_page import VisualizationPage
-from paleo_workbench.ui.pages.well_log_prediction_page import WellLogPredictionPage
-from paleo_workbench.ui.pages.geological_modeling_3d_page import GeologicalModeling3DPage
-from paleo_workbench.viz.hosts.well_location_preview import (
-    WellLocationPreviewStateStore,
-)
-from paleo_workbench.ui.status_bar import StatusBar
 from paleo_workbench import tokens
 from paleo_workbench.project.models import ProjectDocument
-
 from paleo_workbench.ui import navigation
+from paleo_workbench.ui.deferred_page_bindings import DeferredPageBindings
 
 # Backward-compatible re-exports: callers used to import the page constants
 # from app_shell; the hub indices now live in ui.navigation.
 from paleo_workbench.ui.navigation import (  # noqa: F401
     PAGE_INDEX_DATA,
-    PAGE_INDEX_WELL,
-    PAGE_INDEX_SEISMIC,
     PAGE_INDEX_MAPPING,
+    PAGE_INDEX_SEISMIC,
     PAGE_INDEX_VISUALIZATION,
+    PAGE_INDEX_WELL,
+)
+from paleo_workbench.ui.pages.data_page import DataPage
+from paleo_workbench.ui.pages.geological_modeling_3d_page import (
+    GeologicalModeling3DPage,
+)
+from paleo_workbench.ui.pages.home_page import HomePage
+from paleo_workbench.ui.pages.hub_page import HubPage
+from paleo_workbench.ui.pages.mapping_page import MappingPage
+from paleo_workbench.ui.pages.preparation_page import PreparationPage
+from paleo_workbench.ui.pages.review_export_page import ReviewExportPage
+from paleo_workbench.ui.pages.seismic_prediction_page import SeismicPredictionPage
+from paleo_workbench.ui.pages.sequence_framework_page import SequenceFrameworkPage
+from paleo_workbench.ui.pages.stratigraphy_correlation_page import (
+    StratigraphyCorrelationPage,
+)
+from paleo_workbench.ui.pages.visualization_page import VisualizationPage
+from paleo_workbench.ui.pages.well_log_prediction_page import WellLogPredictionPage
+from paleo_workbench.ui.ribbon import RibbonBar
+from paleo_workbench.ui.status_bar import StatusBar
+from paleo_workbench.ui.workstation import WorkstationFrame
+from paleo_workbench.viz.hosts.well_location_preview import (
+    WellLocationPreviewStateStore,
 )
 
 
@@ -134,7 +147,7 @@ class CommandPalette(QFrame):
 
     # --- keyboard -----------------------------------------------------
 
-    def eventFilter(self, source, event):  # noqa: N802 (Qt override)
+    def eventFilter(self, source, event):
         if event.type() == QEvent.Type.KeyPress:
             # Esc dismisses from both the filter box and the result list;
             # all other keys are only intercepted in the filter box (the
@@ -192,9 +205,9 @@ class AppShell(QWidget):
         # Multi-view coordination engines (#1029): AppShell is the single
         # owner; pages receive these via attribute injection and the
         # ViewCoordinationController mediates every selection sync.
+        from paleo_workbench.ui.view_coordination import ViewCoordinationController
         from paleo_workbench.viz.coordinate_hub import CoordinateTransformHub
         from paleo_workbench.viz.selection_context import SelectionContext
-        from paleo_workbench.ui.view_coordination import ViewCoordinationController
 
         self.selection_context = SelectionContext()
         self.coordinate_hub = CoordinateTransformHub()
@@ -209,6 +222,7 @@ class AppShell(QWidget):
         # repeated refreshes retain just the latest committed project state.
         self._defer_nonvisible_bindings = defer_nonvisible_bindings
         self._deferred_page_bindings = DeferredPageBindings()
+        self._workstation_ready = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -218,6 +232,13 @@ class AppShell(QWidget):
         # Ribbon 右键菜单管理当前页面的内容面板（显隐/浮动）。
         self.ribbon.set_panel_provider(self._current_panel_entries)
         outer.addWidget(self.ribbon)
+        # The ribbon remains a compatibility command surface while workflow
+        # pages migrate.  The workstation app bar is the visible global UI.
+        self.ribbon.setFixedHeight(0)
+        self.ribbon.setMinimumWidth(0)
+        self.ribbon.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+        )
 
         # --- hub pages -------------------------------------------------
         self.page_stack = QStackedWidget(self)
@@ -273,7 +294,8 @@ class AppShell(QWidget):
         )
         self.page_stack.addWidget(self.visualization_page)  # hub 4 = 可视化（临时）
 
-        outer.addWidget(self.page_stack, 1)
+        self.workstation = WorkstationFrame(self.project, self.page_stack, self)
+        outer.addWidget(self.workstation, 1)
 
         self.status_bar = StatusBar(self)
         outer.addWidget(self.status_bar)
@@ -300,6 +322,7 @@ class AppShell(QWidget):
         # cursor picks through the coordination controller. Wired HERE so the
         # panel never reaches for a global singleton.
         self._wire_seismic_cursor_producer()
+        self.workstation.attach_coordination(self.view_coordination)
         # Register the open project's wells + seismic geometry into the
         # coordinate hub so seismic→well routing has a registry (#1029).
         self.view_coordination.bind_project(self.project)
@@ -311,8 +334,23 @@ class AppShell(QWidget):
         self._density_pairs: list = []
         self._build_ribbon_contexts()
         self.ribbon.tab_changed.connect(self.navigate_to)
+        self.workstation.navigation_requested.connect(self.navigate_to)
+        self.workstation.command_submitted.connect(self._handle_workstation_command)
+        self.workstation.status_message.connect(self.status_bar.status_label.setText)
+        app_bar = self.workstation.app_bar
+        app_bar.new_project_requested.connect(self.ribbon.new_project_requested.emit)
+        app_bar.open_project_requested.connect(self.ribbon.open_project_requested.emit)
+        app_bar.open_sample_requested.connect(
+            self.ribbon.open_sample_project_requested.emit
+        )
+        app_bar.save_project_requested.connect(self.ribbon.save_project_requested.emit)
+        app_bar.properties_requested.connect(self.ribbon.properties_requested.emit)
+        self.workstation.activity_rail.settings_requested.connect(
+            self.ribbon.preview_settings_requested.emit
+        )
         for hub in (self.hub_data, self.hub_well, self.hub_seismic, self.hub_mapping):
             hub.submodule_changed.connect(self._on_submodule_changed)
+            hub.page_activated.connect(self._on_hub_page_activated)
 
         self._setup_shortcuts()
 
@@ -331,6 +369,7 @@ class AppShell(QWidget):
                 self._context_key(navigation.PAGE_INDEX_DATA, key)
             )
         self.ribbon.set_active_tab(navigation.PAGE_INDEX_DATA)
+        self._workstation_ready = True
 
     # --- ribbon ---------------------------------------------------------
 
@@ -591,6 +630,25 @@ class AppShell(QWidget):
         self.command_palette.dismiss()
         self.ribbon.set_active_tab(hub_index)
         self._animate_page_fade(hub_index)
+        title = navigation.HUB_NAMES[hub_index]
+        if isinstance(hub, HubPage):
+            title = navigation.submodule_title(hub_index, hub.current_key())
+        self.workstation.activate_legacy(title)
+
+    def _handle_workstation_command(self, text: str) -> None:
+        """Route natural-language work to Agent; keep Ctrl+K page search."""
+        command = str(text or "").strip()
+        if not command:
+            return
+        agent_markers = (
+            "打开", "显示", "生成", "比较", "把", "绘制", "分析", "计算",
+            "open ", "show ", "generate ", "compare ", "plot ", "agent ",
+        )
+        if any(marker in command.lower() for marker in agent_markers):
+            self.workstation.submit_agent_command(command)
+            return
+        self.command_palette.filter_input.setText(command)
+        self.command_palette.popup()
 
     # Backward-compatible alias: old callers passed a flat page index; the
     # new stack is hub-indexed, so the alias is hub-based navigation.
@@ -599,6 +657,12 @@ class AppShell(QWidget):
 
     def _on_submodule_changed(self, hub_index: int, key: str) -> None:
         self.ribbon.set_context(self._context_key(hub_index, key))
+
+    def _on_hub_page_activated(self, hub_index: int, key: str) -> None:
+        if self._workstation_ready:
+            self.workstation.activate_legacy(
+                navigation.submodule_title(hub_index, key)
+            )
 
     def _setup_shortcuts(self) -> None:
         """Register hub (1-5), sub-module (Alt+1~3), and Ctrl+K shortcuts."""
@@ -780,6 +844,10 @@ class AppShell(QWidget):
         catalog or replacing native sessions.
         """
         all_joined = True
+        workstation = getattr(self, "workstation", None)
+        shutdown_workstation = getattr(workstation, "shutdown_workers", None)
+        if callable(shutdown_workstation) and shutdown_workstation(wait_ms) is False:
+            all_joined = False
         for page in self._all_pages:
             shutdown = getattr(page, "shutdown_workers", None)
             if callable(shutdown):
@@ -845,6 +913,7 @@ class AppShell(QWidget):
 
     def set_project_name(self, name: str) -> None:
         self.status_bar.set_project_name(name)
+        self.workstation.app_bar.set_project_name(name)
 
     def current_content_page(self) -> QWidget | None:
         """The concrete page currently shown (inside the hub, if any)."""
@@ -855,6 +924,8 @@ class AppShell(QWidget):
 
     def _current_panel_entries(self) -> list[dict]:
         """Ribbon 右键菜单的数据源：当前页面的可管理面板。"""
+        if self.workstation.is_joint_active():
+            return self.workstation.panel_entries()
         page = self.current_content_page()
         getter = getattr(page, "ribbon_panel_entries", None)
         if not callable(getter):
@@ -907,6 +978,7 @@ class AppShell(QWidget):
                 page.set_project_path(path)
             except Exception:
                 continue
+        self.workstation.set_project_path(str(path) if path is not None else None)
 
     def update_well_log_prediction_page(self, prediction_tasks: list, project=None) -> None:
         page = self.well_log_page

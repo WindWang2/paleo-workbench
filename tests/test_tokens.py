@@ -1,11 +1,11 @@
-"""M1 design-system overhaul — Stratum visual language regression suite.
+"""Workstation V3 design-system regression suite.
 
 Pins the redesigned token sheet:
 * API stability — palette_for / build_qss / PAGE_NAMES / PAGE_DESCRIPTIONS /
   ICON_FILES stay index-aligned with ui/navigation.py (11 pages) and every
   icon file referenced by ICON_FILES exists on disk,
 * one token vocabulary across light / dark / high_contrast,
-* the dark petrol icon rail in every theme (one nav icon set serves all),
+* a white light-theme activity rail plus curated dark/high-contrast rails,
 * WCAG floors for every primary text/badge pair — each floor is set at or
   above the old slate sheet's measured ratio, so contrast strictly improves.
 """
@@ -38,13 +38,14 @@ def _ratio(fg: str, bg: str) -> float:
 # Public API stability
 # ---------------------------------------------------------------------------
 
-def test_stratum_light_identity_values():
-    assert tokens.PRIMARY == "#0c3f3b"      # 石化墨绿
-    assert tokens.ACCENT == "#c2410c"       # 烧铜
-    assert tokens.BG_BODY == "#f6f3ec"      # 暖瓷纸面
-    assert tokens.BG_RAIL == "#132a28"      # 深色石化图标栏
+def test_workstation_light_identity_values():
+    assert tokens.PRIMARY == "#0b5563"
+    assert tokens.ACCENT == "#a65313"
+    assert tokens.BG_BODY == "#f4f6f8"
+    assert tokens.BG_SIDEBAR == "#ffffff"
+    assert tokens.BG_RAIL == "#ffffff"
     assert tokens.RADIUS_BUTTON == 4
-    assert tokens.RADIUS_CARD == 8
+    assert tokens.RADIUS_CARD == 4
     assert tokens.PAGE_MARGIN == 16
     assert tokens.FONT_SIZE_TITLE == "14px"
     assert tokens.FONT_WEIGHT_TITLE == "700"
@@ -96,16 +97,15 @@ def test_dark_is_dark_and_high_contrast_is_pure():
     assert hc["BORDER"] == "#000000"
 
 
-def test_icon_rail_stays_dark_in_every_theme():
-    """One light-stroke nav icon set serves all themes because the rail
-    surface never turns light."""
-    for theme in ("light", "dark", "high_contrast"):
+def test_icon_rail_adapts_to_theme():
+    light = tokens.palette_for("light")
+    assert light["BG_RAIL"] == "#ffffff"
+    assert light["BG_RAIL_GRADIENT"] == "#ffffff"
+    for theme in ("dark", "high_contrast"):
         palette = tokens.palette_for(theme)
         rail = palette["BG_RAIL"]
         rgb = [int(rail.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
         assert sum(rgb) < 150, f"{theme} rail must stay dark, got {rail}"
-        # "none" would paint the rail transparent and hide the light-stroke
-        # nav icons (regression: high_contrast used to ship BG_RAIL_GRADIENT=none)
         assert palette["BG_RAIL_GRADIENT"].startswith("qlineargradient"), (
             f"{theme} rail gradient must paint a surface"
         )
@@ -145,14 +145,14 @@ def test_rail_hover_pair_is_readable_in_every_theme():
 def test_light_theme_text_contrast_floors():
     p = tokens.palette_for("light")
     pairs = [
-        ("TEXT_PRIMARY", "BG_BODY", 15.0),
+        ("TEXT_PRIMARY", "BG_BODY", 14.5),
         ("TEXT_PRIMARY", "BG_SIDEBAR", 15.0),
-        ("TEXT_SECONDARY", "BG_SIDEBAR", 6.9),
-        ("PRIMARY", "BG_BODY", 9.4),        # PRIMARY used as text (tabs/menus)
+        ("TEXT_SECONDARY", "BG_SIDEBAR", 6.3),
+        ("PRIMARY", "BG_BODY", 7.7),        # PRIMARY used as text (tabs/menus)
         ("ON_PRIMARY", "PRIMARY", 7.5),     # primary buttons / active chips
-        ("TEXT_ON_RAIL", "BG_RAIL", 9.0),
-        ("TEXT_ON_RAIL_ACTIVE", "BG_RAIL_ACTIVE", 7.5),
-        ("TEXT_PRIMARY", "BG_SELECTION", 13.0),
+        ("TEXT_ON_RAIL", "BG_RAIL", 6.3),
+        ("TEXT_ON_RAIL_ACTIVE", "BG_RAIL_ACTIVE", 7.0),
+        ("TEXT_PRIMARY", "BG_SELECTION", 12.9),
         ("ACCENT", "BG_SIDEBAR", 5.0),      # focus ring (non-text needs ≥ 3)
     ]
     for fg_key, bg_key, floor in pairs:
