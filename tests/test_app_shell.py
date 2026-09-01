@@ -1,24 +1,25 @@
 from PySide6.QtGui import QShortcut
 
+from paleo_workbench.ui import navigation
 from paleo_workbench.ui.app_shell import AppShell
 
 
 def test_app_shell_assembles_all_zones(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
-    assert shell.menu_bar is not None
-    assert not hasattr(shell, "header_toolbar")
-    assert shell.menu_bar.search_box.objectName() == "SearchBox"
-    assert shell.icon_rail is not None
+    assert shell.ribbon is not None
+    assert not hasattr(shell, "menu_bar")
+    assert not hasattr(shell, "icon_rail")
+    assert shell.ribbon.search_box.objectName() == "SearchBox"
     assert shell.page_stack is not None
     assert shell.status_bar is not None
 
 
-def test_app_shell_has_eleven_pages(qtbot):
+def test_app_shell_has_five_hub_pages(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
-    # 11 pages: 井位地图 absorbed into the Data page as a collapsible panel.
-    assert shell.page_stack.count() == 11
+    # 4+1 hubs: 数据 / 井 / 地震 / 编图 / 可视化 (临时).
+    assert shell.page_stack.count() == 5
 
 
 def test_app_shell_default_page_is_zero(qtbot):
@@ -27,20 +28,20 @@ def test_app_shell_default_page_is_zero(qtbot):
     assert shell.page_stack.currentIndex() == 0
 
 
-def test_app_shell_icon_rail_switches_page(qtbot):
+def test_app_shell_ribbon_tab_switches_page(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
-    shell.icon_rail.nav_buttons[4].click()
-    assert shell.page_stack.currentIndex() == 4
+    shell.ribbon._tab_buttons[1].click()
+    assert shell.page_stack.currentIndex() == 1
 
 
 def test_app_shell_geological_modeling_3d_page_navigation(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
-    # Click 11th button (index 10: 井震联合)
-    shell.icon_rail.nav_buttons[10].click()
-    assert shell.page_stack.currentIndex() == 10
-    geomodel_page = shell.page_stack.widget(10)
+    shell.navigate_to(navigation.PAGE_INDEX_SEISMIC, "geomodel")
+    assert shell.page_stack.currentIndex() == navigation.PAGE_INDEX_SEISMIC
+    geomodel_page = shell.geomodel_page
+    assert shell.hub_seismic.current_key() == "geomodel"
     assert geomodel_page.objectName() == "GeologicalModeling3DPage"
     assert geomodel_page.model_tree is not None
     assert geomodel_page.gl_widget is not None
@@ -60,52 +61,39 @@ def test_app_shell_object_name(qtbot):
     assert shell.objectName() == "AppShell"
 
 
-def test_app_shell_has_workflow_stepper(qtbot):
+def test_app_shell_has_ribbon_bar(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
-    assert hasattr(shell, "workflow_stepper")
-    assert shell.workflow_stepper is not None
-    assert shell.workflow_stepper.objectName() == "WorkflowStepper"
+    assert shell.ribbon.objectName() == "RibbonBar"
 
 
-def test_app_shell_embeds_stepper_in_command_header(qtbot):
-    """M2: the workflow stepper lives inside the 36px menu-bar command row."""
-    shell = AppShell()
-    qtbot.addWidget(shell)
-    assert shell.workflow_stepper.parent() is shell.menu_bar
-    assert shell.menu_bar._header_center is shell.workflow_stepper
-
-
-def test_app_shell_stepper_switches_stage_and_recalls_subpage(qtbot):
+def test_app_shell_hub_recalls_active_submodule(qtbot):
+    """Re-entering a hub recalls its current sub-module (no reset to default)."""
     shell = AppShell()
     qtbot.addWidget(shell)
 
-    # Landing page (首页 = index 0) belongs to stage 1: the stepper starts
-    # at the FIRST stage on launch, not the last one.
-    assert shell.workflow_stepper.active_stage_index == 0
-    assert shell.page_stack.currentIndex() == 0
+    # Landing hub (数据) starts on its default sub-module.
+    assert shell.page_stack.currentIndex() == navigation.PAGE_INDEX_DATA
+    assert shell.hub_data.current_key() == "overview"
 
-    # Click Stepper Stage 1 (综合解释) -> remembered page 测井预测 (2)
-    shell.workflow_stepper.stage_buttons[1].click()
-    assert shell.page_stack.currentIndex() == 2
-    assert shell.workflow_stepper.active_stage_index == 1
+    # Switch within 井 hub to 地层对比…
+    shell.navigate_to(navigation.PAGE_INDEX_WELL, "stratigraphy")
+    assert shell.page_stack.currentIndex() == navigation.PAGE_INDEX_WELL
+    assert shell.hub_well.current_key() == "stratigraphy"
 
-    # Click Stepper Stage 2 (古地理编图) -> should switch to PAGE_INDEX_MAPPING (8)
-    shell.workflow_stepper.stage_buttons[2].click()
-    assert shell.page_stack.currentIndex() == 8
-    assert shell.workflow_stepper.active_stage_index == 2
+    # …leave for 数据, then come back: 地层对比 is recalled.
+    shell.navigate_to(navigation.PAGE_INDEX_DATA)
+    shell.navigate_to(navigation.PAGE_INDEX_WELL)
+    assert shell.hub_well.current_key() == "stratigraphy"
 
-    # Switch subpage within Stage 2 to PAGE_INDEX_VISUALIZATION (6)
-    shell._switch_page(6)
-    assert shell.page_stack.currentIndex() == 6
 
-    # Stage 0 recalls its remembered page (首页, the landing page)…
-    shell.workflow_stepper.stage_buttons[0].click()
-    assert shell.page_stack.currentIndex() == 0
-
-    # …then back to Stage 2 -> should recall PAGE_INDEX_VISUALIZATION (6)
-    shell.workflow_stepper.stage_buttons[2].click()
-    assert shell.page_stack.currentIndex() == 6
+def test_app_shell_submodule_switch_updates_ribbon_context(qtbot):
+    shell = AppShell()
+    qtbot.addWidget(shell)
+    shell.navigate_to(navigation.PAGE_INDEX_MAPPING, "review")
+    body = shell.ribbon.context("mapping:review")
+    assert body is not None
+    assert shell.ribbon._body_stack.currentWidget() is body
 
 
 # --- Command palette (Ctrl+K) ----------------------------------------------
@@ -119,7 +107,7 @@ def _palette_escape_event():
     )
 
 
-def test_command_palette_lists_pages_and_stages(qtbot):
+def test_command_palette_lists_submodules(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
     # No shell.show(): offscreen GL pages crash on native-window exposure
@@ -127,14 +115,14 @@ def test_command_palette_lists_pages_and_stages(qtbot):
 
     shell.command_palette.popup()
     assert not shell.command_palette.isHidden()
-    # 11 pages + 4 stages
-    assert shell.command_palette.result_list.count() == 15
+    total = sum(len(navigation.submodule_keys(h)) for h in range(5))
+    assert shell.command_palette.result_list.count() == total
 
     shell.command_palette.filter_input.setText("编图")
-    assert 0 < shell.command_palette.result_list.count() < 15
+    assert 0 < shell.command_palette.result_list.count() < total
 
 
-def test_command_palette_page_result_navigates(qtbot):
+def test_command_palette_result_navigates(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
 
@@ -144,23 +132,25 @@ def test_command_palette_page_result_navigates(qtbot):
         shell.command_palette.result_list.currentItem()
     )
 
-    assert shell.page_stack.currentIndex() == 3
+    assert shell.page_stack.currentIndex() == navigation.PAGE_INDEX_SEISMIC
+    assert shell.hub_seismic.current_key() == "seismic"
     assert shell.command_palette.isHidden()
 
 
-def test_command_palette_stage_result_respects_memory(qtbot):
+def test_command_palette_hub_switch_preserves_submodule(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
-    shell._switch_page(6)  # 可视化 becomes the 古地理编图 stage's remembered page
+    shell.navigate_to(navigation.PAGE_INDEX_WELL, "stratigraphy")
 
     shell.command_palette.popup()
-    # "古地理编图" matches only the stage ❸ command (page hints differ).
-    shell.command_palette.filter_input.setText("古地理编图")
+    # "井" hub commands; picking 测井预测 jumps straight to the sub-module.
+    shell.command_palette.filter_input.setText("测井预测")
     shell.command_palette._activate_item(
         shell.command_palette.result_list.currentItem()
     )
 
-    assert shell.page_stack.currentIndex() == 6
+    assert shell.page_stack.currentIndex() == navigation.PAGE_INDEX_WELL
+    assert shell.hub_well.current_key() == "well_log"
     assert shell.command_palette.isHidden()
 
 

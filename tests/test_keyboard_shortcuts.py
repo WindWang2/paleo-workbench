@@ -19,12 +19,12 @@ from paleo_workbench.ui.pages.data_page import DataPage
 
 
 def _shell_digit_shortcuts(shell: AppShell) -> list[QShortcut]:
-    """Return only the 1-9/0 digit-keyed shortcuts owned by the shell
+    """Return only the 1-5 hub digit-keyed shortcuts owned by the shell
     (excludes the DataPage's Delete shortcut, which is also a descendant)."""
     out = []
     for sc in shell.findChildren(QShortcut):
         key = sc.key().toString()
-        if key in {"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"}:
+        if key in {"1", "2", "3", "4", "5"}:
             out.append(sc)
     return out
 
@@ -41,14 +41,14 @@ def test_digit_shortcut_switches_page(qtbot):
     assert shell.page_stack.currentIndex() == 2
 
 
-def test_digit_shortcut_syncs_icon_rail_active_state(qtbot):
+def test_digit_shortcut_syncs_ribbon_active_tab(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
-    assert shell.icon_rail.active_index == 0
+    assert shell.ribbon.active_tab == 0
 
     shell._shortcut_switch_page(4)
 
-    assert shell.icon_rail.active_index == 4
+    assert shell.ribbon.active_tab == 4
     assert shell.page_stack.currentIndex() == 4
 
 
@@ -58,29 +58,32 @@ def test_digit_shortcut_blocked_in_text_field(qtbot):
     qtbot.addWidget(shell)
     shell.show()
     QApplication.setActiveWindow(shell)
-    # The data toolbar lives on page 1; switch there so its search box is the
-    # current page and can actually take focus.
-    shell.page_stack.setCurrentIndex(1)
-    search = shell.page_stack.widget(1).data_toolbar.search_box
+    # The data toolbar lives on the 数据 hub's 数据管理 sub-module; switch
+    # there so its search box is the current page and can actually take focus.
+    # (switch_to, not navigate_to: a fade after show() would install a
+    # QGraphicsEffect that forces hidden GL pages to initialize offscreen.)
+    shell.hub_data.switch_to("management")
+    search = shell.data_page.data_toolbar.search_box
     search.setFocus()
     QApplication.processEvents()
     assert isinstance(QApplication.focusWidget(), QLineEdit)
 
     shell._shortcut_switch_page(2)  # should be a no-op
 
-    assert shell.page_stack.currentIndex() == 1  # unchanged
+    assert shell.page_stack.currentIndex() == 0  # unchanged
+    assert shell.hub_data.current_key() == "management"
 
 
-def test_digit_shortcut_blocked_in_menu_bar_search(qtbot):
-    """The header (menu-bar) search box is also a QLineEdit — must block."""
+def test_digit_shortcut_blocked_in_ribbon_search(qtbot):
+    """The ribbon's global search box is also a QLineEdit — must block."""
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
     window.show()
     QApplication.setActiveWindow(window)
     shell = window.app_shell
-    shell.menu_bar.search_box.setFocus()
+    shell.ribbon.search_box.setFocus()
     QApplication.processEvents()
-    assert QApplication.focusWidget() is shell.menu_bar.search_box
+    assert QApplication.focusWidget() is shell.ribbon.search_box
 
     shell._shortcut_switch_page(3)  # no-op
 
@@ -96,12 +99,12 @@ def test_digit_shortcut_out_of_range_is_noop(qtbot):
     assert shell.page_stack.currentIndex() == 0
 
 
-def test_app_shell_registers_ten_digit_shortcuts(qtbot):
+def test_app_shell_registers_five_digit_shortcuts(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
     digit_shortcuts = _shell_digit_shortcuts(shell)
     assert sorted(sc.key().toString() for sc in digit_shortcuts) == [
-        "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"
+        "1", "2", "3", "4", "5"
     ]
 
 
@@ -139,8 +142,10 @@ def test_window_focus_search_targets_data_toolbar_when_data_page_active(qtbot):
     qtbot.addWidget(window)
     window.show()
     QApplication.setActiveWindow(window)
-    # Switch to data page and ensure it has a search box.
-    window.app_shell.page_stack.setCurrentIndex(1)
+    # Switch to the 数据 hub's 数据管理 sub-module, which has its own search box.
+    # (switch_to, not navigate_to: no fade → no graphics effect → hidden GL
+    # pages stay uninitialized under the offscreen platform.)
+    window.app_shell.hub_data.switch_to("management")
     data_page = window.app_shell.data_page_widget()
     data_page.data_toolbar.search_box.setFocus()
     QApplication.processEvents()
@@ -151,19 +156,19 @@ def test_window_focus_search_targets_data_toolbar_when_data_page_active(qtbot):
     assert QApplication.focusWidget() is data_page.data_toolbar.search_box
 
 
-def test_window_focus_search_falls_back_to_menu_bar(qtbot):
-    """When the active page has no data_toolbar, focus the header search."""
+def test_window_focus_search_falls_back_to_ribbon(qtbot):
+    """When the active page has no data_toolbar, focus the ribbon search."""
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
     window.show()
     QApplication.setActiveWindow(window)
-    # Home page (index 0) has no data_toolbar.
-    window.app_shell.page_stack.setCurrentIndex(0)
+    # 数据 / 项目概述 (the home surface) has no data_toolbar.
+    window.app_shell.hub_data.switch_to("overview")
 
     window._shortcut_focus_search()
     QApplication.processEvents()
 
-    assert QApplication.focusWidget() is window.app_shell.menu_bar.search_box
+    assert QApplication.focusWidget() is window.app_shell.ribbon.search_box
 
 
 def test_window_shortcut_methods_callable(qtbot):
@@ -218,8 +223,8 @@ def test_data_page_delete_guarded_in_text_field(qtbot, tmp_path):
     window.show()
     QApplication.setActiveWindow(window)
 
-    # Switch to data page
-    window.app_shell.page_stack.setCurrentIndex(1)
+    # Switch to the 数据 hub's 数据管理 sub-module
+    window.app_shell.hub_data.switch_to("management")
     page = window.app_shell.data_page_widget()
     page._set_selected_asset(resource)
     page.data_toolbar.search_box.setFocus()

@@ -1,10 +1,8 @@
 from paleo_workbench.ui.pages import activity_card, completeness_card, resource_summary
-from paleo_workbench.ui.pages import workflow_progress
 from paleo_workbench.workflow.service import REQUIRED_RESOURCE_TYPES, STEP_ORDER
 
 
 def test_step_types_reuse_workflow_step_order():
-    assert workflow_progress.STEP_TYPES is STEP_ORDER
     assert activity_card.STEP_TYPES is STEP_ORDER
 
 

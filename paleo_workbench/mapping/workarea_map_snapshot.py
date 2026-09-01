@@ -46,6 +46,7 @@ from paleo_workbench.mapping.map_styles import (
 )
 from paleo_workbench.project.domain import (
     CoordinateStatus,
+    complete_survey_corners,
     crs_equivalent,
     domain_signature,
 )
@@ -108,24 +109,31 @@ _SURVEY_LABEL_STYLE = VectorStyle(
     marker=MarkerSymbol.CIRCLE,
     marker_size=0.0,
     labels=TextStyle(
-        field="name", size=11.0, color="#0f172a", halo_color="#f8fafc", halo_width=2.0
+        field="name", size=20.0, color="#0f172a", bold=True,
+        halo_color="#f8fafc", halo_width=3.0,
     ),
 ).to_dict()
 
 _WELL_OK_STYLE = VectorStyle(
     fill=_COLOR_WELL_OK,
     stroke="#182431",
-    stroke_width=1.0,
+    stroke_width=1.4,
     marker=MarkerSymbol.WELL,
-    marker_size=8.0,
+    marker_size=11.0,
+    labels=TextStyle(
+        field="name", size=8.0, color="#0f172a", halo_color="#f8fafc", halo_width=1.6
+    ),
 ).to_dict()
 
 _WELL_FLAGGED_STYLE = VectorStyle(
     fill=_COLOR_WELL_FLAGGED,
     stroke="#182431",
-    stroke_width=1.0,
+    stroke_width=1.4,
     marker=MarkerSymbol.WELL,
-    marker_size=8.0,
+    marker_size=11.0,
+    labels=TextStyle(
+        field="name", size=8.0, color="#0f172a", halo_color="#f8fafc", halo_width=1.6
+    ),
 ).to_dict()
 
 
@@ -346,6 +354,10 @@ def _survey_footprints(project: Any, project_crs: str) -> tuple[list[dict[str, A
                 corners.append(xy)
         if len(corners) < 3:
             continue
+        # 旧工程可能只有 3 角点（提取期设计），补出平行四边形第 4 角再画。
+        corners = [
+            (float(c[0]), float(c[1])) for c in complete_survey_corners(corners)
+        ]
         survey_id = str(getattr(survey, "id", "") or "")
         name = str(getattr(survey, "name", "") or "")
         features.append(

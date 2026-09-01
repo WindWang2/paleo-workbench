@@ -1,76 +1,51 @@
 from __future__ import annotations
 
-import pytest
-
 from paleo_workbench.ui import navigation
 
 
-def test_stage_indices_defined():
-    assert hasattr(navigation, "STAGE_INDEX_DATA")
-    assert hasattr(navigation, "STAGE_INDEX_INTERPRETATION")
-    assert hasattr(navigation, "STAGE_INDEX_MAPPING")
-    assert hasattr(navigation, "STAGE_INDEX_REVIEW")
-
-    assert navigation.STAGE_INDEX_DATA == 0
-    assert navigation.STAGE_INDEX_INTERPRETATION == 1
-    assert navigation.STAGE_INDEX_MAPPING == 2
-    assert navigation.STAGE_INDEX_REVIEW == 3
+def test_hub_indices_defined():
+    assert navigation.PAGE_INDEX_DATA == 0
+    assert navigation.PAGE_INDEX_WELL == 1
+    assert navigation.PAGE_INDEX_SEISMIC == 2
+    assert navigation.PAGE_INDEX_MAPPING == 3
+    assert navigation.PAGE_INDEX_VISUALIZATION == 4
 
 
-def test_stage_definitions_structure():
-    stages = navigation.STAGE_DEFINITIONS
-    assert len(stages) == 4
-    for idx, s in enumerate(stages):
-        assert "name" in s
-        assert "badge" in s
-        assert "pages" in s
-        assert isinstance(s["pages"], list)
-        assert len(s["pages"]) > 0
+def test_hub_names_cover_every_hub():
+    assert len(navigation.HUB_NAMES) == 5
+    assert set(navigation.SUBMODULES) == set(range(5))
+    assert set(navigation.DEFAULT_SUBMODULE) == set(range(5))
 
 
-def test_get_stage_for_page():
-    # 首页 opens the workflow: stage 1 owns the landing page.
-    assert navigation.get_stage_for_page(navigation.PAGE_INDEX_HOME) == 0
-    assert navigation.get_stage_for_page(navigation.PAGE_INDEX_DATA) == 0
-    assert navigation.get_stage_for_page(navigation.PAGE_INDEX_PREPARATION) == 0
-
-    assert navigation.get_stage_for_page(navigation.PAGE_INDEX_WELL_LOG) == 1
-    assert navigation.get_stage_for_page(navigation.PAGE_INDEX_SEISMIC) == 1
-    assert navigation.get_stage_for_page(navigation.PAGE_INDEX_SEQUENCE) == 1
-    assert navigation.get_stage_for_page(navigation.PAGE_INDEX_STRATIGRAPHY) == 1
-    # 井震联合 is a map-verification surface, not an interpretation subpage.
-    assert navigation.get_stage_for_page(navigation.PAGE_INDEX_GEOMODEL) == 3
-
-    assert navigation.get_stage_for_page(navigation.PAGE_INDEX_MAPPING) == 2
-    assert navigation.get_stage_for_page(navigation.PAGE_INDEX_VISUALIZATION) == 2
-
-    assert navigation.get_stage_for_page(navigation.PAGE_INDEX_REVIEW) == 3
+def test_submodule_structure():
+    for hub_index, entries in navigation.SUBMODULES.items():
+        assert entries, f"hub {hub_index} must host at least one sub-module"
+        keys = [key for key, _title in entries]
+        assert len(keys) == len(set(keys)), f"hub {hub_index} has duplicate keys"
+        for _key, title in entries:
+            assert title, f"hub {hub_index} has an untitled sub-module"
+        assert navigation.DEFAULT_SUBMODULE[hub_index] in keys
 
 
-def test_get_subpages_for_stage():
-    assert navigation.get_subpages_for_stage(0) == [
-        navigation.PAGE_INDEX_HOME,
-        navigation.PAGE_INDEX_DATA,
-        navigation.PAGE_INDEX_PREPARATION,
+def test_submodule_keys_and_title():
+    assert navigation.submodule_keys(navigation.PAGE_INDEX_WELL) == [
+        "well_log", "sequence", "stratigraphy",
     ]
-    assert navigation.get_subpages_for_stage(1) == [
-        navigation.PAGE_INDEX_WELL_LOG,
-        navigation.PAGE_INDEX_SEISMIC,
-        navigation.PAGE_INDEX_SEQUENCE,
-        navigation.PAGE_INDEX_STRATIGRAPHY,
-    ]
-    assert navigation.get_subpages_for_stage(2) == [
-        navigation.PAGE_INDEX_MAPPING,
-        navigation.PAGE_INDEX_VISUALIZATION,
-    ]
-    assert navigation.get_subpages_for_stage(3) == [
-        navigation.PAGE_INDEX_REVIEW,
-        navigation.PAGE_INDEX_GEOMODEL,
-    ]
+    assert navigation.submodule_title(navigation.PAGE_INDEX_WELL, "sequence") == "层序格架"
+    assert navigation.submodule_title(navigation.PAGE_INDEX_WELL, "nope") == ""
+    # 可视化 is a single-module hub (no in-page switcher).
+    assert navigation.submodule_keys(navigation.PAGE_INDEX_VISUALIZATION) == ["viz"]
 
 
-def test_geomodel_never_joins_interpretation_stage():
+def test_legacy_page_map_covers_all_eleven_old_pages():
+    assert sorted(navigation.LEGACY_PAGE_TO_HUB) == list(range(11))
+    for hub_index, key in navigation.LEGACY_PAGE_TO_HUB.values():
+        assert key in navigation.submodule_keys(hub_index)
+
+
+def test_legacy_geomodel_lives_in_seismic_hub():
     """External contract (test_well_seismic_joint_page): the joint-analysis
-    page stays out of the interpretation stage after the merge into GEOMODEL."""
-    interp = navigation.get_subpages_for_stage(navigation.STAGE_INDEX_INTERPRETATION)
-    assert navigation.PAGE_INDEX_GEOMODEL not in interp
+    page is the 地震 hub's 井震联合 3D sub-module after the hub merge."""
+    assert navigation.LEGACY_PAGE_TO_HUB[10] == (
+        navigation.PAGE_INDEX_SEISMIC, "geomodel",
+    )

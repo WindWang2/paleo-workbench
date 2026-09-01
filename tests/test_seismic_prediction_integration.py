@@ -8,7 +8,7 @@ def test_app_shell_page_three_is_seismic_prediction_page(qtbot, monkeypatch):
     monkeypatch.setattr("paleo_workbench.viz.native_factor_map.require_native_scene", lambda: None)
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
-    page = window.app_shell.page_stack.widget(3)
+    page = window.app_shell.seismic_page
     assert isinstance(page, SeismicPredictionPage)
 
 
@@ -19,7 +19,7 @@ def test_seismic_prediction_page_receives_project_prediction_tasks(qtbot, monkey
 
     window = PaleoWorkbenchWindow(project=project)
     qtbot.addWidget(window)
-    page = window.app_shell.page_stack.widget(3)
+    page = window.app_shell.seismic_page
 
     assert page.context_toolbar.task_value.text() == task.name
     assert page.view_panel.volume_shape == (8, 10, 12)

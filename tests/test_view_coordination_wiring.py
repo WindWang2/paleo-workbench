@@ -70,11 +70,7 @@ def test_map_pick_drives_well_log_page(shell, monkeypatch):
 
 def test_map_pick_highlights_3d_trajectory(shell, monkeypatch):
     calls = []
-    geo_page = shell.page_stack.widget(
-        __import__(
-            "paleo_workbench.ui.navigation", fromlist=["PAGE_INDEX_GEOMODEL"]
-        ).PAGE_INDEX_GEOMODEL
-    )
+    geo_page = shell.geomodel_page
     monkeypatch.setattr(geo_page, "highlight_well", lambda wid: calls.append(wid))
 
     shell.data_page.well_map_panel.map_page.well_selected.emit("W-300")
@@ -87,11 +83,7 @@ def test_3d_pick_routes_through_context_without_direct_wire(shell, monkeypatch):
     from paleo_workbench.ui import workflow_controller as wc_module
 
     # the point-to-point handler is no longer connected by the controller
-    geo_page = shell.page_stack.widget(
-        __import__(
-            "paleo_workbench.ui.navigation", fromlist=["PAGE_INDEX_GEOMODEL"]
-        ).PAGE_INDEX_GEOMODEL
-    )
+    geo_page = shell.geomodel_page
     welllog_calls = []
     map_calls = []
     monkeypatch.setattr(

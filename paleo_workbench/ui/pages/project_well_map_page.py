@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 
 from paleo_workbench.project.domain import (
     CoordinateStatus,
+    complete_survey_corners,
     coordinate_status_flag,
     crs_equivalent,
 )
@@ -596,6 +597,7 @@ class ProjectWellMapPage(QWidget):
                 except (TypeError, ValueError):
                     continue
             if len(corners) >= 3:
+                corners = [tuple(c) for c in complete_survey_corners(corners)]
                 if corners[0] != corners[-1]:
                     corners.append(corners[0])
                 xs.extend([c[0] for c in corners])

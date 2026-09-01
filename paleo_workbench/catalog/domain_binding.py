@@ -232,6 +232,9 @@ def extract_survey_from_segy(path: Path, *, crs: str = "") -> tuple[SurveyExtrac
             [float(p1[2]), float(p1[3])],
             [float(p2[2]), float(p2[3])],
             [float(p3[2]), float(p3[3])],
+            # 平行四边形补点 p4 = p1 + p3 - p2，保证 footprint 是矩形而非三角
+            [float(p1[2]) + float(p3[2]) - float(p2[2]),
+             float(p1[3]) + float(p3[3]) - float(p2[3])],
         ],
         inline_range=_range_of(meta, "iline"),
         crossline_range=_range_of(meta, "xline"),

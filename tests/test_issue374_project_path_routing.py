@@ -56,12 +56,8 @@ def test_set_data_project_path_routes_to_all_pages(qtbot):
         ReviewExportPage: "_project_path",
     }
     for page_cls, attr in expected.items():
-        pages = [
-            shell.page_stack.widget(i)
-            for i in range(shell.page_stack.count())
-            if isinstance(shell.page_stack.widget(i), page_cls)
-        ]
-        assert pages, f"page {page_cls.__name__} not in stack"
+        pages = [p for p in shell._all_pages if isinstance(p, page_cls)]
+        assert pages, f"page {page_cls.__name__} not in shell"
         routed = [getattr(p, attr, None) for p in pages]
         assert all(p is not None for p in routed), f"{page_cls.__name__} not routed"
         assert all(Path(p) == proj_path for p in routed), f"{page_cls.__name__} wrong path"

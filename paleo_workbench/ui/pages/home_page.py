@@ -38,7 +38,6 @@ from paleo_workbench.ui.pages.module_relationship import (
     ModuleRelationshipWidget,
 )
 from paleo_workbench.ui.pages.workflow_contract_panel import WorkflowContractPanel
-from paleo_workbench.ui.pages.workflow_progress import WorkflowProgress
 from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 
 # Sentinel: the map has never been bound (≠ "bound to an empty project").
@@ -85,9 +84,6 @@ class HomePage(QWidget):
 
         from paleo_workbench.ui.pages.onboarding_report_card import OnboardingReportCard
         from paleo_workbench.ui.pages.start_guide_card import StartGuideCard
-
-        self.workflow_progress = WorkflowProgress()
-        layout.addWidget(self.workflow_progress)
 
         # ---- centerpiece: work-area map + right-hand onboarding column ----
         map_row = QHBoxLayout()
@@ -249,7 +245,8 @@ class HomePage(QWidget):
     # ------------------------------------------------------------------
 
     def update_state(self, state: dict, steps: list, project=None) -> None:
-        self.workflow_progress.update_steps(steps)
+        # UI v2: the module-relationship diagram carries the workflow state;
+        # the separate progress strip was removed per product decision.
         self.relationship_widget.update_states(steps)
         self.activity_card.update_state(state, steps)
         self.completeness_card.update_state(state)

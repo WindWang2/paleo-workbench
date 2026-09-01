@@ -60,6 +60,7 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
             if (style.contains("stroke")) layer.stroke = py::cast<std::string>(style["stroke"]);
             if (style.contains("stroke_width")) layer.stroke_width = py::cast<double>(style["stroke_width"]);
             if (style.contains("marker_size")) layer.marker_size = py::cast<double>(style["marker_size"]);
+            if (style.contains("marker")) layer.marker = py::cast<std::string>(style["marker"]);
             if (style.contains("line_pattern")) layer.line_pattern = py::cast<std::string>(style["line_pattern"]);
             if (style.contains("renderer")) layer.renderer_kind = py::cast<std::string>(style["renderer"]);
             if (style.contains("field")) layer.classification_field = py::cast<std::string>(style["field"]);
@@ -118,6 +119,7 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
                 if (labels.contains("field")) layer.label_field = py::cast<std::string>(labels["field"]);
                 if (labels.contains("font_family")) layer.label_font_family = py::cast<std::string>(labels["font_family"]);
                 if (labels.contains("size")) layer.label_size = py::cast<double>(labels["size"]);
+                if (labels.contains("bold")) layer.label_bold = py::cast<bool>(labels["bold"]);
                 if (labels.contains("color")) layer.label_color = py::cast<std::string>(labels["color"]);
                 if (labels.contains("buffer")) layer.label_buffer_size = py::cast<double>(labels["buffer"]);
                 // #1102: the buffer (halo) colour uses the same wire format

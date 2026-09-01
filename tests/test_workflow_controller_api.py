@@ -172,7 +172,11 @@ def _recompute_catalog_with_stale_factor() -> "tuple[InMemoryCatalog, str]":
 
 def test_recompute_requested_is_consumed_and_executes_plan(qtbot, monkeypatch):
     """#537: 更新受影响成果 must reach a controller action, run the minimal
-    recompute plan off the GUI thread and refresh home steps."""
+    recompute plan off the GUI thread and refresh home steps.
+
+    UI v2: the workflow-progress strip (and its button) is gone from the home
+    page; the completion summary is shown in a dialog. Drive the controller
+    entry point directly and capture that dialog's text."""
     import paleo_workbench.catalog.runtime as catalog_runtime
     from paleo_workbench.app import PaleoWorkbenchWindow
     from paleo_workbench.project.models import (
@@ -209,22 +213,24 @@ def test_recompute_requested_is_consumed_and_executes_plan(qtbot, monkeypatch):
         )
     )
 
-    progress = window.app_shell.home_page_widget().workflow_progress
+    summaries: list[str] = []
+    from paleo_workbench.ui import workflow_controller as wc_module
+
+    monkeypatch.setattr(
+        wc_module.QMessageBox, "information",
+        lambda *args: summaries.append(str(args[-1])),
+    )
     catalog_runtime.set_catalog(cat)
     try:
-        progress.recompute_requested.emit()
-        qtbot.waitUntil(
-            lambda: "执行结果" in progress.plan_label.text(), timeout=20_000
-        )
+        window.workflow_controller._on_recompute_requested()
+        qtbot.waitUntil(lambda: bool(summaries), timeout=20_000)
     finally:
         catalog_runtime.reset_catalog()
 
-    text = progress.plan_label.text()
+    text = summaries[-1]
     assert "需要更新" in text, f"plan summary should describe the stale step: {text}"
     # The factor_map step was executed (production interpolation path), so the
     # executor reported an 'ok' outcome rather than 'no handler'.
     assert "ok" in text.lower() or "执行结果" in text
     # The staged task copy was committed to the live project on the GUI thread.
     assert project.factor_map_tasks[0].status == "complete"
-    # The recompute action refreshed the home step strip.
-    assert not progress.recompute_button.isHidden()

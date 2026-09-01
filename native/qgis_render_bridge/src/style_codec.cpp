@@ -15,6 +15,7 @@
 #include <qgsgraduatedsymbolrenderer.h>
 #include <qgslinesymbol.h>
 #include <qgsmarkersymbol.h>
+#include <qgsmarkersymbollayer.h>
 #include <qgsreadwritecontext.h>
 #include <qgsrendererrange.h>
 #include <qgsrulebasedrenderer.h>
@@ -49,7 +50,8 @@ Qgis::GeometryType geometry_type_from_name(const std::string& name) {
 /// fault-trace pattern) has no built-in equivalent at all — it rendered solid.
 std::unique_ptr<QgsSymbol> legacy_symbol_for(
     Qgis::GeometryType geometry_type, const QString& fill, const QString& stroke,
-    double stroke_width, double marker_size, const std::string& line_pattern = "solid"
+    double stroke_width, double marker_size, const std::string& line_pattern = "solid",
+    const std::string& marker = "circle"
 ) {
     QVariantMap properties;
     const QString width = QString::number(std::max(0.0, stroke_width), 'g', 12);
@@ -92,6 +94,23 @@ std::unique_ptr<QgsSymbol> legacy_symbol_for(
             properties.insert(QStringLiteral("outline_color"), stroke);
             properties.insert(QStringLiteral("size"), QString::number(std::max(0.1, marker_size), 'g', 12));
             properties.insert(QStringLiteral("size_unit"), QStringLiteral("Pixel"));
+            if (marker == "well") {
+                // 井符号: filled ring + dark centre dot (the fallback draws
+                // MarkerSymbol.WELL as an ellipse plus a centre point).
+                QVariantMap dot_properties;
+                dot_properties.insert(QStringLiteral("name"), QStringLiteral("circle"));
+                dot_properties.insert(QStringLiteral("color"), stroke);
+                dot_properties.insert(QStringLiteral("outline_color"), QStringLiteral("transparent"));
+                dot_properties.insert(
+                    QStringLiteral("size"),
+                    QString::number(std::max(0.1, marker_size * 0.32), 'g', 12)
+                );
+                dot_properties.insert(QStringLiteral("size_unit"), QStringLiteral("Pixel"));
+                QgsSymbolLayerList symbol_layers;
+                symbol_layers << QgsSimpleMarkerSymbolLayer::create(properties)
+                              << QgsSimpleMarkerSymbolLayer::create(dot_properties);
+                return std::unique_ptr<QgsSymbol>(new QgsMarkerSymbol(symbol_layers));
+            }
             return QgsMarkerSymbol::createSimple(properties);
         default:
             return {};
@@ -144,7 +163,8 @@ std::unique_ptr<QgsFeatureRenderer> build_renderer_from_spec(
                 rule.stroke.empty() ? default_stroke : QString::fromStdString(rule.stroke),
                 rule.stroke_width,
                 rule.marker_size,
-                spec.line_pattern
+                spec.line_pattern,
+                spec.marker
             );
             if (!symbol) continue;
             auto node = std::make_unique<QgsRuleBasedRenderer::Rule>(
@@ -164,7 +184,7 @@ std::unique_ptr<QgsFeatureRenderer> build_renderer_from_spec(
         for (const CategorySpec& category : spec.categories) {
             auto symbol = legacy_symbol_for(
                 geometry_type, QString::fromStdString(category.color), default_stroke,
-                spec.stroke_width, spec.marker_size, spec.line_pattern
+                spec.stroke_width, spec.marker_size, spec.line_pattern, spec.marker
             );
             if (symbol) {
                 categories.emplace_back(
@@ -185,7 +205,7 @@ std::unique_ptr<QgsFeatureRenderer> build_renderer_from_spec(
         for (const RangeSpec& range : spec.ranges) {
             auto symbol = legacy_symbol_for(
                 geometry_type, QString::fromStdString(range.color), default_stroke,
-                spec.stroke_width, spec.marker_size, spec.line_pattern
+                spec.stroke_width, spec.marker_size, spec.line_pattern, spec.marker
             );
             if (symbol) {
                 ranges.emplace_back(
@@ -202,7 +222,7 @@ std::unique_ptr<QgsFeatureRenderer> build_renderer_from_spec(
 
     auto symbol = legacy_symbol_for(
         geometry_type, default_fill, default_stroke, spec.stroke_width,
-        spec.marker_size, spec.line_pattern
+        spec.marker_size, spec.line_pattern, spec.marker
     );
     if (!symbol) return nullptr;
     return std::make_unique<QgsSingleSymbolRenderer>(symbol.release());

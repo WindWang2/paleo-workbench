@@ -20,10 +20,10 @@ def _preview_store(tmp_path):
     )
 
 
-def test_app_shell_page_one_is_data_page(qtbot):
+def test_app_shell_data_hub_hosts_data_page(qtbot):
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
-    page = window.app_shell.page_stack.widget(1)
+    page = window.app_shell.hub_data.page("management")
     assert isinstance(page, DataPage)
 
 
@@ -46,7 +46,7 @@ def test_data_page_receives_resources_and_artifacts(qtbot):
     )
     window = PaleoWorkbenchWindow(project=project)
     qtbot.addWidget(window)
-    page = window.app_shell.page_stack.widget(1)
+    page = window.app_shell.data_page
     assert page.asset_table.table.model().rowCount() == 2
 
 
@@ -65,7 +65,7 @@ def test_tools_preview_settings_action_opens_dialog_with_current_mode(
         PreviewResult(mode="pdf", title="report.pdf")
     )
 
-    window.app_shell.menu_bar.preview_settings_action.trigger()
+    window.app_shell.ribbon.preview_settings_action.trigger()
 
     assert opened == [window._preview_settings_dialog]
     assert opened[0].panel.category_combo.currentData() == "pdf"
@@ -81,7 +81,7 @@ def test_preview_dialog_applies_to_current_data_page_after_shell_rebuild(
     )
     window = PaleoWorkbenchWindow(preview_settings_store=_preview_store(tmp_path))
     qtbot.addWidget(window)
-    window.app_shell.menu_bar.preview_settings_action.trigger()
+    window.app_shell.ribbon.preview_settings_action.trigger()
     dialog = window._preview_settings_dialog
     old_reader = window.app_shell.data_page.reader_panel
 

@@ -8,7 +8,7 @@ from paleo_workbench.workflow.qc import run_basic_qc
 def test_app_shell_page_eight_is_review_export_page(qtbot):
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
-    page = window.app_shell.page_stack.widget(9)
+    page = window.app_shell.review_page
     assert isinstance(page, ReviewExportPage)
 
 
@@ -27,7 +27,7 @@ def test_review_export_page_receives_data(qtbot):
 
     window = PaleoWorkbenchWindow(project=project)
     qtbot.addWidget(window)
-    page = window.app_shell.page_stack.widget(9)
+    page = window.app_shell.review_page
     assert isinstance(page, ReviewExportPage)
     assert page.qc_table.table.rowCount() > 0
     assert "ZJ-2 古地理图" in page.action_header.title_label.text()

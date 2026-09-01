@@ -78,6 +78,7 @@ def _paint_scale_bar_impl(
     canvas_width: int,
     canvas_height: int,
     scale: float,
+    ink: str = "#ffffff",
 ) -> None:
     spec = _scale_bar_spec_impl(extent, canvas_width, scale)
     if spec is None:
@@ -85,7 +86,7 @@ def _paint_scale_bar_impl(
     target_units, pixels = spec
     y = canvas_height - 24.0 * scale
     painter.save()
-    painter.setPen(QPen(QColor("#ffffff"), 2.0 * scale))
+    painter.setPen(QPen(QColor(ink), 2.0 * scale))
     painter.drawLine(QPointF(16 * scale, y), QPointF(16 * scale + pixels, y))
     painter.drawLine(QPointF(16 * scale, y - 4 * scale), QPointF(16 * scale, y + 4 * scale))
     painter.drawLine(QPointF(16 * scale + pixels, y - 4 * scale), QPointF(16 * scale + pixels, y + 4 * scale))
@@ -105,6 +106,7 @@ def _paint_decorations_impl(
     height: int,
     scale: float,
     extent: tuple[float, float, float, float],
+    dark_chrome: bool = False,
 ) -> None:
     """Paint chrome (title/scale bar/north arrow/legend) in device pixels.
 
@@ -113,7 +115,10 @@ def _paint_decorations_impl(
     ``extent`` is the extent actually rendered into this target (exports
     letterbox the view extent); the scale bar reads it so its label always
     matches the drawn bar length.
+    ``dark_chrome`` selects the ink palette for light map bodies (the QGIS
+    backend renders a light background; the fallback fills a dark one).
     """
+    ink = "#1f2937" if dark_chrome else "#f8f9fa"
     canvas_width = int(width)
     canvas_height = int(height)
     elements = {str(item) for item in decorations.get("elements") or ()}
@@ -123,7 +128,7 @@ def _paint_decorations_impl(
     title_font.setBold(True)
     if title and (not elements or "标题栏" in elements or "title" in elements):
         painter.save()
-        painter.setPen(QColor("#f8f9fa"))
+        painter.setPen(QColor(ink))
         painter.setFont(title_font)
         painter.drawText(
             QRectF(14 * scale, 10 * scale, canvas_width - 28 * scale, canvas_height - 20 * scale),
@@ -131,12 +136,12 @@ def _paint_decorations_impl(
         )
         painter.restore()
     if not elements or "比例尺" in elements or "scale_bar" in elements:
-        _paint_scale_bar_impl(painter, extent, canvas_width, canvas_height, scale)
+        _paint_scale_bar_impl(painter, extent, canvas_width, canvas_height, scale, ink=ink)
     if not elements or "指北针" in elements or "north_arrow" in elements:
         painter.save()
         center = QPointF(canvas_width - 28 * scale, 37 * scale)
-        painter.setPen(QPen(QColor("#ffffff"), 1.5 * scale))
-        painter.setBrush(QColor("#343a40"))
+        painter.setPen(QPen(QColor(ink), 1.5 * scale))
+        painter.setBrush(QColor("#f8f9fa") if dark_chrome else QColor("#343a40"))
         painter.drawPolygon(QPolygonF([
             center + QPointF(0, -18 * scale),
             center + QPointF(-6 * scale, 10 * scale),
@@ -200,6 +205,7 @@ def paint_map_decorations(
     height: int,
     extent: tuple[float, float, float, float],
     dpi: float | None = None,
+    dark_chrome: bool = False,
 ) -> None:
     """Draw title / scale / north arrow / legend. ``dpi`` None keeps screen cosmetics.
 
@@ -211,6 +217,7 @@ def paint_map_decorations(
     dpi_scale = RenderContext.device_px_per_logical_px(dpi) if dpi else 1.0
     _paint_decorations_impl(
         painter, decorations, width=width, height=height, scale=dpi_scale, extent=extent,
+        dark_chrome=dark_chrome,
     )
 
 
@@ -605,6 +612,9 @@ class UnifiedMapCanvas(QWidget):
         _paint_decorations_impl(
             painter, decorations,
             width=canvas_width, height=canvas_height, scale=scale, extent=drawn_extent,
+            # The QGIS backend renders a light map body; the fallback fills a
+            # dark one — chrome ink must follow the body or text disappears.
+            dark_chrome=self._backend.backend_name == "qgis",
         )
 
     @staticmethod

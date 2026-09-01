@@ -33,4 +33,5 @@ def test_screen_inventory_includes_required_pages():
         "preparation",
         "paleomap",
         "qc_export",
+        "geomodel_3d",
     ]

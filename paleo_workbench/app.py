@@ -47,7 +47,7 @@ class PaleoWorkbenchWindow(QWidget):
         self.app_shell = AppShell(project=self.project, parent=self)
         self._apply_project_to_shell()
         self.outer_layout.addWidget(self.app_shell)
-        self._wire_menu_bar()
+        self._wire_ribbon()
         self._setup_shortcuts()
         self._update_title()
 
@@ -114,15 +114,16 @@ class PaleoWorkbenchWindow(QWidget):
     def _shortcut_focus_search(self) -> None:
         """Focus the active search box.
 
-        If the data page is active (it has a toolbar with its own search box),
-        focus that; otherwise fall back to the header/menu-bar search box.
+        If the data-management surface is active (it has a toolbar with its
+        own search box), focus that; otherwise fall back to the ribbon's
+        global search box.
         """
-        page = self.app_shell.page_stack.currentWidget()
+        page = self.app_shell.current_content_page()
         toolbar = getattr(page, "data_toolbar", None)
         if toolbar is not None and hasattr(toolbar, "search_box"):
             toolbar.search_box.setFocus()
             return
-        self.app_shell.menu_bar.search_box.setFocus()
+        self.app_shell.ribbon.search_box.setFocus()
 
     # --- project lifecycle delegates ---
 
@@ -195,16 +196,16 @@ class PaleoWorkbenchWindow(QWidget):
 
     # --- signal wiring ---
 
-    def _wire_menu_bar(self) -> None:
-        """Connect the current menu bar's signals to the handler methods.
+    def _wire_ribbon(self) -> None:
+        """Connect the current ribbon's signals to the handler methods.
 
-        Each shell rebuild creates a fresh :class:`MenuBar`, so this must
+        Each shell rebuild creates a fresh :class:`RibbonBar`, so this must
         be called from both ``__init__`` and ``_refresh_shell``.
         """
-        menu_bar = self.app_shell.menu_bar
-        menu_bar.new_project_requested.connect(self._on_new_project)
-        menu_bar.open_project_requested.connect(self._on_open_project)
-        menu_bar.open_sample_project_requested.connect(self._on_open_sample_project)
+        ribbon = self.app_shell.ribbon
+        ribbon.new_project_requested.connect(self._on_new_project)
+        ribbon.open_project_requested.connect(self._on_open_project)
+        ribbon.open_sample_project_requested.connect(self._on_open_sample_project)
         # HomePage start guide cards (recreated on each _refresh_shell)
         try:
             home_page = self.app_shell.home_page_widget()
@@ -217,12 +218,12 @@ class PaleoWorkbenchWindow(QWidget):
                     home_page.open_sample_requested.connect(self._on_open_sample_project)
         except Exception:
             pass
-        menu_bar.save_project_requested.connect(self._on_save_project)
-        menu_bar.properties_requested.connect(self._on_properties)
-        menu_bar.preview_settings_requested.connect(self._show_preview_settings)
-        menu_bar.density_changed.connect(self._on_density_changed)
-        menu_bar.about_requested.connect(self._on_about)
-        menu_bar.search_submitted.connect(self._on_global_search)
+        ribbon.save_project_requested.connect(self._on_save_project)
+        ribbon.properties_requested.connect(self._on_properties)
+        ribbon.preview_settings_requested.connect(self._show_preview_settings)
+        ribbon.density_changed.connect(self._on_density_changed)
+        ribbon.about_requested.connect(self._on_about)
+        ribbon.search_submitted.connect(self._on_global_search)
         self.workflow_controller.wire_home_page()
         self.workflow_controller.wire_data_visualization_jump()
         self.workflow_controller.wire_mapping_page()
@@ -251,7 +252,7 @@ class PaleoWorkbenchWindow(QWidget):
         if app is not None:
             app.setStyleSheet(qss)
         self.app_shell.setStyleSheet(qss)
-        self.app_shell.menu_bar.set_density_checked(density)
+        self.app_shell.set_density_checked(density)
 
     def _on_about(self) -> None:
         QMessageBox.about(
@@ -269,7 +270,7 @@ class PaleoWorkbenchWindow(QWidget):
         ``asset_table.set_search_text``) react. Other pages silently ignore
         the query rather than pretending to search.
         """
-        page = self.app_shell.page_stack.currentWidget()
+        page = self.app_shell.current_content_page()
         # Data page: drive its asset table filter and keep the page-local
         # toolbar search box in sync so the two inputs never disagree.
         asset_table = getattr(page, "asset_table", None)
@@ -309,7 +310,7 @@ class PaleoWorkbenchWindow(QWidget):
         )
         self._apply_project_to_shell()
         self.outer_layout.addWidget(self.app_shell)
-        self._wire_menu_bar()
+        self._wire_ribbon()
         self._update_title()
         # Re-bind project file path after shell rebuild (import/export I/O).
         self.app_shell.set_data_project_path(self.project_path)

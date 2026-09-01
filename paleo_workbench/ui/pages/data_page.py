@@ -346,6 +346,24 @@ class DataPage(QWidget):
         self.open_visualization_btn = self.data_toolbar.visualize_btn
         self.open_folder_btn = self.data_toolbar.open_folder_btn
 
+        # UI v2: these commands live on the Ribbon's 数据管理 context; showing
+        # them here too was flagged as duplicated chrome.  The button objects
+        # stay (the Ribbon proxies their click() and tests drive them), they
+        # just no longer occupy the in-page toolbar row.
+        for button in (
+            self.import_btn,
+            self.import_folder_btn,
+            self.data_toolbar.verify_btn,
+            self.data_toolbar.health_btn,
+            self.rescan_btn,
+            self.remove_btn,
+            self.open_folder_btn,
+            self.open_visualization_btn,
+            self.data_toolbar.tag_filter_btn,
+            self.data_toolbar.tag_manager_btn,
+        ):
+            button.setVisible(False)
+
         self._preview_controller = PreviewRequestController(
             self.reader_panel.provider,
             self,

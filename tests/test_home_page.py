@@ -7,7 +7,10 @@ def test_home_page_assembles_sub_widgets(qtbot):
     qtbot.addWidget(page)
     page.show()
     QApplication.processEvents()
-    assert page.workflow_progress is not None
+    # UI v2: no workflow progress strip — the module-relationship diagram
+    # carries the workflow state instead.
+    assert not hasattr(page, "workflow_progress")
+    assert page.relationship_widget is not None
     assert page.activity_card is not None
     assert page.completeness_card is not None
 
@@ -25,7 +28,6 @@ def test_home_page_update_state_delegates(qtbot):
     ]
     state = {"resource_readiness": {"ready": True, "missing_types": []}}
     page.update_state(state, steps)
-    assert "完成" in page.workflow_progress.step_widgets[0]["status"].text()
     assert page.activity_card.entry_count() == 1
     assert "数据完整" in page.completeness_card.summary_label.text()
 

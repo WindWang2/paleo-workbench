@@ -364,9 +364,7 @@ class ViewCoordinationController(QObject):
                         lambda well_id: self.publish_well_selection(well_id, source=self.SOURCE_MAP)
                     )
 
-        from paleo_workbench.ui.navigation import PAGE_INDEX_GEOMODEL
-
-        geo_page = shell.page_stack.widget(PAGE_INDEX_GEOMODEL)
+        geo_page = getattr(shell, "geomodel_page", None)
         if geo_page is not None and hasattr(geo_page, "well_selected"):
             geo_page.well_selected.connect(
                 lambda well_id: self.publish_well_selection(well_id, source=self.SOURCE_3D)
@@ -612,9 +610,7 @@ class ViewCoordinationController(QObject):
                 setter(well_id)
         # Map/Well Log → 3D (highlight the trajectory)
         if source != self.SOURCE_3D and self._shell is not None:
-            from paleo_workbench.ui.navigation import PAGE_INDEX_GEOMODEL
-
-            geo_page = self._shell.page_stack.widget(PAGE_INDEX_GEOMODEL)
+            geo_page = getattr(self._shell, "geomodel_page", None)
             highlight = getattr(geo_page, "highlight_well", None)
             if callable(highlight):
                 highlight(well_id)

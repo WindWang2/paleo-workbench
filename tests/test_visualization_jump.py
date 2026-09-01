@@ -58,7 +58,7 @@ def test_data_page_jump_switches_to_visualization(qtbot, tmp_path: Path):
 
     data_page.open_visualization_btn.click()
     assert window.app_shell.page_stack.currentIndex() == PAGE_INDEX_VISUALIZATION
-    assert window.app_shell.icon_rail.active_index == PAGE_INDEX_VISUALIZATION
+    assert window.app_shell.ribbon.active_tab == PAGE_INDEX_VISUALIZATION
 
     viz = window.app_shell.page_stack.widget(PAGE_INDEX_VISUALIZATION)
     assert viz._current_ref is not None

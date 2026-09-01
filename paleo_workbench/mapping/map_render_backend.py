@@ -1810,24 +1810,10 @@ class QgisMapRenderBackend(MapRenderBackend):
                 )
                 shipped = True
             except RuntimeError as exc:
-                if "feature delta" not in str(exc).lower():
+                if not _is_stale_delta_error(exc):
                     raise
-                # The delta's base revision no longer matches the bridge mirror
-                # (e.g. the runtime restarted under us). Reship fully once; the
-                # bridge validates deltas before mutating mirrors, so the
-                # half-applied state is impossible (#932).
-                self._qgis_force_full = {
-                    layer.id
-                    for layer in snapshot.layers
-                    if layer.layer_type not in ("scalar_grid", "grid", "raster_source")
-                }
-                try:
-                    self._bridge.set_layer_snapshot(
-                        self._native_snapshot(snapshot), snapshot.project_crs
-                    )
-                    shipped = True
-                finally:
-                    self._qgis_force_full = set()
+                self._reship_full_snapshot(snapshot)
+                shipped = True
         finally:
             if shipped:
                 for layer in snapshot.layers:
@@ -1837,6 +1823,29 @@ class QgisMapRenderBackend(MapRenderBackend):
         # has no active job and has applied the replacement snapshot.
         if self._scalar_raster_cache is not None and not self._bridge.render_active:
             self._scalar_raster_cache.release_stale()
+
+    def _reship_full_snapshot(self, snapshot: MapRenderSnapshot) -> None:
+        """Force a full reship after the bridge rejected a stale feature delta.
+
+        The delta's base revision no longer matches the bridge mirror (e.g. the
+        runtime restarted under us, or the snapshot was stashed behind an active
+        render and its delta only validated when the job finished). The bridge
+        validates deltas before mutating mirrors, so half-applied state is
+        impossible; recovery is reshipping every vector layer in full (#932).
+        """
+        self._qgis_force_full = {
+            layer.id
+            for layer in snapshot.layers
+            if layer.layer_type not in ("scalar_grid", "grid", "raster_source")
+        }
+        try:
+            self._bridge.set_layer_snapshot(
+                self._native_snapshot(snapshot), snapshot.project_crs
+            )
+        finally:
+            self._qgis_force_full = set()
+        for layer in snapshot.layers:
+            self._qgis_shipped_revisions[layer.id] = int(layer.data_revision)
 
     def request_render(self) -> int:
         """Request native parallel rendering; native code coalesces stale frames."""
@@ -1850,19 +1859,44 @@ class QgisMapRenderBackend(MapRenderBackend):
             self._set_native_snapshot(self._snapshot)
         generation = self._next_generation()
         self._completed = None
-        self._bridge.request_render(
-            self._extent,
-            self._output_size[0],
-            self._output_size[1],
-            self._dpi,
-            generation,
-        )
+        try:
+            self._bridge.request_render(
+                self._extent,
+                self._output_size[0],
+                self._output_size[1],
+                self._dpi,
+                generation,
+            )
+        except RuntimeError as exc:
+            if not _is_stale_delta_error(exc):
+                raise
+            # A snapshot stashed behind the previous render only failed delta
+            # validation when the job finished inside this call; recover with
+            # a full reship and re-issue the same render request.
+            self._reship_full_snapshot(self._snapshot)
+            self._bridge.request_render(
+                self._extent,
+                self._output_size[0],
+                self._output_size[1],
+                self._dpi,
+                generation,
+            )
         return generation
 
     def take_completed_frame(self) -> RenderFrame | None:
         if self._bridge is None:
             return None
-        payload = self._bridge.take_completed_frame()
+        try:
+            payload = self._bridge.take_completed_frame()
+        except RuntimeError as exc:
+            if not _is_stale_delta_error(exc):
+                raise
+            # Same deferred-delta rejection, surfacing when the finished job
+            # applied a stashed snapshot. Reship fully and re-render so the
+            # canvas still receives a frame for its current state.
+            self._reship_full_snapshot(self._snapshot)
+            self.request_render()
+            return None
         if self._scalar_raster_cache is not None and not self._bridge.render_active:
             self._scalar_raster_cache.release_stale()
         if payload is None:
@@ -1901,9 +1935,19 @@ class QgisMapRenderBackend(MapRenderBackend):
             self._native_snapshot_pending = False
             self._set_native_snapshot(self._snapshot)
         generation = self._next_generation()
-        payload = self._bridge.render_sync(
-            self._extent, self._output_size[0], self._output_size[1], self._dpi
-        )
+        try:
+            payload = self._bridge.render_sync(
+                self._extent, self._output_size[0], self._output_size[1], self._dpi
+            )
+        except RuntimeError as exc:
+            if not _is_stale_delta_error(exc):
+                raise
+            # Deferred delta rejection can surface here too (the sync path also
+            # applies stashed snapshots); reship fully and retry once.
+            self._reship_full_snapshot(self._snapshot)
+            payload = self._bridge.render_sync(
+                self._extent, self._output_size[0], self._output_size[1], self._dpi
+            )
         return RenderFrame(
             generation=generation,
             width=int(payload["width"]),
@@ -2202,6 +2246,11 @@ def _geometry_to_wkt(geometry: object) -> str:
 
 
 _QGIS_PROBE: dict[str, str] = {}
+
+
+def _is_stale_delta_error(exc: RuntimeError) -> bool:
+    """True for the bridge's stale feature-delta rejection (#932 recovery path)."""
+    return "feature delta" in str(exc).lower()
 
 
 def qgis_backend_probe() -> tuple[bool, str]:

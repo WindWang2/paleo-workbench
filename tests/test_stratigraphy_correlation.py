@@ -9,7 +9,6 @@ from PySide6.QtCore import Qt
 
 from paleo_workbench.app import PaleoWorkbenchWindow
 from paleo_workbench.project.models import ProjectDocument, ResourceItem
-from paleo_workbench.ui.app_shell import PAGE_INDEX_STRATIGRAPHY
 from paleo_workbench.ui.pages.stratigraphy_correlation_page import StratigraphyCorrelationPage
 from paleo_workbench.workflow.stratigraphy_correlation import (
     list_well_log_resources,
@@ -28,12 +27,12 @@ def _wait_section(qtbot, page, *, wells: int | None = None) -> None:
     qtbot.waitUntil(_ready, timeout=10_000)
 
 
-def test_app_shell_page_five_is_stratigraphy_correlation(qtbot):
+def test_app_shell_well_hub_hosts_stratigraphy_correlation(qtbot):
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
-    page = window.app_shell.page_stack.widget(PAGE_INDEX_STRATIGRAPHY)
+    page = window.app_shell.stratigraphy_page
     assert isinstance(page, StratigraphyCorrelationPage)
-    assert window.app_shell.icon_rail.nav_buttons[PAGE_INDEX_STRATIGRAPHY].text() == "地层对比"
+    assert window.app_shell.hub_well.page("stratigraphy") is page
 
 
 def test_list_well_log_resources_sorted():

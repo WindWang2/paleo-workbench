@@ -140,6 +140,16 @@ class VisualizationPage(QWidget):
         )
         outer.setSpacing(tokens.SPACE_4)
 
+        # UI v2: this page is a temporary validation surface; its permanent
+        # home will be inside the 数据/井/地震/编图 hubs.
+        temp_banner = QLabel("临时页面 —— 用于验证可视化能力，正式版将并入数据 / 井 / 地震 / 编图各页")
+        temp_banner.setObjectName("TemporaryPageBanner")
+        temp_banner.setStyleSheet(
+            f"color: {tokens.WARNING}; background: {tokens.BG_SEARCH};"
+            f" border: 1px solid {tokens.BORDER}; border-radius: 4px; padding: 4px 10px;"
+        )
+        outer.addWidget(temp_banner)
+
         # Top bar with asset selector dropdown + Coordinate System Toggle
         top_bar = QHBoxLayout()
         top_bar.setSpacing(tokens.SPACE_2)

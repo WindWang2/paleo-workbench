@@ -19,9 +19,8 @@ from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.ui.app_shell import AppShell
 from paleo_workbench.ui.navigation import (
     PAGE_INDEX_DATA,
-    PAGE_INDEX_GEOMODEL,
     PAGE_INDEX_MAPPING,
-    PAGE_INDEX_WELL_LOG,
+    PAGE_INDEX_SEISMIC,
 )
 
 
@@ -33,15 +32,11 @@ def shell(qtbot):
 
 
 def test_production_app_shell_builds_every_page(shell):
-    """The real shell constructs the full page stack."""
-    for index, expected_type_name in (
-        (PAGE_INDEX_DATA, "DataPage"),
-        (PAGE_INDEX_MAPPING, "MappingPage"),
-        (PAGE_INDEX_GEOMODEL, "GeologicalModeling3DPage"),
-    ):
-        page = shell.page_stack.widget(index)
-        assert page is not None
-        assert type(page).__name__ == expected_type_name
+    """The real shell constructs the full page set (hub model, UI v2)."""
+    assert type(shell.data_page).__name__ == "DataPage"
+    assert type(shell.mapping_page).__name__ == "MappingPage"
+    assert type(shell.geomodel_page).__name__ == "GeologicalModeling3DPage"
+    assert shell.page_stack.count() == 5
 
 
 def test_production_page_switch_drives_real_pages(shell):
@@ -49,6 +44,9 @@ def test_production_page_switch_drives_real_pages(shell):
     assert shell.page_stack.currentIndex() == PAGE_INDEX_DATA
     shell._switch_page(PAGE_INDEX_MAPPING)
     assert shell.page_stack.currentIndex() == PAGE_INDEX_MAPPING
+    shell.navigate_to(PAGE_INDEX_SEISMIC, "geomodel")
+    assert shell.page_stack.currentIndex() == PAGE_INDEX_SEISMIC
+    assert shell.hub_seismic.current_key() == "geomodel"
 
 
 def test_production_data_page_update_state_roundtrip(shell, tmp_path):

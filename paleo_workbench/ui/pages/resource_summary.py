@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QWidget
 
 from paleo_workbench.ui import tokens
 from paleo_workbench.workflow.service import REQUIRED_RESOURCE_TYPES
@@ -13,26 +13,28 @@ class ResourceSummaryBar(QFrame):
         super().__init__(parent)
         self.setObjectName("PanelCard")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(tokens.SPACE_4, tokens.SPACE_3, tokens.SPACE_4, tokens.SPACE_3)
-        layout.setSpacing(tokens.SPACE_4)
+        # Compact single-line strip (UI v2): the two-row card cost a full
+        # toolbar's worth of vertical space on the data page.
+        layout.setContentsMargins(tokens.SPACE_3, tokens.SPACE_1, tokens.SPACE_3, tokens.SPACE_1)
+        layout.setSpacing(tokens.SPACE_3)
         self.name_labels: dict[str, QLabel] = {}
         self.count_labels: dict[str, QLabel] = {}
         self.type_labels = self.count_labels
         for rtype in RESOURCE_TYPES:
             group = QWidget()
-            group_layout = QVBoxLayout(group)
+            group_layout = QHBoxLayout(group)
             group_layout.setContentsMargins(0, 0, 0, 0)
             group_layout.setSpacing(tokens.SPACE_1)
 
             name_label = QLabel(tokens.RESOURCE_LABELS[rtype])
             name_label.setStyleSheet(
-                f"color: {tokens.TEXT_PRIMARY}; font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 500;"
+                f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;"
             )
             group_layout.addWidget(name_label)
 
             count_label = QLabel(f"0{tokens.RESOURCE_UNITS.get(rtype, '')}")
             count_label.setStyleSheet(
-                f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;"
+                f"color: {tokens.TEXT_PRIMARY}; font-size: 12px; font-weight: 500;"
             )
             group_layout.addWidget(count_label)
 

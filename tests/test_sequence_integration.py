@@ -7,7 +7,7 @@ from paleo_workbench.workflow.service import create_compilation_run
 def test_app_shell_page_four_is_sequence_framework_page(qtbot):
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
-    page = window.app_shell.page_stack.widget(4)
+    page = window.app_shell.sequence_page
     assert isinstance(page, SequenceFrameworkPage)
 
 
@@ -19,7 +19,7 @@ def test_sequence_framework_page_receives_project_stratigraphy(qtbot):
 
     window = PaleoWorkbenchWindow(project=project)
     qtbot.addWidget(window)
-    page = window.app_shell.page_stack.widget(4)
+    page = window.app_shell.sequence_page
 
     assert page.target_panel.current_target() == "ZJ2"
     assert page.boundary_table.table.rowCount() == 2

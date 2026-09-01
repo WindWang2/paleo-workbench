@@ -1,0 +1,1724 @@
+<!DOCTYPE html>
+<!-- PROTOTYPE — UI v2 Ribbon 重设计，一次性原型，不进生产代码 -->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UI v2 Ribbon 原型 · paleo_workbench</title>
+<style>
+/* ===== Stratum 令牌（亮主题） ===== */
+:root{
+  --primary:#0c3f3b; --accent:#c2410c; --on-primary:#fff; --primary-hover:#09302c;
+  --success:#15803d; --warning:#b45309; --error:#d31f1f; --teal:#0f766e;
+  --bg-body:#f6f3ec; --bg-header:#fbf8f1; --bg-sidebar:#fffdf9; --bg-search:#efe9db;
+  --bg-nav-active:#eae2cd; --bg-menu-hover:#f1ebdc; --bg-selection:#f3e3d3;
+  --rail:#132a28; --rail-hover:#1b3632; --rail-active:#24514b; --text-rail:#b9cec8; --text-rail-active:#f2f7f5;
+  --text-primary:#141210; --text-secondary:#514c45;
+  --border:#e2dac8; --border-strong:#cec4ac; --border-light:#eee8d9;
+  --canvas:#131d1b; --on-canvas:#eef4f1;
+  --st1:#0c3f3b; --st2:#c2410c; --st3:#4a5899; --st4:#4d6b2f; --st5:#a44a3f; --st6:#5d564b;
+  --menu-h:40px; --status-h:26px; --rail-w:64px; --dockrail-w:36px; --ctl-h:30px;
+  --rbtn:4px; --rcard:8px; --pad-page:16px; --pad-panel:12px;
+  --font:Inter,"SF Pro Text","PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:"SF Mono",Consolas,"Courier New",monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--font);font-size:13px;color:var(--text-primary);background:var(--bg-body);overflow:hidden}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:5px;border:2px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-track{background:transparent}
+svg.ic{display:inline-block;width:18px;height:18px;flex:none;vertical-align:-4px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.app{display:flex;height:100vh;min-width:1080px}
+.app-b{flex-direction:row}
+.app-a,.app-c{flex-direction:column}
+.muted{color:var(--text-secondary)}
+.grow{flex:1;min-width:0}
+/* ===== 通用组件 ===== */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:var(--ctl-h);padding:0 12px;border:1px solid var(--border-strong);border-radius:var(--rbtn);background:var(--bg-header);color:var(--text-primary);font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap;user-select:none}
+.btn:hover{background:var(--bg-menu-hover)}
+.btn:active{transform:translateY(1px)}
+.btn .ic{width:15px;height:15px}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:var(--on-primary)}
+.btn.primary:hover{background:var(--primary-hover)}
+.btn.danger{color:var(--error);border-color:#e2b4b4}
+.btn.sm{height:24px;font-size:12px;padding:0 8px}
+.btn.tgl.on{background:var(--bg-selection);border-color:var(--accent);color:var(--accent);font-weight:600}
+.ibtn{width:26px;height:26px;padding:0;justify-content:center}
+.panel{display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:var(--rcard);overflow:hidden}
+.panel-h{height:34px;flex:none;display:flex;align-items:center;gap:7px;padding:0 10px;border-bottom:1px solid var(--border-light);font-size:13px;font-weight:600}
+.panel-h .ic{width:15px;height:15px;color:var(--primary)}
+.panel-b{flex:1;overflow:auto;padding:var(--pad-panel);min-height:0}
+.panel-b.tight{padding:6px}
+.flic{margin-left:auto;font-weight:400;color:var(--text-secondary);cursor:pointer;font-size:12.5px;padding:2px 4px;border-radius:4px}
+.flic:hover{background:var(--bg-menu-hover);color:var(--accent)}
+.card{background:var(--bg-sidebar);border:1px solid var(--border);border-radius:var(--rcard);padding:var(--pad-panel);min-width:0}
+.card h4{display:flex;align-items:center;gap:7px;font-size:13.5px;margin-bottom:10px}
+.card h4 .ic{width:16px;height:16px;color:var(--primary)}
+.ptoolbar{display:flex;gap:6px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--border-light);flex:none;background:var(--bg-header)}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);padding:0 6px;flex:none;background:var(--bg-header);overflow-x:auto}
+.tab{height:29px;padding:0 12px;display:flex;align-items:center;font-size:12.5px;border-bottom:2px solid transparent;color:var(--text-secondary);cursor:pointer;white-space:nowrap}
+.tab:hover{color:var(--text-primary)}
+.tab.on{color:var(--primary);border-bottom-color:var(--accent);font-weight:600}
+.pane{display:none}
+.pane.on{display:block}
+.chip{display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 7px;border-radius:9px;font-size:11px;background:var(--bg-nav-active);color:var(--text-secondary);white-space:nowrap;flex:none}
+.chip.ok{background:#e2f0e4;color:var(--success)}
+.chip.warn{background:#f8ecd9;color:var(--warning)}
+.chip.err{background:#fae2e2;color:var(--error)}
+.chip.run{background:#e5e8f4;color:var(--st3)}
+.chip.info{background:#e2efee;color:var(--teal)}
+.tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.tbl th{position:sticky;top:0;z-index:1;background:var(--bg-search);text-align:left;font-weight:600;padding:5px 8px;border-bottom:1px solid var(--border-strong);white-space:nowrap}
+.tbl td{padding:5px 8px;border-bottom:1px solid var(--border-light);white-space:nowrap}
+.tbl tbody tr:hover td{background:var(--bg-menu-hover)}
+.tbl tbody tr.sel td{background:var(--bg-selection)}
+.kv{display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-bottom:1px dashed var(--border-light);font-size:12.5px}
+.kv span{color:var(--text-secondary)}
+.kv b{font-weight:600;text-align:right}
+.ck{width:14px;height:14px;border:1.5px solid var(--border-strong);border-radius:3px;display:inline-flex;align-items:center;justify-content:center;background:#fff;flex:none;cursor:pointer}
+.ck.on::after{content:"✓";font-size:10px;line-height:1;color:var(--primary);font-weight:700}
+.tnode .tkids{display:none;padding-left:18px}
+.tnode.open .tkids{display:block}
+.trow{display:flex;align-items:center;gap:6px;height:26px;padding:0 6px;border-radius:4px;cursor:pointer;white-space:nowrap;font-size:12.5px}
+.trow:hover{background:var(--bg-menu-hover)}
+.trow .tw{width:12px;flex:none;color:var(--text-secondary);font-size:9px;transition:transform .12s}
+.tnode.open>.trow .tw{transform:rotate(90deg)}
+.trow .cnt{color:var(--text-secondary);font-size:11px}
+.trow.on{background:var(--bg-nav-active);font-weight:600}
+.pg{height:6px;background:var(--bg-search);border-radius:3px;overflow:hidden;flex:1}
+.pg i{display:block;height:100%;background:var(--teal)}
+.sw{width:34px;height:18px;border-radius:9px;background:var(--border-strong);position:relative;cursor:pointer;transition:.15s;flex:none;display:inline-block}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;transition:.15s;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.sw.on{background:var(--primary)}
+.sw.on::after{left:18px}
+.seg{display:inline-flex;background:var(--bg-search);border:1px solid var(--border-strong);border-radius:6px;padding:2px;gap:2px}
+.seg i{font-style:normal;padding:3px 14px;border-radius:4px;font-size:12.5px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:5px}
+.seg i.on{background:var(--bg-header);color:var(--primary);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.seg.big i{padding:7px 22px;font-size:13px}
+select,input[type=text]{height:var(--ctl-h);border:1px solid var(--border-strong);border-radius:var(--rbtn);background:#fff;font:inherit;font-size:12.5px;padding:0 8px;color:var(--text-primary);outline:none}
+select:focus,input[type=text]:focus{border-color:var(--primary)}
+input[type=range]{accent-color:var(--primary);cursor:pointer}
+.ebar{display:grid;grid-template-columns:56px 1fr 42px;align-items:center;gap:8px;padding:3px 0;font-size:12.5px}
+.ebar .pg{background:var(--bg-search)}
+.ph-box{border:1.5px dashed var(--border-strong);border-radius:6px;min-height:150px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--text-secondary);background:var(--bg-header);text-align:center;padding:10px}
+.pdf-page{width:76%;margin:10px auto;background:#fff;border:1px solid var(--border);box-shadow:0 2px 8px rgba(0,0,0,.08);padding:18px 16px;min-height:170px;color:var(--text-secondary);font-size:12px}
+.tl{height:6px;background:var(--bg-search);border-radius:3px;margin:6px 0}
+.tl.h{width:55%}
+.logpre{font-family:var(--mono);font-size:11px;line-height:1.7;color:#d8e5e1;background:var(--canvas);border-radius:6px;padding:10px;white-space:pre-wrap}
+.banner{display:flex;align-items:center;gap:10px;background:#f8ecd9;border:1px solid #ecd9b7;color:var(--warning);border-radius:var(--rcard);padding:9px 14px;font-size:13px}
+/* ===== 内容布局 ===== */
+.content{flex:1;min-height:0;overflow:auto;position:relative;padding:var(--pad-page)}
+.absfill{position:absolute;inset:var(--pad-page);display:grid;gap:12px;min-height:0}
+.lay-tri{grid-template-columns:250px minmax(0,1fr) 310px}
+.lay-grid4{grid-template-columns:225px minmax(360px,1.5fr) 330px 295px}
+.lay-bi{grid-template-columns:minmax(0,1fr) 330px}
+/* ===== 概述页 ===== */
+.flowwrap{display:grid;gap:12px;align-content:start;min-height:100%;
+  grid-template-columns:minmax(0,1.2fr) minmax(0,1.2fr) 340px;
+  grid-template-areas:"wf wf wf" "mp mp st" "mp mp it" "fl fl ac"}
+.a-wf{grid-area:wf}.a-map{grid-area:mp}.a-start{grid-area:st}.a-integ{grid-area:it}.a-flow{grid-area:fl}.a-act{grid-area:ac}
+.a-map{padding:0;display:flex;flex-direction:column;overflow:hidden}
+.a-map .map-head{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border-light);font-weight:600}
+.wf{display:flex;align-items:center}
+.wf-step{display:flex;align-items:center;gap:9px}
+.wf-dot{width:27px;height:27px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700;flex:none}
+.wf-name{font-weight:600;font-size:13px;white-space:nowrap}
+.wf-sub{font-size:11px;color:var(--text-secondary);white-space:nowrap}
+.wf-line{height:4px;border-radius:2px;background:var(--bg-search);flex:1;margin:0 12px;position:relative;overflow:hidden;min-width:24px}
+.wf-line i{position:absolute;left:0;top:0;bottom:0;border-radius:2px}
+.bigbtn{display:flex;align-items:center;gap:10px;width:100%;border:1px solid var(--border-strong);background:var(--bg-header);border-radius:6px;padding:9px 12px;cursor:pointer;font:inherit;text-align:left;margin-bottom:8px}
+.bigbtn:hover{background:var(--bg-menu-hover)}
+.bigbtn .ic{width:20px;height:20px;color:var(--primary)}
+.bigbtn.primary{background:var(--primary);border-color:var(--primary);color:var(--on-primary)}
+.bigbtn.primary .ic{color:var(--on-primary)}
+.bigbtn b{font-size:13px;display:block}
+.bigbtn small{font-size:11px;opacity:.75}
+.integ-row{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12.5px}
+.integ-row .ic{width:15px;height:15px;flex:none}
+.act-row{display:flex;gap:8px;padding:5px 0;border-bottom:1px dashed var(--border-light);font-size:12.5px;align-items:baseline}
+.act-row time{color:var(--text-secondary);font-size:11px;flex:none;width:44px}
+.map-head-t{font-weight:600}
+/* ===== 地图画布通用 ===== */
+.coord-zone{position:relative;flex:1;min-height:0;background:var(--canvas);overflow:hidden}
+.mapsvg{width:100%;height:100%;display:block}
+.coord-strip{height:24px;flex:none;display:flex;align-items:center;gap:14px;padding:0 10px;background:var(--bg-header);border-top:1px solid var(--border-light);font-size:11px;color:var(--text-secondary);font-family:var(--mono)}
+.ovl{position:absolute;background:rgba(251,248,241,.94);color:var(--text-primary);border:1px solid #46615c;border-radius:4px;padding:6px 10px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.ovl.title{top:10px;left:50%;transform:translateX(-50%);font-weight:600;font-size:14px;white-space:nowrap}
+.ovl.north{top:12px;right:14px;padding:4px 6px}
+.ovl.scale{bottom:12px;left:14px;padding:6px 8px}
+.ovl.legend{bottom:12px;right:14px;max-width:240px}
+.leg-row{display:flex;align-items:center;gap:6px;font-size:11.5px;padding:1.5px 0}
+.lg-sw{width:13px;height:13px;border-radius:2px;border:1px solid rgba(0,0,0,.35);flex:none}
+.sbar{display:flex;height:9px;width:168px;border:1px solid #333;margin-bottom:2px}
+.sbar i{flex:1}
+.sbar i:nth-child(odd){background:#141210}
+.sbar i:nth-child(even){background:#fbf8f1}
+.sbar-l{display:flex;justify-content:space-between;font-size:10px;font-family:var(--mono)}
+/* ===== 编图工作台 ===== */
+.mapwork{position:absolute;inset:var(--pad-page);display:flex;flex-direction:column;min-height:0}
+.map-cmdbar{display:flex;align-items:stretch;background:var(--bg-header);border:1px solid var(--border);border-bottom:none;border-radius:6px 6px 0 0;overflow-x:auto;flex:none}
+.mc-group{display:flex;align-items:center;gap:2px;padding:4px 8px;border-right:1px solid var(--border);flex:none}
+.mc-btn{display:flex;align-items:center;gap:5px;height:28px;padding:0 8px;border-radius:4px;font-size:12px;white-space:nowrap;cursor:pointer}
+.mc-btn:hover{background:var(--bg-menu-hover)}
+.mc-btn.on{background:var(--bg-nav-active);color:var(--primary);font-weight:600}
+.mc-btn .ic{width:15px;height:15px}
+.mc-name{font-size:10.5px;color:var(--text-secondary);align-self:center;padding:0 2px 0 6px;writing-mode:vertical-lr;letter-spacing:1px}
+.map-mid{flex:1;display:flex;min-height:0;border:1px solid var(--border)}
+.map-center-col{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+.dockrail{width:var(--dockrail-w);flex:none;background:var(--bg-sidebar);display:flex;flex-direction:column;align-items:center;padding-top:8px;gap:6px;border-right:1px solid var(--border)}
+.dockrail.rr{border-right:none;border-left:1px solid var(--border)}
+.drbtn{width:27px;height:27px;border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-secondary);border:1px solid transparent}
+.drbtn .ic{width:16px;height:16px}
+.drbtn:hover{background:var(--bg-menu-hover)}
+.drbtn.on{background:var(--bg-nav-active);color:var(--primary);border-color:var(--border-strong)}
+.dock-col{width:255px;flex:none;display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--border);background:var(--bg-sidebar)}
+.dock-col.rr{border-right:none;border-left:none}
+.dock-col .panel{border:none;border-bottom:1px solid var(--border);border-radius:0;flex:1;min-height:110px}
+.dock-col .panel:last-child{border-bottom:none}
+.mstatus{height:var(--status-h);flex:none;display:flex;align-items:center;gap:16px;padding:0 12px;background:var(--bg-header);border:1px solid var(--border);border-top:none;border-radius:0 0 6px 6px;font-size:11px;color:var(--text-secondary);white-space:nowrap;overflow:hidden}
+.mstatus b{color:var(--text-primary);font-weight:600}
+.wb{flex:none;border-top:1px solid var(--border);background:var(--bg-header)}
+.wb-bar{display:flex;align-items:center;height:32px;padding:0 8px;gap:2px;border-bottom:1px solid var(--border-light)}
+.wb-tab{height:24px;padding:0 12px;font-size:12px;display:flex;align-items:center;border-radius:4px;cursor:pointer;gap:6px}
+.wb-tab:hover{background:var(--bg-menu-hover)}
+.wb-tab.on{background:var(--bg-nav-active);font-weight:600;color:var(--primary)}
+.wb-pane{height:188px;overflow:auto;padding:8px 12px;background:var(--bg-sidebar)}
+.closable.closed .cbody{display:none}
+/* ===== 井 / 地震 ===== */
+.canvas-panel{display:flex;flex-direction:column;min-height:0;min-width:0}
+.canvas-body{flex:1;min-height:0;position:relative;display:flex}
+.canvas-body svg,.canvas-body canvas{flex:1;min-width:0}
+canvas.seis{width:100%;height:100%;display:block}
+.b2d{flex:none;border-top:1px solid var(--border-strong);background:var(--bg-sidebar)}
+.b2d-h{height:30px;display:flex;align-items:center;gap:8px;padding:0 12px;font-weight:600;font-size:12.5px;cursor:pointer}
+.b2d-body{display:flex;gap:12px;height:190px;padding:0 12px 12px}
+.b2d.closed .b2d-body{display:none}
+.grad-bar{width:18px;flex:none;border-radius:3px;background:linear-gradient(180deg,#c2410c,#e9e2d0 50%,#14454f);border:1px solid var(--border-strong)}
+.joint3d{position:absolute;inset:var(--pad-page);display:flex;flex-direction:column;min-height:0}
+.joint3d .lay-tri{position:static;flex:1;min-height:0;display:grid}
+/* ===== 壳层 A ===== */
+.topbar{height:var(--menu-h);flex:none;display:flex;align-items:center;gap:4px;background:var(--bg-header);border-bottom:1px solid var(--border-strong);padding:0 12px}
+.brand{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;padding-right:14px;border-right:1px solid var(--border);margin-right:8px;color:var(--primary);white-space:nowrap}
+.brand .ic{width:20px;height:20px}
+.brand span{font-weight:500;font-size:12px;color:var(--text-secondary)}
+.ribtabs{display:flex;gap:2px;height:100%;flex:none}
+.ribtab{display:flex;align-items:center;padding:0 18px;font-size:13px;cursor:pointer;border-bottom:2px solid transparent;color:var(--text-secondary);gap:6px}
+.ribtab .ic{width:15px;height:15px}
+.ribtab:hover{background:var(--bg-menu-hover)}
+.ribtab.on{color:var(--primary);font-weight:600;border-bottom-color:var(--accent)}
+.gsearch{display:flex;align-items:center;gap:8px;background:var(--bg-search);border:1px solid var(--border);border-radius:6px;padding:0 10px;height:30px;color:var(--text-secondary);flex:none}
+.gsearch .ic{width:14px;height:14px}
+.gsearch input{border:none;outline:none;background:transparent;font:inherit;font-size:12.5px;width:250px;color:var(--text-primary)}
+.ribbon{height:92px;flex:none;display:flex;align-items:stretch;background:var(--bg-header);border-bottom:1px solid var(--border-strong);overflow-x:auto;overflow-y:hidden;padding:0 6px}
+.rb-group{display:flex;flex-direction:column;padding:6px 12px 4px;border-right:1px solid var(--border);flex:none}
+.rb-group:last-child{border-right:none}
+.rb-items{display:flex;gap:6px;flex:1;align-items:stretch}
+.rb-group.sm .rb-items{display:grid;grid-template-columns:repeat(2,auto);gap:3px 10px;align-content:center}
+.rb-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-width:60px;padding:2px 8px;border-radius:var(--rbtn);font-size:12px;cursor:pointer;user-select:none;white-space:nowrap;text-align:center}
+.rb-btn:hover{background:var(--bg-menu-hover)}
+.rb-btn .ic{width:22px;height:22px}
+.rb-btn.primary{background:var(--primary);color:var(--on-primary)}
+.rb-btn.primary:hover{background:var(--primary-hover)}
+.rb-btn.tglb.on{background:var(--bg-selection);color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.rb-group.sm .rb-btn{flex-direction:row;min-width:0;padding:2px 6px;font-size:12px;justify-content:flex-start}
+.rb-group.sm .rb-btn .ic{width:15px;height:15px}
+.rb-name{font-size:11px;color:var(--text-secondary);text-align:center;padding-top:4px;white-space:nowrap}
+.rb-subgroup{background:var(--bg-search);border-right:2px solid var(--border-strong);margin-right:2px}
+.rb-btn.subbtn{min-width:88px;font-weight:500}
+.rb-btn.subbtn.on{background:var(--primary);color:var(--on-primary)}
+.subpillbar{height:var(--menu-h);flex:none;display:flex;align-items:center;gap:8px;padding:0 var(--pad-page);background:var(--bg-body);border-bottom:1px solid var(--border)}
+.subpill{height:27px;display:flex;align-items:center;gap:6px;padding:0 15px;border-radius:14px;border:1px solid var(--border-strong);background:var(--bg-header);font-size:12.5px;cursor:pointer}
+.subpill .ic{width:14px;height:14px}
+.subpill:hover{background:var(--bg-menu-hover)}
+.subpill.on{background:var(--primary);color:var(--on-primary);border-color:var(--primary);font-weight:600}
+.subpill-lbl{font-size:11px;color:var(--text-secondary);margin-right:2px}
+/* ===== 壳层 B ===== */
+.rail{width:var(--rail-w);flex:none;background:var(--rail);display:flex;flex-direction:column;align-items:center;padding:10px 0 8px;gap:4px}
+.railbrand{color:var(--text-rail-active);margin-bottom:10px}
+.railbrand .ic{width:24px;height:24px}
+.railbtn{width:52px;height:56px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:var(--text-rail);font-size:11px;border-radius:6px;cursor:pointer;flex:none}
+.railbtn .ic{width:21px;height:21px}
+.railbtn:hover{background:var(--rail-hover)}
+.railbtn.on{background:var(--rail-active);color:var(--text-rail-active)}
+.vtx{writing-mode:vertical-lr;letter-spacing:3px;line-height:1}
+.railspace{flex:1}
+.b-main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;position:relative}
+.cmdrow{height:var(--menu-h);flex:none;display:flex;align-items:center;gap:8px;background:var(--bg-header);border-bottom:1px solid var(--border-strong);padding:0 12px}
+.pmenu{position:absolute;top:46px;left:12px;background:var(--bg-sidebar);border:1px solid var(--border-strong);border-radius:6px;box-shadow:0 10px 28px rgba(20,18,16,.16);padding:5px;display:none;z-index:600;min-width:190px}
+.pmenu.open{display:block}
+.pmenu>div{padding:7px 12px;border-radius:4px;font-size:13px;cursor:pointer;display:flex;gap:9px;align-items:center}
+.pmenu>div:hover{background:var(--bg-menu-hover)}
+.pmenu>div .ic{width:15px;height:15px;color:var(--primary)}
+/* ===== 壳层 C ===== */
+.ctabs-row{height:44px;flex:none;background:var(--primary);display:flex;align-items:flex-end;padding:0 12px;gap:6px}
+.cbrand{display:flex;align-items:center;gap:8px;color:var(--text-rail-active);font-weight:700;font-size:13.5px;padding:0 10px 10px 0;white-space:nowrap}
+.cbrand .ic{width:19px;height:19px}
+.ctabs{display:flex;gap:2px;flex:1;min-width:0;overflow:hidden}
+.ctab{height:37px;display:flex;align-items:center;gap:8px;padding:0 14px;border-radius:8px 8px 0 0;color:var(--text-rail);font-size:13px;cursor:pointer;white-space:nowrap}
+.ctab .ic{width:15px;height:15px}
+.ctab:hover{background:var(--rail-hover)}
+.ctab.on{background:var(--bg-header);color:var(--text-primary);font-weight:600}
+.ctab .x{opacity:.45;font-size:11px;padding:2px 3px;border-radius:3px}
+.ctab .x:hover{opacity:1;background:rgba(0,0,0,.15)}
+.csearch{display:flex;align-items:center;gap:7px;background:var(--rail-active);border-radius:6px;height:29px;padding:0 10px;color:var(--text-rail);margin-bottom:7px;flex:none}
+.csearch .ic{width:13px;height:13px}
+.csearch input{border:none;outline:none;background:transparent;color:var(--text-rail-active);font:inherit;font-size:12px;width:150px}
+.ribbon.c{border-bottom-width:2px;background:var(--bg-header)}
+.ribbon.c .rb-group{border-right:2px solid var(--border-strong);padding:7px 16px 5px}
+.ribbon.c .rb-name{background:var(--bg-nav-active);border-radius:3px;padding:1px 10px;margin:3px auto 0;font-weight:600;color:var(--text-primary)}
+.c-work{flex:1;display:flex;min-height:0;min-width:0}
+.c-midcol{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+.c-center{flex:1;display:flex;flex-direction:column;min-height:0;min-width:0;overflow:auto;padding:var(--pad-page)}
+.c-subseg{padding:0 0 12px;display:flex;align-items:center;gap:12px}
+.c-subseg .lbl{font-size:11px;color:var(--text-secondary)}
+.dock{flex:none;display:flex;flex-direction:column;min-height:0;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:var(--rcard);overflow:hidden;width:272px}
+.dock-col-c{display:flex;flex-direction:column;gap:12px;width:272px;flex:none;min-height:0;overflow:hidden}
+.dock-col-c .dock{flex:1;min-height:130px}
+.dock-l{border-right:none;border-top-left-radius:0;border-bottom-left-radius:0;border-left:none}
+.dock-bottom{width:auto;height:212px;border-radius:var(--rcard) var(--rcard) 0 0;border-bottom:none;margin-top:12px}
+.statusbar{height:var(--status-h);flex:none;display:flex;align-items:center;gap:18px;padding:0 12px;background:var(--bg-header);border-top:1px solid var(--border);font-size:11px;color:var(--text-secondary);white-space:nowrap;overflow:hidden}
+.statusbar b{color:var(--text-primary)}
+.statusbar .sb-r{margin-left:auto;display:flex;gap:18px}
+/* ===== 可视化页 ===== */
+.viz-tabs .tab{padding:0 16px}
+/* ===== 密度 ===== */
+.app.compact{font-size:12.5px}
+.app.compact .panel-b{padding:8px}
+.app.compact .rb-btn .ic{width:19px;height:19px}
+.app.compact .ribbon{height:84px}
+.app.compact .dock{width:240px}
+/* ===== 变体切换悬浮条（非设计的一部分） ===== */
+#variantBar{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:9999;display:flex;align-items:stretch;background:#101014;border:2px dashed #ffb020;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.5);font-family:var(--mono);overflow:hidden}
+#variantBar .vtag{background:#ffb020;color:#101014;font-weight:700;font-size:10px;padding:0 9px;display:flex;align-items:center;letter-spacing:1px}
+#variantBar button{all:unset;cursor:pointer;color:#ffd166;font-size:15px;padding:9px 15px;line-height:1}
+#variantBar button:hover{background:#26262e}
+#vLabel{color:#f5f2e8;font-size:12px;padding:9px 12px;min-width:300px;text-align:center;letter-spacing:.5px;align-self:center}
+#vHint{color:#8a8578;font-size:10px;padding:9px 10px 9px 0;align-self:center}
+#toast{position:fixed;right:18px;bottom:72px;z-index:9998;background:#141210;color:#f5f2e8;padding:9px 14px;border-radius:6px;border-left:3px solid var(--accent);font-size:12.5px;opacity:0;transform:translateY(8px);transition:.18s;pointer-events:none;box-shadow:0 4px 16px rgba(0,0,0,.3);max-width:360px}
+#toast.show{opacity:1;transform:none}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="variantBar">
+  <span class="vtag">PROTOTYPE</span>
+  <button data-act="variant" data-dir="-1" title="上一个变体（←）">◀</button>
+  <span id="vLabel">变体 A / 3</span>
+  <button data-act="variant" data-dir="1" title="下一个变体（→）">▶</button>
+  <span id="vHint">←/→ 切换 · ?variant=A|B|C</span>
+</div>
+<script>
+'use strict';
+/* ================= 工具 ================= */
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function mulberry32(seed){var t=seed>>>0;return function(){t+=0x6D2B79F5;var r=Math.imul(t^t>>>15,1|t);r^=r+Math.imul(r^r>>>7,61|r);return((r^r>>>14)>>>0)/4294967296;};}
+function mix(a,b,t){return [Math.round(a[0]+(b[0]-a[0])*t),Math.round(a[1]+(b[1]-a[1])*t),Math.round(a[2]+(b[2]-a[2])*t)];}
+var toastTimer=null;
+function toast(msg){
+  var t=document.getElementById('toast');
+  if(!t){t=document.createElement('div');t.id='toast';document.body.appendChild(t);}
+  t.textContent=msg;t.classList.add('show');
+  clearTimeout(toastTimer);toastTimer=setTimeout(function(){t.classList.remove('show');},1900);
+}
+function fmtLL(fx,fy){
+  var lon=108.4+fx*1.1, lat=37.1+(1-fy)*0.8;
+  function dms(v){var d=Math.floor(v),m=Math.floor((v-d)*60),s=Math.round(((v-d)*60-m)*60);return d+'\u00b0'+String(m).padStart(2,'0')+'\u2032'+String(s).padStart(2,'0')+'\u2033';}
+  return dms(lon)+'E '+dms(lat)+'N';
+}
+function fmtMeter(fx,fy){
+  var e=Math.round(36420000+fx*38000), n=Math.round(4106000+(1-fy)*29000);
+  return String(e).replace(/\B(?=(\d{3})+(?!\d))/g,' ')+', '+String(n).replace(/\B(?=(\d{3})+(?!\d))/g,' ')+' m';
+}
+/* ================= 图标（内联 SVG） ================= */
+var ICONS={
+logo:'<path d="M12 2l8 4.5v9L12 20l-8-4.5v-9z"/><path d="M12 7l4 2.2v4.6L12 16l-4-2.2V9.2z"/>',
+db:'<path d="M4 6c0-1.66 3.58-3 8-3s8 1.34 8 3-3.58 3-8 3-8-1.34-8-3z"/><path d="M4 6v12c0 1.66 3.58 3 8 3s8-1.34 8-3V6"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/>',
+well:'<path d="M8 3v18"/><path d="M8 6c9 1.5-1 5.5 8 8"/><path d="M6 6h2M6 12h2M6 18h2"/>',
+wave:'<path d="M2 12c1.5-6 4.5-6 6 0s4.5 6 6 0 4.5-6 6 0"/>',
+map:'<path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/>',
+chart:'<path d="M4 4v16h16"/><path d="M8 16v-5M13 16V8M18 16v-8"/>',
+file:'<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/>',
+folder:'<path d="M3 7l2-2h5l2 2h9v12H3z"/>',
+box:'<path d="M12 3l8 4v10l-8 4-8-4V7z"/><path d="M4 7l8 4 8-4M12 11v10"/>',
+save:'<path d="M5 3h11l3 3v15H5z"/><path d="M8 3v5h7V3M8 21v-7h8v7"/>',
+info:'<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>',
+import:'<path d="M12 3v10"/><path d="M8 9l4 4 4-4"/><path d="M4 17v3h16v-3"/>',
+folderplus:'<path d="M3 7l2-2h5l2 2h9v12H3z"/><path d="M13 12v5M10.5 14.5h5"/>',
+refresh:'<path d="M4 12a8 8 0 0 1 14-5"/><path d="M18 3v4h-4"/><path d="M20 12a8 8 0 0 1-14 5"/><path d="M6 21v-4h4"/>',
+check:'<path d="M4 12l5 5L20 7"/>',
+shield:'<path d="M12 3l7 3v5c0 4.8-3.2 7.9-7 10-3.8-2.1-7-5.2-7-10V6z"/><path d="M9 11.5l2 2 4-4"/>',
+filter:'<path d="M3 5h18l-7 8v5l-4 3v-8z"/>',
+tag:'<path d="M3 3h8l10 10-8 8L3 11z"/><circle cx="7.5" cy="7.5" r="1.3" fill="currentColor" stroke="none"/>',
+remove:'<path d="M3 7l2-2h5l2 2h9v12H3z"/><path d="M10 12h10M17 9l3 3-3 3"/>',
+ext:'<path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M9 6H5v13h13v-4"/>',
+export:'<path d="M12 15V4"/><path d="M8 8l4-4 4 4"/><path d="M4 15v5h16v-5"/>',
+link:'<path d="M9 15l6-6"/><path d="M10 6l1.5-1.5a4 4 0 0 1 6 6L16 12"/><path d="M14 18l-1.5 1.5a4 4 0 0 1-6-6L8 12"/>',
+eye:'<path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/>',
+columns:'<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M9.3 4v16M14.6 4v16"/>',
+trash:'<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 14h10l1-14"/><path d="M10 11v6M14 11v6"/>',
+density:'<path d="M4 6h16M4 12h10M4 18h16"/>',
+play:'<path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke="none"/>',
+flask:'<path d="M10 3h4"/><path d="M10 3v6l-5.5 9A2 2 0 0 0 6.2 21h11.6a2 2 0 0 0 1.7-3L14 9V3"/><path d="M8 15h8"/>',
+send:'<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/>',
+sliders:'<path d="M4 8h16M4 16h16"/><circle cx="15" cy="8" r="2.4"/><circle cx="9" cy="16" r="2.4"/>',
+switch:'<rect x="3" y="8" width="18" height="8" rx="4"/><circle cx="16.5" cy="12" r="2.6" fill="currentColor" stroke="none"/>',
+target:'<circle cx="12" cy="12" r="7"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/>',
+bookmark:'<path d="M7 3h10v18l-5-4-5 4z"/>',
+downlink:'<path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M5 21h14"/>',
+cursor:'<path d="M4 4l7 16 2.5-6.5L20 11z"/>',
+pick:'<path d="M12 2v6M12 16v6M2 12h6M16 12h6"/><circle cx="12" cy="12" r="2"/>',
+polyline:'<path d="M3 18l6-6 4 3 8-9"/><rect x="2" y="16.8" width="2.8" height="2.8"/><rect x="19.2" y="4.2" width="2.8" height="2.8"/>',
+magnet:'<path d="M6 3h4v8a2 2 0 0 0 4 0V3h4v8a6 6 0 0 1-12 0z"/><path d="M6 7h4M14 7h4"/>',
+autolink:'<circle cx="5" cy="17" r="2.5"/><circle cx="19" cy="7" r="2.5"/><path d="M7 15l10-6" stroke-dasharray="3 2.4"/>',
+undo:'<path d="M8 5L3 10l5 5"/><path d="M3 10h11a6 6 0 0 1 0 12h-3"/>',
+redo:'<path d="M16 5l5 5-5 5"/><path d="M21 10H10a6 6 0 0 0 0 12h3"/>',
+split:'<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M12 4v16"/>',
+merge:'<path d="M4 4h6v6H4zM14 4h6v6h-6z"/><path d="M4 14h16v6H4z"/>',
+topology:'<circle cx="6" cy="6" r="2.2"/><circle cx="18" cy="8" r="2.2"/><circle cx="10" cy="18" r="2.2"/><path d="M8 6.6l7.8.8M7 8l2.4 8M16.6 9.8l-5 6.4"/>',
+x:'<path d="M6 6l12 12M18 6L6 18"/>',
+xcircle:'<circle cx="12" cy="12" r="8.5"/><path d="M9 9l6 6M15 9l-6 6"/>',
+pluspt:'<circle cx="14.5" cy="13.5" r="3"/><path d="M6 6h4M8 4v4"/>',
+plusline:'<path d="M5 19L17 7"/><rect x="3" y="17" width="3" height="3"/><rect x="15.5" y="5.5" width="3" height="3"/>',
+pluspoly:'<path d="M12 4l7.5 5.5-2.8 9H7.3l-2.8-9z"/>',
+move:'<path d="M12 2v20M2 12h20"/><path d="M12 2l-2.5 2.5M12 2l2.5 2.5M12 22l-2.5-2.5M12 22l2.5-2.5M2 12l2.5-2.5M2 12l2.5 2.5M22 12l-2.5-2.5M22 12l-2.5 2.5"/>',
+nodeedit:'<path d="M4.5 18L19.5 6"/><rect x="3" y="16.5" width="3" height="3"/><rect x="10.5" y="10.5" width="3" height="3"/><rect x="18" y="4.5" width="3" height="3"/>',
+zoomin:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/><path d="M7.5 10.5h6M10.5 7.5v6"/>',
+zoomout:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/><path d="M7.5 10.5h6"/>',
+full:'<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>',
+chevdl:'<path d="M11 6l-6 6 6 6M18 6l-6 6 6 6"/>',
+chevdr:'<path d="M13 6l6 6-6 6M6 6l6 6-6 6"/>',
+rectselect:'<rect x="4" y="4" width="16" height="16" rx="1" stroke-dasharray="4 3"/>',
+ruler:'<path d="M3 16.5L16.5 3 21 7.5 7.5 21z"/><path d="M8 12l2 2M11 9l2 2M14 6l2 2"/>',
+edit:'<path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19z"/><path d="M14.5 6.5l3 3"/>',
+titlet:'<path d="M5 6V4h14v2M12 4v16M9 20h6"/>',
+legend:'<rect x="4" y="4" width="6" height="6"/><path d="M13 6h7"/><rect x="4" y="13" width="6" height="6"/><path d="M13 15h7"/>',
+scalebar:'<path d="M3 17h18"/><path d="M3 13v4M9 15v2M15 15v2M21 13v4"/>',
+north:'<path d="M12 21V9"/><path d="M12 3l4 6H8z"/>',
+grid:'<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M10 4v16M16 4v16M4 10h16M4 16h16"/>',
+warn:'<path d="M12 3L2 21h20z"/><path d="M12 9v5M12 17.5h.01"/>',
+image:'<rect x="3" y="5" width="18" height="14" rx="1.5"/><circle cx="8.5" cy="10" r="1.5"/><path d="M3 17l5-4 4 3 4-4 5 5"/>',
+cube:'<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12L4 7.5M12 12v9"/>',
+slice:'<rect x="4" y="6" width="16" height="12" stroke-dasharray="4 3"/><path d="M4 12h16"/>',
+well2:'<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8 7.6l8 8.8"/>',
+section:'<rect x="3" y="5" width="18" height="14"/><path d="M8 5v14M13 5v14M18 5v14"/>',
+domain:'<path d="M12 3v18"/><path d="M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3"/>',
+search:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.3 15.3L21 21"/>',
+menu:'<path d="M4 7h16M4 12h16M4 17h16"/>',
+gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/>',
+layers:'<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/><path d="M3 17.5l9 5 9-5"/>',
+table:'<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 9h18M3 14h18M9 4v16M15 4v16"/>',
+clock:'<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/>',
+dot:'<circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/>',
+chev:'<path d="M9 6l6 6-6 6"/>'
+};
+function ic(n){return '<svg class="ic" viewBox="0 0 24 24">'+(ICONS[n]||ICONS.dot)+'</svg>';}
+/* ================= 状态 ================= */
+var VARIANTS={A:'经典 Ribbon（Office 式）',B:'图标导轨 + 上下文 Ribbon',C:'QGIS 工作台式'};
+var PAGES=[
+ {id:'data',label:'数据',icon:'db'},
+ {id:'well',label:'井',icon:'well'},
+ {id:'seis',label:'地震',icon:'wave'},
+ {id:'map',label:'编图',icon:'map'},
+ {id:'viz',label:'可视化',icon:'chart',tag:'临时'}
+];
+var SUBS={
+ data:[{id:'overview',label:'项目概述',icon:'info'},{id:'manage',label:'数据管理',icon:'folder'}],
+ well:[{id:'logpred',label:'测井预测',icon:'well'},{id:'seq',label:'层序格架',icon:'layers'},{id:'corr',label:'地层对比',icon:'polyline'}],
+ seis:[{id:'pred',label:'地震预测',icon:'wave'},{id:'joint3d',label:'井震联合3D',icon:'cube'}],
+ map:[{id:'canvas',label:'编图画布',icon:'map'},{id:'prep',label:'数据制备',icon:'flask'},{id:'review',label:'成图审核',icon:'check'}],
+ viz:[]
+};
+function subIcon(page,id){
+  var arr=SUBS[page]||[];
+  for(var i=0;i<arr.length;i++){if(arr[i].id===id)return arr[i].icon||'dot';}
+  return 'dot';
+}
+var state={variant:'A',page:'data',sub:'overview',dense:false};
+var dockState={};
+function dockKey(){return state.page+'/'+(state.sub||'-');}
+/* ================= 假数据 ================= */
+var PROJ={name:'鄂尔多斯盆地 H2 区块 · 岩相古地理重建',wells:24,vols:2,logs:186,horizons:7};
+var WELLS=[
+ {n:'W3',x:.18,y:.42,s:'done'},{n:'W8',x:.27,y:.30,s:'done'},{n:'W12',x:.35,y:.55,s:'done'},{n:'W15',x:.44,y:.38,s:'done'},
+ {n:'W20',x:.50,y:.62,s:'run'},{n:'W22',x:.57,y:.30,s:'done'},{n:'W28',x:.63,y:.48,s:'done'},{n:'W31',x:.70,y:.62,s:'todo'},
+ {n:'W33',x:.76,y:.40,s:'todo'},{n:'W36',x:.84,y:.55,s:'todo'},{n:'W41',x:.40,y:.72,s:'done'},{n:'W45',x:.66,y:.72,s:'run'}
+];
+var FACIES=[
+ {n:'滨浅湖砂坝',c:'#c2410c'},{n:'浅湖泥',c:'#4a5899'},{n:'滩砂',c:'#4d6b2f'},{n:'混积坪',c:'#5d564b'}
+];
+var ASSETS=[
+ ['工区三维叠前地震体.sgy','地震','预测输入','ok','12.6 GB','08-28'],
+ ['W28_测井曲线.las','测井','预测输入 · 已校验','ok','4.2 MB','08-30'],
+ ['H2-Ⅱ层位解释.xml','层位','格架','ok','86 KB','08-29'],
+ ['单因素_砂地比_v2.tif','栅格','制备输出','warn','86 MB','08-31'],
+ ['W31_测井曲线.las','测井','预测输入','err','3.8 MB · 缺 DEN','08-25'],
+ ['野外剖面照片_09.pdf','文档','参考','ok','18 MB','08-12']
+];
+var LOG_HEADERS=[
+ {n:'GR',u:'API',c:'#0f766e'},{n:'SP',u:'mV',c:'#4a5899'},{n:'AC',u:'μs/ft',c:'#c2410c'},{n:'RT',u:'Ω·m',c:'#a44a3f'}
+];
+var CORR_WELLS=['W8','W12','W22','W28','W36'];
+var CORR_TOPS=[[64,132,205,268,330],[70,140,214,276,338],[60,128,198,262,326],[74,144,218,282,344],[66,136,208,272,334]];
+var CORR_NAMES=['H2-Ⅰ顶','H2-Ⅱ顶','H2-Ⅲ顶','H2-Ⅳ顶','H2-Ⅴ顶'];
+var STC=['#0c3f3b','#c2410c','#4a5899','#4d6b2f','#a44a3f','#5d564b'];
+var SEGV=[{id:'vola',n:'三维区 A · 叠前',x:180,y:120,w:190,h:120},{id:'volb',n:'三维区 B · 叠前',x:420,y:190,w:200,h:130}];
+var ACT=[
+ ['14:32','运行 H2 层测井线上预测（12 口）· 王工'],
+ ['13:50','保存层序方案「H2-SS1」· 李工'],
+ ['11:20','完成地震体重扫描（2 个体）· 系统'],
+ ['昨天 18:05','导入 W28 井 LAS 曲线 5 条 · 李工'],
+ ['昨天 15:40','生成等值线初稿（砂地比）· 王工']
+];
+/* ================= SVG 生成器 ================= */
+function svgNorthSVG(){return '<svg width="26" height="32" viewBox="0 0 26 32"><path d="M13 3l6 22-6-5-6 5z" fill="#c2410c" stroke="#8a3a10" stroke-width="1"/><text x="13" y="31" font-size="10" text-anchor="middle" font-weight="700" fill="#141210">N</text></svg>';}
+function svgScalebarHTML(){return '<div class="ovl scale" data-ly="el-scale"><div class="sbar"><i></i><i></i><i></i><i></i></div><div class="sbar-l"><span>0</span><span>2</span><span>4 km</span></div></div>';}
+function svgLegendHTML(){var rows=FACIES.map(function(f){return '<div class="leg-row"><span class="lg-sw" style="background:'+f.c+'"></span>'+f.n+'</div>';}).join('');
+ rows+='<div class="leg-row"><svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="#e0653a" stroke-width="2" stroke-dasharray="5 3"/></svg>断层</div>';
+ rows+='<div class="leg-row"><svg width="22" height="8"><path d="M0 6Q6 0 11 4T22 2" fill="none" stroke="#9ec3ba" stroke-width="1.2"/></svg>等值线 (m)</div>';
+ rows+='<div class="leg-row"><svg width="14" height="10"><circle cx="7" cy="5" r="3.4" fill="#f2f7f5" stroke="#141210"/></svg>井位</div>';
+ return '<div class="ovl legend" data-ly="el-legend"><b style="font-size:11.5px">图例</b>'+rows+'</div>';}
+function svgSurveyMap(o){
+  o=o||{};var w=o.w||760,h=o.h||420,pad=44;
+  var s='<svg class="mapsvg" viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="xMidYMid meet">';
+  s+='<rect x="0" y="0" width="'+w+'" height="'+h+'" fill="#131d1b"/>';
+  var i,x,y;
+  for(x=1;x<8;x++){var gx=pad+(w-2*pad)*x/8;s+='<line x1="'+gx+'" y1="'+pad+'" x2="'+gx+'" y2="'+(h-pad)+'" stroke="#22352f" stroke-width="0.7"/>';}
+  for(y=1;y<5;y++){var gy=pad+(h-2*pad)*y/5;s+='<line x1="'+pad+'" y1="'+gy+'" x2="'+(w-pad)+'" y2="'+gy+'" stroke="#22352f" stroke-width="0.7"/>';}
+  var bnd=[[70,96],[300,52],[600,76],[688,218],[516,352],[196,336],[84,214]];
+  s+='<polygon points="'+bnd.map(function(p){return p.join(',');}).join(' ')+'" fill="rgba(93,86,75,0.10)" stroke="#8b9a6b" stroke-width="1.6" stroke-dasharray="1 0"/>';
+  var vols=SEGV;
+  for(i=0;i<vols.length;i++){var v=vols[i];
+    s+='<rect x="'+v.x+'" y="'+v.y+'" width="'+v.w+'" height="'+v.h+'" fill="rgba(15,118,110,0.14)" stroke="#2dd4bf" stroke-width="1.3" stroke-dasharray="7 4" rx="2"/>';
+    s+='<text x="'+(v.x+8)+'" y="'+(v.y+16)+'" font-size="11" fill="#7de3d4">'+v.n+'</text>';
+    s+='<text x="'+(v.x+8)+'" y="'+(v.y+v.h-7)+'" font-size="9.5" fill="#5b8f86">Inline 800–2000 · 2 ms 采样</text>';
+  }
+  for(i=0;i<WELLS.length;i++){var wl=WELLS[i];
+    var wx=pad+8+wl.x*(w-2*pad-16), wy=pad+10+wl.y*(h-2*pad-20);
+    var col=wl.s==='done'?'#c2410c':(wl.s==='run'?'#f2b53a':'#5eead4');
+    s+='<circle cx="'+wx+'" cy="'+wy+'" r="4.6" fill="'+col+'" stroke="#131d1b" stroke-width="1.2"/>';
+    s+='<text x="'+(wx+7)+'" y="'+(wy+4)+'" font-size="10" fill="#dce8e2">'+wl.n+'</text>';
+  }
+  var lgx=w-206,lgy=16;
+  s+='<g><rect x="'+lgx+'" y="'+lgy+'" width="192" height="104" rx="5" fill="rgba(251,248,241,0.93)"/>';
+  s+='<text x="'+(lgx+10)+'" y="'+(lgy+17)+'" font-size="11" font-weight="700" fill="#141210">图例</text>';
+  var lgs=[['#c2410c','井位 · 预测完成'],['#f2b53a','井位 · 计算中'],['#5eead4','井位 · 待预测'],['none','三维地震体范围']];
+  for(i=0;i<lgs.length;i++){
+    s+='<circle cx="'+(lgx+16)+'" cy="'+(lgy+33+i*17)+'" r="4" fill="'+(lgs[i][0]==='none'?'rgba(45,212,191,.3)':lgs[i][0])+'" stroke="'+(lgs[i][0]==='none'?'#2dd4bf':'#131d1b')+'" stroke-dasharray="'+(lgs[i][0]==='none'?'3 2':'0')+'"/>';
+    s+='<text x="'+(lgx+28)+'" y="'+(lgy+37+i*17)+'" font-size="10.5" fill="#141210">'+lgs[i][1]+'</text>';
+  }
+  s+='<rect x="'+(lgx+10)+'" y="'+(lgy+87)+'" width="16" height="9" fill="rgba(93,86,75,0.15)" stroke="#8b9a6b"/><text x="'+(lgx+32)+'" y="'+(lgy+95)+'" font-size="10.5" fill="#141210">测区边界</text></g>';
+  s+='<g transform="translate(20,18)">'+svgNorthSVG().replace('<svg','<svg width="26" height="32"')+'</g>';
+  var sbx=20,sby=h-44;
+  s+='<g><rect x="'+sbx+'" y="'+sby+'" width="150" height="30" rx="4" fill="rgba(251,248,241,0.93)"/>';
+  s+='<rect x="'+(sbx+8)+'" y="'+(sby+8)+'" width="134" height="7" fill="none" stroke="#333"/>';
+  s+='<rect x="'+(sbx+8)+'" y="'+(sby+8)+'" width="33" height="7" fill="#141210"/><rect x="'+(sbx+75)+'" y="'+(sby+8)+'" width="33" height="7" fill="#141210"/>';
+  s+='<text x="'+(sbx+8)+'" y="'+(sby+26)+'" font-size="8.5" fill="#141210">0</text><text x="'+(sbx+66)+'" y="'+(sby+26)+'" font-size="8.5" fill="#141210">4</text><text x="'+(sbx+116)+'" y="'+(sby+26)+'" font-size="8.5" fill="#141210">8 km</text></g>';
+  s+='<text x="14" y="'+(h-8)+'" font-size="9.5" fill="#6f8b83" font-family="monospace">EPSG:4326 · WGS84 · 网格 109°24′E–109°48′E</text>';
+  s+='</svg>';return s;
+}
+function svgModuleFlow(){
+  var items=[['数据纳管','#0c3f3b','24 口井 · 2 个体'],['测井预测','#c2410c','12/24 已完成'],['地震预测','#4a5899','1/2 已完成'],['数据制备','#4d6b2f','单因素 6 张'],['编图与审核','#5d564b','初稿待审核']];
+  var s='<svg class="mapsvg" viewBox="0 0 640 150" preserveAspectRatio="xMidYMid meet">';
+  var w=112,gap=(640-items.length*w)/(items.length+1);
+  for(var i=0;i<items.length;i++){
+    var x=gap+i*(w+gap);
+    s+='<rect x="'+x+'" y="46" width="'+w+'" height="58" rx="8" fill="'+items[i][1]+'1f" stroke="'+items[i][1]+'" stroke-width="1.4"/>';
+    s+='<text x="'+(x+w/2)+'" y="70" text-anchor="middle" font-size="13" font-weight="600" fill="#141210">'+items[i][0]+'</text>';
+    s+='<text x="'+(x+w/2)+'" y="90" text-anchor="middle" font-size="10.5" fill="#514c45">'+items[i][2]+'</text>';
+    if(i<items.length-1){s+='<path d="M'+(x+w+6)+' 75 L'+(x+w+gap-8)+' 75" stroke="#cec4ac" stroke-width="1.6" marker-end="url(#arrw)"/>';}
+  }
+  s+='<defs><marker id="arrw" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0L7 3L0 6z" fill="#cec4ac"/></marker></defs>';
+  s+='</svg>';return s;
+}
+function svgLineage(){
+  var steps=['导入 LAS','格式质控','预测输入','线上预测'];
+  var s='<svg class="mapsvg" viewBox="0 0 340 74" preserveAspectRatio="xMidYMid meet">';
+  for(var i=0;i<steps.length;i++){
+    var x=8+i*86;
+    s+='<rect x="'+x+'" y="22" width="72" height="30" rx="5" fill="#eae2cd" stroke="#cec4ac"/>';
+    s+='<text x="'+(x+36)+'" y="41" text-anchor="middle" font-size="11" fill="#141210">'+steps[i]+'</text>';
+    if(i<steps.length-1)s+='<path d="M'+(x+74)+' 37 L'+(x+84)+' 37" stroke="#cec4ac" stroke-width="1.5" marker-end="url(#arrw)"/>';
+  }
+  s+='</svg>';return s;
+}
+function svgLogTracks(seed){
+  var rnd=mulberry32(seed||7);
+  var W=690,H=446,top=54,L=48,tw=138,gap=10,DH=H-top-24;
+  var s='<svg class="mapsvg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet" style="background:#fbf8f1">';
+  s+='<rect x="0" y="0" width="'+W+'" height="34" fill="#eae2cd"/>';
+  s+='<text x="10" y="22" font-size="13" font-weight="700" fill="#0c3f3b">W28 · H2 段 · 4 道</text>';
+  s+='<text x="'+(W-10)+'" y="22" font-size="11" fill="#514c45" text-anchor="end">采样 0.125 m · 深度域</text>';
+  var i,d;
+  for(d=0;d<=3200;d+=400){
+    var y=top+DH*d/3200;
+    s+='<line x1="'+(L-6)+'" y1="'+y+'" x2="'+L+'" y2="'+y+'" stroke="#cec4ac"/>';
+    s+='<text x="'+(L-10)+'" y="'+(y+4)+'" font-size="10" text-anchor="end" fill="#514c45">'+d+'</text>';
+    s+='<line x1="'+L+'" y1="'+y+'" x2="'+(L+4*(tw+gap))+'" y2="'+y+'" stroke="#eee8d9"/>';
+  }
+  s+='<text x="12" y="'+(top+DH/2)+'" font-size="11" fill="#514c45" transform="rotate(-90 12 '+(top+DH/2)+')" text-anchor="middle">深度 (m)</text>';
+  for(i=0;i<LOG_HEADERS.length;i++){
+    var hd=LOG_HEADERS[i],x0=L+i*(tw+gap);
+    s+='<rect x="'+x0+'" y="'+top+'" width="'+tw+'" height="'+DH+'" fill="#fffdf9" stroke="#e2dac8"/>';
+    s+='<rect x="'+x0+'" y="'+(top-20)+'" width="'+tw+'" height="18" fill="#efe9db"/>';
+    s+='<text x="'+(x0+8)+'" y="'+(top-7)+'" font-size="11" font-weight="700" fill="'+hd.c+'">'+hd.n+'</text>';
+    s+='<text x="'+(x0+tw-8)+'" y="'+(top-7)+'" font-size="9.5" fill="#514c45" text-anchor="end">'+hd.u+'</text>';
+    var ph=rnd()*6,pts=[],ptsFill=[];
+    for(var yy=0;yy<=DH;yy+=5){
+      var v=0.5+0.30*Math.sin(yy*0.02+i*1.7+ph)+0.16*Math.sin(yy*0.09+i)+ (rnd()-0.5)*0.18;
+      v=Math.max(0.04,Math.min(0.96,v));
+      var px=x0+6+v*(tw-12), py=top+yy;
+      pts.push(px.toFixed(1)+','+py.toFixed(1));ptsFill.push((x0+6).toFixed(1)+','+py.toFixed(1));
+    }
+    s+='<polygon points="'+(x0+6)+','+top+' '+ptsFill.join(' ')+' '+(x0+6)+','+(top+DH)+'" fill="'+hd.c+'" opacity="0.10"/>';
+    s+='<polyline points="'+pts.join(' ')+'" fill="none" stroke="'+hd.c+'" stroke-width="1.4"/>';
+  }
+  var fx=L+4*(tw+gap)+8;
+  s+='<text x="'+(fx+6)+'" y="'+(top-7)+'" font-size="10.5" font-weight="700" fill="#141210">相</text>';
+  var segs=[[0,.16,'#4d6b2f'],[.16,.38,'#0c3f3b'],[.38,.55,'#c2410c'],[.55,.74,'#4a5899'],[.74,.9,'#4d6b2f'],[.9,1,'#5d564b']];
+  for(i=0;i<segs.length;i++){
+    s+='<rect x="'+fx+'" y="'+(top+DH*segs[i][0])+'" width="14" height="'+(DH*(segs[i][1]-segs[i][0])-1.5)+'" fill="'+segs[i][2]+'" opacity="0.82"/>';
+  }
+  s+='<rect x="'+fx+'" y="'+top+'" width="14" height="'+DH+'" fill="none" stroke="#e2dac8"/>';
+  s+='</svg>';return s;
+}
+function svgCorrelation(gap,pfx){
+  gap=gap||90;pfx=pfx||'';
+  var n=CORR_WELLS.length,top=64,DH=352;
+  var w=84+n*(52+gap)+16,h=452;
+  var s='<svg '+(pfx?'id="'+pfx+'" ':'')+'class="mapsvg" viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="xMidYMid meet" style="background:#fbf8f1">';
+  var i,j;
+  for(j=0;j<=380;j+=76){
+    var yy=top+j;
+    s+='<line x1="46" y1="'+yy+'" x2="'+(w-10)+'" y2="'+yy+'" stroke="#eee8d9"/>';
+    s+='<text x="42" y="'+(yy+4)+'" font-size="10" text-anchor="end" fill="#514c45">'+(j*10)+'</text>';
+  }
+  s+='<text x="16" y="'+(top+DH/2)+'" font-size="10.5" fill="#514c45" transform="rotate(-90 16 '+(top+DH/2)+')" text-anchor="middle">埋深 (m)</text>';
+  var xs=[];
+  for(i=0;i<n;i++){xs.push(84+i*(52+gap));}
+  for(i=0;i<n;i++){
+    var tx=xs[i]+22;
+    s+='<text x="'+tx+'" y="'+(top-26)+'" text-anchor="middle" font-size="12" font-weight="700" fill="#0c3f3b">'+CORR_WELLS[i]+'</text>';
+    s+='<path d="M'+(tx-16)+' '+(top-12)+' h32" stroke="#8b9a6b" stroke-width="2"/>';
+    s+='<line x1="'+tx+'" y1="'+(top-10)+'" x2="'+tx+'" y2="'+(top+DH)+'" stroke="#514c45" stroke-width="1.6"/>';
+    for(j=0;j<CORR_TOPS[i].length;j++){
+      var ty=top+CORR_TOPS[i][j];
+      s+='<circle cx="'+tx+'" cy="'+ty+'" r="3.6" fill="#c2410c" stroke="#fff" stroke-width="1"/>';
+      if(i===0)s+='<text x="'+(tx-34)+'" y="'+(ty-6)+'" font-size="9.5" fill="#514c45">'+CORR_NAMES[j]+'</text>';
+    }
+    for(j=0;j<CORR_TOPS[i].length-1;j++){
+      var y1=top+CORR_TOPS[i][j],y2=top+CORR_TOPS[i][j+1];
+      s+='<rect x="'+(tx+4)+'" y="'+(y1+2)+'" width="13" height="'+(y2-y1-4)+'" fill="'+STC[(i+j)%6]+'" opacity="0.72"/>';
+    }
+    s+='<text x="'+tx+'" y="'+(top+DH+16)+'" text-anchor="middle" font-size="9.5" fill="#514c45">TD 3 820</text>';
+  }
+  for(i=0;i<n-1;i++){
+    for(j=0;j<CORR_TOPS[i].length;j++){
+      var x1=xs[i]+22,x2=xs[i+1]+22,y1=top+CORR_TOPS[i][j],y2=top+CORR_TOPS[i+1][j];
+      var mx=(x1+x2)/2;
+      s+='<path d="M'+x1+' '+y1+' C '+mx+' '+y1+', '+mx+' '+y2+', '+x2+' '+y2+'" fill="none" stroke="#0f766e" stroke-width="1.2" opacity="0.8"/>';
+    }
+  }
+  s+='</svg>';return s;
+}
+function svg3DView(p){
+  p=p||{};var il=p.il==null?1200:p.il,xl=p.xl==null?800:p.xl,tm=p.tm==null?2400:p.tm,fl=p.fl||{};
+  var s='<svg class="mapsvg" viewBox="0 0 660 470" preserveAspectRatio="xMidYMid meet" style="background:#131d1b">';
+  function pr(x,y,z){return [340+(x-y)*72, 148+(x+y)*38-z*17];}
+  var NX=4,NY=4,NZ=8;
+  function poly(pts,fill,stroke,dash,op){
+    var str=pts.map(function(q){return q[0].toFixed(1)+','+q[1].toFixed(1);}).join(' ');
+    return '<polygon points="'+str+'" fill="'+fill+'" stroke="'+stroke+'" stroke-width="1.1"'+(dash?' stroke-dasharray="'+dash+'"':'')+(op?' opacity="'+op+'"':'')+'/>';
+  }
+  var c000=pr(0,0,NZ),c100=pr(NX,0,NZ),c110=pr(NX,NY,NZ),c010=pr(0,NY,NZ);
+  var b000=pr(0,0,0),b100=pr(NX,0,0),b110=pr(NX,NY,0),b010=pr(0,NY,0);
+  if(fl.vol!==false){
+    s+=poly([c000,c100,c110,c010],'rgba(45,212,191,0.05)','#2f5f57');
+    s+=poly([b000,b100,b110,b010],'rgba(0,0,0,0)','#24413a');
+    s+=poly([b000,b100,c100,c000],'rgba(0,0,0,0)','#24413a');
+    s+=poly([b100,b110,c110,c100],'rgba(0,0,0,0)','#24413a');
+    for(var i=1;i<NX;i++){var a=pr(i,0,NZ),b=pr(i,NY,NZ),c2=pr(i,NY,0);s+='<path d="M'+a[0]+' '+a[1]+' L'+b[0]+' '+b[1]+' L'+c2[0]+' '+c2[1]+'" stroke="#1c342e" fill="none"/>';}
+    for(var j=1;j<NY;j++){var d1=pr(0,j,NZ),d2=pr(NX,j,NZ);s+='<path d="M'+d1[0]+' '+d1[1]+' L'+d2[0]+' '+d2[1]+'" stroke="#1c342e" fill="none"/>';}
+    s+='<text x="'+c100[0]+'" y="'+(c100[1]-10)+'" font-size="10.5" fill="#7de3d4">Crossline 0–1600</text>';
+    s+='<text x="'+(c010[0]-6)+'" y="'+(c010[1]-10)+'" font-size="10.5" fill="#7de3d4" text-anchor="end">Inline 0–2000</text>';
+    s+='<text x="'+(b000[0]-8)+'" y="'+(b000[1]+14)+'" font-size="10.5" fill="#7de3d4">Time 0–3000 ms</text>';
+  }
+  if(fl.slices!==false){
+    var fi=il/2000*NY;
+    var p1=pr(0,fi,NZ),p2=pr(NX,fi,NZ),p3=pr(NX,fi,0),p4=pr(0,fi,0);
+    s+=poly([p1,p2,p3,p4],'rgba(194,65,12,0.20)','#e0653a');
+    s+='<text x="'+p2[0]+'" y="'+(p2[1]-6)+'" font-size="10.5" fill="#f2b53a">Inline '+il+'</text>';
+    var fj=xl/1600*NX;
+    var q1=pr(fj,0,NZ),q2=pr(fj,NY,NZ),q3=pr(fj,NY,0),q4=pr(fj,0,0);
+    s+=poly([q1,q2,q3,q4],'rgba(15,118,110,0.18)','#2dd4bf');
+    s+='<text x="'+q2[0]+'" y="'+(q2[1]-6)+'" font-size="10.5" fill="#2dd4bf">Xline '+xl+'</text>';
+    var z=tm/3000*NZ;
+    var t1=pr(0,0,z),t2=pr(NX,0,z),t3=pr(NX,NY,z),t4=pr(0,NY,z);
+    s+=poly([t1,t2,t3,t4],'rgba(74,88,153,0.16)','#8fa0d6','5 4');
+    s+='<text x="'+t4[0]+'" y="'+(t4[1]+14)+'" font-size="10.5" fill="#8fa0d6">等时面 '+tm+' ms</text>';
+  }
+  if(fl.wells!==false){
+    var wells3=[[1.1,2.4,'W12'],[2.6,1.3,'W22'],[3.1,2.9,'W28']];
+    for(var k=0;k<wells3.length;k++){
+      var wp=wells3[k],h0=pr(wp[0],wp[1],NZ),h1=pr(wp[0],wp[1],0),dev=pr(wp[0]+.22,wp[1]+.14,0);
+      s+='<path d="M'+h0[0]+' '+h0[1]+' L'+h1[0]+' '+h1[1]+' L'+dev[0]+' '+dev[1]+'" stroke="#f2f7f5" stroke-width="2" fill="none"/>';
+      s+='<circle cx="'+h0[0]+'" cy="'+h0[1]+'" r="4" fill="#c2410c" stroke="#fff"/>';
+      s+='<text x="'+(h0[0]+7)+'" y="'+(h0[1]-4)+'" font-size="10.5" fill="#f2f7f5">'+wp[2]+'</text>';
+    }
+  }
+  s+='</svg>';return s;
+}
+function svgMapCanvasMain(o){
+  o=o||{};
+  var s='<svg class="mapsvg" viewBox="0 0 920 560" preserveAspectRatio="xMidYMid slice">';
+  s+='<rect x="0" y="0" width="920" height="560" fill="#131d1b"/>';
+  s+='<g data-ly="basemap" style="display:none"><rect x="0" y="0" width="920" height="560" fill="#1a2723" opacity="0.6"/><circle cx="700" cy="470" r="130" fill="#22352c" opacity="0.7"/><circle cx="200" cy="120" r="90" fill="#20302a" opacity="0.7"/></g>';
+  var i;
+  s+='<g data-ly="grid">';
+  for(i=1;i<6;i++){var gx=i*153;s+='<line x1="'+gx+'" y1="0" x2="'+gx+'" y2="560" stroke="#22352f" stroke-width="0.7"/><text x="'+(gx+4)+'" y="554" font-size="9" fill="#4c6a63" font-family="monospace">'+(109.4+i*0.012).toFixed(3)+'°E</text>';}
+  for(i=1;i<4;i++){var gy=i*140;s+='<line x1="0" y1="'+gy+'" x2="920" y2="'+gy+'" stroke="#22352f" stroke-width="0.7"/><text x="6" y="'+(gy-5)+'" font-size="9" fill="#4c6a63" font-family="monospace">'+(37.1+i*0.014).toFixed(3)+'°N</text>';}
+  s+='</g>';
+  s+='<g data-ly="facies">';
+  s+='<path d="M60,210 C130,120 300,90 420,130 C480,150 470,240 400,290 C320,344 160,340 100,300 C55,270 40,250 60,210 Z" fill="#4a5899" opacity="0.42" stroke="#37437a" stroke-width="1.2"/>';
+  s+='<path d="M300,180 C380,140 500,150 560,190 C620,230 600,300 520,330 C440,360 340,330 310,280 C285,240 270,205 300,180 Z" fill="#c2410c" opacity="0.5" stroke="#93330a" stroke-width="1.2"/>';
+  s+='<path d="M560,220 C660,190 780,220 820,280 C850,330 800,400 700,410 C610,418 550,370 540,320 C532,280 540,235 560,220 Z" fill="#4d6b2f" opacity="0.48" stroke="#3a5123" stroke-width="1.2"/>';
+  s+='<path d="M180,380 C280,340 420,360 470,410 C510,452 460,510 340,520 C230,528 150,490 140,445 C134,414 150,395 180,380 Z" fill="#5d564b" opacity="0.45" stroke="#453f37" stroke-width="1.2"/>';
+  s+='<text x="330" y="238" font-size="12" fill="#f2e9dd" font-weight="600">滨浅湖砂坝</text>';
+  s+='<text x="120" y="220" font-size="12" fill="#dfe4f4" font-weight="600">浅湖泥</text>';
+  s+='<text x="650" y="300" font-size="12" fill="#e4eedd" font-weight="600">滩砂</text>';
+  s+='<text x="270" y="452" font-size="12" fill="#e6e1d6" font-weight="600">混积坪</text>';
+  s+='</g>';
+  s+='<g data-ly="contour" fill="none" stroke="#9ec3ba" stroke-width="0.9" opacity="0.8">';
+  var rings=['M460,265 C460,215 540,205 570,240 C600,275 570,320 520,322 C470,324 460,300 460,265 Z',
+   'M440,268 C440,196 556,184 596,234 C634,282 596,346 522,350 C448,354 440,330 440,268 Z',
+   'M418,270 C418,176 572,162 626,226 C676,288 626,374 524,380 C422,386 418,352 418,270 Z',
+   'M394,272 C394,154 588,138 658,218 C722,296 658,404 526,412 C394,420 394,380 394,272 Z',
+   'M368,274 C368,130 606,112 692,210 C772,306 692,436 528,446 C366,456 368,410 368,274 Z'];
+  for(i=0;i<rings.length;i++){s+='<path d="'+rings[i]+'"/><text x="'+(520+i*36)+'" y="'+(146+i*52)+'" font-size="9" fill="#7da39a" stroke="none">-'+(3050+i*25)+'</text>';}
+  s+='</g>';
+  s+='<g data-ly="fault" fill="none" stroke="#e0653a" stroke-width="2.2" stroke-dasharray="10 5">';
+  s+='<path d="M150,70 L250,190 L292,320 L268,470"/><text x="298" y="330" font-size="11" fill="#f2b53a" stroke="none">F1</text>';
+  s+='<path d="M600,90 L556,240 L600,400 L576,520"/><text x="606" y="410" font-size="11" fill="#f2b53a" stroke="none">F2</text>';
+  s+='</g>';
+  var wellsM=[[.22,.28,'W3'],[.34,.44,'W12'],[.46,.24,'W15'],[.55,.55,'W20'],[.66,.36,'W28'],[.74,.6,'W31'],[.84,.44,'W36'],[.6,.76,'W45']];
+  s+='<g data-ly="wells">';
+  for(i=0;i<wellsM.length;i++){var wm=wellsM[i],mx=wm[0]*920,my=wm[1]*560;
+    s+='<circle cx="'+mx+'" cy="'+my+'" r="5" fill="#f2f7f5" stroke="#141210" stroke-width="1.4"/>';
+    s+='<text x="'+(mx+8)+'" y="'+(my+4)+'" font-size="10.5" fill="#eef4f1">'+wm[2]+'</text>';
+  }
+  s+='</g>';
+  s+='<rect x="3" y="3" width="914" height="554" fill="none" stroke="#48645f" stroke-width="1.6"/>';
+  s+='</svg>';
+  return s;
+}
+function svgThumb(seed,label){
+  var rnd=mulberry32(seed||3);
+  var s='<svg class="mapsvg" viewBox="0 0 200 130" preserveAspectRatio="xMidYMid slice">';
+  s+='<rect width="200" height="130" fill="#131d1b"/>';
+  for(var i=0;i<3;i++){
+    var cx=40+rnd()*120,cy=30+rnd()*70,r=22+rnd()*26,c=STC[Math.floor(rnd()*6)];
+    s+='<path d="M'+cx+','+(cy-r)+' C'+(cx+r*1.3)+','+(cy-r*0.7)+' '+(cx+r*1.2)+','+(cy+r*0.8)+' '+cx+','+(cy+r)+' C'+(cx-r*1.2)+','+(cy+r*0.9)+' '+(cx-r*1.3)+','+(cy-r*0.6)+' '+cx+','+(cy-r)+' Z" fill="'+c+'" opacity="0.5" stroke="'+c+'"/>';
+  }
+  for(i=0;i<2;i++){var yy=28+rnd()*70;s+='<path d="M6 '+yy+' Q 60 '+(yy-14+rnd()*10)+' 110 '+(yy+6)+' T 194 '+(yy-4)+'" fill="none" stroke="#9ec3ba" stroke-width="0.8" opacity="0.75"/>';}
+  for(i=0;i<3;i++){s+='<circle cx="'+(20+rnd()*160)+'" cy="'+(18+rnd()*94)+'" r="3" fill="#f2f7f5" stroke="#141210"/>';}
+  s+='<rect x="1" y="1" width="198" height="128" fill="none" stroke="#48645f"/>';
+  s+='</svg>';return s;
+}
+function svgScatter(){
+  var rnd=mulberry32(31);
+  var s='<svg class="mapsvg" viewBox="0 0 320 240" preserveAspectRatio="xMidYMid meet" style="background:#fbf8f1">';
+  s+='<rect x="42" y="16" width="262" height="192" fill="#fffdf9" stroke="#e2dac8"/>';
+  for(var i=1;i<5;i++){s+='<line x1="'+(42+i*52)+'" y1="16" x2="'+(42+i*52)+'" y2="208" stroke="#eee8d9"/><line x1="42" y1="'+(16+i*38)+'" x2="304" y2="'+(16+i*38)+'" stroke="#eee8d9"/>';}
+  for(i=0;i<34;i++){s+='<circle cx="'+(70+rnd()*80+rnd()*40)+'" cy="'+(180-rnd()*130)+'" r="3.4" fill="#0f766e" opacity="0.75"/>';}
+  for(i=0;i<26;i++){s+='<circle cx="'+(190+rnd()*95)+'" cy="'+(90+rnd()*100)+'" r="3.4" fill="#c2410c" opacity="0.75"/>';}
+  s+='<text x="173" y="232" text-anchor="middle" font-size="10.5" fill="#514c45">砂地比</text>';
+  s+='<text x="14" y="112" font-size="10.5" fill="#514c45" transform="rotate(-90 14 112)" text-anchor="middle">均方根振幅</text>';
+  s+='<circle cx="252" cy="34" r="3.4" fill="#0f766e"/><text x="260" y="38" font-size="10" fill="#141210">滨浅湖砂坝</text>';
+  s+='<circle cx="252" cy="50" r="3.4" fill="#c2410c"/><text x="260" y="54" font-size="10" fill="#141210">浅湖泥</text>';
+  s+='</svg>';return s;
+}
+/* ================= 通用面板片段 ================= */
+function tabsHTML(id,defs,active){
+  active=active||0;
+  return '<div class="tabbed" style="display:flex;flex-direction:column;min-height:0;flex:1">'+
+    '<div class="tabs">'+defs.map(function(d,i){return '<div class="tab '+(i===active?'on':'')+'" data-act="tab" data-tab="'+id+'-'+i+'">'+d[0]+'</div>';}).join('')+'</div>'+
+    defs.map(function(d,i){return '<div class="pane '+(i===active?'on':'')+'" data-pane="'+id+'-'+i+'" style="flex:1;min-height:0">'+d[1]+'</div>';}).join('')+
+  '</div>';
+}
+function panel(title,icon,body,opt){
+  opt=opt||{};
+  return '<div class="panel"><div class="panel-h">'+(icon?ic(icon):'')+'<span>'+title+'</span>'+(opt.float!==false?'<span class="flic" title="可浮动（原型提示）" data-act="toast" data-label="浮动面板 · 原型提示">⇱</span>':'')+'</div>'+
+   (opt.noPad?'<div class="panel-b" style="padding:0">'+body+'</div>':'<div class="panel-b">'+body+'</div>')+'</div>';
+}
+function card(title,icon,body,cls){
+  return '<div class="card '+(cls||'')+'"><h4>'+(icon?ic(icon):'')+'<span>'+title+'</span></h4>'+body+'</div>';
+}
+function tglBtn(label,icon,on,opt){
+  opt=opt||{};
+  return '<button class="btn tgl '+(on?'on ':'')+(opt.cls||'')+'" data-act="toggle" data-label="'+label+'"'+(opt.attrs||'')+'>'+(icon?ic(icon):'')+label+'</button>';
+}
+function sliderRow(id,label,min,max,val,unit,step){
+  return '<div style="margin-bottom:9px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span>'+label+'</span><b id="'+id+'Val">'+val+unit+'</b></div>'+
+  '<input type="range" id="'+id+'" min="'+min+'" max="'+max+'" step="'+(step||1)+'" value="'+val+'" style="width:100%"></div>';
+}
+/* ================= 概述页卡片 ================= */
+function wfProgress(){
+  var steps=[
+   {n:'数据纳管',s:'完成 · '+PROJ.wells+' 口井 / '+PROJ.vols+' 个体',p:100,c:'#0c3f3b',st:'ok'},
+   {n:'智能预测',s:'测井 12/24 · 地震 1/2',p:62,c:'#c2410c',st:'run'},
+   {n:'编图制备',s:'单因素 6 张 · 初稿 65%',p:65,c:'#4a5899',st:'run'},
+   {n:'审核定稿',s:'未开始',p:0,c:'#4d6b2f',st:'todo'}
+  ];
+  var h='<div class="wf">';
+  for(var i=0;i<steps.length;i++){
+    var t=steps[i];
+    h+='<div class="wf-step"><div class="wf-dot" style="background:'+(t.st==='todo'?'#cec4ac':t.c)+'">'+(i+1)+'</div><div><div class="wf-name">'+t.n+' '+(t.st==='ok'?'<span class="chip ok">完成</span>':(t.st==='run'?'<span class="chip run">进行中</span>':'<span class="chip">未开始</span>'))+'</div><div class="wf-sub">'+t.s+'</div></div></div>';
+    if(i<steps.length-1)h+='<div class="wf-line"><i style="width:'+t.p+'%;background:'+t.c+'"></i></div>';
+  }
+  return h+'</div>';
+}
+function startCard(){
+  function bb(label,icn,desc,prim,act){
+    return '<button class="bigbtn'+(prim?' primary':'')+'" data-act="toast" data-label="'+label+'">'+ic(icn)+'<span style="text-align:left"><b>'+label+'</b><small>'+desc+'</small></span></button>';
+  }
+  return card('启动指南','play','<div style="display:flex;flex-direction:column;gap:8px">'+
+    bb('新建工程','file','从模板创建区块工程',true)+
+    bb('打开工程','folder','浏览最近工程')+
+    bb('打开样例工程','box','鄂尔多斯 H2 演示数据集')+'</div>','a-start');
+}
+function integrityCard(){
+  var rows=[
+   ['check','ok','井位坐标校验','24 / 24 通过'],
+   ['check','ok','测井曲线头','186 / 186 通过'],
+   ['warn','warn','层位绑定缺失','W31 · W36 未绑定'],
+   ['check','ok','地震体道头','2 / 2 通过'],
+   ['trash','info','回收站','3 项可清理']];
+  var h=rows.map(function(r){return '<div class="integ-row">'+ic(r[0]).replace('class="ic"','class="ic" style="color:var(--'+({ok:'success',warn:'warning',err:'error',info:'teal'})[r[1]]+')"')+'<span class="grow">'+r[2]+'</span><span class="muted" style="font-size:11.5px">'+r[3]+'</span></div>';}).join('');
+  return card('数据完整性','shield',h+'<div style="display:flex;gap:6px;margin-top:9px"><button class="btn sm" data-act="toast" data-label="完整性校验">'+ic('refresh')+'完整性校验</button><button class="btn sm" data-act="toast" data-label="健康检查">'+ic('shield')+'健康检查</button></div>','a-integ');
+}
+function activityCard(){
+  return card('最近活动','clock',ACT.map(function(a){return '<div class="act-row"><time>'+a[0]+'</time><span>'+a[1]+'</span></div>';}).join(''),'a-act');
+}
+function flowCard(){return card('模块关系','topology','<div style="margin:-4px">'+svgModuleFlow()+'</div>','a-flow');}
+function mapCardHead(title,coordId){
+  return '<div class="map-head">'+ic('map')+'<span class="map-head-t grow">'+title+'</span>'+
+   '<button class="btn sm ibtn" data-act="toast" data-label="放大" title="放大">'+ic('zoomin')+'</button>'+
+   '<button class="btn sm ibtn" data-act="toast" data-label="缩小" title="缩小">'+ic('zoomout')+'</button>'+
+   '<button class="btn sm ibtn" data-act="toast" data-label="全图" title="全图">'+ic('full')+'</button></div>';
+}
+function overviewMapCard(){
+  return '<div class="card a-map"><div class="map-head">'+ic('map')+'<span class="map-head-t grow">工区地图 · '+PROJ.name+'</span>'+
+   '<button class="btn sm" data-act="toast" data-label="图层面板">'+ic('layers')+'图层</button>'+
+   '<button class="btn sm ibtn" data-act="toast" data-label="放大">'+ic('zoomin')+'</button>'+
+   '<button class="btn sm ibtn" data-act="toast" data-label="全图">'+ic('full')+'</button></div>'+
+   '<div class="coord-zone" data-coordzone="ovCoord" style="border-radius:0">'+svgSurveyMap()+'</div>'+
+   '<div class="coord-strip"><span>坐标</span><b id="ovCoord" style="color:var(--text-primary)">—</b><span style="margin-left:auto">EPSG:4326</span><span>比例尺 1:50 000</span></div></div>';
+}
+/* ================= 数据管理 ================= */
+function navTree(){
+  function node(label,cnt,icon,kids,open){
+    return '<div class="tnode'+(open?' open':'')+'"><div class="trow" data-act="expand"><span class="tw">▶</span>'+ic(icon)+'<span class="grow">'+label+'</span><span class="cnt">'+cnt+'</span></div><div class="tkids">'+(kids||'')+'</div></div>';
+  }
+  function leaf(t){return '<div class="trow" data-act="selrow"><span style="width:12px"></span>'+ic('dot')+'<span>'+t+'</span></div>';}
+  var wells=WELLS.slice(0,6).map(function(w){return leaf(w.n);}).join('')+'<div class="trow muted" data-act="toast" data-label="展开全部井"><span style="width:12px"></span>… 共 '+PROJ.wells+' 口</div>';
+  return node('井',PROJ.wells+' 口','well',wells,true)+
+   node('地震',PROJ.vols+' 个体','wave','<div class="tkids-inner">'+leaf('工区三维叠前地震体.sgy')+leaf('老二维测线 84-219')+ '</div>',true)+
+   node('测井',PROJ.logs+' 条','polyline','',false)+
+   node('层位',PROJ.horizons+' 个','layers','',false)+
+   node('回收站','3 项','trash','',false);
+}
+function assetTable(){
+  var h='<div class="ptoolbar"><button class="btn sm" data-act="toast" data-label="标签筛选">'+ic('filter')+'标签筛选</button><button class="btn sm" data-act="toast" data-label="列设置">'+ic('columns')+'列设置</button><span class="chip info" style="margin-left:auto">6 / '+PROJ.wells+'+ 资产</span></div>';
+  h+='<div style="overflow:auto;flex:1;min-height:0"><table class="tbl"><thead><tr><th>文件名</th><th>类型</th><th>标签</th><th>状态</th><th>大小</th><th>修改</th></tr></thead><tbody>';
+  var chipMap={ok:'<span class="chip ok">已纳管</span>',warn:'<span class="chip warn">待检查</span>',err:'<span class="chip err">缺失 2 曲线</span>'};
+  ASSETS.forEach(function(a){
+    h+='<tr data-act="selrow"><td style="font-weight:600">'+a[0]+'</td><td>'+a[1]+'</td><td><span class="chip">'+a[2]+'</span></td><td>'+chipMap[a[3]]+'</td><td>'+a[4]+'</td><td class="muted">'+a[5]+'</td></tr>';
+  });
+  h+='</tbody></table></div>';
+  return h;
+}
+function readerPanel(){
+  var tbl='<table class="tbl"><thead><tr><th>深度</th><th>GR</th><th>SP</th><th>RT</th></tr></thead><tbody>'+
+   [[3200.00,72.4,-12.1,8.6],[3200.13,74.8,-11.6,8.9],[3200.25,77.1,-10.2,9.4],[3200.38,75.9,-10.8,9.1],[3200.50,79.5,-9.4,10.2]]
+   .map(function(r){return '<tr><td>'+r[0].toFixed(2)+'</td><td>'+r[1]+'</td><td>'+r[2]+'</td><td>'+r[3]+'</td></tr>';}).join('')+'</tbody></table>';
+  var img='<div class="ph-box">'+ic('image')+'<span>单因素_砂地比_v2.tif</span><span class="chip">图片预览 1 024×768</span></div>';
+  var pdf='<div class="pdf-page"><b style="color:var(--text-primary)">W28 井测井解释报告</b><div class="tl h"></div><div class="tl"></div><div class="tl"></div><div class="tl" style="width:80%"></div><div class="tl"></div><div style="margin-top:10px;text-align:center" class="muted">第 1 / 12 页</div></div>';
+  var curve='<div style="flex:1;min-height:0">'+svgLogTracks(19)+'</div>';
+  return panel('阅读器','eye',tabsHTML('reader',[['表格',tbl],['图片',img],['PDF',pdf],['曲线',curve]]),{noPad:true,float:false});
+}
+function inspectorPanel(){
+  var sum=[['名称','W28_测井曲线.las'],['类型','测井曲线族'],['大小','4.2 MB'],['创建者','李工'],['导入时间','2026-08-30 15:12'],['关联井','W28']].map(function(k){return '<div class="kv"><span>'+k[0]+'</span><b>'+k[1]+'</b></div>';}).join('');
+  var meta=[['坐标系','EPSG:4326'],['井深范围','2 860 – 3 820 m'],['采样间隔','0.125 m'],['曲线条数','5 (GR/SP/AC/DEN/RT)'],['空白段','2 段 · 共 4.8 m']].map(function(k){return '<div class="kv"><span>'+k[0]+'</span><b>'+k[1]+'</b></div>';}).join('');
+  var tags='<div style="display:flex;flex-wrap:wrap;gap:6px"><span class="chip info">预测输入</span><span class="chip ok">已校验</span><span class="chip">H2 层</span><span class="chip">环境校正后</span></div><div class="muted" style="font-size:11.5px;margin-top:10px">在「标签管理」中维护标签体系</div>';
+  var ver=['v3 · 当前','v2','v1'].map(function(v,i){return '<div class="trow'+(i===0?' on':'')+'" data-act="selrow">'+ic(i===0?'check':'clock')+'<span class="grow">'+v+'</span><span class="muted" style="font-size:11px">'+['08-30','08-21','08-02'][i]+'</span></div>';}).join('');
+  var lin='<div style="padding:4px 0">'+svgLineage()+'</div><div class="muted" style="font-size:11.5px">血缘：导入 LAS → 格式质控 → 预测输入 → 线上预测</div>';
+  var integ=[['文件哈希','通过'],['曲线头完整','通过'],['深度一致','通过'],['单位制','SI'],['空白段告警','2 段']].map(function(k,i){return '<div class="kv"><span>'+k[0]+'</span><b style="color:var(--'+(i===4?'warning':'success')+')">'+k[1]+'</b></div>';}).join('');
+  return panel('检查器','info',tabsHTML('insp',[['概要',sum],['元数据',meta],['标签',tags],['版本',ver],['血缘',lin],['完整性',integ]]),{noPad:true,float:false});
+}
+function wellMapStrip(){
+  return '<div class="card closable" id="wellMapStrip" style="padding:0;overflow:hidden"><div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border-light);cursor:pointer" data-act="collapse" data-target="#wellMapStrip">'+
+   ic('map')+'<b style="font-size:13px">井位地图</b><span class="muted" style="font-size:11.5px">'+PROJ.wells+' 口井 · 2 个体</span><span class="chev-ic" style="margin-left:auto">▾</span></div>'+
+   '<div class="cbody coord-zone" data-coordzone="wmCoord" style="height:230px;border-radius:0">'+svgSurveyMap()+'</div></div>';
+}
+function dataManageAB(){
+  return '<div class="absfill" style="grid-template-rows:auto minmax(0,1fr)">'+
+   '<div>'+wellMapStrip()+'</div>'+
+   '<div class="absfill" style="position:relative;inset:0;grid-template-columns:225px minmax(360px,1.5fr) 330px 295px">'+
+    panel('导航树','layers',navTree(),{noPad:true})+
+    panel('资产表','table',assetTable(),{noPad:true})+
+    readerPanel()+
+    inspectorPanel()+
+   '</div></div>';
+}
+/* ================= 井页 ================= */
+function taskList(){
+  var tasks=[
+   ['W12','线上预测','ok','12:31',0],['W15','演示预测','run','运行中 62%',62],['W28','线上预测','run','运行中 34%',34],
+   ['W31','线上预测','warn','缺 DEN 曲线',0],['W20','排队中','','—',0]];
+  var h=tasks.map(function(t){
+    var chipHtml={ok:'<span class="chip ok">已完成</span>',run:'<span class="chip run">运行中</span>',warn:'<span class="chip warn">警告</span>','':'<span class="chip">排队</span>'}[t[2]];
+    return '<div class="trow" data-act="selrow" style="height:auto;padding:7px 6px;align-items:flex-start;flex-direction:column;gap:4px"><div style="display:flex;gap:6px;width:100%;align-items:center"><b>'+t[0]+'</b><span class="muted grow" style="font-size:11.5px">'+t[1]+'</span>'+chipHtml+'</div>'+
+    (t[4]?'<div style="display:flex;gap:6px;width:100%;align-items:center"><span class="pg"><i style="width:'+t[4]+'%;background:var(--st3)"></i></span><span class="muted" style="font-size:10.5px">'+t[3]+'</span></div>':(t[2]==='ok'||t[2]==='warn'?'<div class="muted" style="font-size:10.5px">'+t[3]+'</div>':''))+'</div>';
+  }).join('');
+  return panel('任务列表','clock',h+'<div style="margin-top:8px"><button class="btn sm" data-act="toast" data-label="新建预测任务">'+ic('pluspt')+'新建任务</button></div>',{float:true});
+}
+function logCanvasPanel(){
+  return panel('井剖面 · W28','well','<div style="height:100%;display:flex">'+svgLogTracks(7)+'</div>',{noPad:true});
+}
+function evidencePanel(){
+  var bars=[['GR',.32,'#0f766e'],['SP',.24,'#4a5899'],['AC',.18,'#c2410c'],['DEN',.14,'#4d6b2f'],['RT',.12,'#a44a3f']]
+   .map(function(b){return '<div class="ebar"><span>'+b[0]+'</span><span class="pg"><i style="width:'+(b[1]*100)+'%;background:'+b[2]+'"></i></span><b>'+(b[1]*100/100).toFixed(2)+'</b></div>';}).join('');
+  var log='<div class="logpre">12:31:02 [engine] 加载 W28 曲线 5 条\n12:31:03 [engine] 特征对齐完成 Δ=0.12 m\n12:31:05 [engine] 模型 H2_facies v7 推理 …\n12:31:07 [engine] 输出概率剖面 → 证据聚合\n12:31:09 [ done ] 用时 7.2 s · 置信度 0.87</div>';
+  return panel('证据','chart',tabsHTML('evid',[['证据贡献',bars],['运行日志',log]]),{float:true});
+}
+function logPredAB(){
+  return '<div class="absfill lay-tri">'+taskList()+'<div class="canvas-panel">'+logCanvasPanel()+'</div>'+evidencePanel()+'</div>';
+}
+function seqSettings(){
+  var td=[['LST · 低位体系域','#4d6b2f',true],['TST · 水进体系域','#4a5899',true],['HST · 高位体系域','#c2410c',true]];
+  var h='<div style="margin-bottom:10px"><div class="muted" style="font-size:11.5px;margin-bottom:4px">目标层位</div><select style="width:100%" onchange="toast(\'目标层位已切换（原型）\')"><option>H2-Ⅱ</option><option>H2-Ⅰ</option><option>H2-Ⅲ</option></select></div>';
+  h+='<div class="muted" style="font-size:11.5px;margin-bottom:5px">体系域方案</div>';
+  h+=td.map(function(t){return '<div class="trow" data-act="check'+(t[2]?' on':'')+'" style="height:30px"><span class="ck'+(t[2]?' on':'')+'"></span><span class="lg-sw" style="background:'+t[1]+'"></span>'+t[0]+'</div>';}).join('');
+  h+='<div class="muted" style="font-size:11.5px;margin:10px 0 4px">界面自动追踪</div><div style="display:flex;gap:6px;flex-wrap:wrap"><span class="chip info">DTW 对齐</span><span class="chip info">全局等时约束</span></div>';
+  return panel('层序格架设置','sliders',h);
+}
+function seqTable(){
+  var rows=[
+   ['SB-1','层序界面','3 128.5','0.92','自动 + 人工'],
+   ['MFS-1','最大洪泛面','3 176.2','0.87','自动'],
+   ['SB-2','层序界面','3 241.8','0.90','自动 + 人工'],
+   ['mfs-2','洪泛面','3 302.4','0.78','自动'],
+   ['SB-3','层序界面','3 388.0','0.85','人工']];
+  var h='<table class="tbl"><thead><tr><th>界面</th><th>类型</th><th>深度 (m)</th><th>置信度</th><th>方式</th></tr></thead><tbody>'+
+   rows.map(function(r){return '<tr><td><b>'+r[0]+'</b></td><td>'+r[1]+'</td><td>'+r[2]+'</td><td>'+r[3]+'</td><td>'+r[4]+'</td></tr>';}).join('')+'</tbody></table>';
+  return panel('层序界面清单 · H2-Ⅱ','table',h,{noPad:true});
+}
+function seqSummary(){
+  var h=[['方案名','H2-SS1'],['目标层位','H2-Ⅱ'],['界面数','8'],['井数','24 / 24'],['覆盖率','92.4 %'],['体系域','LST · TST · HST']].map(function(k){return '<div class="kv"><span>'+k[0]+'</span><b>'+k[1]+'</b></div>';}).join('');
+  h+='<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap"><button class="btn sm primary" data-act="toast" data-label="保存层序方案">'+ic('save')+'保存层序方案</button><button class="btn sm" data-act="toast" data-label="绑定下游">'+ic('downlink')+'绑定下游</button></div>';
+  return panel('方案摘要','bookmark',h);
+}
+function seqAB(){
+  return '<div class="absfill" style="grid-template-columns:265px minmax(0,1fr) 300px">'+seqSettings()+seqTable()+seqSummary()+'</div>';
+}
+function corrWellList(){
+  var h='<div style="display:flex;gap:6px;margin-bottom:9px"><button class="btn sm primary" data-act="toast" data-label="加载连井剖面">'+ic('polyline')+'加载连井剖面</button></div>'+
+   '<button class="btn sm" style="margin-bottom:9px" data-act="toast" data-label="选用预测绑定井">'+ic('link')+'选用预测绑定井</button>';
+  h+=CORR_WELLS.map(function(w,i){return '<div class="trow" data-act="check on" style="height:28px"><span class="ck on"></span><span class="grow">'+w+'</span><span class="chip '+(i%2?'ok':'run')+'">'+(i%2?'已绑定':'预测')+'</span></div>';}).join('');
+  return panel('井列表 · 连井剖面','well',h);
+}
+function corrToolbar(){
+  function tb(label,icn,on){return '<div class="mc-btn'+(on?' on':'')+'" data-act="toggle" data-label="'+label+'">'+ic(icn)+label+'</div>';}
+  return '<div class="map-cmdbar" style="border:1px solid var(--border);border-radius:6px;margin-bottom:10px">'+
+   '<div class="mc-group">'+tb('浏览','cursor',true)+tb('拾取','pick')+tb('连线模式','polyline')+'</div>'+
+   '<div class="mc-group">'+tb('吸附','magnet',true)+tb('自动连线','autolink')+'</div>'+
+   '<div class="mc-group">'+tb('撤销','undo')+tb('重做','redo')+'</div>'+
+   '<div class="mc-group">'+tb('DTW 传播','wave')+'</div>'+
+   '<div class="mc-group" style="gap:8px;min-width:190px"><span class="muted" style="font-size:11.5px;white-space:nowrap">间距</span><input type="range" data-bind="corrgap" min="40" max="180" value="90" style="flex:1"><b id="corrGapVal" style="font-size:11.5px">90 m</b></div>'+
+  '</div>';
+}
+function corrCanvasPanel(){
+  return '<div class="canvas-panel">'+corrToolbar()+'<div class="panel" style="flex:1;min-height:0"><div class="panel-b" id="corrWrap" style="padding:0;background:#fbf8f1">'+svgCorrelation(90)+'</div></div></div>';
+}
+function corrOps(){
+  var bts=[['导出连井剖面','export','primary'],['导出分层顶 CSV','table'],['保存解释版本','save'],['打开已保存解释','folder'],['恢复已保存版本','refresh'],['清空剖面','trash','danger']];
+  var h=bts.map(function(b){return '<button class="btn '+(b[2]||'')+(b[2]==='danger'?'':' sm')+'" style="width:100%;margin-bottom:7px;justify-content:flex-start" data-act="toast" data-label="'+b[0]+'">'+ic(b[1])+b[0]+'</button>';}).join('');
+  h+='<div class="muted" style="font-size:11px;margin-top:4px">解释版本 v4 · 保存于 08-30 16:40</div>';
+  return panel('操作','gear',h);
+}
+function corrAB(){
+  return '<div class="absfill" style="grid-template-columns:230px minmax(0,1fr) 250px">'+corrWellList()+corrCanvasPanel()+corrOps()+'</div>';
+}
+/* ================= 地震页 ================= */
+function attrPanel(){
+  var attrs=[['均方根振幅','振幅类','#c2410c'],['相干','不连续性','#4a5899'],['瞬时频率','复地震道','#0f766e'],['弧长','几何属性','#4d6b2f'],['相位','振幅类','#a44a3f']];
+  var h=attrs.map(function(a,i){return '<div class="trow" data-act="check'+(i<2?' on':'')+'" style="height:34px"><span class="ck'+(i<2?' on':'')+'"></span><span class="lg-sw" style="background:'+a[2]+';width:18px;height:12px"></span><span class="grow">'+a[0]+'</span><span class="muted" style="font-size:10.5px">'+a[1]+'</span></div>';}).join('');
+  h+='<div class="muted" style="font-size:11px;margin-top:8px">属性沿 H2-Ⅱ 沿层计算 · 时窗 ±20 ms</div>';
+  return panel('地震属性','wave',h);
+}
+function glPanel(){
+  var toolbar='<div class="ptoolbar"><span class="chip info">工区三维叠前地震体 · Inline 1200</span><span class="grow"></span>'+
+   '<div class="seg" id="glModeSeg"><i class="on" data-act="glmode" data-mode="amp">振幅</i><i data-act="glmode" data-mode="va">变面积</i><i data-act="glmode" data-mode="wig">波形</i></div>'+
+   '<button class="btn sm tgl on" id="glTieBtn" data-act="toggle" data-label="井震标定 Auto-Tie" data-repaint="glCanvas">'+ic('link')+'井震标定</button></div>';
+  var body='<div style="flex:1;min-height:0;display:flex"><canvas id="glCanvas" class="seis" data-seis="1" data-seed="7" data-mode="amp" data-tie="1" data-wells="1"></canvas>'+
+   '<div style="width:26px;flex:none;display:flex;flex-direction:column;align-items:center;padding:8px 0"><div class="grad-bar" style="flex:1"></div></div></div>';
+  return '<div class="panel canvas-panel">'+toolbar+'<div class="panel-b" style="padding:0;display:flex;flex-direction:column">'+body+'</div></div>';
+}
+function seisCtrl(){
+  var h='<div class="muted" style="font-size:11.5px;margin-bottom:5px">显示模式</div>'+
+   '<div class="seg" style="margin-bottom:14px" id="ctrlSeg"><i class="on" data-act="glmode" data-mode="amp">振幅</i><i data-act="glmode" data-mode="va">变面积</i><i data-act="glmode" data-mode="wig">波形</i></div>'+
+   '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px"><span class="grow">井震标定 Auto-Tie</span><span class="sw on" data-act="sw" data-label="井震标定 Auto-Tie"></span></div>'+
+   '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px"><span class="grow">深度域叠加显示</span><span class="sw" data-act="sw" data-label="深度域叠加显示"></span></div>'+
+   '<button class="btn primary" style="width:100%" data-act="toast" data-label="发送编图">'+ic('send')+'发送编图</button>'+
+   '<div class="muted" style="font-size:11px;margin-top:12px">预测结果将以「智能分析图层」进入编图制备。</div>';
+  return panel('智能分析控制','sliders',h);
+}
+function predSeisAB(){
+  return '<div class="absfill" style="grid-template-columns:240px minmax(0,1fr) 300px">'+attrPanel()+'<div class="canvas-panel">'+glPanel()+'</div>'+seisCtrl()+'</div>';
+}
+function sceneTree(){
+  function row(id,label,on,extra){return '<div class="trow" style="height:28px"><span class="ck'+(on?' on':'')+'" data-act="check" data-bind="3d" id="'+id+'"></span><span class="grow">'+label+'</span>'+(extra||'')+'</div>';}
+  var h=row('tree-vol','地震体 · 工区三维叠前',true)+row('tree-hor','层位 H2-Ⅱ',true)+
+   row('tree-wells','井 (W12 · W22 · W28)',true)+
+   row('tree-x','井 W31',false)+
+   row('tree-slices','切片 · Inline / Xline',true)+
+   row('tree-t','等时面 2 400 ms',true)+
+   row('tree-b','测区边界',false);
+  return panel('场景对象树','layers',h);
+}
+function view3DPanel(){
+  return panel('3D 视口 · 井震联合','cube','<div id="v3dWrap" style="height:100%;display:flex">'+svg3DView({})+'</div>',{noPad:true});
+}
+function sliceCard(){
+  return '<div class="card" style="margin-top:12px"><h4>'+ic('slice')+'切片位置</h4>'+
+   sliderRow('sl-il','Inline',0,2000,1200,'',10)+
+   sliderRow('sl-xl','Crossline',0,1600,800,'',10)+
+   sliderRow('sl-t','Time',0,3000,2400,' ms',10)+
+  '</div>';
+}
+function analysisCard(){
+  var iso='<div style="display:flex;gap:10px;align-items:center"><div style="width:130px;height:86px;overflow:hidden;border-radius:6px;border:1px solid var(--border)">'+svgThumb(12)+'</div><div class="grow"><div class="kv"><span>时间</span><b>2 400 ms</b></div><div class="kv"><span>切片方向</span><b>等时</b></div></div></div>';
+  var tie=[['W12','Δt +2.1 ms','ok'],['W22','Δt −0.8 ms','ok'],['W28','Δt +3.6 ms','warn']].map(function(t){return '<div class="trow" style="height:30px">'+ic('link')+'<span class="grow">'+t[0]+'</span><span class="chip '+t[2]+'">'+t[1]+'</span></div>';}).join('');
+  var xplot='<div style="height:210px">'+svgScatter()+'</div>';
+  var diag='<div class="muted" style="font-size:12px;margin-bottom:8px">诊断内容：切片缓存、标定残差、交会统计、引擎耗时。</div><button class="btn sm" data-act="toast" data-label="导出诊断">'+ic('export')+'导出诊断</button>';
+  return panel('分析','chart',tabsHTML('an3d',[['等时切片',iso],['井震标定',tie],['沉积相交会图',xplot],['导出诊断',diag]]),{float:true});
+}
+function strip2D(){
+  return '<div class="b2d closable" id="b2dStrip"><div class="b2d-h" data-act="collapse" data-target="#b2dStrip">'+ic('chev')+'<b>2D 切片面板 · Inline 1200</b><span class="chip">可折叠</span><span class="muted" style="margin-left:auto;font-size:11px">▾</span></div>'+
+   '<div class="b2d-body"><div style="flex:1;min-width:0;position:relative;border:1px solid var(--border);border-radius:6px;overflow:hidden"><canvas class="seis" data-seis="1" data-seed="17" data-mode="amp" data-tie="0" data-wells="0"></canvas></div>'+
+   '<div class="card" style="width:210px;flex:none"><h4 style="margin-bottom:6px">'+ic('chart')+'色标</h4><div style="display:flex;gap:8px;align-items:stretch;height:110px"><div class="grad-bar"></div><div style="display:flex;flex-direction:column;justify-content:space-between;font-size:10.5px" class="muted"><span>+A · 砂</span><span>0</span><span>−A · 泥</span></div></div></div></div></div>';
+}
+function joint3dAB(){
+  return '<div class="absfill" style="grid-template-rows:minmax(0,1fr) auto">'+
+   '<div class="absfill" style="position:relative;inset:0;grid-template-columns:235px minmax(0,1fr) 300px">'+
+    sceneTree()+'<div class="canvas-panel">'+view3DPanel()+sliceCard()+'</div>'+analysisCard()+
+   '</div>'+strip2D()+'</div>';
+}
+/* ================= 编图页 ================= */
+function mapCmdBar(){
+  function g(name,btns){
+    return '<div class="mc-group">'+btns.map(function(b){return '<div class="mc-btn'+(b[2]?' on':'')+'" data-act="'+(b[3]||'toggle')+'" data-label="'+b[0]+'">'+ic(b[1])+b[0]+'</div>';}).join('')+'<span class="mc-name">'+name+'</span></div>';
+  }
+  return '<div class="map-cmdbar">'+
+   g('导航',[['平移','move',true],['放大','zoomin'],['缩小','zoomout'],['全图','full'],['前一视图','chevdl'],['后一视图','chevdr'],['刷新','refresh']])+
+   g('选择',[['识别','target'],['选择','cursor',true],['框选','rectselect'],['测距','ruler'],['清除选择','xcircle',false,'toast']])+
+   g('编辑会话',[['切换编辑','edit',false],['保存编辑','save'],['回滚','undo',false,'toast']])+
+   g('要素编辑',[['加点','pluspt'],['加线','plusline'],['加面','pluspoly'],['移动','move'],['节点编辑','nodeedit']])+
+   g('历史',[['撤销','undo',false,'toast'],['重做','redo',false,'toast'],['删除所选','trash',false,'toast']])+
+   g('相带',[['拆分','split'],['合并','merge']])+
+   g('捕捉拓扑',[['捕捉','magnet',true],['拓扑','topology',true],['取消','x',false,'toast']])+
+  '</div>';
+}
+function layerPanel(){
+  function lr(label,ly,on){return '<div class="trow" style="height:27px"><span class="ck'+(on?' on':'')+'" data-act="layer" data-layer="'+ly+'"></span><span class="grow">'+label+'</span></div>';}
+  function grp(label,open,kids){return '<div class="tnode'+(open?' open':'')+'"><div class="trow" data-act="expand" style="font-weight:600"><span class="tw">▶</span>'+ic('layers')+label+'</div><div class="tkids">'+kids+'</div></div>';}
+  return panel('图层面板','layers',
+   grp('解释成果',true,lr('相带分区','facies',true)+lr('等值线','contour',true)+lr('断层','fault',true))+
+   grp('基础地理',true,lr('井位','wells',true)+lr('经纬网','grid',true)+lr('卫星影像底图','basemap',false)),
+  {noPad:true});
+}
+function refPanel(){
+  var items=[['砂地比',59],['泥地比',42],['古构造起伏',71],['目的层顶构造',35]];
+  var h=items.map(function(t,i){return '<div style="margin-bottom:10px"><div style="display:flex;gap:8px;align-items:center;margin-bottom:4px"><span style="width:64px;height:40px;overflow:hidden;border-radius:4px;border:1px solid var(--border);flex:none">'+svgThumb(40+i)+'</span><span class="grow" style="font-size:12.5px">'+t[0]+'</span></div><input type="range" min="0" max="100" value="'+t[1]+'" style="width:100%" title="图层不透明度"></div>';}).join('');
+  return panel('参考图','image',h);
+}
+function elemPanel(){
+  function lr(label,ly){return '<div class="trow" style="height:27px"><span class="ck on" data-act="layer" data-layer="'+ly+'"></span><span class="grow">'+label+'</span></div>';}
+  return panel('图面要素','titlet',lr('标题','el-title')+lr('图例','el-legend')+lr('比例尺','el-scale')+lr('指北针','el-north')+
+   '<div class="muted" style="font-size:11px;margin-top:8px">在画布上直接拖动图面要素（原型示意）</div>',{noPad:true});
+}
+function atlasPanel(){
+  var rows=[['H2-Ⅳ 段组图（4 幅）','ok','已生成'],['单因素图集（6 幅）','run','生成中 62%'],['古地理联查图（2 幅）','','未生成']];
+  var h=rows.map(function(r){return '<div class="trow" data-act="selrow" style="height:auto;padding:6px;flex-direction:column;align-items:flex-start;gap:3px"><div style="display:flex;gap:8px;width:100%;align-items:center">'+ic('box')+'<span class="grow">'+r[0]+'</span></div><span class="chip '+(r[1]||'')+'">'+r[2]+'</span></div>';}).join('');
+  return panel('组图','box',h);
+}
+function workbench(){
+  var attr='<table class="tbl"><thead><tr><th>fid</th><th>相带</th><th>面积 km²</th><th>周长 km</th><th>井点数</th></tr></thead><tbody>'+
+   [['1','滨浅湖砂坝','86.4','42.1','6'],['2','浅湖泥','212.7','88.3','9'],['3','滩砂','124.0','61.7','5'],['4','混积坪','98.2','52.9','4'],['5','滨浅湖砂坝','34.5','30.2','2'],['6','浅湖泥','61.9','40.8','3']]
+   .map(function(r){return '<tr><td>'+r[0]+'</td><td><span class="chip" style="background:'+FACIES.filter(function(f){return f.n===r[1];})[0].c+'33">'+r[1]+'</span></td><td>'+r[2]+'</td><td>'+r[3]+'</td><td>'+r[4]+'</td></tr>';}).join('')+'</tbody></table>';
+  var topo=[['err','相带多边形 #14 与 #17 重叠','0.8 km²'],['warn','等值线交叉 2 处','H2-Ⅱ 顶 −3 100 线'],['warn','断层 F2 未闭合','南端缺节点']]
+   .map(function(t){return '<div class="trow" data-act="selrow" style="height:auto;padding:6px 4px;flex-direction:column;align-items:flex-start;gap:3px"><div style="display:flex;gap:8px;width:100%;align-items:center"><span class="chip '+t[0]+'">'+(t[0]==='err'?'错误':'警告')+'</span><span class="grow">'+t[1]+'</span><button class="btn sm" data-act="toast" data-label="拓扑定位">定位</button></div><span class="muted" style="font-size:11px">'+t[2]+'</span></div>';}).join('');
+  var refs='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">'+[70,71,72,73].map(function(sd,i){return '<div><div style="height:92px;overflow:hidden;border-radius:6px;border:1px solid var(--border)">'+svgThumb(sd)+'</div><div style="font-size:11.5px;margin-top:4px" class="muted">'+['砂地比','泥地比','古构造','厚度'][i]+'</div></div>';}).join('')+'</div>';
+  return '<div class="wb closable" id="wbStrip"><div class="wb-bar">'+
+   '<div class="wb-tab on" data-act="tab" data-tab="wb-0">'+ic('table')+'属性表</div>'+
+   '<div class="wb-tab" data-act="tab" data-tab="wb-1">'+ic('topology')+'拓扑问题 <span class="chip err">1</span></div>'+
+   '<div class="wb-tab" data-act="tab" data-tab="wb-2">'+ic('image')+'单因素参考图</div>'+
+   '<button class="btn sm ibtn" style="margin-left:auto" data-act="collapse" data-target="#wbStrip" title="收起/展开工作台">'+ic('chev')+'</button></div>'+
+   '<div class="cbody"><div class="wb-pane on pane" data-pane="wb-0">'+attr+'</div>'+
+   '<div class="wb-pane pane" data-pane="wb-1">'+topo+'</div>'+
+   '<div class="wb-pane pane" data-pane="wb-2">'+refs+'</div></div></div>';
+}
+function mapStatus(){
+  return '<div class="mstatus"><span>坐标</span><b id="mapCoord" style="font-family:var(--mono)">—</b><span>比例尺</span><b>1:50 000</b><span>后端</span><b>Engine (Native)</b><span>测距</span><b id="mapDist">—</b><span style="margin-left:auto">EPSG:4326 · 编辑会话：未开启</span></div>';
+}
+function mapCenter(){
+  return '<div class="coord-zone" data-coordzone="mapCoord">'+svgMapCanvasMain()+
+   '<div class="ovl title" data-ly="el-title">H2-Ⅳ 段沉积相图 · 1:50 000</div>'+
+   '<div class="ovl north" data-ly="el-north">'+svgNorthSVG()+'</div>'+
+   '<div class="ovl scale" data-ly="el-scale"><div class="sbar"><i></i><i></i><i></i><i></i></div><div class="sbar-l"><span>0</span><span>2</span><span>4 km</span></div></div>'+
+   svgLegendHTML()+
+  '</div>';
+}
+function mapworkAB(){
+  return '<div class="mapwork">'+mapCmdBar()+
+   '<div class="map-mid">'+
+    '<div class="dockrail"><div class="drbtn on" data-act="dockbtn" data-target="#lpLayers" title="图层面板">'+ic('layers')+'</div></div>'+
+    '<div class="dock-col" id="lpLayers">'+layerPanel()+'</div>'+
+    '<div class="map-center-col">'+mapCenter()+workbench()+'</div>'+
+    '<div class="dock-col rr" id="rpStack">'+refPanel()+elemPanel()+atlasPanel()+'</div>'+
+    '<div class="dockrail rr">'+
+     '<div class="drbtn on" data-act="dockbtn" data-target="#rpStack .panel:nth-of-type(1)" title="参考图">'+ic('image')+'</div>'+
+     '<div class="drbtn on" data-act="dockbtn" data-target="#rpStack .panel:nth-of-type(2)" title="图面要素">'+ic('titlet')+'</div>'+
+     '<div class="drbtn on" data-act="dockbtn" data-target="#rpStack .panel:nth-of-type(3)" title="组图">'+ic('box')+'</div>'+
+    '</div>'+
+   '</div>'+mapStatus()+'</div>';
+}
+/* ================= 数据制备 / 成图审核 ================= */
+function prepTasks(){
+  var h='<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px"><button class="btn primary" style="justify-content:flex-start" data-act="toast" data-label="批量生成单因素图">'+ic('play')+'批量生成单因素图</button>'+
+   '<button class="btn" style="justify-content:flex-start" data-act="toast" data-label="生成等值线初稿">'+ic('wave')+'生成等值线初稿</button></div>';
+  var fs=[['砂地比','ok','v2'],['泥地比','ok','v2'],['古构造','ok','v1'],['目的层厚度','ok','v1'],['分选系数','run','45%'],['碳酸盐含量','','排队']];
+  h+=fs.map(function(f){return '<div class="trow" style="height:30px">'+ic('image')+'<span class="grow">'+f[0]+'</span><span class="chip '+f[1]+'">'+(f[1]==='ok'?'已生成 '+(f[2]||''):(f[2]||'排队'))+'</span></div>';}).join('');
+  return panel('单因素任务','flask',h);
+}
+function prepCenter(){
+  var thumbs=[['砂地比',81,'3.2%',90],['泥地比',74,'4.1%',91],['古构造',88,'2.2%',92],['目的层厚度',69,'5.6%',93]]
+   .map(function(t){return '<div><div style="height:110px;overflow:hidden;border-radius:6px;border:1px solid var(--border)">'+svgThumb(t[3])+'</div>'+
+   '<div style="display:flex;gap:5px;margin-top:5px;flex-wrap:wrap"><b style="font-size:12px">'+t[0]+'</b><span class="chip ok">R² 0.'+t[1]+'</span><span class="chip info">重复度 '+t[2]+'</span></div></div>';}).join('');
+  var grid=card('单因素预览网格','image','<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">'+thumbs+'</div>');
+  var wells=[['W3','0.12','通过','ok'],['W12','0.31','复核','warn'],['W22','0.08','通过','ok'],['W28','0.44','离群','err'],['W36','0.19','通过','ok'],['W45','0.27','复核','warn']]
+   .map(function(w){return '<tr><td><b>'+w[0]+'</b></td><td>'+w[1]+'</td><td><span class="chip '+w[3]+'">'+w[2]+'</span></td></tr>';}).join('');
+  var tbl=card('井点表 · 单因素 QC','well','<div style="display:flex;gap:6px;margin-bottom:8px"><button class="btn sm primary" data-act="toast" data-label="运行 MAD">'+ic('play')+'运行 MAD</button><button class="btn sm" data-act="toast" data-label="砂地比 QC">'+ic('check')+'砂地比 QC</button></div>'+
+   '<table class="tbl"><thead><tr><th>井</th><th>MAD 残差</th><th>结论</th></tr></thead><tbody>'+wells+'</tbody></table>');
+  return '<div style="display:flex;flex-direction:column;gap:12px;min-height:0">'+grid+tbl+'</div>';
+}
+function prepBoundary(){
+  var h=sliderRow('pb-th','概率阈值',0,1,0.62,'',0.01)+sliderRow('pb-sm','平滑强度',0,5,2,'')+sliderRow('pb-ar','最小图斑面积 (km²)',1,20,4,'');
+  h+='<div style="margin:6px 0 10px"><div class="muted" style="font-size:11.5px;margin-bottom:4px">相名</div><select style="width:100%"><option>滨浅湖砂坝</option><option>浅湖泥</option><option>滩砂</option><option>混积坪</option></select></div>';
+  h+='<button class="btn primary" style="width:100%" data-act="toast" data-label="生成初始边界并送入编图">'+ic('send')+'生成初始边界并送入编图</button>';
+  h+='<div class="muted" style="font-size:11px;margin-top:10px">边界将作为「初始边界图层」进入编图画布，可继续节点编辑。</div>';
+  return panel('初始岩相边界','pluspoly',h);
+}
+function prepAB(){
+  return '<div class="absfill" style="grid-template-columns:255px minmax(0,1fr) 295px">'+prepTasks()+prepCenter()+prepBoundary()+'</div>';
+}
+function qcTable(){
+  var rows=[
+   ['相带闭合性','所有相带多边形闭合、无自相交','ok','通过 18 / 18','—'],
+   ['图例一致性','图例项与相带色一一对应','warn','1 处色差','图例区'],
+   ['等值线标注','标注间距与可读性','warn','2 处过密','-3100 区段'],
+   ['断层与相带拓扑','断层切割关系检查','err','待处理 1 处','F2 南端'],
+   ['比例尺与投影','图幅投影参数一致性','ok','通过','—'],
+   ['井位标注','标注重叠与避让','ok','通过 24 / 24','—']];
+  var chipMap={ok:'<span class="chip ok">通过</span>',warn:'<span class="chip warn">警告</span>',err:'<span class="chip err">待处理</span>'};
+  var h='<div class="ptoolbar"><button class="btn sm primary" data-act="toast" data-label="运行检查">'+ic('play')+'运行检查</button><button class="btn sm" data-act="toast" data-label="规则配置">'+ic('sliders')+'规则配置</button><button class="btn sm" data-act="toast" data-label="导出检查报告">'+ic('export')+'导出检查报告</button></div>'+
+   '<div style="overflow:auto;flex:1;min-height:0"><table class="tbl"><thead><tr><th>检查项目</th><th>说明</th><th>结果</th><th>定位</th></tr></thead><tbody>'+
+   rows.map(function(r){return '<tr><td><b>'+r[0]+'</b></td><td class="muted">'+r[1]+'</td><td>'+chipMap[r[2]]+' <span class="muted" style="font-size:11px">'+r[3]+'</span></td><td>'+(r[4]==='—'?'<span class="muted">—</span>':'<button class="btn sm" data-act="toast" data-label="定位 → '+r[4]+'">'+ic('target')+'定位</button>')+'</td></tr>';}).join('')+
+   '</tbody></table></div>';
+  return panel('成图 QC 检查','check',h,{noPad:true});
+}
+function qcSummary(){
+  var h='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">'+
+   '<div style="text-align:center;background:#e2f0e4;border-radius:6px;padding:10px 4px"><div style="font-size:22px;font-weight:800;color:var(--success)">18</div><div class="muted" style="font-size:11px">通过</div></div>'+
+   '<div style="text-align:center;background:#f8ecd9;border-radius:6px;padding:10px 4px"><div style="font-size:22px;font-weight:800;color:var(--warning)">3</div><div class="muted" style="font-size:11px">警告</div></div>'+
+   '<div style="text-align:center;background:#fae2e2;border-radius:6px;padding:10px 4px"><div style="font-size:22px;font-weight:800;color:var(--error)">1</div><div class="muted" style="font-size:11px">待处理</div></div></div>';
+  h+='<div class="muted" style="font-size:11.5px;margin-bottom:5px">导出图件</div>';
+  h+=[['H2-Ⅳ 段沉积相图.tif','86 MB','ok'],['单因素图集.pdf','24 MB','ok'],['QC 检查报告.pdf','待生成','']]
+   .map(function(f){return '<div class="trow" data-act="selrow" style="height:32px">'+ic('file')+'<span class="grow" style="font-size:12px">'+f[0]+'</span><span class="chip '+(f[2]||'')+'">'+f[1]+'</span></div>';}).join('');
+  h+='<div style="display:flex;gap:6px;margin-top:10px"><button class="btn sm primary" data-act="toast" data-label="专家定稿">'+ic('check')+'专家定稿</button><button class="btn sm" data-act="toast" data-label="导出图件">'+ic('export')+'导出图件</button></div>';
+  return panel('结果摘要','chart',h);
+}
+function reviewAB(){
+  return '<div class="absfill" style="grid-template-columns:minmax(0,1fr) 330px">'+qcTable()+qcSummary()+'</div>';
+}
+/* ================= 可视化页 ================= */
+function vizBanner(){return '<div class="banner">'+ic('warn')+'<b>临时页面——验证用，正式版将并入其他页面</b><span class="muted" style="color:inherit;font-size:12px">视图追踪 / 资产选择 / 网格与地理坐标切换均为验证项</span></div>';}
+function vizTabsPanel(){
+  var panes={
+   log:'<div style="height:100%;display:flex">'+svgLogTracks(51)+'</div>',
+   mcorr:'<div style="height:100%;display:flex">'+svgCorrelation(70)+'</div>',
+   seis:'<div style="height:100%;display:flex"><canvas class="seis" data-seis="1" data-seed="61" data-mode="amp" data-tie="0" data-wells="0"></canvas></div>',
+   conn:'<div style="height:100%;display:flex">'+svgCorrelation(120)+'</div>',
+   geo:'<div style="height:100%;position:relative">'+svgMapCanvasMain()+'</div>',
+   tie:'<div style="height:100%;display:flex"><canvas class="seis" data-seis="1" data-seed="62" data-mode="amp" data-tie="1" data-wells="1"></canvas></div>',
+   eng:'<div style="height:100%;display:flex">'+svg3DView({})+'</div>'
+  };
+  var defs=[['测井',panes.log],['多井对比剖面',panes.mcorr],['地震',panes.seis],['连井',panes.conn],['古地理',panes.geo],['井震标定',panes.tie],['引擎预览',panes.eng]];
+  return '<div class="panel" style="flex:1;min-height:0"><div class="panel-h">'+ic('chart')+'<span>视图预览</span><span class="chip info">视图追踪中</span></div>'+
+   '<div class="tabbed" style="display:flex;flex-direction:column;min-height:0;flex:1">'+
+   '<div class="tabs viz-tabs">'+defs.map(function(d,i){return '<div class="tab '+(i===0?'on':'')+'" data-act="tab" data-tab="vz-'+i+'">'+d[0]+'</div>';}).join('')+'</div>'+
+   defs.map(function(d,i){return '<div class="pane '+(i===0?'on':'')+'" data-pane="vz-'+i+'" style="flex:1;min-height:420px;position:relative">'+d[1]+'</div>';}).join('')+
+   '</div></div>';
+}
+function vizTrackPanel(){
+  var rows=[['14:32','测井视图 · W28'],['13:50','地震视图 · Inline 1200'],['11:20','古地理视图 · H2-Ⅳ'],['昨天','连井视图 · W8–W36']]
+   .map(function(r){return '<div class="act-row"><time>'+r[0]+'</time><span>'+r[1]+'</span></div>';}).join('');
+  var h=rows+'<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap"><button class="btn sm primary" data-act="toast" data-label="刷新视图">'+ic('refresh')+'刷新视图</button>'+
+   '<button class="btn sm" data-act="toast" data-label="导出 PNG">'+ic('image')+'导出 PNG</button>'+
+   '<button class="btn sm" data-act="toast" data-label="导出 SVG">'+ic('export')+'导出 SVG</button>'+
+   '<button class="btn sm" data-act="toast" data-label="导出 PDF">'+ic('file')+'导出 PDF</button></div>';
+  return panel('视图追踪','clock',h);
+}
+function vizSourcePanel(){
+  var h='<div class="muted" style="font-size:11.5px;margin-bottom:4px">数据资产</div><select style="width:100%;margin-bottom:12px"><option>工区三维叠前地震体.sgy</option><option>W28_测井曲线.las</option><option>H2-Ⅱ层位解释.xml</option></select>'+
+   '<div class="muted" style="font-size:11.5px;margin-bottom:5px">坐标显示</div>'+
+   '<div class="seg" style="width:100%"><i class="on" style="flex:1;justify-content:center" data-act="segto">网格(IL/XL)</i><i style="flex:1;justify-content:center" data-act="segto">地理(X/Y)</i></div>'+
+   '<div class="muted" style="font-size:11px;margin-top:10px">网格坐标用于地震域视图，地理坐标用于图件域视图。</div>';
+  return panel('数据源与坐标','db',h);
+}
+function vizAB(){
+  return '<div style="display:flex;flex-direction:column;gap:12px;height:100%;min-height:0">'+vizBanner()+
+   '<div class="absfill" style="position:relative;inset:auto;flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 320px">'+vizTabsPanel()+vizTrackPanel()+vizSourcePanel()+'</div></div>';
+}
+/* ================= 模块注册：内容组件三变体共享 ================= */
+var MODS={
+ 'data/overview':{label:'项目概述',
+  ab:function(){return '<div class="flowwrap">'+
+   '<div class="card a-wf"><h4>'+ic('clock')+'<span>工作流进度</span><span class="chip ok" style="margin-left:auto">阶段 1 已完成</span></h4>'+wfProgress()+'</div>'+
+   overviewMapCard()+startCard()+integrityCard()+flowCard()+activityCard()+'</div>';},
+  c:function(){return {left:[{t:'启动指南',i:'play',b:startBodyOnly()}],
+   right:[{t:'数据完整性',i:'shield',b:integrityBodyOnly()},{t:'最近活动',i:'clock',b:activityBodyOnly()}],
+   bottom:null,
+   center:'<div style="display:flex;flex-direction:column;gap:12px;min-height:100%">'+
+    '<div class="card"><h4>'+ic('clock')+'<span>工作流进度</span></h4>'+wfProgress()+'</div>'+
+    '<div class="card" style="height:430px;padding:0;display:flex;flex-direction:column;overflow:hidden"><div class="map-head">'+ic('map')+'<span class="map-head-t grow">工区地图 · '+PROJ.name+'</span></div>'+
+     '<div class="coord-zone" data-coordzone="ovCoord" style="border-radius:0">'+svgSurveyMap()+'</div>'+
+     '<div class="coord-strip"><span>坐标</span><b id="ovCoord" style="color:var(--text-primary)">—</b><span style="margin-left:auto">EPSG:4326</span></div></div>'+
+    flowCard()+'</div>'};}},
+ 'data/manage':{label:'数据管理',ab:dataManageAB,
+  c:function(){return {left:[{t:'导航树',i:'layers',b:navTree()}],
+   right:[{t:'阅读器',i:'eye',b:readerBodyOnly()},{t:'检查器',i:'info',b:inspectorBodyOnly()}],
+   bottom:{t:'资产表',i:'table',b:assetTable()},
+   center:'<div style="display:flex;flex-direction:column;gap:12px;min-height:100%">'+wellMapStrip()+'<div class="panel grow" style="min-height:300px"><div class="panel-h">'+ic('table')+'<span>井位地图（大图视图）</span></div><div class="coord-zone grow" data-coordzone="ovCoord" style="border-radius:0 0 8px 8px">'+svgSurveyMap()+'</div></div></div>'};}},
+ 'well/logpred':{label:'测井预测',ab:logPredAB,
+  c:function(){return {left:[{t:'任务列表',i:'clock',b:taskListBody()}],right:[{t:'证据',i:'chart',b:evidenceBody()}],
+   bottom:null,center:'<div class="canvas-panel" style="height:100%">'+logCanvasPanel()+'</div>'};}},
+ 'well/seq':{label:'层序格架',ab:seqAB,
+  c:function(){return {left:[{t:'层序格架设置',i:'sliders',b:seqSettingsBody()}],right:[{t:'方案摘要',i:'bookmark',b:seqSummaryBody()}],
+   bottom:null,center:seqTable()};}},
+ 'well/corr':{label:'地层对比',ab:corrAB,
+  c:function(){return {left:[{t:'井列表 · 连井剖面',i:'well',b:corrWellBody()}],right:[{t:'操作',i:'gear',b:corrOpsBody()}],
+   bottom:null,center:'<div class="canvas-panel" style="height:100%">'+corrToolbar()+corrCanvas()+'</div>'};}},
+ 'seis/pred':{label:'地震预测',ab:predSeisAB,
+  c:function(){return {left:[{t:'地震属性',i:'wave',b:attrBody()}],right:[{t:'智能分析控制',i:'sliders',b:seisCtrlBody()}],
+   bottom:null,center:'<div class="canvas-panel" style="height:100%">'+glPanel()+'</div>'};}},
+ 'seis/joint3d':{label:'井震联合3D',ab:joint3dAB,
+  c:function(){return {left:[{t:'场景对象树',i:'layers',b:sceneBody()}],right:[{t:'分析',i:'chart',b:analysisBody()}],
+   bottom:{t:'2D 切片面板 + 色标',i:'slice',b:strip2DBody()},
+   center:'<div style="display:flex;flex-direction:column;height:100%;min-height:0">'+view3DPanel()+sliceCard()+'</div>'};}},
+ 'map/canvas':{label:'编图画布',ab:mapworkAB,
+  c:function(){return {left:[{t:'图层面板',i:'layers',b:layerBodyOnly()}],
+   right:[{t:'参考图',i:'image',b:refBodyOnly()},{t:'图面要素',i:'titlet',b:elemBodyOnly()},{t:'组图',i:'box',b:atlasBodyOnly()}],
+   bottom:{t:'工作台',i:'table',b:workbenchBodyOnly()},
+   center:'<div class="map-center-col">'+mapCmdBar()+mapCenter()+mapStatus()+'</div>'};}},
+ 'map/prep':{label:'数据制备',ab:prepAB,
+  c:function(){return {left:[{t:'单因素任务',i:'flask',b:prepTasksBody()}],right:[{t:'初始岩相边界',i:'pluspoly',b:prepBoundaryBody()}],
+   bottom:null,center:prepCenter()};}},
+ 'map/review':{label:'成图审核',ab:reviewAB,
+  c:function(){return {left:[{t:'结果摘要',i:'chart',b:qcSummaryBody()}],right:null,
+   bottom:null,center:qcTable()};}},
+ 'viz/-':{label:'可视化',ab:vizAB,
+  c:function(){return {left:[{t:'视图追踪',i:'clock',b:vizTrackBody()}],right:[{t:'数据源与坐标',i:'db',b:vizSourceBody()}],
+   bottom:null,center:'<div style="display:flex;flex-direction:column;gap:12px;height:100%;min-height:0">'+vizBanner()+vizTabsPanel()+'</div>'};}}
+};
+/* --- body-only 辅助（供 C dock 复用，去掉 panel 外壳） --- */
+function taskListBody(){return taskList().replace(/^<div class="panel"><div class="panel-h">.*?<\/div>/,'').replace(/<div class="panel-b">/,'').replace(/<\/div><\/div>$/,'');}
+function _peel(html){var m=html.match(/^<div class="panel"><div class="panel-h">[\s\S]*?<\/div><div class="panel-b"[^>]*>([\s\S]*)<\/div><\/div>$/);return m?m[1]:html;}
+function evidenceBody(){return _peel(evidencePanel());}
+function seqSettingsBody(){return _peel(seqSettings());}
+function seqSummaryBody(){return _peel(seqSummary());}
+function corrWellBody(){return _peel(corrWellList());}
+function corrOpsBody(){return _peel(corrOps());}
+function corrCanvas(){return '<div class="panel" style="flex:1;min-height:0"><div class="panel-b" id="corrWrap" style="padding:0;background:#fbf8f1">'+svgCorrelation(90)+'</div></div>';}
+function attrBody(){return _peel(attrPanel());}
+function seisCtrlBody(){return _peel(seisCtrl());}
+function sceneBody(){return _peel(sceneTree());}
+function analysisBody(){return _peel(analysisCard());}
+function strip2DBody(){return strip2D();}
+function layerBodyOnly(){return _peel(layerPanel());}
+function refBodyOnly(){return _peel(refPanel());}
+function elemBodyOnly(){return _peel(elemPanel());}
+function atlasBodyOnly(){return _peel(atlasPanel());}
+function workbenchBodyOnly(){return workbench();}
+function prepTasksBody(){return _peel(prepTasks());}
+function prepBoundaryBody(){return _peel(prepBoundary());}
+function qcSummaryBody(){return _peel(qcSummary());}
+function vizTrackBody(){return _peel(vizTrackPanel());}
+function vizSourceBody(){return _peel(vizSourcePanel());}
+function readerBodyOnly(){var m=readerPanel().match(/^<div class="panel"><div class="panel-h">[\s\S]*?<\/div><div class="panel-b"[^>]*>([\s\S]*)<\/div><\/div>$/);return m?m[1]:'';}
+function inspectorBodyOnly(){var m=inspectorPanel().match(/^<div class="panel"><div class="panel-h">[\s\S]*?<\/div><div class="panel-b"[^>]*>([\s\S]*)<\/div><\/div>$/);return m?m[1]:'';}
+function _peelCard(html){return html.replace(/^<div class="card[^"]*"><h4>[\s\S]*?<\/h4>/,'').replace(/<\/div>$/,'');}
+function integrityBodyOnly(){return _peelCard(integrityCard());}
+function activityBodyOnly(){return _peelCard(activityCard());}
+function startBodyOnly(){return _peelCard(startCard());}
+/* ================= 地震剖面 Canvas 绘制 ================= */
+function drawWellCol(ctx,x,label,hor){
+  var h=ctx.canvas.height;
+  ctx.strokeStyle='rgba(242,247,245,0.9)';ctx.lineWidth=1.6;
+  ctx.beginPath();ctx.moveTo(x,16);ctx.lineTo(x,h-10);ctx.stroke();
+  ctx.fillStyle='#f2b53a';
+  for(var i=0;i<hor.length;i+=2){var yy=hor[i].y0+hor[i].dip*x;ctx.beginPath();ctx.moveTo(x-5,yy);ctx.lineTo(x+5,yy);ctx.lineTo(x,yy+7);ctx.closePath();ctx.fill();}
+  ctx.fillStyle='#f2f7f5';ctx.font='bold 11px sans-serif';ctx.fillText(label,x+6,26);
+}
+function paintSeismic(cv,seed,o){
+  o=o||{};
+  if(!cv||!cv.getContext)return;
+  var w=cv.clientWidth||640,h=cv.clientHeight||380;
+  if(cv.width!==w)cv.width=w;
+  if(cv.height!==h)cv.height=h;
+  var ctx=cv.getContext('2d');
+  var rnd=mulberry32(seed||7);
+  var hor=[],i,k;
+  for(i=0;i<9;i++)hor.push({y0:18+i*(h-36)/9+rnd()*8,dip:(rnd()-0.5)*0.10,amp:0.45+rnd()*0.5});
+  var mode=o.mode||'amp';
+  var NEG=[20,69,79],ZERO=[233,226,208],POS=[194,65,12];
+  if(mode==='wig'){
+    ctx.fillStyle='#101b18';ctx.fillRect(0,0,w,h);
+    ctx.strokeStyle='rgba(233,226,208,0.72)';ctx.lineWidth=1;
+    for(var x2=8;x2<w;x2+=13){
+      ctx.beginPath();
+      for(var y2=0;y2<h;y2+=3){
+        var a2=0;
+        for(k=0;k<hor.length;k++){var H3=hor[k],d2=y2-(H3.y0+H3.dip*x2);a2+=Math.cos(d2*0.55)*Math.exp(-Math.abs(d2)/9)*H3.amp;}
+        a2+=(rnd()-0.5)*0.2;
+        var px=x2+a2*9;
+        if(y2===0)ctx.moveTo(px,y2);else ctx.lineTo(px,y2);
+      }
+      ctx.stroke();
+    }
+  }else{
+    ctx.fillStyle='#0d1514';ctx.fillRect(0,0,w,h);
+    for(var x=0;x<w;x+=2){
+      for(var y=0;y<h;y+=2){
+        var a=0;
+        for(k=0;k<hor.length;k++){var H2=hor[k],d=y-(H2.y0+H2.dip*x);a+=Math.cos(d*0.55)*Math.exp(-Math.abs(d)/9)*H2.amp;}
+        a+=(rnd()-0.5)*0.22;
+        if(a>1)a=1;if(a<-1)a=-1;
+        var c;
+        if(mode==='va'&&a<=0)c=[16,27,24];
+        else c=a<0?mix(ZERO,NEG,-a):mix(ZERO,POS,a);
+        ctx.fillStyle='rgb('+c[0]+','+c[1]+','+c[2]+')';
+        ctx.fillRect(x,y,2,2);
+      }
+    }
+  }
+  ctx.strokeStyle='rgba(255,255,255,0.08)';
+  ctx.fillStyle='rgba(238,244,241,0.4)';
+  ctx.font='9px monospace';
+  for(var ty=42;ty<h;ty+=62){
+    ctx.beginPath();ctx.moveTo(0,ty);ctx.lineTo(w,ty);ctx.stroke();
+    ctx.fillText((ty*8)+' ms',4,ty-3);
+  }
+  if(o.wells){drawWellCol(ctx,w*0.24,'W12',hor);drawWellCol(ctx,w*0.66,'W28',hor);}
+  if(o.tie){
+    var wxs=[w*0.24,w*0.66];
+    ctx.strokeStyle='#f2b53a';ctx.setLineDash([4,3]);
+    for(i=0;i<wxs.length;i++){
+      for(k=1;k<hor.length;k+=3){
+        var yy2=hor[k].y0+hor[k].dip*wxs[i];
+        ctx.beginPath();ctx.moveTo(wxs[i]-8,yy2);ctx.lineTo(wxs[i]-52,yy2);ctx.stroke();
+        ctx.beginPath();ctx.arc(wxs[i]-56,yy2,3,0,6.3);ctx.stroke();
+      }
+    }
+    ctx.setLineDash([]);
+    ctx.fillStyle='#f2b53a';ctx.font='bold 10px sans-serif';
+    ctx.fillText('Auto-Tie',12,h-14);
+  }
+}
+/* ================= Ribbon 配置 ================= */
+function RB(label,icon,o){o=o||{};o.label=label;o.icon=icon;return o;}
+var RIB_DATA=[
+ {name:'工程',size:'lg',items:[RB('新建工程','file',{primary:true}),RB('打开工程','folder'),RB('打开样例','box'),RB('保存工程','save'),RB('工程属性','info')]},
+ {name:'导入',size:'lg',items:[RB('导入文件','import'),RB('导入目录','folderplus'),RB('重新扫描','refresh'),RB('完整性校验','check'),RB('健康检查','shield')]},
+ {name:'资产',size:'sm',items:[RB('标签筛选','filter'),RB('标签管理','tag'),RB('移出项目','remove'),RB('打开目录','ext'),RB('导出','export'),RB('纳管外部数据','link')]},
+ {name:'视图',size:'sm',items:[RB('预览栏显隐','eye'),RB('列设置','columns'),RB('清除预览缓存','trash'),RB('界面密度','density',{act:'density'})]}
+];
+var RIBBONS={};
+RIBBONS['data/overview']=RIB_DATA;
+RIBBONS['data/manage']=RIB_DATA;
+RIBBONS['well/logpred']=[
+ {name:'数据源',size:'lg',items:[RB('测井数据源选择','db'),RB('导入 LAS','import'),RB('导入 XML','import')]},
+ {name:'预测',size:'lg',items:[RB('运行线上测井预测','play',{primary:true}),RB('运行演示预测','flask'),RB('证据贡献','chart')]},
+ {name:'导出',size:'lg',items:[RB('导出单井剖面','export'),RB('发送制备','send')]},
+ {name:'显示',size:'sm',items:[RB('井道显示设置','sliders'),RB('后端切换 Legacy/Engine','switch')]}
+];
+RIBBONS['well/seq']=[
+ {name:'目标',size:'lg',items:[RB('设为目标层位','target')]},
+ {name:'方案',size:'lg',items:[RB('保存层序方案','save',{primary:true}),RB('绑定下游','downlink')]}
+];
+RIBBONS['well/corr']=[
+ {name:'数据',size:'lg',items:[RB('加载连井剖面','polyline'),RB('选用预测绑定井','link')]},
+ {name:'工具',size:'sm',items:[RB('浏览','cursor',{toggle:true,on:true}),RB('拾取','pick',{toggle:true}),RB('连线模式','polyline',{toggle:true}),RB('吸附','magnet',{toggle:true,on:true}),RB('自动连线','autolink'),RB('DTW 传播','wave')]},
+ {name:'历史',size:'sm',items:[RB('撤销','undo'),RB('重做','redo')]},
+ {name:'解释',size:'sm',items:[RB('保存解释版本','save'),RB('打开已保存解释','folder'),RB('恢复已保存版本','refresh'),RB('清空剖面','trash')]},
+ {name:'导出',size:'sm',items:[RB('导出连井剖面','export'),RB('导出分层顶 CSV','table')]}
+];
+RIBBONS['seis/pred']=[
+ {name:'数据',size:'lg',items:[RB('工区地震体选择','db'),RB('属性','sliders'),RB('详情','info')]},
+ {name:'预测',size:'lg',items:[RB('运行预测','play',{primary:true}),RB('运行演示预测','flask')]},
+ {name:'分析',size:'lg',items:[RB('显示模式','sliders'),RB('井震标定','link'),RB('发送编图','send',{primary:true})]}
+];
+RIBBONS['seis/joint3d']=[
+ {name:'场景',size:'lg',items:[RB('从工程刷新','refresh'),RB('域 Time-Depth 切换','domain'),RB('3D 模式','cube')]},
+ {name:'切片',size:'sm',items:[RB('添加','pluspt'),RB('显隐','eye'),RB('删除','trash')]},
+ {name:'视角',size:'lg',items:[RB('透视','cube'),RB('俯瞰','full'),RB('复位','refresh')]},
+ {name:'交互',size:'lg',items:[RB('选井两点','well2'),RB('画线吸附','magnet'),RB('井间剖面','section')]}
+];
+RIBBONS['map/canvas']=[
+ {name:'图面要素',size:'sm',items:[RB('标题','titlet',{act:'ely',layer:'el-title',toggle:true,on:true}),RB('图例','legend',{act:'ely',layer:'el-legend',toggle:true,on:true}),RB('比例尺','scalebar',{act:'ely',layer:'el-scale',toggle:true,on:true}),RB('指北针','north',{act:'ely',layer:'el-north',toggle:true,on:true})]},
+ {name:'面板',size:'sm',items:[RB('图层面板','layers'),RB('参考图','image'),RB('图面要素','titlet'),RB('组图','box')]},
+ {name:'工作台',size:'sm',items:[RB('属性表','table',{act:'tab',tab:'wb-0'}),RB('拓扑问题','topology',{act:'tab',tab:'wb-1'}),RB('单因素参考图','image',{act:'tab',tab:'wb-2'})]}
+];
+RIBBONS['map/prep']=[
+ {name:'单因素',size:'lg',items:[RB('批量生成单因素图','play',{primary:true}),RB('生成等值线初稿','wave')]},
+ {name:'QC',size:'lg',items:[RB('运行 MAD','play'),RB('砂地比 QC','check')]},
+ {name:'初始边界',size:'lg',items:[RB('生成初始边界并送入编图','send',{primary:true})]}
+];
+RIBBONS['map/review']=[
+ {name:'检查',size:'lg',items:[RB('运行检查','play',{primary:true}),RB('规则配置','sliders'),RB('导出检查报告','export'),RB('专家定稿','check')]}
+];
+RIBBONS['viz/-']=[
+ {name:'视图',size:'lg',items:[RB('刷新视图','refresh',{primary:true}),RB('数据资产选择','db')]},
+ {name:'导出',size:'lg',items:[RB('导出 PNG','image'),RB('导出 SVG','export'),RB('导出 PDF','file')]},
+ {name:'坐标显示',size:'sm',items:[RB('网格(IL/XL)','grid',{toggle:true,on:true}),RB('地理(X/Y)','map',{toggle:true})]}
+];
+function ribbonGroups(m){
+  var gs=m.ribbon||RIBBONS[state.page+'/'+(state.sub||'-')]||[];
+  var subs=SUBS[state.page]||[];
+  if(state.variant==='B'&&subs.length){
+    var pageIc=pageById(state.page).icon;
+    gs=[{name:'子模块',size:'lg',subSwitch:true,items:subs.map(function(s){return RB(s.label,pageIc,{sub:true,subId:s.id,on:s.id===state.sub});})}].concat(gs);
+  }
+  return gs;
+}
+function rbBtn(b){
+  var attrs;
+  if(b.sub)attrs=' data-act="nav" data-page="'+state.page+'" data-sub="'+b.subId+'"';
+  else{
+    var act=b.act||(b.toggle?'toggle':'toast');
+    attrs=' data-act="'+act+'" data-label="'+b.label+'"';
+    if(b.layer)attrs+=' data-layer="'+b.layer+'"';
+    if(b.tab)attrs+=' data-tab="'+b.tab+'"';
+  }
+  return '<div class="rb-btn '+(b.primary?'primary ':'')+(b.sub?'subbtn ':'')+(b.toggle?'tglb ':'')+(b.on?'on':'')+'"'+attrs+' title="'+b.label+'">'+ic(b.icon)+'<span>'+b.label+'</span></div>';
+}
+function ribbonHTML(gs){
+  return gs.map(function(g){
+    return '<div class="rb-group '+(g.size==='sm'?'sm':'lg')+(g.subSwitch?' rb-subgroup':'')+'">'+
+     '<div class="rb-items">'+g.items.map(rbBtn).join('')+'</div>'+
+     '<div class="rb-name">'+g.name+'</div></div>';
+  }).join('');
+}
+/* ================= 壳层 ================= */
+function pageById(id){for(var i=0;i<PAGES.length;i++){if(PAGES[i].id===id)return PAGES[i];}return PAGES[0];}
+function mod(){return MODS[state.page+'/'+(state.sub||'-')]||MODS['data/overview'];}
+function navTabsHTML(){
+  return PAGES.map(function(p){
+    return '<div class="ribtab'+(p.id===state.page?' on':'')+'" data-act="nav" data-page="'+p.id+'">'+ic(p.icon)+p.label+
+     (p.tag?'<span class="chip warn" style="height:15px;font-size:10px">'+p.tag+'</span>':'')+'</div>';
+  }).join('');
+}
+function subBarHTML(kind){
+  var subs=SUBS[state.page]||[];
+  if(kind==='A'){
+    if(!subs.length)return '';
+    return '<div class="subpillbar"><span class="subpill-lbl">子模块</span>'+subs.map(function(s){
+      var icn=subIcon(state.page,s.id);
+      return '<div class="subpill'+(s.id===state.sub?' on':'')+'" data-act="nav" data-page="'+state.page+'" data-sub="'+s.id+'">'+(icn!=='dot'?ic(icn):'')+s.label+'</div>';
+    }).join('')+'</div>';
+  }
+  return '';
+}
+function shellA(){
+  var m=mod();
+  return '<header class="topbar">'+
+   '<div class="brand">'+ic('logo')+'paleo_workbench<span>古地理工作台 · UI v2</span></div>'+
+   '<nav class="ribtabs">'+navTabsHTML()+'</nav>'+
+   '<div class="grow"></div>'+
+   '<div class="gsearch">'+ic('search')+'<input id="gsearch" placeholder="全局搜索：井 / 地震体 / 图件 / 命令"></div>'+
+  '</header>'+
+  '<div class="ribbon">'+ribbonHTML(ribbonGroups(m))+'</div>'+
+  subBarHTML('A')+
+  '<main class="content">'+m.ab()+'</main>';
+}
+function shellB(){
+  var m=mod();
+  var menuItems=[['新建工程','file'],['打开工程','folder'],['打开样例工程','box'],['保存工程','save'],['工程属性','info']];
+  return '<aside class="rail">'+
+   '<div class="railbrand" title="paleo_workbench">'+ic('logo')+'</div>'+
+   PAGES.map(function(p){
+     return '<div class="railbtn'+(p.id===state.page?' on':'')+'" data-act="nav" data-page="'+p.id+'" title="'+p.label+'">'+ic(p.icon)+'<span class="vtx">'+p.label+'</span></div>';
+   }).join('')+
+   '<div class="railspace"></div>'+
+   '<div class="railbtn" data-act="toast" data-label="设置">'+ic('gear')+'<span class="vtx">设置</span></div>'+
+  '</aside><div class="b-main">'+
+   '<header class="cmdrow">'+
+    '<button class="btn" data-act="menu">'+ic('menu')+'工程 ▾</button>'+
+    '<div class="gsearch grow" style="max-width:540px">'+ic('search')+'<input placeholder="全局搜索：井 / 地震体 / 图件 / 命令" style="width:100%"></div>'+
+    '<button class="btn" data-act="density">'+ic('density')+'界面密度</button>'+
+   '</header>'+
+   '<div class="pmenu" id="projMenu">'+menuItems.map(function(t){return '<div data-act="toast" data-label="'+t[0]+'">'+ic(t[1])+t[0]+'</div>';}).join('')+'</div>'+
+   '<div class="ribbon">'+ribbonHTML(ribbonGroups(m))+'</div>'+
+   '<main class="content">'+m.ab()+'</main>'+
+  '</div>';
+}
+function shellC(){
+  var m=mod(),d=m.c(),key=dockKey(),st=dockState[key];
+  if(!st){st=dockState[key]={left:(d.left||[]).map(function(){return true;}),right:(d.right||[]).map(function(){return true;}),bottom:!!d.bottom};}
+  var subs=SUBS[state.page]||[];
+  function railBtns(side){
+    var arr=d[side]||[];
+    if(!arr.length)return '';
+    return '<div class="dockrail'+(side==='right'?' rr':'')+'">'+arr.map(function(it,i){
+      return '<div class="drbtn'+(st[side][i]?' on':'')+'" data-act="cdock" data-side="'+side+'" data-idx="'+i+'" title="'+it.t+'">'+ic(it.i)+'</div>';
+    }).join('')+'</div>';
+  }
+  function docksHTML(side){
+    var arr=d[side]||[];
+    if(!arr.length)return '';
+    return '<div class="dock-col-c">'+arr.map(function(it,i){
+      var pad0=/^(<div class="tnode|<table|<div class="ptoolbar|<div class="tabs)/.test(it.b);
+      return '<div class="dock" style="'+(st[side][i]?'':'display:none')+'">'+
+       '<div class="panel-h">'+ic(it.i)+'<span>'+it.t+'</span><span class="flic" title="可浮动（原型提示）" data-act="toast" data-label="浮动面板 · 原型提示">⇱</span></div>'+
+       '<div class="panel-b" style="padding:'+(pad0?'6px':'12px')+'">'+it.b+'</div></div>';
+    }).join('')+'</div>';
+  }
+  var seg='';
+  if(subs.length){
+    seg='<div class="c-subseg"><span class="lbl">子模块</span><div class="seg big">'+subs.map(function(s){
+      return '<i class="'+(s.id===state.sub?'on':'')+'" data-act="nav" data-page="'+state.page+'" data-sub="'+s.id+'">'+ic(subIcon(state.page,s.id))+s.label+'</i>';
+    }).join('')+'</div></div>';
+  }
+  var bottomHTML='';
+  if(d.bottom){
+    bottomHTML='<div class="dock dock-bottom closable'+(st.bottom?'':' closed')+'">'+
+     '<div class="panel-h" style="cursor:pointer" data-act="cbottom">'+ic(d.bottom.i)+'<span>'+d.bottom.t+'</span><span style="margin-left:auto">'+(st.bottom?'▾ 收起':'▸ 展开')+'</span></div>'+
+     '<div class="cbody" style="flex:1;min-height:0;overflow:auto;padding:0">'+d.bottom.b+'</div></div>';
+  }
+  return '<header class="ctabs-row">'+
+   '<div class="cbrand">'+ic('logo')+'paleo_workbench</div>'+
+   '<div class="ctabs">'+PAGES.map(function(p){
+     return '<div class="ctab'+(p.id===state.page?' on':'')+'" data-act="nav" data-page="'+p.id+'">'+ic(p.icon)+p.label+
+      (p.tag?'<span class="chip warn" style="height:16px;font-size:10px;background:#f8ecd9;color:#b45309">'+p.tag+'</span>':'')+
+      '<span class="x" data-act="noclose">✕</span></div>';
+   }).join('')+'</div>'+
+   '<div class="csearch">'+ic('search')+'<input placeholder="搜索…"></div>'+
+  '</header>'+
+  '<div class="ribbon c">'+ribbonHTML(ribbonGroups(m))+'</div>'+
+  '<div class="c-work">'+
+   railBtns('left')+docksHTML('left')+
+   '<div class="c-midcol" data-coordzone="sbCoord">'+
+    '<div class="c-center">'+seg+d.center+'</div>'+bottomHTML+
+   '</div>'+
+   docksHTML('right')+railBtns('right')+
+  '</div>'+
+  '<footer class="statusbar"><span>坐标</span><b id="sbCoord" style="font-family:var(--mono)">—</b><span>比例尺 1:50 000</span><span>EPSG:4326</span><span>后端 Engine (Native)</span><span class="sb-r"><span>项目：'+PROJ.name+'</span><span>● 就绪</span></span></footer>';
+}
+/* ================= 渲染 & 导航 ================= */
+function render(){
+  var app=document.getElementById('app');
+  /* CSS 类名区分大小写：变体代号须转小写（app-A 无法命中 .app-a） */
+  app.className='app app-'+state.variant.toLowerCase()+(state.dense?' compact':'');
+  var m=mod();
+  app.innerHTML=state.variant==='A'?shellA():(state.variant==='B'?shellB():shellC());
+  afterMount();
+  var lb=document.getElementById('vLabel');
+  if(lb)lb.textContent='变体 '+state.variant+' · '+VARIANTS[state.variant]+'  ['+({A:1,B:2,C:3})[state.variant]+'/3]';
+}
+function nav(page,sub){
+  if(page&&PAGES.some(function(p){return p.id===page;}))state.page=page;
+  var subs=SUBS[state.page]||[];
+  if(subs.length){
+    if(sub&&subs.some(function(s){return s.id===sub;}))state.sub=sub;
+    else if(!subs.some(function(s){return s.id===state.sub;}))state.sub=subs[0].id;
+  }else state.sub=null;
+  render();
+}
+function switchVariant(dir){
+  var order=['A','B','C'],i=order.indexOf(state.variant);
+  i=(i+dir+order.length)%order.length;
+  state.variant=order[i];
+  try{
+    var sp=new URLSearchParams(location.search);
+    sp.set('variant',state.variant);
+    history.replaceState(null,'',location.pathname+'?'+sp.toString());
+  }catch(e){}
+  render();
+  toast('原型变体 → '+state.variant+' · '+VARIANTS[state.variant]);
+}
+function update3D(){
+  var wrap=document.getElementById('v3dWrap');
+  if(!wrap)return;
+  function g(id){return document.getElementById(id);}
+  function ck(id){var e2=g(id);return e2?e2.classList.contains('on'):true;}
+  var il=g('sl-il'),xl=g('sl-xl'),t=g('sl-t');
+  wrap.innerHTML=svg3DView({il:il?+il.value:1200,xl:xl?+xl.value:800,tm:t?+t.value:2400,fl:{wells:ck('tree-wells'),vol:ck('tree-vol'),slices:ck('tree-slices')}});
+  ['sl-il','sl-xl','sl-t'].forEach(function(id){var l=g(id+'Val'),s=g(id);if(l&&s)l.textContent=s.value+(id==='sl-t'?' ms':'');});
+}
+function afterMount(){
+  var cvs=document.querySelectorAll('canvas[data-seis]');
+  for(var i=0;i<cvs.length;i++){
+    var cv=cvs[i];
+    paintSeismic(cv,parseInt(cv.getAttribute('data-seed'),10)||7,{mode:cv.getAttribute('data-mode')||'amp',tie:cv.getAttribute('data-tie')==='1',wells:cv.getAttribute('data-wells')!=='0'});
+  }
+}
+/* ================= 事件 ================= */
+function toastMsg(b){
+  var label=b.getAttribute('data-label')||(b.textContent||'').trim().slice(0,24);
+  toast('【原型】已点击「'+label+'」— 无持久化');
+}
+document.addEventListener('click',function(e){
+  var b=e.target&&e.target.closest?e.target.closest('[data-act]'):null;
+  var pm=document.getElementById('projMenu');
+  if(pm&&!e.target.closest('#projMenu')&&!(b&&b.getAttribute('data-act')==='menu'))pm.classList.remove('open');
+  if(!b)return;
+  var act=(b.getAttribute('data-act')||'').split(' ')[0];
+  switch(act){
+    case 'nav':nav(b.getAttribute('data-page'),b.getAttribute('data-sub'));break;
+    case 'variant':switchVariant(parseInt(b.getAttribute('data-dir'),10));break;
+    case 'toggle':{
+      b.classList.toggle('on');
+      var on=b.classList.contains('on');
+      toast('【原型】「'+(b.getAttribute('data-label')||'')+'」'+(on?'已开启':'已关闭'));
+      var rp=b.getAttribute('data-repaint');
+      if(rp){var cv=document.getElementById(rp);if(cv){cv.setAttribute('data-tie',on?'1':'0');paintSeismic(cv,parseInt(cv.getAttribute('data-seed'),10)||7,{mode:cv.getAttribute('data-mode'),tie:on,wells:cv.getAttribute('data-wells')!=='0'});}}
+      break;}
+    case 'toast':toastMsg(b);break;
+    case 'tab':{
+      var scope=b.closest('.tabbed')||b.closest('.wb')||document.querySelector('.wb');
+      if(scope){
+        var tabs=scope.querySelectorAll('.tab,.wb-tab');
+        for(var i=0;i<tabs.length;i++)tabs[i].classList.toggle('on',tabs[i]===b);
+        var panes=scope.querySelectorAll('.pane');
+        for(var j=0;j<panes.length;j++)panes[j].classList.toggle('on',panes[j].getAttribute('data-pane')===b.getAttribute('data-tab'));
+      }
+      break;}
+    case 'expand':{var tn=b.closest('.tnode');if(tn)tn.classList.toggle('open');break;}
+    case 'collapse':{var tg=document.querySelector(b.getAttribute('data-target'));if(tg)tg.classList.toggle('closed');break;}
+    case 'check':{
+      b.classList.toggle('on');
+      var cks=b.querySelectorAll('.ck');
+      for(var k=0;k<cks.length;k++)cks[k].classList.toggle('on',b.classList.contains('on'));
+      if(b.classList.contains('ck'))b.classList.add('on')&&0;
+      if(b.getAttribute('data-bind')==='3d')update3D();
+      break;}
+    case 'selrow':{
+      var p2=b.parentElement;
+      if(p2){var ons=p2.querySelectorAll('.trow.on,tr.sel');for(var q=0;q<ons.length;q++){ons[q].classList.remove('on');ons[q].classList.remove('sel');}}
+      b.classList.add('on');
+      toastMsg(b);
+      break;}
+    case 'layer':{
+      b.classList.toggle('on');
+      var shown=b.classList.contains('on');
+      var wrap=b.closest('.coord-zone');
+      var el=wrap?wrap.querySelector('[data-ly="'+b.getAttribute('data-layer')+'"]'):null;
+      if(el)el.style.display=shown?'':'none';
+      toast('【原型】图层「'+(b.getAttribute('data-layer')||'')+'」'+(shown?'显示':'隐藏'));
+      break;}
+    case 'ely':{
+      b.classList.toggle('on');
+      var shown2=b.classList.contains('on');
+      var el2=document.querySelector('#app [data-ly="'+b.getAttribute('data-layer')+'"]');
+      if(el2)el2.style.display=shown2?'':'none';
+      toast('【原型】图面要素「'+(b.getAttribute('data-label')||'')+'」'+(shown2?'显示':'隐藏'));
+      break;}
+    case 'dockbtn':{
+      var t2=document.querySelector(b.getAttribute('data-target'));
+      var show2=t2&&t2.style.display==='none';
+      if(t2)t2.style.display=show2?'':'none';
+      b.classList.toggle('on',!!show2);
+      break;}
+    case 'cdock':{
+      var st=dockState[dockKey()];
+      if(st){st[b.getAttribute('data-side')][parseInt(b.getAttribute('data-idx'),10)]=!st[b.getAttribute('data-side')][parseInt(b.getAttribute('data-idx'),10)];render();}
+      break;}
+    case 'cbottom':{
+      var st3=dockState[dockKey()];
+      if(st3){st3.bottom=!st3.bottom;render();}
+      break;}
+    case 'menu':{var pmenu=document.getElementById('projMenu');if(pmenu)pmenu.classList.toggle('open');break;}
+    case 'density':{
+      state.dense=!state.dense;
+      var app=document.querySelector('.app');
+      if(app)app.classList.toggle('compact',state.dense);
+      b.classList.toggle('on',state.dense);
+      toast('【原型】界面密度已切换');
+      break;}
+    case 'segto':{
+      var seg=b.parentElement;
+      if(seg){var items=seg.querySelectorAll('i');for(var s=0;s<items.length;s++)items[s].classList.toggle('on',items[s]===b);}
+      toastMsg(b);
+      break;}
+    case 'glmode':{
+      var mode=b.getAttribute('data-mode');
+      var all=document.querySelectorAll('[data-act="glmode"]');
+      for(var g2=0;g2<all.length;g2++)all[g2].classList.toggle('on',all[g2].getAttribute('data-mode')===mode);
+      var cv2=document.getElementById('glCanvas');
+      if(cv2){cv2.setAttribute('data-mode',mode);paintSeismic(cv2,parseInt(cv2.getAttribute('data-seed'),10)||7,{mode:mode,tie:cv2.getAttribute('data-tie')==='1',wells:cv2.getAttribute('data-wells')!=='0'});}
+      toast('【原型】显示模式 → '+b.textContent.trim());
+      break;}
+    case 'sw':{b.classList.toggle('on');toast('【原型】「'+(b.getAttribute('data-label')||'')+'」'+(b.classList.contains('on')?'已开启':'已关闭'));break;}
+    case 'noclose':toast('原型：页面标签不可关闭');break;
+  }
+});
+document.addEventListener('input',function(e){
+  var el=e.target;
+  var bind=el.getAttribute&&el.getAttribute('data-bind');
+  if(!bind)return;
+  if(bind==='corrgap'){
+    var w=document.getElementById('corrWrap');
+    if(w)w.innerHTML=svgCorrelation(parseInt(el.value,10));
+    var l=document.getElementById('corrGapVal');
+    if(l)l.textContent=el.value+' m';
+  }else if(bind==='slice'){update3D();}
+});
+document.addEventListener('mousemove',function(e){
+  if(!e.target||!e.target.closest)return;
+  var z=e.target.closest('[data-coordzone]');
+  if(!z)return;
+  var out=document.getElementById(z.getAttribute('data-coordzone'));
+  if(!out)return;
+  var r=z.getBoundingClientRect();
+  var fx=(e.clientX-r.left)/Math.max(1,r.width),fy=(e.clientY-r.top)/Math.max(1,r.height);
+  out.textContent=fmtLL(fx,fy)+' · '+fmtMeter(fx,fy);
+});
+document.addEventListener('keydown',function(e){
+  var t=e.target;
+  if(t&&t.id==='gsearch'&&e.key==='Enter'){toast('【原型】全局搜索「'+t.value+'」');return;}
+  if(t&&(t.isContentEditable||t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'))return;
+  if(e.key==='ArrowLeft'){switchVariant(-1);e.preventDefault();}
+  else if(e.key==='ArrowRight'){switchVariant(1);e.preventDefault();}
+});
+/* ================= 初始化 ================= */
+(function(){
+  var v='A';
+  try{v=(new URLSearchParams(location.search)).get('variant')||'A';}catch(e2){}
+  v=String(v).toUpperCase();
+  if(!VARIANTS[v])v='A';
+  state.variant=v;
+  render();
+})();
+</script>
+</body>
+</html>

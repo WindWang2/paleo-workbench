@@ -278,7 +278,8 @@ def test_data_manager_well_opens_the_prediction_page(qtbot, tmp_path, monkeypatc
 
     window.app_shell.data_page.open_in_well_prediction.emit(resource)
 
-    assert window.app_shell.page_stack.currentWidget() is prediction_page
+    assert window.app_shell.page_stack.currentWidget() is window.app_shell.hub_well
+    assert window.app_shell.hub_well.current_page() is prediction_page
     assert prediction_page.selected_well_resource_id() == resource.id
     assert calls == [(resource, project, None)]
 

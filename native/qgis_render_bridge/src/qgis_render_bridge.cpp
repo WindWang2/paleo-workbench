@@ -191,6 +191,7 @@ void apply_label_style(QgsVectorLayer& layer, const VectorLayerSpec& spec) {
     QgsTextFormat format;
     QFont font;
     if (!spec.label_font_family.empty()) font.setFamily(QString::fromStdString(spec.label_font_family));
+    font.setBold(spec.label_bold);
     format.setFont(font);
     format.setSize(std::max(0.1, spec.label_size));
     format.setColor(QColor(QString::fromStdString(spec.label_color)));

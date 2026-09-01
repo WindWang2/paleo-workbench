@@ -174,7 +174,8 @@ def test_data_manager_segy_opens_seismic_prediction_page(qtbot, tmp_path, monkey
 
     window.app_shell.data_page.open_in_seismic_prediction.emit(resource)
 
-    assert window.app_shell.page_stack.currentWidget() is prediction_page
+    assert window.app_shell.page_stack.currentWidget() is window.app_shell.hub_seismic
+    assert window.app_shell.hub_seismic.current_page() is prediction_page
     assert prediction_page.selected_seismic_resource_id() == resource.id
     assert calls == [(resource, project)]
 

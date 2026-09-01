@@ -284,11 +284,11 @@ def test_project_menu_signals_wired_after_refresh(qtbot, monkeypatch):
         window, "_on_new_project", lambda: counter.__setitem__("n", counter["n"] + 1)
     )
 
-    # Force a shell rebuild — _refresh_shell must re-wire the new menu bar.
+    # Force a shell rebuild — _refresh_shell must re-wire the new ribbon.
     window.new_project("After Refresh")
 
-    # Emit on the freshly built menu bar; the patched handler should fire.
-    window.app_shell.menu_bar.new_project_requested.emit()
+    # Emit on the freshly built ribbon; the patched handler should fire.
+    window.app_shell.ribbon.new_project_requested.emit()
 
     assert counter["n"] == 1
 
@@ -389,7 +389,7 @@ def test_save_as_handles_write_error(qtbot, tmp_path: Path, monkeypatch):
 
 def _data_page_row_count(window) -> int:
     """Visible asset rows shown on the data page's asset table."""
-    data_page = window.app_shell.page_stack.widget(1)
+    data_page = window.app_shell.data_page
     return data_page.asset_table.table.model().rowCount()
 
 

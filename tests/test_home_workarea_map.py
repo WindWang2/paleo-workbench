@@ -137,6 +137,44 @@ def test_survey_footprints_close_and_label_at_centroid():
     assert by_id[SURVEY_LABEL_LAYER_ID].style["fill"] == "transparent"
 
 
+def test_three_corner_legacy_survey_heals_to_rectangle():
+    """Projects saved before extraction shipped 4 corners keep 3 — the
+    snapshot must complete the parallelogram instead of drawing a triangle."""
+    doc = make_project(with_wells=False, with_boundary=False)
+    doc.seismic_surveys[0].extent = [[0, 0], [0, 8], [8, 8]]
+    snapshot = build_workarea_map_snapshot(doc)
+    by_id = {layer.id: layer for layer in snapshot.layers}
+    (feature,) = by_id[SURVEY_LAYER_ID].features
+    ring = feature["geometry"]["coordinates"][0]
+    assert ring == [[0.0, 0.0], [0.0, 8.0], [8.0, 8.0], [8.0, 0.0], [0.0, 0.0]]
+
+
+def test_well_layers_carry_name_labels():
+    """Well points must render their 井编号 — both backends read style.labels."""
+    snapshot = build_workarea_map_snapshot(make_project(with_survey=False, with_boundary=False))
+    by_id = {layer.id: layer for layer in snapshot.layers}
+    for layer_id in (WELLS_LAYER_ID, WELLS_FLAGGED_LAYER_ID):
+        labels = by_id[layer_id].style["labels"]
+        assert labels["field"] == "name"
+        assert labels.get("visible", True)
+
+
+def test_complete_survey_corners_helper():
+    from paleo_workbench.project.domain import complete_survey_corners
+
+    assert complete_survey_corners([[0, 0], [0, 8], [8, 8]]) == [
+        [0.0, 0.0],
+        [0.0, 8.0],
+        [8.0, 8.0],
+        [8.0, 0.0],
+    ]
+    # Non-3-corner inputs pass through untouched.
+    four = [[1, 1], [8, 1], [8, 8], [1, 8]]
+    assert complete_survey_corners(four) == [[1.0, 1.0], [8.0, 1.0], [8.0, 8.0], [1.0, 8.0]]
+    assert complete_survey_corners([]) == []
+    assert complete_survey_corners([[1, 2]]) == [[1.0, 2.0]]
+
+
 def test_snapshot_uses_own_layer_id_prefix():
     snapshot = build_workarea_map_snapshot(make_project())
     assert all(layer.id.startswith("home_workarea:") for layer in snapshot.layers)

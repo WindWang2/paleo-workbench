@@ -251,6 +251,25 @@ class SeismicSurveyEntity(BaseModel):
         return {normalize_well_name(self.name)} - {""}
 
 
+def complete_survey_corners(
+    corners: Sequence[Sequence[float]],
+) -> list[list[float]]:
+    """Return the survey footprint with the fourth corner completed.
+
+    SEG-Y extraction (engine ``survey_corners_from_segy``) stores THREE
+    corners — origin, opposite-crossline, opposite-inline — because the bin
+    grid only needs them; the fourth is the parallelogram completion
+    ``p1 + p3 − p2``.  Projects saved before extraction shipped four corners
+    keep three, so display code heals them through here instead of a document
+    migration.  Inputs with ≠3 corners pass through unchanged.
+    """
+    points = [[float(c[0]), float(c[1])] for c in corners or []]
+    if len(points) != 3:
+        return points
+    p1, p2, p3 = points
+    return [p1, p2, p3, [p1[0] + p3[0] - p2[0], p1[1] + p3[1] - p2[1]]]
+
+
 class DomainEntity(BaseModel):
     """Lightweight named entity for geological interpretations or auxiliary material."""
 

@@ -7,8 +7,7 @@ systems where only tokens.build_qss() ever ran.
 These tests pin:
 * every theme renders through tokens.build_qss (single source),
 * dark / high-contrast are real palettes of the same token vocabulary,
-* AppShell styles itself via the ThemeManager,
-* inline token-colored chrome re-resolves on theme switches.
+* AppShell styles itself via the ThemeManager.
 """
 
 from __future__ import annotations
@@ -70,37 +69,3 @@ def test_app_shell_styles_through_the_theme_manager(qtbot):
     shell.set_theme(ThemeMode.DARK)
     assert shell.styleSheet() == theme_manager.get_qss()
     assert theme_manager.current_theme == ThemeMode.DARK
-
-
-def test_theme_change_reapplies_inline_token_colors(qtbot):
-    """Inline token-colored chrome (stepper connectors) must re-resolve
-    against the active palette on theme_changed — no stale light colors on a
-    dark session."""
-    shell = AppShell()
-    qtbot.addWidget(shell)
-
-    shell.theme_manager.set_theme(ThemeMode.LIGHT)
-    light_connector = shell.workflow_stepper._connectors[0].styleSheet()
-
-    shell.set_theme(ThemeMode.DARK)
-    dark_connector = shell.workflow_stepper._connectors[0].styleSheet()
-
-    assert dark_connector != light_connector
-    assert tokens.palette_for("dark")["BORDER_STRONG"] in dark_connector
-
-
-def test_shell_constructed_under_dark_gets_dark_inline_colors(qtbot):
-    """r1 p2-1: theme_changed only fires on switches — a shell constructed
-    while the manager is already dark/high-contrast must start with the dark
-    palette's inline colors, not light ones."""
-    theme_manager.set_theme(ThemeMode.DARK)
-    try:
-        shell = AppShell()
-        qtbot.addWidget(shell)
-
-        assert shell.theme_manager.current_theme == ThemeMode.DARK
-        dark = tokens.palette_for("dark")
-        assert dark["BORDER_STRONG"] in shell.workflow_stepper._connectors[0].styleSheet()
-        assert tokens.BORDER_STRONG not in shell.workflow_stepper._connectors[0].styleSheet()
-    finally:
-        theme_manager.set_theme(ThemeMode.LIGHT)

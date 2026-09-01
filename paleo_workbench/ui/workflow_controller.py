@@ -24,14 +24,12 @@ from paleo_workbench.pipeline.compile_map import compile_map_draft
 from paleo_workbench.workflow.qc import active_quality_reports
 from paleo_workbench.workflow.service import dashboard_state, home_workflow_steps
 from paleo_workbench.ui.navigation import (
-    PAGE_INDEX_GEOMODEL,
+    PAGE_INDEX_DATA,
     PAGE_INDEX_MAPPING,
-    PAGE_INDEX_PREPARATION,
-    PAGE_INDEX_REVIEW,
     PAGE_INDEX_SEISMIC,
-    PAGE_INDEX_SEQUENCE,
     PAGE_INDEX_VISUALIZATION,
-    PAGE_INDEX_WELL_LOG,
+    PAGE_INDEX_WELL,
+    LEGACY_PAGE_TO_HUB,
 )
 from paleo_workbench.ui.preview_settings_dialog import PreviewSettingsDialog
 
@@ -171,9 +169,6 @@ class WorkflowController:
             return
         if hasattr(page, "navigation_requested"):
             page.navigation_requested.connect(self._on_home_navigation)
-        progress = getattr(page, "workflow_progress", None)
-        if progress is not None and hasattr(progress, "recompute_requested"):
-            progress.recompute_requested.connect(self._on_recompute_requested)
 
     def _on_recompute_requested(self) -> None:
         """Execute the minimal affected-products recompute plan (#537).
@@ -253,9 +248,6 @@ class WorkflowController:
                             store_live_factor_grid(task_id, grid)
                         except Exception:
                             pass
-        progress = self._home_workflow_progress()
-        if progress is None:
-            return
         lines = [plan.summary_zh()]
         if plan.cycle_error:
             lines.append(f"依赖环: {plan.cycle_error}")
@@ -266,25 +258,11 @@ class WorkflowController:
             lines.append("部分步骤没有自动重算入口，请在对应页面手动执行。")
         elif result.stopped_early:
             lines.append("已提前停止（上游失败）")
-        # Refresh the step strip first: update_steps rewrites plan_label, so
-        # the execution summary must be applied afterwards to persist (#537).
         self._refresh_home_steps()
-        progress.set_recompute_plan_summary("\n".join(lines))
+        QMessageBox.information(self.window, "更新受影响成果", "\n".join(lines))
 
     def _on_recompute_failed(self, message: str) -> None:
-        progress = self._home_workflow_progress()
-        if progress is not None:
-            progress.set_recompute_plan_summary(f"重算失败：{message}")
-
-    def _home_workflow_progress(self):
-        try:
-            page = self.window.app_shell.home_page_widget()
-            if page is None:
-                return None
-            progress = getattr(page, "workflow_progress", None)
-            return progress if progress is not None else None
-        except Exception:  # pragma: no cover - shell teardown races
-            return None
+        QMessageBox.warning(self.window, "更新受影响成果", f"重算失败：{message}")
 
     def _refresh_home_steps(self) -> None:
         project = self.window.project
@@ -332,7 +310,7 @@ class WorkflowController:
         page = self.window.app_shell.preparation_page_widget()
         if page is None:
             return
-        self.window.app_shell.defer_page_project_binding(PAGE_INDEX_PREPARATION, page)
+        self.window.app_shell.defer_page_project_binding(PAGE_INDEX_MAPPING, page)
         if hasattr(page, "factor_maps_updated"):
             page.factor_maps_updated.connect(self._on_factor_maps_updated)
         if hasattr(page, "contour_drafts_updated"):
@@ -342,9 +320,7 @@ class WorkflowController:
         page = self.window.app_shell.sequence_framework_page_widget()
         if page is None:
             return
-        self.window.app_shell.defer_page_project_binding(
-            PAGE_INDEX_SEQUENCE, page
-        )
+        self.window.app_shell.defer_page_project_binding(PAGE_INDEX_WELL, page)
         if hasattr(page, "stratigraphy_updated"):
             # Avoid duplicate connections across shell rebuilds of the same page
             # instance is new each rebuild; connect once per shell.
@@ -364,7 +340,7 @@ class WorkflowController:
         page = self.window.app_shell.well_log_prediction_page_widget()
         if page is None:
             return
-        self.window.app_shell.defer_page_project_binding(PAGE_INDEX_WELL_LOG, page)
+        self.window.app_shell.defer_page_project_binding(PAGE_INDEX_WELL, page)
         if hasattr(page, "prediction_updated"):
             page.prediction_updated.connect(self._on_well_log_prediction_updated)
         if hasattr(page, "send_to_preparation_requested"):
@@ -374,10 +350,10 @@ class WorkflowController:
 
     def wire_geomodel_page(self) -> None:
         """Wire the 3D well-seismic joint page (project + cross-page well sync)."""
-        page = self.window.app_shell.page_stack.widget(PAGE_INDEX_GEOMODEL)
+        page = self.window.app_shell.geomodel_page
         if page is None:
             return
-        self.window.app_shell.defer_page_project_binding(PAGE_INDEX_GEOMODEL, page)
+        self.window.app_shell.defer_page_project_binding(PAGE_INDEX_SEISMIC, page)
         # Cross-page well sync is mediated by the shared SelectionContext
         # (#1029): the page publishes through ViewCoordinationController and
         # every other view follows — no page→page wire here anymore.
@@ -386,7 +362,7 @@ class WorkflowController:
         page = self.window.app_shell.review_export_page_widget()
         if page is None:
             return
-        self.window.app_shell.defer_page_project_binding(PAGE_INDEX_REVIEW, page)
+        self.window.app_shell.defer_page_project_binding(PAGE_INDEX_MAPPING, page)
         if hasattr(page, "reports_updated"):
             page.reports_updated.connect(self._on_qc_reports_updated)
 
@@ -451,8 +427,7 @@ class WorkflowController:
             prep_page.task_panel.summary_label.setText(
                 f"制备中… 任务 {len(snapshot.tasks)} · 发送制备"
             )
-        self.window.app_shell.icon_rail.set_active(PAGE_INDEX_PREPARATION)
-        self.window.app_shell._switch_page(PAGE_INDEX_PREPARATION)
+        self.window.app_shell.navigate_to(PAGE_INDEX_MAPPING, "preparation")
         self._prepare_job.start(
             worker,
             terminal_signals=(worker.finished, worker.failed, worker.cancelled),
@@ -505,8 +480,7 @@ class WorkflowController:
                 f"{len(project.factor_map_tasks)} 个单因素图"
                 f" · 复用 {result.clean_count} · 计算 {result.executed_count}"
             )
-        self.window.app_shell.icon_rail.set_active(PAGE_INDEX_PREPARATION)
-        self.window.app_shell._switch_page(PAGE_INDEX_PREPARATION)
+        self.window.app_shell.navigate_to(PAGE_INDEX_MAPPING, "preparation")
 
     def _on_prep_send_failed(self, message: str) -> None:
         QMessageBox.warning(self.window, "发送制备失败", message)
@@ -612,8 +586,7 @@ class WorkflowController:
         # The production compile registered a paleomap catalog version —
         # surface it in the Data Manager too.
         self._refresh_data_page()
-        self.window.app_shell.icon_rail.set_active(PAGE_INDEX_MAPPING)
-        self.window.app_shell._switch_page(PAGE_INDEX_MAPPING)
+        self.window.app_shell.navigate_to(PAGE_INDEX_MAPPING, "canvas")
 
     def _on_factor_maps_updated(self) -> None:
         """Refresh preparation + mapping factor shelf after real IDW batch generate."""
@@ -686,9 +659,8 @@ class WorkflowController:
         self.window._refresh_shell()
 
     def _on_open_in_visualization(self, ref) -> None:
-        self.window.app_shell.icon_rail.set_active(PAGE_INDEX_VISUALIZATION)
-        self.window.app_shell._switch_page(PAGE_INDEX_VISUALIZATION)
-        viz = self.window.app_shell.page_stack.widget(PAGE_INDEX_VISUALIZATION)
+        self.window.app_shell.navigate_to(PAGE_INDEX_VISUALIZATION)
+        viz = self.window.app_shell.visualization_page
         if hasattr(viz, "open_ref"):
             viz.open_ref(ref)
 
@@ -699,8 +671,7 @@ class WorkflowController:
         selector = getattr(page, "select_well_resource", None)
         if not resource_id or not callable(selector) or not selector(resource_id):
             return
-        self.window.app_shell.icon_rail.set_active(PAGE_INDEX_WELL_LOG)
-        self.window.app_shell._switch_page(PAGE_INDEX_WELL_LOG)
+        self.window.app_shell.navigate_to(PAGE_INDEX_WELL, "well_log")
 
     def _on_open_in_seismic_prediction(self, resource) -> None:
         """Route a selected Data Management SEG-Y volume to seismic prediction."""
@@ -709,8 +680,7 @@ class WorkflowController:
         selector = getattr(page, "select_seismic_resource", None)
         if not resource_id or not callable(selector) or not selector(resource_id):
             return
-        self.window.app_shell.icon_rail.set_active(PAGE_INDEX_SEISMIC)
-        self.window.app_shell._switch_page(PAGE_INDEX_SEISMIC)
+        self.window.app_shell.navigate_to(PAGE_INDEX_SEISMIC, "seismic")
 
     @staticmethod
     def _well_log_import_path_key(path: str | Path) -> str:
@@ -778,5 +748,6 @@ class WorkflowController:
             page.set_source_import_status(f"测井数据导入失败：{message}")
 
     def _on_home_navigation(self, index: int) -> None:
-        self.window.app_shell.icon_rail.set_active(index)
-        self.window.app_shell._switch_page(index)
+        # Module-relationship cards emit the pre-v2 flat page ordinals.
+        hub, submodule = LEGACY_PAGE_TO_HUB.get(index, (PAGE_INDEX_DATA, "overview"))
+        self.window.app_shell.navigate_to(hub, submodule)

@@ -710,6 +710,65 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         background: {t.BG_HEADER}; border-bottom: 1px solid {t.BORDER_STRONG};
         min-height: {t.MENU_BAR_HEIGHT}px; max-height: {t.MENU_BAR_HEIGHT}px;
     }}
+    /* UI v2 Ribbon (variant A) */
+    QFrame#RibbonBar {{
+        background: {t.BG_HEADER}; border-bottom: 1px solid {t.BORDER_STRONG};
+    }}
+    QFrame#RibbonTopRow {{ background: transparent; }}
+    QLabel#RibbonAppBadge {{
+        color: {t.TEXT_SECONDARY}; font-size: {t.FONT_SIZE_STATUS}px;
+    }}
+    QPushButton#RibbonTab {{
+        background: transparent; border: none; border-bottom: 2px solid transparent;
+        color: {t.TEXT_PRIMARY}; padding: 4px 14px; font-size: {t.FONT_SIZE_BASE}px;
+    }}
+    QPushButton#RibbonTab:hover {{ background: {t.BG_MENU_HOVER}; }}
+    QPushButton#RibbonTab[active="true"] {{
+        color: {t.PRIMARY}; border-bottom: 2px solid {t.ACCENT}; font-weight: 600;
+    }}
+    QPushButton#RibbonAppMenuButton {{
+        background: transparent; border: none; color: {t.TEXT_PRIMARY};
+        font-size: 14px; padding: 0 6px;
+    }}
+    QPushButton#RibbonAppMenuButton::menu-indicator {{ image: none; width: 0; }}
+    QPushButton#RibbonCollapseButton {{
+        background: transparent; border: none; color: {t.TEXT_SECONDARY};
+        font-size: 12px; padding: 0 6px;
+    }}
+    QPushButton#RibbonCollapseButton:hover {{ background: {t.BG_MENU_HOVER}; color: {t.TEXT_PRIMARY}; }}
+    QFrame#RibbonBody {{ background: {t.BG_HEADER}; }}
+    QFrame#RibbonGroup {{ background: transparent; }}
+    QLabel#RibbonGroupCaption {{
+        color: {t.TEXT_SECONDARY}; font-size: {t.FONT_SIZE_STATUS}px;
+    }}
+    QFrame#RibbonGroupSeparator {{
+        color: {t.BORDER}; background: {t.BORDER};
+        max-width: 1px; margin: 8px 2px;
+    }}
+    QToolButton#RibbonButton {{
+        background: transparent; border: 1px solid transparent; border-radius: {t.RADIUS_BUTTON}px;
+        color: {t.TEXT_PRIMARY}; padding: 3px 8px; font-size: {t.FONT_SIZE_STATUS}px;
+    }}
+    QToolButton#RibbonButton:hover {{ background: {t.BG_MENU_HOVER}; border-color: {t.BORDER}; }}
+    QToolButton#RibbonButton:checked {{
+        background: {t.PRIMARY}; color: {t.ON_PRIMARY}; border-color: {t.PRIMARY_PRESSED};
+    }}
+    QToolButton#RibbonButton:disabled {{ color: {t.PRIMARY_DISABLED}; }}
+    QLabel#RibbonHint {{ color: {t.TEXT_SECONDARY}; font-size: {t.FONT_SIZE_STATUS}px; }}
+    /* Hub sub-module pill switcher */
+    QWidget#SubmoduleSwitcher {{
+        background: {t.BG_HEADER}; border-bottom: 1px solid {t.BORDER_LIGHT};
+    }}
+    QPushButton#SubmodulePill {{
+        background: {t.BG_SEARCH}; color: {t.TEXT_PRIMARY};
+        border: 1px solid {t.BORDER}; border-radius: 14px;
+        padding: 4px 16px; font-size: {t.FONT_SIZE_STATUS}px;
+    }}
+    QPushButton#SubmodulePill:hover {{ border-color: {t.PRIMARY}; }}
+    QPushButton#SubmodulePill[active="true"] {{
+        background: {t.PRIMARY}; color: {t.ON_PRIMARY}; border-color: {t.PRIMARY};
+        font-weight: 600;
+    }}
     QPushButton#ProjectMenuButton,
     QPushButton#ViewMenuButton,
     QPushButton#ToolsMenuButton,

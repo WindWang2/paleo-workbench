@@ -55,6 +55,10 @@ struct VectorLayerSpec {
     std::string stroke = "#26364d";
     double stroke_width = 1.0;
     double marker_size = 6.0;
+    /// Host MarkerSymbol enum value ("circle" | "well" | ...). Only "well"
+    /// is special-cased today (filled ring + dark centre dot, matching the
+    /// fallback renderer); every other value keeps the plain circle.
+    std::string marker = "circle";
     /// Host LinePattern enum value ("solid" | "dash" | "dot" | "dash_dot").
     /// Legacy path only (#922): mapped onto the simple-line ``line_style``
     /// property so dashed fault lines stay dashed on the QGIS path.
@@ -74,6 +78,8 @@ struct VectorLayerSpec {
     double label_size = 10.0;
     std::string label_color = "#ffffff";
     double label_buffer_size = 0.0;
+    /// Bold label font (host TextStyle.bold).
+    bool label_bold = false;
     /// #1102: label buffer (halo) colour, same wire format as label_color
     /// ("#rrggbb" or a named colour). Empty keeps the white default.
     std::string label_buffer_color;

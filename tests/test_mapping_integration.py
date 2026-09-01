@@ -12,7 +12,7 @@ from paleo_workbench.ui.pages.mapping_page import MappingPage
 def test_app_shell_page_seven_is_mapping_page(qtbot):
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
-    page = window.app_shell.page_stack.widget(8)
+    page = window.app_shell.mapping_page
     assert isinstance(page, MappingPage)
 
 
@@ -28,7 +28,7 @@ def test_mapping_page_receives_project_map_documents(qtbot):
 
     window = PaleoWorkbenchWindow(project=project)
     qtbot.addWidget(window)
-    page = window.app_shell.page_stack.widget(8)
+    page = window.app_shell.mapping_page
 
     assert isinstance(page.layer_tree, MapLayerTree)
     assert isinstance(page.edit_view, MapEditView)

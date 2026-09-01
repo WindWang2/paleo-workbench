@@ -7,7 +7,7 @@ from paleo_workbench.ui.pages.visualization_page import VisualizationPage
 def test_app_shell_page_five_is_visualization_page(qtbot):
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
-    page = window.app_shell.page_stack.widget(6)
+    page = window.app_shell.visualization_page
     assert isinstance(page, VisualizationPage)
 
 
@@ -19,7 +19,7 @@ def test_visualization_page_receives_project_slices(qtbot):
 
     window = PaleoWorkbenchWindow(project=project)
     qtbot.addWidget(window)
-    page = window.app_shell.page_stack.widget(6)
+    page = window.app_shell.visualization_page
 
     assert page.summary_panel.prediction_count_value.text() == "1 个"
     assert page.trace_panel.task_value.text() == task.name

@@ -6,25 +6,24 @@ from paleo_workbench.ui.app_shell import AppShell
 from paleo_workbench.ui import navigation, tokens
 
 
-def test_geomodel_page_index_and_no_joint_rail(qtbot):
+def test_geomodel_lives_in_seismic_hub(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
-    assert shell.page_stack.count() == 11
-    assert navigation.PAGE_INDEX_GEOMODEL == 10
+    assert shell.page_stack.count() == 5
     assert tokens.PAGE_NAMES[10] == "井震联合"
     assert len(tokens.PAGE_NAMES) == 11
     # The Well-Seismic-Joint page index was removed from the navigation module
     # when it merged into the geomodel page; the legacy name must be gone.
     assert not hasattr(navigation, "PAGE_INDEX_WELL_SEISMIC_JOINT")
-    # The merged geomodel page is not an interpretation subpage.
-    interp = navigation.get_subpages_for_stage(navigation.STAGE_INDEX_INTERPRETATION)
-    assert navigation.PAGE_INDEX_GEOMODEL not in interp
-    assert all(
-        getattr(navigation, "PAGE_INDEX_WELL_SEISMIC_JOINT", -1) != p for p in interp
+    # The merged geomodel page is the 地震 hub's 井震联合 3D sub-module
+    # (legacy flat index 10 maps there).
+    assert navigation.LEGACY_PAGE_TO_HUB[10] == (
+        navigation.PAGE_INDEX_SEISMIC, "geomodel",
     )
-    shell.icon_rail.nav_buttons[10].click()
-    assert shell.page_stack.currentIndex() == 10
-    page = shell.page_stack.widget(10)
+    shell.navigate_to(navigation.PAGE_INDEX_SEISMIC, "geomodel")
+    assert shell.page_stack.currentIndex() == navigation.PAGE_INDEX_SEISMIC
+    assert shell.hub_seismic.current_key() == "geomodel"
+    page = shell.hub_seismic.page("geomodel")
     assert page.objectName() == "GeologicalModeling3DPage"
 
 
@@ -87,10 +86,11 @@ def test_geomodel_page_loads_on_first_switch(qtbot):
     geomodel_page = shell.geomodel_page
     assert geomodel_page._joint_loaded_once is False
 
-    # Switch to 3D page for the first time
-    shell._switch_page(10)
+    # Switch to the 地震 hub's 井震联合 3D sub-module for the first time
+    shell.navigate_to(navigation.PAGE_INDEX_SEISMIC, "geomodel")
 
-    assert shell.page_stack.currentIndex() == 10
+    assert shell.page_stack.currentIndex() == navigation.PAGE_INDEX_SEISMIC
+    assert shell.hub_seismic.current_key() == "geomodel"
     assert geomodel_page._project is doc
     assert geomodel_page._joint_loaded_once is True
 
