@@ -122,28 +122,13 @@ class LinkedInterpretationWorkspace(QWidget):
 
         self.domain_combo = QComboBox(self.context_bar)
         self.domain_combo.addItems(["剖面", "平面", "井轨道"])
-        self.domain_combo.setToolTip("活动解释域")
+        self.domain_combo.setToolTip("聚焦活动解释域（再次选择恢复分屏）")
+        # 假按钮禁令：上下文条只保留真实接线的控件。域选择聚焦对应窗格；
+        # 选择 / 平移 / 测量工具与地震显示属性在联动窗格暂无工具管线，
+        # 不显示不可用的按钮（UI 与功能严格匹配）。
+        self.domain_combo.currentIndexChanged.connect(self._on_domain_selected)
         context_layout.addWidget(self.domain_combo)
         context_layout.addWidget(self._context_separator())
-        for label, icon_name, tip in (
-            ("选择", "map/select.svg", "选择解释对象"),
-            ("平移", "map/pan.svg", "平移活动视图"),
-            ("测量", "map/measure_distance.svg", "测量距离或深度差"),
-        ):
-            button = QToolButton(self.context_bar)
-            button.setObjectName("WorkstationContextButton")
-            button.setIcon(workstation_icon(icon_name))
-            button.setText(label)
-            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-            button.setToolTip(tip)
-            context_layout.addWidget(button)
-
-        context_layout.addWidget(self._context_separator())
-
-        self.display_combo = QComboBox(self.context_bar)
-        self.display_combo.addItems(["振幅", "相对振幅", "瞬时相位"])
-        self.display_combo.setToolTip("地震显示属性")
-        context_layout.addWidget(self.display_combo)
 
         self.link_button = QToolButton(self.context_bar)
         self.link_button.setObjectName("WorkstationLinkButton")
@@ -541,6 +526,16 @@ class LinkedInterpretationWorkspace(QWidget):
             pane.link_label.setProperty("linked", bool(enabled))
             pane.link_label.style().unpolish(pane.link_label)
             pane.link_label.style().polish(pane.link_label)
+
+    def _on_domain_selected(self, index: int) -> None:
+        """域选择聚焦对应窗格（不隐藏其它窗格，再次点击保持聚焦）。"""
+        dock_by_index = (
+            self.seismic_dock,
+            self.map_dock,
+            self.well_dock,
+        )
+        if 0 <= index < len(dock_by_index):
+            dock_by_index[index].raise_()
 
     def _on_map_well_selected(self, well_id: str) -> None:
         well = self._find_well(well_id)

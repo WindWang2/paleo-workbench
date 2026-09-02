@@ -204,6 +204,15 @@ class HomePage(QWidget):
     # map centerpiece
     # ------------------------------------------------------------------
 
+    def shutdown_workers(self, _wait_ms: int = 3_000) -> bool:
+        """Stop the embedded map render backend before teardown (#1120 note).
+
+        Hidden canvases never get a reliable closeEvent; AppShell calls this
+        on project switch / exit alongside the other page workers.
+        """
+        self.map_canvas.shutdown()
+        return True
+
     def _build_empty_state(self) -> QFrame:
         """Inviting empty state shown instead of the map for empty projects."""
         frame = QFrame()
