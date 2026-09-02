@@ -10,6 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytest.importorskip("PySide6.QtWidgets")
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QDockWidget, QLabel, QMainWindow
 
 from paleo_workbench.ui.workstation.dock_title_bar import (
@@ -43,9 +44,6 @@ def test_float_toggle_via_title_bar(qapp):
     host.resize(800, 600)
     dock = QDockWidget("图层管理", host)
     dock.setWidget(QLabel("layers"))
-    host.addDockWidget(host.dockWidgetArea(dock) or __import__("PySide6.QtCore", fromlist=["Qt"]).Qt.DockWidgetArea.RightDockWidgetArea, dock)
-    from PySide6.QtCore import Qt
-
     host.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
     bar = install_dock_title_bar(dock)
     assert not dock.isFloating()
