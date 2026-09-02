@@ -1,19 +1,22 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QSettings, Qt, QTimer, Signal
+from PySide6.QtCore import QByteArray, QSettings, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
+    QDockWidget,
     QFrame,
     QHBoxLayout,
+    QMainWindow,
     QSizePolicy,
-    QSplitter,
     QStackedWidget,
     QTabBar,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from paleo_workbench.ui.workstation.activity_rail import ActivityRail
 from paleo_workbench.ui.workstation.app_bar import WorkstationAppBar
+from paleo_workbench.ui.workstation.composite_document import CompositeDocument
 from paleo_workbench.ui.workstation.explorer import WorkstationExplorer
 from paleo_workbench.ui.workstation.inspector import WorkstationInspector
 from paleo_workbench.ui.workstation.linked_workspace import (
@@ -23,7 +26,18 @@ from paleo_workbench.ui.workstation.process_hub import ProcessHub
 
 
 class WorkstationFrame(QWidget):
-    """Native Qt shell around linked documents and compatible legacy pages."""
+    """Native Qt workstation shell.
+
+    图件显示区域（文档区）是窗口中央内容，永不浮动；其余一切面板 —
+    资源管理器、检查器、任务/Agent、图层管理、输入与结果、联动视图 —
+    全部是 ``QDockWidget``，享有 Qt 完整窗口管理：四边停靠、拖出浮动、
+    面板叠 tab、关闭重开（「面板」菜单）、布局持久化。
+
+    ``QMainWindow`` 设计上必须是顶层窗口，因此 dock 宿主由
+    ``PaleoWorkbenchWindow`` 提供（``dock_host``）；本部件是宿主的中央
+    文档区域。未提供宿主时（测试/孤立构造）使用一个隐藏的 detached
+    宿主，结构完整但不显示 dock。
+    """
 
     navigation_requested = Signal(int, str)
     command_submitted = Signal(str)
@@ -33,8 +47,11 @@ class WorkstationFrame(QWidget):
     TAB_MAP = 1
     TAB_WELL = 2
     TAB_LEGACY = 3
+    TAB_COMPOSITE = 4
 
-    def __init__(self, project, page_stack: QWidget, parent=None):
+    _WINDOW_STATE_KEY = "layout/windowState"
+
+    def __init__(self, project, page_stack: QWidget, dock_host=None, parent=None):
         super().__init__(parent)
         self.setObjectName("WorkstationFrame")
         self._project = project
@@ -42,24 +59,75 @@ class WorkstationFrame(QWidget):
         self._settings = QSettings("PaleoWorkbench", "WorkstationV3")
         self._user_hid_inspector = False
         self._post_show_restored = False
+        self._composite_docks_visible: dict[str, bool] | None = None
+        self._owns_dock_host = dock_host is None
+        self._dock_host: QMainWindow = dock_host if dock_host is not None else QMainWindow()
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(350)
         self._save_timer.timeout.connect(self._save_layout)
 
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
+        self._dock_host.setDockOptions(
+            QMainWindow.DockOption.AnimatedDocks
+            | QMainWindow.DockOption.AllowTabbedDocks
+            | QMainWindow.DockOption.AllowNestedDocks
+        )
+        self._dock_host.setTabPosition(
+            Qt.DockWidgetArea.AllDockWidgetAreas, QTabWidget.TabPosition.North
+        )
+        self._dock_host.setCorner(
+            Qt.Corner.TopLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea
+        )
+
+        # --- 中央：App bar + 文档区（图件主体所在） ----------------------
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         self.app_bar = WorkstationAppBar(self)
-        outer.addWidget(self.app_bar)
+        # QMainWindowLayout 会把子件 minimumSizeHint 计入中央区最小尺寸；
+        # App bar 与文档栈的内容提示之和必须被忽略，否则 dock 化窗口的
+        # 最小宽度会撑爆外层壳（2041px 实测）。
+        self.app_bar.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+        )
+        self.app_bar.setMinimumSize(0, 0)
+        layout.addWidget(self.app_bar)
 
-        self.body_splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        self.body_splitter.setObjectName("WorkstationBodySplitter")
-        self.body_splitter.setChildrenCollapsible(False)
-        outer.addWidget(self.body_splitter, 1)
+        self.document_tabs = QTabBar(self)
+        self.document_tabs.setObjectName("WorkstationDocumentTabs")
+        self.document_tabs.setDocumentMode(True)
+        self.document_tabs.setExpanding(False)
+        self.document_tabs.addTab("井震联合剖面: A12 - D63")
+        self.document_tabs.addTab("平面图: D63")
+        self.document_tabs.addTab("井轨道: A12")
+        self.document_tabs.addTab("项目工作流")
+        self.document_tabs.addTab("综合编修")
+        self.document_tabs.currentChanged.connect(self._on_document_tab_changed)
+        self.document_tabs.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+        )
+        layout.addWidget(self.document_tabs)
 
-        self.navigation_region = QFrame(self.body_splitter)
+        self.document_stack = QStackedWidget(self)
+        self.document_stack.setObjectName("WorkstationDocumentStack")
+        self.document_stack.setMinimumSize(0, 0)
+        self.document_stack.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
+        )
+        self.linked_workspace = LinkedInterpretationWorkspace(
+            project, self.document_stack
+        )
+        self.document_stack.addWidget(self.linked_workspace)
+        self.composite = CompositeDocument(project, self.document_stack)
+        self.document_stack.addWidget(self.composite)
+        self.page_stack = page_stack
+        self.page_stack.setMinimumSize(0, 0)
+        self.document_stack.addWidget(page_stack)
+        layout.addWidget(self.document_stack, 1)
+
+        # --- 面板：全部为宿主窗口上的可浮动 dock -------------------------
+        self.navigation_region = QFrame(self._dock_host)
         self.navigation_region.setObjectName("WorkstationNavigationRegion")
         nav_layout = QHBoxLayout(self.navigation_region)
         nav_layout.setContentsMargins(0, 0, 0, 0)
@@ -68,76 +136,66 @@ class WorkstationFrame(QWidget):
         self.explorer = WorkstationExplorer(project, self.navigation_region)
         nav_layout.addWidget(self.activity_rail)
         nav_layout.addWidget(self.explorer, 1)
-        self.navigation_region.setMinimumWidth(54)
-        self.navigation_region.setMaximumWidth(470)
-        self.body_splitter.addWidget(self.navigation_region)
 
-        self.content_splitter = QSplitter(Qt.Orientation.Vertical, self.body_splitter)
-        self.content_splitter.setObjectName("WorkstationContentSplitter")
-        self.content_splitter.setChildrenCollapsible(False)
-        # Complex document/task children have generous minimum-size hints.
-        # The shell owns responsive sizing, so cap the propagated horizontal
-        # minimum and leave room for the object explorer at 1180px windows.
-        self.content_splitter.setMinimumWidth(640)
-        self.content_splitter.setMinimumHeight(500)
-        self.body_splitter.addWidget(self.content_splitter)
-        self.body_splitter.setStretchFactor(0, 0)
-        self.body_splitter.setStretchFactor(1, 1)
+        self.inspector = WorkstationInspector(self._dock_host)
+        self.process_hub = ProcessHub(project, self._dock_host)
 
-        self.editor_splitter = QSplitter(Qt.Orientation.Horizontal, self.content_splitter)
-        self.editor_splitter.setObjectName("WorkstationShellEditorSplitter")
-        self.editor_splitter.setChildrenCollapsible(False)
-        self.editor_splitter.setMinimumHeight(300)
-
-        self.document_region = QFrame(self.editor_splitter)
-        self.document_region.setObjectName("WorkstationDocumentRegion")
-        document_layout = QVBoxLayout(self.document_region)
-        document_layout.setContentsMargins(0, 0, 0, 0)
-        document_layout.setSpacing(0)
-
-        self.document_tabs = QTabBar(self.document_region)
-        self.document_tabs.setObjectName("WorkstationDocumentTabs")
-        self.document_tabs.setDocumentMode(True)
-        self.document_tabs.setExpanding(False)
-        self.document_tabs.addTab("井震联合剖面: A12 - D63")
-        self.document_tabs.addTab("平面图: D63")
-        self.document_tabs.addTab("井轨道: A12")
-        self.document_tabs.addTab("项目工作流")
-        self.document_tabs.currentChanged.connect(self._on_document_tab_changed)
-        document_layout.addWidget(self.document_tabs)
-
-        self.document_stack = QStackedWidget(self.document_region)
-        self.document_stack.setObjectName("WorkstationDocumentStack")
-        self.document_stack.setMinimumSize(0, 0)
-        self.document_stack.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
+        self.nav_dock = self._add_dock(
+            "资源管理器", self.navigation_region,
+            Qt.DockWidgetArea.LeftDockWidgetArea,
         )
-        self.linked_workspace = LinkedInterpretationWorkspace(project, self.document_stack)
-        self.document_stack.addWidget(self.linked_workspace)
-        self.page_stack = page_stack
-        self.page_stack.setMinimumSize(0, 0)
-        self.page_stack.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
+        self.inspector_dock = self._add_dock(
+            "检查器", self.inspector, Qt.DockWidgetArea.RightDockWidgetArea
         )
-        self.document_stack.addWidget(page_stack)
-        document_layout.addWidget(self.document_stack, 1)
+        self.process_dock = self._add_dock(
+            "任务 / Agent", self.process_hub, Qt.DockWidgetArea.BottomDockWidgetArea
+        )
 
-        self.inspector = WorkstationInspector(project, self.editor_splitter)
-        self.editor_splitter.addWidget(self.document_region)
-        self.editor_splitter.addWidget(self.inspector)
-        self.editor_splitter.setStretchFactor(0, 1)
-        self.editor_splitter.setStretchFactor(1, 0)
-        self.content_splitter.addWidget(self.editor_splitter)
-
-        self.process_hub = ProcessHub(project, self.content_splitter)
-        self.process_hub.setMinimumHeight(150)
-        self.content_splitter.addWidget(self.process_hub)
-        self.content_splitter.setStretchFactor(0, 1)
-        self.content_splitter.setStretchFactor(1, 0)
+        # 综合编修面板（随文档显隐；由宿主 QMainWindow 持有 dock）
+        self.composite_layer_dock = self._add_dock(
+            "图层管理", self.composite.layer_manager,
+            Qt.DockWidgetArea.RightDockWidgetArea,
+        )
+        self.composite_input_dock = self._add_dock(
+            "输入与结果", self.composite.input_tree,
+            Qt.DockWidgetArea.LeftDockWidgetArea,
+        )
+        self.composite_linked_dock = self._add_dock(
+            "联动视图", self.composite.linked_views,
+            Qt.DockWidgetArea.BottomDockWidgetArea,
+        )
+        # 默认视图：图件最大化（variant C），仅图层管理随综合编修打开。
+        self.composite_input_dock.hide()
+        self.composite_linked_dock.hide()
+        self.composite.register_panel_actions(
+            [
+                self.composite_input_dock.toggleViewAction(),
+                self.composite_layer_dock.toggleViewAction(),
+                self.composite_linked_dock.toggleViewAction(),
+            ],
+            self._reset_composite_layout,
+        )
+        # 图层管理与检查器在右侧叠 tab，任务/联动视图在底部叠 tab。
+        self._dock_host.tabifyDockWidget(self.inspector_dock, self.composite_layer_dock)
+        self._dock_host.tabifyDockWidget(self.process_dock, self.composite_linked_dock)
 
         self._wire()
         self.set_project(project)
+        # 进入工作站默认落在综合编修环境（全幅图件 + 浮动面板）。
+        self.document_tabs.setCurrentIndex(self.TAB_COMPOSITE)
         QTimer.singleShot(0, self._restore_layout)
+
+    def _add_dock(self, title: str, widget: QWidget, area) -> QDockWidget:
+        dock = QDockWidget(title, self._dock_host)
+        dock.setObjectName(f"WorkstationDock_{title}")
+        dock.setWidget(widget)
+        dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+            | QDockWidget.DockWidgetFeature.DockWidgetClosable
+        )
+        self._dock_host.addDockWidget(area, dock)
+        return dock
 
     def _wire(self) -> None:
         self.activity_rail.mode_requested.connect(self._on_activity_mode)
@@ -148,6 +206,7 @@ class WorkstationFrame(QWidget):
         self.explorer.joint_workspace_requested.connect(self.activate_joint)
         self.linked_workspace.object_selected.connect(self.inspector.show_payload)
         self.linked_workspace.status_changed.connect(self.status_message)
+        self.composite.object_selected.connect(self.inspector.show_payload)
         self.process_hub.agent.open_well_requested.connect(self._open_well_from_agent)
         self.process_hub.agent.show_wells_requested.connect(self._show_wells_from_agent)
         self.process_hub.agent.focus_joint_requested.connect(self.activate_joint)
@@ -159,15 +218,23 @@ class WorkstationFrame(QWidget):
         self.inspector.style_changed.connect(
             lambda _style: self.status_message.emit("当前解释样式已更新")
         )
+        for dock in (
+            self.nav_dock,
+            self.inspector_dock,
+            self.process_dock,
+            self.composite_layer_dock,
+            self.composite_input_dock,
+            self.composite_linked_dock,
+        ):
+            dock.topLevelChanged.connect(lambda *_: self._schedule_state_save())
+            dock.dockLocationChanged.connect(lambda *_: self._schedule_state_save())
+            dock.visibilityChanged.connect(lambda *_: self._schedule_state_save())
         for splitter in (
-            self.body_splitter,
-            self.content_splitter,
-            self.editor_splitter,
             self.linked_workspace.horizontal_splitter,
             self.linked_workspace.right_splitter,
             self.process_hub.agent_splitter,
         ):
-            splitter.splitterMoved.connect(lambda *_args: self._save_timer.start())
+            splitter.splitterMoved.connect(lambda *_args: self._schedule_state_save())
 
     def set_project(self, project, project_path: str | None = None) -> None:
         self._project = project
@@ -183,6 +250,7 @@ class WorkstationFrame(QWidget):
         self.inspector.set_project(project)
         self.linked_workspace.set_project(project, self._project_path)
         self.process_hub.set_project(project, self._project_path)
+        self.composite.set_project(project)
 
     def set_project_path(self, path: str | None) -> None:
         self._project_path = str(path) if path else None
@@ -206,37 +274,32 @@ class WorkstationFrame(QWidget):
         return self.document_stack.currentWidget() is self.linked_workspace
 
     def show_agent(self) -> None:
+        self.process_dock.show()
         self.process_hub.show_agent()
-        self._expand_process_hub()
+        self._expand_process_dock()
 
     def show_tasks(self) -> None:
+        self.process_dock.show()
         self.process_hub.show_tasks()
-        self._expand_process_hub()
+        self._expand_process_dock()
 
     def submit_agent_command(self, text: str) -> None:
+        self.process_dock.show()
         self.process_hub.submit_agent_command(text)
-        self._expand_process_hub()
+        self._expand_process_dock()
 
     def toggle_explorer(self) -> None:
-        visible = self.explorer.isVisible()
-        self.explorer.setVisible(not visible)
-        if visible:
-            self.navigation_region.setMaximumWidth(54)
-            self.navigation_region.setMinimumWidth(54)
-        else:
-            self.navigation_region.setMaximumWidth(470)
-            self.navigation_region.setMinimumWidth(250)
-            self.body_splitter.setSizes([300, max(600, self.body_splitter.width() - 300)])
+        # dock 内部件用显式隐藏标志：孤立构造（宿主未显示）时
+        # isVisible() 恒为 False，不能作为折叠状态真值。
+        hidden = self.explorer.isHidden()
+        self.explorer.setVisible(hidden)
+        self.activity_rail.set_explorer_expanded(hidden)
         self._save_timer.start()
 
     def toggle_inspector(self) -> None:
-        show = not self.inspector.isVisible()
+        show = self.inspector_dock.isHidden()
         self._user_hid_inspector = not show
-        self.inspector.setVisible(show)
-        if show:
-            self.editor_splitter.setSizes(
-                [max(520, self.editor_splitter.width() - 300), 300]
-            )
+        self.inspector_dock.setVisible(show)
         self._save_timer.start()
 
     def panel_entries(self) -> list[dict]:
@@ -251,28 +314,34 @@ class WorkstationFrame(QWidget):
         self._apply_responsive_panels()
 
     def _apply_responsive_panels(self) -> None:
-        if self.width() < 1280 and not self.inspector.isHidden():
-            self.inspector.hide()
-        elif self.width() >= 1320 and not self._user_hid_inspector and self.inspector.isHidden():
-            self.inspector.show()
-            self.editor_splitter.setSizes(
-                [max(520, self.editor_splitter.width() - 300), 300]
-            )
+        if self.width() < 1280 and not self.inspector_dock.isHidden():
+            self.inspector_dock.hide()
+        elif (
+            self.width() >= 1320
+            and not self._user_hid_inspector
+            and self.inspector_dock.isHidden()
+        ):
+            self.inspector_dock.show()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self._apply_responsive_panels()
         if not self._post_show_restored:
             self._post_show_restored = True
-            # Construction happens before the top-level window has its final
-            # geometry. Restore once more after layout so the explorer is not
-            # normalized down to the activity-rail minimum on first launch.
+            # 构造发生在顶层窗口拿到最终几何之前；show 之后再恢复一次，
+            # 避免 dock 布局被首帧的默认几何覆盖。
             QTimer.singleShot(50, self._restore_layout)
 
     def _on_document_tab_changed(self, index: int) -> None:
         if index == self.TAB_LEGACY:
+            self._set_composite_docks_visible(False)
             self.document_stack.setCurrentWidget(self.page_stack)
             return
+        if index == self.TAB_COMPOSITE:
+            self.document_stack.setCurrentWidget(self.composite)
+            self._set_composite_docks_visible(True)
+            return
+        self._set_composite_docks_visible(False)
         self.document_stack.setCurrentWidget(self.linked_workspace)
         if index == self.TAB_MAP:
             self.linked_workspace.maximize_map()
@@ -281,13 +350,50 @@ class WorkstationFrame(QWidget):
         else:
             self.linked_workspace.restore_split_view()
 
+    def _set_composite_docks_visible(self, visible: bool) -> None:
+        docks = (
+            self.composite_layer_dock,
+            self.composite_input_dock,
+            self.composite_linked_dock,
+        )
+        if visible:
+            state = self._composite_docks_visible or {
+                "layer": True, "input": False, "linked": False,
+            }
+            for dock, key in zip(docks, ("layer", "input", "linked"), strict=True):
+                dock.setVisible(state[key])
+        else:
+            self._composite_docks_visible = {
+                "layer": not self.composite_layer_dock.isHidden(),
+                "input": not self.composite_input_dock.isHidden(),
+                "linked": not self.composite_linked_dock.isHidden(),
+            }
+            for dock in docks:
+                if not dock.isHidden():
+                    dock.hide()
+
+    def _reset_composite_layout(self) -> None:
+        """恢复综合编修面板的默认停靠布局（不改可见性）。"""
+        host = self._dock_host
+        for dock, area in (
+            (self.composite_input_dock, Qt.DockWidgetArea.LeftDockWidgetArea),
+            (self.composite_layer_dock, Qt.DockWidgetArea.RightDockWidgetArea),
+            (self.composite_linked_dock, Qt.DockWidgetArea.BottomDockWidgetArea),
+        ):
+            if dock.isFloating():
+                dock.setFloating(False)
+            host.addDockWidget(area, dock)
+        host.tabifyDockWidget(self.inspector_dock, self.composite_layer_dock)
+        host.tabifyDockWidget(self.process_dock, self.composite_linked_dock)
+        self._save_timer.start()
+
     def _on_activity_mode(self, mode: str) -> None:
         self.explorer.set_mode(mode)
         if mode == "search":
             self.explorer.focus_search()
         elif mode == "history":
             self.process_hub.tabs.setCurrentIndex(2)
-            self._expand_process_hub()
+            self._expand_process_dock()
         elif mode == "workspaces":
             self.document_tabs.setFocus(Qt.FocusReason.OtherFocusReason)
 
@@ -329,17 +435,22 @@ class WorkstationFrame(QWidget):
         self.linked_workspace.restore_split_view()
         self.linked_workspace.open_well("A12")
 
-    def _expand_process_hub(self) -> None:
-        total = max(320, self.content_splitter.height())
-        self.content_splitter.setSizes([max(320, total - 245), 245])
+    def _expand_process_dock(self) -> None:
+        self.process_dock.show()
+        self._dock_host.resizeDocks(
+            [self.process_dock], [245], Qt.Orientation.Vertical
+        )
+
+    def _schedule_state_save(self) -> None:
+        """部件已关闭时不再保存布局——退出/销毁阶段的全部隐藏态不是布局。"""
+        if not self.isVisible():
+            return
+        self._save_timer.start()
 
     def _restore_layout(self) -> None:
-        default_body = [300, max(700, self.width() - 300)]
-        default_editor = [max(650, self.width() - 600), 300]
-        default_content = [max(480, self.height() - 250), 240]
-        self.body_splitter.setSizes(self._read_sizes("body", default_body))
-        self.editor_splitter.setSizes(self._read_sizes("editor", default_editor))
-        self.content_splitter.setSizes(self._read_sizes("content", default_content))
+        data = self._settings.value(self._WINDOW_STATE_KEY)
+        if isinstance(data, QByteArray) and not data.isNull():
+            self._dock_host.restoreState(data)
         self.linked_workspace.horizontal_splitter.setSizes(
             self._read_sizes("linked_horizontal", [700, 360])
         )
@@ -361,9 +472,9 @@ class WorkstationFrame(QWidget):
         return sizes if sum(sizes) > 0 else fallback
 
     def _save_layout(self) -> None:
-        self._settings.setValue("layout/body", self.body_splitter.sizes())
-        self._settings.setValue("layout/editor", self.editor_splitter.sizes())
-        self._settings.setValue("layout/content", self.content_splitter.sizes())
+        if not self.isVisible():
+            return  # 关闭后保存的全隐藏布局会污染下次启动
+        self._settings.setValue(self._WINDOW_STATE_KEY, self._dock_host.saveState())
         self._settings.setValue(
             "layout/linked_horizontal", self.linked_workspace.horizontal_splitter.sizes()
         )
@@ -376,4 +487,24 @@ class WorkstationFrame(QWidget):
         self._save_timer.stop()
         self._save_layout()
         self.process_hub.shutdown()
+        self.composite.shutdown()
+        self._teardown_docks()
         return self.linked_workspace.shutdown_workers(wait_ms)
+
+    def _teardown_docks(self) -> None:
+        """工程切换 / 退出时把 dock 从宿主上摘除（宿主可被重建复用）。"""
+        docks = (
+            self.nav_dock,
+            self.inspector_dock,
+            self.process_dock,
+            self.composite_layer_dock,
+            self.composite_input_dock,
+            self.composite_linked_dock,
+        )
+        for dock in docks:
+            host = dock.parentWidget()
+            if isinstance(host, QMainWindow):
+                host.removeDockWidget(dock)
+            dock.deleteLater()
+        if self._owns_dock_host:
+            self._dock_host.deleteLater()

@@ -190,6 +190,7 @@ class AppShell(QWidget):
         parent=None,
         *,
         defer_nonvisible_bindings: bool = False,
+        dock_host=None,
     ):
         super().__init__(parent)
         self.setObjectName("AppShell")
@@ -294,9 +295,19 @@ class AppShell(QWidget):
         )
         self.page_stack.addWidget(self.visualization_page)  # hub 4 = 可视化（临时）
 
-        self.workstation = WorkstationFrame(self.project, self.page_stack, self)
+        self.workstation = WorkstationFrame(
+            self.project, self.page_stack, dock_host=dock_host, parent=self
+        )
+        # QMainWindow 子部件不会被父布局管理（Qt 设计约束）；dock 宿主由
+        # 顶层窗口提供时，工作站自身是普通 QWidget 的文档区域。
+        self.workstation.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
+        )
+        self.workstation.setMinimumSize(0, 0)
         outer.addWidget(self.workstation, 1)
 
+        # 状态栏留在中央内容底部（自定义 StatusBar 非 QStatusBar，不能占
+        # QMainWindow 的原生状态栏槽位）；属性引用不变以兼容既有接线。
         self.status_bar = StatusBar(self)
         outer.addWidget(self.status_bar)
 

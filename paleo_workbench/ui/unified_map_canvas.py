@@ -253,6 +253,7 @@ class UnifiedMapCanvas(QWidget):
         self._extent_history_index = 0
         self._last_frame: RenderFrame | None = None
         self._image = QImage()
+        self._shutdown_done = False
         # QImage below borrows this immutable payload; retaining it in the GUI
         # object keeps the native pixels valid until the next delivered frame.
         self._image_buffer: bytes | None = None
@@ -1084,10 +1085,23 @@ class UnifiedMapCanvas(QWidget):
             names.add("alt")
         return names
 
-    def closeEvent(self, event) -> None:  # noqa: N802
+    def shutdown(self) -> None:
+        """Stop polling and tear down the render backend, idempotently.
+
+        Explicit teardown for host-initiated worker shutdown (project
+        switch / app exit). ``closeEvent`` delegates here, but a hidden
+        canvas must be shut down through this method too — ``close()``
+        must not be relied on to deliver the event for hidden widgets.
+        """
+        if getattr(self, "_shutdown_done", False):
+            return
+        self._shutdown_done = True
         self._poll.stop()
         self._navigation_render.stop()
         self._image = QImage()
         self._image_buffer = None
         self._backend.shutdown()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        self.shutdown()
         super().closeEvent(event)

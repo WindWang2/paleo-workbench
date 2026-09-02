@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
-from PySide6.QtWidgets import QApplication, QMessageBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.ui import AppShell
@@ -16,11 +16,14 @@ from paleo_workbench.workflow.qc import active_quality_reports
 from paleo_workbench.workflow.service import dashboard_state, home_workflow_steps
 
 
-class PaleoWorkbenchWindow(QWidget):
+class PaleoWorkbenchWindow(QMainWindow):
     """The main application window for Paleogeography Workbench.
 
     Delegates project lifecycle management to ProjectController and cross-page
-    workflow/wiring coordination to WorkflowController.
+    workflow/wiring coordination to WorkflowController. Being a QMainWindow,
+    it is the dock host: every floatable workstation panel (explorer,
+    inspector, process hub, composite panels) is a QDockWidget of this window
+    surrounding the central document area.
     """
 
     def __init__(
@@ -41,12 +44,13 @@ class PaleoWorkbenchWindow(QWidget):
         # 低于该尺寸时多页工作台（图标栏 + 页面栈）会挤压变形，禁止缩到不可用。
         self.setMinimumSize(1180, 720)
 
-        self.outer_layout = QVBoxLayout(self)
-        self.outer_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.app_shell = AppShell(project=self.project, parent=self)
+        # QMainWindow 必须是顶层窗口：可浮动 dock（资源管理器 / 检查器 /
+        # 任务 / 图层面板等）全部注册在本窗口上；AppShell 与文档区是中央内容。
+        self.app_shell = AppShell(
+            project=self.project, parent=self, dock_host=self
+        )
+        self.setCentralWidget(self.app_shell)
         self._apply_project_to_shell()
-        self.outer_layout.addWidget(self.app_shell)
         self._wire_ribbon()
         self._setup_shortcuts()
         self._update_title()
@@ -309,16 +313,16 @@ class PaleoWorkbenchWindow(QWidget):
         if shiboken6.isValid(self.app_shell):
             self.app_shell.hide()
             self.app_shell.shutdown_workers()
-            self.outer_layout.removeWidget(self.app_shell)
             self.app_shell.setParent(None)
             self.app_shell.deleteLater()
         self.app_shell = AppShell(
             project=self.project,
             parent=self,
             defer_nonvisible_bindings=defer_nonvisible_bindings,
+            dock_host=self,
         )
         self._apply_project_to_shell()
-        self.outer_layout.addWidget(self.app_shell)
+        self.setCentralWidget(self.app_shell)
         self._wire_ribbon()
         self._update_title()
         # Re-bind project file path after shell rebuild (import/export I/O).
