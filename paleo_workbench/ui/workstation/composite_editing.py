@@ -288,6 +288,18 @@ def _geometry_equal(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
     )
 
 
+def _union_extent(
+    left: tuple[float, float, float, float], right: tuple[float, float, float, float]
+) -> tuple[float, float, float, float]:
+    """两个范围的包围盒（会话内增量 extent 的单调并集）。"""
+    return (
+        min(left[0], right[0]),
+        min(left[1], right[1]),
+        max(left[2], right[2]),
+        max(left[3], right[3]),
+    )
+
+
 def _feature_extent(features: Iterable[Mapping[str, Any]]) -> tuple[float, float, float, float]:
     xs: list[float] = []
     ys: list[float] = []
@@ -426,7 +438,10 @@ class CompositeEditController(QObject):
         self.identify_delegate: Any = None
         # 修订键控的序列化缓存：数字化点击只重组变化图层，不整层重编码
         # （review #6：100k 要素时每次点击的全量 as_record 是 GUI 线程热点）。
-        self._records_cache: dict[str, tuple[int, tuple, tuple]] = {}
+        # (composite revision, session 对象, features 元组, extent, 有序
+        # records dict)。session 身份入键：同一 data_revision 下的新会话 /
+        # 回滚不会误用旧会话的增量基线。
+        self._records_cache: dict[str, tuple[int, Any, tuple, tuple, dict]] = {}
         self._persist_cache: dict[str, tuple[int, list]] = {}
 
     # -- 画布绑定 -------------------------------------------------------------
@@ -1136,6 +1151,12 @@ class CompositeEditController(QObject):
         用户改名以其为准）；内容与修订永远由编辑权威（VectorLayer /
         编辑会话工作副本）重建。记录序列化按修订键控缓存——数字化
         点击只重编码变化图层（review #6）。
+
+        会话内增量快照：settle 只重编码会话日志覆盖到的要素（#932 的
+        宿主侧对应物），未触及要素的 record 对象跨快照复用——后端
+        feature-entry 复用与 delta 发送因此保持 O(changed)。范围在会话
+        内单调并集（缩放语义宁大勿缺）；会话结束（提交 / 回滚）后修订
+        键变化，下一次重建回到全量精确路径。
         """
         display = display or {}
         snapshots: list[MapLayerSnapshot] = []
@@ -1143,13 +1164,46 @@ class CompositeEditController(QObject):
             session = layer.edit_session
             revision = layer.data_revision if session is None else (layer.data_revision << 32) + session.revision
             cached = self._records_cache.get(layer_id)
-            if cached is not None and cached[0] == revision:
-                features, extent = cached[1], cached[2]
+            if cached is not None and cached[0] == revision and cached[1] is session:
+                features, extent = cached[2], cached[3]
             else:
-                source = session.features() if session is not None else layer.features()
-                features = tuple(feature.as_record() for feature in source)
-                extent = _feature_extent(features)
-                self._records_cache[layer_id] = (revision, features, extent)
+                records: dict[str, dict[str, object]] | None = None
+                base_revision: int | None = None
+                if session is not None and cached is not None:
+                    if cached[1] is session and (cached[0] & ~0xFFFFFFFF) == (
+                        layer.data_revision << 32
+                    ):
+                        base_revision = cached[0] & 0xFFFFFFFF
+                    elif cached[1] is None and cached[0] == layer.data_revision:
+                        # 会话开始前的无会话缓存：同一 data_revision 下内容
+                        # 与会话工作副本初值一致，可作修订 0 的增量基线
+                        # （会话首个 settle 也不必全量重建）。
+                        base_revision = 0
+                if base_revision is not None:
+                    entries = session.changes_since(base_revision)
+                    if entries is not None:
+                        records = cached[4]
+                        changed: list[dict[str, object]] = []
+                        for ids in entries:
+                            for feature_id in ids:
+                                try:
+                                    record = session.feature(feature_id).as_record()
+                                except KeyError:
+                                    records.pop(feature_id, None)
+                                else:
+                                    records[feature_id] = record
+                                    changed.append(record)
+                        extent = cached[3]
+                        if changed:
+                            # 会话内范围单调并集：缩放/命中宁大勿缺，精确
+                            # 范围由会话结束后的全量重建恢复。
+                            extent = _union_extent(extent, _feature_extent(changed))
+                if records is None:
+                    source = session.features() if session is not None else layer.features()
+                    records = {feature.feature_id: feature.as_record() for feature in source}
+                    extent = _feature_extent(records.values())
+                features = tuple(records.values())
+                self._records_cache[layer_id] = (revision, session, features, extent, records)
             previous = display.get(layer_id)
             if previous is not None:
                 # 面板显示态回写为图层权威，供持久化还原。

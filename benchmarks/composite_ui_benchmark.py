@@ -8,6 +8,8 @@ features in one editable layer:
 - visibility toggle / opacity change / reorder through LayerManagerPanel →
   must NOT rebuild geometry (snapshot signature dedup: expect sub-ms)
 - identify (revision-cached cell grid) and snapping
+- settle×10: ten digitize clicks, each followed by the debounced snapshot
+  re-composition (session incremental records path)
 - digitize: add feature into the edit session + undo
 - commit + sync_to_project (project save path)
 
@@ -100,7 +102,7 @@ def main() -> int:
     rows: list[dict] = []
     header = (
         f"{'features':>9} | {'publish':>9} | {'toggle':>8} | {'opacity':>8} | "
-        f"{'reorder':>8} | {'identify':>8} | {'snap':>8} | {'add+undo':>9} | {'commit':>8} | {'RSS MB':>7}"
+        f"{'reorder':>8} | {'identify':>8} | {'snap':>8} | {'settle×10':>9} | {'add+undo':>9} | {'commit':>8} | {'RSS MB':>7}"
     )
     print(header)
     print("-" * len(header))
@@ -150,6 +152,19 @@ def main() -> int:
         controller.start_editing()
         session = layer.edit_session
 
+        def _settle_burst():
+            # 数字化连击：每次点击后的 debounce settle（add + 快照重组）。
+            for index in range(10):
+                session.add_feature(
+                    VectorFeature(
+                        f"bench-settle-{index}",
+                        {"type": "Point", "coordinates": [0.5, 0.5]},
+                    )
+                )
+                controller.snapshot_layers()
+
+        settle_ms = _bench(_settle_burst, repeat=1)
+
         def _add_undo():
             session.add_feature(
                 VectorFeature("bench-add", {"type": "Point", "coordinates": [0.5, 0.5]})
@@ -180,6 +195,7 @@ def main() -> int:
                 "reorder_ms": round(reorder_ms, 3),
                 "identify_ms": round(identify_ms, 2),
                 "snap_ms": round(snap_ms, 2),
+                "settle10_ms": round(settle_ms, 2),
                 "add_undo_ms": round(add_undo_ms, 3),
                 "commit_sync_ms": round(commit_ms, 2),
                 "rss_mb": round(rss_mb, 1),
@@ -187,8 +203,8 @@ def main() -> int:
         )
         print(
             f"{size:>9} | {publish_ms:>8.2f} | {toggle_ms:>7.3f} | {opacity_ms:>7.3f} | "
-            f"{reorder_ms:>7.3f} | {identify_ms:>7.2f} | {snap_ms:>7.2f} | {add_undo_ms:>8.3f} | "
-            f"{commit_ms:>7.2f} | {rss_mb:>6.1f}"
+            f"{reorder_ms:>7.3f} | {identify_ms:>7.2f} | {snap_ms:>7.2f} | {settle_ms:>8.2f} | "
+            f"{add_undo_ms:>8.3f} | {commit_ms:>7.2f} | {rss_mb:>6.1f}"
         )
         controller.snapping._indexes.clear()
         canvas.shutdown()

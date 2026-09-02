@@ -12,6 +12,7 @@ from paleo_workbench.project.models import ProjectDocument, ResourceItem
 from paleo_workbench.ui.workstation.composite_document import CompositeDocument
 from paleo_workbench.ui.workstation.composite_editing import (
     GEO_TEMPLATES,
+    CompositeEditController,
     TemplateField,
     template_by_key,
 )
@@ -200,13 +201,21 @@ def test_layer_properties_payload_applies_to_layer(qtbot, tmp_path):
     assert layer.style_revision > 1
 
 
-def test_layer_properties_dialog_legacy_symbology_path(qtbot, tmp_path):
-    """桥未构建环境：对话框走 legacy 快速字段并产出可应用 payload。"""
+def test_layer_properties_dialog_legacy_symbology_path(qtbot, tmp_path, monkeypatch):
+    """桥未构建环境：对话框走 legacy 快速字段并产出可应用 payload。
+
+    用 monkeypatch 强制无桥——本测试的对象就是降级路径本身，不得随
+    构建环境漂移（桥已构建的机器上同样必须可跑）。
+    """
     from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
     from paleo_workbench.ui.workstation.composite_document import (
         _LayerPropertiesAdapter,
     )
 
+    monkeypatch.setattr(
+        "paleo_workbench.mapping.qgis_style.qgis_bridge_available",
+        lambda: False,
+    )
     doc = CompositeDocument(_project(tmp_path))
     qtbot.addWidget(doc)
     controller = doc.edit_controller
@@ -215,7 +224,7 @@ def test_layer_properties_dialog_legacy_symbology_path(qtbot, tmp_path):
     dialog = MapLayerPropertiesDialog(
         adapter, style=dict(layer.style), features=(), fields=("name", "fault_type")
     )
-    assert getattr(dialog, "_qgis_symbology", False) is False or True
+    assert dialog._qgis_symbology is False
     dialog.fill_edit.setText("#654321")
     dialog.stroke_width_spin.setValue(3.0)
     dialog.label_field_edit.setText("name")
@@ -812,3 +821,368 @@ def test_merge_after_partial_undo_is_safe(qtbot, tmp_path):
     assert layer.selection == {"p1"}
     ok, message = controller.geometry_command("merge")
     assert ok is False, "单要素不满足合并条件，但不得抛未捕获异常"
+
+
+# -- 会话内大图层增量快照 -------------------------------------------------------
+
+
+def test_session_change_journal_covers_undo_redo_and_rollback(qtbot):
+    """changes_since 日志按修订覆盖增删改 / 撤销 / 重做；回滚后不可恢复。"""
+    from paleo_workbench.mapping.vector_layer import VectorLayer, VectorFeature
+
+    layer = VectorLayer(id="vl", name="层", crs="EPSG:4326")
+    session = layer.start_editing()
+    session.add_feature(VectorFeature("a", {"type": "Point", "coordinates": [0.0, 0.0]}))
+    session.add_feature(VectorFeature("b", {"type": "Point", "coordinates": [1.0, 1.0]}))
+    assert session.changes_since(0) == (("a",), ("b",))
+
+    settled = session.revision
+    assert session.changes_since(settled) == ()
+    session.move_feature("a", 0.5, 0.5)
+    assert session.changes_since(settled) == (("a",),)
+
+    settled = session.revision
+    assert session.undo() is True
+    assert session.changes_since(settled) == (("a",),)
+    assert session.redo() is True
+    assert session.changes_since(settled) == (("a",), ("a",))
+
+    settled = session.revision
+    session.delete_feature("b")
+    assert session.changes_since(settled) == (("b",),)
+
+    # 未来修订不可查询。
+    assert session.changes_since(session.revision + 1) is None
+
+    settled = session.revision
+    session.rollback_changes()
+    assert session.changes_since(settled) is None
+
+
+def test_session_journal_trim_falls_back_to_none(qtbot):
+    """日志截断后，早于保留窗口的修订回落全量重建（None）。"""
+    from paleo_workbench.mapping.vector_layer import (
+        VectorEditSession,
+        VectorLayer,
+        VectorFeature,
+    )
+
+    layer = VectorLayer(id="vl", name="层", crs="EPSG:4326")
+    session = layer.start_editing()
+    session.add_feature(VectorFeature("a", {"type": "Point", "coordinates": [0.0, 0.0]}))
+    old = session.revision
+    for index in range(VectorEditSession.JOURNAL_LIMIT + 4):
+        session.add_feature(
+            VectorFeature(f"f{index}", {"type": "Point", "coordinates": [0.0, 0.0]})
+        )
+    assert session.revision - old > VectorEditSession.JOURNAL_LIMIT
+    assert session.changes_since(old) is None
+    # 近期修订仍在窗口内。
+    recent = session.revision - 1
+    assert session.changes_since(recent) is not None
+
+
+def test_snapshot_layers_incremental_matches_full_rebuild(qtbot):
+    """settle 增量重建与全量重建逐要素一致（内容与顺序），未触及 record 复用。"""
+    import random
+
+    controller = CompositeEditController(project_crs="EPSG:4326")
+    reference = CompositeEditController(project_crs="EPSG:4326")
+    layer = controller.create_layer("bench", "point")
+    mirror = reference.create_layer("bench", "point")
+    layer.start_editing()
+    mirror.start_editing()
+
+    rng = random.Random(20260902)
+    script: list[tuple[str, str]] = []
+    known: list[str] = []
+    for index in range(40):
+        op = rng.choice(("add", "add", "move", "attr", "delete", "undo", "redo"))
+        if op == "add":
+            target = f"f{index}"
+            known.append(target)
+        else:
+            target = rng.choice(known) if known else ""
+        script.append((op, target))
+
+    previous_records: dict[str, dict] = {}
+    for op, target in script:
+        for session in (layer.edit_session, mirror.edit_session):
+            try:
+                if op == "add":
+                    session.add_feature(
+                        VectorFeature(target, {"type": "Point", "coordinates": [0.1, 0.2]})
+                    )
+                elif op == "move" and target:
+                    session.move_feature(target, 0.01, 0.01)
+                elif op == "attr" and target:
+                    session.change_attribute(target, "kind", "well")
+                elif op == "delete" and target:
+                    session.delete_feature(target)
+                elif op == "undo":
+                    session.undo()
+                elif op == "redo":
+                    session.redo()
+            except (KeyError, ValueError):
+                pass
+        snapshot = controller.snapshot_layers()[0]
+        current = {record["id"]: record for record in snapshot.features}
+        if op in {"add", "move", "attr", "delete"} and target:
+            for feature_id, record in previous_records.items():
+                if feature_id != target and feature_id in current:
+                    assert current[feature_id] is record, "未触及要素必须复用 record 对象"
+        previous_records = current
+
+    incremental = controller.snapshot_layers()[0]
+    exact = reference.snapshot_layers()[0]
+    assert [record["id"] for record in incremental.features] == [
+        record["id"] for record in exact.features
+    ]
+    assert list(incremental.features) == list(exact.features)
+
+
+def test_snapshot_extent_grows_in_session_and_exact_after_commit(qtbot):
+    """会话内 extent 单调并集（宁大勿缺）；提交后回到精确范围。"""
+    controller = CompositeEditController(project_crs="EPSG:4326")
+    layer = controller.create_layer("bench", "point")
+    layer.start_editing()
+    session = layer.edit_session
+    session.add_feature(VectorFeature("near", {"type": "Point", "coordinates": [0.0, 0.0]}))
+    baseline = controller.snapshot_layers()[0]
+    assert baseline.extent == (0.0, 0.0, 0.0, 0.0)
+
+    session.add_feature(VectorFeature("far", {"type": "Point", "coordinates": [80.0, 60.0]}))
+    grown = controller.snapshot_layers()[0]
+    assert grown.extent == (0.0, 0.0, 80.0, 60.0)
+
+    # 删除远点：会话内范围保守（包含旧范围），不收缩出错。
+    session.delete_feature("far")
+    shrunk = controller.snapshot_layers()[0]
+    assert shrunk.extent[2:] == (80.0, 60.0)
+
+    # 提交（保存编辑）后 data_revision 变化 → 全量精确重建。
+    session.commit_changes()
+    committed = controller.snapshot_layers()[0]
+    assert committed.extent == (0.0, 0.0, 0.0, 0.0)
+
+
+# -- 引用矢量图层导入 Composite -------------------------------------------------
+
+
+def _write_reference_points_geojson(path) -> None:
+    import json
+
+    payload = {
+        "type": "FeatureCollection",
+        "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"label": "A"},
+                "geometry": {"type": "Point", "coordinates": [1.0, 2.0]},
+            },
+            {
+                "type": "Feature",
+                "properties": {"label": "B"},
+                "geometry": {"type": "Point", "coordinates": [3.0, 4.0]},
+            },
+        ],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+class _MessageLog:
+    def __init__(self, doc) -> None:
+        self.messages: list[str] = []
+        doc.status_message.connect(self.messages.append)
+
+
+def test_composite_imports_reference_vector_layer(qtbot, tmp_path):
+    """GDAL 矢量导入 Composite：渲染、合成顺序、持久化与重载。"""
+    pytest.importorskip("osgeo.gdal")
+    project = _project(tmp_path)
+    project.coordinate.project_crs = "EPSG:4326"
+    doc = CompositeDocument(project)
+    qtbot.addWidget(doc)
+    doc.edit_controller.create_layer("断层线", "line", template="fault")
+
+    source = tmp_path / "refs.geojson"
+    _write_reference_points_geojson(source)
+    assert doc.import_reference_layers([str(source)]) == 1
+
+    layers = doc.layer_manager._layers
+    reference = next(
+        (layer for layer in layers if layer.metadata.get("reference") == "true"), None
+    )
+    assert reference is not None
+    assert len(reference.features) == 2
+    assert reference.metadata.get("geometry_kind") == "point"
+    # 合成顺序：引用垫底（基础工区 → 引用 → 编修图层）。
+    user = next(
+        (layer for layer in layers if layer.metadata.get("editable") == "true"), None
+    )
+    assert user is not None
+    assert layers.index(reference) < layers.index(user)
+
+    # 工程持久化（内存写回；磁盘保存走工程保存流程）。
+    assert len(project.workstation_reference_layers) == 1
+    persisted = project.workstation_reference_layers[0]
+    assert persisted.source_kind == "vector"
+    assert str(source) in str(persisted.source_path)
+
+    # 重新打开工程：引用图层恢复。
+    reopened = CompositeDocument(project)
+    qtbot.addWidget(reopened)
+    assert len(reopened._reference_layers) == 1
+    assert reopened._reference_layers[0].id == persisted.id
+
+
+def test_reference_display_state_writes_back_to_reference_authority(qtbot, tmp_path):
+    """面板可见性 / 不透明度写回 MapReferenceLayer（保存前 flush 落盘）。"""
+    pytest.importorskip("osgeo.gdal")
+    project = _project(tmp_path)
+    project.coordinate.project_crs = "EPSG:4326"
+    doc = CompositeDocument(project)
+    qtbot.addWidget(doc)
+    source = tmp_path / "refs.geojson"
+    _write_reference_points_geojson(source)
+    doc.import_reference_layers([str(source)])
+    reference_id = doc._reference_layers[0].id
+
+    doc.layer_manager.set_layer_visible(reference_id, False)
+    doc.layer_manager.set_layer_opacity(reference_id, 0.4)
+    doc._sync_composition_now()
+
+    reference = doc._reference_layers[0]
+    assert reference.visible is False
+    assert abs(reference.opacity - 0.4) < 1e-6
+    assert project.workstation_reference_layers[0].visible is False
+
+
+def test_reference_source_offline_degrades_honestly(qtbot, tmp_path):
+    """源文件消失：要素撤空、名称标注（不可用）、状态一条不漏。"""
+    pytest.importorskip("osgeo.gdal")
+    project = _project(tmp_path)
+    project.coordinate.project_crs = "EPSG:4326"
+    doc = CompositeDocument(project)
+    qtbot.addWidget(doc)
+    log = _MessageLog(doc)
+    source = tmp_path / "refs.geojson"
+    _write_reference_points_geojson(source)
+    doc.import_reference_layers([str(source)])
+    reference_id = doc._reference_layers[0].id
+
+    source.unlink()
+    doc._refresh_reference_layer(reference_id)
+    doc._sync_composition_now()
+
+    reference = next(
+        layer
+        for layer in doc.layer_manager._layers
+        if layer.id == reference_id
+    )
+    assert reference.features == ()
+    assert "不可用" in reference.name
+    assert any("refs" in message or "状态" in message for message in log.messages)
+
+
+def test_reference_import_rejects_broken_sources(qtbot, tmp_path):
+    """缺文件 / 坏文件：导入数为 0，失败原因经状态栏告知，无残留图层。"""
+    pytest.importorskip("osgeo.gdal")
+    project = _project(tmp_path)
+    project.coordinate.project_crs = "EPSG:4326"
+    doc = CompositeDocument(project)
+    qtbot.addWidget(doc)
+    log = _MessageLog(doc)
+
+    assert doc.import_reference_layers([str(tmp_path / "missing.geojson")]) == 0
+    broken = tmp_path / "broken.geojson"
+    broken.write_text("not json at all", encoding="utf-8")
+    assert doc.import_reference_layers([str(broken)]) == 0
+    assert doc._reference_layers == []
+    assert log.messages, "失败必须可见，不得静默"
+
+
+def test_reference_import_without_gdal_reports_actionably(qtbot, tmp_path, monkeypatch):
+    """无 GDAL 环境：导入失败给出可操作信息，Composite 不崩。"""
+    from paleo_workbench.mapping.reference_layers import (
+        ReferenceLayerError,
+        ReferenceLayerService,
+    )
+
+    def _no_gdal(self, path, project_crs):
+        raise ReferenceLayerError("参考图功能需要 GDAL（osgeo）；请安装/修复 GDAL 后重试")
+
+    monkeypatch.setattr(ReferenceLayerService, "import_layer", _no_gdal)
+    project = _project(tmp_path)
+    doc = CompositeDocument(project)
+    qtbot.addWidget(doc)
+    log = _MessageLog(doc)
+    source = tmp_path / "refs.geojson"
+    _write_reference_points_geojson(source)
+    assert doc.import_reference_layers([str(source)]) == 0
+    assert doc._reference_layers == []
+    assert any("GDAL" in message for message in log.messages)
+
+
+def test_reference_snap_participation_and_removal(qtbot, tmp_path):
+    """参与捕捉开关接入参考点通道；移除引用清理面板与工程文档。"""
+    pytest.importorskip("osgeo.gdal")
+    project = _project(tmp_path)
+    project.coordinate.project_crs = "EPSG:4326"
+    doc = CompositeDocument(project)
+    qtbot.addWidget(doc)
+    source = tmp_path / "refs.geojson"
+    _write_reference_points_geojson(source)
+    doc.import_reference_layers([str(source)])
+    assert doc._reference_layer_snap_points() == []
+
+    reference_id = doc._reference_layers[0].id
+    doc._toggle_reference_snap(reference_id)
+    points = doc._reference_layer_snap_points()
+    assert (1.0, 2.0) in points and (3.0, 4.0) in points
+    assert project.workstation_reference_layers[0].participates_in_snap is True
+
+    doc._remove_reference_layer(reference_id)
+    assert doc._reference_layers == []
+    assert project.workstation_reference_layers == []
+    assert all(
+        layer.metadata.get("reference") != "true"
+        for layer in doc.layer_manager._layers
+    )
+
+
+def test_reference_withheld_on_project_crs_change_until_refresh(qtbot, tmp_path):
+    """工程 CRS 变更后引用归一坐标过期：扣发 + 提示；刷新按新 CRS 重读。"""
+    pytest.importorskip("osgeo.gdal")
+    project = _project(tmp_path)
+    project.coordinate.project_crs = "EPSG:4326"
+    doc = CompositeDocument(project)
+    qtbot.addWidget(doc)
+    source = tmp_path / "refs.geojson"
+    _write_reference_points_geojson(source)
+    doc.import_reference_layers([str(source)])
+    reference_id = doc._reference_layers[0].id
+
+    # 模拟工程坐标系变更（WGS84 → UTM 50N）。
+    project.coordinate.project_crs = "EPSG:32650"
+    doc.edit_controller.project_crs = "EPSG:32650"
+    doc._sync_composition_now()
+    withheld = next(
+        layer for layer in doc.layer_manager._layers if layer.id == reference_id
+    )
+    assert withheld.features == ()
+    assert "不一致" in withheld.name
+
+    # 刷新引用：按当前工程 CRS 重读源文件，恢复渲染与身份/显示态
+    # （显示态经面板提交——面板是显示增量的唯一提交口）。
+    doc.layer_manager.set_layer_visible(reference_id, False)
+    doc._refresh_reference_layer(reference_id)
+    refreshed_model = doc._reference_layers[0]
+    assert refreshed_model.id == reference_id
+    assert refreshed_model.visible is False
+    assert refreshed_model.project_crs == "EPSG:32650"
+    restored = next(
+        layer for layer in doc.layer_manager._layers if layer.id == reference_id
+    )
+    assert len(restored.features) == 2

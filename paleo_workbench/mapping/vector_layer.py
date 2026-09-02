@@ -309,6 +309,10 @@ class VectorLayer:
 class VectorEditSession:
     """QGIS-inspired edit buffer: working state, undo/redo, commit, rollback."""
 
+    # Journal retention: enough revision entries for snapshot consumers that
+    # settle on a debounce; older watermarks fall back to a full rebuild.
+    JOURNAL_LIMIT = 1024
+
     def __init__(self, layer: VectorLayer) -> None:
         self.layer = layer
         self._working: dict[str, VectorFeature] = dict(layer._features)
@@ -316,6 +320,31 @@ class VectorEditSession:
         self.redo_stack: list[EditCommand] = []
         self._open_command: list[EditCommand] | None = None
         self.revision = 0
+        # (revision, touched feature ids) per mutation, in application order.
+        # Contiguous suffix of all revisions that ever bumped; rolled back or
+        # trimmed-away history yields None from changes_since (full rebuild).
+        self._journal: list[tuple[int, tuple[str, ...]]] = []
+
+    def _bump_revision(self, touched: Iterable[str] = ()) -> None:
+        self.revision += 1
+        self._journal.append((self.revision, tuple(touched)))
+        if len(self._journal) > self.JOURNAL_LIMIT:
+            del self._journal[: len(self._journal) - self.JOURNAL_LIMIT]
+
+    def changes_since(self, revision: int) -> tuple[tuple[str, ...], ...] | None:
+        """Journal entries with revision > ``revision`` (oldest first).
+
+        ``None`` when the span is unrecoverable (revision never seen, journal
+        trimmed, or the session rolled back wholesale). Empty tuple means the
+        working copy provably did not move past ``revision``.
+        """
+        if revision > self.revision:
+            return None
+        if revision == self.revision:
+            return ()
+        if not self._journal or self._journal[0][0] > revision + 1:
+            return None
+        return tuple(ids for entry_revision, ids in self._journal if entry_revision > revision)
 
     @property
     def is_dirty(self) -> bool:
@@ -353,10 +382,12 @@ class VectorEditSession:
     def destroy_edit_command(self) -> None:
         if self._open_command is None:
             raise RuntimeError("no edit command is open")
+        touched: set[str] = set()
         for command in reversed(self._open_command):
             command.revert(self._working)
+            touched.update(command.feature_ids)
         self._open_command = None
-        self.revision += 1
+        self._bump_revision(touched)
 
     def _record(self, command: EditCommand, *, already_applied: bool = False) -> None:
         if not already_applied:
@@ -366,7 +397,7 @@ class VectorEditSession:
             return
         self.undo_stack.append(command)
         self.redo_stack.clear()
-        self.revision += 1
+        self._bump_revision(command.feature_ids)
 
     def add_feature(self, feature: VectorFeature) -> None:
         if feature.feature_id in self._working:
@@ -484,7 +515,7 @@ class VectorEditSession:
         command = self.undo_stack.pop()
         command.revert(self._working)
         self.redo_stack.append(command)
-        self.revision += 1
+        self._bump_revision(command.feature_ids)
         # 撤销可能移除要素：选集不得残留已不存在的 id（否则宿主的
         # O(selection) 计数与几何命令会命中缺失要素）。
         self.layer._selection.intersection_update(self._working)
@@ -496,7 +527,7 @@ class VectorEditSession:
         command = self.redo_stack.pop()
         command.apply(self._working)
         self.undo_stack.append(command)
-        self.revision += 1
+        self._bump_revision(command.feature_ids)
         self.layer._selection.intersection_update(self._working)
         return True
 
@@ -510,7 +541,11 @@ class VectorEditSession:
         self._working = dict(self.layer._features)
         self.undo_stack.clear()
         self.redo_stack.clear()
-        self.revision += 1
+        # 工作副本整体替换：任何旧修订的增量跨度都不可恢复。bump 之后再
+        # 清空日志——若留下这条空条目，changes_since(旧修订) 会误判为
+        # 「零变更」而保留过期 records；空日志使其返回 None → 全量重建。
+        self._bump_revision()
+        self._journal = []
         self.layer._discard_session(self)
 
     def audit_history(self) -> list[dict[str, object]]:
