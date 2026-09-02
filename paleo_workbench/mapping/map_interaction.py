@@ -378,6 +378,9 @@ class SnappingService:
         self.current_layer_only = False
         self.layer_enabled: dict[str, bool] = {}
         self.layer_modes: dict[str, set[str]] = {}
+        # 每图层覆盖：容差（像素）与优先级（数值小者优先，仅作等距平手裁决）。
+        self.layer_tolerance: dict[str, float] = {}
+        self.layer_priority: dict[str, int] = {}
         self.grid_origin: Point = (0.0, 0.0)
         self.grid_spacing: Point | None = None
         self.reference_points: tuple[Point, ...] = ()
@@ -415,25 +418,32 @@ class SnappingService:
         self.last_match = None
         if not self.enabled:
             return point
-        matches = [
-            match
-            for layer in layers
-            if self.layer_enabled.get(layer.id, True)
-            and (match := self.index_for(layer).snap(point, tolerance, self.layer_modes.get(layer.id, self.modes))) is not None
-        ]
+        ranked: list[tuple[float, int, SnapMatch]] = []
+        for layer in layers:
+            if not self.layer_enabled.get(layer.id, True):
+                continue
+            layer_tolerance = self.layer_tolerance.get(layer.id, tolerance)
+            priority = self.layer_priority.get(layer.id, 0)
+            match = self.index_for(layer).snap(
+                point, layer_tolerance, self.layer_modes.get(layer.id, self.modes)
+            )
+            if match is not None:
+                ranked.append((match.distance, priority, match))
         if "reference" in self.modes:
             for reference in self.reference_points:
                 distance = math.dist(point, reference)
                 if distance <= tolerance:
-                    matches.append(SnapMatch("__reference__", reference, "reference", distance))
+                    ranked.append((distance, 0, SnapMatch("__reference__", reference, "reference", distance)))
         if "grid" in self.modes and self.grid_spacing is not None:
             sx, sy = self.grid_spacing
             ox, oy = self.grid_origin
             grid_point = (ox + round((point[0] - ox) / sx) * sx, oy + round((point[1] - oy) / sy) * sy)
             distance = math.dist(point, grid_point)
             if distance <= tolerance:
-                matches.append(SnapMatch("__grid__", grid_point, "grid", distance))
-        if matches:
-            self.last_match = min(matches, key=lambda match: match.distance)
+                ranked.append((distance, 0, SnapMatch("__grid__", grid_point, "grid", distance)))
+        if ranked:
+            # 距离优先；等距时按每图层优先级（小值优先）裁决。
+            ranked.sort(key=lambda item: (item[0], item[1]))
+            self.last_match = ranked[0][2]
             return self.last_match.point
         return point

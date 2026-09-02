@@ -517,6 +517,8 @@ class UserVectorLayer(BaseModel):
     template: str = ""  # geological template key; "" = custom
     crs: str = ""
     style: dict[str, Any] = Field(default_factory=dict)
+    # 地质模板字段 schema（TemplateField 序列化）；与模板键无关的可扩展描述。
+    field_schema: dict[str, Any] = Field(default_factory=dict)
     features: list[UserVectorFeature] = Field(default_factory=list)
     visible: bool = True
     opacity: float = 1.0

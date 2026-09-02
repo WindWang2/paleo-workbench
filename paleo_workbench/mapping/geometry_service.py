@@ -13,13 +13,14 @@ explicit fallback for hosts without the QGIS bridge.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from paleo_workbench.mapping.geometry_schema import new_feature_id
 from paleo_workbench.mapping.qgis_style import qgis_bridge_available
 from paleo_workbench.mapping.vector_layer import VectorEditSession, VectorFeature
 
 __all__ = [
+    "make_geometry_valid",
     "merge_selected_polygons",
     "qgis_geometry_available",
     "split_polygon_by_line",
@@ -86,3 +87,21 @@ def split_polygon_by_line(
     )
     polygon_session.split_feature(polygon_feature_id, replacements)
     return tuple(feature.feature_id for feature in replacements)
+
+
+def make_geometry_valid(geometry: Mapping[str, object]) -> dict[str, object]:
+    """Repair an invalid polygon geometry: QGIS engine first, shapely fallback."""
+    if not isinstance(geometry, Mapping):
+        return dict(geometry or {})
+    if str(geometry.get("type") or "") not in {"Polygon", "MultiPolygon"}:
+        return dict(geometry)
+    if qgis_bridge_available():
+        try:
+            repaired = _native_geometry().make_valid(json.dumps(geometry))
+            if repaired:
+                return json.loads(repaired)
+        except (RuntimeError, ValueError):
+            pass  # fall through to the shapely repair below
+    from paleo_workbench.mapping.topology import repair_invalid_geometry
+
+    return repair_invalid_geometry(dict(geometry))

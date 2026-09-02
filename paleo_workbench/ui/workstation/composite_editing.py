@@ -43,6 +43,7 @@ from paleo_workbench.mapping.map_tools import (
     VertexTool,
     ZoomTool,
 )
+from paleo_workbench.mapping.topology import TopologyService
 from paleo_workbench.mapping.vector_layer import VectorFeature, VectorLayer
 from paleo_workbench.project.models import UserVectorFeature, UserVectorLayer
 from paleo_workbench.ui.map_action_controller import MapActionState
@@ -53,6 +54,10 @@ __all__ = [
     "GEOMETRY_KIND_LABELS",
     "GEO_TEMPLATES",
     "GeoTemplate",
+    "TemplateField",
+    "fields_to_schema",
+    "schema_fields",
+    "template_by_key",
 ]
 
 GEOMETRY_KINDS: tuple[str, ...] = ("point", "line", "polygon")
@@ -63,59 +68,204 @@ _KIND_STYLE_PRESET = {"point": "well", "line": "line", "polygon": "facies"}
 
 
 @dataclass(frozen=True, slots=True)
+class TemplateField:
+    """地质图层字段描述：数据驱动的可扩展 schema（不硬编码进 UI 控件树）。
+
+    ``kind`` ∈ text / number / choice；choice 字段携带候选值。default 是
+    新要素的初始属性值；required 驱动属性校验（标记缺失，不阻断数字化）。
+    """
+
+    name: str
+    label: str = ""
+    kind: str = "text"
+    choices: tuple[str, ...] = ()
+    default: object = ""
+    required: bool = False
+
+    def to_dict(self) -> dict[str, object]:
+        data: dict[str, object] = {
+            "name": self.name,
+            "label": self.label or self.name,
+            "kind": self.kind,
+            "required": self.required,
+        }
+        if self.choices:
+            data["choices"] = list(self.choices)
+        if self.default not in ("", None):
+            data["default"] = self.default
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> "TemplateField":
+        if not isinstance(data, Mapping) or not str(data.get("name") or ""):
+            raise ValueError("template field requires a name")
+        kind = str(data.get("kind") or "text")
+        if kind not in {"text", "number", "choice"}:
+            kind = "text"
+        choices = tuple(str(c) for c in (data.get("choices") or ()) if str(c))
+        if kind == "choice" and not choices:
+            kind = "text"
+        default = data.get("default", "")
+        if kind == "number":
+            try:
+                default = float(default) if default not in ("", None) else ""
+            except (TypeError, ValueError):
+                default = ""
+        return cls(
+            name=str(data["name"]),
+            label=str(data.get("label") or data["name"]),
+            kind=kind,
+            choices=choices,
+            default=default,
+            required=bool(data.get("required")),
+        )
+
+
+def fields_to_schema(fields: Iterable["TemplateField"]) -> dict[str, object]:
+    return {"fields": [field.to_dict() for field in fields]}
+
+
+def schema_fields(schema: Mapping[str, object] | None) -> tuple[TemplateField, ...]:
+    raw = (schema or {}).get("fields") if isinstance(schema, Mapping) else None
+    fields: list[TemplateField] = []
+    for item in raw or ():
+        try:
+            fields.append(TemplateField.from_dict(item))
+        except (ValueError, TypeError):
+            continue
+    return tuple(fields)
+
+
+@dataclass(frozen=True, slots=True)
 class GeoTemplate:
-    """地质矢量图层模板：中文名 + 几何类型 + 符合制图习惯的默认样式。"""
+    """地质矢量图层模板：角色 + 几何类型 + 字段 schema + 默认样式。
+
+    模板是专业编修的起点（QGIS「新建 Shapefile 图层」的地质版）：字段
+    schema 数据驱动，属性表 / 图层属性 / 校验全部从 schema 生成。
+    """
 
     key: str
     label: str
     kind: str
     style: VectorStyle
+    fields: tuple[TemplateField, ...] = ()
 
+    def field_defaults(self) -> dict[str, object]:
+        return {field.name: field.default for field in self.fields if field.default != ""}
+
+
+def _field(
+    name: str, label: str, *, kind: str = "text", choices: tuple[str, ...] = (),
+    default: object = "", required: bool = False,
+) -> TemplateField:
+    return TemplateField(name, label, kind, choices, default, required)
+
+
+_CONFIDENCE = ("高", "中", "低")
 
 # 新建矢量图层的地质模板（QGIS「新建 Shapefile 图层」对话框的专业化版本）。
 # 样式取自符号库预设或按地质制图惯例定制：断层走 FAULT 长短线，展布线
-# 用蓝色虚线，成图范围用无填充的橙色边界。
+# 用蓝色虚线，成图范围用无填充的橙色边界。字段 schema 覆盖断层 / 相带 /
+# 物源线 / 展布线 / 打断线 / 方向线的实际业务字段。
 GEO_TEMPLATES: tuple[GeoTemplate, ...] = (
-    GeoTemplate("well_point", "测井点", "point", default_style_for("well")),
     GeoTemplate(
-        "source",
-        "物源线",
-        "line",
-        VectorStyle(fill="transparent", stroke="#d62728", stroke_width=2.5),
+        "well_point", "测井点", "point", default_style_for("well"),
+        fields=(
+            _field("name", "井名", required=True),
+            _field("operator", "作业者"),
+            _field("purpose", "井别", kind="choice", choices=("探井", "评价井", "开发井", "参数井")),
+            _field("spud_date", "开钻日期"),
+            _field("source", "资料来源"),
+        ),
     ),
-    GeoTemplate("fault", "断层线", "line", STYLE_LIBRARY["fault"]),
     GeoTemplate(
-        "spreading",
-        "展布线",
-        "line",
+        "fault", "断层线", "line", STYLE_LIBRARY["fault"],
+        fields=(
+            _field("name", "断层名称", required=True),
+            _field("fault_type", "断层性质", kind="choice",
+                   choices=("正断层", "逆断层", "走滑断层", "逆掩断层", "未定")),
+            _field("confidence", "可信度", kind="choice", choices=_CONFIDENCE, default="中"),
+            _field("strike", "走向（°）", kind="number"),
+            _field("throw", "断距（m）", kind="number"),
+            _field("horizon", "层位"),
+            _field("interpreter", "解释人"),
+            _field("source", "资料来源"),
+        ),
+    ),
+    GeoTemplate(
+        "facies", "相带", "polygon", default_style_for("facies"),
+        fields=(
+            _field("facies", "相带类型", kind="choice",
+                   choices=("冲积扇", "河流", "三角洲", "滨浅湖", "半深湖", "深湖", "海底扇", "浊积", "碳酸盐岩台地")),
+            _field("lithology", "岩性"),
+            _field("confidence", "可信度", kind="choice", choices=_CONFIDENCE, default="中"),
+            _field("horizon", "层位", required=True),
+            _field("source", "资料来源"),
+        ),
+    ),
+    GeoTemplate(
+        "source", "物源线", "line",
+        VectorStyle(fill="transparent", stroke="#d62728", stroke_width=2.5),
+        fields=(
+            _field("source_type", "物源类型", kind="choice",
+                   choices=("点物源", "多物源", "侧向物源", "未知")),
+            _field("direction", "方向（如 NNE）"),
+            _field("confidence", "可信度", kind="choice", choices=_CONFIDENCE, default="中"),
+            _field("horizon", "层位"),
+        ),
+    ),
+    GeoTemplate(
+        "spreading", "展布线", "line",
         VectorStyle(
             fill="transparent",
             stroke="#1c7ed6",
             stroke_width=2.0,
             line_pattern=LinePattern.DASH,
         ),
+        fields=(
+            _field("spreading_type", "展布类型", kind="choice", choices=("边界展布", "内部展布", "推测展布")),
+            _field("horizon", "层位"),
+            _field("confidence", "可信度", kind="choice", choices=_CONFIDENCE, default="中"),
+        ),
     ),
     GeoTemplate(
-        "break",
-        "打断线",
-        "line",
+        "break", "打断线", "line",
         VectorStyle(
             fill="transparent",
             stroke="#868e96",
             stroke_width=1.5,
             line_pattern=LinePattern.DASH,
         ),
+        fields=(
+            _field("break_type", "打断类型", kind="choice", choices=("剥蚀", "构造缺失", "资料缺失")),
+            _field("horizon", "层位"),
+            _field("related", "关联层位"),
+        ),
     ),
     GeoTemplate(
-        "direction",
-        "方向线",
-        "line",
+        "direction", "方向线", "line",
         VectorStyle(fill="transparent", stroke="#2f9e44", stroke_width=2.0),
+        fields=(
+            _field("direction", "方向（如 NE45°）", required=True),
+            _field("horizon", "层位"),
+            _field("confidence", "可信度", kind="choice", choices=_CONFIDENCE, default="中"),
+        ),
     ),
-    GeoTemplate("extent", "成图范围", "polygon", STYLE_LIBRARY["formation_boundary"]),
+    GeoTemplate(
+        "extent", "成图范围", "polygon", STYLE_LIBRARY["formation_boundary"],
+        fields=(
+            _field("name", "范围名称", required=True),
+            _field("phase", "编制阶段", kind="choice", choices=("普查", "详查", "精查")),
+            _field("remark", "备注"),
+        ),
+    ),
 )
 
 _TEMPLATE_BY_KEY: dict[str, GeoTemplate] = {t.key: t for t in GEO_TEMPLATES}
+
+
+def template_by_key(key: str) -> GeoTemplate | None:
+    return _TEMPLATE_BY_KEY.get(str(key))
 
 _LAYER_ID_PREFIX = "composite:"
 
@@ -147,6 +297,92 @@ def _feature_extent(features: Iterable[Mapping[str, Any]]) -> tuple[float, float
     return (min(xs), min(ys), max(xs), max(ys))
 
 
+def _segments(value: Any) -> Iterable[tuple[tuple[float, float], tuple[float, float]]]:
+    """展平 GeoJSON coordinates 为线段序列（含 Polygon 环）。"""
+    points: list[tuple[float, float]] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, (list, tuple)):
+            if len(node) >= 2 and isinstance(node[0], (int, float)) and isinstance(node[1], (int, float)):
+                points.append((float(node[0]), float(node[1])))
+                return
+            for child in node:
+                walk(child)
+
+    walk(value)
+    for index in range(len(points) - 1):
+        yield points[index], points[index + 1]
+
+
+def _point_in_ring(point: tuple[float, float], ring: Any) -> bool:
+    points: list[tuple[float, float]] = []
+    for node in ring or ():
+        if (
+            isinstance(node, (list, tuple))
+            and len(node) >= 2
+            and isinstance(node[0], (int, float))
+            and isinstance(node[1], (int, float))
+        ):
+            points.append((float(node[0]), float(node[1])))
+    if len(points) < 3:
+        return False
+    inside = False
+    x, y = point
+    j = len(points) - 1
+    for i in range(len(points)):
+        xi, yi = points[i]
+        xj, yj = points[j]
+        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi + 1e-300) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
+def _geometry_hit(point: tuple[float, float], geometry: Mapping[str, Any], tolerance: float) -> bool:
+    """快照记录的粗命中测试：点距 / 线距 / 多边形 even-odd。"""
+    import math as _math
+
+    kind = str(geometry.get("type") or "")
+    coordinates = geometry.get("coordinates")
+    if kind == "Point":
+        try:
+            return _math.dist(point, (float(coordinates[0]), float(coordinates[1]))) <= tolerance
+        except (TypeError, ValueError, IndexError):
+            return False
+    if kind in {"LineString", "MultiLineString"}:
+        for start, end in _segments(coordinates):
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            length_squared = dx * dx + dy * dy
+            if length_squared <= 0.0:
+                if _math.dist(point, start) <= tolerance:
+                    return True
+                continue
+            t = max(0.0, min(1.0, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length_squared))
+            if _math.dist(point, (start[0] + t * dx, start[1] + t * dy)) <= tolerance:
+                return True
+        return False
+    if kind == "Polygon":
+        rings = list(coordinates or [])
+        if rings and _point_in_ring(point, rings[0]):
+            return all(not _point_in_ring(point, ring) for ring in rings[1:])
+        return any(_math.dist(point, vertex) <= tolerance for vertex, _path in _ring_vertices(rings))
+    if kind == "MultiPolygon":
+        return any(_geometry_hit(point, {"type": "Polygon", "coordinates": poly}, tolerance) for poly in coordinates or ())
+    return False
+
+
+def _ring_vertices(rings: Any) -> Iterable[tuple[tuple[float, float], tuple[int, ...]]]:
+    for ring_index, ring in enumerate(rings or ()):
+        for point_index, node in enumerate(ring or ()):
+            if (
+                isinstance(node, (list, tuple))
+                and len(node) >= 2
+                and isinstance(node[0], (int, float))
+                and isinstance(node[1], (int, float))
+            ):
+                yield (float(node[0]), float(node[1])), (ring_index, point_index)
+
+
 class CompositeEditController(QObject):
     """综合编修文档的用户矢量图层与数字化会话。"""
 
@@ -161,14 +397,18 @@ class CompositeEditController(QObject):
         self.project_crs = str(project_crs)
         self.tools = MapToolController()
         self._snapping = SnappingService()
+        self._topology = TopologyService()
         self._layers: dict[str, VectorLayer] = {}
         self._kinds: dict[str, str] = {}
         self._templates: dict[str, str] = {}
+        self._schemas: dict[str, dict] = {}
         # 图层管理面板的显示态（可见性 / 不透明度），供持久化还原。
         self._display: dict[str, tuple[bool, float]] = {}
         self._active_layer_id: str | None = None
         self._active_tool_action = "pan"
         self._canvas = None
+        # 宿主注入的多图层识别回调（Identify Results 面板）；缺省单图层命中。
+        self.identify_delegate: Any = None
 
     # -- 画布绑定 -------------------------------------------------------------
 
@@ -198,9 +438,11 @@ class CompositeEditController(QObject):
         if kind not in GEOMETRY_KINDS:
             raise ValueError(f"unsupported geometry kind {kind!r}")
         geo_template = _TEMPLATE_BY_KEY.get(str(template))
+        schema: dict[str, object] = {}
         if geo_template is not None:
             kind = geo_template.kind
             style = geo_template.style.to_dict()
+            schema = fields_to_schema(geo_template.fields)
             if not str(name).strip():
                 name = geo_template.label
         else:
@@ -211,11 +453,13 @@ class CompositeEditController(QObject):
             id=layer_id,
             name=str(name) or f"编修图层 {len(self._layers) + 1}",
             crs=self.project_crs,
+            schema=schema,
             style=style,
         )
         self._layers[layer_id] = layer
         self._kinds[layer_id] = kind
         self._templates[layer_id] = template
+        self._schemas[layer_id] = dict(schema)
         self._active_layer_id = layer_id
         self.layers_changed.emit()
         self.state_changed.emit()
@@ -232,6 +476,55 @@ class CompositeEditController(QObject):
     def layer_template(self, layer_id: str) -> str:
         return self._templates.get(str(layer_id), "")
 
+    def layer_schema(self, layer_id: str) -> dict[str, object]:
+        """图层字段 schema（模板 schema 或自定义空 schema）。"""
+        layer = self._layers.get(str(layer_id))
+        if layer is not None and layer.schema:
+            return dict(layer.schema)
+        return dict(self._schemas.get(str(layer_id), {}))
+
+    def set_layer_style(self, layer_id: str, style: Mapping[str, object]) -> None:
+        """写入图层样式（图层属性 / 符号系统 / 标注对话框的落地路径）。"""
+        layer = self._layers.get(str(layer_id))
+        if layer is None:
+            return
+        layer.style = dict(style)
+        layer.style_revision += 1
+        self.layers_changed.emit()
+        self.state_changed.emit()
+
+    def duplicate_layer(self, layer_id: str) -> VectorLayer | None:
+        """复制图层（要素 + 样式 + schema，得到独立的新图层）。"""
+        source = self._layers.get(str(layer_id))
+        if source is None:
+            return None
+        kind = self._kinds.get(str(layer_id), "line")
+        layer_id_new = f"{_LAYER_ID_PREFIX}{new_feature_id('layer')}"
+        copy = VectorLayer(
+            id=layer_id_new,
+            name=f"{source.name} 副本",
+            crs=source.crs,
+            schema=dict(source.schema),
+            style=dict(source.style),
+            features=[
+                VectorFeature(
+                    feature_id=new_feature_id("copy"),
+                    geometry=dict(feature.geometry),
+                    attributes=dict(feature.attributes),
+                )
+                for feature in source.features()
+            ],
+        )
+        copy.style_revision = source.style_revision + 1
+        self._layers[layer_id_new] = copy
+        self._kinds[layer_id_new] = kind
+        self._templates[layer_id_new] = self._templates.get(str(layer_id), "")
+        self._schemas[layer_id_new] = dict(source.schema)
+        self._active_layer_id = layer_id_new
+        self.layers_changed.emit()
+        self.state_changed.emit()
+        return copy
+
     def remove_layer(self, layer_id: str) -> None:
         layer_id = str(layer_id)
         layer = self._layers.pop(layer_id, None)
@@ -241,7 +534,12 @@ class CompositeEditController(QObject):
             layer.edit_session.rollback_changes()
         self._kinds.pop(layer_id, None)
         self._templates.pop(layer_id, None)
+        self._schemas.pop(layer_id, None)
         self._display.pop(layer_id, None)
+        self._snapping.layer_enabled.pop(layer_id, None)
+        self._snapping.layer_modes.pop(layer_id, None)
+        self._snapping.layer_tolerance.pop(layer_id, None)
+        self._snapping.layer_priority.pop(layer_id, None)
         if self._active_layer_id == layer_id:
             self._active_layer_id = next(iter(self._layers), None)
             self._rebind_active_tool()
@@ -258,6 +556,7 @@ class CompositeEditController(QObject):
         self._layers.clear()
         self._kinds.clear()
         self._templates.clear()
+        self._schemas.clear()
         self._display.clear()
         self._active_layer_id = None
         for record in list(getattr(project, "user_vector_layers", None) or []):
@@ -276,24 +575,29 @@ class CompositeEditController(QObject):
                         attributes=dict(getattr(item, "properties", None) or {}),
                     )
                 )
+            template = _TEMPLATE_BY_KEY.get(str(getattr(record, "template", "") or ""))
             style = dict(getattr(record, "style", None) or {})
             if not style:
-                template = _TEMPLATE_BY_KEY.get(str(getattr(record, "template", "") or ""))
                 style = (
                     template.style.to_dict()
                     if template is not None
                     else default_style_for(_KIND_STYLE_PRESET[kind]).to_dict()
                 )
+            schema = dict(getattr(record, "field_schema", None) or {})
+            if not schema and template is not None:
+                schema = fields_to_schema(template.fields)
             layer = VectorLayer(
                 id=str(record.id),
                 name=str(getattr(record, "name", "") or "编修图层"),
                 crs=str(getattr(record, "crs", "") or self.project_crs),
+                schema=schema,
                 style=style,
                 features=features,
             )
             self._layers[layer.id] = layer
             self._kinds[layer.id] = kind
             self._templates[layer.id] = str(getattr(record, "template", "") or "")
+            self._schemas[layer.id] = dict(schema)
             self._display[layer.id] = (
                 bool(getattr(record, "visible", True)),
                 float(getattr(record, "opacity", 1.0) or 1.0),
@@ -321,6 +625,7 @@ class CompositeEditController(QObject):
                     template=self._templates.get(layer_id, ""),
                     crs=layer.crs,
                     style=dict(layer.style),
+                    field_schema=dict(layer.schema or self._schemas.get(layer_id) or {}),
                     features=[
                         UserVectorFeature(
                             id=feature.feature_id,
@@ -367,13 +672,27 @@ class CompositeEditController(QObject):
         layer.start_editing()
         self.state_changed.emit()
 
-    def save_edits(self) -> None:
+    def save_edits(self) -> str | None:
+        """提交活动图层编辑会话；返回 None 表示成功，否则为阻断原因。
+
+        拓扑编辑开启时执行与编图页一致的校验门禁（TopologyService）：
+        无效几何阻断保存并给出原因，修复（make-valid）后可再保存。
+        """
         layer = self.active_layer
         if layer is None or layer.edit_session is None:
-            return
+            return None
+        if self._topology.enabled:
+            issues = self._topology.validate([layer])
+            if issues:
+                first = issues[0]
+                return (
+                    f"图层「{layer.name}」要素 {first.get('feature_id', '')} "
+                    f"未通过拓扑检查：{first.get('message', '')}"
+                )
         layer.edit_session.commit_changes()
         self.content_changed.emit(layer.id)
         self.state_changed.emit()
+        return None
 
     def rollback_edits(self) -> None:
         layer = self.active_layer
@@ -435,7 +754,11 @@ class CompositeEditController(QObject):
                 return
             index = self._snapping.index_for(layer)
             if action_id in {"identify", "select"}:
-                tool = SelectTool(layer, identify=lambda point: index.identify(point, self._tolerance()))
+                if action_id == "identify" and callable(self.identify_delegate):
+                    identify_callable = self.identify_delegate
+                else:
+                    identify_callable = lambda point: index.identify(point, self._tolerance())
+                tool = SelectTool(layer, identify=identify_callable)
             elif action_id == "select_rectangle":
                 tool = RectangleSelectTool(layer, select_rectangle=index.select_rectangle)
             else:
@@ -447,12 +770,14 @@ class CompositeEditController(QObject):
                 kind_required = _KIND_BOUND_TOOLS.get(action_id)
                 if kind_required is not None and kind_required != self._kinds.get(layer.id):
                     return
+                template = _TEMPLATE_BY_KEY.get(self._templates.get(layer.id, ""))
+                defaults = template.field_defaults() if template is not None else {}
                 if action_id == "add_point":
-                    tool = AddPointTool(session, snap=self._snap)
+                    tool = AddPointTool(session, snap=self._snap, attributes=defaults)
                 elif action_id == "add_line":
-                    tool = AddLineTool(session, snap=self._snap)
+                    tool = AddLineTool(session, snap=self._snap, attributes=defaults)
                 elif action_id == "add_polygon":
-                    tool = AddPolygonTool(session, snap=self._snap)
+                    tool = AddPolygonTool(session, snap=self._snap, attributes=defaults)
                 elif action_id == "move_feature":
                     tool = MoveFeatureTool(session, identify=lambda point: index.identify(point, self._tolerance()))
                 elif action_id == "vertex":
@@ -479,6 +804,211 @@ class CompositeEditController(QObject):
 
     def set_snapping(self, enabled: bool) -> None:
         self._snapping.enabled = bool(enabled)
+
+    @property
+    def snapping(self) -> SnappingService:
+        """捕捉配置面（per-layer enable/modes/tolerance/priority，#Phase9）。"""
+        return self._snapping
+
+    def set_topology(self, enabled: bool) -> None:
+        """拓扑编辑开关：开启后保存编辑执行拓扑校验门禁。"""
+        self._topology.enabled = bool(enabled)
+        self.state_changed.emit()
+
+    @property
+    def topology_enabled(self) -> bool:
+        return self._topology.enabled
+
+    def validate_active_layer_topology(self) -> list[dict[str, object]]:
+        """对活动图层（或其编辑工作副本）执行拓扑检查，返回问题清单。"""
+        layer = self.active_layer
+        if layer is None:
+            return []
+        return self._topology.validate([layer])
+
+    def repair_layer_geometries(self, layer_id: str) -> int:
+        """修复图层无效几何（QGIS make-valid 优先，shapely 兜底）。
+
+        修复结果经 ``SetGeometryCommand`` 写入编辑会话：可撤销、可回滚、
+        可审计，与直接改数据无缘。
+        """
+        from paleo_workbench.mapping.geometry_service import make_geometry_valid
+
+        layer = self._layers.get(str(layer_id))
+        if layer is None:
+            return 0
+        session = layer.edit_session or layer.start_editing()
+        repaired = 0
+        for feature in session.features():
+            geometry = feature.as_record()["geometry"]
+            if geometry.get("type") not in {"Polygon", "MultiPolygon"}:
+                continue
+            fixed = make_geometry_valid(geometry)
+            if fixed != geometry:
+                session.set_geometry(feature.feature_id, fixed)
+                repaired += 1
+        if repaired:
+            self.content_changed.emit(layer.id)
+            self.state_changed.emit()
+        return repaired
+
+    # -- 几何命令（split / merge） -----------------------------------------------
+
+    def _split_inputs(self):
+        """定位分割输入：一个正在编辑且有多边形选中的图层 + 一条选中的切割线。"""
+        polygon_layer = None
+        active = self.active_layer
+        if (
+            active is not None
+            and self._kinds.get(active.id) == "polygon"
+            and active.selection
+            and active.edit_session is not None
+        ):
+            polygon_layer = active
+        else:
+            for layer_id, kind in self._kinds.items():
+                layer = self._layers[layer_id]
+                if kind == "polygon" and layer.selection and layer.edit_session is not None:
+                    polygon_layer = layer
+                    break
+        if polygon_layer is None:
+            return None
+        for layer_id, kind in self._kinds.items():
+            if kind != "line":
+                continue
+            line_layer = self._layers[layer_id]
+            if not line_layer.selection:
+                continue
+            line_id = next(iter(sorted(line_layer.selection)))
+            source = line_layer.edit_session or line_layer
+            try:
+                line_feature = source.feature(line_id)
+            except KeyError:
+                continue
+            polygon_id = next(iter(sorted(polygon_layer.selection)))
+            return polygon_layer, polygon_id, line_feature
+        return None
+
+    def geometry_command(self, command_id: str) -> tuple[bool, str]:
+        """执行 split / merge；返回 (是否成功, 用户可读消息)。
+
+        几何计算走 ``geometry_service``（QGIS 桥可用时）或 ``vector_operations``
+        的 shapely 兜底；结果一律落为 ``VectorEditSession`` 命令——undo/redo/
+        commit/project 版本链保持完整，QGIS 从不直接改工程数据。
+        """
+        from paleo_workbench.mapping.vector_operations import (
+            merge_selected_polygons,
+            split_polygon_by_line,
+        )
+
+        layer = self.active_layer
+        if layer is None:
+            return False, "没有活动的矢量图层"
+        session = layer.edit_session
+        if session is None:
+            return False, "请先开始编辑（几何操作需要编辑会话）"
+        try:
+            if command_id == "merge":
+                if not layer.selection:
+                    return False, "请先选择要合并的要素"
+                new_id = merge_selected_polygons(session, layer.selection)
+                layer.set_selection((new_id,))
+                self.content_changed.emit(layer.id)
+                self.state_changed.emit()
+                return True, "已合并所选要素"
+            if command_id == "split":
+                inputs = self._split_inputs()
+                if inputs is None:
+                    return False, "分割需要一个选中多边形（正在编辑）与一条选中的切割线"
+                polygon_layer, polygon_id, line_feature = inputs
+                new_ids = split_polygon_by_line(
+                    polygon_layer.edit_session, polygon_id, line_feature
+                )
+                polygon_layer.set_selection(new_ids)
+                if polygon_layer is not layer:
+                    self._active_layer_id = polygon_layer.id
+                    self._rebind_active_tool()
+                self.content_changed.emit(polygon_layer.id)
+                self.state_changed.emit()
+                return True, "已按切割线分割多边形"
+        except (RuntimeError, ValueError) as exc:
+            return False, str(exc)
+        return False, f"未知几何命令 {command_id}"
+
+    # -- 多图层识别 -------------------------------------------------------------
+
+    def identify_all(self, point: tuple[float, float], *, base_layers: Iterable[Any] = ()) -> list[dict[str, Any]]:
+        """对全部可见可查询图层执行识别（QGIS Identify Results 语义）。
+
+        编修图层经 ``FeatureSpatialIndex`` 命中（修订缓存）；基础工区快照
+        图层（井位等只读要素）走几何粗命中。结果携带图层 / 要素 / 属性 /
+        几何类型 / 来源 / 模板角色。
+        """
+        results: list[dict[str, Any]] = []
+        tolerance = max(self._tolerance(), 1e-9)
+        for layer in self._layers.values():
+            visible, _opacity = self._display.get(layer.id, (True, 1.0))
+            if not visible:
+                continue
+            feature_id = self._snapping.index_for(layer).identify(point, tolerance)
+            if feature_id is None:
+                continue
+            session = layer.edit_session
+            source = session.features() if session is not None else layer.features()
+            feature = next((f for f in source if f.feature_id == feature_id), None)
+            if feature is None:
+                continue
+            results.append(
+                {
+                    "layer_id": layer.id,
+                    "layer_name": layer.name,
+                    "feature_id": feature.feature_id,
+                    "geometry_type": str(feature.geometry.get("type") or ""),
+                    "attributes": dict(feature.attributes),
+                    "source": "composite",
+                    "template": self._templates.get(layer.id, ""),
+                    "editable": True,
+                    "record": feature.as_record(),
+                }
+            )
+        for snapshot_layer in base_layers:
+            if not getattr(snapshot_layer, "visible", True):
+                continue
+            layer_name = str(getattr(snapshot_layer, "name", ""))
+            layer_id = str(getattr(snapshot_layer, "id", ""))
+            for record in getattr(snapshot_layer, "features", ()) or ():
+                geometry = record.get("geometry") if isinstance(record, Mapping) else None
+                if not isinstance(geometry, Mapping):
+                    continue
+                if not _geometry_hit(point, geometry, tolerance):
+                    continue
+                properties = dict(record.get("properties") or {})
+                results.append(
+                    {
+                        "layer_id": layer_id,
+                        "layer_name": layer_name,
+                        "feature_id": str(record.get("id") or ""),
+                        "geometry_type": str(geometry.get("type") or ""),
+                        "attributes": properties,
+                        "source": str(getattr(snapshot_layer, "source_version_id", "") or "workarea"),
+                        "template": "",
+                        "editable": False,
+                        "record": dict(record),
+                    }
+                )
+        return results
+
+    def locate_identify_result(self, result: Mapping[str, Any]) -> bool:
+        """选中并定位一个识别结果（可编辑图层 → 选集 + 缩放到要素）。"""
+        layer_id = str(result.get("layer_id") or "")
+        feature_id = str(result.get("feature_id") or "")
+        layer = self._layers.get(layer_id)
+        if layer is None or not feature_id:
+            return False
+        self.set_active_layer(layer_id)
+        layer.set_selection((feature_id,))
+        self.state_changed.emit()
+        return True
 
     def cancel_active_tool(self) -> None:
         self.tools.key_press("escape")
@@ -570,11 +1100,17 @@ class CompositeEditController(QObject):
     def action_state(self, *, can_previous_extent: bool = False, can_next_extent: bool = False) -> MapActionState:
         layer = self.active_layer
         session = layer.edit_session if layer is not None else None
+        compatible_polygon_count = 0
+        if layer is not None and session is not None and self._kinds.get(layer.id) == "polygon":
+            compatible_polygon_count = sum(
+                1 for feature in session.features() if feature.feature_id in layer.selection
+            )
         return MapActionState(
             has_active_vector_layer=layer is not None,
             vector_layer_writable=layer is not None,
             editing=session is not None,
             selected_count=len(layer.selection) if layer is not None else 0,
+            compatible_polygon_count=compatible_polygon_count,
             can_undo=bool(session and session.undo_stack),
             can_redo=bool(session and session.redo_stack),
             can_previous_extent=can_previous_extent,

@@ -21,8 +21,9 @@ class MapStatusBar(QFrame):
         self.crs = QLabel("CRS: —", self)
         self.render = QLabel("Renderer: —", self)
         self.selection = QLabel("Selection: 0", self)
+        self.snapping = QLabel("", self)
         self.edit = QLabel("Read-only", self)
-        for label in (self.coordinate, self.scale, self.crs, self.render, self.selection):
+        for label in (self.coordinate, self.scale, self.crs, self.render, self.selection, self.snapping):
             label.setStyleSheet(
                 f"color: {tokens.TEXT_SECONDARY}; border: none; background: transparent; padding: 0 2px;"
             )
@@ -44,6 +45,8 @@ class MapStatusBar(QFrame):
         renderer: str = "",
         selection_count: int = 0,
         editing: bool = False,
+        editing_label: str = "",
+        snapping: bool | None = None,
     ) -> None:
         if point is not None:
             self.coordinate.setText(f"X: {point[0]:.6g}  Y: {point[1]:.6g}")
@@ -53,7 +56,11 @@ class MapStatusBar(QFrame):
         self.crs.setText(f"CRS: {crs or 'unspecified'}")
         self.render.setText(f"Renderer: {renderer or '—'}")
         self.selection.setText(f"Selection: {int(selection_count)}")
-        self.edit.setText("Editing" if editing else "Read-only")
+        if snapping is None:
+            self.snapping.setText("")
+        else:
+            self.snapping.setText(f"Snapping: {'ON' if snapping else 'OFF'}")
+        self.edit.setText(f"Editing: {editing_label}" if editing and editing_label else ("Editing" if editing else "Read-only"))
         self.edit.setStyleSheet(
             f"color: {'#ffffff' if editing else tokens.TEXT_SECONDARY};"
             f" background: {tokens.PRIMARY if editing else tokens.BG_SEARCH};"

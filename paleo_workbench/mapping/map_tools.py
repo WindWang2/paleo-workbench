@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Mapping
 
 from paleo_workbench.mapping.geometry_schema import new_feature_id
 from paleo_workbench.mapping.vector_layer import VectorEditSession, VectorFeature, VectorLayer
@@ -218,11 +218,14 @@ class _CaptureTool(MapTool):
         *,
         feature_id_factory: Callable[[], str] | None = None,
         snap: Callable[[Point], Point] | None = None,
+        attributes: Mapping[str, object] | None = None,
     ) -> None:
         super().__init__()
         self.session = session
         self._feature_id_factory = feature_id_factory or (lambda: new_feature_id(self.tool_id))
         self._snap = snap or (lambda point: (float(point[0]), float(point[1])))
+        # 模板默认字段值：新要素直接携带地质 schema 的初始属性。
+        self._default_attributes = dict(attributes or {})
         self.points: list[Point] = []
 
     def mouse_press(self, point: Point, *, button: str = "left", modifiers: Iterable[str] = ()) -> bool:
@@ -258,7 +261,9 @@ class _CaptureTool(MapTool):
             if ring[0] != ring[-1]:
                 ring.append(list(ring[0]))
             geometry = {"type": "Polygon", "coordinates": [ring]}
-        self.session.add_feature(VectorFeature(self._feature_id_factory(), geometry))
+        self.session.add_feature(
+            VectorFeature(self._feature_id_factory(), geometry, self._default_attributes)
+        )
         self.points.clear()
         return True
 

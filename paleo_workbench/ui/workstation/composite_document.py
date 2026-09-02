@@ -6,10 +6,15 @@
 ``saveState/restoreState`` 布局持久化（QSettings）。
 
 图层管理是渲染快照的真实控制器：可见性 / 不透明度 / 顺序变更直接写回
-:class:`UnifiedMapCanvas` 的快照并触发重渲染。
+:class:`UnifiedMapCanvas` 的快照并触发重渲染。QGIS 收敛（2026-09 第二轮）：
+图层属性 / 符号系统 / 标注复用 :class:`MapLayerPropertiesDialog` 与
+``map_symbology_bridge``（桥未构建时走 legacy 快速字段，renderer XML 仍是
+QGIS 权威）；属性表 / 识别结果 / 捕捉设置 / split·merge·topology 全部
+落在 ``VectorEditSession`` 编辑权威上。
 """
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -17,6 +22,7 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -41,12 +47,23 @@ from paleo_workbench.mapping.workarea_map_snapshot import (
     workarea_view_extent,
 )
 from paleo_workbench.ui.map_action_controller import MapActionController
+from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
+from paleo_workbench.ui.map_status_bar import MapStatusBar
 from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 from paleo_workbench.ui.workstation.common import workstation_icon
+from paleo_workbench.ui.workstation.composite_attribute_table import (
+    CompositeAttributeTableDialog,
+)
 from paleo_workbench.ui.workstation.composite_editing import (
-    GEO_TEMPLATES,
     GEOMETRY_KINDS,
+    GEO_TEMPLATES,
     CompositeEditController,
+    _feature_extent,
+    schema_fields,
+)
+from paleo_workbench.ui.workstation.composite_panels import (
+    IdentifyResultsPanel,
+    SnappingSettingsDialog,
 )
 
 _GEOMETRY_TYPE_KIND = {
@@ -103,6 +120,26 @@ def _layer_kind_icon(kind: str, style: dict) -> QIcon:
     return QIcon(pixmap)
 
 
+class _LayerPropertiesAdapter:
+    """``MapLayerPropertiesDialog`` 的图层视图（VectorLayer + 显示态合成）。
+
+    对话框只读这些展示字段；编辑结果经 ``properties_applied`` 回到
+    ``CompositeEditController`` 的图层权威，不产生平行图层状态。
+    """
+
+    def __init__(self, layer, *, opacity: float = 1.0, metadata: dict | None = None):
+        self.id = layer.id
+        self.name = layer.name
+        self.type = "vector"
+        self.crs = layer.crs
+        self.opacity = opacity
+        self.source_ref = "composite-digitizing"
+        self.data_revision = layer.data_revision
+        self.style_revision = layer.style_revision
+        self.metadata = metadata or {}
+        self.provenance_ref = ""
+
+
 class LayerManagerPanel(QFrame):
     """图层管理面板：可见性 / 不透明度 / 顺序 / 图例，真实写回渲染快照。
 
@@ -113,6 +150,15 @@ class LayerManagerPanel(QFrame):
     create_layer_requested = Signal()
     remove_layer_requested = Signal(str)
     rename_layer_requested = Signal(str)
+    # QGIS 图层面板语义的上下文动作（由 CompositeDocument 落地）。
+    attribute_table_requested = Signal(str)
+    toggle_editing_requested = Signal(str)
+    properties_requested = Signal(str)
+    symbology_requested = Signal(str)
+    labeling_requested = Signal(str)
+    duplicate_layer_requested = Signal(str)
+    export_layer_requested = Signal(str)
+    repair_layer_requested = Signal(str)
     # 当前图层变化（无可编辑图层时携带 None）。
     active_layer_changed = Signal(object)
 
@@ -224,7 +270,7 @@ class LayerManagerPanel(QFrame):
         return bool(getattr(layer, "metadata", {}) and layer.metadata.get("editable") == "true")
 
     def _on_context_menu(self, position) -> None:
-        """图层上下文菜单（QGIS 图层面板的核心动作子集）。"""
+        """图层上下文菜单（QGIS 图层面板的核心动作集）。"""
         item = self.tree.itemAt(position)
         if item is None:
             return
@@ -240,17 +286,62 @@ class LayerManagerPanel(QFrame):
         zoom.setEnabled(has_extent)
         if editable:
             menu.addSeparator()
-            rename = menu.addAction(workstation_icon("map/tree-properties.svg"), "重命名图层…")
+            open_table = menu.addAction(
+                workstation_icon("map/tree-attribute-table.svg"), "打开属性表"
+            )
+            if layer_id == self._editing_layer_id:
+                toggle_edit = menu.addAction("停止编辑（保存编辑）")
+            else:
+                toggle_edit = menu.addAction("开始编辑")
+            menu.addSeparator()
+            properties = menu.addAction(
+                workstation_icon("map/tree-properties.svg"), "图层属性…"
+            )
+            symbology = menu.addAction("符号系统…")
+            labeling = menu.addAction("标注…")
+            menu.addSeparator()
+            rename = menu.addAction(
+                workstation_icon("map/tree-properties.svg"), "重命名图层…"
+            )
+            duplicate = menu.addAction("复制图层")
             remove = menu.addAction(workstation_icon("map/tree-remove.svg"), "删除图层")
+            menu.addSeparator()
+            repair = menu.addAction("修复无效几何…")
+            repair.setEnabled(self._repair_available(layer_id))
+            export = menu.addAction("导出图层…")
         else:
-            rename = remove = None
+            open_table = toggle_edit = properties = symbology = labeling = None
+            rename = duplicate = remove = repair = export = None
         chosen = menu.exec(self.tree.viewport().mapToGlobal(position))
-        if chosen is zoom and self._canvas is not None:
+        if chosen is None:
+            return
+        if chosen is zoom and self._canvas is not None and has_extent:
             self._canvas.set_extent(tuple(float(v) for v in extent))
-        elif rename is not None and chosen is rename:
+        elif chosen is open_table:
+            self.attribute_table_requested.emit(layer_id)
+        elif chosen is toggle_edit:
+            self.toggle_editing_requested.emit(layer_id)
+        elif chosen is properties:
+            self.properties_requested.emit(layer_id)
+        elif chosen is symbology:
+            self.symbology_requested.emit(layer_id)
+        elif chosen is labeling:
+            self.labeling_requested.emit(layer_id)
+        elif chosen is rename:
             self.rename_layer_requested.emit(layer_id)
-        elif remove is not None and chosen is remove:
+        elif chosen is duplicate:
+            self.duplicate_layer_requested.emit(layer_id)
+        elif chosen is remove:
             self.remove_layer_requested.emit(layer_id)
+        elif chosen is repair:
+            self.repair_layer_requested.emit(layer_id)
+        elif chosen is export:
+            self.export_layer_requested.emit(layer_id)
+
+    def _repair_available(self, layer_id: str) -> bool:
+        """只有面图层存在 make-valid 修复语义。"""
+        kind = str((getattr(self.layer_by_id(layer_id), "metadata", None) or {}).get("geometry_kind") or "")
+        return kind == "polygon"
 
     def set_editing_layer(self, layer_id: str | None) -> None:
         """标记正在编辑的图层（树项前缀 ✏，QGIS 的 in-edit 视觉语义）。"""
@@ -520,6 +611,7 @@ class CompositeDocument(QWidget):
     """
 
     object_selected = Signal(object)
+    status_message = Signal(str)
 
     def __init__(self, project=None, parent=None):
         super().__init__(parent)
@@ -528,6 +620,7 @@ class CompositeDocument(QWidget):
         self._loading = False
         self._home_extent: tuple[float, float, float, float] | None = None
         self._base_layers: list = []
+        self._attribute_dialog: CompositeAttributeTableDialog | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -536,14 +629,25 @@ class CompositeDocument(QWidget):
         self.canvas = UnifiedMapCanvas(parent=self)
         layout.addWidget(self.canvas, 1)
 
+        # 识别结果（多图层 Identify）与运行状态栏：图件主视图的诚实附属层。
+        self.identify_results = IdentifyResultsPanel(self)
+        self.identify_results.setMaximumHeight(200)
+        self.identify_results.result_activated.connect(self._locate_identify_result)
+        layout.addWidget(self.identify_results)
+        self.status_bar = MapStatusBar(self)
+        layout.addWidget(self.status_bar)
+
         # 矢量图层新建 / 编辑（QGIS 式编辑会话，见 composite_editing.py）
         self.edit_controller = CompositeEditController(parent=self)
         self.edit_controller.attach_canvas(self.canvas)
+        self.edit_controller.identify_delegate = self._identify_with_results
         self.edit_controller.layers_changed.connect(self._sync_composition)
         self.edit_controller.content_changed.connect(lambda *_: self._sync_composition())
         self.edit_controller.state_changed.connect(self._sync_action_state)
         self.canvas.tool_operation.connect(self._on_tool_operation)
         self.canvas.extent_changed.connect(lambda *_: self._sync_action_state())
+        self.canvas.map_position_changed.connect(self._on_map_position)
+        self.canvas.backend_status_changed.connect(lambda *_: self._sync_status_bar())
 
         # 面板实例（dock 由宿主 QMainWindow 创建并管理）
         self.layer_manager = LayerManagerPanel()
@@ -556,6 +660,22 @@ class CompositeDocument(QWidget):
         self.layer_manager.active_layer_changed.connect(
             self.edit_controller.set_active_layer
         )
+        self.layer_manager.attribute_table_requested.connect(
+            self._open_attribute_table
+        )
+        self.layer_manager.toggle_editing_requested.connect(self._toggle_layer_editing)
+        self.layer_manager.properties_requested.connect(
+            lambda layer_id: self._open_layer_properties(layer_id)
+        )
+        self.layer_manager.symbology_requested.connect(
+            lambda layer_id: self._open_layer_properties(layer_id, focus="symbology")
+        )
+        self.layer_manager.labeling_requested.connect(
+            lambda layer_id: self._open_layer_properties(layer_id, focus="labels")
+        )
+        self.layer_manager.duplicate_layer_requested.connect(self._duplicate_vector_layer)
+        self.layer_manager.export_layer_requested.connect(self._export_layer)
+        self.layer_manager.repair_layer_requested.connect(self._repair_layer)
 
         self._build_toolbar()
         self.set_project(project)
@@ -581,8 +701,8 @@ class CompositeDocument(QWidget):
                     ("identify", "select", "select_rectangle", "measure_distance"),
                     ("toggle_editing", "save_edits", "rollback"),
                     ("add_point", "add_line", "add_polygon", "move_feature", "vertex"),
-                    ("undo", "redo", "delete_selected"),
-                    ("snapping", "cancel"),
+                    ("undo", "redo", "delete_selected", "split", "merge"),
+                    ("snapping", "topology", "cancel"),
                 ),
                 self.toolbar,
             )
@@ -636,6 +756,7 @@ class CompositeDocument(QWidget):
         if dock_all_callable is not None:
             self._panels_menu.addAction("全部停靠", dock_all_callable)
         self._panels_menu.addSeparator()
+        self._panels_menu.addAction("捕捉设置…", self._open_snapping_settings)
         self._panels_menu.addAction("恢复默认布局", reset_callable)
 
     def _zoom_home(self) -> None:
@@ -657,20 +778,36 @@ class CompositeDocument(QWidget):
             self.edit_controller.set_snapping(
                 self.action_controller.actions["snapping"].isChecked()
             )
+            self._sync_status_bar()
+        elif command_id == "topology":
+            enabled = self.action_controller.actions["topology"].isChecked()
+            self.edit_controller.set_topology(enabled)
+            self.status_message.emit(
+                "拓扑编辑已开启：保存编辑将执行拓扑校验" if enabled else "拓扑编辑已关闭"
+            )
         elif command_id in {"clear_selection", "select_all", "invert_selection"}:
             self.edit_controller.selection_command(command_id)
         elif command_id == "toggle_editing":
             if self.edit_controller.editing:
-                self.edit_controller.save_edits()
+                self._save_edits_with_feedback()
             else:
                 self.edit_controller.start_editing()
         elif command_id == "save_edits":
-            self.edit_controller.save_edits()
+            self._save_edits_with_feedback()
         elif command_id == "rollback":
             self.edit_controller.rollback_edits()
         elif command_id in {"undo", "redo", "delete_selected"}:
             self.edit_controller.edit_command(command_id)
+        elif command_id in {"split", "merge"}:
+            ok, message = self.edit_controller.geometry_command(command_id)
+            if not ok:
+                self.status_message.emit(message)
         self._sync_action_state()
+
+    def _save_edits_with_feedback(self) -> None:
+        error = self.edit_controller.save_edits()
+        if error:
+            self.status_message.emit(error)
 
     def _on_tool_operation(self, edits_data: bool = True) -> None:
         """工具操作回执：数据编辑重组快照，纯选择 / 指针反馈只刷状态。"""
@@ -679,6 +816,9 @@ class CompositeDocument(QWidget):
         else:
             self.canvas.update()
         self._sync_action_state()
+
+    def _on_map_position(self, point) -> None:
+        self._sync_status_bar(point=tuple(point))
 
     def _sync_action_state(self) -> None:
         self.action_controller.update_state(
@@ -690,6 +830,26 @@ class CompositeDocument(QWidget):
         controller = self.edit_controller
         self.layer_manager.set_editing_layer(
             controller.active_layer_id if controller.editing else None
+        )
+        # split 需要「编辑中的多边形选集 + 选中切割线」；通用使能规则之外
+        # 的综合编修特定条件在此收敛（不显示点了没反应的假按钮）。
+        self.action_controller.actions["split"].setEnabled(
+            controller._split_inputs() is not None
+        )
+        self._sync_status_bar()
+
+    def _sync_status_bar(self, *, point=None) -> None:
+        controller = self.edit_controller
+        layer = controller.active_layer
+        self.status_bar.update_state(
+            point=point,
+            extent=self.canvas.view_extent,
+            crs=controller.project_crs or "EPSG:4326",
+            renderer=self.canvas.backend_status,
+            selection_count=len(layer.selection) if layer is not None else 0,
+            editing=controller.editing,
+            editing_label=layer.name if layer is not None else "",
+            snapping=controller.snapping.enabled,
         )
 
     # -- 矢量图层新建 / 删除 / 重命名 ------------------------------------------------
@@ -787,6 +947,197 @@ class CompositeDocument(QWidget):
 
     def _remove_vector_layer(self, layer_id: str) -> None:
         self.edit_controller.remove_layer(layer_id)
+
+    def _duplicate_vector_layer(self, layer_id: str) -> None:
+        copy = self.edit_controller.duplicate_layer(layer_id)
+        if copy is not None:
+            self.status_message.emit(f"已复制图层为「{copy.name}」")
+
+    def _toggle_layer_editing(self, layer_id: str) -> None:
+        self.edit_controller.set_active_layer(layer_id)
+        if self.edit_controller.editing:
+            self._save_edits_with_feedback()
+        else:
+            self.edit_controller.start_editing()
+        self._sync_action_state()
+
+    def _repair_layer(self, layer_id: str) -> None:
+        repaired = self.edit_controller.repair_layer_geometries(layer_id)
+        if repaired:
+            self.status_message.emit(f"已修复 {repaired} 个无效几何（可撤销）")
+        else:
+            self.status_message.emit("未发现需要修复的无效几何")
+
+    # -- 图层属性 / 符号系统 / 标注（复用 MapLayerPropertiesDialog） ----------
+
+    def _open_layer_properties(self, layer_id: str, *, focus: str = "") -> None:
+        """图层属性对话框：QGIS 桥可用走原生符号编辑器，否则 legacy 快速字段。
+
+        不建立第二套符号模型——renderer XML（``qgis_style``）与 legacy
+        ``VectorStyle`` 字段同存于图层 style dict，由
+        :class:`MapLayerPropertiesDialog` / ``map_symbology_bridge`` 权威解释。
+        """
+        controller = self.edit_controller
+        layer = controller.layer(layer_id)
+        if layer is None:
+            return
+        session = layer.edit_session
+        features = tuple(
+            feature.as_record()
+            for feature in (session.features() if session is not None else layer.features())
+        )
+        fields = [field.name for field in schema_fields(controller.layer_schema(layer_id))]
+        for record in features:
+            properties = record.get("properties") or {}
+            for key in sorted(properties):
+                if key not in fields:
+                    fields.append(key)
+        display = next(
+            (snap for snap in self.layer_manager._layers if snap.id == layer_id), None
+        )
+        adapter = _LayerPropertiesAdapter(
+            layer,
+            opacity=float(getattr(display, "opacity", 1.0) or 1.0),
+            metadata={
+                "editable": "true",
+                "geometry_kind": controller.kind_of(layer_id),
+                "template": controller.layer_template(layer_id),
+            },
+        )
+        dialog = MapLayerPropertiesDialog(
+            adapter,
+            style=dict(layer.style),
+            parent=self,
+            features=features,
+            fields=tuple(fields),
+        )
+        if focus:
+            titles = {"symbology": "Symbology", "labels": "Labels", "general": "General"}
+            target = titles.get(focus)
+            if target is not None:
+                for index in range(dialog.tabs.count()):
+                    if dialog.tabs.tabText(index) == target:
+                        dialog.tabs.setCurrentIndex(index)
+                        break
+        dialog.properties_applied.connect(
+            lambda _layer_id, payload: self._apply_layer_properties(layer_id, payload)
+        )
+        dialog.exec()
+        self._sync_composition()
+
+    def _apply_layer_properties(self, layer_id: str, payload) -> None:
+        controller = self.edit_controller
+        layer = controller.layer(layer_id)
+        if layer is None or not isinstance(payload, dict):
+            return
+        name = str(payload.get("name") or "").strip()
+        if name and name != layer.name:
+            controller.rename_layer(layer_id, name)
+        crs = str(payload.get("crs") or "").strip()
+        if crs and crs != layer.crs:
+            layer.crs = crs
+        opacity = payload.get("opacity")
+        if isinstance(opacity, (int, float)) and 0.0 <= float(opacity) <= 1.0:
+            self.layer_manager.set_layer_opacity(layer_id, float(opacity))
+        style = dict(layer.style)
+        if isinstance(payload.get("style"), dict):
+            style.update(dict(payload["style"]))
+        if isinstance(payload.get("qgis_style"), dict):
+            style["qgis_style"] = dict(payload["qgis_style"])
+        controller.set_layer_style(layer_id, style)
+        self._sync_composition()
+        self.status_message.emit(f"图层「{name or layer.name}」属性已更新")
+
+    # -- 属性表 ---------------------------------------------------------------
+
+    def _open_attribute_table(self, layer_id: str) -> None:
+        if self._attribute_dialog is not None:
+            self._attribute_dialog.reject()
+            self._attribute_dialog = None
+        self._attribute_dialog = CompositeAttributeTableDialog(
+            self.edit_controller, layer_id, parent=self
+        )
+        self._attribute_dialog.feature_activated.connect(self._locate_feature)
+        self._attribute_dialog.show()
+
+    def _locate_feature(self, feature_id: str) -> None:
+        layer = self.edit_controller.active_layer
+        if layer is None:
+            return
+        layer.set_selection((feature_id,))
+        feature = next(
+            (f for f in layer.features() if f.feature_id == feature_id), None
+        )
+        if feature is not None:
+            extent = _feature_extent([feature.as_record()])
+            if extent[0] < extent[2] and extent[1] < extent[3]:
+                self.canvas.set_extent(extent)
+        self._sync_action_state()
+
+    # -- 捕捉设置 -------------------------------------------------------------
+
+    def _open_snapping_settings(self) -> None:
+        dialog = SnappingSettingsDialog(self.edit_controller, parent=self)
+        dialog.exec()
+        self._sync_status_bar()
+
+    # -- 导出 -----------------------------------------------------------------
+
+    def _export_layer(self, layer_id: str) -> None:
+        layer = self.edit_controller.layer(layer_id)
+        if layer is None:
+            return
+        path, _selected = QFileDialog.getSaveFileName(
+            self,
+            "导出图层",
+            f"{layer.name}.geojson",
+            "GeoJSON (*.geojson);;所有文件 (*)",
+        )
+        if not path:
+            return
+        features = [
+            feature.as_record() for feature in layer.features()
+        ]
+        payload = {
+            "type": "FeatureCollection",
+            "name": layer.name,
+            "crs": layer.crs or self.edit_controller.project_crs or "",
+            "features": features,
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=1)
+        except OSError as exc:
+            self.status_message.emit(f"导出失败：{exc}")
+            return
+        self.status_message.emit(f"已导出 {len(features)} 个要素到 {path}")
+
+    # -- 识别结果 -------------------------------------------------------------
+
+    def _identify_with_results(self, point):
+        """多图层识别：全部可见可查询图层 → Identify Results 面板。"""
+        controller = self.edit_controller
+        results = controller.identify_all(point, base_layers=self._base_layers)
+        self.identify_results.set_results(results)
+        active_id = controller.active_layer_id
+        for result in results:
+            if result.get("editable") and result.get("layer_id") == active_id:
+                return result.get("feature_id")
+        return None
+
+    def _locate_identify_result(self, result) -> None:
+        if self.edit_controller.locate_identify_result(result):
+            record = result.get("record") or {}
+            extent = _feature_extent([record])
+            if extent[0] < extent[2] and extent[1] < extent[3]:
+                self.canvas.set_extent(extent)
+            self._sync_composition()
+        else:
+            geometry = (result.get("record") or {}).get("geometry") or {}
+            extent = _feature_extent([{"geometry": dict(geometry)}])
+            if extent[0] < extent[2] and extent[1] < extent[3]:
+                self.canvas.set_extent(extent)
+        self._sync_action_state()
 
     def flush_edit_sessions(self) -> int:
         """提交全部进行中的矢量编辑会话并写回工程文档（保存前 flush，#1126）。"""
