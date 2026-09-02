@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from paleo_workbench.ui.workstation.dock_title_bar import install_dock_title_bar
+
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
@@ -230,6 +232,7 @@ class LinkedInterpretationWorkspace(QWidget):
         )
         dock.setWidget(pane)
         pane.title_label.hide()
+        install_dock_title_bar(dock)
         self.dock_area.addDockWidget(area, dock)
         return dock
 

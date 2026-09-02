@@ -553,10 +553,12 @@ class CompositeDocument(QWidget):
     def _build_toolbar(self) -> None:
         """悬浮工具条：QGIS 命令面（MapActionController）+「面板」菜单。"""
         self.toolbar = QFrame(self)
-        self.toolbar.setObjectName("WorkstationContextBar")
+        # Overlay chrome (not the linked-doc context bar): hairline floating strip.
+        self.toolbar.setObjectName("WorkstationOverlayToolbar")
+        self.toolbar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         bar_layout = QHBoxLayout(self.toolbar)
-        bar_layout.setContentsMargins(6, 3, 6, 3)
-        bar_layout.setSpacing(3)
+        bar_layout.setContentsMargins(5, 2, 5, 2)
+        bar_layout.setSpacing(2)
 
         self.action_controller = MapActionController(self)
         bar_layout.addWidget(
@@ -578,13 +580,13 @@ class CompositeDocument(QWidget):
         )
         self.action_controller.command_requested.connect(self._on_command_requested)
 
-        # 面板菜单：宿主 dock 的显隐动作 + 恢复默认布局（动作由宿主注入）
+        # 面板菜单：显隐 / 布局预设 / 全部浮动·停靠 / 恢复默认（由宿主注入）
         self.panels_button = QToolButton(self.toolbar)
         self.panels_button.setObjectName("WorkstationContextButton")
         self.panels_button.setIcon(workstation_icon("map/panel-manager.svg"))
         self.panels_button.setText("面板")
         self.panels_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        self.panels_button.setToolTip("显示 / 隐藏面板，恢复默认布局")
+        self.panels_button.setToolTip("面板显隐、布局预设、全部浮动 / 停靠")
         self._panels_menu = QMenu(self.panels_button)
         self.panels_button.setMenu(self._panels_menu)
         self.panels_button.setPopupMode(
@@ -594,10 +596,33 @@ class CompositeDocument(QWidget):
 
         self.toolbar.adjustSize()
 
-    def register_panel_actions(self, actions: list, reset_callable) -> None:
-        """宿主 QMainWindow 注入 dock 显隐动作与恢复默认布局回调。"""
+    def register_panel_actions(
+        self,
+        actions: list,
+        reset_callable,
+        *,
+        float_all_callable=None,
+        dock_all_callable=None,
+        layout_presets: list | None = None,
+        apply_preset_callable=None,
+    ) -> None:
+        """宿主注入 dock 显隐、布局预设与浮动/停靠批量动作。"""
+        self._panels_menu.clear()
+        visibility = self._panels_menu.addMenu("显示面板")
         for action in actions:
-            self._panels_menu.addAction(action)
+            visibility.addAction(action)
+        if layout_presets and apply_preset_callable is not None:
+            layouts = self._panels_menu.addMenu("布局预设")
+            for preset_id, label in layout_presets:
+                layouts.addAction(
+                    label,
+                    lambda checked=False, pid=preset_id: apply_preset_callable(pid),
+                )
+        self._panels_menu.addSeparator()
+        if float_all_callable is not None:
+            self._panels_menu.addAction("全部浮动", float_all_callable)
+        if dock_all_callable is not None:
+            self._panels_menu.addAction("全部停靠", dock_all_callable)
         self._panels_menu.addSeparator()
         self._panels_menu.addAction("恢复默认布局", reset_callable)
 
@@ -790,7 +815,19 @@ class CompositeDocument(QWidget):
     # -- 悬浮工具条定位 ----------------------------------------------------------
 
     def _reposition_toolbar(self) -> None:
-        self.toolbar.move((self.width() - self.toolbar.width()) // 2, 8)
+        """Centre the overlay on the map; keep a hairline margin from edges.
+
+        Floating QDockWidgets are separate top-level windows, so they never
+        stack under this toolbar. Within the canvas we always raise the bar
+        above map chrome and leave 8px top / ≥12px side inset so it does not
+        collide with docked panel edges on narrow widths.
+        """
+        self.toolbar.adjustSize()
+        margin_x = 12
+        y = 8
+        x = max(margin_x, (self.width() - self.toolbar.width()) // 2)
+        max_x = max(margin_x, self.width() - self.toolbar.width() - margin_x)
+        self.toolbar.move(min(x, max_x), y)
         self.toolbar.raise_()
 
     def resizeEvent(self, event) -> None:

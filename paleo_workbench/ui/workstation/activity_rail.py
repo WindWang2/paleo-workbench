@@ -28,8 +28,8 @@ class ActivityRail(QFrame):
         self.setFixedWidth(54)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(3, 6, 3, 6)
-        layout.setSpacing(2)
+        layout.setContentsMargins(2, 4, 2, 4)
+        layout.setSpacing(1)
 
         self.group = QButtonGroup(self)
         self.group.setExclusive(True)
