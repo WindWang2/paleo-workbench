@@ -68,3 +68,29 @@ PHASE 2 — Code archaeology
 - Test env: /opt/miniconda3/bin/python3.13 + PySide6 6.11.1, offscreen; wrapper ./run_env.sh
 - qgis_render_bridge NOT built → fallback renderer active; all QGIS UI paths must probe & degrade
 - Baseline failures on main: test_dock_title_bar (visibility assert + _dock attr race), test_composite_editing::test_shell_exposes_digitizing_toolbar — both touched by #1122 work
+
+---
+
+# Task: Convergence 收尾三件套 (2026-09-02, after merge to main)
+
+## Base
+- main @ fcaa9fc2 (feat/qgis-workstation-convergence fast-forward merged)
+
+## Phases
+- [x] A. 桥构建后的原生路径激活验证
+  - cp312 venv（PySide6 6.11.2 + editable bridge）导入 OK；`-m qgis` 67 passed / 8 skipped
+  - 桥启用全量套件：唯一桥致失败 = legacy 符号路径测试的环境假设 → monkeypatch 强制无桥
+  - 其余失败经无桥对照复现，均为机器/环境既有问题（native_compile_flags、
+    welllog_engine_native、e2e harness 等），与桥无关
+- [x] B. 会话内大图层增量快照
+  - VectorEditSession 修订日志（changes_since；1024 条保留窗，回滚/截断回落全量）
+  - snapshot_layers records 增量重建 + extent 会话内单调并集；会话首个 settle 复用
+    无会话缓存作修订 0 基线
+  - benchmark settle×10@100k = 18.8ms（≈1.9ms/settle，原全量重编码 ~230ms）
+- [x] C. 引用矢量图层导入 Composite
+  - ProjectDocument.workstation_reference_layers（复用 MapReferenceLayer）
+  - CompositeDocument：导入（GDAL）/移除/刷新/参与捕捉 + 快照（源修订缓存，muted 样式，
+    不可用诚实降级）+ 显示态回写 + 持久化往返 + 合成顺序 基础→引用→编修
+  - LayerManagerPanel：导入按钮 + 引用右键菜单；捕捉对话框参考点通道合并井位/引用
+- [x] D. 回归（composite/lifecycle/persistence/reference/-m qgis 全绿）+ 全量对照基线
+- [x] E. 无 CI（用户指示）

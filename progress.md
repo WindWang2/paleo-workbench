@@ -109,3 +109,65 @@ UPDATED: test_map_layer_properties.py (legacy fixture + new QGIS-path test).
 - 一轮：Blocker=1 / High=3 / Medium=5 / Low=9 → 全部修复（18 项）
 - 二轮：修复全部确认正确；新增 Medium=1（undo 选集修剪）+ Low=5 → 已修复
 - 终态：Blocker=0，High=0；149 项回归通过（预先存在的环境性失败不含其中）
+
+---
+
+## 2026-09-02（下午）: 合并 + 收尾三件套（main @ fcaa9fc2 → 本次提交）
+
+### 合并
+- feat/qgis-workstation-convergence → main：纯 fast-forward（8 提交），无冲突
+
+### A. vendored QGIS 桥构建后的原生路径激活（验证）
+- 桥产物：native/qgis_render_bridge/qgis_render_bridge.cpython-312-*.so（构建于
+  authoring-core 分支期，比全部源码新）；运行环境 = .venv (py3.12 + PySide6 6.11.2
+  + editable install)。注意裸 shell 里 .venv 解释器会被 ZCode 沙箱 exec 拦截干扰，
+  用 `env -i` 干净环境调用。
+- 激活验证：`-m qgis` 67 passed / 8 skipped（渲染、符号对话框、几何服务、导出、
+  视觉回归全走原生路径）。
+- 桥启用全量套件（4811 passed / 19 failed / 7 errors）逐项 triage：
+  - 唯一桥致失败：test_layer_properties_dialog_legacy_symbology_path —— 断言
+    legacy 快速字段但未隔离构建环境；已 monkeypatch 强制无桥 + 删掉恒真断言。
+  - 其余失败在无桥 miniconda 环境同样失败（welllog_engine_native_integration、
+    render_engine_review_fixes、reference_opacity_debounce、project_well_map、
+    geological_modeling_3d_page、data_workspace、app_close_dead_shell×2、perf×2、
+    native_compile_flags×4、native_backend、tier2、e2e harness errors）→ 机器/
+    venv 环境既有，与桥无关，不属本次范围。
+
+### B. 会话内大图层增量快照（#932 宿主侧）
+- vector_layer.py：VectorEditSession 增加修订日志（_bump_revision 统一收口
+  record/undo/redo/destroy/rollback；changes_since(rev) 返回有序日志条目；
+  JOURNAL_LIMIT=1024 保留窗；回滚清空日志 → 旧修订返回 None 回落全量）。
+- composite_editing.py：snapshot_layers 的 _records_cache 扩为
+  (revision, session, features, extent, records)——
+  - 命中：同修订同会话直接复用；
+  - 增量：同会话修订前进（或会话开始前的无会话缓存作修订 0 基线）时按日志
+    触达 id 重放 set/pop，未触及 record 对象跨快照复用（后端 feature-entry
+    复用与 #932 delta 发送保持 O(changed)）；extent 会话内单调并集；
+  - 全量：提交/回滚/新会话/日志越窗 → 精确重建。
+- benchmark（fallback 渲染，本机）：settle×10 @10k = 1.28ms、@100k = 18.8ms
+  （≈1.9ms/settle；原记录全量重编码 ~230ms@100k）。
+- 回归：新增 4 测试（日志覆盖/截断回落/增量==全量重建含顺序与对象复用/
+  extent 单调并集与会话后精确）。
+
+### C. 引用矢量图层导入 Composite
+- models.py：ProjectDocument.workstation_reference_layers（复用 MapReferenceLayer，
+  旧工程默认空，附加兼容）。
+- composite_document.py：
+  - ReferenceLayerService 接入：import_reference_layers（GDAL 矢量 → 归一项目
+    CRS；失败经 status_message 逐文件告知，§20 不静默）；
+  - _reference_snapshot_layers：要素按源修订缓存；muted 参考样式（点/线/面）；
+    源不可用 → 撤空要素 + 名称「（不可用）」+ 状态转换提示；
+  - 合成顺序固定 基础工区 → 引用参考 → 编修图层；面板显示态（可见性/不透明度/
+    引用块内顺序）写回 MapReferenceLayer；flush/重组时同步工程文档；set_project
+    恢复；
+  - 参与捕捉：participates_in_snap → vector_snap_points 并入 SnappingService
+    reference 通道（与井位参考点同流；对话框标签改为「参考点捕捉」如实）。
+- LayerManagerPanel：「导入参考图层」按钮 + 引用右键菜单（刷新/参与捕捉/移除引用）。
+- 回归：新增 6 测试（导入渲染+顺序+持久化往返 / 显示态回写 / 离线诚实降级 /
+  坏源拒绝 / 无 GDAL 可操作报错 / 捕捉参与+移除）。
+
+### 测试状态（本次改动后）
+- miniconda（无桥）：composite_gis 40 + lifecycle + dock_title_bar + editing +
+  vector_edit_session + project_manager + reference_layers 全绿；全量对照运行中
+- .venv（桥）：-m qgis 67/8skip；composite + layer_properties + lifecycle 全绿
+- 无 CI（用户指示）
