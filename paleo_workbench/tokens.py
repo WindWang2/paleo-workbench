@@ -1239,9 +1239,9 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         background: {t.BG_BODY};
         color: {t.TEXT_PRIMARY};
         border: 1px solid transparent;
-        border-radius: 3px;
-        min-height: 26px;
-        padding: 2px 7px;
+        border-radius: 2px;
+        min-height: 24px;
+        padding: 1px 6px;
         selection-background-color: {t.BG_SELECTION};
         selection-color: {t.TEXT_PRIMARY};
     }}
@@ -1283,8 +1283,9 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         border: none;
         border-right: 1px solid {t.BORDER};
         border-radius: 0px;
-        min-height: 26px;
-        padding: 3px 14px;
+        min-height: 32px;
+        max-height: 32px;
+        padding: 0px 12px;
         margin: 0px;
     }}
     QTabBar#WorkstationDocumentTabs::tab:selected {{
@@ -1297,6 +1298,13 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         background: {t.BG_SIDEBAR};
         border: none;
         border-bottom: 1px solid {t.BORDER};
+    }}
+    /* Composite full-bleed overlay: hairline float strip, no SaaS card chrome */
+    QFrame#WorkstationOverlayToolbar {{
+        background: {t.BG_HEADER};
+        border: 1px solid {t.BORDER_STRONG};
+        border-radius: 3px;
+        padding: 0px;
     }}
     QFrame#WorkstationContextSeparator {{
         background: {t.BORDER};
@@ -1383,20 +1391,60 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     QFrame#WorkstationProcessHub {{
         border-top: 1px solid {t.BORDER_STRONG};
     }}
-    /* 综合编修：可浮动 dock 面板标题条（Qt 原生窗口管理） */
+    /* 综合编修 / shell：可浮动 dock 标题条（对齐 V3 light tokens） */
     QDockWidget {{
         color: {t.TEXT_PRIMARY};
         font-size: 12px;
+        border: 1px solid {t.BORDER};
+        border-radius: 0px;
     }}
     QDockWidget::title {{
-        background: {t.BG_SEARCH};
+        background: {t.BG_HEADER};
+        color: {t.TEXT_PRIMARY};
         border: none;
         border-bottom: 1px solid {t.BORDER};
-        padding: 6px 10px;
+        padding: 5px 10px;
         font-weight: 700;
+        text-align: left;
     }}
     QDockWidget::title:hover {{
-        background: {t.BG_MENU_HOVER};
+        background: {t.BG_SEARCH};
+    }}
+    QDockWidget::close-button,
+    QDockWidget::float-button {{
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 2px;
+        padding: 1px;
+        icon-size: 12px;
+    }}
+    QDockWidget::close-button:hover,
+    QDockWidget::float-button:hover {{
+        background: {t.BG_SEARCH};
+        border-color: {t.BORDER};
+    }}
+    /* FloatController top-level chrome (mapping / legacy float path) */
+    QWidget#FloatingPanel {{
+        background: {t.BG_HEADER};
+        border: 1px solid {t.BORDER_STRONG};
+        border-radius: 3px;
+    }}
+    QWidget#FloatingPanelTitleBar {{
+        background: {t.BG_HEADER};
+        border: none;
+        border-bottom: 1px solid {t.BORDER};
+        min-height: 28px;
+        max-height: 28px;
+    }}
+    QLabel#FloatingPanelTitle {{
+        color: {t.TEXT_PRIMARY};
+        font-size: 12px;
+        font-weight: 700;
+        padding-left: 2px;
+    }}
+    QWidget#FloatingPanelContent {{
+        background: {t.BG_SIDEBAR};
+        border: none;
     }}
     QTextBrowser#WorkstationAgentHistory {{
         background: {t.BG_SIDEBAR};

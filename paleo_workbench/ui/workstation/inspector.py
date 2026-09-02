@@ -48,8 +48,8 @@ class WorkstationInspector(QFrame):
 
         self.style_page = QWidget(self)
         style_layout = QFormLayout(self.style_page)
-        style_layout.setContentsMargins(10, 10, 10, 10)
-        style_layout.setSpacing(8)
+        style_layout.setContentsMargins(8, 8, 8, 8)
+        style_layout.setSpacing(6)
         self.style_color = QComboBox(self.style_page)
         self.style_color.addItems(["层位绿", "联动蓝", "解释橙", "断层红"])
         self.style_width = QSpinBox(self.style_page)
@@ -78,9 +78,9 @@ class WorkstationInspector(QFrame):
     def _form_page() -> tuple[QWidget, QFormLayout]:
         page = QWidget()
         form = QFormLayout(page)
-        form.setContentsMargins(10, 10, 10, 10)
-        form.setHorizontalSpacing(10)
-        form.setVerticalSpacing(6)
+        form.setContentsMargins(8, 8, 8, 8)
+        form.setHorizontalSpacing(8)
+        form.setVerticalSpacing(5)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         return page, form
 

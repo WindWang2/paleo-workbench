@@ -14,11 +14,20 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from paleo_workbench.ui.dock_manager import WorkspacePreset, dock_manager
 from paleo_workbench.ui.workstation.activity_rail import ActivityRail
 from paleo_workbench.ui.workstation.app_bar import WorkstationAppBar
 from paleo_workbench.ui.workstation.composite_document import CompositeDocument
 from paleo_workbench.ui.workstation.explorer import WorkstationExplorer
 from paleo_workbench.ui.workstation.inspector import WorkstationInspector
+from paleo_workbench.ui.layout_presets import (
+    RESET_LAYOUT_PRESET_ID,
+    TAB_COMPOSITE,
+    TAB_JOINT,
+    get_preset,
+    list_presets,
+    visibility_dict,
+)
 from paleo_workbench.ui.workstation.linked_workspace import (
     LinkedInterpretationWorkspace,
 )
@@ -174,14 +183,7 @@ class WorkstationFrame(QWidget):
         # 默认视图：图件最大化（variant C），仅图层管理随综合编修打开。
         self.composite_input_dock.hide()
         self.composite_linked_dock.hide()
-        self.composite.register_panel_actions(
-            [
-                self.composite_input_dock.toggleViewAction(),
-                self.composite_layer_dock.toggleViewAction(),
-                self.composite_linked_dock.toggleViewAction(),
-            ],
-            self._reset_composite_layout,
-        )
+        self._wire_composite_panel_menu()
         # 图层管理与检查器在右侧叠 tab，任务/联动视图在底部叠 tab。
         self._dock_host.tabifyDockWidget(self.inspector_dock, self.composite_layer_dock)
         self._dock_host.tabifyDockWidget(self.process_dock, self.composite_linked_dock)
@@ -201,6 +203,8 @@ class WorkstationFrame(QWidget):
             | QDockWidget.DockWidgetFeature.DockWidgetFloatable
             | QDockWidget.DockWidgetFeature.DockWidgetClosable
         )
+        # Usable when floated: avoid postage-stamp OS windows.
+        dock.setMinimumSize(220, 160)
         self._dock_host.addDockWidget(area, dock)
         return dock
 
@@ -312,6 +316,10 @@ class WorkstationFrame(QWidget):
         hidden = self.explorer.isHidden()
         self.explorer.setVisible(hidden)
         self.activity_rail.set_explorer_expanded(hidden)
+        # Expanding the tree should also surface the nav dock if the user
+        # closed it; collapsing never auto-hides the rail+dock chrome.
+        if hidden and self.nav_dock.isHidden():
+            self.nav_dock.show()
         self._save_timer.start()
 
     def toggle_inspector(self) -> None:
@@ -401,6 +409,129 @@ class WorkstationFrame(QWidget):
                 if not dock.isHidden():
                     dock.hide()
 
+    def _wire_composite_panel_menu(self) -> None:
+        """面板菜单：显隐、布局预设、全部浮动/停靠、恢复默认。"""
+        toggle_actions = []
+        for dock, label in (
+            (self.composite_input_dock, "显示输入与结果"),
+            (self.composite_layer_dock, "显示图层管理"),
+            (self.composite_linked_dock, "显示联动视图"),
+        ):
+            action = dock.toggleViewAction()
+            action.setText(label)
+            toggle_actions.append(action)
+        preset_actions = [
+            (preset.id, preset.label) for preset in list_presets()
+        ]
+        self.composite.register_panel_actions(
+            toggle_actions,
+            reset_callable=self._reset_default_layout,
+            float_all_callable=self.float_all_panels,
+            dock_all_callable=self.dock_all_panels,
+            layout_presets=preset_actions,
+            apply_preset_callable=self.apply_layout_preset,
+        )
+
+    def _shell_docks(self) -> tuple[QDockWidget, ...]:
+        return (
+            self.nav_dock,
+            self.inspector_dock,
+            self.process_dock,
+            self.task_dock,
+            self.composite_layer_dock,
+            self.composite_input_dock,
+            self.composite_linked_dock,
+        )
+
+    def float_all_panels(self) -> None:
+        """Float every currently visible shell dock (map stays central)."""
+        for dock in self._shell_docks():
+            if not dock.isHidden() and not dock.isFloating():
+                dock.setFloating(True)
+                dock.raise_()
+        self._save_timer.start()
+
+    def dock_all_panels(self) -> None:
+        """Dock back every floating shell dock to its default area."""
+        self._reset_composite_layout()
+        for dock in (
+            self.nav_dock,
+            self.inspector_dock,
+            self.process_dock,
+            self.task_dock,
+        ):
+            if dock.isFloating():
+                dock.setFloating(False)
+        self._dock_host.addDockWidget(
+            Qt.DockWidgetArea.LeftDockWidgetArea, self.nav_dock
+        )
+        self._dock_host.addDockWidget(
+            Qt.DockWidgetArea.RightDockWidgetArea, self.inspector_dock
+        )
+        self._dock_host.addDockWidget(
+            Qt.DockWidgetArea.BottomDockWidgetArea, self.process_dock
+        )
+        self._dock_host.addDockWidget(
+            Qt.DockWidgetArea.BottomDockWidgetArea, self.task_dock
+        )
+        self._dock_host.tabifyDockWidget(self.inspector_dock, self.composite_layer_dock)
+        self._dock_host.tabifyDockWidget(self.process_dock, self.composite_linked_dock)
+        self._dock_host.tabifyDockWidget(self.process_dock, self.task_dock)
+        self._save_timer.start()
+
+    def apply_layout_preset(self, preset_id: str) -> None:
+        """Apply a named workstation layout preset (visibility + document tab)."""
+        preset = get_preset(preset_id)
+        if preset is None:
+            return
+        vis = preset.visibility
+        composite_memory = {
+            "layer": vis.composite_layer,
+            "input": vis.composite_input,
+            "linked": vis.composite_linked,
+        }
+        # Seed before tab switch so composite show uses the preset matrix.
+        self._composite_docks_visible = dict(composite_memory)
+        if preset.document_tab == TAB_JOINT:
+            self.activate_joint()
+            # hide-path overwrites memory with pre-hide visibility; restore preset.
+            self._composite_docks_visible = dict(composite_memory)
+        else:
+            self.activate_composite()
+
+        self.nav_dock.setVisible(vis.nav)
+        self.inspector_dock.setVisible(vis.inspector)
+        self._user_hid_inspector = not vis.inspector
+        self._responsive_hid_inspector = False
+        self.process_dock.setVisible(vis.process)
+        self.task_dock.setVisible(vis.tasks)
+        if preset.document_tab == TAB_COMPOSITE:
+            self.composite_layer_dock.setVisible(vis.composite_layer)
+            self.composite_input_dock.setVisible(vis.composite_input)
+            self.composite_linked_dock.setVisible(vis.composite_linked)
+
+        self.explorer.setVisible(vis.explorer_expanded)
+        self.activity_rail.set_explorer_expanded(vis.explorer_expanded)
+
+        # Dock everything for a deterministic preset geometry.
+        self.dock_all_panels()
+
+        if preset_id == "composite_default":
+            dock_manager.set_active_preset(WorkspacePreset.WORKSTATION_COMPOSITE)
+        elif preset_id == "interpretation":
+            dock_manager.set_active_preset(WorkspacePreset.WORKSTATION_INTERPRETATION)
+            if vis.process:
+                self._expand_process_dock()
+            if vis.tasks:
+                self.task_dock.raise_()
+
+        self.status_message.emit(f"已应用布局：{preset.label}")
+        self._save_timer.start()
+
+    def _reset_default_layout(self) -> None:
+        """面板菜单「恢复默认布局」→ 默认综合编修 + 停靠几何。"""
+        self.apply_layout_preset(RESET_LAYOUT_PRESET_ID)
+
     def _reset_composite_layout(self) -> None:
         """恢复综合编修面板的默认停靠布局（不改可见性）。"""
         host = self._dock_host
@@ -415,6 +546,13 @@ class WorkstationFrame(QWidget):
         host.tabifyDockWidget(self.inspector_dock, self.composite_layer_dock)
         host.tabifyDockWidget(self.process_dock, self.composite_linked_dock)
         self._save_timer.start()
+
+    def layout_preset_visibility(self, preset_id: str) -> dict[str, bool] | None:
+        """Test/diagnostic seam: flat visibility matrix for a preset id."""
+        preset = get_preset(preset_id)
+        if preset is None:
+            return None
+        return visibility_dict(preset.visibility)
 
     def _on_activity_mode(self, mode: str) -> None:
         self.explorer.set_mode(mode)

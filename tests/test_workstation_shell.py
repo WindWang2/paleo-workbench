@@ -311,3 +311,55 @@ def test_inspector_marks_missing_values(qtbot, tmp_path):
     texts = [edit.text() for edit in present]
     assert "12.5 m" in texts
     assert "2100 m" in texts
+
+
+def test_layout_presets_apply_visibility_matrix(qtbot, tmp_path):
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+
+    ws.apply_layout_preset("composite_default")
+    assert ws.document_tabs.currentIndex() == ws.TAB_COMPOSITE
+    assert not ws.composite_layer_dock.isHidden()
+    assert ws.composite_input_dock.isHidden()
+    assert ws.composite_linked_dock.isHidden()
+    assert ws.layout_preset_visibility("composite_default")["composite_layer"] is True
+
+    ws.apply_layout_preset("interpretation")
+    assert ws.document_tabs.currentIndex() == ws.TAB_JOINT
+    assert not ws.inspector_dock.isHidden()
+    assert not ws.task_dock.isHidden()
+    assert not ws.process_dock.isHidden()
+    assert ws.composite_layer_dock.isHidden()
+
+    ws._reset_default_layout()
+    assert ws.document_tabs.currentIndex() == ws.TAB_COMPOSITE
+    assert not ws.composite_layer_dock.isHidden()
+
+
+def test_float_all_and_dock_all_panels(qtbot, tmp_path):
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+    ws.apply_layout_preset("composite_default")
+
+    ws.float_all_panels()
+    floated = [d for d in ws._shell_docks() if not d.isHidden()]
+    assert floated
+    assert all(d.isFloating() for d in floated)
+
+    ws.dock_all_panels()
+    assert all(not d.isFloating() for d in ws._shell_docks())
+
+
+def test_panel_menu_exposes_presets_and_batch_float(qtbot, tmp_path):
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    menu = shell.workstation.composite._panels_menu
+    labels = [a.text() for a in menu.actions() if a.text()]
+    # Submenus + batch actions + restore
+    assert "显示面板" in labels
+    assert "布局预设" in labels
+    assert "全部浮动" in labels
+    assert "全部停靠" in labels
+    assert "恢复默认布局" in labels

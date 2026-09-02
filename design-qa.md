@@ -202,6 +202,31 @@ panel-menu reopen, layer mutations re-rendering, layout persistence across resta
 project switch (no segfault). 10 workstation tests pass; xcb captures of the default and
 all-panels-open states are in the QA evidence directory.
 
+
+
+### Iteration 6 - A+B+D polish (visual / float / layout presets) - implemented
+
+Scope requested by user: **A** visual polish, **B** composite floating panels, **D** named layout presets.
+
+**A — Visual polish**
+- QDockWidget title chrome aligned to V3 light tokens (white title surface, hairline border, 2px control radii, teal/amber unchanged).
+- `FloatingPanel` title bar / content host QSS added so legacy FloatController windows match the light shell.
+- Document tabs forced to 32px; inspector value fields and form margins tightened; activity rail margins compacted.
+- Composite overlay toolbar uses `WorkstationOverlayToolbar` (hairline 3px strip) instead of the document context-bar chrome.
+
+**B — Composite / floating panels**
+- 面板 menu regrouped: **显示面板** / **布局预设** / **全部浮动** / **全部停靠** / **恢复默认布局** with clearer labels.
+- Shell docks get a usable float minimum size (220×160); FloatingPanel minimum 240×180.
+- Overlay map toolbar recentres with side inset and `raise_()` so it stays above canvas chrome without fighting OS-level floating docks.
+
+**D — Layout presets**
+- New pure module `paleo_workbench/ui/layout_presets.py` with `默认综合编修` (variant C) and `解释工作区`.
+- `WorkspacePreset.WORKSTATION_COMPOSITE` / `WORKSTATION_INTERPRETATION` added beside existing MAP_AUTHORING etc. (no breakage).
+- Wired through `WorkstationFrame.apply_layout_preset` + QMainWindow dock visibility; `恢复默认布局` reapplies composite default and docks everything.
+- Inspector auto-hide &lt;1280 unchanged; expanding the explorer also resurfaces a closed nav dock.
+
+Tests: `tests/test_layout_presets.py` (pure) + shell coverage for apply / float-all / menu labels.
+
 ## Verification
 
 - 88 targeted Qt tests passed.
