@@ -33,6 +33,7 @@ from paleo_workbench.ui.workstation.linked_workspace import (
 )
 from paleo_workbench.ui.workstation.process_hub import ProcessHub
 from paleo_workbench.ui.workstation.task_center import TaskCenter
+from paleo_workbench.ui.workstation.dock_title_bar import install_dock_title_bar
 
 
 class WorkstationFrame(QWidget):
@@ -205,6 +206,7 @@ class WorkstationFrame(QWidget):
         )
         # Usable when floated: avoid postage-stamp OS windows.
         dock.setMinimumSize(220, 160)
+        install_dock_title_bar(dock, title)
         self._dock_host.addDockWidget(area, dock)
         return dock
 
