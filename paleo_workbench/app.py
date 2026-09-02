@@ -164,6 +164,20 @@ class PaleoWorkbenchWindow(QMainWindow):
     def _show_properties(self) -> None:
         self.project_controller._show_properties()
 
+    def _flush_composite_edits(self) -> int:
+        """Commit in-progress composite vector edit sessions into the project.
+
+        QGIS semantics keep un-committed digitizing out of the layer, but the
+        project-save path must not silently drop it (#1126): Ctrl+S commits
+        every open session so the persisted project contains the edits.
+        """
+        workstation = getattr(self.app_shell, "workstation", None)
+        composite = getattr(workstation, "composite", None)
+        flush = getattr(composite, "flush_edit_sessions", None)
+        if not callable(flush):
+            return 0
+        return int(flush())
+
     def _flush_mapping_draft(self) -> bool:
         """Commit dirty map-scene geometry into the project before serialization.
 
@@ -311,6 +325,16 @@ class PaleoWorkbenchWindow(QMainWindow):
         import shiboken6
 
         if shiboken6.isValid(self.app_shell):
+            # hide 之前先落盘布局与综合编修编辑会话：hide 会让可见性守卫
+            # 跳过 350ms debounce 内的最后一次调整（#1124/#1126）。
+            workstation = getattr(self.app_shell, "workstation", None)
+            flush_layout = getattr(workstation, "flush_layout", None)
+            if callable(flush_layout):
+                flush_layout()
+            try:
+                self._flush_composite_edits()
+            except Exception:  # noqa: BLE001 — 布局/会话 flush 不得阻断壳重建
+                logging.getLogger(__name__).exception("flush composite edits failed")
             self.app_shell.hide()
             self.app_shell.shutdown_workers()
             self.app_shell.setParent(None)

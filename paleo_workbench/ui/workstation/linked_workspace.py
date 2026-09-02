@@ -103,6 +103,8 @@ class LinkedInterpretationWorkspace(QWidget):
         self._load_requested = False
         self._coordination = None
         self._maximized_pane: DocumentPane | None = None
+        # 有已恢复的用户布局时，定时器驱动的默认分屏比例不得覆盖它（#1125）。
+        self._dock_state_restored = False
         self._active_well_name = "A12"
         self.seismic_panel = None
         self.map_panel = None
@@ -484,7 +486,8 @@ class LinkedInterpretationWorkspace(QWidget):
             dock.show()
         for pane in (self.seismic_pane, self.map_pane, self.well_pane):
             pane.set_maximized(False)
-        self._apply_default_split_sizes()
+        # 显式用户动作：即使已有恢复过的布局也强制套用默认分屏。
+        self._apply_default_split_sizes(force=True)
 
     def _toggle_maximize(self, pane: DocumentPane) -> None:
         if self._maximized_pane is pane:
@@ -500,8 +503,11 @@ class LinkedInterpretationWorkspace(QWidget):
         for candidate in (self.seismic_pane, self.map_pane, self.well_pane):
             candidate.set_maximized(candidate is pane)
 
-    def _apply_default_split_sizes(self) -> None:
+    def _apply_default_split_sizes(self, *, force: bool = False) -> None:
         if self._maximized_pane is not None:
+            return
+        if self._dock_state_restored and not force:
+            # 用户布局已恢复：默认 66/34 比例只应在无保存状态时生效（#1125）。
             return
         width = max(1, self.dock_area.width())
         height = max(1, self.dock_area.height())
@@ -522,9 +528,12 @@ class LinkedInterpretationWorkspace(QWidget):
     def restore_dock_state(self, state) -> bool:
         """恢复 dock 布局；浮动窗格保持浮动（saveState 完整记录几何）。"""
         try:
-            return bool(self.dock_area.restoreState(state))
+            restored = bool(self.dock_area.restoreState(state))
         except Exception:  # noqa: BLE001 — 旧版本布局 blob 不兼容时回退默认布局
             return False
+        if restored:
+            self._dock_state_restored = True
+        return restored
 
     def _set_link_state(self, enabled: bool) -> None:
         for pane in (self.seismic_pane, self.map_pane, self.well_pane):
@@ -584,6 +593,12 @@ class LinkedInterpretationWorkspace(QWidget):
     def shutdown_workers(self, _wait_ms: int = 3_000) -> bool:
         if self.seismic_panel is not None:
             self.seismic_panel.shutdown()
+        if self.map_panel is not None:
+            # 平面图内嵌 UnifiedMapCanvas + 渲染后端：与综合编修画布一致，
+            # 必须在宿主拆除前显式停掉 poll/worker（#1120）。
+            shutdown = getattr(self.map_panel, "shutdown", None)
+            if callable(shutdown):
+                shutdown()
         if self.well_panel is not None:
             self.well_panel.shutdown()
         return True

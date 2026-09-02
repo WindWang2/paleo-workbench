@@ -54,6 +54,15 @@ class WorkAreaMapWidget(QWidget):
         self.map_canvas.map_clicked.connect(self._on_map_clicked)
         layout.addWidget(self.map_canvas, 1)
 
+    def shutdown(self) -> None:
+        """Stop the render backend before the host destroys the widget.
+
+        ``UnifiedMapCanvas.shutdown`` is idempotent; hidden panes (linked
+        workspace 平面图) never get a reliable ``closeEvent``, so the host
+        must call this on project switch / teardown.
+        """
+        self.map_canvas.shutdown()
+
     # ------------------------------------------------------------------
     # data
     # ------------------------------------------------------------------

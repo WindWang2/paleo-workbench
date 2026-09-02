@@ -113,6 +113,14 @@ class ProjectController:
                 self._session_generation += 1
                 return False
         shell = getattr(self.window, "app_shell", None)
+        # 切换/关闭工程前提交综合编修编辑会话：与保存路径同一策略，
+        # 不静默丢弃数字化成果（#1126）。
+        flush_composite = getattr(self.window, "_flush_composite_edits", None)
+        if callable(flush_composite):
+            try:
+                flush_composite()
+            except Exception:
+                _SAVE_LOGGER.exception("composite edit session flush failed")
         shutdown = getattr(shell, "shutdown_workers", None)
         if callable(shutdown):
             try:
@@ -479,6 +487,7 @@ class ProjectController:
                 "编图草稿未通过拓扑检查，工程文件未写入。请修复拓扑问题后重试。",
             )
             return None
+        self._flush_composite_vector_edits()
         self._flush_joint_analysis_state()
         if self.window.project_path is not None:
             try:
@@ -513,6 +522,7 @@ class ProjectController:
                 "编图草稿未通过拓扑检查，工程文件未写入。请修复拓扑问题后重试。",
             )
             return False
+        self._flush_composite_vector_edits()
         self._flush_joint_analysis_state()
         path = self.window.project_path
         if path is None:
@@ -809,6 +819,21 @@ class ProjectController:
             )
             if rebased is not None:
                 interpretation.artifact_path = rebased
+
+    def _flush_composite_vector_edits(self) -> None:
+        """Commit in-progress composite edit sessions before project write (#1126).
+
+        Project save must not silently drop digitized-but-uncommitted vector
+        edits: every open session is committed into ``project.user_vector_layers``
+        (QGIS「保存编辑」semantics folded into 工程保存) and the user is told.
+        """
+        try:
+            committed = int(self.window._flush_composite_edits())
+        except Exception:
+            _SAVE_LOGGER.exception("composite edit session flush failed")
+            return
+        if committed:
+            _SAVE_LOGGER.info("工程保存前已提交 %d 个矢量编辑会话", committed)
 
     def _flush_joint_analysis_state(self) -> None:
         """Persist joint presentation from 井震联合 page before project write.

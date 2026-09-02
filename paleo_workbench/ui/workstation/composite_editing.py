@@ -383,6 +383,25 @@ class CompositeEditController(QObject):
         self.content_changed.emit(layer.id)
         self.state_changed.emit()
 
+    def flush_edit_sessions(self) -> int:
+        """提交所有图层的进行中编辑会话（工程保存 / 切换前调用）。
+
+        QGIS 语义下未「保存编辑」的数字化不进图层，但工程保存路径不能
+        静默丢弃它们（#1126）：保存 = 提交全部会话 + 写回工程文档。
+        返回提交的会话数。
+        """
+        committed = 0
+        for layer in self._layers.values():
+            session = layer.edit_session
+            if session is None:
+                continue
+            session.commit_changes()
+            committed += 1
+            self.content_changed.emit(layer.id)
+        if committed:
+            self.state_changed.emit()
+        return committed
+
     # -- 工具装配 ---------------------------------------------------------------
 
     def _tolerance(self) -> float:

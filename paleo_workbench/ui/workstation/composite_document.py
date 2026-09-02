@@ -776,6 +776,13 @@ class CompositeDocument(QWidget):
     def _remove_vector_layer(self, layer_id: str) -> None:
         self.edit_controller.remove_layer(layer_id)
 
+    def flush_edit_sessions(self) -> int:
+        """提交全部进行中的矢量编辑会话并写回工程文档（保存前 flush，#1126）。"""
+        committed = self.edit_controller.flush_edit_sessions()
+        if committed and self._project is not None:
+            self.edit_controller.sync_to_project(self._project)
+        return committed
+
     # -- 快照合成 ------------------------------------------------------------------
 
     def _sync_composition(self) -> None:

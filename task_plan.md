@@ -44,3 +44,27 @@ PHASE 2 — Code archaeology
 ## Notes
 - Build with PALEO_QGIS_BUILD_JOBS=2 (avoid OOM).
 - Do not touch main working tree; all work in worktree.
+
+---
+
+# Task: Open Issues 清仓 + QGIS Workstation Convergence (2026-09-02)
+
+## Base
+- main @ 0e011bb5; worktree ../paleo-qgis-convergence, branch feat/qgis-workstation-convergence
+
+## Phases
+- [ ] A. Fix #1120–#1125, #1128 (lifecycle/layout/dock/data-flush) + #1127 tests
+- [ ] B. CRS authority: LayerManagerPanel._publish must not hardcode EPSG:4326
+- [ ] C. Layer properties / symbology / labeling into Composite (reuse MapLayerPropertiesDialog + bridge)
+- [ ] D. split/merge via vector_operations (session commands); topology via TopologyService
+- [ ] E. GeoTemplate field schemas (fault/facies/source/spreading/break/direction) + persistence
+- [ ] F. Attribute table + identify results panels
+- [ ] G. Per-layer snapping configuration dialog
+- [ ] H. Map status bar in composite (CRS/scale/coords/renderer/edit/snap)
+- [ ] I. Regression tests + 10k/50k/100k benchmark run
+- [ ] J. Review loop (blocker=0, high=0) → push → PR
+
+## Environment facts
+- Test env: /opt/miniconda3/bin/python3.13 + PySide6 6.11.1, offscreen; wrapper ./run_env.sh
+- qgis_render_bridge NOT built → fallback renderer active; all QGIS UI paths must probe & degrade
+- Baseline failures on main: test_dock_title_bar (visibility assert + _dock attr race), test_composite_editing::test_shell_exposes_digitizing_toolbar — both touched by #1122 work

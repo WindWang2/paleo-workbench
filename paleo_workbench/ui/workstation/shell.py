@@ -68,9 +68,14 @@ class WorkstationFrame(QWidget):
         self._project = project
         self._project_path: str | None = None
         self._settings = QSettings("PaleoWorkbench", "WorkstationV3")
-        self._user_hid_inspector = False
+        self._user_hid_inspector = bool(
+            self._settings.value("layout/inspector_user_hidden", False, type=bool)
+        )
         self._responsive_hid_inspector = False
         self._post_show_restored = False
+        # teardown 阶段冻结布局保存：拆除 dock 触发的 visibilityChanged
+        # 不得把「已拆除」状态写进 QSettings（#1124）。
+        self._layout_frozen = False
         self._composite_docks_visible: dict[str, bool] | None = None
         self._owns_dock_host = dock_host is None
         self._dock_host: QMainWindow = dock_host if dock_host is not None else QMainWindow()
@@ -195,6 +200,10 @@ class WorkstationFrame(QWidget):
         self.document_tabs.setCurrentIndex(self.TAB_COMPOSITE)
         QTimer.singleShot(0, self._restore_layout)
 
+    # 浮动时避免邮票窗；停靠时交还内容 hint（否则 220px 最小宽在多面板
+    # 停靠时撑爆布局，#1123）。
+    _FLOAT_MIN_SIZE = (220, 160)
+
     def _add_dock(self, title: str, widget: QWidget, area) -> QDockWidget:
         dock = QDockWidget(title, self._dock_host)
         dock.setObjectName(f"WorkstationDock_{title}")
@@ -204,11 +213,22 @@ class WorkstationFrame(QWidget):
             | QDockWidget.DockWidgetFeature.DockWidgetFloatable
             | QDockWidget.DockWidgetFeature.DockWidgetClosable
         )
-        # Usable when floated: avoid postage-stamp OS windows.
-        dock.setMinimumSize(220, 160)
+        dock.setMinimumSize(0, 0)
+        dock.topLevelChanged.connect(
+            lambda floating, d=dock: self._sync_float_min_size(d, floating)
+        )
+        if dock.isFloating():
+            dock.setMinimumSize(*self._FLOAT_MIN_SIZE)
         install_dock_title_bar(dock, title)
         self._dock_host.addDockWidget(area, dock)
         return dock
+
+    @classmethod
+    def _sync_float_min_size(cls, dock: QDockWidget, floating: bool) -> None:
+        if floating:
+            dock.setMinimumSize(*cls._FLOAT_MIN_SIZE)
+        else:
+            dock.setMinimumSize(0, 0)
 
     def _wire(self) -> None:
         self.activity_rail.mode_requested.connect(self._on_activity_mode)
@@ -329,6 +349,7 @@ class WorkstationFrame(QWidget):
         self._user_hid_inspector = not show
         self._responsive_hid_inspector = False
         self.inspector_dock.setVisible(show)
+        self._settings.setValue("layout/inspector_user_hidden", self._user_hid_inspector)
         self._save_timer.start()
 
     def panel_entries(self) -> list[dict]:
@@ -505,6 +526,7 @@ class WorkstationFrame(QWidget):
         self.inspector_dock.setVisible(vis.inspector)
         self._user_hid_inspector = not vis.inspector
         self._responsive_hid_inspector = False
+        self._settings.setValue("layout/inspector_user_hidden", self._user_hid_inspector)
         self.process_dock.setVisible(vis.process)
         self.task_dock.setVisible(vis.tasks)
         if preset.document_tab == TAB_COMPOSITE:
@@ -561,8 +583,9 @@ class WorkstationFrame(QWidget):
         if mode == "search":
             self.explorer.focus_search()
         elif mode == "history":
-            self.process_hub.tabs.setCurrentIndex(2)
-            self._expand_process_dock()
+            # 历史聚焦资源树的历史视图；不再误开 Agent「日志」tab（#1128）。
+            if self.nav_dock.isHidden():
+                self.nav_dock.show()
         elif mode == "workspaces":
             self.document_tabs.setFocus(Qt.FocusReason.OtherFocusReason)
 
@@ -615,7 +638,7 @@ class WorkstationFrame(QWidget):
 
     def _schedule_state_save(self) -> None:
         """部件已关闭时不再保存布局——退出/销毁阶段的全部隐藏态不是布局。"""
-        if not self.isVisible():
+        if self._layout_frozen or not self.isVisible():
             return
         self._save_timer.start()
 
@@ -626,18 +649,52 @@ class WorkstationFrame(QWidget):
         linked_state = self._settings.value("layout/linked_docks")
         if isinstance(linked_state, QByteArray) and not linked_state.isNull():
             self.linked_workspace.restore_dock_state(linked_state)
+        # restore 之后必须重新执行响应式策略：restoreState 可能把检查器
+        # 在窄屏下重新显示（保存时按「可见」写入），不能让 restore 反杀
+        # 响应式隐藏（#1121）。
+        self._apply_responsive_panels()
 
-    def _save_layout(self) -> None:
-        if not self.isVisible():
+    def _save_layout(self, *, force: bool = False) -> None:
+        if not self.isVisible() and not force:
             return  # 关闭后保存的全隐藏布局会污染下次启动
-        self._settings.setValue(self._WINDOW_STATE_KEY, self._dock_host.saveState())
         self._settings.setValue(
-            "layout/linked_docks", self.linked_workspace.dock_area.saveState()
+            "layout/inspector_user_hidden", self._user_hid_inspector
         )
+        # 响应式隐藏是临时 viewport 策略，不得写进持久布局（#1121）：
+        # 保存时把检查器按「可见」记录，冷启动宽屏即恢复，窄屏由
+        # restore 后的 _apply_responsive_panels 再次隐藏。
+        suppress_visibility_signals = (
+            self._responsive_hid_inspector and not self._user_hid_inspector
+        )
+        if suppress_visibility_signals:
+            self.inspector_dock.blockSignals(True)
+            self.inspector_dock.show()
+        try:
+            self._settings.setValue(self._WINDOW_STATE_KEY, self._dock_host.saveState())
+            self._settings.setValue(
+                "layout/linked_docks", self.linked_workspace.dock_area.saveState()
+            )
+        finally:
+            if suppress_visibility_signals:
+                self.inspector_dock.hide()
+                self.inspector_dock.blockSignals(False)
+
+    def flush_layout(self) -> None:
+        """立即落盘当前布局（忽略可见性守卫）。
+
+        供 ``_refresh_shell`` 在 hide 之前调用：工程切换路径上，
+        hide-before-flush 会丢掉 350ms debounce 内的最后一次调整（#1124）。
+        """
+        if self._layout_frozen:
+            return
+        self._save_timer.stop()
+        self._save_layout(force=True)
 
     def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
         self._save_timer.stop()
-        self._save_layout()
+        # teardown 前最后一次强制落盘（close 路径不先 hide，force 兜底）。
+        self._save_layout(force=True)
+        self._layout_frozen = True
         self.process_hub.shutdown()
         self.task_center.shutdown()
         self.composite.shutdown()
@@ -655,6 +712,15 @@ class WorkstationFrame(QWidget):
             self.composite_input_dock,
             self.composite_linked_dock,
         )
+        linked_docks = (
+            self.linked_workspace.seismic_dock,
+            self.linked_workspace.map_dock,
+            self.linked_workspace.well_dock,
+        )
+        # 先断开布局信号再拆除：removeDockWidget/hide 触发的
+        # visibilityChanged 不得重新调度 350ms 后的保存（#1124）。
+        for dock in docks + linked_docks:
+            dock.blockSignals(True)
         for dock in docks:
             host = dock.parentWidget()
             if isinstance(host, QMainWindow):
