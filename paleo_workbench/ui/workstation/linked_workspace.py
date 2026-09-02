@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -11,7 +10,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QSplitter,
-    QStyle,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -46,9 +44,8 @@ class DocumentPane(QFrame):
         header_layout.addWidget(self.link_label)
         self.maximize_button = QToolButton(header)
         self.maximize_button.setObjectName("WorkstationChromeButton")
-        self.maximize_button.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarMaxButton)
-        )
+        self.maximize_button.setIcon(workstation_icon("pane-maximize.svg"))
+        self.maximize_button.setIconSize(QSize(14, 14))
         self.maximize_button.setToolTip("最大化 / 恢复")
         self.maximize_button.clicked.connect(lambda: self.maximize_requested.emit(self))
         header_layout.addWidget(self.maximize_button)
@@ -74,6 +71,12 @@ class DocumentPane(QFrame):
 
     def set_title(self, title: str) -> None:
         self.title_label.setText(title)
+
+    def set_maximized(self, maximized: bool) -> None:
+        self.maximize_button.setIcon(
+            workstation_icon("pane-restore.svg" if maximized else "pane-maximize.svg")
+        )
+        self.maximize_button.setToolTip("恢复分屏" if maximized else "最大化")
 
 
 class LinkedInterpretationWorkspace(QWidget):
@@ -110,6 +113,7 @@ class LinkedInterpretationWorkspace(QWidget):
         self.domain_combo.addItems(["剖面", "平面", "井轨道"])
         self.domain_combo.setToolTip("活动解释域")
         context_layout.addWidget(self.domain_combo)
+        context_layout.addWidget(self._context_separator())
         for label, icon_name, tip in (
             ("选择", "map/select.svg", "选择解释对象"),
             ("平移", "map/pan.svg", "平移活动视图"),
@@ -122,6 +126,8 @@ class LinkedInterpretationWorkspace(QWidget):
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             button.setToolTip(tip)
             context_layout.addWidget(button)
+
+        context_layout.addWidget(self._context_separator())
 
         self.display_combo = QComboBox(self.context_bar)
         self.display_combo.addItems(["振幅", "相对振幅", "瞬时相位"])
@@ -161,7 +167,7 @@ class LinkedInterpretationWorkspace(QWidget):
         self.right_splitter.setChildrenCollapsible(False)
         self.right_splitter.setMinimumWidth(300)
         self.map_pane = DocumentPane("平面图: D63", self.right_splitter)
-        self.well_pane = DocumentPane("井日志: A12", self.right_splitter)
+        self.well_pane = DocumentPane("测井轨道: A12", self.right_splitter)
         self.horizontal_splitter.addWidget(self.seismic_pane)
         self.horizontal_splitter.addWidget(self.right_splitter)
         self.horizontal_splitter.setStretchFactor(0, 2)
@@ -177,17 +183,29 @@ class LinkedInterpretationWorkspace(QWidget):
 
         QTimer.singleShot(0, self._apply_default_split_sizes)
 
+    @staticmethod
+    def _context_separator() -> QFrame:
+        separator = QFrame()
+        separator.setObjectName("WorkstationContextSeparator")
+        separator.setFrameShape(QFrame.Shape.VLine)
+        separator.setFixedWidth(1)
+        return separator
+
     def _install_empty_states(self) -> None:
         for pane, text in (
             (self.seismic_pane, "打开包含 SEG-Y 的工程后加载地震解释视图"),
             (self.map_pane, "工程井位与层位地图将在此显示"),
             (self.well_pane, "选择井数据后加载测井轨道"),
         ):
-            label = QLabel(text, pane)
+            holder = QWidget(pane)
+            holder_layout = QVBoxLayout(holder)
+            holder_layout.setContentsMargins(10, 10, 10, 10)
+            label = QLabel(text, holder)
             label.setObjectName("WorkstationDocumentEmptyState")
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             label.setWordWrap(True)
-            pane.set_content(label)
+            holder_layout.addWidget(label)
+            pane.set_content(holder)
 
     def set_project(self, project, project_path: str | None = None) -> None:
         self._project = project
@@ -217,12 +235,14 @@ class LinkedInterpretationWorkspace(QWidget):
     def ensure_views(self) -> None:
         if self._views_created or not self._can_create_native_views():
             return
-        from paleo_workbench.ui.pages.project_well_map_page import ProjectWellMapPage
         from paleo_workbench.ui.pages.seismic_view_panel import SeismicViewPanel
         from paleo_workbench.ui.pages.well_log_canvas_panel import WellLogCanvasPanel
+        from paleo_workbench.ui.pages.workarea_map_widget import WorkAreaMapWidget
 
         self.seismic_panel = SeismicViewPanel(self.seismic_pane)
-        self.map_panel = ProjectWellMapPage(self.map_pane)
+        # 平面图窗格 = 整张 GIS 工区图（与首页同一渲染后端），无额外工具行；
+        # 窗格较小，图例关掉避免遮挡井位（首页工区概况仍显示图例）。
+        self.map_panel = WorkAreaMapWidget(self.map_pane, show_legend=False)
         self.well_panel = WellLogCanvasPanel(self.well_pane)
         self._configure_compact_panels()
         self.seismic_pane.set_content(self.seismic_panel)
@@ -237,11 +257,6 @@ class LinkedInterpretationWorkspace(QWidget):
             self.seismic_panel.attach_coordination(self._coordination)
 
         self.map_panel.set_project(self._project)
-        full_crs = self.map_panel.crs_label.text()
-        self.map_panel.crs_label.setToolTip(full_crs)
-        epsg = re.search(r"EPSG:\d+", full_crs)
-        if epsg is not None:
-            self.map_panel.crs_label.setText(epsg.group(0))
         seismic = self._first_resource("seismic")
         if seismic is not None:
             self.seismic_panel.set_project_path(self._project_path)
@@ -258,18 +273,7 @@ class LinkedInterpretationWorkspace(QWidget):
         return bool(resources)
 
     def _configure_compact_panels(self) -> None:
-        if self.map_panel is not None:
-            splitter = self.map_panel.findChild(QSplitter, "WellMapSplitter")
-            if splitter is not None and splitter.count() > 1:
-                splitter.widget(0).hide()
-                splitter.setSizes([0, 800])
-            for button_name in ("btn_reference", "btn_labels", "btn_reset"):
-                button = getattr(self.map_panel, button_name, None)
-                if button is not None:
-                    button.hide()
-            self.map_panel.btn_labels.setChecked(False)
-            self.map_panel.btn_zoom_all.setText("全图")
-            self.map_panel.btn_zoom_selection.setText("选中")
+        # 地图窗格是 WorkAreaMapWidget（整张工区图），无需裁剪工具行。
         if self.well_panel is not None:
             self.well_panel.title_label.hide()
             self.well_panel.backend_combo.hide()
@@ -305,6 +309,34 @@ class LinkedInterpretationWorkspace(QWidget):
                 panel = profile.parentWidget() if profile is not None else None
                 if panel is not None:
                     panel.hide()
+            # Inline 剖面板的整行 header 太占高度：隐藏它，把标识收成一个
+            # 小徽标插到主工具条（显示/色标/属性/拾取层位/井震标定 那行）开头。
+            inline_profile = getattr(view, "_profile_il", None)
+            inline_panel = (
+                inline_profile.parentWidget() if inline_profile is not None else None
+            )
+            if inline_panel is not None:
+                panel_layout = inline_panel.layout()
+                header = (
+                    panel_layout.itemAt(0).widget()
+                    if panel_layout is not None and panel_layout.count() > 0
+                    else None
+                )
+                if header is not None:
+                    header.hide()
+                    header.setFixedHeight(0)
+            toolbar_row1 = getattr(view, "_toolbar_row1", None)
+            if toolbar_row1 is not None and getattr(view, "_inline_badge", None) is None:
+                badge = QLabel("Inline 剖面")
+                badge.setStyleSheet(
+                    "color: #e53e3e; font-weight: bold; font-size: 11px; padding: 0 4px;"
+                )
+                actions = toolbar_row1.actions()
+                if actions:
+                    toolbar_row1.insertWidget(actions[0], badge)
+                else:
+                    toolbar_row1.addWidget(badge)
+                view._inline_badge = badge
             for name in (
                 "_3d_mode_combo",
                 "_horizon_menu_btn",
@@ -352,7 +384,7 @@ class LinkedInterpretationWorkspace(QWidget):
         self.map_panel.select_well(str(getattr(well, "id", "")), zoom=False, emit=False)
         self._active_well_name = name
         self.seismic_pane.set_title(f"井震联合剖面: {name} - {self._target_horizon()}")
-        self.well_pane.set_title(f"井日志: {name}")
+        self.well_pane.set_title(f"测井轨道: {name}")
         self.object_selected.emit({"kind": "well", "object": well, "well_name": name})
         self.status_changed.emit(f"已打开井 {name}")
 
@@ -383,6 +415,8 @@ class LinkedInterpretationWorkspace(QWidget):
         self.right_splitter.show()
         self.map_pane.show()
         self.well_pane.show()
+        for pane in (self.seismic_pane, self.map_pane, self.well_pane):
+            pane.set_maximized(False)
         self._apply_default_split_sizes()
 
     def _toggle_maximize(self, pane: DocumentPane) -> None:
@@ -401,6 +435,7 @@ class LinkedInterpretationWorkspace(QWidget):
             self.right_splitter.show()
             self.map_pane.setVisible(pane is self.map_pane)
             self.well_pane.setVisible(pane is self.well_pane)
+        pane.set_maximized(True)
 
     def _apply_default_split_sizes(self) -> None:
         width = max(1, self.horizontal_splitter.width())
