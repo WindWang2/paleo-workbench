@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+import zlib
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
@@ -40,12 +41,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from paleo_workbench.mapping.map_render_backend import MapRenderSnapshot
+from paleo_workbench.mapping.map_render_backend import MapLayerSnapshot, MapRenderSnapshot
+from paleo_workbench.mapping.map_styles import LinePattern, MarkerSymbol, VectorStyle
+from paleo_workbench.mapping.reference_layers import (
+    ReferenceLayerError,
+    ReferenceLayerService,
+)
 from paleo_workbench.mapping.workarea_map_snapshot import (
     WORKAREA_LEGEND_ITEMS,
     build_workarea_map_snapshot,
     workarea_view_extent,
 )
+from paleo_workbench.project.domain import crs_equivalent
+from paleo_workbench.project.models import MapReferenceLayer
 from paleo_workbench.ui.map_action_controller import MapActionController
 from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
 from paleo_workbench.ui.map_status_bar import MapStatusBar
@@ -74,6 +82,35 @@ _GEOMETRY_TYPE_KIND = {
     "Polygon": "polygon",
     "MultiPolygon": "polygon",
 }
+
+# 引用矢量图层的默认符号：刻意区别于编修图层（ muted 蓝灰 + 虚线），
+# 视觉上一眼可分「外部参考」与「本工程数字化」。
+_REFERENCE_STYLES: dict[str, dict] = {
+    "point": VectorStyle(
+        fill="#8fa3b8",
+        stroke="#3d4a5c",
+        stroke_width=1.0,
+        marker=MarkerSymbol.CIRCLE,
+        marker_size=5.0,
+    ).to_dict(),
+    "line": VectorStyle(
+        fill="transparent",
+        stroke="#7c8fa6",
+        stroke_width=1.2,
+        line_pattern=LinePattern.DASH,
+    ).to_dict(),
+    "polygon": VectorStyle(
+        fill="#1e64748b",
+        stroke="#64748b",
+        stroke_width=1.0,
+    ).to_dict(),
+}
+
+# QFileDialog 的 GDAL 矢量过滤（未列出的 GDAL 格式仍可经「所有文件」导入）。
+_REFERENCE_IMPORT_FILTER = (
+    "矢量参考图层 (*.shp *.geojson *.json *.gpkg *.kml *.gml *.gmt *.csv *.vrt);;"
+    "所有文件 (*)"
+)
 
 
 def _snapshot_geometry_kind(layer) -> str:
@@ -150,6 +187,11 @@ class LayerManagerPanel(QFrame):
     create_layer_requested = Signal()
     remove_layer_requested = Signal(str)
     rename_layer_requested = Signal(str)
+    # 引用矢量图层（外部 GDAL 源，只读参考）的导入与上下文动作。
+    import_reference_requested = Signal()
+    remove_reference_requested = Signal(str)
+    refresh_reference_requested = Signal(str)
+    toggle_reference_snap_requested = Signal(str)
     # QGIS 图层面板语义的上下文动作（由 CompositeDocument 落地）。
     attribute_table_requested = Signal(str)
     toggle_editing_requested = Signal(str)
@@ -186,6 +228,7 @@ class LayerManagerPanel(QFrame):
         manage_row = QHBoxLayout()
         for label, icon, tip, callback in (
             ("新建矢量图层", "map/tree-add-layer.svg", "新建点 / 线 / 面矢量图层", self._on_create_layer),
+            ("导入参考图层", "map/tree-add-layer.svg", "导入外部矢量文件作为只读参考（GDAL）", self._on_import_reference),
             ("删除图层", "map/tree-remove.svg", "删除当前矢量图层（编修图层）", self._on_remove_layer),
         ):
             button = QToolButton(self)
@@ -256,6 +299,9 @@ class LayerManagerPanel(QFrame):
     def _on_create_layer(self) -> None:
         self.create_layer_requested.emit()
 
+    def _on_import_reference(self) -> None:
+        self.import_reference_requested.emit()
+
     def _on_remove_layer(self) -> None:
         item = self.tree.currentItem()
         if item is None:
@@ -269,6 +315,10 @@ class LayerManagerPanel(QFrame):
     def is_editable_layer(layer) -> bool:
         return bool(getattr(layer, "metadata", {}) and layer.metadata.get("editable") == "true")
 
+    @staticmethod
+    def is_reference_layer(layer) -> bool:
+        return bool(getattr(layer, "metadata", {}) and layer.metadata.get("reference") == "true")
+
     def _on_context_menu(self, position) -> None:
         """图层上下文菜单（QGIS 图层面板的核心动作集）。"""
         item = self.tree.itemAt(position)
@@ -279,6 +329,7 @@ class LayerManagerPanel(QFrame):
         if layer is None:
             return
         editable = self.is_editable_layer(layer)
+        is_reference = self.is_reference_layer(layer)
         menu = QMenu(self.tree)
         zoom = menu.addAction(workstation_icon("map/tree-zoom.svg"), "缩放到图层")
         extent = getattr(layer, "extent", None)
@@ -290,6 +341,15 @@ class LayerManagerPanel(QFrame):
             and bool(tuple(getattr(layer, "features", ()) or ()))
         )
         zoom.setEnabled(has_extent)
+        refresh = toggle_snap = remove_reference = None
+        if is_reference:
+            menu.addSeparator()
+            refresh = menu.addAction("刷新引用（重读源文件）")
+            metadata = getattr(layer, "metadata", None) or {}
+            toggle_snap = menu.addAction("参与捕捉")
+            toggle_snap.setCheckable(True)
+            toggle_snap.setChecked(metadata.get("snap") == "true")
+            remove_reference = menu.addAction(workstation_icon("map/tree-remove.svg"), "移除引用…")
         if editable:
             menu.addSeparator()
             open_table = menu.addAction(
@@ -323,6 +383,12 @@ class LayerManagerPanel(QFrame):
             return
         if chosen is zoom and self._canvas is not None and has_extent:
             self._canvas.set_extent(tuple(float(v) for v in extent))
+        elif chosen is refresh:
+            self.refresh_reference_requested.emit(layer_id)
+        elif chosen is toggle_snap:
+            self.toggle_reference_snap_requested.emit(layer_id)
+        elif chosen is remove_reference:
+            self.remove_reference_requested.emit(layer_id)
         elif chosen is open_table:
             self.attribute_table_requested.emit(layer_id)
         elif chosen is toggle_edit:
@@ -650,6 +716,12 @@ class CompositeDocument(QWidget):
         self.edit_controller = CompositeEditController(parent=self)
         self.edit_controller.attach_canvas(self.canvas)
         self.edit_controller.identify_delegate = self._identify_with_results
+        # 引用矢量图层：外部 GDAL 源的只读参考（渲染要素经源修订缓存，
+        # 源文件永不修改；工程只保存引用描述）。合成顺序固定为
+        # 基础工区 → 引用参考 → 编修图层（参考永远垫底）。
+        self._reference_service = ReferenceLayerService()
+        self._reference_layers: list[MapReferenceLayer] = []
+        self._reference_status: dict[str, str] = {}
         # 内容变化（数字化 / 属性编辑）经 120ms debounce 重组快照：连续
         # 采点不重复触发全图层重序列化；overlay（采点预览/捕捉）不经过
         # 快照，交互反馈不受影响。结构变化（图层增删改名）立即重组。
@@ -683,6 +755,12 @@ class CompositeDocument(QWidget):
         self.layer_manager.create_layer_requested.connect(self._create_vector_layer)
         self.layer_manager.remove_layer_requested.connect(self._remove_vector_layer)
         self.layer_manager.rename_layer_requested.connect(self._rename_vector_layer)
+        self.layer_manager.import_reference_requested.connect(self._import_reference_layer)
+        self.layer_manager.remove_reference_requested.connect(self._remove_reference_layer)
+        self.layer_manager.refresh_reference_requested.connect(self._refresh_reference_layer)
+        self.layer_manager.toggle_reference_snap_requested.connect(
+            self._toggle_reference_snap
+        )
         self.layer_manager.active_layer_changed.connect(
             self.edit_controller.set_active_layer
         )
@@ -1128,12 +1206,190 @@ class CompositeDocument(QWidget):
                 self.canvas.set_extent(extent)
         self._sync_action_state()
 
+    # -- 引用矢量图层 -----------------------------------------------------------
+
+    def _import_reference_layer(self) -> None:
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "导入矢量参考图层", "", _REFERENCE_IMPORT_FILTER
+        )
+        if not paths:
+            return
+        self.import_reference_layers(paths)
+
+    def import_reference_layers(self, paths) -> int:
+        """把外部矢量文件导入为只读参考图层并重组快照；逐文件回报失败原因。
+
+        返回成功导入数。CRS 无法归一到项目坐标系的源会被拒绝并经
+        ``status_message`` 告知（§20：不可叠加的坐标系绝不静默出图）。
+        """
+        imported = 0
+        for path in paths:
+            try:
+                layer = self._reference_service.import_layer(
+                    path, self.edit_controller.project_crs or "EPSG:4326"
+                )
+            except ReferenceLayerError as exc:
+                self.status_message.emit(str(exc))
+                continue
+            self._reference_layers.append(layer)
+            imported += 1
+        if imported:
+            self.status_message.emit(f"已导入 {imported} 个矢量参考图层")
+            self._sync_composition_now()
+        return imported
+
+    def _remove_reference_layer(self, layer_id: str) -> None:
+        before = len(self._reference_layers)
+        self._reference_layers = [
+            layer for layer in self._reference_layers if layer.id != layer_id
+        ]
+        if len(self._reference_layers) != before:
+            self._reference_status.pop(layer_id, None)
+            self._sync_composition_now()
+
+    def _refresh_reference_layer(self, layer_id: str) -> None:
+        for index, layer in enumerate(self._reference_layers):
+            if layer.id != layer_id:
+                continue
+            try:
+                refreshed = self._reference_service.import_layer(
+                    layer.source_path,
+                    self.edit_controller.project_crs or layer.project_crs,
+                )
+            except ReferenceLayerError as exc:
+                self.status_message.emit(f"刷新引用失败：{exc}")
+                ReferenceLayerService.refresh_status(layer)
+                break
+            # 保留显示态与身份，只更新归一化描述与缓存键。
+            refreshed.id = layer.id
+            refreshed.name = layer.name
+            refreshed.visible = layer.visible
+            refreshed.opacity = layer.opacity
+            refreshed.participates_in_snap = layer.participates_in_snap
+            self._reference_layers[index] = refreshed
+            self.status_message.emit(f"已刷新参考图层「{layer.name}」")
+            break
+        self._sync_composition_now()
+
+    def _toggle_reference_snap(self, layer_id: str) -> None:
+        for layer in self._reference_layers:
+            if layer.id == layer_id:
+                layer.participates_in_snap = not layer.participates_in_snap
+                break
+        self._sync_composition_now()
+
+    def _reference_layer_snap_points(self) -> list[tuple[float, float]]:
+        """参与捕捉的引用图层的顶点（井位参考点同一通道）。"""
+        points: list[tuple[float, float]] = []
+        for layer in self._reference_layers:
+            if not layer.participates_in_snap:
+                continue
+            try:
+                points.extend(self._reference_service.vector_snap_points(layer))
+            except ReferenceLayerError:
+                continue
+        return points
+
+    def _reference_snapshot_layers(self) -> list:
+        """引用图层的渲染快照（要素按源修订缓存；不可用即诚实降级）。"""
+        snapshots: list[MapLayerSnapshot] = []
+        project_crs = self.edit_controller.project_crs
+        for layer in self._reference_layers:
+            features: tuple = ()
+            extent = (0.0, 0.0, 1.0, 1.0)
+            error = ""
+            if layer.source_kind != "vector":
+                # 栅格源误入矢量通道：不渲染矢量镜像，状态栏提示走导入校验。
+                error = "非矢量参考图层"
+            elif (
+                project_crs
+                and layer.project_crs
+                and not crs_equivalent(layer.project_crs, project_crs)
+            ):
+                # 工程 CRS 在导入后被改过：归一坐标过期，宁可扣发也不错位
+                # 叠加（§20；刷新引用可按新 CRS 重读源文件）。
+                error = f"坐标系 {layer.project_crs} 与工程 {project_crs} 不一致，未叠加"
+            else:
+                try:
+                    features, extent = self._reference_service.vector_render_payload(layer)
+                except ReferenceLayerError as exc:
+                    error = str(exc)
+            kind = ""
+            for record in features:
+                geometry = record.get("geometry") if isinstance(record, dict) else None
+                if isinstance(geometry, dict):
+                    kind = _GEOMETRY_TYPE_KIND.get(str(geometry.get("type") or ""), "")
+                    if kind:
+                        break
+            status = layer.status if not error else "failed"
+            previous = self._reference_status.get(layer.id)
+            if previous is not None and previous != status:
+                self.status_message.emit(f"参考图层「{layer.name}」状态：{status}")
+            self._reference_status[layer.id] = status
+            revision = zlib.crc32(
+                f"{layer.id}|{layer.cache_key}|{status}".encode("utf-8")
+            ) & 0x7FFFFFFF
+            # 扣发原因上名（短后缀），完整原因进 metadata 供悬停/诊断。
+            if error.startswith("坐标系"):
+                suffix = "（坐标系不一致，未叠加）"
+            elif error:
+                suffix = "（不可用）"
+            else:
+                suffix = ""
+            snapshots.append(
+                MapLayerSnapshot(
+                    id=layer.id,
+                    name=f"{layer.name}{suffix}",
+                    layer_type="vector",
+                    extent=extent,
+                    crs=layer.project_crs or self.edit_controller.project_crs,
+                    data_revision=revision or 1,
+                    style_revision=1,
+                    features=features,
+                    style=_REFERENCE_STYLES.get(kind) or _REFERENCE_STYLES["line"],
+                    visible=layer.visible,
+                    opacity=float(layer.opacity),
+                    metadata={
+                        "reference": "true",
+                        "geometry_kind": kind,
+                        "status": status,
+                        "snap": "true" if layer.participates_in_snap else "false",
+                        **({"error": error} if error else {}),
+                    },
+                )
+            )
+        return snapshots
+
+    def _apply_reference_display_state(self, display_layers) -> None:
+        """把面板显示态（可见性 / 不透明度 / 引用块内顺序）写回引用权威。"""
+        by_id = {layer.id: layer for layer in self._reference_layers}
+        order: list[str] = []
+        for snapshot in display_layers:
+            layer_id = str(getattr(snapshot, "id", ""))
+            if layer_id not in by_id or layer_id in order:
+                continue
+            order.append(layer_id)
+            reference = by_id[layer_id]
+            reference.visible = bool(getattr(snapshot, "visible", True))
+            reference.opacity = min(
+                1.0, max(0.05, float(getattr(snapshot, "opacity", 1.0) or 1.0))
+            )
+        if order:
+            seen = set(order)
+            remaining = [layer.id for layer in self._reference_layers if layer.id not in seen]
+            self._reference_layers = [by_id[lid] for lid in order + remaining]
+
+    def _sync_reference_layers_to_project(self) -> None:
+        if self._project is not None:
+            self._project.workstation_reference_layers = list(self._reference_layers)
+
     # -- 捕捉设置 -------------------------------------------------------------
 
     def _open_snapping_settings(self) -> None:
         dialog = SnappingSettingsDialog(
             self.edit_controller,
-            well_points=self._well_reference_points(),
+            well_points=self._well_reference_points()
+            + self._reference_layer_snap_points(),
             parent=self,
         )
         dialog.exec()
@@ -1224,11 +1480,13 @@ class CompositeDocument(QWidget):
         """
         self._composition_timer.stop()
         self.edit_controller.apply_display_state(self.layer_manager._layers)
+        self._apply_reference_display_state(self.layer_manager._layers)
         committed, blocked = self.edit_controller.flush_edit_sessions()
         # sessions_committed 已触发过 immediate 重组；无会话提交（纯显示态
         # 变化 / 全部被拓扑阻断）时在此补一次写回。
         if self._project is not None and not committed:
             self.edit_controller.sync_to_project(self._project)
+            self._sync_reference_layers_to_project()
         for message in blocked:
             self.status_message.emit(message)
         return committed
@@ -1244,7 +1502,7 @@ class CompositeDocument(QWidget):
             self._composition_timer.start()
 
     def _sync_composition_now(self) -> None:
-        """基础工区图层 + 用户矢量图层合并发布到画布与图层管理面板。"""
+        """基础工区图层 + 引用参考图层 + 用户矢量图层合并发布到画布与图层管理面板。"""
         # CRS 权威链：ProjectDocument.coordinate → 编辑控制器 → 面板发布。
         self.layer_manager.set_project_crs(self.edit_controller.project_crs)
         display = {
@@ -1253,11 +1511,14 @@ class CompositeDocument(QWidget):
         # 面板显示增量（顺序 / 可见性 / 不透明度）先写回编辑权威，再由
         # 权威重建快照——identify 可见性与工程持久化读到同一份状态（review #4）。
         self.edit_controller.apply_display_state(display.values())
+        self._apply_reference_display_state(display.values())
         layers = list(self._base_layers)
+        layers.extend(self._reference_snapshot_layers())
         layers.extend(self.edit_controller.snapshot_layers(display=display))
         if self._project is not None and not self._loading:
-            # 人工建数据写回工程文档，纳入数据管理（磁盘保存走工程保存）。
+            # 人工建数据与引用描述写回工程文档（磁盘保存走工程保存）。
             self.edit_controller.sync_to_project(self._project)
+            self._sync_reference_layers_to_project()
         self.layer_manager.bind(self.canvas, layers)
         active_id = self.edit_controller.active_layer_id
         if active_id is not None:
@@ -1276,6 +1537,14 @@ class CompositeDocument(QWidget):
             self.canvas.set_extent(self._home_extent)
         self._loading = True
         try:
+            self._reference_layers = [
+                layer
+                for layer in (
+                    getattr(project, "workstation_reference_layers", None) or []
+                )
+                if getattr(layer, "source_kind", "") == "vector"
+            ]
+            self._reference_status = {}
             self.edit_controller.load_from_project(project)
         finally:
             self._loading = False

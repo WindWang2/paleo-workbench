@@ -561,6 +561,9 @@ class ProjectDocument(BaseModel):
     paleomap_documents: list[PaleoMapDocument] = Field(default_factory=list)
     # 综合编修人工数字化的矢量图层（物源/断层线/展布线等地质模板）
     user_vector_layers: list[UserVectorLayer] = Field(default_factory=list)
+    # 综合编修引用的外部矢量图层（GDAL 读取，坐标归一到项目 CRS；源文件
+    # 保持外部不可变——工程只保存引用描述，不复制数据）。
+    workstation_reference_layers: list[MapReferenceLayer] = Field(default_factory=list)
     # 新建工程向导盘点报告 — 持久化 onboarding 阶段的导入/识别统计
     onboarding_report: dict[str, Any] = Field(default_factory=dict)
     quality_reports: list[QualityReport] = Field(default_factory=list)

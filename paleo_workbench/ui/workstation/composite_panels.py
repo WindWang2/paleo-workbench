@@ -170,9 +170,9 @@ class SnappingSettingsDialog(QDialog):
         outer.addWidget(self._table, 1)
 
         self._well_snap = QCheckBox(
-            f"井位参与捕捉（工区井点作为参考点，{len(self._well_points)} 个）"
+            f"参考点捕捉（井位 / 参与捕捉的引用图层，{len(self._well_points)} 个）"
             if self._well_points
-            else "井位参与捕捉（当前工程无井点）",
+            else "参考点捕捉（当前无井点 / 引用参考点）",
             self,
         )
         self._well_snap.setEnabled(bool(self._well_points))
