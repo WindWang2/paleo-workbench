@@ -2,11 +2,31 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel
 
 from paleo_workbench.ui import tokens
 
 __all__ = ["MapStatusBar"]
+
+# 单个读数被布局压缩时的省略宽度上限（完整内容进 tooltip）。
+_MAX_LABEL_WIDTH = 168
+
+
+def _elide_label(label: QLabel, text: str) -> None:
+    """Set ``text`` on ``label``, eliding to the available width.
+
+    状态栏总宽不足以容纳全部读数时 QLabel 只是被裁剪（"CRS: EPS…"），
+    这里主动按最大宽度省略并保留完整内容的 tooltip。
+    """
+    label.setText(text)
+    label.setToolTip(text)
+    metrics = QFontMetrics(label.font())
+    if metrics.horizontalAdvance(text) > _MAX_LABEL_WIDTH:
+        label.setText(
+            metrics.elidedText(text, Qt.TextElideMode.ElideRight, _MAX_LABEL_WIDTH)
+        )
 
 
 class MapStatusBar(QFrame):
@@ -49,18 +69,23 @@ class MapStatusBar(QFrame):
         snapping: bool | None = None,
     ) -> None:
         if point is not None:
-            self.coordinate.setText(f"X: {point[0]:.6g}  Y: {point[1]:.6g}")
+            _elide_label(self.coordinate, f"X: {point[0]:.6g}  Y: {point[1]:.6g}")
         if extent is not None:
             width = max(0.0, extent[2] - extent[0])
-            self.scale.setText(f"Width: {width:.6g}")
-        self.crs.setText(f"CRS: {crs or 'unspecified'}")
-        self.render.setText(f"Renderer: {renderer or '—'}")
+            _elide_label(self.scale, f"Width: {width:.6g}")
+        # 描述式 CRS（"EPSG:4326 / WGS84"）取权威代码显示，全名进 tooltip。
+        display_crs = str(crs or "unspecified").split("/")[0].strip() or crs
+        _elide_label(self.crs, f"CRS: {display_crs}")
+        _elide_label(self.render, f"Renderer: {renderer or '—'}")
         self.selection.setText(f"Selection: {int(selection_count)}")
         if snapping is None:
             self.snapping.setText("")
         else:
             self.snapping.setText(f"Snapping: {'ON' if snapping else 'OFF'}")
         self.edit.setText(f"Editing: {editing_label}" if editing and editing_label else ("Editing" if editing else "Read-only"))
+        self.edit.setToolTip(
+            f"Editing: {editing_label}" if editing and editing_label else ("Editing" if editing else "Read-only")
+        )
         self.edit.setStyleSheet(
             f"color: {'#ffffff' if editing else tokens.TEXT_SECONDARY};"
             f" background: {tokens.PRIMARY if editing else tokens.BG_SEARCH};"
