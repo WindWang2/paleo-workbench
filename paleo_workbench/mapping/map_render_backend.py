@@ -25,7 +25,7 @@ import weakref
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPolygonF
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPolygonF
 
 from paleo_workbench.mapping.map_styles import MarkerSymbol, TextStyle, VectorStyle
 
@@ -246,6 +246,39 @@ class _LabelSpec:
     halo_color: str
     halo_width: float
     dpi_scale: float
+
+
+def _draw_halo_text(
+    painter: QPainter,
+    position: QPointF,
+    font: QFont,
+    text: str,
+    halo_color: QColor,
+    halo_pen_width: float,
+    fill_color: QColor,
+) -> None:
+    """Paint one label with a smooth stroked-outline halo.
+
+    The halo is a round-join stroke of the text's ``QPainterPath`` — the GIS
+    standard technique. The previous implementation stamped four offset
+    ``drawText`` copies, whose union left lumpy, ratty edges that read as
+    rasterized text on screen at any device pixel ratio.
+    """
+    path = QPainterPath()
+    path.addText(position, font, text)
+    if halo_pen_width > 0.0 and halo_color.alpha() > 0:
+        painter.setPen(
+            QPen(
+                halo_color,
+                halo_pen_width,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+        )
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(path)
+    painter.fillPath(path, fill_color)
 
 
 class _PreparedFeature:
@@ -1567,14 +1600,15 @@ class FallbackMapRenderBackend(MapRenderBackend):
         if style.labels.font_family:
             font.setFamily(style.labels.font_family)
         painter.setFont(font)
-        halo = QColor(style.labels.halo_color)
-        if halo.alpha() > 0 and style.labels.halo_width > 0:
-            offset = style.labels.halo_width * dpi_scale
-            painter.setPen(halo)
-            for dx, dy in ((-offset, 0), (offset, 0), (0, -offset), (0, offset)):
-                painter.drawText(position + QPointF(dx, dy), text)
-        painter.setPen(QColor(style.labels.color))
-        painter.drawText(position, text)
+        _draw_halo_text(
+            painter,
+            position,
+            font,
+            text,
+            QColor(style.labels.halo_color),
+            style.labels.halo_width * dpi_scale * 2.0,
+            QColor(style.labels.color),
+        )
         painter.restore()
 
     def _paint_label_specs(self, painter: QPainter, specs: list) -> None:
@@ -1593,14 +1627,15 @@ class FallbackMapRenderBackend(MapRenderBackend):
                 font.setFamily(spec.family)
             painter.setFont(font)
             position = QPointF(spec.x, spec.y)
-            halo = QColor(spec.halo_color)
-            if halo.alpha() > 0 and spec.halo_width > 0:
-                offset = spec.halo_width * spec.dpi_scale
-                painter.setPen(halo)
-                for dx, dy in ((-offset, 0), (offset, 0), (0, -offset), (0, offset)):
-                    painter.drawText(position + QPointF(dx, dy), spec.text)
-            painter.setPen(QColor(spec.color))
-            painter.drawText(position, spec.text)
+            _draw_halo_text(
+                painter,
+                position,
+                font,
+                spec.text,
+                QColor(spec.halo_color),
+                spec.halo_width * spec.dpi_scale * 2.0,
+                QColor(spec.color),
+            )
         painter.restore()
 
     def _draw_scalar_grid(self, painter: QPainter, layer: MapLayerSnapshot) -> None:

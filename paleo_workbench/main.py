@@ -14,7 +14,7 @@ if __package__ in {None, ""}:
 # mutations (platform policy, default surface format, geoviz gate) live in
 # main() so a bare `import paleo_workbench.main` cannot change Qt state
 # (packaging #440).
-from PySide6.QtGui import QSurfaceFormat
+from PySide6.QtGui import QGuiApplication, QSurfaceFormat
 from PySide6.QtWidgets import QApplication
 
 from paleo_workbench.qt_platform import configure_qt_platform_for_session
@@ -29,6 +29,7 @@ def _apply_qt_desktop_policy() -> None:
     share with the GLES main context.
     """
     configure_qt_platform_for_session()
+    _apply_wayland_fractional_scale_guard()
 
     fmt = QSurfaceFormat()
     fmt.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
@@ -37,6 +38,43 @@ def _apply_qt_desktop_policy() -> None:
     fmt.setDepthBufferSize(24)
     fmt.setStencilBufferSize(8)
     QSurfaceFormat.setDefaultFormat(fmt)
+
+
+def _apply_wayland_fractional_scale_guard() -> None:
+    """Optional integer-scale guard for Wayland fractional-scale sessions.
+
+    Under Wayland fractional scaling (e.g. Plasma 125%) Qt 6 renders crisp
+    device-pixel-ratio buffers, but the final compositor path can deliver the
+    window bitmap-upsampled: thin canvas annotations (seismic ms ticks, map
+    axis numbers) visibly rasterize while regular UI text stays sharp.
+    Integer scales (xcb/DPR 2.0) are unaffected. Setting
+    ``PALEO_WAYLAND_INTEGER_SCALE=1`` rounds the device scale to an integer
+    (crisp canvas text; UI elements become physically larger/smaller by the
+    rounding step). Default: keep the fractional scale (current look) — the
+    size trade-off is a user decision.
+    """
+    import os
+
+    if os.environ.get("PALEO_WAYLAND_INTEGER_SCALE", "").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return
+    session_type = os.environ.get("XDG_SESSION_TYPE", "").lower()
+    platform = os.environ.get("QT_QPA_PLATFORM", "").lower()
+    if session_type != "wayland" and platform not in {"wayland", ""}:
+        return
+    from PySide6.QtCore import Qt
+
+    QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.Round
+    )
+    logging.getLogger("paleo_workbench").info(
+        "PALEO_WAYLAND_INTEGER_SCALE=1: device scale rounded to an integer "
+        "to keep canvas annotations vector-crisp under fractional scaling"
+    )
 
 
 def _require_geoviz() -> None:
