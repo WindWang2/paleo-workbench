@@ -111,14 +111,19 @@ class IdentifyResultsPanel(QFrame):
 
 
 class SnappingSettingsDialog(QDialog):
-    """捕捉设置：全局开关/容差/模式 + 每图层 enable·vertex·segment·容差·优先级。"""
+    """捕捉设置：全局开关/容差/模式 + 每图层 enable·vertex·segment·容差·优先级。
 
-    def __init__(self, controller, parent=None) -> None:
+    容差语义为像素（乘以当前视图比例换算为地图单位）；井位参考点捕捉
+    把基础工区井点作为 reference 候选（只在勾选时生效）。
+    """
+
+    def __init__(self, controller, parent=None, *, well_points: list | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("CompositeSnappingSettingsDialog")
         self.setWindowTitle("捕捉设置")
         self._controller = controller
         self._snapping = controller.snapping
+        self._well_points = [tuple(point) for point in (well_points or ())]
         self._layer_rows: dict[str, dict[str, object]] = {}
 
         outer = QVBoxLayout(self)
@@ -164,7 +169,14 @@ class SnappingSettingsDialog(QDialog):
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         outer.addWidget(self._table, 1)
 
-        self._well_snap = QCheckBox("井位参与捕捉（工区井点作为参考点）", self)
+        self._well_snap = QCheckBox(
+            f"井位参与捕捉（工区井点作为参考点，{len(self._well_points)} 个）"
+            if self._well_points
+            else "井位参与捕捉（当前工程无井点）",
+            self,
+        )
+        self._well_snap.setEnabled(bool(self._well_points))
+        self._well_snap.setChecked("reference" in self._snapping.modes)
         outer.addWidget(self._well_snap)
 
         buttons = QDialogButtonBox(
@@ -255,5 +267,13 @@ class SnappingSettingsDialog(QDialog):
             else:
                 snapping.layer_tolerance.pop(layer_id, None)
             snapping.layer_priority[layer_id] = int(entries["priority"].value())
+        # 井位参考点：勾选时进入 reference 捕捉候选（SnappingService 原生机制）。
+        if self._well_snap.isEnabled() and self._well_snap.isChecked():
+            snapping.modes.add("reference")
+            snapping.set_reference_points(self._well_points)
+        else:
+            snapping.modes.discard("reference")
+            snapping.set_reference_points(())
         self._controller.set_snapping(snapping.enabled)
+        self._controller.state_changed.emit()
         super().accept()

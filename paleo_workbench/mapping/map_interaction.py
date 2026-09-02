@@ -414,7 +414,20 @@ class SnappingService:
             raise ValueError("grid snap origin must be finite")
         self.grid_origin = parsed_origin
 
-    def snap(self, point: Point, *, tolerance: float, layers: Iterable[VectorLayer]) -> Point:
+    def snap(
+        self,
+        point: Point,
+        *,
+        tolerance: float,
+        layers: Iterable[VectorLayer],
+        map_units_per_pixel: float = 1.0,
+    ) -> Point:
+        """按全局容差（调用方换算为地图单位）与每图层像素覆盖捕捉。
+
+        ``layer_tolerance`` 以像素存储（配置 UI 语义）；消费时乘
+        ``map_units_per_pixel`` 换算为地图单位。不传该参数的旧调用方
+        没有每图层覆盖，行为与历史一致。
+        """
         self.last_match = None
         if not self.enabled:
             return point
@@ -422,7 +435,12 @@ class SnappingService:
         for layer in layers:
             if not self.layer_enabled.get(layer.id, True):
                 continue
-            layer_tolerance = self.layer_tolerance.get(layer.id, tolerance)
+            override = self.layer_tolerance.get(layer.id)
+            layer_tolerance = (
+                max(0.0, override) * max(1e-12, map_units_per_pixel)
+                if override is not None
+                else tolerance
+            )
             priority = self.layer_priority.get(layer.id, 0)
             match = self.index_for(layer).snap(
                 point, layer_tolerance, self.layer_modes.get(layer.id, self.modes)

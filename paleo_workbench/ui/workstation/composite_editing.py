@@ -275,6 +275,19 @@ _LAYER_BOUND_TOOLS = frozenset(
 _KIND_BOUND_TOOLS = {"add_point": "point", "add_line": "line", "add_polygon": "polygon"}
 
 
+def _coords_to_lists(value: Any) -> Any:
+    """GeoJSON 坐标归一化：shapely mapping() 返回 tuple，比较前统一为 list。"""
+    if isinstance(value, (list, tuple)):
+        return [_coords_to_lists(item) for item in value]
+    return value
+
+
+def _geometry_equal(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    return str(left.get("type")) == str(right.get("type")) and (
+        _coords_to_lists(left.get("coordinates")) == _coords_to_lists(right.get("coordinates"))
+    )
+
+
 def _feature_extent(features: Iterable[Mapping[str, Any]]) -> tuple[float, float, float, float]:
     xs: list[float] = []
     ys: list[float] = []
@@ -389,6 +402,8 @@ class CompositeEditController(QObject):
     layers_changed = Signal()
     # 某一图层内容（几何 / 属性）发生变化，携带 layer_id。
     content_changed = Signal(str)
+    # 会话已提交 / 回滚（数据进入图层权威，宿主须立即同步工程文档）。
+    sessions_committed = Signal()
     # 选择 / 编辑态 / 撤销栈等纯状态变化（驱动工具条使能）。
     state_changed = Signal()
 
@@ -409,6 +424,10 @@ class CompositeEditController(QObject):
         self._canvas = None
         # 宿主注入的多图层识别回调（Identify Results 面板）；缺省单图层命中。
         self.identify_delegate: Any = None
+        # 修订键控的序列化缓存：数字化点击只重组变化图层，不整层重编码
+        # （review #6：100k 要素时每次点击的全量 as_record 是 GUI 线程热点）。
+        self._records_cache: dict[str, tuple[int, tuple, tuple]] = {}
+        self._persist_cache: dict[str, tuple[int, list]] = {}
 
     # -- 画布绑定 -------------------------------------------------------------
 
@@ -540,6 +559,8 @@ class CompositeEditController(QObject):
         self._snapping.layer_modes.pop(layer_id, None)
         self._snapping.layer_tolerance.pop(layer_id, None)
         self._snapping.layer_priority.pop(layer_id, None)
+        self._records_cache.pop(layer_id, None)
+        self._persist_cache.pop(layer_id, None)
         if self._active_layer_id == layer_id:
             self._active_layer_id = next(iter(self._layers), None)
             self._rebind_active_tool()
@@ -558,6 +579,8 @@ class CompositeEditController(QObject):
         self._templates.clear()
         self._schemas.clear()
         self._display.clear()
+        self._records_cache.clear()
+        self._persist_cache.clear()
         self._active_layer_id = None
         for record in list(getattr(project, "user_vector_layers", None) or []):
             kind = str(getattr(record, "geometry_kind", "") or "line")
@@ -617,6 +640,19 @@ class CompositeEditController(QObject):
         records: list[UserVectorLayer] = []
         for layer_id, layer in self._layers.items():
             visible, opacity = self._display.get(layer_id, (True, 1.0))
+            cached = self._persist_cache.get(layer_id)
+            if cached is not None and cached[0] == layer.data_revision:
+                persisted = cached[1]
+            else:
+                persisted = [
+                    UserVectorFeature(
+                        id=feature.feature_id,
+                        geometry=dict(feature.geometry),
+                        properties=dict(feature.attributes),
+                    )
+                    for feature in layer.features()
+                ]
+                self._persist_cache[layer_id] = (layer.data_revision, persisted)
             records.append(
                 UserVectorLayer(
                     id=layer.id,
@@ -626,14 +662,7 @@ class CompositeEditController(QObject):
                     crs=layer.crs,
                     style=dict(layer.style),
                     field_schema=dict(layer.schema or self._schemas.get(layer_id) or {}),
-                    features=[
-                        UserVectorFeature(
-                            id=feature.feature_id,
-                            geometry=dict(feature.geometry),
-                            properties=dict(feature.attributes),
-                        )
-                        for feature in layer.features()
-                    ],
+                    features=list(persisted),
                     visible=visible,
                     opacity=opacity,
                 )
@@ -691,6 +720,10 @@ class CompositeEditController(QObject):
                 )
         layer.edit_session.commit_changes()
         self.content_changed.emit(layer.id)
+        # 会话已被图层收回：活动工具若持有旧 session 缓冲必须立刻重绑
+        # （回落 pan），否则继续数字化会写进已脱钩的缓冲（review #1）。
+        self._rebind_active_tool()
+        self.sessions_committed.emit()
         self.state_changed.emit()
         return None
 
@@ -700,26 +733,42 @@ class CompositeEditController(QObject):
             return
         layer.edit_session.rollback_changes()
         self.content_changed.emit(layer.id)
+        self._rebind_active_tool()
+        self.sessions_committed.emit()
         self.state_changed.emit()
 
-    def flush_edit_sessions(self) -> int:
+    def flush_edit_sessions(self) -> tuple[int, list[str]]:
         """提交所有图层的进行中编辑会话（工程保存 / 切换前调用）。
 
         QGIS 语义下未「保存编辑」的数字化不进图层，但工程保存路径不能
         静默丢弃它们（#1126）：保存 = 提交全部会话 + 写回工程文档。
-        返回提交的会话数。
+        拓扑门禁与「保存编辑」一致（review #3）：校验失败的会话保持打开
+        （可回滚 / 可修复），不把无效几何写进工程。返回
+        (提交数, 被阻断图层的用户可读原因)。
         """
         committed = 0
+        blocked: list[str] = []
         for layer in self._layers.values():
             session = layer.edit_session
             if session is None:
                 continue
+            if self._topology.enabled:
+                issues = self._topology.validate([layer])
+                if issues:
+                    first = issues[0]
+                    blocked.append(
+                        f"图层「{layer.name}」要素 {first.get('feature_id', '')} "
+                        f"未通过拓扑检查（该图层编辑未提交）：{first.get('message', '')}"
+                    )
+                    continue
             session.commit_changes()
             committed += 1
             self.content_changed.emit(layer.id)
         if committed:
+            self._rebind_active_tool()
+            self.sessions_committed.emit()
             self.state_changed.emit()
-        return committed
+        return committed, blocked
 
     # -- 工具装配 ---------------------------------------------------------------
 
@@ -730,8 +779,13 @@ class CompositeEditController(QObject):
         return self._snapping.pixel_tolerance * canvas.map_units_per_pixel
 
     def _snap(self, point: tuple[float, float]) -> tuple[float, float]:
+        canvas = self._canvas
+        mupp = canvas.map_units_per_pixel if canvas is not None else 1.0
         return self._snapping.snap(
-            point, tolerance=self._tolerance(), layers=list(self._layers.values())
+            point,
+            tolerance=self._tolerance(),
+            layers=list(self._layers.values()),
+            map_units_per_pixel=mupp,
         )
 
     def activate_tool(self, action_id: str) -> None:
@@ -792,7 +846,22 @@ class CompositeEditController(QObject):
 
     def _rebind_active_tool(self) -> None:
         action = self._active_tool_action
-        if action in _LAYER_BOUND_TOOLS:
+        session_actions = {"add_point", "add_line", "add_polygon", "move_feature", "vertex"}
+        if action in session_actions:
+            layer = self.active_layer
+            # 会话级工具在会话消失（保存/回滚/flush 提交）后必须回落 pan：
+            # 旧工具持有的 session 缓冲已与图层脱钩，继续数字化会静默丢失。
+            if layer is None or layer.edit_session is None:
+                self.activate_tool("pan")
+                return
+            if (
+                action in _KIND_BOUND_TOOLS
+                and _KIND_BOUND_TOOLS[action] != self._kinds.get(layer.id)
+            ):
+                self.activate_tool("pan")
+                return
+            self.activate_tool(action)
+        elif action in _LAYER_BOUND_TOOLS:
             if self.active_layer is None:
                 self.activate_tool("pan")
             else:
@@ -837,6 +906,7 @@ class CompositeEditController(QObject):
         layer = self._layers.get(str(layer_id))
         if layer is None:
             return 0
+        opened_session = layer.edit_session is None
         session = layer.edit_session or layer.start_editing()
         repaired = 0
         for feature in session.features():
@@ -844,11 +914,15 @@ class CompositeEditController(QObject):
             if geometry.get("type") not in {"Polygon", "MultiPolygon"}:
                 continue
             fixed = make_geometry_valid(geometry)
-            if fixed != geometry:
+            if not _geometry_equal(fixed, geometry):
                 session.set_geometry(feature.feature_id, fixed)
                 repaired += 1
         if repaired:
             self.content_changed.emit(layer.id)
+            self.state_changed.emit()
+        elif opened_session:
+            # 没有需要修复的要素时不留幽灵会话（review #12）。
+            session.rollback_changes()
             self.state_changed.emit()
         return repaired
 
@@ -1060,15 +1134,22 @@ class CompositeEditController(QObject):
 
         ``display`` 提供图层管理面板当前持有的快照（可见性 / 不透明度 /
         用户改名以其为准）；内容与修订永远由编辑权威（VectorLayer /
-        编辑会话工作副本）重建。
+        编辑会话工作副本）重建。记录序列化按修订键控缓存——数字化
+        点击只重编码变化图层（review #6）。
         """
         display = display or {}
         snapshots: list[MapLayerSnapshot] = []
         for layer_id, layer in self._layers.items():
             session = layer.edit_session
-            source = session.features() if session is not None else layer.features()
-            features = tuple(feature.as_record() for feature in source)
             revision = layer.data_revision if session is None else (layer.data_revision << 32) + session.revision
+            cached = self._records_cache.get(layer_id)
+            if cached is not None and cached[0] == revision:
+                features, extent = cached[1], cached[2]
+            else:
+                source = session.features() if session is not None else layer.features()
+                features = tuple(feature.as_record() for feature in source)
+                extent = _feature_extent(features)
+                self._records_cache[layer_id] = (revision, features, extent)
             previous = display.get(layer_id)
             if previous is not None:
                 # 面板显示态回写为图层权威，供持久化还原。
@@ -1079,7 +1160,7 @@ class CompositeEditController(QObject):
                     id=layer.id,
                     name=layer.name,
                     layer_type="vector",
-                    extent=_feature_extent(features),
+                    extent=extent,
                     crs=layer.crs,
                     data_revision=revision,
                     style_revision=layer.style_revision,
@@ -1097,14 +1178,41 @@ class CompositeEditController(QObject):
             )
         return tuple(snapshots)
 
+    def apply_display_state(self, display_layers: Iterable[Any]) -> None:
+        """把图层管理面板的显示态（顺序 / 可见性 / 不透明度）写回权威。
+
+        面板是显示增量的唯一提交口；顺序变化重建内部图层序（dict 保持
+        插入序），使 identify 可见性判定与工程持久化读到同一份状态。
+        """
+        order: list[str] = []
+        seen: set[str] = set()
+        for snapshot in display_layers:
+            layer_id = str(getattr(snapshot, "id", ""))
+            if layer_id in self._layers and layer_id not in seen:
+                seen.add(layer_id)
+                order.append(layer_id)
+                self._display[layer_id] = (
+                    bool(getattr(snapshot, "visible", True)),
+                    float(getattr(snapshot, "opacity", 1.0) or 1.0),
+                )
+        if not order or len(order) == len(self._layers):
+            remaining = [lid for lid in self._layers if lid not in seen]
+        else:  # 面板缺图层（异常路径）：保守保持原序尾部。
+            remaining = [lid for lid in self._layers if lid not in seen]
+        if order:
+            new_layers = {lid: self._layers[lid] for lid in order + remaining}
+            self._layers = new_layers
+
     def action_state(self, *, can_previous_extent: bool = False, can_next_extent: bool = False) -> MapActionState:
         layer = self.active_layer
         session = layer.edit_session if layer is not None else None
-        compatible_polygon_count = 0
-        if layer is not None and session is not None and self._kinds.get(layer.id) == "polygon":
-            compatible_polygon_count = sum(
-                1 for feature in session.features() if feature.feature_id in layer.selection
-            )
+        # selection ⊆ 会话可选要素（set_selection 过滤），计数无需遍历要素
+        # （review #7：extent 变化高频触发本计算）。
+        compatible_polygon_count = (
+            len(layer.selection)
+            if layer is not None and session is not None and self._kinds.get(layer.id) == "polygon"
+            else 0
+        )
         return MapActionState(
             has_active_vector_layer=layer is not None,
             vector_layer_writable=layer is not None,

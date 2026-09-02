@@ -282,7 +282,13 @@ class LayerManagerPanel(QFrame):
         menu = QMenu(self.tree)
         zoom = menu.addAction(workstation_icon("map/tree-zoom.svg"), "缩放到图层")
         extent = getattr(layer, "extent", None)
-        has_extent = bool(extent) and extent[0] < extent[2] and extent[1] < extent[3]
+        has_extent = (
+            bool(extent)
+            and extent[0] < extent[2]
+            and extent[1] < extent[3]
+            # 空图层会拿到 (0,0,1,1) 的占位范围（review #16），无缩放语义。
+            and bool(tuple(getattr(layer, "features", ()) or ()))
+        )
         zoom.setEnabled(has_extent)
         if editable:
             menu.addSeparator()
@@ -405,7 +411,9 @@ class LayerManagerPanel(QFrame):
         self._layers[self._layers.index(layer)] = replace(
             layer, opacity=max(0.05, opacity)
         )
-        self._publish()
+        # 不透明度不影响树呈现；滑杆拖动的每个 tick 都整树重建是 GUI
+        # 热点（review #5），只重发渲染快照。
+        self._publish(reload_tree=False)
 
     def move_layer(self, layer_id: str, direction: int) -> None:
         layer = self.layer_by_id(layer_id)
@@ -421,7 +429,7 @@ class LayerManagerPanel(QFrame):
         )
         self._publish()
 
-    def _publish(self) -> None:
+    def _publish(self, *, reload_tree: bool = True) -> None:
         if self._canvas is None:
             return
         self._canvas.set_layer_snapshot(
@@ -430,7 +438,8 @@ class LayerManagerPanel(QFrame):
                 layers=tuple(self._layers),
             )
         )
-        self._reload()
+        if reload_tree:
+            self._reload()
 
     # -- 树 ------------------------------------------------------------------
 
@@ -641,8 +650,24 @@ class CompositeDocument(QWidget):
         self.edit_controller = CompositeEditController(parent=self)
         self.edit_controller.attach_canvas(self.canvas)
         self.edit_controller.identify_delegate = self._identify_with_results
-        self.edit_controller.layers_changed.connect(self._sync_composition)
-        self.edit_controller.content_changed.connect(lambda *_: self._sync_composition())
+        # 内容变化（数字化 / 属性编辑）经 120ms debounce 重组快照：连续
+        # 采点不重复触发全图层重序列化；overlay（采点预览/捕捉）不经过
+        # 快照，交互反馈不受影响。结构变化（图层增删改名）立即重组。
+        self._composition_timer = QTimer(self)
+        self._composition_timer.setSingleShot(True)
+        self._composition_timer.setInterval(120)
+        self._composition_timer.timeout.connect(self._sync_composition_now)
+        self.edit_controller.layers_changed.connect(
+            lambda *_: self._sync_composition(immediate=True)
+        )
+        self.edit_controller.content_changed.connect(
+            lambda *_: self._sync_composition(immediate=False)
+        )
+        # 提交 / 回滚点是数据边界：立即重组并写回工程文档（内存态不得
+        # 滞后于「保存编辑」语义）。
+        self.edit_controller.sessions_committed.connect(
+            lambda *_: self._sync_composition_now()
+        )
         self.edit_controller.state_changed.connect(self._sync_action_state)
         self.canvas.tool_operation.connect(self._on_tool_operation)
         self.canvas.extent_changed.connect(lambda *_: self._sync_action_state())
@@ -836,6 +861,17 @@ class CompositeDocument(QWidget):
         self.action_controller.actions["split"].setEnabled(
             controller._split_inputs() is not None
         )
+        # 捕捉 / 拓扑的勾选态以控制器为权威（捕捉设置对话框等旁路入口
+        # 不得让工具条按钮失步，review #11）。
+        actions = self.action_controller.actions
+        for action_id, checked in (
+            ("snapping", controller.snapping.enabled),
+            ("topology", controller.topology_enabled),
+        ):
+            action = actions[action_id]
+            action.blockSignals(True)
+            action.setChecked(bool(checked))
+            action.blockSignals(False)
         self._sync_status_bar()
 
     def _sync_status_bar(self, *, point=None) -> None:
@@ -1057,11 +1093,15 @@ class CompositeDocument(QWidget):
         self._attribute_dialog = CompositeAttributeTableDialog(
             self.edit_controller, layer_id, parent=self
         )
-        self._attribute_dialog.feature_activated.connect(self._locate_feature)
+        self._attribute_dialog.feature_activated.connect(
+            lambda feature_id, lid=layer_id: self._locate_feature(feature_id, lid)
+        )
         self._attribute_dialog.show()
 
-    def _locate_feature(self, feature_id: str) -> None:
-        layer = self.edit_controller.active_layer
+    def _locate_feature(self, feature_id: str, layer_id: str | None = None) -> None:
+        layer = self.edit_controller.layer(
+            layer_id or self.edit_controller.active_layer_id or ""
+        )
         if layer is None:
             return
         layer.set_selection((feature_id,))
@@ -1077,9 +1117,31 @@ class CompositeDocument(QWidget):
     # -- 捕捉设置 -------------------------------------------------------------
 
     def _open_snapping_settings(self) -> None:
-        dialog = SnappingSettingsDialog(self.edit_controller, parent=self)
+        dialog = SnappingSettingsDialog(
+            self.edit_controller,
+            well_points=self._well_reference_points(),
+            parent=self,
+        )
         dialog.exec()
-        self._sync_status_bar()
+        self._sync_action_state()
+
+    def _well_reference_points(self) -> list[tuple[float, float]]:
+        """基础工区井点（作为捕捉参考点的候选）。"""
+        points: list[tuple[float, float]] = []
+        for snapshot_layer in self._base_layers:
+            if "well" not in str(getattr(snapshot_layer, "id", "")):
+                continue
+            for record in getattr(snapshot_layer, "features", ()) or ():
+                geometry = record.get("geometry") if isinstance(record, dict) else None
+                if not isinstance(geometry, dict) or geometry.get("type") != "Point":
+                    continue
+                coordinates = geometry.get("coordinates")
+                if isinstance(coordinates, (list, tuple)) and len(coordinates) >= 2:
+                    try:
+                        points.append((float(coordinates[0]), float(coordinates[1])))
+                    except (TypeError, ValueError):
+                        continue
+        return points
 
     # -- 导出 -----------------------------------------------------------------
 
@@ -1140,21 +1202,42 @@ class CompositeDocument(QWidget):
         self._sync_action_state()
 
     def flush_edit_sessions(self) -> int:
-        """提交全部进行中的矢量编辑会话并写回工程文档（保存前 flush，#1126）。"""
-        committed = self.edit_controller.flush_edit_sessions()
-        if committed and self._project is not None:
+        """提交全部进行中的矢量编辑会话并写回工程文档（保存前 flush，#1126）。
+
+        显示态（可见性 / 不透明度 / 顺序）一并落盘——保存路径不能只覆盖
+        有编辑会话的图层（review #4）。拓扑校验失败的会话保持打开并经
+        status_message 告知（review #3）。
+        """
+        self._composition_timer.stop()
+        self._sync_composition_now()
+        self.edit_controller.apply_display_state(self.layer_manager._layers)
+        committed, blocked = self.edit_controller.flush_edit_sessions()
+        if self._project is not None:
             self.edit_controller.sync_to_project(self._project)
+        for message in blocked:
+            self.status_message.emit(message)
         return committed
 
     # -- 快照合成 ------------------------------------------------------------------
 
-    def _sync_composition(self) -> None:
+    def _sync_composition(self, *, immediate: bool = True) -> None:
+        """重组发布（默认立即；内容变化经 ``immediate=False`` 走 debounce）。"""
+        if immediate:
+            self._composition_timer.stop()
+            self._sync_composition_now()
+        else:
+            self._composition_timer.start()
+
+    def _sync_composition_now(self) -> None:
         """基础工区图层 + 用户矢量图层合并发布到画布与图层管理面板。"""
         # CRS 权威链：ProjectDocument.coordinate → 编辑控制器 → 面板发布。
         self.layer_manager.set_project_crs(self.edit_controller.project_crs)
         display = {
             layer.id: layer for layer in self.layer_manager._layers
         }
+        # 面板显示增量（顺序 / 可见性 / 不透明度）先写回编辑权威，再由
+        # 权威重建快照——identify 可见性与工程持久化读到同一份状态（review #4）。
+        self.edit_controller.apply_display_state(display.values())
         layers = list(self._base_layers)
         layers.extend(self.edit_controller.snapshot_layers(display=display))
         if self._project is not None and not self._loading:
@@ -1181,7 +1264,7 @@ class CompositeDocument(QWidget):
             self.edit_controller.load_from_project(project)
         finally:
             self._loading = False
-        self._sync_composition()
+        self._sync_composition_now()
         self.input_tree.refresh(project)
 
     # -- 悬浮工具条定位 ----------------------------------------------------------
@@ -1214,4 +1297,5 @@ class CompositeDocument(QWidget):
 
     def shutdown(self) -> None:
         """释放渲染后端（工程切换 / 退出时由 WorkstationFrame 调用）。"""
+        self._composition_timer.stop()
         self.canvas.shutdown()

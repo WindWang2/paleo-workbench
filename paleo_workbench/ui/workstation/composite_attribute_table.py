@@ -87,6 +87,7 @@ class CompositeAttributeTableDialog(QDialog):
 
         self._suppress_selection_sync = False
         self._suppress_item_changed = False
+        self._suppress_content_refresh = False
         self.table.itemChanged.connect(self._on_item_changed)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
         self.table.cellDoubleClicked.connect(self._on_cell_double_clicked)
@@ -183,6 +184,13 @@ class CompositeAttributeTableDialog(QDialog):
             except ValueError:
                 value = text  # 保留输入；校验在 schema 层标记
         session.change_attribute(feature_id, key, value)
+        # 属性变化驱动画布（标注渲染）与工程同步（review #17）；
+        # 本表自身的重建被抑制——不能打断正在编辑的单元格。
+        self._suppress_content_refresh = True
+        try:
+            self._controller.content_changed.emit(self._layer_id)
+        finally:
+            self._suppress_content_refresh = False
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
         if self._suppress_item_changed:
@@ -241,7 +249,7 @@ class CompositeAttributeTableDialog(QDialog):
     # -- live refresh ------------------------------------------------------------
 
     def _on_content_changed(self, layer_id: str) -> None:
-        if str(layer_id) == self._layer_id:
+        if str(layer_id) == self._layer_id and not self._suppress_content_refresh:
             self.refresh()
 
     def _on_state_changed(self) -> None:

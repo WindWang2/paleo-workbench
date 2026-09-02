@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from paleo_workbench.mapping.vector_layer import VectorFeature
 from paleo_workbench.project.domain import WellEntity
 from paleo_workbench.project.models import ProjectDocument, ResourceItem
 from paleo_workbench.ui.workstation.composite_document import CompositeDocument
@@ -544,3 +545,230 @@ def test_snapping_settings_dialog_writes_service(qtbot, tmp_path):
     assert snapping.layer_priority[layer.id] == 2
     assert "vertex" in snapping.layer_modes[layer.id]
     assert "segment" not in snapping.layer_modes[layer.id]
+
+
+# --- review 回归：会话失效后的工具重绑（Blocker #1） --------------------------
+
+
+def test_tool_rebinds_after_save_edits(qtbot, tmp_path):
+    """保存编辑后继续数字化必须进入新会话，不得写进已脱钩的旧缓冲。"""
+    doc = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(doc)
+    controller = doc.edit_controller
+    layer = controller.create_layer("断层线", "line", template="fault")
+    controller.start_editing()
+    controller.activate_tool("add_line")
+    tool = controller.tools.active_tool
+    tool.mouse_press((0.0, 0.0), button="left")
+    tool.mouse_press((1.0, 0.0), button="left")
+    tool.mouse_press((1.0, 0.0), button="right")
+    assert len(layer.features()) == 0 and len(layer.edit_session.features()) == 1
+
+    assert controller.save_edits() is None
+    assert layer.edit_session is None
+    assert len(layer.features()) == 1
+
+    controller.start_editing()
+    controller.activate_tool("add_line")
+    tool2 = controller.tools.active_tool
+    assert tool2 is not tool
+    assert tool2.session is layer.edit_session
+    tool2.mouse_press((2.0, 0.0), button="left")
+    tool2.mouse_press((3.0, 0.0), button="left")
+    tool2.mouse_press((3.0, 0.0), button="right")
+    assert len(layer.edit_session.features()) == 2, "新数字化必须进入新会话"
+    assert controller.save_edits() is None
+    assert len(layer.features()) == 2
+
+
+def test_tool_falls_back_to_pan_after_flush(qtbot, tmp_path):
+    """工程保存 flush 提交会话后，会话级工具回落 pan（不静默丢数字化）。"""
+    doc = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(doc)
+    controller = doc.edit_controller
+    layer = controller.create_layer("断层线", "line", template="fault")
+    controller.start_editing()
+    controller.activate_tool("add_line")
+    assert controller.tools.active_tool.tool_id == "add_line"
+    committed, blocked = controller.flush_edit_sessions()
+    assert committed == 1 and not blocked
+    assert controller.tools.active_tool.tool_id == "pan"
+
+
+# --- review 回归：flush 拓扑门禁（High #3） ---------------------------------
+
+
+def test_flush_respects_topology_gate(qtbot, tmp_path):
+    doc = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(doc)
+    controller = doc.edit_controller
+    layer = controller.create_layer("相带", "polygon", template="facies")
+    controller.start_editing()
+    layer.edit_session.add_feature(
+        VectorFeature(
+            "bad",
+            {
+                "type": "Polygon",
+                "coordinates": [[[0.0, 0.0], [2.0, 2.0], [2.0, 0.0], [0.0, 2.0], [0.0, 0.0]]],
+            },
+        )
+    )
+    controller.set_topology(True)
+    committed, blocked = controller.flush_edit_sessions()
+    assert committed == 0
+    assert blocked and "拓扑" in blocked[0]
+    assert layer.edit_session is not None, "被阻断的会话保持打开（可回滚/修复）"
+    # 修复后 flush 通过。
+    assert controller.repair_layer_geometries(layer.id) >= 1
+    committed, blocked = controller.flush_edit_sessions()
+    assert committed == 1 and not blocked
+
+
+# --- review 回归：显示状态持久化与顺序保持（High #4） -------------------------
+
+
+def test_display_state_persists_on_save_without_sessions(qtbot, tmp_path):
+    doc = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(doc)
+    controller = doc.edit_controller
+    first = controller.create_layer("断层线", "line", template="fault")
+    second = controller.create_layer("相带", "polygon", template="facies")
+    doc._sync_composition()
+
+    doc.layer_manager.set_layer_visible(first.id, False)
+    doc.layer_manager.set_layer_opacity(second.id, 0.4)
+    committed = doc.flush_edit_sessions()
+    assert committed == 0
+    records = {r.id: r for r in doc._project.user_vector_layers}
+    assert records[first.id].visible is False
+    assert records[second.id].opacity == pytest.approx(0.4)
+
+
+def test_layer_reorder_survives_composition_resync(qtbot, tmp_path):
+    doc = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(doc)
+    controller = doc.edit_controller
+    first = controller.create_layer("断层线", "line", template="fault")
+    second = controller.create_layer("相带", "polygon", template="facies")
+    doc._sync_composition()
+    # 用户把 second 上移到顶部。
+    doc.layer_manager.move_layer(second.id, +1)
+    ids_before = [s.id for s in doc.layer_manager._layers if s.id.startswith("composite:")]
+    assert ids_before[0] == second.id
+    # 内容变化触发重组：顺序必须保持（不回到插入序）。
+    doc._sync_composition()
+    ids_after = [s.id for s in doc.layer_manager._layers if s.id.startswith("composite:")]
+    assert ids_after[0] == second.id
+    controller.sync_to_project(doc._project)
+    persisted = [r.id for r in doc._project.user_vector_layers]
+    assert persisted[0] == second.id
+
+
+def test_identify_respects_hidden_layer(qtbot, tmp_path):
+    doc = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(doc)
+    controller = doc.edit_controller
+    layer = controller.create_layer("断层线", "line", template="fault")
+    layer.start_editing()
+    layer.edit_session.add_feature(
+        VectorFeature("l1", {"type": "LineString", "coordinates": [[0.0, 0.0], [2.0, 0.0]]})
+    )
+    doc._sync_composition()
+    assert doc._identify_with_results((1.0, 0.0)) == "l1"
+    doc.layer_manager.set_layer_visible(layer.id, False)
+    doc._sync_composition()
+    results = controller.identify_all((1.0, 0.0))
+    assert all(r["layer_id"] != layer.id for r in results), "隐藏图层不得再命中识别"
+
+
+# --- review 回归：每图层容差像素换算（High #2） -------------------------------
+
+
+def test_layer_tolerance_converts_pixels_to_map_units(qtbot, tmp_path):
+    doc = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(doc)
+    controller = doc.edit_controller
+    layer = controller.create_layer("断层线", "line", template="fault")
+    layer.start_editing()
+    layer.edit_session.add_feature(
+        VectorFeature("l1", {"type": "LineString", "coordinates": [[0.0, 0.0], [10.0, 0.0]]})
+    )
+    snapping = controller.snapping
+    snapping.enabled = True
+    snapping.modes = {"vertex"}
+    # 3px 覆盖 × 0.002 地图单位/像素 = 0.006 容差：距离 0.5 的顶点不该命中。
+    snapping.layer_tolerance[layer.id] = 3.0
+    snapped = snapping.snap(
+        (0.0, 0.5), tolerance=10.0, layers=[layer], map_units_per_pixel=0.002
+    )
+    assert snapped == (0.0, 0.5)
+    # 全局容差 10.0（地图单位，调用方换算后）则命中。
+    snapping.layer_tolerance.pop(layer.id)
+    snapped = snapping.snap(
+        (0.0, 0.5), tolerance=10.0, layers=[layer], map_units_per_pixel=0.002
+    )
+    assert snapped == (0.0, 0.0)
+
+
+# --- review 回归：幂等 shutdown（Medium #8） ----------------------------------
+
+
+def test_double_shutdown_does_not_rewrite_layout(qtbot, tmp_path):
+    from paleo_workbench.ui.workstation.shell import WorkstationFrame
+    from PySide6.QtWidgets import QStackedWidget
+    from PySide6.QtCore import QSettings
+
+    frame = WorkstationFrame(_project(tmp_path), QStackedWidget())
+    qtbot.addWidget(frame)
+    frame._settings = QSettings(str(tmp_path / "ws.ini"), QSettings.Format.IniFormat)
+    frame._settings.clear()
+    frame.show()
+    qtbot.waitExposed(frame)
+    assert frame.shutdown_workers() is True
+    state_first = frame._settings.value("layout/windowState")
+    # 第二次（_refresh_shell 路径）不得重写已拆除的布局。
+    assert frame.shutdown_workers() is True
+    state_second = frame._settings.value("layout/windowState")
+    assert state_second == state_first
+
+
+# --- review 回归：repair 不留幽灵会话（Low #12） ------------------------------
+
+
+def test_repair_without_issues_leaves_no_session(qtbot, tmp_path):
+    doc = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(doc)
+    controller = doc.edit_controller
+    layer = controller.create_layer("相带", "polygon", template="facies")
+    layer.start_editing()
+    layer.edit_session.add_feature(_polygon("ok"))
+    assert controller.save_edits() is None
+    assert layer.edit_session is None
+    assert controller.repair_layer_geometries(layer.id) == 0
+    assert layer.edit_session is None, "无修复时不得留下幽灵会话"
+
+
+# --- review 回归：井位参考点捕捉接线（Low #10） -------------------------------
+
+
+def test_well_snap_checkbox_wires_reference_points(qtbot, tmp_path):
+    from paleo_workbench.ui.workstation.composite_panels import SnappingSettingsDialog
+
+    doc = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(doc)
+    controller = doc.edit_controller
+    controller.create_layer("断层线", "line", template="fault")
+    dialog = SnappingSettingsDialog(controller, well_points=[(1.0, 1.0), (2.0, 2.0)])
+    dialog._global_enable.setChecked(True)
+    dialog._well_snap.setChecked(True)
+    dialog.accept()
+    snapping = controller.snapping
+    assert "reference" in snapping.modes
+    assert (1.0, 1.0) in snapping.reference_points
+    # 取消勾选后参考点清空。
+    dialog2 = SnappingSettingsDialog(controller, well_points=[(1.0, 1.0)])
+    dialog2._global_enable.setChecked(True)
+    dialog2._well_snap.setChecked(False)
+    dialog2.accept()
+    assert "reference" not in controller.snapping.modes
+    assert not controller.snapping.reference_points

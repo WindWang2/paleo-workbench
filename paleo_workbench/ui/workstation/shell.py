@@ -655,6 +655,8 @@ class WorkstationFrame(QWidget):
         self._apply_responsive_panels()
 
     def _save_layout(self, *, force: bool = False) -> None:
+        if self._layout_frozen:
+            return  # teardown 后的二次 shutdown 不得写入已拆除的布局（review #8）
         if not self.isVisible() and not force:
             return  # 关闭后保存的全隐藏布局会污染下次启动
         self._settings.setValue(
@@ -691,6 +693,10 @@ class WorkstationFrame(QWidget):
         self._save_layout(force=True)
 
     def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
+        if self._layout_frozen:
+            # 幂等：工程切换路径上 _end_current_session 与 _refresh_shell 会
+            # 对同一个 shell 连续调用两次（review #8）。
+            return True
         self._save_timer.stop()
         # teardown 前最后一次强制落盘（close 路径不先 hide，force 兜底）。
         self._save_layout(force=True)

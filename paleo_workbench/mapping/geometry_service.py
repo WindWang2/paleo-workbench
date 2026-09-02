@@ -95,7 +95,11 @@ def make_geometry_valid(geometry: Mapping[str, object]) -> dict[str, object]:
         return dict(geometry or {})
     if str(geometry.get("type") or "") not in {"Polygon", "MultiPolygon"}:
         return dict(geometry)
-    if qgis_bridge_available():
+    global _BRIDGE_PROBE
+    if _BRIDGE_PROBE is None:
+        # 每图层修复可能遍历大量要素；桥探测结果进程内缓存（review #15）。
+        _BRIDGE_PROBE = qgis_bridge_available()
+    if _BRIDGE_PROBE:
         try:
             repaired = _native_geometry().make_valid(json.dumps(geometry))
             if repaired:
@@ -105,3 +109,6 @@ def make_geometry_valid(geometry: Mapping[str, object]) -> dict[str, object]:
     from paleo_workbench.mapping.topology import repair_invalid_geometry
 
     return repair_invalid_geometry(dict(geometry))
+
+
+_BRIDGE_PROBE: bool | None = None
