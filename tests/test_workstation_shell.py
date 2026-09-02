@@ -141,6 +141,50 @@ def test_legacy_workflows_are_documents_not_a_second_shell(qtbot, tmp_path):
     assert shell.workstation.linked_workspace._maximized_pane is shell.workstation.linked_workspace.well_pane
 
 
+def test_linked_workspace_panes_are_floatable_docks(qtbot, tmp_path):
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    workspace = shell.workstation.linked_workspace
+
+    # 三个视图窗格都是嵌套 QMainWindow 上的 QDockWidget，可浮动/移动/关闭
+    for dock in (workspace.seismic_dock, workspace.map_dock, workspace.well_dock):
+        assert isinstance(dock, QDockWidget)
+        features = dock.features()
+        assert features & QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        assert features & QDockWidget.DockWidgetFeature.DockWidgetMovable
+        assert features & QDockWidget.DockWidgetFeature.DockWidgetClosable
+        assert dock.widget() is not None
+
+    # 「窗格」菜单管理显隐：关闭后经菜单重开
+    assert workspace._panes_menu.actions()
+    workspace.well_dock.close()
+    assert workspace.well_dock.isHidden()
+    workspace.well_dock.toggleViewAction().trigger()
+    assert not workspace.well_dock.isHidden()
+
+    # 拖出浮动 → 重置布局收回并恢复默认停靠
+    workspace.map_dock.setFloating(True)
+    assert workspace.map_dock.isFloating()
+    workspace.restore_split_view()
+    assert not workspace.map_dock.isFloating()
+    for dock in (workspace.seismic_dock, workspace.map_dock, workspace.well_dock):
+        assert not dock.isHidden()
+
+    # 最大化 = 其余 dock 隐藏（dock 语义），恢复分屏全部可见
+    workspace.maximize_map()
+    assert workspace.map_dock.isVisibleTo(workspace.dock_area) or not workspace.map_dock.isHidden()
+    assert workspace.seismic_dock.isHidden()
+    assert workspace.well_dock.isHidden()
+    workspace.restore_split_view()
+    assert not workspace.seismic_dock.isHidden()
+    assert not workspace.well_dock.isHidden()
+
+    # dock 布局 save/restore 往返
+    state = workspace.save_dock_state()
+    assert state
+    assert workspace.restore_dock_state(state)
+
+
 def test_explorer_separates_data_from_storage_cache(qtbot, tmp_path):
     shell = AppShell(project=_project(tmp_path))
     qtbot.addWidget(shell)

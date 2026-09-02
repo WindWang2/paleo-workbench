@@ -15,6 +15,10 @@ from dataclasses import replace
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -36,12 +40,27 @@ from paleo_workbench.mapping.workarea_map_snapshot import (
     build_workarea_map_snapshot,
     workarea_view_extent,
 )
+from paleo_workbench.ui.map_action_controller import MapActionController
 from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 from paleo_workbench.ui.workstation.common import workstation_icon
+from paleo_workbench.ui.workstation.composite_editing import (
+    GEOMETRY_KIND_LABELS,
+    GEOMETRY_KINDS,
+    CompositeEditController,
+)
 
 
 class LayerManagerPanel(QFrame):
-    """图层管理面板：可见性 / 不透明度 / 顺序 / 图例，真实写回渲染快照。"""
+    """图层管理面板：可见性 / 不透明度 / 顺序 / 图例，真实写回渲染快照。
+
+    矢量图层的新建与删除不在此直接执行——面板只发请求信号，由
+    ``CompositeDocument`` 经 ``CompositeEditController`` 落地后重绑。
+    """
+
+    create_layer_requested = Signal()
+    remove_layer_requested = Signal(str)
+    # 当前图层变化（无可编辑图层时携带 None）。
+    active_layer_changed = Signal(object)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -49,6 +68,8 @@ class LayerManagerPanel(QFrame):
         self._layers: list = []
         self._canvas: UnifiedMapCanvas | None = None
         self._tree_connected = False
+        self._editing_layer_id: str | None = None
+        self._reloading = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -58,6 +79,25 @@ class LayerManagerPanel(QFrame):
         self.search.setPlaceholderText("搜索图层名称")
         self.search.setClearButtonEnabled(True)
         outer.addWidget(self.search)
+
+        manage_row = QHBoxLayout()
+        for label, icon, tip, callback in (
+            ("新建矢量图层", "map/tree-add-layer.svg", "新建点 / 线 / 面矢量图层", self._on_create_layer),
+            ("删除图层", "map/tree-remove.svg", "删除当前矢量图层（编修图层）", self._on_remove_layer),
+        ):
+            button = QToolButton(self)
+            button.setObjectName("WorkstationContextButton")
+            button.setIcon(workstation_icon(icon))
+            button.setText(label)
+            button.setToolTip(tip)
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            button.clicked.connect(callback)
+            manage_row.addWidget(button)
+            if label == "删除图层":
+                self.remove_button = button
+        self.remove_button.setEnabled(False)
+        manage_row.addStretch(1)
+        outer.addLayout(manage_row)
 
         self.tree = QTreeWidget(self)
         self.tree.setHeaderHidden(True)
@@ -102,8 +142,45 @@ class LayerManagerPanel(QFrame):
         outer.addWidget(self.legend)
 
         self.search.textChanged.connect(self._filter)
-        self.tree.currentItemChanged.connect(lambda *_: self._sync_opacity())
+        self.tree.currentItemChanged.connect(self._on_current_changed)
         self.opacity.valueChanged.connect(self._apply_opacity)
+
+    # -- 矢量图层管理（请求信号，由宿主落地） --------------------------------------
+
+    def _on_create_layer(self) -> None:
+        self.create_layer_requested.emit()
+
+    def _on_remove_layer(self) -> None:
+        item = self.tree.currentItem()
+        if item is None:
+            return
+        layer_id = item.data(0, Qt.ItemDataRole.UserRole)
+        layer = self.layer_by_id(layer_id)
+        if layer is not None and self.is_editable_layer(layer):
+            self.remove_layer_requested.emit(str(layer_id))
+
+    @staticmethod
+    def is_editable_layer(layer) -> bool:
+        return bool(getattr(layer, "metadata", {}) and layer.metadata.get("editable") == "true")
+
+    def set_editing_layer(self, layer_id: str | None) -> None:
+        """标记正在编辑的图层（树项前缀 ✏，QGIS 的 in-edit 视觉语义）。"""
+        if layer_id == getattr(self, "_editing_layer_id", None):
+            return
+        self._editing_layer_id = layer_id
+        self._reload()
+
+    def _on_current_changed(self, current, _previous) -> None:
+        self._sync_opacity()
+        editable = False
+        if current is not None:
+            layer = self.layer_by_id(current.data(0, Qt.ItemDataRole.UserRole))
+            editable = layer is not None and self.is_editable_layer(layer)
+        self.remove_button.setEnabled(editable)
+        if not getattr(self, "_reloading", False):
+            self.active_layer_changed.emit(
+                current.data(0, Qt.ItemDataRole.UserRole) if current is not None else None
+            )
 
     # -- 绑定 ---------------------------------------------------------------
 
@@ -111,6 +188,14 @@ class LayerManagerPanel(QFrame):
         self._canvas = canvas
         self._layers = layers
         self._reload()
+
+    def select_layer(self, layer_id: str) -> None:
+        """按 id 置为当前图层（QGIS 语义：新建图层即成为当前图层）。"""
+        for row in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(row)
+            if str(item.data(0, Qt.ItemDataRole.UserRole)) == str(layer_id):
+                self.tree.setCurrentItem(item)
+                return
 
     # -- 快照变更（渲染自底向上：上移 = 提前 = index-1） ---------------------
 
@@ -164,15 +249,36 @@ class LayerManagerPanel(QFrame):
         if self._tree_connected:
             self.tree.itemChanged.disconnect(self._on_item_changed)
             self._tree_connected = False
-        self.tree.clear()
-        for layer in self._layers:
-            item = QTreeWidgetItem([layer.name])
-            item.setData(0, Qt.ItemDataRole.UserRole, layer.id)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(
-                0, Qt.CheckState.Checked if layer.visible else Qt.CheckState.Unchecked
-            )
-            self.tree.addTopLevelItem(item)
+        # 重组快照会触发重载：保持当前图层选中，避免编辑态在每次内容
+        # 变更后被树清空信号误重置。
+        current = self.tree.currentItem()
+        current_id = (
+            str(current.data(0, Qt.ItemDataRole.UserRole)) if current is not None else None
+        )
+        self._reloading = True
+        try:
+            self.tree.clear()
+            restored = None
+            for layer in self._layers:
+                label = layer.name
+                if self.is_editable_layer(layer):
+                    label = f"✏ {label}" if layer.id == self._editing_layer_id else f"{label}（矢量）"
+                item = QTreeWidgetItem([label])
+                item.setData(0, Qt.ItemDataRole.UserRole, layer.id)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(
+                    0, Qt.CheckState.Checked if layer.visible else Qt.CheckState.Unchecked
+                )
+                self.tree.addTopLevelItem(item)
+                if current_id is not None and layer.id == current_id:
+                    restored = item
+            if restored is not None:
+                self.tree.setCurrentItem(restored)
+            # 重载只刷新按钮态（不emit active_layer_changed——活动图层是
+            # 编辑控制器的权威状态，树重载不得将其重置）。
+            self._on_current_changed(self.tree.currentItem(), None)
+        finally:
+            self._reloading = False
         self.tree.itemChanged.connect(self._on_item_changed)
         self._tree_connected = True
 
@@ -316,6 +422,7 @@ class CompositeDocument(QWidget):
         self.setObjectName("CompositeDocument")
         self._project = project
         self._home_extent: tuple[float, float, float, float] | None = None
+        self._base_layers: list = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -324,11 +431,25 @@ class CompositeDocument(QWidget):
         self.canvas = UnifiedMapCanvas(parent=self)
         layout.addWidget(self.canvas, 1)
 
+        # 矢量图层新建 / 编辑（QGIS 式编辑会话，见 composite_editing.py）
+        self.edit_controller = CompositeEditController(parent=self)
+        self.edit_controller.attach_canvas(self.canvas)
+        self.edit_controller.layers_changed.connect(self._sync_composition)
+        self.edit_controller.content_changed.connect(lambda *_: self._sync_composition())
+        self.edit_controller.state_changed.connect(self._sync_action_state)
+        self.canvas.tool_operation.connect(self._on_tool_operation)
+        self.canvas.extent_changed.connect(lambda *_: self._sync_action_state())
+
         # 面板实例（dock 由宿主 QMainWindow 创建并管理）
         self.layer_manager = LayerManagerPanel()
         self.input_tree = InputTreePanel(project)
         self.linked_views = LinkedViewsPanel()
         self.input_tree.object_selected.connect(self.object_selected.emit)
+        self.layer_manager.create_layer_requested.connect(self._create_vector_layer)
+        self.layer_manager.remove_layer_requested.connect(self._remove_vector_layer)
+        self.layer_manager.active_layer_changed.connect(
+            self.edit_controller.set_active_layer
+        )
 
         self._build_toolbar()
         self.set_project(project)
@@ -336,52 +457,32 @@ class CompositeDocument(QWidget):
     # -- 悬浮工具条 -----------------------------------------------------------
 
     def _build_toolbar(self) -> None:
-        """悬浮工具条：仅图标（tooltip 提示），顶部居中，含「面板」菜单。"""
+        """悬浮工具条：QGIS 命令面（MapActionController）+「面板」菜单。"""
         self.toolbar = QFrame(self)
         self.toolbar.setObjectName("WorkstationContextBar")
         bar_layout = QHBoxLayout(self.toolbar)
         bar_layout.setContentsMargins(6, 3, 6, 3)
         bar_layout.setSpacing(3)
 
-        def add_button(
-            label: str, icon: str, tip: str, on_click=None,
-            *, checkable: bool = False, enabled: bool = True,
-        ) -> QToolButton:
-            button = QToolButton(self.toolbar)
-            button.setObjectName("WorkstationContextButton")
-            button.setIcon(workstation_icon(icon))
-            button.setText(label)
-            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-            button.setToolTip(tip if enabled else f"{tip}（待接入）")
-            button.setCheckable(checkable)
-            button.setEnabled(enabled)
-            if on_click is not None:
-                button.clicked.connect(on_click)
-            bar_layout.addWidget(button)
-            return button
-
-        # 平移是画布原生交互；选择/测距/查询等解释工具后续经 MapToolController 接入。
-        self.pan_button = add_button("平移", "map/pan.svg", "平移", checkable=True)
-        self.pan_button.setChecked(True)
-        self.select_button = add_button(
-            "选择", "map/select.svg", "选择", checkable=True, enabled=False
+        self.action_controller = MapActionController(self)
+        bar_layout.addWidget(
+            self.action_controller.toolbar(
+                "综合编修",
+                (
+                    ("pan", "zoom_in", "zoom_out", "full_extent", "previous_extent", "next_extent"),
+                    ("identify", "select", "select_rectangle", "measure_distance"),
+                    ("toggle_editing", "save_edits", "rollback"),
+                    ("add_point", "add_line", "add_polygon", "move_feature", "vertex"),
+                    ("undo", "redo", "delete_selected"),
+                    ("snapping", "cancel"),
+                ),
+                self.toolbar,
+            )
         )
-        self.zoom_in_button = add_button(
-            "缩放+", "map/zoom_in.svg", "放大", lambda: self.canvas.zoom_by(0.8)
+        self.action_controller.tool_requested.connect(
+            self.edit_controller.activate_tool
         )
-        self.zoom_out_button = add_button(
-            "缩放-", "map/zoom_out.svg", "缩小", lambda: self.canvas.zoom_by(1.25)
-        )
-        self.home_button = add_button("全图", "map/full_extent.svg", "全图", self._zoom_home)
-        self.previous_button = add_button(
-            "上一视图", "map/previous_extent.svg", "上一视图", self.canvas.previous_extent
-        )
-        self.next_button = add_button(
-            "下一视图", "map/next_extent.svg", "下一视图", self.canvas.next_extent
-        )
-        add_button("测距", "map/measure_distance.svg", "测距", enabled=False)
-        add_button("查询", "map/identify.svg", "查询", enabled=False)
-        self.canvas.extent_changed.connect(lambda *_: self._sync_history_buttons())
+        self.action_controller.command_requested.connect(self._on_command_requested)
 
         # 面板菜单：宿主 dock 的显隐动作 + 恢复默认布局（动作由宿主注入）
         self.panels_button = QToolButton(self.toolbar)
@@ -406,24 +507,115 @@ class CompositeDocument(QWidget):
         self._panels_menu.addSeparator()
         self._panels_menu.addAction("恢复默认布局", reset_callable)
 
-    def _sync_history_buttons(self) -> None:
-        self.previous_button.setEnabled(self.canvas.can_previous_extent)
-        self.next_button.setEnabled(self.canvas.can_next_extent)
-
     def _zoom_home(self) -> None:
         if self._home_extent is not None:
             self.canvas.set_extent(self._home_extent)
+
+    # -- 命令与工具回调 ----------------------------------------------------------
+
+    def _on_command_requested(self, command_id: str) -> None:
+        if command_id == "full_extent":
+            self._zoom_home()
+        elif command_id == "previous_extent":
+            self.canvas.previous_extent()
+        elif command_id == "next_extent":
+            self.canvas.next_extent()
+        elif command_id == "cancel":
+            self.edit_controller.cancel_active_tool()
+        elif command_id == "snapping":
+            self.edit_controller.set_snapping(
+                self.action_controller.actions["snapping"].isChecked()
+            )
+        elif command_id in {"clear_selection", "select_all", "invert_selection"}:
+            self.edit_controller.selection_command(command_id)
+        elif command_id == "toggle_editing":
+            if self.edit_controller.editing:
+                self.edit_controller.save_edits()
+            else:
+                self.edit_controller.start_editing()
+        elif command_id == "save_edits":
+            self.edit_controller.save_edits()
+        elif command_id == "rollback":
+            self.edit_controller.rollback_edits()
+        elif command_id in {"undo", "redo", "delete_selected"}:
+            self.edit_controller.edit_command(command_id)
+        self._sync_action_state()
+
+    def _on_tool_operation(self, edits_data: bool = True) -> None:
+        """工具操作回执：数据编辑重组快照，纯选择 / 指针反馈只刷状态。"""
+        if edits_data:
+            self._sync_composition()
+        else:
+            self.canvas.update()
+        self._sync_action_state()
+
+    def _sync_action_state(self) -> None:
+        self.action_controller.update_state(
+            self.edit_controller.action_state(
+                can_previous_extent=self.canvas.can_previous_extent,
+                can_next_extent=self.canvas.can_next_extent,
+            )
+        )
+        controller = self.edit_controller
+        self.layer_manager.set_editing_layer(
+            controller.active_layer_id if controller.editing else None
+        )
+
+    # -- 矢量图层新建 / 删除 ---------------------------------------------------------
+
+    def _create_vector_layer(self) -> None:
+        dialog = QDialog(self)
+        dialog.setObjectName("CompositeNewVectorLayerDialog")
+        dialog.setWindowTitle("新建矢量图层")
+        form = QFormLayout(dialog)
+        name_edit = QLineEdit(dialog)
+        name_edit.setText(f"编修图层 {len(self.edit_controller.layer_ids()) + 1}")
+        form.addRow("图层名称", name_edit)
+        kind_combo = QComboBox(dialog)
+        for kind in GEOMETRY_KINDS:
+            kind_combo.addItem(GEOMETRY_KIND_LABELS[kind], kind)
+        form.addRow("几何类型", kind_combo)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=dialog,
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.edit_controller.create_layer(
+                name_edit.text().strip(), kind_combo.currentData()
+            )
+
+    def _remove_vector_layer(self, layer_id: str) -> None:
+        self.edit_controller.remove_layer(layer_id)
+
+    # -- 快照合成 ------------------------------------------------------------------
+
+    def _sync_composition(self) -> None:
+        """基础工区图层 + 用户矢量图层合并发布到画布与图层管理面板。"""
+        display = {
+            layer.id: layer for layer in self.layer_manager._layers
+        }
+        layers = list(self._base_layers)
+        layers.extend(self.edit_controller.snapshot_layers(display=display))
+        self.layer_manager.bind(self.canvas, layers)
+        active_id = self.edit_controller.active_layer_id
+        if active_id is not None:
+            self.layer_manager.select_layer(active_id)
+        self.layer_manager._publish()
 
     # -- 工程绑定 -------------------------------------------------------------
 
     def set_project(self, project) -> None:
         self._project = project
         snapshot = build_workarea_map_snapshot(project)
-        self.canvas.set_layer_snapshot(snapshot)
+        self._base_layers = list(snapshot.layers)
+        self.edit_controller.project_crs = snapshot.project_crs
         self._home_extent = workarea_view_extent(snapshot)
         if self._home_extent is not None:
             self.canvas.set_extent(self._home_extent)
-        self.layer_manager.bind(self.canvas, list(snapshot.layers))
+        self._sync_composition()
         self.input_tree.refresh(project)
 
     # -- 悬浮工具条定位 ----------------------------------------------------------

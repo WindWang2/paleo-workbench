@@ -58,6 +58,7 @@ class WorkstationFrame(QWidget):
         self._project_path: str | None = None
         self._settings = QSettings("PaleoWorkbench", "WorkstationV3")
         self._user_hid_inspector = False
+        self._responsive_hid_inspector = False
         self._post_show_restored = False
         self._composite_docks_visible: dict[str, bool] | None = None
         self._owns_dock_host = dock_host is None
@@ -229,12 +230,17 @@ class WorkstationFrame(QWidget):
             dock.topLevelChanged.connect(lambda *_: self._schedule_state_save())
             dock.dockLocationChanged.connect(lambda *_: self._schedule_state_save())
             dock.visibilityChanged.connect(lambda *_: self._schedule_state_save())
-        for splitter in (
-            self.linked_workspace.horizontal_splitter,
-            self.linked_workspace.right_splitter,
-            self.process_hub.agent_splitter,
+        for dock in (
+            self.linked_workspace.seismic_dock,
+            self.linked_workspace.map_dock,
+            self.linked_workspace.well_dock,
         ):
-            splitter.splitterMoved.connect(lambda *_args: self._schedule_state_save())
+            dock.topLevelChanged.connect(lambda *_: self._schedule_state_save())
+            dock.dockLocationChanged.connect(lambda *_: self._schedule_state_save())
+            dock.visibilityChanged.connect(lambda *_: self._schedule_state_save())
+        self.process_hub.agent_splitter.splitterMoved.connect(
+            lambda *_args: self._schedule_state_save()
+        )
 
     def set_project(self, project, project_path: str | None = None) -> None:
         self._project = project
@@ -299,6 +305,7 @@ class WorkstationFrame(QWidget):
     def toggle_inspector(self) -> None:
         show = self.inspector_dock.isHidden()
         self._user_hid_inspector = not show
+        self._responsive_hid_inspector = False
         self.inspector_dock.setVisible(show)
         self._save_timer.start()
 
@@ -315,13 +322,22 @@ class WorkstationFrame(QWidget):
 
     def _apply_responsive_panels(self) -> None:
         if self.width() < 1280 and not self.inspector_dock.isHidden():
+            self._responsive_hid_inspector = True
             self.inspector_dock.hide()
-        elif (
-            self.width() >= 1320
+            return
+        if (
+            self.inspector_dock.isHidden()
+            and self._responsive_hid_inspector
             and not self._user_hid_inspector
-            and self.inspector_dock.isHidden()
         ):
-            self.inspector_dock.show()
+            # 恢复条件必须保证「显示后」宽度仍不低于隐藏阈值，否则
+            # 隐藏↔显示在临界宽度上往复，形成 resize 风暴（画布渲染被饿死）。
+            inspector_width = self.inspector_dock.sizeHint().width()
+            if inspector_width <= 0:
+                inspector_width = 286
+            if self.width() - inspector_width >= 1280:
+                self._responsive_hid_inspector = False
+                self.inspector_dock.show()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -451,12 +467,9 @@ class WorkstationFrame(QWidget):
         data = self._settings.value(self._WINDOW_STATE_KEY)
         if isinstance(data, QByteArray) and not data.isNull():
             self._dock_host.restoreState(data)
-        self.linked_workspace.horizontal_splitter.setSizes(
-            self._read_sizes("linked_horizontal", [700, 360])
-        )
-        self.linked_workspace.right_splitter.setSizes(
-            self._read_sizes("linked_vertical", [300, 330])
-        )
+        linked_state = self._settings.value("layout/linked_docks")
+        if isinstance(linked_state, QByteArray) and not linked_state.isNull():
+            self.linked_workspace.restore_dock_state(linked_state)
         self.process_hub.agent_splitter.setSizes(
             self._read_sizes("agent", [560, 560])
         )
@@ -476,10 +489,7 @@ class WorkstationFrame(QWidget):
             return  # 关闭后保存的全隐藏布局会污染下次启动
         self._settings.setValue(self._WINDOW_STATE_KEY, self._dock_host.saveState())
         self._settings.setValue(
-            "layout/linked_horizontal", self.linked_workspace.horizontal_splitter.sizes()
-        )
-        self._settings.setValue(
-            "layout/linked_vertical", self.linked_workspace.right_splitter.sizes()
+            "layout/linked_docks", self.linked_workspace.dock_area.saveState()
         )
         self._settings.setValue("layout/agent", self.process_hub.agent_splitter.sizes())
 

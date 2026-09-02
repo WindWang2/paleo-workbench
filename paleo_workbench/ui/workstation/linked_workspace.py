@@ -6,10 +6,13 @@ from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
-    QFrame,
-    QHBoxLayout,
+    QDockWidget,
+    QFrame,    QHBoxLayout,
     QLabel,
+    QMainWindow,
+    QMenu,
     QSplitter,
+    QTabWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -71,6 +74,10 @@ class DocumentPane(QFrame):
 
     def set_title(self, title: str) -> None:
         self.title_label.setText(title)
+        # dock 化后标题同时写到 dock 标题栏（拖动柄 / 浮动窗口标题）。
+        dock = self.parentWidget()
+        if isinstance(dock, QDockWidget):
+            dock.setWindowTitle(title)
 
     def set_maximized(self, maximized: bool) -> None:
         self.maximize_button.setIcon(
@@ -153,35 +160,85 @@ class LinkedInterpretationWorkspace(QWidget):
         self.reset_layout_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.reset_layout_button.clicked.connect(self.restore_split_view)
         context_layout.addWidget(self.reset_layout_button)
+
+        # 窗格菜单：三个视图 dock 的显隐（QGIS 面板管理语义）
+        self.panes_button = QToolButton(self.context_bar)
+        self.panes_button.setObjectName("WorkstationContextButton")
+        self.panes_button.setIcon(workstation_icon("map/panel-manager.svg"))
+        self.panes_button.setText("窗格")
+        self.panes_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.panes_button.setToolTip("显示 / 隐藏视图窗格")
+        self._panes_menu = QMenu(self.panes_button)
+        self.panes_button.setMenu(self._panes_menu)
+        self.panes_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        context_layout.addWidget(self.panes_button)
         outer.addWidget(self.context_bar)
 
-        self.horizontal_splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        self.horizontal_splitter.setObjectName("WorkstationEditorSplitter")
-        self.horizontal_splitter.setChildrenCollapsible(False)
-        outer.addWidget(self.horizontal_splitter, 1)
+        # 三个视图窗格 = 嵌套 QMainWindow 的 QDockWidget：可拖出浮动、
+        # 叠 tab、重新停靠、关闭后经「窗格」菜单重开（与综合编修面板同一套
+        # Qt 原生窗口管理）。无中央部件，dock 填满整个文档区。
+        self.dock_area = QMainWindow(self)
+        self.dock_area.setObjectName("WorkstationLinkedDockArea")
+        # QMainWindow 默认带 Qt::Window 标志：作为子部件嵌入布局时不可见，
+        # 必须显式降级为普通 Widget。
+        self.dock_area.setWindowFlags(Qt.WindowType.Widget)
+        self.dock_area.setDockOptions(
+            QMainWindow.DockOption.AnimatedDocks
+            | QMainWindow.DockOption.AllowTabbedDocks
+            | QMainWindow.DockOption.AllowNestedDocks
+        )
+        self.dock_area.setTabPosition(
+            Qt.DockWidgetArea.AllDockWidgetAreas, QTabWidget.TabPosition.North
+        )
+        outer.addWidget(self.dock_area, 1)
 
-        self.seismic_pane = DocumentPane("井震联合剖面: A12 - D63", self.horizontal_splitter)
-        self.seismic_pane.setMinimumWidth(400)
-        self.right_splitter = QSplitter(Qt.Orientation.Vertical, self.horizontal_splitter)
-        self.right_splitter.setObjectName("WorkstationLinkedViewSplitter")
-        self.right_splitter.setChildrenCollapsible(False)
-        self.right_splitter.setMinimumWidth(300)
-        self.map_pane = DocumentPane("平面图: D63", self.right_splitter)
-        self.well_pane = DocumentPane("测井轨道: A12", self.right_splitter)
-        self.horizontal_splitter.addWidget(self.seismic_pane)
-        self.horizontal_splitter.addWidget(self.right_splitter)
-        self.horizontal_splitter.setStretchFactor(0, 2)
-        self.horizontal_splitter.setStretchFactor(1, 1)
-        self.right_splitter.addWidget(self.map_pane)
-        self.right_splitter.addWidget(self.well_pane)
-        self.right_splitter.setStretchFactor(0, 1)
-        self.right_splitter.setStretchFactor(1, 1)
+        self.seismic_pane = DocumentPane("井震联合剖面: A12 - D63", self.dock_area)
+        self.map_pane = DocumentPane("平面图: D63", self.dock_area)
+        self.well_pane = DocumentPane("测井轨道: A12", self.dock_area)
+
+        self.seismic_dock = self._add_pane_dock(
+            "linked:seismic", self.seismic_pane,
+            Qt.DockWidgetArea.LeftDockWidgetArea,
+        )
+        self.map_dock = self._add_pane_dock(
+            "linked:map", self.map_pane,
+            Qt.DockWidgetArea.RightDockWidgetArea,
+        )
+        self.well_dock = self._add_pane_dock(
+            "linked:well", self.well_pane,
+            Qt.DockWidgetArea.RightDockWidgetArea,
+        )
+        self.dock_area.splitDockWidget(self.map_dock, self.well_dock, Qt.Orientation.Vertical)
+        for dock in (self.seismic_dock, self.map_dock, self.well_dock):
+            self._panes_menu.addAction(dock.toggleViewAction())
 
         for pane in (self.seismic_pane, self.map_pane, self.well_pane):
             pane.maximize_requested.connect(self._toggle_maximize)
         self._install_empty_states()
 
         QTimer.singleShot(0, self._apply_default_split_sizes)
+
+    def _add_pane_dock(self, key: str, pane: DocumentPane, area) -> QDockWidget:
+        # dock 标题栏承载窗格名（拖动柄 + 浮动/关闭按钮）；窗格内的标题
+        # 标签隐藏，避免双标题行浪费高度。
+        dock = QDockWidget(pane.title_label.text(), self.dock_area)
+        dock.setObjectName(key)  # saveState/restoreState 需要稳定 objectName
+        dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetClosable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+            | QDockWidget.DockWidgetFeature.DockWidgetMovable
+        )
+        dock.setWidget(pane)
+        pane.title_label.hide()
+        self.dock_area.addDockWidget(area, dock)
+        return dock
+
+    def _dock_for_pane(self, pane: DocumentPane) -> QDockWidget:
+        return {
+            self.seismic_pane: self.seismic_dock,
+            self.map_pane: self.map_dock,
+            self.well_pane: self.well_dock,
+        }[pane]
 
     @staticmethod
     def _context_separator() -> QFrame:
@@ -228,6 +285,8 @@ class LinkedInterpretationWorkspace(QWidget):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        # resizeDocks 需要 dock_area 已布局完成；show 后再套一次默认比例。
+        QTimer.singleShot(0, self._apply_default_split_sizes)
         if not self._load_requested:
             self._load_requested = True
             QTimer.singleShot(0, self.ensure_views)
@@ -411,10 +470,15 @@ class LinkedInterpretationWorkspace(QWidget):
 
     def restore_split_view(self) -> None:
         self._maximized_pane = None
-        self.seismic_pane.show()
-        self.right_splitter.show()
-        self.map_pane.show()
-        self.well_pane.show()
+        # 恢复默认停靠布局：浮动收回、拖乱的 dock 归位（剖面左，平面/测井右上/下）。
+        for dock in (self.seismic_dock, self.map_dock, self.well_dock):
+            if dock.isFloating():
+                dock.setFloating(False)
+        self.dock_area.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.seismic_dock)
+        self.dock_area.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.map_dock)
+        self.dock_area.splitDockWidget(self.map_dock, self.well_dock, Qt.Orientation.Vertical)
+        for dock in (self.seismic_dock, self.map_dock, self.well_dock):
+            dock.show()
         for pane in (self.seismic_pane, self.map_pane, self.well_pane):
             pane.set_maximized(False)
         self._apply_default_split_sizes()
@@ -427,21 +491,37 @@ class LinkedInterpretationWorkspace(QWidget):
 
     def _set_maximized(self, pane: DocumentPane) -> None:
         self._maximized_pane = pane
-        if pane is self.seismic_pane:
-            self.seismic_pane.show()
-            self.right_splitter.hide()
-        else:
-            self.seismic_pane.hide()
-            self.right_splitter.show()
-            self.map_pane.setVisible(pane is self.map_pane)
-            self.well_pane.setVisible(pane is self.well_pane)
-        pane.set_maximized(True)
+        target = self._dock_for_pane(pane)
+        for dock in (self.seismic_dock, self.map_dock, self.well_dock):
+            dock.setVisible(dock is target)
+        for candidate in (self.seismic_pane, self.map_pane, self.well_pane):
+            candidate.set_maximized(candidate is pane)
 
     def _apply_default_split_sizes(self) -> None:
-        width = max(1, self.horizontal_splitter.width())
-        height = max(1, self.right_splitter.height())
-        self.horizontal_splitter.setSizes([int(width * 0.66), int(width * 0.34)])
-        self.right_splitter.setSizes([int(height * 0.48), int(height * 0.52)])
+        if self._maximized_pane is not None:
+            return
+        width = max(1, self.dock_area.width())
+        height = max(1, self.dock_area.height())
+        self.dock_area.resizeDocks(
+            [self.seismic_dock, self.map_dock],
+            [int(width * 0.66), int(width * 0.34)],
+            Qt.Orientation.Horizontal,
+        )
+        self.dock_area.resizeDocks(
+            [self.map_dock, self.well_dock],
+            [int(height * 0.48), int(height * 0.52)],
+            Qt.Orientation.Vertical,
+        )
+
+    def save_dock_state(self) -> bytes:
+        return bytes(self.dock_area.saveState())
+
+    def restore_dock_state(self, state) -> bool:
+        """恢复 dock 布局；浮动窗格保持浮动（saveState 完整记录几何）。"""
+        try:
+            return bool(self.dock_area.restoreState(state))
+        except Exception:  # noqa: BLE001 — 旧版本布局 blob 不兼容时回退默认布局
+            return False
 
     def _set_link_state(self, enabled: bool) -> None:
         for pane in (self.seismic_pane, self.map_pane, self.well_pane):
