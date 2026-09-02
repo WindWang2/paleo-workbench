@@ -70,3 +70,4 @@ CMakeFiles/
 # geo-viz-engine submodule (48d774e1); never let it reappear untracked.
 native/map_edit_core/
 native/gdal-vendored/
+run_env.sh

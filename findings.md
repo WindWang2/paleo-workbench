@@ -150,3 +150,12 @@
   (screen frame blank at probes while export renders content). Reproduced with
   changes stashed AND in the main worktree. Recorded per §32; not introduced
   by this branch.
+
+## 2026-09-02 QGIS Workstation Convergence — 关键发现
+1. qgis_render_bridge 未构建（vendored QGIS 在 third_party/qgis，按规则不重建）→ 所有 QGIS UI 走探测降级：MapLayerPropertiesDialog 在无桥环境自动切 legacy 符号快速字段；split/merge/topology 走 shapely 兜底。桥构建后同一代码路径自动升级到 QGIS 原生（renderer XML / geometry engine）。
+2. LayerManagerPanel._publish 原来写死 project_crs="EPSG:4326"（composite_document.py）——所有可见性/不透明度/顺序变更都会丢弃项目 CRS。权威链：ProjectDocument.coordinate → build_workarea_map_snapshot → CompositeEditController.project_crs → LayerManagerPanel。
+3. VectorEditSession.undo 不修剪 layer selection（二轮 review 发现）：撤销要素添加后 selection 残留失效 id → O(selection) 计数虚高 + merge 命中缺失要素。已在 undo/redo 内 intersect。
+4. 会话失效后工具持有死 session（一轮 review Blocker）：save/rollback/flush 提交后必须 _rebind_active_tool（会话级工具回落 pan）。
+5. 显示态（可见性/不透明度/顺序）必须回写编辑权威（apply_display_state），否则 identify 命中隐藏图层、保存 flush 丢弃纯显示变化、内容重组重置用户顺序。
+6. 快照 records / persist 序列化按修订缓存有效，但会话内每次 add 必然变 revision → 变更图层仍全量重编码；debounce(120ms) + sessions_committed 立即同步是当前取舍；增量快照（delta）是后续工作（QGIS 后端已有 #932 增量通道可复用）。
+7. 测试环境：/opt/minconoda3 python3.13 + PySide6 6.11 offscreen；test_mapping_page 的 6 failed/1 error 与 test_unified_map_canvas native scalar cache 失败为干净 main 上同样存在的环境性失败（native 扩展缺失）。
