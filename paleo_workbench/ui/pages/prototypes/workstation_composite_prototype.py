@@ -300,6 +300,7 @@ class CompositeVariants(QWidget):
         self.project = project
         self.canvas = UnifiedMapCanvas()
         snapshot = build_workarea_map_snapshot(project)
+        self._project_crs = str(snapshot.project_crs)
         self.layers = list(snapshot.layers)
         self.canvas.set_layer_snapshot(snapshot)
         extent = workarea_view_extent(snapshot)
@@ -315,7 +316,10 @@ class CompositeVariants(QWidget):
 
     def _publish(self) -> None:
         self.canvas.set_layer_snapshot(
-            MapRenderSnapshot(project_crs="EPSG:4326", layers=tuple(self.layers))
+            MapRenderSnapshot(
+                project_crs=self._project_crs or "EPSG:4326",
+                layers=tuple(self.layers),
+            )
         )
         self.layer_manager.refresh_tree()
 

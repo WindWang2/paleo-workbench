@@ -124,6 +124,9 @@ class LayerManagerPanel(QFrame):
         self._tree_connected = False
         self._editing_layer_id: str | None = None
         self._reloading = False
+        # 项目 CRS 权威来自 ProjectDocument.coordinate（经 CompositeDocument
+        # 注入）；面板只提交显示增量，绝不自行猜测 CRS。
+        self._project_crs = ""
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -275,6 +278,12 @@ class LayerManagerPanel(QFrame):
         self._layers = layers
         self._reload()
 
+    def set_project_crs(self, crs: str) -> None:
+        """注入项目 CRS 权威（ProjectDocument.coordinate → 渲染快照）。"""
+        crs = str(crs or "")
+        if crs and crs != self._project_crs:
+            self._project_crs = crs
+
     def select_layer(self, layer_id: str) -> None:
         """按 id 置为当前图层（QGIS 语义：新建图层即成为当前图层）。"""
         for row in range(self.tree.topLevelItemCount()):
@@ -325,7 +334,10 @@ class LayerManagerPanel(QFrame):
         if self._canvas is None:
             return
         self._canvas.set_layer_snapshot(
-            MapRenderSnapshot(project_crs="EPSG:4326", layers=tuple(self._layers))
+            MapRenderSnapshot(
+                project_crs=self._project_crs or "EPSG:4326",
+                layers=tuple(self._layers),
+            )
         )
         self._reload()
 
@@ -787,6 +799,8 @@ class CompositeDocument(QWidget):
 
     def _sync_composition(self) -> None:
         """基础工区图层 + 用户矢量图层合并发布到画布与图层管理面板。"""
+        # CRS 权威链：ProjectDocument.coordinate → 编辑控制器 → 面板发布。
+        self.layer_manager.set_project_crs(self.edit_controller.project_crs)
         display = {
             layer.id: layer for layer in self.layer_manager._layers
         }
