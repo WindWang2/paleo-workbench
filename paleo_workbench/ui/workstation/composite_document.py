@@ -13,14 +13,14 @@ from __future__ import annotations
 from dataclasses import replace
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -44,10 +44,63 @@ from paleo_workbench.ui.map_action_controller import MapActionController
 from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 from paleo_workbench.ui.workstation.common import workstation_icon
 from paleo_workbench.ui.workstation.composite_editing import (
-    GEOMETRY_KIND_LABELS,
+    GEO_TEMPLATES,
     GEOMETRY_KINDS,
     CompositeEditController,
 )
+
+_GEOMETRY_TYPE_KIND = {
+    "Point": "point",
+    "MultiPoint": "point",
+    "LineString": "line",
+    "MultiLineString": "line",
+    "Polygon": "polygon",
+    "MultiPolygon": "polygon",
+}
+
+
+def _snapshot_geometry_kind(layer) -> str:
+    """图层几何类型：编辑图层取元数据权威，基础图层嗅探首个要素。"""
+    metadata = getattr(layer, "metadata", None) or {}
+    kind = str(metadata.get("geometry_kind") or "")
+    if kind in GEOMETRY_KINDS:
+        return kind
+    for feature in getattr(layer, "features", ()) or ():
+        geometry = feature.get("geometry") if isinstance(feature, dict) else None
+        if isinstance(geometry, dict):
+            return _GEOMETRY_TYPE_KIND.get(str(geometry.get("type") or ""), "")
+    return ""
+
+
+def _layer_kind_icon(kind: str, style: dict) -> QIcon:
+    """QGIS 式图层树类型图标：按几何类型绘制 16px 符号。"""
+    style = style or {}
+    color_name = str(style.get("stroke") or "")
+    if not color_name or color_name == "transparent":
+        color_name = str(style.get("fill") or "") or "#868e96"
+    color = QColor(color_name)
+    if not color.isValid():
+        color = QColor("#868e96")
+    pixmap = QPixmap(16, 16)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    if kind == "point":
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        painter.drawEllipse(3, 3, 10, 10)
+    elif kind == "polygon":
+        fill = QColor(color)
+        fill.setAlpha(110)
+        painter.setBrush(fill)
+        painter.setPen(QPen(color, 1.4))
+        painter.drawRect(2, 3, 12, 10)
+    else:  # 线（含未知类型的保守回退）
+        painter.setPen(QPen(color, 2.0))
+        painter.drawLine(1, 13, 7, 8)
+        painter.drawLine(7, 8, 15, 3)
+    painter.end()
+    return QIcon(pixmap)
 
 
 class LayerManagerPanel(QFrame):
@@ -59,6 +112,7 @@ class LayerManagerPanel(QFrame):
 
     create_layer_requested = Signal()
     remove_layer_requested = Signal(str)
+    rename_layer_requested = Signal(str)
     # 当前图层变化（无可编辑图层时携带 None）。
     active_layer_changed = Signal(object)
 
@@ -102,6 +156,9 @@ class LayerManagerPanel(QFrame):
         self.tree = QTreeWidget(self)
         self.tree.setHeaderHidden(True)
         self.tree.setRootIsDecorated(False)
+        # QGIS 图层面板语义：右键 = 图层上下文菜单（缩放到图层 / 重命名 / 删除）。
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._on_context_menu)
         outer.addWidget(self.tree, 1)
 
         opacity_row = QHBoxLayout()
@@ -162,6 +219,35 @@ class LayerManagerPanel(QFrame):
     @staticmethod
     def is_editable_layer(layer) -> bool:
         return bool(getattr(layer, "metadata", {}) and layer.metadata.get("editable") == "true")
+
+    def _on_context_menu(self, position) -> None:
+        """图层上下文菜单（QGIS 图层面板的核心动作子集）。"""
+        item = self.tree.itemAt(position)
+        if item is None:
+            return
+        layer_id = str(item.data(0, Qt.ItemDataRole.UserRole))
+        layer = self.layer_by_id(layer_id)
+        if layer is None:
+            return
+        editable = self.is_editable_layer(layer)
+        menu = QMenu(self.tree)
+        zoom = menu.addAction(workstation_icon("map/tree-zoom.svg"), "缩放到图层")
+        extent = getattr(layer, "extent", None)
+        has_extent = bool(extent) and extent[0] < extent[2] and extent[1] < extent[3]
+        zoom.setEnabled(has_extent)
+        if editable:
+            menu.addSeparator()
+            rename = menu.addAction(workstation_icon("map/tree-properties.svg"), "重命名图层…")
+            remove = menu.addAction(workstation_icon("map/tree-remove.svg"), "删除图层")
+        else:
+            rename = remove = None
+        chosen = menu.exec(self.tree.viewport().mapToGlobal(position))
+        if chosen is zoom and self._canvas is not None:
+            self._canvas.set_extent(tuple(float(v) for v in extent))
+        elif rename is not None and chosen is rename:
+            self.rename_layer_requested.emit(layer_id)
+        elif remove is not None and chosen is remove:
+            self.remove_layer_requested.emit(layer_id)
 
     def set_editing_layer(self, layer_id: str | None) -> None:
         """标记正在编辑的图层（树项前缀 ✏，QGIS 的 in-edit 视觉语义）。"""
@@ -265,6 +351,12 @@ class LayerManagerPanel(QFrame):
                     label = f"✏ {label}" if layer.id == self._editing_layer_id else f"{label}（矢量）"
                 item = QTreeWidgetItem([label])
                 item.setData(0, Qt.ItemDataRole.UserRole, layer.id)
+                item.setIcon(
+                    0,
+                    _layer_kind_icon(
+                        _snapshot_geometry_kind(layer), getattr(layer, "style", None)
+                    ),
+                )
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 item.setCheckState(
                     0, Qt.CheckState.Checked if layer.visible else Qt.CheckState.Unchecked
@@ -421,6 +513,7 @@ class CompositeDocument(QWidget):
         super().__init__(parent)
         self.setObjectName("CompositeDocument")
         self._project = project
+        self._loading = False
         self._home_extent: tuple[float, float, float, float] | None = None
         self._base_layers: list = []
 
@@ -447,6 +540,7 @@ class CompositeDocument(QWidget):
         self.input_tree.object_selected.connect(self.object_selected.emit)
         self.layer_manager.create_layer_requested.connect(self._create_vector_layer)
         self.layer_manager.remove_layer_requested.connect(self._remove_vector_layer)
+        self.layer_manager.rename_layer_requested.connect(self._rename_vector_layer)
         self.layer_manager.active_layer_changed.connect(
             self.edit_controller.set_active_layer
         )
@@ -561,31 +655,98 @@ class CompositeDocument(QWidget):
             controller.active_layer_id if controller.editing else None
         )
 
-    # -- 矢量图层新建 / 删除 ---------------------------------------------------------
+    # -- 矢量图层新建 / 删除 / 重命名 ------------------------------------------------
 
     def _create_vector_layer(self) -> None:
+        """新建矢量图层对话框：地质模板按 点 / 线 / 面 分组 + 自定义类型。"""
         dialog = QDialog(self)
         dialog.setObjectName("CompositeNewVectorLayerDialog")
         dialog.setWindowTitle("新建矢量图层")
-        form = QFormLayout(dialog)
+        layout = QVBoxLayout(dialog)
+        template_list = QListWidget(dialog)
+        template_list.setObjectName("CompositeTemplateList")
+
+        def add_header(title: str) -> None:
+            item = QListWidgetItem(title)
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            item.setForeground(QColor("#8a94a6"))
+            template_list.addItem(item)
+
+        def add_entry(label: str, kind: str, template: str = "") -> None:
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, (kind, template, label))
+            item.setIcon(_layer_kind_icon(kind, {}))
+            template_list.addItem(item)
+
+        add_header("点")
+        for template in GEO_TEMPLATES:
+            if template.kind == "point":
+                add_entry(template.label, template.kind, template.key)
+        add_entry("自定义点图层", "point")
+        add_header("线")
+        for template in GEO_TEMPLATES:
+            if template.kind == "line":
+                add_entry(template.label, template.kind, template.key)
+        add_entry("自定义线图层", "line")
+        add_header("面")
+        for template in GEO_TEMPLATES:
+            if template.kind == "polygon":
+                add_entry(template.label, template.kind, template.key)
+        add_entry("自定义面图层", "polygon")
+        layout.addWidget(template_list, 1)
+
+        form = QFormLayout()
         name_edit = QLineEdit(dialog)
-        name_edit.setText(f"编修图层 {len(self.edit_controller.layer_ids()) + 1}")
         form.addRow("图层名称", name_edit)
-        kind_combo = QComboBox(dialog)
-        for kind in GEOMETRY_KINDS:
-            kind_combo.addItem(GEOMETRY_KIND_LABELS[kind], kind)
-        form.addRow("几何类型", kind_combo)
+        layout.addLayout(form)
+
+        def on_selection() -> None:
+            item = template_list.currentItem()
+            data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+            if data:
+                _kind, template_key, label = data
+                count = len(self.edit_controller.layer_ids()) + 1
+                name_edit.setText(label if template_key else f"{label} {count}")
+
+        template_list.currentItemChanged.connect(lambda *_: on_selection())
+        template_list.itemDoubleClicked.connect(lambda *_: dialog.accept())
+        first = next(
+            (
+                template_list.item(row)
+                for row in range(template_list.count())
+                if template_list.item(row).data(Qt.ItemDataRole.UserRole)
+            ),
+            None,
+        )
+        if first is not None:
+            template_list.setCurrentItem(first)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
             parent=dialog,
         )
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
-        form.addRow(buttons)
+        layout.addWidget(buttons)
         if dialog.exec() == QDialog.DialogCode.Accepted:
+            item = template_list.currentItem()
+            data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+            if not data:
+                return
+            kind, template_key, _label = data
             self.edit_controller.create_layer(
-                name_edit.text().strip(), kind_combo.currentData()
+                name_edit.text().strip(), kind, template=template_key
             )
+
+    def _rename_vector_layer(self, layer_id: str) -> None:
+        layer = self.edit_controller.layer(layer_id)
+        if layer is None:
+            return
+        name, ok = QInputDialog.getText(
+            self, "重命名图层", "图层名称", text=layer.name
+        )
+        if ok:
+            self.edit_controller.rename_layer(layer_id, name)
 
     def _remove_vector_layer(self, layer_id: str) -> None:
         self.edit_controller.remove_layer(layer_id)
@@ -599,6 +760,9 @@ class CompositeDocument(QWidget):
         }
         layers = list(self._base_layers)
         layers.extend(self.edit_controller.snapshot_layers(display=display))
+        if self._project is not None and not self._loading:
+            # 人工建数据写回工程文档，纳入数据管理（磁盘保存走工程保存）。
+            self.edit_controller.sync_to_project(self._project)
         self.layer_manager.bind(self.canvas, layers)
         active_id = self.edit_controller.active_layer_id
         if active_id is not None:
@@ -615,6 +779,11 @@ class CompositeDocument(QWidget):
         self._home_extent = workarea_view_extent(snapshot)
         if self._home_extent is not None:
             self.canvas.set_extent(self._home_extent)
+        self._loading = True
+        try:
+            self.edit_controller.load_from_project(project)
+        finally:
+            self._loading = False
         self._sync_composition()
         self.input_tree.refresh(project)
 

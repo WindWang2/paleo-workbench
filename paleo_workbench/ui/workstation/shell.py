@@ -275,6 +275,13 @@ class WorkstationFrame(QWidget):
         self.document_stack.setCurrentWidget(self.linked_workspace)
         self.linked_workspace.focus_joint()
 
+    def activate_composite(self, layer_id: str = "") -> None:
+        """切到综合编修页；携带 layer_id 时选中该编修图层。"""
+        self.document_tabs.setCurrentIndex(self.TAB_COMPOSITE)
+        self.document_stack.setCurrentWidget(self.composite)
+        if layer_id:
+            self.composite.layer_manager.select_layer(layer_id)
+
     def activate_legacy(self, title: str = "项目工作流") -> None:
         self.document_tabs.setTabText(self.TAB_LEGACY, str(title or "项目工作流"))
         self.document_tabs.setCurrentIndex(self.TAB_LEGACY)
@@ -440,6 +447,9 @@ class WorkstationFrame(QWidget):
             return
         if kind in {"horizon", "interpretation", "layer"}:
             self.activate_joint()
+            return
+        if kind == "user_vector_layer":
+            self.activate_composite(str(payload.get("layer_id") or ""))
 
     def _open_well_from_agent(self, well_name: str) -> None:
         self.document_tabs.setCurrentIndex(self.TAB_JOINT)

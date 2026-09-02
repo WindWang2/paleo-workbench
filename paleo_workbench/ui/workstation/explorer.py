@@ -21,6 +21,13 @@ from paleo_workbench.ui.workstation.common import workstation_icon
 OBJECT_ROLE = Qt.ItemDataRole.UserRole + 1
 NAVIGATION_ROLE = Qt.ItemDataRole.UserRole + 2
 
+_USER_LAYER_KIND_ICONS = {
+    "point": "map/add_point.svg",
+    "line": "map/add_line.svg",
+    "polygon": "map/add_polygon.svg",
+}
+_USER_LAYER_KIND_LABELS = {"point": "点", "line": "线", "polygon": "面"}
+
 
 class WorkstationExplorer(QFrame):
     """Project-scoped objects with explicit Data and Layer modes."""
@@ -188,6 +195,9 @@ class WorkstationExplorer(QFrame):
         for label, key in (("剖面", "section"), ("平面图", "map"), ("数据导出", "export")):
             results.appendRow(self._item(label, {"kind": "result", "result_type": key}))
         area.appendRow(results)
+        user_group = self._user_layer_group()
+        if user_group is not None:
+            area.appendRow(user_group)
         self.footer_label.setText(f"{len(wells)} 口井 · {len(seismic)} 个地震体 · {len(horizons)} 个层位")
 
     def _build_data(self) -> None:
@@ -217,6 +227,10 @@ class WorkstationExplorer(QFrame):
                 group.appendRow(self._resource_item(resource))
             root.appendRow(group)
             count += len(resources)
+        user_group = self._user_layer_group()
+        if user_group is not None:
+            root.appendRow(user_group)
+            count += user_group.rowCount()
         self.footer_label.setText(f"{count} 个项目数据对象；存储缓存默认隐藏")
 
     def _build_layers(self) -> None:
@@ -270,6 +284,30 @@ class WorkstationExplorer(QFrame):
             modules.appendRow(self._item(label, {"kind": "module"}, navigation=(hub, key)))
         self.model.appendRow(modules)
         self.footer_label.setText("工作区保存文档、分屏、面板与联动状态")
+
+    def _user_layer_group(self) -> QStandardItem | None:
+        """人工编修图层（综合编修数字化成果），纳入数据管理。"""
+        layers = list(getattr(self._project, "user_vector_layers", None) or [])
+        if not layers:
+            return None
+        group = self._group(f"编修数据 ({len(layers)})")
+        for layer in layers:
+            kind = str(getattr(layer, "geometry_kind", "") or "")
+            kind_label = _USER_LAYER_KIND_LABELS.get(kind, "矢量")
+            feature_count = len(list(getattr(layer, "features", None) or []))
+            item = self._item(
+                f"{getattr(layer, 'name', '') or '编修图层'} · {kind_label} · {feature_count} 要素",
+                {
+                    "kind": "user_vector_layer",
+                    "object": layer,
+                    "layer_id": str(getattr(layer, "id", "") or ""),
+                },
+            )
+            icon = _USER_LAYER_KIND_ICONS.get(kind)
+            if icon:
+                item.setIcon(workstation_icon(icon))
+            group.appendRow(item)
+        return group
 
     def _visible_resources(self) -> list[Any]:
         resources = list(getattr(self._project, "resources", None) or [])

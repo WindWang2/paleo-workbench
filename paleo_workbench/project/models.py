@@ -494,6 +494,34 @@ class MapProductRecord(BaseModel):
     created_at: str = Field(default_factory=_now_iso)
 
 
+class UserVectorFeature(BaseModel):
+    """One persisted GeoJSON feature of a user-digitized vector layer."""
+
+    id: str
+    geometry: dict[str, Any] = Field(default_factory=dict)
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class UserVectorLayer(BaseModel):
+    """User-authored vector layer digitized on the composite mapping page.
+
+    Geological templates (物源线 / 断层线 / 展布线 / 打断线 / 方向线 /
+    测井点 / 成图范围 …) are ordinary layers carrying a ``template`` key.
+    The content lives in the portable project document so人工建数据
+    participates in data management like any imported resource.
+    """
+
+    id: str = Field(default_factory=lambda: _id("uvlayer"))
+    name: str = "编修图层"
+    geometry_kind: Literal["point", "line", "polygon"] = "line"
+    template: str = ""  # geological template key; "" = custom
+    crs: str = ""
+    style: dict[str, Any] = Field(default_factory=dict)
+    features: list[UserVectorFeature] = Field(default_factory=list)
+    visible: bool = True
+    opacity: float = 1.0
+
+
 class ProjectDocument(BaseModel):
     """Portable project snapshot.
 
@@ -529,6 +557,8 @@ class ProjectDocument(BaseModel):
     fault_interpretations: list[FaultInterpretationRef] = Field(default_factory=list)
     prediction_tasks: list[PredictionTask] = Field(default_factory=list)
     paleomap_documents: list[PaleoMapDocument] = Field(default_factory=list)
+    # 综合编修人工数字化的矢量图层（物源/断层线/展布线等地质模板）
+    user_vector_layers: list[UserVectorLayer] = Field(default_factory=list)
     # 新建工程向导盘点报告 — 持久化 onboarding 阶段的导入/识别统计
     onboarding_report: dict[str, Any] = Field(default_factory=dict)
     quality_reports: list[QualityReport] = Field(default_factory=list)

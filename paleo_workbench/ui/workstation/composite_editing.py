@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
 from PySide6.QtCore import QObject, Signal
@@ -23,7 +24,12 @@ from PySide6.QtCore import QObject, Signal
 from paleo_workbench.mapping.geometry_schema import new_feature_id
 from paleo_workbench.mapping.map_interaction import SnappingService
 from paleo_workbench.mapping.map_render_backend import MapLayerSnapshot
-from paleo_workbench.mapping.map_styles import default_style_for
+from paleo_workbench.mapping.map_styles import (
+    STYLE_LIBRARY,
+    LinePattern,
+    VectorStyle,
+    default_style_for,
+)
 from paleo_workbench.mapping.map_tools import (
     AddLineTool,
     AddPointTool,
@@ -37,16 +43,79 @@ from paleo_workbench.mapping.map_tools import (
     VertexTool,
     ZoomTool,
 )
-from paleo_workbench.mapping.vector_layer import VectorLayer
+from paleo_workbench.mapping.vector_layer import VectorFeature, VectorLayer
+from paleo_workbench.project.models import UserVectorFeature, UserVectorLayer
 from paleo_workbench.ui.map_action_controller import MapActionState
 
-__all__ = ["CompositeEditController", "GEOMETRY_KINDS", "GEOMETRY_KIND_LABELS"]
+__all__ = [
+    "CompositeEditController",
+    "GEOMETRY_KINDS",
+    "GEOMETRY_KIND_LABELS",
+    "GEO_TEMPLATES",
+    "GeoTemplate",
+]
 
 GEOMETRY_KINDS: tuple[str, ...] = ("point", "line", "polygon")
 GEOMETRY_KIND_LABELS: dict[str, str] = {"point": "点", "line": "线", "polygon": "面"}
 
 # default_style_for 的符号库预设：点 → 井符号标记，线 → 线型，面 → 相带填充。
 _KIND_STYLE_PRESET = {"point": "well", "line": "line", "polygon": "facies"}
+
+
+@dataclass(frozen=True, slots=True)
+class GeoTemplate:
+    """地质矢量图层模板：中文名 + 几何类型 + 符合制图习惯的默认样式。"""
+
+    key: str
+    label: str
+    kind: str
+    style: VectorStyle
+
+
+# 新建矢量图层的地质模板（QGIS「新建 Shapefile 图层」对话框的专业化版本）。
+# 样式取自符号库预设或按地质制图惯例定制：断层走 FAULT 长短线，展布线
+# 用蓝色虚线，成图范围用无填充的橙色边界。
+GEO_TEMPLATES: tuple[GeoTemplate, ...] = (
+    GeoTemplate("well_point", "测井点", "point", default_style_for("well")),
+    GeoTemplate(
+        "source",
+        "物源线",
+        "line",
+        VectorStyle(fill="transparent", stroke="#d62728", stroke_width=2.5),
+    ),
+    GeoTemplate("fault", "断层线", "line", STYLE_LIBRARY["fault"]),
+    GeoTemplate(
+        "spreading",
+        "展布线",
+        "line",
+        VectorStyle(
+            fill="transparent",
+            stroke="#1c7ed6",
+            stroke_width=2.0,
+            line_pattern=LinePattern.DASH,
+        ),
+    ),
+    GeoTemplate(
+        "break",
+        "打断线",
+        "line",
+        VectorStyle(
+            fill="transparent",
+            stroke="#868e96",
+            stroke_width=1.5,
+            line_pattern=LinePattern.DASH,
+        ),
+    ),
+    GeoTemplate(
+        "direction",
+        "方向线",
+        "line",
+        VectorStyle(fill="transparent", stroke="#2f9e44", stroke_width=2.0),
+    ),
+    GeoTemplate("extent", "成图范围", "polygon", STYLE_LIBRARY["formation_boundary"]),
+)
+
+_TEMPLATE_BY_KEY: dict[str, GeoTemplate] = {t.key: t for t in GEO_TEMPLATES}
 
 _LAYER_ID_PREFIX = "composite:"
 
@@ -94,6 +163,9 @@ class CompositeEditController(QObject):
         self._snapping = SnappingService()
         self._layers: dict[str, VectorLayer] = {}
         self._kinds: dict[str, str] = {}
+        self._templates: dict[str, str] = {}
+        # 图层管理面板的显示态（可见性 / 不透明度），供持久化还原。
+        self._display: dict[str, tuple[bool, float]] = {}
         self._active_layer_id: str | None = None
         self._active_tool_action = "pan"
         self._canvas = None
@@ -121,23 +193,44 @@ class CompositeEditController(QObject):
     def is_composite_layer(layer_id: str) -> bool:
         return str(layer_id).startswith(_LAYER_ID_PREFIX)
 
-    def create_layer(self, name: str, kind: str) -> VectorLayer:
+    def create_layer(self, name: str, kind: str, template: str = "") -> VectorLayer:
         kind = str(kind)
         if kind not in GEOMETRY_KINDS:
             raise ValueError(f"unsupported geometry kind {kind!r}")
+        geo_template = _TEMPLATE_BY_KEY.get(str(template))
+        if geo_template is not None:
+            kind = geo_template.kind
+            style = geo_template.style.to_dict()
+            if not str(name).strip():
+                name = geo_template.label
+        else:
+            template = ""
+            style = default_style_for(_KIND_STYLE_PRESET[kind]).to_dict()
         layer_id = f"{_LAYER_ID_PREFIX}{new_feature_id('layer')}"
         layer = VectorLayer(
             id=layer_id,
             name=str(name) or f"编修图层 {len(self._layers) + 1}",
             crs=self.project_crs,
-            style=default_style_for(_KIND_STYLE_PRESET[kind]).to_dict(),
+            style=style,
         )
         self._layers[layer_id] = layer
         self._kinds[layer_id] = kind
+        self._templates[layer_id] = template
         self._active_layer_id = layer_id
         self.layers_changed.emit()
         self.state_changed.emit()
         return layer
+
+    def rename_layer(self, layer_id: str, name: str) -> None:
+        layer = self._layers.get(str(layer_id))
+        name = str(name).strip()
+        if layer is None or not name or layer.name == name:
+            return
+        layer.name = name
+        self.layers_changed.emit()
+
+    def layer_template(self, layer_id: str) -> str:
+        return self._templates.get(str(layer_id), "")
 
     def remove_layer(self, layer_id: str) -> None:
         layer_id = str(layer_id)
@@ -147,11 +240,100 @@ class CompositeEditController(QObject):
         if layer.edit_session is not None:
             layer.edit_session.rollback_changes()
         self._kinds.pop(layer_id, None)
+        self._templates.pop(layer_id, None)
+        self._display.pop(layer_id, None)
         if self._active_layer_id == layer_id:
             self._active_layer_id = next(iter(self._layers), None)
             self._rebind_active_tool()
         self.layers_changed.emit()
         self.state_changed.emit()
+
+    # -- 工程持久化（人工建数据纳入数据管理） --------------------------------------
+
+    def load_from_project(self, project) -> None:
+        """从工程文档恢复人工矢量图层（替换当前全部图层）。"""
+        for layer in self._layers.values():
+            if layer.edit_session is not None:
+                layer.edit_session.rollback_changes()
+        self._layers.clear()
+        self._kinds.clear()
+        self._templates.clear()
+        self._display.clear()
+        self._active_layer_id = None
+        for record in list(getattr(project, "user_vector_layers", None) or []):
+            kind = str(getattr(record, "geometry_kind", "") or "line")
+            if kind not in GEOMETRY_KINDS:
+                kind = "line"
+            features = []
+            for item in list(getattr(record, "features", None) or []):
+                geometry = getattr(item, "geometry", None)
+                if not isinstance(geometry, Mapping) or not geometry.get("type"):
+                    continue
+                features.append(
+                    VectorFeature(
+                        feature_id=str(item.id),
+                        geometry=dict(geometry),
+                        attributes=dict(getattr(item, "properties", None) or {}),
+                    )
+                )
+            style = dict(getattr(record, "style", None) or {})
+            if not style:
+                template = _TEMPLATE_BY_KEY.get(str(getattr(record, "template", "") or ""))
+                style = (
+                    template.style.to_dict()
+                    if template is not None
+                    else default_style_for(_KIND_STYLE_PRESET[kind]).to_dict()
+                )
+            layer = VectorLayer(
+                id=str(record.id),
+                name=str(getattr(record, "name", "") or "编修图层"),
+                crs=str(getattr(record, "crs", "") or self.project_crs),
+                style=style,
+                features=features,
+            )
+            self._layers[layer.id] = layer
+            self._kinds[layer.id] = kind
+            self._templates[layer.id] = str(getattr(record, "template", "") or "")
+            self._display[layer.id] = (
+                bool(getattr(record, "visible", True)),
+                float(getattr(record, "opacity", 1.0) or 1.0),
+            )
+        if self._layers:
+            self._active_layer_id = next(iter(self._layers))
+        self._rebind_active_tool()
+        self.layers_changed.emit()
+        self.state_changed.emit()
+
+    def sync_to_project(self, project) -> None:
+        """把当前人工矢量图层写回工程文档（磁盘保存走既有工程保存流程）。
+
+        只序列化已提交的要素——进行中的编辑会话遵循 QGIS 语义，
+        「保存编辑」后才成为图层内容。
+        """
+        records: list[UserVectorLayer] = []
+        for layer_id, layer in self._layers.items():
+            visible, opacity = self._display.get(layer_id, (True, 1.0))
+            records.append(
+                UserVectorLayer(
+                    id=layer.id,
+                    name=layer.name,
+                    geometry_kind=self._kinds.get(layer_id, "line"),
+                    template=self._templates.get(layer_id, ""),
+                    crs=layer.crs,
+                    style=dict(layer.style),
+                    features=[
+                        UserVectorFeature(
+                            id=feature.feature_id,
+                            geometry=dict(feature.geometry),
+                            properties=dict(feature.attributes),
+                        )
+                        for feature in layer.features()
+                    ],
+                    visible=visible,
+                    opacity=opacity,
+                )
+            )
+        project.user_vector_layers = records
 
     # -- 活动图层与编辑会话 -------------------------------------------------------
 
@@ -339,6 +521,10 @@ class CompositeEditController(QObject):
             features = tuple(feature.as_record() for feature in source)
             revision = layer.data_revision if session is None else (layer.data_revision << 32) + session.revision
             previous = display.get(layer_id)
+            if previous is not None:
+                # 面板显示态回写为图层权威，供持久化还原。
+                self._display[layer_id] = (bool(previous.visible), float(previous.opacity))
+            visible, opacity = self._display.get(layer_id, (True, 1.0))
             snapshots.append(
                 MapLayerSnapshot(
                     id=layer.id,
@@ -350,11 +536,12 @@ class CompositeEditController(QObject):
                     style_revision=layer.style_revision,
                     features=features,
                     style=dict(layer.style),
-                    visible=True if previous is None else bool(previous.visible),
-                    opacity=1.0 if previous is None else float(previous.opacity),
+                    visible=visible,
+                    opacity=opacity,
                     metadata={
                         "editable": "true",
                         "geometry_kind": self._kinds.get(layer_id, ""),
+                        "template": self._templates.get(layer_id, ""),
                         "editing": "true" if session is not None else "false",
                     },
                 )

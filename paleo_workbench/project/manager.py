@@ -71,6 +71,7 @@ _DOMAIN_BY_SECTION = {
     "factor_map_tasks": ProjectDirtyDomain.FACTOR_TASKS,
     "prediction_tasks": ProjectDirtyDomain.PREDICTIONS,
     "paleomap_documents": ProjectDirtyDomain.MAP_DOCUMENTS,
+    "user_vector_layers": ProjectDirtyDomain.MAP_DOCUMENTS,
     "quality_reports": ProjectDirtyDomain.QC,
     "export_artifacts": ProjectDirtyDomain.EXPORTS,
 }

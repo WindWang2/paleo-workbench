@@ -200,3 +200,128 @@ def test_shell_exposes_digitizing_toolbar(qtbot, tmp_path):
         "undo", "redo", "delete_selected",
     ):
         assert action_id in composite.action_controller.actions
+
+
+def test_template_layer_uses_geological_style(qtbot, tmp_path):
+    document = _document(qtbot, tmp_path)
+    controller = document.edit_controller
+
+    fault = controller.create_layer("", "line", template="fault")
+    assert fault.name == "断层线"  # 模板补默认名
+    assert fault.style["line_pattern"] == "fault"
+    assert fault.style["stroke"] == "#e03131"
+    assert controller.layer_template(fault.id) == "fault"
+
+    # 模板自带几何类型：与传入 kind 不一致时以模板为准
+    extent = controller.create_layer("", "line", template="extent")
+    assert controller.kind_of(extent.id) == "polygon"
+    assert extent.name == "成图范围"
+
+    custom = controller.create_layer("手绘", "line")
+    assert controller.layer_template(custom.id) == ""
+
+
+def test_rename_layer(qtbot, tmp_path):
+    controller = _document(qtbot, tmp_path).edit_controller
+    layer = controller.create_layer("A", "point")
+    controller.rename_layer(layer.id, "  井位注记  ")
+    assert layer.name == "井位注记"
+    controller.rename_layer(layer.id, "")  # 空名忽略
+    assert layer.name == "井位注记"
+
+
+def test_layers_persist_into_project_document(qtbot, tmp_path):
+    document = _document(qtbot, tmp_path)
+    controller = document.edit_controller
+    layer = controller.create_layer("断层 F1", "line", template="fault")
+    controller.start_editing()
+    controller.activate_tool("add_line")
+    tool = controller.tools.active_tool
+    tool.mouse_press((0.0, 0.0))
+    tool.mouse_press((10.0, 10.0))
+    tool.mouse_press((20.0, 0.0), button="right")  # 右键结束
+    controller.save_edits()
+
+    # 人工建数据写回工程文档（纳入数据管理）
+    records = document._project.user_vector_layers
+    assert len(records) == 1
+    record = records[0]
+    assert record.name == "断层 F1"
+    assert record.template == "fault"
+    assert record.geometry_kind == "line"
+    assert len(record.features) == 1
+    assert record.features[0].geometry["type"] == "LineString"
+
+    # 重新打开文档：图层 / 要素 / 模板全部还原
+    fresh = CompositeDocument(document._project)
+    qtbot.addWidget(fresh)
+    restored = fresh.edit_controller.layer(layer.id)
+    assert restored is not None
+    assert restored.name == "断层 F1"
+    assert len(restored.features()) == 1
+    assert fresh.edit_controller.layer_template(layer.id) == "fault"
+
+
+def test_layers_survive_project_file_roundtrip(qtbot, tmp_path):
+    from paleo_workbench.project.manager import ProjectManager
+
+    document = _document(qtbot, tmp_path)
+    controller = document.edit_controller
+    layer = controller.create_layer("", "point", template="well_point")
+    controller.start_editing()
+    controller.activate_tool("add_point")
+    controller.tools.active_tool.mouse_press((3.0, 4.0))
+    controller.save_edits()
+    document.layer_manager.set_layer_visible(layer.id, False)
+    document._sync_composition()
+
+    path = tmp_path / "demo.paleo.json"
+    manager = ProjectManager(path)
+    assert manager.save(document._project)
+    reloaded = manager.load()
+    assert len(reloaded.user_vector_layers) == 1
+    record = reloaded.user_vector_layers[0]
+    assert record.template == "well_point"
+    assert len(record.features) == 1
+    assert record.visible is False
+
+    # 磁盘加载的工程也能直接恢复为可编辑图层
+    fresh = CompositeDocument(reloaded)
+    qtbot.addWidget(fresh)
+    restored = fresh.edit_controller.layer(layer.id)
+    assert restored is not None and len(restored.features()) == 1
+    snapshot = fresh.layer_manager.layer_by_id(layer.id)
+    assert snapshot.visible is False
+
+
+def test_explorer_lists_user_vector_layers(qtbot, tmp_path):
+    document = _document(qtbot, tmp_path)
+    controller = document.edit_controller
+    controller.create_layer("物源线 1", "line", template="source")
+    project = document._project
+
+    from paleo_workbench.ui.workstation.explorer import (
+        OBJECT_ROLE,
+        WorkstationExplorer,
+    )
+
+    explorer = WorkstationExplorer(project)
+    qtbot.addWidget(explorer)
+    explorer.set_mode("data")
+
+    def walk(item):
+        for row in range(item.rowCount()):
+            child = item.child(row)
+            yield child
+            yield from walk(child)
+
+    root = explorer.model.invisibleRootItem()
+    payloads = [
+        (item.text(), item.data(OBJECT_ROLE) or {})
+        for item in walk(root)
+    ]
+    group = next(p for p in payloads if p[1].get("kind") == "group" and "编修数据" in p[0])
+    assert group is not None
+    leaves = [p for p in payloads if p[1].get("kind") == "user_vector_layer"]
+    assert len(leaves) == 1
+    assert "物源线 1" in leaves[0][0]
