@@ -23,6 +23,7 @@ from paleo_workbench.ui.workstation.linked_workspace import (
     LinkedInterpretationWorkspace,
 )
 from paleo_workbench.ui.workstation.process_hub import ProcessHub
+from paleo_workbench.ui.workstation.task_center import TaskCenter
 
 
 class WorkstationFrame(QWidget):
@@ -140,6 +141,8 @@ class WorkstationFrame(QWidget):
 
         self.inspector = WorkstationInspector(self._dock_host)
         self.process_hub = ProcessHub(project, self._dock_host)
+        # 任务中心是独立面板：与 Agent 各自浮动 / 显隐，不再焊在同一 dock 里。
+        self.task_center = TaskCenter(self._dock_host)
 
         self.nav_dock = self._add_dock(
             "资源管理器", self.navigation_region,
@@ -149,7 +152,10 @@ class WorkstationFrame(QWidget):
             "检查器", self.inspector, Qt.DockWidgetArea.RightDockWidgetArea
         )
         self.process_dock = self._add_dock(
-            "任务 / Agent", self.process_hub, Qt.DockWidgetArea.BottomDockWidgetArea
+            "Agent", self.process_hub, Qt.DockWidgetArea.BottomDockWidgetArea
+        )
+        self.task_dock = self._add_dock(
+            "任务中心", self.task_center, Qt.DockWidgetArea.BottomDockWidgetArea
         )
 
         # 综合编修面板（随文档显隐；由宿主 QMainWindow 持有 dock）
@@ -212,7 +218,7 @@ class WorkstationFrame(QWidget):
         self.process_hub.agent.show_wells_requested.connect(self._show_wells_from_agent)
         self.process_hub.agent.focus_joint_requested.connect(self.activate_joint)
         self.process_hub.agent.undo_requested.connect(self._undo_agent_gui)
-        self.process_hub.task_count_changed.connect(self.app_bar.set_task_count)
+        self.task_center.active_count_changed.connect(self.app_bar.set_task_count)
         self.app_bar.agent_requested.connect(self.show_agent)
         self.app_bar.task_center_requested.connect(self.show_tasks)
         self.app_bar.command_submitted.connect(self.command_submitted)
@@ -223,6 +229,7 @@ class WorkstationFrame(QWidget):
             self.nav_dock,
             self.inspector_dock,
             self.process_dock,
+            self.task_dock,
             self.composite_layer_dock,
             self.composite_input_dock,
             self.composite_linked_dock,
@@ -238,9 +245,6 @@ class WorkstationFrame(QWidget):
             dock.topLevelChanged.connect(lambda *_: self._schedule_state_save())
             dock.dockLocationChanged.connect(lambda *_: self._schedule_state_save())
             dock.visibilityChanged.connect(lambda *_: self._schedule_state_save())
-        self.process_hub.agent_splitter.splitterMoved.connect(
-            lambda *_args: self._schedule_state_save()
-        )
 
     def set_project(self, project, project_path: str | None = None) -> None:
         self._project = project
@@ -285,8 +289,9 @@ class WorkstationFrame(QWidget):
         self._expand_process_dock()
 
     def show_tasks(self) -> None:
-        self.process_dock.show()
-        self.process_hub.show_tasks()
+        self.task_dock.show()
+        self.task_dock.raise_()
+        self.task_center.tree.setFocus(Qt.FocusReason.ShortcutFocusReason)
         self._expand_process_dock()
 
     def submit_agent_command(self, text: str) -> None:
@@ -313,7 +318,8 @@ class WorkstationFrame(QWidget):
         return [
             {"key": "workstation:explorer", "title": "资源管理器", "widget": self.explorer},
             {"key": "workstation:inspector", "title": "检查器", "widget": self.inspector},
-            {"key": "workstation:process", "title": "任务 / Agent", "widget": self.process_hub},
+            {"key": "workstation:process", "title": "Agent", "widget": self.process_hub},
+            {"key": "workstation:tasks", "title": "任务中心", "widget": self.task_center},
         ]
 
     def resizeEvent(self, event) -> None:
@@ -470,19 +476,6 @@ class WorkstationFrame(QWidget):
         linked_state = self._settings.value("layout/linked_docks")
         if isinstance(linked_state, QByteArray) and not linked_state.isNull():
             self.linked_workspace.restore_dock_state(linked_state)
-        self.process_hub.agent_splitter.setSizes(
-            self._read_sizes("agent", [560, 560])
-        )
-
-    def _read_sizes(self, key: str, fallback: list[int]) -> list[int]:
-        value = self._settings.value(f"layout/{key}")
-        if not isinstance(value, (list, tuple)) or len(value) != len(fallback):
-            return fallback
-        try:
-            sizes = [max(0, int(part)) for part in value]
-        except (TypeError, ValueError):
-            return fallback
-        return sizes if sum(sizes) > 0 else fallback
 
     def _save_layout(self) -> None:
         if not self.isVisible():
@@ -491,12 +484,12 @@ class WorkstationFrame(QWidget):
         self._settings.setValue(
             "layout/linked_docks", self.linked_workspace.dock_area.saveState()
         )
-        self._settings.setValue("layout/agent", self.process_hub.agent_splitter.sizes())
 
     def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
         self._save_timer.stop()
         self._save_layout()
         self.process_hub.shutdown()
+        self.task_center.shutdown()
         self.composite.shutdown()
         self._teardown_docks()
         return self.linked_workspace.shutdown_workers(wait_ms)
@@ -507,6 +500,7 @@ class WorkstationFrame(QWidget):
             self.nav_dock,
             self.inspector_dock,
             self.process_dock,
+            self.task_dock,
             self.composite_layer_dock,
             self.composite_input_dock,
             self.composite_linked_dock,
