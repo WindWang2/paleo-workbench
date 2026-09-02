@@ -235,3 +235,11 @@ Tests: `tests/test_layout_presets.py` (pure) + shell coverage for apply / float-
 - Native xcb capture loaded actual Map, Well Log and 2D Seismic widgets at DPR 2.0.
 
 final result: passed
+
+### Iteration 6b - custom dock title bars
+
+Custom ``DockTitleBar`` installed on shell and linked-workspace ``QDockWidget``s
+via ``setTitleBarWidget``: dense 28–30px light chrome, float/dock + close
+affordance, drag-to-move when floating, double-click toggles float. OS may still
+draw an outer frame around floating docks; in-content chrome matches V3 light.
+
