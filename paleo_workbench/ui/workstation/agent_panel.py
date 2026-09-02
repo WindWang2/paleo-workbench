@@ -117,7 +117,7 @@ class AgentWorkspace(QFrame):
         self.history.append(
             f"<hr><b>用户</b> · {command}<br>"
             f"<b>执行计划</b> · {plan.summary}<br>"
-            f"<span style='color:#52616b'>动作 {plan.action_id} · 回执 {receipt_id}</span>"
+            f"<span style='color:#53616c'>动作 {plan.action_id} · 回执 {receipt_id}</span>"
         )
         self._run_plan(plan, receipt_id)
 

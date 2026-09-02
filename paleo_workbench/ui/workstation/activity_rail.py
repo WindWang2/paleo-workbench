@@ -65,14 +65,24 @@ class ActivityRail(QFrame):
 
         collapse = QToolButton(self)
         collapse.setObjectName("WorkstationRailCollapseButton")
-        collapse.setText("<<")
+        collapse.setIcon(workstation_icon("chevrons-left.svg"))
         collapse.setToolTip("折叠资源管理器")
         collapse.clicked.connect(self.collapse_requested.emit)
         layout.addWidget(collapse)
 
+        self.collapse_button = collapse
         self.set_mode("project")
 
     def set_mode(self, key: str) -> None:
         button = self.buttons.get(key)
         if button is not None:
             button.setChecked(True)
+
+    def set_explorer_expanded(self, expanded: bool) -> None:
+        """Mirror the explorer state so the collapse affordance flips with it."""
+        if expanded:
+            self.collapse_button.setIcon(workstation_icon("chevrons-left.svg"))
+            self.collapse_button.setToolTip("折叠资源管理器")
+        else:
+            self.collapse_button.setIcon(workstation_icon("chevrons-right.svg"))
+            self.collapse_button.setToolTip("展开资源管理器")

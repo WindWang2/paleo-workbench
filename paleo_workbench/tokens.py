@@ -603,7 +603,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         background-color: {t.BG_HEADER};
         color: {t.TEXT_PRIMARY};
         border: 1px solid {t.BORDER_STRONG};
-        border-radius: 8px;
+        border-radius: 4px;
         padding: 4px;
     }}
     QMenu::item {{
@@ -1141,7 +1141,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         color: {t.TEXT_PRIMARY};
         border: 1px solid {t.BORDER_STRONG};
         border-radius: 4px;
-        min-height: 30px;
+        min-height: 28px;
         padding: 2px 10px;
     }}
     QLineEdit#WorkstationCommandInput:focus {{
@@ -1227,13 +1227,34 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         font-size: 11px;
     }}
     QLineEdit#WorkstationExplorerSearch,
-    QLineEdit#WorkstationAgentInput,
-    QLineEdit#WorkstationInspectorValue {{
+    QLineEdit#WorkstationAgentInput {{
         background: {t.BG_SIDEBAR};
         border: 1px solid {t.BORDER};
         border-radius: 3px;
         min-height: 28px;
         padding: 2px 7px;
+    }}
+    /* Inspector 字段值：可选取的只读 editor —— 扁平浅底，缺失值弱化 */
+    QLineEdit#WorkstationInspectorValue {{
+        background: {t.BG_BODY};
+        color: {t.TEXT_PRIMARY};
+        border: 1px solid transparent;
+        border-radius: 3px;
+        min-height: 26px;
+        padding: 2px 7px;
+        selection-background-color: {t.BG_SELECTION};
+        selection-color: {t.TEXT_PRIMARY};
+    }}
+    QLineEdit#WorkstationInspectorValue:hover {{
+        border-color: {t.BG_SEARCH};
+    }}
+    QLineEdit#WorkstationInspectorValue:focus {{
+        border-color: {t.BORDER_STRONG};
+        background: {t.BG_SIDEBAR};
+    }}
+    QLineEdit#WorkstationInspectorValue[missing="true"] {{
+        color: {t.TEXT_SECONDARY};
+        font-style: italic;
     }}
     QTreeView#WorkstationExplorerTree {{
         background: {t.BG_SIDEBAR};
@@ -1262,7 +1283,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         border: none;
         border-right: 1px solid {t.BORDER};
         border-radius: 0px;
-        min-height: 30px;
+        min-height: 26px;
         padding: 3px 14px;
         margin: 0px;
     }}
@@ -1276,6 +1297,11 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         background: {t.BG_SIDEBAR};
         border: none;
         border-bottom: 1px solid {t.BORDER};
+    }}
+    QFrame#WorkstationContextSeparator {{
+        background: {t.BORDER};
+        border: none;
+        margin: 5px 3px;
     }}
     QToolButton#WorkstationContextButton,
     QToolButton#WorkstationLinkButton {{
@@ -1323,10 +1349,12 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         border: none;
     }}
     QLabel#WorkstationDocumentEmptyState {{
-        background: {t.BG_SIDEBAR};
+        background: transparent;
         color: {t.TEXT_SECONDARY};
-        border: none;
+        border: 1px dashed {t.BORDER_STRONG};
+        border-radius: 4px;
         font-size: 12px;
+        padding: 18px 14px;
     }}
     QFrame#WorkstationInspector {{
         border-left: 1px solid {t.BORDER_STRONG};
@@ -1355,6 +1383,21 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     QFrame#WorkstationProcessHub {{
         border-top: 1px solid {t.BORDER_STRONG};
     }}
+    /* 综合编修：可浮动 dock 面板标题条（Qt 原生窗口管理） */
+    QDockWidget {{
+        color: {t.TEXT_PRIMARY};
+        font-size: 12px;
+    }}
+    QDockWidget::title {{
+        background: {t.BG_SEARCH};
+        border: none;
+        border-bottom: 1px solid {t.BORDER};
+        padding: 6px 10px;
+        font-weight: 700;
+    }}
+    QDockWidget::title:hover {{
+        background: {t.BG_MENU_HOVER};
+    }}
     QTextBrowser#WorkstationAgentHistory {{
         background: {t.BG_SIDEBAR};
         color: {t.TEXT_PRIMARY};
@@ -1373,6 +1416,33 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         background: {t.BG_SIDEBAR};
         border: none;
         border-radius: 0px;
+    }}
+    QTreeWidget#WorkstationTaskTree::item {{
+        min-height: 24px;
+    }}
+    /* 任务进度：slim 无边框条，颜色按任务状态（运行=amber 过程色） */
+    QProgressBar#WorkstationTaskProgress {{
+        background: {t.BG_SEARCH};
+        border: none;
+        border-radius: 3px;
+        min-height: 6px;
+        max-height: 6px;
+    }}
+    QProgressBar#WorkstationTaskProgress::chunk {{
+        background-color: {t.PRIMARY};
+        border-radius: 3px;
+    }}
+    QProgressBar#WorkstationTaskProgress[taskState="running"]::chunk {{
+        background-color: {t.ACCENT};
+    }}
+    QProgressBar#WorkstationTaskProgress[taskState="queued"]::chunk {{
+        background-color: {t.PRIMARY_DISABLED};
+    }}
+    QProgressBar#WorkstationTaskProgress[taskState="done"]::chunk {{
+        background-color: {t.SUCCESS};
+    }}
+    QProgressBar#WorkstationTaskProgress[taskState="failed"]::chunk {{
+        background-color: {t.ERROR_RED};
     }}
     QPushButton#WorkstationTertiaryButton {{
         background: transparent;

@@ -90,10 +90,18 @@ class WorkstationInspector(QFrame):
             form.removeRow(0)
 
     @staticmethod
-    def _readonly(value: object) -> QLineEdit:
-        edit = QLineEdit("" if value is None else str(value))
+    def _readonly(value: object, *, unit: str = "") -> QLineEdit:
+        missing = value is None or str(value).strip() in ("", "—")
+        text = "—" if missing else str(value)
+        if not missing and unit:
+            try:
+                text = f"{float(text):g} {unit}"
+            except ValueError:
+                text = f"{text} {unit}"
+        edit = QLineEdit(text)
         edit.setReadOnly(True)
         edit.setObjectName("WorkstationInspectorValue")
+        edit.setProperty("missing", missing)
         return edit
 
     def set_project(self, project) -> None:
@@ -128,8 +136,10 @@ class WorkstationInspector(QFrame):
         self.properties_form.addRow("工程名", self._readonly(getattr(meta, "name", "")))
         self.properties_form.addRow("区域", self._readonly(getattr(meta, "region", "")))
         self.properties_form.addRow("CRS", self._readonly(getattr(coordinate, "project_crs", "")))
-        self.properties_form.addRow("井", self._readonly(len(getattr(project, "wells", None) or [])))
-        self.properties_form.addRow("地震", self._readonly(len(getattr(project, "seismic_surveys", None) or [])))
+        self.properties_form.addRow("井", self._readonly(f"{len(getattr(project, 'wells', None) or [])} 口"))
+        self.properties_form.addRow(
+            "地震", self._readonly(f"{len(getattr(project, 'seismic_surveys', None) or [])} 个")
+        )
         self.interpretation_form.addRow("目标层位", self._readonly(self._target_horizon()))
         self._set_history(["工程上下文已绑定", "工作区布局可保存和恢复"])
 
@@ -146,8 +156,8 @@ class WorkstationInspector(QFrame):
         self.properties_form.addRow("井名", self._readonly(name))
         self.properties_form.addRow("坐标 X", self._readonly("—" if x is None else f"{x:,.2f}"))
         self.properties_form.addRow("坐标 Y", self._readonly("—" if y is None else f"{y:,.2f}"))
-        self.properties_form.addRow("KB 高程", self._readonly(getattr(well, "kb", None) or "—"))
-        self.properties_form.addRow("总深度", self._readonly(getattr(well, "td", None) or "—"))
+        self.properties_form.addRow("KB 高程", self._readonly(getattr(well, "kb", None) or "—", unit="m"))
+        self.properties_form.addRow("总深度", self._readonly(getattr(well, "td", None) or "—", unit="m"))
         self.interpretation_form.addRow("活动层位", self._readonly(self._target_horizon()))
         self.interpretation_form.addRow("联动状态", self._readonly("地图 / 地震 / 测井已联动"))
         self._set_history([f"已选择井 {name}", "选择通过共享 SelectionContext 发布"])

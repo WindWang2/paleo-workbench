@@ -35,11 +35,11 @@ def get_engine_status_info() -> tuple[str, str]:
         f" font-weight: 600; font-size: {tokens.FONT_SIZE_STATUS};"
     )
     if has_gl and has_cpp:
-        return "⚡ GPU: OpenGL + C++", f"background-color: {tokens.BADGE_SUCCESS}; {_base}"
+        return "GPU · OpenGL + C++", f"background-color: {tokens.BADGE_SUCCESS}; {_base}"
     elif has_cpp:
-        return "💻 CPU: Native C++", f"background-color: {tokens.BADGE_PRIMARY}; {_base}"
+        return "CPU · Native C++", f"background-color: {tokens.BADGE_PRIMARY}; {_base}"
     else:
-        return "🟡 CPU: Python", f"background-color: {tokens.BADGE_WARNING}; {_base}"
+        return "CPU · Python", f"background-color: {tokens.BADGE_WARNING}; {_base}"
 
 
 class StatusBar(QFrame):

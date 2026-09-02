@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 
 from PySide6.QtCore import QTimer, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFrame,
@@ -13,6 +14,16 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem,
     QVBoxLayout,
 )
+
+from paleo_workbench import tokens
+
+_STATE_COLORS = {
+    "queued": tokens.TEXT_SECONDARY,
+    "running": tokens.WARNING,
+    "done": tokens.SUCCESS,
+    "failed": tokens.ERROR_RED,
+    "cancelled": tokens.TEXT_SECONDARY,
+}
 
 
 class TaskCenter(QFrame):
@@ -70,40 +81,51 @@ class TaskCenter(QFrame):
 
         self.tree.clear()
         if not handles:
-            item = QTreeWidgetItem(["就绪", "当前没有后台任务", "", "", ""])
+            item = QTreeWidgetItem(["", "当前没有后台任务", "", "", ""])
             item.setDisabled(True)
+            color = QColor(tokens.TEXT_SECONDARY)
+            for column in range(item.columnCount()):
+                item.setForeground(column, color)
             self.tree.addTopLevelItem(item)
             return
 
         labels = {
-            TaskState.QUEUED: "排队",
-            TaskState.RUNNING: "运行中",
-            TaskState.DONE: "完成",
-            TaskState.FAILED: "失败",
-            TaskState.CANCELLED: "已取消",
+            TaskState.QUEUED: ("排队", "queued"),
+            TaskState.RUNNING: ("运行中", "running"),
+            TaskState.DONE: ("完成", "done"),
+            TaskState.FAILED: ("失败", "failed"),
+            TaskState.CANCELLED: ("已取消", "cancelled"),
         }
         now = time.monotonic()
         for handle in handles:
+            label, state_key = labels.get(handle.state, (str(handle.state), "queued"))
+            progress = round(handle.progress * 100)
+            status_text = f"{label} {progress}%" if state_key == "running" else label
             elapsed_from = handle.started_at or handle.submitted_at
             elapsed_to = handle.finished_at or now
             elapsed = max(0.0, elapsed_to - elapsed_from)
             item = QTreeWidgetItem(
                 [
-                    labels.get(handle.state, str(handle.state)),
+                    status_text,
                     handle.spec.title or handle.spec.kind or handle.task_id,
                     "",
                     self._format_elapsed(elapsed),
                     "",
                 ]
             )
+            color = QColor(_STATE_COLORS.get(state_key, tokens.TEXT_PRIMARY))
+            item.setForeground(0, color)
             item.setToolTip(1, handle.message or handle.error or handle.task_id)
             self.tree.addTopLevelItem(item)
 
-            progress = QProgressBar(self.tree)
-            progress.setRange(0, 100)
-            progress.setValue(round(handle.progress * 100))
-            progress.setTextVisible(True)
-            self.tree.setItemWidget(item, 2, progress)
+            bar = QProgressBar(self.tree)
+            bar.setObjectName("WorkstationTaskProgress")
+            bar.setProperty("taskState", state_key)
+            bar.setRange(0, 100)
+            bar.setValue(progress)
+            bar.setTextVisible(False)
+            bar.setFixedHeight(6)
+            self.tree.setItemWidget(item, 2, bar)
 
             if handle.state in (TaskState.QUEUED, TaskState.RUNNING):
                 cancel = QPushButton("取消", self.tree)

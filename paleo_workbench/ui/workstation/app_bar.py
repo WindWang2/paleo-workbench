@@ -8,10 +8,10 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMenu,
     QSizePolicy,
-    QStyle,
     QToolButton,
 )
 
+from paleo_workbench import tokens
 from paleo_workbench.ui.workstation.common import workstation_icon
 
 
@@ -38,7 +38,9 @@ class WorkstationAppBar(QFrame):
 
         brand_icon = QLabel(self)
         brand_icon.setObjectName("WorkstationBrandIcon")
-        brand_icon.setPixmap(workstation_icon("seismic.svg", "#0b5563").pixmap(20, 20))
+        brand_icon.setPixmap(
+            workstation_icon("seismic.svg", tokens.PRIMARY).pixmap(20, 20)
+        )
         layout.addWidget(brand_icon)
 
         self.brand_label = QLabel("Paleo Workbench", self)
@@ -49,9 +51,7 @@ class WorkstationAppBar(QFrame):
         self.project_button.setObjectName("WorkstationProjectButton")
         self.project_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.project_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.project_button.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon)
-        )
+        self.project_button.setIcon(workstation_icon("folder-open.svg"))
         self._project_menu = QMenu(self.project_button)
         self._project_menu.addAction("新建工程", self.new_project_requested.emit)
         self._project_menu.addAction("打开工程", self.open_project_requested.emit)
@@ -64,16 +64,14 @@ class WorkstationAppBar(QFrame):
 
         self.back_button = QToolButton(self)
         self.back_button.setObjectName("WorkstationChromeButton")
-        self.back_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowBack))
+        self.back_button.setIcon(workstation_icon("arrow-left.svg"))
         self.back_button.setToolTip("后退")
         self.back_button.setEnabled(False)
         layout.addWidget(self.back_button)
 
         self.forward_button = QToolButton(self)
         self.forward_button.setObjectName("WorkstationChromeButton")
-        self.forward_button.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowForward)
-        )
+        self.forward_button.setIcon(workstation_icon("arrow-right.svg"))
         self.forward_button.setToolTip("前进")
         self.forward_button.setEnabled(False)
         layout.addWidget(self.forward_button)
@@ -97,7 +95,7 @@ class WorkstationAppBar(QFrame):
         self.sync_button = QToolButton(self)
         self.sync_button.setObjectName("WorkstationSyncState")
         self.sync_button.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton)
+            workstation_icon("circle-check.svg", tokens.PRIMARY)
         )
         self.sync_button.setText("同步已连接")
         self.sync_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)

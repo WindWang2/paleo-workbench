@@ -11,11 +11,12 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QStyle,
     QToolButton,
     QTreeView,
     QVBoxLayout,
 )
+
+from paleo_workbench.ui.workstation.common import workstation_icon
 
 OBJECT_ROLE = Qt.ItemDataRole.UserRole + 1
 NAVIGATION_ROLE = Qt.ItemDataRole.UserRole + 2
@@ -58,7 +59,7 @@ class WorkstationExplorer(QFrame):
         header.addStretch(1)
         refresh = QToolButton(self)
         refresh.setObjectName("WorkstationChromeButton")
-        refresh.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload))
+        refresh.setIcon(workstation_icon("refresh-cw.svg"))
         refresh.setToolTip("刷新")
         refresh.clicked.connect(self.refresh)
         header.addWidget(refresh)
@@ -130,7 +131,7 @@ class WorkstationExplorer(QFrame):
     def _root(self) -> QStandardItem:
         name = str(getattr(getattr(self._project, "meta", None), "name", "") or "未命名工程")
         root = self._item(name, {"kind": "project", "object": self._project})
-        root.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirHomeIcon))
+        root.setIcon(workstation_icon("folder-open.svg"))
         self.model.appendRow(root)
         return root
 
@@ -250,7 +251,7 @@ class WorkstationExplorer(QFrame):
 
     def _build_workspaces(self) -> None:
         joint = self._item("井震联合解释", {"kind": "workspace", "workspace": "joint"})
-        joint.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon))
+        joint.setIcon(workstation_icon("visualization.svg"))
         self.model.appendRow(joint)
         modules = self._group("兼容工作流")
         entries = (
@@ -310,7 +311,7 @@ class WorkstationExplorer(QFrame):
 
     def _group(self, label: str) -> QStandardItem:
         item = self._item(label, {"kind": "group"})
-        item.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon))
+        item.setIcon(workstation_icon("folder.svg"))
         return item
 
     def _item(self, label: str, payload: dict[str, Any], navigation=None) -> QStandardItem:
