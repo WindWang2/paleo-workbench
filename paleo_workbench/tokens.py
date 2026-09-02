@@ -1,14 +1,9 @@
-"""Design tokens for the AppShell — single source of truth.
+"""Design tokens for the native Qt workstation — single source of truth.
 
-「Stratum」design language (M1 design-system overhaul): a geological-field
-identity for the workstation. The previous slate/ArcGIS look is replaced by
-
-* warm paper canvas (``BG_BODY``  porcelain, not cool gray),
-* petrol-ink primary + burnt-copper accent (stratigraphic ink & mineral),
-* a *dark petrol icon rail anchored in all three themes* — nav icons stay
-  legible without per-theme icon swaps (the old sheet shipped black
-  ``currentColor`` icons on a near-black dark-theme rail),
-* crisper technical radii (4/8px) and an airier spacing rhythm.
+The Workstation V3 language uses white working surfaces, cool-gray structure,
+petrol selection, and restrained amber process feedback.  Its rectilinear
+panels deliberately read as a scientific desktop tool rather than a web
+dashboard.  Light, dark and high-contrast themes share the same vocabulary.
 
 Every theme — light / dark / high_contrast — is a curated palette of the
 same token vocabulary resolved through :func:`palette_for`; the stylesheet
@@ -21,74 +16,73 @@ all primary text pairs improve on the old slate sheet (pinned in
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
-# Stratum palette — signal colors
+# Workstation palette — signal colors
 # ---------------------------------------------------------------------------
-PRIMARY = "#0c3f3b"        # 石化墨绿 — 主色 / 激活态 / 主按钮
-ACCENT = "#c2410c"         # 烧铜 — 焦点环 / hover 高光 / 导航指示条
+PRIMARY = "#0b5563"        # petrol — selection / primary command
+ACCENT = "#a65313"         # amber — focus / processing emphasis
 SUCCESS = "#15803d"
 WARNING = "#b45309"
 ERROR = "#d31f1f"          # general error color
 ERROR_RED = "#b91c1c"      # severe/QC error color
 TEAL = "#0f766e"
-# UI 框架背景层（浅色 = 暖纸面）
-BG_BODY = "#f6f3ec"        # 暖瓷 — 页面画布区底色
-BG_HEADER = "#fbf8f1"
-BG_SIDEBAR = "#fffdf9"
-BG_SEARCH = "#efe9db"      # 输入框 / hover / 下沉底色
-# 图标栏在三套主题下均为深色石板（导航图标无需随主题换色）
-BG_RAIL = "#132a28"
-BG_RAIL_GRADIENT = "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #16302c, stop:1 #0e211e)"
-BG_RAIL_TOP = "#16302c"
-BG_RAIL_BOTTOM = "#0e211e"
-TEXT_PRIMARY = "#141210"
-TEXT_SECONDARY = "#514c45"
-TEXT_DARK = "#0f0d0b"
-TEXT_ON_RAIL = "#b9cec8"           # 深色栏上的次要文字
-TEXT_ON_RAIL_ACTIVE = "#f2f7f5"    # 深色栏上的激活文字
-BORDER = "#e2dac8"                 # 暖色发丝线
-BORDER_STRONG = "#cec4ac"
-BORDER_LIGHT = "#eee8d9"
+# White desktop chrome and cool-gray hierarchy.
+BG_BODY = "#f4f6f8"
+BG_HEADER = "#ffffff"
+BG_SIDEBAR = "#ffffff"
+BG_SEARCH = "#edf1f4"
+BG_RAIL = "#ffffff"
+BG_RAIL_GRADIENT = "#ffffff"
+BG_RAIL_TOP = "#ffffff"
+BG_RAIL_BOTTOM = "#ffffff"
+TEXT_PRIMARY = "#18232d"
+TEXT_SECONDARY = "#53616c"
+TEXT_DARK = "#101820"
+TEXT_ON_RAIL = "#53616c"
+TEXT_ON_RAIL_ACTIVE = "#0b5563"
+BORDER = "#d6dde3"
+BORDER_STRONG = "#b8c3cc"
+BORDER_LIGHT = "#e6ebef"
 
 # 数据画布深色区语义令牌（地图编辑 / 3D 视口 / 地震剖面背景）
-BG_CANVAS = "#131d1b"                # 画布深色底（石板绿调）
-BG_CANVAS_PANEL = "rgba(10, 16, 15, 0.88)"   # 画布上浮层栏
-TEXT_ON_CANVAS = "#eef4f1"           # 画布上文字
-BORDER_CANVAS = "rgba(120, 146, 140, 0.55)"  # 画布上边框
+BG_CANVAS = "#f3f5f7"
+BG_CANVAS_PANEL = "rgba(255, 255, 255, 0.94)"
+TEXT_ON_CANVAS = "#18232d"
+BORDER_CANVAS = "rgba(83, 97, 108, 0.42)"
 # QSS 内联语义色（菜单/nav 激活底 / 表格选中）
-BG_NAV_ACTIVE = "#eae2cd"            # 暖沙中性激活底
-BG_MENU_HOVER = "#f1ebdc"
-BG_SELECTION = "#f3e3d3"             # 表格选中（铜洗暖色）
+BG_NAV_ACTIVE = "#e1eef1"
+BG_MENU_HOVER = "#edf2f4"
+BG_SELECTION = "#d8ebef"
 # 徽章专用深色（配白字达 WCAG ≥ 4.5:1；主 WARNING/SUCCESS 用于正文文字色）
 BADGE_WARNING = "#92400e"            # white-on ≈ 7.1:1
 BADGE_SUCCESS = "#166534"            # white-on ≈ 7.1:1
 BADGE_PRIMARY = "#134e4a"            # white-on ≈ 9.5:1
 
-PRIMARY_HOVER = "#09302c"
-PRIMARY_PRESSED = "#062220"
-PRIMARY_DISABLED = "#a49d8e"
+PRIMARY_HOVER = "#084b58"
+PRIMARY_PRESSED = "#063d48"
+PRIMARY_DISABLED = "#8c99a3"
 # 主色面上的文字色（浅色主题=白，深色主题=深墨，高对比=白）
 ON_PRIMARY = "#ffffff"
 
 # 图标栏交互态（深色栏专用，三主题各自策展）
-BG_RAIL_HOVER = "#1b3632"
-BG_RAIL_ACTIVE = "#24514b"
-RAIL_SEPARATOR = "rgba(185, 206, 200, 0.35)"
+BG_RAIL_HOVER = "#edf2f4"
+BG_RAIL_ACTIVE = "#e1eef1"
+RAIL_SEPARATOR = "rgba(83, 97, 108, 0.25)"
 
 # 工具提示 / 分隔手柄（主题感知，修复旧深色主题下浅字浅底的提示框）
-TOOLTIP_BG = "#2b2622"
-TOOLTIP_TEXT = "#f6f1e7"
-SPLITTER_HANDLE = "rgba(122, 112, 94, 0.40)"
-SPLITTER_HANDLE_HOVER = "rgba(194, 65, 12, 0.45)"
+TOOLTIP_BG = "#18232d"
+TOOLTIP_TEXT = "#ffffff"
+SPLITTER_HANDLE = "rgba(83, 97, 108, 0.28)"
+SPLITTER_HANDLE_HOVER = "rgba(11, 85, 99, 0.55)"
 
 FOCUS_RING = ACCENT
 
 # Glassmorphism & Micro-interaction Tokens
-BG_GLASS = "rgba(255, 253, 249, 0.88)"
+BG_GLASS = "rgba(255, 255, 255, 0.92)"
 BG_GLASS_BORDER = "rgba(255, 255, 255, 0.55)"
-SHADOW_SOFT = "0 4px 16px rgba(41, 35, 26, 0.10)"
-SHADOW_CARD = "0 2px 8px rgba(41, 35, 26, 0.06)"
-SHADOW_CARD_HOVER = "0 6px 20px rgba(194, 65, 12, 0.16)"
-HOVER_GLOW = "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(194, 65, 12, 0.08), stop:1 rgba(12, 63, 59, 0.05))"
+SHADOW_SOFT = "0 4px 16px rgba(24, 35, 45, 0.10)"
+SHADOW_CARD = "0 2px 8px rgba(24, 35, 45, 0.06)"
+SHADOW_CARD_HOVER = "0 6px 20px rgba(11, 85, 99, 0.14)"
+HOVER_GLOW = "#edf2f4"
 
 FONT_FAMILY = '"Inter", "SF Pro Text", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif'
 # Modular type scale (base 13px, Minor Third 1.2): ms(-2)=9, ms(-1)=11, ms(0)=13.
@@ -104,15 +98,15 @@ FONT_WEIGHT_TITLE = "700"
 
 MENU_BAR_HEIGHT = 40
 HEADER_TOOLBAR_HEIGHT = 40
-ICON_RAIL_WIDTH = 64
+ICON_RAIL_WIDTH = 54
 TEXT_SIDEBAR_WIDTH = 256
 STATUS_BAR_HEIGHT = 26
 ICON_RAIL_ITEM_SIZE = 48
 RADIUS_BUTTON = 4
-RADIUS_CARD = 8
+RADIUS_CARD = 4
 RADIUS_BADGE = 4
-RADIUS_PANEL = 8
-RADIUS_NAV_ITEM = 10
+RADIUS_PANEL = 4
+RADIUS_NAV_ITEM = 4
 
 SPACE_1 = 4
 SPACE_2 = 8
@@ -151,7 +145,7 @@ PAGE_DESCRIPTIONS = [
 ]
 
 # 工作流阶段色（白字徽章底色，全部 ≥ 4.5:1）
-STEP_COLORS = ["#0c3f3b", "#c2410c", "#4a5899", "#4d6b2f", "#a44a3f", "#5d564b"]
+STEP_COLORS = ["#0b5563", "#a65313", "#4a5899", "#4d6b2f", "#a44a3f", "#5d564b"]
 STEP_LABELS = [
     "数据管理", "数据转换", "制图数据制备",
     "沉积相预测", "古地理图编制", "质控与导出",
@@ -230,10 +224,9 @@ SYSTEMS_TRACT_LABELS = ["LST", "TST", "HST"]
 
 # ---------------------------------------------------------------------------
 # Theme palettes: one token vocabulary, three curated palettes.
-# LIGHT is the Stratum production look; DARK / HIGH_CONTRAST override the
+# LIGHT is the Workstation production look; DARK / HIGH_CONTRAST override the
 # color-carrying tokens while inheriting every structural token unchanged.
-# The icon rail stays dark in all three themes so one nav icon set serves
-# every theme without recoloring.
+# The light icon rail is white; dark and high-contrast palettes remain curated.
 # ---------------------------------------------------------------------------
 
 _DARK_OVERRIDES = {
@@ -610,7 +603,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         background-color: {t.BG_HEADER};
         color: {t.TEXT_PRIMARY};
         border: 1px solid {t.BORDER_STRONG};
-        border-radius: 8px;
+        border-radius: 4px;
         padding: 4px;
     }}
     QMenu::item {{
@@ -1110,6 +1103,402 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         background: {t.BG_SIDEBAR};
         color: {t.TEXT_PRIMARY};
         border-color: {t.BORDER};
+    }}
+
+    /* ── Workstation V3: native Qt shell ─────────────────────────── */
+    QWidget#WorkstationFrame,
+    QFrame#WorkstationDocumentRegion,
+    QStackedWidget#WorkstationDocumentStack,
+    QWidget#LinkedInterpretationWorkspace {{
+        background: {t.BG_BODY};
+        border: none;
+    }}
+    QFrame#WorkstationAppBar {{
+        background: {t.BG_HEADER};
+        border: none;
+        border-bottom: 1px solid {t.BORDER_STRONG};
+    }}
+    QLabel#WorkstationBrand {{
+        color: {t.TEXT_PRIMARY};
+        font-size: 14px;
+        font-weight: 700;
+        padding-right: 8px;
+    }}
+    QToolButton#WorkstationProjectButton {{
+        background: transparent;
+        color: {t.TEXT_PRIMARY};
+        border: none;
+        border-left: 1px solid {t.BORDER};
+        border-radius: 0px;
+        padding: 4px 10px;
+        font-weight: 600;
+    }}
+    QToolButton#WorkstationProjectButton:hover {{
+        background: {t.BG_MENU_HOVER};
+    }}
+    QLineEdit#WorkstationCommandInput {{
+        background: {t.BG_BODY};
+        color: {t.TEXT_PRIMARY};
+        border: 1px solid {t.BORDER_STRONG};
+        border-radius: 4px;
+        min-height: 28px;
+        padding: 2px 10px;
+    }}
+    QLineEdit#WorkstationCommandInput:focus {{
+        background: {t.BG_SIDEBAR};
+        border-color: {t.PRIMARY};
+    }}
+    QToolButton#WorkstationChromeButton,
+    QToolButton#WorkstationSyncState,
+    QToolButton#WorkstationTaskButton,
+    QToolButton#WorkstationAgentButton {{
+        color: {t.TEXT_SECONDARY};
+        border: 1px solid transparent;
+        border-radius: 3px;
+        min-height: 26px;
+        padding: 2px 7px;
+    }}
+    QToolButton#WorkstationSyncState {{
+        color: {t.PRIMARY};
+    }}
+    QToolButton#WorkstationTaskButton[activeTasks="true"] {{
+        color: {t.WARNING};
+        background: {t.BG_SEARCH};
+    }}
+    QToolButton#WorkstationAgentButton {{
+        color: {t.PRIMARY};
+        border-color: {t.BORDER};
+        font-weight: 600;
+    }}
+    QFrame#WorkstationNavigationRegion,
+    QFrame#WorkstationActivityRail,
+    QFrame#WorkstationExplorer,
+    QFrame#WorkstationInspector,
+    QFrame#WorkstationProcessHub {{
+        background: {t.BG_SIDEBAR};
+        border: none;
+    }}
+    QFrame#WorkstationActivityRail {{
+        border-right: 1px solid {t.BORDER};
+    }}
+    QFrame#WorkstationExplorer {{
+        border-right: 1px solid {t.BORDER_STRONG};
+    }}
+    QToolButton#WorkstationActivityButton {{
+        background: transparent;
+        color: {t.TEXT_SECONDARY};
+        border: none;
+        border-left: 3px solid transparent;
+        border-radius: 0px;
+        padding: 3px 1px;
+        font-size: 9px;
+        font-weight: 600;
+    }}
+    QToolButton#WorkstationActivityButton:hover {{
+        background: {t.BG_RAIL_HOVER};
+        color: {t.TEXT_PRIMARY};
+    }}
+    QToolButton#WorkstationActivityButton:checked {{
+        background: {t.BG_RAIL_ACTIVE};
+        color: {t.PRIMARY};
+        border-left: 3px solid {t.PRIMARY};
+    }}
+    QToolButton#WorkstationRailCollapseButton {{
+        color: {t.TEXT_SECONDARY};
+        border: none;
+        border-top: 1px solid {t.BORDER};
+        border-radius: 0px;
+        min-height: 24px;
+    }}
+    QLabel#WorkstationPanelTitle,
+    QLabel#WorkstationInspectorHeader {{
+        color: {t.TEXT_PRIMARY};
+        font-size: 12px;
+        font-weight: 700;
+    }}
+    QLabel#WorkstationInspectorHeader {{
+        min-height: 30px;
+        padding: 0px 10px;
+        border-bottom: 1px solid {t.BORDER};
+    }}
+    QLabel#WorkstationPanelFootnote,
+    QLabel#WorkstationAgentContext {{
+        color: {t.TEXT_SECONDARY};
+        font-size: 11px;
+    }}
+    QLineEdit#WorkstationExplorerSearch,
+    QLineEdit#WorkstationAgentInput {{
+        background: {t.BG_SIDEBAR};
+        border: 1px solid {t.BORDER};
+        border-radius: 3px;
+        min-height: 28px;
+        padding: 2px 7px;
+    }}
+    /* Inspector 字段值：可选取的只读 editor —— 扁平浅底，缺失值弱化 */
+    QLineEdit#WorkstationInspectorValue {{
+        background: {t.BG_BODY};
+        color: {t.TEXT_PRIMARY};
+        border: 1px solid transparent;
+        border-radius: 2px;
+        min-height: 24px;
+        padding: 1px 6px;
+        selection-background-color: {t.BG_SELECTION};
+        selection-color: {t.TEXT_PRIMARY};
+    }}
+    QLineEdit#WorkstationInspectorValue:hover {{
+        border-color: {t.BG_SEARCH};
+    }}
+    QLineEdit#WorkstationInspectorValue:focus {{
+        border-color: {t.BORDER_STRONG};
+        background: {t.BG_SIDEBAR};
+    }}
+    QLineEdit#WorkstationInspectorValue[missing="true"] {{
+        color: {t.TEXT_SECONDARY};
+        font-style: italic;
+    }}
+    QTreeView#WorkstationExplorerTree {{
+        background: {t.BG_SIDEBAR};
+        border: none;
+        border-top: 1px solid {t.BORDER_LIGHT};
+        border-radius: 0px;
+        padding-top: 3px;
+    }}
+    QTreeView#WorkstationExplorerTree::item {{
+        min-height: 22px;
+        padding: 1px 4px;
+        border-radius: 0px;
+    }}
+    QTreeView#WorkstationExplorerTree::item:selected {{
+        background: {t.BG_SELECTION};
+        color: {t.TEXT_PRIMARY};
+        border-left: 2px solid {t.PRIMARY};
+    }}
+    QTabBar#WorkstationDocumentTabs {{
+        background: {t.BG_SEARCH};
+        border-bottom: 1px solid {t.BORDER_STRONG};
+    }}
+    QTabBar#WorkstationDocumentTabs::tab {{
+        background: {t.BG_SEARCH};
+        color: {t.TEXT_SECONDARY};
+        border: none;
+        border-right: 1px solid {t.BORDER};
+        border-radius: 0px;
+        min-height: 32px;
+        max-height: 32px;
+        padding: 0px 12px;
+        margin: 0px;
+    }}
+    QTabBar#WorkstationDocumentTabs::tab:selected {{
+        background: {t.BG_SIDEBAR};
+        color: {t.TEXT_PRIMARY};
+        border-top: 2px solid {t.PRIMARY};
+        font-weight: 600;
+    }}
+    QFrame#WorkstationContextBar {{
+        background: {t.BG_SIDEBAR};
+        border: none;
+        border-bottom: 1px solid {t.BORDER};
+    }}
+    /* Composite full-bleed overlay: hairline float strip, no SaaS card chrome */
+    QFrame#WorkstationOverlayToolbar {{
+        background: {t.BG_HEADER};
+        border: 1px solid {t.BORDER_STRONG};
+        border-radius: 3px;
+        padding: 0px;
+    }}
+    QFrame#WorkstationContextSeparator {{
+        background: {t.BORDER};
+        border: none;
+        margin: 5px 3px;
+    }}
+    QToolButton#WorkstationContextButton,
+    QToolButton#WorkstationLinkButton {{
+        background: transparent;
+        color: {t.TEXT_SECONDARY};
+        border: 1px solid transparent;
+        border-radius: 3px;
+        padding: 3px 7px;
+    }}
+    QToolButton#WorkstationContextButton:hover,
+    QToolButton#WorkstationLinkButton:hover {{
+        background: {t.BG_SEARCH};
+        color: {t.TEXT_PRIMARY};
+    }}
+    QToolButton#WorkstationLinkButton:checked {{
+        background: {t.BG_SELECTION};
+        color: {t.PRIMARY};
+        border-color: {t.PRIMARY};
+    }}
+    QFrame#WorkstationDocumentPane {{
+        background: {t.BG_SIDEBAR};
+        border: 1px solid {t.BORDER_STRONG};
+        border-radius: 2px;
+    }}
+    QFrame#WorkstationDocumentPaneHeader {{
+        background: {t.BG_SEARCH};
+        border: none;
+        border-bottom: 1px solid {t.BORDER};
+    }}
+    QLabel#WorkstationDocumentPaneTitle {{
+        color: {t.TEXT_PRIMARY};
+        font-size: 11px;
+        font-weight: 700;
+    }}
+    QLabel#WorkstationLinkBadge {{
+        color: {t.PRIMARY};
+        background: {t.BG_SELECTION};
+        border: 1px solid {t.BORDER};
+        border-radius: 3px;
+        padding: 1px 5px;
+        font-size: 10px;
+    }}
+    QFrame#WorkstationDocumentPaneHost {{
+        background: {t.BG_SIDEBAR};
+        border: none;
+    }}
+    QLabel#WorkstationDocumentEmptyState {{
+        background: transparent;
+        color: {t.TEXT_SECONDARY};
+        border: 1px dashed {t.BORDER_STRONG};
+        border-radius: 4px;
+        font-size: 12px;
+        padding: 18px 14px;
+    }}
+    QFrame#WorkstationInspector {{
+        border-left: 1px solid {t.BORDER_STRONG};
+    }}
+    QTabWidget#WorkstationInspectorTabs::pane,
+    QTabWidget#WorkstationProcessTabs::pane {{
+        background: {t.BG_SIDEBAR};
+        border: none;
+        border-top: 1px solid {t.BORDER};
+        border-radius: 0px;
+    }}
+    QTabWidget#WorkstationInspectorTabs QTabBar::tab,
+    QTabWidget#WorkstationProcessTabs QTabBar::tab {{
+        background: {t.BG_SIDEBAR};
+        color: {t.TEXT_SECONDARY};
+        border: none;
+        border-radius: 0px;
+        padding: 5px 10px;
+    }}
+    QTabWidget#WorkstationInspectorTabs QTabBar::tab:selected,
+    QTabWidget#WorkstationProcessTabs QTabBar::tab:selected {{
+        color: {t.PRIMARY};
+        border-bottom: 2px solid {t.PRIMARY};
+        font-weight: 600;
+    }}
+    QFrame#WorkstationProcessHub {{
+        border-top: 1px solid {t.BORDER_STRONG};
+    }}
+    /* 综合编修 / shell：可浮动 dock 标题条（对齐 V3 light tokens） */
+    QDockWidget {{
+        color: {t.TEXT_PRIMARY};
+        font-size: 12px;
+        border: 1px solid {t.BORDER};
+        border-radius: 0px;
+    }}
+    QDockWidget::title {{
+        background: {t.BG_HEADER};
+        color: {t.TEXT_PRIMARY};
+        border: none;
+        border-bottom: 1px solid {t.BORDER};
+        padding: 5px 10px;
+        font-weight: 700;
+        text-align: left;
+    }}
+    QDockWidget::title:hover {{
+        background: {t.BG_SEARCH};
+    }}
+    QDockWidget::close-button,
+    QDockWidget::float-button {{
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 2px;
+        padding: 1px;
+        icon-size: 12px;
+    }}
+    QDockWidget::close-button:hover,
+    QDockWidget::float-button:hover {{
+        background: {t.BG_SEARCH};
+        border-color: {t.BORDER};
+    }}
+    /* FloatController top-level chrome (mapping / legacy float path) */
+    QWidget#FloatingPanel {{
+        background: {t.BG_HEADER};
+        border: 1px solid {t.BORDER_STRONG};
+        border-radius: 3px;
+    }}
+    QWidget#FloatingPanelTitleBar {{
+        background: {t.BG_HEADER};
+        border: none;
+        border-bottom: 1px solid {t.BORDER};
+        min-height: 28px;
+        max-height: 28px;
+    }}
+    QLabel#FloatingPanelTitle {{
+        color: {t.TEXT_PRIMARY};
+        font-size: 12px;
+        font-weight: 700;
+        padding-left: 2px;
+    }}
+    QWidget#FloatingPanelContent {{
+        background: {t.BG_SIDEBAR};
+        border: none;
+    }}
+    QTextBrowser#WorkstationAgentHistory {{
+        background: {t.BG_SIDEBAR};
+        color: {t.TEXT_PRIMARY};
+        border: 1px solid {t.BORDER};
+        border-radius: 3px;
+        padding: 5px;
+    }}
+    QLabel#WorkstationAgentConsent {{
+        color: {t.TEXT_SECONDARY};
+        background: {t.BG_SEARCH};
+        border: 1px solid {t.BORDER};
+        border-radius: 3px;
+        padding: 4px 7px;
+    }}
+    QTreeWidget#WorkstationTaskTree {{
+        background: {t.BG_SIDEBAR};
+        border: none;
+        border-radius: 0px;
+    }}
+    QTreeWidget#WorkstationTaskTree::item {{
+        min-height: 24px;
+    }}
+    /* 任务进度：slim 无边框条，颜色按任务状态（运行=amber 过程色） */
+    QProgressBar#WorkstationTaskProgress {{
+        background: {t.BG_SEARCH};
+        border: none;
+        border-radius: 3px;
+        min-height: 6px;
+        max-height: 6px;
+    }}
+    QProgressBar#WorkstationTaskProgress::chunk {{
+        background-color: {t.PRIMARY};
+        border-radius: 3px;
+    }}
+    QProgressBar#WorkstationTaskProgress[taskState="running"]::chunk {{
+        background-color: {t.ACCENT};
+    }}
+    QProgressBar#WorkstationTaskProgress[taskState="queued"]::chunk {{
+        background-color: {t.PRIMARY_DISABLED};
+    }}
+    QProgressBar#WorkstationTaskProgress[taskState="done"]::chunk {{
+        background-color: {t.SUCCESS};
+    }}
+    QProgressBar#WorkstationTaskProgress[taskState="failed"]::chunk {{
+        background-color: {t.ERROR_RED};
+    }}
+    QPushButton#WorkstationTertiaryButton {{
+        background: transparent;
+        color: {t.TEXT_SECONDARY};
+        border: 1px solid {t.BORDER};
+        border-radius: 3px;
+        min-height: 26px;
+        padding: 2px 8px;
     }}
     '''
 

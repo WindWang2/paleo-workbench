@@ -46,6 +46,7 @@ class FloatingPanel(QWidget):
         # A real top-level window even when a parent widget is handed over.
         self.setWindowFlags(Qt.WindowType.Window)
         self.setObjectName("FloatingPanel")
+        self.setMinimumSize(240, 180)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(

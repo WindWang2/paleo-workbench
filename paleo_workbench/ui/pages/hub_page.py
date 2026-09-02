@@ -24,6 +24,7 @@ class HubPage(QWidget):
     """Container hosting one hub's sub-module pages behind a pill switcher."""
 
     submodule_changed = Signal(int, str)  # hub_index, submodule key
+    page_activated = Signal(int, str)  # emitted for UI and programmatic switches
 
     def __init__(self, hub_index: int, parent=None):
         super().__init__(parent)
@@ -84,6 +85,7 @@ class HubPage(QWidget):
         activate = getattr(page, "activate_page", None)
         if callable(activate):
             activate()
+        self.page_activated.emit(self.hub_index, key)
         if emit:
             self.submodule_changed.emit(self.hub_index, key)
 

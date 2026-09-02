@@ -14,6 +14,10 @@ class WorkspacePreset(str, Enum):
     SINGLE_FACTOR_MAPPING = "single_factor"
     MAP_AUTHORING = "map_authoring"
     GEOMODEL_3D = "geomodel_3d"
+    # Workstation V3 Light named layouts (design-qa P3). Coexist with the
+    # mapping/well presets above; shell applies them via QMainWindow docks.
+    WORKSTATION_COMPOSITE = "workstation_composite"
+    WORKSTATION_INTERPRETATION = "workstation_interpretation"
 
 
 @dataclass
@@ -70,11 +74,60 @@ class DockManager:
                 DockPanelConfig("crossplot", "岩性交会图", visible=True, area="bottom"),
             ],
         )
+        # Workstation V3 Light presets — mirror layout_presets visibility.
+        self._layouts[WorkspacePreset.WORKSTATION_COMPOSITE] = WorkspaceLayout(
+            preset=WorkspacePreset.WORKSTATION_COMPOSITE,
+            name="默认综合编修",
+            docks=[
+                DockPanelConfig("workstation:explorer", "资源管理器", visible=True, area="left"),
+                DockPanelConfig("workstation:inspector", "检查器", visible=True, area="right"),
+                DockPanelConfig("workstation:process", "Agent", visible=False, area="bottom"),
+                DockPanelConfig("workstation:tasks", "任务中心", visible=False, area="bottom"),
+                DockPanelConfig(
+                    "workstation:composite_layer", "图层管理", visible=True, area="right"
+                ),
+                DockPanelConfig(
+                    "workstation:composite_input", "输入与结果", visible=False, area="left"
+                ),
+                DockPanelConfig(
+                    "workstation:composite_linked", "联动视图", visible=False, area="bottom"
+                ),
+            ],
+        )
+        self._layouts[WorkspacePreset.WORKSTATION_INTERPRETATION] = WorkspaceLayout(
+            preset=WorkspacePreset.WORKSTATION_INTERPRETATION,
+            name="解释工作区",
+            docks=[
+                DockPanelConfig("workstation:explorer", "资源管理器", visible=True, area="left"),
+                DockPanelConfig("workstation:inspector", "检查器", visible=True, area="right"),
+                DockPanelConfig("workstation:process", "Agent", visible=True, area="bottom"),
+                DockPanelConfig("workstation:tasks", "任务中心", visible=True, area="bottom"),
+                DockPanelConfig(
+                    "workstation:composite_layer", "图层管理", visible=False, area="right"
+                ),
+                DockPanelConfig(
+                    "workstation:composite_input", "输入与结果", visible=False, area="left"
+                ),
+                DockPanelConfig(
+                    "workstation:composite_linked", "联动视图", visible=False, area="bottom"
+                ),
+            ],
+        )
         # The preset docks seed the panel-id registry: ids are unique across
         # presets (first registration wins on collision).
         for layout in self._layouts.values():
             for dock in layout.docks:
                 self._panels.setdefault(dock.id, dock)
+
+        # Keep layout_presets panel vocabulary in sync (no-op if already seeded).
+        try:
+            from paleo_workbench.ui.layout_presets import (
+                register_with_dock_manager,
+            )
+
+            register_with_dock_manager(self)
+        except Exception:
+            pass
 
     def get_layout(self, preset: WorkspacePreset) -> WorkspaceLayout | None:
         return self._layouts.get(preset)
