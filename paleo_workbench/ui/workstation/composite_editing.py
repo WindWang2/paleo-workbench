@@ -1005,7 +1005,7 @@ class CompositeEditController(QObject):
                 self.content_changed.emit(polygon_layer.id)
                 self.state_changed.emit()
                 return True, "已按切割线分割多边形"
-        except (RuntimeError, ValueError) as exc:
+        except (KeyError, RuntimeError, ValueError) as exc:
             return False, str(exc)
         return False, f"未知几何命令 {command_id}"
 
@@ -1193,15 +1193,12 @@ class CompositeEditController(QObject):
                 order.append(layer_id)
                 self._display[layer_id] = (
                     bool(getattr(snapshot, "visible", True)),
-                    float(getattr(snapshot, "opacity", 1.0) or 1.0),
+                    min(1.0, max(0.05, float(getattr(snapshot, "opacity", 1.0)))),
                 )
-        if not order or len(order) == len(self._layers):
-            remaining = [lid for lid in self._layers if lid not in seen]
-        else:  # 面板缺图层（异常路径）：保守保持原序尾部。
-            remaining = [lid for lid in self._layers if lid not in seen]
         if order:
-            new_layers = {lid: self._layers[lid] for lid in order + remaining}
-            self._layers = new_layers
+            # 面板未覆盖的图层保守保持原序尾部（异常路径）。
+            remaining = [lid for lid in self._layers if lid not in seen]
+            self._layers = {lid: self._layers[lid] for lid in order + remaining}
 
     def action_state(self, *, can_previous_extent: bool = False, can_next_extent: bool = False) -> MapActionState:
         layer = self.active_layer

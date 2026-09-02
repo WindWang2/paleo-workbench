@@ -485,6 +485,9 @@ class VectorEditSession:
         command.revert(self._working)
         self.redo_stack.append(command)
         self.revision += 1
+        # 撤销可能移除要素：选集不得残留已不存在的 id（否则宿主的
+        # O(selection) 计数与几何命令会命中缺失要素）。
+        self.layer._selection.intersection_update(self._working)
         return True
 
     def redo(self) -> bool:
@@ -494,6 +497,7 @@ class VectorEditSession:
         command.apply(self._working)
         self.undo_stack.append(command)
         self.revision += 1
+        self.layer._selection.intersection_update(self._working)
         return True
 
     def commit_changes(self) -> None:

@@ -311,7 +311,15 @@ class UnifiedMapCanvas(QWidget):
             "empty_polls": self._empty_poll_count,
         }
 
+    @property
+    def is_shutdown(self) -> bool:
+        """shutdown() 是否已执行（宿主可在 teardown 后防御性查询）。"""
+        return bool(getattr(self, "_shutdown_done", False))
+
     def set_layer_snapshot(self, snapshot: MapRenderSnapshot) -> None:
+        if getattr(self, "_shutdown_done", False):
+            # teardown 后的迟到发布不得重新启动渲染轮询（review 二轮 #4）。
+            return
         signature = self._snapshot_signature(snapshot)
         if signature == self._last_snapshot_signature:
             # Host refreshes can fire many times per interaction; identical

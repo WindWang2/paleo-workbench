@@ -664,9 +664,10 @@ class CompositeDocument(QWidget):
             lambda *_: self._sync_composition(immediate=False)
         )
         # 提交 / 回滚点是数据边界：立即重组并写回工程文档（内存态不得
-        # 滞后于「保存编辑」语义）。
+        # 滞后于「保存编辑」语义）；immediate 同时取消 pending debounce，
+        # 避免 120ms 后的一次冗余全量重组。
         self.edit_controller.sessions_committed.connect(
-            lambda *_: self._sync_composition_now()
+            lambda *_: self._sync_composition(immediate=True)
         )
         self.edit_controller.state_changed.connect(self._sync_action_state)
         self.canvas.tool_operation.connect(self._on_tool_operation)
@@ -861,6 +862,16 @@ class CompositeDocument(QWidget):
         self.action_controller.actions["split"].setEnabled(
             controller._split_inputs() is not None
         )
+        # 工具按钮勾选态跟随真实活动工具（会话回落 pan 后按钮不得停留在
+        # 已失效的工具上）。
+        active_tool_id = (
+            getattr(controller.tools.active_tool, "tool_id", "") or "pan"
+        )
+        for action_id in self.action_controller._TOOL_IDS:
+            action = self.action_controller.actions[action_id]
+            action.blockSignals(True)
+            action.setChecked(action_id == active_tool_id)
+            action.blockSignals(False)
         # 捕捉 / 拓扑的勾选态以控制器为权威（捕捉设置对话框等旁路入口
         # 不得让工具条按钮失步，review #11）。
         actions = self.action_controller.actions
@@ -1105,9 +1116,12 @@ class CompositeDocument(QWidget):
         if layer is None:
             return
         layer.set_selection((feature_id,))
-        feature = next(
-            (f for f in layer.features() if f.feature_id == feature_id), None
+        source = (
+            layer.edit_session.features()
+            if layer.edit_session is not None
+            else layer.features()
         )
+        feature = next((f for f in source if f.feature_id == feature_id), None)
         if feature is not None:
             extent = _feature_extent([feature.as_record()])
             if extent[0] < extent[2] and extent[1] < extent[3]:
@@ -1209,10 +1223,11 @@ class CompositeDocument(QWidget):
         status_message 告知（review #3）。
         """
         self._composition_timer.stop()
-        self._sync_composition_now()
         self.edit_controller.apply_display_state(self.layer_manager._layers)
         committed, blocked = self.edit_controller.flush_edit_sessions()
-        if self._project is not None:
+        # sessions_committed 已触发过 immediate 重组；无会话提交（纯显示态
+        # 变化 / 全部被拓扑阻断）时在此补一次写回。
+        if self._project is not None and not committed:
             self.edit_controller.sync_to_project(self._project)
         for message in blocked:
             self.status_message.emit(message)

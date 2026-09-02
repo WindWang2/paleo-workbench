@@ -772,3 +772,43 @@ def test_well_snap_checkbox_wires_reference_points(qtbot, tmp_path):
     dialog2.accept()
     assert "reference" not in controller.snapping.modes
     assert not controller.snapping.reference_points
+
+
+# --- 二轮 review 回归：undo 后选集修剪（Medium） ------------------------------
+
+
+def test_undo_prunes_stale_selection(qtbot, tmp_path):
+    """撤销删除要素后选集不得残留失效 id（merge 计数与几何命令的完整性）。"""
+    doc = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(doc)
+    controller = doc.edit_controller
+    layer = controller.create_layer("相带", "polygon", template="facies")
+    layer.start_editing()
+    layer.edit_session.add_feature(_polygon("p1", 0.0, 0.0, 2.0, 2.0))
+    layer.edit_session.add_feature(_polygon("p2", 2.0, 0.0, 4.0, 2.0))
+    layer.set_selection({"p1", "p2"})
+    assert controller.action_state().compatible_polygon_count == 2
+
+    layer.edit_session.undo()
+    layer.edit_session.undo()
+    # 撤销两个添加后选集应为空；merge 不再可用。
+    assert layer.selection == set()
+    assert controller.action_state().compatible_polygon_count == 0
+    ok, message = controller.geometry_command("merge")
+    assert ok is False
+
+
+def test_merge_after_partial_undo_is_safe(qtbot, tmp_path):
+    """部分撤销后 merge 只作用于工作副本中真实存在的选中要素。"""
+    doc = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(doc)
+    controller = doc.edit_controller
+    layer = controller.create_layer("相带", "polygon", template="facies")
+    layer.start_editing()
+    layer.edit_session.add_feature(_polygon("p1", 0.0, 0.0, 2.0, 2.0))
+    layer.edit_session.add_feature(_polygon("p2", 2.0, 0.0, 4.0, 2.0))
+    layer.set_selection({"p1", "p2"})
+    layer.edit_session.undo()  # p2 消失，选集修剪为 {p1}
+    assert layer.selection == {"p1"}
+    ok, message = controller.geometry_command("merge")
+    assert ok is False, "单要素不满足合并条件，但不得抛未捕获异常"
