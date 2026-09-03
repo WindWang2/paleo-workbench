@@ -32,10 +32,9 @@ def test_layer_tree_view_embeds_and_lists_mirror_layers(qtbot, stack):
     tree = wrapInstance(tree_addr, QWidget)
     qtbot.addWidget(tree)
     tree.show()
-    layer_id = stack.add_vector_layer_geojson("井位", "Point", "EPSG:4326", _GEOJSON)
-    qtbot.waitUntil(lambda: tree.model().rowCount() >= 1, timeout=2000)
-    model = tree.model()
-    names = [model.index(row, 0).data() for row in range(model.rowCount())]
+    stack.add_vector_layer_geojson("井位", "Point", "EPSG:4326", _GEOJSON)
+    qtbot.waitUntil(lambda: stack.tree_view_row_count(tree_addr) >= 1, timeout=2000)
+    names = [stack.tree_view_layer_name(tree_addr, row) for row in range(stack.tree_view_row_count(tree_addr))]
     assert "井位" in names
 
 
@@ -44,12 +43,11 @@ def test_selection_callback_fires_with_doc_id(qtbot, stack):
     tree_addr = stack.create_layer_tree_view(canvas)
     seen = []
     stack.set_tree_selection_callback(tree_addr, seen.append)
-    layer_id = stack.add_vector_layer_geojson("工区边界", "Polygon", "EPSG:4326", _GEOJSON)
+    stack.add_vector_layer_geojson("工区边界", "Polygon", "EPSG:4326", _GEOJSON)
     tree = wrapInstance(tree_addr, QWidget)
     qtbot.addWidget(tree)
     tree.show()
-    model = tree.model()
-    qtbot.waitUntil(lambda: model.rowCount() >= 1, timeout=2000)
-    tree.setCurrentIndex(model.index(0, 0))
+    qtbot.waitUntil(lambda: stack.tree_view_row_count(tree_addr) >= 1, timeout=2000)
+    stack.tree_view_set_current_row(tree_addr, 0)
     qtbot.waitUntil(lambda: len(seen) >= 1, timeout=2000)
     assert seen[-1]  # 非空：doc id 或 QGIS layer id

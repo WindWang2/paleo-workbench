@@ -37,7 +37,7 @@ class QgisLayerTreeHost(QWidget):
         self.stack = stack
         self.canvas_address = canvas_address
         self.tree_view_address = stack.create_layer_tree_view(canvas_address)
-        self.tree_view = shiboken6.wrapInstance(self.tree_view_address, QWidget)
+        self.tree_view = wrap_widget(self.tree_view_address)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)

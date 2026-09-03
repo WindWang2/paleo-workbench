@@ -734,6 +734,7 @@ void QgisMapStack::setTreeSelectionCallback(
   auto connIt = impl_->tree_sel_connections.find(tree_addr);
   if (connIt != impl_->tree_sel_connections.end()) {
     QObject::disconnect(connIt->second);
+    impl_->tree_sel_connections.erase(connIt);
   }
   impl_->tree_sel_connections[tree_addr] = QObject::connect(
       view, &QgsLayerTreeView::currentLayerChanged, view,
@@ -756,16 +757,16 @@ void QgisMapStack::setTreeSelectionCallback(
 int QgisMapStack::treeViewRowCount(std::uintptr_t tree) const {
   QgsLayerTreeView* view = treeViewOrThrow(tree);
   QAbstractItemModel* model = view->model();
-  if (model == nullptr) return 0;
+  if (model == nullptr) throw std::runtime_error("tree view model is null");
   return model->rowCount();
 }
 
 std::string QgisMapStack::treeViewLayerName(std::uintptr_t tree, int row) const {
   QgsLayerTreeView* view = treeViewOrThrow(tree);
   QAbstractItemModel* model = view->model();
-  if (model == nullptr) return "";
+  if (model == nullptr) throw std::runtime_error("tree view model is null");
   QModelIndex idx = model->index(row, 0);
-  if (!idx.isValid()) return "";
+  if (!idx.isValid()) throw std::out_of_range("tree view row out of range: " + std::to_string(row));
   QVariant d = model->data(idx, Qt::DisplayRole);
   return d.toString().toStdString();
 }
@@ -773,9 +774,9 @@ std::string QgisMapStack::treeViewLayerName(std::uintptr_t tree, int row) const 
 void QgisMapStack::treeViewSetCurrentRow(std::uintptr_t tree, int row) {
   QgsLayerTreeView* view = treeViewOrThrow(tree);
   QAbstractItemModel* model = view->model();
-  if (model == nullptr) return;
+  if (model == nullptr) throw std::runtime_error("tree view model is null");
   QModelIndex idx = model->index(row, 0);
-  if (!idx.isValid()) return;
+  if (!idx.isValid()) throw std::out_of_range("tree view row out of range: " + std::to_string(row));
   view->setCurrentIndex(idx);
 }
 

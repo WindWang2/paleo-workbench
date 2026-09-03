@@ -45,6 +45,11 @@ public:
   void setTreeSelectionCallback(std::uintptr_t tree_view,
                                 std::function<void(const std::string&)> callback);
 
+  // Tree drive/inspection API — used by tests and M2 panel tasks to drive
+  // and inspect the native QgsLayerTreeView without exposing Qt model types
+  // across the address boundary. Invalid tree address throws via
+  // treeViewOrThrow (invalid_argument); invalid row index throws
+  // std::out_of_range.
   int treeViewRowCount(std::uintptr_t tree) const;
   std::string treeViewLayerName(std::uintptr_t tree, int row) const;
   void treeViewSetCurrentRow(std::uintptr_t tree, int row);
