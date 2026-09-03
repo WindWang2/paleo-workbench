@@ -31,3 +31,7 @@ cd ~/.claude/skills/gstack && ./setup --team
 ```
 
 After install, gstack skills like `/ship`, `/investigate`, `/browse`, `/design-shotgun`, and `/cso` become available. Note: gstack also registers `/qa` and `/review`, which shadow this repo's own `agent/skills/qa` and `agent/skills/code-review` - prefer the repo-vendored versions for project-specific review workflows. Use `/browse` for web browsing.
+
+## 地图栈（M1 起）
+
+综合编修区由 QGIS 画布承载（`paleo_workbench/ui/qgis_stack/QgisCanvasShim` 包装 `QgsMapCanvas`，经 `qgis_render_bridge.mapstack`）；其余页面（`mapping_page` / `home_page` / `workarea_map_widget`）仍使用 `UnifiedMapCanvas` + fallback 渲染器。fallback 拆除在 M4（届时全量切 QGIS 栈）。

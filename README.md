@@ -80,6 +80,16 @@ python -m pip install -e geo-viz-engine/native/map_edit_core
 
 When native extensions are not built, the workbench transparently falls back to pure Python / NumPy / SciPy implementations.
 
+### QGIS 原生地图栈（硬依赖，自 v0.3 起）
+
+地图区由 vendored QGIS 4.2（`third_party/qgis`）的 `QgsMapCanvas` 承载，
+首次构建/安装：
+
+    python -m pip install "pybind11>=2.12" ninja
+    python -m pip install -e native/qgis_render_bridge   # 首次构建 vendored QGIS 需数小时
+
+桥未安装时地图区构造会明确报错（无 fallback）。
+
 ### Running the Application
 
 ```bash
@@ -136,6 +146,8 @@ python -m pytest -q
   UI, never touch SQLite, and every data output enters the catalog.
 
 ## QGIS renderer (primary authoring core, optional build)
+
+> M1 起综合编修区由 QGIS 画布承载（`QgisCanvasShim` + `QgsMapCanvas`，硬依赖）；其余页面仍走 `UnifiedMapCanvas` + fallback。fallback 拆除在 M4。
 
 Per ADR 0059 the QGIS renderer is the **primary professional 2-D cartographic
 authoring core**: `create_map_render_backend()` defaults to
