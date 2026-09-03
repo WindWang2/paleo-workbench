@@ -13,9 +13,11 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QMap>
 #include <QObject>
 #include <QPointer>
 #include <QString>
+#include <QTimer>
 #include <QWidget>
 
 #include <qgsapplication.h>
@@ -302,8 +304,27 @@ struct QgisMapStack::Impl {
   // addresses not yet reused (cleared on createCanvas reuse and shutdown).
   std::unordered_set<std::uintptr_t> dead_canvas_addrs;
   std::unordered_map<std::uintptr_t, QPointer<QgsLayerTreeView>> tree_views;
+  // 树视图创建时的 model 直存（qobject_cast 在该类上不可靠，见 M2T3 调试记录）
+  std::unordered_map<std::uintptr_t, QPointer<QgsLayerTreeModel>> tree_models;
   std::unordered_map<std::uintptr_t, std::function<void(const std::string&)>> tree_sel_callbacks;
   std::unordered_map<std::uintptr_t, QMetaObject::Connection> tree_sel_connections;
+  // 树变更批次：同 tick 合并，QTimer::singleShot(0) 发批（JSON）
+  struct TreeChangeBatch {
+    QMap<QString, bool> visibility;
+    QStringList order;
+    QMap<QString, QString> renames;
+    bool empty() const { return visibility.isEmpty() && order.isEmpty() && renames.isEmpty(); }
+  };
+  std::unordered_map<std::uintptr_t, std::function<void(const std::string&)>> tree_change_callbacks;
+  std::unordered_map<std::uintptr_t, std::vector<QMetaObject::Connection>> tree_change_connections;
+  std::unordered_map<std::uintptr_t, TreeChangeBatch> tree_pending;
+  std::unordered_set<std::uintptr_t> tree_flush_scheduled;
+  // 重命名影子表：doc_id -> 最近一次已知图层名；程序化 setName 同步更新，
+  // 回调侧据此区分真实重命名与样式刷新等无关 dataChanged。
+  std::unordered_map<std::string, std::string> known_layer_names;
+  // 可见性影子表：doc_id -> 最近一次已知勾选态；QGIS 用户勾选与刷新都发
+  // 空 roles 的 dataChanged，只能靠影子比对区分。
+  std::unordered_map<std::string, bool> known_layer_visibility;
   std::unordered_map<std::string, std::string> mirror_by_doc;
   std::unordered_map<std::string, std::string> mirror_style_sig;
   int suppress_tree_callbacks = 0;
@@ -313,6 +334,8 @@ struct QgisMapStack::Impl {
       if (it->second == qgis_id) {
         auto sit = mirror_style_sig.find(it->first);
         if (sit != mirror_style_sig.end()) mirror_style_sig.erase(sit);
+        known_layer_names.erase(it->first);
+        known_layer_visibility.erase(it->first);
         it = mirror_by_doc.erase(it);
       } else {
         ++it;
@@ -325,6 +348,8 @@ struct QgisMapStack::Impl {
     if (dit != mirror_by_doc.end()) mirror_by_doc.erase(dit);
     auto sit = mirror_style_sig.find(doc_id);
     if (sit != mirror_style_sig.end()) mirror_style_sig.erase(sit);
+    known_layer_names.erase(doc_id);
+    known_layer_visibility.erase(doc_id);
   }
 
   void eraseMirrorByDocIdIfQgisMatches(const std::string& doc_id,
@@ -334,6 +359,8 @@ struct QgisMapStack::Impl {
       mirror_by_doc.erase(dit);
       auto sit = mirror_style_sig.find(doc_id);
       if (sit != mirror_style_sig.end()) mirror_style_sig.erase(sit);
+      known_layer_names.erase(doc_id);
+    known_layer_visibility.erase(doc_id);
     }
   }
 };
@@ -372,7 +399,17 @@ QgisMapStack::~QgisMapStack() {
   }
   impl_->tree_sel_connections.clear();
   impl_->tree_sel_callbacks.clear();
+  for (auto& kv : impl_->tree_change_connections) {
+    for (const auto& conn : kv.second) QObject::disconnect(conn);
+  }
+  impl_->tree_change_connections.clear();
+  impl_->tree_change_callbacks.clear();
+  impl_->tree_pending.clear();
+  impl_->tree_flush_scheduled.clear();
+  impl_->known_layer_names.clear();
+  impl_->known_layer_visibility.clear();
   impl_->tree_views.clear();
+  impl_->tree_models.clear();
   for (auto& kv : impl_->tools) {
     auto it = impl_->canvas_refs.find(kv.first);
     bool canvasAlive = (it != impl_->canvas_refs.end() && !it->second.isNull());
@@ -422,7 +459,17 @@ void QgisMapStack::shutdown() {
   }
   impl_->tree_sel_connections.clear();
   impl_->tree_sel_callbacks.clear();
+  for (auto& kv : impl_->tree_change_connections) {
+    for (const auto& conn : kv.second) QObject::disconnect(conn);
+  }
+  impl_->tree_change_connections.clear();
+  impl_->tree_change_callbacks.clear();
+  impl_->tree_pending.clear();
+  impl_->tree_flush_scheduled.clear();
+  impl_->known_layer_names.clear();
+  impl_->known_layer_visibility.clear();
   impl_->tree_views.clear();
+  impl_->tree_models.clear();
   {
     SuppressGuard guard(&impl_->suppress_tree_callbacks);
     for (const auto& id : impl_->owned_layers) {
@@ -705,6 +752,10 @@ void QgisMapStack::setLayerVisibility(const std::string& layer_id, bool visible)
     SuppressGuard guard(&impl_->suppress_tree_callbacks);
     node->setItemVisibilityChecked(visible);
   }
+  const QVariant docVar = layer->customProperty(QStringLiteral("pwb/doc_id"));
+  if (docVar.isValid() && !docVar.toString().isEmpty()) {
+    impl_->known_layer_visibility[docVar.toString().toStdString()] = visible;
+  }
 }
 
 void QgisMapStack::setLayerOpacity(const std::string& layer_id, double opacity) {
@@ -790,9 +841,11 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
       existing->setCustomProperty(QStringLiteral("pwb/style_sig"), QString::fromStdString(new_sig));
     }
     existing->setName(QString::fromStdString(name));
+    impl_->known_layer_names[doc_id] = name;  // 程序化改名：同步影子表防误报
     existing->setOpacity(std::clamp(opacity, 0.0, 1.0));
     QgsLayerTreeLayer* node = project->layerTreeRoot()->findLayer(existing);
     if (node) node->setItemVisibilityChecked(visible);
+    impl_->known_layer_visibility[doc_id] = visible;
     impl_->owned_layers.insert(existing_id);
     for (auto& kv : impl_->tree_bridges) {
       if (kv.second) kv.second->setCanvasLayers();
@@ -833,10 +886,12 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
       QgsLayerTreeLayer* node = QgsProject::instance()->layerTreeRoot()->findLayer(added);
       if (node) node->setItemVisibilityChecked(visible);
     }
+    impl_->known_layer_visibility[doc_id] = visible;
   }
   impl_->owned_layers.insert(id);
   impl_->mirror_by_doc[doc_id] = id;
   impl_->mirror_style_sig[doc_id] = new_sig;
+  impl_->known_layer_names[doc_id] = name;
   for (auto& kv : impl_->tree_bridges) {
     if (kv.second) kv.second->setCanvasLayers();
   }
@@ -949,6 +1004,7 @@ void QgisMapStack::setMirrorLayerVisibility(const std::string& doc_id, bool visi
   QgsLayerTreeLayer* node = QgsProject::instance()->layerTreeRoot()->findLayer(layer);
   if (!node) throw std::invalid_argument("layer node not found for doc_id: " + doc_id);
   node->setItemVisibilityChecked(visible);
+  impl_->known_layer_visibility[doc_id] = visible;
 }
 
 std::vector<std::string> QgisMapStack::mirrorOrderTopFirst() const {
@@ -1069,6 +1125,35 @@ std::uintptr_t QgisMapStack::createLayerTreeView(std::uintptr_t canvas_addr) {
   view->setModel(model);
   const auto addr = reinterpret_cast<std::uintptr_t>(view);
   impl_->tree_views[addr] = view;
+  impl_->tree_models[addr] = model;
+  auto& conns = impl_->tree_change_connections[addr];
+  conns.push_back(QObject::connect(
+      model, &QgsLayerTreeModel::dataChanged, view,
+      [this, addr](const QModelIndex& topLeft, const QModelIndex&, const QVector<int>& roles) {
+        const bool allRoles = roles.isEmpty();
+        onTreeDataChanged(addr, topLeft.row(),
+                          allRoles || roles.contains(Qt::CheckStateRole),
+                          allRoles || roles.contains(Qt::DisplayRole) || roles.contains(Qt::EditRole));
+      }));
+  conns.push_back(QObject::connect(
+      model, &QgsLayerTreeModel::rowsMoved, view,
+      [this, addr](const QModelIndex&, int, int, const QModelIndex&, int) {
+        onTreeOrderChanged(addr);
+      }));
+  // QGIS 的节点移动（含用户 DnD：insertChildNodes + removeRows）不产生
+  // rowsMoved，而是 rowsInserted/rowsRemoved 成对出现；flush 已按 tick 合并。
+  conns.push_back(QObject::connect(
+      model, &QgsLayerTreeModel::rowsInserted, view,
+      [this, addr](const QModelIndex& parent, int, int) {
+        if (parent.isValid()) return;  // 图例行等子级变化不算顶层排序
+        onTreeOrderChanged(addr);
+      }));
+  conns.push_back(QObject::connect(
+      model, &QgsLayerTreeModel::rowsRemoved, view,
+      [this, addr](const QModelIndex& parent, int, int) {
+        if (parent.isValid()) return;
+        onTreeOrderChanged(addr);
+      }));
   return addr;
 }
 
@@ -1131,6 +1216,171 @@ void QgisMapStack::treeViewSetCurrentRow(std::uintptr_t tree, int row) {
   QModelIndex idx = model->index(row, 0);
   if (!idx.isValid()) throw std::out_of_range("tree view row out of range: " + std::to_string(row));
   view->setCurrentIndex(idx);
+}
+
+void QgisMapStack::setTreeChangeCallback(
+    std::uintptr_t tree_addr, std::function<void(const std::string&)> callback) {
+  treeViewOrThrow(tree_addr);
+  impl_->tree_change_callbacks[tree_addr] = std::move(callback);
+}
+
+void QgisMapStack::onTreeDataChanged(std::uintptr_t tree_addr, int row,
+                                     bool check_role, bool display_role) {
+  if (impl_->suppress_tree_callbacks > 0) return;
+  if (!impl_->tree_change_callbacks.count(tree_addr)) return;
+  auto viewIt = impl_->tree_views.find(tree_addr);
+  if (viewIt == impl_->tree_views.end() || viewIt->second.isNull()) return;
+  auto mIt = impl_->tree_models.find(tree_addr);
+  if (mIt == impl_->tree_models.end() || mIt->second.isNull()) return;
+  QgsLayerTreeModel* model = mIt->second.data();
+  QgsLayerTreeNode* node = model->index2node(model->index(row, 0));
+  QgsLayerTreeLayer* layerNode = qobject_cast<QgsLayerTreeLayer*>(node);
+  if (!layerNode) return;
+  QgsMapLayer* layer = layerNode->layer();
+  if (!layer) return;
+  const QVariant docVar = layer->customProperty(QStringLiteral("pwb/doc_id"));
+  if (!docVar.isValid() || docVar.toString().isEmpty()) return;
+  const std::string doc_id = docVar.toString().toStdString();
+  auto& pending = impl_->tree_pending[tree_addr];
+  bool touched = false;
+  if (check_role) {
+    const bool checked = layerNode->itemVisibilityChecked();
+    auto shadowIt = impl_->known_layer_visibility.find(doc_id);
+    if (shadowIt == impl_->known_layer_visibility.end()) {
+      impl_->known_layer_visibility[doc_id] = checked;  // 首次见面只建基线
+    } else if (shadowIt->second != checked) {
+      shadowIt->second = checked;
+      pending.visibility[QString::fromStdString(doc_id)] = checked;
+      touched = true;
+    }
+  }
+  if (display_role) {
+    const std::string name = layer->name().toStdString();
+    auto shadowIt = impl_->known_layer_names.find(doc_id);
+    if (shadowIt == impl_->known_layer_names.end()) {
+      impl_->known_layer_names[doc_id] = name;  // 首次见面只建基线，不报重命名
+    } else if (shadowIt->second != name) {
+      shadowIt->second = name;
+      pending.renames[QString::fromStdString(doc_id)] = QString::fromStdString(name);
+      touched = true;
+    }
+  }
+  if (touched) scheduleTreeChangeFlush(tree_addr);
+}
+
+void QgisMapStack::onTreeOrderChanged(std::uintptr_t tree_addr) {
+  if (impl_->suppress_tree_callbacks > 0) return;
+  if (!impl_->tree_change_callbacks.count(tree_addr)) return;
+  auto viewIt = impl_->tree_views.find(tree_addr);
+  if (viewIt == impl_->tree_views.end() || viewIt->second.isNull()) return;
+  auto& pending = impl_->tree_pending[tree_addr];
+  pending.order.clear();
+  for (const auto& doc : mirrorOrderTopFirst()) {
+    pending.order.push_back(QString::fromStdString(doc));
+  }
+  scheduleTreeChangeFlush(tree_addr);
+}
+
+void QgisMapStack::scheduleTreeChangeFlush(std::uintptr_t tree_addr) {
+  if (!impl_->tree_flush_scheduled.insert(tree_addr).second) return;
+  auto viewIt = impl_->tree_views.find(tree_addr);
+  if (viewIt == impl_->tree_views.end() || viewIt->second.isNull()) {
+    impl_->tree_flush_scheduled.erase(tree_addr);
+    return;
+  }
+  QgsLayerTreeView* view = viewIt->second.data();
+  QTimer::singleShot(0, view, [this, tree_addr]() {
+    impl_->tree_flush_scheduled.erase(tree_addr);
+    flushTreeChange(tree_addr);
+  });
+}
+
+void QgisMapStack::flushTreeChange(std::uintptr_t tree_addr) {
+  auto pIt = impl_->tree_pending.find(tree_addr);
+  if (pIt == impl_->tree_pending.end()) return;
+  Impl::TreeChangeBatch batch = std::move(pIt->second);
+  impl_->tree_pending.erase(pIt);
+  auto cbIt = impl_->tree_change_callbacks.find(tree_addr);
+  if (cbIt == impl_->tree_change_callbacks.end() || !cbIt->second) return;
+  if (batch.empty()) return;
+  QJsonObject root;
+  if (!batch.visibility.isEmpty()) {
+    QJsonObject vis;
+    for (auto it = batch.visibility.begin(); it != batch.visibility.end(); ++it) {
+      vis.insert(it.key(), it.value());
+    }
+    root.insert(QStringLiteral("visibility"), vis);
+  }
+  if (!batch.order.isEmpty()) {
+    root.insert(QStringLiteral("order"), QJsonArray::fromStringList(batch.order));
+  }
+  if (!batch.renames.isEmpty()) {
+    QJsonObject ren;
+    for (auto it = batch.renames.begin(); it != batch.renames.end(); ++it) {
+      ren.insert(it.key(), it.value());
+    }
+    root.insert(QStringLiteral("renames"), ren);
+  }
+  cbIt->second(QString::fromUtf8(
+      QJsonDocument(root).toJson(QJsonDocument::Compact)).toStdString());
+}
+
+void QgisMapStack::treeViewSetRowChecked(std::uintptr_t tree, int row, bool checked) {
+  QgsLayerTreeView* view = treeViewOrThrow(tree);
+  QAbstractItemModel* model = view->model();
+  if (model == nullptr) throw std::runtime_error("tree view model is null");
+  QModelIndex idx = model->index(row, 0);
+  if (!idx.isValid()) throw std::out_of_range("tree view row out of range: " + std::to_string(row));
+  // 模拟用户勾选：不包 SuppressGuard，刻意触发回调
+  if (!model->setData(idx, checked ? Qt::Checked : Qt::Unchecked, Qt::CheckStateRole)) {
+    throw std::runtime_error("tree view setData(CheckStateRole) failed");
+  }
+}
+
+void QgisMapStack::treeViewRenameRow(std::uintptr_t tree, int row, const std::string& name) {
+  QgsLayerTreeView* view = treeViewOrThrow(tree);
+  QAbstractItemModel* model = view->model();
+  if (model == nullptr) throw std::runtime_error("tree view model is null");
+  QModelIndex idx = model->index(row, 0);
+  if (!idx.isValid()) throw std::out_of_range("tree view row out of range: " + std::to_string(row));
+  // 模拟用户重命名：不包 SuppressGuard，刻意触发回调。
+  // 注意：QGIS 的 setData(EditRole) 落地后 fallthrough 到 QAbstractItemModel::setData
+  // 返回 false，返回值不可用作成败依据——以节点名核验。
+  model->setData(idx, QString::fromStdString(name), Qt::EditRole);
+  if (model->data(idx, Qt::DisplayRole).toString().toStdString() != name) {
+    throw std::runtime_error("tree view rename failed (name not applied)");
+  }
+}
+
+void QgisMapStack::treeViewMoveRow(std::uintptr_t tree, int from, int to) {
+  QgsLayerTreeView* view = treeViewOrThrow(tree);
+  QAbstractItemModel* model = view->model();
+  if (model == nullptr) throw std::runtime_error("tree view model is null");
+  const int count = model->rowCount();
+  if (from < 0 || from >= count || to < 0 || to >= count) {
+    throw std::out_of_range("tree view row out of range: " + std::to_string(from) +
+                            " -> " + std::to_string(to));
+  }
+  if (from == to) return;
+  // 用户拖拽等价物（与 QGIS DnD 同序）：先在目标位插入同一 layer 的新节点，
+  // 再移除旧节点——registry bridge 的延迟删除按 findLayer 检查跳过仍在树中的
+  // 图层（groupRemovedChildren: "ignores layers that were dragged'n'dropped:
+  // 1. drop new 2. remove old"）。反过来先 take 后插会把图层从 project 误删。
+  // QgsLayerTreeModel 不实现 moveRows，不能直接走模型。
+  QgsLayerTreeGroup* root = QgsProject::instance()->layerTreeRoot();
+  QgsLayerTreeLayer* node = qobject_cast<QgsLayerTreeLayer*>(root->children().value(from));
+  if (!node || !node->layer()) throw std::runtime_error("tree view moveRow: source node missing");
+  QgsLayerTreeNode* parent = node->parent();
+  if (!parent) throw std::runtime_error("tree view moveRow: node has no parent");
+  auto* clone = new QgsLayerTreeLayer(node->layer());
+  clone->setItemVisibilityChecked(node->itemVisibilityChecked());
+  clone->setExpanded(node->isExpanded());
+  root->insertChildNode(to > from ? to + 1 : to, clone);
+  parent->takeChild(node);  // orphan，不销毁
+  delete node;              // 旧节点由我们销毁（等价 DnD 的 removeRows 路径）
+  if (model->rowCount() != count) {
+    throw std::runtime_error("tree view moveRow failed (row count changed)");
+  }
 }
 
 }  // namespace pwb::qgis_render

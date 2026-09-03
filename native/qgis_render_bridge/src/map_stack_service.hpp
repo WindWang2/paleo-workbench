@@ -53,6 +53,15 @@ public:
   int treeViewRowCount(std::uintptr_t tree) const;
   std::string treeViewLayerName(std::uintptr_t tree, int row) const;
   void treeViewSetCurrentRow(std::uintptr_t tree, int row);
+  // 用户语义驱动（不包 SuppressGuard，刻意触发树变更回调；测试/Task 4 面板用）
+  void treeViewSetRowChecked(std::uintptr_t tree, int row, bool checked);
+  void treeViewRenameRow(std::uintptr_t tree, int row, const std::string& name);
+  void treeViewMoveRow(std::uintptr_t tree, int from, int to);
+
+  // 树变更回调：JSON 批次 {"visibility":{doc:bool},"order":[doc...],"renames":{doc:name}}，
+  // 只含本次实际变更；程序化 reconcile（suppress 计数 >0）期间不触发。
+  void setTreeChangeCallback(std::uintptr_t tree_view,
+                             std::function<void(const std::string&)> callback);
 
   std::string addVectorLayerGeoJson(const std::string& name,
                                     const std::string& geometry_type,
@@ -95,6 +104,10 @@ private:
   void ensureNotStale(std::uintptr_t canvas_addr);
   void eraseMirrorByQgisId(const std::string& qgis_id);
   void eraseMirrorByDocId(const std::string& doc_id);
+  void onTreeDataChanged(std::uintptr_t tree, int row, bool check_role, bool display_role);
+  void onTreeOrderChanged(std::uintptr_t tree);
+  void scheduleTreeChangeFlush(std::uintptr_t tree);
+  void flushTreeChange(std::uintptr_t tree);
 };
 
 }  // namespace pwb::qgis_render

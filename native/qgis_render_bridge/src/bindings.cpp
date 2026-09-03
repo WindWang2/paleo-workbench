@@ -665,5 +665,16 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
              })
         .def("tree_view_row_count", &pwb::qgis_render::QgisMapStack::treeViewRowCount)
         .def("tree_view_layer_name", &pwb::qgis_render::QgisMapStack::treeViewLayerName)
-        .def("tree_view_set_current_row", &pwb::qgis_render::QgisMapStack::treeViewSetCurrentRow);
+        .def("tree_view_set_current_row", &pwb::qgis_render::QgisMapStack::treeViewSetCurrentRow)
+        .def("tree_view_set_row_checked", &pwb::qgis_render::QgisMapStack::treeViewSetRowChecked)
+        .def("tree_view_rename_row", &pwb::qgis_render::QgisMapStack::treeViewRenameRow)
+        .def("tree_view_move_row", &pwb::qgis_render::QgisMapStack::treeViewMoveRow)
+        .def("set_tree_change_callback",
+             [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t tree, py::function f) {
+               self.setTreeChangeCallback(
+                   tree, [f = std::move(f)](const std::string& payload) {
+                     py::gil_scoped_acquire gil;
+                     f(payload);
+                   });
+             });
 }
