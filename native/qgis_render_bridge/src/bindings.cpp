@@ -556,5 +556,10 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
         .def("zoom_to_next_extent", &pwb::qgis_render::QgisMapStack::zoomToNextExtent)
         .def("refresh_canvas", &pwb::qgis_render::QgisMapStack::refreshCanvas)
         .def("screen_to_map", &pwb::qgis_render::QgisMapStack::screenToMap)
-        .def("map_to_screen", &pwb::qgis_render::QgisMapStack::mapToScreen);
+        .def("map_to_screen", &pwb::qgis_render::QgisMapStack::mapToScreen)
+        .def("add_vector_layer_geojson", &pwb::qgis_render::QgisMapStack::addVectorLayerGeoJson)
+        .def("remove_layer", &pwb::qgis_render::QgisMapStack::removeLayer)
+        .def("set_layer_visibility", &pwb::qgis_render::QgisMapStack::setLayerVisibility)
+        .def("set_layer_opacity", &pwb::qgis_render::QgisMapStack::setLayerOpacity)
+        .def("clear_project_layers", &pwb::qgis_render::QgisMapStack::clearProjectLayers);
 }

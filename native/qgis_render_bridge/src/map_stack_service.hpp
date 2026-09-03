@@ -31,6 +31,15 @@ public:
   std::vector<double> screenToMap(std::uintptr_t canvas, double x, double y) const;
   std::vector<double> mapToScreen(std::uintptr_t canvas, double x, double y) const;
 
+  std::string addVectorLayerGeoJson(const std::string& name,
+                                    const std::string& geometry_type,
+                                    const std::string& crs_auth_id,
+                                    const std::string& geojson_feature_collection);
+  bool removeLayer(const std::string& layer_id);
+  void setLayerVisibility(const std::string& layer_id, bool visible);
+  void setLayerOpacity(const std::string& layer_id, double opacity);
+  void clearProjectLayers();
+
 private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
