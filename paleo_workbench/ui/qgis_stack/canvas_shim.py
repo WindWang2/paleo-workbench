@@ -386,6 +386,12 @@ class QgisCanvasShim(QWidget):
 
     # --- 图层镜像 ------------------------------------------------------
     def set_layer_snapshot(self, snapshot) -> None:
+        """Mirror snapshot vector layers into the QGIS project.
+
+        Note (F3 gap, tracked for M2): legacy ``scale_range`` is not yet
+        forwarded to the QGIS mirror — layers stay always-visible on the
+        mapstack path.
+        """
         if getattr(self, "_shutdown_done", False):
             return
         if snapshot.project_crs:
@@ -412,12 +418,46 @@ class QgisCanvasShim(QWidget):
             geom_raw = features[0].get("geometry") if isinstance(features[0], dict) else None
             geom_type = str(geom_raw.get("type", "")) if isinstance(geom_raw, dict) else ""
             geom = _GEOMETRY_TYPE.get(geom_type, "Point")
+            style_raw = getattr(layer, "style", None) or {}
+            if not isinstance(style_raw, dict):
+                try:
+                    style_raw = dict(style_raw)
+                except Exception:
+                    style_raw = {}
+            qgis_style = style_raw.get("qgis_style") if isinstance(style_raw, dict) else None
+            has_qgis_renderer = False
+            has_qgis_labeling = False
+            renderer_xml = ""
+            labeling_xml = ""
+            legacy_style = None
+            if isinstance(qgis_style, dict):
+                renderer_xml = str(qgis_style.get("renderer_xml") or "")
+                labeling_xml = str(qgis_style.get("labeling_xml") or "")
+                has_qgis_renderer = bool(renderer_xml.strip())
+                has_qgis_labeling = bool(labeling_xml.strip())
+                if has_qgis_renderer or has_qgis_labeling:
+                    legacy_style = None
+                else:
+                    legacy_style = {k: v for k, v in style_raw.items() if k != "qgis_style"}
+                    if not legacy_style:
+                        legacy_style = None
+            else:
+                legacy_style = {k: v for k, v in style_raw.items() if k != "qgis_style"} if isinstance(style_raw, dict) else None
+                if legacy_style is not None and not legacy_style:
+                    legacy_style = None
             try:
                 layer_id = self.stack.add_vector_layer_geojson(
                     layer.name or layer.id, geom, layer.crs or snapshot.project_crs,
                     json.dumps({"type": "FeatureCollection", "features": features}),
+                    renderer_xml, labeling_xml, legacy_style,
                 )
-            except Exception:
+            except Exception as exc:
+                if has_qgis_renderer or has_qgis_labeling:
+                    # Style-payload errors must surface (per old-bridge semantics);
+                    # unrelated GeoJSON/memory-layer errors keep the continue behavior.
+                    msg = str(exc).lower()
+                    if "renderer" in msg or "labeling" in msg or "invalid" in msg:
+                        raise
                 continue
             if layer.opacity < 1.0:
                 try:

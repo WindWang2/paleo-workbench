@@ -13,17 +13,27 @@
 #include <qgsfield.h>
 #include <qgsfillsymbol.h>
 #include <qgsgraduatedsymbolrenderer.h>
+#include <qgslabeling.h>
 #include <qgslinesymbol.h>
 #include <qgsmarkersymbol.h>
 #include <qgsmarkersymbollayer.h>
+#include <qgspallabeling.h>
+#include <qgsproperty.h>
+#include <qgspropertycollection.h>
 #include <qgsreadwritecontext.h>
 #include <qgsrendererrange.h>
 #include <qgsrulebasedrenderer.h>
 #include <qgssinglesymbolrenderer.h>
 #include <qgssymbollayerutils.h>
 #include <qgssymbol.h>
+#include <qgstextbuffersettings.h>
+#include <qgstextformat.h>
 #include <qgsvectordataprovider.h>
 #include <qgsvectorlayer.h>
+#include <qgsvectorlayerlabeling.h>
+
+#include <QColor>
+#include <QFont>
 
 #include "qgis_render_bridge.hpp"
 
@@ -252,6 +262,120 @@ std::unique_ptr<QgsVectorLayer> make_dialog_layer(
     }
     layer->updateFields();
     return layer;
+}
+
+void validate_style_payloads(const VectorLayerSpec& spec) {
+    if (!spec.renderer_xml.empty()) {
+        auto renderer = renderer_from_xml(spec.renderer_xml);
+        if (!renderer) {
+            throw std::runtime_error("invalid QGIS renderer payload for layer " + spec.id);
+        }
+    }
+    if (!spec.labeling_xml.empty()) {
+        QDomDocument document;
+        if (!document.setContent(QString::fromStdString(spec.labeling_xml))) {
+            throw std::runtime_error("invalid QGIS labeling payload for layer " + spec.id);
+        }
+        const QDomElement element = document.firstChildElement();
+        if (element.isNull()) {
+            throw std::runtime_error("empty QGIS labeling payload for layer " + spec.id);
+        }
+        QgsReadWriteContext context;
+        auto labeling = std::unique_ptr<QgsAbstractVectorLayerLabeling>(
+            QgsAbstractVectorLayerLabeling::create(element, context)
+        );
+        if (!labeling) {
+            throw std::runtime_error("QGIS labeling payload could not be parsed for layer " + spec.id);
+        }
+    }
+}
+
+void apply_renderer_style(QgsVectorLayer& layer, const VectorLayerSpec& spec) {
+    const Qgis::GeometryType geometry_type = layer.geometryType();
+    if (geometry_type == Qgis::GeometryType::Null) return;
+    if (!spec.renderer_xml.empty()) {
+        auto renderer = renderer_from_xml(spec.renderer_xml);
+        if (!renderer) {
+            throw std::runtime_error("invalid QGIS renderer payload for layer " + spec.id);
+        }
+        layer.setRenderer(renderer.release());
+        return;
+    }
+    auto renderer = build_renderer_from_spec(geometry_type, spec);
+    if (renderer) layer.setRenderer(renderer.release());
+}
+
+void apply_label_style(QgsVectorLayer& layer, const VectorLayerSpec& spec) {
+    if (!spec.labeling_xml.empty()) {
+        QDomDocument document;
+        if (!document.setContent(QString::fromStdString(spec.labeling_xml))) {
+            throw std::runtime_error("invalid QGIS labeling payload for layer " + spec.id);
+        }
+        QDomElement element = document.firstChildElement();
+        if (element.isNull()) {
+            throw std::runtime_error("empty QGIS labeling payload for layer " + spec.id);
+        }
+        QgsReadWriteContext context;
+        auto labeling = std::unique_ptr<QgsAbstractVectorLayerLabeling>(
+            QgsAbstractVectorLayerLabeling::create(element, context)
+        );
+        if (!labeling) {
+            throw std::runtime_error("QGIS labeling payload could not be parsed for layer " + spec.id);
+        }
+        layer.setLabeling(labeling.release());
+        layer.setLabelsEnabled(true);
+        return;
+    }
+    if (!spec.labels_enabled || spec.label_field.empty()) {
+        layer.setLabelsEnabled(false);
+        return;
+    }
+    QgsPalLayerSettings settings;
+    settings.fieldName = QString::fromStdString(spec.label_field);
+    settings.isExpression = false;
+    QgsTextFormat format;
+    QFont font;
+    if (!spec.label_font_family.empty()) font.setFamily(QString::fromStdString(spec.label_font_family));
+    font.setBold(spec.label_bold);
+    format.setFont(font);
+    format.setSize(std::max(0.1, spec.label_size));
+    format.setColor(QColor(QString::fromStdString(spec.label_color)));
+    if (spec.label_buffer_size > 0.0) {
+        QgsTextBufferSettings buffer;
+        buffer.setEnabled(true);
+        buffer.setSize(spec.label_buffer_size);
+        // #1102: the buffer colour rides the wire (labels.buffer_color).
+        // An absent or unparseable value keeps the historical white halo.
+        const QColor buffer_color(QString::fromStdString(spec.label_buffer_color));
+        buffer.setColor(buffer_color.isValid() ? buffer_color : QColor(Qt::white));
+        format.setBuffer(buffer);
+    }
+    settings.setFormat(format);
+    // #1052: per-feature data-defined label properties. Field-based
+    // properties are evaluated per feature by QGIS PAL (rotation in degrees
+    // clockwise, size in points, colour as a colour string) and override the
+    // fixed format above; an empty field name leaves the fixed value.
+    QgsPropertyCollection& data_defined = settings.dataDefinedProperties();
+    if (!spec.label_rotation_field.empty()) {
+        data_defined.setProperty(
+            QgsPalLayerSettings::Property::LabelRotation,
+            QgsProperty::fromField(QString::fromStdString(spec.label_rotation_field))
+        );
+    }
+    if (!spec.label_size_field.empty()) {
+        data_defined.setProperty(
+            QgsPalLayerSettings::Property::Size,
+            QgsProperty::fromField(QString::fromStdString(spec.label_size_field))
+        );
+    }
+    if (!spec.label_color_field.empty()) {
+        data_defined.setProperty(
+            QgsPalLayerSettings::Property::Color,
+            QgsProperty::fromField(QString::fromStdString(spec.label_color_field))
+        );
+    }
+    layer.setLabeling(new QgsVectorLayerSimpleLabeling(settings));
+    layer.setLabelsEnabled(true);
 }
 
 }  // namespace pwb::qgis_render
