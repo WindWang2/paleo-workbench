@@ -690,5 +690,19 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
              })
         .def("zoom_to_layer", &pwb::qgis_render::QgisMapStack::zoomToLayer)
         .def("tree_view_select_doc", &pwb::qgis_render::QgisMapStack::treeViewSelectDoc)
-        .def("set_mirror_layer_opacity", &pwb::qgis_render::QgisMapStack::setMirrorLayerOpacity);
+        .def("set_mirror_layer_opacity", &pwb::qgis_render::QgisMapStack::setMirrorLayerOpacity)
+        .def("exec_layer_properties",
+             [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas,
+                const std::string& doc_id) {
+               auto raw = self.execLayerProperties(canvas, doc_id);
+               py::dict out;
+               out["ok"] = raw["ok"] == "1";
+               if (raw["ok"] == "1") {
+                 out["renderer_xml"] = raw["renderer_xml"];
+                 out["labeling_xml"] = raw["labeling_xml"];
+                 out["opacity"] = std::stod(raw["opacity"]);
+                 out["name"] = raw["name"];
+               }
+               return out;
+             });
 }

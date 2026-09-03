@@ -1108,6 +1108,15 @@ class CompositeDocument(QWidget):
         layer = controller.layer(layer_id)
         if layer is None:
             return
+        if isinstance(self.canvas, QgisCanvasShim):
+            # QGIS 地图栈：直接 exec 原生 QgsVectorLayerProperties（与 QGIS
+            # Desktop 完全一致的属性页），结果经 _apply_native_layer_properties
+            # 写回文档模型（不建立第二套符号模型）。
+            result = self.canvas.stack.exec_layer_properties(
+                self.canvas.canvas_address, str(layer_id))
+            if result.get("ok"):
+                self._apply_native_layer_properties(str(layer_id), result)
+            return
         session = layer.edit_session
         features = tuple(
             feature.as_record()
@@ -1171,6 +1180,41 @@ class CompositeDocument(QWidget):
             style.update(dict(payload["style"]))
         if isinstance(payload.get("qgis_style"), dict):
             style["qgis_style"] = dict(payload["qgis_style"])
+        controller.set_layer_style(layer_id, style)
+        self._sync_composition()
+        self.status_message.emit(f"图层「{name or layer.name}」属性已更新")
+
+    def _apply_native_layer_properties(self, layer_id: str, result: dict) -> None:
+        """原生 QgsVectorLayerProperties 的 Accept 结果写回文档模型。
+
+        与 _apply_layer_properties 同一写回语义（name/opacity/qgis_style →
+        set_layer_style → _sync_composition 持久化）；qgis_style payload 沿用
+        既有结构并递增 revision（沿用旧 payload 的 tags/name 元数据）。
+        """
+        from paleo_workbench.mapping.qgis_style import QgisStylePayload
+
+        controller = self.edit_controller
+        layer = controller.layer(layer_id)
+        if layer is None:
+            return
+        name = str(result.get("name") or "").strip()
+        if name and name != layer.name:
+            controller.rename_layer(layer_id, name)
+        opacity = result.get("opacity")
+        if isinstance(opacity, (int, float)) and 0.0 <= float(opacity) <= 1.0:
+            self.layer_manager.set_layer_opacity(layer_id, float(opacity))
+        renderer_xml = str(result.get("renderer_xml") or "")
+        style = dict(layer.style)
+        if renderer_xml.strip():
+            old_payload = QgisStylePayload.from_dict(style.get("qgis_style"))
+            payload = QgisStylePayload(
+                renderer_xml=renderer_xml,
+                labeling_xml=str(result.get("labeling_xml") or ""),
+                name=old_payload.name if old_payload is not None else "",
+                tags=old_payload.tags if old_payload is not None else (),
+                revision=old_payload.revision + 1 if old_payload is not None else 1,
+            )
+            style["qgis_style"] = payload.to_dict()
         controller.set_layer_style(layer_id, style)
         self._sync_composition()
         self.status_message.emit(f"图层「{name or layer.name}」属性已更新")

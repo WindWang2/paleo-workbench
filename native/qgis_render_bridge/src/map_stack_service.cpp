@@ -6,8 +6,10 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include <QApplication>
 #include <QColor>
 #include <QCoreApplication>
+#include <QDialog>
 #include <QDomDocument>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -39,8 +41,11 @@
 #include <qgsmaptoolzoom.h>
 #include <qgspointxy.h>
 #include <qgsproject.h>
+#include <qgsreadwritecontext.h>
 #include <qgsrectangle.h>
 #include <qgsvectorlayer.h>
+#include <qgsvectorlayerlabeling.h>
+#include <qgsvectorlayerproperties.h>
 
 #include "qgis_render_bridge.hpp"
 #include "style_codec.hpp"
@@ -1542,6 +1547,43 @@ void QgisMapStack::setMirrorLayerOpacity(const std::string& doc_id, double opaci
   if (!layer) layer = findMirrorByDocId(QgsProject::instance(), doc_id);
   if (!layer) throw std::invalid_argument("unknown doc_id: " + doc_id);
   layer->setOpacity(std::clamp(opacity, 0.0, 1.0));  // 触发 repaintRequested → 画布桥自动刷新
+}
+
+std::map<std::string, std::string> QgisMapStack::execLayerProperties(
+    std::uintptr_t canvas_addr, const std::string& doc_id) {
+  if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
+  QCoreApplication* application = QCoreApplication::instance();
+  if (application == nullptr || qobject_cast<QApplication*>(application) == nullptr) {
+    throw std::runtime_error("layer properties dialog requires QApplication (GUI host)");
+  }
+  QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
+  QgsVectorLayer* layer = nullptr;
+  auto it = impl_->mirror_by_doc.find(doc_id);
+  if (it != impl_->mirror_by_doc.end()) {
+    layer = qobject_cast<QgsVectorLayer*>(
+        QgsProject::instance()->mapLayer(QString::fromStdString(it->second)));
+  }
+  if (!layer) layer = findMirrorByDocId(QgsProject::instance(), doc_id);
+  if (!layer) throw std::invalid_argument("unknown mirror layer: " + doc_id);
+
+  QgsVectorLayerProperties dialog(canvas, nullptr, layer);
+  const int code = dialog.exec();
+  std::map<std::string, std::string> result;
+  result["ok"] = code == QDialog::Accepted ? "1" : "0";
+  if (code != QDialog::Accepted) return result;
+  if (layer->renderer() != nullptr) {
+    result["renderer_xml"] = renderer_to_xml(*layer->renderer());
+  }
+  if (layer->labelsEnabled() && layer->labeling() != nullptr) {
+    QDomDocument doc;
+    QgsReadWriteContext context;
+    doc.appendChild(layer->labeling()->save(doc, context));
+    result["labeling_xml"] = doc.toString().toStdString();
+  }
+  result["opacity"] = std::to_string(layer->opacity());
+  result["name"] = layer->name().toStdString();
+  layer->triggerRepaint();
+  return result;
 }
 
 }  // namespace pwb::qgis_render

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -74,6 +75,11 @@ public:
   bool treeViewSelectDoc(std::uintptr_t tree, const std::string& doc_id);
   // 镜像图层透明度直写（doc_id 寻址），避免整快照 reconcile。
   void setMirrorLayerOpacity(const std::string& doc_id, double opacity);
+  // 原生 QgsVectorLayerProperties 模态对话框（矢量镜像专用）。返回键：
+  // ok("1"/"0")；ok=1 时另有 renderer_xml/labeling_xml/opacity/name。
+  // doc_id 未命中镜像或图层非矢量时抛 invalid_argument。
+  std::map<std::string, std::string> execLayerProperties(
+      std::uintptr_t canvas_addr, const std::string& doc_id);
 
   std::string addVectorLayerGeoJson(const std::string& name,
                                     const std::string& geometry_type,
