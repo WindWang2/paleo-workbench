@@ -545,5 +545,16 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
         .def("initialize", &pwb::qgis_render::QgisMapStack::initialize)
         .def_property_readonly("initialized", &pwb::qgis_render::QgisMapStack::initialized)
         .def("project_layer_count", &pwb::qgis_render::QgisMapStack::projectLayerCount)
-        .def("shutdown", &pwb::qgis_render::QgisMapStack::shutdown);
+        .def("shutdown", &pwb::qgis_render::QgisMapStack::shutdown)
+        .def("create_canvas", &pwb::qgis_render::QgisMapStack::createCanvas)
+        .def("set_canvas_white_background", &pwb::qgis_render::QgisMapStack::setCanvasWhiteBackground)
+        .def("set_destination_crs", &pwb::qgis_render::QgisMapStack::setDestinationCrs)
+        .def("set_canvas_extent", &pwb::qgis_render::QgisMapStack::setCanvasExtent)
+        .def("canvas_extent", &pwb::qgis_render::QgisMapStack::canvasExtent)
+        .def("zoom_to_full_extent", &pwb::qgis_render::QgisMapStack::zoomToFullExtent)
+        .def("zoom_to_previous_extent", &pwb::qgis_render::QgisMapStack::zoomToPreviousExtent)
+        .def("zoom_to_next_extent", &pwb::qgis_render::QgisMapStack::zoomToNextExtent)
+        .def("refresh_canvas", &pwb::qgis_render::QgisMapStack::refreshCanvas)
+        .def("screen_to_map", &pwb::qgis_render::QgisMapStack::screenToMap)
+        .def("map_to_screen", &pwb::qgis_render::QgisMapStack::mapToScreen);
 }
