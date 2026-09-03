@@ -24,7 +24,10 @@
 #include <qgslayertree.h>
 #include <qgslayertreelayer.h>
 #include <qgslayertreemapcanvasbridge.h>
+#include <qgslayertreemodel.h>
+#include <qgslayertreeview.h>
 #include <qgsmapcanvas.h>
+#include <qgsmaplayer.h>
 #include <qgsmaptool.h>
 #include <qgsmaptoolpan.h>
 #include <qgsmaptoolzoom.h>
@@ -273,6 +276,9 @@ struct QgisMapStack::Impl {
   // freed pointer (UAF). The set is bounded by the number of distinct dead
   // addresses not yet reused (cleared on createCanvas reuse and shutdown).
   std::unordered_set<std::uintptr_t> dead_canvas_addrs;
+  std::unordered_map<std::uintptr_t, QPointer<QgsLayerTreeView>> tree_views;
+  std::unordered_map<std::uintptr_t, std::function<void(const std::string&)>> tree_sel_callbacks;
+  std::unordered_map<std::uintptr_t, QMetaObject::Connection> tree_sel_connections;
 };
 
 QgisMapStack::QgisMapStack() : impl_(std::make_unique<Impl>()) {}
@@ -286,6 +292,12 @@ QgisMapStack::~QgisMapStack() {
     QObject::disconnect(kv.second);
   }
   impl_->xy_connections.clear();
+  for (auto& kv : impl_->tree_sel_connections) {
+    QObject::disconnect(kv.second);
+  }
+  impl_->tree_sel_connections.clear();
+  impl_->tree_sel_callbacks.clear();
+  impl_->tree_views.clear();
   for (auto& kv : impl_->tools) {
     auto it = impl_->canvas_refs.find(kv.first);
     bool canvasAlive = (it != impl_->canvas_refs.end() && !it->second.isNull());
@@ -330,6 +342,12 @@ void QgisMapStack::shutdown() {
     QObject::disconnect(kv.second);
   }
   impl_->xy_connections.clear();
+  for (auto& kv : impl_->tree_sel_connections) {
+    QObject::disconnect(kv.second);
+  }
+  impl_->tree_sel_connections.clear();
+  impl_->tree_sel_callbacks.clear();
+  impl_->tree_views.clear();
   for (const auto& id : impl_->owned_layers) {
     QgsMapLayer* layer = QgsProject::instance()->mapLayer(QString::fromStdString(id));
     if (layer != nullptr) {
@@ -682,6 +700,83 @@ void QgisMapStack::setXyCallback(std::uintptr_t canvas_addr, PointCallback callb
     cbIt->second(p.x(), p.y());
   });
   impl_->xy_connections[canvas_addr] = conn;
+}
+
+std::uintptr_t QgisMapStack::createLayerTreeView(std::uintptr_t canvas_addr) {
+  QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
+  (void)canvas;
+  QgsLayerTree* root = QgsProject::instance()->layerTreeRoot();
+  auto* model = new QgsLayerTreeModel(root);
+  auto* view = new QgsLayerTreeView();
+  model->setParent(view);
+  model->setFlag(QgsLayerTreeModel::ShowLegend);
+  model->setFlag(QgsLayerTreeModel::AllowNodeReorder);
+  model->setFlag(QgsLayerTreeModel::AllowNodeRename);
+  model->setFlag(QgsLayerTreeModel::AllowNodeChangeVisibility);
+  view->setModel(model);
+  const auto addr = reinterpret_cast<std::uintptr_t>(view);
+  impl_->tree_views[addr] = view;
+  return addr;
+}
+
+QgsLayerTreeView* QgisMapStack::treeViewOrThrow(std::uintptr_t address) const {
+  const auto it = impl_->tree_views.find(address);
+  if (it == impl_->tree_views.end() || it->second.isNull()) {
+    throw std::invalid_argument("layer tree view address no longer valid");
+  }
+  return it->second.data();
+}
+
+void QgisMapStack::setTreeSelectionCallback(
+    std::uintptr_t tree_addr, std::function<void(const std::string&)> callback) {
+  QgsLayerTreeView* view = treeViewOrThrow(tree_addr);
+  impl_->tree_sel_callbacks[tree_addr] = std::move(callback);
+  auto connIt = impl_->tree_sel_connections.find(tree_addr);
+  if (connIt != impl_->tree_sel_connections.end()) {
+    QObject::disconnect(connIt->second);
+  }
+  impl_->tree_sel_connections[tree_addr] = QObject::connect(
+      view, &QgsLayerTreeView::currentLayerChanged, view,
+      [this, tree_addr](QgsMapLayer* layer) {
+        const auto it = impl_->tree_sel_callbacks.find(tree_addr);
+        if (it == impl_->tree_sel_callbacks.end() || !it->second) return;
+        auto viewIt = impl_->tree_views.find(tree_addr);
+        if (viewIt == impl_->tree_views.end() || viewIt->second.isNull()) return;
+        std::string id;
+        if (layer != nullptr) {
+          const QVariant doc = layer->customProperty(QStringLiteral("pwb/doc_id"));
+          id = (doc.isValid() && !doc.toString().isEmpty())
+                   ? doc.toString().toStdString()
+                   : layer->id().toStdString();
+        }
+        it->second(id);
+      });
+}
+
+int QgisMapStack::treeViewRowCount(std::uintptr_t tree) const {
+  QgsLayerTreeView* view = treeViewOrThrow(tree);
+  QAbstractItemModel* model = view->model();
+  if (model == nullptr) return 0;
+  return model->rowCount();
+}
+
+std::string QgisMapStack::treeViewLayerName(std::uintptr_t tree, int row) const {
+  QgsLayerTreeView* view = treeViewOrThrow(tree);
+  QAbstractItemModel* model = view->model();
+  if (model == nullptr) return "";
+  QModelIndex idx = model->index(row, 0);
+  if (!idx.isValid()) return "";
+  QVariant d = model->data(idx, Qt::DisplayRole);
+  return d.toString().toStdString();
+}
+
+void QgisMapStack::treeViewSetCurrentRow(std::uintptr_t tree, int row) {
+  QgsLayerTreeView* view = treeViewOrThrow(tree);
+  QAbstractItemModel* model = view->model();
+  if (model == nullptr) return;
+  QModelIndex idx = model->index(row, 0);
+  if (!idx.isValid()) return;
+  view->setCurrentIndex(idx);
 }
 
 }  // namespace pwb::qgis_render

@@ -7,6 +7,7 @@
 #include <vector>
 
 class QgsMapCanvas;
+class QgsLayerTreeView;
 
 namespace pwb::qgis_render {
 
@@ -40,6 +41,14 @@ public:
   void setExtentCallback(std::uintptr_t canvas, ExtentCallback callback);
   void setXyCallback(std::uintptr_t canvas, PointCallback callback);
 
+  std::uintptr_t createLayerTreeView(std::uintptr_t canvas);
+  void setTreeSelectionCallback(std::uintptr_t tree_view,
+                                std::function<void(const std::string&)> callback);
+
+  int treeViewRowCount(std::uintptr_t tree) const;
+  std::string treeViewLayerName(std::uintptr_t tree, int row) const;
+  void treeViewSetCurrentRow(std::uintptr_t tree, int row);
+
   std::string addVectorLayerGeoJson(const std::string& name,
                                     const std::string& geometry_type,
                                     const std::string& crs_auth_id,
@@ -60,6 +69,7 @@ private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
   QgsMapCanvas* canvasOrThrow(std::uintptr_t canvas) const;
+  QgsLayerTreeView* treeViewOrThrow(std::uintptr_t address) const;
   void ensureNotStale(std::uintptr_t canvas_addr);
 };
 

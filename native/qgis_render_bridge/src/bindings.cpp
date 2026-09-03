@@ -624,5 +624,17 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                  py::gil_scoped_acquire gil;
                  f(x, y);
                });
-             });
+             })
+        .def("create_layer_tree_view", &pwb::qgis_render::QgisMapStack::createLayerTreeView)
+        .def("set_tree_selection_callback",
+             [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t tree, py::function f) {
+               self.setTreeSelectionCallback(
+                   tree, [f = std::move(f)](const std::string& id) {
+                     py::gil_scoped_acquire gil;
+                     f(id);
+                   });
+             })
+        .def("tree_view_row_count", &pwb::qgis_render::QgisMapStack::treeViewRowCount)
+        .def("tree_view_layer_name", &pwb::qgis_render::QgisMapStack::treeViewLayerName)
+        .def("tree_view_set_current_row", &pwb::qgis_render::QgisMapStack::treeViewSetCurrentRow);
 }
