@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -18,6 +19,7 @@
 
 #include "geometry_service.hpp"
 #include "gui_service.hpp"
+#include "map_stack_service.hpp"
 #include "style_codec.hpp"
 
 namespace py = pybind11;
@@ -537,4 +539,50 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                       return pwb::qgis_render::geometry_clip(
                           geometry_arg(source), parse_extent(extent));
                   });
+
+    auto mapstack = module.def_submodule("mapstack", "QGIS native map stack");
+    py::class_<pwb::qgis_render::QgisMapStack>(mapstack, "QgisMapStack")
+        .def(py::init<>())
+        .def("initialize", &pwb::qgis_render::QgisMapStack::initialize)
+        .def_property_readonly("initialized", &pwb::qgis_render::QgisMapStack::initialized)
+        .def("project_layer_count", &pwb::qgis_render::QgisMapStack::projectLayerCount)
+        .def("shutdown", [](pwb::qgis_render::QgisMapStack& self) {
+          py::gil_scoped_acquire gil;
+          self.shutdown();
+        })
+        .def("create_canvas", &pwb::qgis_render::QgisMapStack::createCanvas)
+        .def("destroy_canvas", [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t addr) {
+          py::gil_scoped_acquire gil;
+          self.destroyCanvas(addr);
+        })
+        .def("set_canvas_white_background", &pwb::qgis_render::QgisMapStack::setCanvasWhiteBackground)
+        .def("set_destination_crs", &pwb::qgis_render::QgisMapStack::setDestinationCrs)
+        .def("set_canvas_extent", &pwb::qgis_render::QgisMapStack::setCanvasExtent)
+        .def("canvas_extent", &pwb::qgis_render::QgisMapStack::canvasExtent)
+        .def("zoom_to_full_extent", &pwb::qgis_render::QgisMapStack::zoomToFullExtent)
+        .def("zoom_to_previous_extent", &pwb::qgis_render::QgisMapStack::zoomToPreviousExtent)
+        .def("zoom_to_next_extent", &pwb::qgis_render::QgisMapStack::zoomToNextExtent)
+        .def("refresh_canvas", &pwb::qgis_render::QgisMapStack::refreshCanvas)
+        .def("screen_to_map", &pwb::qgis_render::QgisMapStack::screenToMap)
+        .def("map_to_screen", &pwb::qgis_render::QgisMapStack::mapToScreen)
+        .def("add_vector_layer_geojson", &pwb::qgis_render::QgisMapStack::addVectorLayerGeoJson)
+        .def("remove_layer", &pwb::qgis_render::QgisMapStack::removeLayer)
+        .def("set_layer_visibility", &pwb::qgis_render::QgisMapStack::setLayerVisibility)
+        .def("set_layer_opacity", &pwb::qgis_render::QgisMapStack::setLayerOpacity)
+        .def("clear_project_layers", &pwb::qgis_render::QgisMapStack::clearProjectLayers)
+        .def("set_map_tool", &pwb::qgis_render::QgisMapStack::setMapTool)
+        .def("set_extent_callback",
+             [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas, py::function f) {
+               self.setExtentCallback(canvas, [f = std::move(f)](double a, double b, double c, double d) {
+                 py::gil_scoped_acquire gil;
+                 f(a, b, c, d);
+               });
+             })
+        .def("set_xy_callback",
+             [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas, py::function f) {
+               self.setXyCallback(canvas, [f = std::move(f)](double x, double y) {
+                 py::gil_scoped_acquire gil;
+                 f(x, y);
+               });
+             });
 }

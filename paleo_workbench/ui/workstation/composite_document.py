@@ -6,7 +6,7 @@
 ``saveState/restoreState`` 布局持久化（QSettings）。
 
 图层管理是渲染快照的真实控制器：可见性 / 不透明度 / 顺序变更直接写回
-:class:`UnifiedMapCanvas` 的快照并触发重渲染。QGIS 收敛（2026-09 第二轮）：
+鸭子类型画布（UnifiedMapCanvas / QgisCanvasShim）的快照并触发重渲染。QGIS 收敛（2026-09 第二轮）：
 图层属性 / 符号系统 / 标注复用 :class:`MapLayerPropertiesDialog` 与
 ``map_symbology_bridge``（桥未构建时走 legacy 快速字段，renderer XML 仍是
 QGIS 权威）；属性表 / 识别结果 / 捕捉设置 / split·merge·topology 全部
@@ -57,7 +57,7 @@ from paleo_workbench.project.models import MapReferenceLayer
 from paleo_workbench.ui.map_action_controller import MapActionController
 from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
 from paleo_workbench.ui.map_status_bar import MapStatusBar
-from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
+from paleo_workbench.ui.qgis_stack.canvas_shim import QgisCanvasShim
 from paleo_workbench.ui.workstation.common import workstation_icon
 from paleo_workbench.ui.workstation.composite_attribute_table import (
     CompositeAttributeTableDialog,
@@ -208,7 +208,7 @@ class LayerManagerPanel(QFrame):
         super().__init__(parent)
         self.setObjectName("PanelCard")
         self._layers: list = []
-        self._canvas: UnifiedMapCanvas | None = None
+        self._canvas: QgisCanvasShim | None = None
         self._tree_connected = False
         self._editing_layer_id: str | None = None
         self._reloading = False
@@ -436,7 +436,7 @@ class LayerManagerPanel(QFrame):
 
     # -- 绑定 ---------------------------------------------------------------
 
-    def bind(self, canvas: UnifiedMapCanvas, layers: list) -> None:
+    def bind(self, canvas: QgisCanvasShim, layers: list) -> None:
         self._canvas = canvas
         self._layers = layers
         self._reload()
@@ -701,7 +701,7 @@ class CompositeDocument(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.canvas = UnifiedMapCanvas(parent=self)
+        self.canvas = QgisCanvasShim(parent=self)
         layout.addWidget(self.canvas, 1)
 
         # 识别结果（多图层 Identify）与运行状态栏：图件主视图的诚实附属层。

@@ -94,6 +94,7 @@ if(PALEO_WITH_QGIS_RENDERER)
         src/style_codec.cpp
         src/gui_service.cpp
         src/geometry_service.cpp
+        src/map_stack_service.cpp
     )
     target_include_directories(qgis_render_bridge_core SYSTEM PUBLIC
         "${PALEO_QGIS_SOURCE_DIR}/src/core"

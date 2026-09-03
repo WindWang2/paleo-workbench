@@ -212,6 +212,7 @@ def _extension() -> Pybind11Extension:
             str(HERE / "src" / "style_codec.cpp"),
             str(HERE / "src" / "gui_service.cpp"),
             str(HERE / "src" / "geometry_service.cpp"),
+            str(HERE / "src" / "map_stack_service.cpp"),
             str(HERE / "src" / "bindings.cpp"),
         ],
         include_dirs=[*_qgis_core_include_dirs(build_dir), *_qt_include_dirs()],
@@ -230,5 +231,5 @@ setup(
     ext_modules=[_extension()] if _enabled() else [],
     cmdclass={"build_ext": build_ext},
     zip_safe=False,
-    python_requires=">=3.12,<3.13",
+    python_requires=">=3.12,<3.14",
 )

@@ -51,10 +51,27 @@
 
 #include "style_codec.hpp"
 
+#include <string>
+
+#ifdef PALEO_QGIS_PREFIX_PATH
 namespace pwb::qgis_render {
+const std::string kPaleoQgisVendorPrefixStorage = PALEO_QGIS_PREFIX_PATH;
+}
+#undef PALEO_QGIS_PREFIX_PATH
+namespace pwb::qgis_render {
+extern const std::string PALEO_QGIS_PREFIX_PATH = kPaleoQgisVendorPrefixStorage;
+}
+#else
+namespace pwb::qgis_render {
+extern const std::string PALEO_QGIS_PREFIX_PATH = "";
+}
+#endif
+
+namespace pwb::qgis_render {
+std::mutex g_qgis_lifecycle_mutex;
+
 namespace {
 
-std::mutex g_qgis_lifecycle_mutex;
 std::size_t g_qgis_bridge_count = 0;
 bool g_qgis_initialized = false;
 
