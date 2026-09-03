@@ -70,6 +70,23 @@ public:
   void setLayerOpacity(const std::string& layer_id, double opacity);
   void clearProjectLayers();
 
+  std::string upsertMirrorLayer(const std::string& doc_id,
+                                const std::string& name,
+                                const std::string& geometry_type,
+                                const std::string& crs_auth_id,
+                                const std::string& geojson_feature_collection,
+                                const std::string& renderer_xml,
+                                const std::string& labeling_xml,
+                                const std::string& legacy_style_json,
+                                bool visible,
+                                double opacity);
+  void removeMirrorLayersExcept(const std::vector<std::string>& doc_ids);
+  void setMirrorLayerOrder(const std::vector<std::string>& doc_ids_top_first);
+  void setMirrorLayerVisibility(const std::string& doc_id, bool visible);
+  std::vector<std::string> mirrorOrderTopFirst() const;
+  bool mirrorLayerVisibility(const std::string& doc_id) const;
+  bool treeEchoSuppressed() const noexcept;
+
 private:
   struct Impl;
   std::unique_ptr<Impl> impl_;

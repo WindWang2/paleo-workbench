@@ -610,6 +610,35 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
         .def("set_layer_visibility", &pwb::qgis_render::QgisMapStack::setLayerVisibility)
         .def("set_layer_opacity", &pwb::qgis_render::QgisMapStack::setLayerOpacity)
         .def("clear_project_layers", &pwb::qgis_render::QgisMapStack::clearProjectLayers)
+        .def("upsert_mirror_layer",
+             [](pwb::qgis_render::QgisMapStack& self, const std::string& doc_id,
+                const std::string& name, const std::string& geometry_type,
+                const std::string& crs_auth_id, const std::string& geojson,
+                const std::string& renderer_xml, const std::string& labeling_xml,
+                py::object legacy_style, bool visible, double opacity) {
+               std::string legacy_json;
+               if (!legacy_style.is_none()) {
+                   if (py::isinstance<py::str>(legacy_style)) {
+                       legacy_json = py::cast<std::string>(legacy_style);
+                   } else if (py::isinstance<py::dict>(legacy_style)) {
+                       py::object json_mod = py::module_::import("json");
+                       legacy_json = json_mod.attr("dumps")(legacy_style).cast<std::string>();
+                   } else {
+                       throw py::type_error("legacy_style must be dict, JSON string, or None");
+                   }
+               }
+               return self.upsertMirrorLayer(doc_id, name, geometry_type, crs_auth_id, geojson,
+                                             renderer_xml, labeling_xml, legacy_json, visible, opacity);
+             },
+             py::arg("doc_id"), py::arg("name"), py::arg("geometry_type"), py::arg("crs_auth_id"),
+             py::arg("geojson"), py::arg("renderer_xml") = "", py::arg("labeling_xml") = "",
+             py::arg("legacy_style") = py::none(), py::arg("visible") = true, py::arg("opacity") = 1.0)
+        .def("remove_mirror_layers_except", &pwb::qgis_render::QgisMapStack::removeMirrorLayersExcept)
+        .def("set_mirror_layer_order", &pwb::qgis_render::QgisMapStack::setMirrorLayerOrder)
+        .def("set_mirror_layer_visibility", &pwb::qgis_render::QgisMapStack::setMirrorLayerVisibility)
+        .def("mirror_order_top_first", &pwb::qgis_render::QgisMapStack::mirrorOrderTopFirst)
+        .def("mirror_layer_visibility", &pwb::qgis_render::QgisMapStack::mirrorLayerVisibility)
+        .def("tree_echo_suppressed", &pwb::qgis_render::QgisMapStack::treeEchoSuppressed)
         .def("set_map_tool", &pwb::qgis_render::QgisMapStack::setMapTool)
         .def("set_extent_callback",
              [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas, py::function f) {

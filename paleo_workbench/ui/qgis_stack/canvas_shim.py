@@ -386,11 +386,11 @@ class QgisCanvasShim(QWidget):
 
     # --- 图层镜像 ------------------------------------------------------
     def set_layer_snapshot(self, snapshot) -> None:
-        """Mirror snapshot vector layers into the QGIS project.
+        """Mirror snapshot vector layers into the QGIS project (incremental).
 
-        Note (F3 gap, tracked for M2): legacy ``scale_range`` is not yet
-        forwarded to the QGIS mirror — layers stay always-visible on the
-        mapstack path.
+        Note (M2): reconcile by ``pwb/doc_id`` — unchanged layers keep their
+        QgsVectorLayer object, tree state and renderer across publishes.
+        Note (F3 gap, tracked for M2+): legacy ``scale_range`` 仍未转发。
         """
         if getattr(self, "_shutdown_done", False):
             return
@@ -399,13 +399,9 @@ class QgisCanvasShim(QWidget):
                 self.stack.set_destination_crs(self.canvas_address, str(snapshot.project_crs))
             except Exception:
                 pass
-        try:
-            self.stack.clear_project_layers()
-        except Exception:
-            pass
-        self._mirrored_layers.clear()
+        seen: list[str] = []
         for layer in snapshot.layers:
-            if not layer.visible or layer.layer_type != "vector":
+            if layer.layer_type != "vector":
                 continue
             features = [
                 {"type": "Feature",
@@ -446,27 +442,28 @@ class QgisCanvasShim(QWidget):
                 if legacy_style is not None and not legacy_style:
                     legacy_style = None
             try:
-                layer_id = self.stack.add_vector_layer_geojson(
-                    layer.name or layer.id, geom, layer.crs or snapshot.project_crs,
+                self.stack.upsert_mirror_layer(
+                    layer.id, layer.name or layer.id, geom,
+                    layer.crs or snapshot.project_crs,
                     json.dumps({"type": "FeatureCollection", "features": features}),
                     renderer_xml, labeling_xml, legacy_style,
+                    bool(layer.visible), float(layer.opacity),
                 )
             except Exception as exc:
                 if has_qgis_renderer or has_qgis_labeling:
-                    # Style-payload errors must surface (per old-bridge semantics);
-                    # unrelated GeoJSON/memory-layer errors keep the continue behavior.
                     msg = str(exc).lower()
                     if "renderer" in msg or "labeling" in msg or "invalid" in msg:
                         raise
                 continue
-            if layer.opacity < 1.0:
-                try:
-                    self.stack.set_layer_opacity(layer_id, float(layer.opacity))
-                except Exception:
-                    pass
-            self._mirrored_layers.append(layer_id)
+            seen.append(layer.id)
         try:
+            self.stack.remove_mirror_layers_except(seen)
+            self.stack.set_mirror_layer_order(seen)
             self.stack.refresh_canvas(self.canvas_address)
+        except Exception:
+            pass
+        try:
+            self._mirrored_layers = list(seen)
         except Exception:
             pass
         try:
