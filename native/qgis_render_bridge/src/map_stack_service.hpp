@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+class QgsMapCanvas;
+
 namespace pwb::qgis_render {
 
 class QgisMapStack {
@@ -49,6 +51,8 @@ public:
 private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
+  QgsMapCanvas* canvasOrThrow(std::uintptr_t canvas) const;
+  void ensureNotStale(std::uintptr_t canvas_addr);
 };
 
 }  // namespace pwb::qgis_render

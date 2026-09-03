@@ -546,7 +546,10 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
         .def("initialize", &pwb::qgis_render::QgisMapStack::initialize)
         .def_property_readonly("initialized", &pwb::qgis_render::QgisMapStack::initialized)
         .def("project_layer_count", &pwb::qgis_render::QgisMapStack::projectLayerCount)
-        .def("shutdown", &pwb::qgis_render::QgisMapStack::shutdown)
+        .def("shutdown", [](pwb::qgis_render::QgisMapStack& self) {
+          py::gil_scoped_acquire gil;
+          self.shutdown();
+        })
         .def("create_canvas", &pwb::qgis_render::QgisMapStack::createCanvas)
         .def("set_canvas_white_background", &pwb::qgis_render::QgisMapStack::setCanvasWhiteBackground)
         .def("set_destination_crs", &pwb::qgis_render::QgisMapStack::setDestinationCrs)

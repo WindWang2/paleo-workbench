@@ -8,6 +8,7 @@
 
 #include <QColor>
 #include <QCoreApplication>
+#include <QObject>
 #include <QPointer>
 #include <QString>
 #include <QWidget>
@@ -44,17 +45,26 @@ struct QgisMapStack::Impl {
   std::unordered_map<std::uintptr_t, ExtentCallback> extent_callbacks;
   std::unordered_map<std::uintptr_t, PointCallback> xy_callbacks;
   std::unordered_map<std::uintptr_t, QPointer<QgsMapCanvas>> canvas_refs;
+  std::unordered_map<std::uintptr_t, QMetaObject::Connection> extent_connections;
+  std::unordered_map<std::uintptr_t, QMetaObject::Connection> xy_connections;
 };
 
 QgisMapStack::QgisMapStack() : impl_(std::make_unique<Impl>()) {}
 QgisMapStack::~QgisMapStack() {
-  if (impl_) {
-    for (auto& kv : impl_->tools) {
-      auto it = impl_->canvas_refs.find(kv.first);
-      bool canvasAlive = (it != impl_->canvas_refs.end() && !it->second.isNull());
-      if (!canvasAlive && kv.second) {
-        kv.second.release();
-      }
+  if (!impl_) return;
+  for (auto& kv : impl_->extent_connections) {
+    QObject::disconnect(kv.second);
+  }
+  impl_->extent_connections.clear();
+  for (auto& kv : impl_->xy_connections) {
+    QObject::disconnect(kv.second);
+  }
+  impl_->xy_connections.clear();
+  for (auto& kv : impl_->tools) {
+    auto it = impl_->canvas_refs.find(kv.first);
+    bool canvasAlive = (it != impl_->canvas_refs.end() && !it->second.isNull());
+    if (!canvasAlive && kv.second) {
+      kv.second.release();
     }
   }
 }
@@ -82,6 +92,14 @@ int QgisMapStack::projectLayerCount() const {
 }
 
 void QgisMapStack::shutdown() {
+  for (auto& kv : impl_->extent_connections) {
+    QObject::disconnect(kv.second);
+  }
+  impl_->extent_connections.clear();
+  for (auto& kv : impl_->xy_connections) {
+    QObject::disconnect(kv.second);
+  }
+  impl_->xy_connections.clear();
   for (const auto& id : impl_->owned_layers) {
     QgsMapLayer* layer = QgsProject::instance()->mapLayer(QString::fromStdString(id));
     if (layer != nullptr) {
@@ -104,10 +122,40 @@ void QgisMapStack::shutdown() {
   impl_->initialized = false;
 }
 
-static QgsMapCanvas* canvasOrThrow(std::uintptr_t address) {
+QgsMapCanvas* QgisMapStack::canvasOrThrow(std::uintptr_t address) const {
+  if (address == 0) throw std::invalid_argument("null canvas address");
+  auto it = impl_->canvas_refs.find(address);
+  if (it != impl_->canvas_refs.end() && it->second.isNull()) {
+    throw std::invalid_argument("canvas address no longer valid");
+  }
   auto* canvas = reinterpret_cast<QgsMapCanvas*>(address);
   if (canvas == nullptr) throw std::invalid_argument("null canvas address");
   return canvas;
+}
+
+void QgisMapStack::ensureNotStale(std::uintptr_t canvas_addr) {
+  auto it = impl_->canvas_refs.find(canvas_addr);
+  if (it != impl_->canvas_refs.end() && it->second.isNull()) {
+    auto toolIt = impl_->tools.find(canvas_addr);
+    if (toolIt != impl_->tools.end() && toolIt->second) {
+      toolIt->second.release();
+    }
+    impl_->tools.erase(canvas_addr);
+    auto ecIt = impl_->extent_connections.find(canvas_addr);
+    if (ecIt != impl_->extent_connections.end()) {
+      QObject::disconnect(ecIt->second);
+      impl_->extent_connections.erase(ecIt);
+    }
+    auto xcIt = impl_->xy_connections.find(canvas_addr);
+    if (xcIt != impl_->xy_connections.end()) {
+      QObject::disconnect(xcIt->second);
+      impl_->xy_connections.erase(xcIt);
+    }
+    impl_->extent_callbacks.erase(canvas_addr);
+    impl_->xy_callbacks.erase(canvas_addr);
+    impl_->tree_bridges.erase(canvas_addr);
+    throw std::invalid_argument("canvas address no longer valid");
+  }
 }
 
 std::uintptr_t QgisMapStack::createCanvas() {
@@ -244,6 +292,7 @@ void QgisMapStack::clearProjectLayers() {
 }
 
 void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kind) {
+  ensureNotStale(canvas_addr);
   QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
   impl_->canvas_refs[canvas_addr] = canvas;
   if (kind == "pan") {
@@ -259,27 +308,42 @@ void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kin
 }
 
 void QgisMapStack::setExtentCallback(std::uintptr_t canvas_addr, ExtentCallback callback) {
+  ensureNotStale(canvas_addr);
   QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
   impl_->canvas_refs[canvas_addr] = canvas;
+  auto ecIt = impl_->extent_connections.find(canvas_addr);
+  if (ecIt != impl_->extent_connections.end()) {
+    QObject::disconnect(ecIt->second);
+    impl_->extent_connections.erase(ecIt);
+  }
   impl_->extent_callbacks[canvas_addr] = std::move(callback);
-  QObject::connect(canvas, &QgsMapCanvas::extentsChanged, canvas, [this, canvas_addr]() {
-    const auto& cb = impl_->extent_callbacks[canvas_addr];
-    if (!cb) return;
-    const QgsRectangle r = canvasOrThrow(canvas_addr)->extent();
-    cb(r.xMinimum(), r.yMinimum(), r.xMaximum(), r.yMaximum());
+  QMetaObject::Connection conn = QObject::connect(canvas, &QgsMapCanvas::extentsChanged, canvas, [this, canvas_addr]() {
+    auto cbIt = impl_->extent_callbacks.find(canvas_addr);
+    if (cbIt == impl_->extent_callbacks.end() || !cbIt->second) return;
+    QgsMapCanvas* c = canvasOrThrow(canvas_addr);
+    const QgsRectangle r = c->extent();
+    cbIt->second(r.xMinimum(), r.yMinimum(), r.xMaximum(), r.yMaximum());
   });
+  impl_->extent_connections[canvas_addr] = conn;
 }
 
 void QgisMapStack::setXyCallback(std::uintptr_t canvas_addr, PointCallback callback) {
+  ensureNotStale(canvas_addr);
   QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
   impl_->canvas_refs[canvas_addr] = canvas;
+  auto xcIt = impl_->xy_connections.find(canvas_addr);
+  if (xcIt != impl_->xy_connections.end()) {
+    QObject::disconnect(xcIt->second);
+    impl_->xy_connections.erase(xcIt);
+  }
   impl_->xy_callbacks[canvas_addr] = std::move(callback);
-  QObject::connect(canvas, &QgsMapCanvas::xyCoordinates, canvas,
+  QMetaObject::Connection conn = QObject::connect(canvas, &QgsMapCanvas::xyCoordinates, canvas,
                    [this, canvas_addr](const QgsPointXY& p) {
-    const auto& cb = impl_->xy_callbacks[canvas_addr];
-    if (!cb) return;
-    cb(p.x(), p.y());
+    auto cbIt = impl_->xy_callbacks.find(canvas_addr);
+    if (cbIt == impl_->xy_callbacks.end() || !cbIt->second) return;
+    cbIt->second(p.x(), p.y());
   });
+  impl_->xy_connections[canvas_addr] = conn;
 }
 
 }  // namespace pwb::qgis_render
