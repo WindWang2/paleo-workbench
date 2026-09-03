@@ -63,9 +63,13 @@ QgisMapStack::~QgisMapStack() {
   for (auto& kv : impl_->tools) {
     auto it = impl_->canvas_refs.find(kv.first);
     bool canvasAlive = (it != impl_->canvas_refs.end() && !it->second.isNull());
-    if (!canvasAlive && kv.second) {
-      kv.second.release();
+    if (canvasAlive && kv.second) {
+      QgsMapCanvas* c = it->second;
+      if (c && c->mapTool() == kv.second.get()) {
+        c->unsetMapTool(kv.second.get());
+      }
     }
+    if (kv.second) kv.second.release();
   }
 }
 
@@ -111,9 +115,13 @@ void QgisMapStack::shutdown() {
   for (auto& kv : impl_->tools) {
     auto it = impl_->canvas_refs.find(kv.first);
     bool canvasAlive = (it != impl_->canvas_refs.end() && !it->second.isNull());
-    if (!canvasAlive && kv.second) {
-      kv.second.release();
+    if (canvasAlive && kv.second) {
+      QgsMapCanvas* c = it->second;
+      if (c && c->mapTool() == kv.second.get()) {
+        c->unsetMapTool(kv.second.get());
+      }
     }
+    if (kv.second) kv.second.release();
   }
   impl_->tools.clear();
   impl_->canvas_refs.clear();
@@ -188,14 +196,19 @@ void QgisMapStack::destroyCanvas(std::uintptr_t canvas_addr) {
   }
   impl_->extent_callbacks.erase(canvas_addr);
   impl_->xy_callbacks.erase(canvas_addr);
-  // Remove tool
+  // Remove tool (Qt parent owns it — always release, never delete via unique_ptr)
   auto toolIt = impl_->tools.find(canvas_addr);
-  if (toolIt != impl_->tools.end()) {
-    // Release without deleting canvas-owned tool if canvas still alive
+  if (toolIt != impl_->tools.end() && toolIt->second) {
     bool canvasAlive = !it->second.isNull();
-    if (!canvasAlive && toolIt->second) {
-      toolIt->second.release();
+    if (canvasAlive) {
+      QgsMapCanvas* c = it->second;
+      if (c && c->mapTool() == toolIt->second.get()) {
+        c->unsetMapTool(toolIt->second.get());
+      }
     }
+    toolIt->second.release();
+    impl_->tools.erase(toolIt);
+  } else if (toolIt != impl_->tools.end()) {
     impl_->tools.erase(toolIt);
   }
   // Remove bridge; canvas lifetime is owned by Qt parent hierarchy,
@@ -329,6 +342,17 @@ void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kin
   ensureNotStale(canvas_addr);
   QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
   impl_->canvas_refs[canvas_addr] = canvas;
+  // Release previous tool (Qt parent owns it) before overwriting — avoid double-delete
+  auto existing = impl_->tools.find(canvas_addr);
+  if (existing != impl_->tools.end() && existing->second) {
+    if (canvas->mapTool() == existing->second.get()) {
+      canvas->unsetMapTool(existing->second.get());
+    }
+    existing->second.release();
+    impl_->tools.erase(existing);
+  } else if (existing != impl_->tools.end()) {
+    impl_->tools.erase(existing);
+  }
   if (kind == "pan") {
     impl_->tools[canvas_addr] = std::make_unique<QgsMapToolPan>(canvas);
   } else if (kind == "zoomIn") {
@@ -352,9 +376,11 @@ void QgisMapStack::setExtentCallback(std::uintptr_t canvas_addr, ExtentCallback 
   }
   impl_->extent_callbacks[canvas_addr] = std::move(callback);
   QMetaObject::Connection conn = QObject::connect(canvas, &QgsMapCanvas::extentsChanged, canvas, [this, canvas_addr]() {
+    auto refIt = impl_->canvas_refs.find(canvas_addr);
+    if (refIt == impl_->canvas_refs.end() || refIt->second.isNull()) return;
     auto cbIt = impl_->extent_callbacks.find(canvas_addr);
     if (cbIt == impl_->extent_callbacks.end() || !cbIt->second) return;
-    QgsMapCanvas* c = canvasOrThrow(canvas_addr);
+    QgsMapCanvas* c = refIt->second;
     const QgsRectangle r = c->extent();
     cbIt->second(r.xMinimum(), r.yMinimum(), r.xMaximum(), r.yMaximum());
   });
@@ -373,6 +399,8 @@ void QgisMapStack::setXyCallback(std::uintptr_t canvas_addr, PointCallback callb
   impl_->xy_callbacks[canvas_addr] = std::move(callback);
   QMetaObject::Connection conn = QObject::connect(canvas, &QgsMapCanvas::xyCoordinates, canvas,
                    [this, canvas_addr](const QgsPointXY& p) {
+    auto refIt = impl_->canvas_refs.find(canvas_addr);
+    if (refIt == impl_->canvas_refs.end() || refIt->second.isNull()) return;
     auto cbIt = impl_->xy_callbacks.find(canvas_addr);
     if (cbIt == impl_->xy_callbacks.end() || !cbIt->second) return;
     cbIt->second(p.x(), p.y());

@@ -45,3 +45,71 @@ def test_shim_mirrors_vector_snapshot_to_project(qtbot):
         ],
     ))
     assert doc.canvas.stack.project_layer_count() == 1
+
+
+def test_shim_mupp_non_square_aspect_consistent(qtbot):
+    """F3 回归: 非正方形画布下 map_units_per_pixel 与 fitted extent/width 一致。"""
+    from paleo_workbench.ui.qgis_stack.canvas_shim import QgisCanvasShim
+
+    shim = QgisCanvasShim()
+    qtbot.addWidget(shim)
+    shim.resize(800, 400)
+    shim.show()
+    qtbot.waitExposed(shim)
+    qtbot.wait(300)
+    shim.set_extent((0.0, 0.0, 10.0, 10.0))
+    qtbot.wait(300)
+    w = max(1, shim.canvas.width())
+    h = max(1, shim.canvas.height())
+    extent = tuple(shim.stack.canvas_extent(shim.canvas_address))
+    dx = extent[2] - extent[0]
+    dy = extent[3] - extent[1]
+    mupp = shim.map_units_per_pixel
+    expected = max(dx / w, dy / h)
+    assert mupp == pytest.approx(expected, rel=1e-6)
+    assert (mupp * w == pytest.approx(dx, rel=1e-3) or mupp * h == pytest.approx(dy, rel=1e-3))
+
+
+def test_shim_extent_single_emission(qtbot):
+    """F4 回归: 一次程序化 set_extent 只触发一次 extent_changed。"""
+    from paleo_workbench.ui.qgis_stack.canvas_shim import QgisCanvasShim
+
+    shim = QgisCanvasShim()
+    qtbot.addWidget(shim)
+    shim.resize(600, 400)
+    shim.show()
+    qtbot.waitExposed(shim)
+    qtbot.wait(500)
+    seen: list[tuple] = []
+    shim.extent_changed.connect(lambda e: seen.append(tuple(e)))
+    shim.set_extent((0.0, 0.0, 20.0, 20.0))
+    qtbot.wait(400)
+    assert len(seen) == 1, f"expected 1 emission, got {len(seen)}: {seen}"
+    seen.clear()
+    current = shim.view_extent
+    shim.set_extent(current)
+    qtbot.wait(200)
+    assert len(seen) == 0, f"duplicate fitted should not emit, got {seen}"
+    seen.clear()
+    shim.set_extent((5.0, 5.0, 25.0, 25.0))
+    qtbot.wait(300)
+    assert len(seen) == 1
+
+
+def test_shim_tool_operation_emits_on_user_extent(qtbot):
+    """F2 回归: 用户 pan/zoom（非程序化 extent）触发 tool_operation(False)，程序化不触发。"""
+    from paleo_workbench.ui.qgis_stack.canvas_shim import QgisCanvasShim
+
+    shim = QgisCanvasShim()
+    qtbot.addWidget(shim)
+    shim.resize(600, 400)
+    shim.show()
+    qtbot.waitExposed(shim)
+    qtbot.wait(500)
+    ops: list[bool] = []
+    shim.tool_operation.connect(lambda b: ops.append(bool(b)))
+    shim.set_extent((0.0, 0.0, 20.0, 20.0))
+    qtbot.wait(300)
+    assert ops == [], f"programmatic should not emit tool_operation, got {ops}"
+    shim._on_stack_extent(5.0, 5.0, 25.0, 25.0)
+    assert ops == [False]

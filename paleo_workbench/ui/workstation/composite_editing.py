@@ -447,7 +447,7 @@ class CompositeEditController(QObject):
     # -- 画布绑定 -------------------------------------------------------------
 
     def attach_canvas(self, canvas) -> None:
-        """绑定 UnifiedMapCanvas：工具控制器与 overlay 提供者。"""
+        """绑定鸭子类型画布（UnifiedMapCanvas / QgisCanvasShim）：工具控制器与 overlay 提供者。"""
         self._canvas = canvas
         canvas.set_map_tool_controller(self.tools)
         canvas.set_overlay_provider(self.overlay_state)

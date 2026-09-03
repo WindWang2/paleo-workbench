@@ -6,7 +6,7 @@
 ``saveState/restoreState`` 布局持久化（QSettings）。
 
 图层管理是渲染快照的真实控制器：可见性 / 不透明度 / 顺序变更直接写回
-:class:`UnifiedMapCanvas` 的快照并触发重渲染。QGIS 收敛（2026-09 第二轮）：
+鸭子类型画布（UnifiedMapCanvas / QgisCanvasShim）的快照并触发重渲染。QGIS 收敛（2026-09 第二轮）：
 图层属性 / 符号系统 / 标注复用 :class:`MapLayerPropertiesDialog` 与
 ``map_symbology_bridge``（桥未构建时走 legacy 快速字段，renderer XML 仍是
 QGIS 权威）；属性表 / 识别结果 / 捕捉设置 / split·merge·topology 全部

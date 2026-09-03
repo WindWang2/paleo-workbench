@@ -551,7 +551,10 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
           self.shutdown();
         })
         .def("create_canvas", &pwb::qgis_render::QgisMapStack::createCanvas)
-        .def("destroy_canvas", &pwb::qgis_render::QgisMapStack::destroyCanvas)
+        .def("destroy_canvas", [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t addr) {
+          py::gil_scoped_acquire gil;
+          self.destroyCanvas(addr);
+        })
         .def("set_canvas_white_background", &pwb::qgis_render::QgisMapStack::setCanvasWhiteBackground)
         .def("set_destination_crs", &pwb::qgis_render::QgisMapStack::setDestinationCrs)
         .def("set_canvas_extent", &pwb::qgis_render::QgisMapStack::setCanvasExtent)
