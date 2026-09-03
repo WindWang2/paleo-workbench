@@ -18,6 +18,7 @@
 
 #include "geometry_service.hpp"
 #include "gui_service.hpp"
+#include "map_stack_service.hpp"
 #include "style_codec.hpp"
 
 namespace py = pybind11;
@@ -537,4 +538,12 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                       return pwb::qgis_render::geometry_clip(
                           geometry_arg(source), parse_extent(extent));
                   });
+
+    auto mapstack = module.def_submodule("mapstack", "QGIS native map stack");
+    py::class_<pwb::qgis_render::QgisMapStack>(mapstack, "QgisMapStack")
+        .def(py::init<>())
+        .def("initialize", &pwb::qgis_render::QgisMapStack::initialize)
+        .def_property_readonly("initialized", &pwb::qgis_render::QgisMapStack::initialized)
+        .def("project_layer_count", &pwb::qgis_render::QgisMapStack::projectLayerCount)
+        .def("shutdown", &pwb::qgis_render::QgisMapStack::shutdown);
 }
