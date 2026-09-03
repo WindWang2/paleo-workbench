@@ -48,7 +48,11 @@
 - Produces:
   - `create_layer_tree_view(canvas) -> int`（canvas 为 uintptr_t 地址；返回 QgsLayerTreeView 的 uintptr_t 地址；树的 model 挂 `QgsProject::instance()->layerTreeRoot()`，flags = ShowLegend|AllowNodeReorder|AllowNodeRename|AllowNodeChangeVisibility）
   - `set_tree_selection_callback(tree_view, callback) -> None`（`callback(doc_layer_id_or_empty_str)`；当前图层变化时触发；doc id 从 `QgsMapLayer` customProperty `pwb/doc_id` 读取，无该属性时回退传 QGIS layer id）
-  - Python 侧 `paleo_workbench/ui/qgis_stack/widgets.py` 新增 `QgisLayerTreeHost`（与 `QgisCanvasHost` 同模式：wrapInstance + 布局承载）。
+  - 只读树辅助绑定（uintptr_t 边界的现实约束：wrapInstance 只能拿到 QWidget 基类指针，无法在 Python 侧操作树模型；树操作一律走生产绑定）：
+    - `tree_view_row_count(tree_view) -> int`
+    - `tree_view_layer_name(tree_view, row) -> str`
+    - `tree_view_set_current_row(tree_view, row) -> None`（程序化设置当前图层，触发选择回调）
+  - Python 侧 `paleo_workbench/ui/qgis_stack/widgets.py` 新增 `QgisLayerTreeHost`（与 `QgisCanvasHost` 同模式：统一 `wrap_widget()` 还原 + 布局承载；widgets.py 顶部抽公共 `wrap_widget(address)`）。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -88,10 +92,9 @@ def test_layer_tree_view_embeds_and_lists_mirror_layers(qtbot, stack):
     tree = wrapInstance(tree_addr, QWidget)
     qtbot.addWidget(tree)
     tree.show()
-    layer_id = stack.add_vector_layer_geojson("井位", "Point", "EPSG:4326", _GEOJSON)
-    qtbot.waitUntil(lambda: tree.model().rowCount() >= 1, timeout=2000)
-    model = tree.model()
-    names = [model.index(row, 0).data() for row in range(model.rowCount())]
+    stack.add_vector_layer_geojson("井位", "Point", "EPSG:4326", _GEOJSON)
+    qtbot.waitUntil(lambda: stack.tree_view_row_count(tree_addr) >= 1, timeout=2000)
+    names = [stack.tree_view_layer_name(tree_addr, row) for row in range(stack.tree_view_row_count(tree_addr))]
     assert "井位" in names
 
 
@@ -100,13 +103,12 @@ def test_selection_callback_fires_with_doc_id(qtbot, stack):
     tree_addr = stack.create_layer_tree_view(canvas)
     seen = []
     stack.set_tree_selection_callback(tree_addr, seen.append)
-    layer_id = stack.add_vector_layer_geojson("工区边界", "Polygon", "EPSG:4326", _GEOJSON)
+    stack.add_vector_layer_geojson("工区边界", "Polygon", "EPSG:4326", _GEOJSON)
     tree = wrapInstance(tree_addr, QWidget)
     qtbot.addWidget(tree)
     tree.show()
-    model = tree.model()
-    qtbot.waitUntil(lambda: model.rowCount() >= 1, timeout=2000)
-    tree.setCurrentIndex(model.index(0, 0))
+    qtbot.waitUntil(lambda: stack.tree_view_row_count(tree_addr) >= 1, timeout=2000)
+    stack.tree_view_set_current_row(tree_addr, 0)
     qtbot.waitUntil(lambda: len(seen) >= 1, timeout=2000)
     assert seen[-1]  # 非空：doc id 或 QGIS layer id
 ```
@@ -125,6 +127,14 @@ Expected: FAIL（`AttributeError: create_layer_tree_view`）
                                 std::function<void(const std::string&)> callback);
 // private 区追加：
   QgsLayerTreeView* treeViewOrThrow(std::uintptr_t address) const;
+
+// public 区追加（树驱动/检视 API——uintptr_t 边界不暴露 Qt 模型类型，
+// 测试与 M2 面板任务经此操作树；无效树地址经 treeViewOrThrow 抛
+// invalid_argument，无效行号抛 std::out_of_range，model 为 null 抛
+// std::runtime_error，不做静默返回）：
+  int treeViewRowCount(std::uintptr_t tree) const;
+  std::string treeViewLayerName(std::uintptr_t tree, int row) const;
+  void treeViewSetCurrentRow(std::uintptr_t tree, int row);
 ```
 
 ```cpp
@@ -193,6 +203,9 @@ void QgisMapStack::setTreeSelectionCallback(
 ```cpp
 // bindings.cpp 追加（mapstack 子模块，GIL 在绑定层）：
         .def("create_layer_tree_view", &pwb::qgis_render::QgisMapStack::createLayerTreeView)
+        .def("tree_view_row_count", &pwb::qgis_render::QgisMapStack::treeViewRowCount)
+        .def("tree_view_layer_name", &pwb::qgis_render::QgisMapStack::treeViewLayerName)
+        .def("tree_view_set_current_row", &pwb::qgis_render::QgisMapStack::treeViewSetCurrentRow)
         .def("set_tree_selection_callback",
              [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t tree, py::function f) {
                self.setTreeSelectionCallback(
@@ -213,7 +226,7 @@ class QgisLayerTreeHost(QWidget):
         self.stack = stack
         self.canvas_address = canvas_address
         self.tree_view_address = stack.create_layer_tree_view(canvas_address)
-        self.tree_view = wrapInstance(self.tree_view_address, QWidget)
+        self.tree_view = wrap_widget(self.tree_view_address)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
