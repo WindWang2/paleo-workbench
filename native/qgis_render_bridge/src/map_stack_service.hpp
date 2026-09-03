@@ -43,7 +43,14 @@ public:
   std::string addVectorLayerGeoJson(const std::string& name,
                                     const std::string& geometry_type,
                                     const std::string& crs_auth_id,
-                                    const std::string& geojson_feature_collection);
+                                    const std::string& geojson_feature_collection,
+                                    const std::string& renderer_xml = "",
+                                    const std::string& labeling_xml = "",
+                                    const std::string& legacy_style_json = "");
+  void setLayerStyle(const std::string& layer_id,
+                     const std::string& renderer_xml,
+                     const std::string& labeling_xml,
+                     const std::string& legacy_style_json = "");
   bool removeLayer(const std::string& layer_id);
   void setLayerVisibility(const std::string& layer_id, bool visible);
   void setLayerOpacity(const std::string& layer_id, double opacity);

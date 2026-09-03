@@ -8,6 +8,11 @@
 
 #include <QColor>
 #include <QCoreApplication>
+#include <QDomDocument>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QObject>
 #include <QPointer>
 #include <QString>
@@ -28,6 +33,9 @@
 #include <qgsrectangle.h>
 #include <qgsvectorlayer.h>
 
+#include "qgis_render_bridge.hpp"
+#include "style_codec.hpp"
+
 namespace pwb::qgis_render {
 
 #ifdef PALEO_QGIS_PREFIX_PATH
@@ -35,6 +43,205 @@ namespace pwb::qgis_render {
 #endif
 extern const std::string PALEO_QGIS_PREFIX_PATH;
 extern std::mutex g_qgis_lifecycle_mutex;
+
+namespace {
+
+std::string qjsonValueToString(const QJsonValue& v) {
+    if (v.isString()) return v.toString().toStdString();
+    if (v.isDouble()) {
+        double d = v.toDouble();
+        if (std::floor(d) == d) return std::to_string(static_cast<long long>(d));
+        return QString::number(d, 'g', 12).toStdString();
+    }
+    if (v.isBool()) return v.toBool() ? "true" : "false";
+    return {};
+}
+
+VectorLayerSpec buildSpecFromLegacyJson(const std::string& rendererXml,
+                                        const std::string& labelingXml,
+                                        const std::string& legacyJson,
+                                        const std::string& layerId) {
+    VectorLayerSpec spec;
+    spec.id = layerId;
+    spec.renderer_xml = rendererXml;
+    spec.labeling_xml = labelingXml;
+    if (legacyJson.empty()) return spec;
+    QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(legacyJson));
+    if (!doc.isObject()) return spec;
+    QJsonObject obj = doc.object();
+    if (obj.isEmpty()) return spec;
+    if (obj.contains("fill") && obj["fill"].isString())
+        spec.fill = obj["fill"].toString().toStdString();
+    if (obj.contains("stroke") && obj["stroke"].isString())
+        spec.stroke = obj["stroke"].toString().toStdString();
+    if (obj.contains("stroke_width")) {
+        QJsonValue v = obj["stroke_width"];
+        if (v.isDouble()) spec.stroke_width = v.toDouble();
+        else if (v.isString()) spec.stroke_width = v.toString().toDouble();
+    }
+    if (obj.contains("marker_size")) {
+        QJsonValue v = obj["marker_size"];
+        if (v.isDouble()) spec.marker_size = v.toDouble();
+        else if (v.isString()) spec.marker_size = v.toString().toDouble();
+    }
+    if (obj.contains("marker") && obj["marker"].isString())
+        spec.marker = obj["marker"].toString().toStdString();
+    if (obj.contains("line_pattern") && obj["line_pattern"].isString())
+        spec.line_pattern = obj["line_pattern"].toString().toStdString();
+    if (obj.contains("renderer") && obj["renderer"].isString())
+        spec.renderer_kind = obj["renderer"].toString().toStdString();
+    if (obj.contains("field") && obj["field"].isString())
+        spec.classification_field = obj["field"].toString().toStdString();
+    if (obj.contains("renderer_xml") && obj["renderer_xml"].isString() && spec.renderer_xml.empty())
+        spec.renderer_xml = obj["renderer_xml"].toString().toStdString();
+    if (obj.contains("labeling_xml") && obj["labeling_xml"].isString() && spec.labeling_xml.empty())
+        spec.labeling_xml = obj["labeling_xml"].toString().toStdString();
+    if (obj.contains("categories")) {
+        QJsonValue cv = obj["categories"];
+        if (cv.isObject()) {
+            QJsonObject catObj = cv.toObject();
+            for (auto it = catObj.begin(); it != catObj.end(); ++it) {
+                std::string value = it.key().toStdString();
+                std::string color = it.value().toString().toStdString();
+                spec.categories.push_back({value, color, value});
+            }
+        } else if (cv.isArray()) {
+            QJsonArray arr = cv.toArray();
+            for (const QJsonValue& entryVal : arr) {
+                if (entryVal.isArray()) {
+                    QJsonArray entry = entryVal.toArray();
+                    if (entry.size() >= 2) {
+                        std::string v = qjsonValueToString(entry[0]);
+                        std::string c = qjsonValueToString(entry[1]);
+                        std::string lbl = entry.size() > 2 ? qjsonValueToString(entry[2]) : v;
+                        spec.categories.push_back({v, c, lbl});
+                    }
+                } else if (entryVal.isObject()) {
+                    QJsonObject entry = entryVal.toObject();
+                    std::string v = entry.contains("value") ? qjsonValueToString(entry["value"]) : "";
+                    std::string c = entry.contains("color") ? qjsonValueToString(entry["color"])
+                                  : entry.contains("fill") ? qjsonValueToString(entry["fill"]) : "";
+                    std::string lbl = entry.contains("label") ? qjsonValueToString(entry["label"]) : v;
+                    if (!v.empty() || !c.empty()) spec.categories.push_back({v, c, lbl});
+                }
+            }
+        }
+    }
+    if (obj.contains("ranges")) {
+        QJsonValue rv = obj["ranges"];
+        if (rv.isArray()) {
+            QJsonArray arr = rv.toArray();
+            for (const QJsonValue& entryVal : arr) {
+                if (entryVal.isArray()) {
+                    QJsonArray entry = entryVal.toArray();
+                    if (entry.size() >= 3) {
+                        double lo = entry[0].toDouble();
+                        double hi = entry[1].toDouble();
+                        std::string color = qjsonValueToString(entry[2]);
+                        std::string label = entry.size() > 3 ? qjsonValueToString(entry[3]) : "";
+                        spec.ranges.push_back({lo, hi, color, label});
+                    }
+                } else if (entryVal.isObject()) {
+                    QJsonObject entry = entryVal.toObject();
+                    double lo = 0, hi = 0;
+                    if (entry.contains("lower")) lo = entry["lower"].toDouble();
+                    else if (entry.contains("lo")) lo = entry["lo"].toDouble();
+                    else if (entry.contains("min")) lo = entry["min"].toDouble();
+                    if (entry.contains("upper")) hi = entry["upper"].toDouble();
+                    else if (entry.contains("hi")) hi = entry["hi"].toDouble();
+                    else if (entry.contains("max")) hi = entry["max"].toDouble();
+                    std::string color;
+                    if (entry.contains("color")) color = qjsonValueToString(entry["color"]);
+                    else if (entry.contains("fill")) color = qjsonValueToString(entry["fill"]);
+                    std::string label = entry.contains("label") ? qjsonValueToString(entry["label"]) : "";
+                    spec.ranges.push_back({lo, hi, color, label});
+                }
+            }
+        }
+    }
+    if (obj.contains("rules") && obj["rules"].isArray()) {
+        QJsonArray arr = obj["rules"].toArray();
+        for (const QJsonValue& entryVal : arr) {
+            if (!entryVal.isObject()) continue;
+            QJsonObject entry = entryVal.toObject();
+            RuleSpec rule;
+            if (entry.contains("name")) rule.name = qjsonValueToString(entry["name"]);
+            if (entry.contains("expression")) rule.expression = qjsonValueToString(entry["expression"]);
+            if (entry.contains("label")) rule.label = qjsonValueToString(entry["label"]);
+            else if (entry.contains("name") && rule.label.empty()) rule.label = rule.name;
+            if (entry.contains("fill")) rule.fill = qjsonValueToString(entry["fill"]);
+            if (entry.contains("stroke")) rule.stroke = qjsonValueToString(entry["stroke"]);
+            if (entry.contains("stroke_width")) {
+                QJsonValue v = entry["stroke_width"];
+                if (v.isDouble()) rule.stroke_width = v.toDouble();
+                else if (v.isString()) rule.stroke_width = v.toString().toDouble();
+            }
+            if (entry.contains("marker_size")) {
+                QJsonValue v = entry["marker_size"];
+                if (v.isDouble()) rule.marker_size = v.toDouble();
+                else if (v.isString()) rule.marker_size = v.toString().toDouble();
+            }
+            spec.rules.push_back(std::move(rule));
+        }
+    }
+    if (obj.contains("labels") && obj["labels"].isObject()) {
+        QJsonObject labels = obj["labels"].toObject();
+        bool visible = true;
+        if (labels.contains("visible")) {
+            QJsonValue vv = labels["visible"];
+            if (vv.isBool()) visible = vv.toBool();
+            else if (vv.isString()) visible = vv.toString().toLower() != "false" && vv.toString() != "0";
+        }
+        std::string field;
+        if (labels.contains("field") && labels["field"].isString())
+            field = labels["field"].toString().toStdString();
+        spec.labels_enabled = visible && !field.empty();
+        if (labels.contains("field") && labels["field"].isString())
+            spec.label_field = field;
+        if (labels.contains("font_family") && labels["font_family"].isString())
+            spec.label_font_family = labels["font_family"].toString().toStdString();
+        if (labels.contains("size")) {
+            QJsonValue v = labels["size"];
+            if (v.isDouble()) spec.label_size = v.toDouble();
+            else if (v.isString()) spec.label_size = v.toString().toDouble();
+        }
+        if (labels.contains("bold")) {
+            QJsonValue v = labels["bold"];
+            if (v.isBool()) spec.label_bold = v.toBool();
+            else if (v.isString()) spec.label_bold = v.toString().toLower() == "true" || v.toString() == "1";
+        }
+        if (labels.contains("color") && labels["color"].isString())
+            spec.label_color = labels["color"].toString().toStdString();
+        if (labels.contains("buffer")) {
+            QJsonValue v = labels["buffer"];
+            if (v.isDouble()) spec.label_buffer_size = v.toDouble();
+            else if (v.isString()) spec.label_buffer_size = v.toString().toDouble();
+        } else if (labels.contains("halo_width")) {
+            QJsonValue v = labels["halo_width"];
+            if (v.isDouble()) spec.label_buffer_size = v.toDouble();
+            else if (v.isString()) spec.label_buffer_size = v.toString().toDouble();
+        }
+        if (labels.contains("buffer_color") && labels["buffer_color"].isString())
+            spec.label_buffer_color = labels["buffer_color"].toString().toStdString();
+        else if (labels.contains("halo_color") && labels["halo_color"].isString())
+            spec.label_buffer_color = labels["halo_color"].toString().toStdString();
+        if (labels.contains("rotation_field") && labels["rotation_field"].isString())
+            spec.label_rotation_field = labels["rotation_field"].toString().toStdString();
+        if (labels.contains("size_field") && labels["size_field"].isString())
+            spec.label_size_field = labels["size_field"].toString().toStdString();
+        if (labels.contains("color_field") && labels["color_field"].isString())
+            spec.label_color_field = labels["color_field"].toString().toStdString();
+    }
+    return spec;
+}
+
+void applyStyleToLayer(QgsVectorLayer& layer, const VectorLayerSpec& spec) {
+    validate_style_payloads(spec);
+    apply_renderer_style(layer, spec);
+    apply_label_style(layer, spec);
+}
+
+}  // namespace
 
 struct QgisMapStack::Impl {
   bool initialized = false;
@@ -294,7 +501,9 @@ std::vector<double> QgisMapStack::mapToScreen(std::uintptr_t canvas, double x, d
 
 std::string QgisMapStack::addVectorLayerGeoJson(
     const std::string& name, const std::string& geometry_type,
-    const std::string& crs_auth_id, const std::string& geojson) {
+    const std::string& crs_auth_id, const std::string& geojson,
+    const std::string& renderer_xml, const std::string& labeling_xml,
+    const std::string& legacy_style_json) {
   if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
   const QString uri = QStringLiteral("%1?crs=%2")
       .arg(QString::fromStdString(geometry_type), QString::fromStdString(crs_auth_id));
@@ -308,6 +517,25 @@ std::string QgisMapStack::addVectorLayerGeoJson(
     layer->dataProvider()->addFeatures(features);
     layer->updateExtents();
   }
+  bool hasStyle = !renderer_xml.empty() || !labeling_xml.empty() || !legacy_style_json.empty();
+  bool legacyIsEmpty = true;
+  if (!legacy_style_json.empty()) {
+    QJsonDocument ld = QJsonDocument::fromJson(QByteArray::fromStdString(legacy_style_json));
+    if (ld.isObject() && !ld.object().isEmpty()) legacyIsEmpty = false;
+    else if (ld.isArray() && !ld.array().isEmpty()) legacyIsEmpty = false;
+    else if (ld.isNull() && legacy_style_json != "null" && legacy_style_json != "{}") {
+      legacyIsEmpty = false;
+    } else if (legacy_style_json != "{}" && legacy_style_json != "null" && legacy_style_json != "") {
+      legacyIsEmpty = false;
+    }
+    if (legacy_style_json == "{}" || legacy_style_json == "null") legacyIsEmpty = true;
+  }
+  if (hasStyle && (!renderer_xml.empty() || !labeling_xml.empty() || !legacyIsEmpty)) {
+    VectorLayerSpec spec = buildSpecFromLegacyJson(renderer_xml, labeling_xml, legacy_style_json, name);
+    spec.id = layer->id().toStdString();
+    if (spec.id.empty()) spec.id = name;
+    applyStyleToLayer(*layer, spec);
+  }
   const std::string id = layer->id().toStdString();
   QgsProject::instance()->addMapLayer(layer.release());
   impl_->owned_layers.insert(id);
@@ -315,6 +543,38 @@ std::string QgisMapStack::addVectorLayerGeoJson(
     if (kv.second) kv.second->setCanvasLayers();
   }
   return id;
+}
+
+void QgisMapStack::setLayerStyle(const std::string& layer_id,
+                                 const std::string& renderer_xml,
+                                 const std::string& labeling_xml,
+                                 const std::string& legacy_style_json) {
+  QgsMapLayer* base = QgsProject::instance()->mapLayer(QString::fromStdString(layer_id));
+  if (base == nullptr) throw std::invalid_argument("unknown layer: " + layer_id);
+  auto* layer = dynamic_cast<QgsVectorLayer*>(base);
+  if (layer == nullptr) throw std::invalid_argument("layer is not a vector layer: " + layer_id);
+  bool hasStyle = !renderer_xml.empty() || !labeling_xml.empty() || !legacy_style_json.empty();
+  bool legacyIsEmpty = true;
+  if (!legacy_style_json.empty()) {
+    QJsonDocument ld = QJsonDocument::fromJson(QByteArray::fromStdString(legacy_style_json));
+    if (ld.isObject() && !ld.object().isEmpty()) legacyIsEmpty = false;
+    else if (ld.isArray() && !ld.array().isEmpty()) legacyIsEmpty = false;
+    else if (legacy_style_json != "{}" && legacy_style_json != "null" && legacy_style_json != "") {
+      QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(legacy_style_json));
+      if (!doc.isNull()) legacyIsEmpty = false;
+    }
+    if (legacy_style_json == "{}" || legacy_style_json == "null") legacyIsEmpty = true;
+  }
+  if (!hasStyle || (renderer_xml.empty() && labeling_xml.empty() && legacyIsEmpty)) {
+    return;
+  }
+  VectorLayerSpec spec = buildSpecFromLegacyJson(renderer_xml, labeling_xml, legacy_style_json, layer_id);
+  spec.id = layer_id;
+  applyStyleToLayer(*layer, spec);
+  layer->triggerRepaint();
+  for (auto& kv : impl_->tree_bridges) {
+    if (kv.second) kv.second->setCanvasLayers();
+  }
 }
 
 bool QgisMapStack::removeLayer(const std::string& layer_id) {

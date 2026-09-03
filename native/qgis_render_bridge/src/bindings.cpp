@@ -565,7 +565,47 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
         .def("refresh_canvas", &pwb::qgis_render::QgisMapStack::refreshCanvas)
         .def("screen_to_map", &pwb::qgis_render::QgisMapStack::screenToMap)
         .def("map_to_screen", &pwb::qgis_render::QgisMapStack::mapToScreen)
-        .def("add_vector_layer_geojson", &pwb::qgis_render::QgisMapStack::addVectorLayerGeoJson)
+        .def("add_vector_layer_geojson",
+             [](pwb::qgis_render::QgisMapStack& self, const std::string& name,
+                const std::string& geometry_type, const std::string& crs_auth_id,
+                const std::string& geojson, const std::string& renderer_xml,
+                const std::string& labeling_xml, py::object legacy_style) {
+               std::string legacy_json;
+               if (!legacy_style.is_none()) {
+                   if (py::isinstance<py::str>(legacy_style)) {
+                       legacy_json = py::cast<std::string>(legacy_style);
+                   } else if (py::isinstance<py::dict>(legacy_style)) {
+                       py::object json_mod = py::module_::import("json");
+                       legacy_json = json_mod.attr("dumps")(legacy_style).cast<std::string>();
+                   } else {
+                       throw py::type_error("legacy_style must be dict, JSON string, or None");
+                   }
+               }
+               return self.addVectorLayerGeoJson(name, geometry_type, crs_auth_id, geojson,
+                                                 renderer_xml, labeling_xml, legacy_json);
+             },
+             py::arg("name"), py::arg("geometry_type"), py::arg("crs_auth_id"),
+             py::arg("geojson"), py::arg("renderer_xml") = "", py::arg("labeling_xml") = "",
+             py::arg("legacy_style") = py::none())
+        .def("set_layer_style",
+             [](pwb::qgis_render::QgisMapStack& self, const std::string& layer_id,
+                const std::string& renderer_xml, const std::string& labeling_xml,
+                py::object legacy_style) {
+               std::string legacy_json;
+               if (!legacy_style.is_none()) {
+                   if (py::isinstance<py::str>(legacy_style)) {
+                       legacy_json = py::cast<std::string>(legacy_style);
+                   } else if (py::isinstance<py::dict>(legacy_style)) {
+                       py::object json_mod = py::module_::import("json");
+                       legacy_json = json_mod.attr("dumps")(legacy_style).cast<std::string>();
+                   } else {
+                       throw py::type_error("legacy_style must be dict, JSON string, or None");
+                   }
+               }
+               self.setLayerStyle(layer_id, renderer_xml, labeling_xml, legacy_json);
+             },
+             py::arg("layer_id"), py::arg("renderer_xml") = "", py::arg("labeling_xml") = "",
+             py::arg("legacy_style") = py::none())
         .def("remove_layer", &pwb::qgis_render::QgisMapStack::removeLayer)
         .def("set_layer_visibility", &pwb::qgis_render::QgisMapStack::setLayerVisibility)
         .def("set_layer_opacity", &pwb::qgis_render::QgisMapStack::setLayerOpacity)

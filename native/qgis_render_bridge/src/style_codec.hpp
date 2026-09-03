@@ -44,4 +44,12 @@ std::unique_ptr<QgsVectorLayer> make_dialog_layer(
     const std::vector<std::pair<std::string, std::string>>& fields
 );
 
+/// Shared style helpers (used by both QgisRenderBridge and QgisMapStack) —
+// extracted from the formerly file-static implementations in
+// qgis_render_bridge.cpp so map_stack_service.cpp can reuse them without
+// duplicating logic.
+void validate_style_payloads(const VectorLayerSpec& spec);
+void apply_renderer_style(QgsVectorLayer& layer, const VectorLayerSpec& spec);
+void apply_label_style(QgsVectorLayer& layer, const VectorLayerSpec& spec);
+
 }  // namespace pwb::qgis_render
