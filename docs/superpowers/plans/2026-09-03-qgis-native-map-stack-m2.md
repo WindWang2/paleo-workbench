@@ -438,181 +438,26 @@ git commit -m "feat(qgis): 增量镜像 reconcile——未变图层保持对象/
 
 ---
 
-### Task 3: 树操作回写文档模型（可见性/排序/重命名，去回声）
+### Task 3: 树操作回写文档模型（可见性/排序/重命名，去回声）✅ 已实现（925fcf7a）
 
 **Files:**
 - Modify: `native/qgis_render_bridge/src/map_stack_service.hpp/.cpp`（树变更回调：可见性/顺序/重命名 + suppress 计数器绑定）
 - Modify: `native/qgis_render_bridge/src/bindings.cpp`
-- Modify: `paleo_workbench/ui/qgis_stack/widgets.py`（QgisLayerTreeHost 接回调）或新增 `paleo_workbench/ui/qgis_stack/tree_sync.py`
-- Test: `tests/test_qgis_layertree_writeback.py`（新建）
+- Create: `paleo_workbench/ui/qgis_stack/tree_sync.py`（`TreeChangeSet`/`parse_tree_change`）
+- Test: `tests/test_qgis_layertree_writeback.py`（新建，5 例全绿）
 
-**Interfaces:**
-- Consumes: Task 1 树视图、Task 2 reconcile（含 `suppress_tree_callbacks` 计数器）。
-- Produces:
-  - `set_tree_change_callback(tree_view, callback) -> None`（callback 收 dict 式元组列表不便时可用 JSON 串：`{"visibility": {doc_id: bool}, "order": [doc_id...], "renames": {doc_id: name}}`，只含本次实际变更；程序化 reconcile 期间（suppress 计数 >0）不触发）
-  - Python 侧 `TreeModelWriteback`（新文件 `tree_sync.py`）：`apply(payload) -> TreeChangeSet` 纯函数式归并，供面板持有方消费（Task 4 接入 LayerManagerPanel 替换物）。
+**Interfaces（as-built）:**
+- `set_tree_change_callback(tree_view, callback) -> None`：callback 收 JSON 串 `{"visibility": {doc_id: bool}, "order": [doc_id...], "renames": {doc_id: name}}`，只含本次实际变更；程序化 reconcile 期间（suppress 计数 >0）不触发。
+- 用户语义驱动绑定（不包 SuppressGuard，刻意触发回调）：`tree_view_set_row_checked(tree, row, checked)` / `tree_view_rename_row(tree, row, name)` / `tree_view_move_row(tree, from, to)`。
+- Python 侧 `tree_sync.py`：`parse_tree_change(payload) -> TreeChangeSet`（frozen dataclass，Task 4 由面板消费）。
 
-- [ ] **Step 1: 写失败测试**
-
-```python
-# tests/test_qgis_layertree_writeback.py
-"""M2 Task 3: 树的用户操作（勾选/拖拽/重命名）经回调到达 Python；程序化 reconcile 不触发。"""
-import json
-
-import pytest
-
-pytest.importorskip("PySide6")
-from shiboken6 import wrapInstance
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget
-
-_FC = {"type": "FeatureCollection", "features": [
-    {"type": "Feature", "geometry": {"type": "Point", "coordinates": [1.0, 1.0]}, "properties": {}}]}
-
-
-@pytest.fixture()
-def stack(qapp):
-    from qgis_render_bridge.mapstack import QgisMapStack
-
-    s = QgisMapStack()
-    s.initialize()
-    yield s
-    s.shutdown()
-
-
-def _mirror(stack, doc, name):
-    return stack.upsert_mirror_layer(doc, name, "Point", "EPSG:4326",
-                                     json.dumps(_FC), "", "", "", True, 1.0)
-
-
-def test_tree_visibility_toggle_reports_doc_id(qtbot, stack):
-    canvas = stack.create_canvas()
-    tree_addr = stack.create_layer_tree_view(canvas)
-    events = []
-    stack.set_tree_change_callback(tree_addr, events.append)
-    _mirror(stack, "doc-a", "井位")
-    tree = wrapInstance(tree_addr, QWidget)
-    qtbot.addWidget(tree)
-    tree.show()
-    model = tree.model()
-    qtbot.waitUntil(lambda: model.rowCount() >= 1, timeout=2000)
-    idx = model.index(0, 0)
-    model.setData(idx, Qt.Unchecked, Qt.CheckStateRole)
-    qtbot.waitUntil(lambda: any(json.loads(e).get("visibility") for e in events), timeout=2000)
-    payload = json.loads([e for e in events if json.loads(e).get("visibility")][-1])
-    assert payload["visibility"] == {"doc-a": False}
-
-
-def test_programmatic_reconcile_does_not_echo(qtbot, stack):
-    canvas = stack.create_canvas()
-    tree_addr = stack.create_layer_tree_view(canvas)
-    events = []
-    stack.set_tree_change_callback(tree_addr, events.append)
-    _mirror(stack, "doc-a", "井位")
-    _mirror(stack, "doc-b", "边界")
-    tree = wrapInstance(tree_addr, QWidget)
-    qtbot.addWidget(tree)
-    tree.show()
-    qtbot.waitUntil(lambda: wrapInstance(tree_addr, QWidget).model().rowCount() >= 2, timeout=2000)
-    events.clear()
-    # 程序化：改可见性 + 重排序——不得触发回调
-    stack.set_mirror_layer_visibility("doc-a", False)
-    stack.set_mirror_layer_order(["doc-b", "doc-a"])
-    qtbot.wait(200)
-    assert events == []
-
-
-def test_rename_reports(qtbot, stack):
-    canvas = stack.create_canvas()
-    tree_addr = stack.create_layer_tree_view(canvas)
-    events = []
-    stack.set_tree_change_callback(tree_addr, events.append)
-    _mirror(stack, "doc-a", "井位")
-    tree = wrapInstance(tree_addr, QWidget)
-    qtbot.addWidget(tree)
-    tree.show()
-    model = tree.model()
-    qtbot.waitUntil(lambda: model.rowCount() >= 1, timeout=2000)
-    model.setData(model.index(0, 0), "井位2", Qt.EditRole)
-    qtbot.waitUntil(lambda: any(json.loads(e).get("renames") for e in events), timeout=2000)
-    payload = json.loads([e for e in events if json.loads(e).get("renames")][-1])
-    assert payload["renames"] == {"doc-a": "井位2"}
-```
-
-- [ ] **Step 2: 运行确认失败**
-
-Run: `/home/kevin/projects/paleo_project/run_env.sh /home/kevin/projects/paleo_project/main tests/test_qgis_layertree_writeback.py -v`
-Expected: FAIL（`AttributeError: set_tree_change_callback`）
-
-- [ ] **Step 3: 实现**
-
-C++（关键结构，执行者补全）：
-
-```cpp
-// Impl 追加：
-//   int suppress_tree_callbacks = 0;
-//   struct TreeChangeBatch { QMap<QString,bool> visibility; QStringList order; QMap<QString,QString> renames; };
-//   std::unordered_map<std::uintptr_t, std::function<void(const std::string&)>> tree_change_callbacks;
-//   std::unordered_map<std::uintptr_t, QMetaObject::Connection> tree_change_connections;
-//   std::unordered_map<std::uintptr_t, TreeChangeBatch> tree_pending;  // 事件压缩：同 tick 合并
-
-// 挂接（在 createLayerTreeView 内，model 上）：
-//   connect(model, &QgsLayerTreeModel::dataChanged, view, [this, addr](...) { onTreeDataChanged(addr, ...); });
-//   connect(model, &QgsLayerTreeModel::rowsMoved, view, [this, addr](...) { onTreeOrderChanged(addr); });
-// onTreeDataChanged：index2node → QgsLayerTreeLayer → 读 checkState/名称变化，
-//   解析 pwb/doc_id（无则跳过）；suppress>0 时直接 return；
-//   变化写入 tree_pending[addr]，并 QTimer::singleShot(0, view, ...) 发批（JSON 序列化后调 callback）。
-// onTreeOrderChanged：读取本栈镜像节点的顶层顺序 → 写入 pending.order，同样 singleShot 发批。
-// setMirrorLayerVisibility / setMirrorLayerOrder / upsertMirrorLayer 的程序化树操作：
-//   全部包在 ++impl_->suppress_tree_callbacks / -- 的 RAII 守卫里。
-```
-
-Python：
-
-```python
-# paleo_workbench/ui/qgis_stack/tree_sync.py
-"""树变更回调 → 文档模型写回的纯归并逻辑（Task 4 由面板消费）。"""
-from __future__ import annotations
-
-import json
-from dataclasses import dataclass, field
-
-
-@dataclass(frozen=True)
-class TreeChangeSet:
-    visibility: dict[str, bool] = field(default_factory=dict)
-    order: tuple[str, ...] = ()
-    renames: dict[str, str] = field(default_factory=dict)
-
-    @property
-    def empty(self) -> bool:
-        return not (self.visibility or self.order or self.renames)
-
-
-def parse_tree_change(payload: str) -> TreeChangeSet:
-    raw = json.loads(payload) if payload else {}
-    return TreeChangeSet(
-        visibility={str(k): bool(v) for k, v in (raw.get("visibility") or {}).items()},
-        order=tuple(str(v) for v in (raw.get("order") or [])),
-        renames={str(k): str(v) for k, v in (raw.get("renames") or {}).items()},
-    )
-```
-
-- [ ] **Step 4: 重编 + 运行**
-
-```bash
-cd /home/kevin/projects/paleo_project/main
-PALEO_WITH_QGIS_RENDERER=1 /opt/miniconda3/bin/python3.13 -m pip install -e native/qgis_render_bridge
-/home/kevin/projects/paleo_project/run_env.sh /home/kevin/projects/paleo_project/main -q tests/test_qgis_layertree_writeback.py tests/test_qgis_layertree_embed.py tests/test_qgis_mapstack_reconcile.py
-```
-Expected: 全绿。
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add native/qgis_render_bridge/src/ paleo_workbench/ui/qgis_stack/ tests/test_qgis_layertree_writeback.py
-git commit -m "feat(qgis): 图层树可见性/排序/重命名回调 + 程序化操作去回声"
-```
+**实现要点（as-built，替代原草图）:**
+- 排序监听挂 `rowsInserted`/`rowsRemoved`（顶层 parent 过滤），**不是** `rowsMoved`——QGIS 的节点移动（含用户 DnD：insertChildNodes + removeRows）不发 rowsMoved；flush 经 `QTimer::singleShot(0)` 按 tick 合并（`tree_pending` + `tree_flush_scheduled`）。
+- `QgsLayerTreeModel::setData(CheckStateRole)` 对叶子节点经 `visibilityChanged`→`nodeVisibilityChanged` 发**空 roles** 的 `dataChanged`；刷新类 dataChanged 也是空 roles，无法按 roles 区分——用**影子表**区分真实变更：`known_layer_names`（重命名）与 `known_layer_visibility`（勾选态），程序化写入处（upsert 两路径 / `setMirrorLayerVisibility` / M1 `setLayerVisibility`）同步影子；首次见面只建基线不上报；镜像擦除辅助（`eraseMirrorBy*`）同步清影子。
+- `QgsLayerTreeModel::setData(EditRole)` 落地后 fallthrough 到 `QAbstractItemModel::setData` 返回 false——返回值不可用作成败依据，以节点名核验。
+- `treeViewMoveRow` 必须与 QGIS DnD 同序：**先插入同 layer 新节点、再移除旧节点**（registry bridge `groupRemovedChildren` 按 findLayer 跳过仍在树中的图层）；先 take 后插会被 QueuedConnection 延迟删除把图层从 project 误删。旧节点 takeChild 后需手动 delete（orphan 不销毁）。
+- `qobject_cast<QgsLayerTreeModel*>(view->model())` 在该类上不可靠（调试实测返回 null）——model 指针在创建时直存 `Impl::tree_models`。
+- 清理路径（dtor/shutdown）：`tree_change_connections`（vector）逐个断开，`tree_change_callbacks`/`tree_pending`/`tree_flush_scheduled`/`known_layer_names`/`known_layer_visibility`/`tree_models` 清空。
 
 ---
 
