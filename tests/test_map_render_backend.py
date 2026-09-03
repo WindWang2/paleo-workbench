@@ -75,7 +75,7 @@ def test_fallback_backend_renders_revisioned_vector_snapshot() -> None:
     assert frame.generation == 1
     assert len(frame.rgba) == frame.height * frame.stride
     # Known opaque polygon content must not collapse to the fallback background.
-    assert any(byte not in {24, 28, 34, 255} for byte in frame.rgba)
+    assert any(byte not in {255} for byte in frame.rgba)
 
 
 def test_fallback_backend_discards_preceding_generation_after_view_change() -> None:
@@ -406,7 +406,7 @@ def _stroke_ink(backend: FallbackMapRenderBackend, *, dpi: float) -> int:
     backend.set_dpi(dpi)
     frame = backend.render_sync()
     pixels = np.frombuffer(frame.rgba, dtype=np.uint8).reshape(240, 320, 4).astype(int)
-    background = np.array([0x18, 0x1C, 0x22, 0xFF], dtype=int)
+    background = np.array([0xFF, 0xFF, 0xFF, 0xFF], dtype=int)
     return int(np.abs(pixels - background).sum())
 
 
@@ -443,7 +443,7 @@ def test_fallback_dpi_scales_widths_but_not_geometry_positions() -> None:
         backend.set_dpi(dpi)
         frame = backend.render_sync()
         pixels = np.frombuffer(frame.rgba, dtype=np.uint8).reshape(240, 320, 4).astype(int)
-        background = np.array([0x18, 0x1C, 0x22, 0xFF], dtype=int)
+        background = np.array([0xFF, 0xFF, 0xFF, 0xFF], dtype=int)
         diff = np.abs(pixels - background).sum(axis=2)
         return {int(row) for row in np.where((diff > 24).any(axis=1))[0]}
 
@@ -460,7 +460,7 @@ def _frame_ink(frame) -> int:
     pixels = np.frombuffer(frame.rgba, dtype=np.uint8).reshape(
         frame.height, frame.width, 4
     ).astype(int)
-    background = np.array([0x18, 0x1C, 0x22, 0xFF], dtype=int)
+    background = np.array([0xFF, 0xFF, 0xFF, 0xFF], dtype=int)
     return int(np.abs(pixels - background).sum())
 
 
@@ -689,7 +689,7 @@ def test_fallback_backend_renders_annotation_layer() -> None:
     assert frame.height == 100
     # Text or marker must have drawn pixels differing from background
     pixels = np.frombuffer(frame.rgba, dtype=np.uint8).reshape(100, 100, 4)
-    non_bg = int((pixels[:, :, :3] != np.array([24, 28, 34])).any(axis=-1).sum())
+    non_bg = int((pixels[:, :, :3] != np.array([255, 255, 255])).any(axis=-1).sum())
     assert non_bg > 0
 
 
@@ -721,7 +721,7 @@ def test_fallback_backend_renders_and_exports_annotation_layer_with_none_labels(
     assert frame is not None
     assert (frame.width, frame.height) == (100, 100)
     pixels = np.frombuffer(frame.rgba, dtype=np.uint8).reshape(100, 100, 4)
-    non_bg = int((pixels[:, :, :3] != np.array([24, 28, 34])).any(axis=-1).sum())
+    non_bg = int((pixels[:, :, :3] != np.array([255, 255, 255])).any(axis=-1).sum())
     assert non_bg > 0
 
     # 2. Raster painter export

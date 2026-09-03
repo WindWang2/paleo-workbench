@@ -50,7 +50,7 @@ class WorkstationExplorer(QFrame):
         super().__init__(parent)
         self.setObjectName("WorkstationExplorer")
         self.setMinimumWidth(210)
-        self.setMaximumWidth(420)
+        # 不设最大宽度：dock 加宽或浮动放大时内容要占满面板。
         self._project = project
         self._mode = "project"
 

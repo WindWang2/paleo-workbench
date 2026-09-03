@@ -499,6 +499,13 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         background: {t.BORDER};
         margin: 4px 6px;
     }}
+    QToolBar#WorkstationAppBarToolbar {{
+        background: {t.BG_HEADER};
+        border: none;
+        border-radius: 0px;
+        spacing: 0px;
+        padding: 0px;
+    }}
     QToolButton {{
         background-color: transparent;
         border: 1px solid transparent;
@@ -883,6 +890,16 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         background: {t.BG_SEARCH}; border-top: 1px solid {t.BORDER_STRONG};
         min-height: {t.STATUS_BAR_HEIGHT}px; max-height: {t.STATUS_BAR_HEIGHT}px;
         font-size: {t.FONT_SIZE_STATUS}; color: {t.TEXT_SECONDARY};
+    }}
+    /* 原生状态栏槽位承载自定义 StatusBar：自身不设外观，项边框清零 */
+    QStatusBar {{
+        background: {t.BG_SEARCH};
+        border: none;
+        padding: 0px;
+        margin: 0px;
+    }}
+    QStatusBar::item {{
+        border: none;
     }}
     QFrame#MapStatusBar {{
         background: {t.BG_SIDEBAR};

@@ -10,7 +10,7 @@ from paleo_workbench.viz.native_factor_map import MapScene
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 
 
-BACKGROUND = (24, 28, 34)
+BACKGROUND = (255, 255, 255)
 
 
 def _scene() -> MapScene:

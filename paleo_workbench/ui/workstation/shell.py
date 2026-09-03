@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QTabBar,
     QTabWidget,
+    QToolBar,
     QVBoxLayout,
     QWidget,
 )
@@ -96,20 +97,33 @@ class WorkstationFrame(QWidget):
             Qt.Corner.TopLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea
         )
 
-        # --- 中央：App bar + 文档区（图件主体所在） ----------------------
+        # --- 中央：文档区（图件主体所在） --------------------------------
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
         self.app_bar = WorkstationAppBar(self)
-        # QMainWindowLayout 会把子件 minimumSizeHint 计入中央区最小尺寸；
-        # App bar 与文档栈的内容提示之和必须被忽略，否则 dock 化窗口的
-        # 最小宽度会撑爆外层壳（2041px 实测）。
+        # 首行顶置：App bar 挂在宿主的顶部工具栏区（dock 区域之上），
+        # 占满窗口全宽，左/右 dock 不再推移这一行。固定不可移动/浮动；
+        # objectName 供 saveState/restoreState 识别；右键菜单屏蔽，
+        # 防止通过 toggleViewAction 把全局栏藏起来。
         self.app_bar.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         self.app_bar.setMinimumSize(0, 0)
-        layout.addWidget(self.app_bar)
+        self.app_bar_toolbar = QToolBar("工作站全局栏", self._dock_host)
+        self.app_bar_toolbar.setObjectName("WorkstationAppBarToolbar")
+        self.app_bar_toolbar.setMovable(False)
+        self.app_bar_toolbar.setFloatable(False)
+        self.app_bar_toolbar.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.PreventContextMenu
+        )
+        # 平台主题为 QToolBar 预留的内边距会让全宽首行缩进几像素，清零。
+        self.app_bar_toolbar.layout().setContentsMargins(0, 0, 0, 0)
+        self.app_bar_toolbar.addWidget(self.app_bar)
+        self._dock_host.addToolBar(
+            Qt.ToolBarArea.TopToolBarArea, self.app_bar_toolbar
+        )
 
         self.document_tabs = QTabBar(self)
         self.document_tabs.setObjectName("WorkstationDocumentTabs")
@@ -732,5 +746,11 @@ class WorkstationFrame(QWidget):
             if isinstance(host, QMainWindow):
                 host.removeDockWidget(dock)
             dock.deleteLater()
+        # App bar 的容器 toolbar 同样注册在宿主上：不摘除的话，壳重建
+        # 一次就多挂一条全局栏。
+        toolbar_host = self.app_bar_toolbar.parentWidget()
+        if isinstance(toolbar_host, QMainWindow):
+            toolbar_host.removeToolBar(self.app_bar_toolbar)
+        self.app_bar_toolbar.deleteLater()
         if self._owns_dock_host:
             self._dock_host.deleteLater()

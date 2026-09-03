@@ -165,10 +165,14 @@ def test_dpi_scaling_grows_stroke_width_proportionally() -> None:
         _configure(backend, MapRenderSnapshot(project_crs="", layers=(_layer(features, style=style),)))
         backend.set_dpi(dpi)
         image = _frame_image(backend.render_sync())
+        # 白底上不能用 red() > 100 检测（白色 red=255）：红色描边要
+        # 同时压低绿/蓝通道。
         return sum(
             1
             for y in range(image.height())
-            if image.pixelColor(QPoint(100, y)).red() > 100
+            if (lambda c: c.red() > 100 and c.green() < 100 and c.blue() < 100)(
+                image.pixelColor(QPoint(100, y))
+            )
         )
 
     thin = painted_thickness(96.0)
@@ -203,13 +207,14 @@ def test_well_marker_symbol_renders_ring_and_centre() -> None:
         },
     )
     backend = FallbackMapRenderBackend()
-    style = {"fill": "#22b8a7", "stroke": "#ffffff", "marker": "well", "marker_size": 16.0}
+    # 白底上白色描边不可见，井符号的环/心用深色墨。
+    style = {"fill": "#22b8a7", "stroke": "#1f2937", "marker": "well", "marker_size": 16.0}
     _configure(backend, MapRenderSnapshot(project_crs="", layers=(_layer(features, style=style),)))
 
     image = _frame_image(backend.render_sync())
     center = image.pixelColor(QPoint(100, 100))
 
-    assert (center.red(), center.green(), center.blue()) != (24, 28, 34)
+    assert (center.red(), center.green(), center.blue()) != (255, 255, 255)
 
 
 def test_threaded_backend_delivers_latest_generation(qtbot) -> None:

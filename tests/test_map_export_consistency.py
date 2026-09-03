@@ -50,7 +50,7 @@ def _canvas(qtbot) -> UnifiedMapCanvas:
     return canvas
 
 
-def _content_bbox(image, *, background=(24, 28, 34)):
+def _content_bbox(image, *, background=(255, 255, 255)):
     """Bounding box of non-background pixels inside the central 60% region."""
     min_x = min_y = None
     max_x = max_y = None
@@ -282,7 +282,7 @@ def _stroke_thickness_px(image, bbox) -> int | None:
     best = run = 0
     for x in range(x0, x1):
         color = image.pixelColor(QPoint(x, y))
-        if (color.red(), color.green(), color.blue()) != (24, 28, 34):
+        if (color.red(), color.green(), color.blue()) != (255, 255, 255):
             run += 1
             best = max(best, run)
         else:

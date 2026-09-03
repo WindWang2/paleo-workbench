@@ -115,8 +115,8 @@ def _paint_decorations_impl(
     ``extent`` is the extent actually rendered into this target (exports
     letterbox the view extent); the scale bar reads it so its label always
     matches the drawn bar length.
-    ``dark_chrome`` selects the ink palette for light map bodies (the QGIS
-    backend renders a light background; the fallback fills a dark one).
+    ``dark_chrome`` selects the dark ink palette for light map bodies (all
+    built-in backends render a light/white background).
     """
     ink = "#1f2937" if dark_chrome else "#f8f9fa"
     canvas_width = int(width)
@@ -625,9 +625,9 @@ class UnifiedMapCanvas(QWidget):
         _paint_decorations_impl(
             painter, decorations,
             width=canvas_width, height=canvas_height, scale=scale, extent=drawn_extent,
-            # The QGIS backend renders a light map body; the fallback fills a
-            # dark one — chrome ink must follow the body or text disappears.
-            dark_chrome=self._backend.backend_name == "qgis",
+            # 帧底色决定装饰墨色：浅色帧（当前所有内置后端）用深色墨，
+            # 否则文字消失在底色里。测试替身未必声明该属性，缺省按浅色帧。
+            dark_chrome=getattr(self._backend, "light_frame_background", True),
         )
 
     @staticmethod

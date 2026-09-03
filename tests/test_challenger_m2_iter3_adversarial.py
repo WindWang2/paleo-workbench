@@ -157,12 +157,12 @@ def test_point_styles_and_none_labels_permutations(tmp_path, marker_symbol, styl
         assert frame is not None
         assert (frame.width, frame.height) == (150, 150)
         pixels = np.frombuffer(frame.rgba, dtype=np.uint8).reshape(150, 150, 4)
-        non_bg = int((pixels[:, :, :3] != np.array([24, 28, 34])).any(axis=-1).sum())
+        non_bg = int((pixels[:, :, :3] != np.array([255, 255, 255])).any(axis=-1).sum())
         assert non_bg > 0, f"Expected non-background pixels for {marker_symbol} with {style_config}"
 
         # 2. QImage raster export
         img = QImage(150, 150, QImage.Format.Format_ARGB32_Premultiplied)
-        img.fill(QColor(24, 28, 34))
+        img.fill(QColor(255, 255, 255))
         p = QPainter(img)
         try:
             backend.render_to_painter(p, 150, 150, dpi=96.0)
@@ -246,7 +246,7 @@ def test_line_patterns_and_strokes(tmp_path, line_pattern):
         frame = backend.render_sync()
         assert frame is not None
         pixels = np.frombuffer(frame.rgba, dtype=np.uint8).reshape(200, 200, 4)
-        non_bg = int((pixels[:, :, :3] != np.array([24, 28, 34])).any(axis=-1).sum())
+        non_bg = int((pixels[:, :, :3] != np.array([255, 255, 255])).any(axis=-1).sum())
         assert non_bg > 0
     finally:
         backend.shutdown()
@@ -317,7 +317,7 @@ def test_categorized_and_graduated_points_with_and_without_labels(tmp_path):
         frame = backend.render_sync()
         assert frame is not None
         pixels = np.frombuffer(frame.rgba, dtype=np.uint8).reshape(200, 200, 4)
-        non_bg = int((pixels[:, :, :3] != np.array([24, 28, 34])).any(axis=-1).sum())
+        non_bg = int((pixels[:, :, :3] != np.array([255, 255, 255])).any(axis=-1).sum())
         assert non_bg > 0
 
         # SVG export

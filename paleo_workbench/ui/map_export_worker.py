@@ -151,6 +151,8 @@ def render_and_save_map_export(spec: MapExportSpec) -> None:
         height=spec.height,
         extent=spec.extent,
         dpi=spec.dpi,
+        # 帧底色为浅色（fallback 与 QGIS 后端都是），装饰用深色墨。
+        dark_chrome=True,
     )
     painter.end()
     if not image.save(spec.path, "PNG"):

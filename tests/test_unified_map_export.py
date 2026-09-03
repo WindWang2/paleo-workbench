@@ -89,7 +89,7 @@ def test_fallback_export_scales_title_font_with_dpi(tmp_path, qtbot) -> None:
     def title_height(dpi: float) -> int:
         image = canvas.render_export_image(800, 600, dpi=dpi)
         pixels = np.frombuffer(image.constBits().tobytes(), dtype=np.uint8).reshape(600, 800, 4).astype(int)
-        background = np.array([0x18, 0x1C, 0x22, 0xFF], dtype=int)
+        background = np.array([0xFF, 0xFF, 0xFF, 0xFF], dtype=int)
         diff = np.abs(pixels - background).sum(axis=2)
         # The title is the top-most decoration; ignore map content below.
         rows = np.where((diff > 24).any(axis=1))[0]

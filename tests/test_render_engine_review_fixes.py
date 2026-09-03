@@ -90,7 +90,13 @@ def test_zero_stroke_width_disables_stroke() -> None:
     )))
 
     image = _image(backend.render_sync())
-    painted = any(image.pixelColor(QPoint(x, 100)).red() > 100 for x in range(20, 180))
+    # 白底上检测红色描边要同时压低绿/蓝通道（白色 red 也是 255）。
+    painted = any(
+        (lambda c: c.red() > 100 and c.green() < 100 and c.blue() < 100)(
+            image.pixelColor(QPoint(x, 100))
+        )
+        for x in range(20, 180)
+    )
 
     assert not painted
 
@@ -426,7 +432,7 @@ def test_export_svg_contains_background_fill(qtbot, tmp_path) -> None:
     canvas.export_svg(str(path), width=800, height=600)
 
     text = path.read_text(encoding="utf-8")
-    assert "#181c22" in text.lower()
+    assert "#ffffff" in text.lower()
 
 
 def test_export_vector_cancels_in_flight_screen_render(qtbot, tmp_path) -> None:

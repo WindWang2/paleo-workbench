@@ -25,7 +25,7 @@ class WorkstationInspector(QFrame):
         super().__init__(parent)
         self.setObjectName("WorkstationInspector")
         self.setMinimumWidth(280)
-        self.setMaximumWidth(420)
+        # 不设最大宽度：dock 加宽或浮动放大时内容要占满面板。
         self._project = project
         self._current = None
 

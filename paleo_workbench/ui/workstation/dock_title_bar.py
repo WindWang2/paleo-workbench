@@ -187,6 +187,23 @@ class DockTitleBar(QWidget):
             and self._floatable()
             and not self._hit_button(event.position().toPoint())
         ):
+            # 浮动窗拖动优先交给系统级移动：Wayland 下顶层窗口不允许
+            # 自行 move()，必须由合成器接管拖动；X11 上 kwin 等 WM 同样
+            # 响应 _NET_WM_MOVERESIZE。返回 False 时回退手动位移。
+            # 窗口尚未暴露（新建浮动窗未收到首个 configure）时调用
+            # startSystemMove 会触发 xdg_toplevel 协议错误直接崩溃，
+            # 必须用 isExposed() 守住。
+            if self._dock.isFloating():
+                handle = self._dock.windowHandle()
+                if (
+                    handle is not None
+                    and handle.isExposed()
+                    and handle.startSystemMove()
+                ):
+                    self._drag_origin = None
+                    self._drag_frame = None
+                    event.accept()
+                    return
             self._drag_origin = event.globalPosition().toPoint()
             self._drag_frame = self._dock.frameGeometry().topLeft()
             # 停停靠标题栏按下：超过拖拽阈值后撕出为浮动窗（#1122）。
@@ -212,10 +229,14 @@ class DockTitleBar(QWidget):
                 self._dock.setFloating(True)
                 self._dock.raise_()
                 self._dock.activateWindow()
-                # 重新锚定浮动窗几何，让光标继续「抓着」标题栏。
+                self.float_toggled.emit(True)
+                # 注意：这里不能立刻 startSystemMove()——新浮动窗的
+                # Wayland surface 尚未 configure，调用会协议错误崩溃。
+                # 本次拖动在 Wayland 下原位结束（move 被合成器忽略），
+                # 松开后再次按住标题栏即可系统级拖动（isExposed 已就绪）。
+                # 重新锚定浮动窗几何，让光标继续「抓着」标题栏（X11 有效）。
                 self._drag_origin = event.globalPosition().toPoint()
                 self._drag_frame = self._dock.frameGeometry().topLeft()
-                self.float_toggled.emit(True)
                 event.accept()
                 return
             if self._dock.isFloating():

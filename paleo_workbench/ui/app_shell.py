@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMainWindow,
     QSizePolicy,
     QStackedWidget,
     QTextBrowser,
@@ -306,10 +307,21 @@ class AppShell(QWidget):
         self.workstation.setMinimumSize(0, 0)
         outer.addWidget(self.workstation, 1)
 
-        # 状态栏留在中央内容底部（自定义 StatusBar 非 QStatusBar，不能占
-        # QMainWindow 的原生状态栏槽位）；属性引用不变以兼容既有接线。
+        # 状态栏是整个软件的状态信息：有 dock 宿主（顶层 QMainWindow）时
+        # 占宿主的原生状态栏槽位——它位于所有 dock 区域（含底部 Agent/
+        # 任务中心）之下、贯穿窗口全宽，dock 浮动/停靠都不影响它。
+        # 无宿主（测试/孤立构造）时退回中央内容底部。
+        # 属性引用不变（shell.status_bar）以兼容既有接线。
         self.status_bar = StatusBar(self)
-        outer.addWidget(self.status_bar)
+        self._status_bar_host: QMainWindow | None = None
+        if isinstance(dock_host, QMainWindow):
+            host_status = dock_host.statusBar()
+            host_status.setSizeGripEnabled(False)
+            host_status.setContentsMargins(0, 0, 0, 0)
+            host_status.addWidget(self.status_bar, 1)
+            self._status_bar_host = dock_host
+        else:
+            outer.addWidget(self.status_bar)
 
         # All concrete pages, for broadcast-style operations (shutdown,
         # project-path propagation) that must reach inside the hubs.
@@ -875,6 +887,13 @@ class AppShell(QWidget):
         shutdown = getattr(joint_shutdown, "shutdown", None)
         if callable(shutdown):
             shutdown()
+        if self._status_bar_host is not None:
+            # 状态栏挂在宿主原生槽位上，不随本壳 deleteLater 销毁；本壳之后
+            # 必被拆除/重建（所有调用路径都落到 _refresh_shell 或窗口关闭），
+            # 不摘除的话宿主上会堆出多条状态栏。
+            self._status_bar_host.statusBar().removeWidget(self.status_bar)
+            self.status_bar.setParent(self)
+            self._status_bar_host = None
         return all_joined
 
     # --- deferred page binding (hub-keyed) --------------------------------
