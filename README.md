@@ -86,7 +86,7 @@ When native extensions are not built, the workbench transparently falls back to 
 首次构建/安装：
 
     python -m pip install "pybind11>=2.12" ninja
-    python -m pip install -e native/qgis_render_bridge   # 首次构建 vendored QGIS 需数小时
+    PALEO_WITH_QGIS_RENDERER=1 python -m pip install -e native/qgis_render_bridge   # 首次构建 vendored QGIS 需数小时
 
 桥未安装时地图区构造会明确报错（无 fallback）。
 

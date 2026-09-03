@@ -19,6 +19,19 @@ _GEOMETRY_TYPE = {"Point": "Point", "MultiPoint": "Point",
                   "Polygon": "Polygon", "MultiPolygon": "Polygon"}
 
 
+def _load_mapstack():
+    try:
+        from qgis_render_bridge.mapstack import QgisMapStack
+
+        return QgisMapStack
+    except ImportError as exc:
+        raise RuntimeError(
+            "QGIS 渲染桥未安装或构建失败（qgis_render_bridge.mapstack 无法导入）；"
+            "请执行 PALEO_WITH_QGIS_RENDERER=1 /opt/miniconda3/bin/python3.13 -m pip install -e native/qgis_render_bridge 重新构建安装"
+            "（首次构建 vendored QGIS 需数小时）"
+        ) from exc
+
+
 class QgisCanvasShim(QWidget):
     # 实际消费者 CompositeDocument 消费的信号契约与 QgisCanvasShim（原 UnifiedMapCanvas）一致：
     # tool_operation(bool), extent_changed(tuple), map_position_changed(tuple),
@@ -31,7 +44,7 @@ class QgisCanvasShim(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        from qgis_render_bridge.mapstack import QgisMapStack
+        QgisMapStack = _load_mapstack()
 
         self.stack = QgisMapStack()
         self.stack.initialize()

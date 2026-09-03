@@ -113,3 +113,20 @@ def test_shim_tool_operation_emits_on_user_extent(qtbot):
     assert ops == [], f"programmatic should not emit tool_operation, got {ops}"
     shim._on_stack_extent(5.0, 5.0, 25.0, 25.0)
     assert ops == [False]
+
+
+def test_shim_bridge_missing_raises_actionable_error(monkeypatch):
+    """F1/F2 审查修复回归: 桥缺失时报 RuntimeError 且提示可执行修复命令（offscreen-safe）。"""
+    import sys
+
+    import paleo_workbench.ui.qgis_stack.canvas_shim as shim_mod
+
+    monkeypatch.setitem(sys.modules, "qgis_render_bridge", None)
+    monkeypatch.setitem(sys.modules, "qgis_render_bridge.mapstack", None)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        shim_mod._load_mapstack()
+    msg = str(excinfo.value)
+    assert "PALEO_WITH_QGIS_RENDERER" in msg
+    assert "native/qgis_render_bridge" in msg
+    assert isinstance(excinfo.value.__cause__, ImportError)
