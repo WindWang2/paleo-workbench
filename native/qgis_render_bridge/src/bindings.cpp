@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -561,5 +562,20 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
         .def("remove_layer", &pwb::qgis_render::QgisMapStack::removeLayer)
         .def("set_layer_visibility", &pwb::qgis_render::QgisMapStack::setLayerVisibility)
         .def("set_layer_opacity", &pwb::qgis_render::QgisMapStack::setLayerOpacity)
-        .def("clear_project_layers", &pwb::qgis_render::QgisMapStack::clearProjectLayers);
+        .def("clear_project_layers", &pwb::qgis_render::QgisMapStack::clearProjectLayers)
+        .def("set_map_tool", &pwb::qgis_render::QgisMapStack::setMapTool)
+        .def("set_extent_callback",
+             [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas, py::function f) {
+               self.setExtentCallback(canvas, [f = std::move(f)](double a, double b, double c, double d) {
+                 py::gil_scoped_acquire gil;
+                 f(a, b, c, d);
+               });
+             })
+        .def("set_xy_callback",
+             [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas, py::function f) {
+               self.setXyCallback(canvas, [f = std::move(f)](double x, double y) {
+                 py::gil_scoped_acquire gil;
+                 f(x, y);
+               });
+             });
 }

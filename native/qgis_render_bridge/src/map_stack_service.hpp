@@ -31,6 +31,12 @@ public:
   std::vector<double> screenToMap(std::uintptr_t canvas, double x, double y) const;
   std::vector<double> mapToScreen(std::uintptr_t canvas, double x, double y) const;
 
+  void setMapTool(std::uintptr_t canvas, const std::string& kind);
+  using ExtentCallback = std::function<void(double, double, double, double)>;
+  using PointCallback = std::function<void(double, double)>;
+  void setExtentCallback(std::uintptr_t canvas, ExtentCallback callback);
+  void setXyCallback(std::uintptr_t canvas, PointCallback callback);
+
   std::string addVectorLayerGeoJson(const std::string& name,
                                     const std::string& geometry_type,
                                     const std::string& crs_auth_id,

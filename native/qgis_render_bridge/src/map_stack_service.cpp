@@ -8,6 +8,7 @@
 
 #include <QColor>
 #include <QCoreApplication>
+#include <QPointer>
 #include <QString>
 #include <QWidget>
 
@@ -18,6 +19,9 @@
 #include <qgslayertreelayer.h>
 #include <qgslayertreemapcanvasbridge.h>
 #include <qgsmapcanvas.h>
+#include <qgsmaptool.h>
+#include <qgsmaptoolpan.h>
+#include <qgsmaptoolzoom.h>
 #include <qgspointxy.h>
 #include <qgsproject.h>
 #include <qgsrectangle.h>
@@ -36,10 +40,24 @@ struct QgisMapStack::Impl {
   std::unordered_map<std::uintptr_t, std::unique_ptr<QgsLayerTreeMapCanvasBridge>>
       tree_bridges;
   std::unordered_set<std::string> owned_layers;
+  std::unordered_map<std::uintptr_t, std::unique_ptr<QgsMapTool>> tools;
+  std::unordered_map<std::uintptr_t, ExtentCallback> extent_callbacks;
+  std::unordered_map<std::uintptr_t, PointCallback> xy_callbacks;
+  std::unordered_map<std::uintptr_t, QPointer<QgsMapCanvas>> canvas_refs;
 };
 
 QgisMapStack::QgisMapStack() : impl_(std::make_unique<Impl>()) {}
-QgisMapStack::~QgisMapStack() = default;
+QgisMapStack::~QgisMapStack() {
+  if (impl_) {
+    for (auto& kv : impl_->tools) {
+      auto it = impl_->canvas_refs.find(kv.first);
+      bool canvasAlive = (it != impl_->canvas_refs.end() && !it->second.isNull());
+      if (!canvasAlive && kv.second) {
+        kv.second.release();
+      }
+    }
+  }
+}
 
 void QgisMapStack::initialize() {
   if (impl_->initialized) return;
@@ -72,6 +90,17 @@ void QgisMapStack::shutdown() {
   }
   impl_->owned_layers.clear();
   impl_->tree_bridges.clear();
+  for (auto& kv : impl_->tools) {
+    auto it = impl_->canvas_refs.find(kv.first);
+    bool canvasAlive = (it != impl_->canvas_refs.end() && !it->second.isNull());
+    if (!canvasAlive && kv.second) {
+      kv.second.release();
+    }
+  }
+  impl_->tools.clear();
+  impl_->canvas_refs.clear();
+  impl_->extent_callbacks.clear();
+  impl_->xy_callbacks.clear();
   impl_->initialized = false;
 }
 
@@ -89,9 +118,10 @@ std::uintptr_t QgisMapStack::createCanvas() {
   auto tree_bridge = std::make_unique<QgsLayerTreeMapCanvasBridge>(
       QgsProject::instance()->layerTreeRoot(), canvas);
   tree_bridge->setCanvasLayers();
-  impl_->tree_bridges.emplace(reinterpret_cast<std::uintptr_t>(canvas),
-                              std::move(tree_bridge));
-  return reinterpret_cast<std::uintptr_t>(canvas);
+  std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(canvas);
+  impl_->tree_bridges.emplace(addr, std::move(tree_bridge));
+  impl_->canvas_refs[addr] = canvas;
+  return addr;
 }
 
 void QgisMapStack::setCanvasWhiteBackground(std::uintptr_t canvas) {
@@ -211,6 +241,45 @@ void QgisMapStack::clearProjectLayers() {
   for (auto& kv : impl_->tree_bridges) {
     if (kv.second) kv.second->setCanvasLayers();
   }
+}
+
+void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kind) {
+  QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
+  impl_->canvas_refs[canvas_addr] = canvas;
+  if (kind == "pan") {
+    impl_->tools[canvas_addr] = std::make_unique<QgsMapToolPan>(canvas);
+  } else if (kind == "zoomIn") {
+    impl_->tools[canvas_addr] = std::make_unique<QgsMapToolZoom>(canvas, false);
+  } else if (kind == "zoomOut") {
+    impl_->tools[canvas_addr] = std::make_unique<QgsMapToolZoom>(canvas, true);
+  } else {
+    throw std::invalid_argument("unknown map tool kind: " + kind);
+  }
+  canvas->setMapTool(impl_->tools[canvas_addr].get());
+}
+
+void QgisMapStack::setExtentCallback(std::uintptr_t canvas_addr, ExtentCallback callback) {
+  QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
+  impl_->canvas_refs[canvas_addr] = canvas;
+  impl_->extent_callbacks[canvas_addr] = std::move(callback);
+  QObject::connect(canvas, &QgsMapCanvas::extentsChanged, canvas, [this, canvas_addr]() {
+    const auto& cb = impl_->extent_callbacks[canvas_addr];
+    if (!cb) return;
+    const QgsRectangle r = canvasOrThrow(canvas_addr)->extent();
+    cb(r.xMinimum(), r.yMinimum(), r.xMaximum(), r.yMaximum());
+  });
+}
+
+void QgisMapStack::setXyCallback(std::uintptr_t canvas_addr, PointCallback callback) {
+  QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
+  impl_->canvas_refs[canvas_addr] = canvas;
+  impl_->xy_callbacks[canvas_addr] = std::move(callback);
+  QObject::connect(canvas, &QgsMapCanvas::xyCoordinates, canvas,
+                   [this, canvas_addr](const QgsPointXY& p) {
+    const auto& cb = impl_->xy_callbacks[canvas_addr];
+    if (!cb) return;
+    cb(p.x(), p.y());
+  });
 }
 
 }  // namespace pwb::qgis_render
