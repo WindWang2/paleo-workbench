@@ -47,6 +47,11 @@ struct QgisMapStack::Impl {
   std::unordered_map<std::uintptr_t, QPointer<QgsMapCanvas>> canvas_refs;
   std::unordered_map<std::uintptr_t, QMetaObject::Connection> extent_connections;
   std::unordered_map<std::uintptr_t, QMetaObject::Connection> xy_connections;
+  // I1: retain rejection after erasing the QPointer tombstone — otherwise the
+  // next call would miss in canvas_refs and canvasOrThrow would reinterpret a
+  // freed pointer (UAF). The set is bounded by the number of distinct dead
+  // addresses not yet reused (cleared on createCanvas reuse and shutdown).
+  std::unordered_set<std::uintptr_t> dead_canvas_addrs;
 };
 
 QgisMapStack::QgisMapStack() : impl_(std::make_unique<Impl>()) {}
@@ -125,6 +130,7 @@ void QgisMapStack::shutdown() {
   }
   impl_->tools.clear();
   impl_->canvas_refs.clear();
+  impl_->dead_canvas_addrs.clear();
   impl_->extent_callbacks.clear();
   impl_->xy_callbacks.clear();
   impl_->initialized = false;
@@ -132,6 +138,9 @@ void QgisMapStack::shutdown() {
 
 QgsMapCanvas* QgisMapStack::canvasOrThrow(std::uintptr_t address) const {
   if (address == 0) throw std::invalid_argument("null canvas address");
+  if (impl_->dead_canvas_addrs.find(address) != impl_->dead_canvas_addrs.end()) {
+    throw std::invalid_argument("canvas address no longer valid");
+  }
   auto it = impl_->canvas_refs.find(address);
   if (it != impl_->canvas_refs.end() && it->second.isNull()) {
     throw std::invalid_argument("canvas address no longer valid");
@@ -142,6 +151,9 @@ QgsMapCanvas* QgisMapStack::canvasOrThrow(std::uintptr_t address) const {
 }
 
 void QgisMapStack::ensureNotStale(std::uintptr_t canvas_addr) {
+  if (impl_->dead_canvas_addrs.find(canvas_addr) != impl_->dead_canvas_addrs.end()) {
+    throw std::invalid_argument("canvas address no longer valid");
+  }
   auto it = impl_->canvas_refs.find(canvas_addr);
   if (it != impl_->canvas_refs.end() && it->second.isNull()) {
     auto toolIt = impl_->tools.find(canvas_addr);
@@ -162,6 +174,13 @@ void QgisMapStack::ensureNotStale(std::uintptr_t canvas_addr) {
     impl_->extent_callbacks.erase(canvas_addr);
     impl_->xy_callbacks.erase(canvas_addr);
     impl_->tree_bridges.erase(canvas_addr);
+    // I1: erase the QPointer tombstone to prevent unbounded growth; retain
+    // rejection via dead_canvas_addrs so a subsequent call with the same
+    // freed address cannot be reinterpreted (UAF). The alternative of simply
+    // erasing without dead-set would make the next canvasOrThrow miss and
+    // reinterpret a dangling pointer.
+    impl_->canvas_refs.erase(it);
+    impl_->dead_canvas_addrs.insert(canvas_addr);
     throw std::invalid_argument("canvas address no longer valid");
   }
 }
@@ -177,6 +196,9 @@ std::uintptr_t QgisMapStack::createCanvas() {
   std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(canvas);
   impl_->tree_bridges.emplace(addr, std::move(tree_bridge));
   impl_->canvas_refs[addr] = canvas;
+  // I1: address reuse — a freshly allocated canvas may reuse a previously
+  // dead address; clear the dead-set so the new live entry is not rejected.
+  impl_->dead_canvas_addrs.erase(addr);
   return addr;
 }
 
@@ -217,6 +239,7 @@ void QgisMapStack::destroyCanvas(std::uintptr_t canvas_addr) {
   // deletes the widget.
   impl_->tree_bridges.erase(canvas_addr);
   impl_->canvas_refs.erase(it);
+  impl_->dead_canvas_addrs.erase(canvas_addr);
 }
 
 void QgisMapStack::setCanvasWhiteBackground(std::uintptr_t canvas) {

@@ -6,6 +6,7 @@ tool_operation(False) 发出（与 UnifiedMapCanvas 的鼠标/键盘路径语义
 from __future__ import annotations
 
 import json
+import sys
 import weakref
 
 from PySide6.QtCore import Signal
@@ -26,8 +27,8 @@ def _load_mapstack():
         return QgisMapStack
     except ImportError as exc:
         raise RuntimeError(
-            "QGIS 渲染桥未安装或构建失败（qgis_render_bridge.mapstack 无法导入）；"
-            "请执行 PALEO_WITH_QGIS_RENDERER=1 /opt/miniconda3/bin/python3.13 -m pip install -e native/qgis_render_bridge 重新构建安装"
+            f"QGIS 渲染桥未安装或构建失败（qgis_render_bridge.mapstack 无法导入）；"
+            f"请执行 PALEO_WITH_QGIS_RENDERER=1 {sys.executable} -m pip install -e native/qgis_render_bridge 重新构建安装"
             "（首次构建 vendored QGIS 需数小时）"
         ) from exc
 
@@ -126,7 +127,7 @@ class QgisCanvasShim(QWidget):
                 is_programmatic = True
                 # consume up to and including the compatible entry
                 del expected_list[: compat_idx + 1]
-                self._pending_programmatic = max(0, int(getattr(self, "_pending_programmatic", 0) or 0) - 1)
+                self._pending_programmatic = max(0, int(getattr(self, "_pending_programmatic", 0) or 0) - (compat_idx + 1))
             else:
                 # Check pending counter fallback for exact equality without fitted logic (legacy)
                 pending = int(getattr(self, "_pending_programmatic", 0) or 0)
