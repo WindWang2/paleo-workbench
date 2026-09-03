@@ -501,6 +501,8 @@ git commit -m "feat(qgis): QgsMapCanvas 地址边界嵌入 PySide6（QgisCanvasH
   - `remove_layer(layer_id) -> bool`、`set_layer_visibility(layer_id, visible)`、`set_layer_opacity(layer_id, opacity)`、`clear_project_layers()`
   - 图层加入后 canvas 自动重渲染（`QgsLayerTreeMapCanvasBridge`）。
 
+> **图层归属约束（Task 2 审查修订）：** `Impl` 必须记录本栈创建的 layer id 集合（`addVectorLayerGeoJson` 时登记，`removeLayer` 时注销）。`removeLayer`/`clearProjectLayers` 只允许移除本栈登记的图层；同时把 Task 2 的 `shutdown()` 实现从 `removeAllMapLayers()` 改为仅移除本栈登记图层——`QgsProject::instance()` 是进程级单例，桥的其他使用者可能也在其中镜像图层，禁止整库清空。
+
 - [ ] **Step 1: 写失败测试**
 
 ```python
