@@ -93,6 +93,8 @@ private:
   QgsMapCanvas* canvasOrThrow(std::uintptr_t canvas) const;
   QgsLayerTreeView* treeViewOrThrow(std::uintptr_t address) const;
   void ensureNotStale(std::uintptr_t canvas_addr);
+  void eraseMirrorByQgisId(const std::string& qgis_id);
+  void eraseMirrorByDocId(const std::string& doc_id);
 };
 
 }  // namespace pwb::qgis_render

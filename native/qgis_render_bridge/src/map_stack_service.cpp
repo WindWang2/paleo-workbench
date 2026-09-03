@@ -307,6 +307,35 @@ struct QgisMapStack::Impl {
   std::unordered_map<std::string, std::string> mirror_by_doc;
   std::unordered_map<std::string, std::string> mirror_style_sig;
   int suppress_tree_callbacks = 0;
+
+  void eraseMirrorByQgisId(const std::string& qgis_id) {
+    for (auto it = mirror_by_doc.begin(); it != mirror_by_doc.end(); ) {
+      if (it->second == qgis_id) {
+        auto sit = mirror_style_sig.find(it->first);
+        if (sit != mirror_style_sig.end()) mirror_style_sig.erase(sit);
+        it = mirror_by_doc.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
+  void eraseMirrorByDocId(const std::string& doc_id) {
+    auto dit = mirror_by_doc.find(doc_id);
+    if (dit != mirror_by_doc.end()) mirror_by_doc.erase(dit);
+    auto sit = mirror_style_sig.find(doc_id);
+    if (sit != mirror_style_sig.end()) mirror_style_sig.erase(sit);
+  }
+
+  void eraseMirrorByDocIdIfQgisMatches(const std::string& doc_id,
+                                       const std::string& qgis_id) {
+    auto dit = mirror_by_doc.find(doc_id);
+    if (dit != mirror_by_doc.end() && dit->second == qgis_id) {
+      mirror_by_doc.erase(dit);
+      auto sit = mirror_style_sig.find(doc_id);
+      if (sit != mirror_style_sig.end()) mirror_style_sig.erase(sit);
+    }
+  }
 };
 
 namespace {
@@ -317,6 +346,14 @@ struct SuppressGuard {
     SuppressGuard(const SuppressGuard&) = delete;
     SuppressGuard& operator=(const SuppressGuard&) = delete;
 };
+}
+
+void QgisMapStack::eraseMirrorByQgisId(const std::string& qgis_id) {
+  if (impl_) impl_->eraseMirrorByQgisId(qgis_id);
+}
+
+void QgisMapStack::eraseMirrorByDocId(const std::string& doc_id) {
+  if (impl_) impl_->eraseMirrorByDocId(doc_id);
 }
 
 QgisMapStack::QgisMapStack() : impl_(std::make_unique<Impl>()) {}
@@ -639,13 +676,7 @@ bool QgisMapStack::removeLayer(const std::string& layer_id) {
       QString::fromStdString(layer_id));
   if (layer == nullptr) {
     impl_->owned_layers.erase(it);
-    for (auto dit = impl_->mirror_by_doc.begin(); dit != impl_->mirror_by_doc.end(); ) {
-      if (dit->second == layer_id) {
-        auto sit = impl_->mirror_style_sig.find(dit->first);
-        if (sit != impl_->mirror_style_sig.end()) impl_->mirror_style_sig.erase(sit);
-        dit = impl_->mirror_by_doc.erase(dit);
-      } else ++dit;
-    }
+    eraseMirrorByQgisId(layer_id);
     return false;
   }
   QVariant docVar = layer->customProperty(QStringLiteral("pwb/doc_id"));
@@ -656,18 +687,9 @@ bool QgisMapStack::removeLayer(const std::string& layer_id) {
   }
   impl_->owned_layers.erase(it);
   if (!doc_id.empty()) {
-    auto dit = impl_->mirror_by_doc.find(doc_id);
-    if (dit != impl_->mirror_by_doc.end() && dit->second == layer_id) impl_->mirror_by_doc.erase(dit);
-    auto sit = impl_->mirror_style_sig.find(doc_id);
-    if (sit != impl_->mirror_style_sig.end()) impl_->mirror_style_sig.erase(sit);
+    impl_->eraseMirrorByDocIdIfQgisMatches(doc_id, layer_id);
   } else {
-    for (auto dit = impl_->mirror_by_doc.begin(); dit != impl_->mirror_by_doc.end(); ) {
-      if (dit->second == layer_id) {
-        auto sit = impl_->mirror_style_sig.find(dit->first);
-        if (sit != impl_->mirror_style_sig.end()) impl_->mirror_style_sig.erase(sit);
-        dit = impl_->mirror_by_doc.erase(dit);
-      } else ++dit;
-    }
+    eraseMirrorByQgisId(layer_id);
   }
   for (auto& kv : impl_->tree_bridges) {
     if (kv.second) kv.second->setCanvasLayers();
@@ -721,14 +743,10 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
       if (existing) {
         existing_id = mapIt->second;
       } else {
-        impl_->mirror_by_doc.erase(mapIt);
-        auto sit = impl_->mirror_style_sig.find(doc_id);
-        if (sit != impl_->mirror_style_sig.end()) impl_->mirror_style_sig.erase(sit);
+        impl_->eraseMirrorByDocId(doc_id);
       }
     } else {
-      impl_->mirror_by_doc.erase(mapIt);
-      auto sit = impl_->mirror_style_sig.find(doc_id);
-      if (sit != impl_->mirror_style_sig.end()) impl_->mirror_style_sig.erase(sit);
+      impl_->eraseMirrorByDocId(doc_id);
     }
   }
   if (!existing) {
@@ -744,10 +762,14 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
     QgsFeatureList features = QgsJsonUtils::stringToFeatureList(
         QString::fromStdString(geojson_feature_collection));
     if (existing->dataProvider()) {
-      existing->dataProvider()->truncate();
+      if (!existing->dataProvider()->truncate()) {
+        throw std::runtime_error("mirror truncate failed for doc_id: " + doc_id);
+      }
     }
     if (!features.isEmpty()) {
-      existing->dataProvider()->addFeatures(features);
+      if (!existing->dataProvider() || !existing->dataProvider()->addFeatures(features)) {
+        throw std::runtime_error("mirror addFeatures failed for doc_id: " + doc_id);
+      }
     }
     existing->updateExtents();
     std::string new_sig = makeStyleSig(renderer_xml, labeling_xml, legacy_style_json);
@@ -763,6 +785,8 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
         applyStyleToLayer(*existing, spec);
       }
       impl_->mirror_style_sig[doc_id] = new_sig;
+      // sig 双存：Impl::mirror_style_sig 是快速比对主源；customProperty
+      // pwb/style_sig 供跨边界检视/调试，两者由本函数统一写入保持一致。
       existing->setCustomProperty(QStringLiteral("pwb/style_sig"), QString::fromStdString(new_sig));
     }
     existing->setName(QString::fromStdString(name));
@@ -783,7 +807,9 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
   QgsFeatureList features = QgsJsonUtils::stringToFeatureList(
       QString::fromStdString(geojson_feature_collection));
   if (!features.isEmpty()) {
-    layer->dataProvider()->addFeatures(features);
+    if (!layer->dataProvider()->addFeatures(features)) {
+      throw std::runtime_error("addFeatures failed for new mirror layer: " + name);
+    }
     layer->updateExtents();
   }
   bool hasStyle = !renderer_xml.empty() || !labeling_xml.empty() || !legacy_style_json.empty();
@@ -826,13 +852,7 @@ void QgisMapStack::removeMirrorLayersExcept(const std::vector<std::string>& doc_
     QgsMapLayer* layer = QgsProject::instance()->mapLayer(QString::fromStdString(qgis_id));
     if (layer == nullptr) {
       impl_->owned_layers.erase(qgis_id);
-      for (auto it = impl_->mirror_by_doc.begin(); it != impl_->mirror_by_doc.end(); ) {
-        if (it->second == qgis_id) {
-          auto sit = impl_->mirror_style_sig.find(it->first);
-          if (sit != impl_->mirror_style_sig.end()) impl_->mirror_style_sig.erase(sit);
-          it = impl_->mirror_by_doc.erase(it);
-        } else ++it;
-      }
+      impl_->eraseMirrorByQgisId(qgis_id);
       continue;
     }
     QVariant docVar = layer->customProperty(QStringLiteral("pwb/doc_id"));
@@ -843,35 +863,22 @@ void QgisMapStack::removeMirrorLayersExcept(const std::vector<std::string>& doc_
       if (!keepIt) {
         QgsProject::instance()->removeMapLayer(layer);
         impl_->owned_layers.erase(qgis_id);
-        auto dit = impl_->mirror_by_doc.find(doc_id);
-        if (dit != impl_->mirror_by_doc.end() && dit->second == qgis_id) impl_->mirror_by_doc.erase(dit);
-        auto sit = impl_->mirror_style_sig.find(doc_id);
-        if (sit != impl_->mirror_style_sig.end()) impl_->mirror_style_sig.erase(sit);
+        impl_->eraseMirrorByDocIdIfQgisMatches(doc_id, qgis_id);
       }
     } else {
       QgsProject::instance()->removeMapLayer(layer);
       impl_->owned_layers.erase(qgis_id);
-      for (auto it = impl_->mirror_by_doc.begin(); it != impl_->mirror_by_doc.end(); ) {
-        if (it->second == qgis_id) {
-          auto sit = impl_->mirror_style_sig.find(it->first);
-          if (sit != impl_->mirror_style_sig.end()) impl_->mirror_style_sig.erase(sit);
-          it = impl_->mirror_by_doc.erase(it);
-        } else ++it;
-      }
+      impl_->eraseMirrorByQgisId(qgis_id);
     }
   }
-  for (auto it = impl_->mirror_by_doc.begin(); it != impl_->mirror_by_doc.end(); ) {
-    if (impl_->owned_layers.find(it->second) == impl_->owned_layers.end()) {
-      QgsMapLayer* still = QgsProject::instance()->mapLayer(QString::fromStdString(it->second));
-      if (!still) {
-        auto sit = impl_->mirror_style_sig.find(it->first);
-        if (sit != impl_->mirror_style_sig.end()) impl_->mirror_style_sig.erase(sit);
-        it = impl_->mirror_by_doc.erase(it);
-        continue;
-      }
+  std::vector<std::string> stale_docs;
+  for (const auto& kv : impl_->mirror_by_doc) {
+    if (impl_->owned_layers.find(kv.second) == impl_->owned_layers.end() &&
+        !QgsProject::instance()->mapLayer(QString::fromStdString(kv.second))) {
+      stale_docs.push_back(kv.first);
     }
-    ++it;
   }
+  for (const auto& d : stale_docs) impl_->eraseMirrorByDocId(d);
   for (auto& kv : impl_->tree_bridges) {
     if (kv.second) kv.second->setCanvasLayers();
   }
@@ -881,35 +888,39 @@ void QgisMapStack::setMirrorLayerOrder(const std::vector<std::string>& doc_ids_t
   if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
   SuppressGuard guard(&impl_->suppress_tree_callbacks);
   QgsLayerTreeGroup* root = QgsProject::instance()->layerTreeRoot();
-  auto* registryBridge = QgsProject::instance()->layerTreeRegistryBridge();
-  bool bridgeWasEnabled = false;
-  if (registryBridge && registryBridge->isEnabled()) {
-    bridgeWasEnabled = true;
-    registryBridge->setEnabled(false);
-  }
-  struct BridgeReenable {
-    QgsLayerTreeRegistryBridge* bridge;
-    bool wasEnabled;
-    ~BridgeReenable() { if (bridge && wasEnabled) bridge->setEnabled(true); }
-  } reenable{registryBridge, bridgeWasEnabled};
-  const bool wasBlocked = root->blockSignals(true);
-  struct RootUnblock {
-    QgsLayerTreeGroup* r;
-    bool wasBlocked;
-    ~RootUnblock() { r->blockSignals(wasBlocked); }
-  } unblock{root, wasBlocked};
-  for (auto it = doc_ids_top_first.rbegin(); it != doc_ids_top_first.rend(); ++it) {
-    const std::string& doc_id = *it;
-    auto mapIt = impl_->mirror_by_doc.find(doc_id);
-    if (mapIt == impl_->mirror_by_doc.end()) continue;
-    QgsMapLayer* layer = QgsProject::instance()->mapLayer(QString::fromStdString(mapIt->second));
-    if (!layer) continue;
-    QgsLayerTreeLayer* node = root->findLayer(layer);
-    if (!node) continue;
-    QgsLayerTreeNode* parent = node->parent();
-    if (!parent) continue;
-    parent->takeChild(node);
-    root->insertChildNode(0, node);
+  // 排序操作必须在 root 信号屏蔽 + registryBridge 禁用的保护区间内完成；
+  // setCanvasLayers 依赖树信号驱动画布桥，必须等两个 RAII guard 析构后再调用。
+  {
+    auto* registryBridge = QgsProject::instance()->layerTreeRegistryBridge();
+    bool bridgeWasEnabled = false;
+    if (registryBridge && registryBridge->isEnabled()) {
+      bridgeWasEnabled = true;
+      registryBridge->setEnabled(false);
+    }
+    struct BridgeReenable {
+      QgsLayerTreeRegistryBridge* bridge;
+      bool wasEnabled;
+      ~BridgeReenable() { if (bridge && wasEnabled) bridge->setEnabled(true); }
+    } reenable{registryBridge, bridgeWasEnabled};
+    const bool wasBlocked = root->blockSignals(true);
+    struct RootUnblock {
+      QgsLayerTreeGroup* r;
+      bool wasBlocked;
+      ~RootUnblock() { r->blockSignals(wasBlocked); }
+    } unblock{root, wasBlocked};
+    for (auto it = doc_ids_top_first.rbegin(); it != doc_ids_top_first.rend(); ++it) {
+      const std::string& doc_id = *it;
+      auto mapIt = impl_->mirror_by_doc.find(doc_id);
+      if (mapIt == impl_->mirror_by_doc.end()) continue;
+      QgsMapLayer* layer = QgsProject::instance()->mapLayer(QString::fromStdString(mapIt->second));
+      if (!layer) continue;
+      QgsLayerTreeLayer* node = root->findLayer(layer);
+      if (!node) continue;
+      QgsLayerTreeNode* parent = node->parent();
+      if (!parent) continue;
+      parent->takeChild(node);
+      root->insertChildNode(0, node);
+    }
   }
   for (auto& kv : impl_->tree_bridges) {
     if (kv.second) kv.second->setCanvasLayers();

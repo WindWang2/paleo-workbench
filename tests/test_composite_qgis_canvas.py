@@ -45,6 +45,11 @@ def test_shim_mirrors_vector_snapshot_to_project(qtbot):
         ],
     ))
     assert doc.canvas.stack.project_layer_count() == 1
+    # M2T2 审查修复回归：_mirrored_layers 保持 M1 语义（QGIS layer id），
+    # doc id 另存 _mirrored_doc_ids。
+    assert doc.canvas._mirrored_doc_ids == ["w1"]
+    assert len(doc.canvas._mirrored_layers) == 1
+    assert doc.canvas._mirrored_layers[0] != "w1"
 
 
 def test_shim_mupp_non_square_aspect_consistent(qtbot):

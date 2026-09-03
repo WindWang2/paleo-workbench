@@ -66,6 +66,7 @@ class QgisCanvasShim(QWidget):
         self.events.map_position_changed.connect(self._on_stack_position)
         self._overlay_provider = None
         self._mirrored_layers: list[str] = []
+        self._mirrored_doc_ids: list[str] = []
         self._shutdown_done = False
         self._tool_controller = None
         self._pending_programmatic = 0
@@ -400,6 +401,7 @@ class QgisCanvasShim(QWidget):
             except Exception:
                 pass
         seen: list[str] = []
+        mirrored_qgis_ids: list[str] = []
         for layer in snapshot.layers:
             if layer.layer_type != "vector":
                 continue
@@ -442,7 +444,7 @@ class QgisCanvasShim(QWidget):
                 if legacy_style is not None and not legacy_style:
                     legacy_style = None
             try:
-                self.stack.upsert_mirror_layer(
+                qgis_id = self.stack.upsert_mirror_layer(
                     layer.id, layer.name or layer.id, geom,
                     layer.crs or snapshot.project_crs,
                     json.dumps({"type": "FeatureCollection", "features": features}),
@@ -456,6 +458,7 @@ class QgisCanvasShim(QWidget):
                         raise
                 continue
             seen.append(layer.id)
+            mirrored_qgis_ids.append(qgis_id)
         try:
             self.stack.remove_mirror_layers_except(seen)
             self.stack.set_mirror_layer_order(seen)
@@ -463,7 +466,10 @@ class QgisCanvasShim(QWidget):
         except Exception:
             pass
         try:
-            self._mirrored_layers = list(seen)
+            # _mirrored_layers 保持 M1 语义：存 QGIS layer id；doc id 另存
+            # _mirrored_doc_ids（reconcile 后两者一一对应，顺序同 snapshot）。
+            self._mirrored_layers = list(mirrored_qgis_ids)
+            self._mirrored_doc_ids = list(seen)
         except Exception:
             pass
         try:
