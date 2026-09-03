@@ -26,7 +26,7 @@
 ### Task 1: 桥扩展按 Python 3.13 重编并安装进环境
 
 **Files:**
-- Build: `native/qgis_render_bridge/`（不修改源码，仅构建安装）
+- Build: `native/qgis_render_bridge/`（仅构建安装；执行时发现 `setup.py` 的 `python_requires` 须放宽至 `<3.14` 方可在 py3.13 下安装——已按此修正）
 - Test: `tests/test_qgis_mapstack_env.py`（新建）
 
 **Interfaces:**
@@ -44,7 +44,7 @@ Expected: 输出 `gdal`、`memory`、`ogr` 三行（provider 已编入 qgis_core
 ```bash
 /opt/miniconda3/bin/python3.13 -m pip install "pybind11>=2.12" ninja
 cd /home/kevin/projects/paleo_project/main
-/opt/miniconda3/bin/python3.13 -m pip install -e native/qgis_render_bridge
+PALEO_WITH_QGIS_RENDERER=1 /opt/miniconda3/bin/python3.13 -m pip install -e native/qgis_render_bridge
 ```
 Expected: 构建复用现有 `build/qgis-vendor`（`setup.py` 检测到 `libqgis_{core,gui,analysis}.so` 与 `resources/srs.db` 齐全即跳过 QGIS 重编），只编译扩展；结尾 `Successfully installed qgis_render_bridge`。若扩展编译缺 Qt/QGIS 头文件，检查 `PALEO_QGIS_BUILD_DIR` 是否指向 `native/qgis_render_bridge/build/qgis-vendor`。
 
@@ -65,7 +65,7 @@ def test_bridge_importable_and_initializes(qapp):
     bridge = qgis_render_bridge.QgisRenderBridge()
     bridge.initialize()
     assert bridge.initialized
-    assert bridge.version()  # vendored QGIS 版本串非空
+    assert bridge.version  # vendored QGIS 版本串非空（只读 property，非方法）
     bridge.shutdown()
 ```
 
@@ -240,7 +240,7 @@ void QgisMapStack::shutdown() {
 
 ```bash
 cd /home/kevin/projects/paleo_project/main
-/opt/miniconda3/bin/python3.13 -m pip install -e native/qgis_render_bridge --force-reinstall --no-deps
+PALEO_WITH_QGIS_RENDERER=1 /opt/miniconda3/bin/python3.13 -m pip install -e native/qgis_render_bridge --force-reinstall --no-deps
 /home/kevin/projects/paleo_project/run_env.sh /home/kevin/projects/paleo_project/main tests/test_qgis_mapstack_lifecycle.py -v
 ```
 Expected: 1 passed
@@ -473,7 +473,7 @@ class QgisCanvasHost(QWidget):
 
 ```bash
 cd /home/kevin/projects/paleo_project/main
-/opt/miniconda3/bin/python3.13 -m pip install -e native/qgis_render_bridge --force-reinstall --no-deps
+PALEO_WITH_QGIS_RENDERER=1 /opt/miniconda3/bin/python3.13 -m pip install -e native/qgis_render_bridge --force-reinstall --no-deps
 /home/kevin/projects/paleo_project/run_env.sh /home/kevin/projects/paleo_project/main tests/test_qgis_canvas_embed.py tests/test_qgis_mapstack_lifecycle.py -v
 ```
 Expected: 3 passed
@@ -660,7 +660,7 @@ void QgisMapStack::clearProjectLayers() {
 
 ```bash
 cd /home/kevin/projects/paleo_project/main
-/opt/miniconda3/bin/python3.13 -m pip install -e native/qgis_render_bridge --force-reinstall --no-deps
+PALEO_WITH_QGIS_RENDERER=1 /opt/miniconda3/bin/python3.13 -m pip install -e native/qgis_render_bridge --force-reinstall --no-deps
 /home/kevin/projects/paleo_project/run_env.sh /home/kevin/projects/paleo_project/main tests/test_qgis_mapstack_layers.py -v
 ```
 Expected: 1 passed（若中心像素断言失败：先确认 `QgsLayerTreeMapCanvasBridge::setCanvasLayers()` 已调用、extent 已 set 且 refresh 后跑了事件循环）
@@ -857,7 +857,7 @@ class StackEvents(QObject):
 
 ```bash
 cd /home/kevin/projects/paleo_project/main
-/opt/miniconda3/bin/python3.13 -m pip install -e native/qgis_render_bridge --force-reinstall --no-deps
+PALEO_WITH_QGIS_RENDERER=1 /opt/miniconda3/bin/python3.13 -m pip install -e native/qgis_render_bridge --force-reinstall --no-deps
 /home/kevin/projects/paleo_project/run_env.sh /home/kevin/projects/paleo_project/main tests/test_qgis_mapstack_tools.py -v
 ```
 Expected: 2 passed
