@@ -57,6 +57,20 @@ std::string qjsonValueToString(const QJsonValue& v) {
     return {};
 }
 
+static bool legacy_style_empty(const std::string& s) {
+    if (s.empty()) return true;
+    QByteArray bytes = QByteArray::fromStdString(s).trimmed();
+    if (bytes.isEmpty()) return true;
+    if (bytes == "null" || bytes == "{}" || bytes == "[]") return true;
+    QJsonParseError err;
+    QJsonDocument doc = QJsonDocument::fromJson(bytes, &err);
+    if (err.error != QJsonParseError::NoError) return true;
+    if (doc.isNull()) return true;
+    if (doc.isObject() && doc.object().isEmpty()) return true;
+    if (doc.isArray() && doc.array().isEmpty()) return true;
+    return false;
+}
+
 VectorLayerSpec buildSpecFromLegacyJson(const std::string& rendererXml,
                                         const std::string& labelingXml,
                                         const std::string& legacyJson,
@@ -518,18 +532,7 @@ std::string QgisMapStack::addVectorLayerGeoJson(
     layer->updateExtents();
   }
   bool hasStyle = !renderer_xml.empty() || !labeling_xml.empty() || !legacy_style_json.empty();
-  bool legacyIsEmpty = true;
-  if (!legacy_style_json.empty()) {
-    QJsonDocument ld = QJsonDocument::fromJson(QByteArray::fromStdString(legacy_style_json));
-    if (ld.isObject() && !ld.object().isEmpty()) legacyIsEmpty = false;
-    else if (ld.isArray() && !ld.array().isEmpty()) legacyIsEmpty = false;
-    else if (ld.isNull() && legacy_style_json != "null" && legacy_style_json != "{}") {
-      legacyIsEmpty = false;
-    } else if (legacy_style_json != "{}" && legacy_style_json != "null" && legacy_style_json != "") {
-      legacyIsEmpty = false;
-    }
-    if (legacy_style_json == "{}" || legacy_style_json == "null") legacyIsEmpty = true;
-  }
+  const bool legacyIsEmpty = legacy_style_empty(legacy_style_json);
   if (hasStyle && (!renderer_xml.empty() || !labeling_xml.empty() || !legacyIsEmpty)) {
     VectorLayerSpec spec = buildSpecFromLegacyJson(renderer_xml, labeling_xml, legacy_style_json, name);
     spec.id = layer->id().toStdString();
@@ -554,17 +557,7 @@ void QgisMapStack::setLayerStyle(const std::string& layer_id,
   auto* layer = dynamic_cast<QgsVectorLayer*>(base);
   if (layer == nullptr) throw std::invalid_argument("layer is not a vector layer: " + layer_id);
   bool hasStyle = !renderer_xml.empty() || !labeling_xml.empty() || !legacy_style_json.empty();
-  bool legacyIsEmpty = true;
-  if (!legacy_style_json.empty()) {
-    QJsonDocument ld = QJsonDocument::fromJson(QByteArray::fromStdString(legacy_style_json));
-    if (ld.isObject() && !ld.object().isEmpty()) legacyIsEmpty = false;
-    else if (ld.isArray() && !ld.array().isEmpty()) legacyIsEmpty = false;
-    else if (legacy_style_json != "{}" && legacy_style_json != "null" && legacy_style_json != "") {
-      QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(legacy_style_json));
-      if (!doc.isNull()) legacyIsEmpty = false;
-    }
-    if (legacy_style_json == "{}" || legacy_style_json == "null") legacyIsEmpty = true;
-  }
+  const bool legacyIsEmpty = legacy_style_empty(legacy_style_json);
   if (!hasStyle || (renderer_xml.empty() && labeling_xml.empty() && legacyIsEmpty)) {
     return;
   }

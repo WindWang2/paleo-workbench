@@ -133,6 +133,48 @@ def test_invalid_renderer_xml_surfaces(qapp, qtbot, shim_stack):
         shim.set_layer_snapshot(snap)
 
 
+def test_qgis_style_non_style_error_swallowed(qapp, qtbot, shim_stack):
+    from unittest import mock
+
+    shim = shim_stack
+    qtbot.addWidget(shim)
+    shim.resize(200, 200)
+    shim.show()
+    qtbot.waitExposed(shim)
+
+    try:
+        import qgis_render_bridge
+    except ImportError:
+        pytest.skip("qgis_render_bridge not built")
+
+    xml = qgis_render_bridge.legacy_style_to_renderer_xml(
+        {"fill": "#ff0000", "stroke": "#ff0000", "stroke_width": 1.0}, "Polygon"
+    )
+    assert xml, "renderer xml build failed"
+    style = {"qgis_style": {"renderer_xml": xml, "labeling_xml": ""}}
+    snap = _snapshot_with_style(style)
+
+    real_stack = shim.stack
+
+    class _FakeStack:
+        def __getattr__(self, name):
+            return getattr(real_stack, name)
+
+        def add_vector_layer_geojson(self, *a, **kw):
+            raise RuntimeError("memory layer creation failed")
+
+    shim.stack = _FakeStack()  # type: ignore[assignment]
+    try:
+        shim.set_layer_snapshot(snap)
+    finally:
+        shim.stack = real_stack  # type: ignore[assignment]
+
+    bad_style = {"qgis_style": {"renderer_xml": "<invalid>not a renderer</invalid>", "labeling_xml": ""}}
+    snap_bad = _snapshot_with_style(bad_style)
+    with pytest.raises(Exception):
+        shim.set_layer_snapshot(snap_bad)
+
+
 def test_mapstack_direct_style_api(qapp, qtbot):
     from qgis_render_bridge.mapstack import QgisMapStack
     from paleo_workbench.ui.qgis_stack.widgets import QgisCanvasHost

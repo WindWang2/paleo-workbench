@@ -386,6 +386,12 @@ class QgisCanvasShim(QWidget):
 
     # --- 图层镜像 ------------------------------------------------------
     def set_layer_snapshot(self, snapshot) -> None:
+        """Mirror snapshot vector layers into the QGIS project.
+
+        Note (F3 gap, tracked for M2): legacy ``scale_range`` is not yet
+        forwarded to the QGIS mirror — layers stay always-visible on the
+        mapstack path.
+        """
         if getattr(self, "_shutdown_done", False):
             return
         if snapshot.project_crs:
@@ -447,8 +453,10 @@ class QgisCanvasShim(QWidget):
                 )
             except Exception as exc:
                 if has_qgis_renderer or has_qgis_labeling:
+                    # Style-payload errors must surface (per old-bridge semantics);
+                    # unrelated GeoJSON/memory-layer errors keep the continue behavior.
                     msg = str(exc).lower()
-                    if "renderer" in msg or "labeling" in msg or "invalid" in msg or has_qgis_renderer or has_qgis_labeling:
+                    if "renderer" in msg or "labeling" in msg or "invalid" in msg:
                         raise
                 continue
             if layer.opacity < 1.0:
