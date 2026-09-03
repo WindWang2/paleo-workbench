@@ -14,6 +14,7 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QMap>
+#include <QMenu>
 #include <QObject>
 #include <QPointer>
 #include <QString>
@@ -22,6 +23,7 @@
 
 #include <qgsapplication.h>
 #include <qgscoordinatereferencesystem.h>
+#include <qgscoordinatetransform.h>
 #include <qgsjsonutils.h>
 #include <qgslayertree.h>
 #include <qgslayertreelayer.h>
@@ -29,6 +31,7 @@
 #include <qgslayertreemodel.h>
 #include <qgslayertreeregistrybridge.h>
 #include <qgslayertreeview.h>
+#include <qgslayertreeviewdefaultactions.h>
 #include <qgsmapcanvas.h>
 #include <qgsmaplayer.h>
 #include <qgsmaptool.h>
@@ -325,6 +328,10 @@ struct QgisMapStack::Impl {
   // 可见性影子表：doc_id -> 最近一次已知勾选态；QGIS 用户勾选与刷新都发
   // 空 roles 的 dataChanged，只能靠影子比对区分。
   std::unordered_map<std::string, bool> known_layer_visibility;
+  // 树视图的创建画布（菜单 zoom 动作用）与菜单回调
+  std::unordered_map<std::uintptr_t, QPointer<QgsMapCanvas>> tree_canvas;
+  std::unordered_map<std::uintptr_t, std::function<void(const std::string&, const std::string&)>>
+      tree_menu_callbacks;
   std::unordered_map<std::string, std::string> mirror_by_doc;
   std::unordered_map<std::string, std::string> mirror_style_sig;
   int suppress_tree_callbacks = 0;
@@ -373,7 +380,79 @@ struct SuppressGuard {
     SuppressGuard(const SuppressGuard&) = delete;
     SuppressGuard& operator=(const SuppressGuard&) = delete;
 };
-}
+
+// 图层树右键菜单 provider：QGIS 默认动作（缩放/要素计数/内联重命名）+
+// 自定义动作键经回调上报 Python（删除不走 QGIS 默认 remove——那会绕过文档
+// 模型直接删 project 图层，必须经 remove_layer 请求信号走宿主落地）。
+class PwbLayerTreeMenuProvider : public QgsLayerTreeViewMenuProvider {
+ public:
+  PwbLayerTreeMenuProvider(
+      QgsLayerTreeView* view, QPointer<QgsMapCanvas> canvas,
+      std::function<void(const std::string&, const std::string&)> cb)
+      : view_(view), canvas_(std::move(canvas)), cb_(std::move(cb)) {}
+
+  QMenu* createContextMenu() override {
+    auto* menu = new QMenu();
+    auto* actions = view_->defaultActions();
+    QgsMapLayer* layer = view_->currentLayer();
+    if (layer == nullptr) {
+      addCustom(menu, QStringLiteral("新建矢量图层"), "create_layer", nullptr);
+      addCustom(menu, QStringLiteral("导入参考图层"), "import_reference", nullptr);
+      return menu;
+    }
+    const bool isReference =
+        layer->customProperty(QStringLiteral("pwb/reference")).toString() == QLatin1String("true");
+    const bool isEditable =
+        layer->customProperty(QStringLiteral("pwb/editable")).toString() == QLatin1String("true");
+    if (!canvas_.isNull()) {
+      menu->addAction(actions->actionZoomToLayers(canvas_.data(), menu));
+    }
+    menu->addAction(actions->actionShowFeatureCount(menu));
+    if (isReference) {
+      menu->addSeparator();
+      addCustom(menu, QStringLiteral("刷新引用（重读源文件）"), "refresh_reference", layer);
+      addCustom(menu, QStringLiteral("参与捕捉（切换）"), "toggle_reference_snap", layer);
+      addCustom(menu, QStringLiteral("移除引用…"), "remove_reference", layer);
+    } else if (isEditable) {
+      menu->addSeparator();
+      addCustom(menu, QStringLiteral("打开属性表"), "attribute_table", layer);
+      addCustom(menu, QStringLiteral("开始/停止编辑"), "toggle_editing", layer);
+      menu->addSeparator();
+      addCustom(menu, QStringLiteral("图层属性…"), "properties", layer);
+      addCustom(menu, QStringLiteral("符号系统…"), "symbology", layer);
+      addCustom(menu, QStringLiteral("标注…"), "labeling", layer);
+      menu->addSeparator();
+      menu->addAction(actions->actionRenameGroupOrLayer(menu));
+      addCustom(menu, QStringLiteral("复制图层"), "duplicate", layer);
+      addCustom(menu, QStringLiteral("删除图层"), "remove_layer", layer);
+      menu->addSeparator();
+      addCustom(menu, QStringLiteral("修复无效几何…"), "repair", layer);
+      addCustom(menu, QStringLiteral("导出图层…"), "export", layer);
+    } else {
+      menu->addSeparator();
+      menu->addAction(actions->actionRenameGroupOrLayer(menu));
+    }
+    return menu;
+  }
+
+ private:
+  void addCustom(QMenu* menu, const QString& text, const char* key, QgsMapLayer* layer) {
+    menu->addAction(text, menu, [this, key = std::string(key),
+                                 layer = QPointer<QgsMapLayer>(layer)]() {
+      if (!cb_) return;
+      std::string doc;
+      if (!layer.isNull()) {
+        doc = layer->customProperty(QStringLiteral("pwb/doc_id")).toString().toStdString();
+      }
+      cb_(key, doc);
+    });
+  }
+
+  QgsLayerTreeView* view_;  // provider 由 view 持有（view 析构即销毁），不会悬垂
+  QPointer<QgsMapCanvas> canvas_;
+  std::function<void(const std::string&, const std::string&)> cb_;
+};
+}  // namespace
 
 void QgisMapStack::eraseMirrorByQgisId(const std::string& qgis_id) {
   if (impl_) impl_->eraseMirrorByQgisId(qgis_id);
@@ -410,6 +489,8 @@ QgisMapStack::~QgisMapStack() {
   impl_->known_layer_visibility.clear();
   impl_->tree_views.clear();
   impl_->tree_models.clear();
+  impl_->tree_canvas.clear();
+  impl_->tree_menu_callbacks.clear();
   for (auto& kv : impl_->tools) {
     auto it = impl_->canvas_refs.find(kv.first);
     bool canvasAlive = (it != impl_->canvas_refs.end() && !it->second.isNull());
@@ -470,6 +551,8 @@ void QgisMapStack::shutdown() {
   impl_->known_layer_visibility.clear();
   impl_->tree_views.clear();
   impl_->tree_models.clear();
+  impl_->tree_canvas.clear();
+  impl_->tree_menu_callbacks.clear();
   {
     SuppressGuard guard(&impl_->suppress_tree_callbacks);
     for (const auto& id : impl_->owned_layers) {
@@ -778,7 +861,9 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
                                             const std::string& labeling_xml,
                                             const std::string& legacy_style_json,
                                             bool visible,
-                                            double opacity) {
+                                            double opacity,
+                                            bool is_reference,
+                                            bool is_editable) {
   if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
   if (doc_id.empty()) throw std::invalid_argument("doc_id must not be empty");
   const QByteArray geoBytes = QByteArray::fromStdString(geojson_feature_collection).trimmed();
@@ -843,6 +928,10 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
     existing->setName(QString::fromStdString(name));
     impl_->known_layer_names[doc_id] = name;  // 程序化改名：同步影子表防误报
     existing->setOpacity(std::clamp(opacity, 0.0, 1.0));
+    existing->setCustomProperty(QStringLiteral("pwb/reference"),
+                                is_reference ? QStringLiteral("true") : QString());
+    existing->setCustomProperty(QStringLiteral("pwb/editable"),
+                                is_editable ? QStringLiteral("true") : QString());
     QgsLayerTreeLayer* node = project->layerTreeRoot()->findLayer(existing);
     if (node) node->setItemVisibilityChecked(visible);
     impl_->known_layer_visibility[doc_id] = visible;
@@ -876,6 +965,10 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
   std::string new_sig = makeStyleSig(renderer_xml, labeling_xml, legacy_style_json);
   layer->setCustomProperty(QStringLiteral("pwb/doc_id"), QString::fromStdString(doc_id));
   layer->setCustomProperty(QStringLiteral("pwb/style_sig"), QString::fromStdString(new_sig));
+  layer->setCustomProperty(QStringLiteral("pwb/reference"),
+                           is_reference ? QStringLiteral("true") : QString());
+  layer->setCustomProperty(QStringLiteral("pwb/editable"),
+                           is_editable ? QStringLiteral("true") : QString());
   layer->setOpacity(std::clamp(opacity, 0.0, 1.0));
   const std::string id = layer->id().toStdString();
   {
@@ -1126,6 +1219,7 @@ std::uintptr_t QgisMapStack::createLayerTreeView(std::uintptr_t canvas_addr) {
   const auto addr = reinterpret_cast<std::uintptr_t>(view);
   impl_->tree_views[addr] = view;
   impl_->tree_models[addr] = model;
+  impl_->tree_canvas[addr] = canvas;
   auto& conns = impl_->tree_change_connections[addr];
   conns.push_back(QObject::connect(
       model, &QgsLayerTreeModel::dataChanged, view,
@@ -1381,6 +1475,73 @@ void QgisMapStack::treeViewMoveRow(std::uintptr_t tree, int from, int to) {
   if (model->rowCount() != count) {
     throw std::runtime_error("tree view moveRow failed (row count changed)");
   }
+}
+
+void QgisMapStack::setTreeMenuCallback(
+    std::uintptr_t tree_addr,
+    std::function<void(const std::string&, const std::string&)> callback) {
+  QgsLayerTreeView* view = treeViewOrThrow(tree_addr);
+  impl_->tree_menu_callbacks[tree_addr] = callback;
+  // setMenuProvider 接管所有权并销毁旧 provider，重设安全。
+  QPointer<QgsMapCanvas> canvas;
+  auto canvasIt = impl_->tree_canvas.find(tree_addr);
+  if (canvasIt != impl_->tree_canvas.end()) canvas = canvasIt->second;
+  view->setMenuProvider(new PwbLayerTreeMenuProvider(
+      view, canvas, std::move(callback)));
+}
+
+void QgisMapStack::zoomToLayer(std::uintptr_t tree_addr, const std::string& doc_id) {
+  QgsLayerTreeView* view = treeViewOrThrow(tree_addr);
+  (void)view;
+  QgsVectorLayer* layer = nullptr;
+  auto it = impl_->mirror_by_doc.find(doc_id);
+  if (it != impl_->mirror_by_doc.end()) {
+    layer = qobject_cast<QgsVectorLayer*>(
+        QgsProject::instance()->mapLayer(QString::fromStdString(it->second)));
+  }
+  if (!layer) layer = findMirrorByDocId(QgsProject::instance(), doc_id);
+  if (!layer) throw std::invalid_argument("unknown doc_id: " + doc_id);
+  QPointer<QgsMapCanvas> canvas;
+  auto canvasIt = impl_->tree_canvas.find(tree_addr);
+  if (canvasIt != impl_->tree_canvas.end()) canvas = canvasIt->second;
+  if (canvas.isNull()) throw std::runtime_error("tree view canvas is no longer valid");
+  QgsRectangle ext = layer->extent();
+  if (ext.isEmpty()) return;  // 空图层无缩放语义
+  const QgsCoordinateReferenceSystem dest = canvas->mapSettings().destinationCrs();
+  if (dest.isValid() && layer->crs() != dest) {
+    QgsCoordinateTransform ct(layer->crs(), dest, QgsProject::instance());
+    ext = ct.transformBoundingBox(ext);
+  }
+  canvas->setExtent(ext);
+  canvas->refresh();
+}
+
+bool QgisMapStack::treeViewSelectDoc(std::uintptr_t tree, const std::string& doc_id) {
+  QgsLayerTreeView* view = treeViewOrThrow(tree);
+  QgsMapLayer* layer = nullptr;
+  auto it = impl_->mirror_by_doc.find(doc_id);
+  if (it != impl_->mirror_by_doc.end()) {
+    layer = QgsProject::instance()->mapLayer(QString::fromStdString(it->second));
+  }
+  if (!layer) layer = findMirrorByDocId(QgsProject::instance(), doc_id);
+  if (!layer) return false;
+  QgsLayerTreeLayer* node = QgsProject::instance()->layerTreeRoot()->findLayer(layer);
+  if (!node) return false;
+  view->setCurrentIndex(view->node2index(node));
+  return true;
+}
+
+void QgisMapStack::setMirrorLayerOpacity(const std::string& doc_id, double opacity) {
+  if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
+  QgsVectorLayer* layer = nullptr;
+  auto it = impl_->mirror_by_doc.find(doc_id);
+  if (it != impl_->mirror_by_doc.end()) {
+    layer = qobject_cast<QgsVectorLayer*>(
+        QgsProject::instance()->mapLayer(QString::fromStdString(it->second)));
+  }
+  if (!layer) layer = findMirrorByDocId(QgsProject::instance(), doc_id);
+  if (!layer) throw std::invalid_argument("unknown doc_id: " + doc_id);
+  layer->setOpacity(std::clamp(opacity, 0.0, 1.0));  // 触发 repaintRequested → 画布桥自动刷新
 }
 
 }  // namespace pwb::qgis_render

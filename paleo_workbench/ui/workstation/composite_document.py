@@ -58,6 +58,7 @@ from paleo_workbench.ui.map_action_controller import MapActionController
 from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
 from paleo_workbench.ui.map_status_bar import MapStatusBar
 from paleo_workbench.ui.qgis_stack.canvas_shim import QgisCanvasShim
+from paleo_workbench.ui.qgis_stack.layer_tree_panel import QgisLayerTreePanel
 from paleo_workbench.ui.workstation.common import workstation_icon
 from paleo_workbench.ui.workstation.composite_attribute_table import (
     CompositeAttributeTableDialog,
@@ -748,7 +749,7 @@ class CompositeDocument(QWidget):
         self.canvas.backend_status_changed.connect(lambda *_: self._sync_status_bar())
 
         # 面板实例（dock 由宿主 QMainWindow 创建并管理）
-        self.layer_manager = LayerManagerPanel()
+        self.layer_manager = QgisLayerTreePanel()
         self.input_tree = InputTreePanel(project)
         self.linked_views = LinkedViewsPanel()
         self.input_tree.object_selected.connect(self.object_selected.emit)
@@ -780,6 +781,7 @@ class CompositeDocument(QWidget):
         self.layer_manager.duplicate_layer_requested.connect(self._duplicate_vector_layer)
         self.layer_manager.export_layer_requested.connect(self._export_layer)
         self.layer_manager.repair_layer_requested.connect(self._repair_layer)
+        self.layer_manager.display_state_changed.connect(self.notify_display_changed)
 
         self._build_toolbar()
         self.set_project(project)
@@ -1382,6 +1384,14 @@ class CompositeDocument(QWidget):
     def _sync_reference_layers_to_project(self) -> None:
         if self._project is not None:
             self._project.workstation_reference_layers = list(self._reference_layers)
+
+    def notify_display_changed(self) -> None:
+        """图层树回写（可见性/顺序/重命名）后的轻量持久化：不重组快照。"""
+        self.edit_controller.apply_display_state(self.layer_manager._layers)
+        self._apply_reference_display_state(self.layer_manager._layers)
+        if self._project is not None and not self._loading:
+            self.edit_controller.sync_to_project(self._project)
+            self._sync_reference_layers_to_project()
 
     # -- 捕捉设置 -------------------------------------------------------------
 

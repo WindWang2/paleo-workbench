@@ -70,13 +70,16 @@ def test_composite_preserves_project_crs_through_layer_updates(qtbot, tmp_path):
     assert doc.layer_manager._project_crs == "EPSG:32650"
 
     layer_ids = list(doc.edit_controller.layer_ids())
-    with _SnapshotSpy(doc.canvas) as spy:
-        doc.layer_manager.set_layer_visible(layer_ids[0], False)
-        doc.layer_manager.set_layer_opacity(layer_ids[1], 0.55)
-        doc.layer_manager.move_layer(layer_ids[0], +1)
-        assert spy.snapshots, "layer state updates must republish the snapshot"
-        for snapshot in spy.snapshots:
-            assert snapshot.project_crs == "EPSG:32650"
+    # M2：显示增量直写镜像（set_mirror_layer_visibility/opacity/order），不再整树
+    # 重发快照——_SnapshotSpy 的「必须重发」断言与增量 reconcile 设计冲突，改为
+    # 直接核验效果落点与 CRS 不变（本测试的原始意图）。
+    doc.layer_manager.set_layer_visible(layer_ids[0], False)
+    doc.layer_manager.set_layer_opacity(layer_ids[1], 0.55)
+    doc.layer_manager.move_layer(layer_ids[0], +1)
+    assert doc.layer_manager.layer_by_id(layer_ids[0]).visible is False
+    assert doc.layer_manager.layer_by_id(layer_ids[1]).opacity == pytest.approx(0.55)
+    assert doc.edit_controller.project_crs == "EPSG:32650"
+    assert doc.layer_manager._project_crs == "EPSG:32650"
 
 
 def test_composite_reloads_crs_on_project_change(qtbot, tmp_path):

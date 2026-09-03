@@ -94,7 +94,7 @@ def test_composite_document_is_default_with_dock_panels(qtbot, tmp_path):
     assert workstation.document_stack.currentWidget() is composite
 
     # 图层管理是真实渲染控制
-    assert composite.layer_manager.tree.topLevelItemCount() > 0
+    assert composite.layer_manager.tree_row_count() > 0
     layer_id = composite.layer_manager._layers[0].id
     visible_before = composite.layer_manager.layer_by_id(layer_id).visible
     composite.layer_manager.set_layer_visible(layer_id, not visible_before)

@@ -443,6 +443,7 @@ class QgisCanvasShim(QWidget):
                 legacy_style = {k: v for k, v in style_raw.items() if k != "qgis_style"} if isinstance(style_raw, dict) else None
                 if legacy_style is not None and not legacy_style:
                     legacy_style = None
+            metadata = getattr(layer, "metadata", None) or {}
             try:
                 qgis_id = self.stack.upsert_mirror_layer(
                     layer.id, layer.name or layer.id, geom,
@@ -450,6 +451,8 @@ class QgisCanvasShim(QWidget):
                     json.dumps({"type": "FeatureCollection", "features": features}),
                     renderer_xml, labeling_xml, legacy_style,
                     bool(layer.visible), float(layer.opacity),
+                    is_reference=metadata.get("reference") == "true",
+                    is_editable=metadata.get("editable") == "true",
                 )
             except Exception as exc:
                 if has_qgis_renderer or has_qgis_labeling:

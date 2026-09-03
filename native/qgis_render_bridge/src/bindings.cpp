@@ -615,7 +615,8 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                 const std::string& name, const std::string& geometry_type,
                 const std::string& crs_auth_id, const std::string& geojson,
                 const std::string& renderer_xml, const std::string& labeling_xml,
-                py::object legacy_style, bool visible, double opacity) {
+                py::object legacy_style, bool visible, double opacity,
+                bool is_reference, bool is_editable) {
                std::string legacy_json;
                if (!legacy_style.is_none()) {
                    if (py::isinstance<py::str>(legacy_style)) {
@@ -628,11 +629,13 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                    }
                }
                return self.upsertMirrorLayer(doc_id, name, geometry_type, crs_auth_id, geojson,
-                                             renderer_xml, labeling_xml, legacy_json, visible, opacity);
+                                             renderer_xml, labeling_xml, legacy_json, visible, opacity,
+                                             is_reference, is_editable);
              },
              py::arg("doc_id"), py::arg("name"), py::arg("geometry_type"), py::arg("crs_auth_id"),
              py::arg("geojson"), py::arg("renderer_xml") = "", py::arg("labeling_xml") = "",
-             py::arg("legacy_style") = py::none(), py::arg("visible") = true, py::arg("opacity") = 1.0)
+             py::arg("legacy_style") = py::none(), py::arg("visible") = true, py::arg("opacity") = 1.0,
+             py::arg("is_reference") = false, py::arg("is_editable") = false)
         .def("remove_mirror_layers_except", &pwb::qgis_render::QgisMapStack::removeMirrorLayersExcept)
         .def("set_mirror_layer_order", &pwb::qgis_render::QgisMapStack::setMirrorLayerOrder)
         .def("set_mirror_layer_visibility", &pwb::qgis_render::QgisMapStack::setMirrorLayerVisibility)
@@ -676,5 +679,16 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                      py::gil_scoped_acquire gil;
                      f(payload);
                    });
-             });
+             })
+        .def("set_tree_menu_callback",
+             [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t tree, py::function f) {
+               self.setTreeMenuCallback(
+                   tree, [f = std::move(f)](const std::string& key, const std::string& doc) {
+                     py::gil_scoped_acquire gil;
+                     f(key, doc);
+                   });
+             })
+        .def("zoom_to_layer", &pwb::qgis_render::QgisMapStack::zoomToLayer)
+        .def("tree_view_select_doc", &pwb::qgis_render::QgisMapStack::treeViewSelectDoc)
+        .def("set_mirror_layer_opacity", &pwb::qgis_render::QgisMapStack::setMirrorLayerOpacity);
 }

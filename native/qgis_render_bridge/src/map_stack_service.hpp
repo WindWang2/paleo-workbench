@@ -63,6 +63,18 @@ public:
   void setTreeChangeCallback(std::uintptr_t tree_view,
                              std::function<void(const std::string&)> callback);
 
+  // 右键菜单：C++ 侧组装（QGIS 默认动作 + 自定义动作键），自定义动作触发
+  // callback(action_key, doc_id)。重设会替换旧 provider（view 接管所有权）。
+  void setTreeMenuCallback(
+      std::uintptr_t tree_view,
+      std::function<void(const std::string&, const std::string&)> callback);
+  // 缩放到镜像图层范围（C++ 直接作用画布，不经 Python 回环）；空范围 no-op。
+  void zoomToLayer(std::uintptr_t tree_view, const std::string& doc_id);
+  // 按 doc_id 置当前图层；找不到返回 false。
+  bool treeViewSelectDoc(std::uintptr_t tree, const std::string& doc_id);
+  // 镜像图层透明度直写（doc_id 寻址），避免整快照 reconcile。
+  void setMirrorLayerOpacity(const std::string& doc_id, double opacity);
+
   std::string addVectorLayerGeoJson(const std::string& name,
                                     const std::string& geometry_type,
                                     const std::string& crs_auth_id,
@@ -88,7 +100,9 @@ public:
                                 const std::string& labeling_xml,
                                 const std::string& legacy_style_json,
                                 bool visible,
-                                double opacity);
+                                double opacity,
+                                bool is_reference = false,
+                                bool is_editable = false);
   void removeMirrorLayersExcept(const std::vector<std::string>& doc_ids);
   void setMirrorLayerOrder(const std::vector<std::string>& doc_ids_top_first);
   void setMirrorLayerVisibility(const std::string& doc_id, bool visible);
