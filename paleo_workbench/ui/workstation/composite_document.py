@@ -57,7 +57,7 @@ from paleo_workbench.project.models import MapReferenceLayer
 from paleo_workbench.ui.map_action_controller import MapActionController
 from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
 from paleo_workbench.ui.map_status_bar import MapStatusBar
-from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
+from paleo_workbench.ui.qgis_stack.canvas_shim import QgisCanvasShim
 from paleo_workbench.ui.workstation.common import workstation_icon
 from paleo_workbench.ui.workstation.composite_attribute_table import (
     CompositeAttributeTableDialog,
@@ -208,7 +208,7 @@ class LayerManagerPanel(QFrame):
         super().__init__(parent)
         self.setObjectName("PanelCard")
         self._layers: list = []
-        self._canvas: UnifiedMapCanvas | None = None
+        self._canvas: QgisCanvasShim | None = None
         self._tree_connected = False
         self._editing_layer_id: str | None = None
         self._reloading = False
@@ -436,7 +436,7 @@ class LayerManagerPanel(QFrame):
 
     # -- 绑定 ---------------------------------------------------------------
 
-    def bind(self, canvas: UnifiedMapCanvas, layers: list) -> None:
+    def bind(self, canvas: QgisCanvasShim, layers: list) -> None:
         self._canvas = canvas
         self._layers = layers
         self._reload()
@@ -701,7 +701,7 @@ class CompositeDocument(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.canvas = UnifiedMapCanvas(parent=self)
+        self.canvas = QgisCanvasShim(parent=self)
         layout.addWidget(self.canvas, 1)
 
         # 识别结果（多图层 Identify）与运行状态栏：图件主视图的诚实附属层。

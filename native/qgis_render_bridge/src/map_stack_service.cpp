@@ -172,6 +172,40 @@ std::uintptr_t QgisMapStack::createCanvas() {
   return addr;
 }
 
+void QgisMapStack::destroyCanvas(std::uintptr_t canvas_addr) {
+  auto it = impl_->canvas_refs.find(canvas_addr);
+  if (it == impl_->canvas_refs.end()) return;
+  // Disconnect callbacks
+  auto ecIt = impl_->extent_connections.find(canvas_addr);
+  if (ecIt != impl_->extent_connections.end()) {
+    QObject::disconnect(ecIt->second);
+    impl_->extent_connections.erase(ecIt);
+  }
+  auto xcIt = impl_->xy_connections.find(canvas_addr);
+  if (xcIt != impl_->xy_connections.end()) {
+    QObject::disconnect(xcIt->second);
+    impl_->xy_connections.erase(xcIt);
+  }
+  impl_->extent_callbacks.erase(canvas_addr);
+  impl_->xy_callbacks.erase(canvas_addr);
+  // Remove tool
+  auto toolIt = impl_->tools.find(canvas_addr);
+  if (toolIt != impl_->tools.end()) {
+    // Release without deleting canvas-owned tool if canvas still alive
+    bool canvasAlive = !it->second.isNull();
+    if (!canvasAlive && toolIt->second) {
+      toolIt->second.release();
+    }
+    impl_->tools.erase(toolIt);
+  }
+  // Remove bridge; canvas lifetime is owned by Qt parent hierarchy,
+  // so we do not delete the QWidget here (avoids double-free with
+  // QgisCanvasHost layout). The QPointer will become null when Qt
+  // deletes the widget.
+  impl_->tree_bridges.erase(canvas_addr);
+  impl_->canvas_refs.erase(it);
+}
+
 void QgisMapStack::setCanvasWhiteBackground(std::uintptr_t canvas) {
   canvasOrThrow(canvas)->setCanvasColor(Qt::white);
 }

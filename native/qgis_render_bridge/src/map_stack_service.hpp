@@ -21,6 +21,7 @@ public:
   void shutdown();
 
   std::uintptr_t createCanvas();
+  void destroyCanvas(std::uintptr_t canvas);
   void setCanvasWhiteBackground(std::uintptr_t canvas);
   void setDestinationCrs(std::uintptr_t canvas, const std::string& crs_auth_id);
   void setCanvasExtent(std::uintptr_t canvas, double xmin, double ymin,
