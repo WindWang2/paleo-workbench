@@ -1,5 +1,6 @@
 #include "map_stack_service.hpp"
 
+#include <mutex>
 #include <stdexcept>
 
 #include <QCoreApplication>
@@ -14,6 +15,7 @@ namespace pwb::qgis_render {
 #undef PALEO_QGIS_PREFIX_PATH
 #endif
 extern const std::string PALEO_QGIS_PREFIX_PATH;
+extern std::mutex g_qgis_lifecycle_mutex;
 
 struct QgisMapStack::Impl {
   bool initialized = false;
@@ -30,6 +32,7 @@ void QgisMapStack::initialize() {
   if (PALEO_QGIS_PREFIX_PATH.empty()) {
     throw std::runtime_error("vendored QGIS prefix is not configured");
   }
+  std::lock_guard<std::mutex> lock(g_qgis_lifecycle_mutex);
   QgsApplication::setPrefixPath(
       QString::fromStdString(PALEO_QGIS_PREFIX_PATH), true);
   QgsApplication::init();

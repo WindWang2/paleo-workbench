@@ -68,9 +68,10 @@ extern const std::string PALEO_QGIS_PREFIX_PATH = "";
 #endif
 
 namespace pwb::qgis_render {
+std::mutex g_qgis_lifecycle_mutex;
+
 namespace {
 
-std::mutex g_qgis_lifecycle_mutex;
 std::size_t g_qgis_bridge_count = 0;
 bool g_qgis_initialized = false;
 
