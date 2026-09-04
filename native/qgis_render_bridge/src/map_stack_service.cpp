@@ -670,9 +670,13 @@ void QgisMapStack::syncCanvasLayers(std::uintptr_t canvas_addr) {
   QList<QgsMapLayer*> layers;
   QgsProject* prj = project();
   if (prj != nullptr) {
-    const QList<QgsMapLayer*> order = prj->layerTreeRoot()->layerOrder();
+    QgsLayerTree* root = prj->layerTreeRoot();
+    const QList<QgsMapLayer*> order = root->layerOrder();
     for (QgsMapLayer* layer : order) {
-      if (layer != nullptr) layers.append(layer);
+      if (layer == nullptr || !layer->isSpatial()) continue;
+      QgsLayerTreeLayer* node = root->findLayer(layer);
+      if (node == nullptr || !node->isVisible()) continue;
+      layers.append(layer);
     }
   }
   canvas->setLayers(layers);
@@ -712,6 +716,15 @@ void QgisMapStack::shutdown() {
   impl_->tree_menu_callbacks.clear();
   impl_->orphan_tree_callbacks.clear();
   impl_->orphan_tree_menu_callbacks.clear();
+  if (impl_->owned_project) {
+    for (auto& kv : impl_->canvas_refs) {
+      if (kv.second.isNull()) continue;
+      QgsMapCanvas* c = kv.second;
+      c->setLayers(QList<QgsMapLayer*>());
+      c->setProject(nullptr);
+      if (QgsMapTool* tool = c->mapTool()) c->unsetMapTool(tool);
+    }
+  }
   {
     SuppressGuard guard(&impl_->suppress_tree_callbacks);
     for (const auto& id : impl_->owned_layers) {
@@ -1080,6 +1093,9 @@ void QgisMapStack::setLayerVisibility(const std::string& layer_id, bool visible)
   if (docVar.isValid() && !docVar.toString().isEmpty()) {
     impl_->known_layer_visibility[docVar.toString().toStdString()] = visible;
   }
+  for (auto& kv : impl_->canvas_refs) {
+    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
+  }
 }
 
 void QgisMapStack::setLayerOpacity(const std::string& layer_id, double opacity) {
@@ -1346,6 +1362,9 @@ void QgisMapStack::setMirrorLayerVisibility(const std::string& doc_id, bool visi
   if (!node) throw std::invalid_argument("layer node not found for doc_id: " + doc_id);
   node->setItemVisibilityChecked(visible);
   impl_->known_layer_visibility[doc_id] = visible;
+  for (auto& kv : impl_->canvas_refs) {
+    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
+  }
 }
 
 std::vector<std::string> QgisMapStack::mirrorOrderTopFirst() const {
