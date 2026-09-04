@@ -8,7 +8,7 @@ floating; this bar is the in-content chrome.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, QPoint, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -285,4 +285,32 @@ def install_dock_title_bar(dock: QDockWidget, title: str | None = None) -> DockT
     """Attach a :class:`DockTitleBar` to ``dock`` and return it."""
     bar = DockTitleBar(dock, title=title or dock.windowTitle())
     dock.setTitleBarWidget(bar)
+    _install_tabified_tracking(dock, bar)
     return bar
+
+
+def _install_tabified_tracking(dock: QDockWidget, bar: DockTitleBar) -> None:
+    """Tab 化时隐藏自绘标题栏：活动 tab 本身已显示标题，保留标题栏会
+    出现同一标题上下两份（B17 视觉审查）。浮动/独立停靠时恢复。
+    """
+    host = dock.parentWidget()
+
+    def _update() -> None:
+        try:
+            main = dock.parentWidget()
+            tabified = False
+            if main is not None and hasattr(main, "tabifiedDockWidgets"):
+                tabified = bool(main.tabifiedDockWidgets(dock))
+        except RuntimeError:
+            return  # dock/bar 已随 teardown 拆毁：迟到的校准直接忽略
+        try:
+            bar.setVisible(not tabified)
+        except RuntimeError:
+            pass
+
+    dock.topLevelChanged.connect(lambda *_: _update())
+    dock.dockLocationChanged.connect(lambda *_: _update())
+    dock.visibilityChanged.connect(lambda *_: _update())
+    if host is not None and hasattr(host, "customEvent"):
+        # 初次装配后也校准一次（启动时可能已 tab 化）。
+        QTimer.singleShot(0, _update)

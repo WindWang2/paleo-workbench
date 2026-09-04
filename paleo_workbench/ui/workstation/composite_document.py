@@ -1695,8 +1695,21 @@ class CompositeDocument(QWidget):
         above map chrome and leave 8px top / ≥12px side inset so it does not
         collide with docked panel edges on narrow widths.
         """
-        self.toolbar.adjustSize()
+        # 窄画布：先收起纯文本的 dock 切换钮（面板菜单保留同功能入口），
+        # 否则工具条溢出画布右缘、按钮文字被截断（B17 视觉审查）。
         margin_x = 12
+        budget = self.width() - 2 * margin_x
+        toggles = (
+            self.well_track_button,
+            self.seismic_section_button,
+            self.link_button,
+        )
+        self.toolbar.adjustSize()
+        overflow = self.toolbar.width() > budget
+        for button in toggles:
+            button.setVisible(not overflow)
+        if overflow:
+            self.toolbar.adjustSize()
         y = 8
         x = max(margin_x, (self.width() - self.toolbar.width()) // 2)
         max_x = max(margin_x, self.width() - self.toolbar.width() - margin_x)
