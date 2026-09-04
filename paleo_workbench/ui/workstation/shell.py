@@ -144,6 +144,9 @@ class WorkstationFrame(QWidget):
         layout.addWidget(self.composite, 1)
 
         # --- 面板：全部为宿主窗口上的可浮动 dock -------------------------
+        # 中央编图最小宽度：再糟糕的持久化布局（或极端拖拽）也不能把
+        # 地图挤没了——dock 布局由 QMainWindow 在中央 minimum 之上分配。
+        self.composite.setMinimumWidth(420)
         self.navigation_region = QFrame(self._dock_host)
         self.navigation_region.setObjectName("WorkstationNavigationRegion")
         nav_layout = QHBoxLayout(self.navigation_region)
@@ -267,16 +270,23 @@ class WorkstationFrame(QWidget):
         self.composite.seismic_section_toggled.connect(self._on_seismic_section_toggled)
         self.composite.link_toggled.connect(self._on_link_toggled)
         # 菜单/关闭按钮关 dock 后，工具条勾选态回写（避免状态撒谎）。
+        # 工具条勾选回写只在 dock 真正关闭时发生：底部 dock 全部 tab 化，
+        # 被兄弟 tab 遮挡时 Qt 仍报 visible——若照写会视觉谎报为已关闭，
+        # 用户再点按钮反而把 dock 真正关掉。
         self.well_dock.visibilityChanged.connect(
-            lambda visible: self.composite.well_track_button.setChecked(bool(visible))
+            lambda visible: self._sync_dock_toggle(
+                self.well_dock, self.composite.well_track_button, visible
+            )
         )
         self.seismic_dock.visibilityChanged.connect(
-            lambda visible: self.composite.seismic_section_button.setChecked(bool(visible))
+            lambda visible: self._sync_dock_toggle(
+                self.seismic_dock, self.composite.seismic_section_button, visible
+            )
         )
         self.composite.object_selected.connect(self.inspector.show_payload)
         self.process_hub.agent.open_well_requested.connect(self._open_well_from_agent)
         self.process_hub.agent.show_wells_requested.connect(self._show_wells_from_agent)
-        self.process_hub.agent.focus_joint_requested.connect(self.activate_joint)
+        self.process_hub.agent.focus_joint_requested.connect(self._focus_joint_from_agent)
         self.process_hub.agent.undo_requested.connect(self._undo_agent_gui)
         self.task_center.active_count_changed.connect(self.app_bar.set_task_count)
         self.app_bar.agent_requested.connect(self.show_agent)
@@ -643,6 +653,7 @@ class WorkstationFrame(QWidget):
                 self.task_dock.raise_()
 
         self.status_message.emit(f"已应用布局：{preset.label}")
+        QTimer.singleShot(0, self._apply_default_pane_sizes)
         self._save_timer.start()
 
     def _reset_default_layout(self) -> None:
@@ -709,6 +720,21 @@ class WorkstationFrame(QWidget):
     def _open_well_from_agent(self, well_name: str) -> None:
         self._push_agent_snapshot("open_well")
         self.show_well(well_name)
+
+    def _focus_joint_from_agent(self) -> None:
+        self._push_agent_snapshot("focus_joint")
+        self.activate_joint()
+
+    def _sync_dock_toggle(self, dock, button, visible: bool) -> None:
+        if visible or not hasattr(self._dock_host, "tabifiedDockWidgets"):
+            button.setChecked(bool(visible))
+            return
+        try:
+            tabified = bool(self._dock_host.tabifiedDockWidgets(dock))
+        except RuntimeError:
+            return
+        if not tabified:
+            button.setChecked(False)
 
     def _push_agent_snapshot(self, action: str) -> None:
         """撤销用：记录 Agent 动作前的工作区 GUI 状态（B12：真撤销）。"""
@@ -783,11 +809,35 @@ class WorkstationFrame(QWidget):
             return
         self._save_timer.start()
 
+    def _apply_default_pane_sizes(self) -> None:
+        """给中央编图主导的空间分配（首运行/预设重置共用，B15/B17）。
+
+        QMainWindow 对新 dock 默认近似均分窗口宽度：无持久化布局时中央
+        画布会被挤到接近零宽——专业工作站必须让地图拿到绝大部分空间。
+        resizeDocks 是尽力而为：不可见 dock 由 Qt 忽略，属预期。
+        """
+        host = self._dock_host
+        horizontal = Qt.Orientation.Horizontal
+        vertical = Qt.Orientation.Vertical
+        host.resizeDocks([self.nav_dock], [264], horizontal)
+        host.resizeDocks(
+            [self.inspector_dock, self.composite_layer_dock], [312, 312], horizontal
+        )
+        host.resizeDocks(
+            [self.process_dock, self.task_dock, self.composite_linked_dock],
+            [224, 224, 200],
+            vertical,
+        )
+
     def _restore_layout(self) -> None:
         if self._layout_frozen:
             # teardown 已拆除 dock：迟到的 restore 定时器不得再触碰。
             return
         data = self._settings.value(self._WINDOW_STATE_KEY)
+        if data is None:
+            # 首运行：没有可恢复的布局，显式给中央编图主导的空间分配，
+            # 不靠 QMainWindow 的均分默认值。
+            QTimer.singleShot(0, self._apply_default_pane_sizes)
         if data is not None:
             version = self._settings.value(self._STATE_VERSION_KEY, 0, type=int)
             if version != LAYOUT_STATE_VERSION:
