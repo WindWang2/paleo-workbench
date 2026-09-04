@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QSize, QTimer, Qt, Signal
+from PySide6.QtCore import QPoint, QRectF, QSize, QTimer, Qt, Signal
 from PySide6.QtGui import QImageReader, QPainter, QPixmap
 from PySide6.QtWidgets import QLabel
 
@@ -144,29 +144,12 @@ class ImagePreviewWidget(QLabel):
             self._drag_start_pos = None
             self.update()
         else:
-            w = max(1, int(self._pixmap.width() * self._zoom_factor))
-            h = max(1, int(self._pixmap.height() * self._zoom_factor))
-            target = QSize(w, h)
-            key = (
-                self._path,
-                self._revision,
-                target.width(),
-                target.height(),
-                self.transformation_mode,
-                self._zoom_factor,
-            )
-            if key == self._scaled_key:
-                # pixmap 未变，但 pan 可能已更新，仍需重绘
-                self._pan_offset = self._clamp_pan(self._pan_offset)
-                self.update()
-                return
-            scaled = self._pixmap.scaled(
-                target,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                self.transformation_mode,
-            )
-            self._scaled_key = key
-            self.setPixmap(scaled)
+            # 缩放模式不再物化「整图 × zoom」位图（#1135：8×2048px 的
+            # SmoothTransformation 全图重采样曾在 GUI 线程同步分配 ~1GiB）。
+            # paintEvent 按可视区窗口化采样：一次绘制的开销 O(viewport)，
+            # 与 zoom 上限（_ZOOM_MAX）和源图尺寸解耦。
+            self.setPixmap(QPixmap())
+            self._scaled_key = None
             self._pan_offset = self._clamp_pan(self._pan_offset)
             self.update()
 
@@ -219,11 +202,19 @@ class ImagePreviewWidget(QLabel):
 
     # -- pan helpers -----------------------------------------------------
 
+    def _virtual_size(self) -> tuple[int, int]:
+        """缩放模式下的虚拟整图尺寸（zoom × 源图），只用于几何计算。"""
+        if self._pixmap is None or self._pixmap.isNull():
+            return 0, 0
+        return (
+            max(1, int(self._pixmap.width() * self._zoom_factor)),
+            max(1, int(self._pixmap.height() * self._zoom_factor)),
+        )
+
     def _clamp_pan(self, offset: QPoint) -> QPoint:
-        pm = self.pixmap()
-        if pm is None or pm.isNull():
+        pw, ph = self._virtual_size()
+        if pw <= 0:
             return QPoint(0, 0)
-        pw, ph = pm.width(), pm.height()
         ww, wh = self.width(), self.height()
         # widget 尚未布局时 fallback
         if ww <= 0:
@@ -296,16 +287,39 @@ class ImagePreviewWidget(QLabel):
         if self._pixmap is None or self._pixmap.isNull():
             super().paintEvent(event)
             return
-        pm = self.pixmap()
-        if pm is None or pm.isNull():
+        # 视口窗口化绘制（#1135）：把可视区矩形映射回源图坐标，仅采样
+        # 该窗口；绘制成本 O(viewport)，与 zoom/源图尺寸解耦，GUI 线程
+        # 不再出现 16384px 级中间位图。
+        source = self._pixmap
+        sw, sh = source.width(), source.height()
+        pw, ph = self._virtual_size()
+        if pw <= 0 or ph <= 0:
             super().paintEvent(event)
             return
-        painter = QPainter(self)
         ww, wh = self.width(), self.height()
-        pw, ph = pm.width(), pm.height()
+        if ww <= 0 or wh <= 0:
+            ww, wh = 240, 180
         x = (ww - pw) // 2 + self._pan_offset.x()
         y = (wh - ph) // 2 + self._pan_offset.y()
-        painter.drawPixmap(x, y, pm)
+        # 可视区落在虚拟图上的矩形（与 widget 相交）
+        vis_x0 = max(0, -x)
+        vis_y0 = max(0, -y)
+        vis_x1 = min(int(ww), int(pw) - x)
+        vis_y1 = min(int(wh), int(ph) - y)
+        if vis_x1 <= vis_x0 or vis_y1 <= vis_y0:
+            return
+        scale_x = sw / float(pw)
+        scale_y = sh / float(ph)
+        src_rect = QRectF(
+            vis_x0 * scale_x,
+            vis_y0 * scale_y,
+            (vis_x1 - vis_x0) * scale_x,
+            (vis_y1 - vis_y0) * scale_y,
+        )
+        painter = QPainter(self)
+        if self.transformation_mode == Qt.TransformationMode.SmoothTransformation:
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.drawPixmap(QRectF(x + vis_x0, y + vis_y0, vis_x1 - vis_x0, vis_y1 - vis_y0), source, src_rect)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
