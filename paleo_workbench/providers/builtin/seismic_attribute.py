@@ -110,16 +110,18 @@ class SeismicAttributeProvider:
 
         roi = parameters.get("roi")
         if roi:
-            result_array = roi_attribute(
-                reader,
-                name=self._kernel,
-                il0=int(roi.get("il0", 0)),
-                il1=int(roi.get("il1", 0)) or None,
-                xl0=int(roi.get("xl0", 0)),
-                xl1=int(roi.get("xl1", 0)) or None,
-                t0=int(roi.get("t0", 0)),
-                t1=int(roi.get("t1", 0)) or None,
+            # #1132: roi_attribute takes ONE bounds tuple (base-index,
+            # half-open); the old il0=/xl0= keywords never existed. A zero
+            # bound is a legitimate index and must survive (no `or None`).
+            bounds = (
+                int(roi.get("il0", 0)),
+                int(roi.get("il1", 0)),
+                int(roi.get("xl0", 0)),
+                int(roi.get("xl1", 0)),
+                int(roi.get("t0", 0)),
+                int(roi.get("t1", 0)),
             )
+            result_array = roi_attribute(reader, bounds, name=self._kernel)
             diagnostics = {
                 "mode": "roi",
                 "shape": list(result_array.shape),

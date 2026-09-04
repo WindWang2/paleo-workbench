@@ -271,3 +271,69 @@ def test_attribute_job_registers_derived_and_run(volume, tmp_path):
     finally:
         sched.shutdown(wait=True, timeout=10.0)
         catalog.close()
+
+
+# ------------------------------------------------- #1132 provider ROI entry
+
+
+def _write_small_segy(path):
+    """Self-sufficient 12x12x16 volume (the module fixture's store is
+    mutated by the catalog test above; ROI entry must not depend on it)."""
+    from pathlib import Path as _Path  # noqa: F401  (kept local: test-only helper)
+
+    import numpy as _np
+
+    from paleo_workbench.seismic_transcode import TranscodeParams as _Params
+    from paleo_workbench.seismic_transcode import transcode_segy_to_zarr as _transcode
+
+    nil, nxl, nt = 12, 12, 16
+    rng = _np.random.default_rng(7)
+    cube = (rng.standard_normal((nil, nxl, nt)) * 0.5).astype(_np.float32)
+    cube[3:6, 3:9, 5:10] += 2.0
+    spec = segyio.spec()
+    spec.ilines = list(range(1, nil + 1))
+    spec.xlines = list(range(1, nxl + 1))
+    spec.samples = list(range(nt))
+    spec.format = 5
+    segy = path / "roi.segy"
+    with segyio.create(str(segy), spec) as f:
+        for il in range(nil):
+            for xl in range(nxl):
+                i = il * nxl + xl
+                f.header[i] = {
+                    segyio.TraceField.INLINE_3D: il + 1,
+                    segyio.TraceField.CROSSLINE_3D: xl + 1,
+                    segyio.TraceField.TRACE_SEQUENCE_LINE: i + 1,
+                }
+                f.trace[i] = cube[il, xl]
+    store = path / "roi_store"
+    _transcode(segy, store, params=_Params(chunk=(4, 4, 4), shard=(8, 8, 8), clevel=1))
+    return cube, store
+
+
+def test_provider_entry_roi_returns_correct_result(tmp_path):
+    """#1132: the provider ROI path must call roi_attribute with bounds and
+    return the same window the direct call produces."""
+    from paleo_workbench.providers.base import ProviderContext
+    from paleo_workbench.providers.builtin.seismic_attribute import (
+        SeismicAttributeProvider,
+    )
+    from paleo_workbench.providers.execution import execute_provider
+    from paleo_workbench.providers.refs import SeismicVolumeRef
+
+    cube, store = _write_small_segy(tmp_path)
+    provider = SeismicAttributeProvider("c3", {})
+    bounds = {"il0": 2, "il1": 10, "xl0": 2, "xl1": 10, "t0": 2, "t1": 14}
+    result = execute_provider(
+        provider,
+        inputs={"volume": SeismicVolumeRef(volume_id="v", path=str(store))},
+        parameters={"roi": bounds},
+        context=ProviderContext(work_dir=str(tmp_path)),
+    )
+    got = result.artifacts[0].value
+    assert isinstance(got, np.ndarray)
+    assert got.shape == (8, 8, 12)
+    np.testing.assert_allclose(
+        got, _full_reference(cube)[2:10, 2:10, 2:14], rtol=1e-6, atol=1e-7
+    )
+    assert result.diagnostics["mode"] == "roi"
