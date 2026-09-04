@@ -798,7 +798,12 @@ std::uintptr_t QgisMapStack::createCanvas() {
   std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(canvas);
   impl_->tree_bridges.emplace(addr, std::move(tree_bridge));
   impl_->canvas_refs[addr] = canvas;
-  impl_->cad_docks[addr] = new QgsAdvancedDigitizingDockWidget(canvas, canvas);
+  // 永不显示（真机回归：QDockWidget 非浮动子控件会随父画布 show 一起被
+  // Qt 递归显示）；enable()/activateCad 的 mSessionActive 门仍可绕过，
+  // 但我们从不开启 CAD 会话。
+  auto* cadDock = new QgsAdvancedDigitizingDockWidget(canvas, canvas);
+  cadDock->hide();
+  impl_->cad_docks[addr] = cadDock;
   // I1: address reuse — a freshly allocated canvas may reuse a previously
   // dead address; clear the dead-set so the new live entry is not rejected.
   impl_->dead_canvas_addrs.erase(addr);

@@ -390,14 +390,22 @@ class QgisCanvasShim(QWidget):
         self._wrapped_func = None
 
     def set_map_tool_controller(self, controller) -> None:
-        """Host 工具控制器绑定：M1 仅把 pan/zoom 映射到 QGIS 原生工具，其余保持 pan。"""
+        """Host 工具控制器绑定：pan/zoom/编辑工具映射到 QGIS 原生工具。
+
+        调用方既可能传 CompositeEditController（.tools 属性）也可能直传
+        MapToolController 工具栈本体（composite_editing.attach_canvas 走后者）——
+        两者都接，否则包装静默不装、原生工具永远停在 pan（真机回归）。
+        """
         self._tool_controller = controller
         try:
             self.stack.set_map_tool(self.canvas_address, "pan")
         except Exception:
             pass
         try:
-            tools = getattr(controller, "tools", None)
+            if hasattr(controller, "set_active_tool"):
+                tools = controller  # 直传工具栈
+            else:
+                tools = getattr(controller, "tools", None)
             if tools is not None and hasattr(tools, "set_active_tool"):
                 if getattr(self, "_tools_wrapped_target", None) is tools and getattr(self, "_wrapped_func", None) is not None:
                     return
