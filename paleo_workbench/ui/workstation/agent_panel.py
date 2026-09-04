@@ -145,7 +145,10 @@ class AgentWorkspace(QFrame):
             project_path=self._project_path,
             project=self._project,
             active_well_id=self._well_from_parameters(plan.parameters),
-            permissions=frozenset({ActionRisk.READ, ActionRisk.COMPUTE, ActionRisk.WRITE}),
+            # #1186: default grants are READ+COMPUTE only — WRITE-risk actions
+            # (map export/factor-map, derived seismic stores) need an explicit
+            # elevation instead of being silently pre-granted.
+            permissions=frozenset({ActionRisk.READ, ActionRisk.COMPUTE}),
         )
         executor = HarnessExecutor()
 

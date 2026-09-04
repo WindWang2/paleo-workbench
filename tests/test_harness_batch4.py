@@ -45,6 +45,104 @@ def test_tool_registry_registration_and_execution():
     assert res == 7.0
 
 
+# ------------------------------------------------- #1185 registry hygiene --
+def test_tool_registry_rejects_duplicate_names():
+    from paleo_workbench.agent.registries import ToolRegistry
+
+    reg = ToolRegistry()
+
+    @reg.register(name="dup_tool", description="first")
+    def first():
+        return 1
+
+    with pytest.raises(ValueError, match="already registered"):
+
+        @reg.register(name="dup_tool", description="second")
+        def second():
+            return 2
+
+    assert reg.execute("dup_tool") == 1  # original registration kept
+
+
+def test_tool_registry_execute_validates_required_parameters():
+    from paleo_workbench.agent.registries import ToolRegistry
+
+    reg = ToolRegistry()
+
+    @reg.register(
+        name="needs_args",
+        description="requires arguments",
+        parameters=[
+            ToolParameter("a", "number", "required"),
+            ToolParameter("b", "number", "optional", required=False, default=0.0),
+        ],
+    )
+    def add(a: float, b: float = 0.0) -> float:
+        return a + b
+
+    with pytest.raises(TypeError, match="missing required parameter"):
+        reg.execute("needs_args")  # 'a' missing
+    with pytest.raises(TypeError, match=r"parameter\(s\): a"):
+        reg.execute("needs_args", b=2.0)
+    assert reg.execute("needs_args", a=1.0, b=2.0) == 3.0
+    assert reg.execute("needs_args", a=1.0) == 1.0  # optional default applies
+
+
+def test_skill_registry_rejects_duplicate_names():
+    from paleo_workbench.agent.registries import SkillRegistry
+
+    reg = SkillRegistry()
+
+    @reg.register(name="dup_skill", description="first")
+    def first(context, **kwargs):
+        return 1
+
+    with pytest.raises(ValueError, match="already registered"):
+
+        @reg.register(name="dup_skill", description="second")
+        def second(context, **kwargs):
+            return 2
+
+    assert reg.execute_skill("dup_skill", {}) == 1
+
+
+def test_algorithm_registry_rejects_duplicate_ids():
+    from paleo_workbench.agent.registries import AlgorithmMetadata, AlgorithmRegistry
+
+    reg = AlgorithmRegistry()
+    metadata = AlgorithmMetadata(
+        id="dup_algo",
+        name="Dup",
+        category="test",
+        description="d",
+        time_complexity="O(1)",
+        space_complexity="O(1)",
+        has_cpp_accel=False,
+        supports_gpu=False,
+    )
+    reg.register(metadata)
+    with pytest.raises(ValueError, match="already registered"):
+        reg.register(metadata)
+    assert reg.get("dup_algo") is metadata
+
+
+def test_template_registry_rejects_duplicate_layout_ids():
+    from paleo_workbench.agent.registries import MapLayoutTemplate, TemplateRegistry
+
+    reg = TemplateRegistry()
+    template = MapLayoutTemplate(
+        id="dup_layout",
+        name="Dup",
+        paper_size="A4",
+        orientation="landscape",
+        margins_mm=(10.0, 10.0, 10.0, 10.0),
+    )
+    reg.register_layout(template)
+    with pytest.raises(ValueError, match="already registered"):
+        reg.register_layout(template)
+    assert reg.get_layout("dup_layout") is template
+
+
 def test_algorithm_and_template_registries():
     # Algorithm
     algo = algorithm_registry.get("dtw_curve_matcher")

@@ -111,8 +111,8 @@ def harness_project(tmp_path_factory):
         catalog=adapter,
         project=document,
         selection=SelectionSnapshot(active_well_id=None),
-        # App-level session semantics: WRITE granted (headless default is
-        # READ+COMPUTE; from_app grants WRITE the same way).
+        # App-level session semantics: WRITE granted explicitly (headless
+        # default and from_app are READ+COMPUTE since #1186).
         permissions=DEFAULT_PERMISSIONS | {ActionRisk.WRITE},
     )
     yield {

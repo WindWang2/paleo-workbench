@@ -81,7 +81,9 @@ def register(registry) -> None:
             action_id="seismic.compute_attribute",
             description="对激活（或指定）地震体计算属性体（如 c3 相干），经 provider 执行并登记派生数据。",
             handler=_compute_attribute,
-            risk=ActionRisk.COMPUTE,
+            # #1186: writes the derived zarr store to disk and registers it in
+            # the catalog — WRITE, aligned with its side effects.
+            risk=ActionRisk.WRITE,
             category="seismic.attribute",
             resource_profile={"estimated_cpu_cores": 2.0, "estimated_ram_bytes": 1024 * 1024**2, "io_weight": 1.0},
             supports_cancel=True,

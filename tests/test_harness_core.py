@@ -165,6 +165,204 @@ def test_execute_handler_exception_isolated():
     assert "kaboom" in result.error
 
 
+# ------------------------------------------------- #1137 cancel semantics --
+def test_execute_task_cancelled_is_cancelled_not_fail():
+    """A cooperating handler that raises TaskCancelled lands in 'cancelled'."""
+    from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
+    def cancel_me(ctx, p):
+        raise TaskCancelled("stop at safe point")
+
+    registry = ActionRegistry()
+    registry.register(_spec(action_id="demo.cancel", handler=cancel_me))
+    result = HarnessExecutor(registry).execute("demo.cancel", {"x": 1.0})
+    assert result.status == "cancelled"
+    assert result.ok is False
+    assert "cancelled" in (result.error or "")
+
+
+def test_scheduler_marks_cancelled_task_not_failed():
+    """End-to-end chain (#1137): scheduler cancel → cancel token fires in the
+    action context → handler raises TaskCancelled → executor returns
+    status='cancelled' → scheduler terminal state CANCELLED (not FAILED/DONE)."""
+    import threading
+    import time as _time
+
+    from paleo_workbench.runtime import TaskScheduler, TaskSpec
+    from paleo_workbench.runtime.task_scheduler import TaskCancelled, TaskState
+
+    class _Token:
+        """Cancel-token shape the harness/provider contexts understand."""
+
+        def __init__(self, event: threading.Event):
+            self._event = event
+
+        @property
+        def is_cancelled(self) -> bool:
+            return self._event.is_set()
+
+        def raise_if_cancelled(self) -> None:
+            if self._event.is_set():
+                raise TaskCancelled("provider execution cancelled")
+
+    started = threading.Event()
+
+    def hold_until_cancelled(ctx, p):
+        started.set()
+        deadline = _time.monotonic() + 5.0
+        while _time.monotonic() < deadline and not ctx.cancel.is_cancelled:
+            _time.sleep(0.01)
+        ctx.cancel.raise_if_cancelled()  # cooperative stop at the safe point
+        raise AssertionError("unreachable")
+
+    registry = ActionRegistry()
+    registry.register(_spec(action_id="demo.cancel", handler=hold_until_cancelled))
+    executor = HarnessExecutor(registry)
+    sched = TaskScheduler(max_workers=1)
+    try:
+        handle = sched.submit(
+            TaskSpec(
+                callable=lambda task_ctx: executor.execute(
+                    "demo.cancel", {"x": 1.0}, ActionContext(cancel=_Token(task_ctx.cancelled))
+                ),
+                kind="io",
+                title="cancel-chain",
+            )
+        )
+        assert started.wait(timeout=5.0), "task never started"
+        assert sched.cancel(handle.task_id) is True
+        deadline = _time.monotonic() + 5.0
+        while _time.monotonic() < deadline and handle.state in (
+            TaskState.QUEUED,
+            TaskState.RUNNING,
+        ):
+            _time.sleep(0.01)
+        assert handle.state is TaskState.CANCELLED
+        assert handle.error is None  # CANCELLED, not FAILED
+    finally:
+        sched.shutdown(wait=True, timeout=5)
+
+
+# ------------------------------------------- #1178 output_schema contract --
+def test_output_schema_violation_fails_action():
+    registry = ActionRegistry()
+    registry.register(
+        _spec(
+            action_id="demo.out",
+            handler=lambda ctx, p: {"value": p.get("x", 1)},
+            output_schema={
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": False,
+            },
+        )
+    )
+    result = HarnessExecutor(registry).execute("demo.out", {"x": 4.5})
+    assert result.status == "fail"
+    assert "output.value" in result.error  # shape mismatch is explicit, never silent
+
+
+def test_output_schema_satisfied_passes_and_absent_schema_unchanged():
+    registry = ActionRegistry()
+    registry.register(
+        _spec(
+            action_id="demo.out_ok",
+            handler=lambda ctx, p: {"value": "fine"},
+            output_schema={"type": "object", "properties": {"value": {"type": "string"}}},
+        )
+    )
+    result = HarnessExecutor(registry).execute("demo.out_ok", {"x": 1.0})
+    assert result.status == "ok"
+    # No output_schema declared → no output checking (backwards compatible).
+    registry.register(_spec(action_id="demo.plain"))
+    assert HarnessExecutor(registry).execute("demo.plain", {"x": 1.0}).status == "ok"
+
+
+# -------------------------------------------- #1180 degraded admission --
+def test_admission_import_failure_fails_loud_and_marks_degraded(monkeypatch, caplog):
+    import sys
+
+    from paleo_workbench.harness import executor as harness_executor
+
+    harness_executor.reset_admission_degraded()
+    monkeypatch.setitem(sys.modules, "paleo_workbench.runtime.resource_governor", None)
+    registry = ActionRegistry()
+    registry.register(_spec())
+    try:
+        with caplog.at_level("ERROR"):
+            result = HarnessExecutor(registry).execute("demo.answer", {"x": 1.0})
+        assert result.status == "fail"
+        assert "without resource admission" in result.error
+        assert harness_executor.ADMISSION_DEGRADED is True
+        assert any("falling back" in r.message for r in caplog.records)
+    finally:
+        harness_executor.reset_admission_degraded()
+
+
+def test_admission_singleton_broken_degrades_to_default_budget(monkeypatch, caplog):
+    from paleo_workbench.runtime import resource_governor as rg
+    from paleo_workbench.harness import executor as harness_executor
+
+    def broken_get_governor():
+        raise ImportError("governor singleton broken")
+
+    harness_executor.reset_admission_degraded()
+    monkeypatch.setattr(rg, "get_governor", broken_get_governor)
+    registry = ActionRegistry()
+    registry.register(_spec())
+    try:
+        with caplog.at_level("ERROR"):
+            result = HarnessExecutor(registry).execute("demo.answer", {"x": 1.0})
+        assert result.status == "ok"  # ran — but through guarded fallback admission
+        assert harness_executor.ADMISSION_DEGRADED is True
+        assert any("falling back" in r.message for r in caplog.records)
+    finally:
+        harness_executor.reset_admission_degraded()
+
+
+# --------------------------------- #1186 WRITE risk + default permissions --
+def test_write_risk_actions_aligned_with_side_effects():
+    """Disk-writing/catalog-registering actions require explicit WRITE."""
+    registry = get_action_registry()
+    try:
+        for action_id in ("map.create_factor_map", "map.export", "seismic.compute_attribute"):
+            spec = registry.get(action_id)
+            assert spec.risk is ActionRisk.WRITE, f"{action_id} must be WRITE risk"
+        # A default (READ+COMPUTE) context is refused without crashing.
+        result = HarnessExecutor(registry).execute(
+            "map.create_factor_map", {"factor_name": "厚度"}, ActionContext()
+        )
+        assert result.status == "fail"
+        assert "permission" in result.error
+    finally:
+        set_action_registry(None)
+
+
+def test_from_app_defaults_to_read_compute():
+    from types import SimpleNamespace
+
+    from paleo_workbench.harness.context import ActionContext
+
+    context = ActionContext.from_app(SimpleNamespace())
+    assert context.permissions == frozenset({ActionRisk.READ, ActionRisk.COMPUTE})
+
+
+# ------------------------------------- #1174 factor-name slug containment --
+def test_factor_name_slug_never_escapes_artifact_dir(tmp_path):
+    from pathlib import Path
+
+    from paleo_workbench.harness.actions.mapping import _sanitize_factor_slug
+
+    artifact_dir = tmp_path / "demo.artifacts" / "intermediate"
+    for hostile in ("../../etc/passwd", "a/b/c", "厚度 图", "..", "x y", "ok-name"):
+        slug = _sanitize_factor_slug(hostile)
+        assert slug == "factor" or all(c.isalnum() or c in "_.-" for c in slug)
+        artifact_path = artifact_dir / f"factor-{slug}-ab12cd.npz"
+        artifact_path.resolve().relative_to(artifact_dir.resolve())  # containment holds
+        assert Path(slug).name == slug  # single path component
+
+
 def test_execute_admission_lease_released():
     from paleo_workbench.runtime import (
         ResourceBudget,
@@ -314,8 +512,12 @@ def test_map_apply_template_and_geology_interpretation(tmp_path):
 
 def test_visualization_provider_executes_fallback_render(tmp_path, qapp):
     from paleo_workbench.mapping.layers import MapDocument, WellPointMapLayer
-    from paleo_workbench.providers import execute_provider, get_provider_registry
-    from paleo_workbench.providers.errors import ProviderRejectedInputError
+    from paleo_workbench.providers import (
+        ProviderContext,
+        execute_provider,
+        get_provider_registry,
+    )
+    from paleo_workbench.providers.errors import ProviderExecutionError, ProviderRejectedInputError
 
     document = MapDocument(title="viz")
     layer = WellPointMapLayer(name="井位")
@@ -326,15 +528,35 @@ def test_visualization_provider_executes_fallback_render(tmp_path, qapp):
     document.recompute_extent()
 
     provider = get_provider_registry().get("viz.map_render.fallback")
+    # #1177: providers write only inside the workspace the context provides.
+    context = ProviderContext(workspace_root=str(tmp_path))
     out = tmp_path / "render.png"
     result = execute_provider(
         provider,
         inputs={"document": document},
-        parameters={"output_path": str(out), "width": 200, "height": 150},
-        context=None,
+        parameters={"output_path": "render.png", "width": 200, "height": 150},
+        context=context,
     )
     assert out.exists() and out.stat().st_size > 0
     assert result.diagnostics["backend"] == "fallback"
+
+    # Out-of-workspace destinations are refused (#1177): traversal + absolute.
+    for escape in ("../escape.png", "/definitely-outside/escape.png"):
+        with pytest.raises(ProviderExecutionError, match="outside the execution workspace"):
+            execute_provider(
+                provider,
+                inputs={"document": document},
+                parameters={"output_path": escape, "width": 64, "height": 64},
+                context=context,
+            )
+    # No silent overwrite of the file just written.
+    with pytest.raises(ProviderExecutionError, match="overwrite"):
+        execute_provider(
+            provider,
+            inputs={"document": document},
+            parameters={"output_path": "render.png", "width": 64, "height": 64},
+            context=context,
+        )
 
     # Unavailable backends reject honestly instead of raising garbage.
     qgis = get_provider_registry().find("viz.map_render.qgis")
@@ -342,7 +564,7 @@ def test_visualization_provider_executes_fallback_render(tmp_path, qapp):
         with pytest.raises(ProviderRejectedInputError):
             execute_provider(
                 qgis, inputs={"document": document},
-                parameters={"output_path": str(tmp_path / "q.png")}, context=None,
+                parameters={"output_path": str(tmp_path / "q.png")}, context=context,
             )
 
 
