@@ -5,6 +5,7 @@ import json
 import pytest
 
 pytest.importorskip("PySide6")
+pytestmark = pytest.mark.qgis
 
 # 正方形环：顶点序 (5,5)(8,5)(8,8)(5,8)，闭合回 (5,5)
 _FC = {

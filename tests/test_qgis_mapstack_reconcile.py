@@ -4,6 +4,7 @@ import json
 import pytest
 
 pytest.importorskip("PySide6")
+pytestmark = pytest.mark.qgis
 
 _FC = {
     "type": "FeatureCollection",

@@ -2,7 +2,7 @@
 
 - 日期：2026-09-03
 - 状态：已批准（用户确认方案 A + 硬依赖 + 三块一体 + 权威模型调整）
-- 里程碑进度：M1–M4 已完成并合入 main（M4 HEAD `629ba15a`）。M5 收尾切片见 `docs/superpowers/specs/2026-09-04-qgis-native-map-stack-m5-design.md`（mini-QgsProject XML + 生产路径去掉环境变量降级 + QGIS CI 门禁）。
+- 里程碑进度：M1–M4 已完成并合入 main（M4 HEAD `629ba15a`）。M5 收尾切片见 `docs/superpowers/specs/2026-09-04-qgis-native-map-stack-m5-design.md`（mini-QgsProject XML + 生产路径去掉环境变量降级 + QGIS CI 门禁）；本切片在 `feat/qgis-native-map-stack-m5` 实施。
 - 范围：工作站地图区（综合编修/平面图）的图层管理、矢量显示、矢量编辑、图层属性
 
 ## 背景与目标

@@ -29,17 +29,9 @@ name: QGIS renderer
 #   6.11.1 and the whole 6.11.1 Qt runtime in ONE prefix, and the test steps
 #   put that prefix's lib/ first on LD_LIBRARY_PATH so every libQt6*.so.6 —
 #   Core5Compat included — resolves to the same 6.11.1 build.
-# - KNOWN REMAINING GAP (2026-08-26): the vendored QGIS gui hard-requires
-#   Qt6Multimedia & friends (src/gui/CMakeLists.txt find_package REQUIRED)
-#   and links the SYSTEM 6.4 builds of them; system 6.4 Multimedia uses
-#   Qt PRIVATE API (QObjectPrivate, Qt_6_PRIVATE_API), which is not stable
-#   across minors — so it cannot resolve against the conda 6.11 QtCore and
-#   the import smoke dies. Finishing this leg requires building the whole
-#   closure (vendored QGIS + bridge + qca/qscintilla/qtkeychain) against
-#   the conda Qt (CMAKE_PREFIX_PATH=/tmp/qgisqt — qt6-main ships dev files),
-#   instead of only unifying the runtime. Every cheaper permutation
-#   (PySide6 6.4.2 on 3.11/3.12, late unification, runtime-only unification)
-#   has been tried and is documented in the git history of this file.
+# - BUILD AND RUNTIME use the same conda Qt prefix (CMAKE_PREFIX_PATH=/tmp/qgisqt)
+#   so vendored QGIS gui links conda Qt6Multimedia instead of noble 6.4 private
+#   ABI. setup.py forwards CMAKE_PREFIX_PATH / PALEO_QGIS_CMAKE_PREFIX.
 #
 # Note: the system package list below follows QGIS 4.x build requirements
 # (core + gui + analysis, WITH_AUTH=ON). If a future QGIS vendor bump changes
@@ -54,6 +46,10 @@ on:
       - "third_party/qgis/**"
       - "paleo_workbench/mapping/**"
       - "paleo_workbench/ui/map_*"
+      - "paleo_workbench/ui/qgis_stack/**"
+      - "paleo_workbench/ui/pages/home_page.py"
+      - "paleo_workbench/ui/pages/workarea_map_widget.py"
+      - "paleo_workbench/ui/pages/mapping_page.py"
       - "tests/test_qgis_*"
       - "tests/qgis_support.py"
       - ".github/workflows/qgis-renderer.yml"
@@ -64,6 +60,10 @@ on:
       - "third_party/qgis/**"
       - "paleo_workbench/mapping/**"
       - "paleo_workbench/ui/map_*"
+      - "paleo_workbench/ui/qgis_stack/**"
+      - "paleo_workbench/ui/pages/home_page.py"
+      - "paleo_workbench/ui/pages/workarea_map_widget.py"
+      - "paleo_workbench/ui/pages/mapping_page.py"
       - "tests/test_qgis_*"
       - "tests/qgis_support.py"
       - ".github/workflows/qgis-renderer.yml"
@@ -137,7 +137,7 @@ jobs:
         # See the workflow header for why this env exists. All later steps
         # call /tmp/qgisqt/bin/python explicitly — no conda activation.
         run: |
-          conda create -y -p /tmp/qgisqt -c conda-forge python=3.12 "pyside6=6.11.1"
+          conda create -y -p /tmp/qgisqt -c conda-forge python=3.12 "pyside6=6.11.1" "qt6-main=6.11.1"
           /tmp/qgisqt/bin/python -m pip install --upgrade pip
           # Deps land in the SAME env. PySide6 itself comes from conda (NOT
           # pip) so its Qt stays the prefix's single 6.11.1 set.
@@ -153,12 +153,15 @@ jobs:
           # Fail fast (before the ~50 min vendored QGIS build) if the runtime
           # set is incomplete: Core5Compat present, offscreen Qt importable.
           ls /tmp/qgisqt/lib/libQt6Core5Compat.so.6
+          ls /tmp/qgisqt/lib/libQt6Multimedia.so.6
           QT_QPA_PLATFORM=offscreen /tmp/qgisqt/bin/python -c "from PySide6.QtCore import qVersion; from PySide6.QtWidgets import QApplication; QApplication([]); print('qgisqt runtime OK, Qt', qVersion())"
 
       - name: Build vendored QGIS + qgis_render_bridge (opt-in)
         env:
           PALEO_WITH_QGIS_RENDERER: "1"
           PALEO_QGIS_BUILD_JOBS: "4"
+          CMAKE_PREFIX_PATH: /tmp/qgisqt
+          PKG_CONFIG_PATH: /tmp/qgisqt/lib/pkgconfig
         run: |
           /tmp/qgisqt/bin/python -m pip install -e native/qgis_render_bridge
 

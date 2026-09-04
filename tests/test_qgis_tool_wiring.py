@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("PySide6")
+pytestmark = pytest.mark.qgis
 
 
 def _project(tmp_path: Path):

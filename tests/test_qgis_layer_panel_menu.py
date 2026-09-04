@@ -4,6 +4,7 @@ import json
 import pytest
 
 pytest.importorskip("PySide6")
+pytestmark = pytest.mark.qgis
 from PySide6.QtCore import QCoreApplication, QPoint, QTimer
 from PySide6.QtGui import QContextMenuEvent
 from PySide6.QtWidgets import QMenu

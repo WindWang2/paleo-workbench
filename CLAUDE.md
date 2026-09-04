@@ -34,4 +34,4 @@ After install, gstack skills like `/ship`, `/investigate`, `/browse`, `/design-s
 
 ## 地图栈（M1 起）
 
-综合编修区由 QGIS 画布承载（`paleo_workbench/ui/qgis_stack/QgisCanvasShim` 包装 `QgsMapCanvas`，经 `qgis_render_bridge.mapstack`）；M2 起图层管理面板（真 `QgsLayerTreeView`，`layer_tree_panel.QgisLayerTreePanel`）与图层属性对话框（真 `QgsVectorLayerProperties`，`mapstack.exec_layer_properties`）同为 QGIS 原生控件。M4 起首页 / 工区图 / 编图预览在桥可用时也嵌入只读 `QgsMapCanvas`（自有 `QgsProject`，与综合编修隔离）。无桥或主 CI 仍走 `UnifiedMapCanvas` + fallback。综合编修继续硬依赖桥。fallback 拆除与工程文件 QgsProject XML 不在本切片。
+综合编修区由 QGIS 画布承载（`paleo_workbench/ui/qgis_stack/QgisCanvasShim` 包装 `QgsMapCanvas`，经 `qgis_render_bridge.mapstack`）；M2 起图层管理面板（真 `QgsLayerTreeView`，`layer_tree_panel.QgisLayerTreePanel`）与图层属性对话框（真 `QgsVectorLayerProperties`，`mapstack.exec_layer_properties`）同为 QGIS 原生控件。M4 起首页 / 工区图 / 编图预览在桥可用时也嵌入只读 `QgsMapCanvas`（自有 `QgsProject`，与综合编修隔离）。M5 起工程文件含 `map_qgis_project_xml`（QGIS 呈现态信封；要素仍在 `user_vector_layers`）。无桥或主 CI 仍走 `UnifiedMapCanvas` + fallback。综合编修继续硬依赖桥。

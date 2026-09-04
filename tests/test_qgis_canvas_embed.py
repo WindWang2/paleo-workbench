@@ -2,6 +2,7 @@
 import pytest
 
 pytest.importorskip("PySide6")
+pytestmark = pytest.mark.qgis
 
 
 @pytest.fixture()

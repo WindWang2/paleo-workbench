@@ -2,6 +2,7 @@
 import pytest
 
 pytest.importorskip("PySide6")
+pytestmark = pytest.mark.qgis
 
 
 def test_bridge_importable_and_initializes(qapp):

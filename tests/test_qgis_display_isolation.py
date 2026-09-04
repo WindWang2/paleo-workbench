@@ -8,6 +8,7 @@ pytest.importorskip("PySide6")
 from tests.qgis_support import QGIS_SKIP_REASON
 
 pytest.importorskip("qgis_render_bridge.mapstack", reason=QGIS_SKIP_REASON)
+pytestmark = pytest.mark.qgis
 
 _GEOJSON = json.dumps({
     "type": "FeatureCollection",

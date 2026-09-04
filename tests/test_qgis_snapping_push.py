@@ -4,6 +4,7 @@
 import pytest
 
 pytest.importorskip("PySide6")
+pytestmark = pytest.mark.qgis
 
 from paleo_workbench.ui.workstation.composite_editing import CompositeEditController
 

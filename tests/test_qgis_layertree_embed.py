@@ -2,6 +2,7 @@
 import pytest
 
 pytest.importorskip("PySide6")
+pytestmark = pytest.mark.qgis
 from shiboken6 import wrapInstance
 from PySide6.QtWidgets import QWidget
 

@@ -161,6 +161,11 @@ def _build_vendored_qgis() -> tuple[Path, Path]:
         "-DCMAKE_FIND_USE_PACKAGE_REGISTRY=FALSE",
         "-DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=FALSE",
     ]
+    prefix = os.environ.get("PALEO_QGIS_CMAKE_PREFIX", "").strip()
+    if not prefix:
+        prefix = os.environ.get("CMAKE_PREFIX_PATH", "").strip().split(os.pathsep)[0]
+    if prefix:
+        cmake_args.append(f"-DCMAKE_PREFIX_PATH={prefix}")
     try:
         subprocess.run(cmake_args, check=True)
         if not all(

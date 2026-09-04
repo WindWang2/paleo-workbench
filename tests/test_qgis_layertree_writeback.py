@@ -4,6 +4,7 @@ import json
 import pytest
 
 pytest.importorskip("PySide6")
+pytestmark = pytest.mark.qgis
 from PySide6.QtCore import Qt
 
 _FC = {"type": "FeatureCollection", "features": [
