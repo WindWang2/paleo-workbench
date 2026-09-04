@@ -449,6 +449,14 @@ struct QgisMapStack::Impl {
   std::vector<std::function<void(const std::string&)>> orphan_tree_callbacks;
   std::vector<std::function<void(const std::string&, const std::string&)>>
       orphan_tree_menu_callbacks;
+  // 画布侧回调坟场（同上理由）：canvas destroyed 链上的 reapCanvasTables
+  // 把含 py::function 的回调表 move 进这里，由 shutdown/dtor 统一销毁。
+  std::vector<std::function<void(const std::string&, const std::string&)>>
+      orphan_digitize_callbacks;
+  std::vector<std::function<void(const std::string&, const std::string&)>>
+      orphan_edit_pick_callbacks;
+  std::vector<std::function<void(const std::string&, const std::string&)>>
+      orphan_selection_callbacks;
   std::unordered_map<std::string, std::string> mirror_by_doc;
   // 镜像层 QgsFeatureId → 文档 feature_id（M3 Task 3）：memory provider 不落
   // 属性字段，__pwb_fid 由 upsert 时从 geojson 原文与 addFeatures 后的
@@ -699,6 +707,9 @@ void QgisMapStack::shutdown() {
   impl_->tree_menu_callbacks.clear();
   impl_->orphan_tree_callbacks.clear();
   impl_->orphan_tree_menu_callbacks.clear();
+  impl_->orphan_digitize_callbacks.clear();
+  impl_->orphan_edit_pick_callbacks.clear();
+  impl_->orphan_selection_callbacks.clear();
   if (impl_->owned_project) {
     for (auto& kv : impl_->canvas_refs) {
       if (kv.second.isNull()) continue;
@@ -930,13 +941,30 @@ void QgisMapStack::reapCanvasTables(std::uintptr_t canvas_addr) {
   impl_->tree_bridges.erase(canvas_addr);
   impl_->cad_docks.erase(canvas_addr);  // Qt 父子关系负责销毁（parent=canvas）
   impl_->capture_kits.erase(canvas_addr);
-  impl_->digitize_callbacks.erase(canvas_addr);
+  {
+    // 含 py::function 的回调表不在这里销毁：canvas destroyed 链上解释器
+    // 态不稳（与 orphan_tree 坟场同理由），move 进坟场由 shutdown/dtor
+    // 统一释放（绑定层持 GIL 的正常路径）。
+    if (auto it = impl_->digitize_callbacks.find(canvas_addr);
+        it != impl_->digitize_callbacks.end()) {
+      impl_->orphan_digitize_callbacks.push_back(std::move(it->second));
+      impl_->digitize_callbacks.erase(it);
+    }
+    if (auto it = impl_->edit_pick_callbacks.find(canvas_addr);
+        it != impl_->edit_pick_callbacks.end()) {
+      impl_->orphan_edit_pick_callbacks.push_back(std::move(it->second));
+      impl_->edit_pick_callbacks.erase(it);
+    }
+    if (auto it = impl_->selection_callbacks.find(canvas_addr);
+        it != impl_->selection_callbacks.end()) {
+      impl_->orphan_selection_callbacks.push_back(std::move(it->second));
+      impl_->selection_callbacks.erase(it);
+    }
+  }
   impl_->vertex_tools.erase(canvas_addr);
   impl_->move_tools.erase(canvas_addr);
-  impl_->edit_pick_callbacks.erase(canvas_addr);
   impl_->select_tools.erase(canvas_addr);
   impl_->identify_tools.erase(canvas_addr);
-  impl_->selection_callbacks.erase(canvas_addr);
   impl_->highlights.erase(canvas_addr);
   impl_->canvas_refs.erase(canvas_addr);
   // 终局审查 M5：销毁后的地址必须留在 dead-set（拒绝后续同地址调用把
