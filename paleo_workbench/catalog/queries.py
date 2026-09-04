@@ -121,9 +121,15 @@ def search_assets(
         if str(v).strip() != ""
     ]
     try:
-        if service.index_revision() != service.document.catalog_revision:
+        if (
+            service._batch_depth
+            or service.index_revision() != service.document.catalog_revision
+        ):
             # A readable-but-stale index must not be queried (I3): only the
-            # canonical document scan reflects the current state.
+            # canonical document scan reflects the current state. During
+            # batch_save the store lags the document by design (rows commit
+            # at batch exit) while the revision stays aligned (#1139) —
+            # the document scan is the authoritative view there too.
             raise RuntimeError("index stale — falling back to scan")
         rows = service._index.search_assets(
             text=text,

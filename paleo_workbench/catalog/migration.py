@@ -39,7 +39,8 @@ from paleo_workbench.catalog.models import (
     DataStage,
     DataVersion,
 )
-from paleo_workbench.project.models import _now_iso, ResourceItem
+from paleo_workbench.catalog.storage import is_safe_entity_id
+from paleo_workbench.project.models import _id, _now_iso, ResourceItem
 from paleo_workbench.project.paths import project_dir_for
 
 # Candidate parsed_summary keys that may hold the original absolute path.
@@ -177,10 +178,23 @@ def migrate_resources(
         path, managed = _stored_path(resource, project_path, project_dir)
         legacy = _legacy_metadata(resource)
         timestamp = now_fn()
+        # #1175: the resource id becomes the asset id, which storage joins
+        # into managed paths ({stage}/{asset_id}/{version_id}/) when the
+        # resource is later materialized. A user-crafted id carrying ``/``,
+        # ``..`` or an absolute prefix is sanitized to a fresh safe id; the
+        # ORIGINAL id is still recorded as ``legacy_resource_id`` (a pure
+        # map key, never a path segment) so existing references resolve.
+        asset_id = resource.id
+        if not is_safe_entity_id(asset_id):
+            asset_id = _id("asset")
+            report.warnings.append(
+                f"resource {resource.id}: id unsafe as storage path segment; "
+                f"migrated under sanitized asset id {asset_id}"
+            )
 
         version = DataVersion(
-            id=f"ver_{resource.id}",
-            asset_id=resource.id,
+            id=f"ver_{asset_id}",
+            asset_id=asset_id,
             version_number=1,
             stage=DataStage.RAW,
             managed=managed,
@@ -193,7 +207,7 @@ def migrate_resources(
             created_at=timestamp,
         )
         asset = DataAsset(
-            id=resource.id,
+            id=asset_id,
             name=resource.name,
             type=resource.type,
             current_version_id=version.id,
@@ -206,7 +220,7 @@ def migrate_resources(
         document.versions.append(version)
         existing_ids.add(resource.id)
         report.migrated_count += 1
-        report.asset_ids.append(resource.id)
+        report.asset_ids.append(asset_id)
 
     return report
 

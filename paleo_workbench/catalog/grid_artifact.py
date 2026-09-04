@@ -23,11 +23,14 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import uuid
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from paleo_workbench.catalog.storage import fsync_dir
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult, GridStatistics
 
 __all__ = [
@@ -100,13 +103,21 @@ def write_grid_artifact(
             var = np.ascontiguousarray(var, dtype=np.float32)
         arrays["variance_grid"] = var
 
-    tmp = target.with_name(target.name + ".tmp")
+    # #1149: a UNIQUE temp name per writer — the fixed "<target>.tmp" made
+    # two concurrent writes of the same factor grid fight over one temp file
+    # (last closer wins, loser's bytes silently discarded or interleaved).
+    # fsync before replace + directory fsync after, so a crash never leaves a
+    # half-durable artifact behind.
+    tmp = target.with_name(f"{target.name}.{uuid.uuid4().hex}.tmp")
     try:
         with open(tmp, "wb") as fh:
             # Uncompressed: interactive save/reopen is CPU-bound on compress for
             # smooth float32 grids; size trade-off measured in Stage-3 bench.
             np.savez(fh, **arrays)
-        tmp.replace(target)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, target)
+        fsync_dir(dest)
     except Exception:
         if tmp.exists():
             tmp.unlink()
