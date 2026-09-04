@@ -55,6 +55,7 @@
 
 #include "qgis_render_bridge.hpp"
 #include "style_codec.hpp"
+#include "edit_tools.hpp"
 
 namespace pwb::qgis_render {
 
@@ -76,8 +77,35 @@ std::string qjsonValueToString(const QJsonValue& v) {
     if (v.isBool()) return v.toBool() ? "true" : "false";
     return {};
 }
+// 镜像 fid 映射：从 geojson 原文提取有序 __pwb_fid，与 addFeatures 就地
+// 分配的 QgsFeatureId 顺序配对（M3 Task 3；memory provider 不落属性字段）。
+void recordMirrorFeatureFids(std::unordered_map<long long, std::string>& table,
+                             const QgsFeatureList& flist,
+                             const QByteArray& geoBytes) {
+    table.clear();
+    QStringList ids;
+    const QJsonDocument d = QJsonDocument::fromJson(geoBytes);
+    if (d.isObject()) {
+        const QJsonArray feats =
+            d.object().value(QStringLiteral("features")).toArray();
+        for (const QJsonValue& fv : feats) {
+            ids << fv.toObject()
+                      .value(QStringLiteral("properties"))
+                      .toObject()
+                      .value(QStringLiteral("__pwb_fid"))
+                      .toString();
+        }
+    }
+    int i = 0;
+    for (const QgsFeature& f : flist) {
+        if (i < ids.size() && !ids[i].isEmpty())
+            table[static_cast<long long>(f.id())] = ids[i].toStdString();
+        ++i;
+    }
+}
 
 Qgis::SnappingTypes parseSnappingTypes(const QJsonArray& arr) {
+
     Qgis::SnappingTypes types;
     for (const QJsonValue& v : arr) {
         const QString s = v.toString();
@@ -340,6 +368,12 @@ struct QgisMapStack::Impl {
   std::unordered_map<std::uintptr_t,
                      std::function<void(const std::string&, const std::string&)>>
       digitize_callbacks;
+  // 顶点/移动编辑工具（M3 Task 3；Qt parent=画布持有，指针仅作惰性缓存）
+  std::unordered_map<std::uintptr_t, PwbVertexTool*> vertex_tools;
+  std::unordered_map<std::uintptr_t, PwbMoveTool*> move_tools;
+  std::unordered_map<std::uintptr_t,
+                     std::function<void(const std::string&, const std::string&)>>
+      edit_pick_callbacks;
   std::unordered_map<std::uintptr_t, QMetaObject::Connection> extent_connections;
   std::unordered_map<std::uintptr_t, QMetaObject::Connection> xy_connections;
   // I1: retain rejection after erasing the QPointer tombstone — otherwise the
@@ -380,6 +414,11 @@ struct QgisMapStack::Impl {
   std::vector<std::function<void(const std::string&, const std::string&)>>
       orphan_tree_menu_callbacks;
   std::unordered_map<std::string, std::string> mirror_by_doc;
+  // 镜像层 QgsFeatureId → 文档 feature_id（M3 Task 3）：memory provider 不落
+  // 属性字段，__pwb_fid 由 upsert 时从 geojson 原文与 addFeatures 后的
+  // fid 顺序配对重建；reconcile 每次 truncate+add 后整表替换。
+  std::unordered_map<std::string, std::unordered_map<long long, std::string>>
+      mirror_feature_fids;
   std::unordered_map<std::string, std::string> mirror_style_sig;
   int suppress_tree_callbacks = 0;
 
@@ -390,6 +429,7 @@ struct QgisMapStack::Impl {
         if (sit != mirror_style_sig.end()) mirror_style_sig.erase(sit);
         known_layer_names.erase(it->first);
         known_layer_visibility.erase(it->first);
+        mirror_feature_fids.erase(it->first);
         it = mirror_by_doc.erase(it);
       } else {
         ++it;
@@ -404,6 +444,7 @@ struct QgisMapStack::Impl {
     if (sit != mirror_style_sig.end()) mirror_style_sig.erase(sit);
     known_layer_names.erase(doc_id);
     known_layer_visibility.erase(doc_id);
+    mirror_feature_fids.erase(doc_id);
   }
 
   void eraseMirrorByDocIdIfQgisMatches(const std::string& doc_id,
@@ -633,6 +674,9 @@ void QgisMapStack::shutdown() {
   impl_->cad_docks.clear();
   impl_->capture_kits.clear();
   impl_->digitize_callbacks.clear();
+  impl_->vertex_tools.clear();
+  impl_->move_tools.clear();
+  impl_->edit_pick_callbacks.clear();
   impl_->canvas_refs.clear();
   impl_->dead_canvas_addrs.clear();
   impl_->extent_callbacks.clear();
@@ -746,6 +790,9 @@ void QgisMapStack::destroyCanvas(std::uintptr_t canvas_addr) {
   impl_->cad_docks.erase(canvas_addr);  // Qt 父子关系负责销毁（parent=canvas）
   impl_->capture_kits.erase(canvas_addr);
   impl_->digitize_callbacks.erase(canvas_addr);
+  impl_->vertex_tools.erase(canvas_addr);
+  impl_->move_tools.erase(canvas_addr);
+  impl_->edit_pick_callbacks.erase(canvas_addr);
   impl_->canvas_refs.erase(it);
   impl_->dead_canvas_addrs.erase(canvas_addr);
 }
@@ -965,6 +1012,7 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
         throw std::runtime_error("mirror addFeatures failed for doc_id: " + doc_id);
       }
     }
+    recordMirrorFeatureFids(impl_->mirror_feature_fids[doc_id], features, geoBytes);
     existing->updateExtents();
     std::string new_sig = makeStyleSig(renderer_xml, labeling_xml, legacy_style_json);
     auto sigIt = impl_->mirror_style_sig.find(doc_id);
@@ -1012,6 +1060,7 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
     }
     layer->updateExtents();
   }
+  recordMirrorFeatureFids(impl_->mirror_feature_fids[doc_id], features, geoBytes);
   bool hasStyle = !renderer_xml.empty() || !labeling_xml.empty() || !legacy_style_json.empty();
   const bool legacyIsEmpty = legacy_style_empty(legacy_style_json);
   if (hasStyle && (!renderer_xml.empty() || !labeling_xml.empty() || !legacyIsEmpty)) {
@@ -1304,6 +1353,10 @@ void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kin
     canvas->setMapTool(digitizeToolFor(canvas_addr, canvas, slot));
     return;
   }
+  if (kind == "vertex" || kind == "move") {
+    canvas->setMapTool(editToolFor(canvas_addr, canvas, kind == "vertex"));
+    return;
+  }
   if (kind == "pan") {
     impl_->tools[canvas_addr] = std::make_unique<QgsMapToolPan>(canvas);
   } else if (kind == "zoomIn") {
@@ -1371,6 +1424,50 @@ void QgisMapStack::setDigitizeCallback(
   ensureNotStale(canvas_addr);
   canvasOrThrow(canvas_addr);
   impl_->digitize_callbacks[canvas_addr] = std::move(callback);
+}
+
+QgsMapTool* QgisMapStack::editToolFor(std::uintptr_t canvas_addr,
+                                      QgsMapCanvas* canvas, bool vertex) {
+  std::weak_ptr<char> alive = alive_token_;
+  PwbEditPickTool::Callback cb = [this, alive, canvas_addr](
+                                     const std::string& action,
+                                     const std::string& payload) {
+    if (alive.expired()) return;
+    auto cbIt = impl_->edit_pick_callbacks.find(canvas_addr);
+    if (cbIt == impl_->edit_pick_callbacks.end() || !cbIt->second) return;
+    cbIt->second(action, payload);
+  };
+  PwbEditPickTool::FeatureIdResolver resolver =
+      [this, alive](QgsVectorLayer* vl, QgsFeatureId fid) -> std::string {
+    if (alive.expired() || vl == nullptr) return {};
+    const std::string docId = vl->customProperty(QStringLiteral("pwb/doc_id"))
+                                  .toString()
+                                  .toStdString();
+    auto it = impl_->mirror_feature_fids.find(docId);
+    if (it != impl_->mirror_feature_fids.end()) {
+      auto jt = it->second.find(static_cast<long long>(fid));
+      if (jt != it->second.end()) return jt->second;
+    }
+    return std::to_string(static_cast<long long>(fid));
+  };
+  if (vertex) {
+    auto& slot = impl_->vertex_tools[canvas_addr];
+    if (slot == nullptr)
+      slot = new PwbVertexTool(canvas, std::move(cb), std::move(resolver));
+    return slot;
+  }
+  auto& slot = impl_->move_tools[canvas_addr];
+  if (slot == nullptr)
+    slot = new PwbMoveTool(canvas, std::move(cb), std::move(resolver));
+  return slot;
+}
+
+void QgisMapStack::setEditPickCallback(
+    std::uintptr_t canvas_addr,
+    std::function<void(const std::string&, const std::string&)> callback) {
+  ensureNotStale(canvas_addr);
+  canvasOrThrow(canvas_addr);
+  impl_->edit_pick_callbacks[canvas_addr] = std::move(callback);
 }
 
 void QgisMapStack::setExtentCallback(std::uintptr_t canvas_addr, ExtentCallback callback) {

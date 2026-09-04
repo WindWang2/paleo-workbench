@@ -9,6 +9,7 @@
 
 class QgsMapCanvas;
 class QgsLayerTreeView;
+class QgsMapTool;
 class QgsMapToolDigitizeFeature;
 
 namespace pwb::qgis_render {
@@ -99,6 +100,13 @@ public:
       std::uintptr_t canvas,
       std::function<void(const std::string&, const std::string&)> callback);
 
+  // 顶点/移动编辑拾取回调（M3 Task 3）：callback(action, payload_json)，
+  // action ∈ "vertex_moved"（path/x/y）|"feature_moved"（dx/dy）|"pick_miss"。
+  // set_map_tool kind 相应扩展 "vertex"|"move"。
+  void setEditPickCallback(
+      std::uintptr_t canvas,
+      std::function<void(const std::string&, const std::string&)> callback);
+
   std::string addVectorLayerGeoJson(const std::string& name,
                                     const std::string& geometry_type,
                                     const std::string& crs_auth_id,
@@ -145,6 +153,9 @@ private:
   // slot: 0=Point 1=LineString 2=Polygon；惰性建 scratch 层 + 工具（M3 Task 2）。
   QgsMapToolDigitizeFeature* digitizeToolFor(std::uintptr_t canvas_addr,
                                              QgsMapCanvas* canvas, int slot);
+  // vertex=true → PwbVertexTool，false → PwbMoveTool（M3 Task 3）。
+  QgsMapTool* editToolFor(std::uintptr_t canvas_addr, QgsMapCanvas* canvas,
+                          bool vertex);
   void ensureNotStale(std::uintptr_t canvas_addr);
   void eraseMirrorByQgisId(const std::string& qgis_id);
   void eraseMirrorByDocId(const std::string& doc_id);

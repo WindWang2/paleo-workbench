@@ -653,6 +653,16 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                      f(status, geom);
                    });
              })
+        .def("set_edit_pick_callback",
+             [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas,
+                py::function f) {
+               self.setEditPickCallback(
+                   canvas, [f = std::move(f)](const std::string& action,
+                                              const std::string& payload) {
+                     py::gil_scoped_acquire gil;
+                     f(action, payload);
+                   });
+             })
         .def("set_snapping_config",
              &pwb::qgis_render::QgisMapStack::setSnappingConfig)
         .def("snap_to_map",

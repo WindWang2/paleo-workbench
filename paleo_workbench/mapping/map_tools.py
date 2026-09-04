@@ -337,6 +337,14 @@ class MoveFeatureTool(MapTool):
         self._origin = None
         return had_drag
 
+    def commit_move(self, feature_id: str, dx: float, dy: float) -> bool:
+        """QGIS 原生移动工具完成位移落会话（M3）；feature 不在本会话则拒绝。"""
+        try:
+            self.session.move_feature(str(feature_id), float(dx), float(dy))
+        except Exception:
+            return False
+        return True
+
 
 class VertexTool(MapTool):
     tool_id = "vertex"
@@ -389,3 +397,35 @@ class VertexTool(MapTool):
         self._target = None
         self._origin = None
         return had_target
+
+    def commit_vertex_move(
+        self, feature_id: str, path: tuple[int, ...], point: Point
+    ) -> bool:
+        """QGIS 原生顶点工具拖动完成落会话（M3）。
+
+        feature 不在本会话 / 路径无效 / 几何校验失败均拒绝（返回 False）。
+        on_vertex_committed 钩子与鼠标路径语义对齐（origin 为改动前坐标）。
+        """
+        path = tuple(int(i) for i in path)
+        try:
+            feature = self.session.feature(str(feature_id))
+        except Exception:
+            return False
+        origin: Point | None = None
+        try:
+            current = feature.geometry["coordinates"]
+            if not path and feature.geometry["type"] == "Point":
+                origin = (float(current[0]), float(current[1]))
+            elif path:
+                for index in path:
+                    current = current[index]
+                origin = (float(current[0]), float(current[1]))
+        except Exception:
+            origin = None
+        try:
+            self.session.set_vertex(feature.feature_id, path, point)
+        except Exception:
+            return False
+        if origin is not None and self._on_vertex_committed is not None:
+            self._on_vertex_committed(feature.feature_id, path, origin, point)
+        return True

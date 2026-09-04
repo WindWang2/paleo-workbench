@@ -118,3 +118,52 @@ def test_capture_tool_commit_geometry_from_native_digitize() -> None:
     assert tool.commit_geometry({"type": "LineString", "coordinates": [[0, 0], [1, 1]]}) is False
     assert tool.commit_geometry({}) is False
     assert len(session.features()) == 1
+
+
+def test_move_tool_commit_move_from_native_drag() -> None:
+    """M3 Task 3：原生移动工具位移经 commit_move 落权威会话。"""
+    from paleo_workbench.mapping.map_tools import MoveFeatureTool
+
+    layer, session = _session()
+    tool = MoveFeatureTool(session, identify=lambda _p: "f1")
+
+    assert tool.commit_move("f1", 2.0, 3.0) is True
+    moved = session.feature("f1")
+    assert list(moved.geometry["coordinates"]) == [3.0, 4.0]
+    assert session.undo() is True
+    assert list(session.feature("f1").geometry["coordinates"]) == [1, 1]
+    # 未知要素拒绝且不产生命令
+    assert tool.commit_move("nope", 1.0, 1.0) is False
+
+
+def test_vertex_tool_commit_vertex_move_from_native_drag() -> None:
+    """M3 Task 3：原生顶点工具拖动经 commit_vertex_move 落权威会话。"""
+    from paleo_workbench.mapping.map_tools import VertexTool
+
+    layer = VectorLayer(
+        id="poly",
+        name="Poly",
+        features=[VectorFeature(
+            "p1",
+            {"type": "Polygon",
+             "coordinates": [[[5.0, 5.0], [8.0, 5.0], [8.0, 8.0], [5.0, 8.0], [5.0, 5.0]]]},
+        )],
+    )
+    session = layer.start_editing()
+    committed = []
+    tool = VertexTool(
+        session,
+        identify_vertex=lambda _p: None,
+        on_vertex_committed=lambda fid, path, origin, point: committed.append(
+            (fid, path, origin, point)),
+    )
+
+    assert tool.commit_vertex_move("p1", (0, 1), (9.0, 5.0)) is True
+    ring = session.feature("p1").geometry["coordinates"][0]
+    assert list(ring[1]) == [9.0, 5.0]
+    assert committed == [("p1", (0, 1), (8.0, 5.0), (9.0, 5.0))]
+    assert session.undo() is True
+    assert list(session.feature("p1").geometry["coordinates"][0][1]) == [8.0, 5.0]
+    # 未知要素 / 无效路径拒绝
+    assert tool.commit_vertex_move("nope", (0, 0), (0.0, 0.0)) is False
+    assert tool.commit_vertex_move("p1", (9, 9), (0.0, 0.0)) is False

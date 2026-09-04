@@ -378,14 +378,16 @@ class QgisCanvasShim(QWidget):
                     except Exception:
                         return
                     tool_id = getattr(tool, "tool_id", "") if tool is not None else "pan"
-                    # M3：编辑类工具映射到原生 QgsMapTool（采点/线/面），
-                    # 其余（vertex/move/select 等）Task 3/4 落地前回落 pan。
+                    # M3：编辑类工具映射到原生 QgsMapTool（采点/线/面/顶点/移动），
+                    # 其余（select/identify 等）Task 4 落地前回落 pan。
                     kind = {
                         "zoom_in": "zoomIn",
                         "zoom_out": "zoomOut",
                         "add_point": "addPoint",
                         "add_line": "addLine",
                         "add_polygon": "addPolygon",
+                        "vertex": "vertex",
+                        "move_feature": "move",
                         "pan": "pan",
                     }.get(tool_id, "pan")
                     try:
@@ -427,6 +429,51 @@ class QgisCanvasShim(QWidget):
         except Exception:
             pass
 
+        # M3 Task 3：原生顶点/移动工具完成 → 活动 Python 工具的会话。
+        def _on_edit_pick(action: str, payload_json: str) -> None:
+            shim = self_ref()
+            if shim is None or getattr(shim, "_shutdown_done", False):
+                return
+            if action == "pick_miss":
+                return
+            controller = getattr(shim, "_tool_controller", None)
+            tool = getattr(controller, "active_tool", None) if controller is not None else None
+            if tool is None:
+                return
+            try:
+                payload = json.loads(payload_json)
+            except Exception:
+                return
+            ok = False
+            try:
+                if action == "vertex_moved":
+                    commit = getattr(tool, "commit_vertex_move", None)
+                    if commit is not None:
+                        ok = bool(commit(
+                            payload["feature_id"],
+                            tuple(payload["path"]),
+                            (float(payload["x"]), float(payload["y"])),
+                        ))
+                elif action == "feature_moved":
+                    commit = getattr(tool, "commit_move", None)
+                    if commit is not None:
+                        ok = bool(commit(
+                            payload["feature_id"],
+                            float(payload["dx"]), float(payload["dy"]),
+                        ))
+            except Exception:
+                ok = False
+            if ok:
+                try:
+                    shim.tool_operation.emit(True)
+                except Exception:
+                    pass
+
+        try:
+            self.stack.set_edit_pick_callback(self.canvas_address, _on_edit_pick)
+        except Exception:
+            pass
+
     # --- 图层镜像 ------------------------------------------------------
     def set_layer_snapshot(self, snapshot) -> None:
         """Mirror snapshot vector layers into the QGIS project (incremental).
@@ -447,12 +494,17 @@ class QgisCanvasShim(QWidget):
         for layer in snapshot.layers:
             if layer.layer_type != "vector":
                 continue
-            features = [
-                {"type": "Feature",
-                 "geometry": f.get("geometry"),
-                 "properties": dict(f.get("properties") or {})}
-                for f in layer.features
-            ]
+            features = []
+            for f in layer.features:
+                props = dict(f.get("properties") or {})
+                # M3：文档 feature_id 随镜像下推（C++ 拾取工具据此回写权威
+                # 会话；memory provider 不落属性字段，桥侧自建 fid 映射表）。
+                fid = f.get("id")
+                if fid is not None:
+                    props.setdefault("__pwb_fid", str(fid))
+                features.append({"type": "Feature",
+                                 "geometry": f.get("geometry"),
+                                 "properties": props})
             # 零要素图层同样上树（QGIS memory layer 零要素合法）——否则新建
             # 图层在首次数字化前从图层树消失（M2 终局审查 I1）。几何类型改由
             # metadata.geometry_kind 兜底（点/线/面），无则 Point。

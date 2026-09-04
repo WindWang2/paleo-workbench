@@ -213,6 +213,7 @@ def _extension() -> Pybind11Extension:
             str(HERE / "src" / "gui_service.cpp"),
             str(HERE / "src" / "geometry_service.cpp"),
             str(HERE / "src" / "map_stack_service.cpp"),
+            str(HERE / "src" / "edit_tools.cpp"),
             str(HERE / "src" / "bindings.cpp"),
         ],
         include_dirs=[*_qgis_core_include_dirs(build_dir), *_qt_include_dirs()],
