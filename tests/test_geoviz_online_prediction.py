@@ -280,6 +280,7 @@ def test_authenticated_provider_persists_mocked_online_result(
         service.migrate_legacy_resources(project.resources)
         model_version = ensure_geoviz_online_model(service)
         monkeypatch.setenv("PALEO_GEOVIZ_API_KEY", "ak_test")
+        monkeypatch.setenv("PALEO_GEOVIZ_ONLINE_BASE_URL", "https://inference.test/api/v1")
         captured = {}
 
         def _fake_online(well_name, well_log, **kwargs):
@@ -321,8 +322,14 @@ def test_authenticated_provider_persists_mocked_online_result(
             model_version_id=model_version.id,
             input_version_ids=input_ids,
             parameters={
-                "online_endpoint": "http://inference.test/api/v1",
+                # #1144: a tampered project file carries an attacker's
+                # endpoint and unbounded timeouts — the provider must
+                # ignore the endpoint (env wins) and clamp the timeouts.
+                "online_endpoint": "http://evil.test/collect",
                 "online_model_version_id": "model-gr",
+                "online_wait_timeout_seconds": 999999,
+                "online_request_timeout_seconds": 999999,
+                "online_poll_timeout_seconds": 999999,
             },
         )
         payload = execute_run(service, run.id)
@@ -331,8 +338,11 @@ def test_authenticated_provider_persists_mocked_online_result(
         assert payload["model"].model_id == MODEL_ID_GEOVIZ_ONLINE
         assert payload["result"]["adapter_kind"] == "http"
         assert captured["api_key"] == "ak_test"
-        assert captured["base_url"] == "http://inference.test/api/v1"
+        assert captured["base_url"] == "https://inference.test/api/v1"
         assert captured["model_version_id"] == "model-gr"
+        assert captured["wait_timeout_seconds"] == 120
+        assert captured["request_timeout_seconds"] == 600
+        assert captured["poll_timeout_seconds"] == 3600
         assert captured["curves"] == ["GR", "AC"]
         summary = payload["result"]["result_summary"]
         assert summary["model_type"] == "inference_api_online"
@@ -446,3 +456,45 @@ def test_authenticated_provider_persists_postprocessed_regions_with_top_boundari
         assert summary["predicted_regions"][1]["stratigraphic_unit"] == "珠海组"
     finally:
         service.close()
+
+
+# ---------------------------------------------------------------------------
+# #1145: plaintext remote endpoints fail closed; #1144 timeout bounds.
+# ---------------------------------------------------------------------------
+
+def test_default_endpoint_is_https() -> None:
+    from paleo_workbench.prediction.geoviz_online import INFERENCE_API_BASE_URL
+
+    assert INFERENCE_API_BASE_URL.startswith("https://")
+
+
+def test_plaintext_remote_endpoint_is_refused_without_network(monkeypatch) -> None:
+    import paleo_workbench.prediction.geoviz_online as client
+
+    def _no_network(*_args, **_kwargs):
+        raise AssertionError("must fail before any socket use")
+
+    monkeypatch.setattr(client, "urlopen", _no_network)
+    with pytest.raises(GeoVizOnlinePredictionError):
+        run_single_well_prediction(
+            "HZ27-5-3",
+            _well_log(),
+            api_key="ak_test",
+            base_url="http://203.0.113.7:3100/api/v1",
+            model_version_id="model-gr",
+        )
+
+
+def test_plaintext_opt_in_and_local_names_pass_validator(monkeypatch) -> None:
+    from paleo_workbench.prediction.geoviz_online import require_secure_endpoint
+
+    assert require_secure_endpoint("http://localhost:3100/api/v1")
+    assert require_secure_endpoint("http://127.0.0.1:3100/api/v1")
+    assert require_secure_endpoint("http://inference.test/api/v1")
+    assert require_secure_endpoint("https://203.0.113.7:3100/api/v1")
+    with pytest.raises(GeoVizOnlinePredictionError):
+        require_secure_endpoint("http://evil.example.com/api")
+    with pytest.raises(GeoVizOnlinePredictionError):
+        require_secure_endpoint("")
+    monkeypatch.setenv("PALEO_ALLOW_PLAINTEXT_ENDPOINT", "1")
+    assert require_secure_endpoint("http://203.0.113.7:3100/api/v1")

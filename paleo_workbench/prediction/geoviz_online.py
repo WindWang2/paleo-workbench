@@ -18,11 +18,18 @@ from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 
 
-INFERENCE_API_BASE_URL = "http://118.178.238.153:3100/api/v1"
+INFERENCE_API_BASE_URL = "https://118.178.238.153:3100/api/v1"
 DEFAULT_MODEL_VERSION_ID = "ef107a7e-e222-4326-81ee-65d1a3a23eff"
 ONLINE_WAIT_TIMEOUT_SECONDS = 30
 ONLINE_REQUEST_TIMEOUT_SECONDS = 120
 ONLINE_POLL_TIMEOUT_SECONDS = 600
+
+# Plaintext HTTP is only ever acceptable for loopback or RFC 2606
+# non-routable test names — never for a remote host carrying well curves
+# and API keys (#1145). Operators with a trusted-LAN plaintext server opt
+# in explicitly via PALEO_ALLOW_PLAINTEXT_ENDPOINT=1.
+PLAINTEXT_LOOPBACK_HOSTS = ("localhost", "127.", "[::1]", "::1")
+PLAINTEXT_TEST_SUFFIXES = (".test", ".example", ".invalid", ".localhost")
 
 # Compatibility aliases for callers that used the old names.  They refer to
 # the new API, never the retired GeoVizEngine test route.
@@ -42,6 +49,37 @@ def online_endpoint() -> str:
         or INFERENCE_API_BASE_URL
     )
     return str(value).strip().rstrip("/")
+
+
+def require_secure_endpoint(url: str) -> str:
+    """Fail closed on plaintext remote inference endpoints (#1145).
+
+    Returns the normalized URL. HTTPS always passes; plaintext HTTP passes
+    only for loopback hosts or non-routable test names, or when the
+    operator explicitly opts in via PALEO_ALLOW_PLAINTEXT_ENDPOINT=1.
+    """
+    endpoint = str(url or "").strip().rstrip("/")
+    if not endpoint:
+        raise GeoVizOnlinePredictionError("未配置线上推理服务地址")
+    parts = urlsplit(endpoint if "://" in endpoint else f"https://{endpoint}")
+    host = (parts.hostname or "").lower()
+    if parts.scheme == "https" and host:
+        return endpoint
+    if parts.scheme == "http" and host and (
+        host == "localhost"
+        or host.startswith("127.")
+        or host in ("[::1]", "::1")
+        or host.endswith(PLAINTEXT_TEST_SUFFIXES)
+        or str(os.environ.get("PALEO_ALLOW_PLAINTEXT_ENDPOINT") or "").strip().lower()
+        in ("1", "true", "yes")
+    ):
+        return endpoint
+    raise GeoVizOnlinePredictionError(
+        "拒绝明文 HTTP 线上推理端点（测井曲线与 API 密钥不可明文出网）: "
+        f"{endpoint}。请配置 HTTPS 端点 "
+        "(PALEO_GEOVIZ_ONLINE_BASE_URL)，或在可信内网显式设置 "
+        "PALEO_ALLOW_PLAINTEXT_ENDPOINT=1"
+    )
 
 
 def online_api_key() -> str:
@@ -171,9 +209,7 @@ def run_single_well_prediction(
     key = str(api_key or "").strip()
     if not key:
         raise GeoVizOnlinePredictionError("未配置推理 API 密钥")
-    endpoint = str(base_url or online_endpoint()).strip().rstrip("/")
-    if not endpoint:
-        raise GeoVizOnlinePredictionError("未配置线上推理服务地址")
+    endpoint = require_secure_endpoint(base_url or online_endpoint())
 
     selected_model_id = str(model_version_id or online_model_version_id()).strip()
     request_timeout = (
@@ -479,6 +515,7 @@ __all__ = [
     "online_poll_timeout_seconds",
     "online_timeout_seconds",
     "online_wait_timeout_seconds",
+    "require_secure_endpoint",
     "response_records",
     "run_single_well_prediction",
 ]

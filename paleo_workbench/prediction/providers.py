@@ -57,6 +57,15 @@ class InferenceInputError(RuntimeError):
     """
 
 
+def _clamp_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+    """Clamp a persisted/UI parameter to the env path's hard bounds (#1144)."""
+    try:
+        number = int(value) if value is not None else int(default)
+    except (TypeError, ValueError):
+        return int(default)
+    return max(minimum, min(maximum, number))
+
+
 @runtime_checkable
 class ModelProvider(Protocol):
     """A runnable model registered in the catalog's ModelRegistry."""
@@ -272,7 +281,12 @@ class GeoVizOnlineProvider:
         if well_log is None:
             raise InferenceInputError("无法解析所选测井文件，无法发送线上测井预测")
         well_name = str(getattr(well_log, "well_name", "") or path.stem)
-        endpoint = str(parameters.get("online_endpoint") or online_endpoint())
+        # #1144: the connection endpoint is never taken from persisted
+        # run/project parameters (a shared project file could carry an
+        # attacker's URL) — only the operator environment decides where
+        # well curves and the API key are sent. The UI still snapshots the
+        # endpoint into parameters as a provenance record (display only).
+        endpoint = online_endpoint()
         model_version_id = str(
             parameters.get("online_model_version_id") or online_model_version_id()
         )
@@ -282,12 +296,18 @@ class GeoVizOnlineProvider:
             api_key=online_api_key(),
             base_url=endpoint,
             model_version_id=model_version_id,
-            wait_timeout_seconds=parameters.get("online_wait_timeout_seconds")
-            or online_wait_timeout_seconds(),
-            request_timeout_seconds=parameters.get("online_request_timeout_seconds")
-            or online_timeout_seconds(),
-            poll_timeout_seconds=parameters.get("online_poll_timeout_seconds")
-            or online_poll_timeout_seconds(),
+            wait_timeout_seconds=_clamp_int(
+                parameters.get("online_wait_timeout_seconds"),
+                online_wait_timeout_seconds(), 1, 120,
+            ),
+            request_timeout_seconds=_clamp_int(
+                parameters.get("online_request_timeout_seconds"),
+                online_timeout_seconds(), 1, 600,
+            ),
+            poll_timeout_seconds=_clamp_int(
+                parameters.get("online_poll_timeout_seconds"),
+                online_poll_timeout_seconds(), 1, 3600,
+            ),
         )
         from paleo_workbench.prediction.postprocess import (
             postprocess_prediction_regions,
