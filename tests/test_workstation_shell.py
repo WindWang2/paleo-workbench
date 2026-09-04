@@ -166,6 +166,30 @@ def test_linked_workspace_has_no_nested_map_document(qtbot, tmp_path):
     assert getattr(lw, "context_bar", None) is None
 
 
+def test_bian_tu_toolbar_toggles_view_docks(qtbot, tmp_path):
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+    well_btn = ws.composite.well_track_button
+    seis_btn = ws.composite.seismic_section_button
+    link_btn = ws.composite.link_button
+    assert well_btn.isCheckable()
+    assert seis_btn.isCheckable()
+    assert link_btn.isCheckable()
+    well_btn.setChecked(True)
+    assert not ws.well_dock.isHidden()
+    well_btn.setChecked(False)
+    assert ws.well_dock.isHidden()
+    seis_btn.setChecked(True)
+    assert not ws.seismic_dock.isHidden()
+    seis_btn.setChecked(False)
+    assert ws.seismic_dock.isHidden()
+    link_btn.setChecked(False)
+    assert ws.linked_workspace.is_linked() is False
+    link_btn.setChecked(True)
+    assert ws.linked_workspace.is_linked() is True
+
+
 def test_explorer_separates_data_from_storage_cache(qtbot, tmp_path):
     shell = AppShell(project=_project(tmp_path))
     qtbot.addWidget(shell)

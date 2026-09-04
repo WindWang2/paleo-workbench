@@ -240,6 +240,16 @@ class WorkstationFrame(QWidget):
         self.linked_workspace.show_all_wells_requested.connect(
             lambda: self._show_wells_from_agent()
         )
+        self.composite.well_track_toggled.connect(self._on_well_track_toggled)
+        self.composite.seismic_section_toggled.connect(self._on_seismic_section_toggled)
+        self.composite.link_toggled.connect(self._on_link_toggled)
+        # 菜单/关闭按钮关 dock 后，工具条勾选态回写（避免状态撒谎）。
+        self.well_dock.visibilityChanged.connect(
+            lambda visible: self.composite.well_track_button.setChecked(bool(visible))
+        )
+        self.seismic_dock.visibilityChanged.connect(
+            lambda visible: self.composite.seismic_section_button.setChecked(bool(visible))
+        )
         self.composite.object_selected.connect(self.inspector.show_payload)
         self.process_hub.agent.open_well_requested.connect(self._open_well_from_agent)
         self.process_hub.agent.show_wells_requested.connect(self._show_wells_from_agent)
@@ -601,6 +611,21 @@ class WorkstationFrame(QWidget):
     def _on_well_focused(self, well_name: str) -> None:
         if well_name:
             self.status_message.emit(f"编图已聚焦井 {well_name}")
+
+    def _on_well_track_toggled(self, on: bool) -> None:
+        self.well_dock.setVisible(on)
+        if on:
+            self.well_dock.raise_()
+            self.linked_workspace.ensure_views()
+
+    def _on_seismic_section_toggled(self, on: bool) -> None:
+        self.seismic_dock.setVisible(on)
+        if on:
+            self.seismic_dock.raise_()
+            self.linked_workspace.ensure_views()
+
+    def _on_link_toggled(self, on: bool) -> None:
+        self.linked_workspace.set_linked(on)
 
     def _show_wells_from_agent(self) -> None:
         # 与工具条全幅按钮同一路径：回到 home extent（全部工区井位）。

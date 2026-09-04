@@ -687,6 +687,9 @@ class CompositeDocument(QWidget):
 
     object_selected = Signal(object)
     status_message = Signal(str)
+    well_track_toggled = Signal(bool)
+    seismic_section_toggled = Signal(bool)
+    link_toggled = Signal(bool)
 
     def __init__(self, project=None, parent=None):
         super().__init__(parent)
@@ -800,7 +803,7 @@ class CompositeDocument(QWidget):
         self.action_controller = MapActionController(self)
         bar_layout.addWidget(
             self.action_controller.toolbar(
-                "综合编修",
+                "编图",
                 (
                     ("pan", "zoom_in", "zoom_out", "full_extent", "previous_extent", "next_extent"),
                     ("identify", "select", "select_rectangle", "measure_distance"),
@@ -816,6 +819,27 @@ class CompositeDocument(QWidget):
             self.edit_controller.activate_tool
         )
         self.action_controller.command_requested.connect(self._on_command_requested)
+
+        # 视图 dock 开关 + 联动（宿主 WorkstationFrame 接线）。
+        self.well_track_button = QToolButton(self.toolbar)
+        self.well_track_button.setObjectName("WorkstationWellTrackButton")
+        self.well_track_button.setText("测井轨道")
+        self.well_track_button.setCheckable(True)
+        self.well_track_button.toggled.connect(self.well_track_toggled)
+        bar_layout.addWidget(self.well_track_button)
+        self.seismic_section_button = QToolButton(self.toolbar)
+        self.seismic_section_button.setObjectName("WorkstationSeismicSectionButton")
+        self.seismic_section_button.setText("地震剖面")
+        self.seismic_section_button.setCheckable(True)
+        self.seismic_section_button.toggled.connect(self.seismic_section_toggled)
+        bar_layout.addWidget(self.seismic_section_button)
+        self.link_button = QToolButton(self.toolbar)
+        self.link_button.setObjectName("WorkstationLinkButton")
+        self.link_button.setText("链接")
+        self.link_button.setCheckable(True)
+        self.link_button.setChecked(True)
+        self.link_button.toggled.connect(self.link_toggled)
+        bar_layout.addWidget(self.link_button)
 
         # 面板菜单：显隐 / 布局预设 / 全部浮动·停靠 / 恢复默认（由宿主注入）
         self.panels_button = QToolButton(self.toolbar)
