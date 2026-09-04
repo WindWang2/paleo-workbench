@@ -955,6 +955,22 @@ git commit -m "docs(qgis): M2 收尾——菜单端到端测试 + 文档状态�
 
 ---
 
+## As-built 决策记录（M2 终局审查后补记，2026-09-04）
+
+- **旧面板三件 UI 资产显式不保留**（终局审查 I4 的"显式记录接受"选项）：
+  - 上移/下移按钮：由 QgsLayerTreeView 原生拖拽取代（QGIS 桌面语义即如此，
+    无按钮）；`move_layer` 接口保留供程序化调用。
+  - 图例列表（WORKAREA_LEGEND_ITEMS）：工区级固定装饰说明，与图层内容无关，
+    属旧面板私有 chrome，接受删除。
+  - 名称搜索框：QGIS 桌面图层面板确有名称过滤框——列为 M3 入口候选
+    （与编辑 UI 一并评估，届时走 QgsLayerTreeFilterProxyModel 路线）。
+  - 「参与捕捉（切换）」菜单项无勾选态：捕捉参与状态权威在 Python 侧
+    （参考图层 snap 集合），C++ 菜单侧无源可同步，暂为 plain toggle；
+    M3 捕捉设置面板接入时一并归一。
+- **rename 不经请求信号**：`rename_layer_requested` 面板信号已删除——树内
+  改名直接生效并经 `_on_tree_change` → `apply_display_state` 写回编辑权威
+  （C1 修复后 name 也经 `rename_layer` 落地持久化）。
+
 ## M2 完成定义（DoD）
 
 1. 综合编修区图层管理面板为真 `QgsLayerTreeView`：图例图标、勾选可见性、拖拽排序、F2/右键重命名、右键菜单（含 QGIS 默认动作）可用。

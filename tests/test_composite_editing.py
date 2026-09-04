@@ -325,3 +325,32 @@ def test_explorer_lists_user_vector_layers(qtbot, tmp_path):
     leaves = [p for p in payloads if p[1].get("kind") == "user_vector_layer"]
     assert len(leaves) == 1
     assert "物源线 1" in leaves[0][0]
+
+
+def test_tree_rename_writes_back_to_authority_and_project(qtbot, tmp_path):
+    """树内重命名写回编辑权威并持久化；下次重组快照不回滚（M2 终局审查 C1）。"""
+    document = _document(qtbot, tmp_path)
+    document.show()
+    controller = document.edit_controller
+    layer = controller.create_layer("井点", "point")
+    panel = document.layer_manager
+    tree = panel.tree_host.tree_view_address
+    stack = document.canvas.stack
+
+    def row_of(name):
+        for row in range(stack.tree_view_row_count(tree)):
+            if stack.tree_view_layer_name(tree, row) == name:
+                return row
+        return None
+
+    qtbot.waitUntil(lambda: row_of("井点") is not None, timeout=3000)
+    stack.tree_view_rename_row(tree, row_of("井点"), "井点A")
+    qtbot.waitUntil(lambda: controller.layer(layer.id).name == "井点A", timeout=2000)
+    # 工程文档持久化权威同步
+    persisted = next(
+        item for item in document._project.user_vector_layers if item.id == layer.id)
+    assert persisted.name == "井点A"
+    # 重组快照不回滚树名/权威名
+    document._sync_composition_now()
+    qtbot.waitUntil(lambda: row_of("井点A") is not None, timeout=3000)
+    assert controller.layer(layer.id).name == "井点A"

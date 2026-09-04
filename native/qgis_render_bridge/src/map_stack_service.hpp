@@ -119,11 +119,15 @@ public:
 private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
+  // 存活性令牌：destroyed/flush 等队列回调经 weak_ptr 探测栈是否已析构，
+  // 防 QgisMapStack 先亡时的 this 悬垂（M2 终局审查 I2）。
+  std::shared_ptr<char> alive_token_ = std::make_shared<char>(0);
   QgsMapCanvas* canvasOrThrow(std::uintptr_t canvas) const;
   QgsLayerTreeView* treeViewOrThrow(std::uintptr_t address) const;
   void ensureNotStale(std::uintptr_t canvas_addr);
   void eraseMirrorByQgisId(const std::string& qgis_id);
   void eraseMirrorByDocId(const std::string& doc_id);
+  void cleanupTreeViewState(std::uintptr_t tree_view);
   void onTreeDataChanged(std::uintptr_t tree, int row, bool check_role, bool display_role);
   void onTreeOrderChanged(std::uintptr_t tree);
   void scheduleTreeChangeFlush(std::uintptr_t tree);

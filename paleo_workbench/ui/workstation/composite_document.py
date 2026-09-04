@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -755,7 +754,7 @@ class CompositeDocument(QWidget):
         self.input_tree.object_selected.connect(self.object_selected.emit)
         self.layer_manager.create_layer_requested.connect(self._create_vector_layer)
         self.layer_manager.remove_layer_requested.connect(self._remove_vector_layer)
-        self.layer_manager.rename_layer_requested.connect(self._rename_vector_layer)
+        # 树内改名直接生效并回写（QgisLayerTreePanel 无 rename_layer_requested）
         self.layer_manager.import_reference_requested.connect(self._import_reference_layer)
         self.layer_manager.remove_reference_requested.connect(self._remove_reference_layer)
         self.layer_manager.refresh_reference_requested.connect(self._refresh_reference_layer)
@@ -1061,16 +1060,6 @@ class CompositeDocument(QWidget):
             self.edit_controller.create_layer(
                 name_edit.text().strip(), kind, template=template_key
             )
-
-    def _rename_vector_layer(self, layer_id: str) -> None:
-        layer = self.edit_controller.layer(layer_id)
-        if layer is None:
-            return
-        name, ok = QInputDialog.getText(
-            self, "重命名图层", "图层名称", text=layer.name
-        )
-        if ok:
-            self.edit_controller.rename_layer(layer_id, name)
 
     def _remove_vector_layer(self, layer_id: str) -> None:
         self.edit_controller.remove_layer(layer_id)
@@ -1431,7 +1420,8 @@ class CompositeDocument(QWidget):
 
     def notify_display_changed(self) -> None:
         """图层树回写（可见性/顺序/重命名）后的轻量持久化：不重组快照。"""
-        self.edit_controller.apply_display_state(self.layer_manager._layers)
+        self.edit_controller.apply_display_state(
+            self.layer_manager._layers, include_names=True)
         self._apply_reference_display_state(self.layer_manager._layers)
         if self._project is not None and not self._loading:
             self.edit_controller.sync_to_project(self._project)

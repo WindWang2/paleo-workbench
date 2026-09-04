@@ -411,11 +411,17 @@ class QgisCanvasShim(QWidget):
                  "properties": dict(f.get("properties") or {})}
                 for f in layer.features
             ]
-            if not features:
-                continue
-            geom_raw = features[0].get("geometry") if isinstance(features[0], dict) else None
-            geom_type = str(geom_raw.get("type", "")) if isinstance(geom_raw, dict) else ""
-            geom = _GEOMETRY_TYPE.get(geom_type, "Point")
+            # 零要素图层同样上树（QGIS memory layer 零要素合法）——否则新建
+            # 图层在首次数字化前从图层树消失（M2 终局审查 I1）。几何类型改由
+            # metadata.geometry_kind 兜底（点/线/面），无则 Point。
+            metadata = getattr(layer, "metadata", None) or {}
+            if features:
+                geom_raw = features[0].get("geometry") if isinstance(features[0], dict) else None
+                geom_type = str(geom_raw.get("type", "")) if isinstance(geom_raw, dict) else ""
+                geom = _GEOMETRY_TYPE.get(geom_type, "Point")
+            else:
+                _KIND_GEOM = {"point": "Point", "line": "LineString", "polygon": "Polygon"}
+                geom = _KIND_GEOM.get(str(metadata.get("geometry_kind") or ""), "Point")
             style_raw = getattr(layer, "style", None) or {}
             if not isinstance(style_raw, dict):
                 try:
@@ -443,7 +449,6 @@ class QgisCanvasShim(QWidget):
                 legacy_style = {k: v for k, v in style_raw.items() if k != "qgis_style"} if isinstance(style_raw, dict) else None
                 if legacy_style is not None and not legacy_style:
                     legacy_style = None
-            metadata = getattr(layer, "metadata", None) or {}
             try:
                 qgis_id = self.stack.upsert_mirror_layer(
                     layer.id, layer.name or layer.id, geom,

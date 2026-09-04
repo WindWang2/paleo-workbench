@@ -56,7 +56,8 @@ class QgisLayerTreePanel(QWidget):
 
     create_layer_requested = Signal()
     remove_layer_requested = Signal(str)
-    rename_layer_requested = Signal(str)
+    # 无 rename_layer_requested：树上改名直接生效并经 _on_tree_change 回写
+    # （QGIS 语义，rename 不经请求信号绕行）。
     import_reference_requested = Signal()
     remove_reference_requested = Signal(str)
     refresh_reference_requested = Signal(str)

@@ -337,6 +337,12 @@ struct QgisMapStack::Impl {
   std::unordered_map<std::uintptr_t, QPointer<QgsMapCanvas>> tree_canvas;
   std::unordered_map<std::uintptr_t, std::function<void(const std::string&, const std::string&)>>
       tree_menu_callbacks;
+  // 孤儿回调坟场：view 的 destroyed 信号里不能销毁含 py::function 的
+  // std::function（shiboken 延迟删除链上解释器态不稳，实测 GC_Del segfault），
+  // 挪到这里由 shutdown/dtor（绑定层持 GIL 的正常路径）统一销毁。
+  std::vector<std::function<void(const std::string&)>> orphan_tree_callbacks;
+  std::vector<std::function<void(const std::string&, const std::string&)>>
+      orphan_tree_menu_callbacks;
   std::unordered_map<std::string, std::string> mirror_by_doc;
   std::unordered_map<std::string, std::string> mirror_style_sig;
   int suppress_tree_callbacks = 0;
@@ -496,6 +502,8 @@ QgisMapStack::~QgisMapStack() {
   impl_->tree_models.clear();
   impl_->tree_canvas.clear();
   impl_->tree_menu_callbacks.clear();
+  impl_->orphan_tree_callbacks.clear();
+  impl_->orphan_tree_menu_callbacks.clear();
   for (auto& kv : impl_->tools) {
     auto it = impl_->canvas_refs.find(kv.first);
     bool canvasAlive = (it != impl_->canvas_refs.end() && !it->second.isNull());
@@ -558,6 +566,8 @@ void QgisMapStack::shutdown() {
   impl_->tree_models.clear();
   impl_->tree_canvas.clear();
   impl_->tree_menu_callbacks.clear();
+  impl_->orphan_tree_callbacks.clear();
+  impl_->orphan_tree_menu_callbacks.clear();
   {
     SuppressGuard guard(&impl_->suppress_tree_callbacks);
     for (const auto& id : impl_->owned_layers) {
@@ -1209,6 +1219,36 @@ void QgisMapStack::setXyCallback(std::uintptr_t canvas_addr, PointCallback callb
   impl_->xy_connections[canvas_addr] = conn;
 }
 
+void QgisMapStack::cleanupTreeViewState(std::uintptr_t tree_view) {
+  // per-view 状态全清（M2 终局审查 I2）：view 先亡（面板关闭/重建）或地址
+  // 复用时不得残留 flush 标记 / pending 批次 / 死连接，否则新树的回调整体失效。
+  // 注意：不在此销毁含 py::function 的回调 std::function——destroyed 信号
+  // 运行在 shiboken 延迟删除链上，就地销毁会踩解释器态（GC_Del segfault，
+  // gdb 实锤）。挪到孤儿坟场，由 shutdown/dtor（绑定层正常路径）销毁。
+  impl_->tree_change_connections.erase(tree_view);
+  impl_->tree_sel_connections.erase(tree_view);
+  auto selCb = impl_->tree_sel_callbacks.find(tree_view);
+  if (selCb != impl_->tree_sel_callbacks.end()) {
+    impl_->orphan_tree_callbacks.push_back(std::move(selCb->second));
+    impl_->tree_sel_callbacks.erase(selCb);
+  }
+  auto changeCb = impl_->tree_change_callbacks.find(tree_view);
+  if (changeCb != impl_->tree_change_callbacks.end()) {
+    impl_->orphan_tree_callbacks.push_back(std::move(changeCb->second));
+    impl_->tree_change_callbacks.erase(changeCb);
+  }
+  auto menuCb = impl_->tree_menu_callbacks.find(tree_view);
+  if (menuCb != impl_->tree_menu_callbacks.end()) {
+    impl_->orphan_tree_menu_callbacks.push_back(std::move(menuCb->second));
+    impl_->tree_menu_callbacks.erase(menuCb);
+  }
+  impl_->tree_pending.erase(tree_view);
+  impl_->tree_flush_scheduled.erase(tree_view);
+  impl_->tree_views.erase(tree_view);
+  impl_->tree_models.erase(tree_view);
+  impl_->tree_canvas.erase(tree_view);
+}
+
 std::uintptr_t QgisMapStack::createLayerTreeView(std::uintptr_t canvas_addr) {
   QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
   (void)canvas;
@@ -1222,6 +1262,13 @@ std::uintptr_t QgisMapStack::createLayerTreeView(std::uintptr_t canvas_addr) {
   model->setFlag(QgsLayerTreeModel::AllowNodeChangeVisibility);
   view->setModel(model);
   const auto addr = reinterpret_cast<std::uintptr_t>(view);
+  cleanupTreeViewState(addr);  // 地址复用：先清残留（正常路径全为空，幂等）
+  std::weak_ptr<char> alive = alive_token_;
+  QObject::connect(view, &QObject::destroyed,
+                   [this, alive, addr]() {
+                     if (alive.expired()) return;  // 栈先析构：impl_ 不可达
+                     cleanupTreeViewState(addr);
+                   });
   impl_->tree_views[addr] = view;
   impl_->tree_models[addr] = model;
   impl_->tree_canvas[addr] = canvas;
@@ -1388,7 +1435,9 @@ void QgisMapStack::scheduleTreeChangeFlush(std::uintptr_t tree_addr) {
     return;
   }
   QgsLayerTreeView* view = viewIt->second.data();
-  QTimer::singleShot(0, view, [this, tree_addr]() {
+  std::weak_ptr<char> alive = alive_token_;
+  QTimer::singleShot(0, view, [this, alive, tree_addr]() {
+    if (alive.expired()) return;  // 栈先析构（view 由宿主面板持有，可活得更久）
     impl_->tree_flush_scheduled.erase(tree_addr);
     flushTreeChange(tree_addr);
   });

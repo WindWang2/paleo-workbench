@@ -1235,11 +1235,16 @@ class CompositeEditController(QObject):
             )
         return tuple(snapshots)
 
-    def apply_display_state(self, display_layers: Iterable[Any]) -> None:
-        """把图层管理面板的显示态（顺序 / 可见性 / 不透明度）写回权威。
+    def apply_display_state(self, display_layers: Iterable[Any], *, include_names: bool = False) -> None:
+        """把图层管理面板的显示态（顺序 / 可见性 / 不透明度 / 名称）写回权威。
 
         面板是显示增量的唯一提交口；顺序变化重建内部图层序（dict 保持
         插入序），使 identify 可见性判定与工程持久化读到同一份状态。
+
+        include_names 只在面板发起的回写（notify_display_changed）为 True：
+        重组快照路径（_sync_composition_now 经 layers_changed 同步触发）上
+        面板副本可能滞后于控制器权威，此时消费 name 会把刚改的名立即回滚
+        （C1 修复的配套约束）。name 经 rename_layer 写回（空名/同名幂等）。
         """
         order: list[str] = []
         seen: set[str] = set()
@@ -1252,6 +1257,10 @@ class CompositeEditController(QObject):
                     bool(getattr(snapshot, "visible", True)),
                     min(1.0, max(0.05, float(getattr(snapshot, "opacity", 1.0)))),
                 )
+                if include_names:
+                    name = str(getattr(snapshot, "name", "") or "").strip()
+                    if name:
+                        self.rename_layer(layer_id, name)
         if order:
             # 面板未覆盖的图层保守保持原序尾部（异常路径）。
             remaining = [lid for lid in self._layers if lid not in seen]

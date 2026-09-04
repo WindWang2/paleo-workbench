@@ -83,8 +83,11 @@ def test_tree_reorder_writes_back_to_panel_layers(qtbot, qapp):
     panel.show()
     qtbot.waitUntil(lambda: panel.tree_row_count() >= 2, timeout=3000)
     canvas.stack.tree_view_move_row(panel.tree_host.tree_view_address, 0, 1)
+    # flush 经 singleShot(0) 合并，先等一拍再断言，避免匹配到移动前状态
+    # （M2 终局审查 I3：期望值是移动后的 ["doc-b","doc-a"]）。
+    qtbot.wait(50)
     qtbot.waitUntil(
-        lambda: [l.id for l in panel._layers][:2] == ["doc-a", "doc-b"], timeout=2000)
+        lambda: [l.id for l in panel._layers][:2] == ["doc-b", "doc-a"], timeout=2000)
 
 
 def test_panel_menu_callback_maps_to_request_signals(qtbot, qapp):
@@ -121,3 +124,28 @@ def test_panel_set_layer_visible_reaches_mirror_without_echo(qtbot, qapp):
     panel.set_layer_visible("doc-a", False)
     assert panel.layer_by_id("doc-a").visible is False
     assert canvas.stack.mirror_layer_visibility("doc-a") is False
+
+
+def test_empty_layer_appears_in_tree(qtbot, qapp):
+    """零要素图层也上树——否则新建图层在首次数字化前不可见（M2 终局审查 I1）。"""
+    from paleo_workbench.mapping.map_render_backend import MapLayerSnapshot
+    from paleo_workbench.ui.qgis_stack.canvas_shim import QgisCanvasShim
+    from paleo_workbench.ui.qgis_stack.layer_tree_panel import QgisLayerTreePanel
+
+    empty = MapLayerSnapshot(
+        id="doc-empty", name="新图层", layer_type="vector",
+        extent=(0.0, 0.0, 10.0, 10.0), crs="EPSG:4326",
+        data_revision=1, style_revision=1,
+        features=(), style={},
+        visible=True, opacity=1.0,
+        metadata={"editable": "true", "geometry_kind": "point"},
+    )
+    canvas = QgisCanvasShim()
+    qtbot.addWidget(canvas)
+    panel = QgisLayerTreePanel()
+    qtbot.addWidget(panel)
+    panel.bind(canvas, [_layer("doc-a", "井位"), empty])
+    canvas.show()
+    panel.show()
+    qtbot.waitUntil(lambda: panel.tree_row_count() >= 2, timeout=3000)
+    panel.select_layer("doc-empty")
