@@ -111,7 +111,7 @@ PySide6 shell（app_bar / dock / 状态栏不变）
 - **M1 地基**：provider 补编 + `mapstack` 桥骨架 + canvas 嵌入综合编修区（显示/缩放/平移）→ 可演示。
 - **M2 图层**：`QgsProject` 权威化 + `QgsLayerTreeView` 图层管理 + 属性对话框 → 可演示。
 - **M3 编辑**：map tool 编辑栈 + 捕捉 + 撤销重做 → 完整交付。
-- **M4 收尾**：持久化往返、fallback 拆除、文档（AGENTS.md/README）、测试全绿。
+- **M4 收尾**（已切片）：本切片见 `docs/superpowers/specs/2026-09-04-qgis-native-map-stack-m4-design.md`（只读页真 `QgsMapCanvas` + 自有 `QgsProject`；M3 真机回归先行）。原条目中的 mini-`QgsProject` XML 持久化、fallback 拆除、QGIS CI 专轨，推迟到后续切片。
 
 ## 风险
 

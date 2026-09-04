@@ -85,8 +85,10 @@ When native extensions are not built, the workbench transparently falls back to 
 地图区由 vendored QGIS 4.2（`third_party/qgis`）的 `QgsMapCanvas` 承载，
 M2 起综合编修区的图层管理（真 `QgsLayerTreeView`：图例/勾选/拖拽/重命名/
 右键菜单）与图层属性对话框（真 `QgsVectorLayerProperties`，符号系统页与
-QGIS 桌面同款）也由 QGIS 原生控件承载；其余页面仍走 `UnifiedMapCanvas` +
-fallback，fallback 拆除在 M4。
+QGIS 桌面同款）也由 QGIS 原生控件承载。M4 起首页 / 工区图 / 编图预览在桥
+可用时也嵌入只读 `QgsMapCanvas`（自有 `QgsProject`，与综合编修隔离）。无桥
+或主 CI 仍走 `UnifiedMapCanvas` + fallback。综合编修继续硬依赖桥。fallback
+拆除与工程文件 QgsProject XML 不在本切片。
 首次构建/安装：
 
     python -m pip install "pybind11>=2.12" ninja
@@ -151,7 +153,7 @@ python -m pytest -q
 
 ## QGIS renderer (primary authoring core, optional build)
 
-> M1 起综合编修区由 QGIS 画布承载（`QgisCanvasShim` + `QgsMapCanvas`，硬依赖）；M2 起图层管理面板（`QgsLayerTreeView`）与图层属性对话框（`QgsVectorLayerProperties`）同为 QGIS 原生控件；其余页面仍走 `UnifiedMapCanvas` + fallback。fallback 拆除在 M4。
+> M1 起综合编修区由 QGIS 画布承载（`QgisCanvasShim` + `QgsMapCanvas`，硬依赖）；M2 起图层管理面板（`QgsLayerTreeView`）与图层属性对话框（`QgsVectorLayerProperties`）同为 QGIS 原生控件。M4 起首页 / 工区图 / 编图预览在桥可用时也嵌入只读 `QgsMapCanvas`（自有 `QgsProject`，与综合编修隔离）。无桥或主 CI 仍走 `UnifiedMapCanvas` + fallback。综合编修继续硬依赖桥。fallback 拆除与工程文件 QgsProject XML 不在本切片。
 
 Per ADR 0059 the QGIS renderer is the **primary professional 2-D cartographic
 authoring core**: `create_map_render_backend()` defaults to
