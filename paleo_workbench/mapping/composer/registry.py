@@ -42,6 +42,35 @@ CHART_COLOR_SEQUENCE: tuple[str, ...] = (
     "#eeca3b",
 )
 
+# 各 chart_type 的 series 数据形态描述（单一事实源）。composition_panel
+# 据此给 series 编辑器挂动态提示，并在数据形态不符表格前提时自动退化为
+# JSON 框（见 CompositionPanel._series_is_label_value）。渲染器
+# （renderer._render_stat_chart_svg）按同一套形态解析。
+CHART_SERIES_SCHEMAS: dict[str, str] = {
+    "bar": '分类序列 [{"label": "类目", "value": 数值}, ...]',
+    "hbar": '分类序列 [{"label": "类目", "value": 数值}, ...]（横向条）',
+    "line": (
+        '数值序列 {"x": [数值...], "y": [数值...]} 或 '
+        '[{"x": 数值, "y": 数值}, ...]（x 轴按值缩放）；'
+        '也兼容分类式 [{"label": "类目", "value": 数值}, ...]（x 等距）'
+    ),
+    "scatter": (
+        '数值点对 {"x": [数值...], "y": [数值...]} 或 '
+        '[{"x": 数值, "y": 数值}, ...]（x 轴按值缩放）；'
+        '也兼容分类式 [{"label": "类目", "value": 数值}, ...]（x 等距）'
+    ),
+    "pie": '占比序列 [{"label": "扇区", "value": 正数}, ...]（按 value 占比分扇区，非正值跳过）',
+    "donut": (
+        '占比序列 [{"label": "扇区", "value": 正数}, ...]（环形图，'
+        'properties.hole_ratio 控制内孔半径比 0~0.9，缺省 0.55）'
+    ),
+    "histogram": '原始值直方 {"values": [数值...], "bins": 箱数}（values/bins 也可直挂 properties）',
+    "rose": (
+        '方位序列 [{"label": "方位", "angle_deg": 罗盘方位角(0=北/顺时针), '
+        '"value": 数值, "angle_span": 扇区角(可选)}, ...]（缺省等分 360°）'
+    ),
+}
+
 # 模板悬空调色板键 → 内置色带别名。这些键出现在模板 style_bindings 中
 # 但 color_ramps.py 未注册实现，get_color_ramp 会静默回退 viridis；在
 # composer 层做别名解析（不改 color_ramps.py）：
@@ -299,15 +328,20 @@ def _build_registry() -> dict[ElementType, ComponentSpec]:
             "text",
         ),
         # ---- 统计图（B6）----------------------------------------------
+        # series 形态因 chart_type 而异（CHART_SERIES_SCHEMAS 为描述源）：
+        # 编辑面板对 [{label, value}] 形态用表格编辑器，其余形态自动退化
+        # 为 JSON 框。
         _spec(
             ElementType.STAT_CHART, "统计图", CATEGORY_CHART,
             (210.0, 30.0, 75.0, 55.0),
-            {"chart_type": "bar", "title": "统计", "series": ()},
+            {"chart_type": "bar", "title": "统计", "series": (), "hole_ratio": 0.55},
             ({"name": "chart_type", "label": "图表类型", "type": "choices",
-              "choices": ["bar", "hbar", "line", "scatter", "pie", "histogram", "rose"]},
+              "choices": ["bar", "hbar", "line", "scatter", "pie", "donut", "histogram", "rose"]},
              {"name": "title", "label": "标题", "type": "str"},
              {"name": "series", "label": "数据系列", "type": "list"},
              {"name": "units", "label": "单位", "type": "str"},
+             {"name": "hole_ratio", "label": "内孔半径比 (donut)", "type": "number",
+              "min": 0.0, "max": 0.9},
              {"name": "colors", "label": "色序列 (JSON)", "type": "list"}),
             "stat_chart",
         ),

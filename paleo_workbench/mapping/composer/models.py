@@ -50,7 +50,7 @@ ELEMENT_PROPERTY_KEYS: dict[ElementType, tuple[str, ...]] = {
     ElementType.TEXT: ("text", "font_size", "align", "color"),
     ElementType.IMAGE: ("image_path", "image_data_png_b64", "fit"),
     ElementType.INSET_MAP: ("map_document", "layers", "extent", "locator_scale", "locator_rect"),
-    ElementType.STAT_CHART: ("chart_type", "title", "series", "units"),
+    ElementType.STAT_CHART: ("chart_type", "title", "series", "units", "colors", "hole_ratio"),
     ElementType.METADATA: ("fields", "font_size"),
     ElementType.COLORBAR: ("title", "stops", "min", "max", "units", "discrete", "data_binding"),
     ElementType.NEATLINE: ("line_width_mm", "color", "double_line", "inner_gap_mm"),

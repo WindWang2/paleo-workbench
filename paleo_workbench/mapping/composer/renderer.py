@@ -524,7 +524,8 @@ class MapComposerRenderer:
         return "\n".join(parts)
 
     # ------------------------------------------------------------------
-    # 统计图（B6）：bar/hbar/line/scatter/pie/histogram/rose，纯几何绘制
+    # 统计图（B6）：bar/hbar/line/scatter/pie/donut/histogram/rose，
+    # 纯几何绘制（无阴影、克制配色、确定性输出）
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -538,7 +539,15 @@ class MapComposerRenderer:
         return list(CHART_COLOR_SEQUENCE)
 
     @staticmethod
-    def _series_entries(series: list) -> tuple[list[str], list[float]]:
+    def _finite_or(value: float, default: float) -> float:
+        """NaN/Inf 一律落回缺省值（float("nan") 不抛异常但会污染几何）。"""
+        return value if math.isfinite(value) else default
+
+    @staticmethod
+    def _series_entries(series: Any) -> tuple[list[str], list[float]]:
+        """[{label, value}] 分类序列归一化；非列表/坏项诚实跳过。"""
+        if not isinstance(series, (list, tuple)):
+            return [], []
         labels: list[str] = []
         values: list[float] = []
         for entry in series:
@@ -546,10 +555,67 @@ class MapComposerRenderer:
                 continue
             labels.append(str(entry.get("label", "")))
             try:
-                values.append(float(entry.get("value", 0.0) or 0.0))
+                value = float(entry.get("value", 0.0) or 0.0)
             except (TypeError, ValueError):
-                values.append(0.0)
+                value = 0.0
+            values.append(MapComposerRenderer._finite_or(value, 0.0))
         return labels, values
+
+    @staticmethod
+    def _is_number(value: Any) -> bool:
+        # bool 是 int 子类，显式排除（True/False 不是坐标）。
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+    @classmethod
+    def _floats(cls, raw: Any) -> list[float]:
+        """严格有限数值列表：非数值/NaN/Inf 一律跳过（拒绝猜测）。"""
+        if not isinstance(raw, (list, tuple)):
+            return []
+        return [
+            MapComposerRenderer._finite_or(float(v), 0.0)
+            for v in raw
+            if cls._is_number(v) and math.isfinite(float(v))
+        ]
+
+    @classmethod
+    def _xy_series(cls, series: Any) -> tuple[list[float], list[float], list[str], bool]:
+        """line/scatter 序列归一化为 ``(xs, ys, labels, x_is_value)``。
+
+        支持三种形态（registry ``CHART_SERIES_SCHEMAS`` 有对应描述）：
+          1. ``{x: [...], y: [...]}``      数值数组（x 轴按值缩放）；
+          2. ``[{x: 数值, y: 数值}, ...]``  数值点对（x 轴按值缩放）；
+          3. ``[{label: 类目, value: 数值}]`` 分类式（x 等距取序号，向后
+             兼容既有图件）。
+        非 MAPPING 项 / 非数值坐标一律跳过；空数据返回空 ys → 上层渲染
+        诚实占位。
+        """
+        if isinstance(series, Mapping):
+            xs, ys = cls._floats(series.get("x")), cls._floats(series.get("y"))
+            count = min(len(xs), len(ys))
+            return xs[:count], ys[:count], [""] * count, True
+        if isinstance(series, (list, tuple)):
+            entries = [s for s in series if isinstance(s, Mapping)]
+            if entries and all(
+                cls._is_number(s.get("x")) and cls._is_number(s.get("y")) for s in entries
+            ):
+                xs = [float(s["x"]) for s in entries]
+                ys = [float(s["y"]) for s in entries]
+                labels = [str(s.get("label") or "") for s in entries]
+                return xs, ys, labels, True
+            labels, values = cls._series_entries(series)
+            return [float(i) for i in range(len(values))], values, labels, False
+        return [], [], [], False
+
+    @staticmethod
+    def _hole_ratio(elem: ComposerElement) -> float:
+        """donut 内孔半径比（0=实心饼；缺省/坏值 0.55，钳制 0~0.9）。"""
+        try:
+            hole = float(elem.properties.get("hole_ratio"))
+        except (TypeError, ValueError):
+            return 0.55
+        if not math.isfinite(hole):
+            return 0.55
+        return min(0.9, max(0.0, hole))
 
     @staticmethod
     def _histogram_data(elem: ComposerElement) -> tuple[list[float], int]:
@@ -557,17 +623,22 @@ class MapComposerRenderer:
         properties.values/bins），返回排序无关的原始值列表与箱数。"""
         series = elem.properties.get("series")
         if isinstance(series, Mapping):
-            raw_values = series.get("values") or ()
+            raw_values = series.get("values")
             raw_bins = series.get("bins") or elem.properties.get("bins") or 10
         else:
-            raw_values = elem.properties.get("values") or ()
+            raw_values = elem.properties.get("values")
             raw_bins = elem.properties.get("bins") or 10
+        if not isinstance(raw_values, (list, tuple)):
+            raw_values = ()
         values: list[float] = []
         for value in raw_values:
             try:
-                values.append(float(value))
+                parsed = float(value)
             except (TypeError, ValueError):
                 continue
+            if not math.isfinite(parsed):
+                continue
+            values.append(parsed)
         try:
             bins = max(2, min(60, int(raw_bins)))
         except (TypeError, ValueError):
@@ -584,7 +655,7 @@ class MapComposerRenderer:
         x, y, w, h = elem.x_mm, elem.y_mm, elem.width_mm, elem.height_mm
         chart_type = str(elem.properties.get("chart_type") or "bar").lower()
         title = str(elem.properties.get("title") or "")
-        series = list(elem.properties.get("series") or [])
+        series = elem.properties.get("series")
         units = str(elem.properties.get("units") or "")
         colors = self._chart_colors(elem)
         parts = [
@@ -601,39 +672,51 @@ class MapComposerRenderer:
         plot_x, plot_y = x + 6.0, y + 8.0
         plot_w, plot_h = max(4.0, w - 10.0), max(4.0, h - 15.0)
 
-        if chart_type == "histogram":
+        if chart_type in ("pie", "donut"):
+            labels, values = self._series_entries(series)
+            # 负值/零在占比语义下无扇区可言：诚实跳过（全非正 → 空态占位）。
+            kept = [(label, value) for label, value in zip(labels, values) if value > 0.0]
+            if not kept:
+                parts.append(self._chart_placeholder(x, y, w, h))
+            else:
+                self._draw_pie(
+                    parts, x, y, w, h, bool(title),
+                    [label for label, _ in kept], [value for _, value in kept],
+                    colors,
+                    hole_ratio=self._hole_ratio(elem) if chart_type == "donut" else 0.0,
+                )
+        elif chart_type == "histogram":
             values, bins = self._histogram_data(elem)
             if not values:
                 parts.append(self._chart_placeholder(x, y, w, h))
             else:
                 self._draw_histogram(parts, plot_x, plot_y, plot_w, plot_h, values, bins)
         elif chart_type == "rose":
-            entries = [s for s in series if isinstance(s, Mapping)]
+            entries = [
+                s for s in (series if isinstance(series, (list, tuple)) else ())
+                if isinstance(s, Mapping)
+            ]
             if not entries:
                 parts.append(self._chart_placeholder(x, y, w, h))
             else:
-                self._draw_rose(parts, x, y, w, h, title, entries, colors)
-        elif chart_type == "pie":
-            labels, values = self._series_entries(series)
-            if not values or sum(values) <= 0.0:
+                self._draw_rose(parts, x, y, w, h, bool(title), entries, colors)
+        elif chart_type in ("line", "scatter"):
+            xs, ys, point_labels, x_is_value = self._xy_series(series)
+            if not ys:
                 parts.append(self._chart_placeholder(x, y, w, h))
             else:
-                self._draw_pie(parts, x, y, w, h, bool(title), labels, values, colors)
+                self._draw_line(parts, plot_x, plot_y, plot_w, plot_h, xs, ys,
+                                point_labels, colors, units,
+                                scatter=(chart_type == "scatter"), x_is_value=x_is_value)
         else:
-            # bar / hbar / line / scatter 共用 [{label, value}] 序列。
+            # bar / hbar 共用 [{label, value}] 序列；未知 chart_type 一律按
+            # bar（前向兼容，与既有渲染一致）。
             labels, values = self._series_entries(series)
             if not values:
                 parts.append(self._chart_placeholder(x, y, w, h))
             elif chart_type == "hbar":
                 self._draw_hbar(parts, plot_x, plot_y, plot_w, plot_h, labels, values, colors)
-            elif chart_type == "line":
-                self._draw_line(parts, plot_x, plot_y, plot_w, plot_h, labels, values,
-                                colors, units, scatter=False)
-            elif chart_type == "scatter":
-                self._draw_line(parts, plot_x, plot_y, plot_w, plot_h, labels, values,
-                                colors, units, scatter=True)
             else:
-                # 未知 chart_type 一律按 bar（前向兼容，与既有渲染一致）。
                 self._draw_bar(parts, plot_x, plot_y, plot_w, plot_h, labels, values,
                                colors, units)
         parts.append("</g>")
@@ -717,16 +800,34 @@ class MapComposerRenderer:
         self,
         parts: list[str],
         px: float, py: float, pw: float, ph: float,
-        labels: list[str], values: list[float],
+        xs: list[float], ys: list[float],
+        labels: list[str],
         colors: list[str], units: str,
-        *, scatter: bool,
+        *,
+        scatter: bool,
+        x_is_value: bool,
     ) -> None:
-        vmax = max(abs(v) for v in values) or 1.0
+        """折线/散点：x_is_value 时 x 轴按数值缩放（两端标注范围），
+        否则分类等距（标签逐点标注）——形态由 _xy_series 判定。"""
+        vmax = max(abs(v) for v in ys) or 1.0
         self._draw_axes(parts, px, py, pw, ph)
-        step = pw / max(1, len(values))
+        if x_is_value:
+            xmin, xmax = min(xs), max(xs)
+            span = xmax - xmin
+
+            def mx_of(i: int) -> float:
+                if span <= 0.0:
+                    return px + pw / 2.0
+                return px + (xs[i] - xmin) / span * pw
+        else:
+            step = pw / max(1, len(ys))
+
+            def mx_of(i: int) -> float:
+                return px + i * step + step / 2.0
+
         pts: list[tuple[float, float]] = [
-            (px + i * step + step / 2, py + ph - abs(v) / vmax * ph)
-            for i, v in enumerate(values)
+            (mx_of(i), py + ph - abs(v) / vmax * ph)
+            for i, v in enumerate(ys)
         ]
         if scatter:
             for (mx, my) in pts:
@@ -757,6 +858,16 @@ class MapComposerRenderer:
             f' font-size="2.2" fill="#555555" text-anchor="end">'
             f'{vmax:g}{html.escape(units)}</text>'
         )
+        if x_is_value:
+            # 数值 x 轴的两端范围标注（分类式则逐点标签已覆盖）。
+            parts.append(
+                f'<text x="{px:.2f}" y="{py + ph + 3.0:.2f}" font-family="Arial"'
+                f' font-size="2.0" fill="#555555" text-anchor="start">{xmin:g}</text>'
+            )
+            parts.append(
+                f'<text x="{px + pw:.2f}" y="{py + ph + 3.0:.2f}" font-family="Arial"'
+                f' font-size="2.0" fill="#555555" text-anchor="end">{xmax:g}</text>'
+            )
 
     def _draw_pie(
         self,
@@ -765,13 +876,18 @@ class MapComposerRenderer:
         has_title: bool,
         labels: list[str], values: list[float],
         colors: list[str],
+        *,
+        hole_ratio: float = 0.0,
     ) -> None:
+        """饼图（hole_ratio=0）/ 环形图（donut，hole>0）。调用方保证
+        values 全部 > 0。百分比/外标签最后绘制，确保叠在内孔之上。"""
         top_pad = 8.0 if has_title else 3.0
         cx = x + w / 2
         cy = y + top_pad + (h - top_pad) / 2
         r = max(3.0, min(w, h - top_pad) / 2 - 2.0)
         total = sum(values)
         angle = 0.0
+        texts: list[str] = []
         for i, value in enumerate(values):
             span = 360.0 * value / total
             a0, a1 = angle, angle + span
@@ -794,25 +910,33 @@ class MapComposerRenderer:
             pct = span / 360.0 * 100.0
             mid = (a0 + a1) / 2.0
             lx, ly = self._polar(cx, cy, r * 0.62, mid)
-            parts.append(
+            texts.append(
                 f'<text x="{lx:.2f}" y="{ly + 0.8:.2f}" font-family="Arial"'
                 f' font-size="2.2" fill="#111111" text-anchor="middle">{pct:.0f}%</text>'
             )
             if labels and labels[i]:
                 tx, ty = self._polar(cx, cy, r + 2.6, mid)
                 anchor = "start" if tx > cx else ("end" if tx < cx else "middle")
-                parts.append(
+                texts.append(
                     f'<text x="{tx:.2f}" y="{ty + 0.8:.2f}" font-family="SimSun, Arial"'
                     f' font-size="2.2" fill="#333333" text-anchor="{anchor}">'
                     f"{html.escape(labels[i])}</text>"
                 )
             angle = a1
+        if hole_ratio > 0.01:
+            # 环形内孔：白芯覆盖扇心（无阴影、无渐变，保持克制配色）。
+            hole_r = r * hole_ratio
+            parts.append(
+                f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{hole_r:.2f}"'
+                f' fill="#ffffff" stroke="#333333" stroke-width="0.15"/>'
+            )
+        parts.extend(texts)
 
     def _draw_rose(
         self,
         parts: list[str],
         x: float, y: float, w: float, h: float,
-        has_title: str,
+        has_title: bool,
         entries: list,
         colors: list[str],
     ) -> None:
@@ -823,9 +947,10 @@ class MapComposerRenderer:
         values: list[float] = []
         for entry in entries:
             try:
-                values.append(abs(float(entry.get("value", 0.0) or 0.0)))
+                raw_value = abs(float(entry.get("value", 0.0) or 0.0))
             except (TypeError, ValueError):
-                values.append(0.0)
+                raw_value = 0.0
+            values.append(self._finite_or(raw_value, 0.0))
         vmax = max(values) or 1.0
         # 极坐标网格：外圈 + 半径半圈 + 十字线。
         parts.append(
@@ -850,11 +975,13 @@ class MapComposerRenderer:
                 center_angle = float(entry.get("angle_deg", i * default_span) or 0.0)
             except (TypeError, ValueError):
                 center_angle = i * default_span
+            center_angle = self._finite_or(center_angle, i * default_span)
             try:
                 span = float(entry.get("angle_span") or default_span)
             except (TypeError, ValueError):
                 span = default_span
-            span = min(span, 360.0)
+            span = self._finite_or(span, default_span)
+            span = min(max(span, 0.0), 360.0)
             r_i = r_max * values[i] / vmax
             if r_i <= 0.01:
                 continue

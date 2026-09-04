@@ -62,6 +62,7 @@ from paleo_workbench.mapping.composer.models import (
 )
 from paleo_workbench.mapping.composer.registry import (
     CATEGORY_LABELS,
+    CHART_SERIES_SCHEMAS,
     all_specs,
     categories,
     get_spec,
@@ -81,9 +82,11 @@ ELEMENT_TYPE_LABELS: dict[ElementType, str] = {
     spec.element_type: spec.label for spec in all_specs()
 }
 
-# STAT_CHART 中 series 为 [{label, value}] 的图表类型 → 表格编辑；
-# histogram（{values, bins}）与 rose（[{label, angle_deg, value}]）用 JSON 框。
-_TABLE_SERIES_CHART_TYPES = {"bar", "hbar", "line", "scatter", "pie"}
+# STAT_CHART 中 series 支持 [{label, value}] 表格编辑的图表类型；是否真用
+# 表格还取决于当前数据形态（_series_is_label_value）——histogram 的
+# {values, bins}、rose 的方位序列、line/scatter 的 xy 形态一律 JSON 框
+# （形态描述见 registry.CHART_SERIES_SCHEMAS）。
+_TABLE_SERIES_CHART_TYPES = {"bar", "hbar", "line", "scatter", "pie", "donut"}
 
 # 表单顶部固定行数（图件标题 + X/Y/宽/高），schema 驱动行在其后动态增删。
 _STATIC_FORM_ROWS = 5
@@ -545,8 +548,14 @@ class CompositionPanel(QFrame):
                 element.element_type is ElementType.STAT_CHART
                 and name == "series"
                 and str(element.properties.get("chart_type") or "bar") in _TABLE_SERIES_CHART_TYPES
+                and self._series_is_label_value(element.properties.get("series"))
             ):
+                # 形态匹配（[{label, value}]，允许空表起步）→ 表格编辑器。
                 return self._make_series_table_editor(element)
+            # 其余形态（histogram 的 {values, bins}、rose 的方位序列、
+            # line/scatter 的 xy 数组/点对）自动退化为 JSON 框——表格编辑
+            # 会丢掉 label/value 之外的键。动态形态提示在
+            # _refresh_property_editor 里按 chart_type 挂（registry 描述）。
             line = QLineEdit()
             try:
                 line.setText(json.dumps(value if value is not None else [], ensure_ascii=False))
@@ -563,6 +572,21 @@ class CompositionPanel(QFrame):
             lambda n=name, l=line: self._on_schema_value_changed(n, l.text())
         )
         return line, lambda l=line: l.text()
+
+    @staticmethod
+    def _series_is_label_value(series: Any) -> bool:
+        """series 是否为纯 [{label, value}] 形态（表格编辑器的前提）。
+
+        任一条目携带额外键（如 rose 的 angle_deg、scatter 的 x/y）即返回
+        False——两列表格无法表达也必然丢键，必须退化为 JSON 框；空列表/
+        元组视为可从空表起步的 label/value 形态。
+        """
+        if not isinstance(series, (list, tuple)):
+            return False
+        for entry in series:
+            if not isinstance(entry, dict) or not set(entry) <= {"label", "value"}:
+                return False
+        return True
 
     def _make_series_table_editor(
         self, element
@@ -775,6 +799,13 @@ class CompositionPanel(QFrame):
                 name = str(prop.get("name"))
                 editor, getter = self._make_editor(prop, element.properties.get(name), element)
                 editor.setEnabled(editable)
+                if element.element_type is ElementType.STAT_CHART and name == "series":
+                    # 动态形态提示：随 chart_type 从 registry 取 series 形态
+                    # 描述（chart_type 变更会整表重建，提示随之刷新）。
+                    chart_type = str(element.properties.get("chart_type") or "bar")
+                    description = CHART_SERIES_SCHEMAS.get(chart_type, "")
+                    if description:
+                        editor.setToolTip(f"数据系列形态：{description}")
                 self._schema_editors[name] = editor
                 self._schema_getters[name] = getter
                 self.property_form.addRow(str(prop.get("label") or name), editor)

@@ -274,13 +274,22 @@ def _build_templates() -> dict[str, CompositionTemplate]:
                  data_binding={"key": "paleo.water_depth"}),
             _def(ElementType.ANNOTATION, map_box[0] + 18.0, map_box[1] + 16.0, 42.0, 8.0, z=35,
                  text="物源方向 →", leader=False),
+            # B6 统计图示例：物源方向玫瑰图（罗盘方位角语义，与物源方向
+            # 注记呼应；绑定后由宿主提供真实方位序列）。
+            _def(ElementType.STAT_CHART, right_x, map_box[1] + 116.0, 78.0, 34.0, z=30,
+                 chart_type="rose", title="物源方向玫瑰图",
+                 series=({"label": "北东", "angle_deg": 45.0, "value": 8.0},
+                         {"label": "南东", "angle_deg": 135.0, "value": 5.0},
+                         {"label": "南西", "angle_deg": 225.0, "value": 6.5},
+                         {"label": "北西", "angle_deg": 315.0, "value": 3.0})),
             _def(ElementType.METADATA, map_box[0], map_box[1] + map_box[3] + 12.0,
                  170.0, 14.0, z=30,
                  fields=(("编图单元", ""), ("资料截止", ""), ("审校", ""), ("图件版本", ""))),
         ),
         style_bindings={**common_style, "renderer": "categorized+contour",
                         "paleo.palette": "paleogeographic-v1"},
-        data_bindings={"paleo.water_depth": "water-depth factor colormap + range"},
+        data_bindings={"paleo.water_depth": "water-depth factor colormap + range",
+                       "paleo.paleocurrent": "物源方向玫瑰序列（angle_deg/value）"},
     ))
     register(CompositionTemplate(
         template_id="comprehensive",
