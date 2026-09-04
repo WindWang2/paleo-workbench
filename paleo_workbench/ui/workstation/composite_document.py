@@ -1563,6 +1563,7 @@ class CompositeDocument(QWidget):
             # 人工建数据与引用描述写回工程文档（磁盘保存走工程保存）。
             self.edit_controller.sync_to_project(self._project)
             self._sync_reference_layers_to_project()
+            self._write_map_project_xml()
         self.layer_manager.bind(self.canvas, layers)
         active_id = self.edit_controller.active_layer_id
         if active_id is not None:
@@ -1590,10 +1591,25 @@ class CompositeDocument(QWidget):
             ]
             self._reference_status = {}
             self.edit_controller.load_from_project(project)
+            self._sync_composition_now()
+            xml = str(getattr(project, "map_qgis_project_xml", "") or "")
+            apply = getattr(getattr(self.canvas, "stack", None), "apply_project_xml", None)
+            if xml and callable(apply):
+                apply(xml)
         finally:
             self._loading = False
-        self._sync_composition_now()
+        if project is not None:
+            self._write_map_project_xml()
         self.input_tree.refresh(project)
+
+    def _write_map_project_xml(self) -> None:
+        """把当前 QgsProject 呈现态写入工程信封。loading 期间不调用。"""
+        if self._project is None:
+            return
+        write = getattr(getattr(self.canvas, "stack", None), "write_project_xml", None)
+        if not callable(write):
+            return
+        self._project.map_qgis_project_xml = write()
 
     # -- 悬浮工具条定位 ----------------------------------------------------------
 
