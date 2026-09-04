@@ -859,12 +859,16 @@ class AppShell(QWidget):
     def review_export_page_widget(self):
         return self.review_page
 
-    def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
+    def shutdown_workers(self, wait_ms: int = 400) -> bool:
         """Deterministically release project-scoped jobs before a switch.
 
         Page ``closeEvent`` handlers remain a last line of defence, but a
         project switch must not wait for Qt deferred deletion before closing a
         catalog or replacing native sessions.
+
+        ``wait_ms`` 是每个 job 在 GUI 线程上的等待预算（#1158：此前默认
+        3000ms，最坏把项目切换卡 ~6s）；超时未 join 的线程交给
+        detached_job_keeper 后台收尾，调用立即返回。
         """
         all_joined = True
         workstation = getattr(self, "workstation", None)

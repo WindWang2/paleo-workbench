@@ -618,12 +618,18 @@ class WellSeismicJointHost(QObject):
         except Exception as exc:
             self.status_changed.emit(f"删除剖面失败: {exc}")
 
-    def shutdown(self) -> None:
+    def shutdown(self, wait_ms: int = 250) -> None:
+        """有界停机（#1158）：每个 job 最多占用调用线程 ``wait_ms``，超时后台 detach。
+
+        旧实现对两个 OwnedWorkerJob 顺序执行默认 3s 的阻塞 join，最坏把
+        GUI 线程卡 ~6s；现在 GUI 侧预算 250ms/job，未 join 的线程交给
+        detached_job_keeper 在后台收尾。
+        """
         self._cancel_pending_lod()
         if self._volume_job.is_running:
-            self._volume_job.shutdown()
+            self._volume_job.shutdown(wait_ms=wait_ms)
         if self._assets_job.is_running:
-            self._assets_job.shutdown()
+            self._assets_job.shutdown(wait_ms=wait_ms)
 
     # ------------------------------------------------------------------
     # Internals
@@ -645,7 +651,9 @@ class WellSeismicJointHost(QObject):
         """Supersede in-flight loads, then scan/cache SEG-Y metadata off-thread."""
         self._cancel_pending_lod()
         if self._volume_job.is_running:
-            self._volume_job.shutdown()
+            # supersede：在飞结果注定被丢弃，0 预算 + 后台 detach，
+            # 不在 GUI 线程等待（#1158：此前每次换源最多阻塞 3s）。
+            self._volume_job.shutdown(wait_ms=0)
         self._volume_generation += 1
         generation = self._volume_generation
         cached = self._cached_survey_payload(segy_path)
@@ -733,7 +741,7 @@ class WellSeismicJointHost(QObject):
     ) -> None:
         """Parse the non-SEGY joint assets off the GUI thread (#503)."""
         if self._assets_job.is_running:
-            self._assets_job.shutdown()
+            self._assets_job.shutdown(wait_ms=0)
         self._assets_clear_on_failure = clear_on_failure
         self._pending_survey_apply = survey_payload
         registry = self._well_identity_registry
@@ -871,7 +879,7 @@ class WellSeismicJointHost(QObject):
         """Bind source-backed access (metadata cached from the survey pass), then L0."""
         self._cancel_pending_lod()
         if self._volume_job.is_running:
-            self._volume_job.shutdown()
+            self._volume_job.shutdown(wait_ms=0)
         self._volume_generation += 1
         generation = self._volume_generation
 
