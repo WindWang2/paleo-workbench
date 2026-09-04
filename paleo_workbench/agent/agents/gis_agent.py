@@ -22,7 +22,9 @@ class GISAgent(BaseAgent):
     def run(self, task: TaskNode, context: dict[str, Any]) -> dict[str, Any]:
         self.log(f"Executing spatial GIS analysis: {task.description}")
 
-        # Synthetic fault barriers for domain
+        # #1143/#1143-extension: demo stub — these fault barriers are SYNTHETIC
+        # demo geometry, not data extracted from any interpreted fault pick.
+        # Never present them as project-derived constraints.
         fault_lines = [
             [[500000.0, 3410000.0], [510000.0, 3418000.0], [520000.0, 3422000.0]],
             [[505000.0, 3405000.0], [515000.0, 3412000.0], [525000.0, 3418000.0]],
@@ -41,14 +43,21 @@ class GISAgent(BaseAgent):
             ],
         }
 
-        # Auto-heal boundary topology
+        # Auto-heal boundary topology — this repair DOES run for real, but on
+        # the synthetic demo boundary above; it proves nothing about project data.
         valid_boundary = repair_invalid_geometry(basin_boundary)
-        self.log("Basin boundary topology verified and sealed.")
+        self.log(
+            "Demo boundary repaired; NO topology claim is made about project data (stub)."
+        )
 
         return {
-            "status": "success",
+            "status": "success",  # the node ran; not a verification verdict
+            "stub": True,
             "crs": "EPSG:4547",
             "fault_barriers": fault_lines,
+            "fault_barriers_source": "synthetic_demo",
             "boundary": valid_boundary,
             "barrier_count": len(fault_lines),
+            "topology_verified": False,
+            "note": "演示占位：断层屏障为合成演示几何，边界修复仅作用于该合成边界，未对项目数据做任何拓扑断言。",
         }

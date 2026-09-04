@@ -21,11 +21,17 @@ class SeismicAgent(BaseAgent):
     def run(self, task: TaskNode, context: dict[str, Any]) -> dict[str, Any]:
         self.log(f"Executing seismic volume extraction: {task.description}")
 
-        # Simulate seismic attribute extraction
+        # #1143-extension: demo stub — NO volume is opened and NO attribute is
+        # computed here. The coordinates below are display placeholders, and
+        # coherence is explicitly NOT calculated.
+        self.log("Seismic stub executed: no volume loaded, no attribute computed.")
         return {
-            "status": "success",
-            "active_inline": 250,
-            "active_crossline": 340,
-            "active_timeslice_ms": 1450.0,
-            "coherence_calculated": True,
+            "status": "success",  # the node ran; nothing was computed
+            "stub": True,
+            "active_inline": None,
+            "active_crossline": None,
+            "active_timeslice_ms": None,
+            "coherence_calculated": False,
+            "volume_loaded": False,
+            "note": "演示占位：未加载地震体、未计算相干等属性；坐标字段为空而非虚构值。",
         }

@@ -104,6 +104,14 @@ class ToolRegistry:
                 parameters=tuple(params),
                 handler=func,
             )
+            # #1185: same-name registration is refused (like ActionRegistry /
+            # ProviderRegistry) — silent override hides cross-feature
+            # collisions until the wrong handler runs.
+            if name in self._tools:
+                raise ValueError(
+                    f"tool '{name}' is already registered; refusing silent override "
+                    "(pick a unique name)"
+                )
             self._tools[name] = tool_def
             return func
 
@@ -124,6 +132,13 @@ class ToolRegistry:
         tool = self.get_tool(name)
         if tool is None:
             raise KeyError(f"Tool '{name}' is not registered.")
+        # #1185: validate against the tool schema before dispatch — a missing
+        # required parameter is a clear contract error, not a handler crash.
+        missing = [p.name for p in tool.parameters if p.required and p.name not in kwargs]
+        if missing:
+            raise TypeError(
+                f"tool '{name}' missing required parameter(s): {', '.join(missing)}"
+            )
         return tool.handler(**kwargs)
 
 

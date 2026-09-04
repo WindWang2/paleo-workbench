@@ -32,6 +32,13 @@ class SkillRegistry:
         steps: tuple[str, ...] = (),
     ) -> Callable[[Callable], Callable]:
         def decorator(func: Callable) -> Callable:
+            # #1185: same-name registration is refused — silent override hides
+            # cross-feature collisions.
+            if name in self._skills:
+                raise ValueError(
+                    f"skill '{name}' is already registered; refusing silent override "
+                    "(pick a unique name)"
+                )
             skill_def = SkillDefinition(
                 name=name,
                 description=description,

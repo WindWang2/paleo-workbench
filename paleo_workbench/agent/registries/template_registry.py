@@ -85,6 +85,13 @@ class TemplateRegistry:
         ]
 
     def register_layout(self, template: MapLayoutTemplate) -> None:
+        # #1185: same-id registration is refused — silent override hides
+        # cross-feature collisions.
+        if template.id in self._layouts:
+            raise ValueError(
+                f"map layout template '{template.id}' is already registered; refusing "
+                "silent override (pick a unique id)"
+            )
         self._layouts[template.id] = template
 
     def get_layout(self, layout_id: str) -> MapLayoutTemplate | None:

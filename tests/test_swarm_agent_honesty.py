@@ -1,11 +1,15 @@
-"""#1143: swarm stub agents must not fabricate QC/provenance/delivery claims."""
+"""#1143 (+extension): swarm stub agents must not fabricate QC/provenance/delivery claims."""
 from __future__ import annotations
 
 from types import SimpleNamespace
 
+from paleo_workbench.agent.agents.carto_agent import CartographyAgent
 from paleo_workbench.agent.agents.data_agent import DataAgent
+from paleo_workbench.agent.agents.gis_agent import GISAgent
 from paleo_workbench.agent.agents.qa_agent import QAAgent
 from paleo_workbench.agent.agents.result_agent import ResultAgent
+from paleo_workbench.agent.agents.seismic_agent import SeismicAgent
+from paleo_workbench.agent.agents.viz_agent import VisualizationAgent
 from paleo_workbench.agent.agents.well_agent import WellAgent
 from paleo_workbench.agent.planner import TaskNode
 from paleo_workbench.project.domain import WellEntity
@@ -74,3 +78,43 @@ def test_well_agent_without_project_returns_empty_points() -> None:
     assert out["status"] == "success"
     assert out["well_points"] == []
     assert out["correlated_well_count"] == 0
+
+
+# ------------------------------------------- #1143 extension: 4 more agents --
+def test_gis_agent_marks_fault_barriers_synthetic_and_unverified() -> None:
+    out = GISAgent().run(_node("gis_agent"), {})
+    assert out["status"] == "success"  # node executed; not a verification verdict
+    assert out["stub"] is True
+    # The old agent claimed "topology verified and sealed" — never again.
+    assert out["topology_verified"] is False
+    assert out["fault_barriers_source"] == "synthetic_demo"
+    assert out["barrier_count"] == len(out["fault_barriers"])
+
+
+def test_carto_agent_marks_grid_synthetic_not_interpolated() -> None:
+    out = CartographyAgent().run(_node("carto_agent"), {})
+    assert out["status"] == "success"
+    assert out["stub"] is True
+    assert out["grid_source"] == "synthetic_demo"
+    assert out["interpolated_from_wells"] is False
+    assert out["grid_data"] is not None and out["grid_data"].size > 0
+
+
+def test_seismic_agent_does_not_claim_loaded_volume_or_coherence() -> None:
+    out = SeismicAgent().run(_node("seismic_agent"), {})
+    assert out["status"] == "success"
+    assert out["stub"] is True
+    assert out["coherence_calculated"] is False  # was a fabricated True
+    assert out["volume_loaded"] is False
+    assert out["active_inline"] is None  # placeholder coords removed, not faked
+
+
+def test_viz_agent_selects_template_but_claims_no_placement_or_export() -> None:
+    out = VisualizationAgent().run(_node("viz_agent"), {})
+    assert out["status"] == "success"
+    assert out["stub"] is True
+    # Template/palette selection is real; placement and export never ran.
+    assert out["layout_template"]
+    assert out["template_elements"]  # what the template WOULD include
+    assert out["elements_placed"] == []
+    assert out["export_formats_ready"] == []
