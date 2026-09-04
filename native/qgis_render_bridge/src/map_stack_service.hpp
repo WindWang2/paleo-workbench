@@ -11,6 +11,8 @@ class QgsMapCanvas;
 class QgsLayerTreeView;
 class QgsMapTool;
 class QgsMapToolDigitizeFeature;
+class QgsVectorLayer;
+using QgsFeatureId = long long;
 
 namespace pwb::qgis_render {
 
@@ -107,6 +109,22 @@ public:
       std::uintptr_t canvas,
       std::function<void(const std::string&, const std::string&)> callback);
 
+  // 选择/identify 回调（M3 Task 4）：callback(action, payload_json)，
+  // action ∈ "selection"（layer_doc_id/feature_ids/modifiers）|"identify"
+  // （layer_doc_id/feature_id）。set_map_tool kind 扩展 "select"|"identify"。
+  void setSelectionCallback(
+      std::uintptr_t canvas,
+      std::function<void(const std::string&, const std::string&)> callback);
+  // 画布当前图层（原生选择/identify 的目标图层）；doc_id 未命中镜像抛
+  // invalid_argument。
+  void setCurrentLayer(std::uintptr_t canvas, const std::string& doc_id);
+  // 选中高亮投影（QgsHighlight，QGIS 桌面选中样式）：Python 选集是权威，
+  // 每次调用整组替换。feature_ids_json 为 JSON 字符串数组；未知 id 跳过。
+  void highlightFeatures(std::uintptr_t canvas, const std::string& doc_id,
+                         const std::string& feature_ids_json);
+  void clearHighlights(std::uintptr_t canvas);
+  int highlightCount(std::uintptr_t canvas) const;
+
   std::string addVectorLayerGeoJson(const std::string& name,
                                     const std::string& geometry_type,
                                     const std::string& crs_auth_id,
@@ -156,6 +174,8 @@ private:
   // vertex=true → PwbVertexTool，false → PwbMoveTool（M3 Task 3）。
   QgsMapTool* editToolFor(std::uintptr_t canvas_addr, QgsMapCanvas* canvas,
                           bool vertex);
+  // 文档 feature_id 解析器（镜像 fid 映射表）；供 select/identify 共用。
+  std::function<std::string(QgsVectorLayer*, QgsFeatureId)> fidResolver();
   void ensureNotStale(std::uintptr_t canvas_addr);
   void eraseMirrorByQgisId(const std::string& qgis_id);
   void eraseMirrorByDocId(const std::string& doc_id);

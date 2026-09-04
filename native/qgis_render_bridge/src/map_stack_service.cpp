@@ -40,6 +40,7 @@
 #include <qgsmaplayer.h>
 #include <qgsmaptool.h>
 #include <qgsmaptooldigitizefeature.h>
+#include <qgsmaptoolidentifyfeature.h>
 #include <qgsmaptoolpan.h>
 #include <qgsmaptoolzoom.h>
 #include <qgspointxy.h>
@@ -47,6 +48,8 @@
 #include <qgsproject.h>
 #include <qgsreadwritecontext.h>
 #include <qgsrectangle.h>
+#include <qgsrubberband.h>
+#include <qgshighlight.h>
 #include <qgssnappingconfig.h>
 #include <qgssnappingutils.h>
 #include <qgsvectorlayer.h>
@@ -374,6 +377,14 @@ struct QgisMapStack::Impl {
   std::unordered_map<std::uintptr_t,
                      std::function<void(const std::string&, const std::string&)>>
       edit_pick_callbacks;
+  // 选择/identify（M3 Task 4；Qt parent=画布持有）与选中高亮投影
+  std::unordered_map<std::uintptr_t, PwbSelectTool*> select_tools;
+  std::unordered_map<std::uintptr_t, QgsMapToolIdentifyFeature*> identify_tools;
+  std::unordered_map<std::uintptr_t,
+                     std::function<void(const std::string&, const std::string&)>>
+      selection_callbacks;
+  std::unordered_map<std::uintptr_t, std::vector<std::unique_ptr<QgsHighlight>>>
+      highlights;
   std::unordered_map<std::uintptr_t, QMetaObject::Connection> extent_connections;
   std::unordered_map<std::uintptr_t, QMetaObject::Connection> xy_connections;
   // I1: retain rejection after erasing the QPointer tombstone — otherwise the
@@ -677,6 +688,10 @@ void QgisMapStack::shutdown() {
   impl_->vertex_tools.clear();
   impl_->move_tools.clear();
   impl_->edit_pick_callbacks.clear();
+  impl_->select_tools.clear();
+  impl_->identify_tools.clear();
+  impl_->selection_callbacks.clear();
+  impl_->highlights.clear();
   impl_->canvas_refs.clear();
   impl_->dead_canvas_addrs.clear();
   impl_->extent_callbacks.clear();
@@ -793,6 +808,10 @@ void QgisMapStack::destroyCanvas(std::uintptr_t canvas_addr) {
   impl_->vertex_tools.erase(canvas_addr);
   impl_->move_tools.erase(canvas_addr);
   impl_->edit_pick_callbacks.erase(canvas_addr);
+  impl_->select_tools.erase(canvas_addr);
+  impl_->identify_tools.erase(canvas_addr);
+  impl_->selection_callbacks.erase(canvas_addr);
+  impl_->highlights.erase(canvas_addr);
   impl_->canvas_refs.erase(it);
   impl_->dead_canvas_addrs.erase(canvas_addr);
 }
@@ -1357,6 +1376,55 @@ void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kin
     canvas->setMapTool(editToolFor(canvas_addr, canvas, kind == "vertex"));
     return;
   }
+  if (kind == "select" || kind == "identify") {
+    std::weak_ptr<char> alive = alive_token_;
+    auto cb = [this, alive, canvas_addr](const std::string& action,
+                                         const std::string& payload) {
+      if (alive.expired()) return;
+      auto cbIt = impl_->selection_callbacks.find(canvas_addr);
+      if (cbIt == impl_->selection_callbacks.end() || !cbIt->second) return;
+      cbIt->second(action, payload);
+    };
+    if (kind == "select") {
+      auto& slot = impl_->select_tools[canvas_addr];
+      if (slot == nullptr)
+        slot = new PwbSelectTool(canvas, std::move(cb), fidResolver());
+      canvas->setMapTool(slot);
+      return;
+    }
+    // QgsMapToolIdentifyFeature 无 setLayer——目标图层在构造时钉死；
+    // 每次激活按当前图层新建（旧工具由 Qt parent=画布回收）。
+    auto* tool = new QgsMapToolIdentifyFeature(
+        canvas, qobject_cast<QgsVectorLayer*>(canvas->currentLayer()));
+    impl_->identify_tools[canvas_addr] = tool;
+    std::weak_ptr<char> alive2 = alive_token_;
+    QObject::connect(
+        tool,
+        static_cast<void (QgsMapToolIdentifyFeature::*)(const QgsFeature&)>(
+            &QgsMapToolIdentifyFeature::featureIdentified),
+        canvas,
+        [this, alive2, canvas_addr](const QgsFeature& feature) {
+        if (alive2.expired()) return;
+        auto cbIt = impl_->selection_callbacks.find(canvas_addr);
+        if (cbIt == impl_->selection_callbacks.end() || !cbIt->second) return;
+        std::string docId;
+        std::string fid = std::to_string(static_cast<long long>(feature.id()));
+        auto refIt = impl_->canvas_refs.find(canvas_addr);
+        if (refIt != impl_->canvas_refs.end() && !refIt->second.isNull()) {
+          auto* vl = qobject_cast<QgsVectorLayer*>(refIt->second->currentLayer());
+          if (vl != nullptr) {
+            docId = vl->customProperty(QStringLiteral("pwb/doc_id"))
+                        .toString()
+                        .toStdString();
+            fid = fidResolver()(vl, feature.id());
+          }
+        }
+        cbIt->second("identify", std::string("{\"layer_doc_id\":\"") + docId +
+                                     "\",\"feature_id\":\"" + fid + "\"}");
+      });
+    canvas->setMapTool(tool);
+    return;
+  }
   if (kind == "pan") {
     impl_->tools[canvas_addr] = std::make_unique<QgsMapToolPan>(canvas);
   } else if (kind == "zoomIn") {
@@ -1426,19 +1494,10 @@ void QgisMapStack::setDigitizeCallback(
   impl_->digitize_callbacks[canvas_addr] = std::move(callback);
 }
 
-QgsMapTool* QgisMapStack::editToolFor(std::uintptr_t canvas_addr,
-                                      QgsMapCanvas* canvas, bool vertex) {
+std::function<std::string(QgsVectorLayer*, QgsFeatureId)>
+QgisMapStack::fidResolver() {
   std::weak_ptr<char> alive = alive_token_;
-  PwbEditPickTool::Callback cb = [this, alive, canvas_addr](
-                                     const std::string& action,
-                                     const std::string& payload) {
-    if (alive.expired()) return;
-    auto cbIt = impl_->edit_pick_callbacks.find(canvas_addr);
-    if (cbIt == impl_->edit_pick_callbacks.end() || !cbIt->second) return;
-    cbIt->second(action, payload);
-  };
-  PwbEditPickTool::FeatureIdResolver resolver =
-      [this, alive](QgsVectorLayer* vl, QgsFeatureId fid) -> std::string {
+  return [this, alive](QgsVectorLayer* vl, QgsFeatureId fid) -> std::string {
     if (alive.expired() || vl == nullptr) return {};
     const std::string docId = vl->customProperty(QStringLiteral("pwb/doc_id"))
                                   .toString()
@@ -1450,6 +1509,20 @@ QgsMapTool* QgisMapStack::editToolFor(std::uintptr_t canvas_addr,
     }
     return std::to_string(static_cast<long long>(fid));
   };
+}
+
+QgsMapTool* QgisMapStack::editToolFor(std::uintptr_t canvas_addr,
+                                      QgsMapCanvas* canvas, bool vertex) {
+  std::weak_ptr<char> alive = alive_token_;
+  PwbEditPickTool::Callback cb = [this, alive, canvas_addr](
+                                     const std::string& action,
+                                     const std::string& payload) {
+    if (alive.expired()) return;
+    auto cbIt = impl_->edit_pick_callbacks.find(canvas_addr);
+    if (cbIt == impl_->edit_pick_callbacks.end() || !cbIt->second) return;
+    cbIt->second(action, payload);
+  };
+  PwbEditPickTool::FeatureIdResolver resolver = fidResolver();
   if (vertex) {
     auto& slot = impl_->vertex_tools[canvas_addr];
     if (slot == nullptr)
@@ -1468,6 +1541,74 @@ void QgisMapStack::setEditPickCallback(
   ensureNotStale(canvas_addr);
   canvasOrThrow(canvas_addr);
   impl_->edit_pick_callbacks[canvas_addr] = std::move(callback);
+}
+
+void QgisMapStack::setSelectionCallback(
+    std::uintptr_t canvas_addr,
+    std::function<void(const std::string&, const std::string&)> callback) {
+  ensureNotStale(canvas_addr);
+  canvasOrThrow(canvas_addr);
+  impl_->selection_callbacks[canvas_addr] = std::move(callback);
+}
+
+void QgisMapStack::setCurrentLayer(std::uintptr_t canvas_addr,
+                                   const std::string& doc_id) {
+  ensureNotStale(canvas_addr);
+  QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
+  QgsVectorLayer* layer = findMirrorByDocId(QgsProject::instance(), doc_id);
+  if (layer == nullptr)
+    throw std::invalid_argument("unknown doc_id for current layer: " + doc_id);
+  canvas->setCurrentLayer(layer);
+}
+
+void QgisMapStack::highlightFeatures(std::uintptr_t canvas_addr,
+                                     const std::string& doc_id,
+                                     const std::string& feature_ids_json) {
+  ensureNotStale(canvas_addr);
+  QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
+  QgsVectorLayer* layer = findMirrorByDocId(QgsProject::instance(), doc_id);
+  if (layer == nullptr)
+    throw std::invalid_argument("unknown doc_id for highlight: " + doc_id);
+  clearHighlights(canvas_addr);
+  const QJsonDocument doc =
+      QJsonDocument::fromJson(QByteArray::fromStdString(feature_ids_json));
+  if (!doc.isArray()) throw std::invalid_argument("feature_ids must be a JSON array");
+  // 反查：文档 feature_id → 镜像 QgsFeatureId
+  std::unordered_map<std::string, long long> reverse;
+  auto it = impl_->mirror_feature_fids.find(doc_id);
+  if (it != impl_->mirror_feature_fids.end()) {
+    for (const auto& kv : it->second) reverse[kv.second] = kv.first;
+  }
+  auto& bucket = impl_->highlights[canvas_addr];
+  for (const QJsonValue& v : doc.array()) {
+    const std::string fid = v.toString().toStdString();
+    auto rit = reverse.find(fid);
+    if (rit == reverse.end()) continue;
+    QgsFeature feature;
+    QgsFeatureIterator fit =
+        layer->getFeatures(QgsFeatureRequest(static_cast<QgsFeatureId>(rit->second)));
+    if (!fit.nextFeature(feature) || !feature.hasGeometry())
+      continue;
+    auto* h = new QgsHighlight(canvas, feature.geometry(), layer);
+    bucket.emplace_back(h);
+  }
+  canvas->refresh();
+}
+
+void QgisMapStack::clearHighlights(std::uintptr_t canvas_addr) {
+  auto it = impl_->highlights.find(canvas_addr);
+  if (it != impl_->highlights.end()) {
+    it->second.clear();
+    impl_->highlights.erase(it);
+  }
+  auto refIt = impl_->canvas_refs.find(canvas_addr);
+  if (refIt != impl_->canvas_refs.end() && !refIt->second.isNull())
+    refIt->second->refresh();
+}
+
+int QgisMapStack::highlightCount(std::uintptr_t canvas_addr) const {
+  auto it = impl_->highlights.find(canvas_addr);
+  return it == impl_->highlights.end() ? 0 : static_cast<int>(it->second.size());
 }
 
 void QgisMapStack::setExtentCallback(std::uintptr_t canvas_addr, ExtentCallback callback) {

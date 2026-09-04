@@ -712,6 +712,13 @@ class CompositeEditController(QObject):
             return
         self._active_layer_id = layer_id
         self._rebind_active_tool()
+        # M3：原生选择/identify 工具的目标图层 = 活动图层（QGIS currentLayer 语义）
+        canvas = self._canvas
+        if canvas is not None and hasattr(canvas, "set_current_layer"):
+            try:
+                canvas.set_current_layer(layer_id or "")
+            except Exception:
+                pass
         self.state_changed.emit()
 
     def start_editing(self) -> None:

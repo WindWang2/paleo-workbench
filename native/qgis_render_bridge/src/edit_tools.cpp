@@ -8,6 +8,7 @@
 #include <qgsabstractgeometry.h>
 #include <qgsmapcanvas.h>
 #include <qgsmapmouseevent.h>
+#include <qgsmaptoolselectionhandler.h>
 #include <qgspointlocator.h>
 #include <qgsrubberband.h>
 #include <qgssnappingutils.h>
@@ -226,5 +227,88 @@ void PwbMoveTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
                         ",\"dy\":" + QString::number(dy, 'g', 12).toStdString() + "}";
   callback_("feature_moved", payload);
 }
+// -- 选择 -------------------------------------------------------------------
+
+PwbSelectTool::PwbSelectTool(QgsMapCanvas* canvas, Callback callback,
+                             FeatureIdResolver resolver)
+    : PwbEditPickTool(canvas, std::move(callback), std::move(resolver)),
+      handler_(std::make_unique<QgsMapToolSelectionHandler>(
+          canvas, QgsMapToolSelectionHandler::SelectSimple)) {
+  QObject::connect(handler_.get(),
+                   &QgsMapToolSelectionHandler::geometryChanged, canvas,
+                   [this](Qt::KeyboardModifiers modifiers) {
+                     onGeometryChanged(modifiers);
+                   });
+}
+
+void PwbSelectTool::canvasPressEvent(QgsMapMouseEvent* e) {
+  handler_->canvasPressEvent(e);
+}
+
+void PwbSelectTool::canvasMoveEvent(QgsMapMouseEvent* e) {
+  handler_->canvasMoveEvent(e);
+}
+
+void PwbSelectTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
+  handler_->canvasReleaseEvent(e);
+}
+
+void PwbSelectTool::keyReleaseEvent(QKeyEvent* e) {
+  handler_->keyReleaseEvent(e);
+}
+
+void PwbSelectTool::deactivate() {
+  handler_->deactivate();
+  PwbEditPickTool::deactivate();
+}
+
+void PwbSelectTool::onGeometryChanged(Qt::KeyboardModifiers modifiers) {
+  QStringList ids;
+  std::string docId;
+  auto* vl = qobject_cast<QgsVectorLayer*>(canvas()->currentLayer());
+  const QgsGeometry g = handler_->selectedGeometry();
+  if (vl != nullptr && !g.isEmpty()) {
+    docId = vl->customProperty(QStringLiteral("pwb/doc_id")).toString().toStdString();
+    if (!docId.empty()) {
+      const double mup = canvas()->mapSettings().mapUnitsPerPixel();
+      const double tol = kTolerancePx * mup;
+      QgsFeature f;
+      if (g.type() == Qgis::GeometryType::Point) {
+        const QgsPointXY p = g.asPoint();
+        const QgsRectangle rect(p.x() - tol, p.y() - tol, p.x() + tol,
+                                p.y() + tol);
+        const QgsGeometry probe = QgsGeometry::fromPointXY(p);
+        auto it = vl->getFeatures(QgsFeatureRequest(rect));
+        while (it.nextFeature(f)) {
+          if (f.hasGeometry() && f.geometry().distance(probe) <= tol)
+            ids << QString::fromStdString(
+                resolver_ ? resolver_(vl, f.id())
+                          : std::to_string(static_cast<long long>(f.id())));
+        }
+      } else {
+        auto it = vl->getFeatures(QgsFeatureRequest(g.boundingBox()));
+        while (it.nextFeature(f)) {
+          if (f.hasGeometry() && g.intersects(f.geometry()))
+            ids << QString::fromStdString(
+                resolver_ ? resolver_(vl, f.id())
+                          : std::to_string(static_cast<long long>(f.id())));
+        }
+      }
+    }
+  }
+  QStringList mods;
+  if (modifiers & Qt::ControlModifier) mods << QStringLiteral("ctrl");
+  if (modifiers & Qt::ShiftModifier) mods << QStringLiteral("shift");
+  QStringList quoted;
+  for (const QString& id : ids) quoted << "\"" + id + "\"";
+  QStringList quotedMods;
+  for (const QString& m : mods) quotedMods << "\"" + m + "\"";
+  const std::string payload =
+      std::string("{\"layer_doc_id\":\"") + docId + "\",\"feature_ids\":[" +
+      quoted.join(QStringLiteral(",")).toStdString() + "],\"modifiers\":[" +
+      quotedMods.join(QStringLiteral(",")).toStdString() + "]}";
+  callback_("selection", payload);
+}
 
 }  // namespace pwb::qgis_render
+

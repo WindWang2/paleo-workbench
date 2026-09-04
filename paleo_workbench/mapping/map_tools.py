@@ -170,6 +170,28 @@ class SelectTool(MapTool):
             self.layer.set_selection((feature_id,))
         return True
 
+    def commit_selection(
+        self, feature_ids: Iterable[str], modifiers: Iterable[str] = ()
+    ) -> bool:
+        """QGIS 原生选择工具结果落图层选集（M3）。
+
+        修饰键语义对齐 QGIS 桌面：无=替换，Ctrl=并集，Shift=差集，
+        Ctrl+Shift=交集。
+        """
+        ids = {str(value) for value in feature_ids}
+        mods = {str(value).lower() for value in modifiers}
+        current = set(self.layer.selection)
+        if "ctrl" in mods and "shift" in mods:
+            new = current & ids
+        elif "ctrl" in mods:
+            new = current | ids
+        elif "shift" in mods:
+            new = current - ids
+        else:
+            new = ids
+        self.layer.set_selection(new)
+        return True
+
 
 class RectangleSelectTool(MapTool):
     tool_id = "select_rectangle"

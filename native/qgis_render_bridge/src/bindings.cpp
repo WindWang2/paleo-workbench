@@ -663,6 +663,24 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                      f(action, payload);
                    });
              })
+        .def("set_selection_callback",
+             [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas,
+                py::function f) {
+               self.setSelectionCallback(
+                   canvas, [f = std::move(f)](const std::string& action,
+                                              const std::string& payload) {
+                     py::gil_scoped_acquire gil;
+                     f(action, payload);
+                   });
+             })
+        .def("set_current_layer",
+             &pwb::qgis_render::QgisMapStack::setCurrentLayer)
+        .def("highlight_features",
+             &pwb::qgis_render::QgisMapStack::highlightFeatures)
+        .def("clear_highlights",
+             &pwb::qgis_render::QgisMapStack::clearHighlights)
+        .def("highlight_count",
+             &pwb::qgis_render::QgisMapStack::highlightCount)
         .def("set_snapping_config",
              &pwb::qgis_render::QgisMapStack::setSnappingConfig)
         .def("snap_to_map",

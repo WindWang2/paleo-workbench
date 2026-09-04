@@ -331,6 +331,17 @@ class QgisCanvasShim(QWidget):
         except Exception:
             pass
 
+    def set_current_layer(self, doc_id: str) -> None:
+        """画布当前图层（原生选择/identify 的目标图层）；空串/未知 id 忽略。"""
+        if getattr(self, "_shutdown_done", False) or not self.canvas_address:
+            return
+        if not doc_id:
+            return
+        try:
+            self.stack.set_current_layer(self.canvas_address, str(doc_id))
+        except Exception:
+            pass
+
     def _restore_tool_patch(self) -> None:
         try:
             tools = getattr(self, "_tools_wrapped_target", None)
@@ -388,6 +399,8 @@ class QgisCanvasShim(QWidget):
                         "add_polygon": "addPolygon",
                         "vertex": "vertex",
                         "move_feature": "move",
+                        "select": "select",
+                        "select_rectangle": "select",
                         "pan": "pan",
                     }.get(tool_id, "pan")
                     try:
@@ -471,6 +484,52 @@ class QgisCanvasShim(QWidget):
 
         try:
             self.stack.set_edit_pick_callback(self.canvas_address, _on_edit_pick)
+        except Exception:
+            pass
+
+        # M3 Task 4：原生选择/identify 结果 → Python 选集（权威）+ 高亮投影。
+        def _on_selection(action: str, payload_json: str) -> None:
+            shim = self_ref()
+            if shim is None or getattr(shim, "_shutdown_done", False):
+                return
+            try:
+                payload = json.loads(payload_json)
+            except Exception:
+                return
+            if action != "selection":
+                return  # identify 结果暂无 Python 消费方（桥级能力已就绪）
+            controller = getattr(shim, "_tool_controller", None)
+            tool = getattr(controller, "active_tool", None) if controller is not None else None
+            commit = getattr(tool, "commit_selection", None)
+            if commit is None:
+                return
+            try:
+                ok = bool(commit(payload.get("feature_ids") or (),
+                                 payload.get("modifiers") or ()))
+            except Exception:
+                ok = False
+            if not ok:
+                return
+            # 高亮投影：Python 选集是权威，QgsHighlight 只是视觉投影
+            layer = getattr(tool, "layer", None)
+            if layer is None:
+                return
+            try:
+                selection = sorted(str(i) for i in layer.selection)
+                if selection:
+                    shim.stack.highlight_features(
+                        shim.canvas_address, str(layer.id), json.dumps(selection))
+                else:
+                    shim.stack.clear_highlights(shim.canvas_address)
+            except Exception:
+                pass
+            try:
+                shim.tool_operation.emit(False)
+            except Exception:
+                pass
+
+        try:
+            self.stack.set_selection_callback(self.canvas_address, _on_selection)
         except Exception:
             pass
 

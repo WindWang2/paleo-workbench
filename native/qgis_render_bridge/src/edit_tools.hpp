@@ -20,6 +20,7 @@
 
 class QgsRubberBand;
 class QgsVectorLayer;
+class QgsMapToolSelectionHandler;
 
 namespace pwb::qgis_render {
 
@@ -88,6 +89,25 @@ class PwbMoveTool : public PwbEditPickTool {
 
  private:
   QgsPointXY origin_;
+};
+
+// 原生选择工具（M3 Task 4）：QgsMapToolSelectionHandler 承载
+// 点击/框选/多边形等交互与 rubber band，命中计算在桥内（当前图层），
+// 结果经回调交 Python——不写 QGIS 层选集（选集权威在 Python）。
+class PwbSelectTool : public PwbEditPickTool {
+ public:
+  PwbSelectTool(QgsMapCanvas* canvas, Callback callback,
+                FeatureIdResolver resolver = nullptr);
+  void canvasPressEvent(QgsMapMouseEvent* e) override;
+  void canvasMoveEvent(QgsMapMouseEvent* e) override;
+  void canvasReleaseEvent(QgsMapMouseEvent* e) override;
+  void keyReleaseEvent(QKeyEvent* e) override;
+  void deactivate() override;
+
+ private:
+  void onGeometryChanged(Qt::KeyboardModifiers modifiers);
+
+  std::unique_ptr<QgsMapToolSelectionHandler> handler_;
 };
 
 }  // namespace pwb::qgis_render

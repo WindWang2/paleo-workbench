@@ -167,3 +167,27 @@ def test_vertex_tool_commit_vertex_move_from_native_drag() -> None:
     # 未知要素 / 无效路径拒绝
     assert tool.commit_vertex_move("nope", (0, 0), (0.0, 0.0)) is False
     assert tool.commit_vertex_move("p1", (9, 9), (0.0, 0.0)) is False
+
+
+def test_select_tool_commit_selection_modifier_semantics() -> None:
+    """M3 Task 4：原生选择结果落选集；无=替换/Ctrl=并/Shift=差/Ctrl+Shift=交。"""
+    layer = VectorLayer(
+        id="facies",
+        name="Facies",
+        features=[
+            VectorFeature("f1", {"type": "Point", "coordinates": [1, 1]}),
+            VectorFeature("f2", {"type": "Point", "coordinates": [2, 2]}),
+        ],
+    )
+    tool = SelectTool(layer, identify=lambda _p: None)
+
+    assert tool.commit_selection(["f1"]) is True
+    assert layer.selection == {"f1"}
+    tool.commit_selection(["f2"], ["ctrl"])
+    assert layer.selection == {"f1", "f2"}
+    tool.commit_selection(["f1"], ["shift"])
+    assert layer.selection == {"f2"}
+    tool.commit_selection(["f1", "f2"], ["ctrl", "shift"])
+    assert layer.selection == {"f2"}
+    tool.commit_selection([], [])
+    assert layer.selection == set()
