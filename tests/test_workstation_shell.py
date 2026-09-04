@@ -145,6 +145,15 @@ def test_well_and_seismic_are_host_docks(qtbot, tmp_path):
     assert not ws.well_dock.isHidden()
 
 
+def test_linked_workspace_has_no_nested_map_document(qtbot, tmp_path):
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    lw = shell.workstation.linked_workspace
+    assert getattr(lw, "map_dock", None) is None
+    assert getattr(lw, "dock_area", None) is None
+    assert getattr(lw, "context_bar", None) is None
+
+
 def test_explorer_separates_data_from_storage_cache(qtbot, tmp_path):
     shell = AppShell(project=_project(tmp_path))
     qtbot.addWidget(shell)

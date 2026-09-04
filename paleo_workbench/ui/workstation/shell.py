@@ -116,19 +116,8 @@ class WorkstationFrame(QWidget):
         )
 
         self.linked_workspace = LinkedInterpretationWorkspace(project, self)
-        # 联动区不再是中央文档：只保留测井/地震内容部件（宿主 dock 接管），
-        # 内部嵌套 dock 与上下文条隐藏（Task 3 彻底删除）。
-        for inner in (
-            getattr(self.linked_workspace, "well_dock", None),
-            getattr(self.linked_workspace, "seismic_dock", None),
-            getattr(self.linked_workspace, "map_dock", None),
-        ):
-            if inner is not None:
-                inner.hide()
+        # 联动区不再是中央文档：内容部件已由宿主 dock 接管，本体保持隐藏。
         self.linked_workspace.hide()
-        context_bar = getattr(self.linked_workspace, "context_bar", None)
-        if context_bar is not None:
-            context_bar.hide()
         self.composite = CompositeDocument(project, self)
         self.page_stack = page_stack
         self.page_stack.setMinimumSize(0, 0)
@@ -247,6 +236,10 @@ class WorkstationFrame(QWidget):
         self.explorer.joint_workspace_requested.connect(self.activate_joint)
         self.linked_workspace.object_selected.connect(self.inspector.show_payload)
         self.linked_workspace.status_changed.connect(self.status_message)
+        self.linked_workspace.well_focused.connect(self._on_well_focused)
+        self.linked_workspace.show_all_wells_requested.connect(
+            lambda: self._show_wells_from_agent()
+        )
         self.composite.object_selected.connect(self.inspector.show_payload)
         self.process_hub.agent.open_well_requested.connect(self._open_well_from_agent)
         self.process_hub.agent.show_wells_requested.connect(self._show_wells_from_agent)
@@ -267,14 +260,9 @@ class WorkstationFrame(QWidget):
             self.composite_layer_dock,
             self.composite_input_dock,
             self.composite_linked_dock,
-        ):
-            dock.topLevelChanged.connect(lambda *_: self._schedule_state_save())
-            dock.dockLocationChanged.connect(lambda *_: self._schedule_state_save())
-            dock.visibilityChanged.connect(lambda *_: self._schedule_state_save())
-        for dock in (
-            self.linked_workspace.seismic_dock,
-            self.linked_workspace.map_dock,
-            self.linked_workspace.well_dock,
+            self.well_dock,
+            self.seismic_dock,
+            self.hub_dock,
         ):
             dock.topLevelChanged.connect(lambda *_: self._schedule_state_save())
             dock.dockLocationChanged.connect(lambda *_: self._schedule_state_save())
@@ -609,6 +597,10 @@ class WorkstationFrame(QWidget):
     def _open_well_from_agent(self, well_name: str) -> None:
         self.show_well(well_name)
 
+    def _on_well_focused(self, well_name: str) -> None:
+        if well_name:
+            self.status_message.emit(f"编图已聚焦井 {well_name}")
+
     def _show_wells_from_agent(self) -> None:
         # 与工具条全幅按钮同一路径：回到 home extent（全部工区井位）。
         self.composite._on_command_requested("full_extent")
@@ -632,9 +624,6 @@ class WorkstationFrame(QWidget):
         data = self._settings.value(self._WINDOW_STATE_KEY)
         if isinstance(data, QByteArray) and not data.isNull():
             self._dock_host.restoreState(data)
-        linked_state = self._settings.value("layout/linked_docks")
-        if isinstance(linked_state, QByteArray) and not linked_state.isNull():
-            self.linked_workspace.restore_dock_state(linked_state)
         # restore 之后必须重新执行响应式策略：restoreState 可能把检查器
         # 在窄屏下重新显示（保存时按「可见」写入），不能让 restore 反杀
         # 响应式隐藏（#1121）。
@@ -659,9 +648,6 @@ class WorkstationFrame(QWidget):
             self.inspector_dock.show()
         try:
             self._settings.setValue(self._WINDOW_STATE_KEY, self._dock_host.saveState())
-            self._settings.setValue(
-                "layout/linked_docks", self.linked_workspace.dock_area.saveState()
-            )
         finally:
             if suppress_visibility_signals:
                 self.inspector_dock.hide()
@@ -707,14 +693,9 @@ class WorkstationFrame(QWidget):
             self.seismic_dock,
             self.hub_dock,
         )
-        linked_docks = (
-            self.linked_workspace.seismic_dock,
-            self.linked_workspace.map_dock,
-            self.linked_workspace.well_dock,
-        )
         # 先断开布局信号再拆除：removeDockWidget/hide 触发的
         # visibilityChanged 不得重新调度 350ms 后的保存（#1124）。
-        for dock in docks + linked_docks:
+        for dock in docks:
             dock.blockSignals(True)
         for dock in docks:
             host = dock.parentWidget()

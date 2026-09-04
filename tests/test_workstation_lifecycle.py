@@ -49,7 +49,7 @@ def workstation(qtbot, tmp_path):
 # --- #1120: linked workspace map canvas shutdown -----------------------------
 
 
-def test_linked_shutdown_stops_map_panel(qtbot, tmp_path):
+def test_linked_shutdown_stops_panels(qtbot, tmp_path):
     frame = WorkstationFrame(_project(tmp_path), QStackedWidget())
     qtbot.addWidget(frame)
     linked = frame.linked_workspace
@@ -64,21 +64,12 @@ def test_linked_shutdown_stops_map_panel(qtbot, tmp_path):
         def shutdown(self) -> None:
             calls.append("well")
 
-    linked.map_panel = _MapPanelSpy(calls)
     linked.seismic_panel = _FakeSeismic()
     linked.well_panel = _FakeWell()
 
     assert linked.shutdown_workers() is True
-    # map 与 seismic/well 同批 teardown，不能遗漏。
-    assert set(calls) == {"map", "seismic", "well"}
-
-
-class _MapPanelSpy:
-    def __init__(self, calls: list[str]) -> None:
-        self._calls = calls
-
-    def shutdown(self) -> None:
-        self._calls.append("map")
+    # seismic/well 同批 teardown，不能遗漏（平面图窗格已随编图核心化删除）。
+    assert set(calls) == {"seismic", "well"}
 
 
 def test_workarea_map_widget_shutdown_stops_canvas(qtbot):
@@ -109,7 +100,7 @@ def test_responsive_hide_is_not_persisted_as_user_layout(qtbot, workstation):
     assert workstation._responsive_hid_inspector
 
     workstation._save_layout(force=True)
-    assert workstation._settings.value("layout/windowState") is not None
+    assert workstation._settings.value("layout/windowState.v4") is not None
 
     # 模拟宽屏冷启动：restore 后检查器可见（blob 记录的是「可见」）。
     workstation.resize(1600, 900)
@@ -171,9 +162,9 @@ def test_flush_layout_writes_after_hide(qtbot, workstation):
     workstation.hide()
     # hide 之后常规保存路径是 no-op；flush_layout 必须仍然落盘。
     workstation._save_layout()
-    assert workstation._settings.value("layout/windowState") is None
+    assert workstation._settings.value("layout/windowState.v4") is None
     workstation.flush_layout()
-    assert workstation._settings.value("layout/windowState") is not None
+    assert workstation._settings.value("layout/windowState.v4") is not None
 
 
 def test_teardown_freezes_state_save(qtbot, workstation):
@@ -208,29 +199,8 @@ def test_refresh_shell_flushes_layout_before_hide(qtbot, tmp_path, monkeypatch):
 
 # --- #1125: linked restore gate ------------------------------------------------
 
-
-def test_linked_default_split_sizes_skip_after_restore(qtbot, workstation):
-    linked = workstation.linked_workspace
-    assert linked._dock_state_restored is False
-    assert linked.restore_dock_state(linked.save_dock_state()) is True
-    assert linked._dock_state_restored is True
-
-    seismic = linked.seismic_dock
-    seismic.resize(411, 300)
-    size_before = seismic.size()
-    # 定时器驱动的默认比例不得覆盖已恢复的用户布局。
-    linked._apply_default_split_sizes()
-    assert seismic.size() == size_before
-
-    # 显式用户动作（恢复分屏）仍然生效。
-    linked._apply_default_split_sizes(force=True)
-
-
-def test_linked_default_split_sizes_apply_without_restore(qtbot, workstation):
-    linked = workstation.linked_workspace
-    assert linked._dock_state_restored is False
-    # 无保存状态时默认比例照常应用（不抛错即可；offscreen 布局可能未激活）。
-    linked._apply_default_split_sizes()
+# NOTE（编图核心化 Task 3）：嵌套 dock_area 与默认分屏比例已随平面图窗格删除；
+# 宿主 QMainWindow.saveState/restoreState 覆盖全部宿主 dock，以下两例失效删除。
 
 
 # --- #1126: project save flushes composite edit sessions ----------------------
