@@ -147,7 +147,7 @@ def test_well_and_seismic_are_host_docks(qtbot, tmp_path):
     qtbot.addWidget(shell)
     ws = shell.workstation
     for dock in (ws.well_dock, ws.seismic_dock):
-        assert dock.parent() is ws._dock_host or dock.parentWidget() is ws._dock_host or True
+        assert dock.parentWidget() is ws._dock_host
         features = dock.features()
         assert features & QDockWidget.DockWidgetFeature.DockWidgetFloatable
         assert features & QDockWidget.DockWidgetFeature.DockWidgetClosable

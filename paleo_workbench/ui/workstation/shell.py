@@ -67,7 +67,6 @@ class WorkstationFrame(QWidget):
         # teardown 阶段冻结布局保存：拆除 dock 触发的 visibilityChanged
         # 不得把「已拆除」状态写进 QSettings（#1124）。
         self._layout_frozen = False
-        self._composite_docks_visible: dict[str, bool] | None = None
         self._owns_dock_host = dock_host is None
         self._dock_host: QMainWindow = dock_host if dock_host is not None else QMainWindow()
         self._save_timer = QTimer(self)
@@ -318,6 +317,10 @@ class WorkstationFrame(QWidget):
         self.linked_workspace.ensure_views()
         if resource is not None and self.linked_workspace.seismic_panel is not None:
             self.linked_workspace.seismic_panel.show_resource(resource, self._project)
+            name = str(getattr(resource, "name", "") or "")
+            self.linked_workspace.seismic_pane.set_title(
+                f"地震剖面 · {name}" if name else "地震剖面"
+            )
 
     def show_hub_page(self, title: str) -> None:
         self.hub_dock.setWindowTitle(str(title or "功能页"))
@@ -335,10 +338,6 @@ class WorkstationFrame(QWidget):
 
     def activate_legacy(self, title: str = "功能页") -> None:
         self.show_hub_page(title)
-
-    def is_joint_active(self) -> bool:
-        # 联动文档已取消（编图为核心），保留方法供旧调用点。
-        return False
 
     def show_agent(self) -> None:
         self.process_dock.show()
@@ -501,13 +500,6 @@ class WorkstationFrame(QWidget):
         if preset is None:
             return
         vis = preset.visibility
-        composite_memory = {
-            "layer": vis.composite_layer,
-            "input": vis.composite_input,
-            "linked": vis.composite_linked,
-        }
-        # Seed before dock show so composite restores the preset matrix.
-        self._composite_docks_visible = dict(composite_memory)
 
         self.nav_dock.setVisible(vis.nav)
         self.inspector_dock.setVisible(vis.inspector)
@@ -629,7 +621,7 @@ class WorkstationFrame(QWidget):
 
     def _show_wells_from_agent(self) -> None:
         # 与工具条全幅按钮同一路径：回到 home extent（全部工区井位）。
-        self.composite._on_command_requested("full_extent")
+        self.composite.zoom_to_full_extent()
 
     def _undo_agent_gui(self) -> None:
         self.show_well("A12")

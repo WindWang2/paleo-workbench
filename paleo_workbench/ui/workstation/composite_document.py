@@ -892,6 +892,10 @@ class CompositeDocument(QWidget):
         if self._home_extent is not None:
             self.canvas.set_extent(self._home_extent)
 
+    def zoom_to_full_extent(self) -> None:
+        """回到 home extent（全部工区井位），与工具条全幅按钮同一路径。"""
+        self._zoom_home()
+
     # -- 命令与工具回调 ----------------------------------------------------------
 
     def _on_command_requested(self, command_id: str) -> None:

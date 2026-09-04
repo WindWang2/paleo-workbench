@@ -5,6 +5,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
+    QDockWidget,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -59,8 +60,6 @@ class DocumentPane(QFrame):
     def set_title(self, title: str) -> None:
         self.title_label.setText(title)
         # dock 化后标题同时写到 dock 标题栏（拖动柄 / 浮动窗口标题）。
-        from PySide6.QtWidgets import QDockWidget
-
         dock = self.parentWidget()
         if isinstance(dock, QDockWidget):
             dock.setWindowTitle(title)
@@ -197,6 +196,65 @@ class LinkedInterpretationWorkspace(QWidget):
                 panel = profile.parentWidget() if profile is not None else None
                 if panel is not None:
                     panel.hide()
+            # Inline 剖面板的整行 header 太占高度：隐藏它，把标识收成一个
+            # 小徽标插到主工具条（显示/色标/属性/拾取层位/井震标定 那行）开头。
+            inline_profile = getattr(view, "_profile_il", None)
+            inline_panel = (
+                inline_profile.parentWidget() if inline_profile is not None else None
+            )
+            if inline_panel is not None:
+                panel_layout = inline_panel.layout()
+                header = (
+                    panel_layout.itemAt(0).widget()
+                    if panel_layout is not None and panel_layout.count() > 0
+                    else None
+                )
+                if header is not None:
+                    header.hide()
+                    header.setFixedHeight(0)
+            toolbar_row1 = getattr(view, "_toolbar_row1", None)
+            if toolbar_row1 is not None and getattr(view, "_inline_badge", None) is None:
+                badge = QLabel("Inline 剖面")
+                badge.setStyleSheet(
+                    "color: #e53e3e; font-weight: bold; font-size: 11px; padding: 0 4px;"
+                )
+                actions = toolbar_row1.actions()
+                if actions:
+                    toolbar_row1.insertWidget(actions[0], badge)
+                else:
+                    toolbar_row1.addWidget(badge)
+                view._inline_badge = badge
+            for name in (
+                "_3d_mode_combo",
+                "_horizon_menu_btn",
+                "_render_menu_btn",
+                "_overlay_menu_btn",
+                "_slice_label",
+                "_readout_label",
+            ):
+                widget = getattr(view, name, None)
+                if widget is not None:
+                    widget.hide()
+            toolbar = getattr(view, "_toolbar_row1", None)
+            if toolbar is not None:
+                hidden_widgets = {
+                    widget
+                    for widget in (
+                        renderer,
+                        getattr(view, "_3d_mode_combo", None),
+                        getattr(view, "_horizon_menu_btn", None),
+                        getattr(view, "_render_menu_btn", None),
+                        getattr(view, "_overlay_menu_btn", None),
+                        getattr(view, "_slice_label", None),
+                        getattr(view, "_readout_label", None),
+                    )
+                    if widget is not None
+                }
+                for action in toolbar.actions():
+                    widget = toolbar.widgetForAction(action)
+                    label = widget.text().strip() if hasattr(widget, "text") else ""
+                    if widget in hidden_widgets or label in {"3D模式:", "加载 SEGY", "Demo"}:
+                        action.setVisible(False)
 
     def open_well(self, well_name_or_id: str) -> None:
         if not self._views_created:
