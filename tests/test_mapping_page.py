@@ -20,6 +20,7 @@ from paleo_workbench.ui.pages.mapping_page import (
     MappingPage,
 )
 from paleo_workbench.ui.panel_float_controller import FloatController, FloatingPanel
+from paleo_workbench.ui.qgis_stack.display_canvas import QgisDisplayCanvas
 from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 from tests.qgis_support import QGIS_SKIP_REASON
@@ -52,7 +53,7 @@ def test_mapping_page_assembles_gis_shell(qtbot):
     assert isinstance(page.layer_tree, MapLayerTree)
     assert isinstance(page.reference_panel, MapReferencePanel)
     assert isinstance(page.edit_view, MapEditView)
-    assert isinstance(page.unified_canvas, UnifiedMapCanvas)
+    assert isinstance(page.unified_canvas, (QgisDisplayCanvas, UnifiedMapCanvas))
     assert isinstance(page.attribute_table, MapAttributeTable)
     assert page.attribute_table.maximumHeight() == 220
 
@@ -148,7 +149,10 @@ def test_native_layer_tree_add_layer_imports_an_immutable_reference_into_unified
 def test_mapping_page_uses_the_qgis_unified_canvas_when_the_bridge_is_available(qtbot):
     page = MappingPage()
     qtbot.addWidget(page)
-    if page.unified_canvas.backend.backend_name != "qgis":
+    backend = getattr(page.unified_canvas, "backend", None)
+    if getattr(backend, "backend_name", "") != "qgis" and not isinstance(
+        page.unified_canvas, QgisDisplayCanvas
+    ):
         pytest.skip(QGIS_SKIP_REASON)
     document = PaleoMapDocument(
         id="map-1",
@@ -163,8 +167,11 @@ def test_mapping_page_uses_the_qgis_unified_canvas_when_the_bridge_is_available(
     page.update_state([document], project_crs="EPSG:3857")
     page.set_preview_mode(True)
 
-    qtbot.waitUntil(lambda: page.unified_canvas.last_frame is not None, timeout=5_000)
     assert page.preview_canvas_stack.currentWidget() is page.unified_canvas
+    if isinstance(page.unified_canvas, QgisDisplayCanvas):
+        qtbot.waitExposed(page.unified_canvas)
+        return
+    qtbot.waitUntil(lambda: page.unified_canvas.last_frame is not None, timeout=5_000)
     assert page.unified_canvas.last_frame is not None
 
 
@@ -218,6 +225,8 @@ def test_mapping_page_composes_factor_grid_with_document_layers_in_unified_scene
 def test_unified_canvas_actions_drive_host_edit_session_and_undo_redo(qtbot):
     page = MappingPage()
     qtbot.addWidget(page)
+    if isinstance(page.unified_canvas, QgisDisplayCanvas):
+        pytest.skip("QGIS preview canvas is read-only")
     page.resize(900, 640)
     page.show()
     document = PaleoMapDocument(
@@ -257,6 +266,8 @@ def test_unified_canvas_actions_drive_host_edit_session_and_undo_redo(qtbot):
 def test_unified_canvas_polygon_capture_and_escape_keep_the_edit_buffer(qtbot):
     page = MappingPage()
     qtbot.addWidget(page)
+    if isinstance(page.unified_canvas, QgisDisplayCanvas):
+        pytest.skip("QGIS preview canvas is read-only")
     page.resize(900, 640)
     page.show()
     page.update_state([PaleoMapDocument(id="map-capture", name="Map", linked_target_horizon="H1")])

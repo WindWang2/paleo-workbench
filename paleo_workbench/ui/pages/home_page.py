@@ -2,8 +2,9 @@
 
 The work-area map (工区地图) is the centerpiece: a real layered map fed by a
 pure :mod:`~paleo_workbench.mapping.workarea_map_snapshot` producer through
-the renderer-neutral :class:`~paleo_workbench.ui.unified_map_canvas.UnifiedMapCanvas`
-(read-only — no tool controller; pan/zoom only).  Start guide, onboarding
+:func:`~paleo_workbench.ui.qgis_stack.display_canvas.create_display_canvas`
+(QgsMapCanvas when the bridge is present, otherwise UnifiedMapCanvas;
+read-only — no tool controller; pan/zoom only).  Start guide, onboarding
 report, workflow progress, module relationships and the dashboard cards stay
 available around it, so the page contract (``update_state`` + the four
 signals) is unchanged.
@@ -41,7 +42,7 @@ from paleo_workbench.ui.pages.module_relationship import (
     ModuleRelationshipWidget,
 )
 from paleo_workbench.ui.pages.workflow_contract_panel import WorkflowContractPanel
-from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
+from paleo_workbench.ui.qgis_stack.display_canvas import create_display_canvas
 
 # Sentinel: the map has never been bound (≠ "bound to an empty project").
 _MAP_UNBOUND = object()
@@ -114,7 +115,7 @@ class HomePage(QWidget):
         map_layout.addWidget(self.crs_warning_label)
 
         self.map_stack = QStackedWidget()
-        self.map_canvas = UnifiedMapCanvas()
+        self.map_canvas = create_display_canvas()
         # Read-only embedding: no tool controller, navigation (pan/zoom) only.
         self.map_canvas.set_overlay_provider(self._map_overlay_state)
         self.map_canvas.map_clicked.connect(self._on_map_clicked)

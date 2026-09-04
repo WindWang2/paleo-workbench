@@ -6,6 +6,7 @@ pixel-space hit test against the well layers.
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QMouseEvent
+from PySide6.QtWidgets import QApplication
 
 from paleo_workbench.project.domain import CoordinateStatus, WellEntity
 from paleo_workbench.project.models import ProjectDocument
@@ -23,6 +24,23 @@ def _click(widget, pos: QPointF, button=Qt.MouseButton.LeftButton):
     )
     widget.mousePressEvent(press)
     widget.mouseReleaseEvent(release)
+
+
+def _click_map(canvas, pos: QPointF, button=Qt.MouseButton.LeftButton):
+    """Click the native QgsMapCanvas when present; else the widget itself."""
+    native = getattr(canvas, "canvas", None)
+    if native is None or native is canvas:
+        _click(canvas, pos, button=button)
+        return
+    press = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress, pos, button, button, Qt.KeyboardModifier.NoModifier
+    )
+    release = QMouseEvent(
+        QMouseEvent.Type.MouseButtonRelease, pos, button, Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(native, press)
+    QApplication.sendEvent(native, release)
 
 
 def test_canvas_emits_map_clicked_on_bare_left_click(qtbot):
@@ -96,7 +114,7 @@ def test_home_map_well_click_emits_well_activated(qtbot):
 
     # 画布按纵横比适配 extent — 用它自己的变换取 A1 的屏幕坐标。
     target = canvas.map_to_screen((25.0, 50.0))
-    _click(canvas, target)
+    _click_map(canvas, target)
 
     assert len(activated) == 1
     well_id = activated[0]
@@ -118,6 +136,15 @@ def test_home_map_click_far_from_wells_emits_nothing(qtbot):
     activated = []
     page.well_activated.connect(activated.append)
 
-    _click(canvas, QPointF(400, 20))  # 顶部中间，离两口井都远
+    _click_map(canvas, QPointF(400, 20))  # 顶部中间，离两口井都远
 
     assert activated == []
+
+
+def test_home_page_uses_display_canvas_when_bridge_present(qtbot, qapp):
+    from paleo_workbench.ui.pages.home_page import HomePage
+    from paleo_workbench.ui.qgis_stack.display_canvas import QgisDisplayCanvas
+
+    page = HomePage()
+    qtbot.addWidget(page)
+    assert isinstance(page.map_canvas, QgisDisplayCanvas)

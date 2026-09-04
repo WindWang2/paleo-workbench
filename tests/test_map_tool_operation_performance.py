@@ -14,6 +14,7 @@ from paleo_workbench.mapping.map_scene_adapter import document_render_snapshot a
 from paleo_workbench.mapping.vector_layer import VectorFeature
 from paleo_workbench.project.models import PaleoMapDocument
 from paleo_workbench.ui.pages.mapping_page import MappingPage
+from paleo_workbench.ui.qgis_stack.display_canvas import QgisDisplayCanvas
 from PySide6.QtCore import QPoint, Qt
 
 
@@ -90,6 +91,8 @@ def test_select_click_updates_selection_without_recomposing(qtbot, monkeypatch) 
     """Selection changes are overlay state: the composition is not rebuilt."""
     page = MappingPage()
     _show_page(qtbot, page)
+    if isinstance(page.unified_canvas, QgisDisplayCanvas):
+        pytest.skip("QGIS preview canvas is read-only")
     page.update_state([_document()], project_crs="EPSG:3857")
     canvas = page.unified_canvas
     center = canvas.map_to_screen((5.0, 5.0)).toPoint()

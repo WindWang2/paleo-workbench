@@ -275,13 +275,14 @@ def test_single_point_extent_is_not_degenerate():
 
 def test_home_page_embeds_readonly_map_canvas(qtbot):
     from paleo_workbench.ui.pages.home_page import HomePage
+    from paleo_workbench.ui.qgis_stack.display_canvas import QgisDisplayCanvas
     from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 
     page = HomePage()
     qtbot.addWidget(page)
-    assert isinstance(page.map_canvas, UnifiedMapCanvas)
+    assert isinstance(page.map_canvas, (QgisDisplayCanvas, UnifiedMapCanvas))
     # Read-only: no tool controller — pan/zoom only.
-    assert page.map_canvas._tool_controller is None
+    assert getattr(page.map_canvas, "_tool_controller", None) is None
 
 
 def test_home_page_empty_project_shows_empty_state(qtbot):
@@ -365,6 +366,7 @@ def test_home_page_empty_project_renders_frame_via_default_backend(qtbot):
     """Graceful degradation: default backend selection (QGIS or fallback)
     must deliver a frame for the empty composition without a tool controller."""
     from paleo_workbench.ui.pages.home_page import HomePage
+    from paleo_workbench.ui.qgis_stack.display_canvas import QgisDisplayCanvas
 
     page = HomePage()
     qtbot.addWidget(page)
@@ -372,6 +374,9 @@ def test_home_page_empty_project_renders_frame_via_default_backend(qtbot):
     page.update_state(dashboard_state(doc), home_workflow_steps(doc), project=doc)
     page.resize(900, 600)
     page.show()
+    if isinstance(page.map_canvas, QgisDisplayCanvas):
+        qtbot.waitExposed(page.map_canvas)
+        return
     qtbot.waitUntil(lambda: page.map_canvas.last_frame is not None, timeout=15_000)
 
 

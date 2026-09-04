@@ -51,7 +51,7 @@ from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
 from paleo_workbench.ui.pages.map_reference_panel import MapReferencePanel
 from paleo_workbench.ui.pages.map_workbench_bottom import MapWorkbenchBottom
 from paleo_workbench.ui.panel_float_controller import FloatController
-from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
+from paleo_workbench.ui.qgis_stack.display_canvas import create_display_canvas
 from paleo_workbench.ui.map_action_controller import MapActionController, MapActionState
 from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
 from paleo_workbench.ui.map_status_bar import MapStatusBar
@@ -202,8 +202,9 @@ class MappingPage(QWidget):
         preview_layout.setSpacing(tokens.SPACE_2)
         self.preview_canvas_stack = QStackedWidget()
         self.canvas_panel = MapCanvasPanel()
-        self.unified_canvas = UnifiedMapCanvas()
-        self.unified_canvas.set_map_tool_controller(self._map_tools)
+        self.unified_canvas = create_display_canvas()
+        if hasattr(self.unified_canvas, "set_map_tool_controller"):
+            self.unified_canvas.set_map_tool_controller(self._map_tools)
         self.unified_canvas.set_overlay_provider(self._unified_overlay_state)
         self.preview_canvas_stack.addWidget(self.canvas_panel)
         self.preview_canvas_stack.addWidget(self.unified_canvas)

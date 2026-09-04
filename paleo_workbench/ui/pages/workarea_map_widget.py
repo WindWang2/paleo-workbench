@@ -1,8 +1,8 @@
 """WorkAreaMapWidget — 可复用的 GIS 工区地图（井位 + 地震工区 + 边界）。
 
 整个面板就是一张工区图：渲染走与首页/编图一致的
-:class:`~paleo_workbench.ui.unified_map_canvas.UnifiedMapCanvas`（QGIS 渲染
-后端），数据来自纯生产者
+:func:`~paleo_workbench.ui.qgis_stack.display_canvas.create_display_canvas`
+（桥可用为 QgsMapCanvas），数据来自纯生产者
 :mod:`~paleo_workbench.mapping.workarea_map_snapshot`。只读交互：滚轮缩放、
 中键/空格拖拽平移、左键拾取井位（选中 + 高亮 + 激活）。
 
@@ -22,7 +22,7 @@ from paleo_workbench.mapping.workarea_map_snapshot import (
     domain_signature,
     workarea_view_extent,
 )
-from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
+from paleo_workbench.ui.qgis_stack.display_canvas import create_display_canvas
 
 # 井符号拾取容差（屏幕像素），与首页一致。
 _WELL_PICK_RADIUS_PX = 16.0
@@ -49,7 +49,7 @@ class WorkAreaMapWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.map_canvas = UnifiedMapCanvas(parent=self)
+        self.map_canvas = create_display_canvas(parent=self)
         self.map_canvas.set_overlay_provider(self._overlay_state)
         self.map_canvas.map_clicked.connect(self._on_map_clicked)
         layout.addWidget(self.map_canvas, 1)
@@ -57,7 +57,7 @@ class WorkAreaMapWidget(QWidget):
     def shutdown(self) -> None:
         """Stop the render backend before the host destroys the widget.
 
-        ``UnifiedMapCanvas.shutdown`` is idempotent; hidden panes (linked
+        Canvas ``shutdown`` is idempotent; hidden panes (linked
         workspace 平面图) never get a reliable ``closeEvent``, so the host
         must call this on project switch / teardown.
         """
