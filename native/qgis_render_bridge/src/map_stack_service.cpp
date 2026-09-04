@@ -27,6 +27,7 @@
 #include <qgsadvanceddigitizingdockwidget.h>
 #include <qgscoordinatereferencesystem.h>
 #include <qgscoordinatetransform.h>
+#include <qgscompoundcurve.h>
 #include <qgsfeature.h>
 #include <qgsjsonutils.h>
 #include <qgslayertree.h>
@@ -39,6 +40,7 @@
 #include <qgsmapcanvas.h>
 #include <qgsmaplayer.h>
 #include <qgsmaptool.h>
+#include <qgsmaptoolcapture.h>
 #include <qgsmaptooldigitizefeature.h>
 #include <qgsmaptoolidentifyfeature.h>
 #include <qgsmaptoolpan.h>
@@ -1350,6 +1352,21 @@ std::string QgisMapStack::snapToMap(std::uintptr_t canvas_addr, double x,
     out[QStringLiteral("layer_doc_id")] = QString();
   }
   return QJsonDocument(out).toJson(QJsonDocument::Compact).toStdString();
+}
+
+bool QgisMapStack::nativeToolBusy(std::uintptr_t canvas_addr) const {
+  QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
+  QgsMapTool* tool = canvas->mapTool();
+  if (tool == nullptr) return false;
+  // 采点中（已落至少一个点）：Esc 归原生工具（只取消本次捕捉）。
+  // isCapturing() 是 protected，以 captureCurve 顶点数公开判定。
+  if (const auto* capture = dynamic_cast<const QgsMapToolCapture*>(tool))
+    return capture->captureCurve() != nullptr &&
+           capture->captureCurve()->numPoints() > 0;
+  // 顶点/移动拖动中：Esc 归原生工具（取消拖动，不退出工具）。
+  if (const auto* pick = dynamic_cast<const PwbEditPickTool*>(tool))
+    return pick->dragging();
+  return false;
 }
 
 void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kind) {

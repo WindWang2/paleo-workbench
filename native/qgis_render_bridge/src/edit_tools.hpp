@@ -38,6 +38,8 @@ class PwbEditPickTool : public QgsMapTool {
 
   void keyPressEvent(QKeyEvent* e) override;
   void deactivate() override;
+  // M3 Task 5：键盘路径归一——拖动中 Esc 归原生工具，不上送 Python。
+  bool dragging() const noexcept { return dragging_; }
 
  protected:
   static constexpr double kTolerancePx = 10.0;

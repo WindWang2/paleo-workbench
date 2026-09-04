@@ -93,6 +93,9 @@ public:
   // 地图坐标捕捉探测（测试/诊断用）：返回 JSON
   // {"matched":bool,"x":,"y":,"layer_doc_id":str,"vertex_index":int(-1=非顶点)}。
   std::string snapToMap(std::uintptr_t canvas, double x, double y) const;
+  // 原生工具是否占有键盘取消语义（M3 Task 5）：采点中/拖动中为 true，
+  // 此时 Esc 应由画布直接派发给原生工具，不上送 Python 工具栈。
+  bool nativeToolBusy(std::uintptr_t canvas) const;
 
   // 原生采点完成/取消回调（M3）：callback(status, geojson_geometry)，
   // status ∈ "completed"|"canceled"；completed 时 geojson 为 GeoJSON geometry

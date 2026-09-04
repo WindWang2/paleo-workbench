@@ -1151,6 +1151,13 @@ class CompositeEditController(QObject):
         return True
 
     def cancel_active_tool(self) -> None:
+        # M3 Task 5：原生工具占有 Esc（采点中/拖动中）时直接派发画布——
+        # 只取消本次捕捉/拖动，工具保持激活；否则走 Python 工具栈取消。
+        canvas = self._canvas
+        if canvas is not None and hasattr(canvas, "native_tool_busy") and canvas.native_tool_busy():
+            canvas.cancel_native_tool()
+            self.state_changed.emit()
+            return
         self.tools.key_press("escape")
         self.state_changed.emit()
 

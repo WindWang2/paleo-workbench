@@ -9,8 +9,9 @@ import json
 import sys
 import weakref
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtGui import QKeyEvent
+from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 from paleo_workbench.ui.qgis_stack.events import StackEvents
 from paleo_workbench.ui.qgis_stack.widgets import QgisCanvasHost
@@ -342,6 +343,37 @@ class QgisCanvasShim(QWidget):
         except Exception:
             pass
 
+    def native_tool_busy(self) -> bool:
+        """原生工具是否占有 Esc 语义（M3 Task 5）：采点中/顶点·移动拖动中。
+
+        busy 时 Esc 应直接派发画布（原生工具取消本次捕捉/拖动，工具保持
+        激活），不走 Python 工具栈的取消——否则原生工具还停在激活态而
+        Python 侧已切走，状态错乱。
+        """
+        if getattr(self, "_shutdown_done", False) or not self.canvas_address:
+            return False
+        try:
+            return bool(self.stack.native_tool_busy(self.canvas_address))
+        except Exception:
+            return False
+
+    def cancel_native_tool(self) -> None:
+        """把 Esc 直接派发画布（postEvent）：采点工具经 canvas keyPressEvent
+        转发触发 digitizingCanceled；顶点/移动拖动中经 canvas keyPressed
+        信号（拖动中画布不转发 keyPressEvent）触发 cancelDrag。"""
+        if getattr(self, "_shutdown_done", False):
+            return
+        canvas = getattr(self, "canvas", None)
+        if canvas is None:
+            return
+        try:
+            QApplication.postEvent(
+                canvas,
+                QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape,
+                          Qt.KeyboardModifier.NoModifier))
+        except Exception:
+            pass
+
     def _restore_tool_patch(self) -> None:
         try:
             tools = getattr(self, "_tools_wrapped_target", None)
@@ -425,6 +457,9 @@ class QgisCanvasShim(QWidget):
             if shim is None or getattr(shim, "_shutdown_done", False):
                 return
             if status != "completed":
+                # M3 Task 5：canceled（Esc/右键空取消）时工具条状态回流，
+                # 工具保持激活——只是本次捕捉作废。
+                shim.tool_operation.emit(False)
                 return
             controller = getattr(shim, "_tool_controller", None)
             tool = getattr(controller, "active_tool", None) if controller is not None else None

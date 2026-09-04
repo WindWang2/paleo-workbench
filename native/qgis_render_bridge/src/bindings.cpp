@@ -690,6 +690,8 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                return py::module_::import("json").attr("loads")(raw).cast<py::dict>();
              },
              py::arg("canvas"), py::arg("x"), py::arg("y"))
+        .def("native_tool_busy",
+             &pwb::qgis_render::QgisMapStack::nativeToolBusy)
         .def("set_extent_callback",
              [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas, py::function f) {
                self.setExtentCallback(canvas, [f = std::move(f)](double a, double b, double c, double d) {
