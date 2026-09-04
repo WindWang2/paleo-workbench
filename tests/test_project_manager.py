@@ -158,6 +158,11 @@ def test_metadata_only_save_reuses_resource_path_section(tmp_path: Path, monkeyp
     )
     assert manager.save(loaded) is True
     assert manager.last_save_stats.dirty_domains
+    # The patch only guards the SAVE above (it must reuse the snapshot's
+    # portable resource section). LOAD legitimately normalizes path-bearing
+    # sections once per session now (#1170: load/save symmetry for legacy
+    # absolute paths), so undo before the verification load.
+    monkeypatch.undo()
     assert ProjectManager(project_path).load().meta.name == "After"
 
 
@@ -342,3 +347,89 @@ def test_loaded_relative_pdf_path_is_ready_for_preview(tmp_path: Path):
 
     assert loaded.resources[0].path == pdf_path.resolve().as_posix()
     assert result.mode == "pdf"
+
+
+# ------------------------------------------------- #1170 unknown-section roundtrip
+
+
+def test_unknown_top_level_sections_survive_load_save_roundtrip(tmp_path: Path):
+    """A file written by a NEWER app version keeps its unknown sections when
+    an older version opens and re-saves it (#1170)."""
+    import json
+
+    project_path = tmp_path / "demo.paleo.json"
+    base = ProjectDocument.new("Future")
+    payload = base.model_dump(mode="json")
+    payload["future_section"] = {"nested": [1, 2, {"deep": True}]}
+    payload["another_new_section"] = "plain-value"
+    project_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    manager = ProjectManager(project_path)
+    loaded = manager.load()
+    # Touch an unrelated section so the save actually rewrites the file.
+    loaded.meta.name = "Renamed"
+    assert manager.save(loaded) is True
+
+    on_disk = json.loads(project_path.read_text(encoding="utf-8"))
+    assert on_disk["future_section"] == {"nested": [1, 2, {"deep": True}]}
+    assert on_disk["another_new_section"] == "plain-value"
+    assert on_disk["meta"]["name"] == "Renamed"
+
+    # And a reload sees them again (document-level access via pydantic extras).
+    reloaded = ProjectManager(project_path).load()
+    assert getattr(reloaded, "future_section") == {"nested": [1, 2, {"deep": True}]}
+    assert getattr(reloaded, "another_new_section") == "plain-value"
+
+
+def test_unknown_sections_do_not_dirty_a_clean_document(tmp_path: Path):
+    """Extras ride along but never force spurious rewrites."""
+    import json
+
+    project_path = tmp_path / "demo.paleo.json"
+    payload = ProjectDocument.new("Extras").model_dump(mode="json")
+    payload["future_section"] = {"k": 1}
+    project_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    manager = ProjectManager(project_path)
+    loaded = manager.load()
+    before = project_path.read_bytes()
+    assert manager.save(loaded) is False, "clean document with extras rewritten"
+    assert project_path.read_bytes() == before
+
+
+def test_legacy_absolute_resource_paths_normalize_on_load(tmp_path: Path):
+    """Load-time portable normalization matches save (#1170 asymmetry): a
+    legacy section holding an absolute INSIDE-project path is normalized in
+    the session snapshot, and the next save that rewrites the file stores
+    the portable relative form."""
+    import json
+
+    project_path = tmp_path / "proj" / "demo.paleo.json"
+    project_path.parent.mkdir()
+    inside = project_path.parent / "data" / "a.las"
+    inside.parent.mkdir(parents=True)
+    inside.write_text("~V\n", encoding="utf-8")
+
+    payload = ProjectDocument.new("Legacy").model_dump(mode="json")
+    payload["resources"] = [
+        ResourceItem(
+            name="a.las",
+            path=str(inside),
+            type="well_log",
+            format="las",
+        ).model_dump()
+    ]
+    project_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    manager = ProjectManager(project_path)
+    loaded = manager.load()
+    # Runtime document resolved to the absolute path...
+    assert loaded.resources[0].path == inside.resolve().as_posix()
+    # ...and a metadata-only save persists the PORTABLE relative form.
+    loaded.meta.name = "Saved"
+    assert manager.save(loaded) is True
+    on_disk = json.loads(project_path.read_text(encoding="utf-8"))
+    assert on_disk["resources"][0]["path"] == "data/a.las"
+    assert on_disk["resources"][0]["external"] is False

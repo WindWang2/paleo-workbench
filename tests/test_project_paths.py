@@ -149,3 +149,92 @@ def test_open_project_path_reports_escape_error(qtbot, tmp_path: Path):
     assert ok is False
     assert window._last_open_error is not None
     assert "逃出" in window._last_open_error or "非法" in window._last_open_error
+
+
+# ------------------------------------------------- #1190 safe_rmtree observability
+
+
+def test_safe_rmtree_raises_and_logs_on_failure(tmp_path: Path, monkeypatch, caplog):
+    """A failed removal is observable: logged AND re-raised (#1190)."""
+    import logging
+    import shutil as shutil_module
+    from paleo_workbench.project import paths as paths_module
+
+    target = tmp_path / "tree"
+    target.mkdir()
+    (target / "f.txt").write_text("x", encoding="utf-8")
+
+    def _boom(path, *args, **kwargs):
+        raise OSError("simulated rmtree failure")
+
+    monkeypatch.setattr(shutil_module, "rmtree", _boom)
+    with caplog.at_level(logging.WARNING, logger="paleo_workbench.project.paths"):
+        with pytest.raises(OSError):
+            paths_module.safe_rmtree(target)
+    assert any("safe_rmtree" in record.message for record in caplog.records)
+
+
+def test_safe_rmtree_succeeds_silently(tmp_path: Path):
+    from paleo_workbench.project.paths import safe_rmtree
+
+    target = tmp_path / "tree"
+    target.mkdir()
+    (target / "f.txt").write_text("x", encoding="utf-8")
+    safe_rmtree(target)
+    assert not target.exists()
+
+
+def test_safe_rmtree_missing_path_is_noop(tmp_path: Path):
+    from paleo_workbench.project.paths import safe_rmtree
+
+    safe_rmtree(tmp_path / "not-there")  # must not raise
+
+
+def test_relocation_commit_propagates_rmtree_failure(tmp_path: Path, monkeypatch):
+    """StagedArtifactRelocation.commit lets a source-cleanup failure abort
+    the Save As finishing step instead of half-finishing silently."""
+    import shutil as shutil_module
+    from paleo_workbench.project.paths import StagedArtifactRelocation
+
+    source = tmp_path / "old.artifacts"
+    target = tmp_path / "new.artifacts"
+    source.mkdir()
+    (source / "payload.bin").write_bytes(b"p")
+    shutil_module.copytree(source, target)
+
+    staged = StagedArtifactRelocation(
+        source=source, target=target, preserved_source=True
+    )
+
+    def _boom(path, *args, **kwargs):
+        raise OSError("cannot remove source")
+
+    monkeypatch.setattr(shutil_module, "rmtree", _boom)
+    with pytest.raises(OSError):
+        staged.commit()
+
+
+def test_relocation_rollback_stays_best_effort_on_rmtree_failure(
+    tmp_path: Path, monkeypatch
+):
+    """rollback() is best-effort BY DESIGN (an undo must never mask the
+    original failure) — it catches the OSError; the log inside safe_rmtree
+    keeps it attributable."""
+    import shutil as shutil_module
+    from paleo_workbench.project.paths import StagedArtifactRelocation
+
+    source = tmp_path / "old.artifacts"
+    target = tmp_path / "new.artifacts"
+    source.mkdir()
+    target.mkdir()
+    (target / "junk.bin").write_bytes(b"j")
+
+    staged = StagedArtifactRelocation(
+        source=source, target=target, copied_root=True
+    )
+
+    def _boom(path, *args, **kwargs):
+        raise OSError("cannot remove target")
+
+    monkeypatch.setattr(shutil_module, "rmtree", _boom)
+    staged.rollback()  # must not raise

@@ -168,6 +168,22 @@ def _remember_snapshot(project: ProjectDocument, snapshot: ProjectPersistenceSna
     _SNAPSHOTS[key] = (weakref.ref(project, _forget), snapshot)
 
 
+# Sections whose values carry filesystem paths and therefore need portable
+# normalization (relativization against the project dir) — applied at save
+# for changed sections and at load for the session snapshot, so an untouched
+# legacy section saved with absolute paths normalizes on load the same way a
+# save of that section would (load/save symmetry, #1170).
+_PATH_BEARING_SECTIONS = frozenset(
+    {
+        "resources",
+        "export_artifacts",
+        "paleomap_documents",
+        "factor_map_tasks",
+        "horizon_interpretations",
+    }
+)
+
+
 def _runtime_sections(project: ProjectDocument) -> dict[str, Any]:
     """Return a detached comparison view, omitting runtime-only root binding."""
 
@@ -563,12 +579,22 @@ class ProjectManager:
         # into a false metadata mutation.
         project.meta.project_root = str(self.project_path.resolve().parent)
         runtime_sections = _runtime_sections(project)
+        # Portable snapshot for the session. Unknown top-level sections ride
+        # along untouched (extra="allow" keeps them in the runtime dump,
+        # #1170); path-bearing sections are normalized the same way a save
+        # would normalize them, so load and save agree on legacy
+        # absolute-path representations instead of an untouched section
+        # keeping them until it happens to change (#1170).
         portable_sections = {
             section: data.get(section, runtime_sections[section])
             for section in runtime_sections
         }
-        portable_sections["meta"] = dict(portable_sections["meta"])
-        portable_sections["meta"]["project_root"] = "."
+        for section in sorted(_PATH_BEARING_SECTIONS - {"paleomap_documents"}):
+            portable_sections[section] = _portable_section(
+                section,
+                deepcopy(portable_sections[section]),
+                self.project_path,
+            )
         # Reference-layer status is runtime-derived from source availability;
         # retain its normalized portable representation so a later unrelated
         # save does not accidentally resurrect an obsolete ``ready`` status.
@@ -577,11 +603,8 @@ class ProjectManager:
             deepcopy(runtime_sections["paleomap_documents"]),
             self.project_path,
         )
-        portable_sections["factor_map_tasks"] = _portable_section(
-            "factor_map_tasks",
-            deepcopy(runtime_sections["factor_map_tasks"]),
-            self.project_path,
-        )
+        portable_sections["meta"] = dict(portable_sections["meta"])
+        portable_sections["meta"]["project_root"] = "."
         _remember_snapshot(
             project,
             ProjectPersistenceSnapshot(

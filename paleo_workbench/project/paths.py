@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 import shutil
+
+
+logger = logging.getLogger(__name__)
 
 
 class ProjectPathError(ValueError):
@@ -34,29 +38,39 @@ import sys
 
 
 def _handle_remove_readonly(func, path, exc_info=None):
-    """Clear readonly bit and reattempt removal on Windows NTFS."""
-    try:
-        os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
-        func(path)
-    except Exception:
-        pass
+    """Clear readonly bit and reattempt removal on Windows NTFS.
+
+    A failure here propagates: swallowing it inside the handler made
+    ``shutil.rmtree`` report success while entries were left behind (#1190).
+    """
+    os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+    func(path)
 
 
 def safe_rmtree(path: Path | str) -> None:
-    """Safely remove a directory tree, clearing Windows read-only flags on demand."""
+    """Safely remove a directory tree, clearing Windows read-only flags on demand.
+
+    Failures are OBSERVABLE (#1190): the old double ``try/except`` retried
+    with ``ignore_errors=True`` and swallowed whatever still failed, so a
+    half-deleted tree returned as success with no signal. Now the readonly
+    retry stays, the exception is logged with the path, and it re-raises so
+    callers decide — ``StagedArtifactRelocation.commit`` aborts the Save As
+    finishing step, ``rollback`` remains best-effort (it catches OSError by
+    design; the log record keeps the failure attributable).
+    """
     p = Path(path)
     if not p.exists():
         return
     try:
         if sys.version_info >= (3, 12):
-            shutil.rmtree(p, onexc=lambda func, path, exc: _handle_remove_readonly(func, path, exc))
+            shutil.rmtree(
+                p, onexc=lambda func, path, exc: _handle_remove_readonly(func, path, exc)
+            )
         else:
             shutil.rmtree(p, onerror=_handle_remove_readonly)
     except Exception:
-        try:
-            shutil.rmtree(p, ignore_errors=True)
-        except Exception:
-            pass
+        logger.warning("safe_rmtree: failed to remove %s", p, exc_info=True)
+        raise
 
 
 @dataclass
