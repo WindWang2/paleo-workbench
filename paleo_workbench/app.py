@@ -51,7 +51,7 @@ class PaleoWorkbenchWindow(QMainWindow):
         )
         self.setCentralWidget(self.app_shell)
         self._apply_project_to_shell()
-        self._wire_ribbon()
+        self._wire_shell_signals()
         self._setup_shortcuts()
         self._update_title()
 
@@ -119,15 +119,15 @@ class PaleoWorkbenchWindow(QMainWindow):
         """Focus the active search box.
 
         If the data-management surface is active (it has a toolbar with its
-        own search box), focus that; otherwise fall back to the ribbon's
-        global search box.
+        own search box), focus that; otherwise fall back to the workstation
+        app bar's command input (the old ribbon global search is gone).
         """
         page = self.app_shell.current_content_page()
         toolbar = getattr(page, "data_toolbar", None)
         if toolbar is not None and hasattr(toolbar, "search_box"):
             toolbar.search_box.setFocus()
             return
-        self.app_shell.ribbon.search_box.setFocus()
+        self.app_shell.workstation.app_bar.command_input.setFocus()
 
     # --- project lifecycle delegates ---
 
@@ -214,16 +214,18 @@ class PaleoWorkbenchWindow(QMainWindow):
 
     # --- signal wiring ---
 
-    def _wire_ribbon(self) -> None:
-        """Connect the current ribbon's signals to the handler methods.
+    def _wire_shell_signals(self) -> None:
+        """Connect the current shell's global-action signals to the handlers.
 
-        Each shell rebuild creates a fresh :class:`RibbonBar`, so this must
+        Ribbon 删除（B2）后工程/视图动作由 app bar 直发 AppShell 转发信号。
+        Each shell rebuild creates a fresh :class:`AppShell`, so this must
         be called from both ``__init__`` and ``_refresh_shell``.
         """
-        ribbon = self.app_shell.ribbon
-        ribbon.new_project_requested.connect(self._on_new_project)
-        ribbon.open_project_requested.connect(self._on_open_project)
-        ribbon.open_sample_project_requested.connect(self._on_open_sample_project)
+        shell = self.app_shell
+        shell.about_requested.connect(self._on_about)
+        shell.new_project_requested.connect(self._on_new_project)
+        shell.open_project_requested.connect(self._on_open_project)
+        shell.open_sample_project_requested.connect(self._on_open_sample_project)
         # HomePage start guide cards (recreated on each _refresh_shell)
         try:
             home_page = self.app_shell.home_page_widget()
@@ -238,12 +240,9 @@ class PaleoWorkbenchWindow(QMainWindow):
                     home_page.well_activated.connect(self._on_home_well_activated)
         except Exception:
             pass
-        ribbon.save_project_requested.connect(self._on_save_project)
-        ribbon.properties_requested.connect(self._on_properties)
-        ribbon.preview_settings_requested.connect(self._show_preview_settings)
-        ribbon.density_changed.connect(self._on_density_changed)
-        ribbon.about_requested.connect(self._on_about)
-        ribbon.search_submitted.connect(self._on_global_search)
+        shell.save_project_requested.connect(self._on_save_project)
+        shell.properties_requested.connect(self._on_properties)
+        shell.preview_settings_requested.connect(self._show_preview_settings)
         self.workflow_controller.wire_home_page()
         self.workflow_controller.wire_data_visualization_jump()
         self.workflow_controller.wire_mapping_page()
@@ -268,9 +267,9 @@ class PaleoWorkbenchWindow(QMainWindow):
         # compose — a direct tokens.build_qss(density=...) would silently
         # reset a dark/high-contrast session back to light (#1047 review).
         # set_density 持久化并触发 theme_changed → app_shell 统一重贴 QSS
-        # （B1：密度是一等设置，不再只活在 Ribbon 的隐藏按钮里）。
+        # （B1：密度是一等设置；app bar 视图菜单是生产入口，勾选态由
+        # app_bar._sync_view_checks 随 theme_changed 自同步）。
         self.app_shell.theme_manager.set_density(density)
-        self.app_shell.set_density_checked(density)
 
     def _on_about(self) -> None:
         QMessageBox.about(
@@ -280,26 +279,6 @@ class PaleoWorkbenchWindow(QMainWindow):
             "Paleogeography Workbench\n\n"
             "数据管理 · 沉积相预测 · 古地理编图 · 三维地质建模",
         )
-
-    def _on_global_search(self, text: str) -> None:
-        """Delegate the global search box to the current page's filter, if any.
-
-        Only pages exposing searchable content (today: the data page's
-        ``asset_table.set_search_text``) react. Other pages silently ignore
-        the query rather than pretending to search.
-        """
-        page = self.app_shell.current_content_page()
-        # Data page: drive its asset table filter and keep the page-local
-        # toolbar search box in sync so the two inputs never disagree.
-        asset_table = getattr(page, "asset_table", None)
-        if asset_table is not None and hasattr(asset_table, "set_search_text"):
-            asset_table.set_search_text(text)
-            toolbar = getattr(page, "data_toolbar", None)
-            if toolbar is not None and hasattr(toolbar, "search_box"):
-                if toolbar.search_box.text() != text:
-                    toolbar.search_box.blockSignals(True)
-                    toolbar.search_box.setText(text)
-                    toolbar.search_box.blockSignals(False)
 
     def _on_home_well_activated(self, well_id: str) -> None:
         """首页工区地图井位点击 → 数据页定位该井。"""
@@ -345,7 +324,7 @@ class PaleoWorkbenchWindow(QMainWindow):
         )
         self._apply_project_to_shell()
         self.setCentralWidget(self.app_shell)
-        self._wire_ribbon()
+        self._wire_shell_signals()
         self._update_title()
         # Re-bind project file path after shell rebuild (import/export I/O).
         self.app_shell.set_data_project_path(self.project_path)

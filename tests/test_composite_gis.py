@@ -737,10 +737,10 @@ def test_double_shutdown_does_not_rewrite_layout(qtbot, tmp_path):
     frame.show()
     qtbot.waitExposed(frame)
     assert frame.shutdown_workers() is True
-    state_first = frame._settings.value("layout/windowState")
+    state_first = frame._settings.value("layout/window_state")
     # 第二次（_refresh_shell 路径）不得重写已拆除的布局。
     assert frame.shutdown_workers() is True
-    state_second = frame._settings.value("layout/windowState")
+    state_second = frame._settings.value("layout/window_state")
     assert state_second == state_first
 
 

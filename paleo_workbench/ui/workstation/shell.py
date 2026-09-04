@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QByteArray, QSettings, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QDockWidget,
@@ -14,6 +16,12 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench.ui.dock_manager import WorkspacePreset, dock_manager
+from paleo_workbench.ui.layout_persistence import (
+    LAYOUT_STATE_VERSION,
+    SETTINGS_APP,
+    SETTINGS_ORG,
+    migrate_legacy_layout_settings,
+)
 from paleo_workbench.ui.workstation.activity_rail import ActivityRail
 from paleo_workbench.ui.workstation.app_bar import WorkstationAppBar
 from paleo_workbench.ui.workstation.composite_document import CompositeDocument
@@ -31,6 +39,8 @@ from paleo_workbench.ui.workstation.linked_workspace import (
 from paleo_workbench.ui.workstation.process_hub import ProcessHub
 from paleo_workbench.ui.workstation.task_center import TaskCenter
 from paleo_workbench.ui.workstation.dock_title_bar import install_dock_title_bar
+
+_log = logging.getLogger(__name__)
 
 
 class WorkstationFrame(QWidget):
@@ -51,19 +61,30 @@ class WorkstationFrame(QWidget):
     command_submitted = Signal(str)
     status_message = Signal(str)
 
-    _WINDOW_STATE_KEY = "layout/windowState.v4"
+    _WINDOW_STATE_KEY = "layout/window_state"
+    _STATE_VERSION_KEY = "layout/state_version"
 
     def __init__(self, project, page_stack: QWidget, dock_host=None, parent=None):
         super().__init__(parent)
         self.setObjectName("WorkstationFrame")
+        # 壳本身可持焦：作为初始键盘焦点落点（见 showEvent 注释）。
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._project = project
         self._project_path: str | None = None
-        self._settings = QSettings("PaleoWorkbench", "WorkstationV3")
+        # 统一 QSettings 身份（B2）：与主题同一 (PaleoWorkbench, Workstation)
+        # 存储；旧 WorkstationV3 身份的数据在读任何键之前一次性迁移。
+        migrate_legacy_layout_settings()
+        self._settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
+        self._settings.sync()
         self._user_hid_inspector = bool(
             self._settings.value("layout/inspector_user_hidden", False, type=bool)
         )
         self._responsive_hid_inspector = False
         self._post_show_restored = False
+        # 工作区预设追踪：apply_layout_preset 记录 id；用户手调任一预设
+        # dock 可见性后置 None（app bar 下拉回「自定义」）。
+        self._current_preset_id: str | None = None
+        self._preset_tracking_paused = False
         # teardown 阶段冻结布局保存：拆除 dock 触发的 visibilityChanged
         # 不得把「已拆除」状态写进 QSettings（#1124）。
         self._layout_frozen = False
@@ -188,13 +209,14 @@ class WorkstationFrame(QWidget):
         # 图层管理与检查器在右侧叠 tab，任务/联动视图在底部叠 tab。
         self._dock_host.tabifyDockWidget(self.inspector_dock, self.composite_layer_dock)
         self._dock_host.tabifyDockWidget(self.process_dock, self.composite_linked_dock)
+        self._dock_host.tabifyDockWidget(self.process_dock, self.task_dock)
         self._dock_host.tabifyDockWidget(self.process_dock, self.well_dock)
         self._dock_host.tabifyDockWidget(self.well_dock, self.seismic_dock)
 
         self._wire()
         self.set_project(project)
         # 中央永远是编图，无需切换。
-        QTimer.singleShot(0, self._restore_layout)
+        self._schedule_restore(0)
 
     # 浮动时避免邮票窗；停靠时交还内容 hint（否则 220px 最小宽在多面板
     # 停靠时撑爆布局，#1123）。
@@ -258,6 +280,7 @@ class WorkstationFrame(QWidget):
         self.app_bar.agent_requested.connect(self.show_agent)
         self.app_bar.task_center_requested.connect(self.show_tasks)
         self.app_bar.command_submitted.connect(self.command_submitted)
+        self.app_bar.workspace_preset_requested.connect(self.apply_layout_preset)
         self.inspector.style_changed.connect(
             lambda _style: self.status_message.emit("当前解释样式已更新")
         )
@@ -276,6 +299,11 @@ class WorkstationFrame(QWidget):
             dock.topLevelChanged.connect(lambda *_: self._schedule_state_save())
             dock.dockLocationChanged.connect(lambda *_: self._schedule_state_save())
             dock.visibilityChanged.connect(lambda *_: self._schedule_state_save())
+        # 预设追踪走同一条 visibilityChanged 路径（不新增机制）：预设矩阵
+        # 覆盖的 dock 被手动显隐后，当前预设失效（hub_dock 除外——功能页
+        # 浮窗由导航管理，不属于工作区布局）。
+        for dock in self._preset_tracked_docks():
+            dock.visibilityChanged.connect(lambda *_: self._mark_layout_customized())
 
     def set_project(self, project, project_path: str | None = None) -> None:
         self._project = project
@@ -345,10 +373,11 @@ class WorkstationFrame(QWidget):
         self._expand_process_dock()
 
     def show_tasks(self) -> None:
+        # 任务中心独立于 Agent 面板：只 raise 自己所在的 tab 链，绝不
+        # 强制展开 process_dock（旧副作用：打开任务中心连带显示 Agent）。
         self.task_dock.show()
         self.task_dock.raise_()
         self.task_center.tree.setFocus(Qt.FocusReason.ShortcutFocusReason)
-        self._expand_process_dock()
 
     def submit_agent_command(self, text: str) -> None:
         self.process_dock.show()
@@ -375,22 +404,44 @@ class WorkstationFrame(QWidget):
         self._settings.setValue("layout/inspector_user_hidden", self._user_hid_inspector)
         self._save_timer.start()
 
-    def panel_entries(self) -> list[dict]:
-        return [
-            {"key": "workstation:explorer", "title": "资源管理器", "widget": self.explorer},
-            {"key": "workstation:inspector", "title": "检查器", "widget": self.inspector},
-            {"key": "workstation:process", "title": "Agent", "widget": self.process_hub},
-            {"key": "workstation:tasks", "title": "任务中心", "widget": self.task_center},
-            {"key": "workstation:well", "title": "测井轨道", "widget": self.linked_workspace.well_pane},
-            {"key": "workstation:seismic", "title": "地震剖面", "widget": self.linked_workspace.seismic_pane},
-            {"key": "workstation:hub", "title": "功能页", "widget": self.page_stack},
-        ]
+    # --- 工作区预设 -------------------------------------------------------
+
+    @classmethod
+    def preset_ids(cls) -> list[str]:
+        """预设 id 列表（注册表顺序 = app bar 下拉顺序，稳定）。"""
+        return [preset.id for preset in list_presets()]
+
+    @property
+    def current_preset_id(self) -> str | None:
+        """当前预设 id；用户手调 dock 可见性后为 None（自定义）。"""
+        return self._current_preset_id
+
+    def _preset_tracked_docks(self) -> tuple[QDockWidget, ...]:
+        """预设可见性矩阵覆盖的 dock（hub 浮窗除外）。"""
+        return tuple(dock for dock in self._shell_docks() if dock is not self.hub_dock)
+
+    def _mark_layout_customized(self) -> None:
+        if self._preset_tracking_paused or self._layout_frozen:
+            return
+        if self._current_preset_id is not None:
+            self._current_preset_id = None
+            self.app_bar.set_current_workspace(None)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._apply_responsive_panels()
 
     def _apply_responsive_panels(self) -> None:
+        if self._layout_frozen:
+            return  # 拆除阶段不再调整布局
+        # 响应式显隐是 viewport 策略而非用户定制：不使当前预设失效。
+        self._preset_tracking_paused = True
+        try:
+            self._apply_responsive_panels_unlocked()
+        finally:
+            self._preset_tracking_paused = False
+
+    def _apply_responsive_panels_unlocked(self) -> None:
         if self.width() < 1280 and not self.inspector_dock.isHidden():
             self._responsive_hid_inspector = True
             self.inspector_dock.hide()
@@ -416,7 +467,16 @@ class WorkstationFrame(QWidget):
             self._post_show_restored = True
             # 构造发生在顶层窗口拿到最终几何之前；show 之后再恢复一次，
             # 避免 dock 布局被首帧的默认几何覆盖。
-            QTimer.singleShot(50, self._restore_layout)
+            self._schedule_restore(50)
+
+    def _schedule_restore(self, delay_ms: int) -> None:
+        # 定时器必须挂在本部件上：壳被拆除（deleteLater）后，迟到的
+        # restore 不得再触碰已删除的 dock（游离 singleShot 会越界）。
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.setInterval(delay_ms)
+        timer.timeout.connect(self._restore_layout)
+        timer.start()
 
     def _wire_composite_panel_menu(self) -> None:
         """面板菜单：显隐、布局预设、全部浮动/停靠、恢复默认。"""
@@ -501,34 +561,43 @@ class WorkstationFrame(QWidget):
             return
         vis = preset.visibility
 
-        self.nav_dock.setVisible(vis.nav)
-        self.inspector_dock.setVisible(vis.inspector)
-        self._user_hid_inspector = not vis.inspector
-        self._responsive_hid_inspector = False
-        self._settings.setValue("layout/inspector_user_hidden", self._user_hid_inspector)
-        self.process_dock.setVisible(vis.process)
-        self.task_dock.setVisible(vis.tasks)
-        self.composite_layer_dock.setVisible(vis.composite_layer)
-        self.composite_input_dock.setVisible(vis.composite_input)
-        self.composite_linked_dock.setVisible(vis.composite_linked)
-        for dock_name, flag in (
-            ("well_dock", vis.well),
-            ("seismic_dock", vis.seismic),
-            ("hub_dock", vis.hub),
-        ):
-            dock = getattr(self, dock_name, None)
-            if dock is not None:
-                dock.setVisible(flag)
+        # 应用期间的 visibilityChanged 是预设自身造成的，不算用户定制。
+        self._preset_tracking_paused = True
+        try:
+            self.nav_dock.setVisible(vis.nav)
+            self.inspector_dock.setVisible(vis.inspector)
+            self._user_hid_inspector = not vis.inspector
+            self._responsive_hid_inspector = False
+            self._settings.setValue(
+                "layout/inspector_user_hidden", self._user_hid_inspector
+            )
+            self.process_dock.setVisible(vis.process)
+            self.task_dock.setVisible(vis.tasks)
+            self.composite_layer_dock.setVisible(vis.composite_layer)
+            self.composite_input_dock.setVisible(vis.composite_input)
+            self.composite_linked_dock.setVisible(vis.composite_linked)
+            for dock_name, flag in (
+                ("well_dock", vis.well),
+                ("seismic_dock", vis.seismic),
+                ("hub_dock", vis.hub),
+            ):
+                dock = getattr(self, dock_name, None)
+                if dock is not None:
+                    dock.setVisible(flag)
 
-        self.explorer.setVisible(vis.explorer_expanded)
-        self.activity_rail.set_explorer_expanded(vis.explorer_expanded)
+            self.explorer.setVisible(vis.explorer_expanded)
+            self.activity_rail.set_explorer_expanded(vis.explorer_expanded)
 
-        # Dock everything for a deterministic preset geometry.
-        self.dock_all_panels()
+            # Dock everything for a deterministic preset geometry.
+            self.dock_all_panels()
+        finally:
+            self._preset_tracking_paused = False
+        self._current_preset_id = preset.id
+        self.app_bar.set_current_workspace(preset.id)
 
-        if preset_id == "composite_default":
+        if preset_id == RESET_LAYOUT_PRESET_ID:
             dock_manager.set_active_preset(WorkspacePreset.WORKSTATION_COMPOSITE)
-        elif preset_id == "interpretation":
+        elif preset_id == "integrated":
             dock_manager.set_active_preset(WorkspacePreset.WORKSTATION_INTERPRETATION)
             if vis.process:
                 self._expand_process_dock()
@@ -639,9 +708,22 @@ class WorkstationFrame(QWidget):
         self._save_timer.start()
 
     def _restore_layout(self) -> None:
+        if self._layout_frozen:
+            # teardown 已拆除 dock：迟到的 restore 定时器不得再触碰。
+            return
         data = self._settings.value(self._WINDOW_STATE_KEY)
-        if isinstance(data, QByteArray) and not data.isNull():
-            self._dock_host.restoreState(data)
+        if data is not None:
+            version = self._settings.value(self._STATE_VERSION_KEY, 0, type=int)
+            if version != LAYOUT_STATE_VERSION:
+                # 版本未知（更旧/无版本）或来自更新的应用：恢复语义无法
+                # 保证，丢弃并走默认布局（B2 版本栅栏）。
+                _log.warning(
+                    "忽略持久化布局：状态版本 %s 与支持的版本 %s 不一致，使用默认布局",
+                    version,
+                    LAYOUT_STATE_VERSION,
+                )
+            elif isinstance(data, QByteArray) and not data.isNull():
+                self._dock_host.restoreState(data)
         # restore 之后必须重新执行响应式策略：restoreState 可能把检查器
         # 在窄屏下重新显示（保存时按「可见」写入），不能让 restore 反杀
         # 响应式隐藏（#1121）。
@@ -665,6 +747,9 @@ class WorkstationFrame(QWidget):
             self.inspector_dock.blockSignals(True)
             self.inspector_dock.show()
         try:
+            self._settings.setValue(
+                self._STATE_VERSION_KEY, LAYOUT_STATE_VERSION
+            )
             self._settings.setValue(self._WINDOW_STATE_KEY, self._dock_host.saveState())
         finally:
             if suppress_visibility_signals:

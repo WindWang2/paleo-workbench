@@ -4,13 +4,11 @@ from importlib import import_module
 
 __all__ = [
     "AppShell",
-    "RibbonBar",
     "StatusBar",
 ]
 
 _EXPORTS = {
     "AppShell": "paleo_workbench.ui.app_shell",
-    "RibbonBar": "paleo_workbench.ui.ribbon",
     "StatusBar": "paleo_workbench.ui.status_bar",
 }
 

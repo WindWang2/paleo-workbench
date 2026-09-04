@@ -8,12 +8,15 @@ def test_ui_exports_app_shell():
 
 
 def test_ui_exports_zone_widgets():
-    from paleo_workbench.ui import (
-        AppShell, RibbonBar, StatusBar
-    )
+    from paleo_workbench.ui import AppShell, StatusBar
     assert all([
-        AppShell, RibbonBar, StatusBar
+        AppShell, StatusBar
     ])
+    # Ribbon 已删除（B2）：导出面不得再暴露 RibbonBar。
+    import pytest
+
+    with pytest.raises((AttributeError, ImportError)):
+        from paleo_workbench.ui import RibbonBar  # noqa: F401
 
 
 def test_ui_pages_exports_data_management_widgets():

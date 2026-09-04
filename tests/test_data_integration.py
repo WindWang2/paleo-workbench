@@ -65,7 +65,7 @@ def test_tools_preview_settings_action_opens_dialog_with_current_mode(
         PreviewResult(mode="pdf", title="report.pdf")
     )
 
-    window.app_shell.ribbon.preview_settings_action.trigger()
+    window.app_shell.preview_settings_requested.emit()
 
     assert opened == [window._preview_settings_dialog]
     assert opened[0].panel.category_combo.currentData() == "pdf"
@@ -81,7 +81,7 @@ def test_preview_dialog_applies_to_current_data_page_after_shell_rebuild(
     )
     window = PaleoWorkbenchWindow(preview_settings_store=_preview_store(tmp_path))
     qtbot.addWidget(window)
-    window.app_shell.ribbon.preview_settings_action.trigger()
+    window.app_shell.preview_settings_requested.emit()
     dialog = window._preview_settings_dialog
     old_reader = window.app_shell.data_page.reader_panel
 

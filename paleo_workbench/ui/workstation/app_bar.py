@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench import tokens
+from paleo_workbench.ui.layout_presets import list_presets
 from paleo_workbench.ui.workstation.common import workstation_icon
 
 
@@ -27,6 +29,9 @@ class WorkstationAppBar(QFrame):
     command_submitted = Signal(str)
     agent_requested = Signal()
     task_center_requested = Signal()
+    #: 工作区预设下拉：携带 preset id（B2；shell 接线到 apply_layout_preset）。
+    workspace_preset_requested = Signal(str)
+    about_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -76,6 +81,21 @@ class WorkstationAppBar(QFrame):
         self.forward_button.setToolTip("前进")
         self.forward_button.setEnabled(False)
         layout.addWidget(self.forward_button)
+
+        # 工作区预设（B2）：与编图「面板」菜单同源的布局预设；选择后由
+        # shell 应用可见性矩阵。首项「自定义」= 用户手调布局（无预设）。
+        self.workspace_combo = QComboBox(self)
+        self.workspace_combo.setObjectName("WorkstationWorkspaceCombo")
+        self.workspace_combo.setToolTip("切换工作区布局预设")
+        self._workspace_ids: list[str] = [""]
+        self.workspace_combo.addItem("自定义")
+        for preset in list_presets():
+            self._workspace_ids.append(preset.id)
+            self.workspace_combo.addItem(preset.label)
+        self.workspace_combo.currentIndexChanged.connect(
+            self._on_workspace_selected
+        )
+        layout.addWidget(self.workspace_combo)
 
         layout.addStretch(1)
 
@@ -131,16 +151,12 @@ class WorkstationAppBar(QFrame):
             action.triggered.connect(
                 lambda _checked=False, m=mode: theme_manager.set_density(m)
             )
-        # 主题/密度变化时刷新勾选态（跨入口切换保持一致）。
-        def _sync_view_checks(*_args) -> None:
-            for action, mode in zip(self._theme_group.actions(), list(ThemeMode)):
-                action.setChecked(theme_manager.current_theme is mode)
-            for action, mode in zip(
-                self._density_group.actions(), list(DensityMode)
-            ):
-                action.setChecked(theme_manager.density is mode)
-
-        theme_manager.theme_changed.connect(_sync_view_checks)
+        # 主题/密度变化时刷新勾选态（跨入口切换保持一致）。注意必须连
+        # 绑定方法而非闭包：闭包连接不会随本部件销毁断开，workstation
+        # teardown 后 theme_changed 会在已删除的菜单对象上抛 RuntimeError。
+        theme_manager.theme_changed.connect(self._sync_view_checks)
+        self._view_menu.addSeparator()
+        self._view_menu.addAction("关于", self.about_requested.emit)
         self.view_button.setMenu(self._view_menu)
         layout.addWidget(self.view_button)
 
@@ -173,6 +189,28 @@ class WorkstationAppBar(QFrame):
         self.project_button.setText(f"{project}  /  {area}" if area else project)
         self.project_button.setToolTip("切换工程或打开工程操作")
 
+    # --- 工作区预设 -------------------------------------------------------
+
+    def _on_workspace_selected(self, index: int) -> None:
+        if not 0 <= index < len(self._workspace_ids):
+            return
+        preset_id = self._workspace_ids[index]
+        if preset_id:
+            self.workspace_preset_requested.emit(preset_id)
+
+    def set_current_workspace(self, preset_id: str | None) -> None:
+        """回写当前预设（「自定义」当 preset_id 为 None / 未知 id）。
+
+        只刷下拉显示，不重发请求信号——调用方（shell）刚应用过该预设。
+        """
+        try:
+            index = self._workspace_ids.index(preset_id or "")
+        except ValueError:
+            index = 0
+        self.workspace_combo.blockSignals(True)
+        self.workspace_combo.setCurrentIndex(index)
+        self.workspace_combo.blockSignals(False)
+
     def set_project_name(self, name: str) -> None:
         self.set_project(name, getattr(self, "_project_region", ""))
 
@@ -182,6 +220,16 @@ class WorkstationAppBar(QFrame):
         self.task_button.setProperty("activeTasks", count > 0)
         self.task_button.style().unpolish(self.task_button)
         self.task_button.style().polish(self.task_button)
+
+    def _sync_view_checks(self, *_args) -> None:
+        from paleo_workbench.ui.theme import DensityMode, ThemeMode, theme_manager
+
+        for action, mode in zip(self._theme_group.actions(), list(ThemeMode)):
+            action.setChecked(theme_manager.current_theme is mode)
+        for action, mode in zip(
+            self._density_group.actions(), list(DensityMode)
+        ):
+            action.setChecked(theme_manager.density is mode)
 
     def focus_command(self) -> None:
         self.command_input.setFocus(Qt.FocusReason.ShortcutFocusReason)

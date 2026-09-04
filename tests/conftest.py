@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QSettings, QTimer
 from PySide6.QtWidgets import QApplication
@@ -14,10 +16,22 @@ def isolate_qsettings(tmp_path_factory):
     dir. Redirecting the default path to a session temp dir makes every test
     hermetic suite-wide; tests that need stricter per-test isolation (or a
     pre-seeded store) bind their own explicit ini on top.
+
+    Qt 6.11：双参构造 ``QSettings(org, app)`` 不再遵循 ``setDefaultFormat``，
+    恒为 NativeFormat（``~/.config``），仅 ``setPath(IniFormat, …)`` 拦不住
+    它们——必须同时重定向 ``XDG_CONFIG_HOME``，否则测试读写真实用户配置，
+    跨运行互相污染（布局 blob 会被上一次运行的状态污染）。
     """
     settings_dir = tmp_path_factory.mktemp("qsettings")
     QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(settings_dir))
     QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+    old_xdg = os.environ.get("XDG_CONFIG_HOME")
+    os.environ["XDG_CONFIG_HOME"] = str(settings_dir)
+    yield
+    if old_xdg is None:
+        os.environ.pop("XDG_CONFIG_HOME", None)
+    else:
+        os.environ["XDG_CONFIG_HOME"] = old_xdg
 
 
 def pytest_configure(config):

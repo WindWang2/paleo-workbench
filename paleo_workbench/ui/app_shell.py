@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QEasingCurve, QEvent, QPropertyAnimation, Qt, QTimer
+from PySide6.QtCore import (
+    QEasingCurve,
+    QEvent,
+    QPropertyAnimation,
+    Qt,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -48,7 +55,6 @@ from paleo_workbench.ui.pages.stratigraphy_correlation_page import (
 )
 from paleo_workbench.ui.pages.visualization_page import VisualizationPage
 from paleo_workbench.ui.pages.well_log_prediction_page import WellLogPredictionPage
-from paleo_workbench.ui.ribbon import RibbonBar
 from paleo_workbench.ui.status_bar import StatusBar
 from paleo_workbench.ui.workstation import WorkstationFrame
 from paleo_workbench.viz.hosts.well_location_preview import (
@@ -177,13 +183,23 @@ class CommandPalette(QFrame):
 
 
 class AppShell(QWidget):
-    """Application shell (UI v2, Ribbon variant A).
+    """Application shell (workstation V4).
 
-    A :class:`RibbonBar` on top (page tabs = the 4+1 hubs, command groups
-    per hub/sub-module context, global search), a ``QStackedWidget`` of the
-    five hub pages, and a StatusBar. Hub model:
-    :mod:`paleo_workbench.ui.navigation`.
+    全局 UI 是工作站 app bar（工程/视图/任务/Agent/工作区预设）；中央是
+    ``WorkstationFrame``（编图常驻 + hub 页栈），页面栈按 hub 模型组织：
+    :mod:`paleo_workbench.ui.navigation`。历史 Ribbon 命令面已随死 chrome
+    移除，命令入口回归页面内工具条与 app bar。
     """
+
+    #: 工程 / 视图动作转发给窗口（PaleoWorkbenchWindow）。Ribbon 删除后
+    #: 由 app bar 与 activity rail 直发，信号名保持旧契约。
+    new_project_requested = Signal()
+    open_project_requested = Signal()
+    open_sample_project_requested = Signal()
+    save_project_requested = Signal()
+    properties_requested = Signal()
+    about_requested = Signal()
+    preview_settings_requested = Signal()
 
     def __init__(
         self,
@@ -229,18 +245,6 @@ class AppShell(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
-
-        self.ribbon = RibbonBar(navigation.HUB_NAMES, self)
-        # Ribbon 右键菜单管理当前页面的内容面板（显隐/浮动）。
-        self.ribbon.set_panel_provider(self._current_panel_entries)
-        outer.addWidget(self.ribbon)
-        # The ribbon remains a compatibility command surface while workflow
-        # pages migrate.  The workstation app bar is the visible global UI.
-        self.ribbon.setFixedHeight(0)
-        self.ribbon.setMinimumWidth(0)
-        self.ribbon.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
-        )
 
         # --- hub pages -------------------------------------------------
         self.page_stack = QStackedWidget(self)
@@ -353,26 +357,24 @@ class AppShell(QWidget):
         # Ctrl+K quick-jump palette (non-modal child; offscreen safe).
         self.command_palette = CommandPalette(self, navigate=self.navigate_to)
 
-        # --- ribbon contexts & wiring -----------------------------------
-        self._density_pairs: list = []
-        self._build_ribbon_contexts()
-        self.ribbon.tab_changed.connect(self.navigate_to)
+        # --- global action wiring (app bar → window handlers) -----------
         self.workstation.navigation_requested.connect(self.navigate_to)
         self.workstation.command_submitted.connect(self._handle_workstation_command)
         self.workstation.status_message.connect(self.status_bar.status_label.setText)
         app_bar = self.workstation.app_bar
-        app_bar.new_project_requested.connect(self.ribbon.new_project_requested.emit)
-        app_bar.open_project_requested.connect(self.ribbon.open_project_requested.emit)
+        app_bar.new_project_requested.connect(self.new_project_requested.emit)
+        app_bar.open_project_requested.connect(self.open_project_requested.emit)
         app_bar.open_sample_requested.connect(
-            self.ribbon.open_sample_project_requested.emit
+            self.open_sample_project_requested.emit
         )
-        app_bar.save_project_requested.connect(self.ribbon.save_project_requested.emit)
-        app_bar.properties_requested.connect(self.ribbon.properties_requested.emit)
+        app_bar.save_project_requested.connect(self.save_project_requested.emit)
+        app_bar.properties_requested.connect(self.properties_requested.emit)
+        app_bar.about_requested.connect(self.about_requested.emit)
+        # 设置入口（activity rail 齿轮）与 app bar 工程菜单同走窗口层。
         self.workstation.activity_rail.settings_requested.connect(
-            self.ribbon.preview_settings_requested.emit
+            self.preview_settings_requested.emit
         )
         for hub in (self.hub_data, self.hub_well, self.hub_seismic, self.hub_mapping):
-            hub.submodule_changed.connect(self._on_submodule_changed)
             hub.page_activated.connect(self._on_hub_page_activated)
 
         self._setup_shortcuts()
@@ -388,248 +390,7 @@ class AppShell(QWidget):
         if isinstance(hub, HubPage):
             key = navigation.DEFAULT_SUBMODULE[navigation.PAGE_INDEX_DATA]
             hub.switch_to(key)
-            self.ribbon.set_context(
-                self._context_key(navigation.PAGE_INDEX_DATA, key)
-            )
-        self.ribbon.set_active_tab(navigation.PAGE_INDEX_DATA)
         self._workstation_ready = True
-
-    # --- ribbon ---------------------------------------------------------
-
-    def _context_key(self, hub_index: int, submodule_key: str) -> str:
-        names = {
-            navigation.PAGE_INDEX_DATA: "data",
-            navigation.PAGE_INDEX_WELL: "well",
-            navigation.PAGE_INDEX_SEISMIC: "seismic",
-            navigation.PAGE_INDEX_MAPPING: "mapping",
-            navigation.PAGE_INDEX_VISUALIZATION: "viz",
-        }
-        return f"{names[hub_index]}:{submodule_key}"
-
-    def _build_ribbon_contexts(self) -> None:
-        """Register every (hub, sub-module) command body and wire commands."""
-        # 数据 / 项目概述: 工程 + 视图
-        body = self.ribbon.add_context("data:overview")
-        self.ribbon.populate_project_group(body)
-        self._populate_view_group(body)
-        body.finish()
-
-        # 数据 / 数据管理: 导入 + 资产 + 视图
-        body = self.ribbon.add_context("data:management")
-        toolbar = self.data_page.data_toolbar
-        group = body.add_group("导入")
-        group.add_button("导入文件", icon="map/btn-import.svg", tooltip="导入文件并创建项目受管的不可变 RAW 副本",
-                         on_click=toolbar.import_btn.click)
-        group.add_button("导入目录", icon="map/btn-import-folder.svg", tooltip="导入整个目录",
-                         on_click=toolbar.import_folder_btn.click)
-        group.add_button("重新扫描", icon="map/btn-rescan.svg", tooltip="重新扫描选中项",
-                         on_click=toolbar.rescan_btn.click)
-        group.add_button("完整性校验", icon="map/btn-verify.svg", tooltip="后台校验数据资产完整性与 SHA-256",
-                         on_click=toolbar.verify_btn.click)
-        group.add_button("健康检查", icon="map/btn-health.svg", tooltip="数据目录健康体检",
-                         on_click=toolbar.health_btn.click)
-        group = body.add_group("资产")
-        group.add_button("标签筛选", icon="map/btn-tag-filter.svg", tooltip="按标签筛选资产表",
-                         on_click=toolbar.tag_filter_btn.click)
-        group.add_button("标签管理", icon="map/btn-tag-manager.svg", tooltip="管理项目标签词表",
-                         on_click=toolbar.tag_manager_btn.click)
-        group.add_button("移出项目", icon="map/btn-remove.svg", tooltip="移出项目（不删源文件）",
-                         on_click=toolbar.remove_btn.click)
-        group.add_button("打开目录", icon="map/btn-open-folder.svg", tooltip="在文件管理器中打开",
-                         on_click=toolbar.open_folder_btn.click)
-        group.add_button("可视化", icon="map/btn-visualize.svg", tooltip="在可视化页面打开",
-                         on_click=toolbar.visualize_btn.click)
-        self._populate_view_group(body)
-        body.finish()
-
-        # 井 / 测井预测: 数据 + 预测 + 成果 + 视图
-        body = self.ribbon.add_context("well:well_log")
-        page = self.well_log_page
-        group = body.add_group("数据")
-        group.add_button("导入 LAS/XML", icon="map/btn-import.svg", tooltip="导入 LAS / XML 测井数据",
-                         on_click=page.import_well_btn.click)
-        evidence = page.evidence_panel
-        group = body.add_group("预测")
-        group.add_button("运行预测", icon="rb-run.svg", tooltip="运行线上测井预测",
-                         on_click=evidence.run_btn.click)
-        group.add_button("演示预测", icon="rb-demo.svg", tooltip="运行演示预测",
-                         on_click=evidence.demo_btn.click)
-        group.add_button("复制日志", icon="rb-copy.svg", tooltip="复制运行日志",
-                         on_click=evidence.copy_diagnostic_btn.click)
-        group = body.add_group("成果")
-        group.add_button("导出剖面", icon="rb-export.svg", tooltip="导出单井剖面",
-                         on_click=evidence.export_btn.click)
-        group.add_button("发送制备", icon="rb-send.svg", tooltip="发送预测成果到数据制备",
-                         on_click=evidence.send_btn.click)
-        self._populate_view_group(body)
-        body.finish()
-
-        # 井 / 层序格架: 选择型页面，无页级命令 — 视图
-        body = self.ribbon.add_context("well:sequence")
-        self._populate_view_group(body)
-        body.finish()
-
-        # 井 / 地层对比: 数据 + 编辑 + 解释版本 + 导出 + 视图
-        body = self.ribbon.add_context("well:stratigraphy")
-        page = self.stratigraphy_page
-        group = body.add_group("数据")
-        group.add_button("加载剖面", icon="rb-load.svg", tooltip="加载连井剖面",
-                         on_click=page.load_btn.click)
-        group.add_button("绑定井", icon="rb-link.svg", tooltip="选用预测绑定井",
-                         on_click=page.select_bound_btn.click)
-        group = body.add_group("编辑")
-        group.add_button("撤销", icon="map/undo.svg", tooltip="撤销", on_click=page.undo_btn.click)
-        group.add_button("重做", icon="map/redo.svg", tooltip="重做", on_click=page.redo_btn.click)
-        group.add_button("自动连线", icon="rb-auto-link.svg", tooltip="自动连线",
-                         on_click=page.auto_link_btn.click)
-        group.add_button("DTW 传播", icon="rb-dtw.svg", tooltip="DTW 传播",
-                         on_click=page.dtw_btn.click)
-        group.add_button("清空剖面", icon="rb-clear.svg", tooltip="清空剖面",
-                         on_click=page.clear_btn.click)
-        group = body.add_group("解释版本")
-        group.add_button("保存版本", icon="menu-save.svg", tooltip="保存解释版本",
-                         on_click=page.save_interp_btn.click)
-        group.add_button("打开版本", icon="menu-open.svg", tooltip="打开已保存解释",
-                         on_click=page.open_interp_btn.click)
-        group.add_button("恢复版本", icon="map/rollback.svg", tooltip="恢复已保存版本",
-                         on_click=page.restore_interp_btn.click)
-        group = body.add_group("导出")
-        group.add_button("导出剖面", icon="rb-export.svg", tooltip="导出连井剖面",
-                         on_click=page.export_btn.click)
-        group.add_button("导出分层", icon="rb-export.svg", tooltip="导出分层顶 CSV",
-                         on_click=page.export_tops_btn.click)
-        self._populate_view_group(body)
-        body.finish()
-
-        # 地震 / 地震预测: 预测 + 视图
-        body = self.ribbon.add_context("seismic:seismic")
-        toolbar = self.seismic_page.context_toolbar
-        group = body.add_group("预测")
-        group.add_button("运行预测", icon="rb-run.svg", tooltip="运行地震预测",
-                         on_click=toolbar.run_btn.click)
-        group.add_button("演示预测", icon="rb-demo.svg", tooltip="运行演示预测",
-                         on_click=toolbar.demo_btn.click)
-        group.add_button("设置详情", icon="rb-settings.svg", tooltip="设置与详情",
-                         on_click=toolbar.settings_btn.click)
-        self._populate_view_group(body)
-        body.finish()
-
-        # 地震 / 井震联合 3D: 数据 + 分析 + 视图
-        body = self.ribbon.add_context("seismic:geomodel")
-        page = self.geomodel_page
-        group = body.add_group("数据")
-        group.add_button("刷新数据", icon="map/refresh.svg", tooltip="从工程/数据刷新",
-                         on_click=page._joint_add_btn.click)
-        group = body.add_group("分析")
-        group.add_button("分析", icon="rb-analysis.svg", tooltip="分析",
-                         on_click=page._joint_analysis_btn.click)
-        group.add_button("切片位置", icon="rb-slice.svg", tooltip="切片位置",
-                         on_click=page._joint_slice_card_btn.click)
-        group.add_button("色标", icon="rb-colorbar.svg", tooltip="色标",
-                         on_click=page._joint_color_card_btn.click)
-        group.add_button("井间剖面", icon="rb-fence.svg", tooltip="井间剖面",
-                         on_click=page._joint_fence_btn.click)
-        group.add_button("删 active", icon="map/delete_selected.svg", tooltip="删除 active 井间剖面",
-                         on_click=page._joint_del_fence_btn.click)
-        self._populate_view_group(body)
-        body.finish()
-
-        # 编图 / 编图画布: 编辑 + 视图
-        # (导航/选择/要素工具在页面内的图标工具条中 — 全量搬进 Ribbon 会超宽;
-        # Ribbon 承载的是状态性强的编辑动作。)
-        body = self.ribbon.add_context("mapping:canvas")
-        group = body.add_group("编辑")
-        for action_id in (
-            "toggle_editing", "save_edits", "rollback", "undo", "redo",
-            "delete_selected",
-        ):
-            self._add_map_action(group, action_id)
-        group = body.add_group("画布")
-        for action_id in ("full_extent", "refresh", "snapping", "topology"):
-            self._add_map_action(group, action_id)
-        self._populate_view_group(body)
-        body.finish()
-
-        # 编图 / 数据制备: 生成 + 质检 + 边界 + 视图
-        body = self.ribbon.add_context("mapping:preparation")
-        page = self.preparation_page
-        group = body.add_group("生成")
-        group.add_button("批量生成", icon="rb-generate.svg", tooltip="批量生成单因素图",
-                         on_click=page.task_panel.generate_btn.click)
-        group.add_button("等值线初稿", icon="map/btn-contour-draft.svg", tooltip="生成等值线初稿",
-                         on_click=page.task_panel.contour_draft_btn.click)
-        group = body.add_group("质检")
-        group.add_button("井数据质检", icon="rb-qc.svg", tooltip="运行井数据质检",
-                         on_click=page.well_table_panel.run_qc_btn.click)
-        group = body.add_group("边界")
-        group.add_button("生成边界", icon="rb-boundary.svg", tooltip="生成初始边界并送入编图",
-                         on_click=page.boundary_panel.generate_btn.click)
-        self._populate_view_group(body)
-        body.finish()
-
-        # 编图 / 成图审核: 质检 + 定稿 + 视图
-        body = self.ribbon.add_context("mapping:review")
-        header = self.review_page.action_header
-        group = body.add_group("质检")
-        group.add_button("运行检查", icon="rb-qc.svg", tooltip="运行自动质检规则",
-                         on_click=header.run_btn.click)
-        group.add_button("规则配置", icon="rb-settings.svg", tooltip="规则配置",
-                         on_click=header.config_btn.click)
-        group.add_button("导出报告", icon="rb-export.svg", tooltip="导出检查报告",
-                         on_click=header.export_btn.click)
-        group = body.add_group("定稿")
-        group.add_button("专家定稿", icon="rb-finalize.svg", tooltip="写入 VersionSet 快照并标记为 final",
-                         on_click=header.finalize_btn.click)
-        self._populate_view_group(body)
-        body.finish()
-
-        # 可视化 (临时页): 显示 + 视图
-        body = self.ribbon.add_context("viz:viz")
-        group = body.add_group("显示")
-        btn = group.add_button(
-            "网格(IL/XL)", icon="rb-grid.svg", tooltip="显示 IL/XL 网格坐标", checkable=True,
-            on_click=self.visualization_page.btn_coord.click,
-        )
-        self.visualization_page.btn_coord.toggled.connect(btn.setChecked)
-        self._populate_view_group(body)
-        body.finish()
-
-    def _add_map_action(self, group, action_id: str):
-        """Mirror one MapActionController QAction as a ribbon button."""
-        action = self.mapping_page.action_controller.actions[action_id]
-        btn = group.add_button(
-            action.text(), icon=f"map/{action_id}.svg", tooltip=action.toolTip(),
-            checkable=action.isCheckable(), on_click=action.trigger,
-        )
-        btn.setChecked(action.isChecked())
-        btn.setEnabled(action.isEnabled())
-        action.toggled.connect(btn.setChecked)
-        action.changed.connect(lambda a=action, b=btn: b.setEnabled(a.isEnabled()))
-        return btn
-
-    def _populate_view_group(self, body) -> None:
-        """Shared 视图 group: density pair + preview settings."""
-        group = body.add_group("视图")
-        comfortable = group.add_button(
-            "舒适", icon="rb-density-comfortable.svg", tooltip="界面密度：舒适", checkable=True,
-            on_click=lambda: self.ribbon.density_changed.emit("comfortable"),
-        )
-        compact = group.add_button(
-            "紧凑", icon="rb-density-compact.svg", tooltip="界面密度：紧凑", checkable=True,
-            on_click=lambda: self.ribbon.density_changed.emit("compact"),
-        )
-        comfortable.setChecked(True)
-        self._density_pairs.append((comfortable, compact))
-        group.add_button(
-            "预览设置", icon="menu-preview-settings.svg", tooltip="预览设置…",
-            on_click=self.ribbon.preview_settings_requested.emit,
-        )
-
-    def set_density_checked(self, density: str) -> None:
-        """Sync every context's density pair with the active density."""
-        for comfortable, compact in self._density_pairs:
-            comfortable.setChecked(density == "comfortable")
-            compact.setChecked(density == "compact")
 
     # --- navigation -------------------------------------------------------
 
@@ -644,14 +405,10 @@ class AppShell(QWidget):
             if submodule_key is None:
                 submodule_key = hub.current_key() or navigation.DEFAULT_SUBMODULE[hub_index]
             hub.switch_to(submodule_key)
-            self.ribbon.set_context(self._context_key(hub_index, submodule_key))
-        else:
-            self.ribbon.set_context(self._context_key(hub_index, "viz"))
         activate = getattr(hub, "activate_page", None)
         if callable(activate):
             activate()
         self.command_palette.dismiss()
-        self.ribbon.set_active_tab(hub_index)
         self._animate_page_fade(hub_index)
         title = navigation.HUB_NAMES[hub_index]
         if isinstance(hub, HubPage):
@@ -679,7 +436,9 @@ class AppShell(QWidget):
         self.navigate_to(index)
 
     def _on_submodule_changed(self, hub_index: int, key: str) -> None:
-        self.ribbon.set_context(self._context_key(hub_index, key))
+        # Hub 内子模块切换：无全局 chrome 需要同步（Ribbon 已删），保留
+        # 钩子供页面状态接线。
+        _ = hub_index, key
 
     def _on_hub_page_activated(self, hub_index: int, key: str) -> None:
         if self._workstation_ready:
@@ -699,9 +458,6 @@ class AppShell(QWidget):
 
         # Command palette (works from text fields too — standard toggle).
         QShortcut(QKeySequence("Ctrl+K"), self, self._toggle_command_palette)
-
-        # Collapse/expand the ribbon command body (Office Ctrl+F1).
-        QShortcut(QKeySequence("Ctrl+F1"), self, self.ribbon.toggle_collapsed)
 
     def _toggle_command_palette(self) -> None:
         # isHidden (not isVisible): a hidden shell window keeps children
@@ -955,16 +711,6 @@ class AppShell(QWidget):
         if isinstance(page, HubPage):
             return page.page(page.current_key())
         return page
-
-    def _current_panel_entries(self) -> list[dict]:
-        """Ribbon 右键菜单的数据源：当前页面的可管理面板。"""
-        if self.workstation.central_document() is self.workstation.composite:
-            return self.workstation.panel_entries()
-        page = self.current_content_page()
-        getter = getattr(page, "ribbon_panel_entries", None)
-        if not callable(getter):
-            return []
-        return getter()
 
     # --- page state updates (called by app.py's project binding) ---------
 

@@ -262,8 +262,6 @@ SMOOTHING_LEVELS = ["弱", "中", "强"]
 SEQUENCE_SCHEMES = ["三级层序格架（推荐）", "四级高频层序", "体系域二分方案"]
 SYSTEMS_TRACT_LABELS = ["LST", "TST", "HST"]
 
-
-
 # ---------------------------------------------------------------------------
 # Theme palettes: one token vocabulary, three curated palettes.
 # LIGHT is the Workstation production look; DARK / HIGH_CONTRAST override the
@@ -390,8 +388,6 @@ def palette_for(theme: str = "light") -> dict:
     }
     palette.update(_THEME_OVERRIDES[key])
     return palette
-
-
 
 def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     """Render the application stylesheet from the *theme* palette.
@@ -754,8 +750,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         min-height: {t.MENU_BAR_HEIGHT}px; max-height: {t.MENU_BAR_HEIGHT}px;
     }}
     /* UI v2 Ribbon (variant A) */
-    QFrame#RibbonBar {{
-        background: {t.BG_HEADER}; border-bottom: 1px solid {t.BORDER_STRONG};
+    ; border-bottom: 1px solid {t.BORDER_STRONG};
     }}
     QFrame#RibbonTopRow {{ background: transparent; }}
     QLabel#RibbonAppBadge {{
