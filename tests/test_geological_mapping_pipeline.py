@@ -509,3 +509,87 @@ def test_edge_cases_nans_uniform_and_degenerates():
     assert len(p_const.features) == 1
     assert p_const.features[0]["properties"]["area_percent"] == 100.0
 
+
+
+# ------------------------------------------------------- audit #1150 tests
+
+
+def test_extract_factors_keeps_zero_coordinates():
+    """0.0 is a legal coordinate: a pure (0, 0) well must not be dropped.
+
+    The old or-chain (``rec.get("x") or rec.get("lng") or ...``) treated 0.0
+    as missing and silently discarded such records.
+    """
+    pipeline = GeologicalMappingPipeline()
+    records = [
+        {"well_id": "W0", "name": "origin", "x": 0.0, "y": 0.0, "porosity": 15.0},
+        {"well_id": "W1", "name": "w1", "x": 114.0, "y": 22.5, "porosity": 18.0},
+    ]
+    ds = pipeline.extract_factors(records, "porosity")
+    by_id = {p.well_id: p for p in ds.points}
+    assert "W0" in by_id
+    assert by_id["W0"].x == 0.0 and by_id["W0"].y == 0.0
+    assert by_id["W0"].value == 15.0
+    assert ds.metadata["skipped_missing_coordinates"] == 0
+
+
+def test_extract_factors_never_cross_pairs_coordinate_key_families():
+    """x from one CRS family must never pair with y from another (#1150)."""
+    pipeline = GeologicalMappingPipeline()
+    records = [
+        # x/y family present but y missing; lat from the lng/lat family must
+        # NOT be grafted in as y.
+        {"well_id": "BAD", "x": 114.0, "lat": 22.5, "porosity": 10.0},
+    ]
+    ds = pipeline.extract_factors(records, "porosity")
+    assert ds.points == []
+    assert ds.metadata["skipped_missing_coordinates"] == 1
+    assert ds.metadata["coordinate_key_families_used"] == {}
+
+
+def test_extract_factors_coordinate_family_priority_project_first():
+    """project_* keys win over raw x/y when both families are complete."""
+    pipeline = GeologicalMappingPipeline()
+    records = [
+        {
+            "well_id": "W1",
+            "x": 114.0,
+            "y": 22.5,
+            "project_x": 500000.0,
+            "project_y": 3400000.0,
+            "porosity": 12.0,
+        }
+    ]
+    ds = pipeline.extract_factors(records, "porosity")
+    assert len(ds.points) == 1
+    assert ds.points[0].x == 500000.0
+    assert ds.points[0].y == 3400000.0
+    assert ds.metadata["coordinate_key_families_used"] == {"project": 1}
+
+
+def test_extract_factors_missing_y_skipped_and_counted():
+    pipeline = GeologicalMappingPipeline()
+    records = [
+        {"well_id": "OK", "x": 1.0, "y": 2.0, "porosity": 10.0},
+        {"well_id": "NOY", "x": 5.0, "porosity": 11.0},
+        {"well_id": "NOX", "y": 7.0, "porosity": 12.0},
+    ]
+    ds = pipeline.extract_factors(records, "porosity")
+    assert [p.well_id for p in ds.points] == ["OK"]
+    assert ds.metadata["skipped_missing_coordinates"] == 2
+    assert ds.metadata["coordinate_key_families_used"] == {"xy": 1}
+
+
+def test_extract_factors_mixed_key_families_recorded_as_diagnostic(caplog):
+    """Batch mixing project_* and raw x/y families is flagged, not silent."""
+    pipeline = GeologicalMappingPipeline()
+    records = [
+        {"well_id": "P", "project_x": 500000.0, "project_y": 3400000.0, "porosity": 10.0},
+        {"well_id": "G", "lng": 114.1, "lat": 22.6, "porosity": 12.0},
+    ]
+    with caplog.at_level("WARNING", logger="paleo_workbench.mapping.geological_pipeline.pipeline"):
+        ds = pipeline.extract_factors(records, "porosity")
+    assert len(ds.points) == 2
+    assert ds.metadata["coordinate_key_family_mixing"] is True
+    assert ds.metadata["coordinate_key_families_used"] == {"project": 1, "lnglat": 1}
+    assert any("mixed coordinate key families" in r.message for r in caplog.records)

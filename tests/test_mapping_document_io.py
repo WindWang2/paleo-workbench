@@ -1,3 +1,4 @@
+from paleo_workbench.project.domain import CoordinateStatus
 from paleo_workbench.project.models import PaleoMapDocument
 from paleo_workbench.mapping.document_io import (
     features_from_document,
@@ -93,3 +94,62 @@ def test_facies_multipolygon_round_trip_preserves_every_part():
     apply_features_to_document(doc, [feature])
     assert doc.facies_polygons[0]["geometry"]["type"] == "MultiPolygon"
     assert doc.facies_polygons[0]["geometry"]["coordinates"] == coordinates
+
+
+# ------------------------------------------------------- audit #1162 tests
+
+
+def test_apply_features_short_label_coordinates_skipped_not_crash(caplog):
+    """Single-element label coordinates must be skipped with a diagnostic."""
+    doc = PaleoMapDocument(name="M", linked_target_horizon="H")
+    features = [
+        {"id": "lb_bad", "kind": "label", "name": "坏", "coordinates": [1]},
+        {"id": "lb_ok", "kind": "label", "name": "好", "coordinates": [1, 2]},
+    ]
+    with caplog.at_level("WARNING", logger="paleo_workbench.mapping.document_io"):
+        apply_features_to_document(doc, features)
+    assert [lb["id"] for lb in doc.label_features] == ["lb_ok"]
+    assert doc.label_features[0]["anchor"] == [1.0, 2.0]
+    assert any("lb_bad" in r.message for r in caplog.records)
+
+
+def test_apply_features_empty_label_coordinates_skipped():
+    doc = PaleoMapDocument(name="M", linked_target_horizon="H")
+    apply_features_to_document(
+        doc, [{"id": "lb0", "kind": "label", "name": "t", "coordinates": []}]
+    )
+    assert doc.label_features == []
+
+
+def test_apply_features_short_well_coordinates_flagged_invalid():
+    """A well with one coordinate keeps the partial x but is flagged invalid."""
+    doc = PaleoMapDocument(name="M", linked_target_horizon="H")
+    apply_features_to_document(
+        doc,
+        [{"id": "w1", "kind": "well", "name": "A1", "coordinates": [3.0]}],
+    )
+    assert len(doc.well_overlays) == 1
+    rec = doc.well_overlays[0]
+    assert rec["x"] == 3.0
+    assert rec["y"] == 0.0
+    assert rec["coordinate_status"] == CoordinateStatus.INVALID
+
+
+def test_apply_features_missing_well_coordinates_flagged_missing():
+    doc = PaleoMapDocument(name="M", linked_target_horizon="H")
+    apply_features_to_document(
+        doc,
+        [{"id": "w1", "kind": "well", "name": "A1", "coordinates": []}],
+    )
+    assert doc.well_overlays[0]["coordinate_status"] == CoordinateStatus.MISSING
+
+
+def test_apply_features_valid_well_has_no_status_marker():
+    doc = PaleoMapDocument(name="M", linked_target_horizon="H")
+    apply_features_to_document(
+        doc,
+        [{"id": "w1", "kind": "well", "name": "A1", "coordinates": [1.0, 2.0]}],
+    )
+    assert "coordinate_status" not in doc.well_overlays[0]
+    assert doc.well_overlays[0]["x"] == 1.0
+    assert doc.well_overlays[0]["y"] == 2.0

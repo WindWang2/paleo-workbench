@@ -116,6 +116,8 @@ def well_to_lnglat(raw: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
     if "coordinates" in raw and isinstance(raw["coordinates"], (list, tuple)):
+        if len(raw["coordinates"]) < 2:
+            return None
         lng = float(raw["coordinates"][0])
         lat = float(raw["coordinates"][1])
     elif "lng" in raw and "lat" in raw:
