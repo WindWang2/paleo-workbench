@@ -203,6 +203,13 @@ class LinkedInterpretationWorkspace(QWidget):
         note = self.well_backend_note()
         if note is not None:
             self.status_changed.emit(f"测井轨道使用 Legacy 渲染: {note}")
+        elif not getattr(self.well_panel, "depth_cursor_supported", lambda: True)():
+            # 诚实降级：engine 绑定暂无 hover/光标接口，深度游标联动只在
+            # Legacy 后端可用——明确说明，不静默丢联动。
+            self.status_changed.emit(
+                "测井轨道使用 WellLogEngine：深度游标联动暂不可用（绑定尚无 "
+                "hover 接口，需要游标联动请切回 Legacy）"
+            )
 
     def set_well_backend(self, name: str, *, reason: str | None = None) -> None:
         """Manual Legacy ↔ WellLogEngine switch for the docked well panel.
