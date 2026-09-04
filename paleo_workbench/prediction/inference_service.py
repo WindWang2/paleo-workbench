@@ -19,11 +19,12 @@ version provide the provenance).
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import logging
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from paleo_workbench.catalog.models import CatalogError, DataRun, DataStage
 from paleo_workbench.prediction.providers import get_provider
@@ -43,6 +44,25 @@ _RESERVED_KEYS = (
     "provider",
     "demo_only",
     "error",
+)
+
+# #1152: envelope keys the SERVICE owns. A provider result dict is spread
+# into the persisted payload, so without this filter any provider (or a
+# tampered one) could relabel the run's model identity, seed, provenance
+# hash or run linkage after the fact. Server-constructed values always win.
+PAYLOAD_RESERVED_KEYS = frozenset(
+    {
+        "schema_version",
+        "model",
+        "generator_version",
+        "input_snapshot_hash",
+        "input_version_ids",
+        "seed",
+        "parameters",
+        "run_id",
+        "_finished_at",
+        "output_version_id",
+    }
 )
 
 
@@ -277,13 +297,53 @@ def start_inference(
     return run
 
 
-def execute_run(service, run_id: str) -> dict[str, Any]:
+def _provider_accepts_cancel(provider) -> bool:
+    """True when the provider's ``run`` exposes the cancel seam (#1167)."""
+    try:
+        signature = inspect.signature(provider.run)
+    except (TypeError, ValueError):  # pragma: no cover - exotic callables
+        return False
+    if any(
+        param.kind == inspect.Parameter.VAR_KEYWORD
+        for param in signature.parameters.values()
+    ):
+        return True
+    return "cancel" in signature.parameters
+
+
+def _cancel_run(service, run_id: str, partial: dict[str, Any] | None) -> None:
+    """Record a cooperative cancellation as the run's terminal state (#1167).
+
+    Cancelled is not failed: the run may resume (tiled providers keep
+    per-tile markers), and it produced no consumable output version.
+    """
+    extra = {"_finished_at": _now_iso()}
+    if isinstance(partial, dict):
+        if partial.get("tiles"):
+            extra["tiles_done"] = partial["tiles"]
+        if partial.get("elapsed_s") is not None:
+            extra["elapsed_s"] = partial["elapsed_s"]
+    service.update_run_status(run_id, "cancelled", extra_parameters=extra)
+
+
+def execute_run(
+    service,
+    run_id: str,
+    *,
+    cancel: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
     """Execute a running inference run and persist its outcome.
 
-    Returns ``{"run", "result", "model", "model_version"}``. Any error —
+    Returns ``{"run", "result", "model", "model_version"}`` (plus
+    ``"cancelled": True`` for a cooperatively cancelled run). Any error —
     provider, schema, lookup or persistence — is recorded on the run
     (status ``failed`` + ``error``) so a run never strands in "running".
     A failed run never fabricates output.
+
+    *cancel* is checked cooperatively: it is offered to providers whose
+    ``run`` accepts a ``cancel`` keyword, and a provider result flagged
+    ``cancelled`` ends the run in the terminal ``cancelled`` state (not
+    ``failed``, and no output version is registered).
     """
     run = service.get_run(run_id)
     if (run.status or "").lower() != "running":
@@ -310,15 +370,52 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
             if not k.startswith("_") and k not in _RESERVED_KEYS
         }
         parameters["seed"] = seed
+        # #1176: server-constructed registered-model identity. Providers
+        # that bind their executable artifact to the catalog's ModelVersion
+        # (e.g. tiled ONNX checksum verification) consume this; the leading
+        # underscore keeps it out of the persisted payload parameters.
+        parameters["_registered_model"] = {
+            "model_id": model.model_id,
+            "model_version": model_version.model_version,
+            "model_version_id": model_version.id,
+            "artifact_uri": str(getattr(model_version, "artifact_uri", "") or ""),
+            "checksum": str(getattr(model_version, "checksum", "") or ""),
+        }
         try:
-            result = provider.run(inputs, parameters)
+            if cancel is not None and _provider_accepts_cancel(provider):
+                result = provider.run(inputs, parameters, cancel=cancel)
+            else:
+                result = provider.run(inputs, parameters)
         except Exception as exc:  # noqa: BLE001 — surface into run status honestly
+            from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
+            if isinstance(exc, TaskCancelled):
+                _cancel_run(service, run_id, None)
+                return {
+                    "run": service.get_run(run_id),
+                    "result": None,
+                    "model": model,
+                    "model_version": model_version,
+                    "cancelled": True,
+                }
             _fail_run(service, run_id, exc)
             return {
                 "run": service.get_run(run_id),
                 "result": None,
                 "model": model,
                 "model_version": model_version,
+            }
+
+        # #1167: a cooperatively cancelled provider result is a cancellation,
+        # not a completion — terminal state "cancelled", no output version.
+        if isinstance(result, dict) and result.get("cancelled"):
+            _cancel_run(service, run_id, result)
+            return {
+                "run": service.get_run(run_id),
+                "result": None,
+                "model": model,
+                "model_version": model_version,
+                "cancelled": True,
             }
 
         # Stage-13: validate spatial output when the model declares a spatial schema.
@@ -348,6 +445,12 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
         if provider_generator:
             run.generator = provider_generator
 
+        # #1152: envelope reserved keys are SERVICE-owned. Filter them out
+        # of the provider result before merging so a provider dict can never
+        # relabel model identity, seed, provenance hash or run linkage.
+        provider_payload = {
+            k: v for k, v in result.items() if k not in PAYLOAD_RESERVED_KEYS
+        }
         payload = {
             "schema_version": "1.0",
             "model": {
@@ -364,9 +467,11 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
             "input_snapshot_hash": (run.parameters or {}).get("_input_snapshot_hash"),
             "input_version_ids": list(run.input_version_ids),
             "seed": seed,
-            "parameters": parameters,
+            "parameters": {
+                k: v for k, v in parameters.items() if not k.startswith("_")
+            },
             "run_id": run_id,
-            **result,
+            **provider_payload,
         }
         # Prefer the aligned identity (result may re-set generator_version via **result).
         if provider_generator:

@@ -21,6 +21,7 @@ Robustness:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -38,9 +39,54 @@ PROVIDER_TILED_ONNX = "tiled_onnx"
 TILE = (64, 128, 128)  # (inline, xline, time)
 DEFAULT_RECEPTIVE_FIELD = 8
 
+# #1187: per-inference softmax intermediate budget. The fused tile-group
+# softmax materializes (batch, classes, D, H, W) float32 arrays — with the
+# production 64×128×128 tile that is 4 MiB per (batch × classes) unit, which
+# grows without bound if either parameter is trusted blindly. One inference
+# may plan at most this many bytes of softmax intermediates.
+SOFTMAX_INTERMEDIATE_BUDGET_BYTES = 512 * 1024 * 1024
+
 
 class TiledInferenceError(RuntimeError):
     """Honest failure (bad model I/O contract, unusable input, OOM at batch 1)."""
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _validate_softmax_budget(
+    batch: int, classes: int, tile: tuple[int, int, int]
+) -> None:
+    """Fail closed when softmax intermediates would exceed the budget (#1187).
+
+    Explicit errors, never silent clamps: ``classes`` is part of the model
+    contract (a wrong value means the wrong model/label map), and ``batch``
+    is a caller knob the caller can lower.
+    """
+    tile_voxels = int(tile[0]) * int(tile[1]) * int(tile[2])
+    bytes_per_unit = max(1, tile_voxels * 4)  # float32
+    classes_bytes = int(classes) * bytes_per_unit
+    if classes_bytes > SOFTMAX_INTERMEDIATE_BUDGET_BYTES:
+        raise TiledInferenceError(
+            f"classes={classes} with tile {tuple(tile)} needs "
+            f"{classes_bytes / 1024 / 1024:.0f} MiB of softmax intermediates "
+            f"per batch item (> {SOFTMAX_INTERMEDIATE_BUDGET_BYTES // 1024 // 1024} MiB budget); "
+            "refusing: class count does not match a runnable tile model"
+        )
+    planned = int(batch) * classes_bytes
+    if planned > SOFTMAX_INTERMEDIATE_BUDGET_BYTES:
+        max_batch = max(1, SOFTMAX_INTERMEDIATE_BUDGET_BYTES // classes_bytes)
+        raise TiledInferenceError(
+            f"batch={batch} × classes={classes} × tile {tuple(tile)} would need "
+            f"{planned / 1024 / 1024:.0f} MiB of softmax intermediates "
+            f"(> {SOFTMAX_INTERMEDIATE_BUDGET_BYTES // 1024 // 1024} MiB budget); "
+            f"reduce batch to <= {max_batch}"
+        )
 
 
 def tile_starts(n: int, tile: int, overlap: int) -> list[int]:
@@ -122,14 +168,18 @@ def run_tiled_inference(
     model_path = Path(model_path)
     if not model_path.is_file():
         raise TiledInferenceError(f"ONNX model not found: {model_path}")
+    tile = tuple(int(t) for t in tile)
+    if len(tile) != 3 or any(t <= 0 for t in tile):
+        raise TiledInferenceError(f"tile must be a positive (il, xl, t) triple: {tile}")
+    if classes <= 0:
+        raise TiledInferenceError(f"classes must be > 0, got {classes}")
+    # #1187: bound softmax intermediates before any session/array work.
+    _validate_softmax_budget(max(1, int(batch)), int(classes), tile)
     sess, mode = _make_session(model_path, prefer_gpu=prefer_gpu)
     input_name = sess.get_inputs()[0].name
     output_name = sess.get_outputs()[0].name
 
     shape = tuple(int(x) for x in reader.shape)
-    tile = tuple(int(t) for t in tile)
-    if len(tile) != 3 or any(t <= 0 for t in tile):
-        raise TiledInferenceError(f"tile must be a positive (il, xl, t) triple: {tile}")
     work = Path(work_root)
     work.mkdir(parents=True, exist_ok=True)
     class_dst = work / "classmap"
@@ -173,10 +223,14 @@ def run_tiled_inference(
     idx = 0
     while idx < len(tiles):
         if cancel is not None and cancel():
+            # #1167: keep the protocol complete so callers can distinguish
+            # a cancelled run (resumable, partial tiles on disk) from a
+            # failed one without KeyError-ing on missing stats keys.
             return {
                 "mode": mode, "tiles_total": total, "tiles_done": done_count,
                 "cancelled": True, "elapsed_s": time.perf_counter() - t0,
                 "class_map": str(class_dst), "prob_map": str(prob_dst),
+                "shape": list(shape), "classes": classes, "overlap": overlap,
             }
         group = [t for t in tiles[idx : idx + current_batch]]
         group = [t for t in group if tile_key(t) not in completed]
@@ -291,6 +345,89 @@ def _run_tile_group(
         prob_out[auth[0][0] : auth[0][1], auth[1][0] : auth[1][1], auth[2][0] : auth[2][1]] = mp
 
 
+def _same_file(left: str | Path, right: str | Path) -> bool:
+    try:
+        return Path(left).resolve() == Path(right).resolve()
+    except (TypeError, OSError):
+        return False
+
+
+def _verify_model_identity(
+    model_path: Path,
+    parameters: dict[str, Any],
+    actual_sha256: str,
+) -> dict[str, Any]:
+    """Bind the executed binary to a registered ModelVersion (#1176).
+
+    ``parameters["_registered_model"]`` is injected server-side by
+    :func:`paleo_workbench.prediction.inference_service.execute_run` from the
+    catalog's ModelVersion (artifact_uri + checksum). When a model identity
+    is declared, the executed file MUST be that registered artifact —
+    checksum mismatch, or a different file executing under a declared
+    identity, is refused (fail closed). Identity-less call paths (capability
+    provider, harness) are allowed but the result explicitly records
+    ``registered: False`` and the artifact's REAL sha256, and never carries
+    a registered model identity.
+    """
+    identity = parameters.get("_registered_model")
+    identity = identity if isinstance(identity, dict) else None
+    declared_checksum = ""
+    if identity is not None:
+        declared_checksum = str(identity.get("checksum") or "").strip()
+    if not declared_checksum:
+        declared_checksum = str(parameters.get("model_checksum") or "").strip()
+
+    if identity is not None and declared_checksum:
+        if declared_checksum != actual_sha256:
+            raise TiledInferenceError(
+                "ONNX 工件校验失败：注册模型 checksum "
+                f"{declared_checksum} 与实际执行文件 sha256 {actual_sha256} "
+                "不一致，拒绝执行（不受信二进制不能携带注册模型身份）"
+            )
+        return {
+            "registered": True,
+            "verified": True,
+            "model_id": str(identity.get("model_id") or ""),
+            "model_version": str(identity.get("model_version") or ""),
+            "model_version_id": str(identity.get("model_version_id") or ""),
+            "artifact_uri": str(identity.get("artifact_uri") or ""),
+            "artifact_sha256": actual_sha256,
+            "declared_checksum": declared_checksum,
+        }
+    if identity is not None:
+        # Identity declared without a checksum: bind by registered
+        # artifact path — executing ANY other file under a registered
+        # identity is exactly the #1176 forgery vector.
+        artifact_uri = str(identity.get("artifact_uri") or "").strip()
+        if artifact_uri and not _same_file(model_path, artifact_uri):
+            raise TiledInferenceError(
+                f"执行文件 {model_path} 不是注册模型工件 {artifact_uri}，"
+                "拒绝以注册模型身份执行未注册二进制"
+            )
+        return {
+            "registered": True,
+            "verified": bool(artifact_uri),
+            "model_id": str(identity.get("model_id") or ""),
+            "model_version": str(identity.get("model_version") or ""),
+            "model_version_id": str(identity.get("model_version_id") or ""),
+            "artifact_uri": artifact_uri,
+            "artifact_sha256": actual_sha256,
+            "declared_checksum": declared_checksum,
+        }
+    # No declared identity: honest untrusted execution — real checksum,
+    # registered=False, no registered model identity attached.
+    return {
+        "registered": False,
+        "verified": False,
+        "model_id": "",
+        "model_version": "",
+        "model_version_id": "",
+        "artifact_uri": "",
+        "artifact_sha256": actual_sha256,
+        "declared_checksum": declared_checksum,
+    }
+
+
 class TiledOnnxProvider:
     """ModelProvider over a registered ONNX file (tiled, resumable, honest)."""
 
@@ -302,6 +439,8 @@ class TiledOnnxProvider:
         self,
         inputs: dict[str, dict[str, Any]],
         parameters: dict[str, Any],
+        *,
+        cancel: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         from geoviz_seismic import open_volume
 
@@ -317,6 +456,14 @@ class TiledOnnxProvider:
             raise TiledInferenceError(
                 "parameters must include model_path and classes (> 0)"
             )
+        model_path = Path(str(model_path))
+        if not model_path.is_file():
+            raise TiledInferenceError(f"ONNX model not found: {model_path}")
+        # #1176: verify the executed binary against any declared registered
+        # identity BEFORE building a session from it.
+        provenance = _verify_model_identity(
+            model_path, parameters, _sha256_file(model_path)
+        )
         overlap = int(parameters.get("receptive_field", DEFAULT_RECEPTIVE_FIELD) or 0)
         batch = int(parameters.get("batch", 1) or 1)
         tile_param = parameters.get("tile")
@@ -339,6 +486,7 @@ class TiledOnnxProvider:
             batch=batch,
             prefer_gpu=bool(parameters.get("prefer_gpu", True)),
             tile=tile,
+            cancel=cancel,
         )
         payload = {
             "source": PROVIDER_TILED_ONNX,
@@ -350,6 +498,8 @@ class TiledOnnxProvider:
             "class_map": stats["class_map"],
             "prob_map": stats["prob_map"],
             "shape": stats["shape"],
+            "classes": stats["classes"],
+            "model_provenance": provenance,
             "volume_outputs": [
                 {
                     "name": "facies class map",

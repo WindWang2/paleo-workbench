@@ -12,7 +12,7 @@ import json
 import math
 import os
 import time
-from typing import Any
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
@@ -204,8 +204,15 @@ def run_single_well_prediction(
     wait_timeout_seconds: int | None = None,
     request_timeout_seconds: int | None = None,
     poll_timeout_seconds: int | None = None,
+    cancel: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
-    """Discover the model contract, submit one well, and poll when needed."""
+    """Discover the model contract, submit one well, and poll when needed.
+
+    *cancel* is a cooperative cancellation callback (#1169): checked before
+    every poll cycle; when it returns True the wait aborts promptly by
+    raising :class:`~paleo_workbench.runtime.task_scheduler.TaskCancelled`
+    instead of blocking for the remaining poll timeout.
+    """
     key = str(api_key or "").strip()
     if not key:
         raise GeoVizOnlinePredictionError("未配置推理 API 密钥")
@@ -261,6 +268,7 @@ def run_single_well_prediction(
         status_code=status_code,
         request_timeout_seconds=request_timeout,
         poll_timeout_seconds=poll_timeout,
+        cancel=cancel,
     )
     regions = response_records(response)
     completed_model = response.get("model")
@@ -394,6 +402,7 @@ def _wait_for_completion(
     status_code: int,
     request_timeout_seconds: int,
     poll_timeout_seconds: int,
+    cancel: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     status = str(response.get("status") or "").lower()
     if status == "completed":
@@ -408,6 +417,13 @@ def _wait_for_completion(
     poll_url = _trusted_poll_url(base_url, response.get("pollUrl"))
     deadline = time.monotonic() + poll_timeout_seconds
     while True:
+        if cancel is not None and cancel():
+            # #1169: cooperative cancellation — abort at this safe point
+            # instead of sleeping through the remaining poll timeout. Same
+            # cancellation vocabulary as the tiled-ONNX inference path.
+            from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
+            raise TaskCancelled("online_prediction_poll")
         delay_seconds = _poll_delay_seconds(response.get("pollAfterMs"))
         if time.monotonic() + delay_seconds > deadline:
             raise GeoVizOnlinePredictionError("线上推理轮询超时，任务仍未完成")

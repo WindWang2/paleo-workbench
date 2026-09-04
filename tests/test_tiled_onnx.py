@@ -234,3 +234,194 @@ def test_provider_contract_and_cpu_mode_label(store, tmp_path):
     ref_arg, _ = _reference(model_path, cube)
     classmap = np.asarray(zarr.open(kinds["classmap"]["path"], mode="r")[:, :, :])
     np.testing.assert_array_equal(classmap, ref_arg)
+
+
+# ---------------------------------------------------------------------------
+# #1176 — executed artifact must be the registered artifact (fail closed)
+# #1167 — cooperative cancellation returns a protocol-complete dict
+# #1187 — softmax intermediate budget bounds batch × classes
+# ---------------------------------------------------------------------------
+
+from paleo_workbench.prediction.tiled_onnx import (  # noqa: E402
+    SOFTMAX_INTERMEDIATE_BUDGET_BYTES,
+    TiledInferenceError,
+    TiledOnnxProvider,
+)
+
+
+def _sha256(path: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _provider_inputs(dst: Path) -> dict:
+    return {
+        "version-1": {
+            "path": str(dst),
+            "name": "v",
+            "asset_type": "seismic",
+            "format": "zarr-v3",
+        }
+    }
+
+
+def test_identity_checksum_mismatch_refuses_execution(store, tmp_path):
+    dst, _cube = store
+    model_path = _save(_sign_model(), tmp_path / "m.onnx")
+    provider = TiledOnnxProvider()
+    with pytest.raises(TiledInferenceError, match="checksum"):
+        provider.run(
+            _provider_inputs(dst),
+            {
+                "model_path": str(model_path),
+                "classes": 2,
+                "tile": (8, 16, 16),
+                "work_root": str(tmp_path / "w"),
+                "_registered_model": {
+                    "model_id": "registered-model",
+                    "model_version": "1",
+                    "checksum": "0" * 64,  # not this file
+                },
+            },
+        )
+
+
+def test_identity_checksum_match_reports_registered_provenance(store, tmp_path):
+    dst, _cube = store
+    model_path = _save(_sign_model(), tmp_path / "m.onnx")
+    provider = TiledOnnxProvider()
+    payload = provider.run(
+        _provider_inputs(dst),
+        {
+            "model_path": str(model_path),
+            "classes": 2,
+            "receptive_field": 0,
+            "tile": (8, 16, 16),
+            "work_root": str(tmp_path / "w_reg"),
+            "_registered_model": {
+                "model_id": "registered-model",
+                "model_version": "9",
+                "model_version_id": "mver-9",
+                "artifact_uri": str(model_path),
+                "checksum": _sha256(model_path),
+            },
+        },
+    )
+    provenance = payload["model_provenance"]
+    assert provenance["registered"] is True
+    assert provenance["verified"] is True
+    assert provenance["model_id"] == "registered-model"
+    assert provenance["model_version"] == "9"
+    assert provenance["model_version_id"] == "mver-9"
+    assert provenance["artifact_sha256"] == _sha256(model_path)
+
+
+def test_declared_identity_but_other_file_refused(store, tmp_path):
+    """Identity without a checksum binds by registered artifact path:
+    executing a different binary under a registered identity is refused."""
+    dst, _cube = store
+    model_path = _save(_sign_model(), tmp_path / "real.onnx")
+    other = _save(_conv_model(), tmp_path / "other.onnx")
+    provider = TiledOnnxProvider()
+    with pytest.raises(TiledInferenceError, match="注册模型工件"):
+        provider.run(
+            _provider_inputs(dst),
+            {
+                "model_path": str(other),
+                "classes": 2,
+                "tile": (8, 16, 16),
+                "work_root": str(tmp_path / "w"),
+                "_registered_model": {
+                    "model_id": "registered-model",
+                    "model_version": "1",
+                    "artifact_uri": str(model_path),
+                    "checksum": "",
+                },
+            },
+        )
+
+
+def test_identityless_execution_is_marked_untrusted_with_real_sha256(store, tmp_path):
+    dst, _cube = store
+    model_path = _save(_sign_model(), tmp_path / "m.onnx")
+    provider = TiledOnnxProvider()
+    payload = provider.run(
+        _provider_inputs(dst),
+        {
+            "model_path": str(model_path),
+            "classes": 2,
+            "receptive_field": 0,
+            "tile": (8, 16, 16),
+            "work_root": str(tmp_path / "w_untrusted"),
+        },
+    )
+    provenance = payload["model_provenance"]
+    assert provenance["registered"] is False
+    assert provenance["verified"] is False
+    # Honest untrusted record: real sha256, no registered identity attached.
+    assert provenance["artifact_sha256"] == _sha256(model_path)
+    assert provenance["model_id"] == ""
+    assert provenance["model_version_id"] == ""
+
+
+def test_provider_cancel_returns_protocol_complete_dict(store, tmp_path):
+    """#1167: a cancelled provider run returns cancelled=True WITH the
+    shape/classes keys the caller protocol expects — no KeyError path."""
+    dst, cube = store
+    model_path = _save(_sign_model(), tmp_path / "m.onnx")
+    provider = TiledOnnxProvider()
+    payload = provider.run(
+        _provider_inputs(dst),
+        {
+            "model_path": str(model_path),
+            "classes": 2,
+            "receptive_field": 0,
+            "tile": (8, 16, 16),
+            "work_root": str(tmp_path / "w_cancel"),
+        },
+        cancel=lambda: True,
+    )
+    assert payload["cancelled"] is True
+    assert payload["shape"] == list(cube.shape)
+    assert payload["classes"] == 2
+    assert payload["tiles"] == 0  # cancelled before the first tile
+
+
+def test_softmax_budget_rejects_oversized_batch(store, tmp_path):
+    """#1187: explicit error (never a silent clamp) when batch × classes ×
+    tile floats exceed the softmax intermediate budget."""
+    dst, _cube = store
+    model_path = _save(_sign_model(), tmp_path / "m.onnx")
+    reader = open_volume(dst)
+    tile = (8, 16, 16)  # 2048 voxels × 4 B = 8 KiB per (batch, class) unit
+    bytes_per_unit = 8 * 16 * 16 * 4
+    over_budget_batch = SOFTMAX_INTERMEDIATE_BUDGET_BYTES // (bytes_per_unit * 2) + 1
+    with pytest.raises(TiledInferenceError, match="batch"):
+        run_tiled_inference(
+            reader,
+            model_path,
+            classes=2,
+            work_root=tmp_path / "w_batch",
+            batch=over_budget_batch,
+            tile=tile,
+            prefer_gpu=False,
+        )
+
+
+def test_softmax_budget_rejects_oversized_classes(store, tmp_path):
+    dst, _cube = store
+    model_path = _save(_sign_model(), tmp_path / "m.onnx")
+    reader = open_volume(dst)
+    tile = (8, 16, 16)
+    over_budget_classes = SOFTMAX_INTERMEDIATE_BUDGET_BYTES // (8 * 16 * 16 * 4) + 1
+    with pytest.raises(TiledInferenceError, match="classes"):
+        run_tiled_inference(
+            reader,
+            model_path,
+            classes=over_budget_classes,
+            work_root=tmp_path / "w_classes",
+            batch=1,
+            tile=tile,
+            prefer_gpu=False,
+        )

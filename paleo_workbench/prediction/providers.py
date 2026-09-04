@@ -85,6 +85,13 @@ class ModelProvider(Protocol):
         "format"}`` (payload locations of the run's declared input versions).
         ``parameters`` carries reproducibility metadata (``seed``, ``workflow``,
         ...). Returns a JSON-serializable result dict.
+
+        Long-running implementations MAY accept an extra keyword-only
+        ``cancel: Callable[[], bool]`` — :func:`execute_run` passes its own
+        cancellation channel to providers whose ``run`` accepts one (#1167),
+        and a cancelled provider either returns ``{"cancelled": True, ...}``
+        or raises
+        :class:`~paleo_workbench.runtime.task_scheduler.TaskCancelled`.
         """
         ...
 
@@ -251,6 +258,8 @@ class GeoVizOnlineProvider:
         self,
         inputs: dict[str, dict[str, Any]],
         parameters: dict[str, Any],
+        *,
+        cancel: Any = None,
     ) -> dict[str, Any]:
         well_inputs = [
             info
@@ -275,11 +284,24 @@ class GeoVizOnlineProvider:
             online_timeout_seconds,
             online_wait_timeout_seconds,
         )
-        from paleo_workbench.viz.well_log_load import load_well_log_from_path
+        from paleo_workbench.viz.well_log_load import (
+            FULL_RESOLUTION_MAX_SAMPLES,
+            load_well_log_full_resolution,
+            well_log_decimation_info,
+        )
 
-        well_log = load_well_log_from_path(str(path))
+        # #1193: scientific/ML paths must NOT silently consume the preview
+        # loader's decimated document. Load at full resolution; the payload
+        # then honestly declares the data resolution actually sent.
+        well_log = load_well_log_full_resolution(str(path))
         if well_log is None:
             raise InferenceInputError("无法解析所选测井文件，无法发送线上测井预测")
+        decimation = well_log_decimation_info(
+            str(path),
+            well_log,
+            loader="full_resolution",
+            max_samples=FULL_RESOLUTION_MAX_SAMPLES,
+        )
         well_name = str(getattr(well_log, "well_name", "") or path.stem)
         # #1144: the connection endpoint is never taken from persisted
         # run/project parameters (a shared project file could carry an
@@ -287,9 +309,10 @@ class GeoVizOnlineProvider:
         # well curves and the API key are sent. The UI still snapshots the
         # endpoint into parameters as a provenance record (display only).
         endpoint = online_endpoint()
-        model_version_id = str(
-            parameters.get("online_model_version_id") or online_model_version_id()
-        )
+        # Same treatment for the remote model version: run parameters are a
+        # display-only snapshot; which registered remote model may process
+        # well curves is decided by the operator environment only.
+        model_version_id = online_model_version_id()
         remote = run_single_well_prediction(
             well_name,
             well_log,
@@ -308,6 +331,7 @@ class GeoVizOnlineProvider:
                 parameters.get("online_poll_timeout_seconds"),
                 online_poll_timeout_seconds(), 1, 3600,
             ),
+            cancel=cancel,
         )
         from paleo_workbench.prediction.postprocess import (
             postprocess_prediction_regions,
@@ -339,6 +363,19 @@ class GeoVizOnlineProvider:
                 if isinstance(name, str) and isinstance(count, (int, float))
             },
         }
+        # #1193: honest data-resolution declaration. The ML path loads full
+        # resolution, so ``decimated`` is normally False; if a file ever
+        # exceeded even the full-resolution ceiling the payload says so
+        # explicitly instead of letting a subsampled log masquerade as the
+        # complete curve set.
+        data_resolution = decimation.as_dict() if decimation is not None else {
+            "loader": "full_resolution",
+            "decimated": None,
+            "original_row_count": None,
+            "returned_sample_count": None,
+            "sample_stride": None,
+        }
+        data_resolution["sent_row_count"] = int(remote["request_row_count"])
         # Consolidated intervals represent unequal depths. Preserve the
         # probability summary's physical meaning rather than averaging a few
         # long merged bands as though each were one original sample.
@@ -385,6 +422,7 @@ class GeoVizOnlineProvider:
                 ),
                 "remote_job_id": remote.get("job_id", ""),
                 "request_row_count": remote["request_row_count"],
+                "data_resolution": data_resolution,
                 "remote_summary": remote_summary,
                 "postprocess": postprocess_summary,
             },
@@ -435,16 +473,40 @@ def _install_bundled_providers() -> None:
 _install_bundled_providers()
 
 
-def register_provider(name: str, provider_cls: type[ModelProvider]) -> None:
+def register_provider(
+    name: str,
+    provider_cls: type[ModelProvider],
+    *,
+    replace: bool = False,
+) -> None:
     """Plugin seam: register a provider class under *name* (e.g. tests/fakes).
 
     Does not seed the ModelRegistry. Production UI only finds models that are
     explicitly registered and promoted; test providers must never be installed
     as default production models.
+
+    Registering an existing name raises :class:`ValueError` (#1184) — a
+    silent overwrite would let a shared project's test provider shadow a
+    production one mid-session. Re-registration is an explicit act: pass
+    ``replace=True`` or :func:`unregister_provider` first (same contract as
+    the capability :class:`~paleo_workbench.providers.registry.ProviderRegistry`).
     """
     if not name:
         raise KeyError("provider name required")
-    PROVIDER_BY_NAME[str(name)] = provider_cls
+    key = str(name)
+    if key in PROVIDER_BY_NAME and not replace:
+        existing = PROVIDER_BY_NAME[key]
+        raise ValueError(
+            f"model provider already registered: {key!r} "
+            f"({existing.__name__}); unregister_provider() first or pass "
+            "replace=True"
+        )
+    PROVIDER_BY_NAME[key] = provider_cls
+
+
+def unregister_provider(name: str) -> bool:
+    """Explicitly remove a registered provider (returns True if it existed)."""
+    return PROVIDER_BY_NAME.pop(str(name), None) is not None
 
 
 def get_provider(name: str) -> ModelProvider:

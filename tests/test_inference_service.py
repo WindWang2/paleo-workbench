@@ -305,7 +305,9 @@ def test_promote_model_survives_ensure_default_models(service, tmp_path):
     ensure_default_models(service)
     assert service.find_production_model(CAPABILITY_FACIES) is None
 
-    register_provider(PROVIDER_TEST_SPATIAL, TestSpatialModelProvider)
+    # #1184: duplicate registration no longer silently overwrites; the
+    # explicit replace=True seam is the sanctioned test re-registration.
+    register_provider(PROVIDER_TEST_SPATIAL, TestSpatialModelProvider, replace=True)
     artifact = tmp_path / "weights.bin"
     artifact.write_bytes(b"test-weights")
     register_model_package(
