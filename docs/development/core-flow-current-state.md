@@ -2,6 +2,10 @@
 
 Baseline commit: `a1a526475794b6ad42013f307ab58eda2bc1a5a7` (main, 2026-09-05)
 
+> **注**：本文档记录的是本分支开工前 main 基线的事实状态。文中"仍存在的 issues"
+> 绝大多数已在本分支（feat/core-geoscience-flow-v4）修复——逐项对应关系见
+> `core-flow-target-state.md` 的勾选清单与各 commit message。
+
 本文档基于对最新 main 源码的全领域审计（6 个并行领域调查），记录"从源码看系统今天是什么"，而不是历史文档宣称什么。每节给出关键 `file:line` 证据。目标态见 `core-flow-target-state.md`。
 
 ## 1. Project / Workarea 生命周期
