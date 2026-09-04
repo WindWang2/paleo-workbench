@@ -2331,14 +2331,10 @@ def create_map_render_backend(*, prefer_qgis: bool = True) -> MapRenderBackend:
     first preparation of a large vector layer. Tests construct it directly and
     keep the synchronous contract.
 
-    Runtime opt-out (documented in README): ``PALEO_DISABLE_QGIS_RENDERER=1``
-    or ``PALEO_USE_QGIS_RENDERER=0`` force the fallback without a rebuild
-    (#937-1).
+    Environment variables no longer demote a usable bridge (M5). Callers that
+    need the painter path construct ``FallbackMapRenderBackend`` directly or
+    pass ``prefer_qgis=False``.
     """
-    if os.environ.get("PALEO_DISABLE_QGIS_RENDERER", "").strip().lower() in {"1", "true", "yes"}:
-        prefer_qgis = False
-    if os.environ.get("PALEO_USE_QGIS_RENDERER", "").strip().lower() in {"0", "false", "no"}:
-        prefer_qgis = False
     qgis = QgisMapRenderBackend()
     if prefer_qgis and qgis.is_available:
         usable, reason = qgis_backend_probe()

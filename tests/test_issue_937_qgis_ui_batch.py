@@ -175,8 +175,8 @@ def test_project_controller_end_session_nonblocking_on_lingering_thread(qapp):
     t.join(timeout=2.5)
 
 
-# 1: runtime opt-out env vars honoured by create_map_render_backend
-def test_create_map_render_backend_honours_disable_env(monkeypatch):
+# 1: runtime opt-out env vars no longer demote a usable bridge (M5)
+def test_create_map_render_backend_ignores_disable_env(monkeypatch):
     import paleo_workbench.mapping.map_render_backend as mrb
 
     class _FakeQgis:
@@ -189,14 +189,7 @@ def test_create_map_render_backend_honours_disable_env(monkeypatch):
 
     monkeypatch.setattr(mrb, "QgisMapRenderBackend", _FakeQgis)
     monkeypatch.setattr(mrb, "qgis_backend_probe", lambda: (True, ""))
-    monkeypatch.delenv("PALEO_DISABLE_QGIS_RENDERER", raising=False)
-    monkeypatch.delenv("PALEO_USE_QGIS_RENDERER", raising=False)
-    backend = mrb.create_map_render_backend()
-    assert isinstance(backend, _FakeQgis)
     monkeypatch.setenv("PALEO_DISABLE_QGIS_RENDERER", "1")
-    backend = mrb.create_map_render_backend()
-    assert isinstance(backend, mrb.FallbackMapRenderBackend)
-    monkeypatch.delenv("PALEO_DISABLE_QGIS_RENDERER")
     monkeypatch.setenv("PALEO_USE_QGIS_RENDERER", "0")
-    backend = mrb.create_map_render_backend()
-    assert isinstance(backend, mrb.FallbackMapRenderBackend)
+    backend = mrb.create_map_render_backend(prefer_qgis=True)
+    assert isinstance(backend, _FakeQgis)
