@@ -112,6 +112,8 @@ def test_digitize_commits_build_one_snapshot_and_touch_only_the_edited_layer(qtb
     """Each digitized vertex commits one snapshot and only the layer revision."""
     page = MappingPage()
     _show_page(qtbot, page)
+    if isinstance(page.unified_canvas, QgisDisplayCanvas):
+        pytest.skip("QGIS preview canvas is read-only")
     page.update_state([_document()], project_crs="EPSG:3857")
     canvas = page.unified_canvas
     page.action_controller.actions["toggle_editing"].trigger()

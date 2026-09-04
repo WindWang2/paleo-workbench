@@ -4,6 +4,7 @@ Covers the canvas map_clicked emission (click vs drag) and HomePage's
 pixel-space hit test against the well layers.
 """
 
+import pytest
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
@@ -142,6 +143,9 @@ def test_home_map_click_far_from_wells_emits_nothing(qtbot):
 
 
 def test_home_page_uses_display_canvas_when_bridge_present(qtbot, qapp):
+    from tests.qgis_support import QGIS_SKIP_REASON
+
+    pytest.importorskip("qgis_render_bridge.mapstack", reason=QGIS_SKIP_REASON)
     from paleo_workbench.ui.pages.home_page import HomePage
     from paleo_workbench.ui.qgis_stack.display_canvas import QgisDisplayCanvas
 
