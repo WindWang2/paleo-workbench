@@ -1,5 +1,7 @@
 # QGIS 原生地图栈 M1（地基：桥骨架 + QgsMapCanvas 嵌入）实施计划
 
+> **Status: COMPLETE** — merged to main at `70c9811e`。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把 vendored QGIS 4.2 的 `QgsMapCanvas` 嵌入工作站综合编修文档区，图层经 `QgsProject` 镜像显示，原生 pan/zoom 可用——M1 可演示。

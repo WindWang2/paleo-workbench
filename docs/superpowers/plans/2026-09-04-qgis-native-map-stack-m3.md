@@ -1,5 +1,7 @@
 # QGIS 原生地图栈 M3（原生编辑工具链：采点/顶点/移动/选择 + 捕捉 + 键盘路径）实施计划
 
+> **Status: COMPLETE** — merged to main at `52550ee9`。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 综合编修区的编辑工具链换为 QGIS 原生 `QgsMapTool` 承载——采点/线/面用 `QgsMapToolDigitizeFeature`（原生 rubber band 预览 + 内置 Backspace/Esc + 自动捕捉），选择/identify 用 `QgsMapToolSelect`/`QgsMapToolIdentifyFeature`，顶点编辑与要素移动用桥内薄封装工具；捕捉配置从 Python `SnappingService` 映射进 canvas 自带 `snappingUtils()`；**要素写入权威保持在 Python `VectorEditSession`**（命令模式/undo/持久化/修订日志全部不动），QGIS 原生工具只做输入与预览层。

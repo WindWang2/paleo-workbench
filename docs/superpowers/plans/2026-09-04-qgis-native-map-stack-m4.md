@@ -1,5 +1,7 @@
 # QGIS 原生地图栈 M4（只读页真画布 + 自有 QgsProject）实施计划
 
+> **Status: COMPLETE** — merged to main at `629ba15a`。checkbox 未回写，as-built 以 git log 为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 先合上 M3 真机回归（工具包装 / cadDock hide），再让首页、工区图、编图预览在桥可用时嵌入真 `QgsMapCanvas`；每页自有 `QgsProject`，只读（pan/zoom + 单击），不与综合编修的 `QgsProject::instance()` 抢层。无桥时工厂回落 `UnifiedMapCanvas`。

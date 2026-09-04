@@ -2,7 +2,7 @@
 
 - 日期：2026-09-03
 - 状态：已批准（用户确认方案 A + 硬依赖 + 三块一体 + 权威模型调整）
-- 里程碑进度：M1/M2 已完成并合入 main；M3 编辑工具链（原生采点/线/面 + 顶点/移动工具 + 选择/identify + 捕捉配置下推 + Esc 键盘归一 + M2 移交项）2026-09-04 于 `m3-native-edit-tools` 分支交付（as-built 见 `docs/superpowers/plans/2026-09-04-qgis-native-map-stack-m3.md`）。
+- 里程碑进度：M1–M4 已完成并合入 main（M4 HEAD `629ba15a`）。M5 收尾切片见 `docs/superpowers/specs/2026-09-04-qgis-native-map-stack-m5-design.md`（mini-QgsProject XML + 生产路径去掉环境变量降级 + QGIS CI 门禁）。
 - 范围：工作站地图区（综合编修/平面图）的图层管理、矢量显示、矢量编辑、图层属性
 
 ## 背景与目标
@@ -111,7 +111,8 @@ PySide6 shell（app_bar / dock / 状态栏不变）
 - **M1 地基**：provider 补编 + `mapstack` 桥骨架 + canvas 嵌入综合编修区（显示/缩放/平移）→ 可演示。
 - **M2 图层**：`QgsProject` 权威化 + `QgsLayerTreeView` 图层管理 + 属性对话框 → 可演示。
 - **M3 编辑**：map tool 编辑栈 + 捕捉 + 撤销重做 → 完整交付。
-- **M4 收尾**（已切片）：本切片见 `docs/superpowers/specs/2026-09-04-qgis-native-map-stack-m4-design.md`（只读页真 `QgsMapCanvas` + 自有 `QgsProject`；M3 真机回归先行）。原条目中的 mini-`QgsProject` XML 持久化、fallback 拆除、QGIS CI 专轨，推迟到后续切片。
+- **M4 只读页**（已完成）：见 `docs/superpowers/specs/2026-09-04-qgis-native-map-stack-m4-design.md`。
+- **M5 收尾**（本切片）：见 `docs/superpowers/specs/2026-09-04-qgis-native-map-stack-m5-design.md`（mini-`QgsProject` XML、生产路径去掉 `PALEO_DISABLE_QGIS_RENDERER`、QGIS CI 专轨执行 mapstack 测试）。MapEditView 原生化、编修迁出 `QgsProject::instance()`、删除 `FallbackMapRenderBackend`、`provider_gdal/ogr` 仍不在本程序。
 
 ## 风险
 

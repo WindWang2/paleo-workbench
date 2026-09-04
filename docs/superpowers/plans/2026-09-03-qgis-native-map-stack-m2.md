@@ -1,5 +1,7 @@
 # QGIS 原生地图栈 M2（QgsLayerTreeView 图层管理 + 原生图层属性对话框）实施计划
 
+> **Status: COMPLETE** — merged to main at `55fcb640`。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 综合编修区的图层管理面板与图层属性对话框完全由 QGIS 原生控件承载——`QgsLayerTreeView`（图例/勾选/拖拽排序/重命名/右键菜单）替换自绘 `LayerManagerPanel` 的树，`QgsVectorLayerProperties` 替换自绘 `MapLayerPropertiesDialog`；镜像改增量，树操作回写文档模型。
