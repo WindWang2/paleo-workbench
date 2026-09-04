@@ -21,6 +21,7 @@ from paleo_workbench.providers.contracts import (
     ResourceProfile,
 )
 from paleo_workbench.providers.errors import ProviderExecutionError, ProviderRejectedInputError
+from paleo_workbench.providers.paths import resolve_contained_output
 from paleo_workbench.providers.refs import (
     ArtifactRef,
     MapDocumentRef,
@@ -126,6 +127,9 @@ class MapRenderBackendProvider:
             raise ProviderRejectedInputError(
                 self.descriptor.provider_id, "backend render outputs PNG (use export.map_product for svg/pdf)"
             )
+        # #1177: containment before any mkdir/write — the destination must
+        # stay inside the workspace the context provides.
+        out_path = resolve_contained_output(context, out_path, provider_id=self.descriptor.provider_id)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         from paleo_workbench.mapping.map_render_backend import FallbackMapRenderBackend
 
@@ -213,6 +217,12 @@ class MapProductExportProvider:
                 self.descriptor.provider_id,
                 f"unsupported export format {output_path.suffix!r} (png/svg/pdf)",
             )
+        # #1177: containment before any mkdir/write — the export destination
+        # must stay inside the workspace the context provides (no absolute
+        # escapes, no ../ traversal, no silent overwrite).
+        output_path = resolve_contained_output(
+            context, output_path, provider_id=self.descriptor.provider_id
+        )
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:

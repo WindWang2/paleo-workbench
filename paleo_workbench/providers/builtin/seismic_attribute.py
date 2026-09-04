@@ -12,6 +12,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
 from paleo_workbench.providers.base import ProviderContext
 from paleo_workbench.providers.contracts import (
     ProviderDescriptor,
@@ -122,12 +124,14 @@ class SeismicAttributeProvider:
                 int(roi.get("t1", 0)),
             )
             result_array = roi_attribute(reader, bounds, name=self._kernel)
+            import numpy as np
+
+            # #1160: NaN counts as NON-finite — astype(bool) turned NaN into
+            # True and silently inflated the ratio.
             diagnostics = {
                 "mode": "roi",
                 "shape": list(result_array.shape),
-                "finite_ratio": float(
-                    (result_array.size - int((~result_array.astype(bool)).sum())) / max(1, result_array.size)
-                ),
+                "finite_ratio": float(np.isfinite(result_array).sum()) / max(1, result_array.size),
             }
             return ProviderResult(
                 artifacts=[
@@ -155,6 +159,11 @@ class SeismicAttributeProvider:
         job = VolumeAttributeJob(reader, dst, self._kernel)
         try:
             stats = job.run(_TaskContextAdapter(context))
+        except TaskCancelled:
+            # #1137: cooperative cancellation is not an execution failure —
+            # it propagates unwrapped so the executor marks the DataRun
+            # "cancelled" and the scheduler lands the task in CANCELLED.
+            raise
         except Exception as exc:
             raise ProviderExecutionError(self.descriptor.provider_id, exc) from exc
 
