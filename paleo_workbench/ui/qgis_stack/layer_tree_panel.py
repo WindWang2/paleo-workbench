@@ -192,10 +192,23 @@ class QgisLayerTreePanel(QWidget):
     def set_editing_layer(self, layer_id: str | None) -> None:
         """标记正在编辑的图层。
 
-        M2 注：QgsLayerTreeView 暂无 ✏ 前缀视觉（QGIS 原生亦无前缀，编辑态经
-        动作/属性呈现）；仅记录状态供菜单与宿主查询。
+        M3（M2 移交项）：QgsLayerTreeView 以图层指示器呈现 ✏ 编辑态
+        （QGIS 桌面同款视觉机制，不改节点名避免写回权威污染）。
         """
+        previous = getattr(self, "_editing_layer_id", None)
+        if layer_id == previous:
+            return
         self._editing_layer_id = layer_id
+        if self.tree_host is None or self._canvas is None:
+            return
+        tree = self.tree_host.tree_view_address
+        for doc_id, on in ((previous, False), (layer_id, True)):
+            if not doc_id:
+                continue
+            try:
+                self._canvas.stack.set_edit_indicator(tree, str(doc_id), on)
+            except Exception:
+                pass
 
     # -- 外部显示增量（CompositeDocument 属性应用路径） ---------------------------
 

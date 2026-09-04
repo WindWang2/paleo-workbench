@@ -18,6 +18,7 @@
 #include <QMap>
 #include <QMenu>
 #include <QObject>
+#include <QPainter>
 #include <QPointer>
 #include <QString>
 #include <QTimer>
@@ -37,6 +38,7 @@
 #include <qgslayertreeregistrybridge.h>
 #include <qgslayertreeview.h>
 #include <qgslayertreeviewdefaultactions.h>
+#include <qgslayertreeviewindicator.h>
 #include <qgsmapcanvas.h>
 #include <qgsmaplayer.h>
 #include <qgsmaptool.h>
@@ -45,6 +47,7 @@
 #include <qgsmaptoolidentifyfeature.h>
 #include <qgsmaptoolpan.h>
 #include <qgsmaptoolzoom.h>
+#include <qgsmaptopixel.h>
 #include <qgspointxy.h>
 #include <qgspointlocator.h>
 #include <qgsproject.h>
@@ -512,7 +515,13 @@ class PwbLayerTreeMenuProvider : public QgsLayerTreeViewMenuProvider {
     if (isReference) {
       menu->addSeparator();
       addCustom(menu, QStringLiteral("刷新引用（重读源文件）"), "refresh_reference", layer);
-      addCustom(menu, QStringLiteral("参与捕捉（切换）"), "toggle_reference_snap", layer);
+      // 勾选态以镜像层属性投影 Python 权威（participates_in_snap →
+      // pwb/reference_snap，upsert 时写入），M2 移交项。
+      QAction* snap = addCustom(menu, QStringLiteral("参与捕捉"), "toggle_reference_snap", layer);
+      snap->setCheckable(true);
+      snap->setChecked(
+          layer->customProperty(QStringLiteral("pwb/reference_snap")).toString() ==
+          QLatin1String("true"));
       addCustom(menu, QStringLiteral("移除引用…"), "remove_reference", layer);
     } else if (isEditable) {
       menu->addSeparator();
@@ -537,8 +546,8 @@ class PwbLayerTreeMenuProvider : public QgsLayerTreeViewMenuProvider {
   }
 
  private:
-  void addCustom(QMenu* menu, const QString& text, const char* key, QgsMapLayer* layer) {
-    menu->addAction(text, menu, [this, key = std::string(key),
+  QAction* addCustom(QMenu* menu, const QString& text, const char* key, QgsMapLayer* layer) {
+    QAction* action = menu->addAction(text, menu, [this, key = std::string(key),
                                  layer = QPointer<QgsMapLayer>(layer)]() {
       if (!cb_) return;
       std::string doc;
@@ -547,6 +556,7 @@ class PwbLayerTreeMenuProvider : public QgsLayerTreeViewMenuProvider {
       }
       cb_(key, doc);
     });
+    return action;
   }
 
   QgsLayerTreeView* view_;  // provider 由 view 持有（view 析构即销毁），不会悬垂
@@ -857,8 +867,8 @@ void QgisMapStack::refreshCanvas(std::uintptr_t canvas) {
 }
 
 std::vector<double> QgisMapStack::screenToMap(std::uintptr_t canvas, double x, double y) const {
-  const QgsPointXY p = canvasOrThrow(canvas)->getCoordinateTransform()->toMapCoordinates(
-      static_cast<int>(x), static_cast<int>(y));
+  // double 重载不截断亚像素坐标（M2 移交项：int 截断会吃掉 <1px 精度）。
+  const QgsPointXY p = canvasOrThrow(canvas)->getCoordinateTransform()->toMapCoordinates(x, y);
   return {p.x(), p.y()};
 }
 
@@ -989,7 +999,8 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
                                             bool visible,
                                             double opacity,
                                             bool is_reference,
-                                            bool is_editable) {
+                                            bool is_editable,
+                                            bool reference_snap) {
   if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
   if (doc_id.empty()) throw std::invalid_argument("doc_id must not be empty");
   const QByteArray geoBytes = QByteArray::fromStdString(geojson_feature_collection).trimmed();
@@ -1059,6 +1070,8 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
                                 is_reference ? QStringLiteral("true") : QString());
     existing->setCustomProperty(QStringLiteral("pwb/editable"),
                                 is_editable ? QStringLiteral("true") : QString());
+    existing->setCustomProperty(QStringLiteral("pwb/reference_snap"),
+                                reference_snap ? QStringLiteral("true") : QString());
     QgsLayerTreeLayer* node = project->layerTreeRoot()->findLayer(existing);
     if (node) node->setItemVisibilityChecked(visible);
     impl_->known_layer_visibility[doc_id] = visible;
@@ -1097,6 +1110,8 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
                            is_reference ? QStringLiteral("true") : QString());
   layer->setCustomProperty(QStringLiteral("pwb/editable"),
                            is_editable ? QStringLiteral("true") : QString());
+  layer->setCustomProperty(QStringLiteral("pwb/reference_snap"),
+                           reference_snap ? QStringLiteral("true") : QString());
   layer->setOpacity(std::clamp(opacity, 0.0, 1.0));
   const std::string id = layer->id().toStdString();
   {
@@ -2012,7 +2027,13 @@ void QgisMapStack::zoomToLayer(std::uintptr_t tree_addr, const std::string& doc_
   if (canvasIt != impl_->tree_canvas.end()) canvas = canvasIt->second;
   if (canvas.isNull()) throw std::runtime_error("tree view canvas is no longer valid");
   QgsRectangle ext = layer->extent();
-  if (ext.isEmpty()) return;  // 空图层无缩放语义
+  if (ext.isEmpty()) {
+    // 语义与 QGIS「缩放至图层」归一（M2 移交项）：空图层（新建零要素）
+    // 回退全图缩放，而不是无操作。
+    canvas->zoomToFullExtent();
+    canvas->refresh();
+    return;
+  }
   const QgsCoordinateReferenceSystem dest = canvas->mapSettings().destinationCrs();
   if (dest.isValid() && layer->crs() != dest) {
     QgsCoordinateTransform ct(layer->crs(), dest, QgsProject::instance());
@@ -2020,6 +2041,57 @@ void QgisMapStack::zoomToLayer(std::uintptr_t tree_addr, const std::string& doc_
   }
   canvas->setExtent(ext);
   canvas->refresh();
+}
+
+void QgisMapStack::setEditIndicator(std::uintptr_t tree_addr,
+                                    const std::string& doc_id, bool on) {
+  QgsLayerTreeView* view = treeViewOrThrow(tree_addr);
+  QgsMapLayer* layer = nullptr;
+  auto it = impl_->mirror_by_doc.find(doc_id);
+  if (it != impl_->mirror_by_doc.end()) {
+    layer = QgsProject::instance()->mapLayer(QString::fromStdString(it->second));
+  }
+  if (!layer) layer = findMirrorByDocId(QgsProject::instance(), doc_id);
+  if (!layer) return;  // 未镜像（例如尚未上树）时静默忽略——面板状态仍会记录
+  QgsLayerTreeLayer* node = QgsProject::instance()->layerTreeRoot()->findLayer(layer);
+  if (!node) return;
+  // 幂等：先摘除本栈挂过的编辑指示器（removeIndicator 负责销毁对象）。
+  for (QgsLayerTreeViewIndicator* ind : view->indicators(node)) {
+    if (ind->property("pwb_edit").toBool()) view->removeIndicator(node, ind);
+  }
+  if (!on) return;
+  // QGIS 桌面经图层指示器呈现编辑态；vendored 主题无铅笔资源，绘字符图标。
+  QPixmap pixmap(16, 16);
+  pixmap.fill(Qt::transparent);
+  QPainter painter(&pixmap);
+  QFont font = painter.font();
+  font.setPixelSize(13);
+  painter.setFont(font);
+  painter.drawText(pixmap.rect(), Qt::AlignCenter, QStringLiteral("✏"));
+  auto* indicator = new QgsLayerTreeViewIndicator(view);
+  indicator->setProperty("pwb_edit", true);
+  indicator->setIcon(QIcon(pixmap));
+  indicator->setToolTip(QStringLiteral("编辑中"));
+  view->addIndicator(node, indicator);
+}
+
+int QgisMapStack::editIndicatorCount(std::uintptr_t tree_addr,
+                                     const std::string& doc_id) const {
+  QgsLayerTreeView* view = treeViewOrThrow(tree_addr);
+  QgsMapLayer* layer = nullptr;
+  auto it = impl_->mirror_by_doc.find(doc_id);
+  if (it != impl_->mirror_by_doc.end()) {
+    layer = QgsProject::instance()->mapLayer(QString::fromStdString(it->second));
+  }
+  if (!layer) layer = findMirrorByDocId(QgsProject::instance(), doc_id);
+  if (!layer) return 0;
+  QgsLayerTreeLayer* node = QgsProject::instance()->layerTreeRoot()->findLayer(layer);
+  if (!node) return 0;
+  int count = 0;
+  for (QgsLayerTreeViewIndicator* ind : view->indicators(node)) {
+    if (ind->property("pwb_edit").toBool()) ++count;
+  }
+  return count;
 }
 
 bool QgisMapStack::treeViewSelectDoc(std::uintptr_t tree, const std::string& doc_id) {

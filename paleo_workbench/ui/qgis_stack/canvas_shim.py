@@ -646,6 +646,8 @@ class QgisCanvasShim(QWidget):
                     bool(layer.visible), float(layer.opacity),
                     is_reference=metadata.get("reference") == "true",
                     is_editable=metadata.get("editable") == "true",
+                    # 参考图层「参与捕捉」勾选态投影到镜像层属性（菜单读取）。
+                    reference_snap=metadata.get("snap") == "true",
                 )
             except Exception as exc:
                 if has_qgis_renderer or has_qgis_labeling:

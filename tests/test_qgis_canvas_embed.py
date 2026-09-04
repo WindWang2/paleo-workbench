@@ -42,3 +42,22 @@ def test_canvas_extent_roundtrip(qtbot, stack):
     assert extent == pytest.approx([0.0, 0.0, 10.0, 10.0], abs=2.0)  # 画布按宽高比扩展
     point = stack.screen_to_map(host.canvas_address, 320.0, 240.0)
     assert point == pytest.approx([5.0, 5.0], abs=1.5)
+
+
+def test_screen_to_map_subpixel_precision(qtbot, stack):
+    """M3 Task 6（M2 移交项）：screen_to_map 不再 int 截断亚像素坐标。"""
+    from paleo_workbench.ui.qgis_stack.widgets import QgisCanvasHost
+
+    host = QgisCanvasHost(stack)
+    qtbot.addWidget(host)
+    host.resize(400, 400)
+    host.show()
+
+    stack.set_canvas_extent(host.canvas_address, 0.0, 0.0, 10.0, 10.0)
+    a = stack.screen_to_map(host.canvas_address, 100.0, 100.0)[0]
+    half = stack.screen_to_map(host.canvas_address, 100.5, 100.0)[0]
+    full = stack.screen_to_map(host.canvas_address, 101.0, 100.0)[0]
+    px = full - a
+    assert px != 0.0
+    # 半像素偏移必须体现为半像素地图位移（截断实现下 half == a）。
+    assert half - a == pytest.approx(px / 2.0, rel=0.05)

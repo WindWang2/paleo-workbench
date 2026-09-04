@@ -155,13 +155,19 @@ public:
                                 bool visible,
                                 double opacity,
                                 bool is_reference = false,
-                                bool is_editable = false);
+                                bool is_editable = false,
+                                // 参考图层「参与捕捉」勾选态投影（Python 权威），菜单读取。
+                                bool reference_snap = false);
   void removeMirrorLayersExcept(const std::vector<std::string>& doc_ids);
   void setMirrorLayerOrder(const std::vector<std::string>& doc_ids_top_first);
   void setMirrorLayerVisibility(const std::string& doc_id, bool visible);
   std::vector<std::string> mirrorOrderTopFirst() const;
   bool mirrorLayerVisibility(const std::string& doc_id) const;
   bool treeEchoSuppressed() const noexcept;
+  // ✏ 编辑态图层指示器（M2 移交项：QGIS 桌面经图层指示器呈现编辑态）；
+  // 幂等整组替换，on=false 时清除。doc_id 未镜像时静默忽略。
+  void setEditIndicator(std::uintptr_t tree, const std::string& doc_id, bool on);
+  int editIndicatorCount(std::uintptr_t tree, const std::string& doc_id) const;
 
 private:
   struct Impl;

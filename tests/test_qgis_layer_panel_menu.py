@@ -108,3 +108,69 @@ def test_menu_remove_layer_action_emits_request_not_direct_delete(
     qtbot.waitUntil(lambda: received == ["doc-a"], timeout=2000)
     # 宿主未处理信号时，镜像图层不得被 QGIS 默认动作直接删除
     assert panel.tree_row_count() == 1
+
+
+def _inspect_menu_action(qtbot, qapp, panel, action_text):
+    """右键弹出菜单但不触发，返回匹配动作的 (checkable, checked)；无则 None。
+
+    菜单 exec 关闭后 QAction 随之销毁，状态必须在回调内就地读取。
+    """
+    tree = panel.tree_host.tree_view
+    state = {"done": False, "result": None}
+
+    def on_menu(menu):
+        def inspect():
+            state["done"] = True
+            for action in menu.actions():
+                if action.text() == action_text:
+                    state["result"] = (action.isCheckable(), action.isChecked())
+                    break
+            menu.close()
+        QTimer.singleShot(50, inspect)
+
+    tree.contextMenuAboutToShow.connect(on_menu)
+    viewport = next(
+        (child for child in tree.children()
+         if getattr(child, "objectName", lambda: "")() == "qt_scrollarea_viewport"),
+        tree,
+    )
+    pos = QPoint(5, 5)
+    event = QContextMenuEvent(QContextMenuEvent.Reason.Mouse, pos,
+                              viewport.mapToGlobal(pos))
+    QCoreApplication.sendEvent(viewport, event)
+    qtbot.waitUntil(lambda: state["done"], timeout=3000)
+    return state["result"]
+
+
+@pytest.fixture()
+def panel_with_reference(qtbot, qapp):
+    from paleo_workbench.ui.qgis_stack.canvas_shim import QgisCanvasShim
+    from paleo_workbench.ui.qgis_stack.layer_tree_panel import QgisLayerTreePanel
+
+    canvas = QgisCanvasShim()
+    qtbot.addWidget(canvas)
+    panel = QgisLayerTreePanel()
+    qtbot.addWidget(panel)
+    panel.bind(canvas, [
+        _layer("ref-on", "参与捕捉的引用",
+               metadata={"reference": "true", "snap": "true"}),
+        _layer("ref-off", "不参与捕捉的引用",
+               metadata={"reference": "true", "snap": "false"}),
+    ])
+    canvas.show()
+    panel.show()
+    qtbot.waitUntil(lambda: panel.tree_row_count() >= 2, timeout=3000)
+    return panel
+
+
+def test_menu_reference_snap_check_state_follows_authority(
+        qtbot, qapp, panel_with_reference):
+    """M3 Task 6（M2 移交项）：「参与捕捉」菜单项勾选态投影 Python 权威。"""
+    panel = panel_with_reference
+    panel.select_layer("ref-on")
+    state = _inspect_menu_action(qtbot, qapp, panel, "参与捕捉")
+    assert state == (True, True)
+
+    panel.select_layer("ref-off")
+    state = _inspect_menu_action(qtbot, qapp, panel, "参与捕捉")
+    assert state == (True, False)
