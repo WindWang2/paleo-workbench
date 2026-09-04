@@ -58,6 +58,7 @@ from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
 from paleo_workbench.ui.map_status_bar import MapStatusBar
 from paleo_workbench.ui.qgis_stack.canvas_shim import QgisCanvasShim
 from paleo_workbench.ui.qgis_stack.layer_tree_panel import QgisLayerTreePanel
+from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 from paleo_workbench.ui.workstation.common import workstation_icon
 from paleo_workbench.ui.workstation.composite_attribute_table import (
     CompositeAttributeTableDialog,
@@ -704,7 +705,7 @@ class CompositeDocument(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.canvas = QgisCanvasShim(parent=self)
+        self.canvas, self.uses_native_stack = self._create_canvas()
         layout.addWidget(self.canvas, 1)
 
         # 识别结果（多图层 Identify）与运行状态栏：图件主视图的诚实附属层。
@@ -750,14 +751,20 @@ class CompositeDocument(QWidget):
         self.canvas.map_position_changed.connect(self._on_map_position)
         self.canvas.backend_status_changed.connect(lambda *_: self._sync_status_bar())
 
-        # 面板实例（dock 由宿主 QMainWindow 创建并管理）
-        self.layer_manager = QgisLayerTreePanel()
+        # 面板实例（dock 由宿主 QMainWindow 创建并管理）。图层管理面板跟随
+        # 画布形态：原生栈用 QgsLayerTreeView 面板，回退画布用同信号接缝的
+        # LayerManagerPanel（QTreeWidget 自绘树）——两套面板 16 个请求信号同构。
+        self.layer_manager = self._create_layer_manager()
         self.input_tree = InputTreePanel(project)
         self.linked_views = LinkedViewsPanel()
         self.input_tree.object_selected.connect(self.object_selected.emit)
         self.layer_manager.create_layer_requested.connect(self._create_vector_layer)
         self.layer_manager.remove_layer_requested.connect(self._remove_vector_layer)
-        # 树内改名直接生效并回写（QgisLayerTreePanel 无 rename_layer_requested）
+        if not self.uses_native_stack:
+            # 树内改名在回退面板走请求信号（原生 QgsLayerTreeView 直接改名回写）。
+            self.layer_manager.rename_layer_requested.connect(
+                self._rename_layer_prompt
+            )
         self.layer_manager.import_reference_requested.connect(self._import_reference_layer)
         self.layer_manager.remove_reference_requested.connect(self._remove_reference_layer)
         self.layer_manager.refresh_reference_requested.connect(self._refresh_reference_layer)
@@ -783,10 +790,45 @@ class CompositeDocument(QWidget):
         self.layer_manager.duplicate_layer_requested.connect(self._duplicate_vector_layer)
         self.layer_manager.export_layer_requested.connect(self._export_layer)
         self.layer_manager.repair_layer_requested.connect(self._repair_layer)
-        self.layer_manager.display_state_changed.connect(self.notify_display_changed)
+        if self.uses_native_stack:
+            # 显示态回写只有原生树面板产生（回退面板的显示态经自身信号即时生效）。
+            self.layer_manager.display_state_changed.connect(self.notify_display_changed)
 
         self._build_toolbar()
         self.set_project(project)
+
+    # -- 画布 / 面板形态 -------------------------------------------------------
+
+    def _create_canvas(self) -> tuple[QWidget, bool]:
+        """优先原生 QGIS 地图栈；桥缺失/初始化失败时诚实降级回退画布。
+
+        回退不伪装原生能力：UnifiedMapCanvas 的 backend_status 会如实报告
+        fallback 渲染器；原生专属分支（QgsVectorLayerProperties 等）以
+        ``uses_native_stack`` 显式判断。桥构建指引见 canvas_shim 的报错文案。
+        """
+        try:
+            return QgisCanvasShim(parent=self), True
+        except RuntimeError:
+            return UnifiedMapCanvas(parent=self), False
+
+    def _create_layer_manager(self) -> QWidget:
+        """图层管理面板跟随画布形态（两套面板请求信号同构，见类 docstring）。"""
+        if self.uses_native_stack:
+            return QgisLayerTreePanel()
+        return LayerManagerPanel()
+
+    def _rename_layer_prompt(self, layer_id: str) -> None:
+        """回退树面板的改名请求：QInputDialog → edit_controller.rename_layer。"""
+        layer = self.edit_controller.layer(str(layer_id))
+        if layer is None:
+            return
+        from PySide6.QtWidgets import QInputDialog
+
+        name, ok = QInputDialog.getText(
+            self, "重命名图层", "图层名称", text=str(layer.name or "")
+        )
+        if ok and str(name).strip():
+            self.edit_controller.rename_layer(str(layer_id), str(name).strip())
 
     # -- 悬浮工具条 -----------------------------------------------------------
 

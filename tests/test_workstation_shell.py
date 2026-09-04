@@ -260,7 +260,7 @@ def test_task_center_renders_state_colored_progress(qtbot):
     import time as _time
 
     from paleo_workbench.runtime.task_scheduler import TaskSpec, get_scheduler
-    from paleo_workbench.ui.workstation.task_center import TaskCenter
+    from paleo_workbench.ui.workstation.task_center import TaskCenter, _TaskRowDelegate
 
     center = TaskCenter()
     qtbot.addWidget(center)
@@ -273,19 +273,66 @@ def test_task_center_renders_state_colored_progress(qtbot):
         )
     )
     try:
-        qtbot.waitUntil(
-            lambda: center.tree.topLevelItemCount() == 1
-            and center.tree.topLevelItem(0).text(0).startswith(("运行中", "排队")),
-            timeout=4000,
-        )
+        qtbot.waitUntil(lambda: center.model.rowCount() == 1, timeout=4000)
+        row_handle = center.model.handle_at(0)
+        assert row_handle.task_id == handle.task_id
+        # 状态文本由 delegate 绘制（模型 DisplayRole 只承载任务名/用时）。
+        assert _TaskRowDelegate._state_text(row_handle).startswith(("运行中", "排队"))
+        assert 0.0 <= row_handle.progress <= 1.0
+        # 增量刷新不重建行：集合不变时行身份保持，选中不丢（#1157）。
+        center.tree.selectRow(0)
         center.refresh()
-        item = center.tree.topLevelItem(0)
-        bar = center.tree.itemWidget(item, 2)
-        assert bar.property("taskState") in {"running", "queued"}
-        assert not bar.isTextVisible()
-        assert bar.height() <= 8
+        assert center.model.handle_at(0).task_id == row_handle.task_id
+        assert center.tree.selectionModel().selectedRows(0)
     finally:
         get_scheduler().cancel(handle.task_id)
+        center.shutdown()
+
+
+def test_task_center_incremental_update_keeps_rows_stable(qtbot):
+    """#1157：相同任务集合的刷新必须原位更新，不产生整树重建。"""
+    import time as _time
+
+    from paleo_workbench.runtime.task_scheduler import TaskSpec, get_scheduler
+    from paleo_workbench.ui.workstation.task_center import TaskCenter
+
+    center = TaskCenter()
+    qtbot.addWidget(center)
+    handles = [
+        get_scheduler().submit(
+            TaskSpec(
+                callable=lambda ctx, n=n: (_time.sleep(30), n)[1],
+                kind="background.io",
+                title=f"QA · 增量探针 {n}",
+            )
+        )
+        for n in range(3)
+    ]
+    try:
+        my_ids = {h.task_id for h in handles}
+        # 其它测试残留的已取消任务可能仍在表中（取消是协作式的），
+        # 因此按「本组任务全部出现」而非总行数判断。
+        qtbot.waitUntil(
+            lambda: my_ids.issubset(
+                {
+                    center.model.handle_at(r).task_id
+                    for r in range(center.model.rowCount())
+                }
+            ),
+            timeout=8000,
+        )
+        rows = center.model.rowCount()
+        ids_before = [center.model.handle_at(r).task_id for r in range(rows)]
+        center.refresh()
+        ids_after = [center.model.handle_at(r).task_id for r in range(rows)]
+        assert ids_before == ids_after, "相同任务集合的刷新必须保持行集合与顺序"
+        # 行内零常驻 widget：进度/取消由 delegate 绘制。
+        viewport_children_before = len(center.tree.viewport().findChildren(object))
+        center.refresh()
+        assert len(center.tree.viewport().findChildren(object)) == viewport_children_before
+    finally:
+        for handle in handles:
+            get_scheduler().cancel(handle.task_id)
         center.shutdown()
 
 
