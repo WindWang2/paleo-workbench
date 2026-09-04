@@ -1,5 +1,7 @@
 # QGIS 原生地图栈 M5（工程 XML + fallback 收紧 + CI 门禁）实施计划
 
+> **Status: IMPLEMENTED** on `feat/qgis-native-map-stack-m5`。相关套件 39 passed。QGIS CI 专轨是否全绿以推送后的 Actions 为准。合入 main 待确认。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把父 spec 从 M4 推迟的三项落地：mini-`QgsProject` XML 写入工程文件、生产路径不再用环境变量把已构建的桥降级、QGIS CI 专轨真正执行 mapstack 测试。
@@ -51,7 +53,7 @@
 - Modify: `native/qgis_render_bridge/src/map_stack_service.cpp`
 - Modify: `native/qgis_render_bridge/src/bindings.cpp`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_qgis_project_xml.py
@@ -194,7 +196,7 @@ Expected: 4 passed。
 - Modify: `paleo_workbench/project/manager.py`
 - Modify: `paleo_workbench/ui/workstation/composite_document.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_qgis_project_xml_persist.py
