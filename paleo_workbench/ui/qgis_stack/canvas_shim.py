@@ -2,18 +2,30 @@
 QgisCanvasShim（原 UnifiedMapCanvas）子集契约。M1 只承诺 pan/zoom 与图层镜像；
 编辑类 tool_operation 在 M1 通过原生 pan/zoom 交互的 extent 变更时以
 tool_operation(False) 发出（与 UnifiedMapCanvas 的鼠标/键盘路径语义对齐），
-纯数据编辑的 True 语义 M3 由原生 QgsMapTool 编辑栈接管。"""
+纯数据编辑的 True 语义 M3 由原生 QgsMapTool 编辑栈接管。
+
+B8（identify/measure/export 接线）：
+- identify：工具映射表直连桥 QgsMapToolIdentifyFeature（kind "identify"），
+  回调结果经 :attr:`native_identified` 转发——原生路径的单一识别入口。
+- measure：桥无原生量距工具，激活期由 :class:`_CanvasMouseRouter` 把画布
+  视口鼠标事件换算为地图坐标喂给活动 Python 工具（MapToolController 权威
+  不变），分段距离经 :attr:`measure_segment` / :attr:`measure_preview` 发出。
+- export：``export_png/export_svg/export_pdf/export_capabilities`` 与
+  UnifiedMapCanvas 同契约，export_service 经能力探测识别本类。
+"""
 from __future__ import annotations
 
 import json
 import math
 import sys
+import time
 import weakref
 
-from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
+from paleo_workbench.resources.exporters import ExportError
 from paleo_workbench.ui.qgis_stack.events import StackEvents
 from paleo_workbench.ui.qgis_stack.mirror import mirror_snapshot_to_stack
 from paleo_workbench.ui.qgis_stack.widgets import QgisCanvasHost
@@ -32,6 +44,61 @@ def _load_mapstack():
         ) from exc
 
 
+class _CanvasMouseRouter(QObject):
+    """B8：measure_distance 激活期把画布视口鼠标事件路由给活动 Python 工具。
+
+    QGIS 画布的鼠标输入默认只进原生 QgsMapTool（桥无 measure 工具）。
+    该过滤器装在 ``canvas.viewport()`` 上：按键类事件（press/release/
+    dblclick）拦截消费、换算地图坐标喂给活动 Python 工具（右键=取消）；
+    MouseMove 只读不拦（转发回画布），保住状态条 xyCoordinates 跟手，
+    也不会让 QgsMapToolPan 起拖（press 已被拦，pan 的 mDragging 不置位）。
+    """
+
+    _ROUTED_TYPES = (
+        QEvent.Type.MouseButtonPress,
+        QEvent.Type.MouseButtonRelease,
+        QEvent.Type.MouseButtonDblClick,
+        QEvent.Type.MouseMove,
+    )
+
+    def __init__(self, shim: "QgisCanvasShim") -> None:
+        super().__init__(shim)
+        self._shim_ref = weakref.ref(shim)
+        self.active = False
+        self._installed_on: QWidget | None = None
+
+    def set_active(self, active: bool) -> None:
+        self.active = bool(active)
+        shim = self._shim_ref()
+        viewport = shim._canvas_viewport() if shim is not None else None
+        if self._installed_on is not None and self._installed_on is not viewport:
+            self._installed_on.removeEventFilter(self)
+            self._installed_on = None
+        if active and viewport is not None and self._installed_on is not viewport:
+            viewport.installEventFilter(self)
+            self._installed_on = viewport
+
+    def detach(self) -> None:
+        self.active = False
+        if self._installed_on is not None:
+            try:
+                self._installed_on.removeEventFilter(self)
+            except Exception:
+                pass
+            self._installed_on = None
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        shim = self._shim_ref()
+        if shim is None or not self.active or getattr(shim, "_shutdown_done", False):
+            return False
+        if event.type() not in self._ROUTED_TYPES:
+            return False
+        try:
+            return shim._route_measure_mouse(event)
+        except Exception:
+            return False
+
+
 class QgisCanvasShim(QWidget):
     # 实际消费者 CompositeDocument 消费的信号契约与 QgisCanvasShim（原 UnifiedMapCanvas）一致：
     # tool_operation(bool), extent_changed(tuple), map_position_changed(tuple),
@@ -41,6 +108,13 @@ class QgisCanvasShim(QWidget):
     map_position_changed = Signal(tuple)
     backend_status_changed = Signal(str)
     tool_operation = Signal(bool)
+    # B8：原生 identify 结果（桥 QgsMapToolIdentifyFeature → 回调转发）。
+    # payload: {"layer_doc_id": str, "feature_id": str}；原生路径的单一识别
+    # 结果入口（消费方仍以 Python feature_query_index 面板为权威，未接双面板）。
+    native_identified = Signal(dict)
+    # B8：量距分段完成 / 实时预览（地图单位）。
+    measure_segment = Signal(float)
+    measure_preview = Signal(float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -75,6 +149,9 @@ class QgisCanvasShim(QWidget):
         self._tools_original_set_active = None
         self._tools_wrapped_target = None
         self._wrapped_func = None
+        # B8：量距事件路由（仅 measure_distance 激活期挂画布视口过滤器）。
+        self._measure_router = _CanvasMouseRouter(self)
+        self._last_measure_emit: float | None = None
         # Qt 树析构期间触发的 destroyed 回调只做状态记账：半析构画布上再进
         # destroy_canvas/unsetMapTool 会踩悬空子对象（native 栈已证实）。
         # 画布的桥表回收由桥在 canvas destroyed 时自行完成；orderly 关闭仍走
@@ -382,6 +459,103 @@ class QgisCanvasShim(QWidget):
         except Exception:
             pass
 
+    # --- B8：measure 事件路由（画布视口 → 活动 Python 工具）--------------
+    def _canvas_viewport(self):
+        """画布视口控件（QgsMapCanvas 事件的落点，measure 路由挂这里）。
+
+        QgisCanvasHost 以 QWidget 类型包装画布，而 shiboken 对同一地址只
+        认首次包装类型——QAbstractScrollArea.viewport() 未必可达。Qt6 的
+        视口是画布的无名 QWidget 直接子控件（qt_scrollarea_h/vcontainer
+        是滚动条容器，objectName 非空）；优先走 viewport()，不可达时按
+        此识别。
+        """
+        canvas = getattr(self, "canvas", None)
+        if canvas is None:
+            return None
+        viewport_attr = getattr(canvas, "viewport", None)
+        if callable(viewport_attr):
+            try:
+                vp = viewport_attr()
+                if vp is not None:
+                    return vp
+            except Exception:
+                pass
+        try:
+            for child in canvas.children():
+                try:
+                    if (child.metaObject().className() == "QWidget"
+                            and not child.objectName()):
+                        return child
+                except Exception:
+                    continue
+        except Exception:
+            return None
+        return None
+
+    def _route_measure_mouse(self, event) -> bool:
+        """把画布视口按键类鼠标事件喂给活动 MeasureDistanceTool。
+
+        返回 True 表示事件已消费（不进原生 QgsMapTool）；MouseMove 不拦。
+        """
+        controller = getattr(self, "_tool_controller", None)
+        tool = getattr(controller, "active_tool", None) if controller is not None else None
+        if tool is None or getattr(tool, "tool_id", "") != "measure_distance":
+            return False
+        et = event.type()
+        if et == QEvent.Type.MouseMove:
+            # 只喂预览不拦：画布继续收 move（状态条 xy 跟手；pan 无 press 不起拖）。
+            self._emit_measure_preview(tool)
+            return False
+        button = event.button()
+        if button == Qt.MouseButton.LeftButton:
+            btn = "left"
+        elif button == Qt.MouseButton.RightButton:
+            btn = "right"
+        else:
+            btn = "middle"
+        modifiers = event.modifiers()
+        mods = []
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            mods.append("ctrl")
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            mods.append("shift")
+        pos = event.position()
+        try:
+            mx, my = self.stack.screen_to_map(
+                self.canvas_address, float(pos.x()), float(pos.y()))
+        except Exception:
+            return True  # 换算失败也吞掉：measure 激活期画布不接按键事件
+        point = (mx, my)
+        if et == QEvent.Type.MouseButtonPress:
+            tool.mouse_press(point, button=btn, modifiers=tuple(mods))
+        elif et == QEvent.Type.MouseButtonRelease:
+            tool.mouse_release(point, button=btn, modifiers=tuple(mods))
+        else:
+            tool.double_click(point, modifiers=tuple(mods))
+        distance = getattr(tool, "last_distance", None)
+        if distance != self._last_measure_emit:
+            self._last_measure_emit = distance
+            if distance is not None:
+                try:
+                    self.measure_segment.emit(float(distance))
+                except Exception:
+                    pass
+        return True
+
+    def _emit_measure_preview(self, tool) -> None:
+        start = getattr(tool, "start", None)
+        current = getattr(tool, "current", None)
+        if start is None or current is None:
+            return
+        try:
+            distance = math.dist(start, current)
+        except Exception:
+            return
+        try:
+            self.measure_preview.emit(float(distance))
+        except Exception:
+            pass
+
     def _restore_tool_patch(self) -> None:
         try:
             tools = getattr(self, "_tools_wrapped_target", None)
@@ -437,8 +611,11 @@ class QgisCanvasShim(QWidget):
                     except Exception:
                         return
                     tool_id = getattr(tool, "tool_id", "") if tool is not None else "pan"
-                    # M3：编辑类工具映射到原生 QgsMapTool（采点/线/面/顶点/移动），
-                    # 其余（select/identify 等）Task 4 落地前回落 pan。
+                    # M3：编辑类工具映射到原生 QgsMapTool（采点/线/面/顶点/移动）。
+                    # B8：identify 直连桥 QgsMapToolIdentifyFeature；measure 桥级
+                    # 无原生工具——原生侧落 pan 清掉编辑/识别工具占用，画布鼠标
+                    # 事件由 _CanvasMouseRouter 路由给活动 Python 工具。
+                    measure_active = tool_id == "measure_distance"
                     kind = {
                         "zoom_in": "zoomIn",
                         "zoom_out": "zoomOut",
@@ -449,10 +626,17 @@ class QgisCanvasShim(QWidget):
                         "move_feature": "move",
                         "select": "select",
                         "select_rectangle": "select",
+                        "identify": "identify",
                         "pan": "pan",
                     }.get(tool_id, "pan")
                     try:
                         shim.stack.set_map_tool(addr, kind)
+                    except Exception:
+                        pass
+                    try:
+                        shim._measure_router.set_active(measure_active)
+                        if not measure_active:
+                            shim._last_measure_emit = None
                     except Exception:
                         pass
                     try:
@@ -547,8 +731,16 @@ class QgisCanvasShim(QWidget):
                 payload = json.loads(payload_json)
             except Exception:
                 return
+            if action == "identify":
+                # B8：原生 identify 结果 → Python 信号（单一转发入口）；
+                # 识别面板消费仍走 Python feature_query_index 权威路径。
+                try:
+                    shim.native_identified.emit(dict(payload))
+                except Exception:
+                    pass
+                return
             if action != "selection":
-                return  # identify 结果暂无 Python 消费方（桥级能力已就绪）
+                return
             controller = getattr(shim, "_tool_controller", None)
             tool = getattr(controller, "active_tool", None) if controller is not None else None
             commit = getattr(tool, "commit_selection", None)
@@ -596,6 +788,9 @@ class QgisCanvasShim(QWidget):
             return
         mirrored_qgis_ids, seen, failures = mirror_snapshot_to_stack(
             self.stack, self.canvas_address, snapshot)
+        # B8：保留最近快照供矢量导出（export_svg/export_pdf 经桥级
+        # export_vector 以同一份快照离屏渲染，见 _export_vector）。
+        self._last_snapshot = snapshot
         # #1164: 镜像失败（非法 CRS/坏 GeoJSON/删除排序刷新失败）进入公开
         # 诊断列表并反映到 backend_status，宿主可感知镜层与文档失同步。
         self._mirror_failures = list(failures)
@@ -610,6 +805,93 @@ class QgisCanvasShim(QWidget):
             self.backend_status_changed.emit(self.backend_status)
         except Exception:
             pass
+
+    # --- 导出（B8：与 UnifiedMapCanvas 同契约，export_service 能力探测识别）---
+    def export_capabilities(self) -> tuple[str, ...]:
+        """诚实能力声明：PNG 总可导；SVG/PDF 需有图层快照且桥可用。"""
+        caps = ["PNG"]
+        if self._vector_export_available():
+            caps.extend(("SVG", "PDF"))
+        return tuple(caps)
+
+    def _vector_export_available(self) -> bool:
+        if getattr(self, "_last_snapshot", None) is None:
+            return False
+        try:
+            import qgis_render_bridge  # noqa: F401
+        except ImportError:
+            return False
+        return True
+
+    def export_png(self, path) -> None:
+        """QGIS 画布 PNG 导出：真出图（等待在途渲染完成后抓画布帧）。
+
+        先触发一次刷新并泵事件等渲染收尾，保证帧反映当前图层与范围
+        （画布从未渲染过时也能拿到首帧）；失败抛 ExportError。
+        """
+        if getattr(self, "_shutdown_done", False) or self.stack is None or not self.canvas_address:
+            raise ExportError("QGIS 画布已关闭，无法导出")
+        try:
+            self.stack.refresh_canvas(self.canvas_address)
+        except Exception:
+            pass
+        deadline = time.monotonic() + 5.0
+        while not getattr(self, "_shutdown_done", False):
+            try:
+                rendering = bool(self.stack.is_canvas_rendering(self.canvas_address))
+            except Exception:
+                break
+            if not rendering or time.monotonic() > deadline:
+                break
+            QApplication.processEvents()
+        pixmap = self.canvas.grab()
+        if pixmap.isNull():
+            raise ExportError("QGIS 画布无可用帧，无法导出 PNG")
+        if not pixmap.save(str(path), "PNG"):
+            raise ExportError("PNG 保存失败")
+
+    def export_svg(self, path) -> None:
+        self._export_vector(str(path), "svg")
+
+    def export_pdf(self, path) -> None:
+        self._export_vector(str(path), "pdf")
+
+    def _export_vector(self, path: str, fmt: str) -> None:
+        """桥级真矢量导出：以 retained 快照喂独立 QgisRenderBridge。
+
+        QgisMapStack 的镜像层与 QgisRenderBridge 的 mirrors 是两套表，桥的
+        export_vector 不能直接渲画布内容；经 QgisMapRenderBackend 用同一份
+        快照离屏渲染（与屏幕共用 QGIS 渲染器配置，见
+        tests/test_qgis_screen_export_parity.py）。无快照/桥不可用时诚实报错。
+        """
+        if getattr(self, "_shutdown_done", False):
+            raise ExportError("QGIS 画布已关闭，无法导出")
+        snapshot = getattr(self, "_last_snapshot", None)
+        if snapshot is None:
+            raise ExportError("QGIS 画布尚无图层快照，无法矢量导出；请使用 PNG")
+        try:
+            from paleo_workbench.mapping.map_render_backend import QgisMapRenderBackend
+        except Exception as exc:
+            raise ExportError(f"QGIS 矢量导出模块不可用: {exc}") from exc
+        backend = QgisMapRenderBackend()
+        if not backend.is_available:
+            raise ExportError("QGIS 渲染桥不可用，无法矢量导出；请使用 PNG")
+        backend.initialize()
+        try:
+            backend.set_layer_snapshot(snapshot)
+            try:
+                backend.set_extent(tuple(self.view_extent))
+            except ValueError:
+                raise ExportError("QGIS 画布范围为空，无法矢量导出")
+            width = max(64, int(self.canvas.width() or 800))
+            height = max(64, int(self.canvas.height() or 600))
+            if not backend.export_map_body(path, fmt, width, height, 96.0):
+                raise ExportError(f"QGIS 矢量导出失败（{fmt.upper()}）；请使用 PNG")
+        finally:
+            try:
+                backend.shutdown()
+            except Exception:
+                pass
 
     def _cleanup_canvas(self) -> None:
         if getattr(self, "_canvas_destroyed", False):
@@ -641,6 +923,10 @@ class QgisCanvasShim(QWidget):
             return
         self._shutdown_done = True
         self._restore_tool_patch()
+        try:
+            self._measure_router.detach()
+        except Exception:
+            pass
         try:
             self.events.extent_changed.disconnect(self._on_stack_extent)
         except Exception:
