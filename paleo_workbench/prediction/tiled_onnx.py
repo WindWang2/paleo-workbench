@@ -173,8 +173,16 @@ def run_tiled_inference(
         raise TiledInferenceError(f"tile must be a positive (il, xl, t) triple: {tile}")
     if classes <= 0:
         raise TiledInferenceError(f"classes must be > 0, got {classes}")
+    # B5: ``batch`` is a caller knob the caller can lower — never silently
+    # clamped (same honesty contract as _validate_softmax_budget). batch < 1
+    # is an explicit contract error.
+    batch = int(batch)
+    if batch < 1:
+        raise ValueError(
+            f"batch must be >= 1, got {batch}; refusing to silently clamp"
+        )
     # #1187: bound softmax intermediates before any session/array work.
-    _validate_softmax_budget(max(1, int(batch)), int(classes), tile)
+    _validate_softmax_budget(batch, int(classes), tile)
     sess, mode = _make_session(model_path, prefer_gpu=prefer_gpu)
     input_name = sess.get_inputs()[0].name
     output_name = sess.get_outputs()[0].name
@@ -215,7 +223,7 @@ def run_tiled_inference(
     total = len(tiles)
     done_count = 0
     t0 = time.perf_counter()
-    current_batch = max(1, int(batch))
+    current_batch = batch
 
     def tile_key(t):
         return f"t_{t[0]:05d}_{t[1]:05d}_{t[2]:05d}"
@@ -365,9 +373,11 @@ def _verify_model_identity(
     is declared, the executed file MUST be that registered artifact —
     checksum mismatch, or a different file executing under a declared
     identity, is refused (fail closed). Identity-less call paths (capability
-    provider, harness) are allowed but the result explicitly records
+    provider, harness) are allowed — the result explicitly records
     ``registered: False`` and the artifact's REAL sha256, and never carries
-    a registered model identity.
+    a registered model identity — but a caller-supplied ``model_checksum``
+    is still compared (mismatch refuses execution, P3): "honest untrusted"
+    never means "swappable binary".
     """
     identity = parameters.get("_registered_model")
     identity = identity if isinstance(identity, dict) else None
@@ -415,10 +425,19 @@ def _verify_model_identity(
             "declared_checksum": declared_checksum,
         }
     # No declared identity: honest untrusted execution — real checksum,
-    # registered=False, no registered model identity attached.
+    # registered=False, no registered model identity attached. A caller-
+    # supplied ``model_checksum`` is still honored as a pin (P3): executing a
+    # different binary than the caller asked for is refused even without a
+    # registered identity — same fail-closed honesty, identity or not.
+    if declared_checksum and declared_checksum != actual_sha256:
+        raise TiledInferenceError(
+            "ONNX 工件校验失败：调用方声明 model_checksum "
+            f"{declared_checksum} 与实际执行文件 sha256 {actual_sha256} "
+            "不一致，拒绝执行（无注册身份也不得偷换二进制）"
+        )
     return {
         "registered": False,
-        "verified": False,
+        "verified": bool(declared_checksum),
         "model_id": "",
         "model_version": "",
         "model_version_id": "",
@@ -465,7 +484,11 @@ class TiledOnnxProvider:
             model_path, parameters, _sha256_file(model_path)
         )
         overlap = int(parameters.get("receptive_field", DEFAULT_RECEPTIVE_FIELD) or 0)
-        batch = int(parameters.get("batch", 1) or 1)
+        # B5: ``or 1`` here used to turn batch=0 into a silent 1 — None/empty
+        # still mean "default", but a real value flows through unchanged so
+        # run_tiled_inference can reject it explicitly.
+        raw_batch = parameters.get("batch", 1)
+        batch = 1 if raw_batch in (None, "") else int(raw_batch)
         tile_param = parameters.get("tile")
         tile = (
             tuple(int(t) for t in tile_param)

@@ -192,6 +192,21 @@ def register(registry) -> None:
 
 
 # ------------------------------------------------------------- helpers --
+def _artifact_root(context: ActionContext) -> Path:
+    """The PROJECT's artifacts tree (``<name>.artifacts``) — V2.
+
+    Never a hardcoded ``demo`` name: a project saved under another name
+    must keep its products inside its own tree (same root the catalog
+    manages, ``project/paths.artifact_dir_for``). Project-less contexts
+    keep the legacy ``./demo.artifacts`` fallback.
+    """
+    from paleo_workbench.project.paths import artifact_dir_for
+
+    if context.project_path:
+        return artifact_dir_for(Path(context.project_path))
+    return Path.cwd() / "demo.artifacts"
+
+
 def _current_document(context: ActionContext) -> Any:
     document = context.map_documents.get(context.current_map_id or "")
     if document is None and len(context.map_documents) == 1:
@@ -260,8 +275,8 @@ def _create_factor_map(context: ActionContext, parameters: dict) -> dict:
     version_identity = None
     run_id_out = None
     if grid is not None and context.catalog is not None:
-        root = Path(context.project_path).parent if context.project_path else Path.cwd()
-        artifact_dir = root / "demo.artifacts" / "intermediate"
+        # V2: the project's real artifacts tree, not a hardcoded demo name.
+        artifact_dir = _artifact_root(context) / "intermediate"
         artifact_path = artifact_dir / f"{document_id}.npz"
         # #1174: containment after resolution — the slug whitelist above is
         # the primary defense; this guard fail-closes the action (outside the
@@ -561,23 +576,27 @@ def _validate(context: ActionContext, parameters: dict) -> dict:
 def _resolve_export_path(context: ActionContext, raw: str) -> str:
     """Constrain agent-chosen export paths to the workspace.
 
-    Absolute paths must live under the project root; relative paths resolve
-    against it; existing files are refused (no agent-triggered overwrite —
+    V3: delegates to the provider SDK's single containment implementation
+    (:func:`paleo_workbench.providers.paths.resolve_contained_output`,
+    #1177) so harness and provider paths cannot drift apart — absolute
+    paths must live under the project root, relative paths resolve against
+    it, and existing files are refused (no agent-triggered overwrite;
     overwriting is a destructive action the registry does not install).
+    Failures surface as ``PermissionError`` (harness action semantics).
     """
-    raw_path = Path(raw).expanduser()
+    from paleo_workbench.providers import ProviderContext
+    from paleo_workbench.providers.errors import ProviderExecutionError
+    from paleo_workbench.providers.paths import resolve_contained_output
+
     root = Path(context.project_path).parent if context.project_path else Path.cwd()
-    resolved = raw_path.resolve() if raw_path.is_absolute() else (root / raw_path).resolve()
     try:
-        # Containment AFTER resolution: relative traversal ("../..") must
-        # not escape the workspace either.
-        resolved.relative_to(root.resolve())
-    except ValueError:
-        raise PermissionError(
-            f"export path must stay under the project workspace ({root})"
-        ) from None
-    if resolved.exists():
-        raise PermissionError(f"refusing to overwrite existing file {resolved}")
+        resolved = resolve_contained_output(
+            ProviderContext(workspace_root=str(root)),
+            raw,
+            provider_id="harness.map.export",
+        )
+    except ProviderExecutionError as exc:
+        raise PermissionError(str(exc)) from exc
     return str(resolved)
 
 

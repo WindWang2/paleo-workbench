@@ -50,6 +50,9 @@ _RESERVED_KEYS = (
 # into the persisted payload, so without this filter any provider (or a
 # tampered one) could relabel the run's model identity, seed, provenance
 # hash or run linkage after the fact. Server-constructed values always win.
+# ``generator_version`` included (B2): it is never read back from the
+# provider result — a provider that wants to declare its own generator uses
+# the non-reserved ``provider_generator`` key.
 PAYLOAD_RESERVED_KEYS = frozenset(
     {
         "schema_version",
@@ -436,14 +439,13 @@ def execute_run(
                     "model_version": model_version,
                 }
 
-        # Align DataRun.generator with provider/result generator_version so Stage-9
-        # expected_identity (from PredictionTask.generator_version) does not flag
-        # GENERATOR_CHANGED immediately after a successful run.
-        provider_generator = str(
-            result.get("generator_version") or model.provider or run.generator or ""
-        )
-        if provider_generator:
-            run.generator = provider_generator
+        # B2/#1152: ``generator_version`` is SERVICE-owned (it is in
+        # PAYLOAD_RESERVED_KEYS). The provider result is NEVER read back for
+        # it — a provider that wants to declare its own generator uses the
+        # non-reserved ``provider_generator`` key. The service value is the
+        # run's start-time generator (INFERENCE_GENERATOR or model.provider),
+        # so Stage-9 identity (PredictionTask.generator_version ==
+        # run.generator) holds by construction instead of by provider decree.
 
         # #1152: envelope reserved keys are SERVICE-owned. Filter them out
         # of the provider result before merging so a provider dict can never
@@ -451,6 +453,9 @@ def execute_run(
         provider_payload = {
             k: v for k, v in result.items() if k not in PAYLOAD_RESERVED_KEYS
         }
+        service_generator = str(
+            run.generator or model.provider or INFERENCE_GENERATOR
+        )
         payload = {
             "schema_version": "1.0",
             "model": {
@@ -463,7 +468,7 @@ def execute_run(
                 "checksum": getattr(model_version, "checksum", None) or "",
                 "model_version_id": model_version.id,
             },
-            "generator_version": provider_generator or result.get("generator_version"),
+            "generator_version": service_generator,
             "input_snapshot_hash": (run.parameters or {}).get("_input_snapshot_hash"),
             "input_version_ids": list(run.input_version_ids),
             "seed": seed,
@@ -473,9 +478,6 @@ def execute_run(
             "run_id": run_id,
             **provider_payload,
         }
-        # Prefer the aligned identity (result may re-set generator_version via **result).
-        if provider_generator:
-            payload["generator_version"] = provider_generator
         output_version = _persist_result(service, run_id, model, payload)
         finished = _now_iso()
         service.update_run_status(
@@ -525,8 +527,59 @@ def execute_run(
         }
 
 
+def _run_workspace_roots(service, run) -> list[Path]:
+    """Containment roots a provider-declared volume store may live in (B1).
+
+    The project's artifacts tree (``<name>.artifacts`` beside the project
+    file) plus any working directory the run itself explicitly declared via
+    its ``work_root`` parameter. Nothing else: a provider's word for where a
+    store lives is not trust — ``register_derived_store`` MOVES directories,
+    so an uncontained path would relocate arbitrary host data into the
+    catalog.
+    """
+    from paleo_workbench.project.paths import artifact_dir_for
+
+    roots = [artifact_dir_for(Path(service.project_path)).expanduser().resolve()]
+    declared = str((run.parameters or {}).get("work_root") or "")
+    if declared:
+        roots.append(Path(declared).expanduser().resolve())
+    return roots
+
+
+def _validated_volume_stores(
+    service, run_id: str, payload: dict[str, Any]
+) -> list[tuple[dict[str, Any], Path]]:
+    """Provider volume-output specs proven to live inside the run workspace.
+
+    B1: validation happens BEFORE any registration so an escaping store
+    fails the whole run honestly (status ``failed``, nothing persisted,
+    nothing moved) instead of silently importing an arbitrary directory.
+    """
+    run = service.get_run(run_id)
+    roots = _run_workspace_roots(service, run)
+    validated: list[tuple[dict[str, Any], Path]] = []
+    for spec in payload.get("volume_outputs") or []:
+        if not isinstance(spec, dict):
+            continue
+        store = Path(str(spec.get("path", "")))
+        if not store.is_dir():
+            continue
+        resolved = store.expanduser().resolve()
+        if not any(resolved.is_relative_to(root) for root in roots):
+            raise PermissionError(
+                f"provider volume output {resolved} is outside this run's workspace "
+                f"({', '.join(str(root) for root in roots)}); refusing to move it "
+                "into the catalog (run marked failed)"
+            )
+        validated.append((spec, resolved))
+    return validated
+
+
 def _persist_result(service, run_id: str, model, payload: dict[str, Any]) -> Any:
     """Write *payload* to a temp file and register it as a DERIVED version."""
+    # B1: prove every provider-declared volume store is contained BEFORE the
+    # result asset/store registration begins (see _validated_volume_stores).
+    volume_stores = _validated_volume_stores(service, run_id, payload)
     fd, tmp_path = tempfile.mkstemp(prefix="inference_result_", suffix=".json")
     try:
         with open(fd, "w", encoding="utf-8") as handle:
@@ -555,12 +608,11 @@ def _persist_result(service, run_id: str, model, payload: dict[str, Any]) -> Any
         except OSError:
             pass
     # Volume outputs (tiled ONNX, #1085): register the class/prob zarr
-    # stores as DERIVED versions with lineage through the same run.
-    for spec in payload.get("volume_outputs") or []:
+    # stores as DERIVED versions with lineage through the same run. Paths
+    # were containment-validated above (B1) — register_derived_store moves
+    # them into the catalog tree.
+    for spec, store in volume_stores:
         try:
-            store = Path(str(spec.get("path", "")))
-            if not store.is_dir():
-                continue
             service.register_derived_store(
                 name=str(spec.get("name") or "inference volume"),
                 store_path=store,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import uuid
 from dataclasses import dataclass
@@ -14,6 +15,24 @@ from PySide6.QtWidgets import (
     QTextBrowser,
     QVBoxLayout,
 )
+
+_ENV_ALLOW_WRITE = "PALEO_AGENT_ALLOW_WRITE"
+
+
+def _env_allows_write_actions() -> bool:
+    """``PALEO_AGENT_ALLOW_WRITE=1`` opts the agent panel into WRITE actions.
+
+    Explicit opt-in only (P1, #1186 follow-up): the panel's default grant
+    stays READ+COMPUTE, so WRITE-risk actions (map export / factor map /
+    derived seismic stores) are unreachable unless the operator raised the
+    grant through the environment or the constructor.
+    """
+    return str(os.environ.get(_ENV_ALLOW_WRITE, "")).strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 
 @dataclass(frozen=True)
@@ -38,13 +57,20 @@ class AgentWorkspace(QFrame):
     focus_joint_requested = Signal()
     undo_requested = Signal()
 
-    def __init__(self, project=None, parent=None):
+    def __init__(self, project=None, parent=None, *, allow_write_actions: bool | None = None):
         super().__init__(parent)
         self.setObjectName("WorkstationAgentWorkspace")
         self._project = project
         self._project_path: str | None = None
         self._current_task_id: str | None = None
         self._last_gui_action: str | None = None
+        # P1: WRITE elevation is an explicit opt-in — constructor flag wins
+        # over the environment; default (None) reads PALEO_AGENT_ALLOW_WRITE.
+        self._allow_write_actions = (
+            _env_allows_write_actions()
+            if allow_write_actions is None
+            else bool(allow_write_actions)
+        )
         self._bridge = _AgentBridge(self)
         self._bridge.completed.connect(self._on_completed)
 
@@ -67,10 +93,11 @@ class AgentWorkspace(QFrame):
         header.addWidget(self.undo_button)
         outer.addLayout(header)
 
-        consent = QLabel("当前工程、活动文档、选择与参数会作为本次受控动作的上下文。", self)
+        consent = QLabel(self._consent_text(), self)
         consent.setObjectName("WorkstationAgentConsent")
         consent.setWordWrap(True)
         outer.addWidget(consent)
+        self.consent_label = consent
 
         self.history = QTextBrowser(self)
         self.history.setObjectName("WorkstationAgentHistory")
@@ -136,20 +163,42 @@ class AgentWorkspace(QFrame):
         if get_scheduler().cancel(self._current_task_id):
             self.history.append("<b>取消请求已发送</b> · 将在安全点停止。")
 
-    def _run_plan(self, plan: AgentPlan, receipt_id: str) -> None:
-        from paleo_workbench.harness import ActionContext, ActionRisk, HarnessExecutor
-        from paleo_workbench.runtime.task_scheduler import TaskSpec, get_scheduler
+    def _consent_text(self) -> str:
+        """Consent line; visibly flags an elevated WRITE grant (P1)."""
+        base = "当前工程、活动文档、选择与参数会作为本次受控动作的上下文。"
+        if self._allow_write_actions:
+            return (
+                base
+                + "已显式开启 WRITE 权限（PALEO_AGENT_ALLOW_WRITE）——"
+                "写入/导出类动作将可执行。"
+            )
+        return base
 
-        context = ActionContext(
+    def _build_context(self, plan: AgentPlan):
+        from paleo_workbench.harness import ActionContext, ActionRisk
+
+        # #1186: default grants are READ+COMPUTE only — WRITE-risk actions
+        # (map export/factor-map, derived seismic stores) need an explicit
+        # elevation instead of being silently pre-granted. P1: that
+        # elevation is this panel's explicit opt-in
+        # (PALEO_AGENT_ALLOW_WRITE / allow_write_actions), visible in the
+        # consent line — never a silent default.
+        permissions = frozenset({ActionRisk.READ, ActionRisk.COMPUTE})
+        if self._allow_write_actions:
+            permissions = permissions | {ActionRisk.WRITE}
+        return ActionContext(
             workspace_id=str(getattr(getattr(self._project, "meta", None), "name", "") or ""),
             project_path=self._project_path,
             project=self._project,
             active_well_id=self._well_from_parameters(plan.parameters),
-            # #1186: default grants are READ+COMPUTE only — WRITE-risk actions
-            # (map export/factor-map, derived seismic stores) need an explicit
-            # elevation instead of being silently pre-granted.
-            permissions=frozenset({ActionRisk.READ, ActionRisk.COMPUTE}),
+            permissions=permissions,
         )
+
+    def _run_plan(self, plan: AgentPlan, receipt_id: str) -> None:
+        from paleo_workbench.harness import HarnessExecutor
+        from paleo_workbench.runtime.task_scheduler import TaskSpec, get_scheduler
+
+        context = self._build_context(plan)
         executor = HarnessExecutor()
 
         def run(_task_context):

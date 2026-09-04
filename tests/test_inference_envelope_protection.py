@@ -132,6 +132,144 @@ def test_provider_cannot_overwrite_payload_envelope(service):
     unregister_provider(PROVIDER_EVIL)
 
 
+# --------------------------------------------------------------------- B2 --
+
+def test_provider_generator_version_is_service_owned(service):
+    """B2: the provider result is never read back for generator_version.
+
+    ``generator_version`` is a reserved envelope key — the persisted payload
+    and the DataRun carry the service-owned start-time value; a provider
+    that wants to declare its own generator uses the non-reserved
+    ``provider_generator`` key.
+    """
+
+    class _GeneratorForgingProvider:
+        model_id = "gen-forge"
+        model_version = "1"
+        demo_only = False
+
+        def run(self, inputs, parameters):
+            return {
+                "generator_version": "forged-gen",
+                "provider_generator": "provider-says-v9",
+                "result_summary": {"is_mock": False, "model_type": "ml"},
+            }
+
+    from paleo_workbench.prediction.inference_service import INFERENCE_GENERATOR
+
+    register_provider("generator_forging_provider", _GeneratorForgingProvider, replace=True)
+    version = _register_model_version(
+        service, "generator_forging_provider", "gen-forge-model"
+    )
+    run = start_inference(service, model_version_id=version.id)
+    out = execute_run(service, run.id)
+
+    assert out["run"].status == "complete"
+    # Service value on every surface; the forged label never lands.
+    assert run.generator == INFERENCE_GENERATOR
+    assert out["run"].generator == INFERENCE_GENERATOR
+    assert out["result"]["generator_version"] == INFERENCE_GENERATOR
+    # The non-reserved provider-owned key still travels through the merge.
+    assert out["result"]["provider_generator"] == "provider-says-v9"
+    unregister_provider("generator_forging_provider")
+
+
+# ---------------------------------------------------------------------- B1 --
+
+class _VolumeStealerProvider:
+    """Returns volume_outputs pointing at a host directory of its choosing."""
+
+    model_id = "volume-stealer"
+    model_version = "1"
+    demo_only = False
+    store_path: str = ""
+
+    def run(self, inputs, parameters):
+        return {
+            "volume_outputs": [
+                {"name": "stolen", "path": self.store_path, "kind": "classmap", "dtype": "uint8"}
+            ],
+            "result_summary": {"is_mock": False, "model_type": "ml"},
+        }
+
+
+def test_volume_store_outside_run_workspace_fails_run_and_moves_nothing(
+    service, tmp_path
+):
+    """B1: register_derived_store MOVES directories — an uncontained provider
+    store path must fail the run honestly instead of relocating user data."""
+    register_provider("volume_stealer_provider", _VolumeStealerProvider, replace=True)
+    version = _register_model_version(
+        service, "volume_stealer_provider", "stealer-model"
+    )
+
+    victim = tmp_path / "important-user-dir"
+    victim.mkdir()
+    (victim / "keep.txt").write_text("do not move me", encoding="utf-8")
+    _VolumeStealerProvider.store_path = str(victim)
+
+    run = start_inference(service, model_version_id=version.id)
+    out = execute_run(service, run.id)
+
+    finished = out["run"]
+    assert finished.status == "failed"
+    assert "outside this run's workspace" in str(finished.parameters.get("error"))
+    # Honest failure: nothing was registered, nothing was moved.
+    assert finished.output_version_ids == []
+    assert victim.is_dir()
+    assert (victim / "keep.txt").read_text(encoding="utf-8") == "do not move me"
+
+    unregister_provider("volume_stealer_provider")
+
+
+def test_volume_store_inside_project_artifacts_registers_and_moves(service, tmp_path):
+    """B1 positive: a store genuinely inside the run workspace registers."""
+    register_provider("volume_stealer_provider", _VolumeStealerProvider, replace=True)
+    version = _register_model_version(
+        service, "volume_stealer_provider", "stealer-model"
+    )
+
+    # The service fixture's project file is proj/envelope.paleo.json → the
+    # artifacts tree is proj/envelope.artifacts.
+    artifacts_root = tmp_path / "proj" / "envelope.artifacts"
+    store = artifacts_root / "inference" / "classmap"
+    store.mkdir(parents=True)
+    (store / "zarr.json").write_text("{}", encoding="utf-8")
+    _VolumeStealerProvider.store_path = str(store)
+
+    run = start_inference(service, model_version_id=version.id)
+    out = execute_run(service, run.id)
+
+    assert out["run"].status == "complete"
+    # Result JSON version + the moved volume store version.
+    assert len(out["run"].output_version_ids) == 2
+    assert not store.exists()  # moved into the managed derived layout
+    unregister_provider("volume_stealer_provider")
+
+
+def test_volume_store_inside_explicit_run_work_root_is_allowed(service, tmp_path):
+    """B1: an explicitly declared run work_root is a valid containment root."""
+    register_provider("volume_stealer_provider", _VolumeStealerProvider, replace=True)
+    version = _register_model_version(
+        service, "volume_stealer_provider", "stealer-model"
+    )
+
+    work_root = tmp_path / "explicit-work"
+    store = work_root / "classmap"
+    store.mkdir(parents=True)
+    (store / "zarr.json").write_text("{}", encoding="utf-8")
+    _VolumeStealerProvider.store_path = str(store)
+
+    run = start_inference(
+        service, model_version_id=version.id, parameters={"work_root": str(work_root)}
+    )
+    out = execute_run(service, run.id)
+
+    assert out["run"].status == "complete"
+    assert len(out["run"].output_version_ids) == 2
+    unregister_provider("volume_stealer_provider")
+
+
 # --------------------------------------------------------------------- #1184
 
 

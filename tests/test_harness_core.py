@@ -638,3 +638,116 @@ def test_scheduler_claim_is_atomic_no_double_run():
         assert states.count("done") == 40
     finally:
         sched.shutdown(wait=True, timeout=5)
+
+
+# ---------------------------- V2: project artifacts root + V3: workspace --
+def test_harness_artifact_root_uses_project_name_not_demo(tmp_path):
+    """V2: ``<name>.artifacts`` derives from the PROJECT file name — a
+    project that is not called "demo" must never scatter products into a
+    hardcoded ``demo.artifacts`` tree."""
+    from paleo_workbench.harness.actions.mapping import _artifact_root as map_root
+    from paleo_workbench.harness.actions.seismic import _artifact_root as seis_root
+
+    context = ActionContext(project_path=str(tmp_path / "other.paleo.json"))
+    for root in (map_root(context), seis_root(context)):
+        assert root == tmp_path / "other.artifacts"
+
+
+def test_factor_map_artifact_lands_in_project_artifacts_root(tmp_path, monkeypatch):
+    """V2 end-to-end: the factor-map INTERMEDIATE npz lands inside the
+    project's own ``<name>.artifacts`` tree (real catalog registration)."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from paleo_workbench.catalog.adapter import CoreCatalogAdapter
+    from paleo_workbench.catalog.service import DataCatalogService
+    from paleo_workbench.harness.actions import mapping as mapping_actions
+    from paleo_workbench.harness.spec import ActionRisk
+    from paleo_workbench.mapping.layers import GridMapLayer, MapDocument
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.services import geological_mapping_service as gms
+
+    project_path = tmp_path / "other.paleo.json"
+    project_path.write_text("{}", encoding="utf-8")
+    svc = DataCatalogService.open(project_path)
+    catalog = CoreCatalogAdapter(svc)  # the CatalogPort the actions talk to
+
+    grid = SimpleNamespace(
+        grid_z=np.linspace(0.0, 1.0, 100).reshape(10, 10).astype("float32"),
+        grid_x=np.linspace(0.0, 9.0, 10),
+        grid_y=np.linspace(0.0, 9.0, 10),
+    )
+    layer = GridMapLayer(name="孔隙度")
+    layer.grid_result = grid
+    document = MapDocument(title="t")
+    document.add_layer(layer)
+
+    class _StubService:
+        def create_factor_map(self, project, factor_name, **kw):
+            return document, SimpleNamespace(id="task-1")
+
+    monkeypatch.setattr(gms, "DEFAULT_GEOLOGICAL_MAPPING_SERVICE", _StubService())
+
+    context = ActionContext(
+        project=ProjectDocument.new(name="other", region="r"),
+        project_path=str(project_path),
+        catalog=catalog,
+        permissions=frozenset({ActionRisk.READ, ActionRisk.COMPUTE, ActionRisk.WRITE}),
+    )
+    try:
+        result = mapping_actions._create_factor_map(context, {"factor_name": "porosity"})
+        assert result["version_id"]
+        intermediate = tmp_path / "other.artifacts" / "intermediate"
+        assert list(intermediate.glob("factor-porosity-*.npz"))
+        assert not (tmp_path / "demo.artifacts").exists()
+    finally:
+        svc.close()
+
+
+def test_compute_attribute_passes_workspace_root_and_project_artifacts_dir(
+    tmp_path, monkeypatch
+):
+    """V3: the seismic attribute action builds a ProviderContext with the
+    same workspace_root contract as the executor's provider dispatch; V2:
+    its default output lands in the project's ``<name>.artifacts`` tree."""
+    import paleo_workbench.providers as providers_mod
+    from paleo_workbench.harness.actions import seismic as seismic_actions
+    from paleo_workbench.providers.refs import ProviderResult, SeismicVolumeRef
+
+    captured: dict = {}
+
+    def fake_execute_provider(_registry, provider_id, *, inputs, parameters, context):
+        captured["provider_id"] = provider_id
+        captured["parameters"] = parameters
+        captured["context"] = context
+        return ProviderResult()
+
+    monkeypatch.setattr(providers_mod, "execute_provider", fake_execute_provider)
+
+    context = ActionContext(
+        project_path=str(tmp_path / "other.paleo.json"),
+        permissions=frozenset({ActionRisk.READ, ActionRisk.COMPUTE, ActionRisk.WRITE}),
+    )
+    context.active_volume = SeismicVolumeRef(volume_id="v", path=str(tmp_path / "v.zarr"))
+    seismic_actions._compute_attribute(context, {"attribute": "c3"})
+
+    # V3: containment root available to the provider (aligned with
+    # harness/executor.py provider dispatch).
+    assert captured["context"].workspace_root == str(tmp_path)
+    # V2: default derived output inside the project's artifacts tree.
+    assert captured["parameters"]["output_dir"].startswith(
+        str(tmp_path / "other.artifacts" / "derived")
+    )
+    assert not (tmp_path / "demo.artifacts").exists()
+
+
+def test_export_path_delegation_refuses_existing_file(tmp_path):
+    """V3: the delegated resolver keeps the harness no-overwrite contract."""
+    from paleo_workbench.harness.actions.mapping import _resolve_export_path
+
+    existing = tmp_path / "out.png"
+    existing.write_bytes(b"png")
+    context = ActionContext(project_path=str(tmp_path / "t.paleo.json"))
+    with pytest.raises(PermissionError, match="refusing to overwrite|overwrite"):
+        _resolve_export_path(context, str(existing))

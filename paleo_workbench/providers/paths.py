@@ -2,10 +2,10 @@
 
 File-writing providers must not blindly ``Path(...) + mkdir`` an
 agent-supplied ``output_path``: the resolved destination has to stay inside
-the workspace the execution context provides. This helper centralizes the
-same containment + no-overwrite contract the harness uses
-(``harness/actions/mapping.py::_resolve_export_path``) so provider and
-handler paths cannot drift apart:
+the workspace the execution context provides. This helper is the SINGLE
+containment + no-overwrite implementation — the harness's export-path
+resolver delegates here (V3) so provider and handler paths cannot drift
+apart:
 
 - the containment root is ``context.workspace_root`` (the harness passes the
   project workspace) falling back to ``context.work_dir`` (the execution's

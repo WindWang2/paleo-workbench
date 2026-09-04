@@ -24,6 +24,7 @@ arrive as refs), and never bypasses the catalog.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -61,25 +62,56 @@ def validate_parameters(
     """Validate ``parameters`` against the JSON-schema subset the SDK allows.
 
     Supported — recursively at every object/array nesting level (#1178):
-    type, required, properties, enum, minimum/maximum, minItems/maxItems,
-    items, additionalProperties. ``additionalProperties`` is only enforced
-    when the schema explicitly declares it ``false`` (the JSON Schema default
-    of absent = allow keeps older descriptors working). Intentionally
+    type (including list-form unions, B3), required, properties, enum,
+    minimum/maximum, minItems/maxItems, items, additionalProperties.
+    ``additionalProperties`` is only enforced when the schema explicitly
+    declares it ``false`` (the JSON Schema default of absent = allow keeps
+    older descriptors working). Unknown ``type`` names (single or inside a
+    union) are reported instead of silently passing (B3). Intentionally
     dependency-free (no jsonschema import) — descriptors are small and fully
     under our control.
     """
     problems: list[str] = []
 
+    def type_matches(expected: str, value: Any) -> bool:
+        allowed = _JSON_TYPES.get(expected)
+        if allowed is None or not isinstance(value, allowed):
+            return False
+        if expected in ("integer", "number") and isinstance(value, bool):
+            return False
+        return True
+
     def check(value: Any, sub: Mapping[str, Any], path: str) -> None:
         expected = sub.get("type")
         if expected is not None:
-            allowed = _JSON_TYPES.get(str(expected))
-            if allowed is not None and not isinstance(value, allowed):
-                problems.append(f"{path}: expected {expected}, got {type(value).__name__}")
-                return
-            if str(expected) in ("integer", "number") and isinstance(value, bool):
-                problems.append(f"{path}: expected {expected}, got boolean")
-                return
+            if isinstance(expected, list):
+                # JSON Schema union (B3): valid when ANY known member matches
+                # (``null`` legitimizes None); a union whose members are all
+                # unknown type names is a schema problem, not a silent pass.
+                members = [str(member) for member in expected if str(member)]
+                known = [member for member in members if member in _JSON_TYPES]
+                if known and any(type_matches(member, value) for member in known):
+                    pass
+                else:
+                    detail = "" if known else " (no known JSON type in union)"
+                    problems.append(
+                        f"{path}: expected one of {expected!r}{detail}, "
+                        f"got {type(value).__name__}"
+                    )
+                    return
+            else:
+                allowed = _JSON_TYPES.get(str(expected))
+                if allowed is None:
+                    # B3: an unknown type string used to pass silently — a
+                    # descriptor the SDK cannot check is reported, not trusted.
+                    problems.append(f"{path}: unknown type {expected!r}")
+                    return
+                if not isinstance(value, allowed):
+                    problems.append(f"{path}: expected {expected}, got {type(value).__name__}")
+                    return
+                if str(expected) in ("integer", "number") and isinstance(value, bool):
+                    problems.append(f"{path}: expected {expected}, got boolean")
+                    return
         if "enum" in sub and value not in sub["enum"]:
             problems.append(f"{path}: {value!r} not in enum {sub['enum']!r}")
         if isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -143,6 +175,33 @@ def reset_governor_degraded() -> None:
     GOVERNOR_DEGRADED = False
 
 
+#: #1180/P2: shared fallback governor for DEGRADED admission. Built lazily
+#: ONCE and reused by every fallback call site (this module's
+#: :func:`default_budget_lease` — which the harness executor imports — is the
+#: single constructor). A per-call ``ResourceGovernor(ResourceBudget())``
+#: would give each degraded execution its own unlimited budget, so concurrent
+#: fallback admissions would never aggregate; the singleton restores the
+#: "conservative default budget" contract under concurrency.
+_FALLBACK_GOVERNOR: Any = None
+_FALLBACK_GOVERNOR_LOCK = threading.Lock()
+
+
+def reset_fallback_governor() -> None:
+    """Test helper: drop the shared degraded-mode governor."""
+    global _FALLBACK_GOVERNOR
+    with _FALLBACK_GOVERNOR_LOCK:
+        _FALLBACK_GOVERNOR = None
+
+
+def _shared_fallback_governor(governor_cls: type, budget_cls: type):
+    """The one conservative default-budget governor degraded mode uses."""
+    global _FALLBACK_GOVERNOR
+    with _FALLBACK_GOVERNOR_LOCK:
+        if _FALLBACK_GOVERNOR is None:
+            _FALLBACK_GOVERNOR = governor_cls(budget_cls())
+        return _FALLBACK_GOVERNOR
+
+
 def default_budget_lease(
     *,
     category_value: str,
@@ -152,20 +211,21 @@ def default_budget_lease(
     estimated_vram_bytes: int = 0,
     io_weight: float = 1.0,
 ):
-    """Conservative fallback admission over a fresh default budget (#1180).
+    """Conservative fallback admission over a SHARED default budget (#1180).
 
     Shared by the provider executor and the harness executor so both call
     sites degrade identically: admission goes through a real
     :class:`ResourceGovernor` built on a default :class:`ResourceBudget`
-    instead of being skipped. Raises ``ImportError`` when the first-party
-    runtime modules are truly broken (callers convert that into a loud
-    failure).
+    instead of being skipped — and always the SAME governor instance (P2),
+    so concurrent degraded admissions aggregate against one budget. Raises
+    ``ImportError`` when the first-party runtime modules are truly broken
+    (callers convert that into a loud failure).
     """
     from paleo_workbench.runtime.resource_budget import ResourceBudget
     from paleo_workbench.runtime.resource_governor import ResourceGovernor, TaskRequest
     from paleo_workbench.runtime.task_categories import TaskCategory
 
-    governor = ResourceGovernor(ResourceBudget())
+    governor = _shared_fallback_governor(ResourceGovernor, ResourceBudget)
     return governor.admit(
         TaskRequest(
             category=TaskCategory(category_value),

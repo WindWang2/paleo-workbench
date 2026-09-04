@@ -113,7 +113,16 @@ _las_cache = WellLogCache(_MAX_CACHE_SIZE)
 # Full-resolution documents must never be served from (or evict) the preview
 # cache: the cache key is (path, mtime), so sharing one cache would silently
 # hand a decimated preview document to an ML caller that asked for every row.
-_full_res_cache = WellLogCache(_MAX_CACHE_SIZE)
+#
+# V4: the full-resolution cache has NO byte budget — WellLogCache bounds by
+# entry count only, and a full-resolution document can carry millions of
+# rows × dozens of curves. Its capacity is therefore deliberately tiny (2,
+# not the preview cache's 16): the ML inference path consumes wells
+# sequentially (one model run reads one well), so 2 entries cover the
+# current + previous well while capping worst-case residency at two
+# full-resolution documents instead of sixteen.
+_FULL_RES_CACHE_SIZE = 2
+_full_res_cache = WellLogCache(_FULL_RES_CACHE_SIZE)
 
 
 class WellLogDataWithDepthUnit:

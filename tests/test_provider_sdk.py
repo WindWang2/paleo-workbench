@@ -320,6 +320,46 @@ def test_array_items_object_required_validated():
     assert any("features[1].name: required" in p for p in problems)
 
 
+# ------------------------------------------- B3 union types / unknown types --
+UNION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "mode": {"type": ["string", "null"], "description": "optional string"},
+        "count": {"type": ["integer", "string"]},
+        "weird": {"type": ["mystery", "riddle"]},
+        "odd": {"type": "mystery"},
+    },
+    "required": [],
+    "additionalProperties": False,
+}
+
+
+def test_union_type_matches_any_member_and_null_legitimizes_none():
+    assert validate_parameters(UNION_SCHEMA, {"mode": None, "count": "three"}) == []
+    assert validate_parameters(UNION_SCHEMA, {"mode": "fast", "count": 3}) == []
+
+
+def test_union_type_value_matching_no_member_is_rejected():
+    problems = validate_parameters(UNION_SCHEMA, {"mode": 5})
+    assert any("mode" in p and "expected one of" in p for p in problems)
+    # None without "null" in the union matches no member.
+    problems = validate_parameters(UNION_SCHEMA, {"count": None})
+    assert any("count" in p for p in problems)
+    # bool is not an integer even inside a union.
+    problems = validate_parameters(UNION_SCHEMA, {"count": True})
+    assert any("count" in p for p in problems)
+
+
+def test_union_of_only_unknown_types_is_rejected_not_silently_passed():
+    problems = validate_parameters(UNION_SCHEMA, {"weird": 1})
+    assert any("weird" in p and "no known JSON type in union" in p for p in problems)
+
+
+def test_single_unknown_type_string_is_rejected_not_silently_passed():
+    problems = validate_parameters(UNION_SCHEMA, {"odd": 1})
+    assert any("odd" in p and "unknown type" in p for p in problems)
+
+
 # -------------------------------------------------------------- execution --
 def test_execute_provider_happy_path_with_provenance():
     registry = ProviderRegistry()
@@ -638,6 +678,38 @@ def test_governor_singleton_broken_degrades_to_default_budget_admission(monkeypa
         assert any("falling back" in r.message for r in caplog.records)
     finally:
         provider_execution.reset_governor_degraded()
+
+
+def test_degraded_fallback_governor_is_one_shared_instance():
+    """P2/#1180: every degraded admission leases from the SAME fallback
+    governor — a fresh governor per call would hand each fallback execution
+    its own unlimited budget, so concurrent degraded admissions would never
+    aggregate against one another."""
+    from paleo_workbench.providers import execution as provider_execution
+
+    provider_execution.reset_fallback_governor()
+    lease1 = lease2 = None
+    try:
+        lease1 = provider_execution.default_budget_lease(
+            category_value="interactive.query",
+            title="fallback-1",
+            estimated_cpu_cores=0.5,
+        )
+        governor_after_first = provider_execution._FALLBACK_GOVERNOR
+        assert governor_after_first is not None
+        lease2 = provider_execution.default_budget_lease(
+            category_value="interactive.query",
+            title="fallback-2",
+            estimated_cpu_cores=0.5,
+        )
+        # Same instance across calls (id-identical), not a new governor.
+        assert provider_execution._FALLBACK_GOVERNOR is governor_after_first
+        assert id(provider_execution._FALLBACK_GOVERNOR) == id(governor_after_first)
+    finally:
+        for lease in (lease1, lease2):
+            if lease is not None:
+                lease.release()
+        provider_execution.reset_fallback_governor()
 
 
 # ------------------------------------------- #1177 output containment --

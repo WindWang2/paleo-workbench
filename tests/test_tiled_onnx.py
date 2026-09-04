@@ -425,3 +425,50 @@ def test_softmax_budget_rejects_oversized_classes(store, tmp_path):
             tile=tile,
             prefer_gpu=False,
         )
+
+
+# ---------------------------------------------------------------------------
+# B5 — batch is never silently clamped
+# P3 — identityless execution still honors a caller-declared model_checksum
+# ---------------------------------------------------------------------------
+
+
+def test_batch_below_one_is_explicit_valueerror_never_clamped(tmp_path):
+    """B5: batch < 1 is an explicit ValueError, consistent with the
+    "never silent clamps" contract of the softmax budget guards."""
+    model_path = tmp_path / "m.onnx"
+    model_path.write_bytes(b"stub")  # existence check only — batch fails first
+    for bad_batch in (0, -3):
+        with pytest.raises(ValueError, match="batch"):
+            run_tiled_inference(
+                None,  # reader unused: batch validation happens before any read
+                model_path,
+                classes=2,
+                work_root=tmp_path / "w",
+                batch=bad_batch,
+                tile=(8, 16, 16),
+                prefer_gpu=False,
+            )
+
+
+def test_identityless_caller_checksum_pin_is_enforced(tmp_path):
+    """P3: no registered identity + caller-supplied model_checksum → the
+    checksum is still compared; a mismatch refuses execution."""
+    from paleo_workbench.prediction.tiled_onnx import _verify_model_identity
+
+    model_path = tmp_path / "m.onnx"
+    model_path.write_bytes(b"weights")
+    sha = _sha256(model_path)
+
+    no_pin = _verify_model_identity(model_path, {}, sha)
+    assert no_pin["registered"] is False
+    assert no_pin["verified"] is False
+
+    pinned = _verify_model_identity(model_path, {"model_checksum": sha}, sha)
+    assert pinned["registered"] is False  # unregistered …
+    assert pinned["verified"] is True  # … but checksum-verified
+    assert pinned["artifact_sha256"] == sha
+    assert pinned["declared_checksum"] == sha
+
+    with pytest.raises(TiledInferenceError, match="model_checksum"):
+        _verify_model_identity(model_path, {"model_checksum": "0" * 64}, sha)

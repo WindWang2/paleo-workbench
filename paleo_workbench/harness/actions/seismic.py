@@ -6,6 +6,7 @@ authority; attribute computation runs through the capability provider
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from paleo_workbench.harness.context import ActionContext
@@ -34,6 +35,21 @@ def _resolve_volume_path(context: ActionContext, raw: str) -> str:
             f"volume path must stay under the project workspace ({root})"
         ) from None
     return str(resolved)
+
+
+def _artifact_root(context: ActionContext) -> Path:
+    """The PROJECT's artifacts tree (``<name>.artifacts``) — V2.
+
+    Never a hardcoded ``demo`` name: derived products must land inside the
+    owning project's tree (same root the catalog manages,
+    ``project/paths.artifact_dir_for``). Project-less contexts keep the
+    legacy ``./demo.artifacts`` fallback.
+    """
+    from paleo_workbench.project.paths import artifact_dir_for
+
+    if context.project_path:
+        return artifact_dir_for(Path(context.project_path))
+    return Path.cwd() / "demo.artifacts"
 
 
 def register(registry) -> None:
@@ -182,15 +198,23 @@ def _compute_attribute(context: ActionContext, parameters: dict) -> dict:
     if output_dir is not None:
         output_dir = _resolve_volume_path(context, output_dir)
     elif root is not None:
-        # Derived outputs land in the workspace artifacts area (never /tmp-only).
-        output_dir = str(root / "demo.artifacts" / "derived" / "attr.zarr")
+        # Derived outputs land in the PROJECT's artifacts area (V2: the real
+        # ``<name>.artifacts`` tree, never a hardcoded demo name) — never
+        # /tmp-only.
+        output_dir = str(_artifact_root(context) / "derived" / "attr.zarr")
     else:
         import tempfile
 
         output_dir = str(Path(tempfile.mkdtemp(prefix="p2-attribute-")) / "attr.zarr")
     provider_parameters = {"output_dir": output_dir}
+    # V3: same workspace_root contract as the executor's provider dispatch
+    # (harness/executor.py) and the mapping export action — without it the
+    # provider-side containment checks (#1177) have no root to enforce
+    # against for this action.
+    workspace_root = str(root) if root is not None else str(Path.cwd())
     provider_context = ProviderContext(
         catalog=context.catalog,
+        workspace_root=workspace_root,
         emit_progress=context.progress,
         cancel=context.cancel,
         work_dir=context.extras.get("work_dir"),

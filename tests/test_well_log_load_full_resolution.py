@@ -198,3 +198,16 @@ def test_online_ml_provider_uses_full_resolution_and_declares_it(
         assert resolution["sent_row_count"] == BIG_ROWS
     finally:
         service.close()
+
+
+def test_full_resolution_cache_capacity_is_minimal():
+    """V4: full-resolution documents can carry millions of rows × dozens of
+    curves and the cache bounds by ENTRY COUNT only — capacity stays at 2
+    (current + previous well for the sequential ML path), never the preview
+    cache's 16."""
+    from paleo_workbench.viz import well_log_load
+
+    assert well_log_load._FULL_RES_CACHE_SIZE == 2
+    assert well_log_load._full_res_cache.max_entries == 2
+    # The preview cache is unaffected.
+    assert well_log_load._las_cache.max_entries == well_log_load._MAX_CACHE_SIZE
