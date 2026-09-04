@@ -126,8 +126,10 @@ class QgisDisplayCanvas(QWidget):
             if vp is not None:
                 vp.installEventFilter(self._filter)
         self.stack.set_map_tool(self.canvas_address, "pan")
+        # Qt 树析构期间绝不能 shutdown 整个栈（在半析构画布上进
+        # destroyCanvas/unsetMapTool 会踩悬空子对象）；只做状态记账。
         try:
-            self.destroyed.connect(lambda _obj=None: self.shutdown())
+            self.destroyed.connect(lambda _obj=None: self._mark_disposed())
         except Exception:
             pass
 
@@ -287,6 +289,9 @@ class QgisDisplayCanvas(QWidget):
             self.stack.shutdown()
         except Exception:
             pass
+
+    def _mark_disposed(self) -> None:
+        self._shutdown_done = True
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self.shutdown()

@@ -75,13 +75,16 @@ class QgisCanvasShim(QWidget):
         self._tools_original_set_active = None
         self._tools_wrapped_target = None
         self._wrapped_func = None
-        # 确保父部件销毁时也能回收桥接，避免 stale QgsLayerTreeMapCanvasBridge
+        # Qt 树析构期间触发的 destroyed 回调只做状态记账：半析构画布上再进
+        # destroy_canvas/unsetMapTool 会踩悬空子对象（native 栈已证实）。
+        # 画布的桥表回收由桥在 canvas destroyed 时自行完成；orderly 关闭仍走
+        # shutdown()（宿主在拆树前显式调用）。
         try:
-            self.destroyed.connect(lambda _obj=None: self.shutdown())
+            self.destroyed.connect(lambda _obj=None: self._mark_disposed())
         except Exception:
             pass
         try:
-            self.canvas.destroyed.connect(lambda _obj=None: self.shutdown())
+            self.canvas.destroyed.connect(lambda _obj=None: self._mark_disposed())
         except Exception:
             pass
         # 局部范围历史，映射 UnifiedMapCanvas 的 can_previous/can_next
@@ -647,6 +650,12 @@ class QgisCanvasShim(QWidget):
         except Exception:
             pass
         self._cleanup_canvas()
+
+    def _mark_disposed(self) -> None:
+        """Qt 树析构期间的记账：纯 Python 状态，绝不进桥/QGIS。"""
+        self._restore_tool_patch()
+        self._shutdown_done = True
+        self._canvas_destroyed = True
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self.shutdown()

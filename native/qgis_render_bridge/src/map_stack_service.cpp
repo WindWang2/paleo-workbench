@@ -1,3 +1,7 @@
+// pybind11 (and therefore Python.h) must be included BEFORE any Qt/QGIS
+// header: Qt redefines `slots`, which corrupts PyType_Spec in object.h.
+#include <pybind11/pybind11.h>
+
 #include "map_stack_service.hpp"
 
 #include <algorithm>
@@ -825,6 +829,19 @@ void QgisMapStack::ensureNotStale(std::uintptr_t canvas_addr) {
 std::uintptr_t QgisMapStack::createCanvas() {
   if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
   auto* canvas = new QgsMapCanvas();
+  const std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(canvas);
+  // Qt 树析构直接销毁画布（无 orderly destroyCanvas）时只回收桥表：
+  // 半析构的 QgsMapCanvas 上调用 unsetMapTool 等会踩悬空子对象（UAF），
+  // 因此这条路径绝不触碰画布本身；工具由 Qt 父子树销毁，release() 防双删。
+  std::weak_ptr<char> alive = alive_token_;
+  QObject::connect(canvas, &QObject::destroyed,
+                   [this, alive, addr]() {
+                     if (alive.expired()) return;  // 栈先亡：impl_ 不可达
+                     // 回调表里的 std::function 持有 Python 对象；destroyed
+                     // 可能从无 GIL 的线程发出，先取 GIL 再擦表。
+                     pybind11::gil_scoped_acquire gil;
+                     reapCanvasTables(addr);
+                   });
   canvas->setCanvasColor(Qt::white);
   canvas->enableAntiAliasing(true);
   if (impl_->display_mode) {
@@ -833,7 +850,6 @@ std::uintptr_t QgisMapStack::createCanvas() {
     auto tree_bridge = std::make_unique<QgsLayerTreeMapCanvasBridge>(
         project()->layerTreeRoot(), canvas);
     tree_bridge->setCanvasLayers();
-    std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(canvas);
     impl_->tree_bridges.emplace(addr, std::move(tree_bridge));
     impl_->canvas_refs[addr] = canvas;
     // 永不显示（真机回归：QDockWidget 非浮动子控件会随父画布 show 一起被
@@ -845,7 +861,6 @@ std::uintptr_t QgisMapStack::createCanvas() {
     impl_->dead_canvas_addrs.erase(addr);
     return addr;
   }
-  std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(canvas);
   impl_->canvas_refs[addr] = canvas;
   impl_->dead_canvas_addrs.erase(addr);
   canvas->setMapTool(new QgsMapToolPan(canvas));
@@ -868,31 +883,19 @@ void QgisMapStack::destroyCanvas(std::uintptr_t canvas_addr) {
   }
   impl_->extent_callbacks.erase(canvas_addr);
   impl_->xy_callbacks.erase(canvas_addr);
-  // Remove tool (Qt parent owns it — always release, never delete via unique_ptr)
-  auto toolIt = impl_->tools.find(canvas_addr);
-  if (toolIt != impl_->tools.end() && toolIt->second) {
-    bool canvasAlive = !it->second.isNull();
-    if (canvasAlive) {
-      QgsMapCanvas* c = it->second;
-      if (c && c->mapTool() == toolIt->second.get()) {
-        c->unsetMapTool(toolIt->second.get());
-      }
-    }
-    toolIt->second.release();
-    impl_->tools.erase(toolIt);
-  } else if (toolIt != impl_->tools.end()) {
-    impl_->tools.erase(toolIt);
-  }
-  // Remove bridge; canvas lifetime is owned by Qt parent hierarchy,
-  // so we do not delete the QWidget here (avoids double-free with
-  // QgisCanvasHost layout). The QPointer will become null when Qt
-  // deletes the widget.
-  impl_->tree_bridges.erase(canvas_addr);
-  impl_->cad_docks.erase(canvas_addr);  // Qt 父子关系负责销毁（parent=canvas）
-  // 终局审查 C1：桥内编辑/采点工具 parent=画布，清表前先解除激活——
-  // 否则 scratch 层随 kit 析构而激活工具的 mLayer 悬垂（UAF）。
+  // 只有画布仍活着（orderly 关闭）才允许解除激活工具；Qt 析构期间的
+  // 销毁路径进不来这里——Python 侧 destroyed 钩子只做状态记账，桥内
+  // destroyed 连接走 reapCanvasTables（无解引用）。
   if (!it->second.isNull()) {
     QgsMapCanvas* c = it->second;
+    // Remove tool (Qt parent owns it — always release, never delete via unique_ptr)
+    auto toolIt = impl_->tools.find(canvas_addr);
+    if (toolIt != impl_->tools.end() && toolIt->second &&
+        c && c->mapTool() == toolIt->second.get()) {
+      c->unsetMapTool(toolIt->second.get());
+    }
+    // 终局审查 C1：桥内编辑/采点工具 parent=画布，清表前先解除激活——
+    // 否则 scratch 层随 kit 析构而激活工具的 mLayer 悬垂（UAF）。
     QgsMapTool* active = c ? c->mapTool() : nullptr;
     if (active != nullptr) {
       bool ours = false;
@@ -910,6 +913,22 @@ void QgisMapStack::destroyCanvas(std::uintptr_t canvas_addr) {
       if (ours) c->unsetMapTool(active);
     }
   }
+  reapCanvasTables(canvas_addr);
+}
+
+void QgisMapStack::reapCanvasTables(std::uintptr_t canvas_addr) {
+  // 纯表清理，绝不解引用画布：canvas 可能已亡或正析构。工具由 Qt 父子树
+  // 负责销毁，unique_ptr 一律 release() 防双删。
+  auto toolIt = impl_->tools.find(canvas_addr);
+  if (toolIt != impl_->tools.end()) {
+    if (toolIt->second) toolIt->second.release();
+    impl_->tools.erase(toolIt);
+  }
+  // Remove bridge; canvas lifetime is owned by Qt parent hierarchy,
+  // so we do not delete the QWidget here (avoids double-free with
+  // QgisCanvasHost layout).
+  impl_->tree_bridges.erase(canvas_addr);
+  impl_->cad_docks.erase(canvas_addr);  // Qt 父子关系负责销毁（parent=canvas）
   impl_->capture_kits.erase(canvas_addr);
   impl_->digitize_callbacks.erase(canvas_addr);
   impl_->vertex_tools.erase(canvas_addr);
@@ -919,7 +938,7 @@ void QgisMapStack::destroyCanvas(std::uintptr_t canvas_addr) {
   impl_->identify_tools.erase(canvas_addr);
   impl_->selection_callbacks.erase(canvas_addr);
   impl_->highlights.erase(canvas_addr);
-  impl_->canvas_refs.erase(it);
+  impl_->canvas_refs.erase(canvas_addr);
   // 终局审查 M5：销毁后的地址必须留在 dead-set（拒绝后续同地址调用把
   // 已亡指针 reinterpret 成活画布）；新画布复用地址时 createCanvas 自清。
   impl_->dead_canvas_addrs.insert(canvas_addr);
