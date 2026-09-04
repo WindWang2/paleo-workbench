@@ -312,6 +312,7 @@ class WorkstationFrame(QWidget):
     def show_hub_page(self, title: str) -> None:
         self.hub_dock.setWindowTitle(str(title or "功能页"))
         self.hub_dock.show()
+        self.hub_dock.setFloating(True)
         self.hub_dock.raise_()
 
     def activate_joint(self) -> None:

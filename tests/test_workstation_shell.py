@@ -130,6 +130,18 @@ def test_hub_navigation_does_not_replace_bian_tu(qtbot, tmp_path):
     assert "成图审核" in ws.hub_dock.windowTitle()
 
 
+def test_hub_dock_close_keeps_bian_tu(qtbot, tmp_path):
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+    shell.navigate_to(navigation.PAGE_INDEX_DATA, "overview")
+    assert ws.central_document() is ws.composite
+    assert ws.hub_dock.isFloating()
+    ws.hub_dock.close()
+    assert ws.hub_dock.isHidden()
+    assert ws.central_document() is ws.composite
+
+
 def test_well_and_seismic_are_host_docks(qtbot, tmp_path):
     shell = AppShell(project=_project(tmp_path))
     qtbot.addWidget(shell)
