@@ -166,6 +166,24 @@ def try_import_welllog() -> tuple[Any, type | None, type | None]:
         return None, None, None
 
 
+def resolve_default_backend() -> tuple[str, str | None]:
+    """Resolve the product-default well-log backend without raising.
+
+    Returns ``(backend, fallback_reason)``.  ``"engine"`` requires both the
+    env default being enabled *and* the native binding actually importing;
+    everything else resolves to ``"legacy"``.  ``fallback_reason`` is ``None``
+    only when the engine is selected — every legacy resolution carries an
+    honest, human-readable cause so hosts can announce the degradation
+    instead of disguising it (B9).
+    """
+    if not welllog_engine_env_enabled():
+        return "legacy", "PALEO_USE_WELLLOG_ENGINE 显式关闭了 WellLogEngine"
+    _, view_cls, _ = try_import_welllog()
+    if view_cls is None:
+        return "legacy", "welllog 绑定不可用，自动回退 Legacy (QPainter)"
+    return "engine", None
+
+
 def stable_entity_id(*parts: str) -> str:
     """Make a deterministic UUID for a Workbench-owned business entity."""
     return str(uuid.uuid5(_ID_NS, "|".join(str(p).strip() for p in parts)))

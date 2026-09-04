@@ -186,6 +186,16 @@ class WellLogCanvasPanel(QFrame):
     def backend(self) -> str:
         return self._backend
 
+    def is_native_backend(self) -> bool:
+        """Read-only: whether the *selected* backend is the native engine.
+
+        Selection only — after a failed native load the panel keeps ``engine``
+        selected for explicit retry while painting through the Legacy
+        fallback; ``self.stack.currentWidget() is self.engine_host`` answers
+        "what is on screen right now".
+        """
+        return self._backend == "engine"
+
     def set_backend(self, name: str) -> None:
         """Explicit Legacy ↔ WellLogEngine switch (does not remove Legacy)."""
         target: BackendName = "engine" if name == "engine" else "legacy"
