@@ -67,8 +67,8 @@ class _Overlay(QWidget):
                 coords = geometry.get("coordinates") or ()
                 if len(coords) < 2:
                     continue
-                sx, sy = host.map_to_screen((float(coords[0]), float(coords[1])))
-                painter.drawEllipse(QPointF(sx, sy), 8.0, 8.0)
+                screen = host.map_to_screen((float(coords[0]), float(coords[1])))
+                painter.drawEllipse(QPointF(screen.x(), screen.y()), 8.0, 8.0)
         decorations = state.get("decorations") or {}
         if decorations:
             paint_map_decorations(
@@ -122,6 +122,7 @@ class QgisDisplayCanvas(QWidget):
     def _on_stack_extent(self, xmin, ymin, xmax, ymax) -> None:
         tup = (float(xmin), float(ymin), float(xmax), float(ymax))
         self.extent_changed.emit(tup)
+        self._overlay.update()
 
     @property
     def view_extent(self):
@@ -141,7 +142,8 @@ class QgisDisplayCanvas(QWidget):
         self._overlay.update()
 
     def map_to_screen(self, point):
-        return tuple(self.stack.map_to_screen(self.canvas_address, float(point[0]), float(point[1])))
+        sx, sy = self.stack.map_to_screen(self.canvas_address, float(point[0]), float(point[1]))
+        return QPointF(sx, sy)
 
     def screen_to_map(self, point):
         return tuple(self.stack.screen_to_map(self.canvas_address, float(point[0]), float(point[1])))
