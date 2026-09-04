@@ -392,13 +392,39 @@ class VolumeAttributeJob:
         step = self.band_inlines
         return [(i, min(i + step, n_il)) for i in range(0, n_il, step)]
 
+    def _source_identity(self) -> dict:
+        """Identity of the source volume this job reads (source-mix guard).
+
+        Same scheme as the transcoder's ``_source_identity`` (#1141): the
+        reader's zarr store path plus size/mtime — cheap (no content hashing
+        of a huge store) yet enough to tell two same-shape volumes apart
+        when the active volume switches under a reused attribute store.
+        Readers without a ``path`` (in-memory test fakes) contribute no
+        identity fields, matching the pre-fix spec for them.
+        """
+        from paleo_workbench.seismic_transcode import _source_identity
+
+        path = getattr(self.reader, "path", None)
+        if not path:
+            return {}
+        return _source_identity(Path(str(path)))
+
     def _banding_spec(self) -> dict:
-        """Identity of the band layout this job will produce (#1161)."""
-        return {
+        """Identity of the band layout this job will produce (#1161).
+
+        Includes the SOURCE volume identity: without it, switching the
+        active volume and recomputing the same kernel/band/shape attribute
+        into a reused store would make #1161's marker trust reuse the
+        previous volume's bands — mixed-source DERIVED output. A spec
+        mismatch discards the markers and recomputes every band.
+        """
+        spec = {
             "attribute": self.name,
             "band_inlines": self.band_inlines,
             "shape": [int(v) for v in self.reader.shape],
         }
+        spec.update(self._source_identity())
+        return spec
 
     def _open_or_create_output(self):
         import zarr
@@ -510,13 +536,20 @@ class VolumeAttributeJob:
         return 128  # the layout this job itself creates
 
     def _fsync_band_shards(self, i0: int, i1: int) -> None:
-        """fsync the shard files this band's write touched (#1194).
+        """fsync the shard files AND directory entries this band touched (#1194).
 
         zarr has no per-write durability hook, so the store's ``c/<gi>/…``
         shard files covered by the band's inline span are fsynced directly
         BEFORE the band marker lands — a crash can then never persist a
         done-marker ahead of its data (which would register a store with
-        missing bands as a complete DERIVED volume).
+        missing bands as a complete DERIVED volume). fsyncing the files alone
+        is not enough on Linux: the shard bytes can be durable while the
+        NEWLY CREATED ``c/<gi>`` / ``c/<gi>/<gj>`` directory entries that name
+        them are still only in memory, so a crash right after the marker
+        could leave shards with no directory entries at all. Every directory
+        level the band covered is therefore fsynced too, deepest-first
+        (child entries before the parent that names them), deduped across
+        the band's shard range.
         """
         shard_il = self._shard_inline_extent()
         if shard_il <= 0:
@@ -524,13 +557,21 @@ class VolumeAttributeJob:
         chunks_root = self.dst / "c"
         if not chunks_root.is_dir():
             return
+        dirs: set[Path] = set()
         for gi in range(i0 // shard_il, (i1 - 1) // shard_il + 1):
             col = chunks_root / str(gi)
             if not col.is_dir():
                 continue
+            dirs.add(col)
             for f in col.rglob("*"):
                 if f.is_file():
                     self._fsync_path(f)
+                    dirs.add(f.parent)
+        if dirs:
+            dirs.add(chunks_root)
+            dirs.add(self.dst)
+        for d in sorted(dirs, key=lambda p: len(p.parts), reverse=True):
+            self._fsync_path(d)
 
     def _mark_band_done(self, i0: int) -> None:
         import os

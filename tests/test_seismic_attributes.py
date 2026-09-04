@@ -277,6 +277,77 @@ def test_band_data_fsynced_before_marker_and_marker_body_fsynced(
         "second band's data fsync must land between its predecessor's "
         "marker and its own"
     )
+    # #1194 residual: the DIRECTORIES holding those shards are fsynced too —
+    # shard bytes alone are not durable if the newly created c/<gi>/<gj>
+    # entries are lost. Every shard file's parent directory (plus the store
+    # root and the chunk root) must appear, before the band's marker.
+    shard_files = {p for _, p in shard_events if not p.endswith("zarr.json")}
+    parents = {str(Path(p).parent) for p in shard_files}
+    assert parents, "expected at least one shard file under c/"
+    assert parents <= set(events), (
+        f"shard directories were not fsynced: missing {parents - set(events)}"
+    )
+    assert str(dst / "c") in events
+    assert str(dst) in events
+    parent_indices = [events.index(p) for p in parents if p in events]
+    assert max(parent_indices) < i0, (
+        "directory fsyncs must precede the band marker that claims the data"
+    )
+
+
+# ------------------------------------------- source identity in banding spec
+
+
+def test_band_spec_switching_source_volume_recomputes(volume, tmp_path):
+    """Source identity in the banding spec: two same-shape source volumes,
+    same kernel, same band size, SAME reused output store — the second
+    volume must NOT trust the first one's band markers (mixed-source DERIVED
+    guard); every band recomputes and the result matches the second volume.
+    """
+    _, reader_a, _ = volume
+    # Source B: identical geometry, different data (different seed).
+    segy_b = tmp_path / "v_b.segy"
+    cube_b = _write_segy(segy_b, seed=99)
+    store_b = tmp_path / "store_b"
+    transcode_segy_to_zarr(segy_b, store_b, params=PARAMS)
+    reader_b = open_volume(store_b)
+
+    dst = tmp_path / "attr_mix"
+    job_a = VolumeAttributeJob(reader_a, dst, "c3", band_inlines=18)
+    job_b = VolumeAttributeJob(reader_b, dst, "c3", band_inlines=18)
+    assert job_a._banding_spec() != job_b._banding_spec(), (
+        "same-shape different-source jobs must carry different banding specs"
+    )
+
+    job_a.run(TaskContext(task_id="a"))
+    assert job_a.completed_bands() == {0, 18}
+
+    # Reuse the store for source B: spec mismatch must discard A's markers
+    # and recompute every band (no band may be skipped).
+    import paleo_workbench.seismic_attributes as sa
+
+    compute_calls: list[int] = []
+    orig = sa.compute_block
+
+    def spy(rd, name, i0, i1, *a, **kw):
+        compute_calls.append(i0)
+        return orig(rd, name, i0, i1, *a, **kw)
+
+    sa.compute_block = spy
+    try:
+        stats = job_b.run(TaskContext(task_id="b"))
+    finally:
+        sa.compute_block = orig
+    assert compute_calls == [0, 18], "second source must recompute ALL bands"
+    assert stats["bands"] == 2
+    # The store now holds B's attribute volume, not a mix of A and B.
+    out = zarr.open(str(dst), mode="r")
+    np.testing.assert_allclose(
+        np.asarray(out[:, :, :]),
+        _full_reference(cube_b),
+        rtol=1e-6,
+        atol=1e-7,
+    )
 
 
 # ------------------------------------------------- #1161 band identity

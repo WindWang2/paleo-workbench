@@ -303,6 +303,23 @@ class DataCatalogService:
         # mid-rebuild / mid-invalidate None window (#619).
         self._maps: _CatalogMaps | None = None
 
+    # -- change tracking ------------------------------------------------------
+
+    @property
+    def mutation_serial(self) -> int:
+        """Monotonic counter advanced by EVERY mutation, batch or not.
+
+        Public read-only contract for revision-keyed caches (freshness
+        dependency graphs, adapter tag maps, lineage summaries):
+        ``catalog_revision`` alone cannot key them because inside
+        :meth:`batch_save` the revision is held until the batch commits
+        (#1139) while the in-memory document has already changed. This
+        serial bumps on every ``_save`` — including saves deferred inside a
+        batch — so a cache keyed on it never serves a pre-mutation view of
+        the document. It never resets; only ever increases.
+        """
+        return self._mutation_serial
+
     # -- maintained indexes -------------------------------------------------
 
     @property
@@ -2262,7 +2279,7 @@ class DataCatalogService:
         batch_save (revision held until commit, #1139) still invalidate.
         """
         with self._lock:
-            revision = (self.document.catalog_revision, self._mutation_serial)
+            revision = (self.document.catalog_revision, self.mutation_serial)
             cache = getattr(self, "_lineage_summary_cache", None)
             cache_rev = getattr(self, "_lineage_summary_cache_rev", None)
             if cache is None or cache_rev != revision:

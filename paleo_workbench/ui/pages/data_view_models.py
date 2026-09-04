@@ -629,9 +629,10 @@ def _integrity_from_version(
 # Module-level tag-map cache (#1173): ``enrich_view_from_catalog`` used to
 # rebuild tag_by_id + version_tag_map (O(tags + associations)) on EVERY call,
 # and the data page calls it per row selection. Keyed on document identity +
-# catalog revision + the service's mutation serial, so any catalog write
-# (including mutations deferred inside batch_save, where the revision is held
-# until commit) invalidates it. The cache holds the document reference alive,
+# catalog revision + the service's mutation serial (public
+# ``DataCatalogService.mutation_serial``), so any catalog write (including
+# mutations deferred inside batch_save, where the revision is held until
+# commit) invalidates it. The cache holds the document reference alive,
 # keeping ``id()`` stable.
 _CATALOG_TAG_MAPS_CACHE: tuple[Any, int, int, dict, dict[str, list[str]]] | None = None
 
@@ -641,7 +642,7 @@ def _catalog_tag_maps(service: Any) -> tuple[dict, dict[str, list[str]]]:
     global _CATALOG_TAG_MAPS_CACHE
     document = service.document
     revision = document.catalog_revision
-    serial = getattr(service, "_mutation_serial", 0)
+    serial = getattr(service, "mutation_serial", 0)
     cache = _CATALOG_TAG_MAPS_CACHE
     if (
         cache is not None

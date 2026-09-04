@@ -18,7 +18,14 @@ _DEFAULT_OUTLIER_THRESHOLD = 3.5
 
 
 def apply_sand_ratio_qc(table: WellTable) -> WellTable:
-    """Mutate rows: fill R_s from H_s/H_t; mark invalid ratios."""
+    """Mutate rows: fill R_s from H_s/H_t; mark invalid ratios.
+
+    R_s is dimensionless. QC conclusions land in ``qc_flag`` / ``b_i`` and the
+    dedicated ``R_s`` column — a missing ``z`` (the metre-valued primary
+    measurement column) is never backfilled from the ratio: writing R_s into
+    z mixed dimensions in one column and poisoned downstream MAD scoring
+    (audit #1151 residual).
+    """
     for row in table.rows:
         ratio, flag = compute_sand_ratio(row.H_s, row.H_t)
         if flag == "invalid_ratio":
@@ -28,9 +35,6 @@ def apply_sand_ratio_qc(table: WellTable) -> WellTable:
             continue
         if ratio is not None:
             row.R_s = ratio
-            # Prefer ratio as primary z when factor is sand-ratio like.
-            if row.z is None:
-                row.z = ratio
     return table
 
 
@@ -96,10 +100,19 @@ def run_well_table_qc(
     table: WellTable,
     *,
     mad_threshold: float = _DEFAULT_OUTLIER_THRESHOLD,
+    value_key: str = "z",
 ) -> WellTable:
-    """Full well-table QC pipeline: sand ratio then MAD on primary z."""
+    """Full well-table QC pipeline: sand ratio then MAD on ONE column.
+
+    *value_key* selects the column the MAD score runs on (audit #1151):
+    pass ``value_key_for_factor_type(table.factor_type)`` when the factor
+    semantics are known, so a sand-ratio table scores ``R_s`` instead of the
+    metre-valued ``z`` (rows lacking the selected column are flagged
+    ``missing`` — never filled from a column of another dimension). Defaults
+    to ``"z"`` for backwards compatibility with unknown-semantics callers.
+    """
     apply_sand_ratio_qc(table)
-    apply_mad_outlier_qc(table, threshold=mad_threshold, value_attr="z")
+    apply_mad_outlier_qc(table, threshold=mad_threshold, value_attr=value_key)
     return table
 
 

@@ -518,20 +518,35 @@ def transcode_segy_to_zarr(
                     except Full:
                         continue
 
+            # Read/open failures from the reader thread land here and are
+            # re-raised by the main thread after the join (see reader()).
+            reader_error: list[BaseException] = []
+
             def reader() -> None:
                 # Handle ownership (#1136): opened here, closed here — the
                 # main thread's ``handles`` list stays reader-free, so its
                 # finally-close can never race this thread's reads.
+                #
+                # read/open failures are recorded in ``reader_error`` and
+                # re-raised by the main thread after the join: the pill the
+                # finally sends lets the writer end "normally", so without
+                # this the failed transcode would return success with an
+                # incomplete store.
                 try:
                     f = segyio.open(str(src), "r", ignore_geometry=False)
-                except Exception:
+                except Exception as exc:
+                    reader_error.append(exc)
                     put_pill()
                     return
                 try:
                     for box in todo:
                         if stopped():
                             return  # slab discarded: unwritten, stays todo
-                        slab = read_slab(box, f)
+                        try:
+                            slab = read_slab(box, f)
+                        except Exception as exc:
+                            reader_error.append(exc)
+                            return
                         enqueued = False
                         while not stopped():
                             try:
@@ -579,6 +594,14 @@ def transcode_segy_to_zarr(
                         "segy-transcode-reader did not exit within 30s after "
                         "stop; leaking one daemon thread (store stays valid)"
                     )
+                if reader_error:
+                    # The reader failed (open or slab read). The pill made the
+                    # writer stop without an error of its own, so surface the
+                    # failure HERE: the partial store stays resumable, but
+                    # this call must not report success.
+                    raise TranscodeError(
+                        f"transcode failed while reading {src}: {reader_error[0]}"
+                    ) from reader_error[0]
     finally:
         stats.elapsed_s = time.perf_counter() - t_start
         for f in handles:

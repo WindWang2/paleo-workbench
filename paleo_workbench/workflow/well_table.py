@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from paleo_workbench.project.models import (
@@ -11,6 +12,8 @@ from paleo_workbench.project.models import (
     WellTableRow,
     _id,
 )
+
+_logger = logging.getLogger(__name__)
 
 # Value-key selection (audit #1151): a WellTableRow carries physically distinct
 # columns — ``z`` (raw measured value), ``H_s``/``H_t`` (metres of thickness),
@@ -192,6 +195,29 @@ def sample_points_from_well_table(
     return points
 
 
+def _merged_factor_type(table: WellTable, task: FactorMapTask) -> str:
+    """Effective factor type for export value-key selection: task first.
+
+    ``attach_well_table_to_factor_task`` used to export with the TABLE's
+    factor type (only falling back to the task's when the table's was empty),
+    while ``sync_well_table_to_linked_tasks`` exported with the TASK's — the
+    same table could round-trip through attach and sync with different value
+    keys, flipping which physical column fed the interpolation. The task owns
+    the factor semantics: when both declare a type and they disagree, warn
+    and run by the task's.
+    """
+    table_type = str(table.factor_type or "").strip()
+    task_type = str(task.factor_type or "").strip()
+    if table_type and task_type and table_type != task_type:
+        _logger.warning(
+            "井表 factor_type=%r 与任务 factor_type=%r 不一致，attach 按任务的 "
+            "值键导出 sample_points",
+            table_type,
+            task_type,
+        )
+    return task_type or table_type
+
+
 def attach_well_table_to_factor_task(
     project: ProjectDocument,
     table: WellTable,
@@ -214,8 +240,10 @@ def attach_well_table_to_factor_task(
 
     task.well_table_id = table.id
     params = dict(task.parameters or {})
+    # Same precedence as sync_well_table_to_linked_tasks: the task's factor
+    # type picks the export value key (warned + task-wins on conflict).
     params["sample_points"] = sample_points_from_well_table(
-        table, value_key=value_key_for_factor_type(table.factor_type)
+        table, value_key=value_key_for_factor_type(_merged_factor_type(table, task))
     )
     params["well_table_id"] = table.id
     task.parameters = params
@@ -266,8 +294,10 @@ def sync_well_table_to_linked_tasks(
         linked = list(project.factor_map_tasks)
     for task in linked:
         params = dict(task.parameters or {})
+        # Same precedence as attach_well_table_to_factor_task: the task's
+        # factor type picks the export value key.
         params["sample_points"] = sample_points_from_well_table(
-            table, value_key=value_key_for_factor_type(task.factor_type)
+            table, value_key=value_key_for_factor_type(_merged_factor_type(table, task))
         )
         task.parameters = params
         task.well_table_id = table.id

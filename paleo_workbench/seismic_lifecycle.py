@@ -21,6 +21,7 @@ Semantics required by #1079 and pinned by tests:
 """
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -99,13 +100,58 @@ def store_work_path(catalog: DataCatalogService, raw_version_id: str) -> Path:
     return artifacts / "working" / "seismic-transcode" / raw_version_id / "store"
 
 
-def _store_matches_fingerprint(store: Path, fingerprint: dict | None) -> bool:
+def _zarr_store_metadata(store: Path) -> dict | None:
+    """Parsed root zarr metadata (``zarr.json`` v3 / ``.zarray`` v2), or None."""
+    for name in ("zarr.json", ".zarray"):
+        meta_path = store / name
+        if meta_path.is_file():
+            try:
+                parsed = json.loads(meta_path.read_text())
+            except Exception:
+                return None
+            return parsed if isinstance(parsed, dict) else None
+    return None
+
+
+def _legacy_store_looks_intact(
+    store: Path, n_files: int, expected_shape: Any
+) -> bool:
+    """Tightened no-fingerprint probe for pre-fingerprint DERIVED stores.
+
+    A fingerprint-less store is no longer trusted just because its directory
+    is non-empty (a stray file or a torn partial write would pass): it must
+    carry real zarr metadata at the store root, and — when an expected shape
+    is known from the run parameters / version metadata — the metadata's
+    recorded shape must match. Anything else falls through to the caller's
+    normal re-queue path.
+    """
+    if n_files <= 0:
+        return False
+    meta = _zarr_store_metadata(store)
+    if meta is None:
+        return False
+    if expected_shape:
+        recorded = meta.get("shape")
+        try:
+            if [int(v) for v in recorded or []] != [
+                int(v) for v in expected_shape
+            ]:
+                return False
+        except (TypeError, ValueError):
+            return False
+    return True
+
+
+def _store_matches_fingerprint(
+    store: Path, fingerprint: dict | None, expected_shape: Any = None
+) -> bool:
     """Structural probe of a registered DERIVED store (#1192).
 
     True when the directory's file count + byte total equal the structural
     fingerprint the catalog recorded at registration. A missing fingerprint
-    (versions registered before fingerprints existed) degrades to "directory
-    exists and is non-empty".
+    (versions registered before fingerprints existed) degrades to the
+    tightened legacy probe (:func:`_legacy_store_looks_intact`): zarr
+    metadata present and shape-consistent — never merely "non-empty".
     """
     if not store.is_dir():
         return False
@@ -116,7 +162,7 @@ def _store_matches_fingerprint(store: Path, fingerprint: dict | None) -> bool:
             n_files += 1
             total += f.stat().st_size
     if not fingerprint:
-        return n_files > 0
+        return _legacy_store_looks_intact(store, n_files, expected_shape)
     return n_files == fingerprint.get("files") and total == fingerprint.get("bytes")
 
 
@@ -364,6 +410,8 @@ class SeismicLifecycleService:
         run's DERIVED output (via output_version_ids / version.run_id) is
         located and probed against its recorded structural fingerprint —
         intact means: mark complete, re-queue nothing, stale nothing.
+        Fingerprint-less legacy versions get the tightened probe (zarr
+        metadata + shape consistency), never a bare "directory non-empty".
         """
         catalog = self._catalog
         known_outputs = set(run.output_version_ids)
@@ -380,8 +428,19 @@ class SeismicLifecycleService:
                 store = Path(catalog.resolve_path(v))
             except Exception:
                 continue
+            # Expected shape: run parameters first (the pin), then the
+            # version metadata recorded at registration (available even in
+            # the #1192 crash window). Absent → shape check is skipped.
+            expected_shape = None
+            params = getattr(run, "parameters", None)
+            if isinstance(params, dict) and params.get("shape"):
+                expected_shape = params["shape"]
+            elif isinstance(v.metadata, dict) and v.metadata.get("shape"):
+                expected_shape = v.metadata["shape"]
             if not _store_matches_fingerprint(
-                store, v.metadata.get("store_fingerprint")
+                store,
+                v.metadata.get("store_fingerprint"),
+                expected_shape=expected_shape,
             ):
                 continue
             self._finish_run(

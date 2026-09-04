@@ -83,11 +83,12 @@ class CoreCatalogAdapter:
         ``_version_ref`` runs once per listed version; rebuilding the map
         there made ``list_versions`` O(versions × tags). The cache invalidates
         on any save (revision bump / serial bump) or document swap (reopen).
-        The mutation serial covers saves deferred inside batch_save, where
-        the revision now stays put until commit (#1139).
+        The mutation serial (public ``DataCatalogService.mutation_serial``)
+        covers saves deferred inside batch_save, where the revision now stays
+        put until commit (#1139).
         """
         document = self._service.document
-        serial = getattr(self._service, "_mutation_serial", None)
+        serial = getattr(self._service, "mutation_serial", 0)
         cache = getattr(self, "_tag_map_cache", None)
         if (
             cache is not None

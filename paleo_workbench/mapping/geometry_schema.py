@@ -153,14 +153,22 @@ def normalize_well(raw: dict[str, Any]) -> dict[str, Any]:
         except (TypeError, ValueError):
             x = y = None
     if x is None or y is None:
-        # Coordinates absent/short/non-numeric: fall back to scalar keys.
-        sx = raw.get("x", raw.get("lng", raw.get("lon")))
-        sy = raw.get("y", raw.get("lat"))
-        if sx is not None and sy is not None:
+        # Coordinates absent/short/non-numeric: fall back to SCALAR keys,
+        # selected as whole CRS-consistent families (pipeline semantics,
+        # audit #1150): (x, y) first, then (lng, lat), then (lon, lat). A
+        # family is used only when BOTH keys are present and numeric — never
+        # cross-paired: `{x, lat}` would mix a projected x with a geographic
+        # latitude and silently pass as OK. An incomplete/unusable family
+        # leaves x/y None and the feature falls through to INVALID below.
+        for x_key, y_key in (("x", "y"), ("lng", "lat"), ("lon", "lat")):
+            sx, sy = raw.get(x_key), raw.get(y_key)
+            if sx is None or sy is None:
+                continue
             try:
                 x, y = float(sx), float(sy)
+                break
             except (TypeError, ValueError):
-                x = y = None
+                continue
     if (
         (x is None or y is None)
         and isinstance(coords, (list, tuple))

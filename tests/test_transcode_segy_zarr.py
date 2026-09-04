@@ -224,6 +224,40 @@ def test_cancel_immediately_returns_cleanly(segy_volume, tmp_path):
     assert _reader_threads_alive() == 0
 
 
+def test_reader_failure_raises_instead_of_silent_success(
+    segy_volume, tmp_path, monkeypatch
+):
+    """A read failure inside the parallel reader thread must surface as an
+    error — the sentinel pill lets the writer end "normally", so without the
+    recorded-and-re-raised exception the incomplete store would be returned
+    as a successful transcode. The partial store stays resumable."""
+    src, cube = segy_volume
+    dst = tmp_path / "store"
+
+    real_collect = segyio.tools.collect
+    calls = {"n": 0}
+
+    def flaky_collect(*args, **kwargs):
+        calls["n"] += 1
+        # Shard 0 (inlines 0-127) reads fine (128 collects); fail early in
+        # shard 1's slab so exactly one shard is durably written first.
+        if calls["n"] > 140:
+            raise OSError("simulated read failure")
+        return real_collect(*args, **kwargs)
+
+    monkeypatch.setattr(segyio.tools, "collect", flaky_collect)
+    with pytest.raises(TranscodeError, match="simulated read failure"):
+        transcode_segy_to_zarr(src, dst, workers=2)
+    monkeypatch.undo()
+    assert _reader_threads_alive() == 0
+
+    # The partial store is resumable: rerun without the failure completes it.
+    result = transcode_segy_to_zarr(src, dst)
+    assert result.stats.shards_skipped >= 1
+    arr = zarr.open(str(dst), mode="r")
+    np.testing.assert_array_equal(np.asarray(arr[:, :, :]), cube)
+
+
 # ------------------------------------------------- #1141 source identity
 
 

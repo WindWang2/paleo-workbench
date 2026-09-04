@@ -282,3 +282,134 @@ def test_resume_pending_requeues_when_derived_store_corrupt(imported_raw, sched)
     job = life.job_for(raw.id)
     assert job is not None
     assert _wait_done(job.handle) == TaskState.DONE
+
+
+# ---------------------------------------- legacy (fingerprint-less) tightening
+
+
+def test_resume_pending_completes_legacy_no_fingerprint_real_store(
+    imported_raw, sched
+):
+    """Legacy DERIVED with NO fingerprint but a REAL zarr store (metadata
+    present, shape consistent) still completes in place — the tightened
+    legacy probe checks zarr structure, not just emptiness."""
+    svc, raw, cube = imported_raw
+    from paleo_workbench.seismic_transcode import transcode_segy_to_zarr
+
+    src = Path(svc.resolve_path(svc.get_version(raw.id)))
+    work = store_work_path(svc, raw.id)
+    transcode_segy_to_zarr(src, work, params=PARAMS, workers=1)
+    run = svc.register_run(
+        "segy-to-zarr",
+        input_version_ids=[raw.id],
+        generator="paleo_workbench.seismic_lifecycle",
+        status="running",
+    )
+    derived = svc.register_derived_store(
+        name="legacy seismic store",
+        store_path=work,
+        run_id=run.id,
+        parent_version_ids=[raw.id],
+        type="seismic",
+        format="zarr-v3",
+        version_metadata={"shape": [NIL, NXL, NT]},  # matches the real store
+    )
+    # strip the fingerprint: this version predates fingerprint registration
+    svc.get_version(derived.id).metadata.pop("store_fingerprint", None)
+    svc._save()
+
+    life = SeismicLifecycleService(svc, scheduler=sched)
+    assert life.resume_pending() == 1
+    assert svc.get_run(run.id).status.lower() == "complete"  # in place
+    assert life.job_for(raw.id) is None  # nothing re-queued
+    fresh = svc.get_version(derived.id)
+    assert not fresh.metadata.get("stale")
+    vol = open_volume(Path(svc.resolve_path(fresh)))
+    np.testing.assert_allclose(vol.read_inline(1), cube[0], atol=1e-6)
+
+
+def test_resume_pending_requeues_legacy_store_without_zarr_metadata(
+    imported_raw, sched, tmp_path
+):
+    """Tightened legacy probe: a fingerprint-less DERIVED whose directory is
+    EMPTY or holds only a stray file (no zarr metadata) is NOT intact — the
+    run must fall through to the normal re-queue path instead of being
+    completed in place on top of a non-store directory."""
+    svc, raw, _ = imported_raw
+
+    # Case 1: empty directory
+    empty = tmp_path / "legacy_empty"
+    empty.mkdir()
+    run1 = svc.register_run(
+        "segy-to-zarr", input_version_ids=[raw.id], status="running"
+    )
+    d1 = svc.register_derived_store(
+        name="legacy empty",
+        store_path=empty,
+        run_id=run1.id,
+        parent_version_ids=[raw.id],
+        type="seismic",
+        format="zarr-v3",
+    )
+    svc.get_version(d1.id).metadata.pop("store_fingerprint", None)
+
+    # Case 2: one stray file, no zarr.json / .zarray
+    stray = tmp_path / "legacy_stray"
+    stray.mkdir()
+    (stray / "garbage.bin").write_bytes(b"not a zarr store")
+    run2 = svc.register_run(
+        "segy-to-zarr", input_version_ids=[raw.id], status="running"
+    )
+    d2 = svc.register_derived_store(
+        name="legacy stray",
+        store_path=stray,
+        run_id=run2.id,
+        parent_version_ids=[raw.id],
+        type="seismic",
+        format="zarr-v3",
+    )
+    svc.get_version(d2.id).metadata.pop("store_fingerprint", None)
+    svc._save()
+
+    life = SeismicLifecycleService(svc, scheduler=sched)
+    assert life.resume_pending() == 2
+    # neither run completed in place: both re-queued (cancelled + new job)
+    assert svc.get_run(run1.id).status.lower() == "cancelled"
+    assert svc.get_run(run2.id).status.lower() == "cancelled"
+    job = life.job_for(raw.id)
+    assert job is not None
+    assert _wait_done(job.handle) == TaskState.DONE
+
+
+def test_resume_pending_requeues_legacy_store_shape_mismatch(
+    imported_raw, sched
+):
+    """Tightened legacy probe: zarr metadata present but its shape disagrees
+    with the version's recorded shape → not intact, re-queue."""
+    svc, raw, _ = imported_raw
+    from paleo_workbench.seismic_transcode import transcode_segy_to_zarr
+
+    src = Path(svc.resolve_path(svc.get_version(raw.id)))
+    work = store_work_path(svc, raw.id)
+    transcode_segy_to_zarr(src, work, params=PARAMS, workers=1)
+    run = svc.register_run(
+        "segy-to-zarr", input_version_ids=[raw.id], status="running"
+    )
+    derived = svc.register_derived_store(
+        name="wrong shape legacy",
+        store_path=work,
+        run_id=run.id,
+        parent_version_ids=[raw.id],
+        type="seismic",
+        format="zarr-v3",
+        version_metadata={"shape": [999, 1, 1]},  # disagrees with the store
+    )
+    svc.get_version(derived.id).metadata.pop("store_fingerprint", None)
+    svc._save()
+
+    life = SeismicLifecycleService(svc, scheduler=sched)
+    assert life.resume_pending() == 1
+    assert svc.get_run(run.id).status.lower() == "cancelled"
+    job = life.job_for(raw.id)
+    assert job is not None
+    assert _wait_done(job.handle) == TaskState.DONE

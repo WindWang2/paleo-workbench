@@ -67,6 +67,58 @@ def test_attach_well_table_syncs_factor_task():
     assert task.parameters["well_table_id"] == table.id
 
 
+def test_attach_task_factor_type_wins_over_table(caplog):
+    """attach/sync value-key consistency: a table typed A attached to a task
+    typed B exports with B's value key (task owns the factor semantics),
+    warns about the conflict, and sync afterwards exports identically."""
+    import logging as _logging
+
+    from paleo_workbench.workflow.well_table import sync_well_table_to_linked_tasks
+
+    project = ProjectDocument.new("P")
+    task = FactorMapTask(
+        name="砂地比",
+        target_horizon="C6",
+        factor_type="砂地比",  # B → R_s value key
+        method="IDW",
+    )
+    project.factor_map_tasks.append(task)
+    # Table typed A (砂岩厚度 → H_s value key) carrying BOTH quantities.
+    table = well_table_from_sample_points(
+        [{"well": "W1", "x": 1, "y": 2, "H_s": 3.0, "sand_ratio": 0.4}],
+        name="wells",
+        factor_type="砂岩厚度",  # A
+    )
+    with caplog.at_level(_logging.WARNING, logger="paleo_workbench.workflow.well_table"):
+        attach_well_table_to_factor_task(project, table, task)
+    # Task's factor type (B=砂地比) picked the export value key: R_s, not H_s.
+    assert task.parameters["sample_points"][0]["value"] == 0.4
+    assert any("不一致" in r.message for r in caplog.records)
+
+    # sync (same table, same task) must export the same value key — no flip.
+    sync_well_table_to_linked_tasks(project, table)
+    assert task.parameters["sample_points"][0]["value"] == 0.4
+
+
+def test_attach_table_factor_type_used_when_task_has_none():
+    """No task factor type → the table's own type picks the value key."""
+    project = ProjectDocument.new("P")
+    task = FactorMapTask(
+        name="厚度",
+        target_horizon="C6",
+        factor_type="",
+        method="IDW",
+    )
+    project.factor_map_tasks.append(task)
+    table = well_table_from_sample_points(
+        [{"well": "W1", "x": 1, "y": 2, "H_s": 3.0, "sand_ratio": 0.4}],
+        name="wells",
+        factor_type="砂岩厚度",  # H_s value key
+    )
+    attach_well_table_to_factor_task(project, table, task)
+    assert task.parameters["sample_points"][0]["value"] == 3.0
+
+
 def test_well_table_from_factor_task():
     task = FactorMapTask(
         name="厚度",
@@ -132,14 +184,52 @@ def test_run_well_table_qc_sand_ratio_then_mad():
             {"well": "BAD", "x": 3, "y": 0, "H_s": 20, "H_t": 10},
         ]
     )
-    run_well_table_qc(table)
+    # Sand-ratio table: MAD must score R_s, not the (absent) metre-valued z.
+    run_well_table_qc(table, value_key="R_s")
     by_name = {r.name: r for r in table.rows}
     assert by_name["A"].R_s == 0.3
-    assert by_name["A"].z == 0.3
+    # #1151 residual fix: R_s is NEVER written into the z column — rows that
+    # arrived without a measured z keep z=None instead of a dimensionless mix.
+    assert by_name["A"].z is None
     assert by_name["BAD"].qc_flag == "invalid_ratio"
     summary = qc_summary(table)
     assert summary["invalid_ratio"] == 1
     assert summary["total"] == 4
+
+
+def test_sand_ratio_qc_never_backfills_z():
+    """Rows with z=None but valid H_s/H_t get R_s + QC verdicts, z stays None."""
+    table = well_table_from_sample_points(
+        [
+            {"well": "A", "x": 0, "y": 0, "H_s": 3, "H_t": 10},
+            {"well": "B", "x": 1, "y": 0, "H_s": 4, "H_t": 10},
+        ]
+    )
+    assert all(r.z is None for r in table.rows)
+    run_well_table_qc(table, value_key="R_s")
+    assert all(r.z is None for r in table.rows)  # dimension untouched
+    assert [r.R_s for r in table.rows] == [0.3, 0.4]
+    assert all(r.qc_flag == "ok" for r in table.rows)
+
+
+def test_run_well_table_qc_default_value_key_is_z():
+    """Back-compat: no value_key → MAD scores z; a z-less table flags missing."""
+    table = well_table_from_sample_points(
+        [
+            {"well": "A", "x": 0, "y": 0, "value": 10.0},
+            {"well": "B", "x": 1, "y": 0, "value": 10.1},
+            {"well": "C", "x": 2, "y": 0, "H_s": 3, "H_t": 10},  # z absent
+        ]
+    )
+    run_well_table_qc(table)
+    by_name = {r.name: r for r in table.rows}
+    assert by_name["A"].qc_flag == "ok"
+    assert by_name["B"].qc_flag == "ok"
+    # Row C has no z; the old code backfilled it with R_s=0.3 and scored that
+    # against metre values. Now it is honestly "missing" and z stays None.
+    assert by_name["C"].qc_flag == "missing"
+    assert by_name["C"].z is None
+    assert by_name["C"].R_s == 0.3
 
 
 def test_modified_z_score_formula():

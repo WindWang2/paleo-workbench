@@ -293,3 +293,66 @@ def test_reads_during_batch_see_in_batch_writes(service, tmp_path):
         assert [a.id for a in found] == [v.asset_id]
         tagged = service.find_versions_by_tag("mid-batch-tag")
         assert tagged == [v.id]
+
+
+def test_revision_keyed_caches_invalidate_mid_batch(
+    service: DataCatalogService, catalog: CoreCatalogAdapter, tmp_path
+):
+    """Freshness graph / tag map / lineage summaries must reflect in-batch
+    mutations immediately (#1139 follow-up).
+
+    Inside ``batch_save`` the catalog revision is held until commit, so these
+    revision-keyed caches must also key on the public
+    ``DataCatalogService.mutation_serial`` — otherwise a mid-batch freshness
+    query would reuse a pre-mutation dependency graph (missing runs/edges →
+    wrong STALE/lineage verdicts) and tag/lineage lookups would serve stale
+    maps until commit.
+    """
+    from paleo_workbench.workflow.freshness import (
+        FreshnessService,
+        clear_dependency_graph_cache,
+    )
+
+    a = service.import_raw(_make_source(tmp_path, "a.las", b"a"))
+    b = service.import_raw(_make_source(tmp_path, "b.las", b"b"))
+
+    # Warm every cache on the pre-batch state.
+    clear_dependency_graph_cache()
+    try:
+        svc0 = FreshnessService.for_project(catalog=catalog)
+        assert set(svc0.graph.runs) == set()
+        assert "mid-batch" not in {t.name for t in catalog._tag_by_id().values()}
+        summaries0 = service.lineage_summaries()
+        assert summaries0[b.id]["has_parents"] is False
+
+        before_rev = service.document.catalog_revision
+        before_serial = service.mutation_serial
+        assert service.mutation_serial == service._mutation_serial  # public view
+
+        with service.batch_save():
+            service.add_tag("mid-batch", version_id=a.id)
+            run = service.register_run("qc", input_version_ids=[a.id])
+            catalog.attach_lineage(
+                source_version_id=a.id, target_version_id=b.id
+            )
+
+            # Revision held until commit (#1139) — only the serial moved.
+            assert service.document.catalog_revision == before_rev
+            assert service.mutation_serial > before_serial
+
+            # Freshness graph rebuilt mid-batch: the new run is visible NOW.
+            svc1 = FreshnessService.for_project(catalog=catalog)
+            assert svc1.graph is not svc0.graph
+            assert set(svc1.graph.runs) == {run.id}
+
+            # Adapter tag map reflects the in-batch tag (public path).
+            listed = catalog.list_versions()
+            tagged = next(v for v in listed if v.version_id == a.id)
+            assert "mid-batch" in tagged.tags
+
+            # Lineage summaries recompute: b gained parent a mid-batch.
+            summaries1 = service.lineage_summaries()
+            assert summaries1[b.id]["has_parents"] is True
+            assert summaries1 is not summaries0
+    finally:
+        clear_dependency_graph_cache()

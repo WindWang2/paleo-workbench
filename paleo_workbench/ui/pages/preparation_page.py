@@ -32,6 +32,7 @@ from paleo_workbench.workflow.well_table import (
     attach_well_table_to_factor_task,
     sample_points_from_well_table,
     sync_well_table_to_linked_tasks,
+    value_key_for_factor_type,
     well_table_from_factor_task,
 )
 
@@ -185,7 +186,11 @@ class PreparationPage(QWidget):
         if table is None or not table.rows:
             QMessageBox.information(self, "井点 QC", "没有可检测的井点数据。")
             return
-        run_well_table_qc(table)
+        # Score the column matching the table's factor semantics (#1151):
+        # a 砂地比 table MAD-scores R_s, not the metre-valued z.
+        run_well_table_qc(
+            table, value_key=value_key_for_factor_type(table.factor_type)
+        )
         # Keep first table in project
         if not self._project.well_tables:
             self._project.well_tables.append(table)
