@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
 from PySide6.QtCore import QObject, Signal
+from shiboken6 import isValid as _cpp_alive
 
 from paleo_workbench.mapping.geometry_schema import new_feature_id
 from paleo_workbench.mapping.map_interaction import SnappingService
@@ -855,7 +856,9 @@ class CompositeEditController(QObject):
                     return
         self._active_tool_action = action_id
         self.tools.set_active_tool(tool)
-        if canvas is not None:
+        # teardown 竞态：Qt 子对象析构序可能先删画布，树/面板的队列回调随后
+        # 才触发 activate_tool——画布 C++ 体已亡时跳过 setFocus。
+        if canvas is not None and _cpp_alive(canvas):
             canvas.setFocus()
         self.state_changed.emit()
 
