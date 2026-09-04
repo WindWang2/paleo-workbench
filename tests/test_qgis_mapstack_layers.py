@@ -38,7 +38,17 @@ def test_add_mirror_render_remove(qtbot, stack):
     stack.set_destination_crs(host.canvas_address, "EPSG:4326")
     stack.set_canvas_extent(host.canvas_address, 0.0, 0.0, 10.0, 10.0)
     stack.refresh_canvas(host.canvas_address)
-    qtbot.waitUntil(lambda: True, timeout=100)  # 让事件循环驱动一帧
+    # #1156：refresh 异步化（不再内嵌 waitWhileRendering+processEvents 事件泵）。
+    # is_canvas_rendering 在 job 真正启动前可能瞬时为 False，轮询契约本身
+    # （中心点像素非白）最稳。
+    from PySide6.QtGui import QImage
+
+    def _center_paints() -> bool:
+        img = host.canvas.grab().toImage()
+        color = img.pixelColor(320, 240)
+        return (color.red(), color.green(), color.blue()) != (255, 255, 255)
+
+    qtbot.waitUntil(_center_paints, timeout=8000)
 
     # 中心点要素已渲染：画布中央像素不是纯白。
     from PySide6.QtGui import QImage
