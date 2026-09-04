@@ -70,6 +70,14 @@ _Avoid_: 在 GUI 线程为 10 万资产逐行物化视图；对已取回前缀�
 Every cartographic component (`mapping/composer/`) is creatable, deletable, movable, scalable, configurable, serializable, copyable, z-orderable, and undoable through one `CompositionEditSession` (command pattern, monotonic revision). Elements include MAIN_MAP/LEGEND/NORTH_ARROW/SCALE_BAR/GRID/TITLE/ANNOTATION/TIMESCALE/TEXT/IMAGE/INSET_MAP/STAT_CHART/METADATA/COLORBAR. Serialization round-trips deterministically (schema_version 2); unknown future element types survive as carriers. Templates are layout + component definitions + style bindings + data bindings — never bitmaps; `bind_template` resolves declarative bindings (e.g. `factor.colorbar`) against host context. Export: PNG/SVG/PDF share one physical-size contract (mm paper + DPI fold).
 _Avoid_: 位图模板；第二套组图编辑历史；绕过 RenderContext 的 DPI 换算
 
+### 编图
+The workstation's central QGIS map canvas (`CompositeDocument` + `QgisCanvasShim`). Geological map compilation (digitize, symbology, layer tree) happens here; this surface is never replaced by another document tab.
+_Avoid_: 综合编修 as the UI name; treating `MappingPage` as the workstation center
+
+### 成图排版
+Cartographic layout of map furniture (`MappingPage` / `MapEditView`: legend, scale bar, neatline). A Hub page opened as a dock, not the central 编图.
+_Avoid_: calling this 编图 in the workstation shell
+
 ### Horizon Interpretation Picking
 `HorizonInterpretationDraft.set_picks` writes picked Z values as ONE undoable sparse patch (`viz/picking_controller.py` line-interpolates consecutive picks so sections leave no node gaps); `SurveyGridGeometry` maps survey numbering to grid indices and rejects between-node picks. A fresh draft is NaN everywhere — "not interpreted" is a value, not zero.
 _Avoid_: 拾取点静默丢弃或吸附到非节点；以 0 冒充未解释
