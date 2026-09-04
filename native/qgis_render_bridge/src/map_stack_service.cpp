@@ -584,45 +584,9 @@ void QgisMapStack::eraseMirrorByDocId(const std::string& doc_id) {
 QgisMapStack::QgisMapStack() : impl_(std::make_unique<Impl>()) {}
 QgisMapStack::~QgisMapStack() {
   if (!impl_) return;
-  for (auto& kv : impl_->extent_connections) {
-    QObject::disconnect(kv.second);
-  }
-  impl_->extent_connections.clear();
-  for (auto& kv : impl_->xy_connections) {
-    QObject::disconnect(kv.second);
-  }
-  impl_->xy_connections.clear();
-  for (auto& kv : impl_->tree_sel_connections) {
-    QObject::disconnect(kv.second);
-  }
-  impl_->tree_sel_connections.clear();
-  impl_->tree_sel_callbacks.clear();
-  for (auto& kv : impl_->tree_change_connections) {
-    for (const auto& conn : kv.second) QObject::disconnect(conn);
-  }
-  impl_->tree_change_connections.clear();
-  impl_->tree_change_callbacks.clear();
-  impl_->tree_pending.clear();
-  impl_->tree_flush_scheduled.clear();
-  impl_->known_layer_names.clear();
-  impl_->known_layer_visibility.clear();
-  impl_->tree_views.clear();
-  impl_->tree_models.clear();
-  impl_->tree_canvas.clear();
-  impl_->tree_menu_callbacks.clear();
-  impl_->orphan_tree_callbacks.clear();
-  impl_->orphan_tree_menu_callbacks.clear();
-  for (auto& kv : impl_->tools) {
-    auto it = impl_->canvas_refs.find(kv.first);
-    bool canvasAlive = (it != impl_->canvas_refs.end() && !it->second.isNull());
-    if (canvasAlive && kv.second) {
-      QgsMapCanvas* c = it->second;
-      if (c && c->mapTool() == kv.second.get()) {
-        c->unsetMapTool(kv.second.get());
-      }
-    }
-    if (kv.second) kv.second.release();
-  }
+  // Idempotent. Display path detaches canvases then drops owned_project so
+  // QgsMapCanvas::mProject cannot dangle; never instance()->removeAllMapLayers().
+  shutdown();
 }
 
 QgsProject* QgisMapStack::project() const {
