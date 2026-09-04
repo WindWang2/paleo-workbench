@@ -234,7 +234,7 @@ class WorkstationExplorer(QFrame):
         self.footer_label.setText(f"{count} 个项目数据对象；存储缓存默认隐藏")
 
     def _build_layers(self) -> None:
-        root = self._item("井震联合剖面: A12 - D63", {"kind": "document"})
+        root = self._item("解释图层", {"kind": "document"})
         self.model.appendRow(root)
         layers = (
             ("D63 层位解释", "horizon", True),
