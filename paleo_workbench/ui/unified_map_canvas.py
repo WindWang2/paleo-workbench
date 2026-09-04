@@ -380,6 +380,34 @@ class UnifiedMapCanvas(QWidget):
         tool = self._tool_controller.active_tool if self._tool_controller is not None else None
         return bool(getattr(tool, "edits_data", False))
 
+    @staticmethod
+    def _sanitize_extent(
+        extent: tuple[float, float, float, float],
+    ) -> tuple[float, float, float, float]:
+        """#1166: 有限性 + 零跨度防护。
+
+        单点要素的 extent（如 _feature_extent）两轴跨度为 0，原样接受后
+        map_to_screen/screen_to_map 除零；非有限坐标（上游 NaN 混入）直通
+        渲染层。退化轴按另一轴 1%（下限 1e-9）撑开，非有限值抛
+        ValueError。
+        """
+        xmin, ymin, xmax, ymax = (float(v) for v in extent)
+        if not all(math.isfinite(v) for v in (xmin, ymin, xmax, ymax)):
+            raise ValueError("extent coordinates must be finite")
+        if xmax < xmin:
+            xmin, xmax = xmax, xmin
+        if ymax < ymin:
+            ymin, ymax = ymax, ymin
+        pad_x = max((ymax - ymin) * 0.01, 1e-9)
+        pad_y = max((xmax - xmin) * 0.01, 1e-9)
+        if xmax - xmin < 1e-12:
+            cx = (xmin + xmax) / 2.0
+            xmin, xmax = cx - pad_x / 2.0, cx + pad_x / 2.0
+        if ymax - ymin < 1e-12:
+            cy = (ymin + ymax) / 2.0
+            ymin, ymax = cy - pad_y / 2.0, cy + pad_y / 2.0
+        return (xmin, ymin, xmax, ymax)
+
     def _fitted_extent(self) -> tuple[float, float, float, float]:
         """View extent letterboxed to the widget aspect (#522): uniform
         units-per-pixel so shapes keep their proportions at any size."""
@@ -402,17 +430,21 @@ class UnifiedMapCanvas(QWidget):
 
     def map_to_screen(self, point: tuple[float, float]) -> QPointF:
         xmin, ymin, xmax, ymax = self._fitted_extent()
+        # #1166: 防退化除零（set_extent 已消毒，这里兜底外部直改的 extent）。
+        span_x = max(xmax - xmin, 1e-12)
+        span_y = max(ymax - ymin, 1e-12)
         return QPointF(
-            (float(point[0]) - xmin) * self.width() / (xmax - xmin),
-            (ymax - float(point[1])) * self.height() / (ymax - ymin),
+            (float(point[0]) - xmin) * self.width() / span_x,
+            (ymax - float(point[1])) * self.height() / span_y,
         )
 
     def set_extent(
         self, extent: tuple[float, float, float, float], *, record_history: bool = True,
         coalesce_history: bool = False,
     ) -> None:
-        self._backend.set_extent(extent)
-        self._view_extent = tuple(float(value) for value in extent)
+        sanitized = self._sanitize_extent(extent)
+        self._backend.set_extent(sanitized)
+        self._view_extent = sanitized
         if record_history:
             if self._extent_history_index < len(self._extent_history) - 1:
                 self._extent_history = self._extent_history[: self._extent_history_index + 1]
@@ -434,8 +466,9 @@ class UnifiedMapCanvas(QWidget):
         self, factor: float, center: tuple[float, float] | None = None, *,
         coalesce_history: bool = False,
     ) -> None:
-        if factor <= 0.0:
-            raise ValueError("zoom factor must be positive")
+        factor = float(factor)
+        if not math.isfinite(factor) or factor <= 0.0:
+            raise ValueError("zoom factor must be finite and positive")
         xmin, ymin, xmax, ymax = self._view_extent
         cx, cy = center or ((xmin + xmax) / 2.0, (ymin + ymax) / 2.0)
         if not self._image.isNull():

@@ -162,7 +162,9 @@ class WorkAreaMapWidget(QWidget):
             click_screen = self.map_canvas.map_to_screen(
                 (float(point[0]), float(point[1]))
             )
-        except (TypeError, ValueError, IndexError):
+        except (TypeError, ValueError, IndexError, ArithmeticError):
+            # ArithmeticError 含 ZeroDivisionError（#1166：退化 extent 曾经
+            # 从这条缝漏出去炸掉点击处理）。
             return
         best_id = ""
         best_dist = _WELL_PICK_RADIUS_PX

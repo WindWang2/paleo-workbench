@@ -186,7 +186,9 @@ class QgisDisplayCanvas(QWidget):
             return
         self._snapshot = snapshot
         self._backend._snapshot = snapshot
-        mirror_snapshot_to_stack(self.stack, self.canvas_address, snapshot)
+        _, _, failures = mirror_snapshot_to_stack(
+            self.stack, self.canvas_address, snapshot)
+        self._mirror_failures = list(failures)
         self._overlay.update()
         self.backend_status_changed.emit(self.backend_status)
 

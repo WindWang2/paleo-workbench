@@ -8,13 +8,24 @@ _GEOMETRY_TYPE = {"Point": "Point", "MultiPoint": "Point",
                   "Polygon": "Polygon", "MultiPolygon": "Polygon"}
 
 
-def mirror_snapshot_to_stack(stack, canvas_address, snapshot) -> tuple[list[str], list[str]]:
-    """Returns (mirrored_qgis_ids, seen_doc_ids)."""
+def mirror_snapshot_to_stack(
+    stack, canvas_address, snapshot
+) -> tuple[list[str], list[str], list[str]]:
+    """Mirror vector layers into the QGIS project (incremental reconcile).
+
+    Returns ``(mirrored_qgis_ids, seen_doc_ids, failures)``.
+
+    #1164: failures are collected and surfaced to the host instead of being
+    swallowed — a dropped layer or a failed remove/order/refresh previously
+    left the mirror silently diverging from the document while
+    ``backend_status_changed`` still reported a healthy backend.
+    """
+    failures: list[str] = []
     if snapshot.project_crs:
         try:
             stack.set_destination_crs(canvas_address, str(snapshot.project_crs))
-        except Exception:
-            pass
+        except Exception as exc:
+            failures.append(f"crs {snapshot.project_crs}: {exc}")
     seen: list[str] = []
     mirrored_qgis_ids: list[str] = []
     for layer in snapshot.layers:
@@ -86,13 +97,20 @@ def mirror_snapshot_to_stack(stack, canvas_address, snapshot) -> tuple[list[str]
                 msg = str(exc).lower()
                 if "renderer" in msg or "labeling" in msg or "invalid" in msg:
                     raise
+            failures.append(f"layer {layer.id}: {exc}")
             continue
         seen.append(layer.id)
         mirrored_qgis_ids.append(qgis_id)
     try:
         stack.remove_mirror_layers_except(seen)
+    except Exception as exc:
+        failures.append(f"remove_stale: {exc}")
+    try:
         stack.set_mirror_layer_order(seen)
+    except Exception as exc:
+        failures.append(f"set_order: {exc}")
+    try:
         stack.refresh_canvas(canvas_address)
-    except Exception:
-        pass
-    return mirrored_qgis_ids, seen
+    except Exception as exc:
+        failures.append(f"refresh: {exc}")
+    return mirrored_qgis_ids, seen, failures

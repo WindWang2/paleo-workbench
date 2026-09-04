@@ -6,6 +6,7 @@ tool_operation(False) 发出（与 UnifiedMapCanvas 的鼠标/键盘路径语义
 from __future__ import annotations
 
 import json
+import math
 import sys
 import weakref
 
@@ -65,6 +66,7 @@ class QgisCanvasShim(QWidget):
         self._overlay_provider = None
         self._mirrored_layers: list[str] = []
         self._mirrored_doc_ids: list[str] = []
+        self._mirror_failures: list[str] = []
         self._shutdown_done = False
         self._tool_controller = None
         self._pending_programmatic = 0
@@ -192,6 +194,9 @@ class QgisCanvasShim(QWidget):
     # --- 状态与几何 ---------------------------------------------------
     @property
     def backend_status(self) -> str:
+        failures = getattr(self, "_mirror_failures", None) or []
+        if failures:
+            return f"qgis: degraded ({len(failures)} mirror failures)"
         return "qgis: ready"
 
     @property
@@ -275,8 +280,11 @@ class QgisCanvasShim(QWidget):
         return True
 
     def zoom_by(self, factor: float, center: tuple[float, float] | None = None, *, coalesce_history: bool = False) -> None:
-        if factor <= 0.0:
-            raise ValueError("zoom factor must be positive")
+        # #1165: inf/NaN 会在 set_extent 生成非有限坐标直通 C++（现在
+        # setCanvasExtent 也会拒绝，这里是第一道入口守卫）。
+        factor = float(factor)
+        if not math.isfinite(factor) or factor <= 0.0:
+            raise ValueError("zoom factor must be finite and positive")
         xmin, ymin, xmax, ymax = self.view_extent
         cx, cy = center if center is not None else ((xmin + xmax) / 2.0, (ymin + ymax) / 2.0)
         cx = float(cx); cy = float(cy)
@@ -583,8 +591,11 @@ class QgisCanvasShim(QWidget):
         """
         if getattr(self, "_shutdown_done", False):
             return
-        mirrored_qgis_ids, seen = mirror_snapshot_to_stack(
+        mirrored_qgis_ids, seen, failures = mirror_snapshot_to_stack(
             self.stack, self.canvas_address, snapshot)
+        # #1164: 镜像失败（非法 CRS/坏 GeoJSON/删除排序刷新失败）进入公开
+        # 诊断列表并反映到 backend_status，宿主可感知镜层与文档失同步。
+        self._mirror_failures = list(failures)
         try:
             # _mirrored_layers 保持 M1 语义：存 QGIS layer id；doc id 另存
             # _mirrored_doc_ids（reconcile 后两者一一对应，顺序同 snapshot）。
@@ -641,11 +652,7 @@ class QgisCanvasShim(QWidget):
         self.shutdown()
         super().closeEvent(event)
 
-    def update(self) -> None:  # noqa: A003 — Qt 契约
-        super().update()
-        if getattr(self, "_shutdown_done", False):
-            return
-        try:
-            self.stack.refresh_canvas(self.canvas_address)
-        except Exception:
-            pass
+    # #1156: QWidget.update() 的旧重载把任意宿主重绘都升级成一次全量
+    # refresh_canvas（此前还含同步渲染等待 + 事件泵，可在 C++ 栈深处重入
+    # Python/销毁路径）。刷新只发生在显式的快照/extent 变更点；普通重绘
+    # 就是普通重绘，删除本重载。
