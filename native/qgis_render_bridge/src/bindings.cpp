@@ -565,6 +565,7 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
         .def("zoom_to_previous_extent", &pwb::qgis_render::QgisMapStack::zoomToPreviousExtent)
         .def("zoom_to_next_extent", &pwb::qgis_render::QgisMapStack::zoomToNextExtent)
         .def("refresh_canvas", &pwb::qgis_render::QgisMapStack::refreshCanvas)
+        .def("is_canvas_rendering", &pwb::qgis_render::QgisMapStack::isCanvasRendering)
         .def("screen_to_map", &pwb::qgis_render::QgisMapStack::screenToMap)
         .def("map_to_screen", &pwb::qgis_render::QgisMapStack::mapToScreen)
         .def("add_vector_layer_geojson",

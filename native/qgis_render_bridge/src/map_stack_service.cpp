@@ -1,6 +1,7 @@
 #include "map_stack_service.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
@@ -61,6 +62,7 @@
 #include <qgssnappingconfig.h>
 #include <qgssnappingutils.h>
 #include <qgsvectorlayer.h>
+#include <qgswkbtypes.h>
 #include <qgsvectorlayerlabeling.h>
 #include <qgsvectorlayerproperties.h>
 
@@ -75,6 +77,10 @@ namespace pwb::qgis_render {
 #endif
 extern const std::string PALEO_QGIS_PREFIX_PATH;
 extern std::mutex g_qgis_lifecycle_mutex;
+// #1155: process-level "initQgis ran exactly once" flag owned by
+// qgis_render_bridge.cpp; QGIS 4.2 is not safely re-initializable, so every
+// initialization path must share this guard.
+extern bool g_qgis_initialized;
 
 namespace {
 
@@ -610,10 +616,16 @@ void QgisMapStack::initialize(bool display) {
     throw std::runtime_error("vendored QGIS prefix is not configured");
   }
   std::lock_guard<std::mutex> lock(g_qgis_lifecycle_mutex);
-  QgsApplication::setPrefixPath(
-      QString::fromStdString(PALEO_QGIS_PREFIX_PATH), true);
-  QgsApplication::init();
-  QgsApplication::initQgis();
+  // #1155: only QgisRenderBridge::initialize carried the process-level guard;
+  // per-instance unconditional init()/initQgis() re-entered QGIS when a
+  // QgisRenderBridge (unified canvas) already initialized it.
+  if (!g_qgis_initialized) {
+    QgsApplication::setPrefixPath(
+        QString::fromStdString(PALEO_QGIS_PREFIX_PATH), true);
+    QgsApplication::init();
+    QgsApplication::initQgis();
+    g_qgis_initialized = true;
+  }
   if (display) {
     impl_->owned_project = std::make_unique<QgsProject>();
     impl_->display_mode = true;
@@ -924,6 +936,14 @@ void QgisMapStack::setDestinationCrs(std::uintptr_t canvas, const std::string& c
 
 void QgisMapStack::setCanvasExtent(std::uintptr_t canvas, double xmin, double ymin,
                                    double xmax, double ymax) {
+  // #1165: NaN/inf extents (e.g. zoom_by(inf) on the Python side) went
+  // straight into QgsRectangle and poisoned every derived transform; reject
+  // them like the render-bridge path does with normalized_extent.
+  const bool finite = std::isfinite(xmin) && std::isfinite(ymin)
+      && std::isfinite(xmax) && std::isfinite(ymax);
+  if (!finite || xmax < xmin || ymax < ymin) {
+    throw std::invalid_argument("canvas extent must be finite and ordered");
+  }
   canvasOrThrow(canvas)->setExtent(QgsRectangle(xmin, ymin, xmax, ymax));
 }
 
@@ -942,13 +962,21 @@ void QgisMapStack::zoomToNextExtent(std::uintptr_t canvas) {
   canvasOrThrow(canvas)->zoomToNextExtent();
 }
 void QgisMapStack::refreshCanvas(std::uintptr_t canvas) {
+  // #1156: refresh() starts the canvas's normal asynchronous render. The
+  // previous waitWhileRendering()+processEvents() pair ran a nested event
+  // pump deep inside the C++ call stack: extentsChanged re-entered Python
+  // callbacks, and window destruction re-entered shutdown()/destroy_canvas()
+  // on the same QgisMapStack mid-refresh. Callers that need a finished frame
+  // pump the (outer) event loop or poll isCanvasRendering.
   QgsMapCanvas* c = canvasOrThrow(canvas);
   for (auto& kv : impl_->canvas_refs) {
     if (!kv.second.isNull()) syncCanvasLayers(kv.first);
   }
   c->refresh();
-  c->waitWhileRendering();
-  QCoreApplication::processEvents();
+}
+
+bool QgisMapStack::isCanvasRendering(std::uintptr_t canvas) const {
+  return canvasOrThrow(canvas)->isDrawing();
 }
 
 std::vector<double> QgisMapStack::screenToMap(std::uintptr_t canvas, double x, double y) const {
@@ -1122,6 +1150,24 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
     SuppressGuard guard(&impl_->suppress_tree_callbacks);
     QgsFeatureList features = QgsJsonUtils::stringToFeatureList(
         QString::fromStdString(geojson_feature_collection));
+    // #1153: a memory layer's provider geometry type is fixed at creation;
+    // if the payload drifted (doc_id unchanged but geometries changed kind),
+    // reusing the layer would truncate it and then reject every mismatched
+    // feature — silently emptying the mirror. Rebuild instead.
+    for (const QgsFeature& feature : features) {
+      if (feature.hasGeometry()
+          && QgsWkbTypes::geometryType(feature.geometry().wkbType())
+                 != existing->geometryType()) {
+        impl_->eraseMirrorByDocId(doc_id);
+        existing = nullptr;
+        break;
+      }
+    }
+  }
+  if (existing) {
+    SuppressGuard guard(&impl_->suppress_tree_callbacks);
+    QgsFeatureList features = QgsJsonUtils::stringToFeatureList(
+        QString::fromStdString(geojson_feature_collection));
     if (existing->dataProvider()) {
       if (!existing->dataProvider()->truncate()) {
         throw std::runtime_error("mirror truncate failed for doc_id: " + doc_id);
@@ -1281,12 +1327,37 @@ void QgisMapStack::setMirrorLayerOrder(const std::vector<std::string>& doc_ids_t
       bool wasEnabled;
       ~BridgeReenable() { if (bridge && wasEnabled) bridge->setEnabled(true); }
     } reenable{registryBridge, bridgeWasEnabled};
-    const bool wasBlocked = root->blockSignals(true);
-    struct RootUnblock {
+    // #1154: the root node's signals must stay LIVE — blocking them kept
+    // QgsLayerTreeModel/QgsLayerTreeView from ever seeing the reorder, so the
+    // panel showed stale order/visibility while only the canvas bridge was
+    // manually re-synced. But the registry bridge's removal accounting is not
+    // switchable: groupWillRemoveChildren collects layer ids unconditionally
+    // (no mEnabled check) and groupRemovedChildren queues a QueuedConnection
+    // registry removal for any id not in the tree AT THAT INSTANT — which
+    // every re-parented node is, between takeChildNode() and
+    // insertChildNode(). Detach exactly those two slots for the dance and
+    // restore them exactly as the bridge constructor wires them.
+    // The two slots are protected, so member-pointer disconnect/connect is
+    // unavailable; the generic sender/receiver disconnect plus string-based
+    // reconnect (meta-object invokation reaches protected slots) covers
+    // exactly the two connections the bridge constructor makes from mRoot.
+    const bool bridgeDetached = registryBridge
+        ? QObject::disconnect(root, nullptr, registryBridge, nullptr)
+        : false;
+    struct BridgeReconnect {
       QgsLayerTreeGroup* r;
-      bool wasBlocked;
-      ~RootUnblock() { r->blockSignals(wasBlocked); }
-    } unblock{root, wasBlocked};
+      QgsLayerTreeRegistryBridge* b;
+      bool detached;
+      ~BridgeReconnect() {
+        if (r == nullptr || b == nullptr || !detached) return;
+        QObject::connect(
+            r, SIGNAL(willRemoveChildren(QgsLayerTreeNode*,int,int)), b,
+            SLOT(groupWillRemoveChildren(QgsLayerTreeNode*,int,int)));
+        QObject::connect(
+            r, SIGNAL(removedChildren(QgsLayerTreeNode*,int,int)), b,
+            SLOT(groupRemovedChildren()));
+      }
+    } reconnect{root, registryBridge, bridgeDetached};
     for (auto it = doc_ids_top_first.rbegin(); it != doc_ids_top_first.rend(); ++it) {
       const std::string& doc_id = *it;
       auto mapIt = impl_->mirror_by_doc.find(doc_id);

@@ -69,11 +69,13 @@ extern const std::string PALEO_QGIS_PREFIX_PATH = "";
 
 namespace pwb::qgis_render {
 std::mutex g_qgis_lifecycle_mutex;
+// #1155: external linkage so QgisMapStack::initialize can share the
+// process-level initQgis guard (was anonymous-namespace internal).
+bool g_qgis_initialized = false;
 
 namespace {
 
 std::size_t g_qgis_bridge_count = 0;
-bool g_qgis_initialized = false;
 
 QString geometry_uri_for(const VectorLayerSpec& spec) {
     for (const FeatureSpec& feature : spec.features) {
@@ -162,6 +164,15 @@ class QgisRenderBridge::Impl {
 
     Diagnostics diagnostics;
 
+    /// #1133: serializes mirror-map mutation (apply_snapshot rebuild,
+    /// shutdown teardown) against synchronous renders (render_sync /
+    /// export_vector) whose QgsMapSettings capture raw QgsMapLayer pointers.
+    /// The pybind wrappers release the GIL for those renders, so a second
+    /// Python thread running shutdown()/set_layer_snapshot() could otherwise
+    /// destroy layers mid-render (use-after-free).  Renders hold this lock for
+    /// their whole duration; shutdown waits behind them instead of racing.
+    mutable std::mutex lifecycle_mutex;
+
     bool initialized = false;
     std::string project_crs;
     std::vector<std::string> ordered_ids;
@@ -178,7 +189,8 @@ class QgisRenderBridge::Impl {
     /// All WKTs are parsed (and validated) before anything is deleted, so a
     /// malformed payload cannot leave the mirror half-updated. QGIS owns fid
     /// assignment; host identity is the __pwb_id attribute, indexed here.
-    void apply_feature_delta(Mirror& mirror, const VectorLayerSpec::FeatureDelta& delta) {
+    void apply_feature_delta(Mirror& mirror, const std::string& layer_id,
+                             const VectorLayerSpec::FeatureDelta& delta) {
         auto* vector_layer = dynamic_cast<QgsVectorLayer*>(mirror.layer.get());
         if (vector_layer == nullptr) {
             throw std::runtime_error("QGIS vector mirror has an unexpected layer type");
@@ -201,7 +213,7 @@ class QgisRenderBridge::Impl {
             }
             if (!provider->addAttributes(new_fields)) {
                 throw std::runtime_error(
-                    "QGIS could not add delta fields to layer ");
+                    "QGIS could not add delta fields to layer " + layer_id);
             }
             vector_layer->updateFields();
         }
@@ -218,8 +230,11 @@ class QgisRenderBridge::Impl {
             QgsGeometry geometry = QgsGeometry::fromWkt(
                 QString::fromStdString(feature_spec.wkt));
             if (geometry.isNull()) {
+                // #1163: wording must not contain "feature delta" — that
+                // substring is the #932 stale-mirror recovery marker; a data
+                // error must surface instead of triggering a full reship.
                 throw std::invalid_argument(
-                    "invalid WKT in feature delta for layer ");
+                    "invalid WKT in delta feature on layer " + layer_id);
             }
             parsed.push_back({feature_spec.id, std::move(geometry), &feature_spec});
         }
@@ -243,7 +258,7 @@ class QgisRenderBridge::Impl {
         }
         if (!remove_fids.empty() && !provider->deleteFeatures(remove_fids)) {
             throw std::runtime_error(
-                "QGIS could not delete delta features from layer ");
+                "QGIS could not delete delta features from layer " + layer_id);
         }
         QgsFeatureList features;
         for (const ParsedDeltaFeature& item : parsed) {
@@ -305,6 +320,10 @@ class QgisRenderBridge::Impl {
                 );
             }
         }
+        // #1133: mirror-map mutation must not interleave with a sync render
+        // (render_sync/export_vector hold lifecycle_mutex while QGIS reads the
+        // layer pointers captured by settings_for).
+        std::lock_guard<std::mutex> lifecycle_guard(lifecycle_mutex);
         std::unordered_map<std::string, Mirror> next;
         std::vector<std::string> order;
         std::vector<std::string> reused;
@@ -337,7 +356,7 @@ class QgisRenderBridge::Impl {
                 // layers (#519).
                 Mirror& mirror = existing->second;
                 if (spec.delta) {
-                    apply_feature_delta(mirror, *spec.delta);
+                    apply_feature_delta(mirror, spec.id, *spec.delta);
                 }
                 if (spec.kind == VectorLayerSpec::Kind::Vector
                     && mirror.style_revision != spec.style_revision) {
@@ -663,6 +682,11 @@ RenderResult QgisRenderBridge::render_sync(const std::array<double, 4>& extent,
         throw std::runtime_error("cannot synchronously render while an asynchronous QGIS job is active");
     }
     validate_request(width, height, dpi);
+    // #1133: the GIL is released around this call on the binding side, so a
+    // concurrent shutdown()/set_layer_snapshot() from another Python thread
+    // could destroy mirrors mid-render.  Holding lifecycle_mutex for the whole
+    // render makes teardown wait for completion instead of racing it.
+    std::lock_guard<std::mutex> lifecycle_guard(impl_->lifecycle_mutex);
     const Impl::Request request{extent, width, height, dpi, 0};
     const auto started = std::chrono::steady_clock::now();
     QgsMapRendererParallelJob job(impl_->settings_for(request));
@@ -682,9 +706,18 @@ RenderResult QgisRenderBridge::render_sync(const std::array<double, 4>& extent,
 
 void QgisRenderBridge::shutdown() {
     if (!impl_ || !impl_->initialized) return;
+    // Async job first: its QgsMapSettings also hold raw layer pointers, so the
+    // mirrors must outlive it (cancel + wait, as before).
     impl_->wait_for_active_job();
-    impl_->mirrors.clear();
-    impl_->ordered_ids.clear();
+    // #1133: then serialize against any in-flight sync render/export (whose
+    // GIL is released on the binding side) before destroying the mirrors it
+    // is reading; a sync render in turn sees the still-initialized bridge and
+    // holds the lock, so this either runs before it starts or waits for it.
+    {
+        std::lock_guard<std::mutex> lifecycle_guard(impl_->lifecycle_mutex);
+        impl_->mirrors.clear();
+        impl_->ordered_ids.clear();
+    }
     std::lock_guard<std::mutex> lock(g_qgis_lifecycle_mutex);
     if (g_qgis_bridge_count > 0) --g_qgis_bridge_count;
     // QGIS is process-global, like QApplication. QGIS 4.2 is not safely
@@ -709,6 +742,8 @@ std::size_t QgisRenderBridge::export_vector(const std::string& path,
         throw std::runtime_error("cannot export while an asynchronous QGIS job is active");
     }
 
+    // #1133: same lifetime contract as render_sync (see there).
+    std::lock_guard<std::mutex> lifecycle_guard(impl_->lifecycle_mutex);
     QgsMapSettings settings = impl_->settings_for(
         Impl::Request{extent, width, height, dpi, 0}
     );
