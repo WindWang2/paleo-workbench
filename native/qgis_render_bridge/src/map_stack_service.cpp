@@ -358,6 +358,8 @@ static QgsVectorLayer* findMirrorByDocId(QgsProject* project, const std::string&
 
 struct QgisMapStack::Impl {
   bool initialized = false;
+  bool display_mode = false;
+  std::unique_ptr<QgsProject> owned_project;
   std::unordered_map<std::uintptr_t, std::unique_ptr<QgsLayerTreeMapCanvasBridge>>
       tree_bridges;
   std::unordered_set<std::string> owned_layers;
@@ -623,7 +625,16 @@ QgisMapStack::~QgisMapStack() {
   }
 }
 
-void QgisMapStack::initialize() {
+QgsProject* QgisMapStack::project() const {
+  if (impl_->owned_project) return impl_->owned_project.get();
+  return QgsProject::instance();
+}
+
+bool QgisMapStack::isDisplay() const noexcept {
+  return impl_ && impl_->display_mode;
+}
+
+void QgisMapStack::initialize(bool display) {
   if (impl_->initialized) return;
   if (QCoreApplication::instance() == nullptr) {
     throw std::runtime_error("QgisMapStack requires an existing Qt application");
@@ -636,13 +647,40 @@ void QgisMapStack::initialize() {
       QString::fromStdString(PALEO_QGIS_PREFIX_PATH), true);
   QgsApplication::init();
   QgsApplication::initQgis();
+  if (display) {
+    impl_->owned_project = std::make_unique<QgsProject>();
+    impl_->display_mode = true;
+  }
   impl_->initialized = true;
 }
 
 bool QgisMapStack::initialized() const noexcept { return impl_->initialized; }
 
 int QgisMapStack::projectLayerCount() const {
-  return static_cast<int>(QgsProject::instance()->count());
+  return static_cast<int>(project()->count());
+}
+
+void QgisMapStack::syncCanvasLayers(std::uintptr_t canvas_addr) {
+  QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
+  auto bit = impl_->tree_bridges.find(canvas_addr);
+  if (bit != impl_->tree_bridges.end() && bit->second) {
+    bit->second->setCanvasLayers();
+    return;
+  }
+  QList<QgsMapLayer*> layers;
+  QgsProject* prj = project();
+  if (prj != nullptr) {
+    const QList<QgsMapLayer*> order = prj->layerTreeRoot()->layerOrder();
+    for (QgsMapLayer* layer : order) {
+      if (layer != nullptr) layers.append(layer);
+    }
+  }
+  canvas->setLayers(layers);
+}
+
+int QgisMapStack::canvasLayerCount(std::uintptr_t canvas_addr) const {
+  QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
+  return static_cast<int>(canvas->layers().size());
 }
 
 void QgisMapStack::shutdown() {
@@ -677,9 +715,9 @@ void QgisMapStack::shutdown() {
   {
     SuppressGuard guard(&impl_->suppress_tree_callbacks);
     for (const auto& id : impl_->owned_layers) {
-      QgsMapLayer* layer = QgsProject::instance()->mapLayer(QString::fromStdString(id));
+      QgsMapLayer* layer = project()->mapLayer(QString::fromStdString(id));
       if (layer != nullptr) {
-        QgsProject::instance()->removeMapLayer(layer);
+        project()->removeMapLayer(layer);
       }
     }
   }
@@ -687,6 +725,11 @@ void QgisMapStack::shutdown() {
   impl_->mirror_by_doc.clear();
   impl_->mirror_style_sig.clear();
   impl_->suppress_tree_callbacks = 0;
+  if (impl_->owned_project) {
+    impl_->owned_project->removeAllMapLayers();
+    impl_->owned_project.reset();
+  }
+  impl_->display_mode = false;
   impl_->tree_bridges.clear();
   for (auto& kv : impl_->tools) {
     auto it = impl_->canvas_refs.find(kv.first);
@@ -792,21 +835,28 @@ std::uintptr_t QgisMapStack::createCanvas() {
   auto* canvas = new QgsMapCanvas();
   canvas->setCanvasColor(Qt::white);
   canvas->enableAntiAliasing(true);
-  auto tree_bridge = std::make_unique<QgsLayerTreeMapCanvasBridge>(
-      QgsProject::instance()->layerTreeRoot(), canvas);
-  tree_bridge->setCanvasLayers();
+  if (impl_->display_mode) {
+    canvas->setProject(project());
+  } else {
+    auto tree_bridge = std::make_unique<QgsLayerTreeMapCanvasBridge>(
+        project()->layerTreeRoot(), canvas);
+    tree_bridge->setCanvasLayers();
+    std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(canvas);
+    impl_->tree_bridges.emplace(addr, std::move(tree_bridge));
+    impl_->canvas_refs[addr] = canvas;
+    // 永不显示（真机回归：QDockWidget 非浮动子控件会随父画布 show 一起被
+    // Qt 递归显示）；enable()/activateCad 的 mSessionActive 门仍可绕过，
+    // 但我们从不开启 CAD 会话。
+    auto* cadDock = new QgsAdvancedDigitizingDockWidget(canvas, canvas);
+    cadDock->hide();
+    impl_->cad_docks[addr] = cadDock;
+    impl_->dead_canvas_addrs.erase(addr);
+    return addr;
+  }
   std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(canvas);
-  impl_->tree_bridges.emplace(addr, std::move(tree_bridge));
   impl_->canvas_refs[addr] = canvas;
-  // 永不显示（真机回归：QDockWidget 非浮动子控件会随父画布 show 一起被
-  // Qt 递归显示）；enable()/activateCad 的 mSessionActive 门仍可绕过，
-  // 但我们从不开启 CAD 会话。
-  auto* cadDock = new QgsAdvancedDigitizingDockWidget(canvas, canvas);
-  cadDock->hide();
-  impl_->cad_docks[addr] = cadDock;
-  // I1: address reuse — a freshly allocated canvas may reuse a previously
-  // dead address; clear the dead-set so the new live entry is not rejected.
   impl_->dead_canvas_addrs.erase(addr);
+  canvas->setMapTool(new QgsMapToolPan(canvas));
   return addr;
 }
 
@@ -913,8 +963,8 @@ void QgisMapStack::zoomToNextExtent(std::uintptr_t canvas) {
 }
 void QgisMapStack::refreshCanvas(std::uintptr_t canvas) {
   QgsMapCanvas* c = canvasOrThrow(canvas);
-  for (auto& kv : impl_->tree_bridges) {
-    if (kv.second) kv.second->setCanvasLayers();
+  for (auto& kv : impl_->canvas_refs) {
+    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
   }
   c->refresh();
   c->waitWhileRendering();
@@ -960,10 +1010,10 @@ std::string QgisMapStack::addVectorLayerGeoJson(
     applyStyleToLayer(*layer, spec);
   }
   const std::string id = layer->id().toStdString();
-  QgsProject::instance()->addMapLayer(layer.release());
+  project()->addMapLayer(layer.release());
   impl_->owned_layers.insert(id);
-  for (auto& kv : impl_->tree_bridges) {
-    if (kv.second) kv.second->setCanvasLayers();
+  for (auto& kv : impl_->canvas_refs) {
+    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
   }
   return id;
 }
@@ -972,7 +1022,7 @@ void QgisMapStack::setLayerStyle(const std::string& layer_id,
                                  const std::string& renderer_xml,
                                  const std::string& labeling_xml,
                                  const std::string& legacy_style_json) {
-  QgsMapLayer* base = QgsProject::instance()->mapLayer(QString::fromStdString(layer_id));
+  QgsMapLayer* base = project()->mapLayer(QString::fromStdString(layer_id));
   if (base == nullptr) throw std::invalid_argument("unknown layer: " + layer_id);
   auto* layer = dynamic_cast<QgsVectorLayer*>(base);
   if (layer == nullptr) throw std::invalid_argument("layer is not a vector layer: " + layer_id);
@@ -985,15 +1035,15 @@ void QgisMapStack::setLayerStyle(const std::string& layer_id,
   spec.id = layer_id;
   applyStyleToLayer(*layer, spec);
   layer->triggerRepaint();
-  for (auto& kv : impl_->tree_bridges) {
-    if (kv.second) kv.second->setCanvasLayers();
+  for (auto& kv : impl_->canvas_refs) {
+    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
   }
 }
 
 bool QgisMapStack::removeLayer(const std::string& layer_id) {
   auto it = impl_->owned_layers.find(layer_id);
   if (it == impl_->owned_layers.end()) return false;
-  QgsMapLayer* layer = QgsProject::instance()->mapLayer(
+  QgsMapLayer* layer = project()->mapLayer(
       QString::fromStdString(layer_id));
   if (layer == nullptr) {
     impl_->owned_layers.erase(it);
@@ -1004,7 +1054,7 @@ bool QgisMapStack::removeLayer(const std::string& layer_id) {
   std::string doc_id = docVar.isValid() ? docVar.toString().toStdString() : "";
   {
     SuppressGuard guard(&impl_->suppress_tree_callbacks);
-    QgsProject::instance()->removeMapLayer(layer);
+    project()->removeMapLayer(layer);
   }
   impl_->owned_layers.erase(it);
   if (!doc_id.empty()) {
@@ -1012,16 +1062,16 @@ bool QgisMapStack::removeLayer(const std::string& layer_id) {
   } else {
     eraseMirrorByQgisId(layer_id);
   }
-  for (auto& kv : impl_->tree_bridges) {
-    if (kv.second) kv.second->setCanvasLayers();
+  for (auto& kv : impl_->canvas_refs) {
+    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
   }
   return true;
 }
 
 void QgisMapStack::setLayerVisibility(const std::string& layer_id, bool visible) {
-  QgsMapLayer* layer = QgsProject::instance()->mapLayer(QString::fromStdString(layer_id));
+  QgsMapLayer* layer = project()->mapLayer(QString::fromStdString(layer_id));
   if (layer == nullptr) throw std::invalid_argument("unknown layer: " + layer_id);
-  QgsLayerTreeLayer* node = QgsProject::instance()->layerTreeRoot()->findLayer(layer);
+  QgsLayerTreeLayer* node = project()->layerTreeRoot()->findLayer(layer);
   if (node != nullptr) {
     SuppressGuard guard(&impl_->suppress_tree_callbacks);
     node->setItemVisibilityChecked(visible);
@@ -1033,7 +1083,7 @@ void QgisMapStack::setLayerVisibility(const std::string& layer_id, bool visible)
 }
 
 void QgisMapStack::setLayerOpacity(const std::string& layer_id, double opacity) {
-  QgsMapLayer* layer = QgsProject::instance()->mapLayer(QString::fromStdString(layer_id));
+  QgsMapLayer* layer = project()->mapLayer(QString::fromStdString(layer_id));
   if (layer == nullptr) throw std::invalid_argument("unknown layer: " + layer_id);
   layer->setOpacity(std::clamp(opacity, 0.0, 1.0));
 }
@@ -1060,7 +1110,7 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
   if (doc_id.empty()) throw std::invalid_argument("doc_id must not be empty");
   const QByteArray geoBytes = QByteArray::fromStdString(geojson_feature_collection).trimmed();
   if (geoBytes.isEmpty()) throw std::invalid_argument("geojson must not be empty for doc_id: " + doc_id);
-  QgsProject* project = QgsProject::instance();
+  QgsProject* project = this->project();
   QgsVectorLayer* existing = nullptr;
   std::string existing_id;
   auto mapIt = impl_->mirror_by_doc.find(doc_id);
@@ -1131,8 +1181,8 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
     if (node) node->setItemVisibilityChecked(visible);
     impl_->known_layer_visibility[doc_id] = visible;
     impl_->owned_layers.insert(existing_id);
-    for (auto& kv : impl_->tree_bridges) {
-      if (kv.second) kv.second->setCanvasLayers();
+    for (auto& kv : impl_->canvas_refs) {
+      if (!kv.second.isNull()) syncCanvasLayers(kv.first);
     }
     return existing_id;
   }
@@ -1171,10 +1221,10 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
   const std::string id = layer->id().toStdString();
   {
     SuppressGuard guard(&impl_->suppress_tree_callbacks);
-    QgsProject::instance()->addMapLayer(layer.release());
-    QgsMapLayer* added = QgsProject::instance()->mapLayer(QString::fromStdString(id));
+    project->addMapLayer(layer.release());
+    QgsMapLayer* added = project->mapLayer(QString::fromStdString(id));
     if (added) {
-      QgsLayerTreeLayer* node = QgsProject::instance()->layerTreeRoot()->findLayer(added);
+      QgsLayerTreeLayer* node = project->layerTreeRoot()->findLayer(added);
       if (node) node->setItemVisibilityChecked(visible);
     }
     impl_->known_layer_visibility[doc_id] = visible;
@@ -1183,8 +1233,8 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
   impl_->mirror_by_doc[doc_id] = id;
   impl_->mirror_style_sig[doc_id] = new_sig;
   impl_->known_layer_names[doc_id] = name;
-  for (auto& kv : impl_->tree_bridges) {
-    if (kv.second) kv.second->setCanvasLayers();
+  for (auto& kv : impl_->canvas_refs) {
+    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
   }
   return id;
 }
@@ -1195,7 +1245,7 @@ void QgisMapStack::removeMirrorLayersExcept(const std::vector<std::string>& doc_
   SuppressGuard guard(&impl_->suppress_tree_callbacks);
   auto owned_copy = impl_->owned_layers;
   for (const auto& qgis_id : owned_copy) {
-    QgsMapLayer* layer = QgsProject::instance()->mapLayer(QString::fromStdString(qgis_id));
+    QgsMapLayer* layer = project()->mapLayer(QString::fromStdString(qgis_id));
     if (layer == nullptr) {
       impl_->owned_layers.erase(qgis_id);
       impl_->eraseMirrorByQgisId(qgis_id);
@@ -1207,12 +1257,12 @@ void QgisMapStack::removeMirrorLayersExcept(const std::vector<std::string>& doc_
     bool keepIt = hasDoc && keep.find(doc_id) != keep.end();
     if (hasDoc) {
       if (!keepIt) {
-        QgsProject::instance()->removeMapLayer(layer);
+        project()->removeMapLayer(layer);
         impl_->owned_layers.erase(qgis_id);
         impl_->eraseMirrorByDocIdIfQgisMatches(doc_id, qgis_id);
       }
     } else {
-      QgsProject::instance()->removeMapLayer(layer);
+      project()->removeMapLayer(layer);
       impl_->owned_layers.erase(qgis_id);
       impl_->eraseMirrorByQgisId(qgis_id);
     }
@@ -1220,24 +1270,24 @@ void QgisMapStack::removeMirrorLayersExcept(const std::vector<std::string>& doc_
   std::vector<std::string> stale_docs;
   for (const auto& kv : impl_->mirror_by_doc) {
     if (impl_->owned_layers.find(kv.second) == impl_->owned_layers.end() &&
-        !QgsProject::instance()->mapLayer(QString::fromStdString(kv.second))) {
+        !project()->mapLayer(QString::fromStdString(kv.second))) {
       stale_docs.push_back(kv.first);
     }
   }
   for (const auto& d : stale_docs) impl_->eraseMirrorByDocId(d);
-  for (auto& kv : impl_->tree_bridges) {
-    if (kv.second) kv.second->setCanvasLayers();
+  for (auto& kv : impl_->canvas_refs) {
+    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
   }
 }
 
 void QgisMapStack::setMirrorLayerOrder(const std::vector<std::string>& doc_ids_top_first) {
   if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
   SuppressGuard guard(&impl_->suppress_tree_callbacks);
-  QgsLayerTreeGroup* root = QgsProject::instance()->layerTreeRoot();
+  QgsLayerTreeGroup* root = project()->layerTreeRoot();
   // 排序操作必须在 root 信号屏蔽 + registryBridge 禁用的保护区间内完成；
   // setCanvasLayers 依赖树信号驱动画布桥，必须等两个 RAII guard 析构后再调用。
   {
-    auto* registryBridge = QgsProject::instance()->layerTreeRegistryBridge();
+    auto* registryBridge = project()->layerTreeRegistryBridge();
     bool bridgeWasEnabled = false;
     if (registryBridge && registryBridge->isEnabled()) {
       bridgeWasEnabled = true;
@@ -1258,7 +1308,7 @@ void QgisMapStack::setMirrorLayerOrder(const std::vector<std::string>& doc_ids_t
       const std::string& doc_id = *it;
       auto mapIt = impl_->mirror_by_doc.find(doc_id);
       if (mapIt == impl_->mirror_by_doc.end()) continue;
-      QgsMapLayer* layer = QgsProject::instance()->mapLayer(QString::fromStdString(mapIt->second));
+      QgsMapLayer* layer = project()->mapLayer(QString::fromStdString(mapIt->second));
       if (!layer) continue;
       QgsLayerTreeLayer* node = root->findLayer(layer);
       if (!node) continue;
@@ -1268,8 +1318,8 @@ void QgisMapStack::setMirrorLayerOrder(const std::vector<std::string>& doc_ids_t
       root->insertChildNode(0, node);
     }
   }
-  for (auto& kv : impl_->tree_bridges) {
-    if (kv.second) kv.second->setCanvasLayers();
+  for (auto& kv : impl_->canvas_refs) {
+    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
   }
 }
 
@@ -1279,20 +1329,20 @@ void QgisMapStack::setMirrorLayerVisibility(const std::string& doc_id, bool visi
   auto it = impl_->mirror_by_doc.find(doc_id);
   QgsVectorLayer* layer = nullptr;
   if (it != impl_->mirror_by_doc.end()) {
-    QgsMapLayer* base = QgsProject::instance()->mapLayer(QString::fromStdString(it->second));
+    QgsMapLayer* base = project()->mapLayer(QString::fromStdString(it->second));
     layer = qobject_cast<QgsVectorLayer*>(base);
     if (!layer) {
-      layer = findMirrorByDocId(QgsProject::instance(), doc_id);
+      layer = findMirrorByDocId(project(), doc_id);
     }
   } else {
-    layer = findMirrorByDocId(QgsProject::instance(), doc_id);
+    layer = findMirrorByDocId(project(), doc_id);
     if (layer) {
       impl_->mirror_by_doc[doc_id] = layer->id().toStdString();
       impl_->owned_layers.insert(layer->id().toStdString());
     }
   }
   if (!layer) throw std::invalid_argument("unknown doc_id: " + doc_id);
-  QgsLayerTreeLayer* node = QgsProject::instance()->layerTreeRoot()->findLayer(layer);
+  QgsLayerTreeLayer* node = project()->layerTreeRoot()->findLayer(layer);
   if (!node) throw std::invalid_argument("layer node not found for doc_id: " + doc_id);
   node->setItemVisibilityChecked(visible);
   impl_->known_layer_visibility[doc_id] = visible;
@@ -1300,7 +1350,7 @@ void QgisMapStack::setMirrorLayerVisibility(const std::string& doc_id, bool visi
 
 std::vector<std::string> QgisMapStack::mirrorOrderTopFirst() const {
   std::vector<std::string> result;
-  QgsLayerTreeGroup* root = QgsProject::instance()->layerTreeRoot();
+  QgsLayerTreeGroup* root = project()->layerTreeRoot();
   for (QgsLayerTreeNode* child : root->children()) {
     QgsLayerTreeLayer* layerNode = qobject_cast<QgsLayerTreeLayer*>(child);
     if (!layerNode) continue;
@@ -1318,12 +1368,12 @@ bool QgisMapStack::mirrorLayerVisibility(const std::string& doc_id) const {
   QgsVectorLayer* layer = nullptr;
   auto it = impl_->mirror_by_doc.find(doc_id);
   if (it != impl_->mirror_by_doc.end()) {
-    QgsMapLayer* base = QgsProject::instance()->mapLayer(QString::fromStdString(it->second));
+    QgsMapLayer* base = project()->mapLayer(QString::fromStdString(it->second));
     layer = qobject_cast<QgsVectorLayer*>(base);
   }
-  if (!layer) layer = findMirrorByDocId(QgsProject::instance(), doc_id);
+  if (!layer) layer = findMirrorByDocId(project(), doc_id);
   if (!layer) throw std::invalid_argument("unknown doc_id: " + doc_id);
-  QgsLayerTreeLayer* node = QgsProject::instance()->layerTreeRoot()->findLayer(layer);
+  QgsLayerTreeLayer* node = project()->layerTreeRoot()->findLayer(layer);
   if (!node) throw std::invalid_argument("layer node not found for doc_id: " + doc_id);
   return node->itemVisibilityChecked();
 }
@@ -1364,7 +1414,7 @@ void QgisMapStack::setSnappingConfig(std::uintptr_t canvas_addr,
     const QJsonObject layers = obj.value(QStringLiteral("layers")).toObject();
     for (auto it = layers.begin(); it != layers.end(); ++it) {
       QgsVectorLayer* layer =
-          findMirrorByDocId(QgsProject::instance(), it.key().toStdString());
+          findMirrorByDocId(project(), it.key().toStdString());
       if (layer == nullptr) continue;
       const QJsonObject ls = it.value().toObject();
       config.setIndividualLayerSettings(
@@ -1380,7 +1430,7 @@ void QgisMapStack::setSnappingConfig(std::uintptr_t canvas_addr,
     // 的 QGIS 对应物——参考图层顶点参与捕捉；显式条目优先。
     if (obj.value(QStringLiteral("reference_enabled")).toBool(false)) {
       const auto configured = config.individualLayerSettings();
-      for (auto* layer : QgsProject::instance()->mapLayers().values()) {
+      for (auto* layer : project()->mapLayers().values()) {
         auto* vl = qobject_cast<QgsVectorLayer*>(layer);
         if (vl == nullptr || configured.contains(vl)) continue;
         if (vl->customProperty(QStringLiteral("pwb/reference")).toString() !=
@@ -1443,6 +1493,11 @@ void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kin
   ensureNotStale(canvas_addr);
   QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
   impl_->canvas_refs[canvas_addr] = canvas;
+  if (impl_->display_mode) {
+    if (kind != "pan" && kind != "zoomIn" && kind != "zoomOut") {
+      throw std::runtime_error("display map stack does not host edit tools");
+    }
+  }
   // Release previous tool (Qt parent owns it) before overwriting — avoid double-delete
   auto existing = impl_->tools.find(canvas_addr);
   if (existing != impl_->tools.end() && existing->second) {
@@ -1654,7 +1709,7 @@ void QgisMapStack::setCurrentLayer(std::uintptr_t canvas_addr,
                                    const std::string& doc_id) {
   ensureNotStale(canvas_addr);
   QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
-  QgsVectorLayer* layer = findMirrorByDocId(QgsProject::instance(), doc_id);
+  QgsVectorLayer* layer = findMirrorByDocId(project(), doc_id);
   if (layer == nullptr)
     throw std::invalid_argument("unknown doc_id for current layer: " + doc_id);
   canvas->setCurrentLayer(layer);
@@ -1665,7 +1720,7 @@ void QgisMapStack::highlightFeatures(std::uintptr_t canvas_addr,
                                      const std::string& feature_ids_json) {
   ensureNotStale(canvas_addr);
   QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
-  QgsVectorLayer* layer = findMirrorByDocId(QgsProject::instance(), doc_id);
+  QgsVectorLayer* layer = findMirrorByDocId(project(), doc_id);
   if (layer == nullptr)
     throw std::invalid_argument("unknown doc_id for highlight: " + doc_id);
   clearHighlights(canvas_addr);
@@ -1784,9 +1839,12 @@ void QgisMapStack::cleanupTreeViewState(std::uintptr_t tree_view) {
 }
 
 std::uintptr_t QgisMapStack::createLayerTreeView(std::uintptr_t canvas_addr) {
+  if (impl_->display_mode) {
+    throw std::runtime_error("display map stack has no layer tree");
+  }
   QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
   (void)canvas;
-  QgsLayerTree* root = QgsProject::instance()->layerTreeRoot();
+  QgsLayerTree* root = project()->layerTreeRoot();
   auto* model = new QgsLayerTreeModel(root);
   auto* view = new QgsLayerTreeView();
   model->setParent(view);
@@ -2049,7 +2107,7 @@ void QgisMapStack::treeViewMoveRow(std::uintptr_t tree, int from, int to) {
   // 图层（groupRemovedChildren: "ignores layers that were dragged'n'dropped:
   // 1. drop new 2. remove old"）。反过来先 take 后插会把图层从 project 误删。
   // QgsLayerTreeModel 不实现 moveRows，不能直接走模型。
-  QgsLayerTreeGroup* root = QgsProject::instance()->layerTreeRoot();
+  QgsLayerTreeGroup* root = project()->layerTreeRoot();
   QgsLayerTreeLayer* node = qobject_cast<QgsLayerTreeLayer*>(root->children().value(from));
   if (!node || !node->layer()) throw std::runtime_error("tree view moveRow: source node missing");
   QgsLayerTreeNode* parent = node->parent();
@@ -2085,9 +2143,9 @@ void QgisMapStack::zoomToLayer(std::uintptr_t tree_addr, const std::string& doc_
   auto it = impl_->mirror_by_doc.find(doc_id);
   if (it != impl_->mirror_by_doc.end()) {
     layer = qobject_cast<QgsVectorLayer*>(
-        QgsProject::instance()->mapLayer(QString::fromStdString(it->second)));
+        project()->mapLayer(QString::fromStdString(it->second)));
   }
-  if (!layer) layer = findMirrorByDocId(QgsProject::instance(), doc_id);
+  if (!layer) layer = findMirrorByDocId(project(), doc_id);
   if (!layer) throw std::invalid_argument("unknown doc_id: " + doc_id);
   QPointer<QgsMapCanvas> canvas;
   auto canvasIt = impl_->tree_canvas.find(tree_addr);
@@ -2103,7 +2161,7 @@ void QgisMapStack::zoomToLayer(std::uintptr_t tree_addr, const std::string& doc_
   }
   const QgsCoordinateReferenceSystem dest = canvas->mapSettings().destinationCrs();
   if (dest.isValid() && layer->crs() != dest) {
-    QgsCoordinateTransform ct(layer->crs(), dest, QgsProject::instance());
+    QgsCoordinateTransform ct(layer->crs(), dest, project());
     ext = ct.transformBoundingBox(ext);
   }
   canvas->setExtent(ext);
@@ -2116,11 +2174,11 @@ void QgisMapStack::setEditIndicator(std::uintptr_t tree_addr,
   QgsMapLayer* layer = nullptr;
   auto it = impl_->mirror_by_doc.find(doc_id);
   if (it != impl_->mirror_by_doc.end()) {
-    layer = QgsProject::instance()->mapLayer(QString::fromStdString(it->second));
+    layer = project()->mapLayer(QString::fromStdString(it->second));
   }
-  if (!layer) layer = findMirrorByDocId(QgsProject::instance(), doc_id);
+  if (!layer) layer = findMirrorByDocId(project(), doc_id);
   if (!layer) return;  // 未镜像（例如尚未上树）时静默忽略——面板状态仍会记录
-  QgsLayerTreeLayer* node = QgsProject::instance()->layerTreeRoot()->findLayer(layer);
+  QgsLayerTreeLayer* node = project()->layerTreeRoot()->findLayer(layer);
   if (!node) return;
   // 幂等：先摘除本栈挂过的编辑指示器（removeIndicator 负责销毁对象）。
   for (QgsLayerTreeViewIndicator* ind : view->indicators(node)) {
@@ -2148,11 +2206,11 @@ int QgisMapStack::editIndicatorCount(std::uintptr_t tree_addr,
   QgsMapLayer* layer = nullptr;
   auto it = impl_->mirror_by_doc.find(doc_id);
   if (it != impl_->mirror_by_doc.end()) {
-    layer = QgsProject::instance()->mapLayer(QString::fromStdString(it->second));
+    layer = project()->mapLayer(QString::fromStdString(it->second));
   }
-  if (!layer) layer = findMirrorByDocId(QgsProject::instance(), doc_id);
+  if (!layer) layer = findMirrorByDocId(project(), doc_id);
   if (!layer) return 0;
-  QgsLayerTreeLayer* node = QgsProject::instance()->layerTreeRoot()->findLayer(layer);
+  QgsLayerTreeLayer* node = project()->layerTreeRoot()->findLayer(layer);
   if (!node) return 0;
   int count = 0;
   for (QgsLayerTreeViewIndicator* ind : view->indicators(node)) {
@@ -2166,11 +2224,11 @@ bool QgisMapStack::treeViewSelectDoc(std::uintptr_t tree, const std::string& doc
   QgsMapLayer* layer = nullptr;
   auto it = impl_->mirror_by_doc.find(doc_id);
   if (it != impl_->mirror_by_doc.end()) {
-    layer = QgsProject::instance()->mapLayer(QString::fromStdString(it->second));
+    layer = project()->mapLayer(QString::fromStdString(it->second));
   }
-  if (!layer) layer = findMirrorByDocId(QgsProject::instance(), doc_id);
+  if (!layer) layer = findMirrorByDocId(project(), doc_id);
   if (!layer) return false;
-  QgsLayerTreeLayer* node = QgsProject::instance()->layerTreeRoot()->findLayer(layer);
+  QgsLayerTreeLayer* node = project()->layerTreeRoot()->findLayer(layer);
   if (!node) return false;
   view->setCurrentIndex(view->node2index(node));
   return true;
@@ -2182,9 +2240,9 @@ void QgisMapStack::setMirrorLayerOpacity(const std::string& doc_id, double opaci
   auto it = impl_->mirror_by_doc.find(doc_id);
   if (it != impl_->mirror_by_doc.end()) {
     layer = qobject_cast<QgsVectorLayer*>(
-        QgsProject::instance()->mapLayer(QString::fromStdString(it->second)));
+        project()->mapLayer(QString::fromStdString(it->second)));
   }
-  if (!layer) layer = findMirrorByDocId(QgsProject::instance(), doc_id);
+  if (!layer) layer = findMirrorByDocId(project(), doc_id);
   if (!layer) throw std::invalid_argument("unknown doc_id: " + doc_id);
   layer->setOpacity(std::clamp(opacity, 0.0, 1.0));  // 触发 repaintRequested → 画布桥自动刷新
 }
@@ -2201,9 +2259,9 @@ std::map<std::string, std::string> QgisMapStack::execLayerProperties(
   auto it = impl_->mirror_by_doc.find(doc_id);
   if (it != impl_->mirror_by_doc.end()) {
     layer = qobject_cast<QgsVectorLayer*>(
-        QgsProject::instance()->mapLayer(QString::fromStdString(it->second)));
+        project()->mapLayer(QString::fromStdString(it->second)));
   }
-  if (!layer) layer = findMirrorByDocId(QgsProject::instance(), doc_id);
+  if (!layer) layer = findMirrorByDocId(project(), doc_id);
   if (!layer) throw std::invalid_argument("unknown mirror layer: " + doc_id);
 
   QgsVectorLayerProperties dialog(canvas, nullptr, layer);

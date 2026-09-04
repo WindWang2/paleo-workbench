@@ -12,6 +12,7 @@ class QgsLayerTreeView;
 class QgsMapTool;
 class QgsMapToolDigitizeFeature;
 class QgsVectorLayer;
+class QgsProject;
 using QgsFeatureId = long long;
 
 namespace pwb::qgis_render {
@@ -21,9 +22,11 @@ public:
   QgisMapStack();
   ~QgisMapStack();
 
-  void initialize();
+  void initialize(bool display = false);
+  bool isDisplay() const noexcept;
   bool initialized() const noexcept;
   int projectLayerCount() const;
+  int canvasLayerCount(std::uintptr_t canvas) const;
   void shutdown();
 
   std::uintptr_t createCanvas();
@@ -172,6 +175,8 @@ public:
 private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
+  QgsProject* project() const;
+  void syncCanvasLayers(std::uintptr_t canvas);
   // 存活性令牌：destroyed/flush 等队列回调经 weak_ptr 探测栈是否已析构，
   // 防 QgisMapStack 先亡时的 this 悬垂（M2 终局审查 I2）。
   std::shared_ptr<char> alive_token_ = std::make_shared<char>(0);

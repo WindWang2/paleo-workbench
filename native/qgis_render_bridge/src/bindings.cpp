@@ -543,9 +543,11 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
     auto mapstack = module.def_submodule("mapstack", "QGIS native map stack");
     py::class_<pwb::qgis_render::QgisMapStack>(mapstack, "QgisMapStack")
         .def(py::init<>())
-        .def("initialize", &pwb::qgis_render::QgisMapStack::initialize)
+        .def("initialize", &pwb::qgis_render::QgisMapStack::initialize,
+             py::arg("display") = false)
         .def_property_readonly("initialized", &pwb::qgis_render::QgisMapStack::initialized)
         .def("project_layer_count", &pwb::qgis_render::QgisMapStack::projectLayerCount)
+        .def("canvas_layer_count", &pwb::qgis_render::QgisMapStack::canvasLayerCount)
         .def("shutdown", [](pwb::qgis_render::QgisMapStack& self) {
           py::gil_scoped_acquire gil;
           self.shutdown();
