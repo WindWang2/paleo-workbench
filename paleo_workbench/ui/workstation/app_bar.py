@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -92,16 +93,56 @@ class WorkstationAppBar(QFrame):
 
         layout.addStretch(1)
 
-        self.sync_button = QToolButton(self)
-        self.sync_button.setObjectName("WorkstationSyncState")
-        self.sync_button.setIcon(
-            workstation_icon("circle-check.svg", tokens.PRIMARY)
-        )
-        self.sync_button.setText("同步已连接")
-        self.sync_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.sync_button.setToolTip("多视图选择与坐标同步已连接")
-        self.sync_button.setEnabled(False)
-        layout.addWidget(self.sync_button)
+        # B1/B16：视图菜单是主题与密度的生产入口（此前 set_theme 只有测试
+        # 调用，暗色/高对比在生产不可达；Ribbon 密度按钮随 Ribbon 0 高不可见）。
+        self.view_button = QToolButton(self)
+        self.view_button.setObjectName("WorkstationChromeButton")
+        self.view_button.setIcon(workstation_icon("rb-density-comfortable.svg"))
+        self.view_button.setText("视图")
+        self.view_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.view_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.view_button.setToolTip("主题与界面密度")
+        self._view_menu = QMenu(self.view_button)
+        self._theme_group = QActionGroup(self._view_menu)
+        self._density_group = QActionGroup(self._view_menu)
+        from paleo_workbench.ui.theme import DensityMode, ThemeMode, theme_manager
+
+        for mode, label in (
+            (ThemeMode.LIGHT, "浅色主题"),
+            (ThemeMode.DARK, "深色主题"),
+            (ThemeMode.HIGH_CONTRAST, "高对比主题"),
+        ):
+            action = self._view_menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(theme_manager.current_theme is mode)
+            action.setActionGroup(self._theme_group)
+            action.triggered.connect(
+                lambda _checked=False, m=mode: theme_manager.set_theme(m)
+            )
+        self._view_menu.addSeparator()
+        for mode, label in (
+            (DensityMode.COMPACT, "紧凑密度"),
+            (DensityMode.COMFORTABLE, "舒适密度"),
+        ):
+            action = self._view_menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(theme_manager.density is mode)
+            action.setActionGroup(self._density_group)
+            action.triggered.connect(
+                lambda _checked=False, m=mode: theme_manager.set_density(m)
+            )
+        # 主题/密度变化时刷新勾选态（跨入口切换保持一致）。
+        def _sync_view_checks(*_args) -> None:
+            for action, mode in zip(self._theme_group.actions(), list(ThemeMode)):
+                action.setChecked(theme_manager.current_theme is mode)
+            for action, mode in zip(
+                self._density_group.actions(), list(DensityMode)
+            ):
+                action.setChecked(theme_manager.density is mode)
+
+        theme_manager.theme_changed.connect(_sync_view_checks)
+        self.view_button.setMenu(self._view_menu)
+        layout.addWidget(self.view_button)
 
         self.task_button = QToolButton(self)
         self.task_button.setObjectName("WorkstationTaskButton")

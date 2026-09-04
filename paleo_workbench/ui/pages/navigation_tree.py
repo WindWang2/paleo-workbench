@@ -147,7 +147,7 @@ class NavigationTree(QTreeWidget):
             f" border-radius: {tokens.RADIUS_CARD}px; }}"
         )
 
-    def _on_theme_changed(self, _theme: str) -> None:
+    def _on_theme_changed(self, _theme: str, _density: str = "") -> None:
         self._apply_themed_sheet()
 
     def _build_tree(self) -> None:

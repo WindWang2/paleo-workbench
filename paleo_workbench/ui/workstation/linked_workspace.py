@@ -215,8 +215,12 @@ class LinkedInterpretationWorkspace(QWidget):
             toolbar_row1 = getattr(view, "_toolbar_row1", None)
             if toolbar_row1 is not None and getattr(view, "_inline_badge", None) is None:
                 badge = QLabel("Inline 剖面")
+                from paleo_workbench.ui import style as _style
+
+                pal = _style.palette()
                 badge.setStyleSheet(
-                    "color: #e53e3e; font-weight: bold; font-size: 11px; padding: 0 4px;"
+                    f"color: {pal['ERROR_RED']}; font-weight: bold;"
+                    " font-size: 11px; padding: 0 4px;"
                 )
                 actions = toolbar_row1.actions()
                 if actions:

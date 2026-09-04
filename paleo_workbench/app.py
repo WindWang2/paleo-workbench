@@ -267,11 +267,9 @@ class PaleoWorkbenchWindow(QMainWindow):
         # Route through the ThemeManager so density and the ACTIVE THEME
         # compose — a direct tokens.build_qss(density=...) would silently
         # reset a dark/high-contrast session back to light (#1047 review).
-        qss = self.app_shell.theme_manager.get_qss(density=density)
-        app = QApplication.instance()
-        if app is not None:
-            app.setStyleSheet(qss)
-        self.app_shell.setStyleSheet(qss)
+        # set_density 持久化并触发 theme_changed → app_shell 统一重贴 QSS
+        # （B1：密度是一等设置，不再只活在 Ribbon 的隐藏按钮里）。
+        self.app_shell.theme_manager.set_density(density)
         self.app_shell.set_density_checked(density)
 
     def _on_about(self) -> None:

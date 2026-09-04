@@ -108,6 +108,18 @@ class AgentWorkspace(QFrame):
                 "动作会通过 HarnessExecutor 完成参数校验、权限检查和结果验证。"
             )
 
+    @staticmethod
+    def _muted_html_color() -> str:
+        from paleo_workbench.ui import style
+
+        return str(style.palette().get("TEXT_SECONDARY", "#53616c"))
+
+    @staticmethod
+    def _success_html_color() -> str:
+        from paleo_workbench.ui import style
+
+        return str(style.palette().get("SUCCESS", "#15803d"))
+
     def submit(self, text: str) -> None:
         command = str(text or "").strip()
         if not command or self._project is None or self._current_task_id is not None:
@@ -117,7 +129,7 @@ class AgentWorkspace(QFrame):
         self.history.append(
             f"<hr><b>用户</b> · {command}<br>"
             f"<b>执行计划</b> · {plan.summary}<br>"
-            f"<span style='color:#53616c'>动作 {plan.action_id} · 回执 {receipt_id}</span>"
+            f"<span style='color:{self._muted_html_color()}'>动作 {plan.action_id} · 回执 {receipt_id}</span>"
         )
         self._run_plan(plan, receipt_id)
 
@@ -210,7 +222,7 @@ class AgentWorkspace(QFrame):
         summary = self._result_summary(plan, results)
         self.history.append(
             f"<b>执行完成</b> · {summary}<br>"
-            "<span style='color:#15803d'>校验通过，GUI 状态已同步。</span>"
+            f"<span style='color:{self._success_html_color()}'>校验通过，GUI 状态已同步。</span>"
         )
         self._apply_gui_action(plan)
 

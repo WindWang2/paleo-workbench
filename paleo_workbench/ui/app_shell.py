@@ -733,7 +733,7 @@ class AppShell(QWidget):
         """Switch the application theme (#1047): palette change, same tokens."""
         self.theme_manager.set_theme(mode)
 
-    def _on_theme_changed(self, theme: str) -> None:
+    def _on_theme_changed(self, theme: str, density: str = "") -> None:
         qss = self.theme_manager.get_qss()
         self.setStyleSheet(qss)
         # top-level windows outside this shell (dialogs) follow the theme too

@@ -24,15 +24,20 @@ from paleo_workbench import tokens
 from paleo_workbench.ui.workstation.common import workstation_icon
 
 
-_TITLE_QSS = f"""
+def _title_qss() -> str:
+    """主题感知的 dock 标题栏样式（B1：暗色切换时随 palette 重渲染）。"""
+    from paleo_workbench.ui import style
+
+    pal = style.palette()
+    return f"""
 QWidget#WorkstationDockTitleBar {{
-    background: {tokens.BG_HEADER};
-    border-bottom: 1px solid {tokens.BORDER};
+    background: {pal['BG_HEADER']};
+    border-bottom: 1px solid {pal['BORDER']};
     min-height: 28px;
     max-height: 30px;
 }}
 QLabel#WorkstationDockTitleLabel {{
-    color: {tokens.TEXT_PRIMARY};
+    color: {pal['TEXT_PRIMARY']};
     font-size: 12px;
     font-weight: 600;
     padding-left: 8px;
@@ -41,7 +46,7 @@ QToolButton#WorkstationDockTitleButton {{
     background: transparent;
     border: none;
     border-radius: 3px;
-    color: {tokens.TEXT_SECONDARY};
+    color: {pal['TEXT_SECONDARY']};
     min-width: 22px;
     max-width: 22px;
     min-height: 22px;
@@ -50,11 +55,11 @@ QToolButton#WorkstationDockTitleButton {{
     margin: 0 1px;
 }}
 QToolButton#WorkstationDockTitleButton:hover {{
-    background: {tokens.BG_SEARCH};
-    color: {tokens.PRIMARY};
+    background: {pal['BG_SEARCH']};
+    color: {pal['PRIMARY']};
 }}
 QToolButton#WorkstationDockTitleButton:pressed {{
-    background: {tokens.BG_SELECTION};
+    background: {pal['BG_SELECTION']};
 }}
 """
 
@@ -100,7 +105,10 @@ class DockTitleBar(QWidget):
         self._close_btn.clicked.connect(self._request_close)
         layout.addWidget(self._close_btn)
 
-        self.setStyleSheet(_TITLE_QSS)
+        # B1：动态注册 —— 主题切换时 style.repolish_all 重渲染。
+        from paleo_workbench.ui import style as _style
+
+        _style.bind(self, _title_qss)
         self._sync_float_affordance()
         self._sync_feature_buttons()
 
