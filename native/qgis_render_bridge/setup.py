@@ -46,6 +46,29 @@ def _vendor_build_dir() -> Path:
     return Path(configured) if configured else HERE / "build" / "qgis-vendor"
 
 
+def _vendor_artifacts_present(build_dir: Path) -> bool:
+    """True when a previously completed vendor build can be linked as-is."""
+    return (
+        _vendor_core_library(build_dir).is_file()
+        and _vendor_gui_library(build_dir).is_file()
+        and _vendor_analysis_library(build_dir).is_file()
+        and (build_dir / "resources" / "srs.db").is_file()
+    )
+
+
+def _reuse_vendor_requested(build_dir: Path) -> bool:
+    """Honour PALEO_QGIS_REUSE_VENDOR=1: link an existing vendor build.
+
+    Multi-worktree development points PALEO_QGIS_BUILD_DIR at a sibling
+    worktree's completed vendor build (same vendored-QGIS commit). Re-running
+    cmake configure there would fail on the source-dir mismatch and rebuilding
+    QGIS per worktree is exactly what the build-budget rules forbid, so an
+    explicit opt-out of the configure step is required.
+    """
+    flag = os.environ.get("PALEO_QGIS_REUSE_VENDOR", "").strip().lower()
+    return flag in {"1", "true", "yes", "on"} and _vendor_artifacts_present(build_dir)
+
+
 def _vendor_core_library(build_dir: Path) -> Path:
     library_dir = build_dir / "output" / "lib"
     if sys.platform == "win32":
@@ -167,19 +190,24 @@ def _build_vendored_qgis() -> tuple[Path, Path]:
     if prefix:
         cmake_args.append(f"-DCMAKE_PREFIX_PATH={prefix}")
     try:
-        subprocess.run(cmake_args, check=True)
-        if not all(
-            library.is_file()
-            for library in (core_library, gui_library, analysis_library)
-        ) or not resource_database.is_file():
-            subprocess.run(
-                [
-                    "cmake", "--build", str(build_dir),
-                    "--target", "resources", "qgis_core", "qgis_gui", "qgis_analysis",
-                    "--parallel", jobs,
-                ],
-                check=True,
-            )
+        if _reuse_vendor_requested(build_dir):
+            # Artifacts already validated by _reuse_vendor_requested; skip
+            # configure/build entirely (cross-worktree vendor reuse).
+            pass
+        else:
+            subprocess.run(cmake_args, check=True)
+            if not all(
+                library.is_file()
+                for library in (core_library, gui_library, analysis_library)
+            ) or not resource_database.is_file():
+                subprocess.run(
+                    [
+                        "cmake", "--build", str(build_dir),
+                        "--target", "resources", "qgis_core", "qgis_gui", "qgis_analysis",
+                        "--parallel", jobs,
+                    ],
+                    check=True,
+                )
     except (OSError, subprocess.CalledProcessError) as exc:
         raise RuntimeError("could not build the vendored QGIS core") from exc
     for library in (core_library, gui_library, analysis_library):
