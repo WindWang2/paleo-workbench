@@ -881,6 +881,15 @@ class CompositeEditController(QObject):
             # 会话级工具在会话消失（保存/回滚/flush 提交）后必须回落 pan：
             # 旧工具持有的 session 缓冲已与图层脱钩，继续数字化会静默丢失。
             if layer is None or layer.edit_session is None:
+                # 但同步链上选择会瞬时扫过无会话图层（bind/_publish 逐层
+                # set_active_layer）：只要工具持有的会话仍属于某个活图层
+                # （没被提交/回滚收回），就保留工具不打断数字化；会话真被
+                # 收回才回落 pan（review #1 语义不变）。
+                session = getattr(self.tools.active_tool, "session", None)
+                if session is not None and any(
+                    l.edit_session is session for l in self._layers.values()
+                ):
+                    return
                 self.activate_tool("pan")
                 return
             if (
