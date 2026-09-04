@@ -292,6 +292,8 @@ class QgisDisplayCanvas(QWidget):
 
     def _mark_disposed(self) -> None:
         self._shutdown_done = True
+        # 放开栈引用：~QgisMapStack 在画布亡后走守卫路径回收 owned project。
+        self.stack = None
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self.shutdown()

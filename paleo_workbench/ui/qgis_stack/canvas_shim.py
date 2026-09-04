@@ -656,6 +656,11 @@ class QgisCanvasShim(QWidget):
         self._restore_tool_patch()
         self._shutdown_done = True
         self._canvas_destroyed = True
+        # 画布总是先于本组件析构（host 子孙链），桥内 destroyed 连接已在
+        # C++ 侧回收 bridge/tool 表；这里放开唯一引用，让 ~QgisMapStack →
+        # shutdown() 走 null-QPointer 守卫路径把自有图层移出共享 QgsProject，
+        # 避免泄漏到后续画布。栈内层删除不再有任何活画布可被重入。
+        self.stack = None
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self.shutdown()
