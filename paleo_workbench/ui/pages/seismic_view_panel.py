@@ -6,12 +6,13 @@ from typing import Any
 import numpy as np
 
 from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSplitter,
     QStackedLayout,
     QVBoxLayout,
     QWidget,
@@ -71,6 +72,30 @@ def _primary_resource(project: Any, task: Any, key: str):
     return by_id.get(ids[0])
 
 
+# ----------------------------------------------------------------------
+# Profile interpretation mode (2-D surface) — engine-view probing facts.
+#
+# These names describe the embedded geoviz.SeismicView's internal layout.
+# They are an implementation detail of *this panel* (which wraps the
+# engine); callers must configure the surface through the public API
+# (``enter_profile_mode`` / ``exit_profile_mode`` / ``set_profile_mode``),
+# never by reaching into ``panel.view`` privates themselves.
+# ----------------------------------------------------------------------
+_PROFILE_MODE_TOOLBAR_HIDDEN_WIDGETS = (
+    "_3d_mode_combo",
+    "_horizon_menu_btn",
+    "_render_menu_btn",
+    "_overlay_menu_btn",
+    "_slice_label",
+    "_readout_label",
+)
+# Toolbar entries identified by caption because the engine builds them as
+# bare QPushButton/QLabel widgets without keeping a named attribute.
+_PROFILE_MODE_TOOLBAR_HIDDEN_ACTION_LABELS = frozenset({"3D模式:", "加载 SEGY", "Demo"})
+_PROFILE_MODE_SECONDARY_PROFILES = ("_profile_xl", "_profile_t", "_profile_arb")
+_QWIDGETSIZE_MAX = 0x00FFFFFF  # mirrors Qt's QWIDGETSIZE_MAX
+
+
 class SeismicViewPanel(QFrame):
     """Center panel embedding geo-viz-engine's SeismicView."""
 
@@ -84,6 +109,14 @@ class SeismicViewPanel(QFrame):
         self._horizon_name: str = ""
         self._expected_segy_path: str | None = None
         self._segy_session_active = True
+        # Profile interpretation mode (2-D surface) state. ``_profile_mode_restore``
+        # keeps the *first-enter* pristine geometry so exit can undo exactly what
+        # enter did, even across repeated mode cycles.
+        self._profile_mode = False
+        self._profile_mode_restore: dict[str, Any] = {}
+        self._profile_mode_hidden_widgets: list[QWidget] = []
+        self._profile_mode_hidden_actions: list[QAction] = []
+        self._profile_mode_inline_header: QWidget | None = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -266,6 +299,250 @@ class SeismicViewPanel(QFrame):
             return False
         btn.setChecked(bool(enabled))
         return True
+
+    # ------------------------------------------------------------------
+    # Profile interpretation mode (public API — the documented entry point)
+    #
+    # ``enter_profile_mode`` reshapes the panel into a 2-D inline profile
+    # interpretation surface: the 3-D renderer and 3-D-only toolbar chrome
+    # are hidden, the inline VD profile becomes the main surface and an
+    # "Inline 剖面" badge marks the toolbar.  ``exit_profile_mode`` restores
+    # the default 3-D + profiles layout.  Both are idempotent and mutually
+    # exclusive with the default mode; data-loading paths are unaffected and
+    # a volume loaded while in profile mode keeps the 3-D renderer hidden.
+    # ------------------------------------------------------------------
+
+    @property
+    def profile_mode(self) -> bool:
+        """Whether the panel is currently a 2-D profile interpretation surface.
+
+        Read-only by design — switch modes via :meth:`enter_profile_mode` /
+        :meth:`exit_profile_mode` / :meth:`set_profile_mode`.
+        """
+        return self._profile_mode
+
+    def set_profile_mode(self, enabled: bool) -> None:
+        """Enter or exit profile mode (boolean convenience alias)."""
+        if bool(enabled):
+            self.enter_profile_mode()
+        else:
+            self.exit_profile_mode()
+
+    def enter_profile_mode(self) -> None:
+        """Configure the panel as a 2-D inline profile interpretation surface.
+
+        Hides the 3-D renderer, the crossline/time/arbitrary profile panels,
+        the inline panel's row header and all 3-D-only toolbar widgets and
+        actions; shows an "Inline 剖面" badge on the primary toolbar.  The
+        display-mode / colormap / attribute / picking toolbar tools stay
+        available for inline/crossline interpretation.  Idempotent: calling
+        it while already in profile mode is a no-op.
+        """
+        if self._profile_mode:
+            return
+        self._profile_mode = True
+        self._apply_profile_mode()
+
+    def exit_profile_mode(self) -> None:
+        """Restore the default 3-D + profiles layout.
+
+        Undoes exactly what :meth:`enter_profile_mode` changed (renderer,
+        splitter geometry, profile panels, toolbar widgets/actions, badge).
+        Idempotent: calling it while already in the default mode is a no-op.
+        """
+        if not self._profile_mode:
+            return
+        self._profile_mode = False
+        self._restore_default_layout()
+
+    def set_interpretation_bar_visible(self, visible: bool) -> None:
+        """Show/hide the horizon-interpretation action row (P1-B bar).
+
+        The bar is a panel-owned feature; hiding it is a layout-space
+        decision of the hosting workspace and is orthogonal to profile mode.
+        """
+        for button in (
+            self.interp_draft_btn,
+            self.interp_sync_btn,
+            self.interp_undo_btn,
+            self.interp_redo_btn,
+            self.interp_save_btn,
+            self.interp_reload_btn,
+        ):
+            button.setVisible(bool(visible))
+
+    # ------------------------------------------------------------------
+    # Profile mode internals — all geoviz.SeismicView private probing is
+    # encapsulated here and degrades to no-ops when an engine internal is
+    # missing (e.g. tests running against a stub view).
+    # ------------------------------------------------------------------
+
+    def _view_main_splitter(self) -> QSplitter | None:
+        """The engine's vertical [3-D renderer | profiles] splitter, if any.
+
+        The engine keeps the splitter as a local of ``SeismicView.__init__``,
+        so the only stable handle is the renderer's parent widget.
+        """
+        renderer = getattr(self.view, "_renderer_3d", None)
+        parent = renderer.parentWidget() if renderer is not None else None
+        return parent if isinstance(parent, QSplitter) else None
+
+    def _view_profile_panel(self, profile_name: str) -> QWidget | None:
+        """Wrapper panel (header + profile canvas) for an engine profile."""
+        profile = getattr(self.view, profile_name, None)
+        return profile.parentWidget() if profile is not None else None
+
+    def _make_inline_badge(self) -> QLabel:
+        from paleo_workbench.ui import style as _style
+
+        badge = QLabel("Inline 剖面")
+        pal = _style.palette()
+        badge.setStyleSheet(
+            f"color: {pal['ERROR_RED']}; font-weight: bold;"
+            " font-size: 11px; padding: 0 4px;"
+        )
+        return badge
+
+    def _apply_profile_mode(self) -> None:
+        view = self.view
+        renderer = getattr(view, "_renderer_3d", None)
+        splitter = self._view_main_splitter()
+        if not self._profile_mode_restore:
+            # First transition into profile mode: capture the pristine
+            # geometry so every later exit restores the original layout.
+            if renderer is not None:
+                self._profile_mode_restore["renderer_min_height"] = (
+                    renderer.minimumHeight()
+                )
+            if splitter is not None:
+                sizes = splitter.sizes()
+                self._profile_mode_restore["splitter_sizes"] = (
+                    sizes if sum(sizes) > 0 else None
+                )
+                self._profile_mode_restore["splitter_handle_width"] = (
+                    splitter.handleWidth()
+                )
+                self._profile_mode_restore["splitter_collapsible0"] = (
+                    splitter.isCollapsible(0)
+                )
+            inline_panel = self._view_profile_panel("_profile_il")
+            inline_layout = inline_panel.layout() if inline_panel is not None else None
+            header = (
+                inline_layout.itemAt(0).widget()
+                if inline_layout is not None and inline_layout.count() > 0
+                else None
+            )
+            if header is not None:
+                self._profile_mode_restore["inline_header_max"] = header.maximumHeight()
+
+        # Collapse the 3-D renderer pane; the inline profile takes the space.
+        if renderer is not None:
+            renderer.setMinimumHeight(0)
+            renderer.hide()
+        if splitter is not None:
+            splitter.setCollapsible(0, True)
+            splitter.setHandleWidth(0)
+            splitter.setSizes([0, 1000])
+
+        hidden: list[QWidget] = []
+        for name in _PROFILE_MODE_SECONDARY_PROFILES:
+            panel = self._view_profile_panel(name)
+            if panel is not None:
+                panel.hide()
+                hidden.append(panel)
+        # The inline row header is too tall for a compact 2-D surface; the
+        # identity moves into the toolbar badge below.
+        inline_panel = self._view_profile_panel("_profile_il")
+        header = None
+        if inline_panel is not None:
+            inline_layout = inline_panel.layout()
+            if inline_layout is not None and inline_layout.count() > 0:
+                header = inline_layout.itemAt(0).widget()
+            if header is not None:
+                header.hide()
+                header.setFixedHeight(0)
+        self._profile_mode_inline_header = header
+
+        toolbar = getattr(view, "_toolbar_row1", None)
+        badge = getattr(view, "_inline_badge", None)
+        if toolbar is not None and badge is None:
+            badge = self._make_inline_badge()
+            actions = toolbar.actions()
+            if actions:
+                toolbar.insertWidget(actions[0], badge)
+            else:
+                toolbar.addWidget(badge)
+            # Compat shim: earlier workspaces read this private attribute.
+            view._inline_badge = badge
+        if badge is not None:
+            badge.show()
+
+        for name in _PROFILE_MODE_TOOLBAR_HIDDEN_WIDGETS:
+            widget = getattr(view, name, None)
+            if widget is not None:
+                widget.hide()
+                hidden.append(widget)
+
+        hidden_actions: list[QAction] = []
+        if toolbar is not None:
+            hidden_set = set(hidden)
+            for action in toolbar.actions():
+                if not action.isVisible():
+                    continue
+                widget = toolbar.widgetForAction(action)
+                label = widget.text().strip() if hasattr(widget, "text") else ""
+                if (
+                    widget in hidden_set
+                    or label in _PROFILE_MODE_TOOLBAR_HIDDEN_ACTION_LABELS
+                ):
+                    action.setVisible(False)
+                    hidden_actions.append(action)
+        self._profile_mode_hidden_widgets = hidden
+        self._profile_mode_hidden_actions = hidden_actions
+
+    def _restore_default_layout(self) -> None:
+        view = self.view
+        restore = self._profile_mode_restore
+        renderer = getattr(view, "_renderer_3d", None)
+        splitter = self._view_main_splitter()
+        if renderer is not None:
+            renderer.setMinimumHeight(
+                int(restore.get("renderer_min_height", 200))
+            )
+            renderer.show()
+        if splitter is not None:
+            splitter.setCollapsible(
+                0, bool(restore.get("splitter_collapsible0", False))
+            )
+            splitter.setHandleWidth(int(restore.get("splitter_handle_width", 8)))
+            sizes = restore.get("splitter_sizes") or [350, 350]
+            splitter.setSizes([int(size) for size in sizes])
+
+        for widget in self._profile_mode_hidden_widgets:
+            try:
+                widget.show()
+            except RuntimeError:  # underlying C++ object already deleted
+                continue
+        self._profile_mode_hidden_widgets = []
+        for action in self._profile_mode_hidden_actions:
+            try:
+                action.setVisible(True)
+            except RuntimeError:
+                continue
+        self._profile_mode_hidden_actions = []
+
+        header = self._profile_mode_inline_header
+        if header is not None:
+            header.setMinimumHeight(0)
+            header.setMaximumHeight(
+                int(restore.get("inline_header_max", _QWIDGETSIZE_MAX))
+            )
+            header.show()
+        self._profile_mode_inline_header = None
+
+        badge = getattr(view, "_inline_badge", None)
+        if badge is not None:
+            badge.hide()
 
     # ------------------------------------------------------------------
     # Multi-view cursor producer (#1029)
