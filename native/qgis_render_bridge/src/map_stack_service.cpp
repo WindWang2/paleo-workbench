@@ -104,6 +104,11 @@ void recordMirrorFeatureFids(std::unordered_map<long long, std::string>& table,
                       .toString();
         }
     }
+    // 终局审查 M1：OGR 解析会静默丢弃无效要素（下标平移风险）——
+    // 数量失配时整表弃用，退化为数值 fid 回落，而不是错位映射。
+    if (ids.size() != static_cast<int>(flist.size())) {
+        return;
+    }
     int i = 0;
     for (const QgsFeature& f : flist) {
         if (i < ids.size() && !ids[i].isEmpty())
@@ -471,7 +476,8 @@ struct QgisMapStack::Impl {
       auto sit = mirror_style_sig.find(doc_id);
       if (sit != mirror_style_sig.end()) mirror_style_sig.erase(sit);
       known_layer_names.erase(doc_id);
-    known_layer_visibility.erase(doc_id);
+      known_layer_visibility.erase(doc_id);
+      mirror_feature_fids.erase(doc_id);
     }
   }
 };
@@ -695,6 +701,27 @@ void QgisMapStack::shutdown() {
   }
   impl_->tools.clear();
   impl_->cad_docks.clear();
+  // 终局审查 C1：清工具表前解除各画布上激活的桥内编辑/采点工具，
+  // 否则 scratch 层随 kit 析构而激活工具的 mLayer 悬垂（UAF）。
+  for (auto& kv : impl_->canvas_refs) {
+    if (kv.second.isNull()) continue;
+    QgsMapCanvas* c = kv.second;
+    QgsMapTool* active = c ? c->mapTool() : nullptr;
+    if (active == nullptr) continue;
+    bool ours = false;
+    for (auto& kitKv : impl_->capture_kits) {
+      for (QgsMapToolDigitizeFeature* t : kitKv.second.tools)
+        ours = ours || t == active;
+    }
+    auto inTables = [&](const auto& table) {
+      for (auto& t : table) ours = ours || t.second == active;
+    };
+    inTables(impl_->vertex_tools);
+    inTables(impl_->move_tools);
+    inTables(impl_->select_tools);
+    inTables(impl_->identify_tools);
+    if (ours) c->unsetMapTool(active);
+  }
   impl_->capture_kits.clear();
   impl_->digitize_callbacks.clear();
   impl_->vertex_tools.clear();
@@ -815,6 +842,27 @@ void QgisMapStack::destroyCanvas(std::uintptr_t canvas_addr) {
   // deletes the widget.
   impl_->tree_bridges.erase(canvas_addr);
   impl_->cad_docks.erase(canvas_addr);  // Qt 父子关系负责销毁（parent=canvas）
+  // 终局审查 C1：桥内编辑/采点工具 parent=画布，清表前先解除激活——
+  // 否则 scratch 层随 kit 析构而激活工具的 mLayer 悬垂（UAF）。
+  if (!it->second.isNull()) {
+    QgsMapCanvas* c = it->second;
+    QgsMapTool* active = c ? c->mapTool() : nullptr;
+    if (active != nullptr) {
+      bool ours = false;
+      auto kitIt = impl_->capture_kits.find(canvas_addr);
+      if (kitIt != impl_->capture_kits.end()) {
+        for (QgsMapToolDigitizeFeature* t : kitIt->second.tools)
+          ours = ours || t == active;
+      }
+      auto inTable = [&](const auto& table) {
+        auto tIt = table.find(canvas_addr);
+        return tIt != table.end() && tIt->second == active;
+      };
+      ours = ours || inTable(impl_->vertex_tools) || inTable(impl_->move_tools) ||
+             inTable(impl_->select_tools) || inTable(impl_->identify_tools);
+      if (ours) c->unsetMapTool(active);
+    }
+  }
   impl_->capture_kits.erase(canvas_addr);
   impl_->digitize_callbacks.erase(canvas_addr);
   impl_->vertex_tools.erase(canvas_addr);
@@ -825,7 +873,9 @@ void QgisMapStack::destroyCanvas(std::uintptr_t canvas_addr) {
   impl_->selection_callbacks.erase(canvas_addr);
   impl_->highlights.erase(canvas_addr);
   impl_->canvas_refs.erase(it);
-  impl_->dead_canvas_addrs.erase(canvas_addr);
+  // 终局审查 M5：销毁后的地址必须留在 dead-set（拒绝后续同地址调用把
+  // 已亡指针 reinterpret 成活画布）；新画布复用地址时 createCanvas 自清。
+  impl_->dead_canvas_addrs.insert(canvas_addr);
 }
 
 void QgisMapStack::setCanvasWhiteBackground(std::uintptr_t canvas) {
@@ -1426,8 +1476,10 @@ void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kin
     }
     // QgsMapToolIdentifyFeature 无 setLayer——目标图层在构造时钉死；
     // 每次激活按当前图层新建（旧工具由 Qt parent=画布回收）。
-    auto* tool = new QgsMapToolIdentifyFeature(
-        canvas, qobject_cast<QgsVectorLayer*>(canvas->currentLayer()));
+    // 回调解析同样钉死构造时图层（终局审查 I3）：激活后切当前图层
+    // 不得让 (doc_id, feature_id) 来自两个层。
+    auto* targetLayer = qobject_cast<QgsVectorLayer*>(canvas->currentLayer());
+    auto* tool = new QgsMapToolIdentifyFeature(canvas, targetLayer);
     impl_->identify_tools[canvas_addr] = tool;
     std::weak_ptr<char> alive2 = alive_token_;
     QObject::connect(
@@ -1435,21 +1487,18 @@ void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kin
         static_cast<void (QgsMapToolIdentifyFeature::*)(const QgsFeature&)>(
             &QgsMapToolIdentifyFeature::featureIdentified),
         canvas,
-        [this, alive2, canvas_addr](const QgsFeature& feature) {
+        [this, alive2, canvas_addr,
+         target = QPointer<QgsVectorLayer>(targetLayer)](const QgsFeature& feature) {
         if (alive2.expired()) return;
         auto cbIt = impl_->selection_callbacks.find(canvas_addr);
         if (cbIt == impl_->selection_callbacks.end() || !cbIt->second) return;
         std::string docId;
         std::string fid = std::to_string(static_cast<long long>(feature.id()));
-        auto refIt = impl_->canvas_refs.find(canvas_addr);
-        if (refIt != impl_->canvas_refs.end() && !refIt->second.isNull()) {
-          auto* vl = qobject_cast<QgsVectorLayer*>(refIt->second->currentLayer());
-          if (vl != nullptr) {
-            docId = vl->customProperty(QStringLiteral("pwb/doc_id"))
-                        .toString()
-                        .toStdString();
-            fid = fidResolver()(vl, feature.id());
-          }
+        if (!target.isNull()) {
+          docId = target->customProperty(QStringLiteral("pwb/doc_id"))
+                      .toString()
+                      .toStdString();
+          fid = fidResolver()(target.data(), feature.id());
         }
         cbIt->second("identify", std::string("{\"layer_doc_id\":\"") + docId +
                                      "\",\"feature_id\":\"" + fid + "\"}");
@@ -1500,10 +1549,23 @@ QgsMapToolDigitizeFeature* QgisMapStack::digitizeToolFor(std::uintptr_t canvas_a
     tool->setLayer(kit.scratch[slot].get());
     std::weak_ptr<char> alive = alive_token_;
     QObject::connect(tool, &QgsMapToolDigitizeFeature::digitizingCompleted, canvas,
-                     [this, alive, canvas_addr](const QgsFeature& feature) {
+                     [this, alive, canvas_addr, slot, canvas](const QgsFeature& feature) {
       if (alive.expired()) return;
       auto cbIt = impl_->digitize_callbacks.find(canvas_addr);
       if (cbIt == impl_->digitize_callbacks.end() || !cbIt->second) return;
+      // 终局审查 I2：scratch CRS 在工具激活时钉死；画布 CRS 中途变更后
+      // 旧 CRS 几何不得静默写入权威会话——按 canceled 上报拒绝。
+      // 画布 CRS 无效时 scratch 以 EPSG:4326 兜底创建（见 digitizeToolFor），
+      // 该情形视为一致。
+      auto kitIt = impl_->capture_kits.find(canvas_addr);
+      const QgsCoordinateReferenceSystem canvasCrs =
+          canvas->mapSettings().destinationCrs();
+      if (canvasCrs.isValid() && kitIt != impl_->capture_kits.end() &&
+          kitIt->second.scratch[slot] &&
+          kitIt->second.scratch[slot]->crs() != canvasCrs) {
+        cbIt->second("canceled", std::string());
+        return;
+      }
       cbIt->second("completed", feature.geometry().asJson().toStdString());
     });
     QObject::connect(tool, &QgsMapToolDigitizeFeature::digitizingCanceled, canvas,

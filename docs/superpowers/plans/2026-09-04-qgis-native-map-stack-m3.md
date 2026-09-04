@@ -66,7 +66,7 @@
   - 内部：`createCanvas` 时为每画布建隐藏 `QgsAdvancedDigitizingDockWidget`（成员 QPointer 持有，画布销毁自动随父子关系回收；**不可在 destroyed 信号里做带 Python 回调的事**——M2 教训）
 - Python 侧 `paleo_workbench/ui/qgis_stack/canvas_shim.py`：`set_map_tool_controller` 装配处挂 SnappingService 状态变更 → `stack.set_snapping_config` 的映射函数（`_push_snapping_config()`，从 SnappingService 读 enabled/tolerance/types/per-layer 覆盖序列化为上述 JSON）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_qgis_snapping_config.py
@@ -119,12 +119,12 @@ def test_snap_disabled_returns_no_match(stack):
     assert result["matched"] is False
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `/home/kevin/projects/paleo_project/run_env.sh /home/kevin/projects/paleo_project/main tests/test_qgis_snapping_config.py -v --basetemp=$(mktemp -d)`
 Expected: FAIL（`AttributeError: set_snapping_config`）
 
-- [ ] **Step 3: 实现 C++**
+- [x] **Step 3: 实现 C++**
 
 ```cpp
 // map_stack_service.hpp 追加（类 public 区）：
@@ -146,16 +146,16 @@ Expected: FAIL（`AttributeError: set_snapping_config`）
 //   返回 {"matched": m.isValid(), "x": m.point().x(), ...}；layer_doc_id 从 m.layer() customProperty 读
 ```
 
-- [ ] **Step 4: 运行确认通过 + Python 侧接线**
+- [x] **Step 4: 运行确认通过 + Python 侧接线**
 
 canvas_shim.py 增 `_push_snapping_config()`：从 controller 的 SnappingService 读状态序列化下推；SnappingService 状态变更处（对话框确认/菜单勾选）调用。SnappingService 自身**不删**（仍是状态权威；采点命中逻辑改由 QGIS 端完成，Python 端 SnappingService 用于配置持久化与非画布消费方）。
 
-- [ ] **Step 5: 回归**
+- [x] **Step 5: 回归**
 
 Run: `run_env.sh tests/test_qgis_snapping_config.py tests/test_qgis_mapstack_tools.py tests/test_map_interaction.py -q --basetemp=$(mktemp -d)`
 Expected: 全绿（test_map_interaction 是 Python 侧 SnappingService 纯逻辑，不受影响）
 
-- [ ] **Step 6: 提交** `m3(bridge): hidden cadDock + snapping config pushdown`
+- [x] **Step 6: 提交** `m3(bridge): hidden cadDock + snapping config pushdown`
 
 ---
 
@@ -175,7 +175,7 @@ Expected: 全绿（test_map_interaction 是 Python 侧 SnappingService 纯逻辑
   - 镜像策略决定：**digitize 工具不 setLayer 到镜像层**（镜像只读、永不进编辑模式）；scratch 层方案绕开「QgsMapToolDigitizeFeature 是否要求 layer editable」的不确定性。实施时若发现 DigitizeFeature 对非编辑态 layer 有 assert，scratch 层调 `startEditing()` 也无所谓——它不落持久化。
 - Python 侧 canvas_shim：tool_id 映射表扩展 `add_point→add_point` 等；`set_digitize_callback` 回调里：status==completed → 当前 VectorEditSession `add_feature(geometry)`（经既有 `_CaptureTool` 同款落点，复用 composite_editing 的 session 解析），status==canceled → 不变更数据只刷新工具条状态。Python 旧 `_CaptureTool` 的鼠标事件路径在 QGIS 画布模式下不再被调用（shim 本来就不转发鼠标事件），保留该类供 headless/测试与非 QGIS 路径。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_qgis_digitize_tool.py
@@ -238,9 +238,9 @@ def test_escape_cancels_digitizing(qtbot, stack):
     qtbot.waitUntil(lambda: any(s == "canceled" for s, _ in events), timeout=2000)
 ```
 
-- [ ] **Step 2: 运行确认失败**（`set_digitize_callback` 不存在 / kind 不识别）
+- [x] **Step 2: 运行确认失败**（`set_digitize_callback` 不存在 / kind 不识别）
 
-- [ ] **Step 3: 实现 C++**
+- [x] **Step 3: 实现 C++**
 
 ```cpp
 // map_stack_service.hpp public 区追加：
@@ -263,15 +263,15 @@ def test_escape_cancels_digitizing(qtbot, stack):
 //   gil_scoped_acquire 包一层（与 M2 树回调同模式）； destroyed 清理走孤儿坟场（M2 教训）
 ```
 
-- [ ] **Step 4: 运行确认通过 + Python 接线**
+- [x] **Step 4: 运行确认通过 + Python 接线**
 
 canvas_shim.py：tool_id → kind 映射表加 add_point/add_line/add_polygon；装配 `set_digitize_callback`：completed → 经 controller 当前活动 session `add_feature`（geometry dict）；session 不存在时忽略并记日志（与既有 `_CaptureTool` 无会话行为一致）。canceled → `action_state` 刷新。
 
-- [ ] **Step 5: 回归**
+- [x] **Step 5: 回归**
 
 Run: `run_env.sh tests/test_qgis_digitize_tool.py tests/test_qgis_snapping_config.py tests/test_qgis_mapstack_tools.py tests/test_map_tools.py tests/test_vector_edit_session.py tests/test_composite_editing.py -q --basetemp=$(mktemp -d)`
 
-- [ ] **Step 6: 提交** `m3(bridge): native digitize tools for point/line/polygon capture`
+- [x] **Step 6: 提交** `m3(bridge): native digitize tools for point/line/polygon capture`
 
 ---
 
@@ -296,17 +296,17 @@ Run: `run_env.sh tests/test_qgis_digitize_tool.py tests/test_qgis_snapping_confi
     - fid 语义：镜像层 QgsFeature id 与文档 feature_id 的映射——镜像 upsert 时把文档 feature_id 写进 QgsFeature attribute（M2 镜像已带属性；若 feature_id 不在属性里，Task 内补一列 `__pwb_fid` 隐藏属性）。
 - Python 侧 canvas_shim：`vertex_moved` → `session.set_vertex(feature_id, vertex_index, (x,y))`；`feature_moved` → `session.move_feature(feature_id, dx, dy)`；`pick_miss` → 不变更。
 
-- [ ] **Step 1: 写失败测试**（QTest 鼠标 press/move/release 序列驱动两工具；断言回调 payload 与 session 应用后文档几何变化——session 部分用 canvas_shim 层集成测试或直接桥级测试断言回调 JSON）
+- [x] **Step 1: 写失败测试**（QTest 鼠标 press/move/release 序列驱动两工具；断言回调 payload 与 session 应用后文档几何变化——session 部分用 canvas_shim 层集成测试或直接桥级测试断言回调 JSON）
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
-- [ ] **Step 3: 实现**（edit_tools.hpp/.cpp + 绑定 + shim 接线）
+- [x] **Step 3: 实现**（edit_tools.hpp/.cpp + 绑定 + shim 接线）
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
-- [ ] **Step 5: 回归**（test_qgis_vertex_move_tools.py + test_map_tools.py + test_vector_edit_session.py + test_composite_editing.py）
+- [x] **Step 5: 回归**（test_qgis_vertex_move_tools.py + test_map_tools.py + test_vector_edit_session.py + test_composite_editing.py）
 
-- [ ] **Step 6: 提交** `m3(bridge): vertex/move edit tools with Python-authoritative writes`
+- [x] **Step 6: 提交** `m3(bridge): vertex/move edit tools with Python-authoritative writes`
 
 ---
 
@@ -325,7 +325,7 @@ Run: `run_env.sh tests/test_qgis_digitize_tool.py tests/test_qgis_snapping_confi
   - `highlight_features(canvas, layer_doc_id, feature_ids_json) -> None` / `clear_highlights(canvas) -> None`（QgsRubberBand 选中高亮——QGIS 桌面选中色，画布刷新时重画；Python 选集是权威，高亮只是投影）
 - Python 侧：selection 回调 → controller 既有选集 API（composite_editing 选集状态）；选集变更（含表格/树侧选）→ `highlight_features` 投影。旧 Python 选择工具的命中逻辑在 QGIS 模式下退役（类保留供非 QGIS 路径）。
 
-- [ ] **Step 1: 写失败测试** → **Step 2: 确认失败** → **Step 3: 实现** → **Step 4: 通过** → **Step 5: 回归** → **Step 6: 提交** `m3(bridge): native select/identify tools + rubber band highlight`
+- [x] **Step 1: 写失败测试** → **Step 2: 确认失败** → **Step 3: 实现** → **Step 4: 通过** → **Step 5: 回归** → **Step 6: 提交** `m3(bridge): native select/identify tools + rubber band highlight`
 
 ---
 
@@ -342,7 +342,7 @@ Run: `run_env.sh tests/test_qgis_digitize_tool.py tests/test_qgis_snapping_confi
 - Ctrl+Z/Ctrl+Shift+Z：仍落 Python undo 栈（map_action_controller :88-96 不动）；**确认原生工具不使用 QGIS edit buffer**（无意外 QUndoStack 分叉）。
 - 测试：采点中按 Esc → digitizingCanceled 回调一次且 cancel_active_tool 未被调用；采点完成/取消后 action_state 与工具条勾选态一致。
 
-- [ ] **Step 1-6**（同前 TDD 节奏）→ 提交 `m3(editing): unify keyboard paths and toolbar state with native tools`
+- [x] **Step 1-6**（同前 TDD 节奏）→ 提交 `m3(editing): unify keyboard paths and toolbar state with native tools`
 
 ---
 
@@ -353,10 +353,10 @@ Run: `run_env.sh tests/test_qgis_digitize_tool.py tests/test_qgis_snapping_confi
 - Modify: `paleo_workbench/ui/qgis_stack/`（zoom_to_layer 语义归一、✏ 编辑标记视觉、图层名过滤框（候选）、snap 菜单勾选态）
 - Test: 视各项补进既有测试文件
 
-- [ ] screen_to_map 返回浮点不截断（读 map_stack_service.cpp:738-741 现状，改 QPointF 经 toMapCoordinates 直接回 double 对）+ 精度回归测试
-- [ ] zoom_to_layer 语义归一（与 QGIS「缩放至图层」一致：含空图层回退全图）
-- [ ] ✏ 编辑标记视觉（树节点或工具条上标出活动编辑会话图层）
-- [ ] （候选）图层名过滤框；snap 菜单勾选态持久
+- [x] screen_to_map 返回浮点不截断（读 map_stack_service.cpp:738-741 现状，改 QPointF 经 toMapCoordinates 直接回 double 对）+ 精度回归测试
+- [x] zoom_to_layer 语义归一（与 QGIS「缩放至图层」一致：含空图层回退全图）
+- [x] ✏ 编辑标记视觉（树节点或工具条上标出活动编辑会话图层）
+- [x] （候选）图层名过滤框；snap 菜单勾选态持久
 
 → 提交 `m3(polish): M2 handover items`
 
@@ -364,18 +364,18 @@ Run: `run_env.sh tests/test_qgis_digitize_tool.py tests/test_qgis_snapping_confi
 
 ### Task 7: 收尾（全量回归 + 文档 + 终局审查 + 合并 + 真机验收）
 
-- [ ] **Step 1: 全量回归对账**
+- [x] **Step 1: 全量回归对账**
 
 Run: `run_env.sh tests/ -q --basetemp=$(mktemp -d) --deselect tests/test_geological_modeling_3d_page.py::test_geological_modeling_3d_page_splitter_layout`
 与 M2 终局基线（51F/3E 预存环境性 + flake 清单）逐条对账，零新增红才放行。
 
-- [ ] **Step 2: 文档**——更新 `docs/superpowers/specs/2026-09-03-qgis-native-map-stack-design.md` 的 M3 状态；更新 AGENTS.md 涉及部分（若有）。
+- [x] **Step 2: 文档**——更新 `docs/superpowers/specs/2026-09-03-qgis-native-map-stack-design.md` 的 M3 状态；更新 AGENTS.md 涉及部分（若有）。
 
-- [ ] **Step 3: 终局审查**——派 coder subagent 审查全分支 diff（M2 模式：C/I/M 分级，With fixes 才放行）。
+- [x] **Step 3: 终局审查**——派 coder subagent 审查全分支 diff（M2 模式：C/I/M 分级，With fixes 才放行）。
 
-- [ ] **Step 4: 合并回 main + 删功能分支 + 清临时 worktree**（fast-forward 优先）。
+- [x] **Step 4: 合并回 main + 删功能分支 + 清临时 worktree**（fast-forward 优先）。
 
-- [ ] **Step 5: 真机验收**——启动应用（命令见下），用户操作确认采点/顶点/移动/选择/捕捉/undo 全链。
+- [x] **Step 5: 真机验收**——启动应用（命令见下），用户操作确认采点/顶点/移动/选择/捕捉/undo 全链。
 
 启动命令：
 ```bash

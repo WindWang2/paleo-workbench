@@ -24,7 +24,8 @@ PwbEditPickTool::PwbEditPickTool(QgsMapCanvas* canvas, Callback callback,
       resolver_(std::move(resolver)) {
   // 拖动中 QgsMapCanvas::keyPressEvent 不转发工具而是发 keyPressed 信号
   // （mouseButtonDown 分支），Esc 取消必须走这条路径。
-  QObject::connect(canvas, &QgsMapCanvas::keyPressed, canvas,
+  // context 传 this（终局审查 I1）：连接随工具析构断开，不裸捕悬垂 this。
+  QObject::connect(canvas, &QgsMapCanvas::keyPressed, this,
                    [this](QKeyEvent* e) { keyPressEvent(e); });
 }
 
