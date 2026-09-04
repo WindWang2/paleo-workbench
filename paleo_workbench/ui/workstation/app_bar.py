@@ -68,20 +68,6 @@ class WorkstationAppBar(QFrame):
         self.project_button.setMenu(self._project_menu)
         layout.addWidget(self.project_button)
 
-        self.back_button = QToolButton(self)
-        self.back_button.setObjectName("WorkstationChromeButton")
-        self.back_button.setIcon(workstation_icon("arrow-left.svg"))
-        self.back_button.setToolTip("后退")
-        self.back_button.setEnabled(False)
-        layout.addWidget(self.back_button)
-
-        self.forward_button = QToolButton(self)
-        self.forward_button.setObjectName("WorkstationChromeButton")
-        self.forward_button.setIcon(workstation_icon("arrow-right.svg"))
-        self.forward_button.setToolTip("前进")
-        self.forward_button.setEnabled(False)
-        layout.addWidget(self.forward_button)
-
         # 工作区预设（B2）：与编图「面板」菜单同源的布局预设；选择后由
         # shell 应用可见性矩阵。首项「自定义」= 用户手调布局（无预设）。
         self.workspace_combo = QComboBox(self)
