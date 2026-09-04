@@ -27,18 +27,35 @@ class WellAgent(BaseAgent):
         target_horizon = task.parameters.get("target_horizon", "T3x")
         self.log(f"Target formation horizon identified as: {target_horizon}")
 
-        # Simulate / perform well correlation and extraction
-        sample_wells = [
-            {"well": "W1", "x": 501200.0, "y": 3412000.0, "sand_ratio": 0.42, "thickness": 45.0, "qc_flag": "ok"},
-            {"well": "W2", "x": 508400.0, "y": 3415600.0, "sand_ratio": 0.58, "thickness": 62.0, "qc_flag": "ok"},
-            {"well": "W3", "x": 515100.0, "y": 3419800.0, "sand_ratio": 0.35, "thickness": 38.0, "qc_flag": "ok"},
-            {"well": "W4", "x": 522000.0, "y": 3424100.0, "sand_ratio": 0.65, "thickness": 75.0, "qc_flag": "ok"},
-        ]
+        # #1143: demo stub — never fabricate well points. Enumerate the real
+        # project wells (identity + location only); no correlation, sand
+        # ratio or thickness is computed here.
+        project = context.get("project")
+        well_points: list[dict[str, Any]] = []
+        for well in list(getattr(project, "wells", None) or []):
+            x = getattr(well, "project_x", None)
+            if x is None:
+                x = getattr(well, "surface_x", None)
+            y = getattr(well, "project_y", None)
+            if y is None:
+                y = getattr(well, "surface_y", None)
+            well_points.append(
+                {
+                    "well": str(getattr(well, "name", "") or ""),
+                    "x": x,
+                    "y": y,
+                    "sand_ratio": None,
+                    "thickness": None,
+                    "qc_flag": "unverified",
+                }
+            )
 
-        self.log(f"Extracted {len(sample_wells)} valid well points for horizon {target_horizon}.")
+        self.log(f"Enumerated {len(well_points)} project wells (uncorrelated stub).")
         return {
             "status": "success",
             "target_horizon": target_horizon,
-            "well_points": sample_wells,
-            "correlated_well_count": len(sample_wells),
+            "well_points": well_points,
+            "correlated_well_count": len(well_points),
+            "stub": True,
+            "note": "演示占位：仅枚举项目井位，未执行 DTW 对比与砂地比计算。",
         }

@@ -37,9 +37,12 @@ class DataAgent(BaseAgent):
                 )
 
         self.log(f"Discovered {len(discovered_assets)} project assets.")
+        # #1143: enumeration is real; checksum verification is NOT performed.
         return {
             "status": "success",
             "assets_count": len(discovered_assets),
             "assets": discovered_assets,
-            "catalog_verified": True,
+            "catalog_verified": False,
+            "stub": True,
+            "note": "已枚举项目资产；未执行 SHA-256 校验，目录真实性未经验证。",
         }

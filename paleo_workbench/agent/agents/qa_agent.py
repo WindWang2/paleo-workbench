@@ -21,19 +21,23 @@ class QAAgent(BaseAgent):
     def run(self, task: TaskNode, context: dict[str, Any]) -> dict[str, Any]:
         self.log(f"Executing comprehensive QA audit: {task.description}")
 
+        # #1143: demo stub — no real topology/residual check runs here.
+        # Report UNVERIFIED explicitly; never fabricate scores or verdicts.
         audit_results = {
-            "topology_validity": "passed",
-            "boundary_sealed": True,
-            "max_well_residual": 0.0012,
-            "unclosed_rings": 0,
-            "extreme_value_anomalies": 0,
-            "quality_score": 98.5,
-            "recommendation": "Ready for publication and production release.",
+            "topology_validity": "not_verified",
+            "boundary_sealed": None,
+            "max_well_residual": None,
+            "unclosed_rings": None,
+            "extreme_value_anomalies": None,
+            "quality_score": None,
+            "recommendation": "未验证：QA 当前为演示占位，未执行真实拓扑与地质残差校验。",
         }
 
-        self.log(f"Audit completed: Quality Score {audit_results['quality_score']}/100. Status: {audit_results['topology_validity']}")
+        self.log("Audit stub executed: no real checks ran; verdict is UNVERIFIED.")
         return {
             "status": "success",
-            "passed": True,
+            "passed": False,
+            "verified": False,
+            "stub": True,
             "audit": audit_results,
         }

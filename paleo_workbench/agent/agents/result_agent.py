@@ -21,24 +21,20 @@ class ResultAgent(BaseAgent):
     def run(self, task: TaskNode, context: dict[str, Any]) -> dict[str, Any]:
         self.log(f"Assembling final execution deliverable: {task.description}")
 
+        # #1143: demo stub — nothing is packaged and no lineage is recorded.
         summary = {
             "title": "Paleo AI GIS 智能分析与综合编图执行成果",
-            "execution_status": "COMPLETED",
-            "stages_executed": [
-                "数据资产发现与校验",
-                "空间断层与边界提取",
-                "测井曲线与标志层对齐",
-                "单因素各向异性插值与等值线追踪",
-                "标准化排版与图例整饰",
-                "高精度拓扑与地质残差质检",
-            ],
-            "delivery_timestamp": "2026-08-23T20:20:00Z",
-            "lineage_tracked": True,
+            "execution_status": "STUB_DEMO",
+            "stages_executed": [],
+            "delivery_timestamp": None,
+            "lineage_tracked": False,
+            "stub": True,
+            "note": "演示占位：未打包真实交付物，未记录数据溯源。",
         }
 
-        self.log("All execution steps successfully completed and packaged.")
+        self.log("Result stub executed: no deliverables packaged.")
         return {
             "status": "success",
             "report": summary,
-            "deliverables_ready": True,
+            "deliverables_ready": False,
         }
