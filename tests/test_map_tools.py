@@ -97,3 +97,24 @@ def test_measure_distance_tool_reports_map_space_distance_without_editing() -> N
 
     assert received == [5.0]
     assert tool.points == [(3.0, 4.0), (3.0, 4.0)]
+
+
+def test_capture_tool_commit_geometry_from_native_digitize() -> None:
+    """M3 Task 2：原生采点完成几何经 commit_geometry 落权威会话。"""
+    layer, session = _session()
+    tool = AddPointTool(session, feature_id_factory=lambda: "f-new")
+
+    assert tool.commit_geometry({"type": "Point", "coordinates": [7.0, 8.0]}) is True
+    features = session.features()
+    assert len(features) == 2
+    added = [f for f in features if f.feature_id == "f-new"][0]
+    assert added.geometry["type"] == "Point"
+    assert list(added.geometry["coordinates"]) == [7.0, 8.0]
+    # undo 链完好（命令模式权威不变）
+    assert session.undo() is True
+    assert len(session.features()) == 1
+
+    # 几何类型不匹配 / 空几何拒绝
+    assert tool.commit_geometry({"type": "LineString", "coordinates": [[0, 0], [1, 1]]}) is False
+    assert tool.commit_geometry({}) is False
+    assert len(session.features()) == 1

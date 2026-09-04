@@ -9,6 +9,7 @@
 
 class QgsMapCanvas;
 class QgsLayerTreeView;
+class QgsMapToolDigitizeFeature;
 
 namespace pwb::qgis_render {
 
@@ -90,6 +91,14 @@ public:
   // {"matched":bool,"x":,"y":,"layer_doc_id":str,"vertex_index":int(-1=非顶点)}。
   std::string snapToMap(std::uintptr_t canvas, double x, double y) const;
 
+  // 原生采点完成/取消回调（M3）：callback(status, geojson_geometry)，
+  // status ∈ "completed"|"canceled"；completed 时 geojson 为 GeoJSON geometry
+  // 对象字符串（画布 destination CRS），canceled 时为空串。
+  // set_map_tool kind 相应扩展 "addPoint"|"addLine"|"addPolygon"。
+  void setDigitizeCallback(
+      std::uintptr_t canvas,
+      std::function<void(const std::string&, const std::string&)> callback);
+
   std::string addVectorLayerGeoJson(const std::string& name,
                                     const std::string& geometry_type,
                                     const std::string& crs_auth_id,
@@ -133,6 +142,9 @@ private:
   std::shared_ptr<char> alive_token_ = std::make_shared<char>(0);
   QgsMapCanvas* canvasOrThrow(std::uintptr_t canvas) const;
   QgsLayerTreeView* treeViewOrThrow(std::uintptr_t address) const;
+  // slot: 0=Point 1=LineString 2=Polygon；惰性建 scratch 层 + 工具（M3 Task 2）。
+  QgsMapToolDigitizeFeature* digitizeToolFor(std::uintptr_t canvas_addr,
+                                             QgsMapCanvas* canvas, int slot);
   void ensureNotStale(std::uintptr_t canvas_addr);
   void eraseMirrorByQgisId(const std::string& qgis_id);
   void eraseMirrorByDocId(const std::string& doc_id);

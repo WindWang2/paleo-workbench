@@ -378,15 +378,16 @@ class QgisCanvasShim(QWidget):
                     except Exception:
                         return
                     tool_id = getattr(tool, "tool_id", "") if tool is not None else "pan"
-                    kind = "pan"
-                    if tool_id == "zoom_in":
-                        kind = "zoomIn"
-                    elif tool_id == "zoom_out":
-                        kind = "zoomOut"
-                    elif tool_id == "pan":
-                        kind = "pan"
-                    else:
-                        kind = "pan"
+                    # M3：编辑类工具映射到原生 QgsMapTool（采点/线/面），
+                    # 其余（vertex/move/select 等）Task 3/4 落地前回落 pan。
+                    kind = {
+                        "zoom_in": "zoomIn",
+                        "zoom_out": "zoomOut",
+                        "add_point": "addPoint",
+                        "add_line": "addLine",
+                        "add_polygon": "addPolygon",
+                        "pan": "pan",
+                    }.get(tool_id, "pan")
                     try:
                         shim.stack.set_map_tool(addr, kind)
                     except Exception:
@@ -398,6 +399,31 @@ class QgisCanvasShim(QWidget):
 
                 self._wrapped_func = _wrapped
                 tools.set_active_tool = _wrapped  # type: ignore[method-assign]
+        except Exception:
+            pass
+
+        # M3 Task 2：原生采点完成几何 → 活动 Python 采点工具的会话（权威不变）。
+        self_ref = weakref.ref(self)
+
+        def _on_digitize(status: str, geom_json: str) -> None:
+            shim = self_ref()
+            if shim is None or getattr(shim, "_shutdown_done", False):
+                return
+            if status != "completed":
+                return
+            controller = getattr(shim, "_tool_controller", None)
+            tool = getattr(controller, "active_tool", None) if controller is not None else None
+            commit = getattr(tool, "commit_geometry", None)
+            if commit is None:
+                return
+            try:
+                if commit(json.loads(geom_json)):
+                    shim.tool_operation.emit(True)
+            except Exception:
+                pass
+
+        try:
+            self.stack.set_digitize_callback(self.canvas_address, _on_digitize)
         except Exception:
             pass
 

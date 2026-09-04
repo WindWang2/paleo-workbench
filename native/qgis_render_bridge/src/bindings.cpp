@@ -643,6 +643,16 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
         .def("mirror_layer_visibility", &pwb::qgis_render::QgisMapStack::mirrorLayerVisibility)
         .def("tree_echo_suppressed", &pwb::qgis_render::QgisMapStack::treeEchoSuppressed)
         .def("set_map_tool", &pwb::qgis_render::QgisMapStack::setMapTool)
+        .def("set_digitize_callback",
+             [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas,
+                py::function f) {
+               self.setDigitizeCallback(
+                   canvas, [f = std::move(f)](const std::string& status,
+                                              const std::string& geom) {
+                     py::gil_scoped_acquire gil;
+                     f(status, geom);
+                   });
+             })
         .def("set_snapping_config",
              &pwb::qgis_render::QgisMapStack::setSnappingConfig)
         .def("snap_to_map",

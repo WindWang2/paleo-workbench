@@ -267,6 +267,27 @@ class _CaptureTool(MapTool):
         self.points.clear()
         return True
 
+    def commit_geometry(self, geometry: Mapping[str, object]) -> bool:
+        """QGIS 原生采点工具的完成几何直接落会话（M3）。
+
+        原生 QgsMapToolDigitizeFeature 负责逐点输入/rubber band/捕捉，
+        完成后把 GeoJSON geometry 交这里——要素写入权威仍是本会话
+        （命令模式/undo/持久化链不变）。
+        """
+        if not geometry or "type" not in geometry:
+            return False
+        gtype = str(geometry.get("type"))
+        expected = self.geometry_type
+        if gtype != expected and gtype != f"Multi{expected}":
+            return False
+        self.session.add_feature(
+            VectorFeature(
+                self._feature_id_factory(), dict(geometry), self._default_attributes
+            )
+        )
+        self.points.clear()
+        return True
+
 
 class AddPointTool(_CaptureTool):
     tool_id = "add_point"

@@ -27,6 +27,7 @@
 #include <qgsadvanceddigitizingdockwidget.h>
 #include <qgscoordinatereferencesystem.h>
 #include <qgscoordinatetransform.h>
+#include <qgsfeature.h>
 #include <qgsjsonutils.h>
 #include <qgslayertree.h>
 #include <qgslayertreelayer.h>
@@ -38,6 +39,7 @@
 #include <qgsmapcanvas.h>
 #include <qgsmaplayer.h>
 #include <qgsmaptool.h>
+#include <qgsmaptooldigitizefeature.h>
 #include <qgsmaptoolpan.h>
 #include <qgsmaptoolzoom.h>
 #include <qgspointxy.h>
@@ -325,6 +327,19 @@ struct QgisMapStack::Impl {
   // 隐藏高级数字化 dock：QgsMapToolCapture 派生链构造有 Q_ASSERT(cadDockWidget)，
   // 每画布一个，永不 show；parent 挂画布随其销毁（M3 Task 1）。
   std::unordered_map<std::uintptr_t, QPointer<QgsAdvancedDigitizingDockWidget>> cad_docks;
+  // 采点工具包（M3 Task 2）：每画布 point/line/polygon 三槽，惰性创建。
+  // scratch 为桥内私有 memory 层（不进 QgsProject、不落持久化），仅向
+  // QgsMapToolDigitizeFeature 提供几何类型/CRS/editable 前置；捕获几何经
+  // digitizingCompleted 回调交 Python 权威会话。
+  struct CaptureKit {
+    std::unique_ptr<QgsVectorLayer> scratch[3];
+    QgsMapToolDigitizeFeature* tools[3] = {nullptr, nullptr, nullptr};  // Qt parent 持有
+    QgsCoordinateReferenceSystem scratch_crs;
+  };
+  std::unordered_map<std::uintptr_t, CaptureKit> capture_kits;
+  std::unordered_map<std::uintptr_t,
+                     std::function<void(const std::string&, const std::string&)>>
+      digitize_callbacks;
   std::unordered_map<std::uintptr_t, QMetaObject::Connection> extent_connections;
   std::unordered_map<std::uintptr_t, QMetaObject::Connection> xy_connections;
   // I1: retain rejection after erasing the QPointer tombstone — otherwise the
@@ -616,6 +631,8 @@ void QgisMapStack::shutdown() {
   }
   impl_->tools.clear();
   impl_->cad_docks.clear();
+  impl_->capture_kits.clear();
+  impl_->digitize_callbacks.clear();
   impl_->canvas_refs.clear();
   impl_->dead_canvas_addrs.clear();
   impl_->extent_callbacks.clear();
@@ -727,6 +744,8 @@ void QgisMapStack::destroyCanvas(std::uintptr_t canvas_addr) {
   // deletes the widget.
   impl_->tree_bridges.erase(canvas_addr);
   impl_->cad_docks.erase(canvas_addr);  // Qt 父子关系负责销毁（parent=canvas）
+  impl_->capture_kits.erase(canvas_addr);
+  impl_->digitize_callbacks.erase(canvas_addr);
   impl_->canvas_refs.erase(it);
   impl_->dead_canvas_addrs.erase(canvas_addr);
 }
@@ -1280,6 +1299,11 @@ void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kin
   } else if (existing != impl_->tools.end()) {
     impl_->tools.erase(existing);
   }
+  if (kind == "addPoint" || kind == "addLine" || kind == "addPolygon") {
+    const int slot = kind == "addPoint" ? 0 : kind == "addLine" ? 1 : 2;
+    canvas->setMapTool(digitizeToolFor(canvas_addr, canvas, slot));
+    return;
+  }
   if (kind == "pan") {
     impl_->tools[canvas_addr] = std::make_unique<QgsMapToolPan>(canvas);
   } else if (kind == "zoomIn") {
@@ -1290,6 +1314,63 @@ void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kin
     throw std::invalid_argument("unknown map tool kind: " + kind);
   }
   canvas->setMapTool(impl_->tools[canvas_addr].get());
+}
+
+QgsMapToolDigitizeFeature* QgisMapStack::digitizeToolFor(std::uintptr_t canvas_addr,
+                                                         QgsMapCanvas* canvas, int slot) {
+  auto& kit = impl_->capture_kits[canvas_addr];
+  const QgsCoordinateReferenceSystem crs = canvas->mapSettings().destinationCrs();
+  if (!kit.scratch[slot] || kit.scratch[slot]->crs() != crs) {
+    const QString geom = slot == 0   ? QStringLiteral("Point")
+                         : slot == 1 ? QStringLiteral("LineString")
+                                     : QStringLiteral("Polygon");
+    const QString uri = QStringLiteral("%1?crs=%2")
+                            .arg(geom, crs.isValid() ? crs.authid()
+                                                     : QStringLiteral("EPSG:4326"));
+    auto layer = std::make_unique<QgsVectorLayer>(
+        uri, QStringLiteral("__pwb_capture_scratch"), QStringLiteral("memory"));
+    if (!layer->isValid())
+      throw std::runtime_error("failed to create capture scratch layer");
+    // QgsMapToolDigitizeFeature 要求 isEditable；scratch 不落持久化，无妨。
+    layer->startEditing();
+    kit.scratch[slot] = std::move(layer);
+    kit.tools[slot] = nullptr;  // 旧工具由 Qt parent（画布）持有，弃用即可
+  }
+  if (kit.tools[slot] == nullptr) {
+    QgsAdvancedDigitizingDockWidget* dock = nullptr;
+    auto dockIt = impl_->cad_docks.find(canvas_addr);
+    if (dockIt != impl_->cad_docks.end()) dock = dockIt->second.data();
+    const auto mode = slot == 0   ? QgsMapToolCapture::CapturePoint
+                      : slot == 1 ? QgsMapToolCapture::CaptureLine
+                                  : QgsMapToolCapture::CapturePolygon;
+    auto* tool = new QgsMapToolDigitizeFeature(canvas, dock, mode);
+    tool->setLayer(kit.scratch[slot].get());
+    std::weak_ptr<char> alive = alive_token_;
+    QObject::connect(tool, &QgsMapToolDigitizeFeature::digitizingCompleted, canvas,
+                     [this, alive, canvas_addr](const QgsFeature& feature) {
+      if (alive.expired()) return;
+      auto cbIt = impl_->digitize_callbacks.find(canvas_addr);
+      if (cbIt == impl_->digitize_callbacks.end() || !cbIt->second) return;
+      cbIt->second("completed", feature.geometry().asJson().toStdString());
+    });
+    QObject::connect(tool, &QgsMapToolDigitizeFeature::digitizingCanceled, canvas,
+                     [this, alive, canvas_addr]() {
+      if (alive.expired()) return;
+      auto cbIt = impl_->digitize_callbacks.find(canvas_addr);
+      if (cbIt == impl_->digitize_callbacks.end() || !cbIt->second) return;
+      cbIt->second("canceled", std::string());
+    });
+    kit.tools[slot] = tool;
+  }
+  return kit.tools[slot];
+}
+
+void QgisMapStack::setDigitizeCallback(
+    std::uintptr_t canvas_addr,
+    std::function<void(const std::string&, const std::string&)> callback) {
+  ensureNotStale(canvas_addr);
+  canvasOrThrow(canvas_addr);
+  impl_->digitize_callbacks[canvas_addr] = std::move(callback);
 }
 
 void QgisMapStack::setExtentCallback(std::uintptr_t canvas_addr, ExtentCallback callback) {
