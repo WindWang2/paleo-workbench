@@ -517,7 +517,7 @@ class WorkstationFrame(QWidget):
         self._save_timer.start()
 
     def apply_layout_preset(self, preset_id: str) -> None:
-        """Apply a named workstation layout preset (visibility + document tab)."""
+        """Apply a named workstation layout preset (visibility only; no document tab)."""
         preset = get_preset(preset_id)
         if preset is None:
             return
@@ -527,14 +527,8 @@ class WorkstationFrame(QWidget):
             "input": vis.composite_input,
             "linked": vis.composite_linked,
         }
-        # Seed before tab switch so composite show uses the preset matrix.
+        # Seed before dock show so composite restores the preset matrix.
         self._composite_docks_visible = dict(composite_memory)
-        if preset.document_tab == TAB_JOINT:
-            self.activate_joint()
-            # hide-path overwrites memory with pre-hide visibility; restore preset.
-            self._composite_docks_visible = dict(composite_memory)
-        else:
-            self.activate_composite()
 
         self.nav_dock.setVisible(vis.nav)
         self.inspector_dock.setVisible(vis.inspector)
@@ -543,10 +537,17 @@ class WorkstationFrame(QWidget):
         self._settings.setValue("layout/inspector_user_hidden", self._user_hid_inspector)
         self.process_dock.setVisible(vis.process)
         self.task_dock.setVisible(vis.tasks)
-        if preset.document_tab == TAB_COMPOSITE:
-            self.composite_layer_dock.setVisible(vis.composite_layer)
-            self.composite_input_dock.setVisible(vis.composite_input)
-            self.composite_linked_dock.setVisible(vis.composite_linked)
+        self.composite_layer_dock.setVisible(vis.composite_layer)
+        self.composite_input_dock.setVisible(vis.composite_input)
+        self.composite_linked_dock.setVisible(vis.composite_linked)
+        for dock_name, flag in (
+            ("well_dock", vis.well),
+            ("seismic_dock", vis.seismic),
+            ("hub_dock", vis.hub),
+        ):
+            dock = getattr(self, dock_name, None)
+            if dock is not None:
+                dock.setVisible(flag)
 
         self.explorer.setVisible(vis.explorer_expanded)
         self.activity_rail.set_explorer_expanded(vis.explorer_expanded)

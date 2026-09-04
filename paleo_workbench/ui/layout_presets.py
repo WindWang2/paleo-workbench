@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 
-#: Document-tab keys understood by :class:`WorkstationFrame`.
+#: Deprecated document-tab keys (Task 2 removes shell usages, then delete).
 TAB_COMPOSITE = "composite"
 TAB_JOINT = "joint"
 
@@ -22,7 +22,7 @@ class DockVisibilityMatrix:
     """Visibility flags for the top-level workstation dock set.
 
     Composite docks only matter when the composite document is active; the
-    shell still applies the flags so switching back to 综合编修 restores them.
+    shell still applies the flags so switching back to 编图 restores them.
     """
 
     nav: bool = True
@@ -33,6 +33,9 @@ class DockVisibilityMatrix:
     composite_input: bool = False
     composite_linked: bool = False
     explorer_expanded: bool = True
+    well: bool = False
+    seismic: bool = False
+    hub: bool = False
 
 
 @dataclass(frozen=True)
@@ -40,7 +43,6 @@ class WorkstationLayoutPreset:
     id: str
     label: str
     description: str
-    document_tab: str
     visibility: DockVisibilityMatrix
     #: When True, float every currently-visible shell dock (low-risk affordance).
     float_visible: bool = False
@@ -50,9 +52,8 @@ class WorkstationLayoutPreset:
 WORKSTATION_LAYOUT_PRESETS: tuple[WorkstationLayoutPreset, ...] = (
     WorkstationLayoutPreset(
         id="composite_default",
-        label="默认综合编修",
+        label="默认编图",
         description="Variant C full-bleed map; only the layer dock open among composite panels.",
-        document_tab=TAB_COMPOSITE,
         visibility=DockVisibilityMatrix(
             nav=True,
             inspector=True,
@@ -62,22 +63,27 @@ WORKSTATION_LAYOUT_PRESETS: tuple[WorkstationLayoutPreset, ...] = (
             composite_input=False,
             composite_linked=False,
             explorer_expanded=True,
+            well=False,
+            seismic=False,
+            hub=False,
         ),
     ),
     WorkstationLayoutPreset(
         id="interpretation",
         label="解释工作区",
         description="Explorer + inspector + tasks open for linked interpretation.",
-        document_tab=TAB_JOINT,
         visibility=DockVisibilityMatrix(
             nav=True,
             inspector=True,
             process=True,
             tasks=True,
-            composite_layer=False,
+            composite_layer=True,
             composite_input=False,
             composite_linked=False,
             explorer_expanded=True,
+            well=True,
+            seismic=True,
+            hub=False,
         ),
     ),
 )
@@ -113,6 +119,9 @@ def visibility_dict(matrix: DockVisibilityMatrix) -> dict[str, bool]:
         "composite_input": matrix.composite_input,
         "composite_linked": matrix.composite_linked,
         "explorer_expanded": matrix.explorer_expanded,
+        "well": matrix.well,
+        "seismic": matrix.seismic,
+        "hub": matrix.hub,
     }
 
 
@@ -130,6 +139,9 @@ def register_with_dock_manager(dock_manager) -> None:
         ("workstation:composite_layer", "图层管理", "right"),
         ("workstation:composite_input", "输入与结果", "left"),
         ("workstation:composite_linked", "联动视图", "bottom"),
+        ("workstation:well", "测井轨道", "bottom"),
+        ("workstation:seismic", "地震剖面", "bottom"),
+        ("workstation:hub", "功能页", "right"),
     )
     for panel_id, title, area in panels:
         dock_manager.register_panel(panel_id, title, area=area)
