@@ -103,6 +103,9 @@ def test_cancel_active_tool_routes_to_native_when_busy(qtbot, tmp_path):
         assert pressed == []  # busy 时不碰 Python 工具栈
     finally:
         controller.tools.key_press = original
+        # orderly 关闭：宿主契约是显式 shutdown 回收镜像图层（qtbot 拆树
+        # 不保证 destroyed 链时序），否则共享 QgsProject 泄漏到后续用例。
+        document.shutdown()
 
 
 def test_cancel_active_tool_falls_back_when_not_busy(qtbot, tmp_path):
@@ -123,3 +126,4 @@ def test_cancel_active_tool_falls_back_when_not_busy(qtbot, tmp_path):
         assert pressed == ["escape"]
     finally:
         controller.tools.key_press = original
+        document.shutdown()
