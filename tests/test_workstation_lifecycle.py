@@ -43,7 +43,10 @@ def workstation(qtbot, tmp_path):
     qtbot.addWidget(frame)
     frame._settings = QSettings(str(tmp_path / "workstation.ini"), QSettings.Format.IniFormat)
     frame._settings.clear()
-    return frame
+    yield frame
+    # orderly 关闭：镜像图层只随显式 shutdown 离开共享 QgsProject（与
+    # 宿主契约一致），否则泄漏进后续用例的画布。
+    frame.composite.shutdown()
 
 
 # --- #1120: linked workspace map canvas shutdown -----------------------------
