@@ -1156,6 +1156,10 @@ class CompositeDocument(QWidget):
 
     # -- 图层属性 / 符号系统 / 标注（复用 MapLayerPropertiesDialog） ----------
 
+    def open_layer_properties(self, layer_id: str, *, focus: str = "symbology") -> None:
+        """公开入口：检查器/资源树把用户送去图层属性（同一套符号系统）。"""
+        self._open_layer_properties(layer_id, focus=focus)
+
     def _open_layer_properties(self, layer_id: str, *, focus: str = "") -> None:
         """图层属性对话框：QGIS 桥可用走原生符号编辑器，否则 legacy 快速字段。
 

@@ -4,16 +4,14 @@ import json
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
     QFormLayout,
     QFrame,
     QLabel,
     QLineEdit,
     QListWidget,
-    QSpinBox,
+    QPushButton,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -41,7 +39,8 @@ _VERTICAL_DOMAIN_LABELS = {"time": "Time (TWT)", "depth": "Depth"}
 class WorkstationInspector(QFrame):
     """Contextual properties, interpretation, style, and provenance."""
 
-    style_changed = Signal(dict)
+    style_changed = Signal(dict)  # 兼容保留；真实样式编辑走 edit_style_requested
+    edit_style_requested = Signal(str)
 
     def __init__(self, project=None, parent=None):
         super().__init__(parent)
@@ -50,6 +49,8 @@ class WorkstationInspector(QFrame):
         # 不设最大宽度：dock 加宽或浮动放大时内容要占满面板。
         self._project = project
         self._current = None
+        self._current_payload: dict | None = None
+        self._style_layer_id = ""
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -69,19 +70,19 @@ class WorkstationInspector(QFrame):
         self.tabs.addTab(self.interpretation_page, "解释")
 
         self.style_page = QWidget(self)
-        style_layout = QFormLayout(self.style_page)
+        style_layout = QVBoxLayout(self.style_page)
         style_layout.setContentsMargins(8, 8, 8, 8)
         style_layout.setSpacing(6)
-        self.style_color = QComboBox(self.style_page)
-        self.style_color.addItems(["层位绿", "联动蓝", "解释橙", "断层红"])
-        self.style_width = QSpinBox(self.style_page)
-        self.style_width.setRange(1, 8)
-        self.style_width.setValue(2)
-        self.style_label = QCheckBox("显示标签", self.style_page)
-        self.style_label.setChecked(True)
-        style_layout.addRow("颜色", self.style_color)
-        style_layout.addRow("线宽", self.style_width)
-        style_layout.addRow("标注", self.style_label)
+        self.style_summary = QLabel(self.style_page)
+        self.style_summary.setObjectName("WorkstationAgentConsent")
+        self.style_summary.setWordWrap(True)
+        style_layout.addWidget(self.style_summary)
+        style_layout.addStretch(1)
+        self.style_edit_button = QPushButton("在图层属性中编辑样式…", self.style_page)
+        self.style_edit_button.setObjectName("SecondaryButton")
+        self.style_edit_button.setVisible(False)
+        self.style_edit_button.clicked.connect(self._request_style_edit)
+        style_layout.addWidget(self.style_edit_button, 0, Qt.AlignmentFlag.AlignLeft)
         self.tabs.addTab(self.style_page, "样式")
 
         self.history_page = QWidget(self)
@@ -91,9 +92,6 @@ class WorkstationInspector(QFrame):
         history_layout.addWidget(self.history_list)
         self.tabs.addTab(self.history_page, "历史")
 
-        self.style_color.currentTextChanged.connect(self._emit_style)
-        self.style_width.valueChanged.connect(self._emit_style)
-        self.style_label.toggled.connect(self._emit_style)
         if project is None:
             self.show_empty()
         else:
@@ -140,6 +138,7 @@ class WorkstationInspector(QFrame):
         self.show_project(project)
 
     def show_payload(self, payload) -> None:
+        self._current_payload = payload if isinstance(payload, dict) else None
         payload = payload or {}
         if not isinstance(payload, dict):
             self.show_generic({"object": payload})
@@ -165,6 +164,7 @@ class WorkstationInspector(QFrame):
         else:
             # 未知 kind：通用键值表，不丢弃（B4）。
             self.show_generic(payload)
+        self._update_style_page()
 
     def show_empty(self) -> None:
         """空态：无选择时显示「未选择对象」。"""
@@ -173,6 +173,8 @@ class WorkstationInspector(QFrame):
         self._clear_form(self.properties_form)
         self._clear_form(self.interpretation_form)
         self.properties_form.addRow("状态", self._readonly("未选择对象"))
+        self._current_payload = None
+        self._update_style_page()
         self._set_history([])
 
     def show_project(self, project) -> None:
@@ -383,27 +385,46 @@ class WorkstationInspector(QFrame):
             self.properties_form.addRow(key, self._readonly(text))
         self._set_history([])
 
-    def set_style(self, values: dict) -> None:
-        """程序化同步样式控件显示（不发 style_changed；真实样式接线由宿主完成）。"""
-        values = values or {}
-        widgets = (self.style_color, self.style_width, self.style_label)
-        blocked = [widget.blockSignals(True) for widget in widgets]
-        try:
-            color = str(values.get("color") or "")
-            if color and self.style_color.findText(color) < 0:
-                self.style_color.addItem(color)
-            if color:
-                self.style_color.setCurrentText(color)
-            try:
-                self.style_width.setValue(int(values.get("width", self.style_width.value())))
-            except (TypeError, ValueError):
-                pass
-            labels = values.get("labels")
-            if labels is not None:
-                self.style_label.setChecked(bool(labels))
-        finally:
-            for widget, was_blocked in zip(widgets, blocked):
-                widget.blockSignals(was_blocked)
+    def _update_style_page(self) -> None:
+        """样式页只反映真实情况：图层选择给事实 + 图层属性入口；其余诚实说明。"""
+        payload = self._current_payload or {}
+        kind = str(payload.get("kind") or "")
+        layer_id = str(payload.get("layer_id") or payload.get("id") or "")
+        if kind in ("layer", "user_vector_layer") and layer_id:
+            facts = []
+            name = str(payload.get("name") or payload.get("title") or "").strip()
+            if name:
+                facts.append(f"图层 {name}")
+            geometry = str(payload.get("geometry_kind") or "").strip()
+            if geometry:
+                facts.append(f"几何 {geometry}")
+            count = payload.get("feature_count")
+            if isinstance(count, int):
+                facts.append(f"{count} 个要素")
+            self.style_summary.setText(
+                "、".join(facts) + "\n\n样式、标注与渲染规则在图层属性中编辑（与编图画布同一套符号系统）。"
+            )
+            self.style_edit_button.setVisible(True)
+            self._style_layer_id = layer_id
+            return
+        if kind == "map_component":
+            self.style_summary.setText(
+                "图件组件的样式（字体、颜色、位置）在编图组件面板中编辑。"
+            )
+            self.style_edit_button.setVisible(False)
+            self._style_layer_id = ""
+            return
+        self.style_summary.setText(
+            "当前选择没有可编辑的地图样式。\n\n图层样式：在资源树或图层面板选择图层；"
+            "图件组件样式：在编图组件面板中选择组件。"
+        )
+        self.style_edit_button.setVisible(False)
+        self._style_layer_id = ""
+
+    def _request_style_edit(self) -> None:
+        layer_id = str(getattr(self, "_style_layer_id", "") or "")
+        if layer_id:
+            self.edit_style_requested.emit(layer_id)
 
     # ------------------------------------------------------------------
     # 内部：真实数据提取
@@ -491,11 +512,4 @@ class WorkstationInspector(QFrame):
         self.history_list.clear()
         self.history_list.addItems(rows)
 
-    def _emit_style(self, *_args) -> None:
-        self.style_changed.emit(
-            {
-                "color": self.style_color.currentText(),
-                "width": self.style_width.value(),
-                "labels": self.style_label.isChecked(),
-            }
-        )
+

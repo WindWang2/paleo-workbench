@@ -46,6 +46,7 @@ class ViewCoordinationController(QObject):
     SOURCE_3D = "geomodel_3d"
     SOURCE_WELL_LOG = "well_log_prediction"
     SOURCE_SEISMIC = "seismic_cursor"
+    SOURCE_WORKSTATION = "workstation_explorer"
 
     def __init__(
         self,
@@ -497,6 +498,24 @@ class ViewCoordinationController(QObject):
             return
         self.selection_context.update(
             active_interpretation_id=str(interpretation_id), source_widget_id=source
+        )
+
+    def publish_layer_selection(self, layer_id: str, *, source: str) -> None:
+        """Publish the active map/composite layer (workstation explorer, B11).
+
+        SelectionState carries ``active_layer_id``; the duplicate guard keeps
+        the explorer's re-emissions from fanning identical updates out.
+        """
+        if not layer_id:
+            return
+        current = self.selection_context.snapshot()
+        if (
+            getattr(current, "active_layer_id", None) == layer_id
+            and getattr(current, "source_widget_id", None) == source
+        ):
+            return
+        self.selection_context.update(
+            active_layer_id=str(layer_id), source_widget_id=source
         )
 
     def publish_depth_cursor(self, well_id: str, md: float, *, source: str) -> bool:

@@ -155,6 +155,8 @@ class WorkstationFrame(QWidget):
         nav_layout.addWidget(self.explorer, 1)
 
         self.inspector = WorkstationInspector(self._dock_host)
+        self._agent_undo_stack: list[dict] = []
+        self._current_well_name = ""
         self.process_hub = ProcessHub(project, self._dock_host)
         # 任务中心是独立面板：与 Agent 各自浮动 / 显隐，不再焊在同一 dock 里。
         self.task_center = TaskCenter(self._dock_host)
@@ -281,9 +283,8 @@ class WorkstationFrame(QWidget):
         self.app_bar.task_center_requested.connect(self.show_tasks)
         self.app_bar.command_submitted.connect(self.command_submitted)
         self.app_bar.workspace_preset_requested.connect(self.apply_layout_preset)
-        self.inspector.style_changed.connect(
-            lambda _style: self.status_message.emit("当前解释样式已更新")
-        )
+        # 样式编辑走真实符号系统：检查器只提供入口，编辑发生在图层属性。
+        self.inspector.edit_style_requested.connect(self._open_style_editor)
         for dock in (
             self.nav_dock,
             self.inspector_dock,
@@ -327,7 +328,42 @@ class WorkstationFrame(QWidget):
         self.process_hub.set_project(self._project, self._project_path)
 
     def attach_coordination(self, controller) -> None:
+        """接入全局选择总线（B11）：资源树选择即工作区上下文。"""
+        self._coordination = controller
         self.linked_workspace.attach_coordination(controller)
+        self.explorer.object_selected.connect(self._publish_explorer_selection)
+
+    def _publish_explorer_selection(self, payload) -> None:
+        """把资源树选择发布为 SelectionContext 事实（井/层位/图层）。"""
+        controller = getattr(self, "_coordination", None)
+        if controller is None or not isinstance(payload, dict):
+            return
+        kind = str(payload.get("kind") or "")
+        if kind == "well":
+            well_id = str(payload.get("well_name") or payload.get("id") or "")
+            if well_id:
+                controller.publish_well_selection(
+                    well_id, source=type(controller).SOURCE_WORKSTATION
+                )
+        elif kind in ("horizon", "interpretation"):
+            horizon_id = str(payload.get("id") or payload.get("name") or "")
+            if horizon_id:
+                controller.publish_horizon_selection(
+                    horizon_id, source=type(controller).SOURCE_WORKSTATION
+                )
+        elif kind in ("layer", "user_vector_layer"):
+            layer_id = str(payload.get("layer_id") or payload.get("id") or "")
+            if layer_id and hasattr(controller, "publish_layer_selection"):
+                controller.publish_layer_selection(
+                    layer_id, source=type(controller).SOURCE_WORKSTATION
+                )
+
+    def _open_style_editor(self, layer_id: str) -> None:
+        layer_id = str(layer_id or "")
+        if not layer_id:
+            return
+        self.composite.open_layer_properties(layer_id, focus="symbology")
+        self.status_message.emit(f"图层 {layer_id} 样式编辑已打开")
 
     def central_document(self):
         """中央唯一文档：编图（永不替换）。"""
@@ -337,6 +373,8 @@ class WorkstationFrame(QWidget):
         self.well_dock.show()
         self.well_dock.raise_()
         if well_name:
+            self._current_well_name = str(well_name)
+            self.process_hub.agent.set_active_well(str(well_name))
             self.linked_workspace.open_well(well_name)
 
     def show_seismic(self, resource=None) -> None:
@@ -648,15 +686,17 @@ class WorkstationFrame(QWidget):
         payload = payload or {}
         kind = payload.get("kind") if isinstance(payload, dict) else ""
         if kind == "well":
-            self.show_well(str(payload.get("well_name") or "A12"))
+            well_name = str(payload.get("well_name") or "").strip()
+            if well_name:
+                self.show_well(well_name)
             return
         if kind == "resource":
             resource = payload.get("object")
             resource_type = str(getattr(resource, "type", "") or "")
             if resource_type == "well_log":
-                self.show_well(
-                    str(getattr(resource, "name", "A12")).rsplit(".", 1)[0]
-                )
+                resource_name = str(getattr(resource, "name", "") or "").strip()
+                if resource_name:
+                    self.show_well(resource_name.rsplit(".", 1)[0])
             elif resource_type == "seismic":
                 self.show_seismic(resource)
             return
@@ -667,7 +707,19 @@ class WorkstationFrame(QWidget):
             self.activate_composite(str(payload.get("layer_id") or ""))
 
     def _open_well_from_agent(self, well_name: str) -> None:
+        self._push_agent_snapshot("open_well")
         self.show_well(well_name)
+
+    def _push_agent_snapshot(self, action: str) -> None:
+        """撤销用：记录 Agent 动作前的工作区 GUI 状态（B12：真撤销）。"""
+        self._agent_undo_stack.append(
+            {
+                "action": action,
+                "well_dock_visible": not self.well_dock.isHidden(),
+                "seismic_dock_visible": not self.seismic_dock.isHidden(),
+                "well": self._current_well_name,
+            }
+        )
 
     def _on_well_focused(self, well_name: str) -> None:
         if well_name:
@@ -689,11 +741,35 @@ class WorkstationFrame(QWidget):
         self.linked_workspace.set_linked(on)
 
     def _show_wells_from_agent(self) -> None:
+        self._push_agent_snapshot("show_wells")
         # 与工具条全幅按钮同一路径：回到 home extent（全部工区井位）。
         self.composite.zoom_to_full_extent()
 
-    def _undo_agent_gui(self) -> None:
-        self.show_well("A12")
+    def _undo_agent_gui(self, entry=None) -> None:
+        """真撤销：弹出动作前快照并恢复；无快照时诚实说明（B12）。"""
+        snapshot = self._agent_undo_stack.pop() if self._agent_undo_stack else None
+        if snapshot is None:
+            self.status_message.emit("没有可撤销的 Agent 工作区变更")
+            return
+        action = str(snapshot.get("action") or "")
+        if action == "open_well":
+            prev_well = str(snapshot.get("well") or "")
+            if snapshot.get("well_dock_visible") and prev_well:
+                self.show_well(prev_well)
+            else:
+                if not snapshot.get("well_dock_visible"):
+                    self.well_dock.hide()
+                if prev_well:
+                    self.show_well(prev_well)
+            self.status_message.emit(f"已撤销：恢复井 {prev_well or '（无）'} 的显示状态")
+        elif action == "show_wells":
+            self.status_message.emit("已撤销记录：视图范围请用编图画布的范围历史回退")
+        elif action == "focus_joint":
+            if not snapshot.get("seismic_dock_visible"):
+                self.seismic_dock.hide()
+            self.status_message.emit("已撤销：地震剖面 dock 已恢复原状")
+        else:
+            self.status_message.emit("该 Agent 动作没有已记录的撤销状态")
 
     def _expand_process_dock(self) -> None:
         self.process_dock.show()
