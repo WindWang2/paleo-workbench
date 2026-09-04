@@ -33,6 +33,7 @@ __all__ = [
     "TranscodeParams",
     "TranscodeResult",
     "TranscodeStats",
+    "_axis_spec",
     "default_workers",
     "shard_boxes",
     "transcode_segy_to_zarr",
@@ -44,6 +45,29 @@ DEFAULT_SHARD = (128, 512, 512)
 
 class TranscodeError(RuntimeError):
     """Raised for unstructured input or a mismatched existing store."""
+
+
+def _axis_spec(vals: np.ndarray, name: str) -> tuple[int, int]:
+    """(start, step) mapping logical line numbers to store indices (#1130).
+
+    Constant positive *and* negative steps are supported (SEG-Y line
+    numbering may decrease along the file). Anything that cannot be
+    modelled as one linear axis — zero or varying diffs — fails closed
+    with TranscodeError instead of silently degrading to step=1.
+    """
+    if len(vals) == 0:
+        return 1, 1
+    if len(vals) == 1:
+        return int(vals[0]), 1
+    diffs = np.diff(np.asarray(vals, dtype=np.int64))
+    step = int(diffs[0])
+    if step == 0 or not bool((diffs == step).all()):
+        preview = ", ".join(str(int(v)) for v in vals[:8])
+        raise TranscodeError(
+            f"nonlinear {name} numbering cannot be mapped to "
+            f"(start, step): [{preview}, ...] ({len(vals)} lines)"
+        )
+    return int(vals[0]), step
 
 
 @dataclass(frozen=True)
@@ -150,13 +174,10 @@ def _volume_geometry(src: Path) -> tuple[tuple[int, int, int], dict]:
             ilines = np.asarray(f.ilines)
             xlines = np.asarray(f.xlines)
 
-            def _axis(vals: np.ndarray) -> tuple[int, int]:
-                if len(vals) >= 2 and int(vals[1] - vals[0]) > 0:
-                    return int(vals[0]), int(vals[1] - vals[0])
-                return int(vals[0]) if len(vals) else 1, 1
-
-            il_start, il_step = _axis(ilines)
-            xl_start, xl_step = _axis(xlines)
+        il_start, il_step = _axis_spec(ilines, "iline")
+        xl_start, xl_step = _axis_spec(xlines, "xline")
+    except TranscodeError:
+        raise
     except Exception as exc:  # unstructured or unreadable input
         raise TranscodeError(f"cannot read 3-D grid from {src}: {exc}") from exc
     attrs = {
