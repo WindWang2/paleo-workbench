@@ -81,6 +81,15 @@ public:
   std::map<std::string, std::string> execLayerProperties(
       std::uintptr_t canvas_addr, const std::string& doc_id);
 
+  // 捕捉配置下推（M3）：JSON {"enabled":bool,"mode":"all_layers"|"active_layer",
+  // "tolerance_px":double,"types":["vertex","segment","midpoint","centroid","area"],
+  // "layers":{doc_id:{"enabled":bool,"types":[...],"tolerance_px":double}}}。
+  // 带 layers 键时强制 AdvancedConfiguration 模式；doc_id 经 pwb/doc_id 解析镜像层。
+  void setSnappingConfig(std::uintptr_t canvas, const std::string& config_json);
+  // 地图坐标捕捉探测（测试/诊断用）：返回 JSON
+  // {"matched":bool,"x":,"y":,"layer_doc_id":str,"vertex_index":int(-1=非顶点)}。
+  std::string snapToMap(std::uintptr_t canvas, double x, double y) const;
+
   std::string addVectorLayerGeoJson(const std::string& name,
                                     const std::string& geometry_type,
                                     const std::string& crs_auth_id,

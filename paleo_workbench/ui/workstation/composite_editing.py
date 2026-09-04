@@ -452,6 +452,7 @@ class CompositeEditController(QObject):
         self._canvas = canvas
         canvas.set_map_tool_controller(self.tools)
         canvas.set_overlay_provider(self.overlay_state)
+        self._push_snapping_config()
 
     # -- 图层 CRUD -------------------------------------------------------------
 
@@ -496,6 +497,7 @@ class CompositeEditController(QObject):
         self._templates[layer_id] = template
         self._schemas[layer_id] = dict(schema)
         self._active_layer_id = layer_id
+        self._push_snapping_config()
         self.layers_changed.emit()
         self.state_changed.emit()
         return layer
@@ -575,6 +577,7 @@ class CompositeEditController(QObject):
         self._snapping.layer_modes.pop(layer_id, None)
         self._snapping.layer_tolerance.pop(layer_id, None)
         self._snapping.layer_priority.pop(layer_id, None)
+        self._push_snapping_config()
         self._records_cache.pop(layer_id, None)
         self._persist_cache.pop(layer_id, None)
         if self._active_layer_id == layer_id:
@@ -644,6 +647,7 @@ class CompositeEditController(QObject):
         if self._layers:
             self._active_layer_id = next(iter(self._layers))
         self._rebind_active_tool()
+        self._push_snapping_config()
         self.layers_changed.emit()
         self.state_changed.emit()
 
@@ -891,6 +895,43 @@ class CompositeEditController(QObject):
 
     def set_snapping(self, enabled: bool) -> None:
         self._snapping.enabled = bool(enabled)
+        self._push_snapping_config()
+
+    def _push_snapping_config(self) -> None:
+        """把 SnappingService 状态投影到 QGIS canvas snappingUtils（M3）。
+
+        QGIS 端 AdvancedConfiguration 只认显式列出的图层，因此为每个图层
+        都发条目（未覆盖者落全局值），语义与 SnappingService.snap 对齐；
+        layer_priority（等距裁决）与 grid 模式无 QGIS 对应物，不下推。
+        """
+        canvas = self._canvas
+        if canvas is None or not hasattr(canvas, "set_snapping_config"):
+            return
+        snapping = self._snapping
+        types = [m for m in ("vertex", "segment", "midpoint") if m in snapping.modes]
+        config: dict[str, object] = {
+            "enabled": bool(snapping.enabled),
+            "mode": "active_layer" if snapping.current_layer_only else "all_layers",
+            "tolerance_px": float(snapping.pixel_tolerance),
+            "types": types,
+            "reference_enabled": "reference" in snapping.modes,
+        }
+        if not snapping.current_layer_only:
+            layers: dict[str, dict[str, object]] = {}
+            for layer_id in self._layers:
+                modes = snapping.layer_modes.get(layer_id)
+                layers[layer_id] = {
+                    "enabled": bool(snapping.layer_enabled.get(layer_id, True)),
+                    "types": (
+                        [m for m in ("vertex", "segment", "midpoint") if m in modes]
+                        if modes is not None else types
+                    ),
+                    "tolerance_px": float(
+                        snapping.layer_tolerance.get(layer_id, snapping.pixel_tolerance)
+                    ),
+                }
+            config["layers"] = layers
+        canvas.set_snapping_config(config)
 
     @property
     def snapping(self) -> SnappingService:

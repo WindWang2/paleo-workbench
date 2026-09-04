@@ -315,6 +315,22 @@ class QgisCanvasShim(QWidget):
     def set_overlay_provider(self, provider) -> None:
         self._overlay_provider = provider  # M1 存而不画
 
+    def set_snapping_config(self, config: dict) -> None:
+        """捕捉配置下推 QGIS canvas snappingUtils（M3）。
+
+        config 形如 ``{"enabled": bool, "mode": "all_layers"|"active_layer",
+        "tolerance_px": float, "types": [...], "reference_enabled": bool,
+        "layers": {doc_id: {"enabled": bool, "types": [...], "tolerance_px": float}}}``；
+        状态权威仍是 Python SnappingService，这里只是投影。grid 捕捉为
+        Python 专有模式，QGIS 端无对应物，不下推。
+        """
+        if getattr(self, "_shutdown_done", False) or not self.canvas_address:
+            return
+        try:
+            self.stack.set_snapping_config(self.canvas_address, json.dumps(config))
+        except Exception:
+            pass
+
     def _restore_tool_patch(self) -> None:
         try:
             tools = getattr(self, "_tools_wrapped_target", None)

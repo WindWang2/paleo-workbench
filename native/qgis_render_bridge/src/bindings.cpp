@@ -643,6 +643,15 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
         .def("mirror_layer_visibility", &pwb::qgis_render::QgisMapStack::mirrorLayerVisibility)
         .def("tree_echo_suppressed", &pwb::qgis_render::QgisMapStack::treeEchoSuppressed)
         .def("set_map_tool", &pwb::qgis_render::QgisMapStack::setMapTool)
+        .def("set_snapping_config",
+             &pwb::qgis_render::QgisMapStack::setSnappingConfig)
+        .def("snap_to_map",
+             [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas,
+                double x, double y) {
+               const std::string raw = self.snapToMap(canvas, x, y);
+               return py::module_::import("json").attr("loads")(raw).cast<py::dict>();
+             },
+             py::arg("canvas"), py::arg("x"), py::arg("y"))
         .def("set_extent_callback",
              [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas, py::function f) {
                self.setExtentCallback(canvas, [f = std::move(f)](double a, double b, double c, double d) {

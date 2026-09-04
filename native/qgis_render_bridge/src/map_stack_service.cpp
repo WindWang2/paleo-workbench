@@ -24,6 +24,7 @@
 #include <QWidget>
 
 #include <qgsapplication.h>
+#include <qgsadvanceddigitizingdockwidget.h>
 #include <qgscoordinatereferencesystem.h>
 #include <qgscoordinatetransform.h>
 #include <qgsjsonutils.h>
@@ -40,9 +41,12 @@
 #include <qgsmaptoolpan.h>
 #include <qgsmaptoolzoom.h>
 #include <qgspointxy.h>
+#include <qgspointlocator.h>
 #include <qgsproject.h>
 #include <qgsreadwritecontext.h>
 #include <qgsrectangle.h>
+#include <qgssnappingconfig.h>
+#include <qgssnappingutils.h>
 #include <qgsvectorlayer.h>
 #include <qgsvectorlayerlabeling.h>
 #include <qgsvectorlayerproperties.h>
@@ -69,6 +73,20 @@ std::string qjsonValueToString(const QJsonValue& v) {
     }
     if (v.isBool()) return v.toBool() ? "true" : "false";
     return {};
+}
+
+Qgis::SnappingTypes parseSnappingTypes(const QJsonArray& arr) {
+    Qgis::SnappingTypes types;
+    for (const QJsonValue& v : arr) {
+        const QString s = v.toString();
+        if (s == QLatin1String("vertex")) types |= Qgis::SnappingType::Vertex;
+        else if (s == QLatin1String("segment")) types |= Qgis::SnappingType::Segment;
+        else if (s == QLatin1String("midpoint")) types |= Qgis::SnappingType::MiddleOfSegment;
+        else if (s == QLatin1String("centroid")) types |= Qgis::SnappingType::Centroid;
+        else if (s == QLatin1String("area")) types |= Qgis::SnappingType::Area;
+    }
+    if (types == Qgis::SnappingTypes()) types = Qgis::SnappingType::Vertex;
+    return types;
 }
 
 static bool legacy_style_empty(const std::string& s) {
@@ -304,6 +322,9 @@ struct QgisMapStack::Impl {
   std::unordered_map<std::uintptr_t, ExtentCallback> extent_callbacks;
   std::unordered_map<std::uintptr_t, PointCallback> xy_callbacks;
   std::unordered_map<std::uintptr_t, QPointer<QgsMapCanvas>> canvas_refs;
+  // 隐藏高级数字化 dock：QgsMapToolCapture 派生链构造有 Q_ASSERT(cadDockWidget)，
+  // 每画布一个，永不 show；parent 挂画布随其销毁（M3 Task 1）。
+  std::unordered_map<std::uintptr_t, QPointer<QgsAdvancedDigitizingDockWidget>> cad_docks;
   std::unordered_map<std::uintptr_t, QMetaObject::Connection> extent_connections;
   std::unordered_map<std::uintptr_t, QMetaObject::Connection> xy_connections;
   // I1: retain rejection after erasing the QPointer tombstone — otherwise the
@@ -594,6 +615,7 @@ void QgisMapStack::shutdown() {
     if (kv.second) kv.second.release();
   }
   impl_->tools.clear();
+  impl_->cad_docks.clear();
   impl_->canvas_refs.clear();
   impl_->dead_canvas_addrs.clear();
   impl_->extent_callbacks.clear();
@@ -661,6 +683,7 @@ std::uintptr_t QgisMapStack::createCanvas() {
   std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(canvas);
   impl_->tree_bridges.emplace(addr, std::move(tree_bridge));
   impl_->canvas_refs[addr] = canvas;
+  impl_->cad_docks[addr] = new QgsAdvancedDigitizingDockWidget(canvas, canvas);
   // I1: address reuse — a freshly allocated canvas may reuse a previously
   // dead address; clear the dead-set so the new live entry is not rejected.
   impl_->dead_canvas_addrs.erase(addr);
@@ -703,6 +726,7 @@ void QgisMapStack::destroyCanvas(std::uintptr_t canvas_addr) {
   // QgisCanvasHost layout). The QPointer will become null when Qt
   // deletes the widget.
   impl_->tree_bridges.erase(canvas_addr);
+  impl_->cad_docks.erase(canvas_addr);  // Qt 父子关系负责销毁（parent=canvas）
   impl_->canvas_refs.erase(it);
   impl_->dead_canvas_addrs.erase(canvas_addr);
 }
@@ -1147,6 +1171,98 @@ bool QgisMapStack::mirrorLayerVisibility(const std::string& doc_id) const {
 
 bool QgisMapStack::treeEchoSuppressed() const noexcept {
   return impl_ && impl_->suppress_tree_callbacks > 0;
+}
+
+void QgisMapStack::setSnappingConfig(std::uintptr_t canvas_addr,
+                                     const std::string& config_json) {
+  ensureNotStale(canvas_addr);
+  QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
+  QJsonParseError err;
+  const QJsonDocument doc =
+      QJsonDocument::fromJson(QByteArray::fromStdString(config_json), &err);
+  if (err.error != QJsonParseError::NoError || !doc.isObject())
+    throw std::invalid_argument("invalid snapping config JSON");
+  const QJsonObject obj = doc.object();
+
+  QgsSnappingConfig config;
+  config.setEnabled(obj.value(QStringLiteral("enabled")).toBool(false));
+  const bool hasLayers = obj.contains(QStringLiteral("layers"));
+  const QString mode =
+      obj.value(QStringLiteral("mode")).toString(QStringLiteral("all_layers"));
+  if (hasLayers) {
+    config.setMode(Qgis::SnappingMode::AdvancedConfiguration);
+  } else if (mode == QLatin1String("active_layer")) {
+    config.setMode(Qgis::SnappingMode::ActiveLayer);
+  } else {
+    config.setMode(Qgis::SnappingMode::AllLayers);
+  }
+  config.setTolerance(obj.value(QStringLiteral("tolerance_px")).toDouble(12.0));
+  config.setUnits(Qgis::MapToolUnit::Pixels);
+  config.setTypeFlag(parseSnappingTypes(
+      obj.value(QStringLiteral("types")).toArray()));
+
+  if (hasLayers) {
+    const QJsonObject layers = obj.value(QStringLiteral("layers")).toObject();
+    for (auto it = layers.begin(); it != layers.end(); ++it) {
+      QgsVectorLayer* layer =
+          findMirrorByDocId(QgsProject::instance(), it.key().toStdString());
+      if (layer == nullptr) continue;
+      const QJsonObject ls = it.value().toObject();
+      config.setIndividualLayerSettings(
+          layer,
+          QgsSnappingConfig::IndividualLayerSettings(
+              ls.value(QStringLiteral("enabled")).toBool(true),
+              parseSnappingTypes(ls.value(QStringLiteral("types")).toArray()),
+              ls.value(QStringLiteral("tolerance_px"))
+                  .toDouble(config.tolerance()),
+              Qgis::MapToolUnit::Pixels));
+    }
+    // 参考点捕捉（井位等 pwb/reference 镜像层）：Python 侧 "reference" 模式
+    // 的 QGIS 对应物——参考图层顶点参与捕捉；显式条目优先。
+    if (obj.value(QStringLiteral("reference_enabled")).toBool(false)) {
+      const auto configured = config.individualLayerSettings();
+      for (auto* layer : QgsProject::instance()->mapLayers().values()) {
+        auto* vl = qobject_cast<QgsVectorLayer*>(layer);
+        if (vl == nullptr || configured.contains(vl)) continue;
+        if (vl->customProperty(QStringLiteral("pwb/reference")).toString() !=
+            QLatin1String("true"))
+          continue;
+        config.setIndividualLayerSettings(
+            vl, QgsSnappingConfig::IndividualLayerSettings(
+                    true, Qgis::SnappingType::Vertex, config.tolerance(),
+                    Qgis::MapToolUnit::Pixels));
+      }
+    }
+  }
+  canvas->snappingUtils()->setConfig(config);
+}
+
+std::string QgisMapStack::snapToMap(std::uintptr_t canvas_addr, double x,
+                                    double y) const {
+  QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
+  const QgsPointLocator::Match m =
+      canvas->snappingUtils()->snapToMap(QgsPointXY(x, y));
+  QJsonObject out;
+  out[QStringLiteral("matched")] = m.isValid();
+  if (m.isValid()) {
+    const QgsPointXY p = m.point();
+    out[QStringLiteral("x")] = p.x();
+    out[QStringLiteral("y")] = p.y();
+    out[QStringLiteral("vertex_index")] = m.hasVertex() ? m.vertexIndex() : -1;
+    QString docId;
+    if (m.layer() != nullptr) {
+      docId = m.layer()
+                  ->customProperty(QStringLiteral("pwb/doc_id"))
+                  .toString();
+    }
+    out[QStringLiteral("layer_doc_id")] = docId;
+  } else {
+    out[QStringLiteral("x")] = x;
+    out[QStringLiteral("y")] = y;
+    out[QStringLiteral("vertex_index")] = -1;
+    out[QStringLiteral("layer_doc_id")] = QString();
+  }
+  return QJsonDocument(out).toJson(QJsonDocument::Compact).toStdString();
 }
 
 void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kind) {
