@@ -265,7 +265,7 @@ def test_qc_sync_only_touches_bound_tasks():
 
     updated = sync_well_table_to_linked_tasks(project, table)
     assert updated == [bound]
-    synced_points = sample_points_from_well_table(table)
+    synced_points = sample_points_from_well_table(table, value_key="z")
     assert bound.parameters["sample_points"] == synced_points
     # The unbound FIRST task keeps its own samples (the #936 bug injected here).
     assert unbound_first.parameters["sample_points"] != synced_points

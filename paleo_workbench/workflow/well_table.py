@@ -12,6 +12,43 @@ from paleo_workbench.project.models import (
     _id,
 )
 
+# Value-key selection (audit #1151): a WellTableRow carries physically distinct
+# columns — ``z`` (raw measured value), ``H_s``/``H_t`` (metres of thickness),
+# ``R_s`` (dimensionless sand ratio). The old per-row z→R_s→H_t export
+# fallback silently mixed a ratio with metre thicknesses in one interpolation
+# field. The factor TYPE now decides which single column feeds an export;
+# aliases mirror the factor families registered in
+# ``mapping.geological_pipeline.pipeline._FACTOR_ALIAS_GROUPS``.
+_VALUE_KEY_ALIAS_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("R_s", ("sand_ratio", "r_s", "rs", "砂地比")),
+    ("H_t", ("formation_thickness", "thickness", "h_t", "ht", "total_thickness", "地层厚度")),
+    ("H_s", ("sand_thickness", "h_s", "hs", "sand", "砂岩厚度")),
+)
+VALID_VALUE_KEYS: tuple[str, ...] = ("z", "H_s", "H_t", "R_s")
+
+
+def value_key_for_factor_type(factor_type: str) -> str:
+    """WellTableRow column holding *factor_type*'s measured physical quantity.
+
+    The sand-ratio / formation-thickness / sand-thickness factor families map
+    to their dedicated column; every other (or unknown/empty) factor type maps
+    to ``"z"`` — the raw measured value.
+    """
+    norm = str(factor_type or "").strip().lower()
+    if not norm:
+        return "z"
+    for key, aliases in _VALUE_KEY_ALIAS_GROUPS:
+        if norm == key.lower() or norm in aliases:
+            return key
+    return "z"
+
+
+def _check_value_key(value_key: str) -> None:
+    if value_key not in VALID_VALUE_KEYS:
+        raise ValueError(
+            f"value_key must be one of {VALID_VALUE_KEYS}, got {value_key!r}"
+        )
+
 
 def well_table_from_sample_points(
     sample_points: list[dict[str, Any]] | None,
@@ -103,22 +140,31 @@ def sample_points_from_well_table(
     table: WellTable,
     *,
     include_flagged: bool = False,
+    value_key: str,
+    stats: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """Export WellTable rows to factor sample_points dicts for IDW/grid APIs.
 
     By default skips ``outlier`` / ``invalid_ratio`` / ``missing`` rows so
     interpolation only sees QC-clean samples.
+
+    *value_key* (audit #1151, required) names the single WellTableRow column
+    exported as ``value``: ``"z"`` (raw measured value — pass this when the
+    factor semantics are genuinely unknown), ``"R_s"`` (dimensionless sand
+    ratio), or ``"H_t"``/``"H_s"`` (metres of thickness). Rows that lack the
+    selected column are skipped and counted — never silently filled from a
+    column of a different physical dimension. Pass *stats* (dict) to receive
+    ``{"exported": int, "skipped_missing_value": int}``.
     """
+    _check_value_key(value_key)
     points: list[dict[str, Any]] = []
+    skipped_missing = 0
     for row in table.rows:
         if not include_flagged and row.qc_flag != "ok":
             continue
-        z = row.z
-        if z is None and row.R_s is not None:
-            z = row.R_s
-        if z is None and row.H_t is not None:
-            z = row.H_t
+        z = getattr(row, value_key)
         if z is None:
+            skipped_missing += 1
             continue
         rec: dict[str, Any] = {
             "well_id": row.well_id,
@@ -140,6 +186,9 @@ def sample_points_from_well_table(
         if row.qc_z_star is not None:
             rec["qc_z_star"] = row.qc_z_star
         points.append(rec)
+    if stats is not None:
+        stats["exported"] = len(points)
+        stats["skipped_missing_value"] = skipped_missing
     return points
 
 
@@ -165,7 +214,9 @@ def attach_well_table_to_factor_task(
 
     task.well_table_id = table.id
     params = dict(task.parameters or {})
-    params["sample_points"] = sample_points_from_well_table(table)
+    params["sample_points"] = sample_points_from_well_table(
+        table, value_key=value_key_for_factor_type(table.factor_type)
+    )
     params["well_table_id"] = table.id
     task.parameters = params
     return table
@@ -215,7 +266,9 @@ def sync_well_table_to_linked_tasks(
         linked = list(project.factor_map_tasks)
     for task in linked:
         params = dict(task.parameters or {})
-        params["sample_points"] = sample_points_from_well_table(table)
+        params["sample_points"] = sample_points_from_well_table(
+            table, value_key=value_key_for_factor_type(task.factor_type)
+        )
         task.parameters = params
         task.well_table_id = table.id
     return linked
@@ -225,11 +278,23 @@ def well_table_to_arrays(
     table: WellTable,
     *,
     include_flagged: bool = False,
+    value_key: str,
 ) -> dict[str, Any]:
-    """Export WellTable columns directly to contiguous NumPy arrays."""
+    """Export WellTable columns directly to contiguous NumPy arrays.
+
+    *value_key* (audit #1151, required) names the single WellTableRow column
+    exported as ``z``: ``"z"`` (raw measured value — pass this when the factor
+    semantics are genuinely unknown), ``"R_s"`` (dimensionless), or
+    ``"H_t"``/``"H_s"`` (metres). Rows lacking the selected column are skipped
+    from every array and counted under ``"skipped_missing"`` in the result —
+    never silently filled from a column of a different physical dimension.
+    """
     import numpy as np
 
-    valid_rows = [r for r in table.rows if include_flagged or r.qc_flag == "ok"]
+    _check_value_key(value_key)
+    qc_rows = [r for r in table.rows if include_flagged or r.qc_flag == "ok"]
+    valid_rows = [r for r in qc_rows if getattr(r, value_key) is not None]
+    skipped_missing = len(qc_rows) - len(valid_rows)
     n = len(valid_rows)
     if n == 0:
         return {
@@ -240,19 +305,13 @@ def well_table_to_arrays(
             "q": np.array([], dtype=np.float64),
             "b_i": np.array([], dtype=np.float64),
             "qc_flags": np.array([], dtype=object),
+            "skipped_missing": skipped_missing,
         }
 
     names = [r.name for r in valid_rows]
     x = np.fromiter((r.x for r in valid_rows), dtype=np.float64, count=n)
     y = np.fromiter((r.y for r in valid_rows), dtype=np.float64, count=n)
-    z = np.fromiter(
-        (
-            (r.z if r.z is not None else (r.R_s if r.R_s is not None else (r.H_t if r.H_t is not None else np.nan)))
-            for r in valid_rows
-        ),
-        dtype=np.float64,
-        count=n,
-    )
+    z = np.fromiter((getattr(r, value_key) for r in valid_rows), dtype=np.float64, count=n)
     q = np.fromiter((r.q for r in valid_rows), dtype=np.float64, count=n)
     b_i = np.fromiter((r.b_i for r in valid_rows), dtype=np.float64, count=n)
     qc_flags = [r.qc_flag for r in valid_rows]
@@ -265,14 +324,22 @@ def well_table_to_arrays(
         "q": q,
         "b_i": b_i,
         "qc_flags": np.array(qc_flags, dtype=object),
+        "skipped_missing": skipped_missing,
     }
 
 
-def well_table_to_dataframe(table: WellTable, *, include_flagged: bool = True):
-    """Convert WellTable to a pandas DataFrame."""
+def well_table_to_dataframe(
+    table: WellTable,
+    *,
+    include_flagged: bool = True,
+    value_key: str,
+):
+    """Convert WellTable to a pandas DataFrame (see ``well_table_to_arrays``)."""
     import pandas as pd
 
-    data = well_table_to_arrays(table, include_flagged=include_flagged)
+    data = well_table_to_arrays(
+        table, include_flagged=include_flagged, value_key=value_key
+    )
     df = pd.DataFrame(
         {
             "name": data["names"],

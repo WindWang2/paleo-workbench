@@ -42,6 +42,13 @@ def apply_mad_outlier_qc(
 ) -> WellTable:
     """Flag rows whose modified z-score exceeds *threshold*.
 
+    *value_attr* (audit #1151) names the single WellTableRow column scored —
+    ``"z"`` (raw measured value, the default for callers that cannot know the
+    factor semantics), ``"R_s"``, ``"H_t"`` or ``"H_s"``. There is NO fallback
+    to another column: mixing a dimensionless ratio with metre thicknesses in
+    one MAD score field produced meaningless z-scores. Rows lacking the
+    selected column are flagged ``missing``.
+
     Does not overwrite an existing ``invalid_ratio`` flag. Outliers keep their
     value but get ``qc_flag=outlier`` and reduced ``b_i`` so trend surfaces can
     down-weight them.
@@ -52,8 +59,6 @@ def apply_mad_outlier_qc(
         if row.qc_flag == "invalid_ratio":
             continue
         raw = getattr(row, value_attr, None)
-        if raw is None and value_attr == "z":
-            raw = row.R_s if row.R_s is not None else row.H_t
         if raw is None:
             row.qc_flag = "missing"
             row.b_i = 0.0

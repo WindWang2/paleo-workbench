@@ -58,7 +58,9 @@ def test_e2e_factor_map_welltable_to_version_set():
     summary = qc_summary(table)
     assert summary["invalid_ratio"] >= 1
     assert summary["outlier"] >= 1
-    clean = sample_points_from_well_table(table, include_flagged=False)
+    clean = sample_points_from_well_table(
+        table, include_flagged=False, value_key="R_s"
+    )
     assert len(clean) >= 4
     assert all(p.get("qc_flag", "ok") == "ok" for p in clean)
 
@@ -100,8 +102,11 @@ def test_e2e_factor_map_welltable_to_version_set():
     )
     project.factor_map_tasks.append(task)
     attach_well_table_to_factor_task(project, table, task)
-    # Re-sync cleaned points after attach (attach uses current table QC flags)
-    task.parameters["sample_points"] = sample_points_from_well_table(table)
+    # Re-sync cleaned points after attach (attach uses current table QC flags).
+    # 砂地比 table → export the ratio column (#1151).
+    task.parameters["sample_points"] = sample_points_from_well_table(
+        table, value_key="R_s"
+    )
 
     apply_interpolation_to_task(
         task, method="方向趋势", grid_n=10, project=project
