@@ -170,3 +170,125 @@ def assemble_map_product(
         run_id=run.id,
         scientific_fingerprint=fingerprint,
     )
+
+
+def describe_map_product(
+    record: MapProductRecord,
+    project: ProjectDocument,
+    *,
+    catalog: Any = None,
+) -> dict[str, Any]:
+    """One-step provenance answer for a finalized MapProduct.
+
+    Returns what the product consumed and produced: wells (via the well
+    tables its factor tasks read), interpretation versions (horizon /
+    correlation / fault refs), factor maps with their persisted grid
+    versions and interpolation parameters, the assembling run's generator
+    and parameters, and where the output payload lives. Missing references
+    are reported as ``null`` with the reason — never silently omitted.
+    """
+    tasks = {str(t.id): t for t in getattr(project, "factor_map_tasks", None) or []}
+    tables = {str(t.id): t for t in getattr(project, "well_tables", None) or []}
+    interp_index: dict[str, tuple[str, Any]] = {}
+    for kind, refs in (
+        ("horizon", getattr(project, "horizon_interpretations", None) or []),
+        ("correlation", getattr(project, "correlation_interpretations", None) or []),
+        ("fault", getattr(project, "fault_interpretations", None) or []),
+    ):
+        for ref in refs:
+            interp_index[str(ref.id)] = (kind, ref)
+
+    factor_maps = []
+    wells: list[dict[str, Any]] = []
+    seen_wells: set[str] = set()
+    for task_id in record.factor_task_ids:
+        task = tasks.get(str(task_id))
+        if task is None:
+            factor_maps.append({"task_id": str(task_id), "status": "missing_task"})
+            continue
+        table = tables.get(str(getattr(task, "well_table_id", "") or ""))
+        if table is not None:
+            for row in table.rows:
+                key = str(row.well_id)
+                if key in seen_wells:
+                    continue
+                seen_wells.add(key)
+                wells.append({"well_id": key, "name": str(row.name or "")})
+        factor_maps.append(
+            {
+                "task_id": str(task_id),
+                "name": str(task.name),
+                "factor_type": str(task.factor_type),
+                "target_horizon": str(task.target_horizon),
+                "method": str(task.method),
+                "parameters": dict(task.parameters),
+                "grid_version_id": str(task.grid_artifact_version_id or "") or None,
+                "source_kind": str(task.source_kind),
+                "well_table_id": str(task.well_table_id) if task.well_table_id else None,
+            }
+        )
+
+    interpretations = []
+    for ref_id in record.interpretation_refs:
+        entry = interp_index.get(str(ref_id))
+        if entry is None:
+            interpretations.append({"ref_id": str(ref_id), "status": "missing_ref"})
+            continue
+        kind, ref = entry
+        interpretations.append(
+            {
+                "ref_id": str(ref_id),
+                "kind": kind,
+                "name": str(ref.name),
+                "current_version_id": str(ref.current_version_id or "") or None,
+                "status": str(ref.status),
+            }
+        )
+
+    run_info: dict[str, Any] | None = None
+    if catalog is not None and record.run_id:
+        try:
+            run = catalog.get_run(record.run_id)
+            run_info = {
+                "run_id": str(run.id),
+                "generator": str(getattr(run, "generator", "") or ""),
+                "parameters": dict(getattr(run, "parameters", {}) or {}),
+                "input_version_ids": list(getattr(run, "input_version_ids", []) or []),
+                "status": str(getattr(run, "status", "") or ""),
+            }
+        except Exception as exc:  # catalog closed / run purged: report, don't guess
+            run_info = {"run_id": str(record.run_id), "status": "unavailable", "reason": str(exc)}
+
+    output_info: dict[str, Any] | None = None
+    if catalog is not None and record.output_version_id:
+        try:
+            version = catalog.get_version(record.output_version_id)
+            stage = getattr(version, "stage", "")
+            stage_value = getattr(stage, "value", stage)
+            output_info = {
+                "version_id": str(version.id),
+                "stage": str(stage_value or ""),
+                "path": str(getattr(version, "path", "") or "") or None,
+                "checksum": str(getattr(version, "checksum", "") or "") or None,
+            }
+        except Exception as exc:
+            output_info = {
+                "version_id": str(record.output_version_id),
+                "status": "unavailable",
+                "reason": str(exc),
+            }
+
+    return {
+        "product_name": record.product_name,
+        "record_id": record.id,
+        "scientific_fingerprint": record.scientific_fingerprint,
+        "created_at": record.created_at,
+        "wells": wells,
+        "well_count": len(wells),
+        "factor_maps": factor_maps,
+        "interpretations": interpretations,
+        "composition_ref": record.composition_ref,
+        "run": run_info,
+        "output": output_info,
+        "notes": record.notes,
+    }

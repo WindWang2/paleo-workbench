@@ -73,6 +73,7 @@ _DOMAIN_BY_SECTION = {
     "paleomap_documents": ProjectDirtyDomain.MAP_DOCUMENTS,
     "user_vector_layers": ProjectDirtyDomain.MAP_DOCUMENTS,
     "map_qgis_project_xml": ProjectDirtyDomain.MAP_DOCUMENTS,
+    "map_products": ProjectDirtyDomain.EXPORTS,
     "quality_reports": ProjectDirtyDomain.QC,
     "export_artifacts": ProjectDirtyDomain.EXPORTS,
 }
