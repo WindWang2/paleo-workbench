@@ -172,6 +172,11 @@ public:
   void setEditIndicator(std::uintptr_t tree, const std::string& doc_id, bool on);
   int editIndicatorCount(std::uintptr_t tree, const std::string& doc_id) const;
 
+  // M5: mini QgsProject XML envelope (renderer/labeling/visibility/opacity/order).
+  // Features stay in Python; apply matches live mirrors by pwb/doc_id.
+  std::string writeProjectXml();
+  int applyProjectXml(const std::string& xml);
+
 private:
   struct Impl;
   std::unique_ptr<Impl> impl_;

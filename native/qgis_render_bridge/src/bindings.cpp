@@ -758,5 +758,7 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                  out["name"] = raw["name"];
                }
                return out;
-             });
+             })
+        .def("write_project_xml", &pwb::qgis_render::QgisMapStack::writeProjectXml)
+        .def("apply_project_xml", &pwb::qgis_render::QgisMapStack::applyProjectXml);
 }

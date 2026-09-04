@@ -11,6 +11,8 @@
 #include <QCoreApplication>
 #include <QDialog>
 #include <QDomDocument>
+#include <QFile>
+#include <QIODevice>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -21,6 +23,7 @@
 #include <QPainter>
 #include <QPointer>
 #include <QString>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QWidget>
 
@@ -1363,6 +1366,91 @@ bool QgisMapStack::mirrorLayerVisibility(const std::string& doc_id) const {
 
 bool QgisMapStack::treeEchoSuppressed() const noexcept {
   return impl_ && impl_->suppress_tree_callbacks > 0;
+}
+
+std::string QgisMapStack::writeProjectXml() {
+  if (!impl_ || !impl_->initialized)
+    throw std::runtime_error("map stack is not initialized");
+  QTemporaryDir dir;
+  if (!dir.isValid())
+    throw std::runtime_error("could not create temp dir for QgsProject write");
+  const QString path = dir.filePath(QStringLiteral("map.qgs"));
+  QgsProject* prj = project();
+  const QString oldName = prj->fileName();
+  const bool ok = prj->write(path);
+  prj->setFileName(oldName);
+  if (!ok) throw std::runtime_error("QgsProject::write failed");
+  QFile file(path);
+  if (!file.open(QIODevice::ReadOnly))
+    throw std::runtime_error("could not read written QgsProject XML");
+  return QString::fromUtf8(file.readAll()).toStdString();
+}
+
+int QgisMapStack::applyProjectXml(const std::string& xml) {
+  if (!impl_ || !impl_->initialized)
+    throw std::runtime_error("map stack is not initialized");
+  if (xml.empty()) return 0;
+  if (xml.find("<qgis") == std::string::npos)
+    throw std::runtime_error("invalid QgsProject XML");
+
+  QTemporaryDir dir;
+  if (!dir.isValid())
+    throw std::runtime_error("could not create temp dir for QgsProject read");
+  const QString path = dir.filePath(QStringLiteral("map.qgs"));
+  QFile out(path);
+  if (!out.open(QIODevice::WriteOnly))
+    throw std::runtime_error("could not write temp QgsProject XML");
+  out.write(QByteArray::fromStdString(xml));
+  out.close();
+
+  QgsProject donor;
+  if (!donor.read(path))
+    throw std::runtime_error("QgsProject::read failed");
+
+  SuppressGuard guard(&impl_->suppress_tree_callbacks);
+  int applied = 0;
+  std::vector<std::string> order;
+  QgsLayerTreeGroup* donorRoot = donor.layerTreeRoot();
+  for (QgsLayerTreeNode* child : donorRoot->children()) {
+    auto* layerNode = qobject_cast<QgsLayerTreeLayer*>(child);
+    if (layerNode == nullptr) continue;
+    QgsMapLayer* donorLayer = layerNode->layer();
+    if (donorLayer == nullptr) continue;
+    const QString doc = donorLayer->customProperty(QStringLiteral("pwb/doc_id")).toString();
+    if (doc.isEmpty()) continue;
+    const std::string doc_id = doc.toStdString();
+    order.push_back(doc_id);
+    QgsVectorLayer* live = findMirrorByDocId(project(), doc_id);
+    if (live == nullptr) continue;
+    auto* donorVl = qobject_cast<QgsVectorLayer*>(donorLayer);
+    if (donorVl != nullptr) {
+      if (donorVl->renderer() != nullptr) {
+        live->setRenderer(donorVl->renderer()->clone());
+      }
+      live->setLabelsEnabled(donorVl->labelsEnabled());
+      if (donorVl->labeling() != nullptr) {
+        live->setLabeling(donorVl->labeling()->clone());
+      } else {
+        live->setLabeling(nullptr);
+      }
+    }
+    live->setOpacity(donorLayer->opacity());
+    live->setName(donorLayer->name());
+    QgsLayerTreeLayer* liveNode = project()->layerTreeRoot()->findLayer(live);
+    if (liveNode != nullptr) {
+      const bool visible = layerNode->itemVisibilityChecked();
+      liveNode->setItemVisibilityChecked(visible);
+      impl_->known_layer_visibility[doc_id] = visible;
+    }
+    applied++;
+  }
+  if (!order.empty()) {
+    setMirrorLayerOrder(order);
+  }
+  for (auto& kv : impl_->canvas_refs) {
+    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
+  }
+  return applied;
 }
 
 void QgisMapStack::setSnappingConfig(std::uintptr_t canvas_addr,
