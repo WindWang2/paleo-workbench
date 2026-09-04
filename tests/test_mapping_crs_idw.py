@@ -565,3 +565,44 @@ def test_engine_kriging_labels_dispatch_to_real_kriging() -> None:
     # The SciPy linear backend stays reachable under its own engine name.
     assert module.method_to_backend("linear") == "linear"
 
+
+# ---------------------------------------------------------------------------
+# #1131: domain-well metadata must not silently override reserved record keys.
+# ---------------------------------------------------------------------------
+
+def _project_with_domain_well(metadata: dict) -> ProjectDocument:
+    from paleo_workbench.project.domain import WellEntity
+
+    project = ProjectDocument(
+        meta=ProjectMeta(name="1131-regression"),
+        coordinate=CoordinateReference(project_crs=_UTM49N),
+        stratigraphy=StratigraphicFramework(target_horizon="T1"),
+    )
+    project.wells.append(
+        WellEntity(
+            name="A12",
+            surface_x=1.0,
+            surface_y=2.0,
+            project_x=500000.0,
+            project_y=4400000.0,
+            metadata=dict(metadata),
+        )
+    )
+    return project
+
+
+def test_domain_well_metadata_does_not_override_xy() -> None:
+    """#1131: metadata carrying x/y (common in well-head import summaries)
+    must not replace the projected interpolation coordinates."""
+    service = GeologicalMappingService()
+    dataset = service.extract_well_factors(
+        _project_with_domain_well({"x": 999.0, "y": 888.0, "孔隙度": 12.5, "source": "import-summary"}),
+        "孔隙度",
+    )
+    assert len(dataset.points) == 1
+    point = dataset.points[0]
+    assert point.x == 500000.0
+    assert point.y == 4400000.0
+    assert point.well_id
+    assert point.qc_flag == "ok"
+

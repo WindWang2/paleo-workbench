@@ -99,7 +99,10 @@ class GeologicalMappingService:
                 attrs = dict(getattr(well, "attributes", None) or {})
                 props = {**meta, **attrs}
 
-                records.append({
+                # #1131: free-form metadata must never override reserved
+                # record keys (projected x/y, identity, QC). Explicit keys
+                # win; conflicting metadata keys are dropped with a warning.
+                record = {
                     "well_id": getattr(well, "id", "") or getattr(well, "uwi", "") or well.name,
                     "name": getattr(well, "name", "") or getattr(well, "uwi", "") or getattr(well, "id", ""),
                     "x": fx,
@@ -108,8 +111,15 @@ class GeologicalMappingService:
                     "qc_flag": "ok",
                     "attributes": props,
                     "properties": props,
-                    **props,
-                })
+                }
+                conflicts = sorted(k for k in props if k in record)
+                if conflicts:
+                    logger.warning(
+                        "well %s metadata keys %s collide with reserved "
+                        "factor-record keys; reserved values kept",
+                        getattr(well, "name", "?"), conflicts,
+                    )
+                records.append({**props, **record})
 
         # 3. If no well table or domain well records, extract from sample points in existing factor tasks
         if not records:
