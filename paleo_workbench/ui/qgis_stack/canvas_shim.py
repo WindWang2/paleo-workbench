@@ -238,8 +238,9 @@ class QgisCanvasShim(QWidget):
                     self._extent_history.append(extent)
                     if len(self._extent_history) > 100:
                         self._extent_history.pop(0)
-                    else:
-                        self._extent_history_index = len(self._extent_history) - 1
+                    # 弹头后索引必须重算：pop(0) 让后续下标整体前移一位，
+                    # 不重算则 can_previous/next 错位（review P2-5）。
+                    self._extent_history_index = len(self._extent_history) - 1
                     self._last_emitted_extent = extent
             return
         # User-initiated (native pan/zoom) path
@@ -835,16 +836,37 @@ class QgisCanvasShim(QWidget):
             self.stack.refresh_canvas(self.canvas_address)
         except Exception:
             pass
-        deadline = time.monotonic() + 5.0
-        while not getattr(self, "_shutdown_done", False):
-            try:
-                rendering = bool(self.stack.is_canvas_rendering(self.canvas_address))
-            except Exception:
-                break
-            if not rendering or time.monotonic() > deadline:
-                break
-            QApplication.processEvents()
-        pixmap = self.canvas.grab()
+        # 等待在途渲染收尾：事件循环排除用户输入（泵普通事件不泵鼠标
+        # 键盘），加重入哨兵——泵里再触发导出/关窗是经典重入坑；超时是
+        # 诚实失败（半渲染帧不冒充成品）。
+        if getattr(self, "_exporting", False):
+            raise ExportError("导出已在进行中")
+        self._exporting = True
+        try:
+            from PySide6.QtCore import QEventLoop, QTimer
+
+            deadline = time.monotonic() + 5.0
+            timed_out = False
+            while not getattr(self, "_shutdown_done", False):
+                try:
+                    rendering = bool(self.stack.is_canvas_rendering(self.canvas_address))
+                except Exception:
+                    break
+                if not rendering:
+                    break
+                if time.monotonic() > deadline:
+                    timed_out = True
+                    break
+                loop = QEventLoop()
+                QTimer.singleShot(20, loop.quit)
+                loop.exec(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+            if getattr(self, "_shutdown_done", False) or self.stack is None:
+                raise ExportError("QGIS 画布在导出期间被关闭")
+            if timed_out:
+                raise ExportError("QGIS 画布渲染未在时限内完成，取消导出")
+            pixmap = self.canvas.grab()
+        finally:
+            self._exporting = False
         if pixmap.isNull():
             raise ExportError("QGIS 画布无可用帧，无法导出 PNG")
         if not pixmap.save(str(path), "PNG"):

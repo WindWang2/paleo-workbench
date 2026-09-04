@@ -97,7 +97,8 @@ class ProcessHub(QFrame):
         # 默认继承 root 的 WARNING：降到 INFO 让查看器可见（包级，不动
         # root；应用未配置其它 handler，不会产生控制台噪音）。
         if self._log_source.level == logging.NOTSET:
-            self._log_source.setLevel(logging.INFO)
+            self._prev_pkg_level = self._log_source.level
+        self._log_source.setLevel(logging.INFO)
         self._log_source.addHandler(self._log_handler)
         self._log_timer = QTimer(self)
         self._log_timer.setInterval(1000)
@@ -131,3 +132,7 @@ class ProcessHub(QFrame):
         self._log_timer.stop()
         if self._log_handler in self._log_source.handlers:
             self._log_source.removeHandler(self._log_handler)
+            if getattr(self, "_prev_pkg_level", None) is not None:
+                # review P2-8：壳重建时包级别要还原，不永久停在 INFO。
+                self._log_source.setLevel(self._prev_pkg_level)
+                self._prev_pkg_level = None
