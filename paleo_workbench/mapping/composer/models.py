@@ -25,6 +25,14 @@ class ElementType(str, Enum):
     STAT_CHART = "stat_chart"
     METADATA = "metadata"
     COLORBAR = "colorbar"
+    # B5 专业编图组件：图廓/数据来源/制图责任 + 地质图例符号组。
+    NEATLINE = "neatline"
+    DATASOURCE = "datasource"
+    TIME_CREDITS = "time_credits"
+    FAULT_SYMBOLS = "fault_symbols"
+    FACIES_LEGEND = "facies_legend"
+    LITHOLOGY_LEGEND = "lithology_legend"
+    STRAT_LABELS = "strat_labels"
 
 
 # Serializable property keys per element type. Everything else still round-
@@ -45,6 +53,13 @@ ELEMENT_PROPERTY_KEYS: dict[ElementType, tuple[str, ...]] = {
     ElementType.STAT_CHART: ("chart_type", "title", "series", "units"),
     ElementType.METADATA: ("fields", "font_size"),
     ElementType.COLORBAR: ("title", "stops", "min", "max", "units", "discrete", "data_binding"),
+    ElementType.NEATLINE: ("line_width_mm", "color", "double_line", "inner_gap_mm"),
+    ElementType.DATASOURCE: ("title", "text", "font_size"),
+    ElementType.TIME_CREDITS: ("text", "font_size"),
+    ElementType.FAULT_SYMBOLS: ("title", "items"),
+    ElementType.FACIES_LEGEND: ("title", "items"),
+    ElementType.LITHOLOGY_LEGEND: ("title", "items"),
+    ElementType.STRAT_LABELS: ("text", "font_size"),
 }
 
 
@@ -62,6 +77,7 @@ class ComposerElement:
     height_mm: float
     z_index: int = 0
     visible: bool = True
+    locked: bool = False
     properties: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -84,6 +100,7 @@ class ComposerElement:
             "height_mm": float(self.height_mm),
             "z_index": int(self.z_index),
             "visible": bool(self.visible),
+            "locked": bool(self.locked),
             "properties": props,
         }
 
@@ -109,6 +126,8 @@ class ComposerElement:
             height_mm=float(payload.get("height_mm") or 1.0),
             z_index=int(payload.get("z_index") or 0),
             visible=bool(payload.get("visible", True)),
+            # 旧文档没有 locked 字段：缺省即未锁定。
+            locked=bool(payload.get("locked", False)),
             properties=properties,
         )
 

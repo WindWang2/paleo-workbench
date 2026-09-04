@@ -14,6 +14,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 from paleo_workbench.mapping.composer.components import (
+    ComposerError,
     CompositionEditSession,
     CompositionFactory,
     bind_template,
@@ -127,6 +128,40 @@ class TestComponentContract:
         }
         elem = ComposerElement.from_dict(payload)
         assert elem.to_dict()["element_type"] == "hologram_3d"
+
+
+class TestLockContract:
+    def test_lock_unlock_is_undoable_command(self, session):
+        elem = session.add_element(ElementType.SCALE_BAR)
+        session.set_locked(elem.id, True)
+        with pytest.raises(ComposerError):
+            session.configure_element(elem.id, {"length_km": 99})
+        session.undo()  # 撤销锁定后恢复可编辑
+        session.configure_element(elem.id, {"length_km": 99})
+        assert elem.properties["length_km"] == 99
+
+    def test_locked_roundtrip_through_document(self, session):
+        elem = session.add_element(ElementType.STAT_CHART, properties={
+            "chart_type": "pie",
+            "series": [{"label": "A", "value": 1.0}, {"label": "B", "value": 3.0}],
+        })
+        session.set_locked(elem.id, True)
+        restored = MapCompositionDocument.from_dict(session.document.to_dict())
+        chart = restored.get_element(elem.id)
+        assert chart.locked is True
+        assert chart.properties["chart_type"] == "pie"
+        assert chart.properties["series"][1] == {"label": "B", "value": 3.0}
+
+    def test_new_components_are_creatable_and_mutable(self, session):
+        # B5 新组件走同一组件契约：创建/配置/撤销。
+        elem = session.add_element(ElementType.NEATLINE)
+        assert elem.properties["double_line"] is False
+        session.configure_element(elem.id, {"double_line": True, "line_width_mm": 1.4})
+        assert elem.properties["double_line"] is True
+        session.undo()
+        assert elem.properties["double_line"] is False
+        faults = session.add_element(ElementType.FAULT_SYMBOLS)
+        assert len(faults.properties["items"]) == 3
 
 
 class TestFactoryDefaults:

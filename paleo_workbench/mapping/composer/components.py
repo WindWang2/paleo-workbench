@@ -27,51 +27,21 @@ from paleo_workbench.mapping.composer.models import (
     MapCompositionDocument,
     _new_element_id,
 )
+from paleo_workbench.mapping.composer.registry import all_specs, get_spec
 
-# Default geometry per component (mm) — sensible authoring sizes on A4.
+# 默认几何/属性不再各自维护字面量——注册表（registry）是单一事实源，
+# 此处仅保留同名视图供既有调用方使用。
 DEFAULT_GEOMETRY_MM: dict[ElementType, tuple[float, float, float, float]] = {
-    ElementType.MAIN_MAP: (15.0, 30.0, 180.0, 140.0),
-    ElementType.LEGEND: (205.0, 30.0, 80.0, 60.0),
-    ElementType.NORTH_ARROW: (250.0, 15.0, 14.0, 18.0),
-    ElementType.SCALE_BAR: (20.0, 180.0, 50.0, 8.0),
-    ElementType.GRID: (15.0, 30.0, 180.0, 140.0),
-    ElementType.TITLE: (15.0, 8.0, 180.0, 14.0),
-    ElementType.ANNOTATION: (60.0, 90.0, 45.0, 8.0),
-    ElementType.TIMESCALE: (15.0, 175.0, 180.0, 12.0),
-    ElementType.TEXT: (30.0, 160.0, 80.0, 8.0),
-    ElementType.IMAGE: (200.0, 110.0, 70.0, 50.0),
-    ElementType.INSET_MAP: (210.0, 140.0, 60.0, 50.0),
-    ElementType.STAT_CHART: (210.0, 30.0, 75.0, 55.0),
-    ElementType.METADATA: (15.0, 188.0, 150.0, 16.0),
-    ElementType.COLORBAR: (200.0, 90.0, 12.0, 80.0),
+    spec.element_type: spec.default_geometry for spec in all_specs()
 }
 
 DEFAULT_PROPERTIES: dict[ElementType, dict[str, Any]] = {
-    ElementType.MAIN_MAP: {"title": "主图"},
-    ElementType.TITLE: {"text": "图件标题", "font_size": 8, "align": "center"},
-    ElementType.TEXT: {"text": "文本", "font_size": 4, "align": "left", "color": "#000000"},
-    ElementType.ANNOTATION: {"text": "注释", "leader": True, "font_size": 3.5},
-    ElementType.NORTH_ARROW: {"label": "N"},
-    ElementType.SCALE_BAR: {"length_km": 10, "units": "km"},
-    ElementType.GRID: {"spacing_mm": 20.0, "color": "#9aa4b2", "line_width_mm": 0.2},
-    ElementType.LEGEND: {},
-    ElementType.COLORBAR: {
-        "title": "数值",
-        "min": 0.0,
-        "max": 1.0,
-        "stops": ((0.0, "#053061"), (0.5, "#f7f7f7"), (1.0, "#67001f")),
-        "discrete": False,
-        "data_binding": {"key": "factor.colorbar"},
-    },
-    ElementType.STAT_CHART: {"chart_type": "bar", "title": "统计", "series": ()},
-    ElementType.METADATA: {
-        "fields": (("编制", ""), ("日期", ""), ("比例尺", "")),
-        "font_size": 3.0,
-    },
-    ElementType.IMAGE: {"image_path": None, "image_data_png_b64": None, "fit": "contain"},
-    ElementType.INSET_MAP: {"locator_scale": 4.0},
-    ElementType.TIMESCALE: {"stages": ()},
+    spec.element_type: copy.deepcopy(spec.default_properties) for spec in all_specs()
 }
+
+
+class ComposerError(RuntimeError):
+    """A composition command was refused (e.g. the element is locked)."""
 
 
 class CompositionFactory:
@@ -90,9 +60,10 @@ class CompositionFactory:
         height_mm: float | None = None,
         properties: Mapping[str, Any] | None = None,
     ) -> ComposerElement:
-        dx, dy, dw, dh = DEFAULT_GEOMETRY_MM[element_type]
+        spec = get_spec(element_type)
+        dx, dy, dw, dh = spec.default_geometry
         merged: dict[str, Any] = {
-            **copy.deepcopy(DEFAULT_PROPERTIES.get(element_type, {})),
+            **copy.deepcopy(spec.default_properties),
             **dict(properties or {}),
         }
         return ComposerElement(
@@ -198,6 +169,7 @@ class CompositionEditSession:
         element = self.document.get_element(element_id)
         if element is None:
             return None
+        self._require_mutable(element)
         index = self.document.elements.index(element)
         self._execute(
             f"remove {element.element_type.value}",
@@ -207,7 +179,7 @@ class CompositionEditSession:
         return element
 
     def move_element(self, element_id: str, x_mm: float, y_mm: float) -> None:
-        element = self._require(element_id)
+        element = self._require_mutable(element_id)
         old = (element.x_mm, element.y_mm)
 
         def apply_move() -> None:
@@ -219,7 +191,7 @@ class CompositionEditSession:
         self._execute("move", apply_fn=apply_move, revert_fn=revert_move)
 
     def scale_element(self, element_id: str, width_mm: float, height_mm: float) -> None:
-        element = self._require(element_id)
+        element = self._require_mutable(element_id)
         if width_mm <= 0.0 or height_mm <= 0.0:
             raise ValueError("component size must be positive")
         old = (element.width_mm, element.height_mm)
@@ -233,7 +205,7 @@ class CompositionEditSession:
         self._execute("scale", apply_fn=apply_scale, revert_fn=revert_scale)
 
     def configure_element(self, element_id: str, properties: Mapping[str, Any]) -> None:
-        element = self._require(element_id)
+        element = self._require_mutable(element_id)
         old = dict(element.properties)
 
         def apply_config() -> None:
@@ -248,6 +220,7 @@ class CompositionEditSession:
         element = self.document.get_element(element_id)
         if element is None:
             return None
+        self._require_mutable(element)
         clone = ComposerElement(
             id=_new_element_id(),
             element_type=element.element_type,
@@ -257,6 +230,7 @@ class CompositionEditSession:
             height_mm=element.height_mm,
             z_index=element.z_index + 1,
             visible=element.visible,
+            locked=False,  # 复制件默认可编辑
             properties=copy.deepcopy(element.properties),
         )
         self._execute(
@@ -265,6 +239,23 @@ class CompositionEditSession:
             revert_fn=lambda: self._discard(clone.id),
         )
         return clone
+
+    def set_locked(self, element_id: str, locked: bool) -> None:
+        """Lock/unlock an element (undoable).
+
+        A locked element refuses move/scale/configure/remove/duplicate at
+        the session layer — every host gets identical protection.
+        """
+        element = self._require(element_id)
+        old = element.locked
+
+        def apply_lock() -> None:
+            element.locked = bool(locked)
+
+        def revert_lock() -> None:
+            element.locked = old
+
+        self._execute("lock", apply_fn=apply_lock, revert_fn=revert_lock)
 
     # -- z-order -------------------------------------------------------------
 
@@ -359,6 +350,17 @@ class CompositionEditSession:
         element = self.document.get_element(element_id)
         if element is None:
             raise KeyError(f"no composition element {element_id!r}")
+        return element
+
+    def _require_mutable(self, element_id: str | ComposerElement) -> ComposerElement:
+        element = (
+            element_id if isinstance(element_id, ComposerElement) else self._require(element_id)
+        )
+        if element.locked:
+            raise ComposerError(
+                f"composition element {element.id!r} is locked; "
+                "unlock it before move/scale/configure/remove/duplicate"
+            )
         return element
 
     def _discard(self, element_id: str) -> None:
