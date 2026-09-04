@@ -99,6 +99,27 @@ def store_work_path(catalog: DataCatalogService, raw_version_id: str) -> Path:
     return artifacts / "working" / "seismic-transcode" / raw_version_id / "store"
 
 
+def _store_matches_fingerprint(store: Path, fingerprint: dict | None) -> bool:
+    """Structural probe of a registered DERIVED store (#1192).
+
+    True when the directory's file count + byte total equal the structural
+    fingerprint the catalog recorded at registration. A missing fingerprint
+    (versions registered before fingerprints existed) degrades to "directory
+    exists and is non-empty".
+    """
+    if not store.is_dir():
+        return False
+    n_files = 0
+    total = 0
+    for f in store.rglob("*"):
+        if f.is_file():
+            n_files += 1
+            total += f.stat().st_size
+    if not fingerprint:
+        return n_files > 0
+    return n_files == fingerprint.get("files") and total == fingerprint.get("bytes")
+
+
 class SeismicLifecycleService:
     """Owns transcode jobs for one open project (one instance per project)."""
 
@@ -331,11 +352,58 @@ class SeismicLifecycleService:
         return Path(self._catalog.resolve_path(v))
 
     # -------------------------------------------------------------- resume --
-    def resume_pending(self) -> int:
-        """Re-queue transcodes whose DataRun stayed 'running' (crash/close).
+    def _complete_intact_derived(self, run) -> bool:
+        """Complete ``run`` in place when it already produced an intact
+        DERIVED store (#1192 crash window).
 
-        Called on project open; completed stores skip instantly via shard
-        probing, then register their DERIVED version.
+        ``register_derived_store`` moves the working store into the managed
+        layout and saves the version BEFORE the run reaches 'complete'; a
+        crash between those leaves a 'running' run whose working dir is
+        empty. Re-queueing such a run would re-transcode from scratch and
+        then ``mark_stale`` the perfectly good DERIVED version. Here the
+        run's DERIVED output (via output_version_ids / version.run_id) is
+        located and probed against its recorded structural fingerprint —
+        intact means: mark complete, re-queue nothing, stale nothing.
+        """
+        catalog = self._catalog
+        known_outputs = set(run.output_version_ids)
+        for v in catalog.document.versions:
+            if v.id not in known_outputs and v.run_id != run.id:
+                continue
+            if (
+                v.stage.value != "derived"
+                or v.format != "zarr-v3"
+                or v.trashed
+            ):
+                continue
+            try:
+                store = Path(catalog.resolve_path(v))
+            except Exception:
+                continue
+            if not _store_matches_fingerprint(
+                store, v.metadata.get("store_fingerprint")
+            ):
+                continue
+            self._finish_run(
+                run.id, "complete", extra={"derived_version_id": v.id}
+            )
+            logger.info(
+                "run %s already produced intact DERIVED %s; completed in "
+                "place without re-transcode",
+                run.id,
+                v.id,
+            )
+            return True
+        return False
+
+    def resume_pending(self) -> int:
+        """Resolve transcode DataRuns that stayed 'running' (crash/close).
+
+        Called on project open. A run whose DERIVED store was already
+        registered and is still intact (the #1192 crash window) is marked
+        complete in place — no re-transcode, no stale-marking. Anything
+        else is re-queued; completed stores then skip instantly via shard
+        probing and register their DERIVED version.
         """
         catalog = self._catalog
         resumed = 0
@@ -344,6 +412,9 @@ class SeismicLifecycleService:
                 run.operation == TRANSCODE_OPERATION
                 and (run.status or "").lower() == "running"
             ):
+                if self._complete_intact_derived(run):
+                    resumed += 1
+                    continue
                 for vid in list(run.input_version_ids):
                     try:
                         version = catalog.get_version(vid)
@@ -415,7 +486,11 @@ def start_attribute_job(
     """
     from geoviz_seismic import open_volume as _open_volume
     from paleo_workbench.runtime import get_scheduler
-    from paleo_workbench.seismic_attributes import VolumeAttributeJob
+    from paleo_workbench.seismic_attributes import (
+        VolumeAttributeJob,
+        attribute_halo,
+        derive_band_inlines,
+    )
 
     sched = scheduler or get_scheduler()
     version = catalog.get_version(source_version_id)
@@ -427,12 +502,30 @@ def start_attribute_job(
     life = get_lifecycle_service(catalog)
     work_root = src_store.parent / f"{src_store.name}.attr-{attribute}"
     reader = _open_volume(src_store)
-    job = VolumeAttributeJob(reader, work_root, attribute)
+    # #1146: the band size follows the ResourceGovernor's active budget —
+    # the same coupling the transcode path has — instead of a hardcoded
+    # 64-inline default that blew the per-batch RSS by an order of
+    # magnitude. The derived value is pinned in the run parameters and in
+    # the output store's banding identity (#1161).
+    try:
+        from paleo_workbench.runtime.resource_budget import active_budget
+
+        budget_bytes = active_budget().streaming_buffer_bytes
+    except Exception:
+        budget_bytes = None
+    band_inlines = derive_band_inlines(
+        tuple(reader.shape), halo=attribute_halo(attribute), budget_bytes=budget_bytes
+    )
+    job = VolumeAttributeJob(reader, work_root, attribute, band_inlines=band_inlines)
 
     run = catalog.register_run(
         f"attribute:{attribute}",
         input_version_ids=[source_version_id],
-        parameters={"source_store": str(src_store), "attribute": attribute},
+        parameters={
+            "source_store": str(src_store),
+            "attribute": attribute,
+            "band_inlines": band_inlines,
+        },
         generator="paleo_workbench.seismic_attributes",
         status="running",
     )

@@ -195,3 +195,90 @@ def test_resume_pending_requeues_orphaned_running_runs(imported_raw, sched):
     assert _wait_done(job.handle) == TaskState.DONE
     assert life.derived_version_for(raw.id) is not None
     assert life.resume_pending() == 0  # nothing pending afterwards
+
+
+def test_resume_pending_completes_run_with_intact_derived(imported_raw, sched):
+    """#1192 crash window: the DERIVED store was registered (moved out of
+    the working dir) but the run never reached 'complete'. Reopen must
+    complete the run IN PLACE — no re-transcode, no stale-marking of the
+    intact DERIVED version."""
+    svc, raw, cube = imported_raw
+    from paleo_workbench.seismic_transcode import transcode_segy_to_zarr
+
+    # Reproduce the window exactly as the lifecycle hits it: transcode
+    # succeeds into the working path, register_derived_store moves it and
+    # saves the version, then the process "dies" before _finish_run.
+    src = Path(svc.resolve_path(svc.get_version(raw.id)))
+    work = store_work_path(svc, raw.id)
+    transcode_segy_to_zarr(src, work, params=PARAMS, workers=1)
+    run = svc.register_run(
+        "segy-to-zarr",
+        input_version_ids=[raw.id],
+        generator="paleo_workbench.seismic_lifecycle",
+        status="running",
+    )
+    derived = svc.register_derived_store(
+        name="seismic store from store",
+        store_path=work,
+        run_id=run.id,
+        parent_version_ids=[raw.id],
+        type="seismic",
+        format="zarr-v3",
+    )
+    assert not work.exists()  # store moved into managed layout
+    assert svc.get_run(run.id).status.lower() == "running"  # crash residue
+
+    life = SeismicLifecycleService(svc, scheduler=sched)
+    runs_before = len(svc.document.runs)
+    assert life.resume_pending() == 1
+
+    # run completed in place, referencing the intact DERIVED version
+    finished = svc.get_run(run.id)
+    assert finished.status.lower() == "complete"
+    assert finished.parameters.get("derived_version_id") == derived.id
+    # the DERIVED version is untouched: not stale, still readable
+    fresh = svc.get_version(derived.id)
+    assert not fresh.metadata.get("stale")
+    store = Path(svc.resolve_path(fresh))
+    assert store.is_dir()
+    vol = open_volume(store)
+    np.testing.assert_allclose(vol.read_inline(1), cube[0], atol=1e-6)
+    # nothing re-queued: no job, no new runs, working dir stays empty
+    assert life.job_for(raw.id) is None
+    assert len(svc.document.runs) == runs_before
+    assert not store_work_path(svc, raw.id).exists()
+    assert life.resume_pending() == 0
+
+
+def test_resume_pending_requeues_when_derived_store_corrupt(imported_raw, sched):
+    """#1192 negative: the crash-window DERIVED exists but its store was
+    damaged after registration — the fingerprint probe must reject it and
+    fall back to re-queueing the transcode."""
+    svc, raw, _ = imported_raw
+    from paleo_workbench.seismic_transcode import transcode_segy_to_zarr
+
+    src = Path(svc.resolve_path(svc.get_version(raw.id)))
+    work = store_work_path(svc, raw.id)
+    transcode_segy_to_zarr(src, work, params=PARAMS, workers=1)
+    run = svc.register_run(
+        "segy-to-zarr", input_version_ids=[raw.id], status="running"
+    )
+    derived = svc.register_derived_store(
+        name="seismic store from store",
+        store_path=work,
+        run_id=run.id,
+        parent_version_ids=[raw.id],
+        type="seismic",
+        format="zarr-v3",
+    )
+    # damage the registered store: fingerprint (files/bytes) no longer matches
+    store = Path(svc.resolve_path(derived))
+    victim = next(p for p in store.rglob("*") if p.is_file())
+    victim.unlink()
+
+    life = SeismicLifecycleService(svc, scheduler=sched)
+    assert life.resume_pending() == 1
+    assert svc.get_run(run.id).status.lower() == "cancelled"
+    job = life.job_for(raw.id)
+    assert job is not None
+    assert _wait_done(job.handle) == TaskState.DONE
