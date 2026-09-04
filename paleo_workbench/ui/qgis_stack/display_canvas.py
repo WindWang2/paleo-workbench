@@ -126,6 +126,10 @@ class QgisDisplayCanvas(QWidget):
             if vp is not None:
                 vp.installEventFilter(self._filter)
         self.stack.set_map_tool(self.canvas_address, "pan")
+        try:
+            self.destroyed.connect(lambda _obj=None: self.shutdown())
+        except Exception:
+            pass
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)

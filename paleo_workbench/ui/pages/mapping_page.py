@@ -899,6 +899,10 @@ class MappingPage(QWidget):
                         raster_ok = False
         except Exception:
             pass
+        canvas = getattr(self, "unified_canvas", None)
+        shutdown = getattr(canvas, "shutdown", None)
+        if callable(shutdown):
+            shutdown()
         return joined and export_ok and raster_ok
 
     def save_draft(self) -> bool:
