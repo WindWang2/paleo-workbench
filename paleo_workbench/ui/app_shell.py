@@ -954,7 +954,7 @@ class AppShell(QWidget):
 
     def _current_panel_entries(self) -> list[dict]:
         """Ribbon 右键菜单的数据源：当前页面的可管理面板。"""
-        if self.workstation.is_joint_active():
+        if self.workstation.central_document() is self.workstation.composite:
             return self.workstation.panel_entries()
         page = self.current_content_page()
         getter = getattr(page, "ribbon_panel_entries", None)

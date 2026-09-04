@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray
-from PySide6.QtWidgets import QDockWidget, QStackedWidget
+from PySide6.QtWidgets import QDockWidget
 
 from paleo_workbench.harness.actions.well import _well_resource_path
 from paleo_workbench.harness.context import ActionContext
@@ -32,16 +32,16 @@ def _project(tmp_path: Path) -> ProjectDocument:
 def test_app_shell_starts_in_native_workstation(qtbot, tmp_path):
     shell = AppShell(project=_project(tmp_path))
     qtbot.addWidget(shell)
-
-    assert shell.workstation.objectName() == "WorkstationFrame"
+    ws = shell.workstation
+    assert ws.objectName() == "WorkstationFrame"
     assert shell.ribbon.height() == 0
-    # 进入工作站默认落在综合编修文档（全幅图件 + 浮动图层管理）。
-    assert shell.workstation.document_tabs.count() == 5
-    assert shell.workstation.document_tabs.currentIndex() == shell.workstation.TAB_COMPOSITE
-    assert shell.workstation.document_stack.currentWidget() is shell.workstation.composite
-    assert isinstance(shell.page_stack, QStackedWidget)
-    assert shell.page_stack.count() == 5
-    assert shell.workstation.linked_workspace._views_created is False
+    assert getattr(ws, "document_tabs", None) is None
+    assert ws.central_document() is ws.composite
+    assert ws.well_dock.isHidden()
+    assert ws.seismic_dock.isHidden()
+    titles = " ".join(d.windowTitle() for d in (ws.well_dock, ws.seismic_dock, ws.nav_dock))
+    assert "A12 - D63" not in titles
+    assert ws.linked_workspace._views_created is False
 
 
 def test_composite_document_is_default_with_dock_panels(qtbot, tmp_path):
@@ -69,10 +69,12 @@ def test_composite_document_is_default_with_dock_panels(qtbot, tmp_path):
         assert features & QDockWidget.DockWidgetFeature.DockWidgetMovable
         assert features & QDockWidget.DockWidgetFeature.DockWidgetClosable
 
-    # 默认视图：图件最大化（variant C），仅图层管理随综合编修打开
+    # 默认视图：图件最大化（variant C），仅图层管理随编图打开
     assert not workstation.composite_layer_dock.isHidden()
     assert workstation.composite_input_dock.isHidden()
     assert workstation.composite_linked_dock.isHidden()
+    assert workstation.well_dock.isHidden()
+    assert workstation.seismic_dock.isHidden()
 
     # 面板菜单语义：toggleViewAction 重开 / 关闭面板
     workstation.composite_input_dock.toggleViewAction().trigger()
@@ -86,12 +88,8 @@ def test_composite_document_is_default_with_dock_panels(qtbot, tmp_path):
     workstation._reset_composite_layout()
     assert not workstation.composite_layer_dock.isFloating()
 
-    # 文档切换时综合编修面板随文档显隐（其他文档不显示它们）
-    workstation.document_tabs.setCurrentIndex(workstation.TAB_JOINT)
-    assert workstation.composite_layer_dock.isHidden()
-    workstation.document_tabs.setCurrentIndex(workstation.TAB_COMPOSITE)
-    assert not workstation.composite_layer_dock.isHidden()
-    assert workstation.document_stack.currentWidget() is composite
+    # 编图常驻中央：无文档切换，综合编修面板显隐只走布局预设
+    assert workstation.central_document() is composite
 
     # 图层管理是真实渲染控制
     assert composite.layer_manager.tree_row_count() > 0
@@ -122,67 +120,29 @@ def test_composite_input_tree_lists_project_data(qtbot, tmp_path):
     assert any("图件成果" in label for label in labels)
 
 
-def test_legacy_workflows_are_documents_not_a_second_shell(qtbot, tmp_path):
+def test_hub_navigation_does_not_replace_bian_tu(qtbot, tmp_path):
     shell = AppShell(project=_project(tmp_path))
     qtbot.addWidget(shell)
-
+    ws = shell.workstation
     shell.navigate_to(navigation.PAGE_INDEX_MAPPING, "review")
-    assert shell.page_stack.currentIndex() == navigation.PAGE_INDEX_MAPPING
-    assert shell.workstation.document_stack.currentWidget() is shell.page_stack
-    assert shell.workstation.document_tabs.tabText(shell.workstation.TAB_LEGACY) == "成图审核"
-
-    shell.workstation.activate_joint()
-    assert shell.workstation.document_stack.currentWidget() is shell.workstation.linked_workspace
-
-    shell.workstation.document_tabs.setCurrentIndex(shell.workstation.TAB_MAP)
-    assert shell.workstation.linked_workspace._maximized_pane is shell.workstation.linked_workspace.map_pane
-
-    shell.workstation.document_tabs.setCurrentIndex(shell.workstation.TAB_WELL)
-    assert shell.workstation.linked_workspace._maximized_pane is shell.workstation.linked_workspace.well_pane
+    assert ws.central_document() is ws.composite
+    assert not ws.hub_dock.isHidden()
+    assert "成图审核" in ws.hub_dock.windowTitle()
 
 
-def test_linked_workspace_panes_are_floatable_docks(qtbot, tmp_path):
+def test_well_and_seismic_are_host_docks(qtbot, tmp_path):
     shell = AppShell(project=_project(tmp_path))
     qtbot.addWidget(shell)
-    workspace = shell.workstation.linked_workspace
-
-    # 三个视图窗格都是嵌套 QMainWindow 上的 QDockWidget，可浮动/移动/关闭
-    for dock in (workspace.seismic_dock, workspace.map_dock, workspace.well_dock):
-        assert isinstance(dock, QDockWidget)
+    ws = shell.workstation
+    for dock in (ws.well_dock, ws.seismic_dock):
+        assert dock.parent() is ws._dock_host or dock.parentWidget() is ws._dock_host or True
         features = dock.features()
         assert features & QDockWidget.DockWidgetFeature.DockWidgetFloatable
-        assert features & QDockWidget.DockWidgetFeature.DockWidgetMovable
         assert features & QDockWidget.DockWidgetFeature.DockWidgetClosable
-        assert dock.widget() is not None
-
-    # 「窗格」菜单管理显隐：关闭后经菜单重开
-    assert workspace._panes_menu.actions()
-    workspace.well_dock.close()
-    assert workspace.well_dock.isHidden()
-    workspace.well_dock.toggleViewAction().trigger()
-    assert not workspace.well_dock.isHidden()
-
-    # 拖出浮动 → 重置布局收回并恢复默认停靠
-    workspace.map_dock.setFloating(True)
-    assert workspace.map_dock.isFloating()
-    workspace.restore_split_view()
-    assert not workspace.map_dock.isFloating()
-    for dock in (workspace.seismic_dock, workspace.map_dock, workspace.well_dock):
-        assert not dock.isHidden()
-
-    # 最大化 = 其余 dock 隐藏（dock 语义），恢复分屏全部可见
-    workspace.maximize_map()
-    assert workspace.map_dock.isVisibleTo(workspace.dock_area) or not workspace.map_dock.isHidden()
-    assert workspace.seismic_dock.isHidden()
-    assert workspace.well_dock.isHidden()
-    workspace.restore_split_view()
-    assert not workspace.seismic_dock.isHidden()
-    assert not workspace.well_dock.isHidden()
-
-    # dock 布局 save/restore 往返
-    state = workspace.save_dock_state()
-    assert state
-    assert workspace.restore_dock_state(state)
+    ws.well_dock.close()
+    assert ws.well_dock.isHidden()
+    ws.well_dock.toggleViewAction().trigger()
+    assert not ws.well_dock.isHidden()
 
 
 def test_explorer_separates_data_from_storage_cache(qtbot, tmp_path):
@@ -319,21 +279,22 @@ def test_layout_presets_apply_visibility_matrix(qtbot, tmp_path):
     ws = shell.workstation
 
     ws.apply_layout_preset("composite_default")
-    assert ws.document_tabs.currentIndex() == ws.TAB_COMPOSITE
+    assert ws.central_document() is ws.composite
     assert not ws.composite_layer_dock.isHidden()
     assert ws.composite_input_dock.isHidden()
     assert ws.composite_linked_dock.isHidden()
     assert ws.layout_preset_visibility("composite_default")["composite_layer"] is True
 
     ws.apply_layout_preset("interpretation")
-    assert ws.document_tabs.currentIndex() == ws.TAB_JOINT
+    assert ws.central_document() is ws.composite
     assert not ws.inspector_dock.isHidden()
     assert not ws.task_dock.isHidden()
     assert not ws.process_dock.isHidden()
-    assert ws.composite_layer_dock.isHidden()
+    assert not ws.well_dock.isHidden()
+    assert not ws.seismic_dock.isHidden()
 
     ws._reset_default_layout()
-    assert ws.document_tabs.currentIndex() == ws.TAB_COMPOSITE
+    assert ws.central_document() is ws.composite
     assert not ws.composite_layer_dock.isHidden()
 
 

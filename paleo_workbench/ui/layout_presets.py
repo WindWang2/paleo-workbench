@@ -12,11 +12,6 @@ from dataclasses import dataclass
 from typing import Iterable
 
 
-#: Deprecated document-tab keys (Task 2 removes shell usages, then delete).
-TAB_COMPOSITE = "composite"
-TAB_JOINT = "joint"
-
-
 @dataclass(frozen=True)
 class DockVisibilityMatrix:
     """Visibility flags for the top-level workstation dock set.

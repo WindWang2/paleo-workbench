@@ -7,8 +7,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QMainWindow,
     QSizePolicy,
-    QStackedWidget,
-    QTabBar,
     QTabWidget,
     QToolBar,
     QVBoxLayout,
@@ -23,8 +21,6 @@ from paleo_workbench.ui.workstation.explorer import WorkstationExplorer
 from paleo_workbench.ui.workstation.inspector import WorkstationInspector
 from paleo_workbench.ui.layout_presets import (
     RESET_LAYOUT_PRESET_ID,
-    TAB_COMPOSITE,
-    TAB_JOINT,
     get_preset,
     list_presets,
     visibility_dict,
@@ -55,13 +51,7 @@ class WorkstationFrame(QWidget):
     command_submitted = Signal(str)
     status_message = Signal(str)
 
-    TAB_JOINT = 0
-    TAB_MAP = 1
-    TAB_WELL = 2
-    TAB_LEGACY = 3
-    TAB_COMPOSITE = 4
-
-    _WINDOW_STATE_KEY = "layout/windowState"
+    _WINDOW_STATE_KEY = "layout/windowState.v4"
 
     def __init__(self, project, page_stack: QWidget, dock_host=None, parent=None):
         super().__init__(parent)
@@ -97,7 +87,7 @@ class WorkstationFrame(QWidget):
             Qt.Corner.TopLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea
         )
 
-        # --- 中央：文档区（图件主体所在） --------------------------------
+        # --- 中央：编图（唯一文档，永不替换） ------------------------------
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -125,37 +115,24 @@ class WorkstationFrame(QWidget):
             Qt.ToolBarArea.TopToolBarArea, self.app_bar_toolbar
         )
 
-        self.document_tabs = QTabBar(self)
-        self.document_tabs.setObjectName("WorkstationDocumentTabs")
-        self.document_tabs.setDocumentMode(True)
-        self.document_tabs.setExpanding(False)
-        self.document_tabs.addTab("井震联合剖面: A12 - D63")
-        self.document_tabs.addTab("平面图: D63")
-        self.document_tabs.addTab("井轨道: A12")
-        self.document_tabs.addTab("项目工作流")
-        self.document_tabs.addTab("综合编修")
-        self.document_tabs.currentChanged.connect(self._on_document_tab_changed)
-        self.document_tabs.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
-        )
-        layout.addWidget(self.document_tabs)
-
-        self.document_stack = QStackedWidget(self)
-        self.document_stack.setObjectName("WorkstationDocumentStack")
-        self.document_stack.setMinimumSize(0, 0)
-        self.document_stack.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
-        )
-        self.linked_workspace = LinkedInterpretationWorkspace(
-            project, self.document_stack
-        )
-        self.document_stack.addWidget(self.linked_workspace)
-        self.composite = CompositeDocument(project, self.document_stack)
-        self.document_stack.addWidget(self.composite)
+        self.linked_workspace = LinkedInterpretationWorkspace(project, self)
+        # 联动区不再是中央文档：只保留测井/地震内容部件（宿主 dock 接管），
+        # 内部嵌套 dock 与上下文条隐藏（Task 3 彻底删除）。
+        for inner in (
+            getattr(self.linked_workspace, "well_dock", None),
+            getattr(self.linked_workspace, "seismic_dock", None),
+            getattr(self.linked_workspace, "map_dock", None),
+        ):
+            if inner is not None:
+                inner.hide()
+        self.linked_workspace.hide()
+        context_bar = getattr(self.linked_workspace, "context_bar", None)
+        if context_bar is not None:
+            context_bar.hide()
+        self.composite = CompositeDocument(project, self)
         self.page_stack = page_stack
         self.page_stack.setMinimumSize(0, 0)
-        self.document_stack.addWidget(page_stack)
-        layout.addWidget(self.document_stack, 1)
+        layout.addWidget(self.composite, 1)
 
         # --- 面板：全部为宿主窗口上的可浮动 dock -------------------------
         self.navigation_region = QFrame(self._dock_host)
@@ -187,7 +164,7 @@ class WorkstationFrame(QWidget):
             "任务中心", self.task_center, Qt.DockWidgetArea.BottomDockWidgetArea
         )
 
-        # 综合编修面板（随文档显隐；由宿主 QMainWindow 持有 dock）
+        # 编图面板（由宿主 QMainWindow 持有 dock）
         self.composite_layer_dock = self._add_dock(
             "图层管理", self.composite.layer_manager,
             Qt.DockWidgetArea.RightDockWidgetArea,
@@ -200,18 +177,35 @@ class WorkstationFrame(QWidget):
             "联动视图", self.composite.linked_views,
             Qt.DockWidgetArea.BottomDockWidgetArea,
         )
-        # 默认视图：图件最大化（variant C），仅图层管理随综合编修打开。
+        # 测井轨道 / 地震剖面 / 功能页：宿主级 dock，动作打开，默认隐藏。
+        self.well_dock = self._add_dock(
+            "测井轨道", self.linked_workspace.well_pane,
+            Qt.DockWidgetArea.BottomDockWidgetArea,
+        )
+        self.seismic_dock = self._add_dock(
+            "地震剖面", self.linked_workspace.seismic_pane,
+            Qt.DockWidgetArea.BottomDockWidgetArea,
+        )
+        self.hub_dock = self._add_dock(
+            "功能页", self.page_stack,
+            Qt.DockWidgetArea.RightDockWidgetArea,
+        )
+        self.well_dock.hide()
+        self.seismic_dock.hide()
+        self.hub_dock.hide()
+        # 默认视图：图件最大化（variant C），仅图层管理随编图打开。
         self.composite_input_dock.hide()
         self.composite_linked_dock.hide()
         self._wire_composite_panel_menu()
         # 图层管理与检查器在右侧叠 tab，任务/联动视图在底部叠 tab。
         self._dock_host.tabifyDockWidget(self.inspector_dock, self.composite_layer_dock)
         self._dock_host.tabifyDockWidget(self.process_dock, self.composite_linked_dock)
+        self._dock_host.tabifyDockWidget(self.process_dock, self.well_dock)
+        self._dock_host.tabifyDockWidget(self.well_dock, self.seismic_dock)
 
         self._wire()
         self.set_project(project)
-        # 进入工作站默认落在综合编修环境（全幅图件 + 浮动面板）。
-        self.document_tabs.setCurrentIndex(self.TAB_COMPOSITE)
+        # 中央永远是编图，无需切换。
         QTimer.singleShot(0, self._restore_layout)
 
     # 浮动时避免邮票窗；停靠时交还内容 hint（否则 220px 最小宽在多面板
@@ -310,25 +304,42 @@ class WorkstationFrame(QWidget):
     def attach_coordination(self, controller) -> None:
         self.linked_workspace.attach_coordination(controller)
 
+    def central_document(self):
+        """中央唯一文档：编图（永不替换）。"""
+        return self.composite
+
+    def show_well(self, well_name: str = "") -> None:
+        self.well_dock.show()
+        self.well_dock.raise_()
+        if well_name:
+            self.linked_workspace.open_well(well_name)
+
+    def show_seismic(self, resource=None) -> None:
+        self.seismic_dock.show()
+        self.seismic_dock.raise_()
+        self.linked_workspace.ensure_views()
+        if resource is not None and self.linked_workspace.seismic_panel is not None:
+            self.linked_workspace.seismic_panel.show_resource(resource, self._project)
+
+    def show_hub_page(self, title: str) -> None:
+        self.hub_dock.setWindowTitle(str(title or "功能页"))
+        self.hub_dock.show()
+        self.hub_dock.raise_()
+
     def activate_joint(self) -> None:
-        self.document_tabs.setCurrentIndex(self.TAB_JOINT)
-        self.document_stack.setCurrentWidget(self.linked_workspace)
-        self.linked_workspace.focus_joint()
+        self.show_seismic()
 
     def activate_composite(self, layer_id: str = "") -> None:
-        """切到综合编修页；携带 layer_id 时选中该编修图层。"""
-        self.document_tabs.setCurrentIndex(self.TAB_COMPOSITE)
-        self.document_stack.setCurrentWidget(self.composite)
+        """编图常驻中央；携带 layer_id 时选中该编修图层。"""
         if layer_id:
             self.composite.layer_manager.select_layer(layer_id)
 
-    def activate_legacy(self, title: str = "项目工作流") -> None:
-        self.document_tabs.setTabText(self.TAB_LEGACY, str(title or "项目工作流"))
-        self.document_tabs.setCurrentIndex(self.TAB_LEGACY)
-        self.document_stack.setCurrentWidget(self.page_stack)
+    def activate_legacy(self, title: str = "功能页") -> None:
+        self.show_hub_page(title)
 
     def is_joint_active(self) -> bool:
-        return self.document_stack.currentWidget() is self.linked_workspace
+        # 联动文档已取消（编图为核心），保留方法供旧调用点。
+        return False
 
     def show_agent(self) -> None:
         self.process_dock.show()
@@ -372,6 +383,9 @@ class WorkstationFrame(QWidget):
             {"key": "workstation:inspector", "title": "检查器", "widget": self.inspector},
             {"key": "workstation:process", "title": "Agent", "widget": self.process_hub},
             {"key": "workstation:tasks", "title": "任务中心", "widget": self.task_center},
+            {"key": "workstation:well", "title": "测井轨道", "widget": self.linked_workspace.well_pane},
+            {"key": "workstation:seismic", "title": "地震剖面", "widget": self.linked_workspace.seismic_pane},
+            {"key": "workstation:hub", "title": "功能页", "widget": self.page_stack},
         ]
 
     def resizeEvent(self, event) -> None:
@@ -406,46 +420,6 @@ class WorkstationFrame(QWidget):
             # 避免 dock 布局被首帧的默认几何覆盖。
             QTimer.singleShot(50, self._restore_layout)
 
-    def _on_document_tab_changed(self, index: int) -> None:
-        if index == self.TAB_LEGACY:
-            self._set_composite_docks_visible(False)
-            self.document_stack.setCurrentWidget(self.page_stack)
-            return
-        if index == self.TAB_COMPOSITE:
-            self.document_stack.setCurrentWidget(self.composite)
-            self._set_composite_docks_visible(True)
-            return
-        self._set_composite_docks_visible(False)
-        self.document_stack.setCurrentWidget(self.linked_workspace)
-        if index == self.TAB_MAP:
-            self.linked_workspace.maximize_map()
-        elif index == self.TAB_WELL:
-            self.linked_workspace.maximize_well()
-        else:
-            self.linked_workspace.restore_split_view()
-
-    def _set_composite_docks_visible(self, visible: bool) -> None:
-        docks = (
-            self.composite_layer_dock,
-            self.composite_input_dock,
-            self.composite_linked_dock,
-        )
-        if visible:
-            state = self._composite_docks_visible or {
-                "layer": True, "input": False, "linked": False,
-            }
-            for dock, key in zip(docks, ("layer", "input", "linked"), strict=True):
-                dock.setVisible(state[key])
-        else:
-            self._composite_docks_visible = {
-                "layer": not self.composite_layer_dock.isHidden(),
-                "input": not self.composite_input_dock.isHidden(),
-                "linked": not self.composite_linked_dock.isHidden(),
-            }
-            for dock in docks:
-                if not dock.isHidden():
-                    dock.hide()
-
     def _wire_composite_panel_menu(self) -> None:
         """面板菜单：显隐、布局预设、全部浮动/停靠、恢复默认。"""
         toggle_actions = []
@@ -478,6 +452,9 @@ class WorkstationFrame(QWidget):
             self.composite_layer_dock,
             self.composite_input_dock,
             self.composite_linked_dock,
+            self.well_dock,
+            self.seismic_dock,
+            self.hub_dock,
         )
 
     def float_all_panels(self) -> None:
@@ -496,6 +473,9 @@ class WorkstationFrame(QWidget):
             self.inspector_dock,
             self.process_dock,
             self.task_dock,
+            self.well_dock,
+            self.seismic_dock,
+            self.hub_dock,
         ):
             if dock.isFloating():
                 dock.setFloating(False)
@@ -568,11 +548,11 @@ class WorkstationFrame(QWidget):
         self._save_timer.start()
 
     def _reset_default_layout(self) -> None:
-        """面板菜单「恢复默认布局」→ 默认综合编修 + 停靠几何。"""
+        """面板菜单「恢复默认布局」→ 默认编图 + 停靠几何。"""
         self.apply_layout_preset(RESET_LAYOUT_PRESET_ID)
 
     def _reset_composite_layout(self) -> None:
-        """恢复综合编修面板的默认停靠布局（不改可见性）。"""
+        """恢复编图面板的默认停靠布局（不改可见性）。"""
         host = self._dock_host
         for dock, area in (
             (self.composite_input_dock, Qt.DockWidgetArea.LeftDockWidgetArea),
@@ -602,48 +582,39 @@ class WorkstationFrame(QWidget):
             if self.nav_dock.isHidden():
                 self.nav_dock.show()
         elif mode == "workspaces":
-            self.document_tabs.setFocus(Qt.FocusReason.OtherFocusReason)
+            self.composite.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _activate_explorer_object(self, payload) -> None:
         payload = payload or {}
         kind = payload.get("kind") if isinstance(payload, dict) else ""
         if kind == "well":
-            self._open_well_from_agent(str(payload.get("well_name") or "A12"))
+            self.show_well(str(payload.get("well_name") or "A12"))
             return
         if kind == "resource":
             resource = payload.get("object")
             resource_type = str(getattr(resource, "type", "") or "")
             if resource_type == "well_log":
-                self._open_well_from_agent(
+                self.show_well(
                     str(getattr(resource, "name", "A12")).rsplit(".", 1)[0]
                 )
             elif resource_type == "seismic":
-                self.activate_joint()
-                self.linked_workspace.ensure_views()
-                if self.linked_workspace.seismic_panel is not None:
-                    self.linked_workspace.seismic_panel.show_resource(resource, self._project)
+                self.show_seismic(resource)
             return
         if kind in {"horizon", "interpretation", "layer"}:
-            self.activate_joint()
+            self.show_seismic()
             return
         if kind == "user_vector_layer":
             self.activate_composite(str(payload.get("layer_id") or ""))
 
     def _open_well_from_agent(self, well_name: str) -> None:
-        self.document_tabs.setCurrentIndex(self.TAB_JOINT)
-        self.document_stack.setCurrentWidget(self.linked_workspace)
-        self.linked_workspace.restore_split_view()
-        self.linked_workspace.open_well(well_name)
+        self.show_well(well_name)
 
     def _show_wells_from_agent(self) -> None:
-        self.document_tabs.setCurrentIndex(self.TAB_MAP)
-        self.document_stack.setCurrentWidget(self.linked_workspace)
-        self.linked_workspace.show_all_wells()
+        # 与工具条全幅按钮同一路径：回到 home extent（全部工区井位）。
+        self.composite._on_command_requested("full_extent")
 
     def _undo_agent_gui(self) -> None:
-        self.document_tabs.setCurrentIndex(self.TAB_JOINT)
-        self.linked_workspace.restore_split_view()
-        self.linked_workspace.open_well("A12")
+        self.show_well("A12")
 
     def _expand_process_dock(self) -> None:
         self.process_dock.show()
@@ -732,6 +703,9 @@ class WorkstationFrame(QWidget):
             self.composite_layer_dock,
             self.composite_input_dock,
             self.composite_linked_dock,
+            self.well_dock,
+            self.seismic_dock,
+            self.hub_dock,
         )
         linked_docks = (
             self.linked_workspace.seismic_dock,
