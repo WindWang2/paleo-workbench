@@ -696,15 +696,18 @@ class DataCatalogService:
         except Exception:
             pass
 
-    def export_manifest(self) -> None:
+    def export_manifest(self, *, pretty: bool = False) -> None:
         """Write ``catalog.json`` as a portable manifest of the current state.
 
         The manifest keeps the project openable by older app versions and
         doubles as a human-readable export artifact; the SQLite store remains
         the only authority (#1027). Atomic write + ``.bak`` via CatalogStore.
+
+        #1183: compact by default (close/checkpoint path); pass
+        pretty=True only for an explicit human-readable export.
         """
         with self._lock:
-            self._store.save(self.document)
+            self._store.save(self.document, pretty=pretty)
             _record_manifest_mtime_ns(self._index, catalog_file_for(self.project_path))
             self._mutations_since_manifest = 0
 

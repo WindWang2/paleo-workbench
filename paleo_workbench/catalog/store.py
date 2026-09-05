@@ -139,7 +139,7 @@ class CatalogStore:
             return document
         return CatalogDocument()
 
-    def save(self, document: CatalogDocument) -> None:
+    def save(self, document: CatalogDocument, *, pretty: bool = False) -> None:
         """Atomically persist the canonical document.
 
         Sequence (each step crash-safe):
@@ -160,9 +160,19 @@ class CatalogStore:
         ensure_catalog_layout(self.project_path)
         path = catalog_file_for(self.project_path)
         bak = catalog_bak_file_for(self.project_path)
-        payload = json.dumps(
-            document.model_dump(mode="json"), ensure_ascii=False, indent=2
-        )
+        # #1183: compact separators by default (close/checkpoint path) —
+        # pretty indent only for explicit human-readable export. Readers
+        # use json.load either way, so old versions stay compatible.
+        if pretty:
+            payload = json.dumps(
+                document.model_dump(mode="json"), ensure_ascii=False, indent=2
+            )
+        else:
+            payload = json.dumps(
+                document.model_dump(mode="json"),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
         fd, tmp_name = tempfile.mkstemp(
             prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
         )

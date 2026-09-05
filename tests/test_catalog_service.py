@@ -1263,3 +1263,21 @@ def test_evil_asset_id_rejected_at_version_placement(service, tmp_path):
         service.register_version(evil.id, src, DataStage.RAW)
     assert not (tmp_path / "evil").exists()
 
+
+def test_manifest_compact_by_default_pretty_on_demand(service):
+    """#1183: close-path manifest is compact; explicit export stays pretty."""
+    import json
+
+    from paleo_workbench.catalog.store import catalog_file_for
+
+    manifest = catalog_file_for(service.project_path)
+    service.export_manifest()
+    compact = manifest.read_bytes()
+    assert b"\n" not in compact.strip()
+    assert json.loads(compact)["catalog_revision"] == service.document.catalog_revision
+    service.export_manifest(pretty=True)
+    pretty = manifest.read_bytes()
+    assert b'\n  "assets"' in pretty or b'\n  ' in pretty
+    assert len(pretty) > len(compact)
+    assert json.loads(pretty) == json.loads(compact)
+
