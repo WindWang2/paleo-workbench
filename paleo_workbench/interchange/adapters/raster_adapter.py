@@ -14,6 +14,7 @@ from pathlib import Path
 
 from paleo_workbench.interchange.contracts import (
     CancelToken,
+    ExportPlan,
     ExportVerification,
     FormatCapability,
     FormatNotSupportedError,
@@ -164,7 +165,6 @@ class RasterAdapter(FormatAdapter):
             format=Path(path).suffix.lower().lstrip(".") or self.format_id,
             metadata=plan.metadata,
         )
-        cancel.checkpoint()
         return ImportExecutionResult(version_id=version.id, asset_id=version.asset_id, managed=True)
 
     # -- export: standardized GeoTIFF, block-wise ---------------------------
@@ -237,7 +237,6 @@ class RasterAdapter(FormatAdapter):
                             SCALE=float(scale_meta),
                             OFFSET=float(offset_meta),
                         )
-        cancel.checkpoint()
         return target
 
     def verify_output(self, target_path, plan) -> ExportVerification:

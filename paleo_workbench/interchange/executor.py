@@ -68,7 +68,9 @@ class ImportExecutor:
         cancel = cancel or NULL_CANCEL
         progress = progress or _null_progress
         if plan.action == "unsupported":
-            raise ValueError(f"计划标记为不可导入: {plan.source_path}")
+            from paleo_workbench.interchange.contracts import PreflightFailedError
+
+            raise PreflightFailedError(f"计划标记为不可导入: {plan.source_path}")
         adapter = self.registry().get(plan.format_id)
         if adapter is None:
             raise ValueError(f"未知适配器: {plan.format_id}")

@@ -81,10 +81,20 @@ class VectorAdapter(FormatAdapter):
             result.errors.append("GDAL (osgeo) 不可用，无法检查矢量数据")
             return result
 
+        # Sidecar completeness first: a shapefile without .shx/.dbf fails in
+        # GDAL with a confusing low-level message; report the actionable cause.
+        if path.suffix.lower() == ".shp":
+            self._check_shapefile_sidecars(path, result)
+            if not result.ok:
+                return result
+
         from osgeo import gdal, ogr
 
         try:
-            dataset = gdal.OpenEx(str(path), gdal.OF_VECTOR | gdal.OF_RDONLY | gdal.OF_VERBOSE_ERROR)
+            dataset = gdal.OpenEx(
+                str(path),
+                gdal.OF_READONLY | gdal.OF_VECTOR | gdal.OF_VERBOSE_ERROR,
+            )
         except Exception as exc:
             result.ok = False
             result.errors.append(f"GDAL 打开失败（文件可能损坏或格式不符）: {exc}")
@@ -138,7 +148,10 @@ class VectorAdapter(FormatAdapter):
                         "geometry_types": sorted(geometry_types),
                     }
                 )
-            result.metadata = {"driver": dataset.GetDriverName(), "layers": layers}
+            result.metadata = {
+                "driver": dataset.GetDriver().ShortName if dataset.GetDriver() else "",
+                "layers": layers,
+            }
             if layers:
                 result.crs = layers[0].get("crs")
                 extent = layers[0].get("extent")
@@ -149,8 +162,6 @@ class VectorAdapter(FormatAdapter):
         finally:
             dataset = None
 
-        if path.suffix.lower() == ".shp":
-            self._check_shapefile_sidecars(path, result)
         return result
 
     @staticmethod
@@ -238,7 +249,6 @@ class VectorAdapter(FormatAdapter):
                 staged.unlink(missing_ok=True)
             except OSError:
                 pass
-        cancel.checkpoint()
         return ImportExecutionResult(version_id=version.id, asset_id=version.asset_id, managed=True)
 
     @staticmethod

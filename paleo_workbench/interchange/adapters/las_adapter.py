@@ -243,7 +243,6 @@ class LasAdapter(FormatAdapter):
             format=self.format_id,
             metadata=plan.metadata,
         )
-        cancel.checkpoint()
         progress(1.0, "LAS 导入完成")
         return ImportExecutionResult(version_id=version.id, asset_id=version.asset_id, managed=True)
 
@@ -272,7 +271,6 @@ class LasAdapter(FormatAdapter):
         converter = las_to_csv if target.suffix.lower() == ".csv" else las_to_json_summary
         with atomic_output(target) as tmp:
             converter(Path(source_path), tmp)
-        cancel.checkpoint()
         return target
 
     def verify_output(self, target_path, plan) -> ExportVerification:

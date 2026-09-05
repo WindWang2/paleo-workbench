@@ -90,15 +90,14 @@ class SegyAdapter(FormatAdapter):
             with segyio.open(str(path), "r", ignore_geometry=True) as segy:
                 trace_count = segy.tracecount
                 sample_count = len(segy.samples)
-                sample_interval_us = int(segy.binaryheader[segyio.BinField.Interval])
-                format_code = int(segy.binaryheader[segyio.BinField.Format])
+                sample_interval_us = int(segy.bin[segyio.BinField.Interval])
+                format_code = int(segy.bin[segyio.BinField.Format])
                 try:
-                    text_header = segy.text
-                    if isinstance(text_header, bytes):
-                        text_header = text_header.decode("ascii", errors="replace")
+                    # segyio's Text slices lazily; materialize before slicing.
+                    text_header = str(segy.text)
                 except Exception:
                     text_header = ""
-                first = segy.header(0)
+                first = segy.header[0]
                 il_first = int(first.get(segyio.TraceField.INLINE_3D, 0))
                 xl_first = int(first.get(segyio.TraceField.CROSSLINE_3D, 0))
                 # Bounded geometry probe: header reads at spread indices.
@@ -106,7 +105,7 @@ class SegyAdapter(FormatAdapter):
                 il_values = []
                 xl_values = []
                 for index in probe_indices:
-                    header = segy.header(index)
+                    header = segy.header[index]
                     il_values.append(int(header.get(segyio.TraceField.INLINE_3D, 0)))
                     xl_values.append(int(header.get(segyio.TraceField.CROSSLINE_3D, 0)))
                 samples_axis = segy.samples
@@ -211,7 +210,6 @@ class SegyAdapter(FormatAdapter):
                 metadata=plan.metadata,
             )
             managed = True
-        cancel.checkpoint()
         return ImportExecutionResult(version_id=version.id, asset_id=version.asset_id, managed=managed)
 
     def plan_export(self, source_path, target_path, *, options=None):

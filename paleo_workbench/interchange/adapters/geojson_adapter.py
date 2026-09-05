@@ -15,6 +15,7 @@ from pathlib import Path
 
 from paleo_workbench.interchange.contracts import (
     CancelToken,
+    ExportPlan,
     ExportVerification,
     FormatCapability,
     ImportExecutionResult,
@@ -177,7 +178,6 @@ class GeoJSONAdapter(FormatAdapter):
             format=self.format_id,
             metadata=plan.metadata,
         )
-        cancel.checkpoint()
         return ImportExecutionResult(version_id=version.id, asset_id=version.asset_id, managed=True)
 
     # -- export: normalized FeatureCollection -------------------------------
@@ -226,7 +226,6 @@ class GeoJSONAdapter(FormatAdapter):
                 json.dumps(normalized, ensure_ascii=False, indent=1),
                 encoding="utf-8",
             )
-        cancel.checkpoint()
         return target
 
     def verify_output(self, target_path, plan) -> ExportVerification:

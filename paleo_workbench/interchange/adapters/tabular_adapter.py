@@ -16,6 +16,7 @@ from typing import Any
 
 from paleo_workbench.interchange.contracts import (
     CancelToken,
+    ExportPlan,
     ExportVerification,
     FormatCapability,
     ImportExecutionResult,
@@ -294,7 +295,6 @@ class CsvLikeAdapter(FormatAdapter):
                 format=self.format_id,
                 metadata=plan.metadata,
             )
-            cancel.checkpoint()
             return ImportExecutionResult(version_id=version.id, asset_id=version.asset_id, managed=True)
 
         # Normalize into the work dir, verify, then register the normalized copy.
@@ -306,6 +306,7 @@ class CsvLikeAdapter(FormatAdapter):
             verification = self._verify_normalized_csv(staged, preset)
             if not verification.ok:
                 raise RuntimeError(f"归一化输出未通过校验: {verification.detail}")
+            cancel.checkpoint()
             version = catalog.import_raw(
                 staged,
                 name=plan.asset_name,
@@ -318,10 +319,9 @@ class CsvLikeAdapter(FormatAdapter):
                 staged.unlink(missing_ok=True)
             except OSError:
                 pass
-        cancel.checkpoint()
         return ImportExecutionResult(
             version_id=version.id, asset_id=version.asset_id, managed=True,
-            verification=verification, staged_path=str(staged),
+            verification=verification,
         )
 
     def _normalize(self, source: Path, target: Path, preset: TabularMappingPreset) -> None:
@@ -381,7 +381,6 @@ class CsvLikeAdapter(FormatAdapter):
                     writer = csv.writer(dst, delimiter=delimiter)
                     for row in reader:
                         writer.writerow(row)
-        cancel.checkpoint()
         return target
 
     def verify_output(self, target_path, plan) -> ExportVerification:
@@ -528,5 +527,4 @@ class ExcelAdapter(FormatAdapter):
             format=self.format_id,
             metadata=plan.metadata,
         )
-        cancel.checkpoint()
         return ImportExecutionResult(version_id=version.id, asset_id=version.asset_id, managed=True)

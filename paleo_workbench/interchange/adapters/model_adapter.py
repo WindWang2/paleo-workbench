@@ -250,7 +250,6 @@ class _StructuredModelAdapter(FormatAdapter):
         with atomic_output(target) as tmp:
             if not writer(str(tmp), **writer_kwargs):
                 raise RuntimeError(f"{self.display_name} 导出失败（writer 返回 False）")
-        cancel.checkpoint()
         return target
 
     def _writer(self):

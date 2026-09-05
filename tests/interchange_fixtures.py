@@ -175,7 +175,7 @@ def geotiff_available() -> bool:
 
 
 def write_geotiff(path: Path, *, width: int = 32, height: int = 24, nodata: float = -9999.0,
-                  epsg: int = 4326, dtype: str = "float32") -> Path:
+                  epsg: int | None = 4326, dtype: str = "float32") -> Path:
     import numpy as np
     import rasterio
     from rasterio.transform import from_origin
@@ -192,7 +192,7 @@ def write_geotiff(path: Path, *, width: int = 32, height: int = 24, nodata: floa
         height=height,
         count=1,
         dtype=dtype,
-        crs=f"EPSG:{epsg}",
+        crs=f"EPSG:{epsg}" if epsg else None,
         transform=transform,
         nodata=nodata,
     ) as dst:
