@@ -202,6 +202,19 @@ def test_quick2g_end_to_end(tmp_path):
     assert result.stats.throughput_mb_s > 95  # beats single-thread baseline
 
 
+def test_resume_rejects_swapped_source(tmp_path):
+    """#1141: a same-geometry source replacement must fail closed instead
+    of mixing two data versions in one store."""
+    segy = tmp_path / "swap.segy"
+    _write_segy(segy, seed=7)
+    store = tmp_path / "swap_store"
+    params = TranscodeParams(chunk=(16, 16, 16), shard=(32, 32, 32), clevel=1)
+    transcode_segy_to_zarr(segy, store, params=params)
+    _write_segy(segy, seed=8)  # same geometry, different amplitudes
+    with pytest.raises(TranscodeError, match="different source"):
+        transcode_segy_to_zarr(segy, store, params=params)
+
+
 def test_cancelled_transcode_drains_and_leaves_no_reader_thread(tmp_path):
     """#1136: cancel must return fast with no parked reader thread, and the
     partial store must stay resumable."""

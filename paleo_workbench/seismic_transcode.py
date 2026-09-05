@@ -161,6 +161,17 @@ def shard_boxes(
                 )
 
 
+def _source_identity(src: Path) -> dict[str, int]:
+    """Cheap source identity for resume validation (#1141).
+
+    Size + mtime_ns catch in-place replacement (re-export over the same
+    path). A full sha256 would double the IO of every transcode; geometry
+    equality is enforced separately by shape comparison.
+    """
+    st = src.stat()
+    return {"source_size": st.st_size, "source_mtime_ns": st.st_mtime_ns}
+
+
 def _volume_geometry(src: Path) -> tuple[tuple[int, int, int], dict]:
     """Shape plus the regular-grid coordinate spec for store attributes.
 
@@ -205,12 +216,13 @@ def _open_or_create(
 
     meta_path = dst / "zarr.json"
     if meta_path.exists():
-        _validate_existing(dst, shape, params)
+        _validate_existing(dst, shape, params, source)
         return zarr.open(str(dst), mode="a")
     attributes = {
         "source_path": str(source),
         "source_format": "seg-y",
         "shape": list(shape),
+        **_source_identity(source),
         "transcode": {
             "chunk": list(params.chunk),
             "shard": list(params.shard),
@@ -239,7 +251,7 @@ def _open_or_create(
     )
 
 
-def _validate_existing(dst: Path, shape, params: TranscodeParams) -> None:
+def _validate_existing(dst: Path, shape, params: TranscodeParams, source: Path) -> None:
     """Reopened arrays report inner chunks via ``arr.chunks``, so validate
     against the zarr.json itself: outer chunk grid == shard, sharding
     codec's inner chunk_shape == chunk, codec settings == params."""
@@ -294,6 +306,25 @@ def _validate_existing(dst: Path, shape, params: TranscodeParams) -> None:
                 f"/{cfg.get('clevel')}/{cfg.get('shuffle')}; refusing to mix "
                 f"codecs within one store"
             )
+    # #1141: resume must continue the SAME source. A replaced SEG-Y with
+    # matching geometry would otherwise mix two data versions in one store.
+    stored_attrs = meta.get("attributes", {})
+    if "source_size" in stored_attrs or "source_mtime_ns" in stored_attrs:
+        try:
+            current = _source_identity(source)
+        except OSError as exc:
+            raise TranscodeError(f"cannot stat transcode source {source}: {exc}") from exc
+        if (
+            stored_attrs.get("source_size") != current["source_size"]
+            or stored_attrs.get("source_mtime_ns") != current["source_mtime_ns"]
+        ):
+            raise TranscodeError(
+                f"existing store at {dst} was transcoded from a different "
+                f"source file (size/mtime changed); refusing to resume across "
+                f"sources. Delete {dst} and re-run to transcode {source} cleanly"
+            )
+    # Stores written before source-identity tracking carry no keys and resume
+    # as before (bounded grandfather window, no new silent holes).
 
 
 def _shard_is_complete(arr, box: ShardBox) -> bool:
