@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from paleo_workbench.project.models import (
@@ -11,6 +12,8 @@ from paleo_workbench.project.models import (
     WellTableRow,
     _id,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def well_table_from_sample_points(
@@ -110,16 +113,17 @@ def sample_points_from_well_table(
     interpolation only sees QC-clean samples.
     """
     points: list[dict[str, Any]] = []
+    skipped_no_z = 0
     for row in table.rows:
         if not include_flagged and row.qc_flag != "ok":
             continue
-        z = row.z
-        if z is None and row.R_s is not None:
-            z = row.R_s
-        if z is None and row.H_t is not None:
-            z = row.H_t
-        if z is None:
+        # #1151: z is THE factor value column. Falling back to R_s (0-1
+        # ratio) or H_t (meters) mixes physical dimensions in one field.
+        # Rows without z are skipped and counted, never coerced.
+        if row.z is None:
+            skipped_no_z += 1
             continue
+        z = row.z
         rec: dict[str, Any] = {
             "well_id": row.well_id,
             "well": row.name,
@@ -140,6 +144,12 @@ def sample_points_from_well_table(
         if row.qc_z_star is not None:
             rec["qc_z_star"] = row.qc_z_star
         points.append(rec)
+    if skipped_no_z:
+        logger.warning(
+            "skipped %d well-table rows with no z value "
+            "(R_s/H_t are different physical quantities, not fallbacks)",
+            skipped_no_z,
+        )
     return points
 
 
@@ -246,10 +256,9 @@ def well_table_to_arrays(
     x = np.fromiter((r.x for r in valid_rows), dtype=np.float64, count=n)
     y = np.fromiter((r.y for r in valid_rows), dtype=np.float64, count=n)
     z = np.fromiter(
-        (
-            (r.z if r.z is not None else (r.R_s if r.R_s is not None else (r.H_t if r.H_t is not None else np.nan)))
-            for r in valid_rows
-        ),
+        # #1151: no R_s/H_t fallback — a missing z is NaN (masked downstream),
+        # never another physical quantity wearing z's units.
+        (r.z if r.z is not None else np.nan for r in valid_rows),
         dtype=np.float64,
         count=n,
     )

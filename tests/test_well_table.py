@@ -155,3 +155,22 @@ def test_project_document_serializes_well_tables():
     restored = ProjectDocument.model_validate(data)
     assert len(restored.well_tables) == 1
     assert restored.well_tables[0].rows[0].name == "A"
+
+
+def test_missing_z_rows_skipped_never_coerced_from_rs_ht():
+    """#1151: R_s (ratio) / H_t (meters) must not stand in for z."""
+    from paleo_workbench.project.models import WellTable, WellTableRow
+    from paleo_workbench.workflow.well_table import well_table_to_arrays
+
+    table = WellTable(
+        id="t", name="T", rows=[
+            WellTableRow(well_id="w1", name="A", x=0.0, y=0.0, z=5.0, qc_flag="ok"),
+            WellTableRow(well_id="w2", name="B", x=1.0, y=0.0, z=None, R_s=0.5, H_t=10.0, qc_flag="ok"),
+        ],
+    )
+    points = sample_points_from_well_table(table)
+    assert [p["well"] for p in points] == ["A"]
+    assert points[0]["value"] == 5.0
+    arrays = well_table_to_arrays(table)
+    assert arrays["z"][0] == 5.0
+    assert math.isnan(arrays["z"][1])
