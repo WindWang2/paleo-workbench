@@ -1234,7 +1234,9 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     QFrame#WorkstationActivityRail,
     QFrame#WorkstationExplorer,
     QFrame#WorkstationInspector,
-    QFrame#WorkstationProcessHub {{
+    QFrame#WorkstationAgentWorkspace,
+    QFrame#WorkstationLogPanel,
+    QFrame#WorkstationConsolePane {{
         background: {t.BG_SIDEBAR};
         border: none;
     }}
@@ -1427,29 +1429,23 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     QFrame#WorkstationInspector {{
         border-left: 1px solid {t.BORDER_STRONG};
     }}
-    QTabWidget#WorkstationInspectorTabs::pane,
-    QTabWidget#WorkstationProcessTabs::pane {{
+    QTabWidget#WorkstationInspectorTabs::pane {{
         background: {t.BG_SIDEBAR};
         border: none;
         border-top: 1px solid {t.BORDER};
         border-radius: 0px;
     }}
-    QTabWidget#WorkstationInspectorTabs QTabBar::tab,
-    QTabWidget#WorkstationProcessTabs QTabBar::tab {{
+    QTabWidget#WorkstationInspectorTabs QTabBar::tab {{
         background: {t.BG_SIDEBAR};
         color: {t.TEXT_SECONDARY};
         border: none;
         border-radius: 0px;
         padding: 5px 10px;
     }}
-    QTabWidget#WorkstationInspectorTabs QTabBar::tab:selected,
-    QTabWidget#WorkstationProcessTabs QTabBar::tab:selected {{
+    QTabWidget#WorkstationInspectorTabs QTabBar::tab:selected {{
         color: {t.PRIMARY};
         border-bottom: 2px solid {t.PRIMARY};
         font-weight: 600;
-    }}
-    QFrame#WorkstationProcessHub {{
-        border-top: 1px solid {t.BORDER_STRONG};
     }}
     /* 综合编修 / shell：可浮动 dock 标题条（对齐 V3 light tokens） */
     QDockWidget {{

@@ -59,7 +59,7 @@ def test_composite_document_is_default_with_dock_panels(qtbot, tmp_path):
     for dock in (
         workstation.nav_dock,
         workstation.inspector_dock,
-        workstation.process_dock,
+        workstation.agent_dock,
         workstation.composite_layer_dock,
         workstation.composite_input_dock,
         workstation.composite_linked_dock,
@@ -382,7 +382,7 @@ def test_layout_presets_apply_visibility_matrix(qtbot, tmp_path):
     assert ws.central_document() is ws.composite
     assert not ws.inspector_dock.isHidden()
     assert not ws.task_dock.isHidden()
-    assert not ws.process_dock.isHidden()
+    assert not ws.agent_dock.isHidden()
     assert not ws.well_dock.isHidden()
     assert not ws.seismic_dock.isHidden()
 
@@ -397,43 +397,79 @@ def test_show_tasks_does_not_expand_agent_dock(qtbot, tmp_path):
     qtbot.addWidget(shell)
     ws = shell.workstation
     ws.apply_layout_preset("composite_default")
-    assert ws.process_dock.isHidden()
+    assert ws.agent_dock.isHidden()
     assert ws.task_dock.isHidden()
 
     ws.show_tasks()
 
     assert not ws.task_dock.isHidden()
-    assert ws.process_dock.isHidden(), "打开任务中心不得连带显示 Agent 面板"
+    assert ws.agent_dock.isHidden(), "打开任务中心不得连带显示 Agent 面板"
 
 
-def test_process_hub_log_viewer_streams_and_caps(qtbot):
-    """「日志」tab 是真实日志查看器：流式追加 + 2000 行上限（B2）。"""
+def test_agent_tasks_logs_console_are_independent_docks(qtbot, tmp_path):
+    """B18 去重：Agent / 任务中心 / 日志 / 控制台各自是宿主级 dock，
+    不再存在面板内层 tab（旧 ProcessHub QTabWidget 已拆除）。"""
+    from paleo_workbench.ui.workstation.agent_panel import AgentWorkspace
+
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+
+    for attr, title in (
+        ("agent_dock", "Agent"),
+        ("task_dock", "任务中心"),
+        ("logs_dock", "日志"),
+        ("console_dock", "控制台"),
+    ):
+        dock = getattr(ws, attr)
+        assert dock.windowTitle() == title
+        feats = dock.features()
+        assert feats & QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        assert feats & QDockWidget.DockWidgetFeature.DockWidgetMovable
+        assert feats & QDockWidget.DockWidgetFeature.DockWidgetClosable
+    # dock 内容直接就是各部件：Agent 面板下不再嵌 tab 容器。
+    assert isinstance(ws.agent_dock.widget(), AgentWorkspace)
+    assert not hasattr(ws.agent_panel, "tabs")
+    assert ws.logs_dock.isHidden() and ws.console_dock.isHidden()
+
+    # 各自独立显隐 + 浮动。
+    ws.logs_dock.show()
+    ws.console_dock.show()
+    assert not ws.logs_dock.isHidden() and not ws.console_dock.isHidden()
+    ws.logs_dock.setFloating(True)
+    assert ws.logs_dock.isFloating()
+    assert not ws.console_dock.isFloating()
+    assert not ws.agent_dock.isFloating()
+    ws.logs_dock.setFloating(False)
+
+
+def test_log_viewer_streams_and_caps(qtbot):
+    """「日志」dock 是真实日志查看器：流式追加 + 2000 行上限（B2）。"""
     import logging
 
-    from paleo_workbench.ui.workstation.process_hub import ProcessHub
+    from paleo_workbench.ui.workstation.process_hub import ConsolePane, LogViewer
 
-    hub = ProcessHub()
-    qtbot.addWidget(hub)
+    viewer = LogViewer()
+    qtbot.addWidget(viewer)
     try:
-        # tab 顺序：Agent / 任务 / 日志（/ 控制台占位）。
-        assert [hub.tabs.tabText(i) for i in range(hub.tabs.count())] == [
-            "Agent", "任务", "日志", "控制台",
-        ]
-        assert "预留：嵌入式控制台" in hub.console.toPlainText()
-
         logging.getLogger("paleo_workbench.b2_probe").warning("B2 日志探针")
-        assert "B2 日志探针" in hub.logs.toPlainText()
-        assert hub.logs.isReadOnly()
+        assert "B2 日志探针" in viewer.logs.toPlainText()
+        assert viewer.logs.isReadOnly()
 
         probe = logging.getLogger("paleo_workbench.b2_probe")
         for i in range(2300):
             probe.warning("cap line %d", i)
-        assert hub.logs.blockCount() <= 2000, "超出上限必须丢弃最旧"
-        assert "cap line 2299" in hub.logs.toPlainText()
+        assert viewer.logs.blockCount() <= 2000, "超出上限必须丢弃最旧"
+        assert "cap line 2299" in viewer.logs.toPlainText()
     finally:
-        hub.shutdown()
+        viewer.shutdown()
     root = logging.getLogger("paleo_workbench")
-    assert hub._log_handler not in root.handlers, "shutdown 必须摘除全局 handler"
+    assert viewer._log_handler not in root.handlers, "shutdown 必须摘除全局 handler"
+
+    console = ConsolePane()
+    qtbot.addWidget(console)
+    assert "预留：嵌入式控制台" in console.console.toPlainText()
+    assert console.console.isReadOnly()
 
 
 def test_float_all_and_dock_all_panels(qtbot, tmp_path):

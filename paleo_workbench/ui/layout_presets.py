@@ -22,8 +22,10 @@ class DockVisibilityMatrix:
 
     nav: bool = True
     inspector: bool = True
-    process: bool = False
+    agent: bool = False
     tasks: bool = False
+    logs: bool = False
+    console: bool = False
     composite_layer: bool = True
     composite_input: bool = False
     composite_linked: bool = False
@@ -52,7 +54,7 @@ WORKSTATION_LAYOUT_PRESETS: tuple[WorkstationLayoutPreset, ...] = (
         visibility=DockVisibilityMatrix(
             nav=True,
             inspector=True,
-            process=False,
+            agent=False,
             tasks=False,
             composite_layer=True,
             composite_input=False,
@@ -70,7 +72,7 @@ WORKSTATION_LAYOUT_PRESETS: tuple[WorkstationLayoutPreset, ...] = (
         visibility=DockVisibilityMatrix(
             nav=True,
             inspector=True,
-            process=False,
+            agent=False,
             tasks=False,
             composite_layer=True,
             composite_input=False,
@@ -88,7 +90,7 @@ WORKSTATION_LAYOUT_PRESETS: tuple[WorkstationLayoutPreset, ...] = (
         visibility=DockVisibilityMatrix(
             nav=True,
             inspector=True,
-            process=False,
+            agent=False,
             tasks=False,
             composite_layer=True,
             composite_input=False,
@@ -106,7 +108,7 @@ WORKSTATION_LAYOUT_PRESETS: tuple[WorkstationLayoutPreset, ...] = (
         visibility=DockVisibilityMatrix(
             nav=True,
             inspector=True,
-            process=False,
+            agent=False,
             tasks=False,
             composite_layer=False,
             composite_input=False,
@@ -124,7 +126,7 @@ WORKSTATION_LAYOUT_PRESETS: tuple[WorkstationLayoutPreset, ...] = (
         visibility=DockVisibilityMatrix(
             nav=True,
             inspector=True,
-            process=True,
+            agent=True,
             tasks=True,
             composite_layer=True,
             composite_input=True,
@@ -142,7 +144,7 @@ WORKSTATION_LAYOUT_PRESETS: tuple[WorkstationLayoutPreset, ...] = (
         visibility=DockVisibilityMatrix(
             nav=True,
             inspector=True,
-            process=False,
+            agent=False,
             tasks=False,
             composite_layer=True,
             composite_input=True,
@@ -180,8 +182,10 @@ def visibility_dict(matrix: DockVisibilityMatrix) -> dict[str, bool]:
     return {
         "nav": matrix.nav,
         "inspector": matrix.inspector,
-        "process": matrix.process,
+        "agent": matrix.agent,
         "tasks": matrix.tasks,
+        "logs": matrix.logs,
+        "console": matrix.console,
         "composite_layer": matrix.composite_layer,
         "composite_input": matrix.composite_input,
         "composite_linked": matrix.composite_linked,
@@ -201,8 +205,10 @@ def register_with_dock_manager(dock_manager) -> None:
     panels: Iterable[tuple[str, str, str]] = (
         ("workstation:explorer", "资源管理器", "left"),
         ("workstation:inspector", "检查器", "right"),
-        ("workstation:process", "Agent", "bottom"),
+        ("workstation:agent", "Agent", "bottom"),
         ("workstation:tasks", "任务中心", "bottom"),
+        ("workstation:logs", "日志", "bottom"),
+        ("workstation:console", "控制台", "bottom"),
         ("workstation:composite_layer", "图层管理", "right"),
         ("workstation:composite_input", "输入与结果", "left"),
         ("workstation:composite_linked", "联动视图", "bottom"),

@@ -3,15 +3,9 @@ from __future__ import annotations
 import logging
 from collections import deque
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtWidgets import (
-    QFrame,
-    QPlainTextEdit,
-    QTabWidget,
-    QVBoxLayout,
-)
-
-from paleo_workbench.ui.workstation.agent_panel import AgentWorkspace
+from PySide6.QtCore import QObject, QTimer, Signal
+import shiboken6
+from PySide6.QtWidgets import QFrame, QPlainTextEdit, QVBoxLayout
 
 #: 日志查看器行数上限：超出丢弃最旧（部件与内存缓冲同上限）。
 LOG_LINE_CAP = 2000
@@ -37,13 +31,25 @@ class QtLogHandler(QObject, logging.Handler):
         self._pending: deque[str] = deque(maxlen=capacity)
 
     def emit(self, record: logging.LogRecord) -> None:
+        # 死壳遗留 handler：未走 shutdown() 的拆除路径（failed-stop 的
+        # deleteLater）不会摘除包 logger 上的 handler，而下一次壳构建
+        # 记录「QGIS 画布栈初始化失败」时就会调用它——死 QObject 一 emit
+        # 就抛 RuntimeError，直接炸掉新壳的构建（「打开工程报错」根因）。
+        # handler 死了只能丢弃日志，绝不能让日志记录炸掉调用方。
+        if not shiboken6.isValid(self):
+            return
         try:
             line = self._formatter.format(record)
         except Exception:  # noqa: BLE001 — logging 契约：handler 不得抛出
             self.handleError(record)
             return
         self._pending.append(line)
-        self.message_ready.emit(line)
+        try:
+            self.message_ready.emit(line)
+        except RuntimeError:
+            # emit 瞬间恰好被销毁（DeferredDelete 竞态）：行已在缓冲里，
+            # 轮询兜底取不到就算了，不能向上抛。
+            pass
 
     def take_pending(self) -> list[str]:
         """取走尚未消费的格式化行（轮询路径），取后清空。"""
@@ -52,45 +58,28 @@ class QtLogHandler(QObject, logging.Handler):
         return lines
 
 
-class ProcessHub(QFrame):
-    """Bottom Agent region: Agent console plus 任务 / 日志 / 控制台 tabs.
+class LogViewer(QFrame):
+    """「日志」dock 的内容：真实的包内日志查看器。
 
-    任务中心（TaskCenter）是独立的 dock 面板，由 WorkstationFrame 创建并
-    停靠——不再与 Agent 焊在同一窗格里，两者可分别浮动 / 显隐。
-    「日志」是真实的日志查看器：轮询包内 logger 的内存 handler，
-    readonly，行数上限 :data:`LOG_LINE_CAP`。
+    轮询包内 logger 的内存 handler，readonly，行数上限
+    :data:`LOG_LINE_CAP`。旧 ProcessHub 内层 tab 已拆除（B18 去重）：
+    Agent / 任务中心 / 日志 / 控制台各自是宿主级 dock。
     """
 
-    def __init__(self, project=None, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("WorkstationProcessHub")
+        self.setObjectName("WorkstationLogPanel")
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        self.tabs = QTabWidget(self)
-        self.tabs.setObjectName("WorkstationProcessTabs")
-        self.tabs.setDocumentMode(True)
-        outer.addWidget(self.tabs)
-
-        self.agent = AgentWorkspace(project, self.tabs)
-        self.tabs.addTab(self.agent, "Agent")
-
-        self.processing = QPlainTextEdit(self.tabs)
-        self.processing.setReadOnly(True)
-        self.processing.setPlainText(
-            "处理任务会在这里显示输入、参数、阶段、输出和血缘。\n"
-            "长时间操作同时进入任务中心，可取消并在页面切换后继续观察。"
-        )
-        self.tabs.addTab(self.processing, "任务")
-
-        # --- 日志查看器：包内 logger → 内存 handler → 1s 轮询 ------------
-        self.logs = QPlainTextEdit(self.tabs)
+        self.logs = QPlainTextEdit(self)
         self.logs.setObjectName("WorkstationLogView")
         self.logs.setReadOnly(True)
         self.logs.setMaximumBlockCount(LOG_LINE_CAP)
-        self.tabs.addTab(self.logs, "日志")
+        outer.addWidget(self.logs)
 
+        # --- 日志查看器：包内 logger → 内存 handler → 1s 轮询 ------------
         self._log_handler = QtLogHandler(parent=self)
         self._log_handler.message_ready.connect(self._drain_log_lines)
         self._log_source = logging.getLogger("paleo_workbench")
@@ -105,29 +94,13 @@ class ProcessHub(QFrame):
         self._log_timer.timeout.connect(self._drain_log_lines)
         self._log_timer.start()
 
-        self.console = QPlainTextEdit(self.tabs)
-        self.console.setReadOnly(True)
-        self.console.setPlainText("预留：嵌入式控制台")
-        self.tabs.addTab(self.console, "控制台")
-
-    def set_project(self, project, project_path: str | None = None) -> None:
-        self.agent.set_project(project, project_path)
-
-    def show_agent(self) -> None:
-        self.tabs.setCurrentIndex(0)
-        self.agent.command_input.setFocus(Qt.FocusReason.ShortcutFocusReason)
-
-    def submit_agent_command(self, text: str) -> None:
-        self.show_agent()
-        self.agent.submit(text)
-
     def _drain_log_lines(self, *_args) -> None:
         """信号槽与轮询定时器共用的取行入口（取后清空，绝不重复）。"""
         for line in self._log_handler.take_pending():
             self.logs.appendPlainText(line)
 
     def shutdown(self) -> None:
-        # 摘除全局 logger 上的 handler：壳重建一次会新建一个 ProcessHub，
+        # 摘除全局 logger 上的 handler：壳重建一次会新建一个 LogViewer，
         # 不摘除的话 handler 会越积越多（每个都格式化一遍全部记录）。
         self._log_timer.stop()
         if self._log_handler in self._log_source.handlers:
@@ -136,3 +109,20 @@ class ProcessHub(QFrame):
                 # review P2-8：壳重建时包级别要还原，不永久停在 INFO。
                 self._log_source.setLevel(self._prev_pkg_level)
                 self._prev_pkg_level = None
+
+
+class ConsolePane(QFrame):
+    """「控制台」dock 的内容：预留的嵌入式控制台（诚实占位）。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("WorkstationConsolePane")
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        self.console = QPlainTextEdit(self)
+        self.console.setObjectName("WorkstationConsoleView")
+        self.console.setReadOnly(True)
+        self.console.setPlainText("预留：嵌入式控制台")
+        outer.addWidget(self.console)

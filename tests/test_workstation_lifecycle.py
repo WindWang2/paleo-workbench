@@ -181,7 +181,7 @@ def test_dock_minimum_size_follows_floating_state(qtbot, workstation):
 def test_flush_layout_writes_after_hide(qtbot, workstation):
     workstation.show()
     qtbot.waitExposed(workstation)
-    workstation.process_dock.setFloating(True)
+    workstation.agent_dock.setFloating(True)
     workstation.hide()
     # hide 之后常规保存路径是 no-op；flush_layout 必须仍然落盘。
     workstation._save_layout()
@@ -284,11 +284,11 @@ def test_save_project_calls_composite_flush(qtbot, tmp_path, monkeypatch):
 # --- #1128: activity history focus --------------------------------------------
 
 
-def test_activity_history_does_not_open_agent_log_tab(qtbot, workstation):
+def test_activity_history_does_not_open_agent_log_dock(qtbot, workstation):
     workstation.show()
     qtbot.waitExposed(workstation)
-    workstation.process_hub.tabs.setCurrentIndex(0)
+    workstation.logs_dock.hide()
+    workstation.agent_dock.hide()
     workstation._on_activity_mode("history")
-    assert (
-        workstation.process_hub.tabs.currentIndex() == 0
-    ), "「历史」不得再误开 Agent「日志」tab"
+    assert workstation.agent_dock.isHidden(), "「历史」不得连带显示 Agent 面板"
+    assert workstation.logs_dock.isHidden(), "「历史」不得再误开「日志」面板"

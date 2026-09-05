@@ -42,8 +42,10 @@ EXPECTED_PRESET_IDS = [
 _DOCK_ATTRS = {
     "nav": "nav_dock",
     "inspector": "inspector_dock",
-    "process": "process_dock",
+    "agent": "agent_dock",
     "tasks": "task_dock",
+    "logs": "logs_dock",
+    "console": "console_dock",
     "composite_layer": "composite_layer_dock",
     "composite_input": "composite_input_dock",
     "composite_linked": "composite_linked_dock",

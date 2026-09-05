@@ -36,9 +36,9 @@ from paleo_workbench.ui.layout_presets import (
 from paleo_workbench.ui.workstation.linked_workspace import (
     LinkedInterpretationWorkspace,
 )
-from paleo_workbench.ui.workstation.process_hub import ProcessHub
+from paleo_workbench.ui.workstation.agent_panel import AgentWorkspace
+from paleo_workbench.ui.workstation.process_hub import ConsolePane, LogViewer
 from paleo_workbench.ui.workstation.task_center import TaskCenter
-from paleo_workbench.ui.workstation.dock_title_bar import install_dock_title_bar
 
 _log = logging.getLogger(__name__)
 
@@ -160,7 +160,12 @@ class WorkstationFrame(QWidget):
         self.inspector = WorkstationInspector(self._dock_host)
         self._agent_undo_stack: list[dict] = []
         self._current_well_name = ""
-        self.process_hub = ProcessHub(project, self._dock_host)
+        # B18 去重：Agent 面板直接作为 dock 内容（旧 ProcessHub 内层
+        # 「任务/日志/控制台」tab 与 dock 层概念重复，已拆除——任务中心 /
+        # 日志 / 控制台各自是宿主级 dock，显隐 / 浮动 / 停靠独立）。
+        self.agent_panel = AgentWorkspace(project, self._dock_host)
+        self.log_viewer = LogViewer(self._dock_host)
+        self.console_pane = ConsolePane(self._dock_host)
         # 任务中心是独立面板：与 Agent 各自浮动 / 显隐，不再焊在同一 dock 里。
         self.task_center = TaskCenter(self._dock_host)
 
@@ -171,11 +176,17 @@ class WorkstationFrame(QWidget):
         self.inspector_dock = self._add_dock(
             "检查器", self.inspector, Qt.DockWidgetArea.RightDockWidgetArea
         )
-        self.process_dock = self._add_dock(
-            "Agent", self.process_hub, Qt.DockWidgetArea.BottomDockWidgetArea
+        self.agent_dock = self._add_dock(
+            "Agent", self.agent_panel, Qt.DockWidgetArea.BottomDockWidgetArea
         )
         self.task_dock = self._add_dock(
             "任务中心", self.task_center, Qt.DockWidgetArea.BottomDockWidgetArea
+        )
+        self.logs_dock = self._add_dock(
+            "日志", self.log_viewer, Qt.DockWidgetArea.BottomDockWidgetArea
+        )
+        self.console_dock = self._add_dock(
+            "控制台", self.console_pane, Qt.DockWidgetArea.BottomDockWidgetArea
         )
 
         # 编图面板（由宿主 QMainWindow 持有 dock）
@@ -207,16 +218,21 @@ class WorkstationFrame(QWidget):
         self.well_dock.hide()
         self.seismic_dock.hide()
         self.hub_dock.hide()
+        self.logs_dock.hide()
+        self.console_dock.hide()
         # 默认视图：图件最大化（variant C），仅图层管理随编图打开。
         self.composite_input_dock.hide()
         self.composite_linked_dock.hide()
         self._wire_composite_panel_menu()
-        # 图层管理与检查器在右侧叠 tab，任务/联动视图在底部叠 tab。
+        # 图层管理与检查器在右侧叠 tab，底部面板（Agent/任务中心/日志/
+        # 控制台/联动/测井/地震）叠 tab。
         self._dock_host.tabifyDockWidget(self.inspector_dock, self.composite_layer_dock)
-        self._dock_host.tabifyDockWidget(self.process_dock, self.composite_linked_dock)
-        self._dock_host.tabifyDockWidget(self.process_dock, self.task_dock)
-        self._dock_host.tabifyDockWidget(self.process_dock, self.well_dock)
+        self._dock_host.tabifyDockWidget(self.agent_dock, self.composite_linked_dock)
+        self._dock_host.tabifyDockWidget(self.agent_dock, self.task_dock)
+        self._dock_host.tabifyDockWidget(self.agent_dock, self.well_dock)
         self._dock_host.tabifyDockWidget(self.well_dock, self.seismic_dock)
+        self._dock_host.tabifyDockWidget(self.agent_dock, self.logs_dock)
+        self._dock_host.tabifyDockWidget(self.agent_dock, self.console_dock)
 
         self._wire()
         self.set_project(project)
@@ -228,6 +244,10 @@ class WorkstationFrame(QWidget):
     _FLOAT_MIN_SIZE = (220, 160)
 
     def _add_dock(self, title: str, widget: QWidget, area) -> QDockWidget:
+        # 纯原生 QDockWidget（B18）：原生标题栏负责拖拽停靠 / 浮动 / 叠
+        # tab / 浮动关闭按钮，不再安装自绘标题栏（ setTitleBarWidget 会
+        # 架空 Qt 原生拖拽——「窗口拖不动 / 不响应停靠」的根因）。壳层
+        # 只负责 dock 的创建位置与显隐时机；中央固定为绘图区。
         dock = QDockWidget(title, self._dock_host)
         dock.setObjectName(f"WorkstationDock_{title}")
         dock.setWidget(widget)
@@ -242,7 +262,6 @@ class WorkstationFrame(QWidget):
         )
         if dock.isFloating():
             dock.setMinimumSize(*self._FLOAT_MIN_SIZE)
-        install_dock_title_bar(dock, title)
         self._dock_host.addDockWidget(area, dock)
         return dock
 
@@ -284,10 +303,10 @@ class WorkstationFrame(QWidget):
             )
         )
         self.composite.object_selected.connect(self.inspector.show_payload)
-        self.process_hub.agent.open_well_requested.connect(self._open_well_from_agent)
-        self.process_hub.agent.show_wells_requested.connect(self._show_wells_from_agent)
-        self.process_hub.agent.focus_joint_requested.connect(self._focus_joint_from_agent)
-        self.process_hub.agent.undo_requested.connect(self._undo_agent_gui)
+        self.agent_panel.open_well_requested.connect(self._open_well_from_agent)
+        self.agent_panel.show_wells_requested.connect(self._show_wells_from_agent)
+        self.agent_panel.focus_joint_requested.connect(self._focus_joint_from_agent)
+        self.agent_panel.undo_requested.connect(self._undo_agent_gui)
         self.task_center.active_count_changed.connect(self.app_bar.set_task_count)
         # 首个信号可能早于本接线发出（TaskCenter 构造即首刷，当时 app_bar
         # 还不存在，400ms 周期内若无状态变化不再补发）——接线后显式拉平。
@@ -301,7 +320,7 @@ class WorkstationFrame(QWidget):
         for dock in (
             self.nav_dock,
             self.inspector_dock,
-            self.process_dock,
+            self.agent_dock,
             self.task_dock,
             self.composite_layer_dock,
             self.composite_input_dock,
@@ -332,13 +351,13 @@ class WorkstationFrame(QWidget):
         self.explorer.set_project(project)
         self.inspector.set_project(project)
         self.linked_workspace.set_project(project, self._project_path)
-        self.process_hub.set_project(project, self._project_path)
+        self.agent_panel.set_project(project, self._project_path)
         self.composite.set_project(project)
 
     def set_project_path(self, path: str | None) -> None:
         self._project_path = str(path) if path else None
         self.linked_workspace.set_project_path(self._project_path)
-        self.process_hub.set_project(self._project, self._project_path)
+        self.agent_panel.set_project(self._project, self._project_path)
 
     def attach_coordination(self, controller) -> None:
         """接入全局选择总线（B11）：资源树选择即工作区上下文。"""
@@ -387,7 +406,7 @@ class WorkstationFrame(QWidget):
         self.well_dock.raise_()
         if well_name:
             self._current_well_name = str(well_name)
-            self.process_hub.agent.set_active_well(str(well_name))
+            self.agent_panel.set_active_well(str(well_name))
             self.linked_workspace.open_well(well_name)
 
     def show_seismic(self, resource=None) -> None:
@@ -419,22 +438,23 @@ class WorkstationFrame(QWidget):
         self.show_hub_page(title)
 
     def show_agent(self) -> None:
-        self.process_dock.show()
-        self.process_dock.raise_()  # 与 task_dock 同 tabify 链：必须前置
-        self.process_hub.show_agent()
-        self._expand_process_dock()
+        self.agent_dock.show()
+        self.agent_dock.raise_()  # 与 task_dock 同 tabify 链：必须前置
+        self.agent_panel.command_input.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        self._expand_agent_dock()
 
     def show_tasks(self) -> None:
         # 任务中心独立于 Agent 面板：只 raise 自己所在的 tab 链，绝不
-        # 强制展开 process_dock（旧副作用：打开任务中心连带显示 Agent）。
+        # 强制展开 agent_dock（旧副作用：打开任务中心连带显示 Agent）。
         self.task_dock.show()
         self.task_dock.raise_()
         self.task_center.tree.setFocus(Qt.FocusReason.ShortcutFocusReason)
 
     def submit_agent_command(self, text: str) -> None:
-        self.process_dock.show()
-        self.process_hub.submit_agent_command(text)
-        self._expand_process_dock()
+        self.agent_dock.show()
+        self.agent_dock.raise_()
+        self.agent_panel.submit(text)
+        self._expand_agent_dock()
 
     def toggle_explorer(self) -> None:
         # dock 内部件用显式隐藏标志：孤立构造（宿主未显示）时
@@ -477,7 +497,10 @@ class WorkstationFrame(QWidget):
             return
         if self._current_preset_id is not None:
             self._current_preset_id = None
-            self.app_bar.set_current_workspace(None)
+            try:
+                self.app_bar.set_current_workspace(None)
+            except RuntimeError:
+                return  # 死壳迟到的可见性信号：C++ 已销毁，忽略
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -537,6 +560,10 @@ class WorkstationFrame(QWidget):
             (self.composite_input_dock, "显示输入与结果"),
             (self.composite_layer_dock, "显示图层管理"),
             (self.composite_linked_dock, "显示联动视图"),
+            (self.agent_dock, "显示 Agent"),
+            (self.task_dock, "显示任务中心"),
+            (self.logs_dock, "显示日志"),
+            (self.console_dock, "显示控制台"),
         ):
             action = dock.toggleViewAction()
             action.setText(label)
@@ -557,8 +584,10 @@ class WorkstationFrame(QWidget):
         return (
             self.nav_dock,
             self.inspector_dock,
-            self.process_dock,
+            self.agent_dock,
             self.task_dock,
+            self.logs_dock,
+            self.console_dock,
             self.composite_layer_dock,
             self.composite_input_dock,
             self.composite_linked_dock,
@@ -581,8 +610,10 @@ class WorkstationFrame(QWidget):
         for dock in (
             self.nav_dock,
             self.inspector_dock,
-            self.process_dock,
+            self.agent_dock,
             self.task_dock,
+            self.logs_dock,
+            self.console_dock,
             self.well_dock,
             self.seismic_dock,
             self.hub_dock,
@@ -596,14 +627,16 @@ class WorkstationFrame(QWidget):
             Qt.DockWidgetArea.RightDockWidgetArea, self.inspector_dock
         )
         self._dock_host.addDockWidget(
-            Qt.DockWidgetArea.BottomDockWidgetArea, self.process_dock
+            Qt.DockWidgetArea.BottomDockWidgetArea, self.agent_dock
         )
         self._dock_host.addDockWidget(
             Qt.DockWidgetArea.BottomDockWidgetArea, self.task_dock
         )
         self._dock_host.tabifyDockWidget(self.inspector_dock, self.composite_layer_dock)
-        self._dock_host.tabifyDockWidget(self.process_dock, self.composite_linked_dock)
-        self._dock_host.tabifyDockWidget(self.process_dock, self.task_dock)
+        self._dock_host.tabifyDockWidget(self.agent_dock, self.composite_linked_dock)
+        self._dock_host.tabifyDockWidget(self.agent_dock, self.task_dock)
+        self._dock_host.tabifyDockWidget(self.agent_dock, self.logs_dock)
+        self._dock_host.tabifyDockWidget(self.agent_dock, self.console_dock)
         self._save_timer.start()
 
     def apply_layout_preset(self, preset_id: str) -> None:
@@ -623,8 +656,10 @@ class WorkstationFrame(QWidget):
             self._settings.setValue(
                 "layout/inspector_user_hidden", self._user_hid_inspector
             )
-            self.process_dock.setVisible(vis.process)
+            self.agent_dock.setVisible(vis.agent)
             self.task_dock.setVisible(vis.tasks)
+            self.logs_dock.setVisible(vis.logs)
+            self.console_dock.setVisible(vis.console)
             self.composite_layer_dock.setVisible(vis.composite_layer)
             self.composite_input_dock.setVisible(vis.composite_input)
             self.composite_linked_dock.setVisible(vis.composite_linked)
@@ -651,8 +686,8 @@ class WorkstationFrame(QWidget):
             dock_manager.set_active_preset(WorkspacePreset.WORKSTATION_COMPOSITE)
         elif preset_id == "integrated":
             dock_manager.set_active_preset(WorkspacePreset.WORKSTATION_INTERPRETATION)
-            if vis.process:
-                self._expand_process_dock()
+            if vis.agent:
+                self._expand_agent_dock()
             if vis.tasks:
                 self.task_dock.raise_()
 
@@ -676,7 +711,7 @@ class WorkstationFrame(QWidget):
                 dock.setFloating(False)
             host.addDockWidget(area, dock)
         host.tabifyDockWidget(self.inspector_dock, self.composite_layer_dock)
-        host.tabifyDockWidget(self.process_dock, self.composite_linked_dock)
+        host.tabifyDockWidget(self.agent_dock, self.composite_linked_dock)
         self._save_timer.start()
 
     def layout_preset_visibility(self, preset_id: str) -> dict[str, bool] | None:
@@ -801,17 +836,23 @@ class WorkstationFrame(QWidget):
         else:
             self.status_message.emit("该 Agent 动作没有已记录的撤销状态")
 
-    def _expand_process_dock(self) -> None:
-        self.process_dock.show()
+    def _expand_agent_dock(self) -> None:
+        self.agent_dock.show()
         self._dock_host.resizeDocks(
-            [self.process_dock], [245], Qt.Orientation.Vertical
+            [self.agent_dock], [245], Qt.Orientation.Vertical
         )
 
     def _schedule_state_save(self) -> None:
         """部件已关闭时不再保存布局——退出/销毁阶段的全部隐藏态不是布局。"""
-        if self._layout_frozen or not self.isVisible():
+        if self._layout_frozen:
             return
-        self._save_timer.start()
+        try:
+            # 死壳（deleteLater 后包装器仍被 _all_pages / dock 信号引用）
+            # 的迟到可见性信号：C++ 已销毁，静默忽略而非刷屏 RuntimeError。
+            if self.isVisible():
+                self._save_timer.start()
+        except RuntimeError:
+            pass
 
     def showEvent(self, event) -> None:  # noqa: N802 — Qt 契约
         super().showEvent(event)
@@ -836,7 +877,7 @@ class WorkstationFrame(QWidget):
             [self.inspector_dock, self.composite_layer_dock], [312, 312], horizontal
         )
         host.resizeDocks(
-            [self.process_dock, self.task_dock, self.composite_linked_dock],
+            [self.agent_dock, self.task_dock, self.composite_linked_dock],
             [224, 224, 200],
             vertical,
         )
@@ -917,7 +958,7 @@ class WorkstationFrame(QWidget):
         # teardown 前最后一次强制落盘（close 路径不先 hide，force 兜底）。
         self._save_layout(force=True)
         self._layout_frozen = True
-        self.process_hub.shutdown()
+        self.log_viewer.shutdown()
         self.task_center.shutdown()
         self.composite.shutdown()
         self._teardown_docks()
@@ -928,8 +969,10 @@ class WorkstationFrame(QWidget):
         docks = (
             self.nav_dock,
             self.inspector_dock,
-            self.process_dock,
+            self.agent_dock,
             self.task_dock,
+            self.logs_dock,
+            self.console_dock,
             self.composite_layer_dock,
             self.composite_input_dock,
             self.composite_linked_dock,
