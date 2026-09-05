@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QPushButton, QWidget
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 
 TOOL_IDS = ("select", "move", "vertex", "facies", "line", "label")
 TOOL_LABELS = {
@@ -48,7 +48,7 @@ class MapEditToolbar(QWidget):
         for tool_id in TOOL_IDS:
             btn = QPushButton(TOOL_LABELS[tool_id])
             btn.setObjectName("SecondaryButton")
-            btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+            style.track_control_height(btn)
             btn.setCheckable(True)
             btn.setProperty("tool_id", tool_id)
             self._tool_group.addButton(btn)
@@ -65,27 +65,27 @@ class MapEditToolbar(QWidget):
 
         self.snap_btn = QPushButton("捕捉")
         self.snap_btn.setObjectName("SecondaryButton")
-        self.snap_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.snap_btn)
         self.snap_btn.setCheckable(True)
         self.snap_btn.toggled.connect(self.snap_toggled.emit)
         layout.addWidget(self.snap_btn)
 
         self.undo_btn = QPushButton("撤销")
         self.undo_btn.setObjectName("SecondaryButton")
-        self.undo_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.undo_btn)
         self.undo_btn.clicked.connect(self.undo_requested.emit)
         layout.addWidget(self.undo_btn)
 
         self.redo_btn = QPushButton("重做")
         self.redo_btn.setObjectName("SecondaryButton")
-        self.redo_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.redo_btn)
         self.redo_btn.clicked.connect(self.redo_requested.emit)
         layout.addWidget(self.redo_btn)
         self._add_separator(layout)
 
         self.preview_btn = QPushButton("图面预览")
         self.preview_btn.setObjectName("SecondaryButton")
-        self.preview_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.preview_btn)
         self.preview_btn.setCheckable(True)
         self.preview_btn.setToolTip("切换 PaleoMapCanvas 图面预览（含图例/指北针/比例尺）")
         self.preview_btn.toggled.connect(self.preview_toggled.emit)
@@ -93,7 +93,7 @@ class MapEditToolbar(QWidget):
 
         self.canvas_priority_btn = QPushButton("画布优先")
         self.canvas_priority_btn.setObjectName("SecondaryButton")
-        self.canvas_priority_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.canvas_priority_btn)
         self.canvas_priority_btn.setCheckable(True)
         self.canvas_priority_btn.setToolTip("最大化编辑画布，折叠侧边面板")
         self.canvas_priority_btn.toggled.connect(self.canvas_priority_toggled.emit)
@@ -102,21 +102,21 @@ class MapEditToolbar(QWidget):
 
         self.topology_btn = QPushButton("重建拓扑")
         self.topology_btn.setObjectName("SecondaryButton")
-        self.topology_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.topology_btn)
         self.topology_btn.setToolTip("共享节点捕捉 + 自交/邻接校验")
         self.topology_btn.clicked.connect(self.topology_rebuild_requested.emit)
         layout.addWidget(self.topology_btn)
 
         self.merge_btn = QPushButton("合并相带")
         self.merge_btn.setObjectName("SecondaryButton")
-        self.merge_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.merge_btn)
         self.merge_btn.setToolTip("合并选中的两个相带多边形")
         self.merge_btn.clicked.connect(self.merge_facies_requested.emit)
         layout.addWidget(self.merge_btn)
 
         self.split_btn = QPushButton("分割相带")
         self.split_btn.setObjectName("SecondaryButton")
-        self.split_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.split_btn)
         self.split_btn.setToolTip("用选中的线分割选中的一个相带")
         self.split_btn.clicked.connect(self.split_facies_requested.emit)
         layout.addWidget(self.split_btn)
@@ -126,7 +126,7 @@ class MapEditToolbar(QWidget):
 
         self.generate_demo_draft_btn = QPushButton("生成演示草稿")
         self.generate_demo_draft_btn.setObjectName("SecondaryButton")
-        self.generate_demo_draft_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.generate_demo_draft_btn)
         self.generate_demo_draft_btn.setToolTip("从预测相带区域生成可编辑的演示级编图草稿")
         self.generate_demo_draft_btn.clicked.connect(self.generate_demo_draft_requested.emit)
         layout.addWidget(self.generate_demo_draft_btn)
@@ -144,7 +144,7 @@ class MapEditToolbar(QWidget):
         sep = QFrame()
         sep.setObjectName("ToolbarSeparator")
         sep.setFixedWidth(1)
-        sep.setMinimumHeight(max(1, tokens.CONTROL_HEIGHT - 4))
+        sep.setMinimumHeight(max(1, tokens.control_height(style.current_density()) - 4))
         layout.addWidget(sep)
         return sep
 

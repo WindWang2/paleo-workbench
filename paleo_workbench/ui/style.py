@@ -26,9 +26,37 @@ from PySide6.QtCore import QObject
 from paleo_workbench import tokens
 from paleo_workbench.ui.theme import theme_manager
 
-_registry: "weakref.WeakKeyDictionary[QObject, object]" = (
+_registry: weakref.WeakKeyDictionary[QObject, object] = (
     weakref.WeakKeyDictionary()
 )
+
+# 密度跟踪的最小高度消费点（弱引用；主题切换统一刷新）
+_min_height_widgets: weakref.WeakSet[QObject] = weakref.WeakSet()
+
+
+def current_density() -> str:
+    try:
+        return theme_manager.density.value
+    except Exception:  # noqa: BLE001 — 无 app 环境回落
+        return "comfortable"
+
+
+def track_control_height(widget: QObject) -> None:
+    """按当前密度设置最小控件高度并跟踪（theme_changed 时自动重设）。
+
+    取代 ``setMinimumHeight(tokens.CONTROL_HEIGHT)`` 的 compile-time 快照——
+    切换 compact/comfortable 后行高/按钮高度不再错位。
+    """
+    widget.setMinimumHeight(tokens.control_height(current_density()))
+    _min_height_widgets.add(widget)
+
+
+def _refresh_min_heights() -> None:
+    for widget in list(_min_height_widgets):
+        try:
+            widget.setMinimumHeight(tokens.control_height(current_density()))
+        except RuntimeError:
+            _min_height_widgets.discard(widget)
 
 
 def palette() -> dict:
@@ -59,9 +87,31 @@ def _apply(widget: QObject) -> None:
     except RuntimeError:
         _registry.pop(widget, None)
         return
+    if sheet is None:  # metrics-only 注册（bind_metrics），无样式可贴
+        return
     set_sheet = getattr(widget, "setStyleSheet", None)
     if set_sheet is not None:
         set_sheet(sheet)
+
+
+def bind_metrics(widget: QObject, apply_fn) -> None:
+    """注册 metrics 应用函数并立即执行；theme_changed（携带 density）时重跑。
+
+    用于构造时 ``setFixedHeight(tokens.CONTROL_HEIGHT)`` 一类调用点：
+    换密度后由 apply_fn 重设实际高度，消除「QSS 缩了、固定值没缩」的错位。
+    回调须无捕获地从 ``tokens.density_tokens(current)`` 取值。
+    widget 销毁自动注销（与 :func:`bind` 同一弱引用表——apply_fn 返回
+    None 时表示本次是 metrics-only 调用，不再 setStyleSheet）。
+    """
+    _registry[widget] = apply_fn
+    try:
+        widget.destroyed.connect(lambda _obj=None: _registry.pop(widget, None))
+    except RuntimeError:
+        pass
+    try:
+        apply_fn()
+    except RuntimeError:
+        _registry.pop(widget, None)
 
 
 def on_theme_change(callback) -> None:
@@ -92,3 +142,4 @@ def repolish_all() -> None:
 
 
 theme_manager.theme_changed.connect(lambda *_args: repolish_all())
+theme_manager.theme_changed.connect(lambda *_args: _refresh_min_heights())

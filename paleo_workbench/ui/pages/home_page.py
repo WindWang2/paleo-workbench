@@ -176,7 +176,8 @@ class HomePage(QWidget):
 
         # Add relationship widget
         self.relationship_widget = ModuleRelationshipWidget()
-        self.relationship_widget.setMinimumWidth(1100)
+        # 关系图画布自身 min 1080；外层放到 980 以便窄窗滚动
+        self.relationship_widget.setMinimumWidth(980)
         self.relationship_widget.navigation_requested.connect(self.navigation_requested.emit)
         diagram_layout.addWidget(self.relationship_widget, 1)
 
@@ -186,8 +187,9 @@ class HomePage(QWidget):
         v_splitter.setSizes([420, 620])
         layout.addWidget(v_splitter, 1)
 
-        # Set minimum width on container to prevent horizontal compression in scroll area
-        container.setMinimumWidth(1140)
+        # V5：容器不再钉死 1140px——关系图自带 MIN_CANVAS_WIDTH 最小宽，
+        # 滚动容器负责超宽场景；窄窗口（1180）下页面可缩放。
+        container.setMinimumWidth(960)
 
         bottom = QHBoxLayout()
         bottom.setSpacing(tokens.SPACE_3)
@@ -216,28 +218,12 @@ class HomePage(QWidget):
 
     def _build_empty_state(self) -> QFrame:
         """Inviting empty state shown instead of the map for empty projects."""
-        frame = QFrame()
-        frame.setObjectName("HomeMapEmptyState")
-        layout = QVBoxLayout(frame)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.setSpacing(tokens.SPACE_2)
+        from paleo_workbench.ui.components import PwbEmptyState
 
-        title = QLabel("工区地图")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 18px; font-weight: 600;"
+        return PwbEmptyState(
+            "工区地图",
+            "暂无空间数据。导入井位与地震工区后，这里将展示\n工区边界、井位分布与地震测区范围。",
         )
-        layout.addWidget(title)
-
-        hint = QLabel(
-            "暂无空间数据。导入井位与地震工区后，这里将展示\n工区边界、井位分布与地震测区范围。"
-        )
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: {tokens.FONT_SIZE_BASE}px;"
-        )
-        layout.addWidget(hint)
-        return frame
 
     def _map_overlay_state(self) -> dict:
         """Cheap decoration snapshot: title / scale bar / north arrow / legend."""

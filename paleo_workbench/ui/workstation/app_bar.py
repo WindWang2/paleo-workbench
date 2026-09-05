@@ -14,8 +14,17 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench import tokens
+from paleo_workbench.ui import style
 from paleo_workbench.ui.layout_presets import list_presets
+from paleo_workbench.ui.theme import theme_manager
 from paleo_workbench.ui.workstation.common import workstation_icon
+
+
+def _current_density() -> str:
+    try:
+        return theme_manager.density.value
+    except Exception:  # noqa: BLE001 — 无 app 环境回落
+        return "comfortable"
 
 
 class WorkstationAppBar(QFrame):
@@ -36,7 +45,13 @@ class WorkstationAppBar(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("WorkstationAppBar")
-        self.setFixedHeight(46)
+        # 密度感知高度（compact 40 / comfortable 46），随 theme_changed 重设
+        style.bind_metrics(
+            self,
+            lambda: self.setFixedHeight(
+                tokens.app_bar_height(_current_density())
+            ),
+        )
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 0, 10, 0)

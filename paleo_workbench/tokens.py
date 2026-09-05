@@ -163,6 +163,9 @@ DENSITY_TOKENS = {
         "btn_height": 24,
         "row_height": 22,
         "toolbar_height": 30,
+        "app_bar_height": 40,
+        "rail_width": 48,
+        "rail_item_size": 44,
         "font_delta": 0,  # 字号不缩：专业可读性优先（13px 底线）
     },
     "comfortable": {
@@ -171,6 +174,9 @@ DENSITY_TOKENS = {
         "btn_height": 30,
         "row_height": 28,
         "toolbar_height": 36,
+        "app_bar_height": 46,
+        "rail_width": 54,
+        "rail_item_size": 48,
         "font_delta": 0,
     },
 }
@@ -197,6 +203,18 @@ def row_height(density: str = "comfortable") -> int:
 
 def toolbar_height(density: str = "comfortable") -> int:
     return density_tokens(density)["toolbar_height"]
+
+
+def app_bar_height(density: str = "comfortable") -> int:
+    return density_tokens(density)["app_bar_height"]
+
+
+def rail_width(density: str = "comfortable") -> int:
+    return density_tokens(density)["rail_width"]
+
+
+def rail_item_size(density: str = "comfortable") -> int:
+    return density_tokens(density)["rail_item_size"]
 
 ICON_FILES = [
     "home.svg", "data.svg", "well-log.svg", "seismic.svg", "sequence.svg",
@@ -465,6 +483,10 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     padding_y = density_tokens["padding_y"]
     padding_x = density_tokens["padding_x"]
     btn_height = density_tokens["btn_height"]
+    # 结构性 chrome 尺寸随密度（rail/app bar），QSS 重建即生效
+    rail_width = density_tokens["rail_width"]
+    rail_item = density_tokens["rail_item_size"]
+    app_bar_h = density_tokens["app_bar_height"]  # noqa: F841 — app bar 高度由代码侧 bind_metrics 消费
 
     return f'''
     /* ── Stratum base ─────────────────────────────────────────────── */
@@ -897,7 +919,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     QFrame#IconRail {{
         background: {t.BG_RAIL_GRADIENT};
         border-right: 1px solid {t.BORDER};
-        min-width: {t.ICON_RAIL_WIDTH}px; max-width: {t.ICON_RAIL_WIDTH}px;
+        min-width: {rail_width}px; max-width: {rail_width}px;
     }}
     QFrame#RailSeparator {{
         background: {t.RAIL_SEPARATOR};
@@ -910,8 +932,8 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         background: transparent; color: {t.TEXT_ON_RAIL}; border: none;
         border-left: 3px solid transparent;
         border-radius: {t.RADIUS_NAV_ITEM}px;
-        min-width: {t.ICON_RAIL_ITEM_SIZE}px; max-width: {t.ICON_RAIL_ITEM_SIZE}px;
-        min-height: {t.ICON_RAIL_ITEM_SIZE}px; max-height: {t.ICON_RAIL_ITEM_SIZE}px;
+        min-width: {rail_item}px; max-width: {rail_item}px;
+        min-height: {rail_item}px; max-height: {rail_item}px;
         font-size: {t.FONT_SIZE_NAV_LABEL}; font-weight: {t.FONT_WEIGHT_NAV_LABEL};
     }}
     QToolButton[navItem="true"]:hover {{ background: {t.BG_RAIL_HOVER}; color: {t.TEXT_ON_RAIL_ACTIVE}; }}
