@@ -351,6 +351,44 @@ def test_provider_entry_roi_returns_correct_result(tmp_path, monkeypatch):
     assert result.diagnostics["mode"] == "roi"
 
 
+def test_provider_roi_finite_ratio_counts_nan_not_zero(tmp_path, monkeypatch):
+    """#1160: finite_ratio 是有限占比——全 NaN 报 0.0，合法零值不误伤。"""
+    import numpy as _np
+
+    import paleo_workbench.seismic_attributes as _attrs
+    from paleo_workbench.providers.base import ProviderContext
+    from paleo_workbench.providers.builtin.seismic_attribute import (
+        SeismicAttributeProvider,
+    )
+    from paleo_workbench.providers.execution import execute_provider
+    from paleo_workbench.providers.refs import SeismicVolumeRef
+
+    _cube, store = _write_small_segy(tmp_path)
+    bounds = {"il0": 2, "il1": 10, "xl0": 2, "xl1": 10, "t0": 2, "t1": 14}
+
+    def _run_with(fake):
+        monkeypatch.setattr(_attrs, "roi_attribute", lambda *a, **k: fake)
+        provider = SeismicAttributeProvider("c3", {})
+        return execute_provider(
+            provider,
+            inputs={"volume": SeismicVolumeRef(volume_id="v", path=str(store))},
+            parameters={"roi": bounds},
+            context=ProviderContext(work_dir=str(tmp_path)),
+        )
+
+    import paleo_workbench.providers.execution as execution_module
+
+    class _NullLease:
+        def release(self) -> None:
+            pass
+
+    monkeypatch.setattr(execution_module, "_governor_lease", lambda *a: _NullLease())
+    bad = _run_with(_np.full((8, 8, 12), _np.nan))
+    assert bad.diagnostics["finite_ratio"] == 0.0
+    zeros = _run_with(_np.zeros((8, 8, 12)))
+    assert zeros.diagnostics["finite_ratio"] == 1.0
+
+
 def test_attribute_provider_cancel_propagates_task_cancelled(tmp_path):
     """#1137: a cancelled full-volume attribute run must raise TaskCancelled,
     never a washed ProviderExecutionError."""

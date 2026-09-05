@@ -126,12 +126,15 @@ class SeismicAttributeProvider:
                 int(roi.get("t1", 0)),
             )
             result_array = roi_attribute(reader, bounds, name=self._kernel)
+            import numpy as np
+
             diagnostics = {
                 "mode": "roi",
                 "shape": list(result_array.shape),
-                "finite_ratio": float(
-                    (result_array.size - int((~result_array.astype(bool)).sum())) / max(1, result_array.size)
-                ),
+                # #1160: 有限占比，不是非零占比——NaN.astype(bool) 为 True，
+                # 旧式把全 NaN 坏输出报成 1.0（健康）。
+                "finite_ratio": float(np.isfinite(result_array).mean())
+                if result_array.size else 0.0,
             }
             return ProviderResult(
                 artifacts=[
