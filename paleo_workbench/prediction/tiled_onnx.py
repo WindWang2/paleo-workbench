@@ -210,6 +210,25 @@ def run_tiled_inference(
     done_count = 0
     t0 = time.perf_counter()
     current_batch = max(1, int(batch))
+    # #1187: hard cap on batch×classes×tile_bytes. _run_tile_group holds
+    # ≥3 full (N,C,tile) float32 temporaries (stack copy, ORT output,
+    # softmax in/out); ~6x of one group keeps the transient under budget
+    # instead of discovering it via OOM backoff.
+    try:
+        from paleo_workbench.runtime.resource_budget import active_budget
+
+        _group_budget = int(active_budget().streaming_buffer_bytes)
+    except Exception:
+        _group_budget = 5 * 1024**3
+    _tile_voxels = max(1, tile[0] * tile[1] * tile[2])
+    _max_batch = max(1, _group_budget // (max(1, int(classes)) * _tile_voxels * 4 * 6))
+    if current_batch > _max_batch:
+        logger.warning(
+            "batch %d × %d classes × tile %s exceeds the %d-byte group "
+            "budget; clamped to batch %d",
+            current_batch, classes, tile, _group_budget, _max_batch,
+        )
+        current_batch = _max_batch
 
     def tile_key(t):
         return f"t_{t[0]:05d}_{t[1]:05d}_{t[2]:05d}"
@@ -220,6 +239,7 @@ def run_tiled_inference(
             return {
                 "mode": mode, "tiles_total": total, "tiles_done": done_count,
                 "cancelled": True, "elapsed_s": time.perf_counter() - t0,
+                "batch": current_batch,
                 "class_map": str(class_dst), "prob_map": str(prob_dst),
             }
         group = [t for t in tiles[idx : idx + current_batch]]
@@ -260,6 +280,7 @@ def run_tiled_inference(
         "tiles_done": done_count,
         "cancelled": False,
         "elapsed_s": time.perf_counter() - t0,
+        "batch": current_batch,
         "class_map": str(class_dst),
         "prob_map": str(prob_dst),
         "shape": list(shape),

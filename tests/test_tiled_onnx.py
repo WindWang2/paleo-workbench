@@ -263,3 +263,29 @@ def test_model_binding_records_bytes_identity(tmp_path):
     assert binding["model_file"] == "m.onnx"
     assert binding["model_bytes"] == model_path.stat().st_size > 0
     assert binding["model_sha256"] == sha256_file(model_path)
+
+
+def test_oversized_batch_clamped_transparently(store, tmp_path, monkeypatch):
+    """#1187: batch×classes×tile over budget clamps instead of OOMing;
+    tiled output still equals whole-volume inference."""
+    import paleo_workbench.runtime.resource_budget as _budget
+
+    dst, cube = store
+    model_path = _save(_sign_model(), tmp_path / "clamp.onnx")
+    reader = open_volume(dst)
+    tiny = type("B", (), {"streaming_buffer_bytes": 4 * 1024**2})()
+    monkeypatch.setattr(_budget, "active_budget", lambda: tiny)
+    stats = run_tiled_inference(
+        reader,
+        model_path,
+        classes=2,
+        work_root=tmp_path / "clamp_work",
+        overlap=0,
+        batch=64,
+        tile=(8, 16, 16),
+    )
+    assert stats["tiles_done"] == stats["tiles_total"]
+    assert stats["batch"] < 64  # clamped, not taken at face value
+    ref_arg, _ = _reference(model_path, cube)
+    classmap = np.asarray(zarr.open(stats["class_map"], mode="r")[:, :, :])
+    np.testing.assert_array_equal(classmap, ref_arg)
