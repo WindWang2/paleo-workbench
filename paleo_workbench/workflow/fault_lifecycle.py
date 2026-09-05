@@ -156,6 +156,20 @@ def save_fault_draft(
             parent_version_id=parent,
             scientific_fingerprint=fp,
             domain_task_id=draft.interpretation_id,
+            parameters={
+                "trace_count": len(draft.payload.traces),
+                "pick_count": sum(len(t.section_picks) for t in draft.payload.traces),
+                "seismic_trace_count": sum(
+                    1 for t in draft.payload.traces if t.section_picks
+                ),
+                "map_linked_trace_count": sum(
+                    1 for t in draft.payload.traces if t.map_fault_id
+                ),
+                "vertical_domains": sorted(
+                    {t.vertical_domain for t in draft.payload.traces if t.vertical_domain}
+                ),
+                "crs": draft.payload.crs,
+            },
             catalog=catalog,
         )
     except Exception:

@@ -822,6 +822,7 @@ def register_fault_interpretation_run(
     parent_version_id: str | None = None,
     scientific_fingerprint: str | None = None,
     domain_task_id: str | None = None,
+    parameters: dict[str, Any] | None = None,
     catalog: CatalogPort | None = None,
 ) -> tuple[Any, DataVersionRef | None]:
     """Register fault interpretation polylines as DERIVED + lineage run."""
@@ -831,13 +832,13 @@ def register_fault_interpretation_run(
     inputs = list(source_version_ids or [])
     if parent_version_id and parent_version_id not in inputs:
         inputs.append(parent_version_id)
+    params = dict(parameters or {})
+    params["scientific_fingerprint"] = scientific_fingerprint
+    params["parent_version_id"] = parent_version_id
     run = cat.begin_run(
         operation="fault_interpretation",
         input_version_ids=inputs,
-        parameters={
-            "scientific_fingerprint": scientific_fingerprint,
-            "parent_version_id": parent_version_id,
-        },
+        parameters=params,
         generator_version="fault-interp-v1",
         domain_task_id=domain_task_id,
         input_snapshot_hash=scientific_fingerprint,
