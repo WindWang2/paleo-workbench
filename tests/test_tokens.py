@@ -211,6 +211,9 @@ def test_build_qss_density_and_theme_matrix(theme, density, padding, min_height)
     qss = tokens.build_qss(density=density, theme=theme)
     assert padding in qss
     assert min_height in qss
+    # 密度不能半套用：comfortable 专属的 30px min-height 不得出现在 compact
+    if density == "compact":
+        assert "min-height: 30px" not in qss
     for selector in ("QPushButton", "QMenu", "QTableView", "QHeaderView::section"):
         assert selector in qss
     # shell hooks the app-shell mission consumes must survive the redesign

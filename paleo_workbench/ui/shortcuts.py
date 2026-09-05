@@ -13,7 +13,13 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QLineEdit,
+    QPlainTextEdit,
+    QTextEdit,
+    QWidget,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +53,18 @@ def register_shortcut(
             pass
     shortcut = QShortcut(QKeySequence(spec.key), parent)
     shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
-    shortcut.activated.connect(callback)
-    if not enabled_in_text_input:
-        shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
+    if enabled_in_text_input:
+        shortcut.activated.connect(callback)
+    else:
+        # 文本输入聚焦时不触发（单数字页导航等）；包裹守卫而非改 context——
+        # WidgetShortcut 只在 parent 直接持有焦点时激活，不适用于 shell。
+        def _guarded(_checked=False, _cb=callback):
+            focus = QApplication.focusWidget()
+            if isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit)):
+                return
+            _cb()
+
+        shortcut.activated.connect(_guarded)
     _shortcuts[spec.id] = shortcut
     _registry[spec.id] = spec
     _warn_conflicts(spec)
@@ -66,8 +81,11 @@ def unregister(spec_id: str) -> None:
     _registry.pop(spec_id, None)
     shortcut = _shortcuts.pop(spec_id, None)
     if shortcut is not None:
-        shortcut.setParent(None)
-        shortcut.deleteLater()
+        try:
+            shortcut.setParent(None)
+            shortcut.deleteLater()
+        except RuntimeError:
+            pass  # C++ 对象已随宿主销毁
 
 
 def all_specs() -> list[ShortcutSpec]:

@@ -207,6 +207,20 @@ class SubCard(QFrame):
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._refresh_icon()
 
+    def event(self, event) -> bool:  # noqa: N802
+        # app 级样式表切换会向全部 widget 投递 StyleChange——借此重染图标，
+        # 不经 ui.style 注册表（bound-method 回调强持有 self，teardown 不安全）
+        from PySide6.QtCore import QEvent
+
+        if event.type() == QEvent.Type.StyleChange:
+            if not hasattr(self, "_icon_name"):  # 构造早期的 StyleChange
+                return super().event(event)
+            try:
+                self._refresh_icon()
+            except RuntimeError:
+                pass
+        return super().event(event)
+
     def _refresh_icon(self) -> None:
         p = _palette()
         icon = workstation_icon(self._icon_name, str(p["TEXT_SECONDARY"]))

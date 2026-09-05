@@ -47,8 +47,12 @@ class PwbToast(QFrame):
             layout.addWidget(title_label, 0)
         layout.addWidget(status, 1)
         if timeout_ms > 0:
-            QTimer.singleShot(timeout_ms, self.dismiss)
-        self.setFixedWidth(_WIDTH)
+            # 子 QTimer：toast 随宿主销毁时定时器一并销毁（避免向死对象投递）
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self.dismiss)
+            timer.start(timeout_ms)
+        self.setMaximumWidth(_WIDTH)
 
     def dismiss(self) -> None:
         host = self.parentWidget()
@@ -91,11 +95,13 @@ def _relayout(host: QWidget) -> None:
         return
     y = _TOP_INSET
     x = max(_SIDE_MARGIN, (host.width() - _WIDTH) // 2)
-    for toast in stack:
-        if toast.isVisible() or True:  # deleteLater 延迟期间也保持位置一致
-            toast.move(x, y)
-            toast.adjustSize()
-            y += toast.height() + _GAP
+    for toast in list(stack):
+        width = min(_WIDTH, max(240, host.width() - 2 * _SIDE_MARGIN))
+        toast.setFixedWidth(width)
+        x = max(_SIDE_MARGIN, (host.width() - width) // 2)
+        toast.move(x, y)
+        toast.adjustSize()
+        y += toast.height() + _GAP
 
 
 def notify(text: str, *, tone: str = "neutral", title: str = "", timeout_ms: int = 4000) -> None:

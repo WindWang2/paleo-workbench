@@ -23,9 +23,14 @@ class PwbDialog(QDialog):
 
     用法::
 
-        dlg = PwbDialog("导出图件", ok_text="导出")
-        dlg.content_layout.addWidget(...)
+        dlg = PwbDialog("导出图件")
+        dlg.add_content(...)
+        dlg.add_buttons(ok_text="导出")
         if dlg.exec() == QDialog.DialogCode.Accepted: ...
+
+    或在构造时直接给出按钮（给出任一按钮参数即自动装配按钮盒）::
+
+        dlg = PwbDialog("删除图层?", ok_text="删除", danger=True)
 
     ``buttons`` 传 QDialogButtonBox.StandardButton 组合；``danger=True``
     时确认按钮使用 PwbDangerButton 词汇（破坏性动作）。
@@ -36,9 +41,7 @@ class PwbDialog(QDialog):
         title: str,
         *,
         parent: QWidget | None = None,
-        buttons: QDialogButtonBox.StandardButton = (
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        ),
+        buttons: QDialogButtonBox.StandardButton | None = None,
         ok_text: str | None = None,
         cancel_text: str | None = None,
         danger: bool = False,
@@ -49,6 +52,15 @@ class PwbDialog(QDialog):
         self._outer = QVBoxLayout(self)
         self._outer.setContentsMargins(tokens.SPACE_2XL, tokens.SPACE_XL, tokens.SPACE_2XL, tokens.SPACE_L)
         self._outer.setSpacing(tokens.SPACE_L)
+        # 注意：按钮盒默认加在内容**之后**——先 add_content 再给出按钮参数，
+        # 或构造时给出参数（按钮盒已就位，内容 add 到其上方）。
+        if buttons is not None or ok_text is not None or cancel_text is not None or danger:
+            if buttons is None:
+                buttons = (
+                    QDialogButtonBox.StandardButton.Ok
+                    | QDialogButtonBox.StandardButton.Cancel
+                )
+            self.add_buttons(buttons, ok_text=ok_text, cancel_text=cancel_text, danger=danger)
 
     # -- content -------------------------------------------------------------
 

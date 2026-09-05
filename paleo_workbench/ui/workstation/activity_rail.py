@@ -4,15 +4,9 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import QButtonGroup, QFrame, QToolButton, QVBoxLayout
 
 from paleo_workbench.ui import style, tokens
-from paleo_workbench.ui.theme import theme_manager
 from paleo_workbench.ui.workstation.common import workstation_icon
 
-
-def _current_density() -> str:
-    try:
-        return theme_manager.density.value
-    except Exception:  # noqa: BLE001 — 无 app 环境回落
-        return "comfortable"
+_current_density = style.current_density
 
 
 def _rail_button_size() -> QSize:

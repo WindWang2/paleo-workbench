@@ -37,11 +37,13 @@ def test_theme_round_trip_refreshes_bound_widgets(qtbot, restore_theme_density):
 
     for theme in ("dark", "high_contrast", "light", "dark"):
         theme_manager.set_theme(theme)
-        assert f"color: {tokens.palette_for('dark')['TEXT_PRIMARY']}" in frame.styleSheet() or True
-    # 严格断言：最后落在 dark，颜色 = dark palette 的 TEXT_PRIMARY
+    # 往返结束落在 dark：样式表必须反映 dark palette（无 light 残留）
     assert theme_manager.current_theme.value == "dark"
     expected = tokens.palette_for("dark")["TEXT_PRIMARY"]
     assert expected in frame.styleSheet()
+    light_ink = tokens.palette_for("light")["TEXT_PRIMARY"]
+    assert light_ink != expected
+    assert light_ink not in frame.styleSheet()
     app.setStyleSheet(theme_manager.get_qss())
 
 

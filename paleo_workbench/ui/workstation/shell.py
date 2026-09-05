@@ -554,19 +554,22 @@ class WorkstationFrame(QWidget):
         timer.timeout.connect(self._restore_layout)
         timer.start()
 
+    #: 可切换面板的 (dock, 菜单/palette 标签)——两个消费方共用一张表
+    _PANEL_TOGGLE_TABLE = (
+        ("composite_input_dock", "显示输入与结果"),
+        ("composite_layer_dock", "显示图层管理"),
+        ("composite_linked_dock", "显示联动视图"),
+        ("agent_dock", "显示 Agent"),
+        ("task_dock", "显示任务中心"),
+        ("logs_dock", "显示日志"),
+        ("console_dock", "显示控制台"),
+    )
+
     def panel_commands(self) -> list[tuple[str, QAction]]:
         """可切换面板的 (标签, toggleViewAction) 列表（palette / 菜单共用）。"""
-        pairs = (
-            (self.composite_input_dock, "显示输入与结果"),
-            (self.composite_layer_dock, "显示图层管理"),
-            (self.composite_linked_dock, "显示联动视图"),
-            (self.agent_dock, "显示 Agent"),
-            (self.task_dock, "显示任务中心"),
-            (self.logs_dock, "显示日志"),
-            (self.console_dock, "显示控制台"),
-        )
         actions = []
-        for dock, label in pairs:
+        for attr, label in self._PANEL_TOGGLE_TABLE:
+            dock = getattr(self, attr)
             action = dock.toggleViewAction()
             action.setText(label)
             actions.append((label, action))
@@ -575,16 +578,8 @@ class WorkstationFrame(QWidget):
     def _wire_composite_panel_menu(self) -> None:
         """面板菜单：显隐、布局预设、全部浮动/停靠、恢复默认。"""
         toggle_actions = []
-        for dock, label in (
-            (self.composite_input_dock, "显示输入与结果"),
-            (self.composite_layer_dock, "显示图层管理"),
-            (self.composite_linked_dock, "显示联动视图"),
-            (self.agent_dock, "显示 Agent"),
-            (self.task_dock, "显示任务中心"),
-            (self.logs_dock, "显示日志"),
-            (self.console_dock, "显示控制台"),
-        ):
-            action = dock.toggleViewAction()
+        for attr, label in self._PANEL_TOGGLE_TABLE:
+            action = getattr(self, attr).toggleViewAction()
             action.setText(label)
             toggle_actions.append(action)
         preset_actions = [

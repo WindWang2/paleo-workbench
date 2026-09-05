@@ -270,11 +270,9 @@ def main() -> int:
             start_demo_tasks()  # 任务行是进程级调度器的：子进程里自己起
         window = PaleoWorkbenchWindow(project=make_project())
         if size_override is not None:
-            try:
-                w_str, h_str = size_override.split("x")
-                window.resize(int(w_str), int(h_str))
-            except ValueError:
-                window.resize(1600, 900)
+            # 畸形 --size 显式失败（静默回落会产出与文件名不符像素的截图）
+            w_str, h_str = size_override.lower().split("x")
+            window.resize(int(w_str), int(h_str))
         else:
             window.resize(1600, 900)
         window.show()

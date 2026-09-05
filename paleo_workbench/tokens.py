@@ -73,7 +73,8 @@ BG_CHART = "#ffffff"             # 图表画布底（pyqtgraph 等坐标区）
 
 # 数据画布 chrome 组（painter 级：比例尺/图例/选区/捕捉/编辑笔色）。
 # 这些颜色编码画布交互语义，不由 QSS 渲染——painter 每 paint 经 palette_for 取。
-CANVAS_INK = "#343a40"                     # 画布注记/轴文字主墨
+CANVAS_INK = "#343a40"                     # 画布注记/轴文字主墨（注意：unified_map_canvas
+                                          # 的 chrome 墨色是相对地图底色的另一语义，勿合并）
 CANVAS_CHROME_BG = "rgba(248, 249, 250, 0.92)"   # 画布浮层（图例/比例尺）底
 CANVAS_CHROME_BORDER = "#dfe6ee"           # 画布浮层描边
 CANVAS_SELECTION = "#ffe066"               # 画布选区高亮（amber 系）
@@ -553,7 +554,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         padding: {padding_y}px {padding_x}px;
         selection-background-color: {t.PRIMARY};
         selection-color: {t.ON_PRIMARY};
-        min-height: {t.CONTROL_HEIGHT}px;
+        min-height: {btn_height}px;
     }}
     QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{
         border: 1px solid {t.FOCUS_RING};
@@ -681,7 +682,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         border-bottom: 1px solid {t.BORDER};
         border-right: 1px solid {t.BORDER};
         font-weight: 600;
-        min-height: {t.CONTROL_HEIGHT}px;
+        min-height: {btn_height}px;
     }}
     QTableCornerButton::section {{
         background-color: {t.BG_SEARCH};
@@ -849,7 +850,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         border: 1px solid {t.BORDER};
         border-radius: {t.RADIUS_BUTTON}px;
         padding: 4px 12px;
-        min-height: {t.CONTROL_HEIGHT}px;
+        min-height: {btn_height}px;
         background: {t.BG_SIDEBAR};
     }}
     QPushButton#DataPreviewPdfPrevious:focus,
@@ -861,7 +862,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         border: 1px solid {t.BORDER};
         border-radius: {t.RADIUS_BUTTON}px;
         padding: 4px 12px;
-        min-height: {t.CONTROL_HEIGHT}px;
+        min-height: {btn_height}px;
     }}
     QPushButton#SecondaryButton:hover {{ background: {t.BG_SEARCH}; }}
     QPushButton#SecondaryButton:pressed {{ background: {t.BORDER_LIGHT}; }}
@@ -877,7 +878,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     QLineEdit#SearchBox {{
         background: {t.BG_SEARCH}; border: 1px solid {t.BORDER};
         border-radius: {t.RADIUS_BUTTON}px; padding: 4px 8px; color: {t.TEXT_PRIMARY};
-        min-height: {t.CONTROL_HEIGHT}px;
+        min-height: {btn_height}px;
     }}
     QLineEdit#SearchBox:focus {{ border: 1px solid {t.FOCUS_RING}; }}
     QFrame#PanelCard {{
@@ -1247,7 +1248,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         font-weight: 700;
     }}
     QLabel#WorkstationInspectorHeader {{
-        min-height: 30px;
+        min-height: {btn_height + 4}px;
         padding: 0px 10px;
         border-bottom: 1px solid {t.BORDER};
     }}
@@ -1560,7 +1561,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         background: {t.BG_SIDEBAR};
         border: 1px solid {t.BORDER};
         border-radius: 0px;
-        min-height: {t.CONTROL_HEIGHT}px;
+        min-height: {btn_height}px;
     }}
     QFrame#PwbSplitButton QToolButton:hover {{
         background: {t.BG_SEARCH};
@@ -1656,10 +1657,6 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         font-weight: 600;
         background: transparent;
     }}
-    QLabel#PwbToastText {{
-        color: {t.TEXT_PRIMARY};
-        background: transparent;
-    }}
     QFrame#PwbCommandBar {{
         background: {t.BG_SIDEBAR};
         border: none;
@@ -1675,11 +1672,6 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     QFrame#PwbInspectorSection {{
         background: transparent;
         border: none;
-    }}
-    QLabel#PwbPropertyLabel {{
-        color: {t.TEXT_SECONDARY};
-        font-size: {t.FONT_SIZE_STATUS};
-        background: transparent;
     }}
     '''
 

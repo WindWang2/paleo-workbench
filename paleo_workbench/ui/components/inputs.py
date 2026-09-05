@@ -4,7 +4,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QWidget
 
 from paleo_workbench import tokens
-from paleo_workbench.ui.theme import theme_manager
+from paleo_workbench.ui import style
 from paleo_workbench.ui.workstation.common import workstation_icon
 
 
@@ -44,12 +44,8 @@ class PwbSearchBox(QLineEdit):
             self._clear = None
 
 
-def current_density() -> str:
-    """当前密度（组件 metrics 订阅用；未知态回落 comfortable）。"""
-    try:
-        return theme_manager.density.value
-    except Exception:  # noqa: BLE001 — 无 app 环境回落 comfortable
-        return "comfortable"
+#: 当前密度（唯一实现在 ui.style；组件层按契约从 style 取）
+current_density = style.current_density
 
 
 def make_form_row(

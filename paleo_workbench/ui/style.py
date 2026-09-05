@@ -82,6 +82,14 @@ def _apply(widget: QObject) -> None:
     render = _registry.get(widget)
     if render is None:
         return
+    # 探活：C++ 对象已随父销毁的 widget（Python wrapper 仍被 registry 里的
+    # bound-method 值强引用着）在此出队，绝不再进入 render()/setStyleSheet
+    # —— 否则 teardown 阶段 segfault。
+    try:
+        widget.style()
+    except RuntimeError:
+        _registry.pop(widget, None)
+        return
     try:
         sheet = render()
     except RuntimeError:
@@ -91,7 +99,10 @@ def _apply(widget: QObject) -> None:
         return
     set_sheet = getattr(widget, "setStyleSheet", None)
     if set_sheet is not None:
-        set_sheet(sheet)
+        try:
+            set_sheet(sheet)
+        except RuntimeError:
+            _registry.pop(widget, None)
 
 
 def bind_metrics(widget: QObject, apply_fn) -> None:
@@ -135,7 +146,7 @@ def repolish_all() -> None:
     for widget in list(_registry.keys()):
         try:
             _apply(widget)
-        except Exception:
+        except Exception:  # noqa: BLE001 — 单点失败不拖垮广播链
             logging.getLogger(__name__).exception(
                 "inline style 重渲染失败（widget=%r）", widget
             )

@@ -459,6 +459,7 @@ class AppShell(QWidget):
                     label=f"切换到{navigation.HUB_NAMES[i]}页",
                 ),
                 lambda idx=i: self._shortcut_switch_page(idx),
+                enabled_in_text_input=False,
             )
         for p in range(3):
             register_shortcut(
@@ -469,6 +470,7 @@ class AppShell(QWidget):
                     label=f"切换子模块 {p + 1}",
                 ),
                 lambda sub_idx=p: self._shortcut_switch_subpage(sub_idx),
+                enabled_in_text_input=False,
             )
         # Command palette (works from text fields too — standard toggle).
         register_shortcut(
@@ -556,7 +558,11 @@ class AppShell(QWidget):
                 id="core:palette.toggle",
                 label="命令面板",
                 hint="搜索命令、页面与面板动作",
-                shortcut_hint="Ctrl+K",
+                shortcut_hint=(
+                    shortcuts.get("core:palette").key
+                    if shortcuts.get("core:palette")
+                    else ""
+                ),
                 group="视图",
                 callback=self._toggle_command_palette,
             )
@@ -605,8 +611,10 @@ class AppShell(QWidget):
 
     def _on_theme_changed(self, theme: str, density: str = "") -> None:
         qss = self.theme_manager.get_qss()
+        # shell 级样式表保留：offscreen/无 app 样式表路径下它是 shell 子树的
+        # 唯一主题来源（test_theme_and_sidebar 钉住此契约）；app 级再贴一次
+        # 覆盖 dock 与顶层 dialog。双重 repolish 是一次性用户动作成本。
         self.setStyleSheet(qss)
-        # top-level windows outside this shell (dialogs) follow the theme too
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(qss)
