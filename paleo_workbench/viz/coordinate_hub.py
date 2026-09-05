@@ -473,13 +473,14 @@ class CoordinateTransformHub:
         """
         if velocity is not None and velocity <= 0.0:
             raise ValueError(f"Velocity must be positive, got {velocity}")
-        self._seismic_origin = (float(origin[0]), float(origin[1]))
-        self._seismic_il_step = (float(il_step[0]), float(il_step[1]))
-        self._seismic_xl_step = (float(xl_step[0]), float(xl_step[1]))
-        self._il_min = int(il_min)
-        self._xl_min = int(xl_min)
-        self._velocity = float(velocity) if velocity is not None else None
-        self._crs = str(crs) if crs else None
+        with self._lock:
+            self._seismic_origin = (float(origin[0]), float(origin[1]))
+            self._seismic_il_step = (float(il_step[0]), float(il_step[1]))
+            self._seismic_xl_step = (float(xl_step[0]), float(xl_step[1]))
+            self._il_min = int(il_min)
+            self._xl_min = int(xl_min)
+            self._velocity = float(velocity) if velocity is not None else None
+            self._crs = str(crs) if crs else None
 
     @property
     def seismic_crs(self) -> str | None:
@@ -498,11 +499,13 @@ class CoordinateTransformHub:
         """
         if velocity <= 0.0:
             raise ValueError(f"Velocity must be positive, got {velocity}")
-        self._velocity = float(velocity)
+        with self._lock:
+            self._velocity = float(velocity)
 
     def clear_velocity_assumption(self) -> None:
         """Drop the velocity assumption (z↔TWT tuple conversions fail closed)."""
-        self._velocity = None
+        with self._lock:
+            self._velocity = None
 
     def _require_velocity(self) -> float:
         if self._velocity is None:

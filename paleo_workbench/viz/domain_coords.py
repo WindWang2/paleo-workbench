@@ -331,6 +331,11 @@ class DomainCoordinationService:
     def well_md_to_tvdss(
         self, well_id: str, md: DepthCoordinate
     ) -> ConversionOutcome[DepthCoordinate]:
+        if md.domain is not DepthDomain.MD:
+            return ConversionOutcome.unavailable(
+                ConversionFailure.INVALID_INPUT,
+                f"expected MD coordinate, got {md.domain.value}",
+            )
         try:
             tvdss = self._hub.well_depth_to_tvdss(well_id, md.value_m)
         except KeyError:

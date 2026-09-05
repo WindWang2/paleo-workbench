@@ -208,22 +208,38 @@ def write_td_table(
     pairs: Sequence[tuple[float, float]],
     tvdss_m: Sequence[float],
     *,
+    tvd_m: Sequence[float] | None = None,
     header_lines: Sequence[str] = (),
 ) -> Path:
     """Write the calibration as an SMI TD table.
 
     Column order matches ``parse_td_table`` (TIME TVDSS TVD MD, ≥4 columns,
-    ``# Well : NAME`` comment). ``tvdss_m`` must be computed honestly by the
-    caller (hub trajectory/KB) — this writer never invents a datum.
+    ``# Well : NAME`` comment); TIME is milliseconds — the same unit the
+    parser reads back. ``tvdss_m`` must be computed honestly by the caller
+    (hub trajectory/KB); ``tvd_m`` is optional and, when omitted, the TVD
+    column carries the MD values with an explicit header note (no deviation
+    survey ⇒ TVD==MD), never an invented trajectory.
     """
     tvdss = np.asarray(tvdss_m, dtype=np.float64)
     if tvdss.size != len(pairs):
         raise CalibrationBuildError("tvdss array must match the pairs length")
+    if tvd_m is None:
+        tvd = np.asarray([md for md, _ in pairs], dtype=np.float64)
+        tvd_note = "# TVD column carries MD (no deviation survey applied)"
+    else:
+        tvd = np.asarray(tvd_m, dtype=np.float64)
+        tvd_note = ""
+        if tvd.size != len(pairs):
+            raise CalibrationBuildError("tvd array must match the pairs length")
     lines = [f"# Well : {well_name}"]
+    if tvd_note:
+        lines.append(tvd_note)
     lines.extend(f"# {line}" for line in header_lines)
-    lines.append("# TIME(s) TVDSS(m) TVD(m) MD(m)")
-    for (md, twt), z in zip(pairs, tvdss):
-        lines.append(f"{twt:12.4f} {z:12.4f} {md:12.4f} {md:12.4f}")
+    lines.append("# TIME(ms) TVDSS(m) TVD(m) MD(m)")
+    # 6 decimals match the scientific fingerprint's pair precision, so a
+    # fingerprint recomputed from the artifact equals the stored one.
+    for (md, twt), z, d in zip(pairs, tvdss, tvd):
+        lines.append(f"{twt:16.6f} {z:14.6f} {d:14.6f} {md:14.6f}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
@@ -395,24 +411,16 @@ def save_reviewed_calibration(
 
 
 def _upsert_time_depth_link(project, well_entity_id: str, asset_id: str) -> None:
-    from paleo_workbench.project.domain import EntityAssetLink
+    # Single write path for entity↔asset links (review R2-M1): the domain
+    # upsert is idempotent and demotes sibling primaries of the same role.
+    from paleo_workbench.project.domain import upsert_entity_asset_link
 
-    links = list(getattr(project, "entity_asset_links", None) or [])
-    for link in links:
-        if (
-            str(getattr(link, "role", "")) == "time_depth"
-            and str(getattr(link, "entity_id", "")) == str(well_entity_id)
-            and getattr(link, "is_primary", False)
-        ):
-            link.is_primary = False
-    links.append(
-        EntityAssetLink(
-            entity_type="well",
-            entity_id=str(well_entity_id),
-            asset_id=str(asset_id),
-            role="time_depth",
-            is_primary=True,
-            note="well-seismic tie calibration",
-        )
+    upsert_entity_asset_link(
+        project,
+        entity_type="well",
+        entity_id=str(well_entity_id),
+        asset_id=str(asset_id),
+        role="time_depth",
+        is_primary=True,
+        note="well-seismic tie calibration",
     )
-    project.entity_asset_links = links

@@ -135,3 +135,31 @@ class TestDerivedLoop:
 
 def run_outputs_path(service: DataCatalogService, version_id: str) -> str:
     return str(service.resolve_path(service.get_version(version_id)))
+
+
+def test_derived_las_preserves_source_null_sentinel(catalog_with_las):
+    """R1-M1: a source declaring NULL=-9999.0 must not be rewritten to
+    -999.25 — redefining the missing-value contract would silently change
+    which samples every derived version treats as null."""
+    from pathlib import Path as _P
+
+    service, version, source = catalog_with_las
+    text = source.read_text(encoding="utf-8")
+    assert "NULL. -999.25" in text
+    text = text.replace("NULL. -999.25 : Null value", "NULL. -9999.0 : Null value")
+    alt = source.with_name("raw_null9999.las")
+    alt.write_text(text, encoding="utf-8")
+    version = service.import_raw(alt, name="W-1 GR alt", type="well_log")
+
+    result = apply_curve_operation(
+        service,
+        version.id,
+        operation="baseline_shift",
+        curve="GR",
+        parameters={"delta": 1.0},
+    )
+
+    import lasio as _lasio
+
+    derived = _lasio.read(_P(str(service.resolve_path(service.get_version(result.output_version_id)))))
+    assert str(derived.well["NULL"].value) == "-9999.0"

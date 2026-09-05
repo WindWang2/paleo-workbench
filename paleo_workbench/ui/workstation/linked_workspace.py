@@ -140,12 +140,14 @@ class LinkedInterpretationWorkspace(QWidget):
         """Recompute the badge row from the current selection + hub state."""
         controller = self._coordination
         well = ""
+        depth: float | None = None
         cal_text = "TWT 换算：—"
         if controller is not None:
             snapshot = controller.selection_context.snapshot()
             cursor = getattr(snapshot, "depth_cursor", None)
             if cursor is not None:
                 well = str(cursor[0])
+                depth = float(cursor[1])
                 self.domain_badge.setText("MD · m")
             else:
                 well = str(getattr(snapshot, "active_well_id", "") or "")
@@ -155,14 +157,33 @@ class LinkedInterpretationWorkspace(QWidget):
                     cal_text = f"TWT 换算：不可用（{well} 无时深校准）"
                 else:
                     cal_text = f"TWT 换算：{cal.provenance}"
+                    if depth is not None:
+                        # Coverage of the CURRENT depth, not mere existence:
+                        # an out-of-range cursor must show why the link broke
+                        # (review R3-M2) instead of a healthy-looking label.
+                        twt = cal.md_to_twt(depth)
+                        if twt is None:
+                            cal_text = (
+                                f"TWT 换算：超出校准范围 "
+                                f"({cal.pairs[0][0]:.0f}–{cal.pairs[-1][0]:.0f} m)"
+                            )
+                    # Verified honesty (review R3-M3): an unreviewed
+                    # calibration is visibly marked, never silent.
+                    if not bool(cal.metadata.get("verified", False)):
+                        cal_text += "（未复核）"
         self.conversion_status_label.setText(cal_text)
         linked = self.is_linked()
         parts = ["开启"] if linked else ["关闭"]
         if not linked:
             parts.append("不跟随其它视图")
         if well:
-            parts.append(f"当前井 {well}")
+            parts.append(f"当前井 {self._elide(well)}")
         self.sync_status_label.setText("同步：" + " · ".join(parts))
+
+    @staticmethod
+    def _elide(text: str, limit: int = 14) -> str:
+        text = str(text)
+        return text if len(text) <= limit else text[: limit - 1] + "…"
 
     def _on_selection_for_status(self, _ctx) -> None:
         # Read-only subscription: status only, never a re-publish.
@@ -401,12 +422,42 @@ class LinkedInterpretationWorkspace(QWidget):
         well_panel = self.well_panel
         if resource is not None and well_panel is not None:
             well_panel.show_resource(resource, self._project)
-        self._active_well_name = name
-        self.well_pane.set_title(f"测井轨道 · {name}")
+            self._active_well_name = name
+            self.well_pane.set_title(f"测井轨道 · {name}")
+        else:
+            # R3-M1: a well without a log resource must NOT keep the previous
+            # well's curves under the new name — that misattributed every
+            # link cursor. Clear the surface and refuse the active-well slot.
+            if well_panel is not None:
+                well_panel.update_state(None)
+            self._active_well_name = ""
+            self.well_pane.set_title(f"测井轨道 · {name}（无测井数据）")
+        self._apply_well_overlay(name)
         self.object_selected.emit({"kind": "well", "object": well, "well_name": name})
         self.well_focused.emit(name)
         self.status_changed.emit(f"已打开井 {name}")
         self.refresh_domain_status()
+
+    def _apply_well_overlay(self, well_name: str) -> None:
+        """Project the active well onto the seismic sections (L5, R1-M2).
+
+        Fail-closed: the panel reports its own unavailable reason (no hub
+        registration / no calibration) and it surfaces in the status line
+        instead of being swallowed.
+        """
+        panel = self.seismic_panel
+        setter = getattr(panel, "set_well_overlay", None)
+        if not callable(setter):
+            return
+        try:
+            active = setter(well_name or None)
+        except Exception:
+            self.status_changed.emit("井迹投影不可用（剖面板异常）")
+            return
+        if not active:
+            reason = getattr(panel, "well_overlay_unavailable_reason", lambda: None)()
+            if reason:
+                self.status_changed.emit(f"井迹投影不可用：{reason}")
 
     def show_all_wells(self) -> None:
         self.show_all_wells_requested.emit()
@@ -485,5 +536,5 @@ class LinkedInterpretationWorkspace(QWidget):
         if self.seismic_panel is not None:
             self.seismic_panel.shutdown()
         if self.well_panel is not None:
-            self.well_panel.shutdown()
+            self.well_panel.shutdown(_wait_ms)
         return True

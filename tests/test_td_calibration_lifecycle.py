@@ -327,3 +327,52 @@ class TestSaveReviewedCalibration:
         bad.write_text("# Well : W-TIE\nonly one column\n", encoding="utf-8")
         with pytest.raises(CalibrationBuildError, match="not parseable"):
             hub_calibration_from_td_table(bad, "W-TIE")
+
+
+class TestReviewFixes:
+    def test_artifact_precision_matches_fingerprint(self, catalog_project):
+        """R1-m2: a fingerprint recomputed from the written artifact must
+        equal the stored one (6-decimal writer, 6-decimal fingerprint)."""
+        from paleo_workbench.workflow.td_calibration_lifecycle import (
+            build_calibration_pairs,
+            calibration_fingerprint as _fp,
+            hub_calibration_from_td_table,
+            save_reviewed_calibration,
+        )
+        from paleo_workbench.viz.joint_well_parsers import parse_td_table
+
+        service, doc, well = catalog_project
+        depths, twt = _tie_arrays()
+        review = TieReviewData(
+            well_name=well.name,
+            well_entity_id=well.id,
+            depths_m=depths,
+            twt_ms=twt,
+        )
+        result = save_reviewed_calibration(
+            service, doc, review, tvdss_m=[-md for md in depths]
+        )
+        table = parse_td_table(
+            Path(result.artifact_path), well_name=review.well_name
+        )
+        recomputed = _fp(build_calibration_pairs(table.md_m, table.time_ms))
+        assert recomputed == result.fingerprint
+
+    def test_upsert_link_is_idempotent(self, catalog_project):
+        """R2-M1: saving the same asset twice keeps ONE primary link."""
+        service, doc, well = catalog_project
+        depths, twt = _tie_arrays()
+        review = TieReviewData(
+            well_name=well.name, well_entity_id=well.id, depths_m=depths, twt_ms=twt
+        )
+        result = save_reviewed_calibration(
+            service, doc, review, tvdss_m=[-md for md in depths]
+        )
+        from paleo_workbench.workflow.td_calibration_lifecycle import (
+            _upsert_time_depth_link,
+        )
+
+        _upsert_time_depth_link(doc, well.id, result.asset_id)
+        _upsert_time_depth_link(doc, well.id, result.asset_id)
+        links = [l for l in doc.entity_asset_links if l.role == "time_depth"]
+        assert len(links) == 1

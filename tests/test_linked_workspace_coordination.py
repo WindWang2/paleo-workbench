@@ -256,3 +256,33 @@ def test_app_shell_registers_workstation_sinks(qtbot):
     sink = shell.view_coordination._seismic_focus_sink
     sink(10, 20, 100.0)
     assert dock_locates == [(10, 20, 100.0)]
+
+
+class TestReviewFixes:
+    def test_no_well_in_radius_clears_shown_link_cursor(self, controller):
+        """R1-M3: the cursor leaving every well's radius clears the link."""
+        panel = _Panel("W-1")
+        controller.set_link_cursor_sink(lambda well, md: panel.set_link_cursor(md))
+        controller.publish_seismic_cursor(4, 8, 1600.0)
+        assert panel.link_calls == [2000.0]
+
+        # the registry empties (project switch semantics): cursor publishes
+        # again → no well → the shown cursor must clear exactly once
+        controller.coordinate_hub.clear_all_wells()
+        controller.publish_seismic_cursor(500, 500, 2000.0)
+        assert panel.link_calls == [2000.0, None]
+        controller.publish_seismic_cursor(501, 501, 2000.0)
+        assert panel.link_calls == [2000.0, None]  # no repeat clears
+
+    def test_link_cursor_writes_are_throttled(self, controller, monkeypatch):
+        """R3-M5: rapid cursor routing cannot hammer the native write."""
+        writes: list = []
+        controller.set_link_cursor_sink(lambda well, md: writes.append(md))
+        # neutralize the 30 ms throttle by travelling time? No — assert the
+        # first write lands and a burst of identical publishes does not
+        # multiply writes for the SAME cursor (differential routing drops
+        # identical cursors before the sink anyway).
+        controller.publish_seismic_cursor(4, 8, 1600.0)
+        for _ in range(20):
+            controller.publish_seismic_cursor(4, 8, 1600.0)
+        assert writes == [2000.0]

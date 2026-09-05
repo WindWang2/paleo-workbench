@@ -645,16 +645,21 @@ class ViewCoordinationController(QObject):
         Case B: a seismic cursor resolves to a CALIBRATED MD on the nearest
         well; when that well is the one the dock shows, the sink drives the
         engine crosshair. ``md=None`` clears a previously shown cursor — the
-        sink must tolerate being called for a well it is not showing.
+        sink must tolerate being called for a well it is not showing. Sink
+        invocations are throttled to ≥30 ms apart (rapid inline drags bypass
+        the producer-side il-jump gate; the native crosshair write must not
+        amplify every mouse event).
         """
         self._link_cursor_sink = sink
 
     def attach_well_dock_panel(self, panel) -> None:
         """Wire the docked well panel as a depth-cursor producer (case C).
 
-        The dock panel publishes under the well IT is showing — the bus slot
-        carries the well name, so a dock well and the well-log page well can
-        coexist without one masquerading as the other.
+        NOTE (review R2-M3): the production case-C producer is
+        ``LinkedInterpretationWorkspace._on_depth_cursor`` (link-gated,
+        panel-side throttled). This controller-side hook exists for hosts
+        that embed a WellLogCanvasPanel WITHOUT the workspace; do not wire
+        both or the same signal publishes twice.
         """
         depth_signal = getattr(panel, "depth_cursor_moved", None)
         if depth_signal is None:
@@ -683,6 +688,29 @@ class ViewCoordinationController(QObject):
         if not well_name:
             return
         self.publish_depth_cursor(well_name, md, source=self.SOURCE_WELL_LOG)
+
+    def _throttled_link_cursor_write(self, well_id: str, md: float) -> None:
+        """Rate-limited native crosshair write (see _route_seismic_cursor)."""
+        import time as _time
+
+        now_ms = _time.monotonic() * 1000.0
+        last = getattr(self, "_link_cursor_last_write_ms", None)
+        if last is not None and now_ms - last < 30.0:
+            return
+        self._link_cursor_last_write_ms = now_ms
+        self._link_cursor_sink(well_id, md)  # type: ignore[misc]
+        self._link_cursor_set = True
+
+    def _clear_link_cursor_once(self, well_id: str | None = None) -> None:
+        """Clear a shown link cursor exactly once; no-op afterwards."""
+        if not self._link_cursor_set or self._link_cursor_sink is None:
+            return
+        try:
+            self._link_cursor_sink(well_id, None)
+        except Exception:
+            logger.debug("link cursor clear failed", exc_info=True)
+        finally:
+            self._link_cursor_set = False
 
     # ------------------------------------------------------------------
     # Routing
@@ -802,6 +830,7 @@ class ViewCoordinationController(QObject):
                 cursor,
                 exc_info=True,
             )
+            self._clear_link_cursor_once()
             return
         if not well_id:
             logger.debug(
@@ -809,6 +838,10 @@ class ViewCoordinationController(QObject):
                 "(registry empty or pick off-radius); no well-log routing",
                 cursor,
             )
+            # No well in radius means no authority can produce an MD here:
+            # a previously shown link cursor must not survive as a stale
+            # depth hint on the docked well view (review R1-M3).
+            self._clear_link_cursor_once()
             return
         # Calibrated first: TWT → MD through the well's own calibration.
         calibrated_md: float | None = None
@@ -865,15 +898,16 @@ class ViewCoordinationController(QObject):
                 setter(well_id)
         # Case B well-view half: the calibrated MD drives the native link
         # cursor when the dock is showing this well; a previously shown
-        # cursor is cleared once no authority produces an MD anymore.
+        # cursor is cleared once no authority produces an MD anymore. Sink
+        # writes are throttled (≥30 ms): rapid inline drags bypass the
+        # producer-side il-jump gate and each write is a native crosshair
+        # document mutation (review R3-M5).
         if self._link_cursor_sink is not None:
             try:
                 if calibrated_md is not None:
-                    self._link_cursor_sink(well_id, calibrated_md)
-                    self._link_cursor_set = True
-                elif self._link_cursor_set:
-                    self._link_cursor_sink(well_id, None)
-                    self._link_cursor_set = False
+                    self._throttled_link_cursor_write(well_id, calibrated_md)
+                else:
+                    self._clear_link_cursor_once(well_id)
             except Exception:
                 logger.debug("link cursor routing failed", exc_info=True)
         # Scenario B: the same cursor focuses the 3D/section views. The

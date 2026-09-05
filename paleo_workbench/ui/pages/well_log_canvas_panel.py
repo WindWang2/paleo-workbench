@@ -94,6 +94,10 @@ class WellLogCanvasPanel(QFrame):
         # L2 link-cursor echo guard: the reference depth written
         # externally (publications matching it are echoes of our own write).
         self._link_cursor_echo: float | None = None
+        # Trailing-edge depth flush (review R3-m2): last depth held by the
+        # gate + the single-shot timer that publishes it once the gate opens.
+        self._pending_engine_depth: float | None = None
+        self._depth_flush_timer = None
 
         # Default backend from env; host may still switch explicitly.
         self._backend: BackendName = (
@@ -260,10 +264,14 @@ class WellLogCanvasPanel(QFrame):
     def engine_load_report(self) -> dict[str, Any] | None:
         return self._engine_load
 
-    def shutdown(self) -> None:
-        """Release the retained native document before a project switch/close."""
+    def shutdown(self, wait_ms: int = 3_000) -> None:
+        """Release the retained native document before a project switch/close.
+
+        ``wait_ms`` is the worker-join budget — callers on the app-close path
+        pass the shell's tighter budget (#1158) instead of the 3 s default.
+        """
         self._pending_state = None
-        self._well_log_job.shutdown(3_000)
+        self._well_log_job.shutdown(int(wait_ms))
         self._release_engine_document()
         self.well_log_data = None
         self._bound_las = False
@@ -281,25 +289,53 @@ class WellLogCanvasPanel(QFrame):
 
     # --- depth cursor producer (scenario C) ------------------------------
 
+    def _publish_gated_depth(self, depth: float | None) -> None:
+        """Shared depth-cursor gate with a trailing-edge flush.
+
+        Events inside the 120 ms gate are held, not dropped: when the drag
+        stops, the LAST held depth still publishes (review R3-m2), so linked
+        views settle on the final position instead of the last gated one.
+        """
+        if depth is None:
+            return
+        now_ms = time.monotonic() * 1000.0
+        if (
+            self._depth_last_pub_ms is None
+            or now_ms - self._depth_last_pub_ms >= self.DEPTH_GATE_MS
+        ):
+            self._depth_last_pub_ms = now_ms
+            self._pending_engine_depth = None
+            self.depth_cursor_moved.emit(float(depth))
+            return
+        # gated: remember the newest depth and flush it once the gate opens
+        self._pending_engine_depth = float(depth)
+        if self._depth_flush_timer is None:
+            from PySide6.QtCore import QTimer
+
+            self._depth_flush_timer = QTimer(self)
+            self._depth_flush_timer.setSingleShot(True)
+            self._depth_flush_timer.timeout.connect(self._flush_pending_depth)
+        if not self._depth_flush_timer.isActive():
+            remaining = self.DEPTH_GATE_MS - (now_ms - (self._depth_last_pub_ms or 0.0))
+            self._depth_flush_timer.start(max(int(remaining), 1))
+
+    def _flush_pending_depth(self) -> None:
+        depth = self._pending_engine_depth
+        self._pending_engine_depth = None
+        if depth is None:
+            return
+        self._depth_last_pub_ms = time.monotonic() * 1000.0
+        self.depth_cursor_moved.emit(float(depth))
+
     def _on_canvas_mouse_moved(self, y_px: float) -> None:
-        """Engine crosshair y (px) → MD (m), published through the gate.
+        """Legacy crosshair y (px) → MD (m), published through the gate.
 
         ``y < 0`` is the canvas's own "cursor left the plot" marker — no
         depth exists there, so nothing is published.
         """
         if y_px is None or float(y_px) < 0.0:
             return
-        now_ms = time.monotonic() * 1000.0
-        if (
-            self._depth_last_pub_ms is not None
-            and now_ms - self._depth_last_pub_ms < self.DEPTH_GATE_MS
-        ):
-            return
-        depth = self.depth_at_pixel(float(y_px))
-        if depth is None:
-            return
-        self._depth_last_pub_ms = now_ms
-        self.depth_cursor_moved.emit(float(depth))
+        self._publish_gated_depth(self.depth_at_pixel(float(y_px)))
 
     def depth_at_pixel(self, y_px: float) -> float | None:
         """Map a canvas content y (px) to MD using the visible depth range.
@@ -511,11 +547,26 @@ class WellLogCanvasPanel(QFrame):
         ``crosshair_state()`` returns REFERENCE depth (the axis coordinate
         the host submitted, i.e. MD in metres) — display transforms stay
         inside the engine. Echoes of our own external ``set_link_cursor``
-        writes are suppressed (value match or the short echo window).
+        writes are suppressed (value match). The cheap time gate is checked
+        BEFORE the cross-binding poll; only gate-passing signals pay for the
+        native call (review R3-m1). Held depths flush on the trailing edge
+        so the drag's final position always publishes.
         """
         view = self._engine_view
         if view is None or self.backend() != "engine":
             return
+        # An armed echo guard MUST still poll (swallowing our own echo is
+        # its purpose); otherwise gate first, poll only when publishable.
+        echo_armed = self._link_cursor_echo is not None
+        if not echo_armed:
+            now_ms = time.monotonic() * 1000.0
+            if (
+                self._depth_last_pub_ms is not None
+                and now_ms - self._depth_last_pub_ms < self.DEPTH_GATE_MS
+                and self._depth_flush_timer is not None
+                and self._depth_flush_timer.isActive()
+            ):
+                return
         poll = getattr(view, "crosshair_state", None)
         if poll is None:
             return
@@ -538,14 +589,7 @@ class WellLogCanvasPanel(QFrame):
             if abs(depth - echo_depth) <= max(1e-6, 1e-9 * abs(echo_depth)):
                 return
             self._link_cursor_echo = None
-        now_ms = time.monotonic() * 1000.0
-        if (
-            self._depth_last_pub_ms is not None
-            and now_ms - self._depth_last_pub_ms < self.DEPTH_GATE_MS
-        ):
-            return
-        self._depth_last_pub_ms = now_ms
-        self.depth_cursor_moved.emit(depth)
+        self._publish_gated_depth(depth)
 
     def _on_engine_curve_clicked(self) -> None:
         view = self._engine_view
@@ -652,6 +696,9 @@ class WellLogCanvasPanel(QFrame):
         self._engine_plan = None
         self._link_cursor_echo = None
         self._depth_last_pub_ms = None
+        self._pending_engine_depth = None
+        if self._depth_flush_timer is not None:
+            self._depth_flush_timer.stop()
 
     def _show_empty(self, message: str) -> None:
         self.well_log_data = None

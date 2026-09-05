@@ -64,6 +64,8 @@ class _RecordingPanel(QObject):
         self.backend_calls: list[str] = []
         self.shown: list[object] = []
         self.shutdown_calls = 0
+        self.cleared: list = []
+        self.shutdown_wait_ms: list[int] = []
 
     def backend(self) -> str:
         return self.backend_name
@@ -79,8 +81,12 @@ class _RecordingPanel(QObject):
     def show_resource(self, resource, project, prediction_task=None) -> None:
         self.shown.append(resource)
 
-    def shutdown(self) -> None:
+    def update_state(self, task, project=None) -> None:
+        self.cleared.append(task)
+
+    def shutdown(self, wait_ms: int = 3000) -> None:
         self.shutdown_calls += 1
+        self.shutdown_wait_ms.append(wait_ms)
 
 
 def _dock_with_recording_panel(qtbot, tmp_path: Path) -> LinkedInterpretationWorkspace:
@@ -313,3 +319,26 @@ def test_open_well_selection_linkage_signals_unchanged(qtbot, tmp_path, monkeypa
     lw.show_all_wells()
     assert statuses[-1] == "已显示全部工区井位"
     lw.shutdown_workers()
+
+
+def test_open_well_without_log_resource_never_misattributes(qtbot, tmp_path):
+    """R3-M1: a well without a log resource clears the panel and refuses
+    the active-well slot — the previous well's curves must never receive
+    the new well's link cursor."""
+    project = _project(tmp_path)
+    project.wells.append(
+        WellEntity(name="B99", surface_x=3.0, surface_y=4.0, project_x=3.0, project_y=4.0)
+    )  # B99 has NO well_log resource
+    lw = LinkedInterpretationWorkspace(project)
+    qtbot.addWidget(lw)
+    lw.well_panel = _RecordingPanel()
+    lw._views_created = True
+
+    lw.open_well("A12")
+    assert lw.well_panel.shown  # A12 has a resource
+    assert lw._active_well_name == "A12"
+
+    lw.open_well("B99")
+    assert lw.well_panel.cleared == [None]  # panel cleared, not left showing A12
+    assert lw._active_well_name == ""  # link cursor matching refuses
+    assert lw.apply_link_cursor("B99", 100.0) is False

@@ -318,6 +318,12 @@ def _ensure_writable_well_header(las) -> None:
     ):
         if mnemonic not in well:
             well.append(HeaderItem(mnemonic=mnemonic, unit=depth_unit, value=value, descr=desc))
-        well[mnemonic].value = value
+            continue
+        # STRT/STOP/STEP track the (possibly shifted/resampled) axis; the
+        # NULL sentinel is the FILE's own missing-value contract — a source
+        # declaring -999.0 must stay -999.0 or every derived version would
+        # silently redefine which samples are missing (review R1-M1).
+        if mnemonic != "NULL":
+            well[mnemonic].value = value
     for mnemonic in ("STRT", "STOP", "STEP"):
         well[mnemonic].unit = depth_unit
