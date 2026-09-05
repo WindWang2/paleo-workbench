@@ -107,3 +107,11 @@ test_linked_interpretation_adversarial + 迁移的 producer/wiring/canvas/workst
   linked_workspace_coordination / linked_workspace_ux / adversarial /
   td_calibration_lifecycle / domain_coords / coordinate_hub / curve_interpretation
   = 103+34+9 passed，全绿。
+
+## 2026-09-06 ~04:0x — 最终全量回归 + 三轮 review 修复后复验
+
+- 全量：`run_env_li.sh tests/ --deselect test_harness_scenarios::scenario_c_coherence`（RAM 软限在当前双会话机器负载下预存在失败，main 基线同样失败）
+- 失败分类（25 FAILED + 2 ERROR）：24+2 为**预存在环境失败**——`layer_model_core`/`grid_render_core` 等 native C++ 扩展未安装于 conda 3.13 环境（仅 main/.venv 有 editable 安装）；逐项抽查在 main 基线（run_env.sh）以同样方式失败（test_native_factor_map/native_map_canvas/scalar_raster_mirror/unified_map_*/p3_s9/s10/mapping_integration/project_paths/reference_opacity/tiled_onnx/transcode_resume 等）
+- 真实回归 1 项：test_workstation_lifecycle::test_linked_shutdown_stops_panels（shutdown(wait_ms) 新签名 vs 陈旧 fake）→ 已修复并复验（22 lifecycle/backend 测试通过）
+- 本分支全部领域族（coordination/correlation/curve/seismic/welllog/linked/domain/td_calibration/fault/depth_cursor）在全量运行中零失败
+- 三轮 review 修复后受影响套件复验：engine（display controls 8 + arbitrary worker 3 + view/colormap/ui/interaction/workers）、paleo（curve toolbox 29 + dialog 5 + link editing 11 + overlay 10 + fullres 1 + units 6 + lifecycle 22）全通过

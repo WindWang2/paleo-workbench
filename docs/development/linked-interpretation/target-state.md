@@ -92,7 +92,7 @@
 
 ## 交付
 
-- [ ] well-log-engine 子模块 feature branch + PR（如 L2 需要子模块改动）；主仓库 gitlink 更新。
-- [ ] 三轮 review（Correctness/Architecture/UX-Perf-Adversarial）完成且问题修复。
-- [ ] 主仓库 PR 到 main（不等待 CI）。
+- [x] well-log-engine 子模块 feature branch + PR；主仓库 gitlink 更新。（feat/linked-interpretation-interaction → WindWang2/well-log-engine#52；gitlink e057b347）
+- [x] 三轮 review（Correctness/Architecture/UX-Perf-Adversarial）完成并修复。（结果与已接受风险记录于 decisions.md「Review」节；修复 commits：296b2593/1285f46d/3f2f6931/ad144f80/8edb4f03 + 测试侧 teardown 契约）
+- [x] 主仓库 PR 到 main（不等待 CI）。（feat/linked-interpretation-v5，见 verification.md PR 记录）
 - [x] 不运行 100GB benchmark。
