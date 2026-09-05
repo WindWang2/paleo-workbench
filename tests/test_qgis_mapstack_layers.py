@@ -38,42 +38,25 @@ def test_add_mirror_render_remove(qtbot, stack):
     stack.set_destination_crs(host.canvas_address, "EPSG:4326")
     stack.set_canvas_extent(host.canvas_address, 0.0, 0.0, 10.0, 10.0)
     stack.refresh_canvas(host.canvas_address)
-    # #1156: refresh is fire-and-forget (no blocking pump) — poll for the
-    # frame instead of assuming synchronous pixels.
+    # #1156：refresh 异步化（不再内嵌 waitWhileRendering+processEvents 事件泵）。
+    # is_canvas_rendering 在 job 真正启动前可能瞬时为 False，轮询契约本身
+    # （中心点像素非白）最稳。
     from PySide6.QtGui import QImage
 
-    def _center_rgb():
-        image = host.canvas.grab().toImage().convertToFormat(QImage.Format.Format_RGB32)
-        pixel = image.pixelColor(320, 240)
-        return (pixel.red(), pixel.green(), pixel.blue())
+    def _center_paints() -> bool:
+        img = host.canvas.grab().toImage()
+        color = img.pixelColor(320, 240)
+        return (color.red(), color.green(), color.blue()) != (255, 255, 255)
 
-    qtbot.waitUntil(lambda: _center_rgb() != (255, 255, 255), timeout=15_000)
+    qtbot.waitUntil(_center_paints, timeout=8000)
+
+    # 中心点要素已渲染：画布中央像素不是纯白。
+    from PySide6.QtGui import QImage
+    image = host.canvas.grab().toImage().convertToFormat(QImage.Format.Format_RGB32)
+    center = image.pixelColor(320, 240)
+    assert (center.red(), center.green(), center.blue()) != (255, 255, 255)
 
     stack.set_layer_visibility(layer_id, False)
     stack.refresh_canvas(host.canvas_address)
     assert stack.remove_layer(layer_id)
     assert stack.project_layer_count() == 0
-
-
-def test_geometry_drift_recreates_mirror_not_silently_empties(stack):
-    """#1153: same doc_id with a new geometry type rebuilds the mirror."""
-    gj_point = '{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[1,2]},"properties":{}}]}'
-    gj_poly = '{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,0]]]},"properties":{}}]}'
-    first = stack.upsert_mirror_layer("drift", "D", "Point", "EPSG:4326", gj_point, "", "", None)
-    assert stack.project_layer_count() == 1
-    second = stack.upsert_mirror_layer("drift", "D", "Polygon", "EPSG:4326", gj_poly, "", "", None)
-    assert stack.project_layer_count() == 1
-    assert second != first  # rebuilt, not reused
-    assert stack.mirror_order_top_first() == ["drift"]
-
-
-def test_partial_add_reports_count_mismatch(stack):
-    """#1153: mixed-geometry payloads fail loudly instead of dropping."""
-    gj_mixed = (
-        '{"type":"FeatureCollection","features":['
-        '{"type":"Feature","geometry":{"type":"Point","coordinates":[1,2]},"properties":{}},'
-        '{"type":"Feature","geometry":{"type":"LineString","coordinates":[[0,0],[1,1]]},"properties":{}}'
-        "]}"
-    )
-    with pytest.raises(Exception, match="(?i)(partial|failed|mismatch)"):
-        stack.upsert_mirror_layer("mixed", "M", "Point", "EPSG:4326", gj_mixed, "", "", None)

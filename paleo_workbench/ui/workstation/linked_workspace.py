@@ -9,10 +9,11 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QSplitter,
     QVBoxLayout,
     QWidget,
 )
+
+from paleo_workbench.viz import welllog_engine_adapter as engine_adapter
 
 
 class DocumentPane(QFrame):
@@ -90,6 +91,9 @@ class LinkedInterpretationWorkspace(QWidget):
         self._active_well_name = "A12"
         self.seismic_panel = None
         self.well_panel = None
+        # B9: honest degradation note when the docked well panel is not on the
+        # native engine (None while the engine backend is active).
+        self._well_backend_note: str | None = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -157,7 +161,12 @@ class LinkedInterpretationWorkspace(QWidget):
             self.seismic_panel.set_project_path(self._project_path)
             self.seismic_panel.show_resource(seismic, self._project)
         self.open_well(self._preferred_well_name())
-        self.status_changed.emit("井震视图已加载")
+        note = self.well_backend_note()
+        self.status_changed.emit(
+            "井震视图已加载"
+            if note is None
+            else f"井震视图已加载 · 测井轨道 {note}"
+        )
 
     def _can_create_native_views(self) -> bool:
         resources = list(getattr(self._project, "resources", None) or [])
@@ -167,94 +176,64 @@ class LinkedInterpretationWorkspace(QWidget):
         if self.well_panel is not None:
             self.well_panel.title_label.hide()
             self.well_panel.backend_combo.hide()
-            self.well_panel.set_backend("legacy")
+            # B9: the dock no longer hardcodes the legacy backend; the panel's
+            # own engine detection decides (see apply_default_well_backend).
+            self.apply_default_well_backend()
         if self.seismic_panel is not None:
-            for name in (
-                "interp_draft_btn",
-                "interp_sync_btn",
-                "interp_undo_btn",
-                "interp_redo_btn",
-                "interp_save_btn",
-                "interp_reload_btn",
-            ):
-                widget = getattr(self.seismic_panel, name, None)
-                if widget is not None:
-                    widget.hide()
-            # 联动文档是二维解释面：复用引擎的真实 VD 剖面渲染，
-            # 3-D 渲染留给专用三维页。
-            view = self.seismic_panel.view
-            renderer = getattr(view, "_renderer_3d", None)
-            main_splitter = renderer.parentWidget() if renderer is not None else None
-            if renderer is not None and isinstance(main_splitter, QSplitter):
-                renderer.setMinimumHeight(0)
-                renderer.hide()
-                main_splitter.setCollapsible(0, True)
-                main_splitter.setHandleWidth(0)
-                main_splitter.setSizes([0, 1000])
-            for name in ("_profile_xl", "_profile_t", "_profile_arb"):
-                profile = getattr(view, name, None)
-                panel = profile.parentWidget() if profile is not None else None
-                if panel is not None:
-                    panel.hide()
-            # Inline 剖面板的整行 header 太占高度：隐藏它，把标识收成一个
-            # 小徽标插到主工具条（显示/色标/属性/拾取层位/井震标定 那行）开头。
-            inline_profile = getattr(view, "_profile_il", None)
-            inline_panel = (
-                inline_profile.parentWidget() if inline_profile is not None else None
+            # 联动文档是二维解释面：把地震面板降为 inline 剖面解释形态，
+            # 3-D 渲染留给专用三维页。引擎视图改造全部走面板的公开 API
+            # （SeismicViewPanel.enter_profile_mode），不再探测引擎私有属性。
+            self.seismic_panel.set_interpretation_bar_visible(False)
+            self.seismic_panel.enter_profile_mode()
+
+    def apply_default_well_backend(self) -> None:
+        """Resolve the docked well backend from real binding availability.
+
+        B9: this dock used to hardcode ``set_backend("legacy")``, which kept
+        the native WellLogEngine unreachable in the workstation main flow.
+        The adapter's honest detection now decides: ``engine`` when the env
+        default is on and the binding imports, otherwise ``legacy`` with the
+        fallback reason recorded for the status bar instead of being
+        disguised.
+        """
+        if self.well_panel is None:
+            return
+        backend, reason = engine_adapter.resolve_default_backend()
+        self.set_well_backend(backend, reason=reason)
+        note = self.well_backend_note()
+        if note is not None:
+            self.status_changed.emit(f"测井轨道使用 Legacy 渲染: {note}")
+        elif not getattr(self.well_panel, "depth_cursor_supported", lambda: True)():
+            # 诚实降级：engine 绑定暂无 hover/光标接口，深度游标联动只在
+            # Legacy 后端可用——明确说明，不静默丢联动。
+            self.status_changed.emit(
+                "测井轨道使用 WellLogEngine：深度游标联动暂不可用（绑定尚无 "
+                "hover 接口，需要游标联动请切回 Legacy）"
             )
-            if inline_panel is not None:
-                panel_layout = inline_panel.layout()
-                header = (
-                    panel_layout.itemAt(0).widget()
-                    if panel_layout is not None and panel_layout.count() > 0
-                    else None
-                )
-                if header is not None:
-                    header.hide()
-                    header.setFixedHeight(0)
-            toolbar_row1 = getattr(view, "_toolbar_row1", None)
-            if toolbar_row1 is not None and getattr(view, "_inline_badge", None) is None:
-                badge = QLabel("Inline 剖面")
-                badge.setStyleSheet(
-                    "color: #e53e3e; font-weight: bold; font-size: 11px; padding: 0 4px;"
-                )
-                actions = toolbar_row1.actions()
-                if actions:
-                    toolbar_row1.insertWidget(actions[0], badge)
-                else:
-                    toolbar_row1.addWidget(badge)
-                view._inline_badge = badge
-            for name in (
-                "_3d_mode_combo",
-                "_horizon_menu_btn",
-                "_render_menu_btn",
-                "_overlay_menu_btn",
-                "_slice_label",
-                "_readout_label",
-            ):
-                widget = getattr(view, name, None)
-                if widget is not None:
-                    widget.hide()
-            toolbar = getattr(view, "_toolbar_row1", None)
-            if toolbar is not None:
-                hidden_widgets = {
-                    widget
-                    for widget in (
-                        renderer,
-                        getattr(view, "_3d_mode_combo", None),
-                        getattr(view, "_horizon_menu_btn", None),
-                        getattr(view, "_render_menu_btn", None),
-                        getattr(view, "_overlay_menu_btn", None),
-                        getattr(view, "_slice_label", None),
-                        getattr(view, "_readout_label", None),
-                    )
-                    if widget is not None
-                }
-                for action in toolbar.actions():
-                    widget = toolbar.widgetForAction(action)
-                    label = widget.text().strip() if hasattr(widget, "text") else ""
-                    if widget in hidden_widgets or label in {"3D模式:", "加载 SEGY", "Demo"}:
-                        action.setVisible(False)
+
+    def set_well_backend(self, name: str, *, reason: str | None = None) -> None:
+        """Manual Legacy ↔ WellLogEngine switch for the docked well panel.
+
+        ``reason`` documents why the resolved backend is not the engine; it
+        is kept verbatim so the degradation stays traceable (honest, not
+        cosmetic). A manual switch without a reason gets a plain description.
+        """
+        panel = self.well_panel
+        if panel is None:
+            return
+        panel.set_backend(name)
+        if panel.backend() == "engine":
+            self._well_backend_note = None
+            return
+        self._well_backend_note = reason or "已切换到 Legacy (QPainter)"
+
+    def well_backend(self) -> str:
+        """Effective docked well backend ("" before the views exist)."""
+        return self.well_panel.backend() if self.well_panel is not None else ""
+
+    def well_backend_note(self) -> str | None:
+        """Why the dock is not on the native engine (``None`` when it is)."""
+        return self._well_backend_note
 
     def open_well(self, well_name_or_id: str) -> None:
         if not self._views_created:

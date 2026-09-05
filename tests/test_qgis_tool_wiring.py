@@ -53,25 +53,35 @@ def test_shim_maps_tool_ids_to_native_kinds(qtbot, tmp_path, monkeypatch):
     def kinds():
         return [kind for addr, kind in calls if addr == canvas_addr]
 
-    cases = [
-        (point.id, "add_point", "addPoint"),
-        (line.id, "add_line", "addLine"),
-        (poly.id, "add_polygon", "addPolygon"),
-        (point.id, "vertex", "vertex"),
-        (point.id, "move_feature", "move"),
-        (point.id, "select", "select"),
-        (point.id, "select_rectangle", "select"),
-        (point.id, "pan", "pan"),
-    ]
-    for layer_id, action_id, expected in cases:
-        controller.set_active_layer(layer_id)
-        controller.start_editing()  # 编辑会话按图层开启（QGIS 语义）
-        before = len(kinds())
-        controller.activate_tool(action_id)
-        new = kinds()[before:]
-        assert new and new[-1] == expected, (
-            f"{action_id} 应映射原生 kind {expected}，实际 {new or '（未调用 set_map_tool）'}"
-        )
+    try:
+        cases = [
+            (point.id, "add_point", "addPoint"),
+            (line.id, "add_line", "addLine"),
+            (poly.id, "add_polygon", "addPolygon"),
+            (point.id, "vertex", "vertex"),
+            (point.id, "move_feature", "move"),
+            (point.id, "select", "select"),
+            (point.id, "select_rectangle", "select"),
+            (point.id, "pan", "pan"),
+        ]
+        for layer_id, action_id, expected in cases:
+            controller.set_active_layer(layer_id)
+            controller.start_editing()  # 编辑会话按图层开启（QGIS 语义）
+            before = len(kinds())
+            controller.activate_tool(action_id)
+            new = kinds()[before:]
+            assert new and new[-1] == expected, (
+                f"{action_id} 应映射原生 kind {expected}，实际 {new or '（未调用 set_map_tool）'}"
+            )
+    finally:
+        # 进程级共享 QgsProject 卫生：shim 的图层清理在 C++ 析构时才发生，
+        # 同会话后续用例（test_composite_qgis_canvas 的 project_layer_count
+        # 断言）会看到本用例发布的图层——显式停表并清层。
+        try:
+            document._composition_timer.stop()
+            document.canvas.stack.clear_project_layers()
+        except Exception:
+            pass
 
 
 def test_cad_dock_stays_hidden(qtbot, qapp):

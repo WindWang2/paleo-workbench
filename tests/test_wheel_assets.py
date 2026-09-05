@@ -1,7 +1,7 @@
 """Packaging smoke test: the built wheel must carry the runtime file-system assets.
 
 The workbench loads icons / prototypes / docs from the file system at runtime
-(paleo_workbench/ui/ribbon.py, mapping docs, vendored ATTRIBUTION.md).
+(workstation chrome, mapping docs, vendored ATTRIBUTION.md).
 setuptools only packages .py files by default, so without
 [tool.setuptools.package-data] a wheel silently ships without any of these 21
 files and the installed UI degrades to plain-text navigation (packaging #439).
@@ -58,7 +58,7 @@ def test_wheel_manifest_contains_all_non_py_assets(tmp_path) -> None:
     assert len(md_assets) == EXPECTED_MD, (
         f"wheel must carry both package .md docs, found {len(md_assets)}: {sorted(md_assets)}"
     )
-    # Spot-check the exact assets the UI loads (ribbon tabs / map actions).
+    # Spot-check the exact assets the UI loads (app chrome / map actions).
     assert "paleo_workbench/ui/assets/icons/home.svg" in names
     assert "paleo_workbench/ui/assets/icons/mapping.svg" in names
     assert "paleo_workbench/mapping/CPP_EXTENSION.md" in names

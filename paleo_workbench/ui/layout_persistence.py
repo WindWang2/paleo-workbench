@@ -2,9 +2,82 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from PySide6.QtCore import QSettings, QRect
+
+_log = logging.getLogger(__name__)
+
+#: 统一的 QSettings 身份（B2）：历史上 shell 用 ``WorkstationV3``、面板浮
+#: 动用 ``paleo-workbench``、主题用 ``Workstation`` 三处分裂；统一到主题
+#: 已在用的 (PaleoWorkbench, Workstation)，旧数据一次性迁移。
+SETTINGS_ORG = "PaleoWorkbench"
+SETTINGS_APP = "Workstation"
+
+#: 布局状态版本：不认识（更新或缺失）的版本一律丢弃走默认布局。
+LAYOUT_STATE_VERSION = 4
+
+_WINDOW_STATE_KEY = "layout/window_state"
+_STATE_VERSION_KEY = "layout/state_version"
+_INSPECTOR_FLAG_KEY = "layout/inspector_user_hidden"
+
+#: 旧 shell 身份（WorkstationV3）下的窗口状态键。
+_LEGACY_SHELL_APP = "WorkstationV3"
+_LEGACY_WINDOW_STATE_KEY = "layout/windowState.v4"
+#: 旧面板浮动持久化身份。
+_LEGACY_PANELS_APP = "paleo-workbench"
+
+
+def migrate_legacy_layout_settings() -> bool:
+    """把历史 QSettings 身份里的布局数据迁到 (PaleoWorkbench, Workstation)。
+
+    纯函数（只依赖默认 QSettings 存储），幂等：新键已有值时不覆盖，
+    迁移成功后删除旧键。返回是否有任何数据被迁移——供测试与诊断断言。
+
+    迁移内容：
+
+    - ``(PaleoWorkbench, WorkstationV3)`` 的 ``layout/windowState.v4`` 与
+      ``layout/inspector_user_hidden`` → 新应用名下 ``layout/window_state``
+      /同名键，并补写 ``layout/state_version = 4``；
+    - ``(PaleoWorkbench, paleo-workbench)`` 的 ``panel_layout`` 组 → 新应用
+      名下同名组（键前缀不变）。
+    """
+    migrated = False
+    target = QSettings(SETTINGS_ORG, SETTINGS_APP)
+
+    legacy_shell = QSettings(SETTINGS_ORG, _LEGACY_SHELL_APP)
+    legacy_shell.sync()
+    state = legacy_shell.value(_LEGACY_WINDOW_STATE_KEY)
+    if state is not None:
+        if target.value(_WINDOW_STATE_KEY) is None:
+            target.setValue(_WINDOW_STATE_KEY, state)
+        inspector_hidden = legacy_shell.value(_INSPECTOR_FLAG_KEY, None)
+        if inspector_hidden is not None:
+            target.setValue(_INSPECTOR_FLAG_KEY, inspector_hidden)
+        target.setValue(_STATE_VERSION_KEY, LAYOUT_STATE_VERSION)
+        legacy_shell.remove(_LEGACY_WINDOW_STATE_KEY)
+        legacy_shell.remove(_INSPECTOR_FLAG_KEY)
+        migrated = True
+
+    legacy_panels = QSettings(SETTINGS_ORG, _LEGACY_PANELS_APP)
+    legacy_panels.sync()
+    legacy_panels.beginGroup("panel_layout")
+    try:
+        keys = list(legacy_panels.allKeys())
+        for key in keys:
+            # 组内读、组外写：新存储键前缀保持 panel_layout/… 不变。
+            target.setValue(f"panel_layout/{key}", legacy_panels.value(key))
+    finally:
+        legacy_panels.endGroup()
+    if keys:
+        legacy_panels.remove("panel_layout")
+        migrated = True
+
+    if migrated:
+        target.sync()
+        _log.info("migrated legacy layout settings into (%s, %s)", SETTINGS_ORG, SETTINGS_APP)
+    return migrated
 
 
 @dataclass(frozen=True)
@@ -36,8 +109,8 @@ class LayoutPersistence:
     lazily on first use.
     """
 
-    ORGANIZATION = "PaleoWorkbench"
-    APPLICATION = "paleo-workbench"
+    ORGANIZATION = SETTINGS_ORG
+    APPLICATION = SETTINGS_APP
     GROUP = "panel_layout"
 
     def __init__(self, settings: QSettings | None = None) -> None:
@@ -123,6 +196,9 @@ class LayoutPersistence:
 
     def _bind(self) -> QSettings:
         if self._settings is None:
+            # 默认后端绑定前先做一次旧身份迁移（幂等）：孤立使用
+            # LayoutPersistence（无工作站壳）也能读到旧面板布局。
+            migrate_legacy_layout_settings()
             self._settings = QSettings(self.ORGANIZATION, self.APPLICATION)
         return self._settings
 

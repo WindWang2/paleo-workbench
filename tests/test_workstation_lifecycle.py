@@ -43,7 +43,10 @@ def workstation(qtbot, tmp_path):
     qtbot.addWidget(frame)
     frame._settings = QSettings(str(tmp_path / "workstation.ini"), QSettings.Format.IniFormat)
     frame._settings.clear()
-    return frame
+    yield frame
+    # orderly 关闭：镜像图层只随显式 shutdown 离开共享 QgsProject（与
+    # 宿主契约一致），否则泄漏进后续用例的画布。
+    frame.composite.shutdown()
 
 
 # --- #1120: linked workspace map canvas shutdown -----------------------------
@@ -120,7 +123,7 @@ def test_responsive_hide_is_not_persisted_as_user_layout(qtbot, workstation):
     assert workstation._responsive_hid_inspector
 
     workstation._save_layout(force=True)
-    assert workstation._settings.value("layout/windowState.v4") is not None
+    assert workstation._settings.value("layout/window_state") is not None
 
     # 模拟宽屏冷启动：restore 后检查器可见（blob 记录的是「可见」）。
     workstation.resize(1600, 900)
@@ -182,9 +185,9 @@ def test_flush_layout_writes_after_hide(qtbot, workstation):
     workstation.hide()
     # hide 之后常规保存路径是 no-op；flush_layout 必须仍然落盘。
     workstation._save_layout()
-    assert workstation._settings.value("layout/windowState.v4") is None
+    assert workstation._settings.value("layout/window_state") is None
     workstation.flush_layout()
-    assert workstation._settings.value("layout/windowState.v4") is not None
+    assert workstation._settings.value("layout/window_state") is not None
 
 
 def test_teardown_freezes_state_save(qtbot, workstation):

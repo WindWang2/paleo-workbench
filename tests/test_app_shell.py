@@ -7,10 +7,11 @@ from paleo_workbench.ui.app_shell import AppShell
 def test_app_shell_assembles_all_zones(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
-    assert shell.ribbon is not None
+    # Ribbon 已删除（B2）：全局 chrome 由工作站 app bar 承担。
+    assert not hasattr(shell, "ribbon")
     assert not hasattr(shell, "menu_bar")
     assert not hasattr(shell, "icon_rail")
-    assert shell.ribbon.search_box.objectName() == "SearchBox"
+    assert shell.workstation.app_bar.objectName() == "WorkstationAppBar"
     assert shell.page_stack is not None
     assert shell.status_bar is not None
 
@@ -28,10 +29,11 @@ def test_app_shell_default_page_is_zero(qtbot):
     assert shell.page_stack.currentIndex() == 0
 
 
-def test_app_shell_ribbon_tab_switches_page(qtbot):
+def test_app_shell_navigation_request_switches_page(qtbot):
+    """explorer → shell.navigation_requested → hub 页切换（原 ribbon tab 路径）。"""
     shell = AppShell()
     qtbot.addWidget(shell)
-    shell.ribbon._tab_buttons[1].click()
+    shell.workstation.navigation_requested.emit(1, "")
     assert shell.page_stack.currentIndex() == 1
 
 
@@ -61,10 +63,19 @@ def test_app_shell_object_name(qtbot):
     assert shell.objectName() == "AppShell"
 
 
-def test_app_shell_has_ribbon_bar(qtbot):
+def test_app_shell_exposes_project_action_signals(qtbot):
+    """Ribbon 删除后 AppShell 自带工程动作信号（app bar → 窗口处理器）。"""
     shell = AppShell()
     qtbot.addWidget(shell)
-    assert shell.ribbon.objectName() == "RibbonBar"
+    for name in (
+        "new_project_requested",
+        "open_project_requested",
+        "open_sample_project_requested",
+        "save_project_requested",
+        "properties_requested",
+        "preview_settings_requested",
+    ):
+        assert hasattr(shell, name), f"AppShell 缺少 {name}"
 
 
 def test_app_shell_hub_recalls_active_submodule(qtbot):
@@ -87,13 +98,11 @@ def test_app_shell_hub_recalls_active_submodule(qtbot):
     assert shell.hub_well.current_key() == "stratigraphy"
 
 
-def test_app_shell_submodule_switch_updates_ribbon_context(qtbot):
+def test_app_shell_submodule_switch_updates_hub_state(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
     shell.navigate_to(navigation.PAGE_INDEX_MAPPING, "review")
-    body = shell.ribbon.context("mapping:review")
-    assert body is not None
-    assert shell.ribbon._body_stack.currentWidget() is body
+    assert shell.hub_mapping.current_key() == "review"
 
 
 # --- Command palette (Ctrl+K) ----------------------------------------------

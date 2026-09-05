@@ -113,6 +113,9 @@ class MeasureDistanceTool(MapTool):
         self._measurement_ready = measurement_ready
         self.start: Point | None = None
         self.current: Point | None = None
+        # 最近一次完成的分段长度。QGIS 画布路径（canvas_shim 事件路由）没有
+        # measurement_ready 回调可用——宿主经该只读状态 + 信号给出分段距离。
+        self.last_distance: float | None = None
 
     @property
     def points(self) -> list[Point]:
@@ -128,6 +131,7 @@ class MeasureDistanceTool(MapTool):
             self.current = point
             return True
         distance = math.dist(self.start, point)
+        self.last_distance = distance
         if self._measurement_ready is not None:
             self._measurement_ready(distance)
         self.start = point
@@ -144,6 +148,7 @@ class MeasureDistanceTool(MapTool):
         had_measurement = self.start is not None
         self.start = None
         self.current = None
+        self.last_distance = None
         return had_measurement
 
 

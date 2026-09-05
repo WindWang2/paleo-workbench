@@ -38,11 +38,20 @@ def _style(**overrides: Any) -> dict[str, Any]:
     return style
 
 
-def _accept_active_modal() -> None:
-    """Click the OK button of the active native modal dialog."""
+def _accept_active_modal(remaining_ms: int = 3000) -> None:
+    """Click the OK button of the active native modal dialog (polling).
+
+    The dialog may open later than the timer fires under load (full-suite
+    QGIS runs); asserting here would raise inside the event loop of an
+    unrelated later test, so poll and give up silently — the owning test
+    still fails on its own assertion if the dialog never appeared.
+    """
     application = QApplication.instance()
     dialog = application.activeModalWidget()
-    assert dialog is not None, "no modal dialog became active"
+    if dialog is None:
+        if remaining_ms > 0:
+            QTimer.singleShot(100, lambda: _accept_active_modal(remaining_ms - 100))
+        return
     buttons = dialog.findChildren(QDialogButtonBox)
     if buttons:
         accept = buttons[0].button(QDialogButtonBox.StandardButton.Ok)
@@ -57,9 +66,12 @@ def _accept_active_modal() -> None:
     dialog.reject()
 
 
-def _cancel_active_modal() -> None:
+def _cancel_active_modal(remaining_ms: int = 3000) -> None:
     dialog = QApplication.instance().activeModalWidget()
-    assert dialog is not None, "no modal dialog became active"
+    if dialog is None:
+        if remaining_ms > 0:
+            QTimer.singleShot(100, lambda: _cancel_active_modal(remaining_ms - 100))
+        return
     dialog.reject()
 
 

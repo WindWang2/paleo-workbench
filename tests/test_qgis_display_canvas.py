@@ -129,7 +129,7 @@ def test_shim_and_display_share_mirror_helper(qtbot, qapp):
         qtbot.addWidget(w)
         w.resize(200, 200)
         w.show()
-        qgis_ids, doc_ids = mirror_snapshot_to_stack(s, addr, _point_snapshot())
+        qgis_ids, doc_ids, _failures = mirror_snapshot_to_stack(s, addr, _point_snapshot())
         assert doc_ids == ["home_workarea:wells"]
         assert s.canvas_layer_count(addr) == 1
         assert qgis_ids

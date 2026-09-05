@@ -108,13 +108,55 @@ RADIUS_BADGE = 4
 RADIUS_PANEL = 4
 RADIUS_NAV_ITEM = 4
 
-SPACE_1 = 4
-SPACE_2 = 8
-SPACE_3 = 12
-SPACE_4 = 20
-PAGE_MARGIN = 16
-PANEL_PADDING = 12
-CONTROL_HEIGHT = 30
+# 规范间距刻度（B1）：新代码用语义名；legacy SPACE_1..4 保留别名防全库改动。
+SPACE_XS = 2    # 徽章内距 / 紧贴分隔
+SPACE_S = 4     # 控件内距下限（= SPACE_1）
+SPACE_M = 8     # 常规控件间距（= SPACE_2）
+SPACE_L = 12    # 面板内距（= SPACE_3）
+SPACE_XL = 16   # 页边距（= PAGE_MARGIN）
+SPACE_2XL = 24  # 区块间距
+SPACE_1 = SPACE_S
+SPACE_2 = SPACE_M
+SPACE_3 = SPACE_L
+SPACE_4 = 20  # legacy 值原样保留（历史调用点语义为「较松区块距」）
+PAGE_MARGIN = SPACE_XL
+PANEL_PADDING = SPACE_L
+
+# 语义表面 token 别名（B1 词汇表 → 现有 token）。BORDER / BORDER_STRONG /
+# TEXT_PRIMARY / TEXT_SECONDARY / FOCUS_RING 等词汇本就是原生 token，不重复
+# 别名；这里只补 goal 词汇表里缺的名字。
+SURFACE = BG_BODY              # 窗口底
+SURFACE_RAISED = BG_HEADER     # 抬升面板/工具栏
+SURFACE_PANEL = BG_CANVAS_PANEL  # 内容面板（画布上的浮层卡）
+TEXT_MUTED = TEXT_SECONDARY    # 弱化说明文字
+SELECTION_TOKEN = BG_NAV_ACTIVE
+HOVER_TOKEN = BG_MENU_HOVER
+ACCENT_TOKEN = ACCENT
+
+FONT_FAMILY_MONO = '"JetBrains Mono", "Cascadia Mono", Consolas, "Courier New", monospace'
+
+# 密度表（B1）：两档密度只差结构与字号微调，色彩/词汇不变；QSS 由
+# build_qss(density=...) 消费，ThemeManager 持有运行态。
+DENSITY_MODES = ("compact", "comfortable")
+DENSITY_TOKENS = {
+    "compact": {
+        "padding_y": 3,
+        "padding_x": 8,
+        "btn_height": 24,
+        "row_height": 22,
+        "toolbar_height": 30,
+        "font_delta": 0,  # 字号不缩：专业可读性优先（13px 底线）
+    },
+    "comfortable": {
+        "padding_y": 6,
+        "padding_x": 12,
+        "btn_height": 30,
+        "row_height": 28,
+        "toolbar_height": 36,
+        "font_delta": 0,
+    },
+}
+CONTROL_HEIGHT = DENSITY_TOKENS["comfortable"]["btn_height"]
 CONTROL_HEIGHT_LG = 34
 
 ICON_FILES = [
@@ -219,8 +261,6 @@ INTERPOLATION_METHOD_TOOLTIPS = {
 SMOOTHING_LEVELS = ["弱", "中", "强"]
 SEQUENCE_SCHEMES = ["三级层序格架（推荐）", "四级高频层序", "体系域二分方案"]
 SYSTEMS_TRACT_LABELS = ["LST", "TST", "HST"]
-
-
 
 # ---------------------------------------------------------------------------
 # Theme palettes: one token vocabulary, three curated palettes.
@@ -349,8 +389,6 @@ def palette_for(theme: str = "light") -> dict:
     palette.update(_THEME_OVERRIDES[key])
     return palette
 
-
-
 def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     """Render the application stylesheet from the *theme* palette.
 
@@ -362,9 +400,10 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     from types import SimpleNamespace
 
     t = SimpleNamespace(**palette_for(theme))
-    padding_y = 6 if density == "comfortable" else 3
-    padding_x = 12 if density == "comfortable" else 8
-    btn_height = 30 if density == "comfortable" else 24
+    density_tokens = DENSITY_TOKENS.get(density, DENSITY_TOKENS["comfortable"])
+    padding_y = density_tokens["padding_y"]
+    padding_x = density_tokens["padding_x"]
+    btn_height = density_tokens["btn_height"]
 
     return f'''
     /* ── Stratum base ─────────────────────────────────────────────── */
@@ -711,8 +750,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         min-height: {t.MENU_BAR_HEIGHT}px; max-height: {t.MENU_BAR_HEIGHT}px;
     }}
     /* UI v2 Ribbon (variant A) */
-    QFrame#RibbonBar {{
-        background: {t.BG_HEADER}; border-bottom: 1px solid {t.BORDER_STRONG};
+    ; border-bottom: 1px solid {t.BORDER_STRONG};
     }}
     QFrame#RibbonTopRow {{ background: transparent; }}
     QLabel#RibbonAppBadge {{
@@ -900,6 +938,11 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     }}
     QStatusBar::item {{
         border: none;
+    }}
+    QLabel#CompositeEmptyHint {{
+        background: {t.BG_CANVAS};
+        color: {t.TEXT_SECONDARY};
+        font-size: {t.FONT_SIZE_BASE};
     }}
     QFrame#MapStatusBar {{
         background: {t.BG_SIDEBAR};

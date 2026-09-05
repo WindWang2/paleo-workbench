@@ -163,8 +163,8 @@ class WorkAreaMapWidget(QWidget):
                 (float(point[0]), float(point[1]))
             )
         except (TypeError, ValueError, IndexError, ArithmeticError):
-            # #1166: ZeroDivisionError 是 ArithmeticError（退化 extent），
-            # 原清单漏了它——“以为守了其实没守”。
+            # ArithmeticError 含 ZeroDivisionError（#1166：退化 extent 曾经
+            # 从这条缝漏出去炸掉点击处理）。
             return
         best_id = ""
         best_dist = _WELL_PICK_RADIUS_PX

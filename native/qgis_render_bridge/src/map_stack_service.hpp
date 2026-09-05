@@ -31,6 +31,8 @@ public:
 
   std::uintptr_t createCanvas();
   void destroyCanvas(std::uintptr_t canvas);
+  // Qt 直接销毁画布（绕过 destroyCanvas）时的表回收：绝不解引用画布。
+  void reapCanvasTables(std::uintptr_t canvas_addr);
   void setCanvasWhiteBackground(std::uintptr_t canvas);
   void setDestinationCrs(std::uintptr_t canvas, const std::string& crs_auth_id);
   void setCanvasExtent(std::uintptr_t canvas, double xmin, double ymin,
@@ -40,6 +42,9 @@ public:
   void zoomToPreviousExtent(std::uintptr_t canvas);
   void zoomToNextExtent(std::uintptr_t canvas);
   void refreshCanvas(std::uintptr_t canvas);
+  /// #1156: refresh is asynchronous; callers that need a finished frame
+  /// pump the outer event loop and poll this until false.
+  bool isCanvasRendering(std::uintptr_t canvas) const;
   std::vector<double> screenToMap(std::uintptr_t canvas, double x, double y) const;
   std::vector<double> mapToScreen(std::uintptr_t canvas, double x, double y) const;
 

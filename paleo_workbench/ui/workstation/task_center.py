@@ -1,17 +1,38 @@
+"""TaskCenter：后台任务中心（model/view 增量刷新）。
+
+历史实现（#1157 之前）每 400ms ``tree.clear()`` 后整树重建，逐行 new
+QProgressBar/QPushButton——取消按钮在点击与重建竞态中被吞、选中与滚动每
+tick 丢失、常驻 widget 反复析构。本实现：
+
+- ``QAbstractTableModel`` 差分刷新：结构变化走 insert/removeRows，状态/进
+  度/用时变化只发 ``dataChanged``；
+- 进度条与取消按钮由 delegate 绘制（``editorEvent`` 承接点击），行内不再
+  创建任何常驻 widget；
+- 选中按 task_id 跨结构变化保持；滚动位置在顶部插入新行时保持；
+- 右键菜单：取消 / 重试（failed·cancelled）/ 复制任务 ID / 详情。
+"""
 from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtCore import (
+    QAbstractItemModel,
+    QModelIndex,
+    QPersistentModelIndex,
+    Qt,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QFrame,
+    QHBoxLayout,
     QHeaderView,
-    QProgressBar,
-    QPushButton,
-    QTreeWidget,
-    QTreeWidgetItem,
+    QMenu,
+    QStyledItemDelegate,
+    QTableView,
     QVBoxLayout,
 )
 
@@ -25,9 +46,247 @@ _STATE_COLORS = {
     "cancelled": tokens.TEXT_SECONDARY,
 }
 
+_MAX_ROWS = 100
+# 列：状态 / 任务 / 进度 / 用时 / 操作
+_COL_STATE, _COL_TITLE, _COL_PROGRESS, _COL_ELAPSED, _COL_ACTION = range(5)
+_COLUMNS = 5
+
+
+class _TaskTableModel(QAbstractItemModel):
+    """TaskScheduler 快照的增量镜像；行序按 submitted_at 倒序（最新在顶）。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._rows: list = []  # TaskHandle，最新在顶
+        # 行内容签名：仅变化列发 dataChanged（elapsed 每秒变化单独处理）。
+        self._signatures: dict[str, tuple] = {}
+
+    # -- Qt 模型契约 ----------------------------------------------------------
+
+    def index(self, row, column, parent=QModelIndex()):
+        if parent.isValid() or not (0 <= row < len(self._rows)):
+            return QModelIndex()
+        return self.createIndex(row, column, row)
+
+    def parent(self, child):  # noqa: N802 - Qt 命名
+        return QModelIndex()
+
+    def rowCount(self, parent=QModelIndex()):  # noqa: N802
+        return 0 if parent.isValid() else len(self._rows)
+
+    def columnCount(self, parent=QModelIndex()):  # noqa: N802
+        return 0 if parent.isValid() else _COLUMNS
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid():
+            return None
+        handle = self._rows[index.row()]
+        column = index.column()
+        if role == Qt.ItemDataRole.UserRole:
+            return handle
+        if role == Qt.ItemDataRole.DisplayRole:
+            if column == _COL_TITLE:
+                title = handle.spec.title or handle.spec.kind or handle.task_id
+                # 视觉 QA（10）：失败原因必须可读，不只藏在 tooltip。
+                if getattr(handle.state, "value", "") == "failed" and handle.error:
+                    short = str(handle.error).strip().splitlines()[0][:40]
+                    return f"{title} — {short}"
+                return title
+            if column == _COL_STATE:
+                # 视觉 QA（09/10）：状态列必须给模型文本——ResizeToContents
+                # 以模型数据计宽，纯 delegate 绘制会让列塌缩成「…」。
+                return _TaskRowDelegate._state_text(handle)
+            if column == _COL_ELAPSED:
+                return TaskCenter.format_elapsed(
+                    max(
+                        0.0,
+                        (handle.finished_at or time.monotonic())
+                        - (handle.started_at or handle.submitted_at),
+                    )
+                )
+        if role == Qt.ItemDataRole.ForegroundRole and column == _COL_STATE:
+            return QColor(_STATE_COLORS.get(self._state_key(handle), tokens.TEXT_PRIMARY))
+        if role == Qt.ItemDataRole.ToolTipRole and column == _COL_TITLE:
+            return handle.message or handle.error or handle.task_id
+        return None
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):  # noqa: N802
+        if (
+            role == Qt.ItemDataRole.DisplayRole
+            and orientation == Qt.Orientation.Horizontal
+        ):
+            return ("状态", "任务", "进度", "用时", "操作")[section]
+        return None
+
+    # -- 行取值（delegate 消费） ----------------------------------------------
+
+    @staticmethod
+    def _state_key(handle) -> str:
+        return getattr(handle.state, "value", str(handle.state))
+
+    def handle_at(self, row: int):
+        return self._rows[row] if 0 <= row < len(self._rows) else None
+
+    # -- 增量刷新 --------------------------------------------------------------
+
+    def refresh(self, handles: list) -> None:
+        """差分应用新快照；保持行序 submitted_at 倒序。"""
+        from paleo_workbench.runtime.task_scheduler import TaskState
+
+        handles = sorted(handles, key=lambda h: h.submitted_at, reverse=True)[:_MAX_ROWS]
+        new_ids = [h.task_id for h in handles]
+        old_ids = [h.task_id for h in self._rows]
+        old_by_id = {h.task_id: h for h in self._rows}
+        new_by_id = {h.task_id: h for h in handles}
+
+        # 1) 移除消失的行（从后往前删避免索引漂移）。
+        for row in range(len(old_ids) - 1, -1, -1):
+            if old_ids[row] not in new_by_id:
+                self.beginRemoveRows(QModelIndex(), row, row)
+                removed = self._rows.pop(row)
+                self._signatures.pop(removed.task_id, None)
+                self.endRemoveRows()
+
+        # 2) 插入新行（按目标位置升序插入，保持倒序）。
+        existing = {h.task_id for h in self._rows}
+        for position, task_id in enumerate(new_ids):
+            if task_id in existing:
+                continue
+            self.beginInsertRows(QModelIndex(), position, position)
+            self._rows.insert(position, new_by_id[task_id])
+            self.endInsertRows()
+
+        # 3) 原位更新变化的行：仅变化列发 dataChanged。
+        now = time.monotonic()
+        for row, handle in enumerate(self._rows):
+            core = (
+                self._state_key(handle),
+                round(handle.progress, 3),
+                handle.message,
+                handle.error,
+            )
+            signature = self._signatures.get(handle.task_id)
+            elapsed_changed = (
+                signature is not None
+                and signature[4] != int(
+                    (handle.finished_at or now)
+                    - (handle.started_at or handle.submitted_at)
+                )
+            )
+            self._signatures[handle.task_id] = (*core, int(
+                (handle.finished_at or now)
+                - (handle.started_at or handle.submitted_at)
+            ))
+            if signature is None or signature[:4] != core:
+                left = self.index(row, 0)
+                right = self.index(row, _COLUMNS - 1)
+                self.dataChanged.emit(left, right)
+            elif elapsed_changed:
+                self.dataChanged.emit(
+                    self.index(row, _COL_ELAPSED), self.index(row, _COL_ELAPSED)
+                )
+
+
+class _TaskRowDelegate(QStyledItemDelegate):
+    """进度条 + 取消按钮的纯绘制 delegate：行内零常驻 widget。"""
+
+    def __init__(self, model: _TaskTableModel, parent=None):
+        super().__init__(parent)
+        self._model = model
+
+    def paint(self, painter, option, index):
+        from paleo_workbench.runtime.task_scheduler import TaskState
+
+        handle = self._model.handle_at(index.row())
+        if handle is None:
+            super().paint(painter, option, index)
+            return
+        column = index.column()
+        if column == _COL_PROGRESS:
+            # 手绘进度单元（视觉 QA 09）：CE_ProgressBar 在无行高的表视图里
+            # 常渲染成空框；直接画填充条 + 百分比文本，失败/取消给文字态。
+            from PySide6.QtGui import QColor
+
+            painter.save()
+            rect = option.rect.adjusted(4, 4, -4, -4)
+            progress = max(0, min(100, round(handle.progress * 100)))
+            from paleo_workbench.ui.theme import theme_manager
+            from paleo_workbench import tokens as _tokens
+
+            pal = _tokens.palette_for(theme_manager.current_theme.value)
+            if handle.state is TaskState.FAILED:
+                painter.setPen(QColor(pal["ERROR_RED"]))
+                painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "失败")
+            elif handle.state is TaskState.CANCELLED:
+                painter.setPen(QColor(pal["TEXT_SECONDARY"]))
+                painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "已取消")
+            else:
+                track = QColor(pal["BORDER_LIGHT"])
+                painter.fillRect(rect, track)
+                fill_w = max(2, int(rect.width() * progress / 100))
+                fill = QColor(pal["SUCCESS"] if handle.state is TaskState.DONE else pal["WARNING"])
+                painter.fillRect(rect.adjusted(0, 0, -(rect.width() - fill_w), 0), fill)
+                painter.setPen(QColor(pal["TEXT_SECONDARY"]))
+                painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, f"{progress}%")
+            painter.restore()
+        elif column == _COL_ACTION and handle.state in (
+            TaskState.QUEUED,
+            TaskState.RUNNING,
+        ):
+            from PySide6.QtWidgets import QStyle, QStyleOptionButton
+
+            button = QStyleOptionButton()
+            button.rect = option.rect.adjusted(2, 2, -2, -2)
+            button.text = "取消"
+            button.state = option.state | QStyle.StateFlag.State_Enabled
+            button.direction = option.direction
+            button.fontMetrics = option.fontMetrics
+            button.palette = option.palette
+            option.widget.style().drawControl(
+                QStyle.ControlElement.CE_PushButton, button, painter
+            )
+        else:
+            super().paint(painter, option, index)
+
+    @staticmethod
+    def _state_text(handle) -> str:
+        from paleo_workbench.runtime.task_scheduler import TaskState
+
+        labels = {
+            TaskState.QUEUED: "排队",
+            TaskState.RUNNING: "运行中",
+            TaskState.DONE: "完成",
+            TaskState.FAILED: "失败",
+            TaskState.CANCELLED: "已取消",
+        }
+        text = labels.get(handle.state, str(handle.state))
+        if handle.state is TaskState.RUNNING:
+            text = f"{text} {round(handle.progress * 100)}%"
+        elif handle.cancel_requested and handle.state in (
+            TaskState.QUEUED,
+            TaskState.RUNNING,
+        ):
+            text = "取消中"
+        return text
+
+    def editorEvent(self, event, model, option, index) -> bool:
+        from paleo_workbench.runtime.task_scheduler import TaskState
+
+        if event.type() != event.Type.MouseButtonRelease:
+            return super().editorEvent(event, model, option, index)
+        handle = self._model.handle_at(index.row())
+        if handle is None or index.column() != _COL_ACTION:
+            return super().editorEvent(event, model, option, index)
+        if handle.state not in (TaskState.QUEUED, TaskState.RUNNING):
+            return True
+        from paleo_workbench.runtime.task_scheduler import get_scheduler
+
+        get_scheduler().cancel(handle.task_id)
+        return True
+
 
 class TaskCenter(QFrame):
-    """Polling Qt model over the process-wide TaskScheduler authority."""
+    """轮询 Qt model over the process-wide TaskScheduler authority（增量）。"""
 
     active_count_changed = Signal(int)
 
@@ -35,31 +294,35 @@ class TaskCenter(QFrame):
         super().__init__(parent)
         self.setObjectName("WorkstationTaskCenter")
         self._last_active = -1
-        # #1157: id-keyed row cache — refresh() diffs instead of rebuilding,
-        # so cancel clicks land, selection/scroll survive, and no widget
-        # churn happens on every tick.
-        self._rows: dict[str, tuple[QTreeWidgetItem, QProgressBar, QPushButton]] = {}
-        self._empty_item: QTreeWidgetItem | None = None
+        self._selected_task_id: str | None = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
         outer.setSpacing(6)
 
-        self.tree = QTreeWidget(self)
+        self.model = _TaskTableModel(self)
+        self.tree = QTableView(self)
         self.tree.setObjectName("WorkstationTaskTree")
-        self.tree.setColumnCount(5)
-        self.tree.setHeaderLabels(["状态", "任务", "进度", "用时", "操作"])
-        self.tree.setRootIsDecorated(False)
-        self.tree.setAlternatingRowColors(False)
+        self.tree.setModel(self.model)
+        self.tree.setItemDelegate(_TaskRowDelegate(self.model, self.tree))
+        self.tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.tree.setUniformRowHeights(True)
-        header = self.tree.header()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        header.resizeSection(2, 150)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.setShowGrid(False)
+        self.tree.setWordWrap(False)
+        self.tree.verticalHeader().setVisible(False)
+        self.tree.horizontalHeader().setStretchLastSection(False)
+        header = self.tree.horizontalHeader()
+        header.setSectionResizeMode(_COL_STATE, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(_COL_TITLE, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(_COL_PROGRESS, QHeaderView.ResizeMode.Fixed)
+        header.resizeSection(_COL_PROGRESS, 150)
+        header.setSectionResizeMode(_COL_ELAPSED, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(_COL_ACTION, QHeaderView.ResizeMode.Fixed)
+        header.resizeSection(_COL_ACTION, 64)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._show_context_menu)
+        self.tree.selectionModel().selectionChanged.connect(self._remember_selection)
         outer.addWidget(self.tree, 1)
 
         self.timer = QTimer(self)
@@ -68,17 +331,12 @@ class TaskCenter(QFrame):
         self.timer.start()
         self.refresh()
 
-    _ROLE_TASK_ID = Qt.ItemDataRole.UserRole
+    # -- 刷新 ----------------------------------------------------------------
 
     def refresh(self) -> None:
         from paleo_workbench.runtime.task_scheduler import TaskState, get_scheduler
 
-        scheduler = get_scheduler()
-        handles = sorted(
-            scheduler.statuses(),
-            key=lambda handle: handle.submitted_at,
-            reverse=True,
-        )[:24]
+        handles = get_scheduler().statuses()
         active = sum(
             handle.state in (TaskState.QUEUED, TaskState.RUNNING) for handle in handles
         )
@@ -86,108 +344,82 @@ class TaskCenter(QFrame):
             self._last_active = active
             self.active_count_changed.emit(active)
 
-        if not handles:
-            self._drop_all_rows()
-            if self._empty_item is None:
-                item = QTreeWidgetItem(["", "当前没有后台任务", "", "", ""])
-                item.setDisabled(True)
-                color = QColor(tokens.TEXT_SECONDARY)
-                for column in range(item.columnCount()):
-                    item.setForeground(column, color)
-                self._empty_item = item
-                self.tree.addTopLevelItem(item)
+        scroll_before = self.tree.verticalScrollBar().value()
+        at_top = scroll_before == 0
+        self.model.refresh(handles)
+        self._restore_selection()
+        if not at_top:
+            self.tree.verticalScrollBar().setValue(min(scroll_before, self.tree.verticalScrollBar().maximum()))
+
+    def _remember_selection(self, *_args) -> None:
+        rows = self.tree.selectionModel().selectedRows(_COL_TITLE)
+        handle = self.model.handle_at(rows[0].row()) if rows else None
+        self._selected_task_id = handle.task_id if handle else None
+
+    def _restore_selection(self) -> None:
+        if self._selected_task_id is None:
             return
-        if self._empty_item is not None:
-            index = self.tree.indexOfTopLevelItem(self._empty_item)
-            if index >= 0:
-                self.tree.takeTopLevelItem(index)
-            self._empty_item = None
+        for row, handle in enumerate(self.model._rows):
+            if handle.task_id == self._selected_task_id:
+                self.tree.selectRow(row)
+                return
 
-        wanted = [handle.task_id for handle in handles]
-        wanted_set = set(wanted)
-        for task_id in list(self._rows):
-            if task_id not in wanted_set:
-                self._drop_row(task_id)
-        current = []
-        for i in range(self.tree.topLevelItemCount()):
-            existing = self.tree.topLevelItem(i)
-            current.append(existing.data(0, self._ROLE_TASK_ID) if existing is not None else None)
-        if current != wanted:
-            # Reorder only: take + re-add keeps item widgets attached.
-            kept: list[QTreeWidgetItem] = []
-            while self.tree.topLevelItemCount():
-                taken = self.tree.takeTopLevelItem(0)
-                if taken is not None:
-                    kept.append(taken)
-            by_id = {item.data(0, self._ROLE_TASK_ID): item for item in kept}
-            for task_id in wanted:
-                item = by_id.get(task_id)
-                if item is None:
-                    item = self._create_row(task_id, scheduler)
-                self.tree.addTopLevelItem(item)
+    # -- 上下文菜单 ------------------------------------------------------------
 
-        labels = {
-            TaskState.QUEUED: ("排队", "queued"),
-            TaskState.RUNNING: ("运行中", "running"),
-            TaskState.DONE: ("完成", "done"),
-            TaskState.FAILED: ("失败", "failed"),
-            TaskState.CANCELLED: ("已取消", "cancelled"),
-        }
-        now = time.monotonic()
-        for handle in handles:
-            item, bar, cancel = self._rows[handle.task_id]
-            label, state_key = labels.get(handle.state, (str(handle.state), "queued"))
-            progress = round(handle.progress * 100)
-            item.setText(0, f"{label} {progress}%" if state_key == "running" else label)
-            item.setText(1, handle.spec.title or handle.spec.kind or handle.task_id)
-            elapsed_from = handle.started_at or handle.submitted_at
-            elapsed_to = handle.finished_at or now
-            item.setText(3, self._format_elapsed(max(0.0, elapsed_to - elapsed_from)))
-            color = QColor(_STATE_COLORS.get(state_key, tokens.TEXT_PRIMARY))
-            item.setForeground(0, color)
-            item.setToolTip(1, handle.message or handle.error or handle.task_id)
-            bar.setProperty("taskState", state_key)
-            bar.setValue(progress)
-            cancel.setVisible(handle.state in (TaskState.QUEUED, TaskState.RUNNING))
+    def _show_context_menu(self, position) -> None:
+        from paleo_workbench.runtime.task_scheduler import TaskState, get_scheduler
 
-    def _create_row(self, task_id: str, scheduler) -> QTreeWidgetItem:
-        """Build one row (item + bar + cancel button) exactly once per task."""
-        item = QTreeWidgetItem(["", "", "", "", ""])
-        item.setData(0, self._ROLE_TASK_ID, task_id)
-        self.tree.addTopLevelItem(item)
-        bar = QProgressBar(self.tree)
-        bar.setObjectName("WorkstationTaskProgress")
-        bar.setRange(0, 100)
-        bar.setValue(0)
-        bar.setTextVisible(False)
-        bar.setFixedHeight(6)
-        self.tree.setItemWidget(item, 2, bar)
-        cancel = QPushButton("取消", self.tree)
-        cancel.setObjectName("WorkstationTertiaryButton")
-        cancel.clicked.connect(
-            lambda _checked=False, tid=task_id: scheduler.cancel(tid)
+        index = self.tree.indexAt(position)
+        handle = self.model.handle_at(index.row()) if index.isValid() else None
+        if handle is None:
+            return
+        scheduler = get_scheduler()
+        menu = QMenu(self)
+        if handle.state in (TaskState.QUEUED, TaskState.RUNNING):
+            action = menu.addAction("取消")
+            action.triggered.connect(lambda: scheduler.cancel(handle.task_id))
+        if handle.state in (TaskState.FAILED, TaskState.CANCELLED):
+            action = menu.addAction("重试")
+            action.triggered.connect(lambda: scheduler.submit(handle.spec))
+        action = menu.addAction("复制任务 ID")
+        action.triggered.connect(
+            lambda: QApplication.clipboard().setText(handle.task_id)
         )
-        self.tree.setItemWidget(item, 4, cancel)
-        self._rows[task_id] = (item, bar, cancel)
-        return item
+        detail = menu.addAction("详情…")
+        detail.triggered.connect(lambda: self._show_details(handle))
+        menu.exec(self.tree.viewport().mapToGlobal(position))
 
-    def _drop_row(self, task_id: str) -> None:
-        entry = self._rows.pop(task_id, None)
-        if entry is None:
-            return
-        item, bar, cancel = entry
-        index = self.tree.indexOfTopLevelItem(item)
-        if index >= 0:
-            self.tree.takeTopLevelItem(index)
-        bar.deleteLater()
-        cancel.deleteLater()
+    def _show_details(self, handle) -> None:
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QPlainTextEdit, QVBoxLayout
 
-    def _drop_all_rows(self) -> None:
-        for task_id in list(self._rows):
-            self._drop_row(task_id)
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"任务详情 — {handle.spec.title or handle.task_id}")
+        layout = QVBoxLayout(dialog)
+        body = QPlainTextEdit()
+        body.setReadOnly(True)
+        body.setPlainText(
+            "\n".join(
+                [
+                    f"任务 ID: {handle.task_id}",
+                    f"类型: {handle.spec.kind}",
+                    f"状态: {getattr(handle.state, 'value', handle.state)}",
+                    f"进度: {round(handle.progress * 100)}%",
+                    f"消息: {handle.message or '—'}",
+                    f"错误: {handle.error or '—'}",
+                    f"结果: {repr(handle.result)[:2000] if handle.result is not None else '—'}",
+                ]
+            )
+        )
+        layout.addWidget(body)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        buttons.accepted.connect(dialog.accept)
+        layout.addWidget(buttons)
+        dialog.resize(520, 360)
+        dialog.exec()
 
     @staticmethod
-    def _format_elapsed(seconds: float) -> str:
+    def format_elapsed(seconds: float) -> str:
         if seconds < 60:
             return f"{seconds:.0f} s"
         minutes, remainder = divmod(int(seconds), 60)

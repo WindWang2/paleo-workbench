@@ -8,18 +8,24 @@ _GEOMETRY_TYPE = {"Point": "Point", "MultiPoint": "Point",
                   "Polygon": "Polygon", "MultiPolygon": "Polygon"}
 
 
-def mirror_snapshot_to_stack(stack, canvas_address, snapshot,
-                             diagnostics: list | None = None) -> tuple[list[str], list[str]]:
-    """Returns (mirrored_qgis_ids, seen_doc_ids).
+def mirror_snapshot_to_stack(
+    stack, canvas_address, snapshot
+) -> tuple[list[str], list[str], list[str]]:
+    """Mirror vector layers into the QGIS project (incremental reconcile).
 
-    #1164: per-layer and tail failures append ``(layer_id, error)`` to
-    *diagnostics* (when given) instead of vanishing in ``continue``/``pass``.
+    Returns ``(mirrored_qgis_ids, seen_doc_ids, failures)``.
+
+    #1164: failures are collected and surfaced to the host instead of being
+    swallowed — a dropped layer or a failed remove/order/refresh previously
+    left the mirror silently diverging from the document while
+    ``backend_status_changed`` still reported a healthy backend.
     """
+    failures: list[str] = []
     if snapshot.project_crs:
         try:
             stack.set_destination_crs(canvas_address, str(snapshot.project_crs))
-        except Exception:
-            pass
+        except Exception as exc:
+            failures.append(f"crs {snapshot.project_crs}: {exc}")
     seen: list[str] = []
     mirrored_qgis_ids: list[str] = []
     for layer in snapshot.layers:
@@ -91,16 +97,20 @@ def mirror_snapshot_to_stack(stack, canvas_address, snapshot,
                 msg = str(exc).lower()
                 if "renderer" in msg or "labeling" in msg or "invalid" in msg:
                     raise
-            if diagnostics is not None:
-                diagnostics.append((str(getattr(layer, "id", "?")), str(exc)))
+            failures.append(f"layer {layer.id}: {exc}")
             continue
         seen.append(layer.id)
         mirrored_qgis_ids.append(qgis_id)
     try:
         stack.remove_mirror_layers_except(seen)
+    except Exception as exc:
+        failures.append(f"remove_stale: {exc}")
+    try:
         stack.set_mirror_layer_order(seen)
+    except Exception as exc:
+        failures.append(f"set_order: {exc}")
+    try:
         stack.refresh_canvas(canvas_address)
     except Exception as exc:
-        if diagnostics is not None:
-            diagnostics.append(("<tail>", str(exc)))
-    return mirrored_qgis_ids, seen
+        failures.append(f"refresh: {exc}")
+    return mirrored_qgis_ids, seen, failures

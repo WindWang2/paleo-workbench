@@ -41,14 +41,13 @@ def test_digit_shortcut_switches_page(qtbot):
     assert shell.page_stack.currentIndex() == 2
 
 
-def test_digit_shortcut_syncs_ribbon_active_tab(qtbot):
+def test_digit_shortcut_switches_hub(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
-    assert shell.ribbon.active_tab == 0
+    assert shell.page_stack.currentIndex() == 0
 
     shell._shortcut_switch_page(4)
 
-    assert shell.ribbon.active_tab == 4
     assert shell.page_stack.currentIndex() == 4
 
 
@@ -74,16 +73,17 @@ def test_digit_shortcut_blocked_in_text_field(qtbot):
     assert shell.hub_data.current_key() == "management"
 
 
-def test_digit_shortcut_blocked_in_ribbon_search(qtbot):
-    """The ribbon's global search box is also a QLineEdit — must block."""
+def test_digit_shortcut_blocked_in_app_bar_command_input(qtbot):
+    """app bar 命令输入框也是 QLineEdit —— 数字快捷键必须被拦截。"""
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
     window.show()
     QApplication.setActiveWindow(window)
     shell = window.app_shell
-    shell.ribbon.search_box.setFocus()
+    command_input = shell.workstation.app_bar.command_input
+    command_input.setFocus()
     QApplication.processEvents()
-    assert QApplication.focusWidget() is shell.ribbon.search_box
+    assert QApplication.focusWidget() is command_input
 
     shell._shortcut_switch_page(3)  # no-op
 
@@ -156,8 +156,8 @@ def test_window_focus_search_targets_data_toolbar_when_data_page_active(qtbot):
     assert QApplication.focusWidget() is data_page.data_toolbar.search_box
 
 
-def test_window_focus_search_falls_back_to_ribbon(qtbot):
-    """When the active page has no data_toolbar, focus the ribbon search."""
+def test_window_focus_search_falls_back_to_app_bar(qtbot):
+    """无 data_toolbar 的页面：Ctrl+F 聚焦 app bar 命令输入框。"""
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
     window.show()
@@ -168,7 +168,10 @@ def test_window_focus_search_falls_back_to_ribbon(qtbot):
     window._shortcut_focus_search()
     QApplication.processEvents()
 
-    assert QApplication.focusWidget() is window.app_shell.ribbon.search_box
+    assert (
+        QApplication.focusWidget()
+        is window.app_shell.workstation.app_bar.command_input
+    )
 
 
 def test_window_shortcut_methods_callable(qtbot):

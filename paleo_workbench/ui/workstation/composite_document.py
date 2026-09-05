@@ -15,6 +15,7 @@ QGIS 权威）；属性表 / 识别结果 / 捕捉设置 / split·merge·topolog
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import replace
 import zlib
 
@@ -58,6 +59,7 @@ from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
 from paleo_workbench.ui.map_status_bar import MapStatusBar
 from paleo_workbench.ui.qgis_stack.canvas_shim import QgisCanvasShim
 from paleo_workbench.ui.qgis_stack.layer_tree_panel import QgisLayerTreePanel
+from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 from paleo_workbench.ui.workstation.common import workstation_icon
 from paleo_workbench.ui.workstation.composite_attribute_table import (
     CompositeAttributeTableDialog,
@@ -704,8 +706,16 @@ class CompositeDocument(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.canvas = QgisCanvasShim(parent=self)
+        self.canvas, self.uses_native_stack = self._create_canvas()
         layout.addWidget(self.canvas, 1)
+        # 空态提示（视觉 QA 11）：无任何编修/参考图层时中央画布给明确引导，
+        # 而不是一片纯白；有内容即隐藏，不影响正常渲染。
+        self._empty_hint = QLabel("空工程 — 从左侧 Explorer 导入数据，"
+                                  "或用工具条「新建图层」开始编图", self.canvas)
+        self._empty_hint.setObjectName("CompositeEmptyHint")
+        self._empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._empty_hint.hide()
 
         # 识别结果（多图层 Identify）与运行状态栏：图件主视图的诚实附属层。
         self.identify_results = IdentifyResultsPanel(self)
@@ -750,14 +760,20 @@ class CompositeDocument(QWidget):
         self.canvas.map_position_changed.connect(self._on_map_position)
         self.canvas.backend_status_changed.connect(lambda *_: self._sync_status_bar())
 
-        # 面板实例（dock 由宿主 QMainWindow 创建并管理）
-        self.layer_manager = QgisLayerTreePanel()
+        # 面板实例（dock 由宿主 QMainWindow 创建并管理）。图层管理面板跟随
+        # 画布形态：原生栈用 QgsLayerTreeView 面板，回退画布用同信号接缝的
+        # LayerManagerPanel（QTreeWidget 自绘树）——两套面板 16 个请求信号同构。
+        self.layer_manager = self._create_layer_manager()
         self.input_tree = InputTreePanel(project)
         self.linked_views = LinkedViewsPanel()
         self.input_tree.object_selected.connect(self.object_selected.emit)
         self.layer_manager.create_layer_requested.connect(self._create_vector_layer)
         self.layer_manager.remove_layer_requested.connect(self._remove_vector_layer)
-        # 树内改名直接生效并回写（QgisLayerTreePanel 无 rename_layer_requested）
+        if not self.uses_native_stack:
+            # 树内改名在回退面板走请求信号（原生 QgsLayerTreeView 直接改名回写）。
+            self.layer_manager.rename_layer_requested.connect(
+                self._rename_layer_prompt
+            )
         self.layer_manager.import_reference_requested.connect(self._import_reference_layer)
         self.layer_manager.remove_reference_requested.connect(self._remove_reference_layer)
         self.layer_manager.refresh_reference_requested.connect(self._refresh_reference_layer)
@@ -783,10 +799,51 @@ class CompositeDocument(QWidget):
         self.layer_manager.duplicate_layer_requested.connect(self._duplicate_vector_layer)
         self.layer_manager.export_layer_requested.connect(self._export_layer)
         self.layer_manager.repair_layer_requested.connect(self._repair_layer)
-        self.layer_manager.display_state_changed.connect(self.notify_display_changed)
+        if self.uses_native_stack:
+            # 显示态回写只有原生树面板产生（回退面板的显示态经自身信号即时生效）。
+            self.layer_manager.display_state_changed.connect(self.notify_display_changed)
 
         self._build_toolbar()
         self.set_project(project)
+
+    # -- 画布 / 面板形态 -------------------------------------------------------
+
+    def _create_canvas(self) -> tuple[QWidget, bool]:
+        """优先原生 QGIS 地图栈；桥缺失/初始化失败时诚实降级回退画布。
+
+        回退不伪装原生能力：UnifiedMapCanvas 的 backend_status 会如实报告
+        fallback 渲染器；原生专属分支（QgsVectorLayerProperties 等）以
+        ``uses_native_stack`` 显式判断。桥构建指引见 canvas_shim 的报错文案。
+        """
+        try:
+            return QgisCanvasShim(parent=self), True
+        except Exception:
+            # RuntimeError（桥未装）之外的异常也可能从 shim 构造链冒出
+            # （QgisCanvasHost / 事件attach 等）；降级必须兜住整个链路，
+            # 否则一台环境有问题的机器直接打不开工作站。
+            logging.getLogger(__name__).exception(
+                "QGIS 画布栈初始化失败，回退 fallback 画布"
+            )
+            return UnifiedMapCanvas(parent=self), False
+
+    def _create_layer_manager(self) -> QWidget:
+        """图层管理面板跟随画布形态（两套面板请求信号同构，见类 docstring）。"""
+        if self.uses_native_stack:
+            return QgisLayerTreePanel()
+        return LayerManagerPanel()
+
+    def _rename_layer_prompt(self, layer_id: str) -> None:
+        """回退树面板的改名请求：QInputDialog → edit_controller.rename_layer。"""
+        layer = self.edit_controller.layer(str(layer_id))
+        if layer is None:
+            return
+        from PySide6.QtWidgets import QInputDialog
+
+        name, ok = QInputDialog.getText(
+            self, "重命名图层", "图层名称", text=str(layer.name or "")
+        )
+        if ok and str(name).strip():
+            self.edit_controller.rename_layer(str(layer_id), str(name).strip())
 
     # -- 悬浮工具条 -----------------------------------------------------------
 
@@ -954,6 +1011,7 @@ class CompositeDocument(QWidget):
         self._sync_status_bar(point=tuple(point))
 
     def _sync_action_state(self) -> None:
+        self._update_empty_hint()
         self.action_controller.update_state(
             self.edit_controller.action_state(
                 can_previous_extent=self.canvas.can_previous_extent,
@@ -991,6 +1049,45 @@ class CompositeDocument(QWidget):
             action.setChecked(bool(checked))
             action.blockSignals(False)
         self._sync_status_bar()
+
+    def _update_empty_hint(self) -> None:
+        """空画布引导：编修/参考/工程基础内容全都没有时才显示。
+
+        视觉 QA（07/12）矛盾修复：工程已有井/地震/层位（基础工区图层由
+        set_project 组装）时画布并非空态，不得再挂「空工程」文案。
+        """
+        try:
+            project = self._project
+            has_base = bool(
+                project is not None
+                and (project.wells or project.resources or project.paleomap_documents)
+            )
+            empty = (
+                not self.edit_controller.layer_ids()
+                and not self._reference_layers
+                and not has_base
+            )
+        except RuntimeError:
+            return
+        self._empty_hint.setVisible(bool(empty))
+        if empty:
+            self._empty_hint.setGeometry(self.canvas.rect())
+            self._empty_hint.raise_()
+            # 构造期isVisible 尚为 False（窗口未显示），布局后的真实画布
+            # 矩形要等显示完成才拿得到；延迟一拍再对齐一次。
+            QTimer.singleShot(0, self._sync_hint_geometry)
+
+    def _sync_hint_geometry(self) -> None:
+        hint = getattr(self, "_empty_hint", None)
+        if hint is None or not hint.isVisible():
+            return
+        target = self.canvas.rect()
+        # 等值守卫：setGeometry/raise_ 会触发画布布局回流并再次进入
+        # resizeEvent → 本函数，无差别重设会无限递归（实测 maximum
+        # recursion depth）；收敛后必须成为 no-op。
+        if hint.geometry() != target:
+            hint.setGeometry(target)
+            hint.raise_()
 
     def _sync_status_bar(self, *, point=None) -> None:
         controller = self.edit_controller
@@ -1113,6 +1210,10 @@ class CompositeDocument(QWidget):
             self.status_message.emit("未发现需要修复的无效几何")
 
     # -- 图层属性 / 符号系统 / 标注（复用 MapLayerPropertiesDialog） ----------
+
+    def open_layer_properties(self, layer_id: str, *, focus: str = "symbology") -> None:
+        """公开入口：检查器/资源树把用户送去图层属性（同一套符号系统）。"""
+        self._open_layer_properties(layer_id, focus=focus)
 
     def _open_layer_properties(self, layer_id: str, *, focus: str = "") -> None:
         """图层属性对话框：QGIS 桥可用走原生符号编辑器，否则 legacy 快速字段。
@@ -1649,8 +1750,21 @@ class CompositeDocument(QWidget):
         above map chrome and leave 8px top / ≥12px side inset so it does not
         collide with docked panel edges on narrow widths.
         """
-        self.toolbar.adjustSize()
+        # 窄画布：先收起纯文本的 dock 切换钮（面板菜单保留同功能入口），
+        # 否则工具条溢出画布右缘、按钮文字被截断（B17 视觉审查）。
         margin_x = 12
+        budget = self.width() - 2 * margin_x
+        toggles = (
+            self.well_track_button,
+            self.seismic_section_button,
+            self.link_button,
+        )
+        self.toolbar.adjustSize()
+        overflow = self.toolbar.width() > budget
+        for button in toggles:
+            button.setVisible(not overflow)
+        if overflow:
+            self.toolbar.adjustSize()
         y = 8
         x = max(margin_x, (self.width() - self.toolbar.width()) // 2)
         max_x = max(margin_x, self.width() - self.toolbar.width() - margin_x)
@@ -1660,6 +1774,9 @@ class CompositeDocument(QWidget):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._reposition_toolbar()
+        # 画布随窗口/布局变化后，空态提示必须盖满当前画布矩形（否则残留
+        # 布局前的小矩形，文字被截断或不可见）。
+        self._sync_hint_geometry()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)

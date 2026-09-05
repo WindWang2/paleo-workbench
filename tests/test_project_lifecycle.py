@@ -284,11 +284,11 @@ def test_project_menu_signals_wired_after_refresh(qtbot, monkeypatch):
         window, "_on_new_project", lambda: counter.__setitem__("n", counter["n"] + 1)
     )
 
-    # Force a shell rebuild — _refresh_shell must re-wire the new ribbon.
+    # Force a shell rebuild — _refresh_shell must re-wire the new shell signals.
     window.new_project("After Refresh")
 
-    # Emit on the freshly built ribbon; the patched handler should fire.
-    window.app_shell.ribbon.new_project_requested.emit()
+    # Emit on the freshly built shell; the patched handler should fire.
+    window.app_shell.new_project_requested.emit()
 
     assert counter["n"] == 1
 

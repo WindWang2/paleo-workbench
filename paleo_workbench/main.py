@@ -194,7 +194,12 @@ def main() -> int:
     # top-level window outside AppShell.
     from paleo_workbench.ui.theme import theme_manager
 
+    theme_manager.load_persisted()
     app.setStyleSheet(theme_manager.get_qss())
+    # 图标染色缓存随主题清空（B1）；幂等。
+    from paleo_workbench.ui.workstation.common import install_theme_hook
+
+    install_theme_hook()
 
     from paleo_workbench.viz.render_accel import install_geoviz_acceleration
 

@@ -78,6 +78,7 @@ class QgisLayerTreePanel(QWidget):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("PanelCard")
+        self._manage_buttons: list[QToolButton] = []
         self._layers: list = []
         self._canvas = None
         self._project_crs = ""
@@ -108,13 +109,18 @@ class QgisLayerTreePanel(QWidget):
             button.setObjectName("WorkstationContextButton")
             button.setIcon(_icon(icon))
             button.setText(label)
-            button.setToolTip(tip)
+            button.setToolTip(f"{label} — {tip}")
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             button.clicked.connect(callback)
             manage_row.addWidget(button)
+            button.setProperty("fullWidth", button.sizeHint().width())
+            self._manage_buttons.append(button)
             if label == "删除图层":
                 self.remove_button = button
         self.remove_button.setEnabled(False)
+        from PySide6.QtCore import QTimer
+
+        QTimer.singleShot(0, self._update_manage_button_style)
         manage_row.addStretch(1)
         outer.addLayout(manage_row)
 
@@ -166,6 +172,30 @@ class QgisLayerTreePanel(QWidget):
             project_crs=self._project_crs or "EPSG:4326",
             layers=tuple(self._layers),
         )
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 — Qt 契约
+        super().resizeEvent(event)
+        self._update_manage_button_style()
+
+    def _update_manage_button_style(self) -> None:
+        """宽度不足时按钮收成图标态（QGIS 图层面板惯例，tooltip 留全名）。
+
+        阈值用构造期记录的完整模式 sizeHint（fullWidth 属性），随主题/
+        字号自然缩放；图标态下 sizeHint 收缩会造成振荡，因此不读实时值。
+        """
+        full = sum(
+            int(button.property("fullWidth") or 0)
+            for button in self._manage_buttons
+        )
+        if not full:
+            return
+        icon_only = self.width() < full + 16
+        for button in self._manage_buttons:
+            button.setToolButtonStyle(
+                Qt.ToolButtonStyle.ToolButtonIconOnly
+                if icon_only
+                else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+            )
 
     def _publish(self, *, reload_tree: bool = True) -> None:
         """推快照到画布；树由 reconcile 自动跟随（reload_tree 仅保签名兼容）。"""

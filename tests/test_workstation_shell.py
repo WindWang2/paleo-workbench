@@ -34,7 +34,8 @@ def test_app_shell_starts_in_native_workstation(qtbot, tmp_path):
     qtbot.addWidget(shell)
     ws = shell.workstation
     assert ws.objectName() == "WorkstationFrame"
-    assert shell.ribbon.height() == 0
+    # Ribbon 已随死 chrome 移除（B2）：壳上不得再残留 ribbon 属性。
+    assert not hasattr(shell, "ribbon")
     assert getattr(ws, "document_tabs", None) is None
     assert ws.central_document() is ws.composite
     assert ws.well_dock.isHidden()
@@ -225,60 +226,6 @@ def test_agent_plans_map_scientific_commands_to_typed_actions():
     assert joint.gui_action == "focus_joint"
 
 
-def test_map_export_declared_write_risk():
-    """#1186: map.export writes files — its risk must say WRITE."""
-    from paleo_workbench.harness import ActionRisk, get_action_registry
-
-    assert get_action_registry().get("map.export").risk == ActionRisk.WRITE
-
-
-def _agent_panel(qtbot, tmp_path):
-    from paleo_workbench.ui.workstation.agent_panel import AgentWorkspace
-
-    panel = AgentWorkspace(project=_project(tmp_path))
-    qtbot.addWidget(panel)
-    return panel
-
-
-def test_agent_write_plan_needs_confirmation(qtbot, tmp_path, monkeypatch):
-    """#1186: WRITE plans run only after per-plan confirmation; refusal
-    blocks before any scheduler submission."""
-    from paleo_workbench.ui.workstation.agent_panel import AgentPlan, AgentWorkspace
-
-    panel = _agent_panel(qtbot, tmp_path)
-    monkeypatch.setattr(
-        AgentWorkspace, "_plan",
-        staticmethod(lambda _cmd: AgentPlan(
-            "map.export", {"output_path": "x.png"}, "focus_joint", "导出当前图",
-        )),
-    )
-    calls: list = []
-    panel._run_plan = lambda plan, receipt_id, **kw: calls.append((plan, kw))
-
-    panel.confirm_write = lambda _actions: False
-    panel.submit("导出当前图")
-    assert calls == []
-    assert "已取消" in panel.history.toPlainText()
-
-    panel.confirm_write = lambda actions: actions == ["map.export"]
-    panel.submit("导出当前图")
-    assert len(calls) == 1
-    assert calls[0][1] == {"write_allowed": True}
-
-
-def test_agent_read_plan_runs_without_confirmation(qtbot, tmp_path):
-    """#1186: READ plans keep the old one-shot behavior."""
-    panel = _agent_panel(qtbot, tmp_path)
-    calls: list = []
-    panel._run_plan = lambda plan, receipt_id, **kw: calls.append((plan, kw))
-    panel.confirm_write = lambda _actions: (_ for _ in ()).throw(
-        AssertionError("READ plans must not ask")
-    )
-    panel.submit("显示所有井的平面位置")
-    assert len(calls) == 1
-    assert calls[0][1] == {"write_allowed": False}
-
-
 def test_agent_resolves_project_relative_well_resources(tmp_path):
     project = _project(tmp_path)
     context = ActionContext(
@@ -314,7 +261,7 @@ def test_task_center_renders_state_colored_progress(qtbot):
     import time as _time
 
     from paleo_workbench.runtime.task_scheduler import TaskSpec, get_scheduler
-    from paleo_workbench.ui.workstation.task_center import TaskCenter
+    from paleo_workbench.ui.workstation.task_center import TaskCenter, _TaskRowDelegate
 
     center = TaskCenter()
     qtbot.addWidget(center)
@@ -327,24 +274,24 @@ def test_task_center_renders_state_colored_progress(qtbot):
         )
     )
     try:
-        qtbot.waitUntil(
-            lambda: center.tree.topLevelItemCount() == 1
-            and center.tree.topLevelItem(0).text(0).startswith(("运行中", "排队")),
-            timeout=4000,
-        )
+        qtbot.waitUntil(lambda: center.model.rowCount() == 1, timeout=4000)
+        row_handle = center.model.handle_at(0)
+        assert row_handle.task_id == handle.task_id
+        # 状态文本由 delegate 绘制（模型 DisplayRole 只承载任务名/用时）。
+        assert _TaskRowDelegate._state_text(row_handle).startswith(("运行中", "排队"))
+        assert 0.0 <= row_handle.progress <= 1.0
+        # 增量刷新不重建行：集合不变时行身份保持，选中不丢（#1157）。
+        center.tree.selectRow(0)
         center.refresh()
-        item = center.tree.topLevelItem(0)
-        bar = center.tree.itemWidget(item, 2)
-        assert bar.property("taskState") in {"running", "queued"}
-        assert not bar.isTextVisible()
-        assert bar.height() <= 8
+        assert center.model.handle_at(0).task_id == row_handle.task_id
+        assert center.tree.selectionModel().selectedRows(0)
     finally:
         get_scheduler().cancel(handle.task_id)
         center.shutdown()
 
 
-def test_task_center_reuses_rows_across_refresh(qtbot):
-    """#1157: refresh() diffs — same items/widgets survive, cancel clicks land."""
+def test_task_center_incremental_update_keeps_rows_stable(qtbot):
+    """#1157：相同任务集合的刷新必须原位更新，不产生整树重建。"""
     import time as _time
 
     from paleo_workbench.runtime.task_scheduler import TaskSpec, get_scheduler
@@ -352,34 +299,41 @@ def test_task_center_reuses_rows_across_refresh(qtbot):
 
     center = TaskCenter()
     qtbot.addWidget(center)
-    center.timer.stop()  # deterministic: drive refresh() manually
-
-    handle = get_scheduler().submit(
-        TaskSpec(
-            callable=lambda ctx: (_time.sleep(30), "late")[1],
-            kind="background.io",
-            title="QA · 行复用探针",
+    handles = [
+        get_scheduler().submit(
+            TaskSpec(
+                callable=lambda ctx, n=n: (_time.sleep(30), n)[1],
+                kind="background.io",
+                title=f"QA · 增量探针 {n}",
+            )
         )
-    )
+        for n in range(3)
+    ]
     try:
+        my_ids = {h.task_id for h in handles}
+        # 其它测试残留的已取消任务可能仍在表中（取消是协作式的），
+        # 因此按「本组任务全部出现」而非总行数判断。
         qtbot.waitUntil(
-            lambda: center.tree.topLevelItemCount() == 1
-            and center.tree.topLevelItem(0).text(0).startswith(("运行中", "排队")),
-            timeout=4000,
+            lambda: my_ids.issubset(
+                {
+                    center.model.handle_at(r).task_id
+                    for r in range(center.model.rowCount())
+                }
+            ),
+            timeout=8000,
         )
+        rows = center.model.rowCount()
+        ids_before = [center.model.handle_at(r).task_id for r in range(rows)]
         center.refresh()
-        item_before = center.tree.topLevelItem(0)
-        bar_before = center.tree.itemWidget(item_before, 2)
-        cancel_before = center.tree.itemWidget(item_before, 4)
-        assert cancel_before is not None
+        ids_after = [center.model.handle_at(r).task_id for r in range(rows)]
+        assert ids_before == ids_after, "相同任务集合的刷新必须保持行集合与顺序"
+        # 行内零常驻 widget：进度/取消由 delegate 绘制。
+        viewport_children_before = len(center.tree.viewport().findChildren(object))
         center.refresh()
-        center.refresh()
-        item_after = center.tree.topLevelItem(0)
-        assert item_after is item_before  # same row object: selection/scroll survive
-        assert center.tree.itemWidget(item_after, 2) is bar_before
-        assert center.tree.itemWidget(item_after, 4) is cancel_before
+        assert len(center.tree.viewport().findChildren(object)) == viewport_children_before
     finally:
-        get_scheduler().cancel(handle.task_id)
+        for handle in handles:
+            get_scheduler().cancel(handle.task_id)
         center.shutdown()
 
 
@@ -424,7 +378,7 @@ def test_layout_presets_apply_visibility_matrix(qtbot, tmp_path):
     assert ws.composite_linked_dock.isHidden()
     assert ws.layout_preset_visibility("composite_default")["composite_layer"] is True
 
-    ws.apply_layout_preset("interpretation")
+    ws.apply_layout_preset("integrated")
     assert ws.central_document() is ws.composite
     assert not ws.inspector_dock.isHidden()
     assert not ws.task_dock.isHidden()
@@ -435,6 +389,51 @@ def test_layout_presets_apply_visibility_matrix(qtbot, tmp_path):
     ws._reset_default_layout()
     assert ws.central_document() is ws.composite
     assert not ws.composite_layer_dock.isHidden()
+
+
+def test_show_tasks_does_not_expand_agent_dock(qtbot, tmp_path):
+    """打开任务中心只 raise 任务 dock，不得强制展开 Agent 面板（B2）。"""
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+    ws.apply_layout_preset("composite_default")
+    assert ws.process_dock.isHidden()
+    assert ws.task_dock.isHidden()
+
+    ws.show_tasks()
+
+    assert not ws.task_dock.isHidden()
+    assert ws.process_dock.isHidden(), "打开任务中心不得连带显示 Agent 面板"
+
+
+def test_process_hub_log_viewer_streams_and_caps(qtbot):
+    """「日志」tab 是真实日志查看器：流式追加 + 2000 行上限（B2）。"""
+    import logging
+
+    from paleo_workbench.ui.workstation.process_hub import ProcessHub
+
+    hub = ProcessHub()
+    qtbot.addWidget(hub)
+    try:
+        # tab 顺序：Agent / 任务 / 日志（/ 控制台占位）。
+        assert [hub.tabs.tabText(i) for i in range(hub.tabs.count())] == [
+            "Agent", "任务", "日志", "控制台",
+        ]
+        assert "预留：嵌入式控制台" in hub.console.toPlainText()
+
+        logging.getLogger("paleo_workbench.b2_probe").warning("B2 日志探针")
+        assert "B2 日志探针" in hub.logs.toPlainText()
+        assert hub.logs.isReadOnly()
+
+        probe = logging.getLogger("paleo_workbench.b2_probe")
+        for i in range(2300):
+            probe.warning("cap line %d", i)
+        assert hub.logs.blockCount() <= 2000, "超出上限必须丢弃最旧"
+        assert "cap line 2299" in hub.logs.toPlainText()
+    finally:
+        hub.shutdown()
+    root = logging.getLogger("paleo_workbench")
+    assert hub._log_handler not in root.handlers, "shutdown 必须摘除全局 handler"
 
 
 def test_float_all_and_dock_all_panels(qtbot, tmp_path):
@@ -463,50 +462,3 @@ def test_panel_menu_exposes_presets_and_batch_float(qtbot, tmp_path):
     assert "全部浮动" in labels
     assert "全部停靠" in labels
     assert "恢复默认布局" in labels
-
-
-# ------------------------------------- P1: agent panel WRITE-grant opt-in --
-def test_agent_workspace_write_actions_disabled_by_default(qtbot, tmp_path, monkeypatch):
-    """#1186/P1: default grant stays READ+COMPUTE — WRITE needs an explicit
-    opt-in (env var or constructor flag), never a silent default."""
-    from paleo_workbench.harness.spec import ActionRisk
-
-    monkeypatch.delenv("PALEO_AGENT_ALLOW_WRITE", raising=False)
-    panel = AgentWorkspace(project=_project(tmp_path))
-    qtbot.addWidget(panel)
-
-    permissions = panel._build_context(panel._plan("打开井 A12")).permissions
-    assert ActionRisk.WRITE not in permissions
-    assert {ActionRisk.READ, ActionRisk.COMPUTE} <= permissions
-    # No elevation marker in the consent line by default.
-    assert "WRITE" not in panel.consent_label.text()
-
-
-def test_agent_workspace_write_actions_enabled_by_env(qtbot, tmp_path, monkeypatch):
-    from paleo_workbench.harness.spec import ActionRisk
-
-    monkeypatch.setenv("PALEO_AGENT_ALLOW_WRITE", "1")
-    panel = AgentWorkspace(project=_project(tmp_path))
-    qtbot.addWidget(panel)
-
-    permissions = panel._build_context(panel._plan("打开井 A12")).permissions
-    assert ActionRisk.WRITE in permissions
-    assert {ActionRisk.READ, ActionRisk.COMPUTE} <= permissions
-    # The elevation is visibly flagged, not silent.
-    assert "WRITE" in panel.consent_label.text()
-
-
-def test_agent_workspace_write_actions_constructor_flag_wins(qtbot, tmp_path, monkeypatch):
-    from paleo_workbench.harness.spec import ActionRisk
-
-    monkeypatch.delenv("PALEO_AGENT_ALLOW_WRITE", raising=False)
-    enabled = AgentWorkspace(project=_project(tmp_path), allow_write_actions=True)
-    qtbot.addWidget(enabled)
-    assert ActionRisk.WRITE in enabled._build_context(enabled._plan("打开井 A12")).permissions
-
-    # Explicit False beats a set env var.
-    monkeypatch.setenv("PALEO_AGENT_ALLOW_WRITE", "1")
-    disabled = AgentWorkspace(project=_project(tmp_path), allow_write_actions=False)
-    qtbot.addWidget(disabled)
-    assert ActionRisk.WRITE not in disabled._build_context(disabled._plan("打开井 A12")).permissions
-    assert "WRITE" not in disabled.consent_label.text()

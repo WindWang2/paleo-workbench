@@ -126,8 +126,10 @@ class QgisDisplayCanvas(QWidget):
             if vp is not None:
                 vp.installEventFilter(self._filter)
         self.stack.set_map_tool(self.canvas_address, "pan")
+        # Qt 树析构期间绝不能 shutdown 整个栈（在半析构画布上进
+        # destroyCanvas/unsetMapTool 会踩悬空子对象）；只做状态记账。
         try:
-            self.destroyed.connect(lambda _obj=None: self.shutdown())
+            self.destroyed.connect(lambda _obj=None: self._mark_disposed())
         except Exception:
             pass
 
@@ -186,7 +188,9 @@ class QgisDisplayCanvas(QWidget):
             return
         self._snapshot = snapshot
         self._backend._snapshot = snapshot
-        mirror_snapshot_to_stack(self.stack, self.canvas_address, snapshot)
+        _, _, failures = mirror_snapshot_to_stack(
+            self.stack, self.canvas_address, snapshot)
+        self._mirror_failures = list(failures)
         self._overlay.update()
         self.backend_status_changed.emit(self.backend_status)
 
@@ -215,6 +219,11 @@ class QgisDisplayCanvas(QWidget):
 
     @property
     def backend_status(self) -> str:
+        # #1164 一致性：镜像失败诊断在 shim 与 display 两种画布上同样
+        # 反映到状态（此前 display 恒报健康，失同步无人知晓）。
+        failures = getattr(self, "_mirror_failures", None) or []
+        if failures:
+            return f"qgis: degraded ({len(failures)} mirror failures)"
         return "qgis"
 
     @property
@@ -285,6 +294,11 @@ class QgisDisplayCanvas(QWidget):
             self.stack.shutdown()
         except Exception:
             pass
+
+    def _mark_disposed(self) -> None:
+        self._shutdown_done = True
+        # 放开栈引用：~QgisMapStack 在画布亡后走守卫路径回收 owned project。
+        self.stack = None
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self.shutdown()

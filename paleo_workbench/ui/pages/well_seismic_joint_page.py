@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
 class WellSeismicJointPage(QWidget):
     """Toolbar + joint widget; all scene lifecycle is on the host."""
 
+    def shutdown_workers(self, wait_ms: int = 400) -> bool:
+        """有界停机（#1158）：AppShell 项目切换时显式收尾本页 host。"""
+        return bool(self._host.shutdown(wait_ms=wait_ms))
+
     def __init__(self, parent=None, project: ProjectDocument | None = None):
         super().__init__(parent)
         self.setObjectName("WellSeismicJointPage")

@@ -186,6 +186,26 @@ class WellLogCanvasPanel(QFrame):
     def backend(self) -> str:
         return self._backend
 
+    def depth_cursor_supported(self) -> bool:
+        """Whether the selected backend can publish depth cursors at all.
+
+        The legacy canvas exposes a mouse-move crosshair; the native engine
+        binding (0.1.0) has no hover/pointer API yet, so with ``engine``
+        selected the depth-cursor producer is silent. Surfaced so hosts can
+        say so instead of dropping the linkage quietly.
+        """
+        return self.backend() != "engine"
+
+    def is_native_backend(self) -> bool:
+        """Read-only: whether the *selected* backend is the native engine.
+
+        Selection only — after a failed native load the panel keeps ``engine``
+        selected for explicit retry while painting through the Legacy
+        fallback; ``self.stack.currentWidget() is self.engine_host`` answers
+        "what is on screen right now".
+        """
+        return self._backend == "engine"
+
     def set_backend(self, name: str) -> None:
         """Explicit Legacy ↔ WellLogEngine switch (does not remove Legacy)."""
         target: BackendName = "engine" if name == "engine" else "legacy"

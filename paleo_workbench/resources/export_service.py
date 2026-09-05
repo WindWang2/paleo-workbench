@@ -108,6 +108,7 @@ def _resolve_export_target(widget: Any) -> Any:
         hasattr(canvas, "export_composite")
         or hasattr(canvas, "paint_all")
         or _is_paleo_map_canvas(canvas)
+        or _is_unified_map_canvas(canvas)
         or _is_native_factor_map_canvas(canvas)
     ):
         return canvas
@@ -139,8 +140,13 @@ def _is_native_factor_map_canvas(widget: Any) -> bool:
 
 
 def _is_unified_map_canvas(widget: Any) -> bool:
-    """Recognize the renderer-backed authoring surface without importing Qt here."""
-    return type(widget).__name__ == "UnifiedMapCanvas" and hasattr(widget, "export_png")
+    """Recognize the renderer-backed authoring surface by capability, not type.
+
+    Duck-type probe: the legacy ``UnifiedMapCanvas`` and the QGIS canvas shim
+    (``QgisCanvasShim``) share the ``export_png`` contract; comparing type
+    names locked the QGIS workstation path out of view export (#B8).
+    """
+    return hasattr(widget, "export_png")
 
 
 def _export_surface_kind(widget: Any) -> str:

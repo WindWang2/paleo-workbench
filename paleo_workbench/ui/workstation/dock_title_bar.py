@@ -8,7 +8,7 @@ floating; this bar is the in-content chrome.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, QPoint, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -24,15 +24,20 @@ from paleo_workbench import tokens
 from paleo_workbench.ui.workstation.common import workstation_icon
 
 
-_TITLE_QSS = f"""
+def _title_qss() -> str:
+    """主题感知的 dock 标题栏样式（B1：暗色切换时随 palette 重渲染）。"""
+    from paleo_workbench.ui import style
+
+    pal = style.palette()
+    return f"""
 QWidget#WorkstationDockTitleBar {{
-    background: {tokens.BG_HEADER};
-    border-bottom: 1px solid {tokens.BORDER};
+    background: {pal['BG_HEADER']};
+    border-bottom: 1px solid {pal['BORDER']};
     min-height: 28px;
     max-height: 30px;
 }}
 QLabel#WorkstationDockTitleLabel {{
-    color: {tokens.TEXT_PRIMARY};
+    color: {pal['TEXT_PRIMARY']};
     font-size: 12px;
     font-weight: 600;
     padding-left: 8px;
@@ -41,7 +46,7 @@ QToolButton#WorkstationDockTitleButton {{
     background: transparent;
     border: none;
     border-radius: 3px;
-    color: {tokens.TEXT_SECONDARY};
+    color: {pal['TEXT_SECONDARY']};
     min-width: 22px;
     max-width: 22px;
     min-height: 22px;
@@ -50,11 +55,11 @@ QToolButton#WorkstationDockTitleButton {{
     margin: 0 1px;
 }}
 QToolButton#WorkstationDockTitleButton:hover {{
-    background: {tokens.BG_SEARCH};
-    color: {tokens.PRIMARY};
+    background: {pal['BG_SEARCH']};
+    color: {pal['PRIMARY']};
 }}
 QToolButton#WorkstationDockTitleButton:pressed {{
-    background: {tokens.BG_SELECTION};
+    background: {pal['BG_SELECTION']};
 }}
 """
 
@@ -100,7 +105,10 @@ class DockTitleBar(QWidget):
         self._close_btn.clicked.connect(self._request_close)
         layout.addWidget(self._close_btn)
 
-        self.setStyleSheet(_TITLE_QSS)
+        # B1：动态注册 —— 主题切换时 style.repolish_all 重渲染。
+        from paleo_workbench.ui import style as _style
+
+        _style.bind(self, _title_qss)
         self._sync_float_affordance()
         self._sync_feature_buttons()
 
@@ -277,4 +285,32 @@ def install_dock_title_bar(dock: QDockWidget, title: str | None = None) -> DockT
     """Attach a :class:`DockTitleBar` to ``dock`` and return it."""
     bar = DockTitleBar(dock, title=title or dock.windowTitle())
     dock.setTitleBarWidget(bar)
+    _install_tabified_tracking(dock, bar)
     return bar
+
+
+def _install_tabified_tracking(dock: QDockWidget, bar: DockTitleBar) -> None:
+    """Tab 化时隐藏自绘标题栏：活动 tab 本身已显示标题，保留标题栏会
+    出现同一标题上下两份（B17 视觉审查）。浮动/独立停靠时恢复。
+    """
+    host = dock.parentWidget()
+
+    def _update() -> None:
+        try:
+            main = dock.parentWidget()
+            tabified = False
+            if main is not None and hasattr(main, "tabifiedDockWidgets"):
+                tabified = bool(main.tabifiedDockWidgets(dock))
+        except RuntimeError:
+            return  # dock/bar 已随 teardown 拆毁：迟到的校准直接忽略
+        try:
+            bar.setVisible(not tabified)
+        except RuntimeError:
+            pass
+
+    dock.topLevelChanged.connect(lambda *_: _update())
+    dock.dockLocationChanged.connect(lambda *_: _update())
+    dock.visibilityChanged.connect(lambda *_: _update())
+    if host is not None and hasattr(host, "customEvent"):
+        # 初次装配后也校准一次（启动时可能已 tab 化）。
+        QTimer.singleShot(0, _update)

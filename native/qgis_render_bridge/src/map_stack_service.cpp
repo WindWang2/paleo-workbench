@@ -1,3 +1,7 @@
+// pybind11 (and therefore Python.h) must be included BEFORE any Qt/QGIS
+// header: Qt redefines `slots`, which corrupts PyType_Spec in object.h.
+#include <pybind11/pybind11.h>
+
 #include "map_stack_service.hpp"
 
 #include <algorithm>
@@ -62,6 +66,7 @@
 #include <qgssnappingconfig.h>
 #include <qgssnappingutils.h>
 #include <qgsvectorlayer.h>
+#include <qgswkbtypes.h>
 #include <qgsvectorlayerlabeling.h>
 #include <qgsvectorlayerproperties.h>
 
@@ -76,6 +81,9 @@ namespace pwb::qgis_render {
 #endif
 extern const std::string PALEO_QGIS_PREFIX_PATH;
 extern std::mutex g_qgis_lifecycle_mutex;
+// #1155: process-level "initQgis ran exactly once" flag owned by
+// qgis_render_bridge.cpp; QGIS 4.2 is not safely re-initializable, so every
+// initialization path must share this guard.
 extern bool g_qgis_initialized;
 
 namespace {
@@ -441,6 +449,14 @@ struct QgisMapStack::Impl {
   std::vector<std::function<void(const std::string&)>> orphan_tree_callbacks;
   std::vector<std::function<void(const std::string&, const std::string&)>>
       orphan_tree_menu_callbacks;
+  // 画布侧回调坟场（同上理由）：canvas destroyed 链上的 reapCanvasTables
+  // 把含 py::function 的回调表 move 进这里，由 shutdown/dtor 统一销毁。
+  std::vector<std::function<void(const std::string&, const std::string&)>>
+      orphan_digitize_callbacks;
+  std::vector<std::function<void(const std::string&, const std::string&)>>
+      orphan_edit_pick_callbacks;
+  std::vector<std::function<void(const std::string&, const std::string&)>>
+      orphan_selection_callbacks;
   std::unordered_map<std::string, std::string> mirror_by_doc;
   // 镜像层 QgsFeatureId → 文档 feature_id（M3 Task 3）：memory provider 不落
   // 属性字段，__pwb_fid 由 upsert 时从 geojson 原文与 addFeatures 后的
@@ -612,8 +628,9 @@ void QgisMapStack::initialize(bool display) {
     throw std::runtime_error("vendored QGIS prefix is not configured");
   }
   std::lock_guard<std::mutex> lock(g_qgis_lifecycle_mutex);
-  // #1155: process-wide initQgis guard shared with QgisRenderBridge —
-  // QGIS is not safely re-initializable in one process.
+  // #1155: only QgisRenderBridge::initialize carried the process-level guard;
+  // per-instance unconditional init()/initQgis() re-entered QGIS when a
+  // QgisRenderBridge (unified canvas) already initialized it.
   if (!g_qgis_initialized) {
     QgsApplication::setPrefixPath(
         QString::fromStdString(PALEO_QGIS_PREFIX_PATH), true);
@@ -690,6 +707,9 @@ void QgisMapStack::shutdown() {
   impl_->tree_menu_callbacks.clear();
   impl_->orphan_tree_callbacks.clear();
   impl_->orphan_tree_menu_callbacks.clear();
+  impl_->orphan_digitize_callbacks.clear();
+  impl_->orphan_edit_pick_callbacks.clear();
+  impl_->orphan_selection_callbacks.clear();
   if (impl_->owned_project) {
     for (auto& kv : impl_->canvas_refs) {
       if (kv.second.isNull()) continue;
@@ -820,6 +840,19 @@ void QgisMapStack::ensureNotStale(std::uintptr_t canvas_addr) {
 std::uintptr_t QgisMapStack::createCanvas() {
   if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
   auto* canvas = new QgsMapCanvas();
+  const std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(canvas);
+  // Qt 树析构直接销毁画布（无 orderly destroyCanvas）时只回收桥表：
+  // 半析构的 QgsMapCanvas 上调用 unsetMapTool 等会踩悬空子对象（UAF），
+  // 因此这条路径绝不触碰画布本身；工具由 Qt 父子树销毁，release() 防双删。
+  std::weak_ptr<char> alive = alive_token_;
+  QObject::connect(canvas, &QObject::destroyed,
+                   [this, alive, addr]() {
+                     if (alive.expired()) return;  // 栈先亡：impl_ 不可达
+                     // 回调表里的 std::function 持有 Python 对象；destroyed
+                     // 可能从无 GIL 的线程发出，先取 GIL 再擦表。
+                     pybind11::gil_scoped_acquire gil;
+                     reapCanvasTables(addr);
+                   });
   canvas->setCanvasColor(Qt::white);
   canvas->enableAntiAliasing(true);
   if (impl_->display_mode) {
@@ -828,7 +861,6 @@ std::uintptr_t QgisMapStack::createCanvas() {
     auto tree_bridge = std::make_unique<QgsLayerTreeMapCanvasBridge>(
         project()->layerTreeRoot(), canvas);
     tree_bridge->setCanvasLayers();
-    std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(canvas);
     impl_->tree_bridges.emplace(addr, std::move(tree_bridge));
     impl_->canvas_refs[addr] = canvas;
     // 永不显示（真机回归：QDockWidget 非浮动子控件会随父画布 show 一起被
@@ -840,7 +872,6 @@ std::uintptr_t QgisMapStack::createCanvas() {
     impl_->dead_canvas_addrs.erase(addr);
     return addr;
   }
-  std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(canvas);
   impl_->canvas_refs[addr] = canvas;
   impl_->dead_canvas_addrs.erase(addr);
   canvas->setMapTool(new QgsMapToolPan(canvas));
@@ -863,31 +894,19 @@ void QgisMapStack::destroyCanvas(std::uintptr_t canvas_addr) {
   }
   impl_->extent_callbacks.erase(canvas_addr);
   impl_->xy_callbacks.erase(canvas_addr);
-  // Remove tool (Qt parent owns it — always release, never delete via unique_ptr)
-  auto toolIt = impl_->tools.find(canvas_addr);
-  if (toolIt != impl_->tools.end() && toolIt->second) {
-    bool canvasAlive = !it->second.isNull();
-    if (canvasAlive) {
-      QgsMapCanvas* c = it->second;
-      if (c && c->mapTool() == toolIt->second.get()) {
-        c->unsetMapTool(toolIt->second.get());
-      }
-    }
-    toolIt->second.release();
-    impl_->tools.erase(toolIt);
-  } else if (toolIt != impl_->tools.end()) {
-    impl_->tools.erase(toolIt);
-  }
-  // Remove bridge; canvas lifetime is owned by Qt parent hierarchy,
-  // so we do not delete the QWidget here (avoids double-free with
-  // QgisCanvasHost layout). The QPointer will become null when Qt
-  // deletes the widget.
-  impl_->tree_bridges.erase(canvas_addr);
-  impl_->cad_docks.erase(canvas_addr);  // Qt 父子关系负责销毁（parent=canvas）
-  // 终局审查 C1：桥内编辑/采点工具 parent=画布，清表前先解除激活——
-  // 否则 scratch 层随 kit 析构而激活工具的 mLayer 悬垂（UAF）。
+  // 只有画布仍活着（orderly 关闭）才允许解除激活工具；Qt 析构期间的
+  // 销毁路径进不来这里——Python 侧 destroyed 钩子只做状态记账，桥内
+  // destroyed 连接走 reapCanvasTables（无解引用）。
   if (!it->second.isNull()) {
     QgsMapCanvas* c = it->second;
+    // Remove tool (Qt parent owns it — always release, never delete via unique_ptr)
+    auto toolIt = impl_->tools.find(canvas_addr);
+    if (toolIt != impl_->tools.end() && toolIt->second &&
+        c && c->mapTool() == toolIt->second.get()) {
+      c->unsetMapTool(toolIt->second.get());
+    }
+    // 终局审查 C1：桥内编辑/采点工具 parent=画布，清表前先解除激活——
+    // 否则 scratch 层随 kit 析构而激活工具的 mLayer 悬垂（UAF）。
     QgsMapTool* active = c ? c->mapTool() : nullptr;
     if (active != nullptr) {
       bool ours = false;
@@ -905,16 +924,49 @@ void QgisMapStack::destroyCanvas(std::uintptr_t canvas_addr) {
       if (ours) c->unsetMapTool(active);
     }
   }
+  reapCanvasTables(canvas_addr);
+}
+
+void QgisMapStack::reapCanvasTables(std::uintptr_t canvas_addr) {
+  // 纯表清理，绝不解引用画布：canvas 可能已亡或正析构。工具由 Qt 父子树
+  // 负责销毁，unique_ptr 一律 release() 防双删。
+  auto toolIt = impl_->tools.find(canvas_addr);
+  if (toolIt != impl_->tools.end()) {
+    if (toolIt->second) toolIt->second.release();
+    impl_->tools.erase(toolIt);
+  }
+  // Remove bridge; canvas lifetime is owned by Qt parent hierarchy,
+  // so we do not delete the QWidget here (avoids double-free with
+  // QgisCanvasHost layout).
+  impl_->tree_bridges.erase(canvas_addr);
+  impl_->cad_docks.erase(canvas_addr);  // Qt 父子关系负责销毁（parent=canvas）
   impl_->capture_kits.erase(canvas_addr);
-  impl_->digitize_callbacks.erase(canvas_addr);
+  {
+    // 含 py::function 的回调表不在这里销毁：canvas destroyed 链上解释器
+    // 态不稳（与 orphan_tree 坟场同理由），move 进坟场由 shutdown/dtor
+    // 统一释放（绑定层持 GIL 的正常路径）。
+    if (auto it = impl_->digitize_callbacks.find(canvas_addr);
+        it != impl_->digitize_callbacks.end()) {
+      impl_->orphan_digitize_callbacks.push_back(std::move(it->second));
+      impl_->digitize_callbacks.erase(it);
+    }
+    if (auto it = impl_->edit_pick_callbacks.find(canvas_addr);
+        it != impl_->edit_pick_callbacks.end()) {
+      impl_->orphan_edit_pick_callbacks.push_back(std::move(it->second));
+      impl_->edit_pick_callbacks.erase(it);
+    }
+    if (auto it = impl_->selection_callbacks.find(canvas_addr);
+        it != impl_->selection_callbacks.end()) {
+      impl_->orphan_selection_callbacks.push_back(std::move(it->second));
+      impl_->selection_callbacks.erase(it);
+    }
+  }
   impl_->vertex_tools.erase(canvas_addr);
   impl_->move_tools.erase(canvas_addr);
-  impl_->edit_pick_callbacks.erase(canvas_addr);
   impl_->select_tools.erase(canvas_addr);
   impl_->identify_tools.erase(canvas_addr);
-  impl_->selection_callbacks.erase(canvas_addr);
   impl_->highlights.erase(canvas_addr);
-  impl_->canvas_refs.erase(it);
+  impl_->canvas_refs.erase(canvas_addr);
   // 终局审查 M5：销毁后的地址必须留在 dead-set（拒绝后续同地址调用把
   // 已亡指针 reinterpret 成活画布）；新画布复用地址时 createCanvas 自清。
   impl_->dead_canvas_addrs.insert(canvas_addr);
@@ -931,12 +983,13 @@ void QgisMapStack::setDestinationCrs(std::uintptr_t canvas, const std::string& c
 
 void QgisMapStack::setCanvasExtent(std::uintptr_t canvas, double xmin, double ymin,
                                    double xmax, double ymax) {
-  // #1165: same finite-coordinate guard as the render bridge — a NaN/inf
-  // extent poisons the canvas (persistent blank) and NaN later reaches
-  // screenToMap's integer cast (UB).
-  if (!std::isfinite(xmin) || !std::isfinite(ymin)
-      || !std::isfinite(xmax) || !std::isfinite(ymax)) {
-    throw std::invalid_argument("canvas extent must contain finite coordinates");
+  // #1165: NaN/inf extents (e.g. zoom_by(inf) on the Python side) went
+  // straight into QgsRectangle and poisoned every derived transform; reject
+  // them like the render-bridge path does with normalized_extent.
+  const bool finite = std::isfinite(xmin) && std::isfinite(ymin)
+      && std::isfinite(xmax) && std::isfinite(ymax);
+  if (!finite || xmax < xmin || ymax < ymin) {
+    throw std::invalid_argument("canvas extent must be finite and ordered");
   }
   canvasOrThrow(canvas)->setExtent(QgsRectangle(xmin, ymin, xmax, ymax));
 }
@@ -956,24 +1009,24 @@ void QgisMapStack::zoomToNextExtent(std::uintptr_t canvas) {
   canvasOrThrow(canvas)->zoomToNextExtent();
 }
 void QgisMapStack::refreshCanvas(std::uintptr_t canvas) {
+  // #1156: refresh() starts the canvas's normal asynchronous render. The
+  // previous waitWhileRendering()+processEvents() pair ran a nested event
+  // pump deep inside the C++ call stack: extentsChanged re-entered Python
+  // callbacks, and window destruction re-entered shutdown()/destroy_canvas()
+  // on the same QgisMapStack mid-refresh. Callers that need a finished frame
+  // pump the (outer) event loop or poll isCanvasRendering.
   QgsMapCanvas* c = canvasOrThrow(canvas);
   for (auto& kv : impl_->canvas_refs) {
     if (!kv.second.isNull()) syncCanvasLayers(kv.first);
   }
   c->refresh();
-  // #1156: wait for the frame WITHOUT pumping events. processEvents()
-  // here ran Python slots mid-refresh (reentrancy, teardown races) to buy
-  // nothing — callers rely on synchronous pixels. The wait itself stays:
-  // it blocks only on the canvas job, never reenters.
-  c->waitWhileRendering();
+}
+
+bool QgisMapStack::isCanvasRendering(std::uintptr_t canvas) const {
+  return canvasOrThrow(canvas)->isDrawing();
 }
 
 std::vector<double> QgisMapStack::screenToMap(std::uintptr_t canvas, double x, double y) const {
-  // #1165: NaN/inf must never reach the integer cast below (UB by
-  // standard) — fail loudly like the render bridge's extent guard.
-  if (!std::isfinite(x) || !std::isfinite(y)) {
-    throw std::invalid_argument("screen coordinates must be finite");
-  }
   // double 重载不截断亚像素坐标（M2 移交项：int 截断会吃掉 <1px 精度）。
   const QgsPointXY p = canvasOrThrow(canvas)->getCoordinateTransform()->toMapCoordinates(x, y);
   return {p.x(), p.y()};
@@ -1141,23 +1194,21 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
     }
   }
   if (existing) {
-    // #1153: geometry-type drift must not reuse the old memory layer —
-    // its provider silently rejects mismatched features. Delete and fall
-    // through to the create path, which builds the requested type.
-    // (QGIS 4 enum names: Qgis::GeometryType::Point/Line/Polygon.)
-    Qgis::GeometryType want = Qgis::GeometryType::Unknown;
-    if (geometry_type == "Point") want = Qgis::GeometryType::Point;
-    else if (geometry_type == "LineString") want = Qgis::GeometryType::Line;
-    else if (geometry_type == "Polygon") want = Qgis::GeometryType::Polygon;
-    if (want != Qgis::GeometryType::Unknown
-        && existing->geometryType() != Qgis::GeometryType::Unknown
-        && existing->geometryType() != want) {
-      SuppressGuard guard(&impl_->suppress_tree_callbacks);
-      project->removeMapLayer(existing);
-      impl_->owned_layers.erase(existing_id);
-      impl_->eraseMirrorByDocId(doc_id);
-      existing = nullptr;
-      existing_id.clear();
+    SuppressGuard guard(&impl_->suppress_tree_callbacks);
+    QgsFeatureList features = QgsJsonUtils::stringToFeatureList(
+        QString::fromStdString(geojson_feature_collection));
+    // #1153: a memory layer's provider geometry type is fixed at creation;
+    // if the payload drifted (doc_id unchanged but geometries changed kind),
+    // reusing the layer would truncate it and then reject every mismatched
+    // feature — silently emptying the mirror. Rebuild instead.
+    for (const QgsFeature& feature : features) {
+      if (feature.hasGeometry()
+          && QgsWkbTypes::geometryType(feature.geometry().wkbType())
+                 != existing->geometryType()) {
+        impl_->eraseMirrorByDocId(doc_id);
+        existing = nullptr;
+        break;
+      }
     }
   }
   if (existing) {
@@ -1172,15 +1223,6 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
     if (!features.isEmpty()) {
       if (!existing->dataProvider() || !existing->dataProvider()->addFeatures(features)) {
         throw std::runtime_error("mirror addFeatures failed for doc_id: " + doc_id);
-      }
-      // #1153: the provider reports partial adds as success — verify the
-      // count so mixed-geometry payloads fail loudly instead of dropping.
-      const long long have = existing->featureCount();
-      if (have != static_cast<long long>(features.size())) {
-        throw std::runtime_error(
-            "mirror addFeatures partial for doc_id: " + doc_id
-            + " (added " + std::to_string(have)
-            + " of " + std::to_string(features.size()) + ")");
       }
     }
     recordMirrorFeatureFids(impl_->mirror_feature_fids[doc_id], features, geoBytes);
@@ -1318,11 +1360,8 @@ void QgisMapStack::setMirrorLayerOrder(const std::vector<std::string>& doc_ids_t
   if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
   SuppressGuard guard(&impl_->suppress_tree_callbacks);
   QgsLayerTreeGroup* root = project()->layerTreeRoot();
-  // 排序操作在 registryBridge 禁用 + 自家回调抑制的保护区间内完成；
-  // setCanvasLayers 依赖树信号驱动画布桥，必须等 guard 析构后再调用。
-  // #1154: 不再 blockSignals(root)——结构信号是 QgsLayerTreeModel 与
-  // 面板视图感知重排的唯一通道；屏蔽它会造成模型/渲染静默失同步。
-  // 自家回调已由外层 SuppressGuard 抑制，registryBridge 在此禁用。
+  // 排序操作必须在 root 信号屏蔽 + registryBridge 禁用的保护区间内完成；
+  // setCanvasLayers 依赖树信号驱动画布桥，必须等两个 RAII guard 析构后再调用。
   {
     auto* registryBridge = project()->layerTreeRegistryBridge();
     bool bridgeWasEnabled = false;
@@ -1335,6 +1374,37 @@ void QgisMapStack::setMirrorLayerOrder(const std::vector<std::string>& doc_ids_t
       bool wasEnabled;
       ~BridgeReenable() { if (bridge && wasEnabled) bridge->setEnabled(true); }
     } reenable{registryBridge, bridgeWasEnabled};
+    // #1154: the root node's signals must stay LIVE — blocking them kept
+    // QgsLayerTreeModel/QgsLayerTreeView from ever seeing the reorder, so the
+    // panel showed stale order/visibility while only the canvas bridge was
+    // manually re-synced. But the registry bridge's removal accounting is not
+    // switchable: groupWillRemoveChildren collects layer ids unconditionally
+    // (no mEnabled check) and groupRemovedChildren queues a QueuedConnection
+    // registry removal for any id not in the tree AT THAT INSTANT — which
+    // every re-parented node is, between takeChildNode() and
+    // insertChildNode(). Detach exactly those two slots for the dance and
+    // restore them exactly as the bridge constructor wires them.
+    // The two slots are protected, so member-pointer disconnect/connect is
+    // unavailable; the generic sender/receiver disconnect plus string-based
+    // reconnect (meta-object invokation reaches protected slots) covers
+    // exactly the two connections the bridge constructor makes from mRoot.
+    const bool bridgeDetached = registryBridge
+        ? QObject::disconnect(root, nullptr, registryBridge, nullptr)
+        : false;
+    struct BridgeReconnect {
+      QgsLayerTreeGroup* r;
+      QgsLayerTreeRegistryBridge* b;
+      bool detached;
+      ~BridgeReconnect() {
+        if (r == nullptr || b == nullptr || !detached) return;
+        QObject::connect(
+            r, SIGNAL(willRemoveChildren(QgsLayerTreeNode*,int,int)), b,
+            SLOT(groupWillRemoveChildren(QgsLayerTreeNode*,int,int)));
+        QObject::connect(
+            r, SIGNAL(removedChildren(QgsLayerTreeNode*,int,int)), b,
+            SLOT(groupRemovedChildren()));
+      }
+    } reconnect{root, registryBridge, bridgeDetached};
     for (auto it = doc_ids_top_first.rbegin(); it != doc_ids_top_first.rend(); ++it) {
       const std::string& doc_id = *it;
       auto mapIt = impl_->mirror_by_doc.find(doc_id);
@@ -1345,18 +1415,8 @@ void QgisMapStack::setMirrorLayerOrder(const std::vector<std::string>& doc_ids_t
       if (!node) continue;
       QgsLayerTreeNode* parent = node->parent();
       if (!parent) continue;
-      // #1154: DnD order (same as treeViewMoveRow) — insert the clone
-      // FIRST so the layer is never transiently absent from the tree.
-      // takeChild-first emits rowsRemoved while the layer is missing and
-      // the registry bridge deletes it from the project (the deferred
-      // removal then lands mid-refresh). Signals stay unblocked so the
-      // layer-tree model tracks every structural change.
-      auto* clone = new QgsLayerTreeLayer(layer);
-      clone->setItemVisibilityChecked(node->itemVisibilityChecked());
-      clone->setExpanded(node->isExpanded());
-      root->insertChildNode(0, clone);
-      parent->takeChild(node);  // orphan，不销毁
-      delete node;              // 旧节点由我们销毁（等价 DnD 的 removeRows 路径）
+      parent->takeChild(node);
+      root->insertChildNode(0, node);
     }
   }
   for (auto& kv : impl_->canvas_refs) {
