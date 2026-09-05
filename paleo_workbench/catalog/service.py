@@ -33,6 +33,7 @@ from typing import Any, Iterable
 from paleo_workbench.catalog import audit as _audit
 from paleo_workbench.catalog import lineage_graph as _lineage
 from paleo_workbench.catalog import queries as _queries
+from paleo_workbench.catalog import sources as _sources
 from paleo_workbench.catalog import tags as _tags
 from paleo_workbench.catalog.checksum import sha256_file
 from paleo_workbench.catalog.db import (
@@ -1729,6 +1730,7 @@ class DataCatalogService:
                 and self._asset_by_legacy_id(_legacy_resource_id) is None
             ):
                 asset.legacy_resource_id = _legacy_resource_id
+            stat = path.stat()
             version = DataVersion(
                 asset_id=asset.id,
                 version_number=1,
@@ -1737,7 +1739,16 @@ class DataCatalogService:
                 path=path.resolve().as_posix(),
                 source_uri=path.resolve().as_posix(),
                 format=format or "",
-                size_bytes=path.stat().st_size,
+                size_bytes=stat.st_size,
+                # Identity fingerprint for a later fail-closed relink (D9):
+                # size + mtime_ns are the recorded facts a relocated file
+                # must match when no digest was ever taken.
+                metadata={
+                    "external_stat": {
+                        "size": stat.st_size,
+                        "mtime_ns": stat.st_mtime_ns,
+                    }
+                },
             )
             asset.current_version_id = version.id
             self._add_asset(asset)
@@ -1769,6 +1780,44 @@ class DataCatalogService:
             DataStage.RAW,
             parent_version_ids=[linked.id],
             run_id=run_id,
+        )
+
+    # -- missing sources / relink (D9) -----------------------------------------
+
+    def find_missing_sources(
+        self,
+        *,
+        include_managed: bool = True,
+        cancel: Callable[[], bool] | None = None,
+    ) -> "_sources.MissingSourceReport":
+        """Stat-only scan for live versions whose payload no longer resolves.
+
+        Derived state — never persisted (a scan that wrote flags into the
+        canonical store would multiply writes and fight the cross-process
+        revision guard). Run off the GUI thread at catalog scale; ``cancel``
+        is polled per version.
+        """
+        return _sources.find_missing_sources(
+            self, include_managed=include_managed, cancel=cancel
+        )
+
+    def relink_external_source(
+        self,
+        version_id: str,
+        new_path: str | Path,
+        *,
+        actor: str = "user",
+    ) -> DataVersion:
+        """Fail-closed relink of an external RAW version to its moved file.
+
+        Delegates to
+        :func:`paleo_workbench.catalog.sources.relink_external_source`;
+        identity must be provable against recorded facts (sha256 or the
+        size+mtime fingerprint), otherwise
+        :class:`~paleo_workbench.catalog.sources.CatalogRelinkIdentityError`.
+        """
+        return _sources.relink_external_source(
+            self, version_id, new_path, actor=actor
         )
 
     # -- working copies / derived --------------------------------------------

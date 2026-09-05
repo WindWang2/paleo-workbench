@@ -111,6 +111,11 @@ class AssetContextMenu(QMenu):
             materialize = self._add_action("ctx_materialize", "纳管至项目 (Import into Project)")
             materialize.setEnabled(False)
             materialize.setToolTip("需连接数据目录后端以纳管外部数据")
+            # Relink the moved file (enabled by DataPage when the recorded
+            # source is actually missing — never a silent rebinding).
+            relink = self._add_action("ctx_relink", "重新链接源… (Relink Source)")
+            relink.setEnabled(False)
+            relink.setToolTip("源文件移动后重新指向新位置（需通过身份校验）")
 
         # 3. 校验完整性 (Verify Integrity)
         verify = self._add_action("ctx_verify", "校验完整性 (Verify Integrity)")

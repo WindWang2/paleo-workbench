@@ -50,11 +50,13 @@ from paleo_workbench.ui.pages.data_toolbar import DataToolbar
 from paleo_workbench.ui.pages.data_view_models import (
     AssetView,
     FsProbeCache,
+    IntegrityState,
     asset_view_from_object,
     enrich_view_from_catalog,
     path_exists_safe,
     path_is_dir_safe,
 )
+from paleo_workbench.ui.pages.relink_dialog import RelinkSourcesDialog
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
 from paleo_workbench.project.domain import domain_signature
 from paleo_workbench.project.well_location_map import sync_well_location_map
@@ -1606,6 +1608,20 @@ class DataPage(QWidget):
                 materialize_act.setToolTip("将外部文件复制为受管 RAW 快照 (不可变)")
                 materialize_act.triggered.connect(lambda: self._materialize_asset(first))
 
+        # 重新链接源: enabled when the bridged external version's recorded
+        # payload is actually gone (missing) — fail-closed relink otherwise.
+        relink_act = menu.find_action("ctx_relink")
+        if relink_act and isinstance(first, ResourceItem):
+            _svc, ref = self._catalog_bridge(first)
+            if ref is not None and ref.external:
+                if first_view is not None and getattr(
+                    first_view, "integrity_state", None
+                ) == IntegrityState.MISSING:
+                    relink_act.setEnabled(True)
+                    relink_act.triggered.connect(self._open_relink_dialog)
+                else:
+                    relink_act.setToolTip("源文件未缺失，无需重新链接")
+
         rescan_act = menu.find_action("ctx_rescan")
         if rescan_act:
             rescan_act.triggered.connect(self.rescan_selected_asset)
@@ -1855,8 +1871,17 @@ class DataPage(QWidget):
 
     def _open_catalog_health(self) -> None:
         dlg = CatalogHealthDialog(self, service_provider=self._catalog_service)
+        dlg.relink_requested.connect(self._open_relink_dialog)
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.run_audit(deep=False)
+        dlg.exec()
+
+    def _open_relink_dialog(self) -> None:
+        """缺失源与重新链接 (D9)。`sources_relinked` triggers a full refresh
+        so integrity columns and the missing filter reflect the new paths."""
+        dlg = RelinkSourcesDialog(self, service_provider=self._catalog_service)
+        dlg.sources_relinked.connect(lambda _count: self._refresh())
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.exec()
 
     # --- Governance metadata editing -------------------------------------------

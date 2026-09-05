@@ -58,6 +58,11 @@ from paleo_workbench.catalog.runtime import (
     reset_catalog,
     set_catalog,
 )
+from paleo_workbench.catalog.sources import (
+    CatalogRelinkIdentityError,
+    MissingSource,
+    MissingSourceReport,
+)
 from paleo_workbench.catalog.service import DataCatalogService, IntegrityReport
 from paleo_workbench.catalog.store import CatalogStore
 from paleo_workbench.catalog.types import (
