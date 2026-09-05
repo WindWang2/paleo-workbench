@@ -33,8 +33,8 @@
 ## L4 多井连井对比
 
 - [x] 既有 StratigraphyCorrelationPage 能力核对：well order、shared depth range、datum mode（md/tvdss/horizon flatten）、formation tops 显示、DTW 推荐、correlation bands。
-- [ ] correlation link 增删改（add/remove/edit）真实可操作且写回 draft。
-- [ ] draft copy-on-edit + undo/redo（若 draft 支持；不支持则最小实现编辑事务）。
+- [x] correlation link 增删改（add/remove/edit）真实可操作且写回 draft。（commit b01fb4ad + correlation_link_editor + tests/test_correlation_link_editing.py）
+- [x] draft copy-on-edit + undo/redo（若 draft 支持；不支持则最小实现编辑事务）。（CorrelationInterpretationDraft copy-on-edit；页面 undo/redo 接 picks_model）
 - [x] save immutable version + reopen（已有 correlation_lifecycle，验证联动页接入）。
 - [x] 大井数 LOD：可见深度窗口采样，不全分辨率绘制（引擎 decimation 已有，验证接线）。
 
