@@ -614,7 +614,15 @@ class GeologicalModeling3DPage(QWidget):
 
         exp_layout.addWidget(QLabel("导出格式"))
         self.combo_export_type = QComboBox()
-        self.combo_export_type.addItems(["FLAC3D 角点网格 (*.f3grid)", "Abaqus 有限元网格 (*.inp)"])
+        self.combo_export_type.addItems(
+            [
+                "FLAC3D 角点网格 (*.f3grid)",
+                "Abaqus 有限元网格 (*.inp)",
+                "Wavefront OBJ 网格 (*.obj)",
+                "STL 二进制网格 (*.stl)",
+                "VTK PolyData XML (*.vtp)",
+            ]
+        )
         exp_layout.addWidget(self.combo_export_type)
 
         grid_grid_layout = QHBoxLayout()
@@ -3568,7 +3576,32 @@ class GeologicalModeling3DPage(QWidget):
             dx=self.spin_dx.value(), dy=self.spin_dy.value(), dz=self.spin_dz.value(),
         )
 
-        worker = ExportWorker(filepath, mode, grid_spec)
+        # V2 path: export the REAL domain object when one exists (QC gate +
+        # provenance sidecar inside the worker's exporter); GridSpec path is
+        # the legacy synthetic fallback.
+        volume = self._geo3d.assembly.get(self._geo3d.selected_id or "")
+        if volume is None or not volume.object_id.startswith("volume:"):
+            volumes = self._geo3d.assembly.objects("volume")
+            volume = volumes[0] if volumes else None
+        surface = None
+        if volume is None:
+            selected = self._geo3d.assembly.get(self._geo3d.selected_id or "")
+            if selected is not None and selected.object_id.startswith(("fault:", "volume:")):
+                surface = selected
+            else:
+                faults = self._geo3d.assembly.objects("fault")
+                surface = faults[0] if faults else None
+        if volume is not None or (surface is not None and mode in ("obj", "stl", "vtp")):
+            worker = ExportWorker(
+                filepath,
+                mode,
+                grid_spec,
+                volume=volume,
+                surface=surface,
+                point_data={"vertex_index": list(range(len(getattr(volume or surface, "verts", []))))},
+            )
+        else:
+            worker = ExportWorker(filepath, mode, grid_spec)
         self._export_job.start(
             worker,
             terminal_signals=(worker.terminal,),
@@ -3600,7 +3633,13 @@ class GeologicalModeling3DPage(QWidget):
             from paleo_workbench.catalog.lifecycle import register_export_output
 
             sim_type = self.combo_export_type.currentText()
-            fmt = "f3grid" if "FLAC3D" in sim_type else "inp"
+            fmt = {
+                "FLAC3D": "f3grid",
+                "Abaqus": "inp",
+                "OBJ": "obj",
+                "STL": "stl",
+                "VTK": "vtp",
+            }.get(next((k for k in ("FLAC3D", "Abaqus", "OBJ", "STL", "VTK") if k in sim_type)), "inp")
             register_export_output(
                 name="数值模拟网格模型 export",
                 output_path=str(filepath),

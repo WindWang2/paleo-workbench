@@ -42,6 +42,9 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["ObjectStyle", "SceneSyncReport", "DomainPick", "GeologicalSceneAdapter"]
 
+# display decimation ceiling per horizon axis (see _build_horizon)
+_MAX_HORIZON_DIM = 512
+
 
 @dataclass
 class ObjectStyle:
@@ -397,10 +400,22 @@ class GeologicalSceneAdapter:
         return names
 
     def _build_horizon(self, widget, hor: HorizonSurface) -> list[str]:
+        g = np.asarray(hor.z_grid, dtype=np.float64)
+        origin = hor.origin
+        spacing = hor.spacing
+        # Deterministic decimation ceiling (G12): a horizon larger than
+        # _MAX_HORIZON_DIM per axis is stride-thinned for display so a huge
+        # interpretation grid cannot explode the scene; QC always audits the
+        # full-resolution grid.
+        nI, nX = g.shape
+        sy = max(1, -(-max(nI - 1, 1) // _MAX_HORIZON_DIM))
+        sx = max(1, -(-max(nX - 1, 1) // _MAX_HORIZON_DIM))
+        if sy > 1 or sx > 1:
+            g = g[::sy, ::sx]
+            origin = (origin[0], origin[1])
+            spacing = (spacing[0] * sy, spacing[1] * sx)
         verts, faces = triangulate_heightfield(
-            np.asarray(hor.z_grid, dtype=np.float64),
-            origin=hor.origin,
-            spacing=hor.spacing,
+            g, origin=origin, spacing=spacing
         )
         if len(faces) == 0:
             return []
