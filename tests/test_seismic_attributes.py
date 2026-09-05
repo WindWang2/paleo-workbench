@@ -367,3 +367,36 @@ def test_attribute_provider_cancel_propagates_task_cancelled(tmp_path):
             )
         except ProviderExecutionError as exc:
             raise AssertionError(f"cancel was washed: {exc}") from exc
+
+
+def test_band_inlines_derived_from_budget_not_constant():
+    """#1146: band width follows budget/geometry; explicit values honored."""
+    from paleo_workbench.seismic_attributes import (
+        ATTRIBUTE_PEAK_FACTOR,
+        VolumeAttributeJob,
+        derive_band_inlines,
+    )
+
+    budget = 5 * 1024**3
+    small = derive_band_inlines(40, 48, budget_bytes=budget)
+    huge = derive_band_inlines(2000, 2000, budget_bytes=budget)
+    assert small > huge >= 1
+    # Peak math holds by construction.
+    assert 2000 * 2000 * 4 * huge * ATTRIBUTE_PEAK_FACTOR <= budget + 2000 * 2000 * 4 * ATTRIBUTE_PEAK_FACTOR
+    assert derive_band_inlines(0, 0, budget_bytes=budget) >= 1
+
+    class _Reader:
+        shape = (100, 40, 48)
+
+    job = VolumeAttributeJob(_Reader(), "/tmp/x", "c3")
+    assert job.band_inlines == derive_band_inlines(40, 48)
+    explicit = VolumeAttributeJob(_Reader(), "/tmp/x", "c3", band_inlines=9)
+    assert explicit.band_inlines == 9
+
+
+def test_attribute_provider_ram_estimate_matches_band_peak():
+    """#1146: admission estimate is the same order as a derived band peak."""
+    from paleo_workbench.providers.builtin.seismic_attribute import SeismicAttributeProvider
+
+    estimate = SeismicAttributeProvider("c3", {}).descriptor.resource_profile.estimated_ram_bytes
+    assert estimate >= 4 * 1024**3

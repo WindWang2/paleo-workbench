@@ -284,6 +284,41 @@ class AttributeJobStats:
     elapsed_s: float = 0.0
 
 
+# #1146: worst-case in-flight multiple of one inline slab, measured per
+# kernel family (c3 ≈ 5x: slab + ones + reflect pad + output; float64
+# rms-style paths ≈ 7-8x). One conservative factor for all kernels.
+ATTRIBUTE_PEAK_FACTOR = 8
+ATTRIBUTE_MIN_BAND_INLINES = 1
+
+
+def _attribute_budget_bytes() -> int:
+    """Bytes one attribute band may peak at (operator budget, not a constant)."""
+    try:
+        from paleo_workbench.runtime.resource_budget import active_budget
+
+        return int(active_budget().streaming_buffer_bytes)
+    except Exception:
+        return 5 * 1024**3
+
+
+def derive_band_inlines(
+    n_xl: int,
+    n_t: int,
+    *,
+    budget_bytes: int | None = None,
+    peak_factor: int = ATTRIBUTE_PEAK_FACTOR,
+) -> int:
+    """Inline count per band such that peak temp stays within budget (#1146).
+
+    ``bytes_per_inline × band × peak_factor ≤ budget``; always ≥ 1 so
+    degenerate volumes still run (slowly) instead of refusing.
+    """
+    budget = int(budget_bytes) if budget_bytes else _attribute_budget_bytes()
+    per_inline = max(1, int(n_xl) * max(1, int(n_t)) * 4)
+    band = max(ATTRIBUTE_MIN_BAND_INLINES, budget // (per_inline * max(1, peak_factor)))
+    return int(band)
+
+
 class VolumeAttributeJob:
     """Banded, resumable full-volume attribute run (#1084).
 
@@ -301,7 +336,7 @@ class VolumeAttributeJob:
         dst_store: str | Path,
         name: str = "c3",
         *,
-        band_inlines: int = 64,
+        band_inlines: int | None = None,
         use_gpu: bool = False,
     ):
         if name not in KERNELS:
@@ -309,7 +344,15 @@ class VolumeAttributeJob:
         self.reader = reader
         self.dst = Path(dst_store)
         self.name = name
-        self.band_inlines = int(band_inlines)
+        # #1146: None derives from the operator memory budget and the
+        # volume geometry; an explicit positive value is honored verbatim
+        # (tests, resume-shape stability).
+        if band_inlines is None:
+            n_xl = int(reader.shape[1])
+            n_t = int(reader.shape[2])
+            self.band_inlines = derive_band_inlines(n_xl, n_t)
+        else:
+            self.band_inlines = max(1, int(band_inlines))
         self.use_gpu = use_gpu
         self.stats = AttributeJobStats()
 

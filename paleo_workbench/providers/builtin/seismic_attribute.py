@@ -76,7 +76,10 @@ class SeismicAttributeProvider:
             parameters_schema=_ATTRIBUTE_SCHEMA,
             resource_profile=ResourceProfile(
                 estimated_cpu_cores=2.0,
-                estimated_ram_bytes=1024 * 1024**2,
+                # #1146: same order as a budget-derived band peak (the job
+                # caps bands at streaming_buffer_bytes; the old 1 GiB was
+                # 10-20x under measured 12-20 GB peaks, blinding admission).
+                estimated_ram_bytes=5 * 1024**3,
                 io_weight=1.0,
                 category="seismic.attribute",
             ),
