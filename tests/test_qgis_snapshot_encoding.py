@@ -261,6 +261,29 @@ def test_set_native_snapshot_recovers_from_stale_delta() -> None:
     assert backend._qgis_shipped_revisions["points"] == 2
 
 
+def test_data_errors_do_not_trigger_full_reship() -> None:
+    """#1163: an invalid-WKT data error surfaces at once — no pointless
+    full-snapshot retry that fails the same way."""
+    backend = QgisMapRenderBackend()
+
+    class FakeBridge:
+        def __init__(self):
+            self.calls = []
+
+        def set_layer_snapshot(self, layers, crs):
+            self.calls.append([dict(layer) for layer in layers])
+            if any("delta" in layer for layer in self.calls[-1]):
+                raise RuntimeError("invalid WKT in feature delta for layer points")
+
+    bridge = FakeBridge()
+    backend._bridge = bridge
+    snapshot = _snapshot(data_revision=1)
+    backend._set_native_snapshot(snapshot)
+    with pytest.raises(RuntimeError, match="invalid WKT"):
+        backend._set_native_snapshot(_mutate(snapshot))
+    assert len(bridge.calls) == 2  # full, delta (raised) — no retry
+
+
 @pytest.mark.qgis
 def test_feature_delta_updates_mirror_in_place_on_qgis_path():
     """#932 (bridge integration): a single-feature edit updates the live QGIS

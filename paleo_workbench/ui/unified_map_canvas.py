@@ -402,9 +402,14 @@ class UnifiedMapCanvas(QWidget):
 
     def map_to_screen(self, point: tuple[float, float]) -> QPointF:
         xmin, ymin, xmax, ymax = self._fitted_extent()
+        dx, dy = xmax - xmin, ymax - ymin
+        if dx == 0.0 or dy == 0.0 or not (math.isfinite(dx) and math.isfinite(dy)):
+            # #1166: degenerate extent — center the point instead of
+            # ZeroDivisionError (paint paths must never crash).
+            return QPointF(self.width() / 2.0, self.height() / 2.0)
         return QPointF(
-            (float(point[0]) - xmin) * self.width() / (xmax - xmin),
-            (ymax - float(point[1])) * self.height() / (ymax - ymin),
+            (float(point[0]) - xmin) * self.width() / dx,
+            (ymax - float(point[1])) * self.height() / dy,
         )
 
     def set_extent(

@@ -246,3 +246,17 @@ def test_export_pdf_default_size_follows_view_aspect(qtbot, tmp_path) -> None:
     # 2400px @ 300dpi = 8in x 4in = 576pt x 288pt (not the old 576 x 384 =
     # fixed 2400x1600). Qt writes MediaBox with six decimal places.
     assert b"/MediaBox [0 0 576.000000 288.000000]" in data
+
+
+def test_map_to_screen_degenerate_extent_centers(qtbot) -> None:
+    """#1166: zero-span extent centers the point instead of ZeroDivisionError."""
+    canvas = UnifiedMapCanvas(backend=FallbackMapRenderBackend())
+    qtbot.addWidget(canvas)
+    canvas.resize(300, 180)
+    canvas.show()
+    # Bypass set_extent (the backend already rejects zero spans): simulate
+    # a degenerate view state reaching the paint path.
+    canvas._view_extent = (5.0, 5.0, 5.0, 5.0)
+    point = canvas.map_to_screen((5.0, 5.0))
+    assert point.x() == 150.0
+    assert point.y() == 90.0

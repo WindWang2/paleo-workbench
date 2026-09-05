@@ -8,8 +8,13 @@ _GEOMETRY_TYPE = {"Point": "Point", "MultiPoint": "Point",
                   "Polygon": "Polygon", "MultiPolygon": "Polygon"}
 
 
-def mirror_snapshot_to_stack(stack, canvas_address, snapshot) -> tuple[list[str], list[str]]:
-    """Returns (mirrored_qgis_ids, seen_doc_ids)."""
+def mirror_snapshot_to_stack(stack, canvas_address, snapshot,
+                             diagnostics: list | None = None) -> tuple[list[str], list[str]]:
+    """Returns (mirrored_qgis_ids, seen_doc_ids).
+
+    #1164: per-layer and tail failures append ``(layer_id, error)`` to
+    *diagnostics* (when given) instead of vanishing in ``continue``/``pass``.
+    """
     if snapshot.project_crs:
         try:
             stack.set_destination_crs(canvas_address, str(snapshot.project_crs))
@@ -86,6 +91,8 @@ def mirror_snapshot_to_stack(stack, canvas_address, snapshot) -> tuple[list[str]
                 msg = str(exc).lower()
                 if "renderer" in msg or "labeling" in msg or "invalid" in msg:
                     raise
+            if diagnostics is not None:
+                diagnostics.append((str(getattr(layer, "id", "?")), str(exc)))
             continue
         seen.append(layer.id)
         mirrored_qgis_ids.append(qgis_id)
@@ -93,6 +100,7 @@ def mirror_snapshot_to_stack(stack, canvas_address, snapshot) -> tuple[list[str]
         stack.remove_mirror_layers_except(seen)
         stack.set_mirror_layer_order(seen)
         stack.refresh_canvas(canvas_address)
-    except Exception:
-        pass
+    except Exception as exc:
+        if diagnostics is not None:
+            diagnostics.append(("<tail>", str(exc)))
     return mirrored_qgis_ids, seen

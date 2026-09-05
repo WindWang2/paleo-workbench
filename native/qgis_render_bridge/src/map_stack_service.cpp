@@ -1,6 +1,7 @@
 #include "map_stack_service.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
@@ -75,6 +76,7 @@ namespace pwb::qgis_render {
 #endif
 extern const std::string PALEO_QGIS_PREFIX_PATH;
 extern std::mutex g_qgis_lifecycle_mutex;
+extern bool g_qgis_initialized;
 
 namespace {
 
@@ -610,10 +612,15 @@ void QgisMapStack::initialize(bool display) {
     throw std::runtime_error("vendored QGIS prefix is not configured");
   }
   std::lock_guard<std::mutex> lock(g_qgis_lifecycle_mutex);
-  QgsApplication::setPrefixPath(
-      QString::fromStdString(PALEO_QGIS_PREFIX_PATH), true);
-  QgsApplication::init();
-  QgsApplication::initQgis();
+  // #1155: process-wide initQgis guard shared with QgisRenderBridge —
+  // QGIS is not safely re-initializable in one process.
+  if (!g_qgis_initialized) {
+    QgsApplication::setPrefixPath(
+        QString::fromStdString(PALEO_QGIS_PREFIX_PATH), true);
+    QgsApplication::init();
+    QgsApplication::initQgis();
+    g_qgis_initialized = true;
+  }
   if (display) {
     impl_->owned_project = std::make_unique<QgsProject>();
     impl_->display_mode = true;
@@ -924,6 +931,13 @@ void QgisMapStack::setDestinationCrs(std::uintptr_t canvas, const std::string& c
 
 void QgisMapStack::setCanvasExtent(std::uintptr_t canvas, double xmin, double ymin,
                                    double xmax, double ymax) {
+  // #1165: same finite-coordinate guard as the render bridge — a NaN/inf
+  // extent poisons the canvas (persistent blank) and NaN later reaches
+  // screenToMap's integer cast (UB).
+  if (!std::isfinite(xmin) || !std::isfinite(ymin)
+      || !std::isfinite(xmax) || !std::isfinite(ymax)) {
+    throw std::invalid_argument("canvas extent must contain finite coordinates");
+  }
   canvasOrThrow(canvas)->setExtent(QgsRectangle(xmin, ymin, xmax, ymax));
 }
 
@@ -947,11 +961,19 @@ void QgisMapStack::refreshCanvas(std::uintptr_t canvas) {
     if (!kv.second.isNull()) syncCanvasLayers(kv.first);
   }
   c->refresh();
+  // #1156: wait for the frame WITHOUT pumping events. processEvents()
+  // here ran Python slots mid-refresh (reentrancy, teardown races) to buy
+  // nothing — callers rely on synchronous pixels. The wait itself stays:
+  // it blocks only on the canvas job, never reenters.
   c->waitWhileRendering();
-  QCoreApplication::processEvents();
 }
 
 std::vector<double> QgisMapStack::screenToMap(std::uintptr_t canvas, double x, double y) const {
+  // #1165: NaN/inf must never reach the integer cast below (UB by
+  // standard) — fail loudly like the render bridge's extent guard.
+  if (!std::isfinite(x) || !std::isfinite(y)) {
+    throw std::invalid_argument("screen coordinates must be finite");
+  }
   // double 重载不截断亚像素坐标（M2 移交项：int 截断会吃掉 <1px 精度）。
   const QgsPointXY p = canvasOrThrow(canvas)->getCoordinateTransform()->toMapCoordinates(x, y);
   return {p.x(), p.y()};
@@ -1119,6 +1141,26 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
     }
   }
   if (existing) {
+    // #1153: geometry-type drift must not reuse the old memory layer —
+    // its provider silently rejects mismatched features. Delete and fall
+    // through to the create path, which builds the requested type.
+    // (QGIS 4 enum names: Qgis::GeometryType::Point/Line/Polygon.)
+    Qgis::GeometryType want = Qgis::GeometryType::Unknown;
+    if (geometry_type == "Point") want = Qgis::GeometryType::Point;
+    else if (geometry_type == "LineString") want = Qgis::GeometryType::Line;
+    else if (geometry_type == "Polygon") want = Qgis::GeometryType::Polygon;
+    if (want != Qgis::GeometryType::Unknown
+        && existing->geometryType() != Qgis::GeometryType::Unknown
+        && existing->geometryType() != want) {
+      SuppressGuard guard(&impl_->suppress_tree_callbacks);
+      project->removeMapLayer(existing);
+      impl_->owned_layers.erase(existing_id);
+      impl_->eraseMirrorByDocId(doc_id);
+      existing = nullptr;
+      existing_id.clear();
+    }
+  }
+  if (existing) {
     SuppressGuard guard(&impl_->suppress_tree_callbacks);
     QgsFeatureList features = QgsJsonUtils::stringToFeatureList(
         QString::fromStdString(geojson_feature_collection));
@@ -1130,6 +1172,15 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
     if (!features.isEmpty()) {
       if (!existing->dataProvider() || !existing->dataProvider()->addFeatures(features)) {
         throw std::runtime_error("mirror addFeatures failed for doc_id: " + doc_id);
+      }
+      // #1153: the provider reports partial adds as success — verify the
+      // count so mixed-geometry payloads fail loudly instead of dropping.
+      const long long have = existing->featureCount();
+      if (have != static_cast<long long>(features.size())) {
+        throw std::runtime_error(
+            "mirror addFeatures partial for doc_id: " + doc_id
+            + " (added " + std::to_string(have)
+            + " of " + std::to_string(features.size()) + ")");
       }
     }
     recordMirrorFeatureFids(impl_->mirror_feature_fids[doc_id], features, geoBytes);
@@ -1267,8 +1318,11 @@ void QgisMapStack::setMirrorLayerOrder(const std::vector<std::string>& doc_ids_t
   if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
   SuppressGuard guard(&impl_->suppress_tree_callbacks);
   QgsLayerTreeGroup* root = project()->layerTreeRoot();
-  // 排序操作必须在 root 信号屏蔽 + registryBridge 禁用的保护区间内完成；
-  // setCanvasLayers 依赖树信号驱动画布桥，必须等两个 RAII guard 析构后再调用。
+  // 排序操作在 registryBridge 禁用 + 自家回调抑制的保护区间内完成；
+  // setCanvasLayers 依赖树信号驱动画布桥，必须等 guard 析构后再调用。
+  // #1154: 不再 blockSignals(root)——结构信号是 QgsLayerTreeModel 与
+  // 面板视图感知重排的唯一通道；屏蔽它会造成模型/渲染静默失同步。
+  // 自家回调已由外层 SuppressGuard 抑制，registryBridge 在此禁用。
   {
     auto* registryBridge = project()->layerTreeRegistryBridge();
     bool bridgeWasEnabled = false;
@@ -1281,12 +1335,6 @@ void QgisMapStack::setMirrorLayerOrder(const std::vector<std::string>& doc_ids_t
       bool wasEnabled;
       ~BridgeReenable() { if (bridge && wasEnabled) bridge->setEnabled(true); }
     } reenable{registryBridge, bridgeWasEnabled};
-    const bool wasBlocked = root->blockSignals(true);
-    struct RootUnblock {
-      QgsLayerTreeGroup* r;
-      bool wasBlocked;
-      ~RootUnblock() { r->blockSignals(wasBlocked); }
-    } unblock{root, wasBlocked};
     for (auto it = doc_ids_top_first.rbegin(); it != doc_ids_top_first.rend(); ++it) {
       const std::string& doc_id = *it;
       auto mapIt = impl_->mirror_by_doc.find(doc_id);
@@ -1297,8 +1345,18 @@ void QgisMapStack::setMirrorLayerOrder(const std::vector<std::string>& doc_ids_t
       if (!node) continue;
       QgsLayerTreeNode* parent = node->parent();
       if (!parent) continue;
-      parent->takeChild(node);
-      root->insertChildNode(0, node);
+      // #1154: DnD order (same as treeViewMoveRow) — insert the clone
+      // FIRST so the layer is never transiently absent from the tree.
+      // takeChild-first emits rowsRemoved while the layer is missing and
+      // the registry bridge deletes it from the project (the deferred
+      // removal then lands mid-refresh). Signals stay unblocked so the
+      // layer-tree model tracks every structural change.
+      auto* clone = new QgsLayerTreeLayer(layer);
+      clone->setItemVisibilityChecked(node->itemVisibilityChecked());
+      clone->setExpanded(node->isExpanded());
+      root->insertChildNode(0, clone);
+      parent->takeChild(node);  // orphan，不销毁
+      delete node;              // 旧节点由我们销毁（等价 DnD 的 removeRows 路径）
     }
   }
   for (auto& kv : impl_->canvas_refs) {

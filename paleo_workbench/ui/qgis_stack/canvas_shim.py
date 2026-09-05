@@ -6,6 +6,7 @@ tool_operation(False) 发出（与 UnifiedMapCanvas 的鼠标/键盘路径语义
 from __future__ import annotations
 
 import json
+import math
 import sys
 import weakref
 
@@ -65,6 +66,9 @@ class QgisCanvasShim(QWidget):
         self._overlay_provider = None
         self._mirrored_layers: list[str] = []
         self._mirrored_doc_ids: list[str] = []
+        # #1164: per-layer mirror failures from the last publish (layer id,
+        # error) — surfaced via backend_status instead of silent continue.
+        self._mirror_diagnostics: list[tuple[str, str]] = []
         self._shutdown_done = False
         self._tool_controller = None
         self._pending_programmatic = 0
@@ -192,6 +196,12 @@ class QgisCanvasShim(QWidget):
     # --- 状态与几何 ---------------------------------------------------
     @property
     def backend_status(self) -> str:
+        # #1164: mirror failures stay visible in the status instead of a
+        # silent continue. Keeps the "qgis" prefix existing screens match on.
+        diags = getattr(self, "_mirror_diagnostics", [])
+        if diags:
+            first = str(diags[0][1])[:80]
+            return f"qgis: degraded ({len(diags)} 层镜像失败: {first})"
         return "qgis: ready"
 
     @property
@@ -275,8 +285,10 @@ class QgisCanvasShim(QWidget):
         return True
 
     def zoom_by(self, factor: float, center: tuple[float, float] | None = None, *, coalesce_history: bool = False) -> None:
-        if factor <= 0.0:
-            raise ValueError("zoom factor must be positive")
+        # #1165: inf/nan factors (and centers) would manufacture inf/NaN
+        # coordinates straight into the C++ extent path.
+        if not math.isfinite(float(factor)) or factor <= 0.0:
+            raise ValueError("zoom factor must be a finite positive number")
         xmin, ymin, xmax, ymax = self.view_extent
         cx, cy = center if center is not None else ((xmin + xmax) / 2.0, (ymin + ymax) / 2.0)
         cx = float(cx); cy = float(cy)
@@ -583,8 +595,10 @@ class QgisCanvasShim(QWidget):
         """
         if getattr(self, "_shutdown_done", False):
             return
+        diagnostics: list[tuple[str, str]] = []
         mirrored_qgis_ids, seen = mirror_snapshot_to_stack(
-            self.stack, self.canvas_address, snapshot)
+            self.stack, self.canvas_address, snapshot, diagnostics)
+        self._mirror_diagnostics = diagnostics
         try:
             # _mirrored_layers 保持 M1 语义：存 QGIS layer id；doc id 另存
             # _mirrored_doc_ids（reconcile 后两者一一对应，顺序同 snapshot）。

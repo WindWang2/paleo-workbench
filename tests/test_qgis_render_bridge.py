@@ -241,3 +241,58 @@ def test_qgis_bridge_failed_pending_snapshot_does_not_swallow_next_render(qtbot)
         assert frame["generation"] == 3
     finally:
         bridge.shutdown()
+
+
+def test_concurrent_render_and_shutdown_never_corrupts(qtbot):
+    """#1133: GIL-released render_sync racing shutdown() must serialize —
+    every render either completes or raises RuntimeError, never UAF."""
+    import threading
+
+    bridge = qgis_render_bridge.QgisRenderBridge()
+    bridge.initialize()
+    try:
+        bridge.set_layer_snapshot(
+            [
+                {
+                    "id": "facies",
+                    "name": "Facies",
+                    "crs": "EPSG:3857",
+                    "data_revision": 1,
+                    "style_revision": 1,
+                    "visible": True,
+                    "opacity": 1.0,
+                    "features": [
+                        {"id": "f1", "wkt": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))"}
+                    ],
+                }
+            ],
+            "EPSG:3857",
+        )
+        outcomes: list[str] = []
+        stop = threading.Event()
+
+        def _render_loop() -> None:
+            while not stop.is_set():
+                try:
+                    frame = bridge.render_sync((0.0, 0.0, 10.0, 10.0), 64, 48, 96.0)
+                    assert len(frame["rgba"]) == frame["height"] * frame["stride"]
+                    outcomes.append("ok")
+                except RuntimeError:
+                    outcomes.append("rejected")
+
+        workers = [threading.Thread(target=_render_loop) for _ in range(4)]
+        for w in workers:
+            w.start()
+        qtbot.wait(500)
+        bridge.shutdown()
+        stop.set()
+        for w in workers:
+            w.join(timeout=30)
+            assert not w.is_alive()
+        assert outcomes, "renders must have run before shutdown"
+        assert all(o in ("ok", "rejected") for o in outcomes)
+    finally:
+        try:
+            bridge.shutdown()
+        except Exception:
+            pass

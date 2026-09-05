@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <mutex>
+#include <shared_mutex>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
@@ -69,11 +70,11 @@ extern const std::string PALEO_QGIS_PREFIX_PATH = "";
 
 namespace pwb::qgis_render {
 std::mutex g_qgis_lifecycle_mutex;
+bool g_qgis_initialized = false;
 
 namespace {
 
 std::size_t g_qgis_bridge_count = 0;
-bool g_qgis_initialized = false;
 
 QString geometry_uri_for(const VectorLayerSpec& spec) {
     for (const FeatureSpec& feature : spec.features) {
@@ -166,6 +167,12 @@ class QgisRenderBridge::Impl {
     std::string project_crs;
     std::vector<std::string> ordered_ids;
     std::unordered_map<std::string, Mirror> mirrors;
+    // #1133: render read-write lock. render_sync/export_vector hold it
+    // shared (their stack jobs are invisible to wait_for_active_job);
+    // shutdown takes it exclusively so mirrors cannot be destroyed
+    // mid-render while the GIL is released. Lock order: render lock
+    // first, lifecycle mutex second (render paths never take the latter).
+    mutable std::shared_mutex render_mutex;
     std::unique_ptr<QgsMapRendererParallelJob> active_job;
     std::optional<Request> active_request;
     std::optional<Request> pending_request;
@@ -199,10 +206,11 @@ class QgisRenderBridge::Impl {
             for (const QString& name : missing_fields) {
                 new_fields.append(QgsField(name, QMetaType::Type::QString));
             }
-            if (!provider->addAttributes(new_fields)) {
-                throw std::runtime_error(
-                    "QGIS could not add delta fields to layer ");
-            }
+        if (!provider->addAttributes(new_fields)) {
+            throw std::runtime_error(
+                std::string("QGIS could not add delta fields to layer ")
+                + mirror.layer->id().toStdString());
+        }
             vector_layer->updateFields();
         }
 
@@ -219,7 +227,8 @@ class QgisRenderBridge::Impl {
                 QString::fromStdString(feature_spec.wkt));
             if (geometry.isNull()) {
                 throw std::invalid_argument(
-                    "invalid WKT in feature delta for layer ");
+                    std::string("invalid WKT in feature delta for layer ")
+                    + mirror.layer->id().toStdString());
             }
             parsed.push_back({feature_spec.id, std::move(geometry), &feature_spec});
         }
@@ -659,6 +668,7 @@ RenderResult QgisRenderBridge::render_sync(const std::array<double, 4>& extent,
                                             const int width, const int height,
                                             const double dpi) const {
     if (!impl_->initialized) throw std::runtime_error("QGIS renderer is not initialized");
+    std::shared_lock<std::shared_mutex> render_guard(impl_->render_mutex);
     if (impl_->active_job) {
         throw std::runtime_error("cannot synchronously render while an asynchronous QGIS job is active");
     }
@@ -682,6 +692,9 @@ RenderResult QgisRenderBridge::render_sync(const std::array<double, 4>& extent,
 
 void QgisRenderBridge::shutdown() {
     if (!impl_ || !impl_->initialized) return;
+    // #1133: exclusive render lock first — a GIL-released render_sync on
+    // another thread cannot be mid-flight past this point.
+    std::unique_lock<std::shared_mutex> render_guard(impl_->render_mutex);
     impl_->wait_for_active_job();
     impl_->mirrors.clear();
     impl_->ordered_ids.clear();
@@ -705,6 +718,7 @@ std::size_t QgisRenderBridge::export_vector(const std::string& path,
         throw std::invalid_argument("unsupported export format (svg or pdf)");
     }
     validate_request(width, height, dpi);
+    std::shared_lock<std::shared_mutex> render_guard(impl_->render_mutex);
     if (impl_->active_job) {
         throw std::runtime_error("cannot export while an asynchronous QGIS job is active");
     }

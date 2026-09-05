@@ -126,8 +126,9 @@ def test_symbol_selector_edits_first_symbol(qtbot) -> None:
 
 
 def test_invalid_current_payload_raises_typed_error(qtbot) -> None:
+    # No modal can appear here (validation raises synchronously) — arming
+    # a cancel timer would leak it into the next test's event loop.
     with pytest.raises(SymbologyBridgeError):
-        _run_with_timer(400, _cancel_active_modal)
         open_renderer_properties(
             None,
             title="broken",

@@ -135,3 +135,46 @@ def test_shim_bridge_missing_raises_actionable_error(monkeypatch):
     assert "PALEO_WITH_QGIS_RENDERER" in msg
     assert "native/qgis_render_bridge" in msg
     assert isinstance(excinfo.value.__cause__, ImportError)
+
+
+def test_mirror_failures_collected_not_swallowed():
+    """#1164: per-layer and tail failures land in diagnostics; survivors stay."""
+    from types import SimpleNamespace
+
+    from paleo_workbench.ui.qgis_stack.mirror import mirror_snapshot_to_stack
+
+    def _layer(lid):
+        return SimpleNamespace(
+            id=lid, name=lid, crs="EPSG:4326", visible=True, opacity=1.0,
+            layer_type="vector", metadata={}, style={},
+            features=[{
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [1.0, 2.0]},
+                "properties": {},
+            }],
+        )
+
+    class FakeStack:
+        def upsert_mirror_layer(self, doc_id, *args, **kwargs):
+            if doc_id == "bad":
+                raise RuntimeError("boom-crs")
+            return "qgis-" + doc_id
+
+        def remove_mirror_layers_except(self, seen):
+            raise RuntimeError("tail-boom")
+
+        def set_mirror_layer_order(self, seen):
+            pass
+
+        def refresh_canvas(self, addr):
+            pass
+
+    snap = SimpleNamespace(
+        project_crs="EPSG:4326", layers=[_layer("ok"), _layer("bad")],
+    )
+    diags: list = []
+    qgis_ids, seen = mirror_snapshot_to_stack(FakeStack(), 0, snap, diags)
+    assert seen == ["ok"]
+    assert qgis_ids == ["qgis-ok"]
+    assert ("bad", "boom-crs") in diags
+    assert ("<tail>", "tail-boom") in diags

@@ -2287,8 +2287,13 @@ _QGIS_PROBE: dict[str, str] = {}
 
 
 def _is_stale_delta_error(exc: RuntimeError) -> bool:
-    """True for the bridge's stale feature-delta rejection (#932 recovery path)."""
-    return "feature delta" in str(exc).lower()
+    """True for the bridge's stale feature-delta rejection (#932 recovery path).
+
+    #1163: matches ONLY the stale-mirror sentence. Data errors (e.g. the
+    invalid-WKT message) must surface immediately instead of triggering a
+    pointless full-snapshot reship that fails the same way.
+    """
+    return "stale mirror for feature delta" in str(exc).lower()
 
 
 def qgis_backend_probe() -> tuple[bool, str]:

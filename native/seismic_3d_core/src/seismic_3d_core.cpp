@@ -93,7 +93,12 @@ py::array_t<float> fast_slice_extract(py::array_t<float, py::array::c_style | py
             #endif
             for (size_t k = 0; k < total_elem; ++k) {
 #if defined(__GNUC__) || defined(__clang__)
-                __builtin_prefetch(&ptr[(k + 16) * dim2 + idx], 0, 0);
+                // #1188: prefetch addresses must stay in-bounds (a prefetch
+                // hint never faults in practice, but OOB addresses are UB
+                // and the pattern gets copied into real vectorized loads).
+                const size_t pf = std::min((k + 16) * dim2 + idx,
+                                           (total_elem - 1) * dim2 + idx);
+                __builtin_prefetch(&ptr[pf], 0, 0);
 #endif
                 r_ptr[k] = ptr[k * dim2 + idx];
             }
@@ -195,7 +200,10 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
                 #endif
                 for (size_t k = 0; k < total; k += block) {
     #if defined(__GNUC__) || defined(__clang__)
-                    __builtin_prefetch(&ptr[(k + 16 * block) * dim2 + idx], 0, 0);
+                    // #1188: clamp the prefetch address (see above).
+                    const size_t pf = std::min((k + 16 * block) * dim2 + idx,
+                                               (total - 1) * dim2 + idx);
+                    __builtin_prefetch(&ptr[pf], 0, 0);
     #endif
                     const size_t end = std::min(k + block, total);
                     for (size_t j = k; j < end; ++j) {
@@ -247,9 +255,12 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
                 #if defined(_OPENMP)
                 #pragma omp parallel for schedule(static) if(total > kOmpMinParallelElems)
                 #endif
-                for (size_t k = 0; k < total; ++k) {
+            for (size_t k = 0; k < total; ++k) {
     #if defined(__GNUC__) || defined(__clang__)
-                    __builtin_prefetch(&ptr[(k + 16) * dim2 + idx], 0, 0);
+                // #1188: clamp the prefetch address (see above).
+                const size_t pf = std::min((k + 16) * dim2 + idx,
+                                           (total - 1) * dim2 + idx);
+                __builtin_prefetch(&ptr[pf], 0, 0);
     #endif
                     float v = ptr[k * dim2 + idx];
                     if (std::isnan(v) || std::isinf(v)) {
