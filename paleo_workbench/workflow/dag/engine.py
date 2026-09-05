@@ -267,9 +267,14 @@ class WorkflowEngine:
             old = prior.node_runs.get(node.node_id)
             if node.node_id in affected or old is None or old.state is not NodeState.SUCCEEDED:
                 continue
-            identity = self._cache_identity(spec, node, new_run, catalog)
-            if identity is not None and old.cache_identity is not None and identity != old.cache_identity:
-                continue  # inputs changed upstream of the override → re-execute
+            # Carry over only PROVABLY identical work: the node's identity
+            # (action version, bound parameters, input version ids) must be
+            # unchanged between the prior and the new run. Anything less
+            # re-executes — carry-over is never a guess.
+            old_identity = self._cache_identity(spec, node, prior, catalog)
+            new_identity = self._cache_identity(spec, node, new_run, catalog)
+            if old_identity is None or new_identity is None or old_identity != new_identity:
+                continue
             carried = NodeRun(
                 node_id=node.node_id,
                 state=NodeState.SUCCEEDED,
@@ -278,7 +283,7 @@ class WorkflowEngine:
                 from_cache=True,
                 parameters=dict(old.parameters),
                 input_version_ids=old.input_version_ids,
-                cache_identity=old.cache_identity,
+                cache_identity=old_identity,
                 output_version_ids=old.output_version_ids,
                 outputs=dict(old.outputs),
                 receipt=dict(old.receipt) if old.receipt else None,
@@ -543,17 +548,19 @@ class WorkflowEngine:
             return
 
         input_version_ids = self._input_version_ids(run, node)
-        identity = None
+        # Identity of this execution (cache identity): always recorded on the
+        # checkpoint; *reuse* of a prior execution stays gated on the
+        # action's cacheable declaration.
+        identity = canonical_hash(
+            {
+                "action_id": action_spec.action_id,
+                "action_version": action_spec.version,
+                "parameters": node_run.parameters,
+                "input_version_ids": sorted(input_version_ids),
+            }
+        )
+        node_run.cache_identity = identity
         if action_spec.cacheable:
-            identity = canonical_hash(
-                {
-                    "action_id": action_spec.action_id,
-                    "action_version": action_spec.version,
-                    "parameters": node_run.parameters,
-                    "input_version_ids": sorted(input_version_ids),
-                }
-            )
-            node_run.cache_identity = identity
             hit = find_reusable_node(
                 store,
                 cache_identity=identity,
@@ -743,11 +750,13 @@ class WorkflowEngine:
 
     # -------------------------------------------------------------- helpers --
     def _cache_identity(self, spec: WorkflowSpec, node: NodeSpec, run: WorkflowRun, catalog: Any) -> str | None:
+        """Identity of what this node WOULD do (action id+version, bound
+        parameters, input version ids). Computed for every node — it drives
+        rerun carry-over decisions; cache *reuse* stays gated on the
+        action's cacheable declaration."""
         try:
             action_spec = self._registry.get(node.action_id)
         except LookupError:
-            return None
-        if not action_spec.cacheable:
             return None
         try:
             bound = bind_parameters(node, run=_RunView(run, None), results=self._results_view(run))
