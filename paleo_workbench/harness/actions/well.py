@@ -44,6 +44,7 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="well.open",
+            output_schema={"type": "object", "properties": {"well_id": {"type": ["string", "null"]}, "name": {"type": "string"}, "curves": {"type": "array"}, "curve_count": {"type": "integer"}, "top_depth": {"type": ["number", "null"]}, "bottom_depth": {"type": ["number", "null"]}, "path": {"type": ["string", "null"]}}, "required": ["name"]},
             description="打开一口井的测井数据（解析 LAS/XML，结果进入会话上下文）。",
             handler=_open,
             risk=ActionRisk.COMPUTE,
@@ -78,6 +79,7 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="well.create_display",
+            output_schema={"type": "object", "properties": {"well_id": {"type": ["string", "null"]}, "display": {"type": "object"}, "warnings": {"type": "array"}}, "required": ["display"]},
             description="为井构建显示文档（选定曲线 → 轨道布局 → 模板绑定），纯数据、可被 UI 渲染。",
             handler=_create_display,
             risk=ActionRisk.COMPUTE,
@@ -99,6 +101,7 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="well.apply_template",
+            output_schema={"type": "object", "properties": {"well_id": {"type": ["string", "null"]}, "template": {"type": "object"}}, "required": ["template"]},
             description="将显示模板应用到已存在的井显示文档（轨道编组/可见性）。",
             handler=_apply_template,
             risk=ActionRisk.COMPUTE,
@@ -167,6 +170,7 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="well.correlate",
+            output_schema={"type": "object", "properties": {}, "additionalProperties": False},
             description="井间地层对比。当前无 headless 对比引擎接入 —— 诚实返回不可用，绝不伪造对比结果。",
             handler=_correlate,
             risk=ActionRisk.COMPUTE,

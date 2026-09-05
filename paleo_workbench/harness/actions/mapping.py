@@ -20,6 +20,8 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="map.create_factor_map",
+            side_effect_notes="publishes the map document in-session; writes an intermediate grid artifact and a catalog run/version",
+            output_schema={"type": "object", "properties": {"document_id": {"type": "string"}, "task_id": {"type": "string"}, "name": {"type": "string"}, "version_id": {"type": ["string", "null"]}, "run_id": {"type": ["string", "null"]}}, "required": ["document_id"]},
             description="从井点因素数据生成单因素图（提取→插值→网格/等值线/井位图层→MapDocument），生产管线。",
             handler=_create_factor_map,
             # #1186: writes the grid artifact to disk and registers a DataRun
@@ -50,6 +52,7 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="map.create_well_location_map",
+            output_schema={"type": "object", "properties": {"document_id": {"type": "string"}, "well_count": {"type": "integer"}, "extent": {"type": "array"}, "name": {"type": "string"}}, "required": ["document_id", "well_count"]},
             description="生成井位图（井点+井名标注+范围），场景 A 的生产路径。",
             handler=_create_well_location_map,
             risk=ActionRisk.COMPUTE,
@@ -69,6 +72,8 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="map.add_layer",
+            side_effect_notes="mutates the live map document in-session (layers list)",
+            output_schema={"type": "object", "properties": {"added": {"type": "boolean"}, "document_id": {"type": "string"}, "layer_count": {"type": "integer"}}, "required": ["added", "document_id"]},
             description="向当前图文档添加图层（矢量/栅格/点/注释），写操作走文档修订。",
             handler=_add_layer,
             risk=ActionRisk.WRITE,
@@ -90,6 +95,8 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="map.set_style",
+            side_effect_notes="mutates a layer style and bumps the style revision in-session",
+            output_schema={"type": "object", "properties": {"layer": {"type": "string"}, "style": {"type": "object"}}, "required": ["layer", "style"]},
             description="设置当前图（或指定图层）的样式（颜色/线宽/标注）。",
             handler=_set_style,
             risk=ActionRisk.WRITE,
@@ -111,6 +118,8 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="map.apply_template",
+            side_effect_notes="creates/updates the composer composition in-session",
+            output_schema={"type": "object", "properties": {"document_id": {"type": "string"}, "template": {"type": "string"}, "components": {"type": "array"}}, "required": ["document_id", "template"]},
             description="将制图模板应用到当前图（样式/要素齐备性：图例+比例尺+指北针+标题，可自定义标题）。",
             handler=_apply_template,
             risk=ActionRisk.WRITE,
@@ -129,6 +138,8 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="map.add_component",
+            side_effect_notes="mutates the composer composition in-session",
+            output_schema={"type": "object", "properties": {"added": {"type": "string", "description": "本次确保存在的组件名"}, "document_id": {"type": "string"}, "components": {"type": "array"}}, "required": ["added"]},
             description="向当前图的版面添加制图要素（图例/色标/比例尺/指北针/标题/图框）。",
             handler=_add_component,
             risk=ActionRisk.WRITE,
@@ -168,6 +179,8 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="map.export",
+            side_effect_notes="writes a validated export file inside the workspace and registers a catalog OUTPUT version",
+            output_schema={"type": "object", "properties": {"exported": {"type": "boolean"}, "artifacts": {"type": "array"}, "provenance": {"type": "object"}, "metrics": {"type": "object"}}, "required": ["exported"]},
             description="导出当前图（PNG/SVG/PDF，生产导出路径），登记 catalog OUTPUT 版本。",
             handler=_export,
             # #1186: writes the exported file into the workspace and registers
@@ -227,6 +240,7 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="map.contour",
+            output_schema={"type": "object", "properties": {"draft_id": {"type": ["string", "null"]}, "name": {"type": "string"}, "levels": {"type": "array"}, "segment_count": {"type": "integer"}, "linked_task_id": {"type": ["string", "null"]}}, "required": ["name", "levels"]},
             description="从已插值的因子任务生成等值线初稿（真实 engine isolines，写回工程草稿区）。",
             handler=_map_contour,
             risk=ActionRisk.WRITE,

@@ -39,6 +39,8 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="geology.create_interpretation",
+            side_effect_notes="session-scope draft appended to the project document; save=true persists through the fault lifecycle with a catalog version",
+            output_schema={"type": "object", "properties": {"saved": {"type": "boolean"}, "interpretation_id": {"type": ["string", "null"]}, "trace_count": {"type": "integer"}}, "required": ["saved"]},
             description="创建断层解释草稿并入库（真实 fault lifecycle：draft→项目引用→catalog 版本），带溯源。",
             handler=_create_fault_interpretation,
             risk=ActionRisk.WRITE,

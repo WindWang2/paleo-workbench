@@ -56,6 +56,7 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="seismic.open_volume",
+            output_schema={"type": "object", "properties": {"volume": {"type": "object"}, "geometry": {"type": "object"}}, "required": ["volume"]},
             description="打开地震体（zarr 生产路径 / RAW SEG-Y 降级浏览），成为会话激活体。",
             handler=_open_volume,
             risk=ActionRisk.COMPUTE,
@@ -95,6 +96,8 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="seismic.compute_attribute",
+            side_effect_notes="writes a derived zarr store under the project artifacts tree and registers a catalog derived version",
+            output_schema={"type": "object", "properties": {"attribute": {"type": "string"}, "artifacts": {"type": "array"}, "diagnostics": {"type": "object"}, "provenance": {"type": "object"}}, "required": ["attribute", "artifacts"]},
             description="对激活（或指定）地震体计算属性体（如 c3 相干），经 provider 执行并登记派生数据。",
             handler=_compute_attribute,
             # #1186: writes the derived zarr store to disk and registers it in

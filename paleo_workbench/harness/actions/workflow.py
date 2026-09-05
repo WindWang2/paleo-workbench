@@ -64,6 +64,7 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="workflow.run",
+            output_schema={"type": "object", "properties": {"run_id": {"type": "string"}, "workflow_id": {"type": "string"}, "state": {"type": "string"}, "nodes": {"type": "object"}, "progress": {"type": "number"}}, "required": ["run_id", "state"]},
             description="执行一个工作流（整图作为单个后台任务进入全局调度器，节点经 harness 守卫管线执行）。",
             handler=_run,
             risk=ActionRisk.COMPUTE,
@@ -79,6 +80,7 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="workflow.resume",
+            output_schema={"type": "object", "properties": {"run_id": {"type": "string"}, "state": {"type": "string"}, "nodes": {"type": "object"}, "progress": {"type": "number"}}, "required": ["run_id", "state"]},
             description="恢复一个中断的工作流：已完成节点保留，被打断的节点安全重跑。",
             handler=_resume,
             risk=ActionRisk.COMPUTE,
@@ -98,6 +100,7 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="workflow.cancel",
+            output_schema={"type": "object", "properties": {"run_id": {"type": "string"}, "cancel_signalled": {"type": "boolean"}}, "required": ["run_id", "cancel_signalled"]},
             description="协作取消一个运行中的工作流（运行节点在安全点停止，待执行节点标记取消）。",
             handler=_cancel,
             risk=ActionRisk.COMPUTE,
@@ -149,6 +152,7 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="recipe.save",
+            output_schema={"type": "object", "properties": {"recipe_id": {"type": "string"}, "path": {"type": "string"}, "source_run_id": {"type": "string"}}, "required": ["recipe_id", "path"]},
             description="把一个工作流运行保存为可移植 recipe（*.paleo-workflow.json），拒绝携带秘密/绝对路径/代码。",
             handler=_recipe_save,
             risk=ActionRisk.WRITE,
@@ -184,6 +188,7 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="recipe.clone",
+            output_schema={"type": "object", "properties": {"recipe_id": {"type": "string"}, "path": {"type": "string"}, "cloned_from": {"type": "string"}}, "required": ["recipe_id", "path"]},
             description="克隆一个 recipe（新身份、可编辑副本）。",
             handler=_recipe_clone,
             risk=ActionRisk.COMPUTE,
