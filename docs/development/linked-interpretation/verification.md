@@ -93,3 +93,17 @@ test_linked_workspace_coordination / test_linked_workspace_ux / test_fault_secti
 test_linked_interpretation_adversarial + 迁移的 producer/wiring/canvas/workstation 测试。
 
 ## V9 — 三轮 review（见下方追加记录）
+
+## V9 — 三轮 review（完成）
+
+- Review 1 Correctness / Review 2 Architecture / Review 3 UX-Perf-Adversarial
+  三个独立 agent 审查 `049423ab..HEAD` + 两个子模块分支。
+- 修复：R1-B1（engine overlay 嵌套 bug + 回归测试）、R1-M1（NULL 哨兵）、
+  R1-M3（无井不清除 link cursor）、R1-m1/m2/m4/m5、R2-M1（upsert 复用）、
+  R2-M2（旧测试迁移）、R3-M1（open_well 张冠李戴）、R3-M2/M3（状态行实测
+  换算/未复核标记）、R3-M5（link cursor 节流）、R3-m1/m2/m3/m4。
+  接受项与理由见 decisions.md D8。
+- 修复后回归：test_well_log_engine_interaction / canvas_panel / workstation /
+  linked_workspace_coordination / linked_workspace_ux / adversarial /
+  td_calibration_lifecycle / domain_coords / coordinate_hub / curve_interpretation
+  = 103+34+9 passed，全绿。

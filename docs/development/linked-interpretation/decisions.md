@@ -31,7 +31,7 @@
 ## D5（2026-09-06）fault 解释与 map fault 的关系
 
 背景：project 已有 FaultInterpretationRef（project/models.py:222）与 map 侧 fault DomainEntity；禁止建立冲突权威。
-决策：seismic fault pick 的 FaultInterpretationDraft 以 `domain_fault_id`（map fault 的稳定 id，可空）关联 map fault；没有关联时是独立 seismic 解释对象。版本化走 interpretation_lifecycle 同构管线（artifact=.fault_interp.npz/json + catalog DERIVED + project ref）。map fault 仍是编图域权威，seismic fault 是解释域对象，二者通过 id 引用。
+决策：seismic fault pick 的 FaultSectionPick/FaultTrace 以 `map_fault_id`（map fault DomainEntity 的稳定 id，可空）关联 map fault；没有关联时是独立 seismic 解释对象。版本化走 interpretation_lifecycle 同构管线（artifact=.fault_interp.npz/json + catalog DERIVED + project ref）。map fault 仍是编图域权威，seismic fault 是解释域对象，二者通过 id 引用。
 
 ## D6（2026-09-06）L5 arbitrary line 走 windowed 采样
 
@@ -52,3 +52,20 @@
 3. **包级认领**：本会话当前认领 L3（workflow/curve_interpretation.py + data_page 曲线操作 UI）与 L5（seismic 显示控制）；L1（coordinate_hub/view_coordination）由并行会话正在实施，本会话后续只做 review/验证，不并行重写。
 4. 任何会话发现目标文件已被对方修改时，先读对方实现再决定增量补充，不做整文件覆盖。
 影响：commit 历史会混合两个实例的贡献；target-state.md 勾选时以分支最终状态为准。
+
+## D8（2026-09-06）三轮 review 结论与已接受风险
+
+修复项见 commit "fix(review)" 与 engine commit（R1-B1）。以下为评估后**接受现状**的项（含理由）：
+
+- R1-m3 well_section_overlay 用取整后 IL/XL 过滤距离（±0.5 bin 误差）：hub 无小数测线访问器；正确修法需在 hub 暴露浮点几何访问器并重算（影响面跨 collaborator 文件），留待后续。当前 max_line_offset=1.0 的语义按 bin 位数级近似解释。
+- R1-m6 resample 的 interp_nan_aware 跨缺失区间线性内插：重采样的标准语义；模块承诺"不把缺失变 0"仍成立（NaN 保持 NaN，仅有限样点间插值）。若需保留缺失区间，应在 derive/诊断流程使用 missing_interval_diagnostics 后再决定。
+- R1-m7 merge_session_links 可能保留指向已删 top 的手工链接：L4 collaborator 在制；reopen 后 link 编辑器以现有 tops 校验显示。记录待其后续处理。
+- R1-m10 unit_conversion 信任用户输入源单位：L3 对话框在制；操作 provenance 已记录参数，可审计回滚。建议后续在对话框预填曲线头单位。
+- R2-m3 旧 correlation 工件 link-id 规范化导致首次 resave 指纹漂移：一次性迁移噪音（科学内容不变），接受。
+- R3-m5 绑定"存在但损坏"时构造崩溃（H13 既有决策）：宁可崩也不静默降级；dock 路径同样传播。保持。
+- R3-m6 任意选井自动弹出 well dock：case A 设计意图；"用户关闭后不再弹出"的闩锁记为后续 UX 迭代。
+- R2-M4 子模块 commit 推送顺序：交付时先推子模块分支再推主仓库（本次执行）。
+
+## D9（2026-09-06）并行协作模式
+
+本 Goal 执行中存在同 worktree 的并行贡献者（井–震方向：L3 曲线工具箱、L5 引擎显示控制/任意线/井迹投影、L4 link 编辑）。分工边界自然形成：本 agent 负责 L1/L2/L6/L7/L8/L10/L11 与 review 修复；重复实现（fault_interpretation.py 草稿）在发现既有 fault_lifecycle.py 后立即删除。所有合并提交均通过测试门。
