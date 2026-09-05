@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from paleo_workbench.catalog import CatalogError
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.workstation.common import workstation_icon
 
 # Multi-tag input separators: whitespace (incl. TAB / U+3000) plus ASCII and
 # full-width commas/semicolons.
@@ -70,14 +71,13 @@ class TagBadge(QWidget):
         layout.addWidget(self.label)
 
         if removable:
-            self.remove_btn = QPushButton("×")
+            self.remove_btn = QPushButton()
             self.remove_btn.setFixedSize(14, 14)
             self.remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             self.remove_btn.setToolTip("移除标签")
+            self.remove_btn.setIcon(workstation_icon("rb-clear.svg"))
             self.remove_btn.setStyleSheet(
-                f"QPushButton {{ border: none; background: transparent; color: {tokens.TEXT_SECONDARY};"
-                f" font-size: 12px; font-weight: bold; padding: 0px; }}"
-                f"QPushButton:hover {{ color: {tokens.ERROR_RED}; }}"
+                "QPushButton { border: none; background: transparent; padding: 0px; }"
             )
             self.remove_btn.clicked.connect(lambda: self.remove_requested.emit(self.tag_name))
             layout.addWidget(self.remove_btn)

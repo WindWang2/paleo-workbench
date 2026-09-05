@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QMenu
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.resources.exporters import get_available_formats
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.workstation.common import workstation_icon
 from paleo_workbench.ui.pages.data_view_models import (
     AssetView,
     DataStage,
@@ -214,12 +215,11 @@ class AssetContextMenu(QMenu):
         return action
 
     def _style_destructive(self, action: QAction) -> None:
-        remove_style = (
-            f"QMenu {{ color: {tokens.TEXT_PRIMARY}; }}"
-            f" QAction#ctx_remove {{ color: {tokens.ERROR_RED}; }}"
-            f" QAction#ctx_bulk_remove {{ color: {tokens.ERROR_RED}; }}"
+        """破坏性动作信号：红色删除图标（不再局部覆盖 QMenu 全局 QSS——
+        QAction 字面色规则在 QSS 中本就无效，反而截断全局菜单样式）。"""
+        action.setIcon(
+            workstation_icon("map/delete_selected.svg", tokens.ERROR_RED)
         )
-        self.setStyleSheet(remove_style)
 
     def find_action(self, object_name: str) -> QAction | None:
         if object_name in self._action_registry:

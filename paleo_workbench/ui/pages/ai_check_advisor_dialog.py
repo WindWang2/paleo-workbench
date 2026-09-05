@@ -6,64 +6,33 @@ Extracted from geological_modeling_3d_page.py to avoid Divergent Change smell.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QTextBrowser
+from PySide6.QtWidgets import QLabel, QPushButton, QTextBrowser
 
 from paleo_workbench import tokens
+from paleo_workbench.ui.components.dialog import PwbDialog
 
 
-class AICheckAdvisorDialog(QDialog):
-    """Premium glassmorphism styled non-modal side dialog showing consistency checking reports."""
+class AICheckAdvisorDialog(PwbDialog):
+    """Non-modal dialog showing the deterministic rule-based consistency report."""
     def __init__(self, bh_report: dict, fault_report: dict, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("地质数据一致性核复顾问（规则检查）")
+        super().__init__("地质数据一致性核复顾问（规则检查）", parent=parent)
+        self.setModal(False)
         self.resize(550, 650)
-        self.setStyleSheet(f"""
-            QDialog {{
-                background-color: {tokens.BG_SIDEBAR};
-                color: {tokens.TEXT_PRIMARY};
-            }}
-            QTextBrowser {{
-                background-color: {tokens.BG_BODY};
-                color: {tokens.TEXT_PRIMARY};
-                border: 1px solid {tokens.BORDER};
-                border-radius: 8px;
-                padding: 12px;
-                font-family: 'Segoe UI', system-ui, sans-serif;
-                font-size: 13px;
-                line-height: 1.5;
-            }}
-            QPushButton {{
-                background-color: {tokens.PRIMARY};
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {tokens.PRIMARY_HOVER};
-            }}
-        """)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
-        layout.setSpacing(tokens.SPACE_2)
 
         header = QLabel("地质数据一致性核复报告（规则检查）")
-        header.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {tokens.PRIMARY};")
-        layout.addWidget(header)
+        header.setObjectName("PwbSectionHeader")
+        self.add_content(header)
 
         self.browser = QTextBrowser()
         self.browser.setOpenExternalLinks(True)
-        layout.addWidget(self.browser)
+        self.add_content(self.browser, 1)
 
         # Construct dynamic HTML report
         has_errors = any(x["type"] == "error" for x in bh_report.get("issues", []))
-        bh_badge = f"<span style='background: {tokens.ERROR}; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;'>不通过 (FAIL)</span>" if has_errors else f"<span style='background: {tokens.WARNING}; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;'>警告 (WARNING)</span>"
+        bh_badge = f"<span style='background: {tokens.ERROR}; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-weight: bold;'>不通过 (FAIL)</span>" if has_errors else f"<span style='background: {tokens.WARNING}; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-weight: bold;'>警告 (WARNING)</span>"
 
         has_fault_warnings = len(fault_report.get("issues", [])) > 0
-        fault_badge = f"<span style='background: {tokens.WARNING}; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;'>有冲突 (WARNING)</span>" if has_fault_warnings else f"<span style='background: {tokens.SUCCESS}; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;'>通过 (PASS)</span>"
+        fault_badge = f"<span style='background: {tokens.WARNING}; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-weight: bold;'>有冲突 (WARNING)</span>" if has_fault_warnings else f"<span style='background: {tokens.SUCCESS}; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-weight: bold;'>通过 (PASS)</span>"
 
         html = f"""
         <h3 style='color: {tokens.PRIMARY}; border-bottom: 1px solid {tokens.BORDER}; padding-bottom: 4px;'>📊 核对概要 (Summary)</h3>
@@ -138,5 +107,6 @@ class AICheckAdvisorDialog(QDialog):
         self.browser.setHtml(html)
 
         btn_close = QPushButton("确认并关闭")
+        btn_close.setObjectName("PrimaryButton")
         btn_close.clicked.connect(self.accept)
-        layout.addWidget(btn_close, 0, Qt.AlignRight)
+        self.add_content(btn_close)
