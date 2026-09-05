@@ -53,6 +53,7 @@ class ExternalPolicy(str, enum.Enum):
 class PackageOptions:
     external_policy: ExternalPolicy = ExternalPolicy.KEEP
     include_outputs_only: bool = False  # True: only OUTPUT-stage payloads
+    include_formats: tuple[str, ...] | None = None  # filter by version.format
     include_provenance: bool = True
 
 
@@ -153,6 +154,12 @@ class PackageBuilder:
                     stage, "excluded", "include_outputs_only 策略",
                 ))
                 continue
+            if self.options.include_formats and version.format not in self.options.include_formats:
+                plan.items.append(PackageItem(
+                    version.id, asset_name, str(payload_path), payload_path.stat().st_size,
+                    stage, "excluded", f"format 策略（{version.format or 'unknown'} 不在清单）",
+                ))
+                continue
             size = payload_path.stat().st_size
             expected = version.size_bytes
             stale = expected is not None and expected != size
@@ -220,6 +227,7 @@ class PackageBuilder:
             options={
                 "external_policy": self.options.external_policy.value,
                 "include_outputs_only": self.options.include_outputs_only,
+                "include_formats": list(self.options.include_formats) if self.options.include_formats else None,
             },
         )
 

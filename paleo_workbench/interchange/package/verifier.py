@@ -135,6 +135,11 @@ def verify_package(package_path: Path, *, deep: bool = True) -> PackageVerifyRep
     return _verify_directory(package_path, deep=deep)
 
 
+# Delivery report files live inside the package but are not manifest entries;
+# treat them as known so re-verification doesn't warn about them.
+KNOWN_PACKAGE_EXTRA_FILES = frozenset({"delivery-report.json", "delivery-report.md"})
+
+
 def _verify_directory(package_root: Path, *, deep: bool) -> PackageVerifyReport:
     report = PackageVerifyReport(package_path=str(package_root), manifest=None)
     root = package_root
@@ -217,7 +222,7 @@ def _verify_directory(package_root: Path, *, deep: bool) -> PackageVerifyReport:
                 ))
 
     # unknown files present in the package but absent from the manifest
-    known = manifest.entry_paths() | {MANIFEST_FILENAME}
+    known = manifest.entry_paths() | {MANIFEST_FILENAME} | KNOWN_PACKAGE_EXTRA_FILES
     for path in sorted(root.rglob("*")):
         rel = path.relative_to(root).as_posix()
         if rel in known:

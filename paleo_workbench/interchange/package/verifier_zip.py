@@ -13,7 +13,11 @@ from paleo_workbench.interchange.package.manifest import (
     SUPPORTED_SCHEMA_VERSIONS,
     PackageManifest,
 )
-from paleo_workbench.interchange.package.verifier import VerifyIssue, PackageVerifyReport
+from paleo_workbench.interchange.package.verifier import (
+    KNOWN_PACKAGE_EXTRA_FILES,
+    VerifyIssue,
+    PackageVerifyReport,
+)
 from paleo_workbench.interchange.path_safety import UnsafePathError, safe_members
 
 _HASH_CHUNK = 1024 * 1024
@@ -103,7 +107,7 @@ def verify_zip_container(zip_path: Path, *, deep: bool = True) -> PackageVerifyR
                     "error", "checksum-mismatch", f"{entry.path}: sha256 不匹配"
                 ))
 
-        known = manifest.entry_paths() | {MANIFEST_FILENAME}
+        known = manifest.entry_paths() | {MANIFEST_FILENAME} | set(KNOWN_PACKAGE_EXTRA_FILES)
         for name in names:
             if name not in known:
                 report.issues.append(VerifyIssue(
