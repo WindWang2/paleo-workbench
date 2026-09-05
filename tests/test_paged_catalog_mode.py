@@ -192,12 +192,15 @@ class TestTablePagedMode:
         table = DataAssetTable()
         qtbot.addWidget(table)
         provider = CatalogPageProvider(index)
-        table.update_paged(provider)
+        assert table.update_paged(provider) is True
         emitted = []
         table.paged_mode_unavailable.connect(lambda: emitted.append(True))
-        table.set_filter_query(FilterQuery(node_type="entity"))
+        assert table.set_filter_query(FilterQuery(node_type="entity")) is True
         assert emitted == [True]
         assert not table.in_paged_mode()
+        # #1142: no stale paged rows remain actionable — the classic model
+        # was never populated here, so the visible set is honestly empty.
+        assert table.visible_asset_count() == 0
 
 
 class TestPerformanceBudgets:

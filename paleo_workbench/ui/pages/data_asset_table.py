@@ -235,13 +235,16 @@ class DataAssetTable(QWidget):
     # Paged mode (large catalogs, P0-B)
     # ------------------------------------------------------------------
 
-    def update_paged(self, provider: CatalogPageProvider) -> None:
+    def update_paged(self, provider: CatalogPageProvider) -> bool:
         """Serve the table from SQL pages instead of materialized rows.
 
         The classic model stays constructed (small projects never see this
         path); the view simply displays the paged model. Filter/search
         changes re-query through the provider; unmappable queries emit
         :attr:`paged_mode_unavailable` so the host can fall back.
+
+        Returns True while paged mode serves; False when the query is
+        unmappable (table already exited to the classic model).
         """
         if self._paged_model is None or self._paged_model.provider is not provider:
             self._paged_model = PagedAssetTableModel(provider, self)
@@ -252,10 +255,11 @@ class DataAssetTable(QWidget):
         if not self._paged_model.apply_query(self._filter_query):
             self.exit_paged_mode()
             self.paged_mode_unavailable.emit()
-            return
+            return False
         self._install_model(self._paged_model)
         self._visible_assets = list(self._paged_model.assets())
         self._sync_selection()
+        return True
 
     def exit_paged_mode(self) -> None:
         """Return to the classic materialized model (host rebuilds rows)."""
@@ -277,18 +281,21 @@ class DataAssetTable(QWidget):
         # setModel creates a fresh selection model: rewire the emitters.
         self.table.selectionModel().selectionChanged.connect(self._emit_selection)
 
-    def set_filter_query(self, query: FilterQuery) -> None:
+    def set_filter_query(self, query: FilterQuery) -> bool:
         self._filter_query = query
         self._filter_query.search_text = self._search_text
         if self._in_paged_mode and self._paged_model is not None:
             if self._paged_model.apply_query(self._filter_query):
                 self._visible_assets = list(self._paged_model.assets())
                 self._sync_selection()
-                return
+                return True
             self.exit_paged_mode()
             self.paged_mode_unavailable.emit()
-            return
+            # #1142: fall through to the classic filtered rebuild — the
+            # table must never keep showing rows from the previous
+            # (paged) filter where delete/recompute could act on them.
         self._apply_filter()
+        return True
 
     def set_search_text(self, text: str) -> None:
         self._search_text = text.strip().lower()

@@ -653,9 +653,13 @@ class DataPage(QWidget):
         if total < PAGED_MODE_THRESHOLD:
             return False
         try:
-            self.asset_table.update_paged(provider)
+            served = self.asset_table.update_paged(provider)
         except Exception:
             logger.debug("paged catalog mode failed; falling back", exc_info=True)
+            return False
+        if not served:
+            # #1142: unmappable query — skip paged badges and let the
+            # materialized path below serve consistent rows.
             return False
         self._apply_paged_tree_counts(project_root, total)
         self.data_toolbar.set_tag_candidates(self._collect_tag_candidates())
