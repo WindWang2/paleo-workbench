@@ -55,6 +55,16 @@ _ACTION_RISKS: dict[str, frozenset] = {
     "well.create_display": frozenset({"read", "compute"}),
     "workflow.status": frozenset({"read"}),
     "workspace.describe_context": frozenset({"read"}),
+    # Harness 2.0: workflow/recipe surface (risk mirrors the specs).
+    "workflow.run": frozenset({"compute"}),
+    "workflow.resume": frozenset({"compute"}),
+    "workflow.cancel": frozenset({"compute"}),
+    "workflow.describe": frozenset({"read"}),
+    "workflow.describe_reproduction": frozenset({"read"}),
+    "workflow.validate": frozenset({"read"}),
+    "recipe.save": frozenset({"write"}),
+    "recipe.load": frozenset({"read"}),
+    "recipe.clone": frozenset({"compute"}),
 }
 
 _RISK_LABELS = {"read": "只读", "compute": "计算", "write": "写入"}
@@ -76,6 +86,10 @@ def _risk_label(plan: AgentPlan) -> str:
 
 class _AgentBridge(QObject):
     completed = Signal(object)
+    # H11: workflow node progress streams from the engine (worker thread)
+    # into the panel through this queued signal — widgets are never touched
+    # off the GUI thread.
+    progress_changed = Signal(float, str)
 
 
 class AgentWorkspace(QFrame):
@@ -135,6 +149,12 @@ class AgentWorkspace(QFrame):
         self.history.setObjectName("WorkstationAgentHistory")
         self.history.setOpenExternalLinks(False)
         outer.addWidget(self.history, 1)
+
+        self.progress_label = QLabel("", self)
+        self.progress_label.setObjectName("WorkstationAgentProgress")
+        self.progress_label.setVisible(False)
+        outer.addWidget(self.progress_label)
+        self._bridge.progress_changed.connect(self._on_progress_changed)
 
         command_row = QHBoxLayout()
         self.command_input = QLineEdit(self)
@@ -317,6 +337,7 @@ class AgentWorkspace(QFrame):
             project=self._project,
             active_well_id=self._well_from_parameters(plan.parameters),
             permissions=permissions,
+            progress=self._on_workflow_progress,
         )
         executor = HarnessExecutor()
 
@@ -355,6 +376,42 @@ class AgentWorkspace(QFrame):
         self.run_button.setEnabled(False)
         self.stop_button.setEnabled(True)
 
+    def _on_workflow_progress(self, ratio: float, message: str) -> None:
+        """Worker-thread safe: forward through the queued bridge signal."""
+        self._bridge.progress_changed.emit(float(ratio), str(message))
+
+    def _on_progress_changed(self, ratio: float, message: str) -> None:
+        percent = int(round(max(0.0, min(1.0, ratio)) * 100))
+        self.progress_label.setText(f"工作流进度 {percent}% · {message}")
+        self.progress_label.setVisible(True)
+
+    def _workflow_checklist_html(self, outputs: dict) -> str | None:
+        """Render the WorkflowPlanView checklist from a run summary."""
+        try:
+            from paleo_workbench.workflow.dag.plan_view import WorkflowPlanView
+
+            view = WorkflowPlanView.from_summary(dict(outputs or {}))
+            rows = view.checklist()
+            if not rows:
+                return None
+            muted = self._muted_html_color()
+            lines = []
+            for row in rows:
+                detail = str(row.get("detail") or "")
+                suffix = f" <span style='color:{muted}'>{detail}</span>" if detail else ""
+                cache_note = "（缓存复用）" if row.get("from_cache") else ""
+                lines.append(
+                    f"{row['symbol']} {row['label']}{cache_note}{suffix}"
+                )
+            header = (
+                f"工作流 {view.name} · {view.state_label()} · "
+                f"{int(round(view.progress * 100))}%"
+            )
+            self.progress_label.setVisible(False)
+            return f"<b>{header}</b><br>" + "<br>".join(lines)
+        except Exception:
+            return None
+
     def _on_completed(self, payload) -> None:
         self._current_task_id = None
         self.run_button.setEnabled(True)
@@ -379,6 +436,19 @@ class AgentWorkspace(QFrame):
             return
 
         summary = self._result_summary(plan, results)
+        workflow_outputs = next(
+            (
+                r.outputs
+                for r in results
+                if r.action_id in ("workflow.run", "workflow.resume") and r.outputs.get("run_id")
+            ),
+            None,
+        )
+        if workflow_outputs is not None:
+            checklist = self._workflow_checklist_html(workflow_outputs)
+            if checklist:
+                self.history.append(checklist)
+                return
         gui_note = (
             f"GUI 同步：{plan.gui_action}" if plan.gui_action else "无 GUI 变更"
         )

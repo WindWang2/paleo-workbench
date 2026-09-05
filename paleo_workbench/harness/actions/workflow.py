@@ -229,6 +229,7 @@ def _probe(context: ActionContext):
 
 
 def _run_summary(run: Any) -> dict[str, Any]:
+    labels = {n.node_id: (n.description or n.node_id) for n in run.workflow.nodes}
     return {
         "run_id": run.run_id,
         "workflow_id": run.workflow.workflow_id,
@@ -236,6 +237,7 @@ def _run_summary(run: Any) -> dict[str, Any]:
         "state": run.state.value,
         "nodes": {
             node_id: {
+                "label": labels.get(node_id, node_id),
                 "state": nr.state.value,
                 "from_cache": nr.from_cache,
                 "attempt": nr.attempt,
@@ -297,6 +299,28 @@ _RUN_SCHEMA = {
 }
 
 
+def _progress_streamer(context: ActionContext):
+    """Stream engine node updates onto the session progress surface (H11).
+
+    The Task Center / agent panel receives (ratio, "当前节点") updates
+    through the action context — never through widgets or engine internals.
+    """
+    def on_update(live_run) -> None:
+        if context.progress is None:
+            return
+        from paleo_workbench.workflow.dag.plan_view import WorkflowPlanView
+
+        view = WorkflowPlanView.from_run(live_run)
+        current = view.current_node()
+        message = f"{view.name} · {current}" if current else view.state_label()
+        try:
+            context.progress(view.progress, message)
+        except Exception:
+            pass  # progress must never kill the run
+
+    return on_update
+
+
 def _run(context: ActionContext, parameters: dict) -> dict:
     engine = _engine(context)
     spec = _spec_from_recipe_param(context, parameters)
@@ -307,6 +331,7 @@ def _run(context: ActionContext, parameters: dict) -> dict:
         run.run_id,
         context=context,
         project_probe=_probe(context),
+        on_update=_progress_streamer(context),
     )
     return _run_summary(done)
 
@@ -317,6 +342,7 @@ def _resume(context: ActionContext, parameters: dict) -> dict:
         parameters["run_id"],
         context=context,
         project_probe=_probe(context),
+        on_update=_progress_streamer(context),
     )
     return _run_summary(done)
 
