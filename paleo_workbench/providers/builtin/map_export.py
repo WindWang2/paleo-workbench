@@ -41,6 +41,49 @@ _EXPORT_SCHEMA: dict[str, Any] = {
 }
 
 
+def _resolve_provider_output(
+    provider_id: str,
+    raw: Any,
+    context: ProviderContext,
+    *,
+    suffixes: tuple[str, ...],
+) -> Path:
+    """#1177: provider-level output containment.
+
+    The executor promises inputs arrive as refs, but renderers must write
+    files — so the provider itself enforces: no ``..`` segments (traversal
+    dead even before resolution), an allowlisted suffix, relative paths
+    anchored at the execution-owned ``work_dir``, and single-level parent
+    creation (no ``mkdir -p`` directory-creation spree). Workspace policy
+    stays with the action layer; this is the depth-in-depth backstop for
+    any direct ``execute_provider`` caller.
+    """
+    if not raw or not str(raw).strip():
+        raise ProviderRejectedInputError(provider_id, "output_path parameter required")
+    if ".." in Path(str(raw)).parts:
+        raise ProviderRejectedInputError(
+            provider_id, f"output_path must not contain '..': {raw!r}"
+        )
+    out = Path(str(raw))
+    if not out.is_absolute():
+        if not context.work_dir:
+            raise ProviderRejectedInputError(
+                provider_id, "relative output_path needs context work_dir"
+            )
+        out = Path(context.work_dir) / out
+    if out.suffix.lower() not in suffixes:
+        raise ProviderRejectedInputError(
+            provider_id, f"unsupported output suffix {out.suffix!r} (expected {suffixes})"
+        )
+    try:
+        out.parent.mkdir(exist_ok=True)
+    except FileNotFoundError:
+        raise ProviderRejectedInputError(
+            provider_id, f"output parent does not exist, refusing to create: {out.parent}"
+        )
+    return out
+
+
 class MapRenderBackendProvider:
     """VISUALIZATION family: the probed production render backends."""
 
@@ -119,14 +162,10 @@ class MapRenderBackendProvider:
             raise ProviderRejectedInputError(
                 self.descriptor.provider_id, "output_path parameter required"
             )
-        from pathlib import Path
 
-        out_path = Path(str(output))
-        if out_path.suffix.lower() != ".png":
-            raise ProviderRejectedInputError(
-                self.descriptor.provider_id, "backend render outputs PNG (use export.map_product for svg/pdf)"
-            )
-        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path = _resolve_provider_output(
+            self.descriptor.provider_id, output, context, suffixes=(".png",)
+        )
         from paleo_workbench.mapping.map_render_backend import FallbackMapRenderBackend
 
         if self._backend_name == "qgis":
@@ -207,13 +246,12 @@ class MapProductExportProvider:
                 self.descriptor.provider_id,
                 f"input 'document' must be a MapDocument or MapDocumentRef, got {type(document).__name__}",
             )
-        output_path = Path(str(parameters["output_path"]))
-        if output_path.suffix.lower() not in (".png", ".svg", ".pdf"):
-            raise ProviderRejectedInputError(
-                self.descriptor.provider_id,
-                f"unsupported export format {output_path.suffix!r} (png/svg/pdf)",
-            )
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path = _resolve_provider_output(
+            self.descriptor.provider_id,
+            parameters["output_path"],
+            context,
+            suffixes=(".png", ".svg", ".pdf"),
+        )
 
         try:
             from paleo_workbench.ui.map_export_worker import (

@@ -505,3 +505,35 @@ def test_execute_provider_keyboard_interrupt_propagates_unwrapped():
     # The run is still terminal (never stranded running) but the original
     # interpreter-exit type propagates instead of ProviderExecutionError.
     assert catalog.runs[0]["status"] == "failed"
+
+
+def test_provider_output_path_containment(tmp_path):
+    """#1177: provider-level output guard — no traversal, no mkdir spree,
+    relative paths anchored at the execution work_dir."""
+    from paleo_workbench.providers.base import ProviderContext
+    from paleo_workbench.providers.builtin.map_export import _resolve_provider_output
+    from paleo_workbench.providers.errors import ProviderRejectedInputError
+
+    pid = "viz.map_render.fallback"
+    ctx = ProviderContext(work_dir=str(tmp_path))
+    good = tmp_path / "out.png"
+    assert _resolve_provider_output(pid, str(good), ctx, suffixes=(".png",)) == good
+    assert _resolve_provider_output(
+        pid, "rel.png", ctx, suffixes=(".png",)
+    ) == tmp_path / "rel.png"
+    with pytest.raises(ProviderRejectedInputError):
+        _resolve_provider_output(pid, "../evil.png", ctx, suffixes=(".png",))
+    with pytest.raises(ProviderRejectedInputError):
+        _resolve_provider_output(pid, "/tmp/x/../evil.png", ctx, suffixes=(".png",))
+    with pytest.raises(ProviderRejectedInputError):
+        _resolve_provider_output(pid, str(good.with_suffix(".exe")), ctx, suffixes=(".png",))
+    with pytest.raises(ProviderRejectedInputError):
+        _resolve_provider_output(
+            pid, "rel.png", ProviderContext(), suffixes=(".png",)
+        )
+    # No directory-creation spree: deep parents are refused, not made.
+    with pytest.raises(ProviderRejectedInputError):
+        _resolve_provider_output(
+            pid, str(tmp_path / "a" / "b" / "c.png"), ctx, suffixes=(".png",)
+        )
+    assert not (tmp_path / "a").exists()
