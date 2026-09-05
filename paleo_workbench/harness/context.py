@@ -17,14 +17,30 @@ from typing import Any
 from paleo_workbench.harness.spec import DEFAULT_PERMISSIONS, ActionRisk
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, frozen=True)
 class SelectionSnapshot:
-    """Frozen view of SelectionContext (the P1 selection bus) for agents."""
+    """Frozen view of SelectionContext (the P1 selection bus) for agents.
+
+    Immutable by contract: the host re-snapshots when the session state
+    changes; actions and workflows capture the snapshot they started with
+    (an execution never sees a silently mutated selection).
+    """
 
     active_well_id: str | None = None
     selected_well_ids: tuple[str, ...] = ()
     seismic_cursor: tuple[int, int, float] | None = None
     depth_range: tuple[float, float] | None = None
+    # --- Harness 2.0 snapshot fields ---------------------------------------
+    target_horizon: str | None = None          # active horizon id
+    active_fault_id: str | None = None
+    active_interpretation_id: str | None = None
+    active_layer_id: str | None = None         # active map layer
+    map_extent: tuple[float, float, float, float] | None = None
+    map_crs: str | None = None                 # declared CRS of the map context
+    selected_feature_refs: tuple[str, ...] = ()  # feature identities, not geometries
+    active_version_id: str | None = None       # active catalog data version
+    spatial_cursor: tuple[float, float] | None = None
+    depth_cursor: tuple[str, float] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -32,6 +48,16 @@ class SelectionSnapshot:
             "selected_well_ids": list(self.selected_well_ids),
             "seismic_cursor": list(self.seismic_cursor) if self.seismic_cursor else None,
             "depth_range": list(self.depth_range) if self.depth_range else None,
+            "target_horizon": self.target_horizon,
+            "active_fault_id": self.active_fault_id,
+            "active_interpretation_id": self.active_interpretation_id,
+            "active_layer_id": self.active_layer_id,
+            "map_extent": list(self.map_extent) if self.map_extent else None,
+            "map_crs": self.map_crs,
+            "selected_feature_refs": list(self.selected_feature_refs),
+            "active_version_id": self.active_version_id,
+            "spatial_cursor": list(self.spatial_cursor) if self.spatial_cursor else None,
+            "depth_cursor": list(self.depth_cursor) if self.depth_cursor else None,
         }
 
 
@@ -164,6 +190,7 @@ class ActionContext:
             "open_map_documents": sorted(self.map_documents),
             "loaded_wells": sorted(self.well_logs),
             "available_factor_datasets": sorted(self.factor_datasets),
+            "current_workflow_run_id": self.extras.get("workflow_run_id"),
         }
 
     # -------------------------------------------------------------- build --
@@ -208,6 +235,23 @@ class ActionContext:
                     selected_well_ids=tuple(state.selected_well_ids or ()),
                     seismic_cursor=tuple(state.seismic_cursor) if state.seismic_cursor else None,
                     depth_range=tuple(state.depth_range) if state.depth_range else None,
+                    target_horizon=getattr(state, "active_horizon_id", None),
+                    active_fault_id=getattr(state, "active_fault_id", None),
+                    active_interpretation_id=getattr(state, "active_interpretation_id", None),
+                    active_layer_id=getattr(state, "active_layer_id", None),
+                    map_extent=tuple(state.map_extent)
+                    if getattr(state, "map_extent", None)
+                    else None,
+                    map_crs=getattr(state, "map_crs", None),
+                    selected_feature_refs=tuple(
+                        getattr(state, "selected_feature_ids", None) or ()
+                    ),
+                    spatial_cursor=tuple(state.spatial_cursor)
+                    if getattr(state, "spatial_cursor", None)
+                    else None,
+                    depth_cursor=tuple(state.depth_cursor)
+                    if getattr(state, "depth_cursor", None)
+                    else None,
                 )
                 context.active_well_id = state.active_well_id
         except Exception:

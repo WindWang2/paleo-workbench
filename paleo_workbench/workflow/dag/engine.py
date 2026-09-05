@@ -173,6 +173,7 @@ class WorkflowEngine:
         if cancel_token is None:
             cancel_token = _RunCancelToken()
         active = _ActiveRun(cancel_token, context.project, context)
+        context.extras["workflow_run_id"] = run_id
         with self._lock:
             self._active[run_id] = active
 
@@ -197,6 +198,7 @@ class WorkflowEngine:
                 self._cancel_pending(run, reason="run cancelled")
                 self._finalize(run)
         finally:
+            context.extras.pop("workflow_run_id", None)
             with self._lock:
                 self._active.pop(run_id, None)
             self._checkpoint(store, run)
