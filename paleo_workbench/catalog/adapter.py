@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from paleo_workbench.catalog.checksum import sha256_file_or_none
+from paleo_workbench.catalog.db import DirtySet
 from paleo_workbench.catalog.models import (
     CatalogError,
     DataAsset,
@@ -200,7 +201,8 @@ class CoreCatalogAdapter:
         if self._find_asset_by_legacy_id(legacy_resource_id) is not None:
             return
         self._service._set_legacy_bridge(asset, legacy_resource_id)
-        self._service._save()
+        # #1138: metadata-only row write, not a full reconcile.
+        self._service._save(DirtySet(assets={asset.id: None}))
 
     # ------------------------------------------------------------------ inputs
     def register_input(
@@ -305,6 +307,23 @@ class CoreCatalogAdapter:
         return self._version_ref(version)
 
     # ------------------------------------------------------------ dedup helpers
+    def _batch_overlay_fresh(self) -> bool:
+        """#1139: True when (SQLite index ∪ batch overlay) is complete.
+
+        The index only learns about this batch at exit flush, so mid-batch
+        it is complete exactly for the pre-batch rows recorded in
+        ``_batch_base_revision``; the overlay covers everything added since.
+        Together they prove absence — no document scan needed.
+        """
+        service = self._service
+        base = service._batch_base_revision
+        if not service._batch_depth or base is None:
+            return False
+        try:
+            return service.index_revision() == base
+        except Exception:
+            return False
+
     def _find_managed_raw(self, source_uri: str, checksum: str | None) -> DataVersion | None:
         """Existing managed RAW version for (path, checksum), or None.
 
@@ -324,6 +343,25 @@ class CoreCatalogAdapter:
                             pass
             except Exception:
                 pass
+        if self._batch_overlay_fresh():
+            # #1139: index (pre-batch rows) + overlay (batch rows) are
+            # jointly complete; validate liveness/predicates, then a miss
+            # proves absence without the O(N) scan.
+            vid = service._batch_overlay_managed.get((source_uri, checksum))
+            if vid is not None:
+                try:
+                    version = service.get_version(vid)
+                    if (
+                        version.managed
+                        and version.stage == DataStage.RAW
+                        and not version.trashed
+                        and version.source_uri == source_uri
+                        and version.sha256 == checksum
+                    ):
+                        return version
+                except CatalogError:
+                    pass
+            return None
         for version in service.document.versions:
             if (
                 version.managed
@@ -354,6 +392,22 @@ class CoreCatalogAdapter:
                         pass
         except Exception:
             pass
+        if self._batch_overlay_fresh():
+            # #1139: same absence proof as _find_managed_raw; trashed
+            # versions are never dedup targets (review I2).
+            vid = service._batch_overlay_external.get(resolved)
+            if vid is not None:
+                try:
+                    version = service.get_version(vid)
+                    if (
+                        not version.managed
+                        and not version.trashed
+                        and version.path == resolved
+                    ):
+                        return version
+                except CatalogError:
+                    pass
+            return None
         for version in service.document.versions:
             if not version.managed and not version.trashed and version.path == resolved:
                 return version
@@ -473,7 +527,13 @@ class CoreCatalogAdapter:
                     if version.id not in run.output_version_ids:
                         run.output_version_ids.append(version.id)
                         run_output_added = True
-                    service._save()
+                    # #1138: known mutation scope — asset+version rows plus
+                    # the run linkage, never a full reconcile.
+                    service._save(DirtySet(
+                        assets={asset.id: None},
+                        versions={version.id: None},
+                        runs={run.id: None},
+                    ))
                 except Exception:
                     if run_output_added:
                         run.output_version_ids.remove(version.id)
@@ -592,7 +652,8 @@ class CoreCatalogAdapter:
             if source_version_id not in target.parent_version_ids:
                 service._append_parent(target_version_id, source_version_id)
                 try:
-                    service._save()
+                    # #1138: one edge = one version row, not a full reconcile.
+                    service._save(DirtySet(versions={target_version_id: None}))
                 except Exception:
                     # Snapshot-rollback on a failed save: undo the in-memory
                     # edge (and the maintained children index) so memory never

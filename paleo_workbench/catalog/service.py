@@ -126,6 +126,15 @@ class _BatchSave:
     def __enter__(self) -> "DataCatalogService":
         service = self._service
         with service._lock:
+            if service._batch_depth == 0:
+                # #1139: sample the index freshness baseline once per batch.
+                # The SQLite index only learns about this batch at exit
+                # flush, so during the batch it is complete exactly for the
+                # pre-batch rows — unioned with the overlay, absence proofs
+                # need no document scan.
+                service._batch_base_revision = service.document.catalog_revision
+                service._batch_overlay_managed = {}
+                service._batch_overlay_external = {}
             service._batch_depth += 1
         return service
 
@@ -135,6 +144,9 @@ class _BatchSave:
             service._batch_depth -= 1
             if service._batch_depth:
                 return False  # an outer batch still owns the flush
+            service._batch_base_revision = None
+            service._batch_overlay_managed = {}
+            service._batch_overlay_external = {}
             if exc_type is not None or (
                 service._pending_dirty.is_empty() and not service._pending_reconcile
             ):
@@ -235,6 +247,13 @@ class DataCatalogService:
         # whether any unmarked mutation requires a full reconcile at exit.
         self._pending_dirty = DirtySet()
         self._pending_reconcile = False
+        # #1139: batch dedup overlay. While a batch is open, versions added
+        # via _add_version are recorded here so _find_managed_raw /
+        # _find_external_by_path can prove absence from (index ∪ overlay)
+        # without the O(N) document scan. Reset at every batch boundary.
+        self._batch_base_revision: int | None = None
+        self._batch_overlay_managed: dict[tuple[str | None, str | None], str] = {}
+        self._batch_overlay_external: dict[str, str] = {}
         # Cross-process stale-write baseline: the store's catalog_revision as
         # of open / last successful flush. A flush whose on-disk revision
         # differs means another process committed since we last looked
@@ -450,6 +469,15 @@ class DataCatalogService:
 
     def _add_version(self, version: DataVersion) -> None:
         self.document.versions.append(version)
+        if self._batch_depth:
+            # #1139: record batch-added versions for the dedup overlay.
+            # Lookups validate liveness/predicates via get_version, so later
+            # in-batch removal/trashing can only force a fallback scan,
+            # never a wrong hit.
+            if version.managed:
+                self._batch_overlay_managed[(version.source_uri, version.sha256)] = version.id
+            else:
+                self._batch_overlay_external[version.path] = version.id
         if self._version_by_id is not None:
             self._version_by_id[version.id] = version
             self._versions_by_asset.setdefault(version.asset_id, []).append(version)
@@ -761,6 +789,9 @@ class DataCatalogService:
         self._invalidate_maps()
         self._pending_dirty = DirtySet()
         self._pending_reconcile = False
+        self._batch_base_revision = None
+        self._batch_overlay_managed = {}
+        self._batch_overlay_external = {}
         self._flushed_revision = self._index.revision()
 
     def _maybe_checkpoint_manifest_locked(self) -> None:

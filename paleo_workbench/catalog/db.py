@@ -2148,8 +2148,12 @@ class CatalogIndex:
         return self._safe(None, self._find_managed_raw, source_uri, sha256_value)
 
     def _find_managed_raw(self, source_uri: str, sha256_value: str) -> str | None:
+        # INDEXED BY pins the covering index (#1139: without it the planner
+        # prefers idx_versions_trashed — matching ~all rows, an effective
+        # full scan — the same trap #1043 fixed for the external path).
         row = self._connect().execute(
-            "SELECT id FROM versions WHERE managed = 1 AND stage = 'raw'"
+            "SELECT id FROM versions INDEXED BY idx_versions_source_sha"
+            " WHERE managed = 1 AND stage = 'raw'"
             " AND trashed = 0 AND source_uri = ? AND sha256 = ? LIMIT 1",
             (source_uri, sha256_value),
         ).fetchone()
