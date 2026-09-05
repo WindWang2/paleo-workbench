@@ -63,6 +63,23 @@ PRIMARY_DISABLED = "#8c99a3"
 # 主色面上的文字色（浅色主题=白，深色主题=深墨，高对比=白）
 ON_PRIMARY = "#ffffff"
 
+# ---------------------------------------------------------------------------
+# V5 语义状态 token：禁用 / 降级 / 图表底。三主题各自策展，词汇表唯一。
+# ---------------------------------------------------------------------------
+BG_DISABLED = "#edf1f4"          # 禁用输入/控件底（light 与 BG_SEARCH 同族）
+TEXT_DISABLED = "#8c99a3"        # 禁用文字（与 PRIMARY_DISABLED 同值，语义独立）
+STATUS_DEGRADED = "#b45309"      # 降级/部分可用过程态（warn 族但语义独立）
+BG_CHART = "#ffffff"             # 图表画布底（pyqtgraph 等坐标区）
+
+# 数据画布 chrome 组（painter 级：比例尺/图例/选区/捕捉/编辑笔色）。
+# 这些颜色编码画布交互语义，不由 QSS 渲染——painter 每 paint 经 palette_for 取。
+CANVAS_INK = "#343a40"                     # 画布注记/轴文字主墨
+CANVAS_CHROME_BG = "rgba(248, 249, 250, 0.92)"   # 画布浮层（图例/比例尺）底
+CANVAS_CHROME_BORDER = "#dfe6ee"           # 画布浮层描边
+CANVAS_SELECTION = "#ffe066"               # 画布选区高亮（amber 系）
+CANVAS_SNAP = "#53d8fb"                    # 捕捉指示
+CANVAS_EDIT = "#ff6b6b"                    # 编辑会话警示（顶点/拓扑）
+
 # 图标栏交互态（深色栏专用，三主题各自策展）
 BG_RAIL_HOVER = "#edf2f4"
 BG_RAIL_ACTIVE = "#e1eef1"
@@ -158,6 +175,27 @@ DENSITY_TOKENS = {
 }
 CONTROL_HEIGHT = DENSITY_TOKENS["comfortable"]["btn_height"]
 CONTROL_HEIGHT_LG = 34
+
+
+# ---------------------------------------------------------------------------
+# 密度访问器（V5）：固定高度调用点的运行时真源。构造时用 comfortable，
+# 订阅 theme_changed(theme, density) 后用当前密度重取并重设。
+# ---------------------------------------------------------------------------
+def density_tokens(density: str = "comfortable") -> dict:
+    """Metric table for *density*（未知值回落 comfortable，不抛错）。"""
+    return DENSITY_TOKENS.get(density, DENSITY_TOKENS["comfortable"])
+
+
+def control_height(density: str = "comfortable") -> int:
+    return density_tokens(density)["btn_height"]
+
+
+def row_height(density: str = "comfortable") -> int:
+    return density_tokens(density)["row_height"]
+
+
+def toolbar_height(density: str = "comfortable") -> int:
+    return density_tokens(density)["toolbar_height"]
 
 ICON_FILES = [
     "home.svg", "data.svg", "well-log.svg", "seismic.svg", "sequence.svg",
@@ -307,6 +345,16 @@ _DARK_OVERRIDES = {
     "PRIMARY_HOVER": "#5adcc9",
     "PRIMARY_PRESSED": "#1fa898",
     "PRIMARY_DISABLED": "#455350",
+    "BG_DISABLED": "#161d1c",
+    "TEXT_DISABLED": "#64716c",
+    "STATUS_DEGRADED": "#d97706",
+    "BG_CHART": "#141c1b",
+    "CANVAS_INK": "#c9d2ce",
+    "CANVAS_CHROME_BG": "rgba(20, 28, 27, 0.92)",
+    "CANVAS_CHROME_BORDER": "#3c4744",
+    "CANVAS_SELECTION": "#ffd43b",
+    "CANVAS_SNAP": "#53d8fb",
+    "CANVAS_EDIT": "#ff8787",
     "FOCUS_RING": "#e8863d",
     "TOOLTIP_BG": "#0a1211",
     "TOOLTIP_TEXT": "#e8ece9",
@@ -353,6 +401,16 @@ _HIGH_CONTRAST_OVERRIDES = {
     "PRIMARY_HOVER": "#262626",
     "PRIMARY_PRESSED": "#404040",
     "PRIMARY_DISABLED": "#757575",
+    "BG_DISABLED": "#f0f0f0",
+    "TEXT_DISABLED": "#595959",
+    "STATUS_DEGRADED": "#b45309",
+    "BG_CHART": "#ffffff",
+    "CANVAS_INK": "#ffffff",
+    "CANVAS_CHROME_BG": "rgba(0, 0, 0, 0.85)",
+    "CANVAS_CHROME_BORDER": "#ffffff",
+    "CANVAS_SELECTION": "#ffd43b",
+    "CANVAS_SNAP": "#00e0ff",
+    "CANVAS_EDIT": "#ff5252",
     "FOCUS_RING": "#005fd0",
     "TOOLTIP_BG": "#ffffff",
     "TOOLTIP_TEXT": "#000000",
@@ -439,8 +497,8 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         border: 1px solid {t.FOCUS_RING};
     }}
     QPushButton:disabled {{
-        background-color: {t.BG_SIDEBAR};
-        color: {t.PRIMARY_DISABLED};
+        background-color: {t.BG_DISABLED};
+        color: {t.TEXT_DISABLED};
         border-color: {t.BORDER};
     }}
     QPushButton#PrimaryButton {{
@@ -476,8 +534,8 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         border: 1px solid {t.FOCUS_RING};
     }}
     QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {{
-        background-color: {t.BG_SEARCH};
-        color: {t.PRIMARY_DISABLED};
+        background-color: {t.BG_DISABLED};
+        color: {t.TEXT_DISABLED};
         border-color: {t.BORDER};
     }}
     QComboBox::drop-down {{
@@ -663,7 +721,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         color: {t.PRIMARY};
     }}
     QMenu::item:disabled {{
-        color: {t.PRIMARY_DISABLED};
+        color: {t.TEXT_DISABLED};
     }}
     QMenu::separator {{
         height: 1px;
@@ -745,54 +803,8 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     }}
 
     /* ── App shell chrome ─────────────────────────────────────────── */
-    QFrame#MenuBar {{
-        background: {t.BG_HEADER}; border-bottom: 1px solid {t.BORDER_STRONG};
-        min-height: {t.MENU_BAR_HEIGHT}px; max-height: {t.MENU_BAR_HEIGHT}px;
-    }}
-    /* UI v2 Ribbon (variant A) */
-    ; border-bottom: 1px solid {t.BORDER_STRONG};
-    }}
-    QFrame#RibbonTopRow {{ background: transparent; }}
-    QLabel#RibbonAppBadge {{
-        color: {t.TEXT_SECONDARY}; font-size: {t.FONT_SIZE_STATUS}px;
-    }}
-    QPushButton#RibbonTab {{
-        background: transparent; border: none; border-bottom: 2px solid transparent;
-        color: {t.TEXT_PRIMARY}; padding: 4px 14px; font-size: {t.FONT_SIZE_BASE}px;
-    }}
-    QPushButton#RibbonTab:hover {{ background: {t.BG_MENU_HOVER}; }}
-    QPushButton#RibbonTab[active="true"] {{
-        color: {t.PRIMARY}; border-bottom: 2px solid {t.ACCENT}; font-weight: 600;
-    }}
-    QPushButton#RibbonAppMenuButton {{
-        background: transparent; border: none; color: {t.TEXT_PRIMARY};
-        font-size: 14px; padding: 0 6px;
-    }}
-    QPushButton#RibbonAppMenuButton::menu-indicator {{ image: none; width: 0; }}
-    QPushButton#RibbonCollapseButton {{
-        background: transparent; border: none; color: {t.TEXT_SECONDARY};
-        font-size: 12px; padding: 0 6px;
-    }}
-    QPushButton#RibbonCollapseButton:hover {{ background: {t.BG_MENU_HOVER}; color: {t.TEXT_PRIMARY}; }}
-    QFrame#RibbonBody {{ background: {t.BG_HEADER}; }}
-    QFrame#RibbonGroup {{ background: transparent; }}
-    QLabel#RibbonGroupCaption {{
-        color: {t.TEXT_SECONDARY}; font-size: {t.FONT_SIZE_STATUS}px;
-    }}
-    QFrame#RibbonGroupSeparator {{
-        color: {t.BORDER}; background: {t.BORDER};
-        max-width: 1px; margin: 8px 2px;
-    }}
-    QToolButton#RibbonButton {{
-        background: transparent; border: 1px solid transparent; border-radius: {t.RADIUS_BUTTON}px;
-        color: {t.TEXT_PRIMARY}; padding: 3px 8px; font-size: {t.FONT_SIZE_STATUS}px;
-    }}
-    QToolButton#RibbonButton:hover {{ background: {t.BG_MENU_HOVER}; border-color: {t.BORDER}; }}
-    QToolButton#RibbonButton:checked {{
-        background: {t.PRIMARY}; color: {t.ON_PRIMARY}; border-color: {t.PRIMARY_PRESSED};
-    }}
-    QToolButton#RibbonButton:disabled {{ color: {t.PRIMARY_DISABLED}; }}
-    QLabel#RibbonHint {{ color: {t.TEXT_SECONDARY}; font-size: {t.FONT_SIZE_STATUS}px; }}
+    /* 旧 UI v2 Ribbon 规则块与 QFrame#MenuBar 已随 B2 chrome 删除而失效
+       （全仓无 setObjectName 引用；其中一条还损坏为悬空声明片段）——移除。 */
     /* Hub sub-module pill switcher */
     QWidget#SubmoduleSwitcher {{
         background: {t.BG_HEADER}; border-bottom: 1px solid {t.BORDER_LIGHT};
@@ -807,23 +819,6 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         background: {t.PRIMARY}; color: {t.ON_PRIMARY}; border-color: {t.PRIMARY};
         font-weight: 600;
     }}
-    QPushButton#ProjectMenuButton,
-    QPushButton#ViewMenuButton,
-    QPushButton#ToolsMenuButton,
-    QPushButton#HelpMenuButton {{
-        background: transparent; border: none; color: {t.TEXT_PRIMARY}; padding: 0;
-    }}
-    /* 顶部菜单条按标准菜单栏处理：隐藏下拉指示箭头，避免与文字重叠 */
-    QPushButton#ProjectMenuButton::menu-indicator,
-    QPushButton#ViewMenuButton::menu-indicator,
-    QPushButton#ToolsMenuButton::menu-indicator,
-    QPushButton#HelpMenuButton::menu-indicator {{
-        image: none; width: 0;
-    }}
-    QPushButton#ProjectMenuButton:hover,
-    QPushButton#ViewMenuButton:hover,
-    QPushButton#ToolsMenuButton:hover,
-    QPushButton#HelpMenuButton:hover {{ color: {t.PRIMARY}; }}
     QPushButton#DataPreviewPdfPrevious,
     QPushButton#DataPreviewPdfNext {{
         border: 1px solid {t.BORDER};

@@ -29,7 +29,8 @@ def test_named_presets_cover_composite_and_interpretation():
     assert integrated is not None
     im = visibility_dict(integrated.visibility)
     assert im["inspector"] is True
-    assert im["process"] is True
+    # B18 起 Process Hub 拆分为 agent/logs/console dock（"process" 键已移除）
+    assert im["agent"] is True
     assert im["tasks"] is True
     assert im["well"] is True
     assert im["seismic"] is True
