@@ -1,11 +1,23 @@
-"""Well curve interpretation: explicit operations → DERIVED versions (P1-A).
+"""Well curve interpretation: explicit operations → DERIVED versions (P1-A / L3).
 
 RAW curve datasets are immutable; every interpretation correction (depth
-shift, despike, baseline shift) is a user-attributable operation that
-produces a NEW derived LAS file and a catalog DERIVED version through
+shift, despike, baseline shift, smoothing, resample, normalization, unit
+conversion, derived curves, …) is a user-attributable operation that produces
+a NEW derived LAS file and a catalog DERIVED version through
 :data:`DataCatalogService.create_derived` — carrying the full provenance
-set: input version ids, operation, parameters, generator, time, output
+set: input version ids, operation, parameters (including original sample
+count / resample metadata / unit provenance), generator, time, output
 version ids. Nothing here ever writes to a RAW payload.
+
+Operation scopes (:data:`OPERATION_SCOPE`):
+
+* ``depth_axis`` — transforms the measured-depth axis (depth_shift);
+* ``curve`` — per-curve numeric kernel (despike, baseline_shift, smooth,
+  median_filter, normalize, clip_outliers, unit_conversion);
+* ``file`` — whole-file transforms that must keep every curve aligned
+  (resample, depth_unit_normalize);
+* ``derive`` — controlled-expression derived curve (derive_curve; the
+  evaluator lives in :mod:`curve_operations` and never calls ``eval``).
 """
 
 from __future__ import annotations
@@ -18,10 +30,22 @@ from typing import Any, Callable
 import numpy as np
 
 from paleo_workbench.catalog.service import DataCatalogService
+from paleo_workbench.workflow.curve_operations import (
+    clip_outliers,
+    conversion_factor,
+    convert_values,
+    evaluate_curve_expression,
+    interp_nan_aware,
+    median_filter_curve,
+    missing_interval_report,
+    moving_average,
+    normalize_curve,
+    resample_axis,
+)
 
 logger = logging.getLogger(__name__)
 
-GENERATOR_ID = "curve-interpretation-v1"
+GENERATOR_ID = "curve-interpretation-v2"
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +100,29 @@ CURVE_OPERATIONS: dict[str, tuple[Callable[..., np.ndarray], tuple[str, ...]]] =
     "depth_shift": (depth_shift, ("delta_m",)),
     "despike": (despike, ()),
     "baseline_shift": (baseline_shift, ("delta",)),
+    "smooth": (moving_average, ("window",)),
+    "median_filter": (median_filter_curve, ("window",)),
+    "normalize": (normalize_curve, ()),
+    "clip_outliers": (clip_outliers, ()),
+    "unit_conversion": (convert_values, ("from_unit", "to_unit")),
+    "resample": (resample_axis, ("step",)),
+    "depth_unit_normalize": (conversion_factor, ("target_unit",)),
+    "derive_curve": (evaluate_curve_expression, ("expression", "result_mnemonic")),
+}
+
+# How each operation touches the LAS file (see module docstring).
+OPERATION_SCOPE: dict[str, str] = {
+    "depth_shift": "depth_axis",
+    "despike": "curve",
+    "baseline_shift": "curve",
+    "smooth": "curve",
+    "median_filter": "curve",
+    "normalize": "curve",
+    "clip_outliers": "curve",
+    "unit_conversion": "curve",
+    "resample": "file",
+    "depth_unit_normalize": "file",
+    "derive_curve": "derive",
 }
 
 
@@ -127,15 +174,80 @@ def apply_curve_operation(
 
     curve_values = np.asarray(las.curves[curve].data, dtype=float)
     kwargs = {k: v for k, v in (parameters or {}).items() if k != "curve"}
-    if operation == "depth_shift":
+    scope = OPERATION_SCOPE.get(operation, "curve")
+    provenance_extra: dict[str, Any] = {}
+
+    if scope == "depth_axis":
         las.curves[las.curves[0].mnemonic].data = kernel(
             las.curves[las.curves[0].mnemonic].data, **kwargs
         )
-        new_values = curve_values
+    elif scope == "file":
+        if operation == "resample":
+            depth_axis = np.asarray(las.curves[las.curves[0].mnemonic].data, dtype=float)
+            if depth_axis.size < 2:
+                raise ValueError("resample needs a depth axis with ≥2 samples")
+            original_step = float(depth_axis[1] - depth_axis[0]) if depth_axis.size > 1 else 0.0
+            new_axis = resample_axis(depth_axis, float(kwargs["step"]))
+            for log_curve in las.curves[1:]:
+                log_curve.data = interp_nan_aware(
+                    new_axis, depth_axis, np.asarray(log_curve.data, dtype=float)
+                )
+            las.curves[las.curves[0].mnemonic].data = new_axis
+            provenance_extra = {
+                "original_sample_count": int(depth_axis.size),
+                "original_step": original_step,
+                "new_step": float(kwargs["step"]),
+            }
+        elif operation == "depth_unit_normalize":
+            target_unit = str(kwargs.get("target_unit", "m"))
+            current_unit = (
+                str(getattr(las.curves[0], "unit", "") or "m").strip() or "m"
+            )
+            factor = conversion_factor(current_unit, target_unit)  # raises on unknown
+            if factor == 1.0:
+                raise ValueError(
+                    f"depth axis already in {target_unit!r}; nothing to normalize"
+                )
+            depth_axis = np.asarray(las.curves[las.curves[0].mnemonic].data, dtype=float)
+            las.curves[las.curves[0].mnemonic].data = depth_axis * factor
+            las.curves[0].unit = target_unit
+            provenance_extra = {"unit_from": current_unit, "unit_to": target_unit}
+        else:  # pragma: no cover - registry and scopes are defined together
+            raise ValueError(f"unhandled file-scope operation {operation!r}")
+    elif scope == "derive":
+        expression = str(kwargs["expression"])
+        result_mnemonic = str(kwargs["result_mnemonic"]).strip()
+        result_unit = str(kwargs.get("result_unit", "") or "")
+        if not result_mnemonic:
+            raise ValueError("derive_curve needs a result_mnemonic")
+        if result_mnemonic in las.curves:
+            raise ValueError(
+                f"curve {result_mnemonic!r} already exists in {input_path.name}"
+            )
+        variables = {
+            str(log_curve.mnemonic): np.asarray(log_curve.data, dtype=float)
+            for log_curve in las.curves[1:]
+        }
+        if not variables:
+            raise ValueError("derive_curve needs at least one input curve")
+        result = evaluate_curve_expression(expression, variables)
+        las.append_curve(
+            result_mnemonic, result, unit=result_unit, descr=f"derived: {expression}"
+        )
+        provenance_extra = {
+            "expression": expression,
+            "result_unit": result_unit,
+        }
     else:
         new_values = kernel(curve_values, **kwargs)
         las.curves[curve].data = new_values
-    del new_values
+        if operation == "unit_conversion":
+            las.curves[curve].unit = str(kwargs["to_unit"])
+            provenance_extra = {
+                "unit_from": str(kwargs["from_unit"]),
+                "unit_to": str(kwargs["to_unit"]),
+            }
+    del curve_values
 
     # Stage the derived payload OUTSIDE the managed store (a RAW version's
     # directory is immutable); create_derived copies it into the derived
@@ -154,7 +266,7 @@ def apply_curve_operation(
             parent_version_ids=[input_version_id],
             name=f"{input_version.asset_id} {operation} {curve}",
             operation=f"curve_interpretation:{operation}",
-            parameters={"curve": curve, **dict(parameters or {})},
+            parameters={"curve": curve, **dict(parameters or {}), **provenance_extra},
             generator=GENERATOR_ID,
             type="well_log",
             format="las",
@@ -185,11 +297,13 @@ def _ensure_writable_well_header(las) -> None:
 
     Minimal or hand-authored LAS files can omit them; the derived output
     must still be a readable LAS regardless of how sparse the input header
-    was. Depth_shift also refreshes them to the shifted range.
+    was. Depth_shift also refreshes them to the shifted range. The depth
+    unit follows the (possibly normalized) depth curve's own unit header.
     """
     from lasio import HeaderItem
 
     index = las.curves[0].data
+    depth_unit = str(getattr(las.curves[0], "unit", "") or "M").strip() or "M"
     if len(index):
         start, stop = float(index[0]), float(index[-1])
         step = float(index[1] - index[0]) if len(index) > 1 else 0.0
@@ -203,7 +317,7 @@ def _ensure_writable_well_header(las) -> None:
         ("NULL", -999.25, "Null value"),
     ):
         if mnemonic not in well:
-            well.append(HeaderItem(mnemonic=mnemonic, unit="M", value=value, descr=desc))
-    well["STRT"].value = start
-    well["STOP"].value = stop
-    well["STEP"].value = step
+            well.append(HeaderItem(mnemonic=mnemonic, unit=depth_unit, value=value, descr=desc))
+        well[mnemonic].value = value
+    for mnemonic in ("STRT", "STOP", "STEP"):
+        well[mnemonic].unit = depth_unit
