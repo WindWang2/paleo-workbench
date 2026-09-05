@@ -482,3 +482,21 @@ def test_commit_guard_uses_scheduled_grid_n_and_power():
     assert all(t.status == "complete" for t in project.factor_map_tasks)
     assert all(t.parameters["power"] == 3.0 for t in project.factor_map_tasks)
     assert all(t.parameters["grid_n"] == 24 for t in project.factor_map_tasks)
+
+
+def test_group_job_cancelled_counts_as_cancelled_not_failed(monkeypatch):
+    """#1168: a worker-side JobCancelled (even as the last future) marks
+    cancelled=True with zero failed — never 'group failed'."""
+    import paleo_workbench.workflow.factor_prepare_scheduler as sched
+
+    project = _project_with_tasks(2)
+    snap = build_prepare_snapshot(project, generation=21, method="IDW", grid_n=12)
+
+    def _boom(*args, **kwargs):
+        raise JobCancelled("user cancelled mid-group")
+
+    monkeypatch.setattr(sched, "batch_prepare_factor_maps", _boom)
+    result = run_factor_prepare_schedule(snap, workers=2)
+    assert result.cancelled is True
+    assert result.failed_count == 0
+    assert all(r.error == "cancelled" for r in result.task_results)

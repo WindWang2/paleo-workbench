@@ -528,7 +528,26 @@ def run_factor_prepare_schedule(
                     group_key = futures[fut]
                     try:
                         group_results = fut.result()
-                    except (JobCancelled, Exception) as exc:  # noqa: BLE001
+                    except JobCancelled:
+                        # #1168: cooperative cancel is not a group failure.
+                        # Record its tasks as cancelled (never failed), then
+                        # re-raise so the outer handler sets cancelled=True
+                        # even when this is the last future (the as_completed
+                        # loop would otherwise end without noticing).
+                        for task, _state, _fp in group_items_by_key.get(
+                            group_key, ()
+                        ):
+                            results_by_id[task.id] = FactorPrepareTaskResult(
+                                task_id=task.id,
+                                dirty_state="dirty",
+                                reused=False,
+                                task=None,
+                                scheduled_result_fingerprint="",
+                                error="cancelled",
+                            )
+                            executed += 1
+                        raise
+                    except Exception as exc:  # noqa: BLE001
                         # One failing group must not discard the OTHER groups'
                         # completed results (audit #848): record the group's
                         # tasks as failed and keep collecting. (The serial
