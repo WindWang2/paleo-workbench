@@ -1753,6 +1753,12 @@ class CompositeDocument(QWidget):
         above map chrome and leave 8px top / ≥12px side inset so it does not
         collide with docked panel edges on narrow widths.
         """
+        try:
+            self._reposition_toolbar_impl()
+        except RuntimeError:
+            pass  # 死壳迟到的 resize/定时信号：C++ 已销毁，忽略
+
+    def _reposition_toolbar_impl(self) -> None:
         # 窄画布：先收起纯文本的 dock 切换钮（面板菜单保留同功能入口），
         # 否则工具条溢出画布右缘、按钮文字被截断（B17 视觉审查）。
         margin_x = 12

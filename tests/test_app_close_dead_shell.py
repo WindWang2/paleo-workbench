@@ -42,7 +42,7 @@ def _simulate_failed_rebuild(qtbot, window) -> None:
     raised) — once the deferred deletion runs, ``app_shell`` wraps a
     destroyed C++ object.
     """
-    window.outer_layout.removeWidget(window.app_shell)
+    window.setCentralWidget(None)
     window.app_shell.setParent(None)
     window.app_shell.deleteLater()
     qtbot.waitUntil(lambda: not shiboken6.isValid(window.app_shell))

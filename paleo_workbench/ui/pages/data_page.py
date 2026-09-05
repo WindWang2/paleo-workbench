@@ -9,6 +9,7 @@ from dataclasses import replace
 
 from PySide6.QtCore import QEvent, QObject, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QKeySequence, QShortcut
+import shiboken6
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -496,7 +497,7 @@ class DataPage(QWidget):
         )
         # Do not tear down active-engine widgets if a project switch is about
         # to be rejected because a cooperative job did not stop.
-        if joined:
+        if joined and shiboken6.isValid(self.reader_panel):
             self.reader_panel.release_engine_widgets()
         return joined
 
@@ -1254,8 +1255,15 @@ class DataPage(QWidget):
 
     def _set_import_running(self, running: bool) -> None:
         self._import_in_progress = running
-        self.data_toolbar.import_btn.setEnabled(not running)
-        self.data_toolbar.import_folder_btn.setEnabled(not running)
+        # 关闭协议会迟到：DeferredDelete 之后 restore/refresh 路径仍会再走
+        # 一遍 shutdown_workers（app_shell._all_pages 持有包装器），此时
+        # C++ 部件已销毁——只更新状态位，绝不触碰死按钮（打开/切换工程
+        # 报错的根因）。
+        toolbar = self.data_toolbar
+        if not shiboken6.isValid(toolbar):
+            return
+        toolbar.import_btn.setEnabled(not running)
+        toolbar.import_folder_btn.setEnabled(not running)
 
     def remove_selected_asset(self) -> bool:
         if not self._selected_assets and self._selected_asset is not None:
