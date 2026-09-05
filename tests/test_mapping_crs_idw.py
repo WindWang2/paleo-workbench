@@ -566,6 +566,22 @@ def test_engine_kriging_labels_dispatch_to_real_kriging() -> None:
     assert module.method_to_backend("linear") == "linear"
 
 
+def test_zero_coordinates_are_kept_not_skipped() -> None:
+    """#1150: x=0.0 is a legal coordinate (equator/origin), not missing."""
+    from paleo_workbench.mapping.geological_pipeline.pipeline import (
+        GeologicalMappingPipeline,
+    )
+
+    pipeline = GeologicalMappingPipeline()
+    dataset = pipeline.extract_factors(
+        [{"well_id": "EQ-1", "name": "赤道井", "x": 0.0, "y": 0.0, "孔隙度": 10.0}],
+        "孔隙度",
+    )
+    assert len(dataset.points) == 1
+    assert dataset.points[0].x == 0.0
+    assert dataset.points[0].y == 0.0
+
+
 # ---------------------------------------------------------------------------
 # #1131: domain-well metadata must not silently override reserved record keys.
 # ---------------------------------------------------------------------------

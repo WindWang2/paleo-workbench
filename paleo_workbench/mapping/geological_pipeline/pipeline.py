@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -116,6 +117,21 @@ def _find_matching_aliases(factor_name: str) -> list[str]:
     return [factor_name, norm]
 
 
+logger = logging.getLogger(__name__)
+
+
+def _first_present(rec: Mapping[str, Any], *keys: str) -> Any:
+    """First value whose key exists and is not None (#1150).
+
+    A plain ``or`` chain treats 0.0 (equator, projection origin) as
+    missing and falls through to a key of another CRS/meaning.
+    """
+    for key in keys:
+        if key in rec and rec[key] is not None:
+            return rec[key]
+    return None
+
+
 class GeologicalMappingPipeline:
     """End-to-end Geological Mapping Pipeline.
 
@@ -146,15 +162,20 @@ class GeologicalMappingPipeline:
         for rec in records:
             if not isinstance(rec, Mapping):
                 continue
-            # Extract coordinates
-            x = rec.get("x") or rec.get("lng") or rec.get("longitude") or rec.get("project_x") or rec.get("surface_x")
-            y = rec.get("y") or rec.get("lat") or rec.get("latitude") or rec.get("project_y") or rec.get("surface_y")
+            # Extract coordinates (#1150: presence, not truthiness — 0.0 is
+            # a legal coordinate, not a missing value).
+            x = _first_present(rec, "x", "lng", "longitude", "project_x", "surface_x")
+            y = _first_present(rec, "y", "lat", "latitude", "project_y", "surface_y")
             if x is None or y is None:
                 coords = rec.get("coordinates")
                 if isinstance(coords, (list, tuple)) and len(coords) >= 2:
                     x, y = coords[0], coords[1]
 
             if x is None or y is None:
+                logger.warning(
+                    "factor record for well %r has no usable coordinates; skipped",
+                    rec.get("well_id", rec.get("name", "?")),
+                )
                 continue
 
             try:
