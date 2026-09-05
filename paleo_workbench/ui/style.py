@@ -65,14 +65,30 @@ def _apply(widget: QObject) -> None:
 
 
 def on_theme_change(callback) -> None:
-    """订阅主题/密度变化（弱引用持有者自行管理生命周期）。"""
+    """订阅主题/密度变化。
+
+    注意：连接是**强引用**（Qt 信号表持有 callback），调用方必须在
+    接收者销毁时 disconnect，否则泄漏。widget 级样式请优先用
+    :func:`bind`（destroyed 自动注销）。
+    """
     theme_manager.theme_changed.connect(callback)
 
 
 def repolish_all() -> None:
-    """主题变化时重渲染全部注册的 inline 样式（ThemeManager 接线调用）。"""
+    """主题变化时重渲染全部注册的 inline 样式（ThemeManager 接线调用）。
+
+    单个渲染器抛异常只影响它自己（记录后跳过），不得中断整条
+    theme_changed 广播链。
+    """
+    import logging
+
     for widget in list(_registry.keys()):
-        _apply(widget)
+        try:
+            _apply(widget)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "inline style 重渲染失败（widget=%r）", widget
+            )
 
 
 theme_manager.theme_changed.connect(lambda *_args: repolish_all())

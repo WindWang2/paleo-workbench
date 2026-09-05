@@ -86,7 +86,12 @@ class _TaskTableModel(QAbstractItemModel):
             return handle
         if role == Qt.ItemDataRole.DisplayRole:
             if column == _COL_TITLE:
-                return handle.spec.title or handle.spec.kind or handle.task_id
+                title = handle.spec.title or handle.spec.kind or handle.task_id
+                # 视觉 QA（10）：失败原因必须可读，不只藏在 tooltip。
+                if getattr(handle.state, "value", "") == "failed" and handle.error:
+                    short = str(handle.error).strip().splitlines()[0][:40]
+                    return f"{title} — {short}"
+                return title
             if column == _COL_STATE:
                 # 视觉 QA（09/10）：状态列必须给模型文本——ResizeToContents
                 # 以模型数据计宽，纯 delegate 绘制会让列塌缩成「…」。
@@ -103,13 +108,6 @@ class _TaskTableModel(QAbstractItemModel):
             return QColor(_STATE_COLORS.get(self._state_key(handle), tokens.TEXT_PRIMARY))
         if role == Qt.ItemDataRole.ToolTipRole and column == _COL_TITLE:
             return handle.message or handle.error or handle.task_id
-        if role == Qt.ItemDataRole.DisplayRole and column == _COL_TITLE:
-            title = handle.spec.title or handle.spec.kind or handle.task_id
-            # 视觉 QA（10）：失败原因必须可读，不只藏在 tooltip。
-            if getattr(handle.state, "value", "") == "failed" and handle.error:
-                short = str(handle.error).strip().splitlines()[0][:40]
-                return f"{title} — {short}"
-            return title
         return None
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):  # noqa: N802
@@ -159,7 +157,6 @@ class _TaskTableModel(QAbstractItemModel):
             self.endInsertRows()
 
         # 3) 原位更新变化的行：仅变化列发 dataChanged。
-        active = TaskState.QUEUED, TaskState.RUNNING
         now = time.monotonic()
         for row, handle in enumerate(self._rows):
             core = (
@@ -188,9 +185,6 @@ class _TaskTableModel(QAbstractItemModel):
                 self.dataChanged.emit(
                     self.index(row, _COL_ELAPSED), self.index(row, _COL_ELAPSED)
                 )
-            # 取消按钮的可见性随 state 变化，已覆盖在整行 dataChanged 中；
-            # 活动行超时防悬挂标记（无消费者，仅诊断）。
-            _ = active
 
 
 class _TaskRowDelegate(QStyledItemDelegate):
@@ -395,11 +389,10 @@ class TaskCenter(QFrame):
         detail.triggered.connect(lambda: self._show_details(handle))
         menu.exec(self.tree.viewport().mapToGlobal(position))
 
-    @staticmethod
-    def _show_details(handle) -> None:
+    def _show_details(self, handle) -> None:
         from PySide6.QtWidgets import QDialog, QDialogButtonBox, QPlainTextEdit, QVBoxLayout
 
-        dialog = QDialog()
+        dialog = QDialog(self)
         dialog.setWindowTitle(f"任务详情 — {handle.spec.title or handle.task_id}")
         layout = QVBoxLayout(dialog)
         body = QPlainTextEdit()

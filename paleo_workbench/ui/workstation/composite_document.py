@@ -15,6 +15,7 @@ QGIS 权威）；属性表 / 识别结果 / 捕捉设置 / split·merge·topolog
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import replace
 import zlib
 
@@ -816,7 +817,13 @@ class CompositeDocument(QWidget):
         """
         try:
             return QgisCanvasShim(parent=self), True
-        except RuntimeError:
+        except Exception:
+            # RuntimeError（桥未装）之外的异常也可能从 shim 构造链冒出
+            # （QgisCanvasHost / 事件attach 等）；降级必须兜住整个链路，
+            # 否则一台环境有问题的机器直接打不开工作站。
+            logging.getLogger(__name__).exception(
+                "QGIS 画布栈初始化失败，回退 fallback 画布"
+            )
             return UnifiedMapCanvas(parent=self), False
 
     def _create_layer_manager(self) -> QWidget:

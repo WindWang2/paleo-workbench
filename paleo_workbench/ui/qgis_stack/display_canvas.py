@@ -219,6 +219,11 @@ class QgisDisplayCanvas(QWidget):
 
     @property
     def backend_status(self) -> str:
+        # #1164 一致性：镜像失败诊断在 shim 与 display 两种画布上同样
+        # 反映到状态（此前 display 恒报健康，失同步无人知晓）。
+        failures = getattr(self, "_mirror_failures", None) or []
+        if failures:
+            return f"qgis: degraded ({len(failures)} mirror failures)"
         return "qgis"
 
     @property

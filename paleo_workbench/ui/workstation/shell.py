@@ -826,6 +826,8 @@ class WorkstationFrame(QWidget):
         画布会被挤到接近零宽——专业工作站必须让地图拿到绝大部分空间。
         resizeDocks 是尽力而为：不可见 dock 由 Qt 忽略，属预期。
         """
+        if getattr(self, "_layout_frozen", False):
+            return  # teardown 已拆 dock：迟到的 singleShot 不得触碰
         host = self._dock_host
         horizontal = Qt.Orientation.Horizontal
         vertical = Qt.Orientation.Vertical
