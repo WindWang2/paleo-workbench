@@ -83,6 +83,11 @@ class QgisLayerTreePanel(QWidget):
         self._project_crs = ""
         self._editing_layer_id: str | None = None
         self._selected_doc_id: str | None = None
+        # 程序化发布中（set_layer_snapshot / set_mirror_layer_order 经由原生
+        # 树结构信号重入 _on_tree_selection）：此时的选中跳变是重排噪声，
+        # 不得外发 active_layer_changed（否则数字化工具被回落 pan）。
+        # 用户点击与 select_layer() 程序化置当前不受影响。
+        self._publishing = False
         self.tree_host: QgisLayerTreeHost | None = None
 
         outer = QVBoxLayout(self)
@@ -166,7 +171,11 @@ class QgisLayerTreePanel(QWidget):
         """推快照到画布；树由 reconcile 自动跟随（reload_tree 仅保签名兼容）。"""
         if self._canvas is None:
             return
-        self._canvas.set_layer_snapshot(self._make_snapshot())
+        self._publishing = True
+        try:
+            self._canvas.set_layer_snapshot(self._make_snapshot())
+        finally:
+            self._publishing = False
 
     # -- 查询/选择 ------------------------------------------------------------
 
@@ -256,15 +265,22 @@ class QgisLayerTreePanel(QWidget):
         """把 _layers 的顶层顺序（top-first）推到镜像树（程序化，不 echo）。"""
         if self._canvas is None or self.tree_host is None:
             return
+        self._publishing = True
         try:
             self._canvas.stack.set_mirror_layer_order(
                 [str(layer.id) for layer in self._layers])
         except Exception:
             pass
+        finally:
+            self._publishing = False
 
     # -- 树回调 ---------------------------------------------------------------
 
     def _on_tree_selection(self, doc_id: str) -> None:
+        # 程序化发布中的选中跳变是重排噪声：本地呈现可跟随，但不得外发
+        # active_layer_changed（见 _publishing 注释）。
+        if getattr(self, "_publishing", False):
+            return
         self._selected_doc_id = doc_id or None
         self._sync_opacity(self._selected_doc_id)
         layer = self.layer_by_id(doc_id) if doc_id else None

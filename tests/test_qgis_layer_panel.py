@@ -127,6 +127,32 @@ def test_panel_set_layer_visible_reaches_mirror_without_echo(qtbot, qapp):
     assert canvas.stack.mirror_layer_visibility("doc-a") is False
 
 
+def test_programmatic_publish_does_not_echo_active_layer(qtbot, qapp):
+    """程序化发布（重排）不得外发 active_layer_changed（#1154 回归）。
+
+    原生树重排的结构信号会让视图选中瞬跳（如回到第 0 行）；该噪声若外发，
+    编辑控制器会被误切活动图层、数字化工具回落 pan（综合编修 resync 丢点）。
+    """
+    from paleo_workbench.ui.qgis_stack.canvas_shim import QgisCanvasShim
+    from paleo_workbench.ui.qgis_stack.layer_tree_panel import QgisLayerTreePanel
+
+    canvas = QgisCanvasShim()
+    qtbot.addWidget(canvas)
+    panel = QgisLayerTreePanel()
+    qtbot.addWidget(panel)
+    panel.bind(canvas, [_layer("doc-a", "井位"), _layer("doc-b", "边界")])
+    canvas.show()
+    panel.show()
+    qtbot.waitUntil(lambda: panel.tree_row_count() >= 2, timeout=3000)
+    panel.select_layer("doc-b")
+    qtbot.waitUntil(lambda: panel._selected_doc_id == "doc-b", timeout=2000)
+    active = []
+    panel.active_layer_changed.connect(active.append)
+    panel._publish()
+    qtbot.wait(150)
+    assert active == []
+
+
 def test_empty_layer_appears_in_tree(qtbot, qapp):
     """零要素图层也上树——否则新建图层在首次数字化前不可见（M2 终局审查 I1）。"""
     from paleo_workbench.mapping.map_render_backend import MapLayerSnapshot
