@@ -112,10 +112,15 @@ _SCHEMA_DDL = [
     "CREATE INDEX IF NOT EXISTS idx_assets_name ON assets(name)",
     "CREATE INDEX IF NOT EXISTS idx_assets_name_search ON assets(name_search)",
     "CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(type)",
-    "CREATE INDEX IF NOT EXISTS idx_assets_trashed ON assets(trashed)",
     # v6 scale indexes: paged browsing always tails ORDER BY with ", a.id",
     # so the composites carry the exact order the paged queries issue.
+    # ``idx_assets_trashed`` is deliberately NOT created anymore (see the
+    # connect-time drop below): it matched ~every row, the planner preferred
+    # it over the order-satisfying composites, and every default page paid a
+    # full-table scan + temp b-tree sort at 100k. The partial live index
+    # gives the common (trashed = 0) case a covering, order-satisfying path.
     "CREATE INDEX IF NOT EXISTS idx_assets_name_id ON assets(name, id)",
+    "CREATE INDEX IF NOT EXISTS idx_assets_live_name_id ON assets(name, id) WHERE trashed = 0",
     "CREATE INDEX IF NOT EXISTS idx_assets_type_name_id ON assets(type, name, id)",
     "CREATE INDEX IF NOT EXISTS idx_assets_updated_name_id ON assets(updated_at, name, id)",
     """CREATE TABLE IF NOT EXISTS versions (
@@ -762,13 +767,20 @@ class CatalogIndex:
         conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         # Paged browsing orders by (name, id); older stores lack the composite
-        # index and would sort the whole filtered set on every page. The
+        # indexes and would sort the whole filtered set on every page. The
         # scale indexes (v6 set) are created the same idempotent way so ANY
         # store this code opens carries them without a version-bump rebuild:
         # a locked store just skips creation and pages run on the plain
         # indexes (correct, only slower).
+        # ``idx_assets_trashed`` is actively dropped when present: it matched
+        # ~every row, the planner preferred it over the order-satisfying
+        # composites (the #1043 trap), and every default page paid a full
+        # scan + temp b-tree sort at 100k assets. Without it, the live
+        # partial index below answers the common page path directly.
         for ddl in (
+            "DROP INDEX IF EXISTS idx_assets_trashed",
             "CREATE INDEX IF NOT EXISTS idx_assets_name_id ON assets(name, id)",
+            "CREATE INDEX IF NOT EXISTS idx_assets_live_name_id ON assets(name, id) WHERE trashed = 0",
             "CREATE INDEX IF NOT EXISTS idx_assets_type_name_id ON assets(type, name, id)",
             "CREATE INDEX IF NOT EXISTS idx_assets_updated_name_id ON assets(updated_at, name, id)",
             "CREATE INDEX IF NOT EXISTS idx_versions_asset_version ON versions(asset_id, version_number)",

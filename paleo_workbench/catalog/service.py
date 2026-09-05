@@ -2970,6 +2970,11 @@ class DataCatalogService:
         immediate rollback guarantees; deferring those commits would enlarge a
         crash window.  Here every mutation is in the CatalogDocument, so a
         failed canonical save can restore the exact pre-batch metadata state.
+
+        Rollback is journal-based (same discipline as ``bulk_add_tag``): only
+        the entries this call actually touches are recorded, so the cost is
+        O(names) instead of a deep copy of BOTH full association maps — which
+        at catalog scale (100k+ owners) dominated every batch tag add.
         """
         with self._lock:
             if asset_id is None and version_id is None:
@@ -2979,16 +2984,9 @@ class DataCatalogService:
             if version_id is not None:
                 self._version_or_raise(version_id)
 
-            # A deep copy is bounded to this explicit metadata batch and only
-            # retained until the single canonical write finishes.  It is never
-            # on normal project-save/open paths.
-            before_tags = list(self.document.tags)
-            before_asset_tags = {
-                key: list(value) for key, value in self.document.asset_tags.items()
-            }
-            before_version_tags = {
-                key: list(value)
-                for key, value in self.document.version_tags.items()
+            journal = _tags._TagJournal(self.document)
+            tags_by_name = {
+                tag.name: tag for tag in self.document.tags
             }
             result: list[Tag] = []
             changed = False
@@ -3000,27 +2998,36 @@ class DataCatalogService:
                     if not str(name or "").strip():
                         continue
                     normalized = self._normalize_tag_for_batch(str(name))
-                    tag = self._tag_by_normalized_name(normalized)
+                    tag = tags_by_name.get(normalized)
                     if tag is None:
                         tag = Tag(
                             name=normalized,
                             display_name=" ".join(str(name).split()),
                         )
                         self.document.tags.append(tag)
+                        tags_by_name[normalized] = tag
+                        journal.record_tag_created(tag)
                         created_tags.append(tag)
                         changed = True
                     if asset_id is not None:
-                        ids = self.document.asset_tags.setdefault(asset_id, [])
-                        if tag.id not in ids:
-                            ids.append(tag.id)
-                            changed = True
-                            touched_assets[asset_id] = None
+                        ids = self.document.asset_tags.get(asset_id)
+                        if ids is None or tag.id not in ids:
+                            # Capture BEFORE setdefault can create the key.
+                            journal.record_list("asset_tags", asset_id)
+                            ids = self.document.asset_tags.setdefault(asset_id, [])
+                            if tag.id not in ids:
+                                ids.append(tag.id)
+                                changed = True
+                                touched_assets[asset_id] = None
                     if version_id is not None:
-                        ids = self.document.version_tags.setdefault(version_id, [])
-                        if tag.id not in ids:
-                            ids.append(tag.id)
-                            changed = True
-                            touched_versions[version_id] = None
+                        ids = self.document.version_tags.get(version_id)
+                        if ids is None or tag.id not in ids:
+                            journal.record_list("version_tags", version_id)
+                            ids = self.document.version_tags.setdefault(version_id, [])
+                            if tag.id not in ids:
+                                ids.append(tag.id)
+                                changed = True
+                                touched_versions[version_id] = None
                     result.append(tag)
                 if changed:
                     self._save(
@@ -3032,16 +3039,8 @@ class DataCatalogService:
                     )
                 return result
             except Exception:
-                self.document.tags = before_tags
-                self.document.asset_tags = before_asset_tags
-                self.document.version_tags = before_version_tags
+                journal.rollback()
                 raise
-
-    def _tag_by_normalized_name(self, normalized: str) -> Tag | None:
-        for tag in self.document.tags:
-            if tag.name == normalized:
-                return tag
-        return None
 
     @staticmethod
     def _normalize_tag_for_batch(name: str) -> str:
@@ -3315,13 +3314,35 @@ class DataCatalogService:
 
     def catalog_aggregates(self, include_trashed: bool = False) -> dict:
         """Group-by counts for explorer badges: ``total``/``stages``/
-        ``types``/``tags``/``review_status`` (same shape as the index)."""
+        ``types``/``tags``/``review_status`` (same shape as the index).
+
+        Cached per (revision, mutation serial, include_trashed): the tree
+        re-reads badges on every refresh while the aggregates only change
+        when the catalog mutates (~389 ms per uncached pass at 100k).
+        """
+        with self._lock:
+            cache_key = (self.document.catalog_revision, self.mutation_serial, bool(include_trashed))
+            cache = getattr(self, "_aggregates_cache", None)
+            cache_rev = getattr(self, "_aggregates_cache_rev", None)
+            if cache is not None and cache_rev == cache_key:
+                return cache
         index = self._query_index_if_current()
         if index is not None:
             try:
-                return index.catalog_aggregates(include_trashed=include_trashed)
+                computed = index.catalog_aggregates(include_trashed=include_trashed)
             except Exception:
-                pass
+                computed = None
+        else:
+            computed = None
+        if computed is None:
+            computed = self._aggregates_from_document(include_trashed=include_trashed)
+        with self._lock:
+            self._aggregates_cache = computed
+            self._aggregates_cache_rev = cache_key
+        return computed
+
+    def _aggregates_from_document(self, include_trashed: bool = False) -> dict:
+        """Aggregates from the in-memory document (index unavailable)."""
         rows = self._paged_fallback_rows(include_trashed=include_trashed)
         stages: dict[str, int] = {}
         types: dict[str, int] = {}
