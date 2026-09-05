@@ -371,7 +371,23 @@ class VolumeAttributeJob:
 
         meta = self.dst / "zarr.json"
         if meta.exists():
-            return zarr.open(str(self.dst), mode="a")
+            arr = zarr.open(str(self.dst), mode="a")
+            # #1161: markers are band-START inlines; a reopened store computed
+            # with a different band_inlines must refuse rather than mix two
+            # parameterizations. Legacy stores (no attr) with markers are
+            # unverifiable → refuse as well; delete the store to recompute.
+            recorded = None
+            try:
+                recorded = arr.attrs.get("band_inlines")
+            except Exception:
+                recorded = None
+            if self.completed_bands() and recorded != self.band_inlines:
+                raise ValueError(
+                    "attribute store band_inlines mismatch: stored "
+                    f"{recorded!r} vs requested {self.band_inlines!r} "
+                    f"({self.dst}); delete the store to recompute"
+                )
+            return arr
         self.dst.mkdir(parents=True, exist_ok=True)
         return zarr.create_array(
             str(self.dst),
@@ -385,6 +401,7 @@ class VolumeAttributeJob:
                 "attribute": self.name,
                 "shape": list(self.reader.shape),
                 "kind": "attribute-volume",
+                "band_inlines": self.band_inlines,
             },
         )
 
@@ -409,7 +426,9 @@ class VolumeAttributeJob:
 
         done = self._done_dir()
         done.mkdir(parents=True, exist_ok=True)
-        marker = done / f"band_{k:06d}"
+        # #1161: marker carries the band START inline, not the positional
+        # index — positional numbers silently rebind when band_inlines changes.
+        marker = done / f"band_{k * self.band_inlines:06d}"
         marker.write_text("ok")
         # #1194: fsync the marker CONTENT (not just the directory) so a
         # crash can never leave a durable marker over unflushed content.
@@ -470,7 +489,7 @@ class VolumeAttributeJob:
         n_il, n_xl, n_t = self.reader.shape
         for k, (i0, i1) in enumerate(bounds):
             ctx.check_cancelled()
-            if k in finished:
+            if i0 in finished:
                 self.stats.bands_done += 1
                 ctx.report_progress(self.stats.bands_done, self.stats.bands_total)
                 continue

@@ -489,3 +489,21 @@ def test_band_data_and_marker_fsynced_before_done(tmp_path, monkeypatch):
     shard_hits = [p for p in fsynced
                   if isinstance(p, str) and "/c/" in p.replace("\\", "/")]
     assert shard_hits, "band shard files must be fsynced before marking done"
+
+
+def test_resume_with_changed_band_inlines_refuses(tmp_path):
+    """#1161: markers bind to band-start inlines; reopening with a different
+    band_inlines raises instead of mixing two parameterizations."""
+    from paleo_workbench.runtime import TaskContext
+    from paleo_workbench.seismic_attributes import VolumeAttributeJob
+
+    _cube, store = _write_small_segy(tmp_path)
+    dst = tmp_path / "attr_mix"
+    job = VolumeAttributeJob(open_volume(store), dst, "c3", band_inlines=6)
+    job.run(TaskContext(task_id="t"))
+    done = dst.parent / f"{dst.name}.done"
+    assert {f.name for f in done.iterdir()} == {"band_000000", "band_000006"}
+    with pytest.raises(ValueError, match="band_inlines mismatch"):
+        VolumeAttributeJob(open_volume(store), dst, "c3", band_inlines=4).run(
+            TaskContext(task_id="t2")
+        )
