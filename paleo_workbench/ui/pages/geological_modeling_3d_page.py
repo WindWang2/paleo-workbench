@@ -21,8 +21,6 @@ from PySide6.QtWidgets import (
     QCheckBox, QSpinBox, QDoubleSpinBox, QScrollArea, QFileDialog, QMessageBox,
     QTabWidget, QGroupBox,
 )
-import pyqtgraph.opengl as gl
-
 from paleo_workbench import tokens
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
@@ -32,10 +30,6 @@ from paleo_workbench.viz.joint_well_pick import (
     build_well_screen_geoms,
     pick_well_name,
 )
-from geoviz import (
-    ClippedGLMeshItem,
-    ClippedGLVolumeItem,
-)
 from paleo_workbench.viz.geomodel import analysis
 from paleo_workbench.viz.geomodel.models import GridSpec
 from paleo_workbench.ui.pages.geological_modeling_workers import (
@@ -44,10 +38,24 @@ from paleo_workbench.ui.pages.geological_modeling_workers import (
     AdvisorWorker,
     StratalWorker,
 )
+from paleo_workbench.ui.pages.geo3d_workspace import (
+    GEO_TREE_ROOT_LABEL,
+    Geo3DWorkspaceController,
+)
 from paleo_workbench.ui.pages.ai_check_advisor_dialog import AICheckAdvisorDialog
 from paleo_workbench.ui.pages.lithology_crossplot_dialog import LithologyCrossplotDialog
 
 logger = logging.getLogger(__name__)
+
+# (mode, (label, points-needed)) — mirrored from geo3d_workspace._MEASURE_MODES
+_GEO_MEASURE_ITEMS = (
+    ("point", ("测量: 点坐标", 1)),
+    ("distance", ("测量: 距离", 2)),
+    ("polyline", ("测量: 折线长度", 3)),
+    ("vertical_difference", ("测量: 高差", 2)),
+    ("thickness", ("测量: 厚度", 1)),
+    ("plane_orientation", ("测量: 产状", 3)),
+)
 
 
 def _opengl_widget_supported() -> bool:
@@ -93,14 +101,21 @@ class GeologicalModeling3DPage(QWidget):
         self._export_job = OwnedWorkerJob(self)
         self._advisor_job = OwnedWorkerJob(self)
         self._stratal_job = OwnedWorkerJob(self)
-        self.active_items: list[gl.GLGraphicsItem] = []
-        self.mesh_items_map: dict[str, list[gl.GLMeshItem]] = {}
+        # V5 geological workspace: domain assembly + scene adapter. The
+        # hidden legacy modeling viewport (GLViewWidget plus the
+        # active_items / mesh_items_map renderer-only state) is retired —
+        # modeling output goes through the adapter into the VISIBLE joint
+        # viewport (ADR-01).
+        self._geo3d = Geo3DWorkspaceController(
+            lambda: self._joint_widget, parent=self
+        )
+        self._geo3d.status_message.connect(self._on_joint_status)
+        self._geo3d.publish_selection = self._publish_geo3d_well_selection
         self.bh_raw_data: list[dict] = []
         self.faults_raw_data: list[dict] = []
-        # Well-seismic tie 3D overlay items (managed separately for re-generation)
-        self._well_curve_items: list[gl.GLLinePlotItem] = []
-        self._synthetic_items: list[gl.GLLinePlotItem] = []
-        self._seismic_slice_items: list[gl.GLMeshItem] = []
+        # Analysis overlay scene objects (GR curves / fence / RGB slices):
+        # engine-side names tracked page-side, cleared on project reset.
+        self._analysis_overlays: dict[str, list[str]] = {}
 
         # Joint analysis host (geoviz) — PRD #85 / #88
         self._project: ProjectDocument | None = None
@@ -150,15 +165,8 @@ class GeologicalModeling3DPage(QWidget):
         self._populate_model_tree()
         left_layout.addWidget(self.model_tree)
 
-        # Off-layout modeling GL (G1a): keep for legacy modeling helpers; not main viewport
-        self.gl_widget = gl.GLViewWidget(self)
-        self.gl_widget.hide()
-        self.gl_widget.opts["distance"] = 250
-        self.gl_widget.setCameraPosition(**_CAMERA_PERSPECTIVE)
-        grid = gl.GLGridItem()
-        grid.setSize(300, 300, 300)
-        grid.setSpacing(10, 10, 10)
-        self.gl_widget.addItem(grid)
+        self._build_geo3d_left_panel(left_layout)
+
         self.btn_coord = None  # G1: no grid/geo coord toggle on chrome
         self._coord_mode = "grid"
         self._joint_align_btn = None
@@ -803,6 +811,225 @@ class GeologicalModeling3DPage(QWidget):
 
         main_layout.addWidget(splitter)
 
+    # ------------------------------------------------------------------ #
+    # V5 geological workspace (domain objects / QC / measure / clip)
+    # ------------------------------------------------------------------ #
+
+    def _build_geo3d_left_panel(self, left_layout: QVBoxLayout) -> None:
+        """Inspector / QC / measurement / clip / view controls (V5).
+
+        Compact stacked sections under the scene tree; all state lives in
+        the Geo3DWorkspaceController (view state persists with the project).
+        """
+        from PySide6.QtWidgets import QListWidget, QTextBrowser
+
+        panel = QFrame()
+        panel.setObjectName("Geo3DPanel")
+        panel.setStyleSheet(
+            "QFrame#Geo3DPanel { background: %s; border: 1px solid %s; "
+            "border-radius: %dpx; }"
+            % (tokens.BG_SIDEBAR, tokens.BORDER, tokens.RADIUS_CARD)
+        )
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
+        layout.setSpacing(tokens.SPACE_1)
+
+        def _section_label(text: str) -> QLabel:
+            lbl = QLabel(text)
+            lbl.setStyleSheet(
+                "font-size: %s; font-weight: %s; color: %s; border: none;"
+                % (tokens.FONT_SIZE_BASE, tokens.FONT_WEIGHT_TITLE, tokens.TEXT_SECONDARY)
+            )
+            return lbl
+
+        # -- measurement tools -------------------------------------------
+        measure_row = QHBoxLayout()
+        measure_row.setSpacing(tokens.SPACE_1)
+        self.geo_measure_combo = QComboBox()
+        self.geo_measure_combo.addItem("测量: 关", None)
+        for mode, (label, _needed) in _GEO_MEASURE_ITEMS:
+            self.geo_measure_combo.addItem(label, mode)
+        self.geo_measure_combo.currentIndexChanged.connect(self._on_geo_measure_mode)
+        measure_row.addWidget(self.geo_measure_combo, 1)
+        self.geo_btn_measure_clear = QPushButton("清除测量")
+        self.geo_btn_measure_clear.clicked.connect(self._on_geo_measure_clear)
+        measure_row.addWidget(self.geo_btn_measure_clear)
+        layout.addLayout(measure_row)
+
+        # -- object clipping (bounds-derived, scene objects) --------------
+        clip_grid = QGridLayout()
+        clip_grid.setSpacing(tokens.SPACE_1)
+        self._geo_clip_rows: dict[str, tuple[QCheckBox, QSlider]] = {}
+        for row, axis in enumerate(("x", "y", "z")):
+            chk = QCheckBox(axis.upper())
+            slide = QSlider(Qt.Horizontal)
+            slide.setRange(0, 100)
+            slide.setValue(50)
+            chk.toggled.connect(self._on_geo_clip_changed)
+            slide.valueChanged.connect(self._on_geo_clip_changed)
+            clip_grid.addWidget(chk, row, 0)
+            clip_grid.addWidget(slide, row, 1)
+            self._geo_clip_rows[axis] = (chk, slide)
+        self.geo_btn_clip_reset = QPushButton("重置剖切")
+        self.geo_btn_clip_reset.clicked.connect(self._on_geo_clip_reset)
+        clip_grid.addWidget(self.geo_btn_clip_reset, 3, 0, 1, 2)
+        layout.addLayout(clip_grid)
+
+        # -- view / camera -------------------------------------------------
+        view_row = QHBoxLayout()
+        view_row.setSpacing(tokens.SPACE_1)
+        self.geo_btn_fit = QPushButton("适配全部")
+        self.geo_btn_fit.clicked.connect(self._geo3d.fit_all)
+        view_row.addWidget(self.geo_btn_fit)
+        self.geo_view_combo = QComboBox()
+        self.geo_view_combo.setMinimumWidth(90)
+        view_row.addWidget(self.geo_view_combo, 1)
+        self.geo_btn_save_view = QPushButton("存视图")
+        self.geo_btn_save_view.clicked.connect(self._on_geo_save_view)
+        view_row.addWidget(self.geo_btn_save_view)
+        layout.addLayout(view_row)
+
+        # -- QC list --------------------------------------------------------
+        layout.addWidget(_section_label("质检 (QC)"))
+        self.geo_qc_list = QListWidget()
+        self.geo_qc_list.setMaximumHeight(96)
+        self.geo_qc_list.setStyleSheet(
+            "QListWidget { font-size: 11px; border: none; }"
+        )
+        layout.addWidget(self.geo_qc_list)
+
+        # -- inspector ------------------------------------------------------
+        layout.addWidget(_section_label("对象检查器"))
+        self.geo_inspector = QTextBrowser()
+        self.geo_inspector.setMaximumHeight(120)
+        self.geo_inspector.setStyleSheet(
+            "QTextBrowser { font-size: 11px; border: none; background: transparent; }"
+        )
+        layout.addWidget(self.geo_inspector)
+
+        left_layout.addWidget(panel)
+
+        # wiring
+        self._geo3d.qc_updated.connect(self._on_geo_qc_updated)
+        self._geo3d.selection_changed.connect(self._on_geo_selection_changed)
+        self._geo3d.measurements_changed.connect(self._refresh_geo_view_combo)
+        self.model_tree.itemSelectionChanged.connect(self._on_geo_tree_selected)
+        self._refresh_geo_view_combo()
+
+    # -- geo3d slots -----------------------------------------------------
+
+    def _on_geo_measure_mode(self, _index: int = 0) -> None:
+        if not hasattr(self, "_geo3d"):
+            return
+        mode = self.geo_measure_combo.currentData()
+        self._geo3d.set_measure_mode(mode)
+
+    def _on_geo_measure_clear(self) -> None:
+        removed = self._geo3d.clear("measure")
+        self._on_joint_status(f"已清除 {removed} 条测量记录" if removed else "暂无测量记录")
+
+    def _on_geo_clip_changed(self, *_a) -> None:
+        if not hasattr(self, "_geo3d") or not hasattr(self, "_geo_clip_rows"):
+            return
+        for axis, (chk, slide) in self._geo_clip_rows.items():
+            self._geo3d.set_axis_clip(
+                axis, chk.isChecked(), slide.value() / 100.0, invert=False
+            )
+
+    def _on_geo_clip_reset(self) -> None:
+        self._geo3d.reset_clip()
+        for axis, (chk, slide) in getattr(self, "_geo_clip_rows", {}).items():
+            chk.setChecked(False)
+            slide.setValue(50)
+
+    def _sync_geo_clip_ui(self) -> None:
+        """Reflect controller clip state into the compact rows (restore)."""
+        for axis, (chk, slide) in getattr(self, "_geo_clip_rows", {}).items():
+            state = self._geo3d.clip_state.get(axis, {})
+            chk.blockSignals(True)
+            slide.blockSignals(True)
+            chk.setChecked(bool(state.get("enabled", False)))
+            slide.setValue(int(round(float(state.get("value", 0.5)) * 100)))
+            chk.blockSignals(False)
+            slide.blockSignals(False)
+
+    def _on_geo_save_view(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+
+        name, ok = QInputDialog.getText(self, "保存视图", "视图名称:")
+        if ok and name:
+            if self._geo3d.save_view_preset(name):
+                self._refresh_geo_view_combo()
+                self._on_joint_status(f"已保存视图预设: {name}")
+
+    def _refresh_geo_view_combo(self) -> None:
+        combo = getattr(self, "geo_view_combo", None)
+        if combo is None:
+            return
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("视图预设…", None)
+        for name in sorted(self._geo3d.view_presets):
+            combo.addItem(name, name)
+        if not getattr(self, "_geo_view_combo_hooked", False):
+            combo.currentIndexChanged.connect(self._on_geo_view_selected)
+            self._geo_view_combo_hooked = True
+        combo.blockSignals(False)
+
+    def _on_geo_view_selected(self, _index: int = 0) -> None:
+        name = self.geo_view_combo.currentData()
+        if name:
+            self._geo3d.restore_view_preset(str(name))
+
+    def _on_geo_qc_updated(self, report) -> None:
+        if not hasattr(self, "geo_qc_list"):
+            return
+        self.geo_qc_list.clear()
+        counts = report.severities()
+        summary = (
+            f"blocker {counts.get('blocker', 0)} · error {counts.get('error', 0)} · "
+            f"warning {counts.get('warning', 0)} · info {counts.get('info', 0)}"
+        )
+        from PySide6.QtWidgets import QListWidgetItem
+
+        header = QListWidgetItem(summary)
+        header.setFlags(Qt.ItemIsEnabled)
+        self.geo_qc_list.addItem(header)
+        for issue in report.issues:
+            if issue.severity == "info":
+                continue
+            icon = {"warning": "⚠", "error": "✗", "blocker": "⛔"}.get(issue.severity, "·")
+            self.geo_qc_list.addItem(f"{icon} [{issue.severity}] {issue.code}: {issue.message}")
+        self._refresh_geo_tree_section()
+
+    def _on_geo_selection_changed(self, object_id: str) -> None:
+        self.geo_inspector.setHtml(self._geo3d.inspector_text(object_id or None))
+
+    def _on_geo_tree_selected(self) -> None:
+        if not hasattr(self, "_geo3d_tree_root"):
+            return
+        items = self.model_tree.selectedItems()
+        if not items:
+            return
+        oid = items[0].data(0, Qt.ItemDataRole.UserRole)
+        if oid:
+            self._geo3d.set_selected(str(oid), broadcast=True)
+
+    def _refresh_geo_tree_section(self) -> None:
+        root = getattr(self, "_geo3d_tree_root", None)
+        if root is None:
+            return
+        self.model_tree.blockSignals(True)
+        try:
+            self._geo3d.rebuild_tree(root)
+        finally:
+            self.model_tree.blockSignals(False)
+
+    def _publish_geo3d_well_selection(self, well_name: str) -> None:
+        """Broadcast a geo3d well pick through the page's cross-view signal."""
+        if well_name:
+            self.well_selected.emit(str(well_name))
+
     @staticmethod
     def _populate_color_scale_combo(
         combo: QComboBox,
@@ -889,6 +1116,13 @@ class GeologicalModeling3DPage(QWidget):
         )
         self._add_checkable_child(root_joint, "井震 3D 视口")
         self._add_checkable_child(root_joint, "井震 2D 剖面条")
+
+        self._geo3d_tree_root = QTreeWidgetItem(self.model_tree, [GEO_TREE_ROOT_LABEL])
+        self._geo3d_tree_root.setFlags(
+            self._geo3d_tree_root.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled
+        )
+        self._geo3d_tree_root.setCheckState(0, Qt.Checked)
+        self._geo3d.rebuild_tree(self._geo3d_tree_root)
 
         self.model_tree.expandAll()
         if not getattr(self, "_tree_changed_hooked", False):
@@ -983,6 +1217,17 @@ class GeologicalModeling3DPage(QWidget):
         if project_changed:
             self.bh_raw_data = []
             self.faults_raw_data = []
+            # Drop the previous project's geo scene objects + analysis
+            # overlays before restoring the incoming project's workspace.
+            self._geo3d.reset()
+            self._clear_analysis_overlays()
+            if project is not None:
+                restored = self._geo3d.restore_state(project)
+                if restored:
+                    self._on_joint_status(
+                        f"已恢复 {len(restored)} 个三维地质对象"
+                    )
+                self._sync_geo_clip_ui()
             # Drop the previous project's rendered brick/overlays immediately.
             self._on_joint_scene_updated()
         self._populate_stratal_interpretations()
@@ -2139,6 +2384,12 @@ class GeologicalModeling3DPage(QWidget):
         if self._project is None:
             return
         self._project.joint_analysis = self.collect_joint_analysis_state()
+        # V5 geological workspace: persist domain references + view state.
+        if self._project is not None:
+            try:
+                self._geo3d.save_state(self._project)
+            except Exception:
+                logger.debug("geo3d workspace save failed", exc_info=True)
 
     def _apply_joint_tree_checks_from_project(self) -> None:
         """Restore known geoviz check keys only; unknown keys are ignored (#121)."""
@@ -2426,6 +2677,7 @@ class GeologicalModeling3DPage(QWidget):
         filt = _PickFilter(self)
         self._joint_pick_filter = filt
         target.installEventFilter(filt)
+        self._on_geo3d_viewport_ready()
         # Also filter on renderer widget for keyboard
         if target is not renderer:
             renderer.installEventFilter(filt)
@@ -2433,6 +2685,27 @@ class GeologicalModeling3DPage(QWidget):
             target.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         except Exception:
             pass
+
+    def _on_geo3d_viewport_ready(self) -> None:
+        """Joint viewport mounted: rebuild geo scene objects + view state."""
+        geo = getattr(self, "_geo3d", None)
+        if geo is None:
+            return
+        geo.sync_scene()
+        geo.apply_clip_state()
+        self._refresh_geo_tree_section()
+        self._on_geo_selection_changed(geo.selected_id or "")
+        if geo.camera:
+            widget = self._joint_widget
+            if widget is not None:
+                try:
+                    widget.set_camera_pose(
+                        distance=float(geo.camera.get("distance", 250.0)),
+                        elevation=float(geo.camera.get("elevation", 30.0)),
+                        azimuth=float(geo.camera.get("azimuth", -45.0)),
+                    )
+                except Exception:
+                    logger.debug("geo3d camera restore failed", exc_info=True)
 
     def _on_joint_pick_mode_changed(self, _index: int = 0) -> None:
         if not hasattr(self, "_joint_pick_mode"):
@@ -2448,12 +2721,17 @@ class GeologicalModeling3DPage(QWidget):
         self._joint_host.remove_active_fence()
 
     def _on_joint_3d_click(self, sx: float, sy: float, view_widget) -> bool:
-        """Hit-test ActiveTimeSlice pierce points and append to the well-order fence."""
+        """Hit-test pierce points, then the V5 geological object pick."""
         well_id = self._hit_test_pierce_at(sx, sy, view_widget)
         if well_id is None:
             if self._well_pick.half_select is not None:
                 self._on_joint_status(self._well_pick.on_blank_click())
                 return True
+            # V5: geological object pick / measurement (consumes on hit or
+            # while a measurement mode is armed).
+            geo = getattr(self, "_geo3d", None)
+            if geo is not None:
+                return bool(geo.handle_viewport_click(sx, sy))
             return False
         self._joint_host.append_fence_well(well_id)
         self.well_selected.emit(well_id)
@@ -2803,13 +3081,6 @@ class GeologicalModeling3DPage(QWidget):
         that contradict each other after a domain flip).
         """
         is_time = not str(domain).lower().startswith("depth")
-        for item in list(getattr(self, "active_items", []) or []):
-            name = type(item).__name__
-            if "Volume" in name or "volume" in name.lower():
-                try:
-                    item.setVisible(not is_time)
-                except Exception:
-                    pass
         note = ""
         if is_time:
             note = "竖直域=Time：已弱化深度网格体（Z 语义可能不一致）"
@@ -2822,7 +3093,6 @@ class GeologicalModeling3DPage(QWidget):
                 msg = (msg + " · " + note).strip(" ·") if msg else note
             self._joint_status.setText(msg)
         self._domain_guard_note = note
-        self.gl_widget.update()
 
     def _align_joint_camera(self) -> None:
         """G1: no modeling camera to copy — apply default joint preset."""
@@ -2844,8 +3114,11 @@ class GeologicalModeling3DPage(QWidget):
 
     def _on_opacity_changed(self, value: int) -> None:
         opacity = value / 100.0
-        logger.info("Setting 3D Volume Item opacity to %s", opacity)
-        self.gl_widget.update()
+        logger.info("Setting geological volume opacity to %s", opacity)
+        if not hasattr(self, "_geo3d"):
+            return
+        for vol in self._geo3d.assembly.objects("volume"):
+            self._geo3d.adapter.set_opacity(vol.object_id, opacity)
 
     def _run_modeling(self) -> None:
         if self._modeling_job.is_running:
@@ -2874,9 +3147,6 @@ class GeologicalModeling3DPage(QWidget):
         )
 
     def _on_modeling_completed(self, result: dict) -> None:
-        self.bh_raw_data = result["bh_raw"]
-        self.faults_raw_data = result["faults_raw"]
-
         # Honest demo marking (P2): synthetic output is badged in the UI and
         # the modeling action is recorded as a catalog DataRun with an
         # explicit synthetic source — never implied to be real data.
@@ -2885,65 +3155,36 @@ class GeologicalModeling3DPage(QWidget):
             self.demo_source_label.setText("合成演示数据 (Demo)")
         self._register_modeling_run(result, is_demo=is_demo)
 
-        # Clear existing active GL elements
-        for item in self.active_items:
-            try:
-                self.gl_widget.removeItem(item)
-            except Exception:
-                pass
-        self.active_items.clear()
-        self.mesh_items_map.clear()
+        # V5 (ADR-01): the demo objects become DOMAIN objects rendered by the
+        # scene adapter into the visible joint viewport. The real joint
+        # wells stay authoritative — the legacy demo overwrite of
+        # bh_raw_data that silently replaced real wells was removed.
+        result = dict(result)
+        result["extent"] = self._demo_modeling_extent()
+        counts = self._geo3d.ingest_demo_result(result)
 
-        # Clear well-seismic overlay items
-        self._clear_well_seismic_overlays()
-
-        # 1. Add Volume Item
-        vol_data = result["volume_data"]
-        self.vol_item = ClippedGLVolumeItem(data=vol_data)
-        w, h, d = vol_data.shape
-        self.vol_item.translate(-w / 2, -h / 2, -d / 2)
-        self.gl_widget.addItem(self.vol_item)
-        self.active_items.append(self.vol_item)
-
-        # 2. Add Boreholes
-        for bh in result["boreholes"]:
-            mesh = ClippedGLMeshItem(vertexes=bh["v"], faces=bh["f"], faceColors=bh["c"], smooth=True)
-            self.gl_widget.addItem(mesh)
-            self.active_items.append(mesh)
-
-            name = bh["name"]
-            if name not in self.mesh_items_map:
-                self.mesh_items_map[name] = []
-            self.mesh_items_map[name].append(mesh)
-
-        # 3. Add Tunnels
-        for tn in result["tunnels"]:
-            mesh = ClippedGLMeshItem(vertexes=tn["v"], faces=tn["f"], faceColors=tn["c"], smooth=True)
-            self.gl_widget.addItem(mesh)
-            self.active_items.append(mesh)
-            self.mesh_items_map[tn["name"]] = [mesh]
-
-        # 4. Add Faults
-        for flt in result["faults"]:
-            mesh = ClippedGLMeshItem(vertexes=flt["v"], faces=flt["f"], faceColors=flt["c"], smooth=True)
-            self.gl_widget.addItem(mesh)
-            self.active_items.append(mesh)
-            self.mesh_items_map[flt["name"]] = [mesh]
-
-        # 5. Generate well-seismic tie 3D overlays
-        self._generate_well_curve_overlays()
-        self._generate_seismic_slice_overlay()
-
-        # Sync visibility checkboxes
-        self._sync_visibility_from_tree()
-        # Initialize GPU clipping
-        self._update_clipping()
-
-        self.btn_run.setEnabled(True)
-        self.progress_bar.setVisible(False)
         self._sync_analysis_actions()
+        self._on_joint_status(
+            f"建模完成 (demo): 井 {counts['wells']} · 隧道 {counts['tunnels']} · "
+            f"断层 {counts['faults']} — 已渲染至三维视口"
+        )
 
-        logger.info("3D geological modeling successfully updated in viewport.")
+        logger.info("3D geological modeling demo objects rendered in joint viewport.")
+
+    def _demo_modeling_extent(self) -> tuple[float, float, float, float]:
+        """XY extent for demo object placement (render-space proxy bounds)."""
+        widget = self._joint_widget
+        scene = getattr(widget, "scene", None) if widget is not None else None
+        scene = scene() if callable(scene) else scene
+        if scene is not None:
+            try:
+                bounds = widget.scene_objects_bounds(visible_only=False)
+                if bounds is not None:
+                    lo, hi = bounds[0], bounds[1]
+                    return (float(lo[0]), float(hi[0]), float(lo[1]), float(hi[1]))
+            except Exception:
+                logger.debug("scene bounds unavailable for demo extent", exc_info=True)
+        return (-80.0, 80.0, -80.0, 80.0)
 
     def _modeling_input_version_ids(self, catalog) -> list[str]:
         """Version ids of the seismic / well data the joint scene is built
@@ -3030,93 +3271,136 @@ class GeologicalModeling3DPage(QWidget):
     # Well-Seismic Tie 3D Overlays
     # ------------------------------------------------------------------ #
 
-    def _clear_well_seismic_overlays(self) -> None:
-        """Remove all well-curve and synthetic-trace 3D items from the viewport."""
-        for item in self._well_curve_items + self._synthetic_items + self._seismic_slice_items:
+    def _add_analysis_overlay(self, key: str, verts, faces, face_colors, *, mode: str = "mesh", label: str = "") -> None:
+        """Submit an analysis artifact (GR curve / fence / RGB slice) as a
+        named scene object through the widget's public overlay API.
+
+        Overlays are view-analysis artifacts: tracked under ``key`` for
+        replace/clear, clipped with the current object clip planes, never
+        persisted (they regenerate from sources).
+        """
+        widget = self._joint_widget
+        if widget is None:
+            return
+        for name in self._analysis_overlays.get(key, []):
             try:
-                self.gl_widget.removeItem(item)
+                widget.remove_scene_object(name)
             except Exception:
                 pass
-        self._well_curve_items.clear()
-        self._synthetic_items.clear()
-        self._seismic_slice_items.clear()
+        scene_name = f"analysis:{key}"
+        kwargs = dict(
+            mode=mode,
+            kind="horizon" if mode == "mesh" else "annotation",
+            opacity=0.85,
+            clip_planes=self._geo3d.adapter._clip_planes,
+        )
+        if mode == "mesh":
+            kwargs.update(
+                verts=np.asarray(verts, dtype=np.float32),
+                faces=np.asarray(faces, dtype=np.int64),
+                face_colors=np.asarray(face_colors, dtype=np.float32),
+                smooth=False,
+            )
+        else:
+            kwargs.update(
+                verts=np.asarray(verts, dtype=np.float32),
+                color=(0.2, 1.0, 0.4, 0.9),
+                width=2.0,
+            )
+        try:
+            widget.add_scene_object(scene_name, **kwargs)
+            self._analysis_overlays[key] = [scene_name]
+        except Exception:
+            logger.debug("analysis overlay %s failed", key, exc_info=True)
+
+    def _clear_analysis_overlays(self) -> None:
+        widget = self._joint_widget
+        if widget is None:
+            self._analysis_overlays.clear()
+            return
+        for names in self._analysis_overlays.values():
+            for name in names:
+                try:
+                    widget.remove_scene_object(name)
+                except Exception:
+                    pass
+        self._analysis_overlays.clear()
 
     def _generate_well_curve_overlays(self) -> None:
-        """Generate 3D GR log curves and synthetic seismogram traces for all boreholes.
+        """Generate 3D GR log curves + synthetic traces into the VISIBLE viewport.
 
         Pure computation lives in :func:`paleo_workbench.viz.geomodel.analysis.generate_well_curve_overlays`;
-        this method only wires the returned data into GL items.
+        results are rendered as line scene objects (ADR-01: no hidden
+        viewport exists any more).
         """
         freq = float(self.slider_wavelet_freq.value())
         td_shift = float(self.slider_td_shift.value())
-
+        widget = self._joint_widget
+        scene_obj = getattr(widget, "scene", None) if widget is not None else None
+        scene_obj = scene_obj() if callable(scene_obj) else scene_obj
+        curves = []
         for overlay in analysis.generate_well_curve_overlays(self.bh_raw_data, freq, td_shift):
-            # GR log offset sideways off the trajectory
-            line_item = gl.GLLinePlotItem(
-                pos=overlay["curve_pts"], color=(0.2, 1.0, 0.4, 0.9), width=2.0, antialias=True
+            pts = np.asarray(overlay["curve_pts"], dtype=np.float64)
+            if scene_obj is not None:
+                try:
+                    idx = scene_obj.world_to_render_xyz_array(pts)
+                    pts = np.asarray(widget.index_xyz_to_world(idx))
+                except Exception:
+                    logger.debug("overlay transform failed", exc_info=True)
+            curves.append((pts, overlay.get("syn_curve_pts")))
+        if not curves:
+            return
+        merged = np.vstack([c[0] for c in curves if len(c[0])])
+        if len(merged) >= 2:
+            # break between wells: use 'lines' pairs to avoid connecting runs
+            widget.add_scene_object(
+                "analysis:gr-curves",
+                verts=merged.astype(np.float32),
+                mode="lines",
+                line_mode="line_strip",
+                color=(0.2, 1.0, 0.4, 0.9),
+                kind="annotation",
+                width=2.0,
+                opacity=0.9,
+                clip_planes=self._geo3d.adapter._clip_planes,
             )
-            self.gl_widget.addItem(line_item)
-            self._well_curve_items.append(line_item)
-
-            # Register in mesh_items_map for tree visibility toggle
-            key = "井眼旁显测井曲线 (3D GR Logs)"
-            if key not in self.mesh_items_map:
-                self.mesh_items_map[key] = []
-            self.mesh_items_map[key].append(line_item)
-
-            # Synthetic seismogram trace (offset opposite to the GR curve)
-            if overlay["syn_curve_pts"] is not None:
-                syn_item = gl.GLLinePlotItem(
-                    pos=overlay["syn_curve_pts"], color=(1.0, 0.4, 0.2, 0.9), width=2.0, antialias=True
-                )
-                self.gl_widget.addItem(syn_item)
-                self._synthetic_items.append(syn_item)
-
-                syn_key = "合成地震记录叠加 (Synthetic Seismograms)"
-                if syn_key not in self.mesh_items_map:
-                    self.mesh_items_map[syn_key] = []
-                self.mesh_items_map[syn_key].append(syn_item)
+            self._analysis_overlays["gr"] = ["analysis:gr-curves"]
 
     def _generate_seismic_slice_overlay(self) -> None:
-        """Generate a synthetic horizontal seismic amplitude slice in the 3D viewport.
-
-        Geometry comes from :func:`paleo_workbench.viz.geomodel.analysis.generate_seismic_slice_overlay`.
-        """
+        """Synthetic horizontal amplitude slice as a scene overlay."""
         verts, faces, colors = analysis.generate_seismic_slice_overlay()
-
-        slice_item = ClippedGLMeshItem(vertexes=verts, faces=faces, faceColors=colors, smooth=False)
-        self.gl_widget.addItem(slice_item)
-        self._seismic_slice_items.append(slice_item)
-        self.active_items.append(slice_item)
-
-        key = "地震剖面三维切片 (Seismic Slices)"
-        self.mesh_items_map[key] = [slice_item]
+        self._add_analysis_overlay("slice", verts, faces, colors)
 
     # ------------------------------------------------------------------ #
     # Visibility & Clipping
     # ------------------------------------------------------------------ #
 
     def _sync_visibility_from_tree(self) -> None:
-        """Apply model tree checked status to mesh/volume rendering visibilities."""
-        root = self.model_tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            parent = root.child(i)
-            for j in range(parent.childCount()):
-                item = parent.child(j)
-                name = item.text(0)
-                visible = (item.checkState(0) == Qt.Checked)
+        """Legacy hidden-viewport mesh visibility — retired (ADR-01).
 
-                if name in ["LST 顶底面", "TST 顶底面"]:
-                    if hasattr(self, "vol_item") and self.vol_item is not None:
-                        self.vol_item.setVisible(visible)
-                else:
-                    gl_items = self.mesh_items_map.get(name, [])
-                    for gl_item in gl_items:
-                        gl_item.setVisible(visible)
-        self.gl_widget.update()
+        Geological objects sync through the V5 workspace controller
+        (``_on_tree_item_changed`` geo branch); joint layers through
+        :meth:`_sync_joint_visibility_from_tree`.
+        """
+        return
 
     def _on_tree_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         if column != 0:
+            return
+
+        geo_root = getattr(self, "_geo3d_tree_root", None)
+        if geo_root is not None and (item is geo_root or self._is_tree_descendant(item, geo_root)):
+            oid = item.data(0, Qt.ItemDataRole.UserRole)
+            if oid:
+                self._geo3d.on_tree_check(str(oid), item.checkState(0) == Qt.Checked)
+            else:
+                # kind/root branch: visual propagation only
+                self.model_tree.blockSignals(True)
+                try:
+                    for i in range(item.childCount()):
+                        item.child(i).setCheckState(0, item.checkState(0))
+                finally:
+                    self.model_tree.blockSignals(False)
             return
 
         wells_parent = getattr(self, "_joint_wells_tree_item", None)
@@ -3167,6 +3451,15 @@ class GeologicalModeling3DPage(QWidget):
         self._sync_visibility_from_tree()
         self._sync_joint_visibility_from_tree()
 
+    @staticmethod
+    def _is_tree_descendant(item: QTreeWidgetItem, ancestor: QTreeWidgetItem) -> bool:
+        parent = item.parent()
+        while parent is not None:
+            if parent is ancestor:
+                return True
+            parent = parent.parent()
+        return False
+
     def _tree_item_checked(self, name: str) -> bool:
         root = self.model_tree.invisibleRootItem()
         for i in range(root.childCount()):
@@ -3213,29 +3506,32 @@ class GeologicalModeling3DPage(QWidget):
                     refresh()
 
     def _update_clipping(self) -> None:
-        """Legacy modeling-item clip (G1: clip card hidden; not wired to joint)."""
-        def val_to_coord(val: int) -> float:
-            return -80.0 + (val / 100.0) * 160.0
+        """Apply axis clipping to geological scene objects (V5).
 
-        x_enabled = self.chk_clip_x.isChecked()
-        x_coord = val_to_coord(self.slide_clip_x.value())
-        x_dir = 1.0 if self.combo_clip_x_dir.currentIndex() == 0 else -1.0
-
-        y_enabled = self.chk_clip_y.isChecked()
-        y_coord = val_to_coord(self.slide_clip_y.value())
-        y_dir = 1.0 if self.combo_clip_y_dir.currentIndex() == 0 else -1.0
-
-        z_enabled = self.chk_clip_z.isChecked()
-        z_coord = val_to_coord(self.slide_clip_z.value())
-        z_dir = 1.0 if self.combo_clip_z_dir.currentIndex() == 0 else -1.0
-
-        for item in self.active_items:
-            if hasattr(item, "set_clipping"):
-                item.set_clipping('x', x_enabled, x_coord, x_dir)
-                item.set_clipping('y', y_enabled, y_coord, y_dir)
-                item.set_clipping('z', z_enabled, z_coord, z_dir)
-        if self.gl_widget is not None:
-            self.gl_widget.update()
+        Slider values are UI 0-100 fractions resolved against the CURRENT
+        scene bounds (survey-derived, no hardcoded ±80). ``invert`` matches
+        the combo semantics: index 0 keeps coord >= value.
+        """
+        if not hasattr(self, "_geo3d"):
+            return
+        self._geo3d.set_axis_clip(
+            "x",
+            self.chk_clip_x.isChecked(),
+            self.slide_clip_x.value() / 100.0,
+            self.combo_clip_x_dir.currentIndex() == 0,
+        )
+        self._geo3d.set_axis_clip(
+            "y",
+            self.chk_clip_y.isChecked(),
+            self.slide_clip_y.value() / 100.0,
+            self.combo_clip_y_dir.currentIndex() == 0,
+        )
+        self._geo3d.set_axis_clip(
+            "z",
+            self.chk_clip_z.isChecked(),
+            self.slide_clip_z.value() / 100.0,
+            self.combo_clip_z_dir.currentIndex() == 0,
+        )
 
     def _apply_clip_to_joint_slices(self) -> None:
         """G1 unwired (#110). Kept for possible G2 geomodel stack."""
@@ -3373,15 +3669,12 @@ class GeologicalModeling3DPage(QWidget):
             timer.timeout.connect(self._rebuild_well_seismic_overlays)
             self._tie_rebuild_timer = timer
         timer.start()
-        self.gl_widget.update()
 
     def _rebuild_well_seismic_overlays(self) -> None:
         if self.bh_raw_data:
-            self._clear_well_seismic_overlays()
+            self._clear_analysis_overlays()
             self._generate_well_curve_overlays()
             self._generate_seismic_slice_overlay()
-            self._sync_visibility_from_tree()
-        self.gl_widget.update()
 
     def _run_auto_tie(self) -> None:
         """Run real cross-correlation auto-tie via ``geoviz.correlate_synthetic_to_trace``.
@@ -3427,17 +3720,8 @@ class GeologicalModeling3DPage(QWidget):
         :func:`paleo_workbench.viz.geomodel.analysis.generate_rgb_fusion_slice`.
         """
         verts, faces, face_colors = analysis.generate_rgb_fusion_slice()
-
-        rgb_item = ClippedGLMeshItem(vertexes=verts, faces=faces, faceColors=face_colors, smooth=True)
-        self.gl_widget.addItem(rgb_item)
-        self.active_items.append(rgb_item)
-
-        key = "RGB 属性融合三维切片 (RGB Fusion Slice)"
-        self.mesh_items_map[key] = [rgb_item]
-        self._sync_visibility_from_tree()
-        self.gl_widget.update()
-
-        QMessageBox.information(self, "RGB 融合切片", "RGB 三频率（15Hz/35Hz/55Hz）属性融合三维切片已成功生成并叠加至三维视口！")
+        self._add_analysis_overlay("rgb", verts, faces, face_colors)
+        self._on_joint_status("RGB 三频率（15/35/55Hz）属性融合切片已叠加至三维视口")
 
     def _generate_cross_well_fence(self) -> None:
         """Generate 3D curtain/fence slice connecting all loaded boreholes.
@@ -3455,17 +3739,10 @@ class GeologicalModeling3DPage(QWidget):
         if mesh is None:
             return
         verts, faces, colors = mesh
-
-        fence_item = ClippedGLMeshItem(vertexes=verts, faces=faces, faceColors=colors, smooth=True)
-        self.gl_widget.addItem(fence_item)
-        self.active_items.append(fence_item)
-
-        key = "井震连井三维剖面幕墙 (Cross-Well Seismic Fence)"
-        self.mesh_items_map[key] = [fence_item]
-        self._sync_visibility_from_tree()
-        self.gl_widget.update()
-
-        QMessageBox.information(self, "连井剖面幕墙", f"已成功生成连接 {len(self.bh_raw_data)} 口钻孔的三维剖面幕墙！")
+        self._add_analysis_overlay("fence", verts, faces, colors)
+        self._on_joint_status(
+            f"已生成连接 {len(self.bh_raw_data)} 口井的三维连井剖面幕墙（三维视口）"
+        )
 
     def _run_lithology_crossplot(self) -> None:
         """Run geoviz.analyze_lithology_crossplot and show the crossplot statistics dialog.

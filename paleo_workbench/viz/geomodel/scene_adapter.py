@@ -68,6 +68,9 @@ class SceneSyncReport:
     removed: list[str] = field(default_factory=list)
     unchanged: int = 0
 
+    def __len__(self) -> int:
+        return len(self.added) + len(self.updated) + len(self.removed)
+
     def __str__(self) -> str:  # pragma: no cover
         return (
             f"+{len(self.added)} ~{len(self.updated)} "

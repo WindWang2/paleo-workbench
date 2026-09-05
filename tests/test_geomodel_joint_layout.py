@@ -49,12 +49,17 @@ def test_geomodel_page_has_joint_host_regions(qtbot):
 
 
 def test_geomodel_tree_only_geoviz_group(qtbot):
-    from paleo_workbench.ui.pages.geological_modeling_3d_page import GeologicalModeling3DPage
+    from paleo_workbench.ui.pages.geological_modeling_3d_page import (
+        GEO_TREE_ROOT_LABEL,
+        GeologicalModeling3DPage,
+    )
 
     page = GeologicalModeling3DPage()
     qtbot.addWidget(page)
     root = page.model_tree.invisibleRootItem()
-    assert root.childCount() == 1
+    # V5: joint group + geological objects section (ADR-01)
+    assert root.childCount() == 2
+    assert root.child(1).text(0) == GEO_TREE_ROOT_LABEL
     group = root.child(0)
     assert "井震联合 (geoviz)" in group.text(0)
     labels = [group.child(j).text(0) for j in range(group.childCount())]

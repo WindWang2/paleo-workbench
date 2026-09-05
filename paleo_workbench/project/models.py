@@ -473,6 +473,37 @@ class JointAnalysisState(BaseModel):
     path_hints: dict[str, str] = Field(default_factory=dict)
 
 
+class Geo3DWorkspaceState(BaseModel):
+    """Persisted 3D geological workspace (V5) — view + reference state only.
+
+    ``objects`` / ``measurements`` carry domain *metadata* snapshots
+    (identity, CRS/unit, provenance, stats — see
+    ``paleo_workbench.viz.geomodel.domain``); vertex/grid arrays live in
+    Catalog versioned artifacts and are reloaded from there, never embedded
+    here. Display state (visibility/opacity), the object clip view, camera
+    pose and named view presets round-trip verbatim.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    objects: list[dict[str, Any]] = Field(default_factory=list)
+    measurements: list[dict[str, Any]] = Field(default_factory=list)
+    display: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    clip: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    camera: dict[str, float] = Field(default_factory=dict)
+    views: list[dict[str, Any]] = Field(default_factory=list)
+    selected: str = ""
+
+    def replace(self, payload: dict[str, Any]) -> None:
+        """Adopt a controller payload wholesale (validated on assignment)."""
+        fresh = Geo3DWorkspaceState.model_validate(payload)
+        for name, value in fresh.model_dump().items():
+            setattr(self, name, value)
+
+    def as_dict(self) -> dict[str, Any]:
+        return self.model_dump()
+
+
 class MapProductRecord(BaseModel):
     """A finalized paleogeographic product: multiple factor maps +
     interpretations + manual adjustments + cartographic composition,
@@ -580,6 +611,8 @@ class ProjectDocument(BaseModel):
     version_sets: list[VersionSet] = Field(default_factory=list)
     export_artifacts: list[ExportArtifact] = Field(default_factory=list)
     joint_analysis: JointAnalysisState = Field(default_factory=JointAnalysisState)
+    # 3D geological workspace (V5): domain object references + view state.
+    geo3d_workspace: Geo3DWorkspaceState = Field(default_factory=Geo3DWorkspaceState)
 
     @classmethod
     def new(cls, name: str, region: str = "") -> "ProjectDocument":
