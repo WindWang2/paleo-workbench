@@ -915,33 +915,8 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         font-size: {t.FONT_SIZE_BASE};
     }}
 
-    /* 深色图标栏：三主题统一深石板底，激活项带铜色指示条 */
-    QFrame#IconRail {{
-        background: {t.BG_RAIL_GRADIENT};
-        border-right: 1px solid {t.BORDER};
-        min-width: {rail_width}px; max-width: {rail_width}px;
-    }}
-    QFrame#RailSeparator {{
-        background: {t.RAIL_SEPARATOR};
-        border: none;
-        min-height: 1px;
-        max-height: 1px;
-        margin: 3px 8px;
-    }}
-    QToolButton[navItem="true"] {{
-        background: transparent; color: {t.TEXT_ON_RAIL}; border: none;
-        border-left: 3px solid transparent;
-        border-radius: {t.RADIUS_NAV_ITEM}px;
-        min-width: {rail_item}px; max-width: {rail_item}px;
-        min-height: {rail_item}px; max-height: {rail_item}px;
-        font-size: {t.FONT_SIZE_NAV_LABEL}; font-weight: {t.FONT_WEIGHT_NAV_LABEL};
-    }}
-    QToolButton[navItem="true"]:hover {{ background: {t.BG_RAIL_HOVER}; color: {t.TEXT_ON_RAIL_ACTIVE}; }}
-    QToolButton[navItem="true"]:focus {{ outline: 2px solid {t.FOCUS_RING}; }}
-    QToolButton[navItem="true"][active="true"] {{
-        background: {t.BG_RAIL_ACTIVE}; color: {t.TEXT_ON_RAIL_ACTIVE};
-        border-left: 3px solid {t.ACCENT}; font-weight: 600;
-    }}
+    /* 旧 Hub shell 的 IconRail/RailSeparator/navItem 规则已死（零引用；
+       B18 后工作站使用 WorkstationActivityRail 词汇）——移除。 */
     /* Generic QToolButton focus (covers QToolButton beyond the icon rail) */
     QToolButton:focus {{ border: 1px solid {t.FOCUS_RING}; }}
     QFrame#StatusBar {{
@@ -1085,33 +1060,6 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         border: 1px solid {t.BORDER};
         border-radius: {t.RADIUS_BUTTON}px;
         padding: 2px;
-    }}
-    QFrame#WorkflowStepper {{
-        background: {t.BG_HEADER};
-        border-bottom: 1px solid {t.BORDER};
-    }}
-    QPushButton[stageItem="true"] {{
-        background: transparent;
-        color: {t.TEXT_SECONDARY};
-        font-size: {t.FONT_SIZE_BASE};
-        font-weight: 500;
-        border: 1px solid transparent;
-        border-radius: 16px;
-        padding: 4px 12px;
-    }}
-    QPushButton[stageItem="true"]:hover {{
-        background: {t.BG_SEARCH};
-        color: {t.TEXT_PRIMARY};
-    }}
-    QPushButton[stageItem="true"][active="true"] {{
-        background: {t.PRIMARY};
-        color: {t.ON_PRIMARY};
-        font-weight: 600;
-    }}
-    QLabel#StepperArrow {{
-        color: {t.TEXT_SECONDARY};
-        font-size: 13px;
-        font-weight: bold;
     }}
     QLabel#WorkFieldLabel {{
         color: {t.TEXT_SECONDARY};

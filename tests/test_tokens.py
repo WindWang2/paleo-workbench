@@ -129,13 +129,14 @@ def test_rail_hover_pair_is_readable_in_every_theme():
         floor = 3.0 if theme == "high_contrast" else 1.1
         assert surface >= floor, f"{theme} hover surface vs rail: {surface:.2f} < {floor}"
         qss = tokens.build_qss(theme=theme)
-        for selector in (r'QToolButton\[navItem="true"\]:hover',
-                         r'QToolButton\[dockRailItem="true"\]:hover'):
+        # （V5：navItem 规则随旧 Hub shell 死亡移除；dockRailItem 与
+        #   WorkstationActivityButton 是现役 rail hover 消费者）
+        for selector in (r'QToolButton\[dockRailItem="true"\]:hover',
+                         r'QToolButton#WorkstationActivityButton:hover'):
             m = re.search(selector + r" \{([^}]*)\}", qss)
             assert m, f"{theme} missing rule {selector}"
             block = m.group(1)
             assert p["BG_RAIL_HOVER"] in block, f"{selector} lost hover surface"
-            assert p["TEXT_ON_RAIL_ACTIVE"] in block, f"{selector} lost hover text"
 
 
 # ---------------------------------------------------------------------------
@@ -213,8 +214,12 @@ def test_build_qss_density_and_theme_matrix(theme, density, padding, min_height)
     for selector in ("QPushButton", "QMenu", "QTableView", "QHeaderView::section"):
         assert selector in qss
     # shell hooks the app-shell mission consumes must survive the redesign
-    for hook in ("QWidget#AppShell", "QFrame#IconRail", '[navItem="true"]',
-                 '[active="true"]', '[stageItem="true"]',
+    # （V5：IconRail/navItem/stageItem 随旧 Hub shell 死亡，零生产引用后移除；
+    #   换成 WorkstationActivityRail / 组件层 hook）
+    for hook in ("QWidget#AppShell", "QFrame#WorkstationActivityRail",
+                 "QToolButton#WorkstationActivityButton",
+                 "QLabel#PwbSectionHeader", "QFrame#PwbStateSurface",
+                 '[active="true"]',
                  "QPushButton#PrimaryButton", "QPushButton#SecondaryButton",
                  "QLineEdit#SearchBox"):
         assert hook in qss, f"{theme}/{density} lost {hook}"
