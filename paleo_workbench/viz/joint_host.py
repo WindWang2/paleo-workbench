@@ -645,7 +645,10 @@ class WellSeismicJointHost(QObject):
         """Supersede in-flight loads, then scan/cache SEG-Y metadata off-thread."""
         self._cancel_pending_lod()
         if self._volume_job.is_running:
-            self._volume_job.shutdown()
+            # #1158: supersede must not block the GUI thread — detach and
+            # let the stale worker finish; the generation bump below drops
+            # its result. Only teardown shutdown() waits.
+            self._volume_job.shutdown(wait_ms=0)
         self._volume_generation += 1
         generation = self._volume_generation
         cached = self._cached_survey_payload(segy_path)
@@ -733,7 +736,8 @@ class WellSeismicJointHost(QObject):
     ) -> None:
         """Parse the non-SEGY joint assets off the GUI thread (#503)."""
         if self._assets_job.is_running:
-            self._assets_job.shutdown()
+            # #1158: supersede without blocking (see _ensure_survey_meta).
+            self._assets_job.shutdown(wait_ms=0)
         self._assets_clear_on_failure = clear_on_failure
         self._pending_survey_apply = survey_payload
         registry = self._well_identity_registry
@@ -871,7 +875,8 @@ class WellSeismicJointHost(QObject):
         """Bind source-backed access (metadata cached from the survey pass), then L0."""
         self._cancel_pending_lod()
         if self._volume_job.is_running:
-            self._volume_job.shutdown()
+            # #1158: supersede without blocking (see _ensure_survey_meta).
+            self._volume_job.shutdown(wait_ms=0)
         self._volume_generation += 1
         generation = self._volume_generation
 

@@ -143,3 +143,41 @@ def test_joint_reload_segy_metadata_failure_falls_back(qtbot, tmp_path, monkeypa
         timeout=20_000,
     )
     host.shutdown()
+
+
+def test_supersede_reload_does_not_block_gui_thread(qtbot, tmp_path, monkeypatch):
+    """#1158: superseding an in-flight survey load detaches (wait_ms=0) —
+    the second load returns fast while the stale worker still runs."""
+    import time
+
+    import paleo_workbench.viz.joint_host as jh
+    from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+
+    release = threading.Event()
+
+    def _slow_run(self):
+        release.wait(timeout=30)
+
+    monkeypatch.setattr(jh.SurveyMetaWorker, "run", _slow_run)
+    waits: list[int] = []
+    _real_shutdown = OwnedWorkerJob.shutdown
+
+    def _spy_shutdown(self, wait_ms: int = 3000) -> bool:
+        waits.append(wait_ms)
+        return _real_shutdown(self, wait_ms=wait_ms)
+
+    monkeypatch.setattr(OwnedWorkerJob, "shutdown", _spy_shutdown)
+    segy = _write_mini_segy(tmp_path / "cube.sgy")
+    host = jh.WellSeismicJointHost()
+    try:
+        host._ensure_survey_meta(str(segy))
+        # is_running flips synchronously in start(): no worker-timing flake.
+        qtbot.waitUntil(lambda: host._volume_job.is_running, timeout=10_000)
+        t0 = time.monotonic()
+        host._ensure_survey_meta(str(segy))
+        elapsed = time.monotonic() - t0
+        assert elapsed < 2.0
+        assert 0 in waits, f"supersede must detach, saw waits={waits}"
+    finally:
+        release.set()
+        host.shutdown()
