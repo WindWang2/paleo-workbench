@@ -7,6 +7,7 @@ existing lifecycle helpers. The agent never touches widget internals.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Any
 
@@ -216,7 +217,10 @@ def _create_factor_map(context: ActionContext, parameters: dict) -> dict:
         include_wells=bool(parameters.get("include_wells", True)),
         title=parameters.get("title"),
     )
-    document_id = f"factor-{parameters['factor_name']}-{uuid.uuid4().hex[:6]}"
+    document_id = (
+        f"factor-{_safe_filename_segment(str(parameters['factor_name']))}"
+        f"-{uuid.uuid4().hex[:6]}"
+    )
     grid_layers = [l for l in document.layers if getattr(l, "layer_type", "") == "grid"]
     grid = getattr(grid_layers[0], "grid_result", None) if grid_layers else None
 
@@ -247,6 +251,12 @@ def _create_factor_map(context: ActionContext, parameters: dict) -> dict:
             artifact_dir = root / "demo.artifacts" / "intermediate"
             artifact_dir.mkdir(parents=True, exist_ok=True)
             artifact_path = artifact_dir / f"{document_id}.npz"
+            # #1174 defense in depth: even a sanitized segment must resolve
+            # inside the artifact dir (mirrors _resolve_export_path).
+            if artifact_dir.resolve() not in artifact_path.resolve().parents:
+                raise PermissionError(
+                    f"artifact path escapes the workspace: {artifact_path}"
+                )
             np.savez_compressed(
                 artifact_path,
                 grid_z=grid.grid_z,
@@ -526,6 +536,18 @@ def _validate(context: ActionContext, parameters: dict) -> dict:
         document, composition, require_components=bool(parameters.get("require_components", True))
     )
     return {"verification": report.to_dict(), "report": report.to_dict(), "passed": report.passed}
+
+
+def _safe_filename_segment(raw: str) -> str:
+    """#1174: sanitize an agent-supplied name for use as ONE path segment.
+
+    Keeps CJK/word characters and dashes; everything else becomes "_".
+    The result never contains separators, "..", or drive syntax, so it
+    cannot escape its directory even before containment checks.
+    """
+    cleaned = re.sub(r"[^\w\u4e00-\u9fff\-]+", "_", str(raw), flags=re.UNICODE)
+    cleaned = cleaned.strip("._")[:64] or "factor"
+    return cleaned
 
 
 def _resolve_export_path(context: ActionContext, raw: str) -> str:

@@ -388,6 +388,20 @@ def test_workspace_containment_blocks_relative_traversal(tmp_path):
         assert resolver(context, "inside.zarr") == str(tmp_path / "inside.zarr")
 
 
+def test_factor_artifact_filename_segment_cannot_traverse():
+    """#1174: agent-supplied factor names stay one safe path segment."""
+    from paleo_workbench.harness.actions.mapping import _safe_filename_segment
+
+    assert _safe_filename_segment("孔隙度") == "孔隙度"
+    assert _safe_filename_segment("../../x/../../etc/paleo") == "x_etc_paleo"
+    assert _safe_filename_segment("a/b\\c:d") == "a_b_c_d"
+    assert _safe_filename_segment("") == "factor"
+    assert _safe_filename_segment("...") == "factor"
+    for evil in ("../../x", "/etc/passwd", "a/b", "..", "C:\\win"):
+        cleaned = _safe_filename_segment(evil)
+        assert "/" not in cleaned and "\\" not in cleaned and ".." not in cleaned
+
+
 def test_scheduler_claim_is_atomic_no_double_run():
     """Two same-lane workers can never both run one task (atomic claim)."""
     import threading
