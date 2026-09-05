@@ -68,6 +68,7 @@ class _FakeRegistry:
 class _FakeScene:
     def __init__(self) -> None:
         self.registry = _FakeRegistry()
+        self.visible_calls: list[tuple[str, bool]] = []
 
     # rendering surface used by _refresh_unified_composition (stubbed
     # collaborators of the unavailable C++ backend)
@@ -93,6 +94,19 @@ class _FakeScene:
 
     def vector_features(self, layer_id: str):
         return ()
+
+    # production load-path surface used by _on_document_selected
+    def is_dirty(self) -> bool:
+        return False
+
+    def load_document(self, document) -> None:
+        return None
+
+    def set_layer_visible(self, key: str, visible: bool) -> None:
+        self.visible_calls.append((key, bool(visible)))
+
+    def command_stack(self):
+        return None
 
 
 def _page_with_document(
@@ -204,16 +218,24 @@ def test_edit_scene_load_applies_registry_visibility_not_stale_legacy(qtbot, mon
 def test_production_document_selected_uses_kind_visibility(qtbot, monkeypatch):
     """The _on_document_selected load path consumes _kind_visibility.
 
-    The full page flow requires the optional native C++ scene (covered by
-    the mapping-page CI legs, e.g. test_map_line_label wiring tests); here
-    the refresh pipeline is stubbed and the REAL load sequence runs.
+    #1179: previously an unconditional skip with a false coverage claim.
+    The REAL load sequence runs; only the C++-dependent refresh pipeline
+    is stubbed (same seam as the neighboring write-through test).
     """
-    import pytest as _pytest
+    from paleo_workbench.ui.pages.mapping_page import MappingPage as _MP
 
-    _pytest.skip(
-        "requires the native MapScene backend; covered by CI mapping legs "
-        "(test_mapping_page / test_map_line_label)"
-    )
+    monkeypatch.setattr(_MP, "_refresh_unified_composition", lambda self: None)
+    page, document, scene = _page_with_document(qtbot)
+    # _edit_scene() returns the graphics edit view's scene; point it at the
+    # fake so the production load path is observed (same seam style as the
+    # neighboring tests, which stub collaborators of the C++ backend).
+    monkeypatch.setattr(_MP, "_edit_scene", lambda self: scene)
+    scene.registry.get("map-vis:facies").visible = False
+    page._on_document_selected(document)
+    by_key = dict(scene.visible_calls)
+    assert by_key["facies"] is False
+    assert by_key["well"] is True
+    assert set(by_key) == {"facies", "well", "line", "label"}
 
 
 
