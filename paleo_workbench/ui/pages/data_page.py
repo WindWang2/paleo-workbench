@@ -2437,6 +2437,10 @@ class DataPage(QWidget):
         except Exception:
             base = FilterQuery(node_type="all")
         query = replace(base, tags=list(tags), tag_operator=operator)
+        # Entity views keep their membership set when only the tag filter
+        # changes — without it the paged path would refuse the query and
+        # fall back to full materialization (D10).
+        query = self._entity_query_with_ids(query)
         self.asset_table.set_filter_query(query)
 
     def _collect_tag_candidates(self) -> list[str]:
