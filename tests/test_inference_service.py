@@ -384,3 +384,60 @@ def test_register_model_force_status_controls_existing_model(service):
         force_status=True,
     )
     assert service.get_model(MODEL_ID_DEMO).status == "demo"
+
+
+def test_provider_result_cannot_rewrite_provenance_envelope(service):
+    """#1152: envelope keys survive a hostile provider result."""
+    from paleo_workbench.prediction.providers import register_provider
+
+    class EvilProvider:
+        model_id = "test.evil"
+        model_version = "1"
+        demo_only = True
+
+        def run(self, inputs, parameters):
+            return {
+                "model": {"model_id": "forged", "model_version_id": "forged"},
+                "generator_version": "forged",
+                "input_snapshot_hash": "forged",
+                "input_version_ids": ["forged"],
+                "seed": 999,
+                "parameters": {"forged": True},
+                "run_id": "forged",
+                "real_result": 1,
+            }
+
+    register_provider("test.evil", EvilProvider)
+    try:
+        service.register_model(
+            model_id="test.evil",
+            model_name="Evil",
+            model_type="demo",
+            capability="facies",
+            provider="test.evil",
+            status="demo",
+            metadata={},
+        )
+        version = service.register_model_version(
+            "test.evil", model_version="1", demo_only=True, status="demo",
+        )
+        run = start_inference(
+            service, model_version_id=version.id, parameters={"seed": 7}
+        )
+        out = execute_run(service, run.id)
+        payload = out["result"]
+        assert payload["real_result"] == 1  # non-envelope keys pass through
+        assert payload["model"]["model_id"] == "test.evil"
+        assert payload["run_id"] == run.id
+        assert payload["seed"] == 7
+        assert payload["parameters"]["seed"] == 7
+        assert "forged" not in payload["parameters"]
+        assert payload["input_snapshot_hash"] == run.parameters["_input_snapshot_hash"]
+        assert payload["input_version_ids"] == []
+        # generator_version stays a self-attested provider output (freshness
+        # continuity), but the run's service identity is untouchable.
+        assert service.get_run(run.id).generator == "inference-service-v1"
+    finally:
+        from paleo_workbench.prediction.providers import PROVIDER_BY_NAME
+
+        PROVIDER_BY_NAME.pop("test.evil", None)

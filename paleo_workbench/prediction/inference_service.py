@@ -339,16 +339,21 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
                     "model_version": model_version,
                 }
 
-        # Align DataRun.generator with provider/result generator_version so Stage-9
-        # expected_identity (from PredictionTask.generator_version) does not flag
-        # GENERATOR_CHANGED immediately after a successful run.
+        # Align the payload's generator_version with the provider-reported
+        # version so Stage-9 expected_identity (from PredictionTask.
+        # generator_version) does not flag GENERATOR_CHANGED immediately
+        # after a successful run. run.generator itself stays the registry
+        # identity from start_inference — a result must never rewrite it
+        # (#1152).
         provider_generator = str(
             result.get("generator_version") or model.provider or run.generator or ""
         )
-        if provider_generator:
-            run.generator = provider_generator
 
         payload = {
+            **result,
+            # #1152: the provenance envelope is re-asserted AFTER the
+            # provider result — a (third-party) provider returning
+            # model/run_id/seed/snapshot keys must never rewrite it.
             "schema_version": "1.0",
             "model": {
                 "model_id": model.model_id,
@@ -366,11 +371,7 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
             "seed": seed,
             "parameters": parameters,
             "run_id": run_id,
-            **result,
         }
-        # Prefer the aligned identity (result may re-set generator_version via **result).
-        if provider_generator:
-            payload["generator_version"] = provider_generator
         output_version = _persist_result(service, run_id, model, payload)
         finished = _now_iso()
         service.update_run_status(
