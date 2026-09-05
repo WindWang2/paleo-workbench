@@ -88,3 +88,15 @@ EXPLAIN（第二轮）：默认页/文本过滤/modified 序均 `SCAN a USING <o
 | filter_by_type（旧 materialized search_assets API，即分页路径存在的原因） | 76.5 | 746.2 |
 
 注：100k 分页查询另见上方 EXPLAIN 审计（page0 4.3ms / count 3.0ms / 聚合缓存命中 0ms）。
+
+## 全量套件对照（既有基线问题，非本分支引入）
+- 全量快速套件（`-m "not slow and not qgis and not opengl and not welllog_binding"`）在 ~52%（`tests/test_issues_825_829_846.py` → `test_issues_834_factor_race.py` 区域，渲染线程/ThreadPoolExecutor）出现一次 SIGSEGV；同区域 `tests/test_issues_823_828_830_833.py` 的 2 个失败（native status staleness）在 pristine `origin/main` 完全复现。
+- `tests/e2e/test_harness_scenarios.py::test_scenario_c_coherence_on_active_volume`（RAM governor 软限）在 pristine main 同样失败。
+- `tests/test_mapping_page.py` 的 6 failed + 1 error 在 pristine main 完全一致。
+结论：全量套件在本机存在与 catalog 无关的既有不稳定（与 progress.md 的 full-suite triage 记录一致）；本分支 touched-area 套件 289 passed / 3 skipped。
+
+## 已知限制（评审后接受并记录）
+1. 分页模式跨页淘汰的选择恢复为尽力而为（stable-key 8192 LRU；排序/刷新后不可解析的行会被诚实收缩）。
+2. 打开中的 batch_save 期间刷新分页视图会走文档回退（在调用线程物化，100k 下数秒）——罕见且保正确；数据页的刷新发生在登记完成后。
+3. 实体成员集合 >5000 时诚实回退物化路径（不做分块谓词的无界展开）。
+4. `count_assets(stage=…)` 与 stage/size/version 列排序在 100k 为 ~130-165ms（SQL 全集聚合/排序，显式用户动作）。
