@@ -109,3 +109,7 @@ def test_fullres_arbitrary_profile_replaces_preview_quality(qtbot, chunked_volum
     np.testing.assert_allclose(
         np.asarray(data, dtype=np.float32), expected.T, rtol=1e-4, atol=1e-5
     )
+
+    # Production teardown contract: stop the workers BEFORE widget death,
+    # mirroring what the hosting panel does on shutdown/project switch.
+    view.cleanup()

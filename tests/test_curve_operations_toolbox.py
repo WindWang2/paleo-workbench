@@ -306,3 +306,18 @@ def _catalog_with_ft_depth_las(tmp_path: Path):
     source.write_text("\n".join(lines) + "\n", encoding="utf-8")
     version = service.import_raw(source, name="W-FT GR", type="well_log")
     return service, version, source
+
+
+class TestKernelRobustness:
+    def test_moving_average_window_wider_than_curve(self):
+        out = moving_average(np.arange(10.0), window=101)
+        assert out.shape == (10,)
+        assert np.all(np.isfinite(out))
+
+    def test_resample_refuses_descending_axis(self):
+        with pytest.raises(ValueError, match="non-descending"):
+            resample_axis(np.array([2000.0, 1990.0, 1980.0]), 1.0)
+
+    def test_expression_with_no_variables_refused(self):
+        with pytest.raises(ValueError, match="at least one curve"):
+            evaluate_curve_expression("1.5", {})

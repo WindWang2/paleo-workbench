@@ -39,7 +39,9 @@ def moving_average(values: np.ndarray, window: int = 5) -> np.ndarray:
     n = arr.size
     if n == 0:
         return arr.copy()
-    w = max(1, int(window))
+    # A window wider than the curve averages the whole curve (convolution
+    # 'same' would otherwise return a LONGER array than the input).
+    w = min(max(1, int(window)), n)
     if w == 1:
         return arr.copy()
     finite = np.isfinite(arr)
@@ -228,6 +230,11 @@ def resample_axis(depth: np.ndarray, step: float) -> np.ndarray:
     step_val = float(step)
     if not math.isfinite(step_val) or step_val <= 0.0:
         raise ValueError(f"resample step must be positive, got {step_val}")
+    if float(arr[-1]) < float(arr[0]):
+        raise ValueError(
+            "resample needs a non-descending depth axis "
+            f"(got {arr[0]} → {arr[-1]}); reverse the axis explicitly first"
+        )
     start, stop = float(arr[0]), float(arr[-1])
     count = int(math.floor((stop - start) / step_val + 1e-9)) + 1
     return start + np.arange(count, dtype=float) * step_val
@@ -347,6 +354,8 @@ def evaluate_curve_expression(expr: str, variables: dict[str, np.ndarray]) -> np
     """
     if not expr or not expr.strip():
         raise ValueError("empty expression")
+    if not variables:
+        raise ValueError("expression needs at least one curve variable")
     try:
         tree = ast.parse(expr, mode="eval")
     except SyntaxError as exc:

@@ -68,9 +68,10 @@ class CorrelationLinkEditor(QDialog):
         self.setWindowTitle("相关链接与顶点属性编辑")
         self.resize(760, 520)
         root = QVBoxLayout(self)
-
-        top_by_id = {t.id: t for t in draft.payload.tops}
-        self._top_by_id = top_by_id
+        # NOTE: _top_by_id is REBUILT in _rebuild_tables — a DTW worker can
+        # finish while this modal dialog is open and extend the draft's tops
+        # through the nested event loop (review R3-M3).
+        self._top_by_id = {t.id: t for t in draft.payload.tops}
 
         root.addWidget(QLabel("井间相关链接（保存后进入解释版本）"))
         self.link_table = QTableWidget(0, 5)
@@ -134,6 +135,7 @@ class CorrelationLinkEditor(QDialog):
     # -- tables ----------------------------------------------------------------
 
     def _rebuild_tables(self) -> None:
+        self._top_by_id = {t.id: t for t in self._draft.payload.tops}
         top_by_id = self._top_by_id
         links = sorted(
             self._draft.payload.links,
@@ -193,19 +195,24 @@ class CorrelationLinkEditor(QDialog):
         if len(tops) < 2:
             QMessageBox.information(self, "新增链接", "至少需要两个顶点。")
             return
-        labels = [f"{t.well_name} · {t.marker} ({t.depth:.1f})" for t in tops]
+        # Unique labels map directly to the top objects: two tops can share
+        # well+marker (+depth), and labels.index() would silently pick the
+        # first (review R1-M6).
+        labels = {f"{t.well_name} · {t.marker} ({t.depth:.1f}) #{i}": t
+                  for i, t in enumerate(tops)}
+        label_list = list(labels)
         a_label, ok_a = QInputDialog.getItem(
-            self, "新增链接", "顶点 A", labels, 0, editable=False
+            self, "新增链接", "顶点 A", label_list, 0, editable=False
         )
         if not ok_a:
             return
         b_label, ok_b = QInputDialog.getItem(
-            self, "新增链接", "顶点 B", labels, 1, editable=False
+            self, "新增链接", "顶点 B", label_list, 1, editable=False
         )
         if not ok_b:
             return
-        top_a = tops[labels.index(a_label)]
-        top_b = tops[labels.index(b_label)]
+        top_a = labels[a_label]
+        top_b = labels[b_label]
         try:
             add_manual_link(self._draft, top_a.id, top_b.id)
         except ValueError as exc:
