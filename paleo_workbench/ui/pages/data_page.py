@@ -1650,6 +1650,26 @@ class DataPage(QWidget):
             else:
                 promote_act.triggered.connect(lambda: self._promote_asset(first))
 
+        # D6/D8: version workbench + lineage explorer (catalog-bridged only).
+        version_wb_act = menu.find_action("ctx_version_workbench")
+        if version_wb_act:
+            if catalog_version_id is None:
+                version_wb_act.setToolTip("版本工作台需要活动数据目录（数据未桥接）")
+            else:
+                version_wb_act.setEnabled(True)
+                version_wb_act.triggered.connect(
+                    lambda: self._open_version_workbench(first, catalog_version_id)
+                )
+        lineage_act = menu.find_action("ctx_lineage_explorer")
+        if lineage_act:
+            if catalog_version_id is None:
+                lineage_act.setToolTip("血缘浏览器需要活动数据目录（数据未桥接）")
+            else:
+                lineage_act.setEnabled(True)
+                lineage_act.triggered.connect(
+                    lambda: self._open_lineage_explorer(catalog_version_id)
+                )
+
         export_open_act = menu.find_action("ctx_export_open")
         if export_open_act:
             export_open_act.triggered.connect(lambda: self._deliver_asset(first))
@@ -1944,6 +1964,47 @@ class DataPage(QWidget):
         dlg.run_audit(deep=False)
         dlg.exec()
 
+    def _open_version_workbench(self, asset: object, catalog_version_id: str) -> None:
+        """版本工作台 (D6): timeline + promote/trash/restore/compare."""
+        from paleo_workbench.ui.pages.version_workbench_dialog import (
+            VersionWorkbenchDialog,
+        )
+
+        service = self._catalog_service()
+        if service is None or catalog_version_id is None:
+            return
+        try:
+            version = service.get_version(catalog_version_id)
+        except Exception:
+            self._set_action_status("无法解析该资产的目录版本")
+            return
+        dlg = VersionWorkbenchDialog(
+            self,
+            service_provider=self._catalog_service,
+            asset_id=version.asset_id,
+        )
+        dlg.versions_changed.connect(lambda: self._refresh())
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.exec()
+
+    def _open_lineage_explorer(self, catalog_version_id: str) -> None:
+        """血缘/溯源浏览器 (D8): lazy two-way provenance graph."""
+        from paleo_workbench.ui.pages.lineage_explorer_dialog import (
+            LineageExplorerDialog,
+        )
+
+        service = self._catalog_service()
+        if service is None or catalog_version_id is None:
+            return
+        dlg = LineageExplorerDialog(
+            self,
+            service_provider=self._catalog_service,
+            version_id=catalog_version_id,
+        )
+        dlg.version_activated.connect(self._locate_explorer_version)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.exec()
+
     def _open_relink_dialog(self) -> None:
         """缺失源与重新链接 (D9)。`sources_relinked` triggers a full refresh
         so integrity columns and the missing filter reflect the new paths."""
@@ -1967,6 +2028,19 @@ class DataPage(QWidget):
         self._lifecycle.update_governance_metadata(asset_id, dlg.patch())
 
     # --- Lineage navigation ------------------------------------------------------
+
+    def _locate_explorer_version(self, version_id: str) -> None:
+        """Explorer 双击定位: resolve the version's asset, then reuse the
+        page-level locate flow."""
+        service = self._catalog_service()
+        if service is None:
+            return
+        try:
+            version = service.get_version(version_id)
+        except Exception:
+            self._set_action_status("无法定位该版本")
+            return
+        self._locate_lineage_asset(version_id, version.asset_id)
 
     def _locate_lineage_asset(self, version_id: str, asset_id: str) -> None:
         """Double-clicked a lineage node: select that asset's row (bridged
