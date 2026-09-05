@@ -61,6 +61,12 @@ def validate_workflow_spec(spec: WorkflowSpec, registry: ActionRegistry) -> list
         except LookupError:
             problems.append(f"node {node.node_id!r}: unknown action {node.action_id!r}")
             continue
+        if node.action_id.startswith("workflow."):
+            problems.append(
+                f"node {node.node_id!r}: workflow.* actions cannot be nodes of a "
+                "workflow (meta-workflow recursion is not supported)"
+            )
+            continue
         if action.risk.value == "destructive":  # pragma: no cover - registry refuses these
             problems.append(f"node {node.node_id!r}: DESTRUCTIVE actions cannot appear in workflows")
         if node.retry.max_attempts < 1:

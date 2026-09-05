@@ -42,7 +42,7 @@ class TestContractV2:
         )
         assert any("build_identity" in p for p in validate_descriptor(bad))
 
-    def test_verify_hook_passes_warnings_through(self):
+    def test_verify_hook_passes_warnings_through(self, tmp_path):
         class _Provider(FactorStatsProvider):
             def verify(self, result, context):
                 return {"verdict": "pass", "reasons": ["thin coverage"]}
@@ -55,11 +55,11 @@ class TestContractV2:
             "geology.factor_stats",
             inputs={"dataset": dataset},
             parameters={},
-            context=ProviderContext(),
+            context=ProviderContext(work_dir=str(tmp_path)),
         )
         assert any("thin coverage" in w for w in result.warnings)
 
-    def test_verify_failure_fails_closed(self):
+    def test_verify_failure_fails_closed(self, tmp_path):
         class _Bad(FactorStatsProvider):
             def verify(self, result, context):
                 return {"verdict": "fail", "reasons": ["stats not plausible"]}
@@ -72,10 +72,10 @@ class TestContractV2:
                 "geology.factor_stats",
                 inputs={"dataset": _real_dataset(5)},
                 parameters={},
-                context=ProviderContext(),
+                context=ProviderContext(work_dir=str(tmp_path)),
             )
 
-    def test_verify_crash_fails_closed(self):
+    def test_verify_crash_fails_closed(self, tmp_path):
         class _Crash(FactorStatsProvider):
             def verify(self, result, context):
                 raise RuntimeError("verifier bug")
@@ -88,7 +88,7 @@ class TestContractV2:
                 "geology.factor_stats",
                 inputs={"dataset": _real_dataset(5)},
                 parameters={},
-                context=ProviderContext(),
+                context=ProviderContext(work_dir=str(tmp_path)),
             )
 
 

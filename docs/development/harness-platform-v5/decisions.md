@@ -17,20 +17,25 @@ backend、模板注册表），不得伪造结果。理由：Goal 硬性要求�
 cache/store/reproduction/plan_view）。调度三原则：
 1. 整个 WorkflowRun 在应用内作为**一个** TaskScheduler heavy task 提交（保持全局
    IO 并发 1 契约与 #1081 单队列）；
-2. 节点级并行 = 引擎内就绪集 + `ResourceGovernor.try_admit`（有界，默认 1，可配
-   max_concurrency），engine 不自建线程池权威，admission 全走 governor；
+2. 节点级并行 = 引擎内就绪集 + 结构性 max_concurrency（默认 1）。并行模式下
+   引擎为就绪节点建受界 worker 池（非队列权威）；每个 action 仍各过自己的
+   governor admission，资源只被治理一次。含共享进程内可变状态（如图件文档）
+   的工作流必须声明 max_concurrency=1；
 3. headless/测试可用同步模式（同一状态机，只是调度步进由调用方驱动）。
 不复用 orchestrator.py（线性 legacy，服务首页 step 投影的另一关注点）；不复用
 PlanExecutor（串行、无持久化，其 freshness/recompute 域保留原样）。
 
-## D3 — Cache 权威 = Catalog DataRun，不建第二缓存库（H3）
+## D3 — Cache：run-store 索引 + catalog 验真（H3，review 后修订）
 
-**裁决**：node cache key =（action_id@spec_version, normalized params JSON,
-input version IDs, input_snapshot_hash），复用 catalog 已有的 run 记录
-（`begin_run` 参数 + `input_snapshot_hash`）做复用查找（DependencyGraph.
-find_reuse_run 语义）；命中必须 output 版本可 resolve 且 `verify_integrity==
-verified`。in-process-only 输出（如 MapDocument handle）**不可声明 cacheable**
-（validate_action_spec 静态拒绝），保证 resume 只依赖 catalog-materialized 事实。
+**裁决（实现版）**：node cache identity =（action_id@spec_version, 实际绑定参数
+JSON, 输入版本 IDs）。复用查找扫描 run-store 的历史 NodeRun（identity 相等 +
+终态成功 + 非携带），命中后必须在 catalog 中 resolve 每个 output 版本且
+`verify_integrity == verified` —— catalog 仍是产物唯一真相，store 索引只是查找
+加速。cacheable 节点执行时在 catalog 登记 `workflow.node.*` DataRun（cache
+identity 入 parameters），与 provider 自身 run 并存（receipt.catalog_run_id 保留
+provider run，二者互补）。in-process-only 输出（如 MapDocument handle）不可声明
+cacheable（validate_action_spec 静态拒绝）；首个生产声明为
+seismic.compute_attribute（确定性 ROI 核 + 派生目录版本）。
 
 ## D4 — 持久化位置与格式（H3/H4）
 
@@ -84,3 +89,22 @@ verifier FAIL → 执行 fail（fail-closed），不吞。第三方 example 以
 
 - b8638b62：嵌套 provider 执行继承外层准入租约（e2e Scenario C 在 segyio 可用
   机器必失败的既有缺陷）。
+
+## D12 — Review 修复裁决（三轮独立 review 后）
+
+- **run 重入互锁**：run/resume 入口拒绝同 run_id 的并发驱动（双执行 +
+  checkpoint 互相覆盖）。
+- **carry-over identity**：新身份用调用方 live context 绑定，旧身份用执行时
+  记录值——$context 绑定不再被默认 context 求值掩盖。
+- **condition 求值时点**：条件引用的全部节点到终态后才判定，防"提前 SKIPPED
+  且不补跑"。
+- **项目切换 = INTERRUPTED**（可恢复），不是 CANCELLED；恢复匹配工程后续跑。
+- **checkpoint 失败 fail-closed**：写盘失败中止 run（FAILED + __checkpoint__
+  哨兵节点），绝不带着失效持久化报 COMPLETED。
+- **取消贯通**：宿主/scheduler 协作取消经 `external_cancel` 注入引擎 token；
+  workflow.run/resume 动作转发 context.cancel。
+- **recipe.load/clone 路径边界**：仅限工程 workflow store 子树，杜绝任意路径
+  文件探测。
+- **store 单一路径权威**：workflow 存储走 project.paths.artifact_dir_for；
+  引擎默认不钉死 store，按 context 路由（跨工程不串目录）。
+- **workflow.* 不可入图**：元工作流递归在静态校验即拒绝。

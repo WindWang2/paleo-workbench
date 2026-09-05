@@ -108,6 +108,13 @@ def register(registry) -> None:
             # execute_provider inherits this admission, so the action profile
             # must cover the provider's declared working set.
             resource_profile={"estimated_cpu_cores": 2.0, "estimated_ram_bytes": 5 * 1024**3, "io_weight": 1.0},
+            # ROI attribute kernels are deterministic and register a derived
+            # catalog version — exactly the cache contract (identity gate +
+            # resolvable outputs).
+            deterministic=True,
+            cacheable=True,
+            idempotent=True,
+            output_refs=("DataVersionRef",),
             supports_cancel=True,
             input_schema={
                 "type": "object",

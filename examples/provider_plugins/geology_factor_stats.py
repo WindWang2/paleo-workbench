@@ -124,7 +124,12 @@ class FactorStatsProvider:
         context.report_progress(0.7, "写报告")
 
         report_name = str(parameters.get("report_name") or "factor-stats")
-        work_dir = Path(context.work_dir) if context.work_dir else Path.cwd()
+        if not context.work_dir:
+            raise ProviderRejectedInputError(
+                self.descriptor.provider_id,
+                "context.work_dir is required (never write to the process cwd)",
+            )
+        work_dir = Path(context.work_dir)
         work_dir.mkdir(parents=True, exist_ok=True)
         report_path = work_dir / f"{report_name}.json"
         report_path.write_text(
@@ -168,9 +173,9 @@ class FactorStatsProvider:
         if metrics.get("count", 0) == 0:
             return {"verdict": "fail", "reasons": ["no valid points — empty statistics"]}
         mean, vmin, vmax = metrics.get("mean"), metrics.get("min"), metrics.get("max")
-        if None in (mean, vmin, vmax) and None not in (mean, vmin, vmax):
+        if any(v is None for v in (mean, vmin, vmax)):
             return {"verdict": "fail", "reasons": ["incomplete statistics"]}
-        if mean is not None and not (vmin <= mean <= vmax):
+        if not (vmin <= mean <= vmax):
             return {
                 "verdict": "fail",
                 "reasons": [f"mean {mean} outside [{vmin}, {vmax}]"],

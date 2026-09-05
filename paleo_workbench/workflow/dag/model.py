@@ -52,8 +52,11 @@ class RunState(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class RetryPolicy:
-    """Fixed-backoff retry for *retryable* outcomes (governor shed,
-    transient failures). Cancelled/rejected-by-guard outcomes never retry."""
+    """Fixed-backoff retry for *retryable* outcomes: plain execution
+    failures and governor resource-shed refusals. Guard rejections
+    (schema/permission/context), cancellations and unavailability never
+    retry — retrying them would just re-burn attempts on a permanent
+    answer."""
 
     max_attempts: int = 1
     backoff_seconds: float = 0.0

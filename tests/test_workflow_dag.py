@@ -837,9 +837,17 @@ class TestGuards:
             run.run_id, context=ctx, project_probe=lambda: ctx.project
         )
         thread.join()
-        assert done.state is RunState.CANCELLED
-        assert done.node_runs["b"].state is NodeState.CANCELLED
+        # Fail-closed: nothing executed against the switched project, but
+        # the run stays RESUMABLE (INTERRUPTED), not terminally cancelled.
+        assert done.state is RunState.INTERRUPTED
+        assert done.node_runs["b"].state is NodeState.PENDING
         assert rec.count("b.compute") == 0
+
+        # Restoring the same project identity lets the run finish.
+        ctx.project = project
+        resumed = engine.resume(run.run_id, context=ctx, project_probe=lambda: ctx.project)
+        assert resumed.state is RunState.COMPLETED
+        assert rec.count("b.compute") == 1
 
     def test_corrupted_checkpoint_refuses_to_execute(self):
         rec = Recorder()

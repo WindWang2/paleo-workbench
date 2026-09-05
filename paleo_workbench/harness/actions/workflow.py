@@ -65,7 +65,7 @@ def register(registry) -> None:
         ActionSpec(
             action_id="workflow.run",
             output_schema={"type": "object", "properties": {"run_id": {"type": "string"}, "workflow_id": {"type": "string"}, "state": {"type": "string"}, "nodes": {"type": "object"}, "progress": {"type": "number"}}, "required": ["run_id", "state"]},
-            description="执行一个工作流（整图作为单个后台任务进入全局调度器，节点经 harness 守卫管线执行）。",
+            description="执行一个工作流：在当前任务内同步驱动整个 DAG，节点逐一经 harness 守卫管线执行；宿主任务取消令牌会传播到引擎。",
             handler=_run,
             risk=ActionRisk.COMPUTE,
             category="background.compute",
@@ -209,12 +209,10 @@ def register(registry) -> None:
 
 
 def _engine(context: ActionContext) -> WorkflowEngine:
-    engine = get_workflow_engine(context)
-    if engine._store is None:  # noqa: SLF001 — default wiring, not a bypass
-        engine.set_store(
-            WorkflowRunStore(_store_root(context))
-        )
-    return engine
+    """The shared engine. The store stays UNGLOBAL: without an explicit
+    test/host injection it resolves per session (``store_for(context)``),
+    so each project's runs land in that project's own artifacts tree."""
+    return get_workflow_engine(context)
 
 
 def _store_root(context: ActionContext):
@@ -336,6 +334,7 @@ def _run(context: ActionContext, parameters: dict) -> dict:
         project_probe=_probe(context),
         on_update=_progress_streamer(context),
         use_cache=bool(parameters.get("use_cache", True)),
+        external_cancel=context.cancel,
     )
     return _run_summary(done)
 
@@ -347,6 +346,7 @@ def _resume(context: ActionContext, parameters: dict) -> dict:
         context=context,
         project_probe=_probe(context),
         on_update=_progress_streamer(context),
+        external_cancel=context.cancel,
     )
     return _run_summary(done)
 
@@ -385,13 +385,33 @@ def _recipe_save(context: ActionContext, parameters: dict) -> dict:
     return {"recipe_id": recipe.recipe_id, "path": str(path), "source_run_id": run.run_id}
 
 
+def _contained_recipe_path(context: ActionContext, raw: str) -> str:
+    """Harness path boundary: recipe files load only from the project's
+    managed workflow store (or its subtree). Anything else is refused —
+    an agent never gets an arbitrary-path file probe."""
+    from pathlib import Path
+
+    root = Path(_store_root(context)).resolve()
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = (root / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
+    if root != candidate and root not in candidate.parents:
+        raise PermissionError(
+            f"recipe path {raw!r} is outside the project workflow store"
+        )
+    return str(candidate)
+
+
 def _recipe_load(context: ActionContext, parameters: dict) -> dict:
-    recipe = load_recipe(parameters["path"])
+    path = _contained_recipe_path(context, parameters["path"])
+    recipe = load_recipe(path)
     return inspect_recipe(recipe)
 
 
 def _recipe_clone(context: ActionContext, parameters: dict) -> dict:
-    recipe = load_recipe(parameters["path"])
+    recipe = load_recipe(_contained_recipe_path(context, parameters["path"]))
     clone = clone_recipe(recipe)
     engine = _engine(context)
     path = save_recipe(

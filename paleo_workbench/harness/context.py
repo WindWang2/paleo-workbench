@@ -126,6 +126,7 @@ class ActionContext:
             active_volume=self.active_volume,
             current_map_id=self.current_map_id,
             permissions=self.permissions,
+            progress=self.progress,
             extras={
                 k: v
                 for k, v in self.extras.items()

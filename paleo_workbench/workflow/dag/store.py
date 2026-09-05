@@ -74,7 +74,7 @@ class WorkflowRunStore:
         for run_id in self.list_run_ids():
             try:
                 runs.append(self.load(run_id))
-            except (ValueError, KeyError):
+            except Exception:  # a corrupted run must not poison cache lookups
                 logger.warning("skipping unreadable workflow run %s", run_id)
         return runs
 
@@ -82,12 +82,17 @@ class WorkflowRunStore:
 def default_store_root(context: Any) -> Path:
     """Project-managed storage root: ``<project>.artifacts/workflows/``.
 
-    Falls back to a session directory when the action context has no
-    project (headless unit runs) — such runs simply are not project assets.
+    The artifacts tree is derived by the single authority
+    (:func:`paleo_workbench.project.paths.artifact_dir_for`) — the same
+    helper every other artifact writer uses, so workflow runs never land
+    in a second tree. Falls back to a session directory when the action
+    context has no project (headless unit runs).
     """
     project_path = getattr(context, "project_path", None)
     if project_path:
-        root = Path(project_path).parent / (Path(project_path).stem + ".artifacts") / "workflows"
+        from paleo_workbench.project.paths import artifact_dir_for
+
+        root = artifact_dir_for(Path(project_path)) / "workflows"
     else:
         root = Path(tempfile.gettempdir()) / "paleo-workflow-runs"
     return root

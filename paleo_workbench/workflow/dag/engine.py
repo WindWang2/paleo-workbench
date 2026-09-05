@@ -92,10 +92,12 @@ class _RunCancelToken:
 
 
 class _ActiveRun:
-    def __init__(self, cancel_token: _RunCancelToken, project_identity: Any, context: ActionContext):
+    def __init__(self, cancel_token: _RunCancelToken, project_identity: Any, context: ActionContext,
+                 workflow_id: str = ""):
         self.cancel_token = cancel_token
         self.project_identity = project_identity
         self.context = context
+        self.workflow_id = workflow_id
 
 
 class WorkflowEngine:
@@ -168,7 +170,15 @@ class WorkflowEngine:
         on_update: Callable[[WorkflowRun], None] | None = None,
         cancel_token: "_RunCancelToken | None" = None,
         use_cache: bool = True,
+        external_cancel: Any = None,
     ) -> WorkflowRun:
+        with self._lock:
+            if run_id in self._active:
+                raise WorkflowValidationError(
+                    self._active_run_workflow(run_id),
+                    [f"run {run_id} is already executing in this process "
+                     "(concurrent run/resume would double-execute nodes)"],
+                )
         store = self.store_for(context)
         run = store.load(run_id)
         if run.state in (RunState.COMPLETED,):
@@ -181,7 +191,13 @@ class WorkflowEngine:
         catalog = self._catalog if self._catalog is not None else getattr(context, "catalog", None)
         if cancel_token is None:
             cancel_token = _RunCancelToken()
-        active = _ActiveRun(cancel_token, context.project, context)
+        if external_cancel is not None:
+            # The host's/scheduler's cooperative cancel (any is_cancelled /
+            # raise_if_cancelled token, e.g. a TaskContext) feeds the same
+            # engine token — one cancel path for panel stop buttons,
+            # scheduler cancellation and workflow.cancel.
+            cancel_token = _ExternalSyncedToken(cancel_token, external_cancel)
+        active = _ActiveRun(cancel_token, context.project, context, workflow_id=run.workflow.workflow_id)
         context.extras["workflow_run_id"] = run_id
         with self._lock:
             self._active[run_id] = active
@@ -223,6 +239,7 @@ class WorkflowEngine:
         project_probe: Callable[[], Any] | None = None,
         reverify_cache: bool = True,
         on_update: Callable[[WorkflowRun], None] | None = None,
+        external_cancel: Any = None,
     ) -> WorkflowRun:
         """Continue an interrupted/failed run: complete nodes keep their
         receipts; interrupted (RUNNING at crash) nodes re-execute."""
@@ -235,6 +252,7 @@ class WorkflowEngine:
             project_probe=project_probe,
             reverify_cache=reverify_cache,
             on_update=on_update,
+            external_cancel=external_cancel,
         )
 
     # -------------------------------------------------------------- rerun --
@@ -279,12 +297,14 @@ class WorkflowEngine:
             old = prior.node_runs.get(node.node_id)
             if node.node_id in affected or old is None or old.state is not NodeState.SUCCEEDED:
                 continue
-            # Carry over only PROVABLY identical work: the node's identity
-            # (action version, bound parameters, input version ids) must be
-            # unchanged between the prior and the new run. Anything less
-            # re-executes — carry-over is never a guess.
-            old_identity = self._cache_identity(spec, node, prior, catalog)
-            new_identity = self._cache_identity(spec, node, new_run, catalog)
+            # Carry over only PROVABLY identical work. The PRIOR identity is
+            # the one recorded at execution time (bound with that run's real
+            # context); the NEW identity binds with the caller's live
+            # context. Comparing recorded-vs-freshly-rebound (never
+            # re-binding the prior run against a fake context) keeps
+            # $context-bound nodes honest across session changes.
+            new_identity = self._cache_identity(spec, node, new_run, catalog, context)
+            old_identity = old.cache_identity
             if old_identity is None or new_identity is None or old_identity != new_identity:
                 continue
             carried = NodeRun(
@@ -295,11 +315,16 @@ class WorkflowEngine:
                 from_cache=True,
                 parameters=dict(old.parameters),
                 input_version_ids=old.input_version_ids,
-                cache_identity=old_identity,
+                cache_identity=new_identity,
                 output_version_ids=old.output_version_ids,
                 outputs=dict(old.outputs),
                 receipt=dict(old.receipt) if old.receipt else None,
             )
+            # Restamp the carried receipt so provenance reads correctly.
+            if carried.receipt is not None:
+                carried.receipt["node_id"] = node.node_id
+                carried.receipt["workflow_run_id"] = new_run.run_id
+                carried.receipt["from_cache"] = True
             new_run.node_runs[node.node_id] = carried
             self._restore_session_pointers(context or ActionContext(), carried.outputs)
         store.save(new_run)
@@ -326,6 +351,10 @@ class WorkflowEngine:
             pending.cancel()
             return True
         return False
+
+    def _active_run_workflow(self, run_id: str) -> str:
+        active = self._active.get(run_id)
+        return active.workflow_id if active else "unknown"
 
     # ----------------------------------------------------------- scheduler --
     def submit_to_scheduler(
@@ -426,7 +455,10 @@ class WorkflowEngine:
                 project_identity=project_identity, project_probe=project_probe,
                 reverify_cache=reverify_cache, use_cache=use_cache,
             )
-            self._checkpoint(store, run)
+            try:
+                self._checkpoint(store, run)
+            except CheckpointFailed:
+                return  # run already marked FAILED; stop driving
             self._notify(run, on_update)
         self._finalize(run)
 
@@ -494,7 +526,10 @@ class WorkflowEngine:
                     continue
                 if not batch and not futures:
                     break
-                self._checkpoint(store, run)
+                try:
+                    self._checkpoint(store, run)
+                except CheckpointFailed:
+                    return  # run already marked FAILED; pool drains below
                 self._notify(run, on_update)
         self._finalize(run)
 
@@ -512,8 +547,16 @@ class WorkflowEngine:
                 self._cancel_pending(run, reason="project identity probe failed")
                 return False
             if current is not project_identity:
-                self._cancel_pending(run, reason="project switched during run")
-                run.state = RunState.CANCELLED
+                # The live project changed (or closed). Nothing may be
+                # written to the new project — but the run stays resumable:
+                # unfinished nodes go back to PENDING and the run lands in
+                # INTERRUPTED so a later resume against the matched project
+                # can finish it.
+                for node_run in run.node_runs.values():
+                    if node_run.state in (NodeState.PENDING, NodeState.RUNNING):
+                        node_run.state = NodeState.PENDING
+                        node_run.error = "project switched during run; re-run pending"
+                run.state = RunState.INTERRUPTED
                 return False
         return True
 
@@ -591,13 +634,13 @@ class WorkflowEngine:
                     receipt["from_cache"] = True
                     receipt["node_id"] = node_id
                     receipt["workflow_run_id"] = run.run_id
-                node_run.state = NodeState.SUCCEEDED
-                node_run.action_status = "success"
-                node_run.from_cache = True
                 node_run.output_version_ids = hit.output_version_ids
                 node_run.outputs = dict(hit.outputs)
                 node_run.receipt = receipt
                 node_run.finished_at = time.time()
+                node_run.state = NodeState.SUCCEEDED
+                node_run.action_status = "success"
+                node_run.from_cache = True
                 self._restore_session_pointers(context, hit.outputs)
                 return
 
@@ -623,19 +666,24 @@ class WorkflowEngine:
                 )
                 if identity is not None and catalog is not None:
                     self._register_cache_run(catalog, run, node, receipt)
-                node_run.state = NodeState.SUCCEEDED
-                node_run.action_status = result.status
+                # Order matters for crash safety: the payload fields land
+                # BEFORE the terminal state, so a torn checkpoint can never
+                # claim "succeeded" with empty outputs.
                 node_run.output_version_ids = receipt.output_version_ids
                 node_run.outputs = _jsonable_projection(result.outputs)
                 node_run.receipt = receipt.to_dict()
                 node_run.finished_at = time.time()
+                node_run.state = NodeState.SUCCEEDED
+                node_run.action_status = result.status
                 self._merge_session_pointers(context, node_context)
                 return
             if result.status == "cancelled":
                 self._finish_node(node_run, NodeState.CANCELLED, error=result.error, action_status=result.status)
                 self._cancel_pending(run, reason=f"cancelled at {node_id}")
                 return
-            retryable = result.status in ("rejected", "failed")
+            retryable = result.status == "failed" or (
+                result.status == "rejected" and _is_resource_shed(result.error)
+            )
             if retryable and node_run.attempt < node.retry.max_attempts:
                 backoff = max(0.0, node.retry.backoff_seconds)
                 if backoff:
@@ -689,7 +737,11 @@ class WorkflowEngine:
             )
             run_id = getattr(run_ref, "run_id", None) or getattr(run_ref, "id", None)
             catalog.complete_run(run_id, status="complete")
-            receipt.catalog_run_id = run_id
+            # The provider's own run id (recorded by build_receipt) is the
+            # finer-grained provenance — the workflow-node run complements
+            # it, never replaces it.
+            if not receipt.catalog_run_id:
+                receipt.catalog_run_id = run_id
         except Exception:
             logger.exception(
                 "catalog run registration failed for node %s (execution stays valid; "
@@ -722,6 +774,17 @@ class WorkflowEngine:
                         )
                         continue
                 else:
+                    # The condition may reference nodes beyond depends_on:
+                    # evaluation waits until every referenced node is
+                    # terminal, otherwise the node would be judged on
+                    # not-yet-produced outputs and skipped forever.
+                    cond_nodes = list(node.depends_on) + _condition_node_ids(node.condition)
+                    if not all(
+                        run.node_runs[ref].state in TERMINAL_NODE_STATES
+                        for ref in cond_nodes
+                        if ref in run.node_runs
+                    ):
+                        continue
                     if not _evaluate_condition(node.condition, run, results, view):
                         self._finish_node(
                             node_run, NodeState.SKIPPED, skip_reason="condition false"
@@ -756,8 +819,9 @@ class WorkflowEngine:
 
     def _finalize(self, run: WorkflowRun) -> None:
         states = [nr.state for nr in run.node_runs.values()]
-        if any(s is NodeState.RUNNING for s in states):
-            run.state = RunState.INTERRUPTED  # defensive: should not happen
+        if any(s in (NodeState.RUNNING, NodeState.PENDING) for s in states):
+            # Unfinished work (mid-run abort, project switch): resumable.
+            run.state = RunState.INTERRUPTED
             return
         if any(s in (NodeState.FAILED, NodeState.UNAVAILABLE) for s in states):
             run.state = RunState.FAILED
@@ -792,17 +856,21 @@ class WorkflowEngine:
             )
 
     # -------------------------------------------------------------- helpers --
-    def _cache_identity(self, spec: WorkflowSpec, node: NodeSpec, run: WorkflowRun, catalog: Any) -> str | None:
+    def _cache_identity(self, spec: WorkflowSpec, node: NodeSpec, run: WorkflowRun, catalog: Any,
+                        context: ActionContext | None = None) -> str | None:
         """Identity of what this node WOULD do (action id+version, bound
         parameters, input version ids). Computed for every node — it drives
         rerun carry-over decisions; cache *reuse* stays gated on the
-        action's cacheable declaration."""
+        action's cacheable declaration. ``context`` is the caller's live
+        session (so $context bindings evaluate truthfully); ``None`` makes
+        $context bindings fail and the identity None — nodes depending on
+        session state are then simply never carried over."""
         try:
             action_spec = self._registry.get(node.action_id)
         except LookupError:
             return None
         try:
-            bound = bind_parameters(node, run=_RunView(run, None), results=self._results_view(run))
+            bound = bind_parameters(node, run=_RunView(run, context), results=self._results_view(run))
         except BindingError:
             return None
         input_ids = self._input_version_ids(run, node)
@@ -859,10 +927,23 @@ class WorkflowEngine:
 
     @staticmethod
     def _checkpoint(store: WorkflowRunStore, run: WorkflowRun) -> None:
+        """Persist the run. A failing checkpoint ABORTS the run (fail-closed):
+        silently continuing would report COMPLETED while every resume/cache
+        guarantee is void."""
         try:
             store.save(run)
-        except Exception:
+        except Exception as exc:
             logger.exception("workflow run %s checkpoint failed", run.run_id)
+            for node_run in run.node_runs.values():
+                if node_run.state in (NodeState.PENDING, NodeState.RUNNING):
+                    node_run.state = NodeState.PENDING
+            run.state = RunState.FAILED
+            run.node_runs["__checkpoint__"] = NodeRun(
+                node_id="__checkpoint__",
+                state=NodeState.FAILED,
+                error=f"checkpoint persistence failed: {type(exc).__name__}: {exc}",
+            )
+            raise CheckpointFailed(str(exc)) from exc
 
     @staticmethod
     def _notify(run: WorkflowRun, on_update: Callable[[WorkflowRun], None] | None) -> None:
@@ -875,6 +956,12 @@ class WorkflowEngine:
 
 
 _MODULE_LOCK = threading.RLock()
+
+
+class CheckpointFailed(RuntimeError):
+    """The run store refused a checkpoint write — persistence is void and
+    the run cannot honestly continue."""
+
 
 
 class _RunView:
@@ -910,6 +997,39 @@ class _SyncedToken(_RunCancelToken):
             raise TaskCancelled("workflow run cancelled")
 
 
+class _ExternalSyncedToken(_RunCancelToken):
+    """Engine token synced with an external cooperative-cancel token
+    (duck-typed: ``is_cancelled`` property / ``raise_if_cancelled``)."""
+
+    def __init__(self, token: _RunCancelToken, external: Any) -> None:
+        super().__init__()
+        self._wrapped = token
+        self._external = external
+
+    def _external_cancelled(self) -> bool:
+        check = getattr(self._external, "is_cancelled", None)
+        if callable(check):
+            return bool(check())
+        if isinstance(check, bool):
+            # Property form (the standard harness cancel protocol).
+            return check
+        return bool(
+            getattr(self._external, "cancelled", None)
+            and getattr(self._external.cancelled, "is_set", lambda: False)()
+        )
+
+    @property
+    def is_cancelled(self) -> bool:
+        if self._external_cancelled():
+            self._wrapped.cancel()
+            self._event.set()
+        return self._event.is_set() or self._wrapped.is_cancelled
+
+    def raise_if_cancelled(self) -> None:
+        if self.is_cancelled:
+            raise TaskCancelled("workflow run cancelled")
+
+
 def _make_task_spec(task, *, title: str, kind: str, priority: int, on_done, on_fail):
     from paleo_workbench.runtime.task_scheduler import TaskSpec
 
@@ -921,6 +1041,19 @@ def _make_task_spec(task, *, title: str, kind: str, priority: int, on_done, on_f
         on_done=on_done,
         on_fail=on_fail,
     )
+
+
+def _condition_node_ids(condition: NodeCondition) -> list[str]:
+    ids: list[str] = []
+    def walk(cond: NodeCondition) -> None:
+        if cond.node:
+            ids.append(cond.node)
+        for sub in cond.conditions:
+            walk(sub)
+        if cond.condition is not None:
+            walk(cond.condition)
+    walk(condition)
+    return ids
 
 
 def _evaluate_condition(
@@ -948,6 +1081,18 @@ def _evaluate_condition(
             condition.condition, run, results, view
         )
     return False
+
+
+_RESOURCE_SHED_MARKERS = ("resourceexhausted", "cpu:", "ram:", "io:", "vram:", "pressure")
+
+
+def _is_resource_shed(error: str | None) -> bool:
+    """True for a governor admission refusal (retryable under the retry
+    policy); plain guard rejections (schema/permission/context) never retry."""
+    if not error:
+        return False
+    lowered = error.lower()
+    return any(marker in lowered for marker in _RESOURCE_SHED_MARKERS)
 
 
 def _jsonable_projection(value: Any) -> dict[str, Any]:
