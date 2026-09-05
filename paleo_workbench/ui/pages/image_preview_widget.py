@@ -10,6 +10,11 @@ from PySide6.QtWidgets import QLabel
 # from a bounded source instead of the full bitmap (#530).
 _PREVIEW_MAX_LONG_SIDE = 2048
 
+# Zoomed renders are additionally capped: an 8x zoom of a 2048px source
+# would otherwise allocate a ~1 GiB pixmap on the GUI thread (#1135).
+# 4096px stays crisp on any screen while bounding the transient.
+_RENDER_MAX_LONG_SIDE = 4096
+
 _RESIZE_DEBOUNCE_MS = 80
 
 _ZOOM_STEP = 1.25
@@ -146,6 +151,9 @@ class ImagePreviewWidget(QLabel):
         else:
             w = max(1, int(self._pixmap.width() * self._zoom_factor))
             h = max(1, int(self._pixmap.height() * self._zoom_factor))
+            if max(w, h) > _RENDER_MAX_LONG_SIDE:
+                scale = _RENDER_MAX_LONG_SIDE / max(w, h)
+                w, h = max(1, int(w * scale)), max(1, int(h * scale))
             target = QSize(w, h)
             key = (
                 self._path,
@@ -185,7 +193,10 @@ class ImagePreviewWidget(QLabel):
             return
         self._zoom_factor = clamped
         self._fit_mode = False
-        self.render_current()
+        # #1135: wheel streams dozens of notches — coalesce through the
+        # same debounce timer as resizes instead of a smooth rescale
+        # per notch on the GUI thread.
+        self._resize_timer.start()
         try:
             self.zoom_changed.emit(self._zoom_factor)
         except Exception:

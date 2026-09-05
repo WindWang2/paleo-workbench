@@ -104,3 +104,29 @@ def test_undecodable_source_shows_failure_text(qtbot):
     qtbot.addWidget(w)
     w.load("nowhere.png", revision=(1,), image_bytes=b"not an image")
     assert w.text() == "图片预览加载失败"
+
+
+def test_zoom_render_bounded_and_coalesced(qtbot):
+    """#1135: 8x zoom caps the pixmap (~4k, not ~16k/1 GiB) and a wheel
+    burst renders once after the debounce, not per notch."""
+    w = ImagePreviewWidget()
+    qtbot.addWidget(w)
+    w.resize(800, 600)
+    w.load("img.png", revision=(1,), image_bytes=_big_png_bytes(2048, 1536))
+    renders = []
+    real = w.render_current
+
+    def counting():
+        renders.append(1)
+        real()
+
+    w.render_current = counting
+    for _ in range(12):  # wheel burst to 8x
+        w.zoom_in()
+    assert w._zoom_factor == 8.0
+    assert len(renders) == 0  # nothing rendered synchronously per notch
+    qtbot.waitUntil(lambda: len(renders) > 0, timeout=3000)
+    assert len(renders) == 1  # one coalesced render
+    pm = w.pixmap()
+    assert pm is not None and not pm.isNull()
+    assert max(pm.width(), pm.height()) <= 4096
