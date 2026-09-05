@@ -114,25 +114,34 @@ class _RegisterWorker(QObject):
 
     Runs off the GUI thread so a GB-scale batch (checksum + full copy into
     ``<project>.artifacts/raw/`` + per-file catalog saves) never freezes the
-    window on the import-finished slot (#379).
+    window on the import-finished slot (#379). Registration commits in
+    chunks and reports (done, total) progress; a set cancel event stops it
+    between resources with every completed chunk already consistent (D4).
     """
 
     finished = Signal(object)  # (failure descriptions, ResourceItem.id → asset id)
     failed = Signal(str)
+    progress = Signal(int, int)
 
-    def __init__(self, lifecycle, resources: list, parent=None):
+    def __init__(self, lifecycle, resources: list, parent=None, *, cancel_event=None):
         super().__init__(parent)
         self._lifecycle = lifecycle
         self._resources = resources
+        self._cancel_event = cancel_event
 
     @Slot()
     def run(self) -> None:
         try:
-            mapping = self._lifecycle.register_imported_resources(self._resources)
+            mapping = self._lifecycle.register_imported_resources(
+                self._resources,
+                progress=lambda done, total: self.progress.emit(done, total),
+                cancel_check=(self._cancel_event.is_set if self._cancel_event else None),
+            )
             self.finished.emit(
                 (
                     list(self._lifecycle.last_registration_failures),
                     dict(mapping or {}),
+                    bool(self._cancel_event and self._cancel_event.is_set()),
                 )
             )
         except Exception as exc:  # pragma: no cover - defensive UI boundary
@@ -299,6 +308,8 @@ class DataPage(QWidget):
         self._rescan_context: tuple | None = None
         self._delivery_context: tuple | None = None
         self._import_in_progress = False
+        self._import_cancel_event = None
+        self.last_import_receipt: str | None = None
         self._prefetched_viz_asset: object | None = None
         self._viz_adapter = VizAdapter()
         # Business orchestration (catalog-aware lifecycle actions) lives in the
@@ -414,6 +425,7 @@ class DataPage(QWidget):
         self.data_toolbar.import_folder_requested.connect(self.begin_import_folder_from_dialog)
         self.data_toolbar.verify_requested.connect(self._verify_current_or_all_assets)
         self.data_toolbar.health_check_requested.connect(self._open_catalog_health)
+        self.data_toolbar.cancel_import_requested.connect(self._cancel_import)
         self.data_toolbar.rescan_requested.connect(self.rescan_selected_asset)
         self.data_toolbar.remove_requested.connect(self.remove_selected_asset)
         self.data_toolbar.open_folder_requested.connect(self.open_selected_folder)
@@ -923,24 +935,38 @@ class DataPage(QWidget):
         if not resources:
             self._handle_registration_finished([], {})
             return
-        worker = _RegisterWorker(self._lifecycle, resources)
+        import threading
+
+        self._import_cancel_event = threading.Event()
+        worker = _RegisterWorker(
+            self._lifecycle, resources, cancel_event=self._import_cancel_event
+        )
         self._register_job.start(
             worker,
             terminal_signals=(worker.finished, worker.failed),
             result_connections=(
                 (worker.finished, self._handle_registration_finished_signal),
                 (worker.failed, self._handle_registration_failed_signal),
+                (worker.progress, self._handle_registration_progress),
             ),
             target=self.project,
         )
-        self._set_action_status("正在登记目录元数据...")
+        self._set_action_status(f"正在登记目录元数据 (0/{len(resources)})...")
+
+    @Slot(int, int)
+    def _handle_registration_progress(self, done: int, total: int) -> None:
+        if self._register_job.target is not self.project:
+            return
+        self._set_action_status(f"正在登记目录元数据 ({done}/{total})...")
 
     @Slot(object)
     def _handle_registration_finished_signal(self, result: object) -> None:
         if self._register_job.target is not self.project:
             return
-        failures, mapping = result
-        self._handle_registration_finished(failures, mapping)
+        failures, mapping, cancelled = result
+        self._handle_registration_finished(
+            failures, mapping, cancelled=bool(cancelled)
+        )
 
     @Slot(str)
     def _handle_registration_failed_signal(self, message: str) -> None:
@@ -949,8 +975,9 @@ class DataPage(QWidget):
         self._handle_registration_finished([message], {})
 
     def _handle_registration_finished(
-        self, failures: list, mapping: dict[str, str]
+        self, failures: list, mapping: dict[str, str], *, cancelled: bool = False
     ) -> None:
+        self._import_cancel_event = None
         self._lifecycle.last_registration_failures = list(failures or [])
         self._last_registered_asset_ids = dict(mapping or {})
         # Persist the exact registration result on the project resource.  A
@@ -968,8 +995,39 @@ class DataPage(QWidget):
         report = self._last_import_report
         if report is not None:
             self._set_import_status(report)
+        receipt = self._build_import_receipt(report, failures, cancelled)
+        self.last_import_receipt = receipt
+        if cancelled:
+            self._set_action_status("导入已取消：已完成分块保持一致，未登记文件可重新导入")
+            QMessageBox.information(self, "导入收据", receipt)
+        elif failures or (report is not None and report.skipped_count):
+            QMessageBox.information(self, "导入收据", receipt)
         self.import_finished.emit(report)
         self._start_domain_binding_worker(list(getattr(report, "added", []) or []))
+
+    def _build_import_receipt(
+        self, report, failures: list, cancelled: bool
+    ) -> str:
+        """导入收据 (D4): discovered/skipped/registered/failed + cancel note."""
+        lines: list[str] = ["导入收据"]
+        if report is not None:
+            lines.append(f"发现并归档: {report.added_count}")
+            lines.append(f"跳过 (重复路径): {len(report.skipped_path)}")
+            by_type = report.by_type or {}
+            if by_type:
+                lines.append(
+                    "类型分布: "
+                    + ", ".join(f"{k}×{v}" for k, v in sorted(by_type.items()))
+                )
+            for warning in list(report.warnings)[:5]:
+                lines.append(f"警告: {warning}")
+        lines.append(f"目录登记成功: {len(self._last_registered_asset_ids)}")
+        if failures:
+            lines.append(f"目录登记失败: {len(failures)}")
+            lines.extend(f"  - {item}" for item in list(failures)[:8])
+        if cancelled:
+            lines.append("状态: 已取消（已完成分块保持一致；未登记文件可重新导入）")
+        return "\n".join(lines)
 
     def _start_domain_binding_worker(self, resources: list) -> None:
         """Bind registered imports to Well/Survey entities (worker thread)."""
@@ -1262,6 +1320,15 @@ class DataPage(QWidget):
         if not self._register_job.is_running:
             self._finish_import_job()
 
+    def _cancel_import(self) -> None:
+        """Cooperative import cancellation (D4): the registration worker
+        stops between resources; every committed chunk stays consistent."""
+        if not self._import_in_progress:
+            return
+        if self._import_cancel_event is not None:
+            self._import_cancel_event.set()
+        self._set_action_status("正在取消导入（等待当前分块完成）...")
+
     def _set_import_running(self, running: bool) -> None:
         self._import_in_progress = running
         # 关闭协议会迟到：DeferredDelete 之后 restore/refresh 路径仍会再走
@@ -1273,6 +1340,7 @@ class DataPage(QWidget):
             return
         toolbar.import_btn.setEnabled(not running)
         toolbar.import_folder_btn.setEnabled(not running)
+        toolbar.cancel_import_btn.setVisible(running)
 
     def remove_selected_asset(self) -> bool:
         if not self._selected_assets and self._selected_asset is not None:

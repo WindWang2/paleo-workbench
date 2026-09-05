@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -212,6 +213,10 @@ class _CatalogActionWorker(QObject):
 
 
 class DataLifecycleController:
+    # D4: canonical commit chunk during bulk registration — bounds the dirty
+    # set / crash window per batch and gives cooperative cancel a granule.
+    REGISTRATION_CHUNK = 500
+
     """Business orchestration for the Data Manager page (catalog-aware).
 
     Composed by :class:`paleo_workbench.ui.pages.data_page.DataPage`, which
@@ -1426,7 +1431,11 @@ class DataLifecycleController:
     # ------------------------------------------------------------------ #
 
     def register_imported_resources(
-        self, resources: list[ResourceItem]
+        self,
+        resources: list[ResourceItem],
+        *,
+        progress: Callable[[int, int], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> dict[str, str]:
         """Register imported resources as catalog INPUT versions (RAW/EXTERNAL)
         with the legacy bridge so downstream runs can resolve them. Best-effort:
@@ -1436,6 +1445,12 @@ class DataLifecycleController:
         Failures are never silent: each one is logged and summarized on
         ``last_registration_failures`` (reset per call) so the import status
         surface can report how many registrations were lost.
+
+        Chunked batching (D4): resources are committed in chunks of
+        ``REGISTRATION_CHUNK`` — one canonical transaction per chunk — so a
+        100k-file import keeps its dirty sets and crash window bounded, and
+        ``cancel_check`` stops BETWEEN resources; every completed chunk is a
+        consistent committed batch (no half-registered state either way).
 
         Returns the exact ``ResourceItem.id → DataAsset.id`` values produced by
         this registration pass.  A reused catalog asset may retain an older
@@ -1454,49 +1469,66 @@ class DataLifecycleController:
                 "import catalog registration unavailable: %s", exc
             )
             return registered_asset_ids
-        # Bulk path (audit #849-3): register every file inside ONE batch so
-        # the canonical document is written (serialize + fsync) once, not once
-        # per file (O(N²) bytes on large folders). Per-resource failures are
-        # caught inside the batch so one bad file never discards the others;
-        # a failed final flush restores the pre-batch document and is recorded
-        # like any other registration failure (the import must never break).
-        batch = None
-        try:
-            from paleo_workbench.catalog import get_catalog
 
-            cat = get_catalog()
-            if cat is not None:
-                enter = getattr(cat, "batch_save", None)
-                if callable(enter):
-                    batch = enter()
-                    batch.__enter__()
-        except Exception as exc:
+        def _enter_batch():
             batch = None
-            logging.getLogger(__name__).warning(
-                "import catalog batch unavailable; falling back per-file: %s", exc
-            )
-        try:
-            for resource in resources:
+            try:
+                from paleo_workbench.catalog import get_catalog
+
+                cat = get_catalog()
+                if cat is not None:
+                    enter = getattr(cat, "batch_save", None)
+                    if callable(enter):
+                        batch = enter()
+                        batch.__enter__()
+            except Exception as exc:
+                batch = None
+                logging.getLogger(__name__).warning(
+                    "import catalog batch unavailable; falling back per-file: %s", exc
+                )
+            return batch
+
+        total = len(resources)
+        # Bulk path (audit #849-3) — chunked for bounded memory/crash window
+        # and cooperative cancellation (D4).
+        for start in range(0, total, self.REGISTRATION_CHUNK):
+            if cancel_check is not None and cancel_check():
+                break
+            batch = _enter_batch()
+            try:
+                for resource in resources[start : start + self.REGISTRATION_CHUNK]:
+                    if cancel_check is not None and cancel_check():
+                        break
+                    try:
+                        ref = register_resource_input(resource)
+                        if ref is not None:
+                            registered_asset_ids[str(resource.id)] = str(ref.asset_id)
+                    except Exception as exc:
+                        failure = f"{resource.name} ({resource.id}): {exc}"
+                        self.last_registration_failures.append(failure)
+                        logging.getLogger(__name__).warning(
+                            "import catalog registration failed for %s: %s",
+                            resource.id,
+                            exc,
+                        )
+            finally:
+                if batch is not None:
+                    try:
+                        batch.__exit__(None, None, None)
+                    except Exception as exc:
+                        registered_asset_ids.clear()
+                        self.last_registration_failures.append(f"批提交失败: {exc}")
+                        logging.getLogger(__name__).warning(
+                            "import catalog batch commit failed: %s", exc
+                        )
+            if progress is not None:
                 try:
-                    ref = register_resource_input(resource)
-                    if ref is not None:
-                        registered_asset_ids[str(resource.id)] = str(ref.asset_id)
-                except Exception as exc:
-                    failure = f"{resource.name} ({resource.id}): {exc}"
-                    self.last_registration_failures.append(failure)
-                    logging.getLogger(__name__).warning(
-                        "import catalog registration failed for %s: %s",
-                        resource.id,
-                        exc,
-                    )
-        finally:
-            if batch is not None:
-                try:
-                    batch.__exit__(None, None, None)
-                except Exception as exc:
-                    registered_asset_ids.clear()
-                    self.last_registration_failures.append(f"批提交失败: {exc}")
-                    logging.getLogger(__name__).warning(
-                        "import catalog batch commit failed: %s", exc
+                    # The ACTUAL registered count: a cancel inside the chunk
+                    # commits a partial batch, and progress must never claim
+                    # resources that were skipped.
+                    progress(len(registered_asset_ids), total)
+                except Exception:  # a progress fault must never abort the import
+                    logging.getLogger(__name__).debug(
+                        "import progress callback failed", exc_info=True
                     )
         return registered_asset_ids

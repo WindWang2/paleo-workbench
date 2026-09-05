@@ -33,6 +33,8 @@ class DataToolbar(QWidget):
     tag_filter_changed = Signal(list, str)
     # Open the Tag Manager dialog (tags CRUD / merge / prune).
     tag_manager_requested = Signal()
+    # D4: cooperative import cancellation (registration phase).
+    cancel_import_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -55,6 +57,15 @@ class DataToolbar(QWidget):
         self.import_folder_btn.setToolTip("导入整个目录")
         self.import_folder_btn.clicked.connect(self.import_folder_requested.emit)
         layout.addWidget(self.import_folder_btn)
+
+        # D4: visible only while an import runs; cooperative cancel.
+        self.cancel_import_btn = QPushButton("取消导入")
+        self.cancel_import_btn.setObjectName("SecondaryButton")
+        self.cancel_import_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        self.cancel_import_btn.setToolTip("协作式取消：当前分块完成后停止，已完成分块保持一致")
+        self.cancel_import_btn.setVisible(False)
+        self.cancel_import_btn.clicked.connect(self.cancel_import_requested.emit)
+        layout.addWidget(self.cancel_import_btn)
 
         self.verify_btn = QPushButton(_icon("btn-verify"), "完整性校验")
         self.verify_btn.setObjectName("SecondaryButton")
