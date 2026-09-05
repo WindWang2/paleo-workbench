@@ -1024,19 +1024,36 @@ class DataCatalogService:
             subpath = "/".join(parts[idx + 1:])
             if subpath:
                 cand = (project_dir / subpath).resolve()
-                if cand.is_file():
+                if cand.is_file() and self._fallback_identity_ok(cand, version):
                     return cand
         if len(parts) >= 2:
             two_part = "/".join(parts[-2:])
             cand = (project_dir / two_part).resolve()
-            if cand.is_file():
+            if cand.is_file() and self._fallback_identity_ok(cand, version):
                 return cand
         if parts:
             one_part = parts[-1]
             cand = (project_dir / one_part).resolve()
-            if cand.is_file():
+            if cand.is_file() and self._fallback_identity_ok(cand, version):
                 return cand
         return raw_path
+
+    @staticmethod
+    def _fallback_identity_ok(cand: Path, version: DataVersion) -> bool:
+        """#1140: basename fallbacks must not silently bind a same-named
+        stranger. Verify size/sha256 when the record carries them; a
+        mismatch keeps searching so the caller fails clean (missing file)
+        instead of reading wrong data."""
+        try:
+            if version.sha256:
+                from paleo_workbench.catalog.checksum import sha256_file_or_none
+
+                return sha256_file_or_none(cand) == version.sha256
+            if version.size_bytes is not None:
+                return cand.stat().st_size == version.size_bytes
+        except OSError:
+            return False
+        return True
 
     # -- rollback helper ----------------------------------------------------
 

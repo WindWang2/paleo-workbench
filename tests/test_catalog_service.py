@@ -51,6 +51,58 @@ def _writable(path: Path) -> None:
     path.chmod(path.stat().st_mode | stat.S_IWUSR)
 
 
+def test_resolve_path_basename_fallback_rejects_same_named_stranger(service, tmp_path):
+    """#1140: a same-basename file with different content must not be
+    silently bound when the record carries an identity."""
+    from paleo_workbench.catalog.models import DataAsset, DataVersion
+
+    real = _make_source(tmp_path, name="GR.las", payload=b"real-bytes")
+    version = DataVersion(
+        id="v-ext", asset_id="a-ext", version_number=1,
+        stage=DataStage.RAW, managed=False,
+        path=str(real), format="las",
+        sha256=sha256_file(real), size_bytes=len(b"real-bytes"),
+    )
+    asset = DataAsset(id="a-ext", name="GR", type="well_log")
+    service._add_asset(asset)
+    service._add_version(version)
+    # Original goes missing; a same-named stranger appears at project root.
+    real.unlink()
+    project_dir = service.project_path.expanduser().resolve().parent
+    stranger = project_dir / "GR.las"
+    stranger.write_bytes(b"stranger-bytes")
+    try:
+        resolved = service.resolve_path(version)
+        assert resolved != stranger.resolve()
+        assert not resolved.is_file()  # clean miss, not a wrong binding
+    finally:
+        stranger.unlink()
+
+
+def test_resolve_path_basename_fallback_accepts_identical_content(service, tmp_path):
+    """#1140: the fallback still rescues a relocated identical file."""
+    from paleo_workbench.catalog.models import DataAsset, DataVersion
+
+    real = _make_source(tmp_path, name="GR.las", payload=b"real-bytes")
+    version = DataVersion(
+        id="v-ext", asset_id="a-ext", version_number=1,
+        stage=DataStage.RAW, managed=False,
+        path=str(real), format="las",
+        sha256=sha256_file(real), size_bytes=len(b"real-bytes"),
+    )
+    asset = DataAsset(id="a-ext", name="GR", type="well_log")
+    service._add_asset(asset)
+    service._add_version(version)
+    real.unlink()
+    project_dir = service.project_path.expanduser().resolve().parent
+    relocated = project_dir / "GR.las"
+    relocated.write_bytes(b"real-bytes")
+    try:
+        assert service.resolve_path(version) == relocated.resolve()
+    finally:
+        relocated.unlink()
+
+
 # --- managed import -------------------------------------------------------
 
 
