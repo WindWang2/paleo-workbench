@@ -564,15 +564,13 @@ class AppShell(QWidget):
         def _locate_everywhere(il, xl, twt=None, _page=page_locate):
             if callable(_page):
                 _page(il, xl, twt)
-            dock_panel = getattr(
-                getattr(self.workstation, "linked_workspace", None),
-                "seismic_panel",
-                None,
-            )
-            dock_locate = getattr(dock_panel, "locate_position", None)
-            if callable(dock_locate):
+            # The dock pane follows through the workspace's link-gated
+            # consumer (L10): with the link off it deliberately ignores us.
+            linked = getattr(self.workstation, "linked_workspace", None)
+            locate_dock = getattr(linked, "locate_seismic", None)
+            if callable(locate_dock):
                 try:
-                    dock_locate(il, xl, twt)
+                    locate_dock(il, xl, twt)
                 except Exception:
                     pass
 

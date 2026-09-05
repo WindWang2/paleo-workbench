@@ -68,6 +68,10 @@ class _RecordingPanel(QObject):
     def backend(self) -> str:
         return self.backend_name
 
+    def current_well_name(self) -> str:
+        # the dock opened A12 onto this panel (see open_well test flow)
+        return "A12" if self.shown else ""
+
     def set_backend(self, name: str) -> None:
         self.backend_calls.append(name)
         self.backend_name = "engine" if name == "engine" else "legacy"
