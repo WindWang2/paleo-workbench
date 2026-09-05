@@ -77,9 +77,16 @@ def apply_features_to_document(doc: PaleoMapDocument, features: list[dict[str, A
                 record["properties"] = dict(props)
             facies.append(record)
         elif kind == "well":
-            c = f.get("coordinates") or [0, 0]
-            x = float(c[0]) if len(c) >= 1 else 0.0
-            y = float(c[1]) if len(c) >= 2 else 0.0
+            # #1162: short coordinates skip + warn (same policy as
+            # features_from_document) — never persist a fake y=0.0.
+            c = f.get("coordinates") or []
+            if len(c) < 2:
+                logger.warning(
+                    "Skipping well feature %r with malformed coordinates %r",
+                    f.get("id"), c,
+                )
+                continue
+            x, y = float(c[0]), float(c[1])
             wells.append({
                 "id": f["id"],
                 "name": f.get("name", ""),
@@ -95,7 +102,14 @@ def apply_features_to_document(doc: PaleoMapDocument, features: list[dict[str, A
                 "coordinates": f.get("coordinates", []),
             })
         elif kind == "label":
-            c = f.get("coordinates") or [0, 0]
+            # #1162: same guard as wells — len(c)==1 must skip, not IndexError.
+            c = f.get("coordinates") or []
+            if len(c) < 2:
+                logger.warning(
+                    "Skipping label feature %r with malformed coordinates %r",
+                    f.get("id"), c,
+                )
+                continue
             labels.append({
                 "id": f["id"],
                 "text": f.get("text") or f.get("name", ""),

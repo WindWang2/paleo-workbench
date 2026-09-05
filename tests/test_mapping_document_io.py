@@ -42,6 +42,21 @@ def test_apply_features_round_trip_lines_and_labels():
     assert {f["id"] for f in back} == {"f1", "ln1", "lb1"}
 
 
+def test_malformed_coordinates_skipped_not_crashed_or_faked():
+    """#1162: short coordinates skip + warn — no IndexError (label), no
+    silent y=0.0 persistence (well)."""
+    doc = PaleoMapDocument(name="M", linked_target_horizon="H")
+    apply_features_to_document(doc, [
+        {"id": "w-bad", "kind": "well", "name": "坏井", "coordinates": [116.0]},
+        {"id": "lb-bad", "kind": "label", "name": "坏注记", "text": "x", "coordinates": [1.0]},
+        {"id": "w-ok", "kind": "well", "name": "好井", "coordinates": [116.0, 22.0]},
+    ])
+    assert [w["id"] for w in doc.well_overlays] == ["w-ok"]
+    assert doc.well_overlays[0]["x"] == 116.0
+    assert doc.well_overlays[0]["y"] == 22.0
+    assert doc.label_features == []
+
+
 def test_facies_polygon_holes_round_trip_without_flattening():
     coordinates = [
         [[0, 0], [8, 0], [8, 8], [0, 8], [0, 0]],

@@ -120,7 +120,51 @@ def test_write_is_atomic_on_existing_file(tmp_path: Path):
     write_grid_artifact(original, tmp_path, "p")
     assert path.exists()
     assert not (tmp_path / "p.factor_grid.npz.tmp").exists()
+    assert not list(tmp_path.glob("p.factor_grid.npz.*.tmp"))
     assert path.read_bytes() == first_bytes  # deterministic NPZ payload
+
+
+def test_concurrent_writes_to_same_name_stay_intact(tmp_path: Path):
+    """#1149: concurrent writers must each land an intact file (atomic
+    last-writer-wins); interleaved bytes are never visible."""
+    import threading
+
+    size = 200
+    variants = [np.full((size, size), float(seed), dtype=np.float32) for seed in range(8)]
+    barrier = threading.Barrier(8)
+
+    def _write(variant: np.ndarray) -> None:
+        result = FactorGridResult.from_constrained_idw_dict(
+            {
+                "grid_x": [float(i) for i in range(size)],
+                "grid_y": [float(i) for i in range(size)],
+                "grid_z": variant.tolist(),
+                "backend": "约束IDW",
+                "method": "约束IDW",
+                "grid_n": size,
+                "n_points": 4,
+                "min": 0.0,
+                "max": 7.0,
+                "mean": 3.5,
+                "boundary": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 0.0]],
+            },
+            factor_name="孔隙度",
+        )
+        for _ in range(3):
+            barrier.wait(timeout=60)  # force all writers into the same window
+            write_grid_artifact(result, tmp_path, "race")
+
+    threads = [threading.Thread(target=_write, args=(v,)) for v in variants]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=120)
+        assert not t.is_alive()
+    assert not list(tmp_path.glob("race.factor_grid.npz.*.tmp"))
+    loaded = read_grid_artifact(tmp_path / "race.factor_grid.npz")
+    assert any(
+        np.array_equal(loaded.grid_z, v) for v in variants
+    ), "final file must be exactly one complete write"
 
 
 def test_read_missing_artifact_raises(tmp_path: Path):

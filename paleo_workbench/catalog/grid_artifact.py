@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -100,9 +102,14 @@ def write_grid_artifact(
             var = np.ascontiguousarray(var, dtype=np.float32)
         arrays["variance_grid"] = var
 
-    tmp = target.with_name(target.name + ".tmp")
+    # #1149: unique temp name per writer (mkstemp) — a fixed ".tmp" name
+    # lets concurrent writers interleave bytes into one file.
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(target.parent), prefix=target.name + ".", suffix=".tmp"
+    )
+    tmp = Path(tmp_name)
     try:
-        with open(tmp, "wb") as fh:
+        with os.fdopen(fd, "wb") as fh:
             # Uncompressed: interactive save/reopen is CPU-bound on compress for
             # smooth float32 grids; size trade-off measured in Stage-3 bench.
             np.savez(fh, **arrays)
