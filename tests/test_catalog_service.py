@@ -1250,3 +1250,16 @@ def test_resolve_path_cross_platform_and_relative(service, tmp_path):
     )
     assert service.resolve_path(v2) == real_file.resolve()
 
+
+def test_evil_asset_id_rejected_at_version_placement(service, tmp_path):
+    """#1175: an asset id from a hostile project doc must fail closed at
+    the storage sink instead of escaping the ledger tree."""
+    from paleo_workbench.catalog.models import CatalogError, DataAsset
+
+    src = _make_source(tmp_path, name="ok.las")
+    evil = DataAsset(id="../../evil", name="Evil", type="well_log")
+    service._add_asset(evil)
+    with pytest.raises(CatalogError):
+        service.register_version(evil.id, src, DataStage.RAW)
+    assert not (tmp_path / "evil").exists()
+

@@ -1132,6 +1132,12 @@ class DataCatalogService:
         register_blob: bool = False,
     ) -> tuple[DataVersion, Path]:
         """Place the payload and build the (not yet appended) DataVersion."""
+        if not self._is_safe_version_id(asset.id):
+            # #1175: asset.id flows into the same storage path segments as
+            # version_id and is equally attacker-controlled via project docs.
+            raise CatalogError(
+                f"Unsafe asset id {asset.id!r}: only [A-Za-z0-9._-] allowed"
+            )
         version = DataVersion(
             asset_id=asset.id,
             version_number=self._next_version_number(asset.id),
