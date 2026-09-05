@@ -337,3 +337,33 @@ def test_provider_entry_roi_returns_correct_result(tmp_path):
         got, _full_reference(cube)[2:10, 2:10, 2:14], rtol=1e-6, atol=1e-7
     )
     assert result.diagnostics["mode"] == "roi"
+
+
+def test_attribute_provider_cancel_propagates_task_cancelled(tmp_path):
+    """#1137: a cancelled full-volume attribute run must raise TaskCancelled,
+    never a washed ProviderExecutionError."""
+    from types import SimpleNamespace
+
+    from paleo_workbench.providers.base import ProviderContext
+    from paleo_workbench.providers.builtin.seismic_attribute import (
+        SeismicAttributeProvider,
+    )
+    from paleo_workbench.providers.errors import ProviderExecutionError
+    from paleo_workbench.providers.refs import SeismicVolumeRef
+    from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
+    _cube, store = _write_small_segy(tmp_path)
+    provider = SeismicAttributeProvider("c3", {})
+    context = ProviderContext(
+        work_dir=str(tmp_path),
+        cancel=SimpleNamespace(is_cancelled=True),
+    )
+    with pytest.raises(TaskCancelled):
+        try:
+            provider.execute(
+                {"volume": SeismicVolumeRef(volume_id="v", path=str(store))},
+                {"output_dir": str(tmp_path / "attr_out")},
+                context,
+            )
+        except ProviderExecutionError as exc:
+            raise AssertionError(f"cancel was washed: {exc}") from exc

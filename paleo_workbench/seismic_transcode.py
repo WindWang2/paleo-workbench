@@ -439,12 +439,22 @@ def transcode_segy_to_zarr(
             )
             reader_thread.start()
             try:
+                cancelled_here = False
                 while True:
                     item = q.get()
                     if item is None:
                         break
                     if not write_slab(item[0], item[1]):
+                        cancelled_here = True
                         break  # cancelled: partial store stays resumable
+                if cancelled_here:
+                    # #1136: drain so the reader's blocking puts release and
+                    # it can reach its sentinel-exit. Without this, join()
+                    # below always hits its timeout and leaks a parked
+                    # thread holding an open SEG-Y handle.
+                    while True:
+                        if q.get() is None:
+                            break
             finally:
                 reader_thread.join(timeout=30)
     finally:

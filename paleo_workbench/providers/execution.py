@@ -36,6 +36,7 @@ from paleo_workbench.providers.errors import (
     ProviderRejectedInputError,
 )
 from paleo_workbench.providers.refs import ProviderResult
+from paleo_workbench.runtime.task_scheduler import TaskCancelled
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +200,26 @@ def execute_provider(
         if context is not None and run_ref is not None:
             context.run_id = getattr(run_ref, "run_id", None) or getattr(run_ref, "id", None)
         result = provider.execute(inputs, parameters, context or ProviderContext())
+    except (KeyboardInterrupt, SystemExit):
+        # #1137: interpreter exits propagate unwrapped (never washed into a
+        # provider failure); the run record still goes terminal so it never
+        # strands in "running".
+        if run_ref is not None and getattr(catalog, "complete_run", None) is not None:
+            try:
+                catalog.complete_run(getattr(run_ref, "run_id", None) or getattr(run_ref, "id", None), status="failed")
+            except Exception:
+                logger.exception("provider run failure-status update failed")
+        raise
+    except TaskCancelled:
+        # #1137: cooperative cancel keeps end-to-end semantics (DataRun
+        # cancelled, scheduler on_cancel branch) instead of washing into
+        # failed statistics.
+        if run_ref is not None and getattr(catalog, "complete_run", None) is not None:
+            try:
+                catalog.complete_run(getattr(run_ref, "run_id", None) or getattr(run_ref, "id", None), status="cancelled")
+            except Exception:
+                logger.exception("provider run cancel-status update failed")
+        raise
     except BaseException as exc:
         if run_ref is not None and getattr(catalog, "complete_run", None) is not None:
             try:

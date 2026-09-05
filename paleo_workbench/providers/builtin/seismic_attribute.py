@@ -25,6 +25,7 @@ from paleo_workbench.providers.refs import (
     ProviderResult,
     SeismicVolumeRef,
 )
+from paleo_workbench.runtime.task_scheduler import TaskCancelled
 
 _ATTRIBUTE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -155,6 +156,11 @@ class SeismicAttributeProvider:
         job = VolumeAttributeJob(reader, dst, self._kernel)
         try:
             stats = job.run(_TaskContextAdapter(context))
+        except (TaskCancelled, KeyboardInterrupt, SystemExit):
+            # #1137: cancellation and interpreter exits propagate unwrapped —
+            # wrapping them in ProviderExecutionError would wash cancelled
+            # runs into failed statistics and swallow Ctrl-C.
+            raise
         except Exception as exc:
             raise ProviderExecutionError(self.descriptor.provider_id, exc) from exc
 

@@ -455,3 +455,53 @@ def test_visualization_providers_probe_honesty():
     # QGIS availability is environment-dependent — the flag must simply match
     # the probe, never be hardcoded True.
     assert isinstance(by_id["viz.map_render.qgis"].available, bool)
+
+
+# ------------------------------------------------- #1137 cancel semantics
+
+
+class _CancelProvider:
+    """Raises TaskCancelled like a cooperatively-cancelled job would."""
+
+    def __init__(self, exc: BaseException):
+        self._descriptor = _descriptor()
+        self._exc = exc
+
+    @property
+    def descriptor(self):
+        return self._descriptor
+
+    def execute(self, inputs, parameters, context):
+        raise self._exc
+
+
+def test_execute_provider_cancel_marks_run_cancelled():
+    from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
+    registry = ProviderRegistry()
+    registry.register(_CancelProvider(TaskCancelled("user cancelled")))
+    catalog = FakeCatalog()
+    with pytest.raises(TaskCancelled):
+        execute_provider(
+            registry,
+            "test.echo",
+            parameters={"factor": 1.0},
+            context=ProviderContext(catalog=catalog),
+        )
+    assert catalog.runs[0]["status"] == "cancelled"
+
+
+def test_execute_provider_keyboard_interrupt_propagates_unwrapped():
+    registry = ProviderRegistry()
+    registry.register(_CancelProvider(KeyboardInterrupt()))
+    catalog = FakeCatalog()
+    with pytest.raises(KeyboardInterrupt):
+        execute_provider(
+            registry,
+            "test.echo",
+            parameters={"factor": 1.0},
+            context=ProviderContext(catalog=catalog),
+        )
+    # The run is still terminal (never stranded running) but the original
+    # interpreter-exit type propagates instead of ProviderExecutionError.
+    assert catalog.runs[0]["status"] == "failed"

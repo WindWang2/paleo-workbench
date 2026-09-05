@@ -200,3 +200,55 @@ def test_quick2g_end_to_end(tmp_path):
             )
 
     assert result.stats.throughput_mb_s > 95  # beats single-thread baseline
+
+
+def test_cancelled_transcode_drains_and_leaves_no_reader_thread(tmp_path):
+    """#1136: cancel must return fast with no parked reader thread, and the
+    partial store must stay resumable."""
+    import threading
+    import time
+
+    nil, nxl, nt = 16, 8, 8
+    segy = tmp_path / "cancel.segy"
+    rng = np.random.default_rng(3)
+    spec = segyio.spec()
+    spec.ilines = list(range(1, nil + 1))
+    spec.xlines = list(range(1, nxl + 1))
+    spec.samples = list(range(nt))
+    spec.format = 5
+    with segyio.create(str(segy), spec) as f:
+        for il in range(nil):
+            for xl in range(nxl):
+                i = il * nxl + xl
+                f.header[i] = {
+                    segyio.TraceField.INLINE_3D: il + 1,
+                    segyio.TraceField.CROSSLINE_3D: xl + 1,
+                }
+                f.trace[i] = rng.standard_normal(nt).astype(np.float32)
+    params = TranscodeParams(chunk=(4, 4, 4), shard=(4, 4, 8), clevel=1)
+    state = {"writes": 0}
+
+    def _progress(_ratio: float) -> None:
+        state["writes"] += 1
+
+    store = tmp_path / "cancel_store"
+    t0 = time.monotonic()
+    result = transcode_segy_to_zarr(
+        segy, store, params=params, workers=4,
+        progress=_progress, cancel=lambda: state["writes"] >= 2,
+    )
+    elapsed = time.monotonic() - t0
+    # The old code always burned the 30s reader-join timeout on cancel.
+    assert elapsed < 20
+    assert not any(
+        t.name == "segy-transcode-reader" and t.is_alive()
+        for t in threading.enumerate()
+    )
+    # Partial store stays resumable: a cancel-free rerun finishes everything.
+    resumed = transcode_segy_to_zarr(segy, store, params=params, workers=4)
+    assert resumed.stats.shards_total == 8
+    assert (
+        resumed.stats.shards_written + resumed.stats.shards_skipped
+        == resumed.stats.shards_total
+    )
+    assert result.stats.shards_written < resumed.stats.shards_total
