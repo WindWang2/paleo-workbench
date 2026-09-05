@@ -3172,6 +3172,17 @@ class DataCatalogService:
             self, name, asset_ids=list(asset_ids), version_ids=list(version_ids)
         )
 
+    def tag_ids_for_asset(self, asset_id: str) -> list[str]:
+        """Ids of the tags attached to *asset_id* (read-only service seam).
+
+        UI consumers must resolve tag ownership through this method rather
+        than reaching into ``document.asset_tags`` — the representation may
+        change (e.g. a maintained inverse index) without breaking callers.
+        """
+        asset = self._asset_or_raise(asset_id)
+        with self._lock:
+            return list(self.document.asset_tags.get(asset.id, ()))
+
     def tag_usage(self) -> dict[str, dict]:
         """Per-tag association counts: ``{tag_id: {"name", "display_name",
         "assets", "versions"}}`` — Asset Tags and Version Tags counted apart.

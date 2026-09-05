@@ -70,7 +70,16 @@ class MissingSourceReport:
 
 
 def _probe_path(service, version: DataVersion) -> Path:
-    """The path a missing-scan must check (cheap ladder, no identity probe)."""
+    """The path a missing-scan must check: ONLY the first resolution rung
+    (managed project-join / recorded absolute / naive project-relative).
+
+    Deliberately NOT the full :meth:`resolve_path` ladder — the relocation
+    rungs run identity hashing, which an O(versions) scan must not do. The
+    trade-off: after a project save-as relocation this scan can report a
+    version MISSING that ``resolve_path`` would still find (the scan is an
+    upper bound on missingness); relink and integrity views resolve the
+    truth per version.
+    """
     project_dir = service.project_path.expanduser().resolve().parent
     raw = Path(version.path or "")
     if version.managed:

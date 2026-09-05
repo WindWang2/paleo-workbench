@@ -2303,7 +2303,7 @@ class DataPage(QWidget):
                             tags_by_id = {
                                 tag.id: tag for tag in service.list_tags()
                             }
-                        owned = service.document.asset_tags.get(ref.asset_id, [])
+                        owned = service.tag_ids_for_asset(ref.asset_id)
                         for tag_id in owned:
                             tag = tags_by_id.get(tag_id)
                             if tag is not None:
