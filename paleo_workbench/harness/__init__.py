@@ -43,6 +43,7 @@ from paleo_workbench.harness.executor import (
     ActionContextError,
     ActionPermissionError,
     ActionResult,
+    ActionUnavailableError,
     ActionValidationError,
     HarnessExecutor,
 )
@@ -57,8 +58,10 @@ from paleo_workbench.harness.registry import (
 )
 from paleo_workbench.harness.spec import (
     DEFAULT_PERMISSIONS,
+    POSITIVE_STATUSES,
     ActionRisk,
     ActionSpec,
+    ActionStatus,
     validate_action_spec,
 )
 from paleo_workbench.harness.validation import (
@@ -80,6 +83,8 @@ __all__ = [
     "ActionRisk",
     "ActionResult",
     "ActionSpec",
+    "ActionStatus",
+    "ActionUnavailableError",
     "ActionValidationError",
     "ChatModel",
     "DEFAULT_PERMISSIONS",
@@ -88,6 +93,7 @@ __all__ = [
     "HarnessToolSource",
     "InvalidActionSpecError",
     "MapValidationHook",
+    "POSITIVE_STATUSES",
     "ScientificValidator",
     "SelectionSnapshot",
     "ToolSource",
