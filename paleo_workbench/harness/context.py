@@ -80,6 +80,43 @@ class ActionContext:
     def permits(self, risk: ActionRisk) -> bool:
         return risk in self.permissions
 
+    def derived(self, **overrides: Any) -> "ActionContext":
+        """A per-execution copy sharing services and stashes but with its
+        own ``extras`` (minus volatile executor keys).
+
+        The workflow engine derives one context per node so parallel nodes
+        never race on the admission-lease slot; ``admission_lease`` is
+        deliberately not copied — each action's executor sets its own.
+        """
+        clone = ActionContext(
+            session_id=self.session_id,
+            workspace_id=self.workspace_id,
+            project_path=self.project_path,
+            catalog=self.catalog,
+            project=self.project,
+            selection=self.selection,
+            active_survey_id=self.active_survey_id,
+            active_well_id=self.active_well_id,
+            active_volume=self.active_volume,
+            current_map_id=self.current_map_id,
+            permissions=self.permissions,
+            extras={
+                k: v
+                for k, v in self.extras.items()
+                if k != "admission_lease"
+            },
+        )
+        # Shared in-process stashes are cooperative workflow state: nodes of
+        # one run legitimately exchange handles through them.
+        clone.map_documents = self.map_documents
+        clone.well_logs = self.well_logs
+        clone.well_displays = self.well_displays
+        clone.factor_datasets = self.factor_datasets
+        clone.compositions = self.compositions
+        for key, value in overrides.items():
+            setattr(clone, key, value)
+        return clone
+
     def provider_context(self, **overrides: Any) -> Any:
         """Build the :class:`ProviderContext` for a nested provider execution.
 
