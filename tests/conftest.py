@@ -49,6 +49,39 @@ def pytest_configure(config):
     )
 
 
+def pytest_sessionstart(session):
+    """Fail-closed gate for required QGIS CI legs (#1147)."""
+    import os
+
+    if os.environ.get("PALEO_REQUIRE_QGIS", "").strip().lower() in {"1", "true", "yes"}:
+        from tests.qgis_support import QGIS_SKIP_REASON, qgis_bridge_available
+
+        if not qgis_bridge_available():
+            pytest.exit(
+                f"FATAL: PALEO_REQUIRE_QGIS=1 is set but qgis_render_bridge is not importable.\n"
+                f"Ensure the bridge was compiled: {QGIS_SKIP_REASON}",
+                returncode=1,
+            )
+
+
+def pytest_runtest_setup(item):
+    """Automatically gate all tests carrying the @pytest.mark.qgis marker (#1147)."""
+    marker = item.get_closest_marker("qgis")
+    if marker is not None:
+        import os
+        from tests.qgis_support import QGIS_SKIP_REASON, qgis_bridge_available
+
+        if not qgis_bridge_available():
+            strict = os.environ.get("PALEO_REQUIRE_QGIS", "").strip().lower() in {"1", "true", "yes"}
+            if strict:
+                pytest.fail(
+                    f"Test {item.nodeid} requires QGIS (PALEO_REQUIRE_QGIS=1), "
+                    f"but qgis_render_bridge is not importable."
+                )
+            else:
+                pytest.skip(QGIS_SKIP_REASON)
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_teardown(item):
     """Timer fence (#951): stop every still-armed QTimer BEFORE pytest-qt's

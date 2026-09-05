@@ -30,6 +30,19 @@ def _enabled() -> bool:
 
 
 def _qt_include_dirs() -> list[str]:
+    prefix = os.environ.get("PALEO_QGIS_CMAKE_PREFIX", "").strip()
+    if not prefix:
+        prefix = os.environ.get("CMAKE_PREFIX_PATH", "").strip().split(os.pathsep)[0]
+    if prefix:
+        qt_inc = Path(prefix) / "include" / "qt6"
+        if qt_inc.is_dir():
+            dirs = [str(qt_inc)]
+            for sub in ("QtCore", "QtGui", "QtWidgets", "QtXml", "QtSvg"):
+                sub_path = qt_inc / sub
+                if sub_path.is_dir():
+                    dirs.append(str(sub_path))
+            return dirs
+
     try:
         output = subprocess.check_output(
             ["pkg-config", "--cflags-only-I", "Qt6Core", "Qt6Gui", "Qt6Widgets", "Qt6Xml", "Qt6Svg"], text=True
@@ -111,67 +124,69 @@ def _qgis_core_include_dirs(build_dir: Path) -> list[str]:
 
 
 def _build_vendored_qgis() -> tuple[Path, Path]:
-    if not (QGIS_SOURCE / "UPSTREAM.md").is_file():
-        raise RuntimeError(f"vendored QGIS source is missing: {QGIS_SOURCE}")
-
     build_dir = _vendor_build_dir()
     core_library = _vendor_core_library(build_dir)
     gui_library = _vendor_gui_library(build_dir)
     analysis_library = _vendor_analysis_library(build_dir)
     resource_database = build_dir / "resources" / "srs.db"
-    jobs = os.environ.get("PALEO_QGIS_BUILD_JOBS", "2").strip() or "2"
-    cmake_args = [
-        "cmake",
-        "-S",
-        str(QGIS_SOURCE),
-        "-B",
-        str(build_dir),
-        "-G",
-        "Ninja",
-        "-DCMAKE_BUILD_TYPE=Release",
-        "-DWITH_PYTHON=OFF",
-        "-DWITH_BINDINGS=OFF",
-        "-DWITH_DESKTOP=OFF",
-        "-DWITH_QGIS_PROCESS=OFF",
-        "-DWITH_3D=OFF",
-        "-DWITH_GUI=ON",
-        "-DWITH_ANALYSIS=ON",
-        "-DWITH_AUTH=ON",
-        "-DWITH_CRASH_HANDLER=OFF",
-        "-DWITH_SERVER=OFF",
-        "-DWITH_CUSTOM_WIDGETS=OFF",
-        "-DWITH_QUICK=OFF",
-        "-DWITH_QTWEBENGINE=OFF",
-        "-DWITH_QTPOSITIONING=OFF",
-        # PDAL (point clouds) is irrelevant to the 2D render bridge and its
-        # dev package is not in the CI apt list — the vendored default (ON)
-        # made every bridge configure fail at FindPDAL (#935 follow-up).
-        "-DWITH_PDAL=OFF",
-        # Draco (mesh compression) likewise: default ON, fatal FindDraco on
-        # runners without libdraco-dev.
-        "-DWITH_DRACO=OFF",
-        # Qt6SerialPort is GPS-field hardware support; default ON and a hard
-        # requirement the runner image lacks.
-        "-DWITH_QTSERIALPORT=OFF",
-        "-DWITH_INTERNAL_SPATIALINDEX=ON",
-        "-DUSE_OPENCL=OFF",
-        "-DENABLE_TESTS=OFF",
-        "-DENABLE_LOCAL_BUILD_SHORTCUTS=ON",
-        "-DUSE_CCACHE=OFF",
-        "-DCMAKE_FIND_USE_PACKAGE_REGISTRY=FALSE",
-        "-DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=FALSE",
-    ]
-    prefix = os.environ.get("PALEO_QGIS_CMAKE_PREFIX", "").strip()
-    if not prefix:
-        prefix = os.environ.get("CMAKE_PREFIX_PATH", "").strip().split(os.pathsep)[0]
-    if prefix:
-        cmake_args.append(f"-DCMAKE_PREFIX_PATH={prefix}")
-    try:
-        subprocess.run(cmake_args, check=True)
-        if not all(
-            library.is_file()
-            for library in (core_library, gui_library, analysis_library)
-        ) or not resource_database.is_file():
+
+    already_built = (
+        all(library.is_file() for library in (core_library, gui_library, analysis_library))
+        and resource_database.is_file()
+    )
+    if not already_built:
+        if not (QGIS_SOURCE / "UPSTREAM.md").is_file():
+            raise RuntimeError(f"vendored QGIS source is missing: {QGIS_SOURCE}")
+
+        jobs = os.environ.get("PALEO_QGIS_BUILD_JOBS", "2").strip() or "2"
+        cmake_args = [
+            "cmake",
+            "-S",
+            str(QGIS_SOURCE),
+            "-B",
+            str(build_dir),
+            "-G",
+            "Ninja",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DWITH_PYTHON=OFF",
+            "-DWITH_BINDINGS=OFF",
+            "-DWITH_DESKTOP=OFF",
+            "-DWITH_QGIS_PROCESS=OFF",
+            "-DWITH_3D=OFF",
+            "-DWITH_GUI=ON",
+            "-DWITH_ANALYSIS=ON",
+            "-DWITH_AUTH=ON",
+            "-DWITH_CRASH_HANDLER=OFF",
+            "-DWITH_SERVER=OFF",
+            "-DWITH_CUSTOM_WIDGETS=OFF",
+            "-DWITH_QUICK=OFF",
+            "-DWITH_QTWEBENGINE=OFF",
+            "-DWITH_QTPOSITIONING=OFF",
+            # PDAL (point clouds) is irrelevant to the 2D render bridge and its
+            # dev package is not in the CI apt list — the vendored default (ON)
+            # made every bridge configure fail at FindPDAL (#935 follow-up).
+            "-DWITH_PDAL=OFF",
+            # Draco (mesh compression) likewise: default ON, fatal FindDraco on
+            # runners without libdraco-dev.
+            "-DWITH_DRACO=OFF",
+            # Qt6SerialPort is GPS-field hardware support; default ON and a hard
+            # requirement the runner image lacks.
+            "-DWITH_QTSERIALPORT=OFF",
+            "-DWITH_INTERNAL_SPATIALINDEX=ON",
+            "-DUSE_OPENCL=OFF",
+            "-DENABLE_TESTS=OFF",
+            "-DENABLE_LOCAL_BUILD_SHORTCUTS=ON",
+            "-DUSE_CCACHE=OFF",
+            "-DCMAKE_FIND_USE_PACKAGE_REGISTRY=FALSE",
+            "-DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=FALSE",
+        ]
+        prefix = os.environ.get("PALEO_QGIS_CMAKE_PREFIX", "").strip()
+        if not prefix:
+            prefix = os.environ.get("CMAKE_PREFIX_PATH", "").strip().split(os.pathsep)[0]
+        if prefix:
+            cmake_args.append(f"-DCMAKE_PREFIX_PATH={prefix}")
+        try:
+            subprocess.run(cmake_args, check=True)
             subprocess.run(
                 [
                     "cmake", "--build", str(build_dir),
@@ -180,8 +195,8 @@ def _build_vendored_qgis() -> tuple[Path, Path]:
                 ],
                 check=True,
             )
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise RuntimeError("could not build the vendored QGIS core") from exc
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise RuntimeError("could not build the vendored QGIS core") from exc
     for library in (core_library, gui_library, analysis_library):
         if not library.is_file():
             raise RuntimeError(f"vendored QGIS library is missing: {library}")

@@ -77,13 +77,69 @@ def _apply_wayland_fractional_scale_guard() -> None:
     )
 
 
+def _parse_cli_args(argv: list[str]) -> int | None:
+    """Handle non-GUI command-line arguments prior to Qt application initialization.
+
+    Returns exit code integer if the application should terminate immediately,
+    or None to proceed to GUI startup.
+    """
+    if "--help" in argv or "-h" in argv:
+        from paleo_workbench.env_bootstrap import geoviz_bootstrap_status
+
+        status = geoviz_bootstrap_status()
+        print(
+            "usage: paleo-workbench [OPTIONS]\n\n"
+            "Paleogeographic map compilation desktop workstation.\n\n"
+            "Options:\n"
+            "  -h, --help       Show this help message and exit.\n"
+            "  --version        Show application version and environment status.\n"
+            "  --diagnostics    Show detailed system, geoviz, and native backend diagnostics.\n"
+            "\nEnvironment Status:\n"
+            f"  Repository Root: {status['repo_root'] or 'Not detected (running from installed package)'}\n"
+            f"  GeoViz Core:     {'Available' if status['importable'] else 'Unavailable'}\n"
+            f"  Install Command: {status['preferred_install']}"
+        )
+        return 0
+
+    if "--version" in argv:
+        import paleo_workbench
+
+        version = getattr(paleo_workbench, "__version__", "0.2.17a0")
+        print(f"paleo-workbench {version} (CPython {sys.version.split()[0]})")
+        return 0
+
+    if "--diagnostics" in argv or "--check-env" in argv:
+        from paleo_workbench.env_bootstrap import (
+            ensure_geoviz_on_path,
+            geoviz_bootstrap_status,
+        )
+
+        ensure_geoviz_on_path()
+        status = geoviz_bootstrap_status()
+        print("=== Paleo Workbench Environment Diagnostics ===")
+        print(f"Python:          {sys.executable}")
+        print(f"Repo Root:       {status['repo_root']}")
+        print(f"GeoViz Core:     {'OK' if status['importable'] else 'MISSING'}")
+        print("Subpackages:")
+        subpkgs = status.get("subpackages", {})
+        for name, ok in subpkgs.items():
+            print(f"  - {name:25s}: {'OK' if ok else 'NOT INSTALLED'}")
+        return 0
+
+    return None
+
+
 def _require_geoviz() -> None:
     """Bootstrap geoviz paths and give an actionable error when unavailable.
 
     Keeps the SystemExit(2) contract of the previous module-level gate, but
     only when an entry point actually starts the app (ISS-ENV-01).
     """
-    from paleo_workbench.env_bootstrap import ensure_geoviz_on_path, load_local_env
+    from paleo_workbench.env_bootstrap import (
+        ensure_geoviz_on_path,
+        geoviz_bootstrap_status,
+        load_local_env,
+    )
 
     load_local_env()
 
@@ -97,8 +153,22 @@ def _require_geoviz() -> None:
         )
         raise SystemExit(2)
 
+    status = geoviz_bootstrap_status()
+    missing = status.get("missing_subpackages", [])
+    if missing:
+        logging.getLogger("paleo_workbench").warning(
+            "Some optional geo-viz-engine subpackages are not installed: %s. "
+            "Specific pages (e.g. 3D seismic/well-tie) may be unavailable. "
+            "To install, run: python -m pip install -r requirements-geoviz.txt",
+            ", ".join(missing),
+        )
+
 
 def main() -> int:
+    exit_code = _parse_cli_args(sys.argv[1:])
+    if exit_code is not None:
+        return exit_code
+
     _apply_qt_desktop_policy()
     _require_geoviz()
 

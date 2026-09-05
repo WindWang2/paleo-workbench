@@ -26,6 +26,44 @@ def qgis_bridge_available() -> bool:
     """True when the ``qgis_render_bridge`` extension is importable."""
     try:
         import qgis_render_bridge  # noqa: F401
+
+        return True
     except ImportError:
         return False
-    return True
+
+
+def require_qgis():
+    """Import and return qgis_render_bridge, respecting PALEO_REQUIRE_QGIS."""
+    import os
+    import pytest
+
+    strict = os.environ.get("PALEO_REQUIRE_QGIS", "").strip().lower() in {"1", "true", "yes"}
+    if strict:
+        import qgis_render_bridge
+
+        return qgis_render_bridge
+    return pytest.importorskip("qgis_render_bridge", reason=QGIS_SKIP_REASON)
+
+
+def require_mapstack():
+    """Import and return qgis_render_bridge.mapstack, respecting PALEO_REQUIRE_QGIS."""
+    import os
+    import pytest
+
+    strict = os.environ.get("PALEO_REQUIRE_QGIS", "").strip().lower() in {"1", "true", "yes"}
+    if strict:
+        import qgis_render_bridge.mapstack as mapstack
+
+        return mapstack
+    return pytest.importorskip("qgis_render_bridge.mapstack", reason=QGIS_SKIP_REASON)
+
+
+def qgis_env_status() -> dict[str, object]:
+    """Return runtime diagnostic metadata for QGIS test harness."""
+    import os
+
+    return {
+        "available": qgis_bridge_available(),
+        "strict_mode": os.environ.get("PALEO_REQUIRE_QGIS", "").strip().lower() in {"1", "true", "yes"},
+        "skip_reason": QGIS_SKIP_REASON,
+    }

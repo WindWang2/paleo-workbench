@@ -106,3 +106,48 @@ def test_entry_paths_exit_2_with_guidance_without_geoviz(tmp_path, command) -> N
     assert result.returncode == 2, f"stdout={result.stdout!r} stderr={result.stderr!r}"
     assert "ERROR: cannot import geoviz" in result.stderr
     assert "requirements-geoviz.txt" in result.stderr
+
+
+@pytest.mark.parametrize("flag", ["--help", "-h"])
+def test_entry_point_help_exits_0(flag) -> None:
+    """#1191: paleo-workbench --help outputs help without starting GUI."""
+    result = subprocess.run(
+        [sys.executable, "-m", "paleo_workbench", flag],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0
+    assert "usage: paleo-workbench [OPTIONS]" in result.stdout
+    assert "Environment Status:" in result.stdout
+
+
+def test_entry_point_version_exits_0() -> None:
+    """#1191: paleo-workbench --version outputs version and CPython info."""
+    result = subprocess.run(
+        [sys.executable, "-m", "paleo_workbench", "--version"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0
+    assert "paleo-workbench" in result.stdout
+    assert "CPython" in result.stdout
+
+
+def test_entry_point_diagnostics_exits_0() -> None:
+    """#1191: paleo-workbench --diagnostics outputs environment diagnostics."""
+    result = subprocess.run(
+        [sys.executable, "-m", "paleo_workbench", "--diagnostics"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0
+    assert "=== Paleo Workbench Environment Diagnostics ===" in result.stdout
+    assert "Repo Root:" in result.stdout
+    assert "GeoViz Core:" in result.stdout
+

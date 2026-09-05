@@ -82,3 +82,35 @@ def test_load_local_env_reads_ignored_dotenv_without_overriding_real_environment
     assert boot.load_local_env() is True
     assert boot.os.environ["PALEO_GEOVIZ_API_KEY"] == "ak_from_dotenv"
     assert boot.os.environ["PALEO_GEOVIZ_MODEL_VERSION_ID"] == "shell-model"
+
+
+def test_repo_root_resolves_via_paleo_repo_root_env(tmp_path, monkeypatch):
+    """#1191: _repo_root resolves via PALEO_REPO_ROOT env var."""
+    from paleo_workbench import env_bootstrap as boot
+
+    mock_engine = tmp_path / "geo-viz-engine" / "geoviz"
+    mock_engine.mkdir(parents=True)
+    (mock_engine / "__init__.py").write_text("", encoding="utf-8")
+
+    monkeypatch.setenv("PALEO_REPO_ROOT", str(tmp_path))
+    assert boot._repo_root() == tmp_path
+
+
+def test_check_geoviz_subpackages_returns_status_map():
+    """#1191: check_geoviz_subpackages reports status of all 9 subpackages."""
+    from paleo_workbench.env_bootstrap import (
+        _GEOVIZ_PACKAGES,
+        check_geoviz_subpackages,
+        geoviz_bootstrap_status,
+    )
+
+    status = check_geoviz_subpackages()
+    assert isinstance(status, dict)
+    for pkg in _GEOVIZ_PACKAGES:
+        assert pkg in status
+        assert isinstance(status[pkg], bool)
+
+    boot_status = geoviz_bootstrap_status()
+    assert "subpackages" in boot_status
+    assert "missing_subpackages" in boot_status
+

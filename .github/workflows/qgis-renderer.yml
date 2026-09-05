@@ -80,6 +80,9 @@ jobs:
         with:
           submodules: false
 
+      - name: Init geo-viz-engine submodule
+        run: git submodule update --init geo-viz-engine
+
       - name: System libraries (Qt6 / QGIS build deps / bridge build tools)
         run: |
           sudo apt-get update
@@ -189,37 +192,17 @@ jobs:
           /tmp/qgisqt/bin/python -m pytest -q tests/test_qgis_vendor_source.py --timeout=60 --timeout-method=thread
 
       - name: QGIS tests are selected, not silently skipped — and executed
-        # The leg must fail if the QGIS test set ever stops being selected
-        # (e.g. a rename), so the production path cannot silently lose
-        # coverage. Two fail-closed counts (#935): (a) collect-only must list
-        # >=9 qgis tests ("N tests collected" is collect-mode output), and
-        # (b) the real run summary must show them passing ("N passed" is
-        # run-mode output — the old regex greped a phrase run mode never
-        # prints, and its double-backslash pattern could never match).
+        env:
+          PALEO_REQUIRE_QGIS: "1"
+          QT_QPA_PLATFORM: offscreen
         run: |
           set -o pipefail
-          # Collect ONLY the files that carry the qgis marker: a bare
-          # `tests/` walk collection-errors on modules importing the geoviz
-          # graph, which this focused leg deliberately does not install.
-          # The file list is derived from the marker itself (rename-safe:
-          # a renamed file drops out of the list and the >=9 count guard
-          # below fails loudly).
-          mapfile -t QGIS_FILES < <(
-            for f in $(grep -rl "pytest.mark.qgis" tests --include='*.py' | sort); do
-              # Exclude files that import the native engines directly OR via a
-              # known transitive carrier. A plain top-level `^(from|import)
-              # geoviz` grep is not enough: these test files never name geoviz
-              # themselves, but importing the paleo_workbench modules below
-              # pulls geoviz in at module scope on this leg, which deliberately
-              # does not install it. Extend the carrier list when a new
-              # collection error of the form ModuleNotFoundError: geoviz
-              # appears — the >=9 collected guard below fails loudly either way.
-              grep -qE "^(from|import) (geoviz|grid_render_core|layer_model_core|seismic_3d_core|well_log_core|map_edit_core)|paleo_workbench\.(workflow\.factor_interpolation|viz\.native_factor_map|ui\.pages\.mapping_page)" "$f" || echo "$f"
-            done
-          )
-          echo "qgis marker files: ${QGIS_FILES[*]}"
-          QT_QPA_PLATFORM=offscreen /tmp/qgisqt/bin/python -m pytest -v --tb=short --timeout=120 -m qgis "${QGIS_FILES[@]}" 2>&1 | tee /tmp/qgis-run.txt
-          collected="$(QT_QPA_PLATFORM=offscreen /tmp/qgisqt/bin/python -m pytest --collect-only -q -m qgis "${QGIS_FILES[@]}" 2>/dev/null | grep -oE '[0-9]+ tests collected' | grep -oE '^[0-9]+')"
+          PP="$GITHUB_WORKSPACE"
+          for pkg in "$GITHUB_WORKSPACE"/geo-viz-engine/packages/*/; do
+            PP="$PP:${pkg%/}"
+          done
+          PYTHONPATH="$PP" /tmp/qgisqt/bin/python -m pytest -v --tb=short --timeout=120 -m qgis tests/ 2>&1 | tee /tmp/qgis-run.txt
+          collected="$(PYTHONPATH="$PP" /tmp/qgisqt/bin/python -m pytest --collect-only -q -m qgis tests/ 2>/dev/null | grep -oE '[0-9]+ tests collected' | grep -oE '^[0-9]+')"
           test -n "${collected}" && test "${collected}" -ge 9
           /tmp/qgisqt/bin/python - <<'EOF'
           import re
