@@ -289,6 +289,9 @@ class AttributeJobStats:
 # rms-style paths ≈ 7-8x). One conservative factor for all kernels.
 ATTRIBUTE_PEAK_FACTOR = 8
 ATTRIBUTE_MIN_BAND_INLINES = 1
+# Must match _open_or_create_output's shard grid (band fsync in #1194
+# addresses shard files by grid index).
+ATTRIBUTE_SHARD = (128, 512, 512)
 
 
 def _attribute_budget_bytes() -> int:
@@ -375,7 +378,7 @@ class VolumeAttributeJob:
             shape=tuple(self.reader.shape),
             dtype="float32",
             chunks=(64, 128, 128),
-            shards=(128, 512, 512),
+            shards=ATTRIBUTE_SHARD,
             compressors=[BloscCodec(cname="zstd", clevel=5, shuffle="shuffle")],
             overwrite=False,
             attributes={
@@ -408,14 +411,50 @@ class VolumeAttributeJob:
         done.mkdir(parents=True, exist_ok=True)
         marker = done / f"band_{k:06d}"
         marker.write_text("ok")
-        try:
-            fd = os.open(done, os.O_RDONLY)
+        # #1194: fsync the marker CONTENT (not just the directory) so a
+        # crash can never leave a durable marker over unflushed content.
+        for path in (marker, done):
             try:
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-        except OSError:
-            pass
+                fd = os.open(path, os.O_RDONLY)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+            except OSError:
+                pass
+
+    def _fsync_band_files(self, i0: int, i1: int) -> None:
+        """fsync every shard file overlapping inlines [i0, i1) (#1194).
+
+        The zarr write lands in the OS page cache; the band marker must
+        never become durable first. Called after the band slice assignment,
+        before _mark_band_done.
+        """
+        import os
+
+        shard_il = ATTRIBUTE_SHARD[0]
+        gi_lo, gi_hi = i0 // shard_il, (max(i0, i1 - 1)) // shard_il
+        grid = self.dst / "c"
+        if not grid.is_dir():
+            return
+        for gi_dir in sorted(grid.iterdir()):
+            try:
+                gi = int(gi_dir.name)
+            except ValueError:
+                continue
+            if not (gi_lo <= gi <= gi_hi) or not gi_dir.is_dir():
+                continue
+            for shard_file in sorted(gi_dir.rglob("*")):
+                if not shard_file.is_file():
+                    continue
+                try:
+                    fd = os.open(shard_file, os.O_RDONLY)
+                    try:
+                        os.fsync(fd)
+                    finally:
+                        os.close(fd)
+                except OSError:
+                    pass
 
     # ---------------------------------------------------------------- run --
     def run(
@@ -441,6 +480,7 @@ class VolumeAttributeJob:
             )
             ctx.check_cancelled()
             arr[i0:i1, :, :] = result
+            self._fsync_band_files(i0, i1)
             self._mark_band_done(k)
             self.stats.bands_done += 1
             ctx.report_progress(self.stats.bands_done, self.stats.bands_total)

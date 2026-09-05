@@ -400,3 +400,40 @@ def test_attribute_provider_ram_estimate_matches_band_peak():
 
     estimate = SeismicAttributeProvider("c3", {}).descriptor.resource_profile.estimated_ram_bytes
     assert estimate >= 4 * 1024**3
+
+
+def test_band_data_and_marker_fsynced_before_done(tmp_path, monkeypatch):
+    """#1194: band shard files + marker content are fsynced before the
+    band is trusted on resume."""
+    import os as _os
+
+    from paleo_workbench.runtime import TaskContext
+    from paleo_workbench.seismic_attributes import VolumeAttributeJob
+
+    _cube, store = _write_small_segy(tmp_path)
+    dst = tmp_path / "attr_out"
+    job = VolumeAttributeJob(open_volume(store), dst, "c3", band_inlines=12)
+
+    opened: dict[int, str] = {}
+    real_open, real_fsync = _os.open, _os.fsync
+    fsynced: list[str] = []
+
+    def _spy_open(path, *args, **kwargs):
+        fd = real_open(path, *args, **kwargs)
+        try:
+            opened[fd] = str(path)
+        except Exception:
+            pass
+        return fd
+
+    def _spy_fsync(fd):
+        fsynced.append(opened.get(fd, fd))
+        return real_fsync(fd)
+
+    monkeypatch.setattr(_os, "open", _spy_open)
+    monkeypatch.setattr(_os, "fsync", _spy_fsync)
+    job.run(TaskContext(task_id="t"))
+    marker = str(dst.parent / f"{dst.name}.done" / "band_000000")
+    assert marker in fsynced  # marker content, not just the directory
+    shard_hits = [p for p in fsynced if isinstance(p, str) and "/c/" in p]
+    assert shard_hits, "band shard files must be fsynced before marking done"
