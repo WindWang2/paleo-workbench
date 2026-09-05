@@ -1551,6 +1551,163 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         min-height: 26px;
         padding: 2px 8px;
     }}
+
+    /* ── Design System V5: shared components (ui.components) ──────── */
+    /* 组件一律经 objectName + 动态属性消费本表——构造时不再快照主题值，
+       主题/密度切换由全局样式表重载自然生效。 */
+    QPushButton#PwbDangerButton {{
+        background: {t.BG_SIDEBAR};
+        color: {t.ERROR_RED};
+        border: 1px solid {t.ERROR_RED};
+        font-weight: 600;
+    }}
+    QPushButton#PwbDangerButton:hover {{
+        background: {t.ERROR_RED};
+        color: #ffffff;
+        border-color: {t.ERROR_RED};
+    }}
+    QPushButton#PwbDangerButton:pressed {{
+        background: {t.ERROR};
+        border-color: {t.ERROR};
+        color: #ffffff;
+    }}
+    QPushButton#PwbDangerButton:disabled {{
+        background: {t.BG_DISABLED};
+        color: {t.TEXT_DISABLED};
+        border-color: {t.BORDER};
+    }}
+    QPushButton#PwbDangerButton:focus {{
+        border: 1px solid {t.FOCUS_RING};
+    }}
+    QFrame#PwbSplitButton {{
+        background: transparent;
+        border: none;
+    }}
+    QFrame#PwbSplitButton QToolButton {{
+        background: {t.BG_SIDEBAR};
+        border: 1px solid {t.BORDER};
+        border-radius: 0px;
+        min-height: {t.CONTROL_HEIGHT}px;
+    }}
+    QFrame#PwbSplitButton QToolButton:hover {{
+        background: {t.BG_SEARCH};
+        border-color: {t.BORDER_STRONG};
+    }}
+    QLabel#PwbSectionHeader {{
+        color: {t.TEXT_PRIMARY};
+        font-size: {t.FONT_SIZE_TITLE};
+        font-weight: {t.FONT_WEIGHT_TITLE};
+        border: none;
+        border-left: 3px solid {t.ACCENT};
+        padding-left: 8px;
+        background: transparent;
+    }}
+    QLabel#PwbBadge {{
+        padding: 1px 8px;
+        border-radius: {t.RADIUS_BADGE}px;
+        font-size: {t.FONT_SIZE_STATUS}px;
+        font-weight: 600;
+    }}
+    QLabel#PwbBadge[tone="neutral"] {{
+        background: {t.BG_SEARCH}; color: {t.TEXT_SECONDARY};
+    }}
+    /* 徽章深底色全部按白字 ≥ 4.5:1 策展（BADGE_*），三主题皆用白字 */
+    QLabel#PwbBadge[tone="primary"] {{
+        background: {t.BADGE_PRIMARY}; color: #ffffff;
+    }}
+    QLabel#PwbBadge[tone="success"] {{
+        background: {t.BADGE_SUCCESS}; color: #ffffff;
+    }}
+    QLabel#PwbBadge[tone="warning"] {{
+        background: {t.BADGE_WARNING}; color: #ffffff;
+    }}
+    QLabel#PwbBadge[tone="error"] {{
+        background: {t.ERROR_RED}; color: #ffffff;
+    }}
+    QLabel#PwbInlineStatusText {{
+        font-size: {t.FONT_SIZE_STATUS};
+        background: transparent;
+    }}
+    QLabel#PwbInlineStatusText[tone="neutral"] {{ color: {t.TEXT_SECONDARY}; }}
+    QLabel#PwbInlineStatusText[tone="primary"] {{ color: {t.PRIMARY}; }}
+    QLabel#PwbInlineStatusText[tone="success"] {{ color: {t.SUCCESS}; }}
+    QLabel#PwbInlineStatusText[tone="warning"] {{ color: {t.WARNING}; }}
+    QLabel#PwbInlineStatusText[tone="process"] {{ color: {t.ACCENT}; }}
+    QLabel#PwbInlineStatusText[tone="error"] {{ color: {t.ERROR}; }}
+    QFrame#PwbStateSurface {{
+        background: {t.BG_SIDEBAR};
+        border: 1px dashed {t.BORDER_STRONG};
+        border-radius: {t.RADIUS_CARD}px;
+    }}
+    QLabel#PwbStateTitle {{
+        color: {t.TEXT_PRIMARY};
+        font-size: {t.FONT_SIZE_BASE};
+        font-weight: 600;
+        background: transparent;
+    }}
+    QLabel#PwbStateHint {{
+        color: {t.TEXT_SECONDARY};
+        font-size: {t.FONT_SIZE_STATUS};
+        background: transparent;
+    }}
+    QProgressBar#PwbProgress {{
+        background: {t.BG_SEARCH};
+        border: none;
+        border-radius: 3px;
+        min-height: 6px;
+        max-height: 6px;
+    }}
+    QProgressBar#PwbProgress::chunk {{
+        background-color: {t.PRIMARY};
+        border-radius: 3px;
+    }}
+    QProgressBar#PwbProgress[progressState="running"]::chunk {{
+        background-color: {t.ACCENT};
+    }}
+    QProgressBar#PwbProgress[progressState="queued"]::chunk {{
+        background-color: {t.PRIMARY_DISABLED};
+    }}
+    QProgressBar#PwbProgress[progressState="done"]::chunk {{
+        background-color: {t.SUCCESS};
+    }}
+    QProgressBar#PwbProgress[progressState="failed"]::chunk {{
+        background-color: {t.ERROR_RED};
+    }}
+    QFrame#PwbToast {{
+        background: {t.BG_GLASS};
+        border: 1px solid {t.BORDER_STRONG};
+        border-radius: {t.RADIUS_CARD}px;
+    }}
+    QLabel#PwbToastTitle {{
+        color: {t.TEXT_PRIMARY};
+        font-weight: 600;
+        background: transparent;
+    }}
+    QLabel#PwbToastText {{
+        color: {t.TEXT_PRIMARY};
+        background: transparent;
+    }}
+    QFrame#PwbCommandBar {{
+        background: {t.BG_SIDEBAR};
+        border: none;
+        border-bottom: 1px solid {t.BORDER};
+    }}
+    QFrame#PwbCommandSeparator {{
+        background: {t.BORDER};
+        border: none;
+        max-width: 1px;
+        min-width: 1px;
+        margin: 5px 3px;
+    }}
+    QFrame#PwbInspectorSection {{
+        background: transparent;
+        border: none;
+    }}
+    QLabel#PwbPropertyLabel {{
+        color: {t.TEXT_SECONDARY};
+        font-size: {t.FONT_SIZE_STATUS};
+        background: transparent;
+    }}
     '''
 
 QSS_TEMPLATE = build_qss()
