@@ -537,3 +537,23 @@ def test_provider_output_path_containment(tmp_path):
             pid, str(tmp_path / "a" / "b" / "c.png"), ctx, suffixes=(".png",)
         )
     assert not (tmp_path / "a").exists()
+
+
+def test_execute_provider_governor_import_failure_is_loud(monkeypatch):
+    """#1180: a broken first-party governor import fails closed — never a
+    silent ungoverned run."""
+    import sys
+
+    registry = ProviderRegistry()
+    registry.register(EchoProvider())
+    monkeypatch.setitem(
+        sys.modules, "paleo_workbench.runtime.resource_governor", None
+    )
+    with pytest.raises(ImportError):
+        execute_provider(
+            registry,
+            "test.echo",
+            inputs={"path": PathRef(path="/tmp/x")},
+            parameters={"factor": 2.0},
+            context=ProviderContext(),
+        )

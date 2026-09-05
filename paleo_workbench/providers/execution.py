@@ -126,28 +126,30 @@ def _validate_inputs(descriptor: ProviderDescriptor, inputs: Mapping[str, Any]) 
 
 
 def _governor_lease(descriptor: ProviderDescriptor, provider_id: str):
-    """Admission lease for the execution (best-effort: no governor → run)."""
-    try:
-        from paleo_workbench.runtime.resource_governor import (
-            ResourceExhausted,
-            TaskRequest,
-            get_governor,
-        )
-        from paleo_workbench.runtime.task_categories import TaskCategory
+    """Admission lease for the execution.
 
-        profile = descriptor.resource_profile
-        category = TaskCategory(profile.category)
-        request = TaskRequest(
-            category=category,
-            title=f"provider:{provider_id}",
-            estimated_cpu_cores=profile.estimated_cpu_cores,
-            estimated_ram_bytes=profile.estimated_ram_bytes,
-            estimated_vram_bytes=profile.estimated_vram_bytes,
-            io_weight=profile.io_weight,
-        )
-        return get_governor().admit(request)
-    except ImportError:
-        return None
+    #1180: fail-closed — the governor is first-party (stdlib-only chain),
+    so an ImportError here is packaging breakage, never an optional
+    dependency. Silently running ungoverned used to hide exactly that.
+    """
+    from paleo_workbench.runtime.resource_governor import (
+        ResourceExhausted,
+        TaskRequest,
+        get_governor,
+    )
+    from paleo_workbench.runtime.task_categories import TaskCategory
+
+    profile = descriptor.resource_profile
+    category = TaskCategory(profile.category)
+    request = TaskRequest(
+        category=category,
+        title=f"provider:{provider_id}",
+        estimated_cpu_cores=profile.estimated_cpu_cores,
+        estimated_ram_bytes=profile.estimated_ram_bytes,
+        estimated_vram_bytes=profile.estimated_vram_bytes,
+        io_weight=profile.io_weight,
+    )
+    return get_governor().admit(request)
     # ResourceExhausted propagates: pressure shedding is a first-class outcome.
 
 
