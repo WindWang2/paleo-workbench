@@ -75,3 +75,16 @@ EXPLAIN（第二轮）：默认页/文本过滤/modified 序均 `SCAN a USING <o
 
 ### FTS5 决策（A5 最终）
 最坏子串 LIKE 16-17ms@100k（见 100k 审计），维持 normalized LIKE + 复合索引方案，不引入 FTS5。
+
+### 标准 benchmark（benchmarks/catalog_scale_benchmark.py，10k/50k，[measured]）
+| operation | 10,000 ms | 50,000 ms |
+|---|---|---|
+| register_version | 5.3 | 17.0 |
+| register_version_2nd | 4.7 | 17.1 |
+| filter_by_tag | 3.5 | 18.8 |
+| search_hit / miss | 2.1 / 1.5 | 8.7 / 8.4 |
+| trash / restore_asset | 3.1 / 3.0 | 6.3 / 6.9 |
+| add_tag / remove_tag / rename_tag | 0.3 / 0.1 / 0.2 | 0.3 / 0.2 / 0.2 |
+| filter_by_type（旧 materialized search_assets API，即分页路径存在的原因） | 76.5 | 746.2 |
+
+注：100k 分页查询另见上方 EXPLAIN 审计（page0 4.3ms / count 3.0ms / 聚合缓存命中 0ms）。
