@@ -667,6 +667,15 @@ class ViewCoordinationController(QObject):
             pass
 
     def _on_dock_depth_cursor(self, panel, md: float) -> None:
+        # Defense-in-depth gate: producers pre-gate their own signals, but a
+        # raw emitter (or a future producer) must not flood the bus either.
+        import time as _time
+
+        now_ms = _time.monotonic() * 1000.0
+        last = getattr(self, "_dock_depth_last_pub_ms", None)
+        if last is not None and now_ms - last < 120.0:
+            return
+        self._dock_depth_last_pub_ms = now_ms
         well_name = ""
         getter = getattr(panel, "current_well_name", None)
         if callable(getter):
