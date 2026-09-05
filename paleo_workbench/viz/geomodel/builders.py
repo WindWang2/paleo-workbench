@@ -41,6 +41,22 @@ __all__ = [
 
 
 # ---------------------------------------------------------------------------
+# z-direction conventions
+# ---------------------------------------------------------------------------
+
+
+def _z_sign(vertical_domain: str) -> float:
+    """+1 when z grows downward (depth / TWT), -1 for subsea elevation.
+
+    The project's TVDSS convention is ``TVDSS = KB - TVD``
+    (``CoordinateTransformHub.well_depth_to_tvdss``): deeper is *more
+    negative*. Crossing / curtain-direction checks must respect this, or a
+    perfectly healthy TVDSS pair is flagged as crossed.
+    """
+    return -1.0 if vertical_domain == "tvdss" else 1.0
+
+
+# ---------------------------------------------------------------------------
 # Wells
 # ---------------------------------------------------------------------------
 
@@ -307,8 +323,10 @@ def build_fault_curtain_from_trace(
         raise DomainError(f"{name}: trace_xy must be (M, 2) with M >= 2")
     if not np.all(np.isfinite(t)):
         raise DomainError(f"{name}: trace_xy must be finite")
-    if not (z_bottom > z_top):
-        raise DomainError(f"{name}: z_bottom must be below z_top")
+    if (z_bottom - z_top) <= 0.0:
+        raise DomainError(
+            f"{name}: z_bottom must be below z_top (depth-positive convention)"
+        )
     n = len(t)
     verts = np.empty((2 * n, 3), dtype=np.float64)
     verts[:n, :2] = t
@@ -408,13 +426,14 @@ def build_volume_shell(
     centre_x = 0.25 * (xx[ci, cj] + xx[ci, cj + 1] + xx[ci + 1, cj] + xx[ci + 1, cj + 1])
     centre_y = 0.25 * (yy[ci, cj] + yy[ci, cj + 1] + yy[ci + 1, cj] + yy[ci + 1, cj + 1])
     inside = _points_in_polygon_grid(centre_x, centre_y, bnd)
-    # Crossed anywhere within the cell — z grows downward, so "base above
-    # top" at any corner means an inverted (invalid) column.
+    # Crossed anywhere within the cell: "base above top" in the domain's z
+    # sense at any corner means an inverted (invalid) column.
+    zsign = _z_sign(top.vertical_domain)
     crossed = (
-        (bg[ci, cj] < tg[ci, cj])
-        | (bg[ci, cj + 1] < tg[ci, cj + 1])
-        | (bg[ci + 1, cj] < tg[ci + 1, cj])
-        | (bg[ci + 1, cj + 1] < tg[ci + 1, cj + 1])
+        ((bg[ci, cj] - tg[ci, cj]) * zsign < 0)
+        | ((bg[ci, cj + 1] - tg[ci, cj + 1]) * zsign < 0)
+        | ((bg[ci + 1, cj] - tg[ci + 1, cj]) * zsign < 0)
+        | ((bg[ci + 1, cj + 1] - tg[ci + 1, cj + 1]) * zsign < 0)
     )
     finite_cells = set()
     for k in range(len(ci)):
@@ -648,12 +667,14 @@ def build_columnar_hex_mesh(
     centre_x = 0.25 * (xx[ci, cj] + xx[ci, cj + 1] + xx[ci + 1, cj] + xx[ci + 1, cj + 1])
     centre_y = 0.25 * (yy[ci, cj] + yy[ci, cj + 1] + yy[ci + 1, cj] + yy[ci + 1, cj + 1])
     inside = _points_in_polygon_grid(centre_x, centre_y, bnd)
-    # Crossed anywhere within the cell (z grows downward): drop, never reorder.
+    # Crossed anywhere within the cell, in the domain's z sense: drop,
+    # never reorder.
+    zsign = _z_sign(top.vertical_domain)
     crossed = (
-        (bg[ci, cj] < tg[ci, cj])
-        | (bg[ci, cj + 1] < tg[ci, cj + 1])
-        | (bg[ci + 1, cj] < tg[ci + 1, cj])
-        | (bg[ci + 1, cj + 1] < tg[ci + 1, cj + 1])
+        ((bg[ci, cj] - tg[ci, cj]) * zsign < 0)
+        | ((bg[ci, cj + 1] - tg[ci, cj + 1]) * zsign < 0)
+        | ((bg[ci + 1, cj] - tg[ci + 1, cj]) * zsign < 0)
+        | ((bg[ci + 1, cj + 1] - tg[ci + 1, cj + 1]) * zsign < 0)
     )
     keep = inside & ~crossed
     cell_i = ci[keep]

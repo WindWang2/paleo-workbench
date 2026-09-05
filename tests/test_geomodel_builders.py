@@ -222,3 +222,51 @@ class TestColumnarHexMesh:
         lo, hi = nodes[h[0:4]], nodes[h[4:8]]
         assert np.allclose(lo[:, :2], hi[:, :2])
         assert np.all(hi[:, 2] >= lo[:, 2] - 1e-9)
+
+
+class TestTvdssConvention:
+    """TVDSS = KB - TVD: deeper is more negative — builders must respect it."""
+
+    def _make(self, tg, bg):
+        top = build_horizon_from_grid(
+            "Top", tg, origin=(0, 0), spacing=(10.0, 10.0),
+            crs="EPSG:32650", vertical_domain="tvdss",
+        )
+        base = build_horizon_from_grid(
+            "Base", bg, origin=(0, 0), spacing=(10.0, 10.0),
+            crs="EPSG:32650", vertical_domain="tvdss",
+        )
+        return top, base
+
+    def test_tvdss_shell_builds_and_closes(self):
+        tg = np.full((4, 4), -100.0)   # top of the interval
+        bg = np.full((4, 4), -150.0)   # base: deeper -> more negative
+        top, base = self._make(tg, bg)
+        vol, qc = build_volume_shell(
+            top, base, [(0, 0), (30, 0), (30, 30), (0, 30)], object_id="volume:t"
+        )
+        assert qc["column_count"] == 9
+        assert qc["dropped_crossed"] == 0
+        assert qc["closed"] is True
+
+    def test_tvdss_inverted_flagged(self):
+        tg = np.full((4, 4), -100.0)
+        bg = np.full((4, 4), -90.0)   # base ABOVE top in subsea terms
+        top, base = self._make(tg, bg)
+        vol, qc = build_volume_shell(
+            top, base, [(0, 0), (30, 0), (30, 30), (0, 30)], object_id="volume:t"
+        )
+        assert qc["dropped_crossed"] == 9
+        assert qc["column_count"] == 0
+
+    def test_tvdss_hex_mesh(self):
+        tg = np.full((4, 4), -100.0)
+        bg = np.full((4, 4), -150.0)
+        top, base = self._make(tg, bg)
+        nodes, hexes, info = build_columnar_hex_mesh(
+            top, base, [(0, 0), (30, 0), (30, 30), (0, 30)]
+        )
+        assert info["n_cells"] == 9
+        # hex bottom loop (more negative) sits below top loop
+        h = hexes[0]
+        assert nodes[h[4:8], 2].mean() <= nodes[h[0:4], 2].mean()
