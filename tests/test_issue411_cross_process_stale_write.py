@@ -110,3 +110,37 @@ def test_catalog_sequential_saves_on_one_service_still_work(tmp_path: Path):
     finally:
         svc.close()
     assert len(DataCatalogService.open(project).document.assets) == 3
+
+
+def test_catalog_stale_export_manifest_refused_close_does_not_resurrect(tmp_path: Path):
+    """#1172: a stale session's manifest checkpoint is refused; close()
+    swallows it instead of resurrecting rejected state over A's commit."""
+    project = _project_file(tmp_path)
+    src_a = tmp_path / "incoming" / "from-A.bin"
+    src_a.parent.mkdir(parents=True, exist_ok=True)
+    src_a.write_bytes(b"AAA")
+    src_b = tmp_path / "incoming" / "from-B.bin"
+    src_b.write_bytes(b"BBB")
+
+    svc_a = DataCatalogService.open(project)
+    svc_b = DataCatalogService.open(project)
+    try:
+        svc_a.import_raw(src_a)
+        with pytest.raises(CatalogStaleWriteError):
+            svc_b.import_raw(src_b)
+        # Explicit manifest export obeys the same guard.
+        with pytest.raises(CatalogStaleWriteError):
+            svc_b.export_manifest()
+    finally:
+        svc_a.close()
+        svc_b.close()  # must not raise; must not clobber A's manifest
+
+    reader = DataCatalogService.open(project)
+    try:
+        assert len(reader.document.assets) == 1
+        assert not any(
+            "from-B" in (a.metadata or {}).get("source_name", "")
+            for a in reader.document.assets
+        )
+    finally:
+        reader.close()

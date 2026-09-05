@@ -707,6 +707,17 @@ class DataCatalogService:
         pretty=True only for an explicit human-readable export.
         """
         with self._lock:
+            # #1172: the manifest checkpoint obeys the same #411 stale-write
+            # guard as the canonical flush — a session whose commit was
+            # refused must not resurrect its rejected state over another
+            # process's submission via close(). close() already swallows
+            # this; explicit callers get an honest error.
+            stored = self._index.revision()
+            if stored is not None and stored != self._flushed_revision:
+                raise CatalogStaleWriteError(
+                    "数据目录元数据已被其他实例修改；为避免覆盖他人提交，"
+                    "本次 manifest 导出已中止。请重新打开工程后重试。"
+                )
             self._store.save(self.document, pretty=pretty)
             _record_manifest_mtime_ns(self._index, catalog_file_for(self.project_path))
             self._mutations_since_manifest = 0
