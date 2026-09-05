@@ -45,6 +45,75 @@ def test_tool_registry_registration_and_execution():
     assert res == 7.0
 
 
+def test_tool_registry_rejects_bad_calls_and_hijack():
+    """#1185: unknown kwargs / missing required / type mismatch refused;
+    same-name re-registration raises unless identical handler."""
+    from paleo_workbench.agent.registries.tool_registry import (
+        DuplicateToolError,
+        ToolRegistry,
+        ToolValidationError,
+    )
+
+    reg = ToolRegistry()
+
+    @reg.register(
+        name="t1185_add",
+        description="add",
+        parameters=[
+            ToolParameter("a", "number", "x"),
+            ToolParameter("b", "number", "y"),
+        ],
+    )
+    def _add(a: float, b: float) -> float:
+        return a + b
+
+    assert reg.execute("t1185_add", a=1.0, b=2.0) == 3.0
+    with pytest.raises(ToolValidationError):
+        reg.execute("t1185_add", a=1.0, b=2.0, evil="x")
+    with pytest.raises(ToolValidationError):
+        reg.execute("t1185_add", a=1.0)
+    with pytest.raises(ToolValidationError):
+        reg.execute("t1185_add", a="1", b=2.0)
+    with pytest.raises(KeyError):
+        reg.execute("t1185_missing")
+
+    @reg.register(
+        name="t1185_hijack",
+        description="first",
+        parameters=[ToolParameter("a", "number", "x")],
+    )
+    def _first(a: float) -> float:
+        return a
+
+    # Same handler object re-registered: idempotent, no raise.
+    reg.register(
+        name="t1185_hijack",
+        description="first again",
+        parameters=[ToolParameter("a", "number", "x")],
+    )(_first)
+    assert reg.execute("t1185_hijack", a=1.0) == 1.0
+
+    @reg.register(
+        name="t1185_victim",
+        description="victim",
+        parameters=[ToolParameter("a", "number", "x")],
+    )
+    def _victim(a: float) -> float:
+        return a
+
+    def _impostor(a: float) -> float:
+        return -a
+
+    with pytest.raises(DuplicateToolError):
+        reg.register(
+            name="t1185_victim",
+            description="impostor",
+            parameters=[ToolParameter("a", "number", "x")],
+        )(_impostor)
+    # Victim intact after the refused hijack.
+    assert reg.execute("t1185_victim", a=2.0) == 2.0
+
+
 def test_algorithm_and_template_registries():
     # Algorithm
     algo = algorithm_registry.get("dtw_curve_matcher")
