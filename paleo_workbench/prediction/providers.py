@@ -24,6 +24,7 @@ single-well provider:
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -55,6 +56,13 @@ class InferenceInputError(RuntimeError):
     The honest substitute for the old silent random fallback: a production run
     with no readable inputs fails loudly instead of fabricating output.
     """
+
+
+class DuplicateProviderError(ValueError):
+    """A different provider class is already registered under the name."""
+
+
+_PROVIDER_LOCK = threading.Lock()
 
 
 def _clamp_int(value: Any, default: int, minimum: int, maximum: int) -> int:
@@ -435,16 +443,30 @@ def _install_bundled_providers() -> None:
 _install_bundled_providers()
 
 
-def register_provider(name: str, provider_cls: type[ModelProvider]) -> None:
+def register_provider(name: str, provider_cls: type[ModelProvider], *, replace: bool = False) -> None:
     """Plugin seam: register a provider class under *name* (e.g. tests/fakes).
 
     Does not seed the ModelRegistry. Production UI only finds models that are
     explicitly registered and promoted; test providers must never be installed
     as default production models.
+
+    #1184: re-registering the SAME class is idempotent; a DIFFERENT class
+    under an existing name raises (mirrors the capability registry's
+    DuplicateProviderError instead of silently hijacking the identity).
     """
     if not name:
         raise KeyError("provider name required")
-    PROVIDER_BY_NAME[str(name)] = provider_cls
+    if not (isinstance(provider_cls, type) and callable(getattr(provider_cls, "run", None))):
+        raise TypeError(f"provider {name!r} must be a class with a run() method")
+    key = str(name)
+    with _PROVIDER_LOCK:
+        existing = PROVIDER_BY_NAME.get(key)
+        if existing is not None and existing is not provider_cls and not replace:
+            raise DuplicateProviderError(
+                f"provider {key!r} is already registered by "
+                f"{existing.__module__}.{existing.__name__}"
+            )
+        PROVIDER_BY_NAME[key] = provider_cls
 
 
 def get_provider(name: str) -> ModelProvider:

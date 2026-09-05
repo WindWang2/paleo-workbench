@@ -670,3 +670,40 @@ def test_production_lineage_payload_matches_document_flags(tmp_path, service):
     # The lineage JSON and the document agree on the production flag.
     assert payload["view_state"]["production"] is True
     assert payload["view_state"]["production"] == doc.view_state["production"]
+
+
+def test_register_provider_rejects_identity_hijack():
+    """#1184: a different class under an existing name raises; same-class
+    re-registration stays idempotent; non-classes are rejected."""
+    from paleo_workbench.prediction.providers import (
+        DuplicateProviderError,
+        register_provider,
+    )
+
+    class ProviderA:
+        model_id = "test.hijack-guard"
+        model_version = "1"
+        demo_only = True
+
+        def run(self, inputs, parameters):
+            return {}
+
+    class ProviderB:
+        model_id = "test.hijack-guard"
+        model_version = "1"
+        demo_only = True
+
+        def run(self, inputs, parameters):
+            return {}
+
+    register_provider("test.hijack-guard", ProviderA)
+    try:
+        register_provider("test.hijack-guard", ProviderA)  # idempotent
+        with pytest.raises(DuplicateProviderError):
+            register_provider("test.hijack-guard", ProviderB)
+        with pytest.raises(TypeError):
+            register_provider("test.hijack-guard", object())
+    finally:
+        from paleo_workbench.prediction.providers import PROVIDER_BY_NAME
+
+        PROVIDER_BY_NAME.pop("test.hijack-guard", None)
