@@ -2024,6 +2024,11 @@ class DataPage(QWidget):
 
     def _prompt_remove_tag_from_assets(self, items: list[object]) -> None:
         union: set[str] = set()
+        # Catalog tags are resolved through the document's association map
+        # (owner → tag ids) instead of the historical per-item
+        # "every tag × find_assets_by_tag" scans — O(selection) now, not
+        # O(selection × tags × assets).
+        tags_by_id: dict[str, object] = {}
         for it in items:
             unwrapped = self._unwrap_asset(it)
             if isinstance(unwrapped, ResourceItem):
@@ -2035,8 +2040,14 @@ class DataPage(QWidget):
                 service, ref = self._catalog_bridge(unwrapped)
                 if service is not None and ref is not None:
                     try:
-                        for tag in service.list_tags():
-                            if ref.asset_id in service.find_assets_by_tag(tag.name):
+                        if not tags_by_id:
+                            tags_by_id = {
+                                tag.id: tag for tag in service.list_tags()
+                            }
+                        owned = service.document.asset_tags.get(ref.asset_id, [])
+                        for tag_id in owned:
+                            tag = tags_by_id.get(tag_id)
+                            if tag is not None:
                                 union.add(tag.display_name or tag.name)
                     except Exception:
                         pass
