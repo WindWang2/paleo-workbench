@@ -17,6 +17,7 @@ the spec §7 streaming-pool budget.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
@@ -400,6 +401,128 @@ def _shard_is_complete(arr, box: ShardBox) -> bool:
         return False
 
 
+def _shard_layout(
+    store_path: Path,
+) -> tuple[tuple[int, int, int], tuple[int, int, int], int] | None:
+    """(shard_shape, chunk_shape, index_bytes) from the store's zarr.json.
+
+    ``index_bytes`` includes the trailing checksum the index_codecs append
+    (crc32c adds 4 bytes) — the sharding index itself is n_chunks x
+    (offset, size) little-endian uint64 pairs.
+    """
+    try:
+        doc = json.loads((store_path / "zarr.json").read_text())
+        # zarr v3: chunk_grid = the SHARD (outer chunk) shape; the
+        # sharding_indexed codec's chunk_shape = the inner chunk shape.
+        grid = doc.get("chunk_grid") or {}
+        shard_shape = (grid.get("configuration") or {}).get("chunk_shape")
+        chunk_shape = None
+        index_codecs = []
+        for codec in doc.get("codecs") or []:
+            if codec.get("name") == "sharding_indexed":
+                conf = codec.get("configuration") or {}
+                chunk_shape = conf.get("chunk_shape")
+                index_codecs = conf.get("index_codecs") or []
+                break
+        if not chunk_shape or not shard_shape:
+            return None
+        n_per_shard = 1
+        for s, c in zip(shard_shape, chunk_shape):
+            n_per_shard *= max(1, int(s) // max(1, int(c)))
+        index_bytes = n_per_shard * 16
+        if any(c.get("name") == "crc32c" for c in index_codecs):
+            index_bytes += 4  # crc32c checksum suffix on the index payload
+        return (
+            tuple(int(x) for x in shard_shape),
+            tuple(int(x) for x in chunk_shape),
+            index_bytes,
+        )
+    except Exception:
+        return None
+
+
+_MISSING_CHUNK = (1 << 64) - 1
+
+
+def _shard_file_complete(
+    shard_path: Path,
+    index_bytes: int,
+    required: np.ndarray | None = None,
+) -> bool:
+    """Byte-level shard validation — parse the trailing shard index WITHOUT
+    decompressing shard data (#137).
+
+    A shard file is ``[chunk bytes...][index: n_chunks x (offset, size)
+    uint64-LE]``. Killed mid-write leaves a file whose index is absent or
+    whose entries point past the data region. Chunks outside the array bounds
+    are legitimately ``missing`` (all-ones marker); *required* (flat chunk
+    indices the box needs) must all be present, and every present entry must
+    land inside the data region.
+    """
+    try:
+        size = shard_path.stat().st_size
+    except OSError:
+        return False
+    n_chunks = index_bytes // 16  # before the checksum suffix is added back
+    entry_bytes = n_chunks * 16
+    if size <= index_bytes or index_bytes < entry_bytes:
+        return False
+    try:
+        with shard_path.open("rb") as fh:
+            fh.seek(size - index_bytes)
+            raw = fh.read(entry_bytes)
+        entries = np.frombuffer(raw, dtype="<u8").reshape(n_chunks, 2)
+    except Exception:
+        return False
+    data_end = size - index_bytes
+    present = ~(entries == _MISSING_CHUNK).all(axis=1)
+    if required is not None:
+        if required.size == 0 or not present[required].all():
+            return False
+    elif not present.all():
+        return False
+    offsets = entries[present, 0].astype(np.uint64)
+    sizes = entries[present, 1].astype(np.uint64)
+    if (sizes == 0).any():
+        return False
+    return bool(((offsets + sizes) <= data_end).all() and (offsets < data_end).all())
+
+
+def _box_required_chunks(
+    box: "ShardBox",
+    shard_shape: tuple[int, int, int],
+    chunk_shape: tuple[int, int, int],
+) -> np.ndarray:
+    """Flat chunk indices (within the shard's index) that *box* touches."""
+    origin = (
+        box.gi * shard_shape[0],
+        box.gj * shard_shape[1],
+        box.gk * shard_shape[2],
+    )
+    per_axis = []
+    for lo, hi, o, s, c in (
+        (box.il0, box.il1, origin[0], shard_shape[0], chunk_shape[0]),
+        (box.xl0, box.xl1, origin[1], shard_shape[1], chunk_shape[1]),
+        (box.t0, box.t1, origin[2], shard_shape[2], chunk_shape[2]),
+    ):
+        l_lo = max(int(lo) - o, 0)
+        l_hi = min(int(hi) - o, int(s))
+        if l_hi <= l_lo:
+            return np.empty(0, dtype=np.int64)
+        per_axis.append(range(l_lo // c, (l_hi - 1) // c + 1))
+    n_c = (
+        max(1, shard_shape[1] // chunk_shape[1]),
+        max(1, shard_shape[2] // chunk_shape[2]),
+    )
+    flat = [
+        (ci * n_c[0] + cj) * n_c[1] + ck
+        for ci in per_axis[0]
+        for cj in per_axis[1]
+        for ck in per_axis[2]
+    ]
+    return np.asarray(flat, dtype=np.int64)
+
+
 def transcode_segy_to_zarr(
     src: str | Path,
     dst: str | Path,
@@ -426,10 +549,19 @@ def transcode_segy_to_zarr(
     stats.shards_total = len(boxes)
 
     todo: list[ShardBox] = []
+    layout = _shard_layout(dst)
     for box in boxes:
         shard_path = dst / "c" / str(box.gi) / str(box.gj) / str(box.gk)
         if shard_path.exists():
-            if _shard_is_complete(arr, box):
+            # #137: validate at the byte level (shard index footer) — the old
+            # single-element zarr probe decompressed the whole ~128 MiB shard
+            # per resumed shard (full-library decompression per resume).
+            fast = False
+            if layout is not None:
+                shard_shape, chunk_shape, index_bytes = layout
+                required = _box_required_chunks(box, shard_shape, chunk_shape)
+                fast = _shard_file_complete(shard_path, index_bytes, required)
+            if fast or _shard_is_complete(arr, box):
                 stats.shards_skipped += 1
                 continue
             shard_path.unlink()  # truncated mid-write: redo from scratch
