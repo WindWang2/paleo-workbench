@@ -126,6 +126,91 @@ def test_execute_validates_parameters():
     assert "required" in result.error
 
 
+def test_execute_rejects_nested_missing_required():
+    """#1178: nested required applies — roi without il1 is refused."""
+    registry = ActionRegistry()
+    registry.register(
+        _spec(
+            action_id="demo.nested",
+            handler=lambda ctx, p: {"ok": True},
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "roi": {
+                        "type": "object",
+                        "properties": {
+                            "il0": {"type": "integer"},
+                            "il1": {"type": "integer"},
+                        },
+                        "required": ["il0", "il1"],
+                    }
+                },
+            },
+        )
+    )
+    result = HarnessExecutor(registry).execute("demo.nested", {"roi": {"il0": 0}})
+    assert result.status == "fail"
+    assert "parameters.roi.il1" in result.error
+
+
+def test_execute_rejects_nested_undeclared_property():
+    """#1178: nested additionalProperties:false applies."""
+    registry = ActionRegistry()
+    registry.register(
+        _spec(
+            action_id="demo.closed",
+            handler=lambda ctx, p: {"ok": True},
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "roi": {
+                        "type": "object",
+                        "properties": {"il0": {"type": "integer"}},
+                        "additionalProperties": False,
+                    }
+                },
+            },
+        )
+    )
+    result = HarnessExecutor(registry).execute(
+        "demo.closed", {"roi": {"il0": 0, "bogus": 1}})
+    assert result.status == "fail"
+    assert "parameters.roi.bogus" in result.error
+
+
+def test_execute_output_schema_mismatch_fails():
+    """#1178: output_schema is enforced — non-conforming outputs fail."""
+    registry = ActionRegistry()
+    registry.register(
+        _spec(
+            action_id="demo.out",
+            handler=lambda ctx, p: {"value": "not-a-number"},
+            output_schema={
+                "type": "object",
+                "properties": {"value": {"type": "number"}},
+                "required": ["value"],
+            },
+        )
+    )
+    result = HarnessExecutor(registry).execute("demo.out", {"x": 1.0})
+    assert result.status == "fail"
+    assert "output schema mismatch" in result.error
+    registry2 = ActionRegistry()
+    registry2.register(
+        _spec(
+            action_id="demo.out2",
+            handler=lambda ctx, p: {"value": 2.5},
+            output_schema={
+                "type": "object",
+                "properties": {"value": {"type": "number"}},
+                "required": ["value"],
+            },
+        )
+    )
+    ok_result = HarnessExecutor(registry2).execute("demo.out2", {"x": 1.0})
+    assert ok_result.status == "ok"
+
+
 def test_execute_permission_gate():
     registry = ActionRegistry()
     registry.register(_spec(action_id="demo.write", risk=ActionRisk.WRITE))

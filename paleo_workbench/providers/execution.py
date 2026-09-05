@@ -54,9 +54,10 @@ _JSON_TYPES: dict[str, tuple[type, ...]] = {
 def validate_parameters(schema: Mapping[str, Any], parameters: Mapping[str, Any]) -> list[str]:
     """Validate ``parameters`` against the JSON-schema subset the SDK allows.
 
-    Supported: type, required, properties, enum, minimum/maximum,
-    minItems/maxItems, items. Intentionally dependency-free (no jsonschema
-    import) — descriptors are small and fully under our control.
+    Supported: type, required, properties, additionalProperties,
+    enum, minimum/maximum, minItems/maxItems, items. Intentionally
+    dependency-free (no jsonschema import) — descriptors are small and
+    fully under our control.
     """
     problems: list[str] = []
 
@@ -86,25 +87,28 @@ def validate_parameters(schema: Mapping[str, Any], parameters: Mapping[str, Any]
             if isinstance(items, dict):
                 for i, item in enumerate(value):
                     check(item, items, f"{path}[{i}]")
-        if isinstance(value, dict) and isinstance(sub.get("properties"), dict):
-            for key, sub_sub in sub["properties"].items():
-                if key in value:
-                    check(value[key], sub_sub, f"{path}.{key}")
+        if isinstance(value, dict):
+            # #1178: required/additionalProperties apply at EVERY object
+            # level, not just the top — nested omissions used to sail through.
+            for key in sub.get("required", []):
+                if key not in value:
+                    problems.append(f"{path}.{key}: required")
+            props = sub.get("properties")
+            if isinstance(props, dict):
+                for key, sub_sub in props.items():
+                    if key in value:
+                        check(value[key], sub_sub, f"{path}.{key}")
+                if sub.get("additionalProperties") is False:
+                    for key in value:
+                        if key not in props:
+                            problems.append(
+                                f"{path}.{key}: not declared and additionalProperties false")
 
     if schema.get("type", "object") == "object":
         if not isinstance(parameters, dict):
             problems.append("parameters: expected object")
             return problems
-        for key in schema.get("required", []):
-            if key not in parameters:
-                problems.append(f"parameters.{key}: required")
-        for key, value in parameters.items():
-            sub = (schema.get("properties") or {}).get(key)
-            if sub is None:
-                if schema.get("additionalProperties") is False:
-                    problems.append(f"parameters.{key}: not declared and additionalProperties false")
-                continue
-            check(value, sub, f"parameters.{key}")
+        check(parameters, schema, "parameters")
     return problems
 
 

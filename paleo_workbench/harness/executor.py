@@ -150,6 +150,16 @@ class HarnessExecutor:
                 result.outputs = payload
             else:
                 result.outputs = {"value": payload}
+            # #1178: output_schema was a dead field — outputs that do not
+            # match the declaration fail the action instead of scoring ok.
+            if spec.output_schema:
+                out_problems = validate_parameters(
+                    spec.output_schema, result.outputs
+                )
+                if out_problems:
+                    result.status = "fail"
+                    result.error = "output schema mismatch: " + "; ".join(out_problems)
+                    return result
             if verification.get("verdict") == FAIL:
                 result.status = "fail"
                 result.error = "verification failed: " + "; ".join(
