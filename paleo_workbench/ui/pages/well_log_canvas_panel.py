@@ -198,6 +198,28 @@ class WellLogCanvasPanel(QFrame):
     def backend(self) -> str:
         return self._backend
 
+    def depth_cursor_unit(self) -> str:
+        """Depth-axis unit of the loaded document ("m" or the LAS-declared unit).
+
+        The linking contract publishes/consumes MD in METRES; a document
+        whose depth axis is ft (``WellLogDataWithDepthUnit``) is a different
+        unit domain and must not leak raw numbers into it.
+        """
+        return str(getattr(self.well_log_data, "depth_unit", "m") or "m")
+
+    def depth_cursor_unavailable_reason(self) -> str | None:
+        """Why depth-cursor linking is off for this document (None = on).
+
+        Fail-closed on non-metre depth axes (review R1-M1): publishing a ft
+        axis value as metres would navigate the calibrated seismic loop to a
+        wrong TWT — refuse with the reason instead of guessing a conversion
+        the data never declared.
+        """
+        unit = self.depth_cursor_unit()
+        if unit != "m":
+            return f"depth-unit:{unit}"
+        return None
+
     def depth_cursor_supported(self) -> bool:
         """Whether the selected backend can publish depth cursors at all.
 
@@ -298,6 +320,12 @@ class WellLogCanvasPanel(QFrame):
         """
         if depth is None:
             return
+        if self.depth_cursor_unavailable_reason() is not None:
+            # Non-metre depth axis: the published value would masquerade as
+            # metres in every linked consumer. Refuse, keep any pending
+            # flush from resurrecting it.
+            self._pending_engine_depth = None
+            return
         now_ms = time.monotonic() * 1000.0
         if (
             self._depth_last_pub_ms is None
@@ -323,6 +351,8 @@ class WellLogCanvasPanel(QFrame):
         depth = self._pending_engine_depth
         self._pending_engine_depth = None
         if depth is None:
+            return
+        if self.depth_cursor_unavailable_reason() is not None:
             return
         self._depth_last_pub_ms = time.monotonic() * 1000.0
         self.depth_cursor_moved.emit(float(depth))
@@ -653,6 +683,17 @@ class WellLogCanvasPanel(QFrame):
             if setter is None:
                 return False
             depth = float(depth_m)
+            unit = self.depth_cursor_unit()
+            if unit != "m":
+                # The contract delivers MD in metres; the document axis is
+                # LAS-declared ft — convert EXPLICITLY (one known factor)
+                # instead of writing metres into a ft axis. The echo guard
+                # must hold the DOCUMENT-unit value the poll will report.
+                from paleo_workbench.viz.domain_coords import FT_TO_M
+
+                if unit != "ft":
+                    return False  # unknown unit: fail closed, never guess
+                depth = depth / FT_TO_M
             # Arm the echo guard BEFORE the write: native signals may fire
             # synchronously inside the setter call. The guard is value-based
             # — the poll reports back the written depth (within float
