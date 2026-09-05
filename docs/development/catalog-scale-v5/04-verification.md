@@ -44,3 +44,34 @@ EXPLAIN（第二轮）：默认页/文本过滤/modified 序均 `SCAN a USING <o
 
 ## 崩溃/一致性回归
 - `tests/test_catalog_crash_safety.py` 23 passed（在 db.py 索引修复 + load_document 地板修复后）。
+
+## 后续里程碑实测（全部 [measured]，conda paleo312，offscreen）
+
+### D3 异步分页模型
+- `tests/test_paged_catalog_mode.py` 14 passed（含 100k 行 fixture：page<50ms、count<100ms、lazy paging 改为 qtbot.waitUntil 异步契约）。
+- `tests/test_paged_async_model.py` 6 passed：data()-驱动页取回（滚动跳页取可见窗口）、filter 快速切换 latest-only、LRU 有界、回收站只列已删、**DataPage 经 service 门面进入分页模式**（修复 `service.index` 死路径）。
+- UI 回归：test_data_asset_table/test_data_page/test_data_manager_ui2/test_asset_table_model_differential/test_datapage_stress/test_catalog_paged_query → 158 passed。
+
+### D9 Missing/Relink
+- `tests/test_catalog_relink.py` 9 passed（指纹/摘要两级身份证明、basename 错绑拒绝、size-only 拒绝、managed 拒绝、save 失败精确回滚、relink_history 重开仍在）。
+- `tests/test_relink_dialog_ui.py` 3 passed（worker 扫描渲染、目录重定向拒绝陌生人、同文件目录重定向成功后重扫为空）。
+- 相关回归 152 passed。
+
+### D4 导入管线
+- `tests/test_import_registration_flow.py` 3 passed：分块取消后 reopen 目录恰含已登记资产（无半登记）、进度=真实登记数、收据文本。
+- 导入相关回归 105 passed。
+
+### D5/D10 检索/对象视图
+- `tests/test_filter_chips_bar.py` 3 passed：chips 渲染/移除、保存过滤器 QSettings 往返、**实体视图留在 SQL 分页路径**（有界集合 → chunked IN；超限诚实回退）。
+
+### D6/D8 工作台/浏览器
+- `tests/test_version_workbench_dialog_ui.py` 5 passed；`tests/test_lineage_explorer_dialog_ui.py` 10 passed（断链节点、子节点上限、深度上限、循环引用、定位信号）。
+- 合并回归（context menu/data_page/relink/paged async）119 passed。
+
+### D11 规模/崩溃分层
+- fast：`tests/test_catalog_scale_v5.py` 6 passed + 2 heavy-skipped（默认 N=2k，4x 增长下页取回 sub-linear；save/reopen linear；连续切 filter 有界）。
+- heavy（PALEO_CATALOG_SCALE_HEAVY=1，本地实测）：50k/100k 页取回/计数/聚合/深偏移预算 → **2 passed (11.49s)**。
+- 崩溃：`tests/test_crash_scale.py` 2 passed（2k 资产批提交中 SIGKILL：mid-tx 回滚为 0、post-commit 全保留；重开后查询面完好、工程可再写）。
+
+### FTS5 决策（A5 最终）
+最坏子串 LIKE 16-17ms@100k（见 100k 审计），维持 normalized LIKE + 复合索引方案，不引入 FTS5。
