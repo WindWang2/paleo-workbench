@@ -261,7 +261,7 @@ class _StructuredModelAdapter(FormatAdapter):
         target_path = Path(target_path)
         checks: list[VerificationCheck] = []
         if not target_path.is_file() or target_path.stat().st_size == 0:
-            return ExportVerification(VerificationState.FAILED, checks, "输出缺失或为空")
+            return ExportVerification(VerificationState.FAILED, checks, detail="输出缺失或为空")
         facts = self.parse(target_path)
         checks.append(VerificationCheck("reparsable", facts.gridpoints > 0 and facts.zones > 0,
                                         f"{facts.gridpoints} gridpoints / {facts.zones} zones"))
@@ -276,7 +276,8 @@ class _StructuredModelAdapter(FormatAdapter):
                                             f"预期 {expected_zones}，实际 {facts.zones}"))
         if facts.problems:
             return ExportVerification(
-                VerificationState.FAILED, checks, f"结构问题: {'; '.join(facts.problems[:4])}"
+                VerificationState.FAILED, checks,
+                detail=f"结构问题: {'; '.join(facts.problems[:4])}",
             )
         failed = [c for c in checks if not c.passed]
         if failed:

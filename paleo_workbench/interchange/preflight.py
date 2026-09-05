@@ -102,25 +102,34 @@ class ImportPreflightService:
         extension = path.suffix.lower().lstrip(".")
         adapter = self.registry().get(sniffed_id) if sniff.determined else None
         if adapter is None:
-            adapter = self.registry().adapter_for_extension(path)
-            if adapter is not None and sniff.determined and sniffed_id != adapter.format_id:
-                issues.append(
-                    PreflightIssue(
-                        "error",
-                        "extension-content-mismatch",
-                        f"扩展名 .{extension} 指向 {adapter.format_id}，但内容嗅探为 "
-                        f"{sniff.format_id}（{sniff.evidence}）",
+            extension_adapter = self.registry().adapter_for_extension(path)
+            if extension_adapter is not None and sniff.determined:
+                if sniff.confidence == "high":
+                    # Content conclusively contradicts the extension: refuse
+                    # rather than parse a mislabeled file.
+                    issues.append(
+                        PreflightIssue(
+                            "error",
+                            "extension-content-mismatch",
+                            f"扩展名 .{extension} 指向 {extension_adapter.format_id}，"
+                            f"但内容嗅探为 {sniff.format_id}（{sniff.evidence}）",
+                        )
                     )
-                )
-                adapter = None
-            elif adapter is not None and sniff.determined:
-                issues.append(
-                    PreflightIssue(
-                        "info",
-                        "sniff-confirmed",
-                        f"内容嗅探确认格式 {sniff.format_id}（{sniff.evidence}）",
+                    adapter = None
+                else:
+                    # Advisory sniff: trust the extension, surface the doubt.
+                    issues.append(
+                        PreflightIssue(
+                            "warning",
+                            "sniff-advisory",
+                            f"内容嗅探提示 {sniff.format_id}（{sniff.evidence}，"
+                            f"置信度 {sniff.confidence}）；按扩展名按 "
+                            f"{extension_adapter.format_id} 解析",
+                        )
                     )
-                )
+                    adapter = extension_adapter
+            elif extension_adapter is not None:
+                adapter = extension_adapter
         elif extension and extension not in adapter.extensions:
             issues.append(
                 PreflightIssue(

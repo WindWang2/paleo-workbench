@@ -313,18 +313,21 @@ def sniff_format(path: Path, registry: InterchangeRegistry | None = None) -> Sni
     if text:
         candidates.append(text)
 
-    # SEG-Y heuristic: 3200-byte textual header + 400-byte binary header with
-    # the SEG Y revision marker in the binary header (rev>=1) or a mostly
-    # printable/EBCDIC textual block. Bounded and advisory; segyio confirms.
+    # SEG-Y heuristic. Strong signal: the binary-header revision marker at
+    # byte 3500 ("SEG..."), valid regardless of extension. Weak signal: a
+    # printable 3200-byte textual block — that describes ANY plain text file,
+    # so it only ever confirms an sgy/segy extension (never overrides one).
     if len(prefix) >= 3600:
         textual = prefix[:3200]
         binary_marker = prefix[3500:3504]
-        ratio = _printable_ratio(textual)
-        if binary_marker.startswith(b"SEG") or ratio > 0.75:
-            ext = path.suffix.lower().lstrip(".")
+        ext = path.suffix.lower().lstrip(".")
+        if binary_marker.startswith(b"SEG"):
             confidence = "high" if ext in ("sgy", "segy") else "medium"
-            evidence = "segy-binary-revision" if binary_marker.startswith(b"SEG") else "segy-textual-header"
-            candidates.append(SniffResult("segy", confidence, evidence, ext))
+            candidates.append(
+                SniffResult("segy", confidence, "segy-binary-revision", ext)
+            )
+        elif ext in ("sgy", "segy") and _printable_ratio(textual) > 0.75:
+            candidates.append(SniffResult("segy", "low", "segy-textual-header", ext))
 
     if not candidates:
         return SniffResult("", "low", "no-match", path.suffix.lower().lstrip("."))

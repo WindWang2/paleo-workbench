@@ -41,7 +41,7 @@ def test_segy_inspect_reports_traces_and_interval(tmp_path, segy_adapter):
     assert meta["trace_count"] > 0
     assert meta["sample_count"] > 0
     assert meta["sample_interval_us"] == 2000  # dt = 2 ms generator preset
-    assert inspection.units.get("twt") == "ms"
+    assert inspection.units.get("twt") == "us"
     probe = meta["geometry_probe"]
     assert probe["inline_varies"] and probe["crossline_varies"]
 

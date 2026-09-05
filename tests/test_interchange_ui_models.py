@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication
 
 from paleo_workbench.interchange.batch import BatchItemResult, BatchResult
 from paleo_workbench.interchange.preflight import ImportPreflightService
-from paleo_workbench.interchange.ui_models import (
+from paleo_workbench.ui.pages.interchange_models import (
     BatchResultModel,
     PackagePlanModel,
     PreflightIssueModel,

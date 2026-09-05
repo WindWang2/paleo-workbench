@@ -91,9 +91,12 @@ class PackageManifest:
     def from_dict(cls, data: dict[str, Any]) -> "PackageManifest":
         project = data.get("project") or {}
         application = data.get("application") or {}
+        raw_version = data.get("schema_version", 0)
+        if isinstance(raw_version, bool) or not isinstance(raw_version, int):
+            raise ValueError(f"schema_version 必须是整数，得到 {raw_version!r}")
         return cls(
             kind=str(data.get("kind", MANIFEST_KIND)),
-            schema_version=int(data.get("schema_version", 0)),
+            schema_version=raw_version,
             project_name=str(project.get("name", "")),
             project_file=str(project.get("file", "")),
             created_at=str(data.get("created_at", "")),
@@ -115,9 +118,15 @@ class PackageManifest:
         return {entry.path for entry in self.entries}
 
     def validate_paths(self) -> None:
-        """Fail-closed: every stored path must be a safe relative path."""
+        """Fail-closed: every stored path must be a safe, collision-free
+        relative path (duplicates after NFC/casefold are rejected)."""
+        from paleo_workbench.interchange.path_safety import check_collision
+
+        seen_casefold: set[str] = set()
+        seen_nfc: set[str] = set()
         for entry in self.entries:
-            safe_relative_path(entry.path, what="manifest entry")
+            pure = safe_relative_path(entry.path, what="manifest entry")
+            check_collision(pure, seen_casefold, seen_nfc)
         if self.project_file:
             safe_relative_path(self.project_file, what="manifest project file")
 

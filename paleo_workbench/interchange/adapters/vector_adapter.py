@@ -267,7 +267,7 @@ class VectorAdapter(FormatAdapter):
         target_path = Path(target_path)
         checks: list[VerificationCheck] = []
         if not target_path.is_file():
-            return ExportVerification(VerificationState.FAILED, checks, "输出不存在")
+            return ExportVerification(VerificationState.FAILED, checks, detail="输出不存在")
         return ExportVerification.unverified("vector_gdal 无导出路径；verify 仅存在性检查无意义")
 
     # export capability declared False; plan/export raise the default

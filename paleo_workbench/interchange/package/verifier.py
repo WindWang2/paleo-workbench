@@ -108,13 +108,16 @@ def materialize_package(package_path: Path, dest_dir: Path) -> Path:
         target = dest_dir / package_path.name
         if target.exists():
             raise FileExistsError(f"目标已存在: {target}")
+        # Validate FIRST (reject any symlink — copying with dereference would
+        # inline outside content into the package), then copy.
+        for path in package_path.rglob("*"):
+            if path.is_symlink():
+                raise UnsafePathError(f"包内符号链接被拒绝: {path}")
         staging = dest_dir / f".{target.name}.staging"
         shutil.rmtree(staging, ignore_errors=True)
         try:
-            shutil.copytree(
-                package_path, staging, symlinks=False,
-                ignore=shutil.ignore_patterns("*.staging"),
-            )
+            shutil.copytree(package_path, staging, symlinks=False,
+                            ignore=shutil.ignore_patterns("*.staging"))
             staging.rename(target)
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
@@ -233,6 +236,14 @@ def _verify_directory(package_root: Path, *, deep: bool) -> PackageVerifyReport:
             report.issues.append(VerifyIssue(
                 "warning", "unknown-file", f"manifest 之外的文件: {rel}"
             ))
+
+    # the manifest's own totals must not lie
+    if report.total_size_bytes != manifest.total_size_bytes:
+        report.issues.append(VerifyIssue(
+            "error", "total-size-mismatch",
+            f"manifest total_size_bytes={manifest.total_size_bytes}，"
+            f"实际校验合计 {report.total_size_bytes}",
+        ))
     return report
 
 

@@ -101,9 +101,13 @@ class BatchConversionService:
         *,
         registry: InterchangeRegistry | None = None,
         max_workers: int = 2,
+        catalog=None,
+        project=None,
     ) -> None:
         self._registry = registry
         self._max_workers = max(1, min(int(max_workers), 4))
+        self._catalog = catalog
+        self._project = project
 
     def registry(self) -> InterchangeRegistry:
         if self._registry is None:
@@ -146,6 +150,17 @@ class BatchConversionService:
     ) -> BatchResult:
         cancel = cancel or NULL_CANCEL
         progress = progress or _default_progress
+        progress_ok = True  # a failing callback must not lose the batch result
+
+        def safe_progress(done: int, total: int, current: str) -> None:
+            nonlocal progress_ok
+            if not progress_ok:
+                return
+            try:
+                progress(done, total, current)
+            except Exception:
+                progress_ok = False
+
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         started = time.monotonic()
@@ -163,7 +178,6 @@ class BatchConversionService:
         done = 0
 
         def run_one(job: ConversionJob) -> BatchItemResult:
-            nonlocal done
             item = BatchItemResult(source=str(job.source))
             item_start = time.monotonic()
             cancel.checkpoint()
@@ -176,7 +190,12 @@ class BatchConversionService:
                 target = self._target_path(job, output_dir)
                 plan = adapter.plan_export(job.source, target, options=job.options)
                 item.target = str(target)
-                executor = ExportExecutor(registry=self.registry(), work_dir=output_dir / ".work")
+                executor = ExportExecutor(
+                    registry=self.registry(),
+                    work_dir=output_dir / ".work",
+                    catalog=self._catalog,
+                    project=self._project,
+                )
                 _, verification = executor.execute(plan, cancel=cancel, verify=verify)
                 item.verification_state = verification.state.value
                 # Only FAILED fails the item. With verify=False the output is
@@ -186,6 +205,8 @@ class BatchConversionService:
                     item.detail = verification.detail or "输出未通过校验"
                 else:
                     item.status = "converted"
+                    if verification.state is VerificationState.UNVERIFIED and verify:
+                        item.detail = verification.detail or "输出未验证（校验器异常）"
             except CancelledError:
                 item.status = "cancelled"
                 raise
@@ -201,11 +222,14 @@ class BatchConversionService:
                 try:
                     result.results.append(run_one(job))
                 except CancelledError:
-                    result.cancelled = True
                     result.results.append(BatchItemResult(
                         source=str(job.source), status="cancelled"))
+                    if cancel.cancelled:
+                        result.cancelled = True
+                    # a job-internal CancelledError is failure isolation, not
+                    # a batch stop — only a cancelled shared token stops us
                 done += 1
-                progress(done, total, str(job.source))
+                safe_progress(done, total, str(job.source))
                 if result.cancelled:
                     for remaining in ordered[done:]:
                         result.results.append(BatchItemResult(
@@ -218,14 +242,15 @@ class BatchConversionService:
                     try:
                         result.results.append(future.result())
                     except CancelledError:
-                        result.cancelled = True
                         result.results.append(BatchItemResult(
                             source=str(job.source), status="cancelled"))
+                        if cancel.cancelled:
+                            result.cancelled = True
                     except Exception as exc:  # defensive: isolate everything
                         result.results.append(BatchItemResult(
                             source=str(job.source), status="failed", detail=str(exc)))
                     done += 1
-                    progress(done, total, str(job.source))
+                    safe_progress(done, total, str(job.source))
             if cancel.cancelled:
                 result.cancelled = True
                 for item in result.results:

@@ -116,7 +116,10 @@ class PackageBuilder:
         self.catalog = catalog
         self.options = options or PackageOptions()
         self.project_name = self.project_path.name.removesuffix(".paleo.json")
-        self.artifacts_dir = self.project_path.with_name(f"{self.project_name}.artifacts")
+        # single source of truth for the artifacts-dir convention
+        from paleo_workbench.project.paths import artifact_dir_for
+
+        self.artifacts_dir = artifact_dir_for(self.project_path)
 
     # -- plan ---------------------------------------------------------------
     def plan(self) -> PackagePlan:
@@ -164,14 +167,17 @@ class PackageBuilder:
             expected = version.size_bytes
             stale = expected is not None and expected != size
             if stale:
+                # one honest record per version (still shipped, flagged)
                 plan.items.append(PackageItem(
                     version.id, asset_name, str(payload_path), size, stage, "stale",
-                    "size 与 catalog 记录不一致（内容可能被改动）",
+                    "size 与 catalog 记录不一致（内容可能被改动）；仍打包并保留证据",
                 ))
-            plan.estimated_bytes += size
-            plan.items.append(PackageItem(
-                version.id, asset_name, str(payload_path), size, stage, "included",
-            ))
+                plan.estimated_bytes += size
+            else:
+                plan.items.append(PackageItem(
+                    version.id, asset_name, str(payload_path), size, stage, "included",
+                ))
+                plan.estimated_bytes += size
         return plan
 
     # -- build --------------------------------------------------------------
@@ -199,20 +205,10 @@ class PackageBuilder:
             raise
 
     def build_zip(self, output_dir: Path, *, cancel=None, progress=None) -> Path:
-        """Build the package directory and zip it next to it."""
-        import zipfile
-
+        """Build the package directory and zip it next to it (atomic publish)."""
         result = self.build(output_dir, cancel=cancel, progress=progress)
         zip_path = result.package_dir.with_name(f"{result.package_dir.name}.paleopkg.zip")
-        cancel = cancel or NULL_CANCEL
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as bundle:
-            for path in sorted(result.package_dir.rglob("*")):
-                cancel.checkpoint()
-                if path.is_symlink():
-                    raise ValueError(f"包内出现符号链接: {path}")
-                if path.is_file():
-                    bundle.write(path, path.relative_to(result.package_dir).as_posix())
-        return zip_path
+        return zip_package_dir(result.package_dir, zip_path, cancel=cancel)
 
     # -- internals ----------------------------------------------------------
     def _build_into(self, staging: Path, package_dir: Path, cancel, progress) -> BuildResult:
@@ -277,12 +273,18 @@ class PackageBuilder:
         )
 
     def _copy_payload(self, source: Path, rel_name: str, staging: Path, *, kind: str) -> PackageEntry:
-        digest = sha256_file(source)
-        size = source.stat().st_size
+        """Copy first, then hash the STAGED bytes — the manifest must describe
+        exactly what shipped, never what the source was at some earlier moment
+        (TOCTOU-safe)."""
         target = staging / rel_name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
-        return PackageEntry(path=rel_name, sha256=digest, size_bytes=size, kind=kind)
+        return PackageEntry(
+            path=rel_name,
+            sha256=sha256_file(target),
+            size_bytes=target.stat().st_size,
+            kind=kind,
+        )
 
     def _copy_artifacts_tree(self, staging: Path, manifest: PackageManifest, cancel) -> int:
         copied = 0
@@ -292,10 +294,12 @@ class PackageBuilder:
                 continue
             for source in sorted(source_dir.rglob("*")):
                 cancel.checkpoint()
-                if source.is_dir():
-                    continue
+                # symlink check BEFORE is_dir(): a symlinked directory must be
+                # rejected loudly, never skipped silently (nothing-silent rule)
                 if source.is_symlink():
                     raise ValueError(f"受管数据中出现符号链接: {source}")
+                if source.is_dir():
+                    continue
                 if dir_name == "metadata" and source.name in EXCLUDED_METADATA_FILES:
                     continue
                 rel = source.relative_to(self.artifacts_dir.parent).as_posix()
@@ -304,8 +308,8 @@ class PackageBuilder:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source, target)
                 manifest.entries.append(PackageEntry(
-                    path=rel, sha256=sha256_file(source),
-                    size_bytes=source.stat().st_size,
+                    path=rel, sha256=sha256_file(target),
+                    size_bytes=target.stat().st_size,
                     kind="metadata" if dir_name == "metadata" else "artifact",
                 ))
                 copied += 1
@@ -334,7 +338,12 @@ class PackageBuilder:
                     record["policy"] = "missing"
                     manifest.missing_dependencies.append(record)
                     continue
-                rel = f"artifacts/external/{item.asset_name}/{source.name}"
+                # version_id in the path: two external versions may share the
+                # same asset name and source basename without colliding
+                rel = (
+                    f"artifacts/external/{item.asset_name}/"
+                    f"{item.version_id or 'unknown'}/{source.name}"
+                )
                 safe_relative_path(rel, what="vendored external")
                 manifest.entries.append(self._copy_payload(source, rel, staging, kind="artifact"))
                 record["policy"] = "vendor"
@@ -401,3 +410,29 @@ class _ResourceShim:
         self.stage = "input"
         self.size_bytes = None
         self.path = str(resource.get("path", ""))
+
+
+def zip_package_dir(package_dir: Path, zip_path: Path, *, cancel=None) -> Path:
+    """Zip an existing package directory atomically (temp + os.replace)."""
+    import zipfile
+
+    package_dir = Path(package_dir)
+    zip_path = Path(zip_path)
+    cancel = cancel or NULL_CANCEL
+    zip_tmp = zip_path.with_name(f".{zip_path.name}.tmp")
+    try:
+        with zipfile.ZipFile(zip_tmp, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as bundle:
+            for path in sorted(package_dir.rglob("*")):
+                cancel.checkpoint()
+                if path.is_symlink():
+                    raise ValueError(f"包内出现符号链接: {path}")
+                if path.is_file():
+                    bundle.write(path, path.relative_to(package_dir).as_posix())
+        os_replace_atomic(zip_tmp, zip_path)
+    except BaseException:
+        try:
+            zip_tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    return zip_path

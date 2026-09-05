@@ -234,14 +234,14 @@ class GeoJSONAdapter(FormatAdapter):
         checks: list[VerificationCheck] = []
         warnings: list[str] = list(plan.warnings)
         if not target_path.is_file():
-            return ExportVerification(VerificationState.FAILED, checks, "输出文件不存在")
+            return ExportVerification(VerificationState.FAILED, checks, detail="输出文件不存在")
         try:
             document = json.loads(target_path.read_text("utf-8"))
         except Exception as exc:
             return ExportVerification(VerificationState.FAILED, checks, f"输出无法解析: {exc}")
         checks.append(VerificationCheck("reparse_ok", True))
         if document.get("type") != "FeatureCollection":
-            return ExportVerification(VerificationState.FAILED, checks, "输出不是 FeatureCollection")
+            return ExportVerification(VerificationState.FAILED, checks, detail="输出不是 FeatureCollection")
         checks.append(VerificationCheck("featurecollection_type", True))
 
         expected = int(plan.options.get("feature_count", -1))

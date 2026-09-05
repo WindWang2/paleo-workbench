@@ -70,6 +70,10 @@ def safe_relative_path(name: str, *, what: str = "entry") -> PurePosixPath:
             raise UnsafePathError(f"{what}: traversal component in {name!r}")
         if not part.strip():
             raise UnsafePathError(f"{what}: blank path component in {name!r}")
+        if part != part.rstrip(" ."):
+            # NTFS/FAT strip trailing dots/spaces: "file.txt." would silently
+            # overwrite "file.txt" and "com1 " would target the COM1 device.
+            raise UnsafePathError(f"{what}: trailing dot/space in {part!r}")
         if len(part) > MAX_COMPONENT_LEN:
             raise UnsafePathError(f"{what}: path component too long in {name!r}")
         stem = part.split(".")[0].upper()

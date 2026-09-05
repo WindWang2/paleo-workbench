@@ -317,13 +317,10 @@ class DeliveryService:
         result = DeliveryResult(
             profile_id=profile.profile_id, plan_summary=plan.summary()
         )
-        package_dir = output_dir / builder.project_name
-        if profile.container == "zip":
-            result.container_path = builder.build_zip(output_dir, cancel=cancel, progress=progress)
-            result.package_dir = package_dir
-        else:
-            build = builder.build(output_dir, cancel=cancel, progress=progress)
-            result.package_dir = build.package_dir
+        # Directory first: reports are written INTO the package so even the
+        # zip container ships with its QA report.
+        build = builder.build(output_dir, cancel=cancel, progress=progress)
+        result.package_dir = build.package_dir
 
         audit = ExternalDependencyAuditor(self.catalog).audit(cancel=cancel) \
             if self.catalog is not None else None
@@ -339,6 +336,14 @@ class DeliveryService:
         result.report_path, result.report_markdown_path = self._write_reports(
             report, result.package_dir, profile
         )
+        if profile.container == "zip":
+            from paleo_workbench.interchange.package.builder import zip_package_dir
+
+            result.container_path = zip_package_dir(
+                result.package_dir,
+                output_dir / f"{builder.project_name}.paleopkg.zip",
+                cancel=cancel,
+            )
         return result
 
     def _write_reports(self, report: dict, package_dir: Path | None, profile: DeliveryProfile):

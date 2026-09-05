@@ -189,6 +189,11 @@ class ExternalDependencyAuditor:
         if record.status != DependencyStatus.MISSING:
             return []
         expected_size = record.expected_size
+        expected_sha = record.expected_sha256
+        if expected_size is None and expected_sha is None:
+            # No recorded identity at all: ANY file would "match". Refusing to
+            # guess is the whole point — relink needs something to verify.
+            return []
         candidates: list[RelinkCandidate] = []
         for root in search_roots:
             root = Path(root)

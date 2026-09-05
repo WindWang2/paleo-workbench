@@ -84,7 +84,12 @@ def verify_zip_container(zip_path: Path, *, deep: bool = True) -> PackageVerifyR
             f"{manifest.project_name}.artifacts/metadata/catalog.json"
             if manifest.project_name else ""
         )
-        if catalog_rel and catalog_rel not in names_set:
+        if catalog_rel and catalog_rel in infos:
+            try:
+                json.loads(bundle.read(infos[catalog_rel]).decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                report.issues.append(VerifyIssue("error", "corrupt-catalog", f"catalog manifest 损坏: {exc}"))
+        elif catalog_rel:
             report.issues.append(VerifyIssue(
                 "warning", "no-catalog", "包内无 portable catalog manifest（仅工程文件包）"
             ))
@@ -93,6 +98,11 @@ def verify_zip_container(zip_path: Path, *, deep: bool = True) -> PackageVerifyR
             info = infos.get(entry.path)
             if info is None:
                 report.issues.append(VerifyIssue("error", "missing-entry", f"条目缺失: {entry.path}"))
+                continue
+            if info.is_dir():
+                report.issues.append(VerifyIssue(
+                    "error", "entry-is-directory", f"条目是目录而非文件: {entry.path}"
+                ))
                 continue
             report.checked_entries += 1
             report.total_size_bytes += info.file_size

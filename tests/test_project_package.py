@@ -198,7 +198,9 @@ def test_external_dependency_policies(tmp_path):
             ).build(out)
             deps = result.manifest.external_dependencies
             assert len(deps) == 1 and deps[0]["policy"] == policy.value
-            vendored = out / "demo" / "artifacts" / "external" / "ext-las" / "ext.w.las"
+            vendored = (
+                out / "demo" / "artifacts" / "external" / "ext-las" / version.id / "ext.w.las"
+            )
             assert vendored.is_file() is expect_packaged
     finally:
         catalog.close()

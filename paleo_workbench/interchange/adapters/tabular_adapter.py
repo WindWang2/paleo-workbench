@@ -210,7 +210,7 @@ class CsvLikeAdapter(FormatAdapter):
         if ("x" in header_map) != ("y" in header_map):
             result.warnings.append("坐标列不完整（仅识别到 X 或 Y 之一）")
 
-        row_count = self._count_data_rows(path, delimiter)
+        row_count = self._count_data_rows(path, delimiter, has_header=has_header)
         result.metadata = {
             "delimiter": delimiter,
             "encoding": encoding,
@@ -246,7 +246,7 @@ class CsvLikeAdapter(FormatAdapter):
             return False
 
     @staticmethod
-    def _count_data_rows(path: Path, delimiter: str) -> int:
+    def _count_data_rows(path: Path, delimiter: str, *, has_header: bool = True) -> int:
         count = 0
         try:
             with open(path, "r", encoding="utf-8", errors="replace", newline="") as fh:
@@ -258,7 +258,7 @@ class CsvLikeAdapter(FormatAdapter):
                         count += 1
         except OSError:
             return count
-        return max(0, count - 1)
+        return max(0, count - (1 if has_header else 0))
 
     # -- plan / execute -----------------------------------------------------
     def plan_import(self, path, inspection, *, managed=True, asset_name=None, options=None):
@@ -336,12 +336,12 @@ class CsvLikeAdapter(FormatAdapter):
     def _verify_normalized_csv(self, target: Path, preset: TabularMappingPreset) -> ExportVerification:
         checks: list[VerificationCheck] = []
         if not target.is_file() or target.stat().st_size == 0:
-            return ExportVerification(VerificationState.FAILED, checks, "归一化输出为空")
+            return ExportVerification(VerificationState.FAILED, checks, detail="归一化输出为空")
         with open(target, "r", encoding="utf-8", newline="") as fh:
             rows = list(csv.reader(fh))
         checks.append(VerificationCheck("utf8_parsable", True))
         if not rows:
-            return ExportVerification(VerificationState.FAILED, checks, "无数据行")
+            return ExportVerification(VerificationState.FAILED, checks, detail="无数据行")
         widths = {len(r) for r in rows}
         checks.append(VerificationCheck("consistent_columns", len(widths) == 1, f"列宽 {sorted(widths)}"))
         with open(target, "rb") as fh:
@@ -374,23 +374,32 @@ class CsvLikeAdapter(FormatAdapter):
 
         source = Path(source_path)
         target = Path(plan.target_path)
-        delimiter = "\t" if target.suffix.lower() == ".tsv" else ","
+        # Read with the SOURCE's real delimiter (sniffed — the extension does
+        # not decide, a .csv can be semicolon-delimited), write with the
+        # target's convention.
+        source_delimiter = sniff_delimiter(self._read_text_prefix(source))
+        target_delimiter = "\t" if target.suffix.lower() == ".tsv" else ","
         with atomic_output(target) as tmp:
             with open(source, "r", encoding="utf-8", errors="replace", newline="") as src:
-                reader = csv.reader(src)
+                reader = csv.reader(src, delimiter=source_delimiter)
                 with open(tmp, "w", encoding="utf-8", newline="") as dst:
-                    writer = csv.writer(dst, delimiter=delimiter)
+                    writer = csv.writer(dst, delimiter=target_delimiter)
                     for row in reader:
                         writer.writerow(row)
         return target
+
+    @staticmethod
+    def _read_text_prefix(path: Path, limit: int = _SAMPLE_BYTES) -> str:
+        with open(path, "rb") as fh:
+            return fh.read(limit).decode("utf-8", errors="replace")
 
     def verify_output(self, target_path, plan) -> ExportVerification:
         target_path = Path(target_path)
         checks: list[VerificationCheck] = []
         if not target_path.is_file():
-            return ExportVerification(VerificationState.FAILED, checks, "输出文件不存在")
+            return ExportVerification(VerificationState.FAILED, checks, detail="输出文件不存在")
         if target_path.stat().st_size == 0:
-            return ExportVerification(VerificationState.FAILED, checks, "输出文件为空")
+            return ExportVerification(VerificationState.FAILED, checks, detail="输出文件为空")
         delimiter = "\t" if target_path.suffix.lower() == ".tsv" else ","
         with open(target_path, "r", encoding="utf-8", newline="") as fh:
             rows = list(csv.reader(fh, delimiter=delimiter))

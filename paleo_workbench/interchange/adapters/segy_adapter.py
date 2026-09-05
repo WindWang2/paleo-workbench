@@ -93,8 +93,13 @@ class SegyAdapter(FormatAdapter):
                 sample_interval_us = int(segy.bin[segyio.BinField.Interval])
                 format_code = int(segy.bin[segyio.BinField.Format])
                 try:
-                    # segyio's Text slices lazily; materialize before slicing.
-                    text_header = str(segy.text)
+                    # segyio's Text materializes lazily; str() is the only API
+                    # on this version (locally silenced deprecation notice).
+                    import warnings as _warnings
+
+                    with _warnings.catch_warnings():
+                        _warnings.filterwarnings("ignore", category=DeprecationWarning)
+                        text_header = str(segy.text)
                 except Exception:
                     text_header = ""
                 first = segy.header[0]
@@ -132,10 +137,9 @@ class SegyAdapter(FormatAdapter):
             "axis_last": float(samples_axis[-1]) if sample_count else None,
             "text_header_preview": text_header[:320],
         }
-        if sample_interval_us >= 1000:
-            result.units["twt"] = "ms"
-        else:
-            result.units["twt"] = "us"
+        # segyio's segy.samples axis stores microseconds — keep the unit label
+        # consistent with the stored values (consumers convert for display).
+        result.units["twt"] = "us"
         if il_first == 0 and xl_first == 0:
             result.warnings.append("首道 INLINE_3D/CROSSLINE_3D 均为 0：几何信息可能不完整")
         elif not result.metadata["geometry_probe"]["inline_varies"]:

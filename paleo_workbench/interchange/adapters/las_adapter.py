@@ -188,6 +188,11 @@ class LasAdapter(FormatAdapter):
     def _scan_ascii_stream(self, path: Path, header, result: InspectionResult) -> None:
         """Streaming O(1)-memory scan of the ~A section: depth order/malformed rows."""
         if result.size_bytes > _FULL_SCAN_MAX_BYTES:
+            # header_only=True legitimately reports row_count 0 — that is the
+            # bounded path, not empty data; only note the skipped scan.
+            result.warnings[:] = [
+                w for w in result.warnings if "数据区为空" not in w
+            ]
             result.warnings.append("文件超过全量扫描上限：跳过深度顺序检查")
             return
         depth_header = self._parse_depth_header(path)
@@ -229,7 +234,8 @@ class LasAdapter(FormatAdapter):
             rows += 1
             if not math.isfinite(depth) or math.isclose(depth, null_value, abs_tol=1e-6):
                 null_depths += 1
-                prev_depth = depth
+                # a null depth must NOT lock the direction or join the
+                # monotonicity chain — it carries no ordering information
                 continue
             if prev_depth is not None and math.isfinite(prev_depth) and depth != prev_depth:
                 if direction is None:
@@ -323,7 +329,7 @@ class LasAdapter(FormatAdapter):
         if not target_path.is_file():
             return ExportVerification.failed(checks, "输出文件不存在")
         if target_path.stat().st_size == 0:
-            return ExportVerification(VerificationState.FAILED, checks, "输出文件为空")
+            return ExportVerification(VerificationState.FAILED, checks, detail="输出文件为空")
 
         source_curves = plan_to_curve_names(plan)
         if target_path.suffix.lower() == ".json":

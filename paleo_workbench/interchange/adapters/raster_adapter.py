@@ -197,6 +197,7 @@ class RasterAdapter(FormatAdapter):
         target_dtype = options.get("dtype")  # None = keep source dtype
         target = Path(plan.target_path)
         with rasterio.open(source_path) as src:
+            dtype = target_dtype or src.dtypes[0]
             profile = {
                 "driver": "GTiff",
                 "width": src.width,
@@ -204,12 +205,11 @@ class RasterAdapter(FormatAdapter):
                 "count": src.count,
                 "crs": src.crs,
                 "transform": src.transform,
-                "nodata": src.nodata,
+                "nodata": self._resolve_nodata(src.nodata, dtype),
                 "compress": options.get("compress", "deflate"),
                 "tiled": src.width > 512 or src.height > 512,
+                "dtype": dtype,
             }
-            dtype = target_dtype or src.dtypes[0]
-            profile["dtype"] = dtype
             with atomic_output(target) as tmp:
                 with rasterio.open(tmp, "w", **profile) as dst:
                     block_win = 1024
@@ -244,11 +244,13 @@ class RasterAdapter(FormatAdapter):
         target_path = Path(target_path)
         checks: list[VerificationCheck] = []
         if not target_path.is_file() or target_path.stat().st_size == 0:
-            return ExportVerification(VerificationState.FAILED, checks, "输出缺失或为空")
+            return ExportVerification(VerificationState.FAILED, checks, detail="输出缺失或为空")
         try:
             out = self._open(target_path)
         except Exception as exc:
-            return ExportVerification(VerificationState.FAILED, checks, f"输出无法重新打开: {exc}")
+            return ExportVerification(
+                VerificationState.FAILED, checks, detail=f"输出无法重新打开: {exc}"
+            )
         try:
             with out:
                 with self._open(Path(plan.source_path)) as src:
@@ -282,17 +284,28 @@ class RasterAdapter(FormatAdapter):
                                           f"源 {src_bounds} 输出 {out_bounds}")
                     )
                     src_nodata = src.nodata
+                    # when the dtype changed, an out-of-range source nodata
+                    # was resolved (possibly dropped) at write time
+                    dtype_note = plan.options.get("dtype")
+                    expected_nodata = (
+                        self._resolve_nodata(src_nodata, out.dtypes[0])
+                        if dtype_note and dtype_note != src.dtypes[0]
+                        else src_nodata
+                    )
                     out_nodata = out.nodata
-                    if src_nodata is None and out_nodata is None:
+                    if expected_nodata is None and out_nodata is None:
                         nodata_ok = True
-                    elif src_nodata is None or out_nodata is None:
+                    elif expected_nodata is None or out_nodata is None:
                         nodata_ok = False
                     else:
-                        nodata_ok = math.isclose(src_nodata, out_nodata, rel_tol=1e-9)
+                        nodata_ok = math.isclose(expected_nodata, out_nodata, rel_tol=1e-9)
                     checks.append(
                         VerificationCheck("nodata_preserved", nodata_ok,
-                                          f"源 {src_nodata} 输出 {out_nodata}")
+                                          f"预期 {expected_nodata} 输出 {out_nodata}")
                     )
+                    # Sampled pixel equality on a small window (data fidelity
+                    # probe). When the export converted dtype, apply the same
+                    # conversion to the source window before comparing.
                     dtype_note = plan.options.get("dtype")
                     if dtype_note:
                         checks.append(
@@ -302,8 +315,7 @@ class RasterAdapter(FormatAdapter):
                                 f"输出 dtype {out.dtypes[0]}",
                             )
                         )
-                    # Sampled pixel equality on a small window (data fidelity probe).
-                    probe = self._probe_window_equals(src, out)
+                    probe = self._probe_window_equals(src, out, dtype_note)
                     checks.append(
                         VerificationCheck(
                             "pixel_probe",
@@ -319,7 +331,23 @@ class RasterAdapter(FormatAdapter):
         return ExportVerification(VerificationState.VERIFIED, checks)
 
     @staticmethod
-    def _probe_window_equals(src, out) -> bool | None:
+    def _resolve_nodata(nodata, dtype):
+        """Keep a nodata value only when it fits the target dtype; dropping it
+        beats writing a corrupt file (rasterio refuses out-of-range nodata)."""
+        import numpy as np
+
+        if nodata is None:
+            return None
+        try:
+            info = np.iinfo(dtype)
+        except ValueError:
+            info = np.finfo(dtype)
+        if info.min <= nodata <= info.max:
+            return float(nodata)
+        return None
+
+    @staticmethod
+    def _probe_window_equals(src, out, target_dtype: str | None = None) -> bool | None:
         import numpy as np
         import rasterio
 
@@ -332,4 +360,15 @@ class RasterAdapter(FormatAdapter):
         b = out.read(1, window=window).astype("float64")
         if a.shape != b.shape:
             return False
+        if target_dtype and target_dtype != src.dtypes[0]:
+            a = RasterAdapter._convert_like(a, target_dtype)
         return bool(np.array_equal(np.nan_to_num(a, nan=-1e30), np.nan_to_num(b, nan=-1e30)))
+
+    @staticmethod
+    def _convert_like(data, target_dtype: str):
+        """Mirror of the export-time dtype conversion (clip to dtype range)."""
+        import numpy as np
+
+        info = np.iinfo(target_dtype)
+        converted = np.clip(np.nan_to_num(data, nan=0.0), info.min, info.max)
+        return converted.astype(target_dtype).astype("float64")

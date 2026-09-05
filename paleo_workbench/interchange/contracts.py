@@ -261,6 +261,8 @@ class ExportPlan:
     estimated_bytes: int = 0
     options: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    source_version_ids: list[str] = field(default_factory=list)  # catalog lineage
+    linked_id: str = ""  # domain entity this export belongs to (e.g. task id)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -270,4 +272,6 @@ class ExportPlan:
             "estimated_bytes": self.estimated_bytes,
             "options": dict(self.options),
             "warnings": list(self.warnings),
+            "source_version_ids": list(self.source_version_ids),
+            "linked_id": self.linked_id,
         }

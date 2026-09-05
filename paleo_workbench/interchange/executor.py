@@ -124,13 +124,26 @@ class ImportExecutor:
 class ExportExecutor:
     """Executes :class:`ExportPlan` instances: export then structural verify.
 
-    ``UNVERIFIED`` is passed through honestly — callers and reports must never
-    render it as Verified.
+    When a catalog is provided, every verified export is registered through
+    the repo's single export-provenance choke point
+    (:func:`paleo_workbench.catalog.lifecycle.register_export_output` /
+    ``project.artifacts.record_export`` machinery) so interchange exports are
+    indistinguishable from native ones in lineage. ``UNVERIFIED`` is passed
+    through honestly — callers and reports must never render it as Verified.
     """
 
-    def __init__(self, *, registry: InterchangeRegistry | None = None, work_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        registry: InterchangeRegistry | None = None,
+        work_dir: Path | None = None,
+        catalog=None,
+        project=None,
+    ) -> None:
         self._registry = registry
         self._work_dir = work_dir
+        self._catalog = catalog
+        self._project = project
 
     def registry(self) -> InterchangeRegistry:
         if self._registry is None:
@@ -174,8 +187,50 @@ class ExportExecutor:
                 verification = adapter.verify_output(target, plan)
             except Exception as exc:
                 verification = ExportVerification.unverified(f"校验器异常: {exc}")
+        self._record_export(plan, target, verification)
         progress(1.0, f"导出结束: {verification.state.value}")
         return target, verification
+
+    def _record_export(self, plan: ExportPlan, target: Path, verification: ExportVerification) -> None:
+        """Route through the single export-provenance choke point.
+
+        Provenance failure never masks the export result — the bytes and the
+        verification state are already real; a broken registry is logged on
+        the verification as a warning instead.
+        """
+        if self._catalog is None:
+            return
+        try:
+            if verification.ok:
+                from paleo_workbench.catalog.adapter import CoreCatalogAdapter
+                from paleo_workbench.catalog.lifecycle import register_export_output
+
+                # register_export_output speaks the CatalogPort dialect;
+                # wrap a raw DataCatalogService transparently.
+                port = (
+                    self._catalog
+                    if hasattr(self._catalog, "begin_run")
+                    else CoreCatalogAdapter(self._catalog)
+                )
+                register_export_output(
+                    name=Path(plan.target_path).name,
+                    output_path=str(target),
+                    fmt=plan.format_id,
+                    source_version_ids=plan.source_version_ids or None,
+                    linked_id=plan.linked_id,
+                    catalog=port,
+                )
+            else:
+                self._catalog.register_run(
+                    "export",
+                    input_version_ids=plan.source_version_ids,
+                    output_version_ids=(),
+                    parameters={"plan": plan.to_dict(), "verify_state": verification.state.value},
+                    generator="interchange",
+                    status="failed",
+                )
+        except Exception as exc:
+            verification.warnings.append(f"导出 provenance 记录失败: {exc}")
 
     def _workdir(self) -> Path:
         import tempfile
