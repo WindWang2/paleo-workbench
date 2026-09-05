@@ -27,8 +27,6 @@ EXCLUDED_DIRS = {"prototypes"}
 ALLOWED_VIOLATIONS: dict[str, int] = {
     "ui/unified_map_canvas.py": 13,
     "ui/workstation/composite_document.py": 8,
-    "ui/pages/project_well_map_page.py": 7,
-    "ui/pages/module_relationship.py": 7,
     "ui/workstation/composite_editing.py": 4,
     "ui/pages/lithology_crossplot_dialog.py": 4,
     "viz/hosts/well_log_host.py": 3,
@@ -36,14 +34,10 @@ ALLOWED_VIOLATIONS: dict[str, int] = {
     "ui/pages/ai_check_advisor_dialog.py": 3,
     "viz/hosts/well_section_host.py": 2,
     "ui/workstation/agent_panel.py": 2,
-    "ui/pages/geological_modeling_3d_page.py": 2,
-    "ui/pages/data_view_models.py": 2,
     "ui/map_symbology_bridge.py": 2,
     "ui/workstation/common.py": 1,
     "ui/status_bar.py": 1,
     "ui/qgis_stack/display_canvas.py": 1,
-    "ui/pages/visualization_page.py": 1,
-    "ui/pages/seismic_slice_preview_widget.py": 1,
     "ui/map_status_bar.py": 1,
     "ui/map_layer_properties.py": 1,
 }

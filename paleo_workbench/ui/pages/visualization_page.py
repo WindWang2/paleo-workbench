@@ -171,7 +171,7 @@ class VisualizationPage(QWidget):
         self.btn_coord.setCheckable(True)
         self.btn_coord.setStyleSheet(
             f"QPushButton {{ border: 1px solid {tokens.BORDER}; border-radius: 4px; padding: 5px 14px; background: {tokens.BG_SIDEBAR}; color: {tokens.TEXT_PRIMARY}; font-weight: bold; }}"
-            f"QPushButton:checked {{ background: {tokens.PRIMARY}; color: #ffffff; border-color: {tokens.PRIMARY_PRESSED}; }}"
+            f"QPushButton:checked {{ background: {tokens.PRIMARY}; color: {tokens.ON_PRIMARY}; border-color: {tokens.PRIMARY_PRESSED}; }}"
         )
         self.btn_coord.clicked.connect(self._on_coord_toggle_clicked)
         top_bar.addWidget(self.btn_coord)

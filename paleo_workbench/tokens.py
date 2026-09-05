@@ -79,6 +79,7 @@ CANVAS_CHROME_BORDER = "#dfe6ee"           # 画布浮层描边
 CANVAS_SELECTION = "#ffe066"               # 画布选区高亮（amber 系）
 CANVAS_SNAP = "#53d8fb"                    # 捕捉指示
 CANVAS_EDIT = "#ff6b6b"                    # 编辑会话警示（顶点/拓扑）
+CANVAS_CURSOR = "#7c3aed"                  # 空间游标（井位图/剖面膜上的探针）
 
 # 图标栏交互态（深色栏专用，三主题各自策展）
 BG_RAIL_HOVER = "#edf2f4"
@@ -355,6 +356,7 @@ _DARK_OVERRIDES = {
     "CANVAS_SELECTION": "#ffd43b",
     "CANVAS_SNAP": "#53d8fb",
     "CANVAS_EDIT": "#ff8787",
+    "CANVAS_CURSOR": "#a78bfa",
     "FOCUS_RING": "#e8863d",
     "TOOLTIP_BG": "#0a1211",
     "TOOLTIP_TEXT": "#e8ece9",
@@ -411,6 +413,7 @@ _HIGH_CONTRAST_OVERRIDES = {
     "CANVAS_SELECTION": "#ffd43b",
     "CANVAS_SNAP": "#00e0ff",
     "CANVAS_EDIT": "#ff5252",
+    "CANVAS_CURSOR": "#c5b3ff",
     "FOCUS_RING": "#005fd0",
     "TOOLTIP_BG": "#ffffff",
     "TOOLTIP_TEXT": "#000000",

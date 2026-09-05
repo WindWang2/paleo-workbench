@@ -38,13 +38,18 @@ from PySide6.QtWidgets import (
 
 from paleo_workbench import tokens
 
-_STATE_COLORS = {
-    "queued": tokens.TEXT_SECONDARY,
-    "running": tokens.WARNING,
-    "done": tokens.SUCCESS,
-    "failed": tokens.ERROR_RED,
-    "cancelled": tokens.TEXT_SECONDARY,
-}
+def _state_colors() -> dict[str, str]:
+    """状态→前景色，每调用取当前主题调色板（此前 import 时快照 light 值）。"""
+    from paleo_workbench.ui.style import palette
+
+    p = palette()
+    return {
+        "queued": p["TEXT_SECONDARY"],
+        "running": p["WARNING"],
+        "done": p["SUCCESS"],
+        "failed": p["ERROR_RED"],
+        "cancelled": p["TEXT_SECONDARY"],
+    }
 
 _MAX_ROWS = 100
 # 列：状态 / 任务 / 进度 / 用时 / 操作
@@ -105,7 +110,9 @@ class _TaskTableModel(QAbstractItemModel):
                     )
                 )
         if role == Qt.ItemDataRole.ForegroundRole and column == _COL_STATE:
-            return QColor(_STATE_COLORS.get(self._state_key(handle), tokens.TEXT_PRIMARY))
+            from paleo_workbench.ui.style import palette as _palette
+
+            return QColor(_state_colors().get(self._state_key(handle), _palette()["TEXT_PRIMARY"]))
         if role == Qt.ItemDataRole.ToolTipRole and column == _COL_TITLE:
             return handle.message or handle.error or handle.task_id
         return None
