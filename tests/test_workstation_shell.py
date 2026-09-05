@@ -225,6 +225,60 @@ def test_agent_plans_map_scientific_commands_to_typed_actions():
     assert joint.gui_action == "focus_joint"
 
 
+def test_map_export_declared_write_risk():
+    """#1186: map.export writes files — its risk must say WRITE."""
+    from paleo_workbench.harness import ActionRisk, get_action_registry
+
+    assert get_action_registry().get("map.export").risk == ActionRisk.WRITE
+
+
+def _agent_panel(qtbot, tmp_path):
+    from paleo_workbench.ui.workstation.agent_panel import AgentWorkspace
+
+    panel = AgentWorkspace(project=_project(tmp_path))
+    qtbot.addWidget(panel)
+    return panel
+
+
+def test_agent_write_plan_needs_confirmation(qtbot, tmp_path, monkeypatch):
+    """#1186: WRITE plans run only after per-plan confirmation; refusal
+    blocks before any scheduler submission."""
+    from paleo_workbench.ui.workstation.agent_panel import AgentPlan, AgentWorkspace
+
+    panel = _agent_panel(qtbot, tmp_path)
+    monkeypatch.setattr(
+        AgentWorkspace, "_plan",
+        staticmethod(lambda _cmd: AgentPlan(
+            "map.export", {"output_path": "x.png"}, "focus_joint", "导出当前图",
+        )),
+    )
+    calls: list = []
+    panel._run_plan = lambda plan, receipt_id, **kw: calls.append((plan, kw))
+
+    panel.confirm_write = lambda _actions: False
+    panel.submit("导出当前图")
+    assert calls == []
+    assert "已取消" in panel.history.toPlainText()
+
+    panel.confirm_write = lambda actions: actions == ["map.export"]
+    panel.submit("导出当前图")
+    assert len(calls) == 1
+    assert calls[0][1] == {"write_allowed": True}
+
+
+def test_agent_read_plan_runs_without_confirmation(qtbot, tmp_path):
+    """#1186: READ plans keep the old one-shot behavior."""
+    panel = _agent_panel(qtbot, tmp_path)
+    calls: list = []
+    panel._run_plan = lambda plan, receipt_id, **kw: calls.append((plan, kw))
+    panel.confirm_write = lambda _actions: (_ for _ in ()).throw(
+        AssertionError("READ plans must not ask")
+    )
+    panel.submit("显示所有井的平面位置")
+    assert len(calls) == 1
+    assert calls[0][1] == {"write_allowed": False}
+
+
 def test_agent_resolves_project_relative_well_resources(tmp_path):
     project = _project(tmp_path)
     context = ActionContext(

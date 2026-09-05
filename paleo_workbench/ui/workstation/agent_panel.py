@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QObject, Signal
@@ -10,6 +11,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QTextBrowser,
     QVBoxLayout,
@@ -45,6 +47,9 @@ class AgentWorkspace(QFrame):
         self._project_path: str | None = None
         self._current_task_id: str | None = None
         self._last_gui_action: str | None = None
+        # #1186: WRITE confirmation hook. None → modal QMessageBox; tests
+        # inject a stub returning bool. Per-plan, never latched.
+        self.confirm_write: Callable[[list[str]], bool] | None = None
         self._bridge = _AgentBridge(self)
         self._bridge.completed.connect(self._on_completed)
 
@@ -119,7 +124,57 @@ class AgentWorkspace(QFrame):
             f"<b>执行计划</b> · {plan.summary}<br>"
             f"<span style='color:#53616c'>动作 {plan.action_id} · 回执 {receipt_id}</span>"
         )
-        self._run_plan(plan, receipt_id)
+        write_actions = self._write_actions_in_plan(plan)
+        if write_actions and not self._confirm_write_actions(write_actions):
+            self.history.append(
+                "<b>已取消</b> · 写动作需逐次确认，未获授权本次不执行。"
+            )
+            return
+        self._run_plan(plan, receipt_id, write_allowed=bool(write_actions))
+
+    @staticmethod
+    def _write_actions_in_plan(plan: AgentPlan) -> list[str]:
+        """Action ids in the plan whose spec risk is WRITE (#1186).
+
+        Unknown actions fail closed (treated as WRITE): the registry is
+        the authority on risk, and an unassessable action must not run on
+        default permissions.
+        """
+        from paleo_workbench.harness import ActionRisk, get_action_registry
+
+        ids = [plan.action_id]
+        if plan.followup_action is not None:
+            ids.append(plan.followup_action[0])
+        write: list[str] = []
+        try:
+            registry = get_action_registry()
+        except Exception:
+            return ids
+        for action_id in ids:
+            try:
+                risk = registry.get(action_id).risk
+            except Exception:
+                risk = ActionRisk.WRITE
+            if risk == ActionRisk.WRITE:
+                write.append(action_id)
+        return write
+
+    def _confirm_write_actions(self, action_ids: list[str]) -> bool:
+        if callable(self.confirm_write):
+            try:
+                return bool(self.confirm_write(action_ids))
+            except Exception:
+                return False
+        answer = QMessageBox.question(
+            self,
+            "确认写动作",
+            "该计划包含写动作（{}），将修改工程数据或写盘。是否执行？".format(
+                "、".join(action_ids)
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
 
     def submit_current(self) -> None:
         text = self.command_input.text().strip()
@@ -136,16 +191,21 @@ class AgentWorkspace(QFrame):
         if get_scheduler().cancel(self._current_task_id):
             self.history.append("<b>取消请求已发送</b> · 将在安全点停止。")
 
-    def _run_plan(self, plan: AgentPlan, receipt_id: str) -> None:
+    def _run_plan(self, plan: AgentPlan, receipt_id: str, *, write_allowed: bool = False) -> None:
         from paleo_workbench.harness import ActionContext, ActionRisk, HarnessExecutor
+        from paleo_workbench.harness.spec import DEFAULT_PERMISSIONS
         from paleo_workbench.runtime.task_scheduler import TaskSpec, get_scheduler
 
+        permissions = (
+            DEFAULT_PERMISSIONS | {ActionRisk.WRITE} if write_allowed
+            else DEFAULT_PERMISSIONS
+        )
         context = ActionContext(
             workspace_id=str(getattr(getattr(self._project, "meta", None), "name", "") or ""),
             project_path=self._project_path,
             project=self._project,
             active_well_id=self._well_from_parameters(plan.parameters),
-            permissions=frozenset({ActionRisk.READ, ActionRisk.COMPUTE, ActionRisk.WRITE}),
+            permissions=frozenset(permissions),
         )
         executor = HarnessExecutor()
 

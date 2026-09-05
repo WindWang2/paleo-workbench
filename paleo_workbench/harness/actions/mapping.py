@@ -166,7 +166,9 @@ def register(registry) -> None:
             action_id="map.export",
             description="导出当前图（PNG/SVG/PDF，生产导出路径），登记 catalog OUTPUT 版本。",
             handler=_export,
-            risk=ActionRisk.COMPUTE,
+            # #1186: writes files + registers catalog versions — COMPUTE
+            # understates the side effect and would run on default perms.
+            risk=ActionRisk.WRITE,
             category="export",
             resource_profile={"estimated_cpu_cores": 1.0, "estimated_ram_bytes": 512 * 1024**2, "io_weight": 2.0},
             input_schema={
