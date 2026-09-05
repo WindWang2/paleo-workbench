@@ -216,3 +216,28 @@ def test_unsaved_project_save_interpretation_requires_project_file(qtbot, monkey
     page.save_interpretation_version()
     assert warns, "expected a '请先保存工程' prompt"
     assert "先保存工程" in warns[0]
+
+
+def test_safe_rmtree_reports_outcome(tmp_path, monkeypatch):
+    """#1190: True when gone/missing; False when removal is impossible."""
+    import shutil
+
+    from paleo_workbench.project.paths import safe_rmtree
+
+    target = tmp_path / "gone"
+    target.mkdir()
+    (target / "f.txt").write_text("x", encoding="utf-8")
+    assert safe_rmtree(target) is True
+    assert not target.exists()
+    assert safe_rmtree(tmp_path / "never-existed") is True
+
+    stuck = tmp_path / "stuck"
+    stuck.mkdir()
+    (stuck / "f.txt").write_text("x", encoding="utf-8")
+
+    def _boom(*args, **kwargs):
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(shutil, "rmtree", _boom)
+    assert safe_rmtree(stuck) is False
+    assert stuck.exists()

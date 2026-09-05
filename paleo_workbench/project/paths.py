@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 import shutil
+
+logger = logging.getLogger(__name__)
 
 
 class ProjectPathError(ValueError):
@@ -42,21 +45,32 @@ def _handle_remove_readonly(func, path, exc_info=None):
         pass
 
 
-def safe_rmtree(path: Path | str) -> None:
-    """Safely remove a directory tree, clearing Windows read-only flags on demand."""
+def safe_rmtree(path: Path | str) -> bool:
+    """Safely remove a directory tree, clearing Windows read-only flags on demand.
+
+    #1190: returns True when the tree is gone (or never existed) so
+    transaction layers can tell "cleared" from "still there" instead of
+    guessing through a swallowed error. Never raises for removal failures.
+    """
     p = Path(path)
-    if not p.exists():
-        return
+    if not p.exists() and not p.is_symlink():
+        return True
     try:
         if sys.version_info >= (3, 12):
             shutil.rmtree(p, onexc=lambda func, path, exc: _handle_remove_readonly(func, path, exc))
         else:
             shutil.rmtree(p, onerror=_handle_remove_readonly)
     except Exception:
+        pass
+    if p.exists() or p.is_symlink():
         try:
             shutil.rmtree(p, ignore_errors=True)
         except Exception:
             pass
+    gone = not p.exists() and not p.is_symlink()
+    if not gone:
+        logger.warning("safe_rmtree could not remove %s", p)
+    return gone
 
 
 @dataclass
@@ -85,35 +99,44 @@ class StagedArtifactRelocation:
             or bool(self.moved_children)
         )
 
-    def commit(self) -> None:
-        """Finalize a source-preserving copy only after target metadata is durable."""
-        if not (self.copied_root or self.preserved_source):
-            return
-        safe_rmtree(self.source)
+    def commit(self) -> bool:
+        """Finalize a source-preserving copy only after target metadata is durable.
 
-    def rollback(self) -> None:
-        """Best-effort reversal limited to entries this transaction owns."""
+        Returns True when nothing remains to clean. A False return means the
+        target is durable but source debris is still present (safe direction —
+        the old project stays usable); the caller decides whether to surface it.
+        """
+        if not (self.copied_root or self.preserved_source):
+            return True
+        return safe_rmtree(self.source)
+
+    def rollback(self) -> bool:
+        """Best-effort reversal limited to entries this transaction owns.
+
+        Returns True when every owned entry was restored/removed; False
+        leaves the transaction state inspectable for diagnostics.
+        """
+        ok = True
         if self.moved_root and self.target.exists() and not self.source.exists():
             try:
                 self.target.rename(self.source)
             except OSError:
-                pass
+                ok = False
         elif (self.copied_root or self.preserved_source) and self.target.exists():
-            try:
-                safe_rmtree(self.target)
-            except OSError:
-                pass
+            if not safe_rmtree(self.target):
+                ok = False
         for source, target in reversed(self.moved_children):
             if target.exists() and not source.exists():
                 try:
                     target.rename(source)
                 except OSError:
-                    pass
+                    ok = False
         if self.moved_children:
             try:
                 self.target.rmdir()
             except OSError:
                 pass
+        return ok
 
 
 def stage_artifact_relocation(
@@ -138,11 +161,8 @@ def stage_artifact_relocation(
             staged.preserved_source = True
             return staged
         except Exception:
-            try:
-                if target.exists():
-                    safe_rmtree(target)
-            except OSError:
-                pass
+            if target.exists() and not safe_rmtree(target):
+                logger.warning("staged relocation cleanup failed for %s", target)
             raise
     try:
         for child in source.iterdir():
