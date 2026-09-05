@@ -169,7 +169,7 @@ def extract_archive(archive, dest_root: Path, *, what: str = "package") -> list[
 def sanitize_filename(stem: str, fallback: str = "export") -> str:
     """Make an arbitrary string safe to use as a single file name."""
     cleaned = unicodedata.normalize("NFC", stem)
-    cleaned = _BAD_CHARS_RE.sub("_", cleaned).strip(" .")
+    cleaned = re.sub(r'[<>:"|?*\x00-\x1f/\\]', "_", cleaned).strip(" .")
     if not cleaned:
         cleaned = fallback
     if cleaned.split(".")[0].upper() in _WINDOWS_RESERVED:

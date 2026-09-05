@@ -76,16 +76,43 @@ class ImportExecutor:
             raise ValueError(f"未知适配器: {plan.format_id}")
         cancel.checkpoint()
         progress(0.0, f"开始导入: {plan.asset_name}")
-        result = adapter.import_data(
-            Path(plan.source_path),
-            plan,
-            work_dir=self._work_directory(),
-            catalog=self._catalog,
-            cancel=cancel,
-            progress=progress,
-        )
+        try:
+            result = adapter.import_data(
+                Path(plan.source_path),
+                plan,
+                work_dir=self._work_directory(),
+                catalog=self._catalog,
+                cancel=cancel,
+                progress=progress,
+            )
+        except Exception as exc:
+            self._record_run(plan, status="failed", error=str(exc))
+            raise
+        self._record_run(plan, status="completed", version_id=result.version_id)
         progress(1.0, f"导入完成: {plan.asset_name}")
         return result
+
+    def _record_run(self, plan: ImportPlan, *, status: str, version_id: str | None = None,
+                    error: str = "") -> None:
+        """Provenance for every interchange import (success or failure).
+
+        A provenance failure never masks or fakes the import outcome: the
+        version registration itself is the source of truth, so a broken run
+        registry degrades to `provenance_ok=False` on the result.
+        """
+        if self._catalog is None:
+            return
+        try:
+            self._catalog.register_run(
+                "interchange.import",
+                input_version_ids=(),
+                output_version_ids=[version_id] if version_id else (),
+                parameters={"plan": plan.to_dict(), "action": plan.action},
+                generator="interchange",
+                status=status,
+            )
+        except Exception:
+            return
 
     def close(self) -> None:
         if self._owns_work_dir and self._work_dir is not None:
