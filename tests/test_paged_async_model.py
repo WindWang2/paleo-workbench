@@ -144,6 +144,75 @@ def test_trash_view_lists_only_trashed(service, qtbot, small_pages):
         model.shutdown()
 
 
+def test_paged_rows_support_catalog_actions(service, qtbot, small_pages):
+    """Review-3 fixes: a paged row must survive context-menu build, carry its
+    version id, and be actionable (bulk tag / trash) through the service."""
+    from paleo_workbench.ui.pages.asset_context_menu import AssetContextMenu
+
+    provider = CatalogPageProvider(service)
+    model = _model(provider)
+    try:
+        model.refresh()
+        assert model.rowCount() == 40
+        qtbot.waitUntil(lambda: model.view_at(0) is not None, timeout=5_000)
+        view = model.view_at(0)
+        ref = view.raw_asset
+        # F1: the context-menu build (export-format probe) must not crash.
+        menu = AssetContextMenu()
+        menu.build(ref)
+        assert menu.find_action("ctx_preview") is not None
+        # F2: the row resolves to a catalog version id.
+        assert ref.current_version_id
+        assert service.get_version(ref.current_version_id) is not None
+        model.shutdown()
+    finally:
+        model.shutdown()
+
+    # F3: bulk tag + trash operate on the ref id directly.
+    from paleo_workbench.catalog.adapter import CoreCatalogAdapter
+    from paleo_workbench.catalog.runtime import reset_catalog, set_catalog
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.data_lifecycle_controller import DataLifecycleController
+
+    set_catalog(CoreCatalogAdapter(service))
+
+    class _StubPage:
+        """Minimal page surface remove_assets/restore need (no Qt shell)."""
+
+        def __init__(self):
+            self.project = ProjectDocument.new("Demo")
+            self._selected_asset = None
+
+        def _set_action_status(self, _msg):
+            pass
+
+        def _refresh(self):
+            pass
+
+        def _set_selected_asset(self, asset):
+            self._selected_asset = asset
+
+    controller = DataLifecycleController(page=_StubPage())
+    rows = [model.view_at(r).raw_asset for r in range(3) if model.view_at(r)]
+    assert len(rows) == 3
+    changed = controller.bulk_apply_tag(rows, "paged_tag", add=True)
+    assert changed == 3
+    assert len(service.find_assets_by_tag("paged_tag")) == 3
+    assert controller.bulk_apply_tag(rows, "paged_tag", add=False) == 3
+    assert service.find_assets_by_tag("paged_tag") == []
+    # bulk verify resolves version ids for refs
+    _service, bridged = controller.bridged_version_map(rows)
+    assert len(bridged) == 3
+    # trash one ref (移出项目 path)
+    assert controller.remove_assets([rows[0]]) is True
+    assert len(service.list_assets()) == 39
+    # restore path (paged trash view: the ref IS the asset id)
+    service.trash_asset(rows[1].id)
+    restored_asset = service.restore_asset(rows[1].id)
+    assert restored_asset.trashed is False
+    reset_catalog()
+
+
 def test_datapage_enters_paged_mode_via_service_facade(service, qtbot, monkeypatch):
     """The 25k fast path used to read ``service.index`` (never existed) and
     never engaged; this pins the service-facade entry with a low threshold."""

@@ -210,6 +210,9 @@ def test_promote_trash_restore_roundtrip_updates_service_and_emits(
     dialog.versions_table.selectRow(2)
     assert dialog.promote_btn.isEnabled()
     dialog.promote_btn.click()
+    # Promote copies + hashes the payload OFF-thread (D6 review fix): the
+    # signal arrives via a queued worker completion.
+    qtbot.waitUntil(lambda: bool(emitted), timeout=15_000)
     assert emitted == [1]
     versions = service.list_versions(v1.asset_id)
     assert len(versions) == 4
@@ -224,6 +227,7 @@ def test_promote_trash_restore_roundtrip_updates_service_and_emits(
     dialog.versions_table.selectRow(0)
     assert dialog.trash_btn.isEnabled()
     dialog.trash_btn.click()
+    qtbot.waitUntil(lambda: len(emitted) >= 2, timeout=15_000)
     assert emitted == [1, 1]
     trashed = service.get_version(promoted.id)
     assert trashed.trashed is True
@@ -240,6 +244,7 @@ def test_promote_trash_restore_roundtrip_updates_service_and_emits(
 
     # --- restore returns the version -----------------------------------------
     dialog.restore_btn.click()
+    qtbot.waitUntil(lambda: len(emitted) >= 3, timeout=15_000)
     assert emitted == [1, 1, 1]
     restored = service.get_version(promoted.id)
     assert restored.trashed is False

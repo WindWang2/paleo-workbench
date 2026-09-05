@@ -418,7 +418,9 @@ class LineageExplorerDialog(QDialog):
             if payload.get("direction") == "up":
                 self._populate_inputs(item, payload["version_id"], payload["ancestors"])
             elif payload.get("direction") == "down":
-                self._populate_outputs(item, payload["version_id"])
+                self._populate_outputs(
+                    item, payload["version_id"], payload.get("ancestors", ())
+                )
 
     def _populate_inputs(
         self, holder: QTreeWidgetItem, version_id: str, ancestors: tuple[str, ...]
@@ -458,10 +460,14 @@ class LineageExplorerDialog(QDialog):
                 self._add_overflow_note(parent_holder, len(parent_ids) - shown)
                 break
             parent = resolved.get(pid)
+            if pid in ancestors:
+                # Cycle check FIRST: a resolvable parent that is already on
+                # the current path must not become a re-expandable node.
+                self._add_note(parent_holder, f"↺ 循环引用: {pid}")
+                shown += 1
+                continue
             if parent is not None:
                 self._make_version_item(parent_holder, parent, "up", ancestors + (pid,))
-            elif pid in ancestors:
-                self._add_note(parent_holder, f"↺ 循环引用: {pid}")
             else:
                 broken = QTreeWidgetItem(parent_holder, [f"⚠ 断链: {pid}"])
                 broken.setData(
@@ -473,15 +479,22 @@ class LineageExplorerDialog(QDialog):
         if not parent_ids:
             self._add_note(parent_holder, "（无上游 — RAW 根）")
 
-    def _populate_outputs(self, holder: QTreeWidgetItem, version_id: str) -> None:
-        """List the DIRECT children of *version_id* under *holder* (one hop)."""
+    def _populate_outputs(
+        self, holder: QTreeWidgetItem, version_id: str, ancestors: tuple[str, ...]
+    ) -> None:
+        """List the DIRECT children of *version_id* under *holder* (one hop).
+        Cyclic data (possible via raw attach_lineage) renders a ↺ note for a
+        child already on the current path instead of re-expanding forever."""
         lineage = self._get_lineage(version_id)
         if lineage is None:
             self._add_note(holder, "（无法读取血缘）")
             return
         children = list(lineage["children"])
         for child in children[:MAX_CHILDREN_PER_NODE]:
-            self._make_version_item(holder, child, "down", (version_id, child.id))
+            if child.id in ancestors:
+                self._add_note(holder, f"↺ 循环引用: {child.id}")
+                continue
+            self._make_version_item(holder, child, "down", ancestors + (child.id,))
         if len(children) > MAX_CHILDREN_PER_NODE:
             self._add_overflow_note(holder, len(children) - MAX_CHILDREN_PER_NODE)
         if not children:

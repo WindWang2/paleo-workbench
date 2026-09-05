@@ -440,9 +440,24 @@ class DataLifecycleController:
         service = self.catalog_service()
         if service is not None:
             from paleo_workbench.catalog.models import DataAsset as _DataAsset
+            from paleo_workbench.ui.pages.paged_asset_model import SqlCatalogAssetRef
 
             for item in items:
                 unwrapped = unwrap_asset(item)
+                # SQL-paged rows: the ref id IS the catalog asset id.
+                if isinstance(unwrapped, SqlCatalogAssetRef):
+                    try:
+                        trashed_assets.append(
+                            service.trash_asset(unwrapped.id, reason="移出项目")
+                        )
+                        trashed_count += 1
+                        domain_asset_ids.add(str(unwrapped.id))
+                        target_ids.discard(unwrapped.id)
+                    except Exception as exc:
+                        page._set_action_status(f"移入回收站失败，未移除: {exc}")
+                        page._refresh()
+                        return False
+                    continue
                 if not isinstance(unwrapped, _DataAsset):
                     continue
                 try:
@@ -521,6 +536,24 @@ class DataLifecycleController:
         page = self.page
         item = page._selected_asset
         resource = unwrap_asset(item)
+        from paleo_workbench.ui.pages.paged_asset_model import SqlCatalogAssetRef
+
+        if isinstance(resource, SqlCatalogAssetRef):
+            # Paged trash view: the ref IS the catalog asset id.
+            service = self.catalog_service()
+            if service is None:
+                page._set_action_status("该回收站项目无目录关联，无法还原")
+                return False
+            try:
+                asset = service.restore_asset(resource.id)
+            except Exception as exc:
+                page._set_action_status(f"还原失败: {exc}")
+                return False
+            restored = self.resource_from_catalog_asset(service, asset)
+            from paleo_workbench.catalog.legacy_projection import upsert_legacy_resource
+
+            upsert_legacy_resource(page.project, restored)
+            return True
         if not isinstance(resource, ResourceItem):
             page._set_action_status("请选择回收站中的数据项")
             return False
@@ -1199,16 +1232,26 @@ class DataLifecycleController:
         updated per item; catalog side mirrored via service.bulk_add_tag/bulk_remove_tag
         in ONE canonical write. Returns number of items changed; a failed catalog
         mirror is recorded on ``last_tag_mirror_failed`` (never blocks legacy)."""
+        # SQL-paged rows are catalog-native already: their ref id IS the
+        # asset id, so they go straight into the bulk catalog write with no
+        # legacy mirror (there is no legacy ResourceItem to mirror to).
+        from paleo_workbench.ui.pages.paged_asset_model import SqlCatalogAssetRef
+
         resources = [
             res
             for res in (unwrap_asset(it) for it in items)
             if isinstance(res, ResourceItem)
         ]
+        ref_asset_ids = [
+            ref.id
+            for ref in (unwrap_asset(it) for it in items)
+            if isinstance(ref, SqlCatalogAssetRef)
+        ]
         # Catalog mirror first (best-effort, ONE write): collect the bridged
         # catalog asset ids the same way mirror_tag_to_catalog resolves them.
         self.last_tag_mirror_failed = False
         service = self.catalog_service()
-        asset_ids: list[str] = []
+        asset_ids: list[str] = list(ref_asset_ids)
         if service is not None:
             for resource in resources:
                 _svc, ref = self.catalog_bridge(resource)
@@ -1241,6 +1284,8 @@ class DataLifecycleController:
             elif tag_name in resource.tags:
                 resource.tags.remove(tag_name)
                 count += 1
+        if not resources:
+            count = len(asset_ids)  # ref-only selection: catalog is the truth
         return count
 
     def set_version_tag(self, version_id: str, tag_name: str, *, add: bool) -> bool:
@@ -1306,9 +1351,16 @@ class DataLifecycleController:
         service = self.catalog_service()
         if service is None:
             return None, {}
+        from paleo_workbench.ui.pages.paged_asset_model import SqlCatalogAssetRef
+
         bridged: dict[str, str] = {}
         for item in items:
             resource = unwrap_asset(item)
+            if isinstance(resource, SqlCatalogAssetRef):
+                # Paged rows carry their version id directly.
+                if resource.current_version_id:
+                    bridged[resource.id] = resource.current_version_id
+                continue
             _svc, ref = self.catalog_bridge(resource)
             if ref is not None and isinstance(resource, ResourceItem):
                 # Keyed by legacy resource id — the worker resolves views by it.
@@ -1494,7 +1546,9 @@ class DataLifecycleController:
         for start in range(0, total, self.REGISTRATION_CHUNK):
             if cancel_check is not None and cancel_check():
                 break
+            chunk_ids: dict[str, str] = {}
             batch = _enter_batch()
+            committed = True
             try:
                 for resource in resources[start : start + self.REGISTRATION_CHUNK]:
                     if cancel_check is not None and cancel_check():
@@ -1502,7 +1556,7 @@ class DataLifecycleController:
                     try:
                         ref = register_resource_input(resource)
                         if ref is not None:
-                            registered_asset_ids[str(resource.id)] = str(ref.asset_id)
+                            chunk_ids[str(resource.id)] = str(ref.asset_id)
                     except Exception as exc:
                         failure = f"{resource.name} ({resource.id}): {exc}"
                         self.last_registration_failures.append(failure)
@@ -1516,11 +1570,16 @@ class DataLifecycleController:
                     try:
                         batch.__exit__(None, None, None)
                     except Exception as exc:
-                        registered_asset_ids.clear()
+                        # Only THIS chunk's registrations are lost — earlier
+                        # chunks are already committed and their bridges must
+                        # stay in the receipt.
+                        committed = False
                         self.last_registration_failures.append(f"批提交失败: {exc}")
                         logging.getLogger(__name__).warning(
                             "import catalog batch commit failed: %s", exc
                         )
+            if committed:
+                registered_asset_ids.update(chunk_ids)
             if progress is not None:
                 try:
                     # The ACTUAL registered count: a cancel inside the chunk

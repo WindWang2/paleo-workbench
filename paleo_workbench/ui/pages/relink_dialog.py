@@ -153,10 +153,11 @@ class RelinkSourcesDialog(QDialog):
 
     # -- worker plumbing --------------------------------------------------------
 
-    def _start_task(self, job, task, on_finished, on_failed) -> None:
+    def _start_task(self, job, task, on_finished, on_failed, *, cancel_event=None) -> None:
         if self._busy or job.is_running:
             return  # one task at a time; buttons already reflect this
-        cancel_event = threading.Event()
+        if cancel_event is None:
+            cancel_event = threading.Event()
         self._cancel_event = cancel_event
         self._busy = True
         self._sync_buttons()
@@ -177,7 +178,9 @@ class RelinkSourcesDialog(QDialog):
         if self._cancel_event is not None:
             self._cancel_event.set()
         self._cancel_event = None
-        # Close-time teardown only (see job discipline above).
+        # Close-time teardown only (see job discipline above). The workers
+        # poll the cancel token between items, so they stop promptly; the
+        # bounded join covers the item in flight.
         self._scan_job.shutdown(wait_ms=3_000)
         self._relink_job.shutdown(wait_ms=3_000)
         self._busy = False
@@ -198,11 +201,13 @@ class RelinkSourcesDialog(QDialog):
             self.summary_label.setText("数据目录不可用")
             return
         self.summary_label.setText("正在扫描缺失源…")
+        cancel_event = threading.Event()
         self._start_task(
             self._scan_job,
-            lambda: service.find_missing_sources(),
+            lambda: service.find_missing_sources(cancel=cancel_event.is_set),
             self._on_scan_finished,
             self._on_scan_failed,
+            cancel_event=cancel_event,
         )
 
     def _on_scan_finished(self, report) -> None:
@@ -313,8 +318,12 @@ class RelinkSourcesDialog(QDialog):
 
         def task():
             ok = 0
+            cancelled = False
             reasons: list[str] = []
             for version_id, candidate, label in pairs:
+                if cancel_event is not None and cancel_event.is_set():
+                    cancelled = True
+                    break
                 try:
                     service.relink_external_source(version_id, candidate)
                     ok += 1
@@ -322,13 +331,15 @@ class RelinkSourcesDialog(QDialog):
                     reasons.append(f"{label}: {exc}")
                 except Exception as exc:  # noqa: BLE001 — surfaced per row
                     reasons.append(f"{label}: {exc.__class__.__name__}: {exc}")
-            return {"ok": ok, "reasons": reasons}
+            return {"ok": ok, "reasons": reasons, "cancelled": cancelled}
 
+        cancel_event = threading.Event()
         self._start_task(
             self._relink_job,
             task,
             self._on_relink_finished,
             self._on_relink_failed,
+            cancel_event=cancel_event,
         )
 
     def _on_relink_finished(self, result) -> None:

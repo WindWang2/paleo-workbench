@@ -165,6 +165,9 @@ class VersionWorkbenchDialog(QDialog):
         self.resize(940, 640)
         self._service_provider = service_provider
         self._asset_id = asset_id
+        from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+
+        self._promote_job = OwnedWorkerJob(self)
         # Parallel to the table rows; rebuilt wholesale by reload_versions().
         self._versions: list[DataVersion] = []
 
@@ -312,7 +315,18 @@ class VersionWorkbenchDialog(QDialog):
             self._show_detail(None)
             self._sync_action_buttons()
             return
-        asset = service.get_asset(self._asset_id)
+        from paleo_workbench.catalog.models import CatalogError
+
+        try:
+            asset = service.get_asset(self._asset_id)
+        except CatalogError:
+            self.header_label.setText("该数据资产已不存在（可能已被彻底删除）")
+            self.count_label.setText("")
+            self._versions = []
+            self.versions_table.setRowCount(0)
+            self._show_detail(None)
+            self._sync_action_buttons()
+            return
         # list_versions returns ascending version_number; the timeline is
         # newest-first.
         self._versions = list(reversed(service.list_versions(self._asset_id)))
@@ -369,6 +383,18 @@ class VersionWorkbenchDialog(QDialog):
         rows = self._selected_rows()
         self._show_detail(self._versions[rows[0]] if len(rows) == 1 else None)
         self._sync_action_buttons()
+
+    def _set_actions_enabled(self, enabled: bool) -> None:
+        """Global gate during the off-thread promote (payload copy)."""
+        for button in (
+            getattr(self, "promote_btn", None),
+            getattr(self, "trash_btn", None),
+            getattr(self, "restore_btn", None),
+            getattr(self, "compare_btn", None),
+            getattr(self, "open_btn", None),
+        ):
+            if button is not None:
+                button.setEnabled(enabled)
 
     def _sync_action_buttons(self) -> None:
         rows = self._selected_rows()
@@ -456,14 +482,48 @@ class VersionWorkbenchDialog(QDialog):
         if not self._confirm(
             "提升为正式数据",
             f"将 v{version.version_number} 复制为新的不可变正式成果 (OUTPUT) 版本？"
-            "（源版本保持不变以保留溯源）",
+            "（源版本保持不变以保留溯源；大文件复制+校验在后台执行）",
         ):
             return
-        try:
-            service.promote_version(version.id)
-        except CatalogError as exc:
-            QMessageBox.critical(self, "提升失败", f"提升版本失败: {exc}")
-            return
+        # promote = full payload copy + SHA-256 + fsync — unbounded size, so
+        # it runs OFF the GUI thread (same discipline as the relink dialog).
+        from PySide6.QtCore import QObject as _QObject
+        from PySide6.QtCore import Signal as _Signal
+
+        class _PromoteWorker(_QObject):
+            finished = _Signal()
+            failed = _Signal(str)
+
+            def __init__(self, task, parent=None):
+                super().__init__(parent)
+                self._task = task
+
+            def run(self) -> None:
+                try:
+                    self._task()
+                except Exception as exc:  # noqa: BLE001 — surfaced to the user
+                    self.failed.emit(f"{exc.__class__.__name__}: {exc}")
+                    return
+                self.finished.emit()
+
+        self._set_actions_enabled(False)
+        worker = _PromoteWorker(lambda: service.promote_version(version.id))
+        self._promote_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed),
+            result_connections=(
+                (worker.finished, self._on_promote_finished),
+                (worker.failed, self._on_promote_failed),
+            ),
+        )
+
+    def _on_promote_finished(self) -> None:
+        self._set_actions_enabled(True)
+        self._finish_mutation()
+
+    def _on_promote_failed(self, message: str) -> None:
+        self._set_actions_enabled(True)
+        QMessageBox.critical(self, "提升失败", f"提升版本失败: {message}")
         self._finish_mutation()
 
     def _on_open_clicked(self) -> None:

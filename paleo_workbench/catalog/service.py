@@ -3373,6 +3373,26 @@ class DataCatalogService:
             )
         )
 
+    def cached_catalog_aggregates(
+        self, include_trashed: bool = False
+    ) -> dict | None:
+        """The cached aggregates when fresh, else None (never computes).
+
+        Lets the UI serve badges synchronously on the warm path and defer
+        the ~389 ms cold group-by pass off the GUI thread at 100k.
+        """
+        with self._lock:
+            cache_key = (
+                self.document.catalog_revision,
+                self.mutation_serial,
+                bool(include_trashed),
+            )
+            cache = getattr(self, "_aggregates_cache", None)
+            cache_rev = getattr(self, "_aggregates_cache_rev", None)
+            if cache is not None and cache_rev == cache_key:
+                return cache
+        return None
+
     def catalog_aggregates(self, include_trashed: bool = False) -> dict:
         """Group-by counts for explorer badges: ``total``/``stages``/
         ``types``/``tags``/``review_status`` (same shape as the index).
@@ -3626,10 +3646,11 @@ class DataCatalogService:
                         "version": "current_version_number",
                     }[_order]
                 )
-                # None sorts last, mirroring SQLite's NULLS-last observed
-                # order for ascending LEFT JOIN sorts.
+                # SQLite ASC sorts NULLs FIRST — the fallback must interleave
+                # identically or a mid-refresh gate flip would reorder rows.
                 return (
-                    (value is None, value if isinstance(value, (int, str)) else ""),
+                    0 if value is None else 1,
+                    value if value is not None else "",
                     row["name"],
                     row["id"],
                 )

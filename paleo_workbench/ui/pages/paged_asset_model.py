@@ -69,14 +69,31 @@ _COLUMN_TO_ORDER = {
 
 
 class SqlCatalogAssetRef:
-    """Tiny row identity for a SQL-paged catalog asset.
+    """Row identity + lifecycle facts for a SQL-paged catalog asset.
 
     The data page's action paths address rows through ``getattr``; this ref
-    carries exactly the fields those paths read, without materializing the
-    full pydantic ``DataAsset``.
+    carries the fields those paths read, without materializing the full
+    pydantic ``DataAsset``. ``current_version_id`` is what makes catalog
+    actions (version workbench, lineage, promote, verify) resolvable from a
+    paged row; ``format``/``stage``/``managed`` keep generic UI consumers
+    (export-format probes, stage gates) from crashing on a missing attr.
     """
 
-    __slots__ = ("id", "name", "type", "path", "metadata", "trashed")
+    __slots__ = (
+        "id",
+        "name",
+        "type",
+        "path",
+        "metadata",
+        "trashed",
+        "current_version_id",
+        "format",
+        "stage",
+        "managed",
+        "size_bytes",
+        "sha256",
+        "created_at",
+    )
 
     def __init__(self, row: dict) -> None:
         self.id = str(row.get("id") or "")
@@ -85,6 +102,17 @@ class SqlCatalogAssetRef:
         self.path = str(row.get("current_path") or "")
         self.metadata = _load_metadata(row.get("metadata"))
         self.trashed = bool(row.get("trashed"))
+        self.current_version_id = str(row.get("current_version_id") or "")
+        self.format = str(row.get("current_format") or "")
+        stage_raw = str(row.get("current_stage") or "raw")
+        try:
+            self.stage = DataStage(stage_raw)
+        except ValueError:
+            self.stage = DataStage.RAW
+        self.managed = bool(row.get("current_managed", 1))
+        self.size_bytes = row.get("current_size_bytes")
+        self.sha256 = str(row.get("current_sha256") or "")
+        self.created_at = str(row.get("current_created_at") or "")
 
 
 def _load_metadata(raw) -> dict:
@@ -171,6 +199,10 @@ class CatalogPageProvider:
         self._trashed_only = False
         self._order_by: str = "name"
         self._page_cursors: dict[int, tuple[str, str] | None] = {}
+        # Bumped on every query/order change; a stale-epoch worker completing
+        # after the clear must not re-pollute the cursor map with the OLD
+        # query's cursor (which would silently skip rows of the new query).
+        self._generation = 0
 
     @property
     def index(self):
@@ -184,6 +216,18 @@ class CatalogPageProvider:
         except Exception:
             logger.debug("catalog_aggregates failed", exc_info=True)
             return {}
+
+    def total_source_aggregates_cached(self) -> dict | None:
+        """Warm aggregates only — None lets the host defer the cold pass
+        off the GUI thread instead of a ~0.4 s hang at 100k."""
+        try:
+            cached = getattr(self._source, "cached_catalog_aggregates", None)
+            if callable(cached):
+                return cached()
+            return None  # raw-index source: no cheap freshness probe
+        except Exception:
+            logger.debug("cached_catalog_aggregates failed", exc_info=True)
+            return None
 
     # -- query translation ------------------------------------------------
 
@@ -222,6 +266,7 @@ class CatalogPageProvider:
         self._asset_id = getattr(query, "asset_id", None)
         self._include_trashed = False
         self._trashed_only = node_type == "trash"
+        self._generation += 1
         self._page_cursors.clear()  # a new result set invalidates every cursor
         if node_type == "stage":
             self._stage = getattr(query, "node_value", None) or stage
@@ -257,6 +302,7 @@ class CatalogPageProvider:
             "include_trashed": self._include_trashed,
             "trashed_only": self._trashed_only,
             "order_by": self._order_by,
+            "generation": self._generation,
         }
 
     # -- row source --------------------------------------------------------
@@ -316,7 +362,9 @@ class CatalogPageProvider:
             after=keyset,
         )
         views = [asset_view_from_sql_row(row, self._project_root) for row in rows]
-        if order_by == "name":
+        if order_by == "name" and params.get("generation") == self._generation:
+            # Stale-epoch fetches (query changed mid-flight) must not seed
+            # the NEW query's cursor map with their own boundary.
             self._page_cursors[offset + len(views)] = (
                 (views[-1].name, views[-1].raw_asset.id) if views else None
             )
@@ -335,12 +383,14 @@ class CatalogPageProvider:
         """Order pages by a table column; False when it has no SQL order."""
         if column_key == "name" and descending:
             self._order_by = "name_desc"
+            self._generation += 1
             self._page_cursors.clear()
             return True
         order = _COLUMN_TO_ORDER.get(column_key or "")
         if order is None:
             return False
         self._order_by = order
+        self._generation += 1
         self._page_cursors.clear()
         return True
 
@@ -397,6 +447,12 @@ class PagedAssetTableModel(AssetTableModel):
         self._epoch = 0
         self._watermark = 0  # next sequential page for the fetch protocol
         self._seen_rows: OrderedDict[tuple[str, str], int] = OrderedDict()
+        # Demand queue: data() asked for these pages while the pool was
+        # saturated; re-issued as in-flight capacity frees up (F7).
+        self._demand: OrderedDict[int, None] = OrderedDict()
+        # Per-page empty/failed attempt counts: one transient store hiccup
+        # must not truncate the table; repeated failure degrades honestly.
+        self._attempts: dict[int, int] = {}
         self._signals = _PageFetchSignals()
         self._signals.page_ready.connect(self._on_page_ready)
         self._signals.page_failed.connect(self._on_page_failed)
@@ -432,6 +488,8 @@ class PagedAssetTableModel(AssetTableModel):
         self._epoch += 1
         self._pages.clear()
         self._inflight.clear()
+        self._demand.clear()
+        self._attempts.clear()
         self._seen_rows.clear()
         self._total = self._provider.total()
         self.beginResetModel()
@@ -524,7 +582,7 @@ class PagedAssetTableModel(AssetTableModel):
             # Uncached row: serve the placeholder AND schedule its page.
             # (Callers may pass the role as a raw int — normalize.)
             if int(role) == int(Qt.ItemDataRole.DisplayRole):
-                self._request_page(index.row() // PAGE_SIZE)
+                self._request_page(index.row() // PAGE_SIZE, from_demand=True)
                 return "…"
             return None
         return super().data(index, role)
@@ -543,14 +601,21 @@ class PagedAssetTableModel(AssetTableModel):
 
     # -- async page plumbing ----------------------------------------------------
 
-    def _request_page(self, page_index: int) -> None:
+    def _request_page(self, page_index: int, *, from_demand: bool = False) -> None:
         """Coalesced, bounded, off-thread fetch scheduling."""
         if page_index * PAGE_SIZE >= self._total:
             return
         if page_index in self._pages or page_index in self._inflight:
+            self._demand.pop(page_index, None)
             return
         if len(self._inflight) >= self.MAX_INFLIGHT:
+            # Saturated: remember the demand and re-issue on the next
+            # completion — a scrollbar jump must recover by itself.
+            if from_demand:
+                self._demand[page_index] = None
+                self._demand.move_to_end(page_index)
             return
+        self._demand.pop(page_index, None)
         params = self._provider.snapshot_params()
         self._inflight[page_index] = params
         self._pool.start(
@@ -561,10 +626,24 @@ class PagedAssetTableModel(AssetTableModel):
         self._inflight.pop(offset, None)
         if epoch != self._epoch:
             return  # stale query: latest-only, drop on arrival
-        if not views:
-            # A short read past the end means the total shrank underneath us
-            # (concurrent mutation); clamp honestly.
+        if not views and offset * PAGE_SIZE < self._total:
+            # An EMPTY page BEFORE the reported total is suspicious: the
+            # store's _safe wrapper turns transient SQL errors into [].
+            # Retry a bounded number of times instead of truncating the
+            # table; only a repeatedly empty page shrinks the total.
+            attempts = self._attempts.get(offset, 0) + 1
+            self._attempts[offset] = attempts
+            if attempts < 3:
+                self._request_page(offset, from_demand=True)
+                return
+            # Honest degradation after repeated empty reads: rowCount is
+            # about to change, so wrap the shrink in reset signals (Qt
+            # contract — a bare rowCount change is a model violation).
+            self.beginResetModel()
             self._total = min(self._total, offset * PAGE_SIZE)
+            self.endResetModel()
+        self._attempts.pop(offset, None)
+        if not views:
             if offset == self._watermark:
                 self._advance_watermark()
             return
@@ -581,11 +660,18 @@ class PagedAssetTableModel(AssetTableModel):
             self._advance_watermark()
         # One-page lookahead keeps sequential scrolling smooth.
         self._request_page(self._watermark)
+        # Saturated demand first, then the next sequential page.
+        while self._demand and len(self._inflight) < self.MAX_INFLIGHT:
+            demanded, _ = self._demand.popitem(last=False)
+            self._request_page(demanded, from_demand=True)
 
     def _on_page_failed(self, epoch: int, offset: int, _error: str) -> None:
         self._inflight.pop(offset, None)
         if epoch != self._epoch:
             return
+        self._attempts[offset] = self._attempts.get(offset, 0) + 1
+        if self._attempts[offset] < 3:
+            self._request_page(offset, from_demand=True)
 
     def _store_page(self, offset: int, views: list) -> None:
         self._pages[offset] = views

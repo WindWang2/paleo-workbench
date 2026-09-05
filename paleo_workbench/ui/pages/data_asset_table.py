@@ -56,6 +56,9 @@ class DataAssetTable(QWidget):
     selected_asset_changed = Signal(object)
     selected_assets_changed = Signal(list)
     context_menu_requested = Signal(QPoint, object)  # (global_pos, asset or list of assets)
+    # Search text changed outside the toolbar (chip removal / saved filter
+    # apply); the host syncs its toolbar box without a feedback loop.
+    search_text_changed = Signal(str)
     # Paged mode could not serve the requested view (unmappable filter);
     # the host must rebuild through the materialized path.
     paged_mode_unavailable = Signal()
@@ -93,7 +96,7 @@ class DataAssetTable(QWidget):
         self.filter_chips_bar = FilterChipsBar(self)
         self.filter_chips_bar.chip_removed.connect(self._remove_filter_dimension)
         self.filter_chips_bar.clear_all.connect(self._clear_all_filters)
-        self.filter_chips_bar.filter_applied.connect(self.set_filter_query)
+        self.filter_chips_bar.filter_applied.connect(self.apply_saved_filter)
         layout.addWidget(self.filter_chips_bar)
 
         toolbar = QHBoxLayout()
@@ -330,6 +333,7 @@ class DataAssetTable(QWidget):
         elif key == "text":
             query = replace(query, search_text="")
             self._search_text = ""
+            self.search_text_changed.emit("")
         elif key == "stage":
             query = replace(query, stage=None)
         elif key == "type":
@@ -346,10 +350,16 @@ class DataAssetTable(QWidget):
         self.set_filter_query(query)
 
     def _clear_all_filters(self) -> None:
-        from dataclasses import replace
-
         self._search_text = ""
+        self.search_text_changed.emit("")
         self.set_filter_query(FilterQuery(node_type="all"))
+
+    def apply_saved_filter(self, query: FilterQuery) -> None:
+        """A saved filter carries its OWN search text — adopt it before the
+        set_filter_query normalization pass, so 应用过滤器 actually applies
+        the stored text instead of the toolbar's stale prefix."""
+        self._search_text = (query.search_text or "").strip().lower()
+        self.set_filter_query(query)
 
     def visible_asset_count(self) -> int:
         if self._in_paged_mode and self._paged_model is not None:
@@ -383,12 +393,16 @@ class DataAssetTable(QWidget):
             ordered = ["name"]
         self._visible_column_keys = ordered
         self.model.set_column_keys(self._visible_column_keys)
+        if self._paged_model is not None:
+            self._paged_model.set_column_keys(self._visible_column_keys)
         self._sync_selection()
         self._sync_column_actions()
 
     def reset_columns(self) -> None:
         self._visible_column_keys = list(DEFAULT_COLUMN_KEYS)
         self.model.set_column_keys(self._visible_column_keys)
+        if self._paged_model is not None:
+            self._paged_model.set_column_keys(self._visible_column_keys)
         self._sync_selection()
         self._sync_column_actions()
 
@@ -465,7 +479,12 @@ class DataAssetTable(QWidget):
             return
 
         active = self._active_model()
-        selected_items = [active.asset_at(r.row()) for r in rows if active.asset_at(r.row()) is not None]
+        # One resolution per row (paged asset_at may be a sparse-cache miss).
+        selected_items = []
+        for r in rows:
+            asset = active.asset_at(r.row())
+            if asset is not None:
+                selected_items.append(asset)
         self._selected_assets = selected_items
         first = selected_items[0] if selected_items else None
         self._selected_asset = first
@@ -483,7 +502,11 @@ class DataAssetTable(QWidget):
             selected_rows = [view_row]
 
         active = self._active_model()
-        selected_items = [active.asset_at(r) for r in selected_rows if active.asset_at(r) is not None]
+        selected_items = []
+        for r in selected_rows:
+            asset = active.asset_at(r)
+            if asset is not None:
+                selected_items.append(asset)
         if not selected_items:
             return
 

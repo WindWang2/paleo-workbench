@@ -41,8 +41,11 @@
 ## D-10 工程对象视图 = Catalog 上的 typed read model
 复用 `catalog/domain_binding.py` + `project/domain.py` 的既有 DomainEntity 模型，在 NavigationTree/查询层增加 object-type 分组视图；不新增表、不新增文档字段（视图按 asset.metadata/domain binding 派生）。
 
-## D-11 索引 schema bump 到 v6
-新增索引（lineage parent、paged 组合等）通过 `INDEX_SCHEMA_VERSION` bump + 既有全量重建机制生效；不为 ALTER 写迁移（与仓库既有「rebuild-not-migrate」一致）。STORE_SCHEMA_VERSION 不动（canonical 表结构不变，除非 relink/audit 需要新表——relink 事件走 audit 存储，评估后如需新表再 bump store 并记录）。
+## D-11 【修订】索引布局变更不 bump INDEX_SCHEMA_VERSION（superseded 初版）
+初版曾计划 bump 到 v6；实现期发现两条硬约束推翻了它：
+1. 纯 CREATE/DROP INDEX 是布局变更，连接时幂等 DDL 即可在任何旧库就地生效（沿 `idx_assets_name_id` 先例），不需要重建；
+2. `INDEX_SCHEMA_VERSION` 与 `STORE_SCHEMA_VERSION` 共用 `sync_state.index_schema_version` 键，且 `load_document` 历史上将其与 STORE_SCHEMA_VERSION 做**等值**比较——单独 bump 会被误判为非 canonical store，进而从陈旧 manifest「重建」，这是潜在数据丢失路径。
+落地：保持 INDEX_SCHEMA_VERSION=5；`load_document` 改为版本地板（≥5 即 canonical，可加载），由 `tests/test_catalog_paged_query.py::test_load_document_accepts_newer_index_layout` 钉死；新索引连接时幂等创建。任何**列级**变更仍按仓库既有 rebuild 机制处理。
 
 ## D-12 每次 lifecycle 操作后的全量 `_refresh()` 本轮不重写为增量事件总线
 风险/收益权衡：增量刷新牵动 legacy projection/selection/inspector 全链，属独立大改造。本 Goal 的规模路径是「paged mode 下全量刷新本身走 SQL 聚合而非物化」，即让 `_refresh` 在 paged 模式下 O(page) 而非 O(N)。该点必须在实现中验证（update_state 在 paged 模式不得跑全量 enricher）。若发现无法回避的全量路径，记录为已知限制并给出量化证据。

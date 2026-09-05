@@ -155,6 +155,7 @@ class DataToolbar(QWidget):
 
         self.search_box = QLineEdit()
         self.search_box.setObjectName("SearchBox")
+        self._search_sync = False
         self.search_box.setPlaceholderText("搜索文件名 / 类型 / 阶段 / 标签 / 路径...")
         self.search_box.setToolTip("搜索文件名/类型/阶段/标签/路径")
         self.search_box.setClearButtonEnabled(True)
@@ -286,7 +287,18 @@ class DataToolbar(QWidget):
     def _emit_tag_filter(self) -> None:
         self.tag_filter_changed.emit(list(self._selected_tags), self._tag_operator)
 
+    def set_search_text_silent(self, text: str) -> None:
+        """Programmatic sync (saved-filter apply / chip removal) — updates
+        the box WITHOUT re-emitting search_changed (no feedback loop)."""
+        self._search_sync = True
+        try:
+            self.search_box.setText(text)
+        finally:
+            self._search_sync = False
+
     def _on_search_text_changed(self, text: str) -> None:
+        if getattr(self, "_search_sync", False):
+            return
         self._pending_search = text
         self._search_timer.start()
 
