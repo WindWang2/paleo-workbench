@@ -25,6 +25,7 @@ def valid_las_text(
         "~WELL INFORMATION",
         f"STRT.M {start}",
         f"STOP.M {start + step * (rows - 1)}",
+        f"STEP.M {step}",
         f"NULL. {null}",
         f"WELL. {well_name}",
         "~CURVE INFORMATION",

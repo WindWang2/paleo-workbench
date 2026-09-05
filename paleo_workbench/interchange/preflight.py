@@ -15,7 +15,11 @@ from paleo_workbench.interchange.contracts import (
     InspectionResult,
     SniffResult,
 )
-from paleo_workbench.interchange.registry import InterchangeRegistry, sniff_format
+from paleo_workbench.interchange.registry import (
+    InterchangeRegistry,
+    SNIFF_FORMAT_ALIASES,
+    sniff_format,
+)
 
 
 @dataclass(frozen=True)
@@ -94,11 +98,12 @@ class ImportPreflightService:
             )
 
         sniff = sniff_format(path, self.registry())
+        sniffed_id = SNIFF_FORMAT_ALIASES.get(sniff.format_id, sniff.format_id)
         extension = path.suffix.lower().lstrip(".")
-        adapter = self.registry().get(sniff.format_id) if sniff.determined else None
+        adapter = self.registry().get(sniffed_id) if sniff.determined else None
         if adapter is None:
             adapter = self.registry().adapter_for_extension(path)
-            if adapter is not None and sniff.determined and sniff.format_id != adapter.format_id:
+            if adapter is not None and sniff.determined and sniffed_id != adapter.format_id:
                 issues.append(
                     PreflightIssue(
                         "error",

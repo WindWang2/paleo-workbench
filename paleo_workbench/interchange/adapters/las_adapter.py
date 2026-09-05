@@ -162,18 +162,43 @@ class LasAdapter(FormatAdapter):
         except UnicodeDecodeError:
             result.warnings.append("文件前缀不是有效 UTF-8（LAS 规范为 ASCII）")
 
+    @staticmethod
+    def _parse_depth_header(path: Path) -> dict:
+        """Bounded read of STRT/STOP/STEP declarations (~W section)."""
+        import re
+
+        try:
+            with open(path, "rb") as fh:
+                raw = fh.read(SNIFF_PREFIX_BYTES * 2)
+        except OSError:
+            return {}
+        text = raw.decode("utf-8", errors="replace")
+        header: dict[str, float] = {}
+        for key in ("STRT", "STOP", "STEP"):
+            match = re.search(
+                rf"^{key}\.\s*\S+\s+([-+0-9.eE]+)", text, re.MULTILINE | re.IGNORECASE
+            )
+            if match:
+                try:
+                    header[key.lower()] = float(match.group(1))
+                except ValueError:
+                    continue
+        return header
+
     def _scan_ascii_stream(self, path: Path, header, result: InspectionResult) -> None:
         """Streaming O(1)-memory scan of the ~A section: depth order/malformed rows."""
         if result.size_bytes > _FULL_SCAN_MAX_BYTES:
             result.warnings.append("文件超过全量扫描上限：跳过深度顺序检查")
             return
+        depth_header = self._parse_depth_header(path)
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as fh:
-                self._scan_ascii_lines(fh, header, result)
+                self._scan_ascii_lines(fh, header, result, depth_header)
         except OSError as exc:
             result.warnings.append(f"数据区扫描失败: {exc}")
 
-    def _scan_ascii_lines(self, fh, header, result: InspectionResult) -> None:
+    def _scan_ascii_lines(self, fh, header, result: InspectionResult,
+                          depth_header: dict | None = None) -> None:
         in_ascii = False
         prev_depth: float | None = None
         direction: str | None = None
@@ -222,6 +247,23 @@ class LasAdapter(FormatAdapter):
             result.warnings.append(f"深度列含 {null_depths} 个空值/非有限值")
         if non_monotonic:
             result.warnings.append(f"深度顺序异常（非单调/重复）共 {non_monotonic} 处")
+        self._check_declared_extent(rows, depth_header or {}, result)
+
+    @staticmethod
+    def _check_declared_extent(rows: int, depth_header: dict, result: InspectionResult) -> None:
+        strt = depth_header.get("strt")
+        stop = depth_header.get("stop")
+        step = depth_header.get("step")
+        if strt is None or stop is None or not step:
+            return
+        try:
+            expected = int(round(abs(stop - strt) / abs(step))) + 1
+        except (ZeroDivisionError, TypeError):
+            return
+        if rows + 1 < expected:  # tolerate a single dropped row
+            result.warnings.append(
+                f"数据行数（{rows}）少于头声明（STRT/STOP/STEP 推算 {expected}）：文件可能截断"
+            )
 
     # -- plan / execute -----------------------------------------------------
     def plan_import(self, path, inspection, *, managed=True, asset_name=None, options=None):

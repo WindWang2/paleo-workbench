@@ -32,6 +32,13 @@ from paleo_workbench.interchange.contracts import (
 SNIFF_PREFIX_BYTES = 8192
 _SQITE_MAGIC = b"SQLite format 3\x00"
 
+# Sniff evidence ids → adapter format ids (content families vs adapters).
+SNIFF_FORMAT_ALIASES = {
+    "geotiff": "raster",
+    "gpkg": "vector_gdal",
+    "shapefile": "vector_gdal",
+}
+
 
 class FormatAdapter(ABC):
     """Contract every interchange adapter implements.
