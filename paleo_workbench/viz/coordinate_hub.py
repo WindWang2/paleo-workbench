@@ -27,12 +27,20 @@ class TimeDepthCalibration:
       extrapolation, no constant-velocity fallback (out-of-range → None);
     * ``provenance`` records where the relationship came from
       (``checkshot:<asset>``, ``td-table:<path>``, …) so any depth↔time
-      routing can state its authority.
+      routing can state its authority;
+    * ``version_id``/``fingerprint`` (linked-interpretation L9) identify the
+      catalog DataVersion when the calibration was saved through the
+      interpretation lifecycle — unversioned ad-hoc tables carry None.
     """
 
     well_id: str
     pairs: tuple[tuple[float, float], ...]
     provenance: str
+    version_id: str | None = None
+    fingerprint: str | None = None
+    # Non-scientific context (quality metrics, reviewer, …); excluded from
+    # equality because the fingerprint is the scientific identity.
+    metadata: dict[str, object] = field(default_factory=dict, compare=False)
 
     def __post_init__(self) -> None:
         if len(self.pairs) < 2:
@@ -52,11 +60,21 @@ class TimeDepthCalibration:
         pairs: Sequence[tuple[float, float]],
         *,
         provenance: str,
+        version_id: str | None = None,
+        fingerprint: str | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> "TimeDepthCalibration":
         cleaned = tuple(
             (float(md), float(twt)) for md, twt in sorted(pairs, key=lambda p: float(p[0]))
         )
-        return cls(well_id=str(well_id), pairs=cleaned, provenance=str(provenance))
+        return cls(
+            well_id=str(well_id),
+            pairs=cleaned,
+            provenance=str(provenance),
+            version_id=version_id,
+            fingerprint=fingerprint,
+            metadata=dict(metadata) if metadata else {},
+        )
 
     def md_to_twt(self, md: float) -> float | None:
         md_val = float(md)
@@ -193,7 +211,13 @@ class CoordinateTransformHub:
         self._seismic_xl_step: tuple[float, float] = (0.0, 10.0)
         self._il_min: int = 100
         self._xl_min: int = 200
-        self._velocity: float = 2000.0  # m/s
+        # Velocity is NOT defaulted (linked-interpretation L1): a constant
+        # velocity is an explicit assumption and z↔TWT conversions refuse to
+        # run without one (``velocity_assumption_required``), so the old
+        # silent 2000 m/s guess can never masquerade as a conversion.
+        self._velocity: float | None = None
+        # CRS tag for the bin-grid map space (None = unlabelled/project-local).
+        self._crs: str | None = None
 
     # -------------------------------------------------------------------------
     # Well Registry & Depth Transformations
@@ -310,7 +334,7 @@ class CoordinateTransformHub:
         if twt is None:
             return None
         x, y, _tvd = self.well_depth_to_map(well_id, md)
-        il, xl, _ = self.map_to_seismic(x, y, 0.0)
+        il, xl = self.map_to_seismic_xy(x, y)
         return (il, xl, float(twt))
 
     def registered_well_ids(self) -> tuple[str, ...]:
@@ -434,28 +458,65 @@ class CoordinateTransformHub:
         xl_step: tuple[float, float] = (0.0, 10.0),
         il_min: int = 100,
         xl_min: int = 200,
-        velocity: float = 2000.0,
+        velocity: float | None = None,
+        crs: str | None = None,
     ) -> None:
-        """Configure seismic grid origin, step vectors, index minima, and default velocity."""
-        if velocity <= 0.0:
+        """Configure seismic grid origin, step vectors, index minima.
+
+        ``velocity`` is an EXPLICIT constant-velocity assumption for the
+        legacy z↔TWT tuple API (display/approximate use). It has no default
+        anymore: passing nothing leaves the hub without a velocity and the
+        z↔TWT tuple conversions refuse to run (``ValueError``) instead of
+        guessing 2000 m/s. Scientific routing goes through
+        :class:`~paleo_workbench.viz.domain_coords.DomainCoordinationService`
+        or the calibration-gated ``well_md_to_seismic_cursor``.
+        """
+        if velocity is not None and velocity <= 0.0:
             raise ValueError(f"Velocity must be positive, got {velocity}")
         self._seismic_origin = (float(origin[0]), float(origin[1]))
         self._seismic_il_step = (float(il_step[0]), float(il_step[1]))
         self._seismic_xl_step = (float(xl_step[0]), float(xl_step[1]))
         self._il_min = int(il_min)
         self._xl_min = int(xl_min)
-        self._velocity = float(velocity)
+        self._velocity = float(velocity) if velocity is not None else None
+        self._crs = str(crs) if crs else None
+
+    @property
+    def seismic_crs(self) -> str | None:
+        """CRS tag of the bin-grid map space (None = unlabelled)."""
+        return self._crs
+
+    def velocity_assumption(self) -> float | None:
+        """The explicit velocity assumption, or None when none is declared."""
+        return self._velocity
 
     def set_velocity(self, velocity: float) -> None:
-        """Set average velocity (m/s) for time-depth conversion."""
+        """Declare an explicit average-velocity assumption (m/s).
+
+        This only powers the legacy approximate z↔TWT tuple conversions; it
+        is never a substitute for a :class:`TimeDepthCalibration`.
+        """
         if velocity <= 0.0:
             raise ValueError(f"Velocity must be positive, got {velocity}")
         self._velocity = float(velocity)
 
-    def seismic_to_map(
-        self, il: int | float, xl: int | float, twt: float
-    ) -> tuple[float, float, float]:
-        """Convert seismic (inline, crossline, twt_ms) to Map (x, y, z_m)."""
+    def clear_velocity_assumption(self) -> None:
+        """Drop the velocity assumption (z↔TWT tuple conversions fail closed)."""
+        self._velocity = None
+
+    def _require_velocity(self) -> float:
+        if self._velocity is None:
+            raise ValueError(
+                "no velocity assumption declared: z↔TWT conversion refused "
+                "(declare one via set_velocity/configure_seismic_grid, or use "
+                "a TimeDepthCalibration)"
+            )
+        return self._velocity
+
+    # -- pure bin-grid geometry (no vertical conversion) ----------------------
+
+    def seismic_to_map_xy(self, il: int | float, xl: int | float) -> tuple[float, float]:
+        """(inline, crossline) → map (x, y). Pure bin-grid geometry."""
         dil = float(il) - self._il_min
         dxl = float(xl) - self._xl_min
         x = (
@@ -468,13 +529,10 @@ class CoordinateTransformHub:
             + dil * self._seismic_il_step[1]
             + dxl * self._seismic_xl_step[1]
         )
-        z = (float(twt) / 2000.0) * self._velocity
-        return (float(x), float(y), float(z))
+        return (float(x), float(y))
 
-    def map_to_seismic(
-        self, x: float, y: float, z: float
-    ) -> tuple[int, int, float]:
-        """Convert Map (x, y, z_m) to seismic (inline, crossline, twt_ms) using full 2x2 matrix inversion."""
+    def map_to_seismic_xy(self, x: float, y: float) -> tuple[int, int]:
+        """Map (x, y) → nearest (inline, crossline). Pure bin-grid geometry."""
         rel_x = float(x) - self._seismic_origin[0]
         rel_y = float(y) - self._seismic_origin[1]
 
@@ -488,10 +546,36 @@ class CoordinateTransformHub:
 
         dil = (dy_xl * rel_x - dx_xl * rel_y) / det
         dxl = (-dy_il * rel_x + dx_il * rel_y) / det
+        return (int(round(self._il_min + dil)), int(round(self._xl_min + dxl)))
 
-        il = int(round(self._il_min + dil))
-        xl = int(round(self._xl_min + dxl))
-        twt = (float(z) / self._velocity) * 2000.0
+    # -- legacy tuple API (vertical part requires an explicit velocity) -------
+
+    def seismic_to_map(
+        self, il: int | float, xl: int | float, twt: float
+    ) -> tuple[float, float, float]:
+        """Convert seismic (inline, crossline, twt_ms) to Map (x, y, z_m).
+
+        The (x, y) part is pure geometry. The z part uses the declared
+        velocity ASSUMPTION (approximate/display only) and raises
+        ``ValueError`` when none is declared — use
+        :meth:`seismic_to_map_xy` when you only need geometry.
+        """
+        x, y = self.seismic_to_map_xy(il, xl)
+        z = (float(twt) / 2000.0) * self._require_velocity()
+        return (x, y, float(z))
+
+    def map_to_seismic(
+        self, x: float, y: float, z: float
+    ) -> tuple[int, int, float]:
+        """Convert Map (x, y, z_m) to seismic (inline, crossline, twt_ms).
+
+        The (inline, crossline) part is pure geometry. The TWT part uses the
+        declared velocity ASSUMPTION (approximate/display only) and raises
+        ``ValueError`` when none is declared — use
+        :meth:`map_to_seismic_xy` when you only need geometry.
+        """
+        il, xl = self.map_to_seismic_xy(x, y)
+        twt = (float(z) / self._require_velocity()) * 2000.0
         return (il, xl, float(twt))
 
     # -------------------------------------------------------------------------
@@ -499,17 +583,33 @@ class CoordinateTransformHub:
     # -------------------------------------------------------------------------
 
     def well_to_seismic(self, well_id: str, md: float) -> tuple[int, int, float]:
-        """Directly map well MD to seismic (inline, crossline, twt)."""
+        """Well MD → (inline, crossline, twt) under the declared velocity.
+
+        Approximate/display helper ONLY: the TWT here comes from the declared
+        constant-velocity assumption, not from a calibration. Calibrated
+        routing must use :meth:`well_md_to_seismic_cursor` (fail-closed) or
+        the typed layer in ``viz/domain_coords.py``. Raises ``ValueError``
+        when no velocity assumption is declared.
+        """
         x, y, tvd = self.well_depth_to_map(well_id, md)
         return self.map_to_seismic(x, y, tvd)
 
     def seismic_to_well(
         self, il: int | float, xl: int | float, twt: float, max_radius: float = 50.0
-    ) -> tuple[str | None, float]:
-        """Map seismic (il, xl, twt) to nearest well ID and corresponding MD."""
-        x, y, z = self.seismic_to_map(il, xl, twt)
+    ) -> tuple[str | None, float | None]:
+        """Map seismic (il, xl, twt) to nearest well ID and an MD estimate.
+
+        The MD is computed through the declared velocity ASSUMPTION — an
+        approximate readout context, never a calibrated depth. When no
+        velocity is declared the well is still resolved but the MD is
+        ``None`` (callers must treat that as "depth unavailable", not 0).
+        """
+        x, y = self.seismic_to_map_xy(il, xl)
         nearest = self.map_to_well(x, y, max_radius=max_radius)
         if nearest is None:
-            return None, 0.0
+            return None, None
+        if self._velocity is None:
+            return nearest, None
+        z = (float(twt) / 2000.0) * self._velocity
         md = self.map_to_well_depth(nearest, z)
         return nearest, float(md)

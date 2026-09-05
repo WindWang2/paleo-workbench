@@ -468,7 +468,11 @@ class ViewCoordinationController(QObject):
         """
         spatial = None
         try:
-            x, y, _z = self.coordinate_hub.seismic_to_map(int(il), int(xl), float(twt))
+            # Pure bin-grid geometry: the cursor's TWT is deliberately NOT
+            # converted to a depth here (that needs an authority nobody on
+            # this path has — see _route_seismic_cursor for the calibrated
+            # well-MD route).
+            x, y = self.coordinate_hub.seismic_to_map_xy(int(il), int(xl))
             spatial = (float(x), float(y))
         except Exception:
             logger.debug("seismic cursor %s: map position unavailable", (il, xl, twt))
@@ -656,7 +660,7 @@ class ViewCoordinationController(QObject):
             return False
         try:
             x, y, _tvd = self.coordinate_hub.well_depth_to_map(well_id, 0.0)
-            il, xl, _twt = self.coordinate_hub.map_to_seismic(x, y, 0.0)
+            il, xl = self.coordinate_hub.map_to_seismic_xy(x, y)
         except Exception:
             logger.debug(
                 "seismic locate for well %r: geometry unavailable", well_id, exc_info=True
@@ -676,11 +680,13 @@ class ViewCoordinationController(QObject):
     def _route_seismic_cursor(self, cursor: tuple[int, int, float]) -> None:
         """Seismic → Well: resolve the cursor to the nearest well + MD.
 
-        The resolved MD travels in ``custom_attributes`` so depth-cursor
-        consumers can read it without a second transform. Routing failures
-        never crash the picker, but they are no longer SILENT: an empty
-        registry, an out-of-radius pick or a transform error logs at debug
-        so "why didn't the well-log page follow" stays diagnosable.
+        The MD resolution order is honest about its authority: a REAL
+        time-depth calibration on the nearest well produces a calibrated MD
+        (``seismic_well_md_is_approximate`` False, provenance recorded); a
+        declared velocity assumption produces an approximate readout MD; no
+        authority leaves the MD unavailable (None). Routing failures never
+        crash the picker, and "why didn't the well-log page follow" stays
+        diagnosable through the debug logs.
         """
         try:
             well_id, md = self.coordinate_hub.seismic_to_well(*cursor)
@@ -698,24 +704,62 @@ class ViewCoordinationController(QObject):
                 cursor,
             )
             return
-        # ``seismic_well_md`` is a constant-velocity APPROXIMATION kept for
-        # readout context only — calibrated depth↔time goes through
-        # TimeDepthCalibration (publish_depth_cursor), never this value.
-        self.selection_context.update(
-            custom_attributes={
-                "seismic_well_id": well_id,
-                "seismic_well_md": md,
-                "seismic_well_md_is_approximate": True,
-            }
-        )
+        # Calibrated first: TWT → MD through the well's own calibration.
+        calibrated_md: float | None = None
+        calibration_provenance: str | None = None
+        try:
+            cal = self.coordinate_hub.time_depth_calibration(well_id)
+            if cal is not None:
+                calibrated = cal.twt_to_md(float(cursor[2]))
+                if calibrated is not None:
+                    calibrated_md = float(calibrated)
+                    calibration_provenance = cal.provenance
+        except Exception:
+            logger.debug(
+                "seismic cursor %s: calibrated MD lookup failed",
+                cursor,
+                exc_info=True,
+            )
+        if calibrated_md is not None:
+            self.selection_context.update(
+                custom_attributes={
+                    "seismic_well_id": well_id,
+                    "seismic_well_md": calibrated_md,
+                    "seismic_well_md_is_approximate": False,
+                    "seismic_well_md_authority": f"time-depth:{calibration_provenance}",
+                }
+            )
+        elif md is not None:
+            # ``seismic_well_md`` is a constant-velocity APPROXIMATION kept
+            # for readout context only — calibrated depth↔time goes through
+            # TimeDepthCalibration (publish_depth_cursor), never this value.
+            self.selection_context.update(
+                custom_attributes={
+                    "seismic_well_id": well_id,
+                    "seismic_well_md": md,
+                    "seismic_well_md_is_approximate": True,
+                    "seismic_well_md_authority": (
+                        f"velocity-assumption:"
+                        f"{self.coordinate_hub.velocity_assumption():g} m/s"
+                    ),
+                }
+            )
+        else:
+            self.selection_context.update(
+                custom_attributes={
+                    "seismic_well_id": well_id,
+                    "seismic_well_md": None,
+                    "seismic_well_md_is_approximate": None,
+                    "seismic_well_md_authority": None,
+                }
+            )
         if self._well_log_page is not None:
             setter = getattr(self._well_log_page, "set_selected_well", None)
             if callable(setter):
                 setter(well_id)
         # Scenario B: the same cursor focuses the 3D/section views. The
-        # well-MD above is a constant-velocity approximation used only for
-        # readout context; the 3D focus gets the raw (IL, XL, TWT) so no
-        # approximate depth ever masquerades as a calibrated one.
+        # 3D focus gets the raw (IL, XL, TWT) so no approximate depth ever
+        # masquerades as a calibrated one.
         if self._seismic_focus_sink is not None:
             try:
                 self._seismic_focus_sink(int(cursor[0]), int(cursor[1]), float(cursor[2]))
