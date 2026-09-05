@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import threading
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _MAX_CACHE_SIZE = 16
 
@@ -182,10 +185,23 @@ def load_well_log_from_path(path: str) -> Any | None:
             )
 
         if result is not None:
+            # #1193: preview decimation is for display — never let it reach
+            # inference silently. Flag carriers warn here; the prediction
+            # provider records the flags in its result diagnostics.
+            if bool(getattr(result, "decimated", False)):
+                logger.warning(
+                    "well log %s is decimated for preview (%s of %s rows); "
+                    "not full resolution",
+                    file_path.name,
+                    sum(len(getattr(c, "depth", []) or []) for c in (getattr(result, "curves", []) or [])[:1]),
+                    getattr(result, "total_rows", "?"),
+                )
             depth_unit = detect_depth_unit(str(file_path))
             if depth_unit != "m":
                 result = WellLogDataWithDepthUnit(result, depth_unit)
             _las_cache.put(cache_key, result)
         return result
-    except Exception:
+    except Exception as exc:
+        # #1193: distinguish corrupt/unreadable files in logs (was silent).
+        logger.warning("could not load well log %s: %s: %s", path, type(exc).__name__, exc)
         return None

@@ -378,6 +378,10 @@ class GeoVizOnlineProvider:
             "generator_version": GEOVIZ_ONLINE_GENERATOR_VERSION,
             "demo": False,
             "source": "inference_service_online",
+            # #1193: inference input resolution provenance — a decimated
+            # preview input must be visible to reviewers, not silent.
+            "input_decimated": bool(getattr(well_log, "decimated", False)),
+            "input_total_rows": getattr(well_log, "total_rows", None),
             "result_summary": {
                 "predicted_regions": regions,
                 "is_mock": False,

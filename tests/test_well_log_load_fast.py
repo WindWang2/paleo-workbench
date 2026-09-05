@@ -183,3 +183,48 @@ def test_403_meter_las_stays_unwrapped(tmp_path: Path):
     assert detect_depth_unit(str(path)) == "m"
     data = load_well_log_from_path(str(path))
     assert not isinstance(data, WellLogDataWithDepthUnit)
+
+
+def _write_big_las(path: Path, rows: int = 120_000) -> Path:
+    lines = SAMPLE_LAS.splitlines(keepends=True)
+    head, ascii_start = [], 0
+    for i, line in enumerate(lines):
+        if line.startswith("~ASCII"):
+            ascii_start = i + 1
+            break
+        head.append(line)
+    body = [
+        f" {2000.0 + i * 0.05:.2f}   {45.0 + (i % 50) * 0.1:.1f}   {220.0 - (i % 30) * 0.2:.1f}\n"
+        for i in range(rows)
+    ]
+    path.write_text("".join(head) + "~ASCII\n" + "".join(body), encoding="utf-8")
+    return path
+
+
+def test_small_file_not_decimated(tmp_path: Path):
+    data = load_well_log_from_path(str(_write_las(tmp_path)))
+    assert data is not None
+    assert data.decimated is False
+    assert data.total_rows == 6
+
+
+def test_big_file_decimated_with_provenance_and_warning(tmp_path: Path, caplog):
+    import logging
+
+    path = _write_big_las(tmp_path / "big.las")
+    with caplog.at_level(logging.WARNING, logger="paleo_workbench.viz.well_log_load"):
+        data = load_well_log_from_path(str(path))
+    assert data is not None
+    assert data.decimated is True
+    assert data.total_rows == 120_000
+    assert any("decimated" in r.message for r in caplog.records)
+
+
+def test_corrupt_file_logs_reason_and_returns_none(tmp_path: Path, caplog):
+    import logging
+
+    path = tmp_path / "bad.las"
+    path.write_bytes(b"\x00\xff not las at all \xfe")
+    with caplog.at_level(logging.WARNING, logger="paleo_workbench.viz.well_log_load"):
+        assert load_well_log_from_path(str(path)) is None
+    assert any("could not load" in r.message for r in caplog.records)

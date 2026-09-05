@@ -568,3 +568,41 @@ def test_prediction_poll_loop_aborts_on_cancel(monkeypatch) -> None:
             cancel=lambda: time.monotonic() - t0 > 0.5,
         )
     assert time.monotonic() - t0 < 30.0
+
+
+def test_provider_result_marks_decimated_input(tmp_path, monkeypatch):
+    """#1193: a decimated preview input is flagged on the provider result."""
+    from paleo_workbench.prediction.providers import GeoVizOnlineProvider
+
+    lines = ["~VERSION INFORMATION", " VERS. 2.0:", "~WELL INFORMATION",
+             " WELL. BIG:", "~CURVE INFORMATION", " DEPT.M :", " GR.GAPI :",
+             "~ASCII"]
+    lines += [f"{1000.0 + i * 0.05:.2f} {45.0 + (i % 50) * 0.1:.1f}" for i in range(120_000)]
+    las = tmp_path / "big.Las"
+    las.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    monkeypatch.setenv("PALEO_GEOVIZ_API_KEY", "ak_test")
+
+    def _fake_online(well_name, well_log, **kwargs):
+        return {
+            "endpoint": kwargs["base_url"],
+            "request_row_count": 3,
+            "remote_model_version": "model-gr",
+            "remote_model_name": "m",
+            "api_summary": {"meanConfidence": 0.9, "formationGroup": "g", "classCounts": {}},
+            "predicted_regions": [
+                {"region_id": "r1", "top": 1000.0, "bottom": 1001.0,
+                 "facies": "x", "probability": 0.9},
+            ],
+        }
+
+    monkeypatch.setattr(
+        "paleo_workbench.prediction.geoviz_online.run_single_well_prediction",
+        _fake_online,
+    )
+    provider = GeoVizOnlineProvider()
+    result = provider.run(
+        {"w": {"path": str(las), "name": las.name, "asset_type": "well_log"}},
+        {},
+    )
+    assert result["input_decimated"] is True
+    assert result["input_total_rows"] == 120_000
