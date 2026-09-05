@@ -178,7 +178,8 @@ def main() -> int:
 
     def drive_agent(window):
         ws = window.app_shell.workstation
-        agent = ws.process_hub.agent
+        # B18 起工作台暴露 agent_panel（process_hub 属性已移除）
+        agent = ws.agent_panel
         agent.history.append(
             "<hr><b>用户</b> · 打开井 A12，把 GR 曲线放到第一道<br>"
             "<b>执行计划</b> · 打开井 A12，校验 GR 曲线并生成第一轨显示文档<br>"
@@ -246,7 +247,12 @@ def main() -> int:
             from paleo_workbench.ui.theme import theme_manager as _global_theme
 
             _global_theme.set_theme("dark")
-            _global_theme.apply(app)
+        # 生产入口（main.py）在 QApplication 上贴全局样式表；QDockWidget 是
+        # dock_host（顶层窗口）的孩子，不在 AppShell 子树里——没有 app 级
+        # 样式表，所有 dock 呈 Fusion 默认灰（此前 light 截图因此失真）。
+        from paleo_workbench.ui.theme import theme_manager as _global_theme
+
+        _global_theme.apply(app)
         if drive is drive_tasks:
             start_demo_tasks()  # 任务行是进程级调度器的：子进程里自己起
         window = PaleoWorkbenchWindow(project=make_project())
