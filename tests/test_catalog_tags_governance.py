@@ -365,3 +365,40 @@ def test_governance_ops_keep_sqlite_index_fresh(service, tmp_path):
     assert service.index_revision() == service.document.catalog_revision
     assert len(service._index.search_assets(tags=["同步"], tag_op="and")) == 2
     assert service._index.search_assets(tags=["同步"], tag_op="and")
+
+
+def test_failed_merge_restores_memory_exactly(service, tmp_path):
+    """#1182: journal rollback (not full snapshot) restores merge state."""
+    from paleo_workbench.catalog import tags as tags_mod
+
+    versions = _seed(service, tmp_path, 2)
+    asset_ids = [v.asset_id for v in versions]
+    service.bulk_add_tag("源", asset_ids=asset_ids)
+    service.bulk_add_tag("目标", asset_ids=asset_ids[:1])
+    before_tags = list(service.document.tags)
+    before_asset = {k: list(v) for k, v in service.document.asset_tags.items()}
+
+    real_save = service._save
+
+    def _boom(dirty=None):
+        raise RuntimeError("injected save failure")
+
+    service._save = _boom  # type: ignore[method-assign]
+    try:
+        with pytest.raises(RuntimeError):
+            tags_mod.merge_tag_into(
+                service,
+                next(t for t in service.document.tags if t.name == "源"),
+                next(t for t in service.document.tags if t.name == "目标"),
+            )
+    finally:
+        service._save = real_save  # type: ignore[method-assign]
+    assert [t.id for t in service.document.tags] == [t.id for t in before_tags]
+    assert {k: list(v) for k, v in service.document.asset_tags.items()} == before_asset
+    # And the merge still works once saving is healthy.
+    tags_mod.merge_tag_into(
+        service,
+        next(t for t in service.document.tags if t.name == "源"),
+        next(t for t in service.document.tags if t.name == "目标"),
+    )
+    assert [t.name for t in service.document.tags].count("源") == 0
