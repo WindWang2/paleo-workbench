@@ -179,6 +179,8 @@ def save_recipe(
 def load_recipe(path: str | Path) -> RecipeDocument:
     """Load + migrate + structurally validate one recipe file."""
     path = Path(path)
+    if not path.exists():
+        raise RecipeError(f"recipe file {path.name!r} does not exist")
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:

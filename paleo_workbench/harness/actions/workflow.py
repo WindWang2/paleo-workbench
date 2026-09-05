@@ -293,7 +293,10 @@ _RUN_SCHEMA = {
         "recipe_path": {"type": "string"},
         "workflow": {"type": "object"},
         "slot_values": {"type": "object"},
-        "wait": {"type": "boolean", "description": "同步等待完成（默认 true；false 时仅排队）"},
+        "use_cache": {
+            "type": "boolean",
+            "description": "允许复用此前确定性执行（默认 true；false 强制全部重跑）",
+        },
     },
     "additionalProperties": False,
 }
@@ -332,6 +335,7 @@ def _run(context: ActionContext, parameters: dict) -> dict:
         context=context,
         project_probe=_probe(context),
         on_update=_progress_streamer(context),
+        use_cache=bool(parameters.get("use_cache", True)),
     )
     return _run_summary(done)
 

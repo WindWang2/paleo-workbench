@@ -219,6 +219,13 @@ def _collect_output_version_ids(result: Any) -> tuple[str, ...]:
     declared = outputs.get("version_ids")
     if isinstance(declared, list):
         ids.extend(str(v) for v in declared if v)
+    # Singular contract: actions returning exactly one catalog version
+    # (e.g. map.create_factor_map's grid artifact version).
+    singular = outputs.get("version_id")
+    if isinstance(singular, str) and singular:
+        ids.append(singular)
+    elif singular is not None and hasattr(singular, "version_id") and singular.version_id:
+        ids.append(str(singular.version_id))
     seen: set[str] = set()
     ordered = []
     for v in ids:

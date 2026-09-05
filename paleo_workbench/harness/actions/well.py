@@ -120,7 +120,39 @@ def register(registry) -> None:
     )
 
 
-# ------------------------------------------------------------- helpers --
+    registry.register(
+        ActionSpec(
+            action_id="well.process",
+            description="对工程井点表执行真实 QC 管线（含砂比与 MAD 离群检测），返回逐项 QC 摘要。",
+            handler=_process_well_table,
+            risk=ActionRisk.WRITE,
+            category="background.compute",
+            version="1.0",
+            resource_profile={"estimated_cpu_cores": 0.5, "estimated_ram_bytes": 64 * 1024**2, "io_weight": 0.3},
+            required_context=("project",),
+            side_effect_notes="annotates qc_flag/qc_z_star on the project's WellTable rows in-session",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "table_id": {"type": "string"},
+                    "mad_threshold": {"type": "number", "minimum": 1.0, "maximum": 20.0},
+                    "value_key": {"type": "string", "enum": ["z", "R_s", "H_s"]},
+                },
+                "additionalProperties": False,
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "table_id": {"type": "string"},
+                    "qc": {"type": "object"},
+                    "total_rows": {"type": "integer"},
+                },
+                "required": ["table_id", "qc", "total_rows"],
+            },
+            domain_tags=("well", "qc"),
+        )
+    )
+
     registry.register(
         ActionSpec(
             action_id="well.describe",
@@ -397,6 +429,8 @@ def _apply_template(context: ActionContext, parameters: dict) -> dict:
     }
     return {"well_id": well_id, "template": display["template"]}
 
+# ------------------------------------------------------------- helpers --
+
 def _resolve_well(context: ActionContext, parameters: dict):
     from paleo_workbench.project.domain import resolve_well
 
@@ -467,3 +501,33 @@ def _correlate(context: ActionContext, parameters: dict) -> dict:
         "correlation workstation (project.correlation_interpretations are "
         "readable via well.describe_interpretation)"
     )
+
+def _process_well_table(context: ActionContext, parameters: dict) -> dict:
+    from paleo_workbench.workflow.well_qc import qc_summary, run_well_table_qc
+
+    project = context.require("project")
+    tables = getattr(project, "well_tables", []) or []
+    table_id = parameters.get("table_id")
+    table = None
+    if table_id:
+        table = next((t for t in tables if getattr(t, "id", "") == table_id), None)
+        if table is None:
+            raise LookupError(f"project has no well table {table_id!r}")
+    elif tables:
+        table = tables[-1]  # most recent table, same rule as map.contour
+    if table is None:
+        raise LookupError(
+            "project has no well table to QC (prepare a factor table first)"
+        )
+    value_key = parameters.get("value_key") or "z"
+    mad = float(parameters.get("mad_threshold", 3.5))
+    run_well_table_qc(table, mad_threshold=mad, value_key=value_key)
+    summary = qc_summary(table)
+    return {
+        "table_id": getattr(table, "id", ""),
+        "name": getattr(table, "name", ""),
+        "value_key": value_key,
+        "mad_threshold": mad,
+        "qc": summary,
+        "total_rows": summary.get("total", 0),
+    }

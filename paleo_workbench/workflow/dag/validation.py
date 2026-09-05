@@ -117,7 +117,7 @@ def _binding_problems(node: NodeSpec, seen: dict[str, NodeSpec], slot_names: set
                 name = value["$slot"]
                 if not isinstance(name, str) or name not in slot_names:
                     problems.append(f"binding $slot {name!r} is not a declared slot")
-            elif set(value.keys()) == {"$ref"}:
+            elif set(value.keys()) in ({"$ref"}, {"$ref", "key"}):
                 ref = value["$ref"]
                 if not isinstance(ref, str) or ref not in seen:
                     problems.append(f"binding $ref {ref!r} is not a node in this workflow")
@@ -126,6 +126,8 @@ def _binding_problems(node: NodeSpec, seen: dict[str, NodeSpec], slot_names: set
                         f"binding $ref {ref!r} must be listed in depends_on "
                         "(data dependencies are explicit)"
                     )
+                elif "key" in value and not isinstance(value["key"], str):
+                    problems.append("$ref key must be a string")
             elif set(value.keys()) == {"$context"}:
                 key = value["$context"]
                 if not isinstance(key, str) or key not in CONTEXT_BINDING_WHITELIST:
@@ -203,11 +205,19 @@ def resolve_value(value: Any, *, run: Any, results: dict[str, Any]) -> Any:
             if name not in run.slot_values:
                 raise BindingError(f"slot {name!r} has no bound value")
             return run.slot_values[name]
-        if keys == {"$ref"}:
+        if keys in ({"$ref"}, {"$ref", "key"}):
             node_id = value["$ref"]
             if node_id not in results:
                 raise BindingError(f"reference {node_id!r} has no resolved output yet")
-            return results[node_id]
+            outputs = results[node_id]
+            if "key" in value:
+                key = value["key"]
+                if not isinstance(outputs, dict) or key not in outputs:
+                    raise BindingError(
+                        f"reference {node_id!r} produced no output key {key!r}"
+                    )
+                return outputs[key]
+            return outputs
         if keys == {"$context"}:
             return _context_value(run.context, value["$context"])
         return {k: resolve_value(v, run=run, results=results) for k, v in value.items()}

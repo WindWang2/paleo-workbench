@@ -167,6 +167,7 @@ class WorkflowEngine:
         reverify_cache: bool = True,
         on_update: Callable[[WorkflowRun], None] | None = None,
         cancel_token: "_RunCancelToken | None" = None,
+        use_cache: bool = True,
     ) -> WorkflowRun:
         store = self.store_for(context)
         run = store.load(run_id)
@@ -199,6 +200,7 @@ class WorkflowEngine:
                     project_probe=project_probe,
                     reverify_cache=reverify_cache,
                     on_update=on_update,
+                    use_cache=use_cache,
                 )
             except TaskCancelled:
                 # Cancellation is a first-class terminal outcome of the RUN:
@@ -299,6 +301,7 @@ class WorkflowEngine:
                 receipt=dict(old.receipt) if old.receipt else None,
             )
             new_run.node_runs[node.node_id] = carried
+            self._restore_session_pointers(context or ActionContext(), carried.outputs)
         store.save(new_run)
         return self.run(
             new_run.run_id,
@@ -384,6 +387,7 @@ class WorkflowEngine:
         project_probe: Callable[[], Any] | None,
         reverify_cache: bool,
         on_update: Callable[[WorkflowRun], None] | None,
+        use_cache: bool = True,
     ) -> None:
         max_concurrency = max(1, run.workflow.max_concurrency)
         if max_concurrency == 1:
@@ -391,18 +395,19 @@ class WorkflowEngine:
                 run, store, context, catalog=catalog, cancel_token=cancel_token,
                 project_identity=project_identity, project_probe=project_probe,
                 reverify_cache=reverify_cache, on_update=on_update,
+                use_cache=use_cache,
             )
         else:
             self._drive_parallel(
                 run, store, context, catalog=catalog, cancel_token=cancel_token,
                 project_identity=project_identity, project_probe=project_probe,
                 reverify_cache=reverify_cache, on_update=on_update,
-                workers=max_concurrency,
+                workers=max_concurrency, use_cache=use_cache,
             )
 
     def _drive_sequential(
         self, run, store, context, *, catalog, cancel_token, project_identity,
-        project_probe, reverify_cache, on_update,
+        project_probe, reverify_cache, on_update, use_cache: bool = True,
     ) -> None:
         run.state = RunState.RUNNING
         while True:
@@ -419,7 +424,7 @@ class WorkflowEngine:
                 run, store, node_id, context,
                 catalog=catalog, cancel_token=cancel_token,
                 project_identity=project_identity, project_probe=project_probe,
-                reverify_cache=reverify_cache,
+                reverify_cache=reverify_cache, use_cache=use_cache,
             )
             self._checkpoint(store, run)
             self._notify(run, on_update)
@@ -428,6 +433,7 @@ class WorkflowEngine:
     def _drive_parallel(
         self, run, store, context, *, catalog, cancel_token, project_identity,
         project_probe, reverify_cache, on_update, workers: int,
+        use_cache: bool = True,
     ) -> None:
         run.state = RunState.RUNNING
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="paleo-workflow") as pool:
@@ -480,6 +486,7 @@ class WorkflowEngine:
                         project_identity=project_identity,
                         project_probe=project_probe,
                         reverify_cache=reverify_cache,
+                        use_cache=use_cache,
                     )
                     futures[future] = node_id
                 if not batch and futures:
@@ -523,6 +530,7 @@ class WorkflowEngine:
         project_identity: Any,
         project_probe: Callable[[], Any] | None,
         reverify_cache: bool,
+        use_cache: bool = True,
     ) -> None:
         node = run.workflow.node(node_id)
         node_run = run.node_runs[node_id]
@@ -570,7 +578,7 @@ class WorkflowEngine:
             }
         )
         node_run.cache_identity = identity
-        if action_spec.cacheable:
+        if action_spec.cacheable and use_cache:
             hit = find_reusable_node(
                 store,
                 cache_identity=identity,
@@ -590,6 +598,7 @@ class WorkflowEngine:
                 node_run.outputs = dict(hit.outputs)
                 node_run.receipt = receipt
                 node_run.finished_at = time.time()
+                self._restore_session_pointers(context, hit.outputs)
                 return
 
         started_at = time.time()
@@ -620,6 +629,7 @@ class WorkflowEngine:
                 node_run.outputs = _jsonable_projection(result.outputs)
                 node_run.receipt = receipt.to_dict()
                 node_run.finished_at = time.time()
+                self._merge_session_pointers(context, node_context)
                 return
             if result.status == "cancelled":
                 self._finish_node(node_run, NodeState.CANCELLED, error=result.error, action_status=result.status)
@@ -638,6 +648,29 @@ class WorkflowEngine:
             self._finish_node(node_run, state, error=result.error, action_status=result.status)
             self._skip_dependents(run, node_id, reason=f"upstream {node_id} {state.value}")
             return
+
+    @staticmethod
+    def _merge_session_pointers(context: ActionContext, node_context: ActionContext) -> None:
+        """Propagate the session pointers an action mutated (the in-process
+        "current document"/active well) back onto the run's shared context —
+        the vocabulary downstream nodes read. Guarded by the module lock so
+        parallel branches do not tear the pointer."""
+        with _MODULE_LOCK:
+            context.current_map_id = node_context.current_map_id
+            context.active_well_id = node_context.active_well_id
+
+    @staticmethod
+    def _restore_session_pointers(context: ActionContext, outputs: dict[str, Any]) -> None:
+        """A carried-over/cache-hit node did not execute, so it did not
+        (re)publish its in-process handles. When the SAME process still
+        holds the handle (the document from the original execution), restore
+        the pointer; across a process boundary the pointer is unrecoverable
+        and downstream consumers fail honestly instead of binding to a
+        wrong document."""
+        document_id = outputs.get("document_id")
+        if isinstance(document_id, str) and document_id in context.map_documents:
+            with _MODULE_LOCK:
+                context.current_map_id = document_id
 
     def _register_cache_run(self, catalog: Any, run: WorkflowRun, node: NodeSpec, receipt) -> None:
         """Put the cacheable node execution on the catalog provenance rail so
@@ -839,6 +872,9 @@ class WorkflowEngine:
             on_update(run)
         except Exception:
             logger.exception("workflow on_update callback failed")
+
+
+_MODULE_LOCK = threading.RLock()
 
 
 class _RunView:
