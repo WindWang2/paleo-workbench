@@ -230,33 +230,53 @@ def main() -> int:
         "12-dark-theme": (lambda: _project(tmp), "dark"),
     }
 
-    # --shot NAME：单 shot 子进程模式（main 进程逐个 spawn——多窗口同进程
-    # 会因 QGIS/调度器状态搅扰挂死；每 shot 一个进程 = 真实全新启动）。
+    # --shot NAME [--theme T] [--density D] [--size WxH]：单 shot 子进程模式
+    # （main 进程逐个 spawn——多窗口同进程会因 QGIS/调度器状态搅扰挂死；
+    # 每 shot 一个进程 = 真实全新启动）。主题/密度/尺寸供矩阵 harness 驱动。
+    def _arg(name: str, default: str | None = None) -> str | None:
+        if name in sys.argv:
+            index = sys.argv.index(name)
+            if index + 1 < len(sys.argv):
+                return sys.argv[index + 1]
+        return default
+
     only = None
     if len(sys.argv) > 2 and sys.argv[2] == "--shot":
         only = sys.argv[3]
+    theme_override = _arg("--theme")
+    density_override = _arg("--density")
+    size_override = _arg("--size")
     if only is not None:
         make_project, drive = shots[only]
         # 清工作站布局必须用 shell 的设置身份（QSettings() 无参是空 org/app，
         # 清不到 PaleoWorkbench/Workstation——首运行分支因此从未触发）。
         QSettings("PaleoWorkbench", "Workstation").clear()
-        if drive == "dark":
+        from paleo_workbench.ui.theme import theme_manager as _global_theme
+
+        if drive == "dark" and theme_override is None:
             # 必须切全局单例：app_shell 构造时会用 theme_manager.get_qss()
             # 自贴一层（子树优先于 app 级样式表），图标染色与 ui.style 注册
             # 表也都读单例——局部实例只暗了 QSS，留下整片亮色 chrome。
-            from paleo_workbench.ui.theme import theme_manager as _global_theme
-
             _global_theme.set_theme("dark")
+        if theme_override is not None:
+            _global_theme.set_theme(theme_override)
+        if density_override is not None:
+            _global_theme.set_density(density_override)
         # 生产入口（main.py）在 QApplication 上贴全局样式表；QDockWidget 是
         # dock_host（顶层窗口）的孩子，不在 AppShell 子树里——没有 app 级
         # 样式表，所有 dock 呈 Fusion 默认灰（此前 light 截图因此失真）。
-        from paleo_workbench.ui.theme import theme_manager as _global_theme
-
         _global_theme.apply(app)
         if drive is drive_tasks:
             start_demo_tasks()  # 任务行是进程级调度器的：子进程里自己起
         window = PaleoWorkbenchWindow(project=make_project())
-        window.resize(1600, 900)
+        if size_override is not None:
+            try:
+                w_str, h_str = size_override.split("x")
+                window.resize(int(w_str), int(h_str))
+            except ValueError:
+                window.resize(1600, 900)
+        else:
+            window.resize(1600, 900)
         window.show()
         _settle(500)
         if callable(drive):
