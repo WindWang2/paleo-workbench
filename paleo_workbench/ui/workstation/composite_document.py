@@ -438,6 +438,9 @@ class LayerManagerPanel(QFrame):
 
     # -- 绑定 ---------------------------------------------------------------
 
+    def tree_row_count(self) -> int:
+        return self.tree.topLevelItemCount()
+
     def bind(self, canvas: QgisCanvasShim, layers: list) -> None:
         self._canvas = canvas
         self._layers = layers
