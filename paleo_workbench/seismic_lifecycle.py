@@ -351,12 +351,42 @@ class SeismicLifecycleService:
                         continue
                     if version.trashed:
                         continue
+                    # #1192: a complete non-stale DERIVED means the crash hit
+                    # the "store moved, run not yet complete" window — adopt
+                    # it instead of re-transcoding (and never stale-mark it).
+                    if self._adopt_complete_derived(run.id, vid):
+                        continue
                     # close the orphaned run's bookkeeping; the resumed task
                     # finishes with a fresh run
                     self._finish_run(run.id, "cancelled")
                     self.start_transcode(vid)
                     resumed += 1
         return resumed
+
+    def _adopt_complete_derived(self, run_id: str, raw_version_id: str) -> bool:
+        """Adopt an intact DERIVED store for an orphaned running run.
+
+        Returns True when adoption happened (caller must not re-transcode):
+        the orphaned run is closed as cancelled and the existing DERIVED
+        registration stands untouched.
+        """
+        import json
+
+        try:
+            derived = self.derived_version_for(raw_version_id)
+            if derived is None:
+                return False
+            store = self.derived_store_path(raw_version_id)
+            if store is None:
+                return False
+            meta_path = store / "zarr.json"
+            meta = json.loads(meta_path.read_text())
+            if not isinstance(meta.get("shape"), list) or not meta["shape"]:
+                return False
+        except Exception:
+            return False
+        self._finish_run(run_id, "cancelled")
+        return True
 
     # ------------------------------------------------------------- teardown --
     def shutdown_jobs(self) -> None:

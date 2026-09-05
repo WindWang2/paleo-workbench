@@ -195,3 +195,27 @@ def test_resume_pending_requeues_orphaned_running_runs(imported_raw, sched):
     assert _wait_done(job.handle) == TaskState.DONE
     assert life.derived_version_for(raw.id) is not None
     assert life.resume_pending() == 0  # nothing pending afterwards
+
+
+def test_resume_pending_adopts_complete_derived(imported_raw, sched):
+    """#1192: crash in the 'store moved, run not complete' window must not
+    re-transcode nor stale-mark the intact DERIVED."""
+    svc, raw, cube = imported_raw
+    life = SeismicLifecycleService(svc, scheduler=sched)
+    job = life.start_transcode(raw.id, params=PARAMS, workers=1)
+    assert _wait_done(job.handle) == TaskState.DONE
+    derived = life.derived_version_for(raw.id)
+    assert derived is not None
+    # Simulate the crash window: a second run left 'running' after the
+    # store was already moved into managed layout.
+    orphan = svc.register_run(
+        "segy-to-zarr", input_version_ids=[raw.id], status="running"
+    )
+    assert life.resume_pending() == 0  # adopted, not re-transcoded
+    assert svc.get_run(orphan.id).status.lower() == "cancelled"
+    assert life.job_for(raw.id) is job  # no new job started
+    fresh = life.derived_version_for(raw.id)
+    assert fresh is not None and fresh.id == derived.id
+    assert not fresh.metadata.get("stale")
+    vol = open_volume(Path(svc.resolve_path(fresh)))
+    np.testing.assert_allclose(vol.read_inline(1), cube[0], atol=1e-6)
