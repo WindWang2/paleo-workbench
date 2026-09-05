@@ -75,6 +75,10 @@ class CorrelationScientificPayload(BaseModel):
     curve_names: list[str] = Field(default_factory=list)  # scientific curves if selected
     tops: list[FormationTop] = Field(default_factory=list)
     links: list[CorrelationLink] = Field(default_factory=list)
+    # Adjacency-derived links the interpreter explicitly REMOVED (L4): the
+    # statement "these tops are NOT correlated" must survive save cycles
+    # that would otherwise regenerate the pair. Manual links never land here.
+    suppressed_link_ids: list[str] = Field(default_factory=list)
     method_summary: list[str] = Field(default_factory=list)
     notes: str = ""
     parent_version_id: str | None = None
@@ -103,6 +107,7 @@ class CorrelationScientificPayload(BaseModel):
                 ln.model_dump(mode="json")
                 for ln in sorted(self.links, key=lambda x: (x.top_a_id, x.top_b_id, x.id))
             ],
+            "suppressed_link_ids": sorted(set(self.suppressed_link_ids)),
             "method_summary": list(self.method_summary),
             "notes": self.notes,
         }
