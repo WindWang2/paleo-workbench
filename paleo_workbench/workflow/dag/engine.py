@@ -118,6 +118,14 @@ class WorkflowEngine:
         self._pending_tokens: dict[str, "_SyncedToken"] = {}
 
     # ---------------------------------------------------------- accessors --
+    @property
+    def registry(self):
+        return self._registry
+
+    @property
+    def store(self) -> WorkflowRunStore:
+        return self.store_for(ActionContext())
+
     def store_for(self, context: ActionContext | None) -> WorkflowRunStore:
         if self._store is not None:
             return self._store

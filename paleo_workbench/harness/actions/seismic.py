@@ -109,14 +109,93 @@ def register(registry) -> None:
             input_schema={
                 "type": "object",
                 "properties": {
-                    "attribute": {"type": "string", "enum": ["c3"], "description": "属性 kernel"},
+                    "attribute": {
+                        "type": "string",
+                        "enum": [
+                            "c3",
+                            "envelope",
+                            "instantaneous_phase",
+                            "instantaneous_frequency",
+                            "rms_amplitude",
+                            "sweetness",
+                            "relative_impedance",
+                            "dip_il",
+                            "dip_xl",
+                            "dip_azimuth",
+                            "curvature_mean",
+                        ],
+                        "description": "属性 kernel（seismic_attributes.KERNELS 全表）",
+                    },
                     "output_dir": {"type": "string"},
+                    "roi": {
+                        "type": "object",
+                        "description": "中小 ROI 窗口（本 Goal 不针对 100GB 全量优化）",
+                        "properties": {
+                            "il0": {"type": "integer"},
+                            "il1": {"type": "integer"},
+                            "xl0": {"type": "integer"},
+                            "xl1": {"type": "integer"},
+                            "t0": {"type": "integer"},
+                            "t1": {"type": "integer"},
+                        },
+                        "required": ["il0", "il1", "xl0", "xl1"],
+                        "additionalProperties": False,
+                    },
                 },
                 "additionalProperties": False,
             },
         )
     )
 
+
+    registry.register(
+        ActionSpec(
+            action_id="seismic.describe",
+            description="描述激活地震体的几何与存储（inline/xline/采样数、zarr/segy、窗口范围）。",
+            handler=_describe_volume,
+            risk=ActionRisk.READ,
+            category="interactive.query",
+            version="1.0",
+            resource_profile={"estimated_cpu_cores": 0.2, "io_weight": 0.2},
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+            domain_tags=("seismic", "describe"),
+        )
+    )
+    registry.register(
+        ActionSpec(
+            action_id="seismic.open_section",
+            description="生成一个地震剖面（inline/crossline/timeslice）的只读描述符与数据摘要。",
+            handler=_open_section,
+            risk=ActionRisk.READ,
+            category="interactive.query",
+            version="1.0",
+            resource_profile={"estimated_cpu_cores": 0.5, "estimated_ram_bytes": 32 * 1024**2, "io_weight": 1.0},
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "slice_type": {"type": "string", "enum": ["inline", "crossline", "timeslice"]},
+                    "index": {"type": "integer"},
+                },
+                "required": ["slice_type", "index"],
+                "additionalProperties": False,
+            },
+            domain_tags=("seismic", "section"),
+        )
+    )
+    registry.register(
+        ActionSpec(
+            action_id="seismic.describe_horizon",
+            description="列出工程中的层位解释（名称/井/版本），只读 project 权威。",
+            handler=_describe_horizons,
+            risk=ActionRisk.READ,
+            category="interactive.query",
+            version="1.0",
+            resource_profile={"estimated_cpu_cores": 0.2, "io_weight": 0.1},
+            required_context=("project",),
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+            domain_tags=("seismic", "horizon"),
+        )
+    )
 
 def _open_volume(context: ActionContext, parameters: dict) -> dict:
     from geoviz_seismic import open_volume
@@ -210,6 +289,8 @@ def _compute_attribute(context: ActionContext, parameters: dict) -> dict:
 
         output_dir = str(Path(tempfile.mkdtemp(prefix="p2-attribute-")) / "attr.zarr")
     provider_parameters = {"output_dir": output_dir}
+    if parameters.get("roi") is not None:
+        provider_parameters["roi"] = dict(parameters["roi"])
     # Same workspace_root contract as the executor's provider dispatch — the
     # provider-side containment checks (#1177) need a root to enforce.
     provider_context = context.provider_context(
@@ -237,3 +318,60 @@ def _registry():
     from paleo_workbench.providers import get_provider_registry
 
     return get_provider_registry()
+
+def _describe_volume(context: ActionContext, parameters: dict) -> dict:
+    _volume_id, reader = _reader_for(context, parameters)
+    geometry = reader.geometry
+    volume = context.active_volume
+    return {
+        "volume_id": _volume_id,
+        "store": volume.to_dict() if volume is not None and hasattr(volume, "to_dict") else None,
+        "shape": list(getattr(geometry, "shape", []) or []),
+        "dtype": str(getattr(geometry, "dtype", "")),
+    }
+
+
+def _open_section(context: ActionContext, parameters: dict) -> dict:
+    _volume_id, reader = _reader_for(context, parameters)
+    slice_type = parameters["slice_type"]
+    index = int(parameters["index"])
+    if slice_type == "inline":
+        array = reader.read_inline(index)
+    elif slice_type == "crossline":
+        array = reader.read_crossline(index)
+    else:
+        array = reader.read_timeslice(index)
+    import numpy as np
+
+    finite = array[np.isfinite(array)]
+    return {
+        "descriptor": {
+            "volume_id": _volume_id,
+            "slice_type": slice_type,
+            "index": index,
+            "shape": list(array.shape),
+            "dtype": str(array.dtype),
+        },
+        "summary": {
+            "finite_ratio": float(finite.size) / max(1, array.size),
+            "min": float(finite.min()) if finite.size else None,
+            "max": float(finite.max()) if finite.size else None,
+        },
+        "values": array,
+    }
+
+
+def _describe_horizons(context: ActionContext, parameters: dict) -> dict:
+    project = context.require("project")
+    horizons = []
+    for ref in getattr(project, "horizon_interpretations", []) or []:
+        horizons.append(
+            {
+                "id": getattr(ref, "id", None),
+                "name": getattr(ref, "name", ""),
+                "horizon_key": getattr(ref, "horizon_key", ""),
+                "status": getattr(ref, "status", None),
+                "version_id": getattr(ref, "current_version_id", None),
+            }
+        )
+    return {"horizons": horizons, "count": len(horizons)}

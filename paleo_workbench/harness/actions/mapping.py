@@ -192,6 +192,79 @@ def register(registry) -> None:
 
 
 # ------------------------------------------------------------- helpers --
+    registry.register(
+        ActionSpec(
+            action_id="map.describe",
+            description="描述当前（或指定）图件文档：图层清单、范围、CRS、样式修订。",
+            handler=_describe_map,
+            risk=ActionRisk.READ,
+            category="interactive.query",
+            version="1.0",
+            resource_profile={"estimated_cpu_cores": 0.2, "io_weight": 0.1},
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+            domain_tags=("map", "describe"),
+        )
+    )
+    registry.register(
+        ActionSpec(
+            action_id="map.qc",
+            description="对当前图件执行导出就绪 QC（图层/范围/CRS/成图要素），FAIL 即不合格。",
+            handler=_map_qc,
+            risk=ActionRisk.READ,
+            category="interactive.query",
+            version="1.0",
+            resource_profile={"estimated_cpu_cores": 0.2, "io_weight": 0.1},
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "require_components": {"type": "boolean", "default": True},
+                },
+                "additionalProperties": False,
+            },
+            domain_tags=("map", "qc"),
+        )
+    )
+    registry.register(
+        ActionSpec(
+            action_id="map.contour",
+            description="从已插值的因子任务生成等值线初稿（真实 engine isolines，写回工程草稿区）。",
+            handler=_map_contour,
+            risk=ActionRisk.WRITE,
+            category="background.compute",
+            version="1.0",
+            supports_cancel=True,
+            resource_profile={"estimated_cpu_cores": 1.0, "estimated_ram_bytes": 256 * 1024**2, "io_weight": 0.8},
+            required_context=("project",),
+            side_effect_notes="upserts a ContourDraft into the project document",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string"},
+                    "n_levels": {"type": "integer", "minimum": 2, "maximum": 64},
+                },
+                "additionalProperties": False,
+            },
+            domain_tags=("map", "contour"),
+        )
+    )
+    registry.register(
+        ActionSpec(
+            action_id="layer.describe",
+            description="描述当前图件中的一个图层：类型、要素数、样式与可见性。",
+            handler=_describe_layer,
+            risk=ActionRisk.READ,
+            category="interactive.query",
+            version="1.0",
+            resource_profile={"estimated_cpu_cores": 0.2, "io_weight": 0.1},
+            input_schema={
+                "type": "object",
+                "properties": {"layer_name": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            domain_tags=("map", "layer"),
+        )
+    )
+
 def _artifact_root(context: ActionContext) -> Path:
     """The PROJECT's artifacts tree (``<name>.artifacts``) — V2.
 
@@ -650,4 +723,92 @@ def _export(context: ActionContext, parameters: dict) -> dict:
         "artifacts": artifacts,
         "provenance": result.provenance,
         "metrics": result.metrics,
+    }
+
+def _describe_map(context: ActionContext, parameters: dict) -> dict:
+    document = _current_document(context)
+    return {
+        "document_id": getattr(document, "id", None),
+        "title": getattr(document, "title", ""),
+        "crs": getattr(document, "crs", None),
+        "extent": list(getattr(document, "extent", ()) or ()),
+        "layers": [getattr(l, "name", "") for l in getattr(document, "layers", [])],
+        "layer_count": len(getattr(document, "layers", []) or []),
+    }
+
+
+def _map_qc(context: ActionContext, parameters: dict) -> dict:
+    from paleo_workbench.harness.validation import MapValidationHook
+
+    document = _current_document(context)
+    composition = context.compositions.get(context.current_map_id or "")
+    report = MapValidationHook().validate(
+        document,
+        composition,
+        require_components=bool(parameters.get("require_components", True)),
+    )
+    return {
+        "verdict": report.verdict,
+        "passed": report.passed,
+        "reasons": list(report.reasons),
+        "document_id": getattr(document, "id", None),
+    }
+
+
+def _map_contour(context: ActionContext, parameters: dict) -> dict:
+    from paleo_workbench.workflow.contour_draft import (
+        contour_draft_from_factor_task,
+        upsert_contour_draft,
+    )
+
+    project = context.require("project")
+    tasks = getattr(project, "factor_map_tasks", []) or []
+    task_id = parameters.get("task_id")
+    task = None
+    if task_id:
+        task = next((t for t in tasks if getattr(t, "id", "") == task_id), None)
+        if task is None:
+            raise LookupError(f"no factor task {task_id!r} in project")
+    elif tasks:
+        task = tasks[-1]  # most recent interpolated factor task
+    if task is None:
+        raise LookupError(
+            "no factor map task in project — run map.create_factor_map first"
+        )
+    draft = contour_draft_from_factor_task(
+        task,
+        n_levels=int(parameters.get("n_levels", 10)),
+        cancellation_token=context.cancel,
+    )
+    upsert_contour_draft(project, draft)
+    return {
+        "draft_id": getattr(draft, "id", None),
+        "name": draft.name,
+        "levels": draft.levels,
+        "segment_count": len(getattr(draft, "segments", []) or []),
+        "linked_task_id": draft.linked_factor_task_id,
+    }
+
+
+def _describe_layer(context: ActionContext, parameters: dict) -> dict:
+    document = _current_document(context)
+    layers = getattr(document, "layers", []) or []
+    wanted = parameters.get("layer_name")
+    layer = None
+    if wanted:
+        layer = next(
+            (l for l in layers if getattr(l, "name", "") == wanted), None
+        )
+        if layer is None:
+            raise LookupError(f"document has no layer {wanted!r}")
+    elif layers:
+        layer = layers[-1]
+    if layer is None:
+        raise LookupError("document has no layers")
+    return {
+        "name": getattr(layer, "name", ""),
+        "layer_type": getattr(layer, "layer_type", ""),
+        "visible": getattr(layer, "visible", None),
+        "feature_count": len(getattr(layer, "features", ()) or ()),
+        "style": getattr(layer, "style", None),
     }

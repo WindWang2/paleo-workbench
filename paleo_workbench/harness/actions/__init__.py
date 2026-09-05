@@ -1,4 +1,4 @@
-"""Domain action registration (P2-C).
+"""Domain action registration (P2-C, Harness 2.0).
 
 One module per domain; each exposes ``register(registry)``. Actions are the
 only agent-callable surface — coarse-grained, professional, composable.
@@ -8,15 +8,27 @@ from __future__ import annotations
 
 def register_all(registry) -> list[str]:
     from paleo_workbench.harness.actions import (
+        data,
         geology_workflow,
         mapping,
+        project,
         seismic,
         well,
+        workflow,
         workspace,
     )
 
     registered: list[str] = []
-    for module in (workspace, well, seismic, mapping, geology_workflow):
+    for module in (
+        workspace,
+        project,
+        data,
+        well,
+        seismic,
+        mapping,
+        geology_workflow,
+        workflow,
+    ):
         before = set()
         try:
             before = {s.action_id for s in registry.specs()}

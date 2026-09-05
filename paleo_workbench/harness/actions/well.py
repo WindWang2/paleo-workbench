@@ -118,6 +118,75 @@ def register(registry) -> None:
 
 
 # ------------------------------------------------------------- helpers --
+    registry.register(
+        ActionSpec(
+            action_id="well.describe",
+            description="描述一口井：标识、坐标、深度段、曲线清单（经生产解析器真实解析）。",
+            handler=_describe_well,
+            risk=ActionRisk.READ,
+            category="interactive.query",
+            version="1.0",
+            resource_profile={"estimated_cpu_cores": 0.5, "estimated_ram_bytes": 32 * 1024**2, "io_weight": 1.0},
+            required_context=("project",),
+            input_schema={
+                "type": "object",
+                "properties": {"well": {"type": "string"}},
+                "required": ["well"],
+                "additionalProperties": False,
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "well_id": {"type": ["string", "null"]},
+                    "name": {"type": "string"},
+                    "curves": {"type": "array"},
+                },
+                "required": ["name", "curves"],
+            },
+            domain_tags=("well", "describe"),
+        )
+    )
+    registry.register(
+        ActionSpec(
+            action_id="well.describe_interpretation",
+            description="列出工程中与井相关的解释记录（地层/相关性），引用目录版本。",
+            handler=_describe_interpretation,
+            risk=ActionRisk.READ,
+            category="interactive.query",
+            version="1.0",
+            resource_profile={"estimated_cpu_cores": 0.2, "io_weight": 0.1},
+            required_context=("project",),
+            input_schema={
+                "type": "object",
+                "properties": {"well": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            domain_tags=("well", "interpretation"),
+        )
+    )
+    registry.register(
+        ActionSpec(
+            action_id="well.correlate",
+            description="井间地层对比。当前无 headless 对比引擎接入 —— 诚实返回不可用，绝不伪造对比结果。",
+            handler=_correlate,
+            risk=ActionRisk.COMPUTE,
+            category="background.compute",
+            version="1.0",
+            resource_profile={"estimated_cpu_cores": 1.0, "io_weight": 0.5},
+            required_context=("project",),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "wells": {"type": "array", "items": {"type": "string"}, "minItems": 2},
+                    "horizon": {"type": "string"},
+                },
+                "required": ["wells"],
+                "additionalProperties": False,
+            },
+            domain_tags=("well", "correlation"),
+        )
+    )
+
 def _well_entity(context: ActionContext, name_or_id: str) -> Any:
     from paleo_workbench.project.domain import resolve_well
 
@@ -323,3 +392,74 @@ def _apply_template(context: ActionContext, parameters: dict) -> dict:
         "name": template_id,
     }
     return {"well_id": well_id, "template": display["template"]}
+
+def _resolve_well(context: ActionContext, parameters: dict):
+    from paleo_workbench.project.domain import resolve_well
+
+    project = context.require("project")
+    return project, resolve_well(project, parameters["well"])
+
+
+def _describe_well(context: ActionContext, parameters: dict) -> dict:
+    project, well = _resolve_well(context, parameters)
+    curves = context.well_logs.get(well.id)
+    curve_names = sorted(curves.keys()) if isinstance(curves, dict) else []
+    if not curve_names:
+        # Real parse through the production loader (bounded preview), READ.
+        path = getattr(well, "path", None) or getattr(well, "source_path", None)
+        if path:
+            from paleo_workbench.viz.well_log_load import load_well_log_from_path
+
+            data = load_well_log_from_path(str(path))
+            curve_names = sorted(getattr(data, "curves", {}).keys() if hasattr(data, "curves") else [])
+    return {
+        "well_id": getattr(well, "id", None),
+        "name": getattr(well, "name", ""),
+        "surface_x": getattr(well, "surface_x", None),
+        "surface_y": getattr(well, "surface_y", None),
+        "top_depth": getattr(well, "top_depth", None),
+        "bottom_depth": getattr(well, "bottom_depth", None),
+        "is_reference": bool(getattr(project.domain, "is_reference_well", lambda w: False)(well))
+        if hasattr(project, "domain")
+        else False,
+        "curves": curve_names,
+    }
+
+
+def _describe_interpretation(context: ActionContext, parameters: dict) -> dict:
+    project = context.require("project")
+    well_name = parameters.get("well")
+    horizons = []
+    for ref in getattr(project, "horizon_interpretations", []) or []:
+        horizons.append(
+            {
+                "id": getattr(ref, "id", None),
+                "name": getattr(ref, "name", ""),
+                "horizon_key": getattr(ref, "horizon_key", ""),
+                "status": getattr(ref, "status", None),
+                "version_id": getattr(ref, "current_version_id", None),
+            }
+        )
+    correlations = []
+    for ref in getattr(project, "correlation_interpretations", []) or []:
+        correlations.append(
+            {
+                "id": getattr(ref, "id", None),
+                "name": getattr(ref, "name", ""),
+                "version_id": getattr(ref, "version_id", None),
+            }
+        )
+    return {"horizons": horizons, "correlations": correlations, "well": well_name}
+
+
+def _correlate(context: ActionContext, parameters: dict) -> dict:
+    # Honest unavailability (H8 contract): the correlation *session* today
+    # is a UI-adjacent workflow without a headless engine entry — the action
+    # surface reports that instead of fabricating correlation results.
+    from paleo_workbench.harness.executor import ActionUnavailableError
+
+    raise ActionUnavailableError(
+        "no headless well-correlation engine is wired yet; use the "
+        "correlation workstation (project.correlation_interpretations are "
+        "readable via well.describe_interpretation)"
+    )

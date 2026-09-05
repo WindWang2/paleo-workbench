@@ -142,12 +142,11 @@ def _create_fault_interpretation(context: ActionContext, parameters: dict) -> di
 
 
 def _workflow_status(context: ActionContext, parameters: dict) -> dict:
-    try:
-        from paleo_workbench.workflow.service import dashboard_state
+    # Honesty (#847 family): a failing status projection is a FAILED action,
+    # never a success-shaped payload hiding an "error" key.
+    from paleo_workbench.workflow.service import dashboard_state
 
-        state = dashboard_state(context.project)
-    except Exception as exc:
-        return {"error": f"{type(exc).__name__}: {exc}"}
+    state = dashboard_state(context.project)
     if isinstance(state, dict):
         return {"dashboard": state}
     return {"dashboard": getattr(state, "to_dict", lambda: str(state))()}

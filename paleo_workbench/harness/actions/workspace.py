@@ -136,15 +136,28 @@ def _search(context: ActionContext, parameters: dict) -> dict:
             type=parameters.get("type") or None,
             tag=parameters.get("tag") or None,
         )
-    else:  # CatalogPort fallback: filter the version list
+        degraded = False
+    else:  # CatalogPort fallback: apply every declared filter locally
+        # Honesty: the fallback applies ALL filters the schema declares, and
+        # reports the degrade instead of silently dropping type/tag.
+        degraded = True
         text = (parameters.get("text") or "").lower()
+        type_filter = parameters.get("type")
+        tag = parameters.get("tag")
         assets = []
         for version in catalog.list_versions():
             name = (getattr(version, "name", "") or "").lower()
             if text and text not in name:
                 continue
+            if type_filter and (
+                getattr(version, "kind", "") or getattr(version, "format", "")
+            ) != type_filter:
+                continue
+            if tag and tag not in (getattr(version, "tags", []) or []):
+                continue
             assets.append(version)
     return {
+        "degraded_filters": degraded,
         "results": [
             {
                 "asset_id": getattr(a, "asset_id", getattr(a, "id", "")),
@@ -155,7 +168,6 @@ def _search(context: ActionContext, parameters: dict) -> dict:
         ],
         "count": len(assets),
     }
-
 
 def _lineage(context: ActionContext, parameters: dict) -> dict:
     catalog = _catalog(context)
