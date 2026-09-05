@@ -102,13 +102,26 @@ class ViewCoordinationController(QObject):
 
         Only assets carrying the ``time_depth`` role enter calibration — a
         plain file with a similar name is not an authority. Unparseable
-        tables are skipped with a debug log, never guessed.
+        tables are skipped with a debug log, never guessed. Entity-linked
+        assets keep their catalog identity (version id / fingerprint /
+        quality metadata) so a reopened calibration stays attributable.
         """
         from paleo_workbench.viz.coordinate_hub import TimeDepthCalibration
 
         registered = 0
         td_assets = self._time_depth_assets(project)
-        for well_name, path in td_assets:
+        for item in td_assets:
+            # Entity links carry the catalog identity alongside the path;
+            # legacy ResourceItems only have the path.
+            if len(item) == 3:
+                well_name, path, identity = item
+                version_id = identity.get("version_id")
+                fingerprint = identity.get("fingerprint")
+                metadata = identity.get("metadata") or {}
+            else:
+                well_name, path = item
+                version_id = fingerprint = None
+                metadata = {}
             # Project-model paths arrive as str (ResourceItem.path is a str
             # deserialized straight from the project JSON, and the catalog
             # resolver also hands back str); normalize here so the Path
@@ -127,7 +140,12 @@ class ViewCoordinationController(QObject):
             pairs = list(zip(table.md_m, table.time_ms))
             try:
                 calibration = TimeDepthCalibration.from_pairs(
-                    str(well_name), pairs, provenance=f"td-table:{path.name}"
+                    str(well_name),
+                    pairs,
+                    provenance=f"td-table:{path.name}",
+                    version_id=version_id,
+                    fingerprint=fingerprint,
+                    metadata=dict(metadata),
                 )
             except ValueError:
                 logger.debug(
@@ -140,13 +158,17 @@ class ViewCoordinationController(QObject):
 
     @staticmethod
     def _time_depth_assets(project):
-        """(well_name, path) pairs for time_depth assets, hub-keyed by well name.
+        """time_depth entries for calibration, hub-keyed by well name.
 
         Resolution order: WorkArea EntityAssetLinks (well entity display name
-        + role time_depth) falling back to legacy ResourceItems typed
-        ``time_depth`` keyed by their own file stem.
+        + role time_depth, carrying the catalog version identity when the
+        version metadata holds one) falling back to legacy ResourceItems
+        typed ``time_depth`` keyed by their own file stem.
+
+        Yields ``(well_name, path)`` for legacy entries and
+        ``(well_name, path, identity_dict)`` for entity-linked entries.
         """
-        results: list[tuple[str, str]] = []
+        results: list[tuple] = []
         seen_paths: set[str] = set()
         for link in list(getattr(project, "entity_asset_links", None) or []):
             if str(getattr(link, "role", "")) != "time_depth":
@@ -161,14 +183,17 @@ class ViewCoordinationController(QObject):
             # staticmethod body: reference the sibling helper through the
             # class (a bare ``self`` here has always been a NameError — any
             # project with time_depth entity links crashed bind_project).
-            path = ViewCoordinationController._resolve_asset_path(
+            resolved = ViewCoordinationController._resolve_asset_version(
                 project, getattr(link, "asset_id", "")
             )
+            if resolved is None:
+                continue
+            path, identity = resolved
             if path and well_name:
                 key = str(path)
                 if key not in seen_paths:
                     seen_paths.add(key)
-                    results.append((well_name, path))
+                    results.append((well_name, path, identity))
         for resource in list(getattr(project, "resources", None) or []):
             if str(getattr(resource, "type", "")) != "time_depth":
                 continue
@@ -184,8 +209,13 @@ class ViewCoordinationController(QObject):
         return results
 
     @staticmethod
-    def _resolve_asset_path(project, asset_id: str) -> str | None:
-        """Best-effort payload path for a catalog asset id via the catalog."""
+    def _resolve_asset_version(project, asset_id: str) -> tuple[str, dict] | None:
+        """Best-effort (payload path, identity) for a catalog asset id.
+
+        The identity dict carries the version id plus any fingerprint /
+        quality metadata stored on the version, so a registered calibration
+        stays attributable to its catalog version after reopen.
+        """
         try:
             from paleo_workbench.catalog import get_catalog
 
@@ -200,7 +230,15 @@ class ViewCoordinationController(QObject):
                     version_id = asset.current_version_id
                     for version in cat.document.versions:
                         if version.id == version_id:
-                            return str(cat.resolve_path(version))
+                            metadata = dict(getattr(version, "metadata", None) or {})
+                            return (
+                                str(cat.resolve_path(version)),
+                                {
+                                    "version_id": version_id,
+                                    "fingerprint": metadata.get("fingerprint"),
+                                    "metadata": metadata,
+                                },
+                            )
         except Exception:
             return None
         return None
