@@ -12,7 +12,7 @@ import json
 import math
 import os
 import time
-from typing import Any
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
@@ -204,6 +204,7 @@ def run_single_well_prediction(
     wait_timeout_seconds: int | None = None,
     request_timeout_seconds: int | None = None,
     poll_timeout_seconds: int | None = None,
+    cancel: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Discover the model contract, submit one well, and poll when needed."""
     key = str(api_key or "").strip()
@@ -261,6 +262,7 @@ def run_single_well_prediction(
         status_code=status_code,
         request_timeout_seconds=request_timeout,
         poll_timeout_seconds=poll_timeout,
+        cancel=cancel,
     )
     regions = response_records(response)
     completed_model = response.get("model")
@@ -394,6 +396,7 @@ def _wait_for_completion(
     status_code: int,
     request_timeout_seconds: int,
     poll_timeout_seconds: int,
+    cancel: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     status = str(response.get("status") or "").lower()
     if status == "completed":
@@ -411,7 +414,9 @@ def _wait_for_completion(
         delay_seconds = _poll_delay_seconds(response.get("pollAfterMs"))
         if time.monotonic() + delay_seconds > deadline:
             raise GeoVizOnlinePredictionError("线上推理轮询超时，任务仍未完成")
-        time.sleep(delay_seconds)
+        # #1169: interruptible sleep (≤0.2 s slices) so closing the page
+        # or cancelling stops the poll instead of holding a worker ≤600 s.
+        _sleep_interruptible(delay_seconds, cancel)
         status_code, response = _request_json(
             poll_url,
             api_key=api_key,
@@ -457,6 +462,19 @@ def _poll_delay_seconds(value: Any) -> float:
     except (TypeError, ValueError):
         delay = 2.0
     return max(0.05, min(delay, 10.0))
+
+
+def _sleep_interruptible(delay_seconds: float, cancel: Callable[[], bool] | None) -> None:
+    """Sleep in ≤0.2 s slices, raising TaskCancelled when *cancel* fires."""
+    remaining = max(0.0, float(delay_seconds))
+    while remaining > 0:
+        if cancel is not None and cancel():
+            from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
+            raise TaskCancelled("online polling cancelled")
+        step = min(remaining, 0.2)
+        time.sleep(step)
+        remaining -= step
 
 
 def _positive_int(value: Any, *, fallback: int) -> int:

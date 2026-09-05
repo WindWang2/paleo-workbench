@@ -498,3 +498,73 @@ def test_plaintext_opt_in_and_local_names_pass_validator(monkeypatch) -> None:
         require_secure_endpoint("")
     monkeypatch.setenv("PALEO_ALLOW_PLAINTEXT_ENDPOINT", "1")
     assert require_secure_endpoint("http://203.0.113.7:3100/api/v1")
+
+
+def test_poll_sleep_interruptible_on_cancel() -> None:
+    """#1169: a firing cancel stops the poll sleep in slices, not seconds."""
+    import time
+
+    from paleo_workbench.prediction.geoviz_online import _sleep_interruptible
+    from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
+    calls = {"n": 0}
+
+    def _fire() -> bool:
+        calls["n"] += 1
+        return calls["n"] >= 3
+
+    t0 = time.monotonic()
+    with pytest.raises(TaskCancelled):
+        _sleep_interruptible(10.0, _fire)
+    assert time.monotonic() - t0 < 5.0
+    t0 = time.monotonic()
+    _sleep_interruptible(0.3, None)
+    assert time.monotonic() - t0 >= 0.3
+
+
+def test_prediction_poll_loop_aborts_on_cancel(monkeypatch) -> None:
+    """#1169: predicting-forever + cancel → TaskCancelled, not a 600 s hold."""
+    import time
+
+    import paleo_workbench.prediction.geoviz_online as client
+    from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
+    class _Response:
+        def __init__(self, status: int, body: dict):
+            self.status = status
+            self._body = body
+
+        def read(self):
+            return json.dumps(self._body).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def _urlopen(request, timeout):
+        if request.full_url.endswith("/models"):
+            return _Response(200, {
+                "total": 1,
+                "models": [{
+                    "id": "model-gr", "name": "m", "version": "v1",
+                    "algorithm": "tcn", "inputSchema": {"curves": ["GR"], "window": 2},
+                }],
+            })
+        return _Response(202, {"status": "predicting", "pollUrl": "/api/v1/p/1"})
+
+    monkeypatch.setattr(client, "urlopen", _urlopen)
+    t0 = time.monotonic()
+    with pytest.raises(TaskCancelled):
+        run_single_well_prediction(
+            "HZ27-5-3",
+            _well_log(),
+            api_key="ak_test",
+            base_url="http://inference.test/api/v1",
+            model_version_id="model-gr",
+            wait_timeout_seconds=30,
+            poll_timeout_seconds=600,
+            cancel=lambda: time.monotonic() - t0 > 0.5,
+        )
+    assert time.monotonic() - t0 < 30.0

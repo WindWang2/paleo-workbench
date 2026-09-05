@@ -304,6 +304,7 @@ class GeoVizOnlineProvider:
             api_key=online_api_key(),
             base_url=endpoint,
             model_version_id=model_version_id,
+            cancel=parameters.get("cancel"),
             wait_timeout_seconds=_clamp_int(
                 parameters.get("online_wait_timeout_seconds"),
                 online_wait_timeout_seconds(), 1, 120,
