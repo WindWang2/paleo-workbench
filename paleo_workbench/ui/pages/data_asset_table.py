@@ -238,18 +238,20 @@ class DataAssetTable(QWidget):
     def update_paged(self, provider: CatalogPageProvider) -> bool:
         """Serve the table from SQL pages instead of materialized rows.
 
-        The classic model stays constructed (small projects never see this
-        path); the view simply displays the paged model. Filter/search
+        The paged model (and its fetch thread) persists across refreshes —
+        ``set_provider`` swaps the row source and re-queries. Filter/search
         changes re-query through the provider; unmappable queries emit
         :attr:`paged_mode_unavailable` so the host can fall back.
 
         Returns True while paged mode serves; False when the query is
         unmappable (table already exited to the classic model).
         """
-        if self._paged_model is None or self._paged_model.provider is not provider:
+        if self._paged_model is None:
             self._paged_model = PagedAssetTableModel(provider, self)
             self._paged_model.set_column_keys(self._visible_column_keys)
             self._paged_model.modelReset.connect(self._on_model_reset)
+        else:
+            self._paged_model.set_provider(provider)
         self._in_paged_mode = True
         self._filter_query.search_text = self._search_text
         if not self._paged_model.apply_query(self._filter_query):
@@ -257,9 +259,16 @@ class DataAssetTable(QWidget):
             self.paged_mode_unavailable.emit()
             return False
         self._install_model(self._paged_model)
-        self._visible_assets = list(self._paged_model.assets())
+        # Paged rows are addressed through the model (sparse pages); the
+        # materialized row list has no meaning here.
+        self._visible_assets = []
         self._sync_selection()
         return True
+
+    def shutdown(self) -> None:
+        """Stop background fetch work (host teardown)."""
+        if self._paged_model is not None:
+            self._paged_model.shutdown()
 
     def exit_paged_mode(self) -> None:
         """Return to the classic materialized model (host rebuilds rows)."""
@@ -286,7 +295,7 @@ class DataAssetTable(QWidget):
         self._filter_query.search_text = self._search_text
         if self._in_paged_mode and self._paged_model is not None:
             if self._paged_model.apply_query(self._filter_query):
-                self._visible_assets = list(self._paged_model.assets())
+                self._visible_assets = []
                 self._sync_selection()
                 return True
             self.exit_paged_mode()
@@ -302,6 +311,8 @@ class DataAssetTable(QWidget):
         self.set_filter_query(self._filter_query)
 
     def visible_asset_count(self) -> int:
+        if self._in_paged_mode and self._paged_model is not None:
+            return self._paged_model.rowCount()
         return len(self._visible_assets)
 
     def _active_model(self):
@@ -412,7 +423,8 @@ class DataAssetTable(QWidget):
             self.selected_assets_changed.emit([])
             return
 
-        selected_items = [self.model.asset_at(r.row()) for r in rows if self.model.asset_at(r.row()) is not None]
+        active = self._active_model()
+        selected_items = [active.asset_at(r.row()) for r in rows if active.asset_at(r.row()) is not None]
         self._selected_assets = selected_items
         first = selected_items[0] if selected_items else None
         self._selected_asset = first
@@ -429,7 +441,8 @@ class DataAssetTable(QWidget):
             self.table.selectRow(view_row)
             selected_rows = [view_row]
 
-        selected_items = [self.model.asset_at(r) for r in selected_rows if self.model.asset_at(r) is not None]
+        active = self._active_model()
+        selected_items = [active.asset_at(r) for r in selected_rows if active.asset_at(r) is not None]
         if not selected_items:
             return
 
@@ -454,6 +467,13 @@ class DataAssetTable(QWidget):
         rows (see #412).
         """
         active = self._active_model()
+        if self._in_paged_mode and active is self._paged_model:
+            # Sparse pages: rows are addressed lazily; a full rowCount sweep
+            # would demand-fetch every page in the catalog. Selection
+            # restores through the model's stable-key index instead.
+            self._visible_assets = []
+            self._sync_selection()
+            return
         self._visible_assets = [
             asset
             for row in range(active.rowCount())
@@ -545,12 +565,18 @@ class DataAssetTable(QWidget):
         rows the user can no longer see (#850-2).  Emits nothing itself
         (callers notify via :meth:`_emit_selection_changes`).  Returns True
         when at least one previously selected asset is still visible.
+
+        Paged mode restores through the model's stable-key row index
+        (recently resident pages only) instead of a materialized row list.
         """
-        wanted_keys = {
-            key
-            for key in (
-                self._asset_key(self._selected_asset),
-                *(self._asset_key(a) for a in self._selected_assets),
+        wanted = {
+            key: asset
+            for key, asset in (
+                (self._asset_key(self._selected_asset), self._selected_asset),
+                *(
+                    (self._asset_key(a), a)
+                    for a in self._selected_assets
+                ),
             )
             if key is not None
         }
@@ -559,10 +585,17 @@ class DataAssetTable(QWidget):
         selection_model.blockSignals(True)
         self.table.clearSelection()
         restored: list[object] = []
-        for row, asset in enumerate(self._visible_assets):
-            if self._asset_key(asset) in wanted_keys:
-                self.table.selectRow(row)
-                restored.append(asset)
+        if self._in_paged_mode and self._paged_model is not None:
+            for key, asset in wanted.items():
+                row = self._paged_model.row_for_key(key)
+                if row is not None and 0 <= row < self._paged_model.rowCount():
+                    self.table.selectRow(row)
+                    restored.append(asset)
+        else:
+            for row, asset in enumerate(self._visible_assets):
+                if self._asset_key(asset) in wanted:
+                    self.table.selectRow(row)
+                    restored.append(asset)
         selection_model.blockSignals(False)
 
         self._selected_assets = list(restored)

@@ -3221,6 +3221,7 @@ class DataCatalogService:
         type: str | None = None,
         asset_id: str | None = None,
         include_trashed: bool = False,
+        trashed_only: bool = False,
         order_by: str | None = None,
         limit: int = 500,
         offset: int = 0,
@@ -3251,6 +3252,7 @@ class DataCatalogService:
                     type=type,
                     asset_id=asset_id,
                     include_trashed=include_trashed,
+                    trashed_only=trashed_only,
                     order_by=order_by,
                     limit=limit,
                     offset=offset,
@@ -3266,6 +3268,7 @@ class DataCatalogService:
             type=type,
             asset_id=asset_id,
             include_trashed=include_trashed,
+            trashed_only=trashed_only,
             order_by=order_by,
             limit=limit,
             offset=offset,
@@ -3282,6 +3285,7 @@ class DataCatalogService:
         type: str | None = None,
         asset_id: str | None = None,
         include_trashed: bool = False,
+        trashed_only: bool = False,
     ) -> int:
         """Count of assets matching the paged-path predicates."""
         index = self._query_index_if_current()
@@ -3296,6 +3300,7 @@ class DataCatalogService:
                         type=type,
                         asset_id=asset_id,
                         include_trashed=include_trashed,
+                        trashed_only=trashed_only,
                     )
                 )
             except Exception:
@@ -3309,6 +3314,7 @@ class DataCatalogService:
                 type=type,
                 asset_id=asset_id,
                 include_trashed=include_trashed,
+                trashed_only=trashed_only,
             )
         )
 
@@ -3415,6 +3421,7 @@ class DataCatalogService:
         type: str | None = None,
         asset_id: str | None = None,
         include_trashed: bool = False,
+        trashed_only: bool = False,
     ) -> list[dict]:
         """Filtered assets as paged-shape row dicts, cached per revision.
 
@@ -3430,6 +3437,7 @@ class DataCatalogService:
             str(type or ""),
             str(asset_id or ""),
             bool(include_trashed),
+            bool(trashed_only),
         )
         with self._lock:
             cache_key = (self.document.catalog_revision, self.mutation_serial, query_key)
@@ -3446,7 +3454,10 @@ class DataCatalogService:
             rows: list[dict] = []
             maps = self._ensure_maps()
             for asset in self.document.assets:
-                if not include_trashed and asset.trashed:
+                if trashed_only:
+                    if not asset.trashed:
+                        continue
+                elif not include_trashed and asset.trashed:
                     continue
                 if asset_id and asset.id != asset_id:
                     continue
@@ -3521,6 +3532,7 @@ class DataCatalogService:
         type: str | None = None,
         asset_id: str | None = None,
         include_trashed: bool = False,
+        trashed_only: bool = False,
         order_by: str | None = None,
         limit: int,
         offset: int,
@@ -3535,6 +3547,7 @@ class DataCatalogService:
             type=type,
             asset_id=asset_id,
             include_trashed=include_trashed,
+            trashed_only=trashed_only,
         )
         order = order_by or "name"
         if order == "name_desc":

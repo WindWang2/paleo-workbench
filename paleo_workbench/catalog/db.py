@@ -1861,6 +1861,7 @@ class CatalogIndex:
         type: str | None = None,
         asset_id: str | None = None,
         include_trashed: bool = False,
+        trashed_only: bool = False,
     ) -> tuple[list[str], list[str]]:
         """WHERE fragments + params over the assets table only.
 
@@ -1870,10 +1871,16 @@ class CatalogIndex:
         predicates (stage) go through an ``a.current_version_id IN (SELECT
         …)`` subquery instead, and current-version columns are batch-fetched
         for the page's rows afterwards.
+
+        ``trashed_only`` (recycle-bin view) is the complement of the default
+        ``trashed = 0`` filter — listing live assets in the recycle bin was
+        the old behavior and simply lied.
         """
         wheres: list[str] = []
         params: list[str] = []
-        if not include_trashed:
+        if trashed_only:
+            wheres.append("a.trashed = 1")
+        elif not include_trashed:
             wheres.append("a.trashed = 0")
         if text:
             wheres.append("a.name_search LIKE ? ESCAPE '\\'")
@@ -1935,6 +1942,7 @@ class CatalogIndex:
         type: str | None = None,
         asset_id: str | None = None,
         include_trashed: bool = False,
+        trashed_only: bool = False,
         order_by: str | None = None,
         limit: int = 500,
         offset: int = 0,
@@ -1960,6 +1968,7 @@ class CatalogIndex:
             type=type,
             asset_id=asset_id,
             include_trashed=include_trashed,
+            trashed_only=trashed_only,
             order_by=order_by,
             limit=limit,
             offset=offset,
@@ -1975,6 +1984,7 @@ class CatalogIndex:
         type: str | None = None,
         asset_id: str | None = None,
         include_trashed: bool = False,
+        trashed_only: bool = False,
         order_by: str | None = None,
         limit: int = 500,
         offset: int = 0,
@@ -1988,6 +1998,7 @@ class CatalogIndex:
             type=type,
             asset_id=asset_id,
             include_trashed=include_trashed,
+            trashed_only=trashed_only,
         )
         order = self._PAGE_ORDER_COLUMNS.get(order_by or "name", self._PAGE_ORDER_COLUMNS["name"])
         if after is not None and order_by in (None, "name"):
@@ -2043,6 +2054,7 @@ class CatalogIndex:
         type: str | None = None,
         asset_id: str | None = None,
         include_trashed: bool = False,
+        trashed_only: bool = False,
     ) -> int:
         """Count of assets matching the paged-path predicates (index-backed)."""
         return self._safe(
@@ -2055,6 +2067,7 @@ class CatalogIndex:
             type=type,
             asset_id=asset_id,
             include_trashed=include_trashed,
+            trashed_only=trashed_only,
         )
 
     def _count_assets(
@@ -2066,6 +2079,7 @@ class CatalogIndex:
         type: str | None = None,
         asset_id: str | None = None,
         include_trashed: bool = False,
+        trashed_only: bool = False,
     ) -> int:
         wheres, params = self._paged_predicates(
             text=text,
@@ -2075,6 +2089,7 @@ class CatalogIndex:
             type=type,
             asset_id=asset_id,
             include_trashed=include_trashed,
+            trashed_only=trashed_only,
         )
         where = f"WHERE {' AND '.join(wheres)}" if wheres else ""
         sql = f"SELECT count(*) FROM assets a {where}"

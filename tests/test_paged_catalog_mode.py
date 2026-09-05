@@ -138,16 +138,19 @@ class TestProviderAndModel:
         assert model.rowCount() == 100_000
         fetched_first_page = len(model.assets())
         assert 0 < fetched_first_page <= 500
-        # The view drives further pages through the Qt protocol.
+        # The view drives further pages through the Qt protocol; pages fill
+        # ASYNC (off the GUI thread) and land via dataChanged.
         guard = 0
         while model.canFetchMore() and guard < 10:
             model.fetchMore()
             guard += 1
-        assert len(model.assets()) == min(100_000, fetched_first_page + 500 * 10)
+        expected = min(100_000, fetched_first_page + 500 * 10)
+        qtbot.waitUntil(lambda: len(model.assets()) >= expected, timeout=10_000)
         # Unfetched row displays the placeholder, not fabricated data.
         from PySide6.QtCore import Qt
 
         assert model.data(model.index(99_999, 0), Qt.ItemDataRole.DisplayRole) == "…"
+        model.shutdown()
 
     def test_model_sort_requeries_not_prefix_sort(self, index):
         from PySide6.QtCore import Qt

@@ -482,6 +482,8 @@ class DataPage(QWidget):
         verify_joined = self._verify_job.shutdown(wait_ms)
         domain_bind_joined = self._domain_bind_job.shutdown(wait_ms)
         catalog_copy_joined = self._catalog_copy_job.shutdown(wait_ms)
+        # The paged model's fetch thread (large-catalog mode) must stop too.
+        self.asset_table.shutdown()
         joined = all(
             result is not False
             for result in (
@@ -622,14 +624,19 @@ class DataPage(QWidget):
     # ------------------------------------------------------------------
 
     def _paged_provider(self, project_root):
-        """A SQL page provider over the open catalog index, or None."""
+        """A SQL page provider over the open catalog's query seam, or None.
+
+        Historical bug: this read ``service.index`` — an attribute that does
+        not exist (the service keeps ``_index``) — so the provider was always
+        None and paged mode never engaged in production. The provider now
+        wraps the service's paged query facade directly.
+        """
         service = self._lifecycle.catalog_service()
-        index = getattr(service, "index", None) if service is not None else None
-        if index is None:
+        if service is None:
             return None
         from paleo_workbench.ui.pages.paged_asset_model import CatalogPageProvider
 
-        return CatalogPageProvider(index, project_root)
+        return CatalogPageProvider(service, project_root)
 
     def _try_paged_catalog_mode(self, project_root) -> bool:
         """Serve the explorer from SQL pages when the catalog is large.
@@ -671,7 +678,7 @@ class DataPage(QWidget):
     def _apply_paged_tree_counts(self, project_root, total: int) -> None:
         """Tree badges from SQL aggregates (+ small legacy side counts)."""
         provider = self._paged_provider(project_root)
-        aggregates = provider.index.catalog_aggregates() if provider is not None else {}
+        aggregates = provider.total_source_aggregates() if provider is not None else {}
         stages = dict(aggregates.get("stages") or {})
         types = dict(aggregates.get("types") or {})
         tags = dict(aggregates.get("tags") or {})
