@@ -234,3 +234,32 @@ def test_provider_contract_and_cpu_mode_label(store, tmp_path):
     ref_arg, _ = _reference(model_path, cube)
     classmap = np.asarray(zarr.open(kinds["classmap"]["path"], mode="r")[:, :, :])
     np.testing.assert_array_equal(classmap, ref_arg)
+
+
+def test_non_model_file_refused_before_native_loader(tmp_path):
+    """#1176: devices/non-onnx files never reach ORT."""
+    from paleo_workbench.prediction.tiled_onnx import (
+        TiledInferenceError,
+        _check_onnx_model_file,
+    )
+
+    fake = tmp_path / "evil.bin"
+    fake.write_bytes(b"\x00" * 64)
+    with pytest.raises(TiledInferenceError):
+        _check_onnx_model_file(fake)
+    with pytest.raises(TiledInferenceError):
+        _check_onnx_model_file(tmp_path / "missing.onnx")
+    with pytest.raises(TiledInferenceError):
+        _check_onnx_model_file(Path("/dev/null"))
+
+
+def test_model_binding_records_bytes_identity(tmp_path):
+    """#1176: the loaded model's name/size/sha bind DERIVED to real bytes."""
+    from paleo_workbench.catalog.checksum import sha256_file
+    from paleo_workbench.prediction.tiled_onnx import _check_onnx_model_file
+
+    model_path = _save(_sign_model(), tmp_path / "m.onnx")
+    binding = _check_onnx_model_file(model_path)
+    assert binding["model_file"] == "m.onnx"
+    assert binding["model_bytes"] == model_path.stat().st_size > 0
+    assert binding["model_sha256"] == sha256_file(model_path)

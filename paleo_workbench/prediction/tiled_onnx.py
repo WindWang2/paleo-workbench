@@ -43,6 +43,49 @@ class TiledInferenceError(RuntimeError):
     """Honest failure (bad model I/O contract, unusable input, OOM at batch 1)."""
 
 
+# #1176: native ORT parses whatever path it is given — refuse non-models
+# before they reach it. Regular .onnx files only (no devices/fifos), with
+# a generous size cap against memory-exhaustion models.
+ONNX_MODEL_SUFFIX = ".onnx"
+ONNX_MODEL_MAX_BYTES = 4 * 1024**3
+
+
+def _check_onnx_model_file(model_path: Path) -> dict[str, Any]:
+    """Validate an ONNX model file; return binding metadata for provenance."""
+    try:
+        st = model_path.stat()
+    except OSError:
+        st = None
+    import stat as _stat
+
+    if (
+        st is None
+        or not _stat.S_ISREG(st.st_mode)
+        or model_path.suffix.lower() != ONNX_MODEL_SUFFIX
+        or st.st_size <= 0
+    ):
+        raise TiledInferenceError(
+            f"refusing to load non-model file as ONNX: {model_path} "
+            f"(regular {ONNX_MODEL_SUFFIX} files only)"
+        )
+    try:
+        cap = int(os.environ.get("PALEO_ONNX_MAX_MODEL_BYTES", "") or ONNX_MODEL_MAX_BYTES)
+    except ValueError:
+        cap = ONNX_MODEL_MAX_BYTES
+    if st.st_size > cap:
+        raise TiledInferenceError(
+            f"ONNX model {model_path} is {st.st_size} bytes, above the "
+            f"{cap}-byte load cap (PALEO_ONNX_MAX_MODEL_BYTES overrides)"
+        )
+    from paleo_workbench.catalog.checksum import sha256_file_or_none
+
+    return {
+        "model_file": model_path.name,
+        "model_bytes": st.st_size,
+        "model_sha256": sha256_file_or_none(model_path),
+    }
+
+
 def tile_starts(n: int, tile: int, overlap: int) -> list[int]:
     """Tile start positions covering [0, n) with stride = tile - overlap."""
     if tile <= overlap:
@@ -122,6 +165,7 @@ def run_tiled_inference(
     model_path = Path(model_path)
     if not model_path.is_file():
         raise TiledInferenceError(f"ONNX model not found: {model_path}")
+    model_binding = _check_onnx_model_file(model_path)
     sess, mode = _make_session(model_path, prefer_gpu=prefer_gpu)
     input_name = sess.get_inputs()[0].name
     output_name = sess.get_outputs()[0].name
@@ -221,6 +265,8 @@ def run_tiled_inference(
         "shape": list(shape),
         "classes": classes,
         "overlap": overlap,
+        # #1176: bind the DERIVED outputs to the actual model bytes loaded.
+        "model_binding": model_binding,
     }
 
 
@@ -344,6 +390,7 @@ class TiledOnnxProvider:
             "source": PROVIDER_TILED_ONNX,
             "generator_version": self.model_version,
             "device_mode": stats["mode"],
+            "model_binding": stats.get("model_binding", {}),
             "tiles": stats["tiles_done"],
             "cancelled": stats["cancelled"],
             "elapsed_s": stats["elapsed_s"],
