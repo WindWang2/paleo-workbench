@@ -8,6 +8,7 @@ are auditable, unit-labelled and persistable (ADR-08).
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -25,14 +26,11 @@ __all__ = [
 ]
 
 _KIND_COUNTER: dict[str, int] = {}
+_ID_LOCK = threading.Lock()
 
 
 def _next_id(kind: str) -> str:
-    import itertools
-    import threading
-
-    lock = threading.Lock()
-    with lock:
+    with _ID_LOCK:
         _KIND_COUNTER[kind] = _KIND_COUNTER.get(kind, 0) + 1
         n = _KIND_COUNTER[kind]
     return f"measure:{kind}-{n}"

@@ -513,6 +513,8 @@ def read_obj(path: str | Path) -> dict[str, Any]:
             faces.append(ids)
     arr = np.asarray(verts, dtype=np.float64)
     f = np.asarray(faces, dtype=np.int64)
+    if not verts:
+        raise ExportError(f"{path}: no vertices parsed (empty or garbage OBJ)")
     if len(f) and (f.min() < 0 or f.max() >= len(arr)):
         raise ExportError(f"{path}: face index out of range")
     return {
@@ -545,7 +547,10 @@ def read_stl(path: str | Path) -> dict[str, Any]:
 
 
 def read_vtp(path: str | Path) -> dict[str, Any]:
-    root = ET.parse(path).getroot()
+    try:
+        root = ET.parse(path).getroot()
+    except ET.ParseError as exc:
+        raise ExportError(f"{path}: malformed VTK XML ({exc})") from exc
     if root.tag != "VTKFile" or root.get("type") != "PolyData":
         raise ExportError(f"{path}: not a VTK PolyData XML file")
     piece = root.find(".//Piece")

@@ -20,6 +20,7 @@ Layering contract::
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -152,6 +153,11 @@ class GeologicalSceneAdapter:
                 continue
             derived = self._build_payloads(widget, obj, token)
             if derived is not None:
+                if not derived and not _scene_objects_reachable(widget):
+                    # GL-less viewport: nothing was actually built; do NOT
+                    # record the token or a later renderer would never build
+                    # this object (stale-cache lockout).
+                    continue
                 had_previous = obj.object_id in self._synced_tokens
                 self._derived[obj.object_id] = derived
                 self._synced_tokens[obj.object_id] = token
@@ -202,6 +208,11 @@ class GeologicalSceneAdapter:
             return
         for name in self._derived.get(object_id, []):
             widget.set_scene_object_visibility(name, visible)
+        if visible and self._clip_planes:
+            # set_clip_planes skips invisible objects; re-apply on reveal so
+            # an object hidden during a clip edit is not left unclipped.
+            for name in self._derived.get(object_id, []):
+                widget.set_scene_object_clip_planes(name, self._clip_planes)
 
     def visibility(self, object_id: str) -> bool:
         return self._visibility.get(object_id, True)
@@ -281,9 +292,16 @@ class GeologicalSceneAdapter:
         widget = self._widget_provider()
         if widget is None:
             return None
-        scene = getattr(widget, "scene", None)
-        scene = scene() if callable(scene) else scene
-        hit = widget.pick_scene_object(px, py, kinds=list(kinds) if kinds else None)
+        try:
+            scene = getattr(widget, "scene", None)
+            scene = scene() if callable(scene) else scene
+        except Exception:
+            scene = None
+        try:
+            hit = widget.pick_scene_object(px, py, kinds=list(kinds) if kinds else None)
+        except Exception:
+            logger.debug("engine pick failed", exc_info=True)
+            return None
         if hit is None:
             return None
         # engine world → render indices → domain world
@@ -309,11 +327,19 @@ class GeologicalSceneAdapter:
     # ------------------------------------------------------------------
 
     def _current_scene_token(self, widget) -> Any:
-        """Identity of the active joint scene (None when unbound)."""
-        scene = getattr(widget, "scene", None)
-        scene = scene() if callable(scene) else scene
-        domain = getattr(scene, "depth_transform", lambda: None)()
-        return (id(scene), str(getattr(domain, "kind", "")))
+        """Identity of the active joint scene (None when unbound/destroyed).
+
+        A torn-down scene object may raise on access (PySide RuntimeError);
+        that degrades to ``None`` — the sync proceeds and payloads simply
+        rebuild once a live scene returns (the token changes back).
+        """
+        try:
+            scene = getattr(widget, "scene", None)
+            scene = scene() if callable(scene) else scene
+            domain = getattr(scene, "depth_transform", lambda: None)()
+            return (id(scene), str(getattr(domain, "kind", "")))
+        except Exception:
+            return None
 
     def _payload_token(self, obj: DomainObject) -> tuple | None:
         """Content token deciding rebuild; ``None`` = not renderable now."""
@@ -649,17 +675,29 @@ def oid_is_unchanged(previous: tuple | None, token: tuple) -> bool:
     return previous is not None and previous == token
 
 
+def _scene_objects_reachable(widget) -> bool:
+    """True when the widget can actually host scene objects right now.
+
+    The joint widget keeps its pass-through API with ``_renderer is None``
+    when GL is unavailable; recording stubs in tests have no ``_renderer``
+    attribute at all and count as reachable.
+    """
+    if not hasattr(widget, "add_scene_object"):
+        return False
+    return "_renderer" not in vars(widget) or getattr(widget, "_renderer", None) is not None
+
+
 def _finite_checksum(arr: np.ndarray) -> tuple:
-    """Cheap content address for float arrays (shape + corner samples +
-    sum of finite values). Deterministic, no hash randomization."""
-    a = np.asarray(arr)
+    """Content address for float arrays: full-array digest with NaN holes
+    canonicalized, so a NaN anywhere (legal in heightfields) neither
+    destabilizes the token (sampled-value approach) nor hides changes.
+    Deterministic across processes (hashlib, not salted ``hash``)."""
+    a = np.ascontiguousarray(np.asarray(arr, dtype=np.float64))
     if a.size == 0:
-        return (a.shape, 0.0)
-    flat = a.ravel()
-    finite = flat[np.isfinite(flat)]
-    s = float(finite.sum()) if finite.size else 0.0
-    samples = tuple(float(flat[i]) for i in (0, a.size // 2, a.size - 1))
-    return (a.shape, s, samples)
+        return (a.shape, "")
+    canonical = np.nan_to_num(a, nan=0.0, posinf=0.0, neginf=0.0)
+    digest = hashlib.blake2b(canonical.tobytes(), digest_size=12).hexdigest()
+    return (a.shape, digest)
 
 
 _FACIES_PALETTE = np.array(

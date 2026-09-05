@@ -116,7 +116,11 @@ class Geo3DWorkspaceController(QObject):
     # ------------------------------------------------------------------
 
     def add_object(self, obj: DomainObject) -> DomainObject:
-        """Add (or replace) a domain object, resync the scene and QC."""
+        """Add (or replace) a domain object, resync the scene and QC.
+
+        QC updates incrementally (only this object's audit is recomputed);
+        a full ``qc_assembly`` sweep runs on demand via :meth:`refresh_qc`.
+        """
         if obj.object_id in self.assembly:
             self.assembly.replace(obj)
         else:
@@ -126,8 +130,18 @@ class Geo3DWorkspaceController(QObject):
                 self.status_message.emit(f"对象被拒绝: {exc}")
                 return obj
         self.sync_scene()
-        self.refresh_qc()
+        self._qc_single(obj)
         return obj
+
+    def _qc_single(self, obj: DomainObject) -> None:
+        """Replace one object's cached audit and refresh the panel cheaply."""
+        self.qc_report = QCReport(
+            issues=[
+                i for i in self.qc_report.issues if i.object_id != obj.object_id
+            ]
+            + qc_object(obj).issues
+        )
+        self.qc_updated.emit(self.qc_report)
 
     def remove_object(self, object_id: str) -> bool:
         removed = self.assembly.remove(object_id)
@@ -146,13 +160,20 @@ class Geo3DWorkspaceController(QObject):
         return n
 
     def reset(self) -> None:
-        """Drop every domain object + scene object (project switch)."""
+        """Drop every domain object, scene object and view state (project
+        switch must not carry the previous project's clip/presets)."""
         self.assembly = ModelAssembly("page-geo3d")
         self.adapter.reset()
         self.qc_report = QCReport()
         self._selected_id = None
         self._measure_mode = None
         self._measure_points = []
+        self.clip_state = {
+            axis: {"enabled": False, "value": 0.5, "invert": False}
+            for axis in ("x", "y", "z")
+        }
+        self.view_presets = {}
+        self.camera = {}
         self.refresh_qc()
 
     def set_visibility(self, object_id: str, visible: bool) -> None:
@@ -680,6 +701,11 @@ class Geo3DWorkspaceController(QObject):
         from paleo_workbench.viz.geomodel.domain import MeasurementRecord
 
         for entry in payload.get("objects", []) or []:
+            # Corrupted-but-typed entries degrade per object; a project must
+            # always open (ADR-03). isinstance gates keep malformed values
+            # from raising outside the per-entry try.
+            if not isinstance(entry, dict):
+                continue
             oid = str(entry.get("object_id", ""))
             kind = oid.split(":", 1)[0]
             cls = {
@@ -696,29 +722,52 @@ class Geo3DWorkspaceController(QObject):
                 if not obj.provenance.demo:
                     self.assembly.add(obj)
                     restored.append(oid)
-            except (DomainError, KeyError, TypeError, ValueError):
+            except Exception:
                 logger.debug("restore failed for %s", oid, exc_info=True)
         for entry in payload.get("measurements", []) or []:
+            if not isinstance(entry, dict):
+                continue
             try:
                 record = MeasurementRecord.from_meta(entry)
                 self.assembly.add(record)
                 restored.append(record.object_id)
-            except (DomainError, KeyError, TypeError, ValueError):
+            except Exception:
                 logger.debug("measurement restore failed", exc_info=True)
-        self.adapter.restore_display(payload.get("display", {}) or {})
+        display = payload.get("display", {}) or {}
+        self.adapter.restore_display(
+            {
+                oid: state
+                for oid, state in display.items()
+                if isinstance(state, dict)
+            }
+        )
         clip = payload.get("clip", {}) or {}
         for axis in ("x", "y", "z"):
-            if axis in clip:
-                self.clip_state[axis] = dict(clip[axis])
-        self.camera = dict(payload.get("camera", {}) or {})
-        self.view_presets = {
-            str(v.get("name", f"view-{i}")): {
-                "distance": float(v.get("distance", 250.0)),
-                "elevation": float(v.get("elevation", 30.0)),
-                "azimuth": float(v.get("azimuth", -45.0)),
-            }
-            for i, v in enumerate(payload.get("views", []) or [])
+            if isinstance(clip.get(axis), dict):
+                state = clip[axis]
+                self.clip_state[axis] = {
+                    "enabled": _as_bool(state.get("enabled"), False),
+                    "value": _as_float(
+                        state.get("value"), 0.5, lo=0.0, hi=1.0
+                    ),
+                    "invert": _as_bool(state.get("invert"), False),
+                }
+        camera = payload.get("camera", {}) or {}
+        self.camera = {
+            k: _as_float(v, 0.0)
+            for k, v in camera.items()
+            if isinstance(k, str)
         }
+        self.view_presets = {}
+        for i, v in enumerate(payload.get("views", []) or []):
+            if not isinstance(v, dict):
+                continue
+            name = str(v.get("name", f"view-{i}"))
+            self.view_presets[name] = {
+                "distance": _as_float(v.get("distance"), 250.0, lo=1.0),
+                "elevation": _as_float(v.get("elevation"), 30.0, lo=-89.0, hi=89.0),
+                "azimuth": _as_float(v.get("azimuth"), -45.0),
+            }
         self.sync_scene()
         self.apply_clip_state()
         self.refresh_qc()
@@ -796,6 +845,37 @@ def demo_fault_curtain(
         crs="demo",
         provenance=provenance,
     )
+
+
+def _as_bool(value: Any, default: bool) -> bool:
+    """Strict-ish bool coercion: only real bools and unambiguous strings
+    parse; a persisted "false" must never truthify."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        low = value.strip().lower()
+        if low in ("true", "1", "yes", "on"):
+            return True
+        if low in ("false", "0", "no", "off", ""):
+            return False
+    return default
+
+
+def _as_float(value: Any, default: float, *, lo: float | None = None,
+              hi: float | None = None) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not np.isfinite(out):
+        return default
+    if lo is not None:
+        out = max(lo, out)
+    if hi is not None:
+        out = min(hi, out)
+    return out
 
 
 def _slug(text: str) -> str:

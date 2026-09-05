@@ -253,36 +253,39 @@ def _edge_manifold_stats(f: np.ndarray) -> tuple[int, int]:
 
 
 def _connected_components(v: np.ndarray, f: np.ndarray) -> int:
+    """Vertex components touched by the mesh (vectorized, scipy-backed).
+
+    The pure-Python union-find predecessor cost ~0.5 s on a 300x300
+    heightfield (178k faces), which froze the UI thread on every QC run;
+    the sparse-graph path is ~3 orders faster.
+    """
     if len(f) == 0:
         return 0
-    parent = np.arange(len(v))
+    try:
+        from scipy.sparse import coo_matrix
+        from scipy.sparse.csgraph import connected_components as _cc
+    except Exception:  # pragma: no cover - scipy is a geoviz dependency
+        parent = np.arange(len(v))
 
-    def find(x: int) -> int:
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = int(parent[x])
-        return x
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = int(parent[x])
+            return x
 
-    for tri in f:
-        r0 = find(int(tri[0]))
-        for node in tri[1:]:
-            r1 = find(int(node))
-            if r0 != r1:
-                parent[r1] = r0
-    roots = {find(int(t[0])) for t in f}
-    return len(roots)
-
-
-def _grid_self_intersection_bounds(v: np.ndarray, f: np.ndarray, oid: str) -> None:
-    """Placeholder-free bounded self-intersection screen.
-
-    A full O(n²) triangle-triangle test is out of budget for medium meshes;
-    the screen used here is the *inverted-normal consistency* test along the
-    connectivity (a cheap, reliable self-intersection symptom for heightfield
-    and shell meshes). Full generality is documented as out of scope in the
-    QC panel text.
-    """
-    return None
+        for tri in f:
+            r0 = find(int(tri[0]))
+            for node in tri[1:]:
+                r1 = find(int(node))
+                if r0 != r1:
+                    parent[r1] = r0
+        return len({find(int(t[0])) for t in f})
+    rows = np.concatenate([f[:, 0], f[:, 1], f[:, 2]])
+    cols = np.concatenate([f[:, 1], f[:, 2], f[:, 0]])
+    graph = coo_matrix(
+        (np.ones(len(rows), dtype=np.int8), (rows, cols)), shape=(len(v), len(v))
+    )
+    return int(_cc(graph, directed=False)[0])
 
 
 def qc_horizon_surface(hor: HorizonSurface) -> QCReport:
@@ -556,7 +559,22 @@ def qc_object(obj: DomainObject) -> QCReport:
             QCIssue("UNKNOWN_KIND", "error", "unknown object kind", obj.object_id)
         )
         return report
-    return fn(obj)  # type: ignore[arg-type]
+    try:
+        return fn(obj)  # type: ignore[arg-type]
+    except (IndexError, ValueError, TypeError) as exc:
+        # Arrays mutated behind the frozen-by-convention facade (e.g. a
+        # loader bypassing the constructor): QC must report the object as
+        # untrustworthy instead of crashing the panel.
+        report = QCReport()
+        report.add(
+            QCIssue(
+                "QC_AUDIT_FAILED",
+                "blocker",
+                f"audit crashed on inconsistent geometry: {exc}",
+                obj.object_id,
+            )
+        )
+        return report
 
 
 def qc_assembly(

@@ -221,3 +221,26 @@ class TestLegacySignatures:
         assert read_abaqus_inp(inp)["element_count"] == 18
         # legacy header honestly marks the synthetic nature
         assert "LEGACY" in f3.read_text(encoding="utf-8")
+
+
+class TestParserGarbage:
+    """P2-6: every reader fails with ExportError on garbage, never the
+    underlying parser exception type."""
+
+    def test_vtp_garbage_raises_ExportError(self, tmp_path):
+        p = tmp_path / "g.vtp"
+        p.write_bytes(b"\x00\x01\x02garbage\xff")
+        with pytest.raises(ExportError, match="malformed VTK XML"):
+            read_vtp(p)
+
+    def test_vtp_empty_raises(self, tmp_path):
+        p = tmp_path / "e.vtp"
+        p.write_text("", encoding="utf-8")
+        with pytest.raises(ExportError):
+            read_vtp(p)
+
+    def test_obj_garbage_raises(self, tmp_path):
+        p = tmp_path / "g.obj"
+        p.write_text("# only a comment\n", encoding="utf-8")
+        with pytest.raises(ExportError, match="no vertices"):
+            read_obj(p)
