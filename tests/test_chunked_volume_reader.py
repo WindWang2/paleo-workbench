@@ -124,10 +124,14 @@ def test_logical_values_rejected_outside_survey(volume):
 # --------------------------------------------------------------------- LOD
 
 
-def _floor_half(arr: np.ndarray) -> np.ndarray:
-    """Floor-halving on the last two axes (LOD semantics: odd tails drop)."""
-    h2, w2 = arr.shape[0] // 2, arr.shape[1] // 2
-    return arr[: h2 * 2 : 2, : w2 * 2 : 2]
+def _ceil_half(arr: np.ndarray) -> np.ndarray:
+    """Ceil-halving on the last two axes (#135: odd tails edge-replicate)."""
+    a = np.asarray(arr)
+    if a.shape[0] % 2:
+        a = np.concatenate([a, a[-1:]], axis=0)
+    if a.shape[1] % 2:
+        a = np.concatenate([a, a[:, -1:]], axis=1)
+    return a[::2, ::2]
 
 
 def test_lod_keeps_logical_coordinates(volume):
@@ -148,7 +152,7 @@ def test_lod_keeps_logical_coordinates(volume):
         snapped = vol.read_inline(IL_START + snapped_i * IL_STEP, lod=0)
         ref = snapped
         for _ in range(lod):
-            ref = _floor_half(ref)
+            ref = _ceil_half(ref)
         np.testing.assert_array_equal(at_lod, ref)
 
 
@@ -158,9 +162,11 @@ def test_lod_levels_are_sibling_stores_and_lazy(volume):
     vol.ensure_lods(2)
     assert vol.has_lod(1) and vol.has_lod(2)
     lvl1 = json.loads((Path(f"{store}_l1") / "zarr.json").read_text())
-    assert list(lvl1["shape"]) == [NIL // 2, NXL // 2, NT // 2]
+    # #135: ceil extents — odd survey tails fold into the last strided bin
+    # so _validate_level_store, _level_index and the store agree.
+    assert list(lvl1["shape"]) == [(NIL + 1) // 2, (NXL + 1) // 2, (NT + 1) // 2]
     lvl2 = json.loads((Path(f"{store}_l2") / "zarr.json").read_text())
-    assert list(lvl2["shape"]) == [NIL // 4, NXL // 4, NT // 4]
+    assert list(lvl2["shape"]) == [(NIL + 3) // 4, (NXL + 3) // 4, (NT + 3) // 4]
     # mean strategy must not alias: it builds its OWN level stores
     vol_mean = open_volume(store, lod_strategy="mean")
     assert vol_mean._level_path(1) == f"{store}_l1_mean"
@@ -176,12 +182,27 @@ def test_maxabs_lod_preserves_strongest_event(volume):
     cube, _, store = volume
     vol = open_volume(store, lod_strategy="maxabs")
     at1 = vol.read_inline(IL_START, lod=1)
-    nx2, nt2 = at1.shape  # plane axes are (xline, time)
-    blocks = cube[0:2, : nx2 * 2, : nt2 * 2].reshape(1, 2, nx2, 2, nt2, 2)
-    flat = blocks.reshape(1, nx2, nt2, 8)
+    nx2, nt2 = at1.shape  # plane axes are (xline, time), ceil extents
+    # Independent reference: edge-replicate the pair's odd tails, then the
+    # 2x2x2 maxabs block pick (ties keep the even inline — argmax first).
+    def _pad(a):
+        a = np.asarray(a)
+        if a.shape[0] % 2:
+            a = np.concatenate([a, a[-1:, :]], axis=0)
+        if a.shape[1] % 2:
+            a = np.concatenate([a, a[:, -1:]], axis=1)
+        return a
+    pair = np.stack([_pad(cube[0]), _pad(cube[1])])  # (di, X, T)
+    # Flatten each 2x2x2 bin to (di, dx, dt) — di slowest, matching the
+    # reader's reshape order, so argmax ties keep the even inline.
+    flat = (
+        pair.reshape(2, nx2, 2, nt2, 2)
+        .transpose(1, 3, 0, 2, 4)
+        .reshape(nx2, nt2, 8)
+    )
     idx = np.abs(flat).argmax(axis=-1)
     ref = np.take_along_axis(flat, idx[..., None], axis=-1)[..., 0]
-    np.testing.assert_allclose(at1, ref[0], atol=1e-6)
+    np.testing.assert_allclose(at1, ref, atol=1e-6)
 
 
 # ----------------------------------------------------------- voxel window
@@ -274,7 +295,9 @@ def test_arbitrary_line_lod_decimates_output(volume):
     snapped = vol.read_trace(
         IL_START + (k_i * 2) * IL_STEP, XL_START + (k_j * 2) * XL_STEP
     )
-    np.testing.assert_allclose(at1, snapped[: (len(snapped) // 2) * 2 : 2], atol=1e-6)
+    # #135: ceil decimation — an odd tail sample folds into the last bin.
+    padded = np.append(snapped, snapped[-1]) if len(snapped) % 2 else snapped
+    np.testing.assert_allclose(at1, padded[::2], atol=1e-6)
     assert full.shape[0] == NT
 
 

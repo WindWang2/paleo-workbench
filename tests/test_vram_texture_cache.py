@@ -542,3 +542,46 @@ def test_wiggle_texture_eviction_allows_reupload():
         assert len(tiny) == 0
     finally:
         wi.VRAM = original
+
+
+# --- pin protection (#143) ---------------------------------------------------
+
+
+def test_pinned_entries_survive_budget_pressure():
+    """#143: a pinned entry is never chosen as an eviction victim, so a
+    texture uploaded for the frame in flight cannot be freed mid-paint by a
+    sibling VRAM.put."""
+    cache = VramTextureCache(max_bytes=1000, _use_env=False)
+    evicted: list[tuple] = []
+    cache.put(("volume", 1), content=None, size_bytes=400, kind="volume", release=lambda: evicted.append(("volume", 1)))
+    cache.pin(("volume", 1))
+
+    # Overlay put over budget: only the unpinned entry may go.
+    cache.put(("cmap", 1), content=None, size_bytes=400, kind="cmap", release=lambda: evicted.append(("cmap", 1)))
+    cache.put(("horizon", 1), content=None, size_bytes=400, kind="horizon", release=lambda: evicted.append(("horizon", 1)))
+
+    assert ("volume", 1) not in evicted
+    assert ("volume", 1) in cache
+
+    cache.release(("volume", 1))
+    cache.put(("normal", 1), content=None, size_bytes=400, kind="normal", release=lambda: evicted.append(("normal", 1)))
+    assert ("volume", 1) in evicted  # released → evictable again
+
+
+def test_pin_is_refcounted():
+    cache = VramTextureCache(max_bytes=1000, _use_env=False)
+    cache.put(("k",), content=None, size_bytes=100, kind="volume", release=None)
+    cache.pin(("k",))
+    cache.pin(("k",))
+    cache.release(("k",))
+    assert ("k",) in cache._pinned  # one pin remains
+    cache.release(("k",))
+    assert ("k",) not in cache._pinned
+
+
+def test_clear_drops_pins():
+    cache = VramTextureCache(max_bytes=1000, _use_env=False)
+    cache.put(("k",), content=None, size_bytes=100, kind="volume", release=None)
+    cache.pin(("k",))
+    cache.clear()
+    assert cache._pinned == {}
