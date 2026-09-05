@@ -38,6 +38,8 @@ class DocumentPane(QFrame):
         self.link_label = QLabel("联动", header)
         self.link_label.setObjectName("WorkstationLinkBadge")
         header_layout.addWidget(self.link_label)
+        # exposed for workspace-level extensions (orientation selector, …)
+        self.header_layout = header_layout
         outer.addWidget(header)
 
         self.host = QFrame(self)
@@ -91,6 +93,7 @@ class LinkedInterpretationWorkspace(QWidget):
         self._active_well_name = "A12"
         self.seismic_panel = None
         self.well_panel = None
+        self._orientation_combo = None
         # B9: honest degradation note when the docked well panel is not on the
         # native engine (None while the engine backend is active).
         self._well_backend_note: str | None = None
@@ -297,6 +300,41 @@ class LinkedInterpretationWorkspace(QWidget):
             # （SeismicViewPanel.enter_profile_mode），不再探测引擎私有属性。
             self.seismic_panel.set_interpretation_bar_visible(False)
             self.seismic_panel.enter_profile_mode()
+            self._install_profile_orientation_selector()
+
+    def _install_profile_orientation_selector(self) -> None:
+        """L5: 2-D 解释面方向切换（Inline / Crossline / Time 切片）。"""
+        from PySide6.QtWidgets import QComboBox
+
+        panel = self.seismic_panel
+        if panel is None or getattr(self, "_orientation_combo", None) is not None:
+            return
+        combo = QComboBox(self.seismic_pane)
+        combo.setObjectName("SeismicProfileOrientationCombo")
+        combo.setToolTip("二维解释面方向（联动档位仅改变显示，不重读体积）")
+        for label, key in (
+            ("Inline 剖面", "inline"),
+            ("Crossline 剖面", "crossline"),
+            ("Time 切片", "time"),
+        ):
+            combo.addItem(label, key)
+        combo.currentIndexChanged.connect(self._on_orientation_changed)
+        # 插到地震 pane 头部（标题与联动徽标之间）
+        header = self.seismic_pane.header_layout
+        if header is not None:
+            header.insertWidget(header.count() - 1, combo)
+        self._orientation_combo = combo
+
+    def _on_orientation_changed(self, index: int) -> None:
+        panel = self.seismic_panel
+        if panel is None or self._orientation_combo is None:
+            return
+        key = str(self._orientation_combo.itemData(index) or "inline")
+        ok = panel.set_profile_orientation(key)
+        if ok:
+            self.status_changed.emit(f"解释面方向：{self._orientation_combo.itemText(index)}")
+        else:
+            self.status_changed.emit(f"未知解释面方向 {key!r}，已忽略")
 
     def apply_default_well_backend(self) -> None:
         """Resolve the docked well backend from real binding availability.

@@ -95,6 +95,20 @@ _PROFILE_MODE_TOOLBAR_HIDDEN_ACTION_LABELS = frozenset({"3D模式:", "加载 SEG
 _PROFILE_MODE_SECONDARY_PROFILES = ("_profile_xl", "_profile_t", "_profile_arb")
 _QWIDGETSIZE_MAX = 0x00FFFFFF  # mirrors Qt's QWIDGETSIZE_MAX
 
+# L5 profile-orientation switching: which engine profile panel is the 2-D
+# interpretation surface, and what the toolbar badge calls it.
+_PROFILE_ORIENTATIONS = ("inline", "crossline", "time")
+_PROFILE_ORIENTATION_PANEL = {
+    "inline": "_profile_il",
+    "crossline": "_profile_xl",
+    "time": "_profile_t",
+}
+_PROFILE_ORIENTATION_BADGE = {
+    "inline": "Inline 剖面",
+    "crossline": "Crossline 剖面",
+    "time": "Time 切片",
+}
+
 
 class SeismicViewPanel(QFrame):
     """Center panel embedding geo-viz-engine's SeismicView."""
@@ -117,6 +131,10 @@ class SeismicViewPanel(QFrame):
         self._profile_mode_hidden_widgets: list[QWidget] = []
         self._profile_mode_hidden_actions: list[QAction] = []
         self._profile_mode_inline_header: QWidget | None = None
+        # L5: which profile the 2-D surface shows + per-header restore list
+        # (orientation switches hide different row headers).
+        self._profile_orientation = "inline"
+        self._profile_mode_hidden_headers: list[tuple[QWidget, int]] = []
         # Calibrated well-trace overlay (L5): the displayed well id plus the
         # last reason a projection was unavailable (fail-closed reporting).
         self._overlay_well_id: str | None = None
@@ -351,6 +369,35 @@ class SeismicViewPanel(QFrame):
         self._profile_mode = True
         self._apply_profile_mode()
 
+    def set_profile_orientation(self, orientation: str) -> bool:
+        """Switch which profile the 2-D interpretation surface shows (L5).
+
+        ``inline`` (default) / ``crossline`` / ``time``. Only meaningful in
+        profile mode; outside it the choice is stored and applied on the
+        next :meth:`enter_profile_mode`. Returns False for an unknown
+        orientation (refused, current state unchanged).
+        """
+        orientation = str(orientation or "").strip().lower()
+        if orientation not in _PROFILE_ORIENTATIONS:
+            return False
+        if orientation == self._profile_orientation:
+            return True
+        self._profile_orientation = orientation
+        if self._profile_mode:
+            # Full restore + re-apply keeps every hide/restore bookkeeping
+            # single-path (no orientation-swap special cases to drift).
+            self._profile_mode = False
+            self._restore_default_layout()
+            self._profile_mode = True
+            self._apply_profile_mode()
+        return True
+
+    @property
+    def profile_orientation(self) -> str:
+        """Current 2-D surface orientation ("inline" outside profile mode
+        semantics — the stored choice applies on the next enter)."""
+        return self._profile_orientation
+
     def exit_profile_mode(self) -> None:
         """Restore the default 3-D + profiles layout.
 
@@ -433,16 +480,6 @@ class SeismicViewPanel(QFrame):
                 self._profile_mode_restore["splitter_collapsible0"] = (
                     splitter.isCollapsible(0)
                 )
-            inline_panel = self._view_profile_panel("_profile_il")
-            inline_layout = inline_panel.layout() if inline_panel is not None else None
-            header = (
-                inline_layout.itemAt(0).widget()
-                if inline_layout is not None and inline_layout.count() > 0
-                else None
-            )
-            if header is not None:
-                self._profile_mode_restore["inline_header_max"] = header.maximumHeight()
-
         # Collapse the 3-D renderer pane; the inline profile takes the space.
         if renderer is not None:
             renderer.setMinimumHeight(0)
@@ -453,20 +490,30 @@ class SeismicViewPanel(QFrame):
             splitter.setSizes([0, 1000])
 
         hidden: list[QWidget] = []
-        for name in _PROFILE_MODE_SECONDARY_PROFILES:
+        active_name = _PROFILE_ORIENTATION_PANEL.get(
+            self._profile_orientation, "_profile_il"
+        )
+        for name in ("_profile_il", *_PROFILE_MODE_SECONDARY_PROFILES):
+            if name == active_name:
+                continue
             panel = self._view_profile_panel(name)
             if panel is not None:
                 panel.hide()
                 hidden.append(panel)
-        # The inline row header is too tall for a compact 2-D surface; the
-        # identity moves into the toolbar badge below.
-        inline_panel = self._view_profile_panel("_profile_il")
+        # The active profile's row header is too tall for a compact 2-D
+        # surface; the identity moves into the toolbar badge below. Headers
+        # are tracked per instance (orientation switches hide different
+        # ones; each restores its own original max height).
+        active_panel = self._view_profile_panel(active_name)
         header = None
-        if inline_panel is not None:
-            inline_layout = inline_panel.layout()
-            if inline_layout is not None and inline_layout.count() > 0:
-                header = inline_layout.itemAt(0).widget()
+        if active_panel is not None:
+            active_layout = active_panel.layout()
+            if active_layout is not None and active_layout.count() > 0:
+                header = active_layout.itemAt(0).widget()
             if header is not None:
+                self._profile_mode_hidden_headers.append(
+                    (header, header.maximumHeight())
+                )
                 header.hide()
                 header.setFixedHeight(0)
         self._profile_mode_inline_header = header
@@ -483,6 +530,11 @@ class SeismicViewPanel(QFrame):
             # Compat shim: earlier workspaces read this private attribute.
             view._inline_badge = badge
         if badge is not None:
+            badge.setText(
+                _PROFILE_ORIENTATION_BADGE.get(
+                    self._profile_orientation, "Inline 剖面"
+                )
+            )
             badge.show()
 
         for name in _PROFILE_MODE_TOOLBAR_HIDDEN_WIDGETS:
@@ -539,13 +591,14 @@ class SeismicViewPanel(QFrame):
                 continue
         self._profile_mode_hidden_actions = []
 
-        header = self._profile_mode_inline_header
-        if header is not None:
-            header.setMinimumHeight(0)
-            header.setMaximumHeight(
-                int(restore.get("inline_header_max", _QWIDGETSIZE_MAX))
-            )
-            header.show()
+        for header, max_height in self._profile_mode_hidden_headers:
+            try:
+                header.setMinimumHeight(0)
+                header.setMaximumHeight(int(max_height))
+                header.show()
+            except RuntimeError:
+                continue
+        self._profile_mode_hidden_headers = []
         self._profile_mode_inline_header = None
 
         badge = getattr(view, "_inline_badge", None)
