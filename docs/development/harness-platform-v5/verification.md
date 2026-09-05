@@ -78,3 +78,19 @@
 - 单工作流（9 节点，含一次 kriging 插值 + 一次 PNG 导出）端到端 <1.1s（本机）。
 - 引擎每节点一次原子 checkpoint（tmp+os.replace），无轮询线程。
 
+
+### M10 三轮独立 review（2026-09-06）
+
+- Review 1 Correctness：无 P0；5 项 P1（run 重入、carry-over $context 失真、
+  condition 提前求值、取消断链、面板缺 catalog）→ 全部修复。
+- Review 2 Architecture：无 P0；5 项 P1（store 路径第二推导、调度契约失实、
+  引擎单例钉死首工程、recipe 任意路径、缓存生产不可达+D3 偏差）→ 全部修复。
+- Review 3 UX/Perf/Adversarial：1 项 P0（与 Review1 重入同源）+ 5 项 P1
+  （CANCELLED 不可恢复、跨工程 store、checkpoint 静默失败、写放大、撕裂快照）
+  → 除写放大（P1-4，索引化为后续项，当前规模 12-51 节点可接受并已记录）外
+  全部修复；checkpoint 撕裂经写序修复。
+- 回归：review 修复后 310+122 全绿；新增 tests/test_workflow_review_fixes.py
+  6 项针对性回归（重入互锁、选择变化 bust 携带、条件等待、外部取消、recipe
+  路径边界、元工作流拒绝）。
+- 已知保留项（记录于 PR）：缓存查找 O(N) 全库扫描（当前规模可接受）、
+  workflow.describe 全量 receipt（大 run 有放大空间）、引擎错误信息中文化。
