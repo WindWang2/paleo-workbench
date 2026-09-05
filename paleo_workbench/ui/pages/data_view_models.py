@@ -596,6 +596,33 @@ def _integrity_from_version(service: Any, version: Any) -> IntegrityState:
         return IntegrityState.UNKNOWN
 
 
+def _version_tag_display_map(service):
+    """version_id → [tag display names], cached per (document, revision).
+
+    #1173: enrich runs on row-selection paths; rebuilding the whole map
+    per call is O(all version-tag links). Mirrors the adapter's
+    revision-keyed tag cache — any save bumps the revision and invalidates.
+    """
+    document = service.document
+    cache = getattr(service, "_view_version_tag_map_cache", None)
+    if (
+        cache is not None
+        and cache[0] is document
+        and cache[1] == document.catalog_revision
+    ):
+        return cache[2], cache[3]
+    tag_by_id = {t.id: t for t in document.tags}
+    mapping: dict[str, list[str]] = {}
+    for vid, tids in document.version_tags.items():
+        mapping[vid] = [
+            tag_by_id[tid].display_name or tag_by_id[tid].name
+            for tid in tids
+            if tid in tag_by_id
+        ]
+    service._view_version_tag_map_cache = (document, document.catalog_revision, mapping, tag_by_id)
+    return mapping, tag_by_id
+
+
 def enrich_view_from_catalog(view: AssetView, service: Any, asset_id: str) -> AssetView:
     """Enrich a presentation ``AssetView`` with authoritative catalog data.
 
@@ -627,17 +654,11 @@ def enrich_view_from_catalog(view: AssetView, service: Any, asset_id: str) -> As
     except Exception:
         versions = []
     # Version-level tags come from the catalog association map
-    # (document.version_tags: version_id -> [tag_id]).
+    # (document.version_tags: version_id -> [tag_id]), revision-cached (#1173).
     tag_by_id = {}
     version_tag_map: dict[str, list[str]] = {}
     try:
-        tag_by_id = {t.id: t for t in service.document.tags}
-        for vid, tids in service.document.version_tags.items():
-            version_tag_map[vid] = [
-                tag_by_id[tid].display_name or tag_by_id[tid].name
-                for tid in tids
-                if tid in tag_by_id
-            ]
+        version_tag_map, tag_by_id = _version_tag_display_map(service)
     except Exception:
         version_tag_map = {}
     current_version = None
@@ -767,7 +788,20 @@ def _lineage_status_text(summary: dict[str, Any] | None, stage: DataStage) -> st
 
 def catalog_row_overview(service: Any) -> dict[str, CatalogRowOverview]:
     """Build per-asset catalog facts in one locked pass (plus lineage
-    summaries, cached per catalog revision inside the service)."""
+    summaries, cached per catalog revision inside the service).
+
+    #1171: the whole overview is cached per (document, revision) — refresh
+    triggers with no intervening save reuse it instead of re-resolving
+    every asset's path and re-probing the filesystem.
+    """
+    document = service.document
+    cache = getattr(service, "_view_overview_cache", None)
+    if (
+        cache is not None
+        and cache[0] is document
+        and cache[1] == document.catalog_revision
+    ):
+        return cache[2]
     overviews: dict[str, CatalogRowOverview] = {}
     try:
         assets = service.list_assets(include_trashed=True)
@@ -827,6 +861,7 @@ def catalog_row_overview(service: Any) -> dict[str, CatalogRowOverview]:
             overviews[asset.id] = overview
     except Exception:
         return {}
+    service._view_overview_cache = (document, document.catalog_revision, overviews)
     return overviews
 
 

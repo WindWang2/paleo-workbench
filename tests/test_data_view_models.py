@@ -196,3 +196,53 @@ def test_enrich_integrity_does_not_rehash_on_ui_thread(monkeypatch, tmp_path):
         assert view.integrity_state == IntegrityState.VERIFIED
     finally:
         svc.close()
+
+
+def test_enrich_tag_map_cached_by_revision(tmp_path):
+    """#1173: repeat row selections reuse the tag map; any save rebuilds."""
+    from paleo_workbench.catalog.service import DataCatalogService
+    from paleo_workbench.ui.pages.data_view_models import _version_tag_display_map
+
+    project_path = tmp_path / "proj" / "demo.paleo.json"
+    project_path.parent.mkdir(parents=True, exist_ok=True)
+    project_path.write_text("{}", encoding="utf-8")
+    svc = DataCatalogService.open(project_path)
+    try:
+        src = tmp_path / "incoming" / "a.las"
+        src.parent.mkdir(parents=True, exist_ok=True)
+        src.write_bytes(b"data")
+        version = svc.import_raw(src)
+        svc.add_tag("重点", version_id=version.id)
+        first, _ = _version_tag_display_map(svc)
+        second, _ = _version_tag_display_map(svc)
+        assert second is first
+        assert first[version.id] == ["重点"]
+        svc.add_tag("复核", version_id=version.id)
+        third, _ = _version_tag_display_map(svc)
+        assert third is not first
+        assert sorted(third[version.id]) == ["复核", "重点"]
+    finally:
+        svc.close()
+
+
+def test_catalog_overview_cached_by_revision(tmp_path):
+    """#1171: refreshes without an intervening save reuse the overview."""
+    from paleo_workbench.catalog.service import DataCatalogService
+    from paleo_workbench.ui.pages.data_view_models import catalog_row_overview
+
+    project_path = tmp_path / "proj" / "demo.paleo.json"
+    project_path.parent.mkdir(parents=True, exist_ok=True)
+    project_path.write_text("{}", encoding="utf-8")
+    svc = DataCatalogService.open(project_path)
+    try:
+        src = tmp_path / "incoming" / "a.las"
+        src.parent.mkdir(parents=True, exist_ok=True)
+        src.write_bytes(b"data")
+        version = svc.import_raw(src)
+        first = catalog_row_overview(svc)
+        assert version.asset_id in first
+        assert catalog_row_overview(svc) is first
+        svc.add_tag("重点", version_id=version.id)
+        assert catalog_row_overview(svc) is not first
+    finally:
+        svc.close()
