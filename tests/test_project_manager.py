@@ -154,10 +154,11 @@ def test_metadata_only_save_reuses_resource_path_section(tmp_path: Path, monkeyp
     monkeypatch.setattr(
         manager_module,
         "relativize_path",
-        lambda *_args: pytest.fail("metadata save must reuse resource paths"),
+        lambda *args, **kwargs: pytest.fail("metadata save must reuse resource paths"),
     )
     assert manager.save(loaded) is True
     assert manager.last_save_stats.dirty_domains
+    monkeypatch.undo()
     assert ProjectManager(project_path).load().meta.name == "After"
 
 

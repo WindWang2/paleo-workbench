@@ -311,15 +311,27 @@ def _write_small_segy(path):
     return cube, store
 
 
-def test_provider_entry_roi_returns_correct_result(tmp_path):
+def test_provider_entry_roi_returns_correct_result(tmp_path, monkeypatch):
     """#1132: the provider ROI path must call roi_attribute with bounds and
     return the same window the direct call produces."""
+    import paleo_workbench.providers.execution as execution_module
     from paleo_workbench.providers.base import ProviderContext
     from paleo_workbench.providers.builtin.seismic_attribute import (
         SeismicAttributeProvider,
     )
     from paleo_workbench.providers.execution import execute_provider
     from paleo_workbench.providers.refs import SeismicVolumeRef
+
+    class _NullLease:
+        def release(self) -> None:
+            pass
+
+    # Admission (5 GiB full-volume profile) depends on machine pressure;
+    # this contract is about ROI plumbing, covered hermetically here
+    # (admission itself is pinned by governor tests).
+    monkeypatch.setattr(
+        execution_module, "_governor_lease", lambda *args: _NullLease()
+    )
 
     cube, store = _write_small_segy(tmp_path)
     provider = SeismicAttributeProvider("c3", {})
@@ -435,5 +447,7 @@ def test_band_data_and_marker_fsynced_before_done(tmp_path, monkeypatch):
     job.run(TaskContext(task_id="t"))
     marker = str(dst.parent / f"{dst.name}.done" / "band_000000")
     assert marker in fsynced  # marker content, not just the directory
-    shard_hits = [p for p in fsynced if isinstance(p, str) and "/c/" in p]
+    # Windows 用反斜杠：统一分隔符后再匹配分片路径。
+    shard_hits = [p for p in fsynced
+                  if isinstance(p, str) and "/c/" in p.replace("\\", "/")]
     assert shard_hits, "band shard files must be fsynced before marking done"

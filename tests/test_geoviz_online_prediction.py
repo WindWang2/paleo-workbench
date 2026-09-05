@@ -519,7 +519,8 @@ def test_poll_sleep_interruptible_on_cancel() -> None:
     assert time.monotonic() - t0 < 5.0
     t0 = time.monotonic()
     _sleep_interruptible(0.3, None)
-    assert time.monotonic() - t0 >= 0.3
+    # Windows 计时粒度 (~15.6 ms) 下短 sleep 会欠一点：0.25 仍证明真睡了。
+    assert time.monotonic() - t0 >= 0.25
 
 
 def test_prediction_poll_loop_aborts_on_cancel(monkeypatch) -> None:
