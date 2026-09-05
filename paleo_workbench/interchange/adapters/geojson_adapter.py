@@ -197,6 +197,7 @@ class GeoJSONAdapter(FormatAdapter):
             format_id=self.format_id,
             source_path=str(source_path),
             target_path=str(target_path),
+            estimated_bytes=Path(source_path).stat().st_size,
             options={"feature_count": inspection.metadata.get("feature_count", 0),
                      "geometry_types": inspection.metadata.get("geometry_types", [])},
             warnings=warnings,

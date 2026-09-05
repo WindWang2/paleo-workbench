@@ -363,6 +363,7 @@ class CsvLikeAdapter(FormatAdapter):
             format_id=self.format_id,
             source_path=str(source_path),
             target_path=str(target_path),
+            estimated_bytes=Path(source_path).stat().st_size,
             options=dict(options or {}),
         )
 

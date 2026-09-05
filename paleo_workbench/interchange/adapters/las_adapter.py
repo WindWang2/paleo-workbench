@@ -258,6 +258,7 @@ class LasAdapter(FormatAdapter):
             format_id=self.format_id,
             source_path=str(source_path),
             target_path=str(target_path),
+            estimated_bytes=Path(source_path).stat().st_size,
             options=dict(options or {}),
             warnings=["LAS 导出为摘要转换，不保留原始 LAS 头/单位以外的信息"],
         )
