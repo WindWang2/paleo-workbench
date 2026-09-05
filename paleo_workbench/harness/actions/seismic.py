@@ -101,7 +101,10 @@ def register(registry) -> None:
             # the catalog — WRITE, aligned with its side effects.
             risk=ActionRisk.WRITE,
             category="seismic.attribute",
-            resource_profile={"estimated_cpu_cores": 2.0, "estimated_ram_bytes": 1024 * 1024**2, "io_weight": 1.0},
+            # Honest envelope of the wrapped provider (#1146): the nested
+            # execute_provider inherits this admission, so the action profile
+            # must cover the provider's declared working set.
+            resource_profile={"estimated_cpu_cores": 2.0, "estimated_ram_bytes": 5 * 1024**3, "io_weight": 1.0},
             supports_cancel=True,
             input_schema={
                 "type": "object",
@@ -185,7 +188,7 @@ def _get_slice(context: ActionContext, parameters: dict) -> dict:
 
 
 def _compute_attribute(context: ActionContext, parameters: dict) -> dict:
-    from paleo_workbench.providers import ProviderContext, execute_provider
+    from paleo_workbench.providers import execute_provider
     from paleo_workbench.providers.refs import SeismicVolumeRef
 
     volume = context.active_volume
@@ -207,17 +210,10 @@ def _compute_attribute(context: ActionContext, parameters: dict) -> dict:
 
         output_dir = str(Path(tempfile.mkdtemp(prefix="p2-attribute-")) / "attr.zarr")
     provider_parameters = {"output_dir": output_dir}
-    # V3: same workspace_root contract as the executor's provider dispatch
-    # (harness/executor.py) and the mapping export action — without it the
-    # provider-side containment checks (#1177) have no root to enforce
-    # against for this action.
-    workspace_root = str(root) if root is not None else str(Path.cwd())
-    provider_context = ProviderContext(
-        catalog=context.catalog,
-        workspace_root=workspace_root,
-        emit_progress=context.progress,
-        cancel=context.cancel,
-        work_dir=context.extras.get("work_dir"),
+    # Same workspace_root contract as the executor's provider dispatch — the
+    # provider-side containment checks (#1177) need a root to enforce.
+    provider_context = context.provider_context(
+        workspace_root=str(root) if root is not None else str(Path.cwd())
     )
     result = execute_provider(
         _registry(),

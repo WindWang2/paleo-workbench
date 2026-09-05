@@ -80,6 +80,39 @@ class ActionContext:
     def permits(self, risk: ActionRisk) -> bool:
         return risk in self.permissions
 
+    def provider_context(self, **overrides: Any) -> Any:
+        """Build the :class:`ProviderContext` for a nested provider execution.
+
+        The single sanctioned way for handlers to construct a provider
+        context: it forwards the session's services, progress, cancellation,
+        workspace containment root — and, while the executor runs this
+        action, the enclosing governor admission lease so the nested
+        execution inherits the reservation instead of double-admitting the
+        same work against the streaming-buffer budget.
+        """
+        from pathlib import Path
+
+        from paleo_workbench.providers.base import ProviderContext
+
+        workspace_root = overrides.pop(
+            "workspace_root",
+            str(Path(self.project_path).parent)
+            if self.project_path
+            else str(Path.cwd()),
+        )
+        provider_context = ProviderContext(
+            catalog=overrides.pop("catalog", self.catalog),
+            workspace_root=workspace_root,
+            emit_progress=overrides.pop("emit_progress", self.progress),
+            cancel=overrides.pop("cancel", self.cancel),
+            work_dir=overrides.pop("work_dir", self.extras.get("work_dir")),
+        )
+        lease = self.extras.get("admission_lease")
+        if lease is not None:
+            provider_context.extras["admission_lease"] = lease
+        provider_context.extras.update(overrides)
+        return provider_context
+
     def snapshot_description(self) -> dict[str, Any]:
         """Machine-readable summary for agent prompts (read-only facts)."""
         return {

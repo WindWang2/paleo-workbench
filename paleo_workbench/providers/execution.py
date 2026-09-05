@@ -320,7 +320,34 @@ def execute_provider(
         raise InvalidParametersError(descriptor.provider_id, problems)
     _validate_inputs(descriptor, inputs)
 
-    lease = _governor_lease(descriptor, descriptor.provider_id)
+    # Nested execution (#1146 follow-up): when the provider runs inside an
+    # already-admitted scope (a harness action that wraps execute_provider),
+    # the enclosing lease already reserved this execution's resources against
+    # the same governor. Admitting again would double-count the estimate and
+    # shed work that fits — so the enclosing lease is inherited as-is (the
+    # enclosing scope keeps owning release; the governor sees one admission).
+    enclosing_lease = (
+        context.extras.get("admission_lease") if context is not None else None
+    )
+    owns_lease = enclosing_lease is None
+    lease = (
+        enclosing_lease
+        if enclosing_lease is not None
+        else _governor_lease(descriptor, descriptor.provider_id)
+    )
+    if not owns_lease:
+        profile = descriptor.resource_profile
+        enclosing_request = getattr(enclosing_lease, "request", None)
+        enclosing_ram = getattr(enclosing_request, "estimated_ram_bytes", 0) or 0
+        if enclosing_ram and enclosing_ram < profile.estimated_ram_bytes:
+            logger.warning(
+                "provider %s declares %d RAM bytes but the enclosing admission "
+                "reserved only %d — the enclosing action's resource_profile "
+                "understates this execution",
+                descriptor.provider_id,
+                profile.estimated_ram_bytes,
+                enclosing_ram,
+            )
     run_ref = None
     catalog = context.catalog if context is not None else None
     operation = f"provider.{descriptor.family.value}.{descriptor.provider_id}"
@@ -372,7 +399,7 @@ def execute_provider(
             raise
         raise ProviderExecutionError(descriptor.provider_id, exc) from exc
     finally:
-        if lease is not None:
+        if lease is not None and owns_lease:
             lease.release()
 
     elapsed_ms = (time.perf_counter() - t0) * 1000.0

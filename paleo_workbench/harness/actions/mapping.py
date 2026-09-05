@@ -629,16 +629,9 @@ def _export(context: ActionContext, parameters: dict) -> dict:
             raise ValueError(
                 "map failed validation; fix before export: " + "; ".join(report.reasons)
             )
-    from paleo_workbench.providers import ProviderContext, execute_provider, get_provider_registry
+    from paleo_workbench.providers import execute_provider, get_provider_registry
 
-    root = Path(context.project_path).parent if context.project_path else Path.cwd()
-    provider_context = ProviderContext(
-        catalog=context.catalog,
-        workspace_root=str(root),
-        emit_progress=context.progress,
-        cancel=context.cancel,
-        work_dir=context.extras.get("work_dir"),
-    )
+    provider_context = context.provider_context()
     export_parameters = {"output_path": _resolve_export_path(context, parameters["output_path"])}
     for key in ("width", "height", "dpi"):
         if parameters.get(key) is not None:

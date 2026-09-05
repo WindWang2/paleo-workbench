@@ -449,6 +449,54 @@ def test_execute_provider_admits_through_governor():
         set_provider_registry(previous)
 
 
+def test_execute_provider_inherits_enclosing_admission_lease():
+    """Nested execution (harness action wrapping execute_provider) inherits
+    the enclosing lease instead of double-admitting the same work (#1146
+    follow-up: 1 GiB action + 5 GiB provider vs a 5 GiB streaming buffer used
+    to shed work that fits)."""
+    from paleo_workbench.providers.base import ProviderContext
+    from paleo_workbench.runtime import ResourceBudget, ResourceGovernor, set_governor
+    from paleo_workbench.runtime.memory_pressure import MemoryPressureMonitor
+
+    monitor = MemoryPressureMonitor(ResourceBudget(), sampler=lambda b: (0.1, 0, 0))
+    gov = ResourceGovernor(
+        ResourceBudget(logical_cores=8, streaming_buffer_bytes=5 * 1024**3),
+        pressure_monitor=monitor,
+    )
+    set_governor(gov)
+    registry = ProviderRegistry()
+    registry.register(EchoProvider())
+    try:
+        enclosing = gov.admit(
+            __import__(
+                "paleo_workbench.runtime.resource_governor", fromlist=["TaskRequest"]
+            ).TaskRequest(
+                category=__import__(
+                    "paleo_workbench.runtime.task_categories", fromlist=["TaskCategory"]
+                ).TaskCategory("background.compute"),
+                title="action:seismic.compute_attribute",
+                estimated_cpu_cores=2.0,
+                estimated_ram_bytes=5 * 1024**3,
+                io_weight=1.0,
+            )
+        )
+        context = ProviderContext(extras={"admission_lease": enclosing})
+        result = execute_provider(
+            registry, "test.echo", parameters={"factor": 1.0}, context=context
+        )
+        assert result.metrics["worked"] is True
+        # One admission for the enclosing scope; the nested execution added
+        # no second lease — and the enclosing lease is NOT released by the
+        # provider (its owner releases it).
+        assert gov.metrics.admitted == 1
+        assert gov.metrics.released == 0
+        assert gov.runtime_status()["reserved"]["ram_bytes"] == 5 * 1024**3
+        enclosing.release()
+        assert gov.metrics.released == 1
+    finally:
+        set_governor(None)
+
+
 def test_execute_provider_pressure_shedding_surfaces():
     from paleo_workbench.runtime import (
         ResourceBudget,

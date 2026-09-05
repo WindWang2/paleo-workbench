@@ -64,9 +64,9 @@ class ActionContextError(LookupError):
 
 
 class ActionValidationError(ValueError):
-    def __init__(self, action_id: str, problems: list[str]):
+    def __init__(self, action_id: str, problems: list[str], *, label: str = "parameters"):
         self.problems = problems
-        super().__init__(f"parameters for {action_id!r} invalid: {'; '.join(problems)}")
+        super().__init__(f"{label} for {action_id!r} invalid: {'; '.join(problems)}")
 
 
 @dataclass(slots=True)
@@ -156,6 +156,11 @@ class HarnessExecutor:
         lease = None
         try:
             lease = self._admit(spec)
+            # Nested provider executions (handlers wrapping execute_provider)
+            # inherit this lease instead of double-admitting the same work
+            # against the governor; popped in finally so a shared context
+            # never leaks an admission scope across actions.
+            context.extras["admission_lease"] = lease
             payload = self._execute_spec(spec, parameters, context, result)
             self._validate_output(spec, payload)
             verification = self._verify(spec, payload, parameters, context)
@@ -204,6 +209,7 @@ class HarnessExecutor:
             result.status = "fail"
             result.error = f"{type(exc).__name__}: {exc}"
         finally:
+            context.extras.pop("admission_lease", None)
             if lease is not None:
                 lease.release()
             result.elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -217,7 +223,7 @@ class HarnessExecutor:
     def _execute_spec(self, spec: ActionSpec, parameters: dict[str, Any],
                       context: ActionContext, result: ActionResult) -> Any:
         if spec.provider_id is not None:
-            from paleo_workbench.providers import ProviderContext, execute_provider
+            from paleo_workbench.providers import execute_provider
             from paleo_workbench.providers.refs import PathRef, SeismicVolumeRef
 
             # Provider-declared actions resolve their typed inputs from the
@@ -226,20 +232,7 @@ class HarnessExecutor:
             volume = context.active_volume
             if isinstance(volume, (SeismicVolumeRef, PathRef)):
                 inputs["volume"] = volume
-            from pathlib import Path
-
-            workspace_root = (
-                str(Path(context.project_path).parent)
-                if context.project_path
-                else str(Path.cwd())
-            )
-            provider_context = ProviderContext(
-                catalog=context.catalog,
-                workspace_root=workspace_root,
-                emit_progress=context.progress,
-                cancel=context.cancel,
-                work_dir=context.extras.get("work_dir"),
-            )
+            provider_context = context.provider_context()
             provider_result = execute_provider(
                 self._provider_registry(), spec.provider_id,
                 inputs=inputs, parameters=parameters, context=provider_context,
@@ -279,7 +272,9 @@ class HarnessExecutor:
             return
         problems = validate_parameters(schema, payload, label="output")
         if problems:
-            raise ActionValidationError(spec.action_id, problems)
+            raise ActionValidationError(
+                spec.action_id, problems, label="output schema mismatch"
+            )
 
     def _admit(self, spec: ActionSpec):
         global ADMISSION_DEGRADED
