@@ -87,6 +87,26 @@ def test_workarea_map_widget_shutdown_stops_canvas(qtbot):
     assert stopped == [True]
 
 
+def test_workarea_map_click_survives_degenerate_extent(qtbot):
+    """#1166: 退化 extent 的 map_to_screen 故障（含 ZeroDivisionError，
+    属 ArithmeticError）不得从点击路径漏出。"""
+    from paleo_workbench.ui.pages.workarea_map_widget import WorkAreaMapWidget
+
+    widget = WorkAreaMapWidget(show_legend=False)
+    qtbot.addWidget(widget)
+    widget._snapshot = None
+    widget._on_map_clicked((1.0, 2.0))  # 无快照直接返回
+    from paleo_workbench.mapping.map_render_backend import MapRenderSnapshot
+
+    widget._snapshot = MapRenderSnapshot(project_crs="EPSG:4326", layers=())
+
+    def _boom(_point):
+        raise ZeroDivisionError("degenerate extent")
+
+    widget.map_canvas.map_to_screen = _boom
+    widget._on_map_clicked((1.0, 2.0))  # 不得抛出
+
+
 # --- #1121: responsive inspector persistence ---------------------------------
 
 
