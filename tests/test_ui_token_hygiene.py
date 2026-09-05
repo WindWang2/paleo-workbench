@@ -25,19 +25,16 @@ EXCLUDED_DIRS = {"prototypes"}
 
 # ratchet：历史债务存量（file → 允许的违规行数）。只能调低。
 ALLOWED_VIOLATIONS: dict[str, int] = {
-    "ui/unified_map_canvas.py": 13,
+    "ui/unified_map_canvas.py": 4,
     "ui/workstation/composite_document.py": 8,
     "ui/workstation/composite_editing.py": 4,
     "ui/pages/lithology_crossplot_dialog.py": 4,
-    "viz/hosts/well_log_host.py": 3,
     "ui/pages/mapping_page.py": 3,
     "ui/pages/ai_check_advisor_dialog.py": 3,
-    "viz/hosts/well_section_host.py": 2,
     "ui/workstation/agent_panel.py": 2,
     "ui/map_symbology_bridge.py": 2,
     "ui/workstation/common.py": 1,
     "ui/status_bar.py": 1,
-    "ui/qgis_stack/display_canvas.py": 1,
     "ui/map_status_bar.py": 1,
     "ui/map_layer_properties.py": 1,
 }

@@ -34,6 +34,21 @@ from paleo_workbench.mapping.map_render_backend import (
     create_map_render_backend,
 )
 from paleo_workbench.mapping.renderers import RenderContext
+from paleo_workbench.ui.theme import theme_manager as _theme_manager
+
+
+# 画布 chrome 墨色是**相对地图底色**的域语义（亮图幅→深墨、暗图幅→浅墨），
+# 与 app 主题无关（decisions.md D10）；交互色（选区/捕捉/编辑）走 CANVAS_*
+# token 随主题策展。
+_CHROME_INK_ON_LIGHT_BODY = "#1f2937"
+_CHROME_INK_ON_DARK_BODY = "#f8f9fa"
+_CHROME_PANEL_BG = QColor(24, 28, 34, 210)
+_CHROME_PANEL_BORDER = "#dfe6ee"
+_SWATCH_FALLBACK = "#6c8ebf"
+
+
+def _canvas_palette() -> dict:
+    return tokens.palette_for(_theme_manager.current_theme.value)
 from paleo_workbench.ui import tokens
 
 __all__ = ["UnifiedMapCanvas", "paint_map_decorations"]
@@ -78,7 +93,7 @@ def _paint_scale_bar_impl(
     canvas_width: int,
     canvas_height: int,
     scale: float,
-    ink: str = "#ffffff",
+    ink: str = _CHROME_INK_ON_DARK_BODY,
 ) -> None:
     spec = _scale_bar_spec_impl(extent, canvas_width, scale)
     if spec is None:
@@ -118,7 +133,7 @@ def _paint_decorations_impl(
     ``dark_chrome`` selects the dark ink palette for light map bodies (all
     built-in backends render a light/white background).
     """
-    ink = "#1f2937" if dark_chrome else "#f8f9fa"
+    ink = _CHROME_INK_ON_LIGHT_BODY if dark_chrome else _CHROME_INK_ON_DARK_BODY
     canvas_width = int(width)
     canvas_height = int(height)
     elements = {str(item) for item in decorations.get("elements") or ()}
@@ -141,7 +156,11 @@ def _paint_decorations_impl(
         painter.save()
         center = QPointF(canvas_width - 28 * scale, 37 * scale)
         painter.setPen(QPen(QColor(ink), 1.5 * scale))
-        painter.setBrush(QColor("#f8f9fa") if dark_chrome else QColor("#343a40"))
+        painter.setBrush(
+            QColor(_CHROME_INK_ON_DARK_BODY)
+            if dark_chrome
+            else QColor(_CHROME_INK_ON_LIGHT_BODY)
+        )
         painter.drawPolygon(QPolygonF([
             center + QPointF(0, -18 * scale),
             center + QPointF(-6 * scale, 10 * scale),
@@ -160,17 +179,17 @@ def _paint_decorations_impl(
         for entry in raw_items:
             if isinstance(entry, Mapping):
                 label = str(entry.get("label") or entry.get("name") or entry.get("text") or "")
-                color = str(entry.get("color") or entry.get("fill") or "#6c8ebf")
+                color = str(entry.get("color") or entry.get("fill") or _SWATCH_FALLBACK)
                 items.append((label or str(entry), color))
             else:
-                items.append((str(entry), "#6c8ebf"))
+                items.append((str(entry), _SWATCH_FALLBACK))
         painter.save()
         legend_width = 164 * scale
         row_height = 18 * scale
         swatch = 9 * scale
         legend_height = 10 * scale + row_height * len(items)
-        painter.setPen(QPen(QColor("#dfe6ee"), 1.0 * scale))
-        painter.setBrush(QColor(24, 28, 34, 210))
+        painter.setPen(QPen(QColor(_CHROME_PANEL_BORDER), 1.0 * scale))
+        painter.setBrush(QColor(_CHROME_PANEL_BG))
         rect = QRectF(
             canvas_width - legend_width - 16 * scale,
             canvas_height - legend_height - 16 * scale,
@@ -185,13 +204,13 @@ def _paint_decorations_impl(
             try:
                 swatch_color = QColor(color)
                 if not swatch_color.isValid():
-                    swatch_color = QColor("#6c8ebf")
+                    swatch_color = QColor(_SWATCH_FALLBACK)
             except Exception:
-                swatch_color = QColor("#6c8ebf")
+                swatch_color = QColor(_SWATCH_FALLBACK)
             painter.setBrush(swatch_color)
             y = rect.top() + 14 * scale + index * row_height
             painter.drawRect(QRectF(rect.left() + 8 * scale, y - swatch, swatch, swatch))
-            painter.setPen(QColor("#f8f9fa"))
+            painter.setPen(QColor(_CHROME_INK_ON_DARK_BODY))
             painter.setFont(font)
             painter.drawText(QPointF(rect.left() + 23 * scale, y), label)
         painter.restore()
@@ -607,7 +626,7 @@ class UnifiedMapCanvas(QWidget):
         if selected:
             painter.save()
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            painter.setPen(QPen(QColor("#ffe066"), 2.0))
+            painter.setPen(QPen(QColor(_canvas_palette()["CANVAS_SELECTION"]), 2.0))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             for feature in selected:
                 geometry = getattr(feature, "geometry", None)
@@ -619,12 +638,14 @@ class UnifiedMapCanvas(QWidget):
         if points:
             painter.save()
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            painter.setPen(QPen(QColor("#53d8fb"), 1.5, Qt.PenStyle.DashLine))
+            painter.setPen(
+                QPen(QColor(_canvas_palette()["CANVAS_SNAP"]), 1.5, Qt.PenStyle.DashLine)
+            )
             preview = points + ([self._cursor_map] if self._cursor_map is not None else [])
             screen_points = [self.map_to_screen((float(point[0]), float(point[1]))) for point in preview]
             if len(screen_points) >= 2:
                 painter.drawPolyline(QPolygonF(screen_points))
-            painter.setBrush(QColor("#53d8fb"))
+            painter.setBrush(QColor(_canvas_palette()["CANVAS_SNAP"]))
             for point in screen_points[: len(points)]:
                 painter.drawEllipse(point, 3.5, 3.5)
             painter.restore()
@@ -635,7 +656,7 @@ class UnifiedMapCanvas(QWidget):
             except (TypeError, ValueError, IndexError):
                 return
             painter.save()
-            painter.setPen(QPen(QColor("#ff6b6b"), 1.5))
+            painter.setPen(QPen(QColor(_canvas_palette()["CANVAS_EDIT"]), 1.5))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(center, 6.0, 6.0)
             painter.drawLine(center + QPointF(-8, 0), center + QPointF(8, 0))
