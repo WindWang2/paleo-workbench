@@ -1,0 +1,11 @@
+{
+ "count": 5,
+ "finite": 5,
+ "min": 55.1,
+ "max": 70.2,
+ "mean": 61.36,
+ "stdev": 5.680052816655846,
+ "factor_name": "GR",
+ "unit": "GAPI",
+ "target_horizon": "H2"
+}

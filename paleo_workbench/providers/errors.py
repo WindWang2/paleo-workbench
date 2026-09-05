@@ -78,3 +78,13 @@ class ProviderExecutionError(ProviderError):
         self.provider_id = provider_id
         self.cause = cause
         super().__init__(f"provider {provider_id!r} failed: {type(cause).__name__}: {cause}")
+
+
+class ProviderVerificationError(ProviderError):
+    """The provider's post-execution verifier rejected (or crashed on) the
+    result — a fail-closed contract violation (Harness 2.0)."""
+
+    def __init__(self, provider_id: str, reason: str):
+        self.provider_id = provider_id
+        self.reason = reason
+        super().__init__(f"provider {provider_id!r} verification failed: {reason}")
