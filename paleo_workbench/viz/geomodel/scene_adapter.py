@@ -540,7 +540,7 @@ class GeologicalSceneAdapter:
 
     def _build_tunnel(self, widget, tunnel: TunnelSection) -> list[str]:
         try:
-            from geoviz_plots.geomodel.primitives import generate_tube_geometry
+            from geoviz import generate_tube_geometry  # public facade only
         except Exception:
             logger.warning("tube generator unavailable; tunnel skipped")
             return []
