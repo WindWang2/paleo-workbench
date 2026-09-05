@@ -149,13 +149,15 @@ def test_dock_resolves_to_engine_and_renders_native_when_binding_available(
     assert panel.backend() == "engine"
     assert panel.is_native_backend() is True
     assert lw.well_backend_note() is None
-    # engine 生效时不得谎报回退；唯一允许的状态是深度游标能力说明
-    # （engine 绑定尚无 hover 接口——诚实声明，不是回退谎言）。
+    # engine 生效时不得谎报回退。L2 起 engine 绑定带 crosshair 通道，
+    # 深度游标联动真实可用：不得再出现任何"联动不可用"的降级说明；
+    # （只有绑定真的缺通道时才允许那条诚实声明——本测试的绑定已具备）。
     fallback_lies = [
         m for m in statuses if "Legacy 渲染" in m or "回退" in m
     ]
     assert fallback_lies == [], f"engine 生效时不得谎报回退: {fallback_lies}"
-    assert any("深度游标联动暂不可用" in m for m in statuses)
+    assert not any("联动" in m and "不可用" in m for m in statuses)
+    assert panel.depth_cursor_supported() is True
 
     # End to end: the dock's engine path really hands data to the native view.
     project = _project(tmp_path)

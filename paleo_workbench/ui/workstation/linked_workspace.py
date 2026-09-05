@@ -195,6 +195,11 @@ class LinkedInterpretationWorkspace(QWidget):
         default is on and the binding imports, otherwise ``legacy`` with the
         fallback reason recorded for the status bar instead of being
         disguised.
+
+        L2: the depth-cursor linkage no longer assumes the engine backend is
+        mute — ``depth_cursor_supported`` reflects the binding's real
+        crosshair channel, so the stale "engine has no hover API" demotion
+        is gone and only a genuinely incapable binding degrades.
         """
         if self.well_panel is None:
             return
@@ -204,11 +209,9 @@ class LinkedInterpretationWorkspace(QWidget):
         if note is not None:
             self.status_changed.emit(f"测井轨道使用 Legacy 渲染: {note}")
         elif not getattr(self.well_panel, "depth_cursor_supported", lambda: True)():
-            # 诚实降级：engine 绑定暂无 hover/光标接口，深度游标联动只在
-            # Legacy 后端可用——明确说明，不静默丢联动。
             self.status_changed.emit(
-                "测井轨道使用 WellLogEngine：深度游标联动暂不可用（绑定尚无 "
-                "hover 接口，需要游标联动请切回 Legacy）"
+                "测井轨道使用 WellLogEngine：当前绑定缺少 crosshair 通道，"
+                "深度游标联动不可用（更新 well-log-engine 绑定可恢复）"
             )
 
     def set_well_backend(self, name: str, *, reason: str | None = None) -> None:
