@@ -8,7 +8,6 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -27,7 +26,8 @@ from PySide6.QtWidgets import (
 
 from paleo_workbench import tokens
 from paleo_workbench.project.models import ProjectDocument
-from paleo_workbench.ui import navigation
+from paleo_workbench.ui import navigation, shortcuts
+from paleo_workbench.ui.command_registry import CommandSpec, command_registry
 from paleo_workbench.ui.deferred_page_bindings import DeferredPageBindings
 
 # Backward-compatible re-exports: callers used to import the page constants
@@ -55,6 +55,7 @@ from paleo_workbench.ui.pages.stratigraphy_correlation_page import (
 )
 from paleo_workbench.ui.pages.visualization_page import VisualizationPage
 from paleo_workbench.ui.pages.well_log_prediction_page import WellLogPredictionPage
+from paleo_workbench.ui.shortcuts import ShortcutSpec, register_shortcut
 from paleo_workbench.ui.status_bar import StatusBar
 from paleo_workbench.ui.workstation import WorkstationFrame
 from paleo_workbench.viz.hosts.well_location_preview import (
@@ -120,37 +121,35 @@ class CommandPalette(QFrame):
     # --- commands -----------------------------------------------------
 
     def _rebuild_commands(self) -> None:
-        commands: list[dict] = []
-        for hub_index, hub_name in enumerate(navigation.HUB_NAMES):
-            for key in navigation.submodule_keys(hub_index):
-                title = navigation.submodule_title(hub_index, key)
-                label = hub_name if title == hub_name else f"{hub_name} / {title}"
-                commands.append(
-                    {
-                        "label": label,
-                        "hint": f"{hub_name}页 · {title}",
-                        "run": lambda h=hub_index, k=key: self._navigate(h, k),
-                    }
-                )
-        self._commands = commands
+        """V5：命令来自 ui.command_registry（页面/主题/密度/preset/面板）。"""
+        self._commands = command_registry.specs()
 
     def _apply_filter(self, text: str) -> None:
         text = (text or "").strip()
         self.result_list.clear()
-        for command in self._commands:
-            if text and text not in command["label"] and text not in command["hint"]:
-                continue
-            item = QListWidgetItem(f"{command['label']}  —  {command['hint']}")
-            item.setData(Qt.ItemDataRole.UserRole, command)
+        specs = command_registry.find(text) if text else command_registry.specs()
+        if not text:
+            # 空查询时最近使用置顶
+            recents = command_registry.recent_specs()
+            specs = [s for s in recents if s in specs] + [
+                s for s in specs if s not in recents
+            ]
+        for spec in specs:
+            label = f"{spec.label}  —  {spec.hint}" if spec.hint else spec.label
+            if spec.shortcut_hint:
+                label = f"{label}   [{spec.shortcut_hint}]"
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, spec)
             self.result_list.addItem(item)
         if self.result_list.count():
             self.result_list.setCurrentRow(0)
 
     def _activate_item(self, item: QListWidgetItem) -> None:
-        command = item.data(Qt.ItemDataRole.UserRole)
+        spec = item.data(Qt.ItemDataRole.UserRole)
         self.dismiss()
-        if command is not None:
-            command["run"]()
+        if spec is not None and spec.callback is not None:
+            command_registry.record_recent(spec.id)
+            spec.callback()
 
     # --- keyboard -----------------------------------------------------
 
@@ -447,17 +446,132 @@ class AppShell(QWidget):
             )
 
     def _setup_shortcuts(self) -> None:
-        """Register hub (1-5), sub-module (Alt+1~3), and Ctrl+K shortcuts."""
+        """V5：hub (1-5)、子模块 (Alt+1~3)、Ctrl+K 经中央快捷键注册表创建。
+
+        数字/Alt 快捷键在文本输入框聚焦时不生效（保护 palette 与表单）。
+        """
         for i in range(min(5, len(navigation.HUB_NAMES))):
-            QShortcut(QKeySequence(str(i + 1)), self,
-                      lambda idx=i: self._shortcut_switch_page(idx))
-
+            register_shortcut(
+                self,
+                ShortcutSpec(
+                    id=f"core:nav.hub{i}",
+                    key=str(i + 1),
+                    label=f"切换到{navigation.HUB_NAMES[i]}页",
+                ),
+                lambda idx=i: self._shortcut_switch_page(idx),
+            )
         for p in range(3):
-            QShortcut(QKeySequence(f"Alt+{p + 1}"), self,
-                      lambda sub_idx=p: self._shortcut_switch_subpage(sub_idx))
-
+            register_shortcut(
+                self,
+                ShortcutSpec(
+                    id=f"core:nav.sub{p}",
+                    key=f"Alt+{p + 1}",
+                    label=f"切换子模块 {p + 1}",
+                ),
+                lambda sub_idx=p: self._shortcut_switch_subpage(sub_idx),
+            )
         # Command palette (works from text fields too — standard toggle).
-        QShortcut(QKeySequence("Ctrl+K"), self, self._toggle_command_palette)
+        register_shortcut(
+            self,
+            ShortcutSpec(id="core:palette", key="Ctrl+K", label="命令面板"),
+            self._toggle_command_palette,
+        )
+        register_shortcut(
+            self,
+            ShortcutSpec(id="core:density.toggle", key="Ctrl+Alt+D", label="切换密度"),
+            self.theme_manager.toggle_density,
+        )
+        self._register_commands()
+
+    def _register_commands(self) -> None:
+        """注册 palette 命令：页面导航 / 主题 / 密度 / 布局 preset / 面板。"""
+        for hub_index, hub_name in enumerate(navigation.HUB_NAMES):
+            for key in navigation.submodule_keys(hub_index):
+                title = navigation.submodule_title(hub_index, key)
+                label = hub_name if title == hub_name else f"{hub_name} / {title}"
+                command_registry.register(
+                    CommandSpec(
+                        id=f"nav:{hub_index}:{key}",
+                        label=label,
+                        hint=f"{hub_name}页 · {title}",
+                        group="页面",
+                        callback=lambda h=hub_index, k=key: self.navigate_to(h, k),
+                    )
+                )
+        from paleo_workbench.ui.layout_presets import list_presets
+
+        for preset in list_presets():
+            command_registry.register(
+                CommandSpec(
+                    id=f"core:preset.{preset.id}",
+                    label=f"布局预设 · {preset.label}",
+                    hint=preset.description,
+                    group="布局",
+                    callback=(
+                        lambda pid=preset.id: self.workstation.apply_layout_preset(pid)
+                    ),
+                )
+            )
+        command_registry.register(
+            CommandSpec(
+                id="core:theme.light",
+                label="主题 · 浅色",
+                keywords="light theme 主题",
+                group="视图",
+                callback=lambda: self.set_theme("light"),
+            )
+        )
+        command_registry.register(
+            CommandSpec(
+                id="core:theme.dark",
+                label="主题 · 深色",
+                keywords="dark theme 主题",
+                group="视图",
+                callback=lambda: self.set_theme("dark"),
+            )
+        )
+        command_registry.register(
+            CommandSpec(
+                id="core:theme.high_contrast",
+                label="主题 · 高对比",
+                keywords="high contrast theme 主题",
+                group="视图",
+                callback=lambda: self.set_theme("high_contrast"),
+            )
+        )
+        command_registry.register(
+            CommandSpec(
+                id="core:density.toggle",
+                label="切换 紧凑/舒适 密度",
+                keywords="density compact comfortable 密度",
+                shortcut_hint=shortcuts.get("core:density.toggle").key
+                if shortcuts.get("core:density.toggle")
+                else "",
+                group="视图",
+                callback=self.theme_manager.toggle_density,
+            )
+        )
+        command_registry.register(
+            CommandSpec(
+                id="core:palette.toggle",
+                label="命令面板",
+                hint="搜索命令、页面与面板动作",
+                shortcut_hint="Ctrl+K",
+                group="视图",
+                callback=self._toggle_command_palette,
+            )
+        )
+        # 面板显隐（真实 toggleViewAction，来自工作站 shell）
+        for label, action in self.workstation.panel_commands():
+            command_registry.register(
+                CommandSpec(
+                    id=f"core:panel.{action.objectName() or label}",
+                    label=label,
+                    group="面板",
+                    callback=action.trigger,
+                )
+            )
+        command_registry.load_recent()
 
     def _toggle_command_palette(self) -> None:
         # isHidden (not isVisible): a hidden shell window keeps children

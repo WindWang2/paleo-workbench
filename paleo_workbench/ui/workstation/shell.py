@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from PySide6.QtCore import QByteArray, QSettings, Qt, QTimer, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QDockWidget,
     QFrame,
@@ -552,6 +553,24 @@ class WorkstationFrame(QWidget):
         timer.setInterval(delay_ms)
         timer.timeout.connect(self._restore_layout)
         timer.start()
+
+    def panel_commands(self) -> list[tuple[str, QAction]]:
+        """可切换面板的 (标签, toggleViewAction) 列表（palette / 菜单共用）。"""
+        pairs = (
+            (self.composite_input_dock, "显示输入与结果"),
+            (self.composite_layer_dock, "显示图层管理"),
+            (self.composite_linked_dock, "显示联动视图"),
+            (self.agent_dock, "显示 Agent"),
+            (self.task_dock, "显示任务中心"),
+            (self.logs_dock, "显示日志"),
+            (self.console_dock, "显示控制台"),
+        )
+        actions = []
+        for dock, label in pairs:
+            action = dock.toggleViewAction()
+            action.setText(label)
+            actions.append((label, action))
+        return actions
 
     def _wire_composite_panel_menu(self) -> None:
         """面板菜单：显隐、布局预设、全部浮动/停靠、恢复默认。"""
