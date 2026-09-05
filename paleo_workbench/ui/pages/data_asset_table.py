@@ -34,6 +34,7 @@ from paleo_workbench.ui.pages.filter_index import (
     FilterIndex,
     FilterQuery,
 )
+from paleo_workbench.ui.pages.filter_chips_bar import FilterChipsBar
 from paleo_workbench.ui.pages.paged_asset_model import (
     CatalogPageProvider,
     PagedAssetTableModel,
@@ -86,6 +87,14 @@ class DataAssetTable(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(tokens.SPACE_2)
+
+        # D5: chips rendering the active FilterQuery — filters are never
+        # invisible state, and each chip removal re-issues the query.
+        self.filter_chips_bar = FilterChipsBar(self)
+        self.filter_chips_bar.chip_removed.connect(self._remove_filter_dimension)
+        self.filter_chips_bar.clear_all.connect(self._clear_all_filters)
+        self.filter_chips_bar.filter_applied.connect(self.set_filter_query)
+        layout.addWidget(self.filter_chips_bar)
 
         toolbar = QHBoxLayout()
         toolbar.setContentsMargins(0, 0, 0, 0)
@@ -162,6 +171,7 @@ class DataAssetTable(QWidget):
         self.model.set_project_root(project_root)
         self.model.set_view_enricher(enricher)
         self._filter_query.search_text = self._search_text
+        self.filter_chips_bar.set_query(self._filter_query)
         filtered = self._index.filter_query(self._filter_query)
         self.model.set_assets_filtered(
             assets,
@@ -293,6 +303,7 @@ class DataAssetTable(QWidget):
     def set_filter_query(self, query: FilterQuery) -> bool:
         self._filter_query = query
         self._filter_query.search_text = self._search_text
+        self.filter_chips_bar.set_query(self._filter_query)
         if self._in_paged_mode and self._paged_model is not None:
             if self._paged_model.apply_query(self._filter_query):
                 self._visible_assets = []
@@ -309,6 +320,36 @@ class DataAssetTable(QWidget):
     def set_search_text(self, text: str) -> None:
         self._search_text = text.strip().lower()
         self.set_filter_query(self._filter_query)
+
+    def _remove_filter_dimension(self, key: str) -> None:
+        from dataclasses import replace
+
+        query = self._filter_query
+        if key == "view":
+            query = replace(query, node_type="all", node_value=None, asset_id=None)
+        elif key == "text":
+            query = replace(query, search_text="")
+            self._search_text = ""
+        elif key == "stage":
+            query = replace(query, stage=None)
+        elif key == "type":
+            query = replace(query, data_type=None)
+        elif key == "tag_operator":
+            query = replace(query, tag_operator="and")
+        elif key.startswith("tag:"):
+            tag = key[len("tag:") :]
+            query = replace(
+                query, tags=[t for t in (query.tags or ()) if t != tag]
+            )
+        else:
+            return
+        self.set_filter_query(query)
+
+    def _clear_all_filters(self) -> None:
+        from dataclasses import replace
+
+        self._search_text = ""
+        self.set_filter_query(FilterQuery(node_type="all"))
 
     def visible_asset_count(self) -> int:
         if self._in_paged_mode and self._paged_model is not None:

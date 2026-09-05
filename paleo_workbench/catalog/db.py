@@ -1860,6 +1860,7 @@ class CatalogIndex:
         tag_op: str = "and",
         type: str | None = None,
         asset_id: str | None = None,
+        asset_ids: list[str] | tuple[str, ...] | None = None,
         include_trashed: bool = False,
         trashed_only: bool = False,
     ) -> tuple[list[str], list[str]]:
@@ -1914,6 +1915,16 @@ class CatalogIndex:
         if asset_id:
             wheres.append("a.id = ?")
             params.append(str(asset_id))
+        id_list = [str(a) for a in (asset_ids or ()) if str(a)]
+        if id_list:
+            # Entity membership sets (computed by the caller at query time)
+            # arrive as an explicit id list; chunk the IN predicate so a
+            # large set cannot blow SQLite's variable limit.
+            for start in range(0, len(id_list), 500):
+                chunk = id_list[start : start + 500]
+                placeholders = ", ".join("?" for _ in chunk)
+                wheres.append(f"a.id IN ({placeholders})")
+                params.extend(chunk)
         return wheres, params
 
     _PAGE_ORDER_COLUMNS = {
@@ -1941,6 +1952,7 @@ class CatalogIndex:
         tag_op: str = "and",
         type: str | None = None,
         asset_id: str | None = None,
+        asset_ids: list[str] | tuple[str, ...] | None = None,
         include_trashed: bool = False,
         trashed_only: bool = False,
         order_by: str | None = None,
@@ -1967,6 +1979,7 @@ class CatalogIndex:
             tag_op=tag_op,
             type=type,
             asset_id=asset_id,
+            asset_ids=asset_ids,
             include_trashed=include_trashed,
             trashed_only=trashed_only,
             order_by=order_by,
@@ -1983,6 +1996,7 @@ class CatalogIndex:
         tag_op: str = "and",
         type: str | None = None,
         asset_id: str | None = None,
+        asset_ids: list[str] | tuple[str, ...] | None = None,
         include_trashed: bool = False,
         trashed_only: bool = False,
         order_by: str | None = None,
@@ -1997,6 +2011,7 @@ class CatalogIndex:
             tag_op=tag_op,
             type=type,
             asset_id=asset_id,
+            asset_ids=asset_ids,
             include_trashed=include_trashed,
             trashed_only=trashed_only,
         )
@@ -2053,6 +2068,7 @@ class CatalogIndex:
         tag_op: str = "and",
         type: str | None = None,
         asset_id: str | None = None,
+        asset_ids: list[str] | tuple[str, ...] | None = None,
         include_trashed: bool = False,
         trashed_only: bool = False,
     ) -> int:
@@ -2066,6 +2082,7 @@ class CatalogIndex:
             tag_op=tag_op,
             type=type,
             asset_id=asset_id,
+            asset_ids=asset_ids,
             include_trashed=include_trashed,
             trashed_only=trashed_only,
         )
@@ -2078,6 +2095,7 @@ class CatalogIndex:
         tag_op: str = "and",
         type: str | None = None,
         asset_id: str | None = None,
+        asset_ids: list[str] | tuple[str, ...] | None = None,
         include_trashed: bool = False,
         trashed_only: bool = False,
     ) -> int:
@@ -2088,6 +2106,7 @@ class CatalogIndex:
             tag_op=tag_op,
             type=type,
             asset_id=asset_id,
+            asset_ids=asset_ids,
             include_trashed=include_trashed,
             trashed_only=trashed_only,
         )

@@ -3269,6 +3269,7 @@ class DataCatalogService:
         tag_op: str = "and",
         type: str | None = None,
         asset_id: str | None = None,
+        asset_ids: list[str] | tuple[str, ...] | None = None,
         include_trashed: bool = False,
         trashed_only: bool = False,
         order_by: str | None = None,
@@ -3300,6 +3301,7 @@ class DataCatalogService:
                     tag_op=tag_op,
                     type=type,
                     asset_id=asset_id,
+                    asset_ids=asset_ids,
                     include_trashed=include_trashed,
                     trashed_only=trashed_only,
                     order_by=order_by,
@@ -3316,6 +3318,7 @@ class DataCatalogService:
             tag_op=tag_op,
             type=type,
             asset_id=asset_id,
+            asset_ids=asset_ids,
             include_trashed=include_trashed,
             trashed_only=trashed_only,
             order_by=order_by,
@@ -3333,6 +3336,7 @@ class DataCatalogService:
         tag_op: str = "and",
         type: str | None = None,
         asset_id: str | None = None,
+        asset_ids: list[str] | tuple[str, ...] | None = None,
         include_trashed: bool = False,
         trashed_only: bool = False,
     ) -> int:
@@ -3348,6 +3352,7 @@ class DataCatalogService:
                         tag_op=tag_op,
                         type=type,
                         asset_id=asset_id,
+                        asset_ids=asset_ids,
                         include_trashed=include_trashed,
                         trashed_only=trashed_only,
                     )
@@ -3362,6 +3367,7 @@ class DataCatalogService:
                 tag_op=tag_op,
                 type=type,
                 asset_id=asset_id,
+                asset_ids=asset_ids,
                 include_trashed=include_trashed,
                 trashed_only=trashed_only,
             )
@@ -3469,6 +3475,7 @@ class DataCatalogService:
         tag_op: str = "and",
         type: str | None = None,
         asset_id: str | None = None,
+        asset_ids: list[str] | tuple[str, ...] | None = None,
         include_trashed: bool = False,
         trashed_only: bool = False,
     ) -> list[dict]:
@@ -3485,6 +3492,7 @@ class DataCatalogService:
             str(tag_op or "and"),
             str(type or ""),
             str(asset_id or ""),
+            tuple(sorted(str(a) for a in (asset_ids or ()))),
             bool(include_trashed),
             bool(trashed_only),
         )
@@ -3500,6 +3508,7 @@ class DataCatalogService:
                 _tags.normalize_tag_name(t) for t in (tags or ()) if str(t).strip()
             }
             tags_by_id = {tag.id: tag.name for tag in self.document.tags}
+            asset_id_set = {str(a) for a in (asset_ids or ())}
             rows: list[dict] = []
             maps = self._ensure_maps()
             for asset in self.document.assets:
@@ -3509,6 +3518,8 @@ class DataCatalogService:
                 elif not include_trashed and asset.trashed:
                     continue
                 if asset_id and asset.id != asset_id:
+                    continue
+                if asset_ids and asset.id not in asset_id_set:
                     continue
                 if type is not None and asset.type != str(type):
                     continue
@@ -3580,6 +3591,7 @@ class DataCatalogService:
         tag_op: str = "and",
         type: str | None = None,
         asset_id: str | None = None,
+        asset_ids: list[str] | tuple[str, ...] | None = None,
         include_trashed: bool = False,
         trashed_only: bool = False,
         order_by: str | None = None,
@@ -3595,6 +3607,7 @@ class DataCatalogService:
             tag_op=tag_op,
             type=type,
             asset_id=asset_id,
+            asset_ids=asset_ids,
             include_trashed=include_trashed,
             trashed_only=trashed_only,
         )

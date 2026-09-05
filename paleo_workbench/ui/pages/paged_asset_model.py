@@ -47,8 +47,13 @@ PAGED_MODE_THRESHOLD = 25_000
 PAGE_SIZE = 500
 
 # FilterQuery.node_type values the SQL path can answer. "integrity" needs a
-# filesystem probe; "entity"/"entity_group" need the in-memory link join.
-_UNMAPPABLE_NODE_TYPES = {"integrity", "entity", "entity_group", "auxiliary"}
+# filesystem probe; "entity"/"entity_group" map to SQL only when the
+# membership set (computed by the data page at query time) is small enough
+# for chunked IN predicates; "auxiliary" is legacy-only.
+_UNMAPPABLE_NODE_TYPES = {"integrity", "auxiliary"}
+# Above this the chunked ``a.id IN (...)`` predicate degenerates — fall back
+# to the materialized path instead.
+MAX_SQL_ASSET_ID_SET = 5_000
 
 # Table column keys → SQL order keys. Columns without a SQL equivalent are
 # ignored in paged mode (sorting them would order only the fetched prefix
@@ -161,6 +166,7 @@ class CatalogPageProvider:
         self._tags: list[str] = []
         self._tag_op: str = "and"
         self._asset_id: str | None = None
+        self._asset_ids: list[str] | None = None
         self._include_trashed = False
         self._trashed_only = False
         self._order_by: str = "name"
@@ -197,6 +203,17 @@ class CatalogPageProvider:
             # review_status filters through the metadata JSON path; the paged
             # path keeps it simple by refusing (rare smart view).
             return False
+        # Entity membership: the data page resolves the link set at query
+        # time; a bounded set maps to chunked SQL IN predicates, a huge one
+        # (entity_group over the whole catalog) refuses honestly.
+        asset_ids = getattr(query, "entity_asset_ids", None)
+        if node_type in ("entity", "entity_group"):
+            ids = sorted(str(a) for a in (asset_ids or ()))
+            if not ids or len(ids) > MAX_SQL_ASSET_ID_SET:
+                return False
+            self._asset_ids = ids
+        else:
+            self._asset_ids = None
         self._text = (getattr(query, "search_text", "") or "").strip() or None
         self._stage = stage
         self._type = data_type
@@ -236,6 +253,7 @@ class CatalogPageProvider:
             "tag_op": self._tag_op,
             "type": self._type,
             "asset_id": self._asset_id,
+            "asset_ids": list(self._asset_ids or ()),
             "include_trashed": self._include_trashed,
             "trashed_only": self._trashed_only,
             "order_by": self._order_by,
@@ -256,6 +274,7 @@ class CatalogPageProvider:
             "tag_op": self._tag_op,
             "type": self._type,
             "asset_id": self._asset_id,
+            "asset_ids": self._asset_ids,
             "include_trashed": self._include_trashed or self._trashed_only,
             "trashed_only": self._trashed_only,
         }
@@ -288,6 +307,7 @@ class CatalogPageProvider:
             tag_op=params.get("tag_op", "and"),
             type=params.get("type"),
             asset_id=params.get("asset_id"),
+            asset_ids=params.get("asset_ids"),
             include_trashed=bool(params.get("include_trashed")),
             trashed_only=bool(params.get("trashed_only")),
             order_by=order_by,
