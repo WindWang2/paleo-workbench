@@ -240,12 +240,13 @@ class TestTeardownSafety:
         adapter.set_selected("well:w0")
         adapter.set_clip_planes([(0, 0, -1, 1)])
         assert adapter.sync(asm).added == []  # no crash, no stale calls
-        holder["widget"] = RecordingWidget()
+        holder["widget"] = RecordingWidget()  # fresh viewport, no scene bound
         report = adapter.sync(asm)
-        # w0's visibility view-state changed while hidden → one rebuild;
-        # the other two payloads are content-identical and skip.
-        assert report.unchanged == 2
-        assert report.updated == ["well:w0"]
+        # A new widget is a new render context (scene identity changed), so
+        # every payload rebuilds — the stale-transform correctness rule
+        # (review P1-4) intentionally dominates cache reuse here.
+        assert len(report.updated) == 3
+        assert report.added == []
 
     def test_reset_clears_everything(self, rig):
         holder, adapter = rig

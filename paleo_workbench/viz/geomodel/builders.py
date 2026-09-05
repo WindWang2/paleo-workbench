@@ -448,7 +448,7 @@ def build_volume_shell(
         empty_qc = {
             "column_count": 0,
             "dropped_crossed": dropped_crossed,
-            "dropped_nan": dropped_nan,
+            "dropped_nan_nodes": dropped_nan,
             "negative_thickness_count": 0,
             "min_thickness": 0.0,
             "max_thickness": 0.0,
@@ -531,13 +531,13 @@ def build_volume_shell(
             faces += [(ta, tb, bb_), (ta, bb_, ba)]
 
     verts_arr = verts
-    faces_arr = np.asarray(faces, dtype=np.int64).reshape(-1, 3)
+    faces_arr = _orient_faces_outward(verts, np.asarray(faces, dtype=np.int64).reshape(-1, 3))
     thickness_arr = np.asarray(thicknesses, dtype=np.float64)
 
     qc: dict[str, Any] = {
         "column_count": len(finite_cells),
         "dropped_crossed": dropped_crossed,
-        "dropped_nan": dropped_nan,
+        "dropped_nan_nodes": dropped_nan,
         "negative_thickness_count": 0,
         "min_thickness": float(thickness_arr.min()),
         "max_thickness": float(thickness_arr.max()),
@@ -598,6 +598,29 @@ def _points_in_polygon_grid(
     return inside.reshape(shape)
 
 
+def _orient_faces_outward(verts: np.ndarray, faces: np.ndarray) -> np.ndarray:
+    """Reorient every triangle to face away from the shell centroid.
+
+    The prismatic shells this module builds are star-shaped w.r.t. their
+    centroid, so the per-face centroid test is a reliable outward test and
+    is independent of the vertical-domain z convention (depth positive-down
+    vs TVDSS negative-down), which the hand-wound sheets/walls could not
+    satisfy simultaneously. Non-star-shaped inputs fall back to unflipped
+    faces — QC's manifold/watertight checks are orientation-independent.
+    """
+    if len(faces) == 0 or len(verts) == 0:
+        return faces
+    tri = verts[faces]
+    centroids = tri.mean(axis=1)
+    shell_centroid = verts.mean(axis=0)
+    normals = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
+    outward = centroids - shell_centroid
+    flip = np.einsum("ij,ij->i", normals, outward) < 0
+    out = faces.copy()
+    out[flip] = out[flip][:, [0, 2, 1]]
+    return out
+
+
 def _shell_is_closed(verts: np.ndarray, faces: np.ndarray) -> bool:
     """Edge-manifold check: every undirected edge shared by exactly 2 faces."""
     if len(faces) == 0:
@@ -643,6 +666,10 @@ def build_columnar_hex_mesh(
     bnd = np.asarray(boundary, dtype=np.float64)
     if bnd.ndim != 2 or len(bnd) < 3 or bnd.shape[1] != 2:
         raise DomainError("boundary must be (M, 2) with M >= 3")
+    if not np.all(np.isfinite(bnd)):
+        raise DomainError("boundary must be finite")
+    if top.vertical_domain != base.vertical_domain or top.unit != base.unit:
+        raise DomainError("top/base surfaces must share vertical domain and unit")
     tg = np.asarray(top.z_grid, dtype=np.float64)
     bg = np.asarray(base.z_grid, dtype=np.float64)
     if tg.shape != bg.shape or top.origin != base.origin or top.spacing != base.spacing:

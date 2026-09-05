@@ -226,13 +226,6 @@ def qc_well_trajectory(well: WellTrajectory) -> QCReport:
     return report
 
 
-def _mesh_issue_codes(verts: np.ndarray, faces: np.ndarray) -> tuple[QCReport, np.ndarray, np.ndarray]:
-    report = QCReport()
-    v = np.asarray(verts, dtype=np.float64)
-    f = np.asarray(faces, dtype=np.int64).reshape(-1, 3)
-    return report, v, f
-
-
 def _tri_degenerate_fraction(v: np.ndarray, f: np.ndarray) -> float:
     if len(f) == 0:
         return 0.0

@@ -201,8 +201,12 @@ def _bilinear_z(hor: HorizonSurface, x: float, y: float) -> float | None:
     fi = (y - y0) / dy if dy else 0.0
     nI, nX = g.shape
     j0, i0 = int(np.floor(fj)), int(np.floor(fi))
-    if i0 < 0 or j0 < 0 or i0 + 1 >= nI or j0 + 1 >= nX:
+    if i0 < 0 or j0 < 0 or i0 > nI - 1 or j0 > nX - 1:
         return None
+    # clamp the upper corner so edge picks interpolate the last cell
+    # instead of being misreported as holes
+    i0 = min(i0, nI - 2)
+    j0 = min(j0, nX - 2)
     tj, ti = fj - j0, fi - i0
     corners = (g[i0, j0], g[i0, j0 + 1], g[i0 + 1, j0], g[i0 + 1, j0 + 1])
     if any(not np.isfinite(c) for c in corners):

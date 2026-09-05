@@ -154,7 +154,7 @@ class TestVolumeShell:
         base = build_horizon_from_grid("Base", bg, origin=(0.0, 0.0), spacing=(10.0, 10.0))
         boundary = [(0.0, 0.0), (60.0, 0.0), (60.0, 60.0), (0.0, 60.0)]
         vol, qc = build_volume_shell(top, base, boundary, object_id="volume:v")
-        assert qc["dropped_nan"] == 9
+        assert qc["dropped_nan_nodes"] == 9
         assert qc["closed"] is True
 
     def test_mismatched_grids_rejected(self):

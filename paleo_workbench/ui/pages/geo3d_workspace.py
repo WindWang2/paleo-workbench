@@ -200,10 +200,12 @@ class Geo3DWorkspaceController(QObject):
                     float(bh.get("y", 0.0)),
                     float(bh.get("td", 0.0) or 0.0),
                     formation_tops=tops,
+                    crs="demo",
                     provenance=prov,
                 )
                 self.add_object(well)
-                counts["wells"] += 1
+                if well.object_id in self.assembly:
+                    counts["wells"] += 1
             except (DomainError, TypeError, ValueError):
                 logger.debug("demo well ingest failed", exc_info=True)
         for tn in result.get("tunnels_raw", []) or []:
@@ -365,8 +367,10 @@ class Geo3DWorkspaceController(QObject):
         (x, y, _z) = self._measure_points[-1]
         top = self._first_of_kind("horizon", name_hint=("top", "顶"))
         base = self._first_of_kind("horizon", name_hint=("base", "底"))
-        if top is None or base is None:
-            self.status_message.emit("厚度测量需要 top/base 两个层位面对象")
+        if top is None or base is None or top.object_id == base.object_id:
+            self.status_message.emit(
+                "厚度测量需要两个不同的层位面对象（名称含 top/顶 与 base/底）"
+            )
             self._measure_points = []
             return True
         try:
@@ -401,11 +405,30 @@ class Geo3DWorkspaceController(QObject):
         self._emit_measurement(record)
 
     def _emit_measurement(self, record: MeasurementRecord) -> None:
-        self.assembly.add(record)
+        import dataclasses
+
+        # id uniqueness is the assembly's invariant; restored measurements
+        # may already own the counter-generated id — resolve a free suffix
+        # instead of letting DomainError escape into the click handler.
+        candidate = record
+        suffix = 1
+        while True:
+            try:
+                self.assembly.add(candidate)
+                break
+            except DomainError as exc:
+                if "duplicate object_id" not in str(exc):
+                    self.status_message.emit(f"测量失败: {exc}")
+                    return
+                suffix += 1
+                candidate = dataclasses.replace(
+                    record,
+                    object_id=f"{record.object_id.rsplit('-', 1)[0]}-{suffix}",
+                )
         self.sync_scene()
         self.measurements_changed.emit()
         self.status_message.emit(
-            f"{record.name}: {geo_measure.format_result(record)}"
+            f"{candidate.name}: {geo_measure.format_result(candidate)}"
         )
 
     def _first_of_kind(
@@ -457,13 +480,14 @@ class Geo3DWorkspaceController(QObject):
             state = self.clip_state.get(axis) or {}
             if not state.get("enabled"):
                 continue
-            lo, hi = (
-                (bounds[0][{"x": 0, "y": 1, "z": 2}[axis]],
-                 bounds[1][{"x": 0, "y": 1, "z": 2}[axis]])
-                if bounds is not None else (-80.0, 80.0)
-            )
+            if bounds is None:
+                # No scene bounds yet (empty viewport): applying a hardcoded
+                # extent would clip with fabricated coordinates — skip.
+                continue
+            axis_index = {"x": 0, "y": 1, "z": 2}[axis]
+            lo, hi = float(bounds[0][axis_index]), float(bounds[1][axis_index])
             value = lo + (hi - lo) * float(state.get("value", 0.5))
-            plane = axis_plane(axis, float(value))
+            plane = axis_plane(axis, value)
             planes.append(plane.as_clip_equation(invert=bool(state.get("invert"))))
         self.adapter.set_clip_planes(planes or None)
 
@@ -529,9 +553,10 @@ class Geo3DWorkspaceController(QObject):
         if widget is None or not self._selected_id:
             return False
         try:
-            return bool(
-                widget.fit_to_scene_objects(kinds=[self._selected_id.split(":", 1)[0]])
-            )
+            names = list(self.adapter._derived.get(self._selected_id, []))
+            if not names:
+                return False
+            return bool(widget.fit_to_scene_objects(names=names))
         except Exception:
             return False
 
@@ -578,6 +603,15 @@ class Geo3DWorkspaceController(QObject):
             label += " (简化垂直)"
         elif obj.object_id.startswith("fault:") and obj.representation == "curtain_2p5d":
             label += " (2.5D 幕帘)"
+        # Honest degradation (ADR-03): geometry arrays reload from Catalog
+        # artifacts; a restored reference without arrays is marked unloaded.
+        arrays = getattr(obj, "z_grid", None)
+        if arrays is None:
+            arrays = getattr(obj, "verts", None)
+        if arrays is None:
+            arrays = getattr(obj, "stations", None)
+        if arrays is not None and len(np.asarray(arrays)) == 0:
+            label += " (未加载)"
         return label
 
     def on_tree_check(self, object_id: str, visible: bool) -> None:
@@ -608,10 +642,7 @@ class Geo3DWorkspaceController(QObject):
             "objects": meta_objects,
             "measurements": measurements,
             "display": {
-                oid: {
-                    "visible": self.adapter.visibility(oid),
-                    "opacity": self.adapter._opacity.get(oid, 1.0),
-                }
+                oid: self.adapter.display_state(oid)
                 for oid in self.assembly.ids()
             },
             "clip": {
@@ -627,7 +658,9 @@ class Geo3DWorkspaceController(QObject):
         try:
             section.replace(payload)
         except Exception:
-            logger.debug("geo3d workspace persist failed", exc_info=True)
+            # A failed persist must be visible, not a silent data gap.
+            logger.warning("geo3d workspace persist failed", exc_info=True)
+            self.status_message.emit("三维工作区状态保存失败（详见日志）")
         return payload
 
     def restore_state(self, project: Any) -> list[str]:
@@ -672,10 +705,7 @@ class Geo3DWorkspaceController(QObject):
                 restored.append(record.object_id)
             except (DomainError, KeyError, TypeError, ValueError):
                 logger.debug("measurement restore failed", exc_info=True)
-        display = payload.get("display", {}) or {}
-        for oid, state in display.items():
-            self.adapter._visibility[oid] = bool(state.get("visible", True))
-            self.adapter._opacity[oid] = float(state.get("opacity", 1.0))
+        self.adapter.restore_display(payload.get("display", {}) or {})
         clip = payload.get("clip", {}) or {}
         for axis in ("x", "y", "z"):
             if axis in clip:
@@ -692,6 +722,9 @@ class Geo3DWorkspaceController(QObject):
         self.sync_scene()
         self.apply_clip_state()
         self.refresh_qc()
+        selected = str(payload.get("selected", "") or "")
+        if selected and selected in self.assembly:
+            self.set_selected(selected, broadcast=False)
         return restored
 
 

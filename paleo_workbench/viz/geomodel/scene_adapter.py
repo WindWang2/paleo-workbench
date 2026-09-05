@@ -115,6 +115,7 @@ class GeologicalSceneAdapter:
         self._visibility: dict[str, bool] = {}
         self._opacity: dict[str, float] = {}
         self._clip_planes: list[tuple[float, float, float, float]] | None = None
+        self._overlays: dict[str, list[str]] = {}
         self._selected: str | None = None
 
     # ------------------------------------------------------------------
@@ -127,6 +128,11 @@ class GeologicalSceneAdapter:
         widget = self._widget_provider()
         if widget is None:
             return report
+        # Scene identity participates in every payload token: when the joint
+        # scene is rebound (project switch / LOD reload / domain flip) the
+        # domain→render transform changes, so payloads must rebuild even
+        # though the domain objects themselves are unchanged.
+        self._scene_token = self._current_scene_token(widget)
         live_ids = set(assembly.ids())
         # removals first (also drops derived names)
         for oid in list(self._synced_tokens):
@@ -156,6 +162,22 @@ class GeologicalSceneAdapter:
         self._prune_state(live_ids)
         return report
 
+    def display_state(self, object_id: str) -> dict:
+        """Public snapshot of one object's view state (save path)."""
+        return {
+            "visible": self.visibility(object_id),
+            "opacity": self._opacity.get(object_id, 1.0),
+        }
+
+    def restore_display(self, display: dict) -> None:
+        """Public bulk restore of view state (clamped)."""
+        for oid, state in (display or {}).items():
+            oid = str(oid)
+            self._visibility[oid] = bool(state.get("visible", True))
+            self._opacity[oid] = float(
+                min(max(float(state.get("opacity", 1.0)), 0.0), 1.0)
+            )
+
     def reset(self) -> None:
         """Drop every scene object and all sync state (project switch)."""
         widget = self._widget_provider()
@@ -166,6 +188,7 @@ class GeologicalSceneAdapter:
         self._derived.clear()
         self._visibility.clear()
         self._opacity.clear()
+        self._overlays.clear()
         self._selected = None
 
     # ------------------------------------------------------------------
@@ -217,16 +240,34 @@ class GeologicalSceneAdapter:
                         else self._base_color(name),
                     )
 
+    @property
+    def clip_planes(self):
+        """Current object clip equations (read-only view for overlay owners)."""
+        return self._clip_planes
+
+    def register_overlay(self, key: str, names: Sequence[str]) -> None:
+        """Track page-created analysis overlays so view state (clipping)
+        applies to them exactly like domain-derived objects (ADR: the
+        adapter owns every scene-object lifecycle concern)."""
+        self._overlays[str(key)] = [str(n) for n in names]
+
+    def remove_overlay(self, key: str) -> None:
+        self._overlays.pop(str(key), None)
+
     def set_clip_planes(
         self, planes: Sequence[Sequence[float]] | None
     ) -> None:
-        """Apply clip equations to every derived scene object (view state)."""
+        """Apply clip equations to every derived scene object and every
+        registered overlay (view state)."""
         self._clip_planes = None if planes is None else [tuple(p) for p in planes]
         widget = self._widget_provider()
         if widget is None:
             return
-        for oid, names in self._derived.items():
-            if not self.visibility(oid):
+        targets: list[tuple[str, list[str]]] = list(self._derived.items())
+        for names in self._overlays.values():
+            targets.append((("__overlay__"), names))
+        for oid, names in targets:
+            if oid != "__overlay__" and not self.visibility(oid):
                 continue
             for name in names:
                 widget.set_scene_object_clip_planes(name, self._clip_planes)
@@ -267,43 +308,55 @@ class GeologicalSceneAdapter:
     # payload builders (deterministic, content-addressed)
     # ------------------------------------------------------------------
 
+    def _current_scene_token(self, widget) -> Any:
+        """Identity of the active joint scene (None when unbound)."""
+        scene = getattr(widget, "scene", None)
+        scene = scene() if callable(scene) else scene
+        domain = getattr(scene, "depth_transform", lambda: None)()
+        return (id(scene), str(getattr(domain, "kind", "")))
+
     def _payload_token(self, obj: DomainObject) -> tuple | None:
         """Content token deciding rebuild; ``None`` = not renderable now."""
         style = self._style_for(obj)
+        scene_token = getattr(self, "_scene_token", None)
         if isinstance(obj, WellTrajectory):
             if len(obj.stations) == 0:
                 return None
             return ("well", obj.version, len(obj.stations), obj.representation,
                     float(np.asarray(obj.stations).sum()), style.well_width,
-                    self.styles.show_well_labels, self.visibility(obj.object_id))
+                    self.styles.show_well_labels, self.visibility(obj.object_id),
+                    scene_token)
         if isinstance(obj, HorizonSurface):
             g = np.asarray(obj.z_grid)
             if g.size == 0:
                 return None
             return ("horizon", obj.version, g.shape, _finite_checksum(g),
-                    obj.origin, obj.spacing, self.visibility(obj.object_id))
+                    obj.origin, obj.spacing, self.visibility(obj.object_id),
+                    scene_token)
         if isinstance(obj, FaultSurface):
             if len(obj.verts) == 0:
                 return None
             return ("fault", obj.version, len(obj.verts), len(obj.faces),
                     _finite_checksum(obj.verts), obj.representation,
-                    self.visibility(obj.object_id))
+                    self.visibility(obj.object_id), scene_token)
         if isinstance(obj, StratigraphicVolume):
             if len(obj.verts) == 0:
                 return None
             return ("volume", obj.version, len(obj.verts), len(obj.faces),
-                    _finite_checksum(obj.verts), self.visibility(obj.object_id))
+                    _finite_checksum(obj.verts), self.visibility(obj.object_id),
+                    scene_token)
         if isinstance(obj, TunnelSection):
             if len(obj.path) == 0:
                 return None
             return ("tunnel", obj.version, len(obj.path), obj.radius,
-                    _finite_checksum(obj.path), self.visibility(obj.object_id))
+                    _finite_checksum(obj.path), self.visibility(obj.object_id),
+                    scene_token)
         if isinstance(obj, MeasurementRecord):
             if len(obj.points) == 0:
                 return None
             return ("measure", obj.version, len(obj.points),
                     _finite_checksum(np.asarray(obj.points)), obj.measurement_kind,
-                    self.visibility(obj.object_id))
+                    self.visibility(obj.object_id), scene_token)
         return None
 
     def _build_payloads(self, widget, obj: DomainObject, token: tuple) -> list[str] | None:
@@ -367,6 +420,7 @@ class GeologicalSceneAdapter:
                 color=color,
                 kind="well",
                 pickable=True,
+                pick_radius=2.0,  # engine units (~2 grid cells click tolerance)
                 width=style.well_width,
                 opacity=self._opacity.get(well.object_id, 1.0),
                 clip_planes=self._clip_planes,

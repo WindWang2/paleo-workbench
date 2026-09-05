@@ -127,7 +127,11 @@ def _chain_segments(segments: list[np.ndarray]) -> list[np.ndarray]:
     if not segments:
         return []
     remaining = [s.copy() for s in segments]
-    tol = 1e-9
+    # scale-aware weld tolerance: absolute 1e-9 fragments chains on UTM-scale
+    # coordinates where float64 noise is ~1e-8 relative
+    all_pts = np.vstack([np.vstack(s) for s in segments])
+    scale = float(np.abs(all_pts).max()) if len(all_pts) else 1.0
+    tol = max(1e-9, scale * 1e-9)
     chains: list[np.ndarray] = []
     while remaining:
         chain = remaining.pop(0)

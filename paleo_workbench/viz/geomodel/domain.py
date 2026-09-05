@@ -789,8 +789,11 @@ def geometry_stats(obj: DomainObject) -> dict[str, Any]:
         verts = obj.path if len(obj.path) else None
     elif isinstance(obj, HorizonSurface):
         g = np.asarray(obj.z_grid, dtype=np.float64)
-        if g.size:
-            finite = g[np.isfinite(g)]
+        finite = g[np.isfinite(g)] if g.size else np.zeros(0)
+        if finite.size:
+            # An all-NaN grid (holes everywhere) has no z extent — report
+            # zero vertices rather than raising (meta()/save must not crash
+            # on data the QC ladder already reports as NO_GEOMETRY).
             verts = np.array(
                 [
                     [obj.origin[0], obj.origin[1], float(finite.min())],

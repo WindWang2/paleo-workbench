@@ -1673,8 +1673,7 @@ class GeologicalModeling3DPage(QWidget):
         # Real-data path: no volume available and demo NOT requested → show the
         # unavailable state instead of silently injecting synthetic data
         # (honesty contract: synthetic output only on explicit demo request).
-        if renderer is None or not getattr(renderer, "_loaded", False) \
-                or renderer.volume_data() is None:
+        if renderer is None or renderer.volume_data() is None:
             self._stratal_status.setText(
                 "未加载体数据：无法生成地层切片。"
                 "可勾选“用合成演示体（无 SEGY 时预览）”查看演示效果。"
@@ -2960,6 +2959,11 @@ class GeologicalModeling3DPage(QWidget):
         self._refresh_joint_well_tree()
         self._fill_joint_well_combos()
         self._sync_bh_raw_from_joint_scene()
+        # The scene rebind changes the domain→render transform; the geo
+        # payloads carry the scene identity in their tokens, so this resync
+        # rebuilds exactly the objects whose transform context changed.
+        if getattr(self, "_geo3d", None) is not None:
+            self._geo3d.sync_scene()
         self._sync_joint_visibility_from_tree()
         self._refresh_joint_slice_card()
         warning = self._joint_host.scene.slice_state_warning
@@ -3271,9 +3275,11 @@ class GeologicalModeling3DPage(QWidget):
             logger.exception("register_modeling_run failed (best-effort)")
 
     def _on_modeling_failed(self, err: str) -> None:
+        # #937-6: async failure reports in-page; completion slots never stack
+        # modal dialogs.
         self.btn_run.setEnabled(True)
         self.progress_bar.setVisible(False)
-        QMessageBox.critical(self, "建模失败", f"三维建模失败: {err}")
+        self._on_joint_status(f"三维建模失败: {err}")
 
     # ------------------------------------------------------------------ #
     # Well-Seismic Tie 3D Overlays
@@ -3295,12 +3301,13 @@ class GeologicalModeling3DPage(QWidget):
                 widget.remove_scene_object(name)
             except Exception:
                 pass
+        self._geo3d.adapter.remove_overlay(key)
         scene_name = f"analysis:{key}"
         kwargs = dict(
             mode=mode,
             kind="horizon" if mode == "mesh" else "annotation",
             opacity=0.85,
-            clip_planes=self._geo3d.adapter._clip_planes,
+            clip_planes=self._geo3d.adapter.clip_planes,
         )
         if mode == "mesh":
             kwargs.update(
@@ -3318,6 +3325,7 @@ class GeologicalModeling3DPage(QWidget):
         try:
             widget.add_scene_object(scene_name, **kwargs)
             self._analysis_overlays[key] = [scene_name]
+            self._geo3d.adapter.register_overlay(key, [scene_name])
         except Exception:
             logger.debug("analysis overlay %s failed", key, exc_info=True)
 
@@ -3332,6 +3340,8 @@ class GeologicalModeling3DPage(QWidget):
                     widget.remove_scene_object(name)
                 except Exception:
                     pass
+        for key in list(self._analysis_overlays):
+            self._geo3d.adapter.remove_overlay(key)
         self._analysis_overlays.clear()
 
     def _generate_well_curve_overlays(self) -> None:
@@ -3370,9 +3380,10 @@ class GeologicalModeling3DPage(QWidget):
                 kind="annotation",
                 width=2.0,
                 opacity=0.9,
-                clip_planes=self._geo3d.adapter._clip_planes,
+                clip_planes=self._geo3d.adapter.clip_planes,
             )
             self._analysis_overlays["gr"] = ["analysis:gr-curves"]
+            self._geo3d.adapter.register_overlay("gr", ["analysis:gr-curves"])
 
     def _generate_seismic_slice_overlay(self) -> None:
         """Synthetic horizontal amplitude slice as a scene overlay."""
@@ -3493,8 +3504,11 @@ class GeologicalModeling3DPage(QWidget):
         # Sync stratal-plane visibility on the joint renderer.
         renderer = getattr(self._joint_widget, "renderer", None) \
             if self._joint_widget is not None else None
-        if renderer is not None and getattr(renderer, "_stratal_surfaces", None):
-            renderer.set_stratal_visible(bool(show_stratal))
+        if renderer is not None:
+            get_stratal = getattr(renderer, "get_stratal_slices", None)
+            has_stratal = callable(get_stratal) and bool(get_stratal())
+            if has_stratal:
+                renderer.set_stratal_visible(bool(show_stratal))
         if hasattr(self, "joint_3d_host"):
             self.joint_3d_host.setVisible(show_3d or show_vol)
         if hasattr(self, "_joint_2d_panel"):

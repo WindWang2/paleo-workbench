@@ -91,3 +91,34 @@
   单位），adapter 把它渲染为 lines/points/text overlay；随 workspace 保存
   （ADR-07），可删除。
 - **Consequences**：测量可重放/可审计；大量测量只影响轻量 line item。
+
+## ADR-09 Review 修订（2026-09-06，round 1/2）
+
+- **ADR-03 修订（数组持久化现状）**：V5 本轮的 project 持久化为
+  **meta-only + 诚实降级**——重开后无数组的对象在树上标 "(未加载)"、QC 报
+  NO_GEOMETRY（blocker 会拦截导出）；Catalog 几何工件（NPZ 写/读）作为
+  后续工作，不在本轮伪造"已可恢复"。`decisions.md` 与实现保持一致优先。
+- **Analysis overlay 通道**：页面生成的分析视图产物（GR 曲线/连井幕墙/
+  RGB 切片）经由 `adapter.register_overlay(key, names)` 纳入 adapter 的
+  view-state 生命周期（剖切跟随、reset 清理），页面不再直读
+  `adapter._clip_planes`。这是 domain 权威之外的**显式豁免通道**，
+  命名约定 `analysis:*`，不持久化、可由源数据重生成。
+- **Scene identity 进 payload token**：joint scene 重绑（工程切换/LOD
+  升档/域翻转）会改变 domain→render 变换，token 含 scene id + depth
+  transform kind，变换上下文变化即确定性重建，杜绝错误坐标静默驻留。
+- **体积 shell 法线**：`_orient_faces_outward` 按形心测试统一朝外，
+  同时覆盖 depth 正向下与 TVDSS 负向下两种 z 约定（星形假设内可靠，
+  QC watertight 检查与方向无关）。
+- **井轨迹拾取**：引擎 pick 扩展 line 模式（`pick_radius` 容差的
+  ray-segment 最近距离），井线不再是有 pickable 标志却永不命中的死旗。
+
+## 已知限制（本轮明确不做/后续工作）
+
+1. SelectionContext 的 horizon/fault 选择广播未接（需要
+   `horizon:<slug>` 与解释工件版本 id 的稳定映射；接通前不发显示名，
+   防止违反 selection_context 的稳定 id 契约）。
+2. 恢复对象几何需 Catalog 工件读写（ADR-03 后续）。
+3. core-profile GL 下固定功能剖切面不可用（引擎一次性告警，复用现状）。
+4. 全量三角网格自相交检测（O(n²)）未做；QC 以流形/退化/交叉检查代替，
+   QC 面板文案已注明。
+5. orthographic 相机：pyqtgraph GLViewWidget 仅透视投影（不伪造）。
