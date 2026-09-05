@@ -240,6 +240,7 @@ def run_tiled_inference(
                 "mode": mode, "tiles_total": total, "tiles_done": done_count,
                 "cancelled": True, "elapsed_s": time.perf_counter() - t0,
                 "batch": current_batch,
+                "shape": list(shape),
                 "class_map": str(class_dst), "prob_map": str(prob_dst),
             }
         group = [t for t in tiles[idx : idx + current_batch]]
@@ -369,6 +370,8 @@ class TiledOnnxProvider:
         self,
         inputs: dict[str, dict[str, Any]],
         parameters: dict[str, Any],
+        *,
+        context: Any | None = None,
     ) -> dict[str, Any]:
         from geoviz_seismic import open_volume
 
@@ -384,6 +387,23 @@ class TiledOnnxProvider:
             raise TiledInferenceError(
                 "parameters must include model_path and classes (> 0)"
             )
+        # #1167: thread the caller's cancellation into the engine. Without
+        # this, hour-long tiled runs cannot be cancelled from any entry.
+        cancel: Callable[[], bool] | None = parameters.get("cancel")
+        if cancel is None and context is not None:
+            token = getattr(context, "cancel", None)
+            if token is not None:
+                def _poll_cancel() -> bool:
+                    raise_if = getattr(token, "raise_if_cancelled", None)
+                    if callable(raise_if):
+                        try:
+                            raise_if()
+                        except Exception:
+                            return True
+                        return False
+                    return bool(getattr(token, "is_cancelled", False))
+
+                cancel = _poll_cancel
         overlap = int(parameters.get("receptive_field", DEFAULT_RECEPTIVE_FIELD) or 0)
         batch = int(parameters.get("batch", 1) or 1)
         tile_param = parameters.get("tile")
@@ -406,7 +426,14 @@ class TiledOnnxProvider:
             batch=batch,
             prefer_gpu=bool(parameters.get("prefer_gpu", True)),
             tile=tile,
+            cancel=cancel,
         )
+        if stats.get("cancelled"):
+            # #1167: cancelled runs surface as cancellation (execution.py
+            # records DataRun cancelled), never as KeyError-masked failure.
+            from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
+            raise TaskCancelled("tiled inference cancelled")
         payload = {
             "source": PROVIDER_TILED_ONNX,
             "generator_version": self.model_version,

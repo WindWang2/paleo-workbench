@@ -289,3 +289,47 @@ def test_oversized_batch_clamped_transparently(store, tmp_path, monkeypatch):
     ref_arg, _ = _reference(model_path, cube)
     classmap = np.asarray(zarr.open(stats["class_map"], mode="r")[:, :, :])
     np.testing.assert_array_equal(classmap, ref_arg)
+
+
+def test_provider_cancel_via_context_raises_task_cancelled(store, tmp_path):
+    """#1167: a cancelled context aborts provider inference as cancellation."""
+    from types import SimpleNamespace
+
+    from paleo_workbench.prediction.providers import get_provider
+    from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
+    dst, _cube = store
+    model_path = _save(_sign_model(), tmp_path / "cx.onnx")
+    provider = get_provider("tiled_onnx")
+    ctx = SimpleNamespace(cancel=SimpleNamespace(is_cancelled=True))
+    with pytest.raises(TaskCancelled):
+        provider.run(
+            {("version-1"): {"path": str(dst), "name": "v", "asset_type": "seismic", "format": "zarr-v3"}},
+            {
+                "model_path": str(model_path),
+                "classes": 2,
+                "receptive_field": 0,
+                "tile": (8, 16, 16),
+                "work_root": str(tmp_path / "cx_work"),
+            },
+            context=ctx,
+        )
+
+
+def test_cancelled_stats_keep_shape_contract(store, tmp_path):
+    """#1167: the cancelled branch returns the documented shape key."""
+    dst, _cube = store
+    model_path = _save(_sign_model(), tmp_path / "cs.onnx")
+    reader = open_volume(dst)
+    stats = run_tiled_inference(
+        reader,
+        model_path,
+        classes=2,
+        work_root=tmp_path / "cs_work",
+        overlap=0,
+        batch=1,
+        tile=(8, 16, 16),
+        cancel=lambda: True,
+    )
+    assert stats["cancelled"] is True
+    assert stats["shape"] == [26, 44, 40]
