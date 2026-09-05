@@ -27,6 +27,26 @@ from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 from paleo_workbench.resources.exporters import ExportError
 from paleo_workbench.ui.qgis_stack.events import StackEvents
+
+# 跨测试/跨文档的活 shim 注册表：QgsMapStack（非 display 模式）把镜像层放
+# 进进程级 QgsProject::instance()，宿主销毁路径若不显式 shutdown（Qt 析构
+# 期间禁止重入 QGIS API），镜像层会泄漏进共享工程污染后续用例。弱引用集合
+# + shutdown_live_shims() 给宿主（conftest / 壳层 teardown）一个确定性
+# 清理点，不改变单实例生命周期语义。
+_LIVE_SHIMS: "weakref.WeakSet[QgisCanvasShim]" = weakref.WeakSet()
+
+
+def shutdown_live_shims() -> int:
+    """显式收尾所有存活 shim；返回收尾数量（测试卫生/壳层 teardown 用）。"""
+    cleaned = 0
+    for shim in list(_LIVE_SHIMS):
+        try:
+            if not shim._shutdown_done:
+                shim.shutdown()
+                cleaned += 1
+        except RuntimeError:
+            pass  # 底层 C++ 已析构
+    return cleaned
 from paleo_workbench.ui.qgis_stack.mirror import mirror_snapshot_to_stack
 from paleo_workbench.ui.qgis_stack.widgets import QgisCanvasHost
 
@@ -142,6 +162,7 @@ class QgisCanvasShim(QWidget):
         self._mirrored_doc_ids: list[str] = []
         self._mirror_failures: list[str] = []
         self._shutdown_done = False
+        _LIVE_SHIMS.add(self)
         self._tool_controller = None
         self._pending_programmatic = 0
         self._expected_programmatic_extents: list[tuple[float, float, float, float]] = []

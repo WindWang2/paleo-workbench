@@ -12,6 +12,7 @@ offscreen 平台下无需真实显示服务器；截图只是像素证据，不�
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
@@ -160,10 +161,14 @@ def main() -> int:
         ws.inspector.tabs.setCurrentWidget(ws.inspector.style_page)
 
     def drive_integrated(window):
+        # 集成工作区：全部 dock 的综合预设 + 井/地震/联动视图同屏
+        # （此前只 raise 测井，与 05-well 像素级相同，视觉 QA 判 fail）。
         ws = window.app_shell.workstation
+        ws.apply_layout_preset("integrated")
+        _settle(150)
         ws.show_seismic()
-        _settle(200)
-        ws.show_well("A12")  # 后 raise：两张 tab 都在，测井在前
+        _settle(150)
+        ws.show_well("A12")  # 后 raise：测井在前，地震/联动/任务同屏可见
 
     def drive_well(window):
         window.app_shell.workstation.show_well("A12")
@@ -179,10 +184,35 @@ def main() -> int:
             "<b>执行计划</b> · 打开井 A12，校验 GR 曲线并生成第一轨显示文档<br>"
             "<span>动作 well.open [计算] · 回执 1a2b3c4d</span>"
         )
+        # 运行中的真实任务行：顶栏计数 + 任务中心进度可视化（此前空表壳）。
+        start_demo_tasks()
+        _settle(400)  # 让调度器认领任务、进度首跳可见
+        ws.task_center.refresh()
         ws.show_agent()
 
     def drive_tasks(window):
         window.app_shell.workstation.show_tasks()
+
+    def drive_error(window):
+        """错误态：单独提交一个立即失败的任务并等它真实落到 FAILED。
+
+        不走 start_demo_tasks——长任务先占住 worker 会把失败任务压在
+        排队里，8 秒内落不了 FAILED（视觉 QA 实测）。"""
+        ws = window.app_shell.workstation
+        from paleo_workbench.runtime.task_scheduler import TaskSpec, TaskState, get_scheduler
+
+        ws.show_tasks()
+        get_scheduler().submit(
+            TaskSpec(callable=_bad, kind="background.io", title="示例 · 转码失败")
+        )
+        deadline = time.monotonic() + 8.0
+        while time.monotonic() < deadline:
+            app.processEvents()
+            statuses = get_scheduler().statuses()
+            if any(h.state is TaskState.FAILED for h in statuses):
+                break
+            time.sleep(0.05)
+        ws.task_center.refresh()
 
     shots = {
         "01-default-workstation": (lambda: _project(tmp), None),
@@ -195,7 +225,7 @@ def main() -> int:
         "07-integrated": (lambda: _project(tmp), drive_integrated),
         "08-agent-running": (lambda: _project(tmp), drive_agent),
         "09-task-center": (lambda: _project(tmp), drive_tasks),
-        "10-error-state": (lambda: _project(tmp), drive_tasks),
+        "10-error-state": (lambda: _project(tmp), drive_error),
         "12-dark-theme": (lambda: _project(tmp), "dark"),
     }
 
@@ -206,11 +236,17 @@ def main() -> int:
         only = sys.argv[3]
     if only is not None:
         make_project, drive = shots[only]
-        QSettings().clear()  # 先清布局；dark 主题要在 clear 之后再设
+        # 清工作站布局必须用 shell 的设置身份（QSettings() 无参是空 org/app，
+        # 清不到 PaleoWorkbench/Workstation——首运行分支因此从未触发）。
+        QSettings("PaleoWorkbench", "Workstation").clear()
         if drive == "dark":
-            theme_manager = ThemeManager()
-            theme_manager.set_theme("dark")
-            theme_manager.apply(app)  # set_theme 只翻状态，样式要显式套
+            # 必须切全局单例：app_shell 构造时会用 theme_manager.get_qss()
+            # 自贴一层（子树优先于 app 级样式表），图标染色与 ui.style 注册
+            # 表也都读单例——局部实例只暗了 QSS，留下整片亮色 chrome。
+            from paleo_workbench.ui.theme import theme_manager as _global_theme
+
+            _global_theme.set_theme("dark")
+            _global_theme.apply(app)
         if drive is drive_tasks:
             start_demo_tasks()  # 任务行是进程级调度器的：子进程里自己起
         window = PaleoWorkbenchWindow(project=make_project())

@@ -939,6 +939,11 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     QStatusBar::item {{
         border: none;
     }}
+    QLabel#CompositeEmptyHint {{
+        background: {t.BG_CANVAS};
+        color: {t.TEXT_SECONDARY};
+        font-size: {t.FONT_SIZE_BASE};
+    }}
     QFrame#MapStatusBar {{
         background: {t.BG_SIDEBAR};
         border: 1px solid {t.BORDER};

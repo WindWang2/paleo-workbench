@@ -707,6 +707,14 @@ class CompositeDocument(QWidget):
 
         self.canvas, self.uses_native_stack = self._create_canvas()
         layout.addWidget(self.canvas, 1)
+        # 空态提示（视觉 QA 11）：无任何编修/参考图层时中央画布给明确引导，
+        # 而不是一片纯白；有内容即隐藏，不影响正常渲染。
+        self._empty_hint = QLabel("空工程 — 从左侧 Explorer 导入数据，"
+                                  "或用工具条「新建图层」开始编图", self.canvas)
+        self._empty_hint.setObjectName("CompositeEmptyHint")
+        self._empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._empty_hint.hide()
 
         # 识别结果（多图层 Identify）与运行状态栏：图件主视图的诚实附属层。
         self.identify_results = IdentifyResultsPanel(self)
@@ -996,6 +1004,7 @@ class CompositeDocument(QWidget):
         self._sync_status_bar(point=tuple(point))
 
     def _sync_action_state(self) -> None:
+        self._update_empty_hint()
         self.action_controller.update_state(
             self.edit_controller.action_state(
                 can_previous_extent=self.canvas.can_previous_extent,
@@ -1033,6 +1042,45 @@ class CompositeDocument(QWidget):
             action.setChecked(bool(checked))
             action.blockSignals(False)
         self._sync_status_bar()
+
+    def _update_empty_hint(self) -> None:
+        """空画布引导：编修/参考/工程基础内容全都没有时才显示。
+
+        视觉 QA（07/12）矛盾修复：工程已有井/地震/层位（基础工区图层由
+        set_project 组装）时画布并非空态，不得再挂「空工程」文案。
+        """
+        try:
+            project = self._project
+            has_base = bool(
+                project is not None
+                and (project.wells or project.resources or project.paleomap_documents)
+            )
+            empty = (
+                not self.edit_controller.layer_ids()
+                and not self._reference_layers
+                and not has_base
+            )
+        except RuntimeError:
+            return
+        self._empty_hint.setVisible(bool(empty))
+        if empty:
+            self._empty_hint.setGeometry(self.canvas.rect())
+            self._empty_hint.raise_()
+            # 构造期isVisible 尚为 False（窗口未显示），布局后的真实画布
+            # 矩形要等显示完成才拿得到；延迟一拍再对齐一次。
+            QTimer.singleShot(0, self._sync_hint_geometry)
+
+    def _sync_hint_geometry(self) -> None:
+        hint = getattr(self, "_empty_hint", None)
+        if hint is None or not hint.isVisible():
+            return
+        target = self.canvas.rect()
+        # 等值守卫：setGeometry/raise_ 会触发画布布局回流并再次进入
+        # resizeEvent → 本函数，无差别重设会无限递归（实测 maximum
+        # recursion depth）；收敛后必须成为 no-op。
+        if hint.geometry() != target:
+            hint.setGeometry(target)
+            hint.raise_()
 
     def _sync_status_bar(self, *, point=None) -> None:
         controller = self.edit_controller
@@ -1719,6 +1767,9 @@ class CompositeDocument(QWidget):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._reposition_toolbar()
+        # 画布随窗口/布局变化后，空态提示必须盖满当前画布矩形（否则残留
+        # 布局前的小矩形，文字被截断或不可见）。
+        self._sync_hint_geometry()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)

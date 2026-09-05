@@ -98,6 +98,14 @@ def cleanup_qt_deferred_deletes():
     from paleo_workbench.mapping.map_render_backend import shutdown_live_fallback_backends
 
     shutdown_live_fallback_backends()
+    # 共享 QgsProject 卫生：Qt 析构期间禁止重入 QGIS API，销毁路径收不掉
+    # 的镜像层在这里确定性收尾（否则泄漏进下一个用例的镜像计数）。
+    try:
+        from paleo_workbench.ui.qgis_stack.canvas_shim import shutdown_live_shims
+
+        shutdown_live_shims()
+    except ImportError:
+        pass  # 桥未构建时无 shim 存在
     app = QApplication.instance()
     if app is not None:
         try:

@@ -87,6 +87,10 @@ class _TaskTableModel(QAbstractItemModel):
         if role == Qt.ItemDataRole.DisplayRole:
             if column == _COL_TITLE:
                 return handle.spec.title or handle.spec.kind or handle.task_id
+            if column == _COL_STATE:
+                # 视觉 QA（09/10）：状态列必须给模型文本——ResizeToContents
+                # 以模型数据计宽，纯 delegate 绘制会让列塌缩成「…」。
+                return _TaskRowDelegate._state_text(handle)
             if column == _COL_ELAPSED:
                 return TaskCenter.format_elapsed(
                     max(
@@ -99,6 +103,13 @@ class _TaskTableModel(QAbstractItemModel):
             return QColor(_STATE_COLORS.get(self._state_key(handle), tokens.TEXT_PRIMARY))
         if role == Qt.ItemDataRole.ToolTipRole and column == _COL_TITLE:
             return handle.message or handle.error or handle.task_id
+        if role == Qt.ItemDataRole.DisplayRole and column == _COL_TITLE:
+            title = handle.spec.title or handle.spec.kind or handle.task_id
+            # 视觉 QA（10）：失败原因必须可读，不只藏在 tooltip。
+            if getattr(handle.state, "value", "") == "failed" and handle.error:
+                short = str(handle.error).strip().splitlines()[0][:40]
+                return f"{title} — {short}"
+            return title
         return None
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):  # noqa: N802
@@ -197,26 +208,33 @@ class _TaskRowDelegate(QStyledItemDelegate):
             super().paint(painter, option, index)
             return
         column = index.column()
-        if column == _COL_STATE:
-            option.text = self._state_text(handle)
-            super().paint(painter, option, index)
-        elif column == _COL_PROGRESS:
-            progress = max(0, min(100, round(handle.progress * 100)))
-            from PySide6.QtWidgets import QStyle, QStyleOptionProgressBar
+        if column == _COL_PROGRESS:
+            # 手绘进度单元（视觉 QA 09）：CE_ProgressBar 在无行高的表视图里
+            # 常渲染成空框；直接画填充条 + 百分比文本，失败/取消给文字态。
+            from PySide6.QtGui import QColor
 
-            bar_option = QStyleOptionProgressBar()
-            bar_option.rect = option.rect
-            bar_option.minimum = 0
-            bar_option.maximum = 100
-            bar_option.progress = progress
-            bar_option.textVisible = False
-            bar_option.state = option.state
-            bar_option.direction = option.direction
-            bar_option.fontMetrics = option.fontMetrics
-            bar_option.palette = option.palette
-            option.widget.style().drawControl(
-                QStyle.ControlElement.CE_ProgressBar, bar_option, painter
-            )
+            painter.save()
+            rect = option.rect.adjusted(4, 4, -4, -4)
+            progress = max(0, min(100, round(handle.progress * 100)))
+            from paleo_workbench.ui.theme import theme_manager
+            from paleo_workbench import tokens as _tokens
+
+            pal = _tokens.palette_for(theme_manager.current_theme.value)
+            if handle.state is TaskState.FAILED:
+                painter.setPen(QColor(pal["ERROR_RED"]))
+                painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "失败")
+            elif handle.state is TaskState.CANCELLED:
+                painter.setPen(QColor(pal["TEXT_SECONDARY"]))
+                painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "已取消")
+            else:
+                track = QColor(pal["BORDER_LIGHT"])
+                painter.fillRect(rect, track)
+                fill_w = max(2, int(rect.width() * progress / 100))
+                fill = QColor(pal["SUCCESS"] if handle.state is TaskState.DONE else pal["WARNING"])
+                painter.fillRect(rect.adjusted(0, 0, -(rect.width() - fill_w), 0), fill)
+                painter.setPen(QColor(pal["TEXT_SECONDARY"]))
+                painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, f"{progress}%")
+            painter.restore()
         elif column == _COL_ACTION and handle.state in (
             TaskState.QUEUED,
             TaskState.RUNNING,
@@ -306,7 +324,8 @@ class TaskCenter(QFrame):
         header.setSectionResizeMode(_COL_PROGRESS, QHeaderView.ResizeMode.Fixed)
         header.resizeSection(_COL_PROGRESS, 150)
         header.setSectionResizeMode(_COL_ELAPSED, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(_COL_ACTION, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(_COL_ACTION, QHeaderView.ResizeMode.Fixed)
+        header.resizeSection(_COL_ACTION, 64)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
         self.tree.selectionModel().selectionChanged.connect(self._remember_selection)

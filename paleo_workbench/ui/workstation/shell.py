@@ -289,6 +289,9 @@ class WorkstationFrame(QWidget):
         self.process_hub.agent.focus_joint_requested.connect(self._focus_joint_from_agent)
         self.process_hub.agent.undo_requested.connect(self._undo_agent_gui)
         self.task_center.active_count_changed.connect(self.app_bar.set_task_count)
+        # 首个信号可能早于本接线发出（TaskCenter 构造即首刷，当时 app_bar
+        # 还不存在，400ms 周期内若无状态变化不再补发）——接线后显式拉平。
+        self.app_bar.set_task_count(self.task_center._last_active)
         self.app_bar.agent_requested.connect(self.show_agent)
         self.app_bar.task_center_requested.connect(self.show_tasks)
         self.app_bar.command_submitted.connect(self.command_submitted)
@@ -417,6 +420,7 @@ class WorkstationFrame(QWidget):
 
     def show_agent(self) -> None:
         self.process_dock.show()
+        self.process_dock.raise_()  # 与 task_dock 同 tabify 链：必须前置
         self.process_hub.show_agent()
         self._expand_process_dock()
 
@@ -809,6 +813,12 @@ class WorkstationFrame(QWidget):
             return
         self._save_timer.start()
 
+    def showEvent(self, event) -> None:  # noqa: N802 — Qt 契约
+        super().showEvent(event)
+        if getattr(self, "_pending_default_sizes", False) and self.isVisible():
+            self._pending_default_sizes = False
+            QTimer.singleShot(0, self._apply_default_pane_sizes)
+
     def _apply_default_pane_sizes(self) -> None:
         """给中央编图主导的空间分配（首运行/预设重置共用，B15/B17）。
 
@@ -836,8 +846,10 @@ class WorkstationFrame(QWidget):
         data = self._settings.value(self._WINDOW_STATE_KEY)
         if data is None:
             # 首运行：没有可恢复的布局，显式给中央编图主导的空间分配，
-            # 不靠 QMainWindow 的均分默认值。
-            QTimer.singleShot(0, self._apply_default_pane_sizes)
+            # 不靠 QMainWindow 的均分默认值。singleShot 若在 dock 首次布局
+            # 前触发会被 Qt 静默忽略（视觉 QA 实测 nav/右列各吃 717px），
+            # 改为标记 + showEvent 后补投（见下）。
+            self._pending_default_sizes = True
         if data is not None:
             version = self._settings.value(self._STATE_VERSION_KEY, 0, type=int)
             if version != LAYOUT_STATE_VERSION:
@@ -848,6 +860,7 @@ class WorkstationFrame(QWidget):
                     version,
                     LAYOUT_STATE_VERSION,
                 )
+                self._pending_default_sizes = True
             elif isinstance(data, QByteArray) and not data.isNull():
                 self._dock_host.restoreState(data)
         # restore 之后必须重新执行响应式策略：restoreState 可能把检查器
