@@ -134,6 +134,35 @@ class LinkedInterpretationWorkspace(QWidget):
         self._coordination = controller
         if self.seismic_panel is not None:
             self.seismic_panel.attach_coordination(controller)
+        # Case C producer: the docked well panel publishes depth cursors
+        # through the coordination bus (well name travels with the cursor).
+        if self.well_panel is not None and controller is not None:
+            attach = getattr(controller, "attach_well_dock_panel", None)
+            if callable(attach):
+                attach(self.well_panel)
+
+    def apply_link_cursor(self, well_name: str, md: float | None) -> bool:
+        """Drive the docked well view's native link cursor (case B).
+
+        Only applies when the dock is actually showing *well_name* — a
+        seismic cursor near a DIFFERENT well never moves this well's
+        crosshair. Returns whether the cursor was driven.
+        """
+        if not str(well_name or ""):
+            return False
+        if str(well_name) != str(self._active_well_name):
+            return False
+        panel = self.well_panel
+        if panel is None:
+            return False
+        driven = bool(panel.set_link_cursor(md))
+        if driven:
+            unit = "m" if md is not None else ""
+            value = f"{md:,.1f}" if md is not None else "已清除"
+            self.status_changed.emit(
+                f"井震联动游标 · {self._active_well_name} {value} {unit}".strip()
+            )
+        return driven
 
     def ensure_views(self) -> None:
         if self._views_created or not self._can_create_native_views():
@@ -155,6 +184,9 @@ class LinkedInterpretationWorkspace(QWidget):
         self.well_panel.depth_cursor_moved.connect(self._on_depth_cursor)
         if self._coordination is not None:
             self.seismic_panel.attach_coordination(self._coordination)
+            attach_dock = getattr(self._coordination, "attach_well_dock_panel", None)
+            if callable(attach_dock):
+                attach_dock(self.well_panel)
 
         seismic = self._first_resource("seismic")
         if seismic is not None:

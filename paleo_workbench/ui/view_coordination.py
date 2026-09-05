@@ -68,6 +68,13 @@ class ViewCoordinationController(QObject):
         self._spatial_cursor_sink = None     # (x, y) → map marker
         self._seismic_focus_sink = None      # (il, xl, twt) → 3D slice focus
         self._horizon_sink = None            # horizon id → highlight in views
+        # L8 workstation sinks: the docked well/seismic panels participate as
+        # first-class views. The well dock opens/focuses on any well selection
+        # (case A); a calibrated seismic cursor drives the native link cursor
+        # on the docked well view (case B, calibrated MD only).
+        self._well_dock_sink = None          # (well_name) → open/focus dock
+        self._link_cursor_sink = None        # (well_name, md_m|None) → engine crosshair
+        self._link_cursor_set = False        # a link cursor is currently shown
         selection_context.selection_changed.connect(self._on_selection_changed)
 
     # ------------------------------------------------------------------
@@ -251,6 +258,7 @@ class ViewCoordinationController(QObject):
         """
         self._bound_well_ids.clear()
         removed = self.coordinate_hub.clear_all_wells()
+        self._link_cursor_set = False
         try:
             self.coordinate_hub.configure_seismic_grid()
         except Exception:  # pragma: no cover - defaults are always valid
@@ -622,6 +630,51 @@ class ViewCoordinationController(QObject):
         """Register the horizon highlight target: ``(horizon_id)``."""
         self._horizon_sink = sink
 
+    def set_well_dock_sink(self, sink) -> None:
+        """Register the workstation well dock: ``(well_name) → open/focus``.
+
+        Case A: a well selected anywhere (map/3D/well-log page) opens the
+        docked well view on that well. The dock itself never publishes well
+        selections, so there is no echo path to guard here.
+        """
+        self._well_dock_sink = sink
+
+    def set_link_cursor_sink(self, sink) -> None:
+        """Register the native link-cursor target: ``(well_name, md_m|None)``.
+
+        Case B: a seismic cursor resolves to a CALIBRATED MD on the nearest
+        well; when that well is the one the dock shows, the sink drives the
+        engine crosshair. ``md=None`` clears a previously shown cursor — the
+        sink must tolerate being called for a well it is not showing.
+        """
+        self._link_cursor_sink = sink
+
+    def attach_well_dock_panel(self, panel) -> None:
+        """Wire the docked well panel as a depth-cursor producer (case C).
+
+        The dock panel publishes under the well IT is showing — the bus slot
+        carries the well name, so a dock well and the well-log page well can
+        coexist without one masquerading as the other.
+        """
+        depth_signal = getattr(panel, "depth_cursor_moved", None)
+        if depth_signal is None:
+            return
+        try:
+            depth_signal.connect(
+                lambda md, p=panel: self._on_dock_depth_cursor(p, float(md))
+            )
+        except (RuntimeError, TypeError):
+            pass
+
+    def _on_dock_depth_cursor(self, panel, md: float) -> None:
+        well_name = ""
+        getter = getattr(panel, "current_well_name", None)
+        if callable(getter):
+            well_name = str(getter() or "")
+        if not well_name:
+            return
+        self.publish_depth_cursor(well_name, md, source=self.SOURCE_WELL_LOG)
+
     # ------------------------------------------------------------------
     # Routing
     # ------------------------------------------------------------------
@@ -669,6 +722,12 @@ class ViewCoordinationController(QObject):
             setter = getattr(self._well_log_page, "set_selected_well", None)
             if callable(setter):
                 setter(well_id)
+        # Any view → workstation well dock (case A: open + focus)
+        if self._well_dock_sink is not None:
+            try:
+                self._well_dock_sink(str(well_id))
+            except Exception:
+                logger.debug("well dock routing failed for %r", well_id, exc_info=True)
         # Map/Well Log → 3D (highlight the trajectory)
         if source != self.SOURCE_3D and self._shell is not None:
             geo_page = getattr(self._shell, "geomodel_page", None)
@@ -795,6 +854,19 @@ class ViewCoordinationController(QObject):
             setter = getattr(self._well_log_page, "set_selected_well", None)
             if callable(setter):
                 setter(well_id)
+        # Case B well-view half: the calibrated MD drives the native link
+        # cursor when the dock is showing this well; a previously shown
+        # cursor is cleared once no authority produces an MD anymore.
+        if self._link_cursor_sink is not None:
+            try:
+                if calibrated_md is not None:
+                    self._link_cursor_sink(well_id, calibrated_md)
+                    self._link_cursor_set = True
+                elif self._link_cursor_set:
+                    self._link_cursor_sink(well_id, None)
+                    self._link_cursor_set = False
+            except Exception:
+                logger.debug("link cursor routing failed", exc_info=True)
         # Scenario B: the same cursor focuses the 3D/section views. The
         # 3D focus gets the raw (IL, XL, TWT) so no approximate depth ever
         # masquerades as a calibrated one.
