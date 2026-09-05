@@ -8,6 +8,7 @@ avoid repeating work when a live document has not changed.  The on-disk
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from copy import deepcopy
 from enum import Enum
@@ -17,6 +18,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 import weakref
+
+logger = logging.getLogger(__name__)
 
 from pydantic import ValidationError
 
@@ -362,6 +365,11 @@ class ProjectManager:
                 # section; its in-place path normalization cannot mutate the
                 # live ProjectDocument or the previous snapshot.
                 payload[section] = _portable_section(section, value, self.project_path)
+        if can_reuse and snapshot is not None:
+            # #1170: unknown sections preserved at load ride along verbatim.
+            for section, value in snapshot.portable_sections.items():
+                if section not in payload:
+                    payload[section] = value
         return payload
 
     def _write_payload(self, payload: str) -> None:
@@ -572,16 +580,44 @@ class ProjectManager:
         # Reference-layer status is runtime-derived from source availability;
         # retain its normalized portable representation so a later unrelated
         # save does not accidentally resurrect an obsolete ``ready`` status.
-        portable_sections["paleomap_documents"] = _portable_section(
+        # #1170: normalize every path-bearing section (not just two), and
+        # preserve unknown on-disk sections verbatim instead of dropping
+        # them on the next save (downgrade data-loss guard + warning).
+        for section in (
+            "resources",
+            "export_artifacts",
             "paleomap_documents",
-            deepcopy(runtime_sections["paleomap_documents"]),
-            self.project_path,
-        )
-        portable_sections["factor_map_tasks"] = _portable_section(
             "factor_map_tasks",
-            deepcopy(runtime_sections["factor_map_tasks"]),
-            self.project_path,
-        )
+            "horizon_interpretations",
+        ):
+            if section in portable_sections:
+                portable_sections[section] = _portable_section(
+                    section,
+                    deepcopy(portable_sections[section]),
+                    self.project_path,
+                )
+        unknown_sections = sorted(set(data) - set(runtime_sections))
+        for section in unknown_sections:
+            portable_sections[section] = deepcopy(data[section])
+        if unknown_sections:
+            logger.warning(
+                "project file has unknown sections %s (newer schema?) — "
+                "preserved verbatim, not interpreted",
+                unknown_sections,
+            )
+        # #1170: sections whose load-time normalization differs from disk
+        # need one write-side migration even though the live document is
+        # otherwise identical to what was loaded (legacy absolute paths).
+        pending = set(_pending_persistence_sections(project))
+        for section in (
+            "resources",
+            "export_artifacts",
+            "paleomap_documents",
+            "factor_map_tasks",
+            "horizon_interpretations",
+        ):
+            if section in data and portable_sections.get(section) != data.get(section):
+                pending.add(section)
         _remember_snapshot(
             project,
             ProjectPersistenceSnapshot(
@@ -589,7 +625,7 @@ class ProjectManager:
                 runtime_sections=runtime_sections,
                 portable_sections=portable_sections,
                 disk_mtime_ns=_file_mtime_ns(self.project_path),
-                pending_sections=_pending_persistence_sections(project),
+                pending_sections=frozenset(pending),
             ),
         )
         return project

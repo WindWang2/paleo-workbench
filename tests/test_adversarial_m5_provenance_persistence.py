@@ -652,3 +652,37 @@ class TestGeologicalPipelineProvenanceStress:
         assert not chain.truncated
         assert chain.root.children[0].version_id == inter.id
         assert chain.root.children[0].trashed is True
+
+
+def test_legacy_absolute_paths_portablized_and_unknown_sections_kept(tmp_path, caplog):
+    """#1170: legacy absolute resource paths migrate to portable form;
+    unknown (newer-schema) sections survive a load/save round-trip."""
+    import logging
+
+    from paleo_workbench.project.manager import ProjectManager
+
+    data_file = tmp_path / "data" / "A.Las"
+    data_file.parent.mkdir(parents=True, exist_ok=True)
+    data_file.write_bytes(b"las")
+    proj_path = tmp_path / "legacy.paleo.json"
+    doc = ProjectDocument.new("Legacy")
+    payload = doc.model_dump(mode="json")
+    payload["resources"] = [{
+        "id": "res-1", "name": "A.Las",
+        "path": str(data_file),
+        "type": "well_log", "format": "las",
+    }]
+    payload["future_section"] = {"x": 1}
+    proj_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    mgr = ProjectManager(proj_path)
+    with caplog.at_level(logging.WARNING, logger="paleo_workbench.project.manager"):
+        project = mgr.load()
+    assert any("future_section" in r.message for r in caplog.records)
+
+    mgr.save(project)
+    round_tripped = json.loads(proj_path.read_text(encoding="utf-8"))
+    assert round_tripped["future_section"] == {"x": 1}
+    stored = round_tripped["resources"][0]["path"]
+    assert not Path(stored).is_absolute(), stored
+    assert round_tripped["resources"][0]["external"] is False
