@@ -506,6 +506,47 @@ jobs:
           QT_QPA_PLATFORM: minimal
         run: python well-log-engine/tests/python/test_qt_embedding.py
 
+      # #1148: the workbench↔engine binding contract
+      # (tests/test_welllog_engine_native_integration.py) used to execute
+      # NOWHERE — the main gate deselects welllog_binding, the WLWS leg sets
+      # WLWS_DISABLE_ENGINE=1, and this leg stopped at ctest. The just-built
+      # wheel is installed above, so this leg is the binding gate: run the
+      # contract for real and fail closed on skips (0 executed = red).
+      - name: Init geo-viz-engine submodule (workbench contract imports)
+        shell: bash
+        run: git submodule update --init geo-viz-engine
+
+      - name: Install workbench contract test deps
+        shell: bash
+        run: |
+          python -m pip install \
+            "pytest>=8.0" "pytest-qt>=4.5.0" "pytest-timeout>=2.3.1" \
+            "pydantic>=2"
+
+      - name: Run workbench↔engine binding contract (fail-closed)
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          PP="$GITHUB_WORKSPACE"
+          for pkg in "$GITHUB_WORKSPACE"/geo-viz-engine/packages/*/; do
+            PP="$PP:${pkg%/}"
+          done
+          PYTHONPATH="$PP" python -m pytest \
+            tests/test_welllog_engine_native_integration.py \
+            -m welllog_binding -v --timeout=120 --timeout-method=thread \
+            2>&1 | tee /tmp/welllog-contract.txt
+          python - <<'EOF'
+          import re
+          text = open("/tmp/welllog-contract.txt").read()
+          m = re.search(r"^=+ .*?(\d+) passed.*? =+$", text, re.M)
+          assert m and int(m.group(1)) >= 2, (
+              "expected >=2 welllog_binding tests to PASS "
+              f"(contract + guard), got: {text[-2000:]}"
+          )
+          print(f"welllog binding gate: {m.group(1)} passed (executed, not skipped)")
+          EOF
+
   pinned-vcpkg:
     name: Ubuntu / pinned vcpkg manifest
     runs-on: ubuntu-latest

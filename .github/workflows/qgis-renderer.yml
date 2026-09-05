@@ -137,7 +137,10 @@ jobs:
         # See the workflow header for why this env exists. All later steps
         # call /tmp/qgisqt/bin/python explicitly — no conda activation.
         run: |
-          conda create -y -p /tmp/qgisqt -c conda-forge python=3.12 "pyside6=6.11.1" "qt6-main=6.11.1"
+          conda create -y -p /tmp/qgisqt -c conda-forge python=3.12 "pyside6=6.11.1" "qt6-main=6.11.1" "qt6-multimedia=6.11.1"
+          # NOTE (#1147): conda-forge splits Qt modules — qt6-main does NOT
+          # contain Multimedia; without qt6-multimedia the fail-fast ls below
+          # dies on libQt6Multimedia.so.6 and the whole leg stays red.
           /tmp/qgisqt/bin/python -m pip install --upgrade pip
           # Deps land in the SAME env. PySide6 itself comes from conda (NOT
           # pip) so its Qt stays the prefix's single 6.11.1 set.
