@@ -343,6 +343,46 @@ def test_task_center_renders_state_colored_progress(qtbot):
         center.shutdown()
 
 
+def test_task_center_reuses_rows_across_refresh(qtbot):
+    """#1157: refresh() diffs — same items/widgets survive, cancel clicks land."""
+    import time as _time
+
+    from paleo_workbench.runtime.task_scheduler import TaskSpec, get_scheduler
+    from paleo_workbench.ui.workstation.task_center import TaskCenter
+
+    center = TaskCenter()
+    qtbot.addWidget(center)
+    center.timer.stop()  # deterministic: drive refresh() manually
+
+    handle = get_scheduler().submit(
+        TaskSpec(
+            callable=lambda ctx: (_time.sleep(30), "late")[1],
+            kind="background.io",
+            title="QA · 行复用探针",
+        )
+    )
+    try:
+        qtbot.waitUntil(
+            lambda: center.tree.topLevelItemCount() == 1
+            and center.tree.topLevelItem(0).text(0).startswith(("运行中", "排队")),
+            timeout=4000,
+        )
+        center.refresh()
+        item_before = center.tree.topLevelItem(0)
+        bar_before = center.tree.itemWidget(item_before, 2)
+        cancel_before = center.tree.itemWidget(item_before, 4)
+        assert cancel_before is not None
+        center.refresh()
+        center.refresh()
+        item_after = center.tree.topLevelItem(0)
+        assert item_after is item_before  # same row object: selection/scroll survive
+        assert center.tree.itemWidget(item_after, 2) is bar_before
+        assert center.tree.itemWidget(item_after, 4) is cancel_before
+    finally:
+        get_scheduler().cancel(handle.task_id)
+        center.shutdown()
+
+
 def test_inspector_marks_missing_values(qtbot, tmp_path):
     from paleo_workbench.project.domain import WellEntity
     from paleo_workbench.ui.workstation.inspector import WorkstationInspector
