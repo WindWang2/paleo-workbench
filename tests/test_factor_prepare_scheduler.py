@@ -500,3 +500,28 @@ def test_group_job_cancelled_counts_as_cancelled_not_failed(monkeypatch):
     assert result.cancelled is True
     assert result.failed_count == 0
     assert all(r.error == "cancelled" for r in result.task_results)
+
+
+def test_defaults_commit_discarded_when_live_gained_real_tasks():
+    """#1159: synthetic bootstrap tasks never append into a live project
+    that already holds (user-created) tasks."""
+    empty = ProjectDocument.new("Empty")
+    snap = build_prepare_snapshot(empty, generation=30, method="IDW", grid_n=12)
+    assert snap.created_defaults is True
+    result = run_factor_prepare_schedule(snap, workers=1)
+    assert result.task_results
+
+    live = _project_with_tasks(1)
+    live_ids_before = [t.id for t in live.factor_map_tasks]
+    discarded = commit_prepare_batch_result(
+        live, result, expected_generation=snap.generation
+    )
+    assert [t.id for t in live.factor_map_tasks] == live_ids_before
+    assert set(discarded) == {r.task_id for r in result.task_results}
+
+    # Empty live still bootstraps (legacy behavior preserved).
+    fresh = ProjectDocument.new("Fresh")
+    commit_prepare_batch_result(
+        fresh, result, expected_generation=snap.generation
+    )
+    assert len(fresh.factor_map_tasks) == len(result.task_results)

@@ -693,8 +693,11 @@ def commit_prepare_batch_result(
             continue
         live = live_by_id.get(item.task_id)
         if live is None:
-            # New task id not on live project — append only if defaults path.
-            if result.created_default_tasks:
+            # New task id not on live project. Defaults-path tasks bootstrap
+            # an EMPTY project only: if live gained (real) tasks meanwhile,
+            # appending synthetic mocks would pollute the user project —
+            # discard instead (#1159).
+            if result.created_default_tasks and not live_project.factor_map_tasks:
                 live_project.factor_map_tasks.append(item.task)
             else:
                 discarded.append(item.task_id)
