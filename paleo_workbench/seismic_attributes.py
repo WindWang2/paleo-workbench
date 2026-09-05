@@ -276,6 +276,73 @@ def roi_attribute(
 # Full-volume banded job (#1084)
 # ------------------------------------------------------------------------ #
 
+# #1146: one band materializes, per inline, the halo-expanded input block,
+# a contiguous float32 copy, and the kernel output — modelled as 3 resident
+# copies of (band + 2*inline-halo) inlines of n_xl*n_t*4 bytes.
+_BAND_COPIES = 3
+# Fraction of the streaming-buffer budget a single band batch may occupy.
+_BAND_RAM_SHARE = 0.25
+BAND_INLINES_MIN = 8
+BAND_INLINES_MAX = 64
+
+
+# #1146: worst-case in-flight multiple of one inline slab, measured per
+# kernel family (c3 ≈ 5x: slab + ones + reflect pad + output; float64
+# rms-style paths ≈ 7-8x). One conservative factor for all kernels.
+ATTRIBUTE_PEAK_FACTOR = 8
+ATTRIBUTE_MIN_BAND_INLINES = 1
+ATTRIBUTE_SHARD = (128, 512, 512)
+
+
+def derive_band_inlines(
+    shape_or_n_xl: tuple[int, int, int] | int,
+    n_t: int | None = None,
+    *,
+    halo: tuple[int, int, int] = (0, 0, 0),
+    budget_bytes: int | None = None,
+    band_ram_share: float = _BAND_RAM_SHARE,
+    min_inlines: int = BAND_INLINES_MIN,
+    max_inlines: int = BAND_INLINES_MAX,
+    peak_factor: int = ATTRIBUTE_PEAK_FACTOR,
+) -> int:
+    """Band size (inlines) for the full-volume job, derived from the
+    ResourceGovernor's active budget (#1146).
+
+    Previously a hardcoded ``band_inlines=64`` ignored the budget entirely
+    (12-20 GB resident per batch on large volumes — an order of magnitude
+    over the provider admission estimate). The derivation bounds one band's
+    working set to ``band_ram_share`` of the budget's streaming buffer:
+
+        3 copies x (band + 2*halo_il) inlines x n_xl*n_t*4 bytes <= share
+
+    and clamps to ``[min_inlines, max_inlines]`` so tiny budgets still make
+    progress and huge budgets cannot reintroduce the RSS blow-up. Exposed
+    for the provider side so its ResourceProfile RAM estimate and the job's
+    actual batch size stay aligned.
+    """
+    if n_t is not None:
+        shape = (100, int(shape_or_n_xl), int(n_t))
+        halo = (1, 0, 0)
+    else:
+        shape = shape_or_n_xl
+    n_il, n_xl, n_t_val = (int(v) for v in shape)
+    bytes_per_inline = max(1, n_xl * n_t_val * 4)
+    halo_il = int(halo[0]) if halo else 0
+    if budget_bytes is None:
+        try:
+            from paleo_workbench.runtime.resource_budget import active_budget
+
+            budget_bytes = active_budget().streaming_buffer_bytes
+        except Exception:
+            budget_bytes = 5 << 30
+    band_budget = max(1, int(float(budget_bytes) * float(band_ram_share)))
+    raw = band_budget // (_BAND_COPIES * bytes_per_inline) - 2 * halo_il
+    # Clamp: tiny budgets still make progress (floor), huge budgets cannot
+    # reintroduce the 64-inline RSS blow-up (ceiling). The last band's
+    # remainder is handled by band_bounds, so n_il needs no special case.
+    band = max(1, raw)
+    return max(min_inlines, min(max_inlines, band))
+
 
 @dataclass
 class AttributeJobStats:
@@ -284,53 +351,21 @@ class AttributeJobStats:
     elapsed_s: float = 0.0
 
 
-# #1146: worst-case in-flight multiple of one inline slab, measured per
-# kernel family (c3 ≈ 5x: slab + ones + reflect pad + output; float64
-# rms-style paths ≈ 7-8x). One conservative factor for all kernels.
-ATTRIBUTE_PEAK_FACTOR = 8
-ATTRIBUTE_MIN_BAND_INLINES = 1
-# Must match _open_or_create_output's shard grid (band fsync in #1194
-# addresses shard files by grid index).
-ATTRIBUTE_SHARD = (128, 512, 512)
-
-
-def _attribute_budget_bytes() -> int:
-    """Bytes one attribute band may peak at (operator budget, not a constant)."""
-    try:
-        from paleo_workbench.runtime.resource_budget import active_budget
-
-        return int(active_budget().streaming_buffer_bytes)
-    except Exception:
-        return 5 * 1024**3
-
-
-def derive_band_inlines(
-    n_xl: int,
-    n_t: int,
-    *,
-    budget_bytes: int | None = None,
-    peak_factor: int = ATTRIBUTE_PEAK_FACTOR,
-) -> int:
-    """Inline count per band such that peak temp stays within budget (#1146).
-
-    ``bytes_per_inline × band × peak_factor ≤ budget``; always ≥ 1 so
-    degenerate volumes still run (slowly) instead of refusing.
-    """
-    budget = int(budget_bytes) if budget_bytes else _attribute_budget_bytes()
-    per_inline = max(1, int(n_xl) * max(1, int(n_t)) * 4)
-    band = max(ATTRIBUTE_MIN_BAND_INLINES, budget // (per_inline * max(1, peak_factor)))
-    return int(band)
-
-
 class VolumeAttributeJob:
     """Banded, resumable full-volume attribute run (#1084).
 
     Same kernel and halo semantics as :func:`roi_attribute` — the only
     difference is scheduling and output: bands stream into a float32 zarr
     store (chunk/shard grid matches the seismic spec), completed bands carry
-    ``.done/band_<k>`` marker files (written AFTER the slab lands, fsynced),
-    so cancel/crash resume skips finished bands exactly like the transcoder
-    skips finished shards.
+    ``.done/band_<i0>`` marker files — identified by the band's FIRST
+    INLINE (#1161), so markers can never be misread as positional indices
+    after the band layout changes — and are written only after the band's
+    shard data is fsynced (#1194), so cancel/crash resume skips finished
+    bands exactly like the transcoder skips finished shards.
+
+    ``band_inlines=None`` (the default) derives the band size from the
+    ResourceGovernor's active budget via :func:`derive_band_inlines`
+    (#1146); an explicit value is honoured as-is.
     """
 
     def __init__(
@@ -347,15 +382,11 @@ class VolumeAttributeJob:
         self.reader = reader
         self.dst = Path(dst_store)
         self.name = name
-        # #1146: None derives from the operator memory budget and the
-        # volume geometry; an explicit positive value is honored verbatim
-        # (tests, resume-shape stability).
         if band_inlines is None:
-            n_xl = int(reader.shape[1])
-            n_t = int(reader.shape[2])
-            self.band_inlines = derive_band_inlines(n_xl, n_t)
-        else:
-            self.band_inlines = max(1, int(band_inlines))
+            band_inlines = derive_band_inlines(
+                tuple(reader.shape), halo=attribute_halo(name)
+            )
+        self.band_inlines = int(band_inlines)
         self.use_gpu = use_gpu
         self.stats = AttributeJobStats()
 
@@ -365,50 +396,106 @@ class VolumeAttributeJob:
         step = self.band_inlines
         return [(i, min(i + step, n_il)) for i in range(0, n_il, step)]
 
+    def _source_identity(self) -> dict:
+        """Identity of the source volume this job reads (source-mix guard).
+
+        Same scheme as the transcoder's ``_source_identity`` (#1141): the
+        reader's zarr store path plus size/mtime — cheap (no content hashing
+        of a huge store) yet enough to tell two same-shape volumes apart
+        when the active volume switches under a reused attribute store.
+        Readers without a ``path`` (in-memory test fakes) contribute no
+        identity fields, matching the pre-fix spec for them.
+        """
+        from paleo_workbench.seismic_transcode import _source_identity
+
+        path = getattr(self.reader, "path", None)
+        if not path:
+            return {}
+        return _source_identity(Path(str(path)))
+
+    def _banding_spec(self) -> dict:
+        """Identity of the band layout this job will produce (#1161).
+
+        Includes the SOURCE volume identity: without it, switching the
+        active volume and recomputing the same kernel/band/shape attribute
+        into a reused store would make #1161's marker trust reuse the
+        previous volume's bands — mixed-source DERIVED output. A spec
+        mismatch discards the markers and recomputes every band.
+        """
+        spec = {
+            "attribute": self.name,
+            "band_inlines": self.band_inlines,
+            "shape": [int(v) for v in self.reader.shape],
+        }
+        spec.update(self._source_identity())
+        return spec
+
     def _open_or_create_output(self):
         import zarr
-        from zarr.codecs import BloscCodec
 
         meta = self.dst / "zarr.json"
         if meta.exists():
             arr = zarr.open(str(self.dst), mode="a")
-            # #1161: markers are band-START inlines; a reopened store computed
-            # with a different band_inlines must refuse rather than mix two
-            # parameterizations. Legacy stores (no attr) with markers are
-            # unverifiable → refuse as well; delete the store to recompute.
-            recorded = None
-            try:
-                recorded = arr.attrs.get("band_inlines")
-            except Exception:
-                recorded = None
-            if self.completed_bands() and recorded != self.band_inlines:
-                raise ValueError(
-                    "attribute store band_inlines mismatch: stored "
-                    f"{recorded!r} vs requested {self.band_inlines!r} "
-                    f"({self.dst}); delete the store to recompute"
+            attrs = dict(arr.attrs or {})
+            stored_banding = attrs.get("banding")
+            if stored_banding != self._banding_spec():
+                # #1161: the existing store was laid out for a different
+                # banding (band size, volume shape, or attribute). The old
+                # markers describe bands that no longer exist at those
+                # positions — invalidate them and start the band plan over.
+                logger.warning(
+                    "attribute store %s has banding %s but this job wants "
+                    "%s; discarding old band markers and recomputing",
+                    self.dst,
+                    stored_banding,
+                    self._banding_spec(),
                 )
+                self._invalidate_done_markers()
+                if attrs.get("shape") != self._banding_spec()["shape"]:
+                    arr = self._create_output_array(overwrite=True)
+                else:
+                    arr.attrs["banding"] = self._banding_spec()
             return arr
+        return self._create_output_array(overwrite=False)
+
+    def _create_output_array(self, *, overwrite: bool):
+        import zarr
+        from zarr.codecs import BloscCodec
+
         self.dst.mkdir(parents=True, exist_ok=True)
         return zarr.create_array(
             str(self.dst),
             shape=tuple(self.reader.shape),
             dtype="float32",
             chunks=(64, 128, 128),
-            shards=ATTRIBUTE_SHARD,
+            shards=(128, 512, 512),
             compressors=[BloscCodec(cname="zstd", clevel=5, shuffle="shuffle")],
-            overwrite=False,
+            overwrite=overwrite,
             attributes={
                 "attribute": self.name,
                 "shape": list(self.reader.shape),
                 "kind": "attribute-volume",
-                "band_inlines": self.band_inlines,
+                "banding": self._banding_spec(),
             },
         )
 
     def _done_dir(self) -> Path:
         return self.dst.parent / f"{self.dst.name}.done"
 
+    def _invalidate_done_markers(self) -> None:
+        """Drop all band markers (banding changed, #1161)."""
+        done = self._done_dir()
+        if not done.is_dir():
+            return
+        for f in done.iterdir():
+            if f.name.startswith("band_"):
+                try:
+                    f.unlink()
+                except OSError:
+                    logger.exception("could not remove stale marker %s", f)
+
     def completed_bands(self) -> set[int]:
+        """First-inline numbers of bands whose markers exist (#1161)."""
         done = self._done_dir()
         out: set[int] = set()
         if not done.is_dir():
@@ -421,59 +508,91 @@ class VolumeAttributeJob:
                     continue
         return out
 
-    def _mark_band_done(self, k: int) -> None:
+    # ------------------------------------------------- durability (#1194) --
+    @staticmethod
+    def _fsync_path(path: Path) -> None:
+        """fsync one path — a data file (flush its pages) or a directory
+        (flush its entries); both take an O_RDONLY fd on Linux."""
+        import os
+
+        try:
+            fd = os.open(str(path), os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        except OSError:
+            pass
+
+    def _shard_inline_extent(self) -> int:
+        """Shard size along the inline axis, from the store's zarr.json."""
+        import json
+
+        try:
+            meta = json.loads((self.dst / "zarr.json").read_text())
+            grid = (
+                meta.get("chunk_grid", {}).get("configuration", {}).get("chunk_shape")
+            )
+            if grid and int(grid[0]) > 0:
+                return int(grid[0])
+        except Exception:
+            pass
+        return 128  # the layout this job itself creates
+
+    def _fsync_band_shards(self, i0: int, i1: int) -> None:
+        """fsync the shard files AND directory entries this band touched (#1194).
+
+        zarr has no per-write durability hook, so the store's ``c/<gi>/…``
+        shard files covered by the band's inline span are fsynced directly
+        BEFORE the band marker lands — a crash can then never persist a
+        done-marker ahead of its data (which would register a store with
+        missing bands as a complete DERIVED volume). fsyncing the files alone
+        is not enough on Linux: the shard bytes can be durable while the
+        NEWLY CREATED ``c/<gi>`` / ``c/<gi>/<gj>`` directory entries that name
+        them are still only in memory, so a crash right after the marker
+        could leave shards with no directory entries at all. Every directory
+        level the band covered is therefore fsynced too, deepest-first
+        (child entries before the parent that names them), deduped across
+        the band's shard range.
+        """
+        shard_il = self._shard_inline_extent()
+        if shard_il <= 0:
+            return
+        chunks_root = self.dst / "c"
+        if not chunks_root.is_dir():
+            return
+        dirs: set[Path] = set()
+        for gi in range(i0 // shard_il, (i1 - 1) // shard_il + 1):
+            col = chunks_root / str(gi)
+            if not col.is_dir():
+                continue
+            dirs.add(col)
+            for f in col.rglob("*"):
+                if f.is_file():
+                    self._fsync_path(f)
+                    dirs.add(f.parent)
+        if dirs:
+            dirs.add(chunks_root)
+            dirs.add(self.dst)
+        for d in sorted(dirs, key=lambda p: len(p.parts), reverse=True):
+            self._fsync_path(d)
+
+    def _mark_band_done(self, i0: int) -> None:
         import os
 
         done = self._done_dir()
         done.mkdir(parents=True, exist_ok=True)
-        # #1161: marker carries the band START inline, not the positional
-        # index — positional numbers silently rebind when band_inlines changes.
-        marker = done / f"band_{k * self.band_inlines:06d}"
-        marker.write_text("ok")
-        # #1194: fsync the marker CONTENT (not just the directory) so a
-        # crash can never leave a durable marker over unflushed content.
-        for path in (marker, done):
-            try:
-                fd = os.open(path, os.O_RDONLY)
-                try:
-                    os.fsync(fd)
-                finally:
-                    os.close(fd)
-            except OSError:
-                pass
-
-    def _fsync_band_files(self, i0: int, i1: int) -> None:
-        """fsync every shard file overlapping inlines [i0, i1) (#1194).
-
-        The zarr write lands in the OS page cache; the band marker must
-        never become durable first. Called after the band slice assignment,
-        before _mark_band_done.
-        """
-        import os
-
-        shard_il = ATTRIBUTE_SHARD[0]
-        gi_lo, gi_hi = i0 // shard_il, (max(i0, i1 - 1)) // shard_il
-        grid = self.dst / "c"
-        if not grid.is_dir():
-            return
-        for gi_dir in sorted(grid.iterdir()):
-            try:
-                gi = int(gi_dir.name)
-            except ValueError:
-                continue
-            if not (gi_lo <= gi <= gi_hi) or not gi_dir.is_dir():
-                continue
-            for shard_file in sorted(gi_dir.rglob("*")):
-                if not shard_file.is_file():
-                    continue
-                try:
-                    fd = os.open(shard_file, os.O_RDONLY)
-                    try:
-                        os.fsync(fd)
-                    finally:
-                        os.close(fd)
-                except OSError:
-                    pass
+        marker = done / f"band_{i0:06d}"
+        # #1194: marker body durable (open→write→fsync→close) BEFORE its
+        # directory entry is durable, and both AFTER the band's shard data
+        # was fsynced by the caller.
+        fd = os.open(str(marker), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+        try:
+            os.write(fd, b"ok")
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        self._fsync_path(done)
 
     # ---------------------------------------------------------------- run --
     def run(
@@ -485,9 +604,11 @@ class VolumeAttributeJob:
         arr = self._open_or_create_output()
         bounds = self.band_bounds()
         self.stats.bands_total = len(bounds)
+        # Band identity = first inline (#1161); markers are only trusted
+        # after _open_or_create_output validated the banding layout.
         finished = self.completed_bands()
         n_il, n_xl, n_t = self.reader.shape
-        for k, (i0, i1) in enumerate(bounds):
+        for i0, i1 in bounds:
             ctx.check_cancelled()
             if i0 in finished:
                 self.stats.bands_done += 1
@@ -499,8 +620,8 @@ class VolumeAttributeJob:
             )
             ctx.check_cancelled()
             arr[i0:i1, :, :] = result
-            self._fsync_band_files(i0, i1)
-            self._mark_band_done(k)
+            self._fsync_band_shards(i0, i1)
+            self._mark_band_done(i0)
             self.stats.bands_done += 1
             ctx.report_progress(self.stats.bands_done, self.stats.bands_total)
         self.stats.elapsed_s = time.perf_counter() - t0

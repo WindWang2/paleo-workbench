@@ -463,3 +463,50 @@ def test_panel_menu_exposes_presets_and_batch_float(qtbot, tmp_path):
     assert "全部浮动" in labels
     assert "全部停靠" in labels
     assert "恢复默认布局" in labels
+
+
+# ------------------------------------- P1: agent panel WRITE-grant opt-in --
+def test_agent_workspace_write_actions_disabled_by_default(qtbot, tmp_path, monkeypatch):
+    """#1186/P1: default grant stays READ+COMPUTE — WRITE needs an explicit
+    opt-in (env var or constructor flag), never a silent default."""
+    from paleo_workbench.harness.spec import ActionRisk
+
+    monkeypatch.delenv("PALEO_AGENT_ALLOW_WRITE", raising=False)
+    panel = AgentWorkspace(project=_project(tmp_path))
+    qtbot.addWidget(panel)
+
+    permissions = panel._build_context(panel._plan("打开井 A12")).permissions
+    assert ActionRisk.WRITE not in permissions
+    assert {ActionRisk.READ, ActionRisk.COMPUTE} <= permissions
+    # No elevation marker in the consent line by default.
+    assert "WRITE" not in panel.consent_label.text()
+
+
+def test_agent_workspace_write_actions_enabled_by_env(qtbot, tmp_path, monkeypatch):
+    from paleo_workbench.harness.spec import ActionRisk
+
+    monkeypatch.setenv("PALEO_AGENT_ALLOW_WRITE", "1")
+    panel = AgentWorkspace(project=_project(tmp_path))
+    qtbot.addWidget(panel)
+
+    permissions = panel._build_context(panel._plan("打开井 A12")).permissions
+    assert ActionRisk.WRITE in permissions
+    assert {ActionRisk.READ, ActionRisk.COMPUTE} <= permissions
+    # The elevation is visibly flagged, not silent.
+    assert "WRITE" in panel.consent_label.text()
+
+
+def test_agent_workspace_write_actions_constructor_flag_wins(qtbot, tmp_path, monkeypatch):
+    from paleo_workbench.harness.spec import ActionRisk
+
+    monkeypatch.delenv("PALEO_AGENT_ALLOW_WRITE", raising=False)
+    enabled = AgentWorkspace(project=_project(tmp_path), allow_write_actions=True)
+    qtbot.addWidget(enabled)
+    assert ActionRisk.WRITE in enabled._build_context(enabled._plan("打开井 A12")).permissions
+
+    # Explicit False beats a set env var.
+    monkeypatch.setenv("PALEO_AGENT_ALLOW_WRITE", "1")
+    disabled = AgentWorkspace(project=_project(tmp_path), allow_write_actions=False)
+    qtbot.addWidget(disabled)
+    assert ActionRisk.WRITE not in disabled._build_context(disabled._plan("打开井 A12")).permissions
+    assert "WRITE" not in disabled.consent_label.text()

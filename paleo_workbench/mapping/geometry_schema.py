@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal
 from uuid import uuid4
+
+from paleo_workbench.project.domain import CoordinateStatus
+
+logger = logging.getLogger(__name__)
 
 FeatureKind = Literal["facies", "well", "line", "label"]
 
@@ -130,17 +135,62 @@ def normalize_facies(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def normalize_well(raw: dict[str, Any]) -> dict[str, Any]:
-    if "coordinates" in raw and isinstance(raw["coordinates"], (list, tuple)):
-        x, y = float(raw["coordinates"][0]), float(raw["coordinates"][1])
-    else:
-        # Accept x/lon/lng and y/lat (preview helpers and demo drafts use lng/lat).
-        x = float(raw.get("x", raw.get("lng", raw.get("lon", 0.0))))
-        y = float(raw.get("y", raw.get("lat", 0.0)))
+    """Normalize a well record; malformed coordinates are flagged, never crash.
+
+    A ``coordinates`` payload with fewer than 2 elements (audit #1162) used to
+    raise IndexError; it now falls back to the scalar x/lng + y/lat keys, and
+    when those are unusable too the feature keeps a placeholder position but is
+    marked ``coordinate_status`` INVALID (same vocabulary as
+    ``paleo_workbench.project.domain.CoordinateStatus``) instead of silently
+    pretending to be a valid location.
+    """
+    x: float | None = None
+    y: float | None = None
+    coords = raw.get("coordinates")
+    if isinstance(coords, (list, tuple)) and len(coords) >= 2:
+        try:
+            x, y = float(coords[0]), float(coords[1])
+        except (TypeError, ValueError):
+            x = y = None
+    if x is None or y is None:
+        # Coordinates absent/short/non-numeric: fall back to SCALAR keys,
+        # selected as whole CRS-consistent families (pipeline semantics,
+        # audit #1150): (x, y) first, then (lng, lat), then (lon, lat). A
+        # family is used only when BOTH keys are present and numeric — never
+        # cross-paired: `{x, lat}` would mix a projected x with a geographic
+        # latitude and silently pass as OK. An incomplete/unusable family
+        # leaves x/y None and the feature falls through to INVALID below.
+        for x_key, y_key in (("x", "y"), ("lng", "lat"), ("lon", "lat")):
+            sx, sy = raw.get(x_key), raw.get(y_key)
+            if sx is None or sy is None:
+                continue
+            try:
+                x, y = float(sx), float(sy)
+                break
+            except (TypeError, ValueError):
+                continue
+    if (
+        (x is None or y is None)
+        and isinstance(coords, (list, tuple))
+        and len(coords) == 1
+    ):
+        # No scalar pair: keep a numeric leading element as partial evidence.
+        try:
+            x = float(coords[0])
+        except (TypeError, ValueError):
+            x = None
+    status = CoordinateStatus.OK if (x is not None and y is not None) else CoordinateStatus.INVALID
+    if status == CoordinateStatus.INVALID:
+        logger.warning(
+            "well feature %r has unusable coordinates (missing/short/non-numeric); marked invalid",
+            raw.get("name") or raw.get("id"),
+        )
     return {
         "id": raw.get("id") or new_feature_id("well"),
         "kind": "well",
         "name": raw.get("name") or raw.get("well_name") or "",
-        "coordinates": [x, y],
+        "coordinates": [x if x is not None else 0.0, y if y is not None else 0.0],
+        "coordinate_status": status,
     }
 
 
@@ -155,8 +205,19 @@ def normalize_line(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def normalize_label(raw: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a label record; an anchor needs two numeric elements.
+
+    A short anchor (audit #1162) used to raise IndexError; it now raises a
+    descriptive ``ValueError`` that :func:`features_from_document` catches,
+    logs and skips — malformed labels never abort document import.
+    """
     if "anchor" in raw:
-        ax, ay = float(raw["anchor"][0]), float(raw["anchor"][1])
+        anchor = raw["anchor"]
+        if not isinstance(anchor, (list, tuple)) or len(anchor) < 2:
+            raise ValueError(
+                f"label anchor must have >= 2 coordinate elements, got {anchor!r}"
+            )
+        ax, ay = float(anchor[0]), float(anchor[1])
     else:
         ax = float(raw.get("x", 0.0))
         ay = float(raw.get("y", 0.0))

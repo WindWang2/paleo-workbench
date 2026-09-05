@@ -21,6 +21,7 @@ Semantics required by #1079 and pinned by tests:
 """
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -97,6 +98,72 @@ def store_work_path(catalog: DataCatalogService, raw_version_id: str) -> Path:
     project_dir = Path(catalog.project_path).expanduser().resolve().parent
     artifacts = project_dir / (Path(catalog.project_path).stem + ".artifacts")
     return artifacts / "working" / "seismic-transcode" / raw_version_id / "store"
+
+
+def _zarr_store_metadata(store: Path) -> dict | None:
+    """Parsed root zarr metadata (``zarr.json`` v3 / ``.zarray`` v2), or None."""
+    for name in ("zarr.json", ".zarray"):
+        meta_path = store / name
+        if meta_path.is_file():
+            try:
+                parsed = json.loads(meta_path.read_text())
+            except Exception:
+                return None
+            return parsed if isinstance(parsed, dict) else None
+    return None
+
+
+def _legacy_store_looks_intact(
+    store: Path, n_files: int, expected_shape: Any
+) -> bool:
+    """Tightened no-fingerprint probe for pre-fingerprint DERIVED stores.
+
+    A fingerprint-less store is no longer trusted just because its directory
+    is non-empty (a stray file or a torn partial write would pass): it must
+    carry real zarr metadata at the store root, and — when an expected shape
+    is known from the run parameters / version metadata — the metadata's
+    recorded shape must match. Anything else falls through to the caller's
+    normal re-queue path.
+    """
+    if n_files <= 0:
+        return False
+    meta = _zarr_store_metadata(store)
+    if meta is None:
+        return False
+    if expected_shape:
+        recorded = meta.get("shape")
+        try:
+            if [int(v) for v in recorded or []] != [
+                int(v) for v in expected_shape
+            ]:
+                return False
+        except (TypeError, ValueError):
+            return False
+    return True
+
+
+def _store_matches_fingerprint(
+    store: Path, fingerprint: dict | None, expected_shape: Any = None
+) -> bool:
+    """Structural probe of a registered DERIVED store (#1192).
+
+    True when the directory's file count + byte total equal the structural
+    fingerprint the catalog recorded at registration. A missing fingerprint
+    (versions registered before fingerprints existed) degrades to the
+    tightened legacy probe (:func:`_legacy_store_looks_intact`): zarr
+    metadata present and shape-consistent — never merely "non-empty".
+    """
+    if not store.is_dir():
+        return False
+    n_files = 0
+    total = 0
+    for f in store.rglob("*"):
+        if f.is_file():
+            n_files += 1
+            total += f.stat().st_size
+    if not fingerprint:
+        return _legacy_store_looks_intact(store, n_files, expected_shape)
+    return n_files == fingerprint.get("files") and total == fingerprint.get("bytes")
 
 
 class SeismicLifecycleService:
@@ -331,11 +398,71 @@ class SeismicLifecycleService:
         return Path(self._catalog.resolve_path(v))
 
     # -------------------------------------------------------------- resume --
-    def resume_pending(self) -> int:
-        """Re-queue transcodes whose DataRun stayed 'running' (crash/close).
+    def _complete_intact_derived(self, run) -> bool:
+        """Complete ``run`` in place when it already produced an intact
+        DERIVED store (#1192 crash window).
 
-        Called on project open; completed stores skip instantly via shard
-        probing, then register their DERIVED version.
+        ``register_derived_store`` moves the working store into the managed
+        layout and saves the version BEFORE the run reaches 'complete'; a
+        crash between those leaves a 'running' run whose working dir is
+        empty. Re-queueing such a run would re-transcode from scratch and
+        then ``mark_stale`` the perfectly good DERIVED version. Here the
+        run's DERIVED output (via output_version_ids / version.run_id) is
+        located and probed against its recorded structural fingerprint —
+        intact means: mark complete, re-queue nothing, stale nothing.
+        Fingerprint-less legacy versions get the tightened probe (zarr
+        metadata + shape consistency), never a bare "directory non-empty".
+        """
+        catalog = self._catalog
+        known_outputs = set(run.output_version_ids)
+        for v in catalog.document.versions:
+            if v.id not in known_outputs and v.run_id != run.id:
+                continue
+            if (
+                v.stage.value != "derived"
+                or v.format != "zarr-v3"
+                or v.trashed
+            ):
+                continue
+            try:
+                store = Path(catalog.resolve_path(v))
+            except Exception:
+                continue
+            # Expected shape: run parameters first (the pin), then the
+            # version metadata recorded at registration (available even in
+            # the #1192 crash window). Absent → shape check is skipped.
+            expected_shape = None
+            params = getattr(run, "parameters", None)
+            if isinstance(params, dict) and params.get("shape"):
+                expected_shape = params["shape"]
+            elif isinstance(v.metadata, dict) and v.metadata.get("shape"):
+                expected_shape = v.metadata["shape"]
+            if not _store_matches_fingerprint(
+                store,
+                v.metadata.get("store_fingerprint"),
+                expected_shape=expected_shape,
+            ):
+                continue
+            self._finish_run(
+                run.id, "complete", extra={"derived_version_id": v.id}
+            )
+            logger.info(
+                "run %s already produced intact DERIVED %s; completed in "
+                "place without re-transcode",
+                run.id,
+                v.id,
+            )
+            return True
+        return False
+
+    def resume_pending(self) -> int:
+        """Resolve transcode DataRuns that stayed 'running' (crash/close).
+
+        Called on project open. A run whose DERIVED store was already
+        registered and is still intact (the #1192 crash window) is marked
+        complete in place — no re-transcode, no stale-marking. Anything
+        else is re-queued; completed stores then skip instantly via shard
+        probing and register their DERIVED version.
         """
         catalog = self._catalog
         resumed = 0
@@ -344,6 +471,9 @@ class SeismicLifecycleService:
                 run.operation == TRANSCODE_OPERATION
                 and (run.status or "").lower() == "running"
             ):
+                if self._complete_intact_derived(run):
+                    resumed += 1
+                    continue
                 for vid in list(run.input_version_ids):
                     try:
                         version = catalog.get_version(vid)
@@ -351,42 +481,12 @@ class SeismicLifecycleService:
                         continue
                     if version.trashed:
                         continue
-                    # #1192: a complete non-stale DERIVED means the crash hit
-                    # the "store moved, run not yet complete" window — adopt
-                    # it instead of re-transcoding (and never stale-mark it).
-                    if self._adopt_complete_derived(run.id, vid):
-                        continue
                     # close the orphaned run's bookkeeping; the resumed task
                     # finishes with a fresh run
                     self._finish_run(run.id, "cancelled")
                     self.start_transcode(vid)
                     resumed += 1
         return resumed
-
-    def _adopt_complete_derived(self, run_id: str, raw_version_id: str) -> bool:
-        """Adopt an intact DERIVED store for an orphaned running run.
-
-        Returns True when adoption happened (caller must not re-transcode):
-        the orphaned run is closed as cancelled and the existing DERIVED
-        registration stands untouched.
-        """
-        import json
-
-        try:
-            derived = self.derived_version_for(raw_version_id)
-            if derived is None:
-                return False
-            store = self.derived_store_path(raw_version_id)
-            if store is None:
-                return False
-            meta_path = store / "zarr.json"
-            meta = json.loads(meta_path.read_text())
-            if not isinstance(meta.get("shape"), list) or not meta["shape"]:
-                return False
-        except Exception:
-            return False
-        self._finish_run(run_id, "cancelled")
-        return True
 
     # ------------------------------------------------------------- teardown --
     def shutdown_jobs(self) -> None:
@@ -445,7 +545,11 @@ def start_attribute_job(
     """
     from geoviz_seismic import open_volume as _open_volume
     from paleo_workbench.runtime import get_scheduler
-    from paleo_workbench.seismic_attributes import VolumeAttributeJob
+    from paleo_workbench.seismic_attributes import (
+        VolumeAttributeJob,
+        attribute_halo,
+        derive_band_inlines,
+    )
 
     sched = scheduler or get_scheduler()
     version = catalog.get_version(source_version_id)
@@ -457,12 +561,30 @@ def start_attribute_job(
     life = get_lifecycle_service(catalog)
     work_root = src_store.parent / f"{src_store.name}.attr-{attribute}"
     reader = _open_volume(src_store)
-    job = VolumeAttributeJob(reader, work_root, attribute)
+    # #1146: the band size follows the ResourceGovernor's active budget —
+    # the same coupling the transcode path has — instead of a hardcoded
+    # 64-inline default that blew the per-batch RSS by an order of
+    # magnitude. The derived value is pinned in the run parameters and in
+    # the output store's banding identity (#1161).
+    try:
+        from paleo_workbench.runtime.resource_budget import active_budget
+
+        budget_bytes = active_budget().streaming_buffer_bytes
+    except Exception:
+        budget_bytes = None
+    band_inlines = derive_band_inlines(
+        tuple(reader.shape), halo=attribute_halo(attribute), budget_bytes=budget_bytes
+    )
+    job = VolumeAttributeJob(reader, work_root, attribute, band_inlines=band_inlines)
 
     run = catalog.register_run(
         f"attribute:{attribute}",
         input_version_ids=[source_version_id],
-        parameters={"source_store": str(src_store), "attribute": attribute},
+        parameters={
+            "source_store": str(src_store),
+            "attribute": attribute,
+            "band_inlines": band_inlines,
+        },
         generator="paleo_workbench.seismic_attributes",
         status="running",
     )

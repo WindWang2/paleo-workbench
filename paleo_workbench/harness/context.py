@@ -103,11 +103,12 @@ class ActionContext:
 
         Pulls from the P1 coordination singletons (SelectionContext via the
         window's public selection surface, catalog adapter, project
-        document) and grants WRITE — an app session sits behind the UI and
-        WRITE actions still go through domain services with provenance.
-        Headless/programmatic contexts start with READ+COMPUTE only.
+        document). Default permissions are READ+COMPUTE (#1186): WRITE-risk
+        actions (map export/factor-map, derived seismic stores) require an
+        explicit grant — pass ``permissions=DEFAULT_PERMISSIONS |
+        {ActionRisk.WRITE}`` for a session that should be allowed to write.
         """
-        context = cls(permissions=frozenset({ActionRisk.READ, ActionRisk.COMPUTE, ActionRisk.WRITE}))
+        context = cls(permissions=DEFAULT_PERMISSIONS)
         controller = getattr(window, "project_controller", None)
         project = getattr(controller, "project", None) if controller is not None else None
         if project is not None:

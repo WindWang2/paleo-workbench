@@ -484,44 +484,167 @@ def test_commit_guard_uses_scheduled_grid_n_and_power():
     assert all(t.parameters["grid_n"] == 24 for t in project.factor_map_tasks)
 
 
-def test_group_job_cancelled_counts_as_cancelled_not_failed(monkeypatch):
-    """#1168: a worker-side JobCancelled (even as the last future) marks
-    cancelled=True with zero failed — never 'group failed'."""
-    import paleo_workbench.workflow.factor_prepare_scheduler as sched
-
-    project = _project_with_tasks(2)
-    snap = build_prepare_snapshot(project, generation=21, method="IDW", grid_n=12)
-
-    def _boom(*args, **kwargs):
-        raise JobCancelled("user cancelled mid-group")
-
-    monkeypatch.setattr(sched, "batch_prepare_factor_maps", _boom)
-    result = run_factor_prepare_schedule(snap, workers=2)
-    assert result.cancelled is True
-    assert result.failed_count == 0
-    assert all(r.error == "cancelled" for r in result.task_results)
+# ------------------------------------------- audit #1159: late default tasks
 
 
-def test_defaults_commit_discarded_when_live_gained_real_tasks():
-    """#1159: synthetic bootstrap tasks never append into a live project
-    that already holds (user-created) tasks."""
-    empty = ProjectDocument.new("Empty")
-    snap = build_prepare_snapshot(empty, generation=30, method="IDW", grid_n=12)
+def test_commit_discards_late_defaults_when_live_project_gained_tasks(caplog):
+    """Snapshot (empty) → worker → live project populated → late defaults dropped.
+
+    Real window: workflow_controller snapshots an empty project, the background
+    worker synthesizes default tasks, and the live project receives real tasks
+    before the delayed host commit. Appending the synthetic defaults would
+    graft fake tasks onto the user's project (#1159).
+    """
+    project = ProjectDocument.new("LateDefaults")
+    snap = build_prepare_snapshot(project, generation=31, method="IDW", grid_n=12)
     assert snap.created_defaults is True
     result = run_factor_prepare_schedule(snap, workers=1)
-    assert result.task_results
+    assert result.created_default_tasks is True
+    default_ids = {r.task_id for r in result.task_results}
+    assert default_ids
 
-    live = _project_with_tasks(1)
-    live_ids_before = [t.id for t in live.factor_map_tasks]
+    # The live project is populated AFTER the snapshot, BEFORE the commit.
+    real = FactorMapTask(
+        name="real",
+        target_horizon="H1",
+        factor_type="砂地比",
+        method="IDW",
+        parameters={"sample_points": _points(8, seed=3)},
+        status="pending",
+    )
+    project.factor_map_tasks.append(real)
+
+    with caplog.at_level(
+        "WARNING", logger="paleo_workbench.workflow.factor_prepare_scheduler"
+    ):
+        discarded = commit_prepare_batch_result(
+            project, result, expected_generation=31
+        )
+    assert set(discarded) == default_ids
+    # The real task is the ONLY task left on the live project.
+    assert [t.id for t in project.factor_map_tasks] == [real.id]
+    assert any("late synthetic default" in r.message for r in caplog.records)
+
+
+def test_commit_defaults_onto_unchanged_empty_project():
+    """Normal defaults path: live project still empty → defaults commit as before."""
+    project = ProjectDocument.new("FreshDefaults")
+    snap = build_prepare_snapshot(project, generation=32, method="IDW", grid_n=12)
+    result = run_factor_prepare_schedule(snap, workers=1)
     discarded = commit_prepare_batch_result(
-        live, result, expected_generation=snap.generation
+        project, result, expected_generation=32
     )
-    assert [t.id for t in live.factor_map_tasks] == live_ids_before
-    assert set(discarded) == {r.task_id for r in result.task_results}
+    assert discarded == []
+    assert len(project.factor_map_tasks) == len(result.task_results)
+    assert all(t.status == "complete" for t in project.factor_map_tasks)
 
-    # Empty live still bootstraps (legacy behavior preserved).
-    fresh = ProjectDocument.new("Fresh")
-    commit_prepare_batch_result(
-        fresh, result, expected_generation=snap.generation
+
+# ------------------------------------------- audit #1168: group cancel vs fail
+
+
+def test_parallel_group_cancel_is_cancelled_not_failed(monkeypatch):
+    """JobCancelled in a parallel group must never be counted as failure.
+
+    The old single ``except (JobCancelled, Exception)`` recorded the cancelled
+    group as ``failed_n`` with error "group failed", and when the cancelled
+    group was the LAST one the batch-level cancelled flag was lost entirely.
+    """
+    project = _project_with_tasks(4, shared_xy=False)  # 4 distinct geometries
+    snap = build_prepare_snapshot(project, generation=33, method="IDW", grid_n=12)
+    token = CancellationToken()
+
+    def cancelling_batch(sub, **kwargs):
+        token.cancel()
+        raise JobCancelled()
+
+    monkeypatch.setattr(
+        "paleo_workbench.workflow.factor_prepare_scheduler.batch_prepare_factor_maps",
+        cancelling_batch,
     )
-    assert len(fresh.factor_map_tasks) == len(result.task_results)
+    result = run_factor_prepare_schedule(
+        snap, workers=2, cancellation_token=token
+    )
+    assert result.cancelled is True
+    assert result.failed_count == 0
+    assert result.cancelled_count == result.dirty_count
+    for item in result.task_results:
+        if not item.reused:
+            assert item.error == "cancelled"
+            assert "group failed" not in str(item.error)
+
+
+def test_parallel_cancel_after_one_group_keeps_failed_at_zero(monkeypatch):
+    """One healthy group + one cancelled group: cancelled flag survives, no fails."""
+    project = ProjectDocument.new("MixedCancel")
+    project.stratigraphy.target_horizon = "H1"
+    base = _points(12, seed=1)
+    # Group A: two tasks sharing geometry.
+    for i in range(2):
+        pts = [{**p, "value": float(p["value"]) + 0.01 * i} for p in base]
+        project.factor_map_tasks.append(
+            FactorMapTask(
+                name=f"A{i}",
+                target_horizon="H1",
+                factor_type=f"ta{i}",
+                method="IDW",
+                parameters={"sample_points": pts},
+                status="pending",
+            )
+        )
+    # Group B: distinct geometry, cancelled by the stub.
+    for i in range(2):
+        project.factor_map_tasks.append(
+            FactorMapTask(
+                name=f"B{i}",
+                target_horizon="H1",
+                factor_type=f"tb{i}",
+                method="IDW",
+                parameters={"sample_points": _points(12, seed=50 + i)},
+                status="pending",
+            )
+        )
+    snap = build_prepare_snapshot(project, generation=34, method="IDW", grid_n=12)
+    token = CancellationToken()
+    real_batch = batch_prepare_factor_maps
+
+    def batch_or_cancel(sub, **kwargs):
+        names = {t.name for t in sub.factor_map_tasks}
+        if any(n.startswith("B") for n in names):
+            token.cancel()
+            raise JobCancelled()
+        return real_batch(sub, **kwargs)
+
+    monkeypatch.setattr(
+        "paleo_workbench.workflow.factor_prepare_scheduler.batch_prepare_factor_maps",
+        batch_or_cancel,
+    )
+    result = run_factor_prepare_schedule(
+        snap, workers=2, cancellation_token=token
+    )
+    assert result.cancelled is True
+    assert result.failed_count == 0
+    name_by_id = {t.id: t.name for t in project.factor_map_tasks}
+    for item in result.task_results:
+        if item.reused or name_by_id.get(item.task_id, "").startswith("A"):
+            continue
+        assert item.error == "cancelled"
+    assert result.cancelled_count >= 2
+
+
+def test_serial_cancel_mid_batch_marks_cancelled_count(monkeypatch):
+    """Serial path: cancellation marks every unexecuted dirty task cancelled."""
+    project = _project_with_tasks(2, shared_xy=False)
+    snap = build_prepare_snapshot(project, generation=35, method="IDW", grid_n=12)
+
+    def cancelling_batch(sub, **kwargs):
+        raise JobCancelled()
+
+    monkeypatch.setattr(
+        "paleo_workbench.workflow.factor_prepare_scheduler.batch_prepare_factor_maps",
+        cancelling_batch,
+    )
+    result = run_factor_prepare_schedule(snap, workers=1)
+    assert result.cancelled is True
+    assert result.failed_count == 0
+    assert result.cancelled_count == result.dirty_count == 2
+    assert all(item.error == "cancelled" for item in result.task_results)

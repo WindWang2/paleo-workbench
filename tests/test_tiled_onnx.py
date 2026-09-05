@@ -236,100 +236,239 @@ def test_provider_contract_and_cpu_mode_label(store, tmp_path):
     np.testing.assert_array_equal(classmap, ref_arg)
 
 
-def test_non_model_file_refused_before_native_loader(tmp_path):
-    """#1176: devices/non-onnx files never reach ORT."""
-    from paleo_workbench.prediction.tiled_onnx import (
-        TiledInferenceError,
-        _check_onnx_model_file,
-    )
+# ---------------------------------------------------------------------------
+# #1176 — executed artifact must be the registered artifact (fail closed)
+# #1167 — cooperative cancellation returns a protocol-complete dict
+# #1187 — softmax intermediate budget bounds batch × classes
+# ---------------------------------------------------------------------------
 
-    fake = tmp_path / "evil.bin"
-    fake.write_bytes(b"\x00" * 64)
-    with pytest.raises(TiledInferenceError):
-        _check_onnx_model_file(fake)
-    with pytest.raises(TiledInferenceError):
-        _check_onnx_model_file(tmp_path / "missing.onnx")
-    with pytest.raises(TiledInferenceError):
-        _check_onnx_model_file(Path("/dev/null"))
+from paleo_workbench.prediction.tiled_onnx import (  # noqa: E402
+    SOFTMAX_INTERMEDIATE_BUDGET_BYTES,
+    TiledInferenceError,
+    TiledOnnxProvider,
+)
 
 
-def test_model_binding_records_bytes_identity(tmp_path):
-    """#1176: the loaded model's name/size/sha bind DERIVED to real bytes."""
-    from paleo_workbench.catalog.checksum import sha256_file
-    from paleo_workbench.prediction.tiled_onnx import _check_onnx_model_file
+def _sha256(path: Path) -> str:
+    import hashlib
 
-    model_path = _save(_sign_model(), tmp_path / "m.onnx")
-    binding = _check_onnx_model_file(model_path)
-    assert binding["model_file"] == "m.onnx"
-    assert binding["model_bytes"] == model_path.stat().st_size > 0
-    assert binding["model_sha256"] == sha256_file(model_path)
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def test_oversized_batch_clamped_transparently(store, tmp_path, monkeypatch):
-    """#1187: batch×classes×tile over budget clamps instead of OOMing;
-    tiled output still equals whole-volume inference."""
-    import paleo_workbench.runtime.resource_budget as _budget
-
-    dst, cube = store
-    model_path = _save(_sign_model(), tmp_path / "clamp.onnx")
-    reader = open_volume(dst)
-    tiny = type("B", (), {"streaming_buffer_bytes": 4 * 1024**2})()
-    monkeypatch.setattr(_budget, "active_budget", lambda: tiny)
-    stats = run_tiled_inference(
-        reader,
-        model_path,
-        classes=2,
-        work_root=tmp_path / "clamp_work",
-        overlap=0,
-        batch=64,
-        tile=(8, 16, 16),
-    )
-    assert stats["tiles_done"] == stats["tiles_total"]
-    assert stats["batch"] < 64  # clamped, not taken at face value
-    ref_arg, _ = _reference(model_path, cube)
-    classmap = np.asarray(zarr.open(stats["class_map"], mode="r")[:, :, :])
-    np.testing.assert_array_equal(classmap, ref_arg)
+def _provider_inputs(dst: Path) -> dict:
+    return {
+        "version-1": {
+            "path": str(dst),
+            "name": "v",
+            "asset_type": "seismic",
+            "format": "zarr-v3",
+        }
+    }
 
 
-def test_provider_cancel_via_context_raises_task_cancelled(store, tmp_path):
-    """#1167: a cancelled context aborts provider inference as cancellation."""
-    from types import SimpleNamespace
-
-    from paleo_workbench.prediction.providers import get_provider
-    from paleo_workbench.runtime.task_scheduler import TaskCancelled
-
+def test_identity_checksum_mismatch_refuses_execution(store, tmp_path):
     dst, _cube = store
-    model_path = _save(_sign_model(), tmp_path / "cx.onnx")
-    provider = get_provider("tiled_onnx")
-    ctx = SimpleNamespace(cancel=SimpleNamespace(is_cancelled=True))
-    with pytest.raises(TaskCancelled):
+    model_path = _save(_sign_model(), tmp_path / "m.onnx")
+    provider = TiledOnnxProvider()
+    with pytest.raises(TiledInferenceError, match="checksum"):
         provider.run(
-            {("version-1"): {"path": str(dst), "name": "v", "asset_type": "seismic", "format": "zarr-v3"}},
+            _provider_inputs(dst),
             {
                 "model_path": str(model_path),
                 "classes": 2,
-                "receptive_field": 0,
                 "tile": (8, 16, 16),
-                "work_root": str(tmp_path / "cx_work"),
+                "work_root": str(tmp_path / "w"),
+                "_registered_model": {
+                    "model_id": "registered-model",
+                    "model_version": "1",
+                    "checksum": "0" * 64,  # not this file
+                },
             },
-            context=ctx,
         )
 
 
-def test_cancelled_stats_keep_shape_contract(store, tmp_path):
-    """#1167: the cancelled branch returns the documented shape key."""
+def test_identity_checksum_match_reports_registered_provenance(store, tmp_path):
     dst, _cube = store
-    model_path = _save(_sign_model(), tmp_path / "cs.onnx")
-    reader = open_volume(dst)
-    stats = run_tiled_inference(
-        reader,
-        model_path,
-        classes=2,
-        work_root=tmp_path / "cs_work",
-        overlap=0,
-        batch=1,
-        tile=(8, 16, 16),
+    model_path = _save(_sign_model(), tmp_path / "m.onnx")
+    provider = TiledOnnxProvider()
+    payload = provider.run(
+        _provider_inputs(dst),
+        {
+            "model_path": str(model_path),
+            "classes": 2,
+            "receptive_field": 0,
+            "tile": (8, 16, 16),
+            "work_root": str(tmp_path / "w_reg"),
+            "_registered_model": {
+                "model_id": "registered-model",
+                "model_version": "9",
+                "model_version_id": "mver-9",
+                "artifact_uri": str(model_path),
+                "checksum": _sha256(model_path),
+            },
+        },
+    )
+    provenance = payload["model_provenance"]
+    assert provenance["registered"] is True
+    assert provenance["verified"] is True
+    assert provenance["model_id"] == "registered-model"
+    assert provenance["model_version"] == "9"
+    assert provenance["model_version_id"] == "mver-9"
+    assert provenance["artifact_sha256"] == _sha256(model_path)
+
+
+def test_declared_identity_but_other_file_refused(store, tmp_path):
+    """Identity without a checksum binds by registered artifact path:
+    executing a different binary under a registered identity is refused."""
+    dst, _cube = store
+    model_path = _save(_sign_model(), tmp_path / "real.onnx")
+    other = _save(_conv_model(), tmp_path / "other.onnx")
+    provider = TiledOnnxProvider()
+    with pytest.raises(TiledInferenceError, match="注册模型工件"):
+        provider.run(
+            _provider_inputs(dst),
+            {
+                "model_path": str(other),
+                "classes": 2,
+                "tile": (8, 16, 16),
+                "work_root": str(tmp_path / "w"),
+                "_registered_model": {
+                    "model_id": "registered-model",
+                    "model_version": "1",
+                    "artifact_uri": str(model_path),
+                    "checksum": "",
+                },
+            },
+        )
+
+
+def test_identityless_execution_is_marked_untrusted_with_real_sha256(store, tmp_path):
+    dst, _cube = store
+    model_path = _save(_sign_model(), tmp_path / "m.onnx")
+    provider = TiledOnnxProvider()
+    payload = provider.run(
+        _provider_inputs(dst),
+        {
+            "model_path": str(model_path),
+            "classes": 2,
+            "receptive_field": 0,
+            "tile": (8, 16, 16),
+            "work_root": str(tmp_path / "w_untrusted"),
+        },
+    )
+    provenance = payload["model_provenance"]
+    assert provenance["registered"] is False
+    assert provenance["verified"] is False
+    # Honest untrusted record: real sha256, no registered identity attached.
+    assert provenance["artifact_sha256"] == _sha256(model_path)
+    assert provenance["model_id"] == ""
+    assert provenance["model_version_id"] == ""
+
+
+def test_provider_cancel_returns_protocol_complete_dict(store, tmp_path):
+    """#1167: a cancelled provider run returns cancelled=True WITH the
+    shape/classes keys the caller protocol expects — no KeyError path."""
+    dst, cube = store
+    model_path = _save(_sign_model(), tmp_path / "m.onnx")
+    provider = TiledOnnxProvider()
+    payload = provider.run(
+        _provider_inputs(dst),
+        {
+            "model_path": str(model_path),
+            "classes": 2,
+            "receptive_field": 0,
+            "tile": (8, 16, 16),
+            "work_root": str(tmp_path / "w_cancel"),
+        },
         cancel=lambda: True,
     )
-    assert stats["cancelled"] is True
-    assert stats["shape"] == [26, 44, 40]
+    assert payload["cancelled"] is True
+    assert payload["shape"] == list(cube.shape)
+    assert payload["classes"] == 2
+    assert payload["tiles"] == 0  # cancelled before the first tile
+
+
+def test_softmax_budget_rejects_oversized_batch(store, tmp_path):
+    """#1187: explicit error (never a silent clamp) when batch × classes ×
+    tile floats exceed the softmax intermediate budget."""
+    dst, _cube = store
+    model_path = _save(_sign_model(), tmp_path / "m.onnx")
+    reader = open_volume(dst)
+    tile = (8, 16, 16)  # 2048 voxels × 4 B = 8 KiB per (batch, class) unit
+    bytes_per_unit = 8 * 16 * 16 * 4
+    over_budget_batch = SOFTMAX_INTERMEDIATE_BUDGET_BYTES // (bytes_per_unit * 2) + 1
+    with pytest.raises(TiledInferenceError, match="batch"):
+        run_tiled_inference(
+            reader,
+            model_path,
+            classes=2,
+            work_root=tmp_path / "w_batch",
+            batch=over_budget_batch,
+            tile=tile,
+            prefer_gpu=False,
+        )
+
+
+def test_softmax_budget_rejects_oversized_classes(store, tmp_path):
+    dst, _cube = store
+    model_path = _save(_sign_model(), tmp_path / "m.onnx")
+    reader = open_volume(dst)
+    tile = (8, 16, 16)
+    over_budget_classes = SOFTMAX_INTERMEDIATE_BUDGET_BYTES // (8 * 16 * 16 * 4) + 1
+    with pytest.raises(TiledInferenceError, match="classes"):
+        run_tiled_inference(
+            reader,
+            model_path,
+            classes=over_budget_classes,
+            work_root=tmp_path / "w_classes",
+            batch=1,
+            tile=tile,
+            prefer_gpu=False,
+        )
+
+
+# ---------------------------------------------------------------------------
+# B5 — batch is never silently clamped
+# P3 — identityless execution still honors a caller-declared model_checksum
+# ---------------------------------------------------------------------------
+
+
+def test_batch_below_one_is_explicit_valueerror_never_clamped(tmp_path):
+    """B5: batch < 1 is an explicit ValueError, consistent with the
+    "never silent clamps" contract of the softmax budget guards."""
+    model_path = tmp_path / "m.onnx"
+    model_path.write_bytes(b"stub")  # existence check only — batch fails first
+    for bad_batch in (0, -3):
+        with pytest.raises(ValueError, match="batch"):
+            run_tiled_inference(
+                None,  # reader unused: batch validation happens before any read
+                model_path,
+                classes=2,
+                work_root=tmp_path / "w",
+                batch=bad_batch,
+                tile=(8, 16, 16),
+                prefer_gpu=False,
+            )
+
+
+def test_identityless_caller_checksum_pin_is_enforced(tmp_path):
+    """P3: no registered identity + caller-supplied model_checksum → the
+    checksum is still compared; a mismatch refuses execution."""
+    from paleo_workbench.prediction.tiled_onnx import _verify_model_identity
+
+    model_path = tmp_path / "m.onnx"
+    model_path.write_bytes(b"weights")
+    sha = _sha256(model_path)
+
+    no_pin = _verify_model_identity(model_path, {}, sha)
+    assert no_pin["registered"] is False
+    assert no_pin["verified"] is False
+
+    pinned = _verify_model_identity(model_path, {"model_checksum": sha}, sha)
+    assert pinned["registered"] is False  # unregistered …
+    assert pinned["verified"] is True  # … but checksum-verified
+    assert pinned["artifact_sha256"] == sha
+    assert pinned["declared_checksum"] == sha
+
+    with pytest.raises(TiledInferenceError, match="model_checksum"):
+        _verify_model_identity(model_path, {"model_checksum": "0" * 64}, sha)

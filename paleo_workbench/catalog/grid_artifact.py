@@ -25,11 +25,13 @@ import json
 import math
 import os
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from paleo_workbench.catalog.storage import fsync_dir
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult, GridStatistics
 
 __all__ = [
@@ -113,7 +115,10 @@ def write_grid_artifact(
             # Uncompressed: interactive save/reopen is CPU-bound on compress for
             # smooth float32 grids; size trade-off measured in Stage-3 bench.
             np.savez(fh, **arrays)
-        tmp.replace(target)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, target)
+        fsync_dir(dest)
     except Exception:
         if tmp.exists():
             tmp.unlink()

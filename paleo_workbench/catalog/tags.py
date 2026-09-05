@@ -7,8 +7,83 @@ methods — the PUBLIC API of ``DataCatalogService`` stays identical.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from paleo_workbench.catalog.db import DirtySet
 from paleo_workbench.catalog.models import CatalogError, Tag, normalize_tag_name
+
+
+class _TagJournal:
+    """Lazy rollback journal for tag mutations (#1182).
+
+    The old up-front ``_usage_snapshot`` deep-copied the whole tag list and
+    BOTH association maps on every mutation — O(tags + associations) paid on
+    the success path too. The journal records only the entries a mutator
+    actually touches (prior association lists, removed tag positions, tag
+    field values); ``rollback()`` replays it to restore the exact pre-call
+    state. Success pays nothing beyond the per-mutation bookkeeping below.
+    """
+
+    __slots__ = ("_document", "_lists", "_removed_tags", "_created_tags", "_fields")
+
+    def __init__(self, document: Any) -> None:
+        self._document = document
+        # (attr, key) -> prior list, or None when the key did not exist yet
+        self._lists: dict[tuple[str, str], list[str] | None] = {}
+        # (index-at-removal, tag) pairs; rollback re-inserts in reverse order
+        self._removed_tags: list[tuple[int, Tag]] = []
+        # Entities CREATED during the mutation; rollback removes them again
+        self._created_tags: list[Tag] = []
+        # (tag, field, prior value) triples
+        self._fields: list[tuple[Tag, str, Any]] = []
+
+    def record_list(self, attr: str, key: str) -> None:
+        """Capture the prior association list for *key* (first capture wins)."""
+        if (attr, key) in self._lists:
+            return
+        mapping = getattr(self._document, attr)
+        self._lists[(attr, key)] = (
+            None if key not in mapping else list(mapping[key])
+        )
+
+    def record_tag_field(self, tag: Tag, field: str) -> None:
+        self._fields.append((tag, field, getattr(tag, field)))
+
+    def record_tag_removed(self, tag: Tag) -> None:
+        self._removed_tags.append((self._document.tags.index(tag), tag))
+
+    def record_tag_created(self, tag: Tag) -> None:
+        """Record an entity appended during the mutation (rollback un-appends)."""
+        self._created_tags.append(tag)
+
+    def drop_empty_keys(self) -> None:
+        """``_drop_empty_associations`` with each deleted key journaled."""
+        for attr in ("asset_tags", "version_tags"):
+            mapping = getattr(self._document, attr)
+            for key in [k for k, ids in mapping.items() if not ids]:
+                self.record_list(attr, key)
+                del mapping[key]
+
+    def rollback(self) -> None:
+        for tag, field, value in reversed(self._fields):
+            setattr(tag, field, value)
+        # Reverse removal order: each captured index is a position in the
+        # list as it stood at that removal, so re-inserting in reverse
+        # reproduces the original arrangement exactly.
+        for index, tag in reversed(self._removed_tags):
+            self._document.tags.insert(index, tag)
+        for tag in reversed(self._created_tags):
+            tags = self._document.tags
+            for position, existing in enumerate(tags):
+                if existing is tag:
+                    del tags[position]
+                    break
+        for (attr, key), prior in self._lists.items():
+            mapping = getattr(self._document, attr)
+            if prior is None:
+                mapping.pop(key, None)
+            else:
+                mapping[key] = prior
 
 
 def _tag_by_name(service, name: str) -> Tag | None:
@@ -17,31 +92,6 @@ def _tag_by_name(service, name: str) -> Tag | None:
         if tag.name == normalized:
             return tag
     return None
-
-
-def _drop_empty_associations(document) -> list[tuple[str, str]]:
-    """Remove association keys whose id list became empty.
-
-    The SQLite store represents associations as rows: an empty key has no
-    representation, so keeping it in memory would make reload ≠ memory
-    (#1027). The empty key carries no information (``.get(id, [])`` callers
-    are unaffected).
-
-    Returns pruned ``(mapping_name, key)`` pairs so rollback can restore
-    them exactly (#1182: success paths must not pay a full snapshot).
-    """
-    pruned: list[tuple[str, str]] = []
-    for attr in ("asset_tags", "version_tags"):
-        mapping = getattr(document, attr)
-        for key in [k for k, ids in mapping.items() if not ids]:
-            del mapping[key]
-            pruned.append((attr, key))
-    return pruned
-
-
-def _restore_pruned(document, pruned: list[tuple[str, str]]) -> None:
-    for attr, key in pruned:
-        getattr(document, attr).setdefault(key, [])
 
 
 def add_tag(
@@ -115,7 +165,7 @@ def remove_tag(
 ) -> None:
     """Remove one tag association; unknown tag name is a no-op.
 
-    Snapshot-rollback on a failed canonical save (same discipline as the
+    Journaled rollback on a failed canonical save (same discipline as the
     other tag mutators): a failed removal must not leave a half-applied
     association in memory while the disk still holds the old state.
     """
@@ -123,18 +173,19 @@ def remove_tag(
         tag = _tag_by_name(service, name)
         if tag is None:
             return
-        # #1182: single-owner inverse rollback instead of a full snapshot.
-        removed_asset = removed_version = False
-        pruned: list[tuple[str, str]] = []
+        journal = _TagJournal(service.document)
         try:
+            changed = False
             if asset_id is not None and tag.id in service.document.asset_tags.get(asset_id, []):
+                journal.record_list("asset_tags", asset_id)
                 service.document.asset_tags[asset_id].remove(tag.id)
-                removed_asset = True
+                changed = True
             if version_id is not None and tag.id in service.document.version_tags.get(version_id, []):
+                journal.record_list("version_tags", version_id)
                 service.document.version_tags[version_id].remove(tag.id)
-                removed_version = True
-            if removed_asset or removed_version:
-                pruned = _drop_empty_associations(service.document)
+                changed = True
+            if changed:
+                journal.drop_empty_keys()
                 dirty = DirtySet()
                 if asset_id is not None:
                     dirty.mark_asset_tags(asset_id)
@@ -142,15 +193,7 @@ def remove_tag(
                     dirty.mark_version_tags(version_id)
                 service._save(dirty)
         except Exception:
-            if removed_asset:
-                ids = service.document.asset_tags.setdefault(asset_id, [])
-                if tag.id not in ids:
-                    ids.append(tag.id)
-            if removed_version:
-                ids = service.document.version_tags.setdefault(version_id, [])
-                if tag.id not in ids:
-                    ids.append(tag.id)
-            _restore_pruned(service.document, pruned)
+            journal.rollback()
             raise
 
 
@@ -178,15 +221,14 @@ def rename_tag(
             raise CatalogError("Empty tag name")
         existing = _tag_by_name(service, normalized_new)
         if existing is not None and existing.id == tag.id:
-            # #1182: display-name-only change; restore the one string on
-            # failure — no snapshot needed.
-            old_display = tag.display_name
+            journal = _TagJournal(service.document)
             try:
+                journal.record_tag_field(tag, "display_name")
                 tag.display_name = " ".join(str(new_name).split())
                 service._save(DirtySet(tags={tag.id: None}))
                 return tag
             except Exception:
-                tag.display_name = old_display
+                journal.rollback()
                 raise
         if existing is not None:
             if on_collision == "error":
@@ -194,66 +236,57 @@ def rename_tag(
                     f"Tag '{normalized_new}' already exists; rename would merge"
                 )
             return merge_tag_into(service, tag, existing)
-        # #1182: the string restore below is the whole rollback.
-        old_name_value, old_display = tag.name, tag.display_name
+        journal = _TagJournal(service.document)
         try:
+            journal.record_tag_field(tag, "name")
+            journal.record_tag_field(tag, "display_name")
             tag.name = normalized_new
             tag.display_name = " ".join(str(new_name).split())
             service._save(DirtySet(tags={tag.id: None}))
             return tag
         except Exception:
-            tag.name, tag.display_name = old_name_value, old_display
+            journal.rollback()
             raise
 
 
 def merge_tag_into(service, source: Tag, target: Tag) -> Tag:
     """Re-point every association from *source* at *target* and drop *source*.
 
-    Snapshot-rollback: a failed canonical save restores the pre-merge state so
-    a "failed" merge can never be silently persisted by a later write.
+    Journaled rollback: a failed canonical save restores the pre-merge state
+    so a "failed" merge can never be silently persisted by a later write.
     """
-    # #1182: pre-image slices for touched owners only (reads are O(all) but
-    # allocate O(touched)), plus the source entity index — never a full copy.
-    doc = service.document
-    touched_assets = [o for o, ids in doc.asset_tags.items() if source.id in ids]
-    touched_versions = [o for o, ids in doc.version_tags.items() if source.id in ids]
-    slices_a = {o: list(doc.asset_tags[o]) for o in touched_assets}
-    slices_v = {o: list(doc.version_tags[o]) for o in touched_versions}
+    journal = _TagJournal(service.document)
+    touched_assets: dict[str, None] = {}
+    touched_versions: dict[str, None] = {}
     try:
-        source_index = doc.tags.index(source)
-    except ValueError:
-        source_index = None
-    pruned: list[tuple[str, str]] = []
-    try:
-        for owner in touched_assets:
-            ids = doc.asset_tags[owner]
-            ids[:] = [i for i in ids if i != source.id]
-            if target.id not in ids:
-                ids.append(target.id)
-        for owner in touched_versions:
-            ids = doc.version_tags[owner]
-            ids[:] = [i for i in ids if i != source.id]
-            if target.id not in ids:
-                ids.append(target.id)
-        if source in doc.tags:
-            doc.tags.remove(source)
-        pruned = _drop_empty_associations(doc)
+        for owner, ids in service.document.asset_tags.items():
+            if source.id in ids:
+                touched_assets[owner] = None
+                journal.record_list("asset_tags", owner)
+                ids[:] = [i for i in ids if i != source.id]
+                if target.id not in ids:
+                    ids.append(target.id)
+        for owner, ids in service.document.version_tags.items():
+            if source.id in ids:
+                touched_versions[owner] = None
+                journal.record_list("version_tags", owner)
+                ids[:] = [i for i in ids if i != source.id]
+                if target.id not in ids:
+                    ids.append(target.id)
+        if source in service.document.tags:
+            journal.record_tag_removed(source)
+            service.document.tags.remove(source)
+        journal.drop_empty_keys()
         service._save(
             DirtySet(
                 tags={source.id, target.id},
-                asset_tags=dict.fromkeys(touched_assets),
-                version_tags=dict.fromkeys(touched_versions),
+                asset_tags=touched_assets,
+                version_tags=touched_versions,
             )
         )
         return target
     except Exception:
-        for owner, ids in slices_a.items():
-            doc.asset_tags[owner] = ids
-        for owner, ids in slices_v.items():
-            doc.version_tags[owner] = ids
-        _restore_pruned(doc, pruned)
-        if source_index is not None and source not in doc.tags:
-            doc.tags.insert(min(source_index, len(doc.tags)), source)
+        journal.rollback()
         raise
 
 
@@ -323,33 +356,35 @@ def bulk_add_tag(
             service._asset_or_raise(asset_id)
         for version_id in version_ids:
             service._version_or_raise(version_id)
-        # #1182: pre-image slices for the call's owners only (bounded by
-        # the call, never the catalog) + created-tag tracking.
-        doc = service.document
-        had_a = {o: o in doc.asset_tags for o in asset_ids}
-        had_v = {o: o in doc.version_tags for o in version_ids}
-        slices_a = {o: list(doc.asset_tags.get(o, [])) for o in asset_ids}
-        slices_v = {o: list(doc.version_tags.get(o, [])) for o in version_ids}
-        tag = None
-        created = False
+        journal = _TagJournal(service.document)
         try:
             tag = _tag_by_name(service, normalized)
             changed = False
+            created = False
             if tag is None:
                 tag = Tag(name=normalized, display_name=" ".join(str(name).split()))
-                doc.tags.append(tag)
+                service.document.tags.append(tag)
+                # A failed save must un-create the entity again.
+                journal.record_tag_created(tag)
                 created = True
                 changed = True
             for asset_id in asset_ids:
-                ids = doc.asset_tags.setdefault(asset_id, [])
-                if tag.id not in ids:
-                    ids.append(tag.id)
-                    changed = True
+                ids = service.document.asset_tags.get(asset_id)
+                if ids is None or tag.id not in ids:
+                    # Capture BEFORE setdefault can create the key.
+                    journal.record_list("asset_tags", asset_id)
+                    ids = service.document.asset_tags.setdefault(asset_id, [])
+                    if tag.id not in ids:
+                        ids.append(tag.id)
+                        changed = True
             for version_id in version_ids:
-                ids = doc.version_tags.setdefault(version_id, [])
-                if tag.id not in ids:
-                    ids.append(tag.id)
-                    changed = True
+                ids = service.document.version_tags.get(version_id)
+                if ids is None or tag.id not in ids:
+                    journal.record_list("version_tags", version_id)
+                    ids = service.document.version_tags.setdefault(version_id, [])
+                    if tag.id not in ids:
+                        ids.append(tag.id)
+                        changed = True
             if changed:
                 service._save(
                     DirtySet(
@@ -360,18 +395,7 @@ def bulk_add_tag(
                 )
             return tag
         except Exception:
-            for owner, ids in slices_a.items():
-                if had_a[owner]:
-                    doc.asset_tags[owner] = ids
-                else:
-                    doc.asset_tags.pop(owner, None)
-            for owner, ids in slices_v.items():
-                if had_v[owner]:
-                    doc.version_tags[owner] = ids
-                else:
-                    doc.version_tags.pop(owner, None)
-            if created and tag is not None and tag in doc.tags:
-                doc.tags.remove(tag)
+            journal.rollback()
             raise
 
 
@@ -395,25 +419,23 @@ def bulk_remove_tag(
         tag = _tag_by_name(service, name)
         if tag is None:
             return
-        # #1182: pre-image slices for the call's owners only.
-        doc = service.document
-        slices_a = {o: list(doc.asset_tags.get(o, [])) for o in asset_ids}
-        slices_v = {o: list(doc.version_tags.get(o, [])) for o in version_ids}
-        pruned: list[tuple[str, str]] = []
+        journal = _TagJournal(service.document)
         try:
             changed = False
             for asset_id in asset_ids:
-                ids = doc.asset_tags.get(asset_id)
+                ids = service.document.asset_tags.get(asset_id)
                 if ids and tag.id in ids:
+                    journal.record_list("asset_tags", asset_id)
                     ids.remove(tag.id)
                     changed = True
             for version_id in version_ids:
-                ids = doc.version_tags.get(version_id)
+                ids = service.document.version_tags.get(version_id)
                 if ids and tag.id in ids:
+                    journal.record_list("version_tags", version_id)
                     ids.remove(tag.id)
                     changed = True
             if changed:
-                pruned = _drop_empty_associations(doc)
+                journal.drop_empty_keys()
                 service._save(
                     DirtySet(
                         asset_tags=dict.fromkeys(asset_ids),
@@ -421,17 +443,7 @@ def bulk_remove_tag(
                     )
                 )
         except Exception:
-            for owner, ids in slices_a.items():
-                if ids:
-                    doc.asset_tags[owner] = ids
-                else:
-                    doc.asset_tags.pop(owner, None)
-            for owner, ids in slices_v.items():
-                if ids:
-                    doc.version_tags[owner] = ids
-                else:
-                    doc.version_tags.pop(owner, None)
-            _restore_pruned(doc, pruned)
+            journal.rollback()
             raise
 
 
@@ -492,15 +504,14 @@ def delete_unused_tag(service, name: str) -> Tag:
                 f"Tag '{tag.name}' is still in use "
                 f"({usage.get('assets', 0)} assets, {usage.get('versions', 0)} versions)"
             )
-        # #1182: single-entity removal — re-insert at the captured index.
-        index = service.document.tags.index(tag)
+        journal = _TagJournal(service.document)
         try:
+            journal.record_tag_removed(tag)
             service.document.tags.remove(tag)
             service._save(DirtySet(tags={tag.id: None}))
             return tag
         except Exception:
-            if tag not in service.document.tags:
-                service.document.tags.insert(min(index, len(service.document.tags)), tag)
+            journal.rollback()
             raise
 
 
@@ -519,19 +530,15 @@ def prune_unused_tags(service) -> list[Tag]:
         ]
         if not unused:
             return []
-        # #1182: re-insert survivors at captured indices on failure.
-        indexed = sorted(
-            (service.document.tags.index(tag), tag) for tag in unused
-        )
+        journal = _TagJournal(service.document)
         try:
             for tag in unused:
+                journal.record_tag_removed(tag)
                 service.document.tags.remove(tag)
             service._save(DirtySet(tags=dict.fromkeys(t.id for t in unused)))
             return unused
         except Exception:
-            for index, tag in indexed:
-                if tag not in service.document.tags:
-                    service.document.tags.insert(min(index, len(service.document.tags)), tag)
+            journal.rollback()
             raise
 
 
@@ -540,7 +547,13 @@ def find_assets_by_tag(service, name: str) -> list[str]:
     if tag is None:
         return []
     try:
-        if service.index_revision() != service.document.catalog_revision:
+        # During batch_save the SQLite store lags the document by design
+        # (rows commit at batch exit) while the revision stays aligned
+        # (#1139) — the document scan is the authoritative view there.
+        if (
+            service._batch_depth
+            or service.index_revision() != service.document.catalog_revision
+        ):
             raise RuntimeError("index stale — falling back to scan")
         return sorted(service._index.assets_for_tag(tag.name))
     except Exception:
@@ -556,7 +569,10 @@ def find_versions_by_tag(service, name: str) -> list[str]:
     if tag is None:
         return []
     try:
-        if service.index_revision() != service.document.catalog_revision:
+        if (
+            service._batch_depth
+            or service.index_revision() != service.document.catalog_revision
+        ):
             raise RuntimeError("index stale — falling back to scan")
         return sorted(service._index.versions_for_tag(tag.name))
     except Exception:

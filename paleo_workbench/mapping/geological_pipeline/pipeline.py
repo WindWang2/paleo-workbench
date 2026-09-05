@@ -41,6 +41,23 @@ from paleo_workbench.mapping.map_styles import (
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 
 
+logger = logging.getLogger(__name__)
+
+
+# Coordinate key families (audit #1150): each entry is one CRS-consistent
+# (family, x_key, y_key) pair. A record's (x, y) must come from ONE family —
+# never cross-paired (x from lng with y from project_y mixes two CRSs).
+# ``lng``/``lat`` and ``longitude``/``latitude`` share the family name because
+# they express the same geographic CRS. Priority: projected project_* first.
+_COORDINATE_KEY_FAMILIES: tuple[tuple[str, str, str], ...] = (
+    ("project", "project_x", "project_y"),
+    ("xy", "x", "y"),
+    ("lnglat", "lng", "lat"),
+    ("lnglat", "longitude", "latitude"),
+    ("surface", "surface_x", "surface_y"),
+)
+
+
 # Factor property defaults (units and recommended color ramps)
 FACTOR_DEFAULTS = {
     "孔隙度": {"unit": "%", "color_ramp": "porosity"},
@@ -159,30 +176,49 @@ class GeologicalMappingPipeline:
         aliases = _find_matching_aliases(factor_name)
 
         points: list[GeologicalFactor] = []
+        skipped_missing_coordinates = 0
+        skipped_invalid_coordinates = 0
+        coord_families_used: dict[str, int] = {}
         for rec in records:
             if not isinstance(rec, Mapping):
                 continue
-            # Extract coordinates (#1150: presence, not truthiness — 0.0 is
-            # a legal coordinate, not a missing value).
-            x = _first_present(rec, "x", "lng", "longitude", "project_x", "surface_x")
-            y = _first_present(rec, "y", "lat", "latitude", "project_y", "surface_y")
+            # Extract coordinates (audit #1150): pick ONE CRS-consistent key
+            # family (project_* first). Presence is tested with ``is not None``
+            # — 0.0 is a legal coordinate and must never be treated as missing.
+            # If the chosen family (or every family) lacks one half, the record
+            # is skipped and counted instead of cross-pairing keys.
+            x: Any = None
+            y: Any = None
+            family_used: str | None = None
+            for family, key_x, key_y in _COORDINATE_KEY_FAMILIES:
+                vx = rec.get(key_x)
+                vy = rec.get(key_y)
+                if vx is not None and vy is not None:
+                    x, y = vx, vy
+                    family_used = family
+                    break
             if x is None or y is None:
                 coords = rec.get("coordinates")
                 if isinstance(coords, (list, tuple)) and len(coords) >= 2:
                     x, y = coords[0], coords[1]
+                    family_used = "coordinates"
 
             if x is None or y is None:
                 logger.warning(
                     "factor record for well %r has no usable coordinates; skipped",
                     rec.get("well_id", rec.get("name", "?")),
                 )
+                skipped_missing_coordinates += 1
                 continue
 
             try:
                 fx = float(x)
                 fy = float(y)
             except (TypeError, ValueError):
+                skipped_invalid_coordinates += 1
                 continue
+            if family_used is not None:
+                coord_families_used[family_used] = coord_families_used.get(family_used, 0) + 1
 
             # Extract factor value
             val = None
@@ -292,12 +328,29 @@ class GeologicalMappingPipeline:
                 )
             )
 
+        # Coordinate diagnostics (audit #1150): mixed key families within one
+        # batch usually mean two CRSs were silently merged — surface it.
+        diagnostics: dict[str, Any] = {
+            "coordinate_key_families_used": coord_families_used,
+            "skipped_missing_coordinates": skipped_missing_coordinates,
+            "skipped_invalid_coordinates": skipped_invalid_coordinates,
+        }
+        if len(coord_families_used) > 1:
+            diagnostics["coordinate_key_family_mixing"] = True
+            logger.warning(
+                "extract_factors(%r): records mixed coordinate key families %s "
+                "(possible merge of two different CRSs into one dataset)",
+                factor_name,
+                coord_families_used,
+            )
+
         return GeologicalFactorDataset(
             factor_name=factor_name,
             unit=resolved_unit,
             target_horizon=target_horizon,
             crs=crs,
             points=points,
+            metadata=diagnostics,
         )
 
     def interpolate(

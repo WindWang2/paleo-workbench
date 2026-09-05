@@ -259,6 +259,107 @@ def test_validate_parameters_subset_semantics():
     assert problems  # boolean is not a number in our subset
 
 
+# ------------------------------------------- #1178 recursive validation --
+NESTED_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "roi": {
+            "type": "object",
+            "properties": {
+                "il0": {"type": "integer", "minimum": 0},
+                "xl0": {"type": "integer", "enum": [0, 1, 2]},
+            },
+            "required": ["il0", "xl0"],
+            "additionalProperties": False,
+        },
+        "features": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+        },
+    },
+    "additionalProperties": False,
+}
+
+
+def test_nested_required_missing_rejected():
+    problems = validate_parameters(NESTED_SCHEMA, {"roi": {"il0": 0}})
+    assert any("roi.xl0: required" in p for p in problems)
+
+
+def test_nested_additional_properties_false_rejected():
+    problems = validate_parameters(
+        NESTED_SCHEMA, {"roi": {"il0": 0, "xl0": 1, "surprise": True}}
+    )
+    assert any("roi.surprise" in p and "additionalProperties" in p for p in problems)
+
+
+def test_legacy_schema_without_nested_additional_properties_still_allows_extras():
+    # Backward compatibility: JSON Schema default is absent = allow.
+    legacy = {
+        "type": "object",
+        "properties": {
+            "roi": {"type": "object", "properties": {"il0": {"type": "integer"}}},
+        },
+    }
+    assert validate_parameters(legacy, {"roi": {"il0": 1, "extra": "fine"}}) == []
+
+
+def test_nested_enum_and_bounds_validated_recursively():
+    problems = validate_parameters(NESTED_SCHEMA, {"roi": {"il0": -1, "xl0": 5}})
+    assert any("roi.il0" in p and "minimum" in p for p in problems)
+    assert any("roi.xl0" in p and "enum" in p for p in problems)
+
+
+def test_array_items_object_required_validated():
+    assert validate_parameters(NESTED_SCHEMA, {"features": [{"name": "a"}]}) == []
+    problems = validate_parameters(NESTED_SCHEMA, {"features": [{"name": "a"}, {}]})
+    assert any("features[1].name: required" in p for p in problems)
+
+
+# ------------------------------------------- B3 union types / unknown types --
+UNION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "mode": {"type": ["string", "null"], "description": "optional string"},
+        "count": {"type": ["integer", "string"]},
+        "weird": {"type": ["mystery", "riddle"]},
+        "odd": {"type": "mystery"},
+    },
+    "required": [],
+    "additionalProperties": False,
+}
+
+
+def test_union_type_matches_any_member_and_null_legitimizes_none():
+    assert validate_parameters(UNION_SCHEMA, {"mode": None, "count": "three"}) == []
+    assert validate_parameters(UNION_SCHEMA, {"mode": "fast", "count": 3}) == []
+
+
+def test_union_type_value_matching_no_member_is_rejected():
+    problems = validate_parameters(UNION_SCHEMA, {"mode": 5})
+    assert any("mode" in p and "expected one of" in p for p in problems)
+    # None without "null" in the union matches no member.
+    problems = validate_parameters(UNION_SCHEMA, {"count": None})
+    assert any("count" in p for p in problems)
+    # bool is not an integer even inside a union.
+    problems = validate_parameters(UNION_SCHEMA, {"count": True})
+    assert any("count" in p for p in problems)
+
+
+def test_union_of_only_unknown_types_is_rejected_not_silently_passed():
+    problems = validate_parameters(UNION_SCHEMA, {"weird": 1})
+    assert any("weird" in p and "no known JSON type in union" in p for p in problems)
+
+
+def test_single_unknown_type_string_is_rejected_not_silently_passed():
+    problems = validate_parameters(UNION_SCHEMA, {"odd": 1})
+    assert any("odd" in p and "unknown type" in p for p in problems)
+
+
 # -------------------------------------------------------------- execution --
 def test_execute_provider_happy_path_with_provenance():
     registry = ProviderRegistry()
@@ -457,103 +558,355 @@ def test_visualization_providers_probe_honesty():
     assert isinstance(by_id["viz.map_render.qgis"].available, bool)
 
 
-# ------------------------------------------------- #1137 cancel semantics
-
-
-class _CancelProvider:
-    """Raises TaskCancelled like a cooperatively-cancelled job would."""
-
-    def __init__(self, exc: BaseException):
-        self._descriptor = _descriptor()
-        self._exc = exc
-
-    @property
-    def descriptor(self):
-        return self._descriptor
-
-    def execute(self, inputs, parameters, context):
-        raise self._exc
-
-
-def test_execute_provider_cancel_marks_run_cancelled():
+# ------------------------------------------------ #1137 cancel semantics --
+def test_execute_provider_task_cancelled_marks_run_cancelled_and_propagates():
+    """TaskCancelled: DataRun terminal state 'cancelled', exception unwrapped."""
     from paleo_workbench.runtime.task_scheduler import TaskCancelled
 
-    registry = ProviderRegistry()
-    registry.register(_CancelProvider(TaskCancelled("user cancelled")))
+    class CancelledProvider(EchoProvider):
+        def execute(self, inputs, parameters, context):
+            raise TaskCancelled("cooperative stop at safe point")
+
     catalog = FakeCatalog()
-    with pytest.raises(TaskCancelled):
+    with pytest.raises(TaskCancelled):  # NOT ProviderExecutionError
         execute_provider(
-            registry,
-            "test.echo",
+            CancelledProvider(),
             parameters={"factor": 1.0},
             context=ProviderContext(catalog=catalog),
         )
     assert catalog.runs[0]["status"] == "cancelled"
 
 
-def test_execute_provider_keyboard_interrupt_propagates_unwrapped():
-    registry = ProviderRegistry()
-    registry.register(_CancelProvider(KeyboardInterrupt()))
+def test_execute_provider_keyboard_interrupt_passes_through_unwrapped():
+    class InterruptedProvider(EchoProvider):
+        def execute(self, inputs, parameters, context):
+            raise KeyboardInterrupt()
+
     catalog = FakeCatalog()
     with pytest.raises(KeyboardInterrupt):
         execute_provider(
-            registry,
-            "test.echo",
+            InterruptedProvider(),
             parameters={"factor": 1.0},
             context=ProviderContext(catalog=catalog),
         )
-    # The run is still terminal (never stranded running) but the original
-    # interpreter-exit type propagates instead of ProviderExecutionError.
-    assert catalog.runs[0]["status"] == "failed"
+    # The run is NOT marked "failed" — an interrupt is neither a failure nor
+    # a completion; it simply passes through (nothing swallowed).
+    assert catalog.runs[0]["status"] == "running"
 
 
-def test_provider_output_path_containment(tmp_path):
-    """#1177: provider-level output guard — no traversal, no mkdir spree,
-    relative paths anchored at the execution work_dir."""
-    from paleo_workbench.providers.base import ProviderContext
-    from paleo_workbench.providers.builtin.map_export import _resolve_provider_output
-    from paleo_workbench.providers.errors import ProviderRejectedInputError
+def test_attribute_provider_propagates_task_cancelled_unwrapped(monkeypatch, tmp_path):
+    """#1137: the in-provider job wrapper must not swallow TaskCancelled."""
+    import geoviz_seismic
+    import paleo_workbench.seismic_attributes as attrs_mod
+    from paleo_workbench.providers.builtin.seismic_attribute import SeismicAttributeProvider
+    from paleo_workbench.runtime.task_scheduler import TaskCancelled
 
-    pid = "viz.map_render.fallback"
-    ctx = ProviderContext(work_dir=str(tmp_path))
-    good = tmp_path / "out.png"
-    assert _resolve_provider_output(pid, str(good), ctx, suffixes=(".png",)) == good
-    assert _resolve_provider_output(
-        pid, "rel.png", ctx, suffixes=(".png",)
-    ) == tmp_path / "rel.png"
-    with pytest.raises(ProviderRejectedInputError):
-        _resolve_provider_output(pid, "../evil.png", ctx, suffixes=(".png",))
-    with pytest.raises(ProviderRejectedInputError):
-        _resolve_provider_output(pid, "/tmp/x/../evil.png", ctx, suffixes=(".png",))
-    with pytest.raises(ProviderRejectedInputError):
-        _resolve_provider_output(pid, str(good.with_suffix(".exe")), ctx, suffixes=(".png",))
-    with pytest.raises(ProviderRejectedInputError):
-        _resolve_provider_output(
-            pid, "rel.png", ProviderContext(), suffixes=(".png",)
+    class FakeJob:
+        def __init__(self, reader, dst, kernel):
+            pass
+
+        def run(self, ctx):
+            raise TaskCancelled("stop at band 3")
+
+    monkeypatch.setattr(geoviz_seismic, "open_volume", lambda path: object())
+    monkeypatch.setattr(attrs_mod, "VolumeAttributeJob", FakeJob)
+    provider = SeismicAttributeProvider("c3", {})
+    with pytest.raises(TaskCancelled):
+        provider.execute(
+            inputs={"volume": PathRef(path=str(tmp_path / "v.zarr"))},
+            parameters={"output_dir": str(tmp_path / "out" / "attr.zarr")},
+            context=ProviderContext(),
         )
-    # No directory-creation spree: deep parents are refused, not made.
-    with pytest.raises(ProviderRejectedInputError):
-        _resolve_provider_output(
-            pid, str(tmp_path / "a" / "b" / "c.png"), ctx, suffixes=(".png",)
-        )
-    assert not (tmp_path / "a").exists()
 
 
-def test_execute_provider_governor_import_failure_is_loud(monkeypatch):
-    """#1180: a broken first-party governor import fails closed — never a
-    silent ungoverned run."""
+# -------------------------------------------------- #1160 finite ratio --
+def test_roi_finite_ratio_counts_nan_as_non_finite(monkeypatch, tmp_path):
+    import geoviz_seismic
+    import numpy as np
+    import paleo_workbench.seismic_attributes as attrs_mod
+    from paleo_workbench.providers.builtin.seismic_attribute import SeismicAttributeProvider
+
+    monkeypatch.setattr(geoviz_seismic, "open_volume", lambda path: object())
+    monkeypatch.setattr(
+        attrs_mod, "roi_attribute", lambda reader, bounds, name: np.full((4, 4, 8), np.nan)
+    )
+    provider = SeismicAttributeProvider("c3", {})
+    result = provider.execute(
+        inputs={"volume": PathRef(path=str(tmp_path / "v.zarr"))},
+        parameters={"roi": {"il0": 0, "il1": 4, "xl0": 0, "xl1": 4, "t0": 0, "t1": 8}},
+        context=ProviderContext(),
+    )
+    assert result.diagnostics["finite_ratio"] == 0.0  # all-NaN ROI: nothing finite
+
+
+# ---------------------------------------------- #1180 degraded admission --
+def test_governor_import_failure_fails_loud_and_marks_degraded(monkeypatch, caplog):
+    """A broken first-party admission module never becomes a silent pass."""
     import sys
 
-    registry = ProviderRegistry()
-    registry.register(EchoProvider())
-    monkeypatch.setitem(
-        sys.modules, "paleo_workbench.runtime.resource_governor", None
+    from paleo_workbench.providers import execution as provider_execution
+
+    provider_execution.reset_governor_degraded()
+    monkeypatch.setitem(sys.modules, "paleo_workbench.runtime.resource_governor", None)
+    try:
+        with caplog.at_level("ERROR"):
+            with pytest.raises(RuntimeError, match="without resource admission"):
+                provider_execution.execute_provider(EchoProvider(), parameters={"factor": 1.0})
+        assert provider_execution.GOVERNOR_DEGRADED is True
+        assert any("falling back" in r.message for r in caplog.records)
+    finally:
+        provider_execution.reset_governor_degraded()
+
+
+def test_governor_singleton_broken_degrades_to_default_budget_admission(monkeypatch, caplog):
+    """Import failure at admit time → conservative default-budget lease, run continues."""
+    from paleo_workbench.runtime import resource_governor as rg
+    from paleo_workbench.providers import execution as provider_execution
+
+    def broken_get_governor():
+        raise ImportError("governor singleton broken")
+
+    provider_execution.reset_governor_degraded()
+    monkeypatch.setattr(rg, "get_governor", broken_get_governor)
+    try:
+        with caplog.at_level("ERROR"):
+            result = provider_execution.execute_provider(
+                EchoProvider(), parameters={"factor": 1.0}
+            )
+        assert result.metrics["worked"] is True  # provider still ran — guarded
+        assert provider_execution.GOVERNOR_DEGRADED is True
+        assert any("falling back" in r.message for r in caplog.records)
+    finally:
+        provider_execution.reset_governor_degraded()
+
+
+def test_degraded_fallback_governor_is_one_shared_instance():
+    """P2/#1180: every degraded admission leases from the SAME fallback
+    governor — a fresh governor per call would hand each fallback execution
+    its own unlimited budget, so concurrent degraded admissions would never
+    aggregate against one another."""
+    from paleo_workbench.providers import execution as provider_execution
+
+    provider_execution.reset_fallback_governor()
+    lease1 = lease2 = None
+    try:
+        lease1 = provider_execution.default_budget_lease(
+            category_value="interactive.query",
+            title="fallback-1",
+            estimated_cpu_cores=0.5,
+        )
+        governor_after_first = provider_execution._FALLBACK_GOVERNOR
+        assert governor_after_first is not None
+        lease2 = provider_execution.default_budget_lease(
+            category_value="interactive.query",
+            title="fallback-2",
+            estimated_cpu_cores=0.5,
+        )
+        # Same instance across calls (id-identical), not a new governor.
+        assert provider_execution._FALLBACK_GOVERNOR is governor_after_first
+        assert id(provider_execution._FALLBACK_GOVERNOR) == id(governor_after_first)
+    finally:
+        for lease in (lease1, lease2):
+            if lease is not None:
+                lease.release()
+        provider_execution.reset_fallback_governor()
+
+
+# ------------------------------------------- #1177 output containment --
+def test_resolve_contained_output_requires_a_root(tmp_path):
+    from paleo_workbench.providers.errors import ProviderExecutionError
+    from paleo_workbench.providers.paths import resolve_contained_output
+
+    with pytest.raises(ProviderExecutionError, match="cannot be containment-checked"):
+        resolve_contained_output(ProviderContext(), "x.png", provider_id="test.echo")
+
+
+def test_map_export_provider_rejects_out_of_workspace_output(tmp_path):
+    """Export destinations must stay inside the context workspace (#1177)."""
+    from paleo_workbench.mapping.layers import MapDocument
+    from paleo_workbench.providers.errors import ProviderExecutionError
+
+    provider = get_provider_registry().get("export.map_product")
+    document = MapDocument(title="t")
+    context = ProviderContext(workspace_root=str(tmp_path))
+    for escape in ("../escape.png", "/definitely-outside/escape.png"):
+        with pytest.raises(ProviderExecutionError, match="outside the execution workspace"):
+            execute_provider(
+                provider,
+                inputs={"document": document},
+                parameters={"output_path": escape},
+                context=context,
+            )
+
+
+# --------------------------------------- #1176 model trust chain (provider) --
+class _FakeModelService:
+    def __init__(self, versions):
+        self._versions = versions
+
+    def list_model_versions(self, model_id=None):
+        return list(self._versions)
+
+
+def _sha256_of(path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _make_model_file(tmp_path, content: bytes = b"onnx-model-bytes"):
+    path = tmp_path / "model.onnx"
+    path.write_bytes(content)
+    return path
+
+
+def test_inference_provider_rejects_unregistered_model(tmp_path, monkeypatch):
+    """Unregistered model artifact → fail closed before any inference runs."""
+    from types import SimpleNamespace
+
+    import paleo_workbench.prediction.tiled_onnx as prediction_tiled_onnx
+    from paleo_workbench.providers.builtin.inference import TiledOnnxCapabilityProvider
+    from paleo_workbench.providers.errors import ProviderRejectedInputError
+
+    model_file = _make_model_file(tmp_path)
+    # A registry that knows about a DIFFERENT artifact only.
+    other = tmp_path / "other.onnx"
+    other.write_bytes(b"other")
+    service = _FakeModelService(
+        [
+            SimpleNamespace(
+                model_id="m-other",
+                model_version="1",
+                artifact_uri=str(other),
+                checksum=_sha256_of(other),
+            )
+        ]
     )
-    with pytest.raises(ImportError):
+    catalog = SimpleNamespace(service=service)
+
+    ran = []
+
+    class RecordingDelegate:
+        model_id = "delegate"
+        model_version = "1"
+
+        def run(self, inputs, parameters):
+            ran.append(True)
+            return {"volume_outputs": {}, "generator_version": "x"}
+
+    monkeypatch.setattr(prediction_tiled_onnx, "TiledOnnxProvider", RecordingDelegate)
+    provider = TiledOnnxCapabilityProvider()
+    with pytest.raises(ProviderRejectedInputError, match="not registered"):
         execute_provider(
-            registry,
-            "test.echo",
-            inputs={"path": PathRef(path="/tmp/x")},
-            parameters={"factor": 2.0},
-            context=ProviderContext(),
+            provider,
+            inputs={"volume": PathRef(path=str(tmp_path / "v.zarr"))},
+            parameters={"model_path": str(model_file), "classes": 4},
+            context=ProviderContext(catalog=catalog),
+        )
+    assert ran == []  # never reached inference
+
+
+def test_inference_provider_verified_provenance_for_registered_model(tmp_path, monkeypatch):
+    """Registered model: real sha256 + registered identity in provenance."""
+    from types import SimpleNamespace
+
+    import paleo_workbench.prediction.tiled_onnx as prediction_tiled_onnx
+    from paleo_workbench.providers.builtin.inference import TiledOnnxCapabilityProvider
+
+    model_file = _make_model_file(tmp_path)
+    digest = _sha256_of(model_file)
+    service = _FakeModelService(
+        [
+            SimpleNamespace(
+                model_id="facies-v2",
+                model_version="3",
+                artifact_uri="",  # registered by checksum only
+                checksum=digest,
+            )
+        ]
+    )
+    catalog = SimpleNamespace(service=service)
+
+    class Delegate:
+        model_id = "tiled-onnx-seismic"
+        model_version = "tiled-onnx-v1"
+
+        def run(self, inputs, parameters):
+            return {
+                "volume_outputs": {"classmap": {"store": str(tmp_path / "cm.zarr")}},
+                "generator_version": self.model_version,
+                "warnings": [],
+            }
+
+    monkeypatch.setattr(prediction_tiled_onnx, "TiledOnnxProvider", Delegate)
+    provider = TiledOnnxCapabilityProvider()
+    result = execute_provider(
+        provider,
+        inputs={"volume": PathRef(path=str(tmp_path / "v.zarr"))},
+        parameters={"model_path": str(model_file), "classes": 4},
+        context=ProviderContext(catalog=catalog),
+    )
+    prov = result.provenance
+    assert prov["registered"] is True
+    assert prov["model_id"] == "facies-v2"  # registry identity, not delegate label
+    assert prov["model_version"] == "3"
+    assert prov["model_checksum_sha256"] == digest  # REAL checksum of the file
+    assert prov["registered_match"] == "checksum"
+
+
+def test_inference_provider_rejects_checksum_mismatch(tmp_path, monkeypatch):
+    """artifact_uri match but tampered file → refuse (trusted inference)."""
+    from types import SimpleNamespace
+
+    import paleo_workbench.prediction.tiled_onnx as prediction_tiled_onnx
+    from paleo_workbench.providers.builtin.inference import TiledOnnxCapabilityProvider
+    from paleo_workbench.providers.errors import ProviderRejectedInputError
+
+    model_file = _make_model_file(tmp_path, content=b"tampered-content")
+    service = _FakeModelService(
+        [
+            SimpleNamespace(
+                model_id="m",
+                model_version="1",
+                artifact_uri=str(model_file),
+                checksum="0" * 64,  # registration pins a different digest
+            )
+        ]
+    )
+    catalog = SimpleNamespace(service=service)
+
+    class Delegate:
+        def run(self, inputs, parameters):
+            return {}
+
+    monkeypatch.setattr(prediction_tiled_onnx, "TiledOnnxProvider", Delegate)
+    provider = TiledOnnxCapabilityProvider()
+    with pytest.raises(ProviderRejectedInputError, match="checksum mismatch"):
+        execute_provider(
+            provider,
+            inputs={"volume": PathRef(path=str(tmp_path / "v.zarr"))},
+            parameters={"model_path": str(model_file), "classes": 4},
+            context=ProviderContext(catalog=catalog),
+        )
+
+
+def test_inference_provider_rejects_unreachable_registry(tmp_path, monkeypatch):
+    """No model registry reachable → fail closed (cannot prove registration)."""
+    import paleo_workbench.catalog.runtime as catalog_runtime
+    from paleo_workbench.providers.builtin.inference import TiledOnnxCapabilityProvider
+    from paleo_workbench.providers.errors import ProviderRejectedInputError
+
+    model_file = _make_model_file(tmp_path)
+    monkeypatch.setattr(catalog_runtime, "get_catalog_service", lambda: None)
+    provider = TiledOnnxCapabilityProvider()
+    with pytest.raises(ProviderRejectedInputError, match="no reachable model registry"):
+        execute_provider(
+            provider,
+            inputs={"volume": PathRef(path=str(tmp_path / "v.zarr"))},
+            parameters={"model_path": str(model_file), "classes": 4},
+            context=ProviderContext(),  # no catalog at all
         )

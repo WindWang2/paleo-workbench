@@ -93,12 +93,12 @@ py::array_t<float> fast_slice_extract(py::array_t<float, py::array::c_style | py
             #endif
             for (size_t k = 0; k < total_elem; ++k) {
 #if defined(__GNUC__) || defined(__clang__)
-                // #1188: prefetch addresses must stay in-bounds (a prefetch
-                // hint never faults in practice, but OOB addresses are UB
-                // and the pattern gets copied into real vectorized loads).
-                const size_t pf = std::min((k + 16) * dim2 + idx,
-                                           (total_elem - 1) * dim2 + idx);
-                __builtin_prefetch(&ptr[pf], 0, 0);
+// Prefetch bounds guard (#1188): near the end of the buffer
+                // k+16 indexes past the last element; __builtin_prefetch on
+                // an out-of-range address is UB — skip the tail.
+                if (k + 16 < total_elem) {
+                    __builtin_prefetch(&ptr[(k + 16) * dim2 + idx], 0, 0);
+                }
 #endif
                 r_ptr[k] = ptr[k * dim2 + idx];
             }
@@ -199,12 +199,13 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
                 #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static) if(total > kOmpMinParallelElems)
                 #endif
                 for (size_t k = 0; k < total; k += block) {
-    #if defined(__GNUC__) || defined(__clang__)
-                    // #1188: clamp the prefetch address (see above).
-                    const size_t pf = std::min((k + 16 * block) * dim2 + idx,
-                                               (total - 1) * dim2 + idx);
-                    __builtin_prefetch(&ptr[pf], 0, 0);
-    #endif
+#if defined(__GNUC__) || defined(__clang__)
+                    // Prefetch bounds guard (#1188): k+16*block crosses the
+                    // buffer end on the last blocks; skip the tail.
+                    if (k + 16 * block < total) {
+                        __builtin_prefetch(&ptr[(k + 16 * block) * dim2 + idx], 0, 0);
+                    }
+#endif
                     const size_t end = std::min(k + block, total);
                     for (size_t j = k; j < end; ++j) {
                         float v = ptr[j * dim2 + idx];
@@ -255,13 +256,13 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
                 #if defined(_OPENMP)
                 #pragma omp parallel for schedule(static) if(total > kOmpMinParallelElems)
                 #endif
-            for (size_t k = 0; k < total; ++k) {
-    #if defined(__GNUC__) || defined(__clang__)
-                // #1188: clamp the prefetch address (see above).
-                const size_t pf = std::min((k + 16) * dim2 + idx,
-                                           (total - 1) * dim2 + idx);
-                __builtin_prefetch(&ptr[pf], 0, 0);
-    #endif
+#if defined(__GNUC__) || defined(__clang__)
+                    // Prefetch bounds guard (#1188): same tail hazard as the
+                    // extrema pass — skip the last 16 elements.
+                    if (k + 16 < total) {
+                        __builtin_prefetch(&ptr[(k + 16) * dim2 + idx], 0, 0);
+                    }
+#endif
                     float v = ptr[k * dim2 + idx];
                     if (std::isnan(v) || std::isinf(v)) {
                         dst[k] = 0;

@@ -12,6 +12,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
 from paleo_workbench.providers.base import ProviderContext
 from paleo_workbench.providers.contracts import (
     ProviderDescriptor,

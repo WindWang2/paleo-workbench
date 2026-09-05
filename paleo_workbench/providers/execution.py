@@ -10,7 +10,9 @@ This is the only sanctioned way to run a capability provider:
    resource profile (pressure shedding and CPU/IO caps apply);
 4. **execute**: the provider runs with a :class:`ProviderContext` carrying
    the catalog port, cancellation and progress; provider exceptions are
-   wrapped (isolation) and never leak partial provenance;
+   wrapped (isolation) and never leak partial provenance — except
+   :class:`~paleo_workbench.runtime.task_scheduler.TaskCancelled`, which
+   marks the run "cancelled" and propagates unwrapped (#1137);
 5. **provenance**: when the context has a catalog and the provider declares
    data outputs, a DataRun wraps the execution (begin/complete/fail) —
    providers themselves register artifacts through the same port inside
@@ -22,6 +24,7 @@ arrive as refs), and never bypasses the catalog.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -36,7 +39,6 @@ from paleo_workbench.providers.errors import (
     ProviderRejectedInputError,
 )
 from paleo_workbench.providers.refs import ProviderResult
-from paleo_workbench.runtime.task_scheduler import TaskCancelled
 
 logger = logging.getLogger(__name__)
 
@@ -51,26 +53,65 @@ _JSON_TYPES: dict[str, tuple[type, ...]] = {
 }
 
 
-def validate_parameters(schema: Mapping[str, Any], parameters: Mapping[str, Any]) -> list[str]:
+def validate_parameters(
+    schema: Mapping[str, Any],
+    parameters: Mapping[str, Any],
+    *,
+    label: str = "parameters",
+) -> list[str]:
     """Validate ``parameters`` against the JSON-schema subset the SDK allows.
 
-    Supported: type, required, properties, additionalProperties,
-    enum, minimum/maximum, minItems/maxItems, items. Intentionally
-    dependency-free (no jsonschema import) — descriptors are small and
-    fully under our control.
+    Supported — recursively at every object/array nesting level (#1178):
+    type (including list-form unions, B3), required, properties, enum,
+    minimum/maximum, minItems/maxItems, items, additionalProperties.
+    ``additionalProperties`` is only enforced when the schema explicitly
+    declares it ``false`` (the JSON Schema default of absent = allow keeps
+    older descriptors working). Unknown ``type`` names (single or inside a
+    union) are reported instead of silently passing (B3). Intentionally
+    dependency-free (no jsonschema import) — descriptors are small and fully
+    under our control.
     """
     problems: list[str] = []
+
+    def type_matches(expected: str, value: Any) -> bool:
+        allowed = _JSON_TYPES.get(expected)
+        if allowed is None or not isinstance(value, allowed):
+            return False
+        if expected in ("integer", "number") and isinstance(value, bool):
+            return False
+        return True
 
     def check(value: Any, sub: Mapping[str, Any], path: str) -> None:
         expected = sub.get("type")
         if expected is not None:
-            allowed = _JSON_TYPES.get(str(expected))
-            if allowed is not None and not isinstance(value, allowed):
-                problems.append(f"{path}: expected {expected}, got {type(value).__name__}")
-                return
-            if str(expected) in ("integer", "number") and isinstance(value, bool):
-                problems.append(f"{path}: expected {expected}, got boolean")
-                return
+            if isinstance(expected, list):
+                # JSON Schema union (B3): valid when ANY known member matches
+                # (``null`` legitimizes None); a union whose members are all
+                # unknown type names is a schema problem, not a silent pass.
+                members = [str(member) for member in expected if str(member)]
+                known = [member for member in members if member in _JSON_TYPES]
+                if known and any(type_matches(member, value) for member in known):
+                    pass
+                else:
+                    detail = "" if known else " (no known JSON type in union)"
+                    problems.append(
+                        f"{path}: expected one of {expected!r}{detail}, "
+                        f"got {type(value).__name__}"
+                    )
+                    return
+            else:
+                allowed = _JSON_TYPES.get(str(expected))
+                if allowed is None:
+                    # B3: an unknown type string used to pass silently — a
+                    # descriptor the SDK cannot check is reported, not trusted.
+                    problems.append(f"{path}: unknown type {expected!r}")
+                    return
+                if not isinstance(value, allowed):
+                    problems.append(f"{path}: expected {expected}, got {type(value).__name__}")
+                    return
+                if str(expected) in ("integer", "number") and isinstance(value, bool):
+                    problems.append(f"{path}: expected {expected}, got boolean")
+                    return
         if "enum" in sub and value not in sub["enum"]:
             problems.append(f"{path}: {value!r} not in enum {sub['enum']!r}")
         if isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -88,27 +129,23 @@ def validate_parameters(schema: Mapping[str, Any], parameters: Mapping[str, Any]
                 for i, item in enumerate(value):
                     check(item, items, f"{path}[{i}]")
         if isinstance(value, dict):
-            # #1178: required/additionalProperties apply at EVERY object
-            # level, not just the top — nested omissions used to sail through.
-            for key in sub.get("required", []):
+            properties = sub.get("properties")
+            properties = properties if isinstance(properties, dict) else {}
+            for key in sub.get("required", []) or []:
                 if key not in value:
                     problems.append(f"{path}.{key}: required")
-            props = sub.get("properties")
-            if isinstance(props, dict):
-                for key, sub_sub in props.items():
-                    if key in value:
-                        check(value[key], sub_sub, f"{path}.{key}")
-                if sub.get("additionalProperties") is False:
-                    for key in value:
-                        if key not in props:
-                            problems.append(
-                                f"{path}.{key}: not declared and additionalProperties false")
+            for key, item in value.items():
+                child = properties.get(key)
+                if child is None:
+                    if sub.get("additionalProperties") is False:
+                        problems.append(f"{path}.{key}: not declared and additionalProperties false")
+                    continue
+                check(item, child, f"{path}.{key}")
 
-    if schema.get("type", "object") == "object":
-        if not isinstance(parameters, dict):
-            problems.append("parameters: expected object")
-            return problems
-        check(parameters, schema, "parameters")
+    if schema.get("type", "object") == "object" and not isinstance(parameters, dict):
+        problems.append(f"{label}: expected object")
+        return problems
+    check(parameters, schema, label)
     return problems
 
 
@@ -125,31 +162,133 @@ def _validate_inputs(descriptor: ProviderDescriptor, inputs: Mapping[str, Any]) 
             )
 
 
+#: #1180: set when the first-party runtime admission modules failed to
+#: import. Execution then admits through a conservative default-budget
+#: governor — or fails loudly when even that cannot be constructed. An
+#: ImportError is never a silent "no admission" pass.
+GOVERNOR_DEGRADED = False
+
+
+def reset_governor_degraded() -> None:
+    """Test helper: clear the #1180 degraded marker."""
+    global GOVERNOR_DEGRADED
+    GOVERNOR_DEGRADED = False
+
+
+#: #1180/P2: shared fallback governor for DEGRADED admission. Built lazily
+#: ONCE and reused by every fallback call site (this module's
+#: :func:`default_budget_lease` — which the harness executor imports — is the
+#: single constructor). A per-call ``ResourceGovernor(ResourceBudget())``
+#: would give each degraded execution its own unlimited budget, so concurrent
+#: fallback admissions would never aggregate; the singleton restores the
+#: "conservative default budget" contract under concurrency.
+_FALLBACK_GOVERNOR: Any = None
+_FALLBACK_GOVERNOR_LOCK = threading.Lock()
+
+
+def reset_fallback_governor() -> None:
+    """Test helper: drop the shared degraded-mode governor."""
+    global _FALLBACK_GOVERNOR
+    with _FALLBACK_GOVERNOR_LOCK:
+        _FALLBACK_GOVERNOR = None
+
+
+def _shared_fallback_governor(governor_cls: type, budget_cls: type):
+    """The one conservative default-budget governor degraded mode uses."""
+    global _FALLBACK_GOVERNOR
+    with _FALLBACK_GOVERNOR_LOCK:
+        if _FALLBACK_GOVERNOR is None:
+            _FALLBACK_GOVERNOR = governor_cls(budget_cls())
+        return _FALLBACK_GOVERNOR
+
+
+def default_budget_lease(
+    *,
+    category_value: str,
+    title: str,
+    estimated_cpu_cores: float,
+    estimated_ram_bytes: int = 0,
+    estimated_vram_bytes: int = 0,
+    io_weight: float = 1.0,
+):
+    """Conservative fallback admission over a SHARED default budget (#1180).
+
+    Shared by the provider executor and the harness executor so both call
+    sites degrade identically: admission goes through a real
+    :class:`ResourceGovernor` built on a default :class:`ResourceBudget`
+    instead of being skipped — and always the SAME governor instance (P2),
+    so concurrent degraded admissions aggregate against one budget. Raises
+    ``ImportError`` when the first-party runtime modules are truly broken
+    (callers convert that into a loud failure).
+    """
+    from paleo_workbench.runtime.resource_budget import ResourceBudget
+    from paleo_workbench.runtime.resource_governor import ResourceGovernor, TaskRequest
+    from paleo_workbench.runtime.task_categories import TaskCategory
+
+    governor = _shared_fallback_governor(ResourceGovernor, ResourceBudget)
+    return governor.admit(
+        TaskRequest(
+            category=TaskCategory(category_value),
+            title=title,
+            estimated_cpu_cores=estimated_cpu_cores,
+            estimated_ram_bytes=estimated_ram_bytes,
+            estimated_vram_bytes=estimated_vram_bytes,
+            io_weight=io_weight,
+        )
+    )
+
+
 def _governor_lease(descriptor: ProviderDescriptor, provider_id: str):
     """Admission lease for the execution.
 
-    #1180: fail-closed — the governor is first-party (stdlib-only chain),
-    so an ImportError here is packaging breakage, never an optional
-    dependency. Silently running ungoverned used to hide exactly that.
+    #1180: an ImportError of the first-party runtime modules logs an error,
+    marks the module degraded and retries admission against a conservative
+    default-budget governor; if that is impossible the execution fails
+    loudly instead of running unguarded.
     """
-    from paleo_workbench.runtime.resource_governor import (
-        ResourceExhausted,
-        TaskRequest,
-        get_governor,
-    )
-    from paleo_workbench.runtime.task_categories import TaskCategory
+    global GOVERNOR_DEGRADED
+    try:
+        from paleo_workbench.runtime.resource_governor import (
+            ResourceExhausted,
+            TaskRequest,
+            get_governor,
+        )
+        from paleo_workbench.runtime.task_categories import TaskCategory
 
-    profile = descriptor.resource_profile
-    category = TaskCategory(profile.category)
-    request = TaskRequest(
-        category=category,
-        title=f"provider:{provider_id}",
-        estimated_cpu_cores=profile.estimated_cpu_cores,
-        estimated_ram_bytes=profile.estimated_ram_bytes,
-        estimated_vram_bytes=profile.estimated_vram_bytes,
-        io_weight=profile.io_weight,
-    )
-    return get_governor().admit(request)
+        profile = descriptor.resource_profile
+        category = TaskCategory(profile.category)
+        request = TaskRequest(
+            category=category,
+            title=f"provider:{provider_id}",
+            estimated_cpu_cores=profile.estimated_cpu_cores,
+            estimated_ram_bytes=profile.estimated_ram_bytes,
+            estimated_vram_bytes=profile.estimated_vram_bytes,
+            io_weight=profile.io_weight,
+        )
+        return get_governor().admit(request)
+    except ImportError as exc:
+        GOVERNOR_DEGRADED = True
+        logger.error(
+            "first-party resource admission modules unavailable for provider %s "
+            "(%s); falling back to conservative default-budget admission",
+            provider_id,
+            exc,
+        )
+        try:
+            profile = descriptor.resource_profile
+            return default_budget_lease(
+                category_value=profile.category,
+                title=f"provider:{provider_id} (degraded-admission)",
+                estimated_cpu_cores=profile.estimated_cpu_cores,
+                estimated_ram_bytes=profile.estimated_ram_bytes,
+                estimated_vram_bytes=profile.estimated_vram_bytes,
+                io_weight=profile.io_weight,
+            )
+        except ImportError as fallback_exc:
+            raise RuntimeError(
+                f"first-party runtime admission modules are broken ({exc}); refusing "
+                f"to execute provider {provider_id!r} without resource admission"
+            ) from fallback_exc
     # ResourceExhausted propagates: pressure shedding is a first-class outcome.
 
 
@@ -206,27 +345,22 @@ def execute_provider(
         if context is not None and run_ref is not None:
             context.run_id = getattr(run_ref, "run_id", None) or getattr(run_ref, "id", None)
         result = provider.execute(inputs, parameters, context or ProviderContext())
-    except (KeyboardInterrupt, SystemExit):
-        # #1137: interpreter exits propagate unwrapped (never washed into a
-        # provider failure); the run record still goes terminal so it never
-        # strands in "running".
-        if run_ref is not None and getattr(catalog, "complete_run", None) is not None:
-            try:
-                catalog.complete_run(getattr(run_ref, "run_id", None) or getattr(run_ref, "id", None), status="failed")
-            except Exception:
-                logger.exception("provider run failure-status update failed")
-        raise
-    except TaskCancelled:
-        # #1137: cooperative cancel keeps end-to-end semantics (DataRun
-        # cancelled, scheduler on_cancel branch) instead of washing into
-        # failed statistics.
-        if run_ref is not None and getattr(catalog, "complete_run", None) is not None:
-            try:
-                catalog.complete_run(getattr(run_ref, "run_id", None) or getattr(run_ref, "id", None), status="cancelled")
-            except Exception:
-                logger.exception("provider run cancel-status update failed")
-        raise
-    except BaseException as exc:
+    except Exception as exc:  # NOT BaseException: KeyboardInterrupt/SystemExit must pass through
+        from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
+        if isinstance(exc, TaskCancelled):
+            # #1137: cancellation is a first-class outcome, not a failure —
+            # the DataRun lands in "cancelled" and the exception propagates
+            # unwrapped so the scheduler can mark the task CANCELLED.
+            if run_ref is not None and getattr(catalog, "complete_run", None) is not None:
+                try:
+                    catalog.complete_run(
+                        getattr(run_ref, "run_id", None) or getattr(run_ref, "id", None),
+                        status="cancelled",
+                    )
+                except Exception:
+                    logger.exception("provider run cancelled-status update failed")
+            raise
         if run_ref is not None and getattr(catalog, "complete_run", None) is not None:
             try:
                 catalog.complete_run(getattr(run_ref, "run_id", None) or getattr(run_ref, "id", None), status="failed")

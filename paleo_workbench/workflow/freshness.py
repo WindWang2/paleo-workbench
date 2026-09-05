@@ -22,18 +22,22 @@ from paleo_workbench.workflow.dependency_graph import DependencyGraph, Dependenc
 # Rebuilding DependencyGraph is O(V+E) Python object construction + cycle DFS
 # (~0.08 ms/version with adapter re-wrapping); every refresh signal paid it
 # from scratch even when the catalog had not changed (C15b). Cache the last
-# few graphs keyed by (document identity, catalog_revision): any persisted
-# catalog save bumps the revision and invalidates the entry; a new document
-# (project reopen) gets its own key. Backends without a document/revision
-# (test fakes) bypass the cache and keep today's always-rebuild behavior.
+# few graphs keyed by (document identity, catalog_revision, mutation_serial):
+# any persisted catalog save bumps the revision; a new document (project
+# reopen) gets its own key; and the service's mutation serial covers
+# mutations deferred inside batch_save, where the revision stays put until
+# the batch commits (#1139) — without it a mid-batch freshness query would
+# reuse a pre-mutation graph (missing lineage edges → wrong STALE verdicts).
+# Backends without a document/revision (test fakes) bypass the cache and keep
+# today's always-rebuild behavior.
 _GRAPH_CACHE_MAX = 4
-_GRAPH_CACHE: "OrderedDict[tuple[int, int], tuple[Any, DependencyGraph]]" = (
+_GRAPH_CACHE: "OrderedDict[tuple[int, int, int], tuple[Any, DependencyGraph]]" = (
     OrderedDict()
 )
 
 
 def _cached_graph_for(catalog: Any) -> DependencyGraph:
-    """Return the dependency graph, reusing it while the catalog revision stands.
+    """Return the dependency graph, reusing it while the catalog state stands.
 
     The cache entry keeps a strong reference to the document so an identity
     key can never collide with a recycled object at the same address.
@@ -41,9 +45,12 @@ def _cached_graph_for(catalog: Any) -> DependencyGraph:
     service = getattr(catalog, "service", None)
     document = getattr(service, "document", None)
     revision = getattr(document, "catalog_revision", None)
-    key: tuple[int, int] | None = None
+    # Public serial contract (DataCatalogService.mutation_serial); services
+    # without it (test fakes) default to 0 and keep revision-only keying.
+    serial = int(getattr(service, "mutation_serial", 0) or 0)
+    key: tuple[int, int, int] | None = None
     if document is not None and revision is not None:
-        key = (id(document), int(revision))
+        key = (id(document), int(revision), serial)
         entry = _GRAPH_CACHE.get(key)
         if entry is not None and entry[0] is document:
             return entry[1]

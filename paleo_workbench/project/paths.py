@@ -8,6 +8,9 @@ import shutil
 logger = logging.getLogger(__name__)
 
 
+logger = logging.getLogger(__name__)
+
+
 class ProjectPathError(ValueError):
     """Raised when a stored path is invalid or escapes the project directory."""
 
@@ -37,12 +40,13 @@ import sys
 
 
 def _handle_remove_readonly(func, path, exc_info=None):
-    """Clear readonly bit and reattempt removal on Windows NTFS."""
-    try:
-        os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
-        func(path)
-    except Exception:
-        pass
+    """Clear readonly bit and reattempt removal on Windows NTFS.
+
+    A failure here propagates: swallowing it inside the handler made
+    ``shutil.rmtree`` report success while entries were left behind (#1190).
+    """
+    os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+    func(path)
 
 
 def safe_rmtree(path: Path | str) -> bool:
@@ -57,7 +61,9 @@ def safe_rmtree(path: Path | str) -> bool:
         return True
     try:
         if sys.version_info >= (3, 12):
-            shutil.rmtree(p, onexc=lambda func, path, exc: _handle_remove_readonly(func, path, exc))
+            shutil.rmtree(
+                p, onexc=lambda func, path, exc: _handle_remove_readonly(func, path, exc)
+            )
         else:
             shutil.rmtree(p, onerror=_handle_remove_readonly)
     except Exception:

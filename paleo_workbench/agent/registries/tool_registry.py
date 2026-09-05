@@ -169,7 +169,7 @@ class ToolRegistry:
         missing = [p.name for p in tool.parameters if p.required and p.name not in kwargs]
         if missing:
             raise ToolValidationError(
-                f"tool {name!r} misses required arguments: {missing}"
+                f"tool {name!r} missing required parameter(s): {missing}"
             )
         for key, value in kwargs.items():
             if not _check_param_value(declared[key], value):

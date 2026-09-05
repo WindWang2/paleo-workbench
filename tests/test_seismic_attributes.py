@@ -223,6 +223,313 @@ def test_job_cancel_keeps_completed_bands(volume, tmp_path):
     assert stats["bands"] == 4
 
 
+# ------------------------------------------------- #1194 marker durability
+
+
+@pytest.mark.skipif(
+    not Path("/proc/self").exists(), reason="fd->path resolution needs /proc"
+)
+def test_band_data_fsynced_before_marker_and_marker_body_fsynced(
+    volume, tmp_path, monkeypatch
+):
+    """#1194: per band, the shard files the band touched are fsynced
+    BEFORE the band marker is created, and the marker's own body is
+    fsynced (not just its parent directory)."""
+    import os as _os
+
+    _, reader, _ = volume
+    dst = tmp_path / "attr_fsync"
+    done_dir = dst.parent / f"{dst.name}.done"
+    events: list[str] = []
+    real_fsync = _os.fsync
+
+    def fsync_spy(fd):
+        try:
+            path = _os.readlink(f"/proc/self/fd/{fd}")
+        except OSError:
+            path = f"fd:{fd}"
+        events.append(path)
+        return real_fsync(fd)
+
+    monkeypatch.setattr(_os, "fsync", fsync_spy)
+    job = VolumeAttributeJob(reader, dst, "c3", band_inlines=18)  # 2 bands
+    job.run(TaskContext(task_id="t"))
+
+    marker0 = str(done_dir / "band_000000")
+    marker18 = str(done_dir / "band_000018")
+    # the marker FILE BODY is fsynced for every band, and the marker dir too
+    assert marker0 in events
+    assert marker18 in events
+    assert str(done_dir) in events
+    # marker content intact through the open→write→fsync→close path
+    assert (done_dir / "band_000018").read_text() == "ok"
+    # band shard data hits the disk before the marker that claims it:
+    # between the two markers there is a shard-file fsync (band 1's data),
+    # and the first shard fsync precedes the first marker.
+    shard_events = [
+        (i, p) for i, p in enumerate(events) if f"{dst}/c/" in p
+    ]
+    assert shard_events, "band shard files must be fsynced at all"
+    i0 = events.index(marker0)
+    i18 = events.index(marker18)
+    assert shard_events[0][0] < i0, "band data fsync must precede its marker"
+    assert any(i0 < i < i18 for i, _ in shard_events), (
+        "second band's data fsync must land between its predecessor's "
+        "marker and its own"
+    )
+    # #1194 residual: the DIRECTORIES holding those shards are fsynced too —
+    # shard bytes alone are not durable if the newly created c/<gi>/<gj>
+    # entries are lost. Every shard file's parent directory (plus the store
+    # root and the chunk root) must appear, before the band's marker.
+    shard_files = {p for _, p in shard_events if not p.endswith("zarr.json")}
+    parents = {str(Path(p).parent) for p in shard_files}
+    assert parents, "expected at least one shard file under c/"
+    assert parents <= set(events), (
+        f"shard directories were not fsynced: missing {parents - set(events)}"
+    )
+    assert str(dst / "c") in events
+    assert str(dst) in events
+    parent_indices = [events.index(p) for p in parents if p in events]
+    assert max(parent_indices) < i0, (
+        "directory fsyncs must precede the band marker that claims the data"
+    )
+
+
+# ------------------------------------------- source identity in banding spec
+
+
+def test_band_spec_switching_source_volume_recomputes(volume, tmp_path):
+    """Source identity in the banding spec: two same-shape source volumes,
+    same kernel, same band size, SAME reused output store — the second
+    volume must NOT trust the first one's band markers (mixed-source DERIVED
+    guard); every band recomputes and the result matches the second volume.
+    """
+    _, reader_a, _ = volume
+    # Source B: identical geometry, different data (different seed).
+    segy_b = tmp_path / "v_b.segy"
+    cube_b = _write_segy(segy_b, seed=99)
+    store_b = tmp_path / "store_b"
+    transcode_segy_to_zarr(segy_b, store_b, params=PARAMS)
+    reader_b = open_volume(store_b)
+
+    dst = tmp_path / "attr_mix"
+    job_a = VolumeAttributeJob(reader_a, dst, "c3", band_inlines=18)
+    job_b = VolumeAttributeJob(reader_b, dst, "c3", band_inlines=18)
+    assert job_a._banding_spec() != job_b._banding_spec(), (
+        "same-shape different-source jobs must carry different banding specs"
+    )
+
+    job_a.run(TaskContext(task_id="a"))
+    assert job_a.completed_bands() == {0, 18}
+
+    # Reuse the store for source B: spec mismatch must discard A's markers
+    # and recompute every band (no band may be skipped).
+    import paleo_workbench.seismic_attributes as sa
+
+    compute_calls: list[int] = []
+    orig = sa.compute_block
+
+    def spy(rd, name, i0, i1, *a, **kw):
+        compute_calls.append(i0)
+        return orig(rd, name, i0, i1, *a, **kw)
+
+    sa.compute_block = spy
+    try:
+        stats = job_b.run(TaskContext(task_id="b"))
+    finally:
+        sa.compute_block = orig
+    assert compute_calls == [0, 18], "second source must recompute ALL bands"
+    assert stats["bands"] == 2
+    # The store now holds B's attribute volume, not a mix of A and B.
+    out = zarr.open(str(dst), mode="r")
+    np.testing.assert_allclose(
+        np.asarray(out[:, :, :]),
+        _full_reference(cube_b),
+        rtol=1e-6,
+        atol=1e-7,
+    )
+
+
+# ------------------------------------------------- #1161 band identity
+
+
+def test_band_markers_are_identified_by_first_inline(volume, tmp_path):
+    """#1161: markers name the band's first INLINE, not its position."""
+    _, reader, _ = volume
+    dst = tmp_path / "attr_ident"
+    job = VolumeAttributeJob(reader, dst, "c3", band_inlines=16)  # 0,16,32
+    job.run(TaskContext(task_id="t"))
+    names = sorted(p.name for p in job._done_dir().iterdir())
+    assert names == ["band_000000", "band_000016", "band_000032"]
+
+
+def test_band_size_change_invalidates_markers_and_recomputes(volume, tmp_path):
+    """#1161: resume with a DIFFERENT band_inlines must not skip misaligned
+    bands — old markers are discarded, every band recomputed, and the
+    result equals a one-shot full run."""
+    cube, reader, _ = volume
+    from paleo_workbench.runtime import TaskCancelled
+
+    dst = tmp_path / "attr_reband"
+    ref = _full_reference(cube)
+
+    # half-run at band_inlines=16: band 0 done, then cancelled
+    job = VolumeAttributeJob(reader, dst, "c3", band_inlines=16)
+    ctx = TaskContext(task_id="t")
+    original_report = ctx.report_progress
+
+    state = {"n": 0}
+
+    def one_then_cancel(done, total=None, message=""):
+        state["n"] += 1
+        if state["n"] >= 1:
+            ctx.cancelled.set()
+        original_report(done, total, message)
+
+    ctx._progress_cb = one_then_cancel
+    with pytest.raises(TaskCancelled):
+        job.run(ctx)
+    assert job.completed_bands() == {0}
+
+    # resume at band_inlines=9: banding changed → markers reset, 4 fresh
+    # bands (36/9), output identical to a one-shot run
+    job2 = VolumeAttributeJob(reader, dst, "c3", band_inlines=9)
+    stats = job2.run(TaskContext(task_id="t2"))
+    assert stats["bands"] == 4
+    assert job2.completed_bands() == {0, 9, 18, 27}
+    out = zarr.open(str(dst), mode="r")
+    np.testing.assert_allclose(
+        np.asarray(out[:, :, :]), ref, rtol=1e-6, atol=1e-7
+    )
+
+
+# ------------------------------------------------- #1146 band derivation
+
+
+def test_derive_band_inlines_bounded_and_monotonic():
+    from paleo_workbench.seismic_attributes import (
+        BAND_INLINES_MAX,
+        BAND_INLINES_MIN,
+        _BAND_COPIES,
+        derive_band_inlines,
+    )
+
+    shape = (500, 600, 800)  # bytes/inline = 600*800*4 = 1.92 MiB
+    halo = (5, 5, 5)
+    budgets = [256 << 20, 1 << 30, 2 << 30, 5 << 30, 20 << 30]
+    bands = [
+        derive_band_inlines(shape, halo=halo, budget_bytes=b) for b in budgets
+    ]
+    for b in bands:
+        assert BAND_INLINES_MIN <= b <= BAND_INLINES_MAX
+    assert bands == sorted(bands), "band size must not shrink as budget grows"
+
+    # mid-range (unclamped) budgets respect the share bound:
+    # copies*(band+2*halo_il)*bytes_per_inline <= share*budget (+1 inline slack)
+    bytes_per_inline = 600 * 800 * 4
+    for band, budget in zip(bands, budgets):
+        if BAND_INLINES_MIN < band < BAND_INLINES_MAX:
+            working = _BAND_COPIES * (band + 2 * halo[0]) * bytes_per_inline
+            assert working <= 0.25 * budget + _BAND_COPIES * bytes_per_inline
+
+    # tiny budget clamps to the floor (progress guarantee, bounded batch)
+    assert (
+        derive_band_inlines(shape, halo=halo, budget_bytes=1) == BAND_INLINES_MIN
+    )
+    # huge budget clamps to the ceiling (no 12-20 GB RSS regression)
+    assert (
+        derive_band_inlines(shape, halo=halo, budget_bytes=1 << 40)
+        == BAND_INLINES_MAX
+    )
+
+
+def test_volume_attribute_job_default_band_derives_from_budget(
+    volume, tmp_path, monkeypatch
+):
+    """#1146: constructing VolumeAttributeJob without band_inlines derives
+    the band size from the budget, not a hardcoded 64."""
+    import paleo_workbench.seismic_attributes as sa
+
+    _, reader, _ = volume
+    seen = {}
+
+    def fake_derive(shape, *, halo=(0, 0, 0), budget_bytes=None, **kw):
+        seen["shape"] = shape
+        seen["halo"] = halo
+        return 11
+
+    monkeypatch.setattr(sa, "derive_band_inlines", fake_derive)
+    job = sa.VolumeAttributeJob(reader, tmp_path / "x", "c3")
+    assert job.band_inlines == 11
+    assert seen["shape"] == tuple(reader.shape)
+    assert seen["halo"] == sa.attribute_halo("c3")
+
+
+def test_start_attribute_job_passes_budget_derived_band(tmp_path, monkeypatch):
+    """#1146: the lifecycle queries the active budget and passes the
+    derived band size into the job (transcode-style budget coupling).
+
+    Self-contained store (the module fixture's store is MOVED by whichever
+    catalog test consumes it first)."""
+    from paleo_workbench.runtime import resource_budget
+    import paleo_workbench.seismic_attributes as sa
+
+    work = tmp_path / "w"
+    work.mkdir(parents=True)
+    _, store = _write_small_segy(work)
+    reader = open_volume(store)
+    project = tmp_path / "proj" / "demo.paleo.json"
+    project.parent.mkdir(parents=True)
+    project.write_text("{}", encoding="utf-8")
+    catalog = DataCatalogService.open(project)
+    sched = TaskScheduler(max_workers=1)
+    try:
+        raw = catalog.link_external(work / "roi.segy", name="v", type="seismic")
+        run = catalog.register_run("segy-to-zarr", input_version_ids=[raw.id])
+        derived = catalog.register_derived_store(
+            name="seismic store", store_path=store, run_id=run.id,
+            parent_version_ids=[raw.id], type="seismic", format="zarr-v3",
+        )
+        catalog.update_run_status(run.id, "complete")
+
+        # pin a small budget: 8 GB machine -> 1.25 GiB streaming buffer
+        monkeypatch.setattr(
+            resource_budget, "_ACTIVE", resource_budget.ResourceBudget.for_total_ram_gb(8)
+        )
+        recorded = {}
+        real_cls = sa.VolumeAttributeJob
+
+        class Recorder(real_cls):
+            def __init__(self, reader, dst, name="c3", **kw):
+                recorded["band_inlines"] = kw.get("band_inlines")
+                super().__init__(reader, dst, name, **kw)
+
+        monkeypatch.setattr(sa, "VolumeAttributeJob", Recorder)
+        handle = start_attribute_job(catalog, derived.id, "c3", scheduler=sched)
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline and handle.state not in (
+            TaskState.DONE, TaskState.FAILED, TaskState.CANCELLED
+        ):
+            time.sleep(0.05)
+        assert handle.state == TaskState.DONE, f"job failed: {handle.error}"
+
+        expected = sa.derive_band_inlines(
+            tuple(reader.shape),
+            halo=sa.attribute_halo("c3"),
+            budget_bytes=resource_budget.active_budget().streaming_buffer_bytes,
+        )
+        assert recorded["band_inlines"] == expected
+        assert 8 <= recorded["band_inlines"] <= 64
+        # the band plan is pinned in the run parameters for provenance
+        attr_runs = [
+            r for r in catalog.document.runs if r.operation == "attribute:c3"
+        ]
+        assert attr_runs and attr_runs[-1].parameters.get("band_inlines") == expected
+    finally:
+        sched.shutdown(wait=True, timeout=10.0)
+        catalog.close()
+
+
 # --------------------------------------------------------- lifecycle glue
 
 
@@ -490,20 +797,3 @@ def test_band_data_and_marker_fsynced_before_done(tmp_path, monkeypatch):
                   if isinstance(p, str) and "/c/" in p.replace("\\", "/")]
     assert shard_hits, "band shard files must be fsynced before marking done"
 
-
-def test_resume_with_changed_band_inlines_refuses(tmp_path):
-    """#1161: markers bind to band-start inlines; reopening with a different
-    band_inlines raises instead of mixing two parameterizations."""
-    from paleo_workbench.runtime import TaskContext
-    from paleo_workbench.seismic_attributes import VolumeAttributeJob
-
-    _cube, store = _write_small_segy(tmp_path)
-    dst = tmp_path / "attr_mix"
-    job = VolumeAttributeJob(open_volume(store), dst, "c3", band_inlines=6)
-    job.run(TaskContext(task_id="t"))
-    done = dst.parent / f"{dst.name}.done"
-    assert {f.name for f in done.iterdir()} == {"band_000000", "band_000006"}
-    with pytest.raises(ValueError, match="band_inlines mismatch"):
-        VolumeAttributeJob(open_volume(store), dst, "c3", band_inlines=4).run(
-            TaskContext(task_id="t2")
-        )

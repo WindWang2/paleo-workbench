@@ -13,6 +13,7 @@ never lose more than the in-flight checkpoint: ``load()`` falls back to the
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -30,6 +31,13 @@ from paleo_workbench.catalog.storage import (
 
 def catalog_file_for(project_path: Path) -> Path:
     return catalog_dir_for(Path(project_path)) / "catalog.json"
+
+
+def _mtime_ns(path: Path) -> int | None:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
 
 
 def catalog_bak_file_for(project_path: Path) -> Path:
@@ -84,6 +92,13 @@ class CatalogStore:
 
     def __init__(self, project_path: str | Path):
         self.project_path = Path(project_path)
+        # #1183: (payload sha256, manifest mtime_ns) of the last write THIS
+        # instance performed. close/export used to re-serialize and rewrite
+        # the full manifest even when the document had not changed; an
+        # unchanged payload with an untouched on-disk file skips the write
+        # entirely. The mtime guard makes the skip safe against external
+        # deletion/modification of the manifest between our writes.
+        self._last_write: tuple[str, int] | None = None
 
     def load(self) -> CatalogDocument:
         """Load the canonical document; an absent catalog means an empty one.
@@ -144,25 +159,27 @@ class CatalogStore:
 
         Sequence (each step crash-safe):
 
-        1. Serialize the document and write it to a temp file (fsync).
-        2. Move the current ``catalog.json`` to ``catalog.json.bak`` (rename).
+        1. Serialize the document; when the payload is byte-identical to the
+           last one this instance wrote AND the manifest still carries that
+           write's mtime, return without touching the disk (#1183) — repeated
+           close/export checkpoints of an unchanged catalog no longer pay
+           serialize + fsync + double rename.
+        2. Write the payload to a temp file (fsync).
+        3. Move the current ``catalog.json`` to ``catalog.json.bak`` (rename).
            On the FIRST save (no canonical yet) the backup is instead seeded
            with the identical revision, so a once-saved catalog never sits in
            a no-backup window (issue #372 / C14).
-        3. Rename the temp file into place as ``catalog.json``.
-        4. fsync the directory.
+        4. Rename the temp file into place as ``catalog.json``.
+        5. fsync the directory.
 
-        A crash between 2 and 3 leaves ``catalog.json.bak`` holding the
-        previous revision; :meth:`load` recovers it. Any failure before step 3
+        A crash between 3 and 4 leaves ``catalog.json.bak`` holding the
+        previous revision; :meth:`load` recovers it. Any failure before step 4
         restores the original file and removes the temp file, so a failed save
         never leaves a half-written catalog behind.
         """
         ensure_catalog_layout(self.project_path)
         path = catalog_file_for(self.project_path)
         bak = catalog_bak_file_for(self.project_path)
-        # #1183: compact separators by default (close/checkpoint path) —
-        # pretty indent only for explicit human-readable export. Readers
-        # use json.load either way, so old versions stay compatible.
         if pretty:
             payload = json.dumps(
                 document.model_dump(mode="json"), ensure_ascii=False, indent=2
@@ -173,6 +190,13 @@ class CatalogStore:
                 ensure_ascii=False,
                 separators=(",", ":"),
             )
+        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        if self._last_write is not None:
+            last_digest, last_mtime = self._last_write
+            if last_digest == digest:
+                current_mtime = _mtime_ns(path)
+                if current_mtime is not None and current_mtime == last_mtime:
+                    return  # unchanged since our own last write
         fd, tmp_name = tempfile.mkstemp(
             prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
         )
@@ -200,3 +224,6 @@ class CatalogStore:
                 except OSError:
                     pass
             raise
+        written_mtime = _mtime_ns(path)
+        if written_mtime is not None:
+            self._last_write = (digest, written_mtime)

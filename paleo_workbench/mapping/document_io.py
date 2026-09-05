@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from paleo_workbench.project.domain import CoordinateStatus
 from paleo_workbench.project.models import PaleoMapDocument
 from paleo_workbench.mapping.geometry_schema import (
     normalize_facies,
@@ -49,7 +50,11 @@ def apply_features_to_document(doc: PaleoMapDocument, features: list[dict[str, A
     """Write editor features back into the document, preserving payload fields.
 
     Facies keep prediction/compiler attributes (``properties``, ``facies``,
-    ``probability``, ``region_id``). Wells keep dual ``x``/``y`` and ``lng``/``lat``.
+    ``probability``, ``region_id``). Wells keep dual ``x``/``y`` and ``lng``/``lat``;
+    wells with missing/unusable coordinates carry a ``coordinate_status`` marker
+    (``paleo_workbench.project.domain.CoordinateStatus``) instead of silently
+    posing as valid locations. Labels with malformed coordinates are skipped
+    with a logged diagnostic.
     """
     facies, wells, lines, labels = [], [], [], []
     for f in features:
@@ -77,24 +82,54 @@ def apply_features_to_document(doc: PaleoMapDocument, features: list[dict[str, A
                 record["properties"] = dict(props)
             facies.append(record)
         elif kind == "well":
-            # #1162: short coordinates skip + warn (same policy as
-            # features_from_document) — never persist a fake y=0.0.
-            c = f.get("coordinates") or []
-            if len(c) < 2:
-                logger.warning(
-                    "Skipping well feature %r with malformed coordinates %r",
-                    f.get("id"), c,
+            # Audit #1162: a coordinates payload with fewer than 2 elements
+            # used to silently land at (x, 0.0). Keep the partial position
+            # but flag it via coordinate_status so downstream consumers can
+            # filter unusable wells instead of trusting the fabricated y.
+            c = f.get("coordinates")
+            x = y = 0.0
+            if isinstance(c, (list, tuple)) and len(c) >= 2:
+                status = CoordinateStatus.OK
+                try:
+                    x, y = float(c[0]), float(c[1])
+                except (TypeError, ValueError):
+                    status = CoordinateStatus.INVALID
+                    logger.warning(
+                        "well feature %r has non-numeric coordinates; marked invalid",
+                        f.get("id"),
+                    )
+            else:
+                status = (
+                    CoordinateStatus.INVALID
+                    if isinstance(c, (list, tuple)) and len(c) == 1
+                    else CoordinateStatus.MISSING
                 )
-                continue
-            x, y = float(c[0]), float(c[1])
-            wells.append({
+                if isinstance(c, (list, tuple)) and len(c) == 1:
+                    try:
+                        x = float(c[0])
+                    except (TypeError, ValueError):
+                        pass
+                logger.warning(
+                    "well feature %r has %s coordinates; marked %s",
+                    f.get("id"),
+                    "unusable" if status == CoordinateStatus.INVALID else "no",
+                    status,
+                )
+            # Never silently upgrade a feature already flagged upstream.
+            prior = str(f.get("coordinate_status") or "")
+            if prior and prior != CoordinateStatus.OK:
+                status = prior
+            well_record: dict[str, Any] = {
                 "id": f["id"],
                 "name": f.get("name", ""),
                 "x": x,
                 "y": y,
                 "lng": f.get("lng", x),
                 "lat": f.get("lat", y),
-            })
+            }
+            if status != CoordinateStatus.OK:
+                well_record["coordinate_status"] = status
+            wells.append(well_record)
         elif kind == "line":
             lines.append({
                 "id": f["id"],
@@ -102,18 +137,29 @@ def apply_features_to_document(doc: PaleoMapDocument, features: list[dict[str, A
                 "coordinates": f.get("coordinates", []),
             })
         elif kind == "label":
-            # #1162: same guard as wells — len(c)==1 must skip, not IndexError.
-            c = f.get("coordinates") or []
-            if len(c) < 2:
+            # Audit #1162: single-element coordinates used to IndexError here.
+            # Skip malformed labels with a diagnostic instead of crashing.
+            c = f.get("coordinates")
+            if not isinstance(c, (list, tuple)) or len(c) < 2:
                 logger.warning(
-                    "Skipping label feature %r with malformed coordinates %r",
-                    f.get("id"), c,
+                    "skipping label feature %r: coordinates must have >= 2 elements, got %r",
+                    f.get("id"),
+                    c,
+                )
+                continue
+            try:
+                anchor = [float(c[0]), float(c[1])]
+            except (TypeError, ValueError):
+                logger.warning(
+                    "skipping label feature %r: non-numeric coordinates %r",
+                    f.get("id"),
+                    c,
                 )
                 continue
             labels.append({
                 "id": f["id"],
                 "text": f.get("text") or f.get("name", ""),
-                "anchor": [c[0], c[1]],
+                "anchor": anchor,
             })
     doc.facies_polygons = facies
     doc.well_overlays = wells

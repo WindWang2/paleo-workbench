@@ -250,6 +250,204 @@ def test_execute_handler_exception_isolated():
     assert "kaboom" in result.error
 
 
+# ------------------------------------------------- #1137 cancel semantics --
+def test_execute_task_cancelled_is_cancelled_not_fail():
+    """A cooperating handler that raises TaskCancelled lands in 'cancelled'."""
+    from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
+    def cancel_me(ctx, p):
+        raise TaskCancelled("stop at safe point")
+
+    registry = ActionRegistry()
+    registry.register(_spec(action_id="demo.cancel", handler=cancel_me))
+    result = HarnessExecutor(registry).execute("demo.cancel", {"x": 1.0})
+    assert result.status == "cancelled"
+    assert result.ok is False
+    assert "cancelled" in (result.error or "")
+
+
+def test_scheduler_marks_cancelled_task_not_failed():
+    """End-to-end chain (#1137): scheduler cancel → cancel token fires in the
+    action context → handler raises TaskCancelled → executor returns
+    status='cancelled' → scheduler terminal state CANCELLED (not FAILED/DONE)."""
+    import threading
+    import time as _time
+
+    from paleo_workbench.runtime import TaskScheduler, TaskSpec
+    from paleo_workbench.runtime.task_scheduler import TaskCancelled, TaskState
+
+    class _Token:
+        """Cancel-token shape the harness/provider contexts understand."""
+
+        def __init__(self, event: threading.Event):
+            self._event = event
+
+        @property
+        def is_cancelled(self) -> bool:
+            return self._event.is_set()
+
+        def raise_if_cancelled(self) -> None:
+            if self._event.is_set():
+                raise TaskCancelled("provider execution cancelled")
+
+    started = threading.Event()
+
+    def hold_until_cancelled(ctx, p):
+        started.set()
+        deadline = _time.monotonic() + 5.0
+        while _time.monotonic() < deadline and not ctx.cancel.is_cancelled:
+            _time.sleep(0.01)
+        ctx.cancel.raise_if_cancelled()  # cooperative stop at the safe point
+        raise AssertionError("unreachable")
+
+    registry = ActionRegistry()
+    registry.register(_spec(action_id="demo.cancel", handler=hold_until_cancelled))
+    executor = HarnessExecutor(registry)
+    sched = TaskScheduler(max_workers=1)
+    try:
+        handle = sched.submit(
+            TaskSpec(
+                callable=lambda task_ctx: executor.execute(
+                    "demo.cancel", {"x": 1.0}, ActionContext(cancel=_Token(task_ctx.cancelled))
+                ),
+                kind="io",
+                title="cancel-chain",
+            )
+        )
+        assert started.wait(timeout=5.0), "task never started"
+        assert sched.cancel(handle.task_id) is True
+        deadline = _time.monotonic() + 5.0
+        while _time.monotonic() < deadline and handle.state in (
+            TaskState.QUEUED,
+            TaskState.RUNNING,
+        ):
+            _time.sleep(0.01)
+        assert handle.state is TaskState.CANCELLED
+        assert handle.error is None  # CANCELLED, not FAILED
+    finally:
+        sched.shutdown(wait=True, timeout=5)
+
+
+# ------------------------------------------- #1178 output_schema contract --
+def test_output_schema_violation_fails_action():
+    registry = ActionRegistry()
+    registry.register(
+        _spec(
+            action_id="demo.out",
+            handler=lambda ctx, p: {"value": p.get("x", 1)},
+            output_schema={
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": False,
+            },
+        )
+    )
+    result = HarnessExecutor(registry).execute("demo.out", {"x": 4.5})
+    assert result.status == "fail"
+    assert "output.value" in result.error  # shape mismatch is explicit, never silent
+
+
+def test_output_schema_satisfied_passes_and_absent_schema_unchanged():
+    registry = ActionRegistry()
+    registry.register(
+        _spec(
+            action_id="demo.out_ok",
+            handler=lambda ctx, p: {"value": "fine"},
+            output_schema={"type": "object", "properties": {"value": {"type": "string"}}},
+        )
+    )
+    result = HarnessExecutor(registry).execute("demo.out_ok", {"x": 1.0})
+    assert result.status == "ok"
+    # No output_schema declared → no output checking (backwards compatible).
+    registry.register(_spec(action_id="demo.plain"))
+    assert HarnessExecutor(registry).execute("demo.plain", {"x": 1.0}).status == "ok"
+
+
+# -------------------------------------------- #1180 degraded admission --
+def test_admission_import_failure_fails_loud_and_marks_degraded(monkeypatch, caplog):
+    import sys
+
+    from paleo_workbench.harness import executor as harness_executor
+
+    harness_executor.reset_admission_degraded()
+    monkeypatch.setitem(sys.modules, "paleo_workbench.runtime.resource_governor", None)
+    registry = ActionRegistry()
+    registry.register(_spec())
+    try:
+        with caplog.at_level("ERROR"):
+            result = HarnessExecutor(registry).execute("demo.answer", {"x": 1.0})
+        assert result.status == "fail"
+        assert "without resource admission" in result.error
+        assert harness_executor.ADMISSION_DEGRADED is True
+        assert any("falling back" in r.message for r in caplog.records)
+    finally:
+        harness_executor.reset_admission_degraded()
+
+
+def test_admission_singleton_broken_degrades_to_default_budget(monkeypatch, caplog):
+    from paleo_workbench.runtime import resource_governor as rg
+    from paleo_workbench.harness import executor as harness_executor
+
+    def broken_get_governor():
+        raise ImportError("governor singleton broken")
+
+    harness_executor.reset_admission_degraded()
+    monkeypatch.setattr(rg, "get_governor", broken_get_governor)
+    registry = ActionRegistry()
+    registry.register(_spec())
+    try:
+        with caplog.at_level("ERROR"):
+            result = HarnessExecutor(registry).execute("demo.answer", {"x": 1.0})
+        assert result.status == "ok"  # ran — but through guarded fallback admission
+        assert harness_executor.ADMISSION_DEGRADED is True
+        assert any("falling back" in r.message for r in caplog.records)
+    finally:
+        harness_executor.reset_admission_degraded()
+
+
+# --------------------------------- #1186 WRITE risk + default permissions --
+def test_write_risk_actions_aligned_with_side_effects():
+    """Disk-writing/catalog-registering actions require explicit WRITE."""
+    registry = get_action_registry()
+    try:
+        for action_id in ("map.create_factor_map", "map.export", "seismic.compute_attribute"):
+            spec = registry.get(action_id)
+            assert spec.risk is ActionRisk.WRITE, f"{action_id} must be WRITE risk"
+        # A default (READ+COMPUTE) context is refused without crashing.
+        result = HarnessExecutor(registry).execute(
+            "map.create_factor_map", {"factor_name": "厚度"}, ActionContext()
+        )
+        assert result.status == "fail"
+        assert "permission" in result.error
+    finally:
+        set_action_registry(None)
+
+
+def test_from_app_defaults_to_read_compute():
+    from types import SimpleNamespace
+
+    from paleo_workbench.harness.context import ActionContext
+
+    context = ActionContext.from_app(SimpleNamespace())
+    assert context.permissions == frozenset({ActionRisk.READ, ActionRisk.COMPUTE})
+
+
+# ------------------------------------- #1174 factor-name slug containment --
+def test_factor_name_slug_never_escapes_artifact_dir(tmp_path):
+    from pathlib import Path
+
+    from paleo_workbench.harness.actions.mapping import _sanitize_factor_slug
+
+    artifact_dir = tmp_path / "demo.artifacts" / "intermediate"
+    for hostile in ("../../etc/passwd", "a/b/c", "厚度 图", "..", "x y", "ok-name"):
+        slug = _sanitize_factor_slug(hostile)
+        assert slug == "factor" or all(c.isalnum() or c in "_.-" for c in slug)
+        artifact_path = artifact_dir / f"factor-{slug}-ab12cd.npz"
+        artifact_path.resolve().relative_to(artifact_dir.resolve())  # containment holds
+        assert Path(slug).name == slug  # single path component
+
+
 def test_execute_admission_lease_released():
     from paleo_workbench.runtime import (
         ResourceBudget,
@@ -399,8 +597,12 @@ def test_map_apply_template_and_geology_interpretation(tmp_path):
 
 def test_visualization_provider_executes_fallback_render(tmp_path, qapp):
     from paleo_workbench.mapping.layers import MapDocument, WellPointMapLayer
-    from paleo_workbench.providers import execute_provider, get_provider_registry
-    from paleo_workbench.providers.errors import ProviderRejectedInputError
+    from paleo_workbench.providers import (
+        ProviderContext,
+        execute_provider,
+        get_provider_registry,
+    )
+    from paleo_workbench.providers.errors import ProviderExecutionError, ProviderRejectedInputError
 
     document = MapDocument(title="viz")
     layer = WellPointMapLayer(name="井位")
@@ -411,15 +613,35 @@ def test_visualization_provider_executes_fallback_render(tmp_path, qapp):
     document.recompute_extent()
 
     provider = get_provider_registry().get("viz.map_render.fallback")
+    # #1177: providers write only inside the workspace the context provides.
+    context = ProviderContext(workspace_root=str(tmp_path))
     out = tmp_path / "render.png"
     result = execute_provider(
         provider,
         inputs={"document": document},
-        parameters={"output_path": str(out), "width": 200, "height": 150},
-        context=None,
+        parameters={"output_path": "render.png", "width": 200, "height": 150},
+        context=context,
     )
     assert out.exists() and out.stat().st_size > 0
     assert result.diagnostics["backend"] == "fallback"
+
+    # Out-of-workspace destinations are refused (#1177): traversal + absolute.
+    for escape in ("../escape.png", "/definitely-outside/escape.png"):
+        with pytest.raises(ProviderExecutionError, match="outside the execution workspace"):
+            execute_provider(
+                provider,
+                inputs={"document": document},
+                parameters={"output_path": escape, "width": 64, "height": 64},
+                context=context,
+            )
+    # No silent overwrite of the file just written.
+    with pytest.raises(ProviderExecutionError, match="overwrite"):
+        execute_provider(
+            provider,
+            inputs={"document": document},
+            parameters={"output_path": "render.png", "width": 64, "height": 64},
+            context=context,
+        )
 
     # Unavailable backends reject honestly instead of raising garbage.
     qgis = get_provider_registry().find("viz.map_render.qgis")
@@ -427,7 +649,7 @@ def test_visualization_provider_executes_fallback_render(tmp_path, qapp):
         with pytest.raises(ProviderRejectedInputError):
             execute_provider(
                 qgis, inputs={"document": document},
-                parameters={"output_path": str(tmp_path / "q.png")}, context=None,
+                parameters={"output_path": str(tmp_path / "q.png")}, context=context,
             )
 
 
@@ -515,3 +737,116 @@ def test_scheduler_claim_is_atomic_no_double_run():
         assert states.count("done") == 40
     finally:
         sched.shutdown(wait=True, timeout=5)
+
+
+# ---------------------------- V2: project artifacts root + V3: workspace --
+def test_harness_artifact_root_uses_project_name_not_demo(tmp_path):
+    """V2: ``<name>.artifacts`` derives from the PROJECT file name — a
+    project that is not called "demo" must never scatter products into a
+    hardcoded ``demo.artifacts`` tree."""
+    from paleo_workbench.harness.actions.mapping import _artifact_root as map_root
+    from paleo_workbench.harness.actions.seismic import _artifact_root as seis_root
+
+    context = ActionContext(project_path=str(tmp_path / "other.paleo.json"))
+    for root in (map_root(context), seis_root(context)):
+        assert root == tmp_path / "other.artifacts"
+
+
+def test_factor_map_artifact_lands_in_project_artifacts_root(tmp_path, monkeypatch):
+    """V2 end-to-end: the factor-map INTERMEDIATE npz lands inside the
+    project's own ``<name>.artifacts`` tree (real catalog registration)."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from paleo_workbench.catalog.adapter import CoreCatalogAdapter
+    from paleo_workbench.catalog.service import DataCatalogService
+    from paleo_workbench.harness.actions import mapping as mapping_actions
+    from paleo_workbench.harness.spec import ActionRisk
+    from paleo_workbench.mapping.layers import GridMapLayer, MapDocument
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.services import geological_mapping_service as gms
+
+    project_path = tmp_path / "other.paleo.json"
+    project_path.write_text("{}", encoding="utf-8")
+    svc = DataCatalogService.open(project_path)
+    catalog = CoreCatalogAdapter(svc)  # the CatalogPort the actions talk to
+
+    grid = SimpleNamespace(
+        grid_z=np.linspace(0.0, 1.0, 100).reshape(10, 10).astype("float32"),
+        grid_x=np.linspace(0.0, 9.0, 10),
+        grid_y=np.linspace(0.0, 9.0, 10),
+    )
+    layer = GridMapLayer(name="孔隙度")
+    layer.grid_result = grid
+    document = MapDocument(title="t")
+    document.add_layer(layer)
+
+    class _StubService:
+        def create_factor_map(self, project, factor_name, **kw):
+            return document, SimpleNamespace(id="task-1")
+
+    monkeypatch.setattr(gms, "DEFAULT_GEOLOGICAL_MAPPING_SERVICE", _StubService())
+
+    context = ActionContext(
+        project=ProjectDocument.new(name="other", region="r"),
+        project_path=str(project_path),
+        catalog=catalog,
+        permissions=frozenset({ActionRisk.READ, ActionRisk.COMPUTE, ActionRisk.WRITE}),
+    )
+    try:
+        result = mapping_actions._create_factor_map(context, {"factor_name": "porosity"})
+        assert result["version_id"]
+        intermediate = tmp_path / "other.artifacts" / "intermediate"
+        assert list(intermediate.glob("factor-porosity-*.npz"))
+        assert not (tmp_path / "demo.artifacts").exists()
+    finally:
+        svc.close()
+
+
+def test_compute_attribute_passes_workspace_root_and_project_artifacts_dir(
+    tmp_path, monkeypatch
+):
+    """V3: the seismic attribute action builds a ProviderContext with the
+    same workspace_root contract as the executor's provider dispatch; V2:
+    its default output lands in the project's ``<name>.artifacts`` tree."""
+    import paleo_workbench.providers as providers_mod
+    from paleo_workbench.harness.actions import seismic as seismic_actions
+    from paleo_workbench.providers.refs import ProviderResult, SeismicVolumeRef
+
+    captured: dict = {}
+
+    def fake_execute_provider(_registry, provider_id, *, inputs, parameters, context):
+        captured["provider_id"] = provider_id
+        captured["parameters"] = parameters
+        captured["context"] = context
+        return ProviderResult()
+
+    monkeypatch.setattr(providers_mod, "execute_provider", fake_execute_provider)
+
+    context = ActionContext(
+        project_path=str(tmp_path / "other.paleo.json"),
+        permissions=frozenset({ActionRisk.READ, ActionRisk.COMPUTE, ActionRisk.WRITE}),
+    )
+    context.active_volume = SeismicVolumeRef(volume_id="v", path=str(tmp_path / "v.zarr"))
+    seismic_actions._compute_attribute(context, {"attribute": "c3"})
+
+    # V3: containment root available to the provider (aligned with
+    # harness/executor.py provider dispatch).
+    assert captured["context"].workspace_root == str(tmp_path)
+    # V2: default derived output inside the project's artifacts tree.
+    assert captured["parameters"]["output_dir"].startswith(
+        str(tmp_path / "other.artifacts" / "derived")
+    )
+    assert not (tmp_path / "demo.artifacts").exists()
+
+
+def test_export_path_delegation_refuses_existing_file(tmp_path):
+    """V3: the delegated resolver keeps the harness no-overwrite contract."""
+    from paleo_workbench.harness.actions.mapping import _resolve_export_path
+
+    existing = tmp_path / "out.png"
+    existing.write_bytes(b"png")
+    context = ActionContext(project_path=str(tmp_path / "t.paleo.json"))
+    with pytest.raises(PermissionError, match="refusing to overwrite|overwrite"):
+        _resolve_export_path(context, str(existing))

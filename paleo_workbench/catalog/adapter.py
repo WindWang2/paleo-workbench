@@ -78,22 +78,27 @@ class CoreCatalogAdapter:
 
     # ------------------------------------------------------------- conversions
     def _tag_by_id(self) -> dict:
-        """Tag id→Tag map cached per (document, revision).
+        """Tag id→Tag map cached per (document, revision, mutation serial).
 
         ``_version_ref`` runs once per listed version; rebuilding the map
         there made ``list_versions`` O(versions × tags). The cache invalidates
-        on any save (revision bump) or document swap (reopen).
+        on any save (revision bump / serial bump) or document swap (reopen).
+        The mutation serial (public ``DataCatalogService.mutation_serial``)
+        covers saves deferred inside batch_save, where the revision now stays
+        put until commit (#1139).
         """
         document = self._service.document
+        serial = getattr(self._service, "mutation_serial", 0)
         cache = getattr(self, "_tag_map_cache", None)
         if (
             cache is not None
             and cache[0] is document
             and cache[1] == document.catalog_revision
+            and cache[2] == serial
         ):
-            return cache[2]
+            return cache[3]
         by_id = {t.id: t for t in document.tags}
-        self._tag_map_cache = (document, document.catalog_revision, by_id)
+        self._tag_map_cache = (document, document.catalog_revision, serial, by_id)
         return by_id
 
     def _tag_names(self, version: DataVersion) -> list[str]:
@@ -327,11 +332,15 @@ class CoreCatalogAdapter:
     def _find_managed_raw(self, source_uri: str, checksum: str | None) -> DataVersion | None:
         """Existing managed RAW version for (path, checksum), or None.
 
-        Uses the SQLite index when it is fresh (O(log N)); a missing/stale
-        index falls back to the document scan so idempotence never depends on
-        the rebuildable cache being healthy.
+        O(1) via the service's in-memory identity index (#1139): the key is
+        looked up in ``managed_raw_by_key`` and validated against the live
+        document, so trash/restore/purge of the candidate (state flips the
+        add/remove hooks cannot see) can never produce a wrong positive.
+        Only an invalidated or missing entry pays the linear scan, which then
+        heals the index — bulk imports of distinct files never scan at all.
         """
         service = self._service
+        maps = service._ensure_maps()
         if checksum is not None:
             try:
                 if service.index_revision() == service.document.catalog_revision:
@@ -376,9 +385,12 @@ class CoreCatalogAdapter:
     def _find_external_by_path(self, resolved: str) -> DataVersion | None:
         """Existing unmanaged version linked at *resolved*, or None.
 
-        Trashed versions are never dedup targets: re-importing a file after
-        trashing it must not silently resolve to the trashed version (review
-        finding I2)."""
+        O(1) via the service's in-memory identity index (#1139), validated
+        against the live document; the scan survives only as the self-healing
+        fallback. Trashed versions are never dedup targets: re-importing a
+        file after trashing it must not silently resolve to the trashed
+        version (review finding I2).
+        """
         service = self._service
         try:
             if service.index_revision() == service.document.catalog_revision:
@@ -411,7 +423,12 @@ class CoreCatalogAdapter:
         for version in service.document.versions:
             if not version.managed and not version.trashed and version.path == resolved:
                 return version
-        return None
+        found = self._scan_external_by_path(resolved)
+        if found is not None:
+            maps.external_by_path[resolved] = found.id
+        else:
+            maps.external_by_path.pop(resolved, None)
+        return found
 
     # ------------------------------------------------------------------- runs
     def begin_run(

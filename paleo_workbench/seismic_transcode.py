@@ -17,6 +17,7 @@ the spec §7 streaming-pool budget.
 """
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -27,6 +28,8 @@ from typing import Callable, Iterator
 
 import numpy as np
 import segyio
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "TranscodeError",
@@ -204,6 +207,54 @@ def _volume_shape(src: Path) -> tuple[int, int, int]:
     return _volume_geometry(src)[0]
 
 
+def _source_identity(src: Path) -> dict:
+    """Source identity recorded at creation and re-checked on resume (#1141).
+
+    ``source_path`` plus size/mtime: enough to fail closed when the same
+    store path is resumed against a *different* SEG-Y (same geometry) —
+    the mix-source hazard — while staying cheap (no content hashing of a
+    100 GB file).
+    """
+    try:
+        st = src.stat()
+        return {
+            "source_path": str(src),
+            "source_size": st.st_size,
+            "source_mtime_ns": st.st_mtime_ns,
+        }
+    except OSError:
+        return {"source_path": str(src)}
+
+
+def _check_source_identity(stored: dict, src: Path) -> None:
+    """Raise TranscodeError when ``stored`` identity is not this source."""
+    stored_path = stored.get("source_path")
+    if stored_path is not None and stored_path != str(src):
+        raise TranscodeError(
+            f"existing store at resume was transcoded from {stored_path!r}, "
+            f"not {str(src)!r}; refusing to mix sources — start a fresh "
+            f"transcode to a new store instead of resuming"
+        )
+    try:
+        st = src.stat()
+    except OSError:
+        return  # path matches; the file's absence is the caller's problem
+    stored_size = stored.get("source_size")
+    if stored_size is not None and int(stored_size) != st.st_size:
+        raise TranscodeError(
+            f"source {src} is {st.st_size} bytes but the existing store was "
+            f"transcoded from {stored_size} bytes; refusing to mix sources — "
+            f"start a fresh transcode to a new store instead of resuming"
+        )
+    stored_mtime = stored.get("source_mtime_ns")
+    if stored_mtime is not None and int(stored_mtime) != st.st_mtime_ns:
+        raise TranscodeError(
+            f"source {src} was modified after the existing store was "
+            f"transcoded (mtime changed); refusing to mix sources — start "
+            f"a fresh transcode to a new store instead of resuming"
+        )
+
+
 def _open_or_create(
     dst: Path,
     shape,
@@ -219,7 +270,7 @@ def _open_or_create(
         _validate_existing(dst, shape, params, source)
         return zarr.open(str(dst), mode="a")
     attributes = {
-        "source_path": str(source),
+        **_source_identity(source),
         "source_format": "seg-y",
         "shape": list(shape),
         **_source_identity(source),
@@ -251,16 +302,29 @@ def _open_or_create(
     )
 
 
-def _validate_existing(dst: Path, shape, params: TranscodeParams, source: Path) -> None:
+def _validate_existing(
+    dst: Path, shape, params: TranscodeParams, source: Path | None = None
+) -> None:
     """Reopened arrays report inner chunks via ``arr.chunks``, so validate
     against the zarr.json itself: outer chunk grid == shard, sharding
-    codec's inner chunk_shape == chunk, codec settings == params."""
+    codec's inner chunk_shape == chunk, codec settings == params, and
+    (when ``source`` is given) the store's recorded source identity matches
+    the source being resumed against (#1141 — never mix sources in one
+    store)."""
     import json
 
     try:
         meta = json.loads((dst / "zarr.json").read_text())
     except Exception as exc:
         raise TranscodeError(f"unreadable zarr.json at {dst}: {exc}") from exc
+    if source is not None:
+        stored_attrs = meta.get("attributes") or {}
+        if stored_attrs.get("source_format") == "seg-y" or stored_attrs.get(
+            "source_path"
+        ):
+            # Stores created before #1141 may lack the identity fields; a
+            # recorded source_path alone still gets checked.
+            _check_source_identity(stored_attrs, source)
     if list(meta.get("shape", [])) != list(shape):
         raise TranscodeError(
             f"existing store at {dst} has shape {meta.get('shape')}; "
@@ -384,6 +448,9 @@ def transcode_segy_to_zarr(
     t_start = time.perf_counter()
 
     def thread_segy():
+        """Serial-path handle (main thread only, #1136 ownership): created
+        and closed by the main thread; the multi-worker reader thread owns
+        its own handle and never registers it here."""
         f = getattr(tls, "segy", None)
         if f is None:
             f = segyio.open(str(src), "r", ignore_geometry=False)
@@ -436,7 +503,7 @@ def transcode_segy_to_zarr(
             # reader thread streams slabs (segyio, ~400 MB/s) ahead of the
             # write stage, so disk reads hide under compression.  The
             # queue depth bounds in-flight slabs to ~workers x shard bytes.
-            from queue import Queue
+            from queue import Empty, Full, Queue
 
             # P2-A: the in-flight window derives from the budget's streaming
             # buffer cap (was a hardcoded 1 GiB) so pressure-time budget
@@ -454,16 +521,79 @@ def transcode_segy_to_zarr(
             q: "Queue[tuple[ShardBox, np.ndarray] | None]" = Queue(
                 maxsize=max_in_flight
             )
+            # #1136: the reader must be able to exit on cancel even while
+            # blocked on a FULL queue (the writer has stopped consuming), and
+            # must own its segyio handle so the main thread never closes a
+            # handle the reader is still using. ``stop`` is set by the writer
+            # the moment it stops consuming; every blocking put in the reader
+            # is bounded and re-checks ``stop``/cancel between attempts.
+            stop = threading.Event()
+            put_timeout = 0.25  # s; upper bound on reader responsiveness
+
+            def stopped() -> bool:
+                if stop.is_set():
+                    return True
+                return cancel is not None and cancel()
+
+            def put_pill() -> None:
+                """Hand the writer its exit sentinel. Always attempted when
+                the reader exits — the writer's ``q.get()`` would otherwise
+                block forever (e.g. cancel already true before the first
+                slab). Skipped only once ``stop`` is set, which only the
+                writer sets AFTER leaving its get-loop, so skipping cannot
+                strand it."""
+                while not stop.is_set():
+                    try:
+                        q.put(None, timeout=put_timeout)
+                        break
+                    except Full:
+                        continue
+
+            # Read/open failures from the reader thread land here and are
+            # re-raised by the main thread after the join (see reader()).
+            reader_error: list[BaseException] = []
 
             def reader() -> None:
-                f = thread_segy()
+                # Handle ownership (#1136): opened here, closed here — the
+                # main thread's ``handles`` list stays reader-free, so its
+                # finally-close can never race this thread's reads.
+                #
+                # read/open failures are recorded in ``reader_error`` and
+                # re-raised by the main thread after the join: the pill the
+                # finally sends lets the writer end "normally", so without
+                # this the failed transcode would return success with an
+                # incomplete store.
+                try:
+                    f = segyio.open(str(src), "r", ignore_geometry=False)
+                except Exception as exc:
+                    reader_error.append(exc)
+                    put_pill()
+                    return
                 try:
                     for box in todo:
-                        if cancel is not None and cancel():
-                            break
-                        q.put((box, read_slab(box, f)))
+                        if stopped():
+                            return  # slab discarded: unwritten, stays todo
+                        try:
+                            slab = read_slab(box, f)
+                        except Exception as exc:
+                            reader_error.append(exc)
+                            return
+                        enqueued = False
+                        while not stopped():
+                            try:
+                                q.put((box, slab), timeout=put_timeout)
+                                enqueued = True
+                                break
+                            except Full:
+                                continue
+                        if not enqueued:
+                            return
                 finally:
-                    q.put(None)
+                    try:
+                        f.close()
+                    except Exception:
+                        pass
+                    put_pill()
 
             reader_thread = threading.Thread(
                 target=reader, name="segy-transcode-reader", daemon=True
@@ -487,7 +617,32 @@ def transcode_segy_to_zarr(
                         if q.get() is None:
                             break
             finally:
+                # Unblock the reader deterministically: signal stop, then
+                # drain the queue so a reader parked on a full queue sees
+                # ``stop`` on its next bounded-put retry (and its in-flight
+                # slabs are released). The reader can then only be inside a
+                # bounded put, a finite segyio read, or handle close, so a
+                # bounded join is conclusive — no thread is left leaking.
+                stop.set()
+                while True:
+                    try:
+                        q.get_nowait()
+                    except Empty:
+                        break
                 reader_thread.join(timeout=30)
+                if reader_thread.is_alive():  # pragma: no cover - safety net
+                    logger.warning(
+                        "segy-transcode-reader did not exit within 30s after "
+                        "stop; leaking one daemon thread (store stays valid)"
+                    )
+                if reader_error:
+                    # The reader failed (open or slab read). The pill made the
+                    # writer stop without an error of its own, so surface the
+                    # failure HERE: the partial store stays resumable, but
+                    # this call must not report success.
+                    raise TranscodeError(
+                        f"transcode failed while reading {src}: {reader_error[0]}"
+                    ) from reader_error[0]
     finally:
         stats.elapsed_s = time.perf_counter() - t_start
         for f in handles:

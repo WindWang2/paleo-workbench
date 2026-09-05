@@ -104,6 +104,13 @@ class AlgorithmRegistry:
         )
 
     def register(self, metadata: AlgorithmMetadata) -> None:
+        # #1185: same-id registration is refused — silent override hides
+        # cross-feature collisions (complexity/perf models would drift).
+        if metadata.id in self._algorithms:
+            raise ValueError(
+                f"algorithm '{metadata.id}' is already registered; refusing silent "
+                "override (pick a unique id)"
+            )
         self._algorithms[metadata.id] = metadata
 
     def get(self, algorithm_id: str) -> AlgorithmMetadata | None:

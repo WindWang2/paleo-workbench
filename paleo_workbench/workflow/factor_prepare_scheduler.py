@@ -112,6 +112,9 @@ class FactorPrepareBatchResult:
     executed_count: int
     failed_count: int
     cancelled: bool = False
+    # Tasks marked cancelled (audit #1168): cancelled is NOT failure — keep
+    # the counts separate so UI/commit logic can tell them apart.
+    cancelled_count: int = 0
     snapshot_ms: float = 0.0
     classify_ms: float = 0.0
     execute_ms: float = 0.0
@@ -602,6 +605,20 @@ def run_factor_prepare_schedule(
                 )
 
     execute_ms = (time.perf_counter() - t_exec0) * 1000.0
+    cancelled_count = sum(
+        1 for item in results_by_id.values() if item.error == "cancelled"
+    )
+    if cancelled:
+        _emit(
+            total=total,
+            clean_n=clean_n,
+            dirty_n=dirty_n,
+            completed=clean_n + executed,
+            failed=failed_n,
+            cancelled=cancelled_count,
+            phase="cancelled",
+            message=f"已取消（{cancelled_count} 个任务未完成）",
+        )
     ordered = tuple(
         results_by_id[t.id]
         for t in exec_project.factor_map_tasks
@@ -616,6 +633,7 @@ def run_factor_prepare_schedule(
         executed_count=executed,
         failed_count=failed_n,
         cancelled=cancelled,
+        cancelled_count=cancelled_count,
         snapshot_ms=snapshot.build_ms,
         classify_ms=classify_ms,
         execute_ms=execute_ms,
@@ -684,6 +702,20 @@ def commit_prepare_batch_result(
             new_tasks.append(item.task)
         live_project.factor_map_tasks = new_tasks
         return _invalidate_live_grids(discarded)
+
+    # Audit #1159: defaults were synthesized only because the SNAPSHOT saw an
+    # empty task list.  If the live project now holds any task, it changed
+    # after the snapshot (real window: snapshot → background worker → delayed
+    # host commit); appending the late synthetic defaults would graft fake
+    # tasks onto a project the user already populated.  Drop them instead.
+    late_defaults = result.created_default_tasks and bool(live_project.factor_map_tasks)
+    if late_defaults:
+        logging.getLogger(__name__).warning(
+            "prepare commit (generation %s): discarding late synthetic default "
+            "tasks — live project gained %d task(s) after the prepare snapshot",
+            result.generation,
+            len(live_project.factor_map_tasks),
+        )
 
     for item in result.task_results:
         if item.reused:

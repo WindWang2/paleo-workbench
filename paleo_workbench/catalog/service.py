@@ -63,6 +63,7 @@ from paleo_workbench.catalog.storage import (
     create_working_copy as _place_working_copy,
     ensure_catalog_layout as _ensure_catalog_layout,
     is_cas_path,
+    is_safe_entity_id,
     place_managed_file,
     purge_trashed_payload,
     restore_payload as _restore_trashed_payload,
@@ -76,11 +77,11 @@ from paleo_workbench.project.paths import artifact_dir_for
 
 
 class _CatalogMaps:
-    """One immutable-swap container for the six id indexes.
+    """One immutable-swap container for the id / dedup indexes.
 
     The dicts inside stay mutable for incremental ``_add_*`` / ``_remove_*``
     updates. Readers must hold this object (from ``_ensure_maps()``) rather
-    than re-reading the six attributes after a concurrent invalidate.
+    than re-reading the attributes after a concurrent invalidate.
     """
 
     __slots__ = (
@@ -90,6 +91,14 @@ class _CatalogMaps:
         "versions_by_asset",
         "children_by_parent",
         "assets_by_legacy_id",
+        # Import-dedup identity indexes (#1139): the exact keys the adapter's
+        # ``_find_managed_raw`` / ``_find_external_by_path`` look up, kept in
+        # memory so bulk imports stay O(1) per file regardless of SQLite
+        # freshness. Candidates are validated against the live document at
+        # lookup, so a missed maintenance site degrades to the self-healing
+        # scan — never a wrong positive.
+        "managed_raw_by_key",
+        "external_by_path",
     )
 
     def __init__(
@@ -101,6 +110,8 @@ class _CatalogMaps:
         versions_by_asset: dict[str, list[DataVersion]],
         children_by_parent: dict[str, list[DataVersion]],
         assets_by_legacy_id: dict[str, DataAsset],
+        managed_raw_by_key: dict[tuple[str, str], str],
+        external_by_path: dict[str, str],
     ) -> None:
         self.asset_by_id = asset_by_id
         self.version_by_id = version_by_id
@@ -108,6 +119,28 @@ class _CatalogMaps:
         self.versions_by_asset = versions_by_asset
         self.children_by_parent = children_by_parent
         self.assets_by_legacy_id = assets_by_legacy_id
+        self.managed_raw_by_key = managed_raw_by_key
+        self.external_by_path = external_by_path
+
+
+def _managed_raw_dedup_key(version: DataVersion) -> tuple[str, str] | None:
+    """Identity key used by managed-RAW import dedup, or None (not eligible)."""
+    if (
+        version.managed
+        and version.stage == DataStage.RAW
+        and not version.trashed
+        and version.source_uri
+        and version.sha256
+    ):
+        return (version.source_uri, version.sha256)
+    return None
+
+
+def _external_dedup_key(version: DataVersion) -> str | None:
+    """Identity key used by external-link dedup, or None (not eligible)."""
+    if not version.managed and not version.trashed and version.path:
+        return version.path
+    return None
 
 
 class _BatchSave:
@@ -159,6 +192,15 @@ class _BatchSave:
             reconcile = service._pending_reconcile
             service._pending_dirty = DirtySet()
             service._pending_reconcile = False
+            # The revision advances exactly once, HERE, with the batch's
+            # single transaction (#1139): bumping it per in-batch _save made
+            # ``document.catalog_revision`` run ahead of the store's view for
+            # the whole batch, so every freshness check that compares the two
+            # (dedup, tag lookups) failed and degraded to linear scans. A
+            # failed flush below reloads the document from the store, which
+            # also restores the pre-batch revision — the old
+            # "flush failure rolls the revision back" semantics keep holding.
+            service.document.catalog_revision += 1
             try:
                 service._flush_canonical_locked(combined, reconcile=reconcile)
             except Exception:
@@ -241,6 +283,12 @@ class DataCatalogService:
         # payloads (verify_integrity) on a worker thread while the UI thread
         # may be saving. Re-entrant so public methods can nest under _save.
         self._lock = threading.RLock()
+        # Monotonic counter advanced by EVERY _save call — including the ones
+        # deferred inside batch_save. Revision-keyed caches (adapter tag map,
+        # lineage summaries) use it alongside catalog_revision so a mutation
+        # inside a batch (where the revision now stays put until commit,
+        # #1139) still invalidates them.
+        self._mutation_serial: int = 0
         # Active :meth:`batch_save` nesting depth: >0 accumulates dirty sets.
         self._batch_depth = 0
         # Dirty entities accumulated by the current (outermost) batch, and
@@ -273,6 +321,23 @@ class DataCatalogService:
         # Published as one snapshot so unlocked readers never observe a
         # mid-rebuild / mid-invalidate None window (#619).
         self._maps: _CatalogMaps | None = None
+
+    # -- change tracking ------------------------------------------------------
+
+    @property
+    def mutation_serial(self) -> int:
+        """Monotonic counter advanced by EVERY mutation, batch or not.
+
+        Public read-only contract for revision-keyed caches (freshness
+        dependency graphs, adapter tag maps, lineage summaries):
+        ``catalog_revision`` alone cannot key them because inside
+        :meth:`batch_save` the revision is held until the batch commits
+        (#1139) while the in-memory document has already changed. This
+        serial bumps on every ``_save`` — including saves deferred inside a
+        batch — so a cache keyed on it never serves a pre-mutation view of
+        the document. It never resets; only ever increases.
+        """
+        return self._mutation_serial
 
     # -- maintained indexes -------------------------------------------------
 
@@ -316,6 +381,36 @@ class DataCatalogService:
         """Drop the cached indexes; they rebuild lazily on next use."""
         self._maps = None
 
+    def _drop_dedup_keys(self, version: DataVersion) -> None:
+        """Remove *version*'s dedup-index entries (only when still its own).
+
+        Keys are computed trash-agnostically: an entry may have been indexed
+        while live and survived a later trash flip (trash does not go through
+        add/remove). Lookups validate candidates against the live document
+        and self-heal via the scan fallback anyway (#1139) — this is just the
+        cheap steady-state maintenance.
+        """
+        maps = self._maps
+        if maps is None:
+            return
+        if (
+            version.managed
+            and version.stage == DataStage.RAW
+            and version.source_uri
+            and version.sha256
+            and maps.managed_raw_by_key.get(
+                (version.source_uri, version.sha256)
+            )
+            == version.id
+        ):
+            del maps.managed_raw_by_key[(version.source_uri, version.sha256)]
+        if (
+            not version.managed
+            and version.path
+            and maps.external_by_path.get(version.path) == version.id
+        ):
+            del maps.external_by_path[version.path]
+
     def _ensure_maps(self) -> _CatalogMaps:
         """Build the id→object indexes from the document (idempotent)."""
         maps = self._maps
@@ -323,10 +418,18 @@ class DataCatalogService:
             return maps
         versions_by_asset: dict[str, list[DataVersion]] = {}
         children: dict[str, list[DataVersion]] = {}
+        managed_raw_by_key: dict[tuple[str, str], str] = {}
+        external_by_path: dict[str, str] = {}
         for version in self.document.versions:
             versions_by_asset.setdefault(version.asset_id, []).append(version)
             for pid in version.parent_version_ids:
                 children.setdefault(pid, []).append(version)
+            raw_key = _managed_raw_dedup_key(version)
+            if raw_key is not None:
+                managed_raw_by_key.setdefault(raw_key, version.id)
+            ext_key = _external_dedup_key(version)
+            if ext_key is not None:
+                external_by_path.setdefault(ext_key, version.id)
         # Legacy-bridge resolution order mirrors ``_find_asset_by_legacy_id``:
         # an asset whose *id* equals the legacy id wins; otherwise the first
         # asset bridged via ``legacy_resource_id`` (first-wins via setdefault).
@@ -343,6 +446,8 @@ class DataCatalogService:
             versions_by_asset=versions_by_asset,
             children_by_parent=children,
             assets_by_legacy_id=legacy,
+            managed_raw_by_key=managed_raw_by_key,
+            external_by_path=external_by_path,
         )
         self._maps = maps
         return maps
@@ -483,6 +588,13 @@ class DataCatalogService:
             self._versions_by_asset.setdefault(version.asset_id, []).append(version)
             for pid in version.parent_version_ids:
                 self._children_by_parent.setdefault(pid, []).append(version)
+            maps = self._maps
+            raw_key = _managed_raw_dedup_key(version)
+            if raw_key is not None:
+                maps.managed_raw_by_key[raw_key] = version.id
+            ext_key = _external_dedup_key(version)
+            if ext_key is not None:
+                maps.external_by_path[ext_key] = version.id
 
     def _remove_version(self, version: DataVersion) -> None:
         _discard_by_identity(self.document.versions, version)
@@ -495,6 +607,7 @@ class DataCatalogService:
                 children = self._children_by_parent.get(pid)
                 if children is not None:
                     _discard_by_identity(children, version)
+            self._drop_dedup_keys(version)
 
     def _remove_versions_bulk(self, versions: list[DataVersion]) -> None:
         """Remove many versions in one pass over each affected container (#1044)."""
@@ -510,6 +623,7 @@ class DataCatalogService:
         affected_parents: set[str] = set()
         for version in versions:
             self._version_by_id.pop(version.id, None)
+            self._drop_dedup_keys(version)
             affected_assets.add(version.asset_id)
             affected_parents.update(version.parent_version_ids)
         for asset_id in affected_assets:
@@ -728,15 +842,18 @@ class DataCatalogService:
         """Persist the canonical document (dirty rows only when known).
 
         The revision only advances if the flush succeeds. Inside
-        :meth:`batch_save` the write is deferred to the context exit (one
-        transaction for the whole batch). Before writing, the store's
+        :meth:`batch_save` the write AND the revision bump are deferred to
+        the context exit (one transaction for the whole batch) so the
+        document's revision keeps matching the store's committed view
+        mid-batch (#1139); the mutation serial still advances so
+        revision-keyed caches invalidate. Before writing, the store's
         on-disk revision is compared against this session's baseline: a
         store that advanced since we last wrote was committed by another
         process, and overwriting it would silently drop that process's data
         (last-writer-wins, #411) — refuse instead.
         """
         with self._lock:
-            self.document.catalog_revision += 1
+            self._mutation_serial += 1
             if self._batch_depth:
                 if dirty is None:
                     # Unknown mutation scope: the batch exit must reconcile.
@@ -744,6 +861,7 @@ class DataCatalogService:
                 else:
                     self._pending_dirty.merge(dirty)
                 return
+            self.document.catalog_revision += 1
             try:
                 self._flush_canonical_locked(
                     dirty or DirtySet(), reconcile=dirty is None
@@ -1020,7 +1138,18 @@ class DataCatalogService:
         return sorted(versions, key=lambda v: v.version_number)
 
     def resolve_path(self, version: DataVersion) -> Path:
-        """Runtime absolute path for a version's payload."""
+        """Runtime absolute path for a version's payload.
+
+        Exact-match ladder only (#1140): managed versions resolve to the
+        project-dir-joined recorded path; external versions resolve to the
+        recorded absolute path when it exists, a project-relative join when
+        that exists, or — for a recorded path containing the project dir
+        name — the subpath re-anchored onto the CURRENT project dir (project
+        relocation). There is deliberately NO basename / last-two-segments
+        guess: an external RAW that moved must surface as missing (integrity
+        reports it), never silently re-bind to an unrelated in-project file
+        that happens to share the name.
+        """
         project_dir = self.project_path.expanduser().resolve().parent
         if version.managed:
             return project_dir / version.path
@@ -1116,13 +1245,7 @@ class DataCatalogService:
 
     def _is_safe_version_id(self, version_id: str) -> bool:
         """True when *version_id* is safe to use as a storage path segment."""
-        return bool(
-            version_id
-            and not version_id.startswith(".")
-            and all(c.isalnum() or c in "._-" for c in version_id)
-            and "/" not in version_id
-            and "\\" not in version_id
-        )
+        return is_safe_entity_id(version_id)
 
     def _next_version_number(self, asset_id: str) -> int:
         numbers = [
@@ -1436,6 +1559,12 @@ class DataCatalogService:
                 "bytes": total,
             }
             layout = _ensure_catalog_layout(self.project_path)
+            # The asset/version ids become storage path segments (#1175).
+            if not is_safe_entity_id(asset.id) or not is_safe_entity_id(version.id):
+                raise CatalogError(
+                    f"Unsafe entity id for managed layout: asset={asset.id!r} "
+                    f"version={version.id!r}: only [A-Za-z0-9._-] allowed"
+                )
             target = layout / "derived" / asset.id / version.id
             target.mkdir(parents=True, exist_ok=True)
             final = target / store_dirname
@@ -2209,9 +2338,11 @@ class DataCatalogService:
 
         Computed once per catalog revision and cached (table columns ask for
         every asset on each refresh; the walk itself is O(V+E) memoized DFS).
+        Keyed on (revision, mutation serial) so mutations deferred inside a
+        batch_save (revision held until commit, #1139) still invalidate.
         """
         with self._lock:
-            revision = self.document.catalog_revision
+            revision = (self.document.catalog_revision, self.mutation_serial)
             cache = getattr(self, "_lineage_summary_cache", None)
             cache_rev = getattr(self, "_lineage_summary_cache_rev", None)
             if cache is None or cache_rev != revision:

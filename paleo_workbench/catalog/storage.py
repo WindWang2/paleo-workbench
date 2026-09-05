@@ -41,6 +41,32 @@ def catalog_dir_for(project_path: Path) -> Path:
     return artifact_dir_for(Path(project_path)) / "metadata"
 
 
+def is_safe_entity_id(entity_id: str) -> bool:
+    """True when *entity_id* is safe to interpolate as a storage path segment.
+
+    Same contract as ``DataCatalogService._is_safe_version_id`` (#1175): a
+    caller/legacy-controlled id (a migrated ``ResourceItem.id`` used as an
+    asset id) containing ``/``, ``\\``, ``..`` or an absolute prefix must
+    never be joined into ``{stage}/{asset_id}/{version_id}/`` — it would
+    escape the ledger tree. Non-empty, no leading dot, and only
+    ``[A-Za-z0-9._-]`` characters.
+    """
+    return bool(
+        entity_id
+        and not entity_id.startswith(".")
+        and all(c.isalnum() or c in "._-" for c in entity_id)
+        and "/" not in entity_id
+        and "\\" not in entity_id
+    )
+
+
+def _require_safe_entity_id(role: str, entity_id: str) -> None:
+    if not is_safe_entity_id(entity_id):
+        raise CatalogError(
+            f"Unsafe {role} id {entity_id!r}: only [A-Za-z0-9._-] allowed"
+        )
+
+
 def ensure_catalog_layout(project_path: Path) -> Path:
     """Create the catalog storage directories; returns the artifacts root."""
     root = artifact_dir_for(Path(project_path))
@@ -191,6 +217,7 @@ def trash_payload(project_path: Path, version_path: Path, version_id: str) -> st
     """
     source = Path(version_path)
     project = Path(project_path)
+    _require_safe_entity_id("version", version_id)
     if is_cas_path(project, _relpath_for(project, source)):
         return _relpath_for(project, source)
     if source.is_dir():
@@ -374,6 +401,11 @@ def place_managed_file(
     """
     source = Path(source)
     project = Path(project_path)
+    # #1175: asset/version ids become path segments under
+    # ``{stage}/{asset_id}/{version_id}/`` — reject traversal-shaped ids
+    # before any directory is created.
+    _require_safe_entity_id("asset", asset_id)
+    _require_safe_entity_id("version", version_id)
     if known_sha256 is not None and has_blob(project, known_sha256):
         try:
             if source.stat().st_size == blob_size(project, known_sha256) \
@@ -440,6 +472,7 @@ def create_working_copy(project_path: Path, version_path: Path, version_id: str)
     original. The copy is left writable regardless of the source's read-only bit.
     """
     version_path = Path(version_path)
+    _require_safe_entity_id("version", version_id)
     target_dir = working_dir_for(Path(project_path)) / version_id
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / version_path.name

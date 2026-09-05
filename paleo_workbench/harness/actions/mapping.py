@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from pathlib import Path
 from typing import Any
 
 from paleo_workbench.harness.context import ActionContext
@@ -21,7 +22,10 @@ def register(registry) -> None:
             action_id="map.create_factor_map",
             description="从井点因素数据生成单因素图（提取→插值→网格/等值线/井位图层→MapDocument），生产管线。",
             handler=_create_factor_map,
-            risk=ActionRisk.COMPUTE,
+            # #1186: writes the grid artifact to disk and registers a DataRun
+            # + INTERMEDIATE version in the catalog — a real WRITE, not pure
+            # compute.
+            risk=ActionRisk.WRITE,
             category="background.compute",
             resource_profile={"estimated_cpu_cores": 2.0, "estimated_ram_bytes": 512 * 1024**2, "io_weight": 0.5},
             supports_cancel=True,
@@ -166,8 +170,8 @@ def register(registry) -> None:
             action_id="map.export",
             description="导出当前图（PNG/SVG/PDF，生产导出路径），登记 catalog OUTPUT 版本。",
             handler=_export,
-            # #1186: writes files + registers catalog versions — COMPUTE
-            # understates the side effect and would run on default perms.
+            # #1186: writes the exported file into the workspace and registers
+            # a catalog OUTPUT version — WRITE, aligned with its side effects.
             risk=ActionRisk.WRITE,
             category="export",
             resource_profile={"estimated_cpu_cores": 1.0, "estimated_ram_bytes": 512 * 1024**2, "io_weight": 2.0},
@@ -188,6 +192,21 @@ def register(registry) -> None:
 
 
 # ------------------------------------------------------------- helpers --
+def _artifact_root(context: ActionContext) -> Path:
+    """The PROJECT's artifacts tree (``<name>.artifacts``) — V2.
+
+    Never a hardcoded ``demo`` name: a project saved under another name
+    must keep its products inside its own tree (same root the catalog
+    manages, ``project/paths.artifact_dir_for``). Project-less contexts
+    keep the legacy ``./demo.artifacts`` fallback.
+    """
+    from paleo_workbench.project.paths import artifact_dir_for
+
+    if context.project_path:
+        return artifact_dir_for(Path(context.project_path))
+    return Path.cwd() / "demo.artifacts"
+
+
 def _current_document(context: ActionContext) -> Any:
     document = context.map_documents.get(context.current_map_id or "")
     if document is None and len(context.map_documents) == 1:
@@ -203,6 +222,18 @@ def _publish(context: ActionContext, document: Any, document_id: str) -> None:
 
 
 # ------------------------------------------------------------- handlers --
+def _sanitize_factor_slug(name: Any) -> str:
+    """Whitelist slug for agent-supplied factor names (#1174).
+
+    Same rule as the scalar raster mirror slugs
+    (``mapping/scalar_raster_mirror.py``): everything outside
+    ``[A-Za-z0-9_.-]`` collapses to ``_`` so a factor name can never smuggle
+    a path separator, ``..`` traversal or whitespace into a document id /
+    artifact filename.
+    """
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(name)).strip("_") or "factor"
+
+
 def _create_factor_map(context: ActionContext, parameters: dict) -> dict:
     from paleo_workbench.services.geological_mapping_service import (
         DEFAULT_GEOLOGICAL_MAPPING_SERVICE,
@@ -219,10 +250,9 @@ def _create_factor_map(context: ActionContext, parameters: dict) -> dict:
         include_wells=bool(parameters.get("include_wells", True)),
         title=parameters.get("title"),
     )
-    document_id = (
-        f"factor-{_safe_filename_segment(str(parameters['factor_name']))}"
-        f"-{uuid.uuid4().hex[:6]}"
-    )
+    # #1174: factor_name is agent input — the document_id (and the artifact
+    # filename derived from it) only carries the sanitized slug.
+    document_id = f"factor-{_sanitize_factor_slug(parameters['factor_name'])}-{uuid.uuid4().hex[:6]}"
     grid_layers = [l for l in document.layers if getattr(l, "layer_type", "") == "grid"]
     grid = getattr(grid_layers[0], "grid_result", None) if grid_layers else None
 
@@ -245,20 +275,23 @@ def _create_factor_map(context: ActionContext, parameters: dict) -> dict:
     version_identity = None
     run_id_out = None
     if grid is not None and context.catalog is not None:
+        # V2: the project's real artifacts tree, not a hardcoded demo name.
+        artifact_dir = _artifact_root(context) / "intermediate"
+        artifact_path = artifact_dir / f"{document_id}.npz"
+        # #1174: containment after resolution — the slug whitelist above is
+        # the primary defense; this guard fail-closes the action (outside the
+        # best-effort provenance try) if a path ever escapes anyway.
+        try:
+            artifact_path.resolve().relative_to(artifact_dir.resolve())
+        except ValueError:
+            raise PermissionError(
+                f"factor-map artifact path {artifact_path} escapes the workspace "
+                f"artifacts directory ({artifact_dir})"
+            ) from None
         try:
             import numpy as np
-            from pathlib import Path
 
-            root = Path(context.project_path).parent if context.project_path else Path.cwd()
-            artifact_dir = root / "demo.artifacts" / "intermediate"
             artifact_dir.mkdir(parents=True, exist_ok=True)
-            artifact_path = artifact_dir / f"{document_id}.npz"
-            # #1174 defense in depth: even a sanitized segment must resolve
-            # inside the artifact dir (mirrors _resolve_export_path).
-            if artifact_dir.resolve() not in artifact_path.resolve().parents:
-                raise PermissionError(
-                    f"artifact path escapes the workspace: {artifact_path}"
-                )
             np.savez_compressed(
                 artifact_path,
                 grid_z=grid.grid_z,
@@ -555,25 +588,27 @@ def _safe_filename_segment(raw: str) -> str:
 def _resolve_export_path(context: ActionContext, raw: str) -> str:
     """Constrain agent-chosen export paths to the workspace.
 
-    Absolute paths must live under the project root; relative paths resolve
-    against it; existing files are refused (no agent-triggered overwrite —
+    V3: delegates to the provider SDK's single containment implementation
+    (:func:`paleo_workbench.providers.paths.resolve_contained_output`,
+    #1177) so harness and provider paths cannot drift apart — absolute
+    paths must live under the project root, relative paths resolve against
+    it, and existing files are refused (no agent-triggered overwrite;
     overwriting is a destructive action the registry does not install).
+    Failures surface as ``PermissionError`` (harness action semantics).
     """
-    from pathlib import Path
+    from paleo_workbench.providers import ProviderContext
+    from paleo_workbench.providers.errors import ProviderExecutionError
+    from paleo_workbench.providers.paths import resolve_contained_output
 
-    raw_path = Path(raw).expanduser()
     root = Path(context.project_path).parent if context.project_path else Path.cwd()
-    resolved = raw_path.resolve() if raw_path.is_absolute() else (root / raw_path).resolve()
     try:
-        # Containment AFTER resolution: relative traversal ("../..") must
-        # not escape the workspace either.
-        resolved.relative_to(root.resolve())
-    except ValueError:
-        raise PermissionError(
-            f"export path must stay under the project workspace ({root})"
-        ) from None
-    if resolved.exists():
-        raise PermissionError(f"refusing to overwrite existing file {resolved}")
+        resolved = resolve_contained_output(
+            ProviderContext(workspace_root=str(root)),
+            raw,
+            provider_id="harness.map.export",
+        )
+    except ProviderExecutionError as exc:
+        raise PermissionError(str(exc)) from exc
     return str(resolved)
 
 
@@ -596,8 +631,10 @@ def _export(context: ActionContext, parameters: dict) -> dict:
             )
     from paleo_workbench.providers import ProviderContext, execute_provider, get_provider_registry
 
+    root = Path(context.project_path).parent if context.project_path else Path.cwd()
     provider_context = ProviderContext(
         catalog=context.catalog,
+        workspace_root=str(root),
         emit_progress=context.progress,
         cancel=context.cancel,
         work_dir=context.extras.get("work_dir"),

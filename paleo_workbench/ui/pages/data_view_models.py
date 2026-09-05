@@ -461,13 +461,32 @@ def asset_view_from_resource(
     )
 
 
-def asset_view_from_artifact(artifact: ExportArtifact, project_root: Path | None = None) -> AssetView:
+def asset_view_from_artifact(
+    artifact: ExportArtifact,
+    project_root: Path | None = None,
+    fs_probe: "FsProbeCache | None" = None,
+) -> AssetView:
     name = Path(artifact.output_path).name or artifact.output_path
     path_obj = Path(artifact.output_path)
     if not path_obj.is_absolute() and project_root is not None:
         path_obj = project_root / path_obj
 
-    file_exists = _path_exists(path_obj)
+    # #1171: one probe answers exists + is-file + size (the legacy path paid
+    # exists + is_file + stat — three syscalls — per artifact per refresh).
+    stat_result = None
+    file_exists = False
+    if fs_probe is not None:
+        node = fs_probe.probe(path_obj)
+        file_exists = node is not None
+        if node is not None and stat_module.S_ISREG(node.st_mode):
+            stat_result = node
+    else:
+        file_exists = _path_exists(path_obj)
+        if file_exists and path_obj.is_file():
+            try:
+                stat_result = path_obj.stat()
+            except OSError:
+                stat_result = None
     if not file_exists:
         integrity = IntegrityState.MISSING
     else:
@@ -477,12 +496,7 @@ def asset_view_from_artifact(artifact: ExportArtifact, project_root: Path | None
         # posture is UNKNOWN ("未校验") (#850-4).
         integrity = IntegrityState.UNKNOWN
 
-    size_bytes = None
-    if file_exists and path_obj.is_file():
-        try:
-            size_bytes = path_obj.stat().st_size
-        except OSError:
-            pass
+    size_bytes = stat_result.st_size if stat_result is not None else None
 
     default_version = VersionView(
         version_id="v1",
@@ -536,7 +550,9 @@ def asset_view_from_object(
     if isinstance(asset, ResourceItem):
         return asset_view_from_resource(asset, project_root=project_root, fs_probe=fs_probe)
     if isinstance(asset, ExportArtifact):
-        return asset_view_from_artifact(artifact=asset, project_root=project_root)
+        return asset_view_from_artifact(
+            artifact=asset, project_root=project_root, fs_probe=fs_probe
+        )
 
     # Duck-typing fallback for generic asset objects
     name = getattr(asset, "name", str(asset))
@@ -570,7 +586,11 @@ def asset_view_from_object(
     )
 
 
-def _integrity_from_version(service: Any, version: Any) -> IntegrityState:
+def _integrity_from_version(
+    service: Any,
+    version: Any,
+    fs_probe: "FsProbeCache | None" = None,
+) -> IntegrityState:
     """Map the catalog's recorded integrity posture for *version* to the UI
     enum WITHOUT re-hashing the payload on the UI thread.
 
@@ -580,14 +600,24 @@ def _integrity_from_version(service: Any, version: Any) -> IntegrityState:
     cheap, non-blocking facts: trashed → UNKNOWN, unmanaged → UNMANAGED,
     managed payload present → VERIFIED (recorded checksum exists), managed
     payload missing → MISSING. A byte-level tamper verdict is delivered by
-    the worker flow (review finding I6)."""
+    the worker flow (review finding I6).
+
+    ``fs_probe`` (#1171): when given, payload presence is answered by the
+    shared per-refresh FsProbeCache (one stat per distinct path) instead of
+    a fresh ``Path.is_file`` syscall per call, and results stay consistent
+    within one materialization refresh."""
     try:
         if version.trashed:
             return IntegrityState.UNKNOWN
         if not version.managed:
             return IntegrityState.UNMANAGED
         payload = service.resolve_path(version)
-        if not payload.is_file():
+        if fs_probe is not None:
+            node = fs_probe.probe(payload)
+            present = node is not None and stat_module.S_ISREG(node.st_mode)
+        else:
+            present = payload.is_file()
+        if not present:
             return IntegrityState.MISSING
         if version.sha256:
             return IntegrityState.VERIFIED
@@ -596,31 +626,44 @@ def _integrity_from_version(service: Any, version: Any) -> IntegrityState:
         return IntegrityState.UNKNOWN
 
 
-def _version_tag_display_map(service):
-    """version_id → [tag display names], cached per (document, revision).
+# Module-level tag-map cache (#1173): ``enrich_view_from_catalog`` used to
+# rebuild tag_by_id + version_tag_map (O(tags + associations)) on EVERY call,
+# and the data page calls it per row selection. Keyed on document identity +
+# catalog revision + the service's mutation serial (public
+# ``DataCatalogService.mutation_serial``), so any catalog write (including
+# mutations deferred inside batch_save, where the revision is held until
+# commit) invalidates it. The cache holds the document reference alive,
+# keeping ``id()`` stable.
+_CATALOG_TAG_MAPS_CACHE: tuple[Any, int, int, dict, dict[str, list[str]]] | None = None
 
-    #1173: enrich runs on row-selection paths; rebuilding the whole map
-    per call is O(all version-tag links). Mirrors the adapter's
-    revision-keyed tag cache — any save bumps the revision and invalidates.
-    """
+
+def _catalog_tag_maps(service: Any) -> tuple[dict, dict[str, list[str]]]:
+    """``(tag_by_id, version_tag_map)`` cached per catalog state (#1173)."""
+    global _CATALOG_TAG_MAPS_CACHE
     document = service.document
-    cache = getattr(service, "_view_version_tag_map_cache", None)
+    revision = document.catalog_revision
+    serial = getattr(service, "mutation_serial", 0)
+    cache = _CATALOG_TAG_MAPS_CACHE
     if (
         cache is not None
         and cache[0] is document
-        and cache[1] == document.catalog_revision
+        and cache[1] == revision
+        and cache[2] == serial
     ):
-        return cache[2], cache[3]
+        return cache[3], cache[4]
     tag_by_id = {t.id: t for t in document.tags}
-    mapping: dict[str, list[str]] = {}
-    for vid, tids in document.version_tags.items():
-        mapping[vid] = [
-            tag_by_id[tid].display_name or tag_by_id[tid].name
-            for tid in tids
-            if tid in tag_by_id
-        ]
-    service._view_version_tag_map_cache = (document, document.catalog_revision, mapping, tag_by_id)
-    return mapping, tag_by_id
+    version_tag_map: dict[str, list[str]] = {}
+    try:
+        for vid, tids in document.version_tags.items():
+            version_tag_map[vid] = [
+                tag_by_id[tid].display_name or tag_by_id[tid].name
+                for tid in tids
+                if tid in tag_by_id
+            ]
+    except Exception:
+        version_tag_map = {}
+    _CATALOG_TAG_MAPS_CACHE = (document, revision, serial, tag_by_id, version_tag_map)
+    return tag_by_id, version_tag_map
 
 
 def enrich_view_from_catalog(view: AssetView, service: Any, asset_id: str) -> AssetView:
@@ -654,13 +697,9 @@ def enrich_view_from_catalog(view: AssetView, service: Any, asset_id: str) -> As
     except Exception:
         versions = []
     # Version-level tags come from the catalog association map
-    # (document.version_tags: version_id -> [tag_id]), revision-cached (#1173).
-    tag_by_id = {}
-    version_tag_map: dict[str, list[str]] = {}
-    try:
-        version_tag_map, tag_by_id = _version_tag_display_map(service)
-    except Exception:
-        version_tag_map = {}
+    # (document.version_tags: version_id -> [tag_id]) — served from the
+    # revision-keyed module cache instead of a per-call rebuild (#1173).
+    tag_by_id, version_tag_map = _catalog_tag_maps(service)
     current_version = None
     if versions:
         view.versions = [
@@ -690,9 +729,13 @@ def enrich_view_from_catalog(view: AssetView, service: Any, asset_id: str) -> As
     # --- integrity ---------------------------------------------------------
     # The catalog is the lifecycle authority: report the CURRENT version's
     # recorded integrity instead of the legacy inference. A trashed version
-    # reports UNKNOWN (its payload moved out of its stage location).
+    # reports UNKNOWN (its payload moved out of its stage location). One
+    # FsProbeCache covers every version of this enrichment pass (#1171).
     if current_version is not None:
-        view.integrity_state = _integrity_from_version(service, current_version)
+        fs_probe = FsProbeCache()
+        view.integrity_state = _integrity_from_version(
+            service, current_version, fs_probe
+        )
 
     # --- tags -------------------------------------------------------------
     try:
@@ -807,6 +850,10 @@ def catalog_row_overview(service: Any) -> dict[str, CatalogRowOverview]:
         assets = service.list_assets(include_trashed=True)
         summaries = service.lineage_summaries()
         tag_by_id = {t.id: t for t in service.document.tags}
+        # One probe cache for the whole pass (#1171): per-asset integrity
+        # checks share stats (one per distinct payload path) and stay
+        # consistent within this materialization refresh.
+        fs_probe = FsProbeCache()
         versions_by_asset: dict[str, list[Any]] = {}
         for version in service.document.versions:
             versions_by_asset.setdefault(version.asset_id, []).append(version)
@@ -848,7 +895,9 @@ def catalog_row_overview(service: Any) -> dict[str, CatalogRowOverview]:
                 asset=asset,
             )
             if current is not None:
-                overview.integrity_state = _integrity_from_version(service, current)
+                overview.integrity_state = _integrity_from_version(
+                    service, current, fs_probe
+                )
             try:
                 tag_ids = service.document.asset_tags.get(asset.id, [])
                 overview.tags = [

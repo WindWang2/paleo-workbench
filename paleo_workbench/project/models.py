@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from paleo_workbench.project.domain import (
     DomainEntity,
@@ -531,7 +531,14 @@ class ProjectDocument(BaseModel):
     :mod:`paleo_workbench.project.domain_migration`): legacy files load as
     version 1 and are upgraded in memory; the new schema persists on the next
     successful save only.
+
+    Unknown top-level sections survive a load→save roundtrip (#1170):
+    ``extra="allow"`` keeps them on the model (and therefore in
+    ``model_dump``) so a file written by a NEWER app version loses no
+    sections when an older version opens and re-saves it.
     """
+
+    model_config = ConfigDict(extra="allow")
 
     schema_version: int = 1
     meta: ProjectMeta

@@ -34,9 +34,22 @@ from paleo_workbench.harness.validation import (
     ScientificValidator,
 )
 from paleo_workbench.providers.errors import InvalidParametersError
-from paleo_workbench.providers.execution import validate_parameters
+from paleo_workbench.providers.execution import default_budget_lease, validate_parameters
+from paleo_workbench.runtime.task_scheduler import TaskCancelled
 
 logger = logging.getLogger(__name__)
+
+#: #1180: set when the first-party runtime admission modules failed to
+#: import. Actions then admit through the conservative default-budget
+#: fallback — never an unguarded pass. Mirrors
+#: :data:`paleo_workbench.providers.execution.GOVERNOR_DEGRADED`.
+ADMISSION_DEGRADED = False
+
+
+def reset_admission_degraded() -> None:
+    """Test helper: clear the #1180 degraded marker."""
+    global ADMISSION_DEGRADED
+    ADMISSION_DEGRADED = False
 
 
 class ActionPermissionError(PermissionError):
@@ -59,7 +72,7 @@ class ActionValidationError(ValueError):
 @dataclass(slots=True)
 class ActionResult:
     action_id: str
-    status: str = "ok"  # ok | warning | fail
+    status: str = "ok"  # ok | warning | fail | cancelled
     outputs: dict[str, Any] = field(default_factory=dict)
     verification: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
@@ -144,6 +157,7 @@ class HarnessExecutor:
         try:
             lease = self._admit(spec)
             payload = self._execute_spec(spec, parameters, context, result)
+            self._validate_output(spec, payload)
             verification = self._verify(spec, payload, parameters, context)
             result.verification = verification
             if isinstance(payload, dict):
@@ -171,6 +185,14 @@ class HarnessExecutor:
         except (ActionValidationError, InvalidParametersError) as exc:
             result.status = "fail"
             result.error = str(exc)
+        except TaskCancelled as exc:
+            # #1137: cooperative cancellation is a first-class terminal
+            # outcome — "cancelled", never "fail". Returning (instead of
+            # re-raising) keeps the executor's isolation contract: the loop
+            # never crashes, and scheduler-side callers detect the cancel
+            # through their cancellation token and land in CANCELLED.
+            result.status = "cancelled"
+            result.error = f"cancelled: {exc}"
         except PermissionError as exc:
             result.status = "fail"
             result.error = str(exc)
@@ -204,8 +226,16 @@ class HarnessExecutor:
             volume = context.active_volume
             if isinstance(volume, (SeismicVolumeRef, PathRef)):
                 inputs["volume"] = volume
+            from pathlib import Path
+
+            workspace_root = (
+                str(Path(context.project_path).parent)
+                if context.project_path
+                else str(Path.cwd())
+            )
             provider_context = ProviderContext(
                 catalog=context.catalog,
+                workspace_root=workspace_root,
                 emit_progress=context.progress,
                 cancel=context.cancel,
                 work_dir=context.extras.get("work_dir"),
@@ -234,7 +264,25 @@ class HarnessExecutor:
 
         return get_provider_registry()
 
+    @staticmethod
+    def _validate_output(spec: ActionSpec, payload: Any) -> None:
+        """Enforce a declared ``output_schema`` on the action payload (#1178).
+
+        Minimal-but-real: the top-level required keys and types of the
+        payload dict must match the schema. A violation raises
+        :class:`ActionValidationError` (caught by the loop → status "fail"
+        with the reasons) — a shape-mismatched result is never silently
+        passed to the caller. Schemas that declare nothing stay unchecked.
+        """
+        schema = spec.output_schema
+        if not schema or not isinstance(payload, dict):
+            return
+        problems = validate_parameters(schema, payload, label="output")
+        if problems:
+            raise ActionValidationError(spec.action_id, problems)
+
     def _admit(self, spec: ActionSpec):
+        global ADMISSION_DEGRADED
         try:
             from paleo_workbench.runtime.resource_governor import TaskRequest, get_governor
             from paleo_workbench.runtime.task_categories import TaskCategory
@@ -251,8 +299,33 @@ class HarnessExecutor:
                     io_weight=profile.get("io_weight", 0.5),
                 )
             )
-        except ImportError:
-            return None
+        except ImportError as exc:
+            # #1180: an ImportError of first-party runtime modules is never a
+            # silent "no admission" pass — same contract as the provider
+            # executor: log, mark degraded, retry against a conservative
+            # default-budget governor, or fail loudly.
+            ADMISSION_DEGRADED = True
+            logger.error(
+                "first-party resource admission modules unavailable for action %s "
+                "(%s); falling back to conservative default-budget admission",
+                spec.action_id,
+                exc,
+            )
+            profile = spec.resource_profile
+            try:
+                return default_budget_lease(
+                    category_value=spec.category,
+                    title=f"action:{spec.action_id} (degraded-admission)",
+                    estimated_cpu_cores=float(profile.get("estimated_cpu_cores", 0.5)),
+                    estimated_ram_bytes=int(profile.get("estimated_ram_bytes", 0)),
+                    estimated_vram_bytes=int(profile.get("estimated_vram_bytes", 0)),
+                    io_weight=profile.get("io_weight", 0.5),
+                )
+            except ImportError as fallback_exc:
+                raise RuntimeError(
+                    f"first-party runtime admission modules are broken ({exc}); refusing "
+                    f"to execute action {spec.action_id!r} without resource admission"
+                ) from fallback_exc
         # ResourceExhausted propagates deliberately — pressure shedding is a
         # first-class outcome the agent must see, not a silent queue.
 

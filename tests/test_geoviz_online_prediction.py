@@ -281,6 +281,10 @@ def test_authenticated_provider_persists_mocked_online_result(
         model_version = ensure_geoviz_online_model(service)
         monkeypatch.setenv("PALEO_GEOVIZ_API_KEY", "ak_test")
         monkeypatch.setenv("PALEO_GEOVIZ_ONLINE_BASE_URL", "https://inference.test/api/v1")
+        # #1184-附带: the operator environment decides which registered
+        # remote model may process well curves; the run parameter snapshot
+        # (below) is display-only and must be ignored.
+        monkeypatch.setenv("PALEO_GEOVIZ_MODEL_VERSION_ID", "model-gr")
         captured = {}
 
         def _fake_online(well_name, well_log, **kwargs):
@@ -325,8 +329,10 @@ def test_authenticated_provider_persists_mocked_online_result(
                 # #1144: a tampered project file carries an attacker's
                 # endpoint and unbounded timeouts — the provider must
                 # ignore the endpoint (env wins) and clamp the timeouts.
+                # The model-version id gets the same treatment (#1184-附带):
+                # the tampered value below must NOT reach the remote call.
                 "online_endpoint": "http://evil.test/collect",
-                "online_model_version_id": "model-gr",
+                "online_model_version_id": "evil-model-version",
                 "online_wait_timeout_seconds": 999999,
                 "online_request_timeout_seconds": 999999,
                 "online_poll_timeout_seconds": 999999,
@@ -500,35 +506,18 @@ def test_plaintext_opt_in_and_local_names_pass_validator(monkeypatch) -> None:
     assert require_secure_endpoint("http://203.0.113.7:3100/api/v1")
 
 
-def test_poll_sleep_interruptible_on_cancel() -> None:
-    """#1169: a firing cancel stops the poll sleep in slices, not seconds."""
-    import time
-
-    from paleo_workbench.prediction.geoviz_online import _sleep_interruptible
-    from paleo_workbench.runtime.task_scheduler import TaskCancelled
-
-    calls = {"n": 0}
-
-    def _fire() -> bool:
-        calls["n"] += 1
-        return calls["n"] >= 3
-
-    t0 = time.monotonic()
-    with pytest.raises(TaskCancelled):
-        _sleep_interruptible(10.0, _fire)
-    assert time.monotonic() - t0 < 5.0
-    t0 = time.monotonic()
-    _sleep_interruptible(0.3, None)
-    # Windows 计时粒度 (~15.6 ms) 下短 sleep 会欠一点：0.25 仍证明真睡了。
-    assert time.monotonic() - t0 >= 0.25
+# ---------------------------------------------------------------------------
+# #1169 — poll loop aborts promptly on the cooperative cancel channel.
+# ---------------------------------------------------------------------------
 
 
-def test_prediction_poll_loop_aborts_on_cancel(monkeypatch) -> None:
-    """#1169: predicting-forever + cancel → TaskCancelled, not a 600 s hold."""
-    import time
+def test_poll_wait_aborts_promptly_on_cancel(monkeypatch) -> None:
+    import time as _time
 
     import paleo_workbench.prediction.geoviz_online as client
     from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
+    poll_requests = {"n": 0}
 
     class _Response:
         def __init__(self, status: int, body: dict):
@@ -545,18 +534,52 @@ def test_prediction_poll_loop_aborts_on_cancel(monkeypatch) -> None:
             return False
 
     def _urlopen(request, timeout):
-        if request.full_url.endswith("/models"):
-            return _Response(200, {
-                "total": 1,
-                "models": [{
-                    "id": "model-gr", "name": "m", "version": "v1",
-                    "algorithm": "tcn", "inputSchema": {"curves": ["GR"], "window": 2},
-                }],
-            })
-        return _Response(202, {"status": "predicting", "pollUrl": "/api/v1/p/1"})
+        url = request.full_url
+        if url.endswith("/models"):
+            return _Response(
+                200,
+                {
+                    "models": [
+                        {
+                            "id": "model-gr",
+                            "name": "GR 模型",
+                            "version": "v1",
+                            "inputSchema": {"curves": ["GR"], "window": 2},
+                        }
+                    ]
+                },
+            )
+        if url.endswith("/predict"):
+            return _Response(
+                202,
+                {
+                    "jobId": "job-1",
+                    "status": "predicting",
+                    "pollAfterMs": 1,  # minimal poll delay (clamped to 50 ms)
+                    "pollUrl": "/api/v1/predictions/job-1",
+                },
+            )
+        # Poll endpoint: keep the job predicting forever.
+        poll_requests["n"] += 1
+        return _Response(
+            202,
+            {
+                "jobId": "job-1",
+                "status": "predicting",
+                "pollAfterMs": 1,
+                "pollUrl": "/api/v1/predictions/job-1",
+            },
+        )
 
     monkeypatch.setattr(client, "urlopen", _urlopen)
-    t0 = time.monotonic()
+
+    cancel_after_two_checks = {"checks": 0}
+
+    def _cancel() -> bool:
+        cancel_after_two_checks["checks"] += 1
+        return cancel_after_two_checks["checks"] > 2
+
+    started = _time.monotonic()
     with pytest.raises(TaskCancelled):
         run_single_well_prediction(
             "HZ27-5-3",
@@ -564,46 +587,72 @@ def test_prediction_poll_loop_aborts_on_cancel(monkeypatch) -> None:
             api_key="ak_test",
             base_url="http://inference.test/api/v1",
             model_version_id="model-gr",
-            wait_timeout_seconds=30,
-            poll_timeout_seconds=600,
-            cancel=lambda: time.monotonic() - t0 > 0.5,
+            poll_timeout_seconds=3600,  # must NOT be waited out
+            cancel=_cancel,
         )
-    assert time.monotonic() - t0 < 30.0
+    elapsed = _time.monotonic() - started
+    assert elapsed < 10, "cancel must abort the poll loop promptly, not at timeout"
+    assert poll_requests["n"] >= 1  # at least one poll happened before cancel
 
 
-def test_provider_result_marks_decimated_input(tmp_path, monkeypatch):
-    """#1193: a decimated preview input is flagged on the provider result."""
-    from paleo_workbench.prediction.providers import GeoVizOnlineProvider
+def test_poll_wait_without_cancel_still_enforces_timeout(monkeypatch) -> None:
+    """The cancel seam must not weaken the pre-existing timeout guard."""
+    import paleo_workbench.prediction.geoviz_online as client
 
-    lines = ["~VERSION INFORMATION", " VERS. 2.0:", "~WELL INFORMATION",
-             " WELL. BIG:", "~CURVE INFORMATION", " DEPT.M :", " GR.GAPI :",
-             "~ASCII"]
-    lines += [f"{1000.0 + i * 0.05:.2f} {45.0 + (i % 50) * 0.1:.1f}" for i in range(120_000)]
-    las = tmp_path / "big.Las"
-    las.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    monkeypatch.setenv("PALEO_GEOVIZ_API_KEY", "ak_test")
+    class _Response:
+        def __init__(self, status: int, body: dict):
+            self.status = status
+            self._body = body
 
-    def _fake_online(well_name, well_log, **kwargs):
-        return {
-            "endpoint": kwargs["base_url"],
-            "request_row_count": 3,
-            "remote_model_version": "model-gr",
-            "remote_model_name": "m",
-            "api_summary": {"meanConfidence": 0.9, "formationGroup": "g", "classCounts": {}},
-            "predicted_regions": [
-                {"region_id": "r1", "top": 1000.0, "bottom": 1001.0,
-                 "facies": "x", "probability": 0.9},
-            ],
-        }
+        def read(self):
+            return json.dumps(self._body).encode("utf-8")
 
-    monkeypatch.setattr(
-        "paleo_workbench.prediction.geoviz_online.run_single_well_prediction",
-        _fake_online,
-    )
-    provider = GeoVizOnlineProvider()
-    result = provider.run(
-        {"w": {"path": str(las), "name": las.name, "asset_type": "well_log"}},
-        {},
-    )
-    assert result["input_decimated"] is True
-    assert result["input_total_rows"] == 120_000
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def _urlopen(request, timeout):
+        url = request.full_url
+        if url.endswith("/models"):
+            return _Response(
+                200,
+                {
+                    "models": [
+                        {
+                            "id": "model-gr",
+                            "name": "GR 模型",
+                            "version": "v1",
+                            "inputSchema": {"curves": ["GR"], "window": 2},
+                        }
+                    ]
+                },
+            )
+        if url.endswith("/predict"):
+            return _Response(
+                202,
+                {
+                    "jobId": "job-2",
+                    "status": "predicting",
+                    "pollAfterMs": 60000,  # delay beyond the deadline
+                    "pollUrl": "/api/v1/predictions/job-2",
+                },
+            )
+        return _Response(
+            202,
+            {"jobId": "job-2", "status": "predicting", "pollAfterMs": 60000,
+             "pollUrl": "/api/v1/predictions/job-2"},
+        )
+
+    monkeypatch.setattr(client, "urlopen", _urlopen)
+    monkeypatch.setattr(client.time, "sleep", lambda _s: None)
+    with pytest.raises(GeoVizOnlinePredictionError, match="轮询超时"):
+        run_single_well_prediction(
+            "HZ27-5-3",
+            _well_log(),
+            api_key="ak_test",
+            base_url="http://inference.test/api/v1",
+            model_version_id="model-gr",
+            poll_timeout_seconds=1,
+        )

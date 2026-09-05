@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -168,6 +170,139 @@ def test_rejects_mismatched_existing_store(segy_volume, tmp_path):
     bad = TranscodeParams(chunk=(32, 128, 128), shard=(64, 512, 512))
     with pytest.raises(TranscodeError):
         transcode_segy_to_zarr(src, dst, params=bad)
+
+
+# ------------------------------------------------------------- #1136 cancel
+
+
+def _reader_threads_alive() -> int:
+    return sum(
+        1
+        for t in threading.enumerate()
+        if t.name == "segy-transcode-reader" and t.is_alive()
+    )
+
+
+def test_cancel_parallel_reader_thread_exits_and_store_resumes(segy_volume, tmp_path):
+    """#1136: cancelling mid-transcode must not strand the reader thread on
+    a full queue (bounded puts + stop signal), must not close its segyio
+    handle from under it, and must leave a resumable partial store."""
+    src, cube = segy_volume
+    dst = tmp_path / "store"
+    assert _reader_threads_alive() == 0
+
+    state = {"done": 0}
+
+    def prog(frac: float) -> None:
+        state["done"] += 1
+
+    result = transcode_segy_to_zarr(
+        src, dst, progress=prog, cancel=lambda: state["done"] >= 1, workers=3
+    )
+    # function returned (no hang), no exception leaked, reader really exited
+    assert _reader_threads_alive() == 0
+    assert result.stats.shards_written >= 1
+    assert (
+        result.stats.shards_written + result.stats.shards_skipped
+        < result.stats.shards_total
+    ), "cancel must stop before the whole store is written"
+
+    # partial store is resumable: same source completes and matches bit-exact
+    result2 = transcode_segy_to_zarr(src, dst)
+    assert result2.stats.shards_skipped >= 1
+    arr = zarr.open(str(dst), mode="r")
+    np.testing.assert_array_equal(np.asarray(arr[:, :, :]), cube)
+    assert _reader_threads_alive() == 0
+
+
+def test_cancel_immediately_returns_cleanly(segy_volume, tmp_path):
+    """Cancel already true at start: reader never blocks, writer exits."""
+    src, _ = segy_volume
+    dst = tmp_path / "store"
+    result = transcode_segy_to_zarr(src, dst, cancel=lambda: True, workers=2)
+    assert result.stats.shards_written == 0
+    assert _reader_threads_alive() == 0
+
+
+def test_reader_failure_raises_instead_of_silent_success(
+    segy_volume, tmp_path, monkeypatch
+):
+    """A read failure inside the parallel reader thread must surface as an
+    error — the sentinel pill lets the writer end "normally", so without the
+    recorded-and-re-raised exception the incomplete store would be returned
+    as a successful transcode. The partial store stays resumable."""
+    src, cube = segy_volume
+    dst = tmp_path / "store"
+
+    real_collect = segyio.tools.collect
+    calls = {"n": 0}
+
+    def flaky_collect(*args, **kwargs):
+        calls["n"] += 1
+        # Shard 0 (inlines 0-127) reads fine (128 collects); fail early in
+        # shard 1's slab so exactly one shard is durably written first.
+        if calls["n"] > 140:
+            raise OSError("simulated read failure")
+        return real_collect(*args, **kwargs)
+
+    monkeypatch.setattr(segyio.tools, "collect", flaky_collect)
+    with pytest.raises(TranscodeError, match="simulated read failure"):
+        transcode_segy_to_zarr(src, dst, workers=2)
+    monkeypatch.undo()
+    assert _reader_threads_alive() == 0
+
+    # The partial store is resumable: rerun without the failure completes it.
+    result = transcode_segy_to_zarr(src, dst)
+    assert result.stats.shards_skipped >= 1
+    arr = zarr.open(str(dst), mode="r")
+    np.testing.assert_array_equal(np.asarray(arr[:, :, :]), cube)
+
+
+# ------------------------------------------------- #1141 source identity
+
+
+def test_resume_rejects_different_source_same_geometry(segy_volume, tmp_path):
+    """#1141: a partial store resumed against a DIFFERENT SEG-Y (same shape)
+    must fail closed instead of producing a mixed-source DERIVED volume."""
+    src, cube = segy_volume
+    other = tmp_path / "other.segy"
+    _write_segy(other, seed=99)  # identical geometry, different content
+    dst = tmp_path / "store"
+
+    state = {"done": 0}
+    transcode_segy_to_zarr(
+        src,
+        dst,
+        progress=lambda f: state.__setitem__("done", state["done"] + 1),
+        cancel=lambda: state["done"] >= 1,
+        workers=1,
+    )
+    with pytest.raises(TranscodeError, match="refusing to mix sources"):
+        transcode_segy_to_zarr(other, dst)
+
+    # the ORIGINAL source still resumes (identity matches)
+    result = transcode_segy_to_zarr(src, dst)
+    assert result.stats.shards_skipped >= 1
+    arr = zarr.open(str(dst), mode="r")
+    np.testing.assert_array_equal(np.asarray(arr[:, :, :]), cube)
+
+
+def test_resume_rejects_in_place_modified_source(segy_volume, tmp_path):
+    """#1141: same path, same size, rewritten content — the size/mtime
+    identity must catch an in-place source swap."""
+    src, _ = segy_volume
+    dst = tmp_path / "store"
+    state = {"done": 0}
+    transcode_segy_to_zarr(
+        src,
+        dst,
+        progress=lambda f: state.__setitem__("done", state["done"] + 1),
+        cancel=lambda: state["done"] >= 1,
+        workers=1,
+    )
+    _write_segy(src, seed=123)  # same size (same shape/dtype), new mtime
+    with pytest.raises(TranscodeError, match="refusing to mix sources"):
+        transcode_segy_to_zarr(src, dst)
 
 
 import os  # noqa: E402

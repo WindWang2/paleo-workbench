@@ -19,11 +19,12 @@ version provide the provenance).
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import logging
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from paleo_workbench.catalog.models import CatalogError, DataRun, DataStage
 from paleo_workbench.prediction.providers import get_provider
@@ -43,6 +44,28 @@ _RESERVED_KEYS = (
     "provider",
     "demo_only",
     "error",
+)
+
+# #1152: envelope keys the SERVICE owns. A provider result dict is spread
+# into the persisted payload, so without this filter any provider (or a
+# tampered one) could relabel the run's model identity, seed, provenance
+# hash or run linkage after the fact. Server-constructed values always win.
+# ``generator_version`` included (B2): it is never read back from the
+# provider result — a provider that wants to declare its own generator uses
+# the non-reserved ``provider_generator`` key.
+PAYLOAD_RESERVED_KEYS = frozenset(
+    {
+        "schema_version",
+        "model",
+        "generator_version",
+        "input_snapshot_hash",
+        "input_version_ids",
+        "seed",
+        "parameters",
+        "run_id",
+        "_finished_at",
+        "output_version_id",
+    }
 )
 
 
@@ -277,13 +300,53 @@ def start_inference(
     return run
 
 
-def execute_run(service, run_id: str) -> dict[str, Any]:
+def _provider_accepts_cancel(provider) -> bool:
+    """True when the provider's ``run`` exposes the cancel seam (#1167)."""
+    try:
+        signature = inspect.signature(provider.run)
+    except (TypeError, ValueError):  # pragma: no cover - exotic callables
+        return False
+    if any(
+        param.kind == inspect.Parameter.VAR_KEYWORD
+        for param in signature.parameters.values()
+    ):
+        return True
+    return "cancel" in signature.parameters
+
+
+def _cancel_run(service, run_id: str, partial: dict[str, Any] | None) -> None:
+    """Record a cooperative cancellation as the run's terminal state (#1167).
+
+    Cancelled is not failed: the run may resume (tiled providers keep
+    per-tile markers), and it produced no consumable output version.
+    """
+    extra = {"_finished_at": _now_iso()}
+    if isinstance(partial, dict):
+        if partial.get("tiles"):
+            extra["tiles_done"] = partial["tiles"]
+        if partial.get("elapsed_s") is not None:
+            extra["elapsed_s"] = partial["elapsed_s"]
+    service.update_run_status(run_id, "cancelled", extra_parameters=extra)
+
+
+def execute_run(
+    service,
+    run_id: str,
+    *,
+    cancel: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
     """Execute a running inference run and persist its outcome.
 
-    Returns ``{"run", "result", "model", "model_version"}``. Any error —
+    Returns ``{"run", "result", "model", "model_version"}`` (plus
+    ``"cancelled": True`` for a cooperatively cancelled run). Any error —
     provider, schema, lookup or persistence — is recorded on the run
     (status ``failed`` + ``error``) so a run never strands in "running".
     A failed run never fabricates output.
+
+    *cancel* is checked cooperatively: it is offered to providers whose
+    ``run`` accepts a ``cancel`` keyword, and a provider result flagged
+    ``cancelled`` ends the run in the terminal ``cancelled`` state (not
+    ``failed``, and no output version is registered).
     """
     run = service.get_run(run_id)
     if (run.status or "").lower() != "running":
@@ -310,15 +373,52 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
             if not k.startswith("_") and k not in _RESERVED_KEYS
         }
         parameters["seed"] = seed
+        # #1176: server-constructed registered-model identity. Providers
+        # that bind their executable artifact to the catalog's ModelVersion
+        # (e.g. tiled ONNX checksum verification) consume this; the leading
+        # underscore keeps it out of the persisted payload parameters.
+        parameters["_registered_model"] = {
+            "model_id": model.model_id,
+            "model_version": model_version.model_version,
+            "model_version_id": model_version.id,
+            "artifact_uri": str(getattr(model_version, "artifact_uri", "") or ""),
+            "checksum": str(getattr(model_version, "checksum", "") or ""),
+        }
         try:
-            result = provider.run(inputs, parameters)
+            if cancel is not None and _provider_accepts_cancel(provider):
+                result = provider.run(inputs, parameters, cancel=cancel)
+            else:
+                result = provider.run(inputs, parameters)
         except Exception as exc:  # noqa: BLE001 — surface into run status honestly
+            from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
+            if isinstance(exc, TaskCancelled):
+                _cancel_run(service, run_id, None)
+                return {
+                    "run": service.get_run(run_id),
+                    "result": None,
+                    "model": model,
+                    "model_version": model_version,
+                    "cancelled": True,
+                }
             _fail_run(service, run_id, exc)
             return {
                 "run": service.get_run(run_id),
                 "result": None,
                 "model": model,
                 "model_version": model_version,
+            }
+
+        # #1167: a cooperatively cancelled provider result is a cancellation,
+        # not a completion — terminal state "cancelled", no output version.
+        if isinstance(result, dict) and result.get("cancelled"):
+            _cancel_run(service, run_id, result)
+            return {
+                "run": service.get_run(run_id),
+                "result": None,
+                "model": model,
+                "model_version": model_version,
+                "cancelled": True,
             }
 
         # Stage-13: validate spatial output when the model declares a spatial schema.
@@ -339,16 +439,23 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
                     "model_version": model_version,
                 }
 
-        # Align the payload's generator_version with the provider-reported
-        # version so Stage-9 expected_identity (from PredictionTask.
-        # generator_version) does not flag GENERATOR_CHANGED immediately
-        # after a successful run. run.generator itself stays the registry
-        # identity from start_inference — a result must never rewrite it
-        # (#1152).
-        provider_generator = str(
-            result.get("generator_version") or model.provider or run.generator or ""
-        )
+        # B2/#1152: ``generator_version`` is SERVICE-owned (it is in
+        # PAYLOAD_RESERVED_KEYS). The provider result is NEVER read back for
+        # it — a provider that wants to declare its own generator uses the
+        # non-reserved ``provider_generator`` key. The service value is the
+        # run's start-time generator (INFERENCE_GENERATOR or model.provider),
+        # so Stage-9 identity (PredictionTask.generator_version ==
+        # run.generator) holds by construction instead of by provider decree.
 
+        # #1152: envelope reserved keys are SERVICE-owned. Filter them out
+        # of the provider result before merging so a provider dict can never
+        # relabel model identity, seed, provenance hash or run linkage.
+        provider_payload = {
+            k: v for k, v in result.items() if k not in PAYLOAD_RESERVED_KEYS
+        }
+        service_generator = str(
+            run.generator or model.provider or INFERENCE_GENERATOR
+        )
         payload = {
             **result,
             # #1152: the provenance envelope is re-asserted AFTER the
@@ -365,12 +472,15 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
                 "checksum": getattr(model_version, "checksum", None) or "",
                 "model_version_id": model_version.id,
             },
-            "generator_version": provider_generator or result.get("generator_version"),
+            "generator_version": service_generator,
             "input_snapshot_hash": (run.parameters or {}).get("_input_snapshot_hash"),
             "input_version_ids": list(run.input_version_ids),
             "seed": seed,
-            "parameters": parameters,
+            "parameters": {
+                k: v for k, v in parameters.items() if not k.startswith("_")
+            },
             "run_id": run_id,
+            **provider_payload,
         }
         output_version = _persist_result(service, run_id, model, payload)
         finished = _now_iso()
@@ -421,8 +531,59 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
         }
 
 
+def _run_workspace_roots(service, run) -> list[Path]:
+    """Containment roots a provider-declared volume store may live in (B1).
+
+    The project's artifacts tree (``<name>.artifacts`` beside the project
+    file) plus any working directory the run itself explicitly declared via
+    its ``work_root`` parameter. Nothing else: a provider's word for where a
+    store lives is not trust — ``register_derived_store`` MOVES directories,
+    so an uncontained path would relocate arbitrary host data into the
+    catalog.
+    """
+    from paleo_workbench.project.paths import artifact_dir_for
+
+    roots = [artifact_dir_for(Path(service.project_path)).expanduser().resolve()]
+    declared = str((run.parameters or {}).get("work_root") or "")
+    if declared:
+        roots.append(Path(declared).expanduser().resolve())
+    return roots
+
+
+def _validated_volume_stores(
+    service, run_id: str, payload: dict[str, Any]
+) -> list[tuple[dict[str, Any], Path]]:
+    """Provider volume-output specs proven to live inside the run workspace.
+
+    B1: validation happens BEFORE any registration so an escaping store
+    fails the whole run honestly (status ``failed``, nothing persisted,
+    nothing moved) instead of silently importing an arbitrary directory.
+    """
+    run = service.get_run(run_id)
+    roots = _run_workspace_roots(service, run)
+    validated: list[tuple[dict[str, Any], Path]] = []
+    for spec in payload.get("volume_outputs") or []:
+        if not isinstance(spec, dict):
+            continue
+        store = Path(str(spec.get("path", "")))
+        if not store.is_dir():
+            continue
+        resolved = store.expanduser().resolve()
+        if not any(resolved.is_relative_to(root) for root in roots):
+            raise PermissionError(
+                f"provider volume output {resolved} is outside this run's workspace "
+                f"({', '.join(str(root) for root in roots)}); refusing to move it "
+                "into the catalog (run marked failed)"
+            )
+        validated.append((spec, resolved))
+    return validated
+
+
 def _persist_result(service, run_id: str, model, payload: dict[str, Any]) -> Any:
     """Write *payload* to a temp file and register it as a DERIVED version."""
+    # B1: prove every provider-declared volume store is contained BEFORE the
+    # result asset/store registration begins (see _validated_volume_stores).
+    volume_stores = _validated_volume_stores(service, run_id, payload)
     fd, tmp_path = tempfile.mkstemp(prefix="inference_result_", suffix=".json")
     try:
         with open(fd, "w", encoding="utf-8") as handle:
@@ -451,12 +612,11 @@ def _persist_result(service, run_id: str, model, payload: dict[str, Any]) -> Any
         except OSError:
             pass
     # Volume outputs (tiled ONNX, #1085): register the class/prob zarr
-    # stores as DERIVED versions with lineage through the same run.
-    for spec in payload.get("volume_outputs") or []:
+    # stores as DERIVED versions with lineage through the same run. Paths
+    # were containment-validated above (B1) — register_derived_store moves
+    # them into the catalog tree.
+    for spec, store in volume_stores:
         try:
-            store = Path(str(spec.get("path", "")))
-            if not store.is_dir():
-                continue
             service.register_derived_store(
                 name=str(spec.get("name") or "inference volume"),
                 store_path=store,

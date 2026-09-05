@@ -123,11 +123,12 @@ def _package_manifest(artifact: Path, **overrides) -> dict:
 
 
 def _install_test_provider(service, tmp_path, provider_cls=TestSpatialModelProvider, **kw):
-    register_provider(PROVIDER_TEST_SPATIAL, provider_cls)
+    # #1184: duplicate names raise unless the overwrite is explicit.
+    register_provider(PROVIDER_TEST_SPATIAL, provider_cls, replace=True)
     if provider_cls is TestSpatialFailProvider:
-        register_provider(PROVIDER_TEST_SPATIAL_FAIL, provider_cls)
+        register_provider(PROVIDER_TEST_SPATIAL_FAIL, provider_cls, replace=True)
     if provider_cls is TestSpatialMalformedProvider:
-        register_provider(PROVIDER_TEST_SPATIAL_MALFORMED, provider_cls)
+        register_provider(PROVIDER_TEST_SPATIAL_MALFORMED, provider_cls, replace=True)
     artifact = tmp_path / "weights.bin"
     artifact.write_bytes(b"spatial-weights-v1")
     manifest = _package_manifest(artifact, **kw)
