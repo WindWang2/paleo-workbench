@@ -388,6 +388,8 @@ class WorkstationFrame(QWidget):
         def _on_stage_changed(stage_value: str) -> None:
             self.stage_bar.set_current_stage(stage_value)
             self.mapping_stage_panel.set_stage(stage_value)
+            # V6 §4：阶段驱动工具条命令面（数字化/编辑动作按 profile 过滤）。
+            self.composite.apply_stage_tool_profile(stage_value)
             # 「我画进哪个图层」必须可见：阶段切换消息携带当前编辑目标
             #（无目标时明说，绝不静默）。
             target_id = controller.active_target_layer_id
@@ -405,6 +407,8 @@ class WorkstationFrame(QWidget):
             self._refresh_stage_badges()
 
         controller.current_stage_changed.connect(_on_stage_changed)
+        # 构造即应用当前阶段的工具面（恢复的持久化阶段同样生效）。
+        self.composite.apply_stage_tool_profile(controller.current_stage.value)
 
         def _on_readiness(readiness) -> None:
             from paleo_workbench.mapping_workspace.stages import stage_from_value
@@ -754,15 +758,6 @@ class WorkstationFrame(QWidget):
                 self._responsive_hid_inspector = False
                 self.inspector_dock.show()
 
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        self._apply_responsive_panels()
-        if not self._post_show_restored:
-            self._post_show_restored = True
-            # 构造发生在顶层窗口拿到最终几何之前；show 之后再恢复一次，
-            # 避免 dock 布局被首帧的默认几何覆盖。
-            self._schedule_restore(50)
-
     def _schedule_restore(self, delay_ms: int) -> None:
         # 定时器必须挂在本部件上：壳被拆除（deleteLater）后，迟到的
         # restore 不得再触碰已删除的 dock（游离 singleShot 会越界）。
@@ -772,11 +767,19 @@ class WorkstationFrame(QWidget):
         timer.timeout.connect(self._restore_layout)
         timer.start()
 
-    #: 可切换面板的 (dock, 菜单/palette 标签)——两个消费方共用一张表
+    #: 可切换面板的 (dock, 菜单/palette 标签)——两个消费方共用一张表。
+    #: V6：必须覆盖全部 shell dock——任何被关掉的 dock 都要有菜单/palette
+    #: 重开入口（否则用户只能重启会话找回面板）。
     _PANEL_TOGGLE_TABLE = (
+        ("nav_dock", "显示资源管理器"),
+        ("inspector_dock", "显示检查器"),
         ("composite_input_dock", "显示输入与结果"),
         ("composite_layer_dock", "显示图层管理"),
         ("composite_linked_dock", "显示联动视图"),
+        ("mapping_stage_dock", "显示编图阶段"),
+        ("well_dock", "显示测井轨道"),
+        ("seismic_dock", "显示地震剖面"),
+        ("hub_dock", "显示枢纽页"),
         ("agent_dock", "显示 Agent"),
         ("task_dock", "显示任务中心"),
         ("logs_dock", "显示日志"),
@@ -850,6 +853,8 @@ class WorkstationFrame(QWidget):
             self.well_dock,
             self.seismic_dock,
             self.hub_dock,
+            # 编图阶段 dock 曾缺席本清单：全部停靠后仍浮动（V6 基线 P0 家族）。
+            self.mapping_stage_dock,
         ):
             if dock.isFloating():
                 dock.setFloating(False)
@@ -907,9 +912,9 @@ class WorkstationFrame(QWidget):
 
             self.explorer.setVisible(vis.explorer_expanded)
             self.activity_rail.set_explorer_expanded(vis.explorer_expanded)
-
-            # Dock everything for a deterministic preset geometry.
-            self.dock_all_panels()
+            # V6：具名预设只切可见性，绝不重排 dock 几何——用户浮动/分屏
+            # 布局是显式偏好（audit A-P0-3）。停靠化重置只在
+            # 「恢复默认布局」（_reset_default_layout）发生。
         finally:
             self._preset_tracking_paused = False
         self._current_preset_id = preset.id
@@ -929,7 +934,8 @@ class WorkstationFrame(QWidget):
         self._save_timer.start()
 
     def _reset_default_layout(self) -> None:
-        """面板菜单「恢复默认布局」→ 默认编图 + 停靠几何。"""
+        """面板菜单「恢复默认布局」→ 停靠几何重置 + 默认编图可见性。"""
+        self.dock_all_panels()
         self.apply_layout_preset(RESET_LAYOUT_PRESET_ID)
 
     def _reset_composite_layout(self) -> None:
@@ -1089,6 +1095,13 @@ class WorkstationFrame(QWidget):
 
     def showEvent(self, event) -> None:  # noqa: N802 — Qt 契约
         super().showEvent(event)
+        # V6：合并历史双定义（第一份曾为死代码，post-show 布局恢复从未执行）。
+        self._apply_responsive_panels()
+        if not self._post_show_restored:
+            self._post_show_restored = True
+            # 构造发生在顶层窗口拿到最终几何之前；show 之后再恢复一次，
+            # 避免 dock 布局被首帧的默认几何覆盖。
+            self._schedule_restore(50)
         if getattr(self, "_pending_default_sizes", False) and self.isVisible():
             self._pending_default_sizes = False
             QTimer.singleShot(0, self._apply_default_pane_sizes)

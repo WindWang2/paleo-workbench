@@ -58,6 +58,7 @@ from paleo_workbench.ui.pages.well_log_prediction_page import WellLogPredictionP
 from paleo_workbench.ui.shortcuts import ShortcutSpec, register_shortcut
 from paleo_workbench.ui.status_bar import StatusBar
 from paleo_workbench.ui.workstation import WorkstationFrame
+from paleo_workbench.ui.workstation.ui_context import UIContextService
 from paleo_workbench.viz.hosts.well_location_preview import (
     WellLocationPreviewStateStore,
 )
@@ -74,10 +75,11 @@ class CommandPalette(QFrame):
     _WIDTH = 360
     _HEIGHT = 320
 
-    def __init__(self, parent, *, navigate):
+    def __init__(self, parent, *, navigate, context_provider=None):
         super().__init__(parent)
         self.setObjectName("PanelCard")  # themed card chrome from the token sheet
         self._navigate = navigate  # navigate(hub_index, submodule_key)
+        self._context_provider = context_provider  # () -> UIContextSnapshot | None（V6 §4）
         self._commands: list[dict] = []
 
         layout = QVBoxLayout(self)
@@ -127,7 +129,13 @@ class CommandPalette(QFrame):
     def _apply_filter(self, text: str) -> None:
         text = (text or "").strip()
         self.result_list.clear()
-        specs = command_registry.find(text) if text else command_registry.specs()
+        # V6 §4：有上下文时按适用性过滤/标注（禁用命令保留可发现性）。
+        context = self._context_provider() if self._context_provider else None
+        specs = (
+            command_registry.find(text, context=context)
+            if text
+            else command_registry.find("", context=context)
+        )
         if not text:
             # 空查询时最近使用置顶
             recents = command_registry.recent_specs()
@@ -140,14 +148,31 @@ class CommandPalette(QFrame):
                 label = f"{label}   [{spec.shortcut_hint}]"
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, spec)
+            if context is not None:
+                availability = command_registry.evaluate(spec.id, context)
+                if not availability.enabled:
+                    # 禁用但可发现：灰显 + 原因后缀，且不可激活。
+                    item.setText(f"{label}（{availability.reason}）")
+                    item.setFlags(
+                        item.flags() & ~Qt.ItemFlag.ItemIsEnabled
+                    )
             self.result_list.addItem(item)
         if self.result_list.count():
             self.result_list.setCurrentRow(0)
 
     def _activate_item(self, item: QListWidgetItem) -> None:
         spec = item.data(Qt.ItemDataRole.UserRole)
+        if spec is None:
+            return
+        # V6 §4：禁用命令不执行（palette 不关闭，原因仍可见）。
+        if self._context_provider is not None:
+            context = self._context_provider()
+            if context is not None:
+                availability = command_registry.evaluate(spec.id, context)
+                if not availability.enabled:
+                    return
         self.dismiss()
-        if spec is not None and spec.callback is not None:
+        if spec.callback is not None:
             command_registry.record_recent(spec.id)
             spec.callback()
 
@@ -354,7 +379,14 @@ class AppShell(QWidget):
         self.view_coordination.bind_project(self.project)
 
         # Ctrl+K quick-jump palette (non-modal child; offscreen safe).
-        self.command_palette = CommandPalette(self, navigate=self.navigate_to)
+        self.command_palette = CommandPalette(
+            self,
+            navigate=self.navigate_to,
+            context_provider=lambda: self.ui_context_service.current(),
+        )
+        # V6 §2：派生 UI 上下文（provider 聚合各权威；非第二状态源）。
+        self.ui_context_service = UIContextService(self)
+        self._wire_ui_context()
 
         # --- global action wiring (app bar → window handlers) -----------
         self.workstation.navigation_requested.connect(self.navigate_to)
@@ -484,6 +516,62 @@ class AppShell(QWidget):
             self.theme_manager.toggle_density,
         )
         self._register_commands()
+
+    def _wire_ui_context(self) -> None:
+        """V6 §2：UIContext provider 装配（只读自权威；上下文绝不反写权威）。"""
+        svc = self.ui_context_service
+        composite = self.workstation.composite
+        stage_controller = composite.stage_controller
+        selection = self.selection_context
+
+        svc.set_provider(
+            "project_open",
+            lambda: bool(self.project and getattr(self.project.meta, "project_root", "")),
+        )
+        svc.set_provider(
+            "project_name",
+            lambda: getattr(self.project.meta, "name", None) if self.project else None,
+        )
+        svc.set_provider("mapping_stage", lambda: stage_controller.current_stage.value)
+        svc.set_provider(
+            "mapping_stage_label", lambda: stage_controller.current_stage.label
+        )
+
+        def _target(field: str):
+            def _read():
+                return composite.active_editing_target_status()[field]
+
+            return _read
+
+        svc.set_provider("active_layer_id", _target("active_layer_id"))
+        svc.set_provider("active_layer_role", _target("role_label"))
+        svc.set_provider("active_layer_editable", _target("editable"))
+        svc.set_provider("active_layer_block_reason", _target("block_reason"))
+        svc.set_provider("editing_active", _target("editing_active"))
+
+        svc.set_provider("active_well_id", lambda: selection.active_well_id)
+        svc.set_provider("active_horizon_id", lambda: selection.active_horizon_id)
+        svc.set_provider("active_fault_id", lambda: selection.active_fault_id)
+        svc.set_provider(
+            "active_interpretation_id", lambda: selection.active_interpretation_id
+        )
+
+        svc.set_provider(
+            "qgis_bridge_available", lambda: composite.uses_native_stack
+        )
+
+        def _running_tasks() -> int:
+            from paleo_workbench.runtime.task_scheduler import get_scheduler
+
+            return get_scheduler().active_count()
+
+        svc.set_provider("running_task_count", _running_tasks)
+
+        # 权威变更 → 重新派生（差分发射，见 UIContextService.refresh）。
+        selection.selection_changed.connect(lambda *_: svc.refresh())
+        stage_controller.current_stage_changed.connect(lambda *_: svc.refresh())
+        stage_controller.active_target_changed.connect(lambda *_: svc.refresh())
+        svc.refresh()
 
     def _register_commands(self) -> None:
         """注册 palette 命令：页面导航 / 主题 / 密度 / 布局 preset / 面板。"""

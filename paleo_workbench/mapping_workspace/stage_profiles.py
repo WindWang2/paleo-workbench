@@ -23,7 +23,12 @@ from paleo_workbench.mapping_workspace.stages import STAGE_ORDER, MappingStage
 
 @dataclass(frozen=True)
 class StageToolProfile:
-    """阶段工具集合（基础 pan/zoom/select/identify 永远保留，不在此列）。"""
+    """阶段工具集合（基础 pan/zoom/select/identify 永远保留，不在此列）。
+
+    ``command_groups``/``edit_actions`` 是综合编修工具条的阶段过滤真源
+    （V6 §4：composite toolbar 按此隐藏非本阶段的数字化/编辑动作；
+    基础导航/识别/选择动作不经过该过滤）。
+    """
 
     #: 工具面 id（MapActionController 命令组过滤）。
     command_groups: tuple[str, ...] = ()
@@ -31,6 +36,12 @@ class StageToolProfile:
     edit_actions: tuple[str, ...] = ()
     #: 阶段专属上下文动作（Stage Panel 提供，如「新建物源线」「运行因子」）。
     context_actions: tuple[str, ...] = ()
+
+    def allows_edit_action(self, action_id: str) -> bool:
+        """该编辑/数字化动作在本阶段是否可用（空集合 = 不做阶段过滤）。"""
+        if not self.edit_actions:
+            return True
+        return action_id in self.edit_actions
 
 
 @dataclass(frozen=True)
@@ -178,6 +189,18 @@ def stage_profile(stage: MappingStage) -> StageProfile:
 def stage_profiles() -> tuple[StageProfile, ...]:
     """全部阶段 profile，按工作流顺序。"""
     return tuple(_STAGE_PROFILES[stage] for stage in STAGE_ORDER)
+
+
+def governed_edit_actions() -> frozenset[str]:
+    """受阶段过滤治理的编辑动作全集 = 各阶段 ``edit_actions`` 并集。
+
+    不在并集内的动作（如 add_point）与基础导航/识别/选择动作一样，
+    不做阶段隐藏——profile 只约束它显式声明的动作。
+    """
+    union: set[str] = set()
+    for profile in _STAGE_PROFILES.values():
+        union.update(profile.tools.edit_actions)
+    return frozenset(union)
 
 
 def profile_group_order() -> tuple[str, ...]:

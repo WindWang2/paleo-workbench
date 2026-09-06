@@ -895,6 +895,29 @@ class CompositeDocument(QWidget):
 
     # -- 悬浮工具条 -----------------------------------------------------------
 
+    # -- 阶段工具面（V6 §4） ------------------------------------------------------
+
+    def apply_stage_tool_profile(self, stage_value: str) -> None:
+        """按 ``StageToolProfile`` 过滤工具条的数字化/编辑动作可见性。
+
+        只隐藏受治理全集（``governed_edit_actions``）内的动作；基础导航/
+        识别/选择永不因阶段隐藏。未知阶段值保持现状（宽容：阶段条已校验）。
+        """
+        from paleo_workbench.mapping_workspace.stage_profiles import (
+            governed_edit_actions,
+            stage_profile,
+        )
+        from paleo_workbench.mapping_workspace.stages import stage_from_value
+
+        stage = stage_from_value(stage_value)
+        if stage is None:
+            return
+        tools = stage_profile(stage).tools
+        for action_id in governed_edit_actions():
+            action = self.action_controller.actions.get(action_id)
+            if action is not None:
+                action.setVisible(tools.allows_edit_action(action_id))
+
     def _build_toolbar(self) -> None:
         """悬浮工具条：QGIS 命令面（MapActionController）+「面板」菜单。"""
         self.toolbar = QFrame(self)
@@ -1286,6 +1309,32 @@ class CompositeDocument(QWidget):
         if self.edit_controller.layer(str(layer_id)) is not None:
             self.edit_controller.set_active_layer(str(layer_id))
             self.layer_manager.select_layer(str(layer_id))
+
+    def active_editing_target_status(self) -> dict:
+        """活动编辑目标摘要（V6 §5：UIContext/状态条/检查器共用 seam）。
+
+        返回 ``active_layer_id / role_label / editable / block_reason /
+        editing_active``。无目标时 editable=False 且必须给出原因——
+        「我在编辑什么」永远有答案。
+        """
+        target = self.stage_controller.active_target_layer_id
+        if not target:
+            return {
+                "active_layer_id": None,
+                "role_label": None,
+                "editable": False,
+                "block_reason": "当前阶段没有活动编辑目标（用阶段动作创建编辑对象）",
+                "editing_active": False,
+            }
+        allowed, reason = self._role_allows_editing(str(target))
+        role = self.stage_controller.state.role_of(str(target))
+        return {
+            "active_layer_id": str(target),
+            "role_label": role.label,
+            "editable": allowed,
+            "block_reason": reason,
+            "editing_active": self.edit_controller.editing,
+        }
 
     def _role_allows_editing(self, layer_id) -> tuple[bool, str]:
         """编辑门禁（单点）：RAW 不可变保护（V5 §14）+ 阶段证据组锁（§41）。
