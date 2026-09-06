@@ -128,6 +128,8 @@ class AgentWorkspace(QFrame):
     show_wells_requested = Signal()
     focus_joint_requested = Signal()
     undo_requested = Signal(object)
+    #: V6 §4/§11：会话 WRITE 授权集合变化（UIContext write_granted 消费）。
+    write_grant_changed = Signal()
 
     def __init__(self, project=None, parent=None, *, allow_write_actions: bool | None = None):
         super().__init__(parent)
@@ -313,8 +315,14 @@ class AgentWorkspace(QFrame):
         """会话授权是否已覆盖**精确**动作集合（子集语义，非空白支票）。"""
         return frozenset(action_ids) <= self._session_write_grants
 
+    @property
+    def write_granted_actions(self) -> frozenset:
+        """会话内已授权的 WRITE 动作集合（精确集合；UIContext 只读）。"""
+        return self._session_write_grants
+
     def _grant_write_session(self, action_ids: list[str]) -> None:
         self._session_write_grants |= frozenset(action_ids)
+        self.write_grant_changed.emit()
 
     def _build_write_grant_dialog(self, action_ids: list[str]):
         """专业 WRITE 授权对话框（V6 §11）：动作卡 + 范围 + 会话粒度。

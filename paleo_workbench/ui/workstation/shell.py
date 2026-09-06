@@ -23,7 +23,6 @@ from paleo_workbench.ui.layout_persistence import (
     SETTINGS_ORG,
     migrate_legacy_layout_settings,
 )
-from paleo_workbench.ui.panel_float_controller import clamp_geometry_to_screens
 from paleo_workbench.ui.workstation.activity_rail import ActivityRail
 from paleo_workbench.ui.workstation.app_bar import WorkstationAppBar
 from paleo_workbench.ui.workstation.composite_document import CompositeDocument
@@ -1232,6 +1231,10 @@ class WorkstationFrame(QWidget):
         data = self._settings.value(self._WINDOW_GEOMETRY_KEY)
         if not isinstance(data, QByteArray) or data.isNull():
             return
+        # 函数内导入：panel_float_controller 经 floating_panel 依赖本包
+        # __init__，模块级导入会闭合成环（review round 1/2 P0）。
+        from paleo_workbench.ui.panel_float_controller import clamp_geometry_to_screens
+
         host = self._dock_host
         host.restoreGeometry(data)
         if host.isMaximized() or host.isFullScreen():

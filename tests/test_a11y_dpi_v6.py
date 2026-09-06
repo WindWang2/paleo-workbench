@@ -166,13 +166,16 @@ def test_restored_geometry_clamped_to_visible_desktop(
     _seed_geometry(geometry_settings, source.saveGeometry())
 
     calls: list[QRect] = []
-    real = shell_module.clamp_geometry_to_screens
+    # shell 经函数内导入取该函数（review 修复 P0 环），patch 其源模块。
+    from paleo_workbench.ui import panel_float_controller as pfc_module
+
+    real = pfc_module.clamp_geometry_to_screens
 
     def _spy(geometry: QRect) -> QRect:
         calls.append(geometry)
         return real(geometry)
 
-    monkeypatch.setattr(shell_module, "clamp_geometry_to_screens", _spy)
+    monkeypatch.setattr(pfc_module, "clamp_geometry_to_screens", _spy)
 
     host, frame = _build_host_with_frame(qtbot)
     host.show()

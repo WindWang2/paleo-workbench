@@ -568,16 +568,34 @@ class AppShell(QWidget):
         )
 
         def _running_tasks() -> int:
-            from paleo_workbench.runtime.task_scheduler import get_scheduler
+            # 口径与任务中心/触发器一致：QUEUED+RUNNING（review round 3
+            # P2——active_count 只数 RUNNING，会造成段内计数与徽标不一致，
+            # 且 QUEUED→RUNNING 晋升竞态会把段值钉死在 0）。
+            from paleo_workbench.runtime.task_scheduler import TaskState, get_scheduler
 
-            return get_scheduler().active_count()
+            return sum(
+                1
+                for handle in get_scheduler().statuses()
+                if handle.state in (TaskState.QUEUED, TaskState.RUNNING)
+            )
 
         svc.set_provider("running_task_count", _running_tasks)
+        # V6 §4/§11（review round 1/2 P1）：WRITE 授权态进入上下文——
+        # requires_write 命令据此评估；授权集合变化即刷新。
+        svc.set_provider(
+            "write_granted",
+            lambda: bool(self.workstation.agent_panel.write_granted_actions),
+        )
 
         # 权威变更 → 重新派生（差分发射，见 UIContextService.refresh）。
         selection.selection_changed.connect(lambda *_: svc.refresh())
         stage_controller.current_stage_changed.connect(lambda *_: svc.refresh())
         stage_controller.active_target_changed.connect(lambda *_: svc.refresh())
+        self.workstation.agent_panel.write_grant_changed.connect(lambda: svc.refresh())
+        # 任务中心轮询调度器状态；活动数变化时同步上下文（差分门控）。
+        self.workstation.task_center.active_count_changed.connect(
+            lambda *_: svc.refresh()
+        )
 
         # V6 §5：状态条工作台段（阶段 · 编辑目标 · 后端 · 任务）。
         def _update_workbench_status(snap) -> None:

@@ -194,10 +194,18 @@ class CompositeAttributeTableDialog(QDialog):
         session, _reason = self._controller.ensure_layer_session(self._layer_id)
         return session
 
-    def _write_attribute(self, feature_id: str, key: str, kind: str, text: str) -> None:
+    def _write_attribute(self, feature_id: str, key: str, kind: str, text: str) -> bool | None:
+        """写入单元格；返回 False=被门禁拒绝（调用方须恢复渲染）。"""
         session = self._edit_session()
         if session is None:
-            return
+            # 门禁拒绝（含门禁在对话框打开期间翻转的情形——review round 1
+            # P2）：明示原因，绝不静默吞掉用户输入。
+            _layer = self._layer()
+            _allowed, reason = self._controller.can_edit_layer(self._layer_id)
+            self._info.setText(
+                f"只读 — {reason or '当前图层不可编辑'}（输入未写入）"
+                if _layer is not None else "只读")
+            return False
         value: object = text
         if kind == "number":
             try:
@@ -220,7 +228,16 @@ class CompositeAttributeTableDialog(QDialog):
         if not payload:
             return
         feature_id, key, kind = payload
-        self._write_attribute(feature_id, key, kind, item.text())
+        written = self._write_attribute(feature_id, key, kind, item.text())
+        if written is False:
+            # 门禁拒绝（review round 3 P2）：把单元格恢复为已提交值，
+            # 不留「看起来写进去了」的假成功渲染。
+            self._suppress_item_changed = True
+            try:
+                if not self._refresh_changed_features():
+                    self.refresh()
+            finally:
+                self._suppress_item_changed = False
 
     def _apply_batch(self) -> None:
         key = str(self._batch_field.currentData() or "")

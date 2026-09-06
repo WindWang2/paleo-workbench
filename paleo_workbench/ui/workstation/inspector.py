@@ -341,15 +341,23 @@ class WorkstationInspector(QFrame):
         self.header.setText(f"检查器 · 曲线 {mnemonic or '—'}")
         self._clear_form(self.properties_form)
         self._clear_form(self.interpretation_form)
+
+        def _first(*keys):
+            # 诚实取值：0.0/0 是真实读数，不能当缺失（review round 1 P2）。
+            for key in keys:
+                value = info.get(key)
+                if value is not None and str(value).strip() != "":
+                    return value
+            return None
+
         self.properties_form.addRow(
             "曲线名", self._readonly(mnemonic or None))
+        self.properties_form.addRow("井", self._readonly(_first("well", "well_name")))
+        self.properties_form.addRow("单位", self._readonly(_first("unit")))
         self.properties_form.addRow(
-            "井", self._readonly(info.get("well") or info.get("well_name") or None))
-        self.properties_form.addRow("单位", self._readonly(info.get("unit") or None))
+            "深度", self._readonly(_first("depth", "md"), unit="m"))
         self.properties_form.addRow(
-            "深度", self._readonly(info.get("depth") or info.get("md") or None, unit="m"))
-        self.properties_form.addRow(
-            "值", self._readonly(info.get("value") or info.get("amplitude") or None))
+            "值", self._readonly(_first("value", "amplitude")))
         self.interpretation_form.addRow(
             "提示", self._readonly("拾取自测井引擎；校正操作产生 DERIVED 版本，RAW 不变"))
         self._set_history(["曲线拾取进入检查器（V6）"])

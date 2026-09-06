@@ -400,6 +400,12 @@ class PaleoWorkbenchWindow(QMainWindow):
         # a selection through them; re-binding fully replaces the previous
         # project's registrations (no cross-project residue, #1029).
         self.app_shell.view_coordination.bind_project(self.project)
+        # V6 §2（review round 2 P1）：工程应用即重派生上下文——否则状态条
+        # 工作台段在工程切换后短暂显示旧工程（「未打开工程」/旧任务数）。
+        try:
+            self.app_shell.ui_context_service.refresh()
+        except AttributeError:
+            pass  # 旧壳/测试桩没有 UIContextService
         state = dashboard_state(self.project)
         self.app_shell.set_project_name(
             state.get("project_name", self.project.meta.name)

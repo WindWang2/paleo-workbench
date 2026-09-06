@@ -122,7 +122,11 @@ class CommandRegistry:
             return CommandAvailability(False, "需要写入授权（当前会话只读）")
         if spec.stages:
             stage = getattr(context, "mapping_stage", None)
-            if stage is not None and stage not in spec.stages:
+            # Fail-closed（review round 1 P2）：阶段未知（provider 故障/无
+            # 工程）时阶段限定命令禁用，不放行。
+            if stage is None:
+                return CommandAvailability(False, "当前编图阶段未知")
+            if stage not in spec.stages:
                 return CommandAvailability(False, _stage_reason(spec.stages))
         if spec.applicability is not None:
             try:

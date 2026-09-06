@@ -97,9 +97,16 @@ class UIContextService(QObject):
         return self._last if self._last is not None else self.snapshot()
 
     def refresh(self) -> UIContextSnapshot:
-        """重建快照；变化时发射 ``context_changed``。"""
+        """重建快照；变化时发射 ``context_changed``。
+
+        拆壳期迟到触发（任务中心轮询定时器等）：C++ 信号源可能已销毁，
+        静默忽略而非抛 RuntimeError 刷屏（与 shell 的死壳纪律一致）。
+        """
         snap = self.snapshot()
         if snap != self._last:
             self._last = snap
-            self.context_changed.emit(snap)
+            try:
+                self.context_changed.emit(snap)
+            except RuntimeError:
+                pass  # 信号源已随壳销毁
         return snap

@@ -1331,11 +1331,14 @@ class CompositeDocument(QWidget):
         state = self.stage_controller.state
         role = state.role_of(layer_id)
         allowed, reason = self._role_allows_editing(layer_id)
-        editability = (
-            state_token("editability", "raw" if role.is_raw_protected else "editable")
-            if allowed
-            else state_token("editability", "locked")
-        )
+        # RAW 角色永远显示 raw 词汇（不可达的 "raw" token 是死词表——
+        # review round 1 P2）；其余按门禁 editable/locked。
+        if role.is_raw_protected:
+            editability = state_token("editability", "raw")
+        elif allowed:
+            editability = state_token("editability", "editable")
+        else:
+            editability = state_token("editability", "locked")
         # 成熟度：优先工作区权威（artifact_maturity），RAW 角色直接 raw。
         maturity_value = "raw" if role.is_raw_protected else None
         if maturity_value is None:
