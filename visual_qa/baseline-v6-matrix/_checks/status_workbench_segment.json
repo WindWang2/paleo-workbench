@@ -1,0 +1,25 @@
+{
+  "state_ok": true,
+  "checks": [
+    {
+      "name": "segment_label_non_empty",
+      "ok": true,
+      "detail": "'② 约束与单因素 · 当前阶段没有活动编辑目标（用阶段动作创建编辑对象） · 画布回退（QGIS 桥不可用）'"
+    },
+    {
+      "name": "segment_shows_backend_state",
+      "ok": true,
+      "detail": "'② 约束与单因素 · 当前阶段没有活动编辑目标（用阶段动作创建编辑对象） · 画布回退（QGIS 桥不可用）'"
+    },
+    {
+      "name": "segment_shows_mapping_stage",
+      "ok": true,
+      "detail": "'② 约束与单因素 · 当前阶段没有活动编辑目标（用阶段动作创建编辑对象） · 画布回退（QGIS 桥不可用）'"
+    },
+    {
+      "name": "segment_visible",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

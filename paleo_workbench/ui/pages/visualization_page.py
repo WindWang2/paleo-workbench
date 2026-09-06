@@ -111,6 +111,12 @@ class VisualizationPage(QWidget):
         self._project: ProjectDocument | None = None
         self._project_path: Path | None = None
         self._current_ref: VizRef | None = None
+        # V6 scalability: the asset combo is refilled only when the ref list
+        # signature changes, and the auto-open Path.is_file() probes are
+        # cached per source revision instead of re-statting every refresh.
+        self._asset_combo_signature: tuple[tuple[str, str, str, str], ...] | None = None
+        self._probe_signature: tuple[tuple[str, str, str, str], ...] | None = None
+        self._probe_first_ref: VizRef | None = None
         self._adapter = VizAdapter()
         self._preview_controller = PreviewRequestController(
             preview_provider or LocalVisualizationProvider(),
@@ -296,32 +302,49 @@ class VisualizationPage(QWidget):
         )
         self.trace_panel.update_state(self._prediction_tasks, self._map_documents)
 
-        # Update asset combo dropdown
-        self.asset_combo.blockSignals(True)
-        self.asset_combo.clear()
+        # Update asset combo dropdown — signature-gated (V6 Phase 5): a
+        # clear+refill per state update recreated every entry and reset the
+        # popup for 10k-well projects; only a changed ref list rebuilds now.
+        combo_entries: list[tuple[str, VizRef]] = []
         for res in self._resources:
             ref = self._adapter.ref_from_resource(res)
             if ref is not None:
                 icon = {"well_log": "📋 ", "map": "🗺️ "}.get(ref.kind, "📈 ")
-                self.asset_combo.addItem(f"{icon}{ref.label}", ref)
+                combo_entries.append((f"{icon}{ref.label}", ref))
         for doc in self._map_documents:
             ref = self._adapter.ref_from_map_document(doc)
-            self.asset_combo.addItem(f"🗺️ {ref.label}", ref)
-        self.asset_combo.blockSignals(False)
+            combo_entries.append((f"🗺️ {ref.label}", ref))
+        signature = tuple(
+            (ref.kind, ref.id, ref.label, ref.path) for _label, ref in combo_entries
+        )
+        if signature != self._asset_combo_signature:
+            self.asset_combo.blockSignals(True)
+            self.asset_combo.clear()
+            for label, ref in combo_entries:
+                self.asset_combo.addItem(label, ref)
+            self.asset_combo.blockSignals(False)
+            self._asset_combo_signature = signature
 
         self.composite_panel.update_state(self._prediction_tasks)
 
         if self._current_ref is None:
-            first_ref = None
-            for idx in range(self.asset_combo.count()):
-                ref = self.asset_combo.itemData(idx)
-                if ref is not None and getattr(ref, "kind", "") == "well_log":
-                    if ref.path and Path(ref.path).is_file():
-                        first_ref = ref
-                        self.asset_combo.blockSignals(True)
-                        self.asset_combo.setCurrentIndex(idx)
-                        self.asset_combo.blockSignals(False)
-                        break
+            # File probes cached per source revision: repeated refreshes with
+            # no openable well log used to stat every entry each time.
+            if self._probe_signature == signature:
+                first_ref = self._probe_first_ref
+            else:
+                first_ref = None
+                for idx in range(self.asset_combo.count()):
+                    ref = self.asset_combo.itemData(idx)
+                    if ref is not None and getattr(ref, "kind", "") == "well_log":
+                        if ref.path and Path(ref.path).is_file():
+                            first_ref = ref
+                            self.asset_combo.blockSignals(True)
+                            self.asset_combo.setCurrentIndex(idx)
+                            self.asset_combo.blockSignals(False)
+                            break
+                self._probe_signature = signature
+                self._probe_first_ref = first_ref
 
             if first_ref is not None:
                 self.open_ref(first_ref)

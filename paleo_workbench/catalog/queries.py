@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from paleo_workbench.catalog.checksum import ChecksumCancelled as _ChecksumCancelled
 from paleo_workbench.catalog.checksum import sha256_file
 from paleo_workbench.catalog.models import DataStage, normalize_tag_name
 
@@ -77,10 +78,13 @@ def verify_integrity(
             report.statuses[version.id] = "unknown"
             continue
         try:
-            actual = sha256_file(payload)
+            actual = sha256_file(payload, cancel=cancel)
         except OSError:
             report.statuses[version.id] = "missing"
             continue
+        except _ChecksumCancelled:
+            report.cancelled = True
+            return report
         report.statuses[version.id] = (
             "verified" if actual == version.sha256 else "modified"
         )
@@ -123,7 +127,14 @@ def search_assets(
     try:
         if (
             service._batch_depth
-            or service.index_revision() != service.document.catalog_revision
+            or (
+                not (
+                    getattr(service, "_lazy", False)
+                    and not getattr(service, "_warm", True)
+                )
+                and service.index_revision()
+                != service.document.catalog_revision
+            )
         ):
             # A readable-but-stale index must not be queried (I3): only the
             # canonical document scan reflects the current state. During
@@ -139,8 +150,22 @@ def search_assets(
             type=type,
             metadata=metadata_pairs or None,
         )
-        # Use the service's maintained id→asset map (O(1) per row) instead of
-        # rebuilding it per query, so a filtered search is O(result), not O(N).
+        # Identity-stable resolution via the service (lazy-safe, #1212):
+        # pre-warm the maintained map is empty BY DESIGN, so resolve through
+        # the service's lazy read path instead — index rows must never filter
+        # to an empty result just because the document isn't warm yet.
+        # Post-warm this still returns the document's own objects.
+        if getattr(service, "_lazy", False) and not getattr(service, "_warm", True):
+            resolved = {
+                a.id: a
+                for a in service.resolve_asset_models([r["id"] for r in rows])
+            }
+            return [
+                resolved[r["id"]]
+                for r in rows
+                if r["id"] in resolved
+                and (include_trashed or not resolved[r["id"]].trashed)
+            ]
         by_id = service._ensure_maps().asset_by_id
         return [
             by_id[r["id"]]

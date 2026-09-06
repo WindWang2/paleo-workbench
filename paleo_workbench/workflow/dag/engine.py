@@ -468,6 +468,16 @@ class WorkflowEngine:
         use_cache: bool = True,
     ) -> None:
         run.state = RunState.RUNNING
+        # #1225: the spec's max_concurrency is an UPPER bound only — the
+        # pool width itself comes from the central resource allowance, so a
+        # workflow can never oversubscribe past the governor's compute
+        # ceiling (nested pools outside policy were the bypass).
+        try:
+            from paleo_workbench.runtime.governance import clamp_workers
+
+            workers = max(1, min(int(workers), clamp_workers("background.compute", workers)))
+        except Exception:
+            pass
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="paleo-workflow") as pool:
             futures: dict[Any, str] = {}
             while True:

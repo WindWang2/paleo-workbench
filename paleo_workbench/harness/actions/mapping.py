@@ -385,34 +385,59 @@ def _create_factor_map(context: ActionContext, parameters: dict) -> dict:
                 grid_x=grid.grid_x,
                 grid_y=grid.grid_y,
             )
-            run = context.catalog.begin_run(
-                operation="factor_map.interpolate",
-                input_version_ids=[],
-                parameters={
-                    "factor_name": parameters["factor_name"],
-                    "method": parameters.get("method", "kriging"),
-                    "grid_n": int(parameters.get("grid_n", 50)),
-                },
-                generator_version="geological-mapping-service",
+            # #1222: the npz sits unreferenced inside the stage tree between
+            # the write and the register_intermediate commit; a staging lease
+            # keeps a concurrent explicit GC sweep from deleting it. The port
+            # carries the lease only on the Core adapter (best-effort).
+            _lease_cm = getattr(
+                getattr(context.catalog, "_service", None),
+                "_payload_staging_lease",
+                None,
             )
-            try:
-                version = context.catalog.register_intermediate(
-                    run_id=run.run_id,
-                    name=f"{parameters['factor_name']} grid",
-                    path=str(artifact_path),
-                    kind="factor_grid",
-                    format="npz",
+            _lease = (
+                _lease_cm(
+                    artifact_dir.relative_to(
+                        artifact_dir.parents[1]
+                    ).as_posix(),
+                    kind="harness.mapping",
                 )
-                context.catalog.complete_run(run.run_id, status="complete")
-                version_identity = getattr(version, "version_id", None)
-                run_id_out = run.run_id
-            except Exception:
-                # Never leave a forever-running DataRun behind.
+                if _lease_cm is not None
+                else None
+            )
+            if _lease is not None:
+                _lease.__enter__()
+            try:
+                run = context.catalog.begin_run(
+                    operation="factor_map.interpolate",
+                    input_version_ids=[],
+                    parameters={
+                        "factor_name": parameters["factor_name"],
+                        "method": parameters.get("method", "kriging"),
+                        "grid_n": int(parameters.get("grid_n", 50)),
+                    },
+                    generator_version="geological-mapping-service",
+                )
                 try:
-                    context.catalog.complete_run(run.run_id, status="failed")
+                    version = context.catalog.register_intermediate(
+                        run_id=run.run_id,
+                        name=f"{parameters['factor_name']} grid",
+                        path=str(artifact_path),
+                        kind="factor_grid",
+                        format="npz",
+                    )
+                    context.catalog.complete_run(run.run_id, status="complete")
+                    version_identity = getattr(version, "version_id", None)
+                    run_id_out = run.run_id
                 except Exception:
-                    pass
-                raise
+                    # Never leave a forever-running DataRun behind.
+                    try:
+                        context.catalog.complete_run(run.run_id, status="failed")
+                    except Exception:
+                        pass
+                    raise
+            finally:
+                if _lease is not None:
+                    _lease.__exit__(None, None, None)
         except Exception:
             import logging
 

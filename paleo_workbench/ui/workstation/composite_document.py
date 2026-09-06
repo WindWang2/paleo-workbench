@@ -740,6 +740,8 @@ class CompositeDocument(QWidget):
 
         # 矢量图层新建 / 编辑（QGIS 式编辑会话，见 composite_editing.py）
         self.edit_controller = CompositeEditController(parent=self)
+        # RAW/锁定门禁单点注入（V6 B-P0-1：所有会话起点与 flush 提交经此）。
+        self.edit_controller.set_edit_gate(self._role_allows_editing)
         self.edit_controller.attach_canvas(self.canvas)
         self.edit_controller.identify_delegate = self._identify_with_results
         # 引用矢量图层：外部 GDAL 源的只读参考（渲染要素经源修订缓存，
@@ -895,6 +897,29 @@ class CompositeDocument(QWidget):
 
     # -- 悬浮工具条 -----------------------------------------------------------
 
+    # -- 阶段工具面（V6 §4） ------------------------------------------------------
+
+    def apply_stage_tool_profile(self, stage_value: str) -> None:
+        """按 ``StageToolProfile`` 过滤工具条的数字化/编辑动作可见性。
+
+        只隐藏受治理全集（``governed_edit_actions``）内的动作；基础导航/
+        识别/选择永不因阶段隐藏。未知阶段值保持现状（宽容：阶段条已校验）。
+        """
+        from paleo_workbench.mapping_workspace.stage_profiles import (
+            governed_edit_actions,
+            stage_profile,
+        )
+        from paleo_workbench.mapping_workspace.stages import stage_from_value
+
+        stage = stage_from_value(stage_value)
+        if stage is None:
+            return
+        tools = stage_profile(stage).tools
+        for action_id in governed_edit_actions():
+            action = self.action_controller.actions.get(action_id)
+            if action is not None:
+                action.setVisible(tools.allows_edit_action(action_id))
+
     def _build_toolbar(self) -> None:
         """悬浮工具条：QGIS 命令面（MapActionController）+「面板」菜单。"""
         self.toolbar = QFrame(self)
@@ -953,6 +978,11 @@ class CompositeDocument(QWidget):
         self.panels_button.setText("面板")
         self.panels_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.panels_button.setToolTip("面板显隐、布局预设、全部浮动 / 停靠")
+        # IconOnly 样式隐藏了 text，屏幕阅读器需要显式名（V6 audit G-P1-3）。
+        self.panels_button.setAccessibleName("面板")
+        self.panels_button.setAccessibleDescription(
+            "面板显隐、布局预设、全部浮动 / 停靠"
+        )
         self._panels_menu = QMenu(self.panels_button)
         self.panels_button.setMenu(self._panels_menu)
         self.panels_button.setPopupMode(
@@ -1286,6 +1316,86 @@ class CompositeDocument(QWidget):
         if self.edit_controller.layer(str(layer_id)) is not None:
             self.edit_controller.set_active_layer(str(layer_id))
             self.layer_manager.select_layer(str(layer_id))
+
+    def layer_domain_status(self, layer_id: str) -> dict[str, str]:
+        """图层级域状态行（V6 §6：inspector 上下文 seam 数据源）。
+
+        角色/成熟度/可编辑/新鲜度四行，值经 state_language 词汇渲染
+        （glyph+文字）；未知项诚实「未知」，不编造。
+        """
+        from paleo_workbench.ui.workstation.state_language import state_token
+
+        from paleo_workbench.mapping_workspace.layer_roles import LayerRole
+
+        layer_id = str(layer_id)
+        state = self.stage_controller.state
+        role = state.role_of(layer_id)
+        allowed, reason = self._role_allows_editing(layer_id)
+        # RAW 角色永远显示 raw 词汇（不可达的 "raw" token 是死词表——
+        # review round 1 P2）；其余按门禁 editable/locked。
+        if role.is_raw_protected:
+            editability = state_token("editability", "raw")
+        elif allowed:
+            editability = state_token("editability", "editable")
+        else:
+            editability = state_token("editability", "locked")
+        # 成熟度：优先工作区权威（artifact_maturity），RAW 角色直接 raw。
+        maturity_value = "raw" if role.is_raw_protected else None
+        if maturity_value is None:
+            record = state.membership(layer_id)
+            keys = []
+            if record is not None:
+                if record.factor_task_id:
+                    keys.append(f"factor:{record.factor_task_id}")
+                if record.role == LayerRole.INITIAL_FACIES_DRAFT:
+                    keys.append(f"phase1_draft:{layer_id}")
+                if record.role in (LayerRole.INTEGRATED_FACIES, LayerRole.INTEGRATED_BOUNDARY):
+                    keys.append(f"integrated:{layer_id}")
+            for key in keys:
+                found = state.artifact_maturity.get(key)
+                if found:
+                    maturity_value = str(found)
+                    break
+        maturity = state_token("maturity", maturity_value)
+        freshness_artifact = self.stage_controller.group_controller.layer_freshness(layer_id)
+        freshness = (
+            state_token("freshness", freshness_artifact.status.value)
+            if freshness_artifact is not None
+            else state_token("freshness", None)
+        )
+        return {
+            "角色": f"{role.label}",
+            "成熟度": f"{maturity.glyph} {maturity.label}",
+            "可编辑": f"{editability.glyph} {editability.label}" + (
+                f"（{reason}）" if not allowed and reason else ""),
+            "新鲜度": f"{freshness.glyph} {freshness.label}",
+        }
+
+    def active_editing_target_status(self) -> dict:
+        """活动编辑目标摘要（V6 §5：UIContext/状态条/检查器共用 seam）。
+
+        返回 ``active_layer_id / role_label / editable / block_reason /
+        editing_active``。无目标时 editable=False 且必须给出原因——
+        「我在编辑什么」永远有答案。
+        """
+        target = self.stage_controller.active_target_layer_id
+        if not target:
+            return {
+                "active_layer_id": None,
+                "role_label": None,
+                "editable": False,
+                "block_reason": "当前阶段没有活动编辑目标（用阶段动作创建编辑对象）",
+                "editing_active": False,
+            }
+        allowed, reason = self._role_allows_editing(str(target))
+        role = self.stage_controller.state.role_of(str(target))
+        return {
+            "active_layer_id": str(target),
+            "role_label": role.label,
+            "editable": allowed,
+            "block_reason": reason,
+            "editing_active": self.edit_controller.editing,
+        }
 
     def _role_allows_editing(self, layer_id) -> tuple[bool, str]:
         """编辑门禁（单点）：RAW 不可变保护（V5 §14）+ 阶段证据组锁（§41）。

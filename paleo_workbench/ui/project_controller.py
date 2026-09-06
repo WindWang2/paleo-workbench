@@ -8,7 +8,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 from pydantic import ValidationError
 
-from paleo_workbench.project.manager import ProjectManager
+from paleo_workbench.project.manager import ProjectManager, ProjectUnreadableError
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.project.paths import (
     ProjectPathError,
@@ -201,6 +201,15 @@ class ProjectController:
                 f"工程内相对路径非法（疑似逃出工程目录）：\n{target}\n{e}"
             )
             return False
+        except ProjectUnreadableError as e:
+            # v6 (#1229): transient unreadability (AV/sync lock) — the .bak
+            # fallback must NOT fire; the main file and its backup stay
+            # untouched so a retry after freeing the file loses nothing.
+            self._last_open_error = (
+                f"工程文件暂时不可读（可能被占用），未回退备份以免覆盖较新内容：\n"
+                f"{target}\n{e}\n请关闭占用该文件的程序后重试。"
+            )
+            return False
         except OSError as e:
             self._last_open_error = f"无法读取工程文件：\n{target}\n{e}"
             return False
@@ -293,9 +302,13 @@ class ProjectController:
             )
 
             ProjectController._close_catalog()
-            service = DataCatalogService.open(
-                target, ensure_index=False, sweep_temp=False
-            )
+            # Lazy open (#1212): the O(N) full-document materialization moves
+            # off the GUI thread — the shell turns responsive after the
+            # store health/revision probes only. Hot reads serve from SQLite
+            # immediately; the maintenance thread warms the full document in
+            # the background, and any mutation/full read materializes on
+            # demand before proceeding.
+            service = DataCatalogService.open(target, lazy=True, sweep_temp=False)
             set_catalog(CoreCatalogAdapter(service))
             return None
         except Exception as error:
@@ -380,9 +393,37 @@ class ProjectController:
             return
         if service is not None:
             try:
+                # Warm the lazily-opened document FIRST (#1212): everything
+                # below (legacy projection, sweep, index verification) needs
+                # the full entity graph anyway, and warming before them keeps
+                # those steps on the already-eager code path.
+                service.warm_document()
+                # Working-copy crash recovery (#1211): interrupted commits and
+                # save-as-orphaned registry rows heal before the UI lists them.
+                try:
+                    service.recover_working_copies()
+                except Exception:
+                    pass
                 service.migrate_legacy_resources(resources_snapshot)
                 service.sweep_temp_on_open()
                 service.ensure_index_ready()
+                # #1219: completed runs of producing operations with zero
+                # outputs (pre-book crash window) heal to failed.
+                try:
+                    service.repair_ghost_runs()
+                except Exception:
+                    pass
+                # #1223-family: interrupted transcodes/attributes resume on
+                # project open (was: only on first lifecycle activity, so a
+                # reopened project silently carried 'running' runs).
+                try:
+                    from paleo_workbench.seismic_lifecycle import (
+                        get_lifecycle_service,
+                    )
+
+                    get_lifecycle_service(service)
+                except Exception:
+                    pass
             except Exception:
                 # Canonical project/catalog remain available even if an
                 # optional acceleration rebuild cannot complete.
@@ -749,7 +790,7 @@ class ProjectController:
             from paleo_workbench.catalog.service import DataCatalogService
 
             service = DataCatalogService.open(
-                target, ensure_index=False, sweep_temp=False
+                target, lazy=True, sweep_temp=False
             )
             try:
                 service.rebase_artifact_paths()

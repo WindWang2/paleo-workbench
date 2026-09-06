@@ -27,6 +27,7 @@ import json
 import os
 import threading
 from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -39,6 +40,7 @@ from paleo_workbench.catalog.checksum import sha256_file
 from paleo_workbench.catalog.db import (
     STORE_SCHEMA_VERSION,
     CatalogIndex,
+    CatalogStaleWriteError,
     DirtySet,
     normalize_asset_search_name,
 )
@@ -211,17 +213,6 @@ class _BatchSave:
                 raise
             service._maybe_checkpoint_manifest_locked()
             return False
-class CatalogStaleWriteError(OSError):
-    """Raised when the canonical store advanced past this session's baseline.
-
-    Without an ownership protocol a second process holding an older
-    in-memory snapshot silently overwrites (last-writer-wins) everything the
-    first process committed (#411). Flush-time stale detection compares the
-    store's committed revision against this session's baseline and refuses
-    the overwrite instead.
-    """
-
-
 def _disk_mtime_ns(path: Path) -> int | None:
     try:
         return path.stat().st_mtime_ns
@@ -324,6 +315,23 @@ class DataCatalogService:
         # Published as one snapshot so unlocked readers never observe a
         # mid-rebuild / mid-invalidate None window (#619).
         self._maps: _CatalogMaps | None = None
+        # Lazy open (#1212): a service opened ``lazy=True`` starts with an
+        # EMPTY document and serves hot reads (get/list/page/count/aggregate)
+        # straight from the canonical SQLite store until a background
+        # ``warm_document()`` (or the first mutation / full-document read,
+        # which materializes inline) swaps in the fully materialized document.
+        # ``_warm`` is True for every eagerly-opened service, so all
+        # pre-existing behavior is unchanged unless lazy was requested.
+        self._lazy: bool = False
+        self._warm: bool = True
+        # Asset ids appended by an in-flight commit_working_copy whose
+        # version has not landed yet (the #1218 lock-free payload window):
+        # zombie classifiers must not treat these as removable (R2#5).
+        self._pending_commit_assets: set[str] = set()
+        # id→model cache for lazy reads before warmup: keeps object identity
+        # stable within the pre-warm window (the UI holds these objects).
+        # Cleared when the warm document swaps in.
+        self._lazy_read_cache: dict[str, Any] = {}
 
     # -- change tracking ------------------------------------------------------
 
@@ -384,6 +392,93 @@ class DataCatalogService:
         """Drop the cached indexes; they rebuild lazily on next use."""
         self._maps = None
 
+    # -- lazy open warmup (#1212) ---------------------------------------------
+
+    @property
+    def is_warm(self) -> bool:
+        """True once the full document is materialized (always true when the
+        service was opened eagerly)."""
+        return self._warm
+
+    def require_warm(self) -> None:
+        """Block until the full document is materialized.
+
+        No-op for eager services and already-warm lazy services. For a lazy
+        service still pre-warm, materializes inline (same cost the eager
+        open used to pay, paid by whichever caller needs the full document
+        first). Correct-by-construction: there is exactly one document
+        object and one identity space — no merge logic.
+        """
+        if self._warm:
+            return
+        with self._lock:
+            if not self._warm:
+                self._warm_locked()
+
+    def warm_document(self) -> None:
+        """Background warmup for a lazily-opened service.
+
+        Loads the full document off the service lock, then swaps it in under
+        the lock. Safe to race ``require_warm`` (inline materialization) and
+        arbitrary mutations: any mutation path materializes first via
+        ``_ensure_maps``, so a store revision that moved past the loaded
+        snapshot implies an inline warm already happened and this load is
+        simply discarded.
+        """
+        if self._warm:
+            return
+        document = self._index.load_document()
+        with self._lock:
+            if self._warm:
+                return  # inline warm won the race; discard this snapshot
+            if document is None:
+                # Unreadable mid-warmup (rare; open health-checked it):
+                # fall back to the inline path so the error surfaces from
+                # whichever caller needs the document.
+                self._warm_locked()
+                return
+            stored = self._index.revision()
+            if (
+                stored is not None
+                and document.catalog_revision is not None
+                and stored != document.catalog_revision
+            ):
+                # The store advanced past the loaded snapshot: a mutation
+                # committed while we were loading — but every mutation
+                # implies an inline warm (see above), so this cannot happen
+                # without ``_warm`` already being set. Reachable only via a
+                # legacy json-canonical writer; discard and warm inline.
+                self._warm_locked()
+                return
+            self.document = document
+            self._invalidate_maps()
+            # _warm BEFORE _ensure_maps (see _warm_locked): the maps builder
+            # itself branches on _warm for the inline trigger.
+            self._warm = True
+            self._ensure_maps()
+            self._lazy_read_cache.clear()
+
+    def _warm_locked(self) -> None:
+        """Materialize the full document; caller holds ``_lock``."""
+        document = self._index.load_document()
+        if document is None:
+            raise CatalogError(
+                "Canonical catalog store became unreadable while opening; "
+                "resolve the read failure (close other instances) and reopen."
+            )
+        self.document = document
+        self._invalidate_maps()
+        # Set _warm BEFORE building the maps: _ensure_maps itself branches
+        # on _warm for the inline-materialization trigger and would recurse
+        # otherwise.
+        self._warm = True
+        self._ensure_maps()
+        self._lazy_read_cache.clear()
+
+    def _require_warm(self) -> None:
+        """Internal alias used by the warm-guard method wrappers."""
+        self.require_warm()
+
     def _drop_dedup_keys(self, version: DataVersion) -> None:
         """Remove *version*'s dedup-index entries (only when still its own).
 
@@ -416,6 +511,14 @@ class DataCatalogService:
 
     def _ensure_maps(self) -> _CatalogMaps:
         """Build the id→object indexes from the document (idempotent)."""
+        if not self._warm:
+            # Lazy pre-warm: the document is empty by design. Materialize it
+            # now (inline warmup) so the maps — and every mutation that
+            # follows — see the real entity graph. This is the single
+            # convergence point that keeps lazy and eager behavior
+            # identical after the first mutation.
+            self._warm_locked()
+            return self._maps  # type: ignore[return-value]
         maps = self._maps
         if maps is not None:
             return maps
@@ -668,7 +771,7 @@ class DataCatalogService:
         cls,
         project_path: str | Path,
         *,
-        ensure_index: bool = True,
+        lazy: bool = False,
         sweep_temp: bool = True,
     ) -> "DataCatalogService":
         """Open (or initialize) the catalog for *project_path*.
@@ -687,6 +790,14 @@ class DataCatalogService:
 
         ``sweep_temp`` is optional session maintenance, never a prerequisite
         for canonical catalog availability.
+
+        ``lazy=True`` (#1212) skips the O(N) full-document materialization:
+        the service opens with the store's revision baseline only and serves
+        hot reads (get/list/page/count/aggregate) from SQLite. A background
+        ``warm_document()`` swaps in the materialized document; the first
+        mutation or full-document read materializes inline instead. Use for
+        the GUI project-open path so 100k-scale projects reach a responsive
+        shell without waiting for the eager load.
         """
         project_path = Path(project_path)
         store = CatalogStore(project_path)
@@ -695,7 +806,7 @@ class DataCatalogService:
         document: CatalogDocument | None = None
         json_path = catalog_file_for(project_path)
         health = index.store_health()
-        if health == "canonical":
+        if health == "canonical" and not lazy:
             document = index.load_document()
             if document is None:
                 # Partial corruption: the store passed the health probes
@@ -752,6 +863,40 @@ class DataCatalogService:
             except OSError:
                 pass  # best-effort forensics; reset() removes the bytes anyway
             index.reset()
+        if health == "canonical" and lazy:
+            # Lazy path: the store is canonical and healthy. The manifest
+            # mtime bookkeeping still runs (cheap mtime compare; the full
+            # manifest parse only happens when the mtime moved, i.e. an old
+            # json-canonical app version wrote behind our back) so a newer
+            # legacy revision is honored BEFORE any read is served.
+            revision = index.revision()
+            if json_path.is_file():
+                recorded = _recorded_manifest_mtime_ns(index)
+                current = _disk_mtime_ns(json_path)
+                if recorded is None or current is None or recorded != current:
+                    try:
+                        legacy = store.load()
+                    except CatalogError:
+                        legacy = None
+                    if (
+                        legacy is not None
+                        and revision is not None
+                        and legacy.catalog_revision > revision
+                    ):
+                        index.write_all(legacy)
+                        revision = legacy.catalog_revision
+            service = cls(
+                project_path,
+                CatalogDocument(
+                    catalog_revision=revision if revision is not None else 0
+                ),
+                store,
+                index,
+            )
+            service._flushed_revision = service.document.catalog_revision
+            service._lazy = True
+            service._warm = False
+            return service
         if document is not None and json_path.is_file():
             # The manifest should be exactly what we last checkpointed. A
             # different mtime means an old (json-canonical) app version wrote
@@ -802,9 +947,26 @@ class DataCatalogService:
             pass
 
     def close(self) -> None:
-        """Checkpoint the JSON manifest, then release the store."""
+        """Checkpoint the JSON manifest, then release the store.
+
+        Lazy-session fast path (#1212): a lazily-opened service that made NO
+        mutations skips the manifest rewrite entirely — the on-disk manifest
+        already matches the store's committed revision (verified via the
+        recorded mtime baseline), so re-exporting would force a full document
+        materialization just to reproduce bytes we already have.
+        """
         try:
-            self.export_manifest()
+            if self._lazy and self._mutations_since_manifest == 0:
+                json_path = catalog_file_for(self.project_path)
+                manifest_current = (
+                    json_path.is_file()
+                    and _recorded_manifest_mtime_ns(self._index)
+                    == _disk_mtime_ns(json_path)
+                )
+                if not manifest_current:
+                    self.export_manifest()
+            else:
+                self.export_manifest()
         except Exception:
             # A manifest failure must never block closing the canonical store.
             pass
@@ -882,7 +1044,11 @@ class DataCatalogService:
 
         Caller must hold ``_lock``. Refuses to overwrite a store that
         advanced since this session's baseline, commits *dirty*'s rows in
-        ONE transaction, then refreshes the baseline.
+        ONE transaction, then refreshes the baseline. The revision compare
+        is enforced INSIDE the write transaction (#1220 CAS): the pre-check
+        below stays as a cheap fast-fail, but a foreign commit landing
+        between the pre-check and the transaction is aborted by the store
+        layer — at most one conflicting writer ever succeeds.
         """
         stored = self._index.revision()
         if stored is not None and stored != self._flushed_revision:
@@ -891,7 +1057,9 @@ class DataCatalogService:
                 "本次保存已中止。请重新打开工程后重试。"
             )
         if reconcile:
-            self._index.reconcile(self.document)
+            self._index.reconcile(
+                self.document, expected_revision=self._flushed_revision
+            )
         else:
             maps = self._ensure_maps()
             self._index.apply_changes(
@@ -902,6 +1070,7 @@ class DataCatalogService:
                     "versions": maps.version_by_id,
                     "runs": maps.run_by_id,
                 },
+                expected_revision=self._flushed_revision,
             )
         self._flushed_revision = self.document.catalog_revision
 
@@ -947,18 +1116,6 @@ class DataCatalogService:
         except Exception:
             pass  # the manifest is a convenience artifact, never a gate
 
-    def _sync_index_best_effort(self) -> None:
-        try:
-            self._index.sync(self.document)
-        except Exception:
-            try:
-                self._index.reset()
-                self._index.rebuild(self.document)
-            except Exception:
-                # The store self-heals on the next write; canonical truth is
-                # already committed.
-                pass
-
     def batch_save(self) -> "_BatchSave":
         """Context manager merging many mutator calls into ONE transaction.
 
@@ -981,7 +1138,7 @@ class DataCatalogService:
         Honors the #411 stale-write rule like every other write path: a
         store that advanced past this session's baseline belongs to another
         process, and reconciling over it would silently drop that process's
-        commits.
+        commits (the full diff would DELETE its rows).
         """
         try:
             if self._index.is_fresh(self.document):
@@ -992,7 +1149,9 @@ class DataCatalogService:
                     "数据目录元数据已被其他实例修改；为避免覆盖他人提交，"
                     "本次同步已中止。请重新打开工程后重试。"
                 )
-            self._index.reconcile(self.document)
+            self._index.reconcile(
+                self.document, expected_revision=self._flushed_revision
+            )
         except CatalogStaleWriteError:
             raise
         except Exception:
@@ -1003,13 +1162,27 @@ class DataCatalogService:
         self._ensure_index_fresh()
 
     def rebuild_index(self) -> None:
-        """Force a full store rewrite from the in-memory document."""
-        self._index.reset()
-        self._index.rebuild(self.document)
-        self._flushed_revision = self.document.catalog_revision
-        # The maintained maps reflect the document that was loaded at open;
-        # a caller swapping ``document`` before rebuilding leaves them stale.
-        self._invalidate_maps()
+        """Force a full store rewrite from the in-memory document.
+
+        Guarded like every write path (#1220): a store that advanced past
+        this session's baseline is another process's commits, and rebuilding
+        over it from our snapshot would destroy them. The reset+rebuild runs
+        under the service lock so in-process flushes cannot interleave with
+        a half-deleted database.
+        """
+        with self._lock:
+            stored = self._index.revision()
+            if stored is not None and stored != self._flushed_revision:
+                raise CatalogStaleWriteError(
+                    "数据目录元数据已被其他实例修改；rebuild 已中止以免覆盖他人提交。"
+                    "请重新打开工程后重试。"
+                )
+            self._index.reset()
+            self._index.rebuild(self.document)
+            self._flushed_revision = self.document.catalog_revision
+            # The maintained maps reflect the document that was loaded at open;
+            # a caller swapping ``document`` before rebuilding leaves them stale.
+            self._invalidate_maps()
 
     def index_revision(self) -> int | None:
         return self._index.revision()
@@ -1105,13 +1278,82 @@ class DataCatalogService:
         if self._assets_by_legacy_id is not None:
             self._assets_by_legacy_id.setdefault(legacy_resource_id, asset)
 
+    # -- lazy hot reads (#1212) ------------------------------------------------
+    #
+    # Before warmup these serve straight from the canonical store (bounded
+    # per-entity / per-asset queries) with a small id→model cache for object
+    # identity. After warmup they use the maintained maps exactly as before.
+
+    def _lazy_active(self) -> bool:
+        return self._lazy and not self._warm
+
+    def _lazy_get_asset(self, asset_id: str) -> DataAsset | None:
+        cached = self._lazy_read_cache.get(asset_id)
+        if cached is not None:
+            return cached
+        model = self._index.get_asset_model(asset_id)
+        if model is not None:
+            self._lazy_read_cache[asset_id] = model
+        return model
+
+    def _lazy_get_version(self, version_id: str) -> DataVersion | None:
+        cached = self._lazy_read_cache.get(version_id)
+        if cached is not None:
+            return cached
+        model = self._index.get_version_model(version_id)
+        if model is not None:
+            self._lazy_read_cache[version_id] = model
+        return model
+
+    def _lazy_get_run(self, run_id: str) -> DataRun | None:
+        cached = self._lazy_read_cache.get(run_id)
+        if cached is not None:
+            return cached
+        model = self._index.get_run_model(run_id)
+        if model is not None:
+            self._lazy_read_cache[run_id] = model
+        return model
+
     def get_asset(self, asset_id: str) -> DataAsset:
+        if self._lazy_active():
+            # Pre-warm the store IS the committed truth (mutations and
+            # batches only exist post-warm), so a clean miss is a genuine
+            # unknown id — raise without paying the full materialization.
+            try:
+                asset = self._lazy_get_asset(asset_id)
+            except Exception:
+                asset = None  # store read failed; warm path handles errors
+            else:
+                if asset is None:
+                    raise CatalogError(f"Unknown asset: {asset_id}")
+                return asset
+            self.require_warm()
         return self._asset_or_raise(asset_id)
 
     def get_version(self, version_id: str) -> DataVersion:
+        if self._lazy_active():
+            try:
+                version = self._lazy_get_version(version_id)
+            except Exception:
+                version = None
+            else:
+                if version is None:
+                    raise CatalogError(f"Unknown version: {version_id}")
+                return version
+            self.require_warm()
         return self._version_or_raise(version_id)
 
     def get_run(self, run_id: str) -> DataRun:
+        if self._lazy_active():
+            try:
+                run = self._lazy_get_run(run_id)
+            except Exception:
+                run = None
+            else:
+                if run is None:
+                    raise CatalogError(f"Unknown run: {run_id}")
+                return run
+            self.require_warm()
         maps = self._ensure_maps()
         run = maps.run_by_id.get(run_id)
         if run is not None:
@@ -1125,20 +1367,71 @@ class DataCatalogService:
 
     def list_assets(self, include_trashed: bool = False) -> list[DataAsset]:
         """List assets; trashed (soft-deleted) assets are hidden by default."""
+        if self._lazy_active():
+            models = self._index.list_asset_models(
+                include_trashed=include_trashed, trashed_only=False
+            )
+            for model in models:
+                self._lazy_read_cache.setdefault(model.id, model)
+            return models
         if include_trashed:
             return list(self.document.assets)
         return [asset for asset in self.document.assets if not asset.trashed]
 
     def get_trashed_assets(self) -> list[DataAsset]:
         """Assets currently in the trash (tombstoned, recoverable)."""
+        if self._lazy_active():
+            models = self._index.list_asset_models(
+                include_trashed=True, trashed_only=True
+            )
+            for model in models:
+                self._lazy_read_cache.setdefault(model.id, model)
+            return models
         return [asset for asset in self.document.assets if asset.trashed]
 
     def list_runs(self) -> list[DataRun]:
+        if self._lazy_active():
+            models = self._index.list_run_models()
+            for model in models:
+                self._lazy_read_cache.setdefault(model.id, model)
+            return models
         return list(self.document.runs)
 
     def list_versions(self, asset_id: str) -> list[DataVersion]:
+        if self._lazy_active():
+            models = self._index.list_version_models_for_asset(asset_id)
+            for model in models:
+                self._lazy_read_cache.setdefault(model.id, model)
+            return sorted(models, key=lambda v: v.version_number)
         versions = list(self._ensure_maps().versions_by_asset.get(asset_id, ()))
         return sorted(versions, key=lambda v: v.version_number)
+
+    def list_all_versions(self) -> list[DataVersion]:
+        """Every version in document order (rowid); lazy-safe."""
+        if self._lazy_active():
+            models = self._index.list_all_version_models()
+            for model in models:
+                self._lazy_read_cache.setdefault(model.id, model)
+            return models
+        return list(self.document.versions)
+
+    def resolve_asset_models(self, asset_ids: Iterable[str]) -> list[DataAsset]:
+        """Identity-stable asset models for *asset_ids* (lazy-safe).
+
+        Pre-warm: served from the lazy read cache (populated per id from the
+        store). Post-warm: the maintained document objects. Used by the
+        materialized search path so index rows never filter to empty on a
+        not-yet-warm document.
+        """
+        if self._lazy_active():
+            out: list[DataAsset] = []
+            for asset_id in asset_ids:
+                model = self._lazy_get_asset(str(asset_id))
+                if model is not None:
+                    out.append(model)
+            return out
+        by_id = self._ensure_maps().asset_by_id
+        return [by_id[i] for i in asset_ids if i in by_id]
 
     def resolve_path(self, version: DataVersion) -> Path:
         """Runtime absolute path for a version's payload.
@@ -1186,10 +1479,13 @@ class DataCatalogService:
 
     @staticmethod
     def _fallback_identity_ok(cand: Path, version: DataVersion) -> bool:
-        """#1140: basename fallbacks must not silently bind a same-named
-        stranger. Verify size/sha256 when the record carries them; a
-        mismatch keeps searching so the caller fails clean (missing file)
-        instead of reading wrong data."""
+        """#1140/#1221: basename fallbacks must not silently bind a same-named
+        stranger. Verify size/sha256 when the record carries them; a mismatch
+        keeps searching so the caller fails clean (missing file) instead of
+        reading wrong data. A record with NEITHER fact has nothing to verify
+        against — fail CLOSED (#1221): an identity-less version surfaces as
+        missing (integrity/relink handle it) rather than silently binding an
+        unrelated same-named scientific file."""
         try:
             if version.sha256:
                 from paleo_workbench.catalog.checksum import sha256_file_or_none
@@ -1199,7 +1495,8 @@ class DataCatalogService:
                 return cand.stat().st_size == version.size_bytes
         except OSError:
             return False
-        return True
+        # No identity evidence at all: refuse the basename guess.
+        return False
 
     # -- rollback helper ----------------------------------------------------
 
@@ -1256,6 +1553,53 @@ class DataCatalogService:
             for v in self._ensure_maps().versions_by_asset.get(asset_id, ())
         ]
         return max(numbers, default=0) + 1
+
+    def _staging_target(self, stage: DataStage | None, asset_id: str | None) -> str:
+        """Project-relative posix prefix of a payload target dir (lease key).
+
+        Matches the rel-path convention GC computes for orphan candidates:
+        ``<name>.artifacts/<stage>/<asset_id>``.
+        """
+        from paleo_workbench.catalog.storage import STAGE_DIRS
+
+        parts = [artifact_dir_for(self.project_path).name]
+        if stage is not None:
+            # The ON-DISK directory name (e.g. OUTPUT → "outputs"), NOT
+            # stage.value ("output") — GC computes rel paths from the real
+            # layout, so a value-based key would never prefix-match (R3#1).
+            parts.append(STAGE_DIRS[stage])
+        if asset_id is not None:
+            parts.append(asset_id)
+        return "/".join(parts)
+
+    def _blob_staging_target(self) -> str:
+        return f"{artifact_dir_for(self.project_path).name}/blobs"
+
+    @contextmanager
+    def _payload_staging_lease(self, *targets: str, kind: str = "register"):
+        """Bridge the place-on-disk → metadata-commit window (#1222).
+
+        Payload bytes land outside the service lock by design; until the
+        metadata transaction references them, a concurrent explicit GC sweep
+        would classify them as orphans. The lease records ownership of the
+        target dirs; GC skips leased paths and re-validates under this
+        service's lock before every deletion chunk. Best-effort: when the
+        lease store is unavailable the registration proceeds with the
+        pre-lease semantics instead of failing.
+        """
+        lease_id: str | None = None
+        try:
+            lease_id = self._index.acquire_staging_lease(targets, kind)
+        except Exception:
+            lease_id = None
+        try:
+            yield lease_id
+        finally:
+            if lease_id is not None:
+                try:
+                    self._index.release_staging_lease(lease_id)
+                except Exception:
+                    pass
 
     def _build_version(
         self,
@@ -1354,62 +1698,70 @@ class DataCatalogService:
                     raise ImmutableVersionError(
                         f"Version {version_id} is already committed and immutable"
                     )
-        # Copy+hash+fsync — no lock held while the bytes land on disk.
-        version, payload = self._build_version(
-            asset, source_path, stage,
-            version_id=version_id,
-            parent_version_ids=list(parent_version_ids),
-            run_id=run_id, metadata=metadata, move=move,
-            known_sha256=known_sha256,
-            register_blob=_register_blob,
-        )
-        with self._lock:
-            try:
-                asset = self._asset_or_raise(asset_id)
-            except CatalogError:
-                self._rollback(
-                    payload=payload, restore_payload_to=_restore_payload_to,
-                )
-                raise
-            if any(v.id == version.id for v in self.document.versions):
-                self._rollback(
-                    payload=payload, restore_payload_to=_restore_payload_to,
-                )
-                raise ImmutableVersionError(
-                    f"Version {version.id} is already committed and immutable"
-                )
-            run: DataRun | None = None
-            if run_id is not None:
+        # Copy+hash+fsync — no lock held while the bytes land on disk. The
+        # staging lease (#1222) marks the target dir (and the blob root for
+        # dedup imports) as in-flight for the whole place→commit window so a
+        # concurrent explicit GC sweep cannot delete live-but-uncommitted
+        # bytes; it is released only after the metadata transaction commits.
+        _lease_targets = [self._staging_target(stage, asset_id)]
+        if _register_blob:
+            _lease_targets.append(self._blob_staging_target())
+        with self._payload_staging_lease(*_lease_targets):
+            version, payload = self._build_version(
+                asset, source_path, stage,
+                version_id=version_id,
+                parent_version_ids=list(parent_version_ids),
+                run_id=run_id, metadata=metadata, move=move,
+                known_sha256=known_sha256,
+                register_blob=_register_blob,
+            )
+            with self._lock:
                 try:
-                    run = self.get_run(run_id)
+                    asset = self._asset_or_raise(asset_id)
                 except CatalogError:
                     self._rollback(
                         payload=payload, restore_payload_to=_restore_payload_to,
                     )
                     raise
-            version.version_number = self._next_version_number(asset.id)
-            previous_current = asset.current_version_id
-            self._add_version(version)
-            asset.current_version_id = version.id
-            run_output_added = False
-            if run is not None and version.id not in run.output_version_ids:
-                run.output_version_ids.append(version.id)
-                run_output_added = True
-            _dirty = DirtySet(assets={asset.id: None}, versions={version.id: None})
-            if run is not None:
-                _dirty.mark_runs(run.id)
-            try:
-                self._save(_dirty)
-            except Exception:
-                if run is not None and run_output_added:
-                    run.output_version_ids.remove(version.id)
-                self._rollback(
-                    versions=[version], payload=payload,
-                    restore_current=(asset, previous_current),
-                    restore_payload_to=_restore_payload_to,
-                )
-                raise
-            return version
+                if any(v.id == version.id for v in self.document.versions):
+                    self._rollback(
+                        payload=payload, restore_payload_to=_restore_payload_to,
+                    )
+                    raise ImmutableVersionError(
+                        f"Version {version.id} is already committed and immutable"
+                    )
+                run: DataRun | None = None
+                if run_id is not None:
+                    try:
+                        run = self.get_run(run_id)
+                    except CatalogError:
+                        self._rollback(
+                            payload=payload, restore_payload_to=_restore_payload_to,
+                        )
+                        raise
+                version.version_number = self._next_version_number(asset.id)
+                previous_current = asset.current_version_id
+                self._add_version(version)
+                asset.current_version_id = version.id
+                run_output_added = False
+                if run is not None and version.id not in run.output_version_ids:
+                    run.output_version_ids.append(version.id)
+                    run_output_added = True
+                _dirty = DirtySet(assets={asset.id: None}, versions={version.id: None})
+                if run is not None:
+                    _dirty.mark_runs(run.id)
+                try:
+                    self._save(_dirty)
+                except Exception:
+                    if run is not None and run_output_added:
+                        run.output_version_ids.remove(version.id)
+                    self._rollback(
+                        versions=[version], payload=payload,
+                        restore_current=(asset, previous_current),
+                        restore_payload_to=_restore_payload_to,
+                    )
+                    raise
+                return version
 
     def register_intermediate(
         self, asset_id: str, source_path: str | Path, **kwargs: Any
@@ -1470,35 +1822,40 @@ class DataCatalogService:
             asset = self._new_asset(name, type, format, asset_metadata)
         # Copy+hash+fsync of the payload — no lock held while the bytes land
         # on disk, so GUI-thread catalog calls never wait for worker I/O.
-        version, payload = self._build_version(
-            asset, source_path, stage,
-            version_id=None,
-            parent_version_ids=parents,
-            run_id=run_id,
-            metadata=version_metadata,
-            move=False,
-        )
-        with self._lock:
-            self._add_asset(asset)
-            self._add_version(version)
-            asset.current_version_id = version.id
-            run_output_added = False
-            if run is not None and version.id not in run.output_version_ids:
-                run.output_version_ids.append(version.id)
-                run_output_added = True
-            _dirty = DirtySet(assets={asset.id: None}, versions={version.id: None})
-            if run is not None:
-                _dirty.mark_runs(run.id)
-            try:
-                self._save(_dirty)
-            except Exception:
-                if run_output_added:
-                    run.output_version_ids.remove(version.id)
-                self._rollback(
-                    assets=[asset], versions=[version], payload=payload,
-                )
-                raise
-            return version
+        # The staging lease (#1222) guards the target dir through the
+        # place→commit window against a concurrent explicit GC sweep.
+        with self._payload_staging_lease(
+            self._staging_target(stage, asset.id), kind="register"
+        ):
+            version, payload = self._build_version(
+                asset, source_path, stage,
+                version_id=None,
+                parent_version_ids=parents,
+                run_id=run_id,
+                metadata=version_metadata,
+                move=False,
+            )
+            with self._lock:
+                self._add_asset(asset)
+                self._add_version(version)
+                asset.current_version_id = version.id
+                run_output_added = False
+                if run is not None and version.id not in run.output_version_ids:
+                    run.output_version_ids.append(version.id)
+                    run_output_added = True
+                _dirty = DirtySet(assets={asset.id: None}, versions={version.id: None})
+                if run is not None:
+                    _dirty.mark_runs(run.id)
+                try:
+                    self._save(_dirty)
+                except Exception:
+                    if run_output_added:
+                        run.output_version_ids.remove(version.id)
+                    self._rollback(
+                        assets=[asset], versions=[version], payload=payload,
+                    )
+                    raise
+                return version
 
     # -- import / link / materialize -----------------------------------------
 
@@ -1671,31 +2028,41 @@ class DataCatalogService:
             with self._lock:
                 if self._live_asset_by_legacy_id(_legacy_resource_id) is None:
                     asset.legacy_resource_id = _legacy_resource_id
-        version, payload = self._build_version(
-            asset, source_path, DataStage.RAW,
-            version_id=None,
-            parent_version_ids=[],
-            run_id=None, metadata=metadata, move=False,
-            known_sha256=known_sha256,
-            register_blob=True,
-        )
-        with self._lock:
-            if (
-                _legacy_resource_id is not None
-                and self._live_asset_by_legacy_id(_legacy_resource_id) is not None
-            ):
-                asset.legacy_resource_id = None
-            self._add_asset(asset)
-            self._add_version(version)
-            asset.current_version_id = version.id
-            try:
-                self._save(DirtySet(assets={asset.id: None}, versions={version.id: None}))
-            except Exception:
-                self._rollback(
-                    assets=[asset], versions=[version], payload=payload,
-                )
-                raise
-            return version
+        # Staging lease (#1222, R3#2): import_raw is the PRIMARY bulk-import
+        # funnel (every interchange adapter) and its payload placement runs
+        # lock-free — guard the RAW target dir AND the blob root (dedup
+        # imports adopt blobs) for the whole place→commit window.
+        with self._payload_staging_lease(
+            self._staging_target(DataStage.RAW, asset.id),
+            self._blob_staging_target(),
+        ):
+            version, payload = self._build_version(
+                asset, source_path, DataStage.RAW,
+                version_id=None,
+                parent_version_ids=[],
+                run_id=None, metadata=metadata, move=False,
+                known_sha256=known_sha256,
+                register_blob=True,
+            )
+            with self._lock:
+                if (
+                    _legacy_resource_id is not None
+                    and self._live_asset_by_legacy_id(_legacy_resource_id) is not None
+                ):
+                    asset.legacy_resource_id = None
+                self._add_asset(asset)
+                self._add_version(version)
+                asset.current_version_id = version.id
+                try:
+                    self._save(
+                        DirtySet(assets={asset.id: None}, versions={version.id: None})
+                    )
+                except Exception:
+                    self._rollback(
+                        assets=[asset], versions=[version], payload=payload,
+                    )
+                    raise
+                return version
 
     def link_external(
         self,
@@ -1822,17 +2189,248 @@ class DataCatalogService:
 
     # -- working copies / derived --------------------------------------------
 
-    def create_working_copy(self, version_id: str) -> Path:
+    def create_working_copy(self, version_id: str, *, allow_replace: bool = False) -> Path:
         """Materialize a mutable working copy of a committed version.
 
         Always a real copy (never a hardlink), so editing it cannot touch the
         managed original.
+
+        Lifecycle (#1211): checkouts are REGISTERED (source version, path,
+        state, timestamps) in the canonical store. A live uncommitted copy of
+        the same source version is REUSED — a repeat checkout can no longer
+        silently discard uncommitted edits; pass ``allow_replace=True`` for an
+        explicit discard-and-recreate. The copy's identity is its registry id
+        + source version id, never the display/file name, so duplicate names
+        cannot collide. Enumerate via :meth:`list_working_copies`; abandon
+        explicitly via :meth:`discard_working_copy`; crash recovery via
+        :meth:`recover_working_copies`.
         """
         version = self._version_or_raise(version_id)
+        live = None
+        try:
+            live = self._index.get_live_working_copy_for_source(version.id)
+        except Exception:
+            live = None
+        if live is not None:
+            existing = (
+                Path(self.project_path).expanduser().resolve().parent / live["path"]
+            )
+            if existing.is_file():
+                if not allow_replace:
+                    return existing  # reuse: never clobber uncommitted edits
+                self._discard_working_copy_row_and_file(live, existing)
+            else:
+                # Row without a file (save-as/packaging drops working/):
+                # dead row, drop it and check out fresh.
+                try:
+                    self._index.remove_working_copy(live["working_id"])
+                except Exception:
+                    pass
         payload = self.resolve_path(version)
         if not payload.is_file():
             raise CatalogError(f"Payload not available: {payload}")
-        return _place_working_copy(self.project_path, payload, version.id)
+        # Fail-CLOSED on disk evidence (R3#3): the registry is bookkeeping
+        # and can degrade (missing/corrupt table, failed INSERT, pre-v6
+        # copy with no row) — but an existing file at the target path IS
+        # uncommitted user work. Never clobber it just because the registry
+        # forgot; reuse it (or require allow_replace). #1211 must not fail
+        # open when its bookkeeping does.
+        from paleo_workbench.catalog.storage import working_dir_for
+
+        disk_existing = (
+            working_dir_for(Path(self.project_path)) / version.id / payload.name
+        )
+        if disk_existing.is_file() and live is None and not allow_replace:
+            return disk_existing
+        # Concurrent checkouts of the same version converge on one copy:
+        # placement writes identical bytes to the same target via temp+
+        # replace, so a racing replace can transiently collide on Windows —
+        # retry briefly; the loser's bytes are identical anyway.
+        target = None
+        for attempt in range(4):
+            try:
+                target = _place_working_copy(self.project_path, payload, version.id)
+                break
+            except PermissionError:
+                if attempt == 3:
+                    raise
+                import time as _time
+
+                _time.sleep(0.05 * (attempt + 1))
+        assert target is not None
+        try:
+            rel = target.relative_to(
+                Path(self.project_path).expanduser().resolve().parent
+            ).as_posix()
+            stat = target.stat()
+            self._index.register_working_copy(
+                source_version_id=version.id,
+                path=rel,
+                display_name=payload.name,
+                payload_mtime_ns=stat.st_mtime_ns,
+                source_size_bytes=version.size_bytes,
+            )
+        except Exception:
+            pass  # registry is lifecycle bookkeeping, never a checkout gate
+        return target
+
+    # -- working-copy lifecycle (#1211) ----------------------------------------
+
+    def _working_copy_status(self, row: dict) -> dict[str, Any]:
+        project_dir = Path(self.project_path).expanduser().resolve().parent
+        path = project_dir / row["path"]
+        try:
+            stat = path.stat()
+            exists = True
+            mtime_ns = stat.st_mtime_ns
+            size = stat.st_size
+        except OSError:
+            exists = False
+            mtime_ns = None
+            size = None
+        # Conservative dirty hint: any mtime drift from checkout time or size
+        # divergence from the source counts as edited (false positives are
+        # safe — the user is told the copy may hold edits).
+        dirty_hint = bool(
+            exists
+            and row.get("state") in ("checked_out", "dirty")
+            and (
+                (row.get("payload_mtime_ns") is not None
+                 and mtime_ns != row.get("payload_mtime_ns"))
+                or (row.get("source_size_bytes") is not None
+                    and size != row.get("source_size_bytes"))
+            )
+        )
+        maps = self._ensure_maps()
+        return {
+            "working_id": row["working_id"],
+            "source_version_id": row["source_version_id"],
+            "path": path,
+            "state": row["state"],
+            "display_name": row.get("display_name") or "",
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "exists": exists,
+            "dirty_hint": dirty_hint,
+            "source_version_known": row["source_version_id"] in maps.version_by_id,
+        }
+
+    def list_working_copies(self) -> list[dict[str, Any]]:
+        """Enumerate unfinished working copies (any state, newest last)."""
+        try:
+            rows = self._index.list_working_copies()
+        except Exception:
+            return []
+        return [self._working_copy_status(row) for row in rows]
+
+    def working_copy_state(self, working_path: str | Path) -> dict[str, Any] | None:
+        """Lifecycle status of the copy at *working_path*, or None."""
+        path = Path(working_path)
+        try:
+            rel = path.relative_to(
+                Path(self.project_path).expanduser().resolve().parent
+            ).as_posix()
+        except ValueError:
+            return None
+        try:
+            row = self._index.get_working_copy_by_path(rel)
+        except Exception:
+            return None
+        if row is None:
+            return None
+        return self._working_copy_status(row)
+
+    def _discard_working_copy_row_and_file(self, row: dict, path: Path) -> None:
+        from paleo_workbench.catalog.storage import safe_unlink
+
+        try:
+            safe_unlink(path)
+        except OSError:
+            pass
+        try:
+            self._index.remove_working_copy(row["working_id"])
+        except Exception:
+            pass
+
+    def discard_working_copy(self, working_path: str | Path) -> bool:
+        """Explicitly abandon an uncommitted copy (file + registry row).
+
+        Returns True when a registered copy was discarded. This is the ONLY
+        sanctioned way to destroy uncommitted edits besides committing them.
+        """
+        status = self.working_copy_state(working_path)
+        if status is None:
+            path = Path(working_path)
+            if path.is_file():
+                from paleo_workbench.catalog.storage import safe_unlink
+
+                safe_unlink(path)
+                return True
+            return False
+        if status["state"] == "committing":
+            raise CatalogError(
+                "工作副本正在提交中，不能丢弃；请等待提交完成或重启后恢复。"
+            )
+        try:
+            row = self._index.get_working_copy_by_path(
+                str(status["path"].relative_to(
+                    Path(self.project_path).expanduser().resolve().parent
+                ).as_posix())
+            )
+        except Exception:
+            row = None
+        if row is not None:
+            self._discard_working_copy_row_and_file(row, status["path"])
+            return True
+        return False
+
+    def recover_working_copies(self) -> list[dict[str, Any]]:
+        """Crash/save-as recovery for the working-copy registry.
+
+        - ``committing`` rows: a committed version whose source_uri is the
+          working path means the commit landed and only the row removal was
+          lost — drop the row. Otherwise the commit never landed — the copy
+          is recoverable user work; back to ``dirty``.
+        - rows whose file is gone (save-as/portable packaging drops
+          ``working/``) — drop the row.
+        Returns the surviving copies' statuses.
+        """
+        self._ensure_maps()
+        project_dir = Path(self.project_path).expanduser().resolve().parent
+        try:
+            rows = self._index.list_working_copies()
+        except Exception:
+            return []
+        source_uris = {
+            v.source_uri: v for v in self.document.versions if v.source_uri
+        }
+        for row in rows:
+            path = project_dir / row["path"]
+            if not path.is_file():
+                try:
+                    self._index.remove_working_copy(row["working_id"])
+                except Exception:
+                    pass
+                continue
+            if row["state"] == "committing":
+                committed = source_uris.get(path.resolve().as_posix())
+                if committed is not None:
+                    # The commit landed (version exists, payload moved);
+                    # only the row removal was lost.
+                    try:
+                        self._index.remove_working_copy(row["working_id"])
+                    except Exception:
+                        pass
+                else:
+                    # Interrupted mid-commit: the file never moved (move is
+                    # atomic), so the user's edits are intact — recoverable.
+                    try:
+                        self._index.update_working_copy_state(
+                            row["working_id"], "dirty"
+                        )
+                    except Exception:
+                        pass
+        return self.list_working_copies()
 
     def commit_working_copy(
         self,
@@ -1864,22 +2462,86 @@ class DataCatalogService:
                 if any(v.id == candidate for v in self.document.versions)
                 else []
             )
+        # Registry transition (#1211): checked_out/dirty → committing BEFORE
+        # the payload moves. A crash here is healed by recover_working_copies
+        # (committed version present → row dropped; else back to dirty with
+        # the file intact). Legacy copies without a registry row commit with
+        # their pre-registry semantics.
+        _wc_row = self.working_copy_state(working_path)
+        _wc_working_id = _wc_row["working_id"] if _wc_row else None
+        if _wc_working_id is not None:
+            try:
+                self._index.update_working_copy_state(_wc_working_id, "committing")
+            except Exception:
+                pass
+        try:
+            committed = self._commit_working_copy_inner(
+                working_path,
+                asset_id=asset_id,
+                name=name,
+                stage=stage,
+                parent_version_ids=parent_version_ids,
+                run_id=run_id,
+                metadata=metadata,
+            )
+        except Exception:
+            if _wc_working_id is not None:
+                try:
+                    # The move is atomic inside _build_version: on failure the
+                    # file is back at (or never left) the working path — the
+                    # copy is still live user work.
+                    self._index.update_working_copy_state(_wc_working_id, "dirty")
+                except Exception:
+                    pass
+            raise
+        # Success: the payload moved into managed storage and the copy no
+        # longer exists — drop the registry row.
+        if _wc_working_id is not None:
+            try:
+                self._index.remove_working_copy(_wc_working_id)
+            except Exception:
+                pass
+        return committed
+
+    def _commit_working_copy_inner(
+        self,
+        working_path: Path,
+        *,
+        asset_id: str | None,
+        name: str | None,
+        stage: DataStage,
+        parent_version_ids,
+        run_id: str | None,
+        metadata: dict[str, Any] | None,
+    ) -> DataVersion:
         if asset_id is None:
-            # Lock across append + register (#517): mirrors _register_produced.
+            # #1218: the payload move+hash must NOT run with the service lock
+            # held (a GB-scale working copy would freeze every concurrent
+            # catalog call for the whole I/O). The asset is appended first so
+            # register_version can resolve it, and rolled back on failure —
+            # the unlocked document-scan window (asset without a version for
+            # the copy duration) is served consistently by every SQL-backed
+            # read path, which only see committed state.
             with self._lock:
                 asset = self._new_asset(name or working_path.stem, None, None, metadata)
                 self._add_asset(asset)
-                try:
-                    return self.register_version(
-                        asset.id, working_path, stage,
-                        parent_version_ids=parent_version_ids,
-                        run_id=run_id, metadata=metadata, move=True,
-                        _restore_payload_to=working_path,
-                    )
-                except Exception:
+                self._pending_commit_assets.add(asset.id)
+            try:
+                return self.register_version(
+                    asset.id, working_path, stage,
+                    parent_version_ids=parent_version_ids,
+                    run_id=run_id, metadata=metadata, move=True,
+                    _restore_payload_to=working_path,
+                )
+            except Exception:
+                with self._lock:
                     if asset in self.document.assets:
                         self._remove_asset(asset)
-                    raise
+                    self._pending_commit_assets.discard(asset.id)
+                raise
+            finally:
+                with self._lock:
+                    self._pending_commit_assets.discard(asset.id)
         version_metadata = dict(metadata or {})
         if name:
             version_metadata["name"] = name
@@ -1925,6 +2587,8 @@ class DataCatalogService:
         # Build everything up front so a single save commits asset + version +
         # run atomically — a failure must not leave an orphaned version or
         # payload behind (review finding: two-phase save was not atomic).
+        # The staging lease (#1222) spans build → commit so a concurrent
+        # explicit GC sweep cannot classify the not-yet-committed payload.
         run: DataRun | None = None
         if operation is not None:
             run = DataRun(
@@ -1933,34 +2597,39 @@ class DataCatalogService:
                 parameters=dict(parameters or {}),
                 generator=generator,
             )
-        version, payload = self._build_version(
-            asset, source_path, DataStage.DERIVED,
-            version_id=None,
-            parent_version_ids=[p.id for p in parents],
-            run_id=run.id if run else None, metadata=metadata, move=False,
-        )
-        if run is not None:
-            run.output_version_ids = [version.id]
-        # Commit under the lock (#517); the payload copy/hash above stays
-        # outside so the lock is never held across disk I/O.
-        with self._lock:
-            self._add_asset(asset)
-            self._add_version(version)
-            asset.current_version_id = version.id
+        with self._payload_staging_lease(
+            self._staging_target(DataStage.DERIVED, asset.id)
+        ):
+            version, payload = self._build_version(
+                asset, source_path, DataStage.DERIVED,
+                version_id=None,
+                parent_version_ids=[p.id for p in parents],
+                run_id=run.id if run else None, metadata=metadata, move=False,
+            )
             if run is not None:
-                self._add_run(run)
-            _dirty = DirtySet(assets={asset.id: None}, versions={version.id: None})
-            if run is not None:
-                _dirty.mark_runs(run.id)
-            try:
-                self._save(_dirty)
-            except Exception:
-                self._rollback(
-                    assets=[asset], versions=[version],
-                    runs=[run] if run else [], payload=payload,
+                run.output_version_ids = [version.id]
+            # Commit under the lock (#517); the payload copy/hash above stays
+            # outside so the lock is never held across disk I/O.
+            with self._lock:
+                self._add_asset(asset)
+                self._add_version(version)
+                asset.current_version_id = version.id
+                if run is not None:
+                    self._add_run(run)
+                _dirty = DirtySet(
+                    assets={asset.id: None}, versions={version.id: None}
                 )
-                raise
-            return version
+                if run is not None:
+                    _dirty.mark_runs(run.id)
+                try:
+                    self._save(_dirty)
+                except Exception:
+                    self._rollback(
+                        assets=[asset], versions=[version],
+                        runs=[run] if run else [], payload=payload,
+                    )
+                    raise
+                return version
 
     def register_run(
         self,
@@ -2350,6 +3019,27 @@ class DataCatalogService:
 
     def get_lineage(self, version_id: str) -> dict[str, Any]:
         """Parents, children, and the producing run for a version."""
+        if self._lazy_active():
+            version = self._lazy_get_version(version_id)
+            if version is None:
+                raise CatalogError(f"Unknown version: {version_id}")
+            parents = []
+            for pid in version.parent_version_ids:
+                parent = self._lazy_get_version(pid)
+                if parent is not None:
+                    parents.append(parent)
+            children = self._index.child_version_models(version_id)
+            for child in children:
+                self._lazy_read_cache.setdefault(child.id, child)
+            run = None
+            if version.run_id is not None:
+                run = self._lazy_get_run(version.run_id)
+            return {
+                "version": version,
+                "parents": parents,
+                "children": children,
+                "run": run,
+            }
         version = self._version_or_raise(version_id)
         maps = self._ensure_maps()
         parents = [
@@ -2778,6 +3468,9 @@ class DataCatalogService:
             # purged is a zombie (zero versions, current_version_id=None):
             # drop it so listings cannot show an empty asset row (I3).
             live_asset_ids = {v.asset_id for v in self.document.versions}
+            # In-flight working-copy commits own a version-less asset
+            # for the lock-free payload window (#1218, R2#5).
+            live_asset_ids |= self._pending_commit_assets
             zombie_assets = [
                 a
                 for a in self.document.assets
@@ -2897,42 +3590,46 @@ class DataCatalogService:
                 "note": note,
             },
         )
-        version, payload = self._build_version(
-            asset, source_payload, to_stage,
-            version_id=None,
-            parent_version_ids=[source.id],
-            run_id=run.id,
-            metadata={
-                "promoted_from": source.id,
-                "reviewed_by": reviewed_by,
-                "note": note,
-            },
-            move=False,
-        )
-        run.output_version_ids = [version.id]
-        # Commit under the lock (#517); the payload build above stays outside.
-        # Version numbers are re-allocated INSIDE the lock (mirroring
-        # register_version): the number computed in ``_build_version`` ran
-        # outside it, so concurrent promotes of the same asset could both
-        # compute max+1 and commit duplicates [1,2,2] (audit #849-1).
-        with self._lock:
-            version.version_number = self._next_version_number(asset.id)
-            self._add_version(version)
-            self._add_run(run)
-            asset.current_version_id = version.id
-            try:
-                self._save(
-                    DirtySet(
-                        assets={asset.id}, versions={version.id}, runs={run.id}
+        # Staging lease (#1222) spans the payload copy → commit window.
+        with self._payload_staging_lease(
+            self._staging_target(to_stage, asset.id)
+        ):
+            version, payload = self._build_version(
+                asset, source_payload, to_stage,
+                version_id=None,
+                parent_version_ids=[source.id],
+                run_id=run.id,
+                metadata={
+                    "promoted_from": source.id,
+                    "reviewed_by": reviewed_by,
+                    "note": note,
+                },
+                move=False,
+            )
+            run.output_version_ids = [version.id]
+            # Commit under the lock (#517); the payload build above stays outside.
+            # Version numbers are re-allocated INSIDE the lock (mirroring
+            # register_version): the number computed in ``_build_version`` ran
+            # outside it, so concurrent promotes of the same asset could both
+            # compute max+1 and commit duplicates [1,2,2] (audit #849-1).
+            with self._lock:
+                version.version_number = self._next_version_number(asset.id)
+                self._add_version(version)
+                self._add_run(run)
+                asset.current_version_id = version.id
+                try:
+                    self._save(
+                        DirtySet(
+                            assets={asset.id}, versions={version.id}, runs={run.id}
+                        )
                     )
-                )
-            except Exception:
-                self._rollback(
-                    versions=[version], runs=[run], payload=payload,
-                    restore_current=(asset, previous_current),
-                )
-                raise
-            return version
+                except Exception:
+                    self._rollback(
+                        versions=[version], runs=[run], payload=payload,
+                        restore_current=(asset, previous_current),
+                    )
+                    raise
+                return version
 
     def promote_asset(
         self,
@@ -2955,16 +3652,56 @@ class DataCatalogService:
 
     # -- integrity -------------------------------------------------------------
 
-    def verify_integrity(self, version_id: str | None = None) -> IntegrityReport:
+    def verify_integrity(
+        self,
+        version_id: str | None = None,
+        cancel: Callable[[], bool] | None = None,
+    ) -> IntegrityReport:
         """Re-hash payloads and compare against recorded SHA-256.
 
         Reports only; a mismatch never updates the catalog. Hashing streams in
         chunks; wrap in a worker thread for large batches in UI contexts.
         Trashed versions are skipped (their payloads live in ``trash/``).
+        ``cancel`` (#1224) propagates INTO the chunk loop: a multi-GB hash is
+        interruptible at MiB granularity, not only between payloads.
 
         Delegates to :func:`paleo_workbench.catalog.queries.verify_integrity`.
         """
-        return _queries.verify_integrity(self, version_id=version_id)
+        return _queries.verify_integrity(self, version_id=version_id, cancel=cancel)
+
+    def repair_ghost_runs(self) -> list[str]:
+        """Mark ghost completed runs failed (#1219) and return their ids.
+
+        A "ghost" is a terminal-completed run of an always-producing
+        operation with zero outputs (a crash between the old pre-book
+        pattern's booking and its output registration). Failing them is the
+        honest state: the run claims success but produced nothing. Existing
+        outputs are never touched; non-producing operations are exempt.
+        """
+        always_producing = {
+            "materialize",
+            "working_copy_commit",
+            "map_product_assembly",
+            "interchange.import",
+        }
+        repaired: list[str] = []
+        with self._lock:
+            for run in list(self.document.runs):
+                if (
+                    run.operation in always_producing
+                    and run.status in ("completed", "complete")
+                    and not run.output_version_ids
+                ):
+                    run.status = "failed"
+                    parameters = dict(run.parameters or {})
+                    parameters["ghost_repair"] = (
+                        "v6 repair: completed run had no outputs"
+                    )
+                    run.parameters = parameters
+                    repaired.append(run.id)
+            if repaired:
+                self._save()
+        return repaired
 
     def audit(
         self,
@@ -3484,6 +4221,13 @@ class DataCatalogService:
         """
         if self._batch_depth:
             return None
+        if self._lazy and not self._warm:
+            # Pre-warm the document is EMPTY by design, so the document
+            # fallback below can only serve wrong-empty rows — and a
+            # revision drift here means a FOREIGN process committed (every
+            # local mutation implies an inline warm), making the store the
+            # fresh truth. Serve the store (R1#1/R2#3).
+            return self._index
         try:
             if self._index.revision() != self.document.catalog_revision:
                 return None
@@ -3747,3 +4491,112 @@ class DataCatalogService:
                 self._invalidate_maps()
                 self._save()
             return report
+
+
+# -- lazy-open warm guards (#1212) ---------------------------------------------
+#
+# Every DataCatalogService method that inherently needs the FULL document
+# (mutators, tag/model registry access, lineage chains, GC/audit/integrity,
+# manifest export, index maintenance) is wrapped to materialize the document
+# first via ``require_warm()``. For eagerly-opened services (``_warm`` is True
+# from construction) the wrapper is a no-op flag check, so behavior outside
+# lazy open is byte-identical. Hot per-entity/per-page reads are deliberately
+# NOT wrapped — they serve from the canonical store pre-warm (see the lazy
+# hot-read section above).
+
+_WARM_REQUIRED_METHODS = (
+    # session/maintenance
+    "sweep_temp_on_open",
+    "export_manifest",
+    "ensure_index_ready",
+    "rebuild_index",
+    "plan_gc",
+    "sweep_gc",
+    "cleanup_working_copies",
+    "find_missing_sources",
+    "verify_integrity",
+    "audit",
+    "rebase_artifact_paths",
+    "migrate_legacy_resources",
+    # registration / lifecycle mutators
+    "register_version",
+    "register_intermediate",
+    "register_output",
+    "register_result_asset",
+    "register_derived_store",
+    "import_raw",
+    "link_external",
+    "materialize_external",
+    "relink_external_source",
+    "create_working_copy",
+    "commit_working_copy",
+    "create_derived",
+    "register_run",
+    "update_run_status",
+    "update_asset_metadata",
+    "trash_version",
+    "trash_asset",
+    "restore_version",
+    "restore_asset",
+    "purge_trashed",
+    "promote_version",
+    "promote_asset",
+    # model registry (full-list scans of small collections)
+    "register_model",
+    "register_model_version",
+    "get_model",
+    "get_model_version",
+    "get_model_version_by_id",
+    "list_models",
+    "list_model_versions",
+    "promote_model",
+    "find_production_model",
+    # lineage full-graph walks
+    "get_lineage_chain",
+    "lineage_summaries",
+    # tags (mutators + document-list reads)
+    "add_tag",
+    "add_tags",
+    "remove_tag",
+    "rename_tag",
+    "merge_tags",
+    "create_tag",
+    "bulk_add_tag",
+    "bulk_remove_tag",
+    "tag_ids_for_asset",
+    "tag_usage",
+    "search_tags",
+    "delete_unused_tag",
+    "prune_unused_tags",
+    "list_tags",
+    "find_assets_by_tag",
+    "find_versions_by_tag",
+    # working-copy lifecycle (registry + document lookups)
+    "list_working_copies",
+    "working_copy_state",
+    "discard_working_copy",
+    "recover_working_copies",
+    "repair_ghost_runs",
+)
+
+
+def _apply_warm_guards() -> None:
+    import functools
+
+    for name in _WARM_REQUIRED_METHODS:
+        method = getattr(DataCatalogService, name, None)
+        if method is None:
+            raise RuntimeError(
+                f"warm-guard list references missing method {name!r}; "
+                "the list must track the class surface"
+            )
+
+        @functools.wraps(method)
+        def wrapper(self, *args, _method=method, **kwargs):
+            self._require_warm()
+            return _method(self, *args, **kwargs)
+
+        setattr(DataCatalogService, name, wrapper)
+
+
+_apply_warm_guards()

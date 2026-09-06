@@ -48,6 +48,15 @@ FULL_STATES = [
     "11-empty-state",
     "12-dark-theme",
 ]
+#: V6 Phase 8 新状态（visual_qa_v6；--v6 只跑这些，不触碰既有 12 状态）。
+V6_STATES = [
+    "mapping_stage_phase1",
+    "mapping_stage_phase2",
+    "mapping_stage_phase3",
+    "command_palette_context",
+    "write_grant_dialog",
+    "status_workbench_segment",
+]
 THEMES = ["light", "dark", "high_contrast"]
 DENSITIES = ["compact", "comfortable"]
 SIZES = [
@@ -87,12 +96,18 @@ def main() -> int:
     parser.add_argument("out_dir", nargs="?", default="visual_qa/matrix")
     parser.add_argument("--core", action="store_true", help="仅核心状态矩阵")
     parser.add_argument("--full", action="store_true", help="全部 12 状态 × 3 主题 × 2 密度")
+    parser.add_argument(
+        "--v6", action="store_true",
+        help="仅 V6 Phase 8 新状态（6 状态 × 2 密度 @3 尺寸，light 基准）")
     parser.add_argument("--update-baseline", action="store_true")
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    states = FULL_STATES if args.full else CORE_STATES
+    if args.v6:
+        states = V6_STATES
+    else:
+        states = FULL_STATES if args.full else CORE_STATES
     sizes = SIZES
 
     script = Path(__file__).with_name("capture_workstation_screens.py").resolve()

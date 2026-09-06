@@ -105,7 +105,16 @@ class BatchConversionService:
         project=None,
     ) -> None:
         self._registry = registry
-        self._max_workers = max(1, min(int(max_workers), 4))
+        # #1225: bounded by the governor's central allowance, not a local
+        # hardcoded ceiling (the constructor clamp stays as a hard safety
+        # cap for degraded/no-governor environments).
+        try:
+            from paleo_workbench.runtime.governance import clamp_workers
+
+            cap = clamp_workers("background.io", int(max_workers))
+        except Exception:
+            cap = 4
+        self._max_workers = max(1, min(int(max_workers), cap))
         self._catalog = catalog
         self._project = project
 

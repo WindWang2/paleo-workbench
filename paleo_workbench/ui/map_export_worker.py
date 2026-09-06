@@ -109,7 +109,9 @@ def _render_frame_native(spec: MapExportSpec):
             pass
 
 
-def render_and_save_map_export(spec: MapExportSpec) -> dict:
+def render_and_save_map_export(
+    spec: MapExportSpec, *, cancel: "callable[[], bool] | None" = None
+) -> dict:
     """Render the map body with the same interpreter as the screen (#923).
 
     When the live canvas is the QGIS renderer the frame comes from a throwaway
@@ -140,6 +142,8 @@ def render_and_save_map_export(spec: MapExportSpec) -> dict:
     else:
         degraded = True
         degraded_reason = "QGIS renderer not requested for this export"
+    if cancel is not None and cancel():
+        raise _ExportCancelled()
     if frame is None:
         backend = FallbackMapRenderBackend()
         backend.initialize()
@@ -148,6 +152,11 @@ def render_and_save_map_export(spec: MapExportSpec) -> dict:
         backend.set_output_size(spec.width, spec.height)
         backend.set_dpi(spec.dpi)
         frame = backend.render_sync()
+    if cancel is not None and cancel():
+        # The (non-interruptible) frame render finished while the user was
+        # cancelling: stop BEFORE decorations/save instead of producing a
+        # half-product (#1224 honest cancellation).
+        raise _ExportCancelled()
     image = QImage(
         frame.rgba,
         frame.width,
@@ -168,6 +177,8 @@ def render_and_save_map_export(spec: MapExportSpec) -> dict:
         dark_chrome=True,
     )
     painter.end()
+    if cancel is not None and cancel():
+        raise _ExportCancelled()
     if not image.save(spec.path, "PNG"):
         raise RuntimeError("could not save unified map PNG")
     return {
@@ -175,6 +186,10 @@ def render_and_save_map_export(spec: MapExportSpec) -> dict:
         "degraded": degraded,
         "degraded_reason": degraded_reason,
     }
+
+
+class _ExportCancelled(Exception):
+    """Internal: a cancel checkpoint fired between export phases."""
 
 
 class MapExportWorker(QObject):
@@ -197,7 +212,9 @@ class MapExportWorker(QObject):
             self.cancelled.emit()
             return
         try:
-            render_and_save_map_export(self._spec)
+            render_and_save_map_export(
+                self._spec, cancel=self._cancel_event.is_set
+            )
         except Exception as exc:  # noqa: BLE001 — surface any failure to UI
             if self._cancel_event.is_set():
                 # A render that raised mid-way may have left partial bytes

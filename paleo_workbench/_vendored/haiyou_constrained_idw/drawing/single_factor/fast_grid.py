@@ -436,32 +436,22 @@ def interpolate_idw_grid_batch(
         use_f32 = False
         xp = np
 
-    # 多线程时必须压低 BLAS/OpenMP 内层线程，否则 20 个 worker × MKL 内线
-    # 程会严重超订，资源管理器里“看起来没用满核”、实际更慢。
-    def _pin_blas_threads(n: int) -> None:
+    # #1225（v6 治理收敛）：BLAS/OpenMP 内层线程限制改为“仅本批次期间生效”
+    # 的 threadpoolctl 上下文。旧实现每次调用都运行时改写进程级
+    # OMP/OPENBLAS/MKL/NUMEXPR/VECLIB 环境变量（限制泄漏给之后启动的所有
+    # 子进程与无关计算），并且不带 with 地调用 threadpool_limits（全局生效
+    # 且永不恢复）。作用域化后：多 worker × 内层线程的超订仍被压住，但批
+    # 次结束即恢复，进程环境零污染。
+    def _blas_limit(n: int):
         n = max(1, int(n))
-        for key in (
-            "OMP_NUM_THREADS",
-            "OPENBLAS_NUM_THREADS",
-            "MKL_NUM_THREADS",
-            "NUMEXPR_NUM_THREADS",
-            "VECLIB_MAXIMUM_THREADS",
-        ):
-            os.environ[key] = str(n)
         try:
             import threadpoolctl
 
-            threadpoolctl.threadpool_limits(limits=n)
+            return threadpoolctl.threadpool_limits(limits=n)
         except Exception:
-            pass
-        try:
-            import numpy as _np
+            import contextlib
 
-            # some builds expose this
-            if hasattr(_np, "__config__"):
-                pass
-        except Exception:
-            pass
+            return contextlib.nullcontext()
 
     # CPU 多线程：块要足够多，否则 ranges 很少，线程池几乎空转
     if not use_gpu and workers > 1:
@@ -512,32 +502,36 @@ def interpolate_idw_grid_batch(
         common_cpu["xp"] = np
         # 单线程路径可让 BLAS 用多核；多线程路径每 worker 内 BLAS=1
         if workers <= 1 or len(ranges) <= 1:
-            _pin_blas_threads(max(1, workers if workers > 1 else (os.cpu_count() or 4)))
-            for rr in ranges:
-                r0, r1, block_vals, _ = _idw_row_block(r0=rr[0], r1=rr[1], **common_cpu)
-                result[r0:r1] = block_vals
+            # 单线程路径：本批次内 BLAS 可用满核（作用域限制，不改环境）。
+            with _blas_limit(
+                max(1, workers if workers > 1 else (os.cpu_count() or 4))
+            ):
+                for rr in ranges:
+                    r0, r1, block_vals, _ = _idw_row_block(
+                        r0=rr[0], r1=rr[1], **common_cpu
+                    )
+                    result[r0:r1] = block_vals
             return
-
-        _pin_blas_threads(1)
 
         def _run_cpu(rr):
             r0, r1 = rr
             return _idw_row_block(r0, r1, **common_cpu)
 
         pool = _shared_executor(workers)
-        futures = [pool.submit(_run_cpu, rr) for rr in ranges]
-        for fut in as_completed(futures):
-            r0, r1, block_vals, _ = fut.result()
-            result[r0:r1] = block_vals
+        with _blas_limit(1):
+            futures = [pool.submit(_run_cpu, rr) for rr in ranges]
+            for fut in as_completed(futures):
+                r0, r1, block_vals, _ = fut.result()
+                result[r0:r1] = block_vals
 
     if use_gpu:
         try:
-            # GPU：内层 BLAS 不重要；整块上设备
-            _pin_blas_threads(1)
-            # 首次运行会 JIT 编译若干 kernel（可能数秒）；缓存后明显加速
-            for rr in ranges:
-                r0, r1, block_vals, _ = _run_one(rr)
-                result[r0:r1] = block_vals
+            # GPU：内层 BLAS 不重要；整块上设备（作用域限制 #1225）
+            with _blas_limit(1):
+                # 首次运行会 JIT 编译若干 kernel（可能数秒）；缓存后明显加速
+                for rr in ranges:
+                    r0, r1, block_vals, _ = _run_one(rr)
+                    result[r0:r1] = block_vals
         except Exception:
             # device OOM / unsupported ops → fall back to multi-core CPU
             _run_all_cpu()

@@ -271,7 +271,7 @@ def test_open_without_index_keeps_canonical_catalog_queryable(tmp_path):
     index_path = catalog_dir_for(project_path) / "catalog.sqlite"
     index_path.unlink()
     deferred = DataCatalogService.open(
-        project_path, ensure_index=False, sweep_temp=False
+        project_path, sweep_temp=False
     )
     try:
         # The deleted store is recovered from the manifest checkpoint: the
@@ -768,7 +768,7 @@ def test_open_without_index_keeps_canonical_queries_usable(tmp_path: Path):
     version = service.import_raw(_make_source(tmp_path))
     service.close()
 
-    deferred = DataCatalogService.open(project, ensure_index=False)
+    deferred = DataCatalogService.open(project)
     try:
         # SQLite is an acceleration cache only; the canonical document still
         # answers lookup/query requests before a deferred rebuild.
@@ -1226,7 +1226,10 @@ def test_resolve_path_cross_platform_and_relative(service, tmp_path):
     real_file = wells_dir / "A16.Las"
     real_file.write_text("~A 1000.0 50.0", encoding="utf-8")
 
-    # 1. Stored as foreign Linux absolute path
+    # 1. Stored as foreign Linux absolute path. #1221: the basename rebind
+    # must carry identity evidence — record the size so the fallback binds
+    # by proof, not by name alone (an identity-less record now surfaces
+    # missing instead of binding any same-named stranger).
     v1 = DataVersion(
         id="v1",
         asset_id="a1",
@@ -1235,8 +1238,13 @@ def test_resolve_path_cross_platform_and_relative(service, tmp_path):
         managed=False,
         path="/home/kevin/projects/data/proj/井曲线/A16.Las",
         format="las",
+        size_bytes=real_file.stat().st_size,
     )
     assert service.resolve_path(v1) == real_file.resolve()
+
+    # ...and WITHOUT evidence the same record must refuse the bind (#1221).
+    v1_blind = v1.model_copy(update={"id": "v1b", "size_bytes": None})
+    assert not service.resolve_path(v1_blind).is_file()
 
     # 2. Stored as relative path
     v2 = DataVersion(

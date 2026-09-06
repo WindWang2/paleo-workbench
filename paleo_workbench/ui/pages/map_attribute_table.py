@@ -113,8 +113,7 @@ class MapAttributeTable(QFrame):
         self.feature_combo.addItem("— no selection —", "")
         for feature_id in visible:
             feature = self._layer_features[feature_id]
-            label = str(feature.get("name") or feature.get("text") or feature_id)
-            self.feature_combo.addItem(label, feature_id)
+            self.feature_combo.addItem(self._combo_label(feature, feature_id), feature_id)
         if selected in visible:
             self.feature_combo.setCurrentIndex(
                 max(0, self.feature_combo.findData(selected))
@@ -143,28 +142,85 @@ class MapAttributeTable(QFrame):
         self._feature_id = str((feature or {}).get("id") or "")
         self._rebuild()
 
+    @staticmethod
+    def _combo_label(feature: dict[str, Any], feature_id: str) -> str:
+        return str(feature.get("name") or feature.get("text") or feature_id)
+
+    def _refill_feature_combo(self) -> None:
+        """清空并重灌要素下拉（placeholder + 全部绑定要素）。"""
+        self.feature_combo.clear()
+        self.feature_combo.addItem("— no selection —", "")
+        for feature_id, feature in self._layer_features.items():
+            self.feature_combo.addItem(self._combo_label(feature, feature_id), feature_id)
+
+    def _refresh_combo_labels(self) -> None:
+        """要素 id 集不变时下拉条目标签的就地刷新（不增删条目）。"""
+        combo = self.feature_combo
+        for index in range(combo.count()):
+            feature_id = str(combo.itemData(index) or "")
+            feature = self._layer_features.get(feature_id)
+            if feature is None:
+                continue  # placeholder 或已被过滤隐藏的条目
+            label = self._combo_label(feature, feature_id)
+            if combo.itemText(index) != label:
+                combo.setItemText(index, label)
+
     def set_layer_features(
         self, features: list[dict[str, Any]] | tuple[dict[str, Any], ...], *, selected_ids: set[str] | tuple[str, ...] = (),
     ) -> None:
         """Bind the property grid to one active vector layer without edit shadow state."""
-        self._layer_features = {
+        new_features = {
             str(feature.get("id") or ""): dict(feature)
             for feature in features
             if isinstance(feature, dict) and str(feature.get("id") or "")
         }
         selected = next(iter(sorted(str(value) for value in selected_ids)), "")
-        if selected not in self._layer_features:
+        if selected not in new_features:
             selected = ""
+        # 差量路径（C-P0-3）：要素 id 序列不变（纯属性编辑）时不清空重灌
+        # 下拉——只原地刷新条目标签；id 集或顺序变化（图层切换 / 增删
+        # 要素）仍走全量重灌。
+        same_ids = list(new_features) == list(self._layer_features)
+        self._layer_features = new_features
         self._suppress_feature_selection = True
-        self.feature_combo.clear()
-        self.feature_combo.addItem("— no selection —", "")
-        for feature_id, feature in self._layer_features.items():
-            label = str(feature.get("name") or feature.get("text") or feature_id)
-            self.feature_combo.addItem(label, feature_id)
-        target = self.feature_combo.findData(selected)
-        self.feature_combo.setCurrentIndex(max(0, target))
-        self._suppress_feature_selection = False
+        try:
+            if same_ids:
+                self._refresh_combo_labels()
+            else:
+                self._refill_feature_combo()
+            target = self.feature_combo.findData(selected)
+            self.feature_combo.setCurrentIndex(max(0, target))
+        finally:
+            self._suppress_feature_selection = False
         self.set_feature(self._layer_features.get(selected))
+
+    def update_layer_features(
+        self,
+        features: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+        *,
+        selected_ids: set[str] | tuple[str, ...] | list[str] = (),
+    ) -> None:
+        """差量更新已绑定要素的记录（要素 id 集不变；C-P0-3）。
+
+        宿主经编辑会话日志定位受影响要素后调用：只刷新这些要素的绑定
+        记录、下拉标签与（若选中）属性格，绝不 clear/重灌下拉。未绑定
+        的 id 忽略——id 集变化必须走 ``set_layer_features`` 全量路径。
+        """
+        combo = self.feature_combo
+        for feature in features:
+            if not isinstance(feature, dict):
+                continue
+            feature_id = str(feature.get("id") or "")
+            if not feature_id or feature_id not in self._layer_features:
+                continue
+            self._layer_features[feature_id] = dict(feature)
+            index = combo.findData(feature_id)
+            if index < 0:
+                continue
+            label = self._combo_label(feature, feature_id)
+            if combo.itemText(index) != label:
+                combo.setItemText(index, label)
+        self.set_selected_ids(selected_ids)
 
     def set_selected_ids(
         self, selected_ids: set[str] | tuple[str, ...] | list[str],

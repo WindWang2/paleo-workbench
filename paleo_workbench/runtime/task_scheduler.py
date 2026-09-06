@@ -291,12 +291,50 @@ class TaskScheduler:
             if self._shutdown:
                 raise RuntimeError("scheduler is shut down")
             if key in self._active_keys:
-                raise ValueError(f"task with key {key!r} is already queued or running")
+                existing = self._find_active_by_key_locked(key)
+                if existing is not None and existing.state == TaskState.QUEUED:
+                    # #1224 supersede: a resubmit against a still-QUEUED task
+                    # replaces it instead of erroring — a cancelled request
+                    # must never make the NEXT request appear to hang.
+                    self._heap = [
+                        e for e in self._heap if e[2] != existing.task_id
+                    ]
+                    heapq.heapify(self._heap)
+                    self._finish_locked(existing, TaskState.CANCELLED)
+                    self._active_keys.discard(key)
+                    superseded_cancel = existing.spec.on_cancel
+                else:
+                    running = existing is not None and existing.state == TaskState.RUNNING
+                    detail = (
+                        "正在运行且尚未退出（已请求取消的旧任务需先实际结束）"
+                        if running
+                        else "is already queued or running"
+                    )
+                    raise ValueError(
+                        f"task with key {key!r} {detail}"
+                    )
             self._handles[task_id] = handle
             self._active_keys.add(key)
             heapq.heappush(self._heap, (-spec.priority, next(self._seq), task_id))
+            superseded_cancel = None
         self._wakeup.set()
+        if superseded_cancel is not None:
+            # A superseded task's side effects (pre-booked runs, staging
+            # leases) must unwind exactly like an explicit cancel (R2#6).
+            try:
+                superseded_cancel()
+            except Exception:
+                logger.exception("superseded on_cancel callback failed")
         return handle
+
+    def _find_active_by_key_locked(self, key: str):
+        for handle in self._handles.values():
+            if handle.task_key == key and handle.state in (
+                TaskState.QUEUED,
+                TaskState.RUNNING,
+            ):
+                return handle
+        return None
 
     def submit_callable(
         self,
