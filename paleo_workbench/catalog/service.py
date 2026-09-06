@@ -324,6 +324,19 @@ class DataCatalogService:
         # Published as one snapshot so unlocked readers never observe a
         # mid-rebuild / mid-invalidate None window (#619).
         self._maps: _CatalogMaps | None = None
+        # Lazy open (#1212): a service opened ``lazy=True`` starts with an
+        # EMPTY document and serves hot reads (get/list/page/count/aggregate)
+        # straight from the canonical SQLite store until a background
+        # ``warm_document()`` (or the first mutation / full-document read,
+        # which materializes inline) swaps in the fully materialized document.
+        # ``_warm`` is True for every eagerly-opened service, so all
+        # pre-existing behavior is unchanged unless lazy was requested.
+        self._lazy: bool = False
+        self._warm: bool = True
+        # id→model cache for lazy reads before warmup: keeps object identity
+        # stable within the pre-warm window (the UI holds these objects).
+        # Cleared when the warm document swaps in.
+        self._lazy_read_cache: dict[str, Any] = {}
 
     # -- change tracking ------------------------------------------------------
 
@@ -384,6 +397,93 @@ class DataCatalogService:
         """Drop the cached indexes; they rebuild lazily on next use."""
         self._maps = None
 
+    # -- lazy open warmup (#1212) ---------------------------------------------
+
+    @property
+    def is_warm(self) -> bool:
+        """True once the full document is materialized (always true when the
+        service was opened eagerly)."""
+        return self._warm
+
+    def require_warm(self) -> None:
+        """Block until the full document is materialized.
+
+        No-op for eager services and already-warm lazy services. For a lazy
+        service still pre-warm, materializes inline (same cost the eager
+        open used to pay, paid by whichever caller needs the full document
+        first). Correct-by-construction: there is exactly one document
+        object and one identity space — no merge logic.
+        """
+        if self._warm:
+            return
+        with self._lock:
+            if not self._warm:
+                self._warm_locked()
+
+    def warm_document(self) -> None:
+        """Background warmup for a lazily-opened service.
+
+        Loads the full document off the service lock, then swaps it in under
+        the lock. Safe to race ``require_warm`` (inline materialization) and
+        arbitrary mutations: any mutation path materializes first via
+        ``_ensure_maps``, so a store revision that moved past the loaded
+        snapshot implies an inline warm already happened and this load is
+        simply discarded.
+        """
+        if self._warm:
+            return
+        document = self._index.load_document()
+        with self._lock:
+            if self._warm:
+                return  # inline warm won the race; discard this snapshot
+            if document is None:
+                # Unreadable mid-warmup (rare; open health-checked it):
+                # fall back to the inline path so the error surfaces from
+                # whichever caller needs the document.
+                self._warm_locked()
+                return
+            stored = self._index.revision()
+            if (
+                stored is not None
+                and document.catalog_revision is not None
+                and stored != document.catalog_revision
+            ):
+                # The store advanced past the loaded snapshot: a mutation
+                # committed while we were loading — but every mutation
+                # implies an inline warm (see above), so this cannot happen
+                # without ``_warm`` already being set. Reachable only via a
+                # legacy json-canonical writer; discard and warm inline.
+                self._warm_locked()
+                return
+            self.document = document
+            self._invalidate_maps()
+            # _warm BEFORE _ensure_maps (see _warm_locked): the maps builder
+            # itself branches on _warm for the inline trigger.
+            self._warm = True
+            self._ensure_maps()
+            self._lazy_read_cache.clear()
+
+    def _warm_locked(self) -> None:
+        """Materialize the full document; caller holds ``_lock``."""
+        document = self._index.load_document()
+        if document is None:
+            raise CatalogError(
+                "Canonical catalog store became unreadable while opening; "
+                "resolve the read failure (close other instances) and reopen."
+            )
+        self.document = document
+        self._invalidate_maps()
+        # Set _warm BEFORE building the maps: _ensure_maps itself branches
+        # on _warm for the inline-materialization trigger and would recurse
+        # otherwise.
+        self._warm = True
+        self._ensure_maps()
+        self._lazy_read_cache.clear()
+
+    def _require_warm(self) -> None:
+        """Internal alias used by the warm-guard method wrappers."""
+        self.require_warm()
+
     def _drop_dedup_keys(self, version: DataVersion) -> None:
         """Remove *version*'s dedup-index entries (only when still its own).
 
@@ -416,6 +516,14 @@ class DataCatalogService:
 
     def _ensure_maps(self) -> _CatalogMaps:
         """Build the id→object indexes from the document (idempotent)."""
+        if not self._warm:
+            # Lazy pre-warm: the document is empty by design. Materialize it
+            # now (inline warmup) so the maps — and every mutation that
+            # follows — see the real entity graph. This is the single
+            # convergence point that keeps lazy and eager behavior
+            # identical after the first mutation.
+            self._warm_locked()
+            return self._maps  # type: ignore[return-value]
         maps = self._maps
         if maps is not None:
             return maps
@@ -668,7 +776,7 @@ class DataCatalogService:
         cls,
         project_path: str | Path,
         *,
-        ensure_index: bool = True,
+        lazy: bool = False,
         sweep_temp: bool = True,
     ) -> "DataCatalogService":
         """Open (or initialize) the catalog for *project_path*.
@@ -687,6 +795,14 @@ class DataCatalogService:
 
         ``sweep_temp`` is optional session maintenance, never a prerequisite
         for canonical catalog availability.
+
+        ``lazy=True`` (#1212) skips the O(N) full-document materialization:
+        the service opens with the store's revision baseline only and serves
+        hot reads (get/list/page/count/aggregate) from SQLite. A background
+        ``warm_document()`` swaps in the materialized document; the first
+        mutation or full-document read materializes inline instead. Use for
+        the GUI project-open path so 100k-scale projects reach a responsive
+        shell without waiting for the eager load.
         """
         project_path = Path(project_path)
         store = CatalogStore(project_path)
@@ -695,7 +811,7 @@ class DataCatalogService:
         document: CatalogDocument | None = None
         json_path = catalog_file_for(project_path)
         health = index.store_health()
-        if health == "canonical":
+        if health == "canonical" and not lazy:
             document = index.load_document()
             if document is None:
                 # Partial corruption: the store passed the health probes
@@ -752,6 +868,40 @@ class DataCatalogService:
             except OSError:
                 pass  # best-effort forensics; reset() removes the bytes anyway
             index.reset()
+        if health == "canonical" and lazy:
+            # Lazy path: the store is canonical and healthy. The manifest
+            # mtime bookkeeping still runs (cheap mtime compare; the full
+            # manifest parse only happens when the mtime moved, i.e. an old
+            # json-canonical app version wrote behind our back) so a newer
+            # legacy revision is honored BEFORE any read is served.
+            revision = index.revision()
+            if json_path.is_file():
+                recorded = _recorded_manifest_mtime_ns(index)
+                current = _disk_mtime_ns(json_path)
+                if recorded is None or current is None or recorded != current:
+                    try:
+                        legacy = store.load()
+                    except CatalogError:
+                        legacy = None
+                    if (
+                        legacy is not None
+                        and revision is not None
+                        and legacy.catalog_revision > revision
+                    ):
+                        index.write_all(legacy)
+                        revision = legacy.catalog_revision
+            service = cls(
+                project_path,
+                CatalogDocument(
+                    catalog_revision=revision if revision is not None else 0
+                ),
+                store,
+                index,
+            )
+            service._flushed_revision = service.document.catalog_revision
+            service._lazy = True
+            service._warm = False
+            return service
         if document is not None and json_path.is_file():
             # The manifest should be exactly what we last checkpointed. A
             # different mtime means an old (json-canonical) app version wrote
@@ -802,9 +952,26 @@ class DataCatalogService:
             pass
 
     def close(self) -> None:
-        """Checkpoint the JSON manifest, then release the store."""
+        """Checkpoint the JSON manifest, then release the store.
+
+        Lazy-session fast path (#1212): a lazily-opened service that made NO
+        mutations skips the manifest rewrite entirely — the on-disk manifest
+        already matches the store's committed revision (verified via the
+        recorded mtime baseline), so re-exporting would force a full document
+        materialization just to reproduce bytes we already have.
+        """
         try:
-            self.export_manifest()
+            if self._lazy and self._mutations_since_manifest == 0:
+                json_path = catalog_file_for(self.project_path)
+                manifest_current = (
+                    json_path.is_file()
+                    and _recorded_manifest_mtime_ns(self._index)
+                    == _disk_mtime_ns(json_path)
+                )
+                if not manifest_current:
+                    self.export_manifest()
+            else:
+                self.export_manifest()
         except Exception:
             # A manifest failure must never block closing the canonical store.
             pass
@@ -1105,13 +1272,82 @@ class DataCatalogService:
         if self._assets_by_legacy_id is not None:
             self._assets_by_legacy_id.setdefault(legacy_resource_id, asset)
 
+    # -- lazy hot reads (#1212) ------------------------------------------------
+    #
+    # Before warmup these serve straight from the canonical store (bounded
+    # per-entity / per-asset queries) with a small id→model cache for object
+    # identity. After warmup they use the maintained maps exactly as before.
+
+    def _lazy_active(self) -> bool:
+        return self._lazy and not self._warm
+
+    def _lazy_get_asset(self, asset_id: str) -> DataAsset | None:
+        cached = self._lazy_read_cache.get(asset_id)
+        if cached is not None:
+            return cached
+        model = self._index.get_asset_model(asset_id)
+        if model is not None:
+            self._lazy_read_cache[asset_id] = model
+        return model
+
+    def _lazy_get_version(self, version_id: str) -> DataVersion | None:
+        cached = self._lazy_read_cache.get(version_id)
+        if cached is not None:
+            return cached
+        model = self._index.get_version_model(version_id)
+        if model is not None:
+            self._lazy_read_cache[version_id] = model
+        return model
+
+    def _lazy_get_run(self, run_id: str) -> DataRun | None:
+        cached = self._lazy_read_cache.get(run_id)
+        if cached is not None:
+            return cached
+        model = self._index.get_run_model(run_id)
+        if model is not None:
+            self._lazy_read_cache[run_id] = model
+        return model
+
     def get_asset(self, asset_id: str) -> DataAsset:
+        if self._lazy_active():
+            # Pre-warm the store IS the committed truth (mutations and
+            # batches only exist post-warm), so a clean miss is a genuine
+            # unknown id — raise without paying the full materialization.
+            try:
+                asset = self._lazy_get_asset(asset_id)
+            except Exception:
+                asset = None  # store read failed; warm path handles errors
+            else:
+                if asset is None:
+                    raise CatalogError(f"Unknown asset: {asset_id}")
+                return asset
+            self.require_warm()
         return self._asset_or_raise(asset_id)
 
     def get_version(self, version_id: str) -> DataVersion:
+        if self._lazy_active():
+            try:
+                version = self._lazy_get_version(version_id)
+            except Exception:
+                version = None
+            else:
+                if version is None:
+                    raise CatalogError(f"Unknown version: {version_id}")
+                return version
+            self.require_warm()
         return self._version_or_raise(version_id)
 
     def get_run(self, run_id: str) -> DataRun:
+        if self._lazy_active():
+            try:
+                run = self._lazy_get_run(run_id)
+            except Exception:
+                run = None
+            else:
+                if run is None:
+                    raise CatalogError(f"Unknown run: {run_id}")
+                return run
+            self.require_warm()
         maps = self._ensure_maps()
         run = maps.run_by_id.get(run_id)
         if run is not None:
@@ -1125,20 +1361,71 @@ class DataCatalogService:
 
     def list_assets(self, include_trashed: bool = False) -> list[DataAsset]:
         """List assets; trashed (soft-deleted) assets are hidden by default."""
+        if self._lazy_active():
+            models = self._index.list_asset_models(
+                include_trashed=include_trashed, trashed_only=False
+            )
+            for model in models:
+                self._lazy_read_cache.setdefault(model.id, model)
+            return models
         if include_trashed:
             return list(self.document.assets)
         return [asset for asset in self.document.assets if not asset.trashed]
 
     def get_trashed_assets(self) -> list[DataAsset]:
         """Assets currently in the trash (tombstoned, recoverable)."""
+        if self._lazy_active():
+            models = self._index.list_asset_models(
+                include_trashed=True, trashed_only=True
+            )
+            for model in models:
+                self._lazy_read_cache.setdefault(model.id, model)
+            return models
         return [asset for asset in self.document.assets if asset.trashed]
 
     def list_runs(self) -> list[DataRun]:
+        if self._lazy_active():
+            models = self._index.list_run_models()
+            for model in models:
+                self._lazy_read_cache.setdefault(model.id, model)
+            return models
         return list(self.document.runs)
 
     def list_versions(self, asset_id: str) -> list[DataVersion]:
+        if self._lazy_active():
+            models = self._index.list_version_models_for_asset(asset_id)
+            for model in models:
+                self._lazy_read_cache.setdefault(model.id, model)
+            return sorted(models, key=lambda v: v.version_number)
         versions = list(self._ensure_maps().versions_by_asset.get(asset_id, ()))
         return sorted(versions, key=lambda v: v.version_number)
+
+    def list_all_versions(self) -> list[DataVersion]:
+        """Every version in document order (rowid); lazy-safe."""
+        if self._lazy_active():
+            models = self._index.list_all_version_models()
+            for model in models:
+                self._lazy_read_cache.setdefault(model.id, model)
+            return models
+        return list(self.document.versions)
+
+    def resolve_asset_models(self, asset_ids: Iterable[str]) -> list[DataAsset]:
+        """Identity-stable asset models for *asset_ids* (lazy-safe).
+
+        Pre-warm: served from the lazy read cache (populated per id from the
+        store). Post-warm: the maintained document objects. Used by the
+        materialized search path so index rows never filter to empty on a
+        not-yet-warm document.
+        """
+        if self._lazy_active():
+            out: list[DataAsset] = []
+            for asset_id in asset_ids:
+                model = self._lazy_get_asset(str(asset_id))
+                if model is not None:
+                    out.append(model)
+            return out
+        by_id = self._ensure_maps().asset_by_id
+        return [by_id[i] for i in asset_ids if i in by_id]
 
     def resolve_path(self, version: DataVersion) -> Path:
         """Runtime absolute path for a version's payload.
@@ -2350,6 +2637,27 @@ class DataCatalogService:
 
     def get_lineage(self, version_id: str) -> dict[str, Any]:
         """Parents, children, and the producing run for a version."""
+        if self._lazy_active():
+            version = self._lazy_get_version(version_id)
+            if version is None:
+                raise CatalogError(f"Unknown version: {version_id}")
+            parents = []
+            for pid in version.parent_version_ids:
+                parent = self._lazy_get_version(pid)
+                if parent is not None:
+                    parents.append(parent)
+            children = self._index.child_version_models(version_id)
+            for child in children:
+                self._lazy_read_cache.setdefault(child.id, child)
+            run = None
+            if version.run_id is not None:
+                run = self._lazy_get_run(version.run_id)
+            return {
+                "version": version,
+                "parents": parents,
+                "children": children,
+                "run": run,
+            }
         version = self._version_or_raise(version_id)
         maps = self._ensure_maps()
         parents = [
@@ -3747,3 +4055,106 @@ class DataCatalogService:
                 self._invalidate_maps()
                 self._save()
             return report
+
+
+# -- lazy-open warm guards (#1212) ---------------------------------------------
+#
+# Every DataCatalogService method that inherently needs the FULL document
+# (mutators, tag/model registry access, lineage chains, GC/audit/integrity,
+# manifest export, index maintenance) is wrapped to materialize the document
+# first via ``require_warm()``. For eagerly-opened services (``_warm`` is True
+# from construction) the wrapper is a no-op flag check, so behavior outside
+# lazy open is byte-identical. Hot per-entity/per-page reads are deliberately
+# NOT wrapped — they serve from the canonical store pre-warm (see the lazy
+# hot-read section above).
+
+_WARM_REQUIRED_METHODS = (
+    # session/maintenance
+    "sweep_temp_on_open",
+    "export_manifest",
+    "ensure_index_ready",
+    "rebuild_index",
+    "plan_gc",
+    "sweep_gc",
+    "cleanup_working_copies",
+    "find_missing_sources",
+    "verify_integrity",
+    "audit",
+    "rebase_artifact_paths",
+    "migrate_legacy_resources",
+    # registration / lifecycle mutators
+    "register_version",
+    "register_intermediate",
+    "register_output",
+    "register_result_asset",
+    "register_derived_store",
+    "import_raw",
+    "link_external",
+    "materialize_external",
+    "relink_external_source",
+    "create_working_copy",
+    "commit_working_copy",
+    "create_derived",
+    "register_run",
+    "update_run_status",
+    "update_asset_metadata",
+    "trash_version",
+    "trash_asset",
+    "restore_version",
+    "restore_asset",
+    "purge_trashed",
+    "promote_version",
+    "promote_asset",
+    # model registry (full-list scans of small collections)
+    "register_model",
+    "register_model_version",
+    "get_model",
+    "get_model_version",
+    "get_model_version_by_id",
+    "list_models",
+    "list_model_versions",
+    "promote_model",
+    "find_production_model",
+    # lineage full-graph walks
+    "get_lineage_chain",
+    "lineage_summaries",
+    # tags (mutators + document-list reads)
+    "add_tag",
+    "add_tags",
+    "remove_tag",
+    "rename_tag",
+    "merge_tags",
+    "create_tag",
+    "bulk_add_tag",
+    "bulk_remove_tag",
+    "tag_ids_for_asset",
+    "tag_usage",
+    "search_tags",
+    "delete_unused_tag",
+    "prune_unused_tags",
+    "list_tags",
+    "find_assets_by_tag",
+    "find_versions_by_tag",
+)
+
+
+def _apply_warm_guards() -> None:
+    import functools
+
+    for name in _WARM_REQUIRED_METHODS:
+        method = getattr(DataCatalogService, name, None)
+        if method is None:
+            raise RuntimeError(
+                f"warm-guard list references missing method {name!r}; "
+                "the list must track the class surface"
+            )
+
+        @functools.wraps(method)
+        def wrapper(self, *args, _method=method, **kwargs):
+            self._require_warm()
+            return _method(self, *args, **kwargs)
+
+        setattr(DataCatalogService, name, wrapper)
+
+
+_apply_warm_guards()

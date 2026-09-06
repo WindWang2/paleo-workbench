@@ -86,23 +86,43 @@ class CoreCatalogAdapter:
         The mutation serial (public ``DataCatalogService.mutation_serial``)
         covers saves deferred inside batch_save, where the revision now stays
         put until commit (#1139).
+
+        Lazy-safe (#1212): pre-warm the document's tag list is empty by
+        design, so the map is built from the store instead (still cached per
+        revision/serial; the warm document swap invalidates via identity).
         """
-        document = self._service.document
-        serial = getattr(self._service, "mutation_serial", 0)
+        service = self._service
+        lazy = getattr(service, "_lazy", False) and not getattr(
+            service, "_warm", True
+        )
+        document = service.document
+        serial = getattr(service, "mutation_serial", 0)
         cache = getattr(self, "_tag_map_cache", None)
         if (
             cache is not None
-            and cache[0] is document
             and cache[1] == document.catalog_revision
             and cache[2] == serial
+            and (cache[0] is document or (lazy and cache[0] is None))
         ):
             return cache[3]
-        by_id = {t.id: t for t in document.tags}
-        self._tag_map_cache = (document, document.catalog_revision, serial, by_id)
+        if lazy:
+            by_id = {t.id: t for t in service._index.list_tag_models()}
+            self._tag_map_cache = (None, document.catalog_revision, serial, by_id)
+        else:
+            by_id = {t.id: t for t in document.tags}
+            self._tag_map_cache = (document, document.catalog_revision, serial, by_id)
         return by_id
 
     def _tag_names(self, version: DataVersion) -> list[str]:
-        tag_ids = self._service.document.version_tags.get(version.id, [])
+        service = self._service
+        if getattr(service, "_lazy", False) and not getattr(
+            service, "_warm", True
+        ):
+            tags = service._index.tags_for_version(version.id)
+            return [
+                (t.display_name or t.name) for t in tags
+            ]
+        tag_ids = service.document.version_tags.get(version.id, [])
         by_id = self._tag_by_id()
         return [
             by_id[tid].display_name or by_id[tid].name
@@ -111,7 +131,12 @@ class CoreCatalogAdapter:
         ]
 
     def _asset_for(self, version: DataVersion) -> DataAsset | None:
-        return self._service._ensure_maps().asset_by_id.get(version.asset_id)
+        service = self._service
+        if getattr(service, "_lazy", False) and not getattr(
+            service, "_warm", True
+        ):
+            return service._lazy_get_asset(version.asset_id)
+        return service._ensure_maps().asset_by_id.get(version.asset_id)
 
     def _version_ref(self, version: DataVersion) -> DataVersionRef:
         asset = self._asset_for(version)
@@ -420,15 +445,17 @@ class CoreCatalogAdapter:
                 except CatalogError:
                     pass
             return None
+        if getattr(service, "_lazy", False) and not getattr(
+            service, "_warm", True
+        ):
+            # Lazy pre-warm (#1212): the document is empty by design. The
+            # current-index path above already answered from the store; the
+            # document scan below cannot add information.
+            return None
         for version in service.document.versions:
             if not version.managed and not version.trashed and version.path == resolved:
                 return version
-        found = self._scan_external_by_path(resolved)
-        if found is not None:
-            maps.external_by_path[resolved] = found.id
-        else:
-            maps.external_by_path.pop(resolved, None)
-        return found
+        return None
 
     # ------------------------------------------------------------------- runs
     def begin_run(
@@ -794,7 +821,9 @@ class CoreCatalogAdapter:
         if stage is not None:
             stage_val = stage.value if isinstance(stage, DataStage) else str(stage).lower()
         result = []
-        for version in self._service.document.versions:
+        # Lazy-safe source (#1212): pre-warm the document lists are empty by
+        # design, so enumerate through the service's store-backed read.
+        for version in self._service.list_all_versions():
             if stage_val is not None and version.stage.value != stage_val:
                 continue
             if asset_id is not None and version.asset_id != asset_id:
@@ -804,7 +833,7 @@ class CoreCatalogAdapter:
         return result
 
     def list_runs(self) -> list[DataRunRef]:
-        runs = sorted(
-            self._service.document.runs, key=lambda r: r.created_at
-        )
+        # Lazy-safe source (#1212): service.list_runs serves from the store
+        # pre-warm and from the document post-warm.
+        runs = sorted(self._service.list_runs(), key=lambda r: r.created_at)
         return [self._run_ref(r) for r in runs]

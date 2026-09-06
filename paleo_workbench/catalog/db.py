@@ -23,10 +23,74 @@ from typing import Any
 
 from paleo_workbench.catalog.models import (
     CatalogDocument,
+    DataAsset,
+    DataRun,
     DataStage,
+    DataVersion,
+    Model,
+    ModelVersion,
+    Tag,
     normalize_tag_name,
 )
 from paleo_workbench.catalog.storage import catalog_dir_for
+
+
+# -- row → domain-model builders ---------------------------------------------
+# Single source of truth for SQLite-row → Pydantic reconstruction, shared by
+# the full-document load and the lazy single-entity reads so the two paths can
+# never disagree on field decoding (lazy/eager parity is pinned by tests).
+
+
+def _asset_model_from_row(row) -> DataAsset:
+    return DataAsset(
+        id=row["id"],
+        name=row["name"],
+        type=row["type"],
+        description=row["description"],
+        current_version_id=row["current_version_id"],
+        legacy_resource_id=row["legacy_resource_id"],
+        metadata=json.loads(row["metadata"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        trashed=bool(row["trashed"]),
+        trashed_at=row["trashed_at"],
+    )
+
+
+def _version_model_from_row(row) -> DataVersion:
+    return DataVersion(
+        id=row["id"],
+        asset_id=row["asset_id"],
+        version_number=row["version_number"],
+        stage=DataStage(row["stage"]),
+        managed=bool(row["managed"]),
+        path=row["path"],
+        source_uri=row["source_uri"],
+        format=row["format"],
+        size_bytes=row["size_bytes"],
+        sha256=row["sha256"],
+        run_id=row["run_id"],
+        metadata=json.loads(row["metadata"]),
+        created_at=row["created_at"],
+        trashed=bool(row["trashed"]),
+        trashed_at=row["trashed_at"],
+        parent_version_ids=json.loads(row["parent_ids"]),
+    )
+
+
+def _run_model_from_row(row, inputs: list[str], outputs: list[str]) -> DataRun:
+    run = DataRun(
+        id=row["id"],
+        operation=row["operation"],
+        parameters=json.loads(row["parameters"]),
+        generator=row["generator"],
+        status=row["status"],
+        model_ref=json.loads(row["model_ref"]) if row["model_ref"] else None,
+        created_at=row["created_at"],
+    )
+    run.input_version_ids = inputs
+    run.output_version_ids = outputs
+    return run
 
 DB_FILENAME = "catalog.sqlite"
 
@@ -1052,56 +1116,15 @@ class CatalogIndex:
             return None
 
     def _load_document_once(self) -> CatalogDocument:
-        from paleo_workbench.catalog.models import (
-            DataAsset,
-            DataRun,
-            DataStage,
-            DataVersion,
-            Model,
-            ModelVersion,
-            Tag,
-        )
-
         conn = self._connect()
         conn.execute("BEGIN")
         try:
             assets = [
-                DataAsset(
-                    id=row["id"],
-                    name=row["name"],
-                    type=row["type"],
-                    description=row["description"],
-                    current_version_id=row["current_version_id"],
-                    legacy_resource_id=row["legacy_resource_id"],
-                    metadata=json.loads(row["metadata"]),
-                    created_at=row["created_at"],
-                    updated_at=row["updated_at"],
-                    trashed=bool(row["trashed"]),
-                    trashed_at=row["trashed_at"],
-                )
-                for row in conn.execute(
-                    "SELECT * FROM assets"
-                )
+                _asset_model_from_row(row)
+                for row in conn.execute("SELECT * FROM assets")
             ]
             versions = [
-                DataVersion(
-                    id=row["id"],
-                    asset_id=row["asset_id"],
-                    version_number=row["version_number"],
-                    stage=DataStage(row["stage"]),
-                    managed=bool(row["managed"]),
-                    path=row["path"],
-                    source_uri=row["source_uri"],
-                    format=row["format"],
-                    size_bytes=row["size_bytes"],
-                    sha256=row["sha256"],
-                    run_id=row["run_id"],
-                    metadata=json.loads(row["metadata"]),
-                    created_at=row["created_at"],
-                    trashed=bool(row["trashed"]),
-                    trashed_at=row["trashed_at"],
-                    parent_version_ids=json.loads(row["parent_ids"]),
-                )
+                _version_model_from_row(row)
                 for row in conn.execute("SELECT * FROM versions ORDER BY rowid")
             ]
             inputs_by_run: dict[str, list[str]] = {}
@@ -1111,22 +1134,13 @@ class CatalogIndex:
             for row in conn.execute("SELECT run_id, version_id FROM run_outputs"):
                 outputs_by_run.setdefault(row["run_id"], []).append(row["version_id"])
             runs = [
-                DataRun(
-                    id=row["id"],
-                    operation=row["operation"],
-                    parameters=json.loads(row["parameters"]),
-                    generator=row["generator"],
-                    status=row["status"],
-                    model_ref=json.loads(row["model_ref"])
-                    if row["model_ref"]
-                    else None,
-                    created_at=row["created_at"],
+                _run_model_from_row(
+                    row,
+                    inputs_by_run.get(row["id"], []),
+                    outputs_by_run.get(row["id"], []),
                 )
                 for row in conn.execute("SELECT * FROM runs ORDER BY rowid")
             ]
-            for run in runs:
-                run.input_version_ids = inputs_by_run.get(run.id, [])
-                run.output_version_ids = outputs_by_run.get(run.id, [])
             tags = [
                 Tag(
                     id=row["id"],
@@ -1197,6 +1211,151 @@ class CatalogIndex:
             except sqlite3.Error:
                 pass
             raise
+
+    # -- lazy entity reads (open-without-materialization, #1212) -------------
+    #
+    # Single-entity / bounded-list reads served straight from the canonical
+    # store so a lazily-opened service can answer lookups BEFORE the full
+    # document warmup completes. Row order matches load_document's list order
+    # (rowid) so lazy results are drop-in identical to the eager document's.
+
+    def _read_rows(self, sql: str, params: tuple) -> list:
+        """Read rows on this thread's connection; [] when the store is absent."""
+        if not self.db_path.is_file():
+            return []
+        conn = self._connect()
+        if not self._schema_present(conn):
+            return []
+        return conn.execute(sql, params).fetchall()
+
+    def get_asset_model(self, asset_id: str) -> DataAsset | None:
+        row = self._read_rows("SELECT * FROM assets WHERE id = ?", (asset_id,))
+        return _asset_model_from_row(row[0]) if row else None
+
+    def get_version_model(self, version_id: str) -> DataVersion | None:
+        row = self._read_rows("SELECT * FROM versions WHERE id = ?", (version_id,))
+        return _version_model_from_row(row[0]) if row else None
+
+    def get_run_model(self, run_id: str) -> DataRun | None:
+        rows = self._read_rows("SELECT * FROM runs WHERE id = ?", (run_id,))
+        if not rows:
+            return None
+        inputs = [
+            r["version_id"]
+            for r in self._read_rows(
+                "SELECT version_id FROM run_inputs WHERE run_id = ? ORDER BY rowid",
+                (run_id,),
+            )
+        ]
+        outputs = [
+            r["version_id"]
+            for r in self._read_rows(
+                "SELECT version_id FROM run_outputs WHERE run_id = ? ORDER BY rowid",
+                (run_id,),
+            )
+        ]
+        return _run_model_from_row(rows[0], inputs, outputs)
+
+    def list_asset_models(
+        self, *, include_trashed: bool = True, trashed_only: bool = False
+    ) -> list[DataAsset]:
+        if trashed_only:
+            rows = self._read_rows(
+                "SELECT * FROM assets WHERE trashed = 1 ORDER BY rowid", ()
+            )
+        elif include_trashed:
+            rows = self._read_rows("SELECT * FROM assets ORDER BY rowid", ())
+        else:
+            rows = self._read_rows(
+                "SELECT * FROM assets WHERE trashed = 0 ORDER BY rowid", ()
+            )
+        return [_asset_model_from_row(row) for row in rows]
+
+    def list_run_models(self) -> list[DataRun]:
+        rows = self._read_rows("SELECT * FROM runs ORDER BY rowid", ())
+        if not rows:
+            return []
+        inputs_by_run: dict[str, list[str]] = {}
+        for r in self._read_rows(
+            "SELECT run_id, version_id FROM run_inputs ORDER BY rowid", ()
+        ):
+            inputs_by_run.setdefault(r["run_id"], []).append(r["version_id"])
+        outputs_by_run: dict[str, list[str]] = {}
+        for r in self._read_rows(
+            "SELECT run_id, version_id FROM run_outputs ORDER BY rowid", ()
+        ):
+            outputs_by_run.setdefault(r["run_id"], []).append(r["version_id"])
+        return [
+            _run_model_from_row(
+                row,
+                inputs_by_run.get(row["id"], []),
+                outputs_by_run.get(row["id"], []),
+            )
+            for row in rows
+        ]
+
+    def list_version_models_for_asset(self, asset_id: str) -> list[DataVersion]:
+        # Document order within an asset is rowid; the service's public
+        # list_versions sorts by version_number, stable on input order.
+        rows = self._read_rows(
+            "SELECT * FROM versions WHERE asset_id = ? ORDER BY rowid", (asset_id,)
+        )
+        return [_version_model_from_row(row) for row in rows]
+
+    def list_all_version_models(self) -> list[DataVersion]:
+        rows = self._read_rows("SELECT * FROM versions ORDER BY rowid", ())
+        return [_version_model_from_row(row) for row in rows]
+
+    def child_version_models(self, parent_version_id: str) -> list[DataVersion]:
+        """Versions whose parent_version_ids include *parent_version_id*.
+
+        Mirrors the children_by_parent map (children indexed by parent id,
+        document/rowid order).
+        """
+        rows = self._read_rows(
+            "SELECT v.* FROM versions v JOIN lineage l "
+            "ON l.child_version_id = v.id "
+            "WHERE l.parent_version_id = ? ORDER BY v.rowid",
+            (parent_version_id,),
+        )
+        return [_version_model_from_row(row) for row in rows]
+
+    def list_tag_models(self) -> list[Tag]:
+        rows = self._read_rows("SELECT * FROM tags ORDER BY rowid", ())
+        return [
+            Tag(
+                id=row["id"],
+                name=row["name"],
+                display_name=row["display_name"],
+                metadata=json.loads(row["metadata"]),
+            )
+            for row in rows
+        ]
+
+    def tags_for_version(self, version_id: str) -> list[Tag]:
+        rows = self._read_rows(
+            "SELECT t.* FROM tags t JOIN version_tags vt ON vt.tag_id = t.id "
+            "WHERE vt.version_id = ? ORDER BY t.rowid",
+            (version_id,),
+        )
+        return [
+            Tag(
+                id=row["id"],
+                name=row["name"],
+                display_name=row["display_name"],
+                metadata=json.loads(row["metadata"]),
+            )
+            for row in rows
+        ]
+
+    def tag_ids_for_asset(self, asset_id: str) -> list[str]:
+        return [
+            r["tag_id"]
+            for r in self._read_rows(
+                "SELECT tag_id FROM asset_tags WHERE asset_id = ? ORDER BY rowid",
+                (asset_id,),
+            )
+        ]
 
     def apply_changes(
         self,

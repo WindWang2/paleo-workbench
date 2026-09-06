@@ -25,10 +25,10 @@ support/benchmarking (small/medium fixtures only).
 6. No 100GB seismic work.
 
 ## Phases (milestone commits per prompt §18)
-- [ ] PHASE 0: Setup — worktree, branch, planning files, baseline test run
-- [ ] PHASE 1: Initial audit (subsystems A–L, parallel agents) + issue mapping
-- [ ] PHASE 2: 00-baseline.md  (commit 1: audit/baseline)
-- [ ] PHASE 3: Lazy catalog — SQLite indexed repository under DataCatalogService;
+- [x] PHASE 0: Setup — worktree, branch, planning files, baseline test run
+- [x] PHASE 1: Initial audit (subsystems A–L, parallel agents) + issue mapping
+- [x] PHASE 2: 00-baseline.md (d67c4639)  (commit 1: audit/baseline)
+- [x] PHASE 3: Lazy catalog — SQLite indexed repository under DataCatalogService;
       project-open <500ms to responsive shell at 100k  (commit 2)
 - [ ] PHASE 4: Transaction/revision model — BEGIN IMMEDIATE/CAS, typed conflicts,
       no last-writer-wins  (commit 3)
@@ -45,7 +45,7 @@ support/benchmarking (small/medium fixtures only).
 - [ ] PHASE 13: Docs 00–11 complete; PR to main with full evidence
 
 ## Current Phase
-PHASE 0
+PHASE 4 (transaction/revision CAS)
 
 ## Decisions (locked — do not revisit)
 (none yet beyond hard constraints)

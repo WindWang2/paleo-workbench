@@ -293,9 +293,13 @@ class ProjectController:
             )
 
             ProjectController._close_catalog()
-            service = DataCatalogService.open(
-                target, ensure_index=False, sweep_temp=False
-            )
+            # Lazy open (#1212): the O(N) full-document materialization moves
+            # off the GUI thread — the shell turns responsive after the
+            # store health/revision probes only. Hot reads serve from SQLite
+            # immediately; the maintenance thread warms the full document in
+            # the background, and any mutation/full read materializes on
+            # demand before proceeding.
+            service = DataCatalogService.open(target, lazy=True, sweep_temp=False)
             set_catalog(CoreCatalogAdapter(service))
             return None
         except Exception as error:
@@ -380,6 +384,11 @@ class ProjectController:
             return
         if service is not None:
             try:
+                # Warm the lazily-opened document FIRST (#1212): everything
+                # below (legacy projection, sweep, index verification) needs
+                # the full entity graph anyway, and warming before them keeps
+                # those steps on the already-eager code path.
+                service.warm_document()
                 service.migrate_legacy_resources(resources_snapshot)
                 service.sweep_temp_on_open()
                 service.ensure_index_ready()
@@ -749,7 +758,7 @@ class ProjectController:
             from paleo_workbench.catalog.service import DataCatalogService
 
             service = DataCatalogService.open(
-                target, ensure_index=False, sweep_temp=False
+                target, lazy=True, sweep_temp=False
             )
             try:
                 service.rebase_artifact_paths()

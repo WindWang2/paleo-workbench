@@ -82,6 +82,9 @@ def test_catalog_maintenance_runs_off_gui_thread(qtbot, tmp_path, monkeypatch):
     seen: list[tuple[str, bool]] = []
 
     class _FakeService:
+        def warm_document(self):
+            seen.append(("warm", threading.current_thread() is not threading.main_thread()))
+
         def migrate_legacy_resources(self, _resources):
             seen.append(("migrate", threading.current_thread() is not threading.main_thread()))
 
@@ -98,7 +101,7 @@ def test_catalog_maintenance_runs_off_gui_thread(qtbot, tmp_path, monkeypatch):
         window = _Window(loaded, target)
         controller = ProjectController(window)
         controller._schedule_catalog_maintenance(target, loaded)
-        qtbot.waitUntil(lambda: len(seen) == 3, timeout=3_000)
+        qtbot.waitUntil(lambda: len(seen) == 4, timeout=3_000)
         assert all(off_gui for _name, off_gui in seen), seen
     finally:
         reset_catalog()
