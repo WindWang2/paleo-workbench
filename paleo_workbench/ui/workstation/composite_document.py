@@ -978,6 +978,11 @@ class CompositeDocument(QWidget):
         self.panels_button.setText("面板")
         self.panels_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.panels_button.setToolTip("面板显隐、布局预设、全部浮动 / 停靠")
+        # IconOnly 样式隐藏了 text，屏幕阅读器需要显式名（V6 audit G-P1-3）。
+        self.panels_button.setAccessibleName("面板")
+        self.panels_button.setAccessibleDescription(
+            "面板显隐、布局预设、全部浮动 / 停靠"
+        )
         self._panels_menu = QMenu(self.panels_button)
         self.panels_button.setMenu(self._panels_menu)
         self.panels_button.setPopupMode(

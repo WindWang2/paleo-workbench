@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 
 from paleo_workbench.project.models import ProjectDocument
@@ -129,22 +129,34 @@ class PaleoWorkbenchWindow(QMainWindow):
 
         Parented to ``self`` (the window) so they survive shell rebuilds; the
         callbacks read the current ``self.app_shell`` at call-time.
+
+        V6（audit G-P1-5）：经 shortcuts.register_shortcut 创建并登记——
+        此前直接 QShortcut 之外再 register_meta 一份元数据，同一键序存在
+        两个事实来源，冲突检测覆盖不到真实绑定。注册表按 id 替换旧绑定，
+        同键序始终只有一个活动 QShortcut。
         """
         # Interactive save runs its heavy I/O off the GUI thread (#1040).
-        QShortcut(QKeySequence("Ctrl+S"), self, self._on_save_project)
-        QShortcut(QKeySequence("Ctrl+N"), self, self._on_new_project)
-        QShortcut(QKeySequence("Ctrl+O"), self, self._on_open_project)
-        QShortcut(QKeySequence("Ctrl+F"), self, self._shortcut_focus_search)
-        # V5-U6：登记进中央快捷键注册表（palette 展示 + 冲突检测可见）。
-        from paleo_workbench.ui.shortcuts import ShortcutSpec, register_meta
+        from paleo_workbench.ui.shortcuts import ShortcutSpec, register_shortcut
 
-        for spec in (
-            ShortcutSpec(id="core:project.save", key="Ctrl+S", label="保存工程"),
-            ShortcutSpec(id="core:project.new", key="Ctrl+N", label="新建工程"),
-            ShortcutSpec(id="core:project.open", key="Ctrl+O", label="打开工程"),
-            ShortcutSpec(id="core:search.focus", key="Ctrl+F", label="聚焦搜索"),
+        for spec, callback in (
+            (
+                ShortcutSpec(id="core:project.save", key="Ctrl+S", label="保存工程"),
+                self._on_save_project,
+            ),
+            (
+                ShortcutSpec(id="core:project.new", key="Ctrl+N", label="新建工程"),
+                self._on_new_project,
+            ),
+            (
+                ShortcutSpec(id="core:project.open", key="Ctrl+O", label="打开工程"),
+                self._on_open_project,
+            ),
+            (
+                ShortcutSpec(id="core:search.focus", key="Ctrl+F", label="聚焦搜索"),
+                self._shortcut_focus_search,
+            ),
         ):
-            register_meta(spec)
+            register_shortcut(self, spec, callback)
 
     def _shortcut_focus_search(self) -> None:
         """Focus the active search box.

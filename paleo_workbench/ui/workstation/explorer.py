@@ -116,6 +116,9 @@ class WorkstationExplorer(QFrame):
         refresh.setObjectName("WorkstationChromeButton")
         refresh.setIcon(workstation_icon("refresh-cw.svg"))
         refresh.setToolTip("刷新")
+        # 图标按钮无文字，屏幕阅读器需要显式名（V6 audit G-P1-3）。
+        refresh.setAccessibleName("刷新")
+        refresh.setAccessibleDescription("刷新资源树")
         refresh.clicked.connect(self.refresh)
         header.addWidget(refresh)
         outer.addLayout(header)

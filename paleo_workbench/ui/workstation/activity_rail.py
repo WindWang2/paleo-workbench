@@ -85,6 +85,9 @@ class ActivityRail(QFrame):
         collapse.setObjectName("WorkstationRailCollapseButton")
         collapse.setIcon(workstation_icon("chevrons-left.svg"))
         collapse.setToolTip("折叠资源管理器")
+        # 图标按钮无文字，屏幕阅读器需要显式名（V6 audit G-P1-3）。
+        collapse.setAccessibleName("折叠资源管理器")
+        collapse.setAccessibleDescription("折叠或展开左侧资源管理器面板")
         collapse.clicked.connect(self.collapse_requested.emit)
         # 折叠钮之下还有布局尾项；密度切换时整列重算（见 _apply_density_metrics）
         layout.addWidget(collapse)
@@ -105,6 +108,8 @@ class ActivityRail(QFrame):
         if expanded:
             self.collapse_button.setIcon(workstation_icon("chevrons-left.svg"))
             self.collapse_button.setToolTip("折叠资源管理器")
+            self.collapse_button.setAccessibleName("折叠资源管理器")
         else:
             self.collapse_button.setIcon(workstation_icon("chevrons-right.svg"))
             self.collapse_button.setToolTip("展开资源管理器")
+            self.collapse_button.setAccessibleName("展开资源管理器")
