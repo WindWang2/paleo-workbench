@@ -6,25 +6,25 @@
 
 - [x] 三路源码审计完成（科学链/制图层/构建环境），结论落在 baseline.md
 - [x] baseline/target-state/decisions/verification 四件套建立
-- [ ] 前置缺陷修复：setup.py `resource_database` NameError（native/qgis_render_bridge/setup.py:156,:229）（tests: 构建日志 + 桥 import 成功）
+- [x] 前置缺陷修复：setup.py `resource_database` NameError（commit 89601913；构建日志 + 桥 import + tests/test_qgis_layout_export.py 全套运行）
 
 ## M1 — 单因素图统一产品模型
 
-- [ ] `FactorMapSpec` 显式输入契约：factor identity/unit/源版本/target horizon/bounds+mask/faults/method/parameters，可序列化、可指纹
-- [ ] `FactorMapResult`（或等价扩展 FactorGridResult）显式输出：grid/uncertainty/contour/classified zones/QC/provenance/map layers
-- [ ] 主管线（workflow/factor_interpolation.py）unit 贯通：FactorGridResult.unit 不再为 None（当因子有已知 unit）（tests/test_factor_interpolation*.py 扩展）
-- [ ] 派生因子（砂地比/厚度）带 derived 溯源标记（provenance 字段记录 derivation rule），不再无标记混入
-- [ ] 禁止 `z → Rs → Ht` 隐式 fallback 保持废除（回归测试存在且通过）
-- [ ] 覆盖因子族抽查：sandstone thickness / formation thickness / sand ratio / porosity / probability / paleo-water-depth（FACTOR_DEFAULTS 契约测试）
+- [x] `FactorMapSpec` 显式输入契约：factor identity/unit/源版本/target horizon/bounds+mask/faults/method/parameters，可序列化、可指纹（workflow/factor_map.py；tests/test_factor_map_product_model.py）
+- [x] `FactorMapOutput`（等价扩展，包装 FactorGridResult）显式输出：grid/uncertainty/QC/provenance/map layers（tests/test_factor_map_product_model.py::test_factor_map_output_assembles_qc_and_provenance）
+- [x] 主管线 unit 贯通：四处构造点全部传入（tests/test_factor_map_product_model.py::test_task_pipeline_propagates_known_unit_to_grid_and_metrics）
+- [x] 派生因子带 derived 溯源标记（tests/test_factor_map_product_model.py::test_extract_factors_derived_sand_ratio_carries_provenance）
+- [x] 禁止 `z → Rs → Ht` 隐式 fallback 保持废除（tests/test_factor_map_product_model.py::test_no_implicit_z_to_rs_to_ht_fallback）
+- [x] 覆盖因子族抽查含 probability/paleo-water-depth（tests/test_factor_map_product_model.py::test_factor_unit_authority_covers_goal_factor_families）
 
 ## M2 — 插值工作站 V2
 
-- [ ] 统一精度评估层：LOO/k-fold CV 对 IDW/constrained IDW/kriging/spline/directional trend 产出 RMSE/MAE/bias/R²（tests/test_interpolation_evaluation.py）
-- [ ] residual map（站点残差向量/残差点层）可生成并挂入 MapDocument
-- [ ] 克里金诊断整合：empirical variogram + model params + variance min/max + fit 诊断可从一次运行导出（tests/test_kriging_diagnostics.py）
-- [ ] IDW 语义收敛决策落地（文档化 D 决策 + 单一权威路径或显式参数化差异），不再静默双轨
-- [ ] CV 计算与显示分离（评估结果是数据对象，渲染是图层的事）
-- [ ] 不确定性可视化：variance/uncertainty 图层可挂入 MapDocument（kriging 方差 + IDW 距离代理）
+- [x] 统一精度评估层：空间 K 折 CV（注入生产镜像 run_fold）+ 克里金精确 LOO 产出 RMSE/MAE/bias/R²（workflow/interpolation_evaluation.py + workflow/factor_interpolation.py::cross_validate_factor_task；tests/test_interpolation_evaluation.py）
+- [x] residual map：surface_check/surface_residuals + residual_features GeoJSON 点层（tests/test_interpolation_evaluation.py::test_surface_residuals_labelled_in_sample）
+- [x] 克里金诊断整合：kriging_diagnostics（经验变差函数 + range/sill/nugget，defaulted 标注）（tests/test_interpolation_evaluation.py::test_kriging_diagnostics_reports_variogram_fit）
+- [x] IDW 双轨决策落地（decisions.md D4：任务管线 geoviz IDW 为权威，kNN 变体显式标注）
+- [x] CV 计算与显示分离：评估返回 CrossValidationReport/EvaluationMetrics 数据对象；residual_features 仅生成 GeoJSON 特征（tests/test_interpolation_evaluation.py::test_residual_features_are_geojson_points）
+- [x] 不确定性可视化：variance grid + M5 融合置信度格网可构建为 FactorGridResult（unit="1"）挂图层（tests/test_factor_fusion.py::test_variance_propagation_on_common_support）
 
 ## M3 — Boundary / CRS / Unit 科学正确性
 

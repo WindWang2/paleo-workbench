@@ -240,6 +240,15 @@ class MapProductExportProvider:
         width = int(parameters.get("width", 2400))
         height = int(parameters.get("height", 1800))
         dpi = float(parameters.get("dpi", 300.0))
+        # D2: production exports prefer the QGIS renderer whenever the probe
+        # passes; a fallback export is legal in headless environments but is
+        # recorded in the artifact metadata, never silent.
+        try:
+            from paleo_workbench.mapping.map_render_backend import qgis_backend_probe
+
+            prefer_qgis = bool(qgis_backend_probe())
+        except Exception:
+            prefer_qgis = False
         spec = MapExportSpec(
             snapshot=snapshot,
             extent=tuple(float(v) for v in extent),
@@ -248,11 +257,11 @@ class MapProductExportProvider:
             dpi=dpi,
             decorations={},
             path=str(output_path),
-            prefer_native_renderer=False,
+            prefer_native_renderer=prefer_qgis,
         )
         context.report_progress(0.2, "渲染图面")
         try:
-            render_and_save_map_export(spec)
+            export_report = render_and_save_map_export(spec)
         except Exception as exc:
             raise ProviderExecutionError(self.descriptor.provider_id, exc) from exc
         context.report_progress(1.0, "导出完成")
@@ -282,10 +291,26 @@ class MapProductExportProvider:
                     kind="file",
                     version=version,
                     path=str(output_path),
-                    metadata={"width": width, "height": height, "dpi": dpi},
+                    metadata={
+                        "width": width,
+                        "height": height,
+                        "dpi": dpi,
+                        "renderer": export_report.get("engine", "unknown"),
+                        "degraded": bool(export_report.get("degraded")),
+                        **(
+                            {
+                                "degraded_reason": export_report["degraded_reason"]
+                            }
+                            if export_report.get("degraded_reason")
+                            else {}
+                        ),
+                    },
                 )
             ],
-            diagnostics={"bytes": output_path.stat().st_size if output_path.exists() else 0},
+            diagnostics={
+                "bytes": output_path.stat().st_size if output_path.exists() else 0,
+                "renderer": export_report.get("engine", "unknown"),
+            },
         )
 
 

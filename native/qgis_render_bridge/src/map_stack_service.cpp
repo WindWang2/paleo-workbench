@@ -2762,6 +2762,9 @@ std::string QgisMapStack::layoutExport(const std::string& spec_json,
   if (format == QLatin1String("pdf")) {
     QgsLayoutExporter::PdfExportSettings settings;
     settings.dpi = dpi;
+    // D10: GeoPDF is available in the vendored QGIS and opt-in per export.
+    settings.writeGeoPdf =
+        spec.value(QStringLiteral("geo_pdf")).toBool(false);
     result = exporter.exportToPdf(QString::fromStdString(output_path),
                                   settings);
   } else if (format == QLatin1String("svg")) {

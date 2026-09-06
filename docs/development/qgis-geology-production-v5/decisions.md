@@ -72,9 +72,9 @@ _Avoid_: 任何触碰 vendored QGIS 源的行为；跨 worktree 重编。
 
 _Avoid_: 全量回归先行；并行重型构建。
 
-## D10 — GeoPDF 策略（占位，M11 时裁决）
+## D10 — GeoPDF 策略（M11 实测裁决）
 
-裁决：M11 期间实测 QGIS 4.2 QgsLayoutExporter GeoPDF 能力 + 本地 PDF 校验工具可用性；可靠则纳入 `pdf_geo` 输出选项，否则在 verification.md 记录证据并仅在文档中标注"未启用 GeoPDF"。不伪造支持。
+裁决：GeoPDF 桥接已实现（`layoutExport` spec 的 `geo_pdf: true` → `PdfExportSettings.writeGeoPdf`），但在本机 vendored QGIS 4.2 offscreen 环境实测**失败**（`ExportResult=PrintError(4)`），同参数普通 PDF 成功（%PDF 头 + 7.4KB 内容）。因此：GeoPDF 保持 opt-in 且失败必须显式抛出（绝不静默产出伪 GeoPDF）；默认导出路径不启用；tests/test_export_parity.py::test_geopdf_capability_is_explicit_never_fake 将两种结果都纳入契约（成功→真 PDF，失败→响亮报错且无残留文件）。环境具备能力后无需改代码即可开启。
 
 ## D11 — 派生因子溯源标记
 
