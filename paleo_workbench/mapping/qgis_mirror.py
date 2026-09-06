@@ -9,7 +9,7 @@ _GEOMETRY_TYPE = {"Point": "Point", "MultiPoint": "Point",
 
 
 def mirror_snapshot_to_stack(
-    stack, canvas_address, snapshot, diags=None
+    stack, canvas_address, snapshot, diags=None, *, groups: bool = False
 ) -> tuple[list[str], list[str], list[str]]:
     """Mirror vector layers into the QGIS project (incremental reconcile).
 
@@ -19,6 +19,10 @@ def mirror_snapshot_to_stack(
     swallowed — a dropped layer or a failed remove/order/refresh previously
     left the mirror silently diverging from the document while
     ``backend_status_changed`` still reported a healthy backend.
+
+    V5 ``groups=True``（分层编图工作区）：跳过 root 平铺顺序推送——组结构、
+    图层放置与组可见性由 ``LayerGroupController`` 经 group API 增量
+    reconcile（同一 QGIS 树权威，绝不另建第二棵树）。
     """
 
     def _sink(doc_id: str, message: str) -> None:
@@ -112,11 +116,12 @@ def mirror_snapshot_to_stack(
     except Exception as exc:
         failures.append(f"remove_stale: {exc}")
         _sink("<tail>", str(exc))
-    try:
-        stack.set_mirror_layer_order(seen)
-    except Exception as exc:
-        failures.append(f"set_order: {exc}")
-        _sink("<tail>", str(exc))
+    if not groups:
+        try:
+            stack.set_mirror_layer_order(seen)
+        except Exception as exc:
+            failures.append(f"set_order: {exc}")
+            _sink("<tail>", str(exc))
     try:
         stack.refresh_canvas(canvas_address)
     except Exception as exc:

@@ -13,6 +13,9 @@ class QgsMapTool;
 class QgsMapToolDigitizeFeature;
 class QgsVectorLayer;
 class QgsProject;
+class QgsLayerTreeNode;
+class QgsLayerTreeGroup;
+class QModelIndex;
 using QgsFeatureId = long long;
 
 namespace pwb::qgis_render {
@@ -73,8 +76,40 @@ public:
 
   // 树变更回调：JSON 批次 {"visibility":{doc:bool},"order":[doc...],"renames":{doc:name}}，
   // 只含本次实际变更；程序化 reconcile（suppress 计数 >0）期间不触发。
+  // V5 分组扩展（schema 2）：payload 追加 "schema":2 与 "events":[{type,...}]
+  // typed 事件（layer/group 的 visibility/rename）与 "tree":[...] 全层级
+  // 结构快照（结构变化时携带，覆盖 move/group-create/group-delete）。
   void setTreeChangeCallback(std::uintptr_t tree_view,
                              std::function<void(const std::string&)> callback);
+
+  // 组节点展开态回调（V5 StageViewState 持久化）：callback(node_id, expanded)；
+  // node_id 为 group_id（组）或 doc_id（图层的图例行）。
+  void setTreeExpandCallback(std::uintptr_t tree_view,
+                             std::function<void(const std::string&, bool)> callback);
+
+  // ---------------------------------------------------------------- V5 groups
+  // QGIS 原生 QgsLayerTreeGroup 管理：稳定 group id 经 custom property
+  // "pwb/group_id" 寻址（与显示名解耦）。parent_group_id 为空串 = 根。
+  // group API 全部程序化（SuppressGuard），用户树操作经 tree change 回调回声。
+  bool groupExists(const std::string& group_id) const;
+  bool upsertGroup(const std::string& group_id, const std::string& name,
+                   const std::string& parent_group_id);
+  // 移除不在列表中的组；**绝不移动/删除组内图层**——子节点先上提到父组，
+  // 空组才删除（QgsLayerTreeRegistryBridge 不会因此注销图层）。
+  // 返回移除的组数量。
+  int removeGroupsExcept(const std::vector<std::string>& group_ids);
+  void renameGroup(const std::string& group_id, const std::string& name);
+  void setGroupVisibility(const std::string& group_id, bool visible);
+  // 把镜像图层节点放入目标组（group_id 空 = 根）的 index 位置；index 越界钳制。
+  void moveLayerToGroup(const std::string& doc_id, const std::string& group_id, int index);
+  // 组重挂（禁止移入自身后代，违反抛 invalid_argument）。
+  void moveGroup(const std::string& group_id, const std::string& parent_group_id, int index);
+  // 树结构快照（观察）：[{"type":"group","id":gid,"name":n,"visible":bool,
+  // "children":[...]},{"type":"layer","id":doc_id,"name":n,"visible":bool}]，
+  // 深度优先、自上而下（渲染序）。无 pwb/group_id 的组获得稳定 "user_<uuid>" id。
+  std::string treeSnapshotJson() const;
+  // 程序化展开/收起组节点（恢复 StageViewState）。
+  void setGroupExpanded(std::uintptr_t tree_view, const std::string& node_id, bool expanded);
 
   // 右键菜单：C++ 侧组装（QGIS 默认动作 + 自定义动作键），自定义动作触发
   // callback(action_key, doc_id)。重设会替换旧 provider（view 接管所有权）。
@@ -215,10 +250,20 @@ private:
   void eraseMirrorByQgisId(const std::string& qgis_id);
   void eraseMirrorByDocId(const std::string& doc_id);
   void cleanupTreeViewState(std::uintptr_t tree_view);
-  void onTreeDataChanged(std::uintptr_t tree, int row, bool check_role, bool display_role);
-  void onTreeOrderChanged(std::uintptr_t tree);
+  void onTreeDataChanged(std::uintptr_t tree, const QModelIndex& topLeft,
+                         bool check_role, bool display_role);
+  void onTreeOrderChanged(std::uintptr_t tree, bool structure);
   void scheduleTreeChangeFlush(std::uintptr_t tree);
   void flushTreeChange(std::uintptr_t tree);
+  // V5 groups 内部：组寻址 + 树 JSON 组装（深度优先、自上而下）。
+  QgsLayerTreeGroup* findGroupByGroupId(const std::string& group_id) const;
+  // 节点级 expandedChanged 接线（V5 StageViewState）。
+  void wireNodeExpandSignalsRecursively(QgsLayerTreeNode* node);
+  void wireNodeExpandSignal(QgsLayerTreeNode* node);
+  // applyProjectXml 内部（调用方已持 SuppressGuard）的轻量组恢复。
+  void upsertGroupUnderLock(const std::string& group_id, const std::string& name);
+  void moveLayerToGroupUnderLock(const std::string& doc_id,
+                                 const std::string& group_id, int index);
 };
 
 }  // namespace pwb::qgis_render
