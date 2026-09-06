@@ -274,6 +274,14 @@ def test_velocity_assumption_twt_to_depth_is_marked_approximate():
 
 def test_hub_refuses_z_twt_without_declared_assumption():
     hub = CoordinateTransformHub()
+    # V6 §8: bind grid geometry so this test isolates the VELOCITY gate
+    hub.configure_seismic_grid(
+        origin=(100.0, 200.0),
+        il_step=(10.0, 0.0),
+        xl_step=(0.0, 10.0),
+        il_min=100,
+        xl_min=200,
+    )
     with pytest.raises(ValueError, match="no velocity assumption declared"):
         hub.seismic_to_map(100, 200, 1000.0)
     with pytest.raises(ValueError, match="no velocity assumption declared"):

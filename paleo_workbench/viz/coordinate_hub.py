@@ -211,6 +211,12 @@ class CoordinateTransformHub:
         self._seismic_xl_step: tuple[float, float] = (0.0, 10.0)
         self._il_min: int = 100
         self._xl_min: int = 200
+        # V6 §8 (P1-6): the numeric defaults above are NOT knowledge. Until a
+        # real survey is bound, bin-grid geometry is UNKNOWN and the map↔
+        # seismic conversions refuse — answering from (100, 200)-origin /
+        # 10 m-bin defaults made cursor routing look authoritative on
+        # invented geometry.
+        self._grid_configured: bool = False
         # Velocity is NOT defaulted (linked-interpretation L1): a constant
         # velocity is an explicit assumption and z↔TWT conversions refuse to
         # run without one (``velocity_assumption_required``), so the old
@@ -334,7 +340,10 @@ class CoordinateTransformHub:
         if twt is None:
             return None
         x, y, _tvd = self.well_depth_to_map(well_id, md)
-        il, xl = self.map_to_seismic_xy(x, y)
+        try:
+            il, xl = self.map_to_seismic_xy(x, y)
+        except ValueError:
+            return None  # no grid bound: (IL, XL) is unknown, not default
         return (il, xl, float(twt))
 
     def registered_well_ids(self) -> tuple[str, ...]:
@@ -451,9 +460,11 @@ class CoordinateTransformHub:
     # Seismic Grid Geometry & Transformations
     # -------------------------------------------------------------------------
 
+    _GRID_UNSET = object()  # sentinel: the no-argument reset call
+
     def configure_seismic_grid(
         self,
-        origin: tuple[float, float] = (100.0, 200.0),
+        origin: tuple[float, float] | object = _GRID_UNSET,
         il_step: tuple[float, float] = (10.0, 0.0),
         xl_step: tuple[float, float] = (0.0, 10.0),
         il_min: int = 100,
@@ -474,6 +485,14 @@ class CoordinateTransformHub:
         if velocity is not None and velocity <= 0.0:
             raise ValueError(f"Velocity must be positive, got {velocity}")
         with self._lock:
+            if origin is CoordinateTransformHub._GRID_UNSET:
+                # Reset call (project clear): geometry goes back to UNKNOWN —
+                # the numeric defaults are placeholders, never answers.
+                self._grid_configured = False
+                self._velocity = None
+                self._crs = None
+                return
+            self._grid_configured = True
             self._seismic_origin = (float(origin[0]), float(origin[1]))
             self._seismic_il_step = (float(il_step[0]), float(il_step[1]))
             self._seismic_xl_step = (float(xl_step[0]), float(xl_step[1]))
@@ -486,6 +505,20 @@ class CoordinateTransformHub:
     def seismic_crs(self) -> str | None:
         """CRS tag of the bin-grid map space (None = unlabelled)."""
         return self._crs
+
+    @property
+    def grid_configured(self) -> bool:
+        """Whether a real survey grid has been bound (False = UNKNOWN geometry)."""
+        with self._lock:
+            return self._grid_configured
+
+    def _require_grid(self) -> None:
+        if not self._grid_configured:
+            raise ValueError(
+                "no seismic grid configured: map↔seismic conversion refused "
+                "(bind a survey via configure_seismic_grid — the default "
+                "geometry is a placeholder, not knowledge)"
+            )
 
     def velocity_assumption(self) -> float | None:
         """The explicit velocity assumption, or None when none is declared."""
@@ -520,6 +553,7 @@ class CoordinateTransformHub:
 
     def seismic_to_map_xy(self, il: int | float, xl: int | float) -> tuple[float, float]:
         """(inline, crossline) → map (x, y). Pure bin-grid geometry."""
+        self._require_grid()
         dil = float(il) - self._il_min
         dxl = float(xl) - self._xl_min
         x = (
@@ -536,6 +570,7 @@ class CoordinateTransformHub:
 
     def map_to_seismic_xy(self, x: float, y: float) -> tuple[int, int]:
         """Map (x, y) → nearest (inline, crossline). Pure bin-grid geometry."""
+        self._require_grid()
         rel_x = float(x) - self._seismic_origin[0]
         rel_y = float(y) - self._seismic_origin[1]
 
