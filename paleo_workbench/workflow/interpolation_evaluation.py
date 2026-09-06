@@ -208,6 +208,28 @@ class CrossValidationReport:
         }
 
 
+def leave_one_well_out_folds(
+    points: Sequence[Mapping[str, Any]],
+) -> list[np.ndarray]:
+    """Fold indices grouping samples by WELL identity (V6 §11/§13).
+
+    Every fold holds out ALL samples of one well — the honest scheme when
+    well-level bias (not point noise) is the question: an interpolator can
+    look good under point-wise folds while failing to transfer across
+    wells. Wells are keyed by ``well_id`` (falling back to ``name``); wells
+    with neither are treated as anonymous single-sample wells.
+    """
+    folds_by_key: dict[str, list[int]] = {}
+    anonymous = 0
+    for index, pt in enumerate(points):
+        key = str(pt.get("well_id") or pt.get("name") or "").strip()
+        if not key:
+            anonymous += 1
+            key = f"__anonymous_{index}"
+        folds_by_key.setdefault(key, []).append(index)
+    return [np.array(idx, dtype=int) for idx in folds_by_key.values()]
+
+
 def cross_validate_surface(
     points: Sequence[Mapping[str, Any]],
     *,

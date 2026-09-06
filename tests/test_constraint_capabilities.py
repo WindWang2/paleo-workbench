@@ -32,9 +32,12 @@ class TestMatrix:
             support, _ = caps.for_kind(kind)
             assert support.value == "supported"
 
-    def test_kriging_supports_no_constraints(self):
+    def test_kriging_supports_anisotropy_only(self):
+        """V6 §11 upgraded kriging: anisotropic variogram honored; faults,
+        boundary rings and per-sample trend weights remain unsupported."""
         caps = capabilities_for_method("克里金")  # UI label alias
-        for kind in ALL_KINDS:
+        assert caps.for_kind(ConstraintKind.ANISOTROPY)[0].value == "supported"
+        for kind in ALL_KINDS - {ConstraintKind.ANISOTROPY}:
             support, _ = caps.for_kind(kind)
             assert support.value == "unsupported", kind
 

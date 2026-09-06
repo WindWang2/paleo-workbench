@@ -577,6 +577,20 @@ def apply_interpolation_to_task(
             source_refs=task.input_resource_ids,
         )
     else:
+        # V6 §11: explicit variogram controls travel from the task/UI —
+        # model choice, range, nugget (None = auto-fit, which the engine
+        # now REPORTS instead of silently performing).
+        variogram_kwargs: dict[str, Any] = {}
+        for src_key, dst_key in (
+            ("variogram_model", "variogram_model"),
+            ("variogram_range", "variogram_range"),
+            ("variogram_nugget", "variogram_nugget"),
+            ("range_m", "variogram_range"),
+            ("nugget", "variogram_nugget"),
+        ):
+            value = params.get(src_key)
+            if value is not None:
+                variogram_kwargs[dst_key] = value
         result = interpolate_factor_grid(
             points,
             method=engine_method,
@@ -587,6 +601,7 @@ def apply_interpolation_to_task(
             semi_major=a_axis,
             semi_minor=b_axis,
             cancellation_token=cancellation_token,
+            **variogram_kwargs,
         )
         grid_result = FactorGridResult.from_engine_dict(
             result,

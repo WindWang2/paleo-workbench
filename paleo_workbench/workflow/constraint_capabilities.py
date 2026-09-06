@@ -108,7 +108,13 @@ _METHODS: dict[str, MethodCapabilities] = {
     "kriging": MethodCapabilities(
         method="kriging",
         label="普通克里金",
-        support={},  # isotropic ordinary kriging honors no geological constraint
+        support={
+            ConstraintKind.ANISOTROPY: (
+                Support.SUPPORTED,
+                "geometric anisotropy: azimuth + major/minor ratio via the "
+                "anisotropic variogram transform (V6 §11)",
+            ),
+        },
         prerequisites=("≥3 non-collocated samples",),
     ),
     "spline": MethodCapabilities(
