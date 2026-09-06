@@ -104,3 +104,16 @@
   pre-decoration, pre-save; scheduler QUEUED-duplicate supersede (cancelled
   request never hangs the next; RUNNING refusal message honest)
 - Tests: tests/test_runtime_session_and_cancel.py (6) + regressions green
+
+## PHASE 9 complete — governor convergence (#1225)
+- fast_grid (vendored IDW): REMOVED all runtime OMP/OPENBLAS/MKL/NUMEXPR/
+  VECLIB env mutation; threadpoolctl now used as a SCOPED context per batch
+  (restored after; was called without with — global forever); single-thread
+  path keeps full-core BLAS but scoped; pool width stays budget-derived
+  (ComputeSettings.cpu_workers ← governance set_cpu_percent at bootstrap)
+- workflow DAG _drive_parallel: pool width = min(spec max_concurrency,
+  clamp_workers('background.compute')) — spec value is upper bound only
+- interchange batch: constructor clamp consults clamp_workers('background.io')
+- Tests: tests/test_resource_governance_convergence.py (env-untouched,
+  scoped-limit restore, DAG clamp contract, batch governed, import-time clean)
+- Pre-existing main failure #5 confirmed out-of-scope (kriging dispatch #1227)
