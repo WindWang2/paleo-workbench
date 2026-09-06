@@ -142,7 +142,10 @@ class MappingPage(QWidget):
         self._pending_export: dict | None = None
         # Attribute-table record cache keyed by (layer, data revision) so
         # selection-only tool operations never reconvert every feature.
-        self._attribute_table_records: tuple[object, int, list[dict[str, Any]]] | None = None
+        # (layer, packed revision, records, session, {feature_id: records index})
+        # 缓存上次属性表绑定；session 身份入键：回滚后新会话的修订可与旧
+        # 缓存碰撞（data_revision 未动），身份比对挡掉过期记录复用。
+        self._attribute_table_records: tuple[object, int, list[dict[str, Any]], object, dict[str, int]] | None = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -1795,16 +1798,66 @@ class MappingPage(QWidget):
         layer = authoring.active_layer
         session = layer.edit_session
         revision = (layer.data_revision << 32) + (session.revision if session is not None else 0)
-        source = session.features() if session is not None else layer.features()
         cached = self._attribute_table_records
-        if cached is None or cached[0] is not layer or cached[1] != revision:
-            records = [
-                feature_to_record(feature, kind=authoring.active_kind) for feature in source
-            ]
-            self._attribute_table_records = (layer, revision, records)
-            self.attribute_table.set_layer_features(records, selected_ids=layer.selection)
+        if (
+            cached is not None
+            and cached[0] is layer
+            and cached[1] == revision
+            and cached[3] is session
+        ):
+            self.attribute_table.set_selected_ids(layer.selection)
             return
-        self.attribute_table.set_selected_ids(layer.selection)
+        # 差量路径（C-P0-3）：同一图层的编辑会话内修订前进时，用会话日志
+        # 只重建受影响要素的记录，不清空重灌要素下拉。结构变化（图层切换、
+        # 要素增删、会话更替、日志跨度不可恢复）仍走下方全量重建。
+        if (
+            cached is not None
+            and cached[0] is layer
+            and cached[3] is session
+            and session is not None
+            and self._sync_attribute_table_incrementally(authoring, layer, session, revision)
+        ):
+            return
+        source = session.features() if session is not None else layer.features()
+        records = [
+            feature_to_record(feature, kind=authoring.active_kind) for feature in source
+        ]
+        self._attribute_table_records = (
+            layer,
+            revision,
+            records,
+            session,
+            {str(record.get("id") or ""): index for index, record in enumerate(records)},
+        )
+        self.attribute_table.set_layer_features(records, selected_ids=layer.selection)
+
+    def _sync_attribute_table_incrementally(
+        self, authoring, layer, session, revision: int
+    ) -> bool:
+        """会话内差量刷新属性表（C-P0-3）；返回 False 时调用方走全量重建。"""
+        cached = self._attribute_table_records
+        index: dict[str, int] = cached[4]
+        entries = session.changes_since(cached[1] & 0xFFFFFFFF)
+        if entries is None:
+            return False  # 撤销跨度 / 日志裁剪不可恢复 → 全量
+        touched: set[str] = set()
+        for ids in entries:
+            touched.update(ids)
+        if not touched or not touched <= index.keys():
+            return False  # 新增要素（id 集变化）→ 全量
+        records = cached[2]
+        rebuilt: list[dict[str, Any]] = []
+        for feature_id in sorted(touched):
+            try:
+                feature = session.feature(feature_id)
+            except KeyError:
+                return False  # 要素已被删除 → 全量
+            record = feature_to_record(feature, kind=authoring.active_kind)
+            records[index[feature_id]] = record
+            rebuilt.append(record)
+        self._attribute_table_records = (layer, revision, records, session, index)
+        self.attribute_table.update_layer_features(rebuilt, selected_ids=layer.selection)
+        return True
 
     def _on_attribute_feature_selected(self, feature_id: str) -> None:
         authoring = self._authoring_document

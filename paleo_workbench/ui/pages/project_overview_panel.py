@@ -117,17 +117,26 @@ class ProjectOverviewPanel(QWidget):
             1 for well in wells if coordinate_status_is_flagged(well.coordinate_status)
         )
 
+        # C-P0-1: counts=None 表示计数未就绪(后台聚合统计中),聚合来源不含
+        # 完整性探测时 integrity_known=False —— 两种情况都显示 "—" 占位,
+        # 不伪造 0。
+        counts_known = counts is not None
         stages = dict(getattr(counts, "stages", {}) or {})
+        integrity_known = counts_known and getattr(counts, "integrity_known", True)
         integrity = dict(getattr(counts, "integrity", {}) or {})
         self._values["wells"].setText(str(len(wells)))
         self._values["surveys"].setText(str(len(surveys)))
-        self._values["raw"].setText(str(stages.get("raw", 0)))
+        self._values["raw"].setText(str(stages.get("raw", 0)) if counts_known else "—")
         self._values["derived"].setText(
             str(stages.get("derived", 0) + stages.get("intermediate", 0))
+            if counts_known
+            else "—"
         )
-        self._values["output"].setText(str(stages.get("output", 0)))
+        self._values["output"].setText(
+            str(stages.get("output", 0)) if counts_known else "—"
+        )
         missing = integrity.get("missing", 0) + integrity.get("modified", 0)
-        self._values["issues"].setText(str(missing))
+        self._values["issues"].setText(str(missing) if integrity_known else "—")
         self._values["unresolved"].setText(str(unresolved + bad_coords))
 
         runs = list(getattr(project, "compilation_runs", None) or [])
