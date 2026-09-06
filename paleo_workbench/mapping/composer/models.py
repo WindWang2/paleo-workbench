@@ -33,6 +33,10 @@ class ElementType(str, Enum):
     FACIES_LEGEND = "facies_legend"
     LITHOLOGY_LEGEND = "lithology_legend"
     STRAT_LABELS = "strat_labels"
+    # M6 补齐组件：副标题 / 测井图例 / 剖面占位（有真实数据才渲染内容）。
+    SUBTITLE = "subtitle"
+    WELL_LEGEND = "well_legend"
+    PROFILE = "profile"
 
 
 # Serializable property keys per element type. Everything else still round-
@@ -60,6 +64,9 @@ ELEMENT_PROPERTY_KEYS: dict[ElementType, tuple[str, ...]] = {
     ElementType.FACIES_LEGEND: ("title", "items"),
     ElementType.LITHOLOGY_LEGEND: ("title", "items"),
     ElementType.STRAT_LABELS: ("text", "font_size"),
+    ElementType.SUBTITLE: ("text", "font_size", "align", "color"),
+    ElementType.WELL_LEGEND: ("title", "items"),
+    ElementType.PROFILE: ("section_ref", "title"),
 }
 
 

@@ -20,7 +20,7 @@ from paleo_workbench.ui.panel_float_controller import FloatController
 from paleo_workbench.ui.pages.action_header import ActionHeader
 from paleo_workbench.ui.pages.qc_issue_table import QCIssueTable
 from paleo_workbench.ui.pages.result_summary import ResultSummary
-from paleo_workbench.workflow.qc import active_quality_reports, run_basic_qc
+from paleo_workbench.workflow.qc import active_quality_reports, run_map_qc
 from paleo_workbench.workflow.qc_report_export import export_quality_report_json
 from paleo_workbench.workflow.versioning import finalize_map_version
 
@@ -186,7 +186,7 @@ class ReviewExportPage(QWidget):
             return
         ran = 0
         for doc in docs:
-            run_basic_qc(self._project, doc.id)
+            run_map_qc(self._project, doc.id)
             ran += 1
         self._refresh_from_project()
         self.reports_updated.emit()

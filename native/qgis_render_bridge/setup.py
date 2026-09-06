@@ -37,7 +37,8 @@ def _qt_include_dirs() -> list[str]:
         qt_inc = Path(prefix) / "include" / "qt6"
         if qt_inc.is_dir():
             dirs = [str(qt_inc)]
-            for sub in ("QtCore", "QtGui", "QtWidgets", "QtXml", "QtSvg"):
+            # QtPrintSupport: QgsLayoutExporter (M7 layout export) pulls QPrinter.
+            for sub in ("QtCore", "QtGui", "QtWidgets", "QtXml", "QtSvg", "QtPrintSupport"):
                 sub_path = qt_inc / sub
                 if sub_path.is_dir():
                     dirs.append(str(sub_path))
@@ -45,11 +46,13 @@ def _qt_include_dirs() -> list[str]:
 
     try:
         output = subprocess.check_output(
-            ["pkg-config", "--cflags-only-I", "Qt6Core", "Qt6Gui", "Qt6Widgets", "Qt6Xml", "Qt6Svg"], text=True
+            ["pkg-config", "--cflags-only-I", "Qt6Core", "Qt6Gui", "Qt6Widgets",
+             "Qt6Xml", "Qt6Svg", "Qt6PrintSupport"], text=True
         )
     except (OSError, subprocess.CalledProcessError) as exc:
         raise RuntimeError(
-            "Qt6Core, Qt6Gui, Qt6Widgets, Qt6Xml, and Qt6Svg pkg-config metadata is required for QGIS"
+            "Qt6Core, Qt6Gui, Qt6Widgets, Qt6Xml, Qt6Svg, and Qt6PrintSupport "
+            "pkg-config metadata is required for QGIS"
         ) from exc
     return [arg[2:] for arg in shlex.split(output) if arg.startswith("-I")]
 
@@ -148,6 +151,7 @@ def _qgis_core_include_dirs(build_dir: Path) -> list[str]:
 
 def _build_vendored_qgis() -> tuple[Path, Path]:
     build_dir = _vendor_build_dir()
+    resource_database = build_dir / "resources" / "srs.db"
     core_library = _vendor_core_library(build_dir)
     gui_library = _vendor_gui_library(build_dir)
     analysis_library = _vendor_analysis_library(build_dir)
@@ -263,7 +267,8 @@ def _extension() -> Pybind11Extension:
             str(HERE / "src" / "bindings.cpp"),
         ],
         include_dirs=[*_qgis_core_include_dirs(build_dir), *_qt_include_dirs()],
-        libraries=["Qt6Svg"],
+        # Qt6PrintSupport: QgsLayoutExporter (layout PDF export) links QPrinter.
+        libraries=["Qt6Svg", "Qt6PrintSupport"],
         extra_link_args=link_args,
         define_macros=[("PALEO_QGIS_PREFIX_PATH", f'\"{prefix}\"')],
         cxx_std=20,

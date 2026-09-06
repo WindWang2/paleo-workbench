@@ -67,8 +67,76 @@ class MapAttributeTable(QFrame):
         self._layer_features: dict[str, dict[str, Any]] = {}
         self._suppress_item_changed = False
         self._suppress_feature_selection = False
+        # M8: field-based filter + sort state over the bound layer.
+        self._filter_field: str = ""
+        self._filter_needle: str = ""
+        self._sort_field: str = ""
         self.table.itemChanged.connect(self._on_item_changed)
         self.feature_combo.currentIndexChanged.connect(self._on_feature_selected)
+
+    def _visible_feature_ids(self) -> list[str]:
+        """Feature ids surviving the current filter, in current sort order."""
+        ids = list(self._layer_features)
+        field, needle = self._filter_field, self._filter_needle.strip().lower()
+        if field and needle:
+            def _matches(feature_id: str) -> bool:
+                feature = self._layer_features[feature_id]
+                props = feature.get("properties") or {}
+                value = props.get(field, feature.get(field))
+                return needle in str(value or "").lower()
+
+            ids = [fid for fid in ids if _matches(fid)]
+        if self._sort_field:
+            def _sort_key(feature_id: str) -> str:
+                feature = self._layer_features[feature_id]
+                props = feature.get("properties") or {}
+                value = props.get(self._sort_field, feature.get(self._sort_field))
+                return str(value or "")
+
+            ids.sort(key=_sort_key)
+        return ids
+
+    def apply_filter(self, *, field: str = "", needle: str = "") -> list[str]:
+        """Restrict the feature selector to features matching a field substring.
+
+        Empty *field*/*needle* clears the filter. Case-insensitive substring
+        over ``properties[field]`` (falling back to the top-level key). The
+        current selection survives when it still matches; returns the visible
+        ids so hosts can mirror the filter to map highlighting.
+        """
+        self._filter_field = str(field or "")
+        self._filter_needle = str(needle or "")
+        visible = self._visible_feature_ids()
+        selected = str(self.feature_combo.currentData() or "")
+        self._suppress_feature_selection = True
+        self.feature_combo.clear()
+        self.feature_combo.addItem("— no selection —", "")
+        for feature_id in visible:
+            feature = self._layer_features[feature_id]
+            label = str(feature.get("name") or feature.get("text") or feature_id)
+            self.feature_combo.addItem(label, feature_id)
+        if selected in visible:
+            self.feature_combo.setCurrentIndex(
+                max(0, self.feature_combo.findData(selected))
+            )
+        else:
+            self.feature_combo.setCurrentIndex(0)
+            self._suppress_feature_selection = False
+            self.set_feature(None)
+            # the previously selected feature is now hidden — the map must
+            # drop its highlight too, or host and grid diverge (review R3-P3)
+            self.feature_selection_requested.emit("")
+            return visible
+        self._suppress_feature_selection = False
+        return visible
+
+    def sort_features(self, field: str = "") -> list[str]:
+        """Sort the selector by a property field ("" restores bind order)."""
+        self._sort_field = str(field or "")
+        visible = self.apply_filter(
+            field=self._filter_field, needle=self._filter_needle
+        )
+        return visible
 
     def set_feature(self, feature: dict[str, Any] | None) -> None:
         self._feature = dict(feature) if feature is not None else None

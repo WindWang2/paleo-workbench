@@ -109,24 +109,37 @@ def _render_frame_native(spec: MapExportSpec):
             pass
 
 
-def render_and_save_map_export(spec: MapExportSpec) -> None:
+def render_and_save_map_export(spec: MapExportSpec) -> dict:
     """Render the map body with the same interpreter as the screen (#923).
 
     When the live canvas is the QGIS renderer the frame comes from a throwaway
     QGIS backend on this worker thread; anything that fails (bridge missing,
     scalar pipeline unready, native error) degrades to the legacy painter
-    path exactly as before.
+    path exactly as before. Returns an honest engine report — a fallback
+    export is allowed but must never masquerade as a QGIS export:
+
+    ``{"engine": "qgis"|"fallback", "degraded": bool, "degraded_reason": str|None}``
     """
     frame = None
+    engine = "fallback"
+    degraded = False
+    degraded_reason = None
     if spec.prefer_native_renderer:
         try:
             frame = _render_frame_native(spec)
+            if frame is not None:
+                engine = "qgis"  # only after a frame actually exists
         except Exception as exc:  # noqa: BLE001 — degrade, never lose the export
             import logging
 
             logging.getLogger(__name__).warning(
                 "PNG 导出回退到回退渲染器（QGIS 渲染失败：%s）", exc
             )
+            degraded = True
+            degraded_reason = f"{type(exc).__name__}: {exc}"
+    else:
+        degraded = True
+        degraded_reason = "QGIS renderer not requested for this export"
     if frame is None:
         backend = FallbackMapRenderBackend()
         backend.initialize()
@@ -157,6 +170,11 @@ def render_and_save_map_export(spec: MapExportSpec) -> None:
     painter.end()
     if not image.save(spec.path, "PNG"):
         raise RuntimeError("could not save unified map PNG")
+    return {
+        "engine": engine,
+        "degraded": degraded,
+        "degraded_reason": degraded_reason,
+    }
 
 
 class MapExportWorker(QObject):

@@ -443,3 +443,69 @@ def active_quality_reports(project: ProjectDocument) -> list[QualityReport]:
     for report in project.quality_reports:
         by_map[report.linked_map_document_id] = report
     return list(by_map.values())
+
+
+def run_map_qc(
+    project: ProjectDocument,
+    map_document_id: str,
+    *,
+    map_extent=None,
+    fusion_confidence: dict[str, Any] | None = None,
+    confidence_threshold: float = 0.5,
+    export_report: dict[str, Any] | None = None,
+    bind_active_run: bool = True,
+) -> QualityReport:
+    """Extended QC (M12): BASIC_QC_RULES plus the locatable M12 rule set.
+
+    Same upsert-by-document semantics as :func:`run_basic_qc`; the report's
+    ``rules`` lists exactly what ran. Issues from both passes are merged and
+    each carries its locating fields (layer/feature/ref).
+    """
+    from paleo_workbench.workflow.map_qa_rules import (
+        EXTENDED_QC_RULES,
+        collect_extended_qc_issues,
+    )
+
+    document = next(
+        (doc for doc in project.paleomap_documents if doc.id == map_document_id),
+        None,
+    )
+    if document is None:
+        raise ValueError(f"unknown map document: {map_document_id}")
+
+    base = run_basic_qc(
+        project, map_document_id, bind_active_run=bind_active_run
+    )
+    extended = collect_extended_qc_issues(
+        project,
+        document,
+        map_extent=map_extent,
+        fusion_confidence=fusion_confidence,
+        confidence_threshold=confidence_threshold,
+        export_report=export_report,
+    )
+    document_index = next(
+        (
+            index
+            for index, report in enumerate(project.quality_reports)
+            if report.linked_map_document_id == map_document_id
+        ),
+        None,
+    )
+    merged_issues = list(base.issues) + extended
+    status = _status_from_issues(merged_issues)
+    kwargs: dict = {
+        "linked_map_document_id": map_document_id,
+        "rules": [*BASIC_QC_RULES, *EXTENDED_QC_RULES],
+        "issues": merged_issues,
+        "status": status,
+    }
+    if document_index is not None:
+        kwargs["id"] = project.quality_reports[document_index].id
+    report = QualityReport(**kwargs)
+    report.provenance_registered = base.provenance_registered
+    if document_index is not None:
+        project.quality_reports[document_index] = report
+    else:
+        project.quality_reports.append(report)
+    return report

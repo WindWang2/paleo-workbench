@@ -137,7 +137,42 @@ class MapComposerRenderer:
             return self._render_legend_svg(elem, main_map_elem=main_map_elem)
         elif t == ElementType.LITHOLOGY_LEGEND:
             return self._render_lithology_legend_svg(elem)
+        elif t == ElementType.SUBTITLE:
+            subtitle_text = html.escape(str(elem.properties.get("text", "")))
+            font_size = float(elem.properties.get("font_size") or 5.0)
+            return (
+                f'<g id="{elem.id}">'
+                f'<text x="{x + w/2}" y="{y + h - 1}" font-family="SimSun, Times New Roman, sans-serif" font-size="{font_size}" fill="#333333" text-anchor="middle">{subtitle_text}</text>'
+                f'</g>'
+            )
+        elif t == ElementType.WELL_LEGEND:
+            # 测井图例：与图例同构，无绑定条目时仅占位。
+            if not elem.properties.get("items"):
+                return self._placeholder_svg(elem)
+            return self._render_legend_svg(elem, main_map_elem=main_map_elem)
+        elif t == ElementType.PROFILE:
+            # 剖面占位（M6 契约）：绑定真实剖面前只画占位框，不伪造内容。
+            if not elem.properties.get("section_ref"):
+                return self._placeholder_svg(elem, label="剖面（未绑定数据）")
+            return self._render_inset_map_svg(elem)
         return f'<rect id="{elem.id}" x="{x}" y="{y}" width="{w}" height="{h}" fill="none" stroke="#cccccc" stroke-dasharray="1,1"/>'
+
+    @staticmethod
+    def _placeholder_svg(elem: ComposerElement, label: str = "") -> str:
+        """Dashed placeholder frame: an unbound component stays visibly empty
+        instead of inventing content."""
+        x, y, w, h = elem.x_mm, elem.y_mm, elem.width_mm, elem.height_mm
+        text = html.escape(label) if label else ""
+        label_svg = (
+            f'<text x="{x + w/2}" y="{y + h/2}" font-family="sans-serif" font-size="4" fill="#999999" text-anchor="middle">{text}</text>'
+            if text
+            else ""
+        )
+        return (
+            f'<g id="{elem.id}" data-placeholder="true">'
+            f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="none" stroke="#cccccc" stroke-dasharray="1,1"/>'
+            f'{label_svg}</g>'
+        )
 
     @staticmethod
     def _locked_marker_svg(elem: ComposerElement) -> str:
