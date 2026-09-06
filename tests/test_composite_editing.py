@@ -409,12 +409,31 @@ def test_layer_checkbox_toggle_keeps_tree_items_alive(qtbot, tmp_path):
     set_layer_visible → _reload() → tree.clear() 销毁 delegate 仍持有的
     item，mouseReleaseEvent 返回后在 QStyledItemDelegate::editorEvent 内
     SIGSEGV。修复后复选框路径只重发渲染快照，树 item 对象保持存活。
+
+    双路径：该 UAF 只存在于 fallback QTreeWidget 面板（QGIS 桥面板用原生
+    QgsLayerTreeView，无 Python 树重建）；桥环境下改断言等效契约——可见性
+    写回权威并直达镜像，且 tree_host 不被重建。
     """
     from PySide6.QtCore import Qt
 
     document = _document(qtbot, tmp_path)
     panel = document.layer_manager
     assert panel.tree_row_count() > 0
+
+    if not hasattr(panel, "tree"):
+        # QGIS 桥路径：QgsLayerTreeView 原生树。可见性直达镜像、宿主存活。
+        layer_id = next(
+            iter(
+                sorted(
+                    (layer.id for layer in panel._layers),
+                )
+            )
+        )
+        host_before = panel.tree_host
+        panel.set_layer_visible(layer_id, False)
+        assert panel.layer_by_id(layer_id).visible is False
+        assert panel.tree_host is host_before
+        return
 
     items = [panel.tree.topLevelItem(i) for i in range(panel.tree_row_count())]
     target = next(
