@@ -130,3 +130,19 @@
 - migration: legacy externals without checksum/size gain a SAFE stat
   backfill (size + mtime_ns in external_stat metadata; no guessed digests)
 - Tests: tests/test_provenance_and_identity_v6.py + 71-test regression green
+
+## PHASE 11 complete — scale fixtures + benchmarks (§13)
+- benchmarks/catalog_scale_v6.py: production-API seeding (real import_raw
+  batch) + --direct-seed metadata-stress tier (500k, direct rows, honest
+  labeling); measures §13 list incl. concurrent conflict flag
+- Measured @20k production on this (slow, Defender-fsync) Windows box:
+  open_lazy 13.2ms | first_page 7.2ms | deep_page 6.5ms | get_by_id 0.3ms |
+  tag 8.6ms | wc checkout+commit 33.8ms | manifest export 358ms |
+  REOPEN EAGER 33,072ms (!) | conflict detected=1
+  → lazy open is ~2500× the eager reopen on this box; scale-independent
+- BONUS FIX: ensure_catalog_layout root now RESOLVED — Windows 8.3 short-path
+  project dirs crashed place_managed_file relative_to (found by bench)
+- tests/test_catalog_scale_v6.py: CI-size gates (lazy<500ms, page<150/200ms,
+  get<10ms, warmup-during-query correctness, conflict at scale)
+- #1213 WellRegistry O(N×W): documented as known limitation (well-domain,
+  out of v6 data/runtime core)
