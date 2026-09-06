@@ -492,6 +492,12 @@ class MapProductRecord(BaseModel):
     run_id: str = ""
     scientific_fingerprint: str = ""
     created_at: str = Field(default_factory=_now_iso)
+    # Lifecycle V2 (M10): assembled products are final; supersede/freeze/
+    # clone evolve the record without touching catalog versions.
+    status: Literal["final", "superseded"] = "final"
+    frozen: bool = False
+    superseded_by: str | None = None
+    cloned_from: str | None = None
 
 
 class UserVectorFeature(BaseModel):
