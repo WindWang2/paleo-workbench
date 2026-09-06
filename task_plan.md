@@ -34,7 +34,7 @@ support/benchmarking (small/medium fixtures only).
       no last-writer-wins  (commit 3)
 - [x] PHASE 5: Payload registration protocol (PREPARE..PUBLISH) + GC lease/coord
       (commit 4)
-- [ ] PHASE 6: Working-copy state machine  (commit 5)
+- [x] PHASE 6: Working-copy state machine  (commit 5)
 - [ ] PHASE 7: Project open/save/backup/recovery decision table  (commit 6)
 - [ ] PHASE 8: Runtime session generation + real cancellation  (commit 7)
 - [ ] PHASE 9: ResourceGovernor convergence (OMP/BLAS/env mutation removal)  (commit 8)
@@ -45,7 +45,7 @@ support/benchmarking (small/medium fixtures only).
 - [ ] PHASE 13: Docs 00–11 complete; PR to main with full evidence
 
 ## Current Phase
-PHASE 6 (working-copy state machine)
+PHASE 7 (project recovery)
 
 ## Decisions (locked — do not revisit)
 (none yet beyond hard constraints)

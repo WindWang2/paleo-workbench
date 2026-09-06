@@ -389,6 +389,12 @@ class ProjectController:
                 # the full entity graph anyway, and warming before them keeps
                 # those steps on the already-eager code path.
                 service.warm_document()
+                # Working-copy crash recovery (#1211): interrupted commits and
+                # save-as-orphaned registry rows heal before the UI lists them.
+                try:
+                    service.recover_working_copies()
+                except Exception:
+                    pass
                 service.migrate_legacy_resources(resources_snapshot)
                 service.sweep_temp_on_open()
                 service.ensure_index_ready()

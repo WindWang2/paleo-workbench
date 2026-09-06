@@ -58,3 +58,20 @@
 - Tests: tests/test_catalog_gc_registration_race.py (adversarial register||
   sweep, stale-report sweep, lease TTL expiry, blob survival, #1218 lock
   release during IO). 118-test regression green.
+
+## PHASE 6 complete — working-copy state machine (#1211)
+- db.py: working_copies registry table (connect-time + _SCHEMA_DDL + delete
+  order); register/get_by_path/get_live_for_source/list/update_state/remove
+- service.py: create_working_copy(version_id, allow_replace=False) — live
+  copy REUSED (no silent overwrite; explicit allow_replace discards+recreates);
+  identity = working_id + source version (never display name); concurrent
+  checkouts converge (placement retry + idempotent temp+replace);
+  list_working_copies/working_copy_state (conservative mtime/size dirty hint)/
+  discard_working_copy (explicit; committing copies protected)/
+  recover_working_copies (committing→evidence-based heal; missing-file rows
+  dropped); commit_working_copy transitions committing→(commit)→row removed,
+  failure → back to dirty
+- project_controller maintenance: recover_working_copies after warm
+- Tests: tests/test_catalog_working_copy_lifecycle.py (7: reuse+edits kept,
+  name-collision identity, crash-after-copy reopen, crash-during-commit both
+  evidence branches, discard terminal, concurrent convergence, save-as orphan)

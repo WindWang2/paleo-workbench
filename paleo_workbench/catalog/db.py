@@ -321,10 +321,28 @@ _SCHEMA_DDL = [
         PRIMARY KEY (lease_id, target)
     )""",
     "CREATE INDEX IF NOT EXISTS idx_staging_leases_target ON staging_leases(target)",
+    # Working-copy registry (#1211): formal checkout lifecycle. Identity is
+    # the working_id (uuid) — display names and payload file names are never
+    # identity. States: checked_out → dirty → committing → committed (row
+    # removed) with abandoned as the explicit-discard terminal. Crash
+    # recovery: recover_working_copies() probes committing rows.
+    """CREATE TABLE IF NOT EXISTS working_copies (
+        working_id TEXT PRIMARY KEY,
+        source_version_id TEXT NOT NULL,
+        path TEXT NOT NULL UNIQUE,
+        state TEXT NOT NULL DEFAULT 'checked_out',
+        display_name TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        payload_mtime_ns INTEGER,
+        source_size_bytes INTEGER
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_working_copies_source ON working_copies(source_version_id)",
 ]
 
 # Children first so a future PRAGMA foreign_keys=ON stays safe.
 _DELETE_ORDER = [
+    "working_copies",
     "staging_leases",
     "lineage",
     "version_tags",
@@ -882,6 +900,19 @@ class CatalogIndex:
                 PRIMARY KEY (lease_id, target)
             )""",
             "CREATE INDEX IF NOT EXISTS idx_staging_leases_target ON staging_leases(target)",
+            # #1211: working-copy registry on any store this code opens.
+            """CREATE TABLE IF NOT EXISTS working_copies (
+                working_id TEXT PRIMARY KEY,
+                source_version_id TEXT NOT NULL,
+                path TEXT NOT NULL UNIQUE,
+                state TEXT NOT NULL DEFAULT 'checked_out',
+                display_name TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                payload_mtime_ns INTEGER,
+                source_size_bytes INTEGER
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_working_copies_source ON working_copies(source_version_id)",
         ):
             try:
                 conn.execute(ddl)
@@ -1076,6 +1107,100 @@ class CatalogIndex:
                 return cur.rowcount or 0
         except sqlite3.Error:
             return 0
+
+    # -- working-copy registry (#1211) -----------------------------------------
+
+    def register_working_copy(
+        self,
+        *,
+        source_version_id: str,
+        path: str,
+        display_name: str,
+        payload_mtime_ns: int | None,
+        source_size_bytes: int | None,
+    ) -> str:
+        import uuid
+        from datetime import datetime
+
+        working_id = f"wc-{uuid.uuid4().hex[:12]}"
+        now = datetime.now().isoformat(timespec="seconds")
+        conn = self._connect()
+        with conn:
+            conn.execute(
+                "INSERT INTO working_copies (working_id, source_version_id, path,"
+                " state, display_name, created_at, updated_at, payload_mtime_ns,"
+                " source_size_bytes) VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    working_id,
+                    source_version_id,
+                    path,
+                    "checked_out",
+                    display_name,
+                    now,
+                    now,
+                    payload_mtime_ns,
+                    source_size_bytes,
+                ),
+            )
+        return working_id
+
+    def get_working_copy_by_path(self, path: str) -> dict | None:
+        rows = self._read_rows(
+            "SELECT * FROM working_copies WHERE path = ?", (path,)
+        )
+        return dict(rows[0]) if rows else None
+
+    def get_live_working_copy_for_source(
+        self, source_version_id: str
+    ) -> dict | None:
+        rows = self._read_rows(
+            "SELECT * FROM working_copies WHERE source_version_id = ?"
+            " AND state IN ('checked_out','dirty','committing')"
+            " ORDER BY created_at LIMIT 1",
+            (source_version_id,),
+        )
+        return dict(rows[0]) if rows else None
+
+    def list_working_copies(
+        self, states: "tuple[str, ...] | list[str] | None" = None
+    ) -> list[dict]:
+        if states:
+            marks = ",".join("?" * len(states))
+            rows = self._read_rows(
+                f"SELECT * FROM working_copies WHERE state IN ({marks})"
+                " ORDER BY created_at",
+                tuple(states),
+            )
+        else:
+            rows = self._read_rows(
+                "SELECT * FROM working_copies ORDER BY created_at", ()
+            )
+        return [dict(r) for r in rows]
+
+    def update_working_copy_state(self, working_id: str, state: str) -> None:
+        from datetime import datetime
+
+        conn = self._connect()
+        try:
+            with conn:
+                conn.execute(
+                    "UPDATE working_copies SET state = ?, updated_at = ?"
+                    " WHERE working_id = ?",
+                    (state, datetime.now().isoformat(timespec="seconds"), working_id),
+                )
+        except sqlite3.Error:
+            pass
+
+    def remove_working_copy(self, working_id: str) -> None:
+        conn = self._connect()
+        try:
+            with conn:
+                conn.execute(
+                    "DELETE FROM working_copies WHERE working_id = ?",
+                    (working_id,),
+                )
+        except sqlite3.Error:
+            pass
 
     def is_fresh(self, document: CatalogDocument) -> bool:
         """True when the index matches *document*'s revision and schema."""

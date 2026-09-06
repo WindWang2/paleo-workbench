@@ -2166,17 +2166,235 @@ class DataCatalogService:
 
     # -- working copies / derived --------------------------------------------
 
-    def create_working_copy(self, version_id: str) -> Path:
+    def create_working_copy(self, version_id: str, *, allow_replace: bool = False) -> Path:
         """Materialize a mutable working copy of a committed version.
 
         Always a real copy (never a hardlink), so editing it cannot touch the
         managed original.
+
+        Lifecycle (#1211): checkouts are REGISTERED (source version, path,
+        state, timestamps) in the canonical store. A live uncommitted copy of
+        the same source version is REUSED — a repeat checkout can no longer
+        silently discard uncommitted edits; pass ``allow_replace=True`` for an
+        explicit discard-and-recreate. The copy's identity is its registry id
+        + source version id, never the display/file name, so duplicate names
+        cannot collide. Enumerate via :meth:`list_working_copies`; abandon
+        explicitly via :meth:`discard_working_copy`; crash recovery via
+        :meth:`recover_working_copies`.
         """
         version = self._version_or_raise(version_id)
+        live = None
+        try:
+            live = self._index.get_live_working_copy_for_source(version.id)
+        except Exception:
+            live = None
+        if live is not None:
+            existing = (
+                Path(self.project_path).expanduser().resolve().parent / live["path"]
+            )
+            if existing.is_file():
+                if not allow_replace:
+                    return existing  # reuse: never clobber uncommitted edits
+                self._discard_working_copy_row_and_file(live, existing)
+            else:
+                # Row without a file (save-as/packaging drops working/):
+                # dead row, drop it and check out fresh.
+                try:
+                    self._index.remove_working_copy(live["working_id"])
+                except Exception:
+                    pass
         payload = self.resolve_path(version)
         if not payload.is_file():
             raise CatalogError(f"Payload not available: {payload}")
-        return _place_working_copy(self.project_path, payload, version.id)
+        # Concurrent checkouts of the same version converge on one copy:
+        # placement writes identical bytes to the same target via temp+
+        # replace, so a racing replace can transiently collide on Windows —
+        # retry briefly; the loser's bytes are identical anyway.
+        target = None
+        for attempt in range(4):
+            try:
+                target = _place_working_copy(self.project_path, payload, version.id)
+                break
+            except PermissionError:
+                if attempt == 3:
+                    raise
+                import time as _time
+
+                _time.sleep(0.05 * (attempt + 1))
+        assert target is not None
+        try:
+            rel = target.relative_to(
+                Path(self.project_path).expanduser().resolve().parent
+            ).as_posix()
+            stat = target.stat()
+            self._index.register_working_copy(
+                source_version_id=version.id,
+                path=rel,
+                display_name=payload.name,
+                payload_mtime_ns=stat.st_mtime_ns,
+                source_size_bytes=version.size_bytes,
+            )
+        except Exception:
+            pass  # registry is lifecycle bookkeeping, never a checkout gate
+        return target
+
+    # -- working-copy lifecycle (#1211) ----------------------------------------
+
+    def _working_copy_status(self, row: dict) -> dict[str, Any]:
+        project_dir = Path(self.project_path).expanduser().resolve().parent
+        path = project_dir / row["path"]
+        try:
+            stat = path.stat()
+            exists = True
+            mtime_ns = stat.st_mtime_ns
+            size = stat.st_size
+        except OSError:
+            exists = False
+            mtime_ns = None
+            size = None
+        # Conservative dirty hint: any mtime drift from checkout time or size
+        # divergence from the source counts as edited (false positives are
+        # safe — the user is told the copy may hold edits).
+        dirty_hint = bool(
+            exists
+            and row.get("state") in ("checked_out", "dirty")
+            and (
+                (row.get("payload_mtime_ns") is not None
+                 and mtime_ns != row.get("payload_mtime_ns"))
+                or (row.get("source_size_bytes") is not None
+                    and size != row.get("source_size_bytes"))
+            )
+        )
+        maps = self._ensure_maps()
+        return {
+            "working_id": row["working_id"],
+            "source_version_id": row["source_version_id"],
+            "path": path,
+            "state": row["state"],
+            "display_name": row.get("display_name") or "",
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "exists": exists,
+            "dirty_hint": dirty_hint,
+            "source_version_known": row["source_version_id"] in maps.version_by_id,
+        }
+
+    def list_working_copies(self) -> list[dict[str, Any]]:
+        """Enumerate unfinished working copies (any state, newest last)."""
+        try:
+            rows = self._index.list_working_copies()
+        except Exception:
+            return []
+        return [self._working_copy_status(row) for row in rows]
+
+    def working_copy_state(self, working_path: str | Path) -> dict[str, Any] | None:
+        """Lifecycle status of the copy at *working_path*, or None."""
+        path = Path(working_path)
+        try:
+            rel = path.relative_to(
+                Path(self.project_path).expanduser().resolve().parent
+            ).as_posix()
+        except ValueError:
+            return None
+        try:
+            row = self._index.get_working_copy_by_path(rel)
+        except Exception:
+            return None
+        if row is None:
+            return None
+        return self._working_copy_status(row)
+
+    def _discard_working_copy_row_and_file(self, row: dict, path: Path) -> None:
+        from paleo_workbench.catalog.storage import safe_unlink
+
+        try:
+            safe_unlink(path)
+        except OSError:
+            pass
+        try:
+            self._index.remove_working_copy(row["working_id"])
+        except Exception:
+            pass
+
+    def discard_working_copy(self, working_path: str | Path) -> bool:
+        """Explicitly abandon an uncommitted copy (file + registry row).
+
+        Returns True when a registered copy was discarded. This is the ONLY
+        sanctioned way to destroy uncommitted edits besides committing them.
+        """
+        status = self.working_copy_state(working_path)
+        if status is None:
+            path = Path(working_path)
+            if path.is_file():
+                from paleo_workbench.catalog.storage import safe_unlink
+
+                safe_unlink(path)
+                return True
+            return False
+        if status["state"] == "committing":
+            raise CatalogError(
+                "工作副本正在提交中，不能丢弃；请等待提交完成或重启后恢复。"
+            )
+        try:
+            row = self._index.get_working_copy_by_path(
+                str(status["path"].relative_to(
+                    Path(self.project_path).expanduser().resolve().parent
+                ).as_posix())
+            )
+        except Exception:
+            row = None
+        if row is not None:
+            self._discard_working_copy_row_and_file(row, status["path"])
+            return True
+        return False
+
+    def recover_working_copies(self) -> list[dict[str, Any]]:
+        """Crash/save-as recovery for the working-copy registry.
+
+        - ``committing`` rows: a committed version whose source_uri is the
+          working path means the commit landed and only the row removal was
+          lost — drop the row. Otherwise the commit never landed — the copy
+          is recoverable user work; back to ``dirty``.
+        - rows whose file is gone (save-as/portable packaging drops
+          ``working/``) — drop the row.
+        Returns the surviving copies' statuses.
+        """
+        self._ensure_maps()
+        project_dir = Path(self.project_path).expanduser().resolve().parent
+        try:
+            rows = self._index.list_working_copies()
+        except Exception:
+            return []
+        source_uris = {
+            v.source_uri: v for v in self.document.versions if v.source_uri
+        }
+        for row in rows:
+            path = project_dir / row["path"]
+            if not path.is_file():
+                try:
+                    self._index.remove_working_copy(row["working_id"])
+                except Exception:
+                    pass
+                continue
+            if row["state"] == "committing":
+                committed = source_uris.get(path.resolve().as_posix())
+                if committed is not None:
+                    # The commit landed (version exists, payload moved);
+                    # only the row removal was lost.
+                    try:
+                        self._index.remove_working_copy(row["working_id"])
+                    except Exception:
+                        pass
+                else:
+                    # Interrupted mid-commit: the file never moved (move is
+                    # atomic), so the user's edits are intact — recoverable.
+                    try:
+                        self._index.update_working_copy_state(
+                            row["working_id"], "dirty"
+                        )
+                    except Exception:
+                        pass
+        return self.list_working_copies()
 
     def commit_working_copy(
         self,
@@ -2208,6 +2426,58 @@ class DataCatalogService:
                 if any(v.id == candidate for v in self.document.versions)
                 else []
             )
+        # Registry transition (#1211): checked_out/dirty → committing BEFORE
+        # the payload moves. A crash here is healed by recover_working_copies
+        # (committed version present → row dropped; else back to dirty with
+        # the file intact). Legacy copies without a registry row commit with
+        # their pre-registry semantics.
+        _wc_row = self.working_copy_state(working_path)
+        _wc_working_id = _wc_row["working_id"] if _wc_row else None
+        if _wc_working_id is not None:
+            try:
+                self._index.update_working_copy_state(_wc_working_id, "committing")
+            except Exception:
+                pass
+        try:
+            committed = self._commit_working_copy_inner(
+                working_path,
+                asset_id=asset_id,
+                name=name,
+                stage=stage,
+                parent_version_ids=parent_version_ids,
+                run_id=run_id,
+                metadata=metadata,
+            )
+        except Exception:
+            if _wc_working_id is not None:
+                try:
+                    # The move is atomic inside _build_version: on failure the
+                    # file is back at (or never left) the working path — the
+                    # copy is still live user work.
+                    self._index.update_working_copy_state(_wc_working_id, "dirty")
+                except Exception:
+                    pass
+            raise
+        # Success: the payload moved into managed storage and the copy no
+        # longer exists — drop the registry row.
+        if _wc_working_id is not None:
+            try:
+                self._index.remove_working_copy(_wc_working_id)
+            except Exception:
+                pass
+        return committed
+
+    def _commit_working_copy_inner(
+        self,
+        working_path: Path,
+        *,
+        asset_id: str | None,
+        name: str | None,
+        stage: DataStage,
+        parent_version_ids,
+        run_id: str | None,
+        metadata: dict[str, Any] | None,
+    ) -> DataVersion:
         if asset_id is None:
             # #1218: the payload move+hash must NOT run with the service lock
             # held (a GB-scale working copy would freeze every concurrent
@@ -4210,6 +4480,11 @@ _WARM_REQUIRED_METHODS = (
     "list_tags",
     "find_assets_by_tag",
     "find_versions_by_tag",
+    # working-copy lifecycle (registry + document lookups)
+    "list_working_copies",
+    "working_copy_state",
+    "discard_working_copy",
+    "recover_working_copies",
 )
 
 
