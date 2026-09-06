@@ -328,32 +328,78 @@ def test_explorer_lists_user_vector_layers(qtbot, tmp_path):
 
 
 def test_tree_rename_writes_back_to_authority_and_project(qtbot, tmp_path):
-    """树内重命名写回编辑权威并持久化；下次重组快照不回滚（M2 终局审查 C1）。"""
+    """树内重命名写回编辑权威并持久化；下次重组快照不回滚（M2 终局审查 C1）。
+
+    双路径：QGIS 桥可用时走真 QgsLayerTreeView 内联改名；无桥（本机/CI
+    fallback）走回退面板的重命名请求信号 + QInputDialog（mock 输入）。
+    两条路径最终断言同一权威：edit_controller + 工程文档 + 重组不回滚。
+    """
     document = _document(qtbot, tmp_path)
     document.show()
     controller = document.edit_controller
     layer = controller.create_layer("井点", "point")
     panel = document.layer_manager
-    tree = panel.tree_host.tree_view_address
-    stack = document.canvas.stack
 
-    def row_of(name):
-        for row in range(stack.tree_view_row_count(tree)):
-            if stack.tree_view_layer_name(tree, row) == name:
-                return row
-        return None
+    if getattr(panel, "tree_host", None) is not None:
+        tree = panel.tree_host.tree_view_address
+        stack = document.canvas.stack
 
-    qtbot.waitUntil(lambda: row_of("井点") is not None, timeout=3000)
-    stack.tree_view_rename_row(tree, row_of("井点"), "井点A")
-    qtbot.waitUntil(lambda: controller.layer(layer.id).name == "井点A", timeout=2000)
+        def row_of(name):
+            for row in range(stack.tree_view_row_count(tree)):
+                if stack.tree_view_layer_name(tree, row) == name:
+                    return row
+            return None
+
+        qtbot.waitUntil(lambda: row_of("井点") is not None, timeout=3000)
+        stack.tree_view_rename_row(tree, row_of("井点"), "井点A")
+        qtbot.waitUntil(lambda: controller.layer(layer.id).name == "井点A", timeout=2000)
+    else:
+        from PySide6.QtWidgets import QInputDialog
+
+        qtbot.waitUntil(
+            lambda: any(
+                "井点" in panel.tree.topLevelItem(r).text(0)
+                for r in range(panel.tree_row_count())
+            ),
+            timeout=3000,
+        )
+        # 回退路径：树面板右键菜单发出的改名请求（对话框 mock 为「井点A」）。
+        qtbot.addWidget(panel)
+        original_get_text = QInputDialog.getText
+
+        def _fake_get_text(*_args, **_kwargs):
+            return "井点A", True
+
+        QInputDialog.getText = staticmethod(_fake_get_text)
+        try:
+            panel.rename_layer_requested.emit(str(layer.id))
+        finally:
+            QInputDialog.getText = original_get_text
+        qtbot.waitUntil(lambda: controller.layer(layer.id).name == "井点A", timeout=2000)
+        assert any(
+            "井点A" in panel.tree.topLevelItem(r).text(0)
+            for r in range(panel.tree_row_count())
+        )
+
     # 工程文档持久化权威同步
     persisted = next(
         item for item in document._project.user_vector_layers if item.id == layer.id)
     assert persisted.name == "井点A"
     # 重组快照不回滚树名/权威名
     document._sync_composition_now()
-    qtbot.waitUntil(lambda: row_of("井点A") is not None, timeout=3000)
     assert controller.layer(layer.id).name == "井点A"
+    if getattr(panel, "tree_host", None) is not None:
+        stack = document.canvas.stack
+        tree = panel.tree_host.tree_view_address
+        qtbot.waitUntil(lambda: any(
+            stack.tree_view_layer_name(tree, row) == "井点A"
+            for row in range(stack.tree_view_row_count(tree))
+        ), timeout=3000)
+    else:
+        qtbot.waitUntil(lambda: any(
+            "井点A" in panel.tree.topLevelItem(r).text(0)
+            for r in range(panel.tree_row_count())
+        ), timeout=3000)
 
 
 def test_layer_checkbox_toggle_keeps_tree_items_alive(qtbot, tmp_path):
