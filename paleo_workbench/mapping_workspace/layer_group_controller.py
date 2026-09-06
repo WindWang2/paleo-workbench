@@ -100,6 +100,12 @@ class LayerGroupController:
         """True = 桥无 group 能力（UI 必须显示分组不可用，不得假装分组）。"""
         return self._stack is not None and not self.groups_available
 
+    def reload_from_state(self) -> None:
+        """工程状态重载后：重读放置表并作废增量基线（下次 reconcile 全量）。"""
+        self._load_placements_from_state()
+        self._last_applied = None
+        self._last_group_visibility = {}
+
     def _load_placements_from_state(self) -> None:
         """从持久化树恢复放置表（layer→group / 组内顺序 / 用户组）。"""
         tree_data = self.state.tree or {}
@@ -430,7 +436,6 @@ class LayerGroupController:
     # -- 用户组管理 ---------------------------------------------------------------
 
     def create_user_group(self, name: str) -> str:
-        group_id = f"user.{id(self) & 0xffffff:06x}.{len(self._user_groups) + 1}"
         import time
 
         group_id = f"user.{int(time.time() * 1000) & 0xffffffff:08x}"

@@ -703,6 +703,8 @@ class CompositeDocument(QWidget):
     well_track_toggled = Signal(bool)
     seismic_section_toggled = Signal(bool)
     link_toggled = Signal(bool)
+    # V5：阶段动作请求导航到既有 hub 页（如单因素制备），由宿主壳执行。
+    hub_page_requested = Signal(str)
 
     def __init__(self, project=None, parent=None):
         super().__init__(parent)
@@ -813,6 +815,32 @@ class CompositeDocument(QWidget):
         if self.uses_native_stack:
             # 显示态回写只有原生树面板产生（回退面板的显示态经自身信号即时生效）。
             self.layer_manager.display_state_changed.connect(self.notify_display_changed)
+
+        # V5 分层编图工作区：阶段状态机 + 图层组编排（同一画布/同一工程权威）。
+        from paleo_workbench.mapping_workspace.controller import MappingStageController
+        from paleo_workbench.mapping_workspace.layer_roles import LayerRole
+
+        self.stage_controller = MappingStageController(parent=self)
+        self._layer_role_enum = LayerRole
+        if self.uses_native_stack:
+            self.stage_controller.group_controller.attach_canvas(self.canvas)
+            if isinstance(self.layer_manager, QgisLayerTreePanel):
+                self.layer_manager.set_group_controller(
+                    self.stage_controller.group_controller)
+        self.stage_controller.set_snapshot_provider(
+            lambda: list(self.layer_manager._layers))
+        self.stage_controller.set_target_resolver(self._resolve_editing_target)
+        # 编辑目标信号 → 编辑权威 active layer（阶段切换重指派；用户点选经
+        # set_active_target 记录，无回环）。
+        self.stage_controller.active_target_changed.connect(self._apply_active_target)
+        if isinstance(self.layer_manager, QgisLayerTreePanel):
+            self.layer_manager.group_state_changed.connect(
+                self._sync_workspace_state_to_project)
+            self.layer_manager.create_group_requested.connect(self._create_user_group)
+            self.layer_manager.remove_group_requested.connect(self._remove_user_group)
+        # V5 阶段动作分派（面板动作 → 工作流；见 stage_actions.py）。
+        from paleo_workbench.ui.workstation.stage_actions import StageActionDispatcher
+        self.stage_actions = StageActionDispatcher(self)
 
         self._build_toolbar()
         self.set_project(project)
@@ -1205,7 +1233,45 @@ class CompositeDocument(QWidget):
         if copy is not None:
             self.status_message.emit(f"已复制图层为「{copy.name}」")
 
+    def stage_action(self, stage_value: str, action_id: str) -> None:
+        """阶段面板上下文动作入口（宿主壳经 _dispatch_stage_action 调用）。"""
+        self.stage_actions.dispatch(stage_value, action_id)
+
+    def create_stage_constraint(self, kind_value: str) -> None:
+        """typed 地质约束创建（阶段面板约束按钮）。"""
+        self.stage_actions.create_constraint(kind_value)
+
+    def _resolve_editing_target(self, role):
+        """role → 该角色现存图层 id（阶段编辑目标解析；无则 None）。"""
+        if role is None:
+            return None
+        for layer_id in self.stage_controller.state.layers_with_role(role):
+            if self.edit_controller.layer(str(layer_id)) is not None:
+                return str(layer_id)
+        return None
+
+    def _apply_active_target(self, layer_id) -> None:
+        """阶段编辑目标应用（active_target_changed → 编辑权威 + 树选中）。"""
+        if not layer_id:
+            return
+        if self.edit_controller.layer(str(layer_id)) is not None:
+            self.edit_controller.set_active_layer(str(layer_id))
+            self.layer_manager.select_layer(str(layer_id))
+
+    def _role_allows_editing(self, layer_id: str) -> tuple[bool, str]:
+        """RAW 不可变保护（V5 §14）：初始相图/预测结果/插值面禁止直接编辑。"""
+        role = self.stage_controller.state.role_of(str(layer_id))
+        if role.is_raw_protected:
+            return False, (
+                f"图层角色为「{role.label}」（RAW/模型结果）——不可直接编辑；"
+                "请创建 DERIVED 草稿后编辑")
+        return True, ""
+
     def _toggle_layer_editing(self, layer_id: str) -> None:
+        allowed, reason = self._role_allows_editing(str(layer_id))
+        if not allowed:
+            self.status_message.emit(reason)
+            return
         self.edit_controller.set_active_layer(layer_id)
         if self.edit_controller.editing:
             self._save_edits_with_feedback()
@@ -1632,6 +1698,28 @@ class CompositeDocument(QWidget):
         if self._project is not None:
             self._project.workstation_reference_layers = list(self._reference_layers)
 
+    def _sync_workspace_state_to_project(self) -> None:
+        """阶段工作区科学状态 → ProjectDocument.mapping_workspace。"""
+        if self._project is None:
+            return
+        try:
+            self._project.mapping_workspace = self.stage_controller.save_state()
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "persist mapping workspace state failed")
+
+    def _create_user_group(self) -> None:
+        controller = self.stage_controller.group_controller
+        group_id = controller.create_user_group("新建组")
+        self._sync_composition_now()
+        self.status_message.emit(f"已创建用户组（{group_id}）")
+
+    def _remove_user_group(self, group_id: str) -> None:
+        controller = self.stage_controller.group_controller
+        controller.remove_user_group(str(group_id), keep_layers=True)
+        self._sync_composition_now()
+        self.status_message.emit("已删除用户组（图层已保留并上提）")
+
     def notify_display_changed(self) -> None:
         """图层树回写（可见性/顺序/重命名）后的轻量持久化：不重组快照。"""
         self.edit_controller.apply_display_state(
@@ -1640,6 +1728,7 @@ class CompositeDocument(QWidget):
         if self._project is not None and not self._loading:
             self.edit_controller.sync_to_project(self._project)
             self._sync_reference_layers_to_project()
+            self._sync_workspace_state_to_project()
 
     # -- 捕捉设置 -------------------------------------------------------------
 
@@ -1745,6 +1834,7 @@ class CompositeDocument(QWidget):
         if self._project is not None and not committed:
             self.edit_controller.sync_to_project(self._project)
             self._sync_reference_layers_to_project()
+        self._sync_workspace_state_to_project()
         for message in blocked:
             self.status_message.emit(message)
         return committed
@@ -1783,6 +1873,12 @@ class CompositeDocument(QWidget):
         if active_id is not None:
             self.layer_manager.select_layer(active_id)
         self.layer_manager._publish()
+        # V5：镜像 upsert 完成后做组结构/放置/阶段显隐的增量 reconcile
+        #（组模式下 mirror 不推 root 平铺顺序，组树由 controller 权威驱动）。
+        try:
+            self.stage_controller.sync_composition()
+        except Exception:
+            logging.getLogger(__name__).exception("stage workspace reconcile failed")
 
     # -- 工程绑定 -------------------------------------------------------------
 
@@ -1805,6 +1901,16 @@ class CompositeDocument(QWidget):
             ]
             self._reference_status = {}
             self.edit_controller.load_from_project(project)
+            # V5：恢复阶段工作区科学状态（当前阶段/成员资格/组结构/视图覆盖）。
+            self.stage_controller.load_state(
+                dict(getattr(project, "mapping_workspace", None) or {}))
+            catalog = None
+            try:
+                from paleo_workbench.catalog.runtime import get_catalog
+                catalog = get_catalog()
+            except Exception:
+                catalog = None
+            self.stage_controller.attach_document(project, catalog)
             self._sync_composition_now()
             xml = str(getattr(project, "map_qgis_project_xml", "") or "")
             apply = getattr(getattr(self.canvas, "stack", None), "apply_project_xml", None)
@@ -1814,6 +1920,8 @@ class CompositeDocument(QWidget):
             self._loading = False
         if project is not None:
             self._write_map_project_xml()
+            # 工程装载完成后恢复阶段上下文（组显隐 + 编辑目标 + 就绪度评估）。
+            self.stage_controller.restore_stage_view()
         self.input_tree.refresh(project)
 
     def _write_map_project_xml(self) -> None:
@@ -1878,4 +1986,5 @@ class CompositeDocument(QWidget):
     def shutdown(self) -> None:
         """释放渲染后端（工程切换 / 退出时由 WorkstationFrame 调用）。"""
         self._composition_timer.stop()
+        self._sync_workspace_state_to_project()
         self.canvas.shutdown()

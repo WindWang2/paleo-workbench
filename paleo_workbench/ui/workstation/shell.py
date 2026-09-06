@@ -216,6 +216,14 @@ class WorkstationFrame(QWidget):
             "功能页", self.page_stack,
             Qt.DockWidgetArea.RightDockWidgetArea,
         )
+        # V5 编图阶段面板（QStackedWidget 三阶段；中央地图永不切换）。
+        from paleo_workbench.ui.workstation.mapping_stage_panel import MappingStagePanel
+
+        self.mapping_stage_panel = MappingStagePanel(self._dock_host)
+        self.mapping_stage_dock = self._add_dock(
+            "编图阶段", self.mapping_stage_panel,
+            Qt.DockWidgetArea.LeftDockWidgetArea,
+        )
         self.well_dock.hide()
         self.seismic_dock.hide()
         self.hub_dock.hide()
@@ -225,6 +233,9 @@ class WorkstationFrame(QWidget):
         self.composite_input_dock.hide()
         self.composite_linked_dock.hide()
         self._wire_composite_panel_menu()
+        # 编图阶段 dock 与输入与结果叠 tab（左侧组）。
+        self._dock_host.tabifyDockWidget(
+            self.composite_input_dock, self.mapping_stage_dock)
         # 图层管理与检查器在右侧叠 tab，底部面板（Agent/任务中心/日志/
         # 控制台/联动/测井/地震）叠 tab。
         self._dock_host.tabifyDockWidget(self.inspector_dock, self.composite_layer_dock)
@@ -234,6 +245,22 @@ class WorkstationFrame(QWidget):
         self._dock_host.tabifyDockWidget(self.well_dock, self.seismic_dock)
         self._dock_host.tabifyDockWidget(self.agent_dock, self.logs_dock)
         self._dock_host.tabifyDockWidget(self.agent_dock, self.console_dock)
+
+        # V5 阶段切换条：AppBar 下方的紧凑固定行（Petrel 风格分段控件）。
+        from paleo_workbench.ui.workstation.mapping_stage_bar import MappingStageBar
+
+        self.stage_bar = MappingStageBar(self._dock_host)
+        self.stage_toolbar = QToolBar("编图阶段切换", self._dock_host)
+        self.stage_toolbar.setObjectName("MappingStageToolbar")
+        self.stage_toolbar.setMovable(False)
+        self.stage_toolbar.setFloatable(False)
+        self.stage_toolbar.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.PreventContextMenu
+        )
+        self.stage_toolbar.layout().setContentsMargins(0, 0, 0, 0)
+        self.stage_toolbar.addWidget(self.stage_bar)
+        self._dock_host.addToolBar(
+            Qt.ToolBarArea.TopToolBarArea, self.stage_toolbar)
 
         self._wire()
         self.set_project(project)
@@ -338,6 +365,100 @@ class WorkstationFrame(QWidget):
         # 浮窗由导航管理，不属于工作区布局）。
         for dock in self._preset_tracked_docks():
             dock.visibilityChanged.connect(lambda *_: self._mark_layout_customized())
+        self._wire_mapping_stage()
+
+    def _wire_mapping_stage(self) -> None:
+        """V5 阶段工作区接线：阶段条/阶段面板 ↔ MappingStageController。
+
+        阶段切换是瞬时上下文切换（组可见性增量 + 编辑目标重指派 + dock
+        建议），绝不重开工程/画布、绝不触发科学重计算；切换前 flush 未
+        提交编辑（不静默丢弃，V5 §60）。
+        """
+        controller = self.composite.stage_controller
+
+        def _request_stage(stage_value: str) -> None:
+            if stage_value == controller.current_stage.value:
+                return
+            self.composite.flush_edit_sessions()
+            controller.set_stage(stage_value)
+
+        self.stage_bar.stage_requested.connect(_request_stage)
+        self.mapping_stage_panel.stage_switch_requested.connect(_request_stage)
+
+        def _on_stage_changed(stage_value: str) -> None:
+            self.stage_bar.set_current_stage(stage_value)
+            self.mapping_stage_panel.set_stage(stage_value)
+            self.status_message.emit(f"编图阶段：{controller.current_stage.label}")
+
+        controller.current_stage_changed.connect(_on_stage_changed)
+
+        def _on_readiness(readiness) -> None:
+            from paleo_workbench.mapping_workspace.stages import stage_from_value
+
+            stage = stage_from_value(controller.current_stage.value)
+            if stage is not None:
+                self.mapping_stage_panel.show_readiness(stage, readiness)
+
+        controller.readiness_changed.connect(_on_readiness)
+
+        def _on_stale(summary) -> None:
+            from paleo_workbench.mapping_workspace.stages import STAGE_ORDER
+
+            badges = {}
+            for stage in STAGE_ORDER:
+                count = summary.stage_stale_count(stage)
+                badges[stage.value] = f"{count}↑" if count else ""
+            self.stage_bar.refresh_badges(badges)
+
+        controller.stale_summary_changed.connect(_on_stale)
+
+        controller.stage_notification.connect(self.status_message.emit)
+
+        def _on_dock_recommendation(recommended: dict) -> None:
+            self._apply_stage_dock_recommendation(recommended)
+
+        controller.dock_recommendation.connect(_on_dock_recommendation)
+
+        # 阶段动作的 hub 导航请求（单因素制备等既有页面）。
+        self.composite.hub_page_requested.connect(
+            lambda key="": (self.show_hub_page("综合编图") if not key or key == "mapping"
+                            else self.show_hub_page(str(key))))
+        # 阶段面板上下文动作（执行体在 composite 的阶段动作层）。
+        self.mapping_stage_panel.action_requested.connect(
+            self._dispatch_stage_action)
+        self.mapping_stage_panel.constraint_requested.connect(
+            self._dispatch_stage_constraint)
+
+    def _apply_stage_dock_recommendation(self, recommended: dict) -> None:
+        """阶段 dock 建议（仅首次进入阶段时应用；建议而非强制，V5 §6/§7）。
+
+        与 WorkstationLayoutPreset 解耦：这里只调整 dock 显隐（不触碰停靠
+        几何/tab 结构），用户后续布局完全自由。
+        """
+        mapping = {
+            "composite_input": self.composite_input_dock,
+            "composite_layer": self.composite_layer_dock,
+            "inspector": self.inspector_dock,
+            "well": self.well_dock,
+            "seismic": self.seismic_dock,
+            "composite_linked": self.composite_linked_dock,
+        }
+        for key, visible in (recommended or {}).items():
+            dock = mapping.get(str(key))
+            if dock is None:
+                continue
+            dock.setVisible(bool(visible))
+
+    def _dispatch_stage_action(self, stage_value: str, action_id: str) -> None:
+        """阶段面板上下文动作分派（composite 实现具体工作流）。"""
+        handler = getattr(self.composite, "stage_action", None)
+        if callable(handler):
+            handler(stage_value, action_id)
+
+    def _dispatch_stage_constraint(self, kind_value: str) -> None:
+        handler = getattr(self.composite, "create_stage_constraint", None)
+        if callable(handler):
+            handler(kind_value)
 
     def set_project(self, project, project_path: str | None = None) -> None:
         self._project = project
@@ -354,6 +475,16 @@ class WorkstationFrame(QWidget):
         self.linked_workspace.set_project(project, self._project_path)
         self.agent_panel.set_project(project, self._project_path)
         self.composite.set_project(project)
+        # V5：工程装载后同步阶段条/面板（composite.set_project 已恢复状态）。
+        stage_value = self.composite.stage_controller.current_stage.value
+        self.stage_bar.set_current_stage(stage_value)
+        self.mapping_stage_panel.set_stage(stage_value)
+        self.mapping_stage_panel.show_readiness(
+            self.composite.stage_controller.current_stage,
+            self.composite.stage_controller.readiness)
+        if self.composite.stage_controller.group_controller.degraded:
+            self.status_message.emit(
+                "当前环境缺少 QGIS 分组能力——图层分组功能不可用（平铺模式）")
 
     def set_project_path(self, path: str | None) -> None:
         self._project_path = str(path) if path else None
@@ -608,6 +739,7 @@ class WorkstationFrame(QWidget):
             self.well_dock,
             self.seismic_dock,
             self.hub_dock,
+            self.mapping_stage_dock,
         )
 
     def float_all_panels(self) -> None:
@@ -993,6 +1125,7 @@ class WorkstationFrame(QWidget):
             self.well_dock,
             self.seismic_dock,
             self.hub_dock,
+            self.mapping_stage_dock,
         )
         # 先断开布局信号再拆除：removeDockWidget/hide 触发的
         # visibilityChanged 不得重新调度 350ms 后的保存（#1124）。
@@ -1009,5 +1142,10 @@ class WorkstationFrame(QWidget):
         if isinstance(toolbar_host, QMainWindow):
             toolbar_host.removeToolBar(self.app_bar_toolbar)
         self.app_bar_toolbar.deleteLater()
+        # V5 阶段切换条容器 toolbar 同样摘除（防重建叠条）。
+        stage_toolbar_host = self.stage_toolbar.parentWidget()
+        if isinstance(stage_toolbar_host, QMainWindow):
+            stage_toolbar_host.removeToolBar(self.stage_toolbar)
+        self.stage_toolbar.deleteLater()
         if self._owns_dock_host:
             self._dock_host.deleteLater()
