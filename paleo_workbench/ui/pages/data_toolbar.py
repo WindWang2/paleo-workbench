@@ -33,6 +33,8 @@ class DataToolbar(QWidget):
     tag_filter_changed = Signal(list, str)
     # Open the Tag Manager dialog (tags CRUD / merge / prune).
     tag_manager_requested = Signal()
+    # D4: cooperative import cancellation (registration phase).
+    cancel_import_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -55,6 +57,15 @@ class DataToolbar(QWidget):
         self.import_folder_btn.setToolTip("导入整个目录")
         self.import_folder_btn.clicked.connect(self.import_folder_requested.emit)
         layout.addWidget(self.import_folder_btn)
+
+        # D4: visible only while an import runs; cooperative cancel.
+        self.cancel_import_btn = QPushButton("取消导入")
+        self.cancel_import_btn.setObjectName("SecondaryButton")
+        self.cancel_import_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        self.cancel_import_btn.setToolTip("协作式取消：当前分块完成后停止，已完成分块保持一致")
+        self.cancel_import_btn.setVisible(False)
+        self.cancel_import_btn.clicked.connect(self.cancel_import_requested.emit)
+        layout.addWidget(self.cancel_import_btn)
 
         self.verify_btn = QPushButton(_icon("btn-verify"), "完整性校验")
         self.verify_btn.setObjectName("SecondaryButton")
@@ -144,6 +155,7 @@ class DataToolbar(QWidget):
 
         self.search_box = QLineEdit()
         self.search_box.setObjectName("SearchBox")
+        self._search_sync = False
         self.search_box.setPlaceholderText("搜索文件名 / 类型 / 阶段 / 标签 / 路径...")
         self.search_box.setToolTip("搜索文件名/类型/阶段/标签/路径")
         self.search_box.setClearButtonEnabled(True)
@@ -275,7 +287,18 @@ class DataToolbar(QWidget):
     def _emit_tag_filter(self) -> None:
         self.tag_filter_changed.emit(list(self._selected_tags), self._tag_operator)
 
+    def set_search_text_silent(self, text: str) -> None:
+        """Programmatic sync (saved-filter apply / chip removal) — updates
+        the box WITHOUT re-emitting search_changed (no feedback loop)."""
+        self._search_sync = True
+        try:
+            self.search_box.setText(text)
+        finally:
+            self._search_sync = False
+
     def _on_search_text_changed(self, text: str) -> None:
+        if getattr(self, "_search_sync", False):
+            return
         self._pending_search = text
         self._search_timer.start()
 

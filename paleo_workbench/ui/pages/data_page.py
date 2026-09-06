@@ -50,11 +50,13 @@ from paleo_workbench.ui.pages.data_toolbar import DataToolbar
 from paleo_workbench.ui.pages.data_view_models import (
     AssetView,
     FsProbeCache,
+    IntegrityState,
     asset_view_from_object,
     enrich_view_from_catalog,
     path_exists_safe,
     path_is_dir_safe,
 )
+from paleo_workbench.ui.pages.relink_dialog import RelinkSourcesDialog
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
 from paleo_workbench.project.domain import domain_signature
 from paleo_workbench.project.well_location_map import sync_well_location_map
@@ -107,30 +109,60 @@ class _ImportWorker(QObject):
         self.finished.emit(report)
 
 
+class _AggregatesWorker(QObject):
+    """Cold group-by pass for tree badges, off the GUI thread (F5): the
+    uncached aggregates cost ~389 ms per catalog mutation at 100k."""
+
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, task, parent=None):
+        super().__init__(parent)
+        self._task = task
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            aggregates = self._task()
+        except Exception as exc:  # pragma: no cover - defensive UI boundary
+            self.failed.emit(str(exc))
+            return
+        self.finished.emit(aggregates)
+
+
 class _RegisterWorker(QObject):
     """Catalog registration for a finished import batch (hash+copy+save).
 
     Runs off the GUI thread so a GB-scale batch (checksum + full copy into
     ``<project>.artifacts/raw/`` + per-file catalog saves) never freezes the
-    window on the import-finished slot (#379).
+    window on the import-finished slot (#379). Registration commits in
+    chunks and reports (done, total) progress; a set cancel event stops it
+    between resources with every completed chunk already consistent (D4).
     """
 
     finished = Signal(object)  # (failure descriptions, ResourceItem.id → asset id)
     failed = Signal(str)
+    progress = Signal(int, int)
 
-    def __init__(self, lifecycle, resources: list, parent=None):
+    def __init__(self, lifecycle, resources: list, parent=None, *, cancel_event=None):
         super().__init__(parent)
         self._lifecycle = lifecycle
         self._resources = resources
+        self._cancel_event = cancel_event
 
     @Slot()
     def run(self) -> None:
         try:
-            mapping = self._lifecycle.register_imported_resources(self._resources)
+            mapping = self._lifecycle.register_imported_resources(
+                self._resources,
+                progress=lambda done, total: self.progress.emit(done, total),
+                cancel_check=(self._cancel_event.is_set if self._cancel_event else None),
+            )
             self.finished.emit(
                 (
                     list(self._lifecycle.last_registration_failures),
                     dict(mapping or {}),
+                    bool(self._cancel_event and self._cancel_event.is_set()),
                 )
             )
         except Exception as exc:  # pragma: no cover - defensive UI boundary
@@ -292,11 +324,14 @@ class DataPage(QWidget):
         # #931: heavy catalog copy/hash actions (派生副本/纳管/新建版本/提升)
         # run off the GUI thread like import/rescan/delivery/export.
         self._catalog_copy_job = OwnedWorkerJob(self)
+        self._aggregates_job = OwnedWorkerJob(self)
         self._last_import_report: ImportReport | None = None
         self._last_registered_asset_ids: dict[str, str] = {}
         self._rescan_context: tuple | None = None
         self._delivery_context: tuple | None = None
         self._import_in_progress = False
+        self._import_cancel_event = None
+        self.last_import_receipt: str | None = None
         self._prefetched_viz_asset: object | None = None
         self._viz_adapter = VizAdapter()
         # Business orchestration (catalog-aware lifecycle actions) lives in the
@@ -412,6 +447,10 @@ class DataPage(QWidget):
         self.data_toolbar.import_folder_requested.connect(self.begin_import_folder_from_dialog)
         self.data_toolbar.verify_requested.connect(self._verify_current_or_all_assets)
         self.data_toolbar.health_check_requested.connect(self._open_catalog_health)
+        self.data_toolbar.cancel_import_requested.connect(self._cancel_import)
+        self.asset_table.search_text_changed.connect(
+            self.data_toolbar.set_search_text_silent
+        )
         self.data_toolbar.rescan_requested.connect(self.rescan_selected_asset)
         self.data_toolbar.remove_requested.connect(self.remove_selected_asset)
         self.data_toolbar.open_folder_requested.connect(self.open_selected_folder)
@@ -482,6 +521,9 @@ class DataPage(QWidget):
         verify_joined = self._verify_job.shutdown(wait_ms)
         domain_bind_joined = self._domain_bind_job.shutdown(wait_ms)
         catalog_copy_joined = self._catalog_copy_job.shutdown(wait_ms)
+        aggregates_joined = self._aggregates_job.shutdown(wait_ms)
+        # The paged model's fetch pool (large-catalog mode) must stop too.
+        self.asset_table.shutdown()
         joined = all(
             result is not False
             for result in (
@@ -493,6 +535,7 @@ class DataPage(QWidget):
                 verify_joined,
                 domain_bind_joined,
                 catalog_copy_joined,
+                aggregates_joined,
             )
         )
         # Do not tear down active-engine widgets if a project switch is about
@@ -541,6 +584,18 @@ class DataPage(QWidget):
         # SQLite index serves pages + counts instead; the materialized path
         # below stays exactly as-is for every smaller project.
         if self._try_paged_catalog_mode(preview_root):
+            # The paged table serves the rows, but the tree's WorkArea
+            # entity sections and the trash badge still track the PROJECT
+            # (not the catalog index) — keep them fresh here too (F13).
+            signature = domain_signature(self.project)
+            if signature != getattr(self, "_domain_signature", None):
+                self._domain_signature = signature
+                self.navigation_tree.set_project(self.project)
+            self.navigation_tree.set_trash_count(len(trashed_companions))
+            if self.workspace.overview_visible():
+                self.workspace.overview_panel.refresh_from_project(
+                    self.project, counts=None
+                )
             _stage('paged_mode')
             self._emit_data_context()
             return
@@ -622,14 +677,19 @@ class DataPage(QWidget):
     # ------------------------------------------------------------------
 
     def _paged_provider(self, project_root):
-        """A SQL page provider over the open catalog index, or None."""
+        """A SQL page provider over the open catalog's query seam, or None.
+
+        Historical bug: this read ``service.index`` — an attribute that does
+        not exist (the service keeps ``_index``) — so the provider was always
+        None and paged mode never engaged in production. The provider now
+        wraps the service's paged query facade directly.
+        """
         service = self._lifecycle.catalog_service()
-        index = getattr(service, "index", None) if service is not None else None
-        if index is None:
+        if service is None:
             return None
         from paleo_workbench.ui.pages.paged_asset_model import CatalogPageProvider
 
-        return CatalogPageProvider(index, project_root)
+        return CatalogPageProvider(service, project_root)
 
     def _try_paged_catalog_mode(self, project_root) -> bool:
         """Serve the explorer from SQL pages when the catalog is large.
@@ -669,9 +729,36 @@ class DataPage(QWidget):
         return True
 
     def _apply_paged_tree_counts(self, project_root, total: int) -> None:
-        """Tree badges from SQL aggregates (+ small legacy side counts)."""
+        """Tree badges from SQL aggregates (+ small legacy side counts).
+
+        Warm aggregates render immediately; a cold pass (~389 ms at 100k)
+        is deferred to a worker and the badges refresh on arrival."""
         provider = self._paged_provider(project_root)
-        aggregates = provider.index.catalog_aggregates() if provider is not None else {}
+        cached = provider.total_source_aggregates_cached() if provider is not None else None
+        if cached is None and provider is not None:
+            if self._aggregates_job.is_running:
+                return  # a pass is already in flight; it will refresh badges
+            service = self._catalog_service()
+            if service is not None:
+                worker = _AggregatesWorker(
+                    lambda: provider.total_source_aggregates()
+                )
+                self._aggregates_job.start(
+                    worker,
+                    terminal_signals=(worker.finished, worker.failed),
+                    result_connections=(
+                        (
+                            worker.finished,
+                            lambda _agg: self._apply_paged_tree_counts(
+                                project_root, total
+                            ),
+                        ),
+                        (worker.failed, lambda _msg: None),
+                    ),
+                    target=self.project,
+                )
+                return
+        aggregates = cached if cached is not None else (provider.total_source_aggregates() if provider is not None else {})
         stages = dict(aggregates.get("stages") or {})
         types = dict(aggregates.get("types") or {})
         tags = dict(aggregates.get("tags") or {})
@@ -710,7 +797,13 @@ class DataPage(QWidget):
         # feeding the inspector old data. Re-point the selection at the
         # CURRENT row object with the same id.
         active_model = self.asset_table._active_model()
-        if self._selected_asset is not None:
+        if (
+            self._selected_asset is not None
+            and not self.asset_table.in_paged_mode()
+        ):
+            # Paged mode skips this loop: rows are sparse (asset_at on every
+            # row of a 100k table would demand-fetch the whole catalog), and
+            # the table's own selection sync already re-points by stable key.
             selected_id = getattr(self._unwrap_asset(self._selected_asset), "id", None)
             if selected_id is not None:
                 for row in range(active_model.rowCount()):
@@ -914,24 +1007,38 @@ class DataPage(QWidget):
         if not resources:
             self._handle_registration_finished([], {})
             return
-        worker = _RegisterWorker(self._lifecycle, resources)
+        import threading
+
+        self._import_cancel_event = threading.Event()
+        worker = _RegisterWorker(
+            self._lifecycle, resources, cancel_event=self._import_cancel_event
+        )
         self._register_job.start(
             worker,
             terminal_signals=(worker.finished, worker.failed),
             result_connections=(
                 (worker.finished, self._handle_registration_finished_signal),
                 (worker.failed, self._handle_registration_failed_signal),
+                (worker.progress, self._handle_registration_progress),
             ),
             target=self.project,
         )
-        self._set_action_status("正在登记目录元数据...")
+        self._set_action_status(f"正在登记目录元数据 (0/{len(resources)})...")
+
+    @Slot(int, int)
+    def _handle_registration_progress(self, done: int, total: int) -> None:
+        if self._register_job.target is not self.project:
+            return
+        self._set_action_status(f"正在登记目录元数据 ({done}/{total})...")
 
     @Slot(object)
     def _handle_registration_finished_signal(self, result: object) -> None:
         if self._register_job.target is not self.project:
             return
-        failures, mapping = result
-        self._handle_registration_finished(failures, mapping)
+        failures, mapping, cancelled = result
+        self._handle_registration_finished(
+            failures, mapping, cancelled=bool(cancelled)
+        )
 
     @Slot(str)
     def _handle_registration_failed_signal(self, message: str) -> None:
@@ -940,8 +1047,9 @@ class DataPage(QWidget):
         self._handle_registration_finished([message], {})
 
     def _handle_registration_finished(
-        self, failures: list, mapping: dict[str, str]
+        self, failures: list, mapping: dict[str, str], *, cancelled: bool = False
     ) -> None:
+        self._import_cancel_event = None
         self._lifecycle.last_registration_failures = list(failures or [])
         self._last_registered_asset_ids = dict(mapping or {})
         # Persist the exact registration result on the project resource.  A
@@ -959,8 +1067,39 @@ class DataPage(QWidget):
         report = self._last_import_report
         if report is not None:
             self._set_import_status(report)
+        receipt = self._build_import_receipt(report, failures, cancelled)
+        self.last_import_receipt = receipt
+        if cancelled:
+            self._set_action_status("导入已取消：已完成分块保持一致，未登记文件可重新导入")
+            QMessageBox.information(self, "导入收据", receipt)
+        elif failures or (report is not None and report.skipped_count):
+            QMessageBox.information(self, "导入收据", receipt)
         self.import_finished.emit(report)
         self._start_domain_binding_worker(list(getattr(report, "added", []) or []))
+
+    def _build_import_receipt(
+        self, report, failures: list, cancelled: bool
+    ) -> str:
+        """导入收据 (D4): discovered/skipped/registered/failed + cancel note."""
+        lines: list[str] = ["导入收据"]
+        if report is not None:
+            lines.append(f"发现并归档: {report.added_count}")
+            lines.append(f"跳过 (重复路径): {len(report.skipped_path)}")
+            by_type = report.by_type or {}
+            if by_type:
+                lines.append(
+                    "类型分布: "
+                    + ", ".join(f"{k}×{v}" for k, v in sorted(by_type.items()))
+                )
+            for warning in list(report.warnings)[:5]:
+                lines.append(f"警告: {warning}")
+        lines.append(f"目录登记成功: {len(self._last_registered_asset_ids)}")
+        if failures:
+            lines.append(f"目录登记失败: {len(failures)}")
+            lines.extend(f"  - {item}" for item in list(failures)[:8])
+        if cancelled:
+            lines.append("状态: 已取消（已完成分块保持一致；未登记文件可重新导入）")
+        return "\n".join(lines)
 
     def _start_domain_binding_worker(self, resources: list) -> None:
         """Bind registered imports to Well/Survey entities (worker thread)."""
@@ -1253,6 +1392,15 @@ class DataPage(QWidget):
         if not self._register_job.is_running:
             self._finish_import_job()
 
+    def _cancel_import(self) -> None:
+        """Cooperative import cancellation (D4): the registration worker
+        stops between resources; every committed chunk stays consistent."""
+        if not self._import_in_progress:
+            return
+        if self._import_cancel_event is not None:
+            self._import_cancel_event.set()
+        self._set_action_status("正在取消导入（等待当前分块完成）...")
+
     def _set_import_running(self, running: bool) -> None:
         self._import_in_progress = running
         # 关闭协议会迟到：DeferredDelete 之后 restore/refresh 路径仍会再走
@@ -1264,6 +1412,7 @@ class DataPage(QWidget):
             return
         toolbar.import_btn.setEnabled(not running)
         toolbar.import_folder_btn.setEnabled(not running)
+        toolbar.cancel_import_btn.setVisible(running)
 
     def remove_selected_asset(self) -> bool:
         if not self._selected_assets and self._selected_asset is not None:
@@ -1515,6 +1664,26 @@ class DataPage(QWidget):
             else:
                 promote_act.triggered.connect(lambda: self._promote_asset(first))
 
+        # D6/D8: version workbench + lineage explorer (catalog-bridged only).
+        version_wb_act = menu.find_action("ctx_version_workbench")
+        if version_wb_act:
+            if catalog_version_id is None:
+                version_wb_act.setToolTip("版本工作台需要活动数据目录（数据未桥接）")
+            else:
+                version_wb_act.setEnabled(True)
+                version_wb_act.triggered.connect(
+                    lambda: self._open_version_workbench(first, catalog_version_id)
+                )
+        lineage_act = menu.find_action("ctx_lineage_explorer")
+        if lineage_act:
+            if catalog_version_id is None:
+                lineage_act.setToolTip("血缘浏览器需要活动数据目录（数据未桥接）")
+            else:
+                lineage_act.setEnabled(True)
+                lineage_act.triggered.connect(
+                    lambda: self._open_lineage_explorer(catalog_version_id)
+                )
+
         export_open_act = menu.find_action("ctx_export_open")
         if export_open_act:
             export_open_act.triggered.connect(lambda: self._deliver_asset(first))
@@ -1540,6 +1709,20 @@ class DataPage(QWidget):
                 materialize_act.setEnabled(True)
                 materialize_act.setToolTip("将外部文件复制为受管 RAW 快照 (不可变)")
                 materialize_act.triggered.connect(lambda: self._materialize_asset(first))
+
+        # 重新链接源: enabled when the bridged external version's recorded
+        # payload is actually gone (missing) — fail-closed relink otherwise.
+        relink_act = menu.find_action("ctx_relink")
+        if relink_act and isinstance(first, ResourceItem):
+            _svc, ref = self._catalog_bridge(first)
+            if ref is not None and ref.external:
+                if first_view is not None and getattr(
+                    first_view, "integrity_state", None
+                ) == IntegrityState.MISSING:
+                    relink_act.setEnabled(True)
+                    relink_act.triggered.connect(self._open_relink_dialog)
+                else:
+                    relink_act.setToolTip("源文件未缺失，无需重新链接")
 
         rescan_act = menu.find_action("ctx_rescan")
         if rescan_act:
@@ -1780,6 +1963,10 @@ class DataPage(QWidget):
         if isinstance(resource, ExportArtifact):
             version_id = getattr(resource, "catalog_version_id", None)
             return version_id or None
+        # SQL-paged rows: the ref carries the row's current version id.
+        version_id = getattr(resource, "current_version_id", None)
+        if version_id:
+            return str(version_id)
         # Catalog-only rows carry the current version id on their single
         # VersionView; the legacy synthetic sentinels mean "not catalog".
         if view.versions and view.versions[0].version_id not in ("—", "v1"):
@@ -1790,8 +1977,58 @@ class DataPage(QWidget):
 
     def _open_catalog_health(self) -> None:
         dlg = CatalogHealthDialog(self, service_provider=self._catalog_service)
+        dlg.relink_requested.connect(self._open_relink_dialog)
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.run_audit(deep=False)
+        dlg.exec()
+
+    def _open_version_workbench(self, asset: object, catalog_version_id: str) -> None:
+        """版本工作台 (D6): timeline + promote/trash/restore/compare."""
+        from paleo_workbench.ui.pages.version_workbench_dialog import (
+            VersionWorkbenchDialog,
+        )
+
+        service = self._catalog_service()
+        if service is None or catalog_version_id is None:
+            return
+        try:
+            version = service.get_version(catalog_version_id)
+        except Exception:
+            self._set_action_status("无法解析该资产的目录版本")
+            return
+        dlg = VersionWorkbenchDialog(
+            self,
+            service_provider=self._catalog_service,
+            asset_id=version.asset_id,
+        )
+        dlg.versions_changed.connect(lambda: self._refresh())
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.exec()
+
+    def _open_lineage_explorer(self, catalog_version_id: str) -> None:
+        """血缘/溯源浏览器 (D8): lazy two-way provenance graph."""
+        from paleo_workbench.ui.pages.lineage_explorer_dialog import (
+            LineageExplorerDialog,
+        )
+
+        service = self._catalog_service()
+        if service is None or catalog_version_id is None:
+            return
+        dlg = LineageExplorerDialog(
+            self,
+            service_provider=self._catalog_service,
+            version_id=catalog_version_id,
+        )
+        dlg.version_activated.connect(self._locate_explorer_version)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.exec()
+
+    def _open_relink_dialog(self) -> None:
+        """缺失源与重新链接 (D9)。`sources_relinked` triggers a full refresh
+        so integrity columns and the missing filter reflect the new paths."""
+        dlg = RelinkSourcesDialog(self, service_provider=self._catalog_service)
+        dlg.sources_relinked.connect(lambda _count: self._refresh())
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.exec()
 
     # --- Governance metadata editing -------------------------------------------
@@ -1810,12 +2047,34 @@ class DataPage(QWidget):
 
     # --- Lineage navigation ------------------------------------------------------
 
+    def _locate_explorer_version(self, version_id: str) -> None:
+        """Explorer 双击定位: resolve the version's asset, then reuse the
+        page-level locate flow."""
+        service = self._catalog_service()
+        if service is None:
+            return
+        try:
+            version = service.get_version(version_id)
+        except Exception:
+            self._set_action_status("无法定位该版本")
+            return
+        self._locate_lineage_asset(version_id, version.asset_id)
+
     def _locate_lineage_asset(self, version_id: str, asset_id: str) -> None:
         """Double-clicked a lineage node: select that asset's row (bridged
         companion or catalog-only row) so the inspector follows. Prefers a
         VISIBLE row (the active filter/search may hide the target); when only
         a hidden row matches, still pushes the inspector and tells the user
-        why the table selection looks unchanged."""
+        why the table selection looks unchanged. Paged mode locates through
+        the model's stable-key row index (resident pages only)."""
+        if self.asset_table.in_paged_mode():
+            model = self.asset_table._active_model()
+            row = model.row_for_key(("resource", asset_id))
+            if row is not None and 0 <= row < model.rowCount():
+                self.asset_table.table.selectRow(row)
+            else:
+                self._set_action_status("目标数据行不在当前缓存页中，请在表格中搜索定位")
+            return
         def _matches(asset: object) -> bool:
             return self._lifecycle.resolve_catalog_asset_id(asset) == asset_id
 
@@ -1966,6 +2225,11 @@ class DataPage(QWidget):
 
     def _prompt_remove_tag_from_assets(self, items: list[object]) -> None:
         union: set[str] = set()
+        # Catalog tags are resolved through the document's association map
+        # (owner → tag ids) instead of the historical per-item
+        # "every tag × find_assets_by_tag" scans — O(selection) now, not
+        # O(selection × tags × assets).
+        tags_by_id: dict[str, object] = {}
         for it in items:
             unwrapped = self._unwrap_asset(it)
             if isinstance(unwrapped, ResourceItem):
@@ -1977,8 +2241,14 @@ class DataPage(QWidget):
                 service, ref = self._catalog_bridge(unwrapped)
                 if service is not None and ref is not None:
                     try:
-                        for tag in service.list_tags():
-                            if ref.asset_id in service.find_assets_by_tag(tag.name):
+                        if not tags_by_id:
+                            tags_by_id = {
+                                tag.id: tag for tag in service.list_tags()
+                            }
+                        owned = service.tag_ids_for_asset(ref.asset_id)
+                        for tag_id in owned:
+                            tag = tags_by_id.get(tag_id)
+                            if tag is not None:
                                 union.add(tag.display_name or tag.name)
                     except Exception:
                         pass
@@ -2050,6 +2320,21 @@ class DataPage(QWidget):
         self.asset_table.set_filter_query(query)
         if getattr(query, "asset_id", None):
             # 文件叶：网格过滤到单个资产后直接选中它，预览/检查器立即联动
+            if self.asset_table.in_paged_mode():
+                # Paged rows: locate via the model's stable-key index over
+                # resident pages (the materialized row list is empty here).
+                model = self.asset_table._active_model()
+                wanted_ids = set(query.entity_asset_ids or ())
+                for candidate_id in wanted_ids:
+                    row = model.row_for_key(("resource", candidate_id))
+                    if row is not None and 0 <= row < model.rowCount():
+                        view = model.view_at(row)
+                        if view is not None:
+                            self.asset_table.table.selectRow(row)
+                            self._set_selected_asset(view.raw_asset)
+                            self._update_inspector(view.raw_asset)
+                            break
+                return
             wanted = set(query.entity_asset_ids or ())
             for asset in getattr(self.asset_table, "_visible_assets", []) or []:
                 row_ids = {
@@ -2194,6 +2479,10 @@ class DataPage(QWidget):
         except Exception:
             base = FilterQuery(node_type="all")
         query = replace(base, tags=list(tags), tag_operator=operator)
+        # Entity views keep their membership set when only the tag filter
+        # changes — without it the paged path would refuse the query and
+        # fall back to full materialization (D10).
+        query = self._entity_query_with_ids(query)
         self.asset_table.set_filter_query(query)
 
     def _collect_tag_candidates(self) -> list[str]:
@@ -2319,6 +2608,20 @@ class DataPage(QWidget):
             return unwrapped
 
         from paleo_workbench.catalog.models import DataAsset
+        from paleo_workbench.ui.pages.paged_asset_model import SqlCatalogAssetRef
+
+        if isinstance(unwrapped, SqlCatalogAssetRef):
+            # Paged rows: resolve the asset from the catalog, then reuse the
+            # same companion reconstruction (no pydantic materialization of
+            # the whole table — one asset per preview request).
+            service = self._catalog_service()
+            if service is None or not unwrapped.current_version_id:
+                return None
+            try:
+                asset_obj = service.get_asset(unwrapped.id)
+            except Exception:
+                return None
+            return self._resource_for_preview(asset_obj)
 
         if not isinstance(unwrapped, DataAsset):
             return None

@@ -81,6 +81,14 @@ def normalize_asset_search_name(name: str) -> str:
 # sync_state gains a manifest_mtime_ns bookkeeping key. A v4 database is a
 # legacy rebuildable index and is migrated by a full transactional re-import
 # from catalog.json on first open.
+#
+# NOT bumped for the v6 scale-index additions (lineage parent direction,
+# paged-order composites, per-asset version listing): they are pure CREATE
+# INDEX layout, added idempotently per connection below, and ``load_document``
+# accepts any store whose layout is ≥ 5 — bumping INDEX_SCHEMA_VERSION must
+# never flip ``load_document`` into treating a healthy canonical store as
+# foreign and rebuilding it from a stale manifest (latent data-loss path,
+# found and pinned by test when the two version constants were conflated).
 INDEX_SCHEMA_VERSION = 5
 STORE_SCHEMA_VERSION = 5  # first version with canonical semantics
 
@@ -104,7 +112,17 @@ _SCHEMA_DDL = [
     "CREATE INDEX IF NOT EXISTS idx_assets_name ON assets(name)",
     "CREATE INDEX IF NOT EXISTS idx_assets_name_search ON assets(name_search)",
     "CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(type)",
-    "CREATE INDEX IF NOT EXISTS idx_assets_trashed ON assets(trashed)",
+    # v6 scale indexes: paged browsing always tails ORDER BY with ", a.id",
+    # so the composites carry the exact order the paged queries issue.
+    # ``idx_assets_trashed`` is deliberately NOT created anymore (see the
+    # connect-time drop below): it matched ~every row, the planner preferred
+    # it over the order-satisfying composites, and every default page paid a
+    # full-table scan + temp b-tree sort at 100k. The partial live index
+    # gives the common (trashed = 0) case a covering, order-satisfying path.
+    "CREATE INDEX IF NOT EXISTS idx_assets_name_id ON assets(name, id)",
+    "CREATE INDEX IF NOT EXISTS idx_assets_live_name_id ON assets(name, id) WHERE trashed = 0",
+    "CREATE INDEX IF NOT EXISTS idx_assets_type_name_id ON assets(type, name, id)",
+    "CREATE INDEX IF NOT EXISTS idx_assets_updated_name_id ON assets(updated_at, name, id)",
     """CREATE TABLE IF NOT EXISTS versions (
         id TEXT PRIMARY KEY,
         asset_id TEXT NOT NULL,
@@ -127,6 +145,9 @@ _SCHEMA_DDL = [
     "CREATE INDEX IF NOT EXISTS idx_versions_stage ON versions(stage)",
     "CREATE INDEX IF NOT EXISTS idx_versions_trashed ON versions(trashed)",
     "CREATE INDEX IF NOT EXISTS idx_versions_source_sha ON versions(source_uri, sha256)",
+    # v6: list_versions orders by version_number per asset — the composite
+    # answers it without a sort (per-asset version timelines are a hot path).
+    "CREATE INDEX IF NOT EXISTS idx_versions_asset_version ON versions(asset_id, version_number)",
     # #1043: find_external_by_path dedups every external registration with
     # ``managed = 0 AND trashed = 0 AND path = ?``; the partial index matches
     # the exact predicate (planner proves coverage without statistics) and
@@ -177,6 +198,9 @@ _SCHEMA_DDL = [
         PRIMARY KEY (parent_version_id, child_version_id)
     )""",
     "CREATE INDEX IF NOT EXISTS idx_lineage_child ON lineage(child_version_id)",
+    # v6: descendant walks filter parent_version_id = ? — without this index
+    # every downstream expansion full-scanned the lineage table.
+    "CREATE INDEX IF NOT EXISTS idx_lineage_parent ON lineage(parent_version_id, child_version_id)",
     """CREATE TABLE IF NOT EXISTS models (
         id TEXT PRIMARY KEY,
         model_id TEXT NOT NULL,
@@ -743,15 +767,29 @@ class CatalogIndex:
         conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         # Paged browsing orders by (name, id); older stores lack the composite
-        # index and would sort the whole filtered set on every page. The IF
-        # NOT EXISTS create is idempotent; a locked store just skips it and
-        # pages run on the plain name index (correct, only slower).
-        try:
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_assets_name_id ON assets(name, id)"
-            )
-        except sqlite3.Error:
-            pass
+        # indexes and would sort the whole filtered set on every page. The
+        # scale indexes (v6 set) are created the same idempotent way so ANY
+        # store this code opens carries them without a version-bump rebuild:
+        # a locked store just skips creation and pages run on the plain
+        # indexes (correct, only slower).
+        # ``idx_assets_trashed`` is actively dropped when present: it matched
+        # ~every row, the planner preferred it over the order-satisfying
+        # composites (the #1043 trap), and every default page paid a full
+        # scan + temp b-tree sort at 100k assets. Without it, the live
+        # partial index below answers the common page path directly.
+        for ddl in (
+            "DROP INDEX IF EXISTS idx_assets_trashed",
+            "CREATE INDEX IF NOT EXISTS idx_assets_name_id ON assets(name, id)",
+            "CREATE INDEX IF NOT EXISTS idx_assets_live_name_id ON assets(name, id) WHERE trashed = 0",
+            "CREATE INDEX IF NOT EXISTS idx_assets_type_name_id ON assets(type, name, id)",
+            "CREATE INDEX IF NOT EXISTS idx_assets_updated_name_id ON assets(updated_at, name, id)",
+            "CREATE INDEX IF NOT EXISTS idx_versions_asset_version ON versions(asset_id, version_number)",
+            "CREATE INDEX IF NOT EXISTS idx_lineage_parent ON lineage(parent_version_id, child_version_id)",
+        ):
+            try:
+                conn.execute(ddl)
+            except sqlite3.Error:
+                break  # store not initialized yet (or locked): _SCHEMA_DDL covers it on rebuild
         # WAL is safe here: writes are single-writer (the service serializes
         # saves under its lock) and WAL gives readers a consistent snapshot
         # without blocking. ``reset()`` cleans up -wal/-shm files.
@@ -993,13 +1031,20 @@ class CatalogIndex:
     def load_document(self) -> CatalogDocument | None:
         """Reconstruct the :class:`CatalogDocument` from the store.
 
-        Returns None when the database is missing, not yet migrated to
-        canonical layout (``STORE_SCHEMA_VERSION``), or unreadable — callers
-        fall back to the legacy JSON load/migration path.
+        Returns None when the database is missing, predates the canonical
+        layout (index schema < 5), or is unreadable — callers fall back to
+        the legacy JSON load/migration path.
+
+        The comparison is a floor, not an equality: ``index_schema_version``
+        also moves for pure index-layout changes, and requiring equality
+        would make every such bump reclassify a healthy canonical store as
+        foreign and rebuild it from a stale manifest (a latent data-loss
+        path; the store's own ``is_fresh`` gate handles layout staleness).
         """
         if not self.db_path.is_file():
             return None
-        if self.store_version() != STORE_SCHEMA_VERSION:
+        version = self.store_version()
+        if version is None or version < STORE_SCHEMA_VERSION:
             return None
         try:
             return self._load_document_once()
@@ -1815,7 +1860,9 @@ class CatalogIndex:
         tag_op: str = "and",
         type: str | None = None,
         asset_id: str | None = None,
+        asset_ids: list[str] | tuple[str, ...] | None = None,
         include_trashed: bool = False,
+        trashed_only: bool = False,
     ) -> tuple[list[str], list[str]]:
         """WHERE fragments + params over the assets table only.
 
@@ -1825,10 +1872,16 @@ class CatalogIndex:
         predicates (stage) go through an ``a.current_version_id IN (SELECT
         …)`` subquery instead, and current-version columns are batch-fetched
         for the page's rows afterwards.
+
+        ``trashed_only`` (recycle-bin view) is the complement of the default
+        ``trashed = 0`` filter — listing live assets in the recycle bin was
+        the old behavior and simply lied.
         """
         wheres: list[str] = []
         params: list[str] = []
-        if not include_trashed:
+        if trashed_only:
+            wheres.append("a.trashed = 1")
+        elif not include_trashed:
             wheres.append("a.trashed = 0")
         if text:
             wheres.append("a.name_search LIKE ? ESCAPE '\\'")
@@ -1862,6 +1915,16 @@ class CatalogIndex:
         if asset_id:
             wheres.append("a.id = ?")
             params.append(str(asset_id))
+        id_list = [str(a) for a in (asset_ids or ()) if str(a)]
+        if id_list:
+            # Entity membership sets (computed by the caller at query time)
+            # arrive as an explicit id list; chunk the IN predicate so a
+            # large set cannot blow SQLite's variable limit.
+            for start in range(0, len(id_list), 500):
+                chunk = id_list[start : start + 500]
+                placeholders = ", ".join("?" for _ in chunk)
+                wheres.append(f"a.id IN ({placeholders})")
+                params.extend(chunk)
         return wheres, params
 
     _PAGE_ORDER_COLUMNS = {
@@ -1874,6 +1937,13 @@ class CatalogIndex:
         "version": "v.version_number, a.name",
     }
 
+    # Order keys that reference the current-version columns. The paging SELECT
+    # deliberately joins nothing by default (a join defeats the assets-index
+    # order for name/type/modified); these keys get a targeted LEFT JOIN so
+    # they resolve at all — before the fix they raised "no such column: v.…",
+    # which ``_safe`` swallowed into an EMPTY page (silent zero-row sort).
+    _ORDER_NEEDS_VERSION_JOIN = {"stage", "size", "version"}
+
     def search_assets_page(
         self,
         text: str | None = None,
@@ -1882,7 +1952,9 @@ class CatalogIndex:
         tag_op: str = "and",
         type: str | None = None,
         asset_id: str | None = None,
+        asset_ids: list[str] | tuple[str, ...] | None = None,
         include_trashed: bool = False,
+        trashed_only: bool = False,
         order_by: str | None = None,
         limit: int = 500,
         offset: int = 0,
@@ -1907,7 +1979,9 @@ class CatalogIndex:
             tag_op=tag_op,
             type=type,
             asset_id=asset_id,
+            asset_ids=asset_ids,
             include_trashed=include_trashed,
+            trashed_only=trashed_only,
             order_by=order_by,
             limit=limit,
             offset=offset,
@@ -1922,7 +1996,9 @@ class CatalogIndex:
         tag_op: str = "and",
         type: str | None = None,
         asset_id: str | None = None,
+        asset_ids: list[str] | tuple[str, ...] | None = None,
         include_trashed: bool = False,
+        trashed_only: bool = False,
         order_by: str | None = None,
         limit: int = 500,
         offset: int = 0,
@@ -1935,7 +2011,9 @@ class CatalogIndex:
             tag_op=tag_op,
             type=type,
             asset_id=asset_id,
+            asset_ids=asset_ids,
             include_trashed=include_trashed,
+            trashed_only=trashed_only,
         )
         order = self._PAGE_ORDER_COLUMNS.get(order_by or "name", self._PAGE_ORDER_COLUMNS["name"])
         if after is not None and order_by in (None, "name"):
@@ -1943,9 +2021,14 @@ class CatalogIndex:
             wheres.append("(a.name > ? OR (a.name = ? AND a.id > ?))")
             params.extend([cursor_name, cursor_name, cursor_id])
         where = f"WHERE {' AND '.join(wheres)}" if wheres else ""
+        join = (
+            " LEFT JOIN versions v ON v.id = a.current_version_id"
+            if order_by in self._ORDER_NEEDS_VERSION_JOIN
+            else ""
+        )
         # Step 1: page the assets table alone (index order, no join).
         sql = (
-            f"SELECT a.* FROM assets a {where}"
+            f"SELECT a.* FROM assets a{join} {where}"
             f" ORDER BY {order}, a.id LIMIT ? OFFSET ?"
         )
         params_extended = [*params, int(max(0, limit)), int(max(0, offset))]
@@ -1985,7 +2068,9 @@ class CatalogIndex:
         tag_op: str = "and",
         type: str | None = None,
         asset_id: str | None = None,
+        asset_ids: list[str] | tuple[str, ...] | None = None,
         include_trashed: bool = False,
+        trashed_only: bool = False,
     ) -> int:
         """Count of assets matching the paged-path predicates (index-backed)."""
         return self._safe(
@@ -1997,7 +2082,9 @@ class CatalogIndex:
             tag_op=tag_op,
             type=type,
             asset_id=asset_id,
+            asset_ids=asset_ids,
             include_trashed=include_trashed,
+            trashed_only=trashed_only,
         )
 
     def _count_assets(
@@ -2008,7 +2095,9 @@ class CatalogIndex:
         tag_op: str = "and",
         type: str | None = None,
         asset_id: str | None = None,
+        asset_ids: list[str] | tuple[str, ...] | None = None,
         include_trashed: bool = False,
+        trashed_only: bool = False,
     ) -> int:
         wheres, params = self._paged_predicates(
             text=text,
@@ -2017,7 +2106,9 @@ class CatalogIndex:
             tag_op=tag_op,
             type=type,
             asset_id=asset_id,
+            asset_ids=asset_ids,
             include_trashed=include_trashed,
+            trashed_only=trashed_only,
         )
         where = f"WHERE {' AND '.join(wheres)}" if wheres else ""
         sql = f"SELECT count(*) FROM assets a {where}"

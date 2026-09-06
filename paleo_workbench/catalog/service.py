@@ -23,6 +23,7 @@ worker thread (all state lives in this object, no globals).
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 from collections.abc import Callable
@@ -32,12 +33,14 @@ from typing import Any, Iterable
 from paleo_workbench.catalog import audit as _audit
 from paleo_workbench.catalog import lineage_graph as _lineage
 from paleo_workbench.catalog import queries as _queries
+from paleo_workbench.catalog import sources as _sources
 from paleo_workbench.catalog import tags as _tags
 from paleo_workbench.catalog.checksum import sha256_file
 from paleo_workbench.catalog.db import (
     STORE_SCHEMA_VERSION,
     CatalogIndex,
     DirtySet,
+    normalize_asset_search_name,
 )
 from paleo_workbench.catalog.gc import (
     GcReport,
@@ -1727,6 +1730,7 @@ class DataCatalogService:
                 and self._asset_by_legacy_id(_legacy_resource_id) is None
             ):
                 asset.legacy_resource_id = _legacy_resource_id
+            stat = path.stat()
             version = DataVersion(
                 asset_id=asset.id,
                 version_number=1,
@@ -1735,7 +1739,16 @@ class DataCatalogService:
                 path=path.resolve().as_posix(),
                 source_uri=path.resolve().as_posix(),
                 format=format or "",
-                size_bytes=path.stat().st_size,
+                size_bytes=stat.st_size,
+                # Identity fingerprint for a later fail-closed relink (D9):
+                # size + mtime_ns are the recorded facts a relocated file
+                # must match when no digest was ever taken.
+                metadata={
+                    "external_stat": {
+                        "size": stat.st_size,
+                        "mtime_ns": stat.st_mtime_ns,
+                    }
+                },
             )
             asset.current_version_id = version.id
             self._add_asset(asset)
@@ -1767,6 +1780,44 @@ class DataCatalogService:
             DataStage.RAW,
             parent_version_ids=[linked.id],
             run_id=run_id,
+        )
+
+    # -- missing sources / relink (D9) -----------------------------------------
+
+    def find_missing_sources(
+        self,
+        *,
+        include_managed: bool = True,
+        cancel: Callable[[], bool] | None = None,
+    ) -> "_sources.MissingSourceReport":
+        """Stat-only scan for live versions whose payload no longer resolves.
+
+        Derived state — never persisted (a scan that wrote flags into the
+        canonical store would multiply writes and fight the cross-process
+        revision guard). Run off the GUI thread at catalog scale; ``cancel``
+        is polled per version.
+        """
+        return _sources.find_missing_sources(
+            self, include_managed=include_managed, cancel=cancel
+        )
+
+    def relink_external_source(
+        self,
+        version_id: str,
+        new_path: str | Path,
+        *,
+        actor: str = "user",
+    ) -> DataVersion:
+        """Fail-closed relink of an external RAW version to its moved file.
+
+        Delegates to
+        :func:`paleo_workbench.catalog.sources.relink_external_source`;
+        identity must be provable against recorded facts (sha256 or the
+        size+mtime fingerprint), otherwise
+        :class:`~paleo_workbench.catalog.sources.CatalogRelinkIdentityError`.
+        """
+        return _sources.relink_external_source(
+            self, version_id, new_path, actor=actor
         )
 
     # -- working copies / derived --------------------------------------------
@@ -2968,6 +3019,11 @@ class DataCatalogService:
         immediate rollback guarantees; deferring those commits would enlarge a
         crash window.  Here every mutation is in the CatalogDocument, so a
         failed canonical save can restore the exact pre-batch metadata state.
+
+        Rollback is journal-based (same discipline as ``bulk_add_tag``): only
+        the entries this call actually touches are recorded, so the cost is
+        O(names) instead of a deep copy of BOTH full association maps — which
+        at catalog scale (100k+ owners) dominated every batch tag add.
         """
         with self._lock:
             if asset_id is None and version_id is None:
@@ -2977,16 +3033,9 @@ class DataCatalogService:
             if version_id is not None:
                 self._version_or_raise(version_id)
 
-            # A deep copy is bounded to this explicit metadata batch and only
-            # retained until the single canonical write finishes.  It is never
-            # on normal project-save/open paths.
-            before_tags = list(self.document.tags)
-            before_asset_tags = {
-                key: list(value) for key, value in self.document.asset_tags.items()
-            }
-            before_version_tags = {
-                key: list(value)
-                for key, value in self.document.version_tags.items()
+            journal = _tags._TagJournal(self.document)
+            tags_by_name = {
+                tag.name: tag for tag in self.document.tags
             }
             result: list[Tag] = []
             changed = False
@@ -2998,27 +3047,36 @@ class DataCatalogService:
                     if not str(name or "").strip():
                         continue
                     normalized = self._normalize_tag_for_batch(str(name))
-                    tag = self._tag_by_normalized_name(normalized)
+                    tag = tags_by_name.get(normalized)
                     if tag is None:
                         tag = Tag(
                             name=normalized,
                             display_name=" ".join(str(name).split()),
                         )
                         self.document.tags.append(tag)
+                        tags_by_name[normalized] = tag
+                        journal.record_tag_created(tag)
                         created_tags.append(tag)
                         changed = True
                     if asset_id is not None:
-                        ids = self.document.asset_tags.setdefault(asset_id, [])
-                        if tag.id not in ids:
-                            ids.append(tag.id)
-                            changed = True
-                            touched_assets[asset_id] = None
+                        ids = self.document.asset_tags.get(asset_id)
+                        if ids is None or tag.id not in ids:
+                            # Capture BEFORE setdefault can create the key.
+                            journal.record_list("asset_tags", asset_id)
+                            ids = self.document.asset_tags.setdefault(asset_id, [])
+                            if tag.id not in ids:
+                                ids.append(tag.id)
+                                changed = True
+                                touched_assets[asset_id] = None
                     if version_id is not None:
-                        ids = self.document.version_tags.setdefault(version_id, [])
-                        if tag.id not in ids:
-                            ids.append(tag.id)
-                            changed = True
-                            touched_versions[version_id] = None
+                        ids = self.document.version_tags.get(version_id)
+                        if ids is None or tag.id not in ids:
+                            journal.record_list("version_tags", version_id)
+                            ids = self.document.version_tags.setdefault(version_id, [])
+                            if tag.id not in ids:
+                                ids.append(tag.id)
+                                changed = True
+                                touched_versions[version_id] = None
                     result.append(tag)
                 if changed:
                     self._save(
@@ -3030,16 +3088,8 @@ class DataCatalogService:
                     )
                 return result
             except Exception:
-                self.document.tags = before_tags
-                self.document.asset_tags = before_asset_tags
-                self.document.version_tags = before_version_tags
+                journal.rollback()
                 raise
-
-    def _tag_by_normalized_name(self, normalized: str) -> Tag | None:
-        for tag in self.document.tags:
-            if tag.name == normalized:
-                return tag
-        return None
 
     @staticmethod
     def _normalize_tag_for_batch(name: str) -> str:
@@ -3122,6 +3172,17 @@ class DataCatalogService:
             self, name, asset_ids=list(asset_ids), version_ids=list(version_ids)
         )
 
+    def tag_ids_for_asset(self, asset_id: str) -> list[str]:
+        """Ids of the tags attached to *asset_id* (read-only service seam).
+
+        UI consumers must resolve tag ownership through this method rather
+        than reaching into ``document.asset_tags`` — the representation may
+        change (e.g. a maintained inverse index) without breaking callers.
+        """
+        asset = self._asset_or_raise(asset_id)
+        with self._lock:
+            return list(self.document.asset_tags.get(asset.id, ()))
+
     def tag_usage(self) -> dict[str, dict]:
         """Per-tag association counts: ``{tag_id: {"name", "display_name",
         "assets", "versions"}}`` — Asset Tags and Version Tags counted apart.
@@ -3200,6 +3261,426 @@ class DataCatalogService:
             metadata=metadata,
             include_trashed=include_trashed,
         )
+
+    # -- paged queries (explorer scale path) ---------------------------------
+    #
+    # The read-only query seam the Data Explorer consumes: bounded pages,
+    # index-backed counts and group-by aggregates. The SQLite index answers
+    # whenever it can be proven current (not mid-batch, revision in sync);
+    # otherwise the same page contract is served from the in-memory document
+    # through a revision-keyed fallback so callers never fall back to
+    # materializing every asset in UI code.
+
+    def search_assets_page(
+        self,
+        *,
+        text: str | None = None,
+        stage: DataStage | str | None = None,
+        tags: list[str] | tuple[str, ...] | None = None,
+        tag_op: str = "and",
+        type: str | None = None,
+        asset_id: str | None = None,
+        asset_ids: list[str] | tuple[str, ...] | None = None,
+        include_trashed: bool = False,
+        trashed_only: bool = False,
+        order_by: str | None = None,
+        limit: int = 500,
+        offset: int = 0,
+        after: tuple[str, str] | None = None,
+    ) -> list[dict]:
+        """One deterministic page of assets joined with the current version.
+
+        Row shape (dicts) matches ``CatalogIndex.search_assets_page``: asset
+        columns plus ``current_stage`` / ``current_version_number`` /
+        ``current_size_bytes`` / ``current_sha256`` / ``current_managed`` /
+        ``current_format`` / ``current_path`` / ``current_created_at``.
+
+        Served from the SQLite index when it is provably current; inside a
+        ``batch_save`` (or when the index cannot be trusted) the page is
+        computed from the in-memory document with identical semantics, so a
+        caller paging mid-import sees the pending state instead of stale
+        rows. Never raises for query-shape reasons; an index hiccup degrades
+        to the document fallback, not an empty result.
+        """
+        index = self._query_index_if_current()
+        if index is not None:
+            try:
+                return index.search_assets_page(
+                    text=text,
+                    stage=stage,
+                    tags=tags,
+                    tag_op=tag_op,
+                    type=type,
+                    asset_id=asset_id,
+                    asset_ids=asset_ids,
+                    include_trashed=include_trashed,
+                    trashed_only=trashed_only,
+                    order_by=order_by,
+                    limit=limit,
+                    offset=offset,
+                    after=after,
+                )
+            except Exception:
+                pass  # fall through to the document-backed page
+        return self._paged_rows_from_document(
+            text=text,
+            stage=stage,
+            tags=tags,
+            tag_op=tag_op,
+            type=type,
+            asset_id=asset_id,
+            asset_ids=asset_ids,
+            include_trashed=include_trashed,
+            trashed_only=trashed_only,
+            order_by=order_by,
+            limit=limit,
+            offset=offset,
+            after=after,
+        )
+
+    def count_assets(
+        self,
+        *,
+        text: str | None = None,
+        stage: DataStage | str | None = None,
+        tags: list[str] | tuple[str, ...] | None = None,
+        tag_op: str = "and",
+        type: str | None = None,
+        asset_id: str | None = None,
+        asset_ids: list[str] | tuple[str, ...] | None = None,
+        include_trashed: bool = False,
+        trashed_only: bool = False,
+    ) -> int:
+        """Count of assets matching the paged-path predicates."""
+        index = self._query_index_if_current()
+        if index is not None:
+            try:
+                return int(
+                    index.count_assets(
+                        text=text,
+                        stage=stage,
+                        tags=tags,
+                        tag_op=tag_op,
+                        type=type,
+                        asset_id=asset_id,
+                        asset_ids=asset_ids,
+                        include_trashed=include_trashed,
+                        trashed_only=trashed_only,
+                    )
+                )
+            except Exception:
+                pass
+        return len(
+            self._paged_fallback_rows(
+                text=text,
+                stage=stage,
+                tags=tags,
+                tag_op=tag_op,
+                type=type,
+                asset_id=asset_id,
+                asset_ids=asset_ids,
+                include_trashed=include_trashed,
+                trashed_only=trashed_only,
+            )
+        )
+
+    def cached_catalog_aggregates(
+        self, include_trashed: bool = False
+    ) -> dict | None:
+        """The cached aggregates when fresh, else None (never computes).
+
+        Lets the UI serve badges synchronously on the warm path and defer
+        the ~389 ms cold group-by pass off the GUI thread at 100k.
+        """
+        with self._lock:
+            cache_key = (
+                self.document.catalog_revision,
+                self.mutation_serial,
+                bool(include_trashed),
+            )
+            cache = getattr(self, "_aggregates_cache", None)
+            cache_rev = getattr(self, "_aggregates_cache_rev", None)
+            if cache is not None and cache_rev == cache_key:
+                return cache
+        return None
+
+    def catalog_aggregates(self, include_trashed: bool = False) -> dict:
+        """Group-by counts for explorer badges: ``total``/``stages``/
+        ``types``/``tags``/``review_status`` (same shape as the index).
+
+        Cached per (revision, mutation serial, include_trashed): the tree
+        re-reads badges on every refresh while the aggregates only change
+        when the catalog mutates (~389 ms per uncached pass at 100k).
+        """
+        with self._lock:
+            cache_key = (self.document.catalog_revision, self.mutation_serial, bool(include_trashed))
+            cache = getattr(self, "_aggregates_cache", None)
+            cache_rev = getattr(self, "_aggregates_cache_rev", None)
+            if cache is not None and cache_rev == cache_key:
+                return cache
+        index = self._query_index_if_current()
+        if index is not None:
+            try:
+                computed = index.catalog_aggregates(include_trashed=include_trashed)
+            except Exception:
+                computed = None
+        else:
+            computed = None
+        if computed is None:
+            computed = self._aggregates_from_document(include_trashed=include_trashed)
+        with self._lock:
+            self._aggregates_cache = computed
+            self._aggregates_cache_rev = cache_key
+        return computed
+
+    def _aggregates_from_document(self, include_trashed: bool = False) -> dict:
+        """Aggregates from the in-memory document (index unavailable)."""
+        rows = self._paged_fallback_rows(include_trashed=include_trashed)
+        stages: dict[str, int] = {}
+        types: dict[str, int] = {}
+        review: dict[str, int] = {}
+        for row in rows:
+            stage_key = str(row.get("current_stage") or "")
+            if stage_key:
+                stages[stage_key] = stages.get(stage_key, 0) + 1
+            type_key = str(row.get("type") or "")
+            if type_key:
+                types[type_key] = types.get(type_key, 0) + 1
+            raw_metadata = row.get("metadata")
+            try:
+                metadata = (
+                    json.loads(raw_metadata)
+                    if isinstance(raw_metadata, str)
+                    else (raw_metadata or {})
+                )
+            except (TypeError, ValueError):
+                metadata = {}
+            status = (metadata or {}).get("review_status")
+            if status:
+                review[str(status)] = review.get(str(status), 0) + 1
+        tags_counts: dict[str, int] = {}
+        tags_by_id = {tag.id: tag for tag in self.document.tags}
+        for row in rows:
+            for tag_id in self.document.asset_tags.get(str(row["id"]), ()):
+                tag = tags_by_id.get(tag_id)
+                if tag is None:
+                    continue
+                key = str(tag.display_name or tag.name)
+                tags_counts[key] = tags_counts.get(key, 0) + 1
+        return {
+            "total": len(rows),
+            "stages": stages,
+            "types": types,
+            "tags": tags_counts,
+            "review_status": review,
+        }
+
+    def _query_index_if_current(self) -> CatalogIndex | None:
+        """The index when it can be trusted for a read, else None.
+
+        Mid-batch the document holds unflushed mutations the store has never
+        seen; a stale revision means the same. Reads must reflect the
+        document, so both cases take the document-backed fallback.
+        """
+        if self._batch_depth:
+            return None
+        try:
+            if self._index.revision() != self.document.catalog_revision:
+                return None
+        except Exception:
+            return None
+        return self._index
+
+    def _tag_by_id(self, tag_id: str):
+        for tag in self.document.tags:
+            if tag.id == tag_id:
+                return tag
+        return None
+
+    def _paged_fallback_rows(
+        self,
+        *,
+        text: str | None = None,
+        stage: DataStage | str | None = None,
+        tags: list[str] | tuple[str, ...] | None = None,
+        tag_op: str = "and",
+        type: str | None = None,
+        asset_id: str | None = None,
+        asset_ids: list[str] | tuple[str, ...] | None = None,
+        include_trashed: bool = False,
+        trashed_only: bool = False,
+    ) -> list[dict]:
+        """Filtered assets as paged-shape row dicts, cached per revision.
+
+        Single-slot cache keyed on (revision, mutation serial, query): the
+        explorer re-issues the same query for counts while paging, and the
+        cache keeps that O(1) instead of O(N) per page call.
+        """
+        query_key = (
+            normalize_asset_search_name(text or ""),
+            str(getattr(stage, "value", stage) or ""),
+            tuple(sorted(str(t) for t in (tags or ()))),
+            str(tag_op or "and"),
+            str(type or ""),
+            str(asset_id or ""),
+            tuple(sorted(str(a) for a in (asset_ids or ()))),
+            bool(include_trashed),
+            bool(trashed_only),
+        )
+        with self._lock:
+            cache_key = (self.document.catalog_revision, self.mutation_serial, query_key)
+            cache = getattr(self, "_paged_fallback_cache", None)
+            cache_rev = getattr(self, "_paged_fallback_cache_rev", None)
+            if cache is not None and cache_rev == cache_key:
+                return cache
+            needle = query_key[0] or None
+            stage_value = str(getattr(stage, "value", stage)) if stage is not None else None
+            wanted_tags = {
+                _tags.normalize_tag_name(t) for t in (tags or ()) if str(t).strip()
+            }
+            tags_by_id = {tag.id: tag.name for tag in self.document.tags}
+            asset_id_set = {str(a) for a in (asset_ids or ())}
+            rows: list[dict] = []
+            maps = self._ensure_maps()
+            for asset in self.document.assets:
+                if trashed_only:
+                    if not asset.trashed:
+                        continue
+                elif not include_trashed and asset.trashed:
+                    continue
+                if asset_id and asset.id != asset_id:
+                    continue
+                if asset_ids and asset.id not in asset_id_set:
+                    continue
+                if type is not None and asset.type != str(type):
+                    continue
+                if wanted_tags:
+                    owned = {
+                        tags_by_id.get(tid)
+                        for tid in self.document.asset_tags.get(asset.id, ())
+                    }
+                    owned.discard(None)
+                    if tag_op == "or":
+                        if not (owned & wanted_tags):
+                            continue
+                    elif not wanted_tags.issubset(owned):
+                        continue
+                version = maps.version_by_id.get(asset.current_version_id or "")
+                if stage_value is not None:
+                    if version is None or version.stage.value != stage_value:
+                        continue
+                if needle and needle not in normalize_asset_search_name(asset.name):
+                    continue
+                rows.append(self._asset_page_row(asset, version))
+            self._paged_fallback_cache = rows
+            self._paged_fallback_cache_rev = cache_key
+            return rows
+
+    def _asset_page_row(self, asset: DataAsset, version: DataVersion | None) -> dict:
+        """Paged-shape row dict from in-memory objects (fallback path)."""
+        row = {
+            "id": asset.id,
+            "name": asset.name,
+            "name_search": normalize_asset_search_name(asset.name),
+            "type": asset.type,
+            "description": asset.description,
+            "current_version_id": asset.current_version_id,
+            "legacy_resource_id": asset.legacy_resource_id,
+            # JSON TEXT, matching the SQL row contract byte-for-byte.
+            "metadata": json.dumps(asset.metadata or {}, ensure_ascii=False),
+            "created_at": asset.created_at,
+            "updated_at": asset.updated_at,
+            "trashed": 1 if asset.trashed else 0,
+            "trashed_at": asset.trashed_at,
+            "current_stage": version.stage.value if version is not None else None,
+            "current_version_number": (
+                version.version_number if version is not None else None
+            ),
+            "current_size_bytes": version.size_bytes if version is not None else None,
+            "current_sha256": version.sha256 if version is not None else None,
+            "current_managed": (
+                (1 if version.managed else 0) if version is not None else None
+            ),
+            "current_format": version.format if version is not None else None,
+            "current_path": version.path if version is not None else None,
+            "current_created_at": version.created_at if version is not None else None,
+        }
+        return row
+
+    _PAGE_FALLBACK_SORT_KEYS = {
+        "name": lambda row: (row["name"], row["id"]),
+        "type": lambda row: (row["type"], row["name"], row["id"]),
+        "modified": lambda row: (row["updated_at"], row["name"], row["id"]),
+    }
+
+    def _paged_rows_from_document(
+        self,
+        *,
+        text: str | None = None,
+        stage: DataStage | str | None = None,
+        tags: list[str] | tuple[str, ...] | None = None,
+        tag_op: str = "and",
+        type: str | None = None,
+        asset_id: str | None = None,
+        asset_ids: list[str] | tuple[str, ...] | None = None,
+        include_trashed: bool = False,
+        trashed_only: bool = False,
+        order_by: str | None = None,
+        limit: int,
+        offset: int,
+        after: tuple[str, str] | None,
+    ) -> list[dict]:
+        """Serve one page from the document (index unavailable/in-batch)."""
+        rows = self._paged_fallback_rows(
+            text=text,
+            stage=stage,
+            tags=tags,
+            tag_op=tag_op,
+            type=type,
+            asset_id=asset_id,
+            asset_ids=asset_ids,
+            include_trashed=include_trashed,
+            trashed_only=trashed_only,
+        )
+        order = order_by or "name"
+        if order == "name_desc":
+            # Stable two-pass sort: (name DESC, id ASC), matching the SQL
+            # ORDER BY a.name DESC, a.id tail.
+            rows = sorted(rows, key=lambda row: row["id"])
+            rows = sorted(rows, key=lambda row: row["name"], reverse=True)
+        elif order in ("stage", "size", "version"):
+            def sort_key(row, _order=order):
+                value = row.get(
+                    {
+                        "stage": "current_stage",
+                        "size": "current_size_bytes",
+                        "version": "current_version_number",
+                    }[_order]
+                )
+                # SQLite ASC sorts NULLs FIRST — the fallback must interleave
+                # identically or a mid-refresh gate flip would reorder rows.
+                return (
+                    0 if value is None else 1,
+                    value if value is not None else "",
+                    row["name"],
+                    row["id"],
+                )
+
+            rows = sorted(rows, key=sort_key)
+        else:
+            rows = sorted(
+                rows, key=self._PAGE_FALLBACK_SORT_KEYS.get(order, self._PAGE_FALLBACK_SORT_KEYS["name"])
+            )
+        if after is not None and order in (None, "name"):
+            cursor_name, cursor_id = str(after[0]), str(after[1])
+            rows = [
+                row
+                for row in rows
+                if row["name"] > cursor_name
+                or (row["name"] == cursor_name and row["id"] > cursor_id)
+            ]
+        start = max(0, int(offset))
+        return rows[start : start + max(0, int(limit))]
 
     def rebase_artifact_paths(self) -> bool:
         """Rewrite managed version paths after a save-as relocation.

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -212,6 +213,10 @@ class _CatalogActionWorker(QObject):
 
 
 class DataLifecycleController:
+    # D4: canonical commit chunk during bulk registration — bounds the dirty
+    # set / crash window per batch and gives cooperative cancel a granule.
+    REGISTRATION_CHUNK = 500
+
     """Business orchestration for the Data Manager page (catalog-aware).
 
     Composed by :class:`paleo_workbench.ui.pages.data_page.DataPage`, which
@@ -435,9 +440,24 @@ class DataLifecycleController:
         service = self.catalog_service()
         if service is not None:
             from paleo_workbench.catalog.models import DataAsset as _DataAsset
+            from paleo_workbench.ui.pages.paged_asset_model import SqlCatalogAssetRef
 
             for item in items:
                 unwrapped = unwrap_asset(item)
+                # SQL-paged rows: the ref id IS the catalog asset id.
+                if isinstance(unwrapped, SqlCatalogAssetRef):
+                    try:
+                        trashed_assets.append(
+                            service.trash_asset(unwrapped.id, reason="移出项目")
+                        )
+                        trashed_count += 1
+                        domain_asset_ids.add(str(unwrapped.id))
+                        target_ids.discard(unwrapped.id)
+                    except Exception as exc:
+                        page._set_action_status(f"移入回收站失败，未移除: {exc}")
+                        page._refresh()
+                        return False
+                    continue
                 if not isinstance(unwrapped, _DataAsset):
                     continue
                 try:
@@ -516,6 +536,24 @@ class DataLifecycleController:
         page = self.page
         item = page._selected_asset
         resource = unwrap_asset(item)
+        from paleo_workbench.ui.pages.paged_asset_model import SqlCatalogAssetRef
+
+        if isinstance(resource, SqlCatalogAssetRef):
+            # Paged trash view: the ref IS the catalog asset id.
+            service = self.catalog_service()
+            if service is None:
+                page._set_action_status("该回收站项目无目录关联，无法还原")
+                return False
+            try:
+                asset = service.restore_asset(resource.id)
+            except Exception as exc:
+                page._set_action_status(f"还原失败: {exc}")
+                return False
+            restored = self.resource_from_catalog_asset(service, asset)
+            from paleo_workbench.catalog.legacy_projection import upsert_legacy_resource
+
+            upsert_legacy_resource(page.project, restored)
+            return True
         if not isinstance(resource, ResourceItem):
             page._set_action_status("请选择回收站中的数据项")
             return False
@@ -1194,16 +1232,26 @@ class DataLifecycleController:
         updated per item; catalog side mirrored via service.bulk_add_tag/bulk_remove_tag
         in ONE canonical write. Returns number of items changed; a failed catalog
         mirror is recorded on ``last_tag_mirror_failed`` (never blocks legacy)."""
+        # SQL-paged rows are catalog-native already: their ref id IS the
+        # asset id, so they go straight into the bulk catalog write with no
+        # legacy mirror (there is no legacy ResourceItem to mirror to).
+        from paleo_workbench.ui.pages.paged_asset_model import SqlCatalogAssetRef
+
         resources = [
             res
             for res in (unwrap_asset(it) for it in items)
             if isinstance(res, ResourceItem)
         ]
+        ref_asset_ids = [
+            ref.id
+            for ref in (unwrap_asset(it) for it in items)
+            if isinstance(ref, SqlCatalogAssetRef)
+        ]
         # Catalog mirror first (best-effort, ONE write): collect the bridged
         # catalog asset ids the same way mirror_tag_to_catalog resolves them.
         self.last_tag_mirror_failed = False
         service = self.catalog_service()
-        asset_ids: list[str] = []
+        asset_ids: list[str] = list(ref_asset_ids)
         if service is not None:
             for resource in resources:
                 _svc, ref = self.catalog_bridge(resource)
@@ -1236,6 +1284,8 @@ class DataLifecycleController:
             elif tag_name in resource.tags:
                 resource.tags.remove(tag_name)
                 count += 1
+        if not resources:
+            count = len(asset_ids)  # ref-only selection: catalog is the truth
         return count
 
     def set_version_tag(self, version_id: str, tag_name: str, *, add: bool) -> bool:
@@ -1301,9 +1351,16 @@ class DataLifecycleController:
         service = self.catalog_service()
         if service is None:
             return None, {}
+        from paleo_workbench.ui.pages.paged_asset_model import SqlCatalogAssetRef
+
         bridged: dict[str, str] = {}
         for item in items:
             resource = unwrap_asset(item)
+            if isinstance(resource, SqlCatalogAssetRef):
+                # Paged rows carry their version id directly.
+                if resource.current_version_id:
+                    bridged[resource.id] = resource.current_version_id
+                continue
             _svc, ref = self.catalog_bridge(resource)
             if ref is not None and isinstance(resource, ResourceItem):
                 # Keyed by legacy resource id — the worker resolves views by it.
@@ -1426,7 +1483,11 @@ class DataLifecycleController:
     # ------------------------------------------------------------------ #
 
     def register_imported_resources(
-        self, resources: list[ResourceItem]
+        self,
+        resources: list[ResourceItem],
+        *,
+        progress: Callable[[int, int], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> dict[str, str]:
         """Register imported resources as catalog INPUT versions (RAW/EXTERNAL)
         with the legacy bridge so downstream runs can resolve them. Best-effort:
@@ -1436,6 +1497,12 @@ class DataLifecycleController:
         Failures are never silent: each one is logged and summarized on
         ``last_registration_failures`` (reset per call) so the import status
         surface can report how many registrations were lost.
+
+        Chunked batching (D4): resources are committed in chunks of
+        ``REGISTRATION_CHUNK`` — one canonical transaction per chunk — so a
+        100k-file import keeps its dirty sets and crash window bounded, and
+        ``cancel_check`` stops BETWEEN resources; every completed chunk is a
+        consistent committed batch (no half-registered state either way).
 
         Returns the exact ``ResourceItem.id → DataAsset.id`` values produced by
         this registration pass.  A reused catalog asset may retain an older
@@ -1454,49 +1521,73 @@ class DataLifecycleController:
                 "import catalog registration unavailable: %s", exc
             )
             return registered_asset_ids
-        # Bulk path (audit #849-3): register every file inside ONE batch so
-        # the canonical document is written (serialize + fsync) once, not once
-        # per file (O(N²) bytes on large folders). Per-resource failures are
-        # caught inside the batch so one bad file never discards the others;
-        # a failed final flush restores the pre-batch document and is recorded
-        # like any other registration failure (the import must never break).
-        batch = None
-        try:
-            from paleo_workbench.catalog import get_catalog
 
-            cat = get_catalog()
-            if cat is not None:
-                enter = getattr(cat, "batch_save", None)
-                if callable(enter):
-                    batch = enter()
-                    batch.__enter__()
-        except Exception as exc:
+        def _enter_batch():
             batch = None
-            logging.getLogger(__name__).warning(
-                "import catalog batch unavailable; falling back per-file: %s", exc
-            )
-        try:
-            for resource in resources:
+            try:
+                from paleo_workbench.catalog import get_catalog
+
+                cat = get_catalog()
+                if cat is not None:
+                    enter = getattr(cat, "batch_save", None)
+                    if callable(enter):
+                        batch = enter()
+                        batch.__enter__()
+            except Exception as exc:
+                batch = None
+                logging.getLogger(__name__).warning(
+                    "import catalog batch unavailable; falling back per-file: %s", exc
+                )
+            return batch
+
+        total = len(resources)
+        # Bulk path (audit #849-3) — chunked for bounded memory/crash window
+        # and cooperative cancellation (D4).
+        for start in range(0, total, self.REGISTRATION_CHUNK):
+            if cancel_check is not None and cancel_check():
+                break
+            chunk_ids: dict[str, str] = {}
+            batch = _enter_batch()
+            committed = True
+            try:
+                for resource in resources[start : start + self.REGISTRATION_CHUNK]:
+                    if cancel_check is not None and cancel_check():
+                        break
+                    try:
+                        ref = register_resource_input(resource)
+                        if ref is not None:
+                            chunk_ids[str(resource.id)] = str(ref.asset_id)
+                    except Exception as exc:
+                        failure = f"{resource.name} ({resource.id}): {exc}"
+                        self.last_registration_failures.append(failure)
+                        logging.getLogger(__name__).warning(
+                            "import catalog registration failed for %s: %s",
+                            resource.id,
+                            exc,
+                        )
+            finally:
+                if batch is not None:
+                    try:
+                        batch.__exit__(None, None, None)
+                    except Exception as exc:
+                        # Only THIS chunk's registrations are lost — earlier
+                        # chunks are already committed and their bridges must
+                        # stay in the receipt.
+                        committed = False
+                        self.last_registration_failures.append(f"批提交失败: {exc}")
+                        logging.getLogger(__name__).warning(
+                            "import catalog batch commit failed: %s", exc
+                        )
+            if committed:
+                registered_asset_ids.update(chunk_ids)
+            if progress is not None:
                 try:
-                    ref = register_resource_input(resource)
-                    if ref is not None:
-                        registered_asset_ids[str(resource.id)] = str(ref.asset_id)
-                except Exception as exc:
-                    failure = f"{resource.name} ({resource.id}): {exc}"
-                    self.last_registration_failures.append(failure)
-                    logging.getLogger(__name__).warning(
-                        "import catalog registration failed for %s: %s",
-                        resource.id,
-                        exc,
-                    )
-        finally:
-            if batch is not None:
-                try:
-                    batch.__exit__(None, None, None)
-                except Exception as exc:
-                    registered_asset_ids.clear()
-                    self.last_registration_failures.append(f"批提交失败: {exc}")
-                    logging.getLogger(__name__).warning(
-                        "import catalog batch commit failed: %s", exc
+                    # The ACTUAL registered count: a cancel inside the chunk
+                    # commits a partial batch, and progress must never claim
+                    # resources that were skipped.
+                    progress(len(registered_asset_ids), total)
+                except Exception:  # a progress fault must never abort the import
+                    logging.getLogger(__name__).debug(
+                        "import progress callback failed", exc_info=True
                     )
         return registered_asset_ids
