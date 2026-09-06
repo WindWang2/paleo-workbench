@@ -75,3 +75,18 @@
 - Tests: tests/test_catalog_working_copy_lifecycle.py (7: reuse+edits kept,
   name-collision identity, crash-after-copy reopen, crash-during-commit both
   evidence branches, discard terminal, concurrent convergence, save-as orphan)
+
+## PHASE 7 complete — project recovery decision table (#1229)
+- manager.py _load_data: PermissionError/OSerror → typed ProjectUnreadableError
+  (NEVER .bak fallback — main+backup untouched); FileNotFoundError → interrupted-
+  save restore; JSON/validation → corruption quarantine (*.corrupt-<ts>, catalog
+  precedent) + .bak restore; unusable .bak → original error re-raised
+- Persistent record: ProjectMeta.last_recovery {source, recovered_at, error,
+  quarantined} set on the model at load (snapshot keeps disk truth → next save
+  persists it even when otherwise clean)
+- Stale guard v2: snapshot gains disk_sha256; mtime drift + identical hash =
+  benign external touch (re-baseline + proceed); content change → refuse
+- controller: ProjectUnreadableError mapping with retry message
+- Fixed 4th pre-existing main failure: unknown-section warning dead since
+  extra=allow (#1170) — detection now diffs declared model_fields
+- Tests: tests/test_project_recovery_v6.py (6) + regression 54 green

@@ -30,6 +30,11 @@ class ProjectMeta(BaseModel):
     created_at: str = Field(default_factory=_now_iso)
     updated_at: str = Field(default_factory=_now_iso)
     project_root: str = "."
+    # v6 (#1229): persistent record of a load-time metadata recovery — set
+    # when the main file was proven corrupt (or interrupted) and the session
+    # was restored from the .bak. Persisted by the next save so the event is
+    # auditable after reopen. None on ordinary loads.
+    last_recovery: dict | None = None
 
 
 class CoordinateReference(BaseModel):

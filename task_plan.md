@@ -35,7 +35,7 @@ support/benchmarking (small/medium fixtures only).
 - [x] PHASE 5: Payload registration protocol (PREPARE..PUBLISH) + GC lease/coord
       (commit 4)
 - [x] PHASE 6: Working-copy state machine  (commit 5)
-- [ ] PHASE 7: Project open/save/backup/recovery decision table  (commit 6)
+- [x] PHASE 7: Project open/save/backup/recovery decision table  (commit 6)
 - [ ] PHASE 8: Runtime session generation + real cancellation  (commit 7)
 - [ ] PHASE 9: ResourceGovernor convergence (OMP/BLAS/env mutation removal)  (commit 8)
 - [ ] PHASE 10: Lineage/DataRun atomicity + path identity/relink fail-closed  (commit 9)
@@ -45,7 +45,7 @@ support/benchmarking (small/medium fixtures only).
 - [ ] PHASE 13: Docs 00–11 complete; PR to main with full evidence
 
 ## Current Phase
-PHASE 7 (project recovery)
+PHASE 8 (session generation + cancellation)
 
 ## Decisions (locked — do not revisit)
 (none yet beyond hard constraints)

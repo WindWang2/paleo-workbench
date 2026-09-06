@@ -8,7 +8,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 from pydantic import ValidationError
 
-from paleo_workbench.project.manager import ProjectManager
+from paleo_workbench.project.manager import ProjectManager, ProjectUnreadableError
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.project.paths import (
     ProjectPathError,
@@ -199,6 +199,15 @@ class ProjectController:
         except ProjectPathError as e:
             self._last_open_error = (
                 f"工程内相对路径非法（疑似逃出工程目录）：\n{target}\n{e}"
+            )
+            return False
+        except ProjectUnreadableError as e:
+            # v6 (#1229): transient unreadability (AV/sync lock) — the .bak
+            # fallback must NOT fire; the main file and its backup stay
+            # untouched so a retry after freeing the file loses nothing.
+            self._last_open_error = (
+                f"工程文件暂时不可读（可能被占用），未回退备份以免覆盖较新内容：\n"
+                f"{target}\n{e}\n请关闭占用该文件的程序后重试。"
             )
             return False
         except OSError as e:

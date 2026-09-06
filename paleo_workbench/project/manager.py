@@ -44,6 +44,16 @@ class ProjectStaleWriteError(OSError):
     """
 
 
+class ProjectUnreadableError(OSError):
+    """The project file EXISTS but cannot be read right now (#1229).
+
+    A transient condition (AV scanner / sync tool / another instance holding
+    the file) must NEVER trigger the .bak fallback: replacing a merely-locked
+    newer main with an older backup is silent data loss. The open fails with
+    this typed error and the user retries after freeing the file.
+    """
+
+
 class ProjectDirtyDomain(str, Enum):
     """Runtime-only domains used to explain a bounded project save."""
 
@@ -99,6 +109,11 @@ class ProjectPersistenceSnapshot:
     # file advanced past it means another process wrote since we last looked
     # (#411 stale-write detection).
     disk_mtime_ns: int | None = None
+    # Content hash of the bytes behind disk_mtime_ns (v6 #1229): an mtime
+    # move with identical content is a benign external touch (sync tools) —
+    # verified before the stale guard refuses; only a real content change
+    # raises ProjectStaleWriteError.
+    disk_sha256: str | None = None
     # Some old portable projects still contain inline numerical grids.  They
     # need one artifact migration even when their in-memory representation is
     # otherwise identical to the just-loaded document.
@@ -207,6 +222,19 @@ def project_backup_path(project_path: str | Path) -> Path:
 def _file_mtime_ns(path: Path) -> int | None:
     try:
         return path.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def _file_sha256(path: Path) -> str | None:
+    try:
+        import hashlib
+
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 16), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
     except OSError:
         return None
 
@@ -361,6 +389,10 @@ class ProjectManager:
         self.project_path = Path(project_path)
         self.last_save_stats = ProjectSaveStats(False, frozenset())
         self.last_recovery_message: str | None = None
+        # v6 (#1229): load-time recovery bookkeeping (see _load_data).
+        self.last_recovery: dict | None = None
+        self.last_recovery_quarantine: str | None = None
+        self.last_recovery_error: str | None = None
 
     def _portable_payload(
         self,
@@ -474,13 +506,35 @@ class ProjectManager:
         if same_path and snapshot.disk_mtime_ns is not None:
             current = _file_mtime_ns(self.project_path)
             if current is not None and current != snapshot.disk_mtime_ns:
-                # Another process wrote the project since this session loaded
-                # or last saved it; a whole-document overwrite would silently
-                # drop that process's commits (last-writer-wins, #411).
-                raise ProjectStaleWriteError(
-                    f"工程文件已被其他实例修改（{self.project_path.name}）；"
-                    "为避免覆盖他人提交，保存已中止。请重新打开工程后重试。"
-                )
+                # v6 (#1229): an mtime move alone is not proof of foreign
+                # CONTENT — sync/backup tools touch files. Only a content
+                # change refuses the save; a benign touch re-baselines.
+                current_hash = _file_sha256(self.project_path)
+                if (
+                    snapshot.disk_sha256 is not None
+                    and current_hash == snapshot.disk_sha256
+                ):
+                    _remember_snapshot(
+                        project,
+                        ProjectPersistenceSnapshot(
+                            project_path=snapshot.project_path,
+                            runtime_sections=snapshot.runtime_sections,
+                            portable_sections=snapshot.portable_sections,
+                            disk_mtime_ns=current,
+                            disk_sha256=current_hash,
+                            pending_sections=snapshot.pending_sections,
+                        ),
+                    )
+                    snapshot = _snapshot_for(project)
+                else:
+                    # Another process wrote the project since this session
+                    # loaded or last saved it; a whole-document overwrite
+                    # would silently drop that process's commits
+                    # (last-writer-wins, #411).
+                    raise ProjectStaleWriteError(
+                        f"工程文件已被其他实例修改（{self.project_path.name}）；"
+                        "为避免覆盖他人提交，保存已中止。请重新打开工程后重试。"
+                    )
 
         factor_changes = 0
         if not same_path or "factor_map_tasks" in changed_sections:
@@ -546,34 +600,97 @@ class ProjectManager:
                 runtime_sections=prepared.runtime_sections,
                 portable_sections=prepared.payload_data,
                 disk_mtime_ns=_file_mtime_ns(self.project_path),
+                disk_sha256=_file_sha256(self.project_path),
                 pending_sections=frozenset(),
             ),
         )
         self.last_save_stats = stats
 
     def _load_data(self) -> tuple[dict[str, Any], ProjectDocument, bool]:
-        """Read canonical metadata, falling back to one last-known-good copy."""
+        """Read canonical metadata under the v6 recovery decision table.
 
+        Failure classes are distinguished BEFORE any file is touched:
+
+        ============================  =========================================
+        Failure                       Action
+        ============================  =========================================
+        PermissionError / other       TRANSIENT: the bytes may be fine (AV /
+        read OSError                  sync tool / other instance holds the
+                                      file). Never fall back to .bak — surface
+                                      :class:`ProjectUnreadableError`; main
+                                      and .bak stay untouched (#1229).
+        FileNotFoundError             Interrupted save (main→bak done,
+                                      tmp→main not): restore .bak.
+        JSON / validation errors      CORRUPTION established: quarantine the
+                                      corrupt bytes as ``*.corrupt-<ts>`` for
+                                      forensics, then restore .bak.
+        .bak missing / also invalid   Re-raise the original error; open fails
+                                      honestly.
+        ============================  =========================================
+
+        Every recovery records its evidence on the document
+        (``meta.last_recovery``: source, time, quarantine path, original
+        error class) so it survives the next save, and the caller captures
+        the mtime baseline from the file that actually backs the session.
+        """
         self.last_recovery_message = None
+        self.last_recovery: dict[str, Any] | None = None
         try:
             data = json.loads(self.project_path.read_text(encoding="utf-8"))
             return data, ProjectDocument.model_validate(data), False
-        except (OSError, ValueError, TypeError, ValidationError) as original_error:
+        except PermissionError as error:
+            raise ProjectUnreadableError(
+                f"工程文件暂时不可读（可能被杀毒/同步软件或其他实例占用）："
+                f"{self.project_path}。未回退到备份以免覆盖较新内容；"
+                "请释放文件占用后重试。"
+            ) from error
+        except FileNotFoundError:
+            # Interrupted-save crash window: the previous revision is sitting
+            # in the .bak and main simply never landed.
             backup = project_backup_path(self.project_path)
             if not backup.is_file():
-                raise original_error
+                raise
+            recovery_source = "backup-interrupted-save"
+        except (ValueError, TypeError, ValidationError) as corruption:
+            backup = project_backup_path(self.project_path)
+            if not backup.is_file():
+                raise
+            recovery_source = "backup-corrupt-main"
+            quarantine = self.project_path.with_name(
+                f"{self.project_path.name}.corrupt-"
+                f"{_now_iso().replace(':', '').replace('-', '')}"
+            )
             try:
-                data = json.loads(backup.read_text(encoding="utf-8"))
-                project = ProjectDocument.model_validate(data)
-            except (OSError, ValueError, TypeError, ValidationError):
-                raise original_error
-            try:
-                os.replace(backup, self.project_path)
+                os.replace(self.project_path, quarantine)
                 fsync_dir(self.project_path.parent)
             except OSError:
-                pass
-            self.last_recovery_message = "已恢复上一次完整工程元数据版本"
-            return data, project, True
+                quarantine = None  # keep going: the .bak restore is the point
+            self.last_recovery_quarantine = str(quarantine) if quarantine else None
+            self.last_recovery_error = f"{type(corruption).__name__}"
+        else:  # pragma: no cover - defensive
+            raise
+
+        try:
+            data = json.loads(backup.read_text(encoding="utf-8"))
+            project = ProjectDocument.model_validate(data)
+        except (OSError, ValueError, TypeError, ValidationError):
+            raise  # backup unusable: fail honestly, main was never damaged
+
+        try:
+            os.replace(backup, self.project_path)
+            fsync_dir(self.project_path.parent)
+        except OSError:
+            pass
+        record = {
+            "source": recovery_source,
+            "recovered_at": _now_iso(),
+            "error": getattr(self, "last_recovery_error", None)
+            or "FileNotFoundError",
+            "quarantined": getattr(self, "last_recovery_quarantine", None),
+        }
+        self.last_recovery = record
+        self.last_recovery_message = "已恢复上一次完整工程元数据版本"
+        return data, project, True
 
     def load(self) -> ProjectDocument:
         _cleanup_project_temps(self.project_path)
@@ -623,7 +740,11 @@ class ProjectManager:
                     deepcopy(portable_sections[section]),
                     self.project_path,
                 )
-        unknown_sections = sorted(set(data) - set(runtime_sections))
+        # "Unknown" = not part of the DECLARED schema. With extra="allow" the
+        # model carries future sections through model_dump, so diffing against
+        # runtime_sections would never see them (#1170 regression: the
+        # newer-schema warning went silent).
+        unknown_sections = sorted(set(data) - set(ProjectDocument.model_fields))
         for section in unknown_sections:
             portable_sections[section] = deepcopy(data[section])
         if unknown_sections:
@@ -647,6 +768,15 @@ class ProjectManager:
                 pending.add(section)
         portable_sections["meta"] = dict(portable_sections.get("meta", {}))
         portable_sections["meta"]["project_root"] = "."
+        # A load-time recovery is recorded on the document (#1229) — the next
+        # save persists it (this also makes the recovered session's snapshot
+        # differ from disk exactly once, by the record itself).
+        recovery = getattr(self, "last_recovery", None)
+        if recovery is not None:
+            # Set on the MODEL only: the session snapshot keeps the disk
+            # truth (no record), so the very next save — even an otherwise
+            # clean one — persists the recovery record.
+            project.meta.last_recovery = dict(recovery)
         _remember_snapshot(
             project,
             ProjectPersistenceSnapshot(
@@ -654,6 +784,7 @@ class ProjectManager:
                 runtime_sections=runtime_sections,
                 portable_sections=portable_sections,
                 disk_mtime_ns=_file_mtime_ns(self.project_path),
+                disk_sha256=_file_sha256(self.project_path),
                 pending_sections=frozenset(pending),
             ),
         )
