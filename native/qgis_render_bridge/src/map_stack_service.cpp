@@ -410,6 +410,36 @@ inline QgsLayerTreeLayer* treeLayerCast(QgsLayerTreeNode* node) {
         : nullptr;
 }
 
+// takeChild 的隐藏语义：removeChildrenPrivate 会先递归卸下被移动节点的
+// 全部后代（makeOrphan）——直接对带子组的组调用会摧毁子树。此处的
+// 后序卸载保证每次 takeChild 时目标节点已无子节点。
+struct SubtreeDetachEntry {
+    QgsLayerTreeNode* node;
+    QList<QgsLayerTreeNode*> children;
+};
+
+void detachGroupSubtree(QgsLayerTreeNode* node, QList<SubtreeDetachEntry*>* log) {
+    const QList<QgsLayerTreeNode*> children = node->children();
+    if (children.isEmpty()) return;
+    for (QgsLayerTreeNode* child : children) {
+        detachGroupSubtree(child, log);
+    }
+    for (QgsLayerTreeNode* child : children) {
+        node->takeChild(child);  // child 此刻必为叶（无树子节点）
+    }
+    log->append(new SubtreeDetachEntry{node, children});
+}
+
+void restoreGroupSubtree(const QList<SubtreeDetachEntry*>& log) {
+    for (const auto* entry : log) {
+        auto* group = treeGroupCast(const_cast<QgsLayerTreeNode*>(entry->node));
+        if (group == nullptr) continue;
+        for (int i = 0; i < entry->children.size(); ++i) {
+            group->insertChildNode(i, entry->children.at(i));
+        }
+    }
+}
+
 // #1154 舞步：registry bridge 的移除计数不受 setEnabled 开关控制
 //（groupWillRemoveChildren 无条件收集图层 id），takeChild/insertChildNode
 // 期间必须把 root 上那两个连接整体断开，析构时原样接回。
@@ -1744,12 +1774,16 @@ bool QgisMapStack::upsertGroup(const std::string& group_id, const std::string& n
       existing->setName(QString::fromStdString(name));
     }
     if (existing != parent && existing->parent() != parent) {
-      // 挂错父组：整体搬移（子树跟随，组节点移动不触碰图层注册表）。
+      // 挂错父组：整体搬移。takeChild 会先递归卸下后代——先做子树
+      // 保护性卸载再搬空组、按原结构挂回。
       QgsLayerTreeNode* oldParent = existing->parent();
       if (oldParent != nullptr && oldParent->children().indexOf(existing) >= 0) {
-        // takeChild 只解除挂载（返回 bool），节点指针仍有效，随即重挂。
+        QList<SubtreeDetachEntry*> subtreeLog;
+        detachGroupSubtree(existing, &subtreeLog);
         oldParent->takeChild(existing);
         parent->addChildNode(existing);
+        restoreGroupSubtree(subtreeLog);
+        qDeleteAll(subtreeLog);
       }
     }
   }
@@ -1900,9 +1934,16 @@ void QgisMapStack::moveGroup(const std::string& group_id,
     const int count = static_cast<int>(target->children().size());
     const int clamped = index < 0 ? count : std::min(index, count);
     if (parent != nullptr) {
+      // 子树保护性卸载 → 空组搬运 → 原结构挂回（takeChild 递归 orphan 后代）。
+      QList<SubtreeDetachEntry*> subtreeLog;
+      detachGroupSubtree(group, &subtreeLog);
       parent->takeChild(group);
+      target->insertChildNode(clamped, group);
+      restoreGroupSubtree(subtreeLog);
+      qDeleteAll(subtreeLog);
+    } else {
+      target->insertChildNode(clamped, group);
     }
-    target->insertChildNode(clamped, group);
   }
   for (auto& kv : impl_->canvas_refs) {
     if (!kv.second.isNull()) syncCanvasLayers(kv.first);
@@ -1931,6 +1972,93 @@ void QgisMapStack::setGroupExpanded(std::uintptr_t tree_view,
     SuppressGuard guard(&impl_->suppress_tree_callbacks);
     node->setExpanded(expanded);
   }
+}
+
+std::string QgisMapStack::applyTreePlacements(const std::string& placements_json) {
+  if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
+  QJsonParseError parseErr;
+  const QJsonDocument doc = QJsonDocument::fromJson(
+      QByteArray::fromStdString(placements_json), &parseErr);
+  if (parseErr.error != QJsonParseError::NoError || !doc.isArray()) {
+    throw std::invalid_argument("invalid placements JSON");
+  }
+  QgsLayerTree* root = project()->layerTreeRoot();
+  // 一次遍历建索引：doc_id → layer 节点；group_id → 组节点。
+  std::unordered_map<std::string, QgsLayerTreeLayer*> layerByDoc;
+  std::unordered_map<std::string, QgsLayerTreeGroup*> groupByGid;
+  std::function<void(QgsLayerTreeGroup*)> index = [&](QgsLayerTreeGroup* parent) {
+    for (QgsLayerTreeNode* child : parent->children()) {
+      if (auto* layerNode = treeLayerCast(child)) {
+        QgsMapLayer* layer = layerNode->layer();
+        if (layer != nullptr) {
+          const QString d = layer->customProperty(QStringLiteral("pwb/doc_id")).toString();
+          if (!d.isEmpty()) {
+            layerByDoc[d.toStdString()] = layerNode;
+          }
+        }
+      } else if (auto* group = treeGroupCast(child)) {
+        const std::string gid = ensureGroupNodeId(group);
+        groupByGid[gid] = group;
+        index(group);
+      }
+    }
+  };
+  index(root);
+
+  int applied = 0;
+  int skipped = 0;
+  {
+    SuppressGuard guard(&impl_->suppress_tree_callbacks);
+    RegistryBridgeDetach bridgeDetach{project(), root};
+    for (const QJsonValue& value : doc.array()) {
+      if (!value.isObject()) continue;
+      const QJsonObject item = value.toObject();
+      const QString nodeRef = item.value(QStringLiteral("node")).toString();
+      const QString parentRef = item.value(QStringLiteral("parent")).toString();
+      const int index1 = item.value(QStringLiteral("index")).toInt(-1);
+      QgsLayerTreeGroup* target = root;
+      if (!parentRef.isEmpty()) {
+        auto found = groupByGid.find(parentRef.toStdString());
+        if (found == groupByGid.end()) { skipped++; continue; }
+        target = found->second;
+      }
+      if (nodeRef.startsWith(QStringLiteral("group:"))) {
+        auto found = groupByGid.find(
+            nodeRef.mid(static_cast<int>(strlen("group:"))).toStdString());
+        if (found == groupByGid.end()) { skipped++; continue; }
+        QgsLayerTreeGroup* group = found->second;
+        if (group == target || isDescendantOf(target, group)) { skipped++; continue; }
+        QList<SubtreeDetachEntry*> subtreeLog;
+        detachGroupSubtree(group, &subtreeLog);
+        if (QgsLayerTreeNode* parent = group->parent()) {
+          parent->takeChild(group);
+        }
+        const int count = static_cast<int>(target->children().size());
+        target->insertChildNode(
+            index1 < 0 ? count : std::min(index1, count), group);
+        restoreGroupSubtree(subtreeLog);
+        qDeleteAll(subtreeLog);
+      } else {
+        auto found = layerByDoc.find(nodeRef.toStdString());
+        if (found == layerByDoc.end()) { skipped++; continue; }
+        QgsLayerTreeLayer* node = found->second;
+        if (QgsLayerTreeNode* parent = node->parent()) {
+          parent->takeChild(node);
+        }
+        const int count = static_cast<int>(target->children().size());
+        target->insertChildNode(
+            index1 < 0 ? count : std::min(index1, count), node);
+      }
+      applied++;
+    }
+  }
+  for (auto& kv : impl_->canvas_refs) {
+    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
+  }
+  QJsonObject out;
+  out.insert(QStringLiteral("applied"), applied);
+  out.insert(QStringLiteral("skipped"), skipped);
+  return QJsonDocument(out).toJson(QJsonDocument::Compact).toStdString();
 }
 
 std::string QgisMapStack::writeProjectXml() {
@@ -1982,8 +2110,8 @@ int QgisMapStack::applyProjectXml(const std::string& xml) {
     int index;
     bool visible;
   };
-  std::vector<std::string> donorGroups;      // (id) 自上而下
-  std::vector<std::pair<std::string, std::string>> groupNames;  // (id, name)
+  // (id, name, parent_gid) 自上而下（父先于子）。
+  std::vector<std::tuple<std::string, std::string, std::string>> groupPlacements;
   std::vector<Placement> placements;
   std::vector<std::string> flatOrder;
   std::function<void(QgsLayerTreeGroup*, const std::string&, bool)> walk =
@@ -1997,8 +2125,8 @@ int QgisMapStack::applyProjectXml(const std::string& xml) {
                 gidRaw.isEmpty()
                     ? "user_" + QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString()
                     : gidRaw.toStdString();
-            donorGroups.push_back(gid);
-            groupNames.emplace_back(gid, donorGroup->name().toStdString());
+            groupPlacements.emplace_back(
+                gid, donorGroup->name().toStdString(), parent_gid);
             walk(donorGroup, gid, true);
             continue;
           }
@@ -2041,11 +2169,10 @@ int QgisMapStack::applyProjectXml(const std::string& xml) {
       };
   walk(donor.layerTreeRoot(), std::string(), false);
 
-  if (!donorGroups.empty()) {
-    // 组结构恢复（重挂临时解除 suppress 的作用域见 upsertGroup 内部 guard）。
-    for (const auto& [gid, name] : groupNames) {
-      // donor 组的父组按出现序先建（自上而下保证父先于子）。
-      upsertGroupUnderLock(gid, name);
+  if (!groupPlacements.empty()) {
+    // 组结构恢复：donor 出现序自上而下（父先于子），嵌套父级按 donor 挂载。
+    for (const auto& [gid, name, parent_gid] : groupPlacements) {
+      upsertGroupUnderLock(gid, name, parent_gid);
     }
     for (const auto& placement : placements) {
       if (findMirrorByDocId(project(), placement.doc_id) == nullptr) continue;
@@ -2066,15 +2193,19 @@ int QgisMapStack::applyProjectXml(const std::string& xml) {
 }
 
 void QgisMapStack::upsertGroupUnderLock(const std::string& group_id,
-                                        const std::string& name) {
-  // applyProjectXml 已持 SuppressGuard；此处只建根级组（嵌套父组由
-  // Python 侧 LayerGroupController 经 upsertGroup 正规恢复，本路径仅
-  // 保证平铺组不丢失）。
+                                        const std::string& name,
+                                        const std::string& parent_group_id) {
+  // applyProjectXml 已持 SuppressGuard；donor 出现序保证父组先建。
   QgsLayerTree* root = project()->layerTreeRoot();
   if (findGroupByGroupIdIn(root, group_id) != nullptr) return;
+  QgsLayerTreeGroup* parent = root;
+  if (!parent_group_id.empty()) {
+    parent = findGroupByGroupIdIn(root, parent_group_id);
+    if (parent == nullptr) parent = root;  // 父组缺失退根（不丢组）
+  }
   auto* node = new QgsLayerTreeGroup(QString::fromStdString(name));
   node->setCustomProperty(kGroupIdProp, QString::fromStdString(group_id));
-  root->addChildNode(node);
+  parent->addChildNode(node);
   wireNodeExpandSignal(node);
   impl_->known_group_names[group_id] = name;
 }
@@ -2635,8 +2766,13 @@ std::uintptr_t QgisMapStack::createLayerTreeView(std::uintptr_t canvas_addr) {
 }
 
 void QgisMapStack::wireNodeExpandSignalsRecursively(QgsLayerTreeNode* node) {
+  // 只接组节点（StageViewState 的展开态是组级语义）；layer 接线会让
+  // 大规模插入每层触发一次 Python 回调（GIL 往返），大树上不可接受。
   if (node == nullptr) return;
-  wireNodeExpandSignal(node);
+  if (treeGroupCast(node) == nullptr) return;
+  if (node != project()->layerTreeRoot()) {
+    wireNodeExpandSignal(node);
+  }
   const QList<QgsLayerTreeNode*> children = node->children();
   for (QgsLayerTreeNode* child : children) {
     if (treeGroupCast(child) != nullptr) {

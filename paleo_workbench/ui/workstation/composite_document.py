@@ -1699,11 +1699,14 @@ class CompositeDocument(QWidget):
             self._project.workstation_reference_layers = list(self._reference_layers)
 
     def _sync_workspace_state_to_project(self) -> None:
-        """阶段工作区科学状态 → ProjectDocument.mapping_workspace。"""
+        """阶段工作区科学状态 → ProjectDocument.mapping_workspace；
+        组展开态（纯 UI 偏好）→ QSettings。"""
         if self._project is None:
             return
         try:
             self._project.mapping_workspace = self.stage_controller.save_state()
+            self.stage_controller.save_expand_prefs(
+                str(getattr(getattr(self._project, "meta", None), "name", "") or ""))
         except Exception:
             logging.getLogger(__name__).exception(
                 "persist mapping workspace state failed")
@@ -1876,6 +1879,11 @@ class CompositeDocument(QWidget):
         # V5：镜像 upsert 完成后做组结构/放置/阶段显隐的增量 reconcile
         #（组模式下 mirror 不推 root 平铺顺序，组树由 controller 权威驱动）。
         try:
+            # 首次发布时绑定树视图地址（展开态回调；幂等）。
+            tree_host = getattr(self.layer_manager, "tree_host", None)
+            if tree_host is not None and self.uses_native_stack:
+                self.stage_controller.group_controller.attach_tree_view(
+                    tree_host.tree_view_address)
             self.stage_controller.sync_composition()
         except Exception:
             logging.getLogger(__name__).exception("stage workspace reconcile failed")
@@ -1901,9 +1909,12 @@ class CompositeDocument(QWidget):
             ]
             self._reference_status = {}
             self.edit_controller.load_from_project(project)
-            # V5：恢复阶段工作区科学状态（当前阶段/成员资格/组结构/视图覆盖）。
+            # V5：恢复阶段工作区科学状态（当前阶段/成员资格/组结构/视图覆盖）
+            # + UI 展开偏好（QSettings，按工程名分域）。
             self.stage_controller.load_state(
                 dict(getattr(project, "mapping_workspace", None) or {}))
+            self.stage_controller.load_expand_prefs(
+                str(getattr(getattr(project, "meta", None), "name", "") or ""))
             catalog = None
             try:
                 from paleo_workbench.catalog.runtime import get_catalog

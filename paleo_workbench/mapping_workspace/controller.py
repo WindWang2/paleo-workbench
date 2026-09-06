@@ -157,11 +157,57 @@ class MappingStageController(QObject):
             self.active_target_changed.emit(layer_id)
 
     def restore_stage_view(self) -> None:
-        """工程打开后恢复当前阶段上下文（可见性 + 编辑目标 + 评估）。"""
+        """工程打开后恢复当前阶段上下文（可见性 + 展开态 + 编辑目标 + 评估）。"""
         stage = self.state.current_stage
         self.group_controller.apply_stage_visibility(stage)
+        self.group_controller.apply_group_expanded(
+            self.group_controller.expand_states.get(stage.value, {}))
         self._reassign_active_target()
         self.refresh_evaluation()
+
+    # -- 组展开态（UI 偏好 → QSettings，V5 §45） ----------------------------------
+
+    _EXPAND_SETTINGS_PREFIX = "mapping_workspace/expanded"
+
+    def save_expand_prefs(self, project_key: str = "") -> None:
+        """组展开态 → QSettings（按工程键分域；纯 UI 偏好不进科学工程）。"""
+        try:
+            from PySide6.QtCore import QSettings
+
+            from paleo_workbench.ui.layout_persistence import (
+                SETTINGS_APP,
+                SETTINGS_ORG,
+            )
+
+            settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
+            prefix = f"{self._EXPAND_SETTINGS_PREFIX}/{project_key or 'default'}"
+            for stage_value, expanded_map in (
+                    self.group_controller.expand_states.items()):
+                settings.setValue(
+                    f"{prefix}/{stage_value}",
+                    {k: bool(v) for k, v in expanded_map.items()})
+        except Exception:
+            logger.debug("save expand prefs failed", exc_info=True)
+
+    def load_expand_prefs(self, project_key: str = "") -> None:
+        """QSettings → 组展开态（工程打开时）。"""
+        try:
+            from PySide6.QtCore import QSettings
+
+            from paleo_workbench.ui.layout_persistence import (
+                SETTINGS_APP,
+                SETTINGS_ORG,
+            )
+
+            settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
+            prefix = f"{self._EXPAND_SETTINGS_PREFIX}/{project_key or 'default'}"
+            for stage in STAGE_ORDER:
+                value = settings.value(f"{prefix}/{stage.value}", {})
+                if isinstance(value, dict) and value:
+                    self.group_controller.expand_states[stage.value] = {
+                        str(k): bool(v) for k, v in value.items()}
+        except Exception:
+            logger.debug("load expand prefs failed", exc_info=True)
 
     # -- 组合同步入口 --------------------------------------------------------------
 

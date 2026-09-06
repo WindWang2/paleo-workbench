@@ -767,6 +767,9 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
              py::arg("group_id"), py::arg("parent_group_id"), py::arg("index"))
         .def("tree_snapshot_json",
              &pwb::qgis_render::QgisMapStack::treeSnapshotJson)
+        .def("apply_tree_placements",
+             &pwb::qgis_render::QgisMapStack::applyTreePlacements,
+             py::arg("placements_json"))
         .def("set_group_expanded",
              &pwb::qgis_render::QgisMapStack::setGroupExpanded)
         .def("zoom_to_layer", &pwb::qgis_render::QgisMapStack::zoomToLayer)

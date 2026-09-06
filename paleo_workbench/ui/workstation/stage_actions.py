@@ -223,7 +223,7 @@ class StageActionDispatcher:
             layer = self.edit_controller.layer(raw)
             source_name = f"{layer.name} 校正稿"
             source_features = [
-                (feature.geometry, dict(feature.properties or {}))
+                (feature.geometry, dict(feature.attributes or {}))
                 for feature in layer.features()
             ]
         else:
@@ -435,7 +435,7 @@ class StageActionDispatcher:
         if base is not None:
             layer = self.edit_controller.layer(base)
             features = [
-                (feature.geometry, dict(feature.properties or {}))
+                (feature.geometry, dict(feature.attributes or {}))
                 for feature in layer.features()
             ]
         layer_id = self._create_role_layer(

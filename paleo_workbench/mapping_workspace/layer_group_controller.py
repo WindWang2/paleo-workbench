@@ -67,6 +67,8 @@ class LayerGroupController:
         self.on_structure_changed: Callable[[], None] | None = None
         #: 非法拖放（角色路由冲突）通知宿主显示提示。
         self.on_invalid_move: Callable[[str, str], None] | None = None
+        # 组展开态（阶段 → node_id → expanded；UI 偏好，宿主落 QSettings）。
+        self.expand_states: dict[str, dict[str, bool]] = {}
         # 运行时放置表：layer_id → group_id（"" = root），从持久化树恢复。
         self._placements: dict[str, str] = {}
         self._group_orders: dict[str, list[str]] = {}   # group_id → [layer_id]
@@ -99,6 +101,23 @@ class LayerGroupController:
     def degraded(self) -> bool:
         """True = 桥无 group 能力（UI 必须显示分组不可用，不得假装分组）。"""
         return self._stack is not None and not self.groups_available
+
+    def attach_tree_view(self, tree_view_address: int) -> None:
+        """绑定 QgsLayerTreeView 地址并注册展开态回调（StageViewState 持久化）。"""
+        self._tree_view_address = int(tree_view_address or 0)
+        if self._stack is None or not self.groups_available:
+            return
+        if not self._tree_view_address:
+            return
+        try:
+            self._stack.set_tree_expand_callback(
+                self._tree_view_address, self._on_expand_event)
+        except Exception:
+            logger.debug("set_tree_expand_callback failed", exc_info=True)
+
+    def _on_expand_event(self, node_id: str, expanded: bool) -> None:
+        """用户展开/收起组 → 记录到当前阶段（QSettings 侧由宿主持久化）。"""
+        self.expand_states[self.state.current_stage.value][str(node_id)] = bool(expanded)
 
     def reload_from_state(self) -> None:
         """工程状态重载后：重读放置表并作废增量基线（下次 reconcile 全量）。"""
@@ -238,13 +257,18 @@ class LayerGroupController:
 
         def group_children(group_id: str) -> tuple:
             children: list[GroupNode | LayerRef] = []
-            # factor 子组挂在其任务组下
-            for other_id in sorted(buckets):
-                if not other_id.startswith("factor."):
-                    continue
-                template = system_group_template(other_id)
-                if template is not None and template.parent_id == group_id:
-                    children.append(make_group(other_id))
+            # factor 子组（factor.<task_id>）统一挂在 FACTOR_ROOT 下；
+            # 它们是动态系统组（不在 SYSTEM_GROUP_TEMPLATES 里，经
+            # factor_titles / 成员资格发现），按任务 id 稳定排序。
+            if group_id == FACTOR_ROOT_GROUP_ID:
+                factor_ids = sorted({
+                    gid for gid in buckets
+                    if gid.startswith("factor.")
+                } | {
+                    gid for gid in self._group_orders if gid.startswith("factor.")
+                })
+                for factor_id in factor_ids:
+                    children.append(make_group(factor_id))
             for layer_id in buckets.get(group_id, []):
                 children.append(LayerRef(layer_id=layer_id))
             # 用户组挂在 root（V5 首版：用户组仅 root 级）
@@ -338,7 +362,37 @@ class LayerGroupController:
             else:
                 self._collect_group(child, child.group_id)
 
+    def _placements_of(self, desired: LayerTreeSnapshot) -> list[dict]:
+        """期望树 → 扁平放置指令（node/parent/index，深度优先）。"""
+        placements: list[dict] = []
+
+        def walk(children, parent_id):
+            for index, child in enumerate(children):
+                if isinstance(child, GroupNode):
+                    placements.append({
+                        "node": f"group:{child.group_id}",
+                        "parent": parent_id,
+                        "index": index,
+                    })
+                    walk(child.children, child.group_id)
+                else:
+                    placements.append({
+                        "node": child.layer_id,
+                        "parent": parent_id,
+                        "index": index,
+                    })
+
+        walk(desired.children, "")
+        return placements
+
     def _place_all(self, desired: LayerTreeSnapshot) -> None:
+        # 批量放置（桥 O(N) 路径）；旧桥回落逐个 move（兼容，规模小可接受）。
+        batch = getattr(self._stack, "apply_tree_placements", None)
+        if callable(batch):
+            import json as _json
+
+            batch(_json.dumps(self._placements_of(desired)))
+            return
         root_children = list(desired.children)
         for index, child in enumerate(root_children):
             if isinstance(child, GroupNode):
@@ -537,7 +591,15 @@ class LayerGroupController:
     # -- 查询 ---------------------------------------------------------------------
 
     def placement_of(self, layer_id: str) -> str:
-        return self._placements.get(str(layer_id), "")
+        """图层归属组（运行时放置表 → 成员资格路由兜底，degraded 同样有效）。"""
+        layer_id = str(layer_id)
+        if layer_id in self._placements:
+            return self._placements[layer_id]
+        record = self.state.membership(layer_id)
+        if record is not None:
+            return home_group_for_role(
+                record.role, factor_task_id=record.factor_task_id)
+        return ""
 
     def group_summary(self, group_id: str) -> dict[str, int]:
         """组内状态聚合（layers/stale/errors 计数，事件驱动缓存由宿主维护）。"""

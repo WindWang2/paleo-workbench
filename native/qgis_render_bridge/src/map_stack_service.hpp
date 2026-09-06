@@ -111,6 +111,12 @@ public:
   // 程序化展开/收起组节点（恢复 StageViewState）。
   void setGroupExpanded(std::uintptr_t tree_view, const std::string& node_id, bool expanded);
 
+  // V5 批量放置：placements JSON [{"node":"doc 或 group:<gid>","parent":"<gid|''>",
+  // "index":int}, ...] —— 单次桥调用完成全部放置 + 仅一次画布同步
+  //（逐个 move_* 是 O(N²)：每次都做全树 find + 全画布 sync）。
+  // 返回应用的放置数；未知节点跳过并计数在返回 JSON {"applied":n,"skipped":m}。
+  std::string applyTreePlacements(const std::string& placements_json);
+
   // 右键菜单：C++ 侧组装（QGIS 默认动作 + 自定义动作键），自定义动作触发
   // callback(action_key, doc_id)。重设会替换旧 provider（view 接管所有权）。
   void setTreeMenuCallback(
@@ -261,7 +267,8 @@ private:
   void wireNodeExpandSignalsRecursively(QgsLayerTreeNode* node);
   void wireNodeExpandSignal(QgsLayerTreeNode* node);
   // applyProjectXml 内部（调用方已持 SuppressGuard）的轻量组恢复。
-  void upsertGroupUnderLock(const std::string& group_id, const std::string& name);
+  void upsertGroupUnderLock(const std::string& group_id, const std::string& name,
+                            const std::string& parent_group_id);
   void moveLayerToGroupUnderLock(const std::string& doc_id,
                                  const std::string& group_id, int index);
 };
