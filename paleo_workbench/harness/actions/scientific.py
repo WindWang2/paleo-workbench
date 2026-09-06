@@ -63,6 +63,7 @@ def register(registry) -> None:
                 "返回带能力矩阵警示的推荐报告（忽略约束的方法不因指标好而被推荐）。"
             ),
             handler=_evaluate_methods,
+            output_schema={"type": "object", "properties": {"factor": {"type": "string"}, "scheme": {"type": "string"}, "k": {"type": "integer"}, "methods": {"type": "array"}, "recommended_method": {"type": ["string", "null"]}, "fold_engine": {"type": "string"}, "error": {"type": "string"}, "detail": {"type": "string"}}, "required": ["methods"]},
             risk=ActionRisk.COMPUTE,
             category="background.compute",
             resource_profile={"estimated_cpu_cores": 1.5, "io_weight": 0.5},
@@ -113,6 +114,8 @@ def register(registry) -> None:
                 "单位未声明/约束被忽略/缺不确定性 → 警告并记录（可拒绝）。"
             ),
             handler=_publish_product,
+            output_schema={"type": "object", "properties": {"published": {"type": "boolean"}, "ok": {"type": "boolean"}, "problems": {"type": "array"}, "warnings": {"type": "array"}, "error": {"type": "string"}, "detail": {"type": "string"}}, "required": []},
+            side_effect_notes="runs the publish gate only (refuses or reports); exporting the file to disk is the caller's step",
             risk=ActionRisk.WRITE,
             category="background.io",
             resource_profile={"estimated_cpu_cores": 0.5, "io_weight": 1.5},
