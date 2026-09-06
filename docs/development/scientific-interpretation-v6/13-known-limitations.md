@@ -25,3 +25,16 @@
 - verifier coverage: grid/map payload auto-verification only; scientific
   WRITE actions beyond map.* remain without dedicated verifiers.
 - 100GB seismic explicitly out of scope (program boundary).
+
+## Added by review (documented limitations, honest behavior kept)
+- publish-gate CRS: PaleoMapDocument carries no CRS field and the
+  composition document is not project-addressable, so map CRS cannot be
+  conclusively verified at publish time — the gate records a warning with
+  the project CRS instead of a fabricated pass (round 2 P0-2).
+- seismic.describe_calibration reports per-well UNKNOWN when no coordinate
+  hub is threaded into the action context (never fabricated no_calibration).
+- kriging LOO CV still scores the isotropic-default model (task variogram
+  params are not threaded into leave_one_out_predictions) — the §13
+  recommendation report and kriging_diagnostics carry the production
+  variogram honesty record instead.
+- engine multi-well mixed-unit composition remains (documented in 02).

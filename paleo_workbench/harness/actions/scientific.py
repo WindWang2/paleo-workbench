@@ -166,16 +166,26 @@ def _describe_units(context: ActionContext, parameters: dict) -> dict:
 def _describe_calibration(context: ActionContext, parameters: dict) -> dict:
     project = context.project
     wells = []
+    # The hub is not part of ActionContext today (review R2-P0: reading a
+    # nonexistent attr fabricated no_calibration for every well). When a hub
+    # has NOT been injected the honest answer is per-well UNKNOWN — never a
+    # fabricated "no calibration" statement.
     hub = getattr(context, "coordinate_hub", None)
-    calibrations = getattr(hub, "_calibrations", None) if hub is not None else None
+    calibrations = {}
+    if hub is not None and hasattr(hub, "time_depth_calibration"):
+        # public accessor only — never the hub's private dict
+        for well in getattr(project, "wells", None) or []:
+            cal = hub.time_depth_calibration(well.id)
+            if cal is not None:
+                calibrations[well.id] = cal
     for well in getattr(project, "wells", None) or []:
         entry = {
             "well_id": well.id,
             "well_name": well.name,
-            "calibration": "no_calibration",
+            "calibration": "unknown" if hub is None else "no_calibration",
         }
-        if calibrations and well.id in calibrations:
-            cal = calibrations[well.id]
+        cal = calibrations.get(well.id)
+        if cal is not None:
             pairs = list(getattr(cal, "pairs", []) or [])
             entry.update(
                 {
@@ -188,6 +198,7 @@ def _describe_calibration(context: ActionContext, parameters: dict) -> dict:
         wells.append(entry)
     return {
         "wells": wells,
+        "hub_available": hub is not None,
         "policy": "time-depth conversion requires a calibration; velocity is never guessed",
     }
 
@@ -234,12 +245,19 @@ def _evaluate_methods(context: ActionContext, parameters: dict) -> dict:
         requested_constraints=parameters.get("requested_constraints"),
         k=int(parameters.get("k") or 4),
     )
+    # Review R2-P1: ONE proxy fold engine cannot discriminate methods — the
+    # per-method metrics are identical by construction. Demote the ranking
+    # honestly; the capability warnings remain authoritative.
     report["factor"] = task.name
     report["fold_engine"] = "idw-proxy"
-    report["detail"] = (
-        "fold engine is an IDW proxy for comparability; absolute RMSE values "
-        "are relative indicators, capability warnings are authoritative"
-    )
+    report["recommended_method"] = None
+    for entry in report.get("methods", []):
+        entry["recommended"] = None
+        entry["rationale"] = (
+            "proxy fold engine (IDW) cannot discriminate methods — metrics "
+            "are NOT a method comparison; only capability warnings are "
+            "authoritative here"
+        )
     return report
 
 

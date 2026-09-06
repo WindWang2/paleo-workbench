@@ -41,3 +41,34 @@ suites, harness ×4, workarea/stratigraphy binding).
 ## Full-suite gate
 Fast gate `-m "not slow and not opengl and not qgis"` run at milestone
 boundaries; final full-suite verification runs before the PR (see PR body).
+
+## Review rounds (§22) — 3 independent deep reviews, all P0/P1 fixed
+Round 1 (scientific): fixed — kriging auto-fit double-transform (the fit ran
+in a ratio² frame; 20% range / 32% sill error on anisotropic fields, now
+single-transform + regression test), engine false "anisotropy ignored" on
+every run and its contradiction when kriging applied it, MultiPolygon ring
+access, meters-LAS losing its declaration.
+
+Round 2 (architecture): fixed — meters-LAS loader wrap condition (every V6
+unit gate failed closed on properly declared meters files), publish-gate CRS
+check reading a nonexistent collection (would have refused every product
+with a composition ref → now an honest verifiability warning, see 13),
+calibration action reading a nonexistent context attr + hub private (now
+per-well UNKNOWN when no hub threaded, public accessor only),
+kriging_diagnostics persisted to task provenance, geometry CRS predicate
+delegated to crs_policy (was a second, disagreeing authority),
+factor.evaluate_methods no longer fabricates a method ranking from one
+proxy fold engine.
+
+Round 3 (numerical/adversarial): fixed — the double-transform fit (probe:
+13.6%-of-std prediction error), azimuth 0° anisotropy loss, anonymous
+tops-overlay leakage (no-id no-name target received ALL wells' tops),
+projected "WGS 84 / UTM…" strings misread as geographic (≈m² wrong by
+10^11), descending-axis interp_gap_preserving now raises, evaluate_request
+dedupe, KB lookup keyed with the shift key, wrapper declared-flag
+consistency note.
+
+Also fixed (main-branch debt surfaced by the audit): the 5 tautological
+assertions behind tests/e2e/test_integrity_guard failures — each un-masked
+assertion now checks real behavior (two were masking wrong assertions,
+fixed to match actual table/model contracts).

@@ -267,7 +267,11 @@ def evaluate_request(
     """
     caps = capabilities_for_method(method)
     app = ConstraintApplication(method=caps.method)
-    for kind in requested or ():
+    seen_kinds: set[ConstraintKind] = set()
+    for kind in list(requested or []):
+        if kind in seen_kinds:
+            continue
+        seen_kinds.add(kind)
         kind = ConstraintKind(kind)
         app.requested.append(kind.value)
         support, notes = caps.for_kind(kind)

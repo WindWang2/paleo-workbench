@@ -312,10 +312,6 @@ def _finite_pairs(
     return depth_out, values_out, nulls
 
 
-_FT_UNITS = frozenset({"FT", "F", "FEET", "FOOT"})
-_M_UNITS = frozenset({"M", "METER", "METERS", "MTR", "MTRS"})
-
-
 def _depth_unit_envelope(value: Any) -> tuple[str, bool]:
     """Classify the depth unit for engine submission.
 

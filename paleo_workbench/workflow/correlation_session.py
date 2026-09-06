@@ -360,6 +360,10 @@ def tops_overlay_for_well(
     out: list[dict[str, Any]] = []
     target_id = (well_id or "").strip()
     target_name = (well_name or "").strip()
+    if not target_id and not target_name:
+        # Anonymous target: no identity to match on — returning everything
+        # would place ALL wells' tops on one log (review R3-P1).
+        return []
     for t in tops:
         top_id = (t.well_id or "").strip()
         if top_id:

@@ -130,3 +130,13 @@ class TestPolygonizationQc:
         # raw deg² stays (conservation) + an explicitly-labelled approximation
         assert props["area_unit"] == "deg²"
         assert "area_approx_m2" in props and props["area_approx_m2"] > 0
+
+
+class TestReviewRegressions:
+    def test_projected_wgs84_substring_not_geographic(self):
+        """R3-P1: 'WGS 84 / UTM…' and proj4 UTM strings are PROJECTED."""
+        assert is_geographic_crs("WGS 84 / UTM zone 48N") is False
+        assert is_geographic_crs("+proj=utm +zone=48 +datum=WGS84") is False
+
+    def test_epsg4326_still_geographic(self):
+        assert is_geographic_crs("EPSG:4326") is True

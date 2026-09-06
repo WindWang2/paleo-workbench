@@ -55,7 +55,12 @@ class WellSectionDatum:
             if mode == "md":
                 shifts[key] = 0.0
             elif mode == "tvdss":
-                kb = (kb_elevations or {}).get(wname)
+                # KB lookup uses the same key the shift is stored under —
+                # name-keyed lookups made duplicate-named wells share one KB
+                # (review R2-P2).
+                kb = (kb_elevations or {}).get(WellSectionDatum.shift_key_for(bh))
+                if kb is None:
+                    kb = (kb_elevations or {}).get(wname)
                 if kb is None and diagnostics is not None:
                     diagnostics.append(
                         f"well '{wname}': KB elevation missing; tvdss shift left at 0.0"

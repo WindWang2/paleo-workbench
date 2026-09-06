@@ -58,7 +58,8 @@ def test_teardown_cycles_without_stale_callbacks(qtbot, monkeypatch):
         # 关闭：teardown 后不得再收到任何树/阶段回调引发的 C++ 访问。
         doc.shutdown()
         QApplication.processEvents()
-    assert True
+    # teardown itself is the assertion target: shutdown() completed without
+    # raising for every document created in this test
 
 
 def test_project_switch_does_not_leak_state(qtbot, monkeypatch):

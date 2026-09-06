@@ -12,19 +12,21 @@ from __future__ import annotations
 import math
 from typing import Iterable, Sequence
 
-_GEOGRAPHIC_EPSG = {4326, 4269, 4267, 4623, 4312}
 _METRES_PER_DEGREE_LAT = 111_320.0
 
 
 def is_geographic_crs(crs: str | None) -> bool:
-    """True for known geographic (lat/lon-degree) CRS identifiers."""
-    text = str(crs or "").strip().upper()
-    if not text:
+    """True for geographic (lat/lon-degree) CRS — delegated to the D5
+    authority ``crs_policy`` (single CRS predicate in the repo; review
+    R2-P1/R3-P1: a substring heuristic here misclassified projected
+    "WGS 84 / UTM …" strings and disagreed with crs_policy's answers)."""
+    from paleo_workbench.workflow.crs_policy import crs_is_geographic
+
+    try:
+        result = crs_is_geographic(str(crs or "").strip())
+    except Exception:
         return False
-    if "4326" in text or "WGS84" in text or "WGS 84" in text:
-        return True
-    digits = "".join(ch for ch in text if ch.isdigit())
-    return int(digits) in _GEOGRAPHIC_EPSG if digits else False
+    return bool(result)
 
 
 def area_unit_label(crs: str | None) -> str:

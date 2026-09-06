@@ -170,3 +170,37 @@ class TestExplicitParameters:
             diagnostics=diagnostics,
         )
         assert diagnostics["anisotropy"] == {"azimuth_deg": 30.0, "ratio": 2.5}
+
+
+class TestReviewRegressions:
+    def test_fit_is_single_transformed_not_double(self):
+        """R1-P0/R3-P0: ordinary_kriging's auto-fit must NOT re-transform the
+        already-transformed coordinates (ratio² frame distorted range/sill)."""
+        from geoviz_plots.factor.kriging import apply_anisotropy_transform, fit_variogram
+
+        x, y, z = _anisotropic_field(seed=13, n=400)
+        az, ratio = 90.0, 5.0
+        u, v = apply_anisotropy_transform(x, y, azimuth_deg=az, ratio=ratio)
+        direct = fit_variogram(u, v, z)  # correct single-transform reference
+        d: dict = {}
+        ordinary_kriging(
+            x, y, z, np.array([500.0]), np.array([500.0]),
+            azimuth_deg=az, anisotropy_ratio=ratio, diagnostics=d,
+        )
+        fitted = d["variogram"]
+        assert fitted["range"] == pytest.approx(direct["range"], rel=1e-9)
+        assert fitted["sill"] == pytest.approx(direct["sill"], rel=1e-9)
+        assert fitted["nugget"] == pytest.approx(direct["nugget"], rel=1e-9)
+
+    def test_azimuth_0_with_explicit_axes_is_requested(self):
+        """R3-P1: azimuth 0° (due north) must not disable anisotropy when
+        the axes are explicitly configured."""
+        diagnostics: dict = {}
+        ordinary_kriging(
+            np.array([0.0, 100.0, 200.0, 300.0]),
+            np.array([0.0, 10.0, 0.0, 10.0]),
+            np.array([1.0, 2.0, 3.0, 4.0]),
+            np.array([150.0]), np.array([5.0]),
+            azimuth_deg=0.0, anisotropy_ratio=4.0, diagnostics=diagnostics,
+        )
+        assert diagnostics["anisotropy"] == {"azimuth_deg": 0.0, "ratio": 4.0}

@@ -57,7 +57,9 @@ def test_dialog_lists_missing_and_relinkable_flags(service, tmp_path, qtbot):
     qtbot.addWidget(dialog)
     _wait_scan_clean(dialog, qtbot)
     assert dialog.table.rowCount() == 1
-    assert dialog.table.item(0, 0).text() == external.asset_id or True
+    # column 0 lists the asset NAME (the stable id rides in item data, not
+    # display text) — the external asset must be the listed row
+    assert dialog.table.item(0, 0).text() == getattr(external, "name", "GR1.las")
     assert dialog.table.item(0, 2).text() == "外部"
     assert dialog.table.item(0, 4).text() == "可重链接"
     assert dialog.folder_btn.isEnabled()

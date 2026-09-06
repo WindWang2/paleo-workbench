@@ -270,6 +270,10 @@ def _attach_result_to_task(
             if entry not in record["constraint_diagnostics"]:
                 record["constraint_diagnostics"].append(f"engine:{entry}")
         params["constraint_diagnostics"] = record
+        if result.get("kriging_diagnostics"):
+            # V6 §11 (review R2-P1): which variogram produced this surface
+            # and HOW its parameters were chosen must reach task provenance.
+            params["kriging_diagnostics"] = result["kriging_diagnostics"]
     params["n_break_lines"] = result.get("n_break_lines", 0)
     if result.get("n_direction_lines") is not None:
         params["n_direction_lines"] = result.get("n_direction_lines")

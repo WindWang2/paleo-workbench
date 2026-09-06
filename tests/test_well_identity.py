@@ -292,3 +292,14 @@ class TestRegistryScale:
         )
         assert report.ambiguous_assets == 1
         assert report.wells_created == 0
+
+
+class TestReviewRegressions:
+    def test_anonymous_target_returns_no_tops(self):
+        """R3-P1: a target with no id AND no name must not receive every
+        well's tops."""
+        tops = [
+            _top("well-a", "W-1", "H1", 100.0),
+            _top("well-b", "W-2", "H1", 200.0),
+        ]
+        assert tops_overlay_for_well(tops, well_id="", well_name="") == []

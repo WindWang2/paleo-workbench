@@ -347,6 +347,9 @@ def test_cross_validate_surface_tolerates_nonfinite_and_dedupes_twins():
     unique = cross_validate_surface(clean, run_fold=_idw_fold, k=4)
     assert unique is not None
     assert base.metrics.rmse == pytest.approx(unique.metrics.rmse, rel=1e-9)
-    assert base.metrics.rmse < cross_validate_surface(
-        with_twins + with_twins[:0], run_fold=_idw_fold, k=4
-    ).metrics.rmse or True  # dedupe removes the inflation by construction
+    # the dedupe contract itself: passing the twins through again changes
+    # nothing (duplicate groups enter as ONE sample)
+    again = cross_validate_surface(with_twins + with_twins[:0], run_fold=_idw_fold, k=4)
+    assert again is not None and again.metrics.rmse == pytest.approx(
+        unique.metrics.rmse, rel=1e-9
+    )

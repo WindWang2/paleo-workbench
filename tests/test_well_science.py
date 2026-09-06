@@ -140,19 +140,20 @@ class TestDetectDepthUnitFromFile:
         path.write_text(_las_text(None), encoding="utf-8")
         assert detect_depth_unit(str(path)) is None
 
-    def test_wrapper_carries_unknown_unit_explicitly(self, tmp_path):
-        from paleo_workbench.viz.well_log_load import (
-            WellLogDataWithDepthUnit,
-            load_well_log_from_path,
-        )
+    def test_undeclared_unit_loads_bare_and_reads_unknown(self, tmp_path):
+        from paleo_workbench.workflow.well_science import depth_unit_of
+
+        from paleo_workbench.viz.well_log_load import load_well_log_from_path
 
         path = tmp_path / "nounit2.las"
         path.write_text(_las_text(None), encoding="utf-8")
         data = load_well_log_from_path(str(path))
         assert data is not None
-        assert isinstance(data, WellLogDataWithDepthUnit)
-        assert data.depth_unit is None
-        assert data.depth_unit_declared is False
+        # The envelope is only attached when there is something to declare;
+        # an undeclared axis loads bare and every consumer reads UNKNOWN.
+        info = depth_unit_of(data)
+        assert info.unit is None
+        assert info.declared is False
 
     def test_declared_ft_wrapper_marks_declared(self, tmp_path):
         from paleo_workbench.viz.well_log_load import (

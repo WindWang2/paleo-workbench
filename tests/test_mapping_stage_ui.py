@@ -62,7 +62,7 @@ def test_stage_panel_pages_and_constraint_row(qtbot, monkeypatch):
     frame = _frame(qtbot, monkeypatch)
     panel = frame.mapping_stage_panel
     # 默认 Phase1：约束行不可见。
-    assert not panel._constraints_row.isVisibleTo(panel) or True  # 显隐由 stage 驱动
+    assert not panel._constraints_row.isVisibleTo(panel)  # 显隐由 stage 驱动
     panel.set_stage(MappingStage.CONSTRAINT_FACTOR.value)
     assert panel.stack.currentWidget() is panel._pages[MappingStage.CONSTRAINT_FACTOR]
     panel.set_stage(MappingStage.INTEGRATED_COMPILATION.value)

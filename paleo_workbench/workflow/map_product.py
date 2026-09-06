@@ -639,23 +639,34 @@ def publish_map_product(
             "fix the reported issues before publishing"
         )
 
-    # CRS must be explicit: an unlabelled footprint is unverifiable. A
-    # record without a composition reference has no map footprint to check
-    # (warned below), not a silent pass.
-    map_doc = _map_document_for_record(record, project)
+    # CRS verifiability (review R2-P0): PaleoMapDocument carries no CRS
+    # field and the composition document is not addressable from the
+    # project, so the CRS cannot be CONCLUSIVELY verified today — the
+    # honest gate action is a recorded warning (documented limitation 13),
+    # never a fabricated pass. The project-level CRS declaration is
+    # reported for the caller to judge.
+    project_crs = str(
+        getattr(getattr(project, "coordinate", None), "project_crs", "") or ""
+    ).strip()
     if record.composition_ref:
-        crs = str(getattr(map_doc, "crs", "") or "").strip() if map_doc is not None else ""
-        if not crs:
-            problems.append("map CRS undeclared — coordinates are unverifiable")
+        warnings.append(
+            "map CRS not verifiable from the composition reference "
+            "(no CRS storage on the map document); "
+            f"project CRS is {project_crs!r}"
+        )
     else:
         warnings.append("no composition reference: map CRS cannot be verified")
 
     # Units + constraint diagnostics + uncertainty: warnings, never silent.
+    if not (record.factor_task_ids or []):
+        warnings.append("product references no factor tasks")
     for task in project.factor_map_tasks:
         if task.id not in (record.factor_task_ids or []):
             continue
-        unit = (task.quality_metrics or {}).get("unit") or (task.parameters or {}).get("unit")
+        unit = (task.quality_metrics or {}).get("unit")
         if unit is None:
+            unit = (task.parameters or {}).get("unit")
+        if not str(unit or "").strip():
             warnings.append(f"factor {task.name!r}: unit undeclared")
         constraint_diag = (task.parameters or {}).get("constraint_diagnostics") or {}
         if constraint_diag.get("unsupported_constraints"):
@@ -683,12 +694,4 @@ def publish_map_product(
     return report
 
 
-def _map_document_for_record(record: MapProductRecord, project: ProjectDocument):
-    """The map document a product's composition references, if resolvable."""
-    comp_ref = getattr(record, "composition_ref", None)
-    if not comp_ref:
-        return None
-    for doc in getattr(project, "map_documents", None) or []:
-        if getattr(doc, "id", None) == comp_ref:
-            return doc
-    return None
+

@@ -357,9 +357,12 @@ def _load_well_log(path: str, *, max_samples: int, cache: WellLogCache, loader_l
                     getattr(result, "total_rows", "?"),
                 )
             depth_info = detect_depth_unit_info(str(file_path))
-            if depth_info.unit != "m":
-                # ft or unknown: both are states the rest of the chain must
-                # see explicitly (V6 §3 — "m" is never a default).
+            if depth_info.unit is not None:
+                # Wrap whenever the unit is KNOWN — including meters
+                # (review R2-P0: meters-wrapped files used to load bare and
+                # every V6 unit gate then failed closed on properly declared
+                # data). Only truly undeclared/unrecognized units stay bare
+                # (unknown is a first-class state, never coerced to "m").
                 result = WellLogDataWithDepthUnit(
                     result,
                     depth_info.unit,

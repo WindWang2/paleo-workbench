@@ -278,6 +278,16 @@ def interp_gap_preserving(new_x: np.ndarray, x: np.ndarray, y: np.ndarray) -> np
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     out = np.full(new_x.shape, np.nan)
+    # Descending axes produce empty run segments (silently all-NaN);
+    # refuse loudly like resample_axis does (review R3-P2).
+    finite_x = np.isfinite(x)
+    if finite_x.any():
+        xs = x[finite_x]
+        if float(xs[-1]) < float(xs[0]):
+            raise ValueError(
+                "interp_gap_preserving needs a non-descending depth axis; "
+                "reverse the axis explicitly first"
+            )
     finite = np.isfinite(x) & np.isfinite(y)
     if not finite.any():
         return out
