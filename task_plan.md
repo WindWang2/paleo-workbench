@@ -40,9 +40,9 @@ support/benchmarking (small/medium fixtures only).
 - [x] PHASE 9: ResourceGovernor convergence (OMP/BLAS/env mutation removal)  (commit 8)
 - [x] PHASE 10: Lineage/DataRun atomicity + path identity/relink fail-closed  (commit 9)
 - [x] PHASE 11: Scale fixtures + benchmarks (100k/500k/10k wells)  (commit 10)
-- [ ] PHASE 12: 3 review rounds (data-correctness; concurrency/arch;
+- [x] PHASE 12: 3 review rounds (data-correctness; concurrency/arch;
       perf/adversarial/recovery) → fix P0/P1 + relevant P2  (commit 11)
-- [ ] PHASE 13: Docs 00–11 complete; PR to main with full evidence
+- [x] PHASE 13: Docs 00–11 complete; PR to main with full evidence
 
 ## Current Phase
 PHASE 8 (session generation + cancellation)

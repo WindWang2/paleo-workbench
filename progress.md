@@ -179,3 +179,7 @@ DOCUMENTED (not code-fixed): rebuild/write_all CAS bypass (explicit
 maintenance op, narrow), lease TTL vs >1h single placements, pre-warm N+1
 resolvers (bounded by warm window), recover spoof via source_uri, legacy
 fact-less externals permanently fail-closed (intended #1221).
+
+## PHASE 13 complete — docs + delivery
+- docs/development/data-runtime-foundation-v6/00–11 (12 篇) 全部落盘
+- Branch rebased on origin/main @295fabc3 (unchanged); pushed; PR opened
