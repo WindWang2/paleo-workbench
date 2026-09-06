@@ -61,7 +61,7 @@ _RULE_OPS = {
     "<=": lambda v, t: v <= t,
     ">": lambda v, t: v > t,
     "<": lambda v, t: v < t,
-    "==": lambda v, t: math.isclose(v, t, rel_tol=1e-9, abs_tol=1e-12),
+    "==": lambda v, t: np.isclose(v, t, rtol=1e-9, atol=1e-12),
 }
 
 
@@ -138,9 +138,22 @@ class FusionRule:
     def __post_init__(self) -> None:
         if not self.conditions:
             raise ValueError("rule needs at least one condition")
-        for _factor, op, _threshold in self.conditions:
+        for index, condition in enumerate(self.conditions):
+            if not isinstance(condition, (tuple, list)) or len(condition) != 3:
+                raise ValueError(
+                    f"rule condition {index} must be (factor, op, threshold), "
+                    f"got {condition!r}"
+                )
+            _factor, op, threshold = condition
             if op not in _RULE_OPS:
                 raise ValueError(f"unknown rule operator {op!r}")
+            if not isinstance(threshold, (int, float)) or not math.isfinite(
+                float(threshold)
+            ):
+                raise ValueError(
+                    f"rule condition {index} threshold must be finite, got "
+                    f"{threshold!r}"
+                )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -150,10 +163,16 @@ class FusionRule:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "FusionRule":
+        conditions = []
+        for index, c in enumerate(data.get("conditions") or []):
+            if not isinstance(c, (tuple, list)) or len(c) != 3:
+                raise ValueError(
+                    f"rule condition {index} must be [factor, op, threshold], "
+                    f"got {c!r}"
+                )
+            conditions.append((str(c[0]), str(c[1]), float(c[2])))
         return cls(
-            conditions=tuple(
-                (str(c[0]), str(c[1]), float(c[2])) for c in data["conditions"]
-            ),
+            conditions=tuple(conditions),
             class_name=str(data["class_name"]),
         )
 
@@ -468,6 +487,19 @@ def sensitivity_report(
         return {"kind": "leave_one_out", "supported": False}
     base_classes = _classify_grid(baseline)
     report: dict[str, Any] = {"kind": "leave_one_out", "supported": True, "factors": {}}
+    if len(model.evidences) < 2:
+        # Leave-one-out needs someone left in the model; a single-factor
+        # fusion has no perturbation to measure.
+        report["reason"] = "single factor — no perturbation possible"
+        report["factors"] = {
+            model.evidences[0].factor_name: {
+                "weight": model.evidences[0].weight,
+                "class_change_fraction": None,
+                "changed_cells": 0,
+                "comparable_cells": 0,
+            }
+        }
+        return report
     for ev in model.evidences:
         reduced = FusionModel(
             name=model.name,

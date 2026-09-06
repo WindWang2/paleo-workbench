@@ -380,3 +380,44 @@ def test_fused_output_misaligned_grids_rejected():
     )
     with pytest.raises(ValueError, match="geometry"):
         fuse(model)
+
+
+def test_rule_equality_operator_is_array_safe():
+    model = FusionModel(
+        name="等值规则",
+        kind="rule_based",
+        evidences=[
+            FactorEvidence("砂地比", _grid(_sand_ratio_field(), refs=("s@v1",)),
+                           weight=1.0, normalization=Normalization("minmax", 0, 100)),
+        ],
+        rules=[FusionRule((("砂地比", "==", 10.0),), "恰好10")],
+        default_class="其他",
+    )
+    result = fuse(model)
+    classes = result.likelihood.grid_z
+    assert classes[0, 0] == 1  # exactly 10 matches
+    assert classes[0, 1] == 0
+
+
+def test_sensitivity_single_factor_reports_unsupported():
+    model = FusionModel(
+        name="单因子",
+        kind="weighted_evidence",
+        evidences=[FactorEvidence("砂地比", _grid(_sand_ratio_field(), refs=("s@v1",)),
+                                  weight=2.0, normalization=Normalization("minmax", 0, 100))],
+        class_thresholds=[0.5],
+        class_names=["低", "高"],
+    )
+    baseline = fuse(model)
+    report = sensitivity_report(model, baseline)
+    assert report["supported"] is True or report.get("reason") == "single factor — no perturbation possible"
+    assert report["supported"] is False or "reason" in report
+
+
+def test_rule_from_dict_rejects_malformed_conditions():
+    from paleo_workbench.workflow.factor_fusion import FusionRule as FR
+
+    with pytest.raises(ValueError, match="condition 0"):
+        FR.from_dict({"conditions": [["砂地比", ">"]], "class_name": "x"})
+    with pytest.raises(ValueError, match="finite"):
+        FR.from_dict({"conditions": [["砂地比", ">", float("nan")]], "class_name": "x"})

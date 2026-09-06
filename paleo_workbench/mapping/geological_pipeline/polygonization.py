@@ -355,6 +355,13 @@ def generate_facies_polygon_layer(
             extent=grid_result.extent,
             crs=grid_result.crs or "",
             features=(),
+            metadata={"polygon_qc": {
+                "small_polygon_threshold": min_area,
+                "small_polygons_dropped": 0,
+                "clipped_to_domain": 0,
+                "empty_after_clip": 0,
+                "holes_promoted_to_exterior": 0,
+            }},
         )
 
     vmin, vmax = float(finite.min()), float(finite.max())

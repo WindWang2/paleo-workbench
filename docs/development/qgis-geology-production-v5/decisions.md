@@ -83,3 +83,14 @@ _Avoid_: 全量回归先行；并行重型构建。
 理由：#1151 废除的是"跨列静默填充"，显式派生是合法地质操作；缺的是可追踪性，不是禁止派生。
 
 _Avoid_: 派生值冒充实测；指纹忽略派生来源。
+
+## D12 — Review 轮次确立的补充裁决
+
+* **CV 诚实性**：`cross_validate_surface` 在折叠前过滤非有限样本并按坐标合并孪生井（重复组计一个样本），折叠索引只指向参评样本；detail 报告 `non_finite_dropped/duplicates_merged`（R1-P1/R3-P1）。
+* **CRS 不可验证 ≠ 已验证**：轴单位无法解析（未知 id/无 pyproj）时注记为 "unverified" 并发警告，绝不声称 projected/verified（R1/R3-P2）。
+* **产品 staleness 含人工修正**：`MapProductRecord.manual_adjustments` 随装配记录，staleness 重建完整指纹——修正过的产品不再永久"过期"（R1-P2）。
+* **状态机闭环**：supersede 拒绝 frozen 与已 superseded（首个后继获胜）；clone/promote 拒绝 superseded；rerun 的 assert 改为显式 raise（R1-P2/P3）。
+* **导出像素预算**：`MAX_EXPORT_PIXELS=2e8`（实测 A0@1200dpi ≈ 8.7GB RSS），超限显式 ValueError；GRID 元素无主图可挂时进 warnings 不静默丢弃（R3-P2/P3）。
+* **workflow→mapping 例外**：`FactorMapOutput.build_map_layers` 惰性导入 mapping（函数级、无 import-time cycle）是当前唯一反向边；映射层几何构造的单一权威在 mapping，记录为显式例外。若后续重构，把该函数迁到 mapping 侧适配器即可，语义不变。
+* **成图/接线范围声明**：composition 面板导出已切换到报告版（像素预算+引擎记录），但 canvas stack→QgsLayout 的接线依赖工作站壳层 plumbing，本分支交付桥与映射层（生产入口 `export_composition_reported` 已可达）；extended QC 已接入生产 `review_export_page`（run_map_qc）。
+* **D5 存量债务**：`GeologicalFactorDataset.crs`/`InterpolationOptions.crs`/`GeologicalFactor.crs` 的 "EPSG:4326" 模型默认值仍在（改默认牵动 extract/序列化契约），图层构造边界已不再猜测；列为后续收紧项。

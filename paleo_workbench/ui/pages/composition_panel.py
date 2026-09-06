@@ -55,7 +55,7 @@ from paleo_workbench.mapping.composer.components import (
     CompositionFactory,
     bind_template,
 )
-from paleo_workbench.mapping.composer.export import export_composition
+from paleo_workbench.mapping.layout_export import export_composition_reported
 from paleo_workbench.mapping.composer.models import (
     ElementType,
     MapCompositionDocument,
@@ -890,7 +890,21 @@ class CompositionPanel(QFrame):
         if not path:
             return
         try:
-            out = export_composition(session.document, path, fmt=fmt, dpi=float(self.dpi_spin.value()))
+            # No QGIS stack is reachable from this panel today; the reported
+            # variant still enforces the pixel budget and records the engine
+            # actually used (review R2: production wiring made explicit).
+            report = export_composition_reported(
+                session.document,
+                path,
+                fmt=fmt,
+                dpi=float(self.dpi_spin.value()),
+            )
+            if report.engine == "composer_fallback":
+                logger.warning(
+                    "composition export used the composer fallback: %s",
+                    report.warnings,
+                )
+            out = Path(report.path)
         except Exception:
             logger.exception("composition export failed")
             return

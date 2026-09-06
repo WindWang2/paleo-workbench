@@ -151,6 +151,24 @@ def resolve_distance_policy(
             ),
             "warning": warning,
         }
+    if geographic is None:
+        # Unknown axis units (unresolvable id / no pyproj): the planar
+        # assumption is UNVERIFIED and the annotation must not claim
+        # otherwise (review R1/R3 P2).
+        return {
+            "policy": POLICY_PLANAR,
+            "crs": crs,
+            "axes_known": None,
+            "annotation": (
+                f"distance_policy=planar; CRS {crs} axis units unverifiable "
+                "(unknown id or pyproj unavailable) — planar assumption "
+                "unconfirmed"
+            ),
+            "warning": (
+                f"CRS {crs} axis units could not be verified; distance "
+                "policy applied without confirmation"
+            ),
+        }
     return {
         "policy": POLICY_PLANAR,
         "crs": crs,

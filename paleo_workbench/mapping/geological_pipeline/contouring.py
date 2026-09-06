@@ -385,6 +385,7 @@ def generate_contour_layer(
             crs=grid_result.crs or "",
             features=(),
             levels=[],
+            metadata={"contour_qc": {"clipped_to_domain": 0, "empty_after_clip": 0}},
         )
 
     vmin, vmax = float(finite.min()), float(finite.max())

@@ -96,7 +96,40 @@ class FactorMapSpec:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "FactorMapSpec":
+        def _ring(ring, what: str) -> list[list[float]]:
+            pts = [[float(v) for v in pt] for pt in ring]
+            for pt in pts:
+                if len(pt) != 2:
+                    raise ValueError(f"{what} points must be (x, y) pairs")
+                import math as _math
+
+                if not (_math.isfinite(pt[0]) and _math.isfinite(pt[1])):
+                    raise ValueError(f"{what} points must be finite")
+            return pts
+
         bounds = data.get("bounds")
+        if bounds is not None:
+            values = [float(v) for v in bounds]
+            import math as _math
+
+            if len(values) != 4 or not all(_math.isfinite(v) for v in values):
+                raise ValueError(
+                    "bounds must be exactly 4 finite numbers (xmin, ymin, xmax, ymax)"
+                )
+            bounds = tuple(values)
+        mask = data.get("mask_polygon")
+        if mask is not None:
+            mask = _ring(mask, "mask_polygon")
+            if len(mask) < 3:
+                raise ValueError("mask_polygon needs at least 3 vertices")
+        exclusions = [
+            _ring(ring, "exclusion_polygons")
+            for ring in (data.get("exclusion_polygons") or [])
+        ]
+        faults = [
+            _ring(line, "fault_polylines")
+            for line in (data.get("fault_polylines") or [])
+        ]
         return cls(
             factor_name=str(data["factor_name"]),
             method=str(data["method"]),
@@ -105,20 +138,10 @@ class FactorMapSpec:
             crs=data.get("crs"),
             distance_policy=str(data.get("distance_policy") or "planar"),
             parameters=dict(data.get("parameters") or {}),
-            bounds=tuple(float(v) for v in bounds) if bounds is not None else None,
-            mask_polygon=(
-                [[float(v) for v in pt] for pt in data["mask_polygon"]]
-                if data.get("mask_polygon") is not None
-                else None
-            ),
-            exclusion_polygons=[
-                [[float(v) for v in pt] for pt in ring]
-                for ring in (data.get("exclusion_polygons") or [])
-            ],
-            fault_polylines=[
-                [[float(v) for v in pt] for pt in line]
-                for line in (data.get("fault_polylines") or [])
-            ],
+            bounds=bounds,
+            mask_polygon=mask,
+            exclusion_polygons=exclusions,
+            fault_polylines=faults,
             source_refs=list(data.get("source_refs") or []),
             task_id=data.get("task_id"),
             derived_rule=data.get("derived_rule"),

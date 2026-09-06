@@ -330,15 +330,18 @@ _CV_FOLDS = 4
 
 
 def _spatial_fold_assignment(wells) -> list[np.ndarray]:
-    """Deterministic spatial fold ids (round-robin by angle around centroid)."""
-    xs = np.array([w.x for w in wells], dtype=float)
-    ys = np.array([w.y for w in wells], dtype=float)
-    angle = np.arctan2(ys - ys.mean(), xs - xs.mean())
-    order = np.argsort(angle, kind="stable")
-    folds: list[list[int]] = [[] for _ in range(_CV_FOLDS)]
-    for rank, idx in enumerate(order):
-        folds[rank % _CV_FOLDS].append(int(idx))
-    return [np.array(fold, dtype=int) for fold in folds]
+    """Deterministic spatial fold ids, delegated to the M2 authority.
+
+    Kept as a thin adapter so the preview path and the unified evaluation
+    share ONE fold scheme (review R2: no second copy of the CV maths).
+    """
+    from paleo_workbench.workflow.interpolation_evaluation import (
+        spatial_fold_assignment,
+    )
+
+    return spatial_fold_assignment(
+        [w.x for w in wells], [w.y for w in wells], k=_CV_FOLDS
+    )
 
 
 def _cross_validated_r_squared(

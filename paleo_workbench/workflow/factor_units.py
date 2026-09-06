@@ -110,36 +110,33 @@ def normalize_factor_key(factor_name: str) -> str:
     return factor_name.strip().lower() if factor_name else ""
 
 
-def unit_for_factor(factor_name: str) -> str | None:
-    """Canonical unit for *factor_name*, or ``None`` when unknown (never guessed)."""
+def _folded_entry(factor_name: str) -> dict[str, str] | None:
+    """Case-folded lookup over every known mnemonic (case is never semantic)."""
     key = normalize_factor_key(factor_name)
-    entry = FACTOR_DEFAULTS.get(factor_name) or FACTOR_DEFAULTS.get(key)
-    if entry:
-        return entry.get("unit") or None
+    direct = FACTOR_DEFAULTS.get(factor_name) or FACTOR_DEFAULTS.get(key)
+    if direct:
+        return direct
     for aliases in FACTOR_FAMILIES.values():
         if key in {alias.lower() for alias in aliases}:
-            entry = FACTOR_DEFAULTS.get(aliases[0]) or FACTOR_DEFAULTS.get(
-                aliases[0].lower()
-            )
-            if entry:
-                return entry.get("unit") or None
+            for representative in aliases:
+                entry = FACTOR_DEFAULTS.get(representative) or FACTOR_DEFAULTS.get(
+                    representative.lower()
+                )
+                if entry:
+                    return entry
     return None
+
+
+def unit_for_factor(factor_name: str) -> str | None:
+    """Canonical unit for *factor_name*, or ``None`` when unknown (never guessed)."""
+    entry = _folded_entry(factor_name)
+    return (entry.get("unit") or None) if entry else None
 
 
 def color_ramp_for_factor(factor_name: str) -> str | None:
     """Recommended color ramp for *factor_name*, or ``None`` when unknown."""
-    key = normalize_factor_key(factor_name)
-    entry = FACTOR_DEFAULTS.get(factor_name) or FACTOR_DEFAULTS.get(key)
-    if entry:
-        return entry.get("color_ramp") or None
-    for aliases in FACTOR_FAMILIES.values():
-        if key in {alias.lower() for alias in aliases}:
-            entry = FACTOR_DEFAULTS.get(aliases[0]) or FACTOR_DEFAULTS.get(
-                aliases[0].lower()
-            )
-            if entry:
-                return entry.get("color_ramp") or None
-    return None
+    entry = _folded_entry(factor_name)
+    return (entry.get("color_ramp") or None) if entry else None
 
 
 # Derived-factor provenance rules (decision D11): explicit derivation is legal

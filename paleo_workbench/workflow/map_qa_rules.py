@@ -331,7 +331,8 @@ def _confidence_issues(
 def _export_issues(export_report: Mapping[str, Any] | None) -> list[dict[str, Any]]:
     if not export_report:
         return []
-    if str(export_report.get("engine") or "") == "fallback":
+    engine = str(export_report.get("engine") or "")
+    if engine in ("fallback", "composer_fallback") or export_report.get("degraded"):
         reason = str(export_report.get("degraded_reason") or "未说明")
         return [
             make_issue(

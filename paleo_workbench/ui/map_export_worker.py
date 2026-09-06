@@ -127,7 +127,8 @@ def render_and_save_map_export(spec: MapExportSpec) -> dict:
     if spec.prefer_native_renderer:
         try:
             frame = _render_frame_native(spec)
-            engine = "qgis"
+            if frame is not None:
+                engine = "qgis"  # only after a frame actually exists
         except Exception as exc:  # noqa: BLE001 — degrade, never lose the export
             import logging
 

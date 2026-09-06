@@ -287,3 +287,19 @@ def test_no_implicit_z_to_rs_to_ht_fallback():
     )
     assert dataset.points == []
     assert not math.isnan(0.0)  # sanity: module imported cleanly
+
+
+def test_spec_from_dict_rejects_bad_geometry():
+    with pytest.raises(ValueError, match="bounds"):
+        FactorMapSpec.from_dict({
+            "factor_name": "x", "method": "IDW",
+            "bounds": [0.0, 0.0, float("nan"), 1.0],
+        })
+    with pytest.raises(ValueError, match="bounds"):
+        FactorMapSpec.from_dict({
+            "factor_name": "x", "method": "IDW", "bounds": [0.0, 1.0],
+        })
+    with pytest.raises(ValueError, match="mask_polygon"):
+        FactorMapSpec.from_dict({
+            "factor_name": "x", "method": "IDW", "mask_polygon": [[0.0, 0.0]],
+        })

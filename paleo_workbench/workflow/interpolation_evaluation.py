@@ -226,9 +226,33 @@ def cross_validate_surface(
     skipped, never faked. Returns ``None`` when evaluation cannot honestly
     run (too few points for *k* folds); the caller hides the metric instead.
     """
-    x, y, z = _points_to_arrays(points)
-    if x.size < k + 2:
+    # Fold over the FINITE sample list only: fold indices must index exactly
+    # the points that participate, otherwise a single NaN sample shifts every
+    # assignment and silently holds out the wrong wells (review R1-P1).
+    scorable: list[Mapping[str, Any]] = []
+    seen_coords: set[tuple[float, float]] = set()
+    n_nonfinite = 0
+    n_duplicates = 0
+    for pt in points:
+        x_v = float(pt.get("x"))
+        y_v = float(pt.get("y"))
+        z_v = float(pt.get("value", pt.get("z", float("nan"))))
+        if not (math.isfinite(x_v) and math.isfinite(y_v) and math.isfinite(z_v)):
+            n_nonfinite += 1
+            continue
+        # Twin wells (identical coordinates): a held-out twin is anchored by
+        # its in-fold twin and scores zero residual, inflating CV accuracy —
+        # duplicate groups enter as ONE sample (review R3-P1).
+        coord_key = (x_v, y_v)
+        if coord_key in seen_coords:
+            n_duplicates += 1
+            continue
+        seen_coords.add(coord_key)
+        scorable.append(pt)
+    if len(scorable) < k + 2:
         return None
+    x = [float(p.get("x")) for p in scorable]
+    y = [float(p.get("y")) for p in scorable]
     folds = spatial_fold_assignment(x, y, k)
     observed_all: list[float] = []
     predicted_all: list[float] = []
@@ -239,8 +263,8 @@ def cross_validate_surface(
         if cancellation_token is not None:
             cancellation_token.raise_if_cancelled()
         test_set = {int(i) for i in test_indices}
-        train = [points[i] for i in range(len(points)) if i not in test_set]
-        held = [points[i] for i in sorted(test_set)]
+        train = [scorable[i] for i in range(len(scorable)) if i not in test_set]
+        held = [scorable[i] for i in sorted(test_set)]
         if len(train) < 2 or not held:
             fold_records.append({"fold": fold_idx, "status": "skipped", "n_skipped": len(held)})
             continue
@@ -285,19 +309,20 @@ def cross_validate_surface(
         observed_all.extend(fold_obs)
         predicted_all.extend(fold_pred)
         fold_metrics = EvaluationMetrics.from_arrays(fold_obs, fold_pred)
+        fold_payload = fold_metrics.to_dict()
+        fold_payload["n_held_skipped"] = fold_skipped
         fold_records.append(
             {
                 "fold": fold_idx,
                 "n_train": len(train),
                 "n_held": len(held),
-                "n_skipped": fold_skipped,
-                **fold_metrics.to_dict(),
+                **fold_payload,
             }
         )
     metrics = EvaluationMetrics.from_arrays(observed_all, predicted_all)
     if metrics.n_samples < attempted:
-        # Held-out points the surface could not score (nodata window / non-
-        # finite observed) are unresolvable, not absent — report the count.
+        # Held-out points the surface could not score (nodata window) are
+        # unresolvable, not absent — report the count.
         metrics = _with_n_skipped(metrics, attempted - metrics.n_samples)
     return CrossValidationReport(
         method=method_label,
@@ -307,6 +332,11 @@ def cross_validate_surface(
         folds=fold_records,
         residuals=residuals,
         engine=engine,
+        detail=(
+            f"scorable={len(scorable)}"
+            + (f"; non_finite_dropped={n_nonfinite}" if n_nonfinite else "")
+            + (f"; duplicates_merged={n_duplicates}" if n_duplicates else "")
+        ),
     )
 
 

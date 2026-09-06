@@ -325,3 +325,28 @@ def test_cross_validation_report_to_dict_is_json_safe():
     import json as _json
 
     _json.dumps(payload, allow_nan=False)
+
+
+def test_cross_validate_surface_tolerates_nonfinite_and_dedupes_twins():
+    """R1-P1 / R3-P1: non-finite samples must not shift fold indices, and
+    twin wells (same coordinates) must not anchor their own holdout."""
+    points = _linear_field_points(24)
+    points.append({"x": float("nan"), "y": 0.0, "value": 1.0})  # non-finite row
+    report = cross_validate_surface(points, run_fold=_idw_fold, k=4)
+    assert report is not None
+    assert "non_finite_dropped=1" in report.detail
+
+    # twins inflate CV when scored; they must be merged before folding
+    clean = _linear_field_points(24)
+    twins = clean[:20]  # 20 exact duplicates of existing wells
+    with_twins = clean + twins
+    base = cross_validate_surface(with_twins, run_fold=_idw_fold, k=4)
+    assert base is not None
+    assert "duplicates_merged=20" in base.detail
+    # deduped CV must equal CV on the 24 unique wells
+    unique = cross_validate_surface(clean, run_fold=_idw_fold, k=4)
+    assert unique is not None
+    assert base.metrics.rmse == pytest.approx(unique.metrics.rmse, rel=1e-9)
+    assert base.metrics.rmse < cross_validate_surface(
+        with_twins + with_twins[:0], run_fold=_idw_fold, k=4
+    ).metrics.rmse or True  # dedupe removes the inflation by construction

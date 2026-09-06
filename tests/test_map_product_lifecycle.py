@@ -253,3 +253,35 @@ def test_promote_uses_catalog_authority(project, catalog, tmp_path):
     original = catalog.get_version(record.output_version_id)
     assert promoted.parent_version_ids == [original.id]
     assert promoted.sha256 == original.sha256
+
+
+def test_staleness_honours_manual_adjustments(project, catalog, tmp_path):
+    """R1-P2: an adjusted product must not read stale forever."""
+    payload = tmp_path / "adj.json"
+    payload.write_text("{}", encoding="utf-8")
+    result = assemble_map_product(
+        project,
+        assembly=MapProductAssembly(
+            product_name="adj",
+            factor_task_ids=["t1", "t2"],
+            manual_adjustments=[{"author": "专家", "what": "河道外推", "why": "岩心"}],
+        ),
+        catalog=catalog,
+        payload_path=payload,
+    )
+    record = find_map_product(project, result.record_id)
+    assert record.manual_adjustments
+    assert product_staleness(record, project)["stale"] is False
+
+
+def test_supersede_frozen_and_double_supersede_refused(project):
+    record_a = _record("sa", project)
+    record_b = _record("sb", project)
+    record_c = _record("sc", project)
+    freeze_map_product(record_a)
+    with pytest.raises(ValueError, match="frozen"):
+        supersede_map_product(record_a, project, successor=record_b)
+    unfrozen = _record("sd", project)
+    supersede_map_product(unfrozen, project, successor=record_b)
+    with pytest.raises(ValueError, match="already superseded"):
+        supersede_map_product(unfrozen, project, successor=record_c)

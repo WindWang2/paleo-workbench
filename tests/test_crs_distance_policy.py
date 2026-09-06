@@ -264,3 +264,10 @@ def test_interpolate_factor_annotates_distance_policy_dataset_path():
     result = interpolate_factor(_dataset(), options)
     assert result.algorithm_parameters["distance_policy"] == "planar"
     assert "EPSG:32650" in result.algorithm_parameters["distance_policy_annotation"]
+
+
+def test_unresolvable_crs_is_unverified_not_claimed():
+    resolved = resolve_distance_policy("EPSG:99999999")
+    assert resolved["axes_known"] is None
+    assert "unverifiable" in resolved["annotation"]
+    assert resolved["warning"] is not None

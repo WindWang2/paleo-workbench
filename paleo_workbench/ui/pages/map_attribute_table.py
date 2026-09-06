@@ -123,6 +123,9 @@ class MapAttributeTable(QFrame):
             self.feature_combo.setCurrentIndex(0)
             self._suppress_feature_selection = False
             self.set_feature(None)
+            # the previously selected feature is now hidden — the map must
+            # drop its highlight too, or host and grid diverge (review R3-P3)
+            self.feature_selection_requested.emit("")
             return visible
         self._suppress_feature_selection = False
         return visible

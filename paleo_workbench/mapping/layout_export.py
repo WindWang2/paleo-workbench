@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -49,16 +50,16 @@ _NORTH_ARROW_SVG = """<svg xmlns="http://www.w3.org/2000/svg" width="20" height=
 </svg>
 """
 
-_NORTH_ARROW_CACHE = Path("/tmp") / "pwb_north_arrow.svg"
+_NORTH_ARROW_SVG_NAME = "pwb_north_arrow.svg"
 
 
 def _north_arrow_svg_path() -> str:
+    """Materialise the built-in north indicator once per machine temp dir."""
     try:
-        if not _NORTH_ARROW_CACHE.is_file() or _NORTH_ARROW_CACHE.read_text(
-            encoding="utf-8"
-        ) != _NORTH_ARROW_SVG:
-            _NORTH_ARROW_CACHE.write_text(_NORTH_ARROW_SVG, encoding="utf-8")
-        return str(_NORTH_ARROW_CACHE)
+        cache = Path(tempfile.gettempdir()) / _NORTH_ARROW_SVG_NAME
+        if not cache.is_file() or cache.read_text(encoding="utf-8") != _NORTH_ARROW_SVG:
+            cache.write_text(_NORTH_ARROW_SVG, encoding="utf-8")
+        return str(cache)
     except OSError:
         logger.warning("could not materialise north arrow SVG", exc_info=True)
         return ""
@@ -139,11 +140,29 @@ def _map_grid_spacing_to_units(
     return spacing_mm * extent_width / main_map.width_mm
 
 
+# Rendered-pixel budget: A0 @600dpi is ~4e8 px; beyond ~2e8 the exporter
+# allocates multi-GB rasters (review R3-P2 measured 8.7 GB RSS at 8.7e8 px).
+MAX_EXPORT_PIXELS = 200_000_000
+
+
+def _check_pixel_budget(composition: MapCompositionDocument, dpi: float) -> None:
+    width_px = composition.width_mm / 25.4 * dpi
+    height_px = composition.height_mm / 25.4 * dpi
+    if width_px * height_px > MAX_EXPORT_PIXELS:
+        suggested = 0.999 * MAX_EXPORT_PIXELS / max(1e-9, width_px * height_px) * dpi
+        raise ValueError(
+            f"export of {composition.width_mm}x{composition.height_mm} mm at "
+            f"{dpi:g} dpi needs ~{width_px * height_px:.3g} px (budget "
+            f"{MAX_EXPORT_PIXELS}); reduce dpi to ~{suggested:.0f} or smaller"
+        )
+
+
 def build_layout_spec(
     composition: MapCompositionDocument,
     *,
     map_extent: Sequence[float],
     crs: str | None,
+    warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     """Serialise the component graph into the bridge's layout spec JSON.
 
@@ -152,6 +171,11 @@ def build_layout_spec(
     :func:`export_composition_reported`, which falls back to the composer
     renderer for the whole page).
     """
+
+    def _warn(message: str) -> None:
+        if warnings is not None:
+            warnings.append(message)
+
     visible = _visible_elements(composition)
     unmapped = [
         el for el in visible if el.element_type not in _NATIVE_TYPES
@@ -168,6 +192,11 @@ def build_layout_spec(
     items: list[dict[str, Any]] = []
     grid_spacing_units: float | None = None
     for el in visible:
+        if float(el.width_mm) <= 0 or float(el.height_mm) <= 0:
+            raise ValueError(
+                f"element {el.id} ({el.element_type.value}) has non-positive "
+                "extent; fix the composition before export"
+            )
         base = {
             "x": float(el.x_mm),
             "y": float(el.y_mm),
@@ -215,9 +244,13 @@ def build_layout_spec(
                 }
             )
         elif el.element_type is ElementType.GRID:
-            grid_spacing_units = _map_grid_spacing_to_units(
-                el, main_map, map_extent, crs
-            )
+            converted = _map_grid_spacing_to_units(el, main_map, map_extent, crs)
+            if converted is None:
+                _warn(
+                    f"grid element {el.id} has no main map to attach to; dropped"
+                )
+            else:
+                grid_spacing_units = converted
         elif el.element_type in (
             ElementType.TITLE,
             ElementType.SUBTITLE,
@@ -258,6 +291,10 @@ def build_layout_spec(
                     f"image element {el.id!r} has no image_path; embedded "
                     "image data needs the composer renderer"
                 )
+            if float(el.width_mm) <= 0 or float(el.height_mm) <= 0:
+                raise ValueError(
+                    f"image element {el.id!r} has non-positive extent"
+                )
             items.append({"type": "picture", "path": image_path, **base})
         elif el.element_type is ElementType.NEATLINE:
             items.append(
@@ -292,6 +329,7 @@ def export_composition_reported(
     map_extent: Sequence[float] | None = None,
     crs: str | None = None,
     stack=None,
+    geo_pdf: bool = False,
 ) -> LayoutExportReport:
     """Export the composition, preferring the native QgsLayout engine.
 
@@ -304,13 +342,21 @@ def export_composition_reported(
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     warnings: list[str] = []
+    try:
+        _check_pixel_budget(composition, float(dpi))
+    except ValueError as exc:
+        # A budget breach is a caller error, not an engine limitation —
+        # raise rather than silently producing (or degrading to) a page.
+        raise
 
     can_use_layout = stack is not None and map_extent is not None
     if can_use_layout:
         try:
             spec = build_layout_spec(
-                composition, map_extent=map_extent, crs=crs
+                composition, map_extent=map_extent, crs=crs, warnings=warnings
             )
+            if geo_pdf:
+                spec["geo_pdf"] = True
         except ValueError as exc:
             warnings.append(str(exc))
             can_use_layout = False

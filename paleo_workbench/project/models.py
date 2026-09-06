@@ -498,6 +498,9 @@ class MapProductRecord(BaseModel):
     frozen: bool = False
     superseded_by: str | None = None
     cloned_from: str | None = None
+    # Assembly-time manual adjustments (review R1-P2): staleness must rebuild
+    # the fingerprint WITH them, or any adjusted product reads stale forever.
+    manual_adjustments: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class UserVectorFeature(BaseModel):

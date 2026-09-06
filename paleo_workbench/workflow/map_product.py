@@ -177,6 +177,7 @@ def assemble_map_product(
         output_version_id=version.id,
         run_id=run.id,
         scientific_fingerprint=fingerprint,
+        manual_adjustments=list(assembly.manual_adjustments),
     )
     project.map_products = [*list(getattr(project, "map_products", None) or []), record]
     return MapProductResult(
@@ -353,6 +354,10 @@ def clone_map_product(
         raise ValueError(
             f"product {record.id} is frozen; unfreeze before cloning"
         )
+    if record.status == PRODUCT_STATUS_SUPERSEDED:
+        raise ValueError(
+            f"product {record.id} is superseded; clone its successor instead"
+        )
     clone = MapProductRecord(
         product_name=new_name or f"{record.product_name} (副本)",
         factor_task_ids=list(record.factor_task_ids),
@@ -397,13 +402,17 @@ def rerun_map_product(
         interpretation_refs=list(record.interpretation_refs),
         composition_ref=record.composition_ref,
         notes=record.notes,
+        manual_adjustments=[
+            dict(a) for a in getattr(record, "manual_adjustments", None) or []
+        ],
     )
     result = assemble_map_product(
         project, assembly=effective_assembly, catalog=catalog,
         payload_path=payload_path,
     )
     successor = find_map_product(project, result.record_id)
-    assert successor is not None  # assemble just appended it
+    if successor is None:  # assemble just appended it; never expected
+        raise RuntimeError("assemble_map_product did not register the successor")
     successor.cloned_from = successor.cloned_from or record.id
     record.status = PRODUCT_STATUS_SUPERSEDED
     record.superseded_by = successor.id
@@ -468,6 +477,14 @@ def compare_map_products(
 
     factors_a = _factor_views(a)
     factors_b = _factor_views(b)
+
+    def _factor_source(record: MapProductRecord) -> str:
+        return (
+            "run_snapshot"
+            if _run_factor_snapshot(record) is not None
+            else "live_fallback"
+        )
+
     factor_diff: dict[str, Any] = {
         "only_in_a": sorted(set(factors_a) - set(factors_b)),
         "only_in_b": sorted(set(factors_b) - set(factors_a)),
@@ -493,6 +510,7 @@ def compare_map_products(
         return str(getattr(version, "sha256", "") or "") or None
 
     return {
+        "factor_source": {"a": _factor_source(a), "b": _factor_source(b)},
         "scientific_fingerprint_equal": a.scientific_fingerprint == b.scientific_fingerprint,
         "fingerprint_a": a.scientific_fingerprint,
         "fingerprint_b": b.scientific_fingerprint,
@@ -525,6 +543,9 @@ def product_staleness(
         factor_task_ids=list(record.factor_task_ids),
         interpretation_refs=list(record.interpretation_refs),
         composition_ref=record.composition_ref,
+        manual_adjustments=[
+            dict(a) for a in getattr(record, "manual_adjustments", None) or []
+        ],
     )
     current_fingerprint = current.scientific_fingerprint(project)
     stale = current_fingerprint != record.scientific_fingerprint
@@ -550,6 +571,13 @@ def supersede_map_product(
     """Mark *record* superseded by *successor* (explicit, no re-assembly)."""
     if record is successor:
         raise ValueError("a product cannot supersede itself")
+    if _record_is_frozen(record):
+        raise ValueError(f"product {record.id} is frozen; unfreeze before superseding")
+    if record.status == PRODUCT_STATUS_SUPERSEDED:
+        raise ValueError(
+            f"product {record.id} is already superseded by "
+            f"{record.superseded_by}; the first successor wins"
+        )
     record.status = PRODUCT_STATUS_SUPERSEDED
     record.superseded_by = successor.id
 
@@ -564,6 +592,10 @@ def promote_map_product(record: MapProductRecord, *, catalog: Any) -> str:
         raise ValueError("promote requires the data catalog")
     if not record.output_version_id:
         raise ValueError(f"product {record.id} has no output version to promote")
+    if record.status == PRODUCT_STATUS_SUPERSEDED:
+        raise ValueError(
+            f"product {record.id} is superseded; promote its successor instead"
+        )
     version = catalog.promote_version(record.output_version_id)
     return str(version.id)
 
