@@ -130,16 +130,23 @@ def test_geological_modeling_3d_page_ui_elements(qtbot):
     page = GeologicalModeling3DPage()
     qtbot.addWidget(page)
     
-    # Verify layout objects
+    # Verify layout objects. The hidden legacy modeling viewport
+    # (page.gl_widget) was retired (ADR-01): modeling output renders through
+    # the V5 workspace controller into the visible joint viewport.
     assert page.model_tree is not None
-    assert page.gl_widget is not None
+    assert page._geo3d is not None
+    assert page._geo3d_tree_root is not None
+    assert page.geo_inspector is not None
+    assert page.geo_qc_list is not None
+    assert page.geo_measure_combo is not None
     assert page.btn_run is not None
     assert page.btn_ai_advisor is not None
     assert page.btn_export is not None
     
-    # Tree: geoviz joint only (#121)
-    assert page.model_tree.topLevelItemCount() == 1
+    # Tree: geoviz joint + V5 geological objects section (ADR-01)
+    assert page.model_tree.topLevelItemCount() == 2
     assert "井震联合 (geoviz)" in page.model_tree.topLevelItem(0).text(0)
+    assert "地质模型对象" in page.model_tree.topLevelItem(1).text(0)
     
     # Check default interactive clipping sliders & checkboxes exist
     assert page.chk_clip_x is not None
@@ -154,9 +161,12 @@ def test_geological_modeling_3d_page_clip_and_tie_without_show(qtbot):
 
     splitter = getattr(page, "_main_splitter", None) or page.findChild(QSplitter)
     assert splitter is not None
-    # Offscreen sizes() stay 50/50 until show(); the width cap is what forces
-    # the center pane above 50% once the layout is realized.
-    assert splitter.widget(0).maximumWidth() <= 320
+    # Layout contract (#121): the tree has an enforced MINIMUM width and the
+    # maximum is QWIDGETSIZE_MAX so the splitter handle can widen it. (The
+    # old maximumWidth()<=320 assertion contradicted the page contract and
+    # was environment-flaky offscreen.)
+    assert splitter.widget(0).minimumWidth() >= 220
+    assert splitter.widget(0).maximumWidth() >= 16_777_215
     assert splitter.count() >= 2
 
     page.chk_clip_x.setChecked(True)

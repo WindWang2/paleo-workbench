@@ -294,21 +294,54 @@ class StratalWorker(QObject):
 
 
 class ExportWorker(QObject):
-    """Asynchronous worker for grid exporting to avoid UI freezing."""
+    """Asynchronous worker for mesh export (UI-thread friendly).
+
+    Two paths (G14):
+
+    * ``volume`` given → V2 domain export of the real StratigraphicVolume
+      (FLAC3D/Abaqus columnar hex from the volume, or OBJ/STL/VTP of a
+      mesh object) with QC gate + provenance sidecar;
+    * no volume → LEGACY synthetic GridSpec export (kept for the demo flow,
+      headers honestly marked LEGACY).
+    """
+
     completed = Signal(str)
     failed = Signal(str)
     terminal = Signal()
 
-    def __init__(self, filename: str, mode: str, grid_spec: GridSpec, parent=None):
+    def __init__(
+        self,
+        filename: str,
+        mode: str,
+        grid_spec: GridSpec,
+        parent=None,
+        *,
+        volume=None,
+        surface=None,
+        top=None,
+        base=None,
+        point_data=None,
+    ):
         super().__init__(parent)
         self.filename = filename
         self.mode = mode
         self.grid_spec = grid_spec
+        self.volume = volume
+        self.surface = surface
+        self.top = top
+        self.base = base
+        self.point_data = point_data
 
     def run(self) -> None:
-        from paleo_workbench.viz.geomodel.exporters import export_to_flac3d, export_to_abaqus
         try:
-            time.sleep(0.6)  # Simulated export latency
+            if self.volume is not None or self.surface is not None:
+                self._run_v2()
+                return
+            from paleo_workbench.viz.geomodel.exporters import (
+                export_to_abaqus,
+                export_to_flac3d,
+            )
+
             spec = self.grid_spec
             if self.mode == "flac3d":
                 export_to_flac3d(self.filename, spec.nx, spec.ny, spec.nz, spec.dx, spec.dy, spec.dz)
@@ -319,6 +352,34 @@ class ExportWorker(QObject):
             self.failed.emit(str(e))
         finally:
             self.terminal.emit()
+
+    def _run_v2(self) -> None:
+        from paleo_workbench.viz.geomodel.exporters import (
+            export_mesh_obj,
+            export_mesh_stl,
+            export_mesh_vtp,
+            export_volume_abaqus,
+            export_volume_flac3d,
+        )
+
+        target = self.volume if self.volume is not None else self.surface
+        if self.mode == "flac3d":
+            export_volume_flac3d(
+                self.volume, self.filename, top=self.top, base=self.base
+            )
+        elif self.mode == "abaqus":
+            export_volume_abaqus(
+                self.volume, self.filename, top=self.top, base=self.base
+            )
+        elif self.mode == "obj":
+            export_mesh_obj(target, self.filename)
+        elif self.mode == "stl":
+            export_mesh_stl(target, self.filename)
+        elif self.mode == "vtp":
+            export_mesh_vtp(target, self.filename, point_data=self.point_data)
+        else:  # pragma: no cover - guarded by the page combo
+            raise ValueError(f"unknown export mode {self.mode!r}")
+        self.completed.emit(self.filename)
 
 
 class AdvisorWorker(QObject):
@@ -335,7 +396,6 @@ class AdvisorWorker(QObject):
     def run(self) -> None:
         from paleo_workbench.viz.geomodel.advisor import check_boreholes, check_coplanar_faults
         try:
-            time.sleep(0.5)  # Simulated analysis latency (UI affordance)
             bh_report = check_boreholes(self.bh_data)
             fault_report = check_coplanar_faults(self.faults_data)
             self.completed.emit(bh_report, fault_report)

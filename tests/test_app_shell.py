@@ -46,7 +46,9 @@ def test_app_shell_geological_modeling_3d_page_navigation(qtbot):
     assert shell.hub_seismic.current_key() == "geomodel"
     assert geomodel_page.objectName() == "GeologicalModeling3DPage"
     assert geomodel_page.model_tree is not None
-    assert geomodel_page.gl_widget is not None
+    # ADR-01: the hidden legacy viewport became the V5 workspace controller.
+    assert geomodel_page._geo3d is not None
+    assert geomodel_page._geo3d_tree_root is not None
     assert geomodel_page.btn_run is not None
 
 
