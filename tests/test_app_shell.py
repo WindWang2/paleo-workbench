@@ -124,11 +124,15 @@ def test_command_palette_lists_submodules(qtbot):
 
     shell.command_palette.popup()
     assert not shell.command_palette.isHidden()
-    total = sum(len(navigation.submodule_keys(h)) for h in range(5))
-    assert shell.command_palette.result_list.count() == total
+    # V5：palette 除页面导航外还包含布局 preset / 主题 / 密度 / 面板命令，
+    # 总条目 ≥ 页面命令数；查询过滤仍然收敛。
+    page_total = sum(len(navigation.submodule_keys(h)) for h in range(5))
+    total = shell.command_palette.result_list.count()
+    assert total >= page_total
 
     shell.command_palette.filter_input.setText("编图")
-    assert 0 < shell.command_palette.result_list.count() < total
+    filtered = shell.command_palette.result_list.count()
+    assert 0 < filtered < total
 
 
 def test_command_palette_result_navigates(qtbot):

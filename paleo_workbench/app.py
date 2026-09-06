@@ -114,6 +114,16 @@ class PaleoWorkbenchWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+N"), self, self._on_new_project)
         QShortcut(QKeySequence("Ctrl+O"), self, self._on_open_project)
         QShortcut(QKeySequence("Ctrl+F"), self, self._shortcut_focus_search)
+        # V5-U6：登记进中央快捷键注册表（palette 展示 + 冲突检测可见）。
+        from paleo_workbench.ui.shortcuts import ShortcutSpec, register_meta
+
+        for spec in (
+            ShortcutSpec(id="core:project.save", key="Ctrl+S", label="保存工程"),
+            ShortcutSpec(id="core:project.new", key="Ctrl+N", label="新建工程"),
+            ShortcutSpec(id="core:project.open", key="Ctrl+O", label="打开工程"),
+            ShortcutSpec(id="core:search.focus", key="Ctrl+F", label="聚焦搜索"),
+        ):
+            register_meta(spec)
 
     def _shortcut_focus_search(self) -> None:
         """Focus the active search box.

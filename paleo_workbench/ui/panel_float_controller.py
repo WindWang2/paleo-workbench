@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from PySide6.QtCore import QObject, QPoint, QRect, QSize, Signal
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QSplitter, QWidget
 
 from paleo_workbench.ui.dock_manager import dock_manager
@@ -119,7 +120,9 @@ class FloatController(QObject):
         widget.setVisible(True)
         if geometry is None:
             geometry = self._default_geometry(widget, dock_parent)
-        panel.setGeometry(geometry)
+        # V5-U6：恢复的 float geometry 可能落在已断开的显示器上——clamp 到
+        # 可见桌面（完全出屏时贴回主屏），多显示器切换后不再找不到面板。
+        panel.setGeometry(clamp_geometry_to_screens(geometry))
         panel.show()
         self._floats[key] = record
 
@@ -272,6 +275,31 @@ class FloatController(QObject):
             widget.setParent(record.dock_parent)
             widget.setGeometry(record.dock_geometry)
         widget.setVisible(True)
+
+
+def clamp_geometry_to_screens(geometry: QRect) -> QRect:
+    """把窗口几何 clamp 到可见桌面并集内（V5-U6 多显示器健壮性）。
+
+    与可见桌面无交集 → 贴回主屏（24px 边距、尺寸不超主屏）；
+    部分出屏 → 拉回到桌面边界内至少保留 60px 可抓握区。
+    """
+    screens = QGuiApplication.screens()
+    if not screens:
+        return geometry
+    visible = screens[0].availableGeometry()
+    for screen in screens[1:]:
+        visible = visible.united(screen.availableGeometry())
+    if not geometry.intersects(visible):
+        primary = (
+            QGuiApplication.primaryScreen().availableGeometry()
+            if QGuiApplication.primaryScreen() is not None
+            else visible
+        )
+        size = geometry.size().boundedTo(primary.size())
+        return QRect(primary.x() + 24, primary.y() + 24, size.width(), size.height())
+    x = min(max(geometry.x(), visible.left()), max(visible.left(), visible.right() - 60))
+    y = min(max(geometry.y(), visible.top()), max(visible.top(), visible.bottom() - 60))
+    return QRect(x, y, geometry.width(), geometry.height())
 
 
 def floatable_panel_entries(

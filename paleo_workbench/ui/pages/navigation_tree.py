@@ -133,7 +133,7 @@ class NavigationTree(QTreeWidget):
         # follow theme switches instead of baking a light-only sheet (#1047)
         from paleo_workbench.ui.theme import theme_manager
 
-        self._theme_conn = theme_manager.theme_changed.connect(
+        theme_manager.theme_changed.connect(
             self._on_theme_changed
         )
 

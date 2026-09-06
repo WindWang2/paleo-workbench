@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
 from geoviz import WellSectionCanvas
 
 from paleo_workbench import tokens
+from paleo_workbench.ui import style
+from paleo_workbench.ui.workstation.common import workstation_icon
 from paleo_workbench.viz.models import VizPayload
 
 
@@ -37,7 +39,11 @@ class WellSectionHost:
     def __init__(self) -> None:
         self.widget = QFrame()
         self.widget.setObjectName("WellSectionHostContainer")
-        self.widget.setStyleSheet("QFrame#WellSectionHostContainer { background-color: #ffffff; }")
+        style.bind(
+            self.widget,
+            lambda: "QFrame#WellSectionHostContainer { background-color:"
+                    f" {style.palette()['BG_SIDEBAR']}; }}",
+        )
         self.widget.setAutoFillBackground(True)
 
         layout = QVBoxLayout(self.widget)
@@ -56,7 +62,7 @@ class WellSectionHost:
 
         # 1. Datum Flattening Selector
         datum_lbl = QLabel("拉平基准面:")
-        datum_lbl.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-weight: 500;")
+        datum_lbl.setObjectName("WorkFieldLabel")
         toolbar.addWidget(datum_lbl)
 
         self.datum_combo = QComboBox()
@@ -66,7 +72,7 @@ class WellSectionHost:
 
         # 2. Inter-Well Spacing SpinBox
         spacing_lbl = QLabel("井间距(px):")
-        spacing_lbl.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-weight: 500;")
+        spacing_lbl.setObjectName("WorkFieldLabel")
         toolbar.addWidget(spacing_lbl)
 
         self.spacing_spin = QSpinBox()
@@ -84,16 +90,9 @@ class WellSectionHost:
         toolbar.addStretch(1)
 
         # 4. High-Res PNG Export Button
-        self.export_btn = QPushButton("🖼️ 导出剖面图件")
-        self.export_btn.setStyleSheet(
-            f"QPushButton {{ background: {tokens.BG_HEADER};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px;"
-            f" padding: 6px 12px;"
-            f" color: {tokens.TEXT_PRIMARY};"
-            f" font-weight: 600; }}"
-            f"QPushButton:hover {{ background: {tokens.BG_SEARCH}; border-color: {tokens.PRIMARY}; }}"
-        )
+        self.export_btn = QPushButton("导出剖面图件")
+        self.export_btn.setObjectName("SecondaryButton")
+        self.export_btn.setIcon(workstation_icon("rb-export.svg"))
         self.export_btn.clicked.connect(self._on_export_clicked)
         toolbar.addWidget(self.export_btn)
 
@@ -107,9 +106,11 @@ class WellSectionHost:
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.scroll_area.setMinimumSize(100, 100)
-        self.scroll_area.setStyleSheet(
-            f"QScrollArea#WellSectionScrollArea {{ border: 1px solid {tokens.BORDER};"
-            f" background-color: #ffffff; }}"
+        style.bind(
+            self.scroll_area,
+            lambda: "QScrollArea#WellSectionScrollArea {"
+                    f" border: 1px solid {style.palette()['BORDER']};"
+                    f" background-color: {style.palette()['BG_SIDEBAR']}; }}",
         )
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)

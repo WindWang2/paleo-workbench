@@ -1,3 +1,4 @@
+# [NON-PRODUCTION] 设计探索原型，零生产引用；豁免 token 卫生门禁（tests/test_ui_token_hygiene.py）。勿在生产代码 import。
 """PROTOTYPE — 综合编修环境布局原型（throwaway，勿并入生产代码）。
 
 问题：综合编修环境（右侧图层管理、中央图件为主体）放进现有工作站后应该长什么样？

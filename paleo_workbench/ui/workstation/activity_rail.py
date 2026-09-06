@@ -3,7 +3,15 @@ from __future__ import annotations
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import QButtonGroup, QFrame, QToolButton, QVBoxLayout
 
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.ui.workstation.common import workstation_icon
+
+_current_density = style.current_density
+
+
+def _rail_button_size() -> QSize:
+    d = tokens.density_tokens(_current_density())
+    return QSize(d["rail_item_size"], d["rail_item_size"] + 4)
 
 
 class ActivityRail(QFrame):
@@ -22,10 +30,20 @@ class ActivityRail(QFrame):
         ("workspaces", "工作区", "visualization.svg"),
     )
 
+    def _apply_density_metrics(self) -> None:
+        """密度切换：重设 rail 宽度与全部按钮尺寸（bind_metrics 回调）。"""
+        self.setFixedWidth(tokens.rail_width(_current_density()))
+        size = _rail_button_size()
+        for button in getattr(self, "buttons", {}).values():
+            button.setFixedSize(size)
+        settings_btn = getattr(self, "_settings_button", None)
+        if settings_btn is not None:
+            settings_btn.setFixedSize(size)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("WorkstationActivityRail")
-        self.setFixedWidth(54)
+        self.setFixedWidth(tokens.rail_width(_current_density()))
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 4, 2, 4)
@@ -44,7 +62,7 @@ class ActivityRail(QFrame):
             button.setIconSize(QSize(18, 18))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
             button.setToolTip(label)
-            button.setFixedSize(48, 52)
+            button.setFixedSize(_rail_button_size())
             button.clicked.connect(lambda _checked=False, mode=key: self.mode_requested.emit(mode))
             self.group.addButton(button, index)
             self.buttons[key] = button
@@ -59,7 +77,7 @@ class ActivityRail(QFrame):
         settings.setIconSize(QSize(18, 18))
         settings.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         settings.setToolTip("工作站设置")
-        settings.setFixedSize(48, 52)
+        settings.setFixedSize(_rail_button_size())
         settings.clicked.connect(self.settings_requested.emit)
         layout.addWidget(settings)
 
@@ -68,9 +86,13 @@ class ActivityRail(QFrame):
         collapse.setIcon(workstation_icon("chevrons-left.svg"))
         collapse.setToolTip("折叠资源管理器")
         collapse.clicked.connect(self.collapse_requested.emit)
+        # 折叠钮之下还有布局尾项；密度切换时整列重算（见 _apply_density_metrics）
         layout.addWidget(collapse)
 
         self.collapse_button = collapse
+        self._settings_button = settings
+        # 注册时机在全部按钮构造之后：bind_metrics 立即回调一次
+        style.bind_metrics(self, self._apply_density_metrics)
         self.set_mode("project")
 
     def set_mode(self, key: str) -> None:

@@ -1,55 +1,32 @@
 """Lithology Crossplot Analysis Dialog — interactive scatter plot for reservoir acoustic impedance vs GR."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextBrowser, QFrame
+from PySide6.QtWidgets import QLabel, QPushButton, QTextBrowser
 
 from paleo_workbench import tokens
+from paleo_workbench.ui.components.dialog import PwbDialog
+
+# 岩性判读色的域语义（储层/盖层/碳酸盐/基底）——D10 例外，具名保留
+_LITHO_EVAL_COLORS = {
+    "砂岩": "#059669",
+    "泥岩": "#dc2626",
+    "石灰岩": "#2563eb",
+    "花岗岩": "#d97706",
+}
 
 
-class LithologyCrossplotDialog(QDialog):
+class LithologyCrossplotDialog(PwbDialog):
     """Dialog displaying lithology crossplot statistical summary and cluster centroids."""
     def __init__(self, analysis_result: dict, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("岩相/波阻抗-伽马交会图分析 (Lithology Crossplot)")
+        super().__init__("岩相/波阻抗-伽马交会图分析 (Lithology Crossplot)", parent=parent)
         self.resize(560, 520)
-        self.setStyleSheet(f"""
-            QDialog {{
-                background-color: {tokens.BG_SIDEBAR};
-                color: {tokens.TEXT_PRIMARY};
-            }}
-            QTextBrowser {{
-                background-color: {tokens.BG_BODY};
-                color: {tokens.TEXT_PRIMARY};
-                border: 1px solid {tokens.BORDER};
-                border-radius: 8px;
-                padding: 12px;
-                font-family: 'Segoe UI', system-ui, sans-serif;
-                font-size: 13px;
-            }}
-            QPushButton {{
-                background-color: {tokens.PRIMARY};
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {tokens.PRIMARY_HOVER};
-            }}
-        """)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
-        layout.setSpacing(tokens.SPACE_2)
-
-        header = QLabel("📈 井数据波阻抗 (AI) vs 自然伽马 (GR) 岩相交会图分析")
-        header.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {tokens.PRIMARY};")
-        layout.addWidget(header)
+        header = QLabel("井数据波阻抗 (AI) vs 自然伽马 (GR) 岩相交会图分析")
+        header.setObjectName("PwbSectionHeader")
+        self.add_content(header)
 
         self.browser = QTextBrowser()
-        layout.addWidget(self.browser)
+        self.add_content(self.browser, 1)
 
         # Build HTML table for cluster centroids
         clusters = analysis_result.get("clusters", {})
@@ -72,10 +49,15 @@ class LithologyCrossplotDialog(QDialog):
         """
 
         _litho_eval = {
-            "砂岩": "<span style='color: #059669; font-weight: bold;'>优质储层 (Sand)</span>",
-            "泥岩": "<span style='color: #dc2626; font-weight: bold;'>盖层/隔层 (Shale)</span>",
-            "石灰岩": "<span style='color: #2563eb; font-weight: bold;'>致密/碳酸盐岩 (Limestone)</span>",
-            "花岗岩": "<span style='color: #d97706; font-weight: bold;'>基底结晶岩 (Granite)</span>",
+            lith: (
+                f"<span style='color: {color}; font-weight: bold;'>{label}</span>"
+            )
+            for lith, color, label in (
+                ("砂岩", _LITHO_EVAL_COLORS["砂岩"], "优质储层 (Sand)"),
+                ("泥岩", _LITHO_EVAL_COLORS["泥岩"], "盖层/隔层 (Shale)"),
+                ("石灰岩", _LITHO_EVAL_COLORS["石灰岩"], "致密/碳酸盐岩 (Limestone)"),
+                ("花岗岩", _LITHO_EVAL_COLORS["花岗岩"], "基底结晶岩 (Granite)"),
+            )
         }
 
         for lith, stats in clusters.items():
@@ -106,5 +88,7 @@ class LithologyCrossplotDialog(QDialog):
         self.browser.setHtml(html)
 
         btn_close = QPushButton("关闭")
+        btn_close.setObjectName("PrimaryButton")
         btn_close.clicked.connect(self.accept)
-        layout.addWidget(btn_close, 0, Qt.AlignRight)
+        self.add_content_spacing()
+        self.add_content(btn_close)

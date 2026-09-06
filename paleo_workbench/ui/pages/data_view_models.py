@@ -42,8 +42,8 @@ STAGE_ICONS = {
 STAGE_COLORS = {
     DataStage.RAW: tokens.PRIMARY,
     DataStage.DERIVED: tokens.SUCCESS,
-    DataStage.INTERMEDIATE: "#E6A23C",  # Warm Amber
-    DataStage.OUTPUT: "#409EFF",       # Bright Cyan-Blue
+    DataStage.INTERMEDIATE: tokens.ACCENT,   # Warm Amber（原 Element-UI 遗留 hex）
+    DataStage.OUTPUT: tokens.TEAL,           # Bright Cyan-Blue（同上）
 }
 
 

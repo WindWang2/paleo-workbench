@@ -63,6 +63,25 @@ PRIMARY_DISABLED = "#8c99a3"
 # 主色面上的文字色（浅色主题=白，深色主题=深墨，高对比=白）
 ON_PRIMARY = "#ffffff"
 
+# ---------------------------------------------------------------------------
+# V5 语义状态 token：禁用 / 降级 / 图表底。三主题各自策展，词汇表唯一。
+# ---------------------------------------------------------------------------
+BG_DISABLED = "#edf1f4"          # 禁用输入/控件底（light 与 BG_SEARCH 同族）
+TEXT_DISABLED = "#8c99a3"        # 禁用文字（与 PRIMARY_DISABLED 同值，语义独立）
+STATUS_DEGRADED = "#b45309"      # 降级/部分可用过程态（warn 族但语义独立）
+BG_CHART = "#ffffff"             # 图表画布底（pyqtgraph 等坐标区）
+
+# 数据画布 chrome 组（painter 级：比例尺/图例/选区/捕捉/编辑笔色）。
+# 这些颜色编码画布交互语义，不由 QSS 渲染——painter 每 paint 经 palette_for 取。
+CANVAS_INK = "#343a40"                     # 画布注记/轴文字主墨（注意：unified_map_canvas
+                                          # 的 chrome 墨色是相对地图底色的另一语义，勿合并）
+CANVAS_CHROME_BG = "rgba(248, 249, 250, 0.92)"   # 画布浮层（图例/比例尺）底
+CANVAS_CHROME_BORDER = "#dfe6ee"           # 画布浮层描边
+CANVAS_SELECTION = "#ffe066"               # 画布选区高亮（amber 系）
+CANVAS_SNAP = "#53d8fb"                    # 捕捉指示
+CANVAS_EDIT = "#ff6b6b"                    # 编辑会话警示（顶点/拓扑）
+CANVAS_CURSOR = "#7c3aed"                  # 空间游标（井位图/剖面膜上的探针）
+
 # 图标栏交互态（深色栏专用，三主题各自策展）
 BG_RAIL_HOVER = "#edf2f4"
 BG_RAIL_ACTIVE = "#e1eef1"
@@ -145,6 +164,9 @@ DENSITY_TOKENS = {
         "btn_height": 24,
         "row_height": 22,
         "toolbar_height": 30,
+        "app_bar_height": 40,
+        "rail_width": 48,
+        "rail_item_size": 44,
         "font_delta": 0,  # 字号不缩：专业可读性优先（13px 底线）
     },
     "comfortable": {
@@ -153,11 +175,47 @@ DENSITY_TOKENS = {
         "btn_height": 30,
         "row_height": 28,
         "toolbar_height": 36,
+        "app_bar_height": 46,
+        "rail_width": 54,
+        "rail_item_size": 48,
         "font_delta": 0,
     },
 }
 CONTROL_HEIGHT = DENSITY_TOKENS["comfortable"]["btn_height"]
 CONTROL_HEIGHT_LG = 34
+
+
+# ---------------------------------------------------------------------------
+# 密度访问器（V5）：固定高度调用点的运行时真源。构造时用 comfortable，
+# 订阅 theme_changed(theme, density) 后用当前密度重取并重设。
+# ---------------------------------------------------------------------------
+def density_tokens(density: str = "comfortable") -> dict:
+    """Metric table for *density*（未知值回落 comfortable，不抛错）。"""
+    return DENSITY_TOKENS.get(density, DENSITY_TOKENS["comfortable"])
+
+
+def control_height(density: str = "comfortable") -> int:
+    return density_tokens(density)["btn_height"]
+
+
+def row_height(density: str = "comfortable") -> int:
+    return density_tokens(density)["row_height"]
+
+
+def toolbar_height(density: str = "comfortable") -> int:
+    return density_tokens(density)["toolbar_height"]
+
+
+def app_bar_height(density: str = "comfortable") -> int:
+    return density_tokens(density)["app_bar_height"]
+
+
+def rail_width(density: str = "comfortable") -> int:
+    return density_tokens(density)["rail_width"]
+
+
+def rail_item_size(density: str = "comfortable") -> int:
+    return density_tokens(density)["rail_item_size"]
 
 ICON_FILES = [
     "home.svg", "data.svg", "well-log.svg", "seismic.svg", "sequence.svg",
@@ -307,6 +365,17 @@ _DARK_OVERRIDES = {
     "PRIMARY_HOVER": "#5adcc9",
     "PRIMARY_PRESSED": "#1fa898",
     "PRIMARY_DISABLED": "#455350",
+    "BG_DISABLED": "#161d1c",
+    "TEXT_DISABLED": "#64716c",
+    "STATUS_DEGRADED": "#d97706",
+    "BG_CHART": "#141c1b",
+    "CANVAS_INK": "#c9d2ce",
+    "CANVAS_CHROME_BG": "rgba(20, 28, 27, 0.92)",
+    "CANVAS_CHROME_BORDER": "#3c4744",
+    "CANVAS_SELECTION": "#ffd43b",
+    "CANVAS_SNAP": "#53d8fb",
+    "CANVAS_EDIT": "#ff8787",
+    "CANVAS_CURSOR": "#a78bfa",
     "FOCUS_RING": "#e8863d",
     "TOOLTIP_BG": "#0a1211",
     "TOOLTIP_TEXT": "#e8ece9",
@@ -353,6 +422,17 @@ _HIGH_CONTRAST_OVERRIDES = {
     "PRIMARY_HOVER": "#262626",
     "PRIMARY_PRESSED": "#404040",
     "PRIMARY_DISABLED": "#757575",
+    "BG_DISABLED": "#f0f0f0",
+    "TEXT_DISABLED": "#595959",
+    "STATUS_DEGRADED": "#b45309",
+    "BG_CHART": "#ffffff",
+    "CANVAS_INK": "#ffffff",
+    "CANVAS_CHROME_BG": "rgba(0, 0, 0, 0.85)",
+    "CANVAS_CHROME_BORDER": "#ffffff",
+    "CANVAS_SELECTION": "#ffd43b",
+    "CANVAS_SNAP": "#00e0ff",
+    "CANVAS_EDIT": "#ff5252",
+    "CANVAS_CURSOR": "#c5b3ff",
     "FOCUS_RING": "#005fd0",
     "TOOLTIP_BG": "#ffffff",
     "TOOLTIP_TEXT": "#000000",
@@ -404,6 +484,10 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     padding_y = density_tokens["padding_y"]
     padding_x = density_tokens["padding_x"]
     btn_height = density_tokens["btn_height"]
+    # 结构性 chrome 尺寸随密度（rail/app bar），QSS 重建即生效
+    rail_width = density_tokens["rail_width"]
+    rail_item = density_tokens["rail_item_size"]
+    app_bar_h = density_tokens["app_bar_height"]  # noqa: F841 — app bar 高度由代码侧 bind_metrics 消费
 
     return f'''
     /* ── Stratum base ─────────────────────────────────────────────── */
@@ -439,8 +523,8 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         border: 1px solid {t.FOCUS_RING};
     }}
     QPushButton:disabled {{
-        background-color: {t.BG_SIDEBAR};
-        color: {t.PRIMARY_DISABLED};
+        background-color: {t.BG_DISABLED};
+        color: {t.TEXT_DISABLED};
         border-color: {t.BORDER};
     }}
     QPushButton#PrimaryButton {{
@@ -470,14 +554,14 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         padding: {padding_y}px {padding_x}px;
         selection-background-color: {t.PRIMARY};
         selection-color: {t.ON_PRIMARY};
-        min-height: {t.CONTROL_HEIGHT}px;
+        min-height: {btn_height}px;
     }}
     QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{
         border: 1px solid {t.FOCUS_RING};
     }}
     QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {{
-        background-color: {t.BG_SEARCH};
-        color: {t.PRIMARY_DISABLED};
+        background-color: {t.BG_DISABLED};
+        color: {t.TEXT_DISABLED};
         border-color: {t.BORDER};
     }}
     QComboBox::drop-down {{
@@ -598,7 +682,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         border-bottom: 1px solid {t.BORDER};
         border-right: 1px solid {t.BORDER};
         font-weight: 600;
-        min-height: {t.CONTROL_HEIGHT}px;
+        min-height: {btn_height}px;
     }}
     QTableCornerButton::section {{
         background-color: {t.BG_SEARCH};
@@ -663,7 +747,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         color: {t.PRIMARY};
     }}
     QMenu::item:disabled {{
-        color: {t.PRIMARY_DISABLED};
+        color: {t.TEXT_DISABLED};
     }}
     QMenu::separator {{
         height: 1px;
@@ -745,54 +829,8 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     }}
 
     /* ── App shell chrome ─────────────────────────────────────────── */
-    QFrame#MenuBar {{
-        background: {t.BG_HEADER}; border-bottom: 1px solid {t.BORDER_STRONG};
-        min-height: {t.MENU_BAR_HEIGHT}px; max-height: {t.MENU_BAR_HEIGHT}px;
-    }}
-    /* UI v2 Ribbon (variant A) */
-    ; border-bottom: 1px solid {t.BORDER_STRONG};
-    }}
-    QFrame#RibbonTopRow {{ background: transparent; }}
-    QLabel#RibbonAppBadge {{
-        color: {t.TEXT_SECONDARY}; font-size: {t.FONT_SIZE_STATUS}px;
-    }}
-    QPushButton#RibbonTab {{
-        background: transparent; border: none; border-bottom: 2px solid transparent;
-        color: {t.TEXT_PRIMARY}; padding: 4px 14px; font-size: {t.FONT_SIZE_BASE}px;
-    }}
-    QPushButton#RibbonTab:hover {{ background: {t.BG_MENU_HOVER}; }}
-    QPushButton#RibbonTab[active="true"] {{
-        color: {t.PRIMARY}; border-bottom: 2px solid {t.ACCENT}; font-weight: 600;
-    }}
-    QPushButton#RibbonAppMenuButton {{
-        background: transparent; border: none; color: {t.TEXT_PRIMARY};
-        font-size: 14px; padding: 0 6px;
-    }}
-    QPushButton#RibbonAppMenuButton::menu-indicator {{ image: none; width: 0; }}
-    QPushButton#RibbonCollapseButton {{
-        background: transparent; border: none; color: {t.TEXT_SECONDARY};
-        font-size: 12px; padding: 0 6px;
-    }}
-    QPushButton#RibbonCollapseButton:hover {{ background: {t.BG_MENU_HOVER}; color: {t.TEXT_PRIMARY}; }}
-    QFrame#RibbonBody {{ background: {t.BG_HEADER}; }}
-    QFrame#RibbonGroup {{ background: transparent; }}
-    QLabel#RibbonGroupCaption {{
-        color: {t.TEXT_SECONDARY}; font-size: {t.FONT_SIZE_STATUS}px;
-    }}
-    QFrame#RibbonGroupSeparator {{
-        color: {t.BORDER}; background: {t.BORDER};
-        max-width: 1px; margin: 8px 2px;
-    }}
-    QToolButton#RibbonButton {{
-        background: transparent; border: 1px solid transparent; border-radius: {t.RADIUS_BUTTON}px;
-        color: {t.TEXT_PRIMARY}; padding: 3px 8px; font-size: {t.FONT_SIZE_STATUS}px;
-    }}
-    QToolButton#RibbonButton:hover {{ background: {t.BG_MENU_HOVER}; border-color: {t.BORDER}; }}
-    QToolButton#RibbonButton:checked {{
-        background: {t.PRIMARY}; color: {t.ON_PRIMARY}; border-color: {t.PRIMARY_PRESSED};
-    }}
-    QToolButton#RibbonButton:disabled {{ color: {t.PRIMARY_DISABLED}; }}
-    QLabel#RibbonHint {{ color: {t.TEXT_SECONDARY}; font-size: {t.FONT_SIZE_STATUS}px; }}
+    /* 旧 UI v2 Ribbon 规则块与 QFrame#MenuBar 已随 B2 chrome 删除而失效
+       （全仓无 setObjectName 引用；其中一条还损坏为悬空声明片段）——移除。 */
     /* Hub sub-module pill switcher */
     QWidget#SubmoduleSwitcher {{
         background: {t.BG_HEADER}; border-bottom: 1px solid {t.BORDER_LIGHT};
@@ -807,29 +845,12 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         background: {t.PRIMARY}; color: {t.ON_PRIMARY}; border-color: {t.PRIMARY};
         font-weight: 600;
     }}
-    QPushButton#ProjectMenuButton,
-    QPushButton#ViewMenuButton,
-    QPushButton#ToolsMenuButton,
-    QPushButton#HelpMenuButton {{
-        background: transparent; border: none; color: {t.TEXT_PRIMARY}; padding: 0;
-    }}
-    /* 顶部菜单条按标准菜单栏处理：隐藏下拉指示箭头，避免与文字重叠 */
-    QPushButton#ProjectMenuButton::menu-indicator,
-    QPushButton#ViewMenuButton::menu-indicator,
-    QPushButton#ToolsMenuButton::menu-indicator,
-    QPushButton#HelpMenuButton::menu-indicator {{
-        image: none; width: 0;
-    }}
-    QPushButton#ProjectMenuButton:hover,
-    QPushButton#ViewMenuButton:hover,
-    QPushButton#ToolsMenuButton:hover,
-    QPushButton#HelpMenuButton:hover {{ color: {t.PRIMARY}; }}
     QPushButton#DataPreviewPdfPrevious,
     QPushButton#DataPreviewPdfNext {{
         border: 1px solid {t.BORDER};
         border-radius: {t.RADIUS_BUTTON}px;
         padding: 4px 12px;
-        min-height: {t.CONTROL_HEIGHT}px;
+        min-height: {btn_height}px;
         background: {t.BG_SIDEBAR};
     }}
     QPushButton#DataPreviewPdfPrevious:focus,
@@ -841,7 +862,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         border: 1px solid {t.BORDER};
         border-radius: {t.RADIUS_BUTTON}px;
         padding: 4px 12px;
-        min-height: {t.CONTROL_HEIGHT}px;
+        min-height: {btn_height}px;
     }}
     QPushButton#SecondaryButton:hover {{ background: {t.BG_SEARCH}; }}
     QPushButton#SecondaryButton:pressed {{ background: {t.BORDER_LIGHT}; }}
@@ -857,7 +878,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     QLineEdit#SearchBox {{
         background: {t.BG_SEARCH}; border: 1px solid {t.BORDER};
         border-radius: {t.RADIUS_BUTTON}px; padding: 4px 8px; color: {t.TEXT_PRIMARY};
-        min-height: {t.CONTROL_HEIGHT}px;
+        min-height: {btn_height}px;
     }}
     QLineEdit#SearchBox:focus {{ border: 1px solid {t.FOCUS_RING}; }}
     QFrame#PanelCard {{
@@ -895,33 +916,8 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         font-size: {t.FONT_SIZE_BASE};
     }}
 
-    /* 深色图标栏：三主题统一深石板底，激活项带铜色指示条 */
-    QFrame#IconRail {{
-        background: {t.BG_RAIL_GRADIENT};
-        border-right: 1px solid {t.BORDER};
-        min-width: {t.ICON_RAIL_WIDTH}px; max-width: {t.ICON_RAIL_WIDTH}px;
-    }}
-    QFrame#RailSeparator {{
-        background: {t.RAIL_SEPARATOR};
-        border: none;
-        min-height: 1px;
-        max-height: 1px;
-        margin: 3px 8px;
-    }}
-    QToolButton[navItem="true"] {{
-        background: transparent; color: {t.TEXT_ON_RAIL}; border: none;
-        border-left: 3px solid transparent;
-        border-radius: {t.RADIUS_NAV_ITEM}px;
-        min-width: {t.ICON_RAIL_ITEM_SIZE}px; max-width: {t.ICON_RAIL_ITEM_SIZE}px;
-        min-height: {t.ICON_RAIL_ITEM_SIZE}px; max-height: {t.ICON_RAIL_ITEM_SIZE}px;
-        font-size: {t.FONT_SIZE_NAV_LABEL}; font-weight: {t.FONT_WEIGHT_NAV_LABEL};
-    }}
-    QToolButton[navItem="true"]:hover {{ background: {t.BG_RAIL_HOVER}; color: {t.TEXT_ON_RAIL_ACTIVE}; }}
-    QToolButton[navItem="true"]:focus {{ outline: 2px solid {t.FOCUS_RING}; }}
-    QToolButton[navItem="true"][active="true"] {{
-        background: {t.BG_RAIL_ACTIVE}; color: {t.TEXT_ON_RAIL_ACTIVE};
-        border-left: 3px solid {t.ACCENT}; font-weight: 600;
-    }}
+    /* 旧 Hub shell 的 IconRail/RailSeparator/navItem 规则已死（零引用；
+       B18 后工作站使用 WorkstationActivityRail 词汇）——移除。 */
     /* Generic QToolButton focus (covers QToolButton beyond the icon rail) */
     QToolButton:focus {{ border: 1px solid {t.FOCUS_RING}; }}
     QFrame#StatusBar {{
@@ -1065,33 +1061,6 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         border: 1px solid {t.BORDER};
         border-radius: {t.RADIUS_BUTTON}px;
         padding: 2px;
-    }}
-    QFrame#WorkflowStepper {{
-        background: {t.BG_HEADER};
-        border-bottom: 1px solid {t.BORDER};
-    }}
-    QPushButton[stageItem="true"] {{
-        background: transparent;
-        color: {t.TEXT_SECONDARY};
-        font-size: {t.FONT_SIZE_BASE};
-        font-weight: 500;
-        border: 1px solid transparent;
-        border-radius: 16px;
-        padding: 4px 12px;
-    }}
-    QPushButton[stageItem="true"]:hover {{
-        background: {t.BG_SEARCH};
-        color: {t.TEXT_PRIMARY};
-    }}
-    QPushButton[stageItem="true"][active="true"] {{
-        background: {t.PRIMARY};
-        color: {t.ON_PRIMARY};
-        font-weight: 600;
-    }}
-    QLabel#StepperArrow {{
-        color: {t.TEXT_SECONDARY};
-        font-size: 13px;
-        font-weight: bold;
     }}
     QLabel#WorkFieldLabel {{
         color: {t.TEXT_SECONDARY};
@@ -1279,7 +1248,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         font-weight: 700;
     }}
     QLabel#WorkstationInspectorHeader {{
-        min-height: 30px;
+        min-height: {btn_height + 4}px;
         padding: 0px 10px;
         border-bottom: 1px solid {t.BORDER};
     }}
@@ -1555,6 +1524,154 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         border-radius: 3px;
         min-height: 26px;
         padding: 2px 8px;
+    }}
+
+    /* ── Design System V5: shared components (ui.components) ──────── */
+    /* 组件一律经 objectName + 动态属性消费本表——构造时不再快照主题值，
+       主题/密度切换由全局样式表重载自然生效。 */
+    QPushButton#PwbDangerButton {{
+        background: {t.BG_SIDEBAR};
+        color: {t.ERROR_RED};
+        border: 1px solid {t.ERROR_RED};
+        font-weight: 600;
+    }}
+    QPushButton#PwbDangerButton:hover {{
+        background: {t.ERROR_RED};
+        color: #ffffff;
+        border-color: {t.ERROR_RED};
+    }}
+    QPushButton#PwbDangerButton:pressed {{
+        background: {t.ERROR};
+        border-color: {t.ERROR};
+        color: #ffffff;
+    }}
+    QPushButton#PwbDangerButton:disabled {{
+        background: {t.BG_DISABLED};
+        color: {t.TEXT_DISABLED};
+        border-color: {t.BORDER};
+    }}
+    QPushButton#PwbDangerButton:focus {{
+        border: 1px solid {t.FOCUS_RING};
+    }}
+    QFrame#PwbSplitButton {{
+        background: transparent;
+        border: none;
+    }}
+    QFrame#PwbSplitButton QToolButton {{
+        background: {t.BG_SIDEBAR};
+        border: 1px solid {t.BORDER};
+        border-radius: 0px;
+        min-height: {btn_height}px;
+    }}
+    QFrame#PwbSplitButton QToolButton:hover {{
+        background: {t.BG_SEARCH};
+        border-color: {t.BORDER_STRONG};
+    }}
+    QLabel#PwbSectionHeader {{
+        color: {t.TEXT_PRIMARY};
+        font-size: {t.FONT_SIZE_TITLE};
+        font-weight: {t.FONT_WEIGHT_TITLE};
+        border: none;
+        border-left: 3px solid {t.ACCENT};
+        padding-left: 8px;
+        background: transparent;
+    }}
+    QLabel#PwbBadge {{
+        padding: 1px 8px;
+        border-radius: {t.RADIUS_BADGE}px;
+        font-size: {t.FONT_SIZE_STATUS}px;
+        font-weight: 600;
+    }}
+    QLabel#PwbBadge[tone="neutral"] {{
+        background: {t.BG_SEARCH}; color: {t.TEXT_SECONDARY};
+    }}
+    /* 徽章深底色全部按白字 ≥ 4.5:1 策展（BADGE_*），三主题皆用白字 */
+    QLabel#PwbBadge[tone="primary"] {{
+        background: {t.BADGE_PRIMARY}; color: #ffffff;
+    }}
+    QLabel#PwbBadge[tone="success"] {{
+        background: {t.BADGE_SUCCESS}; color: #ffffff;
+    }}
+    QLabel#PwbBadge[tone="warning"] {{
+        background: {t.BADGE_WARNING}; color: #ffffff;
+    }}
+    QLabel#PwbBadge[tone="error"] {{
+        background: {t.ERROR_RED}; color: #ffffff;
+    }}
+    QLabel#PwbInlineStatusText {{
+        font-size: {t.FONT_SIZE_STATUS};
+        background: transparent;
+    }}
+    QLabel#PwbInlineStatusText[tone="neutral"] {{ color: {t.TEXT_SECONDARY}; }}
+    QLabel#PwbInlineStatusText[tone="primary"] {{ color: {t.PRIMARY}; }}
+    QLabel#PwbInlineStatusText[tone="success"] {{ color: {t.SUCCESS}; }}
+    QLabel#PwbInlineStatusText[tone="warning"] {{ color: {t.WARNING}; }}
+    QLabel#PwbInlineStatusText[tone="process"] {{ color: {t.ACCENT}; }}
+    QLabel#PwbInlineStatusText[tone="error"] {{ color: {t.ERROR}; }}
+    QFrame#PwbStateSurface {{
+        background: {t.BG_SIDEBAR};
+        border: 1px dashed {t.BORDER_STRONG};
+        border-radius: {t.RADIUS_CARD}px;
+    }}
+    QLabel#PwbStateTitle {{
+        color: {t.TEXT_PRIMARY};
+        font-size: {t.FONT_SIZE_BASE};
+        font-weight: 600;
+        background: transparent;
+    }}
+    QLabel#PwbStateHint {{
+        color: {t.TEXT_SECONDARY};
+        font-size: {t.FONT_SIZE_STATUS};
+        background: transparent;
+    }}
+    QProgressBar#PwbProgress {{
+        background: {t.BG_SEARCH};
+        border: none;
+        border-radius: 3px;
+        min-height: 6px;
+        max-height: 6px;
+    }}
+    QProgressBar#PwbProgress::chunk {{
+        background-color: {t.PRIMARY};
+        border-radius: 3px;
+    }}
+    QProgressBar#PwbProgress[progressState="running"]::chunk {{
+        background-color: {t.ACCENT};
+    }}
+    QProgressBar#PwbProgress[progressState="queued"]::chunk {{
+        background-color: {t.PRIMARY_DISABLED};
+    }}
+    QProgressBar#PwbProgress[progressState="done"]::chunk {{
+        background-color: {t.SUCCESS};
+    }}
+    QProgressBar#PwbProgress[progressState="failed"]::chunk {{
+        background-color: {t.ERROR_RED};
+    }}
+    QFrame#PwbToast {{
+        background: {t.BG_GLASS};
+        border: 1px solid {t.BORDER_STRONG};
+        border-radius: {t.RADIUS_CARD}px;
+    }}
+    QLabel#PwbToastTitle {{
+        color: {t.TEXT_PRIMARY};
+        font-weight: 600;
+        background: transparent;
+    }}
+    QFrame#PwbCommandBar {{
+        background: {t.BG_SIDEBAR};
+        border: none;
+        border-bottom: 1px solid {t.BORDER};
+    }}
+    QFrame#PwbCommandSeparator {{
+        background: {t.BORDER};
+        border: none;
+        max-width: 1px;
+        min-width: 1px;
+        margin: 5px 3px;
+    }}
+    QFrame#PwbInspectorSection {{
+        background: transparent;
+        border: none;
     }}
     '''
 

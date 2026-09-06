@@ -22,20 +22,26 @@ from PySide6.QtWidgets import (
     QMenu,
     QPushButton,
     QSizePolicy,
-    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from paleo_workbench.project.models import ExportArtifact, ResourceItem
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
+
+
+def _small_button_size() -> object:
+    """密度感知的 22px 小方按钮（tag +/− 等）。"""
+    from PySide6.QtCore import QSize
+
+    side = tokens.control_height(style.current_density()) - 6
+    return QSize(side, side)
 from paleo_workbench.ui.pages.data_view_models import (
     AssetView,
-    IntegrityState,
     VersionView,
     asset_view_from_object,
     stage_icon,
@@ -115,10 +121,7 @@ class LineageTreeWidget(QWidget):
         self.detail_label = QLabel("点击节点查看版本 / 运行详情（双击版本定位数据行）")
         self.detail_label.setWordWrap(True)
         self.detail_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        self.detail_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
-            " padding: 4px; border: 1px solid rgba(0,0,0,0);"
-        )
+        self.detail_label.setObjectName("PwbStateHint")
         self.detail_label.setMinimumHeight(56)
         layout.addWidget(self.detail_label)
         self._selected_payload: tuple[str, dict] | None = None
@@ -288,10 +291,13 @@ class InspectorPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("InspectorPanel")
-        self.setStyleSheet(
-            f"QFrame#InspectorPanel {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
+        style.bind(
+            self,
+            lambda: (
+                f"QFrame#InspectorPanel {{ background: {style.palette()['BG_SIDEBAR']};"
+                f" border: 1px solid {style.palette()['BORDER']};"
+                f" border-radius: {tokens.RADIUS_CARD}px; }}"
+            ),
         )
         self._current_asset: object | None = None
         self._current_view: AssetView | None = None
@@ -305,23 +311,29 @@ class InspectorPanel(QFrame):
         layout.setSpacing(tokens.SPACE_1)
 
         self.title_label = QLabel("数据资产检查器")
-        self.title_label.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-weight: 600; font-size: {tokens.FONT_SIZE_BASE};"
-        )
+        self.title_label.setObjectName("PwbSectionHeader")
         layout.addWidget(self.title_label)
 
         self.empty_label = QLabel("请从列表中选择数据资产")
         self.empty_label.setObjectName("EmptyStateLabel")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 12px; margin: 20px;")
+        self.empty_label.setStyleSheet(
+            f"color: {style.palette()['TEXT_SECONDARY']}; font-size: 12px; margin: 20px;"
+        )
         layout.addWidget(self.empty_label)
 
         self.tabs = QTabWidget()
         self.tabs.setObjectName("InspectorTabs")
-        self.tabs.setStyleSheet(
-            f"QTabWidget::pane {{ border: 1px solid {tokens.BORDER}; border-radius: {tokens.RADIUS_CARD}px; background: {tokens.BG_BODY}; }}"
-            f" QTabBar::tab {{ padding: 4px 10px; font-size: 11px; font-weight: 500; color: {tokens.TEXT_SECONDARY}; }}"
-            f" QTabBar::tab:selected {{ color: {tokens.PRIMARY}; border-bottom: 2px solid {tokens.PRIMARY}; font-weight: 600; }}"
+        style.bind(
+            self.tabs,
+            lambda: (
+                f"QTabWidget::pane {{ border: 1px solid {style.palette()['BORDER']};"
+                f" border-radius: {tokens.RADIUS_CARD}px; background: {style.palette()['BG_BODY']}; }}"
+                f" QTabBar::tab {{ padding: 4px 10px; font-size: 11px; font-weight: 500;"
+                f" color: {style.palette()['TEXT_SECONDARY']}; }}"
+                f" QTabBar::tab:selected {{ color: {style.palette()['PRIMARY']};"
+                f" border-bottom: 2px solid {style.palette()['PRIMARY']}; font-weight: 600; }}"
+            ),
         )
 
         # Tab 1: 概要 Overview（表高贴合内容，下方不拖出空白网格）
@@ -343,9 +355,7 @@ class InspectorPanel(QFrame):
         self.governance_header_label = QLabel(
             "治理信息 (来源 / 区域 / 负责人 / 学科 / 可信等级 / 审核状态):"
         )
-        self.governance_header_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
-        )
+        self.governance_header_label.setObjectName("WorkFieldLabel")
         self.governance_header_label.setMinimumWidth(0)
         self.governance_header_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
@@ -354,7 +364,7 @@ class InspectorPanel(QFrame):
         self.governance_edit_btn = QPushButton("编辑")
         self.governance_edit_btn.setObjectName("GovernanceEditLink")
         self.governance_edit_btn.setAccessibleName("编辑治理信息")
-        self.governance_edit_btn.setFixedHeight(18)
+        style.track_control_height(self.governance_edit_btn)
         self.governance_edit_btn.setSizePolicy(
             QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
         )
@@ -448,17 +458,17 @@ class InspectorPanel(QFrame):
         tag_row.setContentsMargins(0, 0, 0, 0)
         tag_row.setSpacing(tokens.SPACE_1)
         self.version_tags_hint = QLabel("版本标签:")
-        self.version_tags_hint.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;")
+        self.version_tags_hint.setObjectName("WorkFieldLabel")
         tag_row.addWidget(self.version_tags_hint)
         self.version_tag_add_btn = QPushButton("+")
         self.version_tag_add_btn.setObjectName("SecondaryButton")
-        self.version_tag_add_btn.setFixedSize(22, 22)
+        self.version_tag_add_btn.setFixedSize(_small_button_size())
         self.version_tag_add_btn.setToolTip("为选中版本添加标签")
         self.version_tag_add_btn.clicked.connect(self._on_version_tag_add)
         tag_row.addWidget(self.version_tag_add_btn)
         self.version_tag_remove_btn = QPushButton("−")
         self.version_tag_remove_btn.setObjectName("SecondaryButton")
-        self.version_tag_remove_btn.setFixedSize(22, 22)
+        self.version_tag_remove_btn.setFixedSize(_small_button_size())
         self.version_tag_remove_btn.setToolTip("移除选中版本的标签")
         self.version_tag_remove_btn.clicked.connect(self._on_version_tag_remove)
         tag_row.addWidget(self.version_tag_remove_btn)
@@ -491,7 +501,7 @@ class InspectorPanel(QFrame):
 
         self.copy_hash_btn = QPushButton("复制 Hash")
         self.copy_hash_btn.setObjectName("SecondaryButton")
-        self.copy_hash_btn.setFixedHeight(22)
+        style.track_control_height(self.copy_hash_btn)
         self.copy_hash_btn.clicked.connect(self._copy_hash)
         hash_box.addWidget(self.copy_hash_btn)
         int_layout.addLayout(hash_box)

@@ -8,6 +8,8 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 from paleo_workbench.ui.qgis_stack.events import StackEvents
 from paleo_workbench.ui.qgis_stack.mirror import mirror_snapshot_to_stack
 from paleo_workbench.ui.qgis_stack.widgets import QgisCanvasHost
+from paleo_workbench import tokens
+from paleo_workbench.ui.theme import theme_manager
 from paleo_workbench.ui.unified_map_canvas import paint_map_decorations
 
 
@@ -64,7 +66,16 @@ class _Overlay(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         selected = tuple(state.get("selected_features") or ())
         if selected:
-            painter.setPen(QPen(QColor("#ffe066"), 2.0))
+            painter.setPen(
+                QPen(
+                    QColor(
+                        tokens.palette_for(theme_manager.current_theme.value)[
+                            "CANVAS_SELECTION"
+                        ]
+                    ),
+                    2.0,
+                )
+            )
             painter.setBrush(Qt.BrushStyle.NoBrush)
             for feature in selected:
                 geometry = feature.get("geometry") if isinstance(feature, dict) else getattr(feature, "geometry", None)

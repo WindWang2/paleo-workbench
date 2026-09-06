@@ -1,0 +1,248 @@
+{
+  "generated_at": "2026-09-06 02:37:40",
+  "elapsed_s": 193.4,
+  "shot_count": 30,
+  "failures": [],
+  "shots": [
+    {
+      "name": "01-default-workstation__light__compact__1440x900.png",
+      "state": "01-default-workstation",
+      "theme": "light",
+      "density": "compact",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "01-default-workstation__light__compact__1180x720.png",
+      "state": "01-default-workstation",
+      "theme": "light",
+      "density": "compact",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "01-default-workstation__light__compact__1920x1080.png",
+      "state": "01-default-workstation",
+      "theme": "light",
+      "density": "compact",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "01-default-workstation__light__comfortable__1440x900.png",
+      "state": "01-default-workstation",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "01-default-workstation__light__comfortable__1180x720.png",
+      "state": "01-default-workstation",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "01-default-workstation__light__comfortable__1920x1080.png",
+      "state": "01-default-workstation",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "01-default-workstation__dark__comfortable__1440x900.png",
+      "state": "01-default-workstation",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "01-default-workstation__dark__comfortable__1180x720.png",
+      "state": "01-default-workstation",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "01-default-workstation__dark__comfortable__1920x1080.png",
+      "state": "01-default-workstation",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "01-default-workstation__high_contrast__comfortable__1440x900.png",
+      "state": "01-default-workstation",
+      "theme": "high_contrast",
+      "density": "comfortable",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "01-default-workstation__high_contrast__comfortable__1180x720.png",
+      "state": "01-default-workstation",
+      "theme": "high_contrast",
+      "density": "comfortable",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "01-default-workstation__high_contrast__comfortable__1920x1080.png",
+      "state": "01-default-workstation",
+      "theme": "high_contrast",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "03-mapping__light__compact__1440x900.png",
+      "state": "03-mapping",
+      "theme": "light",
+      "density": "compact",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "03-mapping__light__compact__1180x720.png",
+      "state": "03-mapping",
+      "theme": "light",
+      "density": "compact",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "03-mapping__light__compact__1920x1080.png",
+      "state": "03-mapping",
+      "theme": "light",
+      "density": "compact",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "03-mapping__light__comfortable__1440x900.png",
+      "state": "03-mapping",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "03-mapping__light__comfortable__1180x720.png",
+      "state": "03-mapping",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "03-mapping__light__comfortable__1920x1080.png",
+      "state": "03-mapping",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "07-integrated__light__compact__1440x900.png",
+      "state": "07-integrated",
+      "theme": "light",
+      "density": "compact",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "07-integrated__light__compact__1180x720.png",
+      "state": "07-integrated",
+      "theme": "light",
+      "density": "compact",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "07-integrated__light__compact__1920x1080.png",
+      "state": "07-integrated",
+      "theme": "light",
+      "density": "compact",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "07-integrated__light__comfortable__1440x900.png",
+      "state": "07-integrated",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "07-integrated__light__comfortable__1180x720.png",
+      "state": "07-integrated",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "07-integrated__light__comfortable__1920x1080.png",
+      "state": "07-integrated",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "12-dark-theme__dark__compact__1440x900.png",
+      "state": "12-dark-theme",
+      "theme": "dark",
+      "density": "compact",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "12-dark-theme__dark__compact__1180x720.png",
+      "state": "12-dark-theme",
+      "theme": "dark",
+      "density": "compact",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "12-dark-theme__dark__compact__1920x1080.png",
+      "state": "12-dark-theme",
+      "theme": "dark",
+      "density": "compact",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "12-dark-theme__dark__comfortable__1440x900.png",
+      "state": "12-dark-theme",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "12-dark-theme__dark__comfortable__1180x720.png",
+      "state": "12-dark-theme",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "12-dark-theme__dark__comfortable__1920x1080.png",
+      "state": "12-dark-theme",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    }
+  ]
+}

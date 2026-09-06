@@ -39,6 +39,12 @@ from paleo_workbench.mapping.map_tools import (
 from paleo_workbench.mapping.topology import TopologyService
 from paleo_workbench.mapping.reference_layers import ReferenceLayerError, ReferenceLayerService
 from paleo_workbench.ui import tokens
+
+# 域语义色（decisions.md D10 例外）：数据 colormap 兜底 / 断层参照样式 /
+# 图例 swatch 缺省 —— 属科学渲染语义，不是 UI chrome。
+_FACTOR_RAMP_FALLBACK = ((0.0, "#053061"), (0.5, "#f7f7f7"), (1.0, "#67001f"))
+_FAULT_REF_STYLE = {"fill": "#9c6644", "stroke": "#4d3322", "stroke_width": 1.0}
+_LEGEND_SWATCH_FALLBACK = "#6c8ebf"
 from paleo_workbench.ui.layout_persistence import LayoutPersistence
 from paleo_workbench.ui.pages.map_attribute_table import MapAttributeTable
 from paleo_workbench.ui.pages.map_canvas_panel import MapCanvasPanel
@@ -794,7 +800,7 @@ class MappingPage(QWidget):
                     for stop in get_color_ramp(ramp_name).stops
                 )
             except Exception:
-                stops = ((0.0, "#053061"), (0.5, "#f7f7f7"), (1.0, "#67001f"))
+                stops = _FACTOR_RAMP_FALLBACK
             binding_context["factor.colorbar"] = {
                 "title": f"{task.name} ({descriptor.get('unit') or ''})".strip(),
                 "min": float(stats["min"]),
@@ -1471,7 +1477,7 @@ class MappingPage(QWidget):
                     extent=extent,
                     crs=reference.project_crs,
                     source_ref=f"reference:{reference.id}",
-                    style={"fill": "#9c6644", "stroke": "#4d3322", "stroke_width": 1.0},
+                    style=dict(_FAULT_REF_STYLE),
                 )
             else:
                 self.unified_scene.set_vector_features(layer_id, features, extent=extent)
@@ -1842,7 +1848,7 @@ class MappingPage(QWidget):
                     "color": (
                         (scene.vector_style(layer.id) or {}).get("fill")
                         or (scene.vector_style(layer.id) or {}).get("stroke")
-                        or "#6c8ebf"
+                        or _LEGEND_SWATCH_FALLBACK
                     ),
                 }
                 for layer in scene.registry.layers()

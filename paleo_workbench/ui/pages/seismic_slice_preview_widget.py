@@ -5,7 +5,17 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QSlider, QVBoxLayout, QWidget
 
-from paleo_workbench.tokens import BG_SEARCH, BORDER, PRIMARY, PRIMARY_HOVER, RADIUS_BUTTON, SPACE_2, SPACE_3, TEXT_SECONDARY
+from paleo_workbench.tokens import (
+    BG_SEARCH,
+    BORDER,
+    ON_PRIMARY,
+    PRIMARY,
+    PRIMARY_HOVER,
+    RADIUS_BUTTON,
+    SPACE_2,
+    SPACE_3,
+    TEXT_SECONDARY,
+)
 from paleo_workbench.viz.seismic_3d_api import fast_slice_to_indexed8, global_stretch_range
 
 
@@ -51,7 +61,7 @@ class SeismicSlicePreviewWidget(QWidget):
                 border-radius: 3px;
             }}
             QSlider::handle:horizontal {{
-                background: #ffffff;
+                background: {ON_PRIMARY};
                 border: 2px solid {PRIMARY};
                 width: 14px;
                 height: 14px;
