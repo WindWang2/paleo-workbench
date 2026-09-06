@@ -97,14 +97,18 @@ class StageActionDispatcher:
         if features:
             from paleo_workbench.mapping.vector_layer import VectorFeature
 
-            session = layer.edit_session or layer.start_editing()
-            for geometry, properties in features:
-                session.add_feature(VectorFeature(
-                    feature_id=f"f{uuid.uuid4().hex[:10]}",
-                    geometry=geometry,
-                    attributes=dict(properties or {}),
-                ))
-            session.commit_changes()
+            # 可信导入通道（领域建稿 = 数据初始落盘，非用户编辑；RAW
+            # 保护约束的是后者——见 import_layer_features docstring）。
+            self.composite.edit_controller.import_layer_features(
+                layer.id, [
+                    VectorFeature(
+                        feature_id=f"f{uuid.uuid4().hex[:10]}",
+                        geometry=geometry,
+                        attributes=dict(properties or {}),
+                    )
+                    for geometry, properties in features
+                ]
+            )
         self.composite._sync_composition_now()
         return layer.id
 
@@ -606,5 +610,7 @@ class StageActionDispatcher:
         self.composite._sync_workspace_state_to_project()
         message = "阶段成果已保存"
         if blocked:
-            message += f"；{len(blocked)} 个会话被拓扑校验阻断（保持打开）"
+            # blocked 含 RAW 门禁拒绝与拓扑校验失败（V6 flush 角色复查）——
+            # 文案不得只提拓扑（review round 1 P2）；逐条原因已由 flush 发出。
+            message += f"；{len(blocked)} 个会话未提交（保持打开，原因见消息）"
         self.composite.status_message.emit(message)

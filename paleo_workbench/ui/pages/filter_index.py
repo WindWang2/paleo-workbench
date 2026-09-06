@@ -99,6 +99,9 @@ class CatalogCounts:
     integrity: dict[str, int] = field(default_factory=dict)
     categories: dict[str, int] = field(default_factory=dict)
     review_status: dict[str, int] = field(default_factory=dict)
+    # C-P0-1: 聚合来源(SQL group-by)不含完整性探测时如实标记未知,
+    # 概览面板显示 "—" 占位而不是伪造 0。
+    integrity_known: bool = True
 
 
 class FilterIndex:

@@ -144,6 +144,9 @@ class WellLogPredictionPage(QWidget):
         self._session_token = object()
         self._active_inference_context = None
         self._selected_well_resource_id: str | None = None
+        # V6 scalability: the source combo is refilled only when the well id
+        # list actually changes (signature comparison), never per state update.
+        self._well_source_signature: tuple[tuple[str, object], ...] | None = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -351,17 +354,36 @@ class WellLogPredictionPage(QWidget):
             for resource in (getattr(self._project, "resources", None) or [])
             if getattr(resource, "type", "") == "well_log"
         ]
-        self.well_source_combo.blockSignals(True)
-        self.well_source_combo.clear()
+        entries: list[tuple[str, object]] = []
         for resource in resources:
             name = str(getattr(resource, "name", "未命名测井"))
             format_label = str(getattr(resource, "format", "") or "").upper()
-            self.well_source_combo.addItem(
-                f"{name} · {format_label}" if format_label else name,
-                str(getattr(resource, "id", "")),
+            entries.append(
+                (
+                    f"{name} · {format_label}" if format_label else name,
+                    str(getattr(resource, "id", "")),
+                )
             )
+        if not entries:
+            entries = [("数据管理中暂无 LAS / XML 测井数据", None)]
+        if entries == self._well_source_signature:
+            # Same source revision: keep the combo as-is and only re-assert the
+            # selection invariant (e.g. after a project switch reset the id).
+            target = (
+                self.well_source_combo.findData(previous)
+                if previous
+                else -1
+            )
+            if target != self.well_source_combo.currentIndex():
+                self.well_source_combo.blockSignals(True)
+                self.well_source_combo.setCurrentIndex(target)
+                self.well_source_combo.blockSignals(False)
+            return
+        self.well_source_combo.blockSignals(True)
+        self.well_source_combo.clear()
+        for label, resource_id in entries:
+            self.well_source_combo.addItem(label, resource_id)
         if not resources:
-            self.well_source_combo.addItem("数据管理中暂无 LAS / XML 测井数据", None)
             self._selected_well_resource_id = None
         else:
             selected_index = next(
@@ -376,6 +398,7 @@ class WellLogPredictionPage(QWidget):
             if selected_index < 0:
                 self._selected_well_resource_id = None
         self.well_source_combo.blockSignals(False)
+        self._well_source_signature = entries
 
     def _selected_well_resource(self):
         if not self._selected_well_resource_id or self._project is None:

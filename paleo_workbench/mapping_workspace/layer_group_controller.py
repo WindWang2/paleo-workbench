@@ -79,6 +79,8 @@ class LayerGroupController:
         self._group_orders: dict[str, list[str]] = {}   # group_id → [layer_id]
         self._root_order: list[str] = []
         self._user_groups: dict[str, GroupNode] = {}
+        # V6：宿主推送的新鲜度索引（artifact_key → ArtifactFreshness）。
+        self._freshness: dict[str, Any] = {}
         self._load_placements_from_state()
 
     # -- 装配 -------------------------------------------------------------------
@@ -621,9 +623,51 @@ class LayerGroupController:
         return ""
 
     def group_summary(self, group_id: str) -> dict[str, int]:
-        """组内状态聚合（layers/stale/errors 计数，事件驱动缓存由宿主维护）。"""
+        """组内状态聚合（真实新鲜度统计；宿主经 ``apply_freshness`` 推送）。
+
+        stale = 组内成员命中过期/缺失/被取代的成果数；
+        errors = 其中输入缺失（MISSING_INPUT）数。未推送过 freshness 或
+        成员无成员资格 → 诚实 0（此前硬编码 0/0，V6 修复）。
+        """
+        from paleo_workbench.mapping_workspace.dependencies import FreshnessStatus
+
         order = self._group_orders.get(group_id, [])
-        return {"layers": len(order), "stale": 0, "errors": 0}
+        stale = 0
+        errors = 0
+        for layer_id in order:
+            artifact = self.layer_freshness(layer_id)
+            if artifact is not None and artifact.is_problem:
+                stale += 1
+                if artifact.status == FreshnessStatus.MISSING_INPUT:
+                    errors += 1
+        return {"layers": len(order), "stale": stale, "errors": errors}
+
+    def apply_freshness(self, summary) -> None:
+        """宿主推送 ``StaleSummary``（阶段控制器 stale_summary_changed 接线）。"""
+        self._freshness = {
+            str(artifact.artifact_key): artifact
+            for artifact in (getattr(summary, "artifacts", None) or ())
+        }
+
+    def layer_freshness(self, layer_id: str):
+        """图层级新鲜度（成员资格 → artifact_key 解析；无 → None=未知）。"""
+        if not self._freshness:
+            return None
+        record = self.state.membership(layer_id)
+        if record is None:
+            return None
+        candidate_keys: list[str] = []
+        if record.factor_task_id:
+            candidate_keys.append(f"factor:{record.factor_task_id}")
+        if record.role == LayerRole.INITIAL_FACIES_DRAFT:
+            candidate_keys.append(f"phase1_draft:{layer_id}")
+        if record.role in (LayerRole.INTEGRATED_FACIES, LayerRole.INTEGRATED_BOUNDARY):
+            candidate_keys.append(f"integrated:{layer_id}")
+        for key in candidate_keys:
+            artifact = self._freshness.get(key)
+            if artifact is not None:
+                return artifact
+        return None
 
     def sync_factor_titles(self, titles: dict[str, str]) -> None:
         self.factor_titles = {str(k): str(v) for k, v in (titles or {}).items()}

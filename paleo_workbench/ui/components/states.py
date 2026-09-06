@@ -6,7 +6,7 @@ PwbProgress 消费任务进度同款 state-chunk 词汇。
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QFrame,
     QLabel,
@@ -22,13 +22,15 @@ from paleo_workbench.ui.theme import theme_manager
 from paleo_workbench.ui.workstation.common import workstation_icon
 
 
-def _tinted_pixmap(icon_name: str, color_token: str, size: int) -> object:
+def _tinted_pixmap(icon_name: str, color_token: str, size: int, dpr: float = 1.0) -> object:
 
     palette = tokens.palette_for(theme_manager.current_theme.value)
     icon = workstation_icon(icon_name, str(palette.get(color_token, "")))
-    pm = icon.pixmap(size, size)
-    pm.setDevicePixelRatio(1.0)
-    return pm
+    # V6（audit G-P1-6）：按目标部件的 devicePixelRatioF 出图——Qt6 的
+    # 显式 DPR 重载保证逻辑尺寸恒为 size、物理像素匹配屏幕。此前强制
+    # setDevicePixelRatio(1.0) 会把 HiDPI 下已是 2x 的物理图当作逻辑
+    # 尺寸使用，空态图标放大一倍；DPR 1 下行为不变。
+    return icon.pixmap(QSize(size, size), max(1.0, float(dpr)))
 
 
 class PwbEmptyState(QFrame):
@@ -79,7 +81,9 @@ class PwbEmptyState(QFrame):
         self._refresh_icon()
 
     def _refresh_icon(self) -> None:
-        pm = _tinted_pixmap(self._icon_name, "TEXT_SECONDARY", 24)
+        pm = _tinted_pixmap(
+            self._icon_name, "TEXT_SECONDARY", 24, self._icon.devicePixelRatioF()
+        )
         self._icon.setPixmap(pm)
         self._icon.setVisible(pm is not None)
 

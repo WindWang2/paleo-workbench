@@ -63,6 +63,7 @@ class WorkstationFrame(QWidget):
     status_message = Signal(str)
 
     _WINDOW_STATE_KEY = "layout/window_state"
+    _WINDOW_GEOMETRY_KEY = "layout/window_geometry"
     _STATE_VERSION_KEY = "layout/state_version"
 
     def __init__(self, project, page_stack: QWidget, dock_host=None, parent=None):
@@ -159,6 +160,20 @@ class WorkstationFrame(QWidget):
         nav_layout.addWidget(self.explorer, 1)
 
         self.inspector = WorkstationInspector(self._dock_host)
+        # V6 §6：图层检查的域上下文 seam（角色/成熟度/可编辑/新鲜度）。
+        # 检查器不解析 mapping 权威——由本壳从 CompositeDocument 取数。
+        def _layer_context_seam(payload: dict):
+            layer_id = None
+            if isinstance(payload, dict):
+                layer_id = payload.get("layer_id")
+                if not layer_id:
+                    obj = payload.get("object")
+                    layer_id = getattr(obj, "id", None)
+            if not layer_id:
+                return None
+            return self.composite.layer_domain_status(str(layer_id))
+
+        self.inspector.set_context_seam(_layer_context_seam)
         self._agent_undo_stack: list[dict] = []
         self._current_well_name = ""
         # B18 去重：Agent 面板直接作为 dock 内容（旧 ProcessHub 内层
@@ -388,6 +403,8 @@ class WorkstationFrame(QWidget):
         def _on_stage_changed(stage_value: str) -> None:
             self.stage_bar.set_current_stage(stage_value)
             self.mapping_stage_panel.set_stage(stage_value)
+            # V6 §4：阶段驱动工具条命令面（数字化/编辑动作按 profile 过滤）。
+            self.composite.apply_stage_tool_profile(stage_value)
             # 「我画进哪个图层」必须可见：阶段切换消息携带当前编辑目标
             #（无目标时明说，绝不静默）。
             target_id = controller.active_target_layer_id
@@ -405,6 +422,8 @@ class WorkstationFrame(QWidget):
             self._refresh_stage_badges()
 
         controller.current_stage_changed.connect(_on_stage_changed)
+        # 构造即应用当前阶段的工具面（恢复的持久化阶段同样生效）。
+        self.composite.apply_stage_tool_profile(controller.current_stage.value)
 
         def _on_readiness(readiness) -> None:
             from paleo_workbench.mapping_workspace.stages import stage_from_value
@@ -475,6 +494,11 @@ class WorkstationFrame(QWidget):
         controller.stale_summary_changed.connect(_on_stale)
         self._refresh_stage_badges = _refresh_stage_badges
 
+        # V6 §7：新鲜度进入图层组聚合（group_summary 真实统计）。
+        controller.stale_summary_changed.connect(
+            controller.group_controller.apply_freshness
+        )
+
         controller.stage_notification.connect(self.status_message.emit)
 
         # P1-4：就绪度清单「可点击定位」——选中目标组/图层并提升图层管理 dock。
@@ -515,6 +539,45 @@ class WorkstationFrame(QWidget):
             self._dispatch_stage_action)
         self.mapping_stage_panel.constraint_requested.connect(
             self._dispatch_stage_constraint)
+        # V6 §4：阶段动作进入命令面板（阶段限定白名单；错误阶段禁用但
+        # 保留可发现性 + 原因——palette 据此渲染禁用条目）。
+        self._register_stage_palette_commands()
+
+    def _register_stage_palette_commands(self) -> None:
+        """阶段面板动作注册为 palette 命令（``stage:<阶段>:<动作>``）。
+
+        阶段面板按钮与 palette 条目共用同一分派路径（``_dispatch_stage_action``），
+        动作语义只有一份。``stages`` 白名单使跨阶段调用在 palette 侧被
+        禁用并显示原因（命令注册表 evaluate），执行侧不再重复判定。
+        """
+        from paleo_workbench.mapping_workspace.stages import MappingStage
+        from paleo_workbench.ui.command_registry import CommandSpec, command_registry
+        from paleo_workbench.ui.workstation.mapping_stage_panel import (
+            MappingStagePanel,
+        )
+
+        for stage, actions in (
+            (MappingStage.FACIES_CALIBRATION, MappingStagePanel._PHASE1_ACTIONS),
+            (MappingStage.CONSTRAINT_FACTOR, MappingStagePanel._PHASE2_ACTIONS),
+            (MappingStage.INTEGRATED_COMPILATION, MappingStagePanel._PHASE3_ACTIONS),
+        ):
+            for action_id, title in actions:
+                command_registry.register(
+                    CommandSpec(
+                        id=f"stage:{stage.value}:{action_id}",
+                        # 「阶段动作 · 」前缀是刻意的：palette 子序列打分取
+                        # 首字符位置，带前缀后导航命令（如「井 / 测井预测」）
+                        # 对同名查询仍然先行——阶段动作不抢导航焦点。
+                        label=f"阶段动作 · {title}",
+                        hint=stage.label,
+                        keywords="阶段 stage 编图",
+                        group="编图阶段",
+                        stages=(stage.value,),
+                        callback=lambda s=stage.value, a=action_id: (
+                            self._dispatch_stage_action(s, a)
+                        ),
+                    )
+                )
 
     def _apply_stage_dock_recommendation(self, recommended: dict) -> None:
         """阶段 dock 建议（仅首次进入阶段时应用；建议而非强制，V5 §6/§7）。
@@ -754,15 +817,6 @@ class WorkstationFrame(QWidget):
                 self._responsive_hid_inspector = False
                 self.inspector_dock.show()
 
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        self._apply_responsive_panels()
-        if not self._post_show_restored:
-            self._post_show_restored = True
-            # 构造发生在顶层窗口拿到最终几何之前；show 之后再恢复一次，
-            # 避免 dock 布局被首帧的默认几何覆盖。
-            self._schedule_restore(50)
-
     def _schedule_restore(self, delay_ms: int) -> None:
         # 定时器必须挂在本部件上：壳被拆除（deleteLater）后，迟到的
         # restore 不得再触碰已删除的 dock（游离 singleShot 会越界）。
@@ -772,11 +826,19 @@ class WorkstationFrame(QWidget):
         timer.timeout.connect(self._restore_layout)
         timer.start()
 
-    #: 可切换面板的 (dock, 菜单/palette 标签)——两个消费方共用一张表
+    #: 可切换面板的 (dock, 菜单/palette 标签)——两个消费方共用一张表。
+    #: V6：必须覆盖全部 shell dock——任何被关掉的 dock 都要有菜单/palette
+    #: 重开入口（否则用户只能重启会话找回面板）。
     _PANEL_TOGGLE_TABLE = (
+        ("nav_dock", "显示资源管理器"),
+        ("inspector_dock", "显示检查器"),
         ("composite_input_dock", "显示输入与结果"),
         ("composite_layer_dock", "显示图层管理"),
         ("composite_linked_dock", "显示联动视图"),
+        ("mapping_stage_dock", "显示编图阶段"),
+        ("well_dock", "显示测井轨道"),
+        ("seismic_dock", "显示地震剖面"),
+        ("hub_dock", "显示枢纽页"),
         ("agent_dock", "显示 Agent"),
         ("task_dock", "显示任务中心"),
         ("logs_dock", "显示日志"),
@@ -850,6 +912,8 @@ class WorkstationFrame(QWidget):
             self.well_dock,
             self.seismic_dock,
             self.hub_dock,
+            # 编图阶段 dock 曾缺席本清单：全部停靠后仍浮动（V6 基线 P0 家族）。
+            self.mapping_stage_dock,
         ):
             if dock.isFloating():
                 dock.setFloating(False)
@@ -907,9 +971,9 @@ class WorkstationFrame(QWidget):
 
             self.explorer.setVisible(vis.explorer_expanded)
             self.activity_rail.set_explorer_expanded(vis.explorer_expanded)
-
-            # Dock everything for a deterministic preset geometry.
-            self.dock_all_panels()
+            # V6：具名预设只切可见性，绝不重排 dock 几何——用户浮动/分屏
+            # 布局是显式偏好（audit A-P0-3）。停靠化重置只在
+            # 「恢复默认布局」（_reset_default_layout）发生。
         finally:
             self._preset_tracking_paused = False
         self._current_preset_id = preset.id
@@ -929,7 +993,8 @@ class WorkstationFrame(QWidget):
         self._save_timer.start()
 
     def _reset_default_layout(self) -> None:
-        """面板菜单「恢复默认布局」→ 默认编图 + 停靠几何。"""
+        """面板菜单「恢复默认布局」→ 停靠几何重置 + 默认编图可见性。"""
+        self.dock_all_panels()
         self.apply_layout_preset(RESET_LAYOUT_PRESET_ID)
 
     def _reset_composite_layout(self) -> None:
@@ -1089,6 +1154,13 @@ class WorkstationFrame(QWidget):
 
     def showEvent(self, event) -> None:  # noqa: N802 — Qt 契约
         super().showEvent(event)
+        # V6：合并历史双定义（第一份曾为死代码，post-show 布局恢复从未执行）。
+        self._apply_responsive_panels()
+        if not self._post_show_restored:
+            self._post_show_restored = True
+            # 构造发生在顶层窗口拿到最终几何之前；show 之后再恢复一次，
+            # 避免 dock 布局被首帧的默认几何覆盖。
+            self._schedule_restore(50)
         if getattr(self, "_pending_default_sizes", False) and self.isVisible():
             self._pending_default_sizes = False
             QTimer.singleShot(0, self._apply_default_pane_sizes)
@@ -1137,12 +1209,40 @@ class WorkstationFrame(QWidget):
                     LAYOUT_STATE_VERSION,
                 )
                 self._pending_default_sizes = True
-            elif isinstance(data, QByteArray) and not data.isNull():
-                self._dock_host.restoreState(data)
+            else:
+                if isinstance(data, QByteArray) and not data.isNull():
+                    self._dock_host.restoreState(data)
+                # 主窗口几何与 dock 状态同栅栏恢复（V6 audit G-P0-2）。
+                self._restore_host_window_geometry()
         # restore 之后必须重新执行响应式策略：restoreState 可能把检查器
         # 在窄屏下重新显示（保存时按「可见」写入），不能让 restore 反杀
         # 响应式隐藏（#1121）。
         self._apply_responsive_panels()
+
+    def _restore_host_window_geometry(self) -> None:
+        """恢复主窗口（dock 宿主）几何并 clamp 到可见桌面（V6 G-P0-2）。
+
+        此前窗口本身从不持久化：dock 布局恢复了，窗口却每次回到默认
+        1440x900——多显示器用户丢的是同一次「布局」的另一半。恢复走
+        同一版本栅栏；restoreGeometry 之后由
+        :func:`clamp_geometry_to_screens` 兜底（保存时的显示器已断开时
+        窗口必须回到可见桌面，与浮动面板同一条多显示器契约）。
+        """
+        data = self._settings.value(self._WINDOW_GEOMETRY_KEY)
+        if not isinstance(data, QByteArray) or data.isNull():
+            return
+        # 函数内导入：panel_float_controller 经 floating_panel 依赖本包
+        # __init__，模块级导入会闭合成环（review round 1/2 P0）。
+        from paleo_workbench.ui.panel_float_controller import clamp_geometry_to_screens
+
+        host = self._dock_host
+        host.restoreGeometry(data)
+        if host.isMaximized() or host.isFullScreen():
+            return  # 最大化/全屏几何由窗口管理器接管
+        current = host.geometry()
+        clamped = clamp_geometry_to_screens(current)
+        if clamped != current:
+            host.setGeometry(clamped)
 
     def _save_layout(self, *, force: bool = False) -> None:
         if self._layout_frozen:
@@ -1166,6 +1266,12 @@ class WorkstationFrame(QWidget):
                 self._STATE_VERSION_KEY, LAYOUT_STATE_VERSION
             )
             self._settings.setValue(self._WINDOW_STATE_KEY, self._dock_host.saveState())
+            # 主窗口几何随同一版本栅栏落盘（V6 audit G-P0-2）。孤立构造
+            # （宿主从未显示）不写：隐藏窗的默认几何会污染真实会话。
+            if self._dock_host.isVisible():
+                self._settings.setValue(
+                    self._WINDOW_GEOMETRY_KEY, self._dock_host.saveGeometry()
+                )
         finally:
             if suppress_visibility_signals:
                 self.inspector_dock.hide()

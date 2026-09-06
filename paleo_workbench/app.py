@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 
 from paleo_workbench.project.models import ProjectDocument
@@ -53,7 +53,28 @@ class PaleoWorkbenchWindow(QMainWindow):
         self._apply_project_to_shell()
         self._wire_shell_signals()
         self._setup_shortcuts()
+        self._register_window_commands()
         self._update_title()
+
+    def _register_window_commands(self) -> None:
+        """V6：窗口级领域命令入 palette（此前 29 条 chrome 命令之外为空）。
+
+        「更新受影响成果」此前是孤儿流（_on_recompute_requested 无发射方，
+        baseline F-P1-2）——现在作为一等命令可从 Ctrl+K 发现。
+        """
+        from paleo_workbench.ui.command_registry import CommandSpec, command_registry
+
+        command_registry.register(
+            CommandSpec(
+                id="workflow:recompute",
+                label="更新受影响成果",
+                hint="按受影响最小计划重算过期成果（factor/预测/QC）",
+                keywords="recompute stale 过期 重算",
+                group="工作流",
+                context_tags=("workflow", "mapping", "catalog"),
+                callback=self.workflow_controller.request_recompute,
+            )
+        )
 
     @property
     def project(self) -> ProjectDocument:
@@ -108,22 +129,34 @@ class PaleoWorkbenchWindow(QMainWindow):
 
         Parented to ``self`` (the window) so they survive shell rebuilds; the
         callbacks read the current ``self.app_shell`` at call-time.
+
+        V6（audit G-P1-5）：经 shortcuts.register_shortcut 创建并登记——
+        此前直接 QShortcut 之外再 register_meta 一份元数据，同一键序存在
+        两个事实来源，冲突检测覆盖不到真实绑定。注册表按 id 替换旧绑定，
+        同键序始终只有一个活动 QShortcut。
         """
         # Interactive save runs its heavy I/O off the GUI thread (#1040).
-        QShortcut(QKeySequence("Ctrl+S"), self, self._on_save_project)
-        QShortcut(QKeySequence("Ctrl+N"), self, self._on_new_project)
-        QShortcut(QKeySequence("Ctrl+O"), self, self._on_open_project)
-        QShortcut(QKeySequence("Ctrl+F"), self, self._shortcut_focus_search)
-        # V5-U6：登记进中央快捷键注册表（palette 展示 + 冲突检测可见）。
-        from paleo_workbench.ui.shortcuts import ShortcutSpec, register_meta
+        from paleo_workbench.ui.shortcuts import ShortcutSpec, register_shortcut
 
-        for spec in (
-            ShortcutSpec(id="core:project.save", key="Ctrl+S", label="保存工程"),
-            ShortcutSpec(id="core:project.new", key="Ctrl+N", label="新建工程"),
-            ShortcutSpec(id="core:project.open", key="Ctrl+O", label="打开工程"),
-            ShortcutSpec(id="core:search.focus", key="Ctrl+F", label="聚焦搜索"),
+        for spec, callback in (
+            (
+                ShortcutSpec(id="core:project.save", key="Ctrl+S", label="保存工程"),
+                self._on_save_project,
+            ),
+            (
+                ShortcutSpec(id="core:project.new", key="Ctrl+N", label="新建工程"),
+                self._on_new_project,
+            ),
+            (
+                ShortcutSpec(id="core:project.open", key="Ctrl+O", label="打开工程"),
+                self._on_open_project,
+            ),
+            (
+                ShortcutSpec(id="core:search.focus", key="Ctrl+F", label="聚焦搜索"),
+                self._shortcut_focus_search,
+            ),
         ):
-            register_meta(spec)
+            register_shortcut(self, spec, callback)
 
     def _shortcut_focus_search(self) -> None:
         """Focus the active search box.
@@ -367,6 +400,12 @@ class PaleoWorkbenchWindow(QMainWindow):
         # a selection through them; re-binding fully replaces the previous
         # project's registrations (no cross-project residue, #1029).
         self.app_shell.view_coordination.bind_project(self.project)
+        # V6 §2（review round 2 P1）：工程应用即重派生上下文——否则状态条
+        # 工作台段在工程切换后短暂显示旧工程（「未打开工程」/旧任务数）。
+        try:
+            self.app_shell.ui_context_service.refresh()
+        except AttributeError:
+            pass  # 旧壳/测试桩没有 UIContextService
         state = dashboard_state(self.project)
         self.app_shell.set_project_name(
             state.get("project_name", self.project.meta.name)

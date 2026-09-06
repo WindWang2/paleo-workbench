@@ -1,0 +1,45 @@
+{
+  "state_ok": true,
+  "checks": [
+    {
+      "name": "dialog_constructed",
+      "ok": true,
+      "detail": "WriteGrantDialog"
+    },
+    {
+      "name": "deny_button_is_default",
+      "ok": true,
+      "detail": "default=True"
+    },
+    {
+      "name": "deny_button_labelled",
+      "ok": true,
+      "detail": "拒绝"
+    },
+    {
+      "name": "grant_button_labelled",
+      "ok": true,
+      "detail": "授权"
+    },
+    {
+      "name": "dialog_not_pre_granted",
+      "ok": true,
+      "detail": "False"
+    },
+    {
+      "name": "action_card[map.add_layer]",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "action_card[map.export]",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "no_unknown_action_fallback",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}
