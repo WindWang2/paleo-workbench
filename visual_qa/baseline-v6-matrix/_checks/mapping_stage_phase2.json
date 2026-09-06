@@ -1,0 +1,40 @@
+{
+  "state_ok": true,
+  "checks": [
+    {
+      "name": "stage_bar_marker[facies_calibration]",
+      "ok": true,
+      "detail": "checked=False want=False"
+    },
+    {
+      "name": "stage_bar_marker[constraint_factor]",
+      "ok": true,
+      "detail": "checked=True want=True"
+    },
+    {
+      "name": "stage_bar_marker[integrated_compilation]",
+      "ok": true,
+      "detail": "checked=False want=False"
+    },
+    {
+      "name": "stage_panel_current_page",
+      "ok": true,
+      "detail": "current=<paleo_workbench.ui.workstation.mapping_stage_panel._StagePage(0x2073ea38130, name=\"PanelCard\") at 0x000002073DDBEA00>"
+    },
+    {
+      "name": "toolbar_add_line_stage_visibility",
+      "ok": true,
+      "detail": "visible=True want=True"
+    },
+    {
+      "name": "toolbar_add_polygon_always_visible",
+      "ok": true,
+      "detail": "visible=True"
+    },
+    {
+      "name": "stage_dock_visible",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

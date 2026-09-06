@@ -229,6 +229,11 @@ def main() -> int:
         "10-error-state": (lambda: _project(tmp), drive_error),
         "12-dark-theme": (lambda: _project(tmp), "dark"),
     }
+    # V6 Phase 8：新状态走同一注册形态（(工程工厂, 驱动)），驱动与语义
+    # 检查在 paleo_workbench.ui.visual_qa_v6（tests/test_visual_qa_v6.py 钉住）。
+    from paleo_workbench.ui import visual_qa_v6
+
+    shots.update(visual_qa_v6.v6_shot_table(lambda: _project(tmp)))
 
     # --shot NAME [--theme T] [--density D] [--size WxH]：单 shot 子进程模式
     # （main 进程逐个 spawn——多窗口同进程会因 QGIS/调度器状态搅扰挂死；
@@ -272,18 +277,58 @@ def main() -> int:
         if size_override is not None:
             # 畸形 --size 显式失败（静默回落会产出与文件名不符像素的截图）
             w_str, h_str = size_override.lower().split("x")
-            window.resize(int(w_str), int(h_str))
+            requested = (int(w_str), int(h_str))
         else:
-            window.resize(1600, 900)
+            requested = (1600, 900)
+        window.resize(*requested)
+        # V6 主窗几何持久化（restoreGeometry）会读 shell 的设置身份；在
+        # Windows 上该身份是注册表（XDG_CONFIG_HOME/setPath 拦不住双参
+        # 构造）——构造期间并发进程（如同时段跑的测试套件）可能写入同
+        # 一注册表键。show 前再清一次，把污染窗口压缩到 restore 定时器
+        # 的 50ms 内；残余冲突由下方尺寸守卫显式失败（绝不静默落盘与
+        # 文件名不符的像素）。
+        QSettings("PaleoWorkbench", "Workstation").clear()
         window.show()
         _settle(500)
         if callable(drive):
             drive(window)
             _settle(250)
-        pix = window.grab()
+        # 尺寸守卫：截图像素必须与文件名一致（V6 几何恢复/外部污染时
+        # 显式失败，交矩阵 manifest 记 FAILED——不产出说谎的基线）。
+        if (window.width(), window.height()) != requested:
+            print(
+                f"FAILED SHOT {only}: window {window.width()}x{window.height()}"
+                f" != requested {requested[0]}x{requested[1]}"
+                "（布局几何被恢复/污染——重跑该 shot）",
+                flush=True,
+            )
+            return 1
+        # V6：对话框态改抓对话框本体（独立顶层窗，不在主窗 grab 内）。
+        grab_target = getattr(window, "_v6_grab_widget", None) or window
+        pix = grab_target.grab()
         path = out_dir / f"{only}.png"
         pix.save(str(path))
         print(f"saved {path} ({pix.width()}x{pix.height()})", flush=True)
+        # V6 Phase 8：语义检查（非门禁，同 PIL diff——记录不拦截）。
+        results = visual_qa_v6.run_state_checks(only, window)
+        if results:
+            import json
+
+            checks_dir = out_dir / "_checks"
+            checks_dir.mkdir(parents=True, exist_ok=True)
+            (checks_dir / f"{only}.json").write_text(
+                json.dumps(
+                    visual_qa_v6.checks_payload(results),
+                    ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            for result in results:
+                print(
+                    ("CHECK PASS " if result.ok else "CHECK FAIL ")
+                    + f"{only}:{result.name}"
+                    + (f" — {result.detail}" if result.detail else ""),
+                    flush=True,
+                )
         return 0
 
     import subprocess

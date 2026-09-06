@@ -1,0 +1,30 @@
+{
+  "state_ok": true,
+  "checks": [
+    {
+      "name": "palette_open",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "palette_has_disabled_stage_command",
+      "ok": true,
+      "detail": "disabled=3"
+    },
+    {
+      "name": "disabled_item_shows_reason",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "disabled_item_is_stage_scoped",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "palette_filter_matched",
+      "ok": true,
+      "detail": "rows=3"
+    }
+  ]
+}
