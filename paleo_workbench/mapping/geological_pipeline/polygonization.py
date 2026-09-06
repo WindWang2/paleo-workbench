@@ -8,6 +8,11 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from paleo_workbench.mapping.layers import PolygonMapLayer
+from paleo_workbench.mapping.geological_pipeline.geometry_units import (
+    area_unit_label,
+    is_geographic_crs,
+    ring_area_with_unit,
+)
 from paleo_workbench.mapping.topology import repair_invalid_geometry
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 
@@ -366,6 +371,7 @@ def generate_facies_polygon_layer(
 
     vmin, vmax = float(finite.min()), float(finite.max())
 
+    thresholds_is_explicit = thresholds is not None
     if thresholds is None:
         if math.isclose(vmin, vmax):
             thresholds = [vmin]
@@ -398,7 +404,25 @@ def generate_facies_polygon_layer(
         "small_polygons_dropped": 0,
         "clipped_to_domain": 0,
         "empty_after_clip": 0,
+        # V6 §15: the classification thresholds ARE part of the product —
+        # data-derived defaults (⅓/⅔ span) were previously invisible to QC,
+        # breaking reproducibility of the default path. The nodata extent is
+        # reported too (holes are honest, but their size must be visible).
+        "thresholds": [float(t) for t in thresholds],
+        "thresholds_source": "explicit" if thresholds_is_explicit else "data_derived_default",
+        "nodata_cells": int((~np.isfinite(grid_z)).sum()),
+        "total_cells": int(grid_z.size),
+        "area_unit": area_unit_label(grid_result.crs),
     }
+    area_warnings: list[str] = []
+    if is_geographic_crs(grid_result.crs):
+        area_warnings.append(
+            "geographic CRS: per-feature areas are local-scale approximations"
+        )
+    if not str(grid_result.crs or "").strip():
+        area_warnings.append("CRS undeclared: area unit unknown (not metres)")
+    if area_warnings:
+        polygon_qc["area_warnings"] = area_warnings
 
     for c_idx in range(len(facies_names)):
         c_mask = (class_grid == c_idx) & np.isfinite(grid_z)
@@ -431,22 +455,38 @@ def generate_facies_polygon_layer(
             polygon_qc["small_polygons_dropped"] += dropped
 
         for geom in geoms:
-            geom_area = _compute_geometry_area(geom)
-            area_pct = (geom_area / total_grid_area) * 100.0
+            # V6 §15 (P0-10): ``area`` stays in the CRS's own axis units
+            # (conservation checks compare like with like), but it can no
+            # longer be MISTAKEN for m²: every feature carries ``area_unit``,
+            # and under a geographic CRS an explicitly-labelled local-scale
+            # ``area_approx_m2`` is provided alongside (square degrees are
+            # never presented as if physically meaningful).
+            raw_area = _compute_geometry_area(geom)
+            geom_area, area_unit, area_warning = ring_area_with_unit(
+                geom["coordinates"][0], grid_result.crs
+            )
+            if area_warning and area_warning not in polygon_qc.get("area_warnings", []):
+                polygon_qc.setdefault("area_warnings", []).append(area_warning)
+            area_pct = (raw_area / total_grid_area) * 100.0
+
+            properties: dict[str, Any] = {
+                "facies_id": c_idx + 1,
+                "facies_name": facies_name,
+                "facies": facies_name,
+                "color": color,
+                "area": round(raw_area, 4),
+                "area_unit": area_unit_label(grid_result.crs),
+                "area_percent": round(area_pct, 4),
+                "mean_value": round(mean_val, 4),
+            }
+            if is_geographic_crs(grid_result.crs):
+                properties["area_approx_m2"] = round(geom_area, 4)
 
             features.append(
                 {
                     "type": "Feature",
                     "geometry": geom,
-                    "properties": {
-                        "facies_id": c_idx + 1,
-                        "facies_name": facies_name,
-                        "facies": facies_name,
-                        "color": color,
-                        "area": round(geom_area, 4),
-                        "area_percent": round(area_pct, 4),
-                        "mean_value": round(mean_val, 4),
-                    },
+                    "properties": properties,
                 }
             )
 

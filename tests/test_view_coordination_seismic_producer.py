@@ -77,6 +77,17 @@ class StubController:
 @pytest.fixture()
 def hub() -> CoordinateTransformHub:
     hub = CoordinateTransformHub()
+    # V6 §8: bin-grid geometry is UNKNOWN until a survey is bound; tests
+    # that route cursors declare an explicit grid (the numeric layout the
+    # old fabricated default used to provide). Bind it BEFORE the velocity
+    # assumption — configure_seismic_grid resets an undeclared velocity.
+    hub.configure_seismic_grid(
+        origin=(100.0, 200.0),
+        il_step=(10.0, 0.0),
+        xl_step=(0.0, 10.0),
+        il_min=100,
+        xl_min=200,
+    )
     # The hub no longer carries a silent default velocity (L1): tests that
     # consume the approximate z<->TWT readout declare the assumption here.
     hub.set_velocity(2000.0)
@@ -86,15 +97,44 @@ def hub() -> CoordinateTransformHub:
 @pytest.fixture()
 def bare_hub() -> CoordinateTransformHub:
     """Hub with NO velocity assumption (fail-closed vertical conversions)."""
-    return CoordinateTransformHub()
+    hub = CoordinateTransformHub()
+    hub.configure_seismic_grid(
+        origin=(100.0, 200.0),
+        il_step=(10.0, 0.0),
+        xl_step=(0.0, 10.0),
+        il_min=100,
+        xl_min=200,
+    )
+    return hub
 
 
 @pytest.fixture()
 def controller() -> ViewCoordinationController:
     ctx = SelectionContext()
-    ctl = ViewCoordinationController(ctx, CoordinateTransformHub())
+    hub = CoordinateTransformHub()
+    # V6 §8: cursor-routing tests bind an explicit grid — the hub refuses
+    # map↔seismic conversion on unbound (previously fabricated) geometry.
+    hub.configure_seismic_grid(
+        origin=(100.0, 200.0),
+        il_step=(10.0, 0.0),
+        xl_step=(0.0, 10.0),
+        il_min=100,
+        xl_min=200,
+    )
+    ctl = ViewCoordinationController(ctx, hub)
     ctl.attach_well_log_page(StubWellLogPage())
     return ctl
+
+
+def _bind_default_grid(controller) -> None:
+    """Bind the test grid the way a loaded seismic volume would (V6 §8)."""
+    controller.coordinate_hub.configure_seismic_grid(
+        origin=(100.0, 200.0),
+        il_step=(10.0, 0.0),
+        xl_step=(0.0, 10.0),
+        il_min=100,
+        xl_min=200,
+    )
 
 
 def _project_with_wells(names_xy, *, surveys=None):
@@ -240,6 +280,7 @@ def test_bind_project_prefers_project_crs_coordinates(controller):
     ]
 
     controller.bind_project(doc)
+    _bind_default_grid(controller)  # volume-load grid bind (V6 §8)
 
     # (il 100, xl 200) maps to (100, 200) on the default grid: the registry
     # entry must be the PROJECTED pair, not the raw source pair.
@@ -285,9 +326,10 @@ def test_clear_project_empties_registry_and_resets_grid(controller):
     controller.clear_project()
 
     assert controller.coordinate_hub.registered_well_ids() == ()
-    # grid restored to hub defaults: (il 100, xl 200) is the map origin
-    x, y = controller.coordinate_hub.seismic_to_map_xy(100, 200)
-    assert (x, y) == pytest.approx((100.0, 200.0))
+    # V6 §8: cleared geometry is UNKNOWN (no fabricated defaults to restore)
+    assert controller.coordinate_hub.grid_configured is False
+    with pytest.raises(ValueError, match="no seismic grid"):
+        controller.coordinate_hub.seismic_to_map_xy(100, 200)
 
 
 def test_rebind_different_project_leaves_no_residue(controller):
@@ -296,6 +338,7 @@ def test_rebind_different_project_leaves_no_residue(controller):
 
     controller.bind_project(project_a)
     controller.bind_project(project_b)
+    _bind_default_grid(controller)  # volume load re-binds geometry (V6 §8)
 
     assert controller.coordinate_hub.registered_well_ids() == ("W-B1",)
     # the cursor must resolve to the NEW project's well only
@@ -338,9 +381,13 @@ def test_bind_project_with_degenerate_survey_keeps_grid(controller):
     )
     controller.bind_project(_project_with_wells([], surveys=[survey]))
 
-    # grid untouched (hub defaults) instead of corrupted
-    x, y = controller.coordinate_hub.seismic_to_map_xy(100, 200)
-    assert (x, y) == pytest.approx((100.0, 200.0))
+    # V6 §8: a degenerate survey installs NOTHING — bind clears the old
+    # grid and there are no fabricated defaults to fall back to, so the
+    # geometry is honestly UNKNOWN (conversions refuse) instead of a
+    # valid-looking footprint from unusable corners.
+    assert controller.coordinate_hub.grid_configured is False
+    with pytest.raises(ValueError, match="no seismic grid"):
+        controller.coordinate_hub.seismic_to_map_xy(100, 200)
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +397,16 @@ def test_bind_project_with_degenerate_survey_keeps_grid(controller):
 
 def test_seismic_cursor_routes_to_well_log_page(controller):
     controller.bind_project(_project_with_wells([("W-CUR", (100.0, 200.0))]))
+    # V6 §8: in production a seismic cursor exists only with a loaded
+    # volume, and the volume load binds the grid — bind it here the same
+    # way instead of relying on fabricated default geometry.
+    controller.coordinate_hub.configure_seismic_grid(
+        origin=(100.0, 200.0),
+        il_step=(10.0, 0.0),
+        xl_step=(0.0, 10.0),
+        il_min=100,
+        xl_min=200,
+    )
     controller.coordinate_hub.set_velocity(2000.0)
     page = controller._well_log_page
 
@@ -363,6 +420,7 @@ def test_seismic_cursor_routes_to_well_log_page(controller):
 
 def test_duplicate_cursor_publish_is_not_redispatched(controller):
     controller.bind_project(_project_with_wells([("W-DUP", (100.0, 200.0))]))
+    _bind_default_grid(controller)  # volume-load grid bind (V6 §8)
     page = controller._well_log_page
 
     controller.publish_seismic_cursor(100, 200, 1000.0)

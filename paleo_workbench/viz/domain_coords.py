@@ -60,6 +60,7 @@ class ConversionFailure(str, Enum):
     CRS_MISMATCH = "crs_mismatch"
     CRS_UNKNOWN = "crs_unknown"
     DEGENERATE_GRID = "degenerate_grid"
+    NO_GRID = "no_grid"
     OUT_OF_GRID = "out_of_grid"
     VELOCITY_ASSUMPTION_REQUIRED = "velocity_assumption_required"
     INVALID_INPUT = "invalid_input"
@@ -446,9 +447,12 @@ class DomainCoordinationService:
         try:
             il, xl = self._hub.map_to_seismic_xy(float(point.x), float(point.y))
         except ValueError as exc:
-            return ConversionOutcome.unavailable(
-                ConversionFailure.DEGENERATE_GRID, str(exc)
+            failure = (
+                ConversionFailure.NO_GRID
+                if "no seismic grid" in str(exc)
+                else ConversionFailure.DEGENERATE_GRID
             )
+            return ConversionOutcome.unavailable(failure, str(exc))
         return ConversionOutcome.available(
             SeismicPosition(inline=int(il), crossline=int(xl)),
             authority="bin-grid-geometry",
@@ -461,9 +465,12 @@ class DomainCoordinationService:
         try:
             x, y = self._hub.seismic_to_map_xy(int(position.inline), int(position.crossline))
         except ValueError as exc:
-            return ConversionOutcome.unavailable(
-                ConversionFailure.DEGENERATE_GRID, str(exc)
+            failure = (
+                ConversionFailure.NO_GRID
+                if "no seismic grid" in str(exc)
+                else ConversionFailure.DEGENERATE_GRID
             )
+            return ConversionOutcome.unavailable(failure, str(exc))
         return ConversionOutcome.available(
             MapPoint(float(x), float(y), self._project_crs),
             authority="bin-grid-geometry",

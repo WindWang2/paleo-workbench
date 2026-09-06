@@ -176,14 +176,30 @@ def adapt_multi_well_section(
     display_tops: list[float] = []
     display_bots: list[float] = []
     slots: list[EngineWellSlot] = []
+    # V6 P0-2: duplicate display names are valid data. Without resource ids
+    # a name-keyed document id would collide (both wells share one native
+    # document — tops/markers leak across). Disambiguate id-less duplicates
+    # by slot index and say so in diagnostics.
+    effective_names = [
+        names[index] if index < len(names) else str(
+            getattr(data, "well_name", "") or f"Well-{index + 1}"
+        )
+        for index, data in enumerate(well_logs)
+    ]
+    name_counts: dict[str, int] = {}
+    for n in effective_names:
+        name_counts[n] = name_counts.get(n, 0) + 1
 
     for index, data in enumerate(well_logs):
-        name = (
-            names[index]
-            if index < len(names)
-            else str(getattr(data, "well_name", "") or f"Well-{index + 1}")
-        )
+        name = effective_names[index]
         rid = rids[index] if index < len(rids) else name
+        if index >= len(rids) and name_counts[name] > 1:
+            rid = f"{name}::slot{index}"
+            if f"duplicate_well_name:{name}" not in plan.diagnostics:
+                plan.diagnostics.append(
+                    f"duplicate_well_name:{name} — no resource ids; "
+                    "documents disambiguated by slot index"
+                )
         single_plan = single.adapt_well_log_data(data)
         primary = single_plan.primary
         if primary is None:

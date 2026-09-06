@@ -17,13 +17,51 @@ from paleo_workbench.workflow.stratigraphy_models import (
 )
 
 
+def build_well_identity_map(
+    names: Sequence[str], resource_ids: Sequence[str]
+) -> dict[str, str]:
+    """Positional well-name → resource-id map that REFUSES duplicate names.
+
+    Duplicate WELL display names are valid real-world data; a name→id dict
+    built by ``zip`` silently keeps the last id for both wells, persisting
+    tops under the WRONG well identity (V6 P0-2). When a name repeats with
+    different resource ids the mapping is ambiguous and this raises
+    ValueError — callers must refuse the save instead of guessing.
+
+    Missing resource ids map to ``""`` (unknown identity, never a guessed
+    id): the pair-count mismatch itself is guarded at the save gate.
+    """
+    names = [str(n or "") for n in names]
+    rids = [str(r or "") for r in resource_ids]
+    mapping: dict[str, str] = {}
+    seen: dict[str, str] = {}
+    for index, name in enumerate(names):
+        rid = rids[index] if index < len(rids) else ""
+        if name in seen:
+            if seen[name] != rid:
+                raise ValueError(
+                    f"井名重复但资源 id 不同: {name!r} → {seen[name]!r} 与 {rid!r}；"
+                    "重名井必须以稳定资源 id 区分，拒绝以名称隐式合并"
+                )
+            continue
+        seen[name] = rid
+        mapping[name] = rid
+    return mapping
+
+
 def stable_top_id(
     *,
     well_id: str = "",
     well_name: str = "",
     marker: str = "",
 ) -> str:
-    """Deterministic FormationTop id from well + marker (not random)."""
+    """Deterministic FormationTop id from well + marker (not random).
+
+    ``well_id`` is the identity; ``well_name`` participates only so that
+    legacy id-less tops keep stable ids. Two same-named wells WITH ids get
+    distinct top ids — the id-less duplicate case must be prevented upstream
+    (:func:`build_well_identity_map` refuses it).
+    """
     key = f"{(well_id or '').strip()}|{(well_name or '').strip()}|{(marker or '').strip()}"
     digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
     return f"top_{digest}"
@@ -309,24 +347,33 @@ def tops_overlay_for_well(
     well_id: str = "",
     well_name: str = "",
 ) -> list[dict[str, Any]]:
-    """Lightweight overlay rows for well-log display (marker, depth, domain)."""
+    """Lightweight overlay rows for well-log display (marker, depth, domain).
+
+    Identity rules (V6 P0-2 — duplicate display names are valid data):
+
+    * a top WITH ``well_id`` matches only the same ``well_id`` — a same-name
+      top from a different well can never leak onto this well's log;
+    * a top WITHOUT ``well_id`` (legacy data) falls back to name equality —
+      name is all it ever declared;
+    * a target without ``well_id`` matches by name the same way.
+    """
     out: list[dict[str, Any]] = []
+    target_id = (well_id or "").strip()
+    target_name = (well_name or "").strip()
+    if not target_id and not target_name:
+        # Anonymous target: no identity to match on — returning everything
+        # would place ALL wells' tops on one log (review R3-P1).
+        return []
     for t in tops:
-        if well_id and t.well_id and t.well_id != well_id:
-            continue
-        if well_name and t.well_name and t.well_name != well_name and (
-            not well_id or t.well_id != well_id
-        ):
-            if well_id and t.well_id == well_id:
-                pass
-            elif well_name and t.well_name != well_name:
+        top_id = (t.well_id or "").strip()
+        if top_id:
+            if target_id and top_id != target_id:
                 continue
-        if well_id and not t.well_id and well_name and t.well_name != well_name:
-            continue
-        if well_id and t.well_id and t.well_id != well_id:
-            continue
-        if (not well_id) and well_name and t.well_name != well_name:
-            continue
+            if not target_id and target_name and (t.well_name or "").strip() != target_name:
+                continue
+        else:
+            if target_name and (t.well_name or "").strip() != target_name:
+                continue
         out.append(
             {
                 "id": t.id,

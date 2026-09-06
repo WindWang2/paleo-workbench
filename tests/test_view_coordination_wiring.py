@@ -107,6 +107,13 @@ def test_3d_pick_routes_through_context_without_direct_wire(shell, monkeypatch):
 
 
 def test_seismic_cursor_resolves_to_nearest_well_md(shell):
+    shell.coordinate_hub.configure_seismic_grid(
+        origin=(100.0, 200.0),
+        il_step=(10.0, 0.0),
+        xl_step=(0.0, 10.0),
+        il_min=100,
+        xl_min=200,
+    )
     hub = shell.coordinate_hub
     hub.register_well("W-500", x=100.0, y=200.0, total_depth_m=3000.0)
 
@@ -173,6 +180,13 @@ def test_well_log_refresh_does_not_publish_selection(shell):
 def test_seismic_cursor_after_prior_selection_dispatches_once(shell):
     """A cursor publish must route ONLY the cursor — not re-dispatch the
     stale active well through a full canvas rebind (review MAJOR)."""
+    shell.coordinate_hub.configure_seismic_grid(
+        origin=(100.0, 200.0),
+        il_step=(10.0, 0.0),
+        xl_step=(0.0, 10.0),
+        il_min=100,
+        xl_min=200,
+    )
     shell.coordinate_hub.register_well("W-CUR", x=100.0, y=200.0, total_depth_m=1000.0)
     # The approximate z->MD readout needs a declared velocity assumption
     # since L1 (no silent default 2000 m/s anymore).

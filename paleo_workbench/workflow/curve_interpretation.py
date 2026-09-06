@@ -35,13 +35,31 @@ from paleo_workbench.workflow.curve_operations import (
     conversion_factor,
     convert_values,
     evaluate_curve_expression,
-    interp_nan_aware,
+    interp_gap_preserving,
     median_filter_curve,
     missing_interval_report,
     moving_average,
     normalize_curve,
     resample_axis,
 )
+from paleo_workbench.workflow.well_science import (
+    DERIVED_NULL_SENTINEL,
+    NullPolicy,
+    UnknownDepthUnitError,
+    classify_depth_unit,
+    null_policy_from_declared,
+    require_depth_unit,
+)
+
+__all__ = [
+    "CURVE_OPERATIONS",
+    "OPERATION_SCOPE",
+    "UnknownDepthUnitError",
+    "apply_curve_operation",
+    "baseline_shift",
+    "despike",
+    "depth_shift",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +71,21 @@ GENERATOR_ID = "curve-interpretation-v2"
 # ---------------------------------------------------------------------------
 
 
-def depth_shift(depths: np.ndarray, delta_m: float) -> np.ndarray:
-    """Shift the measured-depth axis by *delta_m* (positive = deeper)."""
-    return np.asarray(depths, dtype=float) + float(delta_m)
+def depth_shift(
+    depths: np.ndarray, delta_m: float, *, axis_unit: str = "m"
+) -> np.ndarray:
+    """Shift the measured-depth axis by *delta_m* metres (positive = deeper).
+
+    The shift magnitude is defined in METRES; when the axis itself is feet
+    (``DEPT.FT``) the delta is explicitly converted to axis units first. An
+    unknown axis unit raises :class:`UnknownDepthUnitError` — a "meter" shift
+    applied raw to a foot axis would misplace every sample by ×3.28 (V6 P0-3).
+    """
+    unit = require_depth_unit(axis_unit, operation="depth_shift")
+    delta_axis = float(delta_m)
+    if unit == "ft":
+        delta_axis *= conversion_factor("m", "ft")
+    return np.asarray(depths, dtype=float) + delta_axis
 
 
 def despike(values: np.ndarray, threshold_sigma: float = 3.0, window: int = 3) -> np.ndarray:
@@ -178,18 +208,30 @@ def apply_curve_operation(
     provenance_extra: dict[str, Any] = {}
 
     if scope == "depth_axis":
+        axis_info = classify_depth_unit(getattr(las.curves[0], "unit", "") or "")
+        require_depth_unit(axis_info, operation=operation)
         las.curves[las.curves[0].mnemonic].data = kernel(
-            las.curves[las.curves[0].mnemonic].data, **kwargs
+            las.curves[las.curves[0].mnemonic].data,
+            axis_unit=axis_info.unit,
+            **kwargs,
         )
+        provenance_extra = {
+            "axis_unit": axis_info.unit,
+            "axis_unit_declared": axis_info.declared,
+        }
     elif scope == "file":
         if operation == "resample":
             depth_axis = np.asarray(las.curves[las.curves[0].mnemonic].data, dtype=float)
             if depth_axis.size < 2:
                 raise ValueError("resample needs a depth axis with ≥2 samples")
             original_step = float(depth_axis[1] - depth_axis[0]) if depth_axis.size > 1 else 0.0
+            axis_info = classify_depth_unit(getattr(las.curves[0], "unit", "") or "")
+            # The step is defined in the AXIS's own unit; recording the unit
+            # makes that contract explicit in provenance instead of leaving
+            # the UI's implicit "meters" label unchallenged.
             new_axis = resample_axis(depth_axis, float(kwargs["step"]))
             for log_curve in las.curves[1:]:
-                log_curve.data = interp_nan_aware(
+                log_curve.data = interp_gap_preserving(
                     new_axis, depth_axis, np.asarray(log_curve.data, dtype=float)
                 )
             las.curves[las.curves[0].mnemonic].data = new_axis
@@ -197,13 +239,21 @@ def apply_curve_operation(
                 "original_sample_count": int(depth_axis.size),
                 "original_step": original_step,
                 "new_step": float(kwargs["step"]),
+                "axis_unit": axis_info.unit,
+                "axis_unit_declared": axis_info.declared,
             }
         elif operation == "depth_unit_normalize":
             target_unit = str(kwargs.get("target_unit", "m"))
-            current_unit = (
-                str(getattr(las.curves[0], "unit", "") or "m").strip() or "m"
+            current_info = classify_depth_unit(
+                getattr(las.curves[0], "unit", "") or ""
             )
-            factor = conversion_factor(current_unit, target_unit)  # raises on unknown
+            # An undeclared/unknown source unit must refuse: normalizing
+            # "unknown → m" with a no-op factor would silently bless the
+            # axis as meters (V6 P0-3).
+            current_unit = require_depth_unit(
+                current_info, operation="depth_unit_normalize"
+            )
+            factor = conversion_factor(current_unit, target_unit)  # raises on unknown pair
             if factor == 1.0:
                 raise ValueError(
                     f"depth axis already in {target_unit!r}; nothing to normalize"
@@ -258,7 +308,12 @@ def apply_curve_operation(
         "w", suffix=".las", delete=False, encoding="utf-8"
     ) as handle:
         staged = Path(handle.name)
-    _ensure_writable_well_header(las)
+    null_policy = _ensure_writable_well_header(las)
+    # The derived file's null representation is part of the derivation: a
+    # sentinel the source never declared is a policy WE introduced, and the
+    # run's provenance must say so (V6 §4 — no silent redefinition of which
+    # samples are missing).
+    provenance_extra["null_policy"] = null_policy.as_dict()
     las.write(str(staged))
     try:
         derived = service.create_derived(
@@ -292,29 +347,39 @@ def apply_curve_operation(
         derived_path=str(derived.path),
     )
 
-def _ensure_writable_well_header(las) -> None:
+def _ensure_writable_well_header(las) -> NullPolicy:
     """Guarantee the STRT/STOP/STEP items lasio's writer requires.
 
     Minimal or hand-authored LAS files can omit them; the derived output
     must still be a readable LAS regardless of how sparse the input header
     was. Depth_shift also refreshes them to the shifted range. The depth
     unit follows the (possibly normalized) depth curve's own unit header.
+
+    Returns the :class:`NullPolicy` of the DERIVED file: the source's own
+    sentinel when it declared one; ``derived_injected`` when this writer had
+    to introduce one (LAS text cannot carry NaN) — the caller records that
+    policy in the run's provenance (V6 §4).
     """
     from lasio import HeaderItem
 
     index = las.curves[0].data
-    depth_unit = str(getattr(las.curves[0], "unit", "") or "M").strip() or "M"
+    depth_unit = str(getattr(las.curves[0], "unit", "") or "").strip() or "M"
     if len(index):
         start, stop = float(index[0]), float(index[-1])
         step = float(index[1] - index[0]) if len(index) > 1 else 0.0
     else:  # pragma: no cover - empty curve has nothing to interpret
         start = stop = step = 0.0
+    source_null = las.well.get("NULL") if "NULL" in las.well else None
+    source_sentinel = getattr(source_null, "value", None)
+    policy = null_policy_from_declared(source_sentinel)
+    if policy.source != "declared":
+        policy = NullPolicy(source="derived_injected", sentinel=DERIVED_NULL_SENTINEL)
     well = las.well
     for mnemonic, value, desc in (
         ("STRT", start, "Start depth"),
         ("STOP", stop, "Stop depth"),
         ("STEP", step, "Step"),
-        ("NULL", -999.25, "Null value"),
+        ("NULL", policy.sentinel, "Null value"),
     ):
         if mnemonic not in well:
             well.append(HeaderItem(mnemonic=mnemonic, unit=depth_unit, value=value, descr=desc))
@@ -325,5 +390,8 @@ def _ensure_writable_well_header(las) -> None:
         # silently redefine which samples are missing (review R1-M1).
         if mnemonic != "NULL":
             well[mnemonic].value = value
+        elif policy.source == "derived_injected":
+            well[mnemonic].value = policy.sentinel
     for mnemonic in ("STRT", "STOP", "STEP"):
         well[mnemonic].unit = depth_unit
+    return policy

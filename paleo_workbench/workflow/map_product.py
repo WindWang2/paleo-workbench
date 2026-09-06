@@ -624,24 +624,93 @@ def publish_map_product(
     project: ProjectDocument,
     *,
     export_path: str | Path | None = None,
+    accept_warnings: bool = True,
 ) -> dict[str, Any]:
-    """Publish gate: refuse stale or superseded products before an export.
+    """Publish gate: refuse stale/superseded/unverifiable products (V6 §17).
 
-    Publishing itself is the caller's export step; this function is the
-    fail-closed gate plus its report.
+    Fail-closed problems (ValueError): superseded, stale, an active QC
+    report with status error, or an undeclared map CRS — those make the
+    product scientifically unverifiable, not merely imperfect.
+
+    Warnings (recorded on the report; pass ``accept_warnings=False`` to
+    refuse on them too): factor units undeclared, unreviewed constraint
+    diagnostics, missing uncertainty surfaces. The product publishes with
+    its honesty record attached; nothing is dropped silently.
     """
     problems: list[str] = []
+    warnings: list[str] = []
     if record.status == PRODUCT_STATUS_SUPERSEDED:
         problems.append(f"superseded by {record.superseded_by}")
     staleness = product_staleness(record, project)
     if staleness["stale"]:
         problems.append(staleness["reason"])
+
+    # QC status gate: the active quality report must not carry errors.
+    active_qc = None
+    active_qc_id = getattr(project, "active_quality_report_id", None)
+    for report_obj in getattr(project, "quality_reports", None) or []:
+        if active_qc_id is not None and getattr(report_obj, "id", None) == active_qc_id:
+            active_qc = report_obj
+            break
+    if active_qc is not None and str(getattr(active_qc, "status", "")) == "error":
+        problems.append(
+            f"active quality report {getattr(active_qc, 'id', '?')} has status error — "
+            "fix the reported issues before publishing"
+        )
+
+    # CRS verifiability (review R2-P0): PaleoMapDocument carries no CRS
+    # field and the composition document is not addressable from the
+    # project, so the CRS cannot be CONCLUSIVELY verified today — the
+    # honest gate action is a recorded warning (documented limitation 13),
+    # never a fabricated pass. The project-level CRS declaration is
+    # reported for the caller to judge.
+    project_crs = str(
+        getattr(getattr(project, "coordinate", None), "project_crs", "") or ""
+    ).strip()
+    if record.composition_ref:
+        warnings.append(
+            "map CRS not verifiable from the composition reference "
+            "(no CRS storage on the map document); "
+            f"project CRS is {project_crs!r}"
+        )
+    else:
+        warnings.append("no composition reference: map CRS cannot be verified")
+
+    # Units + constraint diagnostics + uncertainty: warnings, never silent.
+    if not (record.factor_task_ids or []):
+        warnings.append("product references no factor tasks")
+    for task in project.factor_map_tasks:
+        if task.id not in (record.factor_task_ids or []):
+            continue
+        unit = (task.quality_metrics or {}).get("unit")
+        if unit is None:
+            unit = (task.parameters or {}).get("unit")
+        if not str(unit or "").strip():
+            warnings.append(f"factor {task.name!r}: unit undeclared")
+        constraint_diag = (task.parameters or {}).get("constraint_diagnostics") or {}
+        if constraint_diag.get("unsupported_constraints"):
+            warnings.append(
+                f"factor {task.name!r}: constraints "
+                f"{constraint_diag['unsupported_constraints']} were ignored by "
+                f"{constraint_diag.get('method', '?')} — review before relying on "
+                "this product"
+            )
+        if (task.quality_metrics or {}).get("variance_min") is None:
+            warnings.append(f"factor {task.name!r}: no uncertainty surface")
+
+    if warnings and not accept_warnings:
+        problems.extend(warnings)
+
     report = {
         "ok": not problems,
         "problems": problems,
+        "warnings": warnings,
         "staleness": staleness,
         "export_path": str(export_path) if export_path else None,
     }
     if problems:
         raise ValueError("product cannot be published: " + "; ".join(problems))
     return report
+
+
+

@@ -208,6 +208,28 @@ class CrossValidationReport:
         }
 
 
+def leave_one_well_out_folds(
+    points: Sequence[Mapping[str, Any]],
+) -> list[np.ndarray]:
+    """Fold indices grouping samples by WELL identity (V6 §11/§13).
+
+    Every fold holds out ALL samples of one well — the honest scheme when
+    well-level bias (not point noise) is the question: an interpolator can
+    look good under point-wise folds while failing to transfer across
+    wells. Wells are keyed by ``well_id`` (falling back to ``name``); wells
+    with neither are treated as anonymous single-sample wells.
+    """
+    folds_by_key: dict[str, list[int]] = {}
+    anonymous = 0
+    for index, pt in enumerate(points):
+        key = str(pt.get("well_id") or pt.get("name") or "").strip()
+        if not key:
+            anonymous += 1
+            key = f"__anonymous_{index}"
+        folds_by_key.setdefault(key, []).append(index)
+    return [np.array(idx, dtype=int) for idx in folds_by_key.values()]
+
+
 def cross_validate_surface(
     points: Sequence[Mapping[str, Any]],
     *,
@@ -396,6 +418,117 @@ def residual_features(residuals: Sequence[Mapping[str, float]]) -> list[dict[str
 # ---------------------------------------------------------------------------
 # Kriging exact LOO + variogram diagnostics (geoviz authority)
 # ---------------------------------------------------------------------------
+
+
+def recommend_interpolation_methods(
+    points: Sequence[Mapping[str, Any]],
+    *,
+    methods: Sequence[str],
+    run_fold: Callable[[list[Mapping[str, Any]]], tuple[Any, Any, Any]],
+    requested_constraints: Sequence[str] | None = None,
+    k: int = DEFAULT_CV_FOLDS,
+    cancellation_token=None,
+) -> dict[str, Any]:
+    """Cross-method comparison with a structured recommendation (V6 §13).
+
+    Every method in *methods* is scored by the same spatial K-fold surface
+    CV (``run_fold`` has the :func:`cross_validate_surface` contract). The
+    recommendation NEVER rests on metrics alone: a method with violated
+    constraints (capability matrix, §10) is disqualified regardless of its
+    RMSE — a great number computed by ignoring the user's geology is not a
+    better answer.
+    """
+    requested = [str(c) for c in (requested_constraints or [])]
+    entries: list[dict[str, Any]] = []
+    for method in methods:
+        report = cross_validate_surface(
+            points,
+            run_fold=run_fold,
+            k=k,
+            method_label=str(method),
+            cancellation_token=cancellation_token,
+        )
+        capability_warnings: list[str] = []
+        if requested:
+            from paleo_workbench.workflow.constraint_capabilities import (
+                evaluate_request,
+            )
+
+            from paleo_workbench.workflow.constraint_capabilities import ConstraintKind
+
+            kinds: list[ConstraintKind] = []
+            for name in requested:
+                try:
+                    kinds.append(ConstraintKind(name))
+                except ValueError:
+                    capability_warnings.append(f"unknown constraint {name!r}")
+            if kinds:
+                evaluation = evaluate_request(str(method), kinds)
+                capability_warnings.extend(evaluation.diagnostics)
+        if report is None:
+            entries.append(
+                {
+                    "method": str(method),
+                    "metrics": None,
+                    "capability_warnings": capability_warnings
+                    or ["evaluation unavailable: too few scorable samples"],
+                    "recommended": False,
+                    "rationale": "cross-validation could not run honestly "
+                    "(insufficient samples for the fold scheme)",
+                }
+            )
+            continue
+        entries.append(
+            {
+                "method": str(method),
+                "metrics": report.to_dict()["metrics"],
+                "n_folds": report.k,
+                "residuals": report.residuals[:200],
+                "capability_warnings": capability_warnings,
+            }
+        )
+
+    def _score(entry: dict[str, Any]) -> float:
+        metrics = entry.get("metrics") or {}
+        rmse = metrics.get("rmse")
+        return float(rmse) if rmse is not None else float("inf")
+
+    best_metric_method: str | None = None
+    scorable = [e for e in entries if e.get("metrics")]
+    if scorable:
+        best_metric_method = min(scorable, key=_score)["method"]
+
+    for entry in entries:
+        warnings = entry.get("capability_warnings") or []
+        unsupported = any(":unsupported:" in w for w in warnings)
+        if entry.get("metrics") is None:
+            continue  # rationale already set
+        if unsupported:
+            entry["recommended"] = False
+            entry["rationale"] = (
+                "disqualified: requested constraints ignored by this method "
+                "(capability matrix) — metrics alone cannot justify it"
+            )
+        elif entry["method"] == best_metric_method:
+            entry["recommended"] = True
+            entry["rationale"] = (
+                "best cross-validated RMSE among methods that honor every "
+                "requested constraint"
+            )
+        else:
+            entry["recommended"] = False
+            entry["rationale"] = (
+                f"higher cross-validated RMSE than {best_metric_method!r}"
+            )
+    return {
+        "scheme": "spatial_kfold_surface",
+        "k": k,
+        "requested_constraints": requested,
+        "methods": entries,
+        "recommended_method": next(
+            (e["method"] for e in entries if e.get("recommended")), None
+        ),
+    }
 
 
 def kriging_leave_one_out(

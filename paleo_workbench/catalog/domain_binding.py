@@ -342,23 +342,35 @@ def bind_well_extracts(
     but defers linking — a later idempotent pass attaches links.
     """
     report = BindingReport()
-    from paleo_workbench.project.domain import well_identity_overrides
+    from paleo_workbench.project.domain import (
+        WellEntity,
+        WellRegistry,
+        well_identity_overrides,
+    )
 
     overrides = well_identity_overrides(project)
+    # V6 §6: ONE registry per binding pass (was rebuilt per extract —
+    # O(N×W×K) key normalization). New wells created mid-pass are inserted
+    # incrementally so subsequent extracts can match them exactly like a
+    # full rebuild would.
+    candidate_wells = None
+    if spatial_scope is not None:
+        candidate_wells = [
+            well
+            for well in project.wells
+            if str(getattr(well, "spatial_scope", "") or "") == spatial_scope
+        ]
+    registry = WellRegistry(
+        candidate_wells if candidate_wells is not None else project.wells
+    )
+    by_id = {well.id: well for well in project.wells}
     for extract in extracts:
-        candidate_wells = None
-        if spatial_scope is not None:
-            candidate_wells = [
-                well
-                for well in project.wells
-                if str(getattr(well, "spatial_scope", "") or "") == spatial_scope
-            ]
         outcome = resolve_well(
             project,
             name=extract.name,
             uwi=extract.uwi,
             overrides=overrides,
-            candidate_wells=candidate_wells,
+            registry=registry,
         )
         if outcome.ambiguous:
             report.ambiguous_assets += 1
@@ -384,10 +396,12 @@ def bind_well_extracts(
 
         well: WellEntity | None = None
         if outcome.matched:
-            well = next((item for item in project.wells if item.id == outcome.well_id), None)
+            well = by_id.get(outcome.well_id)
         if well is None:
             well = WellEntity(name=extract.name, uwi=extract.uwi)
             project.wells.append(well)
+            by_id[well.id] = well
+            registry.add(well)
             report.wells_created += 1
         else:
             report.wells_updated += 1

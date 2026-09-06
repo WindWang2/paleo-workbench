@@ -171,7 +171,7 @@ def test_403_feet_las_carries_depth_unit_wrapper(tmp_path: Path):
     assert data.depth_unit == "ft"
 
 
-def test_403_meter_las_stays_unwrapped(tmp_path: Path):
+def test_403_meter_las_carries_declared_envelope(tmp_path: Path):
     from paleo_workbench.viz.well_log_load import (
         WellLogDataWithDepthUnit,
         detect_depth_unit,
@@ -182,7 +182,11 @@ def test_403_meter_las_stays_unwrapped(tmp_path: Path):
     path.write_text(SAMPLE_LAS, encoding="utf-8")  # DEPT .M fixture
     assert detect_depth_unit(str(path)) == "m"
     data = load_well_log_from_path(str(path))
-    assert not isinstance(data, WellLogDataWithDepthUnit)
+    # V6 §3 (review R2-P0): declared meters wrap too — a bare document has
+    # no unit field at all and every unit gate would read it as UNKNOWN.
+    assert isinstance(data, WellLogDataWithDepthUnit)
+    assert data.depth_unit == "m"
+    assert data.depth_unit_declared is True
 
 
 def _write_big_las(path: Path, rows: int = 120_000) -> Path:

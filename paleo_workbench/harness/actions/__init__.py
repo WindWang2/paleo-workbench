@@ -12,6 +12,7 @@ def register_all(registry) -> list[str]:
         geology_workflow,
         mapping,
         project,
+        scientific,
         seismic,
         well,
         workflow,
@@ -28,6 +29,7 @@ def register_all(registry) -> list[str]:
         mapping,
         geology_workflow,
         workflow,
+        scientific,
     ):
         before = set()
         try:

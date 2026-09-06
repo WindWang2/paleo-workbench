@@ -205,6 +205,11 @@ class EngineCurveSubmission:
     display_range: tuple[float, float] = (0.0, 100.0)
     color: str = "#63b3ed"
     line_style: str = "solid"
+    # V6 §3: whether the depth unit came from a file declaration. When
+    # False, ``depth_unit`` is a display-only label (the native bridge
+    # requires a non-empty token) and unit-dependent consumers must treat
+    # the axis as UNKNOWN, never as the label's value.
+    depth_unit_declared: bool = True
 
 
 @dataclass(frozen=True)
@@ -273,45 +278,65 @@ def _freeze_float64(value: Any) -> np.ndarray:
 def _finite_pairs(
     depth: Any, values: Any
 ) -> tuple[np.ndarray, np.ndarray, tuple[int, ...]]:
-    """Align, safely normalize, and retain only finite depth/value pairs.
+    """Align and normalize curve buffers for engine submission (gap-honest).
 
-    ``np.isfinite`` replaces the previous Python sample loop.  Fully finite,
-    read-only typed buffers remain zero-copy candidates for the native bridge.
-    A null gap necessarily has a compact filtered copy because the native
-    SamplingAxis cannot contain a non-finite coordinate.
+    V6 §7 (P0-1): samples with a finite DEPTH stay on the axis even when
+    their VALUE is NaN — the native engine splits its LOD runs at non-finite
+    values (``valid_sample``) and never bridges prepared segments across a
+    gap, so a missing interval renders as a gap exactly like the legacy
+    QPainter path (``build_curve_path`` splits at NaN). The previous
+    filter+compact dropped those rows and the engine bridged them with a
+    straight line — a fabricated trend. Only non-finite DEPTHS are dropped:
+    the native SamplingAxis cannot hold a non-finite coordinate.
+
+    ``null_indices`` counts positions with non-finite values OR dropped
+    depths (indices into the pre-alignment arrays, diagnostics only).
     """
     d = _freeze_float64(depth)
     v = _freeze_float64(values)
     n = min(d.size, v.size)
     d = d[:n]
     v = v[:n]
-    valid = np.isfinite(d) & np.isfinite(v)
-    nulls = tuple(int(index) for index in np.flatnonzero(~valid))
-    if not valid.any():
+    valid_depth = np.isfinite(d)
+    nulls = tuple(int(index) for index in np.flatnonzero(~(valid_depth & np.isfinite(v))))
+    if not valid_depth.any():
         empty = np.empty(0, dtype=np.float64)
         empty.setflags(write=False)
         return empty, empty, nulls
-    if bool(valid.all()):
+    if bool(valid_depth.all()):
         return d, v, nulls
-    depth_out = np.ascontiguousarray(d[valid], dtype=np.float64)
-    values_out = np.ascontiguousarray(v[valid], dtype=np.float64)
+    depth_out = np.ascontiguousarray(d[valid_depth], dtype=np.float64)
+    values_out = np.ascontiguousarray(v[valid_depth], dtype=np.float64)
     depth_out.setflags(write=False)
     values_out.setflags(write=False)
     return depth_out, values_out, nulls
 
 
-_FT_UNITS = frozenset({"FT", "F", "FEET", "FOOT"})
-_M_UNITS = frozenset({"M", "METER", "METERS", "MTR", "MTRS"})
+def _depth_unit_envelope(value: Any) -> tuple[str, bool]:
+    """Classify the depth unit for engine submission.
+
+    Returns ``(unit_label, declared)``. The bridge contract needs a
+    non-empty "m"/"ft" token, so an UNKNOWN unit is submitted labeled "m"
+    for rendering with ``declared=False`` — the honesty lives in
+    ``EngineCurveSubmission.depth_unit_declared`` + plan diagnostics, so no
+    consumer can mistake the label for knowledge (V6 P0-3).
+    """
+    from paleo_workbench.workflow.well_science import classify_depth_unit
+
+    info = classify_depth_unit(value)
+    if info.known:
+        return info.unit, True  # type: ignore[return-value]
+    return "m", False
 
 
 def _normalize_depth_unit(value: Any) -> str:
-    """Map a depth-axis unit string to the engine contract ("m"/"ft")."""
-    unit = str(value or "").strip().upper()
-    if unit in _FT_UNITS:
-        return "ft"
-    if unit in _M_UNITS:
-        return "m"
-    return "m"
+    """Map a depth-axis unit string to the engine contract ("m"/"ft").
+
+    .. deprecated-semantics:: V6 §3
+        Unknown units previously coerced to "m" invisibly; use
+        :func:`_depth_unit_envelope` so the unknown state stays visible.
+    """
+    return _depth_unit_envelope(value)[0]
 
 
 def _pick_primary(curves: Iterable[Any]) -> tuple[int, str]:
@@ -420,7 +445,13 @@ def adapt_well_log_data(data: Any) -> EngineLoadPlan:
 
     primary_index, _ = _pick_primary(source_curves)
     document_id = stable_entity_id("document", well_name)
-    depth_unit = _normalize_depth_unit(getattr(data, "depth_unit", None))
+    depth_unit, depth_unit_declared = _depth_unit_envelope(
+        getattr(data, "depth_unit", None)
+    )
+    if not depth_unit_declared:
+        plan.diagnostics.append(
+            "depth-unit:unknown — engine label defaults to m for rendering only"
+        )
     for index, curve in enumerate(source_curves):
         mnemonic = str(getattr(curve, "name", "") or f"CURVE_{index}")
         unit = str(getattr(curve, "unit", "") or "unit")
@@ -430,7 +461,9 @@ def adapt_well_log_data(data: Any) -> EngineLoadPlan:
             () if raw_depth is None else raw_depth,
             () if raw_values is None else raw_values,
         )
-        if depth.size == 0:
+        if depth.size == 0 or not bool(np.isfinite(values).any()):
+            # No finite values at all → nothing displayable (#402); a curve
+            # with at least one finite value KEEPS its NaN gaps (V6 §7).
             plan.diagnostics.append(f"curve_empty:{mnemonic}")
             continue
         curve_id = stable_entity_id("curve", well_name, mnemonic, str(index))
@@ -446,6 +479,7 @@ def adapt_well_log_data(data: Any) -> EngineLoadPlan:
             null_indices=nulls,
             display_range=_display_range(curve),
             color=str(getattr(curve, "color", "") or _CURVE_COLORS.get(mnemonic.upper(), "#63b3ed")),
+            depth_unit_declared=depth_unit_declared,
         )
         plan.curves.append(submission)
         if index == primary_index:
@@ -744,6 +778,7 @@ def parity_snapshot(data: Any) -> dict[str, Any]:
                 "mnemonic": curve.mnemonic,
                 "unit": curve.value_unit,
                 "depth_unit": curve.depth_unit,
+                "depth_unit_declared": curve.depth_unit_declared,
                 "length": int(curve.depth.size),
                 "depth_first": float(curve.depth[0]) if curve.depth.size else None,
                 "depth_last": float(curve.depth[-1]) if curve.depth.size else None,

@@ -11,9 +11,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import logging
+
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.workflow.correlation_artifact import read_correlation_artifact
 from paleo_workbench.workflow.correlation_session import tops_overlay_for_well
+from paleo_workbench.workflow.curve_operations import conversion_factor
+from paleo_workbench.workflow.well_science import depth_unit_of
 
 
 @dataclass(frozen=True)
@@ -193,26 +197,34 @@ def apply_correlation_tops_to_well_log_data(
     # with a warning instead of being plotted at numerically wrong positions
     # (H8 — no silent domain conversion). When the log axis is a foot axis
     # (DEPT.FT LAS), meter-domain MD tops are converted so they stay aligned
-    # instead of being misplaced by the ×3.28 factor (WL-4).
+    # instead of being misplaced by the ×3.28 factor (WL-4). An axis whose
+    # unit is UNKNOWN refuses placement entirely (V6 P0-3): placing meter
+    # tops raw on a possibly-feet axis is the ×3.28 misplacement again.
     domain_rows = [r for r in rows if str(r.get("depth_domain") or "MD") == "MD"]
     skipped = len(rows) - len(domain_rows)
-    axis_unit = str(getattr(data, "depth_unit", "") or "").strip().lower()
-    if axis_unit in {"ft", "f", "feet", "foot"}:
-        import logging
-
+    axis_info = depth_unit_of(data)
+    if not axis_info.known:
+        skipped += len(domain_rows)
+        logging.getLogger(__name__).warning(
+            "correlation overlay: depth-axis unit is %s for well %r; refusing to "
+            "place %d MD top(s) (no unit guess — declare DEPT.M/DEPT.FT in the LAS)",
+            "undeclared" if not axis_info.declared else f"unrecognized ({axis_info.raw!r})",
+            name,
+            len(domain_rows),
+        )
+        domain_rows = []
+    elif axis_info.unit == "ft":
+        factor = conversion_factor("m", "ft")
         logging.getLogger(__name__).warning(
             "correlation overlay: converting %d MD top(s) from meters to feet to match the %s depth axis",
             len(domain_rows),
-            axis_unit,
+            axis_info.unit,
         )
         domain_rows = [
-            {**r, "depth": float(r["depth"]) * 3.280839895013123}
-            for r in domain_rows
+            {**r, "depth": float(r["depth"]) * factor} for r in domain_rows
         ]
     markers = markers_from_overlay_rows(domain_rows)
     if skipped:
-        import logging
-
         logging.getLogger(__name__).warning(
             "skipped %d correlation top(s) with non-MD depth domain on well-log overlay (no auto-conversion)",
             skipped,

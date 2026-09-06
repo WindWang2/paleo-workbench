@@ -1026,7 +1026,7 @@ def test_overlay_reapply_replaces_correlation_markers():
     orig = ov.load_current_correlation_payload
     ov.load_current_correlation_payload = lambda proj, project_path=None: (ref, payload)
     try:
-        base = SimpleNamespace(well_name="W0")
+        base = SimpleNamespace(well_name="W0", depth_unit="m")
         first = apply_correlation_tops_to_well_log_data(base, project)
         assert len(first.markers) == 1
         second = apply_correlation_tops_to_well_log_data(first, project)
@@ -1080,7 +1080,7 @@ def test_overlay_skips_non_md_domain_tops():
     orig = ov.load_current_correlation_payload
     ov.load_current_correlation_payload = lambda proj, project_path=None: (ref, payload)
     try:
-        base = SimpleNamespace(well_name="W0")
+        base = SimpleNamespace(well_name="W0", depth_unit="m")
         wrapped = apply_correlation_tops_to_well_log_data(base, project)
         assert [m.label for m in wrapped.markers] == ["MD1"]
     finally:
@@ -1127,7 +1127,7 @@ def test_overlay_converts_md_tops_onto_feet_axis():
         assert wrapped.markers[0].depth == pytest.approx(500.0 * 3.280839895013123)
         # Meter axis: numeric placement unchanged.
         flat = apply_correlation_tops_to_well_log_data(
-            SimpleNamespace(well_name="W0"), project
+            SimpleNamespace(well_name="W0", depth_unit="m"), project
         )
         assert flat.markers[0].depth == pytest.approx(500.0)
     finally:

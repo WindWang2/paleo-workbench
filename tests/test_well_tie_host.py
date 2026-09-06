@@ -50,7 +50,11 @@ def test_well_tie_host_creates_engine_canvas(qtbot):
 
 
 def test_build_tie_arrays_uses_dt_rhob_curves():
-    data = _well_with_dt_rhob()
+    from paleo_workbench.viz.well_log_load import WellLogDataWithDepthUnit
+
+    # V6 §3: the unit envelope is mandatory — sonic integration refuses an
+    # axis of unknown unit, so synthetic fixtures declare meters explicitly.
+    data = WellLogDataWithDepthUnit(_well_with_dt_rhob(), "m")
     arrays = build_tie_arrays(data, None)
     assert arrays is not None
     depths, twt, sonic, density, seismic = arrays
@@ -76,7 +80,9 @@ def test_build_tie_arrays_synthetic_proxy_without_dt_rhob():
             )
         ],
     )
-    arrays = build_tie_arrays(data, None)
+    from paleo_workbench.viz.well_log_load import WellLogDataWithDepthUnit
+
+    arrays = build_tie_arrays(WellLogDataWithDepthUnit(data, "m"), None)
     assert arrays is not None
     depths, twt, sonic, density, _seismic = arrays
     assert len(depths) == 3
@@ -100,7 +106,11 @@ def test_build_tie_arrays_none_without_inputs():
 def test_well_tie_host_apply_and_clear(qtbot):
     host = WellTieHost()
     qtbot.addWidget(host.widget)
-    payload = VizPayload(kind="well_log", label="TIE-1", well_log=_well_with_dt_rhob())
+    from paleo_workbench.viz.well_log_load import WellLogDataWithDepthUnit
+
+    payload = VizPayload(
+        kind="well_log", label="TIE-1", well_log=WellLogDataWithDepthUnit(_well_with_dt_rhob(), "m")
+    )
     assert host.apply(payload) is True
     assert host.widget._depths is not None
     assert host.widget._synthetic is not None
@@ -112,7 +122,13 @@ def test_well_tie_host_apply_and_clear(qtbot):
 def test_composite_loads_well_tie_from_well_log_payload(qtbot):
     panel = CompositeVisualizationPanel()
     qtbot.addWidget(panel)
-    payload = VizPayload(kind="well_log", label="TIE-1", well_log=_well_with_dt_rhob())
+    from paleo_workbench.viz.well_log_load import WellLogDataWithDepthUnit
+
+    payload = VizPayload(
+        kind="well_log",
+        label="TIE-1",
+        well_log=WellLogDataWithDepthUnit(_well_with_dt_rhob(), "m"),
+    )
     panel.load_payload(payload)
     assert panel.well_tie_canvas._depths is not None
     assert "井震标定" in panel.status_label.text()

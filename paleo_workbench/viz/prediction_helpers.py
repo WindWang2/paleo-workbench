@@ -370,7 +370,17 @@ def well_log_data_from_prediction(task) -> WellLogData:
             )
         ],
     )
-    return merge_prediction_onto_well_log(data, task)
+    # V6 §3: the synthetic axis is meters BY CONSTRUCTION (0–100 spans);
+    # declare it so unit-gated consumers (overlay placement, well-tie)
+    # proceed honestly instead of seeing an unknown-unit document.
+    from paleo_workbench.viz.well_log_load import WellLogDataWithDepthUnit
+
+    merged = merge_prediction_onto_well_log(data, task)
+    if merged is None:
+        return None
+    if isinstance(merged, WellLogDataWithDepthUnit):
+        return merged
+    return WellLogDataWithDepthUnit(merged, "m")
 
 
 def export_well_canvas(

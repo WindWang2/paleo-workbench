@@ -1,61 +1,81 @@
-# Task Plan — Data & Runtime Foundation V6 (feat/data-runtime-foundation-v6)
+# Task Plan — Scientific Interpretation & Algorithm V6 (feat/scientific-interpretation-v6)
 
 ## Goal
-Repository-scale program: converge catalog/runtime/project persistence into a
-transactional, lazy, crash-safe foundation for 100k–500k entities / 10k wells /
-multi-GB payloads / long background jobs. Hard exclusion: NO 100GB seismic
-support/benchmarking (small/medium fixtures only).
+Make Paleo Workbench scientifically trustworthy across well logs, multi-well
+correlation, map/well/seismic coordinate linkage, small/medium seismic
+interpretation, geological constraints, interpolation, single-factor maps,
+multi-factor synthesis, geological mapping, uncertainty/QC/provenance, and
+Harness scientific actions.
 
-## Base
-- main @ 295fabc3; worktree .worktrees/data-runtime-foundation-v6, branch
-  feat/data-runtime-foundation-v6
-- Test env: main checkout .venv (Python 3.12.13, pytest 9.1.1, PySide6, offscreen);
-  run pytest FROM WORKTREE ROOT so pythonpath "." resolves to worktree code.
-  pytest 9: use explicit `tests/...` args (geo-viz testpaths absent in
-  worktree unless submodules initialized).
+Primary rule: a result must never look scientifically valid when an input
+unit, identity, null convention, coordinate convention, geological
+constraint, calibration, or algorithm capability was actually missing or
+ignored. Prefer explicit unavailable/degraded/unsupported over silent
+approximation.
 
-## Hard constraints (owner-locked)
-1. DataCatalogService remains the public lifecycle authority.
-2. No raw SQLite exposure to UI/business code.
-3. No process-wide lock across multi-GB IO.
-4. Preserve valid existing contracts (RAW/DERIVED/... semantics, pagination,
-   lineage/DataRun, ResourceGovernor, TaskScheduler, OwnedWorkerJob, Harness 2.0,
-   project save/reopen, missing/relink, portable packaging).
-5. Main stays read-only; all work on branch.
-6. No 100GB seismic work.
-
-## Phases (milestone commits per prompt §18)
-- [x] PHASE 0: Setup — worktree, branch, planning files, baseline test run
-- [x] PHASE 1: Initial audit (subsystems A–L, parallel agents) + issue mapping
-- [x] PHASE 2: 00-baseline.md (d67c4639)  (commit 1: audit/baseline)
-- [x] PHASE 3: Lazy catalog — SQLite indexed repository under DataCatalogService;
-      project-open <500ms to responsive shell at 100k  (commit 2)
-- [x] PHASE 4: Transaction/revision model — BEGIN IMMEDIATE/CAS, typed conflicts,
-      no last-writer-wins  (commit 3)
-- [x] PHASE 5: Payload registration protocol (PREPARE..PUBLISH) + GC lease/coord
-      (commit 4)
-- [x] PHASE 6: Working-copy state machine  (commit 5)
-- [x] PHASE 7: Project open/save/backup/recovery decision table  (commit 6)
-- [x] PHASE 8: Runtime session generation + real cancellation  (commit 7)
-- [x] PHASE 9: ResourceGovernor convergence (OMP/BLAS/env mutation removal)  (commit 8)
-- [x] PHASE 10: Lineage/DataRun atomicity + path identity/relink fail-closed  (commit 9)
-- [x] PHASE 11: Scale fixtures + benchmarks (100k/500k/10k wells)  (commit 10)
-- [x] PHASE 12: 3 review rounds (data-correctness; concurrency/arch;
-      perf/adversarial/recovery) → fix P0/P1 + relevant P2  (commit 11)
-- [x] PHASE 13: Docs 00–11 complete; PR to main with full evidence
+HARD EXCLUSION: no 100GB seismic volume support/benchmark/optimization.
 
 ## Current Phase
-PHASE 8 (session generation + cancellation)
+PHASE 1 — Scientific audit (A–Q) → docs/development/scientific-interpretation-v6/00-baseline.md
 
-## Decisions (locked — do not revisit)
-(none yet beyond hard constraints)
+## Phases
+- [ ] PHASE 0: Setup — worktree `.worktrees/scientific-interpretation-v6`,
+      branch `feat/scientific-interpretation-v6` off main (295fabc3),
+      submodules geo-viz-engine (5e03beba) + well-log-engine (f845e7ab) init,
+      uv venv (cp312) + geoviz editables; baseline test run
+- [ ] PHASE 1: Scientific audit A–Q (parallel) → 00-baseline.md
+- [ ] PHASE 2: Well scientific contract V2 (identity/depth-domain/unit/null
+      invariants; §2–4) + tests
+- [ ] PHASE 3: Well identity/correlation duplicate-name correctness +
+      registry scale O(W + N log W) (§5–6)
+- [ ] PHASE 4: well-log-engine gap-aware curves/parity (§7, submodule branch
+      if engine changes needed)
+- [ ] PHASE 5: Coordinate/calibration fail-closed chain + SEG-Y scalar/
+      geometry unification (§8–9)
+- [ ] PHASE 6: Method × Constraint capability matrix + result diagnostics
+      (§10)
+- [ ] PHASE 7: Kriging V2 (anisotropy, diagnostics, CV, LOO) (§11)
+- [ ] PHASE 8: Constrained IDW audit + interpolation evaluation workbench
+      (§12–13)
+- [ ] PHASE 9: Factor map contract + contour QA + fusion V2 + MapProduct
+      gate (§14–17)
+- [ ] PHASE 10: QC first-class model + Harness scientific actions (§18–19)
+- [ ] PHASE 11: Performance + full test matrix (§20–21)
+- [ ] PHASE 12: 3 review rounds + fixes (§22)
+- [ ] PHASE 13: Docs 00–13 (§23), commits, submodule bumps, PR (§24)
+
+## Decisions (locked)
+1. Do NOT replace existing systems (catalog, engines, harness, mapping V5) —
+   converge and harden.
+2. Unknown unit/CRS/null = unknown; never guess; typed diagnostic or refusal
+   when semantics depend on it.
+3. Stable IDs, never display names, identify wells/curves everywhere.
+4. RAW immutable; corrections produce DERIVED + DataRun.
+5. No fake barrier kriging; unsupported = reported unsupported.
+6. 100GB seismic explicitly out of scope.
+7. Windows/GitBash environment; reuse root checkout's native builds only if
+   ABI-compatible (cp312); native rebuilds bounded (CMAKE_BUILD_PARALLEL_LEVEL=2).
+
+## Blocked Items
+(none)
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |-------|---------|------------|
-| git check-ignore .worktrees NOT_IGNORED | 1 | Pattern is `.worktrees/` (dir form); matches once dir exists — safe |
+| well-log-engine submodule network clone failed | git submodule update --init --reference | manual local clone from main checkout + checkout gitlink commit — OK |
 
-## Notes
-- There is a sibling worktree .worktrees/workstation-ux-v6 (parallel UX task) — DO NOT TOUCH.
-- Planning files (task_plan/findings/progress.md) are git-tracked; overwrite in
-  worktree is expected, gets committed on the branch.
+## Environment facts
+- Worktree: C:\Users\wangj.KEVIN\projects\paleo-workbench\.worktrees\scientific-interpretation-v6
+- Windows, Git Bash; uv 0.10.9; project pins CPython >=3.12,<3.13
+- Root checkout .venv = cp312 (pytest 9.1.1) but editable installs point at
+  MAIN checkout — never use it for worktree tests; use worktree .venv
+- Native modules: check native/ + geo-viz-engine builds; fallback paths exist
+
+## FINAL STATUS (2026-09-07)
+ALL PHASES COMPLETE.
+- PHASE 0–13 done; 14 superproject commits + 4 geo-viz-engine submodule
+  commits on feat/scientific-interpretation-v6 (both repos)
+- 3 review rounds run (scientific/architecture/adversarial); all P0/P1
+  findings fixed with regression tests (f7359415 + engine 40ebd168)
+- docs/development/scientific-interpretation-v6/ 00–13 complete
+- 100GB seismic excluded (program boundary honored)

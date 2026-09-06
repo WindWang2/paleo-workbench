@@ -243,8 +243,12 @@ def resample_axis(depth: np.ndarray, step: float) -> np.ndarray:
 def interp_nan_aware(new_x: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
     """Linear interpolation that keeps NaN holes and range limits honest.
 
-    NaN samples drop out of the interpolant; positions outside the finite
-    samples' convex hull stay NaN (no endpoint clamping across a gap).
+    .. deprecated-semantics:: V6 §4
+        This kernel drops NaN samples from the interpolant, so an *interior*
+        gap between two finite samples is silently bridged by a linear ramp —
+        fabricated measurements across a missing interval. Resampling and
+        other scientific paths must use :func:`interp_gap_preserving`;
+        ``interp_nan_aware`` remains for display-only continuity.
     """
     new_x = np.asarray(new_x, dtype=float)
     x = np.asarray(x, dtype=float)
@@ -259,6 +263,47 @@ def interp_nan_aware(new_x: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndar
     xs_unique, idx = np.unique(xs, return_index=True)
     out = np.interp(new_x, xs_unique, ys[idx])
     out[(new_x < xs_unique[0]) | (new_x > xs_unique[-1])] = np.nan
+    return out
+
+
+def interp_gap_preserving(new_x: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Linear interpolation that never bridges an interior gap (V6 §4).
+
+    Output samples are NaN everywhere the source provides no evidence:
+    inside an interior NaN span (a missing interval stays missing — no
+    linear ramp across a washed-out zone), and outside the finite samples'
+    hull. Interpolation happens only within each contiguous finite run.
+    """
+    new_x = np.asarray(new_x, dtype=float)
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    out = np.full(new_x.shape, np.nan)
+    # Descending axes produce empty run segments (silently all-NaN);
+    # refuse loudly like resample_axis does (review R3-P2).
+    finite_x = np.isfinite(x)
+    if finite_x.any():
+        xs = x[finite_x]
+        if float(xs[-1]) < float(xs[0]):
+            raise ValueError(
+                "interp_gap_preserving needs a non-descending depth axis; "
+                "reverse the axis explicitly first"
+            )
+    finite = np.isfinite(x) & np.isfinite(y)
+    if not finite.any():
+        return out
+    idx = np.flatnonzero(finite)
+    breaks = np.flatnonzero(np.diff(idx) > 1)
+    starts = np.concatenate(([idx[0]], idx[breaks + 1]))
+    ends = np.concatenate((idx[breaks], [idx[-1]]))
+    for s, e in zip(starts, ends):
+        segment = (new_x >= x[s]) & (new_x <= x[e])
+        if not segment.any():
+            continue
+        xs, ys = x[s : e + 1], y[s : e + 1]
+        # Duplicate depths within a run: np.interp needs strictly increasing
+        # x; keep the first sample at each depth (deterministic).
+        xs_unique, first = np.unique(xs, return_index=True)
+        out[segment] = np.interp(new_x[segment], xs_unique, ys[first])
     return out
 
 

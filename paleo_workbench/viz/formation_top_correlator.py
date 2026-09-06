@@ -47,8 +47,12 @@ class FormationTopCorrelator:
         Returns:
             List of dicts with 'name', 'polygon' array (4, 2), and 'color'.
         """
-        shift_a = (shifts or {}).get(well_a.get("name", ""), 0.0)
-        shift_b = (shifts or {}).get(well_b.get("name", ""), 0.0)
+        from paleo_workbench.viz.well_section_datum import WellSectionDatum
+
+        # V6 P0-2: shifts are keyed by well_id when present (duplicate names
+        # each keep their own shift); name is the fallback key.
+        shift_a = (shifts or {}).get(WellSectionDatum.shift_key_for(well_a), 0.0)
+        shift_b = (shifts or {}).get(WellSectionDatum.shift_key_for(well_b), 0.0)
 
         # Same key spellings the datum engine accepts (#846): 'tops' or
         # 'layers' for the interval list, 'depth' or 'top' per item — a

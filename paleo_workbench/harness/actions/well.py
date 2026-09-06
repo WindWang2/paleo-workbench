@@ -401,12 +401,22 @@ def _create_display(context: ActionContext, parameters: dict) -> dict:
             }
         )
     warnings = [f"curves not found: {missing}"] if missing else []
+    # V6 §3: report the depth unit honestly — "m"/"ft" when declared, null
+    # when the file never declared one (never a hardcoded meters guess).
+    from paleo_workbench.workflow.well_science import depth_unit_of
+
+    unit_info = depth_unit_of(data)
+    if not unit_info.known:
+        warnings.append(
+            "depth unit undeclared — depth_range unit is unknown (not meters)"
+        )
     display = {
         "display_id": f"well-display-{well_id[:8]}",
         "well_id": well_id,
         "well_name": data.well_name,
         "depth_range": [float(top), float(bottom)],
-        "depth_unit": "m",
+        "depth_unit": unit_info.unit,
+        "depth_unit_declared": unit_info.declared,
         "tracks": tracks,
         "template": dict(DEFAULT_TEMPLATE),
         "warnings": warnings,

@@ -122,7 +122,10 @@ def test_fetchmore_prefills_sequential_pages(service, qtbot, small_pages):
         expected = min(40, 8 * (1 + guard))
         qtbot.waitUntil(lambda: len(model.assets()) >= expected, timeout=10_000)
         # Unfetched rows stay honest placeholders.
-        assert model.data(model.index(39, 0), Qt.ItemDataRole.DisplayRole) in {"…", None} or True
+        # row 39 is either still an honest placeholder OR already a real
+        # prefetched asset — never a fabricated value
+        value_39 = model.data(model.index(39, 0), Qt.ItemDataRole.DisplayRole)
+        assert value_39 in {"…", None} or str(value_39).startswith("well_")
     finally:
         model.shutdown()
 
