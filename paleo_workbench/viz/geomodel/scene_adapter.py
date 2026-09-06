@@ -184,6 +184,17 @@ class GeologicalSceneAdapter:
                 min(max(float(state.get("opacity", 1.0)), 0.0), 1.0)
             )
 
+    def shutdown(self) -> None:
+        """Tear down for viewport/page destruction.
+
+        Clears all state AND releases the widget provider reference, so the
+        adapter no longer participates in any page → controller → adapter →
+        provider cycle while C++ objects are being destroyed (GC running
+        through half-dead Qt wrappers is a known segfault window).
+        """
+        self.reset()
+        self._widget_provider = lambda: None
+
     def reset(self) -> None:
         """Drop every scene object and all sync state (project switch)."""
         widget = self._widget_provider()

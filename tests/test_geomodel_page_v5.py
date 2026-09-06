@@ -276,7 +276,12 @@ class TestSaveReopenCycles:
             assert well.object_id not in page._geo3d.assembly
             page.set_project(project_a)
             assert well.object_id in page._geo3d.assembly
-            page.set_project(None)
+            # Same contract as AppShell's project switch: joint host workers
+            # must be joined before the next reload, or the session
+            # accumulates QThreads that outlive the page's C++ objects.
+            page.shutdown_workers(wait_ms=2_000)
+        page.set_project(None)
+        page.shutdown_workers(wait_ms=2_000)
         qtbot.wait(50)
 
     def test_controller_reset_between_projects(self, page):

@@ -106,9 +106,15 @@ class GeologicalModeling3DPage(QWidget):
         # active_items / mesh_items_map renderer-only state) is retired —
         # modeling output goes through the adapter into the VISIBLE joint
         # viewport (ADR-01).
-        self._geo3d = Geo3DWorkspaceController(
-            lambda: self._joint_widget, parent=self
-        )
+        import weakref as _weakref
+
+        _page_ref = _weakref.ref(self)
+
+        def _geo3d_widget():
+            page = _page_ref()
+            return page._joint_widget if page is not None else None
+
+        self._geo3d = Geo3DWorkspaceController(_geo3d_widget, parent=self)
         self._geo3d.status_message.connect(self._on_joint_status)
         self._geo3d.publish_selection = self._publish_geo3d_well_selection
         self.bh_raw_data: list[dict] = []
@@ -1252,6 +1258,15 @@ class GeologicalModeling3DPage(QWidget):
         self._populate_stratal_interpretations()
 
     def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
+        # V5 workspace teardown: drop scene objects before the worker joins
+        # so nothing on screen references dying Qt/GL state. The provider is
+        # weakref-based (no strong page cycle) and stays re-armable.
+        geo = getattr(self, "_geo3d", None)
+        if geo is not None:
+            try:
+                geo.adapter.reset()
+            except Exception:
+                logger.debug("geo3d adapter reset failed", exc_info=True)
         """Join the page's OwnedWorkerJobs on project switch / app close.
 
         Mirrors the teardown hook sibling pages expose so AppShell.shutdown_workers
