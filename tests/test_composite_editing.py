@@ -454,3 +454,35 @@ def test_layer_checkbox_toggle_keeps_tree_items_alive(qtbot, tmp_path):
     assert [panel.tree.topLevelItem(i) for i in range(panel.tree_row_count())] == items
     # 可见性确实写回了渲染快照权威。
     assert panel.layer_by_id(layer_id).visible is False
+
+
+def test_native_properties_apply_to_base_workarea_layers(qtbot, tmp_path):
+    """基础工区图层（井位 / 地震工区）的原生属性写回快照与源头。
+
+    回归：_apply_native_layer_properties 原先对非编辑控制器图层直接
+    return——井位 / 地震工区打开属性对话框后确定也全被丢弃。现在名称 /
+    不透明度写回面板快照与 _base_layers 源（重组不回滚），引用描述符
+    同步；符号 / 标注经镜像层与呈现态信封生效。
+    """
+    document = _document(qtbot, tmp_path)
+    assert document._base_layers, "工区基础图层应已随 set_project 组装"
+    base = document._base_layers[0]
+    original_name = base.name
+    snapshot = document.layer_manager.layer_by_id(base.id)
+    assert snapshot is not None
+
+    document._apply_native_layer_properties(
+        base.id,
+        {"ok": True, "name": f"{original_name}改", "opacity": 0.55,
+         "renderer_xml": "", "labeling_xml": ""},
+    )
+
+    # 快照源是 frozen dataclass：写回以 replace 换列表条目，按 id 复查。
+    def _source_layer():
+        return next(layer for layer in document._base_layers if layer.id == base.id)
+
+    assert _source_layer().name == f"{original_name}改"
+    assert abs(_source_layer().opacity - 0.55) < 1e-9
+    refreshed = document.layer_manager.layer_by_id(base.id)
+    assert refreshed.name == f"{original_name}改"
+    assert abs(refreshed.opacity - 0.55) < 1e-9

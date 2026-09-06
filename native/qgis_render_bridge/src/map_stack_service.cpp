@@ -570,6 +570,10 @@ class PwbLayerTreeMenuProvider : public QgsLayerTreeViewMenuProvider {
           layer->customProperty(QStringLiteral("pwb/reference_snap")).toString() ==
           QLatin1String("true"));
       addCustom(menu, QStringLiteral("移除引用…"), "remove_reference", layer);
+      // QGIS 桌面语义：属性对话框适用于一切图层。引用层的符号 / 标注 /
+      // 透明度经镜像层生效并持久化到工程呈现态信封（map_qgis_project_xml）。
+      menu->addSeparator();
+      addCustom(menu, QStringLiteral("图层属性…"), "properties", layer);
     } else if (isEditable) {
       menu->addSeparator();
       addCustom(menu, QStringLiteral("打开属性表"), "attribute_table", layer);
@@ -588,6 +592,10 @@ class PwbLayerTreeMenuProvider : public QgsLayerTreeViewMenuProvider {
     } else {
       menu->addSeparator();
       menu->addAction(actions->actionRenameGroupOrLayer(menu));
+      // 基础工区图层（井位 / 地震工区等）：QGIS 桌面语义同样提供属性
+      // 对话框——符号 / 标注 / 透明度经镜像层生效并持久化到呈现态信封。
+      menu->addSeparator();
+      addCustom(menu, QStringLiteral("图层属性…"), "properties", layer);
     }
     return menu;
   }

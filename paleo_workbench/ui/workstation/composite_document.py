@@ -1235,16 +1235,24 @@ class CompositeDocument(QWidget):
         """
         controller = self.edit_controller
         layer = controller.layer(layer_id)
-        if layer is None:
+        if layer is None and self.layer_manager.layer_by_id(layer_id) is None:
             return
         if isinstance(self.canvas, QgisCanvasShim):
             # QGIS 地图栈：直接 exec 原生 QgsVectorLayerProperties（与 QGIS
-            # Desktop 完全一致的属性页），结果经 _apply_native_layer_properties
-            # 写回文档模型（不建立第二套符号模型）。
+            # Desktop 完全一致的属性页）。可编辑图层与基础工区 / 引用图层
+            # （井位、地震工区等快照层）都可打开；结果经
+            # _apply_native_layer_properties 写回文档模型（不建立第二套
+            # 符号模型）。
             result = self.canvas.stack.exec_layer_properties(
                 self.canvas.canvas_address, str(layer_id))
             if result.get("ok"):
                 self._apply_native_layer_properties(str(layer_id), result)
+            return
+        if layer is None:
+            # 回退画布的 legacy 属性对话框绑定编辑控制器图层模型；基础
+            # 工区 / 引用图层只在原生栈上提供属性（诚实告知，不静默）。
+            self.status_message.emit(
+                "基础图层属性对话框需要 QGIS 原生地图栈（当前为回退画布）")
             return
         session = layer.edit_session
         features = tuple(
@@ -1325,6 +1333,7 @@ class CompositeDocument(QWidget):
         controller = self.edit_controller
         layer = controller.layer(layer_id)
         if layer is None:
+            self._apply_native_snapshot_layer_properties(str(layer_id), result)
             return
         name = str(result.get("name") or "").strip()
         if name and name != layer.name:
@@ -1347,6 +1356,71 @@ class CompositeDocument(QWidget):
         controller.set_layer_style(layer_id, style)
         self._sync_composition()
         self.status_message.emit(f"图层「{name or layer.name}」属性已更新")
+
+    def _apply_native_snapshot_layer_properties(self, layer_id: str, result: dict) -> None:
+        """原生属性对话框结果写回基础工区 / 引用图层（快照层）。
+
+        这些图层不在编辑控制器里；权威是工区快照源（``_base_layers``）与
+        引用描述符（工程文档 pydantic 模型）。符号 / 标注已由对话框直接
+        落在镜像层上（upsert 的样式签名未变即不重置），经
+        ``_sync_composition`` 的呈现态信封（map_qgis_project_xml）持久化；
+        名称 / 不透明度写回快照与源，避免重组回滚。
+        """
+        snapshot = self.layer_manager.layer_by_id(layer_id)
+        if snapshot is None:
+            return
+        name = str(result.get("name") or "").strip()
+        opacity = result.get("opacity")
+        has_opacity = isinstance(opacity, (int, float)) and 0.0 <= float(opacity) <= 1.0
+        # 快照是 frozen dataclass：以 replace 重建后换回面板列表。
+        from dataclasses import replace as _dc_replace
+
+        new_snapshot = _dc_replace(
+            snapshot,
+            name=(name or snapshot.name),
+            opacity=(
+                min(1.0, max(0.05, float(opacity))) if has_opacity else snapshot.opacity
+            ),
+        )
+        panel_layers = self.layer_manager._layers
+        for index, existing in enumerate(panel_layers):
+            if existing.id == layer_id:
+                panel_layers[index] = new_snapshot
+                break
+        else:
+            panel_layers.append(new_snapshot)
+        # 源头同步：工区快照源同样是 frozen dataclass，按 id 换列表条目
+        # （重组 list(self._base_layers) 直接复用这里的对象，不回滚）。
+        for index, base in enumerate(self._base_layers):
+            if base.id == layer_id:
+                self._base_layers[index] = _dc_replace(
+                    base,
+                    name=(name or base.name),
+                    opacity=(
+                        min(1.0, max(0.05, float(opacity)))
+                        if has_opacity
+                        else base.opacity
+                    ),
+                )
+                break
+        # 引用描述符（工程文档权威，_sync_reference_layers_to_project 持久化）。
+        for reference in self._reference_layers:
+            if reference.id == layer_id:
+                if name and name != reference.name:
+                    try:
+                        reference.name = name
+                    except Exception:
+                        pass
+                if has_opacity:
+                    try:
+                        reference.opacity = new_snapshot.opacity
+                    except Exception:
+                        pass
+                break
+        # 面板重发快照：名称 / 不透明度即刻上镜像层与原生树。
+        self.layer_manager._publish()
+        self._sync_composition()
+        self.status_message.emit(f"图层「{name or new_snapshot.name}」属性已更新")
 
     # -- 属性表 ---------------------------------------------------------------
 
