@@ -390,7 +390,12 @@ def test_well_tie_seed_ignores_process_hash_salt(qtbot, monkeypatch):
     )
     host = WellTieHost()
     qtbot.addWidget(host.widget)
-    payload = VizPayload(kind="well_log", label="TIE-1", well_log=well)
+    from paleo_workbench.viz.well_log_load import WellLogDataWithDepthUnit
+
+    # V6 §3: tie integration refuses unknown-unit axes; fixture declares m.
+    payload = VizPayload(
+        kind="well_log", label="TIE-1", well_log=WellLogDataWithDepthUnit(well, "m")
+    )
 
     import builtins
 

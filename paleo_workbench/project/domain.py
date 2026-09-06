@@ -314,20 +314,39 @@ class WellRegistry:
     sharing a normalized identity): callers must go through
     :func:`resolve_well` to handle ambiguity explicitly — silent first-wins
     matching is how duplicate wells get merged by accident.
+
+    V6 §6: ``find_all_by_name`` answers from a multi-valued key index built
+    once in ``__init__`` (O(1) per lookup instead of re-normalizing every
+    well's key set per query), and :meth:`add` inserts incrementally so a
+    binding pass reuses ONE registry instead of rebuilding it per extract
+    (the old O(N×W×K) hot loop).
     """
 
     def __init__(self, wells: Iterable[WellEntity]):
         self._by_id: dict[str, WellEntity] = {}
         self._by_key: dict[str, WellEntity] = {}
         self._ambiguous_keys: set[str] = set()
+        # multi-valued index: normalized key -> wells answering to it
+        self._index: dict[str, list[WellEntity]] = {}
+        self._indexed_ids: set[str] = set()
         for well in wells:
-            self._by_id[well.id] = well
-            for key in well.match_keys():
-                existing = self._by_key.get(key)
-                if existing is None:
-                    self._by_key[key] = well
-                elif existing.id != well.id:
-                    self._ambiguous_keys.add(key)
+            self.add(well)
+
+    def add(self, well: WellEntity) -> None:
+        """Insert one well incrementally (keeps all indexes consistent)."""
+        if well.id in self._indexed_ids:
+            return  # already indexed
+        self._indexed_ids.add(well.id)
+        self._by_id[well.id] = well
+        for key in well.match_keys():
+            holders = self._index.setdefault(key, [])
+            holders.append(well)
+            existing = self._by_key.get(key)
+            if existing is None:
+                self._by_key[key] = well
+            elif existing.id != well.id:
+                self._ambiguous_keys.add(key)
+                # by_key stays first-wins-but-ambiguous (None via by_key)
 
     def by_id(self, well_id: str) -> WellEntity | None:
         return self._by_id.get(well_id)
@@ -340,11 +359,9 @@ class WellRegistry:
 
     def find_all_by_name(self, name: str) -> list[WellEntity]:
         normalized = normalize_well_name(name)
-        return [
-            well
-            for well in self._by_id.values()
-            if normalized and normalized in well.match_keys()
-        ]
+        if not normalized:
+            return []
+        return list(self._index.get(normalized, ()))
 
     def __len__(self) -> int:
         return len(self._by_id)
@@ -705,6 +722,7 @@ def resolve_well(
     well_id: str = "",
     overrides: dict[str, str] | None = None,
     candidate_wells: Iterable[WellEntity] | None = None,
+    registry: WellRegistry | None = None,
 ) -> ResolutionOutcome:
     """Match incoming well data against the registry (§13 priority order).
 
@@ -718,13 +736,16 @@ def resolve_well(
     silently — ``ambiguous=True`` with all candidate ids so callers can
     surface an unresolved state. ``candidate_wells`` can restrict resolution
     to one domain scope (for example reference-only imports) without changing
-    the project registry.
+    the project registry. ``registry`` lets a multi-extract binding pass
+    reuse ONE pre-built registry (V6 §6 — the registry must not be rebuilt
+    per extract); it takes precedence over ``candidate_wells``.
     """
-    registry = WellRegistry(
-        candidate_wells
-        if candidate_wells is not None
-        else (getattr(project, "wells", []) or [])
-    )
+    if registry is None:
+        registry = WellRegistry(
+            candidate_wells
+            if candidate_wells is not None
+            else (getattr(project, "wells", []) or [])
+        )
     if well_id:
         well = registry.by_id(well_id)
         if well is not None:

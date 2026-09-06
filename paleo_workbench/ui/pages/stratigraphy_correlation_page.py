@@ -822,17 +822,27 @@ class StratigraphyCorrelationPage(QWidget):
         return None
 
     def _tops_from_canvas(self) -> list:
-        """Collect FormationTop models with stable IDs (no-op save safe)."""
-        from paleo_workbench.workflow.correlation_session import tops_from_canvas_rows
+        """Collect FormationTop models with stable IDs (no-op save safe).
+
+        Raises ValueError when duplicate well display names cannot be
+        uniquely mapped to resource ids (V6 P0-2 — duplicate names are
+        valid data; persisting name-keyed tops for them would attach one
+        well's tops to another).
+        """
+        from paleo_workbench.workflow.correlation_session import (
+            build_well_identity_map,
+            tops_from_canvas_rows,
+        )
         from paleo_workbench.workflow.stratigraphy_models import (
             CorrelationMethod,
             DepthDomain,
         )
 
-        name_to_id = {
-            name: rid
-            for name, rid in zip(self._loaded_names, self._loaded_resource_ids)
-        }
+        # Refuses (ValueError) when a repeated name maps to different ids —
+        # the old zip-dict silently kept the LAST id for both wells.
+        name_to_id = build_well_identity_map(
+            self._loaded_names, self._loaded_resource_ids
+        )
         model = self.cross_host.widget.tops_model
         prev = None
         if self._correlation_draft is not None:
@@ -945,7 +955,17 @@ class StratigraphyCorrelationPage(QWidget):
                 "请先保存工程，再保存解释版本（工件随工程文件归档到 <工程名>.artifacts/）。",
             )
             return
-        tops = self._tops_from_canvas()
+        try:
+            tops = self._tops_from_canvas()
+        except ValueError as exc:
+            # V6 P0-2: duplicate well display names cannot be persisted as
+            # name-keyed identities — refuse the save with the reason.
+            QMessageBox.warning(
+                self,
+                "保存解释",
+                f"{exc}。请为重名井绑定稳定资源 id 后重新加载剖面。",
+            )
+            return
         if not tops and not self._loaded_resource_ids:
             QMessageBox.warning(self, "保存解释", "请先加载连井剖面并确保有分层顶")
             return

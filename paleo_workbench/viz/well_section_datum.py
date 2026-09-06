@@ -11,6 +11,11 @@ class WellSectionDatum:
 
     VALID_MODES = ("md", "tvdss", "horizon")
 
+    @staticmethod
+    def shift_key_for(well: dict[str, Any]) -> str:
+        """The key a well's shift is stored under (well_id, else name)."""
+        return str(well.get("well_id", "") or "") or well.get("name", "Unknown")
+
     def compute_shifts(
         self,
         wells: list[dict[str, Any]],
@@ -21,29 +26,44 @@ class WellSectionDatum:
     ) -> dict[str, float]:
         """Calculate vertical depth shifts (z_aligned = z_true + shift) for each well.
 
-        When *diagnostics* is provided, wells that cannot be corrected (missing
-        target horizon or KB) append a notice instead of silently sitting at
-        shift 0.0 beside corrected wells. Their shift values are unchanged.
+        Shifts are keyed by ``well_id`` when a well dict carries one (stable
+        identity — duplicate display names each keep their own shift, V6
+        P0-2) and by display name otherwise. When *diagnostics* is provided,
+        wells that cannot be corrected (missing target horizon or KB) append
+        a notice instead of silently sitting at shift 0.0 beside corrected
+        wells; duplicate NAME keys without ids are reported too — last-wins
+        collapse is unavoidable there, and that is exactly what the caller
+        must see instead of trusting the number.
         """
         if mode not in self.VALID_MODES:
             raise ValueError(f"Invalid mode '{mode}'. Must be one of {self.VALID_MODES}")
 
         shifts: dict[str, float] = {}
+        seen_name_keys: dict[str, str] = {}
 
         for bh in wells:
             wname = bh.get("name", "Unknown")
+            key = str(bh.get("well_id", "") or "") or wname
+            keyed_by_id = bool(bh.get("well_id"))
+            if not keyed_by_id:
+                previous = seen_name_keys.get(wname)
+                if previous is not None and diagnostics is not None:
+                    diagnostics.append(
+                        f"well '{wname}': 重复井名且无 well_id；同名井位移不可区分（后值覆盖前值）"
+                    )
+                seen_name_keys[wname] = key
             if mode == "md":
-                shifts[wname] = 0.0
+                shifts[key] = 0.0
             elif mode == "tvdss":
                 kb = (kb_elevations or {}).get(wname)
                 if kb is None and diagnostics is not None:
                     diagnostics.append(
                         f"well '{wname}': KB elevation missing; tvdss shift left at 0.0"
                     )
-                shifts[wname] = -float(kb or 0.0)
+                shifts[key] = -float(kb or 0.0)
             elif mode == "horizon":
                 if not target_horizon:
-                    shifts[wname] = 0.0
+                    shifts[key] = 0.0
                     continue
                 tops = bh.get("tops") or bh.get("layers") or []
                 h_depth = None
@@ -54,13 +74,13 @@ class WellSectionDatum:
                         break
 
                 if h_depth is not None:
-                    shifts[wname] = -h_depth
+                    shifts[key] = -h_depth
                 else:
                     if diagnostics is not None:
                         diagnostics.append(
                             f"well '{wname}': target horizon '{target_horizon}' missing; shift left at 0.0"
                         )
-                    shifts[wname] = 0.0
+                    shifts[key] = 0.0
 
         return shifts
 
