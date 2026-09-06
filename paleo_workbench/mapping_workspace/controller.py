@@ -120,9 +120,17 @@ class MappingStageController(QObject):
             self.dock_recommendation.emit(dict(profile.recommended_docks))
         self.current_stage_changed.emit(target.value)
         self.refresh_evaluation()
-        if self._stale is not None and self._stale.stale_count:
-            self.stage_notification.emit(self._stale.headline)
+        self._notify_stage_stale(target)
         return True
+
+    def _notify_stage_stale(self, stage: MappingStage) -> None:
+        """进入阶段时的过期提示（按本阶段口径，不用全工作区计数误导）。"""
+        if self._stale is None:
+            return
+        count = self._stale.stage_stale_count(stage)
+        if count:
+            self.stage_notification.emit(
+                f"{stage.label}：{count} 项输入成果已过期（旧结果保留可查）")
 
     def _reassign_active_target(self) -> None:
         """按阶段 profile 的编辑角色重指派活动编辑目标。
@@ -222,6 +230,9 @@ class MappingStageController(QObject):
         self.group_controller.ensure_memberships(snapshots)
         self.group_controller.reconcile(snapshots)
         self.group_controller.apply_stage_visibility(self.state.current_stage)
+        # 组合变化（建稿/约束/叠加/删除）后重算就绪度与过期——用户完成
+        # 清单推荐的动作后，清单不得继续显示旧结论。
+        self.refresh_evaluation()
 
     # -- 就绪度 / 过期 --------------------------------------------------------------
 
@@ -278,6 +289,16 @@ class MappingStageController(QObject):
         self.group_controller.state = self.state
         self.group_controller.reload_from_state()
         self._dock_recommendation_applied.clear()
+        # 真正的「首次进入」语义：工程此前用过阶段工作区（有持久化组结构
+        # 或用户覆盖）→ 全部阶段视为已应用过，重开工程绝不重置用户布局。
+        used_before = bool(self.state.tree) or any(
+            state.customized or state.group_visibility
+            for state in self.state.stage_states.values()
+        )
+        if used_before:
+            self._dock_recommendation_applied = {
+                stage.value for stage in STAGE_ORDER
+            }
 
     # -- 工具 ---------------------------------------------------------------------
 

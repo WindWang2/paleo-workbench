@@ -168,19 +168,55 @@ class StageActionDispatcher:
         """地震预测相叠加（VECTOR_POLYGONS 空间结果 → 独立预测图层）。"""
         self._overlay_polygon_predictions(prefer="seismic")
 
+    @staticmethod
+    def _classify_prediction_task(task) -> str:
+        """按 machine-readable 信号分类井/震预测（无信号 → unknown）。
+
+        优先 ``input_refs`` 键（well/logs vs seismic）；键无信号时回退任务名
+        的显式类别词（此处是展示归类而非科学语义判定，允许名称提示）。
+        """
+        refs = getattr(task, "input_refs", None) or {}
+        keys = " ".join(str(key).lower() for key in refs.keys())
+        if "seis" in keys:
+            return "seismic"
+        if "well" in keys or "log" in keys:
+            return "well"
+        name = str(getattr(task, "name", "") or "").lower()
+        if "seis" in name or "地震" in name:
+            return "seismic"
+        if "well" in name or "测井" in name or "井" in name:
+            return "well"
+        return "unknown"
+
     def _overlay_polygon_predictions(self, *, prefer: str) -> None:
         from paleo_workbench.prediction.spatial_result import extract_polygon_features
 
         tasks = getattr(self.project, "prediction_tasks", None) or []
-        role = (LayerRole.WELL_FACIES_PREDICTION if prefer == "well"
+        wanted = "well" if prefer == "well" else "seismic"
+        role = (LayerRole.WELL_FACIES_PREDICTION if wanted == "well"
                 else LayerRole.SEISMIC_FACIES_PREDICTION)
-        added = 0
+        added = unmatched = already = 0
         for task in tasks:
+            category = self._classify_prediction_task(task)
+            if category != wanted:
+                if category == "unknown":
+                    unmatched += 1
+                continue
+            # 幂等：该任务在该角色下已有叠加图层则跳过（防连点堆积）。
+            task_marker = str(getattr(task, "id", "") or "")
+            existing = [
+                lid for lid in self.stage_controller.state.memberships
+                if self.stage_controller.state.membership(lid).role == role
+                and self.stage_controller.state.membership(lid).factor_task_id == task_marker
+                and self.edit_controller.layer(lid) is not None
+            ]
+            if existing:
+                already += 1
+                continue
             summary = dict(getattr(task, "result_summary", None) or {})
             spatial = summary.get("spatial") or {}
             features_raw = spatial.get("features")
             payload = {"result_summary": summary}
-            features = []
             if features_raw:
                 features = [f for f in features_raw if isinstance(f, dict)]
             else:
@@ -190,22 +226,26 @@ class StageActionDispatcher:
                     features = []
             if not features:
                 continue
-            name = str(getattr(task, "name", "") or "预测相")
-            label = f"{name}（{'测井' if prefer == 'well' else '地震'}预测）"
+            label = f"{getattr(task, 'name', '') or '预测相'}（{'测井' if wanted == 'well' else '地震'}预测）"
             created = self._create_role_layer(
-                label, "polygon", role,
+                label, "polygon", role, factor_task_id=task_marker,
                 features=[
                     (dict(f.get("geometry") or {}), dict(f.get("properties") or {}))
                     for f in features
                 ],
             )
             added += 1 if created else 0
+        label = "测井" if wanted == "well" else "地震"
         if not added:
-            self.composite.status_message.emit(
-                f"没有可叠加的{'测井' if prefer == 'well' else '地震'}预测空间结果"
-                "（需要 VECTOR_POLYGONS 预测任务）")
+            parts = [f"没有可叠加的{label}预测空间结果（需要 VECTOR_POLYGONS 预测任务）"]
+            if unmatched:
+                parts.append(f"{unmatched} 个任务无法判别井/震类别（经 input_refs/任务名），未叠加")
+            self.composite.status_message.emit("；".join(parts))
         else:
-            self.composite.status_message.emit(f"已叠加 {added} 个预测结果图层（不可编辑）")
+            message = f"已叠加 {added} 个{label}预测结果图层（不可编辑）"
+            if already:
+                message += f"；{already} 个此前已叠加，跳过"
+            self.composite.status_message.emit(message)
 
     def create_facies_draft(self) -> None:
         """RAW → DERIVED：从初始相图创建可编辑解释草稿（V5 §14）。
@@ -293,22 +333,23 @@ class StageActionDispatcher:
         for task in tasks:
             task_id = str(task.id)
             title = factor_group_title(task.name, getattr(task, "factor_type", ""))
-            # 幂等：该任务已有叠加图层则跳过（重复点击不堆积副本）。
-            existing = [
-                lid for lid in self.stage_controller.state.memberships
-                if self.stage_controller.state.membership(lid).factor_task_id == task_id
-                and self.edit_controller.layer(lid) is not None
-            ]
-            if existing:
-                skipped += 0  # 已叠加：不计失败
-                continue
+            # 幂等（按角色独立判定）：井点与等值线分别去重——首点只建了
+            # 井点（无 live 网格）时，第二次点击仍能补齐等值线。
+            def _has_overlay(role) -> bool:
+                return any(
+                    self.stage_controller.state.membership(lid).role == role
+                    and self.stage_controller.state.membership(lid).factor_task_id == task_id
+                    and self.edit_controller.layer(lid) is not None
+                    for lid in self.stage_controller.state.memberships
+                )
             # 输入井点（WellTable 行）。
             table = None
             for candidate in getattr(document, "well_tables", None) or []:
                 if str(candidate.id) == str(getattr(task, "well_table_id", "") or ""):
                     table = candidate
                     break
-            if table is not None and getattr(table, "rows", None):
+            if table is not None and getattr(table, "rows", None) \
+                    and not _has_overlay(LayerRole.FACTOR_INPUT):
                 features = []
                 for row in table.rows:
                     x = getattr(row, "x", None)
@@ -329,6 +370,8 @@ class StageActionDispatcher:
             grid = peek_live_factor_grid(task_id)
             if grid is None:
                 skipped += 1
+                continue
+            if _has_overlay(LayerRole.FACTOR_CONTOUR):
                 continue
             try:
                 contour = generate_contour_layer(
@@ -358,7 +401,12 @@ class StageActionDispatcher:
         if kind is None:
             self.composite.status_message.emit(f"未知约束类型：{kind_value}")
             return
-        name = f"{kind.label} {uuid.uuid4().hex[:4]}"
+        sequence = 1 + sum(
+            1 for record in self.stage_controller.state.memberships.values()
+            if record.constraint_kind == kind.value
+            and self.edit_controller.layer(record.layer_id) is not None
+        )
+        name = f"{kind.label} {sequence}"
         geometry_kind = kind.geometry_kind
         layer_id = self._create_role_layer(
             name, geometry_kind, kind.layer_role,

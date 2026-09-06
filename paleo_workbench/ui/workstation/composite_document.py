@@ -794,8 +794,7 @@ class CompositeDocument(QWidget):
             self._toggle_reference_snap
         )
         self.layer_manager.active_layer_changed.connect(
-            self.edit_controller.set_active_layer
-        )
+            self.edit_controller.set_active_layer)
         self.layer_manager.attribute_table_requested.connect(
             self._open_attribute_table
         )
@@ -827,12 +826,19 @@ class CompositeDocument(QWidget):
             if isinstance(self.layer_manager, QgisLayerTreePanel):
                 self.layer_manager.set_group_controller(
                     self.stage_controller.group_controller)
+        else:
+            # 完全降级（无原生栈）：诚实标记（宿主提示分组/阶段显隐不可用）。
+            self.stage_controller.group_controller.mark_fallback()
         self.stage_controller.set_snapshot_provider(
             lambda: list(self.layer_manager._layers))
         self.stage_controller.set_target_resolver(self._resolve_editing_target)
         # 编辑目标信号 → 编辑权威 active layer（阶段切换重指派；用户点选经
         # set_active_target 记录，无回环）。
         self.stage_controller.active_target_changed.connect(self._apply_active_target)
+        # 用户树选层同步回流阶段控制器（编辑目标单一权威；set_active_target
+        # 仅在变化时发信号，无回环）。
+        self.layer_manager.active_layer_changed.connect(
+            self.stage_controller.set_active_target)
         if isinstance(self.layer_manager, QgisLayerTreePanel):
             self.layer_manager.group_state_changed.connect(
                 self._on_tree_structure_changed)

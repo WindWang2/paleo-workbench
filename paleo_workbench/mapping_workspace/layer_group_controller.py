@@ -57,6 +57,8 @@ class LayerGroupController:
         self._tree_view_address: int = 0
         #: 桥是否具备 group 能力（旧桥 → degraded mode，UI 必须明示）。
         self.groups_available: bool = False
+        #: 完全 fallback 画布（无原生栈）——阶段显隐/分组全部不可用。
+        self._fallback_canvas: bool = False
         #: 最近一次成功应用的期望树（增量 diff 基线）。
         self._last_applied: LayerTreeSnapshot | None = None
         #: 最近应用的组可见性（group_id → bool）。
@@ -102,8 +104,18 @@ class LayerGroupController:
 
     @property
     def degraded(self) -> bool:
-        """True = 桥无 group 能力（UI 必须显示分组不可用，不得假装分组）。"""
+        """True = 分组能力不可用（UI 必须显示，不得假装分组）。
+
+        两种情形：完全 fallback 画布（无原生栈，宿主经 mark_fallback 标记）
+        或旧桥（有栈但无 group API）。
+        """
+        if self._fallback_canvas:
+            return True
         return self._stack is not None and not self.groups_available
+
+    def mark_fallback(self) -> None:
+        """宿主声明画布为完全降级（无原生栈；attach_canvas 不会被调用）。"""
+        self._fallback_canvas = True
 
     def attach_tree_view(self, tree_view_address: int) -> None:
         """绑定 QgsLayerTreeView 地址并注册展开态回调（StageViewState 持久化）。"""

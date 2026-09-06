@@ -137,6 +137,10 @@ def _geometry_issue_count(features: list) -> int:
 
 def check_initial_facies_geometry(document) -> ReadinessItem:
     documents = getattr(document, "paleomap_documents", None) or []
+    if not any(getattr(doc, "facies_polygons", None) for doc in documents):
+        return ReadinessItem(
+            "initial_facies_geometry", ReadinessItemStatus.INFO,
+            "相图几何检查待相图加载")
     total_issues = sum(
         _geometry_issue_count(getattr(doc, "facies_polygons", None) or [])
         for doc in documents
@@ -217,9 +221,12 @@ def check_phase1_interpretation(document, workspace_state=None) -> ReadinessItem
 
 
 def _count_constraints(document) -> int:
+    """数有实际几何的约束（空壳登记不算——按钮误点不产生假绿勾）。"""
     total = 0
     for layers in getattr(document, "constraint_layers", None) or []:
-        total += len(getattr(layers, "lines", None) or [])
+        for line in getattr(layers, "lines", None) or []:
+            if len(getattr(line, "coordinates", None) or []) >= 2:
+                total += 1
     return total
 
 
@@ -307,9 +314,11 @@ def check_integrated_draft(document, workspace_state=None) -> ReadinessItem:
 
 
 def check_qa_geometry_errors(document) -> ReadinessItem:
+    """只看最新一份 QA 报告（历史报告已修复的问题不再永久报警）。"""
+    reports = getattr(document, "quality_reports", None) or []
     issues = 0
-    for report in getattr(document, "quality_reports", None) or []:
-        for issue in getattr(report, "issues", None) or []:
+    if reports:
+        for issue in getattr(reports[-1], "issues", None) or []:
             if str(issue.get("kind") or issue.get("type") or "") in (
                 "geometry", "topology", "overlap", "gap"
             ):

@@ -388,7 +388,21 @@ class WorkstationFrame(QWidget):
         def _on_stage_changed(stage_value: str) -> None:
             self.stage_bar.set_current_stage(stage_value)
             self.mapping_stage_panel.set_stage(stage_value)
-            self.status_message.emit(f"编图阶段：{controller.current_stage.label}")
+            # 「我画进哪个图层」必须可见：阶段切换消息携带当前编辑目标
+            #（无目标时明说，绝不静默）。
+            target_id = controller.active_target_layer_id
+            if target_id:
+                layer = self.composite.edit_controller.layer(str(target_id))
+                target_name = layer.name if layer is not None else str(target_id)
+                message = (
+                    f"编图阶段：{controller.current_stage.label}"
+                    f" — 当前编辑目标：{target_name}")
+            else:
+                message = (
+                    f"编图阶段：{controller.current_stage.label}"
+                    " — 本阶段尚无编辑对象（用阶段动作创建）")
+            self.status_message.emit(message)
+            self._refresh_stage_badges()
 
         controller.current_stage_changed.connect(_on_stage_changed)
 
@@ -402,17 +416,90 @@ class WorkstationFrame(QWidget):
         controller.readiness_changed.connect(_on_readiness)
 
         def _on_stale(summary) -> None:
+            self._refresh_stage_badges()
+
+        def _refresh_stage_badges() -> None:
+            """阶段条徽标：就绪度（! 未就绪 / ~ 提醒）+ 本阶段过期计数。
+
+            徽标含义经动态 tooltip 解释（✓ 就绪 / ~ 有提醒 / ! 未就绪 /
+            N↑ 本阶段过期输入数）——不再让 NOT_READY 显示成空白。
+            """
+            from paleo_workbench.mapping_workspace.readiness import (
+                StageReadinessStatus,
+            )
             from paleo_workbench.mapping_workspace.stages import STAGE_ORDER
 
-            badges = {}
+            stale = controller.stale_summary
+            badges: dict[str, str] = {}
             for stage in STAGE_ORDER:
-                count = summary.stage_stale_count(stage)
-                badges[stage.value] = f"{count}↑" if count else ""
+                parts = []
+                # 就绪度按各阶段 profile 独立评估（当前阶段的缓存之外，
+                # 用轻量重估——只读工程引用，无 IO）。
+                if stage == controller.current_stage:
+                    status = controller.readiness.status
+                else:
+                    from paleo_workbench.mapping_workspace.readiness import (
+                        evaluate_stage_readiness,
+                    )
+                    status = evaluate_stage_readiness(
+                        stage, document=self._project,
+                        workspace_state=controller.state
+                        if self._project is not None else None).status
+                if status == StageReadinessStatus.NOT_READY:
+                    parts.append("!")
+                elif status == StageReadinessStatus.READY_WITH_WARNINGS:
+                    parts.append("~")
+                count = stale.stage_stale_count(stage)
+                if count:
+                    parts.append(f"{count}↑")
+                badges[stage.value] = "".join(parts) or "✓"
             self.stage_bar.refresh_badges(badges)
+            # 动态 tooltip：徽标含义 + 本阶段过期输入提示。
+            for stage in STAGE_ORDER:
+                button = self.stage_bar._buttons.get(stage)
+                if button is None:
+                    continue
+                badge = badges.get(stage.value, "")
+                hints = {
+                    "!": "未就绪（缺关键输入）",
+                    "~": "就绪（有提醒）",
+                    "✓": "就绪",
+                }
+                hint = next((text for glyph, text in hints.items()
+                             if glyph in badge), "")
+                count = stale.stage_stale_count(stage)
+                stale_hint = f"；{count} 项输入成果已过期" if count else ""
+                button.setToolTip(
+                    f"{stage.label} — {hint}{stale_hint}\n{stage.description}")
 
         controller.stale_summary_changed.connect(_on_stale)
+        self._refresh_stage_badges = _refresh_stage_badges
 
         controller.stage_notification.connect(self.status_message.emit)
+
+        # P1-4：就绪度清单「可点击定位」——选中目标组/图层并提升图层管理 dock。
+        def _on_locate(stage_value: str, target: str) -> None:
+            if not target:
+                return
+            from paleo_workbench.mapping_workspace.layer_groups import (
+                home_group_for_role,
+            )
+
+            layer_id = ""
+            for lid in controller.state.memberships:
+                record = controller.state.membership(lid)
+                home = home_group_for_role(
+                    record.role, factor_task_id=record.factor_task_id)
+                if target in (home, record.factor_task_id or ""):
+                    if self.composite.edit_controller.layer(lid) is not None:
+                        layer_id = str(lid)
+                        break
+            if layer_id:
+                self.composite.layer_manager.select_layer(layer_id)
+            self.composite_layer_dock.show()
+            self.composite_layer_dock.raise_()
+
+        self.mapping_stage_panel.locate_requested.connect(_on_locate)
 
         def _on_dock_recommendation(recommended: dict) -> None:
             self._apply_stage_dock_recommendation(recommended)

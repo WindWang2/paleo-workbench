@@ -109,6 +109,7 @@ _STAGE_PROFILES: dict[MappingStage, StageProfile] = {
             LayerRole.PROVENANCE_LINE, LayerRole.PROVENANCE_DIRECTION,
             LayerRole.DISTRIBUTION_LINE, LayerRole.PALEO_SHORELINE,
             LayerRole.FACIES_BOUNDARY, LayerRole.FAULT_CONSTRAINT,
+            LayerRole.MASK_BOUNDARY, LayerRole.INTERPOLATION_BOUNDARY,
         ),
         tools=StageToolProfile(
             command_groups=("navigate", "identify", "select", "edit_session", "digitize"),
