@@ -557,10 +557,39 @@ class AppShell(QWidget):
             attach(self.view_coordination)
         # Scenario A/B sinks: well selection elsewhere navigates the seismic
         # profiles; a seismic cursor focuses them (via the same 3D renderer).
-        locate = getattr(panel, "locate_position", None)
-        if callable(locate):
-            self.view_coordination.set_seismic_sink(locate)
-            self.view_coordination.set_seismic_focus_sink(locate)
+        # The locate sink is COMPOSITE: the seismic page's panel and the
+        # workstation dock's panel both follow when they exist (L8).
+        page_locate = getattr(panel, "locate_position", None)
+
+        def _locate_everywhere(il, xl, twt=None, _page=page_locate):
+            if callable(_page):
+                _page(il, xl, twt)
+            # The dock pane follows through the workspace's link-gated
+            # consumer (L10): with the link off it deliberately ignores us.
+            linked = getattr(self.workstation, "linked_workspace", None)
+            locate_dock = getattr(linked, "locate_seismic", None)
+            if callable(locate_dock):
+                try:
+                    locate_dock(il, xl, twt)
+                except Exception:
+                    pass
+
+        if callable(page_locate):
+            self.view_coordination.set_seismic_sink(_locate_everywhere)
+            self.view_coordination.set_seismic_focus_sink(_locate_everywhere)
+        # L8 case A: any well selection opens/focuses the workstation well
+        # dock on that well; case B: a calibrated seismic cursor drives the
+        # docked well view's native link cursor (cleared when no authority
+        # produces an MD anymore).
+        workstation = getattr(self, "workstation", None)
+        show_well = getattr(workstation, "show_well", None)
+        if callable(show_well):
+            self.view_coordination.set_well_dock_sink(show_well)
+        apply_link = getattr(
+            getattr(workstation, "linked_workspace", None), "apply_link_cursor", None
+        )
+        if callable(apply_link):
+            self.view_coordination.set_link_cursor_sink(apply_link)
         # Scenario B map marker: the well map shows the picked seismic position.
         map_page = getattr(getattr(self.data_page, "well_map_panel", None), "map_page", None)
         show_cursor = getattr(map_page, "show_spatial_cursor", None)

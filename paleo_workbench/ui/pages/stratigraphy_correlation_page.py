@@ -365,6 +365,14 @@ class StratigraphyCorrelationPage(QWidget):
         self.restore_interp_btn.setToolTip("丢弃未保存编辑，重新加载当前已保存版本")
         self.restore_interp_btn.clicked.connect(self.restore_saved_interpretation)
         right.addWidget(self.restore_interp_btn)
+        # L4: manual link/tops-attribute editor (draft copy-on-edit). Lives in
+        # the action panel — the center toolbar is width-budgeted by the
+        # splitter contract (test_page_uses_resizable_splitter…).
+        self.link_edit_btn = QPushButton("链接编辑…")
+        self.link_edit_btn.setObjectName("SecondaryButton")
+        self.link_edit_btn.setToolTip("增删改井间相关链接与顶点属性（写入解释草稿）")
+        self.link_edit_btn.clicked.connect(self._open_link_editor)
+        right.addWidget(self.link_edit_btn)
         self.interp_status = QLabel("解释: 未保存")
         self.interp_status.setObjectName("WorkFieldValue")
         self.interp_status.setWordWrap(True)
@@ -838,15 +846,66 @@ class StratigraphyCorrelationPage(QWidget):
         )
 
     def _links_from_session(self, tops: list) -> list:
-        """Build adjacent-well CorrelationLink rows for shared markers."""
-        from paleo_workbench.workflow.correlation_session import adjacent_links_for_marker
+        """Adjacency-derived links merged with the draft's edited links (L4).
+
+        Pure derivation used to discard manual link edits at every save;
+        :func:`merge_session_links` keeps method/notes edits, manual
+        cross-well links and explicit suppressions.
+        """
+        from paleo_workbench.workflow.correlation_session import (
+            adjacent_links_for_marker,
+            merge_session_links,
+        )
         from paleo_workbench.workflow.stratigraphy_models import CorrelationMethod
 
         # Prefer resource ids order, fall back to names
         well_order = list(self._loaded_resource_ids) or list(self._loaded_names)
-        return adjacent_links_for_marker(
+        derived = adjacent_links_for_marker(
             tops, well_order=well_order, method=CorrelationMethod.MANUAL
         )
+        draft = self._correlation_draft
+        if draft is None:
+            return derived
+        return merge_session_links(
+            derived,
+            draft.payload.links,
+            draft.payload.suppressed_link_ids,
+        )
+
+    def _ensure_correlation_draft(self, tops: list | None = None):
+        """The working draft, created lazily from current canvas tops."""
+        if self._correlation_draft is not None:
+            return self._correlation_draft
+        from paleo_workbench.workflow.correlation_lifecycle import (
+            new_correlation_draft,
+        )
+        from paleo_workbench.workflow.stratigraphy_models import DepthDomain
+
+        tops = tops if tops is not None else self._tops_from_canvas()
+        self._correlation_draft = new_correlation_draft(
+            name="连井对比",
+            well_resource_ids=list(self._loaded_resource_ids),
+            well_version_ids=self._resolve_well_version_ids(),
+            tops=tops,
+            depth_domain=DepthDomain.MD,
+        )
+        self._correlation_draft.payload.links = self._links_from_session(tops)
+        return self._correlation_draft
+
+    def _open_link_editor(self) -> None:
+        """L4 link/tops attribute editor writing into the draft (copy-on-edit)."""
+        from paleo_workbench.ui.pages.correlation_link_editor import (
+            run_link_editor,
+        )
+
+        if not self._loaded_names:
+            self.status_label.setText("请先加载连井剖面，再编辑相关链接")
+            return
+        draft = self._ensure_correlation_draft()
+        run_link_editor(self, draft, on_changed=self._on_link_edited)
+
+    def _on_link_edited(self) -> None:
+        self.interp_status.setText("解释: 链接已修改（保存后生成新版本）")
 
     def _resolve_well_version_ids(self) -> list[str]:
         from paleo_workbench.catalog.lifecycle import resolve_resource_version
@@ -898,7 +957,6 @@ class StratigraphyCorrelationPage(QWidget):
         from paleo_workbench.workflow.stratigraphy_models import DepthDomain
 
         well_vids = self._resolve_well_version_ids()
-        links = self._links_from_session(tops)
         draft = self._correlation_draft
         if draft is None:
             draft = new_correlation_draft(
@@ -909,10 +967,12 @@ class StratigraphyCorrelationPage(QWidget):
                 depth_domain=DepthDomain.MD,
                 framework_ref=active_target_horizon(self._project) or "",
             )
-            draft.payload.links = links
+            draft.payload.links = self._links_from_session(tops)
         else:
             draft.payload.tops = tops
-            draft.payload.links = links
+            # L4: regenerate adjacency, then merge with the draft's
+            # manual/edited/suppressed links — link editing survives saves.
+            draft.payload.links = self._links_from_session(tops)
             draft.payload.well_resource_ids = list(self._loaded_resource_ids)
             draft.payload.well_version_ids = well_vids
             # bump only if content would change (fingerprint handles no-op)

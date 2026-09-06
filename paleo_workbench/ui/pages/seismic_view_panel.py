@@ -5,7 +5,7 @@ from typing import Any
 
 import numpy as np
 
-from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
     QFrame,
@@ -95,6 +95,20 @@ _PROFILE_MODE_TOOLBAR_HIDDEN_ACTION_LABELS = frozenset({"3D模式:", "加载 SEG
 _PROFILE_MODE_SECONDARY_PROFILES = ("_profile_xl", "_profile_t", "_profile_arb")
 _QWIDGETSIZE_MAX = 0x00FFFFFF  # mirrors Qt's QWIDGETSIZE_MAX
 
+# L5 profile-orientation switching: which engine profile panel is the 2-D
+# interpretation surface, and what the toolbar badge calls it.
+_PROFILE_ORIENTATIONS = ("inline", "crossline", "time")
+_PROFILE_ORIENTATION_PANEL = {
+    "inline": "_profile_il",
+    "crossline": "_profile_xl",
+    "time": "_profile_t",
+}
+_PROFILE_ORIENTATION_BADGE = {
+    "inline": "Inline 剖面",
+    "crossline": "Crossline 剖面",
+    "time": "Time 切片",
+}
+
 
 class SeismicViewPanel(QFrame):
     """Center panel embedding geo-viz-engine's SeismicView."""
@@ -117,6 +131,18 @@ class SeismicViewPanel(QFrame):
         self._profile_mode_hidden_widgets: list[QWidget] = []
         self._profile_mode_hidden_actions: list[QAction] = []
         self._profile_mode_inline_header: QWidget | None = None
+        # L5: which profile the 2-D surface shows + per-header restore list
+        # (orientation switches hide different row headers).
+        self._profile_orientation = "inline"
+        self._profile_mode_hidden_headers: list[tuple[QWidget, int]] = []
+        # Calibrated well-trace overlay (L5): the displayed well id plus the
+        # last reason a projection was unavailable (fail-closed reporting).
+        self._overlay_well_id: str | None = None
+        self._overlay_unavailable_reason: str | None = None
+        self._overlay_refresh_timer = QTimer(self)
+        self._overlay_refresh_timer.setSingleShot(True)
+        self._overlay_refresh_timer.setInterval(400)
+        self._overlay_refresh_timer.timeout.connect(self._refresh_well_overlays)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -343,6 +369,35 @@ class SeismicViewPanel(QFrame):
         self._profile_mode = True
         self._apply_profile_mode()
 
+    def set_profile_orientation(self, orientation: str) -> bool:
+        """Switch which profile the 2-D interpretation surface shows (L5).
+
+        ``inline`` (default) / ``crossline`` / ``time``. Only meaningful in
+        profile mode; outside it the choice is stored and applied on the
+        next :meth:`enter_profile_mode`. Returns False for an unknown
+        orientation (refused, current state unchanged).
+        """
+        orientation = str(orientation or "").strip().lower()
+        if orientation not in _PROFILE_ORIENTATIONS:
+            return False
+        if orientation == self._profile_orientation:
+            return True
+        self._profile_orientation = orientation
+        if self._profile_mode:
+            # Full restore + re-apply keeps every hide/restore bookkeeping
+            # single-path (no orientation-swap special cases to drift).
+            self._profile_mode = False
+            self._restore_default_layout()
+            self._profile_mode = True
+            self._apply_profile_mode()
+        return True
+
+    @property
+    def profile_orientation(self) -> str:
+        """Current 2-D surface orientation ("inline" outside profile mode
+        semantics — the stored choice applies on the next enter)."""
+        return self._profile_orientation
+
     def exit_profile_mode(self) -> None:
         """Restore the default 3-D + profiles layout.
 
@@ -425,16 +480,6 @@ class SeismicViewPanel(QFrame):
                 self._profile_mode_restore["splitter_collapsible0"] = (
                     splitter.isCollapsible(0)
                 )
-            inline_panel = self._view_profile_panel("_profile_il")
-            inline_layout = inline_panel.layout() if inline_panel is not None else None
-            header = (
-                inline_layout.itemAt(0).widget()
-                if inline_layout is not None and inline_layout.count() > 0
-                else None
-            )
-            if header is not None:
-                self._profile_mode_restore["inline_header_max"] = header.maximumHeight()
-
         # Collapse the 3-D renderer pane; the inline profile takes the space.
         if renderer is not None:
             renderer.setMinimumHeight(0)
@@ -445,20 +490,30 @@ class SeismicViewPanel(QFrame):
             splitter.setSizes([0, 1000])
 
         hidden: list[QWidget] = []
-        for name in _PROFILE_MODE_SECONDARY_PROFILES:
+        active_name = _PROFILE_ORIENTATION_PANEL.get(
+            self._profile_orientation, "_profile_il"
+        )
+        for name in ("_profile_il", *_PROFILE_MODE_SECONDARY_PROFILES):
+            if name == active_name:
+                continue
             panel = self._view_profile_panel(name)
             if panel is not None:
                 panel.hide()
                 hidden.append(panel)
-        # The inline row header is too tall for a compact 2-D surface; the
-        # identity moves into the toolbar badge below.
-        inline_panel = self._view_profile_panel("_profile_il")
+        # The active profile's row header is too tall for a compact 2-D
+        # surface; the identity moves into the toolbar badge below. Headers
+        # are tracked per instance (orientation switches hide different
+        # ones; each restores its own original max height).
+        active_panel = self._view_profile_panel(active_name)
         header = None
-        if inline_panel is not None:
-            inline_layout = inline_panel.layout()
-            if inline_layout is not None and inline_layout.count() > 0:
-                header = inline_layout.itemAt(0).widget()
+        if active_panel is not None:
+            active_layout = active_panel.layout()
+            if active_layout is not None and active_layout.count() > 0:
+                header = active_layout.itemAt(0).widget()
             if header is not None:
+                self._profile_mode_hidden_headers.append(
+                    (header, header.maximumHeight())
+                )
                 header.hide()
                 header.setFixedHeight(0)
         self._profile_mode_inline_header = header
@@ -475,6 +530,11 @@ class SeismicViewPanel(QFrame):
             # Compat shim: earlier workspaces read this private attribute.
             view._inline_badge = badge
         if badge is not None:
+            badge.setText(
+                _PROFILE_ORIENTATION_BADGE.get(
+                    self._profile_orientation, "Inline 剖面"
+                )
+            )
             badge.show()
 
         for name in _PROFILE_MODE_TOOLBAR_HIDDEN_WIDGETS:
@@ -531,13 +591,14 @@ class SeismicViewPanel(QFrame):
                 continue
         self._profile_mode_hidden_actions = []
 
-        header = self._profile_mode_inline_header
-        if header is not None:
-            header.setMinimumHeight(0)
-            header.setMaximumHeight(
-                int(restore.get("inline_header_max", _QWIDGETSIZE_MAX))
-            )
-            header.show()
+        for header, max_height in self._profile_mode_hidden_headers:
+            try:
+                header.setMinimumHeight(0)
+                header.setMaximumHeight(int(max_height))
+                header.show()
+            except RuntimeError:
+                continue
+        self._profile_mode_hidden_headers = []
         self._profile_mode_inline_header = None
 
         badge = getattr(view, "_inline_badge", None)
@@ -580,7 +641,115 @@ class SeismicViewPanel(QFrame):
                 set_position("time", int(t_idx))
         except Exception:
             return False
+        self._schedule_overlay_refresh()
         return True
+
+    # ------------------------------------------------------------------
+    # Calibrated well-trace overlay (L5, display-only)
+    # ------------------------------------------------------------------
+
+    def set_well_overlay(self, well_id: str | None) -> bool:
+        """Project a calibrated well trace onto the inline/crossline sections.
+
+        Returns True when a projection is active. Fail-closed: without a
+        registered well or a time-depth calibration nothing is drawn and
+        :meth:`well_overlay_unavailable_reason` explains why.
+        """
+        self._overlay_well_id = str(well_id) if well_id else None
+        self._overlay_unavailable_reason = None
+        if not self._overlay_well_id:
+            self._clear_overlays_on_panels()
+            return False
+        self._refresh_well_overlays()
+        return self._overlay_unavailable_reason is None
+
+    def well_overlay_unavailable_reason(self) -> str | None:
+        """Why the well overlay is not shown (None when active or not set)."""
+        return self._overlay_unavailable_reason
+
+    def depth_slice_unavailable_reason(self) -> str | None:
+        """Why a depth slice cannot be offered right now (None = available).
+
+        Fail-closed depth-domain gate: the loaded volume's vertical axis is
+        TWT (ms) in every store the engine opens today, so a depth slice
+        would silently fabricate depth through an uncalibrated velocity —
+        refused with an explicit reason instead.
+        """
+        if not self.is_view_ready():
+            return "no-volume"
+        meta = getattr(self.view, "_meta", None)
+        vertical = getattr(meta, "vertical_domain", None)
+        if vertical != "depth":
+            return "twt-domain-volume"
+        return None
+
+    def _schedule_overlay_refresh(self) -> None:
+        """Coalesced overlay refresh (browsing moves slices, cursor surges)."""
+        if self._overlay_well_id:
+            self._overlay_refresh_timer.start()
+
+    def _clear_overlays_on_panels(self) -> None:
+        for name in ("_profile_il", "_profile_xl"):
+            panel = getattr(self.view, name, None)
+            clear = getattr(panel, "clear_path_overlays", None)
+            if callable(clear):
+                clear()
+
+    def _current_survey_slice_values(self) -> tuple[float, float] | None:
+        """(inline, crossline) survey values of the current section positions."""
+        view = self.view
+        if not self.is_view_ready():
+            return None
+        current = getattr(view, "_current_il_xl_t", None)
+        to_survey = getattr(view, "_preview_to_survey_coords", None)
+        if not callable(current) or not callable(to_survey):
+            return None
+        try:
+            il_idx, xl_idx, _t_idx = current()
+            il_val, xl_val, _t = to_survey("inline", int(il_idx))
+            return float(il_val), float(xl_val)
+        except Exception:
+            return None
+
+    def _refresh_well_overlays(self) -> None:
+        """Recompute the well projection for the current section positions."""
+        well_id = self._overlay_well_id
+        if not well_id:
+            return
+        hub = getattr(self._coordination, "coordinate_hub", None)
+        if hub is None:
+            self._overlay_unavailable_reason = "no-coordination-hub"
+            self._clear_overlays_on_panels()
+            return
+        slice_values = self._current_survey_slice_values()
+        if slice_values is None:
+            self._overlay_unavailable_reason = "no-volume"
+            self._clear_overlays_on_panels()
+            return
+        inline_value, crossline_value = slice_values
+        from paleo_workbench.viz.well_section_overlay import (
+            compute_well_section_overlays,
+        )
+
+        overlays, reason = compute_well_section_overlays(
+            hub,
+            well_id,
+            inline_value=inline_value,
+            crossline_value=crossline_value,
+        )
+        self._overlay_unavailable_reason = reason
+        for name, key in (("_profile_il", "inline"), ("_profile_xl", "crossline")):
+            panel = getattr(self.view, name, None)
+            setter = getattr(panel, "set_path_overlays", None)
+            if not callable(setter):
+                continue
+            overlay = overlays.get(key)
+            if overlay is None:
+                clear = getattr(panel, "clear_path_overlays", None)
+                if callable(clear):
+                    clear()
+                continue
+            setter([overlay.as_engine_path(label=well_id)])
 
     def notify_cursor(self, iline_value: float, xl_value: float, twt_ms: float) -> bool:
         """Publish a seismic cursor position to the coordination bus.
@@ -659,6 +828,9 @@ class SeismicViewPanel(QFrame):
         elif slice_type == "time":
             # h = inline number, v = crossline number; TWT from the slider
             self.notify_cursor(h_val, v_val, t_val)
+        # Slice browsing often accompanies cursor motion — refresh the well
+        # overlay coalesced (the timer collapses bursts to one recomputation).
+        self._schedule_overlay_refresh()
 
     def set_horizon_context(self, horizon: str) -> None:
         """Show target horizon context on the panel title / view slice label."""

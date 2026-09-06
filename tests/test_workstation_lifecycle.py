@@ -64,7 +64,9 @@ def test_linked_shutdown_stops_panels(qtbot, tmp_path):
             calls.append("seismic")
 
     class _FakeWell:
-        def shutdown(self) -> None:
+        # shutdown(wait_ms) since the app-close path passes a tighter join
+        # budget (#1158); the fake mirrors the real panel signature.
+        def shutdown(self, wait_ms: int = 3_000) -> None:
             calls.append("well")
 
     linked.seismic_panel = _FakeSeismic()

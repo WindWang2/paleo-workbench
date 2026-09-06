@@ -68,6 +68,13 @@ class ViewCoordinationController(QObject):
         self._spatial_cursor_sink = None     # (x, y) → map marker
         self._seismic_focus_sink = None      # (il, xl, twt) → 3D slice focus
         self._horizon_sink = None            # horizon id → highlight in views
+        # L8 workstation sinks: the docked well/seismic panels participate as
+        # first-class views. The well dock opens/focuses on any well selection
+        # (case A); a calibrated seismic cursor drives the native link cursor
+        # on the docked well view (case B, calibrated MD only).
+        self._well_dock_sink = None          # (well_name) → open/focus dock
+        self._link_cursor_sink = None        # (well_name, md_m|None) → engine crosshair
+        self._link_cursor_set = False        # a link cursor is currently shown
         selection_context.selection_changed.connect(self._on_selection_changed)
 
     # ------------------------------------------------------------------
@@ -102,13 +109,26 @@ class ViewCoordinationController(QObject):
 
         Only assets carrying the ``time_depth`` role enter calibration — a
         plain file with a similar name is not an authority. Unparseable
-        tables are skipped with a debug log, never guessed.
+        tables are skipped with a debug log, never guessed. Entity-linked
+        assets keep their catalog identity (version id / fingerprint /
+        quality metadata) so a reopened calibration stays attributable.
         """
         from paleo_workbench.viz.coordinate_hub import TimeDepthCalibration
 
         registered = 0
         td_assets = self._time_depth_assets(project)
-        for well_name, path in td_assets:
+        for item in td_assets:
+            # Entity links carry the catalog identity alongside the path;
+            # legacy ResourceItems only have the path.
+            if len(item) == 3:
+                well_name, path, identity = item
+                version_id = identity.get("version_id")
+                fingerprint = identity.get("fingerprint")
+                metadata = identity.get("metadata") or {}
+            else:
+                well_name, path = item
+                version_id = fingerprint = None
+                metadata = {}
             # Project-model paths arrive as str (ResourceItem.path is a str
             # deserialized straight from the project JSON, and the catalog
             # resolver also hands back str); normalize here so the Path
@@ -127,7 +147,12 @@ class ViewCoordinationController(QObject):
             pairs = list(zip(table.md_m, table.time_ms))
             try:
                 calibration = TimeDepthCalibration.from_pairs(
-                    str(well_name), pairs, provenance=f"td-table:{path.name}"
+                    str(well_name),
+                    pairs,
+                    provenance=f"td-table:{path.name}",
+                    version_id=version_id,
+                    fingerprint=fingerprint,
+                    metadata=dict(metadata),
                 )
             except ValueError:
                 logger.debug(
@@ -140,13 +165,17 @@ class ViewCoordinationController(QObject):
 
     @staticmethod
     def _time_depth_assets(project):
-        """(well_name, path) pairs for time_depth assets, hub-keyed by well name.
+        """time_depth entries for calibration, hub-keyed by well name.
 
         Resolution order: WorkArea EntityAssetLinks (well entity display name
-        + role time_depth) falling back to legacy ResourceItems typed
-        ``time_depth`` keyed by their own file stem.
+        + role time_depth, carrying the catalog version identity when the
+        version metadata holds one) falling back to legacy ResourceItems
+        typed ``time_depth`` keyed by their own file stem.
+
+        Yields ``(well_name, path)`` for legacy entries and
+        ``(well_name, path, identity_dict)`` for entity-linked entries.
         """
-        results: list[tuple[str, str]] = []
+        results: list[tuple] = []
         seen_paths: set[str] = set()
         for link in list(getattr(project, "entity_asset_links", None) or []):
             if str(getattr(link, "role", "")) != "time_depth":
@@ -161,14 +190,17 @@ class ViewCoordinationController(QObject):
             # staticmethod body: reference the sibling helper through the
             # class (a bare ``self`` here has always been a NameError — any
             # project with time_depth entity links crashed bind_project).
-            path = ViewCoordinationController._resolve_asset_path(
+            resolved = ViewCoordinationController._resolve_asset_version(
                 project, getattr(link, "asset_id", "")
             )
+            if resolved is None:
+                continue
+            path, identity = resolved
             if path and well_name:
                 key = str(path)
                 if key not in seen_paths:
                     seen_paths.add(key)
-                    results.append((well_name, path))
+                    results.append((well_name, path, identity))
         for resource in list(getattr(project, "resources", None) or []):
             if str(getattr(resource, "type", "")) != "time_depth":
                 continue
@@ -184,8 +216,13 @@ class ViewCoordinationController(QObject):
         return results
 
     @staticmethod
-    def _resolve_asset_path(project, asset_id: str) -> str | None:
-        """Best-effort payload path for a catalog asset id via the catalog."""
+    def _resolve_asset_version(project, asset_id: str) -> tuple[str, dict] | None:
+        """Best-effort (payload path, identity) for a catalog asset id.
+
+        The identity dict carries the version id plus any fingerprint /
+        quality metadata stored on the version, so a registered calibration
+        stays attributable to its catalog version after reopen.
+        """
         try:
             from paleo_workbench.catalog import get_catalog
 
@@ -200,7 +237,15 @@ class ViewCoordinationController(QObject):
                     version_id = asset.current_version_id
                     for version in cat.document.versions:
                         if version.id == version_id:
-                            return str(cat.resolve_path(version))
+                            metadata = dict(getattr(version, "metadata", None) or {})
+                            return (
+                                str(cat.resolve_path(version)),
+                                {
+                                    "version_id": version_id,
+                                    "fingerprint": metadata.get("fingerprint"),
+                                    "metadata": metadata,
+                                },
+                            )
         except Exception:
             return None
         return None
@@ -213,6 +258,7 @@ class ViewCoordinationController(QObject):
         """
         self._bound_well_ids.clear()
         removed = self.coordinate_hub.clear_all_wells()
+        self._link_cursor_set = False
         try:
             self.coordinate_hub.configure_seismic_grid()
         except Exception:  # pragma: no cover - defaults are always valid
@@ -468,7 +514,11 @@ class ViewCoordinationController(QObject):
         """
         spatial = None
         try:
-            x, y, _z = self.coordinate_hub.seismic_to_map(int(il), int(xl), float(twt))
+            # Pure bin-grid geometry: the cursor's TWT is deliberately NOT
+            # converted to a depth here (that needs an authority nobody on
+            # this path has — see _route_seismic_cursor for the calibrated
+            # well-MD route).
+            x, y = self.coordinate_hub.seismic_to_map_xy(int(il), int(xl))
             spatial = (float(x), float(y))
         except Exception:
             logger.debug("seismic cursor %s: map position unavailable", (il, xl, twt))
@@ -580,6 +630,88 @@ class ViewCoordinationController(QObject):
         """Register the horizon highlight target: ``(horizon_id)``."""
         self._horizon_sink = sink
 
+    def set_well_dock_sink(self, sink) -> None:
+        """Register the workstation well dock: ``(well_name) → open/focus``.
+
+        Case A: a well selected anywhere (map/3D/well-log page) opens the
+        docked well view on that well. The dock itself never publishes well
+        selections, so there is no echo path to guard here.
+        """
+        self._well_dock_sink = sink
+
+    def set_link_cursor_sink(self, sink) -> None:
+        """Register the native link-cursor target: ``(well_name, md_m|None)``.
+
+        Case B: a seismic cursor resolves to a CALIBRATED MD on the nearest
+        well; when that well is the one the dock shows, the sink drives the
+        engine crosshair. ``md=None`` clears a previously shown cursor — the
+        sink must tolerate being called for a well it is not showing. Sink
+        invocations are throttled to ≥30 ms apart (rapid inline drags bypass
+        the producer-side il-jump gate; the native crosshair write must not
+        amplify every mouse event).
+        """
+        self._link_cursor_sink = sink
+
+    def attach_well_dock_panel(self, panel) -> None:
+        """Wire the docked well panel as a depth-cursor producer (case C).
+
+        NOTE (review R2-M3): the production case-C producer is
+        ``LinkedInterpretationWorkspace._on_depth_cursor`` (link-gated,
+        panel-side throttled). This controller-side hook exists for hosts
+        that embed a WellLogCanvasPanel WITHOUT the workspace; do not wire
+        both or the same signal publishes twice.
+        """
+        depth_signal = getattr(panel, "depth_cursor_moved", None)
+        if depth_signal is None:
+            return
+        try:
+            depth_signal.connect(
+                lambda md, p=panel: self._on_dock_depth_cursor(p, float(md))
+            )
+        except (RuntimeError, TypeError):
+            pass
+
+    def _on_dock_depth_cursor(self, panel, md: float) -> None:
+        # Defense-in-depth gate: producers pre-gate their own signals, but a
+        # raw emitter (or a future producer) must not flood the bus either.
+        import time as _time
+
+        now_ms = _time.monotonic() * 1000.0
+        last = getattr(self, "_dock_depth_last_pub_ms", None)
+        if last is not None and now_ms - last < 120.0:
+            return
+        self._dock_depth_last_pub_ms = now_ms
+        well_name = ""
+        getter = getattr(panel, "current_well_name", None)
+        if callable(getter):
+            well_name = str(getter() or "")
+        if not well_name:
+            return
+        self.publish_depth_cursor(well_name, md, source=self.SOURCE_WELL_LOG)
+
+    def _throttled_link_cursor_write(self, well_id: str, md: float) -> None:
+        """Rate-limited native crosshair write (see _route_seismic_cursor)."""
+        import time as _time
+
+        now_ms = _time.monotonic() * 1000.0
+        last = getattr(self, "_link_cursor_last_write_ms", None)
+        if last is not None and now_ms - last < 30.0:
+            return
+        self._link_cursor_last_write_ms = now_ms
+        self._link_cursor_sink(well_id, md)  # type: ignore[misc]
+        self._link_cursor_set = True
+
+    def _clear_link_cursor_once(self, well_id: str | None = None) -> None:
+        """Clear a shown link cursor exactly once; no-op afterwards."""
+        if not self._link_cursor_set or self._link_cursor_sink is None:
+            return
+        try:
+            self._link_cursor_sink(well_id, None)
+        except Exception:
+            logger.debug("link cursor clear failed", exc_info=True)
+        finally:
+            self._link_cursor_set = False
+
     # ------------------------------------------------------------------
     # Routing
     # ------------------------------------------------------------------
@@ -627,6 +759,12 @@ class ViewCoordinationController(QObject):
             setter = getattr(self._well_log_page, "set_selected_well", None)
             if callable(setter):
                 setter(well_id)
+        # Any view → workstation well dock (case A: open + focus)
+        if self._well_dock_sink is not None:
+            try:
+                self._well_dock_sink(str(well_id))
+            except Exception:
+                logger.debug("well dock routing failed for %r", well_id, exc_info=True)
         # Map/Well Log → 3D (highlight the trajectory)
         if source != self.SOURCE_3D and self._shell is not None:
             geo_page = getattr(self._shell, "geomodel_page", None)
@@ -656,7 +794,7 @@ class ViewCoordinationController(QObject):
             return False
         try:
             x, y, _tvd = self.coordinate_hub.well_depth_to_map(well_id, 0.0)
-            il, xl, _twt = self.coordinate_hub.map_to_seismic(x, y, 0.0)
+            il, xl = self.coordinate_hub.map_to_seismic_xy(x, y)
         except Exception:
             logger.debug(
                 "seismic locate for well %r: geometry unavailable", well_id, exc_info=True
@@ -676,11 +814,13 @@ class ViewCoordinationController(QObject):
     def _route_seismic_cursor(self, cursor: tuple[int, int, float]) -> None:
         """Seismic → Well: resolve the cursor to the nearest well + MD.
 
-        The resolved MD travels in ``custom_attributes`` so depth-cursor
-        consumers can read it without a second transform. Routing failures
-        never crash the picker, but they are no longer SILENT: an empty
-        registry, an out-of-radius pick or a transform error logs at debug
-        so "why didn't the well-log page follow" stays diagnosable.
+        The MD resolution order is honest about its authority: a REAL
+        time-depth calibration on the nearest well produces a calibrated MD
+        (``seismic_well_md_is_approximate`` False, provenance recorded); a
+        declared velocity assumption produces an approximate readout MD; no
+        authority leaves the MD unavailable (None). Routing failures never
+        crash the picker, and "why didn't the well-log page follow" stays
+        diagnosable through the debug logs.
         """
         try:
             well_id, md = self.coordinate_hub.seismic_to_well(*cursor)
@@ -690,6 +830,7 @@ class ViewCoordinationController(QObject):
                 cursor,
                 exc_info=True,
             )
+            self._clear_link_cursor_once()
             return
         if not well_id:
             logger.debug(
@@ -697,25 +838,81 @@ class ViewCoordinationController(QObject):
                 "(registry empty or pick off-radius); no well-log routing",
                 cursor,
             )
+            # No well in radius means no authority can produce an MD here:
+            # a previously shown link cursor must not survive as a stale
+            # depth hint on the docked well view (review R1-M3).
+            self._clear_link_cursor_once()
             return
-        # ``seismic_well_md`` is a constant-velocity APPROXIMATION kept for
-        # readout context only — calibrated depth↔time goes through
-        # TimeDepthCalibration (publish_depth_cursor), never this value.
-        self.selection_context.update(
-            custom_attributes={
-                "seismic_well_id": well_id,
-                "seismic_well_md": md,
-                "seismic_well_md_is_approximate": True,
-            }
-        )
+        # Calibrated first: TWT → MD through the well's own calibration.
+        calibrated_md: float | None = None
+        calibration_provenance: str | None = None
+        try:
+            cal = self.coordinate_hub.time_depth_calibration(well_id)
+            if cal is not None:
+                calibrated = cal.twt_to_md(float(cursor[2]))
+                if calibrated is not None:
+                    calibrated_md = float(calibrated)
+                    calibration_provenance = cal.provenance
+        except Exception:
+            logger.debug(
+                "seismic cursor %s: calibrated MD lookup failed",
+                cursor,
+                exc_info=True,
+            )
+        if calibrated_md is not None:
+            self.selection_context.update(
+                custom_attributes={
+                    "seismic_well_id": well_id,
+                    "seismic_well_md": calibrated_md,
+                    "seismic_well_md_is_approximate": False,
+                    "seismic_well_md_authority": f"time-depth:{calibration_provenance}",
+                }
+            )
+        elif md is not None:
+            # ``seismic_well_md`` is a constant-velocity APPROXIMATION kept
+            # for readout context only — calibrated depth↔time goes through
+            # TimeDepthCalibration (publish_depth_cursor), never this value.
+            self.selection_context.update(
+                custom_attributes={
+                    "seismic_well_id": well_id,
+                    "seismic_well_md": md,
+                    "seismic_well_md_is_approximate": True,
+                    "seismic_well_md_authority": (
+                        f"velocity-assumption:"
+                        f"{self.coordinate_hub.velocity_assumption():g} m/s"
+                    ),
+                }
+            )
+        else:
+            self.selection_context.update(
+                custom_attributes={
+                    "seismic_well_id": well_id,
+                    "seismic_well_md": None,
+                    "seismic_well_md_is_approximate": None,
+                    "seismic_well_md_authority": None,
+                }
+            )
         if self._well_log_page is not None:
             setter = getattr(self._well_log_page, "set_selected_well", None)
             if callable(setter):
                 setter(well_id)
+        # Case B well-view half: the calibrated MD drives the native link
+        # cursor when the dock is showing this well; a previously shown
+        # cursor is cleared once no authority produces an MD anymore. Sink
+        # writes are throttled (≥30 ms): rapid inline drags bypass the
+        # producer-side il-jump gate and each write is a native crosshair
+        # document mutation (review R3-M5).
+        if self._link_cursor_sink is not None:
+            try:
+                if calibrated_md is not None:
+                    self._throttled_link_cursor_write(well_id, calibrated_md)
+                else:
+                    self._clear_link_cursor_once(well_id)
+            except Exception:
+                logger.debug("link cursor routing failed", exc_info=True)
         # Scenario B: the same cursor focuses the 3D/section views. The
-        # well-MD above is a constant-velocity approximation used only for
-        # readout context; the 3D focus gets the raw (IL, XL, TWT) so no
-        # approximate depth ever masquerades as a calibrated one.
+        # 3D focus gets the raw (IL, XL, TWT) so no approximate depth ever
+        # masquerades as a calibrated one.
         if self._seismic_focus_sink is not None:
             try:
                 self._seismic_focus_sink(int(cursor[0]), int(cursor[1]), float(cursor[2]))

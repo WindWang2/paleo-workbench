@@ -174,6 +174,9 @@ def test_seismic_cursor_after_prior_selection_dispatches_once(shell):
     """A cursor publish must route ONLY the cursor — not re-dispatch the
     stale active well through a full canvas rebind (review MAJOR)."""
     shell.coordinate_hub.register_well("W-CUR", x=100.0, y=200.0, total_depth_m=1000.0)
+    # The approximate z->MD readout needs a declared velocity assumption
+    # since L1 (no silent default 2000 m/s anymore).
+    shell.coordinate_hub.set_velocity(2000.0)
     shell.view_coordination.publish_well_selection(
         "W-PREV", source=ViewCoordinationController.SOURCE_MAP
     )

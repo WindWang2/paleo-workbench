@@ -76,6 +76,16 @@ class StubController:
 
 @pytest.fixture()
 def hub() -> CoordinateTransformHub:
+    hub = CoordinateTransformHub()
+    # The hub no longer carries a silent default velocity (L1): tests that
+    # consume the approximate z<->TWT readout declare the assumption here.
+    hub.set_velocity(2000.0)
+    return hub
+
+
+@pytest.fixture()
+def bare_hub() -> CoordinateTransformHub:
+    """Hub with NO velocity assumption (fail-closed vertical conversions)."""
     return CoordinateTransformHub()
 
 
@@ -115,6 +125,16 @@ def test_seismic_to_well_finds_nearest_registered_well(hub):
     assert md == pytest.approx(1000.0)  # vertical well: MD == TVD == z
 
 
+def test_seismic_to_well_without_velocity_assumption_refuses_md(bare_hub):
+    """No declared velocity -> the well still resolves but the MD is None."""
+    bare_hub.register_well("W-NOV", x=100.0, y=200.0, total_depth_m=3000.0)
+    assert bare_hub.seismic_to_well(100, 200, 1000.0) == ("W-NOV", None)
+    with pytest.raises(ValueError, match="no velocity assumption declared"):
+        bare_hub.seismic_to_map(100, 200, 1000.0)
+    with pytest.raises(ValueError, match="no velocity assumption declared"):
+        bare_hub.map_to_seismic(100.0, 200.0, 1000.0)
+
+
 def test_seismic_cursor_to_md_vertical_well_matches_depth(hub):
     # Default grid: (il 100, xl 200) -> map (100, 200); z = twt/2000*v = twt
     hub.register_well(
@@ -132,7 +152,8 @@ def test_seismic_cursor_to_md_vertical_well_matches_depth(hub):
 def test_seismic_cursor_to_md_deviated_well_roundtrip(hub):
     # 1 survey number == 1 m on both axes -> IL/XL ints are exact meters.
     hub.configure_seismic_grid(
-        origin=(0.0, 0.0), il_step=(1.0, 0.0), xl_step=(0.0, 1.0), il_min=0, xl_min=0
+        origin=(0.0, 0.0), il_step=(1.0, 0.0), xl_step=(0.0, 1.0), il_min=0,
+        xl_min=0, velocity=2000.0,
     )
     hub.register_well(
         "W-DEV",
@@ -158,8 +179,9 @@ def test_unregister_well_then_queries_fail_or_none(hub):
     assert hub.unregister_well("W-GONE") is True
     assert hub.unregister_well("W-GONE") is False
 
-    # nearest-well query degrades to (None, 0.0) — no crash, no fabricated well
-    assert hub.seismic_to_well(100, 200, 1000.0) == (None, 0.0)
+    # nearest-well query degrades to (None, None) — no crash, no fabricated
+    # well, and no fabricated MD either (the 0.0 guess is gone)
+    assert hub.seismic_to_well(100, 200, 1000.0) == (None, None)
     # direct depth transform raises KeyError for an unregistered well
     with pytest.raises(KeyError):
         hub.well_depth_to_map("W-GONE", 100.0)
@@ -175,7 +197,7 @@ def test_clear_all_wells_empties_registry(hub):
     assert removed == 2
     assert hub.registered_well_ids() == ()
     assert hub.clear_all_wells() == 0
-    assert hub.seismic_to_well(0, 0, 0.0) == (None, 0.0)
+    assert hub.seismic_to_well(0, 0, 0.0) == (None, None)
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +286,7 @@ def test_clear_project_empties_registry_and_resets_grid(controller):
 
     assert controller.coordinate_hub.registered_well_ids() == ()
     # grid restored to hub defaults: (il 100, xl 200) is the map origin
-    x, y, _z = controller.coordinate_hub.seismic_to_map(100, 200, 0.0)
+    x, y = controller.coordinate_hub.seismic_to_map_xy(100, 200)
     assert (x, y) == pytest.approx((100.0, 200.0))
 
 
@@ -297,13 +319,13 @@ def test_bind_project_configures_seismic_bin_grid(controller):
     hub = controller.coordinate_hub
 
     # origin corner: (il_min, xl_min) -> extent[0]
-    x, y, _z = hub.seismic_to_map(10, 20, 0.0)
+    x, y = hub.seismic_to_map_xy(10, 20)
     assert (x, y) == pytest.approx((1000.0, 2000.0))
     # opposite inline corner: (il_max, xl_max) -> extent[2]
-    x, y, _z = hub.seismic_to_map(110, 70, 0.0)
+    x, y = hub.seismic_to_map_xy(110, 70)
     assert (x, y) == pytest.approx((1100.0, 2200.0))
     # opposite crossline corner: (il_min, xl_max) -> extent[1]
-    x, y, _z = hub.seismic_to_map(10, 70, 0.0)
+    x, y = hub.seismic_to_map_xy(10, 70)
     assert (x, y) == pytest.approx((1100.0, 2000.0))
 
 
@@ -317,7 +339,7 @@ def test_bind_project_with_degenerate_survey_keeps_grid(controller):
     controller.bind_project(_project_with_wells([], surveys=[survey]))
 
     # grid untouched (hub defaults) instead of corrupted
-    x, y, _z = controller.coordinate_hub.seismic_to_map(100, 200, 0.0)
+    x, y = controller.coordinate_hub.seismic_to_map_xy(100, 200)
     assert (x, y) == pytest.approx((100.0, 200.0))
 
 
@@ -328,6 +350,7 @@ def test_bind_project_with_degenerate_survey_keeps_grid(controller):
 
 def test_seismic_cursor_routes_to_well_log_page(controller):
     controller.bind_project(_project_with_wells([("W-CUR", (100.0, 200.0))]))
+    controller.coordinate_hub.set_velocity(2000.0)
     page = controller._well_log_page
 
     controller.publish_seismic_cursor(100, 200, 1000.0)

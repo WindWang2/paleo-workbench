@@ -75,6 +75,10 @@ class CorrelationScientificPayload(BaseModel):
     curve_names: list[str] = Field(default_factory=list)  # scientific curves if selected
     tops: list[FormationTop] = Field(default_factory=list)
     links: list[CorrelationLink] = Field(default_factory=list)
+    # Adjacency-derived links the interpreter explicitly REMOVED (L4): the
+    # statement "these tops are NOT correlated" must survive save cycles
+    # that would otherwise regenerate the pair. Manual links never land here.
+    suppressed_link_ids: list[str] = Field(default_factory=list)
     method_summary: list[str] = Field(default_factory=list)
     notes: str = ""
     parent_version_id: str | None = None
@@ -103,6 +107,7 @@ class CorrelationScientificPayload(BaseModel):
                 ln.model_dump(mode="json")
                 for ln in sorted(self.links, key=lambda x: (x.top_a_id, x.top_b_id, x.id))
             ],
+            "suppressed_link_ids": sorted(set(self.suppressed_link_ids)),
             "method_summary": list(self.method_summary),
             "notes": self.notes,
         }
@@ -128,16 +133,45 @@ class CorrelationInterpretationDraft(BaseModel):
 # for ProjectDocument persistence (same pattern as HorizonInterpretationRef).
 
 
+class FaultSectionPick(BaseModel):
+    """One seismic fault pick on a section (linked-interpretation L6).
+
+    ``section_kind``/``section_index`` name the section the pick was made
+    on; ``offset`` is the position along it (crossline number on an inline
+    section, inline number on a crossline section); ``twt_ms`` is the
+    two-way-time ordinate. ``confidence`` is optional interpreter metadata
+    (0–1) — absent means unassessed, never a fabricated 0.
+    """
+
+    section_kind: Literal["inline", "crossline"]
+    section_index: int
+    offset: float
+    twt_ms: float
+    confidence: float | None = None
+
+
 class FaultTrace(BaseModel):
-    """Scientific fault geometry (map-plane polyline); not screen coordinates."""
+    """Scientific fault geometry (map-plane polyline); not screen coordinates.
+
+    ``section_picks`` carries the SEISMIC side of the interpretation (L6):
+    picks made on inline/crossline sections with TWT ordinates. The
+    map-plane ``polyline`` stays the cartographic authority; the two
+    representations relate through this one trace (one fault, both views)
+    — there is no second fault authority. ``map_fault_id`` optionally ties
+    the trace to a map-side fault DomainEntity by its stable id.
+    """
 
     id: str = Field(default_factory=lambda: _id("ftrace"))
     name: str = ""
     # Open polyline [[x,y], ...] in project CRS
     polyline: list[list[float]] = Field(default_factory=list)
     role: Literal["break", "fault", "other"] = "fault"
-    vertical_domain: str = ""  # empty = map-plane only
+    vertical_domain: str = ""  # empty = map-plane only; "time" when picks carry TWT
     notes: str = ""
+    # Seismic interpretation side (optional; display-only data never here)
+    section_picks: list[FaultSectionPick] = Field(default_factory=list)
+    # Relation to the map fault DomainEntity (stable id; None = unrelated)
+    map_fault_id: str | None = None
 
 
 class FaultInterpretationPayload(BaseModel):
