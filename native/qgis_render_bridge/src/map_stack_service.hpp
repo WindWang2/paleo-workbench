@@ -182,6 +182,17 @@ public:
   std::string writeProjectXml();
   int applyProjectXml(const std::string& xml);
 
+  // M7: component-graph → QgsLayout export. The spec is a JSON document
+  // {"page":{width_mm,height_mm,background},"items":[...]} with item types
+  // map/legend/scalebar/north_arrow/picture/label/shape. The layout is built
+  // from the stack's mirrored layers at export time and discarded — never a
+  // second writable map document. format ∈ "pdf"|"svg"|"png".
+  // Returns a JSON report {ok,path,format,dpi,items,page_mm}.
+  std::string layoutExport(const std::string& spec_json,
+                           const std::string& output_path,
+                           const std::string& format,
+                           double dpi);
+
 private:
   struct Impl;
   std::unique_ptr<Impl> impl_;

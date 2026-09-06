@@ -173,8 +173,11 @@ def test_mirror_failures_collected_not_swallowed():
         project_crs="EPSG:4326", layers=[_layer("ok"), _layer("bad")],
     )
     diags: list = []
-    qgis_ids, seen = mirror_snapshot_to_stack(FakeStack(), 0, snap, diags)
+    qgis_ids, seen, failures = mirror_snapshot_to_stack(
+        FakeStack(), 0, snap, diags
+    )
     assert seen == ["ok"]
     assert qgis_ids == ["qgis-ok"]
     assert ("bad", "boom-crs") in diags
     assert ("<tail>", "tail-boom") in diags
+    assert failures, "failures stay surfaced on the return path too"

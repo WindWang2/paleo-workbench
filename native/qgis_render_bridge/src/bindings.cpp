@@ -761,5 +761,9 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                return out;
              })
         .def("write_project_xml", &pwb::qgis_render::QgisMapStack::writeProjectXml)
-        .def("apply_project_xml", &pwb::qgis_render::QgisMapStack::applyProjectXml);
+        .def("apply_project_xml", &pwb::qgis_render::QgisMapStack::applyProjectXml)
+        .def("layout_export",
+             &pwb::qgis_render::QgisMapStack::layoutExport,
+             py::arg("spec_json"), py::arg("output_path"),
+             py::arg("format") = "pdf", py::arg("dpi") = 300.0);
 }
