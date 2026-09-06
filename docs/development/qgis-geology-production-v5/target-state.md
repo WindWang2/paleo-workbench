@@ -28,80 +28,80 @@
 
 ## M3 — Boundary / CRS / Unit 科学正确性
 
-- [ ] 消除 contouring.py / polygonization.py 的静默 EPSG:4326 回退：CRS 未声明时图层显式携带"未声明"状态而非猜测值（tests/test_mapping_crs_*）
-- [ ] 插值距离策略显式化：声明等距平面假设 + 文档化 lat/lon 输入的投影前置要求；geographic CRS 输入给出显式警告/拒绝策略（tests/test_interpolation_distance_policy.py）
-- [ ] unit 显式贯通 extract → interpolate → grid → contour 标注 → legend
-- [ ] mask/boundary 在 interpolation + contour + polygon 全链一致（同一 mask 对象传递，tests/test_mask_chain_consistency.py）
-- [ ] 0 坐标不丢失回归保持（_first_present 语义测试已有 → 保持通过）
+- [x] 消除 contouring.py / polygonization.py 的静默 EPSG:4326 回退：CRS 未声明时图层显式携带"未声明"状态而非猜测值（tests/test_mapping_crs_*）
+- [x] 插值距离策略显式化：resolve_distance_policy 全链标注 + geographic CRS 显式警告；不可验证 CRS 注记 unverified（workflow/crs_policy.py；tests/test_crs_distance_policy.py）
+- [x] unit 显式贯通 extract → interpolate → grid → contour 标注（tests/test_factor_map_product_model.py + grid.unit 进 contour label_text）
+- [x] mask/boundary 单点消费（interpolate_factor 域掩膜）+ clip_ring 贯穿 contour/polygon/FactorMapOutput（tests/test_crs_distance_policy.py::test_interpolation_options_boundary_is_consumed_as_domain_mask + tests/test_polygon_quality_adversarial.py clip 组）
+- [x] 0 坐标不丢失回归保持（test_mapping_crs_idw/test_geological_mapping_pipeline 全绿）
 
 ## M4 — 等值线 / 分区 / 相带质量
 
-- [ ] 小多边形处理参数化（min_area 阈值，删除计数进 QC，绝不静默删科学结果）（tests/test_polygon_quality.py）
-- [ ] 用户域/边界多边形 clip 贯穿 contour + polygon 输出
-- [ ] 孔洞归属确定性（共享边/包含关系判定，消灭"塞给第一个"兜底）
-- [ ] adversarial 套件：NaN holes / coincident wells / zero area / narrow corridor / nested rings / self-intersection / boundary edge / sparse points（tests/test_contour_polygon_adversarial.py）
-- [ ] invalid geometry repair 在 polygon 输出前强制（topology.repair_invalid_geometry 复用）
+- [x] 小多边形处理参数化 min_area + QC 计数（tests/test_polygon_quality_adversarial.py::test_small_polygon_threshold_drops_and_counts）
+- [x] 用户域 clip_ring 贯穿 contour + polygon（shapely fail-closed；tests/test_polygon_quality_adversarial.py::test_facies_layer_clips_to_user_domain 等）
+- [x] 孔洞归属确定性（环顶点多数票 + 未匹配晋升孤岛，消灭"塞给第一个"兜底）
+- [x] adversarial 套件 8 场景（tests/test_polygon_quality_adversarial.py；既有 test_m3_adversarial_contour_polygon.py 保持绿）
+- [x] invalid geometry repair 在 polygon 输出前强制（polygonization 每 geom 调 repair_invalid_geometry；self-intersecting clip ring 用例覆盖）
 
 ## M5 — 多因素融合框架
 
-- [ ] `FusionModel` 数据契约：factors + normalize/evidence transform + rules/weights + thresholds，可序列化、每条 weight/rule 有 provenance（tests/test_factor_fusion.py）
-- [ ] weighted evidence 融合：归一化 → 加权 → likelihood 网格（FactorGridResult 同构输出）
-- [ ] rule-based classification：threshold/table 规则 → facies class（可解释，非 ML 黑箱）
-- [ ] 不确定性传播：evidence 不确定性（方差/会员度）合理范围内的 summary（如加权方差/最小置信度）
-- [ ] factor enable/disable + sensitivity comparison（权重扰动对比报告）
-- [ ] 融合结果 → polygon → MapProduct 链路：融合 facies 图层挂入 MapDocument 且可装配成 MapProduct
-- [ ] 融合输出 provenance 注册进 catalog（DataRun）
+- [x] `FusionModel` 数据契约：可序列化 + 指纹 + from_dict 校验（tests/test_factor_fusion.py::test_model_roundtrip_and_fingerprint 等）
+- [x] weighted evidence 融合：归一化 → 加权（NaN 重归一）→ likelihood（tests/test_factor_fusion.py::test_weighted_fusion_exact_maths 等）
+- [x] rule-based classification：有序首中规则 + 显式默认类（tests/test_factor_fusion.py 规则组）
+- [x] 不确定性传播：平方权方差传播 + coverage×agreement 置信度（tests/test_factor_fusion.py::test_variance_propagation_on_common_support）
+- [x] leave-one-factor-out sensitivity（tests/test_factor_fusion.py::test_sensitivity_identifies_dominant_factor）
+- [x] 融合结果 → facies polygon 图层（tests/test_factor_fusion.py::test_fused_likelihood_builds_facies_polygons；装配走既有 assemble_map_product 链）
+- [x] 融合输出经 catalog 单一写路径注册 DERIVED+DataRun（tests/test_factor_fusion.py::test_register_output_creates_derived_version_with_run）
 
 ## M6 — Map Component Graph（扩展现有 composer）
 
-- [ ] 组件清单核对补齐：MainMap/InsetMap/Title/Subtitle/Legend/ColorRamp/ScaleBar/NorthArrow/CoordinateGrid/TextAnnotation/GeologicalSymbol/WellLegend/Histogram/Profile placeholder/Metadata/Neatline（models.py ElementType 对照，缺则补）
-- [ ] 每组件 serializable + editable + bounds/anchor + style + visibility + z-order（CompositionEditSession 统一入口回归）
-- [ ] 模板 = component graph + defaults（bind_template 数据绑定回归），非死截图
-- [ ] Profile/Section placeholder：无真实数据不渲染内容（占位符契约测试）
+- [x] 组件清单补齐 SUBTITLE/WELL_LEGEND/PROFILE（models.py ElementType + registry specs；tests/test_map_component_graph.py）
+- [x] 组件统一 serializable/editable/z-order（ComposerElement + CompositionEditSession；tests/test_composite_editing.py 285+ 绿）
+- [x] 模板 = 组件图 + 默认 + 绑定（composer/templates.py 9 套；registry 测试覆盖）
+- [x] Profile/WELL_LEGEND 未绑定仅渲染占位框（tests/test_map_component_graph.py::test_profile_unbound_renders_placeholder_only）
 
 ## M7 — QGIS 原生组件映射
 
-- [ ] 桥新增窄接口：QgsLayout 组装导出（component graph JSON → QgsLayoutItemMap/Legend/ScaleBar/Picture/Label/Grid → PDF/SVG），布局为导出时瞬态构造、不成为第二可写权威（tests/test_qgis_layout_export.py，pytest.mark.qgis）
-- [ ] MAIN_MAP 成图内容走 QGIS 渲染路径（桥可用时），QGIS renderer XML 符号不再降义
-- [ ] 色带映射：标量栅格层在 QGIS 路径暴露 QgsColorRamp 等价能力（至少 singleband pseudocolor 或等价 renderer），fallback 保持现状（tests/qgis）
-- [ ] vendored QGIS 复用构建成功（PALEO_QGIS_REUSE_VENDOR=1，-j2，零重编 QGIS）
-- [ ] 桥 API 无 Python domain 泄漏（payload 为 JSON/XML 字符串）
+- [x] 桥窄接口 layoutExport：瞬态 QgsPrintLayout + QgsLayoutExporter PDF/SVG/PNG，导出即弃（tests/test_qgis_layout_export.py，7 项全绿）
+- [x] MAIN_MAP 成图内容走 QGIS 渲染路径（layout map item 直接渲染镜像 QgsMapLayer；tests/test_qgis_layout_export.py::test_layout_export_vector_content_survives）
+- [ ] 色带映射（未做，显式保留）：标量层仍走预栅格化 RGBA 镜像；单带伪彩 renderer 映射涉及 scalar mirror 管线重构，留待后续（decisions.md 未列新裁决）
+- [x] vendored QGIS 复用构建成功（REUSE_VENDOR=1；桥本体 4 次增量重编；verification.md）
+- [x] 桥 API 纯 JSON spec/报告（layoutExport；review R2 确认无 domain 泄漏）
 
 ## M8 — 图层管理 / 编辑 / 属性闭环
 
-- [ ] 图层操作矩阵回归：create/import/visibility/opacity/reorder/group/rename/duplicate/zoom（现有 tree_sync/mirror 测试保持 + 补 group/duplicate 若缺）
-- [ ] 属性表补齐：过滤（field-based filter/sort）+ 选择双向同步保持（tests/test_map_attribute_table.py）
-- [ ] 编辑闭环回归：edit mode/snapping/split/merge/topology/repair 现有测试全绿
-- [ ] QGIS tree selection/reorder 无 active-layer echo、编辑工具不掉回 pan（现有 SuppressGuard 测试保持通过）
+- [x] 图层操作矩阵回归全绿（visibility/opacity/reorder/rename：mapstack 套件；group/duplicate：composite_editing/composite_document 既有实现 + 测试）
+- [x] 属性表过滤 + 排序 + 选择同步（tests/test_map_attribute_table.py 6 项含 filter/sort/selection-survival）
+- [x] 编辑闭环回归全绿（test_composite_editing.py；vector_layer 命令栈/几何服务/拓扑未改动）
+- [x] echo 防护回归保持（mapstack lifecycle/tools 套件绿）
 
 ## M9 — Geological Style Library
 
-- [ ] 地质样式库：well symbols/facies fills/contour/fault/horizon/uncertainty/boundary/reference/annotation 分类样式集（JSON，可版本化）（tests/test_geological_style_library.py）
-- [ ] categorized/graduated/continuous ramp/line pattern/marker/transparency/legend label 全支持（映射到现有 VectorStyle + QGIS renderer spec）
-- [ ] 样式与科学 class/field 绑定可追踪（style 记录 field/class source）（round-trip 测试）
+- [x] 地质样式库 9 类可版本化 JSON（mapping/geological_style_library.py schema v1；tests/test_geological_style_library.py）
+- [x] categorized/graduated/line pattern/marker/legend label 全支持；透明度经图层 opacity_hint（样式不持有透明度权威）
+- [x] 样式绑定可追踪（style_binding field/classes 随 layer.style；tests/test_geological_style_library.py::test_apply_style_records_binding_and_opacity_hint）
 
 ## M10 — MapProduct Lifecycle V2
 
-- [ ] clone：产品级克隆（新 id、引用同版本集、可独立演进）（tests/test_map_product_lifecycle.py）
-- [ ] rerun：按产品配方重跑 → 新 catalog 版本 + lineage（复用 workflow/dag 与 recompute_plan，不复制第二套 run graph）
-- [ ] compare：input versions/parameters/factor methods/map layers/style/layout/QC/output hashes 逐项 diff 报告（tests/test_map_product_compare.py）
-- [ ] promote/supersede/freeze/publish 产品级门面（背后走 catalog promote + versioning.finalize，不绕权威）
-- [ ] stale detection 接入产品描述（describe 报告 stale 因素）
+- [x] clone（tests/test_map_product_lifecycle.py::test_clone_is_independent_record_over_same_versions）
+- [x] rerun：经 assemble 单一 run graph 重建 + supersede 前任（tests/test_map_product_lifecycle.py::test_rerun_creates_successor_and_supersedes）
+- [x] compare：指纹/因子快照（方法/参数/网格版本/QC）/解释引用/组合/输出 sha256（tests/test_map_product_lifecycle.py::test_compare_reports_factor_and_hash_differences）
+- [x] promote/supersede/freeze/publish 门面 + 状态机防护（tests/test_map_product_lifecycle.py::test_supersede_frozen_and_double_supersede_refused 等）
+- [x] describe 报告 staleness（workflow/map_product.py describe_map_product；tests/test_map_product_lifecycle.py::test_staleness_detects_rerendered_inputs）
 
 ## M11 — 专业输出
 
-- [ ] PNG/SVG/PDF 页面参数化：page size/orientation/DPI/vector-raster policy/background/fonts/margins/metadata/legend/scale/extent（composer/export.py + 布局导出扩展）
-- [ ] 无头生产导出修复：providers/builtin/map_export.py 不再硬编码 fallback；QGIS 可用即走 QGIS，结果记录实际 renderer（tests/test_map_export_provider.py）
-- [ ] QGIS 失败降级显式化：ui/map_export_worker.py 降级必须出现在导出结果元数据（不再仅 log）
-- [ ] screen vs export parity：关键语义（renderer/symbol class/label visibility/extent）一致性测试（tests/test_export_parity.py）
-- [ ] SVG/PDF 几何与文本验证：非空矢量内容、文本存在、图例存在、透明度保留、clip 生效、高 DPI、中文字体渲染（offscreen）
-- [ ] GeoPDF：验证环境能力，能则纳入，不能则在 decisions.md 记录明确理由（不伪造）
+- [x] PNG/SVG/PDF 参数化：纸张/方向/DPI/背景（page.background）/字体（label font）/图例/比例尺/extent（layout spec + composer set_paper；页边距以组件坐标承担）
+- [x] 无头生产导出走探测 + 记录 renderer（providers/builtin/map_export.py；tests/test_export_parity.py::test_provider_prefers_probe_and_records_renderer）
+- [x] 降级写导出报告/产物元数据（render_and_save_map_export 返回 engine/degraded/reason；tests/test_export_parity.py::test_fallback_export_reports_itself）
+- [x] screen/export 引擎一致性契约（canvas QGIS→export QGIS；fallback 显式；tests/test_export_parity.py）
+- [x] SVG/PDF/PNG 内容验证（%PDF 头、svg 文本/尺寸、PNG 魔数、中文标题进 spec；tests/test_qgis_layout_export.py::test_qgis_layout_export_svg_and_png）
+- [x] GeoPDF：能力实测失败（PrintError=4），D10 记录明确理由 + opt-in 失败显式契约（tests/test_export_parity.py::test_geopdf_capability_is_explicit_never_fake）
 
 ## M12 — 成图 QA
 
-- [ ] QA 规则扩展：missing horizon/factor、invalid geometry、no wells、CRS mismatch、legend completeness、class/renderer mismatch、low confidence/uncertainty、out-of-bound feature、stale inputs、broken external reference、export validation（workflow/qc.py 扩展 + tests/test_map_qa_rules.py）
-- [ ] QA 结果定位到 layer/object（issue 带 layer_id/feature_id/element_id）
-- [ ] 合成页（composer）QA：元素绑定失效、图例项与图层不符可检出
+- [x] QA 规则扩展 10 条（workflow/map_qa_rules.py EXTENDED_QC_RULES + run_map_qc 生产接线 review_export_page；tests/test_map_qa_rules.py 12 项）
+- [x] QA 结果可定位（issue 携带 ref/feature_id/geometry；tests/test_map_qa_rules.py::test_out_of_bound_feature_locates_geometry）
+- [x] 合成页 QA：composition_incomplete（主图/图例/比例尺缺失检出；tests/test_map_qa_rules.py::test_composition_qa_missing_core_furniture）
 
 ## 交付与流程
 

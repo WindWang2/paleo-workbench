@@ -13,9 +13,13 @@
 
 | 层 | 套件 | 结果 |
 |---|---|---|
-| 1-2 科学+管线 | 27 个文件（factor/eval/crs/fusion/polygon/adversarial/pipeline/products/styles/qa/attribute/composer） | **599 passed** |
-| 3-6 桥+导出+合成 | 14 个文件（layout export/export parity/mapstack×5/composite canvas/display canvas/render bridge/native cores） | **79 passed** |
-| review 修复回归 | evaluation/crs/fusion/lifecycle/factor_map + QC/panel/page 消费方 | **112 passed** |
+| 1-2 科学+管线（review 修复前） | 27 个文件 | 599 passed |
+| 3-6 桥+导出+合成（review 修复前） | 14 个文件 | 79 passed |
+| review 修复回归 | evaluation/crs/fusion/lifecycle/factor_map + QC/panel/page 消费方 | 112 passed |
+| **终验：科学+管线+QA+面板** | 34 个文件 | **668 passed, 0 failed** |
+| **终验：桥+导出+合成+e2e** | 15 个文件 | **81 passed, 0 failed** |
+
+终验合计 **749 passed / 0 failed**（commit 70cb3dab）。
 
 桥扩展构建：`PALEO_WITH_QGIS_RENDERER=1 PALEO_QGIS_REUSE_VENDOR=1 PALEO_QGIS_BUILD_DIR=<main>/build/qgis-vendor PALEO_QGIS_CMAKE_PREFIX=/usr/lib/cmake/Qt6 pip install --user -e native/qgis_render_bridge`（零 QGIS 重编；增量修复期间共 4 次重编桥本体，单次 ~3 分钟）。
 附带修复两个环境级前置缺陷：setup.py `resource_database` NameError（89601913）；`layer_model_core`/`grid_render_core` setup.py `python_requires<3.13` 与全链 3.13 矛盾（放宽 <3.14，二进制此前在 3.13 环境从未可装）。
