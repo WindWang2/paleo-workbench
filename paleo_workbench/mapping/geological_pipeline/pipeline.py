@@ -372,6 +372,7 @@ class GeologicalMappingPipeline:
         interval: float | None = None,
         layer_id: str | None = None,
         name: str | None = None,
+        clip_ring: list[list[float]] | None = None,
     ) -> ContourMapLayer:
         """Extract and generate a standard GIS ContourMapLayer."""
         return generate_contour_layer(
@@ -380,6 +381,7 @@ class GeologicalMappingPipeline:
             interval=interval,
             layer_id=layer_id,
             name=name,
+            clip_ring=clip_ring,
         )
 
     def create_well_point_layer(
@@ -439,6 +441,8 @@ class GeologicalMappingPipeline:
         colors: list[str] | None = None,
         layer_id: str | None = None,
         name: str | None = None,
+        min_area: float | None = None,
+        clip_ring: list[list[float]] | None = None,
     ) -> PolygonMapLayer:
         """Classify grid and generate a standard GIS PolygonMapLayer."""
         return generate_facies_polygon_layer(
@@ -448,6 +452,8 @@ class GeologicalMappingPipeline:
             colors=colors,
             layer_id=layer_id,
             name=name,
+            min_area=min_area,
+            clip_ring=clip_ring,
         )
 
     def build_factor_map_document(

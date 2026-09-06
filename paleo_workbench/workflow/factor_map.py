@@ -263,12 +263,17 @@ class FactorMapOutput:
             ],
         )
         layers: list = []
+        clip_ring = self.spec.mask_polygon
         if include_grid:
             layers.append(pipeline.create_grid_layer(self.grid))
         if include_polygons:
-            layers.append(pipeline.create_polygon_layer(self.grid))
+            layers.append(
+                pipeline.create_polygon_layer(self.grid, clip_ring=clip_ring)
+            )
         if include_contours:
-            layers.append(pipeline.create_contour_layer(self.grid))
+            layers.append(
+                pipeline.create_contour_layer(self.grid, clip_ring=clip_ring)
+            )
         if include_wells:
             layers.append(pipeline.create_well_point_layer(dataset))
         return layers
