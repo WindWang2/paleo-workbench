@@ -62,6 +62,7 @@ from paleo_workbench.workflow.factor_grid_result import (
     encode_legacy_axis_list,
     encode_legacy_grid_lists,
 )
+from paleo_workbench.workflow.factor_units import unit_for_factor
 from paleo_workbench.workflow.interpolation_fingerprint import (
     FactorDirtyState,
     FactorFingerprints,
@@ -121,6 +122,20 @@ METHOD_LABEL_TO_ENGINE = {
 def _snapshot_hash(payload: dict[str, Any]) -> str:
     encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _declared_unit_for_task(task: FactorMapTask) -> str | None:
+    """Unit travelling with this task's grid result (M1 unit propagation).
+
+    An explicit ``parameters["unit"]`` declaration wins; otherwise the factor
+    defaults authority resolves a known mnemonic. ``None`` means undeclared —
+    never guessed from the value range.
+    """
+    params = task.parameters or {}
+    declared = params.get("unit")
+    if declared is not None:
+        return str(declared) or None
+    return unit_for_factor(task.factor_type or task.name)
 
 
 def _legacy_params_from_grid_result(
@@ -251,6 +266,9 @@ def _attach_result_to_task(
         "backend": result["backend"],
         "mean": round(result["mean"], 4),
     }
+    declared_unit = grid_result.unit
+    if declared_unit is not None:
+        task.quality_metrics["unit"] = declared_unit
     if result.get("duplicate_wells_dropped"):
         task.quality_metrics["duplicate_wells_dropped"] = int(
             result["duplicate_wells_dropped"]
@@ -427,6 +445,7 @@ def apply_interpolation_to_task(
             },
             factor_name=task.factor_type or task.name,
             crs=crs,
+            unit=_declared_unit_for_task(task),
             generator_version=GENERATOR_VERSION,
             source_refs=task.input_resource_ids,
         )
@@ -458,6 +477,7 @@ def apply_interpolation_to_task(
             result,
             factor_name=task.factor_type or task.name,
             crs=crs,
+            unit=_declared_unit_for_task(task),
             generator_version=GENERATOR_VERSION,
             source_refs=task.input_resource_ids,
         )
@@ -477,6 +497,7 @@ def apply_interpolation_to_task(
             result,
             factor_name=task.factor_type or task.name,
             crs=crs,
+            unit=_declared_unit_for_task(task),
             generator_version=GENERATOR_VERSION,
             source_refs=task.input_resource_ids,
         )
@@ -734,6 +755,7 @@ def batch_prepare_factor_maps(
                         },
                         factor_name=task.factor_type or task.name,
                         crs=crs,
+                        unit=_declared_unit_for_task(task),
                         generator_version=GENERATOR_VERSION,
                         source_refs=task.input_resource_ids,
                     )
