@@ -396,7 +396,28 @@ class CoreCatalogAdapter:
                 except CatalogError:
                     pass
             return None
-        for version in service.document.versions:
+        if getattr(service, "_lazy", False) and not getattr(
+            service, "_warm", True
+        ):
+            # Lazy pre-warm (#1212): the document is empty by design. The
+            # current-index path above already answered from the store; the
+            # document scan below cannot add information.
+            return None
+        found = self._scan_managed_raw(source_uri, checksum)
+        if found is not None:
+            maps.managed_raw_by_key[(source_uri, checksum)] = found.id
+        else:
+            maps.managed_raw_by_key.pop((source_uri, checksum), None)
+        return found
+
+    def _scan_managed_raw(self, source_uri: str, checksum) -> DataVersion | None:
+        """Linear-scan fallback for :meth:`_find_managed_raw`.
+
+        Kept as a named method so callers (and the #1139 regression tests)
+        can observe when dedup degrades from the O(1) index to a scan; the
+        caller heals the ``managed_raw_by_key`` index from the result.
+        """
+        for version in self._service.document.versions:
             if (
                 version.managed
                 and version.stage == DataStage.RAW
@@ -452,7 +473,22 @@ class CoreCatalogAdapter:
             # current-index path above already answered from the store; the
             # document scan below cannot add information.
             return None
-        for version in service.document.versions:
+        maps = service._ensure_maps()
+        found = self._scan_external_by_path(resolved)
+        if found is not None:
+            maps.external_by_path[resolved] = found.id
+        else:
+            maps.external_by_path.pop(resolved, None)
+        return found
+
+    def _scan_external_by_path(self, resolved: str) -> DataVersion | None:
+        """Linear-scan fallback for :meth:`_find_external_by_path`.
+
+        Kept as a named method so callers (and the #1139 regression tests)
+        can observe when dedup degrades from the O(1) index to a scan; the
+        caller heals the ``external_by_path`` index from the result.
+        """
+        for version in self._service.document.versions:
             if not version.managed and not version.trashed and version.path == resolved:
                 return version
         return None

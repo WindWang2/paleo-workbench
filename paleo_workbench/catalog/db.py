@@ -92,6 +92,13 @@ def _run_model_from_row(row, inputs: list[str], outputs: list[str]) -> DataRun:
     run.output_version_ids = outputs
     return run
 
+
+class CatalogStaleWriteError(OSError):
+    """Another process/session committed to the canonical store after this
+    session's baseline (#411). Raised transactionally: the compare happens
+    INSIDE the write transaction (BEGIN IMMEDIATE), so no check-then-act
+    window survives — at most one conflicting writer commits."""
+
 DB_FILENAME = "catalog.sqlite"
 
 
@@ -1363,14 +1370,24 @@ class CatalogIndex:
         dirty: "DirtySet",
         *,
         lookups: dict[str, dict] | None = None,
+        expected_revision: int | None = None,
     ) -> None:
-        """Persist *dirty*'s entities in ONE transaction (#1027).
+        """Persist *dirty*'s entities in ONE transaction (#1027, #1220 CAS).
 
         For every id in *dirty*: present in *document* → upsert its row;
         absent → delete it plus its dependents. Lineage edges are reconciled
         per touched version/run with the same keep-rules a full rebuild
         encodes (run-derived edges survive version purges). The result is
         identical to :meth:`write_all` restricted to the dirty set.
+
+        The transaction opens ``BEGIN IMMEDIATE`` (grabbing the write lock up
+        front, so cross-process writers serialize at SQLite level) and, when
+        *expected_revision* is given, compares the store's committed
+        ``catalog_revision`` INSIDE that transaction: a store that moved past
+        the caller's baseline belongs to another process (#411) — abort with
+        :class:`CatalogStaleWriteError` instead of stamping a colliding
+        revision over foreign commits. The compare-and-write is one atomic
+        step: no check-then-act window exists.
         """
         conn = self._connect()
         if not self._schema_present(conn):
@@ -1424,7 +1441,30 @@ class CatalogIndex:
             appended = [e for e in marks if e not in rowid_of]
             return [e for _, e in existing] + appended
 
-        with conn:
+        # BEGIN IMMEDIATE + in-transaction revision CAS (#1220): the write
+        # lock is taken before anything is read, and the stale-write compare
+        # happens inside the same transaction that writes — the #411 guard
+        # becomes atomic instead of check-then-act.
+        if conn.in_transaction:
+            conn.rollback()  # pooled conn left mid-txn by an aborted path
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if expected_revision is not None:
+                stored = conn.execute(
+                    "SELECT value FROM sync_state WHERE key = 'catalog_revision'"
+                ).fetchone()
+                stored_rev = None
+                if stored is not None:
+                    try:
+                        stored_rev = int(stored[0])
+                    except (TypeError, ValueError):
+                        stored_rev = None
+                if stored_rev != expected_revision:
+                    raise CatalogStaleWriteError(
+                        "数据目录元数据已被其他实例修改（事务内比对失败）；"
+                        "为避免覆盖他人提交，本次保存已中止。"
+                        "请重新打开工程后重试。"
+                    )
             for asset_id in _ordered(dirty.assets, "assets"):
                 asset = asset_by_id.get(asset_id)
                 if asset is None:
@@ -1542,6 +1582,13 @@ class CatalogIndex:
                     ("index_schema_version", str(INDEX_SCHEMA_VERSION)),
                 ],
             )
+            conn.execute("COMMIT")
+        except Exception:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
 
     def _reconcile_version_parents(
         self, conn: sqlite3.Connection, version
@@ -1671,12 +1718,17 @@ class CatalogIndex:
         ).fetchone()
         return row is not None
 
-    def reconcile(self, document: CatalogDocument) -> None:
+    def reconcile(
+        self, document: CatalogDocument, *, expected_revision: int | None = None
+    ) -> None:
         """Full compare-and-repair against the document (safe fallback).
 
         O(N) read of the store, then applies exactly the differing entities
         through :meth:`apply_changes` — the same writer the dirty-set path
-        uses, so unmarked mutations stay correct (only slower).
+        uses, so unmarked mutations stay correct (only slower). The full
+        diff is dangerous under foreign commits (it would DELETE the other
+        process's rows), so *expected_revision* CAS-runs the apply exactly
+        like the dirty-set path (#1220).
         """
         dirty = DirtySet()
         conn = self._connect()
@@ -1756,9 +1808,27 @@ class CatalogIndex:
                 dirty.mark_runs(run.id)
 
         if dirty.is_empty():
-            # Still refresh the revision stamp (the caller bumped it).
-            conn.execute("BEGIN")
+            # Still refresh the revision stamp (the caller bumped it) — under
+            # the same CAS contract as apply_changes (#1220): a foreign
+            # revision advance aborts instead of stamping over it.
+            if conn.in_transaction:
+                conn.rollback()
+            conn.execute("BEGIN IMMEDIATE")
             try:
+                if expected_revision is not None:
+                    stored = conn.execute(
+                        "SELECT value FROM sync_state WHERE key = 'catalog_revision'"
+                    ).fetchone()
+                    try:
+                        stored_rev = int(stored[0]) if stored is not None else None
+                    except (TypeError, ValueError):
+                        stored_rev = None
+                    if stored_rev != expected_revision:
+                        raise CatalogStaleWriteError(
+                            "数据目录元数据已被其他实例修改（事务内比对失败）；"
+                            "为避免覆盖他人提交，本次同步已中止。"
+                            "请重新打开工程后重试。"
+                        )
                 conn.executemany(
                     "INSERT OR REPLACE INTO sync_state (key, value) VALUES (?,?)",
                     [
@@ -1767,12 +1837,15 @@ class CatalogIndex:
                         ("index_schema_version", str(INDEX_SCHEMA_VERSION)),
                     ],
                 )
-                conn.commit()
-            except sqlite3.Error:
-                conn.execute("ROLLBACK")
+                conn.execute("COMMIT")
+            except Exception:
+                try:
+                    conn.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
                 raise
             return
-        self.apply_changes(document, dirty)
+        self.apply_changes(document, dirty, expected_revision=expected_revision)
 
     def _rebuild_once(self, document: CatalogDocument) -> None:
         conn = self._connect()

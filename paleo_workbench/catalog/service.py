@@ -39,6 +39,7 @@ from paleo_workbench.catalog.checksum import sha256_file
 from paleo_workbench.catalog.db import (
     STORE_SCHEMA_VERSION,
     CatalogIndex,
+    CatalogStaleWriteError,
     DirtySet,
     normalize_asset_search_name,
 )
@@ -211,17 +212,6 @@ class _BatchSave:
                 raise
             service._maybe_checkpoint_manifest_locked()
             return False
-class CatalogStaleWriteError(OSError):
-    """Raised when the canonical store advanced past this session's baseline.
-
-    Without an ownership protocol a second process holding an older
-    in-memory snapshot silently overwrites (last-writer-wins) everything the
-    first process committed (#411). Flush-time stale detection compares the
-    store's committed revision against this session's baseline and refuses
-    the overwrite instead.
-    """
-
-
 def _disk_mtime_ns(path: Path) -> int | None:
     try:
         return path.stat().st_mtime_ns
@@ -1049,7 +1039,11 @@ class DataCatalogService:
 
         Caller must hold ``_lock``. Refuses to overwrite a store that
         advanced since this session's baseline, commits *dirty*'s rows in
-        ONE transaction, then refreshes the baseline.
+        ONE transaction, then refreshes the baseline. The revision compare
+        is enforced INSIDE the write transaction (#1220 CAS): the pre-check
+        below stays as a cheap fast-fail, but a foreign commit landing
+        between the pre-check and the transaction is aborted by the store
+        layer — at most one conflicting writer ever succeeds.
         """
         stored = self._index.revision()
         if stored is not None and stored != self._flushed_revision:
@@ -1058,7 +1052,9 @@ class DataCatalogService:
                 "本次保存已中止。请重新打开工程后重试。"
             )
         if reconcile:
-            self._index.reconcile(self.document)
+            self._index.reconcile(
+                self.document, expected_revision=self._flushed_revision
+            )
         else:
             maps = self._ensure_maps()
             self._index.apply_changes(
@@ -1069,6 +1065,7 @@ class DataCatalogService:
                     "versions": maps.version_by_id,
                     "runs": maps.run_by_id,
                 },
+                expected_revision=self._flushed_revision,
             )
         self._flushed_revision = self.document.catalog_revision
 
@@ -1114,18 +1111,6 @@ class DataCatalogService:
         except Exception:
             pass  # the manifest is a convenience artifact, never a gate
 
-    def _sync_index_best_effort(self) -> None:
-        try:
-            self._index.sync(self.document)
-        except Exception:
-            try:
-                self._index.reset()
-                self._index.rebuild(self.document)
-            except Exception:
-                # The store self-heals on the next write; canonical truth is
-                # already committed.
-                pass
-
     def batch_save(self) -> "_BatchSave":
         """Context manager merging many mutator calls into ONE transaction.
 
@@ -1148,7 +1133,7 @@ class DataCatalogService:
         Honors the #411 stale-write rule like every other write path: a
         store that advanced past this session's baseline belongs to another
         process, and reconciling over it would silently drop that process's
-        commits.
+        commits (the full diff would DELETE its rows).
         """
         try:
             if self._index.is_fresh(self.document):
@@ -1159,7 +1144,9 @@ class DataCatalogService:
                     "数据目录元数据已被其他实例修改；为避免覆盖他人提交，"
                     "本次同步已中止。请重新打开工程后重试。"
                 )
-            self._index.reconcile(self.document)
+            self._index.reconcile(
+                self.document, expected_revision=self._flushed_revision
+            )
         except CatalogStaleWriteError:
             raise
         except Exception:
@@ -1170,13 +1157,27 @@ class DataCatalogService:
         self._ensure_index_fresh()
 
     def rebuild_index(self) -> None:
-        """Force a full store rewrite from the in-memory document."""
-        self._index.reset()
-        self._index.rebuild(self.document)
-        self._flushed_revision = self.document.catalog_revision
-        # The maintained maps reflect the document that was loaded at open;
-        # a caller swapping ``document`` before rebuilding leaves them stale.
-        self._invalidate_maps()
+        """Force a full store rewrite from the in-memory document.
+
+        Guarded like every write path (#1220): a store that advanced past
+        this session's baseline is another process's commits, and rebuilding
+        over it from our snapshot would destroy them. The reset+rebuild runs
+        under the service lock so in-process flushes cannot interleave with
+        a half-deleted database.
+        """
+        with self._lock:
+            stored = self._index.revision()
+            if stored is not None and stored != self._flushed_revision:
+                raise CatalogStaleWriteError(
+                    "数据目录元数据已被其他实例修改；rebuild 已中止以免覆盖他人提交。"
+                    "请重新打开工程后重试。"
+                )
+            self._index.reset()
+            self._index.rebuild(self.document)
+            self._flushed_revision = self.document.catalog_revision
+            # The maintained maps reflect the document that was loaded at open;
+            # a caller swapping ``document`` before rebuilding leaves them stale.
+            self._invalidate_maps()
 
     def index_revision(self) -> int | None:
         return self._index.revision()

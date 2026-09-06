@@ -30,7 +30,7 @@ support/benchmarking (small/medium fixtures only).
 - [x] PHASE 2: 00-baseline.md (d67c4639)  (commit 1: audit/baseline)
 - [x] PHASE 3: Lazy catalog — SQLite indexed repository under DataCatalogService;
       project-open <500ms to responsive shell at 100k  (commit 2)
-- [ ] PHASE 4: Transaction/revision model — BEGIN IMMEDIATE/CAS, typed conflicts,
+- [x] PHASE 4: Transaction/revision model — BEGIN IMMEDIATE/CAS, typed conflicts,
       no last-writer-wins  (commit 3)
 - [ ] PHASE 5: Payload registration protocol (PREPARE..PUBLISH) + GC lease/coord
       (commit 4)
@@ -45,7 +45,7 @@ support/benchmarking (small/medium fixtures only).
 - [ ] PHASE 13: Docs 00–11 complete; PR to main with full evidence
 
 ## Current Phase
-PHASE 4 (transaction/revision CAS)
+PHASE 5 (payload registration + GC coordination)
 
 ## Decisions (locked — do not revisit)
 (none yet beyond hard constraints)

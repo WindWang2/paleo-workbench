@@ -23,3 +23,17 @@
 - project_controller: lazy open + warm first in maintenance thread
 - Tests: tests/test_catalog_lazy_open.py (11 tests incl. open budget + warm race +
   eager/lazy equivalence). Regression: 282 catalog tests + controller/capacity green.
+
+## PHASE 4 complete — transaction CAS (#1220, commit 3)
+- db.py: CatalogStaleWriteError moved here (service re-exports); apply_changes
+  opens BEGIN IMMEDIATE + in-txn revision CAS (expected_revision kwarg);
+  reconcile gains expected_revision incl. empty-dirty stamp branch
+- service.py: _flush_canonical_locked/_ensure_index_fresh pass baseline;
+  rebuild_index under lock + stale guard + re-baseline; removed dead
+  _sync_index_best_effort (guard bypass)
+- adapter.py: restored _scan_managed_raw/_scan_external_by_path named
+  fallbacks (2nd pre-existing main breakage from e01cc3cb; 2 batch_dedup
+  tests red on main) + lazy pre-warm early-out
+- Tests: tests/test_catalog_transaction_cas.py (TOCTOU window sim, unscoped
+  reconcile refusal, rebuild guard, REAL subprocess commit, batch atomicity)
+- Regression: 134 catalog tests green.
