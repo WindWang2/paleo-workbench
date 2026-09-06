@@ -1,173 +1,185 @@
-# Progress — QGIS Authoring Core
+# Progress — Data & Runtime Foundation V6
 
-## Files changed (branch feat/qgis-authoring-core)
+## Session 2026-09-07
+- Created worktree .worktrees/data-runtime-foundation-v6, branch
+  feat/data-runtime-foundation-v6 off main @ 295fabc3
+- Verified test env: main .venv Python 3.12.13 / pytest 9.1.1 / pydantic 2.13.4
+- Planning files reset for this task
+- Next: baseline test run, then parallel subsystem audit (A–L)
 
-### Native bridge (C++)
-- `native/qgis_render_bridge/src/style_codec.{hpp,cpp}` — NEW: renderer XML
-  round-trip, legacy spec → renderer builder (single/categorized/graduated/
-  rule), dialog layer factory.
-- `native/qgis_render_bridge/src/gui_service.{hpp,cpp}` — NEW: modal
-  QgsRendererPropertiesDialog / QgsSymbolSelectorDialog /
-  QgsStyleManagerDialog host; RAII session (mirror layer + QgsStyle).
-- `native/qgis_render_bridge/src/geometry_service.{hpp,cpp}` — NEW: QGIS
-  geometry ops, GeoJSON in/out.
-- `native/qgis_render_bridge/src/qgis_render_bridge.{hpp,cpp}` — renderer_xml/
-  labeling_xml/rules on VectorLayerSpec; mirror diagnostics counters;
-  export_vector (SVG/PDF via CustomPainterJob); z-order fix (reverse layer
-  list for QgsMapSettings).
-- `native/qgis_render_bridge/src/bindings.cpp` — new API surface + dict-tolerant
-  geometry args.
-- `native/qgis_render_bridge/setup.py`, `CMakeLists.txt` — link qgis_gui +
-  qgis_analysis + Qt6Svg; compile new modules.
+## PHASE 3 complete — lazy catalog (commit 2)
+- db.py: shared row→model builders; lazy getters get_asset_model/get_version_model/
+  get_run_model/list_asset_models/list_run_models/list_version_models_for_asset/
+  list_all_version_models/child_version_models/list_tag_models/tags_for_version/
+  tag_ids_for_asset
+- service.py: open(lazy=True); warm_document/require_warm/_warm_locked;
+  _ensure_maps inline-warms; hot getters SQL fast path w/ _lazy_read_cache;
+  resolve_asset_models; get_lineage lazy path; close() zero-mutation manifest skip;
+  _WARM_REQUIRED_METHODS decorator loop (68 methods); ensure_index dead param removed
+- queries.py search_assets lazy resolver (was: index rows filtered to empty pre-warm)
+- adapter.py: list_versions/list_runs lazy-safe; _tag_by_id/_tag_names/_asset_for
+  lazy branches; FIXED pre-existing main bug: _scan_external_by_path dangling
+  reference in _find_external_by_path (3 adapter_e2e tests failed on main)
+- project_controller: lazy open + warm first in maintenance thread
+- Tests: tests/test_catalog_lazy_open.py (11 tests incl. open budget + warm race +
+  eager/lazy equivalence). Regression: 282 catalog tests + controller/capacity green.
 
-### Python mapping
-- `paleo_workbench/mapping/qgis_style.py` — NEW: QgisStylePayload,
-  migrate_legacy_style, availability probe.
-- `paleo_workbench/mapping/geometry_service.py` — NEW: QGIS-backed merge/split
-  routed through VectorEditSession.
-- `paleo_workbench/mapping/vector_operations.py` — routes to QGIS when built,
-  Shapely kept as explicit fallback.
-- `paleo_workbench/mapping/map_render_backend.py` — `_flatten_qgis_style`
-  wire promotion; base/QGIS `export_map_body`.
+## PHASE 4 complete — transaction CAS (#1220, commit 3)
+- db.py: CatalogStaleWriteError moved here (service re-exports); apply_changes
+  opens BEGIN IMMEDIATE + in-txn revision CAS (expected_revision kwarg);
+  reconcile gains expected_revision incl. empty-dirty stamp branch
+- service.py: _flush_canonical_locked/_ensure_index_fresh pass baseline;
+  rebuild_index under lock + stale guard + re-baseline; removed dead
+  _sync_index_best_effort (guard bypass)
+- adapter.py: restored _scan_managed_raw/_scan_external_by_path named
+  fallbacks (2nd pre-existing main breakage from e01cc3cb; 2 batch_dedup
+  tests red on main) + lazy pre-warm early-out
+- Tests: tests/test_catalog_transaction_cas.py (TOCTOU window sim, unscoped
+  reconcile refusal, rebuild guard, REAL subprocess commit, batch atomicity)
+- Regression: 134 catalog tests green.
 
-### UI
-- `paleo_workbench/ui/map_symbology_bridge.py` — NEW: native symbology dialog
-  entry points (typed errors, payload bumping).
-- `paleo_workbench/ui/map_layer_properties.py` — professional path: native
-  editor button + renderer info; legacy form retained for no-bridge runtimes.
-- `paleo_workbench/ui/pages/mapping_page.py` — features/fields passed to the
-  properties dialog; `qgis_style` applied through the normal style path.
-- `paleo_workbench/ui/unified_map_canvas.py` — SVG/PDF export prefers native
-  map-body export (true vector) and paints decorations on top.
+## PHASE 5 complete — payload staging leases + GC coordination (#1222, #1218)
+- db.py: staging_leases table (connect-time idempotent + _SCHEMA_DDL +
+  _DELETE_ORDER); acquire/release/heartbeat/active_staging_targets(ttl=1h)/
+  prune_stale methods
+- gc.py: plan skips leased prefixes (stage/temp/blob/empty-dir, auto+explicit);
+  sweep_gc(report=None) re-validates referenced+leased under service lock in
+  64-item chunks (closes plan→sweep TOCTOU AND place→commit window);
+  stale leases pruned at explicit plan
+- service.py: _payload_staging_lease ctx + _staging_target/_blob_staging_target;
+  wired register_version (incl. blob-root target), register_result_asset,
+  create_derived, promote_version; commit_working_copy(asset_id=None)
+  restructured — payload IO no longer under the lock (#1218)
+- adapter _register_produced leased; seismic attribute job: lease acquired at
+  start, per-band heartbeat (VolumeAttributeJob.on_band), released in
+  on_done/on_fail/on_cancel; harness mapping npz lease around write+register
+- register_derived_store needs no lease (move+commit already fully in-lock,
+  protected by chunked recheck)
+- Tests: tests/test_catalog_gc_registration_race.py (adversarial register||
+  sweep, stale-report sweep, lease TTL expiry, blob survival, #1218 lock
+  release during IO). 118-test regression green.
 
-### Tests
-NEW: test_qgis_style_payload.py (no bridge), test_qgis_authoring_codec.py,
-test_qgis_rule_renderer.py, test_qgis_geometry_service.py,
-test_qgis_geometry_edit_session.py, test_qgis_symbology_dialog_bridge.py,
-test_qgis_style_revision.py, test_qgis_screen_export_parity.py,
-test_qgis_visual_regression.py (4-layer geological scene: facies categorized,
-fault rule, contour, wells+labels; composition/z-order/histogram/determinism).
-UPDATED: test_map_layer_properties.py (legacy fixture + new QGIS-path test).
+## PHASE 6 complete — working-copy state machine (#1211)
+- db.py: working_copies registry table (connect-time + _SCHEMA_DDL + delete
+  order); register/get_by_path/get_live_for_source/list/update_state/remove
+- service.py: create_working_copy(version_id, allow_replace=False) — live
+  copy REUSED (no silent overwrite; explicit allow_replace discards+recreates);
+  identity = working_id + source version (never display name); concurrent
+  checkouts converge (placement retry + idempotent temp+replace);
+  list_working_copies/working_copy_state (conservative mtime/size dirty hint)/
+  discard_working_copy (explicit; committing copies protected)/
+  recover_working_copies (committing→evidence-based heal; missing-file rows
+  dropped); commit_working_copy transitions committing→(commit)→row removed,
+  failure → back to dirty
+- project_controller maintenance: recover_working_copies after warm
+- Tests: tests/test_catalog_working_copy_lifecycle.py (7: reuse+edits kept,
+  name-collision identity, crash-after-copy reopen, crash-during-commit both
+  evidence branches, discard terminal, concurrent convergence, save-as orphan)
 
-### Docs
-- docs/adr/0059-qgis-authoring-core.md (new)
+## PHASE 7 complete — project recovery decision table (#1229)
+- manager.py _load_data: PermissionError/OSerror → typed ProjectUnreadableError
+  (NEVER .bak fallback — main+backup untouched); FileNotFoundError → interrupted-
+  save restore; JSON/validation → corruption quarantine (*.corrupt-<ts>, catalog
+  precedent) + .bak restore; unusable .bak → original error re-raised
+- Persistent record: ProjectMeta.last_recovery {source, recovered_at, error,
+  quarantined} set on the model at load (snapshot keeps disk truth → next save
+  persists it even when otherwise clean)
+- Stale guard v2: snapshot gains disk_sha256; mtime drift + identical hash =
+  benign external touch (re-baseline + proceed); content change → refuse
+- controller: ProjectUnreadableError mapping with retry message
+- Fixed 4th pre-existing main failure: unknown-section warning dead since
+  extra=allow (#1170) — detection now diffs declared model_fields
+- Tests: tests/test_project_recovery_v6.py (6) + regression 54 green
 
-## Test status
-- `-m qgis`: 63 passed, 2 skipped (pre-existing skips)
-- focused suites: render backend / snapshot encoding / canvas / frame delivery /
-  authoring / styles / layer tree / export worker / interaction / edit commands:
-  all green except one PRE-EXISTING baseline failure documented below.
-- full suite: running (see findings.md for baseline-failure policy)
+## PHASE 8 complete — session generation + real cancellation (#1223, #1224)
+- catalog_is_current(service) in catalog/runtime (+__init__ re-export):
+  backend identity IS the session token (set/reset swap at every open/close);
+  unwraps adapter .service. Seismic lifecycle on_done/on_fail/on_cancel embed
+  the guard; mapping_page export slot checks captured project vs page project
+- resume_pending wired into project-open maintenance (interrupted transcodes
+  no longer sit 'running' until unrelated lifecycle activity)
+- Real cancellation: sha256_file(cancel=) chunk-granular (ChecksumCancelled,
+  never a partial digest) wired through service.verify_integrity(cancel=);
+  map export render_and_save(cancel=) checkpoints between native→fallback,
+  pre-decoration, pre-save; scheduler QUEUED-duplicate supersede (cancelled
+  request never hangs the next; RUNNING refusal message honest)
+- Tests: tests/test_runtime_session_and_cancel.py (6) + regressions green
 
-## Benchmarks
-- (pending)
+## PHASE 9 complete — governor convergence (#1225)
+- fast_grid (vendored IDW): REMOVED all runtime OMP/OPENBLAS/MKL/NUMEXPR/
+  VECLIB env mutation; threadpoolctl now used as a SCOPED context per batch
+  (restored after; was called without with — global forever); single-thread
+  path keeps full-core BLAS but scoped; pool width stays budget-derived
+  (ComputeSettings.cpu_workers ← governance set_cpu_percent at bootstrap)
+- workflow DAG _drive_parallel: pool width = min(spec max_concurrency,
+  clamp_workers('background.compute')) — spec value is upper bound only
+- interchange batch: constructor clamp consults clamp_workers('background.io')
+- Tests: tests/test_resource_governance_convergence.py (env-untouched,
+  scoped-limit restore, DAG clamp contract, batch governed, import-time clean)
+- Pre-existing main failure #5 confirmed out-of-scope (kriging dispatch #1227)
 
-## Known issues
-- BASELINE (pre-existing on pristine origin/main, this machine):
-  test_map_export_consistency.py::test_export_png_matches_screen_frame_and_
-  carries_dpi_metadata fails with the fallback backend (screen frame blank at
-  probes while export renders). Reproduces with branch changes stashed and in
-  the main worktree. Not introduced here; not fixed here (surgical scope).
+## PHASE 10 complete — provenance atomicity + identity fail-closed (#1219, #1221)
+- map_product.assemble_map_product: run booked RUNNING → register_result_asset
+  → complete; registration failure compensates to failed (no permanent ghost)
+- audit orphan_completed_run now covers map_product_assembly + interchange.import
+- service.repair_ghost_runs(): completed producing runs w/o outputs → failed
+  (+ghost_repair note); wired into project maintenance
+- resolve_path._fallback_identity_ok: no sha AND no size → False (fail closed,
+  #1221) — identity-less versions surface missing instead of binding a
+  same-named stranger
+- migration: legacy externals without checksum/size gain a SAFE stat
+  backfill (size + mtime_ns in external_stat metadata; no guessed digests)
+- Tests: tests/test_provenance_and_identity_v6.py + 71-test regression green
 
-## Remaining
-- benchmarks (10k/100k), full-suite triage, commit split, push, PR.
+## PHASE 11 complete — scale fixtures + benchmarks (§13)
+- benchmarks/catalog_scale_v6.py: production-API seeding (real import_raw
+  batch) + --direct-seed metadata-stress tier (500k, direct rows, honest
+  labeling); measures §13 list incl. concurrent conflict flag
+- Measured @20k production on this (slow, Defender-fsync) Windows box:
+  open_lazy 13.2ms | first_page 7.2ms | deep_page 6.5ms | get_by_id 0.3ms |
+  tag 8.6ms | wc checkout+commit 33.8ms | manifest export 358ms |
+  REOPEN EAGER 33,072ms (!) | conflict detected=1
+  → lazy open is ~2500× the eager reopen on this box; scale-independent
+- BONUS FIX: ensure_catalog_layout root now RESOLVED — Windows 8.3 short-path
+  project dirs crashed place_managed_file relative_to (found by bench)
+- tests/test_catalog_scale_v6.py: CI-size gates (lazy<500ms, page<150/200ms,
+  get<10ms, warmup-during-query correctness, conflict at scale)
+- #1213 WellRegistry O(N×W): documented as known limitation (well-domain,
+  out of v6 data/runtime core)
 
----
+## PHASE 12 complete — 3 review rounds + fixes (commit 11)
+R1(data correctness)/R2(concurrency)/R3(perf/adversarial/recovery) ran as
+independent agents over 295fabc3..5078bfec.
+P1 FIXED:
+- R3#1 _staging_target used stage.value ("output") not STAGE_DIRS ("outputs")
+  — OUTPUT leases never matched; now on-disk names. Race test proven
+  load-bearing (red with bug / green with fix).
+- R3#2 import_raw (primary bulk funnel) + register_derived_store paths
+  lacked leases — import_raw now leases RAW dir + blob root.
+- R3#3/#1211 fail-open: registry degradation clobbered uncommitted copies —
+  create_working_copy now fail-CLOSED on disk evidence (existing file w/o
+  row reused unless allow_replace).
+- R3#4 vacuous race test rewritten (gate on EVERY placement pre-commit).
+- R2#1 mapping_page guard read nonexistent self.project (registration dead
+  code, wrong message on every export) → self._project.
+P2 FIXED:
+- R1#1/R2#3 pre-warm foreign-revision drift served empty fallbacks —
+  _query_index_if_current/queries.search_assets trust the store pre-warm.
+- R1#4/R3#7 recovery quarantined main BEFORE validating backup — validate
+  first; R1#5 stale recovery attrs reset per load.
+- R1#10 assets load ORDER BY rowid (lazy/eager parity).
+- R2#4 transcode _register_derived session guard (mirror of attr path).
+- R2#6 supersede fires on_cancel (side effects unwind).
+- R2#5 _pending_commit_assets placeholder set guards purge/maintenance
+  zombie classifiers during the #1218 lock-free window.
+- R3#11 removed committed debug artifacts (.scratch/cas_smoke, wc_dbg).
+- catalog_is_current semantics refined: absent backend ≠ stale (the hazard
+  is a REPLACED backend); updated tests accordingly.
+DOCUMENTED (not code-fixed): rebuild/write_all CAS bypass (explicit
+maintenance op, narrow), lease TTL vs >1h single placements, pre-warm N+1
+resolvers (bounded by warm window), recover spoof via source_uri, legacy
+fact-less externals permanently fail-closed (intended #1221).
 
-## 2026-09-02: Open Issues 清仓 + QGIS Workstation Convergence（feat/qgis-workstation-convergence）
-
-### Open Issues（9/9 处理完毕）
-- #1120 linked map canvas shutdown → WorkAreaMapWidget.shutdown + linked shutdown_workers + HomePage.shutdown_workers
-- #1121 responsive inspector persistence → 保存按「可见」写 blob + restore 后重跑响应式 + user-hide 标志持久化
-- #1122 DockTitleBar 停靠态拖出浮动（阈值撕出）+ featuresChanged + a11y + eventFilter 防御
-- #1123 浮动专属 220×160 最小尺寸（topLevelChanged 切换）
-- #1124 flush_layout 先于 hide；teardown 冻结 + 断信号；幂等 shutdown
-- #1125 linked 恢复布局门闩（默认比例不覆盖已恢复状态）
-- #1126 工程保存/切换 flush 编辑会话（提交 + 拓扑门禁 + 显示态一并落盘）
-- #1127 14 项生命周期回归测试 + 12 项 review 回归测试
-- #1128 Activity「历史」不再误开 Agent 日志 tab
-
-### QGIS 收敛（Composite = 唯一未来主 GIS 工作区）
-- CRS 权威链修复（_publish 不再写死 EPSG:4326）
-- 图层属性 / 符号系统 / 标注：复用 MapLayerPropertiesDialog + symbology bridge（桥未构建走 legacy 快速字段；renderer XML 仍为权威）
-- split / merge：geometry_service（QGIS）或 shapely 兜底 → VectorEditSession 命令
-- topology：开关 + 保存门禁 + make-valid 修复（可撤销）
-- 地质模板字段 schema（断层/相带/物源/展布/打断/方向/井点/范围）+ field_schema 持久化
-- 属性表（QGIS 式窗口：行=要素、列=schema、双向选集、批量修改）
-- Identify Results 多图层识别 + 定位缩放
-- 捕捉配置（全局 + per-layer enable/vertex/segment/tolerance(px×比例)/priority + 井位参考点）
-- 状态栏（CRS/范围/渲染器诚实显示/选择/编辑图层/捕捉）
-- 联动工作区假按钮移除（选择/平移/测量/显示属性），域选择接线窗格聚焦
-
-### 性能（fallback 渲染器，本机）
-- 渲染基准 10k/50k/100k：首帧 1.2/5.2/11.2s，RSS 873MB@100k；快照热重建 0.1ms；帧缓存命中 ~0.04ms
-- 交互路径：toggle/opacity 10k/50k 亚毫秒；100k ~22ms（可见性需重发快照，设计行为）；identify/snap 恒亚毫秒
-- 数字化点击：120ms debounce + 修订缓存 → 100k 图层 10 连击 ~0.3s（原 ~23s）；save_edits 全量提交 100k ~4.3s
-- 已知边界：会话内大图层每次 settle 仍全量重编码该图层（~230ms@100k）——增量快照列后续工作
-
-### Review 循环
-- 一轮：Blocker=1 / High=3 / Medium=5 / Low=9 → 全部修复（18 项）
-- 二轮：修复全部确认正确；新增 Medium=1（undo 选集修剪）+ Low=5 → 已修复
-- 终态：Blocker=0，High=0；149 项回归通过（预先存在的环境性失败不含其中）
-
----
-
-## 2026-09-02（下午）: 合并 + 收尾三件套（main @ fcaa9fc2 → 本次提交）
-
-### 合并
-- feat/qgis-workstation-convergence → main：纯 fast-forward（8 提交），无冲突
-
-### A. vendored QGIS 桥构建后的原生路径激活（验证）
-- 桥产物：native/qgis_render_bridge/qgis_render_bridge.cpython-312-*.so（构建于
-  authoring-core 分支期，比全部源码新）；运行环境 = .venv (py3.12 + PySide6 6.11.2
-  + editable install)。注意裸 shell 里 .venv 解释器会被 ZCode 沙箱 exec 拦截干扰，
-  用 `env -i` 干净环境调用。
-- 激活验证：`-m qgis` 67 passed / 8 skipped（渲染、符号对话框、几何服务、导出、
-  视觉回归全走原生路径）。
-- 桥启用全量套件（4811 passed / 19 failed / 7 errors）逐项 triage：
-  - 唯一桥致失败：test_layer_properties_dialog_legacy_symbology_path —— 断言
-    legacy 快速字段但未隔离构建环境；已 monkeypatch 强制无桥 + 删掉恒真断言。
-  - 其余失败在无桥 miniconda 环境同样失败（welllog_engine_native_integration、
-    render_engine_review_fixes、reference_opacity_debounce、project_well_map、
-    geological_modeling_3d_page、data_workspace、app_close_dead_shell×2、perf×2、
-    native_compile_flags×4、native_backend、tier2、e2e harness errors）→ 机器/
-    venv 环境既有，与桥无关，不属本次范围。
-
-### B. 会话内大图层增量快照（#932 宿主侧）
-- vector_layer.py：VectorEditSession 增加修订日志（_bump_revision 统一收口
-  record/undo/redo/destroy/rollback；changes_since(rev) 返回有序日志条目；
-  JOURNAL_LIMIT=1024 保留窗；回滚清空日志 → 旧修订返回 None 回落全量）。
-- composite_editing.py：snapshot_layers 的 _records_cache 扩为
-  (revision, session, features, extent, records)——
-  - 命中：同修订同会话直接复用；
-  - 增量：同会话修订前进（或会话开始前的无会话缓存作修订 0 基线）时按日志
-    触达 id 重放 set/pop，未触及 record 对象跨快照复用（后端 feature-entry
-    复用与 #932 delta 发送保持 O(changed)）；extent 会话内单调并集；
-  - 全量：提交/回滚/新会话/日志越窗 → 精确重建。
-- benchmark（fallback 渲染，本机）：settle×10 @10k = 1.28ms、@100k = 18.8ms
-  （≈1.9ms/settle；原记录全量重编码 ~230ms@100k）。
-- 回归：新增 4 测试（日志覆盖/截断回落/增量==全量重建含顺序与对象复用/
-  extent 单调并集与会话后精确）。
-
-### C. 引用矢量图层导入 Composite
-- models.py：ProjectDocument.workstation_reference_layers（复用 MapReferenceLayer，
-  旧工程默认空，附加兼容）。
-- composite_document.py：
-  - ReferenceLayerService 接入：import_reference_layers（GDAL 矢量 → 归一项目
-    CRS；失败经 status_message 逐文件告知，§20 不静默）；
-  - _reference_snapshot_layers：要素按源修订缓存；muted 参考样式（点/线/面）；
-    源不可用 → 撤空要素 + 名称「（不可用）」+ 状态转换提示；
-  - 合成顺序固定 基础工区 → 引用参考 → 编修图层；面板显示态（可见性/不透明度/
-    引用块内顺序）写回 MapReferenceLayer；flush/重组时同步工程文档；set_project
-    恢复；
-  - 参与捕捉：participates_in_snap → vector_snap_points 并入 SnappingService
-    reference 通道（与井位参考点同流；对话框标签改为「参考点捕捉」如实）。
-- LayerManagerPanel：「导入参考图层」按钮 + 引用右键菜单（刷新/参与捕捉/移除引用）。
-- 回归：新增 6 测试（导入渲染+顺序+持久化往返 / 显示态回写 / 离线诚实降级 /
-  坏源拒绝 / 无 GDAL 可操作报错 / 捕捉参与+移除）。
-
-### 测试状态（本次改动后）
-- miniconda（无桥）：composite_gis 40 + lifecycle + dock_title_bar + editing +
-  vector_edit_session + project_manager + reference_layers 全绿；全量对照运行中
-- .venv（桥）：-m qgis 67/8skip；composite + layer_properties + lifecycle 全绿
-- 无 CI（用户指示）
+## PHASE 13 complete — docs + delivery
+- docs/development/data-runtime-foundation-v6/00–11 (12 篇) 全部落盘
+- Branch rebased on origin/main @295fabc3 (unchanged); pushed; PR opened

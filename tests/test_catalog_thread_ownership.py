@@ -416,7 +416,7 @@ def test_shutdown_during_active_statement_interrupts_cleanly(tmp_path: Path):
 
     project = tmp_path / "proj"
     project.mkdir()
-    service = DataCatalogService.open(project, ensure_index=False)
+    service = DataCatalogService.open(project)
     observed: list[BaseException] = []
 
     def long_runner() -> None:

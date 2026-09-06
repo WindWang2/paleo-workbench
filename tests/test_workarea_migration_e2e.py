@@ -180,7 +180,7 @@ class TestImportDefaultsManagedRaw:
         project_file = tmp_path / "p.paleo.json"
         project_file.write_text("{}", encoding="utf-8")
 
-        service = DataCatalogService.open(project_file, ensure_index=False, sweep_temp=False)
+        service = DataCatalogService.open(project_file, sweep_temp=False)
         try:
             version = service.import_raw(str(src), name="井位.dat", type="well_head", format="dat")
             asset = service.get_asset(version.asset_id)
@@ -207,7 +207,7 @@ class TestImportDefaultsManagedRaw:
         project_file = tmp_path / "p.paleo.json"
         project_file.write_text("{}", encoding="utf-8")
 
-        service = DataCatalogService.open(project_file, ensure_index=False, sweep_temp=False)
+        service = DataCatalogService.open(project_file, sweep_temp=False)
         try:
             version = service.link_external(str(external), name="big.sgy", type="seismic")
             assert version.managed is False

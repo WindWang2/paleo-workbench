@@ -68,8 +68,15 @@ def _require_safe_entity_id(role: str, entity_id: str) -> None:
 
 
 def ensure_catalog_layout(project_path: Path) -> Path:
-    """Create the catalog storage directories; returns the artifacts root."""
-    root = artifact_dir_for(Path(project_path))
+    """Create the catalog storage directories; returns the artifacts root.
+
+    The root is RESOLVED: version paths are stored relative to the resolved
+    project dir (see ``_project_dir``), and on Windows a project under a
+    legacy 8.3 short path (``NAME~1``) would otherwise produce an
+    unresolvable ``relative_to`` mismatch between the placed payload and
+    the recorded base (v6 benchmark crash; any short-path project dir).
+    """
+    root = artifact_dir_for(Path(project_path).expanduser().resolve())
     for name in list(STAGE_DIRS.values()) + EXTRA_DIRS:
         (root / name).mkdir(parents=True, exist_ok=True)
     return root

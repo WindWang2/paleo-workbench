@@ -23,10 +23,81 @@ from typing import Any
 
 from paleo_workbench.catalog.models import (
     CatalogDocument,
+    DataAsset,
+    DataRun,
     DataStage,
+    DataVersion,
+    Model,
+    ModelVersion,
+    Tag,
     normalize_tag_name,
 )
 from paleo_workbench.catalog.storage import catalog_dir_for
+
+
+# -- row → domain-model builders ---------------------------------------------
+# Single source of truth for SQLite-row → Pydantic reconstruction, shared by
+# the full-document load and the lazy single-entity reads so the two paths can
+# never disagree on field decoding (lazy/eager parity is pinned by tests).
+
+
+def _asset_model_from_row(row) -> DataAsset:
+    return DataAsset(
+        id=row["id"],
+        name=row["name"],
+        type=row["type"],
+        description=row["description"],
+        current_version_id=row["current_version_id"],
+        legacy_resource_id=row["legacy_resource_id"],
+        metadata=json.loads(row["metadata"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        trashed=bool(row["trashed"]),
+        trashed_at=row["trashed_at"],
+    )
+
+
+def _version_model_from_row(row) -> DataVersion:
+    return DataVersion(
+        id=row["id"],
+        asset_id=row["asset_id"],
+        version_number=row["version_number"],
+        stage=DataStage(row["stage"]),
+        managed=bool(row["managed"]),
+        path=row["path"],
+        source_uri=row["source_uri"],
+        format=row["format"],
+        size_bytes=row["size_bytes"],
+        sha256=row["sha256"],
+        run_id=row["run_id"],
+        metadata=json.loads(row["metadata"]),
+        created_at=row["created_at"],
+        trashed=bool(row["trashed"]),
+        trashed_at=row["trashed_at"],
+        parent_version_ids=json.loads(row["parent_ids"]),
+    )
+
+
+def _run_model_from_row(row, inputs: list[str], outputs: list[str]) -> DataRun:
+    run = DataRun(
+        id=row["id"],
+        operation=row["operation"],
+        parameters=json.loads(row["parameters"]),
+        generator=row["generator"],
+        status=row["status"],
+        model_ref=json.loads(row["model_ref"]) if row["model_ref"] else None,
+        created_at=row["created_at"],
+    )
+    run.input_version_ids = inputs
+    run.output_version_ids = outputs
+    return run
+
+
+class CatalogStaleWriteError(OSError):
+    """Another process/session committed to the canonical store after this
+    session's baseline (#411). Raised transactionally: the compare happens
+    INSIDE the write transaction (BEGIN IMMEDIATE), so no check-then-act
+    window survives — at most one conflicting writer commits."""
 
 DB_FILENAME = "catalog.sqlite"
 
@@ -236,10 +307,43 @@ _SCHEMA_DDL = [
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
     )""",
+    # Payload staging leases (#1222): bridge the place-on-disk → metadata-commit
+    # window. Payload bytes land OUTSIDE the service lock by design; the lease
+    # tells GC "an in-flight registration owns this target" so a concurrent
+    # explicit sweep cannot classify the live payload as an orphan. Transient
+    # table: rows die at release, or expire via heartbeat TTL after a crash.
+    """CREATE TABLE IF NOT EXISTS staging_leases (
+        lease_id TEXT NOT NULL,
+        target TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'register',
+        acquired_at TEXT NOT NULL,
+        heartbeat_at TEXT NOT NULL,
+        PRIMARY KEY (lease_id, target)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_staging_leases_target ON staging_leases(target)",
+    # Working-copy registry (#1211): formal checkout lifecycle. Identity is
+    # the working_id (uuid) — display names and payload file names are never
+    # identity. States: checked_out → dirty → committing → committed (row
+    # removed) with abandoned as the explicit-discard terminal. Crash
+    # recovery: recover_working_copies() probes committing rows.
+    """CREATE TABLE IF NOT EXISTS working_copies (
+        working_id TEXT PRIMARY KEY,
+        source_version_id TEXT NOT NULL,
+        path TEXT NOT NULL UNIQUE,
+        state TEXT NOT NULL DEFAULT 'checked_out',
+        display_name TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        payload_mtime_ns INTEGER,
+        source_size_bytes INTEGER
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_working_copies_source ON working_copies(source_version_id)",
 ]
 
 # Children first so a future PRAGMA foreign_keys=ON stays safe.
 _DELETE_ORDER = [
+    "working_copies",
+    "staging_leases",
     "lineage",
     "version_tags",
     "asset_tags",
@@ -785,6 +889,30 @@ class CatalogIndex:
             "CREATE INDEX IF NOT EXISTS idx_assets_updated_name_id ON assets(updated_at, name, id)",
             "CREATE INDEX IF NOT EXISTS idx_versions_asset_version ON versions(asset_id, version_number)",
             "CREATE INDEX IF NOT EXISTS idx_lineage_parent ON lineage(parent_version_id, child_version_id)",
+            # #1222: the lease table must exist on ANY store this code opens
+            # (existing stores predate it and never rebuild for this).
+            """CREATE TABLE IF NOT EXISTS staging_leases (
+                lease_id TEXT NOT NULL,
+                target TEXT NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'register',
+                acquired_at TEXT NOT NULL,
+                heartbeat_at TEXT NOT NULL,
+                PRIMARY KEY (lease_id, target)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_staging_leases_target ON staging_leases(target)",
+            # #1211: working-copy registry on any store this code opens.
+            """CREATE TABLE IF NOT EXISTS working_copies (
+                working_id TEXT PRIMARY KEY,
+                source_version_id TEXT NOT NULL,
+                path TEXT NOT NULL UNIQUE,
+                state TEXT NOT NULL DEFAULT 'checked_out',
+                display_name TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                payload_mtime_ns INTEGER,
+                source_size_bytes INTEGER
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_working_copies_source ON working_copies(source_version_id)",
         ):
             try:
                 conn.execute(ddl)
@@ -866,6 +994,213 @@ class CatalogIndex:
             return int(raw)
         except ValueError:
             return None
+
+    # -- payload staging leases (#1222) ---------------------------------------
+
+    # A lease older than this without a heartbeat is presumed dead (process
+    # crashed mid-registration); GC stops honoring it and the payload it
+    # guarded is classified by the normal orphan rules.
+    STAGING_LEASE_TTL_SECONDS = 3600.0
+
+    def acquire_staging_lease(
+        self, targets: "tuple[str, ...] | list[str]", kind: str = "register"
+    ) -> str | None:
+        """Record an in-flight registration's ownership of *targets*.
+
+        Targets are project-relative posix directory prefixes (e.g.
+        ``demo.artifacts/raw/asset_x``); GC skips any candidate whose path
+        falls under an active lease. Returns the lease id, or None when the
+        lease table is unavailable — leases are protection, not a gate, so
+        registration proceeds (pre-lease behavior) rather than failing.
+        """
+        import uuid
+        from datetime import datetime, timedelta
+
+        lease_id = uuid.uuid4().hex
+        now = datetime.now().isoformat(timespec="seconds")
+        conn = self._connect()
+        if not self._schema_present(conn):
+            return None
+        try:
+            if conn.in_transaction:
+                conn.rollback()
+            conn.execute("BEGIN IMMEDIATE")
+            conn.executemany(
+                "INSERT OR REPLACE INTO staging_leases"
+                " (lease_id, target, kind, acquired_at, heartbeat_at)"
+                " VALUES (?,?,?,?,?)",
+                [(lease_id, str(t), kind, now, now) for t in targets],
+            )
+            conn.execute("COMMIT")
+            return lease_id
+        except sqlite3.Error:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            return None
+
+    def release_staging_lease(self, lease_id: str) -> None:
+        conn = self._connect()
+        try:
+            with conn:
+                conn.execute(
+                    "DELETE FROM staging_leases WHERE lease_id = ?", (lease_id,)
+                )
+        except sqlite3.Error:
+            pass
+
+    def heartbeat_staging_lease(self, lease_id: str) -> None:
+        """Refresh a long-running lease (multi-hour computes)."""
+        from datetime import datetime
+
+        conn = self._connect()
+        try:
+            with conn:
+                conn.execute(
+                    "UPDATE staging_leases SET heartbeat_at = ? WHERE lease_id = ?",
+                    (datetime.now().isoformat(timespec="seconds"), lease_id),
+                )
+        except sqlite3.Error:
+            pass
+
+    def active_staging_targets(
+        self, ttl_seconds: float | None = None
+    ) -> set[str]:
+        """Target prefixes guarded by a lease with a fresh heartbeat."""
+        from datetime import datetime, timedelta
+
+        ttl = (
+            self.STAGING_LEASE_TTL_SECONDS if ttl_seconds is None else ttl_seconds
+        )
+        cutoff = (
+            datetime.now() - timedelta(seconds=ttl)
+        ).isoformat(timespec="seconds")
+        try:
+            rows = self._read_rows(
+                "SELECT DISTINCT target FROM staging_leases WHERE heartbeat_at > ?",
+                (cutoff,),
+            )
+        except Exception:
+            return set()
+        return {row["target"] for row in rows}
+
+    def prune_stale_staging_leases(
+        self, ttl_seconds: float | None = None
+    ) -> int:
+        """Drop dead leases (crashed registrations); returns rows removed."""
+        from datetime import datetime, timedelta
+
+        ttl = (
+            self.STAGING_LEASE_TTL_SECONDS if ttl_seconds is None else ttl_seconds
+        )
+        cutoff = (
+            datetime.now() - timedelta(seconds=ttl)
+        ).isoformat(timespec="seconds")
+        conn = self._connect()
+        try:
+            with conn:
+                cur = conn.execute(
+                    "DELETE FROM staging_leases WHERE heartbeat_at <= ?",
+                    (cutoff,),
+                )
+                return cur.rowcount or 0
+        except sqlite3.Error:
+            return 0
+
+    # -- working-copy registry (#1211) -----------------------------------------
+
+    def register_working_copy(
+        self,
+        *,
+        source_version_id: str,
+        path: str,
+        display_name: str,
+        payload_mtime_ns: int | None,
+        source_size_bytes: int | None,
+    ) -> str:
+        import uuid
+        from datetime import datetime
+
+        working_id = f"wc-{uuid.uuid4().hex[:12]}"
+        now = datetime.now().isoformat(timespec="seconds")
+        conn = self._connect()
+        with conn:
+            conn.execute(
+                "INSERT INTO working_copies (working_id, source_version_id, path,"
+                " state, display_name, created_at, updated_at, payload_mtime_ns,"
+                " source_size_bytes) VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    working_id,
+                    source_version_id,
+                    path,
+                    "checked_out",
+                    display_name,
+                    now,
+                    now,
+                    payload_mtime_ns,
+                    source_size_bytes,
+                ),
+            )
+        return working_id
+
+    def get_working_copy_by_path(self, path: str) -> dict | None:
+        rows = self._read_rows(
+            "SELECT * FROM working_copies WHERE path = ?", (path,)
+        )
+        return dict(rows[0]) if rows else None
+
+    def get_live_working_copy_for_source(
+        self, source_version_id: str
+    ) -> dict | None:
+        rows = self._read_rows(
+            "SELECT * FROM working_copies WHERE source_version_id = ?"
+            " AND state IN ('checked_out','dirty','committing')"
+            " ORDER BY created_at LIMIT 1",
+            (source_version_id,),
+        )
+        return dict(rows[0]) if rows else None
+
+    def list_working_copies(
+        self, states: "tuple[str, ...] | list[str] | None" = None
+    ) -> list[dict]:
+        if states:
+            marks = ",".join("?" * len(states))
+            rows = self._read_rows(
+                f"SELECT * FROM working_copies WHERE state IN ({marks})"
+                " ORDER BY created_at",
+                tuple(states),
+            )
+        else:
+            rows = self._read_rows(
+                "SELECT * FROM working_copies ORDER BY created_at", ()
+            )
+        return [dict(r) for r in rows]
+
+    def update_working_copy_state(self, working_id: str, state: str) -> None:
+        from datetime import datetime
+
+        conn = self._connect()
+        try:
+            with conn:
+                conn.execute(
+                    "UPDATE working_copies SET state = ?, updated_at = ?"
+                    " WHERE working_id = ?",
+                    (state, datetime.now().isoformat(timespec="seconds"), working_id),
+                )
+        except sqlite3.Error:
+            pass
+
+    def remove_working_copy(self, working_id: str) -> None:
+        conn = self._connect()
+        try:
+            with conn:
+                conn.execute(
+                    "DELETE FROM working_copies WHERE working_id = ?",
+                    (working_id,),
+                )
+        except sqlite3.Error:
+            pass
 
     def is_fresh(self, document: CatalogDocument) -> bool:
         """True when the index matches *document*'s revision and schema."""
@@ -1052,56 +1387,15 @@ class CatalogIndex:
             return None
 
     def _load_document_once(self) -> CatalogDocument:
-        from paleo_workbench.catalog.models import (
-            DataAsset,
-            DataRun,
-            DataStage,
-            DataVersion,
-            Model,
-            ModelVersion,
-            Tag,
-        )
-
         conn = self._connect()
         conn.execute("BEGIN")
         try:
             assets = [
-                DataAsset(
-                    id=row["id"],
-                    name=row["name"],
-                    type=row["type"],
-                    description=row["description"],
-                    current_version_id=row["current_version_id"],
-                    legacy_resource_id=row["legacy_resource_id"],
-                    metadata=json.loads(row["metadata"]),
-                    created_at=row["created_at"],
-                    updated_at=row["updated_at"],
-                    trashed=bool(row["trashed"]),
-                    trashed_at=row["trashed_at"],
-                )
-                for row in conn.execute(
-                    "SELECT * FROM assets"
-                )
+                _asset_model_from_row(row)
+                for row in conn.execute("SELECT * FROM assets ORDER BY rowid")
             ]
             versions = [
-                DataVersion(
-                    id=row["id"],
-                    asset_id=row["asset_id"],
-                    version_number=row["version_number"],
-                    stage=DataStage(row["stage"]),
-                    managed=bool(row["managed"]),
-                    path=row["path"],
-                    source_uri=row["source_uri"],
-                    format=row["format"],
-                    size_bytes=row["size_bytes"],
-                    sha256=row["sha256"],
-                    run_id=row["run_id"],
-                    metadata=json.loads(row["metadata"]),
-                    created_at=row["created_at"],
-                    trashed=bool(row["trashed"]),
-                    trashed_at=row["trashed_at"],
-                    parent_version_ids=json.loads(row["parent_ids"]),
-                )
+                _version_model_from_row(row)
                 for row in conn.execute("SELECT * FROM versions ORDER BY rowid")
             ]
             inputs_by_run: dict[str, list[str]] = {}
@@ -1111,22 +1405,13 @@ class CatalogIndex:
             for row in conn.execute("SELECT run_id, version_id FROM run_outputs"):
                 outputs_by_run.setdefault(row["run_id"], []).append(row["version_id"])
             runs = [
-                DataRun(
-                    id=row["id"],
-                    operation=row["operation"],
-                    parameters=json.loads(row["parameters"]),
-                    generator=row["generator"],
-                    status=row["status"],
-                    model_ref=json.loads(row["model_ref"])
-                    if row["model_ref"]
-                    else None,
-                    created_at=row["created_at"],
+                _run_model_from_row(
+                    row,
+                    inputs_by_run.get(row["id"], []),
+                    outputs_by_run.get(row["id"], []),
                 )
                 for row in conn.execute("SELECT * FROM runs ORDER BY rowid")
             ]
-            for run in runs:
-                run.input_version_ids = inputs_by_run.get(run.id, [])
-                run.output_version_ids = outputs_by_run.get(run.id, [])
             tags = [
                 Tag(
                     id=row["id"],
@@ -1198,20 +1483,175 @@ class CatalogIndex:
                 pass
             raise
 
+    # -- lazy entity reads (open-without-materialization, #1212) -------------
+    #
+    # Single-entity / bounded-list reads served straight from the canonical
+    # store so a lazily-opened service can answer lookups BEFORE the full
+    # document warmup completes. Row order matches load_document's list order
+    # (rowid) so lazy results are drop-in identical to the eager document's.
+
+    def _read_rows(self, sql: str, params: tuple) -> list:
+        """Read rows on this thread's connection; [] when the store is absent."""
+        if not self.db_path.is_file():
+            return []
+        conn = self._connect()
+        if not self._schema_present(conn):
+            return []
+        return conn.execute(sql, params).fetchall()
+
+    def get_asset_model(self, asset_id: str) -> DataAsset | None:
+        row = self._read_rows("SELECT * FROM assets WHERE id = ?", (asset_id,))
+        return _asset_model_from_row(row[0]) if row else None
+
+    def get_version_model(self, version_id: str) -> DataVersion | None:
+        row = self._read_rows("SELECT * FROM versions WHERE id = ?", (version_id,))
+        return _version_model_from_row(row[0]) if row else None
+
+    def get_run_model(self, run_id: str) -> DataRun | None:
+        rows = self._read_rows("SELECT * FROM runs WHERE id = ?", (run_id,))
+        if not rows:
+            return None
+        inputs = [
+            r["version_id"]
+            for r in self._read_rows(
+                "SELECT version_id FROM run_inputs WHERE run_id = ? ORDER BY rowid",
+                (run_id,),
+            )
+        ]
+        outputs = [
+            r["version_id"]
+            for r in self._read_rows(
+                "SELECT version_id FROM run_outputs WHERE run_id = ? ORDER BY rowid",
+                (run_id,),
+            )
+        ]
+        return _run_model_from_row(rows[0], inputs, outputs)
+
+    def list_asset_models(
+        self, *, include_trashed: bool = True, trashed_only: bool = False
+    ) -> list[DataAsset]:
+        if trashed_only:
+            rows = self._read_rows(
+                "SELECT * FROM assets WHERE trashed = 1 ORDER BY rowid", ()
+            )
+        elif include_trashed:
+            rows = self._read_rows("SELECT * FROM assets ORDER BY rowid", ())
+        else:
+            rows = self._read_rows(
+                "SELECT * FROM assets WHERE trashed = 0 ORDER BY rowid", ()
+            )
+        return [_asset_model_from_row(row) for row in rows]
+
+    def list_run_models(self) -> list[DataRun]:
+        rows = self._read_rows("SELECT * FROM runs ORDER BY rowid", ())
+        if not rows:
+            return []
+        inputs_by_run: dict[str, list[str]] = {}
+        for r in self._read_rows(
+            "SELECT run_id, version_id FROM run_inputs ORDER BY rowid", ()
+        ):
+            inputs_by_run.setdefault(r["run_id"], []).append(r["version_id"])
+        outputs_by_run: dict[str, list[str]] = {}
+        for r in self._read_rows(
+            "SELECT run_id, version_id FROM run_outputs ORDER BY rowid", ()
+        ):
+            outputs_by_run.setdefault(r["run_id"], []).append(r["version_id"])
+        return [
+            _run_model_from_row(
+                row,
+                inputs_by_run.get(row["id"], []),
+                outputs_by_run.get(row["id"], []),
+            )
+            for row in rows
+        ]
+
+    def list_version_models_for_asset(self, asset_id: str) -> list[DataVersion]:
+        # Document order within an asset is rowid; the service's public
+        # list_versions sorts by version_number, stable on input order.
+        rows = self._read_rows(
+            "SELECT * FROM versions WHERE asset_id = ? ORDER BY rowid", (asset_id,)
+        )
+        return [_version_model_from_row(row) for row in rows]
+
+    def list_all_version_models(self) -> list[DataVersion]:
+        rows = self._read_rows("SELECT * FROM versions ORDER BY rowid", ())
+        return [_version_model_from_row(row) for row in rows]
+
+    def child_version_models(self, parent_version_id: str) -> list[DataVersion]:
+        """Versions whose parent_version_ids include *parent_version_id*.
+
+        Mirrors the children_by_parent map (children indexed by parent id,
+        document/rowid order).
+        """
+        rows = self._read_rows(
+            "SELECT v.* FROM versions v JOIN lineage l "
+            "ON l.child_version_id = v.id "
+            "WHERE l.parent_version_id = ? ORDER BY v.rowid",
+            (parent_version_id,),
+        )
+        return [_version_model_from_row(row) for row in rows]
+
+    def list_tag_models(self) -> list[Tag]:
+        rows = self._read_rows("SELECT * FROM tags ORDER BY rowid", ())
+        return [
+            Tag(
+                id=row["id"],
+                name=row["name"],
+                display_name=row["display_name"],
+                metadata=json.loads(row["metadata"]),
+            )
+            for row in rows
+        ]
+
+    def tags_for_version(self, version_id: str) -> list[Tag]:
+        rows = self._read_rows(
+            "SELECT t.* FROM tags t JOIN version_tags vt ON vt.tag_id = t.id "
+            "WHERE vt.version_id = ? ORDER BY t.rowid",
+            (version_id,),
+        )
+        return [
+            Tag(
+                id=row["id"],
+                name=row["name"],
+                display_name=row["display_name"],
+                metadata=json.loads(row["metadata"]),
+            )
+            for row in rows
+        ]
+
+    def tag_ids_for_asset(self, asset_id: str) -> list[str]:
+        return [
+            r["tag_id"]
+            for r in self._read_rows(
+                "SELECT tag_id FROM asset_tags WHERE asset_id = ? ORDER BY rowid",
+                (asset_id,),
+            )
+        ]
+
     def apply_changes(
         self,
         document: CatalogDocument,
         dirty: "DirtySet",
         *,
         lookups: dict[str, dict] | None = None,
+        expected_revision: int | None = None,
     ) -> None:
-        """Persist *dirty*'s entities in ONE transaction (#1027).
+        """Persist *dirty*'s entities in ONE transaction (#1027, #1220 CAS).
 
         For every id in *dirty*: present in *document* → upsert its row;
         absent → delete it plus its dependents. Lineage edges are reconciled
         per touched version/run with the same keep-rules a full rebuild
         encodes (run-derived edges survive version purges). The result is
         identical to :meth:`write_all` restricted to the dirty set.
+
+        The transaction opens ``BEGIN IMMEDIATE`` (grabbing the write lock up
+        front, so cross-process writers serialize at SQLite level) and, when
+        *expected_revision* is given, compares the store's committed
+        ``catalog_revision`` INSIDE that transaction: a store that moved past
+        the caller's baseline belongs to another process (#411) — abort with
+        :class:`CatalogStaleWriteError` instead of stamping a colliding
+        revision over foreign commits. The compare-and-write is one atomic
+        step: no check-then-act window exists.
         """
         conn = self._connect()
         if not self._schema_present(conn):
@@ -1265,7 +1705,30 @@ class CatalogIndex:
             appended = [e for e in marks if e not in rowid_of]
             return [e for _, e in existing] + appended
 
-        with conn:
+        # BEGIN IMMEDIATE + in-transaction revision CAS (#1220): the write
+        # lock is taken before anything is read, and the stale-write compare
+        # happens inside the same transaction that writes — the #411 guard
+        # becomes atomic instead of check-then-act.
+        if conn.in_transaction:
+            conn.rollback()  # pooled conn left mid-txn by an aborted path
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if expected_revision is not None:
+                stored = conn.execute(
+                    "SELECT value FROM sync_state WHERE key = 'catalog_revision'"
+                ).fetchone()
+                stored_rev = None
+                if stored is not None:
+                    try:
+                        stored_rev = int(stored[0])
+                    except (TypeError, ValueError):
+                        stored_rev = None
+                if stored_rev != expected_revision:
+                    raise CatalogStaleWriteError(
+                        "数据目录元数据已被其他实例修改（事务内比对失败）；"
+                        "为避免覆盖他人提交，本次保存已中止。"
+                        "请重新打开工程后重试。"
+                    )
             for asset_id in _ordered(dirty.assets, "assets"):
                 asset = asset_by_id.get(asset_id)
                 if asset is None:
@@ -1383,6 +1846,13 @@ class CatalogIndex:
                     ("index_schema_version", str(INDEX_SCHEMA_VERSION)),
                 ],
             )
+            conn.execute("COMMIT")
+        except Exception:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
 
     def _reconcile_version_parents(
         self, conn: sqlite3.Connection, version
@@ -1512,12 +1982,17 @@ class CatalogIndex:
         ).fetchone()
         return row is not None
 
-    def reconcile(self, document: CatalogDocument) -> None:
+    def reconcile(
+        self, document: CatalogDocument, *, expected_revision: int | None = None
+    ) -> None:
         """Full compare-and-repair against the document (safe fallback).
 
         O(N) read of the store, then applies exactly the differing entities
         through :meth:`apply_changes` — the same writer the dirty-set path
-        uses, so unmarked mutations stay correct (only slower).
+        uses, so unmarked mutations stay correct (only slower). The full
+        diff is dangerous under foreign commits (it would DELETE the other
+        process's rows), so *expected_revision* CAS-runs the apply exactly
+        like the dirty-set path (#1220).
         """
         dirty = DirtySet()
         conn = self._connect()
@@ -1597,9 +2072,27 @@ class CatalogIndex:
                 dirty.mark_runs(run.id)
 
         if dirty.is_empty():
-            # Still refresh the revision stamp (the caller bumped it).
-            conn.execute("BEGIN")
+            # Still refresh the revision stamp (the caller bumped it) — under
+            # the same CAS contract as apply_changes (#1220): a foreign
+            # revision advance aborts instead of stamping over it.
+            if conn.in_transaction:
+                conn.rollback()
+            conn.execute("BEGIN IMMEDIATE")
             try:
+                if expected_revision is not None:
+                    stored = conn.execute(
+                        "SELECT value FROM sync_state WHERE key = 'catalog_revision'"
+                    ).fetchone()
+                    try:
+                        stored_rev = int(stored[0]) if stored is not None else None
+                    except (TypeError, ValueError):
+                        stored_rev = None
+                    if stored_rev != expected_revision:
+                        raise CatalogStaleWriteError(
+                            "数据目录元数据已被其他实例修改（事务内比对失败）；"
+                            "为避免覆盖他人提交，本次同步已中止。"
+                            "请重新打开工程后重试。"
+                        )
                 conn.executemany(
                     "INSERT OR REPLACE INTO sync_state (key, value) VALUES (?,?)",
                     [
@@ -1608,12 +2101,15 @@ class CatalogIndex:
                         ("index_schema_version", str(INDEX_SCHEMA_VERSION)),
                     ],
                 )
-                conn.commit()
-            except sqlite3.Error:
-                conn.execute("ROLLBACK")
+                conn.execute("COMMIT")
+            except Exception:
+                try:
+                    conn.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
                 raise
             return
-        self.apply_changes(document, dirty)
+        self.apply_changes(document, dirty, expected_revision=expected_revision)
 
     def _rebuild_once(self, document: CatalogDocument) -> None:
         conn = self._connect()

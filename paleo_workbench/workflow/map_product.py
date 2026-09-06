@@ -121,6 +121,10 @@ def assemble_map_product(
         raise ValueError("map product assembly needs a staged payload file")
 
     fingerprint = assembly.scientific_fingerprint(project)
+    # #1219: the run is booked RUNNING first and completes only after the
+    # output version registers. The old default-completed booking left a
+    # permanent ghost when the process died (or registration raised) between
+    # the two saves — a completed run that produced nothing.
     run = catalog.register_run(
         "map_product_assembly",
         input_version_ids=[grid_version for _task, grid_version in resolved],
@@ -149,24 +153,39 @@ def assemble_map_product(
             ],
         },
         generator=GENERATOR_ID,
+        status="running",
     )
-    version = catalog.register_result_asset(
-        name=assembly.product_name,
-        type="map_product",
-        format=payload.suffix.lstrip(".") or "json",
-        asset_metadata={
-            "product_name": assembly.product_name,
-            "factor_task_ids": list(assembly.factor_task_ids),
-            "scientific_fingerprint": fingerprint,
-        },
-        source_path=payload,
-        stage=DataStage.OUTPUT,
-        run_id=run.id,
-        version_metadata={
-            "product_name": assembly.product_name,
-            "generator": GENERATOR_ID,
-        },
-    )
+    try:
+        version = catalog.register_result_asset(
+            name=assembly.product_name,
+            type="map_product",
+            format=payload.suffix.lstrip(".") or "json",
+            asset_metadata={
+                "product_name": assembly.product_name,
+                "factor_task_ids": list(assembly.factor_task_ids),
+                "scientific_fingerprint": fingerprint,
+            },
+            source_path=payload,
+            stage=DataStage.OUTPUT,
+            run_id=run.id,
+            version_metadata={
+                "product_name": assembly.product_name,
+                "generator": GENERATOR_ID,
+            },
+        )
+    except Exception:
+        # Output registration failed: the run must NOT stay completed (or
+        # running forever) — fail it with the error preserved.
+        try:
+            catalog.update_run_status(
+                run.id, "failed", extra_parameters={
+                    "error": "output registration failed"
+                }
+            )
+        except Exception:
+            pass
+        raise
+    catalog.update_run_status(run.id, "complete")
 
     record = MapProductRecord(
         product_name=assembly.product_name,

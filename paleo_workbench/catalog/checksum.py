@@ -17,11 +17,30 @@ from pathlib import Path
 CHUNK_SIZE = 1024 * 1024  # 1 MiB, matches the historical scanner behavior
 
 
-def sha256_file(path: Path, *, chunk_size: int = CHUNK_SIZE) -> str:
-    """Return the hex SHA-256 digest of *path*, read in chunks."""
+class ChecksumCancelled(Exception):
+    """Raised by :func:`sha256_file` when its cancel callback fires mid-hash.
+
+    The digest is deliberately NOT returned partial — callers surface an
+    honest "cancelled" state instead of a wrong checksum."""
+
+
+def sha256_file(
+    path: Path,
+    *,
+    chunk_size: int = CHUNK_SIZE,
+    cancel: "callable[[], bool] | None" = None,
+) -> str:
+    """Return the hex SHA-256 digest of *path*, read in chunks.
+
+    ``cancel`` (v6 #1224): polled once per chunk; hashing a multi-GB payload
+    is interruptible at MiB granularity instead of blocking until completion.
+    Raises :class:`ChecksumCancelled` — never a partial digest.
+    """
     digest = hashlib.sha256()
     with Path(path).open("rb") as handle:
         for chunk in iter(lambda: handle.read(chunk_size), b""):
+            if cancel is not None and cancel():
+                raise ChecksumCancelled(f"hash cancelled: {path}")
             digest.update(chunk)
     return digest.hexdigest()
 

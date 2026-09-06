@@ -299,7 +299,15 @@ def _check_run_outputs(report: AuditReport, runs) -> None:
     Only operations that ALWAYS produce a version when they succeed are
     checked; delivery runs legitimately record a handoff without an output.
     """
-    _ALWAYS_PRODUCING = {"materialize", "working_copy_commit"}
+    # #1219: map_product_assembly and interchange.import book runs whose
+    # entire purpose is one output version; a terminal-completed run with
+    # zero outputs there is a ghost (crash between booking and registration).
+    _ALWAYS_PRODUCING = {
+        "materialize",
+        "working_copy_commit",
+        "map_product_assembly",
+        "interchange.import",
+    }
     for run in runs:
         if (
             run.operation in _ALWAYS_PRODUCING
