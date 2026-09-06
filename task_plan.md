@@ -1,96 +1,72 @@
-# Task Plan — QGIS Authoring Core (feat/qgis-authoring-core)
+# Task Plan — Scientific Interpretation & Algorithm V6 (feat/scientific-interpretation-v6)
 
 ## Goal
-Promote vendored QGIS from optional render adapter to the primary professional 2-D
-cartographic authoring core of Paleo Workbench, while Paleo keeps project/data/version
-authority (VectorEditSession, DataVersion, provenance).
+Make Paleo Workbench scientifically trustworthy across well logs, multi-well
+correlation, map/well/seismic coordinate linkage, small/medium seismic
+interpretation, geological constraints, interpolation, single-factor maps,
+multi-factor synthesis, geological mapping, uncertainty/QC/provenance, and
+Harness scientific actions.
+
+Primary rule: a result must never look scientifically valid when an input
+unit, identity, null convention, coordinate convention, geological
+constraint, calibration, or algorithm capability was actually missing or
+ignored. Prefer explicit unavailable/degraded/unsupported over silent
+approximation.
+
+HARD EXCLUSION: no 100GB seismic volume support/benchmark/optimization.
 
 ## Current Phase
-PHASE 2 — Code archaeology
+PHASE 1 — Scientific audit (A–Q) → docs/development/scientific-interpretation-v6/00-baseline.md
 
 ## Phases
-- [x] PHASE 0: Planning files created; worktree `../paleo-workbench-qgis-authoring`
-      branch `feat/qgis-authoring-core` off `origin/main` (da1b9834)
-- [ ] PHASE 1: Pre-read code (mapping/, ui/, native bridge, vendored QGIS, tests, ADRs)
-- [ ] PHASE 2: Capability matrix in findings.md
-- [ ] PHASE 3: P0 vertical slice
-  - [ ] Unified QGIS runtime lifecycle owner
-  - [ ] Revision-keyed layer mirror (no rebuild on pan/zoom)
-  - [ ] Full QgsSymbol/SymbolLayer representation (multi-layer), no createSimple as main model
-  - [ ] Renderers: single / categorized / graduated / rule-based (rule = P0)
-  - [ ] Style serialization roundtrip (QGIS XML payload in project doc)
-  - [ ] Legacy VectorStyle → QGIS renderer migration
-  - [ ] Symbology GUI: QgsSymbolSelectorDialog + renderer widgets via bridge
-- [ ] PHASE 4: P1
-  - [ ] QgisGeometryService (union/split/buffer/... via QgsGeometry)
-  - [ ] VectorEditSession integration (QGIS computes, Paleo commands record)
-  - [ ] Style manager on QgsStyle (geological categories)
-- [ ] PHASE 5: Tests (TDD) + visual regression fixtures
-- [ ] PHASE 6: Local build + full validation loop (/loop until no P0/P1)
-- [ ] PHASE 7: Adversarial review + fixes
-- [ ] PHASE 8: Docs (ADR 0059) + commits + push + PR
+- [ ] PHASE 0: Setup — worktree `.worktrees/scientific-interpretation-v6`,
+      branch `feat/scientific-interpretation-v6` off main (295fabc3),
+      submodules geo-viz-engine (5e03beba) + well-log-engine (f845e7ab) init,
+      uv venv (cp312) + geoviz editables; baseline test run
+- [ ] PHASE 1: Scientific audit A–Q (parallel) → 00-baseline.md
+- [ ] PHASE 2: Well scientific contract V2 (identity/depth-domain/unit/null
+      invariants; §2–4) + tests
+- [ ] PHASE 3: Well identity/correlation duplicate-name correctness +
+      registry scale O(W + N log W) (§5–6)
+- [ ] PHASE 4: well-log-engine gap-aware curves/parity (§7, submodule branch
+      if engine changes needed)
+- [ ] PHASE 5: Coordinate/calibration fail-closed chain + SEG-Y scalar/
+      geometry unification (§8–9)
+- [ ] PHASE 6: Method × Constraint capability matrix + result diagnostics
+      (§10)
+- [ ] PHASE 7: Kriging V2 (anisotropy, diagnostics, CV, LOO) (§11)
+- [ ] PHASE 8: Constrained IDW audit + interpolation evaluation workbench
+      (§12–13)
+- [ ] PHASE 9: Factor map contract + contour QA + fusion V2 + MapProduct
+      gate (§14–17)
+- [ ] PHASE 10: QC first-class model + Harness scientific actions (§18–19)
+- [ ] PHASE 11: Performance + full test matrix (§20–21)
+- [ ] PHASE 12: 3 review rounds + fixes (§22)
+- [ ] PHASE 13: Docs 00–13 (§23), commits, submodule bumps, PR (§24)
 
-## Decisions (locked by owner — do not revisit)
-1. QGIS = official 2-D authoring core; fallback only for tests/headless/legacy.
-2. Reuse vendored qgis_gui symbology widgets (no weak reimplementation).
-3. QgsFeatureRenderer/QgsSymbol/QgsSymbolLayer/QgsTextFormat = authoritative style model;
-   legacy VectorStyle kept only for compat/migration.
-4. Geometry algorithms via QGIS; edit transaction authority stays in Paleo
-   (VectorEditSession → DataVersion/provenance).
+## Decisions (locked)
+1. Do NOT replace existing systems (catalog, engines, harness, mapping V5) —
+   converge and harden.
+2. Unknown unit/CRS/null = unknown; never guess; typed diagnostic or refusal
+   when semantics depend on it.
+3. Stable IDs, never display names, identify wells/curves everywhere.
+4. RAW immutable; corrections produce DERIVED + DataRun.
+5. No fake barrier kriging; unsupported = reported unsupported.
+6. 100GB seismic explicitly out of scope.
+7. Windows/GitBash environment; reuse root checkout's native builds only if
+   ABI-compatible (cp312); native rebuilds bounded (CMAKE_BUILD_PARALLEL_LEVEL=2).
 
 ## Blocked Items
-(none yet)
+(none)
 
-## Notes
-- Build with PALEO_QGIS_BUILD_JOBS=2 (avoid OOM).
-- Do not touch main working tree; all work in worktree.
-
----
-
-# Task: Open Issues 清仓 + QGIS Workstation Convergence (2026-09-02)
-
-## Base
-- main @ 0e011bb5; worktree ../paleo-qgis-convergence, branch feat/qgis-workstation-convergence
-
-## Phases
-- [ ] A. Fix #1120–#1125, #1128 (lifecycle/layout/dock/data-flush) + #1127 tests
-- [ ] B. CRS authority: LayerManagerPanel._publish must not hardcode EPSG:4326
-- [ ] C. Layer properties / symbology / labeling into Composite (reuse MapLayerPropertiesDialog + bridge)
-- [ ] D. split/merge via vector_operations (session commands); topology via TopologyService
-- [ ] E. GeoTemplate field schemas (fault/facies/source/spreading/break/direction) + persistence
-- [ ] F. Attribute table + identify results panels
-- [ ] G. Per-layer snapping configuration dialog
-- [ ] H. Map status bar in composite (CRS/scale/coords/renderer/edit/snap)
-- [ ] I. Regression tests + 10k/50k/100k benchmark run
-- [ ] J. Review loop (blocker=0, high=0) → push → PR
+## Errors Encountered
+| Error | Attempt | Resolution |
+|-------|---------|------------|
+| well-log-engine submodule network clone failed | git submodule update --init --reference | manual local clone from main checkout + checkout gitlink commit — OK |
 
 ## Environment facts
-- Test env: /opt/miniconda3/bin/python3.13 + PySide6 6.11.1, offscreen; wrapper ./run_env.sh
-- qgis_render_bridge NOT built → fallback renderer active; all QGIS UI paths must probe & degrade
-- Baseline failures on main: test_dock_title_bar (visibility assert + _dock attr race), test_composite_editing::test_shell_exposes_digitizing_toolbar — both touched by #1122 work
-
----
-
-# Task: Convergence 收尾三件套 (2026-09-02, after merge to main)
-
-## Base
-- main @ fcaa9fc2 (feat/qgis-workstation-convergence fast-forward merged)
-
-## Phases
-- [x] A. 桥构建后的原生路径激活验证
-  - cp312 venv（PySide6 6.11.2 + editable bridge）导入 OK；`-m qgis` 67 passed / 8 skipped
-  - 桥启用全量套件：唯一桥致失败 = legacy 符号路径测试的环境假设 → monkeypatch 强制无桥
-  - 其余失败经无桥对照复现，均为机器/环境既有问题（native_compile_flags、
-    welllog_engine_native、e2e harness 等），与桥无关
-- [x] B. 会话内大图层增量快照
-  - VectorEditSession 修订日志（changes_since；1024 条保留窗，回滚/截断回落全量）
-  - snapshot_layers records 增量重建 + extent 会话内单调并集；会话首个 settle 复用
-    无会话缓存作修订 0 基线
-  - benchmark settle×10@100k = 18.8ms（≈1.9ms/settle，原全量重编码 ~230ms）
-- [x] C. 引用矢量图层导入 Composite
-  - ProjectDocument.workstation_reference_layers（复用 MapReferenceLayer）
-  - CompositeDocument：导入（GDAL）/移除/刷新/参与捕捉 + 快照（源修订缓存，muted 样式，
-    不可用诚实降级）+ 显示态回写 + 持久化往返 + 合成顺序 基础→引用→编修
-  - LayerManagerPanel：导入按钮 + 引用右键菜单；捕捉对话框参考点通道合并井位/引用
-- [x] D. 回归（composite/lifecycle/persistence/reference/-m qgis 全绿）+ 全量对照基线
-- [x] E. 无 CI（用户指示）
+- Worktree: C:\Users\wangj.KEVIN\projects\paleo-workbench\.worktrees\scientific-interpretation-v6
+- Windows, Git Bash; uv 0.10.9; project pins CPython >=3.12,<3.13
+- Root checkout .venv = cp312 (pytest 9.1.1) but editable installs point at
+  MAIN checkout — never use it for worktree tests; use worktree .venv
+- Native modules: check native/ + geo-viz-engine builds; fallback paths exist
