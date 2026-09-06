@@ -661,8 +661,14 @@ def test_well_log_overlay_from_correlation(tmp_path: Path, core_catalog):
     depth = np.asarray([0.0, 25.0, 50.0, 75.0, 100.0], dtype=np.float64)
     values = np.asarray([10.0, 20.0, 30.0, 40.0, 50.0], dtype=np.float64)
     curve = CurveData(name="GR", unit="API", depth=depth, values=values)
-    raw = WellLogData(
-        well_name="W0", top_depth=0.0, bottom_depth=100.0, curves=[curve]
+    from paleo_workbench.viz.well_log_load import WellLogDataWithDepthUnit
+
+    # V6 §3: unit envelope required for marker placement (meters declared).
+    raw = WellLogDataWithDepthUnit(
+        WellLogData(
+            well_name="W0", top_depth=0.0, bottom_depth=100.0, curves=[curve]
+        ),
+        "m",
     )
     # Real model rejects unknown fields
     with pytest.raises((ValueError, TypeError, AttributeError)):
@@ -742,11 +748,18 @@ def test_visualization_workspace_binds_project_for_overlay(
 
     depth = np.asarray([0.0, 10.0, 20.0], dtype=np.float64)
     values = np.asarray([1.0, 2.0, 3.0], dtype=np.float64)
-    data = WellLogData(
-        well_name="W0",
-        top_depth=0.0,
-        bottom_depth=20.0,
-        curves=[CurveData(name="GR", unit="API", depth=depth, values=values)],
+    from paleo_workbench.viz.well_log_load import WellLogDataWithDepthUnit
+
+    # V6 §3: production payloads carry a unit envelope (file loads and
+    # prediction-derived logs both wrap); the fixture declares meters.
+    data = WellLogDataWithDepthUnit(
+        WellLogData(
+            well_name="W0",
+            top_depth=0.0,
+            bottom_depth=20.0,
+            curves=[CurveData(name="GR", unit="API", depth=depth, values=values)],
+        ),
+        "m",
     )
     import paleo_workbench.workflow.correlation_overlay as ov
 

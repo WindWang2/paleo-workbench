@@ -205,6 +205,11 @@ class EngineCurveSubmission:
     display_range: tuple[float, float] = (0.0, 100.0)
     color: str = "#63b3ed"
     line_style: str = "solid"
+    # V6 §3: whether the depth unit came from a file declaration. When
+    # False, ``depth_unit`` is a display-only label (the native bridge
+    # requires a non-empty token) and unit-dependent consumers must treat
+    # the axis as UNKNOWN, never as the label's value.
+    depth_unit_declared: bool = True
 
 
 @dataclass(frozen=True)
@@ -304,14 +309,31 @@ _FT_UNITS = frozenset({"FT", "F", "FEET", "FOOT"})
 _M_UNITS = frozenset({"M", "METER", "METERS", "MTR", "MTRS"})
 
 
+def _depth_unit_envelope(value: Any) -> tuple[str, bool]:
+    """Classify the depth unit for engine submission.
+
+    Returns ``(unit_label, declared)``. The bridge contract needs a
+    non-empty "m"/"ft" token, so an UNKNOWN unit is submitted labeled "m"
+    for rendering with ``declared=False`` — the honesty lives in
+    ``EngineCurveSubmission.depth_unit_declared`` + plan diagnostics, so no
+    consumer can mistake the label for knowledge (V6 P0-3).
+    """
+    from paleo_workbench.workflow.well_science import classify_depth_unit
+
+    info = classify_depth_unit(value)
+    if info.known:
+        return info.unit, True  # type: ignore[return-value]
+    return "m", False
+
+
 def _normalize_depth_unit(value: Any) -> str:
-    """Map a depth-axis unit string to the engine contract ("m"/"ft")."""
-    unit = str(value or "").strip().upper()
-    if unit in _FT_UNITS:
-        return "ft"
-    if unit in _M_UNITS:
-        return "m"
-    return "m"
+    """Map a depth-axis unit string to the engine contract ("m"/"ft").
+
+    .. deprecated-semantics:: V6 §3
+        Unknown units previously coerced to "m" invisibly; use
+        :func:`_depth_unit_envelope` so the unknown state stays visible.
+    """
+    return _depth_unit_envelope(value)[0]
 
 
 def _pick_primary(curves: Iterable[Any]) -> tuple[int, str]:
@@ -420,7 +442,13 @@ def adapt_well_log_data(data: Any) -> EngineLoadPlan:
 
     primary_index, _ = _pick_primary(source_curves)
     document_id = stable_entity_id("document", well_name)
-    depth_unit = _normalize_depth_unit(getattr(data, "depth_unit", None))
+    depth_unit, depth_unit_declared = _depth_unit_envelope(
+        getattr(data, "depth_unit", None)
+    )
+    if not depth_unit_declared:
+        plan.diagnostics.append(
+            "depth-unit:unknown — engine label defaults to m for rendering only"
+        )
     for index, curve in enumerate(source_curves):
         mnemonic = str(getattr(curve, "name", "") or f"CURVE_{index}")
         unit = str(getattr(curve, "unit", "") or "unit")
@@ -446,6 +474,7 @@ def adapt_well_log_data(data: Any) -> EngineLoadPlan:
             null_indices=nulls,
             display_range=_display_range(curve),
             color=str(getattr(curve, "color", "") or _CURVE_COLORS.get(mnemonic.upper(), "#63b3ed")),
+            depth_unit_declared=depth_unit_declared,
         )
         plan.curves.append(submission)
         if index == primary_index:
@@ -744,6 +773,7 @@ def parity_snapshot(data: Any) -> dict[str, Any]:
                 "mnemonic": curve.mnemonic,
                 "unit": curve.value_unit,
                 "depth_unit": curve.depth_unit,
+                "depth_unit_declared": curve.depth_unit_declared,
                 "length": int(curve.depth.size),
                 "depth_first": float(curve.depth[0]) if curve.depth.size else None,
                 "depth_last": float(curve.depth[-1]) if curve.depth.size else None,

@@ -181,11 +181,26 @@ def build_tie_arrays(
         return None
 
     if well_log is not None:
+        # Sonic→TWT integration is defined over METRES of depth; an axis
+        # whose unit is unknown cannot be integrated honestly — the old
+        # silent meters assumption produced TWT wrong by ×3.28 on foot axes
+        # with undeclared units (V6 §3: refuse, don't guess).
+        from paleo_workbench.workflow.well_science import depth_unit_of
+
+        unit_info = depth_unit_of(well_log)
+        if not unit_info.known:
+            logging.getLogger(__name__).warning(
+                "well tie: depth-axis unit %s for %r — refusing sonic TWT "
+                "integration (declare DEPT.M/DEPT.FT to enable)",
+                "undeclared" if not unit_info.declared else f"unrecognized ({unit_info.raw!r})",
+                str(getattr(well_log, "well_name", "") or ""),
+            )
+            return None
         depths = _depth_axis(well_log, n_fallback)
         sonic_pair = _curve_arrays(well_log, _SONIC_NAMES)
         sonic_unit = sonic_pair[2] if sonic_pair is not None else ""
         dens_pair = _curve_arrays(well_log, _DENSITY_NAMES)
-        depth_unit = str(getattr(well_log, "depth_unit", "") or "")
+        depth_unit = unit_info.unit
     else:
         depths = np.linspace(1000.0, 2000.0, n_fallback, dtype=np.float64)
         sonic_pair = None

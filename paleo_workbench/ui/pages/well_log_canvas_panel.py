@@ -199,13 +199,18 @@ class WellLogCanvasPanel(QFrame):
         return self._backend
 
     def depth_cursor_unit(self) -> str:
-        """Depth-axis unit of the loaded document ("m" or the LAS-declared unit).
+        """Depth-axis unit of the loaded document ("m"/"ft", or "" if unknown).
 
         The linking contract publishes/consumes MD in METRES; a document
-        whose depth axis is ft (``WellLogDataWithDepthUnit``) is a different
-        unit domain and must not leak raw numbers into it.
+        whose depth axis is ft (``WellLogDataWithDepthUnit``) — or whose unit
+        is undeclared/unknown — is a different or indeterminate unit domain
+        and must not leak raw numbers into it (V6 §3: unknown is never
+        coerced to meters).
         """
-        return str(getattr(self.well_log_data, "depth_unit", "m") or "m")
+        from paleo_workbench.workflow.well_science import depth_unit_of
+
+        info = depth_unit_of(self.well_log_data)
+        return info.unit or ""
 
     def depth_cursor_unavailable_reason(self) -> str | None:
         """Why depth-cursor linking is off for this document (None = on).
@@ -213,9 +218,12 @@ class WellLogCanvasPanel(QFrame):
         Fail-closed on non-metre depth axes (review R1-M1): publishing a ft
         axis value as metres would navigate the calibrated seismic loop to a
         wrong TWT — refuse with the reason instead of guessing a conversion
-        the data never declared.
+        the data never declared. An UNKNOWN unit fails closed too (V6 §3):
+        a silent meters guess publishes numbers nobody declared.
         """
         unit = self.depth_cursor_unit()
+        if unit == "":
+            return "depth-unit:unknown"
         if unit != "m":
             return f"depth-unit:{unit}"
         return None
