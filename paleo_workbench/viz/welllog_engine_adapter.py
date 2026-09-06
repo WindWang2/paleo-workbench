@@ -278,28 +278,35 @@ def _freeze_float64(value: Any) -> np.ndarray:
 def _finite_pairs(
     depth: Any, values: Any
 ) -> tuple[np.ndarray, np.ndarray, tuple[int, ...]]:
-    """Align, safely normalize, and retain only finite depth/value pairs.
+    """Align and normalize curve buffers for engine submission (gap-honest).
 
-    ``np.isfinite`` replaces the previous Python sample loop.  Fully finite,
-    read-only typed buffers remain zero-copy candidates for the native bridge.
-    A null gap necessarily has a compact filtered copy because the native
-    SamplingAxis cannot contain a non-finite coordinate.
+    V6 §7 (P0-1): samples with a finite DEPTH stay on the axis even when
+    their VALUE is NaN — the native engine splits its LOD runs at non-finite
+    values (``valid_sample``) and never bridges prepared segments across a
+    gap, so a missing interval renders as a gap exactly like the legacy
+    QPainter path (``build_curve_path`` splits at NaN). The previous
+    filter+compact dropped those rows and the engine bridged them with a
+    straight line — a fabricated trend. Only non-finite DEPTHS are dropped:
+    the native SamplingAxis cannot hold a non-finite coordinate.
+
+    ``null_indices`` counts positions with non-finite values OR dropped
+    depths (indices into the pre-alignment arrays, diagnostics only).
     """
     d = _freeze_float64(depth)
     v = _freeze_float64(values)
     n = min(d.size, v.size)
     d = d[:n]
     v = v[:n]
-    valid = np.isfinite(d) & np.isfinite(v)
-    nulls = tuple(int(index) for index in np.flatnonzero(~valid))
-    if not valid.any():
+    valid_depth = np.isfinite(d)
+    nulls = tuple(int(index) for index in np.flatnonzero(~(valid_depth & np.isfinite(v))))
+    if not valid_depth.any():
         empty = np.empty(0, dtype=np.float64)
         empty.setflags(write=False)
         return empty, empty, nulls
-    if bool(valid.all()):
+    if bool(valid_depth.all()):
         return d, v, nulls
-    depth_out = np.ascontiguousarray(d[valid], dtype=np.float64)
-    values_out = np.ascontiguousarray(v[valid], dtype=np.float64)
+    depth_out = np.ascontiguousarray(d[valid_depth], dtype=np.float64)
+    values_out = np.ascontiguousarray(v[valid_depth], dtype=np.float64)
     depth_out.setflags(write=False)
     values_out.setflags(write=False)
     return depth_out, values_out, nulls
@@ -458,7 +465,9 @@ def adapt_well_log_data(data: Any) -> EngineLoadPlan:
             () if raw_depth is None else raw_depth,
             () if raw_values is None else raw_values,
         )
-        if depth.size == 0:
+        if depth.size == 0 or not bool(np.isfinite(values).any()):
+            # No finite values at all → nothing displayable (#402); a curve
+            # with at least one finite value KEEPS its NaN gaps (V6 §7).
             plan.diagnostics.append(f"curve_empty:{mnemonic}")
             continue
         curve_id = stable_entity_id("curve", well_name, mnemonic, str(index))
