@@ -376,6 +376,7 @@ class VolumeAttributeJob:
         *,
         band_inlines: int | None = None,
         use_gpu: bool = False,
+        on_band: Any = None,
     ):
         if name not in KERNELS:
             raise ValueError(f"unknown attribute kernel {name!r}")
@@ -389,6 +390,10 @@ class VolumeAttributeJob:
         self.band_inlines = int(band_inlines)
         self.use_gpu = use_gpu
         self.stats = AttributeJobStats()
+        # Optional per-band callback (#1222): the seismic lifecycle heartbeats
+        # its payload staging lease here so a multi-hour compute keeps GC
+        # from classifying the in-flight band files as stage orphans.
+        self.on_band = on_band
 
     # ------------------------------------------------------------ layout --
     def band_bounds(self) -> list[tuple[int, int]]:
@@ -610,6 +615,11 @@ class VolumeAttributeJob:
         n_il, n_xl, n_t = self.reader.shape
         for i0, i1 in bounds:
             ctx.check_cancelled()
+            if self.on_band is not None:
+                try:
+                    self.on_band()
+                except Exception:
+                    pass
             if i0 in finished:
                 self.stats.bands_done += 1
                 ctx.report_progress(self.stats.bands_done, self.stats.bands_total)

@@ -80,6 +80,30 @@ def _is_temp_name(name: str) -> bool:
     return name.endswith(_TEMP_SUFFIX) or name.startswith(_TEMP_PREFIXES)
 
 
+def _leased_prefixes(service) -> set[str]:
+    """Target prefixes currently guarded by an in-flight registration lease.
+
+    Payload bytes land on disk OUTSIDE the service lock and only become
+    document-referenced at the following metadata commit; without the lease
+    a concurrent explicit sweep classifies those live bytes as orphans
+    (#1222). Lease failure (missing table, locked store) degrades to the
+    pre-lease behavior — the set is simply empty.
+    """
+    index = getattr(service, "_index", None)
+    if index is None:
+        return set()
+    try:
+        return index.active_staging_targets()
+    except Exception:
+        return set()
+
+
+def _is_leased(rel: str, leased: set[str]) -> bool:
+    if not leased:
+        return False
+    return any(rel == t or rel.startswith(t + "/") for t in leased)
+
+
 def _walk_files(directory: Path) -> list[Path]:
     if not directory.is_dir():
         return []
@@ -108,6 +132,7 @@ def _plan_auto_gc(service) -> GcReport:
     project_path = service.project_path
     document = service.document
     referenced = {v.path for v in document.versions if v.managed}
+    leased = _leased_prefixes(service)
     stage_root = catalog_dir_for(project_path).parent
     skip_roots = _temp_scan_roots(project_path)
     for path in _walk_files(stage_root):
@@ -119,10 +144,15 @@ def _plan_auto_gc(service) -> GcReport:
             rel = path.relative_to(stage_root.parent).as_posix()
         except ValueError:
             rel = ""
-        if rel not in referenced:
+        if rel not in referenced and not _is_leased(rel, leased):
             report.items.append(GcItem(TEMP_ORPHAN, path, _safe_size(path)))
     for directory in _empty_dirs(stage_root):
-        report.items.append(GcItem(EMPTY_DIR, directory, 0))
+        try:
+            rel = directory.relative_to(stage_root.parent).as_posix()
+        except ValueError:
+            rel = ""
+        if not _is_leased(rel, leased):
+            report.items.append(GcItem(EMPTY_DIR, directory, 0))
     return report
 
 
@@ -137,6 +167,14 @@ def plan_gc(service, *, explicit: bool = True) -> GcReport:
     report = GcReport()
     project_path = service.project_path
     document = service.document
+    leased = _leased_prefixes(service)
+    # Dead leases (crashed registrations) are pruned so their payloads
+    # return to normal orphan classification instead of being guarded
+    # forever.
+    try:
+        service._index.prune_stale_staging_leases()
+    except Exception:
+        pass
 
     # 1. Stage payloads not referenced by any managed version path.
     referenced = {v.path for v in document.versions if v.managed}
@@ -149,7 +187,7 @@ def plan_gc(service, *, explicit: bool = True) -> GcReport:
                 rel = path.relative_to(stage_root.parent).as_posix()
             except ValueError:
                 continue
-            if rel not in referenced:
+            if rel not in referenced and not _is_leased(rel, leased):
                 report.items.append(
                     GcItem(STAGE_ORPHAN, path, _safe_size(path))
                 )
@@ -202,17 +240,29 @@ def plan_gc(service, *, explicit: bool = True) -> GcReport:
             rel = path.relative_to(stage_root.parent).as_posix()
         except ValueError:
             rel = ""
-        if rel not in referenced:
+        if rel not in referenced and not _is_leased(rel, leased):
             report.items.append(GcItem(TEMP_ORPHAN, path, _safe_size(path)))
 
     # 5. Unreferenced blobs (reachability GC on the content store).
     for digest in dedup.plan_blob_gc(project_path, document):
         blob_path = blob_dir_for(project_path) / digest[:2] / digest
-        report.items.append(GcItem(BLOB_ORPHAN, blob_path, _safe_size(blob_path)))
+        try:
+            rel = blob_path.relative_to(stage_root.parent).as_posix()
+        except ValueError:
+            rel = ""
+        if not _is_leased(rel, leased):
+            report.items.append(
+                GcItem(BLOB_ORPHAN, blob_path, _safe_size(blob_path))
+            )
 
     # 6. Empty directories under the payload dirs (crash leftovers).
     for directory in _empty_dirs(stage_root):
-        report.items.append(GcItem(EMPTY_DIR, directory, 0))
+        try:
+            rel = directory.relative_to(stage_root.parent).as_posix()
+        except ValueError:
+            rel = ""
+        if not _is_leased(rel, leased):
+            report.items.append(GcItem(EMPTY_DIR, directory, 0))
     return report
 
 
@@ -253,7 +303,9 @@ _EXPLICIT_SWEEPABLE = {
 }
 
 
-def sweep_gc(service, *, dry_run: bool = True, explicit: bool = False) -> GcReport:
+def sweep_gc(
+    service, *, dry_run: bool = True, explicit: bool = False, report: GcReport | None = None
+) -> GcReport:
     """Plan (dry_run=True) or perform a GC sweep.
 
     With ``explicit=False`` (the conservative sweep used on open) only stale
@@ -261,37 +313,65 @@ def sweep_gc(service, *, dry_run: bool = True, explicit: bool = False) -> GcRepo
     full safe set is swept: stage orphans, trash orphans and unreferenced
     blobs too. Working copies are never swept here (see
     :func:`cleanup_working_copies`).
+
+    A pre-computed *report* may be passed in; its items are re-validated
+    before deletion (#1222): the plan is a point-in-time snapshot, so every
+    chunk of deletions re-derives the referenced set and the active staging
+    leases under the service lock first. A payload registered (or leased by
+    an in-flight registration) after the plan was taken is skipped, closing
+    the plan→sweep TOCTOU and the place→commit window.
     """
-    report = plan_gc(service, explicit=explicit)
+    report = report if report is not None else plan_gc(service, explicit=explicit)
     sweepable = _EXPLICIT_SWEEPABLE if explicit else _AUTO_SWEEPABLE
+    candidates = [item for item in report.items if item.kind in sweepable]
     removed: list[GcItem] = []
-    for item in report.items:
-        if item.kind not in sweepable:
-            continue
-        if dry_run:
-            removed.append(item)
-            continue
-        try:
-            if item.path.is_dir():
-                item.path.rmdir()
-            else:
-                item.path.unlink()
-            removed.append(item)
-        except PermissionError:
-            # Read-only payload (blobs are content-addressed and immutable
-            # by contract): Windows refuses to unlink read-only files —
-            # clear the bit and retry once.
-            try:
-                item.path.chmod(item.path.stat().st_mode | stat.S_IWUSR)
-                if item.path.is_dir():
-                    item.path.rmdir()
-                else:
-                    item.path.unlink()
-                removed.append(item)
-            except OSError:
-                continue
-        except OSError:
-            continue
+    if dry_run:
+        return GcReport(candidates)
+    stage_root = catalog_dir_for(service.project_path).parent
+    # Chunked in-lock recheck: refresh the guards, delete up to _CHUNK items
+    # while holding the service lock (fast unlinks only), release, repeat.
+    # Registration commits interleave between chunks instead of waiting out
+    # the whole sweep.
+    chunk_size = 64
+    index = 0
+    while index < len(candidates):
+        chunk = candidates[index : index + chunk_size]
+        index += chunk_size
+        with service._lock:
+            referenced = {
+                v.path for v in service.document.versions if v.managed
+            }
+            leased = _leased_prefixes(service)
+            for item in chunk:
+                try:
+                    rel = item.path.relative_to(stage_root.parent).as_posix()
+                except ValueError:
+                    rel = ""
+                if rel in referenced or _is_leased(rel, leased):
+                    continue  # registered or staged since the plan — keep it
+                try:
+                    if item.path.is_dir():
+                        item.path.rmdir()
+                    else:
+                        item.path.unlink()
+                    removed.append(item)
+                except PermissionError:
+                    # Read-only payload (blobs are content-addressed and
+                    # immutable by contract): Windows refuses to unlink
+                    # read-only files — clear the bit and retry once.
+                    try:
+                        item.path.chmod(
+                            item.path.stat().st_mode | stat.S_IWUSR
+                        )
+                        if item.path.is_dir():
+                            item.path.rmdir()
+                        else:
+                            item.path.unlink()
+                        removed.append(item)
+                    except OSError:
+                        continue
+                except OSError:
+                    continue
     return GcReport(removed)
 
 

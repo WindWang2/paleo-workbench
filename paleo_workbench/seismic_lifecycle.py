@@ -575,7 +575,36 @@ def start_attribute_job(
     band_inlines = derive_band_inlines(
         tuple(reader.shape), halo=attribute_halo(attribute), budget_bytes=budget_bytes
     )
-    job = VolumeAttributeJob(reader, work_root, attribute, band_inlines=band_inlines)
+    # #1222: the work root lives INSIDE the derived stage tree and stays
+    # unreferenced for the whole (possibly multi-hour) compute; a staging
+    # lease keeps a concurrent explicit GC sweep from classifying the
+    # in-flight band files as stage orphans. Heartbeats ride the per-band
+    # callback so long jobs never age past the lease TTL.
+    lease_id = None
+    try:
+        project_dir = Path(catalog.project_path).expanduser().resolve().parent
+        lease_target = work_root.resolve().relative_to(project_dir).as_posix()
+        lease_id = catalog._index.acquire_staging_lease(
+            (lease_target,), kind="seismic.attribute"
+        )
+    except Exception:
+        lease_id = None
+
+    def _heartbeat_lease():
+        if lease_id is not None:
+            catalog._index.heartbeat_staging_lease(lease_id)
+
+    def _release_lease():
+        if lease_id is not None:
+            try:
+                catalog._index.release_staging_lease(lease_id)
+            except Exception:
+                pass
+
+    job = VolumeAttributeJob(
+        reader, work_root, attribute, band_inlines=band_inlines,
+        on_band=_heartbeat_lease,
+    )
 
     run = catalog.register_run(
         f"attribute:{attribute}",
@@ -591,20 +620,27 @@ def start_attribute_job(
 
     def on_done(stats):
         if stats is None:
+            _release_lease()
             return
-        derived = catalog.register_derived_store(
-            name=f"{attribute} attribute volume",
-            store_path=work_root,
-            run_id=run.id,
-            parent_version_ids=[source_version_id],
-            type="seismic-attribute",
-            format="zarr-v3",
-            version_metadata={
-                "attribute": attribute,
-                "source_version_id": source_version_id,
-                "shape": stats.get("bands") and list(reader.shape),
-            },
-        )
+        try:
+            derived = catalog.register_derived_store(
+                name=f"{attribute} attribute volume",
+                store_path=work_root,
+                run_id=run.id,
+                parent_version_ids=[source_version_id],
+                type="seismic-attribute",
+                format="zarr-v3",
+                version_metadata={
+                    "attribute": attribute,
+                    "source_version_id": source_version_id,
+                    "shape": stats.get("bands") and list(reader.shape),
+                },
+            )
+        finally:
+            # The register either moved the store (registered → protected by
+            # reference) or raised (work root stays as an orphan candidate
+            # again); either way the in-flight lease ends here.
+            _release_lease()
         try:
             catalog.update_run_status(
                 run.id, "complete", extra_parameters={"derived_version_id": derived.id}
@@ -618,6 +654,7 @@ def start_attribute_job(
                 logger.exception("derived hook failed for attribute %s", attribute)
 
     def on_fail(exc):
+        _release_lease()
         try:
             catalog.update_run_status(
                 run.id, "failed", extra_parameters={"error": f"{type(exc).__name__}: {exc}"}
@@ -626,6 +663,7 @@ def start_attribute_job(
             logger.exception("attribute run status update failed")
 
     def on_cancel():
+        _release_lease()
         try:
             catalog.update_run_status(run.id, "cancelled")
         except Exception:

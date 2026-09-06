@@ -27,6 +27,7 @@ import json
 import os
 import threading
 from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -1545,6 +1546,48 @@ class DataCatalogService:
         ]
         return max(numbers, default=0) + 1
 
+    def _staging_target(self, stage: DataStage | None, asset_id: str | None) -> str:
+        """Project-relative posix prefix of a payload target dir (lease key).
+
+        Matches the rel-path convention GC computes for orphan candidates:
+        ``<name>.artifacts/<stage>/<asset_id>``.
+        """
+        parts = [artifact_dir_for(self.project_path).name]
+        if stage is not None:
+            parts.append(stage.value)
+        if asset_id is not None:
+            parts.append(asset_id)
+        return "/".join(parts)
+
+    def _blob_staging_target(self) -> str:
+        return f"{artifact_dir_for(self.project_path).name}/blobs"
+
+    @contextmanager
+    def _payload_staging_lease(self, *targets: str, kind: str = "register"):
+        """Bridge the place-on-disk → metadata-commit window (#1222).
+
+        Payload bytes land outside the service lock by design; until the
+        metadata transaction references them, a concurrent explicit GC sweep
+        would classify them as orphans. The lease records ownership of the
+        target dirs; GC skips leased paths and re-validates under this
+        service's lock before every deletion chunk. Best-effort: when the
+        lease store is unavailable the registration proceeds with the
+        pre-lease semantics instead of failing.
+        """
+        lease_id: str | None = None
+        try:
+            lease_id = self._index.acquire_staging_lease(targets, kind)
+        except Exception:
+            lease_id = None
+        try:
+            yield lease_id
+        finally:
+            if lease_id is not None:
+                try:
+                    self._index.release_staging_lease(lease_id)
+                except Exception:
+                    pass
+
     def _build_version(
         self,
         asset: DataAsset,
@@ -1642,62 +1685,70 @@ class DataCatalogService:
                     raise ImmutableVersionError(
                         f"Version {version_id} is already committed and immutable"
                     )
-        # Copy+hash+fsync — no lock held while the bytes land on disk.
-        version, payload = self._build_version(
-            asset, source_path, stage,
-            version_id=version_id,
-            parent_version_ids=list(parent_version_ids),
-            run_id=run_id, metadata=metadata, move=move,
-            known_sha256=known_sha256,
-            register_blob=_register_blob,
-        )
-        with self._lock:
-            try:
-                asset = self._asset_or_raise(asset_id)
-            except CatalogError:
-                self._rollback(
-                    payload=payload, restore_payload_to=_restore_payload_to,
-                )
-                raise
-            if any(v.id == version.id for v in self.document.versions):
-                self._rollback(
-                    payload=payload, restore_payload_to=_restore_payload_to,
-                )
-                raise ImmutableVersionError(
-                    f"Version {version.id} is already committed and immutable"
-                )
-            run: DataRun | None = None
-            if run_id is not None:
+        # Copy+hash+fsync — no lock held while the bytes land on disk. The
+        # staging lease (#1222) marks the target dir (and the blob root for
+        # dedup imports) as in-flight for the whole place→commit window so a
+        # concurrent explicit GC sweep cannot delete live-but-uncommitted
+        # bytes; it is released only after the metadata transaction commits.
+        _lease_targets = [self._staging_target(stage, asset_id)]
+        if _register_blob:
+            _lease_targets.append(self._blob_staging_target())
+        with self._payload_staging_lease(*_lease_targets):
+            version, payload = self._build_version(
+                asset, source_path, stage,
+                version_id=version_id,
+                parent_version_ids=list(parent_version_ids),
+                run_id=run_id, metadata=metadata, move=move,
+                known_sha256=known_sha256,
+                register_blob=_register_blob,
+            )
+            with self._lock:
                 try:
-                    run = self.get_run(run_id)
+                    asset = self._asset_or_raise(asset_id)
                 except CatalogError:
                     self._rollback(
                         payload=payload, restore_payload_to=_restore_payload_to,
                     )
                     raise
-            version.version_number = self._next_version_number(asset.id)
-            previous_current = asset.current_version_id
-            self._add_version(version)
-            asset.current_version_id = version.id
-            run_output_added = False
-            if run is not None and version.id not in run.output_version_ids:
-                run.output_version_ids.append(version.id)
-                run_output_added = True
-            _dirty = DirtySet(assets={asset.id: None}, versions={version.id: None})
-            if run is not None:
-                _dirty.mark_runs(run.id)
-            try:
-                self._save(_dirty)
-            except Exception:
-                if run is not None and run_output_added:
-                    run.output_version_ids.remove(version.id)
-                self._rollback(
-                    versions=[version], payload=payload,
-                    restore_current=(asset, previous_current),
-                    restore_payload_to=_restore_payload_to,
-                )
-                raise
-            return version
+                if any(v.id == version.id for v in self.document.versions):
+                    self._rollback(
+                        payload=payload, restore_payload_to=_restore_payload_to,
+                    )
+                    raise ImmutableVersionError(
+                        f"Version {version.id} is already committed and immutable"
+                    )
+                run: DataRun | None = None
+                if run_id is not None:
+                    try:
+                        run = self.get_run(run_id)
+                    except CatalogError:
+                        self._rollback(
+                            payload=payload, restore_payload_to=_restore_payload_to,
+                        )
+                        raise
+                version.version_number = self._next_version_number(asset.id)
+                previous_current = asset.current_version_id
+                self._add_version(version)
+                asset.current_version_id = version.id
+                run_output_added = False
+                if run is not None and version.id not in run.output_version_ids:
+                    run.output_version_ids.append(version.id)
+                    run_output_added = True
+                _dirty = DirtySet(assets={asset.id: None}, versions={version.id: None})
+                if run is not None:
+                    _dirty.mark_runs(run.id)
+                try:
+                    self._save(_dirty)
+                except Exception:
+                    if run is not None and run_output_added:
+                        run.output_version_ids.remove(version.id)
+                    self._rollback(
+                        versions=[version], payload=payload,
+                        restore_current=(asset, previous_current),
+                        restore_payload_to=_restore_payload_to,
+                    )
+                    raise
+                return version
 
     def register_intermediate(
         self, asset_id: str, source_path: str | Path, **kwargs: Any
@@ -1758,35 +1809,40 @@ class DataCatalogService:
             asset = self._new_asset(name, type, format, asset_metadata)
         # Copy+hash+fsync of the payload — no lock held while the bytes land
         # on disk, so GUI-thread catalog calls never wait for worker I/O.
-        version, payload = self._build_version(
-            asset, source_path, stage,
-            version_id=None,
-            parent_version_ids=parents,
-            run_id=run_id,
-            metadata=version_metadata,
-            move=False,
-        )
-        with self._lock:
-            self._add_asset(asset)
-            self._add_version(version)
-            asset.current_version_id = version.id
-            run_output_added = False
-            if run is not None and version.id not in run.output_version_ids:
-                run.output_version_ids.append(version.id)
-                run_output_added = True
-            _dirty = DirtySet(assets={asset.id: None}, versions={version.id: None})
-            if run is not None:
-                _dirty.mark_runs(run.id)
-            try:
-                self._save(_dirty)
-            except Exception:
-                if run_output_added:
-                    run.output_version_ids.remove(version.id)
-                self._rollback(
-                    assets=[asset], versions=[version], payload=payload,
-                )
-                raise
-            return version
+        # The staging lease (#1222) guards the target dir through the
+        # place→commit window against a concurrent explicit GC sweep.
+        with self._payload_staging_lease(
+            self._staging_target(stage, asset.id), kind="register"
+        ):
+            version, payload = self._build_version(
+                asset, source_path, stage,
+                version_id=None,
+                parent_version_ids=parents,
+                run_id=run_id,
+                metadata=version_metadata,
+                move=False,
+            )
+            with self._lock:
+                self._add_asset(asset)
+                self._add_version(version)
+                asset.current_version_id = version.id
+                run_output_added = False
+                if run is not None and version.id not in run.output_version_ids:
+                    run.output_version_ids.append(version.id)
+                    run_output_added = True
+                _dirty = DirtySet(assets={asset.id: None}, versions={version.id: None})
+                if run is not None:
+                    _dirty.mark_runs(run.id)
+                try:
+                    self._save(_dirty)
+                except Exception:
+                    if run_output_added:
+                        run.output_version_ids.remove(version.id)
+                    self._rollback(
+                        assets=[asset], versions=[version], payload=payload,
+                    )
+                    raise
+                return version
 
     # -- import / link / materialize -----------------------------------------
 
@@ -2153,21 +2209,28 @@ class DataCatalogService:
                 else []
             )
         if asset_id is None:
-            # Lock across append + register (#517): mirrors _register_produced.
+            # #1218: the payload move+hash must NOT run with the service lock
+            # held (a GB-scale working copy would freeze every concurrent
+            # catalog call for the whole I/O). The asset is appended first so
+            # register_version can resolve it, and rolled back on failure —
+            # the unlocked document-scan window (asset without a version for
+            # the copy duration) is served consistently by every SQL-backed
+            # read path, which only see committed state.
             with self._lock:
                 asset = self._new_asset(name or working_path.stem, None, None, metadata)
                 self._add_asset(asset)
-                try:
-                    return self.register_version(
-                        asset.id, working_path, stage,
-                        parent_version_ids=parent_version_ids,
-                        run_id=run_id, metadata=metadata, move=True,
-                        _restore_payload_to=working_path,
-                    )
-                except Exception:
+            try:
+                return self.register_version(
+                    asset.id, working_path, stage,
+                    parent_version_ids=parent_version_ids,
+                    run_id=run_id, metadata=metadata, move=True,
+                    _restore_payload_to=working_path,
+                )
+            except Exception:
+                with self._lock:
                     if asset in self.document.assets:
                         self._remove_asset(asset)
-                    raise
+                raise
         version_metadata = dict(metadata or {})
         if name:
             version_metadata["name"] = name
@@ -2213,6 +2276,8 @@ class DataCatalogService:
         # Build everything up front so a single save commits asset + version +
         # run atomically — a failure must not leave an orphaned version or
         # payload behind (review finding: two-phase save was not atomic).
+        # The staging lease (#1222) spans build → commit so a concurrent
+        # explicit GC sweep cannot classify the not-yet-committed payload.
         run: DataRun | None = None
         if operation is not None:
             run = DataRun(
@@ -2221,34 +2286,39 @@ class DataCatalogService:
                 parameters=dict(parameters or {}),
                 generator=generator,
             )
-        version, payload = self._build_version(
-            asset, source_path, DataStage.DERIVED,
-            version_id=None,
-            parent_version_ids=[p.id for p in parents],
-            run_id=run.id if run else None, metadata=metadata, move=False,
-        )
-        if run is not None:
-            run.output_version_ids = [version.id]
-        # Commit under the lock (#517); the payload copy/hash above stays
-        # outside so the lock is never held across disk I/O.
-        with self._lock:
-            self._add_asset(asset)
-            self._add_version(version)
-            asset.current_version_id = version.id
+        with self._payload_staging_lease(
+            self._staging_target(DataStage.DERIVED, asset.id)
+        ):
+            version, payload = self._build_version(
+                asset, source_path, DataStage.DERIVED,
+                version_id=None,
+                parent_version_ids=[p.id for p in parents],
+                run_id=run.id if run else None, metadata=metadata, move=False,
+            )
             if run is not None:
-                self._add_run(run)
-            _dirty = DirtySet(assets={asset.id: None}, versions={version.id: None})
-            if run is not None:
-                _dirty.mark_runs(run.id)
-            try:
-                self._save(_dirty)
-            except Exception:
-                self._rollback(
-                    assets=[asset], versions=[version],
-                    runs=[run] if run else [], payload=payload,
+                run.output_version_ids = [version.id]
+            # Commit under the lock (#517); the payload copy/hash above stays
+            # outside so the lock is never held across disk I/O.
+            with self._lock:
+                self._add_asset(asset)
+                self._add_version(version)
+                asset.current_version_id = version.id
+                if run is not None:
+                    self._add_run(run)
+                _dirty = DirtySet(
+                    assets={asset.id: None}, versions={version.id: None}
                 )
-                raise
-            return version
+                if run is not None:
+                    _dirty.mark_runs(run.id)
+                try:
+                    self._save(_dirty)
+                except Exception:
+                    self._rollback(
+                        assets=[asset], versions=[version],
+                        runs=[run] if run else [], payload=payload,
+                    )
+                    raise
+                return version
 
     def register_run(
         self,
@@ -3206,42 +3276,46 @@ class DataCatalogService:
                 "note": note,
             },
         )
-        version, payload = self._build_version(
-            asset, source_payload, to_stage,
-            version_id=None,
-            parent_version_ids=[source.id],
-            run_id=run.id,
-            metadata={
-                "promoted_from": source.id,
-                "reviewed_by": reviewed_by,
-                "note": note,
-            },
-            move=False,
-        )
-        run.output_version_ids = [version.id]
-        # Commit under the lock (#517); the payload build above stays outside.
-        # Version numbers are re-allocated INSIDE the lock (mirroring
-        # register_version): the number computed in ``_build_version`` ran
-        # outside it, so concurrent promotes of the same asset could both
-        # compute max+1 and commit duplicates [1,2,2] (audit #849-1).
-        with self._lock:
-            version.version_number = self._next_version_number(asset.id)
-            self._add_version(version)
-            self._add_run(run)
-            asset.current_version_id = version.id
-            try:
-                self._save(
-                    DirtySet(
-                        assets={asset.id}, versions={version.id}, runs={run.id}
+        # Staging lease (#1222) spans the payload copy → commit window.
+        with self._payload_staging_lease(
+            self._staging_target(to_stage, asset.id)
+        ):
+            version, payload = self._build_version(
+                asset, source_payload, to_stage,
+                version_id=None,
+                parent_version_ids=[source.id],
+                run_id=run.id,
+                metadata={
+                    "promoted_from": source.id,
+                    "reviewed_by": reviewed_by,
+                    "note": note,
+                },
+                move=False,
+            )
+            run.output_version_ids = [version.id]
+            # Commit under the lock (#517); the payload build above stays outside.
+            # Version numbers are re-allocated INSIDE the lock (mirroring
+            # register_version): the number computed in ``_build_version`` ran
+            # outside it, so concurrent promotes of the same asset could both
+            # compute max+1 and commit duplicates [1,2,2] (audit #849-1).
+            with self._lock:
+                version.version_number = self._next_version_number(asset.id)
+                self._add_version(version)
+                self._add_run(run)
+                asset.current_version_id = version.id
+                try:
+                    self._save(
+                        DirtySet(
+                            assets={asset.id}, versions={version.id}, runs={run.id}
+                        )
                     )
-                )
-            except Exception:
-                self._rollback(
-                    versions=[version], runs=[run], payload=payload,
-                    restore_current=(asset, previous_current),
-                )
-                raise
-            return version
+                except Exception:
+                    self._rollback(
+                        versions=[version], runs=[run], payload=payload,
+                        restore_current=(asset, previous_current),
+                    )
+                    raise
+                return version
 
     def promote_asset(
         self,

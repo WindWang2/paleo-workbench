@@ -586,41 +586,46 @@ class CoreCatalogAdapter:
         else:
             # New asset: build the version with no lock held, then commit
             # asset+version+run linkage in one locked save (the
-            # register_result_asset pattern — no zero-version window).
-            version, payload = service._build_version(
-                asset,
-                Path(path),
-                stage,
-                version_id=None,
-                parent_version_ids=parents,
-                run_id=run.id,
-                metadata=None,
-                move=False,
-                known_sha256=checksum,
-            )
-            with service._lock:
-                run_output_added = False
-                service._add_asset(asset)
-                try:
-                    service._add_version(version)
-                    asset.current_version_id = version.id
-                    if version.id not in run.output_version_ids:
-                        run.output_version_ids.append(version.id)
-                        run_output_added = True
-                    # #1138: known mutation scope — asset+version rows plus
-                    # the run linkage, never a full reconcile.
-                    service._save(DirtySet(
-                        assets={asset.id: None},
-                        versions={version.id: None},
-                        runs={run.id: None},
-                    ))
-                except Exception:
-                    if run_output_added:
-                        run.output_version_ids.remove(version.id)
-                    if asset in service.document.assets:
-                        service._remove_asset(asset)
-                    service._rollback(payload=payload)
-                    raise
+            # register_result_asset pattern — no zero-version window). The
+            # staging lease (#1222) guards the target dir across the
+            # lock-free placement → commit window.
+            with service._payload_staging_lease(
+                service._staging_target(stage, asset.id)
+            ):
+                version, payload = service._build_version(
+                    asset,
+                    Path(path),
+                    stage,
+                    version_id=None,
+                    parent_version_ids=parents,
+                    run_id=run.id,
+                    metadata=None,
+                    move=False,
+                    known_sha256=checksum,
+                )
+                with service._lock:
+                    run_output_added = False
+                    service._add_asset(asset)
+                    try:
+                        service._add_version(version)
+                        asset.current_version_id = version.id
+                        if version.id not in run.output_version_ids:
+                            run.output_version_ids.append(version.id)
+                            run_output_added = True
+                        # #1138: known mutation scope — asset+version rows plus
+                        # the run linkage, never a full reconcile.
+                        service._save(DirtySet(
+                            assets={asset.id: None},
+                            versions={version.id: None},
+                            runs={run.id: None},
+                        ))
+                    except Exception:
+                        if run_output_added:
+                            run.output_version_ids.remove(version.id)
+                        if asset in service.document.assets:
+                            service._remove_asset(asset)
+                        service._rollback(payload=payload)
+                        raise
         with service._lock:
             for tag in tags or []:
                 if tag:

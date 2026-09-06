@@ -37,3 +37,24 @@
 - Tests: tests/test_catalog_transaction_cas.py (TOCTOU window sim, unscoped
   reconcile refusal, rebuild guard, REAL subprocess commit, batch atomicity)
 - Regression: 134 catalog tests green.
+
+## PHASE 5 complete — payload staging leases + GC coordination (#1222, #1218)
+- db.py: staging_leases table (connect-time idempotent + _SCHEMA_DDL +
+  _DELETE_ORDER); acquire/release/heartbeat/active_staging_targets(ttl=1h)/
+  prune_stale methods
+- gc.py: plan skips leased prefixes (stage/temp/blob/empty-dir, auto+explicit);
+  sweep_gc(report=None) re-validates referenced+leased under service lock in
+  64-item chunks (closes plan→sweep TOCTOU AND place→commit window);
+  stale leases pruned at explicit plan
+- service.py: _payload_staging_lease ctx + _staging_target/_blob_staging_target;
+  wired register_version (incl. blob-root target), register_result_asset,
+  create_derived, promote_version; commit_working_copy(asset_id=None)
+  restructured — payload IO no longer under the lock (#1218)
+- adapter _register_produced leased; seismic attribute job: lease acquired at
+  start, per-band heartbeat (VolumeAttributeJob.on_band), released in
+  on_done/on_fail/on_cancel; harness mapping npz lease around write+register
+- register_derived_store needs no lease (move+commit already fully in-lock,
+  protected by chunked recheck)
+- Tests: tests/test_catalog_gc_registration_race.py (adversarial register||
+  sweep, stale-report sweep, lease TTL expiry, blob survival, #1218 lock
+  release during IO). 118-test regression green.

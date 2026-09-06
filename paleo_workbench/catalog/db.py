@@ -307,10 +307,25 @@ _SCHEMA_DDL = [
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
     )""",
+    # Payload staging leases (#1222): bridge the place-on-disk → metadata-commit
+    # window. Payload bytes land OUTSIDE the service lock by design; the lease
+    # tells GC "an in-flight registration owns this target" so a concurrent
+    # explicit sweep cannot classify the live payload as an orphan. Transient
+    # table: rows die at release, or expire via heartbeat TTL after a crash.
+    """CREATE TABLE IF NOT EXISTS staging_leases (
+        lease_id TEXT NOT NULL,
+        target TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'register',
+        acquired_at TEXT NOT NULL,
+        heartbeat_at TEXT NOT NULL,
+        PRIMARY KEY (lease_id, target)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_staging_leases_target ON staging_leases(target)",
 ]
 
 # Children first so a future PRAGMA foreign_keys=ON stays safe.
 _DELETE_ORDER = [
+    "staging_leases",
     "lineage",
     "version_tags",
     "asset_tags",
@@ -856,6 +871,17 @@ class CatalogIndex:
             "CREATE INDEX IF NOT EXISTS idx_assets_updated_name_id ON assets(updated_at, name, id)",
             "CREATE INDEX IF NOT EXISTS idx_versions_asset_version ON versions(asset_id, version_number)",
             "CREATE INDEX IF NOT EXISTS idx_lineage_parent ON lineage(parent_version_id, child_version_id)",
+            # #1222: the lease table must exist on ANY store this code opens
+            # (existing stores predate it and never rebuild for this).
+            """CREATE TABLE IF NOT EXISTS staging_leases (
+                lease_id TEXT NOT NULL,
+                target TEXT NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'register',
+                acquired_at TEXT NOT NULL,
+                heartbeat_at TEXT NOT NULL,
+                PRIMARY KEY (lease_id, target)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_staging_leases_target ON staging_leases(target)",
         ):
             try:
                 conn.execute(ddl)
@@ -937,6 +963,119 @@ class CatalogIndex:
             return int(raw)
         except ValueError:
             return None
+
+    # -- payload staging leases (#1222) ---------------------------------------
+
+    # A lease older than this without a heartbeat is presumed dead (process
+    # crashed mid-registration); GC stops honoring it and the payload it
+    # guarded is classified by the normal orphan rules.
+    STAGING_LEASE_TTL_SECONDS = 3600.0
+
+    def acquire_staging_lease(
+        self, targets: "tuple[str, ...] | list[str]", kind: str = "register"
+    ) -> str | None:
+        """Record an in-flight registration's ownership of *targets*.
+
+        Targets are project-relative posix directory prefixes (e.g.
+        ``demo.artifacts/raw/asset_x``); GC skips any candidate whose path
+        falls under an active lease. Returns the lease id, or None when the
+        lease table is unavailable — leases are protection, not a gate, so
+        registration proceeds (pre-lease behavior) rather than failing.
+        """
+        import uuid
+        from datetime import datetime, timedelta
+
+        lease_id = uuid.uuid4().hex
+        now = datetime.now().isoformat(timespec="seconds")
+        conn = self._connect()
+        if not self._schema_present(conn):
+            return None
+        try:
+            if conn.in_transaction:
+                conn.rollback()
+            conn.execute("BEGIN IMMEDIATE")
+            conn.executemany(
+                "INSERT OR REPLACE INTO staging_leases"
+                " (lease_id, target, kind, acquired_at, heartbeat_at)"
+                " VALUES (?,?,?,?,?)",
+                [(lease_id, str(t), kind, now, now) for t in targets],
+            )
+            conn.execute("COMMIT")
+            return lease_id
+        except sqlite3.Error:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            return None
+
+    def release_staging_lease(self, lease_id: str) -> None:
+        conn = self._connect()
+        try:
+            with conn:
+                conn.execute(
+                    "DELETE FROM staging_leases WHERE lease_id = ?", (lease_id,)
+                )
+        except sqlite3.Error:
+            pass
+
+    def heartbeat_staging_lease(self, lease_id: str) -> None:
+        """Refresh a long-running lease (multi-hour computes)."""
+        from datetime import datetime
+
+        conn = self._connect()
+        try:
+            with conn:
+                conn.execute(
+                    "UPDATE staging_leases SET heartbeat_at = ? WHERE lease_id = ?",
+                    (datetime.now().isoformat(timespec="seconds"), lease_id),
+                )
+        except sqlite3.Error:
+            pass
+
+    def active_staging_targets(
+        self, ttl_seconds: float | None = None
+    ) -> set[str]:
+        """Target prefixes guarded by a lease with a fresh heartbeat."""
+        from datetime import datetime, timedelta
+
+        ttl = (
+            self.STAGING_LEASE_TTL_SECONDS if ttl_seconds is None else ttl_seconds
+        )
+        cutoff = (
+            datetime.now() - timedelta(seconds=ttl)
+        ).isoformat(timespec="seconds")
+        try:
+            rows = self._read_rows(
+                "SELECT DISTINCT target FROM staging_leases WHERE heartbeat_at > ?",
+                (cutoff,),
+            )
+        except Exception:
+            return set()
+        return {row["target"] for row in rows}
+
+    def prune_stale_staging_leases(
+        self, ttl_seconds: float | None = None
+    ) -> int:
+        """Drop dead leases (crashed registrations); returns rows removed."""
+        from datetime import datetime, timedelta
+
+        ttl = (
+            self.STAGING_LEASE_TTL_SECONDS if ttl_seconds is None else ttl_seconds
+        )
+        cutoff = (
+            datetime.now() - timedelta(seconds=ttl)
+        ).isoformat(timespec="seconds")
+        conn = self._connect()
+        try:
+            with conn:
+                cur = conn.execute(
+                    "DELETE FROM staging_leases WHERE heartbeat_at <= ?",
+                    (cutoff,),
+                )
+                return cur.rowcount or 0
+        except sqlite3.Error:
+            return 0
 
     def is_fresh(self, document: CatalogDocument) -> bool:
         """True when the index matches *document*'s revision and schema."""
