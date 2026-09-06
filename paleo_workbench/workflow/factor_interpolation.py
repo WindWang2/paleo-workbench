@@ -32,7 +32,11 @@ import math
 from collections import defaultdict
 from typing import Any
 
+import logging
+
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from geoviz import (  # re-exported for tests / callers — facade only
     extract_xy_values,
@@ -52,6 +56,10 @@ from paleo_workbench.project.models import FactorMapTask, ProjectDocument
 from paleo_workbench.workflow.constrained_idw_adapter import (
     CONSTRAINED_IDW_ENGINE_LABEL,
     run_constrained_idw,
+)
+from paleo_workbench.workflow.constraint_capabilities import (
+    ConstraintKind,
+    evaluate_request,
 )
 from paleo_workbench.workflow.constraints import (
     break_polylines_for_idw,
@@ -193,6 +201,7 @@ def _attach_result_to_task(
     breaks: list | None,
     engine_method: str,
     fingerprints: FactorFingerprints | None = None,
+    constraint_eval=None,
 ) -> FactorMapTask:
     """Write live cache + small metadata onto *task* (no full-grid lists).
 
@@ -229,6 +238,14 @@ def _attach_result_to_task(
     grid_result.algorithm_parameters["distance_policy"] = policy["policy"]
     grid_result.algorithm_parameters["distance_policy_annotation"] = policy["annotation"]
 
+    # V6 §10: the requested/applied/ignored constraint record travels with
+    # the grid (algorithm parameters → artifact metadata) AND the task
+    # (parameters → provenance) — a dropped constraint can never disappear.
+    if constraint_eval is not None:
+        grid_result.algorithm_parameters["constraint_diagnostics"] = (
+            constraint_eval.as_dict()
+        )
+
     clear_live_factor_grid(task.id)
     store_live_factor_grid(task.id, grid_result)
 
@@ -245,6 +262,14 @@ def _attach_result_to_task(
     params["power"] = float(result["power"]) if result.get("power") is not None else power
     if result.get("grid_n") is not None:
         params["grid_n"] = int(result["grid_n"])
+    if constraint_eval is not None:
+        record = constraint_eval.as_dict()
+        # Merge backend-reported ignorances (engine may drop constraints
+        # the host routing believed were consumed — V6 §10 single record).
+        for entry in result.get("ignored_constraints") or []:
+            if entry not in record["constraint_diagnostics"]:
+                record["constraint_diagnostics"].append(f"engine:{entry}")
+        params["constraint_diagnostics"] = record
     params["n_break_lines"] = result.get("n_break_lines", 0)
     if result.get("n_direction_lines") is not None:
         params["n_direction_lines"] = result.get("n_direction_lines")
@@ -380,6 +405,44 @@ def interpolation_params_from_task(task: "FactorMapTask") -> tuple[str, int, flo
     return method, grid_n, power
 
 
+def _requested_constraint_kinds(
+    *,
+    layers,
+    breaks,
+    directions,
+    points: list,
+    task: FactorMapTask,
+) -> list[ConstraintKind]:
+    """Which geological constraints the user actually asked for (V6 §10)."""
+    from paleo_workbench.workflow.constraints import boundary_rings_for_engine
+
+    kinds: list[ConstraintKind] = []
+    if breaks:
+        kinds.append(ConstraintKind.BARRIER)
+    if directions:
+        kinds.append(ConstraintKind.DIRECTION)
+        kinds.append(ConstraintKind.ANISOTROPY)
+    if layers is not None and boundary_rings_for_engine(
+        layers, target_horizon=task.target_horizon
+    ):
+        kinds.append(ConstraintKind.BOUNDARY_MASK)
+    params = task.parameters or {}
+    if params.get("azimuth_deg") is not None and not directions:
+        kinds.append(ConstraintKind.ANISOTROPY)
+    if any(
+        isinstance(pt, dict) and (pt.get("q") is not None or pt.get("b_i") is not None)
+        for pt in points
+    ):
+        kinds.append(ConstraintKind.TREND)
+    seen: set[ConstraintKind] = set()
+    unique: list[ConstraintKind] = []
+    for kind in kinds:
+        if kind not in seen:
+            seen.add(kind)
+            unique.append(kind)
+    return unique
+
+
 def apply_interpolation_to_task(
     task: FactorMapTask,
     *,
@@ -438,6 +501,16 @@ def apply_interpolation_to_task(
         if layers is not None
         else None
     )
+    # V6 §10: evaluate the REQUESTED constraints against the method's
+    # capability matrix BEFORE interpolating — a constraint the backend
+    # drops (faults + kriging, boundary + plain IDW, …) is reported on the
+    # result, never silent (audit P0-6).
+    requested_kinds = _requested_constraint_kinds(
+        layers=layers, breaks=breaks, directions=directions, points=points, task=task
+    )
+    constraint_eval = evaluate_request(engine_method, requested_kinds)
+    for diagnostic in constraint_eval.diagnostics:
+        logger.warning("factor interpolation %s [%s]: %s", task.name, method, diagnostic)
     fps = fingerprints_for_task(
         task,
         project=project,
@@ -481,6 +554,7 @@ def apply_interpolation_to_task(
             breaks=breaks,
             engine_method="IDW",
             fingerprints=fps,
+            constraint_eval=constraint_eval,
         )
 
     if engine_method == CONSTRAINED_IDW_ENGINE_LABEL:
@@ -534,6 +608,7 @@ def apply_interpolation_to_task(
         breaks=breaks,
         engine_method=engine_method,
         fingerprints=fps,
+        constraint_eval=constraint_eval,
     )
 
 
@@ -780,6 +855,29 @@ def batch_prepare_factor_maps(
                         generator_version=GENERATOR_VERSION,
                         source_refs=task.input_resource_ids,
                     )
+                    batch_layers = (
+                        constraint_layers_for_project(
+                            project, target_horizon=task.target_horizon
+                        )
+                        if project is not None
+                        else None
+                    )
+                    batch_eval = evaluate_request(
+                        "IDW",
+                        _requested_constraint_kinds(
+                            layers=batch_layers,
+                            breaks=plan.fault_polylines,
+                            directions=(
+                                direction_line_params(
+                                    batch_layers, target_horizon=task.target_horizon
+                                )
+                                if batch_layers is not None
+                                else None
+                            ),
+                            points=(task.parameters or {}).get("sample_points") or [],
+                            task=task,
+                        ),
+                    )
                     _attach_result_to_task(
                         task,
                         result=result,
@@ -791,6 +889,7 @@ def batch_prepare_factor_maps(
                         breaks=plan.fault_polylines,
                         engine_method="IDW",
                         fingerprints=fps,
+                        constraint_eval=batch_eval,
                     )
             continue
 

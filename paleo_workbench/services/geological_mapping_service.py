@@ -171,6 +171,43 @@ class GeologicalMappingService:
         dataset.metadata["source_table_ids"] = [wt.id for wt in matched_tables]
         return dataset
 
+    def constraint_diagnostics_for(
+        self,
+        project: ProjectDocument,
+        *,
+        method: str,
+        target_horizon: str = "",
+    ) -> dict | None:
+        """Capability-matrix evaluation of the project's live constraints.
+
+        Returns None when the project carries no constraint layers (nothing
+        was requested, nothing was dropped).
+        """
+        from paleo_workbench.workflow.constraint_capabilities import (
+            ConstraintKind,
+            evaluate_request,
+        )
+        from paleo_workbench.workflow.constraints import (
+            boundary_rings_for_engine,
+            break_polylines_for_idw,
+            constraint_layers_for_project,
+            direction_line_params,
+        )
+
+        layers = constraint_layers_for_project(project, target_horizon=target_horizon)
+        if not layers:
+            return None
+        requested: list[ConstraintKind] = []
+        if break_polylines_for_idw(layers, target_horizon=target_horizon):
+            requested.append(ConstraintKind.BARRIER)
+        if direction_line_params(layers, target_horizon=target_horizon):
+            requested.append(ConstraintKind.DIRECTION)
+        if boundary_rings_for_engine(layers, target_horizon=target_horizon):
+            requested.append(ConstraintKind.BOUNDARY_MASK)
+        if not requested:
+            return None
+        return evaluate_request(method, requested).as_dict()
+
     def create_factor_map(
         self,
         project: ProjectDocument,
@@ -243,6 +280,19 @@ class GeologicalMappingService:
                 **(task.quality_metrics or {}),
                 "synthesized_fallback": True,
             }
+        # V6 §10 (P0-7): this dialog/agent path's interpolators honor no
+        # geological constraints — whatever the project carries is recorded
+        # as requested-but-ignored on the task, never silently dropped.
+        constraint_record = self.constraint_diagnostics_for(
+            project, method=method, target_horizon=resolved_horizon
+        )
+        if constraint_record is not None:
+            task.parameters["constraint_diagnostics"] = constraint_record
+            if constraint_record["unsupported_constraints"]:
+                task.quality_metrics = {
+                    **(task.quality_metrics or {}),
+                    "constraints_ignored": constraint_record["unsupported_constraints"],
+                }
         project.factor_map_tasks.append(task)
 
         # 3. Create or update PaleoMapDocument compatibility record.
