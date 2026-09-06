@@ -407,6 +407,12 @@ class ProjectController:
                 service.migrate_legacy_resources(resources_snapshot)
                 service.sweep_temp_on_open()
                 service.ensure_index_ready()
+                # #1219: completed runs of producing operations with zero
+                # outputs (pre-book crash window) heal to failed.
+                try:
+                    service.repair_ghost_runs()
+                except Exception:
+                    pass
                 # #1223-family: interrupted transcodes/attributes resume on
                 # project open (was: only on first lifecycle activity, so a
                 # reopened project silently carried 'running' runs).

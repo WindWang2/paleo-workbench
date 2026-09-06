@@ -192,6 +192,27 @@ def migrate_resources(
                 f"migrated under sanitized asset id {asset_id}"
             )
 
+        size_bytes = _size_bytes(resource)
+        # #1221: an external version with NO identity facts (no checksum,
+        # no size) is unresolvable fail-closed and un-relinkable forever.
+        # Backfill what can be SAFELY measured at migration time: a stat
+        # fingerprint (size + mtime_ns) for the linked file — cheap, no
+        # hashing, and enough for relink's stat-proof tier. The digest is
+        # NOT guessed from the legacy record.
+        stat_fingerprint = None
+        if not managed and not resource.checksum and size_bytes is None:
+            try:
+                stat = _file_path(resource, project_dir).stat()
+                size_bytes = stat.st_size
+                stat_fingerprint = {
+                    "size": stat.st_size,
+                    "mtime_ns": stat.st_mtime_ns,
+                }
+            except OSError:
+                pass
+        metadata = dict(legacy)
+        if stat_fingerprint is not None:
+            metadata["external_stat"] = stat_fingerprint
         version = DataVersion(
             id=f"ver_{asset_id}",
             asset_id=asset_id,
@@ -201,9 +222,9 @@ def migrate_resources(
             path=path,
             source_uri=_source_uri(resource),
             format=resource.format,
-            size_bytes=_size_bytes(resource),
+            size_bytes=size_bytes,
             sha256=resource.checksum,
-            metadata=dict(legacy),
+            metadata=metadata,
             created_at=timestamp,
         )
         asset = DataAsset(

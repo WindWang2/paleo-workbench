@@ -117,3 +117,16 @@
 - Tests: tests/test_resource_governance_convergence.py (env-untouched,
   scoped-limit restore, DAG clamp contract, batch governed, import-time clean)
 - Pre-existing main failure #5 confirmed out-of-scope (kriging dispatch #1227)
+
+## PHASE 10 complete — provenance atomicity + identity fail-closed (#1219, #1221)
+- map_product.assemble_map_product: run booked RUNNING → register_result_asset
+  → complete; registration failure compensates to failed (no permanent ghost)
+- audit orphan_completed_run now covers map_product_assembly + interchange.import
+- service.repair_ghost_runs(): completed producing runs w/o outputs → failed
+  (+ghost_repair note); wired into project maintenance
+- resolve_path._fallback_identity_ok: no sha AND no size → False (fail closed,
+  #1221) — identity-less versions surface missing instead of binding a
+  same-named stranger
+- migration: legacy externals without checksum/size gain a SAFE stat
+  backfill (size + mtime_ns in external_stat metadata; no guessed digests)
+- Tests: tests/test_provenance_and_identity_v6.py + 71-test regression green

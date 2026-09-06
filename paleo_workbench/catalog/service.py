@@ -1475,10 +1475,13 @@ class DataCatalogService:
 
     @staticmethod
     def _fallback_identity_ok(cand: Path, version: DataVersion) -> bool:
-        """#1140: basename fallbacks must not silently bind a same-named
-        stranger. Verify size/sha256 when the record carries them; a
-        mismatch keeps searching so the caller fails clean (missing file)
-        instead of reading wrong data."""
+        """#1140/#1221: basename fallbacks must not silently bind a same-named
+        stranger. Verify size/sha256 when the record carries them; a mismatch
+        keeps searching so the caller fails clean (missing file) instead of
+        reading wrong data. A record with NEITHER fact has nothing to verify
+        against — fail CLOSED (#1221): an identity-less version surfaces as
+        missing (integrity/relink handle it) rather than silently binding an
+        unrelated same-named scientific file."""
         try:
             if version.sha256:
                 from paleo_workbench.catalog.checksum import sha256_file_or_none
@@ -1488,7 +1491,8 @@ class DataCatalogService:
                 return cand.stat().st_size == version.size_bytes
         except OSError:
             return False
-        return True
+        # No identity evidence at all: refuse the basename guess.
+        return False
 
     # -- rollback helper ----------------------------------------------------
 
@@ -3625,6 +3629,40 @@ class DataCatalogService:
         """
         return _queries.verify_integrity(self, version_id=version_id, cancel=cancel)
 
+    def repair_ghost_runs(self) -> list[str]:
+        """Mark ghost completed runs failed (#1219) and return their ids.
+
+        A "ghost" is a terminal-completed run of an always-producing
+        operation with zero outputs (a crash between the old pre-book
+        pattern's booking and its output registration). Failing them is the
+        honest state: the run claims success but produced nothing. Existing
+        outputs are never touched; non-producing operations are exempt.
+        """
+        always_producing = {
+            "materialize",
+            "working_copy_commit",
+            "map_product_assembly",
+            "interchange.import",
+        }
+        repaired: list[str] = []
+        with self._lock:
+            for run in list(self.document.runs):
+                if (
+                    run.operation in always_producing
+                    and run.status in ("completed", "complete")
+                    and not run.output_version_ids
+                ):
+                    run.status = "failed"
+                    parameters = dict(run.parameters or {})
+                    parameters["ghost_repair"] = (
+                        "v6 repair: completed run had no outputs"
+                    )
+                    run.parameters = parameters
+                    repaired.append(run.id)
+            if repaired:
+                self._save()
+        return repaired
+
     def audit(
         self,
         *,
@@ -4491,6 +4529,7 @@ _WARM_REQUIRED_METHODS = (
     "working_copy_state",
     "discard_working_copy",
     "recover_working_copies",
+    "repair_ghost_runs",
 )
 
 
