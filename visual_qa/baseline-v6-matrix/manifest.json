@@ -1,0 +1,296 @@
+{
+  "generated_at": "2026-09-07 03:05:16",
+  "elapsed_s": 224.9,
+  "shot_count": 36,
+  "failures": [],
+  "shots": [
+    {
+      "name": "mapping_stage_phase1__light__compact__1440x900.png",
+      "state": "mapping_stage_phase1",
+      "theme": "light",
+      "density": "compact",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "mapping_stage_phase1__light__compact__1180x720.png",
+      "state": "mapping_stage_phase1",
+      "theme": "light",
+      "density": "compact",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "mapping_stage_phase1__light__compact__1920x1080.png",
+      "state": "mapping_stage_phase1",
+      "theme": "light",
+      "density": "compact",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "mapping_stage_phase1__light__comfortable__1440x900.png",
+      "state": "mapping_stage_phase1",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "mapping_stage_phase1__light__comfortable__1180x720.png",
+      "state": "mapping_stage_phase1",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "mapping_stage_phase1__light__comfortable__1920x1080.png",
+      "state": "mapping_stage_phase1",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "mapping_stage_phase2__light__compact__1440x900.png",
+      "state": "mapping_stage_phase2",
+      "theme": "light",
+      "density": "compact",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "mapping_stage_phase2__light__compact__1180x720.png",
+      "state": "mapping_stage_phase2",
+      "theme": "light",
+      "density": "compact",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "mapping_stage_phase2__light__compact__1920x1080.png",
+      "state": "mapping_stage_phase2",
+      "theme": "light",
+      "density": "compact",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "mapping_stage_phase2__light__comfortable__1440x900.png",
+      "state": "mapping_stage_phase2",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "mapping_stage_phase2__light__comfortable__1180x720.png",
+      "state": "mapping_stage_phase2",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "mapping_stage_phase2__light__comfortable__1920x1080.png",
+      "state": "mapping_stage_phase2",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "mapping_stage_phase3__light__compact__1440x900.png",
+      "state": "mapping_stage_phase3",
+      "theme": "light",
+      "density": "compact",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "mapping_stage_phase3__light__compact__1180x720.png",
+      "state": "mapping_stage_phase3",
+      "theme": "light",
+      "density": "compact",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "mapping_stage_phase3__light__compact__1920x1080.png",
+      "state": "mapping_stage_phase3",
+      "theme": "light",
+      "density": "compact",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "mapping_stage_phase3__light__comfortable__1440x900.png",
+      "state": "mapping_stage_phase3",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "mapping_stage_phase3__light__comfortable__1180x720.png",
+      "state": "mapping_stage_phase3",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "mapping_stage_phase3__light__comfortable__1920x1080.png",
+      "state": "mapping_stage_phase3",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "command_palette_context__light__compact__1440x900.png",
+      "state": "command_palette_context",
+      "theme": "light",
+      "density": "compact",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "command_palette_context__light__compact__1180x720.png",
+      "state": "command_palette_context",
+      "theme": "light",
+      "density": "compact",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "command_palette_context__light__compact__1920x1080.png",
+      "state": "command_palette_context",
+      "theme": "light",
+      "density": "compact",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "command_palette_context__light__comfortable__1440x900.png",
+      "state": "command_palette_context",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "command_palette_context__light__comfortable__1180x720.png",
+      "state": "command_palette_context",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "command_palette_context__light__comfortable__1920x1080.png",
+      "state": "command_palette_context",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "write_grant_dialog__light__compact__1440x900.png",
+      "state": "write_grant_dialog",
+      "theme": "light",
+      "density": "compact",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "write_grant_dialog__light__compact__1180x720.png",
+      "state": "write_grant_dialog",
+      "theme": "light",
+      "density": "compact",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "write_grant_dialog__light__compact__1920x1080.png",
+      "state": "write_grant_dialog",
+      "theme": "light",
+      "density": "compact",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "write_grant_dialog__light__comfortable__1440x900.png",
+      "state": "write_grant_dialog",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "write_grant_dialog__light__comfortable__1180x720.png",
+      "state": "write_grant_dialog",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "write_grant_dialog__light__comfortable__1920x1080.png",
+      "state": "write_grant_dialog",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "status_workbench_segment__light__compact__1440x900.png",
+      "state": "status_workbench_segment",
+      "theme": "light",
+      "density": "compact",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "status_workbench_segment__light__compact__1180x720.png",
+      "state": "status_workbench_segment",
+      "theme": "light",
+      "density": "compact",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "status_workbench_segment__light__compact__1920x1080.png",
+      "state": "status_workbench_segment",
+      "theme": "light",
+      "density": "compact",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "status_workbench_segment__light__comfortable__1440x900.png",
+      "state": "status_workbench_segment",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1440x900",
+      "ok": true
+    },
+    {
+      "name": "status_workbench_segment__light__comfortable__1180x720.png",
+      "state": "status_workbench_segment",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1180x720",
+      "ok": true
+    },
+    {
+      "name": "status_workbench_segment__light__comfortable__1920x1080.png",
+      "state": "status_workbench_segment",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    }
+  ]
+}

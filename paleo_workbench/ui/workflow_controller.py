@@ -170,6 +170,10 @@ class WorkflowController:
         if hasattr(page, "navigation_requested"):
             page.navigation_requested.connect(self._on_home_navigation)
 
+    def request_recompute(self) -> None:
+        """V6 公共入口：「更新受影响成果」（palette 命令 / UI 按钮共用）。"""
+        self._on_recompute_requested()
+
     def _on_recompute_requested(self) -> None:
         """Execute the minimal affected-products recompute plan (#537).
 

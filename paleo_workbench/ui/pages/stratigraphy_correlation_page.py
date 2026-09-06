@@ -115,6 +115,10 @@ class StratigraphyCorrelationPage(QWidget):
         super().__init__(parent)
         self.setObjectName("StratigraphyCorrelationPage")
         self._project = None
+        # V6 scalability: well-list items are keyed by resource id and reused
+        # across update_state calls (differential refresh, never clear+rebuild).
+        self._well_items: dict[str, QListWidgetItem] = {}
+        self._well_list_signature: tuple[tuple[str, str], ...] | None = None
         self._loaded_names: list[str] = []
         self._loaded_logs: list[Any] = []
         self._loaded_resource_ids: list[str] = []
@@ -573,28 +577,56 @@ class StratigraphyCorrelationPage(QWidget):
             self._project = project
         if self._project is None:
             self.well_list.clear()
+            self._well_items.clear()
+            self._well_list_signature = None
             self.horizon_value.setText("目标层位: —")
             return
         horizon = active_target_horizon(self._project) or "—"
         self.horizon_value.setText(f"目标层位: {horizon}")
         self.section_title.setText(f"连井地层对比 · {horizon}" if horizon != "—" else "连井地层对比")
+        self._sync_well_list(list_well_log_resources(self._project))
 
-        selected = {
-            self.well_list.item(i).data(Qt.ItemDataRole.UserRole)
-            for i in range(self.well_list.count())
-            if self.well_list.item(i).checkState() == Qt.CheckState.Checked
-        }
-        self.well_list.clear()
-        for resource in list_well_log_resources(self._project):
-            item = QListWidgetItem(resource.name or resource.id)
-            item.setData(Qt.ItemDataRole.UserRole, resource.id)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(
-                Qt.CheckState.Checked
-                if resource.id in selected
-                else Qt.CheckState.Unchecked
-            )
-            self.well_list.addItem(item)
+    def _sync_well_list(self, resources) -> None:
+        """Differential well-list refresh keyed by resource id (V6 Phase 5).
+
+        10k-well projects used to clear+rebuild every item on each state
+        update (≈0.5-2s per refresh). Items are now keyed by resource id and
+        reused: an unchanged id/name signature performs no item work at all —
+        selection, check states and scroll position ride on the persistent
+        items — while a changed set only removes dropped ids, creates items
+        for new ids, retitles renamed ids and reorders by move (no rebuild).
+        """
+        entries = tuple(
+            (str(resource.id), str(resource.name or resource.id))
+            for resource in resources
+        )
+        if entries == self._well_list_signature:
+            return
+        wanted = {rid for rid, _name in entries}
+        for rid in list(self._well_items):
+            if rid not in wanted:
+                item = self._well_items.pop(rid)
+                row = self.well_list.row(item)
+                if row >= 0:
+                    self.well_list.takeItem(row)
+        for index, (rid, name) in enumerate(entries):
+            item = self._well_items.get(rid)
+            if item is None:
+                item = QListWidgetItem(name)
+                item.setData(Qt.ItemDataRole.UserRole, rid)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Unchecked)
+                self._well_items[rid] = item
+                self.well_list.insertItem(index, item)
+                continue
+            if item.text() != name:
+                item.setText(name)
+            row = self.well_list.row(item)
+            if row != index:
+                # takeItem+insertItem move the existing item (no creation).
+                self.well_list.takeItem(row)
+                self.well_list.insertItem(index, item)
+        self._well_list_signature = entries
 
     def selected_resource_ids(self) -> list[str]:
         ids: list[str] = []

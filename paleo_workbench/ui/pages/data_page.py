@@ -569,9 +569,6 @@ class DataPage(QWidget):
                     flush=True,
                 )
                 _last[0] = now
-        # #937-9: the trash view and the trash count both rebuild companion
-        # items per refresh; compute once.
-        trashed_companions = self._trashed_companions()
         self._resources = resources
         self._artifacts = artifacts or []
         preview_root = self._preview_disk_project_root()
@@ -591,10 +588,14 @@ class DataPage(QWidget):
             if signature != getattr(self, "_domain_signature", None):
                 self._domain_signature = signature
                 self.navigation_tree.set_project(self.project)
-            self.navigation_tree.set_trash_count(len(trashed_companions))
+            # C-P1: 分页模式下回收站只差一个徽章计数 —— SQL 计数即可,
+            # 不再每轮刷新重建 companion(全文档遍历 + 逐资产路径解析)。
+            self.navigation_tree.set_trash_count(self._trashed_count_fast())
             if self.workspace.overview_visible():
+                # C-P0-1: 普通刷新与点击路径共用同一份缓存聚合,
+                # 概览不再显示归零计数。
                 self.workspace.overview_panel.refresh_from_project(
-                    self.project, counts=None
+                    self.project, counts=self._overview_counts_from_aggregates()
                 )
             _stage('paged_mode')
             self._emit_data_context()
@@ -604,6 +605,10 @@ class DataPage(QWidget):
         enricher = self._lifecycle.catalog_enricher()
         catalog_rows = self._lifecycle.catalog_only_rows(enricher)
         display_resources = list(self._resources)
+        # #937-9: the trash view and the trash count both rebuild companion
+        # items per refresh; compute once (materialized path only — paged
+        # mode took the SQL count above).
+        trashed_companions = self._trashed_companions()
         if self._trash_view_active():
             display_resources.extend(trashed_companions)
         # Build the enriched row views ONCE per refresh (#527): every build
@@ -642,7 +647,19 @@ class DataPage(QWidget):
             self.navigation_tree.set_project(self.project)
         if self.workspace.overview_visible():
             overview = self.workspace.overview_panel
-            overview.refresh_from_project(self.project, counts=None)
+            # C-P0-1: 复用本轮已构建的共享行视图做纯 CPU 统计 (#527),
+            # 普通刷新后概览不再显示归零计数,也不额外探测文件系统。
+            overview.refresh_from_project(
+                self.project,
+                counts=compute_catalog_counts(
+                    self._resources,
+                    self._artifacts,
+                    project_root=preview_root,
+                    extra_assets=catalog_rows,
+                    enricher=enricher,
+                    views=shared_views,
+                ),
+            )
         _stage('counts')
         table_views = (
             shared_views
@@ -749,7 +766,7 @@ class DataPage(QWidget):
                     result_connections=(
                         (
                             worker.finished,
-                            lambda _agg: self._apply_paged_tree_counts(
+                            lambda _agg: self._on_paged_aggregates_ready(
                                 project_root, total
                             ),
                         ),
@@ -785,6 +802,58 @@ class DataPage(QWidget):
             review_status=review,
         )
         self.navigation_tree._update_tree_counts(counts)
+
+    def _on_paged_aggregates_ready(self, project_root, total: int) -> None:
+        """后台聚合就绪:树徽章与(可见时的)工区概览一起重绘 (C-P0-1)。"""
+        self._apply_paged_tree_counts(project_root, total)
+        if self.workspace.overview_visible():
+            self._refresh_overview_panel()
+
+    def _counts_from_aggregates(self, aggregates: dict) -> CatalogCounts:
+        """缓存 SQL 聚合 → 概览计数 (C-P0-1)。
+
+        聚合不含完整性探测:如实标记 ``integrity_known=False``,概览显示
+        "—" 占位,不伪造 0。"""
+        return CatalogCounts(
+            total=int(aggregates.get("total") or 0),
+            stages=dict(aggregates.get("stages") or {}),
+            types=dict(aggregates.get("types") or {}),
+            tags=dict(aggregates.get("tags") or {}),
+            review_status=dict(aggregates.get("review_status") or {}),
+            integrity={},
+            integrity_known=False,
+        )
+
+    def _overview_counts_from_aggregates(self) -> CatalogCounts | None:
+        """概览计数:只读服务的缓存聚合,绝不物化全部资产 (C-P0-1)。"""
+        service = self._catalog_service()
+        if service is None:
+            return None
+        try:
+            aggregates = service.cached_catalog_aggregates()
+        except Exception:
+            return None
+        if aggregates is None:
+            return None
+        return self._counts_from_aggregates(aggregates)
+
+    def _defer_overview_aggregates(self, service) -> None:
+        """缓存冷时把目录聚合计算派离 GUI 线程 (C-P0-1)。
+
+        与树徽章共享同一个 ``_aggregates_job``;在途的一趟完成后经
+        ``_on_paged_aggregates_ready`` / 本方法的完成回调重绘概览。"""
+        if self._aggregates_job.is_running:
+            return  # 已有一趟在途;完成后会回调重绘
+        worker = _AggregatesWorker(lambda: service.catalog_aggregates())
+        self._aggregates_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed),
+            result_connections=(
+                (worker.finished, lambda _agg: self._refresh_overview_panel()),
+                (worker.failed, lambda _msg: None),
+            ),
+            target=self.project,
+        )
 
     def _refresh(self) -> None:
         self.update_state(
@@ -826,6 +895,20 @@ class DataPage(QWidget):
         """Reconstruct legacy ResourceItem companions for trashed catalog
         assets so the 回收站 view can list and restore them."""
         return self._lifecycle.trashed_companions()
+
+    def _trashed_count_fast(self) -> int:
+        """回收站徽章计数 (C-P1):优先走服务的 SQL 计数,不重建 companion。
+
+        分页模式下回收站行由 SQL 分页直接服务,徽章只需要一个计数;
+        ``count_assets(trashed_only=True)`` 命中索引时是 O(log n) 的
+        COUNT,失败或无服务时退回 companion 重建(小工程路径)。"""
+        service = self._catalog_service()
+        if service is not None:
+            try:
+                return int(service.count_assets(trashed_only=True))
+            except Exception:
+                logger.debug("trashed SQL count failed; rebuilding companions", exc_info=True)
+        return len(self._trashed_companions())
 
     def _preview_disk_project_root(self) -> Path | None:
         raw = getattr(self.project.meta, "project_root", None)
@@ -2433,7 +2516,14 @@ class DataPage(QWidget):
     def _asset_name_map(self) -> dict[str, str]:
         """catalog DataAsset.id / legacy ResourceItem.id → display name."""
         service = self._catalog_service()
-        revision = getattr(service, "catalog_revision", None) if service else None
+        # C-P1: 修订号必须读 document.catalog_revision —— service 上没有顶层
+        # catalog_revision 属性,旧的 getattr 永远取到 None,同一修订内的
+        # 复用退化为只看资源数量,目录变更(重命名等)后映射不再失效。
+        revision = (
+            getattr(getattr(service, "document", None), "catalog_revision", None)
+            if service is not None
+            else None
+        )
         resource_count = len(self._resources) if self._resources is not None else 0
         cached = getattr(self, "_asset_name_cache", None)
         if cached is not None and cached[0] == (revision, resource_count):
@@ -2458,6 +2548,37 @@ class DataPage(QWidget):
         overview = getattr(self.workspace, "overview_panel", None)
         if overview is None:
             return
+        # C-P0-1: 点击 工区概览 绝不在 GUI 线程物化全部资产来算计数。
+        # 大目录(≥ 分页阈值)直接服务缓存 SQL 聚合;缓存冷时把聚合计算
+        # 派到后台线程,期间面板显示 "—" 占位(不伪造 0),完成后自动重绘。
+        from paleo_workbench.ui.pages.paged_asset_model import PAGED_MODE_THRESHOLD
+
+        service = self._catalog_service()
+        aggregates = None
+        if service is not None:
+            try:
+                aggregates = service.cached_catalog_aggregates()
+            except Exception:
+                aggregates = None
+        if service is not None:
+            try:
+                total = int(service.count_assets())
+            except Exception:
+                total = 0
+            if total >= PAGED_MODE_THRESHOLD:
+                # 大目录:资源/工件都是目录投影,聚合即全量;零物化。
+                if aggregates is None:
+                    self._defer_overview_aggregates(service)
+                overview.refresh_from_project(
+                    self.project,
+                    counts=(
+                        self._counts_from_aggregates(aggregates)
+                        if aggregates is not None
+                        else None
+                    ),
+                )
+                return
+        # 小工程 / 无目录:物化统计路径规模小,保持原样 (C-P0-1 降级路径)。
         try:
             enricher = self._lifecycle.catalog_enricher()
             catalog_rows = self._lifecycle.catalog_only_rows(enricher)

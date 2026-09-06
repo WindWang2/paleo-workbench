@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QTreeWidget,
@@ -41,6 +40,67 @@ _GEOMETRY_TYPE_LABELS = {
     "Polygon": "面",
     "MultiPolygon": "面（多）",
 }
+
+
+class _CheckCell:
+    """Boolean cell proxy over a checkable QTableWidgetItem.
+
+    V6 scalability: per-layer rows are item-based (no QCheckBox/QSpinBox cell
+    widgets — 1000 layers used to materialize ~5000 widgets); the proxy keeps
+    the historical ``setChecked``/``isChecked`` surface used by ``accept``.
+    """
+
+    __slots__ = ("_item",)
+
+    def __init__(self, item: QTableWidgetItem) -> None:
+        self._item = item
+
+    def setChecked(self, checked: bool) -> None:
+        self._item.setCheckState(
+            Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+        )
+
+    def isChecked(self) -> bool:
+        return self._item.checkState() == Qt.CheckState.Checked
+
+
+class _NumericCell:
+    """Numeric cell proxy: text is parsed on read, invalid reads as 0.
+
+    ``zero_label`` mirrors the old spinbox special-value text (e.g. 容差 0
+    displays as 全局); values clamp to ``[0, maximum]`` like the spinbox did.
+    """
+
+    __slots__ = ("_item", "_maximum", "_decimals", "_zero_label")
+
+    def __init__(
+        self,
+        item: QTableWidgetItem,
+        *,
+        maximum: float,
+        decimals: int = 1,
+        zero_label: str = "",
+    ) -> None:
+        self._item = item
+        self._maximum = float(maximum)
+        self._decimals = int(decimals)
+        self._zero_label = zero_label
+
+    def value(self) -> float:
+        text = self._item.text().strip()
+        if not text or text == self._zero_label:
+            return 0.0
+        try:
+            return max(0.0, min(float(text), self._maximum))
+        except ValueError:
+            return 0.0
+
+    def setValue(self, value: float) -> None:
+        clamped = max(0.0, min(float(value), self._maximum))
+        if clamped <= 0.0 and self._zero_label:
+            self._item.setText(self._zero_label)
+        else:
+            self._item.setText(f"{clamped:.{self._decimals}f}")
 
 
 class IdentifyResultsPanel(QFrame):
@@ -192,6 +252,15 @@ class SnappingSettingsDialog(QDialog):
         self._populate_layers()
 
     def _populate_layers(self) -> None:
+        """Fill the per-layer table with items, not cell widgets.
+
+        V6 scalability: every layer used to get 3 QCheckBox + 2 spinbox cell
+        widgets (~5 widgets/layer → ~5000 widgets at 1000 layers, freezing
+        dialog construction). Rows now use checkable/typed QTableWidgetItems
+        with the lightweight ``_CheckCell``/``_NumericCell`` proxies; the
+        ``_layer_rows`` write surface (``setChecked``/``setValue``/``value``)
+        is unchanged, so ``accept`` reads them exactly as before.
+        """
         snapping = self._snapping
         rows: list[tuple[str, str]] = []
         for layer_id in self._controller.layer_ids():
@@ -220,24 +289,30 @@ class SnappingSettingsDialog(QDialog):
                 ),
                 start=1,
             ):
-                box = QCheckBox(self._table)
-                box.setChecked(bool(checked))
-                self._table.setCellWidget(row, column, box)
-                entries[key] = box
+                box_item = QTableWidgetItem()
+                box_item.setFlags(
+                    (box_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                    & ~Qt.ItemFlag.ItemIsEditable
+                )
+                box_item.setCheckState(
+                    Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+                )
+                self._table.setItem(row, column, box_item)
+                entries[key] = _CheckCell(box_item)
 
-            tolerance = QDoubleSpinBox(self._table)
-            tolerance.setRange(0.0, 100.0)
-            tolerance.setDecimals(1)
-            tolerance.setSpecialValueText("全局")
+            tolerance_item = QTableWidgetItem()
+            self._table.setItem(row, 4, tolerance_item)
+            tolerance = _NumericCell(
+                tolerance_item, maximum=100.0, decimals=1, zero_label="全局"
+            )
             tolerance.setValue(float(tolerance_override or 0.0))
-            self._table.setCellWidget(row, 4, tolerance)
             entries["tolerance"] = tolerance
 
-            priority_spin = QSpinBox(self._table)
-            priority_spin.setRange(0, 99)
-            priority_spin.setValue(int(priority))
-            self._table.setCellWidget(row, 5, priority_spin)
-            entries["priority"] = priority_spin
+            priority_item = QTableWidgetItem()
+            self._table.setItem(row, 5, priority_item)
+            priority_cell = _NumericCell(priority_item, maximum=99.0, decimals=0)
+            priority_cell.setValue(int(priority))
+            entries["priority"] = priority_cell
 
             self._layer_rows[layer_id] = entries
 
