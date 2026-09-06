@@ -148,6 +148,7 @@ def _qgis_core_include_dirs(build_dir: Path) -> list[str]:
 
 def _build_vendored_qgis() -> tuple[Path, Path]:
     build_dir = _vendor_build_dir()
+    resource_database = build_dir / "resources" / "srs.db"
     core_library = _vendor_core_library(build_dir)
     gui_library = _vendor_gui_library(build_dir)
     analysis_library = _vendor_analysis_library(build_dir)
