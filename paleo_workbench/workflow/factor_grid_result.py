@@ -501,6 +501,20 @@ class FactorGridResult:
             # prefers the stored refined isolines when its request matches.
             "contour_levels": data.get("contour_levels"),
         }
+        # V6 §12 (P1-10): the adapter's surface-shaping facts survive into
+        # provenance — radii, buffer mode, duplicate drops and the honesty
+        # labels that keep anchored fidelity from masquerading as R².
+        for passthrough in (
+            "search_radius",
+            "decluster_radius",
+            "barrier_buffer_mode",
+            "duplicate_wells_dropped",
+            "r_squared_method",
+            "anchored_fidelity",
+            "anchored_fidelity_n_skipped",
+        ):
+            if data.get(passthrough) is not None:
+                params[passthrough] = data[passthrough]
         raw_contours = data.get("contours")
         contours = None
         if isinstance(raw_contours, dict) and raw_contours:
