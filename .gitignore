@@ -71,3 +71,11 @@ CMakeFiles/
 native/map_edit_core/
 native/gdal-vendored/
 run_env.sh
+
+# Desktop-app runtime state (SQLite): QGIS symbology session style database
+# and user history. Never source; keep them out of git status.
+symbology-style.db
+user-history.db
+
+# Agent session working directories (transient tooling artifacts).
+.agent-work/
