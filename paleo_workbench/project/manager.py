@@ -634,7 +634,11 @@ class ProjectManager:
         the mtime baseline from the file that actually backs the session.
         """
         self.last_recovery_message = None
-        self.last_recovery: dict[str, Any] | None = None
+        self.last_recovery: dict | None = None
+        # Reset per-load: stale evidence from an earlier recovery on this
+        # manager must never leak into a later record (R1#5).
+        self.last_recovery_quarantine: str | None = None
+        self.last_recovery_error: str | None = None
         try:
             data = json.loads(self.project_path.read_text(encoding="utf-8"))
             return data, ProjectDocument.model_validate(data), False
@@ -656,25 +660,30 @@ class ProjectManager:
             if not backup.is_file():
                 raise
             recovery_source = "backup-corrupt-main"
-            quarantine = self.project_path.with_name(
-                f"{self.project_path.name}.corrupt-"
-                f"{_now_iso().replace(':', '').replace('-', '')}"
-            )
-            try:
-                os.replace(self.project_path, quarantine)
-                fsync_dir(self.project_path.parent)
-            except OSError:
-                quarantine = None  # keep going: the .bak restore is the point
-            self.last_recovery_quarantine = str(quarantine) if quarantine else None
             self.last_recovery_error = f"{type(corruption).__name__}"
         else:  # pragma: no cover - defensive
             raise
 
+        # Validate the backup BEFORE touching the main file (R1#4): when the
+        # backup is also unusable, the original corruption error propagates
+        # and the main file keeps its bytes at the original path — no
+        # missing-project limbo between a quarantine and a dead backup.
         try:
             data = json.loads(backup.read_text(encoding="utf-8"))
             project = ProjectDocument.model_validate(data)
         except (OSError, ValueError, TypeError, ValidationError):
-            raise  # backup unusable: fail honestly, main was never damaged
+            raise  # backup unusable: fail honestly, main untouched so far
+
+        quarantine = self.project_path.with_name(
+            f"{self.project_path.name}.corrupt-"
+            f"{_now_iso().replace(':', '').replace('-', '')}"
+        )
+        try:
+            os.replace(self.project_path, quarantine)
+            fsync_dir(self.project_path.parent)
+        except OSError:
+            quarantine = None  # keep going: the .bak restore is the point
+        self.last_recovery_quarantine = str(quarantine) if quarantine else None
 
         try:
             os.replace(backup, self.project_path)

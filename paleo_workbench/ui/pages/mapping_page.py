@@ -2291,7 +2291,7 @@ class MappingPage(QWidget):
             # one would write the OLD project behind the user's back. The
             # check is slot-level, not infrastructural — it holds even if the
             # delivery path ever stops going through an OwnedWorkerJob.
-            if pending.get("project") is not getattr(self, "project", None):
+            if pending.get("project") is not getattr(self, "_project", None):
                 if getattr(self, "status_bar", None) is not None:
                     self.status_bar.scale.setText("已切换工程，导出结果未登记到旧工程")
                 return

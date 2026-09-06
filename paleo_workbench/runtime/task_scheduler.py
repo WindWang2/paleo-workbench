@@ -302,6 +302,7 @@ class TaskScheduler:
                     heapq.heapify(self._heap)
                     self._finish_locked(existing, TaskState.CANCELLED)
                     self._active_keys.discard(key)
+                    superseded_cancel = existing.spec.on_cancel
                 else:
                     running = existing is not None and existing.state == TaskState.RUNNING
                     detail = (
@@ -315,7 +316,15 @@ class TaskScheduler:
             self._handles[task_id] = handle
             self._active_keys.add(key)
             heapq.heappush(self._heap, (-spec.priority, next(self._seq), task_id))
+            superseded_cancel = None
         self._wakeup.set()
+        if superseded_cancel is not None:
+            # A superseded task's side effects (pre-booked runs, staging
+            # leases) must unwind exactly like an explicit cancel (R2#6).
+            try:
+                superseded_cancel()
+            except Exception:
+                logger.exception("superseded on_cancel callback failed")
         return handle
 
     def _find_active_by_key_locked(self, key: str):

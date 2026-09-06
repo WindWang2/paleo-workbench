@@ -146,3 +146,36 @@
   get<10ms, warmup-during-query correctness, conflict at scale)
 - #1213 WellRegistry O(N×W): documented as known limitation (well-domain,
   out of v6 data/runtime core)
+
+## PHASE 12 complete — 3 review rounds + fixes (commit 11)
+R1(data correctness)/R2(concurrency)/R3(perf/adversarial/recovery) ran as
+independent agents over 295fabc3..5078bfec.
+P1 FIXED:
+- R3#1 _staging_target used stage.value ("output") not STAGE_DIRS ("outputs")
+  — OUTPUT leases never matched; now on-disk names. Race test proven
+  load-bearing (red with bug / green with fix).
+- R3#2 import_raw (primary bulk funnel) + register_derived_store paths
+  lacked leases — import_raw now leases RAW dir + blob root.
+- R3#3/#1211 fail-open: registry degradation clobbered uncommitted copies —
+  create_working_copy now fail-CLOSED on disk evidence (existing file w/o
+  row reused unless allow_replace).
+- R3#4 vacuous race test rewritten (gate on EVERY placement pre-commit).
+- R2#1 mapping_page guard read nonexistent self.project (registration dead
+  code, wrong message on every export) → self._project.
+P2 FIXED:
+- R1#1/R2#3 pre-warm foreign-revision drift served empty fallbacks —
+  _query_index_if_current/queries.search_assets trust the store pre-warm.
+- R1#4/R3#7 recovery quarantined main BEFORE validating backup — validate
+  first; R1#5 stale recovery attrs reset per load.
+- R1#10 assets load ORDER BY rowid (lazy/eager parity).
+- R2#4 transcode _register_derived session guard (mirror of attr path).
+- R2#6 supersede fires on_cancel (side effects unwind).
+- R2#5 _pending_commit_assets placeholder set guards purge/maintenance
+  zombie classifiers during the #1218 lock-free window.
+- R3#11 removed committed debug artifacts (.scratch/cas_smoke, wc_dbg).
+- catalog_is_current semantics refined: absent backend ≠ stale (the hazard
+  is a REPLACED backend); updated tests accordingly.
+DOCUMENTED (not code-fixed): rebuild/write_all CAS bypass (explicit
+maintenance op, narrow), lease TTL vs >1h single placements, pre-warm N+1
+resolvers (bounded by warm window), recover spoof via source_uri, legacy
+fact-less externals permanently fail-closed (intended #1221).

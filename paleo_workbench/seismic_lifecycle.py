@@ -303,6 +303,15 @@ class SeismicLifecycleService:
         return job
 
     # ---------------------------------------------------------- completion --
+    def _session_stale_guard(self):
+        """#1223: refuse to register through a catalog the app replaced."""
+        try:
+            from paleo_workbench.catalog import catalog_is_current
+
+            return not catalog_is_current(self._catalog)
+        except Exception:
+            return False
+
     def _register_derived(
         self, raw_version_id: str, run_id: str, store: Path, stats: dict
     ) -> None:
@@ -354,6 +363,12 @@ class SeismicLifecycleService:
     def mark_stale(self, raw_version_id: str, reason: str) -> int:
         """Flag existing DERIVED zarr versions produced from this RAW as
         stale (kept for lineage; never auto-deleted)."""
+
+        if self._session_stale_guard():
+            # #1223 (R2#4): transcode finished after the project switched;
+            # registering through the stale catalog would write the OLD
+            # project behind the user's back.
+            return None
         catalog = self._catalog
         marked = 0
         with catalog._lock:

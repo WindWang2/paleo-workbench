@@ -324,6 +324,10 @@ class DataCatalogService:
         # pre-existing behavior is unchanged unless lazy was requested.
         self._lazy: bool = False
         self._warm: bool = True
+        # Asset ids appended by an in-flight commit_working_copy whose
+        # version has not landed yet (the #1218 lock-free payload window):
+        # zombie classifiers must not treat these as removable (R2#5).
+        self._pending_commit_assets: set[str] = set()
         # id→model cache for lazy reads before warmup: keeps object identity
         # stable within the pre-warm window (the UI holds these objects).
         # Cleared when the warm document swaps in.
@@ -1556,9 +1560,14 @@ class DataCatalogService:
         Matches the rel-path convention GC computes for orphan candidates:
         ``<name>.artifacts/<stage>/<asset_id>``.
         """
+        from paleo_workbench.catalog.storage import STAGE_DIRS
+
         parts = [artifact_dir_for(self.project_path).name]
         if stage is not None:
-            parts.append(stage.value)
+            # The ON-DISK directory name (e.g. OUTPUT → "outputs"), NOT
+            # stage.value ("output") — GC computes rel paths from the real
+            # layout, so a value-based key would never prefix-match (R3#1).
+            parts.append(STAGE_DIRS[stage])
         if asset_id is not None:
             parts.append(asset_id)
         return "/".join(parts)
@@ -2019,31 +2028,41 @@ class DataCatalogService:
             with self._lock:
                 if self._live_asset_by_legacy_id(_legacy_resource_id) is None:
                     asset.legacy_resource_id = _legacy_resource_id
-        version, payload = self._build_version(
-            asset, source_path, DataStage.RAW,
-            version_id=None,
-            parent_version_ids=[],
-            run_id=None, metadata=metadata, move=False,
-            known_sha256=known_sha256,
-            register_blob=True,
-        )
-        with self._lock:
-            if (
-                _legacy_resource_id is not None
-                and self._live_asset_by_legacy_id(_legacy_resource_id) is not None
-            ):
-                asset.legacy_resource_id = None
-            self._add_asset(asset)
-            self._add_version(version)
-            asset.current_version_id = version.id
-            try:
-                self._save(DirtySet(assets={asset.id: None}, versions={version.id: None}))
-            except Exception:
-                self._rollback(
-                    assets=[asset], versions=[version], payload=payload,
-                )
-                raise
-            return version
+        # Staging lease (#1222, R3#2): import_raw is the PRIMARY bulk-import
+        # funnel (every interchange adapter) and its payload placement runs
+        # lock-free — guard the RAW target dir AND the blob root (dedup
+        # imports adopt blobs) for the whole place→commit window.
+        with self._payload_staging_lease(
+            self._staging_target(DataStage.RAW, asset.id),
+            self._blob_staging_target(),
+        ):
+            version, payload = self._build_version(
+                asset, source_path, DataStage.RAW,
+                version_id=None,
+                parent_version_ids=[],
+                run_id=None, metadata=metadata, move=False,
+                known_sha256=known_sha256,
+                register_blob=True,
+            )
+            with self._lock:
+                if (
+                    _legacy_resource_id is not None
+                    and self._live_asset_by_legacy_id(_legacy_resource_id) is not None
+                ):
+                    asset.legacy_resource_id = None
+                self._add_asset(asset)
+                self._add_version(version)
+                asset.current_version_id = version.id
+                try:
+                    self._save(
+                        DirtySet(assets={asset.id: None}, versions={version.id: None})
+                    )
+                except Exception:
+                    self._rollback(
+                        assets=[asset], versions=[version], payload=payload,
+                    )
+                    raise
+                return version
 
     def link_external(
         self,
@@ -2210,6 +2229,19 @@ class DataCatalogService:
         payload = self.resolve_path(version)
         if not payload.is_file():
             raise CatalogError(f"Payload not available: {payload}")
+        # Fail-CLOSED on disk evidence (R3#3): the registry is bookkeeping
+        # and can degrade (missing/corrupt table, failed INSERT, pre-v6
+        # copy with no row) — but an existing file at the target path IS
+        # uncommitted user work. Never clobber it just because the registry
+        # forgot; reuse it (or require allow_replace). #1211 must not fail
+        # open when its bookkeeping does.
+        from paleo_workbench.catalog.storage import working_dir_for
+
+        disk_existing = (
+            working_dir_for(Path(self.project_path)) / version.id / payload.name
+        )
+        if disk_existing.is_file() and live is None and not allow_replace:
+            return disk_existing
         # Concurrent checkouts of the same version converge on one copy:
         # placement writes identical bytes to the same target via temp+
         # replace, so a racing replace can transiently collide on Windows —
@@ -2493,6 +2525,7 @@ class DataCatalogService:
             with self._lock:
                 asset = self._new_asset(name or working_path.stem, None, None, metadata)
                 self._add_asset(asset)
+                self._pending_commit_assets.add(asset.id)
             try:
                 return self.register_version(
                     asset.id, working_path, stage,
@@ -2504,7 +2537,11 @@ class DataCatalogService:
                 with self._lock:
                     if asset in self.document.assets:
                         self._remove_asset(asset)
+                    self._pending_commit_assets.discard(asset.id)
                 raise
+            finally:
+                with self._lock:
+                    self._pending_commit_assets.discard(asset.id)
         version_metadata = dict(metadata or {})
         if name:
             version_metadata["name"] = name
@@ -3431,6 +3468,9 @@ class DataCatalogService:
             # purged is a zombie (zero versions, current_version_id=None):
             # drop it so listings cannot show an empty asset row (I3).
             live_asset_ids = {v.asset_id for v in self.document.versions}
+            # In-flight working-copy commits own a version-less asset
+            # for the lock-free payload window (#1218, R2#5).
+            live_asset_ids |= self._pending_commit_assets
             zombie_assets = [
                 a
                 for a in self.document.assets
@@ -4181,6 +4221,13 @@ class DataCatalogService:
         """
         if self._batch_depth:
             return None
+        if self._lazy and not self._warm:
+            # Pre-warm the document is EMPTY by design, so the document
+            # fallback below can only serve wrong-empty rows — and a
+            # revision drift here means a FOREIGN process committed (every
+            # local mutation implies an inline warm), making the store the
+            # fresh truth. Serve the store (R1#1/R2#3).
+            return self._index
         try:
             if self._index.revision() != self.document.catalog_revision:
                 return None

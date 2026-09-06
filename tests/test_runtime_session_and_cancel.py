@@ -38,10 +38,14 @@ def test_catalog_identity_is_the_session_token(tmp_path):
         set_catalog(service)
         assert catalog_is_current(service) is True
 
-        # A session switch swaps the backend — the captured service is stale.
+        # An absent backend (everything closed / headless) REPLACED nothing:
+        # the captured service is not stale — the #1223 hazard is a
+        # *different* backend being active, which cannot receive a
+        # misdirected write when none is installed.
         reset_catalog()
-        assert catalog_is_current(service) is False
+        assert catalog_is_current(service) is True
 
+        # A session switch installs a DIFFERENT backend — now stale.
         other = DataCatalogService.open(project)
         try:
             set_catalog(other)
@@ -50,6 +54,7 @@ def test_catalog_identity_is_the_session_token(tmp_path):
         finally:
             reset_catalog()
             other.close()
+        assert catalog_is_current(service) is True  # nothing replaced it
     finally:
         service.close()
 
@@ -65,7 +70,9 @@ def test_seismic_callbacks_refuse_stale_service(tmp_path, monkeypatch):
 
         from paleo_workbench import seismic_lifecycle as life
 
-        # The stale-service primitive is False for the captured service...
+        # Install a DIFFERENT backend: the captured service is now stale.
+        replacement = DataCatalogService.open(project)
+        set_catalog(replacement)
         assert catalog_is_current(service) is False
         # ...and every task callback embeds the guard (#1223).
         import inspect
@@ -75,6 +82,7 @@ def test_seismic_callbacks_refuse_stale_service(tmp_path, monkeypatch):
         assert "_session_stale" in src
     finally:
         reset_catalog()
+        replacement.close()
         service.close()
 
 

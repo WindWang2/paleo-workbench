@@ -1392,7 +1392,7 @@ class CatalogIndex:
         try:
             assets = [
                 _asset_model_from_row(row)
-                for row in conn.execute("SELECT * FROM assets")
+                for row in conn.execute("SELECT * FROM assets ORDER BY rowid")
             ]
             versions = [
                 _version_model_from_row(row)

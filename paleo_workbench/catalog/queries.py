@@ -127,7 +127,14 @@ def search_assets(
     try:
         if (
             service._batch_depth
-            or service.index_revision() != service.document.catalog_revision
+            or (
+                not (
+                    getattr(service, "_lazy", False)
+                    and not getattr(service, "_warm", True)
+                )
+                and service.index_revision()
+                != service.document.catalog_revision
+            )
         ):
             # A readable-but-stale index must not be queried (I3): only the
             # canonical document scan reflects the current state. During

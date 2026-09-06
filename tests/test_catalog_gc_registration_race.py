@@ -50,17 +50,17 @@ def test_concurrent_sweep_never_deletes_inflight_payload(tmp_path, monkeypatch):
         src0 = _make_source(tmp_path, "seed.las", b"seed")
         seed = service.import_raw(src0)
 
-        # Widen the place→commit window: pause right AFTER the payload is
-        # placed (inside _build_version, before the locked commit).
+        # Widen the place→commit window DETERMINISTICALLY (R3#4): pause
+        # right AFTER the payload is placed (inside _build_version, before
+        # the locked commit), for EVERY placement in this test.
         original_build = service._build_version
         gate = threading.Event()
         proceed = threading.Event()
 
         def slow_build(*args, **kwargs):
             version, payload = original_build(*args, **kwargs)
-            if args and getattr(args[2], "value", "") == "OUTPUT":
-                gate.set()
-                proceed.wait(timeout=10)
+            gate.set()
+            proceed.wait(timeout=15)
             return version, payload
 
         monkeypatch.setattr(service, "_build_version", slow_build)
@@ -79,16 +79,18 @@ def test_concurrent_sweep_never_deletes_inflight_payload(tmp_path, monkeypatch):
             except Exception as exc:  # pragma: no cover - failure evidence
                 error.append(exc)
             finally:
-                gate.set()
                 proceed.set()
 
         thread = threading.Thread(target=register)
         thread.start()
-        assert gate.wait(timeout=10)
-        # The payload is on disk, unreferenced, uncommitted — the exact
-        # window the sweep used to delete. Spin it.
-        for _ in range(3):
-            service.sweep_gc(dry_run=False, explicit=True)
+        assert gate.wait(timeout=10), "placement never started"
+        # The payload is on disk under outputs/<asset>/<ver>/, unreferenced,
+        # uncommitted, WITH a live staging lease — the exact window the
+        # sweep used to delete (now in the OUTPUT stage whose lease prefix
+        # must use the on-disk dir name "outputs", R3#1). The gate holds the
+        # window OPEN while the sweeps run.
+        service.sweep_gc(dry_run=False, explicit=True)
+        service.sweep_gc(dry_run=False, explicit=True)
         proceed.set()
         thread.join(timeout=10)
         assert not error, error

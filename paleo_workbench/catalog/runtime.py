@@ -112,7 +112,11 @@ def catalog_is_current(service) -> bool:
     except Exception:
         return False
     if current is None:
-        return False
+        # No backend installed at all (headless/test, or everything closed):
+        # nothing REPLACED this service, so it is not stale. The #1223 hazard
+        # is a *different* backend being active (a switched-to project); an
+        # absent backend cannot receive the misdirected write.
+        return True
     # The production backend is the Core adapter wrapping the service; tests
     # may install the bare service. Match either shape.
     return current is service or getattr(current, "service", None) is service
