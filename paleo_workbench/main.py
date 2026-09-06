@@ -30,6 +30,7 @@ def _apply_qt_desktop_policy() -> None:
     """
     configure_qt_platform_for_session()
     _apply_wayland_fractional_scale_guard()
+    _install_glview_paint_guard()
 
     fmt = QSurfaceFormat()
     fmt.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
@@ -38,6 +39,35 @@ def _apply_qt_desktop_policy() -> None:
     fmt.setDepthBufferSize(24)
     fmt.setStencilBufferSize(8)
     QSurfaceFormat.setDefaultFormat(fmt)
+
+
+def _install_glview_paint_guard() -> None:
+    """Make pyqtgraph GLViewWidget tolerate paints without a usable context.
+
+    Dock teardown (浮动 ↔ 停靠) can deliver a paint event to an embedded
+    GLViewWidget while the dock machinery is still reparenting it between
+    top-levels; paintGL's unconditioned GL calls then hit a dead context and
+    crash inside the driver (see qt_platform._pin_mesa_egl_on_wayland for the
+    primary fix). Skipping such a paint is invisible — Qt repaints normally
+    once the widget is re-attached; the same guard also covers the
+    paint-with-no-context case documented for offscreen sessions.
+    """
+    try:
+        import pyqtgraph.opengl as _gl
+    except Exception:  # pyqtgraph.opengl is an optional heavy import
+        return
+
+    original = _gl.GLViewWidget.paintGL
+
+    def _guarded_paint_gl(self):
+        try:
+            if not self.isValid() or self.context() is None:
+                return
+        except RuntimeError:  # wrapped C++ object already deleted
+            return
+        original(self)
+
+    _gl.GLViewWidget.paintGL = _guarded_paint_gl
 
 
 def _apply_wayland_fractional_scale_guard() -> None:
