@@ -282,7 +282,7 @@ def test_scenario_e_export_map_product(executor, harness_project, tmp_path, qapp
     rejected = executor.execute(
         "map.export", {"output_path": "exports/bad.png"}, ctx
     )
-    assert rejected.status == "fail"
+    assert rejected.status == "failed"
     assert "validation" in rejected.error
 
     # Boundary checks need a VALID map (the validation gate short-circuits first).
@@ -296,13 +296,13 @@ def test_scenario_e_export_map_product(executor, harness_project, tmp_path, qapp
     outside = executor.execute(
         "map.export", {"output_path": "/definitely-outside.png"}, ctx
     )
-    assert outside.status == "fail", outside.error
+    assert outside.status == "failed", outside.error
     assert "workspace" in outside.error
     # Overwriting an existing file is refused (no destructive export).
     again = executor.execute(
         "map.export", {"output_path": out_rel, "width": 640, "height": 480}, ctx
     )
-    assert again.status == "fail"
+    assert again.status == "failed"
     assert "overwrite" in again.error
 
 

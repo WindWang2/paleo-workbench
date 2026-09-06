@@ -55,15 +55,36 @@ _ACTION_RISKS: dict[str, frozenset] = {
     "well.create_display": frozenset({"read", "compute"}),
     "workflow.status": frozenset({"read"}),
     "workspace.describe_context": frozenset({"read"}),
+    # Harness 2.0: workflow/recipe surface (risk mirrors the specs).
+    "workflow.run": frozenset({"compute"}),
+    "workflow.resume": frozenset({"compute"}),
+    "workflow.cancel": frozenset({"compute"}),
+    "workflow.describe": frozenset({"read"}),
+    "workflow.describe_reproduction": frozenset({"read"}),
+    "workflow.validate": frozenset({"read"}),
+    "recipe.save": frozenset({"write"}),
+    "recipe.load": frozenset({"read"}),
+    "recipe.clone": frozenset({"compute"}),
 }
 
 _RISK_LABELS = {"read": "只读", "compute": "计算", "write": "写入"}
 
 
 def _plan_risks(plan: AgentPlan) -> frozenset:
-    risks: set = set(_ACTION_RISKS.get(plan.action_id, {"read"}))
+    """The registry is the risk authority; the static table is only the
+    fallback for actions whose spec cannot be looked up."""
+
+    def _risk_of(action_id: str) -> set:
+        try:
+            from paleo_workbench.harness import get_action_registry
+
+            return {get_action_registry().get(action_id).risk.value}
+        except Exception:
+            return set(_ACTION_RISKS.get(action_id, {"read"}))
+
+    risks: set = set(_risk_of(plan.action_id))
     if plan.followup_action is not None:
-        risks |= set(_ACTION_RISKS.get(plan.followup_action[0], {"read"}))
+        risks |= _risk_of(plan.followup_action[0])
     return frozenset(risks)
 
 
@@ -74,8 +95,30 @@ def _risk_label(plan: AgentPlan) -> str:
     return _RISK_LABELS.get(top, top)
 
 
+class _TaskCancelAdapter:
+    """Adapts the scheduler TaskContext (``.cancelled`` Event) to the
+    harness cancel protocol (``is_cancelled`` / ``raise_if_cancelled``)."""
+
+    def __init__(self, task_context) -> None:
+        self._task_context = task_context
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self._task_context.cancelled.is_set()
+
+    def raise_if_cancelled(self) -> None:
+        from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
+        if self.is_cancelled:
+            raise TaskCancelled("agent task cancelled")
+
+
 class _AgentBridge(QObject):
     completed = Signal(object)
+    # H11: workflow node progress streams from the engine (worker thread)
+    # into the panel through this queued signal — widgets are never touched
+    # off the GUI thread.
+    progress_changed = Signal(float, str)
 
 
 class AgentWorkspace(QFrame):
@@ -93,6 +136,7 @@ class AgentWorkspace(QFrame):
         self._last_gui_action: str | None = None
         self._active_well_id: str = ""
         self._gui_history: list[dict] = []
+        self._current_task_id = None
         # #1186: WRITE confirmation hook. None → modal QMessageBox; tests
         # inject a stub returning bool. Per-plan, never latched.
         self.confirm_write: Callable[[list[str]], bool] | None = None
@@ -135,6 +179,12 @@ class AgentWorkspace(QFrame):
         self.history.setObjectName("WorkstationAgentHistory")
         self.history.setOpenExternalLinks(False)
         outer.addWidget(self.history, 1)
+
+        self.progress_label = QLabel("", self)
+        self.progress_label.setObjectName("WorkstationAgentProgress")
+        self.progress_label.setVisible(False)
+        outer.addWidget(self.progress_label)
+        self._bridge.progress_changed.connect(self._on_progress_changed)
 
         command_row = QHBoxLayout()
         self.command_input = QLineEdit(self)
@@ -311,16 +361,27 @@ class AgentWorkspace(QFrame):
             )
             if label in requested and risk in allowed_risks
         )
+        try:
+            from paleo_workbench.catalog.runtime import get_catalog
+
+            catalog = get_catalog()
+        except Exception:
+            catalog = None
         context = ActionContext(
             workspace_id=str(getattr(getattr(self._project, "meta", None), "name", "") or ""),
             project_path=self._project_path,
             project=self._project,
+            catalog=catalog,
             active_well_id=self._well_from_parameters(plan.parameters),
             permissions=permissions,
+            progress=self._on_workflow_progress,
         )
         executor = HarnessExecutor()
 
-        def run(_task_context):
+        def run(task_context):
+            # Scheduler cancellation reaches workflow actions through the
+            # session cancel token (cooperative, same protocol as engines).
+            context.cancel = _TaskCancelAdapter(task_context)
             results = [executor.execute(plan.action_id, plan.parameters, context)]
             if results[0].ok and plan.followup_action is not None:
                 action_id, parameters = plan.followup_action
@@ -355,10 +416,47 @@ class AgentWorkspace(QFrame):
         self.run_button.setEnabled(False)
         self.stop_button.setEnabled(True)
 
+    def _on_workflow_progress(self, ratio: float, message: str) -> None:
+        """Worker-thread safe: forward through the queued bridge signal."""
+        self._bridge.progress_changed.emit(float(ratio), str(message))
+
+    def _on_progress_changed(self, ratio: float, message: str) -> None:
+        percent = int(round(max(0.0, min(1.0, ratio)) * 100))
+        self.progress_label.setText(f"工作流进度 {percent}% · {message}")
+        self.progress_label.setVisible(True)
+
+    def _workflow_checklist_html(self, outputs: dict) -> str | None:
+        """Render the WorkflowPlanView checklist from a run summary."""
+        try:
+            from paleo_workbench.workflow.dag.plan_view import WorkflowPlanView
+
+            view = WorkflowPlanView.from_summary(dict(outputs or {}))
+            rows = view.checklist()
+            if not rows:
+                return None
+            muted = self._muted_html_color()
+            lines = []
+            for row in rows:
+                detail = str(row.get("detail") or "")
+                suffix = f" <span style='color:{muted}'>{detail}</span>" if detail else ""
+                cache_note = "（缓存复用）" if row.get("from_cache") else ""
+                lines.append(
+                    f"{row['symbol']} {row['label']}{cache_note}{suffix}"
+                )
+            header = (
+                f"工作流 {view.name} · {view.state_label()} · "
+                f"{int(round(view.progress * 100))}%"
+            )
+            self.progress_label.setVisible(False)
+            return f"<b>{header}</b><br>" + "<br>".join(lines)
+        except Exception:
+            return None
+
     def _on_completed(self, payload) -> None:
         self._current_task_id = None
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
+        self.progress_label.setVisible(False)
         if payload.get("cancelled"):
             self.history.append("<b>已取消</b> · 未应用 GUI 变更。")
             return
@@ -379,6 +477,19 @@ class AgentWorkspace(QFrame):
             return
 
         summary = self._result_summary(plan, results)
+        workflow_outputs = next(
+            (
+                r.outputs
+                for r in results
+                if r.action_id in ("workflow.run", "workflow.resume") and r.outputs.get("run_id")
+            ),
+            None,
+        )
+        if workflow_outputs is not None:
+            checklist = self._workflow_checklist_html(workflow_outputs)
+            if checklist:
+                self.history.append(checklist)
+                return
         gui_note = (
             f"GUI 同步：{plan.gui_action}" if plan.gui_action else "无 GUI 变更"
         )
@@ -427,6 +538,17 @@ class AgentWorkspace(QFrame):
         normalized = command.strip()
         well_match = re.search(r"\b([A-Za-z]{1,4}\d+(?:[-_]\d+)*)\b", normalized)
         well = well_match.group(1).upper() if well_match else ""
+        # 工作流入口（H11）：`运行工作流 <recipe 路径>` 计划为 workflow.run，
+        # 完成后经 WorkflowPlanView 渲染节点清单。
+        recipe_match = re.search(r"运行工作流\s+(\S+\.paleo-workflow\.json)", normalized)
+        if recipe_match:
+            return AgentPlan(
+                "workflow.run",
+                {"recipe_path": recipe_match.group(1)},
+                None,
+                f"运行工作流 {recipe_match.group(1)}",
+                kind="background.compute",
+            )
         # 规划期不虚构井名：缺井时留给执行期解析活动井，解析失败则动作
         # 校验诚实失败（参数校验拒绝空井），绝不静默换成示例井。
         if "显示" in normalized and "井" in normalized and any(word in normalized for word in ("所有", "全部", "平面")):

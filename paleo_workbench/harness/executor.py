@@ -25,7 +25,7 @@ from typing import Any, Callable
 
 from paleo_workbench.harness.context import ActionContext
 from paleo_workbench.harness.registry import ActionRegistry
-from paleo_workbench.harness.spec import ActionRisk, ActionSpec
+from paleo_workbench.harness.spec import ActionRisk, ActionSpec, ActionStatus
 from paleo_workbench.harness.validation import (
     FAIL,
     PASS,
@@ -64,15 +64,22 @@ class ActionContextError(LookupError):
 
 
 class ActionValidationError(ValueError):
-    def __init__(self, action_id: str, problems: list[str]):
+    def __init__(self, action_id: str, problems: list[str], *, label: str = "parameters"):
         self.problems = problems
-        super().__init__(f"parameters for {action_id!r} invalid: {'; '.join(problems)}")
+        super().__init__(f"{label} for {action_id!r} invalid: {'; '.join(problems)}")
+
+
+class ActionUnavailableError(RuntimeError):
+    """A required production capability is missing (backend, provider,
+    engine). Handlers raise this instead of faking a result — the executor
+    maps it to the canonical ``unavailable`` status."""
 
 
 @dataclass(slots=True)
 class ActionResult:
     action_id: str
-    status: str = "ok"  # ok | warning | fail | cancelled
+    status: str = ActionStatus.SUCCESS.value
+    # success | degraded | failed | cancelled | rejected | unavailable
     outputs: dict[str, Any] = field(default_factory=dict)
     verification: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
@@ -82,7 +89,11 @@ class ActionResult:
 
     @property
     def ok(self) -> bool:
-        return self.status in ("ok", "warning")
+        return self.status in (ActionStatus.SUCCESS.value, ActionStatus.DEGRADED.value)
+
+    @property
+    def degraded(self) -> bool:
+        return self.status == ActionStatus.DEGRADED.value
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -128,7 +139,7 @@ class HarnessExecutor:
         try:
             spec = self._registry.get(action_id)
         except LookupError as exc:
-            result.status = "fail"
+            result.status = ActionStatus.REJECTED.value
             result.error = str(exc)
             result.elapsed_ms = (time.perf_counter() - t0) * 1000
             return result
@@ -148,7 +159,8 @@ class HarnessExecutor:
                         f"({', '.join(spec.required_context)} must be set)"
                     )
         except (ActionValidationError, ActionPermissionError, ActionContextError) as exc:
-            result.status = "fail"
+            # Guard refusals happen before any work: rejected, never failed.
+            result.status = ActionStatus.REJECTED.value
             result.error = str(exc)
             result.elapsed_ms = (time.perf_counter() - t0) * 1000
             return result
@@ -156,6 +168,11 @@ class HarnessExecutor:
         lease = None
         try:
             lease = self._admit(spec)
+            # Nested provider executions (handlers wrapping execute_provider)
+            # inherit this lease instead of double-admitting the same work
+            # against the governor; popped in finally so a shared context
+            # never leaks an admission scope across actions.
+            context.extras["admission_lease"] = lease
             payload = self._execute_spec(spec, parameters, context, result)
             self._validate_output(spec, payload)
             verification = self._verify(spec, payload, parameters, context)
@@ -171,39 +188,57 @@ class HarnessExecutor:
                     spec.output_schema, result.outputs
                 )
                 if out_problems:
-                    result.status = "fail"
+                    result.status = ActionStatus.FAILED.value
                     result.error = "output schema mismatch: " + "; ".join(out_problems)
                     return result
+            # Harness 2.0: action-specific verifier hook, fail-closed — a
+            # verifier that crashes cannot bless the output.
+            if spec.verifier is not None:
+                custom = self._run_verifier(spec, payload, parameters, context)
+                verification = self._merge(verification, "verifier", custom)
+                result.verification = verification
             if verification.get("verdict") == FAIL:
-                result.status = "fail"
+                result.status = ActionStatus.FAILED.value
                 result.error = "verification failed: " + "; ".join(
                     r for r in verification.get("reasons", []) if r
                 )
             elif verification.get("verdict") == WARNING:
-                result.status = "warning"
+                result.status = ActionStatus.DEGRADED.value
                 result.warnings.extend(verification.get("reasons", []))
         except (ActionValidationError, InvalidParametersError) as exc:
-            result.status = "fail"
+            result.status = ActionStatus.FAILED.value
             result.error = str(exc)
         except TaskCancelled as exc:
             # #1137: cooperative cancellation is a first-class terminal
-            # outcome — "cancelled", never "fail". Returning (instead of
+            # outcome — "cancelled", never "failed". Returning (instead of
             # re-raising) keeps the executor's isolation contract: the loop
             # never crashes, and scheduler-side callers detect the cancel
             # through their cancellation token and land in CANCELLED.
-            result.status = "cancelled"
+            result.status = ActionStatus.CANCELLED.value
             result.error = f"cancelled: {exc}"
+        except (ActionUnavailableError, ModuleNotFoundError, ImportError) as exc:
+            # A missing production backend/provider is honest unavailability,
+            # not a compute failure — and never a fake result.
+            result.status = ActionStatus.UNAVAILABLE.value
+            result.error = f"unavailable: {exc}"
         except PermissionError as exc:
-            result.status = "fail"
+            result.status = ActionStatus.FAILED.value
             result.error = str(exc)
         except LookupError as exc:
-            result.status = "fail"
+            result.status = ActionStatus.FAILED.value
             result.error = str(exc)
         except Exception as exc:  # isolation: handler errors never crash the loop
-            logger.exception("harness action %s failed", action_id)
-            result.status = "fail"
-            result.error = f"{type(exc).__name__}: {exc}"
+            if _is_resource_exhausted(exc):
+                # Governor refusal (capacity/pressure): the request was never
+                # admitted — rejected, with the governor's explainable reason.
+                result.status = ActionStatus.REJECTED.value
+                result.error = str(exc)
+            else:
+                logger.exception("harness action %s failed", action_id)
+                result.status = ActionStatus.FAILED.value
+                result.error = f"{type(exc).__name__}: {exc}"
         finally:
+            context.extras.pop("admission_lease", None)
             if lease is not None:
                 lease.release()
             result.elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -217,7 +252,7 @@ class HarnessExecutor:
     def _execute_spec(self, spec: ActionSpec, parameters: dict[str, Any],
                       context: ActionContext, result: ActionResult) -> Any:
         if spec.provider_id is not None:
-            from paleo_workbench.providers import ProviderContext, execute_provider
+            from paleo_workbench.providers import execute_provider
             from paleo_workbench.providers.refs import PathRef, SeismicVolumeRef
 
             # Provider-declared actions resolve their typed inputs from the
@@ -226,20 +261,7 @@ class HarnessExecutor:
             volume = context.active_volume
             if isinstance(volume, (SeismicVolumeRef, PathRef)):
                 inputs["volume"] = volume
-            from pathlib import Path
-
-            workspace_root = (
-                str(Path(context.project_path).parent)
-                if context.project_path
-                else str(Path.cwd())
-            )
-            provider_context = ProviderContext(
-                catalog=context.catalog,
-                workspace_root=workspace_root,
-                emit_progress=context.progress,
-                cancel=context.cancel,
-                work_dir=context.extras.get("work_dir"),
-            )
+            provider_context = context.provider_context()
             provider_result = execute_provider(
                 self._provider_registry(), spec.provider_id,
                 inputs=inputs, parameters=parameters, context=provider_context,
@@ -257,6 +279,34 @@ class HarnessExecutor:
         if handler is None:
             raise RuntimeError(f"action {spec.action_id} has neither handler nor provider")
         return handler(context, parameters)
+
+    def _run_verifier(self, spec: ActionSpec, payload: Any, parameters: dict[str, Any],
+                      context: ActionContext) -> dict[str, Any]:
+        """Run the action's custom verifier, fail-closed.
+
+        The verifier receives the raw payload plus the request parameters and
+        the captured context; it returns a ValidationReport-shaped object
+        (``verdict``/``reasons``) or dict. A crash is a FAILED report — an
+        unverifiable output never scores as success.
+        """
+        try:
+            report = spec.verifier(payload, parameters, context)
+        except Exception as exc:
+            logger.exception("verifier for %s crashed", spec.action_id)
+            return {
+                "verdict": FAIL,
+                "reasons": [f"verifier crashed: {type(exc).__name__}: {exc}"],
+            }
+        if hasattr(report, "to_dict"):
+            try:
+                report = report.to_dict()
+            except Exception:
+                report = None
+        if not isinstance(report, dict):
+            return {"verdict": FAIL, "reasons": ["verifier returned no report"]}
+        verdict = report.get("verdict", FAIL)
+        reasons = [str(r) for r in report.get("reasons", []) if r]
+        return {"verdict": verdict, "reasons": reasons}
 
     @staticmethod
     def _provider_registry():
@@ -279,7 +329,9 @@ class HarnessExecutor:
             return
         problems = validate_parameters(schema, payload, label="output")
         if problems:
-            raise ActionValidationError(spec.action_id, problems)
+            raise ActionValidationError(
+                spec.action_id, problems, label="output schema mismatch"
+            )
 
     def _admit(self, spec: ActionSpec):
         global ADMISSION_DEGRADED
@@ -376,6 +428,15 @@ class HarnessExecutor:
             key: report,
             **{k: v for k, v in verification.items() if k not in ("verdict", "reasons")},
         }
+
+
+def _is_resource_exhausted(exc: BaseException) -> bool:
+    """True for a governor admission refusal (duck-typed: the runtime module
+    may be degraded, so no hard import at module scope)."""
+    return (
+        type(exc).__name__ == "ResourceExhausted"
+        and hasattr(exc, "reason")
+    )
 
 
 def _jsonable(value: Any) -> Any:

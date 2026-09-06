@@ -111,6 +111,10 @@ class ProviderDescriptor:
     supports_resume: bool = False
     deterministic: bool = True
     threading_model: str = "worker_thread"  # worker_thread | gui_thread | any
+    # Harness 2.0: optional build identity (git sha, native lib build tag…)
+    # recorded in receipts alongside `version` when reproducibility needs
+    # more granularity than the numeric version.
+    build_identity: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -128,6 +132,7 @@ class ProviderDescriptor:
             "supports_resume": self.supports_resume,
             "deterministic": self.deterministic,
             "threading_model": self.threading_model,
+            "build_identity": self.build_identity,
         }
 
 
@@ -160,6 +165,8 @@ def validate_descriptor(descriptor: ProviderDescriptor) -> list[str]:
                 problems.append(f"{role} entry {t!r} is not a known typed ref {sorted(TYPED_REFS)}")
     if descriptor.threading_model not in ("worker_thread", "gui_thread", "any"):
         problems.append(f"threading_model {descriptor.threading_model!r} invalid")
+    if descriptor.build_identity is not None and not isinstance(descriptor.build_identity, str):
+        problems.append("build_identity must be a string when present")
     profile = descriptor.resource_profile
     if not isinstance(profile, ResourceProfile):
         problems.append("resource_profile must be a ResourceProfile")

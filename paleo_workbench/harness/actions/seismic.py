@@ -56,6 +56,7 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="seismic.open_volume",
+            output_schema={"type": "object", "properties": {"volume": {"type": "object"}, "geometry": {"type": "object"}}, "required": ["volume"]},
             description="打开地震体（zarr 生产路径 / RAW SEG-Y 降级浏览），成为会话激活体。",
             handler=_open_volume,
             risk=ActionRisk.COMPUTE,
@@ -95,25 +96,116 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="seismic.compute_attribute",
+            side_effect_notes="writes a derived zarr store under the project artifacts tree and registers a catalog derived version",
+            output_schema={"type": "object", "properties": {"attribute": {"type": "string"}, "artifacts": {"type": "array"}, "diagnostics": {"type": "object"}, "provenance": {"type": "object"}}, "required": ["attribute", "artifacts"]},
             description="对激活（或指定）地震体计算属性体（如 c3 相干），经 provider 执行并登记派生数据。",
             handler=_compute_attribute,
             # #1186: writes the derived zarr store to disk and registers it in
             # the catalog — WRITE, aligned with its side effects.
             risk=ActionRisk.WRITE,
             category="seismic.attribute",
-            resource_profile={"estimated_cpu_cores": 2.0, "estimated_ram_bytes": 1024 * 1024**2, "io_weight": 1.0},
+            # Honest envelope of the wrapped provider (#1146): the nested
+            # execute_provider inherits this admission, so the action profile
+            # must cover the provider's declared working set.
+            resource_profile={"estimated_cpu_cores": 2.0, "estimated_ram_bytes": 5 * 1024**3, "io_weight": 1.0},
+            # ROI attribute kernels are deterministic and register a derived
+            # catalog version — exactly the cache contract (identity gate +
+            # resolvable outputs).
+            deterministic=True,
+            cacheable=True,
+            idempotent=True,
+            output_refs=("DataVersionRef",),
             supports_cancel=True,
             input_schema={
                 "type": "object",
                 "properties": {
-                    "attribute": {"type": "string", "enum": ["c3"], "description": "属性 kernel"},
+                    "attribute": {
+                        "type": "string",
+                        "enum": [
+                            "c3",
+                            "envelope",
+                            "instantaneous_phase",
+                            "instantaneous_frequency",
+                            "rms_amplitude",
+                            "sweetness",
+                            "relative_impedance",
+                            "dip_il",
+                            "dip_xl",
+                            "dip_azimuth",
+                            "curvature_mean",
+                        ],
+                        "description": "属性 kernel（seismic_attributes.KERNELS 全表）",
+                    },
                     "output_dir": {"type": "string"},
+                    "roi": {
+                        "type": "object",
+                        "description": "中小 ROI 窗口（本 Goal 不针对 100GB 全量优化）",
+                        "properties": {
+                            "il0": {"type": "integer"},
+                            "il1": {"type": "integer"},
+                            "xl0": {"type": "integer"},
+                            "xl1": {"type": "integer"},
+                            "t0": {"type": "integer"},
+                            "t1": {"type": "integer"},
+                        },
+                        "required": ["il0", "il1", "xl0", "xl1"],
+                        "additionalProperties": False,
+                    },
                 },
                 "additionalProperties": False,
             },
         )
     )
 
+
+    registry.register(
+        ActionSpec(
+            action_id="seismic.describe",
+            description="描述激活地震体的几何与存储（inline/xline/采样数、zarr/segy、窗口范围）。",
+            handler=_describe_volume,
+            risk=ActionRisk.READ,
+            category="interactive.query",
+            version="1.0",
+            resource_profile={"estimated_cpu_cores": 0.2, "io_weight": 0.2},
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+            domain_tags=("seismic", "describe"),
+        )
+    )
+    registry.register(
+        ActionSpec(
+            action_id="seismic.open_section",
+            description="生成一个地震剖面（inline/crossline/timeslice）的只读描述符与数据摘要。",
+            handler=_open_section,
+            risk=ActionRisk.READ,
+            category="interactive.query",
+            version="1.0",
+            resource_profile={"estimated_cpu_cores": 0.5, "estimated_ram_bytes": 32 * 1024**2, "io_weight": 1.0},
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "slice_type": {"type": "string", "enum": ["inline", "crossline", "timeslice"]},
+                    "index": {"type": "integer"},
+                },
+                "required": ["slice_type", "index"],
+                "additionalProperties": False,
+            },
+            domain_tags=("seismic", "section"),
+        )
+    )
+    registry.register(
+        ActionSpec(
+            action_id="seismic.describe_horizon",
+            description="列出工程中的层位解释（名称/井/版本），只读 project 权威。",
+            handler=_describe_horizons,
+            risk=ActionRisk.READ,
+            category="interactive.query",
+            version="1.0",
+            resource_profile={"estimated_cpu_cores": 0.2, "io_weight": 0.1},
+            required_context=("project",),
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+            domain_tags=("seismic", "horizon"),
+        )
+    )
 
 def _open_volume(context: ActionContext, parameters: dict) -> dict:
     from geoviz_seismic import open_volume
@@ -185,7 +277,7 @@ def _get_slice(context: ActionContext, parameters: dict) -> dict:
 
 
 def _compute_attribute(context: ActionContext, parameters: dict) -> dict:
-    from paleo_workbench.providers import ProviderContext, execute_provider
+    from paleo_workbench.providers import execute_provider
     from paleo_workbench.providers.refs import SeismicVolumeRef
 
     volume = context.active_volume
@@ -207,17 +299,12 @@ def _compute_attribute(context: ActionContext, parameters: dict) -> dict:
 
         output_dir = str(Path(tempfile.mkdtemp(prefix="p2-attribute-")) / "attr.zarr")
     provider_parameters = {"output_dir": output_dir}
-    # V3: same workspace_root contract as the executor's provider dispatch
-    # (harness/executor.py) and the mapping export action — without it the
-    # provider-side containment checks (#1177) have no root to enforce
-    # against for this action.
-    workspace_root = str(root) if root is not None else str(Path.cwd())
-    provider_context = ProviderContext(
-        catalog=context.catalog,
-        workspace_root=workspace_root,
-        emit_progress=context.progress,
-        cancel=context.cancel,
-        work_dir=context.extras.get("work_dir"),
+    if parameters.get("roi") is not None:
+        provider_parameters["roi"] = dict(parameters["roi"])
+    # Same workspace_root contract as the executor's provider dispatch — the
+    # provider-side containment checks (#1177) need a root to enforce.
+    provider_context = context.provider_context(
+        workspace_root=str(root) if root is not None else str(Path.cwd())
     )
     result = execute_provider(
         _registry(),
@@ -241,3 +328,60 @@ def _registry():
     from paleo_workbench.providers import get_provider_registry
 
     return get_provider_registry()
+
+def _describe_volume(context: ActionContext, parameters: dict) -> dict:
+    _volume_id, reader = _reader_for(context, parameters)
+    geometry = reader.geometry
+    volume = context.active_volume
+    return {
+        "volume_id": _volume_id,
+        "store": volume.to_dict() if volume is not None and hasattr(volume, "to_dict") else None,
+        "shape": list(getattr(geometry, "shape", []) or []),
+        "dtype": str(getattr(geometry, "dtype", "")),
+    }
+
+
+def _open_section(context: ActionContext, parameters: dict) -> dict:
+    _volume_id, reader = _reader_for(context, parameters)
+    slice_type = parameters["slice_type"]
+    index = int(parameters["index"])
+    if slice_type == "inline":
+        array = reader.read_inline(index)
+    elif slice_type == "crossline":
+        array = reader.read_crossline(index)
+    else:
+        array = reader.read_timeslice(index)
+    import numpy as np
+
+    finite = array[np.isfinite(array)]
+    return {
+        "descriptor": {
+            "volume_id": _volume_id,
+            "slice_type": slice_type,
+            "index": index,
+            "shape": list(array.shape),
+            "dtype": str(array.dtype),
+        },
+        "summary": {
+            "finite_ratio": float(finite.size) / max(1, array.size),
+            "min": float(finite.min()) if finite.size else None,
+            "max": float(finite.max()) if finite.size else None,
+        },
+        "values": array,
+    }
+
+
+def _describe_horizons(context: ActionContext, parameters: dict) -> dict:
+    project = context.require("project")
+    horizons = []
+    for ref in getattr(project, "horizon_interpretations", []) or []:
+        horizons.append(
+            {
+                "id": getattr(ref, "id", None),
+                "name": getattr(ref, "name", ""),
+                "horizon_key": getattr(ref, "horizon_key", ""),
+                "status": getattr(ref, "status", None),
+                "version_id": getattr(ref, "current_version_id", None),
+            }
+        )
+    return {"horizons": horizons, "count": len(horizons)}
