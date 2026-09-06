@@ -67,6 +67,9 @@ class LayerGroupController:
         self.on_structure_changed: Callable[[], None] | None = None
         #: 非法拖放（角色路由冲突）通知宿主显示提示。
         self.on_invalid_move: Callable[[str, str], None] | None = None
+        # 最近一次 observe_tree_nodes 是否拒绝了非法放置（宿主据此 force
+        # reconcile 把 QGIS 树拉回领域权威位置）。
+        self.last_observe_rejected: bool = False
         # 组展开态（阶段 → node_id → expanded；UI 偏好，宿主落 QSettings）。
         self.expand_states: dict[str, dict[str, bool]] = {}
         # 运行时放置表：layer_id → group_id（"" = root），从持久化树恢复。
@@ -340,10 +343,8 @@ class LayerGroupController:
             parent = template.parent_id if template is not None else (
                 FACTOR_ROOT_GROUP_ID if group_id.startswith("factor.") else "")
             stack.upsert_group(group_id, group.name, parent)
-        keep_ids = [
-            g.group_id for g in desired.iter_groups()
-        ] + [g.group_id for g in desired.iter_groups()]  # 含嵌套组
-        stack.remove_groups_except(sorted(set(keep_ids)))
+        keep_ids = sorted({g.group_id for g in desired.iter_groups()})
+        stack.remove_groups_except(keep_ids)
 
         # 2) 组间顺序（root 级）与组内放置增量。
         if last is None or force:
@@ -453,11 +454,13 @@ class LayerGroupController:
                     self._last_group_visibility[group_id] != visible:
                 try:
                     self._stack.set_group_visibility(group_id, visible)
+                    # 成功才记已应用：失败的显隐保持未应用态，后续重试
+                    #（否则记忆表与 QGIS 实际显隐永久漂移）。
+                    self._last_group_visibility[group_id] = visible
                     changed += 1
                 except Exception:
                     logger.debug("set_group_visibility failed for %s", group_id,
                                  exc_info=True)
-            self._last_group_visibility[group_id] = visible
         return effective
 
     def set_group_visible(self, group_id: str, visible: bool,
@@ -466,10 +469,10 @@ class LayerGroupController:
         if self._stack is not None and self.groups_available:
             try:
                 self._stack.set_group_visibility(group_id, bool(visible))
+                self._last_group_visibility[group_id] = bool(visible)
             except Exception:
                 logger.debug("set_group_visibility failed for %s", group_id,
                              exc_info=True)
-        self._last_group_visibility[group_id] = bool(visible)
         if record:
             self.state.view_state(self.state.current_stage).record_group_visibility(
                 group_id, bool(visible))
@@ -532,12 +535,13 @@ class LayerGroupController:
         observed = tree_from_nodes(nodes)
         # 用户组发现：观察树中不在系统模板/factor 集中的组 → 用户组。
         system_ids = {t.group_id for t in SYSTEM_GROUP_TEMPLATES}
-        observed_ids = set(observed.group_ids())
+        # 先收集，全部校验通过才提交（拒绝时回滚，不留幽灵组）。
+        discovered_user_groups: dict[str, GroupNode] = {}
         for group in observed.iter_groups():
             gid = group.group_id
             if gid and gid not in system_ids and not gid.startswith("factor.") \
                     and gid not in self._user_groups:
-                self._user_groups[gid] = GroupNode(
+                discovered_user_groups[gid] = GroupNode(
                     group_id=gid, name=group.name or gid, kind="user")
         # 放置回写（含角色校验）。
         rejected = False
@@ -565,12 +569,15 @@ class LayerGroupController:
 
         walk(observed.children, "")
         if rejected:
+            self.last_observe_rejected = True
             if self.on_invalid_move is not None:
                 try:
                     self.on_invalid_move("", "")
                 except Exception:
                     pass
             return False
+        self.last_observe_rejected = False
+        self._user_groups.update(discovered_user_groups)
         self._placements = placements
         self._group_orders = orders
         self._root_order = root_order

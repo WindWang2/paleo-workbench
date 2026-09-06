@@ -80,9 +80,9 @@ class MappingStageController(QObject):
         """绑定 ProjectDocument（与可选 CatalogPort）——工程打开/切换时调用。"""
         self._document = document
         self._catalog = catalog
-        if self._layer_snapshot_provider is not None:
-            snapshots = self._layer_snapshot_provider()
-            self.group_controller.ensure_memberships(snapshots)
+        # 注意：这里不预跑 ensure_memberships——装载早期 snapshot provider
+        # 可能返回上一工程的图层列表（bind 之前）；迁移归类统一在
+        # sync_composition（组合同步后）执行。
         self.refresh_evaluation()
 
     def set_snapshot_provider(self, provider: Callable[[], list]) -> None:

@@ -252,6 +252,8 @@ class StageActionDispatcher:
             features=source_features, source_version_id=source_version,
         )
         if layer_id:
+            self.stage_controller.state.set_maturity(
+                f"phase1_draft:{layer_id}", "draft")
             self.edit_controller.set_active_layer(layer_id)
             self.composite.layer_manager.select_layer(layer_id)
             self.composite.status_message.emit(
@@ -291,6 +293,15 @@ class StageActionDispatcher:
         for task in tasks:
             task_id = str(task.id)
             title = factor_group_title(task.name, getattr(task, "factor_type", ""))
+            # 幂等：该任务已有叠加图层则跳过（重复点击不堆积副本）。
+            existing = [
+                lid for lid in self.stage_controller.state.memberships
+                if self.stage_controller.state.membership(lid).factor_task_id == task_id
+                and self.edit_controller.layer(lid) is not None
+            ]
+            if existing:
+                skipped += 0  # 已叠加：不计失败
+                continue
             # 输入井点（WellTable 行）。
             table = None
             for candidate in getattr(document, "well_tables", None) or []:
@@ -388,7 +399,7 @@ class StageActionDispatcher:
         if document is None:
             return
         entries: list[tuple[str, str]] = []
-        # 阶段1解释草稿
+        # 阶段1解释草稿（draft:<layer_id>——dependencies 传播式评估契约）
         for layer_id in self.stage_controller.state.layers_with_role(
                 LayerRole.INITIAL_FACIES_DRAFT):
             layer = self.edit_controller.layer(str(layer_id))
@@ -443,6 +454,8 @@ class StageActionDispatcher:
             features=features,
         )
         if layer_id:
+            self.stage_controller.state.set_maturity(
+                f"integrated:{layer_id}", "draft")
             self.edit_controller.set_active_layer(layer_id)
             self.composite.layer_manager.select_layer(layer_id)
             self.composite.status_message.emit(
@@ -459,7 +472,7 @@ class StageActionDispatcher:
             if layer is None:
                 continue
             try:
-                found = self.edit_controller._topology.validate([layer])
+                found = self.edit_controller.topology.validate([layer])
             except Exception:
                 continue
             for problem in found or []:

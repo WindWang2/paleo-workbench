@@ -255,39 +255,88 @@ class MappingDependencyService:
         return results
 
     def _evaluate_integrated(self, document, workspace_state, catalog) -> list:
+        """传播式评估：综合解释的过期 = 其证据引用的上游成果过期。
+
+        证据引用契约（select_evidence 写入）：
+        * ``draft:<layer_id>`` → 传播 ``phase1_draft:<layer_id>`` 的评估；
+        * ``factor:<task_id>:<version>`` → factor 评估 + 版本是否仍为该任务
+          当前结果版本（否则 SUPERSEDED/STALE）；
+        * ``constraints:current`` → 未钉版本的约束内容（诚实 UNKNOWN，
+          **绝不**谎报 STALE——没有比较基准时不可断言过期）；
+        * 裸版本 id（``_looks_like_version_id``）→ 直接版本货币性检查。
+        """
         results: list[ArtifactFreshness] = []
         if workspace_state is None:
             return results
         input_set = dict(workspace_state.compilation_input_set or {})
+        # 先算上游（draft/factor），传播时复用。
+        upstream: dict[str, ArtifactFreshness] = {
+            entry.artifact_key: entry
+            for entry in self._evaluate_phase1_drafts(
+                document, workspace_state, catalog)
+                + self._evaluate_factors(document, catalog)
+        }
+        task_grid_version = {
+            str(task.id): str(getattr(task, "grid_artifact_version_id", "") or "")
+            for task in (getattr(document, "factor_map_tasks", None) or [])
+        }
         for layer_id, record in workspace_state.memberships.items():
             if record.role not in (LayerRole.INTEGRATED_FACIES,
                                    LayerRole.INTEGRATED_BOUNDARY):
                 continue
             key = f"integrated:{layer_id}"
-            pinned_versions: list[str] = []
-            stale_pins: list[str] = []
+            if not input_set:
+                results.append(ArtifactFreshness(
+                    key, "integrated", MappingStage.INTEGRATED_COMPILATION,
+                    FreshnessStatus.UNKNOWN,
+                    "未选择证据版本（Compilation Input Set 为空）"))
+                continue
+            pinned_inputs: list[tuple[str, str]] = []
+            culprits: list[str] = []
+            worst: FreshnessStatus | None = None
+            detail = ""
             for ref_key, value in input_set.items():
                 value = str(value or "")
                 if not value:
                     continue
-                if _looks_like_version_id(value):
-                    pinned_versions.append(value)
-                else:
-                    stale_pins.append(ref_key)  # 指纹引用：与当前不符即过期
-            status, culprits, detail = self._check_pinned_versions(catalog, pinned_versions)
-            if stale_pins and status == FreshnessStatus.CURRENT:
-                status = FreshnessStatus.STALE
-                detail = "证据指纹与当前不符（约束/输入已修改）"
-                culprits = culprits + tuple(stale_pins)
-            if not pinned_versions and not stale_pins:
-                status = FreshnessStatus.UNKNOWN
-                detail = "未选择证据版本（Compilation Input Set 为空）"
+                if value.startswith("draft:"):
+                    upstream_entry = upstream.get(
+                        f"phase1_draft:{value[len('draft:'):] }")
+                    if upstream_entry is not None:
+                        pinned_inputs.append((ref_key, value))
+                        if upstream_entry.is_problem and worst is not FreshnessStatus.MISSING_INPUT:
+                            worst = upstream_entry.status
+                            culprits.append(upstream_entry.artifact_key)
+                            detail = f"上游证据已过期：{upstream_entry.artifact_key}"
+                elif value.startswith("factor:"):
+                    parts = value.split(":")
+                    task_id = parts[1] if len(parts) > 1 else ""
+                    pinned_version = parts[2] if len(parts) > 2 else ""
+                    pinned_inputs.append((ref_key, value))
+                    if pinned_version and task_grid_version.get(task_id) \
+                            and task_grid_version[task_id] != pinned_version:
+                        if worst is not FreshnessStatus.MISSING_INPUT:
+                            worst = FreshnessStatus.SUPERSEDED
+                            culprits.append(f"factor:{task_id}")
+                            detail = f"证据单因素已有新结果版本（{ref_key}）"
+                elif value.startswith("constraints:"):
+                    # 未钉版本的约束内容：无比较基准 → 诚实不计入过期判定。
+                    pinned_inputs.append((ref_key, value))
+                elif _looks_like_version_id(value):
+                    pinned_inputs.append((ref_key, value))
+                    status, bad, why = self._check_pinned_versions(
+                        catalog, [value])
+                    if status != FreshnessStatus.CURRENT and (
+                            worst is not FreshnessStatus.MISSING_INPUT):
+                        worst = status
+                        culprits.extend(bad)
+                        detail = why
+            if worst is None:
+                worst = FreshnessStatus.CURRENT
             results.append(ArtifactFreshness(
                 key, "integrated", MappingStage.INTEGRATED_COMPILATION,
-                status, detail,
-                pinned_inputs=tuple(
-                    [("version", v) for v in pinned_versions]
-                    + [("fingerprint", p) for p in stale_pins]),
+                worst, detail,
+                pinned_inputs=tuple(pinned_inputs),
                 upstream_culprits=tuple(culprits)))
         return results
 

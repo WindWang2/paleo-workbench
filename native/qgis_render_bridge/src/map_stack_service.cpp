@@ -744,8 +744,14 @@ class PwbLayerTreeMenuProvider : public QgsLayerTreeViewMenuProvider {
           menu->addAction(actions->actionZoomToLayers(canvas_.data(), menu));
         }
         menu->addAction(actions->actionRenameGroupOrLayer(menu));
-        addCustom(menu, QStringLiteral("删除组（保留图层）"), "remove_group",
-                  gid.toStdString());
+        const bool isSystemGroup = gid.startsWith(QLatin1String("phase"))
+            || gid.startsWith(QLatin1String("factor."))
+            || gid.startsWith(QLatin1String("base."))
+            || gid.startsWith(QLatin1String("legacy."));
+        if (!isSystemGroup) {
+          addCustom(menu, QStringLiteral("删除组（保留图层）"), "remove_group",
+                    gid.toStdString());
+        }
         return menu;
       }
     }

@@ -264,3 +264,37 @@ def test_project_manager_roundtrip_keeps_workspace_state(tmp_path, monkeypatch):
     assert loaded.mapping_workspace["artifact_maturity"] == {
         "phase1_draft:L1": "reviewed"}
     assert loaded.mapping_workspace["compilation_input_set"]["砂厚"] == "factor:f1:ver_9"
+
+def test_integrated_staleness_propagates_and_constraints_not_fake_stale(
+        qtbot, monkeypatch):
+    """P1 修复回归：传播式评估——draft 过期传播到 integrated；
+    constraints:current 无基准时诚实不计入过期。"""
+    project = _project_with_initial_facies()
+    doc = _composite(qtbot, monkeypatch, project)
+    controller = doc.stage_controller
+    catalog = _FakeCatalog()
+    catalog.add_asset("raw-asset", "ver_1")
+    controller.attach_document(project, catalog)
+
+    actions = doc.stage_actions
+    actions.load_initial_facies()
+    actions.create_facies_draft()
+    draft_id = controller.state.layers_with_role(LayerRole.INITIAL_FACIES_DRAFT)[0]
+    controller.state.membership(draft_id).source_version_id = "ver_1"
+    # 证据集：draft 引用（传播契约） + 未钉版本的约束内容。
+    controller.state.compilation_input_set["阶段1解释"] = f"draft:{draft_id}"
+    controller.state.compilation_input_set["地质约束"] = "constraints:current"
+    actions.create_integrated_draft()
+    integrated = controller.state.layers_with_role(LayerRole.INTEGRATED_FACIES)[0]
+
+    controller.refresh_evaluation()
+    entry = controller.stale_summary.get(f"integrated:{integrated}")
+    assert entry is not None and entry.status.value == "current", \
+        "constraints:current 无比较基准，不得谎报过期"
+
+    # 上游 v2 → draft STALE → integrated 传播 STALE。
+    catalog.add_asset("raw-asset", "ver_2")
+    controller.refresh_evaluation()
+    entry = controller.stale_summary.get(f"integrated:{integrated}")
+    assert entry.status.value == "stale", "上游过期必须传播到综合解释"
+    assert draft_id in entry.detail or "phase1_draft" in entry.detail

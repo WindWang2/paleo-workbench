@@ -835,9 +835,12 @@ class CompositeDocument(QWidget):
         self.stage_controller.active_target_changed.connect(self._apply_active_target)
         if isinstance(self.layer_manager, QgisLayerTreePanel):
             self.layer_manager.group_state_changed.connect(
-                self._sync_workspace_state_to_project)
+                self._on_tree_structure_changed)
             self.layer_manager.create_group_requested.connect(self._create_user_group)
             self.layer_manager.remove_group_requested.connect(self._remove_user_group)
+        self.stage_controller.group_controller.on_invalid_move = (
+            lambda layer_id, group_id: self.status_message.emit(
+                "该图层不能移入此系统组（科学角色与组语义不相容）——已保持原位"))
         # V5 阶段动作分派（面板动作 → 工作流；见 stage_actions.py）。
         from paleo_workbench.ui.workstation.stage_actions import StageActionDispatcher
         self.stage_actions = StageActionDispatcher(self)
@@ -1020,7 +1023,12 @@ class CompositeDocument(QWidget):
             if self.edit_controller.editing:
                 self._save_edits_with_feedback()
             else:
-                self.edit_controller.start_editing()
+                allowed, reason = self._role_allows_editing(
+                    self.edit_controller.active_layer_id)
+                if not allowed:
+                    self.status_message.emit(reason)
+                else:
+                    self.edit_controller.start_editing()
         elif command_id == "save_edits":
             self._save_edits_with_feedback()
         elif command_id == "rollback":
@@ -1034,6 +1042,14 @@ class CompositeDocument(QWidget):
         self._sync_action_state()
 
     def _save_edits_with_feedback(self) -> None:
+        # 纵深防御：RAW 保护角色的会话即使被未知路径打开，也不得提交——
+        # 回滚并告知（防原始相图/模型结果被改写后持久化）。
+        active_id = self.edit_controller.active_layer_id
+        allowed, reason = self._role_allows_editing(active_id)
+        if not allowed:
+            self.edit_controller.rollback_edits()
+            self.status_message.emit(f"已回滚：{reason}")
+            return
         error = self.edit_controller.save_edits()
         if error:
             self.status_message.emit(error)
@@ -1226,6 +1242,7 @@ class CompositeDocument(QWidget):
             )
 
     def _remove_vector_layer(self, layer_id: str) -> None:
+        self.stage_controller.group_controller.unregister_layer(str(layer_id))
         self.edit_controller.remove_layer(layer_id)
 
     def _duplicate_vector_layer(self, layer_id: str) -> None:
@@ -1251,20 +1268,48 @@ class CompositeDocument(QWidget):
         return None
 
     def _apply_active_target(self, layer_id) -> None:
-        """阶段编辑目标应用（active_target_changed → 编辑权威 + 树选中）。"""
+        """阶段编辑目标应用（active_target_changed → 编辑权威 + 树选中）。
+
+        None（阶段无编辑目标）也必须生效：清空活动图层，编辑动作落到
+        门禁拒绝（P1 修复：绝不让上一阶段目标悄悄存活）。
+        """
         if not layer_id:
+            if self.edit_controller.active_layer_id is not None:
+                self.edit_controller.set_active_layer(None)
             return
         if self.edit_controller.layer(str(layer_id)) is not None:
             self.edit_controller.set_active_layer(str(layer_id))
             self.layer_manager.select_layer(str(layer_id))
 
-    def _role_allows_editing(self, layer_id: str) -> tuple[bool, str]:
-        """RAW 不可变保护（V5 §14）：初始相图/预测结果/插值面禁止直接编辑。"""
+    def _role_allows_editing(self, layer_id) -> tuple[bool, str]:
+        """编辑门禁（单点）：RAW 不可变保护（V5 §14）+ 阶段证据组锁（§41）。
+
+        所有开启编辑会话的路径（树面板/主工具栏命令/修复几何/保存提交）
+        都必须经过本检查——「画物源线写进相带边界」与「改写原始相图」
+        都是 P0 级业务风险。
+        """
+        if not layer_id:
+            return False, "当前没有活动编辑目标（本阶段的默认编辑对象尚未创建）"
         role = self.stage_controller.state.role_of(str(layer_id))
         if role.is_raw_protected:
             return False, (
                 f"图层角色为「{role.label}」（RAW/模型结果）——不可直接编辑；"
                 "请创建 DERIVED 草稿后编辑")
+        # 阶段证据组锁：图层所在组在本阶段锁定 → 拒绝（用户可在阶段视图
+        # 状态中显式解锁）。
+        from paleo_workbench.mapping_workspace.layer_groups import (
+            system_group_template,
+        )
+        group_id = self.stage_controller.group_controller.placement_of(layer_id)
+        template = system_group_template(group_id) if group_id else None
+        stage = self.stage_controller.current_stage
+        view_state = self.stage_controller.state.view_state(stage)
+        locked_override = view_state.group_locked.get(group_id)
+        locked = locked_override if locked_override is not None else bool(
+            template and template.stage_locked(stage))
+        if locked:
+            title = template.title if template else group_id
+            return False, f"图层所在组「{title}」在本阶段为证据锁定——不可编辑"
         return True, ""
 
     def _toggle_layer_editing(self, layer_id: str) -> None:
@@ -1280,6 +1325,10 @@ class CompositeDocument(QWidget):
         self._sync_action_state()
 
     def _repair_layer(self, layer_id: str) -> None:
+        allowed, reason = self._role_allows_editing(str(layer_id))
+        if not allowed:
+            self.status_message.emit(f"无法修复：{reason}")
+            return
         repaired = self.edit_controller.repair_layer_geometries(layer_id)
         if repaired:
             self.status_message.emit(f"已修复 {repaired} 个无效几何（可撤销）")
@@ -1698,6 +1747,29 @@ class CompositeDocument(QWidget):
         if self._project is not None:
             self._project.workstation_reference_layers = list(self._reference_layers)
 
+    def _on_tree_structure_changed(self) -> None:
+        """用户树结构调整（拖拽/建组/删组/组勾选）→ reconcile 落盘。
+
+        1) observe 已更新领域放置表 → reconcile 把期望树（含用户组织）
+           增量应用到 QGIS 并写入 state.tree（修复：纯拖拽不落盘，重开
+           即回退）；
+        2) observe 拒绝的非法放置 → force reconcile 把 QGIS 树拉回领域
+           权威位置（修复：非法拖放永不自愈）。
+        """
+        controller = self.stage_controller.group_controller
+        try:
+            if getattr(controller, "last_observe_rejected", False):
+                # 非法放置：force reconcile 把 QGIS 树拉回领域权威位置。
+                controller.reconcile(
+                    list(self.layer_manager._layers), force=True)
+            else:
+                # 合法组织：增量 reconcile 落 state.tree（持久化用户结构）。
+                self.stage_controller.sync_composition()
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "tree structure reconcile failed")
+        self._sync_workspace_state_to_project()
+
     def _sync_workspace_state_to_project(self) -> None:
         """阶段工作区科学状态 → ProjectDocument.mapping_workspace；
         组展开态（纯 UI 偏好）→ QSettings。"""
@@ -1922,11 +1994,14 @@ class CompositeDocument(QWidget):
             except Exception:
                 catalog = None
             self.stage_controller.attach_document(project, catalog)
-            self._sync_composition_now()
+            # 先应用呈现态信封（样式/可见性；legacy 信封可能带平铺顺序），
+            # 再组合同步——reconcile 以领域树权威重建组结构，覆盖信封的
+            # 平铺顺序（否则 legacy 信封会把刚迁移好的分组拆散）。
             xml = str(getattr(project, "map_qgis_project_xml", "") or "")
             apply = getattr(getattr(self.canvas, "stack", None), "apply_project_xml", None)
             if xml and callable(apply):
                 apply(xml)
+            self._sync_composition_now()
         finally:
             self._loading = False
         if project is not None:

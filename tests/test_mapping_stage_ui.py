@@ -207,3 +207,40 @@ def test_degraded_mode_reports_honestly(qtbot, monkeypatch):
     assert controller.group_controller.groups_available is False
     # reconcile 是 no-op 而不是崩溃。
     controller.sync_composition()
+
+def test_raw_gate_covers_toolbar_and_repair_paths(qtbot, monkeypatch):
+    """P0 修复回归：主工具栏 toggle_editing 命令与「修复几何」同样被门禁。"""
+    frame = _frame(qtbot, monkeypatch)
+    composite = frame.composite
+    raw = composite.edit_controller.create_layer("初始相图（原始）", "polygon")
+    composite.stage_controller.group_controller.register_layer(
+        raw.id, LayerRole.INITIAL_FACIES_SOURCE)
+    composite._sync_composition_now()
+
+    # 主工具栏命令路径（P0-1）。
+    composite.edit_controller.set_active_layer(raw.id)
+    composite._on_command_requested("toggle_editing")
+    assert not composite.edit_controller.editing
+
+    # 修复无效几何路径（P0-2）。
+    composite._repair_layer(raw.id)
+    assert not raw.edit_session
+
+
+def test_stage_without_target_clears_active_layer(qtbot, monkeypatch):
+    """P1 修复回归：切到无编辑目标的阶段必须清空活动图层（不悄悄继承）。"""
+    frame = _frame(qtbot, monkeypatch)
+    composite = frame.composite
+    controller = composite.stage_controller
+    draft = composite.edit_controller.create_layer("草稿", "polygon")
+    controller.group_controller.register_layer(
+        draft.id, LayerRole.INITIAL_FACIES_DRAFT)
+    composite._sync_composition_now()
+    controller.set_active_target(draft.id)
+    assert composite.edit_controller.active_layer_id == draft.id
+
+    # P3 无综合草稿 → 目标 None → 活动图层必须被清空。
+    composite.flush_edit_sessions()
+    controller.set_stage(MappingStage.INTEGRATED_COMPILATION)
+    assert controller.active_target_layer_id is None
+    assert composite.edit_controller.active_layer_id is None

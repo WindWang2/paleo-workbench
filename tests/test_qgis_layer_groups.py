@@ -328,3 +328,45 @@ def test_controller_user_move_into_wrong_system_group_rejected(qtbot, stack):
     assert accepted is False
     # 领域放置未变（下一次 reconcile 会把树拉回正确位置）。
     assert controller.placement_of("fac-g") == "factor.f1"
+
+def test_invalid_move_self_heals_via_force_reconcile(qtbot, stack):
+    """P1 修复回归：非法放置被拒后，宿主的 force reconcile 把树拉回。"""
+    canvas = stack.create_canvas()
+    controller, state = _make_controller()
+    controller.attach_canvas(_ShimLikeCanvas(stack, canvas))
+    from paleo_workbench.mapping_workspace.layer_roles import LayerRole
+
+    controller.register_layer("fac-g", LayerRole.FACTOR_GRID, factor_task_id="f1")
+    controller.sync_factor_titles({"f1": "砂厚"})
+    _mirror(stack, "fac-g", "栅格", geom="Polygon")
+    snapshots = [_Snap("fac-g", "栅格")]
+
+    class _LayerSnap:
+        def __init__(self, layer_id, name):
+            self.id = layer_id
+            self.name = name
+            self.metadata = {}
+            self.template = ""
+
+    controller.reconcile([_LayerSnap("fac-g", "栅格")])
+    qtbot.wait(50)
+
+    # 用户把 factor 栅格拖进 phase1.well_predictions → 拒绝 + 标记。
+    accepted = controller.observe_tree_nodes([
+        {"type": "group", "id": "phase1.well_predictions", "name": "测井预测相",
+         "children": [{"type": "layer", "id": "fac-g", "name": "栅格",
+                       "visible": True}]},
+    ])
+    assert accepted is False
+    assert controller.last_observe_rejected is True
+
+    # 宿主路径：拒绝 → force reconcile → QGIS 树回到领域权威位置。
+    controller.reconcile([_LayerSnap("fac-g", "栅格")], force=True)
+    qtbot.wait(50)
+    payload = json.loads(stack.tree_snapshot_json())
+    factors = [n for n in payload["children"] if n["id"] == "phase2.factors"]
+    assert factors, "factor root exists"
+    factor_group = [c for c in factors[0]["children"] if c["id"] == "factor.f1"]
+    assert factor_group and any(
+        g["id"] == "fac-g" for g in factor_group[0]["children"]), \
+        "fac-g must be back in its factor group"
