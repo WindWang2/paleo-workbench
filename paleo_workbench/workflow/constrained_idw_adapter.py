@@ -281,46 +281,12 @@ def _boundary_from_samples(
 # Core entry point
 # --------------------------------------------------------------------------- #
 
-
-def _bilinear_sample_grid(
-    grid_z: np.ndarray,
-    grid_x: np.ndarray,
-    grid_y: np.ndarray,
-    px: float,
-    py: float,
-) -> float | None:
-    """Bilinearly sample *grid_z* at map coordinates (px, py); NaN → None."""
-    gx = np.asarray(grid_x, dtype=float)
-    gy = np.asarray(grid_y, dtype=float)
-    z = np.asarray(grid_z, dtype=float)
-    x0, x1 = gx[0], gx[-1]
-    y0, y1 = gy[0], gy[-1]
-    nx, ny = gx.size, gy.size
-    fi = (px - x0) / (x1 - x0) * (nx - 1) if nx > 1 else 0.0
-    fj = (py - y0) / (y1 - y0) * (ny - 1) if ny > 1 else 0.0
-    i = min(max(int(math.floor(fi)), 0), nx - 2)
-    j = min(max(int(math.floor(fj)), 0), ny - 2)
-    a = fi - i
-    b = fj - j
-    # rows index y (grid_z shape = (len(grid_y), len(grid_x)))
-    v = (
-        z[j, i] * (1 - a) * (1 - b)
-        + z[j, i + 1] * a * (1 - b)
-        + z[j + 1, i] * (1 - a) * b
-        + z[j + 1, i + 1] * a * b
-    )
-    if not math.isfinite(float(v)):
-        return None
-    return float(v)
-
-
-def _signed_r_squared(observed: np.ndarray, predicted: np.ndarray) -> float:
-    """Signed R² over paired samples (never clamped; issue #844 convention)."""
-    ss_res = float(np.sum((observed - predicted) ** 2))
-    ss_tot = float(np.sum((observed - observed.mean()) ** 2))
-    if ss_tot < 1e-12:
-        return 1.0
-    return float(1.0 - ss_res / ss_tot)
+# Scoring helpers are shared with the unified evaluation authority (M2) so
+# every method is cross-validated with identical maths.
+from paleo_workbench.workflow.interpolation_evaluation import (
+    bilinear_sample_grid as _bilinear_sample_grid,
+    signed_r_squared as _signed_r_squared,
+)
 
 
 def _anchored_grid_fidelity(
