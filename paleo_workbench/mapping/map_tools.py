@@ -237,7 +237,6 @@ class RectangleSelectTool(MapTool):
 class _CaptureTool(MapTool):
     geometry_type = ""
     tool_id = "capture"
-    edits_data = True
 
     def __init__(
         self,
@@ -255,13 +254,26 @@ class _CaptureTool(MapTool):
         self._default_attributes = dict(attributes or {})
         self.points: list[Point] = []
 
+    @property
+    def edits_data(self) -> bool:
+        # 采集中（points 非空）只动 overlay（轻量重绘，rubber band 跟手）；
+        # 要素落地 / 会话回空后才需要全量重组合快照。
+        return not self.points
+
     def mouse_press(self, point: Point, *, button: str = "left", modifiers: Iterable[str] = ()) -> bool:
         if button == "right":
             return self.finish()
         if button != "left":
             return False
         self.points.append(self._snap(point))
-        return self.geometry_type == "Point" and self.finish()
+        if self.geometry_type == "Point":
+            return self.finish()
+        # 已消费该次采点：返回 True 让画布重绘 overlay（新顶点 + 橡皮筋）。
+        return True
+
+    def mouse_move(self, point: Point, *, modifiers: Iterable[str] = ()) -> bool:
+        # 采集中鼠标移动 = 橡皮筋终点变化，需要逐帧重绘 overlay。
+        return bool(self.points)
 
     def double_click(self, point: Point, *, modifiers: Iterable[str] = ()) -> bool:
         self.points.append(self._snap(point))

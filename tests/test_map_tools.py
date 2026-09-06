@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from paleo_workbench.mapping.map_tools import (
+    AddLineTool,
     AddPointTool,
     AddPolygonTool,
     MapToolController,
@@ -191,3 +192,41 @@ def test_select_tool_commit_selection_modifier_semantics() -> None:
     assert layer.selection == {"f2"}
     tool.commit_selection([], [])
     assert layer.selection == set()
+
+
+def test_capture_vertex_clicks_request_overlay_repaint() -> None:
+    """线/面采点期间每个顶点点击都要回报「已处理」→ 画布重绘 overlay。
+
+    回归：此前线/面 mouse_press 加点后返回 False，画布不重绘，绘制
+    过程完全不可见，只有右键结束才能看到要素。
+    """
+    layer, session = _session()
+    line = AddLineTool(session, feature_id_factory=lambda: "line-1")
+
+    assert line.mouse_press((0.0, 0.0)) is True
+    assert line.mouse_press((1.0, 1.0)) is True
+
+
+def test_capture_mouse_move_requests_repaint_only_mid_capture() -> None:
+    layer, session = _session()
+    line = AddLineTool(session, feature_id_factory=lambda: "line-1")
+
+    # 未开始采点：悬停不重绘（裸悬停不得触发逐帧重绘）。
+    assert line.mouse_move((0.5, 0.5)) is False
+    line.mouse_press((0.0, 0.0))
+    # 采集中：橡皮筋终点变化需要逐帧重绘。
+    assert line.mouse_move((0.5, 0.5)) is True
+
+
+def test_capture_edits_data_flag_is_dynamic() -> None:
+    """采集中 = False（只刷 overlay）；要素落地后 = True（全量重组合）。"""
+    layer, session = _session()
+    polygon = AddPolygonTool(session, feature_id_factory=lambda: "poly-1")
+    polygon.mouse_press((0.0, 0.0))
+    assert polygon.edits_data is False
+
+    polygon.mouse_press((2.0, 0.0))
+    polygon.mouse_press((2.0, 2.0))
+    assert polygon.mouse_press((0.0, 0.0), button="right") is True
+    assert polygon.edits_data is True
+    assert session.feature("poly-1") is not None
