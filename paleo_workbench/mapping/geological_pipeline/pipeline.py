@@ -361,7 +361,7 @@ class GeologicalMappingPipeline:
             grid_result=grid_result,
             color_ramp_name=ramp_name,
             opacity=opacity,
-            crs=grid_result.crs or "EPSG:4326",
+            crs=grid_result.crs or "",
             unit=grid_result.unit or "",
         )
 

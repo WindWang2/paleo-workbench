@@ -334,7 +334,7 @@ def generate_contour_layer(
             id=layer_id or f"contour_{grid_result.factor_name}",
             name=name or f"{grid_result.factor_name} 等值线",
             extent=grid_result.extent,
-            crs=grid_result.crs or "EPSG:4326",
+            crs=grid_result.crs or "",
             features=(),
             levels=[],
         )
@@ -404,7 +404,7 @@ def generate_contour_layer(
         id=layer_id or f"contour_{grid_result.factor_name}",
         name=name or f"{grid_result.factor_name} 等值线",
         extent=grid_result.extent,
-        crs=grid_result.crs or "EPSG:4326",
+        crs=grid_result.crs or "",
         features=tuple(features),
         levels=levels,
         contour_interval=interval,

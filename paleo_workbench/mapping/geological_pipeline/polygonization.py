@@ -239,7 +239,7 @@ def generate_facies_polygon_layer(
             id=layer_id or f"facies_{grid_result.factor_name}",
             name=name or f"{grid_result.factor_name} 相带多边形",
             extent=grid_result.extent,
-            crs=grid_result.crs or "EPSG:4326",
+            crs=grid_result.crs or "",
             features=(),
         )
 
@@ -324,7 +324,7 @@ def generate_facies_polygon_layer(
         id=layer_id or f"facies_{grid_result.factor_name}",
         name=name or f"{grid_result.factor_name} 相带",
         extent=grid_result.extent,
-        crs=grid_result.crs or "EPSG:4326",
+        crs=grid_result.crs or "",
         features=tuple(features),
         categories=[{"name": fn, "color": col} for fn, col in zip(facies_names, colors)],
         style=style,

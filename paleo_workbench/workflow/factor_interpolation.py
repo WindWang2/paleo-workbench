@@ -58,6 +58,7 @@ from paleo_workbench.workflow.constraints import (
     constraint_layers_for_project,
     direction_line_params,
 )
+from paleo_workbench.workflow.crs_policy import resolve_distance_policy
 from paleo_workbench.workflow.factor_grid_result import (
     FactorGridResult,
     encode_legacy_axis_list,
@@ -219,6 +220,15 @@ def _attach_result_to_task(
         for key, value in fingerprints.to_dict().items():
             grid_result.algorithm_parameters[key] = value
 
+    # D5: the planar-distance assumption must travel with the result — a
+    # geographic CRS silently treated as metres is exactly the failure mode
+    # this annotation makes visible (task metrics + grid parameters + QA).
+    policy = resolve_distance_policy(
+        grid_result.crs, (task.parameters or {}).get("distance_policy")
+    )
+    grid_result.algorithm_parameters["distance_policy"] = policy["policy"]
+    grid_result.algorithm_parameters["distance_policy_annotation"] = policy["annotation"]
+
     clear_live_factor_grid(task.id)
     store_live_factor_grid(task.id, grid_result)
 
@@ -273,7 +283,10 @@ def _attach_result_to_task(
         "n_points": result["n_points"],
         "backend": result["backend"],
         "mean": round(result["mean"], 4),
+        "distance_policy": policy["policy"],
     }
+    if policy["warning"]:
+        task.quality_metrics["distance_warning"] = policy["warning"]
     declared_unit = grid_result.unit
     if declared_unit is not None:
         task.quality_metrics["unit"] = declared_unit
