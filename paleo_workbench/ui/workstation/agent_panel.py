@@ -140,6 +140,9 @@ class AgentWorkspace(QFrame):
         # #1186: WRITE confirmation hook. None → modal QMessageBox; tests
         # inject a stub returning bool. Per-plan, never latched.
         self.confirm_write: Callable[[list[str]], bool] | None = None
+        # V6 §11：会话级 WRITE 授权（显式「记住」才生效；精确动作集合语义，
+        # 绝不是空白支票）。
+        self._session_write_grants: frozenset[str] = frozenset()
         # P1: WRITE elevation is an explicit opt-in — constructor flag wins
         # over the environment; default (None) reads PALEO_AGENT_ALLOW_WRITE.
         self._allow_write_actions = (
@@ -248,6 +251,12 @@ class AgentWorkspace(QFrame):
 
         return str(style.palette().get("SUCCESS", "#15803d"))
 
+    @staticmethod
+    def _warn_html_color() -> str:
+        from paleo_workbench.ui import style
+
+        return str(style.palette().get("WARNING", "#b45309"))
+
     def submit(self, text: str) -> None:
         command = str(text or "").strip()
         if not command or self._project is None or self._current_task_id is not None:
@@ -300,22 +309,114 @@ class AgentWorkspace(QFrame):
                 write.append(action_id)
         return write
 
+    def _write_granted_for(self, action_ids: list[str]) -> bool:
+        """会话授权是否已覆盖**精确**动作集合（子集语义，非空白支票）。"""
+        return frozenset(action_ids) <= self._session_write_grants
+
+    def _grant_write_session(self, action_ids: list[str]) -> None:
+        self._session_write_grants |= frozenset(action_ids)
+
+    def _build_write_grant_dialog(self, action_ids: list[str]):
+        """专业 WRITE 授权对话框（V6 §11）：动作卡 + 范围 + 会话粒度。
+
+        安全默认：拒绝按钮为 default；「记住授权」是显式勾选，不预选。
+        动作描述来自 ActionSpec（注册表权威）；未知动作诚实标注。
+        """
+        from PySide6.QtWidgets import (
+            QCheckBox,
+            QDialog,
+            QDialogButtonBox,
+            QFrame,
+            QLabel,
+            QScrollArea,
+            QVBoxLayout,
+        )
+
+        dialog = QDialog(self)
+        dialog.setObjectName("WriteGrantDialog")
+        dialog.setWindowTitle("写入授权")
+        dialog.setModal(True)
+        dialog.granted = False
+        dialog.remember = False
+
+        layout = QVBoxLayout(dialog)
+        intro = QLabel(
+            "以下 Agent 动作将执行写入（WRITE）——修改工程数据或写盘。"
+            "逐项核对后授权；拒绝不会执行任何动作。", dialog)
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        cards = QFrame(dialog)
+        cards.setObjectName("WriteGrantActionList")
+        cards_layout = QVBoxLayout(cards)
+        cards_layout.setContentsMargins(6, 6, 6, 6)
+        specs = {}
+        try:
+            from paleo_workbench.harness.registry import get_action_registry
+
+            registry = get_action_registry()
+            for action_id in action_ids:
+                try:
+                    specs[action_id] = registry.get(action_id)
+                except Exception:
+                    specs[action_id] = None
+        except Exception:
+            pass
+        for action_id in action_ids:
+            spec = specs.get(action_id)
+            title = QLabel(f"▣ {action_id}", cards)
+            title.setObjectName("WriteGrantActionTitle")
+            cards_layout.addWidget(title)
+            if spec is not None:
+                detail = QLabel(str(getattr(spec, "description", "") or ""), cards)
+                detail.setWordWrap(True)
+                cards_layout.addWidget(detail)
+            else:
+                unknown = QLabel("（注册表中无此动作描述——按 WRITE 对待）", cards)
+                unknown.setWordWrap(True)
+                cards_layout.addWidget(unknown)
+        scroll = QScrollArea(dialog)
+        scroll.setWidget(cards)
+        scroll.setWidgetResizable(True)
+        layout.addWidget(scroll, 1)
+
+        remember_box = QCheckBox("本会话内记住该授权（同一动作集合不再询问）", dialog)
+        layout.addWidget(remember_box)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Yes | QDialogButtonBox.StandardButton.No,
+            parent=dialog,
+        )
+        buttons.button(QDialogButtonBox.StandardButton.No).setText("拒绝")
+        buttons.button(QDialogButtonBox.StandardButton.Yes).setText("授权")
+        buttons.button(QDialogButtonBox.StandardButton.No).setDefault(True)
+        buttons.button(QDialogButtonBox.StandardButton.No).setFocus()
+        buttons.accepted.connect(
+            lambda: (_setattr_grant(dialog, True, remember_box.isChecked())))
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        return dialog
+
     def _confirm_write_actions(self, action_ids: list[str]) -> bool:
+        # V6：会话授权命中（精确集合）→ 不再打扰；否则专业授权对话框。
+        if self._write_granted_for(action_ids):
+            return True
         if callable(self.confirm_write):
             try:
-                return bool(self.confirm_write(action_ids))
+                granted = bool(self.confirm_write(action_ids))
             except Exception:
                 return False
-        answer = QMessageBox.question(
-            self,
-            "确认写动作",
-            "该计划包含写动作（{}），将修改工程数据或写盘。是否执行？".format(
-                "、".join(action_ids)
-            ),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        return answer == QMessageBox.StandardButton.Yes
+            if granted:
+                # confirm_write 钩子授权视为一次性行为（不记住会话）。
+                return True
+            return False
+        dialog = self._build_write_grant_dialog(action_ids)
+        dialog.exec()
+        if getattr(dialog, "granted", False):
+            if getattr(dialog, "remember", False):
+                self._grant_write_session(action_ids)
+            return True
+        return False
 
     def submit_current(self) -> None:
         text = self.command_input.text().strip()
@@ -493,6 +594,20 @@ class AgentWorkspace(QFrame):
         gui_note = (
             f"GUI 同步：{plan.gui_action}" if plan.gui_action else "无 GUI 变更"
         )
+        # V6（F-P0-1）：DEGRADED 不是「校验通过」——warnings 必须可见。
+        degraded = [r for r in results if r.degraded]
+        if degraded:
+            warning_lines = "<br>".join(
+                f"· {w}" for r in degraded for w in (r.warnings or ())
+            ) or "· （执行器未提供降级原因）"
+            self.history.append(
+                f"<b>降级完成</b> · {summary}<br>"
+                f"<span style='color:{self._warn_html_color()}'>"
+                f"结果带警告，请核对后采信：<br>{warning_lines}</span><br>"
+                f"{gui_note}。"
+            )
+            self._apply_gui_action(plan)
+            return
         self.history.append(
             f"<b>执行完成</b> · {summary}<br>"
             f"<span style='color:{self._success_html_color()}'>校验通过 · {gui_note}。</span>"
@@ -602,3 +717,10 @@ class AgentWorkspace(QFrame):
         if plan.action_id == "workflow.status":
             return "井震联合工作流已聚焦，当前选择保持联动"
         return "上下文已刷新，工作区保持可操作"
+
+
+def _setattr_grant(dialog, granted: bool, remember: bool) -> None:
+    """授权按钮回调：记录结果并关闭（模块级小助手，避免闭包晚绑定）。"""
+    dialog.granted = granted
+    dialog.remember = remember
+    dialog.accept()

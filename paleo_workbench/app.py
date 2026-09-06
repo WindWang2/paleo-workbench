@@ -53,7 +53,28 @@ class PaleoWorkbenchWindow(QMainWindow):
         self._apply_project_to_shell()
         self._wire_shell_signals()
         self._setup_shortcuts()
+        self._register_window_commands()
         self._update_title()
+
+    def _register_window_commands(self) -> None:
+        """V6：窗口级领域命令入 palette（此前 29 条 chrome 命令之外为空）。
+
+        「更新受影响成果」此前是孤儿流（_on_recompute_requested 无发射方，
+        baseline F-P1-2）——现在作为一等命令可从 Ctrl+K 发现。
+        """
+        from paleo_workbench.ui.command_registry import CommandSpec, command_registry
+
+        command_registry.register(
+            CommandSpec(
+                id="workflow:recompute",
+                label="更新受影响成果",
+                hint="按受影响最小计划重算过期成果（factor/预测/QC）",
+                keywords="recompute stale 过期 重算",
+                group="工作流",
+                context_tags=("workflow", "mapping", "catalog"),
+                callback=self.workflow_controller.request_recompute,
+            )
+        )
 
     @property
     def project(self) -> ProjectDocument:
