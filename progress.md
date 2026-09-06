@@ -90,3 +90,17 @@
 - Fixed 4th pre-existing main failure: unknown-section warning dead since
   extra=allow (#1170) — detection now diffs declared model_fields
 - Tests: tests/test_project_recovery_v6.py (6) + regression 54 green
+
+## PHASE 8 complete — session generation + real cancellation (#1223, #1224)
+- catalog_is_current(service) in catalog/runtime (+__init__ re-export):
+  backend identity IS the session token (set/reset swap at every open/close);
+  unwraps adapter .service. Seismic lifecycle on_done/on_fail/on_cancel embed
+  the guard; mapping_page export slot checks captured project vs page project
+- resume_pending wired into project-open maintenance (interrupted transcodes
+  no longer sit 'running' until unrelated lifecycle activity)
+- Real cancellation: sha256_file(cancel=) chunk-granular (ChecksumCancelled,
+  never a partial digest) wired through service.verify_integrity(cancel=);
+  map export render_and_save(cancel=) checkpoints between native→fallback,
+  pre-decoration, pre-save; scheduler QUEUED-duplicate supersede (cancelled
+  request never hangs the next; RUNNING refusal message honest)
+- Tests: tests/test_runtime_session_and_cancel.py (6) + regressions green

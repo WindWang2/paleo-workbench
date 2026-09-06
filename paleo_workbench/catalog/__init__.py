@@ -54,6 +54,7 @@ from paleo_workbench.catalog.models import (
 from paleo_workbench.catalog.port import CatalogPort
 from paleo_workbench.catalog.runtime import (
     get_catalog,
+    catalog_is_current,
     get_catalog_service,
     reset_catalog,
     set_catalog,

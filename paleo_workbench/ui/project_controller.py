@@ -407,6 +407,17 @@ class ProjectController:
                 service.migrate_legacy_resources(resources_snapshot)
                 service.sweep_temp_on_open()
                 service.ensure_index_ready()
+                # #1223-family: interrupted transcodes/attributes resume on
+                # project open (was: only on first lifecycle activity, so a
+                # reopened project silently carried 'running' runs).
+                try:
+                    from paleo_workbench.seismic_lifecycle import (
+                        get_lifecycle_service,
+                    )
+
+                    get_lifecycle_service(service)
+                except Exception:
+                    pass
             except Exception:
                 # Canonical project/catalog remain available even if an
                 # optional acceleration rebuild cannot complete.

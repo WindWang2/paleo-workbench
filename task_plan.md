@@ -36,7 +36,7 @@ support/benchmarking (small/medium fixtures only).
       (commit 4)
 - [x] PHASE 6: Working-copy state machine  (commit 5)
 - [x] PHASE 7: Project open/save/backup/recovery decision table  (commit 6)
-- [ ] PHASE 8: Runtime session generation + real cancellation  (commit 7)
+- [x] PHASE 8: Runtime session generation + real cancellation  (commit 7)
 - [ ] PHASE 9: ResourceGovernor convergence (OMP/BLAS/env mutation removal)  (commit 8)
 - [ ] PHASE 10: Lineage/DataRun atomicity + path identity/relink fail-closed  (commit 9)
 - [ ] PHASE 11: Scale fixtures + benchmarks (100k/500k/10k wells)  (commit 10)

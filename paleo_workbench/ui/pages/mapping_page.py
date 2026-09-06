@@ -2285,6 +2285,16 @@ class MappingPage(QWidget):
         self._pending_export = None
         self._end_export_busy()
         if pending:
+            # #1223: the export started under a project object captured at
+            # kick-off. If the session switched since (page's project is now
+            # a different object / None), registering through the captured
+            # one would write the OLD project behind the user's back. The
+            # check is slot-level, not infrastructural — it holds even if the
+            # delivery path ever stops going through an OwnedWorkerJob.
+            if pending.get("project") is not getattr(self, "project", None):
+                if getattr(self, "status_bar", None) is not None:
+                    self.status_bar.scale.setText("已切换工程，导出结果未登记到旧工程")
+                return
             from paleo_workbench.resources.export_service import register_exported_view
 
             register_exported_view(

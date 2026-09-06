@@ -3608,16 +3608,22 @@ class DataCatalogService:
 
     # -- integrity -------------------------------------------------------------
 
-    def verify_integrity(self, version_id: str | None = None) -> IntegrityReport:
+    def verify_integrity(
+        self,
+        version_id: str | None = None,
+        cancel: Callable[[], bool] | None = None,
+    ) -> IntegrityReport:
         """Re-hash payloads and compare against recorded SHA-256.
 
         Reports only; a mismatch never updates the catalog. Hashing streams in
         chunks; wrap in a worker thread for large batches in UI contexts.
         Trashed versions are skipped (their payloads live in ``trash/``).
+        ``cancel`` (#1224) propagates INTO the chunk loop: a multi-GB hash is
+        interruptible at MiB granularity, not only between payloads.
 
         Delegates to :func:`paleo_workbench.catalog.queries.verify_integrity`.
         """
-        return _queries.verify_integrity(self, version_id=version_id)
+        return _queries.verify_integrity(self, version_id=version_id, cancel=cancel)
 
     def audit(
         self,

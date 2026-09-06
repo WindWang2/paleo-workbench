@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from paleo_workbench.catalog.checksum import ChecksumCancelled as _ChecksumCancelled
 from paleo_workbench.catalog.checksum import sha256_file
 from paleo_workbench.catalog.models import DataStage, normalize_tag_name
 
@@ -77,10 +78,13 @@ def verify_integrity(
             report.statuses[version.id] = "unknown"
             continue
         try:
-            actual = sha256_file(payload)
+            actual = sha256_file(payload, cancel=cancel)
         except OSError:
             report.statuses[version.id] = "missing"
             continue
+        except _ChecksumCancelled:
+            report.cancelled = True
+            return report
         report.statuses[version.id] = (
             "verified" if actual == version.sha256 else "modified"
         )

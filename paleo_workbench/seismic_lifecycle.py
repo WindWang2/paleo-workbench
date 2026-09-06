@@ -618,8 +618,22 @@ def start_attribute_job(
         status="running",
     )
 
+    def _session_stale() -> bool:
+        """#1223: the capturing service must still be the active backend —
+        a project switch/close swaps it; mutating through the stale service
+        would write the old project behind the user's back."""
+        try:
+            from paleo_workbench.catalog import catalog_is_current
+
+            return not catalog_is_current(catalog)
+        except Exception:
+            return False
+
     def on_done(stats):
         if stats is None:
+            _release_lease()
+            return
+        if _session_stale():
             _release_lease()
             return
         try:
@@ -655,6 +669,8 @@ def start_attribute_job(
 
     def on_fail(exc):
         _release_lease()
+        if _session_stale():
+            return
         try:
             catalog.update_run_status(
                 run.id, "failed", extra_parameters={"error": f"{type(exc).__name__}: {exc}"}
@@ -664,6 +680,8 @@ def start_attribute_job(
 
     def on_cancel():
         _release_lease()
+        if _session_stale():
+            return
         try:
             catalog.update_run_status(run.id, "cancelled")
         except Exception:

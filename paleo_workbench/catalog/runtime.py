@@ -95,3 +95,24 @@ def _import_dotted(dotted: str) -> CatalogPort | None:
     except Exception:
         # A misconfigured env var must never crash business code.
         return None
+
+def catalog_is_current(service) -> bool:
+    """Authoritative session-generation check (#1223): is *service* still the
+    active catalog backend?
+
+    ``set_catalog``/``reset_catalog`` swap the process-global backend at every
+    project open/close/switch, so backend identity IS the session token —
+    heavy-task ``on_done`` callbacks that captured a service check this before
+    mutating, instead of maintaining per-page sequence counters. A stale
+    service belongs to a closed/replaced project: writing through it would
+    mutate the old project behind the user's back.
+    """
+    try:
+        current = get_catalog()
+    except Exception:
+        return False
+    if current is None:
+        return False
+    # The production backend is the Core adapter wrapping the service; tests
+    # may install the bare service. Match either shape.
+    return current is service or getattr(current, "service", None) is service
