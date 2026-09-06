@@ -605,24 +605,90 @@ def publish_map_product(
     project: ProjectDocument,
     *,
     export_path: str | Path | None = None,
+    accept_warnings: bool = True,
 ) -> dict[str, Any]:
-    """Publish gate: refuse stale or superseded products before an export.
+    """Publish gate: refuse stale/superseded/unverifiable products (V6 §17).
 
-    Publishing itself is the caller's export step; this function is the
-    fail-closed gate plus its report.
+    Fail-closed problems (ValueError): superseded, stale, an active QC
+    report with status error, or an undeclared map CRS — those make the
+    product scientifically unverifiable, not merely imperfect.
+
+    Warnings (recorded on the report; pass ``accept_warnings=False`` to
+    refuse on them too): factor units undeclared, unreviewed constraint
+    diagnostics, missing uncertainty surfaces. The product publishes with
+    its honesty record attached; nothing is dropped silently.
     """
     problems: list[str] = []
+    warnings: list[str] = []
     if record.status == PRODUCT_STATUS_SUPERSEDED:
         problems.append(f"superseded by {record.superseded_by}")
     staleness = product_staleness(record, project)
     if staleness["stale"]:
         problems.append(staleness["reason"])
+
+    # QC status gate: the active quality report must not carry errors.
+    active_qc = None
+    active_qc_id = getattr(project, "active_quality_report_id", None)
+    for report_obj in getattr(project, "quality_reports", None) or []:
+        if active_qc_id is not None and getattr(report_obj, "id", None) == active_qc_id:
+            active_qc = report_obj
+            break
+    if active_qc is not None and str(getattr(active_qc, "status", "")) == "error":
+        problems.append(
+            f"active quality report {getattr(active_qc, 'id', '?')} has status error — "
+            "fix the reported issues before publishing"
+        )
+
+    # CRS must be explicit: an unlabelled footprint is unverifiable. A
+    # record without a composition reference has no map footprint to check
+    # (warned below), not a silent pass.
+    map_doc = _map_document_for_record(record, project)
+    if record.composition_ref:
+        crs = str(getattr(map_doc, "crs", "") or "").strip() if map_doc is not None else ""
+        if not crs:
+            problems.append("map CRS undeclared — coordinates are unverifiable")
+    else:
+        warnings.append("no composition reference: map CRS cannot be verified")
+
+    # Units + constraint diagnostics + uncertainty: warnings, never silent.
+    for task in project.factor_map_tasks:
+        if task.id not in (record.factor_task_ids or []):
+            continue
+        unit = (task.quality_metrics or {}).get("unit") or (task.parameters or {}).get("unit")
+        if unit is None:
+            warnings.append(f"factor {task.name!r}: unit undeclared")
+        constraint_diag = (task.parameters or {}).get("constraint_diagnostics") or {}
+        if constraint_diag.get("unsupported_constraints"):
+            warnings.append(
+                f"factor {task.name!r}: constraints "
+                f"{constraint_diag['unsupported_constraints']} were ignored by "
+                f"{constraint_diag.get('method', '?')} — review before relying on "
+                "this product"
+            )
+        if (task.quality_metrics or {}).get("variance_min") is None:
+            warnings.append(f"factor {task.name!r}: no uncertainty surface")
+
+    if warnings and not accept_warnings:
+        problems.extend(warnings)
+
     report = {
         "ok": not problems,
         "problems": problems,
+        "warnings": warnings,
         "staleness": staleness,
         "export_path": str(export_path) if export_path else None,
     }
     if problems:
         raise ValueError("product cannot be published: " + "; ".join(problems))
     return report
+
+
+def _map_document_for_record(record: MapProductRecord, project: ProjectDocument):
+    """The map document a product's composition references, if resolvable."""
+    comp_ref = getattr(record, "composition_ref", None)
+    if not comp_ref:
+        return None
+    for doc in getattr(project, "map_documents", None) or []:
+        if getattr(doc, "id", None) == comp_ref:
+            return doc
+    return None

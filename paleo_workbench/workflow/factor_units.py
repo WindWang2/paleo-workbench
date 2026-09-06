@@ -143,3 +143,41 @@ def color_ramp_for_factor(factor_name: str) -> str | None:
 # geology; it must carry a traceable marker instead of passing as measured data.
 DERIVED_SAND_RATIO_RULE = "sand_ratio = H_s / H_t"
 DERIVED_FORMATION_THICKNESS_RULE = "formation_thickness = base_depth - top_depth"
+
+
+def validate_factor_unit_against_values(
+    factor_name: str,
+    unit: str | None,
+    values,
+) -> list[str]:
+    """Cross-check a DECLARED unit against the values' magnitude (V6 §14).
+
+    A name-derived "%" unit on a fraction (0..1) column — or "1" on percent-
+    scale data — silently misclassifies every downstream threshold. The
+    check is a diagnostic, not a correction: it never rewrites the unit.
+    """
+    import numpy as np
+
+    if unit is None:
+        return []
+    arr = np.asarray(values, dtype=float)
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return []
+    lo, hi = float(finite.min()), float(finite.max())
+    diagnostics: list[str] = []
+    u = str(unit).strip()
+    if u in {"%", "percent"}:
+        if 0.0 <= lo and hi <= 1.5 and not np.allclose(finite, np.round(finite)):
+            diagnostics.append(
+                f"factor {factor_name!r} declares % but values span "
+                f"[{lo:.3g}, {hi:.3g}] — fractions misread as percent "
+                f"(÷100 or relabel as v/v)"
+            )
+    elif u in {"1", "v/v", "fraction"}:
+        if lo >= 1.5 or hi > 1.5:
+            diagnostics.append(
+                f"factor {factor_name!r} declares dimensionless {u!r} but values "
+                f"span [{lo:.3g}, {hi:.3g}] — percent-scale data in a 0..1 unit"
+            )
+    return diagnostics

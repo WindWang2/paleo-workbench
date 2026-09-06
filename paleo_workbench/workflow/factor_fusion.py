@@ -296,6 +296,15 @@ def _aligned_or_raise(grids: Sequence[FactorGridResult]) -> None:
             and np.allclose(other.grid_y, first.grid_y)
         ):
             raise ValueError("evidence grid axes differ — resample to a common grid first")
+        # V6 §16 (P1-11): same-shape grids in DIFFERENT CRSs fuse silently —
+        # refuse: the coordinates are not comparable until reprojected.
+        crs_a = str(first.crs or "").strip()
+        crs_b = str(other.crs or "").strip()
+        if crs_a and crs_b and crs_a != crs_b:
+            raise ValueError(
+                f"evidence grids declare different CRSs ({crs_a!r} vs {crs_b!r}); "
+                "reproject to a common CRS before fusing"
+            )
 
 
 def _build_grid(
@@ -336,6 +345,31 @@ def _fuse_weighted(model: FusionModel) -> FusionResult:
     grids = [ev.grid for ev in model.evidences]
     _aligned_or_raise(grids)
     reference = grids[0]
+    # V6 §16 (P1-11): normalization bounds live in each factor's OWN unit;
+    # a bounds-vs-grid unit mismatch (percent grid with 0..1 bounds) or a
+    # values-vs-declared-unit mismatch misclassifies silently. Diagnose both.
+    from paleo_workbench.workflow.factor_units import (
+        validate_factor_unit_against_values,
+    )
+
+    unit_warnings: list[str] = []
+    for ev in model.evidences:
+        grid_unit = str(ev.grid.unit or "").strip()
+        if (
+            getattr(ev.normalization, "kind", "") in ("minmax", "ramp")
+            and grid_unit in {"%", "percent"}
+            and max(abs(ev.normalization.low), abs(ev.normalization.high)) <= 1.5
+        ):
+            unit_warnings.append(
+                f"evidence {ev.factor_name!r}: percent-declared grid with 0..1 "
+                f"normalization bounds (low={ev.normalization.low}, "
+                f"high={ev.normalization.high}) — bounds unit mismatch"
+            )
+        unit_warnings.extend(
+            validate_factor_unit_against_values(
+                ev.factor_name, ev.grid.unit, ev.grid.grid_z
+            )
+        )
     weights = np.array([ev.weight for ev in model.evidences], dtype=float)
     total_weight = float(weights.sum())
     memberships = [ev.normalization.apply(ev.grid.grid_z.astype(float)) for ev in model.evidences]
@@ -388,6 +422,7 @@ def _fuse_weighted(model: FusionModel) -> FusionResult:
     qc = {
         "fusion_kind": model.kind,
         "n_factors": len(model.evidences),
+        "unit_warnings": unit_warnings,
         "classified_cells": int(finite.sum()),
         "unclassified_cells": int((~finite).sum()),
         "class_counts": {
@@ -554,6 +589,14 @@ def register_output(
 
     parents = sorted({ref for ev in result.model.evidences for ref in ev.grid.source_refs})
     provenance = result.provenance()
+    # V6 §16 (P1-11): sensitivity was computed but never persisted — leave-
+    # one-factor-out is part of the product's honesty record.
+    try:
+        sensitivity = sensitivity_report(result.model, result)
+    except Exception:
+        sensitivity = None
+    if sensitivity is not None:
+        provenance["sensitivity_leave_one_factor_out"] = sensitivity
     with tempfile.TemporaryDirectory() as td:
         artifact_path = write_grid_artifact(result.likelihood, td, "fusion_result")
         derived = catalog_service.create_derived(
@@ -566,8 +609,29 @@ def register_output(
             type="factor_map",
             format="npz",
         )
+        # The uncertainty surface ships WITH the product (best-effort
+        # sibling version): a fused map without its confidence grid used to
+        # look more certain than its provenance allows.
+        confidence_path = write_grid_artifact(
+            result.confidence, td, "fusion_confidence"
+        )
+        try:
+            derived_conf = catalog_service.create_derived(
+                confidence_path,
+                parent_version_ids=[str(derived.id)],
+                name=f"{result.model.name} 融合置信度",
+                operation="factor_fusion:confidence",
+                parameters={"fusion_version_id": str(derived.id)},
+                generator=FUSION_GENERATOR_VERSION,
+                type="factor_map",
+                format="npz",
+            )
+        except Exception:
+            derived_conf = None
     result.likelihood.run_ref = getattr(derived, "run_id", None) or str(
         getattr(derived, "id", "")
     )
     result.qc["catalog_version_id"] = str(derived.id)
+    if derived_conf is not None:
+        result.qc["confidence_version_id"] = str(derived_conf.id)
     return str(derived.id)
