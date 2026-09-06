@@ -369,6 +369,13 @@ class AppShell(QWidget):
 
         # Bridge every page's selection surface onto the shared context (#1029).
         self.view_coordination.attach_app_shell(self)
+        # V6 §6（D-P0-1 落地）：引擎曲线拾取此前无生产消费者——现在落到
+        # 工作站检查器（kind=curve；只展示引擎真实提供的字段）。
+        self.well_log_page.canvas_panel.curve_picked.connect(
+            lambda info: self.workstation.inspector.show_payload(
+                {"kind": "curve", "object": info}
+            )
+        )
         # Seismic cursor producer (#1029): the panel publishes (IL, XL, TWT)
         # cursor picks through the coordination controller. Wired HERE so the
         # panel never reaches for a global singleton.

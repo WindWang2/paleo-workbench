@@ -159,6 +159,20 @@ class WorkstationFrame(QWidget):
         nav_layout.addWidget(self.explorer, 1)
 
         self.inspector = WorkstationInspector(self._dock_host)
+        # V6 §6：图层检查的域上下文 seam（角色/成熟度/可编辑/新鲜度）。
+        # 检查器不解析 mapping 权威——由本壳从 CompositeDocument 取数。
+        def _layer_context_seam(payload: dict):
+            layer_id = None
+            if isinstance(payload, dict):
+                layer_id = payload.get("layer_id")
+                if not layer_id:
+                    obj = payload.get("object")
+                    layer_id = getattr(obj, "id", None)
+            if not layer_id:
+                return None
+            return self.composite.layer_domain_status(str(layer_id))
+
+        self.inspector.set_context_seam(_layer_context_seam)
         self._agent_undo_stack: list[dict] = []
         self._current_well_name = ""
         # B18 去重：Agent 面板直接作为 dock 内容（旧 ProcessHub 内层
@@ -478,6 +492,11 @@ class WorkstationFrame(QWidget):
 
         controller.stale_summary_changed.connect(_on_stale)
         self._refresh_stage_badges = _refresh_stage_badges
+
+        # V6 §7：新鲜度进入图层组聚合（group_summary 真实统计）。
+        controller.stale_summary_changed.connect(
+            controller.group_controller.apply_freshness
+        )
 
         controller.stage_notification.connect(self.status_message.emit)
 

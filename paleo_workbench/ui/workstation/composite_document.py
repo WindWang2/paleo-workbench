@@ -1312,6 +1312,57 @@ class CompositeDocument(QWidget):
             self.edit_controller.set_active_layer(str(layer_id))
             self.layer_manager.select_layer(str(layer_id))
 
+    def layer_domain_status(self, layer_id: str) -> dict[str, str]:
+        """图层级域状态行（V6 §6：inspector 上下文 seam 数据源）。
+
+        角色/成熟度/可编辑/新鲜度四行，值经 state_language 词汇渲染
+        （glyph+文字）；未知项诚实「未知」，不编造。
+        """
+        from paleo_workbench.ui.workstation.state_language import state_token
+
+        from paleo_workbench.mapping_workspace.layer_roles import LayerRole
+
+        layer_id = str(layer_id)
+        state = self.stage_controller.state
+        role = state.role_of(layer_id)
+        allowed, reason = self._role_allows_editing(layer_id)
+        editability = (
+            state_token("editability", "raw" if role.is_raw_protected else "editable")
+            if allowed
+            else state_token("editability", "locked")
+        )
+        # 成熟度：优先工作区权威（artifact_maturity），RAW 角色直接 raw。
+        maturity_value = "raw" if role.is_raw_protected else None
+        if maturity_value is None:
+            record = state.membership(layer_id)
+            keys = []
+            if record is not None:
+                if record.factor_task_id:
+                    keys.append(f"factor:{record.factor_task_id}")
+                if record.role == LayerRole.INITIAL_FACIES_DRAFT:
+                    keys.append(f"phase1_draft:{layer_id}")
+                if record.role in (LayerRole.INTEGRATED_FACIES, LayerRole.INTEGRATED_BOUNDARY):
+                    keys.append(f"integrated:{layer_id}")
+            for key in keys:
+                found = state.artifact_maturity.get(key)
+                if found:
+                    maturity_value = str(found)
+                    break
+        maturity = state_token("maturity", maturity_value)
+        freshness_artifact = self.stage_controller.group_controller.layer_freshness(layer_id)
+        freshness = (
+            state_token("freshness", freshness_artifact.status.value)
+            if freshness_artifact is not None
+            else state_token("freshness", None)
+        )
+        return {
+            "角色": f"{role.label}",
+            "成熟度": f"{maturity.glyph} {maturity.label}",
+            "可编辑": f"{editability.glyph} {editability.label}" + (
+                f"（{reason}）" if not allowed and reason else ""),
+            "新鲜度": f"{freshness.glyph} {freshness.label}",
+        }
+
     def active_editing_target_status(self) -> dict:
         """活动编辑目标摘要（V6 §5：UIContext/状态条/检查器共用 seam）。
 

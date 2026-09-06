@@ -51,6 +51,9 @@ class WorkstationInspector(QFrame):
         self._current = None
         self._current_payload: dict | None = None
         self._style_layer_id = ""
+        # V6 §6 上下文 seam：宿主注入（payload → 域状态行 dict）；检查器
+        # 不直接触碰 mapping/selection 权威。None = 无域上下文（不编造行）。
+        self._context_seam = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -150,7 +153,8 @@ class WorkstationInspector(QFrame):
         elif kind in {"horizon", "interpretation"}:
             self.show_horizon(str(payload.get("name") or ""), obj)
         elif kind == "layer":
-            self.show_layer(str(payload.get("layer_type") or "图层"), obj)
+            self.show_layer(
+                str(payload.get("layer_type") or "图层"), obj, payload=payload)
         elif kind == "project":
             self.show_project(obj)
         elif kind in {"seismic"} or (
@@ -161,6 +165,8 @@ class WorkstationInspector(QFrame):
             self.show_resource(obj)
         elif kind == "map_component":
             self.show_map_component(payload)
+        elif kind == "curve":
+            self.show_curve(obj if isinstance(obj, dict) else payload)
         else:
             # 未知 kind：通用键值表，不丢弃（B4）。
             self.show_generic(payload)
@@ -319,13 +325,53 @@ class WorkstationInspector(QFrame):
         self.properties_form.addRow("可见", self._readonly(self._yes_no(visible)))
         self._set_history([f"图件组件 {name}"])
 
-    def show_layer(self, layer_type: str, obj=None) -> None:
+    def set_context_seam(self, seam) -> None:
+        """V6 §6：注入图层域上下文 seam（payload → {行名: 值} | None）。"""
+        self._context_seam = seam
+
+    def show_curve(self, info) -> None:
+        """曲线拾取检查（D-P0-1 落地）：缺失字段诚实显示「—」。
+
+        ``info`` 为引擎 ``click_pick_info()`` dict——字段集合开放（不同
+        引擎版本/曲线类型键位不同），只展示存在的键，不编造。
+        """
+        info = info if isinstance(info, dict) else {}
+        self._current = info
+        mnemonic = str(info.get("mnemonic") or info.get("curve_name") or "")
+        self.header.setText(f"检查器 · 曲线 {mnemonic or '—'}")
+        self._clear_form(self.properties_form)
+        self._clear_form(self.interpretation_form)
+        self.properties_form.addRow(
+            "曲线名", self._readonly(mnemonic or None))
+        self.properties_form.addRow(
+            "井", self._readonly(info.get("well") or info.get("well_name") or None))
+        self.properties_form.addRow("单位", self._readonly(info.get("unit") or None))
+        self.properties_form.addRow(
+            "深度", self._readonly(info.get("depth") or info.get("md") or None, unit="m"))
+        self.properties_form.addRow(
+            "值", self._readonly(info.get("value") or info.get("amplitude") or None))
+        self.interpretation_form.addRow(
+            "提示", self._readonly("拾取自测井引擎；校正操作产生 DERIVED 版本，RAW 不变"))
+        self._set_history(["曲线拾取进入检查器（V6）"])
+
+    def show_layer(self, layer_type: str, obj=None, payload: dict | None = None) -> None:
         self._current = obj or layer_type
         self.header.setText(f"检查器 · {layer_type}")
         self._clear_form(self.properties_form)
         self._clear_form(self.interpretation_form)
         self.properties_form.addRow("类型", self._readonly(layer_type))
         self.properties_form.addRow("作用域", self._readonly("当前文档"))
+        # V6 §6：域上下文行（角色/成熟度/可编辑/新鲜度）——由宿主 seam 提供，
+        # 检查器自身不解析 mapping 权威；seam 缺席则不显示（不编造）。
+        seam_rows = None
+        if self._context_seam is not None:
+            try:
+                seam_rows = self._context_seam(payload or {"kind": "layer", "object": obj})
+            except Exception:
+                seam_rows = None
+        if isinstance(seam_rows, dict):
+            for label, value in seam_rows.items():
+                self.properties_form.addRow(str(label), self._readonly(value))
         visible = getattr(obj, "visible", None)
         self.properties_form.addRow("可见", self._readonly(self._yes_no(visible)))
         features = getattr(obj, "features", None)
