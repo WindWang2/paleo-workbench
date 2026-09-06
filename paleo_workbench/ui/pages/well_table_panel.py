@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 
 _COLUMNS = (
     ("name", "井名"),
@@ -67,7 +67,7 @@ class WellTablePanel(QFrame):
         header.addWidget(self.summary_label)
         self.run_qc_btn = QPushButton("运行 MAD/砂地比 QC")
         self.run_qc_btn.setObjectName("SecondaryButton")
-        self.run_qc_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.run_qc_btn)
         self.run_qc_btn.setToolTip("对当前井点表执行砂地比约束与 MAD 异常检测")
         header.addWidget(self.run_qc_btn)
         outer.addLayout(header)

@@ -8,7 +8,6 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -27,7 +26,8 @@ from PySide6.QtWidgets import (
 
 from paleo_workbench import tokens
 from paleo_workbench.project.models import ProjectDocument
-from paleo_workbench.ui import navigation
+from paleo_workbench.ui import navigation, shortcuts
+from paleo_workbench.ui.command_registry import CommandSpec, command_registry
 from paleo_workbench.ui.deferred_page_bindings import DeferredPageBindings
 
 # Backward-compatible re-exports: callers used to import the page constants
@@ -55,6 +55,7 @@ from paleo_workbench.ui.pages.stratigraphy_correlation_page import (
 )
 from paleo_workbench.ui.pages.visualization_page import VisualizationPage
 from paleo_workbench.ui.pages.well_log_prediction_page import WellLogPredictionPage
+from paleo_workbench.ui.shortcuts import ShortcutSpec, register_shortcut
 from paleo_workbench.ui.status_bar import StatusBar
 from paleo_workbench.ui.workstation import WorkstationFrame
 from paleo_workbench.viz.hosts.well_location_preview import (
@@ -120,37 +121,35 @@ class CommandPalette(QFrame):
     # --- commands -----------------------------------------------------
 
     def _rebuild_commands(self) -> None:
-        commands: list[dict] = []
-        for hub_index, hub_name in enumerate(navigation.HUB_NAMES):
-            for key in navigation.submodule_keys(hub_index):
-                title = navigation.submodule_title(hub_index, key)
-                label = hub_name if title == hub_name else f"{hub_name} / {title}"
-                commands.append(
-                    {
-                        "label": label,
-                        "hint": f"{hub_name}页 · {title}",
-                        "run": lambda h=hub_index, k=key: self._navigate(h, k),
-                    }
-                )
-        self._commands = commands
+        """V5：命令来自 ui.command_registry（页面/主题/密度/preset/面板）。"""
+        self._commands = command_registry.specs()
 
     def _apply_filter(self, text: str) -> None:
         text = (text or "").strip()
         self.result_list.clear()
-        for command in self._commands:
-            if text and text not in command["label"] and text not in command["hint"]:
-                continue
-            item = QListWidgetItem(f"{command['label']}  —  {command['hint']}")
-            item.setData(Qt.ItemDataRole.UserRole, command)
+        specs = command_registry.find(text) if text else command_registry.specs()
+        if not text:
+            # 空查询时最近使用置顶
+            recents = command_registry.recent_specs()
+            specs = [s for s in recents if s in specs] + [
+                s for s in specs if s not in recents
+            ]
+        for spec in specs:
+            label = f"{spec.label}  —  {spec.hint}" if spec.hint else spec.label
+            if spec.shortcut_hint:
+                label = f"{label}   [{spec.shortcut_hint}]"
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, spec)
             self.result_list.addItem(item)
         if self.result_list.count():
             self.result_list.setCurrentRow(0)
 
     def _activate_item(self, item: QListWidgetItem) -> None:
-        command = item.data(Qt.ItemDataRole.UserRole)
+        spec = item.data(Qt.ItemDataRole.UserRole)
         self.dismiss()
-        if command is not None:
-            command["run"]()
+        if spec is not None and spec.callback is not None:
+            command_registry.record_recent(spec.id)
+            spec.callback()
 
     # --- keyboard -----------------------------------------------------
 
@@ -447,17 +446,138 @@ class AppShell(QWidget):
             )
 
     def _setup_shortcuts(self) -> None:
-        """Register hub (1-5), sub-module (Alt+1~3), and Ctrl+K shortcuts."""
+        """V5：hub (1-5)、子模块 (Alt+1~3)、Ctrl+K 经中央快捷键注册表创建。
+
+        数字/Alt 快捷键在文本输入框聚焦时不生效（保护 palette 与表单）。
+        """
         for i in range(min(5, len(navigation.HUB_NAMES))):
-            QShortcut(QKeySequence(str(i + 1)), self,
-                      lambda idx=i: self._shortcut_switch_page(idx))
-
+            register_shortcut(
+                self,
+                ShortcutSpec(
+                    id=f"core:nav.hub{i}",
+                    key=str(i + 1),
+                    label=f"切换到{navigation.HUB_NAMES[i]}页",
+                ),
+                lambda idx=i: self._shortcut_switch_page(idx),
+                enabled_in_text_input=False,
+            )
         for p in range(3):
-            QShortcut(QKeySequence(f"Alt+{p + 1}"), self,
-                      lambda sub_idx=p: self._shortcut_switch_subpage(sub_idx))
-
+            register_shortcut(
+                self,
+                ShortcutSpec(
+                    id=f"core:nav.sub{p}",
+                    key=f"Alt+{p + 1}",
+                    label=f"切换子模块 {p + 1}",
+                ),
+                lambda sub_idx=p: self._shortcut_switch_subpage(sub_idx),
+                enabled_in_text_input=False,
+            )
         # Command palette (works from text fields too — standard toggle).
-        QShortcut(QKeySequence("Ctrl+K"), self, self._toggle_command_palette)
+        register_shortcut(
+            self,
+            ShortcutSpec(id="core:palette", key="Ctrl+K", label="命令面板"),
+            self._toggle_command_palette,
+        )
+        register_shortcut(
+            self,
+            ShortcutSpec(id="core:density.toggle", key="Ctrl+Alt+D", label="切换密度"),
+            self.theme_manager.toggle_density,
+        )
+        self._register_commands()
+
+    def _register_commands(self) -> None:
+        """注册 palette 命令：页面导航 / 主题 / 密度 / 布局 preset / 面板。"""
+        for hub_index, hub_name in enumerate(navigation.HUB_NAMES):
+            for key in navigation.submodule_keys(hub_index):
+                title = navigation.submodule_title(hub_index, key)
+                label = hub_name if title == hub_name else f"{hub_name} / {title}"
+                command_registry.register(
+                    CommandSpec(
+                        id=f"nav:{hub_index}:{key}",
+                        label=label,
+                        hint=f"{hub_name}页 · {title}",
+                        group="页面",
+                        callback=lambda h=hub_index, k=key: self.navigate_to(h, k),
+                    )
+                )
+        from paleo_workbench.ui.layout_presets import list_presets
+
+        for preset in list_presets():
+            command_registry.register(
+                CommandSpec(
+                    id=f"core:preset.{preset.id}",
+                    label=f"布局预设 · {preset.label}",
+                    hint=preset.description,
+                    group="布局",
+                    callback=(
+                        lambda pid=preset.id: self.workstation.apply_layout_preset(pid)
+                    ),
+                )
+            )
+        command_registry.register(
+            CommandSpec(
+                id="core:theme.light",
+                label="主题 · 浅色",
+                keywords="light theme 主题",
+                group="视图",
+                callback=lambda: self.set_theme("light"),
+            )
+        )
+        command_registry.register(
+            CommandSpec(
+                id="core:theme.dark",
+                label="主题 · 深色",
+                keywords="dark theme 主题",
+                group="视图",
+                callback=lambda: self.set_theme("dark"),
+            )
+        )
+        command_registry.register(
+            CommandSpec(
+                id="core:theme.high_contrast",
+                label="主题 · 高对比",
+                keywords="high contrast theme 主题",
+                group="视图",
+                callback=lambda: self.set_theme("high_contrast"),
+            )
+        )
+        command_registry.register(
+            CommandSpec(
+                id="core:density.toggle",
+                label="切换 紧凑/舒适 密度",
+                keywords="density compact comfortable 密度",
+                shortcut_hint=shortcuts.get("core:density.toggle").key
+                if shortcuts.get("core:density.toggle")
+                else "",
+                group="视图",
+                callback=self.theme_manager.toggle_density,
+            )
+        )
+        command_registry.register(
+            CommandSpec(
+                id="core:palette.toggle",
+                label="命令面板",
+                hint="搜索命令、页面与面板动作",
+                shortcut_hint=(
+                    shortcuts.get("core:palette").key
+                    if shortcuts.get("core:palette")
+                    else ""
+                ),
+                group="视图",
+                callback=self._toggle_command_palette,
+            )
+        )
+        # 面板显隐（真实 toggleViewAction，来自工作站 shell）
+        for label, action in self.workstation.panel_commands():
+            command_registry.register(
+                CommandSpec(
+                    id=f"core:panel.{action.objectName() or label}",
+                    label=label,
+                    group="面板",
+                    callback=action.trigger,
+                )
+            )
+        command_registry.load_recent()
 
     def _toggle_command_palette(self) -> None:
         # isHidden (not isVisible): a hidden shell window keeps children
@@ -491,8 +611,10 @@ class AppShell(QWidget):
 
     def _on_theme_changed(self, theme: str, density: str = "") -> None:
         qss = self.theme_manager.get_qss()
+        # shell 级样式表保留：offscreen/无 app 样式表路径下它是 shell 子树的
+        # 唯一主题来源（test_theme_and_sidebar 钉住此契约）；app 级再贴一次
+        # 覆盖 dock 与顶层 dialog。双重 repolish 是一次性用户动作成本。
         self.setStyleSheet(qss)
-        # top-level windows outside this shell (dialogs) follow the theme too
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(qss)
@@ -557,10 +679,39 @@ class AppShell(QWidget):
             attach(self.view_coordination)
         # Scenario A/B sinks: well selection elsewhere navigates the seismic
         # profiles; a seismic cursor focuses them (via the same 3D renderer).
-        locate = getattr(panel, "locate_position", None)
-        if callable(locate):
-            self.view_coordination.set_seismic_sink(locate)
-            self.view_coordination.set_seismic_focus_sink(locate)
+        # The locate sink is COMPOSITE: the seismic page's panel and the
+        # workstation dock's panel both follow when they exist (L8).
+        page_locate = getattr(panel, "locate_position", None)
+
+        def _locate_everywhere(il, xl, twt=None, _page=page_locate):
+            if callable(_page):
+                _page(il, xl, twt)
+            # The dock pane follows through the workspace's link-gated
+            # consumer (L10): with the link off it deliberately ignores us.
+            linked = getattr(self.workstation, "linked_workspace", None)
+            locate_dock = getattr(linked, "locate_seismic", None)
+            if callable(locate_dock):
+                try:
+                    locate_dock(il, xl, twt)
+                except Exception:
+                    pass
+
+        if callable(page_locate):
+            self.view_coordination.set_seismic_sink(_locate_everywhere)
+            self.view_coordination.set_seismic_focus_sink(_locate_everywhere)
+        # L8 case A: any well selection opens/focuses the workstation well
+        # dock on that well; case B: a calibrated seismic cursor drives the
+        # docked well view's native link cursor (cleared when no authority
+        # produces an MD anymore).
+        workstation = getattr(self, "workstation", None)
+        show_well = getattr(workstation, "show_well", None)
+        if callable(show_well):
+            self.view_coordination.set_well_dock_sink(show_well)
+        apply_link = getattr(
+            getattr(workstation, "linked_workspace", None), "apply_link_cursor", None
+        )
+        if callable(apply_link):
+            self.view_coordination.set_link_cursor_sink(apply_link)
         # Scenario B map marker: the well map shows the picked seismic position.
         map_page = getattr(getattr(self.data_page, "well_map_panel", None), "map_page", None)
         show_cursor = getattr(map_page, "show_spatial_cursor", None)

@@ -6,7 +6,7 @@ from PySide6.QtCore import QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QIcon
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QWidget
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 
 _ICONS_DIR = Path(__file__).parent.parent.parent / "ui" / "assets" / "icons" / "map"
 
@@ -33,6 +33,8 @@ class DataToolbar(QWidget):
     tag_filter_changed = Signal(list, str)
     # Open the Tag Manager dialog (tags CRUD / merge / prune).
     tag_manager_requested = Signal()
+    # D4: cooperative import cancellation (registration phase).
+    cancel_import_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -51,14 +53,23 @@ class DataToolbar(QWidget):
 
         self.import_folder_btn = QPushButton(_icon("btn-import-folder"), "导入目录")
         self.import_folder_btn.setObjectName("SecondaryButton")
-        self.import_folder_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.import_folder_btn)
         self.import_folder_btn.setToolTip("导入整个目录")
         self.import_folder_btn.clicked.connect(self.import_folder_requested.emit)
         layout.addWidget(self.import_folder_btn)
 
+        # D4: visible only while an import runs; cooperative cancel.
+        self.cancel_import_btn = QPushButton("取消导入")
+        self.cancel_import_btn.setObjectName("SecondaryButton")
+        self.cancel_import_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        self.cancel_import_btn.setToolTip("协作式取消：当前分块完成后停止，已完成分块保持一致")
+        self.cancel_import_btn.setVisible(False)
+        self.cancel_import_btn.clicked.connect(self.cancel_import_requested.emit)
+        layout.addWidget(self.cancel_import_btn)
+
         self.verify_btn = QPushButton(_icon("btn-verify"), "完整性校验")
         self.verify_btn.setObjectName("SecondaryButton")
-        self.verify_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.verify_btn)
         self.verify_btn.setToolTip("后台校验数据资产完整性与 SHA-256")
         self.verify_btn.clicked.connect(self.verify_requested.emit)
         layout.addWidget(self.verify_btn)
@@ -66,42 +77,42 @@ class DataToolbar(QWidget):
 
         self.health_btn = QPushButton(_icon("btn-health"), "健康检查")
         self.health_btn.setObjectName("SecondaryButton")
-        self.health_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.health_btn)
         self.health_btn.setToolTip("数据目录健康体检：资产/版本统计、缺失、血缘断链、标签悬挂、孤儿文件")
         self.health_btn.clicked.connect(self.health_check_requested.emit)
         layout.addWidget(self.health_btn)
 
         self.rescan_btn = QPushButton(_icon("btn-rescan"), "重新扫描")
         self.rescan_btn.setObjectName("SecondaryButton")
-        self.rescan_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.rescan_btn)
         self.rescan_btn.setToolTip("重新扫描选中项")
         self.rescan_btn.clicked.connect(self.rescan_requested.emit)
         layout.addWidget(self.rescan_btn)
 
         self.remove_btn = QPushButton(_icon("btn-remove"), "移出项目")
         self.remove_btn.setObjectName("SecondaryButton")
-        self.remove_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.remove_btn)
         self.remove_btn.setToolTip("移出项目（不删源文件）")
         self.remove_btn.clicked.connect(self.remove_requested.emit)
         layout.addWidget(self.remove_btn)
 
         self.open_folder_btn = QPushButton(_icon("btn-open-folder"), "打开目录")
         self.open_folder_btn.setObjectName("SecondaryButton")
-        self.open_folder_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.open_folder_btn)
         self.open_folder_btn.setToolTip("在文件管理器中打开")
         self.open_folder_btn.clicked.connect(self.open_folder_requested.emit)
         layout.addWidget(self.open_folder_btn)
 
         self.visualize_btn = QPushButton(_icon("btn-visualize"), "可视化")
         self.visualize_btn.setObjectName("SecondaryButton")
-        self.visualize_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.visualize_btn)
         self.visualize_btn.setToolTip("在可视化页面打开")
         self.visualize_btn.clicked.connect(self.visualize_requested.emit)
         layout.addWidget(self.visualize_btn)
 
         self.clear_preview_cache_btn = QPushButton(_icon("btn-clear-cache"), "清除预览缓存")
         self.clear_preview_cache_btn.setObjectName("SecondaryButton")
-        self.clear_preview_cache_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.clear_preview_cache_btn)
         self.clear_preview_cache_btn.setToolTip("清除项目预览磁盘缓存")
         self.clear_preview_cache_btn.clicked.connect(
             self.clear_preview_cache_requested.emit
@@ -112,7 +123,7 @@ class DataToolbar(QWidget):
         # 标签筛选: checkable tag list + AND/OR + clear, applied immediately.
         self.tag_filter_btn = QPushButton(_icon("btn-tag-filter"), "标签筛选")
         self.tag_filter_btn.setObjectName("SecondaryButton")
-        self.tag_filter_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.tag_filter_btn)
         self.tag_filter_btn.setToolTip("按标签筛选资产表（支持多选与 AND/OR 组合）")
         self._tag_filter_menu = QMenu(self.tag_filter_btn)
         self._tag_filter_menu.aboutToShow.connect(self._rebuild_tag_filter_menu)
@@ -121,7 +132,7 @@ class DataToolbar(QWidget):
 
         self.tag_manager_btn = QPushButton(_icon("btn-tag-manager"), "标签管理")
         self.tag_manager_btn.setObjectName("SecondaryButton")
-        self.tag_manager_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.tag_manager_btn)
         self.tag_manager_btn.setToolTip("管理标签：新建 / 重命名 / 合并 / 清理")
         self.tag_manager_btn.clicked.connect(self.tag_manager_requested.emit)
         layout.addWidget(self.tag_manager_btn)
@@ -144,10 +155,11 @@ class DataToolbar(QWidget):
 
         self.search_box = QLineEdit()
         self.search_box.setObjectName("SearchBox")
+        self._search_sync = False
         self.search_box.setPlaceholderText("搜索文件名 / 类型 / 阶段 / 标签 / 路径...")
         self.search_box.setToolTip("搜索文件名/类型/阶段/标签/路径")
         self.search_box.setClearButtonEnabled(True)
-        self.search_box.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.search_box)
         self.search_box.textChanged.connect(self._on_search_text_changed)
         layout.addWidget(self.search_box, 1)
 
@@ -161,7 +173,7 @@ class DataToolbar(QWidget):
         # Hides the whole right column (reader + inspector), not only the reader pane.
         self.reader_btn = QPushButton(_icon("btn-reader"), "预览栏")
         self.reader_btn.setObjectName("SecondaryButton")
-        self.reader_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.reader_btn)
         self.reader_btn.setCheckable(True)
         self.reader_btn.setToolTip("显示或隐藏右侧预览与属性面板")
         self.reader_btn.clicked.connect(self.reader_toggled.emit)
@@ -275,7 +287,18 @@ class DataToolbar(QWidget):
     def _emit_tag_filter(self) -> None:
         self.tag_filter_changed.emit(list(self._selected_tags), self._tag_operator)
 
+    def set_search_text_silent(self, text: str) -> None:
+        """Programmatic sync (saved-filter apply / chip removal) — updates
+        the box WITHOUT re-emitting search_changed (no feedback loop)."""
+        self._search_sync = True
+        try:
+            self.search_box.setText(text)
+        finally:
+            self._search_sync = False
+
     def _on_search_text_changed(self, text: str) -> None:
+        if getattr(self, "_search_sync", False):
+            return
         self._pending_search = text
         self._search_timer.start()
 

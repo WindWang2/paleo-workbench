@@ -311,6 +311,48 @@ def _marching_squares_pure_python(
     return _stitch_segments(segments, simplify_tol=simplify_tol, smooth_iterations=smooth_iterations)
 
 
+def _clip_polyline_to_ring(
+    poly: list[list[float]],
+    clip_ring: list[list[float]],
+) -> list[list[list[float]]]:
+    """Clip one polyline to a user domain ring; returns the resulting pieces.
+
+    Requires shapely — a requested clip must never degrade to silently
+    unclipped output.
+    """
+    from shapely.geometry import LineString, Polygon, mapping
+    from shapely.geometry.collection import GeometryCollection
+
+    ring_poly = Polygon([(float(x), float(y)) for x, y in clip_ring])
+    if not ring_poly.is_valid:
+        from shapely.validation import make_valid
+
+        ring_poly = make_valid(ring_poly)
+    line = LineString([(float(x), float(y)) for x, y in poly])
+    clipped = line.intersection(ring_poly)
+    if clipped.is_empty:
+        return []
+    if clipped.geom_type == "GeometryCollection":
+        pieces = [
+            g
+            for g in clipped.geoms
+            if g.geom_type in ("LineString", "MultiLineString")
+        ]
+    else:
+        pieces = [clipped]
+    coords_out: list[list[list[float]]] = []
+    for piece in pieces:
+        geom = mapping(piece)
+        if geom["type"] == "LineString":
+            coords_out.append([[float(x), float(y)] for x, y in geom["coordinates"]])
+        elif geom["type"] == "MultiLineString":
+            coords_out.extend(
+                [[float(x), float(y)] for x, y in part]
+                for part in geom["coordinates"]
+            )
+    return [c for c in coords_out if len(c) >= 2]
+
+
 def generate_contour_layer(
     grid_result: FactorGridResult,
     levels: list[float] | None = None,
@@ -321,8 +363,14 @@ def generate_contour_layer(
     layer_id: str | None = None,
     name: str | None = None,
     style: dict[str, Any] | None = None,
+    clip_ring: list[list[float]] | None = None,
 ) -> ContourMapLayer:
-    """Extract smooth vector contour lines from FactorGridResult into a ContourMapLayer."""
+    """Extract smooth vector contour lines from FactorGridResult into a ContourMapLayer.
+
+    *clip_ring* restricts the output lines to a user domain polygon (the grid
+    level equivalent is ``InterpolationOptions.boundary``); the clip count is
+    reported in layer metadata ``contour_qc``.
+    """
     grid_z = grid_result.grid_z
     grid_x = grid_result.grid_x
     grid_y = grid_result.grid_y
@@ -334,9 +382,10 @@ def generate_contour_layer(
             id=layer_id or f"contour_{grid_result.factor_name}",
             name=name or f"{grid_result.factor_name} 等值线",
             extent=grid_result.extent,
-            crs=grid_result.crs or "EPSG:4326",
+            crs=grid_result.crs or "",
             features=(),
             levels=[],
+            metadata={"contour_qc": {"clipped_to_domain": 0, "empty_after_clip": 0}},
         )
 
     vmin, vmax = float(finite.min()), float(finite.max())
@@ -356,6 +405,10 @@ def generate_contour_layer(
 
     features: list[dict[str, Any]] = []
     unit_str = grid_result.unit or ""
+    contour_qc: dict[str, Any] = {
+        "clipped_to_domain": 0,
+        "empty_after_clip": 0,
+    }
 
     for idx, level in enumerate(levels):
         flevel = float(level)
@@ -376,27 +429,36 @@ def generate_contour_layer(
         for poly in polylines:
             if len(poly) < 2:
                 continue
-            poly_len = calculate_polyline_length(poly)
-            is_closed = math.isclose(poly[0][0], poly[-1][0], abs_tol=1e-5) and math.isclose(poly[0][1], poly[-1][1], abs_tol=1e-5)
+            if clip_ring is not None:
+                pieces = _clip_polyline_to_ring(poly, clip_ring)
+                if not pieces:
+                    contour_qc["empty_after_clip"] += 1
+                    continue
+                contour_qc["clipped_to_domain"] += 1
+            else:
+                pieces = [poly]
+            for clipped_poly in pieces:
+                poly_len = calculate_polyline_length(clipped_poly)
+                is_closed = math.isclose(clipped_poly[0][0], clipped_poly[-1][0], abs_tol=1e-5) and math.isclose(clipped_poly[0][1], clipped_poly[-1][1], abs_tol=1e-5)
 
-            features.append(
-                {
-                    "type": "Feature",
-                    "geometry": {
-                        "type": "LineString",
-                        "coordinates": poly,
-                    },
-                    "properties": {
-                        "level": flevel,
-                        "label_text": label_text,
-                        "is_index_contour": is_index,
-                        "length": poly_len,
-                        "is_closed": is_closed,
-                        "factor": grid_result.factor_name,
-                        "unit": unit_str,
-                    },
-                }
-            )
+                features.append(
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": clipped_poly,
+                        },
+                        "properties": {
+                            "level": flevel,
+                            "label_text": label_text,
+                            "is_index_contour": is_index,
+                            "length": poly_len,
+                            "is_closed": is_closed,
+                            "factor": grid_result.factor_name,
+                            "unit": unit_str,
+                        },
+                    }
+                )
 
     layer_style = dict(style) if style is not None else default_style_for("contour").to_dict()
 
@@ -404,10 +466,11 @@ def generate_contour_layer(
         id=layer_id or f"contour_{grid_result.factor_name}",
         name=name or f"{grid_result.factor_name} 等值线",
         extent=grid_result.extent,
-        crs=grid_result.crs or "EPSG:4326",
+        crs=grid_result.crs or "",
         features=tuple(features),
         levels=levels,
         contour_interval=interval,
         style=layer_style,
+        metadata={"contour_qc": contour_qc},
     )
 

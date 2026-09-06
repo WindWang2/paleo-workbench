@@ -354,3 +354,38 @@ def test_tree_rename_writes_back_to_authority_and_project(qtbot, tmp_path):
     document._sync_composition_now()
     qtbot.waitUntil(lambda: row_of("井点A") is not None, timeout=3000)
     assert controller.layer(layer.id).name == "井点A"
+
+
+def test_layer_checkbox_toggle_keeps_tree_items_alive(qtbot, tmp_path):
+    """图层可见性复选框：不得同步重建树（鼠标释放栈内 clear() 会 UAF 崩溃）。
+
+    回归（2026-09-06 core dump）：勾选「井位信息」复选框 → itemChanged →
+    set_layer_visible → _reload() → tree.clear() 销毁 delegate 仍持有的
+    item，mouseReleaseEvent 返回后在 QStyledItemDelegate::editorEvent 内
+    SIGSEGV。修复后复选框路径只重发渲染快照，树 item 对象保持存活。
+    """
+    from PySide6.QtCore import Qt
+
+    document = _document(qtbot, tmp_path)
+    panel = document.layer_manager
+    assert panel.tree_row_count() > 0
+
+    items = [panel.tree.topLevelItem(i) for i in range(panel.tree_row_count())]
+    target = next(
+        (
+            item
+            for item in items
+            if "井位" in item.text(0) or panel.layer_by_id(item.data(0, Qt.ItemDataRole.UserRole)) is not None
+        ),
+        items[0],
+    )
+    layer_id = target.data(0, Qt.ItemDataRole.UserRole)
+    assert panel.layer_by_id(layer_id).visible is True
+
+    # 模拟用户勾选：触发 itemChanged → _on_item_changed。
+    target.setCheckState(0, Qt.CheckState.Unchecked)
+
+    # 树未重建：同一批 item 对象仍挂在树上（clear() 会换新对象）。
+    assert [panel.tree.topLevelItem(i) for i in range(panel.tree_row_count())] == items
+    # 可见性确实写回了渲染快照权威。
+    assert panel.layer_by_id(layer_id).visible is False

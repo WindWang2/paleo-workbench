@@ -34,6 +34,25 @@ def calculate_signed_area(ring: Sequence[Sequence[float]]) -> float:
     return 0.5 * area2
 
 
+def _ring_centroid(ring: Sequence[Sequence[float]]) -> tuple[float, float]:
+    """Area centroid of a ring (shoelace); falls back to the first vertex for
+    degenerate rings so containment testing always has a deterministic point."""
+    n = len(ring)
+    if n == 0:
+        return (0.0, 0.0)
+    area2 = 0.0
+    cx = 0.0
+    cy = 0.0
+    for i in range(n - 1):
+        cross = ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1]
+        area2 += cross
+        cx += (ring[i][0] + ring[i + 1][0]) * cross
+        cy += (ring[i][1] + ring[i + 1][1]) * cross
+    if math.isclose(area2, 0.0, abs_tol=1e-12):
+        return (float(ring[0][0]), float(ring[0][1]))
+    return (cx / (3.0 * area2), cy / (3.0 * area2))
+
+
 def _point_in_ring(x: float, y: float, ring: Sequence[Sequence[float]]) -> bool:
     """Ray casting point in polygon test."""
     inside = False
@@ -99,8 +118,15 @@ def _polygonize_raster_boundaries(
     grid_z: np.ndarray,
     extent: tuple[float, float, float, float],
     target_class: int,
-) -> list[dict[str, Any]]:
-    """Trace cell boundaries of target_class and form valid GeoJSON Polygon / MultiPolygon geometries."""
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Trace cell boundaries of target_class and form valid GeoJSON Polygon / MultiPolygon geometries.
+
+    Hole assignment is deterministic: each hole ring is matched, by its area
+    centroid, to the *smallest* exterior containing it (exteriors are iterated
+    smallest-area first). An unmatched hole is promoted to an exterior island
+    and counted — it is never silently stapled onto an unrelated polygon.
+    """
+    qc: dict[str, int] = {"holes_promoted_to_exterior": 0}
     h, w = class_grid.shape
     xmin, ymin, xmax, ymax = extent
     dx = (xmax - xmin) / float(max(1, w))
@@ -108,7 +134,7 @@ def _polygonize_raster_boundaries(
 
     mask = (class_grid == target_class) & np.isfinite(grid_z)
     if not np.any(mask):
-        return []
+        return [], qc
 
     segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
 
@@ -131,7 +157,7 @@ def _polygonize_raster_boundaries(
                 segments.append(((x0, y1), (x0, y0)))
 
     if not segments:
-        return []
+        return [], qc
 
     def pt_key(pt: tuple[float, float]) -> tuple[float, float]:
         return (round(pt[0], 6), round(pt[1], 6))
@@ -173,7 +199,7 @@ def _polygonize_raster_boundaries(
                 loops.append(simplified)
 
     if not loops:
-        return []
+        return [], qc
 
     exterior_rings: list[list[list[float]]] = []
     holes: list[list[list[float]]] = []
@@ -192,7 +218,8 @@ def _polygonize_raster_boundaries(
             exterior_rings.append(list(reversed(h_loop)))
         holes = []
 
-    # Sort exterior rings ascending so innermost containing island matches first
+    # Sort exterior rings ascending so ties resolve to the innermost
+    # (smallest) containing exterior — deterministic nesting assignment.
     exterior_rings.sort(key=lambda ring: calculate_shoelace_area(ring))
 
     poly_groups: list[dict[str, Any]] = []
@@ -200,15 +227,31 @@ def _polygonize_raster_boundaries(
         poly_groups.append({"exterior": ext, "holes": []})
 
     for hole in holes:
-        test_pt = hole[0]
-        matched = False
-        for pg in poly_groups:
-            if _point_in_ring(test_pt[0], test_pt[1], pg["exterior"]):
-                pg["holes"].append(hole)
-                matched = True
-                break
-        if not matched and poly_groups:
-            poly_groups[0]["holes"].append(hole)
+        # Majority vote over hole-ring vertices: a hole belongs to the
+        # smallest exterior containing most of its vertices. Vertex tests
+        # (not centroid) are required here — for concentric rings the hole
+        # ring's centroid falls INSIDE the inner island, which would attach
+        # the hole to the wrong polygon.
+        best_idx = -1
+        best_votes = 0
+        for g_idx, pg in enumerate(poly_groups):
+            votes = sum(
+                1
+                for pt in hole[:-1]
+                if _point_in_ring(pt[0], pt[1], pg["exterior"])
+            )
+            if votes > best_votes:
+                best_votes = votes
+                best_idx = g_idx
+        if best_idx >= 0 and best_votes > 0:
+            poly_groups[best_idx]["holes"].append(hole)
+        else:
+            # No exterior contains this ring: promote it to an island instead
+            # of attaching it to an unrelated polygon.
+            promoted = list(reversed(hole))
+            exterior_rings.append(promoted)
+            poly_groups.append({"exterior": promoted, "holes": []})
+            qc["holes_promoted_to_exterior"] += 1
 
     geoms: list[dict[str, Any]] = []
     for pg in poly_groups:
@@ -217,7 +260,69 @@ def _polygonize_raster_boundaries(
         repaired = repair_invalid_geometry(geom)
         geoms.append(repaired)
 
-    return geoms
+    return geoms, qc
+
+
+def _mapping_to_lists(obj: Any) -> Any:
+    """Recursively convert shapely ``mapping`` output (tuples) to plain lists
+    so the geometry round-trips through JSON and list-based consumers."""
+    if isinstance(obj, (list, tuple)):
+        return [_mapping_to_lists(item) for item in obj]
+    if isinstance(obj, dict):
+        return {key: _mapping_to_lists(value) for key, value in obj.items()}
+    return obj
+
+
+def _clip_polygon_to_ring(
+    geom: dict[str, Any], clip_ring: Sequence[Sequence[float]]
+) -> dict[str, Any] | None:
+    """Intersect a GeoJSON polygon with a user domain ring (shapely).
+
+    Returns the clipped polygonal geometry, or ``None`` when the intersection
+    is empty. Requires shapely — callers must not fall back to silently
+    unclipped output.
+    """
+    from shapely.geometry import MultiPolygon, Polygon, mapping, shape
+    from shapely.geometry.collection import GeometryCollection
+
+    ring_poly = Polygon([(float(x), float(y)) for x, y in clip_ring])
+    if not ring_poly.is_valid:
+        from shapely.validation import make_valid
+
+        ring_poly = make_valid(ring_poly)
+    clipped = shape(geom).intersection(ring_poly)
+    if clipped.is_empty:
+        return None
+    if clipped.geom_type == "GeometryCollection":
+        polys = [g for g in clipped.geoms if g.geom_type in ("Polygon", "MultiPolygon")]
+        if not polys:
+            return None
+        polygons = [g for g in polys if g.geom_type == "Polygon"]
+        multipolygons = [g for g in polys if g.geom_type == "MultiPolygon"]
+        clipped = (
+            multipolygons[0]
+            if not polygons and multipolygons
+            else MultiPolygon([p for p in polygons] + [q for mp in multipolygons for q in mp.geoms])
+        )
+    return _mapping_to_lists(mapping(clipped))
+
+
+def _filter_small_polygons(
+    geoms: list[dict[str, Any]], min_area: float
+) -> tuple[list[dict[str, Any]], int]:
+    """Drop polygons whose net area is below *min_area*; return kept + dropped count.
+
+    The caller records the count in layer QC — a scientific result is only
+    removed by an explicit, visible threshold.
+    """
+    kept: list[dict[str, Any]] = []
+    dropped = 0
+    for geom in geoms:
+        if _compute_geometry_area(geom) < min_area:
+            dropped += 1
+        else:
+            kept.append(geom)
+    return kept, dropped
 
 
 def generate_facies_polygon_layer(
@@ -227,8 +332,17 @@ def generate_facies_polygon_layer(
     colors: list[str] | None = None,
     layer_id: str | None = None,
     name: str | None = None,
+    min_area: float | None = None,
+    clip_ring: Sequence[Sequence[float]] | None = None,
 ) -> PolygonMapLayer:
-    """Classify scalar grid and polygonize into topologically valid Facies / Zone Polygon layer."""
+    """Classify scalar grid and polygonize into topologically valid Facies / Zone Polygon layer.
+
+    *min_area* removes polygons below an explicit area threshold (the drop
+    count is reported in layer metadata ``polygon_qc`` — nothing is removed
+    silently). *clip_ring* restricts output polygons to a user domain; the
+    grid-level equivalent is ``InterpolationOptions.boundary`` (D6), and both
+    must describe the same domain for consistent maps.
+    """
     grid_z = grid_result.grid_z
     h, w = grid_z.shape
     xmin, ymin, xmax, ymax = grid_result.extent
@@ -239,8 +353,15 @@ def generate_facies_polygon_layer(
             id=layer_id or f"facies_{grid_result.factor_name}",
             name=name or f"{grid_result.factor_name} 相带多边形",
             extent=grid_result.extent,
-            crs=grid_result.crs or "EPSG:4326",
+            crs=grid_result.crs or "",
             features=(),
+            metadata={"polygon_qc": {
+                "small_polygon_threshold": min_area,
+                "small_polygons_dropped": 0,
+                "clipped_to_domain": 0,
+                "empty_after_clip": 0,
+                "holes_promoted_to_exterior": 0,
+            }},
         )
 
     vmin, vmax = float(finite.min()), float(finite.max())
@@ -272,6 +393,12 @@ def generate_facies_polygon_layer(
 
     features: list[dict[str, Any]] = []
     total_grid_area = max(1e-12, (xmax - xmin) * (ymax - ymin))
+    polygon_qc: dict[str, Any] = {
+        "small_polygon_threshold": min_area,
+        "small_polygons_dropped": 0,
+        "clipped_to_domain": 0,
+        "empty_after_clip": 0,
+    }
 
     for c_idx in range(len(facies_names)):
         c_mask = (class_grid == c_idx) & np.isfinite(grid_z)
@@ -282,9 +409,26 @@ def generate_facies_polygon_layer(
         color = colors[c_idx % len(colors)]
         mean_val = float(np.mean(grid_z[c_mask]))
 
-        geoms = _polygonize_raster_boundaries(
+        geoms, hole_qc = _polygonize_raster_boundaries(
             class_grid, grid_z, grid_result.extent, target_class=c_idx
         )
+        polygon_qc["holes_promoted_to_exterior"] = (
+            polygon_qc.get("holes_promoted_to_exterior", 0)
+            + hole_qc["holes_promoted_to_exterior"]
+        )
+        if clip_ring is not None:
+            clipped_geoms: list[dict[str, Any]] = []
+            for geom in geoms:
+                clipped = _clip_polygon_to_ring(geom, clip_ring)
+                if clipped is None:
+                    polygon_qc["empty_after_clip"] += 1
+                else:
+                    clipped_geoms.append(clipped)
+                    polygon_qc["clipped_to_domain"] += 1
+            geoms = clipped_geoms
+        if min_area is not None and min_area > 0:
+            geoms, dropped = _filter_small_polygons(geoms, float(min_area))
+            polygon_qc["small_polygons_dropped"] += dropped
 
         for geom in geoms:
             geom_area = _compute_geometry_area(geom)
@@ -324,8 +468,9 @@ def generate_facies_polygon_layer(
         id=layer_id or f"facies_{grid_result.factor_name}",
         name=name or f"{grid_result.factor_name} 相带",
         extent=grid_result.extent,
-        crs=grid_result.crs or "EPSG:4326",
+        crs=grid_result.crs or "",
         features=tuple(features),
         categories=[{"name": fn, "color": col} for fn, col in zip(facies_names, colors)],
         style=style,
+        metadata={"polygon_qc": polygon_qc},
     )

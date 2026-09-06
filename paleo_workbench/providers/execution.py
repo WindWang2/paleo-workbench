@@ -37,6 +37,7 @@ from paleo_workbench.providers.errors import (
     ProviderError,
     ProviderExecutionError,
     ProviderRejectedInputError,
+    ProviderVerificationError,
 )
 from paleo_workbench.providers.refs import ProviderResult
 
@@ -320,7 +321,34 @@ def execute_provider(
         raise InvalidParametersError(descriptor.provider_id, problems)
     _validate_inputs(descriptor, inputs)
 
-    lease = _governor_lease(descriptor, descriptor.provider_id)
+    # Nested execution (#1146 follow-up): when the provider runs inside an
+    # already-admitted scope (a harness action that wraps execute_provider),
+    # the enclosing lease already reserved this execution's resources against
+    # the same governor. Admitting again would double-count the estimate and
+    # shed work that fits — so the enclosing lease is inherited as-is (the
+    # enclosing scope keeps owning release; the governor sees one admission).
+    enclosing_lease = (
+        context.extras.get("admission_lease") if context is not None else None
+    )
+    owns_lease = enclosing_lease is None
+    lease = (
+        enclosing_lease
+        if enclosing_lease is not None
+        else _governor_lease(descriptor, descriptor.provider_id)
+    )
+    if not owns_lease:
+        profile = descriptor.resource_profile
+        enclosing_request = getattr(enclosing_lease, "request", None)
+        enclosing_ram = getattr(enclosing_request, "estimated_ram_bytes", 0) or 0
+        if enclosing_ram and enclosing_ram < profile.estimated_ram_bytes:
+            logger.warning(
+                "provider %s declares %d RAM bytes but the enclosing admission "
+                "reserved only %d — the enclosing action's resource_profile "
+                "understates this execution",
+                descriptor.provider_id,
+                profile.estimated_ram_bytes,
+                enclosing_ram,
+            )
     run_ref = None
     catalog = context.catalog if context is not None else None
     operation = f"provider.{descriptor.family.value}.{descriptor.provider_id}"
@@ -345,6 +373,40 @@ def execute_provider(
         if context is not None and run_ref is not None:
             context.run_id = getattr(run_ref, "run_id", None) or getattr(run_ref, "id", None)
         result = provider.execute(inputs, parameters, context or ProviderContext())
+        # Harness 2.0: optional provider-side verifier, fail-closed — a
+        # verifier that crashes or rejects raises ProviderVerificationError;
+        # the shared failure path below marks the run failed. Verifier
+        # warnings ride along on a passing result.
+        verify = getattr(provider, "verify", None)
+        if callable(verify):
+            try:
+                verification = verify(result, context or ProviderContext())
+            except Exception as exc:
+                from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
+                if isinstance(exc, TaskCancelled):
+                    raise
+                raise ProviderVerificationError(
+                    descriptor.provider_id,
+                    f"verifier crashed: {type(exc).__name__}: {exc}",
+                ) from exc
+            verdict = getattr(verification, "verdict", verification)
+            reasons: list[str] = []
+            if isinstance(verification, dict):
+                reasons = [str(r) for r in verification.get("reasons", []) if r]
+                verdict = verification.get("verdict", verdict)
+            elif hasattr(verification, "reasons"):
+                reasons = [str(r) for r in (verification.reasons or []) if r]
+            if str(verdict).lower() in ("fail", "failed", "false"):
+                raise ProviderVerificationError(
+                    descriptor.provider_id, "; ".join(reasons) or "verification failed"
+                )
+            if reasons:
+                result.warnings.extend(reasons)
+            if isinstance(verification, dict):
+                result.metrics.setdefault("verification", {
+                    k: v for k, v in verification.items() if k not in ("verdict", "reasons")
+                })
     except Exception as exc:  # NOT BaseException: KeyboardInterrupt/SystemExit must pass through
         from paleo_workbench.runtime.task_scheduler import TaskCancelled
 
@@ -372,7 +434,7 @@ def execute_provider(
             raise
         raise ProviderExecutionError(descriptor.provider_id, exc) from exc
     finally:
-        if lease is not None:
+        if lease is not None and owns_lease:
             lease.release()
 
     elapsed_ms = (time.perf_counter() - t0) * 1000.0

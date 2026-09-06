@@ -113,3 +113,6 @@ class InterpolationOptions:
     crs: str = "EPSG:4326"
     anisotropy_angle: float | None = None
     anisotropy_ratio: float | None = None
+    # D5: declared distance strategy ("planar" | "planar_degrees" |
+    # "projected"). Resolved + annotated on the result by interpolate_factor.
+    distance_policy: str = "planar"

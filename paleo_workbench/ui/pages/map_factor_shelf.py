@@ -6,7 +6,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QVBoxLayout, QWidget
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.ui.pages.factor_preview_grid import FactorPreviewGrid
 
 _ICONS_DIR = Path(__file__).parent.parent.parent / "ui" / "assets" / "icons" / "map"
@@ -37,14 +37,14 @@ class MapFactorShelf(QWidget):
 
         self.create_factor_map_btn = QPushButton("新建单因素地质编图")
         self.create_factor_map_btn.setObjectName("PrimaryButton")
-        self.create_factor_map_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.create_factor_map_btn)
         self.create_factor_map_btn.setToolTip("从井点属性执行空间克里金插值，生成包含栅格、等值线及井位标注的 GIS 图件")
         self.create_factor_map_btn.clicked.connect(self.create_factor_map_requested.emit)
         actions.addWidget(self.create_factor_map_btn)
 
         self.contour_draft_btn = QPushButton(_panel_icon("btn-contour-draft"), "从单因素生成等值线初稿")
         self.contour_draft_btn.setObjectName("SecondaryButton")
-        self.contour_draft_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.contour_draft_btn)
         self.contour_draft_btn.setToolTip(
             "对已完成网格的单因素任务提取 ContourDraft 并写入当前工程图件"
         )
@@ -53,7 +53,7 @@ class MapFactorShelf(QWidget):
 
         self.fault_interpretation_btn = QPushButton("断层约束→解释版本")
         self.fault_interpretation_btn.setObjectName("SecondaryButton")
-        self.fault_interpretation_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.fault_interpretation_btn)
         self.fault_interpretation_btn.setToolTip(
             "把当前图件中断线/断层多段线提升为正式断层解释，保存为不可变解释版本（目录血缘）"
         )
@@ -62,7 +62,7 @@ class MapFactorShelf(QWidget):
 
         self.map_product_btn = QPushButton("装配古地理成果 (MapProduct)")
         self.map_product_btn.setObjectName("PrimaryButton")
-        self.map_product_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        style.track_control_height(self.map_product_btn)
         self.map_product_btn.setToolTip(
             "多因素 + 解释 + 组图 → 一个带完整血缘的 OUTPUT 成果版本（拒绝合成数据）"
         )

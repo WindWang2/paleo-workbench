@@ -13,6 +13,7 @@ from paleo_workbench.mapping.geological_pipeline.models import (
     InterpolationOptions,
 )
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult, NODATA
+from paleo_workbench.workflow.crs_policy import resolve_distance_policy
 
 
 class Interpolator(ABC):
@@ -591,14 +592,75 @@ def _pure_numpy_kriging(
     )
 
 
+def _domain_mask(
+    grid_x: np.ndarray, grid_y: np.ndarray, boundary: list[tuple[float, float]]
+) -> np.ndarray:
+    """Vectorised ray-cast inside/outside test for grid cell centres.
+
+    Returns a boolean ``(len(grid_y), len(grid_x))`` array: ``True`` where a
+    cell centre lies inside (or on the edge of) the user boundary ring.
+    """
+    poly = np.asarray(boundary, dtype=float)
+    if poly.ndim != 2 or poly.shape[0] < 3:
+        raise ValueError("boundary ring needs at least 3 vertices")
+    px = poly[:, 0]
+    py = poly[:, 1]
+    xx, yy = np.meshgrid(
+        np.asarray(grid_x, dtype=float), np.asarray(grid_y, dtype=float)
+    )
+    inside = np.zeros(xx.shape, dtype=bool)
+    j = len(px) - 1
+    for i in range(len(px)):
+        yi, yj = py[i], py[j]
+        xi, xj = px[i], px[j]
+        straddle = (yi > yy) != (yj > yy)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            x_cross = (xj - xi) * (yy - yi) / (yj - yi) + xi
+        inside ^= straddle & (xx < x_cross)
+        j = i
+    return inside
+
+
+def _apply_domain_options(
+    result: FactorGridResult, options: InterpolationOptions
+) -> FactorGridResult:
+    """Consume the previously-dead ``InterpolationOptions.boundary`` (D6).
+
+    The user domain ring masks every cell centre outside it to nodata across
+    the *same* grid that contouring and polygonization later read, so the
+    mask is identical along the whole chain. The masking is recorded as real
+    algorithm output (masked-cell count) — never a silent edit.
+    """
+    if not options.boundary:
+        return result
+    ring = [(float(x), float(y)) for x, y in options.boundary]
+    inside = _domain_mask(result.grid_x, result.grid_y, ring)
+    masked = int(np.isfinite(result.grid_z[~inside]).sum())
+    if masked:
+        grid = np.array(result.grid_z, copy=True)
+        grid[~inside] = NODATA
+        result.grid_z = grid
+        result.statistics = type(result.statistics).from_grid(grid)
+    result.boundary = ring
+    result.algorithm_parameters["domain_mask"] = "user_boundary"
+    result.algorithm_parameters["domain_masked_cells"] = masked
+    return result
+
+
 def interpolate_factor(
     dataset: GeologicalFactorDataset, options: InterpolationOptions | None = None
 ) -> FactorGridResult:
-    """Convenience top-level interpolation dispatcher."""
+    """Top-level interpolation dispatcher (single place where the user
+    domain boundary and the D5 distance policy are enforced and recorded)."""
     if options is None:
         options = InterpolationOptions()
     if options.method.lower() in ("kriging", "ordinary_kriging", "ok"):
         engine = KrigingInterpolator()
     else:
         engine = IDWInterpolator()
-    return engine.interpolate(dataset, options)
+    result = engine.interpolate(dataset, options)
+    result = _apply_domain_options(result, options)
+    policy = resolve_distance_policy(dataset.crs or None, options.distance_policy)
+    result.algorithm_parameters["distance_policy"] = policy["policy"]
+    result.algorithm_parameters["distance_policy_annotation"] = policy["annotation"]
+    return result

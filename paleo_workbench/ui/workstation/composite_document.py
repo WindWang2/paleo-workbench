@@ -468,12 +468,14 @@ class LayerManagerPanel(QFrame):
                 return layer
         return None
 
-    def set_layer_visible(self, layer_id: str, visible: bool) -> None:
+    def set_layer_visible(
+        self, layer_id: str, visible: bool, *, reload_tree: bool = True
+    ) -> None:
         layer = self.layer_by_id(layer_id)
         if layer is None:
             return
         self._layers[self._layers.index(layer)] = replace(layer, visible=visible)
-        self._publish()
+        self._publish(reload_tree=reload_tree)
 
     def set_layer_opacity(self, layer_id: str, opacity: float) -> None:
         layer = self.layer_by_id(layer_id)
@@ -564,9 +566,15 @@ class LayerManagerPanel(QFrame):
             item.setHidden(bool(text) and text not in item.text(0).lower())
 
     def _on_item_changed(self, item: QTreeWidgetItem) -> None:
+        # 复选框勾选在鼠标释放事件的 delegate 处理栈内触发本回调；此时
+        # 绝不能同步重建树（tree.clear() 销毁 delegate 仍持有的 item →
+        # libQt6Widgets 内 use-after-free SIGSEGV）。勾选态本就是树自己
+        # 写的，跳过重载只重发渲染快照即可（同 set_layer_opacity 的
+        # reload_tree=False 先例）。
         self.set_layer_visible(
             item.data(0, Qt.ItemDataRole.UserRole),
             item.checkState(0) == Qt.CheckState.Checked,
+            reload_tree=False,
         )
 
     def _sync_opacity(self) -> None:

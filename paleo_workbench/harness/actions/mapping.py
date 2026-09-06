@@ -20,6 +20,8 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="map.create_factor_map",
+            side_effect_notes="publishes the map document in-session; writes an intermediate grid artifact and a catalog run/version",
+            output_schema={"type": "object", "properties": {"document_id": {"type": "string"}, "task_id": {"type": "string"}, "name": {"type": "string"}, "version_id": {"type": ["string", "null"]}, "run_id": {"type": ["string", "null"]}}, "required": ["document_id"]},
             description="从井点因素数据生成单因素图（提取→插值→网格/等值线/井位图层→MapDocument），生产管线。",
             handler=_create_factor_map,
             # #1186: writes the grid artifact to disk and registers a DataRun
@@ -50,6 +52,7 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="map.create_well_location_map",
+            output_schema={"type": "object", "properties": {"document_id": {"type": "string"}, "well_count": {"type": "integer"}, "extent": {"type": "array"}, "name": {"type": "string"}}, "required": ["document_id", "well_count"]},
             description="生成井位图（井点+井名标注+范围），场景 A 的生产路径。",
             handler=_create_well_location_map,
             risk=ActionRisk.COMPUTE,
@@ -69,6 +72,8 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="map.add_layer",
+            side_effect_notes="mutates the live map document in-session (layers list)",
+            output_schema={"type": "object", "properties": {"added": {"type": "boolean"}, "document_id": {"type": "string"}, "layer_count": {"type": "integer"}}, "required": ["added", "document_id"]},
             description="向当前图文档添加图层（矢量/栅格/点/注释），写操作走文档修订。",
             handler=_add_layer,
             risk=ActionRisk.WRITE,
@@ -90,6 +95,8 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="map.set_style",
+            side_effect_notes="mutates a layer style and bumps the style revision in-session",
+            output_schema={"type": "object", "properties": {"layer": {"type": "string"}, "style": {"type": "object"}}, "required": ["layer", "style"]},
             description="设置当前图（或指定图层）的样式（颜色/线宽/标注）。",
             handler=_set_style,
             risk=ActionRisk.WRITE,
@@ -111,6 +118,8 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="map.apply_template",
+            side_effect_notes="creates/updates the composer composition in-session",
+            output_schema={"type": "object", "properties": {"document_id": {"type": "string"}, "template": {"type": "string"}, "components": {"type": "array"}}, "required": ["document_id", "template"]},
             description="将制图模板应用到当前图（样式/要素齐备性：图例+比例尺+指北针+标题，可自定义标题）。",
             handler=_apply_template,
             risk=ActionRisk.WRITE,
@@ -129,6 +138,8 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="map.add_component",
+            side_effect_notes="mutates the composer composition in-session",
+            output_schema={"type": "object", "properties": {"added": {"type": "string", "description": "本次确保存在的组件名"}, "document_id": {"type": "string"}, "components": {"type": "array"}}, "required": ["added"]},
             description="向当前图的版面添加制图要素（图例/色标/比例尺/指北针/标题/图框）。",
             handler=_add_component,
             risk=ActionRisk.WRITE,
@@ -168,6 +179,8 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="map.export",
+            side_effect_notes="writes a validated export file inside the workspace and registers a catalog OUTPUT version",
+            output_schema={"type": "object", "properties": {"exported": {"type": "boolean"}, "artifacts": {"type": "array"}, "provenance": {"type": "object"}, "metrics": {"type": "object"}}, "required": ["exported"]},
             description="导出当前图（PNG/SVG/PDF，生产导出路径），登记 catalog OUTPUT 版本。",
             handler=_export,
             # #1186: writes the exported file into the workspace and registers
@@ -192,6 +205,80 @@ def register(registry) -> None:
 
 
 # ------------------------------------------------------------- helpers --
+    registry.register(
+        ActionSpec(
+            action_id="map.describe",
+            description="描述当前（或指定）图件文档：图层清单、范围、CRS、样式修订。",
+            handler=_describe_map,
+            risk=ActionRisk.READ,
+            category="interactive.query",
+            version="1.0",
+            resource_profile={"estimated_cpu_cores": 0.2, "io_weight": 0.1},
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+            domain_tags=("map", "describe"),
+        )
+    )
+    registry.register(
+        ActionSpec(
+            action_id="map.qc",
+            description="对当前图件执行导出就绪 QC（图层/范围/CRS/成图要素），FAIL 即不合格。",
+            handler=_map_qc,
+            risk=ActionRisk.READ,
+            category="interactive.query",
+            version="1.0",
+            resource_profile={"estimated_cpu_cores": 0.2, "io_weight": 0.1},
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "require_components": {"type": "boolean", "default": True},
+                },
+                "additionalProperties": False,
+            },
+            domain_tags=("map", "qc"),
+        )
+    )
+    registry.register(
+        ActionSpec(
+            action_id="map.contour",
+            output_schema={"type": "object", "properties": {"draft_id": {"type": ["string", "null"]}, "name": {"type": "string"}, "levels": {"type": "array"}, "segment_count": {"type": "integer"}, "linked_task_id": {"type": ["string", "null"]}}, "required": ["name", "levels"]},
+            description="从已插值的因子任务生成等值线初稿（真实 engine isolines，写回工程草稿区）。",
+            handler=_map_contour,
+            risk=ActionRisk.WRITE,
+            category="background.compute",
+            version="1.0",
+            supports_cancel=True,
+            resource_profile={"estimated_cpu_cores": 1.0, "estimated_ram_bytes": 256 * 1024**2, "io_weight": 0.8},
+            required_context=("project",),
+            side_effect_notes="upserts a ContourDraft into the project document",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string"},
+                    "n_levels": {"type": "integer", "minimum": 2, "maximum": 64},
+                },
+                "additionalProperties": False,
+            },
+            domain_tags=("map", "contour"),
+        )
+    )
+    registry.register(
+        ActionSpec(
+            action_id="layer.describe",
+            description="描述当前图件中的一个图层：类型、要素数、样式与可见性。",
+            handler=_describe_layer,
+            risk=ActionRisk.READ,
+            category="interactive.query",
+            version="1.0",
+            resource_profile={"estimated_cpu_cores": 0.2, "io_weight": 0.1},
+            input_schema={
+                "type": "object",
+                "properties": {"layer_name": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            domain_tags=("map", "layer"),
+        )
+    )
+
 def _artifact_root(context: ActionContext) -> Path:
     """The PROJECT's artifacts tree (``<name>.artifacts``) — V2.
 
@@ -629,16 +716,9 @@ def _export(context: ActionContext, parameters: dict) -> dict:
             raise ValueError(
                 "map failed validation; fix before export: " + "; ".join(report.reasons)
             )
-    from paleo_workbench.providers import ProviderContext, execute_provider, get_provider_registry
+    from paleo_workbench.providers import execute_provider, get_provider_registry
 
-    root = Path(context.project_path).parent if context.project_path else Path.cwd()
-    provider_context = ProviderContext(
-        catalog=context.catalog,
-        workspace_root=str(root),
-        emit_progress=context.progress,
-        cancel=context.cancel,
-        work_dir=context.extras.get("work_dir"),
-    )
+    provider_context = context.provider_context()
     export_parameters = {"output_path": _resolve_export_path(context, parameters["output_path"])}
     for key in ("width", "height", "dpi"):
         if parameters.get(key) is not None:
@@ -657,4 +737,92 @@ def _export(context: ActionContext, parameters: dict) -> dict:
         "artifacts": artifacts,
         "provenance": result.provenance,
         "metrics": result.metrics,
+    }
+
+def _describe_map(context: ActionContext, parameters: dict) -> dict:
+    document = _current_document(context)
+    return {
+        "document_id": getattr(document, "id", None),
+        "title": getattr(document, "title", ""),
+        "crs": getattr(document, "crs", None),
+        "extent": list(getattr(document, "extent", ()) or ()),
+        "layers": [getattr(l, "name", "") for l in getattr(document, "layers", [])],
+        "layer_count": len(getattr(document, "layers", []) or []),
+    }
+
+
+def _map_qc(context: ActionContext, parameters: dict) -> dict:
+    from paleo_workbench.harness.validation import MapValidationHook
+
+    document = _current_document(context)
+    composition = context.compositions.get(context.current_map_id or "")
+    report = MapValidationHook().validate(
+        document,
+        composition,
+        require_components=bool(parameters.get("require_components", True)),
+    )
+    return {
+        "verdict": report.verdict,
+        "passed": report.passed,
+        "reasons": list(report.reasons),
+        "document_id": getattr(document, "id", None),
+    }
+
+
+def _map_contour(context: ActionContext, parameters: dict) -> dict:
+    from paleo_workbench.workflow.contour_draft import (
+        contour_draft_from_factor_task,
+        upsert_contour_draft,
+    )
+
+    project = context.require("project")
+    tasks = getattr(project, "factor_map_tasks", []) or []
+    task_id = parameters.get("task_id")
+    task = None
+    if task_id:
+        task = next((t for t in tasks if getattr(t, "id", "") == task_id), None)
+        if task is None:
+            raise LookupError(f"no factor task {task_id!r} in project")
+    elif tasks:
+        task = tasks[-1]  # most recent interpolated factor task
+    if task is None:
+        raise LookupError(
+            "no factor map task in project — run map.create_factor_map first"
+        )
+    draft = contour_draft_from_factor_task(
+        task,
+        n_levels=int(parameters.get("n_levels", 10)),
+        cancellation_token=context.cancel,
+    )
+    upsert_contour_draft(project, draft)
+    return {
+        "draft_id": getattr(draft, "id", None),
+        "name": draft.name,
+        "levels": draft.levels,
+        "segment_count": len(getattr(draft, "segments", []) or []),
+        "linked_task_id": draft.linked_factor_task_id,
+    }
+
+
+def _describe_layer(context: ActionContext, parameters: dict) -> dict:
+    document = _current_document(context)
+    layers = getattr(document, "layers", []) or []
+    wanted = parameters.get("layer_name")
+    layer = None
+    if wanted:
+        layer = next(
+            (l for l in layers if getattr(l, "name", "") == wanted), None
+        )
+        if layer is None:
+            raise LookupError(f"document has no layer {wanted!r}")
+    elif layers:
+        layer = layers[-1]
+    if layer is None:
+        raise LookupError("document has no layers")
+    return {
+        "name": getattr(layer, "name", ""),
+        "layer_type": getattr(layer, "layer_type", ""),
+        "visible": getattr(layer, "visible", None),
+        "feature_count": len(getattr(layer, "features", ()) or ()),
+        "style": getattr(layer, "style", None),
     }

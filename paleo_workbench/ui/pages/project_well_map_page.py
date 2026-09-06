@@ -45,12 +45,13 @@ from paleo_workbench.ui import tokens
 
 _WELL_ID_ROLE = Qt.ItemDataRole.UserRole + 1
 
-_COLOR_OK = "#409cff"
-_COLOR_FLAGGED = "#f59e0b"
-_COLOR_SELECTED = "#e11d48"
-_COLOR_BOUNDARY = "#64748b"
-_COLOR_SURVEY = "#0d9488"
-_COLOR_SPATIAL_CURSOR = "#7c3aed"
+# 井位散点系列语义色：值取自 token 调色板（随主题策展），含义为域状态。
+_COLOR_OK = tokens.PRIMARY
+_COLOR_FLAGGED = tokens.WARNING
+_COLOR_SELECTED = tokens.ACCENT
+_COLOR_BOUNDARY = tokens.TEXT_SECONDARY
+_COLOR_SURVEY = tokens.TEAL
+_COLOR_SPATIAL_CURSOR = tokens.CANVAS_CURSOR
 
 
 class WellListModel(QAbstractListModel):
@@ -299,7 +300,7 @@ class ProjectWellMapPage(QWidget):
         plot.set_equal_aspect(True)
         # Engine default is a dark chart theme; the workbench is light.
         plot.bg_color = QColor(tokens.BG_HEADER)
-        plot.plot_bg_color = QColor("#f8fafc")
+        plot.plot_bg_color = QColor(tokens.BG_CHART)
         plot.grid_color = QColor(tokens.BORDER)
         plot.axis_color = QColor(tokens.BORDER_STRONG)
         plot.text_color = QColor(tokens.TEXT_SECONDARY)

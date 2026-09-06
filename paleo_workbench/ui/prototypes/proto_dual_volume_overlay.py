@@ -1,3 +1,4 @@
+# [NON-PRODUCTION] 设计探索原型，零生产引用；豁免 token 卫生门禁（tests/test_ui_token_hygiene.py）。勿在生产代码 import。
 """PROTOTYPE — THROW AWAY CODE FOR TESTING DUAL-VOLUME OVERLAY & BLENDING DESIGNS
 
 Run command:

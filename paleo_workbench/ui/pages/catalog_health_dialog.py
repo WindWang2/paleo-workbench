@@ -49,6 +49,10 @@ class _AuditWorker(QObject):
 class CatalogHealthDialog(QDialog):
     """数据健康检查: audit statistics + issues for the active catalog."""
 
+    # D9: emitted when the user asks for the 缺失源/重链接 flow; the host
+    # opens RelinkSourcesDialog (keeps this dialog free of relink logic).
+    relink_requested = Signal()
+
     def __init__(self, parent=None, *, service_provider):
         super().__init__(parent)
         self.setWindowTitle("数据健康检查 (Catalog Health)")
@@ -91,6 +95,11 @@ class CatalogHealthDialog(QDialog):
         self.deep_btn.setObjectName("SecondaryButton")
         self.deep_btn.clicked.connect(lambda: self.run_audit(deep=True))
         buttons.addWidget(self.deep_btn)
+        # D9: 缺失源扫描 + fail-closed relink，紧邻健康检查入口保证可发现性。
+        self.relink_btn = QPushButton("缺失源与重链接…")
+        self.relink_btn.setObjectName("SecondaryButton")
+        self.relink_btn.clicked.connect(self.relink_requested)
+        buttons.addWidget(self.relink_btn)
         buttons.addStretch()
         close_btn = QPushButton("关闭")
         close_btn.clicked.connect(self.accept)

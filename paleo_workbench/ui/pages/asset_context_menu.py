@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QMenu
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.resources.exporters import get_available_formats
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.workstation.common import workstation_icon
 from paleo_workbench.ui.pages.data_view_models import (
     AssetView,
     DataStage,
@@ -111,9 +112,23 @@ class AssetContextMenu(QMenu):
             materialize = self._add_action("ctx_materialize", "纳管至项目 (Import into Project)")
             materialize.setEnabled(False)
             materialize.setToolTip("需连接数据目录后端以纳管外部数据")
+            # Relink the moved file (enabled by DataPage when the recorded
+            # source is actually missing — never a silent rebinding).
+            relink = self._add_action("ctx_relink", "重新链接源… (Relink Source)")
+            relink.setEnabled(False)
+            relink.setToolTip("源文件移动后重新指向新位置（需通过身份校验）")
 
         # 3. 校验完整性 (Verify Integrity)
         verify = self._add_action("ctx_verify", "校验完整性 (Verify Integrity)")
+
+        # 3b. 版本工作台 / 血缘浏览器 (D6/D8): wired + gated by DataPage —
+        # they need the catalog version bridge to resolve anything.
+        version_wb = self._add_action("ctx_version_workbench", "版本工作台… (Versions)")
+        version_wb.setEnabled(False)
+        version_wb.setToolTip("需要数据目录桥接的资产")
+        lineage = self._add_action("ctx_lineage_explorer", "血缘/溯源浏览器… (Lineage)")
+        lineage.setEnabled(False)
+        lineage.setToolTip("需要数据目录桥接的资产")
 
         # 4. 标签 (Tags)
         add_tag = self._add_action("ctx_add_tag", "添加标签...")
@@ -214,12 +229,11 @@ class AssetContextMenu(QMenu):
         return action
 
     def _style_destructive(self, action: QAction) -> None:
-        remove_style = (
-            f"QMenu {{ color: {tokens.TEXT_PRIMARY}; }}"
-            f" QAction#ctx_remove {{ color: {tokens.ERROR_RED}; }}"
-            f" QAction#ctx_bulk_remove {{ color: {tokens.ERROR_RED}; }}"
+        """破坏性动作信号：红色删除图标（不再局部覆盖 QMenu 全局 QSS——
+        QAction 字面色规则在 QSS 中本就无效，反而截断全局菜单样式）。"""
+        action.setIcon(
+            workstation_icon("map/delete_selected.svg", tokens.ERROR_RED)
         )
-        self.setStyleSheet(remove_style)
 
     def find_action(self, object_name: str) -> QAction | None:
         if object_name in self._action_registry:

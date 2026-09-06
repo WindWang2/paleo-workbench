@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Mapping
 
 from PySide6.QtCore import Qt, Signal
+from paleo_workbench.ui.workstation.common import workstation_icon
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -61,7 +62,8 @@ class IdentifyResultsPanel(QFrame):
         title.setObjectName("WorkstationPanelFootnote")
         header.addWidget(title)
         header.addStretch(1)
-        clear_button = QLabel("✕", self)
+        clear_button = QLabel(self)
+        clear_button.setPixmap(workstation_icon("rb-clear.svg").pixmap(14, 14))
         clear_button.setToolTip("关闭识别结果")
         clear_button.setCursor(Qt.CursorShape.PointingHandCursor)
         clear_button.mousePressEvent = lambda _event: self.set_results(())

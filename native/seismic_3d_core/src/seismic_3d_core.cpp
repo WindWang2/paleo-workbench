@@ -256,6 +256,7 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
                 #if defined(_OPENMP)
                 #pragma omp parallel for schedule(static) if(total > kOmpMinParallelElems)
                 #endif
+                for (size_t k = 0; k < total; ++k) {
 #if defined(__GNUC__) || defined(__clang__)
                     // Prefetch bounds guard (#1188): same tail hazard as the
                     // extrema pass — skip the last 16 elements.

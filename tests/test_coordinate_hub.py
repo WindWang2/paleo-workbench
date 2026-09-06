@@ -203,7 +203,8 @@ class TestCoordinateTransformHubCrossDomain:
         assert nearest == "W-ALPHA"
         assert math.isclose(md, 1000.0, abs_tol=1e-4)
 
-        # Seismic location far from any well
+        # Seismic location far from any well: the MD is UNAVAILABLE (None),
+        # never the legacy 0.0 guess (L1 fail-closed contract).
         nearest_far, md_far = hub.seismic_to_well(500, 800, 1000.0, max_radius=20.0)
         assert nearest_far is None
-        assert md_far == 0.0
+        assert md_far is None

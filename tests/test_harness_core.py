@@ -114,7 +114,7 @@ def test_default_registry_has_domain_actions():
 # -------------------------------------------------------------- executor --
 def test_execute_unknown_action_fails_explicitly():
     result = HarnessExecutor(ActionRegistry()).execute("nope.nothing", {})
-    assert result.status == "fail"
+    assert result.status == "rejected"
     assert "unknown" in (result.error or "")
 
 
@@ -122,7 +122,7 @@ def test_execute_validates_parameters():
     registry = ActionRegistry()
     registry.register(_spec())
     result = HarnessExecutor(registry).execute("demo.answer", {})
-    assert result.status == "fail"
+    assert result.status == "rejected"
     assert "required" in result.error
 
 
@@ -149,7 +149,7 @@ def test_execute_rejects_nested_missing_required():
         )
     )
     result = HarnessExecutor(registry).execute("demo.nested", {"roi": {"il0": 0}})
-    assert result.status == "fail"
+    assert result.status == "rejected"
     assert "parameters.roi.il1" in result.error
 
 
@@ -174,7 +174,7 @@ def test_execute_rejects_nested_undeclared_property():
     )
     result = HarnessExecutor(registry).execute(
         "demo.closed", {"roi": {"il0": 0, "bogus": 1}})
-    assert result.status == "fail"
+    assert result.status == "rejected"
     assert "parameters.roi.bogus" in result.error
 
 
@@ -193,7 +193,7 @@ def test_execute_output_schema_mismatch_fails():
         )
     )
     result = HarnessExecutor(registry).execute("demo.out", {"x": 1.0})
-    assert result.status == "fail"
+    assert result.status == "failed"
     assert "output schema mismatch" in result.error
     registry2 = ActionRegistry()
     registry2.register(
@@ -208,7 +208,7 @@ def test_execute_output_schema_mismatch_fails():
         )
     )
     ok_result = HarnessExecutor(registry2).execute("demo.out2", {"x": 1.0})
-    assert ok_result.status == "ok"
+    assert ok_result.status == "success"
 
 
 def test_execute_permission_gate():
@@ -216,7 +216,7 @@ def test_execute_permission_gate():
     registry.register(_spec(action_id="demo.write", risk=ActionRisk.WRITE))
     context = ActionContext(permissions=frozenset({ActionRisk.READ}))
     result = HarnessExecutor(registry).execute("demo.write", {"x": 1.0}, context)
-    assert result.status == "fail"
+    assert result.status == "rejected"
     assert "permission" in result.error
 
 
@@ -226,7 +226,7 @@ def test_execute_required_context_gate():
         _spec(action_id="demo.need", required_context=("project",))
     )
     result = HarnessExecutor(registry).execute("demo.need", {"x": 1.0}, ActionContext())
-    assert result.status == "fail"
+    assert result.status == "rejected"
     assert "project" in result.error
 
 
@@ -234,7 +234,7 @@ def test_execute_happy_path_metrics():
     registry = ActionRegistry()
     registry.register(_spec())
     result = HarnessExecutor(registry).execute("demo.answer", {"x": 4.5})
-    assert result.status == "ok"
+    assert result.status == "success"
     assert result.outputs["value"] == 4.5
     assert result.elapsed_ms >= 0.0
 
@@ -246,7 +246,7 @@ def test_execute_handler_exception_isolated():
     registry = ActionRegistry()
     registry.register(_spec(action_id="demo.boom", handler=boom))
     result = HarnessExecutor(registry).execute("demo.boom", {"x": 1.0})
-    assert result.status == "fail"
+    assert result.status == "failed"
     assert "kaboom" in result.error
 
 
@@ -344,7 +344,7 @@ def test_output_schema_violation_fails_action():
         )
     )
     result = HarnessExecutor(registry).execute("demo.out", {"x": 4.5})
-    assert result.status == "fail"
+    assert result.status == "failed"
     assert "output.value" in result.error  # shape mismatch is explicit, never silent
 
 
@@ -358,10 +358,10 @@ def test_output_schema_satisfied_passes_and_absent_schema_unchanged():
         )
     )
     result = HarnessExecutor(registry).execute("demo.out_ok", {"x": 1.0})
-    assert result.status == "ok"
+    assert result.status == "success"
     # No output_schema declared → no output checking (backwards compatible).
     registry.register(_spec(action_id="demo.plain"))
-    assert HarnessExecutor(registry).execute("demo.plain", {"x": 1.0}).status == "ok"
+    assert HarnessExecutor(registry).execute("demo.plain", {"x": 1.0}).status == "success"
 
 
 # -------------------------------------------- #1180 degraded admission --
@@ -377,7 +377,7 @@ def test_admission_import_failure_fails_loud_and_marks_degraded(monkeypatch, cap
     try:
         with caplog.at_level("ERROR"):
             result = HarnessExecutor(registry).execute("demo.answer", {"x": 1.0})
-        assert result.status == "fail"
+        assert result.status == "failed"
         assert "without resource admission" in result.error
         assert harness_executor.ADMISSION_DEGRADED is True
         assert any("falling back" in r.message for r in caplog.records)
@@ -399,7 +399,7 @@ def test_admission_singleton_broken_degrades_to_default_budget(monkeypatch, capl
     try:
         with caplog.at_level("ERROR"):
             result = HarnessExecutor(registry).execute("demo.answer", {"x": 1.0})
-        assert result.status == "ok"  # ran — but through guarded fallback admission
+        assert result.status == "success"  # ran — but through guarded fallback admission
         assert harness_executor.ADMISSION_DEGRADED is True
         assert any("falling back" in r.message for r in caplog.records)
     finally:
@@ -418,7 +418,7 @@ def test_write_risk_actions_aligned_with_side_effects():
         result = HarnessExecutor(registry).execute(
             "map.create_factor_map", {"factor_name": "厚度"}, ActionContext()
         )
-        assert result.status == "fail"
+        assert result.status == "rejected"
         assert "permission" in result.error
     finally:
         set_action_registry(None)
@@ -672,7 +672,7 @@ def test_compute_attribute_rejects_paths_outside_workspace(tmp_path):
             {"attribute": "c3", "output_dir": "/definitely-outside/attr.zarr"},
             context,
         )
-        assert outside.status == "fail"
+        assert outside.status == "failed"
         assert "workspace" in outside.error
     finally:
         set_action_registry(None)

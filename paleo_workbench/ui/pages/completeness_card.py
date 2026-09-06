@@ -63,16 +63,11 @@ class DataCompletenessCard(QFrame):
             count = available.get(rtype, 0)
             unit = tokens.RESOURCE_UNITS.get(rtype, "")
             self.rows[i]["count"].setText(f"{count}{unit}")
-            if count > 0:
-                self.rows[i]["status"].setText("✓")
-                self.rows[i]["status"].setStyleSheet(
-                    f"color: {tokens.SUCCESS}; font-size: 14px; font-weight: 600;"
-                )
-            else:
-                self.rows[i]["status"].setText("✗")
-                self.rows[i]["status"].setStyleSheet(
-                    f"color: {tokens.ERROR_RED}; font-size: 14px; font-weight: 600;"
-                )
+            self.rows[i]["status"].setText("已就绪" if count > 0 else "缺失")
+            self.rows[i]["status"].setStyleSheet(
+                f"color: {tokens.SUCCESS if count > 0 else tokens.ERROR_RED};"
+                f" font-size: 11px; font-weight: 500;"
+            )
         if ready:
             self.summary_label.setText("数据完整")
             self.summary_label.setStyleSheet(

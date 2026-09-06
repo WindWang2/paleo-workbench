@@ -522,7 +522,7 @@ class GeologicalModeling3DPage(QWidget):
         self.demo_source_label = QLabel("合成演示数据 (Demo)")
         self.demo_source_label.setObjectName("DemoSourceLabel")
         self.demo_source_label.setStyleSheet(
-            "color: #b58900; font-weight: 600;"
+            f"color: {tokens.WARNING}; font-weight: 600;"
         )
         cfg_layout.addWidget(self.demo_source_label)
 
@@ -2938,8 +2938,9 @@ class GeologicalModeling3DPage(QWidget):
             chip.setText("域: Depth · 2D/3D 联动")
             chip.setStyleSheet(
                 "QLabel#Joint2DTimeChip {"
-                " color: #c2410c; background: #fff7ed; border: 1px solid #fed7aa;"
-                " border-radius: 999px; padding: 2px 8px; font-size: 11px; }"
+                " color: %s; background: %s; border: 1px solid %s; border-radius: 999px;"
+                " padding: 2px 8px; font-size: 11px; }"
+                % (tokens.WARNING, tokens.BG_SEARCH, tokens.ACCENT)
             )
         else:
             chip.setText("域: Time · 2D/3D 联动")

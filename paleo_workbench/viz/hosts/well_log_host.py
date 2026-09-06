@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
+    QDialogButtonBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -22,7 +23,22 @@ from geoviz import WellLogCanvas, build_qpainter_tracks
 
 from paleo_workbench import tokens
 from paleo_workbench.viz import welllog_engine_adapter as engine_adapter
+from paleo_workbench.ui import style
+from paleo_workbench.ui.workstation.common import workstation_icon
 from paleo_workbench.viz.models import VizPayload
+
+
+def _track_bar_sheet() -> str:
+    p = style.palette()
+    return (
+        f"QLabel {{ background: {p['BG_SEARCH']};"
+        f" border: 1px solid {p['BORDER']};"
+        f" border-radius: {tokens.RADIUS_BUTTON}px;"
+        f" padding: 6px 12px;"
+        f" color: {p['TEXT_SECONDARY']};"
+        f" font-size: {tokens.FONT_SIZE_BASE};"
+        f" font-weight: 500; }}"
+    )
 
 
 class TrackVisibilityDialog(QDialog):
@@ -70,10 +86,16 @@ class TrackVisibilityDialog(QDialog):
         btn_layout.addWidget(select_none_btn)
         btn_layout.addStretch()
 
-        ok_btn = QPushButton("确定", self)
-        ok_btn.setStyleSheet(f"background: {tokens.PRIMARY}; color: white; font-weight: bold;")
-        ok_btn.clicked.connect(self.accept)
-        btn_layout.addWidget(ok_btn)
+        # 标准按钮盒：主命令=确定（PrimaryButton），取消走全局 QSS
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        ok_btn.setObjectName("PrimaryButton")
+        ok_btn.setText("确定")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        btn_layout.addWidget(buttons)
 
         layout.addLayout(btn_layout)
 
@@ -110,7 +132,11 @@ class WellLogHost:
     def __init__(self) -> None:
         self.widget = QFrame()
         self.widget.setObjectName("WellLogHostContainer")
-        self.widget.setStyleSheet("QFrame#WellLogHostContainer { background-color: #ffffff; }")
+        style.bind(
+            self.widget,
+            lambda: "QFrame#WellLogHostContainer { background-color:"
+                    f" {style.palette()['BG_SIDEBAR']}; }}",
+        )
         self.widget.setAutoFillBackground(True)
         self.widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.widget.setMinimumSize(100, 100)
@@ -136,28 +162,13 @@ class WellLogHost:
 
         self.track_bar = QLabel("测井道列表: 未加载数据")
         self.track_bar.setObjectName("WellLogTrackBar")
-        self.track_bar.setStyleSheet(
-            f"QLabel {{ background: {tokens.BG_SEARCH};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px;"
-            f" padding: 6px 12px;"
-            f" color: {tokens.TEXT_SECONDARY};"
-            f" font-size: {tokens.FONT_SIZE_BASE};"
-            f" font-weight: 500; }}"
-        )
+        style.bind(self.track_bar, _track_bar_sheet)
         self.track_bar.setWordWrap(True)
         header_layout.addWidget(self.track_bar, 1)
 
-        self.settings_btn = QPushButton("⚙️ 设置显示井道")
-        self.settings_btn.setStyleSheet(
-            f"QPushButton {{ background: {tokens.BG_HEADER};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px;"
-            f" padding: 6px 12px;"
-            f" color: {tokens.TEXT_PRIMARY};"
-            f" font-weight: 600; }}"
-            f"QPushButton:hover {{ background: {tokens.BG_SEARCH}; border-color: {tokens.PRIMARY}; }}"
-        )
+        self.settings_btn = QPushButton("设置显示井道")
+        self.settings_btn.setObjectName("SecondaryButton")
+        self.settings_btn.setIcon(workstation_icon("rb-settings.svg"))
         self.settings_btn.clicked.connect(self._open_track_settings)
         header_layout.addWidget(self.settings_btn)
 
@@ -172,9 +183,11 @@ class WellLogHost:
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.scroll_area.setMinimumSize(100, 100)
-        self.scroll_area.setStyleSheet(
-            f"QScrollArea#WellLogScrollArea {{ border: 1px solid {tokens.BORDER};"
-            f" background-color: #ffffff; }}"
+        style.bind(
+            self.scroll_area,
+            lambda: "QScrollArea#WellLogScrollArea {"
+                    f" border: 1px solid {style.palette()['BORDER']};"
+                    f" background-color: {style.palette()['BG_SIDEBAR']}; }}",
         )
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -189,6 +202,8 @@ class WellLogHost:
         engine_layout = QVBoxLayout(self.engine_host)
         engine_layout.setContentsMargins(0, 0, 0, 0)
         self.engine_placeholder = QLabel("WellLogEngine 不可用，已使用 Legacy (QPainter)")
+        self.engine_placeholder.setObjectName("PwbStateHint")
+        self.engine_placeholder.setAlignment(self.engine_placeholder.alignment())
         self.engine_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.engine_placeholder.setWordWrap(True)
         engine_layout.addWidget(self.engine_placeholder)

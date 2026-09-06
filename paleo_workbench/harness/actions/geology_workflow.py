@@ -39,6 +39,8 @@ def register(registry) -> None:
     registry.register(
         ActionSpec(
             action_id="geology.create_interpretation",
+            side_effect_notes="session-scope draft appended to the project document; save=true persists through the fault lifecycle with a catalog version",
+            output_schema={"type": "object", "properties": {"saved": {"type": "boolean"}, "interpretation_id": {"type": ["string", "null"]}, "trace_count": {"type": "integer"}}, "required": ["saved"]},
             description="创建断层解释草稿并入库（真实 fault lifecycle：draft→项目引用→catalog 版本），带溯源。",
             handler=_create_fault_interpretation,
             risk=ActionRisk.WRITE,
@@ -142,12 +144,11 @@ def _create_fault_interpretation(context: ActionContext, parameters: dict) -> di
 
 
 def _workflow_status(context: ActionContext, parameters: dict) -> dict:
-    try:
-        from paleo_workbench.workflow.service import dashboard_state
+    # Honesty (#847 family): a failing status projection is a FAILED action,
+    # never a success-shaped payload hiding an "error" key.
+    from paleo_workbench.workflow.service import dashboard_state
 
-        state = dashboard_state(context.project)
-    except Exception as exc:
-        return {"error": f"{type(exc).__name__}: {exc}"}
+    state = dashboard_state(context.project)
     if isinstance(state, dict):
         return {"dashboard": state}
     return {"dashboard": getattr(state, "to_dict", lambda: str(state))()}

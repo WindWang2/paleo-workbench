@@ -64,9 +64,15 @@ class _RecordingPanel(QObject):
         self.backend_calls: list[str] = []
         self.shown: list[object] = []
         self.shutdown_calls = 0
+        self.cleared: list = []
+        self.shutdown_wait_ms: list[int] = []
 
     def backend(self) -> str:
         return self.backend_name
+
+    def current_well_name(self) -> str:
+        # the dock opened A12 onto this panel (see open_well test flow)
+        return "A12" if self.shown else ""
 
     def set_backend(self, name: str) -> None:
         self.backend_calls.append(name)
@@ -75,8 +81,12 @@ class _RecordingPanel(QObject):
     def show_resource(self, resource, project, prediction_task=None) -> None:
         self.shown.append(resource)
 
-    def shutdown(self) -> None:
+    def update_state(self, task, project=None) -> None:
+        self.cleared.append(task)
+
+    def shutdown(self, wait_ms: int = 3000) -> None:
         self.shutdown_calls += 1
+        self.shutdown_wait_ms.append(wait_ms)
 
 
 def _dock_with_recording_panel(qtbot, tmp_path: Path) -> LinkedInterpretationWorkspace:
@@ -149,13 +159,15 @@ def test_dock_resolves_to_engine_and_renders_native_when_binding_available(
     assert panel.backend() == "engine"
     assert panel.is_native_backend() is True
     assert lw.well_backend_note() is None
-    # engine 生效时不得谎报回退；唯一允许的状态是深度游标能力说明
-    # （engine 绑定尚无 hover 接口——诚实声明，不是回退谎言）。
+    # engine 生效时不得谎报回退。L2 起 engine 绑定带 crosshair 通道，
+    # 深度游标联动真实可用：不得再出现任何"联动不可用"的降级说明；
+    # （只有绑定真的缺通道时才允许那条诚实声明——本测试的绑定已具备）。
     fallback_lies = [
         m for m in statuses if "Legacy 渲染" in m or "回退" in m
     ]
     assert fallback_lies == [], f"engine 生效时不得谎报回退: {fallback_lies}"
-    assert any("深度游标联动暂不可用" in m for m in statuses)
+    assert not any("联动" in m and "不可用" in m for m in statuses)
+    assert panel.depth_cursor_supported() is True
 
     # End to end: the dock's engine path really hands data to the native view.
     project = _project(tmp_path)
@@ -307,3 +319,26 @@ def test_open_well_selection_linkage_signals_unchanged(qtbot, tmp_path, monkeypa
     lw.show_all_wells()
     assert statuses[-1] == "已显示全部工区井位"
     lw.shutdown_workers()
+
+
+def test_open_well_without_log_resource_never_misattributes(qtbot, tmp_path):
+    """R3-M1: a well without a log resource clears the panel and refuses
+    the active-well slot — the previous well's curves must never receive
+    the new well's link cursor."""
+    project = _project(tmp_path)
+    project.wells.append(
+        WellEntity(name="B99", surface_x=3.0, surface_y=4.0, project_x=3.0, project_y=4.0)
+    )  # B99 has NO well_log resource
+    lw = LinkedInterpretationWorkspace(project)
+    qtbot.addWidget(lw)
+    lw.well_panel = _RecordingPanel()
+    lw._views_created = True
+
+    lw.open_well("A12")
+    assert lw.well_panel.shown  # A12 has a resource
+    assert lw._active_well_name == "A12"
+
+    lw.open_well("B99")
+    assert lw.well_panel.cleared == [None]  # panel cleared, not left showing A12
+    assert lw._active_well_name == ""  # link cursor matching refuses
+    assert lw.apply_link_cursor("B99", 100.0) is False

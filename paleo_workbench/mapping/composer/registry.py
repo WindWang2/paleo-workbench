@@ -327,6 +327,36 @@ def _build_registry() -> dict[ElementType, ComponentSpec]:
              {"name": "font_size", "label": "字号", "type": "number", "min": 1.0, "max": 24.0}),
             "text",
         ),
+        _spec(
+            ElementType.SUBTITLE, "副标题", CATEGORY_BASIC,
+            (60.0, 8.0, 120.0, 6.0),
+            {"text": "T1 层沉积相图", "font_size": 4.0, "align": "center",
+             "color": "#333333"},
+            ({"name": "text", "label": "副标题文本", "type": "text"},
+             {"name": "font_size", "label": "字号", "type": "number", "min": 1.0, "max": 24.0},
+             {"name": "align", "label": "对齐", "type": "choices",
+              "choices": ["left", "center", "right"]},
+             {"name": "color", "label": "颜色", "type": "str"}),
+            "subtitle",
+        ),
+        _spec(
+            ElementType.WELL_LEGEND, "测井图例", CATEGORY_GEOLOGICAL,
+            (210.0, 100.0, 70.0, 50.0),
+            # 绑定井数据前仅占位（M6 契约），不伪造符号项。
+            {"title": "测井图例", "items": ()},
+            ({"name": "title", "label": "标题", "type": "str"},
+             {"name": "items", "label": "图例项 (JSON)", "type": "list"}),
+            "well_legend",
+        ),
+        _spec(
+            ElementType.PROFILE, "剖面占位", CATEGORY_GEOLOGICAL,
+            (30.0, 168.0, 90.0, 30.0),
+            # 绑定真实剖面前仅画占位框（section_ref 为空）。
+            {"section_ref": "", "title": "剖面"},
+            ({"name": "section_ref", "label": "剖面引用", "type": "str"},
+             {"name": "title", "label": "标题", "type": "str"}),
+            "profile",
+        ),
         # ---- 统计图（B6）----------------------------------------------
         # series 形态因 chart_type 而异（CHART_SERIES_SCHEMAS 为描述源）：
         # 编辑面板对 [{label, value}] 形态用表格编辑器，其余形态自动退化

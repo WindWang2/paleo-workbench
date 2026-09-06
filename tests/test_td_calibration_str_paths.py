@@ -81,8 +81,10 @@ def test_entity_asset_link_str_path_registers_calibration(
     ]
     monkeypatch.setattr(
         vc_module.ViewCoordinationController,
-        "_resolve_asset_path",
-        staticmethod(lambda project, asset_id: str(td_table)),
+        "_resolve_asset_version",
+        # identity dict is optional — a resolver without catalog metadata
+        # still yields a registrable str path
+        staticmethod(lambda project, asset_id: (str(td_table), {})),
     )
 
     controller.bind_project(doc)  # used to AttributeError on path.name

@@ -58,58 +58,15 @@ _COORDINATE_KEY_FAMILIES: tuple[tuple[str, str, str], ...] = (
 )
 
 
-# Factor property defaults (units and recommended color ramps)
-FACTOR_DEFAULTS = {
-    "孔隙度": {"unit": "%", "color_ramp": "porosity"},
-    "porosity": {"unit": "%", "color_ramp": "porosity"},
-    "POR": {"unit": "%", "color_ramp": "porosity"},
-    "PORO": {"unit": "%", "color_ramp": "porosity"},
-    "PHIE": {"unit": "%", "color_ramp": "porosity"},
-    "PHIT": {"unit": "%", "color_ramp": "porosity"},
-    "渗透率": {"unit": "mD", "color_ramp": "permeability"},
-    "permeability": {"unit": "mD", "color_ramp": "permeability"},
-    "PERM": {"unit": "mD", "color_ramp": "permeability"},
-    "PERMEABILITY": {"unit": "mD", "color_ramp": "permeability"},
-    "K": {"unit": "mD", "color_ramp": "permeability"},
-    "有效厚度": {"unit": "m", "color_ramp": "sand_thickness"},
-    "net_pay": {"unit": "m", "color_ramp": "sand_thickness"},
-    "NET_PAY": {"unit": "m", "color_ramp": "sand_thickness"},
-    "净产层厚度": {"unit": "m", "color_ramp": "sand_thickness"},
-    "H_pay": {"unit": "m", "color_ramp": "sand_thickness"},
-    "H_net": {"unit": "m", "color_ramp": "sand_thickness"},
-    "PAY_THICKNESS": {"unit": "m", "color_ramp": "sand_thickness"},
-    "地层厚度": {"unit": "m", "color_ramp": "thickness"},
-    "formation_thickness": {"unit": "m", "color_ramp": "thickness"},
-    "thickness": {"unit": "m", "color_ramp": "thickness"},
-    "H_t": {"unit": "m", "color_ramp": "thickness"},
-    "TOTAL_THICKNESS": {"unit": "m", "color_ramp": "thickness"},
-    "砂岩厚度": {"unit": "m", "color_ramp": "sand_thickness"},
-    "sand_thickness": {"unit": "m", "color_ramp": "sand_thickness"},
-    "H_s": {"unit": "m", "color_ramp": "sand_thickness"},
-    "SAND_THICKNESS": {"unit": "m", "color_ramp": "sand_thickness"},
-    "砂地比": {"unit": "%", "color_ramp": "sand_thickness"},
-    "sand_ratio": {"unit": "%", "color_ramp": "sand_thickness"},
-    "R_s": {"unit": "%", "color_ramp": "sand_thickness"},
-    "SAND_RATIO": {"unit": "%", "color_ramp": "sand_thickness"},
-    "地层顶界": {"unit": "m", "color_ramp": "elevation"},
-    "顶界深度": {"unit": "m", "color_ramp": "elevation"},
-    "top_depth": {"unit": "m", "color_ramp": "elevation"},
-    "top_md": {"unit": "m", "color_ramp": "elevation"},
-    "top_tvd": {"unit": "m", "color_ramp": "elevation"},
-    "TOP": {"unit": "m", "color_ramp": "elevation"},
-    "TOP_DEPTH": {"unit": "m", "color_ramp": "elevation"},
-    "地层底界": {"unit": "m", "color_ramp": "elevation"},
-    "底界深度": {"unit": "m", "color_ramp": "elevation"},
-    "base_depth": {"unit": "m", "color_ramp": "elevation"},
-    "base_md": {"unit": "m", "color_ramp": "elevation"},
-    "base_tvd": {"unit": "m", "color_ramp": "elevation"},
-    "BASE": {"unit": "m", "color_ramp": "elevation"},
-    "BASE_DEPTH": {"unit": "m", "color_ramp": "elevation"},
-    "TOC": {"unit": "%", "color_ramp": "toc"},
-    "toc": {"unit": "%", "color_ramp": "toc"},
-    "古水深": {"unit": "m", "color_ramp": "water_depth"},
-    "water_depth": {"unit": "m", "color_ramp": "water_depth"},
-}
+# Factor property defaults (units and recommended color ramps) live in the
+# workflow leaf module ``factor_units`` (single authority for the whole chain:
+# workflow task pipeline and this mapping pipeline must resolve identical
+# units); re-exported here for backwards compatibility.
+from paleo_workbench.workflow.factor_units import (  # noqa: E402
+    DERIVED_FORMATION_THICKNESS_RULE,
+    DERIVED_SAND_RATIO_RULE,
+    FACTOR_DEFAULTS,
+)
 
 _FACTOR_ALIAS_GROUPS: dict[str, tuple[str, ...]] = {
     "porosity": ("porosity", "por", "poro", "phie", "phit", "孔隙度"),
@@ -178,6 +135,7 @@ class GeologicalMappingPipeline:
         points: list[GeologicalFactor] = []
         skipped_missing_coordinates = 0
         skipped_invalid_coordinates = 0
+        derived_points = 0
         coord_families_used: dict[str, int] = {}
         for rec in records:
             if not isinstance(rec, Mapping):
@@ -255,7 +213,11 @@ class GeologicalMappingPipeline:
                     if val is not None:
                         break
 
-            # Derived factor calculations
+            # Derived factor calculations (D11): an explicitly derived value is
+            # legal, but it must carry a ``derived`` provenance marker so it can
+            # never masquerade as a measured value downstream.
+            derived_rule: str | None = None
+            derived_sources: dict[str, Any] | None = None
             if val is None:
                 norm_factor = factor_name.lower()
                 rec_lower = {str(k).lower(): v for k, v in rec.items()}
@@ -264,19 +226,24 @@ class GeologicalMappingPipeline:
                     thick_aliases = _find_matching_aliases("formation_thickness")
                     hs = None
                     ht = None
+                    hs_key = ht_key = None
                     for sa in sand_aliases:
                         if sa.lower() in rec_lower:
                             hs = rec_lower[sa.lower()]
+                            hs_key = sa
                             break
                     for ta in thick_aliases:
                         if ta.lower() in rec_lower:
                             ht = rec_lower[ta.lower()]
+                            ht_key = ta
                             break
                     if hs is not None and ht is not None:
                         try:
                             f_hs, f_ht = float(hs), float(ht)
                             if f_ht > 0:
                                 val = f_hs / f_ht
+                                derived_rule = DERIVED_SAND_RATIO_RULE
+                                derived_sources = {"H_s": hs_key, "H_t": ht_key}
                         except (TypeError, ValueError):
                             pass
                 elif norm_factor in ("地层厚度", "formation_thickness", "thickness", "h_t", "total_thickness"):
@@ -284,19 +251,24 @@ class GeologicalMappingPipeline:
                     top_aliases = _find_matching_aliases("top_depth")
                     base = None
                     top = None
+                    base_key = top_key = None
                     for ba in base_aliases:
                         if ba.lower() in rec_lower:
                             base = rec_lower[ba.lower()]
+                            base_key = ba
                             break
                     for ta in top_aliases:
                         if ta.lower() in rec_lower:
                             top = rec_lower[ta.lower()]
+                            top_key = ta
                             break
                     if base is not None and top is not None:
                         try:
                             f_base, f_top = float(base), float(top)
                             if f_base > f_top:
                                 val = f_base - f_top
+                                derived_rule = DERIVED_FORMATION_THICKNESS_RULE
+                                derived_sources = {"base": base_key, "top": top_key}
                         except (TypeError, ValueError):
                             pass
 
@@ -312,6 +284,14 @@ class GeologicalMappingPipeline:
             qc_flag = str(rec.get("qc_flag") or "ok")
             formation = str(rec.get("formation") or rec.get("target_horizon") or target_horizon)
 
+            point_metadata = dict(rec.get("properties") or {})
+            if derived_rule is not None:
+                point_metadata["derived"] = {
+                    "rule": derived_rule,
+                    "sources": derived_sources,
+                }
+                derived_points += 1
+
             points.append(
                 GeologicalFactor(
                     name=factor_name,
@@ -324,7 +304,7 @@ class GeologicalMappingPipeline:
                     crs=crs,
                     formation=formation,
                     qc_flag=qc_flag,
-                    metadata=dict(rec.get("properties") or {}),
+                    metadata=point_metadata,
                 )
             )
 
@@ -334,6 +314,7 @@ class GeologicalMappingPipeline:
             "coordinate_key_families_used": coord_families_used,
             "skipped_missing_coordinates": skipped_missing_coordinates,
             "skipped_invalid_coordinates": skipped_invalid_coordinates,
+            "derived_points": derived_points,
         }
         if len(coord_families_used) > 1:
             diagnostics["coordinate_key_family_mixing"] = True
@@ -380,7 +361,7 @@ class GeologicalMappingPipeline:
             grid_result=grid_result,
             color_ramp_name=ramp_name,
             opacity=opacity,
-            crs=grid_result.crs or "EPSG:4326",
+            crs=grid_result.crs or "",
             unit=grid_result.unit or "",
         )
 
@@ -391,6 +372,7 @@ class GeologicalMappingPipeline:
         interval: float | None = None,
         layer_id: str | None = None,
         name: str | None = None,
+        clip_ring: list[list[float]] | None = None,
     ) -> ContourMapLayer:
         """Extract and generate a standard GIS ContourMapLayer."""
         return generate_contour_layer(
@@ -399,6 +381,7 @@ class GeologicalMappingPipeline:
             interval=interval,
             layer_id=layer_id,
             name=name,
+            clip_ring=clip_ring,
         )
 
     def create_well_point_layer(
@@ -458,6 +441,8 @@ class GeologicalMappingPipeline:
         colors: list[str] | None = None,
         layer_id: str | None = None,
         name: str | None = None,
+        min_area: float | None = None,
+        clip_ring: list[list[float]] | None = None,
     ) -> PolygonMapLayer:
         """Classify grid and generate a standard GIS PolygonMapLayer."""
         return generate_facies_polygon_layer(
@@ -467,6 +452,8 @@ class GeologicalMappingPipeline:
             colors=colors,
             layer_id=layer_id,
             name=name,
+            min_area=min_area,
+            clip_ring=clip_ring,
         )
 
     def build_factor_map_document(

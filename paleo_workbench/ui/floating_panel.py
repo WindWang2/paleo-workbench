@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
+from paleo_workbench.ui.workstation.common import workstation_icon
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -65,12 +66,12 @@ class FloatingPanel(QWidget):
         bar_layout.addWidget(self.title_label)
         bar_layout.addStretch(1)
         self.dock_back_button = QToolButton(title_bar)
-        self.dock_back_button.setText("⇲")
+        self.dock_back_button.setIcon(workstation_icon("pane-restore.svg"))
         self.dock_back_button.setToolTip("停靠回原位 (Dock back)")
         self.dock_back_button.clicked.connect(self._emit_dock_back)
         bar_layout.addWidget(self.dock_back_button)
         self.close_button = QToolButton(title_bar)
-        self.close_button.setText("✕")
+        self.close_button.setIcon(workstation_icon("rb-clear.svg"))
         self.close_button.setToolTip("隐藏浮动面板 (Hide)")
         self.close_button.clicked.connect(self.close)
         bar_layout.addWidget(self.close_button)

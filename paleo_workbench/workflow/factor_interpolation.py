@@ -45,6 +45,7 @@ from paleo_workbench.project.factor_grid_artifacts import (
     GRID_ARRAY_PARAMETER_KEYS,
     clear_live_factor_grid,
     intern_grid_axes,
+    peek_live_factor_grid,
     store_live_factor_grid,
 )
 from paleo_workbench.project.models import FactorMapTask, ProjectDocument
@@ -57,10 +58,19 @@ from paleo_workbench.workflow.constraints import (
     constraint_layers_for_project,
     direction_line_params,
 )
+from paleo_workbench.workflow.crs_policy import resolve_distance_policy
 from paleo_workbench.workflow.factor_grid_result import (
     FactorGridResult,
     encode_legacy_axis_list,
     encode_legacy_grid_lists,
+)
+from paleo_workbench.workflow.factor_units import unit_for_factor
+from paleo_workbench.workflow.interpolation_evaluation import (
+    CrossValidationReport,
+    cross_validate_surface,
+    kriging_diagnostics,
+    kriging_leave_one_out,
+    surface_residuals,
 )
 from paleo_workbench.workflow.interpolation_fingerprint import (
     FactorDirtyState,
@@ -121,6 +131,20 @@ METHOD_LABEL_TO_ENGINE = {
 def _snapshot_hash(payload: dict[str, Any]) -> str:
     encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _declared_unit_for_task(task: FactorMapTask) -> str | None:
+    """Unit travelling with this task's grid result (M1 unit propagation).
+
+    An explicit ``parameters["unit"]`` declaration wins; otherwise the factor
+    defaults authority resolves a known mnemonic. ``None`` means undeclared —
+    never guessed from the value range.
+    """
+    params = task.parameters or {}
+    declared = params.get("unit")
+    if declared is not None:
+        return str(declared) or None
+    return unit_for_factor(task.factor_type or task.name)
 
 
 def _legacy_params_from_grid_result(
@@ -196,6 +220,15 @@ def _attach_result_to_task(
         for key, value in fingerprints.to_dict().items():
             grid_result.algorithm_parameters[key] = value
 
+    # D5: the planar-distance assumption must travel with the result — a
+    # geographic CRS silently treated as metres is exactly the failure mode
+    # this annotation makes visible (task metrics + grid parameters + QA).
+    policy = resolve_distance_policy(
+        grid_result.crs, (task.parameters or {}).get("distance_policy")
+    )
+    grid_result.algorithm_parameters["distance_policy"] = policy["policy"]
+    grid_result.algorithm_parameters["distance_policy_annotation"] = policy["annotation"]
+
     clear_live_factor_grid(task.id)
     store_live_factor_grid(task.id, grid_result)
 
@@ -250,7 +283,13 @@ def _attach_result_to_task(
         "n_points": result["n_points"],
         "backend": result["backend"],
         "mean": round(result["mean"], 4),
+        "distance_policy": policy["policy"],
     }
+    if policy["warning"]:
+        task.quality_metrics["distance_warning"] = policy["warning"]
+    declared_unit = grid_result.unit
+    if declared_unit is not None:
+        task.quality_metrics["unit"] = declared_unit
     if result.get("duplicate_wells_dropped"):
         task.quality_metrics["duplicate_wells_dropped"] = int(
             result["duplicate_wells_dropped"]
@@ -427,6 +466,7 @@ def apply_interpolation_to_task(
             },
             factor_name=task.factor_type or task.name,
             crs=crs,
+            unit=_declared_unit_for_task(task),
             generator_version=GENERATOR_VERSION,
             source_refs=task.input_resource_ids,
         )
@@ -458,6 +498,7 @@ def apply_interpolation_to_task(
             result,
             factor_name=task.factor_type or task.name,
             crs=crs,
+            unit=_declared_unit_for_task(task),
             generator_version=GENERATOR_VERSION,
             source_refs=task.input_resource_ids,
         )
@@ -477,6 +518,7 @@ def apply_interpolation_to_task(
             result,
             factor_name=task.factor_type or task.name,
             crs=crs,
+            unit=_declared_unit_for_task(task),
             generator_version=GENERATOR_VERSION,
             source_refs=task.input_resource_ids,
         )
@@ -734,6 +776,7 @@ def batch_prepare_factor_maps(
                         },
                         factor_name=task.factor_type or task.name,
                         crs=crs,
+                        unit=_declared_unit_for_task(task),
                         generator_version=GENERATOR_VERSION,
                         source_refs=task.input_resource_ids,
                     )
@@ -775,3 +818,189 @@ def batch_prepare_factor_maps(
                 fingerprint_memo=fp_memo,
             )
     return prepared
+
+
+# --------------------------------------------------------------------------- #
+# M2 workstation V2 — accuracy evaluation attached to a prepared task
+# --------------------------------------------------------------------------- #
+
+
+def _engine_run_fold_for_task(
+    task: FactorMapTask,
+    *,
+    engine_method: str,
+    grid_n: int,
+    power: float,
+    breaks: list | None,
+    az: float,
+    a_axis: float,
+    b_axis: float,
+    layers,
+    target_horizon: str | None,
+    cancellation_token,
+):
+    """Build the production-mirroring ``run_fold(points)`` closure for CV.
+
+    The closure routes through the SAME engine entry the real interpolation
+    uses, so cross-validation scores the production maths, never a lookalike.
+    """
+    if engine_method == CONSTRAINED_IDW_ENGINE_LABEL:
+        # Local import keeps the heavy vendored engine off the module path
+        # unless a constrained task is actually cross-validated.
+        from paleo_workbench.workflow.constrained_idw_adapter import run_constrained_idw
+
+        def run_fold(train_points):
+            result = run_constrained_idw(
+                list(train_points),
+                grid_n=grid_n,
+                power=power,
+                layers=layers,
+                target_horizon=target_horizon,
+                break_polylines=breaks,
+                cancellation_token=cancellation_token,
+            )
+            return result["grid_x"], result["grid_y"], result["grid_z"]
+
+        return run_fold
+
+    def run_fold(train_points):
+        result = interpolate_factor_grid(
+            list(train_points),
+            method=engine_method,
+            grid_n=grid_n,
+            power=power,
+            fault_polylines=breaks,
+            azimuth_deg=az,
+            semi_major=a_axis,
+            semi_minor=b_axis,
+            cancellation_token=cancellation_token,
+        )
+        return result["grid_x"], result["grid_y"], result["grid_z"]
+
+    return run_fold
+
+
+def cross_validate_factor_task(
+    task: FactorMapTask,
+    *,
+    project: ProjectDocument | None = None,
+    k: int = 4,
+    cancellation_token=None,
+    include_diagnostics: bool = False,
+) -> tuple[CrossValidationReport | None, dict[str, Any] | None]:
+    """Cross-validate ONE task's factor surface with its own production settings.
+
+    Kriging uses the exact closed-form LOO (scheme ``loo_exact``); every other
+    method uses deterministic spatial K-fold surface CV through the production
+    engine path. Returns ``(report, kriging_diagnostics)``; ``report`` is
+    ``None`` when there is too little data to evaluate honestly.
+    """
+    params = dict(task.parameters or {})
+    points = params.get("sample_points") or []
+    method, recorded_grid_n, power = interpolation_params_from_task(task)
+    engine_method = METHOD_LABEL_TO_ENGINE.get(method, method)
+    grid_n = recorded_grid_n if recorded_grid_n else DEFAULT_GRID_N
+
+    breaks = None
+    az, a_axis, b_axis = 0.0, 1.0, 0.4
+    layers = None
+    if project is not None:
+        layers = constraint_layers_for_project(
+            project, target_horizon=task.target_horizon
+        )
+        breaks = break_polylines_for_idw(layers, target_horizon=task.target_horizon)
+        az, a_axis, b_axis = resolve_anisotropy_params(
+            direction_line_params(layers, target_horizon=task.target_horizon)
+        )
+
+    diagnostics: dict[str, Any] | None = None
+    if engine_method == "kriging":
+        report = kriging_leave_one_out(
+            points, cancellation_token=cancellation_token
+        )
+        if report is not None:
+            report.method = method
+        if include_diagnostics:
+            diagnostics = kriging_diagnostics(points)
+        return report, diagnostics
+
+    report = cross_validate_surface(
+        points,
+        run_fold=_engine_run_fold_for_task(
+            task,
+            engine_method=engine_method,
+            grid_n=grid_n,
+            power=power,
+            breaks=breaks,
+            az=az,
+            a_axis=a_axis,
+            b_axis=b_axis,
+            layers=layers,
+            target_horizon=task.target_horizon,
+            cancellation_token=cancellation_token,
+        ),
+        k=k,
+        method_label=method,
+        engine=engine_method,
+        cancellation_token=cancellation_token,
+    )
+    return report, None
+
+
+def attach_surface_check(
+    task: FactorMapTask,
+) -> dict[str, Any] | None:
+    """Record how the delivered surface reproduces its own sample points.
+
+    In-sample by definition (anchoring fidelity for re-anchoring engines) —
+    stored under ``surface_check`` and never presented as cross-validated
+    accuracy.
+    """
+    grid = peek_live_factor_grid(task.id)
+    if grid is None:
+        return None
+    points = (task.parameters or {}).get("sample_points") or []
+    records, metrics = surface_residuals(points, grid.grid_x, grid.grid_y, grid.grid_z)
+    payload = {
+        "kind": "in_sample_surface_check",
+        **metrics.to_dict(),
+        "residuals": records,
+    }
+    task.quality_metrics["surface_check"] = {
+        key: value for key, value in payload.items() if key != "residuals"
+    }
+    task.quality_metrics["surface_residuals"] = records
+    return payload
+
+
+def attach_cross_validation(
+    task: FactorMapTask,
+    *,
+    project: ProjectDocument | None = None,
+    k: int = 4,
+    cancellation_token=None,
+    include_diagnostics: bool = False,
+) -> CrossValidationReport | None:
+    """Evaluate a prepared task and write RMSE/MAE/bias + CV into its metrics.
+
+    The production ``r_squared`` key keeps its existing meaning (whoever set
+    it wins); cross-validated metrics land under ``cv`` / ``cv_rmse`` /
+    ``cv_mae`` / ``cv_bias`` so the two are never conflated.
+    """
+    report, diagnostics = cross_validate_factor_task(
+        task,
+        project=project,
+        k=k,
+        cancellation_token=cancellation_token,
+        include_diagnostics=include_diagnostics,
+    )
+    if report is not None:
+        task.quality_metrics["cv"] = report.to_dict()
+        metrics = report.metrics.to_dict()
+        for key in ("rmse", "mae", "bias"):
+            if metrics.get(key) is not None:
+                task.quality_metrics[f"cv_{key}"] = round(metrics[key], 6)
+    if diagnostics is not None:
+        task.quality_metrics["kriging_diagnostics"] = diagnostics
+    attach_surface_check(task)
+    return report

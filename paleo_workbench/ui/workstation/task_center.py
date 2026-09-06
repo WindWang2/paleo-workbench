@@ -37,14 +37,20 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench import tokens
+from paleo_workbench.ui.components.states import PwbEmptyState
 
-_STATE_COLORS = {
-    "queued": tokens.TEXT_SECONDARY,
-    "running": tokens.WARNING,
-    "done": tokens.SUCCESS,
-    "failed": tokens.ERROR_RED,
-    "cancelled": tokens.TEXT_SECONDARY,
-}
+def _state_colors() -> dict[str, str]:
+    """状态→前景色，每调用取当前主题调色板（此前 import 时快照 light 值）。"""
+    from paleo_workbench.ui.style import palette
+
+    p = palette()
+    return {
+        "queued": p["TEXT_SECONDARY"],
+        "running": p["WARNING"],
+        "done": p["SUCCESS"],
+        "failed": p["ERROR_RED"],
+        "cancelled": p["TEXT_SECONDARY"],
+    }
 
 _MAX_ROWS = 100
 # 列：状态 / 任务 / 进度 / 用时 / 操作
@@ -105,7 +111,9 @@ class _TaskTableModel(QAbstractItemModel):
                     )
                 )
         if role == Qt.ItemDataRole.ForegroundRole and column == _COL_STATE:
-            return QColor(_STATE_COLORS.get(self._state_key(handle), tokens.TEXT_PRIMARY))
+            from paleo_workbench.ui.style import palette as _palette
+
+            return QColor(_state_colors().get(self._state_key(handle), _palette()["TEXT_PRIMARY"]))
         if role == Qt.ItemDataRole.ToolTipRole and column == _COL_TITLE:
             return handle.message or handle.error or handle.task_id
         return None
@@ -211,9 +219,9 @@ class _TaskRowDelegate(QStyledItemDelegate):
             rect = option.rect.adjusted(4, 4, -4, -4)
             progress = max(0, min(100, round(handle.progress * 100)))
             from paleo_workbench.ui.theme import theme_manager
-            from paleo_workbench import tokens as _tokens
+            from paleo_workbench import tokens
 
-            pal = _tokens.palette_for(theme_manager.current_theme.value)
+            pal = tokens.palette_for(theme_manager.current_theme.value)
             if handle.state is TaskState.FAILED:
                 painter.setPen(QColor(pal["ERROR_RED"]))
                 painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "失败")
@@ -325,11 +333,36 @@ class TaskCenter(QFrame):
         self.tree.selectionModel().selectionChanged.connect(self._remember_selection)
         outer.addWidget(self.tree, 1)
 
+        # V5-C9：空任务表的统一空态（此前是空白网格）
+        self._empty_state = PwbEmptyState(
+            "暂无任务",
+            "提交制备 / 预测 / 转码等任务后将在此显示进度与状态",
+        )
+        self._empty_state.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._empty_state.setParent(self.tree)
+        self._empty_state.hide()
+        self.model.rowsInserted.connect(self._update_empty_state)
+        self.model.rowsRemoved.connect(self._update_empty_state)
+        self.model.modelReset.connect(self._update_empty_state)
+
         self.timer = QTimer(self)
         self.timer.setInterval(400)
         self.timer.timeout.connect(self.refresh)
         self.timer.start()
         self.refresh()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        if self._empty_state.isVisible():
+            self._empty_state.setGeometry(self.tree.viewport().rect())
+
+    def _update_empty_state(self, *_args) -> None:
+        if self.model.rowCount() == 0:
+            self._empty_state.setGeometry(self.tree.viewport().rect())
+            self._empty_state.show()
+            self._empty_state.raise_()
+        else:
+            self._empty_state.hide()
 
     # -- 刷新 ----------------------------------------------------------------
 

@@ -38,6 +38,8 @@ class DocumentPane(QFrame):
         self.link_label = QLabel("联动", header)
         self.link_label.setObjectName("WorkstationLinkBadge")
         header_layout.addWidget(self.link_label)
+        # exposed for workspace-level extensions (orientation selector, …)
+        self.header_layout = header_layout
         outer.addWidget(header)
 
         self.host = QFrame(self)
@@ -91,6 +93,7 @@ class LinkedInterpretationWorkspace(QWidget):
         self._active_well_name = "A12"
         self.seismic_panel = None
         self.well_panel = None
+        self._orientation_combo = None
         # B9: honest degradation note when the docked well panel is not on the
         # native engine (None while the engine backend is active).
         self._well_backend_note: str | None = None
@@ -103,7 +106,88 @@ class LinkedInterpretationWorkspace(QWidget):
         self.well_pane = DocumentPane("测井轨道", self)
         outer.addWidget(self.seismic_pane, 1)
         outer.addWidget(self.well_pane, 1)
+        self._install_domain_status_bar(outer)
         self._install_empty_states()
+
+    def _install_domain_status_bar(self, outer_layout) -> None:
+        """L10: current-domain badge + conversion availability + sync status.
+
+        Read-only view over the coordination bus (never publishes, so no
+        echo path); unknown states stay explicit instead of silently blank.
+        """
+        from PySide6.QtWidgets import QFrame
+
+        bar = QFrame(self)
+        bar.setObjectName("WorkstationDomainStatusBar")
+        from PySide6.QtWidgets import QHBoxLayout as _QHBoxLayout
+
+        layout = _QHBoxLayout(bar)
+        layout.setContentsMargins(8, 2, 8, 2)
+        layout.setSpacing(8)
+        self.domain_badge = QLabel("MD · m", bar)
+        self.domain_badge.setObjectName("WorkstationDomainBadge")
+        self.domain_badge.setToolTip("当前深度游标域（井侧发布 MD 米）")
+        self.conversion_status_label = QLabel("TWT 换算：—", bar)
+        self.conversion_status_label.setObjectName("WorkstationConversionStatus")
+        self.sync_status_label = QLabel("同步：—", bar)
+        self.sync_status_label.setObjectName("WorkstationSyncStatus")
+        layout.addWidget(self.domain_badge)
+        layout.addWidget(self.conversion_status_label, 1)
+        layout.addWidget(self.sync_status_label)
+        outer_layout.addWidget(bar)
+
+    def refresh_domain_status(self) -> None:
+        """Recompute the badge row from the current selection + hub state."""
+        controller = self._coordination
+        well = ""
+        depth: float | None = None
+        cal_text = "TWT 换算：—"
+        if controller is not None:
+            snapshot = controller.selection_context.snapshot()
+            cursor = getattr(snapshot, "depth_cursor", None)
+            if cursor is not None:
+                well = str(cursor[0])
+                depth = float(cursor[1])
+                self.domain_badge.setText("MD · m")
+            else:
+                well = str(getattr(snapshot, "active_well_id", "") or "")
+            if well:
+                cal = controller.coordinate_hub.time_depth_calibration(well)
+                if cal is None:
+                    cal_text = f"TWT 换算：不可用（{well} 无时深校准）"
+                else:
+                    cal_text = f"TWT 换算：{cal.provenance}"
+                    if depth is not None:
+                        # Coverage of the CURRENT depth, not mere existence:
+                        # an out-of-range cursor must show why the link broke
+                        # (review R3-M2) instead of a healthy-looking label.
+                        twt = cal.md_to_twt(depth)
+                        if twt is None:
+                            cal_text = (
+                                f"TWT 换算：超出校准范围 "
+                                f"({cal.pairs[0][0]:.0f}–{cal.pairs[-1][0]:.0f} m)"
+                            )
+                    # Verified honesty (review R3-M3): an unreviewed
+                    # calibration is visibly marked, never silent.
+                    if not bool(cal.metadata.get("verified", False)):
+                        cal_text += "（未复核）"
+        self.conversion_status_label.setText(cal_text)
+        linked = self.is_linked()
+        parts = ["开启"] if linked else ["关闭"]
+        if not linked:
+            parts.append("不跟随其它视图")
+        if well:
+            parts.append(f"当前井 {self._elide(well)}")
+        self.sync_status_label.setText("同步：" + " · ".join(parts))
+
+    @staticmethod
+    def _elide(text: str, limit: int = 14) -> str:
+        text = str(text)
+        return text if len(text) <= limit else text[: limit - 1] + "…"
+
+    def _on_selection_for_status(self, _ctx) -> None:
+        # Read-only subscription: status only, never a re-publish.
+        self.refresh_domain_status()
 
     def _install_empty_states(self) -> None:
         for pane, text in (
@@ -134,6 +218,58 @@ class LinkedInterpretationWorkspace(QWidget):
         self._coordination = controller
         if self.seismic_panel is not None:
             self.seismic_panel.attach_coordination(controller)
+        # Status-only bus subscription (L10): badge/conversion state follows
+        # every selection change without ever publishing back.
+        if controller is not None:
+            try:
+                controller.selection_context.selection_changed.connect(
+                    self._on_selection_for_status
+                )
+            except (RuntimeError, TypeError):
+                pass
+        self.refresh_domain_status()
+
+    def locate_seismic(self, il: int, xl: int, twt: float | None = None) -> None:
+        """Seismic navigation consumer, gated on the link switch (L10).
+
+        The composite locate sink calls this; with the link off the dock's
+        seismic pane simply stops following other views.
+        """
+        if not self._linked:
+            return
+        panel = self.seismic_panel
+        locate = getattr(panel, "locate_position", None)
+        if callable(locate):
+            try:
+                locate(int(il), int(xl), twt)
+            except Exception:
+                pass
+
+    def apply_link_cursor(self, well_name: str, md: float | None) -> bool:
+        """Drive the docked well view's native link cursor (case B).
+
+        Only applies when the dock is actually showing *well_name* — a
+        seismic cursor near a DIFFERENT well never moves this well's
+        crosshair. Gated on the link switch: with the link off, the docked
+        well view stops following the seismic cursor entirely.
+        """
+        if not self._linked:
+            return False
+        if not str(well_name or ""):
+            return False
+        if str(well_name) != str(self._active_well_name):
+            return False
+        panel = self.well_panel
+        if panel is None:
+            return False
+        driven = bool(panel.set_link_cursor(md))
+        if driven:
+            unit = "m" if md is not None else ""
+            value = f"{md:,.1f}" if md is not None else "已清除"
+            self.status_changed.emit(
+                f"井震联动游标 · {self._active_well_name} {value} {unit}".strip()
+            )
+        return driven
 
     def ensure_views(self) -> None:
         if self._views_created or not self._can_create_native_views():
@@ -185,6 +321,41 @@ class LinkedInterpretationWorkspace(QWidget):
             # （SeismicViewPanel.enter_profile_mode），不再探测引擎私有属性。
             self.seismic_panel.set_interpretation_bar_visible(False)
             self.seismic_panel.enter_profile_mode()
+            self._install_profile_orientation_selector()
+
+    def _install_profile_orientation_selector(self) -> None:
+        """L5: 2-D 解释面方向切换（Inline / Crossline / Time 切片）。"""
+        from PySide6.QtWidgets import QComboBox
+
+        panel = self.seismic_panel
+        if panel is None or getattr(self, "_orientation_combo", None) is not None:
+            return
+        combo = QComboBox(self.seismic_pane)
+        combo.setObjectName("SeismicProfileOrientationCombo")
+        combo.setToolTip("二维解释面方向（联动档位仅改变显示，不重读体积）")
+        for label, key in (
+            ("Inline 剖面", "inline"),
+            ("Crossline 剖面", "crossline"),
+            ("Time 切片", "time"),
+        ):
+            combo.addItem(label, key)
+        combo.currentIndexChanged.connect(self._on_orientation_changed)
+        # 插到地震 pane 头部（标题与联动徽标之间）
+        header = self.seismic_pane.header_layout
+        if header is not None:
+            header.insertWidget(header.count() - 1, combo)
+        self._orientation_combo = combo
+
+    def _on_orientation_changed(self, index: int) -> None:
+        panel = self.seismic_panel
+        if panel is None or self._orientation_combo is None:
+            return
+        key = str(self._orientation_combo.itemData(index) or "inline")
+        ok = panel.set_profile_orientation(key)
+        if ok:
+            self.status_changed.emit(f"解释面方向：{self._orientation_combo.itemText(index)}")
+        else:
+            self.status_changed.emit(f"未知解释面方向 {key!r}，已忽略")
 
     def apply_default_well_backend(self) -> None:
         """Resolve the docked well backend from real binding availability.
@@ -195,6 +366,11 @@ class LinkedInterpretationWorkspace(QWidget):
         default is on and the binding imports, otherwise ``legacy`` with the
         fallback reason recorded for the status bar instead of being
         disguised.
+
+        L2: the depth-cursor linkage no longer assumes the engine backend is
+        mute — ``depth_cursor_supported`` reflects the binding's real
+        crosshair channel, so the stale "engine has no hover API" demotion
+        is gone and only a genuinely incapable binding degrades.
         """
         if self.well_panel is None:
             return
@@ -204,11 +380,9 @@ class LinkedInterpretationWorkspace(QWidget):
         if note is not None:
             self.status_changed.emit(f"测井轨道使用 Legacy 渲染: {note}")
         elif not getattr(self.well_panel, "depth_cursor_supported", lambda: True)():
-            # 诚实降级：engine 绑定暂无 hover/光标接口，深度游标联动只在
-            # Legacy 后端可用——明确说明，不静默丢联动。
             self.status_changed.emit(
-                "测井轨道使用 WellLogEngine：深度游标联动暂不可用（绑定尚无 "
-                "hover 接口，需要游标联动请切回 Legacy）"
+                "测井轨道使用 WellLogEngine：当前绑定缺少 crosshair 通道，"
+                "深度游标联动不可用（更新 well-log-engine 绑定可恢复）"
             )
 
     def set_well_backend(self, name: str, *, reason: str | None = None) -> None:
@@ -248,11 +422,42 @@ class LinkedInterpretationWorkspace(QWidget):
         well_panel = self.well_panel
         if resource is not None and well_panel is not None:
             well_panel.show_resource(resource, self._project)
-        self._active_well_name = name
-        self.well_pane.set_title(f"测井轨道 · {name}")
+            self._active_well_name = name
+            self.well_pane.set_title(f"测井轨道 · {name}")
+        else:
+            # R3-M1: a well without a log resource must NOT keep the previous
+            # well's curves under the new name — that misattributed every
+            # link cursor. Clear the surface and refuse the active-well slot.
+            if well_panel is not None:
+                well_panel.update_state(None)
+            self._active_well_name = ""
+            self.well_pane.set_title(f"测井轨道 · {name}（无测井数据）")
+        self._apply_well_overlay(name)
         self.object_selected.emit({"kind": "well", "object": well, "well_name": name})
         self.well_focused.emit(name)
         self.status_changed.emit(f"已打开井 {name}")
+        self.refresh_domain_status()
+
+    def _apply_well_overlay(self, well_name: str) -> None:
+        """Project the active well onto the seismic sections (L5, R1-M2).
+
+        Fail-closed: the panel reports its own unavailable reason (no hub
+        registration / no calibration) and it surfaces in the status line
+        instead of being swallowed.
+        """
+        panel = self.seismic_panel
+        setter = getattr(panel, "set_well_overlay", None)
+        if not callable(setter):
+            return
+        try:
+            active = setter(well_name or None)
+        except Exception:
+            self.status_changed.emit("井迹投影不可用（剖面板异常）")
+            return
+        if not active:
+            reason = getattr(panel, "well_overlay_unavailable_reason", lambda: None)()
+            if reason:
+                self.status_changed.emit(f"井迹投影不可用：{reason}")
 
     def show_all_wells(self) -> None:
         self.show_all_wells_requested.emit()
@@ -269,14 +474,29 @@ class LinkedInterpretationWorkspace(QWidget):
             pane.link_label.setProperty("linked", bool(enabled))
             pane.link_label.style().unpolish(pane.link_label)
             pane.link_label.style().polish(pane.link_label)
+        self.refresh_domain_status()
 
     def is_linked(self) -> bool:
         return self._linked
 
     def _on_depth_cursor(self, depth: float) -> None:
+        """Case C producer (link-gated): dock well cursor → coordination bus.
+
+        The panel-level gate already throttles this to ~8 Hz; the link
+        switch is the semantic gate (an unlinked dock does not broadcast).
+        """
         if not self._linked:
             return
         self.status_changed.emit(f"联动深度 {depth:,.1f} m")
+        controller = self._coordination
+        if controller is None:
+            return
+        well = str(getattr(self.well_panel, "current_well_name", lambda: "")() or "")
+        if not well:
+            return
+        publish = getattr(controller, "publish_depth_cursor", None)
+        if callable(publish):
+            publish(well, float(depth), source=controller.SOURCE_WELL_LOG)
 
     def _first_resource(self, resource_type: str):
         for resource in list(getattr(self._project, "resources", None) or []):
@@ -316,5 +536,5 @@ class LinkedInterpretationWorkspace(QWidget):
         if self.seismic_panel is not None:
             self.seismic_panel.shutdown()
         if self.well_panel is not None:
-            self.well_panel.shutdown()
+            self.well_panel.shutdown(_wait_ms)
         return True

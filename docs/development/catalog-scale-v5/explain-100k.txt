@@ -1,0 +1,52 @@
+# EXPLAIN/plan audit — 100000 assets, build 79.2s
+
+## EXPLAIN QUERY PLAN
+### page name asc (default)
+  8  214 SCAN a USING INDEX idx_assets_live_name_id
+### page name asc deep offset
+  8  214 SCAN a USING INDEX idx_assets_live_name_id
+### page keyset after cursor
+  8  214 SCAN a USING INDEX idx_assets_live_name_id
+### page text LIKE suffix
+  8  214 SCAN a USING INDEX idx_assets_live_name_id
+### page type filter
+  8  62 SEARCH a USING INDEX idx_assets_type_name_id (type=?)
+### page stage subquery
+  8  214 SCAN a USING INDEX idx_assets_live_name_id
+  14   LIST SUBQUERY 1
+  18 14 61 SEARCH versions USING INDEX idx_versions_stage (stage=?)
+  29 14  CREATE BLOOM FILTER
+### page tag and
+  8  92 SEARCH a USING INDEX sqlite_autoindex_assets_1 (id=?)
+  12   LIST SUBQUERY 1
+  17 12 46 SEARCH t_a USING INDEX sqlite_autoindex_tags_2 (name=?)
+  24 12 62 SEARCH at_a USING INDEX idx_asset_tags_tag_id (tag_id=?)
+  64   USE TEMP B-TREE FOR ORDER BY
+### page order modified
+  8  224 SCAN a USING INDEX idx_assets_updated_name_id
+### page order stage (join)
+  10  214 SCAN a USING INDEX idx_assets_live_name_id
+  13  46 SEARCH v USING INDEX sqlite_autoindex_versions_1 (id=?) LEFT-JOIN
+  47   USE TEMP B-TREE FOR ORDER BY
+### count all
+  3  201 SCAN a USING COVERING INDEX idx_assets_live_name_id
+### lineage children (parent idx)
+  2  56 SEARCH lineage USING COVERING INDEX idx_lineage_parent (parent_version_id=?)
+### lineage parents (child idx)
+  3  62 SEARCH lineage USING INDEX idx_lineage_child (child_version_id=?)
+### list versions of asset
+  4  61 SEARCH versions USING INDEX idx_versions_asset_version (asset_id=?)
+
+## Wall timings (best of 3)
+  service.search_assets_page page0 (500): 4.31 ms
+  service.search_assets_page deep keyset: 7.45 ms
+  service.count_assets(): 3.01 ms
+  service.catalog_aggregates(): 0.00 ms
+  text filter asset_00042x: 17.71 ms
+  tag filter: 6.85 ms
+  stage filter: 164.50 ms
+  mid-text LIKE %42x% (worst case): 16.33 ms
+  order_by stage page: 132.97 ms
+  order_by size page: 127.07 ms
+  order_by modified page: 4.09 ms
+  order_by type page: 4.03 ms

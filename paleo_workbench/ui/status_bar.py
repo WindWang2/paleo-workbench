@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel
 
 from paleo_workbench.native_backend import native_backend
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 
 
 def _probe_opengl() -> bool:
@@ -30,16 +30,27 @@ def get_engine_status_info() -> tuple[str, str]:
 
     # Badge colors use the BADGE_* tokens (deeper shades) so white text clears
     # WCAG 3:1 at bold 11px; the main WARNING/SUCCESS tokens are for body text.
+    # 值每调用经 palette_for 取（BADGE_* 随主题策展），不再读模块快照。
+    palette = tokens.palette_for(_current_theme())
     _base = (
-        f"color: #ffffff; padding: 2px 8px; border-radius: 4px;"
+        "color: #ffffff; padding: 2px 8px; border-radius: 4px;"
         f" font-weight: 600; font-size: {tokens.FONT_SIZE_STATUS};"
     )
     if has_gl and has_cpp:
-        return "GPU · OpenGL + C++", f"background-color: {tokens.BADGE_SUCCESS}; {_base}"
+        return "GPU · OpenGL + C++", f"background-color: {palette['BADGE_SUCCESS']}; {_base}"
     elif has_cpp:
-        return "CPU · Native C++", f"background-color: {tokens.BADGE_PRIMARY}; {_base}"
+        return "CPU · Native C++", f"background-color: {palette['BADGE_PRIMARY']}; {_base}"
     else:
-        return "CPU · Python", f"background-color: {tokens.BADGE_WARNING}; {_base}"
+        return "CPU · Python", f"background-color: {palette['BADGE_WARNING']}; {_base}"
+
+
+def _current_theme() -> str:
+    try:
+        from paleo_workbench.ui.theme import theme_manager
+
+        return theme_manager.current_theme.value
+    except Exception:  # noqa: BLE001 — 无 app 环境回落 light
+        return "light"
 
 
 class StatusBar(QFrame):
@@ -59,21 +70,24 @@ class StatusBar(QFrame):
         self.coord_label.hide()
         layout.addWidget(self.coord_label)
 
-        # GPU / CPU Engine Backend Badge Indicator
-        badge_text, style_sheet = get_engine_status_info()
+        # GPU / CPU Engine Backend Badge Indicator（style.bind：随主题刷新）
+        badge_text, _style_sheet = get_engine_status_info()
         self.engine_label = QLabel(badge_text)
-        self.engine_label.setStyleSheet(style_sheet)
+        style.bind(self.engine_label, self._engine_badge_sheet)
         self.engine_label.setToolTip("可视化与数据计算引擎状态")
         layout.addWidget(self.engine_label)
+
+    def _engine_badge_sheet(self) -> str:
+        _text, style_sheet = get_engine_status_info()
+        return style_sheet
 
     def update_engine_status(self, engine_name: str | None = None) -> None:
         """Update displayed engine acceleration badge."""
         if engine_name:
             self.engine_label.setText(engine_name)
         else:
-            badge_text, style_sheet = get_engine_status_info()
+            badge_text, _style_sheet = get_engine_status_info()
             self.engine_label.setText(badge_text)
-            self.engine_label.setStyleSheet(style_sheet)
 
     def set_project_name(self, name: str) -> None:
         self._project_name = name
