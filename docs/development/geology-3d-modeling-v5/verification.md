@@ -54,6 +54,11 @@ PYTHONPATH 指向本 worktree 子模块）。并发约束：native 构建 ≤2�
   checkout 内未跟踪构建产物，从主 checkout 复制）。
 - 三轮 review（correctness / architecture / adversarial-performance）
   的修复分别见 commit 68dc7378、b0d04993 及子模块 4a068822。
+- **全量 run 3（加固后）**：完整跑完（exit=1，仅测试失败；Fatal=0）。
+  76 个唯一 FAILED/ERROR vs main 基线 72：其中 1 条为捕获日志噪音、
+  2 条为会话级内存压力 flake（capacity/deep-lineage stress，双侧隔离
+  均 pass）、1 条 keyboard focus flake（origin/main 直接复现失败）。
+  **本分支零回归判定成立。**
 
 ### V5 验收对照（target-state.md）
 
