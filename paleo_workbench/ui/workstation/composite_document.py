@@ -740,6 +740,8 @@ class CompositeDocument(QWidget):
 
         # 矢量图层新建 / 编辑（QGIS 式编辑会话，见 composite_editing.py）
         self.edit_controller = CompositeEditController(parent=self)
+        # RAW/锁定门禁单点注入（V6 B-P0-1：所有会话起点与 flush 提交经此）。
+        self.edit_controller.set_edit_gate(self._role_allows_editing)
         self.edit_controller.attach_canvas(self.canvas)
         self.edit_controller.identify_delegate = self._identify_with_results
         # 引用矢量图层：外部 GDAL 源的只读参考（渲染要素经源修订缓存，

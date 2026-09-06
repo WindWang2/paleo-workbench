@@ -131,6 +131,8 @@ class CompositeAttributeTableDialog(QDialog):
             return
         columns = self._columns()
         features = self._features()
+        # 角色门禁（V6）：RAW/锁定图层整表只读并明示原因，单元格不可编辑。
+        editable, gate_reason = self._controller.can_edit_layer(self._layer_id)
         self._suppress_item_changed = True
         self._suppress_selection_sync = True
         try:
@@ -153,11 +155,17 @@ class CompositeAttributeTableDialog(QDialog):
                     value = feature.attributes.get(key, "")
                     item = QTableWidgetItem("" if value is None else str(value))
                     item.setData(Qt.ItemDataRole.UserRole, (feature.feature_id, key, kind))
+                    if not editable:
+                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                     self.table.setItem(row, column, item)
-            self._info.setText(
-                f"{len(features)} 个要素 · {len(columns)} 个字段 · "
-                + ("编辑中（修改即时进入编辑会话）" if layer.edit_session is not None else "只读（编辑单元格将自动开始编辑会话）")
-            )
+            if not editable:
+                self._info.setText(
+                    f"{len(features)} 个要素 · {len(columns)} 个字段 · 只读 — {gate_reason}")
+            else:
+                self._info.setText(
+                    f"{len(features)} 个要素 · {len(columns)} 个字段 · "
+                    + ("编辑中（修改即时进入编辑会话）" if layer.edit_session is not None else "只读（编辑单元格将自动开始编辑会话）")
+                )
             self._batch_field.clear()
             for key, header, _kind in columns:
                 self._batch_field.addItem(header, key)
@@ -168,10 +176,12 @@ class CompositeAttributeTableDialog(QDialog):
     # -- editing ------------------------------------------------------------
 
     def _edit_session(self):
+        """门禁下的会话获取（V6 B-P0-1：RAW 图层绝不开启会话）。"""
         layer = self._layer()
         if layer is None:
             return None
-        return layer.edit_session or layer.start_editing()
+        session, _reason = self._controller.ensure_layer_session(self._layer_id)
+        return session
 
     def _write_attribute(self, feature_id: str, key: str, kind: str, text: str) -> None:
         session = self._edit_session()

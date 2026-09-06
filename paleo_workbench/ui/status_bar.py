@@ -63,6 +63,12 @@ class StatusBar(QFrame):
         layout.setSpacing(tokens.SPACE_2)
         self.status_label = QLabel(f"就绪 · {self._project_name}")
         layout.addWidget(self.status_label)
+
+        # V6 §5 工作台段：阶段 · 编辑目标 · 后端 · 任务（UIContext 驱动）。
+        self.workbench_label = QLabel("", self)
+        self.workbench_label.setObjectName("StatusWorkbenchLabel")
+        self.workbench_label.hide()
+        layout.addWidget(self.workbench_label)
         layout.addStretch()
 
         self.coord_label = QLabel("")
@@ -92,6 +98,15 @@ class StatusBar(QFrame):
     def set_project_name(self, name: str) -> None:
         self._project_name = name
         self.status_label.setText(f"就绪 · {name}")
+
+    def set_workbench_context(self, text: str, tooltip: str = "") -> None:
+        """V6 §5：工作台上下文段（空文案隐藏，绝不显示空段）。"""
+        if not text:
+            self.workbench_label.hide()
+            return
+        self.workbench_label.setText(text)
+        self.workbench_label.setToolTip(tooltip or text)
+        self.workbench_label.show()
 
     def update_context(self, *, coords: str = "", horizon: str = "", crs: str = "", scale: str = "") -> None:
         """Update contextual status segments. Empty values hide the segment.

@@ -571,6 +571,25 @@ class AppShell(QWidget):
         selection.selection_changed.connect(lambda *_: svc.refresh())
         stage_controller.current_stage_changed.connect(lambda *_: svc.refresh())
         stage_controller.active_target_changed.connect(lambda *_: svc.refresh())
+
+        # V6 §5：状态条工作台段（阶段 · 编辑目标 · 后端 · 任务）。
+        def _update_workbench_status(snap) -> None:
+            try:
+                def _layer_name(layer_id: str) -> str:
+                    layer = composite.edit_controller.layer(layer_id)
+                    return layer.name if layer is not None and layer.name else layer_id
+
+                from paleo_workbench.ui.workstation.state_language import (
+                    workbench_context_text,
+                )
+
+                self.status_bar.set_workbench_context(
+                    workbench_context_text(snap, layer_name=_layer_name)
+                )
+            except RuntimeError:
+                pass  # 拆壳期迟到信号：C++ 对象已销毁
+
+        svc.context_changed.connect(_update_workbench_status)
         svc.refresh()
 
     def _register_commands(self) -> None:

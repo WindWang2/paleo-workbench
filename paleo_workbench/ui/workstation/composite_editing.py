@@ -444,6 +444,23 @@ class CompositeEditController(QObject):
         # 回滚不会误用旧会话的增量基线。
         self._records_cache: dict[str, tuple[int, Any, tuple, tuple, dict]] = {}
         self._persist_cache: dict[str, tuple[int, list]] = {}
+        # RAW/锁定门禁（宿主注入；单点 = CompositeDocument._role_allows_editing）。
+        # 所有会话起点（start_editing / ensure_layer_session / 修复）与
+        # flush 提交都必须经过它——历史旁路：属性表直接 layer.start_editing()、
+        # flush 无角色复查（V6 baseline B-P0-1）。
+        self._edit_gate: Any = None
+
+    # -- RAW/锁定门禁（V6 单点） -------------------------------------------------
+
+    def set_edit_gate(self, gate) -> None:
+        """注入编辑门禁 ``layer_id -> (allowed, reason)``（无注入 = 全放行）。"""
+        self._edit_gate = gate
+
+    def can_edit_layer(self, layer_id: str) -> tuple[bool, str]:
+        """角色门禁判定；被拒时返回用户可读原因（无门禁 = 允许，测试/独立用）。"""
+        if self._edit_gate is None:
+            return True, ""
+        return self._edit_gate(str(layer_id))
 
     # -- 画布绑定 -------------------------------------------------------------
 
@@ -730,8 +747,46 @@ class CompositeEditController(QObject):
         layer = self.active_layer
         if layer is None or layer.edit_session is not None:
             return
+        allowed, _reason = self.can_edit_layer(layer.id)
+        if not allowed:
+            return  # 原因由调用方（门禁入口）负责呈现
         layer.start_editing()
         self.state_changed.emit()
+
+    def ensure_layer_session(self, layer_id: str):
+        """门禁下的会话获取：返回 ``(session, reason)``。
+
+        允许 → (该图层的会话——无则开启, "")；拒绝 → (None, 原因)。
+        属性表 / 阶段动作等一切「拿会话写数据」的路径统一走这里，
+        不再各自 ``layer.start_editing()``。
+        """
+        layer = self._layers.get(str(layer_id))
+        if layer is None:
+            return None, "图层不存在"
+        allowed, reason = self.can_edit_layer(layer.id)
+        if not allowed:
+            return None, reason
+        if layer.edit_session is None:
+            layer.start_editing()
+            self.state_changed.emit()
+        return layer.edit_session, ""
+
+    def import_layer_features(self, layer_id: str, features: list) -> None:
+        """可信导入通道：向（通常是 RAW 角色的）图层写入初始要素。
+
+        语义对齐 DataCatalogService.import_raw——RAW 不可变保护约束的是
+        **用户编辑**，不约束数据的初始落盘。只有领域建稿动作
+        （stage_actions 的加载/建稿）允许走这条路径；绝不能用于
+        用户编辑入口。会话即刻提交，不留打开的编辑会话。
+        """
+        layer = self._layers.get(str(layer_id))
+        if layer is None or not features:
+            return
+        session = layer.edit_session or layer.start_editing()
+        for feature in features:
+            session.add_feature(feature)
+        session.commit_changes()
+        self.content_changed.emit(str(layer_id))
 
     def save_edits(self) -> str | None:
         """提交活动图层编辑会话；返回 None 表示成功，否则为阻断原因。
@@ -783,6 +838,12 @@ class CompositeEditController(QObject):
         for layer in self._layers.values():
             session = layer.edit_session
             if session is None:
+                continue
+            # 角色门禁复查（V6 B-P0-1）：历史旁路开启的 RAW 会话绝不提交；
+            # 会话保持打开（可回滚），原因进 blocked。
+            allowed, gate_reason = self.can_edit_layer(layer.id)
+            if not allowed:
+                blocked.append(f"图层「{layer.name}」{gate_reason}（该图层编辑未提交）")
                 continue
             if self._topology.enabled:
                 issues = self._topology.validate([layer])
@@ -985,6 +1046,9 @@ class CompositeEditController(QObject):
 
         layer = self._layers.get(str(layer_id))
         if layer is None:
+            return 0
+        allowed, _reason = self.can_edit_layer(layer.id)
+        if not allowed:
             return 0
         opened_session = layer.edit_session is None
         session = layer.edit_session or layer.start_editing()
