@@ -1,161 +1,155 @@
-# Findings — QGIS Authoring Core
+# Findings — Data & Runtime Foundation V6
 
 ## Environment facts
-- Vendored QGIS 4.2.0 at `third_party/qgis` (UPSTREAM.md pins final-4_2_0).
-  Only targets `resources qgis_core qgis_gui qgis_analysis` are built (2877 TUs,
-  ~40 min at -j8 on this 16-core/62 GB box). Desktop/server/python disabled.
-- System Qt 6.11.2 dev packages present (pkg-config Qt6Core/Gui/Widgets/Xml OK).
-  PySide6 in venv = 6.11.1 (same soname libQt6Core.so.6 → single-runtime symbol
-  resolution; this is how the existing bridge already works against the PySide6
-  QApplication: bridge requires `QCoreApplication::instance()` non-null).
-- venv: `/home/kevin/projects/paleo_project/main/.venv` (py3.12, PySide6, pytest,
-  pytest-qt, numpy, shapely). Worktree has no own venv; reuse main venv.
-- Bridge install: `PALEO_WITH_QGIS_RENDERER=1 pip install -e native/qgis_render_bridge`.
-  NOTE: setup.py currently links ONLY qgis_core → must add qgis_gui (+analysis)
-  for symbology GUI / geometry work. CMakeLists.txt path already links all three.
-- Tests conditionalized via `tests/qgis_support.py`, marker `qgis`, skip unless
-  extension importable. CI main gate does NOT build QGIS (dedicated workflow).
+- Worktree: .worktrees/data-runtime-foundation-v6 @ feat/data-runtime-foundation-v6 (from main 295fabc3)
+- Test venv (shared from main checkout): C:/Users/wangj.KEVIN/projects/paleo-workbench/.venv
+  Python 3.12.13, pytest 9.1.1, pydantic 2.13.4, PySide6 present. QT_QPA_PLATFORM=offscreen.
+  paleo-workbench NOT pip-installed → pytest `pythonpath=["."]` resolves code from CWD;
+  always run pytest from worktree root with explicit tests/... args.
+- Baseline: tests/test_catalog_service.py + test_catalog_db.py → 64 passed.
+- Sibling worktree .worktrees/workstation-ux-v6 — parallel task, do not touch.
 
-## Architecture archaeology (HEAD da1b9834)
-- Seam: `MapRenderSnapshot → MapRenderBackend` (map_render_backend.py).
-  `QgisMapRenderBackend` encodes layers to a narrow native payload
-  (`_qgis_snapshot`: id/name/crs/revisions/visible/opacity/style-dict/features
-  WKT+attrs); native `QgisRenderBridge` owns revision-keyed QgsMapLayer mirrors,
-  QgsMapRendererParallelJob, generation coalescing, cancellation. Host receives
-  RGBA bytes only. Fallback = QPainter pipeline (tests/minimal runtime only).
-- Native mirrors already revision-keyed (#519 semantics): vector rebuild only on
-  data_revision change; vector style re-applied in place on style_revision change;
-  raster rebuilds on either. Pan/zoom never rebuilds layers. GOOD — keep.
-- Symbol model today: `symbol_for()` in qgis_render_bridge.cpp uses
-  `Qgs{Fill,Line,Marker}Symbol::createSimple()` ONLY. Renderer kinds:
-  single/categorized/graduated. NO rule renderer, NO symbol layers, NO
-  serialization. This is the core gap (task §8-10).
-- Legacy style model: `VectorStyle` (map_styles.py, frozen dataclass, Qt-free)
-  + STYLE_LIBRARY presets (facies/well/contour/formation_boundary/fault/line/
-  annotation/label). Persisted inside PaleoMapDocument layer state dicts.
-  Fallback honors fill/stroke/stroke_width/patterns/markers/categories/ranges.
-- Edit authority: `VectorLayer` + `VectorEditSession` (vector_layer.py) own
-  working copy, undo/redo, commit→data_revision, audit. Geometry ops today =
-  Shapely in vector_operations.py (merge_selected_polygons, split_polygon_by_line)
-  applied THROUGH session commands. Keep transaction ownership; swap engine to
-  QGIS (P1).
-- Properties UI today: `MapLayerPropertiesDialog` (ui/map_layer_properties.py) —
-  simple form (fill/stroke/renderer combo/classes JSON textarea). This is the
-  "weak clone" Decision 2 forbids growing; replace symbology editing with QGIS
-  dialogs behind the same apply-payload seam.
-- Export today: PNG via backend.render_sync (QGIS when available);
-  SVG/PDF via `_paint_export_vector` → throwaway FALLBACK painter backend.
-  Export-parity gap for QGIS path (task §23).
-- Canvas: UnifiedMapCanvas keeps snapshot→backend→frame→display; decorations
-  painted host-side. Do not rewrite (§21).
+## Open issues mapped to this program (from gh, 2026-09-07)
+IN SCOPE (fix in this program):
+- #1211 P1 create_working_copy 无条件覆盖未提交工作副本 → PHASE 6 working-copy state machine
+- #1212 P1 工程打开 GUI 线程全量物化 catalog document → PHASE 3 lazy catalog
+- #1218 P2 commit_working_copy 持锁跨 payload IO → PHASE 5 (verify then fix)
+- #1219 P2 成果装配先落 completed run（ghost provenance）→ PHASE 10
+- #1220 P2 stale 守卫 TOCTOU + rebuild_index 绕过 → PHASE 4 CAS/BEGIN IMMEDIATE
+- #1221 P2 resolve_path 无 sha/size 时无条件信任 basename → PHASE 10 fail-closed
+- #1222 P2 sweep_gc 与并发注册竞态删 payload → PHASE 5 GC leases
+- #1223 P2 heavy-task on_done 在 catalog close 后写旧工程 → PHASE 8 session generation
+- #1224 P2 WellLogLoadWorker/MapExportWorker 假取消 → PHASE 8 real cancellation
+- #1225 P2 vendored IDW 改写 BLAS env + 绕开 governor → PHASE 9
+- #1228 P2 打开后 GUI 全量物化旁路家族 → PHASE 3 (UI-side lazy follow-ups)
+- #1229 P2 .bak 回退把暂时不可读当损坏 → PHASE 7 project recovery
+OUT OF SCOPE (well-domain/algorithms/seismic-footprint/CI): #1213(O(N×W) WellRegistry —
+maybe PHASE 11 if cheap), #1214–#1217, #1226, #1227, #1230.
 
-## Vendored QGIS 4.2 API inventory (verified in source)
-- Serialization: `QgsFeatureRenderer::save(QDomDocument&, QgsReadWriteContext&)`,
-  static `QgsFeatureRenderer::load(QDomElement&, ctx)`;
-  `QgsSymbolLayerUtils::saveSymbol/loadSymbol`. → payload = renderer XML string.
-- Symbology GUI (src/gui/symbology/, all vendored & built):
-  - `QgsSymbolSelectorWidget/QgsSymbolSelectorDialog(QgsSymbol*, QgsStyle*,
-    QgsVectorLayer*, QWidget*, bool embedded)`
-  - `QgsRendererPropertiesDialog(QgsVectorLayer*, QgsStyle*, bool embedded,
-    QWidget*)`; static-init `initRendererWidgetFunctions()` registers widgets for
-    singleSymbol/categorizedSymbol/graduatedSymbol/RuleRenderer/pointDisplacement/
-    pointCluster/invertedPolygon/mergedFeature/heatmap/null/embedded;
-    `apply()` writes renderer into the layer; `widgetChanged` signal.
-  - `QgsStyleManagerDialog(QgsStyle*, ...)`, `QgsStyle` core API:
-    addSymbol/symbol/addColorRamp/tagSymbol/addGroup/createDatabase/load.
-  - `QgsGui::instance()` lazy singleton constructs GUI registries.
-- Rule renderer: `QgsRuleBasedRenderer` (core) + widget registered above.
-- Geometry: `QgsGeometry` (union/difference/buffer/simplify/makeValid/...),
-  `qgsgeometryengine.h`, analysis lib for processing-style ops.
+## Key architecture facts (from 6-way parallel audit, file:line under paleo_workbench/)
+### Catalog core
+- Canonical store = metadata/catalog.sqlite (WAL, busy_timeout=5000, DEFERRED txns only);
+  catalog.json = export/checkpoint manifest with .bak + corrupt-isolation (catalog/store.py).
+- DataCatalogService (catalog/service.py, ~3750 lines): holds full in-memory Pydantic
+  CatalogDocument + _CatalogMaps (immutable-swap snapshot #619), single RLock :288.
+- OPEN IS EAGER: DataCatalogService.open (service.py:667-789) → index.load_document →
+  _load_document_once (db.py:1054-1199) materializes EVERY row to Pydantic + _ensure_maps
+  second O(N) pass (service.py:417-456) — all on GUI thread via project_controller.py:296-299.
+  `ensure_index` param is DEAD (accepted :671, never used). ensure_index_ready/sweep/migrate
+  deferred to background thread (project_controller.py:312-355) but that's after the eager load.
+- Stale guard #411 = check-then-act NOT CAS: revision read at service.py:887 BEFORE
+  apply_changes txn; apply_changes writes catalog_revision unconditionally (db.py:1378-1385).
+  rebuild_index (service.py:1005-1012) has NO stale guard + no lock; resets DB from stale
+  in-memory doc. Unscoped _save(dirty=None) → reconcile() full-diff can DELETE other
+  process's rows (service.py:3727 rebase_artifact_paths).
+- Paged facade already SQL-backed when index current: search_assets_page/count/aggregates
+  (service.py:3231-3410, _query_index_if_current :3478). UI paged mode ≥25k assets.
+  Numbers @100k: page0 4.31ms, deep 7.45ms, count 3.01ms, aggregates 389ms cold.
+- Payload IO outside lock for register_version (copy+hash :1357-1365), register_result_asset
+  (:1471-1480), create_derived (:1944-1946). place_managed_file: temp+fsync+os.replace+
+  readonly bit + known_sha verified against actual bytes (storage.py:371-465). dir fsync
+  no-op on win32.
+- register_derived_store (service.py:1505-1609): NO hash, NO fsync, structural fingerprint only.
+- Seismic attr compute writes into derived/{asset}/{ver}/.attr-* INSIDE stage tree unreferenced
+  (seismic_lifecycle.py:562); harness mapping npz direct-write into intermediate/
+  (harness/actions/mapping.py:366-387) — both GC-race exposed.
 
-## Capability matrix
-| Capability | Paleo now | Native bridge now | Vendored QGIS | Gap | Target |
-|---|---|---|---|---|---|
-| Map renderer | fallback QPainter | QgsMapRendererParallelJob, RGBA frames | full | none | QGIS default path |
-| Point/Line/Polygon symbol | VectorStyle flat fields | createSimple only | full symbology | multilayer+types | renderer XML payload |
-| Symbol layers | none | none | Simple/SVG/Font/Filled/MarkerLine/Hashed/Arrow/Interpolated/Gradient/Shapeburst/PointPattern/LinePattern/Centroid/GeomGen | all | via XML roundtrip + editor |
-| Single renderer | yes (both backends) | yes | yes | – | keep |
-| Categorized | yes (both) | yes (value→color) | yes | labels/expr | XML |
-| Graduated | yes (both) | yes (ranges) | yes | – | XML |
-| Rule-based | NO | NO | yes | P0 | rules spec + XML |
-| Labeling | TextStyle point labels (fallback), basic PAL fields in bridge | fieldName/size/color/buffer | full PAL | placement/priority/collision | XML payload (schema first, UI later) |
-| Style manager | STYLE_LIBRARY JSON | none | QgsStyle+dialog | library | QgsStyle db + dialog (P1) |
-| Symbol selector UI | form dialog (weak) | none | QgsSymbolSelectorDialog | P0 | modal bridge call |
-| Renderer props UI | combo+JSON textarea | none | QgsRendererPropertiesDialog | P0 | modal bridge call |
-| Geometry ops | Shapely merge/split | none | QgsGeometry | engine swap | QgisGeometryService (P1) |
-| Snapping/topology | map_edit_snap/topology (host overlays) | n/a | advanced | keep host | unchanged |
-| Selection/editing/undo | VectorEditSession | none | edit buffer | keep Paleo authority | unchanged |
-| Undo bypass risk | – | none (read-only mirrors) | – | – | mirrors stay read-only |
-| Export | PNG=backend, SVG/PDF=fallback painter | render_sync only | CustomPainterJob | SVG/PDF parity | bridge export_vector (SVG/PDF) |
-| Legacy migration | n/a | n/a | – | old docs must open | legacy→XML lazy migrate |
+### GC
+- plan_gc/sweep_gc/cleanup_working_copies (catalog/gc.py) run with NO lock (documented
+  catalog/audit.py:625). Classification: STAGE_ORPHAN = stage file not referenced by
+  current document (gc.py:142-155); sweep = snapshot-then-delete, no recheck at unlink
+  (gc.py:265-294). RACE: payload placed on disk outside lock → explicit sweep between
+  place and metadata commit deletes live payload (#1222). No leases/epochs anywhere.
+- Trash safe by ordering (tombstone→move). Blob GC conservative w/ content-proof adoption.
 
-## Key design decisions (made autonomously per mandate)
-1. Keep directory `native/qgis_render_bridge/`, split internal modules:
-   `style_codec.*`, `gui_service.*`, `geometry_service.*` + existing render
-   bridge (option B of §5; lowest-risk, same build system).
-2. GUI crossing = **modal dialog bridge**: Python calls
-   `bridge.run_renderer_properties(spec, renderer_xml)` etc. on the GUI thread;
-   C++ builds a temporary memory QgsVectorLayer mirror, creates the real QGIS
-   dialog, exec()s it, serializes result back to XML. No raw QWidget crosses
-   the Python boundary (avoids shiboken/ABI fragility; matches §13 sanctioned
-   pattern). Ownership entirely C++-side (RAII), zero leaks.
-3. Authoritative persisted style = QGIS renderer XML string stored in the map
-   document layer state as `qgis_style` payload {schema_version, renderer_xml,
-   name, tags, revision}. Legacy `style` dict kept in sync (single/categorized/
-   graduated projections) so fallback/tests/old projects keep working.
-4. Migration is lazy + lossless-forward: opening an old doc keeps working; first
-   QGIS edit materializes `qgis_style` via native `legacy_style_to_renderer_xml`.
-5. Export parity: bridge gains `export_vector(path, svg|pdf, ...)` using
-   QgsMapRendererCustomPainterJob inside the bridge's Qt runtime (raster-free
-   true-vector output; avoids passing QPainter* across pybind).
-6. Threading: dialogs asserted on QApplication thread; renders stay async;
-   geometry service is pure computation (no QObject creation off-thread).
+### Working copies today
+- create_working_copy = full copy to working/{version_id}/ (storage.py:468-494), directory
+  existence IS the state; repeat checkout REPLACES uncommitted edits (pinned as intended,
+  tests/test_storage_m1.py:30-55). No registry/dirty flag/crash recovery (#1211).
 
-## Risks
-- PySide6 Qt 6.11.1 vs system 6.11.2 headers: patch-level diff; existing bridge
-  proves load-time resolution works for core; GUI adds more surface — watch for
-  missing-symbol ImportError on first import after adding gui_service.
-- QgsStyleManagerDialog pulls heavy deps (browser widgets etc.) — verify link;
-  if too heavy, defer to P2 with QgsStyle API-only library management.
-- Test teardown crashes: keep process-global QGIS runtime (never exitQgis),
-  mirrors RAII-owned; follow #519/#447 patterns.
-- 100k-feature perf: mirror reuse already proven; new code must not touch the
-  per-feature encode path (payload cache keyed by data_revision stays).
+### Project persistence
+- Save 3-phase (project/manager.py:425-552): prepare (mtime stale guard :474-483) →
+  execute worker (mkstemp+fsync+replace main→bak then tmp→main :392-423) → commit.
+- Recovery _load_data (manager.py:554-576): catches (OSError, ValueError, TypeError,
+  ValidationError) ALL → .bak os.replace destructive; PermissionError on main (transient
+  AV/sync lock) silently replaces newer main with older .bak (#1229). No quarantine, no
+  persistent recovery record (last_recovery_message on throwaway manager, UI never reads).
+- No persisted project revision counter — mtime-only stale guard (false positives on sync
+  tools; prepare→execute TOCTOU). Unknown fields round-trip OK (extra="allow").
+- Session generation exists in ProjectController (_session_generation, guards async save
+  + catalog maintenance) but heavy-task on_done in data_page etc. relies on
+  `job.target is not self.project` identity checks; mapping_page._on_map_export_finished
+  uses project object captured at export start, slot itself has NO check (#1223 family).
 
-## Performance baselines (to fill after benchmarks)
-- (pending local bench run)
+### Runtime
+- TaskScheduler singleton: max 2 daemon threads (heavy lane concurrency=1 + interactive
+  lane=1). Cancel cooperative (Event). Governor lease held until callable RETURNS
+  (task_scheduler.py:495-499) → cancelled-but-nonchecking task blocks heavy lane + task_key
+  (ValueError on same-key resubmit until old lands).
+- OwnedWorkerJob: QThread per job, cancel cooperative, shutdown(3000ms) → DetachedJobKeeper.
+- Cancellation: REAL for transcode/attributes/DAG-node-boundaries/factor-prepare/ONNX-tiles/
+  packaging/relink/audit; COSMETIC for LAS well-log parse (well_log_load_worker.py:36-56
+  check before/after only), map export render (map_export_worker.py:195-221), native render
+  (by design); hashing has NO cancel (catalog/checksum.py:20-26); fast_grid.interpolate_
+  idw_grid_batch has ZERO cancel checks.
+- Governor bypasses: vendored fast_grid _shared_executor process-lifetime pool sized by
+  os.cpu_count (fast_grid.py:19-36); _pin_blas_threads mutates OMP/OPENBLAS/MKL/NUMEXPR/
+  VECLIB env vars at runtime per call + threadpoolctl used WITHOUT context manager
+  (fast_grid.py:441-456) (#1225). DAG engine pool width = spec max_concurrency ungoverned
+  (workflow/dag/engine.py:465-471). batch.py clamps 1..4 without governor.
+- resume_pending NOT wired to project open (only on first lifecycle service use);
+  docstring aspirational (seismic_lifecycle.py:460).
 
-## Test findings
-- Existing suites to keep green: test_map_render_backend, test_qgis_*,
-  test_unified_map_*, test_map_authoring*, test_map_styles, test_map_export_*,
-  test_layer_lifecycle, visual regression suite.
+### Provenance/identity
+- map_product.assemble_map_product (workflow/map_product.py:124-169): register_run default
+  status="completed" NO outputs, THEN register_result_asset — crash between = permanent
+  ghost; audit orphan_completed_run only checks {materialize, working_copy_commit}
+  (catalog/audit.py:296-316) → map_product ghosts undetectable (#1219).
+  Same pre-book pattern: data_lifecycle_controller materialize :860 / new_version :924
+  (those ARE audit-covered + _fail_booked_run compensation).
+- interchange ImportExecutor._record_run swallows exceptions (fail-open provenance,
+  executor.py:114-115); caught only by unprovenanced_version audit.
+- resolve_path basename fallback fail-open when version has NO sha AND NO size
+  (service.py:1180-1202 _fallback_identity_ok returns True on missing facts) (#1221).
+  relink_external_source itself fail-closed (sources.py:223-241 requires sha or
+  size+mtime_ns). Legacy migration produces externals with NO identity facts
+  (migration.py:195-208) → unrelinkable + fail-open resolve.
+- Interchange packaging: catalog.json travels; provenance truncated to 1000 runs, no edges;
+  vendored externals NOT rebound to in-package path.
 
-## Build log (appendix)
-- gcc 16.2.1 ICEs on 4 qgis_gui TUs (deterministic; Arch gcc bug). Solution:
-  vendored QGIS rebuilt with clang 22.1.8 (-j8, ~35 min). Extension TU compile
-  stays on gcc — fine.
-- Extension build fixes: pybind11 MUST precede Qt/QGIS includes in bindings.cpp
-  (Qt `slots` macro corrupts Python.h PyType_Spec); qgis_render_bridge.hpp must
-  stay Qt-free for the same reason; `emit` is a Qt macro (renamed helper);
-  QgsFeatureRenderer::save() is non-const → serialize via clone;
-  symbols(QgsRenderContext&) signature in 4.2 needs a context; ui_* headers at
-  build/qgis-vendor/src/ui; Qt6Svg needed for QSvgGenerator export.
-- Runtime alignment: system Qt 6.11.2 + vendored QGIS(6.11.2 headers) vs
-  PySide6 6.11.1 private-symbol mismatch (_ZN14QObjectPrivateC2E16QtPrivate_…).
-  Fix = upgrade venv to PySide6 6.11.2 (repo allows pyside6>=6.6). CI legs pin
-  their own env so this is a local-env alignment only.
-- BASELINE FAILURE (pre-existing, pristine origin/main, unrelated to diff):
-  tests/test_map_export_consistency.py::test_export_png_matches_screen_frame_
-  and_carries_dpi_metadata fails on this machine with the fallback backend
-  (screen frame blank at probes while export renders content). Reproduced with
-  changes stashed AND in the main worktree. Recorded per §32; not introduced
-  by this branch.
+### Concurrency/scale/tests
+- NO file locks anywhere (no msvcrt/portalocker/fcntl); two instances cooperate only via
+  #411 revision fence + mtime guard. SQLite: WAL, busy_timeout 5000, implicit DEFERRED
+  BEGIN — no BEGIN IMMEDIATE anywhere. No two-PROCESS tests (all "cross-process" are two
+  services in one process); cross-flush TOCTOU untested.
+- Open memory floor = full Pydantic graph (_load_document_once). Capacity guard pins UI
+  single-residency identity, not open RSS. 500k tier not implemented (heavy tier 50k/100k).
+- Crash tests strong: real SIGKILL/TerminateProcess helpers (crash_kill_helper.py).
+  GC-race tests MISSING. Working-copy state tests MISSING. PermissionError-on-main
+  recovery test MISSING.
+- CI fast gate: -m "not slow and not welllog_binding" --ignore=tests/perf --timeout=45.
+  capacity marker runs in fast gate. Perf tests nightly.
 
-## 2026-09-02 QGIS Workstation Convergence — 关键发现
-1. qgis_render_bridge 未构建（vendored QGIS 在 third_party/qgis，按规则不重建）→ 所有 QGIS UI 走探测降级：MapLayerPropertiesDialog 在无桥环境自动切 legacy 符号快速字段；split/merge/topology 走 shapely 兜底。桥构建后同一代码路径自动升级到 QGIS 原生（renderer XML / geometry engine）。
-2. LayerManagerPanel._publish 原来写死 project_crs="EPSG:4326"（composite_document.py）——所有可见性/不透明度/顺序变更都会丢弃项目 CRS。权威链：ProjectDocument.coordinate → build_workarea_map_snapshot → CompositeEditController.project_crs → LayerManagerPanel。
-3. VectorEditSession.undo 不修剪 layer selection（二轮 review 发现）：撤销要素添加后 selection 残留失效 id → O(selection) 计数虚高 + merge 命中缺失要素。已在 undo/redo 内 intersect。
-4. 会话失效后工具持有死 session（一轮 review Blocker）：save/rollback/flush 提交后必须 _rebind_active_tool（会话级工具回落 pan）。
-5. 显示态（可见性/不透明度/顺序）必须回写编辑权威（apply_display_state），否则 identify 命中隐藏图层、保存 flush 丢弃纯显示变化、内容重组重置用户顺序。
-6. 快照 records / persist 序列化按修订缓存有效，但会话内每次 add 必然变 revision → 变更图层仍全量重编码；debounce(120ms) + sessions_committed 立即同步是当前取舍；增量快照（delta）是后续工作（QGIS 后端已有 #932 增量通道可复用）。
-7. 测试环境：/opt/minconoda3 python3.13 + PySide6 6.11 offscreen；test_mapping_page 的 6 failed/1 error 与 test_unified_map_canvas native scalar cache 失败为干净 main 上同样存在的环境性失败（native 扩展缺失）。
+## Design directions (locked into baseline doc)
+1. Lazy catalog: open() reads revision+health+counts only; LazyEntityRepository (SQLite
+   row→Pydantic by id + SQL list/page/aggregate/lineage); document becomes background-
+   warmed cache; mutations journal entity ids during warmup, overlay after build; get-by-id
+   served from SQL + identity LRU. Target open <500ms @100k.
+2. Transactions: apply_changes(expected_revision) → BEGIN IMMEDIATE + in-txn revision
+   compare + conditional bump (CAS); rebuild_index guarded+locked; reconcile refuses on
+   foreign revision advance (typed CatalogStaleWriteError).
+3. Payload protocol: staging dir + lease table (heartbeat) outside lock; move-into-place +
+   metadata commit inside one immediate txn; GC consults leases + rechecks references under
+   lock at unlink; register_derived_store gains fsync+staging; hash loops get cancel tokens.
+4. Working copies: SQLite working_copies table state machine NONE/CHECKED_OUT/DIRTY/
+   COMMITTING/COMMITTED/ABANDONED; no silent overwrite; recovery on open.
+5. Project recovery: distinguish corruption (validate-fail → quarantine + .bak restore,
+   recorded) from transient OSError (surface, never fallback); persistent recovery record.
+6. Session generation: ProjectSessionToken (generation uuid) checked in heavy on_done
+   callbacks via small guard helper; wire seismic resume_pending into project open
+   maintenance; real cancel for LAS/map-export/hashing.
+7. Governor: remove runtime env mutation in fast_grid; scoped threadpoolctl; executor
+   width from clamp_workers; DAG pool clamped; batch.py consults governor.
+8. Provenance: map_product begin→register→complete; audit covers map_product_assembly +
+   interchange.import + repair for ghosts; resolve_path fail-closed without identity
+   facts; migration backfills size+mtime (hash small files budget-bounded).
