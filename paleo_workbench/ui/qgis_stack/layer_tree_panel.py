@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QLabel,
 )
 
-from paleo_workbench.ui.qgis_stack.tree_sync import parse_tree_change
+from paleo_workbench.ui.qgis_stack.tree_sync import parse_tree_change, parse_tree_events
 from paleo_workbench.ui.qgis_stack.widgets import QgisLayerTreeHost
 
 
@@ -46,6 +46,9 @@ _MENU_SIGNALS = {
     "symbology": "symbology_requested",
     "labeling": "labeling_requested",
     "duplicate": "duplicate_layer_requested",
+    # V5 分组（组上下文/根菜单，payload 为 group_id）
+    "create_group": "create_group_requested",
+    "remove_group": "remove_group_requested",
     "export": "export_layer_requested",
     "repair": "repair_layer_requested",
 }
@@ -74,6 +77,11 @@ class QgisLayerTreePanel(QWidget):
     active_layer_changed = Signal(object)
     # 树回写/显示增量后的持久化通知（CompositeDocument 接 notify_display_changed）。
     display_state_changed = Signal()
+    # V5 分组请求（组上下文菜单；create 无参，remove 携带 group_id）。
+    create_group_requested = Signal()
+    remove_group_requested = Signal(str)
+    # 组勾选/结构变化经 controller 处理后的额外持久化通知。
+    group_state_changed = Signal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -84,6 +92,8 @@ class QgisLayerTreePanel(QWidget):
         self._project_crs = ""
         self._editing_layer_id: str | None = None
         self._selected_doc_id: str | None = None
+        # V5 分组编排（LayerGroupController；树事件经此回写领域状态）。
+        self._group_controller = None
         # 程序化发布中（set_layer_snapshot / set_mirror_layer_order 经由原生
         # 树结构信号重入 _on_tree_selection）：此时的选中跳变是重排噪声，
         # 不得外发 active_layer_changed（否则数字化工具被回落 pan）。
@@ -292,8 +302,14 @@ class QgisLayerTreePanel(QWidget):
         self._notify_display_changed()
 
     def _push_mirror_order(self) -> None:
-        """把 _layers 的顶层顺序（top-first）推到镜像树（程序化，不 echo）。"""
+        """把 _layers 的顶层顺序（top-first）推到镜像树（程序化，不 echo）。
+
+        V5 分组模式：root 平铺顺序不再是权威（组内顺序 + 放置由
+        LayerGroupController reconcile），此处不再推送。
+        """
         if self._canvas is None or self.tree_host is None:
+            return
+        if self._group_controller is not None:
             return
         self._publishing = True
         try:
@@ -318,20 +334,30 @@ class QgisLayerTreePanel(QWidget):
             layer is not None and self.is_editable_layer(layer))
         self.active_layer_changed.emit(doc_id or None)
 
+    def set_group_controller(self, controller) -> None:
+        """注入 LayerGroupController（V5 分组事件回写；None = 平铺模式）。"""
+        self._group_controller = controller
+
     def _on_tree_menu(self, key: str, doc_id: str) -> None:
         signal_name = _MENU_SIGNALS.get(str(key))
         if signal_name is None:
             return
         signal = getattr(self, signal_name)
-        if signal_name in ("create_layer_requested", "import_reference_requested"):
+        if signal_name in ("create_layer_requested", "import_reference_requested",
+                           "create_group_requested"):
             signal.emit()
         elif doc_id:
             signal.emit(str(doc_id))
 
     def _on_tree_change(self, payload: str) -> None:
-        """树用户操作回写 _layers（不回推画布，防回环）+ 落持久化权威。"""
-        changes = parse_tree_change(payload)
-        if changes.empty:
+        """树用户操作回写 _layers（不回推画布，防回环）+ 落持久化权威。
+
+        V5 schema 2：typed events（含组）与全层级 tree 结构快照经
+        LayerGroupController 回写领域分组状态（拖拽/建组/删组/组勾选）。
+        """
+        batch = parse_tree_events(payload)
+        changes = batch.changes
+        if changes.empty and not batch.events and not batch.tree:
             return
         for doc_id, visible in changes.visibility.items():
             layer = self.layer_by_id(doc_id)
@@ -347,6 +373,24 @@ class QgisLayerTreePanel(QWidget):
             listed_ids = {layer.id for layer in listed}
             unlisted = [layer for layer in self._layers if layer.id not in listed_ids]
             self._layers = listed + unlisted
+        group_touched = False
+        if self._group_controller is not None:
+            controller = self._group_controller
+            if batch.tree:
+                controller.observe_tree_nodes(list(batch.tree))
+                group_touched = True
+            group_visibility = batch.group_visibility()
+            if group_visibility:
+                for group_id, visible in group_visibility.items():
+                    controller.record_group_visibility_event(group_id, visible)
+                group_touched = True
+            group_renames = batch.group_renames()
+            if group_renames:
+                for group_id, name in group_renames.items():
+                    controller.rename_user_group(group_id, name)
+                group_touched = True
+        if group_touched:
+            self.group_state_changed.emit()
         self._notify_display_changed()
 
     def _notify_display_changed(self) -> None:

@@ -161,6 +161,9 @@ class QgisCanvasShim(QWidget):
         self._mirrored_layers: list[str] = []
         self._mirrored_doc_ids: list[str] = []
         self._mirror_failures: list[str] = []
+        # V5 分层编图工作区：True 时镜像跳过 root 平铺顺序，组结构由
+        # LayerGroupController 经 group API reconcile（默认 False 保持旧路径）。
+        self.layer_groups_enabled: bool = False
         self._shutdown_done = False
         _LIVE_SHIMS.add(self)
         self._tool_controller = None
@@ -805,11 +808,14 @@ class QgisCanvasShim(QWidget):
         Note (M2): reconcile by ``pwb/doc_id`` — unchanged layers keep their
         QgsVectorLayer object, tree state and renderer across publishes.
         Note (F3 gap, tracked for M2+): legacy ``scale_range`` 仍未转发。
+        V5：``layer_groups_enabled`` 为 True 时跳过 root 平铺顺序推送——
+        组结构/放置由 LayerGroupController 经 group API reconcile。
         """
         if getattr(self, "_shutdown_done", False):
             return
         mirrored_qgis_ids, seen, failures = mirror_snapshot_to_stack(
-            self.stack, self.canvas_address, snapshot)
+            self.stack, self.canvas_address, snapshot,
+            groups=bool(getattr(self, "layer_groups_enabled", False)))
         # B8：保留最近快照供矢量导出（export_svg/export_pdf 经桥级
         # export_vector 以同一份快照离屏渲染，见 _export_vector）。
         self._last_snapshot = snapshot

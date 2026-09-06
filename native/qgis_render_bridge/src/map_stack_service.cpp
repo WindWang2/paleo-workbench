@@ -27,9 +27,11 @@
 #include <QObject>
 #include <QPainter>
 #include <QPointer>
+#include <QSet>
 #include <QString>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QUuid>
 #include <QWidget>
 
 #include <qgsapplication.h>
@@ -387,6 +389,176 @@ static QgsVectorLayer* findMirrorByDocId(QgsProject* project, const std::string&
     return nullptr;
 }
 
+// ------------------------------------------------------------------ V5 groups
+
+namespace {
+
+const char kGroupIdProp[] = "pwb/group_id";
+
+
+// M2T3 经验：qobject_cast 在 QgsLayerTree* 节点类上不可靠（meta-object 链
+// 在 vendored 构建下有缺口）；类型分派一律走 nodeType() 枚举 + static_cast。
+inline QgsLayerTreeGroup* treeGroupCast(QgsLayerTreeNode* node) {
+    return node != nullptr && node->nodeType() == QgsLayerTreeNode::NodeGroup
+        ? static_cast<QgsLayerTreeGroup*>(node)
+        : nullptr;
+}
+
+inline QgsLayerTreeLayer* treeLayerCast(QgsLayerTreeNode* node) {
+    return node != nullptr && node->nodeType() == QgsLayerTreeNode::NodeLayer
+        ? static_cast<QgsLayerTreeLayer*>(node)
+        : nullptr;
+}
+
+// takeChild 的隐藏语义：removeChildrenPrivate 会先递归卸下被移动节点的
+// 全部后代（makeOrphan）——直接对带子组的组调用会摧毁子树。此处的
+// 后序卸载保证每次 takeChild 时目标节点已无子节点。
+struct SubtreeDetachEntry {
+    QgsLayerTreeNode* node;
+    QList<QgsLayerTreeNode*> children;
+};
+
+void detachGroupSubtree(QgsLayerTreeNode* node, QList<SubtreeDetachEntry*>* log) {
+    const QList<QgsLayerTreeNode*> children = node->children();
+    if (children.isEmpty()) return;
+    for (QgsLayerTreeNode* child : children) {
+        detachGroupSubtree(child, log);
+    }
+    for (QgsLayerTreeNode* child : children) {
+        node->takeChild(child);  // child 此刻必为叶（无树子节点）
+    }
+    log->append(new SubtreeDetachEntry{node, children});
+}
+
+void restoreGroupSubtree(const QList<SubtreeDetachEntry*>& log) {
+    for (const auto* entry : log) {
+        auto* group = treeGroupCast(const_cast<QgsLayerTreeNode*>(entry->node));
+        if (group == nullptr) continue;
+        for (int i = 0; i < entry->children.size(); ++i) {
+            group->insertChildNode(i, entry->children.at(i));
+        }
+    }
+}
+
+// #1154 舞步：registry bridge 的移除计数不受 setEnabled 开关控制
+//（groupWillRemoveChildren 无条件收集图层 id），takeChild/insertChildNode
+// 期间必须把 root 上那两个连接整体断开，析构时原样接回。
+struct RegistryBridgeDetach {
+    QgsLayerTreeGroup* root = nullptr;
+    QgsLayerTreeRegistryBridge* bridge = nullptr;
+    bool detached = false;
+    bool wasEnabled = false;
+
+    explicit RegistryBridgeDetach(QgsProject* project, QgsLayerTreeGroup* treeRoot)
+        : root(treeRoot), bridge(project ? project->layerTreeRegistryBridge() : nullptr) {
+        if (bridge == nullptr || root == nullptr) return;
+        wasEnabled = bridge->isEnabled();
+        if (wasEnabled) bridge->setEnabled(false);
+        detached = QObject::disconnect(root, nullptr, bridge, nullptr);
+    }
+
+    ~RegistryBridgeDetach() {
+        if (bridge == nullptr) return;
+        if (detached) {
+            QObject::connect(
+                root, SIGNAL(willRemoveChildren(QgsLayerTreeNode*,int,int)), bridge,
+                SLOT(groupWillRemoveChildren(QgsLayerTreeNode*,int,int)));
+            QObject::connect(
+                root, SIGNAL(removedChildren(QgsLayerTreeNode*,int,int)), bridge,
+                SLOT(groupRemovedChildren()));
+        }
+        if (wasEnabled) bridge->setEnabled(true);
+    }
+};
+
+// 递归按稳定 group_id 寻址组节点（custom property，与显示名解耦）。
+QgsLayerTreeGroup* findGroupByGroupIdIn(QgsLayerTreeGroup* parent,
+                                        const std::string& group_id) {
+    if (parent == nullptr || group_id.empty()) return nullptr;
+    for (QgsLayerTreeNode* child : parent->children()) {
+        auto* group = treeGroupCast(child);
+        if (group == nullptr) continue;
+        if (group->customProperty(kGroupIdProp).toString().toStdString() == group_id) {
+            return group;
+        }
+        QgsLayerTreeGroup* found = findGroupByGroupIdIn(group, group_id);
+        if (found != nullptr) return found;
+    }
+    return nullptr;
+}
+
+// 组节点没有稳定 id 时分配一个（用户在 QGIS 树里新建的组）并返回。
+std::string ensureGroupNodeId(QgsLayerTreeGroup* group) {
+    if (group == nullptr) return std::string();
+    QVariant existing = group->customProperty(kGroupIdProp);
+    if (existing.isValid() && !existing.toString().isEmpty()) {
+        return existing.toString().toStdString();
+    }
+    const std::string assigned =
+        "user_" + QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+    group->setCustomProperty(kGroupIdProp, QString::fromStdString(assigned));
+    return assigned;
+}
+
+bool isDescendantOf(QgsLayerTreeNode* node, QgsLayerTreeNode* candidate) {
+    for (QgsLayerTreeNode* p = node; p != nullptr; p = p->parent()) {
+        if (p == candidate) return true;
+    }
+    return false;
+}
+
+void appendNodeToJson(QgsLayerTreeNode* node, QJsonArray* out) {
+    if (auto* group = treeGroupCast(node)) {
+        QJsonObject obj;
+        obj.insert(QStringLiteral("type"), QStringLiteral("group"));
+        obj.insert(QStringLiteral("id"), QString::fromStdString(ensureGroupNodeId(group)));
+        obj.insert(QStringLiteral("name"), group->name());
+        obj.insert(QStringLiteral("visible"), group->itemVisibilityChecked());
+        QJsonArray children;
+        for (QgsLayerTreeNode* child : group->children()) {
+            appendNodeToJson(child, &children);
+        }
+        obj.insert(QStringLiteral("children"), children);
+        out->append(obj);
+        return;
+    }
+    if (auto* layerNode = treeLayerCast(node)) {
+        QgsMapLayer* layer = layerNode->layer();
+        if (layer == nullptr) return;
+        const QString doc = layer->customProperty(QStringLiteral("pwb/doc_id")).toString();
+        if (doc.isEmpty()) return;
+        QJsonObject obj;
+        obj.insert(QStringLiteral("type"), QStringLiteral("layer"));
+        obj.insert(QStringLiteral("id"), doc);
+        obj.insert(QStringLiteral("name"), layer->name());
+        obj.insert(QStringLiteral("visible"), layerNode->itemVisibilityChecked());
+        out->append(obj);
+    }
+}
+
+// V5 typed 树事件（schema 2 events 数组元素）。
+void appendTreeEvent(QJsonArray* events, const QString& type, const QString& node_type,
+                     const std::string& node_id, bool value) {
+    QJsonObject event;
+    event.insert(QStringLiteral("type"), type);
+    event.insert(QStringLiteral("node_type"), node_type);
+    event.insert(QStringLiteral("node_id"), QString::fromStdString(node_id));
+    event.insert(QStringLiteral("value"), value);
+    events->append(event);
+}
+
+void appendTreeEvent(QJsonArray* events, const QString& type, const QString& node_type,
+                     const std::string& node_id, const std::string& value) {
+    QJsonObject event;
+    event.insert(QStringLiteral("type"), type);
+    event.insert(QStringLiteral("node_type"), node_type);
+    event.insert(QStringLiteral("node_id"), QString::fromStdString(node_id));
+    event.insert(QStringLiteral("value"), QString::fromStdString(value));
+    events->append(event);
+}
+
+}  // namespace
+
 struct QgisMapStack::Impl {
   bool initialized = false;
   bool display_mode = false;
@@ -445,18 +617,34 @@ struct QgisMapStack::Impl {
     QMap<QString, bool> visibility;
     QStringList order;
     QMap<QString, QString> renames;
-    bool empty() const { return visibility.isEmpty() && order.isEmpty() && renames.isEmpty(); }
+    // V5 分组扩展：typed 事件（含组）与结构快照脏标记。
+    QJsonArray events;
+    bool tree_dirty = false;
+    bool empty() const {
+      return visibility.isEmpty() && order.isEmpty() && renames.isEmpty()
+          && events.isEmpty() && !tree_dirty;
+    }
   };
   std::unordered_map<std::uintptr_t, std::function<void(const std::string&)>> tree_change_callbacks;
   std::unordered_map<std::uintptr_t, std::vector<QMetaObject::Connection>> tree_change_connections;
   std::unordered_map<std::uintptr_t, TreeChangeBatch> tree_pending;
   std::unordered_set<std::uintptr_t> tree_flush_scheduled;
+  // 组节点展开态回调（V5 StageViewState）。expandedChanged 是节点级信号，
+  // 经 wireNodeExpandSignal 接线；去重标记走节点 custom property（随节点
+  // 生灭，无悬挂指针），连接随节点析构自灭，shutdown 兜底断开。
+  std::unordered_map<std::uintptr_t,
+                     std::function<void(const std::string&, bool)>> tree_expand_callbacks;
+  std::vector<QMetaObject::Connection> node_expand_connections;
   // 重命名影子表：doc_id -> 最近一次已知图层名；程序化 setName 同步更新，
   // 回调侧据此区分真实重命名与样式刷新等无关 dataChanged。
   std::unordered_map<std::string, std::string> known_layer_names;
   // 可见性影子表：doc_id -> 最近一次已知勾选态；QGIS 用户勾选与刷新都发
   // 空 roles 的 dataChanged，只能靠影子比对区分。
   std::unordered_map<std::string, bool> known_layer_visibility;
+  // V5 组影子表：group_id -> 最近一次已知名称/勾选态（与图层表分开，
+  // 组 id 与 doc_id 命名空间不同但语义独立更稳）。
+  std::unordered_map<std::string, std::string> known_group_names;
+  std::unordered_map<std::string, bool> known_group_visibility;
   // 树视图的创建画布（菜单 zoom 动作用）与菜单回调
   std::unordered_map<std::uintptr_t, QPointer<QgsMapCanvas>> tree_canvas;
   std::unordered_map<std::uintptr_t, std::function<void(const std::string&, const std::string&)>>
@@ -467,6 +655,8 @@ struct QgisMapStack::Impl {
   std::vector<std::function<void(const std::string&)>> orphan_tree_callbacks;
   std::vector<std::function<void(const std::string&, const std::string&)>>
       orphan_tree_menu_callbacks;
+  std::vector<std::function<void(const std::string&, bool)>>
+      orphan_tree_expand_callbacks;
   // 画布侧回调坟场（同上理由）：canvas destroyed 链上的 reapCanvasTables
   // 把含 py::function 的回调表 move 进这里，由 shutdown/dtor 统一销毁。
   std::vector<std::function<void(const std::string&, const std::string&)>>
@@ -545,10 +735,32 @@ class PwbLayerTreeMenuProvider : public QgsLayerTreeViewMenuProvider {
   QMenu* createContextMenu() override {
     auto* menu = new QMenu();
     auto* actions = view_->defaultActions();
+    // V5：组节点上下文（currentLayer 对组返回 nullptr，先看 currentNode）。
+    QgsLayerTreeNode* node = view_->currentNode();
+    if (auto* group = treeGroupCast(node)) {
+      if (group != view_->layerTreeModel()->rootGroup()) {
+        const QString gid = group->customProperty(QStringLiteral("pwb/group_id")).toString();
+        if (!canvas_.isNull()) {
+          menu->addAction(actions->actionZoomToLayers(canvas_.data(), menu));
+        }
+        menu->addAction(actions->actionRenameGroupOrLayer(menu));
+        const bool isSystemGroup = gid.startsWith(QLatin1String("phase"))
+            || gid.startsWith(QLatin1String("factor."))
+            || gid.startsWith(QLatin1String("base."))
+            || gid.startsWith(QLatin1String("legacy."));
+        if (!isSystemGroup) {
+          addCustom(menu, QStringLiteral("删除组（保留图层）"), "remove_group",
+                    gid.toStdString());
+        }
+        return menu;
+      }
+    }
     QgsMapLayer* layer = view_->currentLayer();
     if (layer == nullptr) {
       addCustom(menu, QStringLiteral("新建矢量图层"), "create_layer", nullptr);
       addCustom(menu, QStringLiteral("导入参考图层"), "import_reference", nullptr);
+      menu->addSeparator();
+      addCustom(menu, QStringLiteral("新建图层组"), "create_group", nullptr);
       return menu;
     }
     const bool isReference =
@@ -602,14 +814,19 @@ class PwbLayerTreeMenuProvider : public QgsLayerTreeViewMenuProvider {
 
  private:
   QAction* addCustom(QMenu* menu, const QString& text, const char* key, QgsMapLayer* layer) {
+    std::string doc;
+    if (layer != nullptr) {
+      doc = layer->customProperty(QStringLiteral("pwb/doc_id")).toString().toStdString();
+    }
+    return addCustom(menu, text, key, doc);
+  }
+
+  QAction* addCustom(QMenu* menu, const QString& text, const char* key,
+                     std::string node_id) {
     QAction* action = menu->addAction(text, menu, [this, key = std::string(key),
-                                 layer = QPointer<QgsMapLayer>(layer)]() {
+                                 node_id = std::move(node_id)]() {
       if (!cb_) return;
-      std::string doc;
-      if (!layer.isNull()) {
-        doc = layer->customProperty(QStringLiteral("pwb/doc_id")).toString().toStdString();
-      }
-      cb_(key, doc);
+      cb_(key, node_id);
     });
     return action;
   }
@@ -723,10 +940,18 @@ void QgisMapStack::shutdown() {
   }
   impl_->tree_change_connections.clear();
   impl_->tree_change_callbacks.clear();
+  for (const auto& conn : impl_->node_expand_connections) {
+    QObject::disconnect(conn);
+  }
+  impl_->node_expand_connections.clear();
+  impl_->tree_expand_callbacks.clear();
+  impl_->orphan_tree_expand_callbacks.clear();
   impl_->tree_pending.clear();
   impl_->tree_flush_scheduled.clear();
   impl_->known_layer_names.clear();
   impl_->known_layer_visibility.clear();
+  impl_->known_group_names.clear();
+  impl_->known_group_visibility.clear();
   impl_->tree_views.clear();
   impl_->tree_models.clear();
   impl_->tree_canvas.clear();
@@ -1489,7 +1714,7 @@ std::vector<std::string> QgisMapStack::mirrorOrderTopFirst() const {
   std::vector<std::string> result;
   QgsLayerTreeGroup* root = project()->layerTreeRoot();
   for (QgsLayerTreeNode* child : root->children()) {
-    QgsLayerTreeLayer* layerNode = qobject_cast<QgsLayerTreeLayer*>(child);
+    QgsLayerTreeLayer* layerNode = treeLayerCast(child);
     if (!layerNode) continue;
     QgsMapLayer* layer = layerNode->layer();
     if (!layer) continue;
@@ -1517,6 +1742,329 @@ bool QgisMapStack::mirrorLayerVisibility(const std::string& doc_id) const {
 
 bool QgisMapStack::treeEchoSuppressed() const noexcept {
   return impl_ && impl_->suppress_tree_callbacks > 0;
+}
+
+// ---------------------------------------------------------------- V5 groups
+
+QgsLayerTreeGroup* QgisMapStack::findGroupByGroupId(const std::string& group_id) const {
+  return findGroupByGroupIdIn(project()->layerTreeRoot(), group_id);
+}
+
+bool QgisMapStack::groupExists(const std::string& group_id) const {
+  if (!impl_ || !impl_->initialized) return false;
+  return findGroupByGroupId(group_id) != nullptr;
+}
+
+bool QgisMapStack::upsertGroup(const std::string& group_id, const std::string& name,
+                               const std::string& parent_group_id) {
+  if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
+  if (group_id.empty()) throw std::invalid_argument("group_id must not be empty");
+  QgsLayerTree* root = project()->layerTreeRoot();
+  QgsLayerTreeGroup* parent = root;
+  if (!parent_group_id.empty()) {
+    parent = findGroupByGroupIdIn(root, parent_group_id);
+    if (parent == nullptr) {
+      throw std::invalid_argument("parent group not found: " + parent_group_id);
+    }
+  }
+  SuppressGuard guard(&impl_->suppress_tree_callbacks);
+  QgsLayerTreeGroup* existing = findGroupByGroupIdIn(root, group_id);
+  if (existing == nullptr) {
+    auto* node = new QgsLayerTreeGroup(QString::fromStdString(name));
+    node->setCustomProperty(kGroupIdProp, QString::fromStdString(group_id));
+    parent->addChildNode(node);
+    existing = node;
+    wireNodeExpandSignal(node);  // V5：新组接入展开态回调
+  } else {
+    if (existing->name().toStdString() != name) {
+      existing->setName(QString::fromStdString(name));
+    }
+    if (existing != parent && existing->parent() != parent) {
+      // 挂错父组：整体搬移。takeChild 会先递归卸下后代——先做子树
+      // 保护性卸载再搬空组、按原结构挂回。
+      QgsLayerTreeNode* oldParent = existing->parent();
+      if (oldParent != nullptr && oldParent->children().indexOf(existing) >= 0) {
+        QList<SubtreeDetachEntry*> subtreeLog;
+        detachGroupSubtree(existing, &subtreeLog);
+        oldParent->takeChild(existing);
+        parent->addChildNode(existing);
+        restoreGroupSubtree(subtreeLog);
+        qDeleteAll(subtreeLog);
+      }
+    }
+  }
+  impl_->known_group_names[group_id] = name;
+  // 可见性基线同步建立（否则用户首次勾选被当"首次见面"吞掉）。
+  impl_->known_group_visibility[group_id] = existing->itemVisibilityChecked();
+  for (auto& kv : impl_->canvas_refs) {
+    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
+  }
+  return true;
+}
+
+int QgisMapStack::removeGroupsExcept(const std::vector<std::string>& group_ids) {
+  if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
+  const std::unordered_set<std::string> keep(group_ids.begin(), group_ids.end());
+  SuppressGuard guard(&impl_->suppress_tree_callbacks);
+  QgsLayerTree* root = project()->layerTreeRoot();
+  int removed = 0;
+  // 注册表桥 detach（#1154）：removeChildNode 的 removedChildren 计数
+  // 不受 setEnabled 控制，必须整体断开——上提的图层才不会被排队注销。
+  {
+    RegistryBridgeDetach bridgeDetach{project(), root};
+    // 收集要删的组（自底向上删，子组先于父组）。
+    std::vector<QgsLayerTreeGroup*> doomed;
+    std::function<void(QgsLayerTreeGroup*)> collect =
+        [&](QgsLayerTreeGroup* parent) {
+          for (QgsLayerTreeNode* child : parent->children()) {
+            auto* group = treeGroupCast(child);
+            if (group == nullptr) continue;
+            collect(group);
+            const std::string gid = group->customProperty(kGroupIdProp).toString().toStdString();
+            if (!gid.empty() && keep.find(gid) == keep.end()) {
+              doomed.push_back(group);
+            }
+          }
+        };
+    collect(root);
+    for (QgsLayerTreeGroup* group : doomed) {
+      // 先把子节点上提到本组的父组——组删除绝不带走图层。
+      QgsLayerTreeNode* parentNode = group->parent();
+      auto* parentGroup = treeGroupCast(parentNode);
+      if (parentGroup == nullptr) continue;
+      const QList<QgsLayerTreeNode*> children = group->children();
+      for (QgsLayerTreeNode* child : children) {
+        group->takeChild(child);
+        parentGroup->addChildNode(child);
+      }
+      const std::string gid = group->customProperty(kGroupIdProp).toString().toStdString();
+      parentGroup->removeChildNode(group);
+      impl_->known_group_names.erase(gid);
+      impl_->known_group_visibility.erase(gid);
+      removed++;
+    }
+  }
+  for (auto& kv : impl_->canvas_refs) {
+    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
+  }
+  return removed;
+}
+
+void QgisMapStack::renameGroup(const std::string& group_id, const std::string& name) {
+  if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
+  QgsLayerTreeGroup* group = findGroupByGroupId(group_id);
+  if (group == nullptr) throw std::invalid_argument("unknown group_id: " + group_id);
+  {
+    SuppressGuard guard(&impl_->suppress_tree_callbacks);
+    group->setName(QString::fromStdString(name));
+  }
+  impl_->known_group_names[group_id] = name;
+}
+
+void QgisMapStack::setGroupVisibility(const std::string& group_id, bool visible) {
+  if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
+  QgsLayerTreeGroup* group = findGroupByGroupId(group_id);
+  if (group == nullptr) throw std::invalid_argument("unknown group_id: " + group_id);
+  {
+    SuppressGuard guard(&impl_->suppress_tree_callbacks);
+    group->setItemVisibilityChecked(visible);
+  }
+  impl_->known_group_visibility[group_id] = visible;
+  for (auto& kv : impl_->canvas_refs) {
+    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
+  }
+}
+
+void QgisMapStack::moveLayerToGroup(const std::string& doc_id,
+                                    const std::string& group_id, int index) {
+  if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
+  QgsVectorLayer* layer = nullptr;
+  auto it = impl_->mirror_by_doc.find(doc_id);
+  if (it != impl_->mirror_by_doc.end()) {
+    layer = qobject_cast<QgsVectorLayer*>(
+        project()->mapLayer(QString::fromStdString(it->second)));
+  }
+  if (layer == nullptr) layer = findMirrorByDocId(project(), doc_id);
+  if (layer == nullptr) throw std::invalid_argument("unknown doc_id: " + doc_id);
+  QgsLayerTree* root = project()->layerTreeRoot();
+  QgsLayerTreeLayer* node = root->findLayer(layer);
+  if (node == nullptr) throw std::invalid_argument("layer node not found: " + doc_id);
+  QgsLayerTreeGroup* target = root;
+  if (!group_id.empty()) {
+    target = findGroupByGroupIdIn(root, group_id);
+    if (target == nullptr) throw std::invalid_argument("unknown group_id: " + group_id);
+  }
+  {
+    // 注册表桥 detach 舞步与 setMirrorLayerOrder 相同（#1154）。
+    SuppressGuard guard(&impl_->suppress_tree_callbacks);
+    RegistryBridgeDetach bridgeDetach{project(), root};
+    QgsLayerTreeNode* parent = node->parent();
+    if (parent == target) {
+      const int current = target->children().indexOf(node);
+      const int wanted = index < 0
+          ? static_cast<int>(target->children().size()) - 1
+          : std::min<int>(index, static_cast<int>(target->children().size()) - 1);
+      if (current == wanted) return;  // 已就位：no-op
+    }
+    const int count = static_cast<int>(target->children().size());
+    const int clamped = index < 0 ? count : std::min(index, count);
+    if (parent != nullptr) {
+      parent->takeChild(node);  // 解除挂载；节点指针仍有效
+    }
+    target->insertChildNode(clamped, node);
+  }
+  for (auto& kv : impl_->canvas_refs) {
+    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
+  }
+}
+
+void QgisMapStack::moveGroup(const std::string& group_id,
+                             const std::string& parent_group_id, int index) {
+  if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
+  QgsLayerTree* root = project()->layerTreeRoot();
+  QgsLayerTreeGroup* group = findGroupByGroupIdIn(root, group_id);
+  if (group == nullptr) throw std::invalid_argument("unknown group_id: " + group_id);
+  QgsLayerTreeGroup* target = root;
+  if (!parent_group_id.empty()) {
+    target = findGroupByGroupIdIn(root, parent_group_id);
+    if (target == nullptr) {
+      throw std::invalid_argument("unknown parent group_id: " + parent_group_id);
+    }
+  }
+  if (target != root && isDescendantOf(target, group)) {
+    throw std::invalid_argument("cannot move a group into its own descendant");
+  }
+  {
+    SuppressGuard guard(&impl_->suppress_tree_callbacks);
+    QgsLayerTreeNode* parent = group->parent();
+    const int count = static_cast<int>(target->children().size());
+    const int clamped = index < 0 ? count : std::min(index, count);
+    if (parent != nullptr) {
+      // 子树保护性卸载 → 空组搬运 → 原结构挂回（takeChild 递归 orphan 后代）。
+      QList<SubtreeDetachEntry*> subtreeLog;
+      detachGroupSubtree(group, &subtreeLog);
+      parent->takeChild(group);
+      target->insertChildNode(clamped, group);
+      restoreGroupSubtree(subtreeLog);
+      qDeleteAll(subtreeLog);
+    } else {
+      target->insertChildNode(clamped, group);
+    }
+  }
+  for (auto& kv : impl_->canvas_refs) {
+    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
+  }
+}
+
+std::string QgisMapStack::treeSnapshotJson() const {
+  if (!impl_ || !impl_->initialized) {
+    throw std::runtime_error("map stack is not initialized");
+  }
+  QJsonArray children;
+  for (QgsLayerTreeNode* child : project()->layerTreeRoot()->children()) {
+    appendNodeToJson(child, &children);
+  }
+  QJsonObject root;
+  root.insert(QStringLiteral("children"), children);
+  return QJsonDocument(root).toJson(QJsonDocument::Compact).toStdString();
+}
+
+void QgisMapStack::setGroupExpanded(std::uintptr_t tree_view,
+                                    const std::string& node_id, bool expanded) {
+  (void)treeViewOrThrow(tree_view);  // 树地址校验（节点级 setExpanded 自带视图联动）
+  QgsLayerTreeNode* node = findGroupByGroupId(node_id);
+  if (node == nullptr) return;
+  {
+    SuppressGuard guard(&impl_->suppress_tree_callbacks);
+    node->setExpanded(expanded);
+  }
+}
+
+std::string QgisMapStack::applyTreePlacements(const std::string& placements_json) {
+  if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
+  QJsonParseError parseErr;
+  const QJsonDocument doc = QJsonDocument::fromJson(
+      QByteArray::fromStdString(placements_json), &parseErr);
+  if (parseErr.error != QJsonParseError::NoError || !doc.isArray()) {
+    throw std::invalid_argument("invalid placements JSON");
+  }
+  QgsLayerTree* root = project()->layerTreeRoot();
+  // 一次遍历建索引：doc_id → layer 节点；group_id → 组节点。
+  std::unordered_map<std::string, QgsLayerTreeLayer*> layerByDoc;
+  std::unordered_map<std::string, QgsLayerTreeGroup*> groupByGid;
+  std::function<void(QgsLayerTreeGroup*)> index = [&](QgsLayerTreeGroup* parent) {
+    for (QgsLayerTreeNode* child : parent->children()) {
+      if (auto* layerNode = treeLayerCast(child)) {
+        QgsMapLayer* layer = layerNode->layer();
+        if (layer != nullptr) {
+          const QString d = layer->customProperty(QStringLiteral("pwb/doc_id")).toString();
+          if (!d.isEmpty()) {
+            layerByDoc[d.toStdString()] = layerNode;
+          }
+        }
+      } else if (auto* group = treeGroupCast(child)) {
+        const std::string gid = ensureGroupNodeId(group);
+        groupByGid[gid] = group;
+        index(group);
+      }
+    }
+  };
+  index(root);
+
+  int applied = 0;
+  int skipped = 0;
+  {
+    SuppressGuard guard(&impl_->suppress_tree_callbacks);
+    RegistryBridgeDetach bridgeDetach{project(), root};
+    for (const QJsonValue& value : doc.array()) {
+      if (!value.isObject()) continue;
+      const QJsonObject item = value.toObject();
+      const QString nodeRef = item.value(QStringLiteral("node")).toString();
+      const QString parentRef = item.value(QStringLiteral("parent")).toString();
+      const int index1 = item.value(QStringLiteral("index")).toInt(-1);
+      QgsLayerTreeGroup* target = root;
+      if (!parentRef.isEmpty()) {
+        auto found = groupByGid.find(parentRef.toStdString());
+        if (found == groupByGid.end()) { skipped++; continue; }
+        target = found->second;
+      }
+      if (nodeRef.startsWith(QStringLiteral("group:"))) {
+        auto found = groupByGid.find(
+            nodeRef.mid(static_cast<int>(strlen("group:"))).toStdString());
+        if (found == groupByGid.end()) { skipped++; continue; }
+        QgsLayerTreeGroup* group = found->second;
+        if (group == target || isDescendantOf(target, group)) { skipped++; continue; }
+        QList<SubtreeDetachEntry*> subtreeLog;
+        detachGroupSubtree(group, &subtreeLog);
+        if (QgsLayerTreeNode* parent = group->parent()) {
+          parent->takeChild(group);
+        }
+        const int count = static_cast<int>(target->children().size());
+        target->insertChildNode(
+            index1 < 0 ? count : std::min(index1, count), group);
+        restoreGroupSubtree(subtreeLog);
+        qDeleteAll(subtreeLog);
+      } else {
+        auto found = layerByDoc.find(nodeRef.toStdString());
+        if (found == layerByDoc.end()) { skipped++; continue; }
+        QgsLayerTreeLayer* node = found->second;
+        if (QgsLayerTreeNode* parent = node->parent()) {
+          parent->takeChild(node);
+        }
+        const int count = static_cast<int>(target->children().size());
+        target->insertChildNode(
+            index1 < 0 ? count : std::min(index1, count), node);
+      }
+      applied++;
+    }
+  }
+  for (auto& kv : impl_->canvas_refs) {
+    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
+  }
+  QJsonObject out;
+  out.insert(QStringLiteral("applied"), applied);
+  out.insert(QStringLiteral("skipped"), skipped);
+  return QJsonDocument(out).toJson(QJsonDocument::Compact).toStdString();
 }
 
 std::string QgisMapStack::writeProjectXml() {
@@ -1560,48 +2108,132 @@ int QgisMapStack::applyProjectXml(const std::string& xml) {
 
   SuppressGuard guard(&impl_->suppress_tree_callbacks);
   int applied = 0;
-  std::vector<std::string> order;
-  QgsLayerTreeGroup* donorRoot = donor.layerTreeRoot();
-  for (QgsLayerTreeNode* child : donorRoot->children()) {
-    auto* layerNode = qobject_cast<QgsLayerTreeLayer*>(child);
-    if (layerNode == nullptr) continue;
-    QgsMapLayer* donorLayer = layerNode->layer();
-    if (donorLayer == nullptr) continue;
-    const QString doc = donorLayer->customProperty(QStringLiteral("pwb/doc_id")).toString();
-    if (doc.isEmpty()) continue;
-    const std::string doc_id = doc.toStdString();
-    order.push_back(doc_id);
-    QgsVectorLayer* live = findMirrorByDocId(project(), doc_id);
-    if (live == nullptr) continue;
-    auto* donorVl = qobject_cast<QgsVectorLayer*>(donorLayer);
-    if (donorVl != nullptr) {
-      if (donorVl->renderer() != nullptr) {
-        live->setRenderer(donorVl->renderer()->clone());
-      }
-      live->setLabelsEnabled(donorVl->labelsEnabled());
-      if (donorVl->labeling() != nullptr) {
-        live->setLabeling(donorVl->labeling()->clone());
-      } else {
-        live->setLabeling(nullptr);
+  // V5：donor 树按层级遍历（组 + 图层）。先应用样式/可见性，再恢复
+  // 组结构与放置；无组时保持 legacy 平铺顺序路径。
+  struct Placement {
+    std::string doc_id;
+    std::string parent_group_id;
+    int index;
+    bool visible;
+  };
+  // (id, name, parent_gid) 自上而下（父先于子）。
+  std::vector<std::tuple<std::string, std::string, std::string>> groupPlacements;
+  std::vector<Placement> placements;
+  std::vector<std::string> flatOrder;
+  std::function<void(QgsLayerTreeGroup*, const std::string&, bool)> walk =
+      [&](QgsLayerTreeGroup* parent, const std::string& parent_gid, bool inGroup) {
+        int index = 0;
+        for (QgsLayerTreeNode* child : parent->children()) {
+          if (auto* donorGroup = treeGroupCast(child)) {
+            const QString gidRaw =
+                donorGroup->customProperty(QStringLiteral("pwb/group_id")).toString();
+            const std::string gid =
+                gidRaw.isEmpty()
+                    ? "user_" + QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString()
+                    : gidRaw.toStdString();
+            groupPlacements.emplace_back(
+                gid, donorGroup->name().toStdString(), parent_gid);
+            walk(donorGroup, gid, true);
+            continue;
+          }
+          auto* layerNode = treeLayerCast(child);
+          if (layerNode == nullptr) continue;
+          QgsMapLayer* donorLayer = layerNode->layer();
+          if (donorLayer == nullptr) continue;
+          const QString doc =
+              donorLayer->customProperty(QStringLiteral("pwb/doc_id")).toString();
+          if (doc.isEmpty()) continue;
+          const std::string doc_id = doc.toStdString();
+          flatOrder.push_back(doc_id);
+          placements.push_back(
+              {doc_id, parent_gid, index, layerNode->itemVisibilityChecked()});
+          index++;
+          QgsVectorLayer* live = findMirrorByDocId(project(), doc_id);
+          if (live == nullptr) continue;
+          auto* donorVl = qobject_cast<QgsVectorLayer*>(donorLayer);
+          if (donorVl != nullptr) {
+            if (donorVl->renderer() != nullptr) {
+              live->setRenderer(donorVl->renderer()->clone());
+            }
+            live->setLabelsEnabled(donorVl->labelsEnabled());
+            if (donorVl->labeling() != nullptr) {
+              live->setLabeling(donorVl->labeling()->clone());
+            } else {
+              live->setLabeling(nullptr);
+            }
+          }
+          live->setOpacity(donorLayer->opacity());
+          live->setName(donorLayer->name());
+          QgsLayerTreeLayer* liveNode = project()->layerTreeRoot()->findLayer(live);
+          if (liveNode != nullptr) {
+            const bool visible = layerNode->itemVisibilityChecked();
+            liveNode->setItemVisibilityChecked(visible);
+            impl_->known_layer_visibility[doc_id] = visible;
+          }
+          applied++;
+        }
+      };
+  walk(donor.layerTreeRoot(), std::string(), false);
+
+  if (!groupPlacements.empty()) {
+    // 组结构恢复：donor 出现序自上而下（父先于子），嵌套父级按 donor 挂载。
+    for (const auto& [gid, name, parent_gid] : groupPlacements) {
+      upsertGroupUnderLock(gid, name, parent_gid);
+    }
+    for (const auto& placement : placements) {
+      if (findMirrorByDocId(project(), placement.doc_id) == nullptr) continue;
+      try {
+        moveLayerToGroupUnderLock(placement.doc_id, placement.parent_group_id,
+                                  placement.index);
+      } catch (const std::exception&) {
+        // 放置失败不阻断其余恢复（如组缺失→根）。
       }
     }
-    live->setOpacity(donorLayer->opacity());
-    live->setName(donorLayer->name());
-    QgsLayerTreeLayer* liveNode = project()->layerTreeRoot()->findLayer(live);
-    if (liveNode != nullptr) {
-      const bool visible = layerNode->itemVisibilityChecked();
-      liveNode->setItemVisibilityChecked(visible);
-      impl_->known_layer_visibility[doc_id] = visible;
-    }
-    applied++;
-  }
-  if (!order.empty()) {
-    setMirrorLayerOrder(order);
+  } else if (!flatOrder.empty()) {
+    setMirrorLayerOrder(flatOrder);
   }
   for (auto& kv : impl_->canvas_refs) {
     if (!kv.second.isNull()) syncCanvasLayers(kv.first);
   }
   return applied;
+}
+
+void QgisMapStack::upsertGroupUnderLock(const std::string& group_id,
+                                        const std::string& name,
+                                        const std::string& parent_group_id) {
+  // applyProjectXml 已持 SuppressGuard；donor 出现序保证父组先建。
+  QgsLayerTree* root = project()->layerTreeRoot();
+  if (findGroupByGroupIdIn(root, group_id) != nullptr) return;
+  QgsLayerTreeGroup* parent = root;
+  if (!parent_group_id.empty()) {
+    parent = findGroupByGroupIdIn(root, parent_group_id);
+    if (parent == nullptr) parent = root;  // 父组缺失退根（不丢组）
+  }
+  auto* node = new QgsLayerTreeGroup(QString::fromStdString(name));
+  node->setCustomProperty(kGroupIdProp, QString::fromStdString(group_id));
+  parent->addChildNode(node);
+  wireNodeExpandSignal(node);
+  impl_->known_group_names[group_id] = name;
+}
+
+void QgisMapStack::moveLayerToGroupUnderLock(const std::string& doc_id,
+                                             const std::string& group_id, int index) {
+  QgsVectorLayer* layer = findMirrorByDocId(project(), doc_id);
+  if (layer == nullptr) return;
+  QgsLayerTree* root = project()->layerTreeRoot();
+  QgsLayerTreeLayer* node = root->findLayer(layer);
+  if (node == nullptr) return;
+  QgsLayerTreeGroup* target = root;
+  if (!group_id.empty()) {
+    target = findGroupByGroupIdIn(root, group_id);
+    if (target == nullptr) return;
+  }
+  QgsLayerTreeNode* parent = node->parent();
+  const int count = static_cast<int>(target->children().size());
+  if (parent != nullptr) {
+    parent->takeChild(node);
+  }
+  target->insertChildNode(index < 0 ? count : std::min(index, count), node);
 }
 
 void QgisMapStack::setSnappingConfig(std::uintptr_t canvas_addr,
@@ -2053,6 +2685,11 @@ void QgisMapStack::cleanupTreeViewState(std::uintptr_t tree_view) {
     impl_->orphan_tree_menu_callbacks.push_back(std::move(menuCb->second));
     impl_->tree_menu_callbacks.erase(menuCb);
   }
+  auto expandCb = impl_->tree_expand_callbacks.find(tree_view);
+  if (expandCb != impl_->tree_expand_callbacks.end()) {
+    impl_->orphan_tree_expand_callbacks.push_back(std::move(expandCb->second));
+    impl_->tree_expand_callbacks.erase(expandCb);
+  }
   impl_->tree_pending.erase(tree_view);
   impl_->tree_flush_scheduled.erase(tree_view);
   impl_->tree_views.erase(tree_view);
@@ -2091,30 +2728,91 @@ std::uintptr_t QgisMapStack::createLayerTreeView(std::uintptr_t canvas_addr) {
       model, &QgsLayerTreeModel::dataChanged, view,
       [this, addr](const QModelIndex& topLeft, const QModelIndex&, const QVector<int>& roles) {
         const bool allRoles = roles.isEmpty();
-        onTreeDataChanged(addr, topLeft.row(),
+        onTreeDataChanged(addr, topLeft,
                           allRoles || roles.contains(Qt::CheckStateRole),
                           allRoles || roles.contains(Qt::DisplayRole) || roles.contains(Qt::EditRole));
       }));
   conns.push_back(QObject::connect(
       model, &QgsLayerTreeModel::rowsMoved, view,
       [this, addr](const QModelIndex&, int, int, const QModelIndex&, int) {
-        onTreeOrderChanged(addr);
+        onTreeOrderChanged(addr, true);
       }));
   // QGIS 的节点移动（含用户 DnD：insertChildNodes + removeRows）不产生
   // rowsMoved，而是 rowsInserted/rowsRemoved 成对出现；flush 已按 tick 合并。
+  // V5 分组：组内插入/移除同样是结构变化；图例行（图层节点之下）仍是噪声。
   conns.push_back(QObject::connect(
       model, &QgsLayerTreeModel::rowsInserted, view,
-      [this, addr](const QModelIndex& parent, int, int) {
-        if (parent.isValid()) return;  // 图例行等子级变化不算顶层排序
-        onTreeOrderChanged(addr);
+      [this, addr, model](const QModelIndex& parent, int, int) {
+        QgsLayerTreeNode* parentNode =
+            parent.isValid() ? model->index2node(parent) : nullptr;
+        if (parent.isValid()) {
+          // 只关心 root/组之下的插入；图层节点下是图例行。
+          if (treeLayerCast(parentNode) != nullptr) return;
+          onTreeOrderChanged(addr, true);
+          return;
+        }
+        onTreeOrderChanged(addr, false);  // 顶层排序变化（legacy order 键）
       }));
   conns.push_back(QObject::connect(
       model, &QgsLayerTreeModel::rowsRemoved, view,
-      [this, addr](const QModelIndex& parent, int, int) {
-        if (parent.isValid()) return;
-        onTreeOrderChanged(addr);
+      [this, addr, model](const QModelIndex& parent, int, int) {
+        QgsLayerTreeNode* parentNode =
+            parent.isValid() ? model->index2node(parent) : nullptr;
+        if (parent.isValid()) {
+          if (treeLayerCast(parentNode) != nullptr) return;
+          onTreeOrderChanged(addr, true);
+          return;
+        }
+        onTreeOrderChanged(addr, false);
       }));
+  // 组展开态回调（V5 StageViewState 持久化）。expandedChanged 是
+  // QgsLayerTreeNode 级信号：树视图创建/组创建时对全部节点接线。
+  wireNodeExpandSignalsRecursively(root);
   return addr;
+}
+
+void QgisMapStack::wireNodeExpandSignalsRecursively(QgsLayerTreeNode* node) {
+  // 只接组节点（StageViewState 的展开态是组级语义）；layer 接线会让
+  // 大规模插入每层触发一次 Python 回调（GIL 往返），大树上不可接受。
+  if (node == nullptr) return;
+  if (treeGroupCast(node) == nullptr) return;
+  if (node != project()->layerTreeRoot()) {
+    wireNodeExpandSignal(node);
+  }
+  const QList<QgsLayerTreeNode*> children = node->children();
+  for (QgsLayerTreeNode* child : children) {
+    if (treeGroupCast(child) != nullptr) {
+      wireNodeExpandSignalsRecursively(child);
+    }
+  }
+}
+
+void QgisMapStack::wireNodeExpandSignal(QgsLayerTreeNode* node) {
+  if (node == nullptr) return;
+  // 去重标记：custom property 随节点生灭（地址复用不会误判已接线）。
+  if (node->customProperty("pwb/expand_wired").toBool()) return;
+  node->setCustomProperty("pwb/expand_wired", true);
+  std::weak_ptr<char> alive = alive_token_;
+  impl_->node_expand_connections.push_back(QObject::connect(
+      node, &QgsLayerTreeNode::expandedChanged, node,
+      [this, alive](QgsLayerTreeNode* changed, bool expanded) {
+        if (alive.expired()) return;
+        if (impl_->suppress_tree_callbacks > 0) return;
+        std::string id;
+        if (auto* group = treeGroupCast(changed)) {
+          id = ensureGroupNodeId(group);
+        } else if (auto* layerNode = treeLayerCast(changed)) {
+          if (layerNode->layer() != nullptr) {
+            id = layerNode->layer()
+                     ->customProperty(QStringLiteral("pwb/doc_id"))
+                     .toString().toStdString();
+          }
+        }
+        if (id.empty()) return;
+        for (auto& kv : impl_->tree_expand_callbacks) {
+          if (kv.second) kv.second(id, expanded);
+        }
+      }));
 }
 
 QgsLayerTreeView* QgisMapStack::treeViewOrThrow(std::uintptr_t address) const {
@@ -2184,7 +2882,23 @@ void QgisMapStack::setTreeChangeCallback(
   impl_->tree_change_callbacks[tree_addr] = std::move(callback);
 }
 
-void QgisMapStack::onTreeDataChanged(std::uintptr_t tree_addr, int row,
+void QgisMapStack::setTreeExpandCallback(
+    std::uintptr_t tree_addr,
+    std::function<void(const std::string&, bool)> callback) {
+  treeViewOrThrow(tree_addr);
+  // 孤儿回调坟场语义同 tree_change_callbacks（destroyed 链上不能销毁
+  // 含 py::function 的 std::function）。
+  auto it = impl_->tree_expand_callbacks.find(tree_addr);
+  if (it != impl_->tree_expand_callbacks.end()) {
+    impl_->orphan_tree_expand_callbacks.push_back(std::move(it->second));
+    impl_->tree_expand_callbacks.erase(it);
+  }
+  impl_->tree_expand_callbacks[tree_addr] = std::move(callback);
+  // 既有树节点统一接线（新节点在 upsertGroup 时接线）。
+  wireNodeExpandSignalsRecursively(project()->layerTreeRoot());
+}
+
+void QgisMapStack::onTreeDataChanged(std::uintptr_t tree_addr, const QModelIndex& topLeft,
                                      bool check_role, bool display_role) {
   if (impl_->suppress_tree_callbacks > 0) return;
   if (!impl_->tree_change_callbacks.count(tree_addr)) return;
@@ -2193,42 +2907,72 @@ void QgisMapStack::onTreeDataChanged(std::uintptr_t tree_addr, int row,
   auto mIt = impl_->tree_models.find(tree_addr);
   if (mIt == impl_->tree_models.end() || mIt->second.isNull()) return;
   QgsLayerTreeModel* model = mIt->second.data();
-  QgsLayerTreeNode* node = model->index2node(model->index(row, 0));
-  QgsLayerTreeLayer* layerNode = qobject_cast<QgsLayerTreeLayer*>(node);
-  if (!layerNode) return;
-  QgsMapLayer* layer = layerNode->layer();
-  if (!layer) return;
-  const QVariant docVar = layer->customProperty(QStringLiteral("pwb/doc_id"));
-  if (!docVar.isValid() || docVar.toString().isEmpty()) return;
-  const std::string doc_id = docVar.toString().toStdString();
+  // V5：index2node 支持任意深度（组内图层的勾选/改名同样回写）。
+  QgsLayerTreeNode* node = topLeft.isValid() ? model->index2node(topLeft) : nullptr;
+  if (node == nullptr) return;
   auto& pending = impl_->tree_pending[tree_addr];
   bool touched = false;
-  if (check_role) {
-    const bool checked = layerNode->itemVisibilityChecked();
-    auto shadowIt = impl_->known_layer_visibility.find(doc_id);
-    if (shadowIt == impl_->known_layer_visibility.end()) {
-      impl_->known_layer_visibility[doc_id] = checked;  // 首次见面只建基线
-    } else if (shadowIt->second != checked) {
-      shadowIt->second = checked;
-      pending.visibility[QString::fromStdString(doc_id)] = checked;
-      touched = true;
+  if (auto* layerNode = treeLayerCast(node)) {
+    QgsMapLayer* layer = layerNode->layer();
+    if (layer == nullptr) return;
+    const QVariant docVar = layer->customProperty(QStringLiteral("pwb/doc_id"));
+    if (!docVar.isValid() || docVar.toString().isEmpty()) return;
+    const std::string doc_id = docVar.toString().toStdString();
+    if (check_role) {
+      const bool checked = layerNode->itemVisibilityChecked();
+      auto shadowIt = impl_->known_layer_visibility.find(doc_id);
+      if (shadowIt == impl_->known_layer_visibility.end()) {
+        impl_->known_layer_visibility[doc_id] = checked;  // 首次见面只建基线
+      } else if (shadowIt->second != checked) {
+        shadowIt->second = checked;
+        pending.visibility[QString::fromStdString(doc_id)] = checked;
+        appendTreeEvent(&pending.events, "visibility", "layer", doc_id, checked);
+        touched = true;
+      }
     }
-  }
-  if (display_role) {
-    const std::string name = layer->name().toStdString();
-    auto shadowIt = impl_->known_layer_names.find(doc_id);
-    if (shadowIt == impl_->known_layer_names.end()) {
-      impl_->known_layer_names[doc_id] = name;  // 首次见面只建基线，不报重命名
-    } else if (shadowIt->second != name) {
-      shadowIt->second = name;
-      pending.renames[QString::fromStdString(doc_id)] = QString::fromStdString(name);
-      touched = true;
+    if (display_role) {
+      const std::string name = layer->name().toStdString();
+      auto shadowIt = impl_->known_layer_names.find(doc_id);
+      if (shadowIt == impl_->known_layer_names.end()) {
+        impl_->known_layer_names[doc_id] = name;  // 首次见面只建基线，不报重命名
+      } else if (shadowIt->second != name) {
+        shadowIt->second = name;
+        pending.renames[QString::fromStdString(doc_id)] = QString::fromStdString(name);
+        appendTreeEvent(&pending.events, "rename", "layer", doc_id, name);
+        touched = true;
+      }
+    }
+  } else if (auto* groupNode = treeGroupCast(node)) {
+    // V5：组节点勾选（tri-state 语义由 QGIS 原生处理）/改名回写。
+    const std::string gid = ensureGroupNodeId(groupNode);
+    if (gid.empty()) return;
+    if (check_role) {
+      const bool checked = groupNode->itemVisibilityChecked();
+      auto shadowIt = impl_->known_group_visibility.find(gid);
+      if (shadowIt == impl_->known_group_visibility.end()) {
+        impl_->known_group_visibility[gid] = checked;
+      } else if (shadowIt->second != checked) {
+        shadowIt->second = checked;
+        appendTreeEvent(&pending.events, "visibility", "group", gid, checked);
+        touched = true;
+      }
+    }
+    if (display_role) {
+      const std::string name = groupNode->name().toStdString();
+      auto shadowIt = impl_->known_group_names.find(gid);
+      if (shadowIt == impl_->known_group_names.end()) {
+        impl_->known_group_names[gid] = name;
+      } else if (shadowIt->second != name) {
+        shadowIt->second = name;
+        appendTreeEvent(&pending.events, "rename", "group", gid, name);
+        touched = true;
+      }
     }
   }
   if (touched) scheduleTreeChangeFlush(tree_addr);
 }
 
-void QgisMapStack::onTreeOrderChanged(std::uintptr_t tree_addr) {
+void QgisMapStack::onTreeOrderChanged(std::uintptr_t tree_addr, bool structure) {
   if (impl_->suppress_tree_callbacks > 0) return;
   if (!impl_->tree_change_callbacks.count(tree_addr)) return;
   auto viewIt = impl_->tree_views.find(tree_addr);
@@ -2237,6 +2981,11 @@ void QgisMapStack::onTreeOrderChanged(std::uintptr_t tree_addr) {
   pending.order.clear();
   for (const auto& doc : mirrorOrderTopFirst()) {
     pending.order.push_back(QString::fromStdString(doc));
+  }
+  if (structure) {
+    // V5：全层级结构快照（覆盖 move/group-create/group-delete，用户在
+    // QGIS 树里的任何重排/建组/删组经此一次性回声，Python 侧 diff）。
+    pending.tree_dirty = true;
   }
   scheduleTreeChangeFlush(tree_addr);
 }
@@ -2266,6 +3015,9 @@ void QgisMapStack::flushTreeChange(std::uintptr_t tree_addr) {
   if (cbIt == impl_->tree_change_callbacks.end() || !cbIt->second) return;
   if (batch.empty()) return;
   QJsonObject root;
+  // V5 schema 2：保留 legacy visibility/order/renames 键（平铺图层语义，
+  // 旧消费者不破），追加 typed events 与全层级 tree 快照。
+  root.insert(QStringLiteral("schema"), 2);
   if (!batch.visibility.isEmpty()) {
     QJsonObject vis;
     for (auto it = batch.visibility.begin(); it != batch.visibility.end(); ++it) {
@@ -2282,6 +3034,16 @@ void QgisMapStack::flushTreeChange(std::uintptr_t tree_addr) {
       ren.insert(it.key(), it.value());
     }
     root.insert(QStringLiteral("renames"), ren);
+  }
+  if (!batch.events.isEmpty()) {
+    root.insert(QStringLiteral("events"), batch.events);
+  }
+  if (batch.tree_dirty) {
+    QJsonArray children;
+    for (QgsLayerTreeNode* child : project()->layerTreeRoot()->children()) {
+      appendNodeToJson(child, &children);
+    }
+    root.insert(QStringLiteral("tree"), children);
   }
   cbIt->second(QString::fromUtf8(
       QJsonDocument(root).toJson(QJsonDocument::Compact)).toStdString());
@@ -2330,7 +3092,7 @@ void QgisMapStack::treeViewMoveRow(std::uintptr_t tree, int from, int to) {
   // 1. drop new 2. remove old"）。反过来先 take 后插会把图层从 project 误删。
   // QgsLayerTreeModel 不实现 moveRows，不能直接走模型。
   QgsLayerTreeGroup* root = project()->layerTreeRoot();
-  QgsLayerTreeLayer* node = qobject_cast<QgsLayerTreeLayer*>(root->children().value(from));
+  QgsLayerTreeLayer* node = treeLayerCast(root->children().value(from));
   if (!node || !node->layer()) throw std::runtime_error("tree view moveRow: source node missing");
   QgsLayerTreeNode* parent = node->parent();
   if (!parent) throw std::runtime_error("tree view moveRow: node has no parent");

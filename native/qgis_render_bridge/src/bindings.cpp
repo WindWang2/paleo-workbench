@@ -741,6 +741,37 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                      f(key, doc);
                    });
              })
+        .def("set_tree_expand_callback",
+             [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t tree, py::function f) {
+               self.setTreeExpandCallback(
+                   tree, [f = std::move(f)](const std::string& node_id, bool expanded) {
+                     py::gil_scoped_acquire gil;
+                     f(node_id, expanded);
+                   });
+             })
+        // ------------------------------------------------------ V5 layer groups
+        .def("group_exists", &pwb::qgis_render::QgisMapStack::groupExists,
+             py::arg("group_id"))
+        .def("upsert_group", &pwb::qgis_render::QgisMapStack::upsertGroup,
+             py::arg("group_id"), py::arg("name"), py::arg("parent_group_id") = "")
+        .def("remove_groups_except",
+             &pwb::qgis_render::QgisMapStack::removeGroupsExcept,
+             py::arg("group_ids"))
+        .def("rename_group", &pwb::qgis_render::QgisMapStack::renameGroup)
+        .def("set_group_visibility",
+             &pwb::qgis_render::QgisMapStack::setGroupVisibility)
+        .def("move_layer_to_group",
+             &pwb::qgis_render::QgisMapStack::moveLayerToGroup,
+             py::arg("doc_id"), py::arg("group_id"), py::arg("index"))
+        .def("move_group", &pwb::qgis_render::QgisMapStack::moveGroup,
+             py::arg("group_id"), py::arg("parent_group_id"), py::arg("index"))
+        .def("tree_snapshot_json",
+             &pwb::qgis_render::QgisMapStack::treeSnapshotJson)
+        .def("apply_tree_placements",
+             &pwb::qgis_render::QgisMapStack::applyTreePlacements,
+             py::arg("placements_json"))
+        .def("set_group_expanded",
+             &pwb::qgis_render::QgisMapStack::setGroupExpanded)
         .def("zoom_to_layer", &pwb::qgis_render::QgisMapStack::zoomToLayer)
         .def("set_edit_indicator", &pwb::qgis_render::QgisMapStack::setEditIndicator)
         .def("edit_indicator_count", &pwb::qgis_render::QgisMapStack::editIndicatorCount)

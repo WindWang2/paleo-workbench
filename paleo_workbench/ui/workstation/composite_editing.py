@@ -700,6 +700,11 @@ class CompositeEditController(QObject):
         return self._layers.get(self._active_layer_id or "")
 
     @property
+    def topology(self):
+        """拓扑校验服务（只读公共访问；stage_actions QA 等宿主消费）。"""
+        return self._topology
+
+    @property
     def editing(self) -> bool:
         layer = self.active_layer
         return layer is not None and layer.edit_session is not None

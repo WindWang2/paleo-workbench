@@ -622,6 +622,11 @@ class ProjectDocument(BaseModel):
     joint_analysis: JointAnalysisState = Field(default_factory=JointAnalysisState)
     # 3D geological workspace (V5): domain object references + view state.
     geo3d_workspace: Geo3DWorkspaceState = Field(default_factory=Geo3DWorkspaceState)
+    # Geological Mapping Stage Workspace V5: 阶段工作区科学状态
+    #（当前阶段/图层角色成员资格/组结构/阶段视图覆盖/成熟度/证据版本集）。
+    # 纯 dict 载体——schema 由 mapping_workspace.stage_state 拥有；用户 UI
+    # 偏好（dock 几何/组展开）留在 QSettings，不进科学工程。
+    mapping_workspace: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
     def new(cls, name: str, region: str = "") -> "ProjectDocument":
