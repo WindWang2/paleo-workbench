@@ -89,3 +89,72 @@ class TestSpatialFolds:
         a = spatial_fold_assignment(x, y, k=4)
         b = spatial_fold_assignment(x, y, k=4)
         assert all(np.array_equal(fa, fb) for fa, fb in zip(a, b))
+
+
+class TestMethodRecommendation:
+    def test_recommendation_report_structure(self):
+        from paleo_workbench.workflow.interpolation_evaluation import (
+            recommend_interpolation_methods,
+        )
+
+        pts = _points(n_per_well=8, wells=4, seed=8)
+
+        def run_idw(train):
+            xs = np.array([p["x"] for p in train])
+            ys = np.array([p["y"] for p in train])
+            zs = np.array([p["value"] for p in train])
+            gx, gy = np.meshgrid(
+                np.linspace(xs.min() - 50, xs.max() + 50, 40),
+                np.linspace(ys.min() - 50, ys.max() + 50, 40),
+            )
+            # crude IDW for the test
+            d = np.sqrt(
+                (gx[:, :, None] - xs[None, None, :]) ** 2
+                + (gy[:, :, None] - ys[None, None, :]) ** 2
+            ) + 1e-9
+            gz = (zs[None, None, :] / d**2).sum(-1) / (1.0 / d**2).sum(-1)
+            return gx[0], gy[:, 0], gz
+
+        report = recommend_interpolation_methods(
+            pts,
+            methods=["IDW", "克里金"],
+            run_fold=run_idw,
+            requested_constraints=["barrier"],
+        )
+        entries = report["methods"]
+        assert {e["method"] for e in entries} == {"IDW", "克里金"}
+        for entry in entries:
+            assert "metrics" in entry and "recommended" in entry and "rationale" in entry
+            assert "capability_warnings" in entry
+        kriging_entry = next(e for e in entries if e["method"] == "克里金")
+        assert kriging_entry["capability_warnings"], (
+            "kriging + barrier request must warn (unsupported)"
+        )
+
+    def test_metric_violation_blocks_recommendation(self):
+        from paleo_workbench.workflow.interpolation_evaluation import (
+            recommend_interpolation_methods,
+        )
+
+        # One method with violated constraints must never be 'recommended'
+        # on raw metrics alone.
+        pts = _points(n_per_well=8, wells=4, seed=8)
+
+        def run(train):
+            xs = np.array([p["x"] for p in train])
+            ys = np.array([p["y"] for p in train])
+            gx, gy = np.meshgrid(
+                np.linspace(xs.min() - 50, xs.max() + 50, 30),
+                np.linspace(ys.min() - 50, ys.max() + 50, 30),
+            )
+            return gx[0], gy[:, 0], np.full(gx.shape, 0.0)
+
+        report = recommend_interpolation_methods(
+            pts,
+            methods=["克里金"],
+            run_fold=run,
+            requested_constraints=["barrier"],
+        )
+        entry = report["methods"][0]
+        if entry["capability_warnings"]:
+            assert entry["recommended"] is False
