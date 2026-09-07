@@ -677,6 +677,10 @@ class LayerGroupController:
                 ids.append(group_id)
         return tuple(ids)
 
+    def artifact_freshness(self, artifact_key: str):
+        """按 artifact key 取新鲜度评估（mapproduct 等非图层工件；未评估 → None）。"""
+        return self._freshness.get(str(artifact_key)) if self._freshness else None
+
     def set_maturity_provider(self, callback) -> None:
         """注入成熟度回调（``layer_id -> str | None``；组聚合用）。
 

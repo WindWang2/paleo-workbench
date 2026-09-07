@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 
+logger = logging.getLogger(__name__)
+
 from PySide6.QtCore import QByteArray, QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
@@ -346,6 +348,12 @@ class WorkstationFrame(QWidget):
             )
         )
         self.composite.object_selected.connect(self.inspector.show_payload)
+        # V7 §8：图层树选择驱动类型化 Inspector（layer / factor 分节）。
+        composite_layer_panel = getattr(self.composite, "layer_manager", None)
+        if composite_layer_panel is not None:
+            composite_layer_panel.active_layer_changed.connect(
+                self._inspect_layer_selection
+            )
         self.agent_panel.open_well_requested.connect(self._open_well_from_agent)
         self.agent_panel.show_wells_requested.connect(self._show_wells_from_agent)
         self.agent_panel.focus_joint_requested.connect(self._focus_joint_from_agent)
@@ -651,6 +659,83 @@ class WorkstationFrame(QWidget):
             str(key or "mapping"), (3, "canvas")
         )
         self.navigation_requested.emit(hub_index, subkey)
+
+    def _inspect_layer_selection(self, layer_id) -> None:
+        """图层树选择 → 类型化 Inspector payload（V7 §8）。
+
+        factor 系角色（带 factor_task_id）→ 单因素分节（任务 + live 网格
+        摘要）；其余 → layer 分节（域行经 context seam）。
+        """
+        if not layer_id:
+            return
+        try:
+            composite = self.composite
+            state = composite.stage_controller.state
+            record = state.membership(str(layer_id))
+            if record is not None and record.factor_task_id:
+                task = None
+                for candidate in getattr(self._project, "factor_map_tasks", None) or []:
+                    if str(candidate.id) == str(record.factor_task_id):
+                        task = candidate
+                        break
+                if task is not None:
+                    self.inspector.show_payload({
+                        "kind": "factor",
+                        "task": task,
+                        "grid": self._factor_grid_summary(record.factor_task_id),
+                        "layer_id": str(layer_id),
+                        "name": getattr(task, "name", None),
+                    })
+                    return
+            role = state.role_of(str(layer_id))
+            self.inspector.show_payload({
+                "kind": "layer",
+                "layer_id": str(layer_id),
+                "layer_type": role.label,
+                "object": composite.edit_controller.layer(str(layer_id)),
+                "name": getattr(
+                    composite.edit_controller.layer(str(layer_id)), "name", None),
+            })
+        except RuntimeError:
+            pass  # 拆壳期迟到信号
+        except Exception:
+            logger.exception("inspector layer selection failed")
+
+    @staticmethod
+    def _factor_grid_summary(task_id: str) -> dict:
+        """live 因子网格摘要（min/max/不确定性；缓存缺失 → 空 dict）。"""
+        try:
+            from paleo_workbench.project.factor_grid_artifacts import (
+                peek_live_factor_grid,
+            )
+
+            grid = peek_live_factor_grid(str(task_id))
+        except Exception:
+            return {}
+        if grid is None:
+            return {}
+        summary: dict = {}
+        try:
+            values = getattr(grid, "values", None)
+            if values is not None:
+                import numpy as np
+
+                finite = np.asarray(values, dtype=float)
+                finite = finite[np.isfinite(finite)]
+                if finite.size:
+                    summary["min"] = float(finite.min())
+                    summary["max"] = float(finite.max())
+            uncertainty = getattr(grid, "uncertainty", None)
+            if uncertainty is not None:
+                import numpy as np
+
+                array = np.asarray(uncertainty, dtype=float)
+                finite = array[np.isfinite(array)]
+                if finite.size:
+                    summary["uncertainty"] = (float(finite.min()), float(finite.max()))
+        except Exception:
+            logger.exception("factor grid summary failed")
+        return summary
 
     def _dispatch_stage_constraint(self, kind_value: str) -> None:
         handler = getattr(self.composite, "create_stage_constraint", None)

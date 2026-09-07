@@ -603,6 +603,24 @@ class StageActionDispatcher:
             return
         self.composite.status_message.emit(
             f"MapProduct 已生成（{result.record_id}；输出版本 {result.output_version_id[:12]}…）")
+        # V7 §8：新装配的成果进入 Inspector（staleness 来自依赖评估权威）。
+        record = next(
+            (item for item in getattr(document, "map_products", None) or []
+             if str(getattr(item, "id", "")) == str(result.record_id)),
+            None,
+        )
+        if record is not None:
+            from paleo_workbench.ui.workstation.state_language import state_token
+
+            freshness = self.stage_controller.group_controller.artifact_freshness(
+                f"mapproduct:{record.id}")
+            self.composite.object_selected.emit({
+                "kind": "map_product",
+                "object": record,
+                "staleness": (
+                    state_token("freshness", freshness.status.value)
+                    if freshness is not None else None),
+            })
 
     def stage_save(self) -> None:
         """保存阶段成果：flush 编辑会话 + 工作区状态落工程。"""

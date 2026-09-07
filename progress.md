@@ -20,3 +20,16 @@
 ## Next
 - PHASE 2: write docs/development/workstation-ux-v7/00-baseline.md (from findings),
   01-target-state.md, 02-architecture.md, 03-decisions.md; then M1 implementation.
+
+## Session 2026-09-08 (M1–M4)
+- M1/M2 committed 0e398f98: tool_surface.py 单一可用性真源（42 矩阵单测 +
+  12 Qt 集成）；composite/mapping_page/shell/palette 全部接线；冻结成熟度
+  门禁进入 _role_allows_editing；hub 导航经 navigation_requested 真切换。
+- M4 committed a5941bdb: layer_decorations + 回退树状态列/差分重载/双击定位 +
+  原生面板摘要行 + 组聚合（frozen/published + fallback 真实派生）。
+- state_language 扩词（freshness 全集 + session；🔒→⊘）。
+- 基线：tests/test_lod_render_path.py 与 test_layer_visibility_authority.py
+  在全量运行时 Windows access violation（GC-in-import 时序 flake；单跑均过，
+  main 同现象——非本分支引入）。全量基线第三轮（排除上述两文件）后台进行中。
+- test_composite_qgis_canvas 5 失败为 main 既有（需桥）。
+- 注意：git add -A 不会加入 .baseline-*.log（已 gitignore）。

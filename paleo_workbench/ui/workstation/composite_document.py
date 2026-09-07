@@ -2385,6 +2385,15 @@ class CompositeDocument(QWidget):
         return None
 
     def _locate_identify_result(self, result) -> None:
+        # V7 §8：识别结果同步进入 Inspector（feature 分节；双击仍定位）。
+        try:
+            self.object_selected.emit({
+                "kind": "feature",
+                "object": dict(result or {}),
+                "layer_id": (result or {}).get("layer_id"),
+            })
+        except RuntimeError:
+            pass
         if self.edit_controller.locate_identify_result(result):
             record = result.get("record") or {}
             extent = _feature_extent([record])
