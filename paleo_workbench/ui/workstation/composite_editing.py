@@ -40,6 +40,7 @@ from paleo_workbench.mapping.map_tools import (
     MoveFeatureTool,
     PanTool,
     RectangleSelectTool,
+    ReshapeTool,
     SelectTool,
     VertexTool,
     ZoomTool,
@@ -750,7 +751,7 @@ class CompositeEditController(QObject):
         allowed, _reason = self.can_edit_layer(layer.id)
         if not allowed:
             return  # 原因由调用方（门禁入口）负责呈现
-        layer.start_editing()
+        self._open_session(layer)
         self.state_changed.emit()
 
     def ensure_layer_session(self, layer_id: str):
@@ -767,7 +768,7 @@ class CompositeEditController(QObject):
         if not allowed:
             return None, reason
         if layer.edit_session is None:
-            layer.start_editing()
+            self._open_session(layer)
             self.state_changed.emit()
         return layer.edit_session, ""
 
@@ -782,9 +783,10 @@ class CompositeEditController(QObject):
         layer = self._layers.get(str(layer_id))
         if layer is None or not features:
             return
-        session = layer.edit_session or layer.start_editing()
-        for feature in features:
-            session.add_feature(feature)
+        session = self._open_session(layer)
+        with session.edit_source("domain_import"):
+            for feature in features:
+                session.add_feature(feature)
         session.commit_changes()
         self.content_changed.emit(str(layer_id))
 
@@ -863,6 +865,81 @@ class CompositeEditController(QObject):
             self.state_changed.emit()
         return committed, blocked
 
+    # -- 会话开启 / 能力溯源 -----------------------------------------------------
+
+    # EditDelta 的引擎溯源 token（capability snapshot 稳定摘要）；宿主在
+    # 桥探测后注入，未注入时保持诚实的 "unavailable"。
+    qgis_capability_token: str = "unavailable"
+
+    def set_qgis_capability_token(self, token: str) -> None:
+        self.qgis_capability_token = str(token or "unavailable")
+
+    def _open_session(self, layer: VectorLayer) -> object:
+        """开启（或取既有）会话并注入引擎溯源 token（单点）。"""
+        session = layer.edit_session or layer.start_editing()
+        session.qgis_capability_token = self.qgis_capability_token
+        return session
+
+    def _make_reshape_applier(self, session, feature_id: str):
+        """构建 reshape 应用器（桥 geometry.reshape → SetGeometryCommand）。
+
+        桥不可用/无 reshape 算子时返回 None（工具不激活——native-only）。
+        """
+        if not feature_id:
+            return None
+        try:
+            import qgis_render_bridge as native
+
+            reshape_fn = getattr(native.geometry, "reshape", None)
+            if not callable(reshape_fn):
+                return None
+        except Exception:
+            return None
+        import json
+
+        def _apply(line_geometry) -> bool:
+            try:
+                feature = session.feature(feature_id)
+                target = json.dumps(feature.as_record()["geometry"], ensure_ascii=False)
+                line = json.dumps(dict(line_geometry), ensure_ascii=False)
+                reshaped = json.loads(reshape_fn(target, line))
+                session.set_geometry(feature_id, reshaped)
+                self.content_changed.emit(session.layer.id)
+                return True
+            except Exception:
+                return False
+
+        return _apply
+
+    def _propagate_shared_vertex(
+        self,
+        feature_id: str,
+        path: tuple[int, ...],
+        origin: tuple[float, float],
+        replacement: tuple[float, float],
+    ) -> None:
+        """顶点提交后的 opt-in 拓扑传播（与编图页同语义，V7 工作站接线）。
+
+        只向门禁放行的图层传播：传播会在共享节点图层上开启编辑会话，
+        RAW/锁定图层绝不能因此获得脏会话。
+        """
+        layer = self.active_layer
+        if layer is None:
+            return
+        allowed_layers = [
+            candidate
+            for candidate in self._layers.values()
+            if self.can_edit_layer(candidate.id)[0]
+        ]
+        self._topology.propagate_shared_vertex(
+            allowed_layers,
+            origin=origin,
+            replacement=replacement,
+            skip=(layer.id, str(feature_id), tuple(path)),
+        )
+        if len(allowed_layers) > 1:
+            self.content_changed.emit(layer.id)
+
     # -- 工具装配 ---------------------------------------------------------------
 
     def _tolerance(self) -> float:
@@ -928,7 +1005,26 @@ class CompositeEditController(QObject):
                 elif action_id == "move_feature":
                     tool = MoveFeatureTool(session, identify=lambda point: index.identify(point, self._tolerance()))
                 elif action_id == "vertex":
-                    tool = VertexTool(session, identify_vertex=lambda point: index.identify_vertex(point, self._tolerance()))
+                    tool = VertexTool(
+                        session,
+                        identify_vertex=lambda point: index.identify_vertex(point, self._tolerance()),
+                        # 拓扑传播与编图页（mapping_page._on_unified_vertex_committed）
+                        # 同语义：顶点提交后按 opt-in 传播共享节点（V7 修复
+                        # 工作站断线——两条路径行为不得漂移）。
+                        on_vertex_committed=self._propagate_shared_vertex,
+                    )
+                elif action_id == "reshape":
+                    # V7：native-only 工具——无 reshape 算子（旧桥/无桥）时
+                    # 拒激活并保持当前工具（与 evaluator 禁用语义一致）。
+                    feature_id = next(iter(sorted(layer.selection)), "") if layer.selection else ""
+                    applier = self._make_reshape_applier(session, feature_id) if feature_id else None
+                    if applier is None:
+                        return
+                    tool = ReshapeTool(
+                        session,
+                        feature_id=feature_id,
+                        apply_reshape=applier,
+                    )
                 else:
                     return
         self._active_tool_action = action_id
@@ -941,7 +1037,7 @@ class CompositeEditController(QObject):
 
     def _rebind_active_tool(self) -> None:
         action = self._active_tool_action
-        session_actions = {"add_point", "add_line", "add_polygon", "move_feature", "vertex"}
+        session_actions = {"add_point", "add_line", "add_polygon", "move_feature", "vertex", "reshape"}
         if action in session_actions:
             layer = self.active_layer
             # 会话级工具在会话消失（保存/回滚/flush 提交）后必须回落 pan：
@@ -985,18 +1081,30 @@ class CompositeEditController(QObject):
         QGIS 端 AdvancedConfiguration 只认显式列出的图层，因此为每个图层
         都发条目（未覆盖者落全局值），语义与 SnappingService.snap 对齐；
         layer_priority（等距裁决）与 grid 模式无 QGIS 对应物，不下推。
+
+        V7：endpoint → QGIS LineEndpoint、intersection → 交点捕捉 flag——
+        两者都在桥 capability manifest 声明后才下推（旧桥静默丢弃未知
+        types 会造成语义漂移；未声明时保持 Python 执行体路径并如实不推）。
         """
         canvas = self._canvas
         if canvas is None or not hasattr(canvas, "set_snapping_config"):
             return
         snapping = self._snapping
-        types = [m for m in ("vertex", "segment", "midpoint") if m in snapping.modes]
+        features = self._bridge_snapping_features()
+        endpoint_pushable = "snapping_endpoint" in features
+        intersection_pushable = "snapping_intersection" in features
+        types = [
+            m
+            for m in ("vertex", "segment", "midpoint", "endpoint")
+            if m in snapping.modes and (m != "endpoint" or endpoint_pushable)
+        ]
         config: dict[str, object] = {
             "enabled": bool(snapping.enabled),
             "mode": "active_layer" if snapping.current_layer_only else "all_layers",
             "tolerance_px": float(snapping.pixel_tolerance),
             "types": types,
             "reference_enabled": "reference" in snapping.modes,
+            "intersection_enabled": "intersection" in snapping.modes and intersection_pushable,
         }
         if not snapping.current_layer_only:
             layers: dict[str, dict[str, object]] = {}
@@ -1005,8 +1113,13 @@ class CompositeEditController(QObject):
                 layers[layer_id] = {
                     "enabled": bool(snapping.layer_enabled.get(layer_id, True)),
                     "types": (
-                        [m for m in ("vertex", "segment", "midpoint") if m in modes]
-                        if modes is not None else types
+                        [
+                            m
+                            for m in ("vertex", "segment", "midpoint", "endpoint")
+                            if m in modes and (m != "endpoint" or endpoint_pushable)
+                        ]
+                        if modes is not None
+                        else types
                     ),
                     "tolerance_px": float(
                         snapping.layer_tolerance.get(layer_id, snapping.pixel_tolerance)
@@ -1014,6 +1127,23 @@ class CompositeEditController(QObject):
                 }
             config["layers"] = layers
         canvas.set_snapping_config(config)
+
+    @staticmethod
+    def _bridge_snapping_features() -> frozenset[str]:
+        """桥 capability manifest 声明的 snapping 特性（V7）。
+
+        vertex/segment/midpoint 自 M3 起所有桥版本支持；endpoint 与
+        intersection 为 V7 新增——manifest 未声明时不下推（旧桥会静默丢弃
+        未知条目，绝不允许静默语义漂移）。无桥时本方法结果不影响 fallback
+        执行体（下推路径本身不存在）。
+        """
+        try:
+            import qgis_render_bridge as bridge
+
+            manifest = bridge.capability_manifest()
+            return frozenset(str(f) for f in (manifest.get("features") or ()))
+        except Exception:
+            return frozenset()
 
     @property
     def snapping(self) -> SnappingService:
@@ -1051,16 +1181,17 @@ class CompositeEditController(QObject):
         if not allowed:
             return 0
         opened_session = layer.edit_session is None
-        session = layer.edit_session or layer.start_editing()
+        session = self._open_session(layer)
         repaired = 0
-        for feature in session.features():
-            geometry = feature.as_record()["geometry"]
-            if geometry.get("type") not in {"Polygon", "MultiPolygon"}:
-                continue
-            fixed = make_geometry_valid(geometry)
-            if not _geometry_equal(fixed, geometry):
-                session.set_geometry(feature.feature_id, fixed)
-                repaired += 1
+        with session.edit_source("repair_geometry"):
+            for feature in session.features():
+                geometry = feature.as_record()["geometry"]
+                if geometry.get("type") not in {"Polygon", "MultiPolygon"}:
+                    continue
+                fixed = make_geometry_valid(geometry)
+                if not _geometry_equal(fixed, geometry):
+                    session.set_geometry(feature.feature_id, fixed)
+                    repaired += 1
         if repaired:
             self.content_changed.emit(layer.id)
             self.state_changed.emit()
@@ -1129,7 +1260,8 @@ class CompositeEditController(QObject):
             if command_id == "merge":
                 if not layer.selection:
                     return False, "请先选择要合并的要素"
-                new_id = merge_selected_polygons(session, layer.selection)
+                with session.edit_source("merge(command)"):
+                    new_id = merge_selected_polygons(session, layer.selection)
                 layer.set_selection((new_id,))
                 self.content_changed.emit(layer.id)
                 self.state_changed.emit()
@@ -1139,9 +1271,10 @@ class CompositeEditController(QObject):
                 if inputs is None:
                     return False, "分割需要一个选中多边形（正在编辑）与一条选中的切割线"
                 polygon_layer, polygon_id, line_feature = inputs
-                new_ids = split_polygon_by_line(
-                    polygon_layer.edit_session, polygon_id, line_feature
-                )
+                with polygon_layer.edit_session.edit_source("split(command)"):
+                    new_ids = split_polygon_by_line(
+                        polygon_layer.edit_session, polygon_id, line_feature
+                    )
                 polygon_layer.set_selection(new_ids)
                 if polygon_layer is not layer:
                     self._active_layer_id = polygon_layer.id
@@ -1420,6 +1553,73 @@ class CompositeEditController(QObject):
             can_previous_extent=can_previous_extent,
             can_next_extent=can_next_extent,
         )
+
+    def tool_context_inputs(self) -> dict[str, Any]:
+        """ToolContext 的宿主侧采集器（Goal V7 §3）。
+
+        只做派生（不建第二状态源）：图层/会话/选集/捕捉拓扑开关全部读
+        既有权威；角色/阶段锁由 CompositeDocument 注入（它拥有
+        ``_role_allows_editing`` 的语义细分）。
+        """
+        layer = self.active_layer
+        session = layer.edit_session if layer is not None else None
+        kinds_among_selection: list[str] = []
+        if layer is not None and layer.selection:
+            source = session.features() if session is not None else layer.features()
+            kinds_among_selection = [
+                str(self._kinds.get(layer.id, ""))
+                for feature in source
+                if feature.feature_id in layer.selection
+            ] or [str(self._kinds.get(layer.id, ""))]
+        gate_allowed, gate_reason = (
+            self.can_edit_layer(layer.id) if layer is not None else (False, "没有活动图层")
+        )
+        return {
+            "project_open": True,
+            "active_layer_id": layer.id if layer is not None else "",
+            "active_layer_kind": self._kinds.get(layer.id, "") if layer is not None else "",
+            "wkb_type": next(
+                (
+                    str(feature.geometry["type"])
+                    for feature in (session.features() if session is not None else layer.features())
+                ),
+                "",
+            ) if layer is not None else "",
+            "vector_writable": layer is not None,
+            "editing": session is not None,
+            "dirty": bool(session is not None and session.is_dirty),
+            "edit_gate_open": bool(gate_allowed),
+            "edit_gate_reason": str(gate_reason or ""),
+            "can_undo": bool(session and session.undo_stack),
+            "can_redo": bool(session and session.redo_stack),
+            "selection_count": len(layer.selection) if layer is not None else 0,
+            "selection_geometry_types": tuple(kinds_among_selection),
+            "compatible_polygon_count": (
+                len(layer.selection)
+                if layer is not None and session is not None and self._kinds.get(layer.id) == "polygon"
+                else 0
+            ),
+            "split_ready": self._split_inputs() is not None,
+            "merge_ready": (
+                layer is not None
+                and session is not None
+                and self._kinds.get(layer.id) == "polygon"
+                and len(layer.selection) >= 2
+            ),
+            "reshape_ready": (
+                layer is not None
+                and session is not None
+                and self._kinds.get(layer.id) in {"line", "polygon"}
+                and len(layer.selection) == 1
+            ),
+            "snapping_available": True,
+            "snapping_enabled": self._snapping.enabled,
+            "topology_available": True,
+            "topology_enabled": self._topology.enabled,
+            "crs_valid": bool(self.project_crs),
+            "current_tool": getattr(self.tools.active_tool, "tool_id", "") or "pan",
+            "blocking_task": str(getattr(self, "blocking_task_label", "") or ""),
+        }
 
     def overlay_state(self) -> dict[str, Any]:
         """画布 overlay：选中要素高亮 / 采点预览 / 捕捉标记。"""

@@ -6,10 +6,14 @@
 #include <QKeyEvent>
 
 #include <qgsabstractgeometry.h>
+#include <qgscoordinatereferencesystem.h>
+#include <qgscsexception.h>
+#include <qgsdistancearea.h>
 #include <qgsmapcanvas.h>
 #include <qgsmapmouseevent.h>
 #include <qgsmaptoolselectionhandler.h>
 #include <qgspointlocator.h>
+#include <qgsproject.h>
 #include <qgsrubberband.h>
 #include <qgssnappingutils.h>
 #include <qgsvectorlayer.h>
@@ -309,6 +313,131 @@ void PwbSelectTool::onGeometryChanged(Qt::KeyboardModifiers modifiers) {
       quoted.join(QStringLiteral(",")).toStdString() + "],\"modifiers\":[" +
       quotedMods.join(QStringLiteral(",")).toStdString() + "]}";
   callback_("selection", payload);
+}
+
+// -- 测距（V7）---------------------------------------------------------------
+
+PwbMeasureTool::PwbMeasureTool(QgsMapCanvas* canvas, Callback callback)
+    : PwbEditPickTool(canvas, std::move(callback)) {
+  // 激活时按画布 CRS 配置测算器：地理 CRS + 工程椭球体 → 椭球测算（米），
+  // 否则平面测算（地图单位）。CRS 中途变更由工具重激活兜底（shim 每次
+  // set_map_tool 重建工具实例）。
+  distance_ = std::make_unique<QgsDistanceArea>();
+  const QgsCoordinateReferenceSystem crs =
+      canvas->mapSettings().destinationCrs();
+  distance_->setSourceCrs(crs, QgsProject::instance()->transformContext());
+  const QString ellipsoid = QgsProject::instance()->ellipsoid();
+  ellipsoidal_ = crs.isGeographic() && !ellipsoid.isEmpty();
+  if (ellipsoidal_) distance_->setEllipsoid(ellipsoid);
+}
+
+PwbMeasureTool::~PwbMeasureTool() = default;
+
+void PwbMeasureTool::canvasPressEvent(QgsMapMouseEvent* e) {
+  if (e->button() == Qt::RightButton) {
+    if (!points_.isEmpty()) callback_("measure_completed", payloadJson("measure_completed", e->mapPoint()));
+    reset();
+    return;
+  }
+  if (e->button() != Qt::LeftButton) return;
+  const QgsPointXY p = snapOrRaw(e->mapPoint());
+  points_.push_back(p);
+  if (!rubber_) {
+    rubber_ = std::make_unique<QgsRubberBand>(canvas(), Qgis::GeometryType::Line);
+    rubber_->setColor(QColor(255, 170, 0, 210));
+    rubber_->setWidth(2);
+  }
+  rubber_->addPoint(p);
+  callback_("measure_updated", payloadJson("measure_updated", e->mapPoint()));
+}
+
+void PwbMeasureTool::canvasMoveEvent(QgsMapMouseEvent* e) {
+  if (points_.isEmpty() || !rubber_) return;
+  // 折线 = 已采点 + hover 点（预览段），逐帧重建（RubberBand 语义）。
+  rubber_->reset(Qgis::GeometryType::Line);
+  for (const QgsPointXY& p : points_) rubber_->addPoint(p);
+  rubber_->addPoint(e->mapPoint());
+  callback_("measure_updated", payloadJson("measure_updated", e->mapPoint()));
+}
+
+void PwbMeasureTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
+  Q_UNUSED(e);
+}
+
+void PwbMeasureTool::keyPressEvent(QKeyEvent* e) {
+  if (e->key() == Qt::Key_Escape) {
+    const bool had = !points_.isEmpty();
+    reset();
+    if (had) callback_("measure_canceled", "{}");
+    e->accept();
+    return;
+  }
+  QgsMapTool::keyPressEvent(e);
+}
+
+void PwbMeasureTool::deactivate() {
+  reset();
+  QgsMapTool::deactivate();
+}
+
+double PwbMeasureTool::totalIncluding(const QgsPointXY& hover) const {
+  if (points_.isEmpty()) return 0.0;
+  QVector<QgsPointXY> all = points_;
+  all.push_back(hover);
+  try {
+    return distance_->measureLine(all);
+  } catch (const QgsCsException&) {
+    // 椭球测算换带失败：回落平面距离，绝不静默吞掉（payload 如实报告）。
+    double total = 0.0;
+    for (int i = 1; i < all.size(); ++i)
+      total += std::hypot(all[i].x() - all[i - 1].x(), all[i].y() - all[i - 1].y());
+    return total;
+  }
+}
+
+std::string PwbMeasureTool::payloadJson(const char* action, const QgsPointXY& hover) const {
+  QStringList pts;
+  for (const QgsPointXY& p : points_)
+    pts << QStringLiteral("[%1,%2]")
+               .arg(QString::number(p.x(), 'g', 12),
+                    QString::number(p.y(), 'g', 12));
+  QStringList segs;
+  QgsPointXY prev;
+  bool first = true;
+  for (const QgsPointXY& p : points_) {
+    if (!first) {
+      double d = 0.0;
+      try {
+        d = distance_->measureLine(prev, p);
+      } catch (const QgsCsException&) {
+        d = std::hypot(p.x() - prev.x(), p.y() - prev.y());
+      }
+      segs << QString::number(d, 'g', 12);
+    }
+    prev = p;
+    first = false;
+  }
+  if (!points_.isEmpty()) {
+    double live = 0.0;
+    try {
+      live = distance_->measureLine(points_.constLast(), hover);
+    } catch (const QgsCsException&) {
+      live = std::hypot(hover.x() - points_.constLast().x(),
+                        hover.y() - points_.constLast().y());
+    }
+    segs << QString::number(live, 'g', 12);
+  }
+  return std::string("{\"action\":\"") + action +
+         "\",\"points\":[" + pts.join(QStringLiteral(",")).toStdString() +
+         "],\"segments\":[" + segs.join(QStringLiteral(",")).toStdString() +
+         "],\"total\":" +
+         QString::number(totalIncluding(hover), 'g', 12).toStdString() +
+         ",\"ellipsoidal\":" + (ellipsoidal_ ? "true" : "false") + "}";
+}
+
+void PwbMeasureTool::reset() {
+  points_.clear();
+  rubber_.reset();
 }
 
 }  // namespace pwb::qgis_render

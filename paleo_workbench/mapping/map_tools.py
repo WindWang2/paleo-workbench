@@ -1,4 +1,14 @@
-"""QGIS-inspired renderer-independent map-tool state machines."""
+"""QGIS-inspired renderer-independent map-tool state machines.
+
+**Execution-path status (Goal V7)**: on hosts with the QGIS bridge the native
+``QgsMapTool`` layer (canvas_shim → qgis_render_bridge) is the *production*
+interaction executor; the mouse-driven state machines here are the explicit
+**fallback** for the renderer-independent canvas, headless tests and hosts
+without the bridge. The ``commit_*`` entry points are the native tools'
+landing zone into the Paleo session authority and stay production code.
+The fallback must not gain professional capabilities the native path lacks
+(Goal V7 §5); divergences are defects.
+"""
 
 from __future__ import annotations
 
@@ -18,6 +28,7 @@ __all__ = [
     "MoveFeatureTool",
     "PanTool",
     "RectangleSelectTool",
+    "ReshapeTool",
     "SelectTool",
     "VertexTool",
     "ZoomTool",
@@ -300,9 +311,10 @@ class _CaptureTool(MapTool):
             if ring[0] != ring[-1]:
                 ring.append(list(ring[0]))
             geometry = {"type": "Polygon", "coordinates": [ring]}
-        self.session.add_feature(
-            VectorFeature(self._feature_id_factory(), geometry, self._default_attributes)
-        )
+        with self.session.edit_source(f"{self.tool_id}(python-fallback)"):
+            self.session.add_feature(
+                VectorFeature(self._feature_id_factory(), geometry, self._default_attributes)
+            )
         self.points.clear()
         return True
 
@@ -319,11 +331,12 @@ class _CaptureTool(MapTool):
         expected = self.geometry_type
         if gtype != expected and gtype != f"Multi{expected}":
             return False
-        self.session.add_feature(
-            VectorFeature(
-                self._feature_id_factory(), dict(geometry), self._default_attributes
+        with self.session.edit_source(f"{self.tool_id}(native)"):
+            self.session.add_feature(
+                VectorFeature(
+                    self._feature_id_factory(), dict(geometry), self._default_attributes
+                )
             )
-        )
         self.points.clear()
         return True
 
@@ -367,7 +380,8 @@ class MoveFeatureTool(MapTool):
         feature_id, origin = self._feature_id, self._origin
         self._feature_id = None
         self._origin = None
-        self.session.move_feature(feature_id, point[0] - origin[0], point[1] - origin[1])
+        with self.session.edit_source(f"{self.tool_id}(python-fallback)"):
+            self.session.move_feature(feature_id, point[0] - origin[0], point[1] - origin[1])
         return True
 
     def cancel(self) -> bool:
@@ -379,10 +393,42 @@ class MoveFeatureTool(MapTool):
     def commit_move(self, feature_id: str, dx: float, dy: float) -> bool:
         """QGIS 原生移动工具完成位移落会话（M3）；feature 不在本会话则拒绝。"""
         try:
-            self.session.move_feature(str(feature_id), float(dx), float(dy))
+            with self.session.edit_source(f"{self.tool_id}(native)"):
+                self.session.move_feature(str(feature_id), float(dx), float(dy))
         except Exception:
             return False
         return True
+
+
+class ReshapeTool(MapTool):
+    """V7 重塑（native-only）：原生 addLine 数字化器采重塑线 → 会话几何替换。
+
+    无鼠标路径（fallback 画布不提供 reshape——Goal V7 §5：fallback 不获得
+    QGIS 路径没有的专业功能）。几何计算走桥 ``geometry.reshape``
+    （QgsGeometry::reshapeGeometry），结果经 ``SetGeometryCommand`` 落会话。
+    """
+
+    tool_id = "reshape"
+    edits_data = True
+
+    def __init__(
+        self,
+        session: VectorEditSession,
+        *,
+        feature_id: str,
+        apply_reshape: Callable[[Mapping[str, object]], bool],
+    ) -> None:
+        super().__init__()
+        self.session = session
+        self.feature_id = str(feature_id)
+        self._apply_reshape = apply_reshape
+
+    def commit_geometry(self, geometry: Mapping[str, object]) -> bool:
+        """原生数字化的重塑线完成 → 应用 reshape → 落会话。"""
+        if not geometry or str(geometry.get("type")) not in {"LineString", "MultiLineString"}:
+            return False
+        with self.session.edit_source(f"{self.tool_id}(native)"):
+            return bool(self._apply_reshape(geometry))
 
 
 class VertexTool(MapTool):
@@ -426,7 +472,8 @@ class VertexTool(MapTool):
         origin = self._origin
         self._target = None
         self._origin = None
-        self.session.set_vertex(feature_id, path, point)
+        with self.session.edit_source(f"{self.tool_id}(python-fallback)"):
+            self.session.set_vertex(feature_id, path, point)
         if origin is not None and self._on_vertex_committed is not None:
             self._on_vertex_committed(feature_id, path, origin, point)
         return True
@@ -462,7 +509,8 @@ class VertexTool(MapTool):
         except Exception:
             origin = None
         try:
-            self.session.set_vertex(feature.feature_id, path, point)
+            with self.session.edit_source(f"{self.tool_id}(native)"):
+                self.session.set_vertex(feature.feature_id, path, point)
         except Exception:
             return False
         if origin is not None and self._on_vertex_committed is not None:

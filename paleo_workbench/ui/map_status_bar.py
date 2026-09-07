@@ -64,8 +64,9 @@ class MapStatusBar(QFrame):
         self.render = QLabel("Renderer: —", self)
         self.selection = QLabel("Selection: 0", self)
         self.snapping = QLabel("", self)
+        self.measure = QLabel("", self)
         self.edit = QLabel("Read-only", self)
-        for label in (self.coordinate, self.scale, self.crs, self.render, self.selection, self.snapping):
+        for label in (self.coordinate, self.scale, self.crs, self.render, self.selection, self.snapping, self.measure):
             label.setStyleSheet(
                 f"color: {tokens.TEXT_SECONDARY}; border: none; background: transparent; padding: 0 2px;"
             )
@@ -86,6 +87,12 @@ class MapStatusBar(QFrame):
             self._coord_decimals = _coordinate_decimals(crs, point)
             self._crs_decimals_key = crs
         return self._coord_decimals
+
+    def set_measure(self, text: str) -> None:
+        """V7 原生测距显示（空串清除）。独立于 update_state：测距事件以指针
+        频率到达，不与状态刷新耦合。"""
+        _elide_label(self.measure, text)
+        self.measure.setToolTip(text)
 
     def update_state(
         self,

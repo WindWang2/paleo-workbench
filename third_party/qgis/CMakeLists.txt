@@ -417,8 +417,11 @@ if(WITH_CORE)
   #############################################################
   # search for dependencies
 
+  # paleo-workbench patch (Windows support): src/core's internal-spatialindex
+  # block calls check_function_exists() on every platform; upstream only pulls
+  # the module in on the openpty (non-Windows) path above the WIN32 guard.
+  include(CheckFunctionExists)
   if(NOT WIN32 AND NOT ANDROID AND NOT EMSCRIPTEN)
-    include(CheckFunctionExists)
     CHECK_FUNCTION_EXISTS(openpty OPENPTY_IN_LIBC)
     if(NOT OPENPTY_IN_LIBC)
       set(CMAKE_REQUIRED_INCLUDES util.h)

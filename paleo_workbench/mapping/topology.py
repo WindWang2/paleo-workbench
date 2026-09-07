@@ -45,19 +45,60 @@ class TopologyService:
         self.enabled = bool(enabled)
         self.tolerance = max(0.0, float(tolerance))
 
-    def validate(self, layers: Iterable[VectorLayer]) -> list[dict[str, object]]:
-        issues: list[dict[str, object]] = []
+    # -- 校验引擎选择（V7：QGIS GEOS 优先，Shapely 显式回退） ------------------
+
+    @staticmethod
+    def _bridge_validate_fn():
+        """桥 geometry.validate（逐错误详情）——不可用时返回 None（回退 Shapely）。
+
+        与 split/merge/repair 的桥优先策略对齐（基线不一致项，V7 收敛）；
+        运行失败按不可用处理（不静默吞异常，Shapely 路径会给出自己的报告）。
+        """
+        try:
+            from paleo_workbench.mapping.qgis_style import qgis_bridge_available
+
+            if not qgis_bridge_available():
+                return None
+            import qgis_render_bridge as native
+
+            fn = getattr(native.geometry, "validate", None)
+            return fn if callable(fn) else None
+        except Exception:
+            return None
+
+    def _validate_geometry_detailed(self, geometry) -> list[str]:
+        """逐几何校验，返回错误消息列表（空列表 = 有效）。"""
+        bridge_validate = self._bridge_validate_fn()
+        if bridge_validate is not None:
+            try:
+                errors = bridge_validate(geometry)
+                return [str(entry.get("message") or "invalid geometry") for entry in errors]
+            except Exception:
+                pass  # 桥路径失败 → 显式回退 Shapely（两条引擎都在报告中可见）
         try:
             from shapely.geometry import shape
             from shapely.validation import explain_validity
         except ImportError:
+            return ["Shapely/GEOS 与 QGIS 校验引擎均不可用"]
+        candidate = shape(geometry)
+        if candidate.is_valid:
+            return []
+        return [explain_validity(candidate) if explain_validity else "invalid geometry"]
+
+    def validate(self, layers: Iterable[VectorLayer]) -> list[dict[str, object]]:
+        issues: list[dict[str, object]] = []
+        engine_available = (
+            self._bridge_validate_fn() is not None
+            or self._shapely_available()
+        )
+        if not engine_available:
             return [
                 {
                     "severity": "error",
                     "layer_id": "",
                     "feature_id": "",
-                    "code": "shapely_unavailable",
-                    "message": "拓扑检查需要 Shapely/GEOS，当前不可用",
+                    "code": "validator_unavailable",
+                    "message": "拓扑检查需要 QGIS 桥或 Shapely/GEOS，当前均不可用",
                 }
             ]
         for layer in layers:
@@ -65,15 +106,14 @@ class TopologyService:
             features = session.features() if session is not None else layer.features()
             for feature in features:
                 geometry = feature.as_record()["geometry"]
-                if shape is not None and geometry["type"] in {"Polygon", "MultiPolygon", "LineString", "MultiLineString"}:
-                    candidate = shape(geometry)
-                    if not candidate.is_valid:
+                if geometry["type"] in {"Polygon", "MultiPolygon", "LineString", "MultiLineString"}:
+                    for message in self._validate_geometry_detailed(geometry):
                         issues.append(
                             {
                                 "severity": "error",
                                 "layer_id": layer.id,
                                 "feature_id": feature.feature_id,
-                                "message": explain_validity(candidate) if explain_validity else "invalid geometry",
+                                "message": message,
                             }
                         )
                 if geometry["type"] == "Polygon":
@@ -89,6 +129,15 @@ class TopologyService:
                                 }
                             )
         return issues
+
+    @staticmethod
+    def _shapely_available() -> bool:
+        try:
+            import shapely.geometry  # noqa: F401
+
+            return True
+        except ImportError:
+            return False
 
     def propagate_shared_vertex(
         self,

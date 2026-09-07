@@ -42,6 +42,7 @@ class MapActionController(QObject):
     _TOOL_IDS = (
         "pan", "zoom_in", "zoom_out", "identify", "select", "select_rectangle",
         "measure_distance", "add_point", "add_line", "add_polygon", "move_feature", "vertex",
+        "reshape",
     )
 
     _LABELS = {
@@ -53,6 +54,7 @@ class MapActionController(QObject):
         "toggle_editing": "开始编辑", "save_edits": "保存编辑", "rollback": "回滚",
         "add_point": "添加点", "add_line": "添加线", "add_polygon": "添加面",
         "move_feature": "移动要素", "vertex": "节点编辑", "delete_selected": "删除所选",
+        "reshape": "重塑",
         "undo": "撤销", "redo": "重做", "split": "分割", "merge": "合并",
         "snapping": "捕捉", "topology": "拓扑编辑", "cancel": "取消",
     }
@@ -117,6 +119,34 @@ class MapActionController(QObject):
         self.actions["previous_extent"].setEnabled(state.can_previous_extent)
         self.actions["next_extent"].setEnabled(state.can_next_extent)
         self.actions["cancel"].setEnabled(True)
+
+    def apply_availability(self, availability) -> None:
+        """Apply ``{tool_id: ToolAvailability}`` from the V7 evaluator.
+
+        Supersedes :meth:`update_state` on the workstation path: enabled state
+        and checkmarks come from the single evaluator, and every disabled
+        action carries its human-readable reason in the tooltip/status tip
+        (Goal V7 §3: never a bare ``setEnabled(False)``). ``update_state``
+        remains for the legacy authoring page host.
+        """
+        for tool_id, result in dict(availability).items():
+            action = self.actions.get(tool_id)
+            if action is None:
+                continue  # evaluator may cover tools this host has no action for
+            label = self._LABELS.get(tool_id, tool_id)
+            action.setEnabled(result.enabled)
+            action.setVisible(result.visible)
+            if result.disabled_reason:
+                action.setToolTip(f"{label}——{result.disabled_reason}")
+                action.setStatusTip(f"{label}——{result.disabled_reason}")
+            else:
+                action.setToolTip(label)
+                action.setStatusTip(label)
+            checked = bool(result.checked)
+            if action.isCheckable() and action.isChecked() != checked:
+                action.blockSignals(True)
+                action.setChecked(checked)
+                action.blockSignals(False)
 
     def toolbar(
         self,

@@ -33,11 +33,19 @@ directories remain when they are required by the Core/GUI build closure.
 
 Only `CMakeLists.txt` differs from upstream: four non-runtime subdirectories
 (`doc`, `i18n`, `postinstall`, and `linux`) are not added because their source
-is intentionally not part of this minimal runtime closure. One imported C++
-header carries a documented compatibility patch:
+is intentionally not part of this minimal runtime closure. Imported
+C++/build patches carry a documented compatibility rationale:
 
 - `src/core/qgsconnectionpool.h` — `QSemaphore::tryAcquire(int,
   QDeadlineTimer)` does not exist before Qt 6.6; on older Qt runtimes (the
   CI leg builds against Ubuntu noble's Qt 6.4) the call falls back to the
   identical milliseconds overload, guarded by `QT_VERSION`. Semantics are
   unchanged (both forms time out after `timeout` ms).
+- `CMakeLists.txt` (V7, Windows support) — `include(CheckFunctionExists)` is
+  hoisted above the `NOT WIN32` openpty guard: upstream only pulls the module
+  in on non-Windows paths while `src/core`'s internal-spatialindex block calls
+  `check_function_exists()` on every platform. No behavior change on Linux.
+- `platform/windows/rc/version.rc.in` (V7, Windows support) — the file is
+  part of the upstream tag but was not part of the original import closure;
+  it is restored verbatim from `final-4_2_0` because `win32_version_info()`
+  (compiled into qgis_core/qgis_gui on MSVC) requires it.

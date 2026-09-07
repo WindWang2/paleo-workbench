@@ -132,9 +132,14 @@ class QgisCanvasShim(QWidget):
     # payload: {"layer_doc_id": str, "feature_id": str}；原生路径的单一识别
     # 结果入口（消费方仍以 Python feature_query_index 面板为权威，未接双面板）。
     native_identified = Signal(dict)
-    # B8：量距分段完成 / 实时预览（地图单位）。
+    # B8：量距分段完成 / 实时预览（地图单位）——fallback 路由路径（旧桥）。
     measure_segment = Signal(float)
     measure_preview = Signal(float)
+    # V7：原生测距（PwbMeasureTool）结果。payload 见桥侧
+    # PwbMeasureTool::payloadJson：{"action", "points", "segments", "total",
+    # "ellipsoidal"}；action ∈ measure_updated|measure_completed。
+    measure_updated = Signal(dict)
+    measure_canceled = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -176,6 +181,9 @@ class QgisCanvasShim(QWidget):
         # B8：量距事件路由（仅 measure_distance 激活期挂画布视口过滤器）。
         self._measure_router = _CanvasMouseRouter(self)
         self._last_measure_emit: float | None = None
+        # V7：原生测距可用性（capability manifest 声明 "measure" kind）。
+        # 旧桥（<0.3.0）无原生测距——诚实降级为视口路由路径，不静默。
+        self._native_measure_supported = self._probe_native_measure(QgisMapStack)
         # Qt 树析构期间触发的 destroyed 回调只做状态记账：半析构画布上再进
         # destroy_canvas/unsetMapTool 会踩悬空子对象（native 栈已证实）。
         # 画布的桥表回收由桥在 canvas destroyed 时自行完成；orderly 关闭仍走
@@ -197,10 +205,24 @@ class QgisCanvasShim(QWidget):
         self._extent_history_index = 0
         self._last_emitted_extent = initial
 
+    @staticmethod
+    def _probe_native_measure(stack_cls) -> bool:
+        """桥 capability manifest 是否声明原生测距（V7）。
+
+        manifest 是桥能力的唯一权威；旧桥无 manifest 或未列 "measure"
+        都返回 False（fallback 路由路径接管，不伪造能力）。
+        """
+        try:
+            import qgis_render_bridge as bridge
+
+            manifest = bridge.capability_manifest()
+            return "measure" in set(manifest.get("native_tools") or ())
+        except Exception:
+            return False
+
     def _is_fitted_compatible(self, expected: tuple[float, float, float, float], actual: tuple[float, float, float, float]) -> bool:
         if expected == actual:
-            return True
-        # QGIS aspect-fit expands one axis keeping center: actual should contain expected with same center
+            return True        # QGIS aspect-fit expands one axis keeping center: actual should contain expected with same center
         ex_cx = (expected[0] + expected[2]) * 0.5
         ex_cy = (expected[1] + expected[3]) * 0.5
         ac_cx = (actual[0] + actual[2]) * 0.5
@@ -637,10 +659,11 @@ class QgisCanvasShim(QWidget):
                         return
                     tool_id = getattr(tool, "tool_id", "") if tool is not None else "pan"
                     # M3：编辑类工具映射到原生 QgsMapTool（采点/线/面/顶点/移动）。
-                    # B8：identify 直连桥 QgsMapToolIdentifyFeature；measure 桥级
-                    # 无原生工具——原生侧落 pan 清掉编辑/识别工具占用，画布鼠标
-                    # 事件由 _CanvasMouseRouter 路由给活动 Python 工具。
+                    # B8：identify 直连桥 QgsMapToolIdentifyFeature。
+                    # V7：measure 有原生 PwbMeasureTool 时直连；旧桥（无
+                    # manifest 声明）诚实降级为视口路由路径（Python 工具执行）。
                     measure_active = tool_id == "measure_distance"
+                    native_measure = measure_active and shim._native_measure_supported
                     kind = {
                         "zoom_in": "zoomIn",
                         "zoom_out": "zoomOut",
@@ -654,12 +677,19 @@ class QgisCanvasShim(QWidget):
                         "identify": "identify",
                         "pan": "pan",
                     }.get(tool_id, "pan")
+                    if native_measure:
+                        kind = "measure"
+                    elif tool_id == "reshape":
+                        # V7 重塑：原生 addLine 数字化器采重塑线；语义应用在
+                        # Python 会话（ReshapeTool.commit_geometry）。
+                        kind = "addLine"
                     try:
                         shim.stack.set_map_tool(addr, kind)
                     except Exception:
                         pass
                     try:
-                        shim._measure_router.set_active(measure_active)
+                        # 视口路由只在「measure 激活 且 桥无原生测距」时挂载。
+                        shim._measure_router.set_active(measure_active and not native_measure)
                         if not measure_active:
                             shim._last_measure_emit = None
                     except Exception:
@@ -798,6 +828,30 @@ class QgisCanvasShim(QWidget):
 
         try:
             self.stack.set_selection_callback(self.canvas_address, _on_selection)
+        except Exception:
+            pass
+
+        # V7：原生测距结果上浮（PwbMeasureTool → 状态栏/宿主信号）。
+        def _on_measure(action: str, payload_json: str) -> None:
+            shim = self_ref()
+            if shim is None or getattr(shim, "_shutdown_done", False):
+                return
+            try:
+                if action == "measure_canceled":
+                    shim.measure_canceled.emit()
+                    return
+                payload = json.loads(payload_json) if payload_json else {}
+            except Exception:
+                return
+            if not isinstance(payload, dict):
+                return
+            try:
+                shim.measure_updated.emit(dict(payload))
+            except Exception:
+                pass
+
+        try:
+            self.stack.set_measure_callback(self.canvas_address, _on_measure)
         except Exception:
             pass
 
