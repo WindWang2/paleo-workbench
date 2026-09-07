@@ -15,7 +15,11 @@
 门禁求值顺序（先到先得 = 优先级）：
 存在性 → 工程 → QGIS 能力 → 图层存在/缺失 → 角色门禁（RAW/冻结/锁定）
 → 阶段（组隐藏 / 动作白名单）→ 几何类型（捕获工具）→ 编辑会话
-→ 选择条件 → WRITE 授权。
+→ 选择条件。
+
+（WRITE 授权字段 ``write_granted`` 是 palette 适配器输入的保留位：
+本应用中 WRITE grant 门控 Agent 动作而非地图工具——首个需要授权的
+地图工具出现前，求值器不声称该门禁。评审 R1-P2/R2-F6 改为如实陈述。）
 """
 from __future__ import annotations
 
@@ -182,7 +186,9 @@ _NEEDS_ANY_LAYER = frozenset({
     "clear_selection", "select_all", "invert_selection",
     "layer_properties", "layer_zoom", "layer_export", "symbology",
 })
-_NEEDS_EDITABLE_LAYER = frozenset({"toggle_editing", "attribute_table"})
+# attribute_table 是只读查看（QGIS 语义）——只要求图层存在，不要求
+# 可编辑（R1-P2：此前与 toggle_editing 同门禁，RAW 层连查看都被禁）。
+_NEEDS_EDITABLE_LAYER = frozenset({"toggle_editing"})
 
 #: 需要已开启编辑会话的工具（会话内进一步受选择/撤销栈约束）
 _NEEDS_EDITING = frozenset({
@@ -428,7 +434,11 @@ def _kind_gate(tool_id: str, layer: LayerCapabilitySnapshot) -> ToolAvailability
         return None
     expected = {"add_point": "point", "add_line": "line", "add_polygon": "polygon"}[tool_id]
     kind = str(layer.kind or "")
-    if kind and kind != expected:
+    if not kind:
+        # fail-closed（R1-P2）：未知几何类型不放开捕获工具（空图层/快照
+        # 未就绪时启用三支捕获工具是假可用）。
+        return _no("活动图层几何类型未知——不能确定可用的捕获工具")
+    if kind != expected:
         return _no(
             f"活动图层为{LAYER_CAPTION(kind)}图层，不能使用添加{LAYER_CAPTION(expected)}"
         )

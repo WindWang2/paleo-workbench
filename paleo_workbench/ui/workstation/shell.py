@@ -413,6 +413,10 @@ class WorkstationFrame(QWidget):
             self.mapping_stage_panel.set_stage(stage_value)
             # V6 §4：阶段驱动工具条命令面（数字化/编辑动作按 profile 过滤）。
             self.composite.apply_stage_tool_profile(stage_value)
+            # V7 R1-P1：阶段也改变组可见性/白名单/求值器输出——统一可用性
+            # 必须随阶段刷新（此前仅 profile 过滤，factor/qa/layout_export
+            # 组与阶段禁用项停留在旧阶段状态）。
+            self.composite._sync_action_state()
             # 「我画进哪个图层」必须可见：阶段切换消息携带当前编辑目标
             #（无目标时明说，绝不静默）。
             target_id = controller.active_target_layer_id

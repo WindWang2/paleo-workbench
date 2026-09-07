@@ -268,13 +268,15 @@ class _TaskRowDelegate(QStyledItemDelegate):
             TaskState.CANCELLED: "已取消",
         }
         text = labels.get(handle.state, str(handle.state))
-        if handle.state is TaskState.RUNNING:
-            text = f"{text} {round(handle.progress * 100)}%"
-        elif handle.cancel_requested and handle.state in (
+        # V7 R1-P1：取消中优先于运行中（RUNNING+cancel_requested 是协作
+        # 取消等待期——显示「运行中 N%」是假状态）。
+        if handle.cancel_requested and handle.state in (
             TaskState.QUEUED,
             TaskState.RUNNING,
         ):
             text = "取消中"
+        elif handle.state is TaskState.RUNNING:
+            text = f"{text} {round(handle.progress * 100)}%"
         return text
 
     def editorEvent(self, event, model, option, index) -> bool:

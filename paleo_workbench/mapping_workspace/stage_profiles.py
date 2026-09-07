@@ -33,7 +33,9 @@ class StageToolProfile:
 
     #: 本阶段可用的数字化/编辑动作 id（existing MapActionController ids）。
     edit_actions: tuple[str, ...] = ()
-    #: 阶段专属上下文动作（Stage Panel 提供，如「新建物源线」「运行因子」）。
+    #: 阶段专属上下文动作 id（镜像 dispatcher 单表，仅域侧编排消费；
+    #: 面板/palette 词表派生自 ui.workstation.stage_actions.
+    #: STAGE_CONTEXT_ACTIONS——V7 R2-F1 后不再三处手维护）。
     context_actions: tuple[str, ...] = ()
 
     def allows_edit_action(self, action_id: str) -> bool:
@@ -94,7 +96,7 @@ _STAGE_PROFILES: dict[MappingStage, StageProfile] = {
             context_actions=(
                 "load_initial_facies", "add_well_prediction_overlay",
                 "add_seismic_prediction_overlay", "create_facies_draft",
-                "toggle_prediction_confidence", "stage_save", "stage_qc",
+                "stage_save", "stage_qc",
             ),
         ),
         recommended_docks={
@@ -127,7 +129,7 @@ _STAGE_PROFILES: dict[MappingStage, StageProfile] = {
             ),
             context_actions=(
                 "create_constraint", "open_factor_workbench", "run_factor",
-                "factor_qc", "compare_factor_versions", "stage_save", "stage_qc",
+                "stage_save", "stage_qc",
             ),
         ),
         recommended_docks={
@@ -153,7 +155,7 @@ _STAGE_PROFILES: dict[MappingStage, StageProfile] = {
                 "merge", "delete_selected", "undo", "redo",
             ),
             context_actions=(
-                "select_evidence", "create_integrated_draft", "map_components",
+                "select_evidence", "create_integrated_draft", 
                 "run_qa", "assemble_map_product", "stage_save",
             ),
         ),

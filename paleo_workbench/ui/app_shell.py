@@ -544,35 +544,36 @@ class AppShell(QWidget):
             "mapping_stage_label", lambda: stage_controller.current_stage.label
         )
 
-        def _target(field: str):
+        # V7 R2-F2：palette 上下文的图层字段全部从 composite.tool_context()
+        # 单一推导（此前 id/editable 走阶段目标、kind/maturity 走活动图层
+        # ——两套 id 源可漂移，palette 会用图层 B 的几何评估图层 A 的身份）。
+        def _tool_layer_field(field: str):
             def _read():
-                return composite.active_editing_target_status()[field]
+                return getattr(composite.tool_context().layer, field)
 
             return _read
 
-        svc.set_provider("active_layer_id", _target("active_layer_id"))
-        svc.set_provider("active_layer_role", _target("role_label"))
-        svc.set_provider("active_layer_editable", _target("editable"))
-        svc.set_provider("active_layer_block_reason", _target("block_reason"))
-        svc.set_provider("editing_active", _target("editing_active"))
-
-        # V7 §3：图层几何/成熟度/冻结 + 能力三态（palette applicability 的
-        # 求值输入；与工具条共用 composite.tool_context 的同一权威链）。
-        def _layer_capability_field(field: str):
-            def _read():
-                snapshot = composite._layer_capability(
-                    composite.edit_controller.active_layer_id
-                )
-                return getattr(snapshot, field)
-
-            return _read
-
-        svc.set_provider("active_layer_kind", _layer_capability_field("kind"))
+        svc.set_provider("active_layer_id", _tool_layer_field("layer_id"))
         svc.set_provider(
-            "active_layer_maturity", _layer_capability_field("maturity")
+            "active_layer_editable", _tool_layer_field("editable")
         )
         svc.set_provider(
-            "active_layer_frozen", _layer_capability_field("frozen")
+            "active_layer_block_reason", _tool_layer_field("block_reason")
+        )
+        # editing_active 是会话态（非图层字段），读编辑控制器权威。
+        svc.set_provider(
+            "editing_active",
+            lambda: composite.edit_controller.editing,
+        )
+        svc.set_provider(
+            "active_layer_role", _tool_layer_field("role_label")
+        )
+        svc.set_provider("active_layer_kind", _tool_layer_field("kind"))
+        svc.set_provider(
+            "active_layer_maturity", _tool_layer_field("maturity")
+        )
+        svc.set_provider(
+            "active_layer_frozen", _tool_layer_field("frozen")
         )
 
         def _capability_field(field: str):

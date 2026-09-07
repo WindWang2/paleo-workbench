@@ -82,7 +82,7 @@ def test_no_new_raw_color_literals() -> None:
 
 
 def test_ratchet_only_shrinks() -> None:
-    """登记表中的每项都必须仍有对应违规，防止僵尸预算。"""
+    """登记表中的每项都必须仍有对应违规，防止僵尸预算（V7 扩到全部三表）。"""
     stale: list[str] = []
     known = set()
     for path in _iter_production_py():
@@ -96,7 +96,23 @@ def test_ratchet_only_shrinks() -> None:
             stale.append(f"{rel}: 预算 {budget} > 实际 {actual}，请下调")
         if budget <= 0:
             stale.append(f"{rel}: 预算为 0 请直接移出登记表")
-    assert not stale, "ALLOWED_VIOLATIONS 需要收敛：\n" + "\n".join(stale)
+    # V7 新表（font-size / fixed-size）同样不得有僵尸预算。
+    for table_name, budgets, pattern in (
+        ("FONT_SIZE_BUDGETS", FONT_SIZE_BUDGETS, _FONT_LITERAL),
+        ("FIXED_SIZE_BUDGETS", FIXED_SIZE_BUDGETS, _FIXED_LITERAL),
+    ):
+        for rel, budget in budgets.items():
+            path = ROOT / rel
+            if not path.exists():
+                stale.append(f"{table_name}: {rel} 文件已不存在，请移除登记")
+                continue
+            actual = _count(path, pattern)
+            if actual < budget:
+                stale.append(
+                    f"{table_name}: {rel} 预算 {budget} > 实际 {actual}，请下调")
+            if budget <= 0:
+                stale.append(f"{table_name}: {rel} 预算为 0 请直接移出登记表")
+    assert not stale, "ratchet 登记表需要收敛：\n" + "\n".join(stale)
 
 
 # ---------------------------------------------------------------------------

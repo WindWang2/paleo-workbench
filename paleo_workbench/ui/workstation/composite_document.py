@@ -879,7 +879,22 @@ class CompositeDocument(QWidget):
         )
         self.edit_controller.state_changed.connect(self._sync_action_state)
         self.canvas.tool_operation.connect(self._on_tool_operation)
-        self.canvas.extent_changed.connect(lambda *_: self._sync_action_state())
+        # 视野（pan/zoom）是高频事件：走轻路径——勾选态 + 状态条；统一
+        # 可用性/树装饰与 extent 无关（R3-P2：满载 1000 层时每次 pan 全量
+        # 重算 27ms，超 60fps 预算）。
+        def _on_extent_changed(*_):
+            controller = self.edit_controller
+            for action_id in self.action_controller._TOOL_IDS:
+                action = self.action_controller.actions[action_id]
+                active_tool_id = (
+                    getattr(controller.tools.active_tool, "tool_id", "") or "pan"
+                )
+                action.blockSignals(True)
+                action.setChecked(action_id == active_tool_id)
+                action.blockSignals(False)
+            self._sync_status_bar()
+
+        self.canvas.extent_changed.connect(_on_extent_changed)
         self.canvas.map_position_changed.connect(self._on_map_position)
         self.canvas.backend_status_changed.connect(lambda *_: self._sync_status_bar())
 
@@ -940,6 +955,24 @@ class CompositeDocument(QWidget):
         self.stage_controller.group_controller.set_maturity_provider(
             self._layer_maturity_value
         )
+        # V7 R3-P1：新鲜度评估变化 → 树装饰即时刷新（此前 stale 推送后
+        # 树要等下一次无关交互才更新——goal §7 的主过期呈现面滞后）。
+        try:
+            self.stage_controller.stale_summary_changed.connect(
+                lambda *_: self._push_layer_decorations()
+            )
+        except (AttributeError, RuntimeError):
+            pass  # 旧 controller 无该信号：保持轮询路径
+        # 主题切换 → 状态列颜色重取（R3-P2：装饰色随 palette()，但只在
+        # 推送时写入 item，切主题后需重推）。
+        from paleo_workbench.ui.theme import theme_manager
+
+        try:
+            theme_manager.theme_changed.connect(
+                lambda *_: self._push_layer_decorations()
+            )
+        except (AttributeError, RuntimeError):
+            pass
         if self.uses_native_stack:
             self.stage_controller.group_controller.attach_canvas(self.canvas)
             if isinstance(self.layer_manager, QgisLayerTreePanel):
@@ -1189,6 +1222,19 @@ class CompositeDocument(QWidget):
             decorations[str(reference.id)] = LayerPresentationState(
                 degraded=status in {"failed", "error"},
             )
+        # 树上仍存在、但编辑注册表已没有的行 → 显式「缺失」（R1-P2：承诺
+        # 的 missing 装饰此前从未产生）。
+        from PySide6.QtCore import Qt as _Qt
+
+        tree = getattr(self.layer_manager, "tree", None)
+        if tree is not None:
+            for row in range(tree.topLevelItemCount()):
+                layer_id = str(tree.topLevelItem(row).data(
+                    0, _Qt.ItemDataRole.UserRole) or "")
+                if layer_id and layer_id not in decorations                         and controller.layer(layer_id) is None:
+                    decorations[layer_id] = LayerPresentationState(
+                        missing=True,
+                    )
         return decorations
 
     def _group_summaries(self) -> list:
@@ -1471,12 +1517,33 @@ class CompositeDocument(QWidget):
             self.hub_page_requested.emit("review")
         self._sync_action_state()
 
+    def _managed_style_db_path(self) -> str:
+        """受管样式库路径（工程 .artifacts/styles.db；无工程 → 用户目录）。"""
+        import pathlib
+
+        root = getattr(getattr(self._project, "meta", None), "project_root", "")
+        if root:
+            directory = pathlib.Path(root) / ".artifacts"
+        else:
+            from PySide6.QtCore import QStandardPaths
+
+            base = QStandardPaths.writableLocation(
+                QStandardPaths.StandardLocation.AppDataLocation
+            )
+            directory = pathlib.Path(base or ".") / "PaleoWorkbench"
+        directory.mkdir(parents=True, exist_ok=True)
+        return str(directory / "styles.db")
+
     def _open_style_manager(self) -> None:
-        """QGIS 样式库入口（桥能力门禁；失败如实反馈，不静默）。"""
+        """QGIS 样式库入口（桥能力门禁；失败与 False 返回均如实反馈）。"""
         try:
             from paleo_workbench.ui.map_symbology_bridge import open_style_manager
 
-            open_style_manager(self)
+            opened = open_style_manager(
+                self, style_db_path=self._managed_style_db_path()
+            )
+            if not opened:
+                self.status_message.emit("样式库未打开（对话框被取消或未提交）")
         except Exception as exc:  # 桥缺失/构造失败均必须可见
             logging.getLogger(__name__).exception("样式库打开失败")
             self.status_message.emit(f"样式库不可用：{exc}")
@@ -2733,17 +2800,13 @@ class CompositeDocument(QWidget):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._reposition_toolbar()
-
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        # 隐藏状态下 Qt 延迟发送 resize：首显时补一次工具条重排（V7）。
-        QTimer.singleShot(0, self._reposition_toolbar)
         # 画布随窗口/布局变化后，空态提示必须盖满当前画布矩形（否则残留
         # 布局前的小矩形，文字被截断或不可见）。
         self._sync_hint_geometry()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        # 隐藏状态下 Qt 延迟发送 resize：首显时补一次工具条重排（V7）。
         QTimer.singleShot(0, self._reposition_toolbar)
 
     # -- 生命周期 --------------------------------------------------------------

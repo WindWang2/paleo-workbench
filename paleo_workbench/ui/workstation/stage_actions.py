@@ -30,6 +30,42 @@ from paleo_workbench.mapping_workspace.stages import MappingStage
 logger = logging.getLogger(__name__)
 
 
+#: 阶段上下文动作单一词表（V7 R2-F1：阶段面板按钮、palette 注册、
+#: dispatcher 执行共用这一份——(action_id, label)，按阶段）。
+#: 此前三套手维护表（panel._PHASEn_ACTIONS / dispatcher map / profile
+#: context_actions）互不推导，存在漂移（评审 R2-F1）。
+STAGE_CONTEXT_ACTIONS: dict[str, tuple[tuple[str, str], ...]] = {
+    "facies_calibration": (
+        ("load_initial_facies", "加载初始相图"),
+        ("add_well_prediction_overlay", "叠加测井预测"),
+        ("add_seismic_prediction_overlay", "叠加地震预测"),
+        ("create_facies_draft", "创建解释草稿"),
+        ("stage_save", "保存阶段成果"),
+    ),
+    "constraint_factor": (
+        ("open_factor_workbench", "单因素工作台"),
+        ("overlay_factor_results", "叠加单因素结果"),
+        ("stage_save", "保存阶段成果"),
+    ),
+    "integrated_compilation": (
+        ("select_evidence", "选择证据版本"),
+        ("create_integrated_draft", "创建综合草稿"),
+        ("run_qa", "运行 QA"),
+        ("assemble_map_product", "生成 MapProduct"),
+    ),
+}
+
+
+def stage_context_actions(stage_value: str) -> tuple[tuple[str, str], ...]:
+    """某阶段的上下文动作表（未知阶段 → 空表，fail-closed）。"""
+    from paleo_workbench.mapping_workspace.stages import stage_from_value
+
+    stage = stage_from_value(str(stage_value or ""))
+    if stage is None:
+        return ()
+    return STAGE_CONTEXT_ACTIONS.get(stage.value, ())
+
+
 class StageActionDispatcher:
     """宿主为 CompositeDocument；动作结果经 status_message 反馈。"""
 
@@ -308,7 +344,9 @@ class StageActionDispatcher:
     def open_factor_workbench(self) -> None:
         """单因素工作台：导航到既有制备/编图 hub（不在本分支重实现插值）。"""
         try:
-            self.composite.hub_page_requested.emit("mapping")
+            # V7 R1-P2：单因素工作台在「数据制备」子页（FactorTaskPanel），
+            # 此前路由到编图画布页。
+            self.composite.hub_page_requested.emit("preparation")
         except Exception:
             self.composite.status_message.emit(
                 "请通过左侧功能导航打开单因素制备页运行插值")
@@ -526,6 +564,14 @@ class StageActionDispatcher:
             try:
                 found = self.edit_controller.topology.validate([layer])
             except Exception:
+                # V7 R1-P1：验证器崩溃不得静默跳过——否则「QA 通过」是在
+                # 未验证的图层上得出的假结论；转为 error 级 issue。
+                logger.exception("topology validate crashed for %s", layer_id)
+                issues.append({
+                    "kind": "error",
+                    "message": f"拓扑验证失败（验证器异常）：{layer.name}",
+                    "layer_id": str(layer_id),
+                })
                 continue
             for problem in found or []:
                 issues.append({

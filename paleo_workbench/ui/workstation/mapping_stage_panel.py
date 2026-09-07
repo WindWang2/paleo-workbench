@@ -30,6 +30,7 @@ from paleo_workbench.mapping_workspace.readiness import (
     StageReadiness,
 )
 from paleo_workbench.mapping_workspace.stages import MappingStage
+from paleo_workbench.ui.workstation.stage_actions import stage_context_actions
 
 # V7 §6：就绪度 glyph 归一到 state_language（readiness 词表）。
 from paleo_workbench.ui.workstation.state_language import state_token as _state_token
@@ -141,24 +142,10 @@ class MappingStagePanel(QWidget):
     locate_requested = Signal(str, str)  # (stage.value, target)
     stage_switch_requested = Signal(str)
 
-    _PHASE1_ACTIONS = [
-        ("load_initial_facies", "加载初始相图"),
-        ("add_well_prediction_overlay", "叠加测井预测"),
-        ("add_seismic_prediction_overlay", "叠加地震预测"),
-        ("create_facies_draft", "创建解释草稿"),
-        ("stage_save", "保存阶段成果"),
-    ]
-    _PHASE2_ACTIONS = [
-        ("open_factor_workbench", "单因素工作台"),
-        ("overlay_factor_results", "叠加单因素结果"),
-        ("stage_save", "保存阶段成果"),
-    ]
-    _PHASE3_ACTIONS = [
-        ("select_evidence", "选择证据版本"),
-        ("create_integrated_draft", "创建综合草稿"),
-        ("run_qa", "运行 QA"),
-        ("assemble_map_product", "生成 MapProduct"),
-    ]
+    # V7 R2-F1：阶段动作词表派生自 dispatcher 单表（不再手维护第二份）。
+    _PHASE1_ACTIONS = list(stage_context_actions("facies_calibration"))
+    _PHASE2_ACTIONS = list(stage_context_actions("constraint_factor"))
+    _PHASE3_ACTIONS = list(stage_context_actions("integrated_compilation"))
     _CONSTRAINT_ACTIONS = [
         (ConstraintKind.PROVENANCE_LINE, "物源线"),
         (ConstraintKind.SOURCE_DIRECTION, "物源方向"),
