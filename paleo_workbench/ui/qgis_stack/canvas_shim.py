@@ -52,6 +52,10 @@ from paleo_workbench.ui.qgis_stack.widgets import QgisCanvasHost
 
 
 def _load_mapstack():
+    # Windows V7：vendored QGIS 运行时 DLL 目录必须先进 loader 路径。
+    from paleo_workbench.mapping.qgis_style import ensure_qgis_bridge_dll_dirs
+
+    ensure_qgis_bridge_dll_dirs()
     try:
         from qgis_render_bridge.mapstack import QgisMapStack
 
@@ -213,6 +217,9 @@ class QgisCanvasShim(QWidget):
         都返回 False（fallback 路由路径接管，不伪造能力）。
         """
         try:
+            from paleo_workbench.mapping.qgis_style import ensure_qgis_bridge_dll_dirs
+
+            ensure_qgis_bridge_dll_dirs()  # Windows V7: vendor DLL path
             import qgis_render_bridge as bridge
 
             manifest = bridge.capability_manifest()

@@ -1138,6 +1138,9 @@ class CompositeEditController(QObject):
         执行体（下推路径本身不存在）。
         """
         try:
+            from paleo_workbench.mapping.qgis_style import ensure_qgis_bridge_dll_dirs
+
+            ensure_qgis_bridge_dll_dirs()  # Windows V7: vendor DLL path
             import qgis_render_bridge as bridge
 
             manifest = bridge.capability_manifest()

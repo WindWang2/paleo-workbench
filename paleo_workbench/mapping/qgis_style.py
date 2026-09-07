@@ -24,13 +24,16 @@ never interprets renderer XML (that is the native bridge's job).
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any
 
 __all__ = [
     "QGIS_STYLE_SCHEMA_VERSION",
     "QgisStylePayload",
+    "ensure_qgis_bridge_dll_dirs",
     "migrate_legacy_style",
     "payload_from_legacy_style",
     "qgis_bridge_available",
@@ -38,9 +41,44 @@ __all__ = [
 
 QGIS_STYLE_SCHEMA_VERSION = 1
 
+_DLL_DIRS_INJECTED = False
+
+
+def ensure_qgis_bridge_dll_dirs() -> None:
+    """Windows V7: put the vendored-QGIS runtime DLLs on the loader path.
+
+    The bridge ``.pyd`` imports ``qgis_core.dll`` etc. from the vendor build's
+    ``output/bin``; MSVC has no rpath equivalent, so the directory must join
+    the DLL search path **before** the first ``import qgis_render_bridge``.
+    Idempotent; no-op on non-Windows. Dev-layout driven (editable install is
+    the only supported mode): repo ``native/qgis_render_bridge/build/qgis-vendor``
+    or ``PALEO_QGIS_BUILD_DIR`` override, plus the QScintilla runtime tree.
+    """
+    global _DLL_DIRS_INJECTED
+    if _DLL_DIRS_INJECTED or os.name != "nt":
+        return
+    _DLL_DIRS_INJECTED = True
+    candidates: list[str] = []
+    env_dir = os.environ.get("PALEO_QGIS_BUILD_DIR", "").strip()
+    if env_dir:
+        candidates.append(str(Path(env_dir) / "output" / "bin"))
+    repo_root = Path(__file__).resolve().parents[2]
+    candidates.append(
+        str(repo_root / "native" / "qgis_render_bridge" / "build" / "qgis-vendor" / "output" / "bin")
+    )
+    candidates.append("C:/deps/qscintilla-install/bin")
+    for directory in candidates:
+        if directory and Path(directory).is_dir():
+            try:
+                os.add_dll_directory(directory)
+                os.environ["PATH"] = directory + os.pathsep + os.environ.get("PATH", "")
+            except OSError:
+                continue
+
 
 def qgis_bridge_available() -> bool:
     """True when the optional native bridge module is importable."""
+    ensure_qgis_bridge_dll_dirs()
     try:
         import qgis_render_bridge  # noqa: F401
     except ImportError:

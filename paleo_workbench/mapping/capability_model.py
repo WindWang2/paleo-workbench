@@ -190,6 +190,9 @@ def probe_qgis_capability() -> QgisCapabilitySnapshot:
     capability surface and runtime health are separate concerns.
     """
     try:
+        from paleo_workbench.mapping.qgis_style import ensure_qgis_bridge_dll_dirs
+
+        ensure_qgis_bridge_dll_dirs()  # Windows V7: vendor DLL path before import
         import qgis_render_bridge as bridge
     except ImportError:
         return QgisCapabilitySnapshot(status="unavailable", reason=BRIDGE_BUILD_HINT)
