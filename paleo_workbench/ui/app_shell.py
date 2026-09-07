@@ -556,6 +556,34 @@ class AppShell(QWidget):
         svc.set_provider("active_layer_block_reason", _target("block_reason"))
         svc.set_provider("editing_active", _target("editing_active"))
 
+        # V7 §3：图层几何/成熟度/冻结 + 能力三态（palette applicability 的
+        # 求值输入；与工具条共用 composite.tool_context 的同一权威链）。
+        def _layer_capability_field(field: str):
+            def _read():
+                snapshot = composite._layer_capability(
+                    composite.edit_controller.active_layer_id
+                )
+                return getattr(snapshot, field)
+
+            return _read
+
+        svc.set_provider("active_layer_kind", _layer_capability_field("kind"))
+        svc.set_provider(
+            "active_layer_maturity", _layer_capability_field("maturity")
+        )
+        svc.set_provider(
+            "active_layer_frozen", _layer_capability_field("frozen")
+        )
+
+        def _capability_field(field: str):
+            def _read():
+                return getattr(composite._capability_snapshot(), field)
+
+            return _read
+
+        svc.set_provider("capability_mode", _capability_field("mode"))
+        svc.set_provider("capability_reason", _capability_field("reason"))
+
         svc.set_provider("active_well_id", lambda: selection.active_well_id)
         svc.set_provider("active_horizon_id", lambda: selection.active_horizon_id)
         svc.set_provider("active_fault_id", lambda: selection.active_fault_id)
@@ -591,6 +619,9 @@ class AppShell(QWidget):
         selection.selection_changed.connect(lambda *_: svc.refresh())
         stage_controller.current_stage_changed.connect(lambda *_: svc.refresh())
         stage_controller.active_target_changed.connect(lambda *_: svc.refresh())
+        # V7：活动图层切换（树选择/新建）也改变 kind/成熟度上下文——
+        # refresh 差分门控，无变化时不发射。
+        composite.edit_controller.state_changed.connect(lambda *_: svc.refresh())
         self.workstation.agent_panel.write_grant_changed.connect(lambda: svc.refresh())
         # 任务中心轮询调度器状态；活动数变化时同步上下文（差分门控）。
         self.workstation.task_center.active_count_changed.connect(

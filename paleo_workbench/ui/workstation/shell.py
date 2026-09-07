@@ -531,9 +531,16 @@ class WorkstationFrame(QWidget):
         controller.dock_recommendation.connect(_on_dock_recommendation)
 
         # 阶段动作的 hub 导航请求（单因素制备等既有页面）。
-        self.composite.hub_page_requested.connect(
-            lambda key="": (self.show_hub_page("综合编图") if not key or key == "mapping"
-                            else self.show_hub_page(str(key))))
+        # V7 修复：此前只 show 浮动 hub dock、不切换子模块（「单因素工作台」
+        # 实际停在编图画布）。改为经 navigation_requested 走 AppShell 真导航
+        # （切 hub + 子模块 + 激活页面）。
+        self._HUB_ROUTES = {
+            "mapping": (3, "canvas"),
+            "preparation": (3, "preparation"),
+            "review": (3, "review"),
+            "data": (0, "management"),
+        }
+        self.composite.hub_page_requested.connect(self._on_hub_page_requested)
         # 阶段面板上下文动作（执行体在 composite 的阶段动作层）。
         self.mapping_stage_panel.action_requested.connect(
             self._dispatch_stage_action)
@@ -549,12 +556,30 @@ class WorkstationFrame(QWidget):
         阶段面板按钮与 palette 条目共用同一分派路径（``_dispatch_stage_action``），
         动作语义只有一份。``stages`` 白名单使跨阶段调用在 palette 侧被
         禁用并显示原因（命令注册表 evaluate），执行侧不再重复判定。
+
+        V7 §5：有工具面映射的阶段动作追加 ``applicability``——与工具条
+        共用 ``tool_surface.evaluate_tool``（经 UIContext 快照适配），
+        palette 禁用原因与 tooltip 同一字符串源。
         """
         from paleo_workbench.mapping_workspace.stages import MappingStage
         from paleo_workbench.ui.command_registry import CommandSpec, command_registry
         from paleo_workbench.ui.workstation.mapping_stage_panel import (
             MappingStagePanel,
         )
+        from paleo_workbench.ui.workstation.tool_surface import (
+            evaluate_tool,
+            tool_context_from_ui_snapshot,
+        )
+
+        # 阶段动作 id → 工具面 id（无映射的动作不受工具门禁，仅阶段白名单）。
+        stage_action_tools = {
+            "open_factor_workbench": "factor_workbench",
+            "run_factor": "factor_workbench",
+            "overlay_factor_results": "factor_overlay",
+            "run_qa": "qa_run",
+            "stage_qc": "qa_run",
+            "assemble_map_product": "map_product_assemble",
+        }
 
         for stage, actions in (
             (MappingStage.FACIES_CALIBRATION, MappingStagePanel._PHASE1_ACTIONS),
@@ -562,6 +587,16 @@ class WorkstationFrame(QWidget):
             (MappingStage.INTEGRATED_COMPILATION, MappingStagePanel._PHASE3_ACTIONS),
         ):
             for action_id, title in actions:
+                tool_id = stage_action_tools.get(action_id)
+
+                def _applicability(ctx, _tool=tool_id):
+                    if _tool is None:
+                        return None
+                    avail = evaluate_tool(
+                        _tool, tool_context_from_ui_snapshot(ctx)
+                    )
+                    return avail.reason or None
+
                 command_registry.register(
                     CommandSpec(
                         id=f"stage:{stage.value}:{action_id}",
@@ -573,6 +608,7 @@ class WorkstationFrame(QWidget):
                         keywords="阶段 stage 编图",
                         group="编图阶段",
                         stages=(stage.value,),
+                        applicability=_applicability,
                         callback=lambda s=stage.value, a=action_id: (
                             self._dispatch_stage_action(s, a)
                         ),
@@ -604,6 +640,17 @@ class WorkstationFrame(QWidget):
         handler = getattr(self.composite, "stage_action", None)
         if callable(handler):
             handler(stage_value, action_id)
+
+    def _on_hub_page_requested(self, key: str) -> None:
+        """composite 的 hub 导航请求 → 真导航（切 hub + 子模块）。
+
+        未知 key 落到编图 hub 的画布页（与旧行为「显示综合编图」等价，
+        但现在真的切换页面而不是只弹 dock）。
+        """
+        hub_index, subkey = self._HUB_ROUTES.get(
+            str(key or "mapping"), (3, "canvas")
+        )
+        self.navigation_requested.emit(hub_index, subkey)
 
     def _dispatch_stage_constraint(self, kind_value: str) -> None:
         handler = getattr(self.composite, "create_stage_constraint", None)

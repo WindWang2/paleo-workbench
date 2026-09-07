@@ -80,3 +80,5 @@ user-history.db
 # Agent session working directories (transient tooling artifacts).
 .agent-work/
 baseline_tests*.log
+.baseline-*.log
+.baseline-*.txt

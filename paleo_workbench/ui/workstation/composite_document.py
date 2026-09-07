@@ -61,6 +61,13 @@ from paleo_workbench.ui.qgis_stack.canvas_shim import QgisCanvasShim
 from paleo_workbench.ui.qgis_stack.layer_tree_panel import QgisLayerTreePanel
 from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 from paleo_workbench.ui.workstation.common import workstation_icon
+from paleo_workbench.ui.workstation.tool_surface import (
+    LayerCapabilitySnapshot,
+    QgisCapabilitySnapshot,
+    ToolAvailability,
+    ToolContext,
+    availability_for_context,
+)
 from paleo_workbench.ui.workstation.composite_attribute_table import (
     CompositeAttributeTableDialog,
 )
@@ -920,6 +927,119 @@ class CompositeDocument(QWidget):
             if action is not None:
                 action.setVisible(tools.allows_edit_action(action_id))
 
+    # -- V7 上下文驱动工具面 ----------------------------------------------------
+
+    def tool_context(self) -> ToolContext:
+        """当前 ``ToolContext``（palette/状态条/工具条共用的求值输入）。
+
+        全部字段来自既有权威（edit_controller.action_state /
+        stage_controller / 画布 backend_status / 角色门禁结论），构造廉价。
+        """
+        controller = self.edit_controller
+        state = controller.action_state(
+            can_previous_extent=self.canvas.can_previous_extent,
+            can_next_extent=self.canvas.can_next_extent,
+        )
+        stage_value = None
+        stage_controller = getattr(self, "stage_controller", None)
+        if stage_controller is not None:
+            current = getattr(stage_controller, "current_stage", None)
+            stage_value = getattr(current, "value", None)
+        split_inputs = getattr(controller, "_split_inputs", None)
+        return ToolContext(
+            project_open=self._project is not None,
+            stage=stage_value,
+            layer=self._layer_capability(controller.active_layer_id),
+            has_active_vector_layer=state.has_active_vector_layer,
+            vector_layer_writable=state.vector_layer_writable,
+            editing=state.editing,
+            selected_count=state.selected_count,
+            compatible_polygon_count=state.compatible_polygon_count,
+            can_undo=state.can_undo,
+            can_redo=state.can_redo,
+            can_previous_extent=state.can_previous_extent,
+            can_next_extent=state.can_next_extent,
+            split_inputs_ready=(split_inputs() is not None) if split_inputs else None,
+            capability=self._capability_snapshot(),
+        )
+
+    def _capability_snapshot(self) -> QgisCapabilitySnapshot:
+        """画布后端能力三态（native / degraded / unavailable）。"""
+        try:
+            status = str(self.canvas.backend_status or "")
+        except Exception:
+            status = ""
+        if not self.uses_native_stack:
+            return QgisCapabilitySnapshot(
+                mode="unavailable", reason="QGIS 桥不可用（回退画布）"
+            )
+        if "degraded" in status:
+            return QgisCapabilitySnapshot(mode="degraded", reason=status)
+        return QgisCapabilitySnapshot(mode="native")
+
+    def _layer_capability(self, layer_id) -> LayerCapabilitySnapshot:
+        """活动图层能力快照（角色/几何/成熟度/门禁结论——全部派生）。"""
+        if not layer_id:
+            return LayerCapabilitySnapshot()
+        layer_id = str(layer_id)
+        state = self.stage_controller.state
+        role = state.role_of(layer_id)
+        layer = self.edit_controller.layer(layer_id)
+        if layer is None:
+            return LayerCapabilitySnapshot(
+                layer_id=layer_id,
+                role=role.value,
+                role_label=role.label,
+                missing=True,
+                editable=False,
+                block_reason="图层不在当前编辑注册表（可能已被移除）",
+            )
+        allowed, reason = self._role_allows_editing(layer_id)
+        maturity = self._layer_maturity_value(layer_id, role)
+        return LayerCapabilitySnapshot(
+            layer_id=layer_id,
+            name=str(layer.name or ""),
+            role=role.value,
+            role_label=role.label,
+            kind=self.edit_controller.kind_of(layer_id) or None,
+            maturity=maturity,
+            editable=allowed,
+            block_reason=reason or None,
+            frozen=maturity in ("frozen", "published"),
+        )
+
+    def _layer_maturity_value(self, layer_id, role=None) -> str | None:
+        """图层级成熟度原始值（None = 未知；raw 角色直接 raw）。"""
+        from paleo_workbench.mapping_workspace.layer_roles import LayerRole
+
+        state = self.stage_controller.state
+        layer_id = str(layer_id)
+        if role is None:
+            role = state.role_of(layer_id)
+        if role.is_raw_protected:
+            return "raw"
+        record = state.membership(layer_id)
+        keys: list[str] = []
+        if record is not None:
+            if record.factor_task_id:
+                keys.append(f"factor:{record.factor_task_id}")
+            if record.role == LayerRole.INITIAL_FACIES_DRAFT:
+                keys.append(f"phase1_draft:{layer_id}")
+            if record.role in (LayerRole.INTEGRATED_FACIES, LayerRole.INTEGRATED_BOUNDARY):
+                keys.append(f"integrated:{layer_id}")
+        for key in keys:
+            found = state.artifact_maturity.get(key)
+            if found:
+                return str(found)
+        return None
+
+    def tool_availability(self) -> dict[str, ToolAvailability]:
+        """统一可用性求值（供工具条刷新与 palette applicability 复用）。"""
+        return availability_for_context(self.tool_context())
+
+    def _apply_tool_availability(self) -> None:
+        self.action_controller.apply_availability(self.tool_availability())
+
     def _build_toolbar(self) -> None:
         """悬浮工具条：QGIS 命令面（MapActionController）+「面板」菜单。"""
         self.toolbar = QFrame(self)
@@ -931,16 +1051,22 @@ class CompositeDocument(QWidget):
         bar_layout.setSpacing(2)
 
         self.action_controller = MapActionController(self)
+        # V7 专业分组（goal §6）：Navigation / Selection / Inspection / Edit
+        # Session / Capture / Geometry / Snapping·Topology / Layer /
+        # Symbology / Factor / QA / Layout·Export——组内动作使能由统一
+        # 求值器管理，组级可见性随阶段/图层切换（_apply_tool_availability）。
+        from paleo_workbench.ui.workstation.tool_surface import TOOL_GROUPS
+
         bar_layout.addWidget(
             self.action_controller.toolbar(
                 "编图",
-                (
-                    ("pan", "zoom_in", "zoom_out", "full_extent", "previous_extent", "next_extent"),
-                    ("identify", "select", "select_rectangle", "measure_distance"),
-                    ("toggle_editing", "save_edits", "rollback"),
-                    ("add_point", "add_line", "add_polygon", "move_feature", "vertex"),
-                    ("undo", "redo", "delete_selected", "split", "merge"),
-                    ("snapping", "topology", "cancel"),
+                tuple(
+                    tuple(TOOL_GROUPS[group])
+                    for group in (
+                        "navigate", "selection", "inspection", "edit_session",
+                        "capture", "geometry", "snapping", "layer",
+                        "symbology", "factor", "qa", "layout_export",
+                    )
                 ),
                 self.toolbar,
             )
@@ -1075,7 +1201,76 @@ class CompositeDocument(QWidget):
             ok, message = self.edit_controller.geometry_command(command_id)
             if not ok:
                 self.status_message.emit(message)
+        elif command_id == "refresh":
+            self.canvas.update()
+        elif command_id == "layer_new":
+            self._create_vector_layer()
+        elif command_id == "reference_import":
+            self._import_reference_layer()
+        elif command_id == "layer_properties":
+            layer_id = self.edit_controller.active_layer_id
+            if layer_id:
+                self.open_layer_properties(str(layer_id))
+        elif command_id == "symbology":
+            layer_id = self.edit_controller.active_layer_id
+            if layer_id:
+                self.open_layer_properties(str(layer_id), focus="symbology")
+        elif command_id == "style_manager":
+            self._open_style_manager()
+        elif command_id == "attribute_table":
+            layer_id = self.edit_controller.active_layer_id
+            if layer_id:
+                self._open_attribute_table(str(layer_id))
+        elif command_id == "layer_zoom":
+            self._zoom_to_active_layer()
+        elif command_id == "layer_export":
+            layer_id = self.edit_controller.active_layer_id
+            if layer_id:
+                self._export_layer(str(layer_id))
+        elif command_id == "factor_workbench":
+            self.stage_actions.dispatch(
+                str(self.stage_controller.current_stage.value
+                    if self.stage_controller.current_stage else ""),
+                "open_factor_workbench",
+            )
+        elif command_id == "factor_overlay":
+            self.stage_actions.overlay_factor_results()
+        elif command_id == "qa_run":
+            self.stage_actions.dispatch(
+                str(self.stage_controller.current_stage.value
+                    if self.stage_controller.current_stage else ""),
+                "run_qa",
+            )
+        elif command_id == "map_product_assemble":
+            self.stage_actions.assemble_map_product()
+        elif command_id == "map_export":
+            self.hub_page_requested.emit("review")
         self._sync_action_state()
+
+    def _open_style_manager(self) -> None:
+        """QGIS 样式库入口（桥能力门禁；失败如实反馈，不静默）。"""
+        try:
+            from paleo_workbench.ui.map_symbology_bridge import open_style_manager
+
+            open_style_manager(self)
+        except Exception as exc:  # 桥缺失/构造失败均必须可见
+            logging.getLogger(__name__).exception("样式库打开失败")
+            self.status_message.emit(f"样式库不可用：{exc}")
+
+    def _zoom_to_active_layer(self) -> None:
+        """缩放到活动图层（与图层树「缩放到图层」同一有效性判据）。"""
+        layer_id = self.edit_controller.active_layer_id
+        layer = self.edit_controller.layer(str(layer_id)) if layer_id else None
+        extent = getattr(layer, "extent", None) if layer is not None else None
+        has_extent = bool(extent) and extent[0] < extent[2] and extent[1] < extent[3]
+        if not has_extent:
+            self.status_message.emit("活动图层没有可缩放的有效范围")
+            return
+        try:
+            self.canvas.set_extent(tuple(float(v) for v in extent))
+        except Exception:
+            logging.getLogger(__name__).exception("缩放到图层失败")
+            self.status_message.emit("缩放到图层失败（范围无效）")
 
     def _save_edits_with_feedback(self) -> None:
         # 纵深防御：RAW 保护角色的会话即使被未知路径打开，也不得提交——
@@ -1113,11 +1308,6 @@ class CompositeDocument(QWidget):
         self.layer_manager.set_editing_layer(
             controller.active_layer_id if controller.editing else None
         )
-        # split 需要「编辑中的多边形选集 + 选中切割线」；通用使能规则之外
-        # 的综合编修特定条件在此收敛（不显示点了没反应的假按钮）。
-        self.action_controller.actions["split"].setEnabled(
-            controller._split_inputs() is not None
-        )
         # 工具按钮勾选态跟随真实活动工具（会话回落 pan 后按钮不得停留在
         # 已失效的工具上）。
         active_tool_id = (
@@ -1139,6 +1329,10 @@ class CompositeDocument(QWidget):
             action.blockSignals(True)
             action.setChecked(bool(checked))
             action.blockSignals(False)
+        # V7：使能/可见/禁用原因统一由 tool_surface 求值（在 update_state
+        # 之后调用——勾选态归前者，其余归单一真源；split 的「多边形选集 +
+        # 切割线」条件经 split_inputs_ready 收敛，不再二次改 enable）。
+        self._apply_tool_availability()
         self._sync_status_bar()
 
     def _update_empty_hint(self) -> None:
@@ -1325,8 +1519,6 @@ class CompositeDocument(QWidget):
         """
         from paleo_workbench.ui.workstation.state_language import state_token
 
-        from paleo_workbench.mapping_workspace.layer_roles import LayerRole
-
         layer_id = str(layer_id)
         state = self.stage_controller.state
         role = state.role_of(layer_id)
@@ -1340,22 +1532,7 @@ class CompositeDocument(QWidget):
         else:
             editability = state_token("editability", "locked")
         # 成熟度：优先工作区权威（artifact_maturity），RAW 角色直接 raw。
-        maturity_value = "raw" if role.is_raw_protected else None
-        if maturity_value is None:
-            record = state.membership(layer_id)
-            keys = []
-            if record is not None:
-                if record.factor_task_id:
-                    keys.append(f"factor:{record.factor_task_id}")
-                if record.role == LayerRole.INITIAL_FACIES_DRAFT:
-                    keys.append(f"phase1_draft:{layer_id}")
-                if record.role in (LayerRole.INTEGRATED_FACIES, LayerRole.INTEGRATED_BOUNDARY):
-                    keys.append(f"integrated:{layer_id}")
-            for key in keys:
-                found = state.artifact_maturity.get(key)
-                if found:
-                    maturity_value = str(found)
-                    break
+        maturity_value = self._layer_maturity_value(layer_id, role)
         maturity = state_token("maturity", maturity_value)
         freshness_artifact = self.stage_controller.group_controller.layer_freshness(layer_id)
         freshness = (
@@ -1398,7 +1575,7 @@ class CompositeDocument(QWidget):
         }
 
     def _role_allows_editing(self, layer_id) -> tuple[bool, str]:
-        """编辑门禁（单点）：RAW 不可变保护（V5 §14）+ 阶段证据组锁（§41）。
+        """编辑门禁（单点）：RAW 不可变保护（V5 §14）+ 成熟度冻结 + 阶段证据组锁（§41）。
 
         所有开启编辑会话的路径（树面板/主工具栏命令/修复几何/保存提交）
         都必须经过本检查——「画物源线写进相带边界」与「改写原始相图」
@@ -1411,6 +1588,14 @@ class CompositeDocument(QWidget):
             return False, (
                 f"图层角色为「{role.label}」（RAW/模型结果）——不可直接编辑；"
                 "请创建 DERIVED 草稿后编辑")
+        # 成熟度冻结/发布：FROZEN/PUBLISHED 工件不可变（goal §5「当前结果
+        # 已冻结」禁用原因的真源——UI 不在门禁之外另判）。
+        maturity = self._layer_maturity_value(str(layer_id), role)
+        if maturity in ("frozen", "published"):
+            label = "已发布" if maturity == "published" else "已冻结"
+            return False, (
+                f"当前结果{label}（{role.label}）——不可编辑；"
+                "如需修改请另存草稿或解除冻结")
         # 阶段证据组锁：图层所在组在本阶段锁定 → 拒绝（用户可在阶段视图
         # 状态中显式解锁）。
         from paleo_workbench.mapping_workspace.layer_groups import (
