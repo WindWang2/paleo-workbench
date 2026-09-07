@@ -31,7 +31,6 @@ ALLOWED_VIOLATIONS: dict[str, int] = {
     "ui/pages/lithology_crossplot_dialog.py": 3,
     "ui/pages/mapping_page.py": 3,
     "ui/pages/ai_check_advisor_dialog.py": 2,
-    "ui/workstation/agent_panel.py": 2,
     "ui/map_symbology_bridge.py": 2,
     "ui/workstation/common.py": 1,
     "ui/status_bar.py": 1,

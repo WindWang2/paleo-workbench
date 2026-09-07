@@ -9,7 +9,7 @@ from PySide6.QtPdf import QPdfDocument
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.ui.pages.data_asset_table import RESOURCE_TYPE_LABELS
 from paleo_workbench.ui.pages.preview_strategy import (
     preview_for_artifact,
@@ -201,10 +201,13 @@ class DataDetailPanel(QFrame):
         # Project file used to resolve project-RELATIVE resource/artifact paths
         # for preview. Set by the owning DataPage; None keeps legacy behavior.
         self.project_path: Path | None = None
-        self.setStyleSheet(
-            f"QFrame#DataDetailPanel {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
+        style.bind(
+            self,
+            lambda: (
+                f"QFrame#DataDetailPanel {{ background: {style.palette()['BG_SIDEBAR']};"
+                f" border: 1px solid {style.palette()['BORDER']};"
+                f" border-radius: {tokens.RADIUS_CARD}px; }}"
+            ),
         )
 
         layout = QVBoxLayout(self)
@@ -212,8 +215,11 @@ class DataDetailPanel(QFrame):
         layout.setSpacing(tokens.SPACE_3)
 
         self.title_label = QLabel("请选择数据项")
-        self.title_label.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-weight: 600;"
+        style.bind(
+            self.title_label,
+            lambda: (
+                f"color: {style.palette()['TEXT_PRIMARY']}; font-weight: 600;"
+            ),
         )
         layout.addWidget(self.title_label)
 
@@ -222,8 +228,11 @@ class DataDetailPanel(QFrame):
         layout.addLayout(self.metadata_layout)
 
         self.preview_title = QLabel("预览")
-        self.preview_title.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-weight: 600;"
+        style.bind(
+            self.preview_title,
+            lambda: (
+                f"color: {style.palette()['TEXT_PRIMARY']}; font-weight: 600;"
+            ),
         )
         layout.addWidget(self.preview_title)
 
@@ -308,7 +317,13 @@ class DataDetailPanel(QFrame):
     def _add_row(self, label: str, value: str) -> None:
         item = QLabel(f"{label}: {value}")
         item.setWordWrap(True)
-        item.setStyleSheet(f"color: {tokens.TEXT_PRIMARY}; font-size: 12px;")
+        style.bind(
+            item,
+            lambda: (
+                f"color: {style.palette()['TEXT_PRIMARY']};"
+                f" font-size: {tokens.FONT_SIZE_BASE};"
+            ),
+        )
         self.metadata_layout.addWidget(item)
 
     def show_downstream_impact(self, rows: list[dict] | None) -> None:
@@ -316,8 +331,12 @@ class DataDetailPanel(QFrame):
         if not rows:
             return
         title = QLabel("下游影响")
-        title.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-weight: 600; font-size: 12px;"
+        style.bind(
+            title,
+            lambda: (
+                f"color: {style.palette()['TEXT_PRIMARY']}; font-weight: 600;"
+                f" font-size: {tokens.FONT_SIZE_BASE};"
+            ),
         )
         self.metadata_layout.addWidget(title)
         for row in rows[:20]:
@@ -325,27 +344,43 @@ class DataDetailPanel(QFrame):
             state = row.get("state_label") or row.get("state") or ""
             line = QLabel(f"· {label} — {state}")
             line.setWordWrap(True)
-            color = (
-                tokens.WARNING
+            token = (
+                "WARNING"
                 if str(row.get("state", "")).upper() == "STALE"
-                else tokens.TEXT_SECONDARY
+                else "TEXT_SECONDARY"
             )
-            line.setStyleSheet(f"color: {color}; font-size: 12px;")
+            style.bind(
+                line,
+                lambda tok=token: (
+                    f"color: {style.palette()[tok]};"
+                    f" font-size: {tokens.FONT_SIZE_BASE};"
+                ),
+            )
             self.metadata_layout.addWidget(line)
 
     def _add_muted(self, layout: QVBoxLayout, text: str) -> None:
         item = QLabel(text)
         item.setWordWrap(True)
-        item.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;")
+        style.bind(
+            item,
+            lambda: (
+                f"color: {style.palette()['TEXT_SECONDARY']};"
+                f" font-size: {tokens.FONT_SIZE_BASE};"
+            ),
+        )
         layout.addWidget(item)
 
     def _add_preview_line(self, text: str) -> None:
         item = QLabel(text)
         item.setWordWrap(True)
         item.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        item.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;"
-            " font-family: Consolas, 'Courier New', monospace;"
+        style.bind(
+            item,
+            lambda: (
+                f"color: {style.palette()['TEXT_SECONDARY']};"
+                f" font-size: {tokens.FONT_SIZE_BASE};"
+                " font-family: Consolas, 'Courier New', monospace;"
+            ),
         )
         self.preview_layout.addWidget(item)
 
@@ -380,7 +415,13 @@ class DataDetailPanel(QFrame):
     def _add_warning(self, text: str) -> None:
         item = QLabel(text)
         item.setWordWrap(True)
-        item.setStyleSheet(f"color: {tokens.WARNING}; font-size: 12px;")
+        style.bind(
+            item,
+            lambda: (
+                f"color: {style.palette()['WARNING']};"
+                f" font-size: {tokens.FONT_SIZE_BASE};"
+            ),
+        )
         self.preview_layout.addWidget(item)
 
     def _clear_layout(self, layout: QVBoxLayout) -> None:

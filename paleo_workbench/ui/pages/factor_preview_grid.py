@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 
 
 class FactorPreviewGrid(QWidget):
@@ -41,25 +41,37 @@ class FactorPreviewGrid(QWidget):
 
             title = task.factor_type or task.name
             self.name_label = QLabel(title)
-            self.name_label.setStyleSheet(
-                f"color: {tokens.TEXT_PRIMARY}; font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 600;"
-                " border: none; background: transparent;"
+            style.bind(
+                self.name_label,
+                lambda: (
+                    f"color: {style.palette()['TEXT_PRIMARY']};"
+                    f" font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 600;"
+                    " border: none; background: transparent;"
+                ),
             )
             layout.addWidget(self.name_label)
 
             metrics = task.quality_metrics or {}
             self.range_label = QLabel(str(metrics.get("range", "—")))
-            self.range_label.setStyleSheet(
-                f"color: {tokens.TEXT_PRIMARY}; font-size: 12px;"
-                " border: none; background: transparent;"
+            style.bind(
+                self.range_label,
+                lambda: (
+                    f"color: {style.palette()['TEXT_PRIMARY']};"
+                    f" font-size: {tokens.FONT_SIZE_BASE};"
+                    " border: none; background: transparent;"
+                ),
             )
             layout.addWidget(self.range_label)
 
             r_squared = metrics.get("r_squared")
             self.rsquared_label = QLabel("")
-            self.rsquared_label.setStyleSheet(
-                f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
-                " border: none; background: transparent;"
+            style.bind(
+                self.rsquared_label,
+                lambda: (
+                    f"color: {style.palette()['TEXT_SECONDARY']};"
+                    f" font-size: {tokens.FONT_SIZE_STATUS};"
+                    " border: none; background: transparent;"
+                ),
             )
             if r_squared is not None:
                 self.rsquared_label.setText(f"R² {r_squared}")
@@ -76,9 +88,13 @@ class FactorPreviewGrid(QWidget):
 
             dup_count = int(metrics.get("duplicate_wells_dropped") or 0)
             self.dup_label = QLabel("")
-            self.dup_label.setStyleSheet(
-                f"color: {tokens.ERROR_RED}; font-size: 11px;"
-                " border: none; background: transparent;"
+            style.bind(
+                self.dup_label,
+                lambda: (
+                    f"color: {style.palette()['ERROR_RED']};"
+                    f" font-size: {tokens.FONT_SIZE_STATUS};"
+                    " border: none; background: transparent;"
+                ),
             )
             if dup_count > 0:
                 self.dup_label.setText(f"{dup_count} 口同坐标井已去重（保留先录入值）")
@@ -98,7 +114,10 @@ class FactorPreviewGrid(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("FactorPreviewGrid")
-        self.setStyleSheet(f"QWidget#FactorPreviewGrid {{ background: transparent; }}")
+        style.bind(
+            self,
+            lambda: "QWidget#FactorPreviewGrid { background: transparent; }",
+        )
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -116,9 +135,12 @@ class FactorPreviewGrid(QWidget):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        self.scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        style.bind(
+            self.scroll,
+            lambda: "QScrollArea { border: none; background: transparent; }",
+        )
         self.grid_container = QWidget()
-        self.grid_container.setStyleSheet("background: transparent;")
+        style.bind(self.grid_container, lambda: "background: transparent;")
         self.grid_layout = QGridLayout(self.grid_container)
         self.grid_layout.setContentsMargins(0, 0, 0, 0)
         self.grid_layout.setSpacing(tokens.SPACE_3)

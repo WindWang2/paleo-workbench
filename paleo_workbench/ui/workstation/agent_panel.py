@@ -245,19 +245,19 @@ class AgentWorkspace(QFrame):
     def _muted_html_color() -> str:
         from paleo_workbench.ui import style
 
-        return str(style.palette().get("TEXT_SECONDARY", "#53616c"))
+        return str(style.palette()["TEXT_SECONDARY"])
 
     @staticmethod
     def _success_html_color() -> str:
         from paleo_workbench.ui import style
 
-        return str(style.palette().get("SUCCESS", "#15803d"))
+        return str(style.palette()["SUCCESS"])
 
     @staticmethod
     def _warn_html_color() -> str:
         from paleo_workbench.ui import style
 
-        return str(style.palette().get("WARNING", "#b45309"))
+        return str(style.palette()["WARNING"])
 
     def submit(self, text: str) -> None:
         command = str(text or "").strip()

@@ -40,8 +40,10 @@ def _small_button_size() -> object:
 
     side = tokens.control_height(style.current_density()) - 6
     return QSize(side, side)
+
 from paleo_workbench.ui.pages.data_view_models import (
     AssetView,
+    IntegrityState,
     VersionView,
     asset_view_from_object,
     stage_icon,
@@ -49,6 +51,16 @@ from paleo_workbench.ui.pages.data_view_models import (
 )
 from paleo_workbench.ui.pages.preview_widgets import TablePreviewWidget
 from paleo_workbench.ui.pages.tag_widgets import TagContainerWidget, TagInputDialog
+
+# IntegrityState → palette token 名：渲染时经 style.palette() 取当前主题值。
+# （IntegrityState.color_token 属性返回 light 模块常量快照，主题切换后不刷新。）
+_INTEGRITY_TONE_TOKENS = {
+    IntegrityState.VERIFIED: "SUCCESS",
+    IntegrityState.MODIFIED: "WARNING",
+    IntegrityState.MISSING: "ERROR_RED",
+    IntegrityState.UNMANAGED: "TEXT_SECONDARY",
+    IntegrityState.UNKNOWN: "TEXT_SECONDARY",
+}
 
 
 def _fit_key_value_table(
@@ -182,7 +194,7 @@ class LineageTreeWidget(QWidget):
     ) -> QTreeWidgetItem:
         label = f"{stage_icon(node.stage)} {node.asset_name} · {stage_label(node.stage)} v{node.version_number}"
         if node.trashed:
-            label += " 🗑"
+            label += " ✕回收站"
         item = QTreeWidgetItem(parent, [label])
         payload = {
             "kind": "version",
@@ -317,8 +329,12 @@ class InspectorPanel(QFrame):
         self.empty_label = QLabel("请从列表中选择数据资产")
         self.empty_label.setObjectName("EmptyStateLabel")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setStyleSheet(
-            f"color: {style.palette()['TEXT_SECONDARY']}; font-size: 12px; margin: 20px;"
+        style.bind(
+            self.empty_label,
+            lambda: (
+                f"color: {style.palette()['TEXT_SECONDARY']};"
+                f" font-size: {tokens.FONT_SIZE_BASE}; margin: 20px;"
+            ),
         )
         layout.addWidget(self.empty_label)
 
@@ -329,7 +345,7 @@ class InspectorPanel(QFrame):
             lambda: (
                 f"QTabWidget::pane {{ border: 1px solid {style.palette()['BORDER']};"
                 f" border-radius: {tokens.RADIUS_CARD}px; background: {style.palette()['BG_BODY']}; }}"
-                f" QTabBar::tab {{ padding: 4px 10px; font-size: 11px; font-weight: 500;"
+                f" QTabBar::tab {{ padding: 4px 10px; font-size: {tokens.FONT_SIZE_STATUS}; font-weight: 500;"
                 f" color: {style.palette()['TEXT_SECONDARY']}; }}"
                 f" QTabBar::tab:selected {{ color: {style.palette()['PRIMARY']};"
                 f" border-bottom: 2px solid {style.palette()['PRIMARY']}; font-weight: 600; }}"
@@ -368,27 +384,30 @@ class InspectorPanel(QFrame):
         self.governance_edit_btn.setSizePolicy(
             QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
         )
-        self.governance_edit_btn.setStyleSheet(
-            f"""
-            QPushButton#GovernanceEditLink {{
-                color: {tokens.TEXT_SECONDARY};
-                background: transparent;
-                border: 1px solid transparent;
-                border-radius: {tokens.RADIUS_BUTTON}px;
-                font-size: 11px;
-                font-weight: 400;
-                padding: 0 3px;
-                min-width: 28px;
-            }}
-            QPushButton#GovernanceEditLink:hover {{
-                color: {tokens.PRIMARY};
-                background: {tokens.BG_SELECTION};
-            }}
-            QPushButton#GovernanceEditLink:focus {{
-                color: {tokens.PRIMARY};
-                border-color: {tokens.PRIMARY};
-            }}
-            """
+        style.bind(
+            self.governance_edit_btn,
+            lambda: (
+                f"""
+                QPushButton#GovernanceEditLink {{
+                    color: {style.palette()['TEXT_SECONDARY']};
+                    background: transparent;
+                    border: 1px solid transparent;
+                    border-radius: {tokens.RADIUS_BUTTON}px;
+                    font-size: {tokens.FONT_SIZE_STATUS};
+                    font-weight: 400;
+                    padding: 0 3px;
+                    min-width: 28px;
+                }}
+                QPushButton#GovernanceEditLink:hover {{
+                    color: {style.palette()['PRIMARY']};
+                    background: {style.palette()['BG_SELECTION']};
+                }}
+                QPushButton#GovernanceEditLink:focus {{
+                    color: {style.palette()['PRIMARY']};
+                    border-color: {style.palette()['PRIMARY']};
+                }}
+                """
+            ),
         )
         self.governance_edit_btn.setToolTip("编辑标准治理字段（写入数据目录，受控词表校验）")
         self.governance_edit_btn.clicked.connect(self._on_governance_edit_clicked)
@@ -402,13 +421,25 @@ class InspectorPanel(QFrame):
         metadata_layout.addWidget(self.governance_table)
 
         cat_hdr = QLabel("目录元数据 (Catalog):")
-        cat_hdr.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;")
+        style.bind(
+            cat_hdr,
+            lambda: (
+                f"color: {style.palette()['TEXT_SECONDARY']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
+        )
         metadata_layout.addWidget(cat_hdr)
         self.catalog_metadata_table = TablePreviewWidget()
         metadata_layout.addWidget(self.catalog_metadata_table)
 
         parsed_hdr = QLabel("解析摘要 (Parsed Summary):")
-        parsed_hdr.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;")
+        style.bind(
+            parsed_hdr,
+            lambda: (
+                f"color: {style.palette()['TEXT_SECONDARY']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
+        )
         metadata_layout.addWidget(parsed_hdr)
         self.metadata_table = TablePreviewWidget()
         metadata_layout.addWidget(self.metadata_table)
@@ -421,7 +452,13 @@ class InspectorPanel(QFrame):
         tags_layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
         tags_layout.setSpacing(tokens.SPACE_2)
         tags_hdr = QLabel("资产关联标签:")
-        tags_hdr.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;")
+        style.bind(
+            tags_hdr,
+            lambda: (
+                f"color: {style.palette()['TEXT_SECONDARY']};"
+                f" font-size: {tokens.FONT_SIZE_BASE};"
+            ),
+        )
         tags_layout.addWidget(tags_hdr)
 
         self.tag_container = TagContainerWidget(removable=True)
@@ -490,13 +527,24 @@ class InspectorPanel(QFrame):
         int_layout.setSpacing(tokens.SPACE_2)
 
         self.integrity_status_lbl = QLabel("状态: 未校验")
-        self.integrity_status_lbl.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {tokens.TEXT_PRIMARY};")
+        # 数据驱动色（IntegrityState）：存 palette token 名，渲染时取当前主题值。
+        self._integrity_color_token = "TEXT_PRIMARY"
+        style.bind(
+            self.integrity_status_lbl,
+            self._render_integrity_status_sheet,
+        )
         int_layout.addWidget(self.integrity_status_lbl)
 
         hash_box = QHBoxLayout()
         self.hash_label = QLabel("SHA-256: —")
         self.hash_label.setWordWrap(True)
-        self.hash_label.setStyleSheet(f"font-family: monospace; font-size: 11px; color: {tokens.TEXT_SECONDARY};")
+        style.bind(
+            self.hash_label,
+            lambda: (
+                f"font-family: monospace; font-size: {tokens.FONT_SIZE_STATUS};"
+                f" color: {style.palette()['TEXT_SECONDARY']};"
+            ),
+        )
         hash_box.addWidget(self.hash_label, 1)
 
         self.copy_hash_btn = QPushButton("复制 Hash")
@@ -763,10 +811,19 @@ class InspectorPanel(QFrame):
             return
         self.lineage_tree.load_chains(view, lineage_up, lineage_down)
 
+    def _render_integrity_status_sheet(self) -> str:
+        pal = style.palette()
+        return (
+            f"font-size: {tokens.FONT_SIZE_BASE}; font-weight: bold;"
+            f" color: {pal[self._integrity_color_token]};"
+        )
+
     def _populate_integrity(self, view: AssetView) -> None:
         st = view.integrity_state
         self.integrity_status_lbl.setText(f"完整性状态: {st.icon_symbol} {st.label}")
-        self.integrity_status_lbl.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {st.color_token};")
+        self._integrity_color_token = _INTEGRITY_TONE_TOKENS.get(st, "TEXT_SECONDARY")
+        # 重注册即重渲染（数据态变化立即生效，主题切换时由 style 注册表刷新）
+        style.bind(self.integrity_status_lbl, self._render_integrity_status_sheet)
 
         checksum = view.checksum or "未生成校验和"
         self.hash_label.setText(f"SHA-256: {checksum}")

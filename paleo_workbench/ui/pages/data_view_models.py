@@ -33,10 +33,10 @@ STAGE_LABELS = {
 }
 
 STAGE_ICONS = {
-    DataStage.RAW: "🔒",
-    DataStage.DERIVED: "🌿",
+    DataStage.RAW: "▣",
+    DataStage.DERIVED: "◈",
     DataStage.INTERMEDIATE: "⚡",
-    DataStage.OUTPUT: "📦",
+    DataStage.OUTPUT: "★",
 }
 
 STAGE_COLORS = {
@@ -52,7 +52,7 @@ def stage_label(stage: DataStage) -> str:
 
 
 def stage_icon(stage: DataStage) -> str:
-    return STAGE_ICONS.get(stage, "📄")
+    return STAGE_ICONS.get(stage, "▤")
 
 
 def stage_color(stage: DataStage) -> str:
@@ -83,7 +83,7 @@ class IntegrityState(str, Enum):
             IntegrityState.VERIFIED: "✅",
             IntegrityState.MODIFIED: "⚠️",
             IntegrityState.MISSING: "❌",
-            IntegrityState.UNMANAGED: "🔗",
+            IntegrityState.UNMANAGED: "§",
             IntegrityState.UNKNOWN: "❓",
         }
         return symbols.get(self, "❓")
@@ -216,7 +216,7 @@ class AssetView:
 
     @property
     def trashed_label(self) -> str:
-        return "🗑 已移至回收站"
+        return "✕ 已移至回收站"
 
     @property
     def stage_label(self) -> str:

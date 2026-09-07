@@ -9,7 +9,23 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
+
+
+def _field_label_sheet() -> str:
+    return (
+        f"color: {style.palette()['TEXT_SECONDARY']};"
+        f" font-size: {tokens.FONT_SIZE_STATUS};"
+        " border: none; background: transparent;"
+    )
+
+
+def _field_control_sheet(selector: str) -> str:
+    return (
+        f"{selector} {{ background: {style.palette()['BG_SIDEBAR']};"
+        f" border: 1px solid {style.palette()['BORDER']};"
+        f" border-radius: {tokens.RADIUS_BUTTON}px; padding: 2px 6px; }}"
+    )
 
 
 class BoundaryPanel(QFrame):
@@ -18,7 +34,9 @@ class BoundaryPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("BoundaryPanel")
-        self.setFixedWidth(220)
+        # 侧栏宽度：保底 220，窄屏下可收缩、宽屏最多 1.6 倍有界弹性
+        self.setMinimumWidth(220)
+        self.setMaximumWidth(int(220 * 1.6))
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(
@@ -35,46 +53,35 @@ class BoundaryPanel(QFrame):
 
         # Threshold spin (0.0–1.0, step 0.05, default 0.55, 2 decimals)
         self.threshold_label = QLabel("概率阈值")
-        self.threshold_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
-            " border: none; background: transparent;"
-        )
+        style.bind(self.threshold_label, _field_label_sheet)
         layout.addWidget(self.threshold_label)
         self.threshold_spin = QDoubleSpinBox()
         self.threshold_spin.setRange(0.0, 1.0)
         self.threshold_spin.setSingleStep(0.05)
         self.threshold_spin.setDecimals(2)
         self.threshold_spin.setValue(0.55)
-        self.threshold_spin.setStyleSheet(
-            f"QDoubleSpinBox {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px; padding: 2px 6px; }}"
+        style.bind(
+            self.threshold_spin,
+            lambda: _field_control_sheet("QDoubleSpinBox"),
         )
         layout.addWidget(self.threshold_spin)
 
         # Smoothing combo (SMOOTHING_LEVELS, default 中)
         self.smoothing_label = QLabel("边界平滑强度")
-        self.smoothing_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
-            " border: none; background: transparent;"
-        )
+        style.bind(self.smoothing_label, _field_label_sheet)
         layout.addWidget(self.smoothing_label)
         self.smoothing_combo = QComboBox()
         self.smoothing_combo.addItems(tokens.SMOOTHING_LEVELS)
         self.smoothing_combo.setCurrentText("中")
-        self.smoothing_combo.setStyleSheet(
-            f"QComboBox {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px; padding: 2px 6px; }}"
+        style.bind(
+            self.smoothing_combo,
+            lambda: _field_control_sheet("QComboBox"),
         )
         layout.addWidget(self.smoothing_combo)
 
         # Minimum area spin (0.0–10.0, step 0.1, default 0.5, 1 decimal, " km²")
         self.area_label = QLabel("最小图斑面积 (km²)")
-        self.area_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
-            " border: none; background: transparent;"
-        )
+        style.bind(self.area_label, _field_label_sheet)
         layout.addWidget(self.area_label)
         self.area_spin = QDoubleSpinBox()
         self.area_spin.setRange(0.0, 10.0)
@@ -82,19 +89,12 @@ class BoundaryPanel(QFrame):
         self.area_spin.setDecimals(1)
         self.area_spin.setValue(0.5)
         self.area_spin.setSuffix(" km²")
-        self.area_spin.setStyleSheet(
-            f"QDoubleSpinBox {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px; padding: 2px 6px; }}"
-        )
+        style.bind(self.area_spin, lambda: _field_control_sheet("QDoubleSpinBox"))
         layout.addWidget(self.area_spin)
 
         # Facies placeholder label
         self.facies_label = QLabel("三角洲前缘砂体 · 分流间湾泥")
-        self.facies_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
-            " border: none; background: transparent;"
-        )
+        style.bind(self.facies_label, _field_label_sheet)
         layout.addWidget(self.facies_label)
 
         layout.addStretch()

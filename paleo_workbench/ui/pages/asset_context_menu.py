@@ -82,7 +82,7 @@ class AssetContextMenu(QMenu):
                 )
 
             # Direct edit disabled for RAW
-            edit_raw = self._add_action("ctx_edit_original", "编辑原始数据 (已锁定 🔒)")
+            edit_raw = self._add_action("ctx_edit_original", "编辑原始数据 (已锁定 ⊘)")
             edit_raw.setEnabled(False)
             edit_raw.setToolTip("原始数据已锁定，不能直接编辑。请创建派生副本。")
 

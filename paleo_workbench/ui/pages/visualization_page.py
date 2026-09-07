@@ -160,7 +160,7 @@ class VisualizationPage(QWidget):
         top_bar = QHBoxLayout()
         top_bar.setSpacing(tokens.SPACE_2)
 
-        asset_label = QLabel("📊 选择数据资产:")
+        asset_label = QLabel("▤ 选择数据资产:")
         asset_label.setStyleSheet(f"font-weight: bold; color: {tokens.TEXT_SECONDARY};")
         top_bar.addWidget(asset_label)
 
@@ -173,7 +173,7 @@ class VisualizationPage(QWidget):
         top_bar.addWidget(self.asset_combo)
 
         # 1-Click Geographic / Grid coordinate toggle
-        self.btn_coord = QPushButton("📍 网格(IL/XL)")
+        self.btn_coord = QPushButton("◆ 网格(IL/XL)")
         self.btn_coord.setCheckable(True)
         self.btn_coord.setStyleSheet(
             f"QPushButton {{ border: 1px solid {tokens.BORDER}; border-radius: 4px; padding: 5px 14px; background: {tokens.BG_SIDEBAR}; color: {tokens.TEXT_PRIMARY}; font-weight: bold; }}"
@@ -309,11 +309,11 @@ class VisualizationPage(QWidget):
         for res in self._resources:
             ref = self._adapter.ref_from_resource(res)
             if ref is not None:
-                icon = {"well_log": "📋 ", "map": "🗺️ "}.get(ref.kind, "📈 ")
+                icon = {"well_log": "▤ ", "map": "◉ "}.get(ref.kind, "✦ ")
                 combo_entries.append((f"{icon}{ref.label}", ref))
         for doc in self._map_documents:
             ref = self._adapter.ref_from_map_document(doc)
-            combo_entries.append((f"🗺️ {ref.label}", ref))
+            combo_entries.append((f"◉ {ref.label}", ref))
         signature = tuple(
             (ref.kind, ref.id, ref.label, ref.path) for _label, ref in combo_entries
         )
@@ -706,4 +706,4 @@ class VisualizationPage(QWidget):
         hasattr(sv, "btn_coord") branch was removed).
         """
         is_geo = self.btn_coord.isChecked()
-        self.btn_coord.setText("🌐 地理(X/Y)" if is_geo else "📍 网格(IL/XL)")
+        self.btn_coord.setText("◉ 地理(X/Y)" if is_geo else "◆ 网格(IL/XL)")
