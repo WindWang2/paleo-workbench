@@ -32,11 +32,14 @@ STAGE_LABELS = {
     DataStage.OUTPUT: "输出成果",
 }
 
+# V7 §6：数据阶段 glyph 派生自 state_language maturity 词表（单一词汇源）。
+from paleo_workbench.ui.workstation.state_language import state_token as _state_token
+
 STAGE_ICONS = {
-    DataStage.RAW: "▣",
-    DataStage.DERIVED: "◈",
-    DataStage.INTERMEDIATE: "⚡",
-    DataStage.OUTPUT: "★",
+    DataStage.RAW: _state_token("maturity", "raw").glyph,
+    DataStage.DERIVED: _state_token("maturity", "derived").glyph,
+    DataStage.INTERMEDIATE: _state_token("maturity", "intermediate").glyph,
+    DataStage.OUTPUT: _state_token("maturity", "output").glyph,
 }
 
 STAGE_COLORS = {

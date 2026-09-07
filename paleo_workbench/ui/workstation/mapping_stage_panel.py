@@ -31,11 +31,14 @@ from paleo_workbench.mapping_workspace.readiness import (
 )
 from paleo_workbench.mapping_workspace.stages import MappingStage
 
+# V7 §6：就绪度 glyph 归一到 state_language（readiness 词表）。
+from paleo_workbench.ui.workstation.state_language import state_token as _state_token
+
 _STATUS_GLYPHS = {
-    ReadinessItemStatus.OK: "✓",
-    ReadinessItemStatus.WARNING: "!",
-    ReadinessItemStatus.ERROR: "✕",
-    ReadinessItemStatus.INFO: "·",
+    ReadinessItemStatus.OK: _state_token("readiness", "ok").glyph,
+    ReadinessItemStatus.WARNING: _state_token("readiness", "warning").glyph,
+    ReadinessItemStatus.ERROR: _state_token("readiness", "error").glyph,
+    ReadinessItemStatus.INFO: _state_token("readiness", "info").glyph,
 }
 
 
