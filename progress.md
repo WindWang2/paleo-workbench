@@ -54,3 +54,13 @@
   test_composite_qgis_canvas 5 项（需桥）、test_version_workbench_dialog_ui
   1 项 Windows PermissionError flake。
 - 剩余 M6 债（登记在 ratchet 预算中）：41 行字号字面量 / 12 处定宽。
+
+## Session 2026-09-08 (M11–M14)
+- M11 a2e502ea: visual_qa_v7 8 状态 + capture --v7 + 1366/2560 尺寸 +
+  32 基线 + armed-cancel 真 bug 修复 + 溢出菜单使能求值器化。
+- M12 a2e502ea: 4 条结构 bound（1000 层差分/装饰无重建/求值 O(1)/组聚合）。
+- M13 eeeeb504: 三轮评审（R1: P0×1+P1×3；R2: P1×2；R3: P1×1）全修复
+  + P2×10 批 + 8 回归测试。最重三项：style_manager 签名 P0、阶段切换
+  可用性冻结、三套阶段词表派生化。
+- M14: docs 04-08 完成；00-03 已在早前落盘。
+- 最终：docs 9 文件齐、114 新测试、基线 32 张、PR 待建。

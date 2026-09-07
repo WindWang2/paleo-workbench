@@ -36,18 +36,18 @@ Next: M1 contextual command surface.
 - [x] M6: Visual convergence (§9): fix RED ratchet; migrate 44 snapshot files to
       style.bind/QSS; emoji→SVG; status vocab unification; badge/state adoption;
       new ratchets (font-size, fixed-width, status-map import lint)
-- [ ] M7: Layout (§10): hub force-float legacy resolution, dead pages/presets/
+- [x] M7: Layout (§10): hub force-float legacy resolution, dead pages/presets/
       placeholders removal, 1366×768 narrow handling
-- [ ] M8: QGIS UX (§11): capability-gated entries (Style Manager production entry,
+- [x] M8: QGIS UX (§11): capability-gated entries (Style Manager production entry,
       CRS entry), consistent unavailable/degraded semantics
-- [ ] M9: Task/Agent UX (§12): cancelling/slot/retry presentation honesty
-- [ ] M10: Accessibility/DPI/keyboard (§13): accessibleNames, focus chain, shortcut
+- [x] M9: Task/Agent UX (§12): cancelling/slot/retry presentation honesty
+- [x] M10: Accessibility/DPI/keyboard (§13): accessibleNames, focus chain, shortcut
       registration unification, DPR
-- [ ] M11: Visual QA V7 (§14): new states + 1366×768/2560×1440 + theme coverage +
+- [x] M11: Visual QA V7 (§14): new states + 1366×768/2560×1440 + theme coverage +
       semantic assertions
-- [ ] M12: Performance (§17): differential updates verified, structural bounds
-- [ ] M13: Review rounds ×3 + P0/P1 fixes with regressions (§18)
-- [ ] M14: Docs 04–08 final sync, PR to main (§19)
+- [x] M12: Performance (§17): differential updates verified, structural bounds
+- [x] M13: Review rounds ×3 + P0/P1 fixes with regressions (§18)
+- [x] M14: Docs 04–08 final sync, PR to main (§19)
 
 ## Decisions (locked so far)
 1. All UI-side: no native/qgis_render_bridge C++ changes; capability via adapters.
