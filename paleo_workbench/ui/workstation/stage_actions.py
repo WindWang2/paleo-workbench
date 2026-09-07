@@ -20,6 +20,7 @@ import uuid
 from typing import Any
 
 from paleo_workbench.mapping_workspace.layer_groups import factor_group_title
+from paleo_workbench.project.models import FACTOR_TASK_STATUS_COMPLETE
 from paleo_workbench.mapping_workspace.layer_roles import (
     ConstraintKind,
     LayerRole,
@@ -328,7 +329,7 @@ class StageActionDispatcher:
         document = self.project
         tasks = [
             task for task in (getattr(document, "factor_map_tasks", None) or [])
-            if str(getattr(task, "status", "")) == "completed"
+            if str(getattr(task, "status", "")) == FACTOR_TASK_STATUS_COMPLETE
         ]
         if not tasks:
             self.composite.status_message.emit("没有已完成的单因素任务可叠加")
@@ -459,7 +460,7 @@ class StageActionDispatcher:
                 entries.append((f"阶段1解释草稿：{layer.name}", f"draft:{layer_id}"))
         # 单因素任务（版本钉住）
         for task in getattr(document, "factor_map_tasks", None) or []:
-            if str(getattr(task, "status", "")) != "completed":
+            if str(getattr(task, "status", "")) != FACTOR_TASK_STATUS_COMPLETE:
                 continue
             version = str(getattr(task, "grid_artifact_version_id", "") or "")
             entries.append((f"单因素：{task.name}", f"factor:{task.id}:{version}"))
@@ -585,22 +586,34 @@ class StageActionDispatcher:
         except Exception:
             self.composite.status_message.emit("数据目录不可用（先打开工程文件）")
             return
-        try:
-            import pathlib
+        from paleo_workbench.workflow.map_product import write_product_manifest
 
-            root = str(getattr(getattr(document, "meta", None), "project_root", "") or ".")
-            payload_dir = pathlib.Path(root) / ".artifacts"
+        staged_path = None
+        try:
+            staged_path = write_product_manifest(
+                document,
+                product_name=f"综合编图 {document.meta.name}",
+                factor_task_ids=factor_ids,
+            )
             assembly = MapProductAssembly(
                 product_name=f"综合编图 {document.meta.name}",
                 factor_task_ids=factor_ids,
             )
             result = assemble_map_product(
                 document, assembly=assembly, catalog=catalog,
-                payload_path=payload_dir)
+                payload_path=staged_path)
         except Exception as exc:
             logger.exception("map product assembly failed")
             self.composite.status_message.emit(f"MapProduct 组装失败：{exc}")
             return
+        finally:
+            if staged_path is not None:
+                # The catalog copied the payload into the managed OUTPUT
+                # store; the staging file must not linger in temp.
+                try:
+                    staged_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
         self.composite.status_message.emit(
             f"MapProduct 已生成（{result.record_id}；输出版本 {result.output_version_id[:12]}…）")
 

@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from paleo_workbench.mapping_workspace.stages import MappingStage
+from paleo_workbench.project.models import FACTOR_TASK_STATUS_COMPLETE
 
 
 class ReadinessItemStatus(str, Enum):
@@ -244,7 +245,7 @@ def check_constraints_present(document) -> ReadinessItem:
 
 def check_factors_complete(document) -> ReadinessItem:
     tasks = getattr(document, "factor_map_tasks", None) or []
-    completed = [task for task in tasks if str(task.status) == "completed"]
+    completed = [task for task in tasks if str(task.status) == FACTOR_TASK_STATUS_COMPLETE]
     if not tasks:
         return ReadinessItem(
             "factors_complete", ReadinessItemStatus.WARNING, "无单因素任务",
@@ -279,7 +280,7 @@ def check_evidence_available(document) -> ReadinessItem:
     evidence = 0
     evidence += len([
         task for task in (getattr(document, "factor_map_tasks", None) or [])
-        if str(task.status) == "completed"
+        if str(task.status) == FACTOR_TASK_STATUS_COMPLETE
     ])
     evidence += _count_constraints(document)
     if evidence:

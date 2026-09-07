@@ -155,6 +155,15 @@ class WellTable(BaseModel):
     linked_factor_task_id: str | None = None
 
 
+# FactorMapTask status vocabulary — the single authority.  Interpolation
+# writes FACTOR_TASK_STATUS_COMPLETE; every reader compares against these
+# constants.  (Historical ``"completed"`` drift silently disabled stage
+# overlays/evidence/readiness — v7 P0-1 regression.)
+FACTOR_TASK_STATUS_PENDING = "pending"
+FACTOR_TASK_STATUS_COMPLETE = "complete"
+FACTOR_TASK_STATUS_FAILED = "failed"
+
+
 class FactorMapTask(BaseModel):
     id: str = Field(default_factory=lambda: _id("factor"))
     name: str
@@ -166,7 +175,7 @@ class FactorMapTask(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
     output_resource_ids: list[str] = Field(default_factory=list)
     quality_metrics: dict[str, Any] = Field(default_factory=dict)
-    status: str = "pending"
+    status: str = FACTOR_TASK_STATUS_PENDING
     source_kind: Literal["real", "imported", "mock", "mixed"] = "mock"
     input_snapshot_hash: str = ""
     generator_version: str | None = None

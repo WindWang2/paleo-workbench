@@ -69,6 +69,46 @@ class MapProductAssembly:
         return hashlib.sha256(blob).hexdigest()
 
 
+def write_product_manifest(
+    project: ProjectDocument,
+    *,
+    product_name: str,
+    factor_task_ids: list[str],
+) -> Path:
+    """Stage the product manifest into a caller-managed temp JSON file.
+
+    ``assemble_map_product`` requires a staged payload FILE (the catalog
+    copies it into the managed OUTPUT store).  Producers that have no
+    serialized composition yet stage this manifest instead — passing a
+    directory always failed assembly (v7 P0-2 regression).  The caller
+    owns unlinking the returned path after assembly.
+    """
+    import tempfile
+
+    tasks_by_id = {str(t.id): t for t in getattr(project, "factor_map_tasks", None) or []}
+    manifest = {
+        "product_name": product_name,
+        "factor_tasks": [
+            {
+                "id": str(task.id),
+                "name": str(task.name),
+                "grid_version": str(getattr(task, "grid_artifact_version_id", "") or ""),
+            }
+            for task_id in factor_task_ids
+            if (task := tasks_by_id.get(str(task_id))) is not None
+        ],
+        "interpretation_refs": [
+            str(ref.id)
+            for ref in (getattr(project, "horizon_interpretations", None) or [])
+        ],
+    }
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".json", delete=False, encoding="utf-8"
+    ) as handle:
+        json.dump(manifest, handle, ensure_ascii=False, indent=2)
+        return Path(handle.name)
+
+
 @dataclass
 class MapProductResult:
     product_name: str

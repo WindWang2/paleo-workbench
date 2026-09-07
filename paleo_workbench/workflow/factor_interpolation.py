@@ -52,7 +52,11 @@ from paleo_workbench.project.factor_grid_artifacts import (
     peek_live_factor_grid,
     store_live_factor_grid,
 )
-from paleo_workbench.project.models import FactorMapTask, ProjectDocument
+from paleo_workbench.project.models import (
+    FACTOR_TASK_STATUS_COMPLETE,
+    FactorMapTask,
+    ProjectDocument,
+)
 from paleo_workbench.workflow.constrained_idw_adapter import (
     CONSTRAINED_IDW_ENGINE_LABEL,
     run_constrained_idw,
@@ -296,7 +300,7 @@ def _attach_result_to_task(
 
     task.parameters = params
     task.method = method if method != "mock" else "IDW"
-    task.status = "complete"
+    task.status = FACTOR_TASK_STATUS_COMPLETE
     # Honesty (audit #848): a synthetic/mock task stays ``mock`` — completing
     # the interpolation must not relabel it ``mixed`` (laundering pure
     # synthetic input as production data for QC/编图 without annotation).
