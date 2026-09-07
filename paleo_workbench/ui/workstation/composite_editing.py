@@ -16,11 +16,14 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
 from PySide6.QtCore import QObject, Signal
 from shiboken6 import isValid as _cpp_alive
+
+_logger = logging.getLogger(__name__)
 
 from paleo_workbench.mapping.geometry_schema import new_feature_id
 from paleo_workbench.mapping.map_interaction import SnappingService
@@ -937,6 +940,14 @@ class CompositeEditController(QObject):
             replacement=replacement,
             skip=(layer.id, str(feature_id), tuple(path)),
         )
+        # 传播可能为其它图层新开编辑会话——统一注入引擎溯源 token（P2-6）。
+        for candidate in allowed_layers:
+            opened = candidate.edit_session
+            if opened is not None and (
+                not opened.qgis_capability_token
+                or opened.qgis_capability_token == "unavailable"
+            ):
+                opened.qgis_capability_token = self.qgis_capability_token
         if len(allowed_layers) > 1:
             self.content_changed.emit(layer.id)
 
@@ -1014,8 +1025,11 @@ class CompositeEditController(QObject):
                         on_vertex_committed=self._propagate_shared_vertex,
                     )
                 elif action_id == "reshape":
-                    # V7：native-only 工具——无 reshape 算子（旧桥/无桥）时
-                    # 拒激活并保持当前工具（与 evaluator 禁用语义一致）。
+                    # V7：native-only 工具——无 reshape 算子（旧桥/无桥）或
+                    # 非原生画布（ReshapeTool 无鼠标输入路径）时拒激活并
+                    # 保持当前工具（与 evaluator 禁用语义一致，P1-3）。
+                    if not hasattr(self._canvas, "canvas_address"):
+                        return
                     feature_id = next(iter(sorted(layer.selection)), "") if layer.selection else ""
                     applier = self._make_reshape_applier(session, feature_id) if feature_id else None
                     if applier is None:
@@ -1093,6 +1107,25 @@ class CompositeEditController(QObject):
         features = self._bridge_snapping_features()
         endpoint_pushable = "snapping_endpoint" in features
         intersection_pushable = "snapping_intersection" in features
+        # P2-8：旧桥不识别 endpoint/intersection 时如实告警一次——原生采点
+        # 走 QGIS 捕捉引擎（不经 Python snap），用户必须知道这两个模式在
+        # 原生路径未生效，而不是静默失效。
+        native_canvas = hasattr(canvas, "canvas_address")
+        if snapping.enabled and native_canvas:
+            degraded_modes = [
+                mode
+                for mode, pushable in (
+                    ("endpoint", endpoint_pushable),
+                    ("intersection", intersection_pushable),
+                )
+                if mode in snapping.modes and not pushable
+            ]
+            if degraded_modes:
+                _logger.warning(
+                    "捕捉模式 %s 在当前 qgis_render_bridge 版本的 QGIS 捕捉引擎"
+                    "上不可用（仅 fallback 采点轨生效）；重建桥扩展可恢复",
+                    "、".join(degraded_modes),
+                )
         types = [
             m
             for m in ("vertex", "segment", "midpoint", "endpoint")
@@ -1566,14 +1599,12 @@ class CompositeEditController(QObject):
         """
         layer = self.active_layer
         session = layer.edit_session if layer is not None else None
-        kinds_among_selection: list[str] = []
-        if layer is not None and layer.selection:
-            source = session.features() if session is not None else layer.features()
-            kinds_among_selection = [
-                str(self._kinds.get(layer.id, ""))
-                for feature in source
-                if feature.feature_id in layer.selection
-            ] or [str(self._kinds.get(layer.id, ""))]
+        # 选集几何类型 O(1) 推导（P1-5）：图层 kind 是权威（一个图层一种
+        # 几何），无需遍历要素——本方法挂在帧级触发链（extent_changed）上。
+        layer_kind = self._kinds.get(layer.id, "") if layer is not None else ""
+        kinds_among_selection: tuple[str, ...] = (
+            (layer_kind,) if layer is not None and layer.selection and layer_kind else ()
+        )
         gate_allowed, gate_reason = (
             self.can_edit_layer(layer.id) if layer is not None else (False, "没有活动图层")
         )

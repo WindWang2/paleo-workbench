@@ -162,8 +162,7 @@ def _rule_pan(ctx: ToolContext) -> ToolAvailability:
     return _ok("pan", preferred=ctx.current_tool == "pan") if reason is None else _no("pan", reason)
 
 
-def _rule_zoom(ctx: ToolContext) -> ToolAvailability:
-    tool_id = "zoom_in"
+def _rule_zoom(ctx: ToolContext, tool_id: str) -> ToolAvailability:
     reason = _canvas_gate(ctx) or _blocking_gate(ctx)
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
 
@@ -196,10 +195,11 @@ def _rule_inspection(ctx: ToolContext, tool_id: str) -> ToolAvailability:
     reason = _canvas_gate(ctx) or _layer_gate(ctx) or _blocking_gate(ctx)
     if reason is None and tool_id == "identify":
         reason = _native_tool_gate(ctx, "identify", "识别")
-    if reason is None and tool_id == "measure_distance":
-        # Native canvas → native measure tool; fallback canvas keeps the
-        # Python measure implementation.
-        reason = _native_tool_gate(ctx, "measure", "测距")
+    if reason is None and tool_id in {"select", "select_rectangle"}:
+        reason = _native_tool_gate(ctx, "select", "选择")
+    # measure：原生画布上 PwbMeasureTool 与视口路由 fallback 双执行体
+    # （shim 按 capability manifest 运行期选择），evaluator 不做能力门——
+    # 与 capture 工具不同，measure 的 fallback 在原生画布上也接得到输入。
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
 
 
@@ -251,7 +251,7 @@ def _rule_capture(ctx: ToolContext, tool_id: str) -> ToolAvailability:
         reason = _native_tool_gate(ctx, native_kind, "采点")
     # Kind match is enforced by the gate; the matching capture tool is the
     # suggested one for the active layer.
-    return _ok(tool_id, preferred=reason is None) if reason is None else _no(tool_id, reason)
+    return _ok(tool_id, preferred=True) if reason is None else _no(tool_id, reason)
 
 
 def _rule_edit_tool(ctx: ToolContext, tool_id: str, native_kind: str) -> ToolAvailability:
@@ -292,6 +292,10 @@ def _rule_merge(ctx: ToolContext) -> ToolAvailability:
 
 def _rule_reshape(ctx: ToolContext) -> ToolAvailability:
     reason = _canvas_gate(ctx) or _layer_gate(ctx) or _editing_gate(ctx) or _role_gate(ctx) or _blocking_gate(ctx)
+    if reason is None and not ctx.native_canvas_available:
+        # 重塑的采线输入依赖原生数字化器——fallback 画布无输入路径
+        # （ReshapeTool 无鼠标方法），绝不能启用一个点了没反应的工具。
+        reason = "重塑需要原生 QGIS 画布（无回退实现）"
     if reason is None and ctx.active_layer_kind not in {"line", "polygon"}:
         reason = "重塑仅支持线/面图层"
     if reason is None and ctx.selection_count != 1:
@@ -337,8 +341,8 @@ def _rule_topology(ctx: ToolContext) -> ToolAvailability:
 
 _RULE_TABLE: dict[str, Rule] = {
     "pan": _rule_pan,
-    "zoom_in": _rule_zoom,
-    "zoom_out": _rule_zoom,
+    "zoom_in": lambda ctx: _rule_zoom(ctx, "zoom_in"),
+    "zoom_out": lambda ctx: _rule_zoom(ctx, "zoom_out"),
     "full_extent": _rule_full_extent,
     "previous_extent": lambda ctx: _rule_previous_extent(ctx, "previous_extent"),
     "next_extent": _rule_next_extent,

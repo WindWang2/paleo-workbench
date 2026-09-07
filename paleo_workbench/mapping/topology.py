@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 import math
 from typing import Iterable
@@ -9,6 +10,8 @@ from typing import Iterable
 from paleo_workbench.mapping.vector_layer import VectorLayer
 
 __all__ = ["TopologyEditResult", "TopologyService", "repair_invalid_geometry"]
+
+_logger = logging.getLogger(__name__)
 
 Point = tuple[float, float]
 
@@ -73,8 +76,10 @@ class TopologyService:
             try:
                 errors = bridge_validate(geometry)
                 return [str(entry.get("message") or "invalid geometry") for entry in errors]
-            except Exception:
-                pass  # 桥路径失败 → 显式回退 Shapely（两条引擎都在报告中可见）
+            except Exception as exc:
+                # 桥路径失败必须可诊断（P2-2）——Shapely 回退给的是 Shapely
+                # 判词，桥/GEOS 的异常文本在这里留下痕迹。
+                _logger.warning("QGIS 几何校验失败，回退 Shapely：%s", exc)
         try:
             from shapely.geometry import shape
             from shapely.validation import explain_validity

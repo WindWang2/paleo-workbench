@@ -60,6 +60,26 @@ KNOWN_NATIVE_TOOLS = frozenset(
     }
 )
 
+# M3/M4-era bridges (pre-manifest) verifiably expose this surface — every
+# shipped ``set_map_tool`` since the first workstation canvas accepted these
+# kinds. Degraded (manifest-less) snapshots report it as the legacy baseline
+# instead of an empty set, so existing installs keep working; V7 additions
+# (measure/reshape, endpoint/intersection snapping) stay honestly absent.
+LEGACY_NATIVE_TOOLS = frozenset(
+    {
+        "pan",
+        "zoomIn",
+        "zoomOut",
+        "addPoint",
+        "addLine",
+        "addPolygon",
+        "vertex",
+        "move",
+        "select",
+        "identify",
+    }
+)
+
 KNOWN_GEOMETRY_OPS = frozenset(
     {
         "union",
@@ -148,12 +168,12 @@ class QgisCapabilitySnapshot:
 
         Synthesizes ``qgis.native_tool.<kind>`` / ``qgis.geometry_op.<op>``
         from the manifest lists plus the coarse ``qgis.<feature>`` flags, so
-        the evaluator can gate per-tool without re-probing.
+        the evaluator can gate per-tool without re-probing. Degraded (legacy)
+        snapshots expose the M3/M4 baseline tool set and no V7 features.
         """
         flags = {f"qgis.{name}" for name in self.features}
-        if self.available:
-            flags.update(f"qgis.native_tool.{kind}" for kind in self.native_tools)
-            flags.update(f"qgis.geometry_op.{op}" for op in self.geometry_ops)
+        flags.update(f"qgis.native_tool.{kind}" for kind in self.native_tools)
+        flags.update(f"qgis.geometry_op.{op}" for op in self.geometry_ops)
         return frozenset(flags)
 
     def to_dict(self) -> dict[str, Any]:
@@ -196,16 +216,27 @@ def probe_qgis_capability() -> QgisCapabilitySnapshot:
         import qgis_render_bridge as bridge
     except ImportError:
         return QgisCapabilitySnapshot(status="unavailable", reason=BRIDGE_BUILD_HINT)
+    except Exception as exc:
+        # 桥损坏（.pyd 加载失败等非 ImportError）也必须给出 degraded 判词，
+        # 绝不让 probe 把异常抛进宿主构造链（P2-9）。
+        return QgisCapabilitySnapshot(
+            status="degraded",
+            reason=f"qgis_render_bridge 加载失败：{exc}",
+            native_tools=LEGACY_NATIVE_TOOLS,
+        )
 
     version = getattr(bridge, "__version__", None)
     manifest_fn = getattr(bridge, "capability_manifest", None)
     if manifest_fn is None:
-        # Bridge predates the manifest API: degrade with the concrete gap
-        # instead of fabricating a capability surface.
+        # Bridge predates the manifest API: degrade with the verifiable M3/M4
+        # baseline instead of fabricating a full surface — existing installs
+        # keep the pre-V7 tools, V7 additions stay honestly absent (P1-2).
         return QgisCapabilitySnapshot(
             status="degraded",
-            reason="qgis_render_bridge 版本过旧：缺少 capability_manifest（需重建桥扩展）",
+            reason="qgis_render_bridge 版本过旧：缺少 capability_manifest"
+            "（原生测距/重塑与 endpoint/intersection 捕捉不可用；重建桥扩展可恢复）",
             bridge_version=str(version or "unknown"),
+            native_tools=LEGACY_NATIVE_TOOLS,
         )
     try:
         manifest = manifest_fn()
@@ -214,6 +245,7 @@ def probe_qgis_capability() -> QgisCapabilitySnapshot:
             status="degraded",
             reason=f"capability_manifest() 调用失败：{exc}",
             bridge_version=str(version or "unknown"),
+            native_tools=LEGACY_NATIVE_TOOLS,
         )
     if not isinstance(manifest, Mapping) or any(key not in manifest for key in _REQUIRED_MANIFEST_KEYS):
         missing = [key for key in _REQUIRED_MANIFEST_KEYS if not isinstance(manifest, Mapping) or key not in manifest]

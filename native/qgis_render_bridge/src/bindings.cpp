@@ -13,6 +13,7 @@
 #include <pybind11/stl.h>
 
 #include <qgis.h>
+#include <qgsconfig.h>  // _QGIS_VERSION（capability manifest 的版本串）
 #include <qgsrenderer.h>
 #include <qgsrendercontext.h>
 #include <qgssymbol.h>

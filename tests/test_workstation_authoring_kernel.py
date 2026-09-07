@@ -205,6 +205,15 @@ class TestTopologyPropagationWiring:
         assert ops.count("move_vertex") >= 2
         sources = {d.source_tool for d in session.deltas()}
         assert "vertex(native)" in sources
+        # P1-4：主编辑 + 同会话传播合成一个 undo 命令（一次 Ctrl+Z 整体回退，
+        # 共享节点不因撤销而断裂）。2 个 add_feature + 1 个 compound = 3。
+        undo_steps_before = len(session.undo_stack)
+        assert undo_steps_before == 3
+        assert session.undo()
+        geom_a = session.feature("a").as_record()["geometry"]
+        geom_b2 = session.feature("b").as_record()["geometry"]
+        assert [0.0, 0.0] in geom_a["coordinates"][0]
+        assert [-1.0, 0.0] not in geom_b2["coordinates"][0]
 
     def test_propagation_respects_edit_gate(self, qtbot, tmp_path):
         document = _document(qtbot, tmp_path)

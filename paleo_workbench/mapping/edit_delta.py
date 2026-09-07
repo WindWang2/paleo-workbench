@@ -16,7 +16,6 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
@@ -91,7 +90,22 @@ def _thaw(value: Any) -> Any:
 
 @dataclass(frozen=True, slots=True)
 class EditDelta:
-    """One normalized edit record (Goal V7 §6 field contract)."""
+    """One normalized edit record (Goal V7 §6 field contract).
+
+    Anchor semantics for multi-feature operations (P2-5, locked by
+    ``test_split_and_merge_related_ids``):
+
+    * ``split_feature`` — ``feature_id`` = the removed original;
+      ``after_geometry`` = the first replacement's geometry (the original has
+      no after state); ``related_feature_ids`` = all replacement ids.
+    * ``merge_features`` — ``feature_id`` = the merged result id;
+      ``before_geometry_hash`` = the first constituent's before hash (the
+      result has no single before state); ``related_feature_ids`` = all
+      removed constituent ids.
+
+    Consumers must not assume ``feature_id ↔ before/after`` pairing for these
+    two operations.
+    """
 
     layer_id: str
     feature_id: str
@@ -206,14 +220,3 @@ def delta_from_command(
         related_feature_ids=related if command_type in {"split_feature", "merge_features"} else (),
         timestamp=time.time() if timestamp is None else timestamp,
     )
-
-
-@contextmanager
-def _edit_source(session: Any, source_tool: str):
-    """Tag deltas recorded inside the block with ``source_tool``."""
-    previous = getattr(session, "_delta_source_tool", None)
-    session._delta_source_tool = str(source_tool)
-    try:
-        yield session
-    finally:
-        session._delta_source_tool = previous

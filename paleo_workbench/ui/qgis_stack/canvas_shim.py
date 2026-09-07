@@ -731,8 +731,9 @@ class QgisCanvasShim(QWidget):
             try:
                 if commit(json.loads(geom_json)):
                     shim.tool_operation.emit(True)
-            except Exception:
-                pass
+            except Exception as exc:
+                logging.getLogger(__name__).debug(
+                    "digitize commit rejected: %s", exc)
 
         try:
             self.stack.set_digitize_callback(self.canvas_address, _on_digitize)

@@ -12,6 +12,7 @@ The fallback must not gain professional capabilities the native path lacks
 
 from __future__ import annotations
 
+import logging
 import math
 from typing import Callable, Iterable, Mapping
 
@@ -35,6 +36,57 @@ __all__ = [
 ]
 
 Point = tuple[float, float]
+
+_logger = logging.getLogger(__name__)
+
+
+def _commit_vertex(
+    session: VectorEditSession,
+    feature_id: str,
+    path: tuple[int, ...],
+    point,
+    on_vertex_committed=None,
+    *,
+    source_suffix: str,
+) -> bool:
+    """顶点提交公共实现：主编辑 + 同会话拓扑传播 = 单个 undo 命令。
+
+    传播钩子若在同会话内追加 set_vertex（工作站/编图页的共享节点传播），
+    begin/end_edit_command 把它们合成一个 compound——一次 Ctrl+Z 整体回退
+    （QGIS 顶点编辑的 macro 语义；跨图层传播受会话隔离限制，见
+    08-known-limitations）。失败路径绝不留下打开的 compound。
+    """
+    origin: Point | None = None
+    try:
+        feature = session.feature(str(feature_id))
+    except Exception:
+        return False
+    try:
+        current = feature.geometry["coordinates"]
+        if not path and feature.geometry["type"] == "Point":
+            origin = (float(current[0]), float(current[1]))
+        elif path:
+            for index in path:
+                current = current[index]
+            origin = (float(current[0]), float(current[1]))
+    except Exception:
+        origin = None
+
+    session.begin_edit_command()
+    try:
+        with session.edit_source(f"vertex({source_suffix})"):
+            session.set_vertex(feature.feature_id, path, point)
+        if origin is not None and on_vertex_committed is not None:
+            try:
+                on_vertex_committed(feature.feature_id, path, origin, point)
+            except Exception as exc:  # 传播失败不吞主编辑，但必须可诊断
+                _logger.warning("vertex propagation failed: %s", exc)
+    except Exception as exc:
+        session.destroy_edit_command()
+        _logger.debug("vertex commit rejected: %s", exc)
+        return False
+    session.end_edit_command()
+    return True
 
 
 class MapTool:
@@ -231,10 +283,14 @@ class RectangleSelectTool(MapTool):
         self.start = None
         selected = self._select_rectangle(start, point)
         mods = {str(value).lower() for value in modifiers}
-        if "ctrl" in mods:
+        # 修饰键语义对齐 QGIS 桌面与原生 commit_selection（P2-4）：
+        # Ctrl=并集，Shift=差集，Ctrl+Shift=交集。
+        if "ctrl" in mods and "shift" in mods:
+            self.layer.set_selection(self.layer.selection & selected)
+        elif "ctrl" in mods:
             self.layer.set_selection(self.layer.selection | selected)
         elif "shift" in mods:
-            self.layer.set_selection(self.layer.selection ^ selected)
+            self.layer.set_selection(self.layer.selection - selected)
         else:
             self.layer.set_selection(selected)
         return True
@@ -395,7 +451,8 @@ class MoveFeatureTool(MapTool):
         try:
             with self.session.edit_source(f"{self.tool_id}(native)"):
                 self.session.move_feature(str(feature_id), float(dx), float(dy))
-        except Exception:
+        except Exception as exc:
+            _logger.debug("native move commit rejected (%s): %s", feature_id, exc)
             return False
         return True
 
@@ -428,7 +485,10 @@ class ReshapeTool(MapTool):
         if not geometry or str(geometry.get("type")) not in {"LineString", "MultiLineString"}:
             return False
         with self.session.edit_source(f"{self.tool_id}(native)"):
-            return bool(self._apply_reshape(geometry))
+            ok = bool(self._apply_reshape(geometry))
+        if not ok:
+            _logger.debug("reshape application rejected for feature %s", self.feature_id)
+        return ok
 
 
 class VertexTool(MapTool):
@@ -469,14 +529,13 @@ class VertexTool(MapTool):
         if button != "left" or self._target is None:
             return False
         feature_id, path = self._target
-        origin = self._origin
         self._target = None
         self._origin = None
-        with self.session.edit_source(f"{self.tool_id}(python-fallback)"):
-            self.session.set_vertex(feature_id, path, point)
-        if origin is not None and self._on_vertex_committed is not None:
-            self._on_vertex_committed(feature_id, path, origin, point)
-        return True
+        return _commit_vertex(
+            self.session, feature_id, path, point,
+            on_vertex_committed=self._on_vertex_committed,
+            source_suffix="python-fallback",
+        )
 
     def cancel(self) -> bool:
         had_target = self._target is not None
@@ -490,29 +549,14 @@ class VertexTool(MapTool):
         """QGIS 原生顶点工具拖动完成落会话（M3）。
 
         feature 不在本会话 / 路径无效 / 几何校验失败均拒绝（返回 False）。
-        on_vertex_committed 钩子与鼠标路径语义对齐（origin 为改动前坐标）。
+        on_vertex_committed 钩子与鼠标路径语义对齐（origin 为改动前坐标）；
+        主编辑 + 同会话传播合成单个 undo 命令（P1-4）。
         """
-        path = tuple(int(i) for i in path)
-        try:
-            feature = self.session.feature(str(feature_id))
-        except Exception:
-            return False
-        origin: Point | None = None
-        try:
-            current = feature.geometry["coordinates"]
-            if not path and feature.geometry["type"] == "Point":
-                origin = (float(current[0]), float(current[1]))
-            elif path:
-                for index in path:
-                    current = current[index]
-                origin = (float(current[0]), float(current[1]))
-        except Exception:
-            origin = None
-        try:
-            with self.session.edit_source(f"{self.tool_id}(native)"):
-                self.session.set_vertex(feature.feature_id, path, point)
-        except Exception:
-            return False
-        if origin is not None and self._on_vertex_committed is not None:
-            self._on_vertex_committed(feature.feature_id, path, origin, point)
-        return True
+        return _commit_vertex(
+            self.session,
+            str(feature_id),
+            tuple(int(i) for i in path),
+            point,
+            on_vertex_committed=self._on_vertex_committed,
+            source_suffix="native",
+        )

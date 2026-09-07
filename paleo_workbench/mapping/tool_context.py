@@ -26,7 +26,15 @@ TOOL_CONTEXT_CONTRACT_VERSION = 1
 
 @dataclass(frozen=True, slots=True)
 class ToolContext:
-    """Immutable snapshot of everything the evaluator is allowed to know."""
+    """Immutable snapshot of everything the evaluator is allowed to know.
+
+    Field policy (contract completeness): ``wkb_type``/``qgis_layer_type``/
+    ``selection_geometry_types``/``compatible_polygon_count`` are carried for
+    downstream consumers (status bar, palette, audit) even though the current
+    evaluator derives coarse checks from ``active_layer_kind``/
+    ``selection_count``/``*_ready`` — they are contract surface, not dead
+    weight, and stay populated by ``tool_context_inputs()``.
+    """
 
     # Project / environment
     project_open: bool = False

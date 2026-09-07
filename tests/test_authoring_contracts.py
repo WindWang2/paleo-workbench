@@ -106,7 +106,6 @@ class TestQgisCapabilitySnapshot:
         assert snap.status == "degraded"
         assert "capability_manifest" in snap.reason
 
-
 class TestLayerCapabilitySnapshot:
     def _layer(self):
         return VectorLayer(id="composite:L1", name="相带", kind_hint=None) if False else VectorLayer(id="composite:L1", name="相带")
@@ -248,15 +247,29 @@ class TestInspection:
     def test_select_all_needs_no_selection(self):
         assert evaluate_tool("select_all", _ctx(selection_count=0)).enabled
 
-    def test_native_measure_requires_manifest(self):
-        ctx = _ctx(native_canvas_available=True)  # no capability flags
-        av = evaluate_tool("measure_distance", ctx)
-        assert not av.enabled and "测距" in av.disabled_reason
-        flags = frozenset({"qgis.native_tool.measure"})
-        assert evaluate_tool("measure_distance", _ctx(native_canvas_available=True, capability_flags=flags)).enabled
-
-    def test_fallback_canvas_measure_enabled(self):
+    def test_native_measure_always_executable(self):
+        # measure 在原生画布上有双执行体（PwbMeasureTool 或视口路由），
+        # evaluator 不做能力门（P1-1：禁用会让旧桥用户失去测距，
+        # 而 fallback 路由在原生画布上依然接得到输入）。
+        assert evaluate_tool("measure_distance", _ctx(native_canvas_available=True)).enabled
         assert evaluate_tool("measure_distance", _ctx()).enabled
+
+    def test_degraded_bridge_keeps_legacy_tool_surface(self, monkeypatch):
+        import sys
+        import types
+
+        fake = types.ModuleType("qgis_render_bridge")
+        fake.__version__ = "0.2.17a0"  # pre-manifest bridge
+        monkeypatch.setitem(sys.modules, "qgis_render_bridge", fake)
+        snap = probe_qgis_capability()
+        assert snap.status == "degraded"
+        # 可验证的 M3/M4 基线能力保持可用（存量安装不因升级变只读，P1-2）；
+        # V7 新能力（measure/reshape/endpoint）诚实缺席。
+        assert "addPoint" in snap.native_tools
+        assert "measure" not in snap.native_tools
+        assert "reshape" not in snap.geometry_ops
+        assert "qgis.native_tool.addPoint" in snap.capability_flags()
+        assert "qgis.native_tool.measure" not in snap.capability_flags()
 
 
 class TestEditSession:
@@ -332,16 +345,26 @@ class TestGeometryCommands:
     def test_reshape_native_only(self):
         no_sel = evaluate_tool("reshape", _ctx(selection_count=0))
         assert not no_sel.enabled
-        wrong_kind = evaluate_tool("reshape", _ctx(active_layer_kind="point", selection_count=1))
+        # P1-3：fallback 画布无输入路径（ReshapeTool 无鼠标方法），必须禁用
+        # 且该原因是画布层面最根本的阻断。
+        fallback = evaluate_tool("reshape", _ctx(selection_count=1))
+        assert not fallback.enabled and "原生 QGIS 画布" in fallback.disabled_reason
+        wrong_kind = evaluate_tool(
+            "reshape", _ctx(native_canvas_available=True, active_layer_kind="point", selection_count=1)
+        )
         assert not wrong_kind.enabled and "线/面" in wrong_kind.disabled_reason
-        no_native = evaluate_tool("reshape", _ctx(selection_count=1))
+        native = _ctx(native_canvas_available=True, selection_count=1)
+        no_native = evaluate_tool("reshape", native)
         assert not no_native.enabled and "原生" in no_native.disabled_reason
         # 只有 addLine 数字化器、没有 reshape 算子 → 仍禁用（算法子）
         flags = frozenset({"qgis.native_tool.addLine"})
-        av = evaluate_tool("reshape", _ctx(selection_count=1, capability_flags=flags))
+        av = evaluate_tool("reshape", _ctx(native_canvas_available=True, selection_count=1, capability_flags=flags))
         assert not av.enabled and "reshape" in av.disabled_reason
         flags = frozenset({"qgis.native_tool.addLine", "qgis.geometry_op.reshape"})
-        assert evaluate_tool("reshape", _ctx(selection_count=1, capability_flags=flags)).enabled
+        assert evaluate_tool(
+            "reshape",
+            _ctx(native_canvas_available=True, selection_count=1, capability_flags=flags),
+        ).enabled
 
     def test_repair_targets_polygons(self):
         av = evaluate_tool("repair_geometry", _ctx(active_layer_kind="line"))
