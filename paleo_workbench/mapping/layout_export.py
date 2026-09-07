@@ -1,4 +1,4 @@
-"""Component graph → QgsLayout export bridge (M6/M7, decisions D1).
+"""Component graph → QgsLayout export bridge (M6/M7, decisions D1; V7 §13).
 
 The composition component graph (``mapping/composer``) stays the single
 authoritative, editable document. This module *maps* it, at export time, to
@@ -14,13 +14,30 @@ Engine policy (recorded on every export report):
   renderer/labeling, so screen (QGIS canvas) and export share one symbol
   authority.
 * ``composer_fallback`` — at least one visible element has no native
-  counterpart (timescale, stat chart, facies/lithology legend tables,
-  colorbar, inset map …); the whole page goes through the existing composer
-  SVG renderer instead. A partial QGIS page would silently drop those
-  elements, so the fallback is all-or-nothing and reported.
+  counterpart; the whole page goes through the existing composer SVG
+  renderer instead. A partial QGIS page would silently drop those elements,
+  so the fallback is all-or-nothing, itemized per element type in the
+  report's ``hybrid_items`` (V7 §13: the hybrid boundary is explicit, never
+  a silent engine mix — the C++ builds one page, so two engines can never
+  share a file).
 
 When no bridge stack is available the composer renderer is used, and the
 report says so.
+
+Legend-family elements (V7 §13). COLORBAR, FACIES_LEGEND (the geological
+legend) and WELL_LEGEND map onto the native ``legend`` item **bound to the
+main map item** — the only link the C++ wire protocol supports
+(``map_item``; accepted legend keys are exactly type/x/y/map_item/title/
+resize_to_contents/background, see :data:`_LEGEND_ITEM_KEYS`). The bridge's
+legend item has NO layer-filter key, so each of those legends lists EVERY
+layer of the linked map (with its mirrored QGIS symbology — raster legends
+included via the §5 raster mirror), not only the scalar/facies/well layer
+the composer element was authored for. That is documented here, asserted by
+tests, and disclosed as a warning on every export that uses the mapping.
+``mirror_layers`` (the render snapshot mirrored into the stack) is the
+honesty gate: a legend-backed element goes native only when the layer it
+needs is provably in the mirror; without proof it stays on the composer
+engine rather than rendering a wrong-but-pretty legend.
 """
 
 from __future__ import annotations
@@ -68,6 +85,7 @@ __all__ = [
     "LayoutExportReport",
     "build_layout_spec",
     "export_composition_reported",
+    "hybrid_element_types",
 ]
 
 # Element types with a native QgsLayout counterpart in the bridge spec.
@@ -89,6 +107,142 @@ _NATIVE_TYPES: dict[ElementType, str] = {
     ElementType.GRID: "map_grid",  # folded into the linked map item's grid
 }
 
+# Element types with NO native counterpart under any condition — the hard
+# hybrid boundary. Rendered by the composer engine; each type is itemized in
+# the export report's ``hybrid_items`` when present and visible.
+_HYBRID_TYPES: frozenset[ElementType] = frozenset({
+    ElementType.TIMESCALE,
+    ElementType.INSET_MAP,
+    ElementType.STAT_CHART,
+    ElementType.PROFILE,
+    ElementType.FAULT_SYMBOLS,   # hand-authored pattern swatch table
+    ElementType.LITHOLOGY_LEGEND,  # hand-authored pattern swatch table
+})
+
+# Legend-backed elements (V7 §13): mapped onto the native legend item bound
+# to the main map, gated on the required layer kind being in the mirror.
+# The C++ legend cannot filter layers (no such wire key — see the module
+# docstring), so the legend lists every layer of the linked map.
+_SCALAR_LAYER_TYPES = frozenset({"scalar_grid"})
+_FACIES_LAYER_TYPES = frozenset({"polygon", "facies"})
+_WELL_LAYER_TYPES = frozenset({"well_point", "well"})
+
+
+def _layer_field(layer: Any, name: str, default: Any = None) -> Any:
+    if isinstance(layer, Mapping):
+        return layer.get(name, default)
+    return getattr(layer, name, default)
+
+
+def _normalize_mirror_layers(mirror_layers: Any) -> list[Any]:
+    """Accept a render snapshot (``.layers``) or a plain layer sequence."""
+    if mirror_layers is None:
+        return []
+    layers = getattr(mirror_layers, "layers", None)
+    if layers is not None:
+        return list(layers)
+    if isinstance(mirror_layers, Mapping):
+        return []
+    try:
+        return [layer for layer in mirror_layers]
+    except TypeError:
+        return []
+
+
+def _mirror_proves(
+    element_type: ElementType, mirror_layers: Any
+) -> bool:
+    """Can the mirrored layer set prove this legend-backed element native?
+
+    COLORBAR needs a scalar factor raster in the mirror (the §5 float-GeoTIFF
+    path — its QGIS pseudocolor renderer is what the native legend draws, the
+    same XML the canvas uses, so screen and export stay one symbol
+    authority). FACIES_LEGEND (the geological legend) needs facies polygons
+    or any categorized vector surface. WELL_LEGEND needs a well point layer.
+    """
+    layers = _normalize_mirror_layers(mirror_layers)
+    layer_types = {
+        str(_layer_field(layer, "layer_type", "") or "") for layer in layers
+    }
+    if element_type is ElementType.COLORBAR:
+        return bool(layer_types & _SCALAR_LAYER_TYPES)
+    if element_type is ElementType.FACIES_LEGEND:
+        if layer_types & _FACIES_LAYER_TYPES:
+            return True
+        # Categorized vector surfaces (e.g. the facies classification
+        # products) carry the legend content the composer element means.
+        return any(
+            str(_layer_field(layer, "layer_type", "") or "") == "vector"
+            and isinstance(_layer_field(layer, "style", None), Mapping)
+            and str(_layer_field(layer, "style", None).get("renderer") or "")
+            == "categorized"
+            for layer in layers
+        )
+    if element_type is ElementType.WELL_LEGEND:
+        return bool(layer_types & _WELL_LAYER_TYPES)
+    return False
+
+
+#: Legend-backed elements (V7 §13) — see the module docstring for the
+#: no-layer-filter limitation of the native legend item.
+_LEGEND_BACKED_GATES: frozenset[ElementType] = frozenset({
+    ElementType.COLORBAR,
+    ElementType.FACIES_LEGEND,
+    ElementType.WELL_LEGEND,
+})
+
+#: The complete key set the C++ legend branch parses (map_stack_service.cpp,
+#: QgisMapStack::layoutExport, ``type == "legend"``). Anything else on the
+#: wire is silently ignored — emitting keys outside this set would be
+#: inventing protocol.
+_LEGEND_ITEM_KEYS: frozenset[str] = frozenset({
+    "type", "x", "y", "w", "h", "map_item", "title",
+    "resize_to_contents", "background",
+})
+
+# Completeness guard (V7 §13 task: "verify each ElementType in _NATIVE_TYPES
+# or explicitly listed as hybrid"): every ElementType value must fall in
+# exactly one bucket — natively mapped, conditionally legend-backed, or an
+# explicitly documented hybrid. An unaccounted type would be a *silent*
+# hybrid; this assert fails at import instead (and tests re-assert it).
+assert set(ElementType) == (
+    set(_NATIVE_TYPES) | _HYBRID_TYPES | _LEGEND_BACKED_GATES
+), "every ElementType must be native, legend-backed, or explicitly hybrid"
+
+
+def _legend_backed_types(mirror_layers: Any) -> set[ElementType]:
+    """Which legend-backed element types the mirror can prove natively."""
+    return {
+        element_type
+        for element_type in _LEGEND_BACKED_GATES
+        if _mirror_proves(element_type, mirror_layers)
+    }
+
+
+def hybrid_element_types(
+    composition: MapCompositionDocument,
+    *,
+    mirror_layers: Any = None,
+) -> list[str]:
+    """Visible element types that force the composer engine, itemized.
+
+    Returns the sorted distinct ``ElementType`` *values* of visible elements
+    with no native layout counterpart under the given mirror description
+    (legend-backed types without their layer in the mirror count as hybrid).
+    This is the report's ``hybrid_items`` list — the explicit boundary of the
+    all-or-nothing policy.
+    """
+    proven = _legend_backed_types(mirror_layers)
+    types: set[str] = set()
+    for element in _visible_elements(composition):
+        etype = element.element_type
+        if etype in _NATIVE_TYPES:
+            continue
+        if etype in _LEGEND_BACKED_GATES and etype in proven:
+            continue
+        types.add(str(etype.value))
+    return sorted(types)
+
 
 @dataclass(slots=True)
 class LayoutExportReport:
@@ -102,6 +256,11 @@ class LayoutExportReport:
     warnings: list[str] = field(default_factory=list)
     unmapped_elements: list[str] = field(default_factory=list)
     items: int = 0
+    # V7 §13 — the explicit hybrid boundary: element TYPES rendered by the
+    # composer engine instead of QGIS, i.e. the visible types that forced
+    # (or would force) the all-or-nothing fallback. Empty for a pure
+    # ``qgis_layout`` export whose mapping is fully native.
+    hybrid_items: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -113,6 +272,7 @@ class LayoutExportReport:
             "warnings": list(self.warnings),
             "unmapped_elements": list(self.unmapped_elements),
             "items": self.items,
+            "hybrid_items": list(self.hybrid_items),
         }
 
 
@@ -163,8 +323,14 @@ def build_layout_spec(
     map_extent: Sequence[float],
     crs: str | None,
     warnings: list[str] | None = None,
+    mirror_layers: Any = None,
 ) -> dict[str, Any]:
     """Serialise the component graph into the bridge's layout spec JSON.
+
+    ``mirror_layers`` is the render snapshot (or layer sequence) mirrored
+    into the stack — the honesty gate for legend-backed elements
+    (COLORBAR/FACIES_LEGEND/WELL_LEGEND): they map onto the native legend
+    item only while their layer kind is provably in the mirror.
 
     Raises :class:`ValueError` when a visible element has no native layout
     counterpart — callers decide the fallback policy (see
@@ -177,13 +343,35 @@ def build_layout_spec(
             warnings.append(message)
 
     visible = _visible_elements(composition)
+    proven_legend_types = _legend_backed_types(mirror_layers)
     unmapped = [
-        el for el in visible if el.element_type not in _NATIVE_TYPES
+        el
+        for el in visible
+        if el.element_type not in _NATIVE_TYPES
+        and el.element_type not in proven_legend_types
     ]
     if unmapped:
         names = ", ".join(sorted({el.element_type.value for el in unmapped}))
         raise ValueError(
             f"composition has elements with no native layout counterpart: {names}"
+        )
+
+    legend_backed_present = sorted(
+        {
+            el.element_type
+            for el in visible
+            if el.element_type in proven_legend_types
+        },
+        key=lambda etype: etype.value,
+    )
+    if legend_backed_present:
+        # Documented limitation (module docstring): the C++ legend item has
+        # no layer-filter key, so it lists EVERY layer of the linked map.
+        names = ", ".join(etype.value for etype in legend_backed_present)
+        _warn(
+            f"{names} mapped to the native legend bound to the main map; "
+            "the bridge legend item cannot filter layers, so it lists every "
+            "layer of the linked map (not only the element's own layer)"
         )
 
     main_map = next(
@@ -215,15 +403,38 @@ def build_layout_spec(
                     "frame": True,
                 }
             )
-        elif el.element_type is ElementType.LEGEND:
-            items.append(
-                {
-                    "type": "legend",
-                    "map_item": "map",
-                    "title": str(props.get("title") or "图例"),
-                    **base,
-                }
-            )
+        elif el.element_type in (
+            ElementType.LEGEND,
+            ElementType.COLORBAR,
+            ElementType.FACIES_LEGEND,
+            ElementType.WELL_LEGEND,
+        ):
+            # Native legend item. Only the keys the C++ parses are emitted
+            # (map_stack_service.cpp layoutExport legend branch): type/x/y/
+            # map_item/title/resize_to_contents/background. The legend binds
+            # to the main map item — "map" — and lists every mirrored layer
+            # (no filter key on the wire; see module docstring). Plain
+            # LEGEND keeps its historical auto-size behaviour; the V7
+            # legend-backed elements pin the composer-authored box instead.
+            if el.element_type is ElementType.COLORBAR:
+                title = str(props.get("title") or "图例")
+                units = str(props.get("units") or "").strip()
+                legend_title = f"{title} ({units})" if units else title
+            else:
+                legend_title = str(props.get("title") or "图例")
+            legend_item: dict[str, Any] = {
+                "type": "legend",
+                "map_item": "map",
+                "title": legend_title,
+                "x": float(el.x_mm),
+                "y": float(el.y_mm),
+            }
+            if el.element_type is ElementType.LEGEND:
+                legend_item["w"] = float(el.width_mm)
+                legend_item["h"] = float(el.height_mm)
+            else:
+                legend_item["resize_to_contents"] = False
+            items.append(legend_item)
         elif el.element_type is ElementType.NORTH_ARROW:
             items.append(
                 {
@@ -330,6 +541,7 @@ def export_composition_reported(
     crs: str | None = None,
     stack=None,
     geo_pdf: bool = False,
+    mirror_layers: Any = None,
 ) -> LayoutExportReport:
     """Export the composition, preferring the native QgsLayout engine.
 
@@ -338,6 +550,10 @@ def export_composition_reported(
     canvas shim or a headless snapshot mirror). Without a stack, or when the
     composition carries elements with no native counterpart, the composer
     renderer produces the page and the report records the engine.
+    ``mirror_layers`` is the render snapshot mirrored into that stack; it
+    gates the legend-backed element mapping (COLORBAR / FACIES_LEGEND /
+    WELL_LEGEND) and should be the SAME snapshot the canvas mirrors, so the
+    export legend draws exactly what the screen shows.
     """
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -349,11 +565,47 @@ def export_composition_reported(
         # raise rather than silently producing (or degrading to) a page.
         raise
 
+    # V7 §13 — the hybrid boundary is computed up front so every exit path
+    # reports WHICH element types forced (or would force) the composer
+    # engine, not just that something did.
+    proven_native = _legend_backed_types(mirror_layers)
+    hybrid_types = hybrid_element_types(composition, mirror_layers=mirror_layers)
+    counts: dict[str, int] = {}
+    hybrid_element_ids: list[str] = []
+    for el in _visible_elements(composition):
+        if el.element_type in _NATIVE_TYPES or el.element_type in proven_native:
+            continue
+        counts[el.element_type.value] = counts.get(el.element_type.value, 0) + 1
+        hybrid_element_ids.append(el.id)
+    if hybrid_types:
+        forced = ", ".join(f"{name}×{counts[name]}" for name in sorted(counts))
+        warnings.append(
+            f"composer fallback forced by unmapped elements: {forced}"
+        )
+        unproven = sorted(
+            {
+                el.element_type.value
+                for el in _visible_elements(composition)
+                if el.element_type in _LEGEND_BACKED_GATES
+                and el.element_type not in proven_native
+            }
+        )
+        if unproven:
+            warnings.append(
+                f"{', '.join(unproven)} element(s) have no matching layer "
+                "in the mirror description (mirror_layers); a legend-backed "
+                "element goes native only when its layer is provably mirrored"
+            )
+
     can_use_layout = stack is not None and map_extent is not None
     if can_use_layout:
         try:
             spec = build_layout_spec(
-                composition, map_extent=map_extent, crs=crs, warnings=warnings
+                composition,
+                map_extent=map_extent,
+                crs=crs,
+                warnings=warnings,
+                mirror_layers=mirror_layers,
             )
             if geo_pdf:
                 spec["geo_pdf"] = True
@@ -394,4 +646,6 @@ def export_composition_reported(
         dpi=float(dpi),
         ok=True,
         warnings=warnings,
+        unmapped_elements=hybrid_element_ids,
+        hybrid_items=hybrid_types,
     )
