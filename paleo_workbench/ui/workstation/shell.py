@@ -835,9 +835,15 @@ class WorkstationFrame(QWidget):
             )
 
     def show_hub_page(self, title: str) -> None:
+        """功能页 dock 显示（V7 D12：不再强制浮动）。
+
+        旧实现每次导航 ``setFloating(True)`` 弹独立窗口——双架构接缝的
+        主要来源（预设定制被排除、多屏几何噪声）。现在 hub_dock 是普通
+        停靠 dock，导航 = show + raise；用户可自由拖出/叠 tab/关闭，
+        与其余 dock 行为一致（重开路径：面板菜单/palette 不变）。
+        """
         self.hub_dock.setWindowTitle(str(title or "功能页"))
         self.hub_dock.show()
-        self.hub_dock.setFloating(True)
         self.hub_dock.raise_()
 
     def activate_joint(self) -> None:
@@ -903,8 +909,8 @@ class WorkstationFrame(QWidget):
         return self._current_preset_id
 
     def _preset_tracked_docks(self) -> tuple[QDockWidget, ...]:
-        """预设可见性矩阵覆盖的 dock（hub 浮窗除外）。"""
-        return tuple(dock for dock in self._shell_docks() if dock is not self.hub_dock)
+        """预设可见性矩阵覆盖的 dock（V7 D12：hub 不再强制浮动，纳入追踪）。"""
+        return tuple(self._shell_docks())
 
     def _mark_layout_customized(self) -> None:
         if self._preset_tracking_paused or self._layout_frozen:

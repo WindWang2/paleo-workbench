@@ -190,6 +190,10 @@ _NEEDS_EDITING = frozenset({
     "move_feature", "vertex", "snapping", "topology",
 })
 
+#: 需要活动图层的组（goal §6「根据 active layer 切换组」：无活动图层
+# 时整组不显示——比显示一排禁用按钮更专业；palette 侧同因禁用）。
+_NEEDS_LAYER_GROUPS = frozenset({"layer", "symbology"})
+
 #: 阶段专属组（其余组全阶段可见；goal §4/§6）
 _STAGE_GROUP_VISIBILITY: dict[str, dict[str, bool]] = {
     MappingStage.FACIES_CALIBRATION.value: {"factor": False, "layout_export": False},
@@ -259,6 +263,10 @@ def evaluate_tool(tool_id: str, ctx: ToolContext) -> ToolAvailability:
         if layer.degraded and layer.editable is False:
             return _no(layer.block_reason or "图层处于降级状态（数据不完整）")
         if layer.layer_id is None:
+            # 图层/符号组整组跟随活动图层（goal §6）；选择/识别类保持
+            # disabled+原因（可发现性）。
+            if _group_of(tool_id) in _NEEDS_LAYER_GROUPS:
+                return _hidden("当前无活动图层——该工具组未显示")
             if tool_id in _NEEDS_ANY_LAYER:
                 return _no("当前无活动图层" if tool_id.startswith("layer_")
                            else "当前无活动矢量图层")
@@ -275,6 +283,13 @@ def evaluate_tool(tool_id: str, ctx: ToolContext) -> ToolAvailability:
             return _no("当前图层可编辑性未知")
 
     # 5) 阶段（组隐藏 → 动作白名单）
+    group = _group_of(tool_id)
+    if (
+        group in _NEEDS_LAYER_GROUPS
+        and layer.layer_id is None
+        and tool_id not in {"layer_new", "reference_import"}
+    ):
+        return _hidden("当前无活动图层——该工具组未显示")
     group_visibility = _stage_group_visibility_for(ctx.stage)
     group = _group_of(tool_id)
     if group_visibility is not None and not group_visibility.get(group, True):

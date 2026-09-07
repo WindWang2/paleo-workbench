@@ -1148,7 +1148,17 @@ class CompositeDocument(QWidget):
         return availability_for_context(self.tool_context())
 
     def _apply_tool_availability(self) -> None:
-        self.action_controller.apply_availability(self.tool_availability())
+        availability = self.tool_availability()
+        self._last_availability = availability
+        self.action_controller.apply_availability(availability)
+        # 溢出集合优先于求值器可见性（窄画布收纳的组保持隐藏，菜单可达）。
+        hidden = getattr(self, "_toolbar_overflow_hidden", None)
+        if hidden:
+            for tool_id in hidden:
+                action = self.action_controller.actions.get(tool_id)
+                if action is not None:
+                    action.setVisible(False)
+            self._rebuild_overflow_menu()
 
     # -- V7 §7 图层树呈现态 ----------------------------------------------------
 
@@ -1259,20 +1269,32 @@ class CompositeDocument(QWidget):
         # 求值器管理，组级可见性随阶段/图层切换（_apply_tool_availability）。
         from paleo_workbench.ui.workstation.tool_surface import TOOL_GROUPS
 
-        bar_layout.addWidget(
-            self.action_controller.toolbar(
-                "编图",
-                tuple(
-                    tuple(TOOL_GROUPS[group])
-                    for group in (
-                        "navigate", "selection", "inspection", "edit_session",
-                        "capture", "geometry", "snapping", "layer",
-                        "symbology", "factor", "qa", "layout_export",
-                    )
-                ),
-                self.toolbar,
-            )
+        self._toolbar_group_order = (
+            "navigate", "selection", "inspection", "edit_session",
+            "capture", "geometry", "snapping", "layer",
+            "symbology", "factor", "qa", "layout_export",
         )
+        self._toolbar_overflow_hidden: set[str] = set()
+        self._map_toolbar = self.action_controller.toolbar(
+            "编图",
+            tuple(tuple(TOOL_GROUPS[group]) for group in self._toolbar_group_order),
+            self.toolbar,
+        )
+        bar_layout.addWidget(self._map_toolbar)
+        # 溢出菜单（goal §6 overflow）：窄画布时低优先组收进「»」菜单，
+        # 动作本体隐藏但可从菜单触发（含禁用原因入 tooltip）。
+        self._overflow_button = QToolButton(self.toolbar)
+        self._overflow_button.setObjectName("WorkstationOverflowButton")
+        self._overflow_button.setText("»")
+        self._overflow_button.setToolTip("更多工具（画布较窄时收纳低优先组）")
+        self._overflow_button.setAccessibleName("更多工具")
+        self._overflow_button.setPopupMode(
+            QToolButton.ToolButtonPopupMode.InstantPopup
+        )
+        self._overflow_menu = QMenu(self._overflow_button)
+        self._overflow_button.setMenu(self._overflow_menu)
+        self._overflow_button.setVisible(False)
+        bar_layout.addWidget(self._overflow_button)
         self.action_controller.tool_requested.connect(
             self.edit_controller.activate_tool
         )
@@ -2564,15 +2586,153 @@ class CompositeDocument(QWidget):
             button.setVisible(not overflow)
         if overflow:
             self.toolbar.adjustSize()
+        # 仍溢出：低优先组逐步收进「»」溢出菜单（goal §6 overflow）。
+        self._update_toolbar_overflow(budget)
+        self.toolbar.layout().invalidate()
+        self.toolbar.layout().activate()
+        desired = self._toolbar_desired_width()
+        self.toolbar.resize(
+            desired, max(self.toolbar.sizeHint().height(), 36)
+        )
         y = 8
-        x = max(margin_x, (self.width() - self.toolbar.width()) // 2)
-        max_x = max(margin_x, self.width() - self.toolbar.width() - margin_x)
+        x = max(margin_x, (self.width() - desired) // 2)
+        max_x = max(margin_x, self.width() - desired - margin_x)
         self.toolbar.move(min(x, max_x), y)
         self.toolbar.raise_()
+
+    def _toolbar_desired_width(self) -> int:
+        """可见子部件的期望宽度总和（Qt 布局对隐藏 widget 的 hint 计入
+        行为不可依赖——按可见集合显式求和，确定性收缩）。"""
+        layout = self.toolbar.layout()
+        margins = layout.contentsMargins()
+        total = margins.left() + margins.right()
+        count = 0
+        for index in range(layout.count()):
+            item = layout.itemAt(index)
+            widget = item.widget()
+            if widget is not None:
+                if widget.isHidden():
+                    continue
+                total += max(widget.sizeHint().width(), widget.minimumSizeHint().width())
+            else:
+                total += item.sizeHint().width()
+            count += 1
+        if count > 1:
+            total += layout.spacing() * (count - 1)
+        return total
+
+    def _update_toolbar_overflow(self, budget: int) -> None:
+        """窄画布溢出：按逆优先级隐藏组，动作收进「»」菜单。
+
+        恢复顺序相反（宽画布逐步还原）。可见性语义：求值器给 visible
+        且不在溢出集合 → 显示；溢出集合成员 → 菜单可达。
+        """
+        from paleo_workbench.ui.workstation.tool_surface import TOOL_GROUPS
+
+        actions = self.action_controller.actions
+
+        def _fits() -> bool:
+            return self._toolbar_desired_width() <= budget
+
+        overflow = not _fits()
+        # 逆优先级序（最低优先先隐藏）。核心编辑组（navigate/selection/
+        # inspection/edit_session/capture/geometry）的主体永不收纳；组内
+        # 低频单动作（refresh/measure/反选等）可在极限窄时最后收纳。
+        never_hide = {
+            "navigate", "selection", "inspection", "edit_session",
+            "capture", "geometry",
+        }
+        hide_order = tuple(
+            group for group in reversed(self._toolbar_group_order)
+            if group not in never_hide
+        )
+        index = 0
+        while overflow and index < len(hide_order):
+            group = hide_order[index]
+            index += 1
+            for tool_id in TOOL_GROUPS[group]:
+                if tool_id not in self._toolbar_overflow_hidden:
+                    self._toolbar_overflow_hidden.add(tool_id)
+                    actions[tool_id].setVisible(False)
+            overflow = not _fits()
+        # 极限窄：核心组内的低频单动作最后收纳（数字化/编辑入口仍在条上）。
+        last_resort = (
+            "refresh", "measure_distance", "invert_selection", "select_all",
+            "clear_selection", "full_extent",
+        )
+        for tool_id in last_resort:
+            if not overflow:
+                break
+            if tool_id not in self._toolbar_overflow_hidden:
+                self._toolbar_overflow_hidden.add(tool_id)
+                actions[tool_id].setVisible(False)
+                overflow = not _fits()
+        while not overflow and self._toolbar_overflow_hidden:
+            # 尝试恢复最高优先的隐藏组（hide_order 逆序的末尾）。
+            restore_group = None
+            for group in self._toolbar_group_order:
+                if any(t in self._toolbar_overflow_hidden for t in TOOL_GROUPS[group]):
+                    restore_group = group
+                    break
+            if restore_group is None:
+                break
+            trial = set(self._toolbar_overflow_hidden)
+            for tool_id in TOOL_GROUPS[restore_group]:
+                trial.discard(tool_id)
+            saved = set(self._toolbar_overflow_hidden)
+            self._toolbar_overflow_hidden = trial
+            # 还原可见性以最近一次求值结果为准（组可能因无图层/阶段被
+            # 求值器隐藏——溢出恢复不得越过它）。
+            last = getattr(self, "_last_availability", None) or {}
+            for tool_id in TOOL_GROUPS[restore_group]:
+                avail = last.get(tool_id)
+                actions[tool_id].setVisible(True if avail is None else avail.visible)
+            if not _fits():
+                self._toolbar_overflow_hidden = saved
+                for tool_id in TOOL_GROUPS[restore_group]:
+                    actions[tool_id].setVisible(False)
+                break
+        self._rebuild_overflow_menu()
+
+    def _rebuild_overflow_menu(self) -> None:
+        """「»」菜单 = 溢出集合内的动作（触发真实 QAction；保留禁用态）。"""
+        from paleo_workbench.ui.workstation.tool_surface import TOOL_GROUPS
+
+        self._overflow_menu.clear()
+        labels = self.action_controller._LABELS
+        count = 0
+        for group in reversed(self._toolbar_group_order):
+            entries = [
+                (tool_id, labels.get(tool_id, tool_id))
+                for tool_id in TOOL_GROUPS[group]
+                if tool_id in self._toolbar_overflow_hidden
+            ]
+            if not entries:
+                continue
+            if count:
+                self._overflow_menu.addSeparator()
+            for tool_id, label in entries:
+                action = self.action_controller.actions.get(tool_id)
+                if action is None:
+                    continue
+                entry = self._overflow_menu.addAction(
+                    action.icon(), label, action.trigger
+                )
+                entry.setEnabled(action.isEnabled())
+                if not action.isEnabled():
+                    entry.setToolTip(action.toolTip())
+                count += 1
+        self._overflow_button.setVisible(count > 0)
+        self._overflow_button.setEnabled(count > 0)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._reposition_toolbar()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        # 隐藏状态下 Qt 延迟发送 resize：首显时补一次工具条重排（V7）。
+        QTimer.singleShot(0, self._reposition_toolbar)
         # 画布随窗口/布局变化后，空态提示必须盖满当前画布矩形（否则残留
         # 布局前的小矩形，文字被截断或不可见）。
         self._sync_hint_geometry()

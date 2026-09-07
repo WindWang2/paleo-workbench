@@ -25,13 +25,12 @@ from paleo_workbench.mapping_workspace.stages import STAGE_ORDER, MappingStage
 class StageToolProfile:
     """阶段工具集合（基础 pan/zoom/select/identify 永远保留，不在此列）。
 
-    ``command_groups``/``edit_actions`` 是综合编修工具条的阶段过滤真源
-    （V6 §4：composite toolbar 按此隐藏非本阶段的数字化/编辑动作；
-    基础导航/识别/选择动作不经过该过滤）。
+    ``edit_actions`` 是综合编修工具条的阶段过滤真源（V6 §4：composite
+    toolbar 按此隐藏非本阶段的数字化/编辑动作；基础导航/识别/选择动作
+    不经过该过滤。V7 D3 删除了零消费者的 ``command_groups``——分组 IA
+    由 ui.workstation.tool_surface.TOOL_GROUPS 承担）。
     """
 
-    #: 工具面 id（MapActionController 命令组过滤）。
-    command_groups: tuple[str, ...] = ()
     #: 本阶段可用的数字化/编辑动作 id（existing MapActionController ids）。
     edit_actions: tuple[str, ...] = ()
     #: 阶段专属上下文动作（Stage Panel 提供，如「新建物源线」「运行因子」）。
@@ -88,7 +87,6 @@ _STAGE_PROFILES: dict[MappingStage, StageProfile] = {
         MappingStage.FACIES_CALIBRATION,
         active_editing_roles=(LayerRole.INITIAL_FACIES_DRAFT,),
         tools=StageToolProfile(
-            command_groups=("navigate", "identify", "select", "edit_session", "digitize"),
             edit_actions=(
                 "add_polygon", "move_feature", "vertex", "split", "merge",
                 "delete_selected", "undo", "redo",
@@ -123,7 +121,6 @@ _STAGE_PROFILES: dict[MappingStage, StageProfile] = {
             LayerRole.MASK_BOUNDARY, LayerRole.INTERPOLATION_BOUNDARY,
         ),
         tools=StageToolProfile(
-            command_groups=("navigate", "identify", "select", "edit_session", "digitize"),
             edit_actions=(
                 "add_line", "add_polygon", "move_feature", "vertex", "split",
                 "merge", "delete_selected", "undo", "redo",
@@ -151,7 +148,6 @@ _STAGE_PROFILES: dict[MappingStage, StageProfile] = {
         MappingStage.INTEGRATED_COMPILATION,
         active_editing_roles=(LayerRole.INTEGRATED_FACIES, LayerRole.INTEGRATED_BOUNDARY),
         tools=StageToolProfile(
-            command_groups=("navigate", "identify", "select", "edit_session", "digitize"),
             edit_actions=(
                 "add_polygon", "add_line", "move_feature", "vertex", "split",
                 "merge", "delete_selected", "undo", "redo",
