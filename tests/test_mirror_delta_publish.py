@@ -219,12 +219,17 @@ class _StrictSignatureStack(_DeltaCapableStack):
     """Fake mirroring the REAL bridge signature: rejects unknown kwargs
     (R3-1 regression: mocks accepting **kwargs hid the fields_json break)."""
 
+    def __init__(self):
+        super().__init__()
+        self.received_fields: list = []
+
     def upsert_mirror_layer(self, doc_id, name, geom, crs, geojson,
                             renderer_xml="", labeling_xml="",
                             legacy_style=None, visible=True, opacity=1.0,
                             is_reference=False, is_editable=False,
                             reference_snap=False, data_revision=0, delta="",
                             fields_json=""):
+        self.received_fields.append(fields_json)
         return super().upsert_mirror_layer(
             doc_id, name, geom, crs, geojson, renderer_xml, labeling_xml,
             legacy_style, visible, opacity, is_reference, is_editable,
