@@ -43,6 +43,19 @@ def _qt_include_dirs() -> list[str]:
                 if sub_path.is_dir():
                     dirs.append(str(sub_path))
             return dirs
+        # Windows official/aqt layout (V7): headers live at <prefix>/include/<Module>
+        # without a qt6/ subdirectory; QScintilla's Qsci headers install alongside.
+        win_inc = Path(prefix) / "include"
+        if (win_inc / "QtCore").is_dir():
+            dirs = [str(win_inc)]
+            for sub in ("QtCore", "QtGui", "QtWidgets", "QtXml", "QtSvg", "QtPrintSupport"):
+                sub_path = win_inc / sub
+                if sub_path.is_dir():
+                    dirs.append(str(sub_path))
+            qsci = win_inc / "Qsci"
+            if qsci.is_dir():
+                dirs.append(str(qsci))
+            return dirs
 
     try:
         output = subprocess.check_output(
@@ -210,6 +223,22 @@ def _build_vendored_qgis() -> tuple[Path, Path]:
                 "-DCMAKE_FIND_USE_PACKAGE_REGISTRY=FALSE",
                 "-DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=FALSE",
             ]
+            if sys.platform == "win32":
+                # V7 Windows support: providers/optional deps without MSVC
+                # packages in the C:/deps tree; winflexbison + vcpkg protobuf
+                # module hints (FindProtobuf is module-mode and misses the
+                # vcpkg config package on its own).
+                cmake_args += [
+                    "-DWITH_INTERNAL_SPATIALITE=ON",
+                    "-DWITH_SPATIALITE=OFF",
+                    "-DWITH_POSTGRESQL=OFF",
+                    "-DWITH_EXIV2=OFF",
+                    "-DFLEX_EXECUTABLE=C:/deps/winflexbison/win_flex.exe",
+                    "-DBISON_EXECUTABLE=C:/deps/winflexbison/win_bison.exe",
+                    "-DProtobuf_LIBRARY=C:/deps/vcpkg/installed/x64-windows/lib/libprotobuf.lib",
+                    "-DProtobuf_INCLUDE_DIR=C:/deps/vcpkg/installed/x64-windows/include",
+                    "-DProtobuf_PROTOC_EXECUTABLE=C:/deps/vcpkg/installed/x64-windows/tools/protobuf/protoc.exe",
+                ]
             prefix = os.environ.get("PALEO_QGIS_CMAKE_PREFIX", "").strip()
             if not prefix:
                 prefix = os.environ.get("CMAKE_PREFIX_PATH", "").strip().split(os.pathsep)[0]
@@ -268,7 +297,11 @@ def _extension() -> Pybind11Extension:
         ],
         include_dirs=[*_qgis_core_include_dirs(build_dir), *_qt_include_dirs()],
         # Qt6PrintSupport: QgsLayoutExporter (layout PDF export) links QPrinter.
-        libraries=["Qt6Svg", "Qt6PrintSupport"],
+        # Windows: MSVC resolves Qt symbols only from explicit .lib inputs
+        # (qgis_*.lib import libs carry QGIS API only), so the full set of
+        # directly-used Qt modules is linked.
+        libraries=_windows_link_libraries(),
+        library_dirs=_windows_link_library_dirs(),
         extra_link_args=link_args,
         define_macros=[("PALEO_QGIS_PREFIX_PATH", f'\"{prefix}\"')],
         cxx_std=20,
@@ -276,9 +309,40 @@ def _extension() -> Pybind11Extension:
     )
 
 
+def _windows_link_libraries() -> list[str]:
+    if sys.platform == "win32":
+        return ["Qt6Core", "Qt6Gui", "Qt6Widgets", "Qt6Xml", "Qt6Svg", "Qt6PrintSupport"]
+    return ["Qt6Svg", "Qt6PrintSupport"]
+
+
+def _windows_link_library_dirs() -> list[str]:
+    """MSVC /LIBPATH entries for Qt/QScintilla import libraries (V7 Windows).
+
+    distutils MSVC link does not read the unix-style rpath args; Qt6Svg/
+    Qt6PrintSupport .lib files live in the dev prefix from CMAKE_PREFIX_PATH
+    (first entry). Empty on non-Windows (Linux resolves via system linker).
+    """
+    if sys.platform != "win32":
+        return []
+    prefix = os.environ.get("PALEO_QGIS_CMAKE_PREFIX", "").strip()
+    if not prefix:
+        prefix = os.environ.get("CMAKE_PREFIX_PATH", "").strip().split(os.pathsep)[0]
+    dirs: list[str] = []
+    if prefix:
+        qt_lib = Path(prefix) / "lib"
+        if (qt_lib / "Qt6Core.lib").is_file():
+            dirs.append(str(qt_lib))
+    for extra in ("C:/deps/qscintilla-install/lib",):
+        if Path(extra, "qscintilla2_qt6.lib").is_file():
+            dirs.append(extra)
+    return dirs
+
+
 setup(
     name="qgis_render_bridge",
-    version="0.2.17a0",
+    # 0.3.0a0 (V7): capability_manifest + native measure + geometry
+    # validate/reshape + snapping endpoint/intersection.
+    version="0.3.0a0",
     description="Optional narrow C++ QGIS renderer bridge for paleo-workbench",
     ext_modules=[_extension()] if _enabled() else [],
     cmdclass={"build_ext": build_ext},
