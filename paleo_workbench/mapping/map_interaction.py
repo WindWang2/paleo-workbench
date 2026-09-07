@@ -87,16 +87,9 @@ def _contains(point: Point, ring: object) -> bool:
     vertices = [vertex for vertex, _path in _vertices(ring)]
     if len(vertices) < 3:
         return False
-    inside = False
-    px, py = point
-    previous = vertices[-1]
-    for current in vertices:
-        x1, y1 = previous
-        x2, y2 = current
-        if (y1 > py) != (y2 > py) and px < (x2 - x1) * (py - y1) / (y2 - y1) + x1:
-            inside = not inside
-        previous = current
-    return inside
+    from paleo_workbench.mapping.geometry_planar import point_in_ring_scalar
+
+    return point_in_ring_scalar(float(point[0]), float(point[1]), vertices)
 
 
 def _contains_polygon(point: Point, geometry: Mapping[str, object]) -> bool:

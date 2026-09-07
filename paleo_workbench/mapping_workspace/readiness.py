@@ -124,6 +124,11 @@ def check_initial_facies_crs(document) -> ReadinessItem:
 
 
 def _geometry_issue_count(features: list) -> int:
+    """Real geometry validity (facade: QGIS engine when built, shapely
+    otherwise) — the former non-empty check let invalid bowtie/unclosed
+    rings pass readiness (v7 P2-16)."""
+    from paleo_workbench.mapping.geometry_operations import validate
+
     issues = 0
     for feature in features or ():
         geometry = feature.get("geometry") if isinstance(feature, dict) else None
@@ -133,6 +138,12 @@ def _geometry_issue_count(features: list) -> int:
         coordinates = geometry.get("coordinates")
         if not coordinates:
             issues += 1
+            continue
+        try:
+            if not validate(geometry).valid:
+                issues += 1
+        except Exception:
+            issues += 1  # unvalidatable geometry is an issue, never a pass
     return issues
 
 

@@ -90,25 +90,15 @@ def split_polygon_by_line(
 
 
 def make_geometry_valid(geometry: Mapping[str, object]) -> dict[str, object]:
-    """Repair an invalid polygon geometry: QGIS engine first, shapely fallback."""
+    """Repair an invalid polygon geometry via the single §4 facade entry
+    (QGIS engine first, shapely fallback, engine disclosed)."""
     if not isinstance(geometry, Mapping):
         return dict(geometry or {})
     if str(geometry.get("type") or "") not in {"Polygon", "MultiPolygon"}:
         return dict(geometry)
-    global _BRIDGE_PROBE
-    if _BRIDGE_PROBE is None:
-        # 每图层修复可能遍历大量要素；桥探测结果进程内缓存（review #15）。
-        _BRIDGE_PROBE = qgis_bridge_available()
-    if _BRIDGE_PROBE:
-        try:
-            repaired = _native_geometry().make_valid(json.dumps(geometry))
-            if repaired:
-                return json.loads(repaired)
-        except (RuntimeError, ValueError):
-            pass  # fall through to the shapely repair below
-    from paleo_workbench.mapping.topology import repair_invalid_geometry
+    from paleo_workbench.mapping.geometry_operations import repair as repair_op
 
-    return repair_invalid_geometry(dict(geometry))
+    return repair_op(dict(geometry))
 
 
 _BRIDGE_PROBE: bool | None = None

@@ -315,42 +315,10 @@ def _clip_polyline_to_ring(
     poly: list[list[float]],
     clip_ring: list[list[float]],
 ) -> list[list[list[float]]]:
-    """Clip one polyline to a user domain ring; returns the resulting pieces.
+    """Clip one polyline to a user domain ring (shared kernel, v7 §4)."""
+    from paleo_workbench.mapping.geometry_operations import clip_polyline_to_ring
 
-    Requires shapely — a requested clip must never degrade to silently
-    unclipped output.
-    """
-    from shapely.geometry import LineString, Polygon, mapping
-    from shapely.geometry.collection import GeometryCollection
-
-    ring_poly = Polygon([(float(x), float(y)) for x, y in clip_ring])
-    if not ring_poly.is_valid:
-        from shapely.validation import make_valid
-
-        ring_poly = make_valid(ring_poly)
-    line = LineString([(float(x), float(y)) for x, y in poly])
-    clipped = line.intersection(ring_poly)
-    if clipped.is_empty:
-        return []
-    if clipped.geom_type == "GeometryCollection":
-        pieces = [
-            g
-            for g in clipped.geoms
-            if g.geom_type in ("LineString", "MultiLineString")
-        ]
-    else:
-        pieces = [clipped]
-    coords_out: list[list[list[float]]] = []
-    for piece in pieces:
-        geom = mapping(piece)
-        if geom["type"] == "LineString":
-            coords_out.append([[float(x), float(y)] for x, y in geom["coordinates"]])
-        elif geom["type"] == "MultiLineString":
-            coords_out.extend(
-                [[float(x), float(y)] for x, y in part]
-                for part in geom["coordinates"]
-            )
-    return [c for c in coords_out if len(c) >= 2]
+    return clip_polyline_to_ring(poly, clip_ring)
 
 
 def generate_contour_layer(

@@ -603,22 +603,17 @@ def _domain_mask(
     poly = np.asarray(boundary, dtype=float)
     if poly.ndim != 2 or poly.shape[0] < 3:
         raise ValueError("boundary ring needs at least 3 vertices")
-    px = poly[:, 0]
-    py = poly[:, 1]
+    from paleo_workbench.mapping.geometry_planar import (
+        points_in_polygon_vectorized,
+    )
+
     xx, yy = np.meshgrid(
         np.asarray(grid_x, dtype=float), np.asarray(grid_y, dtype=float)
     )
-    inside = np.zeros(xx.shape, dtype=bool)
-    j = len(px) - 1
-    for i in range(len(px)):
-        yi, yj = py[i], py[j]
-        xi, xj = px[i], px[j]
-        straddle = (yi > yy) != (yj > yy)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            x_cross = (xj - xi) * (yy - yi) / (yj - yi) + xi
-        inside ^= straddle & (xx < x_cross)
-        j = i
-    return inside
+    return points_in_polygon_vectorized(xx, yy, {
+        "type": "Polygon",
+        "coordinates": [[(float(x), float(y)) for x, y in poly]],
+    })
 
 
 def _apply_domain_options(
