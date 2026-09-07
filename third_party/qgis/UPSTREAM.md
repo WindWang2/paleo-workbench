@@ -41,3 +41,17 @@ header carries a documented compatibility patch:
   CI leg builds against Ubuntu noble's Qt 6.4) the call falls back to the
   identical milliseconds overload, guarded by `QT_VERSION`. Semantics are
   unchanged (both forms time out after `timeout` ms).
+
+Windows (MSVC) build support patches — qgis-geolayer-cartography-v7:
+
+- `platform/windows/rc/version.rc.in` — restored verbatim from the pinned
+  upstream commit. The win32_version_info() CMake function
+  (cmake/CreateQgsVersion.cmake) requires it on WIN32, but `platform/` had
+  been dropped from the closure because Linux builds never reference it.
+- `src/core/CMakeLists.txt` — `include(CheckFunctionExists)` added inside
+  `if(WITH_INTERNAL_SPATIALINDEX)`. Upstream only includes that module
+  under `if(NOT WIN32 ...)` (the openpty probe in the top-level
+  CMakeLists.txt), so pure-MSVC configure fails with "Unknown CMake
+  command" at the spatialindex `check_function_exists()` calls. No
+  behavioural change on Linux (the module is idempotent to include).
+
