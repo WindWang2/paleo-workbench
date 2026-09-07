@@ -752,8 +752,8 @@ class AppShell(QWidget):
             self.command_palette.popup()
 
     def _shortcut_switch_subpage(self, sub_idx: int) -> None:
-        focus = QApplication.focusWidget()
-        if isinstance(focus, (QLineEdit, QTextEdit, QTextBrowser)):
+        # V7：文本输入守卫统一到 shortcuts.focus_in_text_input（单一清单）。
+        if shortcuts.focus_in_text_input():
             return
         hub = self.page_stack.currentWidget()
         if not isinstance(hub, HubPage):
@@ -763,8 +763,7 @@ class AppShell(QWidget):
             self.navigate_to(hub.hub_index, keys[sub_idx])
 
     def _shortcut_switch_page(self, idx: int) -> None:
-        focus = QApplication.focusWidget()
-        if isinstance(focus, (QLineEdit, QTextEdit, QTextBrowser)):
+        if shortcuts.focus_in_text_input():
             return
         self.navigate_to(idx)
 

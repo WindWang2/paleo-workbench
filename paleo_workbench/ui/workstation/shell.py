@@ -622,6 +622,46 @@ class WorkstationFrame(QWidget):
                         ),
                     )
                 )
+        self._register_surface_palette_commands()
+
+    def _register_surface_palette_commands(self) -> None:
+        """V7 §3：工具面动作注册为 palette 命令（applicability 同一求值器）。
+
+        palette 与工具条对同一动作给同一禁用原因（goal §5 四表面一致）；
+        回调经 composite 的命令分派（同一执行路径）。
+        """
+        from paleo_workbench.ui.command_registry import CommandSpec, command_registry
+        from paleo_workbench.ui.map_action_controller import MapActionController
+        from paleo_workbench.ui.workstation.tool_surface import (
+            evaluate_tool,
+            tool_context_from_ui_snapshot,
+        )
+
+        surface_tools = (
+            "layer_new", "reference_import", "layer_properties",
+            "attribute_table", "layer_zoom", "layer_export", "symbology",
+            "style_manager", "factor_workbench", "factor_overlay",
+            "qa_run", "map_product_assemble", "map_export",
+        )
+        labels = MapActionController._LABELS
+        for tool_id in surface_tools:
+
+            def _applicability(ctx, _tool=tool_id):
+                avail = evaluate_tool(_tool, tool_context_from_ui_snapshot(ctx))
+                return avail.reason or None
+
+            command_registry.register(
+                CommandSpec(
+                    id=f"map:{tool_id}",
+                    label=f"编图 · {labels.get(tool_id, tool_id)}",
+                    keywords="map 编图 图层 符号 因子 导出",
+                    group="编图工具",
+                    applicability=_applicability,
+                    callback=lambda t=tool_id: (
+                        self.composite._on_command_requested(t)
+                    ),
+                )
+            )
 
     def _apply_stage_dock_recommendation(self, recommended: dict) -> None:
         """阶段 dock 建议（仅首次进入阶段时应用；建议而非强制，V5 §6/§7）。

@@ -410,9 +410,15 @@ class TaskCenter(QFrame):
         menu = QMenu(self)
         if handle.state in (TaskState.QUEUED, TaskState.RUNNING):
             action = menu.addAction("取消")
+            if handle.cancel_requested:
+                action.setEnabled(False)
+                action.setToolTip("正在等待任务协作取消（长计算步骤间检查取消点）")
             action.triggered.connect(lambda: scheduler.cancel(handle.task_id))
         if handle.state in (TaskState.FAILED, TaskState.CANCELLED):
             action = menu.addAction("重试")
+            # V7 §12：如实说明重试语义——重新提交相同 spec（闭包参数原样
+            # 重放，输入若已变化不会自动更新）。
+            action.setToolTip("用完全相同的参数重新提交该任务")
             action.triggered.connect(lambda: scheduler.submit(handle.spec))
         action = menu.addAction("复制任务 ID")
         action.triggered.connect(
