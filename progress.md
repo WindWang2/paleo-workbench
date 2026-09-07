@@ -45,3 +45,21 @@
 §16 fusion (unit check, CRS compare, variance persistence, sensitivity wired); §17 publish gate
 §18 QC model; §19 harness actions (15 missing; ActionResult.provenance)
 §20–21 perf+tests; §22 3 reviews; §23 docs 01-13; §24 submodule bumps+PR
+
+## Session 2026-09-08 (qgis-geolayer-cartography-v7)
+- Worktree .worktrees/qgis-geolayer-cartography-v7 off main db21f6cf; submodules pinned; venv cp312 + geoviz + build deps OK
+- 4 parallel deep audits complete → docs/development/qgis-geolayer-cartography-v7/audit-*.md + 00-baseline (defect register P0 1-4, P1 5-15, P2 16-19)
+- VENDOR BUILD (D1): conda env paleo-qgis-deps (qt6-main 6.11.2, qca-qt6, expat dev, gdal/geos/proj/spatialite/etc); qt6keychain v0.14.0 built from source; vendored QGIS CONFIGURE PASSED on Windows after 2 documented patches (version.rc.in restored, CheckFunctionExists include); build -j2 running in background (1.5-4h)
+- Baseline pytest rerun in background (first run lost summary to faulthandler dump, exit 0)
+- Commits: 9cc04645 (docs), d6f63fba (build patches)
+
+## Session 2026-09-08 (continued, qgis-geolayer-cartography-v7)
+- Commits: c1a40d9a P0 fixes, bf3784ae GeologicalLayerSpec V2, 5e4aefce §4 geometry
+  facade+dedup, 96a9a05e §5 scalar raster (py+c++), e825dcfe §8 presentation
+  (agent), bb40a61c §10-12 stage producers (agent; found+fixed 2 latent bugs:
+  contour overlay always failed, stage_save unpack crash), d2a5f0e1 §9 delta
+  publish + benchmarks (1000-layer noop 30ms)
+- Vendor build in progress: 959 core objs, qgis_native.dll linked; core/gui/analysis pending
+- Baseline rerun died at test_ui_adversarial_v5 theme-switch (passes standalone;
+  full-suite pollution or build contention) — rerun post-build
+- Native exts (grid_render_core etc.) built in worktree venv; grid_array getter added

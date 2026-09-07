@@ -43,3 +43,19 @@
 - Kriging: engine kriging.py has variance + LOO already; needs anisotropy, fit diagnostics surfaced, nugget/range settable; unify numpy fallback fitter
 - Harness: 15/17 scientific actions missing; ActionResult lacks provenance field
 - Pre-existing main failure: test_integrity_guard tautological assertions (5 sites)
+
+## qgis-geolayer-cartography-v7 key facts (session 2026-09-08)
+- All phases implemented+committed through f38e7c76+perf; 250+ new tests green
+- Vendor QGIS building at C:\Users\wangj.KEVIN\paleo-qgis-build\qgis-vendor
+  (conda deps env paleo-qgis-deps; qt6keychain built from source v0.14.0;
+  vendored patches documented in third_party/qgis/UPSTREAM.md)
+- Bridge runtime: PATH=vendor\output\bin + deps\Library\bin first;
+  QT_QPA_PLATFORM=offscreen; osgeo via deps env (cp312 ABI match) —
+  .scratch/run-bridge-tests.cmd has the wrapper; numpy shadowing risk if
+  PYTHONPATH=deps site-packages — copy osgeo pkg into venv instead if hit
+- Pending: build bridge ext (uv pip install -e native/qgis_render_bridge with
+  PALEO_WITH_QGIS_RENDERER=1 PALEO_QGIS_BUILD_DIR=vendor PALEO_QGIS_CMAKE_PREFIX=deps\Library
+  LIB=deps\Library\lib) → run tests/test_qgis_scalar_raster_v7.py + -m qgis suite →
+  docs 05/07 → 3 review rounds → baseline rerun → PR
+- Known env issues: full-suite theme-switch hang (passes standalone),
+  test_lod_render_path Windows crash (V6-era)
