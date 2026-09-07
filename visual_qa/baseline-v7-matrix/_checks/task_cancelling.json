@@ -1,0 +1,15 @@
+{
+  "state_ok": true,
+  "checks": [
+    {
+      "name": "task_cancel_pending",
+      "ok": true,
+      "detail": "1 tasks"
+    },
+    {
+      "name": "task_dock_visible",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

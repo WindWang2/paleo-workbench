@@ -82,3 +82,4 @@ user-history.db
 baseline_tests*.log
 .baseline-*.log
 .baseline-*.txt
+.v7-baseline-gen.log

@@ -1,0 +1,269 @@
+{
+  "generated_at": "2026-09-08 04:55:45",
+  "elapsed_s": 441.0,
+  "shot_count": 32,
+  "failures": [
+    "toolbar_overflow_narrow__light__comfortable__1366x768.png",
+    "toolbar_overflow_narrow__light__comfortable__1920x1080.png",
+    "toolbar_overflow_narrow__dark__comfortable__1366x768.png",
+    "toolbar_overflow_narrow__dark__comfortable__1920x1080.png"
+  ],
+  "shots": [
+    {
+      "name": "phase1_raw_blocked__light__comfortable__1366x768.png",
+      "state": "phase1_raw_blocked",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1366x768",
+      "ok": true
+    },
+    {
+      "name": "phase1_raw_blocked__light__comfortable__1920x1080.png",
+      "state": "phase1_raw_blocked",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "phase1_raw_blocked__dark__comfortable__1366x768.png",
+      "state": "phase1_raw_blocked",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1366x768",
+      "ok": true
+    },
+    {
+      "name": "phase1_raw_blocked__dark__comfortable__1920x1080.png",
+      "state": "phase1_raw_blocked",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "phase1_editing_session__light__comfortable__1366x768.png",
+      "state": "phase1_editing_session",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1366x768",
+      "ok": true
+    },
+    {
+      "name": "phase1_editing_session__light__comfortable__1920x1080.png",
+      "state": "phase1_editing_session",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "phase1_editing_session__dark__comfortable__1366x768.png",
+      "state": "phase1_editing_session",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1366x768",
+      "ok": true
+    },
+    {
+      "name": "phase1_editing_session__dark__comfortable__1920x1080.png",
+      "state": "phase1_editing_session",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "phase2_constraint_line__light__comfortable__1366x768.png",
+      "state": "phase2_constraint_line",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1366x768",
+      "ok": true
+    },
+    {
+      "name": "phase2_constraint_line__light__comfortable__1920x1080.png",
+      "state": "phase2_constraint_line",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "phase2_constraint_line__dark__comfortable__1366x768.png",
+      "state": "phase2_constraint_line",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1366x768",
+      "ok": true
+    },
+    {
+      "name": "phase2_constraint_line__dark__comfortable__1920x1080.png",
+      "state": "phase2_constraint_line",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "phase2_factor_raster__light__comfortable__1366x768.png",
+      "state": "phase2_factor_raster",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1366x768",
+      "ok": true
+    },
+    {
+      "name": "phase2_factor_raster__light__comfortable__1920x1080.png",
+      "state": "phase2_factor_raster",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "phase2_factor_raster__dark__comfortable__1366x768.png",
+      "state": "phase2_factor_raster",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1366x768",
+      "ok": true
+    },
+    {
+      "name": "phase2_factor_raster__dark__comfortable__1920x1080.png",
+      "state": "phase2_factor_raster",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "layer_tree_decorations__light__comfortable__1366x768.png",
+      "state": "layer_tree_decorations",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1366x768",
+      "ok": true
+    },
+    {
+      "name": "layer_tree_decorations__light__comfortable__1920x1080.png",
+      "state": "layer_tree_decorations",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "layer_tree_decorations__dark__comfortable__1366x768.png",
+      "state": "layer_tree_decorations",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1366x768",
+      "ok": true
+    },
+    {
+      "name": "layer_tree_decorations__dark__comfortable__1920x1080.png",
+      "state": "layer_tree_decorations",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "task_cancelling__light__comfortable__1366x768.png",
+      "state": "task_cancelling",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1366x768",
+      "ok": true
+    },
+    {
+      "name": "task_cancelling__light__comfortable__1920x1080.png",
+      "state": "task_cancelling",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "task_cancelling__dark__comfortable__1366x768.png",
+      "state": "task_cancelling",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1366x768",
+      "ok": true
+    },
+    {
+      "name": "task_cancelling__dark__comfortable__1920x1080.png",
+      "state": "task_cancelling",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "toolbar_overflow_narrow__light__comfortable__1366x768.png",
+      "state": "toolbar_overflow_narrow",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1366x768",
+      "ok": false
+    },
+    {
+      "name": "toolbar_overflow_narrow__light__comfortable__1920x1080.png",
+      "state": "toolbar_overflow_narrow",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": false
+    },
+    {
+      "name": "toolbar_overflow_narrow__dark__comfortable__1366x768.png",
+      "state": "toolbar_overflow_narrow",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1366x768",
+      "ok": false
+    },
+    {
+      "name": "toolbar_overflow_narrow__dark__comfortable__1920x1080.png",
+      "state": "toolbar_overflow_narrow",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": false
+    },
+    {
+      "name": "inspector_factor__light__comfortable__1366x768.png",
+      "state": "inspector_factor",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1366x768",
+      "ok": true
+    },
+    {
+      "name": "inspector_factor__light__comfortable__1920x1080.png",
+      "state": "inspector_factor",
+      "theme": "light",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    },
+    {
+      "name": "inspector_factor__dark__comfortable__1366x768.png",
+      "state": "inspector_factor",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1366x768",
+      "ok": true
+    },
+    {
+      "name": "inspector_factor__dark__comfortable__1920x1080.png",
+      "state": "inspector_factor",
+      "theme": "dark",
+      "density": "comfortable",
+      "size": "1920x1080",
+      "ok": true
+    }
+  ]
+}

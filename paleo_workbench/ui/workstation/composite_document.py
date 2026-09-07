@@ -2711,6 +2711,7 @@ class CompositeDocument(QWidget):
                 continue
             if count:
                 self._overflow_menu.addSeparator()
+            last = getattr(self, "_last_availability", None) or {}
             for tool_id, label in entries:
                 action = self.action_controller.actions.get(tool_id)
                 if action is None:
@@ -2718,9 +2719,13 @@ class CompositeDocument(QWidget):
                 entry = self._overflow_menu.addAction(
                     action.icon(), label, action.trigger
                 )
-                entry.setEnabled(action.isEnabled())
-                if not action.isEnabled():
-                    entry.setToolTip(action.toolTip())
+                # Qt 会把工具条上隐藏的 QAction 自动置 disabled——菜单
+                # 条目的使能必须取自统一求值结果，而不是 action.isEnabled()
+                avail = last.get(tool_id)
+                entry.setEnabled(True if avail is None else avail.enabled)
+                if avail is not None and not avail.enabled:
+                    reason = avail.reason or "当前不可用"
+                    entry.setToolTip(f"{label}（{reason}）")
                 count += 1
         self._overflow_button.setVisible(count > 0)
         self._overflow_button.setEnabled(count > 0)

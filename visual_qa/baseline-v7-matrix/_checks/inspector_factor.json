@@ -1,0 +1,10 @@
+{
+  "state_ok": true,
+  "checks": [
+    {
+      "name": "inspector_shows_factor_section",
+      "ok": true,
+      "detail": "检查器 · 单因素等值线"
+    }
+  ]
+}
