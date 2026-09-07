@@ -141,6 +141,16 @@ PYBIND11_MODULE(grid_render_core, m) {
                                &pwb::grid_render::ScalarGridLayer::style_revision)
         .def_property_readonly("rasterize_count",
                                &pwb::grid_render::ScalarGridLayer::rasterize_count)
+        .def("grid_array",
+             [](pwb::grid_render::ScalarGridLayer& layer) {
+                 // v7 §5: raw float32 values for the QGIS scalar data
+                 // mirror; NaN carries the nodata convention.
+                 return py::array_t<float>(
+                     {layer.height(), layer.width()},
+                     layer.grid_z().data());
+             },
+             "Read-only copy of the scalar grid as an (h, w) float32 array "
+             "(NaN = nodata).")
         .def("set_grid", [](pwb::grid_render::ScalarGridLayer& layer, FloatArray grid_z) {
             int width = 0;
             int height = 0;

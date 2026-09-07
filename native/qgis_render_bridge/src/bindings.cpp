@@ -1,4 +1,6 @@
 #include "qgis_render_bridge.hpp"
+#include <QDomDocument>
+#include <QDomElement>
 
 // pybind11 (and therefore Python.h) must be included BEFORE any Qt/QGIS
 // header: Qt redefines `slots`, which corrupts PyType_Spec in object.h.
@@ -55,6 +57,12 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
         if (data.contains("kind") && py::cast<std::string>(data["kind"]) == "raster") {
             layer.kind = VectorLayerSpec::Kind::Raster;
             layer.source_path = py::cast<std::string>(data["source_path"]);
+            // v7 §5: authoritative scalar renderer payload (single-band
+            // pseudocolor).  Parsed and validated up front so a bad payload
+            // fails the snapshot before any mirror mutates.
+            if (data.contains("raster_renderer_xml")) {
+                layer.raster_renderer_xml = py::cast<std::string>(data["raster_renderer_xml"]);
+            }
         }
         if (data.contains("style")) {
             const py::dict style = as_dict(data["style"], "layer style");
@@ -426,6 +434,51 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                py::arg("style"), py::arg("geometry_type"),
                "Build a QGIS renderer XML payload from a legacy VectorStyle dict.");
 
+    module.def("build_scalar_renderer_xml",
+               [](const std::string& spec_json) {
+                   return pwb::qgis_render::build_scalar_renderer_xml(spec_json);
+               },
+               py::arg("spec_json"),
+               "v7: build a QGIS single-band pseudocolor renderer XML from a "
+               "scalar style JSON (ramp items + min/max + mode). Authored by "
+               "QGIS's own serializer; classification is host-side.");
+
+    module.def("raster_renderer_info",
+               [](const std::string& renderer_xml) -> py::object {
+                   QDomDocument doc;
+                   if (!doc.setContent(QString::fromStdString(renderer_xml), true)) {
+                       return py::none();
+                   }
+                   QDomElement elem = doc.documentElement();
+                   if (elem.tagName() != QStringLiteral("rasterrenderer")) {
+                       elem = doc.firstChildElement(QStringLiteral("rasterrenderer"));
+                   }
+                   if (elem.isNull()) return py::none();
+                   py::dict info;
+                   info["type"] = elem.attribute(QStringLiteral("type")).toStdString();
+                   bool ok = false;
+                   const int items = elem.attribute(
+                       QStringLiteral("colorrampshader")).toInt(&ok);
+                   if (!ok) {
+                       // count <item> children as fallback
+                       int count = 0;
+                       for (QDomElement child = elem.firstChildElement(
+                                QStringLiteral("item"));
+                            !child.isNull();
+                            child = child.nextSiblingElement(
+                                QStringLiteral("item"))) {
+                           ++count;
+                       }
+                       info["item_count"] = count;
+                   } else {
+                       info["item_count"] = items;
+                   }
+                   return std::move(info);
+               },
+               py::arg("renderer_xml"),
+               "v7: inspect a raster renderer XML payload {type, item_count} "
+               "or None when invalid.");
+
     module.def("renderer_info", &renderer_info, py::arg("renderer_xml"),
                "Describe a serialized renderer payload (type, symbol_count).");
 
@@ -640,6 +693,15 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
              py::arg("legacy_style") = py::none(), py::arg("visible") = true, py::arg("opacity") = 1.0,
              py::arg("is_reference") = false, py::arg("is_editable") = false,
              py::arg("reference_snap") = false)
+        .def("upsert_raster_mirror_layer",
+             &pwb::qgis_render::QgisMapStack::upsertRasterMirrorLayer,
+             py::arg("doc_id"), py::arg("name"), py::arg("source_path"),
+             py::arg("crs_auth_id") = "", py::arg("renderer_xml") = "",
+             py::arg("visible") = true, py::arg("opacity") = 1.0,
+             py::arg("is_reference") = false,
+             "v7: upsert a scalar raster mirror (float GeoTIFF + optional "
+             "pseudocolor renderer XML); style-only changes reapply the "
+             "renderer without touching the raster source.")
         .def("remove_mirror_layers_except", &pwb::qgis_render::QgisMapStack::removeMirrorLayersExcept)
         .def("set_mirror_layer_order", &pwb::qgis_render::QgisMapStack::setMirrorLayerOrder)
         .def("set_mirror_layer_visibility", &pwb::qgis_render::QgisMapStack::setMirrorLayerVisibility)

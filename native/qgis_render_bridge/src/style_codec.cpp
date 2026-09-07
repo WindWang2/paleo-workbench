@@ -378,4 +378,138 @@ void apply_label_style(QgsVectorLayer& layer, const VectorLayerSpec& spec) {
     layer.setLabelsEnabled(true);
 }
 
+// ---------------------------------------------------------------------------
+// Raster renderer codec (v7 §5)
+
+#include <QDomElement>
+
+#include <nlohmann/json.hpp>
+
+#include <qgsapplication.h>
+#include <qgscolorrampshader.h>
+#include <qgsrasterinterface.h>
+#include <qgsrasterlayer.h>
+#include <qgsrasterrenderer.h>
+#include <qgsrasterrendererregistry.h>
+#include <qgsrastershader.h>
+#include <qgssinglebandpseudocolorrenderer.h>
+
+namespace {
+
+/// Parse the payload into a rasterrenderer element; null element = invalid.
+QDomElement raster_renderer_element(const std::string& xml) {
+    QDomDocument doc;
+    if (!doc.setContent(QString::fromStdString(xml), true)) return {};
+    QDomElement elem = doc.documentElement();
+    if (elem.tagName() != QStringLiteral("rasterrenderer")) {
+        elem = doc.firstChildElement(QStringLiteral("rasterrenderer"));
+    }
+    if (elem.isNull() || elem.tagName() != QStringLiteral("rasterrenderer")) {
+        return {};
+    }
+    return elem;
+}
+
+}  // namespace
+
+namespace pwb::qgis_render {
+
+std::string build_scalar_renderer_xml(const std::string& spec_json) {
+    nlohmann::json payload = nlohmann::json::parse(
+        spec_json, nullptr, /*allow_exceptions=*/true,
+        /*ignore_comments=*/true);
+    if (!payload.is_object()) {
+        throw std::runtime_error("scalar renderer spec must be a JSON object");
+    }
+    const double vmin = payload.value("min", 0.0);
+    double vmax = payload.value("max", 1.0);
+    if (!(vmax > vmin)) vmax = vmin + 1.0;
+    const std::string mode = payload.value("mode", std::string("continuous"));
+    const auto items = payload.find("items");
+    if (items == payload.end() || !items->is_array() || items->empty()) {
+        throw std::runtime_error("scalar renderer spec needs a non-empty items list");
+    }
+    auto shader = std::make_unique<QgsColorRampShader>(vmin, vmax);
+    shader->setColorRampType(mode == "classified"
+                                  ? Qgis::ShaderInterpolationMethod::Discrete
+                                  : Qgis::ShaderInterpolationMethod::Linear);
+    QList<QgsColorRampShader::ColorRampItem> ramp_items;
+    ramp_items.reserve(static_cast<int>(items->size()));
+    for (const auto& item : *items) {
+        if (!item.is_object()) {
+            throw std::runtime_error("scalar renderer item must be an object");
+        }
+        const double value = item.value("value", 0.0);
+        const std::string color = item.value("color", std::string("#000000"));
+        const std::string label = item.value("label", std::string());
+        ramp_items.append(QgsColorRampShader::ColorRampItem(
+            value, QColor(QString::fromStdString(color)),
+            QString::fromStdString(label)));
+    }
+    std::sort(ramp_items.begin(), ramp_items.end(),
+              [](const QgsColorRampShader::ColorRampItem& a,
+                 const QgsColorRampShader::ColorRampItem& b) {
+                  return a.value < b.value;
+              });
+    shader->setColorRampItemList(ramp_items);
+
+    auto raster_shader = std::make_unique<QgsRasterShader>();
+    raster_shader->setRasterShaderFunction(shader.release());
+    // No live provider here: the XML is the deliverable.  Applying it to a
+    // layer re-binds the provider as the renderer input (setRenderer/pipe).
+    auto renderer = std::make_unique<QgsSingleBandPseudoColorRenderer>(
+        /*input=*/nullptr, /*band=*/1, raster_shader.release());
+
+    QDomDocument doc;
+    QDomElement wrapper = doc.createElement(QStringLiteral("pwbwrapper"));
+    doc.appendChild(wrapper);
+    renderer->writeXml(doc, wrapper);
+    QDomElement raster_elem = wrapper.firstChildElement(
+        QStringLiteral("rasterrenderer"));
+    if (raster_elem.isNull()) {
+        throw std::runtime_error("QGIS raster renderer serialization failed");
+    }
+    QDomDocument out;
+    out.appendChild(out.importNode(raster_elem, /*deep=*/true).toElement());
+    return out.toString(-1).toStdString();
+}
+
+std::unique_ptr<QgsRasterRenderer> raster_renderer_from_xml(
+    const std::string& xml, QgsRasterInterface* input) {
+    QDomElement elem = raster_renderer_element(xml);
+    if (elem.isNull()) return nullptr;
+    const QString renderer_type = elem.attribute(QStringLiteral("type"));
+    QgsRasterRendererRegistryEntry entry;
+    if (QgsApplication::rasterRendererRegistry()->rendererData(
+            renderer_type, entry)
+        && entry.rendererCreateFunction) {
+        return std::unique_ptr<QgsRasterRenderer>(
+            entry.rendererCreateFunction(elem, input));
+    }
+    // Registry miss (exotic type): singlebandpseudocolor is this codec's own
+    // format, so attempting it directly stays within known semantics.
+    if (renderer_type == QStringLiteral("singlebandpseudocolor")) {
+        return std::unique_ptr<QgsRasterRenderer>(
+            QgsSingleBandPseudoColorRenderer::create(elem, input));
+    }
+    return nullptr;
+}
+
+bool apply_raster_renderer_xml(QgsRasterLayer& layer, const std::string& xml) {
+    if (xml.empty()) return true;  // nothing to apply, not an error
+    auto renderer = raster_renderer_from_xml(xml, layer.dataProvider());
+    if (!renderer) return false;
+    layer.setRenderer(renderer.release());
+    layer.setCacheImage(nullptr);
+    layer.repaint();
+    return true;
+}
+
+void validate_raster_renderer_xml(const std::string& xml) {
+    QDomElement elem = raster_renderer_element(xml);
+    if (elem.isNull()) {
+        throw std::runtime_error("invalid raster renderer XML payload");
+    }
+}
+
 }  // namespace pwb::qgis_render

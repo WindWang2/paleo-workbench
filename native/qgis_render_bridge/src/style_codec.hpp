@@ -16,6 +16,8 @@
 #include <qstring.h>
 
 class QgsFeatureRenderer;
+class QgsRasterLayer;
+class QgsRasterRenderer;
 class QgsVectorLayer;
 
 namespace pwb::qgis_render {
@@ -51,5 +53,36 @@ std::unique_ptr<QgsVectorLayer> make_dialog_layer(
 void validate_style_payloads(const VectorLayerSpec& spec);
 void apply_renderer_style(QgsVectorLayer& layer, const VectorLayerSpec& spec);
 void apply_label_style(QgsVectorLayer& layer, const VectorLayerSpec& spec);
+
+// ---------------------------------------------------------------------------
+// Raster renderer codec (v7 §5): scalar factor surfaces.
+//
+// The host computes classification (equal interval / quantile / natural
+// breaks / explicit) and ramp items; THIS codec builds the actual QGIS
+// objects (QgsSingleBandPseudoColorRenderer + QgsColorRampShader) and
+// serializes them through QGIS's own writer so the persisted XML always
+// matches the vendored QGIS version — never hand-rolled markup.
+
+/// Build a single-band pseudocolor renderer XML from the scalar style JSON:
+/// {"ramp_name","mode":"continuous|classified","items":[{"value","color",
+/// "label"}...],"min","max","opacity","nodata_transparent","unit_label",
+/// "colorbar_title","crs","labels":[...]}.  Throws std::runtime_error on a
+/// malformed payload or empty item list.
+std::string build_scalar_renderer_xml(const std::string& spec_json);
+
+/// Parse a raster renderer XML payload (as produced by
+/// build_scalar_renderer_xml or QgsProject saves).  Returns nullptr when the
+/// payload is not a valid raster renderer element.
+std::unique_ptr<QgsRasterRenderer> raster_renderer_from_xml(
+    const std::string& xml, class QgsRasterInterface* input);
+
+/// Apply a raster renderer XML payload to a live raster layer.  Returns
+/// false (without mutating the layer) when the payload does not parse.
+bool apply_raster_renderer_xml(QgsRasterLayer& layer, const std::string& xml);
+
+/// Validate a raster renderer XML payload without a live layer (up-front
+/// snapshot validation, mirroring validate_style_payloads for vectors).
+/// Throws std::runtime_error when the payload does not parse.
+void validate_raster_renderer_xml(const std::string& xml);
 
 }  // namespace pwb::qgis_render

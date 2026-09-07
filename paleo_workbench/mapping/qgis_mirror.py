@@ -7,6 +7,32 @@ _GEOMETRY_TYPE = {"Point": "Point", "MultiPoint": "Point",
                   "LineString": "LineString", "MultiLineString": "LineString",
                   "Polygon": "Polygon", "MultiPolygon": "Polygon"}
 
+# v7 §5: process-level scalar data mirror shared by every canvas publish
+# (both the authoring shim and the display canvas mirror the same science).
+_SCALAR_DATA_CACHE = None
+
+
+def _scalar_data_cache():
+    global _SCALAR_DATA_CACHE
+    if _SCALAR_DATA_CACHE is not None:
+        return _SCALAR_DATA_CACHE
+    from paleo_workbench.mapping.scalar_style import scalar_style_pipeline_ready
+
+    if not scalar_style_pipeline_ready()["ready"]:
+        return None
+    from paleo_workbench.mapping.scalar_data_mirror import ScalarDataMirror
+
+    _SCALAR_DATA_CACHE = ScalarDataMirror()
+    return _SCALAR_DATA_CACHE
+
+
+def release_scalar_data_cache() -> None:
+    """Drop stale scalar data mirrors (called on host teardown)."""
+    global _SCALAR_DATA_CACHE
+    if _SCALAR_DATA_CACHE is not None:
+        _SCALAR_DATA_CACHE.clear()
+        _SCALAR_DATA_CACHE = None
+
 
 def mirror_snapshot_to_stack(
     stack, canvas_address, snapshot, diags=None, *, groups: bool = False
@@ -19,6 +45,12 @@ def mirror_snapshot_to_stack(
     swallowed — a dropped layer or a failed remove/order/refresh previously
     left the mirror silently diverging from the document while
     ``backend_status_changed`` still reported a healthy backend.
+
+    v7 §5: raster layers (scalar factor grids via the float-GeoTIFF data
+    mirror + pseudocolor renderer XML, and raster_source file layers) are
+    mirrored with ``upsert_raster_mirror_layer``.  When the scalar data
+    pipeline is unavailable the layer is skipped and reported as a failure —
+    never silently dropped, never substituted with wrong pixels.
 
     V5 ``groups=True``（分层编图工作区）：跳过 root 平铺顺序推送——组结构、
     图层放置与组可见性由 ``LayerGroupController`` 经 group API 增量
@@ -37,7 +69,43 @@ def mirror_snapshot_to_stack(
             failures.append(f"crs {snapshot.project_crs}: {exc}")
     seen: list[str] = []
     mirrored_qgis_ids: list[str] = []
+    data_cache = _scalar_data_cache()
     for layer in snapshot.layers:
+        if layer.layer_type in ("scalar_grid", "raster_source"):
+            try:
+                from paleo_workbench.mapping.scalar_publish import (
+                    build_scalar_qgis_payload,
+                    raster_source_qgis_payload,
+                )
+
+                if layer.layer_type == "scalar_grid":
+                    payload = None
+                    if data_cache is not None:
+                        payload = build_scalar_qgis_payload(layer, data_cache)
+                    if payload is None:
+                        failures.append(
+                            f"layer {layer.id}: scalar raster mirror "
+                            "unavailable (bridge/gdal); layer not mirrored")
+                        _sink(layer.id, "scalar data pipeline unavailable")
+                        continue
+                else:
+                    payload = raster_source_qgis_payload(layer)
+                    if payload is None:
+                        continue  # empty payload: nothing to mirror
+                qgis_id = stack.upsert_raster_mirror_layer(
+                    layer.id, layer.name or layer.id,
+                    payload["source_path"],
+                    layer.crs or snapshot.project_crs,
+                    payload["renderer_xml"],
+                    bool(layer.visible), float(layer.opacity),
+                )
+            except Exception as exc:
+                failures.append(f"layer {layer.id}: {exc}")
+                _sink(layer.id, str(exc))
+                continue
+            seen.append(layer.id)
+            mirrored_qgis_ids.append(qgis_id)
+            continue
         if layer.layer_type != "vector":
             continue
         features = []
@@ -111,6 +179,11 @@ def mirror_snapshot_to_stack(
             continue
         seen.append(layer.id)
         mirrored_qgis_ids.append(qgis_id)
+    if _SCALAR_DATA_CACHE is not None:
+        _SCALAR_DATA_CACHE.retain_layer_ids({
+            layer.id for layer in snapshot.layers
+            if layer.layer_type == "scalar_grid"})
+        _SCALAR_DATA_CACHE.release_stale()
     try:
         stack.remove_mirror_layers_except(seen)
     except Exception as exc:

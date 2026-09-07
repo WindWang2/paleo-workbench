@@ -207,6 +207,20 @@ public:
                                 bool is_editable = false,
                                 // 参考图层「参与捕捉」勾选态投影（Python 权威），菜单读取。
                                 bool reference_snap = false);
+  /// v7 §5: raster mirror upsert (single-band scalar GeoTIFF + optional
+  /// pseudocolor renderer XML).  Same doc-keyed contract as the vector
+  /// mirror: reuse by doc_id, rebuild on source change, style-only change
+  /// reapplies the renderer without touching the raster source.  The CRS
+  /// comes from the GeoTIFF itself (crs_auth_id is advisory metadata for
+  /// the host and may be empty).
+  std::string upsertRasterMirrorLayer(const std::string& doc_id,
+                                      const std::string& name,
+                                      const std::string& source_path,
+                                      const std::string& crs_auth_id,
+                                      const std::string& renderer_xml,
+                                      bool visible,
+                                      double opacity,
+                                      bool is_reference = false);
   void removeMirrorLayersExcept(const std::vector<std::string>& doc_ids);
   void setMirrorLayerOrder(const std::vector<std::string>& doc_ids_top_first);
   void setMirrorLayerVisibility(const std::string& doc_id, bool visible);

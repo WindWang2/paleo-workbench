@@ -1733,6 +1733,7 @@ class QgisMapRenderBackend(MapRenderBackend):
         # request_render must deliver it or the first async frame is blank.
         self._native_snapshot_pending = False
         self._scalar_raster_cache = None
+        self._scalar_data_cache = None
         # Geometry payload is keyed to the host's data revision.  Style and
         # visibility changes can reuse it without re-walking every feature/WKT.
         self._vector_feature_payloads: dict[
@@ -1803,9 +1804,25 @@ class QgisMapRenderBackend(MapRenderBackend):
                 from paleo_workbench.mapping.scalar_raster_mirror import ScalarRasterMirrorCache
 
                 self._scalar_raster_cache = ScalarRasterMirrorCache()
+            if self._scalar_data_cache is None and any(
+                    layer.layer_type == "scalar_grid" for layer in snapshot.layers):
+                from paleo_workbench.mapping.scalar_data_mirror import (
+                    scalar_data_mirror_ready,
+                )
+
+                # The DATA path additionally needs the bridge (renderer XML
+                # is authored by QGIS itself); without it the RGBA mirror
+                # below remains the honest fallback.
+                if scalar_data_mirror_ready()["gdal"]:
+                    from paleo_workbench.mapping.scalar_data_mirror import (
+                        ScalarDataMirror,
+                    )
+
+                    self._scalar_data_cache = ScalarDataMirror()
         encoded = _qgis_snapshot(
             snapshot,
             scalar_raster_cache=self._scalar_raster_cache,
+            scalar_data_cache=self._scalar_data_cache,
             vector_feature_payloads=self._vector_feature_payloads,
             vector_feature_entries=self._vector_feature_entries,
             encoding_stats=self,
@@ -1833,6 +1850,10 @@ class QgisMapRenderBackend(MapRenderBackend):
             if layer_id in active_vector_ids
         }
         if self._scalar_raster_cache is not None:
+            if self._scalar_data_cache is not None:
+                self._scalar_data_cache.retain_layer_ids(
+                    {layer.id for layer in snapshot.layers
+                     if layer.layer_type == "scalar_grid"})
             self._scalar_raster_cache.retain_layer_ids(
                 {layer.id for layer in snapshot.layers if layer.layer_type == "scalar_grid"}
             )
@@ -1860,6 +1881,8 @@ class QgisMapRenderBackend(MapRenderBackend):
         # It is only safe to unlink deferred /vsimem or disk sources once the bridge
         # has no active job and has applied the replacement snapshot.
         if self._scalar_raster_cache is not None and not self._bridge.render_active:
+            if self._scalar_data_cache is not None:
+                self._scalar_data_cache.release_stale()
             self._scalar_raster_cache.release_stale()
 
     def _reship_full_snapshot(self, snapshot: MapRenderSnapshot) -> None:
@@ -1936,6 +1959,8 @@ class QgisMapRenderBackend(MapRenderBackend):
             self.request_render()
             return None
         if self._scalar_raster_cache is not None and not self._bridge.render_active:
+            if self._scalar_data_cache is not None:
+                self._scalar_data_cache.release_stale()
             self._scalar_raster_cache.release_stale()
         if payload is None:
             return None
@@ -2014,6 +2039,8 @@ class QgisMapRenderBackend(MapRenderBackend):
             self._bridge.shutdown()
             self._bridge = None
         if self._scalar_raster_cache is not None:
+            if self._scalar_data_cache is not None:
+                self._scalar_data_cache.clear()
             self._scalar_raster_cache.clear()
             self._scalar_raster_cache = None
         self._vector_feature_payloads.clear()
@@ -2025,6 +2052,7 @@ def _qgis_snapshot(
     snapshot: MapRenderSnapshot,
     *,
     scalar_raster_cache=None,
+    scalar_data_cache=None,
     vector_feature_payloads: dict[str, tuple[int, tuple[dict[str, object], ...]]] | None = None,
     vector_feature_entries: dict[str, dict[str, tuple[object, object, dict[str, object]]]] | None = None,
     encoding_stats: object | None = None,
@@ -2042,6 +2070,37 @@ def _qgis_snapshot(
     layers: list[dict[str, object]] = []
     for layer in snapshot.layers:
         if layer.layer_type == "scalar_grid":
+            # v7 §5: scalar DATA path (float GeoTIFF + pseudocolor renderer
+            # authored by QGIS) when the pipeline is ready; RGBA mirror
+            # otherwise (explicit fallback, disclosed via probe).
+            scalar_payload = None
+            if scalar_data_cache is not None:
+                from paleo_workbench.mapping.scalar_publish import (
+                    build_scalar_qgis_payload,
+                )
+
+                try:
+                    scalar_payload = build_scalar_qgis_payload(
+                        layer, scalar_data_cache)
+                except (RuntimeError, ValueError):
+                    scalar_payload = None
+            if scalar_payload is not None:
+                layers.append(
+                    {
+                        "id": layer.id,
+                        "name": layer.name,
+                        "crs": layer.crs or snapshot.project_crs,
+                        "kind": "raster",
+                        "source_path": scalar_payload["source_path"],
+                        "raster_renderer_xml": scalar_payload["renderer_xml"],
+                        "data_revision": int(layer.data_revision),
+                        "style_revision": int(layer.style_revision),
+                        "visible": bool(layer.visible),
+                        "opacity": float(layer.opacity),
+                        "features": [],
+                    }
+                )
+                continue
             if scalar_raster_cache is None:
                 raise RuntimeError("QGIS scalar-grid rendering requires a raster mirror cache")
             layers.append(

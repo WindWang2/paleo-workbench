@@ -305,6 +305,13 @@ class QgisRenderBridge::Impl {
                 && existing->second.style_revision != spec.style_revision) {
                 validate_style_payloads(spec);
             }
+            // v7 §5: raster renderer payloads validate up front too, so a
+            // malformed scalar style cannot half-apply to live mirrors.
+            if (spec.kind == VectorLayerSpec::Kind::Raster
+                && !spec.raster_renderer_xml.empty()
+                && existing->second.style_revision != spec.style_revision) {
+                validate_raster_renderer_xml(spec.raster_renderer_xml);
+            }
         }
         // #932: feature deltas mutate live mirrors; validate every delta's
         // base revision BEFORE any mutation so a stale snapshot throws with
@@ -339,11 +346,9 @@ class QgisRenderBridge::Impl {
             const bool revision_changed = existing == mirrors.end()
                 || existing->second.data_revision != spec.data_revision;
             const bool rebuild = (revision_changed && !delta_applies)
-                // Vector style can be reapplied to its existing memory layer;
-                // retain the former conservative behavior for raster styles.
-                || (spec.kind == VectorLayerSpec::Kind::Raster
-                    && existing != mirrors.end()
-                    && existing->second.style_revision != spec.style_revision)
+                // v7 §5: a raster style-only change reapplies the renderer
+                // on the live mirror — the GeoTIFF source is untouched
+                // (styling never rewrites scientific values).
                 || (existing != mirrors.end() && existing->second.kind != spec.kind)
                 || (existing != mirrors.end()
                     && existing->second.source_path != spec.source_path);
@@ -368,6 +373,19 @@ class QgisRenderBridge::Impl {
                     apply_label_style(*vector_layer, spec);
                     diagnostics.style_reapplies += 1;
                 }
+                if (spec.kind == VectorLayerSpec::Kind::Raster
+                    && mirror.style_revision != spec.style_revision
+                    && !spec.raster_renderer_xml.empty()) {
+                    auto* raster_layer = dynamic_cast<QgsRasterLayer*>(mirror.layer.get());
+                    if (raster_layer == nullptr) {
+                        throw std::runtime_error("QGIS raster mirror has an unexpected layer type");
+                    }
+                    if (!apply_raster_renderer_xml(*raster_layer, spec.raster_renderer_xml)) {
+                        throw std::runtime_error(
+                            "QGIS could not apply the raster renderer for layer " + spec.id);
+                    }
+                    diagnostics.style_reapplies += 1;
+                }
                 mirror.data_revision = spec.data_revision;
                 mirror.style_revision = spec.style_revision;
                 mirror.kind = spec.kind;
@@ -387,6 +405,17 @@ class QgisRenderBridge::Impl {
                     );
                     if (!mirror.layer->isValid()) {
                         throw std::runtime_error("QGIS could not open raster layer " + spec.id);
+                    }
+                    if (!spec.raster_renderer_xml.empty()) {
+                        auto* raster_layer =
+                            dynamic_cast<QgsRasterLayer*>(mirror.layer.get());
+                        if (raster_layer == nullptr
+                            || !apply_raster_renderer_xml(
+                                *raster_layer, spec.raster_renderer_xml)) {
+                            throw std::runtime_error(
+                                "QGIS could not apply the raster renderer for layer "
+                                + spec.id);
+                        }
                     }
                 } else {
                     const QString geometry_uri = geometry_uri_for(spec);
