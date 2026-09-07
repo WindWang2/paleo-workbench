@@ -1513,7 +1513,11 @@ bool QgisMapStack::applyMirrorFeatureDelta(QgsVectorLayer& layer,
   } else {
     // count mismatch (OGR dropped a malformed feature): drop the whole
     // table — numeric fid fallback beats a shifted mapping (M1 discipline).
+    // v7 R2-F6: also drop the recorded revision so the next publish takes
+    // the full path; otherwise later deltas would resolve zero deletes and
+    // re-add — accumulating duplicates until a coincidental full ship.
     table.clear();
+    impl_->mirror_data_revisions.erase(doc_id);
   }
   layer.updateExtents();
   impl_->mirror_data_revisions[doc_id] = new_revision;

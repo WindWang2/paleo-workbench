@@ -17,7 +17,9 @@ What is deliberately host/shapely here (recorded in
 * point-in-polygon — host ray-cast (:mod:`geometry_planar`), the single
   shared implementation replacing three in-repo duplicates;
 * area/length — CRS-unit-honest scientific measurements (V6 §15);
-* nearest feature — scipy cKDTree (kNN authority);
+* nearest feature — host brute force on first coordinates (the IDW
+  kNN authority stays scipy cKDTree inside the interpolator, but this
+  facade entry is deliberately linear);
 * topology checks — TopologyService (shapely explain_validity);
 * CRS transform — pyproj reproject_xy (existing transformation authority);
 * polygonize / line_merge — shapely (bridge does not expose them yet).
@@ -318,7 +320,8 @@ def smooth(geometry: dict, iterations: int = 1, offset: float = 0.25) -> Geometr
         smoothed = chaikin_smooth([list(pt) for pt in smoothed])
     out = dict(geometry)
     out["coordinates"] = [smoothed] if closed else smoothed
-    return GeometryResult(out, ENGINE_SHAPELY)
+    # host Chaikin (R2-F1): disclosed as host, not shapely
+    return GeometryResult(out, ENGINE_HOST)
 
 
 def densify(geometry: dict, interval: float) -> GeometryResult:

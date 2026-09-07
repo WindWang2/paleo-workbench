@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import json
 
+# Polygon layers mirror as MultiPolygon so single/multi features share one
+# WKB type on the memory provider (matches qgis_layer_schema's
+# qgis_geometry_type_name; R2-F3).
 _GEOMETRY_TYPE = {"Point": "Point", "MultiPoint": "Point",
                   "LineString": "LineString", "MultiLineString": "LineString",
-                  "Polygon": "Polygon", "MultiPolygon": "Polygon"}
+                  "Polygon": "MultiPolygon", "MultiPolygon": "MultiPolygon"}
 
 # v7 §5: process-level scalar data mirror shared by every canvas publish
 # (both the authoring shim and the display canvas mirror the same science).
@@ -24,6 +27,25 @@ def _scalar_data_cache():
 
     _SCALAR_DATA_CACHE = ScalarDataMirror()
     return _SCALAR_DATA_CACHE
+
+
+def _fields_json_for_metadata(metadata: dict) -> str:
+    """fields_json from the layer's recorded role (spec authority)."""
+    role = str((metadata or {}).get("role") or "")
+    if not role:
+        return ""
+    try:
+        from paleo_workbench.mapping.qgis_layer_schema import (
+            fields_json_for_spec,
+        )
+        from paleo_workbench.mapping_workspace.geological_layer_spec import (
+            spec_for_role,
+        )
+
+        return json.dumps(
+            fields_json_for_spec(spec_for_role(role)), ensure_ascii=False)
+    except (KeyError, ValueError):
+        return ""  # unknown role: legacy path, honestly un-schematized
 
 
 def release_scalar_data_cache() -> None:
@@ -193,6 +215,10 @@ def mirror_snapshot_to_stack(
                 style_raw = dict(style_raw)
             except Exception:
                 style_raw = {}
+        # v7 R2-F4: spec-authored field schema (fields_json) reaches the
+        # mirror when the layer declares its role; absent roles keep the
+        # legacy property-only path (honest, no fake enforcement).
+        fields_json = _fields_json_for_metadata(metadata)
         qgis_style = style_raw.get("qgis_style") if isinstance(style_raw, dict) else None
         has_qgis_renderer = False
         has_qgis_labeling = False
@@ -215,9 +241,17 @@ def mirror_snapshot_to_stack(
             if legacy_style is not None and not legacy_style:
                 legacy_style = None
         # v7 §9: consult the publish ledger — ship only what changed.
+        # Duck-typed layers (SimpleNamespace, legacy producers) may not
+        # carry revisions: 0 = unknown, ledger disabled, delta channel off.
         style_sig = _style_signature(renderer_xml, labeling_xml, legacy_style)
         entry = _MIRROR_LEDGER.get(layer.id)
-        layer_revision = int(layer.data_revision)
+        try:
+            layer_revision = int(getattr(layer, "data_revision", 0) or 0)
+        except (TypeError, ValueError):
+            layer_revision = 0
+        ledger_active = layer_revision != 0
+        if not ledger_active:
+            entry = None
         unchanged = (
             entry is not None
             and entry.data_revision == layer_revision
@@ -258,8 +292,49 @@ def mirror_snapshot_to_stack(
                     })
         full_collection = json.dumps(
             {"type": "FeatureCollection", "features": features})
+        upsert_kwargs = {
+            "is_reference": metadata.get("reference") == "true",
+            "is_editable": metadata.get("editable") == "true",
+            "reference_snap": metadata.get("snap") == "true",
+            "data_revision": layer_revision,
+        }
+        if delta_json:
+            upsert_kwargs["delta"] = delta_json
+        if fields_json:
+            upsert_kwargs["fields_json"] = fields_json
         try:
-            if delta_json:
+            try:
+                qgis_id = stack.upsert_mirror_layer(
+                    layer.id, layer.name or layer.id, geom,
+                    layer.crs or snapshot.project_crs,
+                    full_collection,
+                    renderer_xml, labeling_xml, legacy_style,
+                    bool(layer.visible), float(layer.opacity),
+                    **upsert_kwargs,
+                )
+            except TypeError:
+                # older bridge (no delta channel / no fields_json) — retry
+                # with only the kwargs the legacy signature accepts.
+                delta_json = ""
+                for drop in ("delta", "fields_json", "data_revision"):
+                    upsert_kwargs.pop(drop, None)
+                qgis_id = stack.upsert_mirror_layer(
+                    layer.id, layer.name or layer.id, geom,
+                    layer.crs or snapshot.project_crs,
+                    full_collection,
+                    renderer_xml, labeling_xml, legacy_style,
+                    bool(layer.visible), float(layer.opacity),
+                    **upsert_kwargs,
+                )
+
+                no_delta_kwargs = {
+                    "is_reference": metadata.get("reference") == "true",
+                    "is_editable": metadata.get("editable") == "true",
+                    "reference_snap": metadata.get("snap") == "true",
+                    "data_revision": layer_revision,
+                }
+                if fields_json:
+                    no_delta_kwargs["fields_json"] = fields_json
                 try:
                     qgis_id = stack.upsert_mirror_layer(
                         layer.id, layer.name or layer.id, geom,
@@ -267,37 +342,19 @@ def mirror_snapshot_to_stack(
                         full_collection,
                         renderer_xml, labeling_xml, legacy_style,
                         bool(layer.visible), float(layer.opacity),
-                        is_reference=metadata.get("reference") == "true",
-                        is_editable=metadata.get("editable") == "true",
-                        reference_snap=metadata.get("snap") == "true",
-                        data_revision=layer_revision,
-                        delta=delta_json,
+                        **no_delta_kwargs,
                     )
                 except TypeError:
-                    # older bridge without the delta channel — full ship
-                    delta_json = ""
+                    no_delta_kwargs.pop("fields_json", None)
+                    no_delta_kwargs.pop("data_revision", None)
                     qgis_id = stack.upsert_mirror_layer(
                         layer.id, layer.name or layer.id, geom,
                         layer.crs or snapshot.project_crs,
                         full_collection,
                         renderer_xml, labeling_xml, legacy_style,
                         bool(layer.visible), float(layer.opacity),
-                        is_reference=metadata.get("reference") == "true",
-                        is_editable=metadata.get("editable") == "true",
-                        reference_snap=metadata.get("snap") == "true",
+                        **no_delta_kwargs,
                     )
-            else:
-                qgis_id = stack.upsert_mirror_layer(
-                    layer.id, layer.name or layer.id, geom,
-                    layer.crs or snapshot.project_crs,
-                    full_collection,
-                    renderer_xml, labeling_xml, legacy_style,
-                    bool(layer.visible), float(layer.opacity),
-                    is_reference=metadata.get("reference") == "true",
-                    is_editable=metadata.get("editable") == "true",
-                    reference_snap=metadata.get("snap") == "true",
-                    data_revision=layer_revision,
-                )
         except Exception as exc:
             if has_qgis_renderer or has_qgis_labeling:
                 msg = str(exc).lower()
@@ -306,12 +363,13 @@ def mirror_snapshot_to_stack(
             failures.append(f"layer {layer.id}: {exc}")
             _sink(layer.id, str(exc))
             continue
-        _MIRROR_LEDGER[layer.id] = _LedgerEntry(
-            layer_revision, style_sig, bool(layer.visible), float(layer.opacity),
-            geom,
-            {str((f.get("properties") or {}).get("__pwb_fid")
-             or (f.get("properties") or {}).get("id") or ""):
-             _feature_signature(f) for f in features})
+        if ledger_active:
+            _MIRROR_LEDGER[layer.id] = _LedgerEntry(
+                layer_revision, style_sig, bool(layer.visible),
+                float(layer.opacity), geom,
+                {str((f.get("properties") or {}).get("__pwb_fid")
+                 or (f.get("properties") or {}).get("id") or ""):
+                 _feature_signature(f) for f in features})
         seen.append(layer.id)
         mirrored_qgis_ids.append(qgis_id)
     # v7 §9: ledger follows the mirror registry — entries for layers no

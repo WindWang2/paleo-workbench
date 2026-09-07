@@ -33,7 +33,8 @@ class _DeltaCapableStack:
                             renderer_xml="", labeling_xml="",
                             legacy_style=None, visible=True, opacity=1.0,
                             is_reference=False, is_editable=False,
-                            reference_snap=False, data_revision=0, delta=""):
+                            reference_snap=False, data_revision=0, delta="",
+                            fields_json=""):
         """upsert_mirror_layer(..., data_revision: int, delta: str) -> str"""
         self.calls.append({
             "doc_id": doc_id, "geojson": json.loads(geojson),

@@ -189,3 +189,23 @@ def test_spec_ids_stable_and_unique():
     ids = [spec.spec_id for spec in GEOLOGICAL_LAYER_SPECS.values()]
     assert len(ids) == len(set(ids))
     assert all(ids), "spec_id must be non-empty"
+
+
+def test_geometry_kind_matches_layer_type_binding():
+    """R2-F5: spec geometry_kind must be consistent with the LayerType it
+    maps to (no split vocabulary)."""
+    from paleo_workbench.mapping.layers import LayerType
+
+    kind_to_types = {
+        "point": {LayerType.WELL_POINT, LayerType.VECTOR, LayerType.ANNOTATION},
+        "line": {LayerType.VECTOR, LayerType.CONTOUR},
+        "polygon": {LayerType.POLYGON},
+        "raster": {LayerType.SCALAR_GRID, LayerType.RASTER, LayerType.GRID},
+        "vector": {LayerType.VECTOR, LayerType.ANNOTATION},
+    }
+    for role, spec in GEOLOGICAL_LAYER_SPECS.items():
+        layer_type = layer_type_for_role(role)
+        allowed = kind_to_types[spec.geometry_kind]
+        assert layer_type in allowed, (
+            f"{role}: geometry_kind {spec.geometry_kind!r} vs "
+            f"LayerType {layer_type}")

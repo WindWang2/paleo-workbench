@@ -196,7 +196,8 @@ def test_offset_curve_and_smooth_exist():
     offset = ops.offset_curve(LINE, 1.0)
     assert offset.engine in (ops.ENGINE_QGIS, ops.ENGINE_SHAPELY)
     smooth = ops.smooth(LINE, iterations=1)
-    assert smooth.engine in (ops.ENGINE_QGIS, ops.ENGINE_SHAPELY)
+    # host Chaikin fallback is disclosed as host (R2-F1)
+    assert smooth.engine in (ops.ENGINE_QGIS, ops.ENGINE_HOST)
     assert len(smooth.geometry["coordinates"]) >= len(LINE["coordinates"])
 
 
