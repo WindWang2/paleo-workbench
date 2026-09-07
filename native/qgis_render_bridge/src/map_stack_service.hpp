@@ -206,7 +206,16 @@ public:
                                 bool is_reference = false,
                                 bool is_editable = false,
                                 // 参考图层「参与捕捉」勾选态投影（Python 权威），菜单读取。
-                                bool reference_snap = false);
+                                bool reference_snap = false,
+                                // v7 §9: host data revision (0 = unknown; a
+                                // zero disables the delta channel).
+                                std::uint64_t data_revision = 0,
+                                // v7 §9: incremental payload — applied in
+                                // place when the mirror provably holds
+                                // base_revision; a mismatch falls back to the
+                                // full-collection path (concurrent reset is a
+                                // full-ship case, never an error).
+                                const std::string& delta_json = "");
   /// v7 §5: raster mirror upsert (single-band scalar GeoTIFF + optional
   /// pseudocolor renderer XML).  Same doc-keyed contract as the vector
   /// mirror: reuse by doc_id, rebuild on source change, style-only change
@@ -250,6 +259,13 @@ public:
 
 private:
   struct Impl;
+
+  /// v7 §9: apply {"base_revision","changed":[Feature],"removed_ids":[id]}
+  /// to a live mirror by __pwb_fid (delete + re-add, mirroring the offscreen
+  /// #932 semantics).  False ⇒ caller falls back to the full path.
+  bool applyMirrorFeatureDelta(QgsVectorLayer& layer, const std::string& doc_id,
+                               const std::string& delta_json,
+                               std::uint64_t new_revision);
   std::unique_ptr<Impl> impl_;
   QgsProject* project() const;
   void syncCanvasLayers(std::uintptr_t canvas);

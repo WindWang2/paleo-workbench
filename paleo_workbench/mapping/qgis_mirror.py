@@ -34,6 +34,63 @@ def release_scalar_data_cache() -> None:
         _SCALAR_DATA_CACHE = None
 
 
+# ---------------------------------------------------------------------------
+# v7 §9 — publish ledger: the host-side per-layer revision tokens
+# (LayerContentToken = data_revision, LayerStyleToken = style signature,
+# LayerPlacementToken/VisibilityToken = placement/visibility).  The publish
+# path consults the ledger and ships ONLY what changed: no-op publishes
+# touch nothing, single-feature edits ship one feature, style-only changes
+# reapply the renderer, visibility-only changes stay on the cheap setters.
+
+
+def _style_signature(renderer_xml: str, labeling_xml: str, legacy_style) -> str:
+    legacy_json = ""
+    if legacy_style is not None:
+        if isinstance(legacy_style, str):
+            legacy_json = legacy_style
+        else:
+            try:
+                import json as _json
+                legacy_json = _json.dumps(legacy_style, sort_keys=True)
+            except (TypeError, ValueError):
+                legacy_json = ""
+    return "".join((renderer_xml, labeling_xml, legacy_json))
+
+
+class _LedgerEntry:
+    __slots__ = ("data_revision", "style_sig", "visible", "opacity",
+                 "geom_kind", "features_by_id")
+
+    def __init__(self, data_revision, style_sig, visible, opacity,
+                 geom_kind, features_by_id):
+        self.data_revision = data_revision
+        self.style_sig = style_sig
+        self.visible = visible
+        self.opacity = opacity
+        self.geom_kind = geom_kind
+        self.features_by_id = features_by_id
+
+
+_MIRROR_LEDGER: dict[str, _LedgerEntry] = {}
+
+
+def reset_publish_ledger() -> None:
+    """Clear the publish ledger (stack re-created / project switched)."""
+    _MIRROR_LEDGER.clear()
+
+
+def _stack_supports_delta(stack) -> bool:
+    doc = getattr(getattr(stack, "upsert_mirror_layer", None), "__doc__", "") or ""
+    return "data_revision" in doc
+
+
+def _feature_signature(feature: dict) -> tuple:
+    return (
+        json.dumps(feature.get("geometry"), sort_keys=True),
+        json.dumps(feature.get("properties"), sort_keys=True),
+    )
+
+
 def mirror_snapshot_to_stack(
     stack, canvas_address, snapshot, diags=None, *, groups: bool = False
 ) -> tuple[list[str], list[str], list[str]]:
@@ -157,18 +214,90 @@ def mirror_snapshot_to_stack(
             legacy_style = {k: v for k, v in style_raw.items() if k != "qgis_style"} if isinstance(style_raw, dict) else None
             if legacy_style is not None and not legacy_style:
                 legacy_style = None
+        # v7 §9: consult the publish ledger — ship only what changed.
+        style_sig = _style_signature(renderer_xml, labeling_xml, legacy_style)
+        entry = _MIRROR_LEDGER.get(layer.id)
+        layer_revision = int(layer.data_revision)
+        unchanged = (
+            entry is not None
+            and entry.data_revision == layer_revision
+            and entry.style_sig == style_sig
+            and entry.visible == bool(layer.visible)
+            and entry.opacity == float(layer.opacity)
+            and entry.geom_kind == geom)
+        if unchanged:
+            # no-op publish for this layer: tokens unchanged, nothing ships
+            _sink(layer.id, "publish:no-op")
+            seen.append(layer.id)
+            continue
+
+        delta_json = ""
+        if (entry is not None and entry.data_revision != layer_revision
+                and _stack_supports_delta(stack) and features):
+            changed: list | None = []
+            seen_ids = set()
+            for feature in features:
+                fid = str((feature.get("properties") or {}).get("__pwb_fid")
+                          or (feature.get("properties") or {}).get("id") or "")
+                if not fid:
+                    changed = None  # un-id'd payloads cannot delta safely
+                    break
+                seen_ids.add(fid)
+                previous = entry.features_by_id.get(fid)
+                signature = _feature_signature(feature)
+                if previous is None or previous != signature:
+                    changed.append(feature)
+            if changed is not None:
+                removed = [fid for fid in entry.features_by_id
+                           if fid not in seen_ids]
+                if (changed or removed) and len(changed) < len(features):
+                    delta_json = json.dumps({
+                        "base_revision": entry.data_revision,
+                        "changed": changed,
+                        "removed_ids": removed,
+                    })
+        full_collection = json.dumps(
+            {"type": "FeatureCollection", "features": features})
         try:
-            qgis_id = stack.upsert_mirror_layer(
-                layer.id, layer.name or layer.id, geom,
-                layer.crs or snapshot.project_crs,
-                json.dumps({"type": "FeatureCollection", "features": features}),
-                renderer_xml, labeling_xml, legacy_style,
-                bool(layer.visible), float(layer.opacity),
-                is_reference=metadata.get("reference") == "true",
-                is_editable=metadata.get("editable") == "true",
-                # 参考图层「参与捕捉」勾选态投影到镜像层属性（菜单读取）。
-                reference_snap=metadata.get("snap") == "true",
-            )
+            if delta_json:
+                try:
+                    qgis_id = stack.upsert_mirror_layer(
+                        layer.id, layer.name or layer.id, geom,
+                        layer.crs or snapshot.project_crs,
+                        full_collection,
+                        renderer_xml, labeling_xml, legacy_style,
+                        bool(layer.visible), float(layer.opacity),
+                        is_reference=metadata.get("reference") == "true",
+                        is_editable=metadata.get("editable") == "true",
+                        reference_snap=metadata.get("snap") == "true",
+                        data_revision=layer_revision,
+                        delta=delta_json,
+                    )
+                except TypeError:
+                    # older bridge without the delta channel — full ship
+                    delta_json = ""
+                    qgis_id = stack.upsert_mirror_layer(
+                        layer.id, layer.name or layer.id, geom,
+                        layer.crs or snapshot.project_crs,
+                        full_collection,
+                        renderer_xml, labeling_xml, legacy_style,
+                        bool(layer.visible), float(layer.opacity),
+                        is_reference=metadata.get("reference") == "true",
+                        is_editable=metadata.get("editable") == "true",
+                        reference_snap=metadata.get("snap") == "true",
+                    )
+            else:
+                qgis_id = stack.upsert_mirror_layer(
+                    layer.id, layer.name or layer.id, geom,
+                    layer.crs or snapshot.project_crs,
+                    full_collection,
+                    renderer_xml, labeling_xml, legacy_style,
+                    bool(layer.visible), float(layer.opacity),
+                    is_reference=metadata.get("reference") == "true",
+                    is_editable=metadata.get("editable") == "true",
+                    reference_snap=metadata.get("snap") == "true",
+                    data_revision=layer_revision,
+                )
         except Exception as exc:
             if has_qgis_renderer or has_qgis_labeling:
                 msg = str(exc).lower()
@@ -177,8 +306,21 @@ def mirror_snapshot_to_stack(
             failures.append(f"layer {layer.id}: {exc}")
             _sink(layer.id, str(exc))
             continue
+        _MIRROR_LEDGER[layer.id] = _LedgerEntry(
+            layer_revision, style_sig, bool(layer.visible), float(layer.opacity),
+            geom,
+            {str((f.get("properties") or {}).get("__pwb_fid")
+             or (f.get("properties") or {}).get("id") or ""):
+             _feature_signature(f) for f in features})
         seen.append(layer.id)
         mirrored_qgis_ids.append(qgis_id)
+    # v7 §9: ledger follows the mirror registry — entries for layers no
+    # longer published are dropped so a re-added layer ships fully.
+    keep_ids = set(seen) | {
+        layer.id for layer in snapshot.layers
+        if layer.layer_type == "raster_source"}
+    for stale_id in [key for key in _MIRROR_LEDGER if key not in keep_ids]:
+        del _MIRROR_LEDGER[stale_id]
     if _SCALAR_DATA_CACHE is not None:
         _SCALAR_DATA_CACHE.retain_layer_ids({
             layer.id for layer in snapshot.layers
