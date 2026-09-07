@@ -82,3 +82,4 @@ user-history.db
 baseline_tests*.log
 scratch_full_tests.log
 main_full_tests.log
+run_suite_detached.bat

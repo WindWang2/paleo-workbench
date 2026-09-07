@@ -30,3 +30,25 @@
 ## Review 2 — Architecture（待 C++ 编译验证后执行）
 
 ## Review 3 — UX / Performance / Adversarial（待 QGIS 测试执行后执行）
+
+## Review 2 — Architecture（2026-09-08，独立 agent 审查）
+
+范围：`db21f6cf..HEAD` 全变更面（6 commits，+4214/−142），逐文件 diff 审阅。修复落地 commit `3ab9222d`。
+
+**结论：0 × P0，1 × P1，10 × P2。架构不变量 A–J 全部成立（无第二 GIS authority、无 lifecycle 绕过、无 QGIS 绕过、无第二 tool state authority、FFI ownership 与既有模式一致、manifest 单权威、EditDelta 保持派生契约、接口冻结、未越模块边界、vendored 补丁最小且文档化）。**
+
+| 编号 | 级别 | 问题 | 处置 |
+|---|---|---|---|
+| P1-1 | P1 | measure 双执行体的旧桥降级无运行期提示（与 P2-8 snapping 降级处理不对称——用户拿到平面距离却不知无椭球修正） | 已修：shim 一次性 warning「测距已降级为平面计算，地理坐标系下不含椭球修正」 |
+| P2-1 | P2 | KNOWN_NATIVE_TOOLS/KNOWN_GEOMETRY_OPS 为零消费的手工能力镜像（第二能力清单的种子） | 已修：删除；LEGACY 集合显式限定 degraded 路径并注明 manifest 单权威 |
+| P2-2 | P2 | LEGACY_NATIVE_TOOLS 是对旧桥能力面的手工断言（若某 0.2.x 实际缺工具会伪可用） | 记录：旧桥版本面已封死，风险受控（注释言明断言性质） |
+| P2-3 | P2 | LayerCapabilitySnapshot 无生产消费者；can_split/merge 在桥缺算子时仍 True（shapely 语义兜底） | 记录：并行 UI 分支契约预置（08-10）；二元结构限制已注明 |
+| P2-4 | P2 | evaluate_tool 的 checked 重建分支丢弃 conflicts 字段 | 已修：透传 |
+| P2-5 | P2 | reshape 激活不防御 selection != 1；evaluator 是唯一门禁 | 已修：激活侧双重防御（画布 + 恰一选集） |
+| P2-6 | P2 | TopologyService.validate 逐要素重复桥探测（O(N) import 探测 + 潜在刷屏） | 已修：探测单次提升；桥失败 warning 一次后回退 |
+| P2-7 | P2 | snapshot_stable_hash 不含 contract_version（不同契约版本撞 token） | 已修：纳入 hash |
+| P2-8 | P2 | scratch_full_tests.log（含崩溃堆栈）被提交入库 | 已修：移出 git + gitignore |
+| P2-9 | P2 | RectangleSelectTool Shift 语义变更（XOR→差集）无变更公告面 | 记录：对齐 QGIS 桌面是 Goal 方向；PR 描述中将列入行为变更 |
+| P2-10 | P2 | canvas_shim 注释并行的无语义 diff 噪音 | 记录（无害） |
+
+审查原文逐项确认（摘要）：A 无第二 authority（ReshapeTool 几何全走桥、测距在 C++ QgsDistanceArea、topology 收敛而非扩张）；B 无 lifecycle 绕过（reshape/vertex/传播/回滚全链过会话与门禁，镜像层只读）；C 唯一非原生执行是显式声明的 measure 双执行体与命令型 split/merge（引擎记入 delta）；D 工作站路径单一 evaluator 来源，旧 update_state 仅为 mapping_page legacy 宿主保留，UIContextSnapshot 关注点正交；E FFI 逐点与 select/identify 同型（per-canvas 缓存/回调表/孤儿坟场/GIL）；F manifest 双向钉死（kind ⊆ set_map_tool 接受集 + snapshot 派生相等）；G EditDelta 无第二命令栈/无持久化副作用；H 契约只加不改 + mapping_page 未破坏；I diff 面未越界；J 两处 vendored 补丁最小且 UPSTREAM.md 记录。
