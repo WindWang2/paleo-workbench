@@ -33,3 +33,24 @@
   main 同现象——非本分支引入）。全量基线第三轮（排除上述两文件）后台进行中。
 - test_composite_qgis_canvas 5 失败为 main 既有（需桥）。
 - 注意：git add -A 不会加入 .baseline-*.log（已 gitignore）。
+
+## Session 2026-09-08 (M5–M6)
+- M5 committed 834e33df: 类型化 Inspector（feature/factor/map_product 分节
+  + 树选择路由 + identify 双击 + assemble 后进入 Inspector）。
+- M6a committed 4b70cdf9: 视觉收敛 wave1——ratchet 修红；geo3d 47 处
+  setStyleSheet→style.bind（+20 字号 token 化）；5 文件快照迁移；10 文件
+  snapshot+定宽批；43 处 emoji 清零（测试 pin 同步 9 处）。
+- M6b committed 4f48e214: readiness 词表 + tone_to_badge 桥 + STAGE_ICONS
+  派生 + filter_index canonical 路由 + 3 条新 ratchet（font 104→41 冻结、
+  fixed 42→12 冻结、emoji 硬禁）。
+- 4 个并行迁移 agent 曾并发编辑：inspector_panel NameError 与 geo3d f-string
+  语法错误均在合并后修复（互相补救）；教训：并发 agent 共享文件有风险，
+  后续按不相交文件集分派（本次已如此，残余是跨集引用）。
+- 基线-3 全量在 86% 因 test_theme_switch_with_open_project_shell 超时中断
+  （单跑 PASS 22s；HEAD 与工作树均如此——满载堆压力下的时序环境项，
+  与 test_lod_render_path/test_layer_visibility_authority GC-flake 同类）。
+- pre-existing main 失败（本分支同样出现，非本分支引入）：
+  test_data_view_models::test_enrich_tag_map_cached_by_revision（符号缺失）、
+  test_composite_qgis_canvas 5 项（需桥）、test_version_workbench_dialog_ui
+  1 项 Windows PermissionError flake。
+- 剩余 M6 债（登记在 ratchet 预算中）：41 行字号字面量 / 12 处定宽。

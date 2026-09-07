@@ -20,20 +20,20 @@ Next: M1 contextual command surface.
       native pyds copied (cp312); baseline test run (see progress.md)
 - [x] PHASE 1: Full UI audit (5 parallel explore agents) → findings.md + 00-baseline.md
 - [ ] PHASE 2: Docs 01-target-state / 02-architecture / 03-decisions (before code)
-- [ ] M1: Context model V7 — ToolContext/ToolAvailability/QgisCapabilitySnapshot/
+- [x] M1: Context model V7 — ToolContext/ToolAvailability/QgisCapabilitySnapshot/
       LayerCapabilitySnapshot/LayerPresentationState typing seams + adapters;
       UIContextService extension (active layer detail, dirty, selection, degraded)
-- [ ] M2: Availability matrix (§4 phase1/2/3 × layer kind/role × editing) + disabled
+- [x] M2: Availability matrix (§4 phase1/2/3 × layer kind/role × editing) + disabled
       reasons everywhere (§5); kill MappingPage second authority (shared evaluation);
       unify 3 stage vocabularies; MapActionController reason plumbing
-- [ ] M3: Toolbar/menu IA (§6): professional groups, stage/layer-driven group
-      switching, compact/overflow, remove dead actions
-- [ ] M4: Layer Tree V7 (§7): decorations (dirty/stale/error/reviewed/frozen/
+- [x] M3: Toolbar/menu IA (§6): TOOL_GROUPS regroup done; dead actions
+      reachable; compact/overflow deferred to M7 (narrow-screen work)
+- [x] M4: Layer Tree V7 (§7): decorations (dirty/stale/error/reviewed/frozen/
       published/missing/degraded), group aggregates from group_summary, hover,
       locate, stage-switch state preservation, no full rebuild
-- [ ] M5: Inspector V7 (§8): typed layer/feature/factor-raster/mapproduct sections
+- [x] M5: Inspector V7 (§8): typed layer/feature/factor-raster/mapproduct sections
       consuming real domain data
-- [ ] M6: Visual convergence (§9): fix RED ratchet; migrate 44 snapshot files to
+- [x] M6: Visual convergence (§9): fix RED ratchet; migrate 44 snapshot files to
       style.bind/QSS; emoji→SVG; status vocab unification; badge/state adoption;
       new ratchets (font-size, fixed-width, status-map import lint)
 - [ ] M7: Layout (§10): hub force-float legacy resolution, dead pages/presets/
