@@ -673,7 +673,8 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                 const std::string& renderer_xml, const std::string& labeling_xml,
                 py::object legacy_style, bool visible, double opacity,
                 bool is_reference, bool is_editable, bool reference_snap,
-                std::uint64_t data_revision, const std::string& delta_json) {
+                std::uint64_t data_revision, const std::string& delta_json,
+                const std::string& fields_json) {
                std::string legacy_json;
                if (!legacy_style.is_none()) {
                    if (py::isinstance<py::str>(legacy_style)) {
@@ -688,14 +689,15 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                return self.upsertMirrorLayer(doc_id, name, geometry_type, crs_auth_id, geojson,
                                              renderer_xml, labeling_xml, legacy_json, visible, opacity,
                                              is_reference, is_editable, reference_snap,
-                                             data_revision, delta_json);
+                                             data_revision, delta_json, fields_json);
              },
              py::arg("doc_id"), py::arg("name"), py::arg("geometry_type"), py::arg("crs_auth_id"),
              py::arg("geojson"), py::arg("renderer_xml") = "", py::arg("labeling_xml") = "",
              py::arg("legacy_style") = py::none(), py::arg("visible") = true, py::arg("opacity") = 1.0,
              py::arg("is_reference") = false, py::arg("is_editable") = false,
              py::arg("reference_snap") = false,
-             py::arg("data_revision") = 0, py::arg("delta") = "")
+             py::arg("data_revision") = 0, py::arg("delta") = "",
+             py::arg("fields_json") = "")
         .def("upsert_raster_mirror_layer",
              &pwb::qgis_render::QgisMapStack::upsertRasterMirrorLayer,
              py::arg("doc_id"), py::arg("name"), py::arg("source_path"),

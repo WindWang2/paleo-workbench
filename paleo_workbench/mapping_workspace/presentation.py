@@ -1,5 +1,9 @@
 """``LayerPresentationState`` — 派生图层呈现状态（goal §8 / D9）。
 
+__all__ = ["LayerPresentationState", "build_presentation_states"]
+
+
+
 **纯派生、绝不持久化**（03-decisions D9）：本模块按需把既有权威
 （memberships + 依赖服务 freshness + QualityReports + FactorMapTask
 版本钉住 + 阶段视图状态）投影成图层级呈现状态，供 UI 分支

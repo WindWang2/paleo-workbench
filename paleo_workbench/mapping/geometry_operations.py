@@ -222,10 +222,22 @@ def symdifference(a: dict, b: dict) -> GeometryResult:
 def clip(geometry: dict, extent: Sequence[float]) -> GeometryResult:
     """Rectangle clip (bbox).  Domain-ring clipping is a different, scientific
     operation (contour/polygonization clip_to_ring)."""
+    try:
+        xmin, ymin, xmax, ymax = (float(v) for v in extent)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "clip needs an (xmin, ymin, xmax, ymax) extent of 4 numbers") from exc
+    for value in (xmin, ymin, xmax, ymax):
+        if not math.isfinite(value):
+            raise ValueError("clip extent must be finite numbers")
+    if not (xmax > xmin and ymax > ymin):
+        raise ValueError(
+            f"clip extent needs xmax > xmin and ymax > ymin, got "
+            f"({xmin}, {ymin}, {xmax}, {ymax})")
     native = _bridge_geometry()
     if native is not None:
         try:
-            result = native.clip(_dump(geometry), [float(v) for v in extent])
+            result = native.clip(_dump(geometry), [xmin, ymin, xmax, ymax])
             return GeometryResult(_geojson(result), ENGINE_QGIS)
         except (RuntimeError, ValueError):
             pass
@@ -559,16 +571,32 @@ def point_in_polygon(point: Sequence[float], polygon: dict) -> ContainsResult:
 
 def area_with_unit(geometry: dict, crs: str | None) -> MeasurementResult:
     """CRS-honest area (V6 §15): projected → CRS-axis squares; geographic →
-    labelled local-scale approximation; undeclared → unknown-unit²."""
+    labelled local-scale approximation; undeclared → unknown-unit².
+
+    Sums every part's exterior minus its holes (R1-F2/R3-3: the former
+    coordinates[0] shortcut silently truncated holed/multi geometries).
+    """
     from paleo_workbench.mapping.geological_pipeline.geometry_units import (
         ring_area_with_unit,
     )
 
-    if geometry.get("type") not in {"Polygon", "MultiPolygon"}:
+    geom_type = geometry.get("type")
+    if geom_type == "Polygon":
+        polys = [geometry.get("coordinates") or []]
+    elif geom_type == "MultiPolygon":
+        polys = [poly for poly in geometry.get("coordinates") or []]
+    else:
         raise ValueError("area_with_unit needs a polygon geometry")
-    exterior = (geometry.get("coordinates") or [[[]]])[0]
-    value, unit, _warn = ring_area_with_unit(exterior, crs)
-    return MeasurementResult(value, unit, ENGINE_HOST)
+    total, unit, _warn = 0.0, "unknown-unit²", None
+    for rings in polys:
+        if not rings:
+            continue
+        exterior_value, unit, _warn = ring_area_with_unit(rings[0], crs)
+        total += exterior_value
+        for hole in rings[1:]:
+            hole_value, _, _ = ring_area_with_unit(hole, crs)
+            total -= hole_value
+    return MeasurementResult(max(total, 0.0), unit, ENGINE_HOST)
 
 
 def length_with_unit(geometry: dict, crs: str | None) -> MeasurementResult:
@@ -579,9 +607,20 @@ def length_with_unit(geometry: dict, crs: str | None) -> MeasurementResult:
     coords = geometry.get("coordinates") or []
     if geometry.get("type") not in {"LineString", "MultiLineString"} or not coords:
         raise ValueError("length_with_unit needs a line geometry")
-    value, unit, _warn = polyline_length_with_unit(
-        coords if geometry.get("type") == "LineString" else coords[0], crs)
-    return MeasurementResult(value, unit, ENGINE_HOST)
+    geom_type = geometry.get("type")
+    if geom_type == "LineString":
+        parts = [coords]
+    elif geom_type == "MultiLineString":
+        # R3-2: sum ALL parts (the former coords[0] shortcut silently dropped
+        # every part after the first).
+        parts = [part for part in coords]
+    else:  # pragma: no cover - guarded above
+        raise ValueError("length_with_unit needs a line geometry")
+    total, unit = 0.0, "unknown-unit"
+    for part in parts:
+        value, unit, _warn = polyline_length_with_unit(part, crs)
+        total += value
+    return MeasurementResult(total, unit, ENGINE_HOST)
 
 
 def bounding_geometry(geometries: Iterable[dict]) -> tuple[float, float, float, float]:

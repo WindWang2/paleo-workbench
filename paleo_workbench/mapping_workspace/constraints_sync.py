@@ -130,28 +130,35 @@ def _harvest_coordinates(layer: Any) -> tuple[list[list[list[float]]], int]:
             if len(merged) >= 2:
                 sequences.append(merged)
         else:
+            # R1-F5: keep each polygon's ring structure — every part's
+            # exterior harvests as its own sequence; holes are counted but
+            # never mislabelled as exteriors (the former flattened model
+            # dropped the 2nd+ polygon of a MultiPolygon mask).
             if gtype == "Polygon":
-                rings = list(coordinates)
+                polys = [list(coordinates)]
             elif gtype == "MultiPolygon":
-                rings = [ring for poly in coordinates for ring in poly]
+                polys = [list(poly) for poly in coordinates]
             else:
                 continue
-            for index, ring in enumerate(rings):
-                points: list[list[float]] = []
-                for point in ring or []:
-                    vertex = _vertex(point)
-                    if vertex is not None:
-                        points.append(vertex)
-                if len(points) < 3:
+            for poly in polys:
+                if not poly:
                     continue
-                if index == 0:
-                    # Ring closure for polygon kinds (mask / exclusion):
-                    # the boundary-ring consumer requires first == last.
-                    if points[0] != points[-1]:
-                        points.append(list(points[0]))
-                    sequences.append(points)
-                else:
-                    holes += 1
+                for index, ring in enumerate(poly):
+                    points: list[list[float]] = []
+                    for point in ring or []:
+                        vertex = _vertex(point)
+                        if vertex is not None:
+                            points.append(vertex)
+                    if len(points) < 3:
+                        continue
+                    if index == 0:
+                        # Ring closure for polygon kinds (mask / exclusion):
+                        # the boundary-ring consumer requires first == last.
+                        if points[0] != points[-1]:
+                            points.append(list(points[0]))
+                        sequences.append(points)
+                    else:
+                        holes += 1
     return sequences, holes
 
 

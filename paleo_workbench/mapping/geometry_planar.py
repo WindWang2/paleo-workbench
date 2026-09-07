@@ -33,29 +33,33 @@ def point_in_ring_scalar(x: float, y: float, ring) -> bool:
     return _ray_crosses(float(x), float(y), ring)
 
 
-def point_in_polygon_scalar(point: Sequence[float], polygon: dict[str, Any]) -> bool:
-    """Even-odd ray-cast with hole support (GeoJSON Polygon/MultiPolygon)."""
+def _polygons_of(polygon: dict[str, Any]) -> list:
+    """GeoJSON Polygon/MultiPolygon → list of ring-lists (R1-F1)."""
     geom_type = str(polygon.get("type") or "")
     if geom_type == "Polygon":
-        rings = polygon.get("coordinates") or []
-    elif geom_type == "MultiPolygon":
-        rings = [
-            ring for poly in polygon.get("coordinates") or [] for ring in poly
-        ]
-    else:
-        raise ValueError(f"point_in_polygon needs a polygon, got {geom_type!r}")
-    if not rings:
-        return False
+        return [polygon.get("coordinates") or []]
+    if geom_type == "MultiPolygon":
+        return [poly for poly in polygon.get("coordinates") or []]
+    raise ValueError(f"point_in_polygon needs a polygon, got {geom_type!r}")
+
+
+def point_in_polygon_scalar(point: Sequence[float], polygon: dict[str, Any]) -> bool:
+    """Even-odd ray-cast with hole support (GeoJSON Polygon/MultiPolygon).
+
+    Each part is tested independently: inside the part's exterior and not
+    inside any of ITS holes (R1-F1: the former flattened rings[0]/rings[1:]
+    model broke every MultiPolygon).
+    """
     x, y = float(point[0]), float(point[1])
-    inside = False
-    exterior_hit = _ray_crosses(x, y, rings[0])
-    if not exterior_hit:
-        return False
-    for hole in rings[1:]:
-        if _ray_crosses(x, y, hole):
-            inside = True  # in a hole → outside the polygon
-            break
-    return exterior_hit and not inside
+    for rings in _polygons_of(polygon):
+        if not rings:
+            continue
+        if not _ray_crosses(x, y, rings[0]):
+            continue
+        if any(_ray_crosses(x, y, hole) for hole in rings[1:]):
+            continue
+        return True
+    return False
 
 
 def _ray_crosses(x: float, y: float, ring: Sequence[Sequence[float]]) -> bool:
@@ -80,25 +84,18 @@ def points_in_polygon_vectorized(xs, ys, polygon: dict[str, Any]):
     """
     import numpy as np
 
-    geom_type = str(polygon.get("type") or "")
-    if geom_type == "Polygon":
-        rings = polygon.get("coordinates") or []
-    elif geom_type == "MultiPolygon":
-        rings = [
-            ring for poly in polygon.get("coordinates") or [] for ring in poly
-        ]
-    else:
-        raise ValueError(
-            f"points_in_polygon needs a polygon, got {geom_type!r}")
-    if not rings:
-        return np.zeros(np.broadcast(xs, ys).shape, dtype=bool)
-
+    polys = _polygons_of(polygon)
     xs_b = np.broadcast_to(np.asarray(xs, dtype=float),
                            np.broadcast(np.asarray(xs), np.asarray(ys)).shape)
     ys_b = np.broadcast_to(np.asarray(ys, dtype=float), xs_b.shape)
-    inside = _ring_crossings_vectorized(xs_b, ys_b, rings[0])
-    for hole in rings[1:]:
-        inside &= ~_ring_crossings_vectorized(xs_b, ys_b, hole)
+    inside = np.zeros(xs_b.shape, dtype=bool)
+    for rings in polys:
+        if not rings:
+            continue
+        part = _ring_crossings_vectorized(xs_b, ys_b, rings[0])
+        for hole in rings[1:]:
+            part &= ~_ring_crossings_vectorized(xs_b, ys_b, hole)
+        inside |= part
     return inside
 
 

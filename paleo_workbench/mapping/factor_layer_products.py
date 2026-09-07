@@ -244,6 +244,12 @@ def _scalar_payload(
     }
     if extra_metadata:
         metadata.update(extra_metadata)
+    if quantity == "stddev" and "stddev_statistics" in metadata:
+        # R1-F4: the uncertainty descriptor's `statistics` must describe the
+        # stddev quantity it carries — not the factor-value statistics of the
+        # parent grid.  The parent stats stay available as `factor_statistics`.
+        metadata["factor_statistics"] = statistics
+        metadata["statistics"] = dict(metadata["stddev_statistics"])
     payload["metadata"] = metadata
     return payload
 

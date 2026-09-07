@@ -215,7 +215,13 @@ public:
                                 // base_revision; a mismatch falls back to the
                                 // full-collection path (concurrent reset is a
                                 // full-ship case, never an error).
-                                const std::string& delta_json = "");
+                                const std::string& delta_json = "",
+                                // v7 R3-1: spec-authored field schema JSON
+                                // (qgis_layer_schema wire). Persisted as the
+                                // pwb/fields_json custom property and
+                                // re-applied on rebuild; memory-provider field
+                                // application is the documented follow-up.
+                                const std::string& fields_json = "");
   /// v7 §5: raster mirror upsert (single-band scalar GeoTIFF + optional
   /// pseudocolor renderer XML).  Same doc-keyed contract as the vector
   /// mirror: reuse by doc_id, rebuild on source change, style-only change

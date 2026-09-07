@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 
+from dataclasses import replace
+
 import pytest
 
 import paleo_workbench.mapping.qgis_mirror as qgis_mirror
@@ -211,3 +213,42 @@ def test_removed_layer_drops_ledger():
     mirror_snapshot_to_stack(stack, 0x1, _Snap([]))
     assert stack.removed_except == []
     assert "draft-1" not in _MIRROR_LEDGER
+
+
+class _StrictSignatureStack(_DeltaCapableStack):
+    """Fake mirroring the REAL bridge signature: rejects unknown kwargs
+    (R3-1 regression: mocks accepting **kwargs hid the fields_json break)."""
+
+    def upsert_mirror_layer(self, doc_id, name, geom, crs, geojson,
+                            renderer_xml="", labeling_xml="",
+                            legacy_style=None, visible=True, opacity=1.0,
+                            is_reference=False, is_editable=False,
+                            reference_snap=False, data_revision=0, delta="",
+                            fields_json=""):
+        return super().upsert_mirror_layer(
+            doc_id, name, geom, crs, geojson, renderer_xml, labeling_xml,
+            legacy_style, visible, opacity, is_reference, is_editable,
+            reference_snap, data_revision, delta, fields_json)
+
+
+def test_strict_signature_stack_single_upsert_per_publish():
+    """R3-1: with a bridge-shaped signature, one publish performs exactly one
+    upsert per changed layer — no blind second full upsert."""
+    stack = _StrictSignatureStack()
+    features = [_feature("a"), _feature("b")]
+    mirror_snapshot_to_stack(stack, 0x1, _Snap([_vector_layer(features)]))
+    assert len(stack.calls) == 1
+    edited = [_feature("a"), _feature("b", name="changed")]
+    mirror_snapshot_to_stack(stack, 0x1, _Snap([_vector_layer(edited, revision=2)]))
+    assert len(stack.calls) == 2
+    assert stack.calls[1]["delta"] is not None  # delta consumed, not retried
+
+
+def test_fields_json_flows_from_role_metadata():
+    """R2-F4: layers declaring a role carry the spec's fields_json."""
+    stack = _StrictSignatureStack()
+    layer = _vector_layer([_feature("a")])
+    roled = replace(layer, metadata={"role": "fault_constraint"})
+    mirror_snapshot_to_stack(stack, 0x1, _Snap([roled]))
+    assert len(stack.calls) == 1
+    assert stack.received_fields and "fault_type" in stack.received_fields[0]

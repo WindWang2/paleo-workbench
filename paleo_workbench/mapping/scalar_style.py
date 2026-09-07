@@ -64,14 +64,27 @@ class ScalarStyleSpec:
                 f"{self.classification!r}")
         if self.n_classes < 2:
             raise ValueError("n_classes must be >= 2")
+        if self.n_classes > 256:
+            # R3-4: unbounded classes would allocate attacker-sized break
+            # arrays from a persisted style dict (linspace of n+1).
+            raise ValueError("n_classes must be <= 256")
         if not 0.0 <= float(self.opacity) <= 1.0:
             raise ValueError("opacity must be within [0, 1]")
         if self.manual_range is not None:
             lo, hi = (float(v) for v in self.manual_range)
             if not hi > lo:
                 raise ValueError("manual_range needs hi > lo")
-        if self.classification == "explicit" and not self.explicit_breaks:
-            raise ValueError("explicit classification requires explicit_breaks")
+        if self.classification == "explicit":
+            if not self.explicit_breaks:
+                raise ValueError(
+                    "explicit classification requires explicit_breaks")
+            ordered = [float(v) for v in self.explicit_breaks]
+            # R3-5: the C++ shader sorts items by value while the host
+            # assigns colors in break order — unsorted/duplicate breaks
+            # would permute or collapse the color assignment silently.
+            if any(second <= first for first, second in zip(ordered, ordered[1:])):
+                raise ValueError(
+                    "explicit_breaks must be strictly increasing")
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {

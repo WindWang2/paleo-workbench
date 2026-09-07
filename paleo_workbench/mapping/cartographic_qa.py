@@ -816,8 +816,10 @@ def _confidence_issues(
         stats.count("low_confidence")
         summary = dict(_field(task, "probability_summary", None) or {})
         task_id = str(_field(task, "id", ""))
-        mean = summary.get("mean")
-        minimum = summary.get("min")
+        # R1-F3: real writers emit mean_probability (prediction/adapters.py);
+        # accept both spellings so the rule actually fires.
+        mean = summary.get("mean", summary.get("mean_probability"))
+        minimum = summary.get("min", summary.get("min_probability"))
         low_regions = int(summary.get("low_confidence_regions") or 0)
         below = (
             isinstance(mean, (int, float)) and float(mean) < threshold

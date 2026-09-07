@@ -109,3 +109,43 @@ def test_engine_honesty_guard():
             assert status["ops"][name] == ops.ENGINE_SHAPELY
     else:
         pytest.skip("QGIS engine active — shapely parity checked in R1 narrative")
+
+
+def test_multipolygon_parts_independent():
+    """R1-F1: each MultiPolygon part is tested independently (the former
+    flattened rings[0]/rings[1:] model broke every MultiPolygon)."""
+    multi = {
+        "type": "MultiPolygon",
+        "coordinates": [
+            [[[0, 0], [1, 0], [1, 1], [0, 0]]],
+            [[[10, 10], [11, 10], [11, 11], [10, 10]]],
+        ],
+    }
+    assert ops.point_in_polygon((0.5, 0.5), multi).contains is True
+    assert ops.point_in_polygon((10.5, 10.5), multi).contains is True
+    assert ops.point_in_polygon((5, 5), multi).contains is False
+
+
+def test_multipolygon_area_sums_parts_minus_holes():
+    """R1-F2/R3-3: areas sum exteriors minus holes across all parts."""
+    donut = {
+        "type": "MultiPolygon",
+        "coordinates": [
+            [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]],
+             [[3, 3], [7, 3], [7, 7], [3, 7], [3, 3]]],
+            [[[20, 20], [24, 20], [24, 24], [20, 20]]],
+        ],
+    }
+    measured = ops.area_with_unit(donut, crs="EPSG:32650")
+    # 84 (donut) + 8 (triangle) = 92
+    assert measured.value == pytest.approx(92.0)
+
+
+def test_clip_extent_validation_loud():
+    """R3-9: bad extents fail with actionable ValueError, not IndexError."""
+    with pytest.raises(ValueError, match="4 numbers"):
+        ops.clip(SQ_A, (0, 0, 1))
+    with pytest.raises(ValueError, match="xmax > xmin"):
+        ops.clip(SQ_A, (5, 5, 1, 1))
+    with pytest.raises(ValueError, match="finite"):
+        ops.clip(SQ_A, (0, 0, float("nan"), 1))

@@ -1538,7 +1538,8 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
                                             bool is_editable,
                                             bool reference_snap,
                                             std::uint64_t data_revision,
-                                            const std::string& delta_json) {
+                                            const std::string& delta_json,
+                                            const std::string& fields_json) {
   if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
   if (doc_id.empty()) throw std::invalid_argument("doc_id must not be empty");
   const QByteArray geoBytes = QByteArray::fromStdString(geojson_feature_collection).trimmed();
@@ -1644,6 +1645,10 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
                                 is_editable ? QStringLiteral("true") : QString());
     existing->setCustomProperty(QStringLiteral("pwb/reference_snap"),
                                 reference_snap ? QStringLiteral("true") : QString());
+    if (!fields_json.empty()) {
+      existing->setCustomProperty(QStringLiteral("pwb/fields_json"),
+                                  QString::fromStdString(fields_json));
+    }
     QgsLayerTreeLayer* node = project->layerTreeRoot()->findLayer(existing);
     if (node) node->setItemVisibilityChecked(visible);
     impl_->known_layer_visibility[doc_id] = visible;
@@ -1689,6 +1694,10 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
                            is_editable ? QStringLiteral("true") : QString());
   layer->setCustomProperty(QStringLiteral("pwb/reference_snap"),
                            reference_snap ? QStringLiteral("true") : QString());
+  if (!fields_json.empty()) {
+    layer->setCustomProperty(QStringLiteral("pwb/fields_json"),
+                             QString::fromStdString(fields_json));
+  }
   layer->setOpacity(std::clamp(opacity, 0.0, 1.0));
   const std::string id = layer->id().toStdString();
   {

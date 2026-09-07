@@ -102,8 +102,26 @@ def reset_publish_ledger() -> None:
 
 
 def _stack_supports_delta(stack) -> bool:
-    doc = getattr(getattr(stack, "upsert_mirror_layer", None), "__doc__", "") or ""
-    return "data_revision" in doc
+    """Capability probe for the delta channel (R3: signature-based, never a
+    docstring sniff; the outcome is honest, not silent)."""
+    import inspect
+
+    try:
+        params = inspect.signature(stack.upsert_mirror_layer).parameters
+        return "data_revision" in params and "delta" in params
+    except (TypeError, ValueError):
+        return False
+
+
+def _stack_supports_fields_json(stack) -> bool:
+    """R3-1: probe for the fields_json kwarg (older bridges ignore it)."""
+    import inspect
+
+    try:
+        params = inspect.signature(stack.upsert_mirror_layer).parameters
+        return "fields_json" in params
+    except (TypeError, ValueError):
+        return False
 
 
 def _feature_signature(feature: dict) -> tuple:
@@ -170,7 +188,12 @@ def mirror_snapshot_to_stack(
                 else:
                     payload = raster_source_qgis_payload(layer)
                     if payload is None:
-                        continue  # empty payload: nothing to mirror
+                        # R3-7: an empty reference payload is a real problem
+                        # (the layer vanishes from the mirror), not a skip.
+                        failures.append(
+                            f"layer {layer.id}: empty raster source payload")
+                        _sink(layer.id, "empty raster source payload")
+                        continue
                 qgis_id = stack.upsert_raster_mirror_layer(
                     layer.id, layer.name or layer.id,
                     payload["source_path"],
@@ -292,69 +315,46 @@ def mirror_snapshot_to_stack(
                     })
         full_collection = json.dumps(
             {"type": "FeatureCollection", "features": features})
+        delta_supported = _stack_supports_delta(stack)
         upsert_kwargs = {
             "is_reference": metadata.get("reference") == "true",
             "is_editable": metadata.get("editable") == "true",
             "reference_snap": metadata.get("snap") == "true",
-            "data_revision": layer_revision,
         }
-        if delta_json:
-            upsert_kwargs["delta"] = delta_json
-        if fields_json:
+        if delta_supported:
+            upsert_kwargs["data_revision"] = layer_revision
+            if delta_json:
+                upsert_kwargs["delta"] = delta_json
+        elif delta_json:
+            # delta computed but the bridge cannot consume it: full ship
+            # (documented in diags, never silent).
+            _sink(layer.id, "delta unsupported by bridge; full ship")
+            delta_json = ""
+        if fields_json and _stack_supports_fields_json(stack):
             upsert_kwargs["fields_json"] = fields_json
         try:
-            try:
-                qgis_id = stack.upsert_mirror_layer(
-                    layer.id, layer.name or layer.id, geom,
-                    layer.crs or snapshot.project_crs,
-                    full_collection,
-                    renderer_xml, labeling_xml, legacy_style,
-                    bool(layer.visible), float(layer.opacity),
-                    **upsert_kwargs,
-                )
-            except TypeError:
-                # older bridge (no delta channel / no fields_json) — retry
-                # with only the kwargs the legacy signature accepts.
-                delta_json = ""
-                for drop in ("delta", "fields_json", "data_revision"):
-                    upsert_kwargs.pop(drop, None)
-                qgis_id = stack.upsert_mirror_layer(
-                    layer.id, layer.name or layer.id, geom,
-                    layer.crs or snapshot.project_crs,
-                    full_collection,
-                    renderer_xml, labeling_xml, legacy_style,
-                    bool(layer.visible), float(layer.opacity),
-                    **upsert_kwargs,
-                )
-
-                no_delta_kwargs = {
-                    "is_reference": metadata.get("reference") == "true",
-                    "is_editable": metadata.get("editable") == "true",
-                    "reference_snap": metadata.get("snap") == "true",
-                    "data_revision": layer_revision,
-                }
-                if fields_json:
-                    no_delta_kwargs["fields_json"] = fields_json
-                try:
-                    qgis_id = stack.upsert_mirror_layer(
-                        layer.id, layer.name or layer.id, geom,
-                        layer.crs or snapshot.project_crs,
-                        full_collection,
-                        renderer_xml, labeling_xml, legacy_style,
-                        bool(layer.visible), float(layer.opacity),
-                        **no_delta_kwargs,
-                    )
-                except TypeError:
-                    no_delta_kwargs.pop("fields_json", None)
-                    no_delta_kwargs.pop("data_revision", None)
-                    qgis_id = stack.upsert_mirror_layer(
-                        layer.id, layer.name or layer.id, geom,
-                        layer.crs or snapshot.project_crs,
-                        full_collection,
-                        renderer_xml, labeling_xml, legacy_style,
-                        bool(layer.visible), float(layer.opacity),
-                        **no_delta_kwargs,
-                    )
+            qgis_id = stack.upsert_mirror_layer(
+                layer.id, layer.name or layer.id, geom,
+                layer.crs or snapshot.project_crs,
+                full_collection,
+                renderer_xml, labeling_xml, legacy_style,
+                bool(layer.visible), float(layer.opacity),
+                **upsert_kwargs,
+            )
+        except TypeError:
+            # signature drift despite the probes — retry once with the
+            # minimal legacy kwargs (R3-1: never a blind second full upsert).
+            for drop in ("delta", "fields_json", "data_revision"):
+                upsert_kwargs.pop(drop, None)
+            delta_json = ""
+            qgis_id = stack.upsert_mirror_layer(
+                layer.id, layer.name or layer.id, geom,
+                layer.crs or snapshot.project_crs,
+                full_collection,
+                renderer_xml, labeling_xml, legacy_style,
+                bool(layer.visible), float(layer.opacity),
+                **upsert_kwargs,
+            )
         except Exception as exc:
             if has_qgis_renderer or has_qgis_labeling:
                 msg = str(exc).lower()
