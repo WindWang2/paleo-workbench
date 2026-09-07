@@ -19,7 +19,6 @@ import logging
 import uuid
 from typing import Any
 
-from paleo_workbench.mapping_workspace.layer_groups import factor_group_title
 from paleo_workbench.project.models import FACTOR_TASK_STATUS_COMPLETE
 from paleo_workbench.mapping_workspace.layer_roles import (
     ConstraintKind,
@@ -27,6 +26,7 @@ from paleo_workbench.mapping_workspace.layer_roles import (
     constraint_kind_from_value,
 )
 from paleo_workbench.mapping_workspace.stages import MappingStage
+from paleo_workbench.mapping_workspace.stage_state import LayerMembershipRecord
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +46,14 @@ class StageActionDispatcher:
             "load_initial_facies": self.load_initial_facies,
             "add_well_prediction_overlay": self.add_well_prediction_overlay,
             "add_seismic_prediction_overlay": self.add_seismic_prediction_overlay,
+            "toggle_prediction_confidence": self.toggle_prediction_confidence,
             "create_facies_draft": self.create_facies_draft,
             "open_factor_workbench": self.open_factor_workbench,
             "run_factor": self.open_factor_workbench,
             "overlay_factor_results": self.overlay_factor_results,
             "select_evidence": self.select_evidence,
             "create_integrated_draft": self.create_integrated_draft,
+            "create_integrated_boundary": self.create_integrated_boundary,
             "run_qa": self.run_qa,
             "assemble_map_product": self.assemble_map_product,
             "stage_save": self.stage_save,
@@ -252,6 +254,52 @@ class StageActionDispatcher:
                 message += f"；{already} 个此前已叠加，跳过"
             self.composite.status_message.emit(message)
 
+    def toggle_prediction_confidence(self) -> None:
+        """预测置信度叠加开关（§10 P1；stage_profiles 已声明动作 id）。
+
+        幂等 toggle：已有置信度叠加图层 → 移除；否则从带 probability
+        字段的 VECTOR_POLYGONS 预测结果建层。**无持久化**——
+        StageViewState 只有组/图层可见性覆盖语义，没有动作级开关状态；
+        当前为按需叠加（重开工程后需重新触发），不伪造持久开关。
+        """
+        from paleo_workbench.mapping.factor_layer_products import (
+            confidence_overlay_layers,
+        )
+
+        state = self.stage_controller.state
+        roles = (LayerRole.WELL_FACIES_CONFIDENCE,
+                 LayerRole.SEISMIC_FACIES_CONFIDENCE)
+        existing = [
+            lid for lid in state.memberships
+            if state.membership(lid).role in roles
+            and self.edit_controller.layer(lid) is not None
+        ]
+        if existing:
+            for lid in existing:
+                self.stage_controller.group_controller.unregister_layer(lid)
+                self.edit_controller.remove_layer(lid)
+            self.composite._sync_composition_now()
+            self.composite.status_message.emit(
+                f"已移除 {len(existing)} 个预测置信度叠加图层")
+            return
+        added = 0
+        for task in getattr(self.project, "prediction_tasks", None) or []:
+            for descriptor in confidence_overlay_layers(self.project, task):
+                created = self._create_role_layer(
+                    descriptor["title"], descriptor["geometry_kind"],
+                    descriptor["role"],
+                    factor_task_id=str(
+                        descriptor["metadata"].get("prediction_task_id") or ""),
+                    features=descriptor.get("features"))
+                added += 1 if created else 0
+        if not added:
+            self.composite.status_message.emit(
+                "没有可叠加的预测置信度结果（需要带 probability 字段的 "
+                "VECTOR_POLYGONS 预测任务）")
+        else:
+            self.composite.status_message.emit(
+                f"已叠加 {added} 个预测置信度图层（不可编辑）")
+
     def create_facies_draft(self) -> None:
         """RAW → DERIVED：从初始相图创建可编辑解释草稿（V5 §14）。
 
@@ -315,15 +363,14 @@ class StageActionDispatcher:
                 "请通过左侧功能导航打开单因素制备页运行插值")
 
     def overlay_factor_results(self) -> None:
-        """把已完成单因素任务的结果组织进 factor 组（V5 §21/§71）。
+        """把已完成单因素任务的结果组织进 factor 组（V5 §21/§71；§10-12 六子层）。
 
-        同一 FactorGridResult 在 Phase 2/3 共享同一数据身份：等值线从
-        live 网格缓存派生（缓存缺失时诚实提示，不重算）。
+        同一 FactorGridResult 在 Phase 2/3 共享同一数据身份：栅格派生子层
+        （等值线/分级/不确定性）从 live 网格缓存派生（缓存缺失时诚实留空，
+        不重算）。标量子层（栅格/不确定性）为 descriptor-only 域登记——
+        画布标量发布路径（snapshot 消费）不在本动作内，桥缺失时登记仍完成。
         """
-        from paleo_workbench.mapping.geological_pipeline.contouring import (
-            calculate_nice_contour_levels,
-            generate_contour_layer,
-        )
+        from paleo_workbench.mapping.factor_layer_products import factor_group_layers
         from paleo_workbench.project.factor_grid_artifacts import peek_live_factor_grid
 
         document = self.project
@@ -334,70 +381,54 @@ class StageActionDispatcher:
         if not tasks:
             self.composite.status_message.emit("没有已完成的单因素任务可叠加")
             return
-        added = skipped = 0
+        state = self.stage_controller.state
+        vector_added = raster_registered = empty_children = 0
+        no_grid_tasks = 0
         for task in tasks:
             task_id = str(task.id)
-            title = factor_group_title(task.name, getattr(task, "factor_type", ""))
-            # 幂等（按角色独立判定）：井点与等值线分别去重——首点只建了
-            # 井点（无 live 网格）时，第二次点击仍能补齐等值线。
-            def _has_overlay(role) -> bool:
-                return any(
-                    self.stage_controller.state.membership(lid).role == role
-                    and self.stage_controller.state.membership(lid).factor_task_id == task_id
-                    and self.edit_controller.layer(lid) is not None
-                    for lid in self.stage_controller.state.memberships
-                )
-            # 输入井点（WellTable 行）。
-            table = None
-            for candidate in getattr(document, "well_tables", None) or []:
-                if str(candidate.id) == str(getattr(task, "well_table_id", "") or ""):
-                    table = candidate
-                    break
-            if table is not None and getattr(table, "rows", None) \
-                    and not _has_overlay(LayerRole.FACTOR_INPUT):
-                features = []
-                for row in table.rows:
-                    x = getattr(row, "x", None)
-                    y = getattr(row, "y", None)
-                    if x is None or y is None:
-                        continue
-                    value = getattr(row, "value", None)
-                    features.append((
-                        {"type": "Point", "coordinates": [float(x), float(y)]},
-                        {"value": float(value) if value is not None else None,
-                         "well": str(getattr(row, "well_name", "") or "")},
-                    ))
-                if features:
-                    self._create_role_layer(
-                        f"{title}·井点", "point", LayerRole.FACTOR_INPUT,
-                        factor_task_id=task_id, features=features)
-            # 等值线（live 网格缓存 → marching squares）。
             grid = peek_live_factor_grid(task_id)
             if grid is None:
-                skipped += 1
-                continue
-            if _has_overlay(LayerRole.FACTOR_CONTOUR):
-                continue
-            try:
-                contour = generate_contour_layer(
-                    grid, levels=calculate_nice_contour_levels(grid),
-                    name=f"{title}·等值线")
-                snapshot = contour.to_snapshot()
+                no_grid_tasks += 1
+            for descriptor in factor_group_layers(document, task, grid=grid):
+                role = descriptor["role"]
+                layer_id = str(descriptor.get("layer_id") or "")
+                # 幂等（按子层角色独立判定）：首个动作只建了井点（无 live
+                # 网格）时，第二次点击仍能补齐其余子层。
+                if descriptor.get("geometry_kind") == "raster":
+                    if state.membership(layer_id) is not None:
+                        continue
+                    state.set_membership(LayerMembershipRecord(
+                        layer_id=layer_id, role=role,
+                        factor_task_id=task_id,
+                        created_stage=state.current_stage.value,
+                    ))
+                    raster_registered += 1
+                    continue
+                present = any(
+                    state.membership(lid).role == role
+                    and state.membership(lid).factor_task_id == task_id
+                    and self.edit_controller.layer(lid) is not None
+                    for lid in state.memberships
+                )
+                if present:
+                    continue
+                features = descriptor.get("features") or []
+                if not features:
+                    # 空矢量子层（如无 live 网格的等值线/分级）不建空图层；
+                    # 缺失原因由 QC 子层与消息诚实报告。
+                    empty_children += 1
+                    continue
                 created = self._create_role_layer(
-                    f"{title}·等值线", "line", LayerRole.FACTOR_CONTOUR,
-                    factor_task_id=task_id,
-                    features=[
-                        (dict(record.get("geometry") or {}),
-                         dict(record.get("properties") or {}))
-                        for record in snapshot.features
-                    ])
-                added += 1 if created else 0
-            except Exception:
-                logger.exception("factor contour overlay failed for %s", task_id)
-                skipped += 1
-        message = f"已叠加 {added} 组单因素等值线（自动归入 factor 组）"
-        if skipped:
-            message += f"；{skipped} 个任务无 live 网格（打开制备页加载后可叠加）"
+                    descriptor["title"], descriptor["geometry_kind"], role,
+                    factor_task_id=task_id, features=features)
+                vector_added += 1 if created else 0
+        message = (f"已叠加单因素组：矢量子层 {vector_added}，标量子层登记 "
+                   f"{raster_registered}（descriptor-only，画布标量发布待接入）")
+        if no_grid_tasks:
+            message += (f"；{no_grid_tasks} 个任务无 live 网格（等值线/分级/"
+                        "不确定性子层留空，打开制备页加载后可叠加）")
+        if empty_children:
+            message += f"；{empty_children} 个矢量子层无内容（详见 QC 子层）"
         self.composite.status_message.emit(message)
 
     def create_constraint(self, kind_value: str) -> None:
@@ -514,6 +545,68 @@ class StageActionDispatcher:
             self.composite.status_message.emit(
                 f"已创建综合解释草稿（证据 {len(self.stage_controller.state.compilation_input_set)} 项）")
 
+    def create_integrated_boundary(self) -> None:
+        """综合相带边界（V5 §30，§12）：从综合/阶段1草稿的相面环提取边界线。
+
+        与 create_integrated_draft 同构（role INTEGRATED_BOUNDARY，可编辑）。
+        注：stage_profiles 的 P3 context_actions 尚未声明本动作 id——面板
+        入口待声明后出现；dispatch 已注册，动作可直达。
+        """
+        from paleo_workbench.mapping.factor_layer_products import (
+            boundary_features_from_polygons,
+            integrated_boundary_action_helpers,
+        )
+
+        existing = self._stage_role_layer(LayerRole.INTEGRATED_BOUNDARY)
+        if existing is not None:
+            self.composite.status_message.emit("综合相带边界已存在（02 综合解释）")
+            return
+        source = (self._stage_role_layer(LayerRole.INTEGRATED_FACIES)
+                  or self._stage_role_layer(LayerRole.INITIAL_FACIES_DRAFT))
+        features: list = []
+        source_id = ""
+        if source is not None:
+            layer = self.edit_controller.layer(source)
+            source_id = source
+            features = boundary_features_from_polygons(
+                [(feature.geometry, dict(feature.attributes or {}))
+                 for feature in layer.features()],
+                source_layer_id=source,
+            )
+        elif self.project is not None:
+            # 无 live 编辑层时退回工程侧草稿（重开工程后的持久化几何）。
+            state = self.stage_controller.state
+            for role in (LayerRole.INTEGRATED_FACIES,
+                         LayerRole.INITIAL_FACIES_DRAFT):
+                for layer_id in state.layers_with_role(role):
+                    descriptor = integrated_boundary_action_helpers(
+                        self.project, str(layer_id))
+                    if descriptor is not None:
+                        features = [
+                            (geometry, dict(properties))
+                            for geometry, properties in descriptor["features"]
+                        ]
+                        source_id = str(layer_id)
+                        break
+                if features:
+                    break
+        if not features:
+            self.composite.status_message.emit(
+                "没有可提取边界的草稿相面——先创建综合解释草稿（含相面几何）")
+            return
+        layer_id = self._create_role_layer(
+            "综合相带边界", "line", LayerRole.INTEGRATED_BOUNDARY,
+            features=features,
+        )
+        if layer_id:
+            self.stage_controller.state.set_maturity(
+                f"integrated:{layer_id}", "draft")
+            self.edit_controller.set_active_layer(layer_id)
+            self.composite.layer_manager.select_layer(layer_id)
+            self.composite.status_message.emit(
+                f"已创建综合相带边界（{len(features)} 条，源自草稿 "
+                f"{source_id or '（工程侧）'} 相面环）")
+
     def run_qa(self) -> None:
         """QA：拓扑校验综合解释图层 + 汇总过期输入。"""
         controller = self.stage_controller
@@ -618,12 +711,48 @@ class StageActionDispatcher:
             f"MapProduct 已生成（{result.record_id}；输出版本 {result.output_version_id[:12]}…）")
 
     def stage_save(self) -> None:
-        """保存阶段成果：flush 编辑会话 + 工作区状态落工程。"""
-        committed, blocked = self.composite.flush_edit_sessions()
+        """保存阶段成果：flush 编辑会话 + 约束几何回填 + 工作区状态落工程。
+
+        blocked（RAW 门禁拒绝/拓扑失败）逐条原因已由 flush 自身经
+        status_message 发出（composite.flush 只返回提交数）。
+        """
+        committed = self.composite.flush_edit_sessions()
+        synced = self._sync_constraint_geometry()
         self.composite._sync_workspace_state_to_project()
         message = "阶段成果已保存"
-        if blocked:
-            # blocked 含 RAW 门禁拒绝与拓扑校验失败（V6 flush 角色复查）——
-            # 文案不得只提拓扑（review round 1 P2）；逐条原因已由 flush 发出。
-            message += f"；{len(blocked)} 个会话未提交（保持打开，原因见消息）"
+        if committed:
+            message += f"（提交 {committed} 个编辑会话）"
+        if synced:
+            message += f"；回填 {synced} 条约束几何（含内容指纹）"
         self.composite.status_message.emit(message)
+
+    def _sync_constraint_geometry(self) -> int:
+        """约束几何回填（§11 P0-3）：数字化矢量 → ConstraintLine.coordinates。
+
+        flush 后 user_vector_layers 已写回工程文档，此处按 layer_id 邮戳
+        迭代约束线并回填。失败（空层/未知层）不阻断保存——保存语义优先。
+        """
+        from paleo_workbench.mapping_workspace.constraints_sync import (
+            sync_constraint_geometry,
+        )
+
+        document = self.project
+        if document is None:
+            return 0
+        count = 0
+        seen: set[str] = set()
+        for group in getattr(document, "constraint_layers", None) or []:
+            for line in list(group.lines):
+                layer_id = str((line.properties or {}).get("layer_id") or "")
+                if not layer_id or layer_id in seen:
+                    continue
+                seen.add(layer_id)
+                try:
+                    report = sync_constraint_geometry(document, layer_id)
+                except Exception:
+                    logger.exception(
+                        "constraint geometry sync failed for %s", layer_id)
+                    continue
+                if report.get("ok"):
+                    count += int(report.get("lines_synced") or 0)
+        return count
