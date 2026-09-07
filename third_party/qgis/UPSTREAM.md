@@ -54,4 +54,10 @@ Windows (MSVC) build support patches — qgis-geolayer-cartography-v7:
   CMakeLists.txt), so pure-MSVC configure fails with "Unknown CMake
   command" at the spatialindex `check_function_exists()` calls. No
   behavioural change on Linux (the module is idempotent to include).
+- `src/gui/symbology/qgstemplatedcategorizedrendererwidget_p.h` — added
+  the `typename` keyword to the dependent type
+  `RendererType::Category` in the virtual `symbolIcon` declaration
+  (C2061 on MSVC; GCC accepts both). This is an upstream
+  MSVC-incompatibility in the Nov-2025 categorized-renderer-widget
+  rework; the file is otherwise verbatim.
 
