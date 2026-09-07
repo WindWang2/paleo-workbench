@@ -25,6 +25,8 @@ from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
+import logging
+
 from paleo_workbench.resources.exporters import ExportError
 from paleo_workbench.ui.qgis_stack.events import StackEvents
 
@@ -188,6 +190,7 @@ class QgisCanvasShim(QWidget):
         # V7：原生测距可用性（capability manifest 声明 "measure" kind）。
         # 旧桥（<0.3.0）无原生测距——诚实降级为视口路由路径，不静默。
         self._native_measure_supported = self._probe_native_measure(QgisMapStack)
+        self._measure_degrade_warned = False
         # Qt 树析构期间触发的 destroyed 回调只做状态记账：半析构画布上再进
         # destroy_canvas/unsetMapTool 会踩悬空子对象（native 栈已证实）。
         # 画布的桥表回收由桥在 canvas destroyed 时自行完成；orderly 关闭仍走
@@ -699,6 +702,15 @@ class QgisCanvasShim(QWidget):
                         shim._measure_router.set_active(measure_active and not native_measure)
                         if not measure_active:
                             shim._last_measure_emit = None
+                        elif not native_measure and not shim._measure_degrade_warned:
+                            # 与 snapping endpoint/intersection 降级同款诚实
+                            # 提示（review-2 P1-1）：旧桥上测距走 Python 平面
+                            # 路径，地理 CRS 下无椭球修正。
+                            shim._measure_degrade_warned = True
+                            logging.getLogger(__name__).warning(
+                                "原生测距工具不可用（旧 qgis_render_bridge）；"
+                                "测距已降级为平面计算，地理坐标系下不含椭球修正"
+                            )
                     except Exception:
                         pass
                     try:

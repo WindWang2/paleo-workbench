@@ -60,3 +60,9 @@
 
 - PwbMeasureTool 复用 `PwbEditPickTool` 基类（snapOrRaw/Esc 语义免费获得）；工具实例 per-canvas 缓存（Qt parent=画布持有），回调经 `alive_token_` + `measure_callbacks` 表（与 select/identify 同防悬垂模式），destroyed 链回收进孤儿回调坟场。
 - measure 工具在激活时钉死 QgsDistanceArea 的 CRS/椭球配置（shim 每次 set_map_tool 重建实例，画布 CRS 变更天然失效重建——与采点 scratch CRS 钉死语义一致）。
+
+## D11 构建并发 -j2 → -j6 的偏离裁决
+
+- **背景**：Goal 规定「QGIS/C++ 编译并发默认 -j2，内存紧张时降到 -j1」。实测 -j2 在本机（16 核 / 31.2GB）需 ~9 小时完成 1767 个剩余目标，严重压缩验证窗口。
+- **裁决**：提升至 **-j6** 并持续监控可用内存。
+- **依据**：该约束的目的是防 OOM 而非数字本身；实测空闲内存 >25GB，6 路 cl 峰值估算 ≤9GB，裕量充足；测试套件等竞争负载已让路。若监控发现可用内存 <6GB 立即回退 -j2/-j1。本裁决在此记录以保持与约束文本的可审计关系。

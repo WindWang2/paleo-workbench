@@ -420,23 +420,25 @@ def evaluate_tool(tool_id: str, ctx: ToolContext) -> ToolAvailability:
         availability = ToolAvailability(
             tool_id=tool_id, visible=availability.visible, enabled=availability.enabled,
             checked=ctx.editing, disabled_reason=availability.disabled_reason,
-            preferred=availability.preferred,
+            preferred=availability.preferred, conflicts=availability.conflicts,
         )
     elif tool_id == "snapping":
         availability = ToolAvailability(
             tool_id=tool_id, visible=availability.visible, enabled=availability.enabled,
             checked=ctx.snapping_enabled, disabled_reason=availability.disabled_reason,
+            conflicts=availability.conflicts,
         )
     elif tool_id == "topology":
         availability = ToolAvailability(
             tool_id=tool_id, visible=availability.visible, enabled=availability.enabled,
             checked=ctx.topology_enabled, disabled_reason=availability.disabled_reason,
+            conflicts=availability.conflicts,
         )
     elif tool_id in checked_tools:
         availability = ToolAvailability(
             tool_id=tool_id, visible=availability.visible, enabled=availability.enabled,
             checked=ctx.current_tool == tool_id, disabled_reason=availability.disabled_reason,
-            preferred=availability.preferred,
+            preferred=availability.preferred, conflicts=availability.conflicts,
         )
     return availability
 

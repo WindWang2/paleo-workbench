@@ -69,34 +69,12 @@ class TopologyService:
         except Exception:
             return None
 
-    def _validate_geometry_detailed(self, geometry) -> list[str]:
-        """逐几何校验，返回错误消息列表（空列表 = 有效）。"""
-        bridge_validate = self._bridge_validate_fn()
-        if bridge_validate is not None:
-            try:
-                errors = bridge_validate(geometry)
-                return [str(entry.get("message") or "invalid geometry") for entry in errors]
-            except Exception as exc:
-                # 桥路径失败必须可诊断（P2-2）——Shapely 回退给的是 Shapely
-                # 判词，桥/GEOS 的异常文本在这里留下痕迹。
-                _logger.warning("QGIS 几何校验失败，回退 Shapely：%s", exc)
-        try:
-            from shapely.geometry import shape
-            from shapely.validation import explain_validity
-        except ImportError:
-            return ["Shapely/GEOS 与 QGIS 校验引擎均不可用"]
-        candidate = shape(geometry)
-        if candidate.is_valid:
-            return []
-        return [explain_validity(candidate) if explain_validity else "invalid geometry"]
-
     def validate(self, layers: Iterable[VectorLayer]) -> list[dict[str, object]]:
         issues: list[dict[str, object]] = []
-        engine_available = (
-            self._bridge_validate_fn() is not None
-            or self._shapely_available()
-        )
-        if not engine_available:
+        # 探测单次提升（review-2 P2-6）：逐要素重复 import 探测是 O(N) 开销。
+        bridge_validate = self._bridge_validate_fn()
+        shapely_ok = self._shapely_available()
+        if bridge_validate is None and not shapely_ok:
             return [
                 {
                     "severity": "error",
@@ -106,13 +84,28 @@ class TopologyService:
                     "message": "拓扑检查需要 QGIS 桥或 Shapely/GEOS，当前均不可用",
                 }
             ]
+        bridge_failed = False
         for layer in layers:
             session = layer.edit_session
             features = session.features() if session is not None else layer.features()
             for feature in features:
                 geometry = feature.as_record()["geometry"]
                 if geometry["type"] in {"Polygon", "MultiPolygon", "LineString", "MultiLineString"}:
-                    for message in self._validate_geometry_detailed(geometry):
+                    messages: list[str] | None
+                    if bridge_validate is not None and not bridge_failed:
+                        try:
+                            errors = bridge_validate(geometry)
+                            messages = [str(entry.get("message") or "invalid geometry") for entry in errors]
+                        except Exception as exc:
+                            # 桥路径失败必须可诊断（P2-2）且只报一次（P2-6）。
+                            _logger.warning("QGIS 几何校验失败，后续回退 Shapely：%s", exc)
+                            bridge_failed = True
+                            messages = None
+                    else:
+                        messages = None
+                    if messages is None:
+                        messages = self._shapely_messages(geometry)
+                    for message in messages:
                         issues.append(
                             {
                                 "severity": "error",
@@ -134,6 +127,19 @@ class TopologyService:
                                 }
                             )
         return issues
+
+    @staticmethod
+    def _shapely_messages(geometry) -> list[str]:
+        """Shapely 判词（空列表 = 有效）；不可用时报告单条不可用消息。"""
+        try:
+            from shapely.geometry import shape
+            from shapely.validation import explain_validity
+        except ImportError:
+            return ["QGIS 校验失败且 Shapely/GEOS 不可用"]
+        candidate = shape(geometry)
+        if candidate.is_valid:
+            return []
+        return [explain_validity(candidate) if explain_validity else "invalid geometry"]
 
     @staticmethod
     def _shapely_available() -> bool:

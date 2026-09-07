@@ -40,31 +40,14 @@ BRIDGE_BUILD_HINT = (
 # than this degrades instead of half-working (fail-honest, never fake).
 _REQUIRED_MANIFEST_KEYS = ("native_tools", "geometry_ops", "dialogs", "features")
 
-# Native map-tool kinds the kernel knows how to map Python tool ids onto.
-# Must stay in sync with ``set_map_tool`` in map_stack_service.cpp; the C++
-# manifest is the authority and this set only gates *consumption*.
-KNOWN_NATIVE_TOOLS = frozenset(
-    {
-        "pan",
-        "zoomIn",
-        "zoomOut",
-        "addPoint",
-        "addLine",
-        "addPolygon",
-        "vertex",
-        "move",
-        "select",
-        "identify",
-        "measure",
-        "reshape",
-    }
-)
-
 # M3/M4-era bridges (pre-manifest) verifiably expose this surface — every
 # shipped ``set_map_tool`` since the first workstation canvas accepted these
 # kinds. Degraded (manifest-less) snapshots report it as the legacy baseline
 # instead of an empty set, so existing installs keep working; V7 additions
 # (measure/reshape, endpoint/intersection snapping) stay honestly absent.
+# This is a baseline assertion for the degraded path only — the C++ manifest
+# remains the single authority for available bridges (review-2 P2-1: no
+# second Python-side capability mirror is kept).
 LEGACY_NATIVE_TOOLS = frozenset(
     {
         "pan",
@@ -77,28 +60,6 @@ LEGACY_NATIVE_TOOLS = frozenset(
         "move",
         "select",
         "identify",
-    }
-)
-
-KNOWN_GEOMETRY_OPS = frozenset(
-    {
-        "union",
-        "split_by_line",
-        "intersection",
-        "difference",
-        "symdifference",
-        "buffer",
-        "offset_curve",
-        "simplify",
-        "smooth",
-        "densify",
-        "make_valid",
-        "is_valid",
-        "validate",
-        "reshape",
-        "multipart_to_singlepart",
-        "singlepart_to_multipart",
-        "clip",
     }
 )
 
@@ -196,7 +157,13 @@ def snapshot_stable_hash(snapshot: QgisCapabilitySnapshot) -> str:
     import json
 
     payload = json.dumps(
-        [snapshot.status, sorted(snapshot.native_tools), sorted(snapshot.geometry_ops), sorted(snapshot.features)],
+        [
+            snapshot.status,
+            snapshot.contract_version,
+            sorted(snapshot.native_tools),
+            sorted(snapshot.geometry_ops),
+            sorted(snapshot.features),
+        ],
         ensure_ascii=False,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]

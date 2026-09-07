@@ -1025,12 +1025,15 @@ class CompositeEditController(QObject):
                         on_vertex_committed=self._propagate_shared_vertex,
                     )
                 elif action_id == "reshape":
-                    # V7：native-only 工具——无 reshape 算子（旧桥/无桥）或
-                    # 非原生画布（ReshapeTool 无鼠标输入路径）时拒激活并
-                    # 保持当前工具（与 evaluator 禁用语义一致，P1-3）。
+                    # V7：native-only 工具——非原生画布（ReshapeTool 无鼠标
+                    # 输入路径）、无 reshape 算子（旧桥/无桥）或选集非恰一个
+                    # 时拒激活并保持当前工具（与 evaluator 禁用语义一致，
+                    # P1-3/P2-5 双重防御）。
                     if not hasattr(self._canvas, "canvas_address"):
                         return
-                    feature_id = next(iter(sorted(layer.selection)), "") if layer.selection else ""
+                    if len(layer.selection) != 1:
+                        return
+                    feature_id = next(iter(sorted(layer.selection)), "")
                     applier = self._make_reshape_applier(session, feature_id) if feature_id else None
                     if applier is None:
                         return
