@@ -100,14 +100,17 @@ def _writable_gate(ctx: ToolContext) -> str | None:
 
 
 def _role_gate(ctx: ToolContext) -> str | None:
-    # 门禁自身的判词优先（宿主注入的 RAW/阶段锁语义权威）；raw_locked/
-    # stage_locked 分类标记只在没有具体判词时提供归类描述。
+    # 拒绝判定的优先序：宿主门禁的具体判词（RAW/阶段锁语义权威文本，最
+    # 具体）→ raw_locked/stage_locked 分类标志（门禁未同步文本时的绝对
+    # 拒绝兜底）→ 无文本的门禁拒绝。
+    if not ctx.edit_gate_open and ctx.edit_gate_reason:
+        return ctx.edit_gate_reason
+    if ctx.raw_locked:
+        return "RAW 图层不可变，请创建 DERIVED 草稿后编辑"
+    if ctx.stage_locked:
+        return "当前阶段的证据组已锁定，禁止编辑"
     if not ctx.edit_gate_open:
-        return ctx.edit_gate_reason or (
-            "RAW 图层不可变，请创建 DERIVED 草稿后编辑"
-            if ctx.raw_locked
-            else "当前阶段的证据组已锁定，禁止编辑"
-        )
+        return "图层被编辑门禁锁定"
     return None
 
 
