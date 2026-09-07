@@ -54,6 +54,7 @@ class StageActionDispatcher:
             "select_evidence": self.select_evidence,
             "create_integrated_draft": self.create_integrated_draft,
             "create_integrated_boundary": self.create_integrated_boundary,
+            "run_fusion": self.run_fusion,
             "run_qa": self.run_qa,
             "assemble_map_product": self.assemble_map_product,
             "stage_save": self.stage_save,
@@ -607,6 +608,108 @@ class StageActionDispatcher:
                 f"已创建综合相带边界（{len(features)} 条，源自草稿 "
                 f"{source_id or '（工程侧）'} 相面环）")
 
+    def run_fusion(self) -> None:
+        """§12 计算融合入口：证据集 → workflow.integrated_compilation 融合。
+
+        证据集中 ``factor:<task>:<version>`` 条目 → FusionModel（等权 +
+        低/中/高三分默认，全部记入 qc）→ fuse → 目录注册（有目录服务时）。
+        科学全部在 workflow.factor_fusion / integrated_compilation；本动作
+        只做编排。
+
+        面板声明缺口：stage_profiles 的 P3 context_actions 尚未声明
+        ``run_fusion`` 动作 id（同 create_integrated_boundary 先例）——
+        dispatch 已注册，动作可直达，面板入口待声明后出现。
+
+        融合面登记（descriptor-only）：似然/置信度（及方差）为 scalar_grid
+        descriptor（factor_layer_products 词表 + metadata["fusion"]），按
+        overlay_factor_results 的 raster 分支同构登记 memberships——画布
+        标量发布路径（snapshot 消费）不在本动作内，登记仍完成。
+
+        融合初稿：分级多边形存在且尚无 INTEGRATED_FACIES 层时经
+        _create_role_layer 建可编辑初稿（计算播种，人工修编）；已有草稿
+        绝不覆盖（人工解释优先，融合结果见 descriptor 登记）。
+
+        无目录服务时 register=False 诚实降级（状态消息明示，不伪称已
+        版本钉住）；证据集为空/无 factor 条目/网格不可解析时逐条原因
+        报告，绝不静默。
+        """
+        from paleo_workbench.workflow.integrated_compilation import (
+            run_integrated_fusion,
+        )
+
+        document = self.project
+        state = self.stage_controller.state
+        evidence = dict(state.compilation_input_set or {})
+        if not evidence:
+            self.composite.status_message.emit("证据集为空——先选择证据版本（Compilation Input Set）")
+            return
+        if not any(str(value).startswith("factor:") for value in evidence.values()):
+            self.composite.status_message.emit(
+                "证据集中没有单因素证据（factor 条目）——计算融合至少需要一个单因素网格")
+            return
+        catalog = None
+        try:
+            from paleo_workbench.catalog.runtime import get_catalog_service
+
+            catalog = get_catalog_service()
+        except Exception:
+            catalog = None
+        try:
+            summary = run_integrated_fusion(
+                document, evidence, catalog, register=catalog is not None)
+        except Exception as exc:
+            logger.exception("run_fusion failed")
+            self.composite.status_message.emit(f"融合失败：{exc}")
+            return
+        # 标量 descriptor-only 登记（幂等：按 layer_id 已存在则跳过）。
+        registered = 0
+        for descriptor in (
+            summary["likelihood_descriptor"],
+            summary["confidence_descriptor"],
+            summary.get("variance_descriptor"),
+        ):
+            if not descriptor:
+                continue
+            layer_id = str(descriptor.get("layer_id") or "")
+            if not layer_id or state.membership(layer_id) is not None:
+                continue
+            state.set_membership(LayerMembershipRecord(
+                layer_id=layer_id, role=descriptor["role"],
+                created_stage=state.current_stage.value,
+            ))
+            registered += 1
+        # 融合初稿（仅有分级多边形且无既有草稿时创建；绝不覆盖人工解释）。
+        features = list(summary.get("classification_features") or [])
+        if features and self._stage_role_layer(LayerRole.INTEGRATED_FACIES) is None:
+            created = self._create_role_layer(
+                "综合沉积相（融合初稿）", "polygon", LayerRole.INTEGRATED_FACIES,
+                features=features,
+            )
+            if created:
+                self.stage_controller.state.set_maturity(
+                    f"integrated:{created}", "draft")
+                draft_note = f"；已创建融合初稿（{len(features)} 个分级面，可编辑修编）"
+            else:
+                draft_note = ""
+        elif features:
+            draft_note = "；已有综合解释草稿，融合分级未覆盖（人工解释优先，见融合登记）"
+        else:
+            draft_note = "；融合分级无多边形（阈值内无有效面，未建初稿）"
+        counts = dict((summary["qc"].get("class_counts") or {}))
+        counts_text = "，".join(f"{n} {c}" for n, c in counts.items()) or "无"
+        coverage = dict(summary["qc"].get("confidence_coverage") or {})
+        fraction = coverage.get("finite_fraction")
+        coverage_text = (
+            f"{float(fraction):.0%}" if isinstance(fraction, (int, float)) else "无")
+        if summary.get("registered"):
+            reg_text = f"已注册目录版本 {str(summary.get('catalog_version_id') or '')[:12]}…"
+        else:
+            reg_text = "未注册目录（无目录服务，诚实降级——重开工程后可补注册）"
+        self.composite.status_message.emit(
+            f"融合完成：{summary['n_factors']} 因子（{reg_text}）；分类 {counts_text}；"
+            f"置信度覆盖 {coverage_text}；标量登记 {registered}"
+            f"（descriptor-only，画布标量发布待接入）{draft_note}")
+
     def run_qa(self) -> None:
         """QA：拓扑校验综合解释图层 + 汇总过期输入。"""
         controller = self.stage_controller
@@ -634,6 +737,26 @@ class StageActionDispatcher:
                 "message": f"{artifact.artifact_key}：{artifact.status_label}（{artifact.detail}）",
                 "layer_id": "",
             })
+        # §14 cartographic rules (localization: rule/severity/reason/layer or
+        # feature ref).  Rule evaluation is best-effort per rule; collector
+        # failures never block the topology/staleness core of this action.
+        carto_rules: list[str] = []
+        try:
+            from paleo_workbench.workflow.map_qa_rules import cartographic_issues
+
+            found = cartographic_issues(
+                self.project,
+                stale_summary=stale,
+            )
+            carto_rules = sorted({str(i.get("rule") or "cartographic")
+                                  for i in found})
+            issues.extend(found)
+        except Exception as exc:  # noqa: BLE001 — QA action must survive
+            issues.append({
+                "kind": "cartographic",
+                "message": f"制图 QA 规则集评估失败：{exc}",
+                "layer_id": "",
+            })
         status = "passed" if not issues else "issues"
         document = self.project
         if document is not None:
@@ -641,7 +764,7 @@ class StageActionDispatcher:
 
             document.quality_reports.append(QualityReport(
                 linked_map_document_id="",
-                rules=["topology", "staleness"],
+                rules=["topology", "staleness", *carto_rules],
                 issues=issues,
                 status=status,
             ))
