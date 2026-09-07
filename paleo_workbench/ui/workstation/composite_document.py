@@ -166,6 +166,30 @@ def _layer_kind_icon(kind: str, style: dict) -> QIcon:
     return QIcon(pixmap)
 
 
+#: 状态 tone → tokens palette 键（V7 §7 状态列前景色；随主题重取）。
+_TONE_PALETTE_KEYS = {
+    "ok": "SUCCESS",
+    "warn": "WARNING",
+    "error": "ERROR_RED",
+    "info": "PRIMARY",
+    "muted": "TEXT_SECONDARY",
+    "locked": "TEXT_SECONDARY",
+}
+
+
+def _decoration_color(tone: str):
+    """状态列前景色（theme-aware；每次调用重取，勿缓存）。"""
+    from paleo_workbench.ui import style
+
+    palette = style.palette()
+    key = _TONE_PALETTE_KEYS.get(str(tone))
+    value = palette.get(key) if key else None
+    if not value:
+        return None
+    color = QColor(str(value))
+    return color if color.isValid() else None
+
+
 class _LayerPropertiesAdapter:
     """``MapLayerPropertiesDialog`` 的图层视图（VectorLayer + 显示态合成）。
 
@@ -212,6 +236,8 @@ class LayerManagerPanel(QFrame):
     repair_layer_requested = Signal(str)
     # 当前图层变化（无可编辑图层时携带 None）。
     active_layer_changed = Signal(object)
+    # V7 §7：双击定位（zoom to layer；由 CompositeDocument 落地）。
+    zoom_to_layer_requested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -221,6 +247,8 @@ class LayerManagerPanel(QFrame):
         self._tree_connected = False
         self._editing_layer_id: str | None = None
         self._reloading = False
+        # V7 §7 呈现态（id → LayerPresentationState；空 = 无装饰）。
+        self._decorations: dict = {}
         # 项目 CRS 权威来自 ProjectDocument.coordinate（经 CompositeDocument
         # 注入）；面板只提交显示增量，绝不自行猜测 CRS。
         self._project_crs = ""
@@ -257,9 +285,19 @@ class LayerManagerPanel(QFrame):
         self.tree = QTreeWidget(self)
         self.tree.setHeaderHidden(True)
         self.tree.setRootIsDecorated(False)
+        # V7 §7：第 2 列 = 状态装饰（glyph+label；hover 摘要看 tooltip）。
+        self.tree.setColumnCount(2)
+        self.tree.setColumnWidth(0, 320)
+        self.tree.setColumnWidth(1, 96)
         # QGIS 图层面板语义：右键 = 图层上下文菜单（缩放到图层 / 重命名 / 删除）。
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._on_context_menu)
+        # 双击 = 定位问题图层（选中 + 缩放；goal §7「定位问题 feature/layer」）。
+        self.tree.itemDoubleClicked.connect(
+            lambda item, _col: self.zoom_to_layer_requested.emit(
+                str(item.data(0, Qt.ItemDataRole.UserRole) or "")
+            )
+        )
         outer.addWidget(self.tree, 1)
 
         opacity_row = QHBoxLayout()
@@ -533,38 +571,101 @@ class LayerManagerPanel(QFrame):
         current_id = (
             str(current.data(0, Qt.ItemDataRole.UserRole)) if current is not None else None
         )
+        # V7 §12：差分重载——结构（id 顺序）未变时只更新单元格，不清树
+        # （全清重建是 GUI 热点，且破坏滚动位置）。
+        existing_ids = [
+            str(self.tree.topLevelItem(row).data(0, Qt.ItemDataRole.UserRole))
+            for row in range(self.tree.topLevelItemCount())
+        ]
+        desired_ids = [str(layer.id) for layer in self._layers]
+        differential = existing_ids == desired_ids and desired_ids
+        scroll = self.tree.verticalScrollBar().value()
         self._reloading = True
         try:
-            self.tree.clear()
-            restored = None
-            for layer in self._layers:
-                label = layer.name
-                if self.is_editable_layer(layer):
-                    label = f"✏ {label}" if layer.id == self._editing_layer_id else f"{label}（矢量）"
-                item = QTreeWidgetItem([label])
-                item.setData(0, Qt.ItemDataRole.UserRole, layer.id)
-                item.setIcon(
-                    0,
-                    _layer_kind_icon(
-                        _snapshot_geometry_kind(layer), getattr(layer, "style", None)
-                    ),
-                )
-                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                item.setCheckState(
-                    0, Qt.CheckState.Checked if layer.visible else Qt.CheckState.Unchecked
-                )
-                self.tree.addTopLevelItem(item)
-                if current_id is not None and layer.id == current_id:
-                    restored = item
-            if restored is not None:
-                self.tree.setCurrentItem(restored)
+            if differential:
+                for row, layer in enumerate(self._layers):
+                    self._update_tree_item(self.tree.topLevelItem(row), layer)
+                restored = current
+            else:
+                self.tree.clear()
+                restored = None
+                for layer in self._layers:
+                    item = QTreeWidgetItem(["", ""])
+                    self._update_tree_item(item, layer)
+                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                    self.tree.addTopLevelItem(item)
+                    if current_id is not None and layer.id == current_id:
+                        restored = item
+                if restored is not None:
+                    self.tree.setCurrentItem(restored)
             # 重载只刷新按钮态（不emit active_layer_changed——活动图层是
             # 编辑控制器的权威状态，树重载不得将其重置）。
             self._on_current_changed(self.tree.currentItem(), None)
         finally:
             self._reloading = False
+        if differential:
+            self.tree.verticalScrollBar().setValue(scroll)
         self.tree.itemChanged.connect(self._on_item_changed)
         self._tree_connected = True
+
+    def _update_tree_item(self, item: QTreeWidgetItem, layer) -> None:
+        """（差分）刷新一行：名称 / 图标 / 勾选 / 状态装饰。"""
+        label = layer.name
+        if self.is_editable_layer(layer):
+            label = f"{label}（矢量）"
+        item.setText(0, label)
+        item.setData(0, Qt.ItemDataRole.UserRole, layer.id)
+        item.setIcon(
+            0,
+            _layer_kind_icon(
+                _snapshot_geometry_kind(layer), getattr(layer, "style", None)
+            ),
+        )
+        item.setCheckState(
+            0, Qt.CheckState.Checked if layer.visible else Qt.CheckState.Unchecked
+        )
+        self._apply_item_decoration(item, str(layer.id), label)
+
+    def _apply_item_decoration(self, item: QTreeWidgetItem, layer_id: str, label: str) -> None:
+        """状态列 + hover 摘要（V7 §7；词汇来自 state_language）。"""
+        from paleo_workbench.ui.workstation.layer_decorations import (
+            decoration_summary_text,
+            decoration_token,
+        )
+
+        state = self._decorations.get(str(layer_id))
+        token = decoration_token(state) if state is not None else None
+        if token is None:
+            item.setText(1, "")
+            item.setToolTip(0, label)
+            item.setToolTip(1, "")
+            item.setData(1, Qt.ItemDataRole.ForegroundRole, None)
+            return
+        item.setText(1, f"{token.glyph} {token.label}")
+        summary = decoration_summary_text(state) if state is not None else ""
+        tooltip = label if not summary else f"{label}\n{summary}"
+        item.setToolTip(0, tooltip)
+        item.setToolTip(1, tooltip)
+        color = _decoration_color(token.tone)
+        if color is not None:
+            item.setData(1, Qt.ItemDataRole.ForegroundRole, color)
+
+    def set_layer_decorations(self, decorations: dict) -> None:
+        """V7 §7：推送图层级呈现态（差分更新状态列，不重建树）。"""
+        self._decorations = dict(decorations or {})
+        if self._reloading:
+            return
+        if self._tree_connected:
+            self.tree.itemChanged.disconnect(self._on_item_changed)
+            self._tree_connected = False
+        try:
+            for row in range(self.tree.topLevelItemCount()):
+                item = self.tree.topLevelItem(row)
+                layer_id = str(item.data(0, Qt.ItemDataRole.UserRole))
+                self._apply_item_decoration(item, layer_id, item.text(0))
+        finally:
+            self.tree.itemChanged.connect(self._on_item_changed)
+            self._tree_connected = True
 
     def _filter(self, text: str) -> None:
         text = text.strip().lower()
@@ -791,6 +892,11 @@ class CompositeDocument(QWidget):
         self.input_tree.object_selected.connect(self.object_selected.emit)
         self.layer_manager.create_layer_requested.connect(self._create_vector_layer)
         self.layer_manager.remove_layer_requested.connect(self._remove_vector_layer)
+        # V7 §7：双击定位（两套面板同构信号；无桥环境同样生效）。
+        if hasattr(self.layer_manager, "zoom_to_layer_requested"):
+            self.layer_manager.zoom_to_layer_requested.connect(
+                self._zoom_to_layer_by_id
+            )
         if not self.uses_native_stack:
             # 树内改名在回退面板走请求信号（原生 QgsLayerTreeView 直接改名回写）。
             self.layer_manager.rename_layer_requested.connect(
@@ -830,6 +936,10 @@ class CompositeDocument(QWidget):
 
         self.stage_controller = MappingStageController(parent=self)
         self._layer_role_enum = LayerRole
+        # V7 §7：组聚合的成熟度回调（键解析唯一源在本类，controller 只数）。
+        self.stage_controller.group_controller.set_maturity_provider(
+            self._layer_maturity_value
+        )
         if self.uses_native_stack:
             self.stage_controller.group_controller.attach_canvas(self.canvas)
             if isinstance(self.layer_manager, QgisLayerTreePanel):
@@ -1039,6 +1149,98 @@ class CompositeDocument(QWidget):
 
     def _apply_tool_availability(self) -> None:
         self.action_controller.apply_availability(self.tool_availability())
+
+    # -- V7 §7 图层树呈现态 ----------------------------------------------------
+
+    def _layer_decorations(self) -> dict:
+        """图层级呈现态（编辑/未保存/新鲜度/成熟度/参考降级）。"""
+        from paleo_workbench.ui.workstation.layer_decorations import (
+            LayerPresentationState,
+            presentation_state,
+        )
+
+        controller = self.edit_controller
+        group_controller = self.stage_controller.group_controller
+        decorations: dict[str, LayerPresentationState] = {}
+        for layer_id in controller.layer_ids():
+            layer = controller.layer(str(layer_id))
+            session = getattr(layer, "edit_session", None) if layer else None
+            freshness = group_controller.layer_freshness(str(layer_id))
+            decorations[str(layer_id)] = presentation_state(
+                editing=session is not None,
+                session_undo_depth=len(getattr(session, "undo_stack", ()) or ()),
+                freshness_status=(
+                    freshness.status.value if freshness is not None else None
+                ),
+                maturity=self._layer_maturity_value(str(layer_id)),
+            )
+        for reference in self._reference_layers:
+            status = str(self._reference_status.get(str(reference.id), "") or "")
+            decorations[str(reference.id)] = LayerPresentationState(
+                degraded=status in {"failed", "error"},
+            )
+        return decorations
+
+    def _group_summaries(self) -> list:
+        """组级聚合（group_summary + 因子任务运行/排队计数）。"""
+        from paleo_workbench.mapping_workspace.layer_groups import (
+            system_group_template,
+        )
+        from paleo_workbench.ui.workstation.layer_decorations import (
+            GroupPresentationSummary,
+        )
+
+        group_controller = self.stage_controller.group_controller
+        running = pending = 0
+        for task in getattr(self._project, "factor_map_tasks", None) or []:
+            status = str(getattr(task, "status", ""))
+            if status == "running":
+                running += 1
+            elif status == "pending":
+                pending += 1
+        summaries = []
+        for group_id in group_controller.group_ids():
+            counts = group_controller.group_summary(group_id)
+            template = system_group_template(group_id)
+            summaries.append(GroupPresentationSummary(
+                group_id=group_id,
+                title=template.title if template else group_id,
+                layers=int(counts.get("layers", 0)),
+                stale=int(counts.get("stale", 0)),
+                errors=int(counts.get("errors", 0)),
+                running=running if group_id == "phase2.factors" else 0,
+                pending=pending if group_id == "phase2.factors" else 0,
+                frozen=int(counts.get("frozen", 0)),
+                published=int(counts.get("published", 0)),
+            ))
+        return summaries
+
+    def _push_layer_decorations(self) -> None:
+        """把呈现态/组聚合推给图层管理面板（面板差分渲染）。"""
+        setters = (
+            getattr(self.layer_manager, "set_layer_decorations", None),
+            getattr(self.layer_manager, "set_group_summaries", None),
+        )
+        try:
+            if callable(setters[0]):
+                setters[0](self._layer_decorations())
+            if callable(setters[1]):
+                setters[1](self._group_summaries())
+        except RuntimeError:
+            pass  # 拆壳期 C++ 对象已销毁
+
+    def _zoom_to_layer_by_id(self, layer_id) -> None:
+        """按 id 缩放到图层（树双击定位；与树菜单同一有效性判据）。"""
+        layer = self.edit_controller.layer(str(layer_id)) if layer_id else None
+        extent = getattr(layer, "extent", None) if layer is not None else None
+        if not (extent and extent[0] < extent[2] and extent[1] < extent[3]):
+            self.status_message.emit("该图层没有可缩放的有效范围")
+            return
+        try:
+            self.canvas.set_extent(tuple(float(v) for v in extent))
+        except Exception:
+            logging.getLogger(__name__).exception("缩放到图层失败")
+            self.status_message.emit("缩放到图层失败（范围无效）")
 
     def _build_toolbar(self) -> None:
         """悬浮工具条：QGIS 命令面（MapActionController）+「面板」菜单。"""
@@ -1333,6 +1535,8 @@ class CompositeDocument(QWidget):
         # 之后调用——勾选态归前者，其余归单一真源；split 的「多边形选集 +
         # 切割线」条件经 split_inputs_ready 收敛，不再二次改 enable）。
         self._apply_tool_availability()
+        # V7 §7：树呈现态（编辑/新鲜度/成熟度）差分推送。
+        self._push_layer_decorations()
         self._sync_status_bar()
 
     def _update_empty_hint(self) -> None:

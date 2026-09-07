@@ -75,6 +75,9 @@ class QgisLayerTreePanel(QWidget):
     repair_layer_requested = Signal(str)
     # 当前图层变化（无可编辑图层时携带 None）。
     active_layer_changed = Signal(object)
+    # V7 §7：双击定位信号（原生树双击事件经树回调回传时发射；无桥环境
+    # 由宿主 fallback 面板承担——同构信号）。
+    zoom_to_layer_requested = Signal(str)
     # 树回写/显示增量后的持久化通知（CompositeDocument 接 notify_display_changed）。
     display_state_changed = Signal()
     # V5 分组请求（组上下文菜单；create 无参，remove 携带 group_id）。
@@ -144,6 +147,39 @@ class QgisLayerTreePanel(QWidget):
         opacity_row.addWidget(self.opacity, 1)
         outer.addLayout(opacity_row)
         self.opacity.valueChanged.connect(self._apply_opacity)
+
+        # V7 §7：组级真实聚合摘要行（桥的 QgsLayerTreeView 行内装饰仅
+        # 支持编辑铅笔——组态/问题态在 Python 侧如实呈现，不伪造行内
+        # 指示器；行内装饰随桥 API 扩展再接入）。
+        self.group_status_label = QLabel("", self)
+        self.group_status_label.setObjectName("WorkstationPanelFootnote")
+        self.group_status_label.setWordWrap(True)
+        outer.addWidget(self.group_status_label)
+        self._decorations: dict = {}
+
+    def set_layer_decorations(self, decorations: dict) -> None:
+        """V7 §7：接收图层级呈现态（原生行内装饰受桥能力限制，先存储
+        供摘要行/未来扩展消费——接口与 fallback 面板同构）。"""
+        self._decorations = dict(decorations or {})
+        self._update_group_status_label()
+
+    def set_group_summaries(self, summaries) -> None:
+        """V7 §7：组级聚合摘要（问题组优先；干净组只计数）。"""
+        self._group_summaries_cache = list(summaries or [])
+        self._update_group_status_label()
+
+    def _update_group_status_label(self) -> None:
+        summaries = getattr(self, "_group_summaries_cache", None) or []
+        problem = [s for s in summaries if getattr(s, "has_problems", False)]
+        parts = []
+        for summary in problem[:4]:
+            parts.append(
+                f"{summary.title}: {summary.summary_text()}"
+            )
+        if not parts:
+            total = sum(int(getattr(s, "layers", 0)) for s in summaries)
+            parts.append(f"{total} 层 · 组状态正常" if total else "暂无图层")
+        self.group_status_label.setText(" · ".join(parts))
 
     # -- 静态判定（与旧面板同语义） ---------------------------------------------
 

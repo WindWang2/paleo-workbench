@@ -42,11 +42,22 @@ _VOCABULARY: dict[str, dict[str, StateToken]] = {
         "current": StateToken("✓", "最新", "ok"),
         "stale": StateToken("↻", "已过期", "warn"),
         "missing": StateToken("✕", "缺失", "error"),
+        # V7 §7（树装饰）：对齐 dependencies.FreshnessStatus 全集——
+        # missing_input/superseded 此前只有域侧中文标签，无 glyph/tone。
+        "missing_input": StateToken("✕", "输入缺失", "error"),
+        "superseded": StateToken("↻", "已被取代", "warn"),
+        "unknown": StateToken("·", "状态未知", "muted"),
+    },
+    # V7 §7：编辑会话呈现态（图层级 dirty 信号）。
+    "session": {
+        "editing": StateToken("✎", "编辑中", "info"),
+        "dirty": StateToken("✎", "未保存修改", "warn"),
     },
     "editability": {
         "editable": StateToken("✎", "可编辑", "ok"),
         "raw": StateToken("▣", "RAW 不可编辑", "locked"),
-        "locked": StateToken("🔒", "证据锁定", "locked"),
+        # 「⊘」取代旧 emoji 🔒（goal §7 禁止 emoji；字形+文字双信号保留）。
+        "locked": StateToken("⊘", "证据锁定", "locked"),
         "none": StateToken("·", "无编辑目标", "muted"),
     },
     "task": {

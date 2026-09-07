@@ -622,16 +622,30 @@ class LayerGroupController:
                 record.role, factor_task_id=record.factor_task_id)
         return ""
 
+    def _group_members(self, group_id: str) -> list[str]:
+        """组成员（reconcile 序 + 未观察到的成员资格派生；fallback 画布
+        无 reconcile 时聚合仍真实）。"""
+        order = list(self._group_orders.get(group_id, []))
+        seen = set(order)
+        for layer_id in self.state.memberships:
+            if layer_id not in seen and self.placement_of(layer_id) == group_id:
+                order.append(layer_id)
+                seen.add(layer_id)
+        return order
+
     def group_summary(self, group_id: str) -> dict[str, int]:
         """组内状态聚合（真实新鲜度统计；宿主经 ``apply_freshness`` 推送）。
 
         stale = 组内成员命中过期/缺失/被取代的成果数；
         errors = 其中输入缺失（MISSING_INPUT）数。未推送过 freshness 或
         成员无成员资格 → 诚实 0（此前硬编码 0/0，V6 修复）。
+
+        V7 §7 追加 frozen/published：组内成员成熟度计数（经
+        ``set_maturity_provider`` 注入的回调；未注入 → 诚实 0，不猜）。
         """
         from paleo_workbench.mapping_workspace.dependencies import FreshnessStatus
 
-        order = self._group_orders.get(group_id, [])
+        order = self._group_members(group_id)
         stale = 0
         errors = 0
         for layer_id in order:
@@ -640,7 +654,37 @@ class LayerGroupController:
                 stale += 1
                 if artifact.status == FreshnessStatus.MISSING_INPUT:
                     errors += 1
-        return {"layers": len(order), "stale": stale, "errors": errors}
+        frozen = published = 0
+        maturity_of = getattr(self, "_maturity_of", None)
+        if maturity_of is not None:
+            for layer_id in order:
+                maturity = str(maturity_of(layer_id) or "")
+                if maturity == "frozen":
+                    frozen += 1
+                elif maturity == "published":
+                    published += 1
+        return {
+            "layers": len(order), "stale": stale, "errors": errors,
+            "frozen": frozen, "published": published,
+        }
+
+    def group_ids(self) -> tuple[str, ...]:
+        """已知组 id（reconcile 序 + 成员资格派生；fallback 画布同样真实）。"""
+        ids = list(self._group_orders.keys())
+        for layer_id in self.state.memberships:
+            group_id = self.placement_of(layer_id)
+            if group_id and group_id not in ids:
+                ids.append(group_id)
+        return tuple(ids)
+
+    def set_maturity_provider(self, callback) -> None:
+        """注入成熟度回调（``layer_id -> str | None``；组聚合用）。
+
+        权威在 MappingWorkspaceState.artifact_maturity（宿主适配）；本
+        controller 不解析 artifact key——键解析与宿主的
+        ``_layer_maturity_value`` 同源，不在两处重复。
+        """
+        self._maturity_of = callback
 
     def apply_freshness(self, summary) -> None:
         """宿主推送 ``StaleSummary``（阶段控制器 stale_summary_changed 接线）。"""
