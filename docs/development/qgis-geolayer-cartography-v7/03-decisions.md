@@ -22,7 +22,15 @@ New decisions appended as the work proceeds; each records alternatives.
   `platform/windows/rc/version.rc.in` from the pinned commit, and
   `include(CheckFunctionExists)` inside the internal-spatialindex block
   (upstream bug: module only included under NOT WIN32).
-- **D2 — Scalar factor layers via single-band float GeoTIFF + QGIS
+- **D1b — external libspatialindex 2.0.0 instead of the internal copy.**
+  The internal spatialindex sources compile INTO qgis_core; on MSVC their
+  symbols lack dllexport so qgis_analysis fails to LINK (LNK2019; Linux is
+  unaffected — default visibility exports everything). Upstream Windows
+  practice is an external libspatialindex; conda-forge 2.0.0 satisfies the
+  vendored `<2.1` ceiling. Configure flag flipped to
+  `-DWITH_INTERNAL_SPATIALINDEX=OFF` in `.scratch/configure-qgis-vendor.cmd`
+  (the repo setup.py default stays ON for the CI Linux leg — no repo change
+  was needed since we configure manually per B3 procedure).
   pseudocolor renderer, not RGBA.** Data mirror keyed by data_revision
   ONLY (styles never rewrite science values). Classification (equal
   interval / quantile / explicit / natural breaks) computed host-side
