@@ -25,7 +25,7 @@ Only additive changes are allowed after this contract lands.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Any, Iterable
 
 from paleo_workbench.mapping.capability_model import (
@@ -126,13 +126,6 @@ class ToolContext:
         """A vector layer is registered as active (kind may still be unknown)."""
         return bool(self.active_layer_id) and self.qgis_layer_type != "raster"
 
-    def with_capability(self, snapshot: QgisCapabilitySnapshot) -> "ToolContext":
-        return replace(
-            self,
-            qgis_available=snapshot.available,
-            capability_flags=snapshot.capability_flags(),
-        )
-
     def to_dict(self) -> dict[str, Any]:
         data = {k: getattr(self, k) for k in self.__dataclass_fields__}
         data["selection_geometry_types"] = list(self.selection_geometry_types)
@@ -178,7 +171,8 @@ def build_tool_context(
         backend_reason=str(backend_reason or ""),
         blocking_task=str(state.get("blocking_task") or ""),
         mapping_stage=mapping_stage if mapping_stage is not None else (
-            str(state.get("mapping_stage") or "") or None
+            # 显式 "" 保留（fail-closed 未知阶段）；缺键才是 None（无阶段语义）。
+            str(state["mapping_stage"]) if "mapping_stage" in state else None
         ),
         write_granted=bool(facts.get("write_granted", False)),
         active_layer_id=str(facts.get("active_layer_id") or state.get("active_layer_id") or ""),

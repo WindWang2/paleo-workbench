@@ -406,21 +406,26 @@ class LayerManagerPanel(QFrame):
             toggle_snap.setCheckable(True)
             toggle_snap.setChecked(metadata.get("snap") == "true")
             remove_reference = menu.addAction(workstation_icon("map/tree-remove.svg"), "移除引用…")
+        # V8 M2：查看/导出类动作（属性表/属性/符号/标注/导出）对任意已注
+        # 册图层开放——与 canonical evaluator 同语义（attribute_table 是只
+        # 读查看，RAW 层禁查看是 evaluator 明确拒绝的假限制，review R2-P1）。
+        # 编辑类动作（开始编辑/重命名/复制/删除/修复）仍要求可编辑图层。
+        open_table = menu.addAction(
+            workstation_icon("map/tree-attribute-table.svg"), "打开属性表"
+        )
+        properties = menu.addAction(
+            workstation_icon("map/tree-properties.svg"), "图层属性…"
+        )
+        symbology = menu.addAction("符号系统…")
+        labeling = menu.addAction("标注…")
+        export = menu.addAction("导出图层…")
+        rename = duplicate = remove = repair = None
         if editable:
             menu.addSeparator()
-            open_table = menu.addAction(
-                workstation_icon("map/tree-attribute-table.svg"), "打开属性表"
-            )
             if layer_id == self._editing_layer_id:
                 toggle_edit = menu.addAction("停止编辑（保存编辑）")
             else:
                 toggle_edit = menu.addAction("开始编辑")
-            menu.addSeparator()
-            properties = menu.addAction(
-                workstation_icon("map/tree-properties.svg"), "图层属性…"
-            )
-            symbology = menu.addAction("符号系统…")
-            labeling = menu.addAction("标注…")
             menu.addSeparator()
             rename = menu.addAction(
                 workstation_icon("map/tree-properties.svg"), "重命名图层…"
@@ -438,10 +443,8 @@ class LayerManagerPanel(QFrame):
             repair.setEnabled(bool(repair_avail and repair_avail.enabled))
             if repair_avail is not None and not repair_avail.enabled:
                 repair.setToolTip(f"不可用：{repair_avail.disabled_reason}")
-            export = menu.addAction("导出图层…")
         else:
-            open_table = toggle_edit = properties = symbology = labeling = None
-            rename = duplicate = remove = repair = export = None
+            toggle_edit = None
         chosen = menu.exec(self.tree.viewport().mapToGlobal(position))
         if chosen is None:
             return
@@ -1233,8 +1236,8 @@ class CompositeDocument(QWidget):
         return None
 
     def tool_availability(self) -> dict[str, ToolAvailability]:
-        """统一可用性求值（供工具条刷新与 palette applicability 复用）。"""
-        return availability_for_context(self.tool_context())
+        """统一可用性求值（canonical evaluator；供工具条刷新与 palette 复用）。"""
+        return evaluate_all(self.tool_context())
 
     def explain_action(self, tool_id: str):
         """M4：一个动作的完整上下文解释（Inspector/palette/Agent 共用）。
@@ -1261,11 +1264,13 @@ class CompositeDocument(QWidget):
 
         ctx = self.tool_context()
         availability = dict(evaluate_all(ctx))
-        help_texts = {
-            tool_id: (format_tooltip(explain(tool_id, ctx)),
-                      format_status(explain(tool_id, ctx)))
-            for tool_id in availability
-        }
+        # explain 每工具一次（内含求值），tooltip/status 复用同一解释
+        # （review R2-P2：此前每工具求值两次）。
+        help_texts = {}
+        for tool_id in availability:
+            explanation = explain(tool_id, ctx)
+            help_texts[tool_id] = (
+                format_tooltip(explanation), format_status(explanation))
         self._last_availability = availability
         self.action_controller.apply_availability(availability, help_texts=help_texts)
         # 溢出集合优先于求值器可见性（窄画布收纳的组保持隐藏，菜单可达）。
@@ -1425,9 +1430,7 @@ class CompositeDocument(QWidget):
         self._overflow_button.setMenu(self._overflow_menu)
         self._overflow_button.setVisible(False)
         bar_layout.addWidget(self._overflow_button)
-        self.action_controller.tool_requested.connect(
-            self.edit_controller.activate_tool
-        )
+        self.action_controller.tool_requested.connect(self._on_tool_requested)
         self.action_controller.command_requested.connect(self._on_command_requested)
 
         # 视图 dock 开关 + 联动（宿主 WorkstationFrame 接线）。
@@ -1520,6 +1523,20 @@ class CompositeDocument(QWidget):
         "move_feature", "vertex", "reshape",
     })
 
+    def _on_tool_requested(self, tool_id: str) -> None:
+        """画布工具激活（checkable QAction 路径）——同样经过 re-gate。
+
+        V8 M6：工具条 checkable 动作此前直连 ``activate_tool``（绕过
+        统一门禁）。工具条刷新间隙里的过期可用判断（选择/会话刚变）在
+        此用新鲜求值拦截；QAction 的 checked 已被点击翻转，须回同步。
+        """
+        verdict = self.tool_availability().get(tool_id)
+        if verdict is not None and not verdict.enabled:
+            self.status_message.emit(f"不可用：{verdict.disabled_reason}")
+            self._sync_action_state()
+            return
+        self.edit_controller.activate_tool(tool_id)
+
     def _on_command_requested(self, command_id: str) -> None:
         # V8 M6：execution-time re-gate——shortcut/palette/工具条全部经此
         # 单一入口，禁用动作（含原因）不得被任何表面绕过。求值必须新鲜
@@ -1528,6 +1545,8 @@ class CompositeDocument(QWidget):
         if verdict is not None and not verdict.enabled:
             self.status_message.emit(
                 f"不可用：{verdict.disabled_reason}")
+            # 拒绝后回同步：checkable 动作的点击翻转不得残留（R1-P2）。
+            self._sync_action_state()
             return
         if command_id in self._CANVAS_TOOL_COMMANDS:
             self.edit_controller.activate_tool(command_id)
@@ -1542,13 +1561,14 @@ class CompositeDocument(QWidget):
         elif command_id == "cancel":
             self.edit_controller.cancel_active_tool()
         elif command_id == "snapping":
+            # V8 M6：以控制器权威为基准做「取反」分派——palette 路径不经
+            # QAction 翻转，读 isChecked() 会把当前态重设一遍（静默空操作）。
             self.edit_controller.set_snapping(
-                self.action_controller.actions["snapping"].isChecked()
-            )
+                not self.edit_controller.snapping.enabled)
             self._sync_status_bar()
         elif command_id == "topology":
-            enabled = self.action_controller.actions["topology"].isChecked()
-            self.edit_controller.set_topology(enabled)
+            self.edit_controller.set_topology(
+                not self.edit_controller.topology_enabled)
             self.status_message.emit(
                 "拓扑编辑已开启：保存编辑将执行拓扑校验" if enabled else "拓扑编辑已关闭"
             )
@@ -1810,26 +1830,11 @@ class CompositeDocument(QWidget):
         self.layer_manager.set_editing_layer(
             controller.active_layer_id if controller.editing else None
         )
-        # 工具按钮勾选态跟随真实活动工具（会话回落 pan 后按钮不得停留在
-        # 已失效的工具上）。原生画布优先读画布实际工具（shim 记录的最近
-        # 成功激活值）——Python 栈与原生栈分叉时以原生为准。
-        active_tool_id = None
-        native_probe = getattr(self.canvas, "active_map_tool_id", None)
-        if callable(native_probe):
-            try:
-                active_tool_id = native_probe()
-            except Exception:
-                active_tool_id = None
-        if not active_tool_id:
-            active_tool_id = (
-                getattr(controller.tools.active_tool, "tool_id", "") or "pan"
-            )
-        for action_id in self.action_controller._TOOL_IDS:
-            action = self.action_controller.actions.get(action_id)
-            if action is not None:
-                action.blockSignals(True)
-                action.setChecked(action_id == active_tool_id)
-                action.blockSignals(False)
+        # 工具按钮勾选态由 apply_availability 统一写入（evaluator 的
+        # checked ← current_tool，单一写者；review R2-P2：此处此前存在
+        # 第二写者且原生探针优先级逻辑会被随后 apply 覆盖——已删）。
+        # 原生实际工具的回读（canvas.active_map_tool_id）保留为 QA/检测
+        # API，激活失败路径经 _on_native_tool_activation_failed 收敛。
         # 捕捉 / 拓扑的勾选态以控制器为权威（捕捉设置对话框等旁路入口
         # 不得让工具条按钮失步，review #11）。
         actions = self.action_controller.actions
@@ -1995,7 +2000,21 @@ class CompositeDocument(QWidget):
             self.status_message.emit(f"已复制图层为「{copy.name}」")
 
     def stage_action(self, stage_value: str, action_id: str) -> None:
-        """阶段面板上下文动作入口（宿主壳经 _dispatch_stage_action 调用）。"""
+        """阶段面板上下文动作入口（宿主壳经 _dispatch_stage_action 调用）。
+
+        V8 M6：有工具面映射的阶段动作（因子/QA/成果组装）在执行前经
+        canonical evaluator re-gate——阶段面板按钮与工具条/palette 同一
+        门禁（review R2-P1：此前面板直连 dispatch，blocking/project 门
+        禁可被绕过）。
+        """
+        from paleo_workbench.ui.workstation.stage_actions import STAGE_ACTION_TOOLS
+
+        tool_id = STAGE_ACTION_TOOLS.get(str(action_id))
+        if tool_id:
+            verdict = self.tool_availability().get(tool_id)
+            if verdict is not None and not verdict.enabled:
+                self.status_message.emit(f"不可用：{verdict.disabled_reason}")
+                return
         self.stage_actions.dispatch(stage_value, action_id)
 
     def create_stage_constraint(self, kind_value: str) -> None:
@@ -2184,6 +2203,7 @@ class CompositeDocument(QWidget):
 
         layer = self._layer_capability(str(layer_id))
         base = self.tool_context()
+        raw_locked, stage_locked = self._layer_lock_classes(str(layer_id))
         ctx = _replace(
             base,
             active_layer_id=str(layer_id),
@@ -2195,6 +2215,8 @@ class CompositeDocument(QWidget):
             layer_frozen=layer.frozen,
             layer_missing=layer.missing,
             layer_degraded=layer.degraded,
+            raw_locked=raw_locked,
+            stage_locked=stage_locked,
             vector_writable=self.edit_controller.layer(str(layer_id)) is not None,
         )
         return evaluate_tool("repair_geometry", ctx)

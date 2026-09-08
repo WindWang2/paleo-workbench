@@ -232,3 +232,51 @@ def test_stage_palette_commands_carry_applicability(qtbot, tmp_path):
         assert avail.reason
     finally:
         command_registry.clear(keep_core=False)
+
+
+# -- V8 M6：单一受门禁执行路径（tool_requested / command_requested 双入口） --
+
+
+def test_tool_requested_path_regates_with_fresh_context(document, monkeypatch):
+    """checkable 工具动作的 tool_requested 路径同样被 re-gate 拦截。
+
+    构造过期窗口：动作在上一次刷新时可用（编辑会话中），随后会话结束
+    但尚未重刷——直接触发 _on_tool_requested 必须被新鲜求值拒绝并回报
+    原因，而不是透传给 activate_tool。
+    """
+    layer = _create_layer(document, "polygon")
+    _assign_role(document, layer.id, LayerRole.INITIAL_FACIES_DRAFT)
+    document.edit_controller.start_editing()
+    document._sync_action_state()
+    assert document.tool_availability()["add_polygon"].enabled
+
+    # 过期窗口：会话结束后不调用 _sync_action_state。
+    document.edit_controller.rollback_edits()
+
+    calls = []
+    monkeypatch.setattr(
+        document.edit_controller, "activate_tool",
+        lambda tool_id: calls.append(tool_id))
+    messages = []
+    document.status_message.connect(messages.append)
+
+    document._on_tool_requested("add_polygon")
+    assert calls == [], "stale-window tool request must not reach activate_tool"
+    assert any("不可用" in m for m in messages), messages
+    # 拒绝后 checked 已被回同步（QAction 的翻转不得残留）。
+    assert not document.action_controller.actions["add_polygon"].isChecked()
+
+
+def test_command_requested_path_regates_disabled_command(document, monkeypatch):
+    """命令路径 re-gate：结构性前提不满足时 save_edits 被拒并带原因。"""
+    calls = []
+    monkeypatch.setattr(
+        document, "_save_edits_with_feedback",
+        lambda: calls.append("save"))
+    messages = []
+    document.status_message.connect(messages.append)
+
+    document._on_command_requested("save_edits")
+    assert calls == []
+    # 最根本的 blocker 优先（无活动图层先于会话状态）。
+    assert any("不可用" in m for m in messages), messages

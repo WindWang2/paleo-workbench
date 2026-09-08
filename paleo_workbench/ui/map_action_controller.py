@@ -8,6 +8,11 @@ from PySide6.QtCore import QObject, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QIcon, QKeySequence
 from PySide6.QtWidgets import QToolBar, QWidget
 
+from paleo_workbench.ui.workstation.action_help import (
+    TOOL_LABELS,
+    TOOL_SHORTCUTS,
+)
+
 __all__ = ["MapActionController"]
 
 _MAP_ICONS_DIR = Path(__file__).parent / "assets" / "icons" / "map"
@@ -38,28 +43,8 @@ class MapActionController(QObject):
         "reshape",
     )
 
-    _LABELS = {
-        "pan": "平移", "zoom_in": "放大", "zoom_out": "缩小",
-        "full_extent": "全图", "previous_extent": "上一视图", "next_extent": "下一视图",
-        "refresh": "刷新", "identify": "识别", "select": "选择",
-        "select_rectangle": "框选", "measure_distance": "测距",
-        "clear_selection": "清除选择", "select_all": "全选", "invert_selection": "反选",
-        "toggle_editing": "开始编辑", "save_edits": "保存编辑", "rollback": "回滚",
-        "add_point": "添加点", "add_line": "添加线", "add_polygon": "添加面",
-        "move_feature": "移动要素", "vertex": "节点编辑", "delete_selected": "删除所选",
-        "reshape": "重塑",
-        "undo": "撤销", "redo": "重做", "split": "分割", "merge": "合并",
-        "repair_geometry": "修复几何",
-        "snapping": "捕捉", "topology": "拓扑编辑", "cancel": "取消",
-        # V7 专业分组扩展（goal §6 Layer/Symbology/Factor/QA/Layout·Export）
-        "layer_new": "新建图层", "reference_import": "导入参考图层",
-        "layer_properties": "图层属性", "attribute_table": "属性表",
-        "layer_zoom": "缩放到图层", "layer_export": "导出图层",
-        "symbology": "符号系统", "style_manager": "样式库",
-        "factor_workbench": "单因素工作台", "factor_overlay": "叠加等值线",
-        "qa_run": "运行 QC", "map_product_assemble": "生成成果",
-        "map_export": "导出图面",
-    }
+    #: 词表单一来源（V8 M4：action_help.TOOL_LABELS；帮助/QAction 同名）。
+    _LABELS = dict(TOOL_LABELS)
 
     #: 扩展面动作的图标（id → map/ 或 assets 根目录下的 svg 名）。
     _SURFACE_ICONS = {
@@ -102,13 +87,16 @@ class MapActionController(QObject):
             action = self._action(action_id, checkable=True)
             self._tool_group.addAction(action)
             action.triggered.connect(lambda checked=False, name=action_id: checked and self.tool_requested.emit(name))
-        for action_id, shortcut in (
-            ("full_extent", ""), ("previous_extent", ""), ("next_extent", ""), ("refresh", ""),
-            ("clear_selection", ""), ("select_all", ""), ("invert_selection", ""), ("toggle_editing", ""),
-            ("save_edits", "Ctrl+S"), ("rollback", ""), ("delete_selected", "Delete"),
-            ("undo", "Ctrl+Z"), ("redo", "Ctrl+Shift+Z"), ("split", ""), ("merge", ""),
-            ("snapping", ""), ("topology", ""), ("cancel", "Esc"),
+        # 快捷键单一来源（V8 M4：action_help.TOOL_SHORTCUTS；帮助镜像同源）。
+        shortcut_registry = dict(TOOL_SHORTCUTS)
+        for action_id in (
+            "full_extent", "previous_extent", "next_extent", "refresh",
+            "clear_selection", "select_all", "invert_selection", "toggle_editing",
+            "save_edits", "rollback", "delete_selected",
+            "undo", "redo", "split", "merge",
+            "snapping", "topology", "cancel",
         ):
+            shortcut = shortcut_registry.get(action_id, "")
             action = self._action(action_id, checkable=action_id in {"snapping", "topology", "toggle_editing"}, shortcut=shortcut)
             action.triggered.connect(lambda checked=False, name=action_id: self.command_requested.emit(name))
         self.actions["pan"].setChecked(True)

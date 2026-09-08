@@ -166,6 +166,10 @@ def tool_context_from_ui_snapshot(snap: object) -> ToolContext:
         layer_frozen=bool(_get("active_layer_frozen", False)),
         layer_missing=bool(_get("active_layer_missing", False)),
         layer_degraded=bool(_get("active_layer_degraded", False)),
+        qgis_layer_type=(
+            "raster" if _get("active_layer_is_raster", False)
+            else ("vector" if _get("active_layer_id", None) else "")
+        ),
         edit_gate_open=(None if editable is None else bool(editable)),
         edit_gate_reason=str(_get("active_layer_block_reason", None) or ""),
         vector_writable=(

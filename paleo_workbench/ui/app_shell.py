@@ -582,11 +582,13 @@ class AppShell(QWidget):
             "active_layer_degraded", _tool_layer_field("degraded")
         )
         svc.set_provider(
-            "active_layer_writable", _session_input("vector_writable", False)
+            "active_layer_is_raster",
+            lambda: composite.tool_context().qgis_layer_type == "raster",
         )
 
         # V8 M6：会话运行细节——palette applicability 与工具条同因的必要
-        # 输入（dirty/选择数/撤销栈）。读 V7 kernel 采集器（权威派生）。
+        # 输入（dirty/选择数/撤销栈/可写性/阻塞任务）。读 V7 kernel
+        # 采集器（权威派生）。
         def _session_input(key: str, default):
             def _read():
                 collector = getattr(
@@ -597,6 +599,9 @@ class AppShell(QWidget):
 
             return _read
 
+        svc.set_provider(
+            "active_layer_writable", _session_input("vector_writable", False)
+        )
         svc.set_provider("editing_dirty", _session_input("dirty", False))
         svc.set_provider("selection_count", _session_input("selection_count", 0))
         svc.set_provider("can_undo", _session_input("can_undo", False))

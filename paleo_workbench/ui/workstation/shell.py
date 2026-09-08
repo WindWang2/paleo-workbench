@@ -583,15 +583,11 @@ class WorkstationFrame(QWidget):
             tool_context_from_ui_snapshot,
         )
 
-        # 阶段动作 id → 工具面 id（无映射的动作不受工具门禁，仅阶段白名单）。
-        stage_action_tools = {
-            "open_factor_workbench": "factor_workbench",
-            "run_factor": "factor_workbench",
-            "overlay_factor_results": "factor_overlay",
-            "run_qa": "qa_run",
-            "stage_qc": "qa_run",
-            "assemble_map_product": "map_product_assemble",
-        }
+        # 阶段动作 id → 工具面 id：单一词表（stage_actions.STAGE_ACTION_TOOLS，
+        # 执行侧 re-gate 共用；无映射的动作不受工具门禁，仅阶段白名单）。
+        from paleo_workbench.ui.workstation.stage_actions import STAGE_ACTION_TOOLS
+
+        stage_action_tools = STAGE_ACTION_TOOLS
 
         for stage, actions in (
             (MappingStage.FACIES_CALIBRATION, MappingStagePanel._PHASE1_ACTIONS),

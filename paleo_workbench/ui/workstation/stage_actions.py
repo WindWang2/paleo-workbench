@@ -31,6 +31,19 @@ from paleo_workbench.mapping_workspace.stage_state import LayerMembershipRecord
 logger = logging.getLogger(__name__)
 
 
+#: 阶段动作 → 工具面 tool id（V8 M6：有映射的阶段动作在执行前经
+#: canonical evaluator re-gate；palette 注册与执行分派共用这一份——
+#: 阶段面板按钮不再绕过 blocking/project 门禁）。
+STAGE_ACTION_TOOLS: dict[str, str] = {
+    "open_factor_workbench": "factor_workbench",
+    "run_factor": "factor_workbench",
+    "overlay_factor_results": "factor_overlay",
+    "run_qa": "qa_run",
+    "stage_qc": "qa_run",
+    "assemble_map_product": "map_product_assemble",
+}
+
+
 #: 阶段上下文动作单一词表（V7 R2-F1：阶段面板按钮、palette 注册、
 #: dispatcher 执行共用这一份——(action_id, label)，按阶段）。
 #: 此前三套手维护表（panel._PHASEn_ACTIONS / dispatcher map / profile

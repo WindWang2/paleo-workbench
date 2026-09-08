@@ -54,13 +54,22 @@ def test_labels_match_controller_vocabulary():
         assert MapActionController._LABELS.get(tool_id) == label, tool_id
 
 
-def test_shortcut_mirror_matches_action_registration():
-    """帮助里的快捷键镜像与 QAction 注册一致（真源在注册处）。"""
-    registered = {
-        "save_edits": "Ctrl+S", "delete_selected": "Delete",
-        "undo": "Ctrl+Z", "redo": "Ctrl+Shift+Z", "cancel": "Esc",
-    }
-    assert TOOL_SHORTCUTS == registered
+def test_shortcut_mirror_matches_action_registration(qtbot):
+    """帮助里的快捷键镜像与 QAction 注册一致（注册处消费同一张表）。"""
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    from paleo_workbench.ui.map_action_controller import MapActionController
+
+    from PySide6.QtGui import QKeySequence
+
+    controller = MapActionController()
+    for tool_id, shortcut in TOOL_SHORTCUTS.items():
+        action = controller.actions[tool_id]
+        assert action.shortcut() == QKeySequence(shortcut), tool_id
+    # 无快捷键的命令动作不得携带残留 shortcut
+    for tool_id in ("toggle_editing", "merge", "split", "snapping"):
+        assert controller.actions[tool_id].shortcut().isEmpty(), tool_id
 
 
 def test_explain_derives_availability_from_evaluator():

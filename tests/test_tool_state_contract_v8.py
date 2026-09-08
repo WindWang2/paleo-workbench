@@ -313,6 +313,7 @@ class _FakeSnapshot:
         self.active_layer_frozen = ctx.layer_frozen
         self.active_layer_missing = ctx.layer_missing
         self.active_layer_degraded = ctx.layer_degraded
+        self.active_layer_is_raster = ctx.qgis_layer_type == "raster"
         self.active_layer_writable = ctx.vector_writable
         self.editing_active = ctx.editing
         self.editing_dirty = ctx.dirty

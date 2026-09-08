@@ -28,7 +28,8 @@ class StageToolProfile:
     ``edit_actions`` 是综合编修工具条的阶段过滤真源（V6 §4：composite
     toolbar 按此隐藏非本阶段的数字化/编辑动作；基础导航/识别/选择动作
     不经过该过滤。V7 D3 删除了零消费者的 ``command_groups``——分组 IA
-    由 ui.workstation.tool_surface.TOOL_GROUPS 承担）。
+    由 mapping.tool_availability.TOOL_GROUPS 承担（V8 起 canonical；
+    ui.workstation.tool_surface 仅 re-export）。
     """
 
     #: 本阶段可用的数字化/编辑动作 id（existing MapActionController ids）。

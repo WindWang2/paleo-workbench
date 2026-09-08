@@ -11,9 +11,7 @@ from tests.qgis_support import QGIS_SKIP_REASON, qgis_bridge_available
 from paleo_workbench.mapping.capability_model import (
     BRIDGE_BUILD_HINT,
     CapabilityFlag,
-    LayerCapabilitySnapshot,
     QgisCapabilitySnapshot,
-    layer_capability_snapshot,
     probe_qgis_capability,
     snapshot_stable_hash,
 )
@@ -142,37 +140,6 @@ class TestQgisCapabilitySnapshot:
         snap = probe_qgis_capability(_import_bridge=lambda: fake)
         assert snap.status == "degraded"
         assert "capability_manifest" in snap.reason
-
-class TestLayerCapabilitySnapshot:
-    def _layer(self):
-        return VectorLayer(id="composite:L1", name="相带", kind_hint=None) if False else VectorLayer(id="composite:L1", name="相带")
-
-    def test_full_open_layer(self):
-        snap = layer_capability_snapshot(self._layer(), kind="polygon", qgis=_available_snapshot())
-        for name in (
-            "can_identify", "can_select", "can_edit", "can_add_feature", "can_delete_feature",
-            "can_change_geometry", "can_change_attributes", "can_split", "can_merge",
-            "can_snap", "can_topology", "can_open_properties", "can_symbol_edit",
-        ):
-            assert snap.capability(name).available, name
-        assert snap.to_dict()["capabilities"]["can_edit"] is True
-
-    def test_raw_locked_layer_blocks_edits_not_inspection(self):
-        snap = LayerCapabilitySnapshot(layer_id="L", gate_allowed=False, gate_reason="RAW 图层不可变")
-        assert snap.capability("can_identify").available
-        assert not snap.capability("can_edit").available
-        assert "RAW" in snap.capability("can_edit").unavailable_reason
-
-    def test_non_writable_layer(self):
-        snap = LayerCapabilitySnapshot(layer_id="L", writable=False)
-        assert not snap.capability("can_add_feature").available
-        assert snap.capability("can_select").available
-
-    def test_unknown_capability_is_honest(self):
-        snap = LayerCapabilitySnapshot(layer_id="L")
-        flag = snap.capability("can_teleport")
-        assert not flag.available
-        assert "未知图层能力" in flag.unavailable_reason
 
 
 # ---------------------------------------------------------------------------

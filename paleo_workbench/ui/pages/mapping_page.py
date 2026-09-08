@@ -1956,6 +1956,9 @@ class MappingPage(QWidget):
         kind = _AUTHORING_KIND_GEOMETRY.get(str(authoring.active_kind or ""))
         # V8 M1：与工作站共用 canonical evaluator（stage=None——本页是 legacy
         # 编图表面，没有阶段语义；几何/会话/选择门禁语义一致）。
+        # checked 三态（current_tool/捕捉/拓扑）必须喂真实权威——apply_
+        # availability 会把 checkable 动作统一写成求值结果，漏喂会被
+        # 重置为默认（review R1-P1：捕捉/拓扑开关曾被恒置未勾选）。
         self.action_controller.apply_availability(
             availability_for_context(
                 ToolContext(
@@ -1976,6 +1979,11 @@ class MappingPage(QWidget):
                     split_ready=len(selected) > 0,
                     can_previous_extent=self.unified_canvas.can_previous_extent,
                     can_next_extent=self.unified_canvas.can_next_extent,
+                    current_tool=(
+                        getattr(self._map_tools.active_tool, "tool_id", "")
+                        or "pan"),
+                    snapping_enabled=bool(getattr(self._snapping, "enabled", False)),
+                    topology_enabled=bool(getattr(self._topology, "enabled", False)),
                     backend_mode="unavailable",
                     backend_reason="本页使用自有编辑画布（QGIS 桥栈在工作站中央文档）",
                 )

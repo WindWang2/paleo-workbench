@@ -62,7 +62,6 @@ __all__ = [
 
 Point = tuple[float, float]
 
-
 @dataclass(frozen=True, slots=True)
 class ToolAvailability:
     """一个工具在给定上下文下的业务结论（唯一契约）。
@@ -103,14 +102,11 @@ class ToolAvailability:
             "conflicts": list(self.conflicts),
         }
 
-
 def _ok(tool_id: str, *, visible: bool = True, preferred: bool = False) -> ToolAvailability:
     return ToolAvailability(tool_id=tool_id, visible=visible, enabled=True, preferred=preferred)
 
-
 def _no(tool_id: str, reason: str, *, visible: bool = True) -> ToolAvailability:
     return ToolAvailability(tool_id=tool_id, visible=visible, enabled=False, disabled_reason=reason)
-
 
 # ---------------------------------------------------------------------------
 # Tool group IA — the tool id namespace. Group visibility is availability
@@ -155,11 +151,9 @@ _GROUP_OF: dict[str, str] = {
 
 _KIND_LABELS = {"point": "点", "line": "线", "polygon": "面"}
 
-
 def LAYER_CAPTION(kind: str | None) -> str:  # noqa: N802 — 呈现词汇函数
     """几何类型的中文呈现（未知 = 「未知」，不猜）。"""
     return _KIND_LABELS.get(str(kind or ""), "未知")
-
 
 #: 线角色（Add Line 为主捕获工具的角色集）
 _LINE_ROLES = frozenset({
@@ -229,23 +223,19 @@ _CHECKED_CANVAS_TOOLS = frozenset({
     "move_feature", "vertex", "reshape",
 })
 
-
 # ---------------------------------------------------------------------------
 # Shared gating helpers. Each returns either None (gate passed) or a reason.
 # ---------------------------------------------------------------------------
-
 
 def _project_gate(ctx: ToolContext) -> str | None:
     if not ctx.project_open:
         return "未打开工程"
     return None
 
-
 def _blocking_gate(ctx: ToolContext) -> str | None:
     if ctx.blocking_task:
         return f"后台任务进行中：{ctx.blocking_task}"
     return None
-
 
 def _layer_gate(ctx: ToolContext) -> str | None:
     if not ctx.has_active_layer:
@@ -253,11 +243,15 @@ def _layer_gate(ctx: ToolContext) -> str | None:
     return None
 
 
+def _vector_layer_gate(ctx: ToolContext) -> str | None:
+    if not ctx.has_active_vector_layer:
+        return "没有活动的矢量图层"
+    return None
+
 def _writable_gate(ctx: ToolContext) -> str | None:
     if not ctx.vector_writable:
         return "图层不可写"
     return None
-
 
 def _role_gate(ctx: ToolContext) -> str | None:
     # 拒绝判定的优先序：宿主门禁的具体判词（RAW/冻结/组锁语义的权威文本，
@@ -276,12 +270,10 @@ def _role_gate(ctx: ToolContext) -> str | None:
         return "当前图层可编辑性未知"
     return None
 
-
 def _editing_gate(ctx: ToolContext) -> str | None:
     if not ctx.editing:
         return "需要先开始编辑"
     return None
-
 
 def _native_tool_gate(ctx: ToolContext, kind: str, native_name: str) -> str | None:
     """Native-canvas-only requirement; the fallback canvas runs the Python tool."""
@@ -290,7 +282,6 @@ def _native_tool_gate(ctx: ToolContext, kind: str, native_name: str) -> str | No
     }:
         return f"原生 {native_name} 工具在当前桥版本不可用（重建 qgis_render_bridge）"
     return None
-
 
 def _backend_gate(ctx: ToolContext) -> str | None:
     """Runtime-backend gate for native-only surface tools (style_manager)."""
@@ -302,9 +293,7 @@ def _backend_gate(ctx: ToolContext) -> str | None:
     reason = ctx.backend_reason or ("能力未知" if mode == "unknown" else "桥不可用")
     return f"需要 QGIS 原生编辑后端（{reason}）"
 
-
 _KIND_REQUIRED = {"add_point": "point", "add_line": "line", "add_polygon": "polygon"}
-
 
 def _kind_gate(ctx: ToolContext, tool_id: str) -> str | None:
     expected = _KIND_REQUIRED[tool_id]
@@ -325,17 +314,14 @@ def _kind_gate(ctx: ToolContext, tool_id: str) -> str | None:
         return f"当前编辑目标为面要素角色（{ctx.layer_role_label or '边界/掩膜'}），应使用添加面"
     return None
 
-
 # ---------------------------------------------------------------------------
 # Stage gating — derived here from the domain StageToolProfile (single
 # derivation; the host never pre-computes hidden sets).
 # ---------------------------------------------------------------------------
 
-
 def _stage_label(value: str | None) -> str:
     stage = stage_from_value(value or "")
     return stage.label if stage is not None else str(value or "阶段未知")
-
 
 def _stage_group_visibility_for(ctx: ToolContext) -> dict[str, bool] | None:
     """组可见性映射；None = 表面无阶段语义，不做组过滤。"""
@@ -347,7 +333,6 @@ def _stage_group_visibility_for(ctx: ToolContext) -> dict[str, bool] | None:
     overrides = _STAGE_GROUP_VISIBILITY.get(ctx.mapping_stage, {})
     return {group: overrides.get(group, True) for group in TOOL_GROUPS}
 
-
 def stage_group_visibility(stage_value: str | None) -> dict[str, bool]:
     """该阶段的组可见性（全组条目；None = 无阶段语义全可见）。"""
     if stage_value is None:
@@ -356,7 +341,6 @@ def stage_group_visibility(stage_value: str | None) -> dict[str, bool]:
         return {group: group in _BASIC_GROUPS for group in TOOL_GROUPS}
     overrides = _STAGE_GROUP_VISIBILITY.get(stage_value, {})
     return {group: overrides.get(group, True) for group in TOOL_GROUPS}
-
 
 def _stage_group_gate(ctx: ToolContext, tool_id: str) -> str | None:
     """组隐藏（hidden）判据；返回 None 表示该门放行。调用方负责区分 hidden。"""
@@ -372,7 +356,6 @@ def _stage_group_gate(ctx: ToolContext, tool_id: str) -> str | None:
         return f"当前阶段不提供该工具组（{_stage_label(ctx.mapping_stage)}）"
     return None
 
-
 def _stage_whitelist_gate(ctx: ToolContext, tool_id: str) -> str | None:
     whitelist = _STAGE_ACTION_WHITELIST.get(tool_id)
     if whitelist is None or ctx.mapping_stage is None:
@@ -381,7 +364,6 @@ def _stage_whitelist_gate(ctx: ToolContext, tool_id: str) -> str | None:
         labels = "/".join(_stage_label(v) for v in whitelist)
         return f"当前阶段不允许该操作（限 {labels}）"
     return None
-
 
 def _edit_action_stage_gate(ctx: ToolContext, tool_id: str) -> str | None:
     """编辑/数字化动作的阶段过滤（真源 StageToolProfile.edit_actions）。
@@ -406,7 +388,6 @@ def _edit_action_stage_gate(ctx: ToolContext, tool_id: str) -> str | None:
         return f"当前阶段不允许此编辑动作（限 {_stage_label(stage.value)}）"
     return None
 
-
 # ---------------------------------------------------------------------------
 # Rules — one per tool id. Gate order inside each rule is deliberate:
 # coarse → fine so the reason shown is the most fundamental blocker.
@@ -414,23 +395,24 @@ def _edit_action_stage_gate(ctx: ToolContext, tool_id: str) -> str | None:
 
 Rule = Callable[[ToolContext], ToolAvailability]
 
-
 def _rule_navigation(ctx: ToolContext, tool_id: str) -> ToolAvailability:
-    reason = _project_gate(ctx) or _blocking_gate(ctx)
+    reason = _project_gate(ctx)
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
 
-
 def _rule_extent_history(ctx: ToolContext, tool_id: str) -> ToolAvailability:
-    reason = _project_gate(ctx) or _blocking_gate(ctx)
+    reason = _project_gate(ctx)
     if reason is None and tool_id == "previous_extent" and not ctx.can_previous_extent:
         reason = "没有上一视图"
     if reason is None and tool_id == "next_extent" and not ctx.can_next_extent:
         reason = "没有下一视图"
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
 
-
 def _rule_inspection(ctx: ToolContext, tool_id: str) -> ToolAvailability:
-    reason = _project_gate(ctx) or _layer_gate(ctx) or _blocking_gate(ctx)
+    # identify 对任意图层合法（栅格也可识别）；select* 只对矢量。
+    reason = _project_gate(ctx) or (
+        _vector_layer_gate(ctx) if tool_id in {"select", "select_rectangle"}
+        else _layer_gate(ctx)
+    )
     if reason is None and tool_id == "identify":
         reason = _native_tool_gate(ctx, "identify", "识别")
     if reason is None and tool_id in {"select", "select_rectangle"}:
@@ -439,13 +421,11 @@ def _rule_inspection(ctx: ToolContext, tool_id: str) -> ToolAvailability:
     # （shim 按 capability manifest 运行期选择），evaluator 不做能力门。
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
 
-
 def _rule_selection_commands(ctx: ToolContext, tool_id: str) -> ToolAvailability:
-    reason = _project_gate(ctx) or _layer_gate(ctx) or _blocking_gate(ctx)
+    reason = _project_gate(ctx) or _vector_layer_gate(ctx)
     if reason is None and tool_id != "select_all" and ctx.selection_count == 0:
         reason = "没有选中的要素"
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
-
 
 def _rule_toggle_editing(ctx: ToolContext) -> ToolAvailability:
     reason = (
@@ -453,14 +433,13 @@ def _rule_toggle_editing(ctx: ToolContext) -> ToolAvailability:
         or _layer_gate(ctx)
         or _role_gate(ctx)
         or _writable_gate(ctx)
-        or _blocking_gate(ctx)
+
     )
     return (
         _ok("toggle_editing", preferred=ctx.editing)
         if reason is None
         else _no("toggle_editing", reason)
     )
-
 
 def _rule_save_edits(ctx: ToolContext) -> ToolAvailability:
     # 门序遵循总则（project → layer → editing）：无工程/无图层是更根本的
@@ -469,32 +448,31 @@ def _rule_save_edits(ctx: ToolContext) -> ToolAvailability:
         _project_gate(ctx)
         or _layer_gate(ctx)
         or _editing_gate(ctx)
-        or _blocking_gate(ctx)
+
     )
     if reason is None and not ctx.dirty:
         reason = "编辑会话没有未保存的修改"
-    if reason is None and ctx.edit_gate_open is False:
-        reason = ctx.edit_gate_reason or "图层被编辑门禁锁定"
+    if reason is None and ctx.edit_gate_open is not True:
+        reason = ctx.edit_gate_reason or (
+            "当前图层可编辑性未知" if ctx.edit_gate_open is None
+            else "图层被编辑门禁锁定")
     # 拓扑/科学阻断在保存时校验并回报（校验代价高，不进状态机）；
     # 状态机只保证结构性前提。
     return _ok("save_edits") if reason is None else _no("save_edits", reason)
-
 
 def _rule_rollback(ctx: ToolContext) -> ToolAvailability:
     reason = (
         _project_gate(ctx)
         or _layer_gate(ctx)
         or _editing_gate(ctx)
-        or _blocking_gate(ctx)
+
     )
     if reason is None and not ctx.dirty:
         reason = "编辑会话没有可回滚的修改"
     return _ok("rollback") if reason is None else _no("rollback", reason)
 
-
 def _rule_cancel(ctx: ToolContext) -> ToolAvailability:
     return _ok("cancel")
-
 
 def _rule_capture(ctx: ToolContext, tool_id: str) -> ToolAvailability:
     reason = (
@@ -503,7 +481,7 @@ def _rule_capture(ctx: ToolContext, tool_id: str) -> ToolAvailability:
         or _role_gate(ctx)
         or _editing_gate(ctx)
         or _kind_gate(ctx, tool_id)
-        or _blocking_gate(ctx)
+
     )
     if reason is None:
         native_kind = {"add_point": "addPoint", "add_line": "addLine", "add_polygon": "addPolygon"}[tool_id]
@@ -512,19 +490,17 @@ def _rule_capture(ctx: ToolContext, tool_id: str) -> ToolAvailability:
     # suggested one for the active layer.
     return _ok(tool_id, preferred=True) if reason is None else _no(tool_id, reason)
 
-
 def _rule_edit_tool(ctx: ToolContext, tool_id: str, native_kind: str) -> ToolAvailability:
     reason = (
         _project_gate(ctx)
         or _layer_gate(ctx)
         or _role_gate(ctx)
         or _editing_gate(ctx)
-        or _blocking_gate(ctx)
+
     )
     if reason is None:
         reason = _native_tool_gate(ctx, native_kind, {"move_feature": "移动", "vertex": "节点编辑"}[tool_id])
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
-
 
 def _rule_delete_selected(ctx: ToolContext) -> ToolAvailability:
     reason = (
@@ -532,12 +508,11 @@ def _rule_delete_selected(ctx: ToolContext) -> ToolAvailability:
         or _layer_gate(ctx)
         or _role_gate(ctx)
         or _editing_gate(ctx)
-        or _blocking_gate(ctx)
+
     )
     if reason is None and ctx.selection_count == 0:
         reason = "没有选中的要素"
     return _ok("delete_selected") if reason is None else _no("delete_selected", reason)
-
 
 def _rule_split(ctx: ToolContext) -> ToolAvailability:
     reason = (
@@ -545,12 +520,11 @@ def _rule_split(ctx: ToolContext) -> ToolAvailability:
         or _layer_gate(ctx)
         or _role_gate(ctx)
         or _editing_gate(ctx)
-        or _blocking_gate(ctx)
+
     )
     if reason is None and not ctx.split_ready:
         reason = "分割需要：一个正在编辑且选中了多边形的面图层 + 一条选中的切割线"
     return _ok("split") if reason is None else _no("split", reason)
-
 
 def _rule_merge(ctx: ToolContext) -> ToolAvailability:
     reason = (
@@ -558,7 +532,7 @@ def _rule_merge(ctx: ToolContext) -> ToolAvailability:
         or _layer_gate(ctx)
         or _role_gate(ctx)
         or _editing_gate(ctx)
-        or _blocking_gate(ctx)
+
     )
     if reason is None and ctx.topology_error_count > 0:
         reason = "当前编辑会话存在拓扑错误，不能合并"
@@ -566,14 +540,13 @@ def _rule_merge(ctx: ToolContext) -> ToolAvailability:
         reason = "合并需要至少两个选中的兼容面要素"
     return _ok("merge") if reason is None else _no("merge", reason)
 
-
 def _rule_reshape(ctx: ToolContext) -> ToolAvailability:
     reason = (
         _project_gate(ctx)
         or _layer_gate(ctx)
         or _role_gate(ctx)
         or _editing_gate(ctx)
-        or _blocking_gate(ctx)
+
     )
     if reason is None and not ctx.native_canvas_available:
         # 重塑的采线输入依赖原生数字化器——fallback 画布无输入路径
@@ -593,26 +566,24 @@ def _rule_reshape(ctx: ToolContext) -> ToolAvailability:
             reason = "重塑需要 QGIS reshape 几何算子（重建 qgis_render_bridge）"
     return _ok("reshape") if reason is None else _no("reshape", reason)
 
-
 def _rule_repair(ctx: ToolContext) -> ToolAvailability:
     reason = (
         _project_gate(ctx)
         or _layer_gate(ctx)
         or _writable_gate(ctx)
         or _role_gate(ctx)
-        or _blocking_gate(ctx)
+
     )
     if reason is None and ctx.active_layer_kind != "polygon":
         reason = "几何修复针对面图层"
     return _ok("repair_geometry") if reason is None else _no("repair_geometry", reason)
-
 
 def _rule_history(ctx: ToolContext, tool_id: str) -> ToolAvailability:
     reason = (
         _project_gate(ctx)
         or _layer_gate(ctx)
         or _editing_gate(ctx)
-        or _blocking_gate(ctx)
+
     )
     if reason is None and tool_id == "undo" and not ctx.can_undo:
         reason = "没有可撤销的操作"
@@ -620,59 +591,49 @@ def _rule_history(ctx: ToolContext, tool_id: str) -> ToolAvailability:
         reason = "没有可重做的操作"
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
 
-
 def _rule_snapping(ctx: ToolContext) -> ToolAvailability:
     # D4-5：捕捉/拓扑只需活动图层（与编辑会话解耦，QGIS desktop 对齐）。
-    reason = _project_gate(ctx) or _layer_gate(ctx) or _blocking_gate(ctx)
+    reason = _project_gate(ctx) or _layer_gate(ctx)
     return _ok("snapping") if reason is None else _no("snapping", reason)
 
-
 def _rule_topology(ctx: ToolContext) -> ToolAvailability:
-    reason = _project_gate(ctx) or _layer_gate(ctx) or _blocking_gate(ctx)
+    reason = _project_gate(ctx) or _layer_gate(ctx)
     if reason is None and not ctx.crs_valid:
         reason = "工程 CRS 无效，拓扑校验不可用"
     return _ok("topology") if reason is None else _no("topology", reason)
 
-
 def _rule_layer_management(ctx: ToolContext, tool_id: str) -> ToolAvailability:
     # layer_new / reference_import：工程级动作，不需要活动图层。
-    reason = _project_gate(ctx) or _blocking_gate(ctx)
+    reason = _project_gate(ctx)
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
-
 
 def _rule_layer_scoped(ctx: ToolContext, tool_id: str) -> ToolAvailability:
     # 图层泛用动作（属性/属性表/缩放/导出/符号）：任意活动图层即可，
     # 不要求矢量（参考栅格层的属性/缩放/导出同样合法）。
-    reason = _project_gate(ctx) or _blocking_gate(ctx)
+    reason = _project_gate(ctx)
     if reason is None and not ctx.has_active_layer:
         reason = "当前无活动图层"
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
-
 
 def _rule_style_manager(ctx: ToolContext) -> ToolAvailability:
     # 门序遵循总则：blocking task 先于 native-only 能力门（后台任务进行中
     # 是更根本的全局阻断，V8 M1 契约）。
     reason = (
-        _blocking_gate(ctx)
-        or _project_gate(ctx)
-        or _layer_gate(ctx)
+        _project_gate(ctx)
         or _backend_gate(ctx)
+        or _layer_gate(ctx)
     )
     return _ok("style_manager") if reason is None else _no("style_manager", reason)
 
-
 def _rule_factor(ctx: ToolContext, tool_id: str) -> ToolAvailability:
-    reason = _project_gate(ctx) or _stage_whitelist_gate(ctx, tool_id) or _blocking_gate(ctx)
+    reason = _project_gate(ctx) or _stage_whitelist_gate(ctx, tool_id)
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
-
 
 def _rule_qa(ctx: ToolContext, tool_id: str) -> ToolAvailability:
     reason = _project_gate(ctx)
     if tool_id == "map_product_assemble":
         reason = reason or _stage_whitelist_gate(ctx, tool_id)
-    reason = reason or _blocking_gate(ctx)
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
-
 
 _RULE_TABLE: dict[str, Rule] = {
     "pan": lambda ctx: _rule_navigation(ctx, "pan"),
@@ -722,6 +683,20 @@ _RULE_TABLE: dict[str, Rule] = {
     "map_export": lambda ctx: _rule_factor(ctx, "map_export"),
 }
 
+def _coarsely_blocked(ctx: ToolContext, tool_id: str) -> bool:
+    """该工具是否被比阶段更粗的门禁挡住（其判词优先于阶段呈现）。
+
+    优先于阶段的判词：工程未开；以及**存在于具体图层之上**的角色/事实
+    门禁（RAW/冻结/组锁/源缺失——这些是权威业务结论）。无活动图层不是
+    ——阶段外动作概念上不存在（QGIS 惯例整条隐藏），无图层判词无从谈起。
+    """
+    if not ctx.project_open:
+        return True
+    needs_role = tool_id in (_NEEDS_EDITABLE_LAYER | _NEEDS_EDITING)
+    if needs_role and ctx.has_active_layer and ctx.edit_gate_open is not True:
+        return True
+    return False
+
 
 def evaluate_tool(tool_id: str, ctx: ToolContext) -> ToolAvailability:
     """Evaluate one tool. Unknown ids are invisible+disabled (fail-honest)."""
@@ -739,7 +714,8 @@ def evaluate_tool(tool_id: str, ctx: ToolContext) -> ToolAvailability:
         if blocking is not None:
             return _no(tool_id, blocking)
     # 2) 图层事实门禁：源缺失 / 降级（宿主判词优先，默认文案兜底）。
-    if tool_id in _LAYER_FACT_GATED and ctx.has_active_layer:
+    #    仅在工程已打开时裁决——无工程是更根本的 blocker（门序总则）。
+    if tool_id in _LAYER_FACT_GATED and ctx.project_open and ctx.has_active_layer:
         if ctx.layer_missing:
             return _no(
                 tool_id,
@@ -765,8 +741,11 @@ def evaluate_tool(tool_id: str, ctx: ToolContext) -> ToolAvailability:
             tool_id=tool_id, visible=False, enabled=False,
             disabled_reason="当前无活动图层——该工具组未显示",
         )
-    else:
+    elif not _coarsely_blocked(ctx, tool_id):
         # 阶段裁决（组隐藏 → 受治理编辑动作），单一推导自 StageToolProfile。
+        # 门序总则：project/图层存在/角色门禁等**粗**门禁的判词优先于阶段
+        # 呈现；更细的门禁（会话/几何/选择/原生 manifest）则被阶段隐藏覆盖
+        # （阶段外动作整条隐藏，QGIS 惯例）——review R1-P2 的精确语义。
         stage_reason = _stage_group_gate(ctx, tool_id)
         if stage_reason is None:
             stage_reason = _edit_action_stage_gate(ctx, tool_id)
@@ -793,7 +772,6 @@ def evaluate_tool(tool_id: str, ctx: ToolContext) -> ToolAvailability:
             preferred=availability.preferred, conflicts=availability.conflicts,
         )
     return availability
-
 
 def evaluate_all(ctx: ToolContext) -> dict[str, ToolAvailability]:
     """Evaluate the full matrix (stable ordering by TOOL_IDS)."""

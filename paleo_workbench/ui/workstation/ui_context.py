@@ -47,6 +47,8 @@ class UIContextSnapshot:
     active_layer_frozen: bool = False
     active_layer_missing: bool = False
     active_layer_degraded: bool = False
+    # V8 M2：活动图层是否为栅格/参考（select* 等矢量专属工具的门禁输入）。
+    active_layer_is_raster: bool = False
     # V8 M2：图层可写性（数据源事实）——与 editable（角色门禁结论）是两个
     # 正交事实：只读参考层可以门禁通过但不可写。None = provider 缺席。
     active_layer_writable: bool | None = None
