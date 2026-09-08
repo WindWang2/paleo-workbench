@@ -98,7 +98,9 @@ def make_geometry_valid(geometry: Mapping[str, object]) -> dict[str, object]:
         return dict(geometry)
     from paleo_workbench.mapping.geometry_operations import repair as repair_op
 
-    return repair_op(dict(geometry))
+    # Contract (unchanged): dict in → dict out.  The facade returns a
+    # GeometryResult carrier (engine-disclosed); unwrap it here.
+    return repair_op(dict(geometry)).geometry
 
 
 _BRIDGE_PROBE: bool | None = None
