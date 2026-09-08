@@ -8,7 +8,7 @@ from PySide6.QtCore import QObject, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QIcon, QKeySequence
 from PySide6.QtWidgets import QToolBar, QWidget
 
-from paleo_workbench.ui.workstation.action_help import (
+from paleo_workbench.mapping.tool_help import (
     TOOL_LABELS,
     TOOL_SHORTCUTS,
 )
