@@ -114,9 +114,9 @@ jobs:
       - name: Assert the slow family has not silently shrunk
         # Baseline 15 = 7 real-data smoke + 5 interpolation perf + 2 real SEGY axis contracts (#650) + 1 fence probe (#896).
         run: |
-          count="$(python -m pytest --collect-only -q -m slow tests/ 2>&1 | grep -oE '[0-9]+ tests collected' | grep -oE '^[0-9]+')"
+          count="$(python -m pytest --collect-only -q -m slow tests/ 2>&1 | awk -F': ' '/\.py: [0-9]+$/ {s+=$NF} END {print s+0}')"
           echo "slow tests collected: ${count} (baseline 15)"
-          test -n "${count}" && test "${count}" -ge 15
+          test "${count}" -ge 15
 
       - name: Run slow tests (real-data smoke + interpolation perf gates)
         env:

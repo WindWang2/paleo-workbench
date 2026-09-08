@@ -277,7 +277,7 @@ jobs:
         # environment silently stops running those gates — fail instead. The nightly
         # workflow (.github/workflows/slow-tests.yml) actually executes them.
         run: |
-          count="$(python -m pytest --collect-only -q -m slow tests/ 2>&1 | grep -oE '[0-9]+ tests collected' | grep -oE '^[0-9]+')"
+          count="$(python -m pytest --collect-only -q -m slow tests/ 2>&1 | awk -F': ' '/\.py: [0-9]+$/ {s+=$NF} END {print s+0}')"
           echo "slow tests collected: ${count} (baseline 15)"
           test -n "${count}" && test "${count}" -ge 15
 
@@ -289,7 +289,7 @@ jobs:
         # PRESENCE is asserted (baseline: 1 contract + 1 guard) so the contract
         # cannot silently vanish; execution happens where the binding is built.
         run: |
-          count="$(python -m pytest --collect-only -q -m welllog_binding tests/ 2>&1 | grep -oE '[0-9]+ tests collected' | grep -oE '^[0-9]+')"
+          count="$(python -m pytest --collect-only -q -m welllog_binding tests/ 2>&1 | awk -F': ' '/\.py: [0-9]+$/ {s+=$NF} END {print s+0}')"
           echo "welllog_binding tests collected: ${count} (baseline 2)"
           test -n "${count}" && test "${count}" -ge 2
 
@@ -357,10 +357,13 @@ jobs:
           xvfb-run -a python -m pytest -v --tb=line             --timeout=120             --timeout-method=thread             -m opengl             --durations=15
 
       - name: Assert the opengl family has not silently shrunk
+        # pytest >=8.4 prints `-q --collect-only` as per-file "path: N" lines
+        # (no trailing "N tests collected" summary) — tail -1 greps came back
+        # empty and failed this guard. Sum the per-file counts instead.
         run: |
-          count=$(python -m pytest -m opengl --collect-only -q 2>/dev/null | tail -1 | grep -oE '[0-9]+' | head -1)
+          count=$(python -m pytest -m opengl --collect-only -q tests/ 2>/dev/null | awk -F': ' '/\.py: [0-9]+$/ {s+=$NF} END {print s+0}')
           echo "opengl-marked tests: ${count}"
-          test -n "${count}" && test "${count}" -ge 4
+          test "${count}" -ge 4
 
   well-log-workstation:
     name: Well Log Workstation (host)
