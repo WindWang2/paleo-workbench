@@ -39,8 +39,10 @@ __all__ = [
     "ENGINE_QGIS",
     "ENGINE_SHAPELY",
     "area_with_unit",
+    "bbox_intersects",
     "bounding_geometry",
     "buffer",
+    "centroid",
     "clip",
     "crs_transform_xy",
     "densify",
@@ -627,6 +629,95 @@ def bounding_geometry(geometries: Iterable[dict]) -> tuple[float, float, float, 
     from paleo_workbench.mapping.geometry_planar import extent_of_geometries
 
     return extent_of_geometries(geometries)
+
+
+def bbox_intersects(a: tuple[float, float, float, float],
+                    b: tuple[float, float, float, float],
+                    *,
+                    tolerance: float = 0.0) -> bool:
+    """AABB overlap（V8 M4 facade 补缺）。
+
+    闭区间语义（touch = 相交）；``tolerance`` 供 QA 规则的数值余量。
+    原 cartographic_qa / map_qa_rules 的手工 max/min 判定由此收敛。
+    """
+    axmin, aymin, axmax, aymax = (float(v) for v in a)
+    bxmin, bymin, bxmax, bymax = (float(v) for v in b)
+    tol = max(0.0, float(tolerance))
+    return not (
+        axmax < bxmin - tol
+        or bxmax < axmin - tol
+        or aymax < bymin - tol
+        or bymax < aymin - tol
+    )
+
+
+def centroid(geometry: dict) -> tuple[float, float]:
+    """GeoJSON 几何质心（V8 M4 facade 补缺，吸收 qc/workarea 两处顶点均值复刻）。
+
+    Point → 自身；线 → 顶点均值（显式语义——非 shapely 的线密度积分质心，
+    与既有 QC/标注放置行为一致）；面 → shoelace 面积质心（含洞、多 part
+    加权），洞按符号面积减权，退化面拒绝（fail-closed）。
+    """
+    from paleo_workbench.mapping.geological_pipeline.polygonization import (
+        calculate_signed_area,
+        ring_area_centroid,
+    )
+
+    geom_type = str(geometry.get("type") or "")
+    coords = geometry.get("coordinates")
+    if geom_type == "Point":
+        return float(coords[0]), float(coords[1])
+    if geom_type in {"LineString", "MultiLineString"}:
+        parts = [coords] if geom_type == "LineString" else list(coords)
+        vertices: list[tuple[float, float]] = []
+        for part in parts:
+            vertices.extend(
+                (float(p[0]), float(p[1]))
+                for p in part or ()
+                if isinstance(p, (list, tuple)) and len(p) >= 2
+            )
+        if not vertices:
+            raise ValueError("centroid needs a non-empty geometry")
+        return (
+            sum(v[0] for v in vertices) / len(vertices),
+            sum(v[1] for v in vertices) / len(vertices),
+        )
+    if geom_type in {"Polygon", "MultiPolygon"}:
+        polys = [coords] if geom_type == "Polygon" else list(coords)
+        # 面积矩守恒（review-1 P1-4）：Σ(A_ext·C_ext − Σ A_hole·C_hole) /
+        # Σ(A_ext − Σ A_hole)——洞既减面积也减矩；此前只减面积的版本对
+        # 非对称洞给出错误质心（恰好在中心对称洞上与真值重合）。
+        area_total = 0.0
+        moment_x = 0.0
+        moment_y = 0.0
+        for rings in polys:
+            rings = list(rings or [])
+            if not rings:
+                continue
+            exterior = [p for p in rings[0] if isinstance(p, (list, tuple)) and len(p) >= 2]
+            if not exterior:
+                continue
+            ext_area = abs(calculate_signed_area(exterior))
+            ext_cx, ext_cy = ring_area_centroid(exterior)
+            part_area = ext_area
+            part_moment_x = ext_cx * ext_area
+            part_moment_y = ext_cy * ext_area
+            for hole in rings[1:]:
+                cleaned = [p for p in hole if isinstance(p, (list, tuple)) and len(p) >= 2]
+                if cleaned:
+                    hole_area = abs(calculate_signed_area(cleaned))
+                    hole_cx, hole_cy = ring_area_centroid(cleaned)
+                    part_area -= hole_area
+                    part_moment_x -= hole_cx * hole_area
+                    part_moment_y -= hole_cy * hole_area
+            if part_area > 0.0:
+                area_total += part_area
+                moment_x += part_moment_x
+                moment_y += part_moment_y
+        if area_total <= 0.0:
+            raise ValueError("centroid needs a non-degenerate polygon")
+        return moment_x / area_total, moment_y / area_total
+    raise ValueError(f"centroid: unsupported geometry type {geom_type!r}")
 
 
 def nearest_feature(point: Sequence[float],

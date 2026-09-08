@@ -253,10 +253,27 @@ public:
   // 幂等整组替换，on=false 时清除。doc_id 未镜像时静默忽略。
   void setEditIndicator(std::uintptr_t tree, const std::string& doc_id, bool on);
   int editIndicatorCount(std::uintptr_t tree, const std::string& doc_id) const;
+  // V8 M5: 通用行指示器——kinds_json 为字符串数组，词汇与 host
+  // state_language 的 LayerPresentationState 装饰集对齐（dirty/stale/
+  // missing/missing_input/superseded/degraded/frozen/published/reviewed）。
+  // 幂等整组替换（不动 ✏ 编辑铅笔）；未知 kind 跳过；doc_id 未镜像时
+  // 静默忽略。kind 过滤的计数用于 parity 测试。
+  void setRowIndicators(std::uintptr_t tree, const std::string& doc_id,
+                        const std::string& kinds_json);
+  int rowIndicatorCount(std::uintptr_t tree, const std::string& doc_id,
+                        const std::string& kind = "") const;
 
   // M5: mini QgsProject XML envelope (renderer/labeling/visibility/opacity/order).
   // Features stay in Python; apply matches live mirrors by pwb/doc_id.
   std::string writeProjectXml();
+  // V8 M1 自省面：doc_id 镜像层上真实应用的 provider schema（fields/
+  // constraints/alias/editor widget/default 的 JSON 事实）。未镜像 →
+  // {"exists": false}。当前消费者为 qgis-marked 测试；host 侧
+  // Inspector/handshake 接入为后续（能力事实面，非展示规则）。
+  std::string mirrorLayerSchemaJson(const std::string& doc_id) const;
+  // V8 M1 自省面（数据侧）：镜像层真实存储的要素 + typed 属性
+  // （GeoJSON FeatureCollection，limit 截断）。
+  std::string mirrorFeaturesJson(const std::string& doc_id, int limit = 16) const;
   int applyProjectXml(const std::string& xml);
 
   // M7: component-graph → QgsLayout export. The spec is a JSON document

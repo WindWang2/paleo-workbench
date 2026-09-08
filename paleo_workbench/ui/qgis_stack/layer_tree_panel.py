@@ -148,9 +148,8 @@ class QgisLayerTreePanel(QWidget):
         outer.addLayout(opacity_row)
         self.opacity.valueChanged.connect(self._apply_opacity)
 
-        # V7 §7：组级真实聚合摘要行（桥的 QgsLayerTreeView 行内装饰仅
-        # 支持编辑铅笔——组态/问题态在 Python 侧如实呈现，不伪造行内
-        # 指示器；行内装饰随桥 API 扩展再接入）。
+        # V7 §7：组级真实聚合摘要行；V8 M5 起行内状态经桥的通用行指示器
+        # （set_row_indicators）投影——旧桥无该能力时仍只有本摘要行。
         self.group_status_label = QLabel("", self)
         self.group_status_label.setObjectName("WorkstationPanelFootnote")
         self.group_status_label.setWordWrap(True)
@@ -158,10 +157,61 @@ class QgisLayerTreePanel(QWidget):
         self._decorations: dict = {}
 
     def set_layer_decorations(self, decorations: dict) -> None:
-        """V7 §7：接收图层级呈现态（原生行内装饰受桥能力限制，先存储
-        供摘要行/未来扩展消费——接口与 fallback 面板同构）。"""
+        """V7 §7：接收图层级呈现态；V8 M5 起同时投影为原生行指示器。
+
+        桥有 ``set_row_indicators``（feature flag row_indicators）时按
+        LayerPresentationState 的装饰词汇（dirty/stale/missing/…）逐行推
+        送；旧桥诚实跳过（仅摘要行）。editing 仍由 set_editing_layer 的 ✏
+        铅笔独占，不在此重复。
+        """
         self._decorations = dict(decorations or {})
+        self._push_native_row_indicators()
         self._update_group_status_label()
+
+    @staticmethod
+    def _indicator_kinds(state) -> list[str]:
+        """LayerPresentationState → 行指示器 kinds（优先序同 _PRIORITY）。"""
+        if state is None:
+            return []
+        maturity = getattr(state, "maturity", None)
+        flags = [
+            ("missing", bool(getattr(state, "missing", False))),
+            ("dirty", bool(getattr(state, "dirty", False))),
+            ("missing_input", bool(getattr(state, "missing_input", False))),
+            ("superseded", bool(getattr(state, "superseded", False))),
+            ("stale", bool(getattr(state, "stale", False))),
+            ("degraded", bool(getattr(state, "degraded", False))),
+            ("frozen", maturity == "frozen"),
+            ("published", maturity == "published"),
+            ("reviewed", maturity == "reviewed"),
+        ]
+        return [kind for kind, on in flags if on]
+
+    def _push_native_row_indicators(self) -> None:
+        """把装饰态投影到桥的原生行指示器（能力门控 + 幂等整组替换）。"""
+        tree_host = getattr(self, "tree_host", None)
+        canvas = getattr(self, "_canvas", None)
+        if tree_host is None or canvas is None:
+            return
+        stack = getattr(canvas, "stack", None)
+        if stack is None:
+            return
+        push = getattr(stack, "set_row_indicators", None)
+        if not callable(push):
+            return  # 旧桥：诚实跳过（group summary 仍呈现状态）
+        import json
+
+        for doc_id, state in self._decorations.items():
+            kinds = self._indicator_kinds(state)
+            try:
+                push(
+                    tree_host.tree_view_address,
+                    str(doc_id),
+                    json.dumps(kinds),
+                )
+            except Exception:
+                # 指示器是纯呈现增强：失败不得影响数据/树权威。
+                continue
 
     def set_group_summaries(self, summaries) -> None:
         """V7 §7：组级聚合摘要（问题组优先；干净组只计数）。"""

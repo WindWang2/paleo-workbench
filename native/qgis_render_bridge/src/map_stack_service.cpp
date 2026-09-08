@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <functional>
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
@@ -41,7 +42,11 @@
 #include <qgscoordinatereferencesystem.h>
 #include <qgscoordinatetransform.h>
 #include <qgscompoundcurve.h>
+#include <qgsdefaultvalue.h>
+#include <qgseditorwidgetsetup.h>
 #include <qgsfeature.h>
+#include <qgsfield.h>
+#include <qgsfieldconstraints.h>
 #include <qgsfillsymbol.h>
 #include <qgsjsonutils.h>
 #include <qgslayertree.h>
@@ -151,6 +156,265 @@ void recordMirrorFeatureFids(std::unordered_map<long long, std::string>& table,
             table[static_cast<long long>(f.id())] = ids[i].toStdString();
         ++i;
     }
+}
+
+// ---------------------------------------------------------------------------
+// V8 M1: fields_json（qgis_layer_schema wire，GeologicalLayerSpec 单一字段
+// 权威）→ memory provider 的真实 QgsFields + 约束 + 默认值 + 编辑器控件。
+// 桥只应用 schema、绝不发明字段；wire 畸形时抛错（fail-closed），因为
+// Python 侧 spec 已验证——能到这里的坏 JSON 只能是编程错误。
+// ---------------------------------------------------------------------------
+struct FieldSchemaEntry {
+    QgsField field;            // 类型/长度/精度 + 字段级约束（provider origin）
+    QString alias;
+    QString editor_widget;     // 空 = 不设置（沿用 QGIS 默认）
+    QVariantMap editor_config;
+    QString default_expression;  // 字面量已转 QGIS 表达式
+};
+
+QMetaType::Type metaTypeForWireName(const QString& name) {
+    if (name == QLatin1String("QString")) return QMetaType::Type::QString;
+    if (name == QLatin1String("qlonglong")) return QMetaType::Type::LongLong;
+    if (name == QLatin1String("double")) return QMetaType::Type::Double;
+    if (name == QLatin1String("bool")) return QMetaType::Type::Bool;
+    if (name == QLatin1String("QDateTime")) return QMetaType::Type::QDateTime;
+    throw std::invalid_argument(
+        "fields_json: unknown field type '" + name.toStdString() + "'");
+}
+
+QVariant jsonValueToVariant(const QJsonValue& v) {
+    if (v.isString()) return QVariant(v.toString());
+    if (v.isDouble()) return QVariant(v.toDouble());
+    if (v.isBool()) return QVariant(v.toBool());
+    return QVariant();
+}
+
+QString defaultLiteralToExpression(const QJsonValue& v) {
+    if (v.isBool()) return v.toBool() ? QStringLiteral("true") : QStringLiteral("false");
+    if (v.isDouble()) return QString::number(v.toDouble(), 'g', 15);
+    // 字符串字面量 → 单引号表达式（内部引号按 QGIS 表达式转义）。
+    const QString raw = v.toString();
+    QString escaped;
+    escaped.reserve(raw.size());
+    for (const QChar ch : raw) {
+        if (ch == QLatin1Char('\'')) escaped += QStringLiteral("''");
+        else escaped += ch;
+    }
+    return QStringLiteral("'%1'").arg(escaped);
+}
+
+QList<FieldSchemaEntry> parseFieldSchema(const std::string& fields_json) {
+    QJsonParseError err;
+    const QJsonDocument doc = QJsonDocument::fromJson(
+        QByteArray::fromStdString(fields_json).trimmed(), &err);
+    if (err.error != QJsonParseError::NoError || !doc.isArray()) {
+        throw std::invalid_argument(
+            "fields_json: malformed wire payload for mirror layer: "
+            + err.errorString().toStdString());
+    }
+    QList<FieldSchemaEntry> entries;
+    const QJsonArray array = doc.array();
+    for (const QJsonValue& value : array) {
+        const QJsonObject obj = value.toObject();
+        const QString name = obj.value(QStringLiteral("name")).toString();
+        if (name.isEmpty()) {
+            throw std::invalid_argument("fields_json: field entry without name");
+        }
+        FieldSchemaEntry entry;
+        entry.field = QgsField(
+            name, metaTypeForWireName(obj.value(QStringLiteral("type")).toString()));
+        if (obj.contains(QStringLiteral("length"))) {
+            entry.field.setLength(obj.value(QStringLiteral("length")).toInt());
+        }
+        if (obj.contains(QStringLiteral("precision"))) {
+            entry.field.setPrecision(obj.value(QStringLiteral("precision")).toInt());
+        }
+        entry.alias = obj.value(QStringLiteral("alias")).toString();
+        if (entry.alias.isEmpty()) entry.alias = name;
+        // 字段级约束：随 QgsField 进 provider（ConstraintOriginProvider），
+        // QGIS 属性表单按 field.constraints() 强制，与 origin 无关。
+        const QJsonObject constraints =
+            obj.value(QStringLiteral("constraints")).toObject();
+        if (constraints.value(QStringLiteral("not_null")).toBool()) {
+            QgsFieldConstraints fc = entry.field.constraints();
+            fc.setConstraint(QgsFieldConstraints::ConstraintNotNull,
+                             QgsFieldConstraints::ConstraintOriginProvider);
+            entry.field.setConstraints(fc);
+        }
+        if (constraints.value(QStringLiteral("unique")).toBool()) {
+            QgsFieldConstraints fc = entry.field.constraints();
+            fc.setConstraint(QgsFieldConstraints::ConstraintUnique,
+                             QgsFieldConstraints::ConstraintOriginProvider);
+            entry.field.setConstraints(fc);
+        }
+        const QString expr = constraints.value(QStringLiteral("expression")).toString();
+        if (!expr.isEmpty()) {
+            QgsFieldConstraints fc = entry.field.constraints();
+            fc.setConstraintExpression(expr);
+            entry.field.setConstraints(fc);
+        }
+        // 编辑器控件 + 值域配置（ValueMap/Range 的 config 形状与 QGIS 桌面
+        // 同名控件一致——style_codec/桌面对话框序列化的形状不漂移）。
+        entry.editor_widget = obj.value(QStringLiteral("editor_widget")).toString();
+        const QJsonObject domain = obj.value(QStringLiteral("domain")).toObject();
+        QVariantMap config;
+        if (entry.editor_widget == QLatin1String("ValueMap")) {
+            QVariantMap map_config;
+            const QJsonObject map = domain.value(QStringLiteral("map")).toObject();
+            for (auto it = map.begin(); it != map.end(); ++it) {
+                // wire 的 map 是 {值: 值}（identity）——显示文本取键、存储值取值。
+                map_config.insert(it.key(), jsonValueToVariant(it.value()));
+            }
+            config.insert(QStringLiteral("map"), map_config);
+        } else if (entry.editor_widget == QLatin1String("Range")) {
+            const QJsonArray range = domain.value(QStringLiteral("range")).toArray();
+            if (range.size() == 2) {
+                config.insert(QStringLiteral("Min"), range.at(0).toDouble());
+                config.insert(QStringLiteral("Max"), range.at(1).toDouble());
+                config.insert(QStringLiteral("Step"), 1.0);
+                config.insert(QStringLiteral("Style"), QStringLiteral("SpinBox"));
+            }
+        }
+        entry.editor_config = config;
+        if (obj.contains(QStringLiteral("default"))) {
+            entry.default_expression =
+                defaultLiteralToExpression(obj.value(QStringLiteral("default")));
+        }
+        entries.append(entry);
+    }
+    return entries;
+}
+
+
+// 把 schema 应用到镜像层。返回 provider 字段是否发生变化（变化即要求
+// 调用方跳过 delta 通道——属性被整体重建，改走全量重发）。
+bool applyFieldSchema(QgsVectorLayer& layer,
+                      const QList<FieldSchemaEntry>& entries) {
+    QgsVectorDataProvider* provider = layer.dataProvider();
+    if (provider == nullptr) return false;
+    const QgsFields current = layer.fields();
+    // 等价 = 名称/类型/长度/精度全同（review-2 P2-4：只比名称/类型时，
+    // 仅改 length/precision 的 spec 漂移静默不应用，自省面会谎报）。
+    bool equivalent = current.count() == entries.count();
+    if (equivalent) {
+        for (int i = 0; i < entries.count(); ++i) {
+            if (current.at(i).name() != entries.at(i).field.name()
+                || current.at(i).type() != entries.at(i).field.type()
+                || current.at(i).length() != entries.at(i).field.length()
+                || current.at(i).precision() != entries.at(i).field.precision()) {
+                equivalent = false;
+                break;
+            }
+        }
+    }
+    if (!equivalent) {
+        // 镜像层由 host 全量权威重发——字段漂移时整体重建（delete + re-add）
+        // 比 per-field changeAttributeType 简单且不会留下半迁移状态。
+        QgsAttributeIds drop;
+        for (int i = 0; i < current.count(); ++i) drop << i;
+        if (!drop.isEmpty()) provider->deleteAttributes(drop);
+        layer.updateFields();
+        QList<QgsField> fresh;
+        for (const FieldSchemaEntry& e : entries) fresh << e.field;
+        if (!fresh.isEmpty()) {
+            if (!provider->addAttributes(fresh)) {
+                throw std::runtime_error(
+                    "mirror addAttributes failed for doc_id: "
+                    + layer.customProperty(QStringLiteral("pwb/doc_id"))
+                          .toString().toStdString());
+            }
+            layer.updateFields();
+        }
+    }
+    // 图层级配置（alias/widget/default）幂等覆盖——cheap，不做签名短路。
+    const QgsFields applied = layer.fields();
+    for (const FieldSchemaEntry& e : entries) {
+        const int idx = applied.indexOf(e.field.name());
+        if (idx < 0) continue;
+        layer.setFieldAlias(idx, e.alias);
+        if (!e.editor_widget.isEmpty()) {
+            layer.setEditorWidgetSetup(
+                idx, QgsEditorWidgetSetup(e.editor_widget, e.editor_config));
+        }
+        if (!e.default_expression.isEmpty()) {
+            layer.setDefaultValueDefinition(
+                idx, QgsDefaultValue(e.default_expression, false));
+        }
+    }
+    return !equivalent;
+}
+
+QgsFeatureList parseGeoJsonFeatures(const QString& text, const QgsFields& fields) {
+    // V8 M1：带 schema 解析。不使用 stringToFeatureList(text, fields)——
+    // 该 vendored 构建对额外属性按"位置"映射（__pwb_fid 首键错位实测），
+    // 因此手工构建要素：几何走 geometryFromGeoJson，属性按名 setAttribute
+    // （__pwb_* 侧信道键天然忽略）。无 schema 时保持 QGIS 默认（V7 行为）。
+    if (fields.isEmpty()) {
+        return QgsJsonUtils::stringToFeatureList(text);
+    }
+    QJsonParseError json_err{};
+    const QJsonDocument doc = QJsonDocument::fromJson(text.toUtf8(), &json_err);
+    if (json_err.error != QJsonParseError::NoError || !doc.isObject()) {
+        return QgsJsonUtils::stringToFeatureList(text);
+    }
+    QgsFeatureList out;
+    const QJsonArray features =
+        doc.object().value(QStringLiteral("features")).toArray();
+    for (const QJsonValue& value : features) {
+        const QJsonObject feature = value.toObject();
+        QgsFeature record(fields);
+        const QJsonObject geometry_json =
+            feature.value(QStringLiteral("geometry")).toObject();
+        if (!geometry_json.isEmpty()) {
+            const QgsGeometry geometry = QgsJsonUtils::geometryFromGeoJson(
+                QString::fromUtf8(
+                    QJsonDocument(geometry_json).toJson(QJsonDocument::Compact)));
+            if (!geometry.isNull()) record.setGeometry(geometry);
+        }
+        const QJsonObject properties =
+            feature.value(QStringLiteral("properties")).toObject();
+        for (int index = 0; index < fields.count(); ++index) {
+            const QString name = fields.at(index).name();
+            const QJsonValue property = properties.value(name);
+            if (property.isUndefined()) continue;  // 缺省属性 = NULL（诚实）
+            // 严格类型收窄（review-1 P2-8）：JSON 值类型与字段类型不符 →
+            // 置 NULL（诚实），不做静默截断/猜值（"3.9"→3、"true"→false）。
+            QVariant variant;
+            const double number = property.toDouble(0.0);
+            switch (fields.at(index).type()) {
+              case QMetaType::Type::Double:
+                if (property.isDouble()) variant = property.toDouble();
+                break;
+              case QMetaType::Type::LongLong:
+              case QMetaType::Type::Int:
+                if (property.isDouble()
+                    && number == std::floor(number)) {
+                  variant = QVariant(static_cast<qint64>(number));
+                }
+                break;
+              case QMetaType::Type::Bool:
+                if (property.isBool()) variant = property.toBool();
+                break;
+              case QMetaType::Type::QDateTime:
+                if (property.isString()) {
+                  const QDateTime parsed =
+                      QDateTime::fromString(property.toString(), Qt::ISODate);
+                  if (parsed.isValid()) variant = parsed;
+                }
+                break;
+              default:
+                if (property.isString()) variant = property.toString();
+                break;
+            }
+            if (variant.isValid()) {
+              record.setAttribute(index, variant);
+            }  // 无效 = 缺省 NULL（setAttribute 未调即保持初始 NULL）
+        }
+        // 与 OGR 路径同律：出现在 features 数组里的要素一律保留（空几何/
+        // 空属性也保留——review-1 P2-7：丢掉会错位 __pwb_fid 顺序配对）。
+        out.append(record);
+    }
+    return out;
 }
 
 Qgis::SnappingTypes parseSnappingTypes(const QJsonArray& arr) {
@@ -1516,8 +1780,9 @@ bool QgisMapStack::applyMirrorFeatureDelta(QgsVectorLayer& layer,
     QJsonArray single_features;
     single_features.append(value);
     single.insert(QStringLiteral("features"), single_features);
-    const QgsFeatureList one = QgsJsonUtils::stringToFeatureList(
-        QString::fromUtf8(QJsonDocument(single).toJson()));
+    // V8 M1: delta 重加的要素也按层内 typed 字段解析（调用前 schema 已应用）。
+    const QgsFeatureList one = parseGeoJsonFeatures(
+        QString::fromUtf8(QJsonDocument(single).toJson()), layer.fields());
     if (!one.isEmpty()) add_list.append(one);
   }
   if (!add_list.isEmpty()) {
@@ -1614,17 +1879,42 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
   }
   if (existing) {
     SuppressGuard guard(&impl_->suppress_tree_callbacks);
+    // V8 M1: 先应用 spec 字段 schema——delta 通道与全量重发都必须在 typed
+    // provider 字段上解析 features，GeoJSON properties 才真正落为属性。
+    bool schema_changed = false;
+    if (!fields_json.empty()) {
+      const QList<FieldSchemaEntry> schema = parseFieldSchema(fields_json);
+      schema_changed = applyFieldSchema(*existing, schema);
+      existing->setCustomProperty(QStringLiteral("pwb/fields_json"),
+                                  QString::fromStdString(fields_json));
+    } else if (!existing->customProperty(QStringLiteral("pwb/fields_json"))
+                    .toString().isEmpty()) {
+      // 角色回退（legacy 无 schema 路径）且此前 schema 化过：这是 schema
+      // 漂移到"无"——provider 字段一并重建（否则残留列全部变 NULL 的假象），
+      // 并清掉过期声明属性。
+      QgsAttributeIds drop;
+      const QgsFields current = existing->fields();
+      for (int i = 0; i < current.count(); ++i) drop << i;
+      if (!drop.isEmpty() && existing->dataProvider() != nullptr) {
+        existing->dataProvider()->deleteAttributes(drop);
+        existing->updateFields();
+      }
+      existing->removeCustomProperty(QStringLiteral("pwb/fields_json"));
+      schema_changed = true;  // 全量重发（typed → legacy 的属性丢弃语义）
+    }
     // v7 §9: delta channel — delete+re-add only the changed features when
     // the mirror provably holds base_revision (offscreen #932 semantics).
+    // V8 M1: schema 重建后属性列已整体换血，delta 的 delete+re-add 会丢未
+    // 变更要素的属性——强制走全量路径。
     bool delta_applied = false;
-    if (!delta_json.empty() && data_revision != 0) {
+    if (!delta_json.empty() && data_revision != 0 && !schema_changed) {
       delta_applied = applyMirrorFeatureDelta(*existing, doc_id, delta_json,
                                               data_revision);
     }
     QgsFeatureList features;
     if (!delta_applied) {
-      features = QgsJsonUtils::stringToFeatureList(
-          QString::fromStdString(geojson_feature_collection));
+      features = parseGeoJsonFeatures(
+          QString::fromStdString(geojson_feature_collection), existing->fields());
       if (existing->dataProvider()) {
         if (!existing->dataProvider()->truncate()) {
           throw std::runtime_error("mirror truncate failed for doc_id: " + doc_id);
@@ -1670,10 +1960,6 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
                                 is_editable ? QStringLiteral("true") : QString());
     existing->setCustomProperty(QStringLiteral("pwb/reference_snap"),
                                 reference_snap ? QStringLiteral("true") : QString());
-    if (!fields_json.empty()) {
-      existing->setCustomProperty(QStringLiteral("pwb/fields_json"),
-                                  QString::fromStdString(fields_json));
-    }
     QgsLayerTreeLayer* node = project->layerTreeRoot()->findLayer(existing);
     if (node) node->setItemVisibilityChecked(visible);
     impl_->known_layer_visibility[doc_id] = visible;
@@ -1688,8 +1974,16 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
   auto layer = std::make_unique<QgsVectorLayer>(
       uri, QString::fromStdString(name), QStringLiteral("memory"));
   if (!layer->isValid()) throw std::runtime_error("memory layer creation failed: " + name);
-  QgsFeatureList features = QgsJsonUtils::stringToFeatureList(
-      QString::fromStdString(geojson_feature_collection));
+  // V8 M1: schema 先行——provider 落字段，features 带 schema 解析为 typed
+  // 属性（无 schema 时保持 V7 legacy 行为：属性被丢弃，几何仍在）。
+  if (!fields_json.empty()) {
+    const QList<FieldSchemaEntry> schema = parseFieldSchema(fields_json);
+    applyFieldSchema(*layer, schema);
+    layer->setCustomProperty(QStringLiteral("pwb/fields_json"),
+                             QString::fromStdString(fields_json));
+  }
+  QgsFeatureList features = parseGeoJsonFeatures(
+      QString::fromStdString(geojson_feature_collection), layer->fields());
   if (!features.isEmpty()) {
     if (!layer->dataProvider()->addFeatures(features)) {
       throw std::runtime_error("addFeatures failed for new mirror layer: " + name);
@@ -1719,10 +2013,6 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
                            is_editable ? QStringLiteral("true") : QString());
   layer->setCustomProperty(QStringLiteral("pwb/reference_snap"),
                            reference_snap ? QStringLiteral("true") : QString());
-  if (!fields_json.empty()) {
-    layer->setCustomProperty(QStringLiteral("pwb/fields_json"),
-                             QString::fromStdString(fields_json));
-  }
   layer->setOpacity(std::clamp(opacity, 0.0, 1.0));
   const std::string id = layer->id().toStdString();
   {
@@ -2267,6 +2557,144 @@ std::string QgisMapStack::treeSnapshotJson() const {
   QJsonObject root;
   root.insert(QStringLiteral("children"), children);
   return QJsonDocument(root).toJson(QJsonDocument::Compact).toStdString();
+}
+
+std::string QgisMapStack::mirrorLayerSchemaJson(const std::string& doc_id) const {
+  // V8 M1 自省面：镜像层上真实落地的 provider schema（QgsFields/约束/
+  // 别名/控件/默认值）。能力事实而非展示规则——供 qgis-marked 测试与
+  // host 端 handshake（M10）消费；未镜像返回 {"exists": false}。
+  if (!impl_ || !impl_->initialized) {
+    throw std::runtime_error("map stack is not initialized");
+  }
+  QJsonObject out;
+  QgsVectorLayer* layer = nullptr;
+  auto it = impl_->mirror_by_doc.find(doc_id);
+  if (it != impl_->mirror_by_doc.end()) {
+    layer = qobject_cast<QgsVectorLayer*>(
+        project()->mapLayer(QString::fromStdString(it->second)));
+  }
+  if (layer == nullptr) layer = findMirrorByDocId(project(), doc_id);
+  if (layer == nullptr) {
+    out.insert(QStringLiteral("exists"), false);
+    return QJsonDocument(out).toJson(QJsonDocument::Compact).toStdString();
+  }
+  out.insert(QStringLiteral("exists"), true);
+  QJsonArray fields;
+  const QgsFields applied = layer->fields();
+  for (int i = 0; i < applied.count(); ++i) {
+    const QgsField field = applied.at(i);
+    QJsonObject entry;
+    entry.insert(QStringLiteral("name"), field.name());
+    entry.insert(QStringLiteral("type"),
+                 QString::fromUtf8(QMetaType(field.type()).name()));
+    if (!field.alias().isEmpty()) {
+      entry.insert(QStringLiteral("alias"), field.alias());
+    }
+    if (field.length() > 0) {
+      entry.insert(QStringLiteral("length"), field.length());
+    }
+    if (field.precision() > 0) {
+      entry.insert(QStringLiteral("precision"), field.precision());
+    }
+    const QgsFieldConstraints constraints = field.constraints();
+    QJsonObject constraint_json;
+    if (constraints.constraints() & QgsFieldConstraints::ConstraintNotNull) {
+      constraint_json.insert(QStringLiteral("not_null"), true);
+    }
+    if (constraints.constraints() & QgsFieldConstraints::ConstraintUnique) {
+      constraint_json.insert(QStringLiteral("unique"), true);
+    }
+    if (!constraints.constraintExpression().isEmpty()) {
+      constraint_json.insert(
+          QStringLiteral("expression"), constraints.constraintExpression());
+    }
+    if (!constraint_json.isEmpty()) {
+      entry.insert(QStringLiteral("constraints"), constraint_json);
+    }
+    const QgsEditorWidgetSetup setup = layer->editorWidgetSetup(i);
+    if (!setup.type().isEmpty()) {
+      entry.insert(QStringLiteral("editor_widget"), setup.type());
+      QJsonObject config;
+      for (auto cfg = setup.config().constBegin();
+           cfg != setup.config().constEnd(); ++cfg) {
+        config.insert(cfg.key(), QJsonValue::fromVariant(cfg.value()));
+      }
+      entry.insert(QStringLiteral("editor_config"), config);
+    }
+    const QString default_expr =
+        layer->defaultValueDefinition(i).expression();
+    if (!default_expr.isEmpty()) {
+      entry.insert(QStringLiteral("default"), default_expr);
+    }
+    fields.append(entry);
+  }
+  out.insert(QStringLiteral("fields"), fields);
+  return QJsonDocument(out).toJson(QJsonDocument::Compact).toStdString();
+}
+
+std::string QgisMapStack::mirrorFeaturesJson(const std::string& doc_id,
+                                             int limit) const {
+  // V8 M1 自省面（数据侧）：镜像层上真实存储的要素 + typed 属性
+  // （GeoJSON FeatureCollection）。与 mirrorLayerSchemaJson 成对，供
+  // qgis-marked 测试与 host 端（Inspector/handshake）消费；limit 截断
+  // 防止大层意外序列化。
+  if (!impl_ || !impl_->initialized) {
+    throw std::runtime_error("map stack is not initialized");
+  }
+  QJsonObject out;
+  QgsVectorLayer* layer = nullptr;
+  auto it = impl_->mirror_by_doc.find(doc_id);
+  if (it != impl_->mirror_by_doc.end()) {
+    layer = qobject_cast<QgsVectorLayer*>(
+        project()->mapLayer(QString::fromStdString(it->second)));
+  }
+  if (layer == nullptr) layer = findMirrorByDocId(project(), doc_id);
+  if (layer == nullptr) {
+    out.insert(QStringLiteral("exists"), false);
+    return QJsonDocument(out).toJson(QJsonDocument::Compact).toStdString();
+  }
+  out.insert(QStringLiteral("exists"), true);
+  QJsonArray features;
+  int emitted = 0;
+  QgsFeature stored;
+  QgsFeatureIterator cursor = layer->getFeatures();
+  while (cursor.nextFeature(stored)) {
+    if (emitted++ >= std::max(1, limit)) break;
+    QJsonObject feature_json;
+    if (stored.hasGeometry()) {
+      feature_json.insert(QStringLiteral("geometry"),
+                          QJsonDocument::fromJson(
+                              stored.geometry().asJson().toUtf8()).object());
+    }
+    // 原始 QVariant 属性（不经 editor-widget formatter——Range 控件的
+    // 千分位格式化会把 2500 变 "2,500"，自省面必须报告存储真相）。
+    QJsonObject properties;
+    const QgsFields stored_fields = layer->fields();
+    for (int index = 0; index < stored_fields.count(); ++index) {
+      const QVariant value = stored.attribute(index);
+      if (!value.isValid() || value.isNull()) continue;
+      switch (stored_fields.at(index).type()) {
+        case QMetaType::Type::Double:
+          properties.insert(stored_fields.at(index).name(), value.toDouble());
+          break;
+        case QMetaType::Type::LongLong:
+        case QMetaType::Type::Int:
+          properties.insert(stored_fields.at(index).name(),
+                            static_cast<qint64>(value.toLongLong()));
+          break;
+        case QMetaType::Type::Bool:
+          properties.insert(stored_fields.at(index).name(), value.toBool());
+          break;
+        default:
+          properties.insert(stored_fields.at(index).name(), value.toString());
+          break;
+      }
+    }
+    feature_json.insert(QStringLiteral("properties"), properties);
+    features.append(feature_json);
+  }
+  out.insert(QStringLiteral("features"), features);
+  return QJsonDocument(out).toJson(QJsonDocument::Compact).toStdString();
 }
 
 void QgisMapStack::setGroupExpanded(std::uintptr_t tree_view,
@@ -3514,9 +3942,13 @@ void QgisMapStack::setEditIndicator(std::uintptr_t tree_addr,
   if (!layer) return;  // 未镜像（例如尚未上树）时静默忽略——面板状态仍会记录
   QgsLayerTreeLayer* node = project()->layerTreeRoot()->findLayer(layer);
   if (!node) return;
-  // 幂等：先摘除本栈挂过的编辑指示器（removeIndicator 负责销毁对象）。
+  // 幂等：先摘除本栈挂过的编辑指示器；removeIndicator 只出列表，销毁
+  // 由 deleteLater 补齐（与行指示器同律，review-1 P1-5）。
   for (QgsLayerTreeViewIndicator* ind : view->indicators(node)) {
-    if (ind->property("pwb_edit").toBool()) view->removeIndicator(node, ind);
+    if (ind->property("pwb_edit").toBool()) {
+      view->removeIndicator(node, ind);
+      ind->deleteLater();
+    }
   }
   if (!on) return;
   // QGIS 桌面经图层指示器呈现编辑态；vendored 主题无铅笔资源，绘字符图标。
@@ -3549,6 +3981,114 @@ int QgisMapStack::editIndicatorCount(std::uintptr_t tree_addr,
   int count = 0;
   for (QgsLayerTreeViewIndicator* ind : view->indicators(node)) {
     if (ind->property("pwb_edit").toBool()) ++count;
+  }
+  return count;
+}
+
+// ---------------------------------------------------------------------------
+// V8 M5: 通用行指示器。kinds 词汇与 host state_language（layer_decorations
+// .py 的 LayerPresentationState 装饰集）逐词对齐——桥只绘制，不发明状态；
+// 未知 kind 静默跳过（host 端"未知=无装饰"同语义）。editing 仍由
+// setEditIndicator 独占（✏ 铅笔），本 API 不处理 editing。
+// ---------------------------------------------------------------------------
+namespace {
+struct RowIndicatorStyle {
+    const char* glyph;
+    const char* label;
+    const char* color;  // 设计 tokens（tokens.py）语义色的 hex
+};
+
+const QMap<QString, RowIndicatorStyle>& rowIndicatorStyles() {
+    static const QMap<QString, RowIndicatorStyle> styles{
+        {QStringLiteral("dirty"), {"✎", "未保存修改", "#b45309"}},
+        {QStringLiteral("stale"), {"↻", "已过期", "#b45309"}},
+        {QStringLiteral("missing"), {"✕", "缺失", "#d31f1f"}},
+        {QStringLiteral("missing_input"), {"✕", "输入缺失", "#d31f1f"}},
+        {QStringLiteral("superseded"), {"↻", "已被取代", "#b45309"}},
+        {QStringLiteral("degraded"), {"◌", "回退", "#b45309"}},
+        {QStringLiteral("frozen"), {"❄", "冻结", "#53616c"}},
+        {QStringLiteral("published"), {"◉", "已发布", "#15803d"}},
+        {QStringLiteral("reviewed"), {"✓", "已复核", "#15803d"}},
+    };
+    return styles;
+}
+}  // namespace
+
+void QgisMapStack::setRowIndicators(std::uintptr_t tree_addr,
+                                    const std::string& doc_id,
+                                    const std::string& kinds_json) {
+  QgsLayerTreeView* view = treeViewOrThrow(tree_addr);
+  QgsMapLayer* layer = nullptr;
+  auto it = impl_->mirror_by_doc.find(doc_id);
+  if (it != impl_->mirror_by_doc.end()) {
+    layer = project()->mapLayer(QString::fromStdString(it->second));
+  }
+  if (!layer) layer = findMirrorByDocId(project(), doc_id);
+  if (!layer) return;  // 未镜像时静默忽略——面板状态记录仍是权威
+  QgsLayerTreeLayer* node = project()->layerTreeRoot()->findLayer(layer);
+  if (!node) return;
+  // 幂等：先摘除本栈挂过的行指示器（edit 铅笔不动）。removeIndicator 只
+  // 从列表移除不销毁（QGIS 自家 provider 亦随后 deleteLater——review-1
+  // P1-5：不补销毁会在长会话中随刷新无限累积 QObject）。
+  for (QgsLayerTreeViewIndicator* ind : view->indicators(node)) {
+    if (ind->property("pwb_row").toBool()) {
+      view->removeIndicator(node, ind);
+      ind->deleteLater();
+    }
+  }
+  QJsonParseError err;
+  const QJsonDocument doc = QJsonDocument::fromJson(
+      QByteArray::fromStdString(kinds_json).trimmed(), &err);
+  if (err.error != QJsonParseError::NoError || !doc.isArray()) {
+    throw std::invalid_argument(
+        "kinds_json: malformed indicator payload: " + err.errorString().toStdString());
+  }
+  int emitted = 0;
+  for (const QJsonValue& v : doc.array()) {
+    const auto style = rowIndicatorStyles().constFind(v.toString());
+    if (style == rowIndicatorStyles().constEnd()) continue;  // 未知 kind：跳过
+    QPixmap pixmap(16, 16);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    QFont font = painter.font();
+    font.setPixelSize(13);
+    painter.setFont(font);
+    painter.setPen(QColor(QLatin1String(style->color)));
+    painter.drawText(pixmap.rect(), Qt::AlignCenter,
+                     QString::fromUtf8(style->glyph));
+    painter.end();
+    auto* indicator = new QgsLayerTreeViewIndicator(view);
+    indicator->setProperty("pwb_row", true);
+    indicator->setProperty("pwb_kind", v.toString());
+    indicator->setIcon(QIcon(pixmap));
+    indicator->setToolTip(QString::fromUtf8(style->label));
+    view->addIndicator(node, indicator);
+    ++emitted;
+  }
+  node->setCustomProperty(QStringLiteral("pwb/row_indicator_count"), emitted);
+}
+
+int QgisMapStack::rowIndicatorCount(std::uintptr_t tree_addr,
+                                    const std::string& doc_id,
+                                    const std::string& kind) const {
+  QgsLayerTreeView* view = treeViewOrThrow(tree_addr);
+  QgsMapLayer* layer = nullptr;
+  auto it = impl_->mirror_by_doc.find(doc_id);
+  if (it != impl_->mirror_by_doc.end()) {
+    layer = project()->mapLayer(QString::fromStdString(it->second));
+  }
+  if (!layer) layer = findMirrorByDocId(project(), doc_id);
+  if (!layer) return 0;
+  QgsLayerTreeLayer* node = project()->layerTreeRoot()->findLayer(layer);
+  if (!node) return 0;
+  int count = 0;
+  for (QgsLayerTreeViewIndicator* ind : view->indicators(node)) {
+    if (!ind->property("pwb_row").toBool()) continue;
+    if (!kind.empty()
+        && ind->property("pwb_kind").toString().toStdString() != kind) {
+      continue;
+    }
+    ++count;
   }
   return count;
 }
@@ -3772,6 +4312,56 @@ std::string QgisMapStack::layoutExport(const std::string& spec_json,
       legend->attemptMove(mmPoint(x, y));
       legend->setBackgroundEnabled(
           item.value(QStringLiteral("background")).toBool(true));
+      // V8 M8: legend filter（V7 08 §1 的显式 follow-up）。filter_layers 是
+      // include 表（doc_id 或 QGIS layer id/name）。QGIS 4.2 的公开路径：
+      // setSyncMode(Manual) 内部克隆工程树（setCustomLayerTree 已私有），
+      // model()->rootGroup() 即那份手动树——在其上剪枝不动工程本树。
+      // 空/缺省 = 不过滤（历史行为，列全部层）。
+      const QJsonArray filter =
+          item.value(QStringLiteral("filter_layers")).toArray();
+      if (linked_map && !filter.isEmpty()) {
+        QSet<QString> keep_ids;
+        for (const QJsonValue& v : filter) {
+          const QString key = v.toString();
+          if (key.isEmpty()) continue;
+          // 解析顺序：mirror doc_id → QGIS layer id → layer name。
+          QString resolved;
+          auto mirror = impl_->mirror_by_doc.find(key.toStdString());
+          if (mirror != impl_->mirror_by_doc.end()) {
+            resolved = QString::fromStdString(mirror->second);
+          } else if (project()->mapLayer(key) != nullptr) {
+            resolved = project()->mapLayer(key)->id();
+          } else {
+            const QList<QgsMapLayer*> by_name = project()->mapLayersByName(key);
+            if (!by_name.isEmpty()) resolved = by_name.first()->id();
+          }
+          if (!resolved.isEmpty()) keep_ids.insert(resolved);
+        }
+        if (!keep_ids.isEmpty()) {
+          legend->setSyncMode(Qgis::LegendSyncMode::Manual);
+          // 剪掉不在 include 表里的层与因此变空的组（removeChildNode 连节点
+          // 一起销毁——手动树归 legend 所有）；模型监听树信号自动重绘。
+          const std::function<void(QgsLayerTreeGroup*)> prune =
+              [&](QgsLayerTreeGroup* branch) {
+                const QList<QgsLayerTreeNode*> children = branch->children();
+                for (QgsLayerTreeNode* child : children) {
+                  if (QgsLayerTree::isGroup(child)) {
+                    prune(QgsLayerTree::toGroup(child));
+                    if (child->children().isEmpty()) {
+                      branch->removeChildNode(child);
+                    }
+                  } else if (QgsLayerTree::isLayer(child)) {
+                    auto* layer_node = static_cast<QgsLayerTreeLayer*>(child);
+                    if (layer_node->layer() == nullptr
+                        || !keep_ids.contains(layer_node->layer()->id())) {
+                      branch->removeChildNode(child);
+                    }
+                  }
+                }
+              };
+          prune(legend->model()->rootGroup());
+        }
+      }
       layout.addLayoutItem(legend);
       ++item_count;
     } else if (type == QLatin1String("scalebar")) {

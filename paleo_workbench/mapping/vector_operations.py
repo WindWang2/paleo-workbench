@@ -16,20 +16,6 @@ from paleo_workbench.mapping.vector_layer import VectorEditSession, VectorFeatur
 __all__ = ["merge_selected_polygons", "split_polygon_by_line"]
 
 
-def _shape(feature: VectorFeature):
-    try:
-        from shapely.geometry import shape
-    except ImportError as exc:  # pragma: no cover - dependency/environment path
-        raise RuntimeError("polygon operations require Shapely/GEOS") from exc
-    return shape(feature.as_record()["geometry"])
-
-
-def _feature_from_shape(feature_id: str, geometry, attributes) -> VectorFeature:
-    from shapely.geometry import mapping
-
-    return VectorFeature(feature_id, mapping(geometry), attributes)
-
-
 def merge_selected_polygons(session: VectorEditSession, feature_ids: Iterable[str]) -> str:
     if qgis_bridge_available():
         from paleo_workbench.mapping.geometry_service import (
@@ -47,16 +33,17 @@ def _shapely_merge(session: VectorEditSession, feature_ids: Iterable[str]) -> st
     features = [session.feature(feature_id) for feature_id in ids]
     if any(feature.geometry["type"] not in {"Polygon", "MultiPolygon"} for feature in features):
         raise ValueError("only polygon features can be merged")
-    try:
-        from shapely.ops import unary_union
-    except ImportError as exc:  # pragma: no cover - dependency/environment path
-        raise RuntimeError("polygon operations require Shapely/GEOS") from exc
-    geometry = unary_union([_shape(feature) for feature in features])
-    if geometry.is_empty or geometry.geom_type not in {"Polygon", "MultiPolygon"}:
+    # V8 M4：shapely 兜底改经 facade union（同一引擎链 + 披露）；本模块
+    # 不再直接 import shapely——unavailable 环境的错误信息也由 facade 统一。
+    from paleo_workbench.mapping.geometry_operations import union
+
+    merged = union([feature.as_record()["geometry"] for feature in features])
+    geometry = merged.geometry
+    if str(geometry.get("type")) not in {"Polygon", "MultiPolygon"}:
         raise ValueError("selected polygons cannot form a valid merged polygon")
     feature_id = new_feature_id("merge")
-    merged = _feature_from_shape(feature_id, geometry, features[0].attributes)
-    session.merge_features(ids, merged)
+    merged_feature = VectorFeature(feature_id, geometry, features[0].attributes)
+    session.merge_features(ids, merged_feature)
     return feature_id
 
 
@@ -84,16 +71,22 @@ def _shapely_split(
         raise ValueError("split target must be a polygon")
     if line_feature.geometry["type"] not in {"LineString", "MultiLineString"}:
         raise ValueError("split cutter must be a line")
-    try:
-        from shapely.ops import split
-    except ImportError as exc:  # pragma: no cover - dependency/environment path
-        raise RuntimeError("polygon operations require Shapely/GEOS") from exc
-    pieces = list(split(_shape(polygon_feature), _shape(line_feature)).geoms)
-    pieces = [piece for piece in pieces if piece.geom_type in {"Polygon", "MultiPolygon"} and not piece.is_empty]
+    # V8 M4：shapely 兜底改经 facade split_by_line（同一引擎链 + 披露）。
+    from paleo_workbench.mapping.geometry_operations import split_by_line
+
+    result = split_by_line(
+        polygon_feature.as_record()["geometry"],
+        line_feature.as_record()["geometry"],
+    )
+    pieces = [
+        piece
+        for piece in (result.geometries or [])
+        if str(piece.get("type")) in {"Polygon", "MultiPolygon"}
+    ]
     if len(pieces) < 2:
         raise ValueError("the cutter does not split the selected polygon")
     replacements = tuple(
-        _feature_from_shape(new_feature_id("split"), piece, polygon_feature.attributes)
+        VectorFeature(new_feature_id("split"), piece, polygon_feature.attributes)
         for piece in pieces
     )
     polygon_session.split_feature(polygon_feature_id, replacements)

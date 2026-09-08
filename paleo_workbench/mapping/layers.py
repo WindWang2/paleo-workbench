@@ -140,30 +140,17 @@ class VectorMapLayer(MapLayer):
         self.bump_data_revision()
 
     def recompute_extent(self) -> tuple[float, float, float, float]:
-        coords: list[tuple[float, float]] = []
+        # V8 M4：范围聚合走共享内核；空集合占位与退化垫宽契约不变。
+        from paleo_workbench.mapping.geometry_planar import extent_of_geometries
 
-        def extract_pts(geom: object) -> None:
-            if isinstance(geom, Mapping):
-                extract_pts(geom.get("coordinates"))
-            elif isinstance(geom, (list, tuple)):
-                if len(geom) >= 2 and isinstance(geom[0], (int, float)) and isinstance(geom[1], (int, float)):
-                    coords.append((float(geom[0]), float(geom[1])))
-                else:
-                    for item in geom:
-                        extract_pts(item)
-
-        for f in self.features:
-            geom = f.get("geometry") if isinstance(f, Mapping) else None
-            if geom:
-                extract_pts(geom)
-
-        if not coords:
+        try:
+            xmin, ymin, xmax, ymax = extent_of_geometries(
+                f.get("geometry") for f in self.features
+                if isinstance(f, Mapping) and isinstance(f.get("geometry"), Mapping)
+            )
+        except ValueError:
             self.extent = (0.0, 0.0, 1.0, 1.0)
             return self.extent
-        xs = [p[0] for p in coords]
-        ys = [p[1] for p in coords]
-        xmin, xmax = min(xs), max(xs)
-        ymin, ymax = min(ys), max(ys)
         pad = max(1.0, abs(xmin), abs(ymin), abs(xmax), abs(ymax)) * 1e-6
         if math.isclose(xmin, xmax):
             xmin -= pad

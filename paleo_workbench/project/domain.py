@@ -169,7 +169,12 @@ def is_reference_well(well: Any) -> bool:
 
 
 def _point_in_ring(x: float, y: float, ring: Iterable[Iterable[float]]) -> bool:
-    """Inclusive ray-cast containment for one WorkArea boundary ring."""
+    """Inclusive ray-cast containment for one WorkArea boundary ring.
+
+    V8 M4：第 5 份 PIP 复刻已删——边界包含语义（边界井属工区）提升为
+    共享内核 ``geometry_planar.point_in_ring_scalar_inclusive``；这里只做
+    容错归一（畸形顶点跳过，与旧实现一致）。
+    """
     points: list[tuple[float, float]] = []
     for point in ring:
         try:
@@ -177,31 +182,9 @@ def _point_in_ring(x: float, y: float, ring: Iterable[Iterable[float]]) -> bool:
             points.append((float(px), float(py)))
         except (TypeError, ValueError):
             continue
-    if len(points) < 3:
-        return False
-    inside = False
-    previous_x, previous_y = points[-1]
-    for current_x, current_y in points:
-        # A point on an edge belongs to the WorkArea; floating point epsilon
-        # keeps boundary wells from oscillating between categories.
-        cross = (current_x - previous_x) * (y - previous_y) - (
-            current_y - previous_y
-        ) * (x - previous_x)
-        if abs(cross) <= 1e-9 and min(previous_x, current_x) - 1e-9 <= x <= max(
-            previous_x, current_x
-        ) + 1e-9 and min(previous_y, current_y) - 1e-9 <= y <= max(
-            previous_y, current_y
-        ) + 1e-9:
-            return True
-        intersects = (current_y > y) != (previous_y > y)
-        if intersects:
-            crossing_x = (previous_x - current_x) * (y - current_y) / (
-                previous_y - current_y
-            ) + current_x
-            if x < crossing_x:
-                inside = not inside
-        previous_x, previous_y = current_x, current_y
-    return inside
+    from paleo_workbench.mapping.geometry_planar import point_in_ring_scalar_inclusive
+
+    return point_in_ring_scalar_inclusive(float(x), float(y), points)
 
 
 def classify_well_spatial_scope(project: Any, well: WellEntity) -> str | None:

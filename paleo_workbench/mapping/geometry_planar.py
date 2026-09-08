@@ -19,18 +19,75 @@ import math
 from typing import Any, Iterable, Sequence
 
 __all__ = [
+    "distance_to_segment",
     "extent_of_coordinates",
     "extent_of_geometries",
     "point_in_polygon_scalar",
     "point_in_ring_scalar",
+    "point_in_ring_scalar_inclusive",
     "points_in_polygon_vectorized",
 ]
+
+
+def distance_to_segment(point, start, end) -> float:
+    """Planar point-to-segment distance（V8 M4 唯一内核）。
+
+    原 map_interaction / composite_editing 各自内联的同式投影距离已删；
+    零长度段按点到端点处理。
+    """
+    px, py = float(point[0]), float(point[1])
+    x1, y1 = float(start[0]), float(start[1])
+    x2, y2 = float(end[0]), float(end[1])
+    dx, dy = x2 - x1, y2 - y1
+    norm = dx * dx + dy * dy
+    if norm <= 1e-18:
+        return math.dist((px, py), (x1, y1))
+    t = max(0.0, min(1.0, ((px - x1) * dx + (py - y1) * dy) / norm))
+    return math.hypot(px - (x1 + t * dx), py - (y1 + t * dy))
 
 
 def point_in_ring_scalar(x: float, y: float, ring) -> bool:
     """Ray-cast containment for ONE ring (no holes).  Shared kernel for the
     former polygonization/map_interaction/interpolator duplicates."""
     return _ray_crosses(float(x), float(y), ring)
+
+
+def point_in_ring_scalar_inclusive(x: float, y: float, ring, *,
+                                   epsilon: float = 1e-9) -> bool:
+    """Even-odd containment with an explicit on-edge test（V8 M4 唯一内核）。
+
+    边界包含语义用于安全相关分类（井位是否属工区——边界井不得在两次
+    分类间振荡）：on-edge 判据是叉积面积阈值（等效距离 epsilon 约为
+    ``epsilon / 边长``，与原 project/domain.py 实现逐字一致——语义保持，
+    措辞按 review-1 P2-12 修正），不依赖射线奇偶在边界点上的未定义行
+    为。共享内核族的显式语义变体，不再是调用方各自的复刻。
+    """
+    x = float(x)
+    y = float(y)
+    points = [(float(p[0]), float(p[1])) for p in ring]
+    if len(points) < 3:
+        return False
+    previous_x, previous_y = points[-1]
+    inside = False
+    for current_x, current_y in points:
+        cross = (current_x - previous_x) * (y - previous_y) - (
+            current_y - previous_y
+        ) * (x - previous_x)
+        if (
+            abs(cross) <= epsilon
+            and min(previous_x, current_x) - epsilon <= x <= max(previous_x, current_x) + epsilon
+            and min(previous_y, current_y) - epsilon <= y <= max(previous_y, current_y) + epsilon
+        ):
+            return True
+        if (current_y > y) != (previous_y > y):
+            crossing_x = (
+                (previous_x - current_x) * (y - current_y) / (previous_y - current_y)
+                + current_x
+            )
+            if x < crossing_x:
+                inside = not inside
+        previous_x, previous_y = current_x, current_y
+    return inside
 
 
 def _polygons_of(polygon: dict[str, Any]) -> list:

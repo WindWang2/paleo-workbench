@@ -39,7 +39,8 @@ def calculate_signed_area(ring: Sequence[Sequence[float]]) -> float:
     return 0.5 * area2
 
 
-def _ring_centroid(ring: Sequence[Sequence[float]]) -> tuple[float, float]:
+def ring_area_centroid(ring: Sequence[Sequence[float]]) -> tuple[float, float]:
+    """Public name (V8 M4 facade centroid 的底层内核)。"""
     """Area centroid of a ring (shoelace); falls back to the first vertex for
     degenerate rings so containment testing always has a deterministic point."""
     n = len(ring)

@@ -35,20 +35,40 @@ def isolate_qsettings(tmp_path_factory):
 def _register_qgis_dll_directories() -> None:
     """Windows: make the vendored QGIS + dependency DLLs loadable.
 
-    Since Python 3.8, Windows DLL search no longer consults PATH for
-    extension modules — directories must be registered explicitly.  The
-    build layout is fixed by the v7 goal (neutral reusable vendor dir +
-    conda dependency prefix); both are overridable via env so CI keeps its
-    own layout.  No-op when the directories are absent (bridge stays
-    unimportable and the qgis marker keeps skipping honestly).
+    V8: two supported recipes, selected by ``PALEO_QGIS_CONDA_QT``:
+
+    * **default (self-contained vendor)** — the authoring-style build whose
+      ``output/bin`` carries every third-party runtime the QGIS DLLs need
+      (incl. Qt6Core5Compat).  The loader authority is
+      ``qgis_style.ensure_qgis_bridge_dll_dirs`` (vendor bin + PySide6 dir +
+      MSVCP pre-pin); PySide6 must match the vendor build's Qt minor
+      (6.8.x).  No conda preloads here: mixing a second Qt family breaks
+      the load with WinError 127.
+    * ``PALEO_QGIS_CONDA_QT=1`` (conda-Qt unification, cartography legacy
+      machine recipe) — neutral minimal vendor dir + conda deps bin with
+      the conda Qt set preloaded BEFORE PySide6 (ADR 0059 private-ABI
+      rule); the osgeo python binding resolves its own gdal from the deps
+      prefix (cp312 ABI match).
+
+    Both are overridable via env so CI keeps its own layout.  No-op when
+    the directories are absent (bridge stays unimportable and the qgis
+    marker keeps skipping honestly).
     """
     if os.name != "nt":
         return
-    # MINIMAL directory set (bisected): exactly the vendor output bin and
-    # the dependency prefix bin.  Adding any other directory (conda gdal
-    # env, env roots) lets the loader resolve a same-named but
-    # incompatible DLL (e.g. older sqlite3/zlib) and breaks qgis_gui with
-    # ERROR_MOD_NOT_FOUND.  osgeo resolves its own gdal from these two.
+    conda_qt = os.environ.get("PALEO_QGIS_CONDA_QT", "").strip().lower() in {
+        "1", "true", "yes", "on"}
+    if not conda_qt:
+        # V8 default recipe: single loader authority, no Qt preloads.
+        try:
+            from paleo_workbench.mapping.qgis_style import (
+                ensure_qgis_bridge_dll_dirs,
+            )
+
+            ensure_qgis_bridge_dll_dirs()
+        except Exception:
+            pass
+        return
     for sub in (
         os.path.join(os.environ.get(
             "PALEO_QGIS_BUILD_DIR",
@@ -109,10 +129,11 @@ def _register_qgis_dll_directories() -> None:
 
 _register_qgis_dll_directories()
 
-# PySide6 AFTER the Qt preload above: the whole process (PySide6 + bridge +
-# vendored QGIS) then shares the ONE conda Qt 6.11.2 set, mirroring the CI
-# leg's LD_LIBRARY_PATH unification (ADR 0059 private-ABI rule).  Importing
-# PySide6 first would pin its wheel-bundled Qt and break qgis_gui loads.
+# PySide6 AFTER the loader registration above.  In the default V8 recipe
+# the process Qt IS PySide6's own wheel copy (single-Qt rule); in the
+# conda-Qt legacy recipe the conda set preloaded above is the one Qt for
+# the whole process (PySide6 + bridge + vendored QGIS), mirroring the CI
+# leg's LD_LIBRARY_PATH unification (ADR 0059 private-ABI rule).
 from PySide6.QtCore import QCoreApplication, QEvent, QSettings, QTimer
 from PySide6.QtWidgets import QApplication
 

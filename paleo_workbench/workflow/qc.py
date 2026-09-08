@@ -58,28 +58,16 @@ def make_issue(
 
 
 def _geometry_centroid(geometry: dict[str, Any]) -> list[float] | None:
-    gtype = geometry.get("type")
-    coords = geometry.get("coordinates")
+    """问题定位点：走 facade centroid（V8 M4）——面的顶点均值复刻已删，
+    面/多面统一为面积质心（定位精度无差，语义与 polygonization 一致）；
+    畸形/退化几何按"无定位点"处理（fail-open：定位缺失不掩盖问题本身）。"""
+    from paleo_workbench.mapping.geometry_operations import centroid
+
     try:
-        if gtype == "Point" and isinstance(coords, (list, tuple)) and len(coords) >= 2:
-            return [float(coords[0]), float(coords[1])]
-        if gtype == "LineString" and isinstance(coords, list) and coords:
-            xs = [float(p[0]) for p in coords if isinstance(p, (list, tuple)) and len(p) >= 2]
-            ys = [float(p[1]) for p in coords if isinstance(p, (list, tuple)) and len(p) >= 2]
-            if xs:
-                return [sum(xs) / len(xs), sum(ys) / len(ys)]
-        if gtype == "Polygon" and isinstance(coords, list) and coords:
-            ring = coords[0]
-            xs = [float(p[0]) for p in ring if isinstance(p, (list, tuple)) and len(p) >= 2]
-            ys = [float(p[1]) for p in ring if isinstance(p, (list, tuple)) and len(p) >= 2]
-            # Drop closing duplicate for mean
-            if len(xs) >= 2 and xs[0] == xs[-1] and ys[0] == ys[-1]:
-                xs, ys = xs[:-1], ys[:-1]
-            if xs:
-                return [sum(xs) / len(xs), sum(ys) / len(ys)]
-    except (TypeError, ValueError, IndexError):
+        x, y = centroid(geometry)
+        return [x, y]
+    except (TypeError, ValueError, IndexError, KeyError):
         return None
-    return None
 
 
 def _facies_ring(poly: dict[str, Any]) -> list[list[float]] | None:

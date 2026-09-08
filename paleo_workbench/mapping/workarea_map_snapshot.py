@@ -256,29 +256,18 @@ def _feature(
 
 
 def _extent_of_features(features: Sequence[Mapping[str, Any]]) -> tuple[float, float, float, float]:
-    xs: list[float] = []
-    ys: list[float] = []
-    for feature in features:
-        coordinates = feature.get("geometry", {}).get("coordinates")
-        for point in _iter_leaf_coordinates(coordinates):
-            xs.append(point[0])
-            ys.append(point[1])
-    if not xs:
+    # V8 M4：范围计算走共享内核；空集合保持 (0,0,1,1) 占位（快照拟合
+    # 契约不变）。
+    from paleo_workbench.mapping.geometry_planar import extent_of_geometries
+
+    try:
+        return extent_of_geometries(
+            feature.get("geometry") for feature in features
+            if isinstance(feature.get("geometry"), Mapping)
+        )
+    except ValueError:
         return (0.0, 0.0, 1.0, 1.0)
-    return (min(xs), min(ys), max(xs), max(ys))
 
-
-def _iter_leaf_coordinates(node: Any) -> Iterable[tuple[float, float]]:
-    """Yield (x, y) leaves of a nested GeoJSON coordinate structure."""
-    if not isinstance(node, (list, tuple)):
-        return
-    if len(node) >= 2 and isinstance(node[0], (int, float)) and isinstance(node[1], (int, float)):
-        xy = _finite_xy(node)
-        if xy is not None:
-            yield xy
-        return
-    for child in node:
-        yield from _iter_leaf_coordinates(child)
 
 
 def _content_revision(features: Sequence[Mapping[str, Any]]) -> int:

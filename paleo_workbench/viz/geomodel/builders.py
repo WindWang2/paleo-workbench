@@ -576,26 +576,16 @@ def build_volume_shell(
 def _points_in_polygon_grid(
     px: np.ndarray, py: np.ndarray, poly: np.ndarray
 ) -> np.ndarray:
-    """Vectorized ray-casting point-in-polygon for matched point grids."""
-    px = np.asarray(px, dtype=np.float64)
-    py = np.asarray(py, dtype=np.float64)
-    shape = np.broadcast_shapes(px.shape, py.shape)
-    px = np.broadcast_to(px, shape).ravel()
-    py = np.broadcast_to(py, shape).ravel()
-    x = poly[:, 0]
-    y = poly[:, 1]
-    inside = np.zeros(px.shape, dtype=bool)
-    n = len(poly)
-    j = n - 1
-    for k in range(n):
-        yk, yj = y[k], y[j]
-        xk, xj = x[k], x[j]
-        cond = (yk > py) != (yj > py)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            xint = (xj - xk) * (py - yk) / np.where(yj != yk, yj - yk, 1.0) + xk
-        inside ^= cond & (px < xint)
-        j = k
-    return inside.reshape(shape)
+    """Vectorized even-odd containment for matched point grids.
+
+    V8 M4：第二套向量化 PIP 已删——同一 even-odd 语义（含洞）统一走
+    ``geometry_planar.points_in_polygon_vectorized``；本包装只做 (N,2)
+    环数组 → GeoJSON Polygon 的形状适配。
+    """
+    from paleo_workbench.mapping.geometry_planar import points_in_polygon_vectorized
+
+    polygon = {"type": "Polygon", "coordinates": [np.asarray(poly, dtype=float).tolist()]}
+    return points_in_polygon_vectorized(px, py, polygon)
 
 
 def _orient_faces_outward(verts: np.ndarray, faces: np.ndarray) -> np.ndarray:

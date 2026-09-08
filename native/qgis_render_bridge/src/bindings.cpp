@@ -402,7 +402,10 @@ py::dict capability_manifest() {
          {"snapping_push", "snapping_endpoint", "snapping_intersection",
           "layer_tree", "selection_highlight", "edit_indicator",
           "measure_ellipsoidal", "digitize_crs_guard", "native_capture",
-          "native_vertex_move", "native_select_identify"}) {
+          "native_vertex_move", "native_select_identify",
+          // 0.4.0a0 (V8): memory-provider 字段 schema 应用（M1）、
+          // 通用行指示器（M5）、legend filter_layers（M8）。
+          "provider_fields", "row_indicators", "legend_filter"}) {
         features.append(feature);
     }
     manifest["features"] = features;
@@ -415,7 +418,10 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
     // paleo_workbench.__version__; previously missing and drifted.
     // 0.3.0a0 (V7): capability_manifest + native measure + geometry
     // validate/reshape + snapping endpoint/intersection.
-    module.attr("__version__") = "0.3.0a0";
+    // 0.4.0a0 (V8): provider field-schema application (fields_json →
+    // QgsFields/constraints/widgets), generic row indicators, legend
+    // filter_layers.
+    module.attr("__version__") = "0.4.0a0";
     module.attr("__build_commit__") = "unknown";
     py::register_exception<GeometryServiceError>(module, "QgisGeometryError");
 
@@ -912,6 +918,14 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
              py::arg("group_id"), py::arg("parent_group_id"), py::arg("index"))
         .def("tree_snapshot_json",
              &pwb::qgis_render::QgisMapStack::treeSnapshotJson)
+        // V8 M1：镜像层已应用 provider schema 的 JSON 自省事实。
+        .def("mirror_layer_schema_json",
+             &pwb::qgis_render::QgisMapStack::mirrorLayerSchemaJson,
+             py::arg("doc_id"))
+        // V8 M1：镜像层真实存储要素 + typed 属性的自省（数据侧）。
+        .def("mirror_features_json",
+             &pwb::qgis_render::QgisMapStack::mirrorFeaturesJson,
+             py::arg("doc_id"), py::arg("limit") = 16)
         .def("apply_tree_placements",
              &pwb::qgis_render::QgisMapStack::applyTreePlacements,
              py::arg("placements_json"))
@@ -920,6 +934,11 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
         .def("zoom_to_layer", &pwb::qgis_render::QgisMapStack::zoomToLayer)
         .def("set_edit_indicator", &pwb::qgis_render::QgisMapStack::setEditIndicator)
         .def("edit_indicator_count", &pwb::qgis_render::QgisMapStack::editIndicatorCount)
+        // V8 M5: 通用行指示器（kinds 与 host state_language 装饰词汇对齐）。
+        .def("set_row_indicators", &pwb::qgis_render::QgisMapStack::setRowIndicators,
+             py::arg("tree"), py::arg("doc_id"), py::arg("kinds_json"))
+        .def("row_indicator_count", &pwb::qgis_render::QgisMapStack::rowIndicatorCount,
+             py::arg("tree"), py::arg("doc_id"), py::arg("kind") = "")
         .def("tree_view_select_doc", &pwb::qgis_render::QgisMapStack::treeViewSelectDoc)
         .def("set_mirror_layer_opacity", &pwb::qgis_render::QgisMapStack::setMirrorLayerOpacity)
         .def("exec_layer_properties",

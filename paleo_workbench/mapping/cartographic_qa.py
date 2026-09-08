@@ -299,28 +299,18 @@ def _geometry_issues(project: Any, stats: _RuleStats) -> list[dict]:
 
 
 def _layer_bbox(layer: Any) -> tuple[float, float, float, float] | None:
-    coords: list[tuple[float, float]] = []
+    # V8 M4：范围计算走共享内核（空集合回退到图层 extent 声明不变）。
+    from paleo_workbench.mapping.geometry_planar import extent_of_geometries
 
-    def _walk(node: Any) -> None:
-        if isinstance(node, (list, tuple)):
-            if (
-                len(node) >= 2
-                and isinstance(node[0], (int, float))
-                and isinstance(node[1], (int, float))
-            ):
-                coords.append((float(node[0]), float(node[1])))
-                return
-            for item in node:
-                _walk(item)
-
-    for feature in _field(layer, "features", None) or ():
-        geometry = _field(feature, "geometry", None) or {}
-        node = geometry.get("coordinates") if isinstance(geometry, Mapping) else geometry
-        _walk(node)
-    if coords:
-        xs = [p[0] for p in coords]
-        ys = [p[1] for p in coords]
-        return (min(xs), min(ys), max(xs), max(ys))
+    geometries = [
+        _field(feature, "geometry", None)
+        for feature in _field(layer, "features", None) or ()
+        if isinstance(_field(feature, "geometry", None), Mapping)
+    ]
+    try:
+        return extent_of_geometries(geometries)
+    except ValueError:
+        pass
     extent = _field(layer, "extent", None)
     if extent and len(extent) == 4:
         x0, y0, x1, y1 = (float(v) for v in extent)
@@ -369,8 +359,10 @@ def _outside_extent_issues(
             return
         stats.count("layer_outside_extent")
         xmin, ymin, xmax, ymax = bbox
-        wxmin, wymin, wxmax, wymax = ref_box
-        if xmax < wxmin or xmin > wxmax or ymax < wymin or ymin > wymax:
+        # V8 M4：AABB 判定走 facade（闭区间 + 显式内核，不再手工 max/min）。
+        from paleo_workbench.mapping.geometry_operations import bbox_intersects
+
+        if not bbox_intersects((xmin, ymin, xmax, ymax), ref_box):
             issues.append(
                 make_issue(
                     rule="layer_outside_extent",

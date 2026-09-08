@@ -11,6 +11,10 @@ from dataclasses import dataclass
 import math
 from typing import Iterable, Mapping
 
+from paleo_workbench.mapping.geometry_planar import (
+    distance_to_segment,
+    point_in_polygon_scalar,
+)
 from paleo_workbench.mapping.vector_layer import VectorFeature, VectorLayer
 
 __all__ = ["FeatureSpatialIndex", "SnapMatch", "SnappingService"]
@@ -40,23 +44,18 @@ def _vertices(value: object, path: tuple[int, ...] = ()) -> Iterable[tuple[Point
 
 
 def _bounds(feature: VectorFeature) -> Bounds:
-    vertices = [point for point, _path in _vertices(feature.geometry["coordinates"])]
-    if not vertices:
-        return (0.0, 0.0, 0.0, 0.0)
-    xs, ys = zip(*vertices)
-    return min(xs), min(ys), max(xs), max(ys)
+    # V8 M4：范围计算走共享内核；空几何保持 (0,0,0,0) 退化哨兵。
+    from paleo_workbench.mapping.geometry_planar import extent_of_coordinates
+
+    extent = extent_of_coordinates(
+        point for point, _path in _vertices(feature.geometry["coordinates"])
+    )
+    return extent if extent is not None else (0.0, 0.0, 0.0, 0.0)
 
 
 def _distance_to_segment(point: Point, start: Point, end: Point) -> float:
-    px, py = point
-    x1, y1 = start
-    x2, y2 = end
-    dx, dy = x2 - x1, y2 - y1
-    norm = dx * dx + dy * dy
-    if norm <= 1e-18:
-        return math.dist(point, start)
-    t = max(0.0, min(1.0, ((px - x1) * dx + (py - y1) * dy) / norm))
-    return math.hypot(px - (x1 + t * dx), py - (y1 + t * dy))
+    # V8 M4：内联投影距离已删——共享内核唯一实现。
+    return distance_to_segment(point, start, end)
 
 
 def _project_to_segment(point: Point, start: Point, end: Point) -> Point | None:
@@ -83,36 +82,38 @@ def _segment_intersection(a: Point, b: Point, c: Point, d: Point) -> Point | Non
     return None
 
 
-def _contains(point: Point, ring: object) -> bool:
-    vertices = [vertex for vertex, _path in _vertices(ring)]
-    if len(vertices) < 3:
-        return False
-    from paleo_workbench.mapping.geometry_planar import point_in_ring_scalar
-
-    return point_in_ring_scalar(float(point[0]), float(point[1]), vertices)
-
-
 def _contains_polygon(point: Point, geometry: Mapping[str, object]) -> bool:
     """Even-odd across a polygon's rings: inside the outer ring and no hole.
 
-    GeoJSON stores holes as subsequent rings, so a point inside any hole must
-    NOT identify the feature.
+    V8 M4：环奇偶 XOR 复刻已删——与 polygonization/interpolator 同语义的
+    even-odd（含洞、MultiPolygon 逐 part 独立判定）统一走共享内核
+    ``geometry_planar.point_in_polygon_scalar``；畸形几何（非 list 坐标、
+    环顶点不足）按"不含"处理，与旧实现一致。
     """
     geometry_type = str(geometry.get("type") or "")
     coords = geometry.get("coordinates")
-    polygons: list[object] = []
-    if geometry_type == "Polygon" and isinstance(coords, (list, tuple)):
-        polygons = [coords]
-    elif geometry_type == "MultiPolygon" and isinstance(coords, (list, tuple)):
-        polygons = [polygon for polygon in coords if isinstance(polygon, (list, tuple))]
-    for polygon in polygons:
-        hit = False
-        for ring in polygon:
-            if isinstance(ring, (list, tuple)) and _contains(point, ring):
-                hit = not hit
-        if hit:
-            return True
-    return False
+    if geometry_type not in {"Polygon", "MultiPolygon"} or not isinstance(coords, (list, tuple)):
+        return False
+    polygon = {
+        "type": geometry_type,
+        "coordinates": [
+            [
+                [vertex for vertex, _path in _vertices(ring)]
+                for ring in rings_part
+                if isinstance(rings_part, (list, tuple))
+            ]
+            for rings_part in coords
+            if isinstance(rings_part, (list, tuple))
+        ]
+        if geometry_type == "MultiPolygon"
+        else coords,
+    }
+    try:
+        return point_in_polygon_scalar(
+            (float(point[0]), float(point[1])), polygon
+        )
+    except (TypeError, ValueError, IndexError):
+        return False
 
 
 def _rings(geometry: Mapping[str, object]) -> Iterable[tuple[Point, ...]]:
