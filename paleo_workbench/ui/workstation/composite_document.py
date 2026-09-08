@@ -1771,9 +1771,6 @@ class CompositeDocument(QWidget):
 
     def _sync_action_state(self) -> None:
         self._update_empty_hint()
-        # V7：工具条状态唯一来源 = ToolContext + evaluate_all（禁用带原因）。
-        availability = evaluate_all(self._build_tool_context())
-        self.action_controller.apply_availability(availability)
         controller = self.edit_controller
         self.layer_manager.set_editing_layer(
             controller.active_layer_id if controller.editing else None
@@ -1801,10 +1798,28 @@ class CompositeDocument(QWidget):
                 action.blockSignals(True)
                 action.setChecked(bool(checked))
                 action.blockSignals(False)
-        # V7：使能/可见/禁用原因统一由 tool_surface 求值（在 update_state
-        # 之后调用——勾选态归前者，其余归单一真源；split 的「多边形选集 +
-        # 切割线」条件经 split_inputs_ready 收敛，不再二次改 enable）。
+        # V7：工作站专业分组统一由 tool_surface 求值
         self._apply_tool_availability()
+        # V7：核心数字化/编辑动作由 authoring kernel evaluator 统一裁定状态与原因
+        from dataclasses import replace
+        from paleo_workbench.mapping_workspace.stage_profiles import (
+            governed_edit_actions,
+            stage_profile,
+        )
+        from paleo_workbench.mapping_workspace.stages import stage_from_value
+
+        availability = dict(evaluate_all(self._build_tool_context()))
+        stage_raw = getattr(self.stage_controller, "current_stage", None) if hasattr(self, "stage_controller") else None
+        stage = stage_from_value(getattr(stage_raw, "value", stage_raw))
+        if stage is not None:
+            tools = stage_profile(stage).tools
+            for action_id in governed_edit_actions():
+                if action_id in availability:
+                    avail = availability[action_id]
+                    availability[action_id] = replace(avail, visible=tools.allows_edit_action(action_id))
+            if "add_point" in availability:
+                availability["add_point"] = replace(availability["add_point"], visible=True)
+        self.action_controller.apply_availability(availability)
         # V7 §7：树呈现态（编辑/新鲜度/成熟度）差分推送。
         self._push_layer_decorations()
         self._sync_status_bar()
