@@ -3,8 +3,16 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QComboBox, QFrame, QLabel, QVBoxLayout
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.ui.pages.sequence_helpers import field_value
+
+
+def _combo_sheet() -> str:
+    return (
+        f"QComboBox {{ background: {style.palette()['BG_SIDEBAR']};"
+        f" border: 1px solid {style.palette()['BORDER']};"
+        f" border-radius: {tokens.RADIUS_BUTTON}px; padding: 2px 6px; }}"
+    )
 
 
 class SequenceTargetPanel(QFrame):
@@ -16,7 +24,9 @@ class SequenceTargetPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("SequenceTargetPanel")
-        self.setFixedWidth(240)
+        # 侧栏宽度：保底 240，窄屏下可收缩、宽屏最多 1.6 倍有界弹性
+        self.setMinimumWidth(240)
+        self.setMaximumWidth(int(240 * 1.6))
         self._suppress = False
 
         layout = QVBoxLayout(self)
@@ -39,11 +49,7 @@ class SequenceTargetPanel(QFrame):
         self.target_combo.setEditable(True)
         self.target_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.target_combo.setObjectName("SequenceTargetCombo")
-        self.target_combo.setStyleSheet(
-            f"QComboBox {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px; padding: 2px 6px; }}"
-        )
+        style.bind(self.target_combo, _combo_sheet)
         self.target_combo.lineEdit().setPlaceholderText("未设置")
         # For an editable combo, ``currentTextChanged`` fires on every keystroke
         # and cascades apply_stratigraphy_scheme (writes partial horizons into
@@ -64,11 +70,7 @@ class SequenceTargetPanel(QFrame):
         self.scheme_combo = QComboBox()
         self.scheme_combo.addItem("LST/TST/HST")
         self.scheme_combo.addItems(tokens.SEQUENCE_SCHEMES)
-        self.scheme_combo.setStyleSheet(
-            f"QComboBox {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px; padding: 2px 6px; }}"
-        )
+        style.bind(self.scheme_combo, _combo_sheet)
         self.scheme_combo.currentTextChanged.connect(self._on_scheme_text)
         layout.addWidget(self.scheme_combo)
 

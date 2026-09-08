@@ -714,21 +714,6 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     QTabBar::tab:focus {{
         border-bottom: 2px solid {t.FOCUS_RING};
     }}
-    QMenuBar {{
-        background-color: {t.BG_HEADER};
-        color: {t.TEXT_PRIMARY};
-        border-bottom: 1px solid {t.BORDER};
-    }}
-    QMenuBar::item {{
-        background-color: transparent;
-        padding: 6px 12px;
-        color: {t.TEXT_PRIMARY};
-        border-radius: 3px;
-    }}
-    QMenuBar::item:selected, QMenuBar::item:pressed {{
-        background-color: {t.BG_MENU_HOVER};
-        color: {t.PRIMARY};
-    }}
     QMenu {{
         background-color: {t.BG_HEADER};
         color: {t.TEXT_PRIMARY};

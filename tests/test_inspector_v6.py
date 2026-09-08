@@ -159,7 +159,9 @@ def test_group_summary_without_freshness_stays_zero():
     controller, _state = _group_controller()
     controller._group_orders["phase2.factors"] = ["L1"]
     summary = controller.group_summary("phase2.factors")
-    assert summary == {"layers": 1, "stale": 0, "errors": 0}
+    # V7 §7 追加 frozen/published 成熟度计数（未注入 provider → 诚实 0）。
+    assert summary == {"layers": 1, "stale": 0, "errors": 0,
+                       "frozen": 0, "published": 0}
 
 
 def test_layer_freshness_resolves_phase1_draft_by_layer_id():

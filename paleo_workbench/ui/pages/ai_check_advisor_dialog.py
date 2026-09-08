@@ -35,7 +35,7 @@ class AICheckAdvisorDialog(PwbDialog):
         fault_badge = f"<span style='background: {tokens.WARNING}; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-weight: bold;'>有冲突 (WARNING)</span>" if has_fault_warnings else f"<span style='background: {tokens.SUCCESS}; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-weight: bold;'>通过 (PASS)</span>"
 
         html = f"""
-        <h3 style='color: {tokens.PRIMARY}; border-bottom: 1px solid {tokens.BORDER}; padding-bottom: 4px;'>📊 核对概要 (Summary)</h3>
+        <h3 style='color: {tokens.PRIMARY}; border-bottom: 1px solid {tokens.BORDER}; padding-bottom: 4px;'>▤ 核对概要 (Summary)</h3>
         <table style='width: 100%; border-collapse: collapse; margin-top: 8px; margin-bottom: 16px;'>
             <tr style='background: {tokens.BG_SEARCH}; color: {tokens.TEXT_PRIMARY};'>
                 <th style='padding: 8px; text-align: left;'>复核模块</th>
@@ -54,23 +54,23 @@ class AICheckAdvisorDialog(PwbDialog):
             </tr>
         </table>
 
-        <h3 style='color: {tokens.PRIMARY}; border-bottom: 1px solid {tokens.BORDER}; padding-bottom: 4px;'>🚨 诊断问题明细 (Issues)</h3>
+        <h3 style='color: {tokens.PRIMARY}; border-bottom: 1px solid {tokens.BORDER}; padding-bottom: 4px;'>⚠ 诊断问题明细 (Issues)</h3>
         """
 
         # Boreholes details
-        html += f"<h4 style='color: {tokens.ERROR}; margin-bottom: 4px;'>📍 钻孔层位异常：</h4><ul style='margin-top: 0; padding-left: 20px; color: {tokens.TEXT_SECONDARY};'>"
+        html += f"<h4 style='color: {tokens.ERROR}; margin-bottom: 4px;'>◆ 钻孔层位异常：</h4><ul style='margin-top: 0; padding-left: 20px; color: {tokens.TEXT_SECONDARY};'>"
         for iss in bh_report.get("issues", []):
             color = tokens.ERROR if iss["type"] == "error" else tokens.WARNING
-            badge = "❌ 错误" if iss["type"] == "error" else "⚠️ 警告"
+            badge = "✕ 错误" if iss["type"] == "error" else "⚠️ 警告"
             html += f"<li><b>{iss['borehole']}</b>: <span style='color: {color};'>{badge}</span> - {iss['message']}</li>"
         if not bh_report.get("issues", []):
             html += "<li>✅ 钻孔间距及分层深度完全一致，无冲突。</li>"
         html += "</ul>"
 
         # Faults details
-        html += f"<h4 style='color: {tokens.WARNING}; margin-bottom: 4px;'>📁 共面断层预警：</h4><ul style='margin-top: 0; padding-left: 20px; color: {tokens.TEXT_SECONDARY};'>"
+        html += f"<h4 style='color: {tokens.WARNING}; margin-bottom: 4px;'>▣ 共面断层预警：</h4><ul style='margin-top: 0; padding-left: 20px; color: {tokens.TEXT_SECONDARY};'>"
         for iss in fault_report.get("issues", []):
-            html += f"<li>🔗 <b>{' & '.join(iss['faults'])}</b>: {iss['message']}</li>"
+            html += f"<li>§ <b>{' & '.join(iss['faults'])}</b>: {iss['message']}</li>"
         if not fault_report.get("issues", []):
             html += "<li>✅ 未检测到重叠或共面冲突的断层面。</li>"
         html += "</ul>"
@@ -95,9 +95,9 @@ class AICheckAdvisorDialog(PwbDialog):
             )
         suggestions_html = "\n".join(suggestion_items)
         html += f"""
-        <h3 style='color: {tokens.PRIMARY}; border-bottom: 1px solid {tokens.BORDER}; padding-bottom: 4px;'>💡 基于规则检查的优化建议 (Suggestions)</h3>
+        <h3 style='color: {tokens.PRIMARY}; border-bottom: 1px solid {tokens.BORDER}; padding-bottom: 4px;'>✦ 基于规则检查的优化建议 (Suggestions)</h3>
         <div style='background: {tokens.BG_SEARCH}; border-left: 4px solid {tokens.PRIMARY}; padding: 12px; border-radius: 6px; margin-top: 8px;'>
-            <p style='color: {tokens.TEXT_PRIMARY}; font-weight: bold; margin: 0 0 8px 0;'>💡 建模优化建议：</p>
+            <p style='color: {tokens.TEXT_PRIMARY}; font-weight: bold; margin: 0 0 8px 0;'>✦ 建模优化建议：</p>
             <ol style='margin: 0; padding-left: 20px; color: {tokens.TEXT_SECONDARY}; line-height: 1.6;'>
                 {suggestions_html}
             </ol>

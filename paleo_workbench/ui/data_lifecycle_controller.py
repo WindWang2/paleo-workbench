@@ -748,7 +748,7 @@ class DataLifecycleController:
                 upsert_legacy_resource(page.project, derived_item)
                 page._refresh()
                 page._set_selected_asset(derived_item)
-                page._set_action_status(f"已从 🔒 RAW 建立派生副本: {derived_item.name}")
+                page._set_action_status(f"已从 ⊘ RAW 建立派生副本: {derived_item.name}")
 
             self._run_catalog_action("创建派生副本", _derived_companion, _derived_done)
             return

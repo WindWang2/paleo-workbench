@@ -152,7 +152,9 @@ class CurveOperationDialog(QDialog):
             source = QLineEdit("g/cm3")
             target = QLineEdit("kg/m3")
             hint = QLabel("白名单对：m↔ft, g/cm3↔kg/m3, us/m↔us/ft, mm↔in, mv↔v, %↔v/v")
-            hint.setStyleSheet("color: gray;")
+            from paleo_workbench.ui import style
+
+            style.bind(hint, lambda: f"color: {style.palette()['TEXT_SECONDARY']};")
             return [("源单位", "from_unit", source), ("目标单位", "to_unit", target), ("", "_hint", hint)]
         if op == "depth_shift":
             delta = self._spin(0.0, 3, -1e5, 1e5, " m")

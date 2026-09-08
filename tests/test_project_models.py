@@ -20,18 +20,9 @@ def test_project_defaults_include_crs_and_empty_workflow():
 
 
 def test_screen_inventory_includes_required_pages():
-    page_ids = [page["id"] for page in SCREEN_INVENTORY["pages"]]
-
-    assert page_ids == [
-        "dashboard",
-        "data",
-        "well_log_prediction",
-        "seismic_prediction",
-        "sequence_framework",
-        "stratigraphy_correlation",
-        "visualization",
-        "preparation",
-        "paleomap",
-        "qc_export",
-        "geomodel_3d",
-    ]
+    """V7 D13：清单从 navigation 派生（旧 11 页硬编码与实际 UI 脱节）。"""
+    hubs = {hub["name"]: hub["submodules"] for hub in SCREEN_INVENTORY["hubs"]}
+    assert [entry[0] for entry in hubs["编图"]] == ["canvas", "preparation", "review"]
+    assert [entry[0] for entry in hubs["数据"]] == ["overview", "management"]
+    docks = SCREEN_INVENTORY["workstation"]["docks"]
+    assert len(docks) == 13 and SCREEN_INVENTORY["workstation"]["central_document"] == "composite"

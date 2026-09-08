@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QLineEdit,
     QPlainTextEdit,
+    QTextBrowser,
     QTextEdit,
     QWidget,
 )
@@ -59,8 +60,7 @@ def register_shortcut(
         # 文本输入聚焦时不触发（单数字页导航等）；包裹守卫而非改 context——
         # WidgetShortcut 只在 parent 直接持有焦点时激活，不适用于 shell。
         def _guarded(_checked=False, _cb=callback):
-            focus = QApplication.focusWidget()
-            if isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit)):
+            if focus_in_text_input():
                 return
             _cb()
 
@@ -69,6 +69,16 @@ def register_shortcut(
     _registry[spec.id] = spec
     _warn_conflicts(spec)
     return shortcut
+
+
+def focus_in_text_input() -> bool:
+    """当前焦点是否在文本输入件（守卫统一类型清单，goal §13）。
+
+    V7：QTextBrowser 并入清单（旧 shortcuts.py 守卫漏掉、app_shell 侧
+    自带清单包含——两处不一致；统一到本函数后 app_shell 复用）。
+    """
+    focus = QApplication.focusWidget()
+    return isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit, QTextBrowser))
 
 
 def register_meta(spec: ShortcutSpec) -> None:

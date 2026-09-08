@@ -47,17 +47,17 @@ TYPE_LEAVES = [
 ]
 
 STAGE_LEAVES = [
-    ("🔒 原始输入", DataStage.RAW.value, "RAW"),
-    ("🌿 派生数据", DataStage.DERIVED.value, "DERIVED"),
+    ("▣ 原始输入", DataStage.RAW.value, "RAW"),
+    ("◈ 派生数据", DataStage.DERIVED.value, "DERIVED"),
     ("⚡ 中间结果", DataStage.INTERMEDIATE.value, "INTERMEDIATE"),
-    ("📦 输出成果", DataStage.OUTPUT.value, "OUTPUT"),
+    ("★ 输出成果", DataStage.OUTPUT.value, "OUTPUT"),
 ]
 
 INTEGRITY_LEAVES = [
     ("✅ 已校验", IntegrityState.VERIFIED.value, "VERIFIED"),
     ("⚠️ 已修改", IntegrityState.MODIFIED.value, "MODIFIED"),
     ("❌ 缺失", IntegrityState.MISSING.value, "MISSING"),
-    ("🔗 外部链接", IntegrityState.UNMANAGED.value, "UNMANAGED"),
+    ("§ 外部链接", IntegrityState.UNMANAGED.value, "UNMANAGED"),
 ]
 
 REVIEW_STATUS_LABELS = {
@@ -76,8 +76,8 @@ WORKING_DATA_NODE = "stage_any"
 
 # Entity-type → (group label, icon prefix)
 _ENTITY_GROUPS = {
-    "well": ("井", "🛢"),
-    "seismic_survey": ("地震", "🌊"),
+    "well": ("井", "◉"),
+    "seismic_survey": ("地震", "◈"),
 }
 
 # Per-well file-leaf cap: keeps tree allocation bounded when one well has
@@ -194,7 +194,7 @@ class NavigationTree(QTreeWidget):
             else:
                 self._survey_group_item = group
 
-        reference_group = QTreeWidgetItem(self, ["📍 其他参考井"])
+        reference_group = QTreeWidgetItem(self, ["◆ 其他参考井"])
         reference_group.setData(
             0,
             Qt.ItemDataRole.UserRole,
@@ -421,7 +421,7 @@ class NavigationTree(QTreeWidget):
                 "key": entity_type,
                 "entities": ordered,
                 "rendered": 0,
-                "icon": "📍" if entity_type == "reference_well" else _ENTITY_GROUPS[entity_type][1],
+                "icon": "◆" if entity_type == "reference_well" else _ENTITY_GROUPS[entity_type][1],
                 "count_key": "well" if entity_type == "reference_well" else entity_type,
                 "well_links": well_links if entity_type in {"well", "reference_well"} else {},
                 "unresolved": unresolved_wells,
@@ -500,7 +500,7 @@ class NavigationTree(QTreeWidget):
                 )
                 for link in file_links[:MAX_WELL_FILE_CHILDREN]:
                     label = self._asset_label(link.asset_id)
-                    file_child = QTreeWidgetItem(child, [f"📄 {label}"])
+                    file_child = QTreeWidgetItem(child, [f"▤ {label}"])
                     file_child.setData(
                         0,
                         Qt.ItemDataRole.UserRole,
@@ -530,7 +530,7 @@ class NavigationTree(QTreeWidget):
         if stop < len(entities):
             more = QTreeWidgetItem(
                 group,
-                [f"📂 显示更多（已显示 {stop}/{len(entities)}）"],
+                [f"▣ 显示更多（已显示 {stop}/{len(entities)}）"],
             )
             more.setData(0, _ROLE_SHOW_MORE, group_key)
 

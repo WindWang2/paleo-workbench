@@ -241,7 +241,7 @@ class WellLogHost:
             interval_count = len(self._engine_plan.intervals)
             suffix = f" · 区间 {interval_count}" if interval_count else ""
             self.track_bar.setText(
-                f"📋 WellLogEngine ({len(names)} 曲线):  {' | '.join(names)}{suffix}"
+                f"▤ WellLogEngine ({len(names)} 曲线):  {' | '.join(names)}{suffix}"
             )
             return
         visible_tracks = [
@@ -250,9 +250,9 @@ class WellLogHost:
         track_names = [getattr(t, "label", str(t)) for t in visible_tracks if getattr(t, "label", None)]
         if track_names:
             names_str = "  |  ".join(track_names)
-            self.track_bar.setText(f"📋 显示中井道 ({len(track_names)}/{len(self.canvas.tracks)} 道):  {names_str}")
+            self.track_bar.setText(f"▤ 显示中井道 ({len(track_names)}/{len(self.canvas.tracks)} 道):  {names_str}")
         else:
-            self.track_bar.setText("📋 显示中井道 (0 道): 已隐藏全部井道")
+            self.track_bar.setText("▤ 显示中井道 (0 道): 已隐藏全部井道")
 
     def has_data(self) -> bool:
         """Return True when either the native engine or the legacy canvas holds data."""

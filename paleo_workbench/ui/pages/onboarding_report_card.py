@@ -2,15 +2,20 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 
 
 class OnboardingReportCard(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("OnboardingReportCard")
-        self.setStyleSheet(
-            f"QFrame#OnboardingReportCard {{ background: {tokens.BG_SIDEBAR}; border: 1px solid {tokens.BORDER}; border-radius: {tokens.RADIUS_CARD}px; }}"
+        style.bind(
+            self,
+            lambda: (
+                f"QFrame#OnboardingReportCard {{ background: {style.palette()['BG_SIDEBAR']};"
+                f" border: 1px solid {style.palette()['BORDER']};"
+                f" border-radius: {tokens.RADIUS_CARD}px; }}"
+            ),
         )
         layout = QVBoxLayout(self)
         layout.setContentsMargins(tokens.SPACE_4, tokens.SPACE_4, tokens.SPACE_4, tokens.SPACE_4)
@@ -18,45 +23,85 @@ class OnboardingReportCard(QFrame):
 
         self.title_label = QLabel("数据盘点报告")
         self.title_label.setObjectName("report_title_label")
-        self.title_label.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 14px; font-weight: 600;"
+        style.bind(
+            self.title_label,
+            lambda: (
+                f"color: {style.palette()['TEXT_PRIMARY']};"
+                f" font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 600;"
+            ),
         )
         layout.addWidget(self.title_label)
 
         self.source_label = QLabel("")
         self.source_label.setObjectName("report_source_label")
         self.source_label.setWordWrap(True)
-        self.source_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;")
+        style.bind(
+            self.source_label,
+            lambda: (
+                f"color: {style.palette()['TEXT_SECONDARY']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
+        )
         layout.addWidget(self.source_label)
 
         self.report_summary_label = QLabel("")
         self.report_summary_label.setObjectName("report_summary_label")
         self.report_summary_label.setWordWrap(True)
-        self.report_summary_label.setStyleSheet(f"color: {tokens.TEXT_PRIMARY}; font-size: 12px;")
+        style.bind(
+            self.report_summary_label,
+            lambda: (
+                f"color: {style.palette()['TEXT_PRIMARY']};"
+                f" font-size: {tokens.FONT_SIZE_BASE};"
+            ),
+        )
         layout.addWidget(self.report_summary_label)
 
         self.by_type_label = QLabel("")
         self.by_type_label.setObjectName("report_by_type_label")
         self.by_type_label.setWordWrap(True)
-        self.by_type_label.setStyleSheet(f"color: {tokens.TEXT_PRIMARY}; font-size: 11px;")
+        style.bind(
+            self.by_type_label,
+            lambda: (
+                f"color: {style.palette()['TEXT_PRIMARY']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
+        )
         layout.addWidget(self.by_type_label)
 
         self.extent_label = QLabel("")
         self.extent_label.setObjectName("report_extent_label")
         self.extent_label.setWordWrap(True)
-        self.extent_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;")
+        style.bind(
+            self.extent_label,
+            lambda: (
+                f"color: {style.palette()['TEXT_SECONDARY']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
+        )
         layout.addWidget(self.extent_label)
 
         self.issues_label = QLabel("")
         self.issues_label.setObjectName("report_issues_label")
         self.issues_label.setWordWrap(True)
-        self.issues_label.setStyleSheet(f"color: {tokens.WARNING}; font-size: 11px;")
+        style.bind(
+            self.issues_label,
+            lambda: (
+                f"color: {style.palette()['WARNING']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
+        )
         layout.addWidget(self.issues_label)
 
         self.warnings_label = QLabel("")
         self.warnings_label.setObjectName("report_warnings_label")
         self.warnings_label.setWordWrap(True)
-        self.warnings_label.setStyleSheet(f"color: {tokens.WARNING}; font-size: 11px;")
+        style.bind(
+            self.warnings_label,
+            lambda: (
+                f"color: {style.palette()['WARNING']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
+        )
         layout.addWidget(self.warnings_label)
 
         self.setVisible(False)

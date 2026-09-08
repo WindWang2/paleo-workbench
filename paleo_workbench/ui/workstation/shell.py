@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 
+logger = logging.getLogger(__name__)
+
 from PySide6.QtCore import QByteArray, QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
@@ -346,6 +348,12 @@ class WorkstationFrame(QWidget):
             )
         )
         self.composite.object_selected.connect(self.inspector.show_payload)
+        # V7 §8：图层树选择驱动类型化 Inspector（layer / factor 分节）。
+        composite_layer_panel = getattr(self.composite, "layer_manager", None)
+        if composite_layer_panel is not None:
+            composite_layer_panel.active_layer_changed.connect(
+                self._inspect_layer_selection
+            )
         self.agent_panel.open_well_requested.connect(self._open_well_from_agent)
         self.agent_panel.show_wells_requested.connect(self._show_wells_from_agent)
         self.agent_panel.focus_joint_requested.connect(self._focus_joint_from_agent)
@@ -405,6 +413,10 @@ class WorkstationFrame(QWidget):
             self.mapping_stage_panel.set_stage(stage_value)
             # V6 §4：阶段驱动工具条命令面（数字化/编辑动作按 profile 过滤）。
             self.composite.apply_stage_tool_profile(stage_value)
+            # V7 R1-P1：阶段也改变组可见性/白名单/求值器输出——统一可用性
+            # 必须随阶段刷新（此前仅 profile 过滤，factor/qa/layout_export
+            # 组与阶段禁用项停留在旧阶段状态）。
+            self.composite._sync_action_state()
             # 「我画进哪个图层」必须可见：阶段切换消息携带当前编辑目标
             #（无目标时明说，绝不静默）。
             target_id = controller.active_target_layer_id
@@ -531,9 +543,16 @@ class WorkstationFrame(QWidget):
         controller.dock_recommendation.connect(_on_dock_recommendation)
 
         # 阶段动作的 hub 导航请求（单因素制备等既有页面）。
-        self.composite.hub_page_requested.connect(
-            lambda key="": (self.show_hub_page("综合编图") if not key or key == "mapping"
-                            else self.show_hub_page(str(key))))
+        # V7 修复：此前只 show 浮动 hub dock、不切换子模块（「单因素工作台」
+        # 实际停在编图画布）。改为经 navigation_requested 走 AppShell 真导航
+        # （切 hub + 子模块 + 激活页面）。
+        self._HUB_ROUTES = {
+            "mapping": (3, "canvas"),
+            "preparation": (3, "preparation"),
+            "review": (3, "review"),
+            "data": (0, "management"),
+        }
+        self.composite.hub_page_requested.connect(self._on_hub_page_requested)
         # 阶段面板上下文动作（执行体在 composite 的阶段动作层）。
         self.mapping_stage_panel.action_requested.connect(
             self._dispatch_stage_action)
@@ -549,12 +568,30 @@ class WorkstationFrame(QWidget):
         阶段面板按钮与 palette 条目共用同一分派路径（``_dispatch_stage_action``），
         动作语义只有一份。``stages`` 白名单使跨阶段调用在 palette 侧被
         禁用并显示原因（命令注册表 evaluate），执行侧不再重复判定。
+
+        V7 §5：有工具面映射的阶段动作追加 ``applicability``——与工具条
+        共用 ``tool_surface.evaluate_tool``（经 UIContext 快照适配），
+        palette 禁用原因与 tooltip 同一字符串源。
         """
         from paleo_workbench.mapping_workspace.stages import MappingStage
         from paleo_workbench.ui.command_registry import CommandSpec, command_registry
         from paleo_workbench.ui.workstation.mapping_stage_panel import (
             MappingStagePanel,
         )
+        from paleo_workbench.ui.workstation.tool_surface import (
+            evaluate_tool,
+            tool_context_from_ui_snapshot,
+        )
+
+        # 阶段动作 id → 工具面 id（无映射的动作不受工具门禁，仅阶段白名单）。
+        stage_action_tools = {
+            "open_factor_workbench": "factor_workbench",
+            "run_factor": "factor_workbench",
+            "overlay_factor_results": "factor_overlay",
+            "run_qa": "qa_run",
+            "stage_qc": "qa_run",
+            "assemble_map_product": "map_product_assemble",
+        }
 
         for stage, actions in (
             (MappingStage.FACIES_CALIBRATION, MappingStagePanel._PHASE1_ACTIONS),
@@ -562,6 +599,16 @@ class WorkstationFrame(QWidget):
             (MappingStage.INTEGRATED_COMPILATION, MappingStagePanel._PHASE3_ACTIONS),
         ):
             for action_id, title in actions:
+                tool_id = stage_action_tools.get(action_id)
+
+                def _applicability(ctx, _tool=tool_id):
+                    if _tool is None:
+                        return None
+                    avail = evaluate_tool(
+                        _tool, tool_context_from_ui_snapshot(ctx)
+                    )
+                    return avail.reason or None
+
                 command_registry.register(
                     CommandSpec(
                         id=f"stage:{stage.value}:{action_id}",
@@ -573,11 +620,52 @@ class WorkstationFrame(QWidget):
                         keywords="阶段 stage 编图",
                         group="编图阶段",
                         stages=(stage.value,),
+                        applicability=_applicability,
                         callback=lambda s=stage.value, a=action_id: (
                             self._dispatch_stage_action(s, a)
                         ),
                     )
                 )
+        self._register_surface_palette_commands()
+
+    def _register_surface_palette_commands(self) -> None:
+        """V7 §3：工具面动作注册为 palette 命令（applicability 同一求值器）。
+
+        palette 与工具条对同一动作给同一禁用原因（goal §5 四表面一致）；
+        回调经 composite 的命令分派（同一执行路径）。
+        """
+        from paleo_workbench.ui.command_registry import CommandSpec, command_registry
+        from paleo_workbench.ui.map_action_controller import MapActionController
+        from paleo_workbench.ui.workstation.tool_surface import (
+            evaluate_tool,
+            tool_context_from_ui_snapshot,
+        )
+
+        surface_tools = (
+            "layer_new", "reference_import", "layer_properties",
+            "attribute_table", "layer_zoom", "layer_export", "symbology",
+            "style_manager", "factor_workbench", "factor_overlay",
+            "qa_run", "map_product_assemble", "map_export",
+        )
+        labels = MapActionController._LABELS
+        for tool_id in surface_tools:
+
+            def _applicability(ctx, _tool=tool_id):
+                avail = evaluate_tool(_tool, tool_context_from_ui_snapshot(ctx))
+                return avail.reason or None
+
+            command_registry.register(
+                CommandSpec(
+                    id=f"map:{tool_id}",
+                    label=f"编图 · {labels.get(tool_id, tool_id)}",
+                    keywords="map 编图 图层 符号 因子 导出",
+                    group="编图工具",
+                    applicability=_applicability,
+                    callback=lambda t=tool_id: (
+                        self.composite._on_command_requested(t)
+                    ),
+                )
+            )
 
     def _apply_stage_dock_recommendation(self, recommended: dict) -> None:
         """阶段 dock 建议（仅首次进入阶段时应用；建议而非强制，V5 §6/§7）。
@@ -604,6 +692,94 @@ class WorkstationFrame(QWidget):
         handler = getattr(self.composite, "stage_action", None)
         if callable(handler):
             handler(stage_value, action_id)
+
+    def _on_hub_page_requested(self, key: str) -> None:
+        """composite 的 hub 导航请求 → 真导航（切 hub + 子模块）。
+
+        未知 key 落到编图 hub 的画布页（与旧行为「显示综合编图」等价，
+        但现在真的切换页面而不是只弹 dock）。
+        """
+        hub_index, subkey = self._HUB_ROUTES.get(
+            str(key or "mapping"), (3, "canvas")
+        )
+        self.navigation_requested.emit(hub_index, subkey)
+
+    def _inspect_layer_selection(self, layer_id) -> None:
+        """图层树选择 → 类型化 Inspector payload（V7 §8）。
+
+        factor 系角色（带 factor_task_id）→ 单因素分节（任务 + live 网格
+        摘要）；其余 → layer 分节（域行经 context seam）。
+        """
+        if not layer_id:
+            return
+        try:
+            composite = self.composite
+            state = composite.stage_controller.state
+            record = state.membership(str(layer_id))
+            if record is not None and record.factor_task_id:
+                task = None
+                for candidate in getattr(self._project, "factor_map_tasks", None) or []:
+                    if str(candidate.id) == str(record.factor_task_id):
+                        task = candidate
+                        break
+                if task is not None:
+                    self.inspector.show_payload({
+                        "kind": "factor",
+                        "task": task,
+                        "grid": self._factor_grid_summary(record.factor_task_id),
+                        "layer_id": str(layer_id),
+                        "name": getattr(task, "name", None),
+                    })
+                    return
+            role = state.role_of(str(layer_id))
+            self.inspector.show_payload({
+                "kind": "layer",
+                "layer_id": str(layer_id),
+                "layer_type": role.label,
+                "object": composite.edit_controller.layer(str(layer_id)),
+                "name": getattr(
+                    composite.edit_controller.layer(str(layer_id)), "name", None),
+            })
+        except RuntimeError:
+            pass  # 拆壳期迟到信号
+        except Exception:
+            logger.exception("inspector layer selection failed")
+
+    @staticmethod
+    def _factor_grid_summary(task_id: str) -> dict:
+        """live 因子网格摘要（min/max/不确定性；缓存缺失 → 空 dict）。"""
+        try:
+            from paleo_workbench.project.factor_grid_artifacts import (
+                peek_live_factor_grid,
+            )
+
+            grid = peek_live_factor_grid(str(task_id))
+        except Exception:
+            return {}
+        if grid is None:
+            return {}
+        summary: dict = {}
+        try:
+            values = getattr(grid, "values", None)
+            if values is not None:
+                import numpy as np
+
+                finite = np.asarray(values, dtype=float)
+                finite = finite[np.isfinite(finite)]
+                if finite.size:
+                    summary["min"] = float(finite.min())
+                    summary["max"] = float(finite.max())
+            uncertainty = getattr(grid, "uncertainty", None)
+            if uncertainty is not None:
+                import numpy as np
+
+                array = np.asarray(uncertainty, dtype=float)
+                finite = array[np.isfinite(array)]
+                if finite.size:
+                    summary["uncertainty"] = (float(finite.min()), float(finite.max()))
+        except Exception:
+            logger.exception("factor grid summary failed")
+        return summary
 
     def _dispatch_stage_constraint(self, kind_value: str) -> None:
         handler = getattr(self.composite, "create_stage_constraint", None)
@@ -703,9 +879,15 @@ class WorkstationFrame(QWidget):
             )
 
     def show_hub_page(self, title: str) -> None:
+        """功能页 dock 显示（V7 D12：不再强制浮动）。
+
+        旧实现每次导航 ``setFloating(True)`` 弹独立窗口——双架构接缝的
+        主要来源（预设定制被排除、多屏几何噪声）。现在 hub_dock 是普通
+        停靠 dock，导航 = show + raise；用户可自由拖出/叠 tab/关闭，
+        与其余 dock 行为一致（重开路径：面板菜单/palette 不变）。
+        """
         self.hub_dock.setWindowTitle(str(title or "功能页"))
         self.hub_dock.show()
-        self.hub_dock.setFloating(True)
         self.hub_dock.raise_()
 
     def activate_joint(self) -> None:
@@ -771,8 +953,8 @@ class WorkstationFrame(QWidget):
         return self._current_preset_id
 
     def _preset_tracked_docks(self) -> tuple[QDockWidget, ...]:
-        """预设可见性矩阵覆盖的 dock（hub 浮窗除外）。"""
-        return tuple(dock for dock in self._shell_docks() if dock is not self.hub_dock)
+        """预设可见性矩阵覆盖的 dock（V7 D12：hub 不再强制浮动，纳入追踪）。"""
+        return tuple(self._shell_docks())
 
     def _mark_layout_customized(self) -> None:
         if self._preset_tracking_paused or self._layout_frozen:

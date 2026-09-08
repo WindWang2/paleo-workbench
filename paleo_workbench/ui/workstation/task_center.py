@@ -268,13 +268,15 @@ class _TaskRowDelegate(QStyledItemDelegate):
             TaskState.CANCELLED: "已取消",
         }
         text = labels.get(handle.state, str(handle.state))
-        if handle.state is TaskState.RUNNING:
-            text = f"{text} {round(handle.progress * 100)}%"
-        elif handle.cancel_requested and handle.state in (
+        # V7 R1-P1：取消中优先于运行中（RUNNING+cancel_requested 是协作
+        # 取消等待期——显示「运行中 N%」是假状态）。
+        if handle.cancel_requested and handle.state in (
             TaskState.QUEUED,
             TaskState.RUNNING,
         ):
             text = "取消中"
+        elif handle.state is TaskState.RUNNING:
+            text = f"{text} {round(handle.progress * 100)}%"
         return text
 
     def editorEvent(self, event, model, option, index) -> bool:
@@ -410,9 +412,15 @@ class TaskCenter(QFrame):
         menu = QMenu(self)
         if handle.state in (TaskState.QUEUED, TaskState.RUNNING):
             action = menu.addAction("取消")
+            if handle.cancel_requested:
+                action.setEnabled(False)
+                action.setToolTip("正在等待任务协作取消（长计算步骤间检查取消点）")
             action.triggered.connect(lambda: scheduler.cancel(handle.task_id))
         if handle.state in (TaskState.FAILED, TaskState.CANCELLED):
             action = menu.addAction("重试")
+            # V7 §12：如实说明重试语义——重新提交相同 spec（闭包参数原样
+            # 重放，输入若已变化不会自动更新）。
+            action.setToolTip("用完全相同的参数重新提交该任务")
             action.triggered.connect(lambda: scheduler.submit(handle.spec))
         action = menu.addAction("复制任务 ID")
         action.triggered.connect(

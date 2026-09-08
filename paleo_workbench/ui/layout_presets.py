@@ -42,7 +42,6 @@ class WorkstationLayoutPreset:
     description: str
     visibility: DockVisibilityMatrix
     #: When True, float every currently-visible shell dock (low-risk affordance).
-    float_visible: bool = False
 
 
 #: Canonical registry — order is menu order（app bar「工作区」下拉同序）。

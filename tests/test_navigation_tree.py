@@ -158,14 +158,14 @@ def test_well_node_expands_to_file_leaves(qtbot):
     tree.set_asset_label_provider(lambda aid: labels.get(aid, aid))
     tree.set_project(doc)
 
-    group = tree._well_group_item  # 顶层标签带 🛢 前缀，find_group("井") 会误中“井分层”
+    group = tree._well_group_item  # 顶层标签带 ◉ 前缀，find_group("井") 会误中“井分层”
     assert group is not None
     well_item = group.child(0)
     assert well_item is not None
     assert well_item.childCount() == 2
 
     leaf_texts = sorted(well_item.child(i).text(0) for i in range(2))
-    assert leaf_texts == ["📄 A1.las", "📄 A1_head.dat"]
+    assert leaf_texts == ["▤ A1.las", "▤ A1_head.dat"]
     leaf = well_item.child(0)
     query = leaf.data(0, Qt.ItemDataRole.UserRole)
     assert query is not None

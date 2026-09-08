@@ -137,7 +137,9 @@ def test_hub_dock_close_keeps_bian_tu(qtbot, tmp_path):
     ws = shell.workstation
     shell.navigate_to(navigation.PAGE_INDEX_DATA, "overview")
     assert ws.central_document() is ws.composite
-    assert ws.hub_dock.isFloating()
+    # V7 D12：hub 停靠显示（不再强制浮动；离屏未 show 窗口用 isHidden 判）。
+    assert not ws.hub_dock.isFloating()
+    assert not ws.hub_dock.isHidden()
     ws.hub_dock.close()
     assert ws.hub_dock.isHidden()
     assert ws.central_document() is ws.composite

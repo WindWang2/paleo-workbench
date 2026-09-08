@@ -42,11 +42,22 @@ _VOCABULARY: dict[str, dict[str, StateToken]] = {
         "current": StateToken("✓", "最新", "ok"),
         "stale": StateToken("↻", "已过期", "warn"),
         "missing": StateToken("✕", "缺失", "error"),
+        # V7 §7（树装饰）：对齐 dependencies.FreshnessStatus 全集——
+        # missing_input/superseded 此前只有域侧中文标签，无 glyph/tone。
+        "missing_input": StateToken("✕", "输入缺失", "error"),
+        "superseded": StateToken("↻", "已被取代", "warn"),
+        "unknown": StateToken("·", "状态未知", "muted"),
+    },
+    # V7 §7：编辑会话呈现态（图层级 dirty 信号）。
+    "session": {
+        "editing": StateToken("✎", "编辑中", "info"),
+        "dirty": StateToken("✎", "未保存修改", "warn"),
     },
     "editability": {
         "editable": StateToken("✎", "可编辑", "ok"),
         "raw": StateToken("▣", "RAW 不可编辑", "locked"),
-        "locked": StateToken("🔒", "证据锁定", "locked"),
+        # 「⊘」取代旧的锁 emoji 字形（goal §7 禁止 emoji；字形+文字双信号保留）。
+        "locked": StateToken("⊘", "证据锁定", "locked"),
         "none": StateToken("·", "无编辑目标", "muted"),
     },
     "task": {
@@ -66,7 +77,31 @@ _VOCABULARY: dict[str, dict[str, StateToken]] = {
         "granted": StateToken("✓", "已授权写入", "ok"),
         "read_only": StateToken("▣", "只读会话", "muted"),
     },
+    # V7 §6：阶段就绪度（readiness items；此前 mapping_stage_panel 自带
+    # glyph 表——词表归一）。
+    "readiness": {
+        "ok": StateToken("✓", "就绪", "ok"),
+        "warning": StateToken("!", "注意", "warn"),
+        "error": StateToken("✕", "未就绪", "error"),
+        "info": StateToken("·", "说明", "muted"),
+    },
 }
+
+#: state_language tone → PwbBadge tone（两套 tone 语法的单向桥；badge 消费
+#: 方不得自行再映射）。process 语义 = running。
+_TONE_TO_BADGE = {
+    "ok": "success",
+    "info": "primary",
+    "warn": "warning",
+    "error": "error",
+    "muted": "neutral",
+    "locked": "neutral",
+}
+
+
+def tone_to_badge(tone: str) -> str:
+    """StateToken.tone → ``PwbBadge`` tone（未知 tone 回落 neutral）。"""
+    return _TONE_TO_BADGE.get(str(tone), "neutral")
 
 
 def state_token(category: str, value: str | None) -> StateToken:
