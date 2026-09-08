@@ -280,6 +280,34 @@ _LAYER_BOUND_TOOLS = frozenset(
 _KIND_BOUND_TOOLS = {"add_point": "point", "add_line": "line", "add_polygon": "polygon"}
 
 
+def _crs_parseable(crs: str) -> bool:
+    """ADV-6：CRS 有效性做真校验（pyproj 可解析），而非仅判非空。
+
+    结果进程内缓存（帧级触发链上每次同步都问一次，pyproj 解析不便宜）。
+    pyproj 缺失时回落为非空判断（不比原来更差）。
+    """
+    text = str(crs or "").split("/")[0].strip()
+    if not text:
+        return False
+    cached = _crs_parseable._cache.get(text)  # type: ignore[attr-defined]
+    if cached is not None:
+        return cached
+    try:
+        from pyproj import CRS
+
+        CRS(text)
+        result = True
+    except ImportError:
+        result = True
+    except Exception:
+        result = False
+    _crs_parseable._cache[text] = result  # type: ignore[attr-defined]
+    return result
+
+
+_crs_parseable._cache = {}  # type: ignore[attr-defined]
+
+
 def _coords_to_lists(value: Any) -> Any:
     """GeoJSON 坐标归一化：shapely mapping() 返回 tuple，比较前统一为 list。"""
     if isinstance(value, (list, tuple)):
@@ -796,9 +824,15 @@ class CompositeEditController(QObject):
         if layer is None or not features:
             return
         session = self._open_session(layer)
-        with session.edit_source("domain_import"):
-            for feature in features:
-                session.add_feature(feature)
+        # ADV-4：批量导入中途失败（重复 id 等）必须回滚，不得留半脏会话。
+        try:
+            with session.edit_source("domain_import"):
+                for feature in features:
+                    session.add_feature(feature)
+        except Exception:
+            session.rollback_changes()
+            self.state_changed.emit()
+            raise
         session.commit_changes()
         self.content_changed.emit(str(layer_id))
 
@@ -814,10 +848,17 @@ class CompositeEditController(QObject):
         if self._topology.enabled:
             issues = self._topology.validate([layer])
             if issues:
-                first = issues[0]
+                # UX-4：列出前 3 个 offender（图层名/要素 id/判词），用户可
+                # 定位修复；不再只报首条 transient 消息。
+                shown = issues[:3]
+                details = "；".join(
+                    f"{issue.get('feature_id', '')}：{issue.get('message', '')}"
+                    for issue in shown
+                )
+                more = f"（另有 {len(issues) - 3} 个问题）" if len(issues) > 3 else ""
                 return (
-                    f"图层「{layer.name}」要素 {first.get('feature_id', '')} "
-                    f"未通过拓扑检查：{first.get('message', '')}"
+                    f"图层「{layer.name}」{len(issues)} 个要素未通过拓扑检查："
+                    f"{details}{more}"
                 )
         layer.edit_session.commit_changes()
         self.content_changed.emit(layer.id)
@@ -1085,6 +1126,12 @@ class CompositeEditController(QObject):
                 and _KIND_BOUND_TOOLS[action] != self._kinds.get(layer.id)
             ):
                 self.activate_tool("pan")
+                return
+            # ADV-3：reshape 目标是单选集要素——选集变化（删除/清空）导致
+            # 失配时回落 pan 并提示，不得把用户卡在无目标的重塑工具里。
+            if action == "reshape" and len(layer.selection) != 1:
+                self.activate_tool("pan")
+                self.state_changed.emit()
                 return
             self.activate_tool(action)
         elif action in _LAYER_BOUND_TOOLS:
@@ -1432,6 +1479,8 @@ class CompositeEditController(QObject):
             layer.invert_selection()
         else:
             return
+        # 选集变化可能使 reshape 等单选集工具失配（ADV-3）：重绑检查。
+        self._rebind_active_tool()
         self.state_changed.emit()
 
     def edit_command(self, command_id: str) -> bool:
@@ -1660,22 +1709,32 @@ class CompositeEditController(QObject):
             "snapping_enabled": self._snapping.enabled,
             "topology_available": True,
             "topology_enabled": self._topology.enabled,
-            "crs_valid": bool(self.project_crs),
+            "crs_valid": _crs_parseable(self.project_crs),
             "current_tool": getattr(self.tools.active_tool, "tool_id", "") or "pan",
             "blocking_task": str(getattr(self, "blocking_task_label", "") or ""),
         }
 
     def overlay_state(self) -> dict[str, Any]:
-        """画布 overlay：选中要素高亮 / 采点预览 / 捕捉标记。"""
+        """画布 overlay：选中要素高亮 / 采点预览 / 捕捉标记。
+
+        PERF-1：只点查选集 id 对应的要素（O(选集)），不全量拷贝
+        features()（O(全量)）——fallback 画布每帧 overlay 回调即触发。
+        """
         selected = []
         for layer in self._layers.values():
             if not layer.selection:
                 continue
             session = layer.edit_session
-            source = session.features() if session is not None else layer.features()
-            selected.extend(
-                feature for feature in source if feature.feature_id in layer.selection
-            )
+            for feature_id in layer.selection:
+                try:
+                    feature = (
+                        session.feature(feature_id)
+                        if session is not None
+                        else layer.feature(feature_id)
+                    )
+                except KeyError:
+                    continue
+                selected.append(feature)
         tool = self.tools.active_tool
         capture = list(getattr(tool, "points", ()) or ())
         snap = self._snapping.last_match.point if self._snapping.last_match is not None else None

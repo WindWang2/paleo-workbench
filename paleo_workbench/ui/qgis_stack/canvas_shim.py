@@ -146,6 +146,9 @@ class QgisCanvasShim(QWidget):
     # "ellipsoidal"}；action ∈ measure_updated|measure_completed。
     measure_updated = Signal(dict)
     measure_canceled = Signal()
+    # V7/ADV-2：原生交互提交被会话拒绝时的人类可读原因（坏几何/重复 id/
+    # 脱钩会话），宿主转 status_message——采点完成必须有回执。
+    commit_rejected = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -695,8 +698,16 @@ class QgisCanvasShim(QWidget):
                         kind = "addLine"
                     try:
                         shim.stack.set_map_tool(addr, kind)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        # ADV-1：原生工具切换失败必须可见——工具条 checked
+                        # 与画布实际工具分叉是"点了没反应"类 UX 缺陷。
+                        logging.getLogger(__name__).warning(
+                            "原生工具切换失败（%s -> %s）：%s", tool_id, kind, exc)
+                        try:
+                            shim.backend_status_changed.emit(
+                                f"qgis: 工具切换失败（{tool_id}）")
+                        except Exception:
+                            pass
                     try:
                         # 视口路由只在「measure 激活 且 桥无原生测距」时挂载。
                         shim._measure_router.set_active(measure_active and not native_measure)
@@ -740,12 +751,21 @@ class QgisCanvasShim(QWidget):
             commit = getattr(tool, "commit_geometry", None)
             if commit is None:
                 return
+            # ADV-2：commit 被拒（坏几何/重复 id/脱钩会话）必须让用户感知，
+            # 不得静默吞掉一次完成的采点。
             try:
-                if commit(json.loads(geom_json)):
-                    shim.tool_operation.emit(True)
+                ok = bool(commit(json.loads(geom_json)))
             except Exception as exc:
                 logging.getLogger(__name__).debug(
                     "digitize commit rejected: %s", exc)
+                shim.commit_rejected.emit(f"要素未写入：{exc}")
+                shim.tool_operation.emit(False)
+                return
+            if ok:
+                shim.tool_operation.emit(True)
+            else:
+                shim.commit_rejected.emit("要素未写入：几何校验未通过")
+                shim.tool_operation.emit(False)
 
         try:
             self.stack.set_digitize_callback(self.canvas_address, _on_digitize)

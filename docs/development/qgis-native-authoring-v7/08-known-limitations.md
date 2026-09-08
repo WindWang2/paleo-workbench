@@ -49,3 +49,15 @@
       Windows venv 无（Linux CI 有）；与 V7 矢量 authoring 范围无关。
     - `test_qgis_layer_panel_menu.py::test_menu_reference_snap_check_state_follows_authority`
       的 teardown error（QMenu 悬垂回调）隔离复现，为既有测试问题。
+
+13. **原生+旧桥测距同样无数值显示**（Review-3 P1-3，已修复）：修复前
+    fallback 与原生+旧桥都只有 overlay、无状态栏数值；修复后旧桥路由的
+    分段/预览同样进状态栏（明确标注"平面"以区别于原生椭球测算）。
+14. **undo 栈无界**（Review-3 PERF-4）：只有 EditDelta journal 有 1024 上限；
+    长会话内存上界由 undo 栈决定（与基线一致，未引入新风险；QGIS 桌面
+    同样有可配 undo 深度，本分支未加限）。
+15. **桥调用/回调注册失败的可见性**（Review-3 ADV-1，已修复）：修复前
+    `set_map_tool` 失败被静默吞掉（工具条 checked 与画布实际分叉）；
+    修复后 warning 日志 + `backend_status_changed` 告警。
+16. **cancel 永远可用**（Review-3 UX-1）：空工程点"取消"无操作也无反馈——
+    有意为之（Esc 全局兜底，不因"无事可做"禁用逃生通道）。

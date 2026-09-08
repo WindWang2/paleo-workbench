@@ -809,6 +809,10 @@ class CompositeDocument(QWidget):
         native_identified = getattr(self.canvas, "native_identified", None)
         if native_identified is not None:
             native_identified.connect(self._on_native_identified)
+        # V7/ADV-2：原生提交被拒 → 状态栏明示（采点完成必须有回执）。
+        commit_rejected = getattr(self.canvas, "commit_rejected", None)
+        if commit_rejected is not None:
+            commit_rejected.connect(self.status_message.emit)
 
         # 面板实例（dock 由宿主 QMainWindow 创建并管理）。图层管理面板跟随
         # 画布形态：原生栈用 QgsLayerTreeView 面板，回退画布用同信号接缝的
@@ -943,6 +947,16 @@ class CompositeDocument(QWidget):
         动作；基础导航/识别/选择永不因阶段隐藏。
         """
         self._sync_action_state()
+        # UX-2：隐藏的按钮连"为什么没了"都看不到——阶段切换时明示被隐藏
+        # 的工具名（隐藏 action 的 tooltip 用户永远看不到）。
+        try:
+            hidden = sorted(self._stage_hidden_edit_actions())
+        except Exception:
+            hidden = []
+        if hidden:
+            self.status_message.emit(
+                f"当前阶段隐藏了 {len(hidden)} 个编辑工具：{', '.join(hidden)}"
+            )
 
     def _build_toolbar(self) -> None:
         """悬浮工具条：QGIS 命令面（MapActionController）+「面板」菜单。"""
@@ -1191,12 +1205,17 @@ class CompositeDocument(QWidget):
         feature_id = str(payload.get("feature_id") or "")
         controller = self.edit_controller
         layer = controller.layer(layer_id)
+        # UX-3：未命中（无图层/无要素）时清空面板并提示——不得残留上次结果
+        # 误导用户（fallback identify_all 至少会刷新为空）。
         if layer is None or not feature_id:
+            self.identify_results.set_results([])
             return
         session = layer.edit_session
         source = session.features() if session is not None else layer.features()
         feature = next((f for f in source if f.feature_id == feature_id), None)
         if feature is None:
+            self.identify_results.set_results([])
+            self.status_message.emit("识别未命中：要素不存在或已被删除")
             return
         self.identify_results.set_results(
             [
@@ -1236,13 +1255,7 @@ class CompositeDocument(QWidget):
         """ToolContext 组装（Goal V7 §3）：controller 派生 + 角色/阶段细分注入。"""
         inputs = self.edit_controller.tool_context_inputs()
         layer_id = str(inputs.get("active_layer_id") or "")
-        raw_locked = False
-        stage_locked = False
-        if layer_id:
-            role = self.stage_controller.state.role_of(layer_id)
-            raw_locked = bool(getattr(role, "is_raw_protected", False))
-            gate_allowed = bool(inputs.get("edit_gate_open"))
-            stage_locked = (not raw_locked) and (not gate_allowed)
+        raw_locked, stage_locked = self._layer_lock_classes(layer_id)
         context = build_tool_context(
             controller_state=inputs,
             qgis=self._qgis_capability,
@@ -1559,6 +1572,34 @@ class CompositeDocument(QWidget):
             title = template.title if template else group_id
             return False, f"图层所在组「{title}」在本阶段为证据锁定——不可编辑"
         return True, ""
+
+    def _layer_lock_classes(self, layer_id: str) -> tuple[bool, bool]:
+        """(raw_locked, stage_locked) 分类（review-3 UX-5）。
+
+        只在真正的 RAW 保护 / 组证据锁分支置 true；门禁的其他拒绝原因
+        （无活动目标等瞬态原因）保持两者皆 false，具体判词走
+        ``edit_gate_reason``（evaluator 的 _role_gate 优先用判词）。
+        """
+        if not layer_id:
+            return False, False
+        role = self.stage_controller.state.role_of(str(layer_id))
+        if bool(getattr(role, "is_raw_protected", False)):
+            return True, False
+        from paleo_workbench.mapping_workspace.layer_groups import (
+            system_group_template,
+        )
+
+        group_id = self.stage_controller.group_controller.placement_of(layer_id)
+        template = system_group_template(group_id) if group_id else None
+        stage = self.stage_controller.current_stage
+        try:
+            view_state = self.stage_controller.state.view_state(stage)
+            locked_override = view_state.group_locked.get(group_id)
+            locked = locked_override if locked_override is not None else bool(
+                template and template.stage_locked(stage))
+        except Exception:
+            locked = False
+        return False, bool(locked)
 
     def _toggle_layer_editing(self, layer_id: str) -> None:
         allowed, reason = self._role_allows_editing(str(layer_id))
