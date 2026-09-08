@@ -8,7 +8,10 @@ pytestmark = pytest.mark.qgis
 def test_bridge_importable_and_initializes(qapp):
     import qgis_render_bridge
 
-    assert qgis_render_bridge.__version__ == "0.2.17a0"
+    # V7：桥版本随 capability manifest 一起演进（0.3.0a0 起）。
+    assert qgis_render_bridge.__version__ == "0.3.0a0"
+    manifest = qgis_render_bridge.capability_manifest()
+    assert manifest["contract_version"] >= 2
     bridge = qgis_render_bridge.QgisRenderBridge()
     bridge.initialize()
     assert bridge.initialized

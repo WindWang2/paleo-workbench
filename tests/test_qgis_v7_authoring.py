@@ -101,18 +101,12 @@ class TestGeometryValidateReshape:
         line = {"type": "LineString", "coordinates": [[2, -1], [2, 7]]}
         reshaped = json.loads(bridge.geometry.reshape(json.dumps(target), json.dumps(line)))
         assert reshaped["type"] in {"Polygon", "MultiPolygon"}
-        # The reshape line splits the ring: the vertex count grows.
-        def count_points(g):
-            total = 0
-            stack = [g["coordinates"]]
-            while stack:
-                item = stack.pop()
-                if isinstance(item[0], (int, float)):
-                    total += 1
-                else:
-                    stack.extend(item)
-            return total
-        assert count_points(reshaped) > count_points(target)
+        # The reshape line (x=2 vertical cut) replaces the left boundary:
+        # the ring's left edge moves from x=0 to x=2 (QgsGeometry semantics —
+        # boundary substitution, not vertex insertion).
+        ring = reshaped["coordinates"][0]
+        xs = sorted({round(p[0]) for p in ring})
+        assert 2 in xs and 0 not in xs
 
     def test_reshape_nonintersecting_line_errors(self, bridge):
         target = {
@@ -143,20 +137,22 @@ class TestNativeMeasureTool:
         try:
             from paleo_workbench.mapping.map_tools import MapToolController, MeasureDistanceTool
 
+            from PySide6.QtCore import QPoint, Qt
+            from PySide6.QtTest import QTest
+
             controller = MapToolController()
             shim.set_map_tool_controller(controller)
             controller.set_active_tool(MeasureDistanceTool())
             # Native kind dispatched without raising is the activation proof.
-            import qgis_render_bridge as native  # noqa: F401
-            from PySide6.QtCore import QPointF
-            from PySide6.QtTest import QTest
-
-            viewport = shim._viewport_widget()
-            canvas_center = viewport.rect().center()
-            QTest.mouseClick(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, canvas_center)
-            QTest.mouseMove(viewport, canvas_center + QPointF(50, 0))
-            QTest.mouseClick(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
-                             canvas_center + QPointF(50, 0))
+            viewport = shim._canvas_viewport()
+            assert viewport is not None
+            center = viewport.rect().center()
+            first = QPoint(int(center.x()), int(center.y()))
+            second = QPoint(int(center.x()) + 50, int(center.y()))
+            QTest.mouseClick(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, first)
+            QTest.mouseMove(viewport, second)
+            QTest.mouseClick(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, second)
+            qtbot.wait(300)
         finally:
             shim.shutdown()
         if events:

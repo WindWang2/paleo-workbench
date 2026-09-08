@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
@@ -3605,6 +3606,11 @@ std::string QgisMapStack::layoutExport(const std::string& spec_json,
     throw std::invalid_argument("format must be pdf|svg|png, got: " + format);
   }
   if (result != QgsLayoutExporter::Success) {
+    // D10/V7 never-fake contract: a failed export (e.g. GeoPDF without a
+    // capable GDAL PDF driver — PrintError) must not leave a partial file
+    // behind that callers could mistake for the requested product.
+    std::error_code remove_error;
+    std::filesystem::remove(output_path, remove_error);
     throw std::runtime_error("layout export failed with result code " +
                              std::to_string(static_cast<int>(result)));
   }
