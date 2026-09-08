@@ -1608,20 +1608,18 @@ class CompositeEditController(QObject):
         kinds_among_selection: tuple[str, ...] = (
             (layer_kind,) if layer is not None and layer.selection and layer_kind else ()
         )
+        # wkb_type O(1)（review-3 P1-1）：图层 kind 的 GeoJSON 名；
+        # evaluator 不用它做门禁（下游消费字段），绝不为它全量拷贝
+        # features()（next 再短路也已付 O(N) tuple 拷贝，帧级链上不可接受）。
+        wkb_type = {"point": "Point", "line": "LineString", "polygon": "Polygon"}.get(layer_kind, "")
         gate_allowed, gate_reason = (
             self.can_edit_layer(layer.id) if layer is not None else (False, "没有活动图层")
         )
         return {
             "project_open": True,
             "active_layer_id": layer.id if layer is not None else "",
-            "active_layer_kind": self._kinds.get(layer.id, "") if layer is not None else "",
-            "wkb_type": next(
-                (
-                    str(feature.geometry["type"])
-                    for feature in (session.features() if session is not None else layer.features())
-                ),
-                "",
-            ) if layer is not None else "",
+            "active_layer_kind": layer_kind,
+            "wkb_type": wkb_type,
             "vector_writable": layer is not None,
             "editing": session is not None,
             "dirty": bool(session is not None and session.is_dirty),

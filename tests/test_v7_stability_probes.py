@@ -122,6 +122,37 @@ class TestScaleProbes:
 
 
 class TestToolActivationStability:
+    def test_context_inputs_constant_in_layer_size(self, qtbot, tmp_path):
+        """Review-3 P1-1 回归探针：tool_context_inputs 不得 O(要素数)。
+
+        直接构造 ToolContext 的 evaluator 探针测不到采集器本身的 O(N)——
+        本测试经 CompositeEditController（含选集 + 会话）采集，对比
+        1k vs 100k 要素的耗时比（>8x 即存在全量遍历回归）。
+        """
+        import timeit
+
+        from tests.test_composite_editing import _document
+
+        document = _document(qtbot, tmp_path)
+        controller = document.edit_controller
+        for name, kind in (("小", "point"), ("大", "polygon")):
+            layer = controller.create_layer(name, kind)
+            controller.set_active_layer(layer.id)
+            controller.start_editing()
+        small_layer = controller.layer(controller.layer_ids()[0])
+        for i in range(1_000):
+            small_layer.edit_session.add_feature(_polygon_feature(f"s{i}", float(i)))
+        small_layer.set_selection(["s0"])
+        big_layer = controller.layer(controller.layer_ids()[1])
+        for i in range(100_000):
+            big_layer.edit_session.add_feature(_polygon_feature(f"b{i}", float(i % 1000)))
+        big_layer.set_selection(["b0"])
+
+        controller.set_active_layer(small_layer.id)
+        small = min(timeit.repeat(controller.tool_context_inputs, number=50, repeat=3))
+        controller.set_active_layer(big_layer.id)
+        big = min(timeit.repeat(controller.tool_context_inputs, number=50, repeat=3))
+        assert big < max(small * 8.0, small + 0.10)
     def test_100x_activate_deactivate_cycle(self, qtbot, tmp_path):
         from tests.test_composite_editing import _document
 

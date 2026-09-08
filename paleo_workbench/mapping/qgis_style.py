@@ -60,6 +60,32 @@ def ensure_qgis_bridge_dll_dirs() -> None:
     if _DLL_DIRS_INJECTED or os.name != "nt":
         return
     _DLL_DIRS_INJECTED = True
+    # MSVCP pre-pin (V7 loader investigation): numpy wheels ship a TRIMMED
+    # msvcp140 (only the OpenBLAS-needed symbol subset). If numpy imports
+    # first, its copy squats the process-wide MSVCP slot and the VS2022-built
+    # QGIS DLLs fail with WinError 127 (missing symbols). Pre-pinning the
+    # newest SYSTEM MSVCP makes numpy reuse it (superset-compatible) and
+    # leaves the full symbol set for QGIS. Harmless when numpy is absent.
+    try:
+        import ctypes
+
+        _system32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
+        for _crt in (
+            "msvcp140.dll",
+            "msvcp140_1.dll",
+            "msvcp140_2.dll",
+            "vcruntime140.dll",
+            "vcruntime140_1.dll",
+            "concrt140.dll",
+        ):
+            _candidate = _system32 / _crt
+            if _candidate.is_file():
+                try:
+                    ctypes.WinDLL(str(_candidate))
+                except OSError:
+                    continue
+    except Exception:
+        pass
     candidates: list[str] = []
     env_dir = os.environ.get("PALEO_QGIS_BUILD_DIR", "").strip()
     if env_dir:

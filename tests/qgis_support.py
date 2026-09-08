@@ -56,7 +56,10 @@ def require_qgis():
         import qgis_render_bridge
 
         return qgis_render_bridge
-    return pytest.importorskip("qgis_render_bridge", reason=QGIS_SKIP_REASON)
+    # pytest>=8.4: importorskip defaults to ModuleNotFoundError only — a
+    # broken bridge DLL raises plain ImportError and must still skip (not
+    # fail) on non-strict legs.
+    return pytest.importorskip("qgis_render_bridge", reason=QGIS_SKIP_REASON, exc_type=ImportError)
 
 
 def require_mapstack():
@@ -69,7 +72,7 @@ def require_mapstack():
         import qgis_render_bridge.mapstack as mapstack
 
         return mapstack
-    return pytest.importorskip("qgis_render_bridge.mapstack", reason=QGIS_SKIP_REASON)
+    return pytest.importorskip("qgis_render_bridge.mapstack", reason=QGIS_SKIP_REASON, exc_type=ImportError)
 
 
 def qgis_env_status() -> dict[str, object]:

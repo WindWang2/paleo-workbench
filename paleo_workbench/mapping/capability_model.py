@@ -169,28 +169,46 @@ def snapshot_stable_hash(snapshot: QgisCapabilitySnapshot) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
 
-def probe_qgis_capability() -> QgisCapabilitySnapshot:
+def probe_qgis_capability(_import_bridge=None) -> QgisCapabilitySnapshot:
     """Assemble the bridge snapshot. Cheap: import + compile-time manifest only.
 
     This does **not** spin up the QGIS runtime; runtime verification stays with
     ``map_render_backend.qgis_backend_probe`` (render backend selection) —
     capability surface and runtime health are separate concerns.
-    """
-    try:
-        from paleo_workbench.mapping.qgis_style import ensure_qgis_bridge_dll_dirs
 
-        ensure_qgis_bridge_dll_dirs()  # Windows V7: vendor DLL path before import
-        import qgis_render_bridge as bridge
-    except ImportError:
-        return QgisCapabilitySnapshot(status="unavailable", reason=BRIDGE_BUILD_HINT)
-    except Exception as exc:
-        # 桥损坏（.pyd 加载失败等非 ImportError）也必须给出 degraded 判词，
-        # 绝不让 probe 把异常抛进宿主构造链（P2-9）。
-        return QgisCapabilitySnapshot(
-            status="degraded",
-            reason=f"qgis_render_bridge 加载失败：{exc}",
-            native_tools=LEGACY_NATIVE_TOOLS,
-        )
+    ``_import_bridge`` is an injection hook for tests (a zero-argument
+    callable returning the bridge module); production always uses the real
+    import. It exists because simulating "bridge missing" via sys.modules
+    surgery poisons the Windows extension-loader state for later tests in
+    the same process.
+    """
+    if _import_bridge is None:
+        try:
+            from paleo_workbench.mapping.qgis_style import ensure_qgis_bridge_dll_dirs
+
+            ensure_qgis_bridge_dll_dirs()  # Windows V7: vendor DLL path before import
+            import qgis_render_bridge as bridge
+        except ImportError:
+            return QgisCapabilitySnapshot(status="unavailable", reason=BRIDGE_BUILD_HINT)
+        except Exception as exc:
+            # 桥损坏（.pyd 加载失败等非 ImportError）也必须给出 degraded 判词，
+            # 绝不让 probe 把异常抛进宿主构造链（P2-9）。
+            return QgisCapabilitySnapshot(
+                status="degraded",
+                reason=f"qgis_render_bridge 加载失败：{exc}",
+                native_tools=LEGACY_NATIVE_TOOLS,
+            )
+    else:
+        try:
+            bridge = _import_bridge()
+        except ImportError:
+            return QgisCapabilitySnapshot(status="unavailable", reason=BRIDGE_BUILD_HINT)
+        except Exception as exc:
+            return QgisCapabilitySnapshot(
+                status="degraded",
+                reason=f"qgis_render_bridge 加载失败：{exc}",
+                native_tools=LEGACY_NATIVE_TOOLS,
+            )
 
     version = getattr(bridge, "__version__", None)
     manifest_fn = getattr(bridge, "capability_manifest", None)

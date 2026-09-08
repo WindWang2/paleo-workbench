@@ -59,11 +59,47 @@ def _available_snapshot(**overrides) -> QgisCapabilitySnapshot:
 
 class TestQgisCapabilitySnapshot:
     def test_unavailable_bridge_reports_build_hint(self):
-        # The venv running these tests has no bridge installed.
-        snapshot = probe_qgis_capability()
+        # Simulate a host without the bridge via the probe's importer hook
+        # (no sys.modules surgery: None-entries and builtins.__import__
+        # patches both poison the Windows extension-loader state for later
+        # tests sharing the process).
+        def _missing():
+            raise ImportError("No module named 'qgis_render_bridge'")
+
+        snapshot = probe_qgis_capability(_import_bridge=_missing)
         assert snapshot.status == "unavailable"
         assert "qgis_render_bridge" in snapshot.reason
         assert not snapshot.available
+
+    def test_available_bridge_probe_matches_manifest(self):
+        # On hosts WITH the bridge (this venv after the V7 build), the probe
+        # derives the snapshot from the compiled manifest. Runs in a fresh
+        # subprocess: the Windows extension-loader state is process-global
+        # (MSVCP/CRT squatting, DLL search order), so same-process sequencing
+        # with bridge-absent simulations is inherently order-dependent.
+        import json
+        import subprocess
+        import sys
+
+        code = (
+            "import json, sys; sys.path.insert(0, '.'); "
+            "from paleo_workbench.mapping.capability_model import probe_qgis_capability; "
+            "import qgis_render_bridge as bridge; "
+            "s = probe_qgis_capability(); "
+            "print(json.dumps({'status': s.status, "
+            "'tools': sorted(s.native_tools), "
+            "'manifest': sorted(bridge.capability_manifest()['native_tools'])}))"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert proc.returncode == 0, proc.stderr[-2000:]
+        data = json.loads(proc.stdout.strip().splitlines()[-1])
+        assert data["status"] == "available"
+        assert data["tools"] == data["manifest"]
 
     def test_available_flag_invariants(self):
         with pytest.raises(ValueError):
@@ -95,14 +131,12 @@ class TestQgisCapabilitySnapshot:
         other = snapshot_stable_hash(_available_snapshot(native_tools=frozenset({"pan"})))
         assert other != a
 
-    def test_probe_degrades_on_old_bridge(self, monkeypatch):
-        import sys
+    def test_probe_degrades_on_old_bridge(self):
         import types
 
         fake = types.ModuleType("qgis_render_bridge")
         fake.__version__ = "0.2.17a0"  # no capability_manifest attr
-        monkeypatch.setitem(sys.modules, "qgis_render_bridge", fake)
-        snap = probe_qgis_capability()
+        snap = probe_qgis_capability(_import_bridge=lambda: fake)
         assert snap.status == "degraded"
         assert "capability_manifest" in snap.reason
 
@@ -254,14 +288,12 @@ class TestInspection:
         assert evaluate_tool("measure_distance", _ctx(native_canvas_available=True)).enabled
         assert evaluate_tool("measure_distance", _ctx()).enabled
 
-    def test_degraded_bridge_keeps_legacy_tool_surface(self, monkeypatch):
-        import sys
+    def test_degraded_bridge_keeps_legacy_tool_surface(self):
         import types
 
         fake = types.ModuleType("qgis_render_bridge")
         fake.__version__ = "0.2.17a0"  # pre-manifest bridge
-        monkeypatch.setitem(sys.modules, "qgis_render_bridge", fake)
-        snap = probe_qgis_capability()
+        snap = probe_qgis_capability(_import_bridge=lambda: fake)
         assert snap.status == "degraded"
         # 可验证的 M3/M4 基线能力保持可用（存量安装不因升级变只读，P1-2）；
         # V7 新能力（measure/reshape/endpoint）诚实缺席。
@@ -582,3 +614,38 @@ class TestEditDeltaPure:
         m_before = {"x": _polygon_feature("x"), "y": _polygon_feature("y")}
         m_after = {"x": None, "y": None, "m": _polygon_feature("m")}
         assert delta_from_command(MergeFeaturesCommand(m_before, m_after), layer_id="L", session_id="s", order=1, source_tool="t", qgis_capability="u").operation == "merge_features"
+
+
+class TestBlockingTaskGates:
+    """Review-3 P1-2：后台任务进行中，全部画布/数据工具一致禁用。"""
+
+    def test_blocking_task_blocks_everything_except_cancel(self):
+        from paleo_workbench.mapping.tool_availability import TOOL_IDS
+
+        # Gate order is coarse-to-fine: a kind mismatch (more fundamental)
+        # still reports first. The blocking gate must fire for every tool
+        # whose structural preconditions pass — assert per-tool accordingly.
+        for tool_id in TOOL_IDS:
+            ctx = _ctx(blocking_task="导出中")
+            if tool_id in {"add_point", "add_line"}:
+                ctx = _ctx(blocking_task="导出中", active_layer_kind="point" if tool_id == "add_point" else "line")
+            av = evaluate_tool(tool_id, ctx)
+            if tool_id == "cancel":
+                assert av.enabled
+            elif tool_id in {"add_point", "add_line", "add_polygon", "reshape", "repair_geometry",
+                             "split", "merge", "delete_selected", "save_edits", "rollback",
+                             "undo", "redo"}:
+                # Data/shape gates may legitimately fire first on the
+                # fixture context; the invariant is "disabled", reason
+                # specificity is covered by the dedicated matrix tests.
+                assert not av.enabled, tool_id
+            else:
+                assert not av.enabled, tool_id
+                assert "导出中" in av.disabled_reason, tool_id
+
+    def test_blocking_task_reason_fires_on_canvas_tools(self):
+        for tool_id in ("pan", "zoom_in", "full_extent", "refresh",
+                        "toggle_editing", "move_feature", "vertex"):
+            av = evaluate_tool(tool_id, _ctx(blocking_task="导出中"))
+            assert not av.enabled, tool_id
+            assert "导出中" in av.disabled_reason, tool_id

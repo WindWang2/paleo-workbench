@@ -168,24 +168,24 @@ def _rule_zoom(ctx: ToolContext, tool_id: str) -> ToolAvailability:
 
 
 def _rule_full_extent(ctx: ToolContext) -> ToolAvailability:
-    reason = _canvas_gate(ctx)
+    reason = _canvas_gate(ctx) or _blocking_gate(ctx)
     return _ok("full_extent") if reason is None else _no("full_extent", reason)
 
 
 def _rule_refresh(ctx: ToolContext) -> ToolAvailability:
-    reason = _canvas_gate(ctx)
+    reason = _canvas_gate(ctx) or _blocking_gate(ctx)
     return _ok("refresh") if reason is None else _no("refresh", reason)
 
 
 def _rule_previous_extent(ctx: ToolContext, tool_id: str) -> ToolAvailability:
-    reason = _canvas_gate(ctx)
+    reason = _canvas_gate(ctx) or _blocking_gate(ctx)
     if reason is None and not ctx.can_previous_extent:
         reason = "没有可回退的视图历史"
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
 
 
 def _rule_next_extent(ctx: ToolContext) -> ToolAvailability:
-    reason = _canvas_gate(ctx)
+    reason = _canvas_gate(ctx) or _blocking_gate(ctx)
     if reason is None and not ctx.can_next_extent:
         reason = "没有可前进的视图历史"
     return _ok("next_extent") if reason is None else _no("next_extent", reason)
@@ -204,19 +204,19 @@ def _rule_inspection(ctx: ToolContext, tool_id: str) -> ToolAvailability:
 
 
 def _rule_selection_commands(ctx: ToolContext, tool_id: str) -> ToolAvailability:
-    reason = _layer_gate(ctx)
+    reason = _canvas_gate(ctx) or _layer_gate(ctx) or _blocking_gate(ctx)
     if reason is None and tool_id != "select_all" and ctx.selection_count == 0:
         reason = "没有选中的要素"
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
 
 
 def _rule_toggle_editing(ctx: ToolContext) -> ToolAvailability:
-    reason = _layer_gate(ctx) or _writable_gate(ctx) or _role_gate(ctx)
+    reason = _layer_gate(ctx) or _writable_gate(ctx) or _role_gate(ctx) or _blocking_gate(ctx)
     return _ok("toggle_editing", preferred=ctx.editing) if reason is None else _no("toggle_editing", reason)
 
 
 def _rule_save_edits(ctx: ToolContext) -> ToolAvailability:
-    reason = _editing_gate(ctx)
+    reason = _editing_gate(ctx) or _blocking_gate(ctx)
     if reason is None and not ctx.dirty:
         reason = "编辑会话没有未保存的修改"
     if reason is None and not ctx.edit_gate_open:
@@ -227,7 +227,7 @@ def _rule_save_edits(ctx: ToolContext) -> ToolAvailability:
 
 
 def _rule_rollback(ctx: ToolContext) -> ToolAvailability:
-    reason = _editing_gate(ctx)
+    reason = _editing_gate(ctx) or _blocking_gate(ctx)
     if reason is None and not ctx.dirty:
         reason = "编辑会话没有可回滚的修改"
     return _ok("rollback") if reason is None else _no("rollback", reason)
@@ -268,14 +268,14 @@ def _rule_edit_tool(ctx: ToolContext, tool_id: str, native_kind: str) -> ToolAva
 
 
 def _rule_delete_selected(ctx: ToolContext) -> ToolAvailability:
-    reason = _layer_gate(ctx) or _editing_gate(ctx) or _role_gate(ctx)
+    reason = _layer_gate(ctx) or _editing_gate(ctx) or _role_gate(ctx) or _blocking_gate(ctx)
     if reason is None and ctx.selection_count == 0:
         reason = "没有选中的要素"
     return _ok("delete_selected") if reason is None else _no("delete_selected", reason)
 
 
 def _rule_split(ctx: ToolContext) -> ToolAvailability:
-    reason = _layer_gate(ctx) or _editing_gate(ctx) or _role_gate(ctx)
+    reason = _layer_gate(ctx) or _editing_gate(ctx) or _role_gate(ctx) or _blocking_gate(ctx)
     if reason is None and not ctx.split_ready:
         reason = (
             "分割需要：一个正在编辑且选中了多边形的面图层 + 一条选中的切割线"
@@ -284,7 +284,7 @@ def _rule_split(ctx: ToolContext) -> ToolAvailability:
 
 
 def _rule_merge(ctx: ToolContext) -> ToolAvailability:
-    reason = _layer_gate(ctx) or _editing_gate(ctx) or _role_gate(ctx)
+    reason = _layer_gate(ctx) or _editing_gate(ctx) or _role_gate(ctx) or _blocking_gate(ctx)
     if reason is None and not ctx.merge_ready:
         reason = "合并需要至少两个选中的兼容面要素"
     return _ok("merge") if reason is None else _no("merge", reason)
@@ -312,14 +312,14 @@ def _rule_reshape(ctx: ToolContext) -> ToolAvailability:
 
 
 def _rule_repair(ctx: ToolContext) -> ToolAvailability:
-    reason = _layer_gate(ctx) or _writable_gate(ctx) or _role_gate(ctx)
+    reason = _layer_gate(ctx) or _writable_gate(ctx) or _role_gate(ctx) or _blocking_gate(ctx)
     if reason is None and ctx.active_layer_kind != "polygon":
         reason = "几何修复针对面图层"
     return _ok("repair_geometry") if reason is None else _no("repair_geometry", reason)
 
 
 def _rule_history(ctx: ToolContext, tool_id: str) -> ToolAvailability:
-    reason = _editing_gate(ctx)
+    reason = _editing_gate(ctx) or _blocking_gate(ctx)
     if reason is None and tool_id == "undo" and not ctx.can_undo:
         reason = "没有可撤销的操作"
     if reason is None and tool_id == "redo" and not ctx.can_redo:
@@ -328,12 +328,12 @@ def _rule_history(ctx: ToolContext, tool_id: str) -> ToolAvailability:
 
 
 def _rule_snapping(ctx: ToolContext) -> ToolAvailability:
-    reason = _layer_gate(ctx)
+    reason = _layer_gate(ctx) or _blocking_gate(ctx)
     return _ok("snapping") if reason is None else _no("snapping", reason)
 
 
 def _rule_topology(ctx: ToolContext) -> ToolAvailability:
-    reason = _layer_gate(ctx)
+    reason = _layer_gate(ctx) or _blocking_gate(ctx)
     if reason is None and not ctx.crs_valid:
         reason = "工程 CRS 无效，拓扑校验不可用"
     return _ok("topology") if reason is None else _no("topology", reason)
