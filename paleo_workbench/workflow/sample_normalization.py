@@ -182,11 +182,19 @@ def normalize_factor_samples(
         members = [records[i] for i in indices]
         base = dict(members[0])
         if policy == "mean":
-            base["z"] = sum(m["z"] for m in members) / len(members)
+            # incremental mean: a plain sum() overflows to inf for huge
+            # values (1e308 duplicates); mean-of-two must stay finite
+            def _imean(values):
+                acc = 0.0
+                for i, v in enumerate(values, 1):
+                    acc += (v - acc) / i
+                return acc
+
+            base["z"] = _imean(m["z"] for m in members)
             for extra in _NUMERIC_EXTRAS:
                 values = [m[extra] for m in members if extra in m]
                 if values:
-                    base[extra] = sum(values) / len(values)
+                    base[extra] = _imean(values)
         # Worst-flag-wins: one flagged twin flags the merged location — a
         # conservative sample is dropped by QC-aware backends, never laundered.
         flags = {str(m.get("qc_flag") or "") for m in members}
