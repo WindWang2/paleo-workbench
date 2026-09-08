@@ -273,7 +273,9 @@ def _extension() -> Pybind11Extension:
     if not (include_dir / "qgsapplication.h").is_file():
         raise RuntimeError(f"vendored QGIS include directory is invalid: {include_dir}")
     if sys.platform == "win32":
-        compile_args = ["/O2", "/std:c++20"]
+        # /Zc:__cplusplus: Qt headers require a conforming __cplusplus value
+        # (MSVC defaults to the legacy 199711L without it — Qt errors out).
+        compile_args = ["/O2", "/std:c++20", "/Zc:__cplusplus", "/utf-8", "/EHsc"]
         link_args = [str(core_library), str(gui_library), str(analysis_library)]
     else:
         compile_args = ["-O2", "-std=c++20", "-Wall", "-Wextra"]

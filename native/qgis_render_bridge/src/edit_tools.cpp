@@ -7,7 +7,7 @@
 
 #include <qgsabstractgeometry.h>
 #include <qgscoordinatereferencesystem.h>
-#include <qgscsexception.h>
+#include <qgsexception.h>  // QgsCsException lives here in QGIS 4.2 (no qgscsexception.h)
 #include <qgsdistancearea.h>
 #include <qgsmapcanvas.h>
 #include <qgsmapmouseevent.h>
