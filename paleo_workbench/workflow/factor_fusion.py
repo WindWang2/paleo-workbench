@@ -188,6 +188,9 @@ class FusionModel:
     default_class: str = "未定"
     class_thresholds: list[float] = field(default_factory=list)
     class_names: list[str] = field(default_factory=list)
+    #: V8 M5 — who set the weights and why (actor/notes/policy); rides in
+    #: to_dict (fingerprinted + catalog run parameters).
+    weight_provenance: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in ("weighted_evidence", "rule_based"):
@@ -216,6 +219,8 @@ class FusionModel:
         if self.kind == "weighted_evidence":
             payload["class_thresholds"] = list(self.class_thresholds)
             payload["class_names"] = list(self.class_names)
+        if self.weight_provenance:
+            payload["weight_provenance"] = dict(self.weight_provenance)
         return payload
 
     @classmethod
@@ -254,6 +259,9 @@ class FusionModel:
                 float(t) for t in data.get("class_thresholds", [])
             ],
             class_names=list(data.get("class_names", [])),
+            weight_provenance=dict(data["weight_provenance"])
+            if data.get("weight_provenance")
+            else None,
         )
 
     def fingerprint(self) -> str:
@@ -372,15 +380,29 @@ def _fuse_weighted(model: FusionModel) -> FusionResult:
         )
     weights = np.array([ev.weight for ev in model.evidences], dtype=float)
     total_weight = float(weights.sum())
-    memberships = [ev.normalization.apply(ev.grid.grid_z.astype(float)) for ev in model.evidences]
-    finite_masks = [np.isfinite(m) for m in memberships]
-
-    stack = np.stack(memberships)  # (n, h, w)
-    avail = np.stack(finite_masks)  # (n, h, w)
-    weighted = stack * weights[:, None, None]
-    w_avail = weights[:, None, None] * avail
-    w_sum = w_avail.sum(axis=0)
-    m_sum = np.where(avail, weighted, 0.0).sum(axis=0)
+    # V8 M5 streaming accumulation: the V6 path materialised 4-5 (n, h, w)
+    # float64 temporaries (stack / avail / weighted / w_avail) — ~0.5 GB
+    # transient at 50 factors × 500×500 and O(N) worse beyond. Accumulating
+    # per factor keeps the working set at O(h, w) regardless of N; the
+    # maths is identical (sums are associative and order-stable here since
+    # we iterate evidences in fixed model order).
+    shape = np.asarray(grids[0].grid_z).shape
+    w_sum = np.zeros(shape, dtype=float)
+    m_sum = np.zeros(shape, dtype=float)
+    w_sq = np.zeros(shape, dtype=float)
+    memberships: list[np.ndarray] = []
+    finite_masks: list[np.ndarray] = []
+    for ev, weight in zip(model.evidences, weights):
+        membership = ev.normalization.apply(ev.grid.grid_z.astype(float))
+        mask = np.isfinite(membership)
+        memberships.append(membership)
+        finite_masks.append(mask)
+        contribution = np.where(mask, weight * membership, 0.0)
+        w_sum += np.where(mask, weight, 0.0)
+        m_sum += contribution
+        # NaN-safe: membership is NaN exactly where mask is False; a bare
+        # contribution*membership would poison w_sq with 0*NaN (review R1-P0)
+        w_sq += np.where(mask, contribution * membership, 0.0)
     with np.errstate(invalid="ignore", divide="ignore"):
         likelihood = m_sum / w_sum
     likelihood[w_sum <= 0.0] = np.nan  # no evidence at all stays nodata
@@ -388,12 +410,48 @@ def _fuse_weighted(model: FusionModel) -> FusionResult:
     # Confidence: coverage (available weight share) × agreement.
     with np.errstate(invalid="ignore", divide="ignore"):
         coverage = w_sum / total_weight
-        w_sq = np.where(avail, weighted * stack, 0.0).sum(axis=0)
         mean_sq = w_sq / w_sum
         spread_sq = np.maximum(mean_sq - likelihood**2, 0.0)
         agreement = 1.0 - np.sqrt(spread_sq)
     confidence = coverage * agreement
     confidence[w_sum <= 0.0] = np.nan
+
+    # V8 M5 conflict diagnostics: the spread-based agreement is only an
+    # indirect conflict signal. Per cell we also measure how much of the
+    # available evidence WEIGHT points at a class OTHER than the fused one
+    # (per-factor implied class vs fused class), and the decision margin
+    # (distance from the fused likelihood to the nearest class threshold).
+    thresholds_list = [float(t) for t in model.class_thresholds]
+
+    def _implied_class(values: np.ndarray) -> np.ndarray:
+        out = np.zeros(shape, dtype=np.int8)
+        finite_v = np.isfinite(values)
+        for idx in range(1, len(thresholds_list) + 1):
+            out[finite_v & (values >= thresholds_list[idx - 1])] = idx
+        out[~finite_v] = -1
+        return out
+
+    fused_class = _implied_class(likelihood)
+    disagree_weight = np.zeros(shape, dtype=float)
+    for ev, membership, mask, weight in zip(
+        model.evidences, memberships, finite_masks, weights
+    ):
+        implied = _implied_class(membership)
+        disagree_weight += np.where(
+            mask & (implied >= 0) & (implied != fused_class), weight, 0.0
+        )
+    with np.errstate(invalid="ignore", divide="ignore"):
+        conflict_fraction = disagree_weight / w_sum
+    conflict_fraction[w_sum <= 0.0] = np.nan
+    margin = np.full(shape, np.nan)
+    if thresholds_list:
+        thr = np.asarray(thresholds_list, dtype=float)
+        finite_l = np.isfinite(likelihood)
+        margin[finite_l] = np.min(
+            np.abs(likelihood[finite_l][:, None] - thr[None, :]), axis=1
+        )
+    else:
+        margin[np.isfinite(likelihood)] = 1.0
 
     # Variance propagation on the common support of available evidence.
     variance: FactorGridResult | None = None
@@ -419,6 +477,26 @@ def _fuse_weighted(model: FusionModel) -> FusionResult:
         class_grid[finite & (likelihood >= thresholds[idx - 1])] = float(idx)
     class_grid[~finite] = np.nan
 
+    finite_confidence = np.isfinite(confidence)
+    n_conf = int(finite_confidence.sum())
+    low_confidence_fraction = (
+        float((confidence[finite_confidence] < 0.3).sum()) / n_conf
+        if n_conf
+        else None
+    )
+    finite_conflict = np.isfinite(conflict_fraction)
+    high_conflict_fraction = (
+        float((conflict_fraction[finite_conflict] > 0.5).sum())
+        / int(finite_conflict.sum())
+        if finite_conflict.any()
+        else None
+    )
+    finite_margin = np.isfinite(margin)
+    low_margin_fraction = (
+        float((margin[finite_margin] < 0.05).sum()) / int(finite_margin.sum())
+        if finite_margin.any()
+        else None
+    )
     qc = {
         "fusion_kind": model.kind,
         "n_factors": len(model.evidences),
@@ -430,6 +508,16 @@ def _fuse_weighted(model: FusionModel) -> FusionResult:
             for i in range(len(model.class_names))
         },
         "nan_policy": "renormalize",
+        # V8 M5 honesty: how uncertain/conflicted the fused product is —
+        # consumed by fusion QC gates and the Inspector.
+        "low_confidence_fraction": low_confidence_fraction,
+        "mean_conflict_fraction": (
+            float(np.mean(conflict_fraction[finite_conflict]))
+            if finite_conflict.any()
+            else None
+        ),
+        "high_conflict_fraction": high_conflict_fraction,
+        "low_margin_fraction": low_margin_fraction,
     }
     result = FusionResult(
         model=model,
@@ -589,14 +677,25 @@ def register_output(
 
     parents = sorted({ref for ev in result.model.evidences for ref in ev.grid.source_refs})
     provenance = result.provenance()
-    # V6 §16 (P1-11): sensitivity was computed but never persisted — leave-
-    # one-factor-out is part of the product's honesty record.
-    try:
-        sensitivity = sensitivity_report(result.model, result)
-    except Exception:
-        sensitivity = None
+    # the provenance qc view drops private cache keys (they are re-serialized
+    # under sensitivity_leave_one_factor_out already; review R1-P2)
+    provenance["qc"] = {
+        k: v for k, v in dict(provenance.get("qc") or {}).items()
+        if not str(k).startswith("_")
+    }
+    # V6 §16 (P1-11): sensitivity is part of the product's honesty record.
+    # V8 M5: compute ONCE here and cache it on qc — the integrated entry
+    # reuses the cached copy instead of recomputing (which doubled the
+    # (N-1) extra full fusions per registered run).
+    sensitivity = result.qc.pop("_cached_sensitivity", None)
+    if sensitivity is None:
+        try:
+            sensitivity = sensitivity_report(result.model, result)
+        except Exception:
+            sensitivity = None
     if sensitivity is not None:
         provenance["sensitivity_leave_one_factor_out"] = sensitivity
+        result.qc["_cached_sensitivity"] = sensitivity
     with tempfile.TemporaryDirectory() as td:
         artifact_path = write_grid_artifact(result.likelihood, td, "fusion_result")
         derived = catalog_service.create_derived(
@@ -628,10 +727,33 @@ def register_output(
             )
         except Exception:
             derived_conf = None
+        # V8 M5: the propagated VARIANCE surface registers as a sibling too
+        # (it existed only as a runtime descriptor before — downstream QA
+        # could not verify the uncertainty claim from the catalog).
+        derived_var = None
+        if result.variance is not None:
+            try:
+                variance_path = write_grid_artifact(
+                    result.variance, td, "fusion_variance"
+                )
+                derived_var = catalog_service.create_derived(
+                    variance_path,
+                    parent_version_ids=[str(derived.id)],
+                    name=f"{result.model.name} 融合方差",
+                    operation="factor_fusion:variance",
+                    parameters={"fusion_version_id": str(derived.id)},
+                    generator=FUSION_GENERATOR_VERSION,
+                    type="factor_map",
+                    format="npz",
+                )
+            except Exception:
+                derived_var = None
     result.likelihood.run_ref = getattr(derived, "run_id", None) or str(
         getattr(derived, "id", "")
     )
     result.qc["catalog_version_id"] = str(derived.id)
     if derived_conf is not None:
         result.qc["confidence_version_id"] = str(derived_conf.id)
+    if derived_var is not None:
+        result.qc["variance_version_id"] = str(derived_var.id)
     return str(derived.id)

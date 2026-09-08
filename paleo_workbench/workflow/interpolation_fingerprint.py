@@ -228,8 +228,16 @@ def build_factor_fingerprints(
     crs: str | None = None,
     generator_version: str = DEFAULT_GENERATOR_VERSION,
     target_horizon: str | None = None,
+    duplicate_policy: str | None = None,
 ) -> FactorFingerprints:
-    """Build component + result fingerprints for a resolved interpolation input set."""
+    """Build component + result fingerprints for a resolved interpolation input set.
+
+    ``sample_points`` must be the NORMALIZED set (duplicate policy applied —
+    see :mod:`paleo_workbench.workflow.sample_normalization`). Pass
+    ``duplicate_policy`` only when duplicates were actually merged: a policy
+    only changes the delivered surface for duplicate-bearing inputs, and the
+    fingerprint must invalidate exactly those tasks (never globally).
+    """
     backend = resolve_backend(method)
     samples = extract_sample_records(sample_points)
     xy = [[s["x"], s["y"]] for s in samples]
@@ -269,6 +277,8 @@ def build_factor_fingerprints(
         "backend": backend,
         "generator_version": str(generator_version),
     }
+    if duplicate_policy is not None:
+        algorithm_payload["duplicate_policy"] = str(duplicate_policy)
     if backend_uses_power(backend):
         algorithm_payload["power"] = float(power)
     if backend_uses_anisotropy(backend):
@@ -407,8 +417,19 @@ def _fingerprints_for_task_uncached(
     generator_version: str = DEFAULT_GENERATOR_VERSION,
 ) -> FactorFingerprints:
     """Uncached derivation (see :func:`fingerprints_for_task`)."""
+    from paleo_workbench.workflow.sample_normalization import (
+        duplicate_policy_from_params,
+        normalize_factor_samples,
+    )
+
     params = dict(getattr(task, "parameters", None) or {})
-    points = params.get("sample_points") or []
+    # V8 M3: fingerprints cover the NORMALIZED sample set (what the engine
+    # actually consumes) — duplicate-bearing tasks get new geometry/values
+    # fingerprints exactly once, duplicate-free tasks stay CLEAN.
+    points, norm_report = normalize_factor_samples(
+        params.get("sample_points") or [],
+        policy=duplicate_policy_from_params(params),
+    )
     # Prepare-time overrides (method/grid_n/power) win over stored task params so
     # batch_prepare(power=3) correctly invalidates results computed with power=2.
     use_method = method if method is not None else str(getattr(task, "method", "IDW"))
@@ -462,6 +483,9 @@ def _fingerprints_for_task_uncached(
         crs=crs,
         generator_version=generator_version,
         target_horizon=horizon,
+        duplicate_policy=(
+            norm_report.policy if norm_report.duplicates_present else None
+        ),
     )
 
 

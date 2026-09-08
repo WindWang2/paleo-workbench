@@ -420,6 +420,123 @@ def residual_features(residuals: Sequence[Mapping[str, float]]) -> list[dict[str
 # ---------------------------------------------------------------------------
 
 
+def _validate_recommendation_context(
+    unit: str | None, crs: str | None
+) -> tuple[list[str], str | None]:
+    """Fail-closed gates shared by every method entry (V8 M4).
+
+    Unknown unit or an unparseable CRS must stop the recommendation, not
+    merely annotate it: ranking methods on data whose measurement unit is
+    unknown pretends to a comparison the numbers cannot support. Returns
+    ``(gate_warnings, gate)`` where ``gate`` names the failure (None = open).
+    """
+    warnings: list[str] = []
+    if unit is None or not str(unit).strip():
+        return warnings, "unit_unknown"
+    unit_norm = str(unit).strip().lower()
+    known_units = {
+        "m", "米", "ft", "feet", "英尺", "%", "percent", "ratio",
+        "dimensionless", "v/v", "g/cm3", "api", "us/cm",
+        # emitted by the factor-units authority (factor_units.py): permeability
+        # (mD) and probability (1) tasks are legitimately declared-known
+        "md", "1",
+    }
+    if unit_norm not in known_units:
+        warnings.append(f"unrecognized unit {unit!r} — treated as declared-unknown")
+        return warnings, "unit_unknown"
+    if crs is not None and str(crs).strip():
+        try:
+            import pyproj
+
+            pyproj.CRS.from_user_input(str(crs))
+        except Exception:
+            return warnings, "crs_invalid"
+    return warnings, None
+
+
+def adjudicate_recommendation(
+    entries: list[dict[str, Any]],
+    *,
+    gate: str | None = None,
+    unknown_constraints: list[str] | None = None,
+    scheme_caveat: str = "",
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Shared recommendation adjudication (V8 M4, single authority — review
+    R2-P1: the per-method and shared-fold callers used to carry two
+    verbatim copies that already drifted once).
+
+    Applies, in order: the fail-closed gate (unknown unit / invalid CRS /
+    unknown constraint names — nothing recommended, every entry says why),
+    capability disqualification (``:unsupported:``), then metric-best among
+    ELIGIBLE entries only. Mutates entries with ``recommended``/``rationale``
+    and returns ``(entries, recommended_method)``.
+    """
+    gate_rationale = {
+        "unit_unknown": (
+            "no recommendation: measurement unit is unknown — cross-method "
+            "ranking on ununitized data is not a defensible comparison"
+        ),
+        "crs_invalid": (
+            "no recommendation: declared CRS is invalid/unparseable — "
+            "distances and folds cannot be trusted"
+        ),
+    }.get(gate or "")
+    if gate_rationale is None and unknown_constraints:
+        gate_rationale = (
+            "no recommendation: requested constraint(s) "
+            f"{unknown_constraints!r} are unknown to the capability matrix — "
+            "no method can be certified as honoring them"
+        )
+
+    def _score(entry: dict[str, Any]) -> float:
+        metrics = entry.get("metrics") or {}
+        rmse = metrics.get("rmse")
+        return float(rmse) if rmse is not None else float("inf")
+
+    def _eligible(entry: dict[str, Any]) -> bool:
+        return entry.get("metrics") is not None and not any(
+            ":unsupported:" in w for w in entry.get("capability_warnings") or []
+        )
+
+    best: str | None = None
+    scorable = [e for e in entries if _eligible(e)]
+    if scorable:
+        best = min(scorable, key=_score)["method"]
+
+    for entry in entries:
+        if entry.get("metrics") is None:
+            continue  # rationale already set by the caller
+        unsupported = any(
+            ":unsupported:" in w
+            for w in entry.get("capability_warnings") or []
+        )
+        caveat = f"; caveat: {scheme_caveat}" if scheme_caveat else ""
+        if gate_rationale is not None:
+            entry["recommended"] = False
+            entry["rationale"] = gate_rationale
+        elif unsupported:
+            entry["recommended"] = False
+            entry["rationale"] = (
+                "disqualified: requested constraints ignored by this method "
+                "(capability matrix) — metrics alone cannot justify it"
+            )
+        elif entry["method"] == best:
+            entry["recommended"] = True
+            entry["rationale"] = (
+                "best cross-validated RMSE among methods that honor every "
+                "requested constraint" + caveat
+            )
+        else:
+            entry["recommended"] = False
+            entry["rationale"] = f"higher cross-validated RMSE than {best!r}" + caveat
+    recommended_method = (
+        None
+        if gate_rationale is not None
+        else next((e["method"] for e in entries if e.get("recommended")), None)
+    )
+    return entries, recommended_method
+
+
 def recommend_interpolation_methods(
     points: Sequence[Mapping[str, Any]],
     *,
@@ -427,6 +544,8 @@ def recommend_interpolation_methods(
     run_fold: Callable[[list[Mapping[str, Any]]], tuple[Any, Any, Any]],
     requested_constraints: Sequence[str] | None = None,
     k: int = DEFAULT_CV_FOLDS,
+    unit: str | None = None,
+    crs: str | None = None,
     cancellation_token=None,
 ) -> dict[str, Any]:
     """Cross-method comparison with a structured recommendation (V6 §13).
@@ -437,9 +556,26 @@ def recommend_interpolation_methods(
     constraints (capability matrix, §10) is disqualified regardless of its
     RMSE — a great number computed by ignoring the user's geology is not a
     better answer.
+
+    V8 M4 fail-closed gates: an unknown *unit* or invalid *crs* disables the
+    recommendation entirely (metrics may still be reported); an unknown
+    constraint NAME means the request itself cannot be certified — no method
+    is recommended, each entry says why.
     """
     requested = [str(c) for c in (requested_constraints or [])]
     entries: list[dict[str, Any]] = []
+
+    gate_warnings, gate = _validate_recommendation_context(unit, crs)
+    unknown_constraints = []
+    from paleo_workbench.workflow.constraint_capabilities import ConstraintKind
+
+    kinds: list[ConstraintKind] = []
+    for name in requested:
+        try:
+            kinds.append(ConstraintKind(name))
+        except ValueError:
+            unknown_constraints.append(name)
+
     for method in methods:
         report = cross_validate_surface(
             points,
@@ -448,23 +584,19 @@ def recommend_interpolation_methods(
             method_label=str(method),
             cancellation_token=cancellation_token,
         )
-        capability_warnings: list[str] = []
-        if requested:
+        capability_warnings: list[str] = list(gate_warnings)
+        if unknown_constraints:
+            capability_warnings.extend(
+                f"unknown constraint {name!r} — cannot certify honoring it"
+                for name in unknown_constraints
+            )
+        if kinds:
             from paleo_workbench.workflow.constraint_capabilities import (
                 evaluate_request,
             )
 
-            from paleo_workbench.workflow.constraint_capabilities import ConstraintKind
-
-            kinds: list[ConstraintKind] = []
-            for name in requested:
-                try:
-                    kinds.append(ConstraintKind(name))
-                except ValueError:
-                    capability_warnings.append(f"unknown constraint {name!r}")
-            if kinds:
-                evaluation = evaluate_request(str(method), kinds)
-                capability_warnings.extend(evaluation.diagnostics)
+            evaluation = evaluate_request(str(method), kinds)
+            capability_warnings.extend(evaluation.diagnostics)
         if report is None:
             entries.append(
                 {
@@ -488,46 +620,21 @@ def recommend_interpolation_methods(
             }
         )
 
-    def _score(entry: dict[str, Any]) -> float:
-        metrics = entry.get("metrics") or {}
-        rmse = metrics.get("rmse")
-        return float(rmse) if rmse is not None else float("inf")
-
-    best_metric_method: str | None = None
-    scorable = [e for e in entries if e.get("metrics")]
-    if scorable:
-        best_metric_method = min(scorable, key=_score)["method"]
-
-    for entry in entries:
-        warnings = entry.get("capability_warnings") or []
-        unsupported = any(":unsupported:" in w for w in warnings)
-        if entry.get("metrics") is None:
-            continue  # rationale already set
-        if unsupported:
-            entry["recommended"] = False
-            entry["rationale"] = (
-                "disqualified: requested constraints ignored by this method "
-                "(capability matrix) — metrics alone cannot justify it"
-            )
-        elif entry["method"] == best_metric_method:
-            entry["recommended"] = True
-            entry["rationale"] = (
-                "best cross-validated RMSE among methods that honor every "
-                "requested constraint"
-            )
-        else:
-            entry["recommended"] = False
-            entry["rationale"] = (
-                f"higher cross-validated RMSE than {best_metric_method!r}"
-            )
+    entries, recommended_method = adjudicate_recommendation(
+        entries,
+        gate=gate,
+        unknown_constraints=unknown_constraints or None,
+    )
     return {
         "scheme": "spatial_kfold_surface",
         "k": k,
         "requested_constraints": requested,
+        "unit": unit,
+        "crs": crs,
+        "recommendation_gate": gate
+        or ("unknown_constraints" if unknown_constraints and gate is None else None),
         "methods": entries,
-        "recommended_method": next(
-            (e["method"] for e in entries if e.get("recommended")), None
-        ),
+        "recommended_method": recommended_method,
     }
 
 
@@ -535,16 +642,31 @@ def kriging_leave_one_out(
     points: Sequence[Mapping[str, Any]],
     *,
     variogram_model: str = "spherical",
+    range_: float | None = None,
+    sill: float | None = None,
+    nugget: float | None = None,
+    azimuth_deg: float | None = None,
+    anisotropy_ratio: float | None = None,
     cancellation_token=None,
 ) -> CrossValidationReport | None:
     """Exact closed-form kriging LOO via the geoviz kriging authority.
+
+    V8 M4: the caller passes the PRODUCTION variogram (model/range/sill/
+    nugget) and anisotropy (azimuth + major/minor ratio) so the LOO scores
+    the surface that was actually delivered — never engine defaults. The
+    anisotropy transform mirrors :func:`ordinary_kriging`: samples move into
+    the isotropic frame, the variogram is fitted there when parameters are
+    missing, and residuals still report ORIGINAL map coordinates.
 
     Returns ``None`` when there are too few points or the geoviz kriging
     module is unavailable; degenerate systems surface as an ``unavailable``
     report with the engine's error in ``detail``.
     """
     try:
-        from geoviz_plots.factor.kriging import leave_one_out_predictions
+        from geoviz_plots.factor.kriging import (
+            apply_anisotropy_transform,
+            leave_one_out_predictions,
+        )
     except ImportError:
         return None
     x, y, z = _points_to_arrays(points)
@@ -552,9 +674,36 @@ def kriging_leave_one_out(
         return None
     if cancellation_token is not None:
         cancellation_token.raise_if_cancelled()
+    use_anisotropy = azimuth_deg is not None and anisotropy_ratio is not None
+    if use_anisotropy:
+        xt, yt = apply_anisotropy_transform(
+            x, y, azimuth_deg=float(azimuth_deg), ratio=float(anisotropy_ratio)
+        )
+    else:
+        xt, yt = x, y
+    # Dedupe HOST-SIDE with the engine's exact convention (np.unique
+    # lexicographic order, mean z): the engine's returned z/preds are aligned
+    # to that order, so pre-deduping here keeps residual coordinates truly
+    # aligned (input order ≠ unique order — the naive zip mislabels x/y).
+    pts = np.stack([xt, yt], axis=1)
+    unique_pts, inverse = np.unique(pts, axis=0, return_inverse=True)
+    inverse = np.asarray(inverse).ravel()
+    z_sum = np.zeros(len(unique_pts), dtype=np.float64)
+    np.add.at(z_sum, inverse, z)
+    # Mean z per unique location AND (for duplicate-free inputs) the reorder
+    # of z into the unique/sorted order — without it coordinates and values
+    # scramble whenever input order differs from sorted order.
+    z = z_sum / np.bincount(inverse)
+    xu, yu = unique_pts[:, 0], unique_pts[:, 1]
     try:
         preds, z_dedup = leave_one_out_predictions(
-            x, y, z, variogram_model=variogram_model
+            xu,
+            yu,
+            z,
+            variogram_model=variogram_model,
+            range_=range_,
+            sill=sill,
+            nugget=nugget,
         )
     except ValueError as exc:
         return CrossValidationReport(
@@ -566,6 +715,19 @@ def kriging_leave_one_out(
             detail=str(exc),
         )
     metrics = EvaluationMetrics.from_arrays(z_dedup, preds)
+    if use_anisotropy:
+        # Inverse of the engine's forward transform (rotation by
+        # 90°-azimuth, minor axis scaled by ratio): x = c*u - s*(v/r),
+        # y = s*u + c*(v/r). Reported residuals stay in MAP coordinates.
+        import math as _math
+
+        theta = _math.radians(90.0 - float(azimuth_deg))
+        c, s = _math.cos(theta), _math.sin(theta)
+        r = float(anisotropy_ratio)
+        rx = c * xu - s * (yu / r)
+        ry = s * xu + c * (yu / r)
+    else:
+        rx, ry = xu, yu
     residuals = [
         {
             "x": float(xi),
@@ -574,7 +736,9 @@ def kriging_leave_one_out(
             "predicted": float(pi),
             "residual": float(zi - pi),
         }
-        for xi, yi, zi, pi in zip(x, y, z_dedup, preds)
+        # Aligned to the deduped unique locations, in original map
+        # coordinates (the anisotropy frame is computational only).
+        for xi, yi, zi, pi in zip(rx, ry, z_dedup, preds)
     ]
     return CrossValidationReport(
         method="kriging",
@@ -583,6 +747,10 @@ def kriging_leave_one_out(
         metrics=metrics,
         residuals=residuals,
         engine="geoviz_plots.factor.kriging",
+        detail=(
+            "variogram: production settings"
+            + ("; anisotropy frame applied" if use_anisotropy else "")
+        ),
     )
 
 

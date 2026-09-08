@@ -285,6 +285,7 @@ def build_fusion_model(
     class_names: Sequence[str] | None = None,
     class_thresholds: Sequence[float] | None = None,
     name: str = DEFAULT_FUSION_MODEL_NAME,
+    weight_provenance: Mapping[str, Any] | None = None,
 ) -> FusionModel:
     """Build a weighted-evidence :class:`FusionModel` from a Compilation Input Set.
 
@@ -349,7 +350,7 @@ def build_fusion_model(
         )
         for task_id in ordered
     ]
-    return FusionModel(
+    model = FusionModel(
         name=name,
         kind="weighted_evidence",
         evidences=evidences,
@@ -357,6 +358,16 @@ def build_fusion_model(
         class_thresholds=class_thresholds_r,
         class_names=class_names_r,
     )
+    # V8 M5 weight provenance: WHO chose the weights and WHY travels with
+    # the model (fingerprinted + catalog run parameters) — "explicit" vs
+    # "equal default" alone could not answer who decided.
+    if weight_provenance:
+        record = {
+            str(k): v for k, v in dict(weight_provenance).items() if v is not None
+        }
+        if record:
+            model.weight_provenance = record
+    return model
 
 
 def _defaults_record(
@@ -492,6 +503,7 @@ def run_integrated_fusion(
     class_thresholds: Sequence[float] | None = None,
     register: bool = True,
     name: str = DEFAULT_FUSION_MODEL_NAME,
+    weight_provenance: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build + fuse + (optionally) register the integrated fusion product.
 
@@ -524,6 +536,7 @@ def run_integrated_fusion(
         class_names=class_names,
         class_thresholds=class_thresholds,
         name=name,
+        weight_provenance=weight_provenance,
     )
     result = fuse(model)
 
@@ -561,6 +574,7 @@ def run_integrated_fusion(
             "registered": True,
             "catalog_version_id": catalog_version_id,
             "confidence_version_id": str(result.qc.get("confidence_version_id") or ""),
+            "variance_version_id": str(result.qc.get("variance_version_id") or ""),
         })
     elif not register:
         registration["reason"] = "register=False"
@@ -570,7 +584,11 @@ def run_integrated_fusion(
             "product not version-pinned; re-run with a catalog to register"
         )
 
-    sensitivity = sensitivity_report(model, result)
+    # V8 M5: reuse the sensitivity cached by registration when present —
+    # computing it twice doubled the (N-1) re-fusions per run.
+    sensitivity = result.qc.pop("_cached_sensitivity", None)
+    if sensitivity is None:
+        sensitivity = sensitivity_report(model, result)
     qc = dict(result.qc)
     qc["registration"] = registration
 
@@ -595,6 +613,9 @@ def run_integrated_fusion(
             result,
             quantity="fusion_variance",
             title=f"{model.name}·融合方差",
+            # V8 review R1-P2: bind the registered sibling version so the
+            # descriptor resolves from the catalog like confidence does.
+            catalog_version_id=str(result.qc.get("variance_version_id") or ""),
         )
 
     return {

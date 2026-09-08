@@ -119,11 +119,20 @@ class VizAdapter:
         """Resolve a VizRef — alias kept for VisualizationWorkspace.load."""
         return self.resolve(ref, project)
 
-    def resolve(self, ref: VizRef, project: Any) -> VizPayload:
+    def resolve(self, ref: VizRef, project: Any, cancel=None) -> VizPayload:
+        """Resolve a VizRef into a VizPayload.
+
+        *cancel* (V8 M8, #1224): cooperative token (callable / object with
+        ``is_cancelled``) checked at phase boundaries of long resolutions.
+        Cancellation raises :class:`WellLogLoadCancelled` — the soft-fail
+        message wrapping NEVER converts it into a fake "resolved" payload.
+        """
+        from paleo_workbench.viz.well_log_load import WellLogLoadCancelled
+
         label = ref.label or ref.id or ref.kind
         try:
             if ref.kind == "well_log":
-                return self._resolve_well_log(ref, project, label)
+                return self._resolve_well_log(ref, project, label, cancel=cancel)
             if ref.kind == "seismic":
                 return self._resolve_seismic(ref, project, label)
             if ref.kind == "map":
@@ -146,6 +155,8 @@ class VizAdapter:
                 label=label,
                 message=f"不支持的可视化类型: {ref.kind}",
             )
+        except WellLogLoadCancelled:
+            raise  # honest cancellation, never a fake message payload
         except Exception as exc:
             return VizPayload(
                 kind="message",
@@ -209,7 +220,9 @@ class VizAdapter:
             return str(joined)
         return str(candidate)
 
-    def _resolve_well_log(self, ref: VizRef, project: Any, label: str) -> VizPayload:
+    def _resolve_well_log(
+        self, ref: VizRef, project: Any, label: str, *, cancel=None
+    ) -> VizPayload:
         resource = self._find_resource(ref, project)
         path = (str(getattr(resource, "path", "") or "") if resource is not None else "") or ref.path
         path = self._absolute_path(path, project) if path else ""
@@ -219,7 +232,7 @@ class VizAdapter:
                 label=label,
                 message="井数据文件不存在或不可读",
             )
-        data = load_well_log_from_path(path)
+        data = load_well_log_from_path(path, cancel=cancel)
         if data is None:
             return VizPayload(
                 kind="message",

@@ -207,10 +207,8 @@ def _describe_calibration(context: ActionContext, parameters: dict) -> dict:
 
 
 def _evaluate_methods(context: ActionContext, parameters: dict) -> dict:
-    import numpy as np
-
-    from paleo_workbench.workflow.interpolation_evaluation import (
-        recommend_interpolation_methods,
+    from paleo_workbench.workflow.factor_interpolation import (
+        evaluate_methods_for_task,
     )
 
     project = context.project
@@ -229,39 +227,17 @@ def _evaluate_methods(context: ActionContext, parameters: dict) -> dict:
         }
     methods = list(parameters.get("methods") or ["IDW", "克里金", "约束IDW"])
 
-    def _run_fold_idw(train):
-        from geoviz import interpolate_idw
-
-        xs = np.array([p["x"] for p in train], dtype=float)
-        ys = np.array([p["y"] for p in train], dtype=float)
-        zs = np.array([p.get("value", p.get("z")) for p in train], dtype=float)
-        pad = 0.05 * max(xs.ptp(), ys.ptp(), 1.0)
-        gx = np.linspace(xs.min() - pad, xs.max() + pad, 48)
-        gy = np.linspace(ys.min() - pad, ys.max() + pad, 48)
-        grid = interpolate_idw(xs, ys, zs, gx, gy)
-        return gx, gy, grid
-
-    report = recommend_interpolation_methods(
-        points,
+    # V8 M4: REAL per-method production-mirroring evaluation — kriging is
+    # scored by exact LOO with its production variogram/anisotropy, the
+    # others through their own engine fold paths. The V6 IDW-proxy fold
+    # engine (identical metrics for every method by construction) is gone.
+    return evaluate_methods_for_task(
+        task,
+        project=project,
         methods=methods,
-        run_fold=_run_fold_idw,
-        requested_constraints=parameters.get("requested_constraints"),
         k=int(parameters.get("k") or 4),
+        requested_constraints=parameters.get("requested_constraints"),
     )
-    # Review R2-P1: ONE proxy fold engine cannot discriminate methods — the
-    # per-method metrics are identical by construction. Demote the ranking
-    # honestly; the capability warnings remain authoritative.
-    report["factor"] = task.name
-    report["fold_engine"] = "idw-proxy"
-    report["recommended_method"] = None
-    for entry in report.get("methods", []):
-        entry["recommended"] = None
-        entry["rationale"] = (
-            "proxy fold engine (IDW) cannot discriminate methods — metrics "
-            "are NOT a method comparison; only capability warnings are "
-            "authoritative here"
-        )
-    return report
 
 
 def _describe_product(context: ActionContext, parameters: dict) -> dict:

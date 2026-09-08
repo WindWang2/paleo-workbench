@@ -283,6 +283,10 @@ def _compute_attribute(context: ActionContext, parameters: dict) -> dict:
     volume = context.active_volume
     if volume is None or not isinstance(volume, SeismicVolumeRef):
         raise LookupError("no active seismic volume (call seismic.open_volume first)")
+    # supports_cancel is admission-level here: the provider call itself has
+    # no token plumbing — check before the compute and before registration.
+    if context.cancel is not None:
+        context.cancel.raise_if_cancelled()
     from pathlib import Path
 
     root = Path(context.project_path).parent if context.project_path else None

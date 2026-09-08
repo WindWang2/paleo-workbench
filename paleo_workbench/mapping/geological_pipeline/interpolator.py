@@ -80,6 +80,7 @@ class KrigingInterpolator(Interpolator):
                 "range": fit_params["range"],
                 "sill": fit_params["sill"],
                 "nugget": fit_params["nugget"],
+                "variogram_fit": "engine-wls",
                 "r_squared": float(r2),
                 "grid_n": grid_n,
                 "n_samples": len(xs),
@@ -90,7 +91,12 @@ class KrigingInterpolator(Interpolator):
             }
 
         except ImportError:
-            # Fallback pure-numpy Ordinary Kriging
+            # Fallback pure-numpy Ordinary Kriging. V8 M1: the fallback's
+            # variogram estimator is a numpy grid-OLS fit — a DIFFERENT
+            # estimator from the engine's pair-count-weighted bounded WLS
+            # (scipy least_squares). The result is explicitly degraded and
+            # labeled; downstream QA/publish gates read these keys instead
+            # of treating the surface as engine-equivalent.
             grid_z, grid_var, algo_params = _pure_numpy_kriging(
                 xs, ys, zs, grid_x, grid_y, model=options.variogram_model
             )
@@ -98,6 +104,14 @@ class KrigingInterpolator(Interpolator):
                 {"well": p.well_name or p.well_id, "x": p.x, "y": p.y, "value": p.value}
                 for p in dataset.valid_points
             ]
+            algo_params["degraded"] = True
+            algo_params["degraded_reason"] = (
+                "geoviz kriging engine unavailable: numpy fallback used a "
+                "grid-OLS variogram fit, not the engine's weighted WLS fit; "
+                "r_squared not computed (engine LOO unavailable)"
+            )
+            algo_params["variogram_fit"] = "numpy-grid-ols"
+            algo_params["r_squared"] = None
 
         return FactorGridResult(
             grid_z=np.asarray(grid_z, dtype=np.float32),
@@ -519,6 +533,7 @@ def _pure_numpy_kriging(
                 "n_samples": n,
                 "duplicates_merged": duplicates,
                 "variogram_bins": bins,
+                "variogram_fit": "numpy-grid-ols",
             },
         )
 
@@ -588,6 +603,7 @@ def _pure_numpy_kriging(
             "n_samples": n,
             "duplicates_merged": duplicates,
             "variogram_bins": bins,
+            "variogram_fit": "numpy-grid-ols",
         },
     )
 

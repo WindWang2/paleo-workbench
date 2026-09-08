@@ -372,6 +372,20 @@ def sweep_gc(
                         continue
                 except OSError:
                     continue
+    # V8 M9: durable telemetry — the sweep outcome survives restarts.
+    from paleo_workbench.catalog.telemetry import record_catalog_event
+
+    record_catalog_event(
+        service.project_path,
+        "gc.sweep",
+        detail={
+            "explicit": bool(explicit),
+            "candidates": len(candidates),
+            "removed": len(removed),
+            "removed_bytes": sum(item.size for item in removed),
+            "kinds": sorted({item.kind for item in removed}),
+        },
+    )
     return GcReport(removed)
 
 

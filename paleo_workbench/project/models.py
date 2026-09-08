@@ -392,6 +392,11 @@ class QualityReport(BaseModel):
     # report exists but its provenance run could not be registered (visible,
     # not silent).
     provenance_registered: bool = True
+    # V8 M11 honest coverage: per rule, whether it EVALUATED or was SKIPPED
+    # (with the reason). A skipped rule emits no issues — without this map a
+    # pass status could not distinguish "checked and clean" from "never ran".
+    rule_status: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    coverage: dict[str, int] = Field(default_factory=dict)
 
 
 class VersionSnapshot(BaseModel):

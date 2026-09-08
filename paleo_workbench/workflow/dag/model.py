@@ -342,6 +342,10 @@ class WorkflowRun:
     created_at: float | None = None
     updated_at: float | None = None
     spec_hash: str | None = None
+    #: V8 M7 run lineage: the run this one was derived from (rerun / resume
+    #: chains). None = an original execution. Provenance walks it instead of
+    #: losing the derivation relationship between successive runs.
+    parent_run_id: str | None = None
 
     @classmethod
     def create(cls, workflow: WorkflowSpec, slot_values: dict[str, Any]) -> "WorkflowRun":
@@ -369,6 +373,7 @@ class WorkflowRun:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "spec_hash": self.spec_hash,
+            "parent_run_id": self.parent_run_id,
         }
 
     @classmethod
@@ -383,6 +388,7 @@ class WorkflowRun:
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
             spec_hash=data.get("spec_hash"),
+            parent_run_id=data.get("parent_run_id"),
         )
         run.node_runs = {
             nr.node_id: nr for nr in (NodeRun.from_dict(d) for d in data.get("node_runs", []))

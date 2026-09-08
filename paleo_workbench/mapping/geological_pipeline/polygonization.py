@@ -498,3 +498,33 @@ def generate_facies_polygon_layer(
         style=style,
         metadata={"polygon_qc": polygon_qc},
     )
+
+def polygonize_factor_grid(
+    grid_result,
+    *,
+    level: float | None = None,
+) -> dict:
+    """Public factor-grid polygonization (V8): threshold the grid at *level*
+    (default: median of finite cells) and trace the target class into
+    GeoJSON Polygon/MultiPolygon features via :func:`_polygonize_raster_boundaries`.
+
+    Returns a pure-data descriptor (features bounded to 500 + counts + crs).
+    """
+    import numpy as np
+
+    z = np.asarray(grid_result.grid_z, dtype=float)
+    if level is None:
+        finite = z[np.isfinite(z)]
+        level = float(np.median(finite)) if finite.size else 0.0
+    class_grid = (z >= level).astype(int)
+    polygons, counts = _polygonize_raster_boundaries(
+        class_grid, z, grid_result.extent, 1
+    )
+    return {
+        "level": level,
+        "n_polygons": len(polygons),
+        "counts": counts,
+        "polygons": polygons[:500],
+        "truncated": len(polygons) > 500,
+        "crs": grid_result.crs,
+    }

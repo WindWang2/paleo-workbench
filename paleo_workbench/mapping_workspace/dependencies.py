@@ -41,6 +41,14 @@ class FreshnessStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
+#: constraint_versions.resolve_constraint_ref verdict strings → enum
+_FRESHNESS_FROM_CONSTRAINT = {
+    "current": FreshnessStatus.CURRENT,
+    "stale": FreshnessStatus.STALE,
+    "superseded": FreshnessStatus.SUPERSEDED,
+    "unknown": FreshnessStatus.UNKNOWN,
+}
+
 _STATUS_LABELS = {
     FreshnessStatus.CURRENT: "最新",
     FreshnessStatus.STALE: "已过期",
@@ -320,8 +328,39 @@ class MappingDependencyService:
                             culprits.append(f"factor:{task_id}")
                             detail = f"证据单因素已有新结果版本（{ref_key}）"
                 elif value.startswith("constraints:"):
-                    # 未钉版本的约束内容：无比较基准 → 诚实不计入过期判定。
+                    # V8 M2: constraint refs now resolve against committed
+                    # catalog versions — `constraints:current` compares the
+                    # live document to the latest commit (CLEAN/STALE, or
+                    # UNKNOWN when nothing was ever committed — never a
+                    # fabricated verdict); `constraints:<group>:<version>`
+                    # pins check supersession like factor pins.
                     pinned_inputs.append((ref_key, value))
+                    try:
+                        from paleo_workbench.workflow.constraint_versions import (
+                            resolve_constraint_ref,
+                        )
+
+                        verdict = resolve_constraint_ref(document, catalog, value)
+                        # constraint_versions speaks plain verdict strings
+                        # (no upward import) — map them onto our enum here.
+                        status = _FRESHNESS_FROM_CONSTRAINT.get(
+                            str(verdict["status"])
+                        )
+                        if status is None:
+                            status = FreshnessStatus.UNKNOWN
+                        if status is not FreshnessStatus.CURRENT and (
+                            status is not FreshnessStatus.UNKNOWN
+                            and worst is not FreshnessStatus.MISSING_INPUT
+                        ):
+                            worst = status
+                            culprits.append(ref_key)
+                            detail = verdict["detail"]
+                    except Exception:  # noqa: BLE001 — freshness stays honest
+                        # resolution failure must NOT fabricate freshness: the
+                        # honest verdict is UNKNOWN (worst stays unset below,
+                        # but the artifact is flagged), never CURRENT.
+                        if worst is None:
+                            worst = FreshnessStatus.UNKNOWN
                 elif _looks_like_version_id(value):
                     pinned_inputs.append((ref_key, value))
                     status, bad, why = self._check_pinned_versions(

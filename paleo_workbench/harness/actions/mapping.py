@@ -326,6 +326,11 @@ def _create_factor_map(context: ActionContext, parameters: dict) -> dict:
         DEFAULT_GEOLOGICAL_MAPPING_SERVICE,
     )
 
+    # supports_cancel is admission-level for this action (the mapping
+    # service itself has no token plumbing — V8 M8 note): the check fires
+    # before the expensive interpolation AND before provenance registration.
+    if context.cancel is not None:
+        context.cancel.raise_if_cancelled()
     document, task = DEFAULT_GEOLOGICAL_MAPPING_SERVICE.create_factor_map(
         context.project,
         parameters["factor_name"],
@@ -355,6 +360,8 @@ def _create_factor_map(context: ActionContext, parameters: dict) -> dict:
             f"interpolated grid failed scientific validation: {verification.reasons}"
         )
 
+    if context.cancel is not None:
+        context.cancel.raise_if_cancelled()
     _publish(context, document, document_id)
 
     # Provenance: DataRun + INTERMEDIATE grid artifact through the catalog
@@ -495,6 +502,8 @@ def _create_well_location_map(context: ActionContext, parameters: dict) -> dict:
     document.add_layer(layer)
     document.recompute_extent()
     document_id = f"wells-{uuid.uuid4().hex[:6]}"
+    if context.cancel is not None:
+        context.cancel.raise_if_cancelled()
     _publish(context, document, document_id)
     return {
         "map_document": document,

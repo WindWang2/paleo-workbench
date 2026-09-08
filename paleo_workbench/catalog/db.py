@@ -1503,6 +1503,27 @@ class CatalogIndex:
         row = self._read_rows("SELECT * FROM assets WHERE id = ?", (asset_id,))
         return _asset_model_from_row(row[0]) if row else None
 
+    def get_asset_models(self, asset_ids) -> dict:
+        """Batch asset fetch (V8 M9: kills the pre-warm N+1).
+
+        ONE query per 500-id chunk instead of one per id — a lazy search
+        resolving 10k result rows used to issue 10k point lookups. Order of
+        the returned dict follows insertion (first-seen id order).
+        """
+        out: dict = {}
+        ids = [str(i) for i in asset_ids]
+        for start in range(0, len(ids), 500):
+            chunk = ids[start : start + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = self._read_rows(
+                f"SELECT * FROM assets WHERE id IN ({placeholders})", tuple(chunk)
+            )
+            row_by_id = {row["id"]: row for row in rows}
+            for asset_id in chunk:
+                if asset_id in row_by_id and asset_id not in out:
+                    out[asset_id] = _asset_model_from_row(row_by_id[asset_id])
+        return out
+
     def get_version_model(self, version_id: str) -> DataVersion | None:
         row = self._read_rows("SELECT * FROM versions WHERE id = ?", (version_id,))
         return _version_model_from_row(row[0]) if row else None

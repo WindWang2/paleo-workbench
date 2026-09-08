@@ -1424,12 +1424,23 @@ class DataCatalogService:
         not-yet-warm document.
         """
         if self._lazy_active():
-            out: list[DataAsset] = []
-            for asset_id in asset_ids:
-                model = self._lazy_get_asset(str(asset_id))
+            # V8 M9: batch fetch — the per-id loop was one store query per
+            # search-result row (N+1 on every materialized search pre-warm).
+            ids = [str(i) for i in asset_ids]
+            cached: dict = {}
+            missing: list[str] = []
+            for asset_id in ids:
+                model = self._lazy_read_cache.get(asset_id)
                 if model is not None:
-                    out.append(model)
-            return out
+                    cached[asset_id] = model
+                else:
+                    missing.append(asset_id)
+            if missing:
+                fetched = self._index.get_asset_models(missing)
+                for asset_id, model in fetched.items():
+                    self._lazy_read_cache.setdefault(asset_id, model)
+                cached.update(fetched)
+            return [cached[i] for i in ids if i in cached]
         by_id = self._ensure_maps().asset_by_id
         return [by_id[i] for i in asset_ids if i in by_id]
 
@@ -2404,11 +2415,13 @@ class DataCatalogService:
         source_uris = {
             v.source_uri: v for v in self.document.versions if v.source_uri
         }
+        healed = {"committing_dropped": 0, "reverted_to_dirty": 0, "missing_dropped": 0}
         for row in rows:
             path = project_dir / row["path"]
             if not path.is_file():
                 try:
                     self._index.remove_working_copy(row["working_id"])
+                    healed["missing_dropped"] += 1
                 except Exception:
                     pass
                 continue
@@ -2419,6 +2432,7 @@ class DataCatalogService:
                     # only the row removal was lost.
                     try:
                         self._index.remove_working_copy(row["working_id"])
+                        healed["committing_dropped"] += 1
                     except Exception:
                         pass
                 else:
@@ -2428,8 +2442,17 @@ class DataCatalogService:
                         self._index.update_working_copy_state(
                             row["working_id"], "dirty"
                         )
+                        healed["reverted_to_dirty"] += 1
                     except Exception:
                         pass
+        # V8 M9: durable recovery telemetry — what was healed and how.
+        from paleo_workbench.catalog.telemetry import record_catalog_event
+
+        record_catalog_event(
+            self.project_path,
+            "working_copy.recovery",
+            detail={**healed, "surviving": len(self.list_working_copies())},
+        )
         return self.list_working_copies()
 
     def commit_working_copy(

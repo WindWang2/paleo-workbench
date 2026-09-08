@@ -287,6 +287,8 @@ class WorkflowEngine:
             raise WorkflowValidationError(spec.workflow_id, problems)
         new_run.project_name = prior.project_name
         new_run.project_path = prior.project_path
+        # V8 M7 run lineage: the rerun remembers where it came from.
+        new_run.parent_run_id = prior.run_id
         if context is not None:
             new_run.project_name = context.workspace_id or prior.project_name
             new_run.project_path = context.project_path or prior.project_path
