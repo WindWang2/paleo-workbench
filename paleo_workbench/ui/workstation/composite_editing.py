@@ -25,6 +25,11 @@ from shiboken6 import isValid as _cpp_alive
 
 _logger = logging.getLogger(__name__)
 
+from paleo_workbench.mapping.geometry_planar import (
+    distance_to_segment,
+    extent_of_geometries,
+    point_in_polygon_scalar,
+)
 from paleo_workbench.mapping.geometry_schema import new_feature_id
 from paleo_workbench.mapping.map_interaction import SnappingService
 from paleo_workbench.mapping.map_render_backend import MapLayerSnapshot
@@ -334,25 +339,16 @@ def _union_extent(
 
 
 def _feature_extent(features: Iterable[Mapping[str, Any]]) -> tuple[float, float, float, float]:
-    xs: list[float] = []
-    ys: list[float] = []
-
-    def walk(node: Any) -> None:
-        if isinstance(node, (list, tuple)):
-            if len(node) >= 2 and isinstance(node[0], (int, float)) and isinstance(node[1], (int, float)):
-                xs.append(float(node[0]))
-                ys.append(float(node[1]))
-                return
-            for child in node:
-                walk(child)
-
-    for feature in features:
-        geometry = feature.get("geometry") if isinstance(feature, Mapping) else None
-        if isinstance(geometry, Mapping):
-            walk(geometry.get("coordinates"))
-    if not xs:
+    """快照要素范围（V8 M4：走共享 extent 内核；空集保持占位语义）。"""
+    geometries = [
+        feature.get("geometry")
+        for feature in features
+        if isinstance(feature, Mapping) and isinstance(feature.get("geometry"), Mapping)
+    ]
+    try:
+        return extent_of_geometries(geometries)
+    except ValueError:
         return (0.0, 0.0, 1.0, 1.0)
-    return (min(xs), min(ys), max(xs), max(ys))
 
 
 def _segments(value: Any) -> Iterable[tuple[tuple[float, float], tuple[float, float]]]:
@@ -372,32 +368,12 @@ def _segments(value: Any) -> Iterable[tuple[tuple[float, float], tuple[float, fl
         yield points[index], points[index + 1]
 
 
-def _point_in_ring(point: tuple[float, float], ring: Any) -> bool:
-    points: list[tuple[float, float]] = []
-    for node in ring or ():
-        if (
-            isinstance(node, (list, tuple))
-            and len(node) >= 2
-            and isinstance(node[0], (int, float))
-            and isinstance(node[1], (int, float))
-        ):
-            points.append((float(node[0]), float(node[1])))
-    if len(points) < 3:
-        return False
-    inside = False
-    x, y = point
-    j = len(points) - 1
-    for i in range(len(points)):
-        xi, yi = points[i]
-        xj, yj = points[j]
-        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi + 1e-300) + xi:
-            inside = not inside
-        j = i
-    return inside
-
-
 def _geometry_hit(point: tuple[float, float], geometry: Mapping[str, Any], tolerance: float) -> bool:
-    """快照记录的粗命中测试：点距 / 线距 / 多边形 even-odd。"""
+    """快照记录的粗命中测试：点距 / 线距 / 多边形 even-odd。
+
+    V8 M4：PIP 与线段距离均走共享内核（geometry_planar）——本函数只保留
+    命中测试特有的容差语义（顶点邻近回退；内部的第 4 份射线复刻已删）。
+    """
     import math as _math
 
     kind = str(geometry.get("type") or "")
@@ -408,21 +384,20 @@ def _geometry_hit(point: tuple[float, float], geometry: Mapping[str, Any], toler
         except (TypeError, ValueError, IndexError):
             return False
     if kind in {"LineString", "MultiLineString"}:
-        for start, end in _segments(coordinates):
-            dx, dy = end[0] - start[0], end[1] - start[1]
-            length_squared = dx * dx + dy * dy
-            if length_squared <= 0.0:
-                if _math.dist(point, start) <= tolerance:
-                    return True
-                continue
-            t = max(0.0, min(1.0, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length_squared))
-            if _math.dist(point, (start[0] + t * dx, start[1] + t * dy)) <= tolerance:
-                return True
-        return False
+        return any(
+            distance_to_segment(point, start, end) <= tolerance
+            for start, end in _segments(coordinates)
+        )
     if kind == "Polygon":
         rings = list(coordinates or [])
-        if rings and _point_in_ring(point, rings[0]):
-            return all(not _point_in_ring(point, ring) for ring in rings[1:])
+        if rings:
+            try:
+                if point_in_polygon_scalar(
+                    point, {"type": "Polygon", "coordinates": rings}
+                ):
+                    return True
+            except (TypeError, ValueError, IndexError):
+                pass
         return any(_math.dist(point, vertex) <= tolerance for vertex, _path in _ring_vertices(rings))
     if kind == "MultiPolygon":
         return any(_geometry_hit(point, {"type": "Polygon", "coordinates": poly}, tolerance) for poly in coordinates or ())
@@ -451,6 +426,9 @@ class CompositeEditController(QObject):
     sessions_committed = Signal()
     # 选择 / 编辑态 / 撤销栈等纯状态变化（驱动工具条使能）。
     state_changed = Signal()
+    # V8 M3：跨图层复合撤销被拒绝的用户可读原因（不静默——原子性受损时
+    # 用户必须知道为什么这次 undo 没有发生）。
+    topology_conflict = Signal(str)
 
     def __init__(self, *, project_crs: str = "", parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -618,6 +596,8 @@ class CompositeEditController(QObject):
             return
         if layer.edit_session is not None:
             layer.edit_session.rollback_changes()
+        # V8 M3：触及该图层的复合撤销组随层作废（命令身份已无处解析）。
+        self._topology.discard_compounds([layer_id])
         self._kinds.pop(layer_id, None)
         self._templates.pop(layer_id, None)
         self._schemas.pop(layer_id, None)
@@ -861,6 +841,9 @@ class CompositeEditController(QObject):
                     f"{details}{more}"
                 )
         layer.edit_session.commit_changes()
+        # V8 M3：会话终结（提交）——涉及本层的复合撤销组作废（撤销历史
+        # 随会话关闭消失，与单层 undo 语义一致）。
+        self._topology.discard_compounds([layer.id])
         self.content_changed.emit(layer.id)
         # 会话已被图层收回：活动工具若持有旧 session 缓冲必须立刻重绑
         # （回落 pan），否则继续数字化会写进已脱钩的缓冲（review #1）。
@@ -874,6 +857,7 @@ class CompositeEditController(QObject):
         if layer is None or layer.edit_session is None:
             return
         layer.edit_session.rollback_changes()
+        self._topology.discard_compounds([layer.id])
         self.content_changed.emit(layer.id)
         self._rebind_active_tool()
         self.sessions_committed.emit()
@@ -913,6 +897,10 @@ class CompositeEditController(QObject):
             committed += 1
             self.content_changed.emit(layer.id)
         if committed:
+            # V8 M3：被提交会话的复合组作废（撤销历史随会话终结消失）。
+            self._topology.discard_compounds(
+                [layer.id for layer in self._layers.values() if layer.edit_session is None]
+            )
             self._rebind_active_tool()
             self.sessions_committed.emit()
             self.state_changed.emit()
@@ -1000,6 +988,10 @@ class CompositeEditController(QObject):
                 opened.qgis_capability_token = self.qgis_capability_token
         if len(allowed_layers) > 1:
             self.content_changed.emit(layer.id)
+
+    def _pending_compound_redo(self, session) -> object | None:
+        """该会话最近一个处于已撤销态的复合组（redo 入口，委托拓扑服务）。"""
+        return self._topology.pending_compound_redo(session)
 
     # -- 工具装配 ---------------------------------------------------------------
 
@@ -1488,12 +1480,37 @@ class CompositeEditController(QObject):
         layer = self.active_layer
         session = layer.edit_session if layer is not None else None
         if command_id == "undo" and session is not None:
+            # V8 M3：栈顶是复合组 origin（顶点编辑 + 共享节点传播）时，
+            # undo 必须整组原子撤销；不可安全撤销则拒绝并给出原因（信号
+            # 上报，不静默半组回滚）。
+            group = self._topology.pending_compound(session)
+            if group is not None:
+                result = self._topology.undo_compound(group)
+                if result.ok:
+                    for changed_layer_id in result.undone_layer_ids:
+                        self.content_changed.emit(changed_layer_id)
+                    self.state_changed.emit()
+                    return True
+                self.topology_conflict.emit(result.reason)
+                return False
             if session.undo():
                 self.content_changed.emit(layer.id)
                 self.state_changed.emit()
                 return True
             return False
         if command_id == "redo" and session is not None:
+            # 复合组的重做同样整组：栈顶 redo 不是入口（组命令寄存在组里），
+            # 以"最近被整组撤销且无后续编辑"的组为准。
+            group = self._pending_compound_redo(session)
+            if group is not None:
+                result = self._topology.redo_compound(group)
+                if result.ok:
+                    for changed_layer_id in result.undone_layer_ids:
+                        self.content_changed.emit(changed_layer_id)
+                    self.state_changed.emit()
+                    return True
+                self.topology_conflict.emit(result.reason)
+                return False
             if session.redo():
                 self.content_changed.emit(layer.id)
                 self.state_changed.emit()

@@ -1625,9 +1625,25 @@ class MappingPage(QWidget):
         elif command_id == "rollback" and authoring is not None:
             authoring.rollback_changes()
         elif command_id == "undo" and authoring is not None and authoring.active_session is not None:
-            authoring.active_session.undo()
+            # V8 M3：栈顶是复合组 origin（顶点编辑 + 共享节点传播）时整组
+            # 原子撤销；拒绝时状态栏给出原因，不静默半组回滚。
+            session = authoring.active_session
+            compound = self._topology.pending_compound(session)
+            if compound is not None:
+                result = self._topology.undo_compound(compound)
+                if not result.ok and getattr(self, "status_bar", None) is not None:
+                    self.status_bar.scale.setText(f"撤销被拒绝：{result.reason}")
+            else:
+                session.undo()
         elif command_id == "redo" and authoring is not None and authoring.active_session is not None:
-            authoring.active_session.redo()
+            session = authoring.active_session
+            compound = self._topology.pending_compound_redo(session)
+            if compound is not None:
+                result = self._topology.redo_compound(compound)
+                if not result.ok and getattr(self, "status_bar", None) is not None:
+                    self.status_bar.scale.setText(f"重做被拒绝：{result.reason}")
+            else:
+                session.redo()
         elif command_id == "delete_selected" and authoring is not None and authoring.active_session is not None:
             for feature_id in sorted(authoring.active_layer.selection):
                 authoring.active_session.delete_feature(feature_id)

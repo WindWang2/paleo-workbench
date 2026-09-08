@@ -289,9 +289,10 @@ def project_coordinates(
     through untouched) so the UI can flag them instead of silently plotting
     incompatible frames together.
 
-    Uses pyproj directly (same engine as ``geoviz_plots.crs``) because the
-    workarea target CRS is per-project, while ``coerce_to_project_crs``
-    transforms toward a process-global target.
+    Uses the geometry facade's ``crs_transform_xy`` (same pyproj authority as
+    the render stack — one transform chain, V8 M4).  The fail-open wrapper
+    here is deliberate: a binding must not die because one CRS string is
+    unresolvable; the status keeps it honest.
     """
     if x is None or y is None:
         return None, None, CoordinateStatus.MISSING
@@ -302,12 +303,9 @@ def project_coordinates(
     if not project_crs or crs_equivalent(source_crs, project_crs):
         return float(x), float(y), CoordinateStatus.OK
     try:
-        import numpy as np  # noqa: PLC0415
-        from pyproj import Transformer  # noqa: PLC0415
+        from paleo_workbench.mapping.geometry_operations import crs_transform_xy
 
-        transformer = Transformer.from_crs(source_crs, project_crs, always_xy=True)
-        px, py = transformer.transform(float(x), float(y))
-        px, py = float(px), float(py)
+        px, py = crs_transform_xy((float(x), float(y)), source_crs, project_crs)
     except Exception:
         return float(x), float(y), CoordinateStatus.UNTRANSFORMED
     if px != px or py != py or abs(px) == float("inf") or abs(py) == float("inf"):  # NaN/Inf guard

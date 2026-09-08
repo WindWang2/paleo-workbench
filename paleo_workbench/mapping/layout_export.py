@@ -28,9 +28,10 @@ Legend-family elements (V7 §13). COLORBAR, FACIES_LEGEND (the geological
 legend) and WELL_LEGEND map onto the native ``legend`` item **bound to the
 main map item** — the only link the C++ wire protocol supports
 (``map_item``; accepted legend keys are exactly type/x/y/map_item/title/
-resize_to_contents/background, see :data:`_LEGEND_ITEM_KEYS`). The bridge's
-legend item has NO layer-filter key, so each of those legends lists EVERY
-layer of the linked map (with its mirrored QGIS symbology — raster legends
+resize_to_contents/background/filter_layers, see :data:`_LEGEND_ITEM_KEYS`).
+V8 M8: legend-backed elements emit ``filter_layers`` (their own doc_id
+include list) — the legend lists only its layers (with mirrored QGIS
+symbology — raster legends
 included via the §5 raster mirror), not only the scalar/facies/well layer
 the composer element was authored for. That is documented here, asserted by
 tests, and disclosed as a warning on every export that uses the mapping.
@@ -194,10 +195,11 @@ _LEGEND_BACKED_GATES: frozenset[ElementType] = frozenset({
 #: The complete key set the C++ legend branch parses (map_stack_service.cpp,
 #: QgisMapStack::layoutExport, ``type == "legend"``). Anything else on the
 #: wire is silently ignored — emitting keys outside this set would be
-#: inventing protocol.
+#: inventing protocol.  V8 M8 adds ``filter_layers`` (doc_id include 表；
+#: 经 setSyncMode(Manual) 的克隆树剪枝实现，工程本树不动)。
 _LEGEND_ITEM_KEYS: frozenset[str] = frozenset({
     "type", "x", "y", "w", "h", "map_item", "title",
-    "resize_to_contents", "background",
+    "resize_to_contents", "background", "filter_layers",
 })
 
 # Completeness guard (V7 §13 task: "verify each ElementType in _NATIVE_TYPES
@@ -217,6 +219,40 @@ def _legend_backed_types(mirror_layers: Any) -> set[ElementType]:
         for element_type in _LEGEND_BACKED_GATES
         if _mirror_proves(element_type, mirror_layers)
     }
+
+
+def _legend_filter_doc_ids(element_type: ElementType, mirror_layers: Any) -> list[str]:
+    """V8 M8：legend-backed 元素的 doc_id include 表（feed filter_layers）。
+
+    与 :func:`_mirror_proves` 同一判定词汇——COLORBAR 取标量栅格层、
+    FACIES_LEGEND 取相带面/分类矢量面、WELL_LEGEND 取井点层；无匹配层
+    时返回空表（honest：不过滤 = 列全部，调用方不 emit 键）。
+    """
+    layers = _normalize_mirror_layers(mirror_layers)
+    wanted: frozenset[str]
+    if element_type is ElementType.COLORBAR:
+        wanted = _SCALAR_LAYER_TYPES
+    elif element_type is ElementType.FACIES_LEGEND:
+        return [
+            str(_layer_field(layer, "id", "") or "")
+            for layer in layers
+            if str(_layer_field(layer, "layer_type", "") or "") in _FACIES_LAYER_TYPES
+            or (
+                str(_layer_field(layer, "layer_type", "") or "") == "vector"
+                and isinstance(_layer_field(layer, "style", None), Mapping)
+                and str(_layer_field(layer, "style", None).get("renderer") or "")
+                == "categorized"
+            )
+        ]
+    elif element_type is ElementType.WELL_LEGEND:
+        wanted = _WELL_LAYER_TYPES
+    else:
+        return []
+    return [
+        str(_layer_field(layer, "id", "") or "")
+        for layer in layers
+        if str(_layer_field(layer, "layer_type", "") or "") in wanted
+    ]
 
 
 def hybrid_element_types(
@@ -365,13 +401,14 @@ def build_layout_spec(
         key=lambda etype: etype.value,
     )
     if legend_backed_present:
-        # Documented limitation (module docstring): the C++ legend item has
-        # no layer-filter key, so it lists EVERY layer of the linked map.
+        # V8 M8：legend-backed 元素经 filter_layers 只列自己的层；但过滤键
+        # 需要桥 >= 0.4.0（feature flag legend_filter）——旧桥会忽略该键并
+        # 列出整幅地图，此处如实预警。
         names = ", ".join(etype.value for etype in legend_backed_present)
         _warn(
-            f"{names} mapped to the native legend bound to the main map; "
-            "the bridge legend item cannot filter layers, so it lists every "
-            "layer of the linked map (not only the element's own layer)"
+            f"{names} mapped to the native legend bound to the main map with "
+            "a filter_layers include list (bridge >= 0.4.0); an older bridge "
+            "ignores the filter and lists every layer of the linked map"
         )
 
     main_map = next(
@@ -410,12 +447,11 @@ def build_layout_spec(
             ElementType.WELL_LEGEND,
         ):
             # Native legend item. Only the keys the C++ parses are emitted
-            # (map_stack_service.cpp layoutExport legend branch): type/x/y/
-            # map_item/title/resize_to_contents/background. The legend binds
-            # to the main map item — "map" — and lists every mirrored layer
-            # (no filter key on the wire; see module docstring). Plain
-            # LEGEND keeps its historical auto-size behaviour; the V7
-            # legend-backed elements pin the composer-authored box instead.
+            # (map_stack_service.cpp layoutExport legend branch). V8 M8:
+            # legend-backed elements carry filter_layers（该元素自己的
+            # doc_id include 表）——图例只列自己的层，不再罗列整幅地图的
+            # 全部图层。Plain LEGEND 无过滤键（历史行为：列全部层）且保留
+            # auto-size；legend-backed 元素钉住 composer 排版的框。
             if el.element_type is ElementType.COLORBAR:
                 title = str(props.get("title") or "图例")
                 units = str(props.get("units") or "").strip()
@@ -434,6 +470,9 @@ def build_layout_spec(
                 legend_item["h"] = float(el.height_mm)
             else:
                 legend_item["resize_to_contents"] = False
+                filter_doc_ids = _legend_filter_doc_ids(el.element_type, mirror_layers)
+                if filter_doc_ids:
+                    legend_item["filter_layers"] = filter_doc_ids
             items.append(legend_item)
         elif el.element_type is ElementType.NORTH_ARROW:
             items.append(

@@ -379,11 +379,17 @@ def _coordinates(value: object) -> Iterable[list[float]]:
 
 
 def _extent_for_features(features: Iterable[Mapping[str, Any]]) -> tuple[float, float, float, float]:
-    points = [point for feature in features for point in _coordinates(feature.get("geometry", {}).get("coordinates"))]
-    if not points:
+    # V8 M4：范围计算走共享内核；空集合占位与正面积垫宽契约不变。
+    from paleo_workbench.mapping.geometry_planar import extent_of_geometries
+
+    try:
+        extent = extent_of_geometries(
+            feature.get("geometry") for feature in features
+            if isinstance(feature.get("geometry"), Mapping)
+        )
+    except ValueError:
         return (0.0, 0.0, 1.0, 1.0)
-    xs, ys = zip(*points)
-    return _positive_extent((min(xs), min(ys), max(xs), max(ys)))
+    return _positive_extent(extent)
 
 
 def _positive_extent(extent: tuple[float, float, float, float]) -> tuple[float, float, float, float]:

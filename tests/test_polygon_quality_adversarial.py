@@ -29,7 +29,7 @@ from paleo_workbench.mapping.geological_pipeline.pipeline import (
 from paleo_workbench.mapping.geological_pipeline.polygonization import (
     _clip_polygon_to_ring,
     _point_in_ring,
-    _ring_centroid,
+    ring_area_centroid,
     calculate_shoelace_area,
     generate_facies_polygon_layer,
 )
@@ -161,7 +161,7 @@ def test_hole_inside_nested_exterior_gets_smallest_container():
         ext = geom["coordinates"][0]
         assert calculate_shoelace_area(ext) > 0
         for hole in geom["coordinates"][1:]:
-            cx, cy = _ring_centroid(hole)
+            cx, cy = ring_area_centroid(hole)
             assert _point_in_ring(cx, cy, ext)
 
 

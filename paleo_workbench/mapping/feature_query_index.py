@@ -41,11 +41,14 @@ def _record_bounds(record: Mapping[str, Any]) -> Bounds:
     coordinates = geometry.get("coordinates") if isinstance(geometry, Mapping) else None
     if coordinates is None:
         coordinates = record.get("coordinates")
-    vertices = tuple(_points(coordinates))
-    if not vertices:
+    # V8 M4：范围计算走共享内核；空记录保持 (0,0,0,0) 退化哨兵（索引层
+    # 依赖该值参与 cell 覆盖判定，语义不变）。
+    from paleo_workbench.mapping.geometry_planar import extent_of_coordinates
+
+    extent = extent_of_coordinates(_points(coordinates))
+    if extent is None:
         return (0.0, 0.0, 0.0, 0.0)
-    xs, ys = zip(*vertices)
-    return (min(xs), min(ys), max(xs), max(ys))
+    return extent
 
 
 def _intersects(left: Bounds, right: Bounds) -> bool:

@@ -53,6 +53,20 @@ def _colorbar() -> ComposerElement:
     )
 
 
+def _facies_legend() -> ComposerElement:
+    return ComposerElement(
+        "el_fl", ElementType.FACIES_LEGEND, 205.0, 95.0, 12.0, 60.0,
+        properties={"title": "沉积相图例"},
+    )
+
+
+def _well_legend() -> ComposerElement:
+    return ComposerElement(
+        "el_wl", ElementType.WELL_LEGEND, 205.0, 160.0, 12.0, 40.0,
+        properties={"title": "井位图例"},
+    )
+
+
 class _FakeLayer:
     def __init__(self, layer_id: str, layer_type: str, style=None):
         self.id = layer_id
@@ -117,8 +131,34 @@ def test_colorbar_maps_to_native_legend_with_scalar_in_mirror():
     assert legend["map_item"] == "map"  # bound to the main map item
     assert legend["title"] == "砂地比 (%)"
     assert set(legend) <= CPP_LEGEND_KEYS
-    # the no-filter limitation is disclosed, not silent
-    assert any("cannot filter layers" in w for w in warnings)
+    # V8 M8: the legend filters to its own scalar layer (doc_id include list)
+    assert legend["filter_layers"] == ["grid1"]
+    # the old-bridge degradation is disclosed, not silent
+    assert any("older bridge ignores the filter" in w for w in warnings)
+
+
+def test_legend_filter_layers_covers_facies_and_well_kinds():
+    """V8 M8：include 表的判定词汇与 _mirror_proves 同源（面/井各取其层）。"""
+    mirror = _FakeSnapshot(
+        _FakeLayer("fac1", "polygon"),
+        _FakeLayer("cat1", "vector", {"renderer": "categorized"}),
+        _FakeLayer("w1", "well_point"),
+        _FakeLayer("grid1", "scalar_grid"),
+    )
+    spec = build_layout_spec(
+        _composition(_colorbar(), _facies_legend(), _well_legend()),
+        map_extent=EXTENT, crs="EPSG:4326", mirror_layers=mirror,
+    )
+    filters = {
+        item["title"]: item.get("filter_layers")
+        for item in spec["items"]
+        if item["type"] == "legend"
+    }
+    assert filters["砂地比 (%)"] == ["grid1"]
+    facies = [v for k, v in filters.items() if k and ("相" in str(k))][:1]
+    assert facies and sorted(facies[0]) == ["cat1", "fac1"]
+    wells = [v for k, v in filters.items() if v == ["w1"]]
+    assert wells
 
 
 def test_colorbar_without_scalar_layer_stays_composer():

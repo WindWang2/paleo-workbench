@@ -6,7 +6,7 @@ from typing import Any
 
 from paleo_workbench.agent.agents.base import BaseAgent
 from paleo_workbench.agent.planner import TaskNode
-from paleo_workbench.mapping.topology import repair_invalid_geometry
+from paleo_workbench.mapping.geometry_operations import repair as repair_geometry
 
 
 class GISAgent(BaseAgent):
@@ -45,7 +45,9 @@ class GISAgent(BaseAgent):
 
         # Auto-heal boundary topology — this repair DOES run for real, but on
         # the synthetic demo boundary above; it proves nothing about project data.
-        valid_boundary = repair_invalid_geometry(basin_boundary)
+        # V8 M4：修复走 geometry_operations 门面（桥 make_valid 优先，
+        # 引擎披露随 GeometryResult）——不再旁路直调 shapely 兜底。
+        valid_boundary = repair_geometry(basin_boundary).geometry
         self.log(
             "Demo boundary repaired; NO topology claim is made about project data (stub)."
         )

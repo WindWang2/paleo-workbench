@@ -393,7 +393,10 @@ setup(
     name="qgis_render_bridge",
     # 0.3.0a0 (V7): capability_manifest + native measure + geometry
     # validate/reshape + snapping endpoint/intersection.
-    version="0.3.0a0",
+    # 0.4.0a0 (V8): provider field-schema application (fields_json →
+    # QgsFields/constraints/widgets), generic row indicators, legend
+    # filter_layers.
+    version="0.4.0a0",
     description="Optional narrow C++ QGIS renderer bridge for paleo-workbench",
     ext_modules=[_extension()] if _enabled() else [],
     cmdclass={"build_ext": build_ext},
