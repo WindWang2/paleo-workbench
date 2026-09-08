@@ -547,7 +547,12 @@ class WorkstationInspector(QFrame):
         visible = getattr(obj, "visible", None)
         self.properties_form.addRow("可见", self._readonly(self._yes_no(visible)))
         features = getattr(obj, "features", None)
-        if features is not None:
+        if callable(features):
+            try:
+                features = features()
+            except Exception:
+                features = None
+        if features is not None and hasattr(features, "__len__"):
             self.properties_form.addRow("要素数", self._readonly(len(features)))
 
     def show_generic(self, payload) -> None:

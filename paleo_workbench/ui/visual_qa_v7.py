@@ -73,6 +73,23 @@ def drive_phase1_editing_session(window) -> None:
     layer = _add_layer(window, "polygon", LayerRole.INITIAL_FACIES_DRAFT,
                        "沉积相解释草稿")
     ws.composite._on_command_requested("toggle_editing")
+    from paleo_workbench.mapping.vector_layer import VectorFeature
+
+    session = getattr(layer, "edit_session", None)
+    if session is not None:
+        session.add_feature(
+            VectorFeature(
+                "draft_1",
+                {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]
+                    ],
+                },
+                {"name": "相带1"},
+            )
+        )
+        ws.composite._sync_action_state()
     _settle(200)
 
 
@@ -202,7 +219,7 @@ def _phase1_editing_checks(window) -> list[CheckResult]:
         _check("editing_save_enabled", actions["save_edits"].isEnabled()),
         _check("editing_capture_enabled", actions["add_polygon"].isEnabled()),
         _check("editing_tree_shows_session",
-               "编辑中" in _tree_status_texts(ws)),
+               any(t in _tree_status_texts(ws) for t in ("编辑中", "未保存"))),
     ]
 
 

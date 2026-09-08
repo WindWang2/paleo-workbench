@@ -1790,6 +1790,7 @@ class CompositeDocument(QWidget):
         # 不得让工具条按钮失步，review #11）。
         actions = self.action_controller.actions
         for action_id, checked in (
+            ("toggle_editing", controller.editing),
             ("snapping", controller.snapping.enabled),
             ("topology", controller.topology_enabled),
         ):
@@ -1798,28 +1799,8 @@ class CompositeDocument(QWidget):
                 action.blockSignals(True)
                 action.setChecked(bool(checked))
                 action.blockSignals(False)
-        # V7：工作站专业分组统一由 tool_surface 求值
+        # V7：使能/可见/禁用原因统一由 tool_surface 求值
         self._apply_tool_availability()
-        # V7：核心数字化/编辑动作由 authoring kernel evaluator 统一裁定状态与原因
-        from dataclasses import replace
-        from paleo_workbench.mapping_workspace.stage_profiles import (
-            governed_edit_actions,
-            stage_profile,
-        )
-        from paleo_workbench.mapping_workspace.stages import stage_from_value
-
-        availability = dict(evaluate_all(self._build_tool_context()))
-        stage_raw = getattr(self.stage_controller, "current_stage", None) if hasattr(self, "stage_controller") else None
-        stage = stage_from_value(getattr(stage_raw, "value", stage_raw))
-        if stage is not None:
-            tools = stage_profile(stage).tools
-            for action_id in governed_edit_actions():
-                if action_id in availability:
-                    avail = availability[action_id]
-                    availability[action_id] = replace(avail, visible=tools.allows_edit_action(action_id))
-            if "add_point" in availability:
-                availability["add_point"] = replace(availability["add_point"], visible=True)
-        self.action_controller.apply_availability(availability)
         # V7 §7：树呈现态（编辑/新鲜度/成熟度）差分推送。
         self._push_layer_decorations()
         self._sync_status_bar()
@@ -2072,6 +2053,11 @@ class CompositeDocument(QWidget):
         """
         if not layer_id:
             return False, "当前没有活动编辑目标（本阶段的默认编辑对象尚未创建）"
+        gate = getattr(self.edit_controller, "_edit_gate", None)
+        if gate is not None and gate != self._role_allows_editing:
+            allowed, reason = gate(layer_id)
+            if not allowed:
+                return False, reason
         role = self.stage_controller.state.role_of(str(layer_id))
         if role.is_raw_protected:
             return False, (
@@ -2965,10 +2951,20 @@ class CompositeDocument(QWidget):
                 self._toolbar_overflow_hidden.add(tool_id)
                 actions[tool_id].setVisible(False)
                 overflow = not _fits()
+        # 恢复阶段：先尝试恢复 hide_order 中最高优先的隐藏组（hide_order 逆序末尾）。
+        for tool_id in reversed(last_resort):
+            if not overflow and tool_id in self._toolbar_overflow_hidden:
+                self._toolbar_overflow_hidden.discard(tool_id)
+                last = getattr(self, "_last_availability", None) or {}
+                avail = last.get(tool_id)
+                actions[tool_id].setVisible(True if avail is None else avail.visible)
+                if not _fits():
+                    self._toolbar_overflow_hidden.add(tool_id)
+                    actions[tool_id].setVisible(False)
+                    break
         while not overflow and self._toolbar_overflow_hidden:
-            # 尝试恢复最高优先的隐藏组（hide_order 逆序的末尾）。
             restore_group = None
-            for group in self._toolbar_group_order:
+            for group in reversed(hide_order):
                 if any(t in self._toolbar_overflow_hidden for t in TOOL_GROUPS[group]):
                     restore_group = group
                     break
@@ -2988,7 +2984,8 @@ class CompositeDocument(QWidget):
             if not _fits():
                 self._toolbar_overflow_hidden = saved
                 for tool_id in TOOL_GROUPS[restore_group]:
-                    actions[tool_id].setVisible(False)
+                    if tool_id in saved:
+                        actions[tool_id].setVisible(False)
                 break
         self._rebuild_overflow_menu()
 
