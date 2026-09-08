@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench.catalog.models import CatalogError, DataStage, DataVersion
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 
 _STAGE_DISPLAY = {
     DataStage.RAW: "RAW",
@@ -178,14 +178,21 @@ class VersionWorkbenchDialog(QDialog):
         header = QHBoxLayout()
         self.header_label = QLabel("版本工作台")
         self.header_label.setWordWrap(True)
-        self.header_label.setStyleSheet(
-            f"font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 600;"
-            f" color: {tokens.TEXT_PRIMARY};"
+        style.bind(
+            self.header_label,
+            lambda: (
+                f"font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 600;"
+                f" color: {style.palette()['TEXT_PRIMARY']};"
+            ),
         )
         header.addWidget(self.header_label, 1)
         self.count_label = QLabel("")
-        self.count_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: {tokens.FONT_SIZE_STATUS};"
+        style.bind(
+            self.count_label,
+            lambda: (
+                f"color: {style.palette()['TEXT_SECONDARY']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
         )
         header.addWidget(self.count_label)
         layout.addLayout(header)
@@ -215,8 +222,11 @@ class VersionWorkbenchDialog(QDialog):
 
         # -- detail panel ------------------------------------------------------
         self.detail_title_label = QLabel("版本详情")
-        self.detail_title_label.setStyleSheet(
-            f"font-weight: 600; color: {tokens.TEXT_PRIMARY};"
+        style.bind(
+            self.detail_title_label,
+            lambda: (
+                f"font-weight: 600; color: {style.palette()['TEXT_PRIMARY']};"
+            ),
         )
         layout.addWidget(self.detail_title_label)
 
@@ -229,16 +239,23 @@ class VersionWorkbenchDialog(QDialog):
         layout.addWidget(self.detail_run_label)
 
         run_params_caption = QLabel("Run 参数:")
-        run_params_caption.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: {tokens.FONT_SIZE_STATUS};"
+        style.bind(
+            run_params_caption,
+            lambda: (
+                f"color: {style.palette()['TEXT_SECONDARY']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
         )
         layout.addWidget(run_params_caption)
         self.detail_run_params = QPlainTextEdit()
         self.detail_run_params.setReadOnly(True)
         self.detail_run_params.setMaximumHeight(72)
-        self.detail_run_params.setStyleSheet(
-            f"font-family: {tokens.FONT_FAMILY_MONO};"
-            f" font-size: {tokens.FONT_SIZE_STATUS};"
+        style.bind(
+            self.detail_run_params,
+            lambda: (
+                f"font-family: {tokens.FONT_FAMILY_MONO};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
         )
         self.detail_run_params.setPlaceholderText("—")
         layout.addWidget(self.detail_run_params)
@@ -252,15 +269,22 @@ class VersionWorkbenchDialog(QDialog):
         layout.addWidget(self.detail_resolved_label)
 
         meta_caption = QLabel("元数据 (JSON):")
-        meta_caption.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: {tokens.FONT_SIZE_STATUS};"
+        style.bind(
+            meta_caption,
+            lambda: (
+                f"color: {style.palette()['TEXT_SECONDARY']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
         )
         layout.addWidget(meta_caption)
         self.detail_meta_text = QPlainTextEdit()
         self.detail_meta_text.setReadOnly(True)
-        self.detail_meta_text.setStyleSheet(
-            f"font-family: {tokens.FONT_FAMILY_MONO};"
-            f" font-size: {tokens.FONT_SIZE_STATUS};"
+        style.bind(
+            self.detail_meta_text,
+            lambda: (
+                f"font-family: {tokens.FONT_FAMILY_MONO};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
         )
         layout.addWidget(self.detail_meta_text, 1)
 

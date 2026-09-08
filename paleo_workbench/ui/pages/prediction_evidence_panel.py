@@ -28,7 +28,9 @@ class PredictionEvidencePanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("PredictionEvidencePanel")
-        self.setFixedWidth(220)
+        # 侧栏宽度：保底 220，窄屏下可收缩、宽屏最多 1.6 倍有界弹性
+        self.setMinimumWidth(220)
+        self.setMaximumWidth(int(220 * 1.6))
         self._inferring = False
 
         layout = QVBoxLayout(self)

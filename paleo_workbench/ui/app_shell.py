@@ -544,17 +544,46 @@ class AppShell(QWidget):
             "mapping_stage_label", lambda: stage_controller.current_stage.label
         )
 
-        def _target(field: str):
+        # V7 R2-F2：palette 上下文的图层字段全部从 composite.tool_context()
+        # 单一推导（此前 id/editable 走阶段目标、kind/maturity 走活动图层
+        # ——两套 id 源可漂移，palette 会用图层 B 的几何评估图层 A 的身份）。
+        def _tool_layer_field(field: str):
             def _read():
-                return composite.active_editing_target_status()[field]
+                return getattr(composite.tool_context().layer, field)
 
             return _read
 
-        svc.set_provider("active_layer_id", _target("active_layer_id"))
-        svc.set_provider("active_layer_role", _target("role_label"))
-        svc.set_provider("active_layer_editable", _target("editable"))
-        svc.set_provider("active_layer_block_reason", _target("block_reason"))
-        svc.set_provider("editing_active", _target("editing_active"))
+        svc.set_provider("active_layer_id", _tool_layer_field("layer_id"))
+        svc.set_provider(
+            "active_layer_editable", _tool_layer_field("editable")
+        )
+        svc.set_provider(
+            "active_layer_block_reason", _tool_layer_field("block_reason")
+        )
+        # editing_active 是会话态（非图层字段），读编辑控制器权威。
+        svc.set_provider(
+            "editing_active",
+            lambda: composite.edit_controller.editing,
+        )
+        svc.set_provider(
+            "active_layer_role", _tool_layer_field("role_label")
+        )
+        svc.set_provider("active_layer_kind", _tool_layer_field("kind"))
+        svc.set_provider(
+            "active_layer_maturity", _tool_layer_field("maturity")
+        )
+        svc.set_provider(
+            "active_layer_frozen", _tool_layer_field("frozen")
+        )
+
+        def _capability_field(field: str):
+            def _read():
+                return getattr(composite._capability_snapshot(), field)
+
+            return _read
+
+        svc.set_provider("capability_mode", _capability_field("mode"))
+        svc.set_provider("capability_reason", _capability_field("reason"))
 
         svc.set_provider("active_well_id", lambda: selection.active_well_id)
         svc.set_provider("active_horizon_id", lambda: selection.active_horizon_id)
@@ -591,6 +620,9 @@ class AppShell(QWidget):
         selection.selection_changed.connect(lambda *_: svc.refresh())
         stage_controller.current_stage_changed.connect(lambda *_: svc.refresh())
         stage_controller.active_target_changed.connect(lambda *_: svc.refresh())
+        # V7：活动图层切换（树选择/新建）也改变 kind/成熟度上下文——
+        # refresh 差分门控，无变化时不发射。
+        composite.edit_controller.state_changed.connect(lambda *_: svc.refresh())
         self.workstation.agent_panel.write_grant_changed.connect(lambda: svc.refresh())
         # 任务中心轮询调度器状态；活动数变化时同步上下文（差分门控）。
         self.workstation.task_center.active_count_changed.connect(
@@ -721,8 +753,8 @@ class AppShell(QWidget):
             self.command_palette.popup()
 
     def _shortcut_switch_subpage(self, sub_idx: int) -> None:
-        focus = QApplication.focusWidget()
-        if isinstance(focus, (QLineEdit, QTextEdit, QTextBrowser)):
+        # V7：文本输入守卫统一到 shortcuts.focus_in_text_input（单一清单）。
+        if shortcuts.focus_in_text_input():
             return
         hub = self.page_stack.currentWidget()
         if not isinstance(hub, HubPage):
@@ -732,8 +764,7 @@ class AppShell(QWidget):
             self.navigate_to(hub.hub_index, keys[sub_idx])
 
     def _shortcut_switch_page(self, idx: int) -> None:
-        focus = QApplication.focusWidget()
-        if isinstance(focus, (QLineEdit, QTextEdit, QTextBrowser)):
+        if shortcuts.focus_in_text_input():
             return
         self.navigate_to(idx)
 

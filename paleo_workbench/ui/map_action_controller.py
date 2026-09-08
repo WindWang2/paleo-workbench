@@ -9,15 +9,24 @@ from PySide6.QtCore import QObject, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QIcon, QKeySequence
 from PySide6.QtWidgets import QToolBar, QWidget
 
+from paleo_workbench.ui.workstation.tool_surface import ToolAvailability
+
 __all__ = ["MapActionController", "MapActionState"]
 
 _MAP_ICONS_DIR = Path(__file__).parent / "assets" / "icons" / "map"
+_ICONS_DIR = Path(__file__).parent / "assets" / "icons"
 
 
-def _map_icon(action_id: str) -> QIcon:
-    """Load a QGIS-theme toolbar icon, returning an empty QIcon if absent."""
-    path = _MAP_ICONS_DIR / f"{action_id}.svg"
-    return QIcon(str(path)) if path.exists() else QIcon()
+def _map_icon(action_id: str, *, fallback: str = "") -> QIcon:
+    """Load a toolbar icon (map/ 优先，assets 根目录兜底)，缺失返回空 QIcon。"""
+    for name in (action_id, fallback):
+        if not name:
+            continue
+        for directory in (_MAP_ICONS_DIR, _ICONS_DIR):
+            path = directory / f"{name}.svg"
+            if path.exists():
+                return QIcon(str(path))
+    return QIcon()
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +66,25 @@ class MapActionController(QObject):
         "reshape": "重塑",
         "undo": "撤销", "redo": "重做", "split": "分割", "merge": "合并",
         "snapping": "捕捉", "topology": "拓扑编辑", "cancel": "取消",
+        # V7 专业分组扩展（goal §6 Layer/Symbology/Factor/QA/Layout·Export）
+        "layer_new": "新建图层", "reference_import": "导入参考图层",
+        "layer_properties": "图层属性", "attribute_table": "属性表",
+        "layer_zoom": "缩放到图层", "layer_export": "导出图层",
+        "symbology": "符号系统", "style_manager": "样式库",
+        "factor_workbench": "单因素工作台", "factor_overlay": "叠加等值线",
+        "qa_run": "运行 QC", "map_product_assemble": "生成成果",
+        "map_export": "导出图面",
+    }
+
+    #: 扩展面动作的图标（id → map/ 或 assets 根目录下的 svg 名）。
+    _SURFACE_ICONS = {
+        "layer_new": "tree-add-layer", "reference_import": "btn-import",
+        "layer_properties": "tree-properties", "attribute_table": "attribute_table",
+        "layer_zoom": "tree-zoom", "layer_export": "tree-export",
+        "symbology": "rb-colorbar", "style_manager": "rb-settings",
+        "factor_workbench": "rb-grid", "factor_overlay": "btn-contour-draft",
+        "qa_run": "rb-qc", "map_product_assemble": "rb-finalize",
+        "map_export": "rb-export",
     }
 
     def __init__(self, parent: QObject | None = None):
@@ -68,7 +96,8 @@ class MapActionController(QObject):
         self.update_state(MapActionState())
 
     def _action(self, action_id: str, *, checkable: bool = False, shortcut: str = "") -> QAction:
-        action = QAction(_map_icon(action_id), self._LABELS[action_id], self)
+        icon_name = self._SURFACE_ICONS.get(action_id, action_id)
+        action = QAction(_map_icon(icon_name), self._LABELS[action_id], self)
         action.setObjectName(f"MapAction:{action_id}")
         action.setCheckable(checkable)
         action.setToolTip(self._LABELS[action_id])
@@ -97,6 +126,10 @@ class MapActionController(QObject):
             action = self._action(action_id, checkable=action_id in {"snapping", "topology", "toggle_editing"}, shortcut=shortcut)
             action.triggered.connect(lambda checked=False, name=action_id: self.command_requested.emit(name))
         self.actions["pan"].setChecked(True)
+        # V7 专业分组扩展（Layer / Symbology / Factor / QA / Layout·Export）。
+        for action_id in self._SURFACE_ICONS:
+            action = self._action(action_id)
+            action.triggered.connect(lambda checked=False, name=action_id: self.command_requested.emit(name))
 
     def update_state(self, state: MapActionState) -> None:
         vector = state.has_active_vector_layer
@@ -134,18 +167,19 @@ class MapActionController(QObject):
             if action is None:
                 continue  # evaluator may cover tools this host has no action for
             label = self._LABELS.get(tool_id, tool_id)
-            action.setEnabled(result.enabled)
-            action.setVisible(result.visible)
-            if result.disabled_reason:
-                action.setToolTip(f"{label}——{result.disabled_reason}")
-                action.setStatusTip(f"{label}——{result.disabled_reason}")
+            action.setEnabled(bool(result.enabled))
+            action.setVisible(bool(result.visible))
+            reason = getattr(result, "reason", None) or getattr(result, "disabled_reason", "") or ""
+            if reason:
+                action.setToolTip(f"{label}\n{reason}")
+                action.setStatusTip(f"{label}（{reason}）")
             else:
                 action.setToolTip(label)
                 action.setStatusTip(label)
-            checked = bool(result.checked)
-            if action.isCheckable() and action.isChecked() != checked:
+            checked = getattr(result, "checked", None)
+            if checked is not None and action.isCheckable() and action.isChecked() != bool(checked):
                 action.blockSignals(True)
-                action.setChecked(checked)
+                action.setChecked(bool(checked))
                 action.blockSignals(False)
 
     def toolbar(

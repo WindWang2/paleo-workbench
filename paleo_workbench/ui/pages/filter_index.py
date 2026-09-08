@@ -44,15 +44,19 @@ CATEGORIES = {
     "未知": "unknown",
 }
 
+# V7 §6：与 tokens.STATUS_TEXT 重叠的状态经 canonical 词汇（单一来源）；
+# indexed/parsed/missing/generated 是数据目录域词，保持本地。
+from paleo_workbench import tokens as _tokens
+
 _STATUS_LABELS = {
     "indexed": "已索引",
     "parsed": "已解析",
     "missing": "缺失",
-    "warning": "警告",
-    "failed": "失败",
+    "warning": _tokens.STATUS_TEXT["warning"],
+    "failed": _tokens.STATUS_TEXT["failed"],
     "error": "错误",
-    "ready": "就绪",
-    "generated": "已生成",
+    "ready": _tokens.STATUS_TEXT["ready"],
+    "generated": _tokens.TASK_STATUS_LABELS["complete"],
 }
 
 

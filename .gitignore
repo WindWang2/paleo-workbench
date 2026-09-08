@@ -86,3 +86,8 @@ run_suite_detached.bat
 run_batched.bat
 main_batched*
 scratch_wt_batched*
+.baseline-*.log
+.baseline-*.txt
+.v7-baseline-gen.log
+.final-sweep.log
+

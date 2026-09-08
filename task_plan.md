@@ -1,60 +1,63 @@
-# Task Plan — Scientific Interpretation & Algorithm V6 (feat/scientific-interpretation-v6)
+# Task Plan — Professional Workstation UI/UX V7 (feat/workstation-ux-v7)
 
 ## Goal
-Make Paleo Workbench scientifically trustworthy across well logs, multi-well
-correlation, map/well/seismic coordinate linkage, small/medium seismic
-interpretation, geological constraints, interpolation, single-factor maps,
-multi-factor synthesis, geological mapping, uncertainty/QC/provenance, and
-Harness scientific actions.
+Converge Paleo Workbench into a high-density, context-driven, visually unified
+professional geoscience workstation (QGIS + Petrel/Kingdom + VS Code reference).
+Focus: UI beauty, UI-function matching, when tools appear/are enabled, QGIS shell
+consistency. UI must truthfully present what the system can do, explain why not,
+and map geological context to tools/panels/inspector/status.
 
-Primary rule: a result must never look scientifically valid when an input
-unit, identity, null convention, coordinate convention, geological
-constraint, calibration, or algorithm capability was actually missing or
-ignored. Prefer explicit unavailable/degraded/unsupported over silent
-approximation.
-
-HARD EXCLUSION: no 100GB seismic volume support/benchmark/optimization.
+HARD EXCLUSIONS: no 100GB seismic anything; no QGIS C++ branch overhauls (adapter
+seams only); no second domain authority; no fake backends/silent fallbacks.
 
 ## Current Phase
-PHASE 1 — Scientific audit (A–Q) → docs/development/scientific-interpretation-v6/00-baseline.md
+PHASE 0 (setup) — COMPLETE. PHASE 1 (audit) — COMPLETE → docs 00.
+Next: M1 contextual command surface.
 
-## Phases
-- [ ] PHASE 0: Setup — worktree `.worktrees/scientific-interpretation-v6`,
-      branch `feat/scientific-interpretation-v6` off main (295fabc3),
-      submodules geo-viz-engine (5e03beba) + well-log-engine (f845e7ab) init,
-      uv venv (cp312) + geoviz editables; baseline test run
-- [ ] PHASE 1: Scientific audit A–Q (parallel) → 00-baseline.md
-- [ ] PHASE 2: Well scientific contract V2 (identity/depth-domain/unit/null
-      invariants; §2–4) + tests
-- [ ] PHASE 3: Well identity/correlation duplicate-name correctness +
-      registry scale O(W + N log W) (§5–6)
-- [ ] PHASE 4: well-log-engine gap-aware curves/parity (§7, submodule branch
-      if engine changes needed)
-- [ ] PHASE 5: Coordinate/calibration fail-closed chain + SEG-Y scalar/
-      geometry unification (§8–9)
-- [ ] PHASE 6: Method × Constraint capability matrix + result diagnostics
-      (§10)
-- [ ] PHASE 7: Kriging V2 (anisotropy, diagnostics, CV, LOO) (§11)
-- [ ] PHASE 8: Constrained IDW audit + interpolation evaluation workbench
-      (§12–13)
-- [ ] PHASE 9: Factor map contract + contour QA + fusion V2 + MapProduct
-      gate (§14–17)
-- [ ] PHASE 10: QC first-class model + Harness scientific actions (§18–19)
-- [ ] PHASE 11: Performance + full test matrix (§20–21)
-- [ ] PHASE 12: 3 review rounds + fixes (§22)
-- [ ] PHASE 13: Docs 00–13 (§23), commits, submodule bumps, PR (§24)
+## Phases (milestones; each = atomic commits + tests + doc updates)
+- [x] PHASE 0: worktree `.worktrees/workstation-ux-v7` branch feat/workstation-ux-v7
+      off main db21f6cf; submodules local-clone init; uv venv cp312 + editables;
+      native pyds copied (cp312); baseline test run (see progress.md)
+- [x] PHASE 1: Full UI audit (5 parallel explore agents) → findings.md + 00-baseline.md
+- [ ] PHASE 2: Docs 01-target-state / 02-architecture / 03-decisions (before code)
+- [x] M1: Context model V7 — ToolContext/ToolAvailability/QgisCapabilitySnapshot/
+      LayerCapabilitySnapshot/LayerPresentationState typing seams + adapters;
+      UIContextService extension (active layer detail, dirty, selection, degraded)
+- [x] M2: Availability matrix (§4 phase1/2/3 × layer kind/role × editing) + disabled
+      reasons everywhere (§5); kill MappingPage second authority (shared evaluation);
+      unify 3 stage vocabularies; MapActionController reason plumbing
+- [x] M3: Toolbar/menu IA (§6): TOOL_GROUPS regroup done; dead actions
+      reachable; compact/overflow deferred to M7 (narrow-screen work)
+- [x] M4: Layer Tree V7 (§7): decorations (dirty/stale/error/reviewed/frozen/
+      published/missing/degraded), group aggregates from group_summary, hover,
+      locate, stage-switch state preservation, no full rebuild
+- [x] M5: Inspector V7 (§8): typed layer/feature/factor-raster/mapproduct sections
+      consuming real domain data
+- [x] M6: Visual convergence (§9): fix RED ratchet; migrate 44 snapshot files to
+      style.bind/QSS; emoji→SVG; status vocab unification; badge/state adoption;
+      new ratchets (font-size, fixed-width, status-map import lint)
+- [x] M7: Layout (§10): hub force-float legacy resolution, dead pages/presets/
+      placeholders removal, 1366×768 narrow handling
+- [x] M8: QGIS UX (§11): capability-gated entries (Style Manager production entry,
+      CRS entry), consistent unavailable/degraded semantics
+- [x] M9: Task/Agent UX (§12): cancelling/slot/retry presentation honesty
+- [x] M10: Accessibility/DPI/keyboard (§13): accessibleNames, focus chain, shortcut
+      registration unification, DPR
+- [x] M11: Visual QA V7 (§14): new states + 1366×768/2560×1440 + theme coverage +
+      semantic assertions
+- [x] M12: Performance (§17): differential updates verified, structural bounds
+- [x] M13: Review rounds ×3 + P0/P1 fixes with regressions (§18)
+- [x] M14: Docs 04–08 final sync, PR to main (§19)
 
-## Decisions (locked)
-1. Do NOT replace existing systems (catalog, engines, harness, mapping V5) —
-   converge and harden.
-2. Unknown unit/CRS/null = unknown; never guess; typed diagnostic or refusal
-   when semantics depend on it.
-3. Stable IDs, never display names, identify wells/curves everywhere.
-4. RAW immutable; corrections produce DERIVED + DataRun.
-5. No fake barrier kriging; unsupported = reported unsupported.
-6. 100GB seismic explicitly out of scope.
-7. Windows/GitBash environment; reuse root checkout's native builds only if
-   ABI-compatible (cp312); native rebuilds bounded (CMAKE_BUILD_PARALLEL_LEVEL=2).
+## Decisions (locked so far)
+1. All UI-side: no native/qgis_render_bridge C++ changes; capability via adapters.
+2. Keep CommandRegistry + StageToolProfile + UIContextService as authorities — extend,
+   do not create parallel systems. Unify vocabularies BY DERIVATION, not by new tables.
+3. Availability truth = pure evaluation function over ToolContext (testable without Qt
+   where possible); surfaces (toolbar/palette/menu/status) all render its output.
+4. Dead code found in audit gets deleted with tests updated (not left hidden).
+5. Planning files tracked in-repo per convention; durable docs in
+   docs/development/workstation-ux-v7/.
 
 ## Blocked Items
 (none)
@@ -62,20 +65,13 @@ PHASE 1 — Scientific audit (A–Q) → docs/development/scientific-interpretat
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |-------|---------|------------|
-| well-log-engine submodule network clone failed | git submodule update --init --reference | manual local clone from main checkout + checkout gitlink commit — OK |
+| (see progress.md session log) | | |
 
 ## Environment facts
-- Worktree: C:\Users\wangj.KEVIN\projects\paleo-workbench\.worktrees\scientific-interpretation-v6
-- Windows, Git Bash; uv 0.10.9; project pins CPython >=3.12,<3.13
-- Root checkout .venv = cp312 (pytest 9.1.1) but editable installs point at
-  MAIN checkout — never use it for worktree tests; use worktree .venv
-- Native modules: check native/ + geo-viz-engine builds; fallback paths exist
-
-## FINAL STATUS (2026-09-07)
-ALL PHASES COMPLETE.
-- PHASE 0–13 done; 14 superproject commits + 4 geo-viz-engine submodule
-  commits on feat/scientific-interpretation-v6 (both repos)
-- 3 review rounds run (scientific/architecture/adversarial); all P0/P1
-  findings fixed with regression tests (f7359415 + engine 40ebd168)
-- docs/development/scientific-interpretation-v6/ 00–13 complete
-- 100GB seismic excluded (program boundary honored)
+- Worktree: C:\Users\wangj.KEVIN\projects\paleo-workbench\.worktrees\workstation-ux-v7
+- Windows Git Bash; uv 0.10.9; venv .venv cp312 (project pins >=3.12,<3.13)
+- Native pyds copied from main checkout (ABI-compatible cp312)
+- qgis_render_bridge NOT built (as on main) — qgis-marker tests skip; fallback path
+  is the verified surface. QGIS 4.2.0 exists at C:/Program Files/QGIS 4.2.0 if ever
+  needed; building the bridge is OUT of scope for V7.
+- Run UI tests: QT_QPA_PLATFORM=offscreen .venv/Scripts/python.exe -m pytest ...

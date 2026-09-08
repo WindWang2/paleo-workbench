@@ -6,6 +6,8 @@ import json
 
 import pytest
 
+from tests.qgis_support import QGIS_SKIP_REASON, qgis_bridge_available
+
 from paleo_workbench.mapping.capability_model import (
     BRIDGE_BUILD_HINT,
     CapabilityFlag,
@@ -71,6 +73,7 @@ class TestQgisCapabilitySnapshot:
         assert "qgis_render_bridge" in snapshot.reason
         assert not snapshot.available
 
+    @pytest.mark.skipif(not qgis_bridge_available(), reason=QGIS_SKIP_REASON)
     def test_available_bridge_probe_matches_manifest(self):
         # On hosts WITH the bridge (this venv after the V7 build), the probe
         # derives the snapshot from the compiled manifest. Runs in a fresh

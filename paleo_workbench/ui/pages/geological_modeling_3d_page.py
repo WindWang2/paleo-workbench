@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QGroupBox,
 )
 from paleo_workbench import tokens
+from paleo_workbench.ui import style
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 from paleo_workbench.viz.joint_host import WellSeismicJointHost
@@ -77,6 +78,132 @@ def _opengl_widget_supported() -> bool:
 # ---- Camera Presets (eliminates duplicated lambdas) ----
 _CAMERA_PERSPECTIVE = dict(distance=250, elevation=30, azimuth=-45)
 _CAMERA_TOP_DOWN = dict(distance=250, elevation=90, azimuth=0)
+
+
+# ---------------------------------------------------------------------------
+# B1 dynamic inline styles:构造期 setStyleSheet(tokens.X …) 会把 light 主题
+# 烘焙进页面，主题切换后不再刷新。以下渲染函数每次调用都从
+# style.palette() 重取当前主题值，经 style.bind 注册后在 theme_changed
+# 时重渲染（同 factor_task_panel 的迁移范式）。选择器保持原文，不改行为。
+# ---------------------------------------------------------------------------
+
+def _render_hsplit_handle() -> str:
+    return (
+        f"QSplitter::handle {{ background: {style.palette()['BORDER']};"
+        f" width: 1px; }}"
+    )
+
+
+def _render_vsplit_handle() -> str:
+    return (
+        f"QSplitter::handle {{ background: {style.palette()['BORDER']};"
+        f" height: 3px; }}"
+    )
+
+
+def _render_panel_header() -> str:
+    pal = style.palette()
+    return (
+        f"font-size: {pal['FONT_SIZE_TITLE']};"
+        f" font-weight: {pal['FONT_WEIGHT_TITLE']};"
+        f" color: {pal['TEXT_PRIMARY']};"
+    )
+
+
+def _render_card_title() -> str:
+    pal = style.palette()
+    return (
+        f"font-weight: bold; font-size: {pal['FONT_SIZE_BASE']};"
+        f" color: {pal['TEXT_PRIMARY']};"
+    )
+
+
+def _render_section_label() -> str:
+    pal = style.palette()
+    return (
+        f"font-size: {pal['FONT_SIZE_BASE']};"
+        f" font-weight: {pal['FONT_WEIGHT_TITLE']};"
+        f" color: {pal['TEXT_SECONDARY']}; border: none;"
+    )
+
+
+def _render_secondary_hint() -> str:
+    pal = style.palette()
+    return f"color: {pal['TEXT_SECONDARY']}; font-size: {pal['FONT_SIZE_STATUS']};"
+
+
+def _render_export_status() -> str:
+    pal = style.palette()
+    return (
+        f"font-size: {pal['FONT_SIZE_STATUS']};"
+        f" color: {pal['TEXT_SECONDARY']}; border: none;"
+    )
+
+
+def _frame_card_renderer(
+    selector: str,
+    surface: str = "BG_SIDEBAR",
+    padding: str = "",
+    radius: str = "RADIUS_CARD",
+):
+    """Card 面板 QSS 渲染工厂：palette 每次调用重取（B1 反快照约束）。"""
+
+    def _render() -> str:
+        pal = style.palette()
+        pad = f" padding: {padding};" if padding else ""
+        return (
+            f"{selector} {{ background: {pal[surface]};"
+            f" border: 1px solid {pal['BORDER']};"
+            f" border-radius: {pal[radius]}px;{pad} }}"
+        )
+
+    return _render
+
+
+def _render_joint_top_toolbar() -> str:
+    pal = style.palette()
+    return (
+        "QFrame#JointTopToolbar {"
+        f" background: {pal['BG_SIDEBAR']};"
+        f" border: 1px solid {pal['BORDER']};"
+        f" border-radius: {pal['RADIUS_BUTTON']}px;"
+        " }"
+        "QFrame#JointTopToolbar QLabel {"
+        f" color: {pal['TEXT_PRIMARY']};"
+        " background: transparent;"
+        " padding: 0 2px;"
+        " }"
+        "QFrame#JointTopToolbar QPushButton {"
+        f" background: {pal['BG_SEARCH']};"
+        f" color: {pal['TEXT_PRIMARY']};"
+        f" border: 1px solid {pal['BORDER']};"
+        f" border-radius: {pal['RADIUS_BUTTON']}px;"
+        " padding: 4px 10px;"
+        " font-weight: 600;"
+        " }"
+        "QFrame#JointTopToolbar QPushButton:hover {"
+        f" background: {pal['BG_SELECTION']};"
+        f" border-color: {pal['PRIMARY']};"
+        " }"
+        "QFrame#JointTopToolbar QComboBox {"
+        f" background: {pal['BG_SIDEBAR']};"
+        f" color: {pal['TEXT_PRIMARY']};"
+        f" border: 1px solid {pal['BORDER']};"
+        f" border-radius: {pal['RADIUS_BUTTON']}px;"
+        " padding: 2px 8px;"
+        " min-height: 24px;"
+        " }"
+    )
+
+
+def _render_status_row() -> str:
+    pal = style.palette()
+    return (
+        "QLabel#JointStatusRow {"
+        f" color: {pal['TEXT_SECONDARY']}; background: {pal['BG_SEARCH']};"
+        f" border: 1px solid {pal['BORDER']}; border-radius: {pal['RADIUS_BUTTON']}px;"
+        f" padding: 4px 8px; font-size: {pal['FONT_SIZE_STATUS']}; }}"
+    )
 
 
 class GeologicalModeling3DPage(QWidget):
@@ -149,7 +276,7 @@ class GeologicalModeling3DPage(QWidget):
 
         # Horizontal splitter: left tree | center joint (no right rail — #121)
         splitter = QSplitter(Qt.Horizontal, self)
-        splitter.setStyleSheet("QSplitter::handle { background: %s; width: 1px; }" % tokens.BORDER)
+        style.bind(splitter, _render_hsplit_handle)
 
         # 1. Left Panel: geoviz scene tree only
         left_widget = QWidget()
@@ -158,16 +285,18 @@ class GeologicalModeling3DPage(QWidget):
         left_layout.setSpacing(tokens.SPACE_2)
 
         left_header = QLabel("场景对象")
-        left_header.setStyleSheet("font-size: %s; font-weight: %s; color: %s;" % (
-            tokens.FONT_SIZE_TITLE, tokens.FONT_WEIGHT_TITLE, tokens.TEXT_PRIMARY
-        ))
+        style.bind(left_header, _render_panel_header)
         left_layout.addWidget(left_header)
 
         self.model_tree = QTreeWidget()
         self.model_tree.setHeaderLabel("井震联合图层")
-        self.model_tree.setStyleSheet("QTreeView { border: 1px solid %s; border-radius: %dpx; }" % (
-            tokens.BORDER, tokens.RADIUS_CARD
-        ))
+        style.bind(
+            self.model_tree,
+            lambda: (
+                f"QTreeView {{ border: 1px solid {style.palette()['BORDER']};"
+                f" border-radius: {style.palette()['RADIUS_CARD']}px; }}"
+            ),
+        )
         self._populate_model_tree()
         left_layout.addWidget(self.model_tree)
 
@@ -185,17 +314,12 @@ class GeologicalModeling3DPage(QWidget):
         center_column_layout.setSpacing(0)
 
         self._center_v_split = QSplitter(Qt.Vertical, center_column)
-        self._center_v_split.setStyleSheet(
-            "QSplitter::handle { background: %s; height: 3px; }" % tokens.BORDER
-        )
+        style.bind(self._center_v_split, _render_vsplit_handle)
 
         # Light chrome around dark 3D host (toolbar/status match app light theme)
         self.view_container = QFrame()
         self.view_container.setFrameShape(QFrame.StyledPanel)
-        self.view_container.setStyleSheet(
-            "QFrame { background: %s; border-radius: %dpx; border: 1px solid %s; }"
-            % (tokens.BG_SIDEBAR, tokens.RADIUS_CARD, tokens.BORDER)
-        )
+        style.bind(self.view_container, _frame_card_renderer("QFrame"))
         view_layout = QVBoxLayout(self.view_container)
         view_layout.setContentsMargins(tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1)
         view_layout.setSpacing(tokens.SPACE_1)
@@ -203,56 +327,7 @@ class GeologicalModeling3DPage(QWidget):
         # Single-row joint toolbar — light surface (not canvas black)
         self.floating_bar = QFrame()
         self.floating_bar.setObjectName("JointTopToolbar")
-        self.floating_bar.setStyleSheet(
-            """
-            QFrame#JointTopToolbar {
-                background: %s;
-                border: 1px solid %s;
-                border-radius: %dpx;
-            }
-            QFrame#JointTopToolbar QLabel {
-                color: %s;
-                background: transparent;
-                padding: 0 2px;
-            }
-            QFrame#JointTopToolbar QPushButton {
-                background: %s;
-                color: %s;
-                border: 1px solid %s;
-                border-radius: %dpx;
-                padding: 4px 10px;
-                font-weight: 600;
-            }
-            QFrame#JointTopToolbar QPushButton:hover {
-                background: %s;
-                border-color: %s;
-            }
-            QFrame#JointTopToolbar QComboBox {
-                background: %s;
-                color: %s;
-                border: 1px solid %s;
-                border-radius: %dpx;
-                padding: 2px 8px;
-                min-height: 24px;
-            }
-            """
-            % (
-                tokens.BG_SIDEBAR,
-                tokens.BORDER,
-                tokens.RADIUS_BUTTON,
-                tokens.TEXT_PRIMARY,
-                tokens.BG_SEARCH,
-                tokens.TEXT_PRIMARY,
-                tokens.BORDER,
-                tokens.RADIUS_BUTTON,
-                tokens.BG_SELECTION,
-                tokens.PRIMARY,
-                tokens.BG_SIDEBAR,
-                tokens.TEXT_PRIMARY,
-                tokens.BORDER,
-                tokens.RADIUS_BUTTON,
-            )
-        )
+        style.bind(self.floating_bar, _render_joint_top_toolbar)
         f_layout = QHBoxLayout(self.floating_bar)
         f_layout.setContentsMargins(tokens.SPACE_2, 4, tokens.SPACE_2, 4)
         f_layout.setSpacing(tokens.SPACE_1)
@@ -332,27 +407,29 @@ class GeologicalModeling3DPage(QWidget):
         # Status row under toolbar — light chrome, not canvas black
         self._joint_status.setWordWrap(True)
         self._joint_status.setObjectName("JointStatusRow")
-        self._joint_status.setStyleSheet(
-            "QLabel#JointStatusRow {"
-            " color: %s; background: %s; border: 1px solid %s; border-radius: %dpx;"
-            " padding: 4px 8px; font-size: 11px; }"
-            % (tokens.TEXT_SECONDARY, tokens.BG_SEARCH, tokens.BORDER, tokens.RADIUS_BUTTON)
-        )
+        style.bind(self._joint_status, _render_status_row)
         view_layout.addWidget(self._joint_status)
 
         self.joint_3d_host = QWidget()
         self.joint_3d_host.setObjectName("Joint3DHost")
-        self.joint_3d_host.setStyleSheet(
-            "QWidget#Joint3DHost { background: %s; border-radius: %dpx; }"
-            % (tokens.BG_CANVAS, tokens.RADIUS_CARD)
+        style.bind(
+            self.joint_3d_host,
+            lambda: (
+                f"QWidget#Joint3DHost {{ background: {style.palette()['BG_CANVAS']};"
+                f" border-radius: {style.palette()['RADIUS_CARD']}px; }}"
+            ),
         )
         j3_host_layout = QVBoxLayout(self.joint_3d_host)
         j3_host_layout.setContentsMargins(0, 0, 0, 0)
         self._joint_3d_placeholder = QLabel("井震联合 3D（主视口）")
         self._joint_3d_placeholder.setAlignment(Qt.AlignCenter)
         self._joint_3d_placeholder.setWordWrap(True)
-        self._joint_3d_placeholder.setStyleSheet(
-            "color: %s; padding: 12px; background: transparent;" % tokens.TEXT_ON_CANVAS
+        style.bind(
+            self._joint_3d_placeholder,
+            lambda: (
+                f"color: {style.palette()['TEXT_ON_CANVAS']};"
+                " padding: 12px; background: transparent;"
+            ),
         )
         j3_host_layout.addWidget(self._joint_3d_placeholder)
         view_layout.addWidget(self.joint_3d_host, 1)
@@ -362,28 +439,24 @@ class GeologicalModeling3DPage(QWidget):
         # Bottom: collapsible joint fence 2D strip
         self._joint_2d_panel = QFrame()
         self._joint_2d_panel.setObjectName("JointFence2DPanel")
-        self._joint_2d_panel.setStyleSheet(
-            "QFrame#JointFence2DPanel { background: %s; border: 1px solid %s; border-radius: %dpx; }"
-            % (tokens.BG_SIDEBAR, tokens.BORDER, tokens.RADIUS_CARD)
+        style.bind(
+            self._joint_2d_panel, _frame_card_renderer("QFrame#JointFence2DPanel")
         )
         j2_layout = QVBoxLayout(self._joint_2d_panel)
         j2_layout.setContentsMargins(tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1)
         j2_layout.setSpacing(tokens.SPACE_1)
         j2_header = QHBoxLayout()
         self._joint_2d_title = QLabel("Time 平面 / 井间剖面")
-        self._joint_2d_title.setStyleSheet(
-            "font-weight: 600; color: %s;" % tokens.TEXT_PRIMARY
+        style.bind(
+            self._joint_2d_title,
+            lambda: f"font-weight: 600; color: {style.palette()['TEXT_PRIMARY']};",
         )
         j2_header.addWidget(self._joint_2d_title)
         # Unified domain chip: 2D and 3D always share the scene domain.
         self._joint_2d_time_chip = QLabel("域: Time · 2D/3D 联动")
         self._joint_2d_time_chip.setObjectName("Joint2DTimeChip")
-        self._joint_2d_time_chip.setStyleSheet(
-            "QLabel#Joint2DTimeChip {"
-            " color: %s; background: %s; border: 1px solid %s; border-radius: 999px;"
-            " padding: 2px 8px; font-size: 11px; }"
-            % (tokens.PRIMARY, tokens.BG_SEARCH, tokens.BORDER)
-        )
+        self._joint_2d_depth_domain = False
+        style.bind(self._joint_2d_time_chip, self._render_joint_2d_time_chip)
         j2_header.addWidget(self._joint_2d_time_chip)
         j2_header.addStretch()
         self._joint_color_card_btn = QPushButton("色标")
@@ -399,11 +472,12 @@ class GeologicalModeling3DPage(QWidget):
 
         self._joint_color_card = QFrame()
         self._joint_color_card.setObjectName("JointColorScaleCard")
-        self._joint_color_card.setStyleSheet(
-            "QFrame#JointColorScaleCard {"
-            " background: %s; border: 1px solid %s; border-radius: %dpx;"
-            " padding: 4px; }"
-            % (tokens.BG_SEARCH, tokens.BORDER, tokens.RADIUS_BUTTON)
+        style.bind(
+            self._joint_color_card,
+            _frame_card_renderer(
+                "QFrame#JointColorScaleCard", "BG_SEARCH", padding="4px",
+                radius="RADIUS_BUTTON",
+            ),
         )
         color_layout = QGridLayout(self._joint_color_card)
         color_layout.setContentsMargins(
@@ -468,8 +542,9 @@ class GeologicalModeling3DPage(QWidget):
         self._joint_2d_placeholder.setAlignment(Qt.AlignCenter)
         self._joint_2d_placeholder.setWordWrap(True)
         self._joint_2d_placeholder.setObjectName("Joint2DEmptyHint")
-        self._joint_2d_placeholder.setStyleSheet(
-            "color: %s; padding: 12px;" % tokens.TEXT_SECONDARY
+        style.bind(
+            self._joint_2d_placeholder,
+            lambda: f"color: {style.palette()['TEXT_SECONDARY']}; padding: 12px;",
         )
         j2_host_layout.addWidget(self._joint_2d_placeholder)
         j2_layout.addWidget(self.joint_2d_host, 1)
@@ -484,7 +559,7 @@ class GeologicalModeling3DPage(QWidget):
         # 3. Right Panel: Parameters & Exporters (Scrollable)
         right_scroll = QScrollArea()
         right_scroll.setWidgetResizable(True)
-        right_scroll.setStyleSheet("QScrollArea { border: none; }")
+        style.bind(right_scroll, lambda: "QScrollArea { border: none; }")
 
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
@@ -492,21 +567,17 @@ class GeologicalModeling3DPage(QWidget):
         right_layout.setSpacing(tokens.SPACE_2)
 
         right_header = QLabel("三维可视化与模拟接口")
-        right_header.setStyleSheet("font-size: %s; font-weight: %s; color: %s;" % (
-            tokens.FONT_SIZE_TITLE, tokens.FONT_WEIGHT_TITLE, tokens.TEXT_PRIMARY
-        ))
+        style.bind(right_header, _render_panel_header)
         right_layout.addWidget(right_header)
 
         # CARD 1: Modeling Config
         card_config = QFrame()
-        card_config.setStyleSheet("QFrame { background: %s; border-radius: %dpx; border: 1px solid %s; }" % (
-            tokens.BG_SIDEBAR, tokens.RADIUS_CARD, tokens.BORDER
-        ))
+        style.bind(card_config, _frame_card_renderer("QFrame"))
         cfg_layout = QVBoxLayout(card_config)
         cfg_layout.setSpacing(tokens.SPACE_2)
 
         title_cfg = QLabel("建模计算参数")
-        title_cfg.setStyleSheet("font-weight: bold; font-size: 13px; color: %s;" % tokens.TEXT_PRIMARY)
+        style.bind(title_cfg, _render_card_title)
         cfg_layout.addWidget(title_cfg)
 
         cfg_layout.addWidget(QLabel("网格密度 (Grid Density)"))
@@ -521,8 +592,9 @@ class GeologicalModeling3DPage(QWidget):
         # current volume/borehole/tunnel/fault data is synthetic demo data.
         self.demo_source_label = QLabel("合成演示数据 (Demo)")
         self.demo_source_label.setObjectName("DemoSourceLabel")
-        self.demo_source_label.setStyleSheet(
-            f"color: {tokens.WARNING}; font-weight: 600;"
+        style.bind(
+            self.demo_source_label,
+            lambda: f"color: {style.palette()['WARNING']}; font-weight: 600;",
         )
         cfg_layout.addWidget(self.demo_source_label)
 
@@ -548,14 +620,12 @@ class GeologicalModeling3DPage(QWidget):
 
         # CARD 2: 3-Way Interactive Clipping
         card_clip = QFrame()
-        card_clip.setStyleSheet("QFrame { background: %s; border-radius: %dpx; border: 1px solid %s; }" % (
-            tokens.BG_SIDEBAR, tokens.RADIUS_CARD, tokens.BORDER
-        ))
+        style.bind(card_clip, _frame_card_renderer("QFrame"))
         clip_layout = QVBoxLayout(card_clip)
         clip_layout.setSpacing(tokens.SPACE_2)
 
         title_clip = QLabel("三向交互剖切 (GPU Clipping)")
-        title_clip.setStyleSheet("font-weight: bold; font-size: 13px; color: %s;" % tokens.TEXT_PRIMARY)
+        style.bind(title_clip, _render_card_title)
         clip_layout.addWidget(title_clip)
 
         # X-Axis Clip controls
@@ -608,14 +678,12 @@ class GeologicalModeling3DPage(QWidget):
 
         # CARD 3: Simulator Mesh Exporters
         card_export = QFrame()
-        card_export.setStyleSheet("QFrame { background: %s; border-radius: %dpx; border: 1px solid %s; }" % (
-            tokens.BG_SIDEBAR, tokens.RADIUS_CARD, tokens.BORDER
-        ))
+        style.bind(card_export, _frame_card_renderer("QFrame"))
         exp_layout = QVBoxLayout(card_export)
         exp_layout.setSpacing(tokens.SPACE_2)
 
         title_exp = QLabel("数值模拟分析接口 (Export)")
-        title_exp.setStyleSheet("font-weight: bold; font-size: 13px; color: %s;" % tokens.TEXT_PRIMARY)
+        style.bind(title_exp, _render_card_title)
         exp_layout.addWidget(title_exp)
 
         exp_layout.addWidget(QLabel("导出格式"))
@@ -699,28 +767,25 @@ class GeologicalModeling3DPage(QWidget):
         # dialogs (worker completion slots must not stack modals, #897 family).
         self.export_status = QLabel("")
         self.export_status.setWordWrap(True)
-        self.export_status.setStyleSheet(
-            "font-size: 12px; color: %s; border: none;" % tokens.TEXT_SECONDARY
-        )
+        # 12px 字号不在 9/11/13/14 刻度上：状态行语义 → 吸附 FONT_SIZE_STATUS
+        style.bind(self.export_status, _render_export_status)
         exp_layout.addWidget(self.export_status)
 
         right_layout.addWidget(card_export)
 
         # CARD 4: Rule-based Consistency Advisor Side Dialog
         card_ai = QFrame()
-        card_ai.setStyleSheet("QFrame { background: %s; border-radius: %dpx; border: 1px solid %s; }" % (
-            tokens.BG_SEARCH, tokens.RADIUS_CARD, tokens.BORDER
-        ))
+        style.bind(card_ai, _frame_card_renderer("QFrame", "BG_SEARCH"))
         ai_layout = QVBoxLayout(card_ai)
         ai_layout.setSpacing(tokens.SPACE_2)
 
         title_ai = QLabel("地质数据一致性核复顾问")
-        title_ai.setStyleSheet("font-weight: bold; font-size: 13px; color: %s;" % tokens.TEXT_PRIMARY)
+        style.bind(title_ai, _render_card_title)
         ai_layout.addWidget(title_ai)
 
         desc_ai = QLabel("基于规则自动分析当前项目下所有钻孔的深度分层完整性，并校验平行断层共面问题。")
         desc_ai.setWordWrap(True)
-        desc_ai.setStyleSheet("font-size: 11px; color: %s;" % tokens.TEXT_SECONDARY)
+        style.bind(desc_ai, _render_secondary_hint)
         ai_layout.addWidget(desc_ai)
 
         self.btn_ai_advisor = QPushButton("开启一致性诊断")
@@ -733,14 +798,12 @@ class GeologicalModeling3DPage(QWidget):
 
         # CARD 5: Well-Seismic Tie Calibration & Analysis Controls
         card_tie = QFrame()
-        card_tie.setStyleSheet("QFrame { background: %s; border-radius: %dpx; border: 1px solid %s; }" % (
-            tokens.BG_SIDEBAR, tokens.RADIUS_CARD, tokens.BORDER
-        ))
+        style.bind(card_tie, _frame_card_renderer("QFrame"))
         tie_layout = QVBoxLayout(card_tie)
         tie_layout.setSpacing(tokens.SPACE_2)
 
         title_tie = QLabel("井震融合校正 (Well-Seismic Calibration)")
-        title_tie.setStyleSheet("font-weight: bold; font-size: 13px; color: %s;" % tokens.TEXT_PRIMARY)
+        style.bind(title_tie, _render_card_title)
         tie_layout.addWidget(title_tie)
 
         tie_layout.addWidget(QLabel("主频 (Wavelet Frequency)"))
@@ -758,7 +821,13 @@ class GeologicalModeling3DPage(QWidget):
         tie_layout.addWidget(self.slider_td_shift)
 
         self.label_correlation = QLabel("互相关系数 (Cross-Correlation CC): —")
-        self.label_correlation.setStyleSheet("font-size: 11px; color: %s; font-weight: bold;" % tokens.SUCCESS)
+        style.bind(
+            self.label_correlation,
+            lambda: (
+                f"font-size: {style.palette()['FONT_SIZE_STATUS']};"
+                f" color: {style.palette()['SUCCESS']}; font-weight: bold;"
+            ),
+        )
         tie_layout.addWidget(self.label_correlation)
 
         self.btn_auto_tie = QPushButton("自动互相关对齐 (Auto-Tie)")
@@ -770,14 +839,12 @@ class GeologicalModeling3DPage(QWidget):
 
         # CARD 6: Advanced Multi-Attribute & Crossplot Analysis
         card_adv = QFrame()
-        card_adv.setStyleSheet("QFrame { background: %s; border-radius: %dpx; border: 1px solid %s; }" % (
-            tokens.BG_SIDEBAR, tokens.RADIUS_CARD, tokens.BORDER
-        ))
+        style.bind(card_adv, _frame_card_renderer("QFrame"))
         adv_layout = QVBoxLayout(card_adv)
         adv_layout.setSpacing(tokens.SPACE_2)
 
         title_adv = QLabel("高级地震与井震综合分析")
-        title_adv.setStyleSheet("font-weight: bold; font-size: 13px; color: %s;" % tokens.TEXT_PRIMARY)
+        style.bind(title_adv, _render_card_title)
         adv_layout.addWidget(title_adv)
 
         self.btn_rgb_fusion = QPushButton("生成 RGB 三频率属性融合切片")
@@ -839,21 +906,14 @@ class GeologicalModeling3DPage(QWidget):
 
         panel = QFrame()
         panel.setObjectName("Geo3DPanel")
-        panel.setStyleSheet(
-            "QFrame#Geo3DPanel { background: %s; border: 1px solid %s; "
-            "border-radius: %dpx; }"
-            % (tokens.BG_SIDEBAR, tokens.BORDER, tokens.RADIUS_CARD)
-        )
+        style.bind(panel, _frame_card_renderer("QFrame#Geo3DPanel"))
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
         layout.setSpacing(tokens.SPACE_1)
 
         def _section_label(text: str) -> QLabel:
             lbl = QLabel(text)
-            lbl.setStyleSheet(
-                "font-size: %s; font-weight: %s; color: %s; border: none;"
-                % (tokens.FONT_SIZE_BASE, tokens.FONT_WEIGHT_TITLE, tokens.TEXT_SECONDARY)
-            )
+            style.bind(lbl, _render_section_label)
             return lbl
 
         # -- measurement tools -------------------------------------------
@@ -907,8 +967,12 @@ class GeologicalModeling3DPage(QWidget):
         layout.addWidget(_section_label("质检 (QC)"))
         self.geo_qc_list = QListWidget()
         self.geo_qc_list.setMaximumHeight(96)
-        self.geo_qc_list.setStyleSheet(
-            "QListWidget { font-size: 11px; border: none; }"
+        style.bind(
+            self.geo_qc_list,
+            lambda: (
+                f"QListWidget {{ font-size: {style.palette()['FONT_SIZE_STATUS']};"
+                " border: none; }"
+            ),
         )
         layout.addWidget(self.geo_qc_list)
 
@@ -916,8 +980,12 @@ class GeologicalModeling3DPage(QWidget):
         layout.addWidget(_section_label("对象检查器"))
         self.geo_inspector = QTextBrowser()
         self.geo_inspector.setMaximumHeight(120)
-        self.geo_inspector.setStyleSheet(
-            "QTextBrowser { font-size: 11px; border: none; background: transparent; }"
+        style.bind(
+            self.geo_inspector,
+            lambda: (
+                f"QTextBrowser {{ font-size: {style.palette()['FONT_SIZE_STATUS']};"
+                " border: none; background: transparent; }"
+            ),
         )
         layout.addWidget(self.geo_inspector)
 
@@ -1285,11 +1353,12 @@ class GeologicalModeling3DPage(QWidget):
         card = QFrame()
         card.setObjectName("JointOrthogonalSliceCard")
         card.setMaximumHeight(52)
-        card.setStyleSheet(
-            "QFrame#JointOrthogonalSliceCard {"
-            " background: %s; border: 1px solid %s; border-radius: %dpx;"
-            " padding: 3px; }"
-            % (tokens.BG_SEARCH, tokens.BORDER, tokens.RADIUS_BUTTON)
+        style.bind(
+            card,
+            _frame_card_renderer(
+                "QFrame#JointOrthogonalSliceCard", "BG_SEARCH", padding="3px",
+                radius="RADIUS_BUTTON",
+            ),
         )
         layout = QHBoxLayout(card)
         layout.setContentsMargins(
@@ -1370,8 +1439,12 @@ class GeologicalModeling3DPage(QWidget):
 
         self._joint_time_domain_note = QLabel("")
         self._joint_time_domain_note.setWordWrap(False)
-        self._joint_time_domain_note.setStyleSheet(
-            "color: %s; background: transparent;" % tokens.TEXT_SECONDARY
+        style.bind(
+            self._joint_time_domain_note,
+            lambda: (
+                f"color: {style.palette()['TEXT_SECONDARY']};"
+                " background: transparent;"
+            ),
         )
         self._joint_time_domain_note.setToolTip(
             "时间会自动吸附到可显示的 SEG-Y 样点"
@@ -1421,11 +1494,7 @@ class GeologicalModeling3DPage(QWidget):
         """
         card = QFrame()
         card.setObjectName("JointAnalysisCard")
-        card.setStyleSheet(
-            "QFrame#JointAnalysisCard {"
-            " background: %s; border: 1px solid %s; border-radius: %dpx; }"
-            % (tokens.BG_SIDEBAR, tokens.BORDER, tokens.RADIUS_CARD)
-        )
+        style.bind(card, _frame_card_renderer("QFrame#JointAnalysisCard"))
         layout = QVBoxLayout(card)
         layout.setContentsMargins(
             tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1
@@ -1528,7 +1597,7 @@ class GeologicalModeling3DPage(QWidget):
             "无 SEGY 时可用合成演示体预览。"
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: %s; font-size: 11px;" % tokens.TEXT_SECONDARY)
+        style.bind(hint, _render_secondary_hint)
         form.addWidget(hint, 0, 0, 1, 3)
 
         form.addWidget(QLabel("顶部 horizon"), 1, 0)
@@ -1583,9 +1652,7 @@ class GeologicalModeling3DPage(QWidget):
 
         self._stratal_status = QLabel("尚未生成地层切片")
         self._stratal_status.setWordWrap(True)
-        self._stratal_status.setStyleSheet(
-            "color: %s; font-size: 11px;" % tokens.TEXT_SECONDARY
-        )
+        style.bind(self._stratal_status, _render_secondary_hint)
         form.addWidget(self._stratal_status, 6, 0, 1, 3)
         form.addWidget(QLabel(""), 7, 0)  # spacer
         form.setRowStretch(7, 1)
@@ -1781,7 +1848,7 @@ class GeologicalModeling3DPage(QWidget):
             "井震标定：Ricker 合成记录、互相关自动对齐（Auto-Tie）、时深偏移。"
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: %s; font-size: 11px;" % tokens.TEXT_SECONDARY)
+        style.bind(hint, _render_secondary_hint)
         layout.addWidget(hint)
         # Reference the existing controls (built in the legacy right rail) so a
         # single source of truth drives both surfaces. The legacy rail stays
@@ -1834,7 +1901,7 @@ class GeologicalModeling3DPage(QWidget):
             "（高级分析入口在「高级地震与井震综合分析」卡片中）"
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: %s; font-size: 11px;" % tokens.TEXT_SECONDARY)
+        style.bind(hint, _render_secondary_hint)
         layout.addWidget(hint)
         row = QHBoxLayout()
         layout.addLayout(row)
@@ -1859,7 +1926,7 @@ class GeologicalModeling3DPage(QWidget):
             "导出与诊断：FLAC3D / Abaqus 数值模拟网格导出，一致性诊断顾问。"
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: %s; font-size: 11px;" % tokens.TEXT_SECONDARY)
+        style.bind(hint, _render_secondary_hint)
         layout.addWidget(hint)
         row = QHBoxLayout()
         layout.addLayout(row)
@@ -2571,8 +2638,12 @@ class GeologicalModeling3DPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
         header = QLabel(title)
-        header.setStyleSheet(
-            "font-weight: 600; color: %s; padding: 2px 4px;" % tokens.TEXT_PRIMARY
+        style.bind(
+            header,
+            lambda: (
+                f"font-weight: 600; color: {style.palette()['TEXT_PRIMARY']};"
+                " padding: 2px 4px;"
+            ),
         )
         layout.addWidget(header)
         layout.addWidget(widget, 1)
@@ -2923,6 +2994,21 @@ class GeologicalModeling3DPage(QWidget):
         except Exception:
             logger.debug("profile domain follow unavailable", exc_info=True)
 
+    def _render_joint_2d_time_chip(self) -> str:
+        """Chip QSS：当前主题 palette + 当前域标志（B1 动态，随 theme_changed 重渲染）。"""
+        pal = style.palette()
+        if getattr(self, "_joint_2d_depth_domain", False):
+            color, border = pal["WARNING"], pal["ACCENT"]
+        else:
+            color, border = pal["PRIMARY"], pal["BORDER"]
+        return (
+            "QLabel#Joint2DTimeChip {"
+            f" color: {color}; background: {pal['BG_SEARCH']};"
+            f" border: 1px solid {border}; border-radius: 999px;"
+            f" padding: 2px 8px; font-size: {pal['FONT_SIZE_STATUS']};"
+            " }"
+        )
+
     def _sync_joint_2d_time_chip(self, domain: str | None = None) -> None:
         """Surface the single shared 2D/3D domain in the bottom strip header."""
         chip = getattr(self, "_joint_2d_time_chip", None)
@@ -2936,20 +3022,13 @@ class GeologicalModeling3DPage(QWidget):
         domain = domain or "Time"
         if str(domain).lower().startswith("depth"):
             chip.setText("域: Depth · 2D/3D 联动")
-            chip.setStyleSheet(
-                "QLabel#Joint2DTimeChip {"
-                " color: %s; background: %s; border: 1px solid %s; border-radius: 999px;"
-                " padding: 2px 8px; font-size: 11px; }"
-                % (tokens.WARNING, tokens.BG_SEARCH, tokens.ACCENT)
-            )
+            self._joint_2d_depth_domain = True
         else:
             chip.setText("域: Time · 2D/3D 联动")
-            chip.setStyleSheet(
-                "QLabel#Joint2DTimeChip {"
-                " color: %s; background: %s; border: 1px solid %s; border-radius: 999px;"
-                " padding: 2px 8px; font-size: 11px; }"
-                % (tokens.PRIMARY, tokens.BG_SEARCH, tokens.BORDER)
-            )
+            self._joint_2d_depth_domain = False
+        # Runtime re-style: fresh palette values (no construction-time snapshot);
+        # theme switches re-render via the style.bind registration above.
+        chip.setStyleSheet(self._render_joint_2d_time_chip())
 
     def _on_joint_status(self, text: str) -> None:
         self._joint_status.setText(text)

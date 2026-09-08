@@ -351,7 +351,7 @@ def test_data_tree_has_separate_reference_well_category(qtbot):
     reference_item = reference_group.child(0)
     assert "REF-01" in reference_item.text(0)
     assert reference_item.childCount() == 1
-    assert reference_item.child(0).text(0) == "📄 reference.xml"
+    assert reference_item.child(0).text(0) == "▤ reference.xml"
 
 
 def test_navigation_tree_context_menu_requests_concrete_well_delete(

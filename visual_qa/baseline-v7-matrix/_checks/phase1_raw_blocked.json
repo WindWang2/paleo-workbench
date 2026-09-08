@@ -1,0 +1,25 @@
+{
+  "state_ok": true,
+  "checks": [
+    {
+      "name": "raw_toggle_editing_disabled",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "raw_reason_in_status_tip",
+      "ok": true,
+      "detail": "开始编辑（图层角色为「初始沉积相（原始）」（RAW/模型结果）——不可直接编辑；请创建 DERIVED 草稿后编辑）"
+    },
+    {
+      "name": "raw_capture_disabled",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "raw_view_tools_enabled",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

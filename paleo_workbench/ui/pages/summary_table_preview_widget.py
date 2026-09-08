@@ -38,13 +38,13 @@ class SummaryTablePreviewWidget(QWidget):
         stat_layout.setSpacing(8)
 
         self.chip_well = self._create_stat_chip(
-            "📌 井名", "—", tokens.PRIMARY, tokens.BG_SELECTION
+            "◆ 井名", "—", tokens.PRIMARY, tokens.BG_SELECTION
         )
         self.chip_curves = self._create_stat_chip(
-            "📊 曲线数", "0 条", tokens.TEAL, tokens.BG_SEARCH
+            "▤ 曲线数", "0 条", tokens.TEAL, tokens.BG_SEARCH
         )
         self.chip_samples = self._create_stat_chip(
-            "📏 采样点", "0 点", tokens.SUCCESS, tokens.BG_SEARCH
+            "◌ 采样点", "0 点", tokens.SUCCESS, tokens.BG_SEARCH
         )
 
         stat_layout.addWidget(self.chip_well)

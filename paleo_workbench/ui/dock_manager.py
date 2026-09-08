@@ -8,12 +8,8 @@ from typing import Any
 
 
 class WorkspacePreset(str, Enum):
-    DATA_MANAGEMENT = "data_management"
     WELL_LOG_INTERPRETATION = "well_log"
-    SEISMIC_ANALYSIS = "seismic"
-    SINGLE_FACTOR_MAPPING = "single_factor"
     MAP_AUTHORING = "map_authoring"
-    GEOMODEL_3D = "geomodel_3d"
     # Workstation V3 Light named layouts (design-qa P3). Coexist with the
     # mapping/well presets above; shell applies them via QMainWindow docks.
     WORKSTATION_COMPOSITE = "workstation_composite"

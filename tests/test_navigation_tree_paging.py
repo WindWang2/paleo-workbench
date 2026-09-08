@@ -62,7 +62,7 @@ def test_well_group_pages_instead_of_capping(qtbot):
     qtbot.addWidget(tree)
     tree.set_project(_Project(wells))
 
-    group = _group_by_label(tree, "🛢 井")
+    group = _group_by_label(tree, "◉ 井")
     assert group is not None
     # one materialized page + the show-more affordance — never 5000 items
     assert group.childCount() <= 501, group.childCount()
@@ -76,7 +76,7 @@ def test_show_more_appends_pages_until_all_wells_reachable(qtbot):
     qtbot.addWidget(tree)
     tree.set_project(_Project(wells))
 
-    group = _group_by_label(tree, "🛢 井")
+    group = _group_by_label(tree, "◉ 井")
     guard = 0
     while tree._activate_next_entity_page("well") and guard < 10:
         guard += 1
@@ -126,7 +126,7 @@ def test_100k_well_project_builds_fast(qtbot):
     elapsed = time.perf_counter() - start
 
     assert elapsed < 5.0, f"100k-well tree build took {elapsed:.1f}s"
-    group = _group_by_label(tree, "🛢 井")
+    group = _group_by_label(tree, "◉ 井")
     assert group.childCount() <= 501
     assert tree.entity_population("well") == 100_000
 
@@ -145,7 +145,7 @@ def test_repeated_set_project_does_not_duplicate_children(qtbot):
     tree.set_project(_Project(wells))
     tree.set_project(_Project(wells))
 
-    group = _group_by_label(tree, "🛢 井")
+    group = _group_by_label(tree, "◉ 井")
     assert group.childCount() == 30, group.childCount()
     assert tree.entity_population("well") == 30
 
@@ -156,7 +156,7 @@ def test_set_project_with_new_population_replaces_children(qtbot):
     tree.set_project(_Project([_Well(f"old-{i}", f"旧井{i}") for i in range(10)]))
     tree.set_project(_Project([_Well("new-1", "新井1")]))
 
-    group = _group_by_label(tree, "🛢 井")
+    group = _group_by_label(tree, "◉ 井")
     texts = [group.child(i).text(0) for i in range(group.childCount())]
     assert len(texts) == 1
     assert "新井1" in texts[0]
@@ -170,7 +170,7 @@ def test_set_project_none_clears_wells(qtbot):
 
     tree.set_project(_Project([]))
 
-    group = _group_by_label(tree, "🛢 井")
+    group = _group_by_label(tree, "◉ 井")
     texts = [group.child(i).text(0) for i in range(group.childCount())]
     assert tree.entity_population("well") == 0
     assert any("暂无" in t for t in texts), texts

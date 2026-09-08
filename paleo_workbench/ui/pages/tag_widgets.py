@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench.catalog import CatalogError
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.ui.workstation.common import workstation_icon
 
 # Multi-tag input separators: whitespace (incl. TAB / U+3000) plus ASCII and
@@ -65,8 +65,12 @@ class TagBadge(QWidget):
         layout.setSpacing(4)
 
         self.label = QLabel(f"#{self.tag_name}")
-        self.label.setStyleSheet(
-            f"color: {tokens.PRIMARY}; font-size: 11px; font-weight: 500;"
+        style.bind(
+            self.label,
+            lambda: (
+                f"color: {style.palette()['PRIMARY']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS}; font-weight: 500;"
+            ),
         )
         layout.addWidget(self.label)
 
@@ -76,15 +80,23 @@ class TagBadge(QWidget):
             self.remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             self.remove_btn.setToolTip("移除标签")
             self.remove_btn.setIcon(workstation_icon("rb-clear.svg"))
-            self.remove_btn.setStyleSheet(
-                "QPushButton { border: none; background: transparent; padding: 0px; }"
+            style.bind(
+                self.remove_btn,
+                lambda: (
+                    "QPushButton { border: none; background: transparent;"
+                    " padding: 0px; }"
+                ),
             )
             self.remove_btn.clicked.connect(lambda: self.remove_requested.emit(self.tag_name))
             layout.addWidget(self.remove_btn)
 
-        self.setStyleSheet(
-            f"QWidget {{ background-color: {tokens.BG_SIDEBAR}; border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px; }}"
+        style.bind(
+            self,
+            lambda: (
+                f"QWidget {{ background-color: {style.palette()['BG_SIDEBAR']};"
+                f" border: 1px solid {style.palette()['BORDER']};"
+                f" border-radius: {tokens.RADIUS_BUTTON}px; }}"
+            ),
         )
 
 
@@ -106,8 +118,12 @@ class TagContainerWidget(QWidget):
         self.add_btn.setObjectName("SecondaryButton")
         self.add_btn.setToolTip("添加新标签")
         self.add_btn.setFixedHeight(22)
-        self.add_btn.setStyleSheet(
-            f"QPushButton {{ font-size: 11px; padding: 0px 6px; border-radius: {tokens.RADIUS_BUTTON}px; }}"
+        style.bind(
+            self.add_btn,
+            lambda: (
+                f"QPushButton {{ font-size: {tokens.FONT_SIZE_STATUS};"
+                f" padding: 0px 6px; border-radius: {tokens.RADIUS_BUTTON}px; }}"
+            ),
         )
         self.add_btn.clicked.connect(self._prompt_add_tag)
         self._layout.addWidget(self.add_btn)
@@ -167,7 +183,13 @@ class TagInputDialog(QDialog):
         layout.addWidget(self.input)
 
         self.error_label = QLabel("")
-        self.error_label.setStyleSheet(f"color: {tokens.ERROR_RED}; font-size: 11px;")
+        style.bind(
+            self.error_label,
+            lambda: (
+                f"color: {style.palette()['ERROR_RED']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
+        )
         layout.addWidget(self.error_label)
 
         buttons = QDialogButtonBox(
@@ -209,7 +231,13 @@ class BulkAddTagDialog(QDialog):
         layout.addWidget(self.input)
 
         self.error_label = QLabel("")
-        self.error_label.setStyleSheet(f"color: {tokens.ERROR_RED}; font-size: 11px;")
+        style.bind(
+            self.error_label,
+            lambda: (
+                f"color: {style.palette()['ERROR_RED']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
+        )
         layout.addWidget(self.error_label)
 
         buttons = QDialogButtonBox(
@@ -301,7 +329,10 @@ class TagManagerDialog(QDialog):
         layout = QVBoxLayout(self)
 
         self.hint_label = QLabel("未连接数据目录 — 标签管理不可用")
-        self.hint_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
+        style.bind(
+            self.hint_label,
+            lambda: f"color: {style.palette()['TEXT_SECONDARY']};",
+        )
         self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.hint_label)
 

@@ -231,9 +231,11 @@ def main() -> int:
     }
     # V6 Phase 8：新状态走同一注册形态（(工程工厂, 驱动)），驱动与语义
     # 检查在 paleo_workbench.ui.visual_qa_v6（tests/test_visual_qa_v6.py 钉住）。
-    from paleo_workbench.ui import visual_qa_v6
+    from paleo_workbench.ui import visual_qa_v6, visual_qa_v7
 
     shots.update(visual_qa_v6.v6_shot_table(lambda: _project(tmp)))
+    # V7：工具可用性/树装饰/取消中/溢出/Inspector 因子分节（8 状态）。
+    shots.update(visual_qa_v7.v7_shot_table(lambda: _project(tmp)))
 
     # --shot NAME [--theme T] [--density D] [--size WxH]：单 shot 子进程模式
     # （main 进程逐个 spawn——多窗口同进程会因 QGIS/调度器状态搅扰挂死；
@@ -310,7 +312,7 @@ def main() -> int:
         pix.save(str(path))
         print(f"saved {path} ({pix.width()}x{pix.height()})", flush=True)
         # V6 Phase 8：语义检查（非门禁，同 PIL diff——记录不拦截）。
-        results = visual_qa_v6.run_state_checks(only, window)
+        results = visual_qa_v6.run_state_checks(only, window)             or visual_qa_v7.run_state_checks(only, window)
         if results:
             import json
 

@@ -1,0 +1,25 @@
+{
+  "state_ok": true,
+  "checks": [
+    {
+      "name": "editing_toggle_checked",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "editing_save_enabled",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "editing_capture_enabled",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "editing_tree_shows_session",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}
