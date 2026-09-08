@@ -172,7 +172,7 @@ class MappingPage(QWidget):
                 ("pan", "zoom_in", "zoom_out", "full_extent", "previous_extent", "next_extent", "refresh"),
                 ("identify", "select", "select_rectangle", "measure_distance", "clear_selection", "select_all", "invert_selection"),
                 ("toggle_editing", "save_edits", "rollback"),
-                ("add_point", "add_line", "add_polygon", "move_feature", "vertex"),
+                ("add_point", "add_line", "add_polygon", "move_feature", "vertex", "reshape"),
                 ("undo", "redo", "delete_selected"),
                 ("split", "merge"),
                 ("snapping", "topology", "cancel"),
