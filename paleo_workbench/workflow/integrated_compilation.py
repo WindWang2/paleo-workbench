@@ -503,6 +503,7 @@ def run_integrated_fusion(
     class_thresholds: Sequence[float] | None = None,
     register: bool = True,
     name: str = DEFAULT_FUSION_MODEL_NAME,
+    weight_provenance: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build + fuse + (optionally) register the integrated fusion product.
 
@@ -535,6 +536,7 @@ def run_integrated_fusion(
         class_names=class_names,
         class_thresholds=class_thresholds,
         name=name,
+        weight_provenance=weight_provenance,
     )
     result = fuse(model)
 
@@ -572,6 +574,7 @@ def run_integrated_fusion(
             "registered": True,
             "catalog_version_id": catalog_version_id,
             "confidence_version_id": str(result.qc.get("confidence_version_id") or ""),
+            "variance_version_id": str(result.qc.get("variance_version_id") or ""),
         })
     elif not register:
         registration["reason"] = "register=False"
@@ -610,6 +613,9 @@ def run_integrated_fusion(
             result,
             quantity="fusion_variance",
             title=f"{model.name}·融合方差",
+            # V8 review R1-P2: bind the registered sibling version so the
+            # descriptor resolves from the catalog like confidence does.
+            catalog_version_id=str(result.qc.get("variance_version_id") or ""),
         )
 
     return {

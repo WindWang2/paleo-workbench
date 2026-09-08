@@ -393,3 +393,20 @@ def test_evaluate_methods_for_task_gate_on_undeclared_unit():
     report = evaluate_methods_for_task(task, methods=["IDW"], k=4)
     assert report["recommendation_gate"] == "unit_unknown"
     assert report["recommended_method"] is None
+
+
+class TestReviewR1KrigingDefaults:
+    def test_default_kriging_cv_is_isotropic_like_production(self):
+        """R1-P0: default axes (1.0/0.4, az 0) mean UNSET — the LOO must
+        score the isotropic model production delivers, not a 2.5:1 frame."""
+        points = _smooth_points(16)
+        default_task = FactorMapTask(
+            name="kd", target_horizon="H1", method="克里金",
+            factor_type="地层厚度", parameters={"sample_points": points},
+        )
+        report, _ = cross_validate_factor_task(default_task, project=None)
+        assert report is not None
+        assert "anisotropy frame applied" not in report.detail
+        # identical to a direct isotropic LOO
+        direct = kriging_leave_one_out(points)
+        assert report.metrics.rmse == pytest.approx(direct.metrics.rmse)

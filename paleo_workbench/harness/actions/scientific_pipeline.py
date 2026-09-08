@@ -338,10 +338,17 @@ def _factor_interpolate(context: ActionContext, parameters: dict) -> dict:
             project=context.project,
             cancellation_token=context.cancel,
         )
-    except Exception as exc:  # engine failures land as task-level failure state
+    except Exception as exc:
+        # Cancellation is first-class: geoviz JobCancelled / scheduler
+        # TaskCancelled must reach the executor's CANCELLED mapping, never
+        # be laundered into a FAILED payload (review R1-P1).
+        name = type(exc).__name__
+        if "Cancel" in name:
+            raise
         return {
             "error": "failed",
-            "detail": f"{type(exc).__name__}: {exc}",
+            "detail": f"{name}: {exc}",
+            "task_id": task.id,
             "task_status": getattr(task, "status", ""),
         }
     if task.status != "complete":
@@ -366,6 +373,8 @@ def _factor_interpolate(context: ActionContext, parameters: dict) -> dict:
 
 def _verify_factor_interpolate(payload, parameters, context) -> dict:
     """Post-WRITE check: the delivered task is complete with honest provenance."""
+    if payload.get("error"):
+        return {"verdict": "fail", "reasons": [str(payload.get("detail"))]}
     task_id = str(payload.get("task_id", ""))
     if not task_id:
         return {"verdict": "fail", "reasons": ["payload carries no task id"]}
@@ -411,12 +420,10 @@ def _factor_polygonize(context: ActionContext, parameters: dict) -> dict:
         else float(np.nanmedian(z))
     )
     class_grid = (z >= level).astype(int)
-    extent = (
-        float(grid.grid_x[0]),
-        float(grid.grid_x[-1]),
-        float(grid.grid_y[0]),
-        float(grid.grid_y[-1]),
-    )
+    # (xmin, ymin, xmax, ymax) — the polygonizer's unpack order; grid.extent
+    # is the authority (review R1-P1: a hand-built (xmin, xmax, ymin, ymax)
+    # tuple produced garbage geometry).
+    extent = grid.extent
     polygons, counts = _polygonize_raster_boundaries(class_grid, z, extent, 1)
     return {
         "task": task.name,
@@ -656,8 +663,11 @@ def _verify_fusion_run(payload, parameters, context) -> dict:
         problems.append("no likelihood descriptor produced")
     if payload.get("confidence_descriptor") is None:
         problems.append("no confidence descriptor produced")
-    if payload.get("registered") and not payload.get("version_id"):
-        problems.append("claimed registered but no version id")
+    if payload.get("registered") and not (
+        payload.get("catalog_version_id")
+        or (payload.get("qc") or {}).get("registration", {}).get("catalog_version_id")
+    ):
+        problems.append("claimed registered but no catalog version id")
     return {"verdict": "pass" if not problems else "fail", "reasons": problems}
 
 
@@ -712,14 +722,22 @@ def _compilation_validate_inputs(context: ActionContext, parameters: dict) -> di
                  "reason": "人工解释草稿（不参与计算融合）"}
             )
         elif ref.startswith("constraints:"):
+            from paleo_workbench.workflow.constraint_versions import (
+                resolve_constraint_ref,
+            )
+
+            verdict = resolve_constraint_ref(
+                context.project, _catalog_service(context), ref
+            )
             entries.append(
-                {"key": key, "ref": ref, "kind": "constraints", "resolved": True,
-                 "reason": "约束引用（不参与计算融合；新鲜度见 dependencies）"}
+                {"key": key, "ref": ref, "kind": "constraints",
+                 "resolved": verdict["status"].value != "unknown",
+                 "reason": f"约束新鲜度：{verdict['detail']}"}
             )
         else:
             entries.append(
                 {"key": key, "ref": ref, "kind": "version", "resolved": True,
-                 "reason": "catalog 版本引用"}
+                 "reason": "catalog 版本引用（未逐条校验存在性）"}
             )
     factor_ok = [e for e in entries if e["kind"] == "factor"]
     return {
@@ -774,7 +792,7 @@ def _map_product_freeze(context: ActionContext, parameters: dict) -> dict:
 
     record = find_map_product(context.project, str(parameters.get("product", "")))
     if record is None:
-        return {"error": "not_found", "detail": "产品不存在"}
+        return {"error": "not_found", "detail": "产品不存在", "product": str(parameters.get("product", ""))}
     frozen = bool(parameters.get("frozen", True))
     freeze_map_product(record, frozen=frozen)
     return {"product": record.id, "product_name": record.product_name, "frozen": frozen}
@@ -783,6 +801,8 @@ def _map_product_freeze(context: ActionContext, parameters: dict) -> dict:
 def _verify_map_product_freeze(payload, parameters, context) -> dict:
     from paleo_workbench.workflow.map_product import find_map_product
 
+    if payload.get("error"):
+        return {"verdict": "fail", "reasons": [str(payload.get("detail"))]}
     record = find_map_product(context.project, str(payload.get("product", "")))
     if record is None:
         return {"verdict": "fail", "reasons": ["record vanished"]}

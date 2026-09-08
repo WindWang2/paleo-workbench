@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -42,42 +43,66 @@ class WorkflowRunStore:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self._cache_index: dict[str, list[tuple[str, str]]] | None = None
+        self._indexed_pairs: set[tuple[str, str]] = set()
+        self._index_lock = threading.Lock()
 
     # ------------------------------------------------------------ index --
     def _cache_index_entry(self, run: WorkflowRun) -> None:
-        """Record one run's reusable nodes in the index (if built)."""
+        """Record one run's reusable nodes in the index (if built).
+
+        Idempotent per (run_id, node_id): the engine re-saves the SAME run
+        several times per resume cycle, and an unconditional append used to
+        duplicate entries on every save (review R1-P2).
+        """
         if self._cache_index is None:
             return
         if run.state == RunState.RUNNING:
             return  # not reusable evidence until terminal
-        for node_run in run.node_runs.values():
-            if (
-                node_run.state.value == "succeeded"
-                and node_run.cache_identity
-                and not node_run.from_cache
-                and node_run.output_version_ids
-            ):
-                self._cache_index.setdefault(node_run.cache_identity, []).append(
-                    (run.run_id, node_run.node_id)
-                )
+        with self._index_lock:
+            for node_run in run.node_runs.values():
+                if (
+                    node_run.state.value == "succeeded"
+                    and node_run.cache_identity
+                    and not node_run.from_cache
+                    and node_run.output_version_ids
+                ):
+                    pair = (run.run_id, node_run.node_id)
+                    if pair in self._indexed_pairs:
+                        continue
+                    self._indexed_pairs.add(pair)
+                    self._cache_index.setdefault(node_run.cache_identity, []).append(
+                        pair
+                    )
 
     def rebuild_cache_index(self) -> int:
         """Scan every stored run once and build the cache index.
 
         Returns the number of indexed node entries. Runs load through the
         normal path — a corrupted run is skipped (logged), never fatal.
+        Entries seed in run.updated_at order (oldest to newest) so the
+        newest-first read is real recency, not a lexicographic accident
+        (production run ids are random uuid hex; review R1-P2).
         """
-        self._cache_index = {}
-        for run in self.list_runs():
+        with self._index_lock:
+            self._cache_index = {}
+            self._indexed_pairs = set()
+        runs = sorted(
+            self.list_runs(),
+            key=lambda r: (getattr(r, "updated_at", None) or 0.0),
+        )
+        for run in runs:
             self._cache_index_entry(run)
-        return sum(len(v) for v in self._cache_index.values())
+        with self._index_lock:
+            assert self._cache_index is not None
+            return sum(len(v) for v in self._cache_index.values())
 
     def candidates_for_identity(self, cache_identity: str) -> list[tuple[str, str]]:
         """(run_id, node_id) candidates for a cache identity, NEWEST first."""
         if self._cache_index is None:
             self.rebuild_cache_index()
-        assert self._cache_index is not None
-        entries = list(self._cache_index.get(cache_identity, []))
+        with self._index_lock:
+            assert self._cache_index is not None
+            entries = list(self._cache_index.get(cache_identity, []))
         entries.reverse()  # later saves appended last -> newest first
         return entries
 

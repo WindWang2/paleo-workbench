@@ -222,7 +222,13 @@ class WellLogLoadCancelled(Exception):
 def _cancel_check(cancel) -> None:
     if cancel is None:
         return
-    cancelled = cancel() if callable(cancel) else bool(cancel)
+    # token protocol: callable > object with is_cancelled() > truthy fallback
+    if callable(cancel):
+        cancelled = bool(cancel())
+    elif hasattr(cancel, "is_cancelled"):
+        cancelled = bool(cancel.is_cancelled())
+    else:
+        cancelled = bool(cancel)
     if cancelled:
         raise WellLogLoadCancelled("cancelled at a load checkpoint")
 

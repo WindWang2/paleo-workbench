@@ -342,8 +342,11 @@ class MappingDependencyService:
                             culprits.append(ref_key)
                             detail = verdict["detail"]
                     except Exception:  # noqa: BLE001 — freshness stays honest
-                        # resolution failure must not fabricate freshness
-                        pass
+                        # resolution failure must NOT fabricate freshness: the
+                        # honest verdict is UNKNOWN (worst stays unset below,
+                        # but the artifact is flagged), never CURRENT.
+                        if worst is None:
+                            worst = FreshnessStatus.UNKNOWN
                 elif _looks_like_version_id(value):
                     pinned_inputs.append((ref_key, value))
                     status, bad, why = self._check_pinned_versions(

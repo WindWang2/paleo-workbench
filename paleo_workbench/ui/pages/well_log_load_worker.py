@@ -78,7 +78,11 @@ class WellLogLoadWorker(QObject):
                 return
             self.failed.emit(f"{exc.__class__.__name__}: {exc}")
             return
-        self._parse_started = False
+        finally:
+            # terminal on EVERY path — a post-run cancel() (e.g. teardown)
+            # must not emit a spurious `cancelling` for a finished worker
+            # (review R1-P2).
+            self._parse_started = False
         if self._cancel_event.is_set():
             # Late result discarded — the request was cancelled while the
             # parse ran; the payload never reaches the UI (#1224 contract:

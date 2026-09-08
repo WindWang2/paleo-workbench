@@ -434,8 +434,14 @@ def _validate_recommendation_context(
     if unit is None or not str(unit).strip():
         return warnings, "unit_unknown"
     unit_norm = str(unit).strip().lower()
-    if unit_norm not in {"m", "米", "ft", "feet", "英尺", "%", "percent", "ratio",
-                         "dimensionless", "v/v", "g/cm3", "api", "us/cm"}:
+    known_units = {
+        "m", "米", "ft", "feet", "英尺", "%", "percent", "ratio",
+        "dimensionless", "v/v", "g/cm3", "api", "us/cm",
+        # emitted by the factor-units authority (factor_units.py): permeability
+        # (mD) and probability (1) tasks are legitimately declared-known
+        "md", "1",
+    }
+    if unit_norm not in known_units:
         warnings.append(f"unrecognized unit {unit!r} — treated as declared-unknown")
         return warnings, "unit_unknown"
     if crs is not None and str(crs).strip():
@@ -536,8 +542,16 @@ def recommend_interpolation_methods(
         rmse = metrics.get("rmse")
         return float(rmse) if rmse is not None else float("inf")
 
+    # choose the metric-best among ELIGIBLE entries only: a disqualified
+    # method must never become the bar other entries are compared against
+    # (review R1-P2).
+    def _eligible(entry: dict[str, Any]) -> bool:
+        return entry.get("metrics") is not None and not any(
+            ":unsupported:" in w for w in entry.get("capability_warnings") or []
+        )
+
     best_metric_method: str | None = None
-    scorable = [e for e in entries if e.get("metrics")]
+    scorable = [e for e in entries if _eligible(e)]
     if scorable:
         best_metric_method = min(scorable, key=_score)["method"]
 

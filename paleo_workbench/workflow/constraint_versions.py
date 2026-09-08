@@ -483,7 +483,7 @@ def constraint_pins_staleness(
             pinned_version = str(bound.id) if bound is not None else None
         if str(pin.get("content_hash") or "") != content_hash:
             state = "stale_content"
-            detail = "constraint geometry changed after this task was computed"
+            detail = "constraint content changed (geometry, role or naming) after this task was computed"
         elif catalog is not None:
             if pinned_version is None:
                 state = "unknown"

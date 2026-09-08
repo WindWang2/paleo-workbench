@@ -251,3 +251,47 @@ class TestMemoryShape:
         assert np.isnan(z[0, 0])  # no-evidence cell stays nodata
         assert np.isfinite(z[1, 1])
         assert result.qc["n_factors"] == n
+
+
+class TestReviewR1Fixes:
+    def test_w_sq_nan_safe_at_partial_coverage(self):
+        """R1-P0 regression: confidence must stay finite where SOME factors
+        are nodata (0*NaN used to poison w_sq)."""
+        a = _grid([[80.0, np.nan]], refs=("a@v1",))
+        b = _grid([[np.nan, 40.0]], refs=("b@v1",))
+        model = _model(
+            FactorEvidence("A", a, 1.0, Normalization("minmax", 0.0, 100.0)),
+            FactorEvidence("B", b, 1.0, Normalization("minmax", 0.0, 100.0)),
+        )
+        result = fuse(model)
+        conf = np.asarray(result.confidence.grid_z, dtype=float)
+        assert np.isfinite(conf[0, 0]) and np.isfinite(conf[0, 1])
+        assert 0.0 <= conf[0, 0] <= 1.0
+        # partial-coverage cells participate in low-confidence stats
+        assert result.qc["low_confidence_fraction"] is not None
+
+    def test_v6_stacked_reference_agreement_confidence(self):
+        a = _grid([[80.0, 20.0], [np.nan, 40.0]], refs=("a@v1",))
+        b = _grid([[90.0, 10.0], [30.0, np.nan]], refs=("b@v1",))
+        model = _model(
+            FactorEvidence("A", a, 2.0, Normalization("minmax", 0.0, 100.0)),
+            FactorEvidence("B", b, 1.0, Normalization("minmax", 0.0, 100.0)),
+        )
+        result = fuse(model)
+        got = np.asarray(result.confidence.grid_z, dtype=float)
+        # V6 formula computed independently
+        m_a = a.grid_z.astype(float) / 100.0
+        m_b = b.grid_z.astype(float) / 100.0
+        w = np.array([2.0, 1.0])
+        stack = np.stack([m_a, m_b])
+        avail = np.isfinite(stack)
+        weighted = stack * w[:, None, None]
+        w_sum = (w[:, None, None] * avail).sum(axis=0)
+        m_sum = np.where(avail, weighted, 0.0).sum(axis=0)
+        likelihood = m_sum / w_sum
+        w_sq = np.where(avail, weighted * stack, 0.0).sum(axis=0)
+        mean_sq = w_sq / w_sum
+        agreement = 1.0 - np.sqrt(np.maximum(mean_sq - likelihood**2, 0.0))
+        expected = (w_sum / w.sum()) * agreement
+        mask = np.isfinite(expected)
+        assert np.allclose(got[mask], expected[mask])

@@ -823,15 +823,26 @@ def batch_prepare_factor_maps(
     for task in prepared:
         if cancellation_token is not None:
             cancellation_token.raise_if_cancelled()
-        fps = fingerprints_for_task(
-            task,
-            project=project,
-            method=method,
-            grid_n=grid_n,
-            power=power,
-            generator_version=GENERATOR_VERSION,
-            memo=fp_memo,
-        )
+        try:
+            fps = fingerprints_for_task(
+                task,
+                project=project,
+                method=method,
+                grid_n=grid_n,
+                power=power,
+                generator_version=GENERATOR_VERSION,
+                memo=fp_memo,
+            )
+        except ValueError as exc:
+            # e.g. duplicate_policy='error' met real duplicates: fail ONLY
+            # this task (review R1-P1) — one strict task must not abort the
+            # whole batch before any interpolation happens.
+            task.status = "failed"
+            task.parameters = {
+                **(task.parameters or {}),
+                "last_error": f"{type(exc).__name__}: {exc}",
+            }
+            continue
         state = classify_factor_recompute(task, fps, force=force)
         if state is FactorDirtyState.CLEAN:
             continue
@@ -845,9 +856,17 @@ def batch_prepare_factor_maps(
     for task in dirty:
         if cancellation_token is not None:
             cancellation_token.raise_if_cancelled()
-        gkey = _task_plan_group_key(
-            task, method=method, grid_n=grid_n, power=power, project=project
-        )
+        try:
+            gkey = _task_plan_group_key(
+                task, method=method, grid_n=grid_n, power=power, project=project
+            )
+        except ValueError as exc:
+            task.status = "failed"
+            task.parameters = {
+                **(task.parameters or {}),
+                "last_error": f"{type(exc).__name__}: {exc}",
+            }
+            continue
         groups[gkey].append(task)
 
     for gkey, tasks in groups.items():
@@ -906,7 +925,7 @@ def batch_prepare_factor_maps(
             and METHOD_LABEL_TO_ENGINE.get(method, method) in ("IDW", "idw", "mock")
         ):
             stack_rows: list[np.ndarray] = []
-            aligned_tasks: list[FactorMapTask] = []
+            aligned_tasks: list[tuple[FactorMapTask, list, Any]] = []
             for task in tasks:
                 try:
                     pts, norm = _normalized_points_for(task)
@@ -923,7 +942,11 @@ def batch_prepare_factor_maps(
                     )
                     continue
                 stack_rows.append(vals)
-                aligned_tasks.append(task)
+                # keep EACH task's own normalized points + report — the
+                # attach loop used to stamp the LAST task's pair on every
+                # task (review R1-P1: wrong duplicate accounting + trend
+                # detection against the wrong sample set).
+                aligned_tasks.append((task, pts, norm))
             if aligned_tasks:
                 _count_interpolation_execution()
                 results = apply_idw_plan_multi(
@@ -932,7 +955,7 @@ def batch_prepare_factor_maps(
                     cancellation_token=cancellation_token,
                 )
                 crs = project.coordinate.project_crs
-                for task, result in zip(aligned_tasks, results):
+                for (task, pts, norm), result in zip(aligned_tasks, results):
                     if cancellation_token is not None:
                         cancellation_token.raise_if_cancelled()
                     fps = fingerprints_for_task(
@@ -1155,13 +1178,23 @@ def cross_validate_factor_task(
             variogram_kwargs["range_"] = float(settings["variogram_range"])
         if settings.get("variogram_nugget") is not None:
             variogram_kwargs["nugget"] = float(settings["variogram_nugget"])
-        ratio = float(a_axis) / float(b_axis) if b_axis else 1.0
+        # Mirror the engine's anisotropy_requested gate exactly: the
+        # DEFAULTS (az=0, axes 1.0/0.4) mean "unset" — production runs
+        # ISOTROPIC kriging then, and the LOO must score that same model
+        # (review R1-P0: the raw ratio 2.5 stretched the CV frame while the
+        # delivered surface was isotropic).
+        anisotropy_requested = (
+            az not in (None, 0.0)
+            or (float(a_axis), float(b_axis)) != (1.0, 0.4)
+        )
         anisotropy_kwargs: dict[str, Any] = {}
-        if ratio > 1.0 + 1e-9:
-            anisotropy_kwargs = {
-                "azimuth_deg": float(az or 0.0),
-                "anisotropy_ratio": ratio,
-            }
+        if anisotropy_requested:
+            ratio = float(a_axis) / float(b_axis) if b_axis else 1.0
+            if ratio > 1.0 + 1e-9:
+                anisotropy_kwargs = {
+                    "azimuth_deg": float(az or 0.0),
+                    "anisotropy_ratio": ratio,
+                }
         report = kriging_leave_one_out(
             points,
             cancellation_token=cancellation_token,
@@ -1301,8 +1334,13 @@ def evaluate_methods_for_task(
         rmse = metrics.get("rmse")
         return float(rmse) if rmse is not None else float("inf")
 
+    def _eligible(entry: dict[str, Any]) -> bool:
+        return entry.get("metrics") is not None and not any(
+            ":unsupported:" in w for w in entry.get("capability_warnings") or []
+        )
+
     best: str | None = None
-    scorable = [e for e in entries if e.get("metrics")]
+    scorable = [e for e in entries if _eligible(e)]
     if scorable:
         best = min(scorable, key=_score)["method"]
 

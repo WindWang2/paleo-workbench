@@ -259,6 +259,9 @@ class FusionModel:
                 float(t) for t in data.get("class_thresholds", [])
             ],
             class_names=list(data.get("class_names", [])),
+            weight_provenance=dict(data["weight_provenance"])
+            if data.get("weight_provenance")
+            else None,
         )
 
     def fingerprint(self) -> str:
@@ -397,7 +400,9 @@ def _fuse_weighted(model: FusionModel) -> FusionResult:
         contribution = np.where(mask, weight * membership, 0.0)
         w_sum += np.where(mask, weight, 0.0)
         m_sum += contribution
-        w_sq += contribution * membership
+        # NaN-safe: membership is NaN exactly where mask is False; a bare
+        # contribution*membership would poison w_sq with 0*NaN (review R1-P0)
+        w_sq += np.where(mask, contribution * membership, 0.0)
     with np.errstate(invalid="ignore", divide="ignore"):
         likelihood = m_sum / w_sum
     likelihood[w_sum <= 0.0] = np.nan  # no evidence at all stays nodata
@@ -672,6 +677,12 @@ def register_output(
 
     parents = sorted({ref for ev in result.model.evidences for ref in ev.grid.source_refs})
     provenance = result.provenance()
+    # the provenance qc view drops private cache keys (they are re-serialized
+    # under sensitivity_leave_one_factor_out already; review R1-P2)
+    provenance["qc"] = {
+        k: v for k, v in dict(provenance.get("qc") or {}).items()
+        if not str(k).startswith("_")
+    }
     # V6 §16 (P1-11): sensitivity is part of the product's honesty record.
     # V8 M5: compute ONCE here and cache it on qc — the integrated entry
     # reuses the cached copy instead of recomputing (which doubled the
