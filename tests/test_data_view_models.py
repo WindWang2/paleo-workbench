@@ -201,7 +201,7 @@ def test_enrich_integrity_does_not_rehash_on_ui_thread(monkeypatch, tmp_path):
 def test_enrich_tag_map_cached_by_revision(tmp_path):
     """#1173: repeat row selections reuse the tag map; any save rebuilds."""
     from paleo_workbench.catalog.service import DataCatalogService
-    from paleo_workbench.ui.pages.data_view_models import _version_tag_display_map
+    from paleo_workbench.ui.pages.data_view_models import _catalog_tag_maps
 
     project_path = tmp_path / "proj" / "demo.paleo.json"
     project_path.parent.mkdir(parents=True, exist_ok=True)
@@ -213,12 +213,12 @@ def test_enrich_tag_map_cached_by_revision(tmp_path):
         src.write_bytes(b"data")
         version = svc.import_raw(src)
         svc.add_tag("重点", version_id=version.id)
-        first, _ = _version_tag_display_map(svc)
-        second, _ = _version_tag_display_map(svc)
+        _, first = _catalog_tag_maps(svc)
+        _, second = _catalog_tag_maps(svc)
         assert second is first
         assert first[version.id] == ["重点"]
         svc.add_tag("复核", version_id=version.id)
-        third, _ = _version_tag_display_map(svc)
+        _, third = _catalog_tag_maps(svc)
         assert third is not first
         assert sorted(third[version.id]) == ["复核", "重点"]
     finally:

@@ -53,15 +53,25 @@ def test_digit_shortcut_switches_hub(qtbot):
 
 def test_digit_shortcut_blocked_in_text_field(qtbot):
     """Digit shortcuts must NOT fire when a QLineEdit has focus."""
-    shell = AppShell()
-    qtbot.addWidget(shell)
-    shell.show()
-    QApplication.setActiveWindow(shell)
+    # Workstation shell V4+: the hub pages (incl. 数据管理) live in the
+    # workstation's 功能页 dock, whose host QMainWindow is provided by
+    # PaleoWorkbenchWindow — a standalone AppShell keeps a hidden detached
+    # host where the data page can never become visible/focusable. Build the
+    # real window so the search box is actually reachable, like the app does.
+    window = PaleoWorkbenchWindow()
+    qtbot.addWidget(window)
+    window.show()
+    QApplication.setActiveWindow(window)
+    shell = window.app_shell
     # The data toolbar lives on the 数据 hub's 数据管理 sub-module; switch
     # there so its search box is the current page and can actually take focus.
     # (switch_to, not navigate_to: a fade after show() would install a
     # QGraphicsEffect that forces hidden GL pages to initialize offscreen.)
     shell.hub_data.switch_to("management")
+    # Let the workstation's deferred dock-layout restore (0 ms timer off the
+    # WorkstationFrame constructor) settle BEFORE focusing: restoreState()
+    # reflows the docks and would otherwise yank focus back to the frame.
+    QApplication.processEvents()
     search = shell.data_page.data_toolbar.search_box
     search.setFocus()
     QApplication.processEvents()

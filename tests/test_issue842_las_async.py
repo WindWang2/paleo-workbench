@@ -63,7 +63,7 @@ def test_visualization_page_parses_las_off_gui_thread(qtbot, tmp_path: Path, mon
     release = threading.Event()
     threads: list[str] = []
 
-    def _slow_load(p):
+    def _slow_load(p, cancel=None):
         threads.append(threading.current_thread().name)
         started.set()
         release.wait(timeout=5)
@@ -136,7 +136,7 @@ def test_well_log_canvas_panel_parses_bound_las_off_gui_thread(qtbot, tmp_path: 
     release = threading.Event()
     threads: list[str] = []
 
-    def _slow_load(p):
+    def _slow_load(p, cancel=None):
         threads.append(threading.current_thread().name)
         started.set()
         release.wait(timeout=5)

@@ -154,8 +154,12 @@ def test_open_project_path_reports_escape_error(qtbot, tmp_path: Path):
 # ------------------------------------------------- #1190 safe_rmtree observability
 
 
-def test_safe_rmtree_raises_and_logs_on_failure(tmp_path: Path, monkeypatch, caplog):
-    """A failed removal is observable: logged AND re-raised (#1190)."""
+def test_safe_rmtree_reports_and_logs_on_failure(tmp_path: Path, monkeypatch, caplog):
+    """A failed removal is observable: logged AND reported as False (#1190).
+
+    ``safe_rmtree`` never raises for removal failures by contract — the
+    bool return lets transaction layers tell "cleared" from "still there".
+    """
     import logging
     import shutil as shutil_module
     from paleo_workbench.project import paths as paths_module
@@ -169,8 +173,7 @@ def test_safe_rmtree_raises_and_logs_on_failure(tmp_path: Path, monkeypatch, cap
 
     monkeypatch.setattr(shutil_module, "rmtree", _boom)
     with caplog.at_level(logging.WARNING, logger="paleo_workbench.project.paths"):
-        with pytest.raises(OSError):
-            paths_module.safe_rmtree(target)
+        assert paths_module.safe_rmtree(target) is False
     assert any("safe_rmtree" in record.message for record in caplog.records)
 
 
@@ -190,9 +193,10 @@ def test_safe_rmtree_missing_path_is_noop(tmp_path: Path):
     safe_rmtree(tmp_path / "not-there")  # must not raise
 
 
-def test_relocation_commit_propagates_rmtree_failure(tmp_path: Path, monkeypatch):
-    """StagedArtifactRelocation.commit lets a source-cleanup failure abort
-    the Save As finishing step instead of half-finishing silently."""
+def test_relocation_commit_reports_rmtree_failure(tmp_path: Path, monkeypatch):
+    """StagedArtifactRelocation.commit reports a source-cleanup failure as
+    False (target durable, source debris present — the safe direction) so
+    the Save As finishing step cannot half-finish silently."""
     import shutil as shutil_module
     from paleo_workbench.project.paths import StagedArtifactRelocation
 
@@ -210,8 +214,9 @@ def test_relocation_commit_propagates_rmtree_failure(tmp_path: Path, monkeypatch
         raise OSError("cannot remove source")
 
     monkeypatch.setattr(shutil_module, "rmtree", _boom)
-    with pytest.raises(OSError):
-        staged.commit()
+    assert staged.commit() is False
+    # The durable target is untouched by the failed source cleanup.
+    assert (target / "payload.bin").read_bytes() == b"p"
 
 
 def test_relocation_rollback_stays_best_effort_on_rmtree_failure(

@@ -365,6 +365,15 @@ def _attach_result_to_task(
             normalization.n_duplicates_merged
         )
         task.quality_metrics["duplicate_policy"] = normalization.policy
+        # Legacy #399 UI hook: host-side normalization (V8 M3) now owns the
+        # duplicate accounting and the engine sees an already-deduplicated
+        # set, so the engine-reported count alone would read 0 — surface the
+        # normalized count unless the engine dropped duplicates itself
+        # ("keep" policy passes twins through to first-wins engines).
+        if not task.quality_metrics.get("duplicate_wells_dropped"):
+            task.quality_metrics["duplicate_wells_dropped"] = (
+                normalization.n_duplicates_merged
+            )
     if result.get("variance_min") is not None:
         task.quality_metrics["variance_min"] = round(result["variance_min"], 4)
         task.quality_metrics["variance_max"] = round(result["variance_max"], 4)

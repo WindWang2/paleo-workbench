@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from paleo_workbench.project.models import PaleoMapDocument, ProjectDocument, QualityReport, _now_iso
 
@@ -60,14 +60,45 @@ def make_issue(
 def _geometry_centroid(geometry: dict[str, Any]) -> list[float] | None:
     """问题定位点：走 facade centroid（V8 M4）——面的顶点均值复刻已删，
     面/多面统一为面积质心（定位精度无差，语义与 polygonization 一致）；
-    畸形/退化几何按"无定位点"处理（fail-open：定位缺失不掩盖问题本身）。"""
+    自交/退化面 facade fail-closed（ValueError）时回退顶点均值定位点
+    （ISS-QC-02 契约：问题几何必须可定位，畸形不等于无处可指）；
+    畸形/空洞几何按"无定位点"处理（fail-open：定位缺失不掩盖问题本身）。"""
     from paleo_workbench.mapping.geometry_operations import centroid
 
     try:
         x, y = centroid(geometry)
         return [x, y]
-    except (TypeError, ValueError, IndexError, KeyError):
+    except ValueError:
+        return _vertex_mean_locate_point(geometry)
+    except (TypeError, IndexError, KeyError):
         return None
+
+
+def _vertex_mean_locate_point(geometry: dict[str, Any]) -> list[float] | None:
+    """退化几何（零面积面/空线）的兜底定位点：所有顶点坐标均值。"""
+    coords = geometry.get("coordinates")
+    if geometry.get("type") == "Point" or not isinstance(coords, (list, tuple)):
+        return None  # 非退化路径已处理 Point，到这说明坐标畸形
+
+    def _iter_points(node: Any) -> Iterator[list[Any]]:
+        if isinstance(node, (list, tuple)):
+            if (
+                len(node) >= 2
+                and isinstance(node[0], (int, float))
+                and isinstance(node[1], (int, float))
+            ):
+                yield node
+            else:
+                for child in node:
+                    yield from _iter_points(child)
+
+    vertices = list(_iter_points(coords))
+    if not vertices:
+        return None
+    return [
+        sum(float(p[0]) for p in vertices) / len(vertices),
+        sum(float(p[1]) for p in vertices) / len(vertices),
+    ]
 
 
 def _facies_ring(poly: dict[str, Any]) -> list[list[float]] | None:

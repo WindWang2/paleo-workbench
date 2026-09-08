@@ -31,7 +31,13 @@ def window(qtbot):
     win = PaleoWorkbenchWindow()
     qtbot.addWidget(win)
     win.show()
-    return win
+    yield win
+    # pytest-qt's _close_widgets closes the window again AFTER monkeypatch
+    # undo, rerunning closeEvent through the full shutdown path (worker join
+    # + deferred-delete race on the rebuilt shell) — that crashed the process
+    # on the Windows leg. The closeEvent contract is asserted by the tests
+    # themselves; keep teardown on the plain accept path.
+    win.project_controller.shutdown_current_session = lambda: True
 
 
 def _simulate_failed_rebuild(qtbot, window) -> None:

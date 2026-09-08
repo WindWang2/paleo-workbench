@@ -101,9 +101,12 @@ def test_export_worker_cancel_after_render_removes_partial_file(
     worker = MapExportWorker(spec)
     emitted: list[str] = []
 
-    def fake_render(existing: MapExportSpec):
+    def fake_render(existing: MapExportSpec, *, cancel=None):
         # Simulate a render that completes (writes the PNG) while the user is
-        # cancelling: the flag is observed only after the file exists.
+        # cancelling: the flag is observed only after the file exists.  The
+        # ``cancel`` checkpoint kwarg (#1224) is accepted and ignored so the
+        # render runs to completion, exercising the worker's post-render
+        # stale-file discard.
         image = QImage(160, 120, QImage.Format.Format_RGBA8888)
         image.fill(QColor("#56789a"))
         assert image.save(existing.path, "PNG")

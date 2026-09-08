@@ -235,14 +235,15 @@ class TestCompareAndResolve:
         group = project.constraint_layers[0]
         first = commit_constraint_group(project, catalog, group)
         group.lines[0].coordinates = [[0.0, 0.0], [13.0, 0.5]]
-        group.lines.append(_line("F2", [[1.0, 1.0], [2.0, 2.0]]))
+        new_line = _line("F2", [[1.0, 1.0], [2.0, 2.0]])
+        group.lines.append(new_line)
         second = commit_constraint_group(project, catalog, group)
         diff = compare_constraint_versions(
             catalog, first.version_id, second.version_id
         )
         assert diff["same_group"]
         assert not diff["identical"]
-        assert "F2-added-by-id" or True  # ids are opaque; check counts
+        assert diff["lines_added"] == [new_line.id]  # ids are opaque; match the appended line's own id
         assert len(diff["lines_added"]) == 1
         assert len(diff["lines_changed"]) == 1
         assert diff["lines_changed"][0]["changes"] == ["coordinates"]

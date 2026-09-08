@@ -1150,6 +1150,13 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     QToolButton#WorkstationProjectButton:hover {{
         background: {t.BG_MENU_HOVER};
     }}
+    /* 顶部应用栏的菜单按钮隐藏下拉箭头（箭头与文字重叠回归，随 V7
+       工作站化顶栏重建时丢失的 ProjectMenuButton 同款规则）。 */
+    QToolButton#WorkstationProjectButton::menu-indicator,
+    QToolButton#WorkstationChromeButton::menu-indicator {{
+        image: none;
+        width: 0px;
+    }}
     QLineEdit#WorkstationCommandInput {{
         background: {t.BG_BODY};
         color: {t.TEXT_PRIMARY};

@@ -6,6 +6,7 @@ from paleo_workbench.viz.prediction_helpers import (
     active_prediction_task,
     well_log_data_from_prediction,
 )
+from paleo_workbench.viz.well_log_load import WellLogDataWithDepthUnit
 
 
 def test_active_prediction_task_selects_latest():
@@ -23,7 +24,12 @@ def test_well_log_data_from_prediction_builds_probability_curve_and_facies():
 
     data = well_log_data_from_prediction(task)
 
-    assert isinstance(data, WellLogData)
+    # V6 §3: the synthetic axis is meters BY CONSTRUCTION, so the helper
+    # wraps the document in the depth-unit envelope (duck-typed proxy).
+    assert isinstance(data, WellLogDataWithDepthUnit)
+    assert isinstance(data.base, WellLogData)
+    assert data.depth_unit == "m"
+    assert data.depth_unit_declared is True
     assert data.well_name == task.name
     assert data.top_depth == 0.0
     assert data.bottom_depth == 100.0

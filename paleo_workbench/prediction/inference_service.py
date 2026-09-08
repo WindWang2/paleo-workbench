@@ -457,10 +457,12 @@ def execute_run(
             run.generator or model.provider or INFERENCE_GENERATOR
         )
         payload = {
-            **result,
             # #1152: the provenance envelope is re-asserted AFTER the
             # provider result — a (third-party) provider returning
-            # model/run_id/seed/snapshot keys must never rewrite it.
+            # model/run_id/seed/snapshot keys must never rewrite it. Only
+            # the FILTERED provider payload is spread (the raw ``**result``
+            # would resurrect reserved keys the envelope does not itself
+            # re-assert, e.g. a forged ``output_version_id``).
             "schema_version": "1.0",
             "model": {
                 "model_id": model.model_id,

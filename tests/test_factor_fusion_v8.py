@@ -138,7 +138,7 @@ class TestVarianceRegistration:
         assert service.get_version(version_id) is not None
         assert result.qc.get("variance_version_id")
         var_version = service.get_version(result.qc["variance_version_id"])
-        assert var_version.metadata.get("operation", "") or True  # presence check
+        assert service.get_run(var_version.run_id).operation == "factor_fusion:variance"
         # the run recorded the variance sibling linkage
         assert var_version.parent_version_ids == [version_id]
 

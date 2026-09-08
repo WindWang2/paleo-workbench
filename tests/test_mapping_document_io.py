@@ -43,18 +43,24 @@ def test_apply_features_round_trip_lines_and_labels():
     assert {f["id"] for f in back} == {"f1", "ln1", "lb1"}
 
 
-def test_malformed_coordinates_skipped_not_crashed_or_faked():
-    """#1162: short coordinates skip + warn — no IndexError (label), no
-    silent y=0.0 persistence (well)."""
+def test_malformed_coordinates_flagged_or_skipped_never_faked():
+    """#1162 (V4 semantics): short well coordinates neither crash nor get
+    faked as valid locations — the record survives with a ``coordinate_status``
+    INVALID flag for downstream filtering (see the flagged_* tests below),
+    while a short label anchor is skipped with a diagnostic. The good well
+    round-trips unflagged."""
     doc = PaleoMapDocument(name="M", linked_target_horizon="H")
     apply_features_to_document(doc, [
         {"id": "w-bad", "kind": "well", "name": "坏井", "coordinates": [116.0]},
         {"id": "lb-bad", "kind": "label", "name": "坏注记", "text": "x", "coordinates": [1.0]},
         {"id": "w-ok", "kind": "well", "name": "好井", "coordinates": [116.0, 22.0]},
     ])
-    assert [w["id"] for w in doc.well_overlays] == ["w-ok"]
-    assert doc.well_overlays[0]["x"] == 116.0
-    assert doc.well_overlays[0]["y"] == 22.0
+    by_id = {w["id"]: w for w in doc.well_overlays}
+    assert set(by_id) == {"w-bad", "w-ok"}
+    assert by_id["w-bad"]["coordinate_status"] == CoordinateStatus.INVALID
+    assert "coordinate_status" not in by_id["w-ok"]
+    assert by_id["w-ok"]["x"] == 116.0
+    assert by_id["w-ok"]["y"] == 22.0
     assert doc.label_features == []
 
 

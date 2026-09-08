@@ -98,7 +98,13 @@ def test_single_toolbar_strip_carries_every_action(qtbot) -> None:
         for action in toolbars[0].actions()
         if action.objectName().startswith("MapAction:")
     }
-    assert action_ids == set(page.action_controller.actions.keys())
+    # V8 M1: the QAction registry is a shared vocabulary across command
+    # surfaces — the workstation ribbon / layer-tree context menus carry the
+    # extension actions (``_SURFACE_ICONS``).  This page's single strip must
+    # carry every core authoring action (everything else the controller
+    # registers) and nothing that is not registered.
+    extension_surface = set(page.action_controller._SURFACE_ICONS)
+    assert action_ids == set(page.action_controller.actions.keys()) - extension_surface
 
     menu_button = page.map_toolbars.findChild(QToolButton, "MapPanelsMenuButton")
     assert menu_button is not None and menu_button.menu() is not None

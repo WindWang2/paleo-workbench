@@ -135,14 +135,26 @@ def test_governance_edit_action_shares_the_governance_header_row(qtbot):
     assert panel.governance_header_layout.indexOf(panel.governance_edit_btn) == 1
     assert panel.governance_edit_btn.text() == "编辑"
     assert panel.governance_edit_btn.accessibleName() == "编辑治理信息"
-    assert panel.governance_edit_btn.height() == 18
+    # U3/U7: 控件高度改为密度感知的最小高度（随 theme_changed 重设），
+    # 不再是 compile-time 的 setFixedHeight(18)。
+    from paleo_workbench.ui import style, tokens
+
+    assert panel.governance_edit_btn.minimumHeight() == (
+        tokens.control_height(style.current_density())
+    )
 
 
 def test_menu_bar_buttons_hide_dropdown_indicator():
-    """顶部菜单条隐藏下拉箭头（箭头与文字重叠回归）。"""
+    """顶部应用栏的菜单按钮隐藏下拉箭头（箭头与文字重叠回归）。
+
+    V7 工作站化顶栏用 WorkstationProjectButton / WorkstationChromeButton
+    (QToolButton + InstantPopup) 取代了旧的 ProjectMenuButton——规则随
+    顶栏重建迁移到这两个选择器。
+    """
     from paleo_workbench.ui import tokens
 
-    assert "ProjectMenuButton::menu-indicator" in tokens.QSS_TEMPLATE
+    assert "WorkstationProjectButton::menu-indicator" in tokens.QSS_TEMPLATE
+    assert "WorkstationChromeButton::menu-indicator" in tokens.QSS_TEMPLATE
 
 
 def test_format_size():

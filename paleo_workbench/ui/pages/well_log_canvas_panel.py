@@ -219,11 +219,16 @@ class WellLogCanvasPanel(QFrame):
         axis value as metres would navigate the calibrated seismic loop to a
         wrong TWT — refuse with the reason instead of guessing a conversion
         the data never declared. An UNKNOWN unit fails closed too (V6 §3):
-        a silent meters guess publishes numbers nobody declared.
+        a silent meters guess publishes numbers nobody declared. A
+        declared-but-unrecognized token (e.g. "cubits") surfaces verbatim
+        for diagnostics; only an undeclared axis reports "unknown".
         """
-        unit = self.depth_cursor_unit()
+        from paleo_workbench.workflow.well_science import depth_unit_of
+
+        info = depth_unit_of(self.well_log_data)
+        unit = info.unit or ""
         if unit == "":
-            return "depth-unit:unknown"
+            return f"depth-unit:{info.raw}" if info.declared and info.raw else "depth-unit:unknown"
         if unit != "m":
             return f"depth-unit:{unit}"
         return None

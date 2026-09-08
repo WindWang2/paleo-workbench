@@ -1,9 +1,15 @@
-"""M1 Task 6: 综合编修文档区由 QgsMapCanvas 承载（shim 契约）。"""
+"""M1 Task 6: 综合编修文档区由 QgsMapCanvas 承载（shim 契约）。
+
+需要 ``qgis_render_bridge`` 的用例带 ``@pytest.mark.qgis``（packaging #437：
+主 CI 门不构建桥，标记用例自跳过；``PALEO_REQUIRE_QGIS=1`` 的 QGIS 腿上
+fail-closed，见 tests/qgis_support.py 与 conftest 的统一门禁）。
+"""
 import pytest
 
 pytest.importorskip("PySide6")
 
 
+@pytest.mark.qgis
 def test_composite_document_hosts_qgis_canvas(qtbot):
     from paleo_workbench.project.models import ProjectDocument
     from paleo_workbench.ui.qgis_stack.canvas_shim import QgisCanvasShim
@@ -20,6 +26,7 @@ def test_composite_document_hosts_qgis_canvas(qtbot):
     assert "qgis" in doc.canvas.backend_status.lower()
 
 
+@pytest.mark.qgis
 def test_shim_mirrors_vector_snapshot_to_project(qtbot):
     from paleo_workbench.mapping.map_render_backend import (
         MapLayerSnapshot, MapRenderSnapshot,
@@ -52,6 +59,7 @@ def test_shim_mirrors_vector_snapshot_to_project(qtbot):
     assert doc.canvas._mirrored_layers[0] != "w1"
 
 
+@pytest.mark.qgis
 def test_shim_mupp_non_square_aspect_consistent(qtbot):
     """F3 回归: 非正方形画布下 map_units_per_pixel 与 fitted extent/width 一致。"""
     from paleo_workbench.ui.qgis_stack.canvas_shim import QgisCanvasShim
@@ -75,6 +83,7 @@ def test_shim_mupp_non_square_aspect_consistent(qtbot):
     assert (mupp * w == pytest.approx(dx, rel=1e-3) or mupp * h == pytest.approx(dy, rel=1e-3))
 
 
+@pytest.mark.qgis
 def test_shim_extent_single_emission(qtbot):
     """F4 回归: 一次程序化 set_extent 只触发一次 extent_changed。"""
     from paleo_workbench.ui.qgis_stack.canvas_shim import QgisCanvasShim
@@ -101,6 +110,7 @@ def test_shim_extent_single_emission(qtbot):
     assert len(seen) == 1
 
 
+@pytest.mark.qgis
 def test_shim_tool_operation_emits_on_user_extent(qtbot):
     """F2 回归: 用户 pan/zoom（非程序化 extent）触发 tool_operation(False)，程序化不触发。"""
     from paleo_workbench.ui.qgis_stack.canvas_shim import QgisCanvasShim

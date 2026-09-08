@@ -32,7 +32,16 @@ def _imports(tree: ast.AST) -> set[str]:
 
 def test_primary_mapping_page_uses_the_renderer_neutral_unified_canvas() -> None:
     imports = _imports(_tree("ui/pages/mapping_page.py"))
-    assert "paleo_workbench.ui.unified_map_canvas" in imports
+    # The page acquires its canvas through the renderer-neutral seam: either
+    # UnifiedMapCanvas directly or the qgis_stack display factory, which embeds
+    # a read-only QgsMapCanvas and falls back to UnifiedMapCanvas when the
+    # native bridge is absent.  The legacy native canvas and matplotlib stay
+    # forbidden either way.
+    renderer_neutral = {
+        "paleo_workbench.ui.unified_map_canvas",
+        "paleo_workbench.ui.qgis_stack.display_canvas",
+    }
+    assert imports & renderer_neutral
     assert "paleo_workbench.ui.native_map_canvas" not in imports
     assert not any(name.startswith("matplotlib") for name in imports)
 

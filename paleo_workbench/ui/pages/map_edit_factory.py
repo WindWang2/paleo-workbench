@@ -52,6 +52,14 @@ def make_facies(record: dict[str, Any]) -> FaciesPolygonItem | None:
 
 
 def make_well(record: dict[str, Any]) -> WellPointItem | None:
+    # Audit #1162 semantics: an unusable well keeps a placeholder [x, 0.0]
+    # position in the document pipeline but is flagged ``coordinate_status``.
+    # The editor canvas must not draw the fabricated position — flagged wells
+    # are skipped exactly like the other bad-geometry records.
+    from paleo_workbench.project.domain import coordinate_status_is_flagged
+
+    if coordinate_status_is_flagged(str(record.get("coordinate_status") or "ok")):
+        return None
     coords = record.get("coordinates") or [0, 0]
     if not isinstance(coords, (list, tuple)) or len(coords) < 2:
         return None
