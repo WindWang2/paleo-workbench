@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from paleo_workbench.mapping_workspace.stages import MappingStage
+from paleo_workbench.project.models import FACTOR_TASK_STATUS_COMPLETE
 
 
 class ReadinessItemStatus(str, Enum):
@@ -123,6 +124,11 @@ def check_initial_facies_crs(document) -> ReadinessItem:
 
 
 def _geometry_issue_count(features: list) -> int:
+    """Real geometry validity (facade: QGIS engine when built, shapely
+    otherwise) — the former non-empty check let invalid bowtie/unclosed
+    rings pass readiness (v7 P2-16)."""
+    from paleo_workbench.mapping.geometry_operations import validate
+
     issues = 0
     for feature in features or ():
         geometry = feature.get("geometry") if isinstance(feature, dict) else None
@@ -132,6 +138,12 @@ def _geometry_issue_count(features: list) -> int:
         coordinates = geometry.get("coordinates")
         if not coordinates:
             issues += 1
+            continue
+        try:
+            if not validate(geometry).valid:
+                issues += 1
+        except Exception:
+            issues += 1  # unvalidatable geometry is an issue, never a pass
     return issues
 
 
@@ -244,7 +256,7 @@ def check_constraints_present(document) -> ReadinessItem:
 
 def check_factors_complete(document) -> ReadinessItem:
     tasks = getattr(document, "factor_map_tasks", None) or []
-    completed = [task for task in tasks if str(task.status) == "completed"]
+    completed = [task for task in tasks if str(task.status) == FACTOR_TASK_STATUS_COMPLETE]
     if not tasks:
         return ReadinessItem(
             "factors_complete", ReadinessItemStatus.WARNING, "无单因素任务",
@@ -279,7 +291,7 @@ def check_evidence_available(document) -> ReadinessItem:
     evidence = 0
     evidence += len([
         task for task in (getattr(document, "factor_map_tasks", None) or [])
-        if str(task.status) == "completed"
+        if str(task.status) == FACTOR_TASK_STATUS_COMPLETE
     ])
     evidence += _count_constraints(document)
     if evidence:

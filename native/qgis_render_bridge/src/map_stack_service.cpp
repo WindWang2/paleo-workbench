@@ -93,6 +93,8 @@
 
 #include "qgis_render_bridge.hpp"
 #include "style_codec.hpp"
+#include <qgsrasterlayer.h>
+#include <qgsrasterrenderer.h>
 #include "edit_tools.hpp"
 
 namespace pwb::qgis_render {
@@ -382,15 +384,18 @@ static std::string makeStyleSig(const std::string& renderer_xml,
 
 }  // namespace
 
-static QgsVectorLayer* findMirrorByDocId(QgsProject* project, const std::string& doc_id) {
+static QgsMapLayer* findMapMirrorByDocId(QgsProject* project, const std::string& doc_id) {
     if (!project || doc_id.empty()) return nullptr;
     const QString key = QStringLiteral("pwb/doc_id");
     const QString target = QString::fromStdString(doc_id);
     for (auto* layer : project->mapLayers().values()) {
-        if (layer->customProperty(key).toString() == target)
-            return qobject_cast<QgsVectorLayer*>(layer);
+        if (layer->customProperty(key).toString() == target) return layer;
     }
     return nullptr;
+}
+
+static QgsVectorLayer* findMirrorByDocId(QgsProject* project, const std::string& doc_id) {
+    return qobject_cast<QgsVectorLayer*>(findMapMirrorByDocId(project, doc_id));
 }
 
 // ------------------------------------------------------------------ V5 groups
@@ -682,6 +687,8 @@ struct QgisMapStack::Impl {
   // fid 顺序配对重建；reconcile 每次 truncate+add 后整表替换。
   std::unordered_map<std::string, std::unordered_map<long long, std::string>>
       mirror_feature_fids;
+      // v7 §9: last-applied host data revision per doc_id (delta channel).
+      std::unordered_map<std::string, std::uint64_t> mirror_data_revisions;
   std::unordered_map<std::string, std::string> mirror_style_sig;
   int suppress_tree_callbacks = 0;
 
@@ -693,6 +700,7 @@ struct QgisMapStack::Impl {
         known_layer_names.erase(it->first);
         known_layer_visibility.erase(it->first);
         mirror_feature_fids.erase(it->first);
+        mirror_data_revisions.erase(it->first);
         it = mirror_by_doc.erase(it);
       } else {
         ++it;
@@ -708,6 +716,7 @@ struct QgisMapStack::Impl {
     known_layer_names.erase(doc_id);
     known_layer_visibility.erase(doc_id);
     mirror_feature_fids.erase(doc_id);
+    mirror_data_revisions.erase(doc_id);
   }
 
   void eraseMirrorByDocIdIfQgisMatches(const std::string& doc_id,
@@ -720,6 +729,7 @@ struct QgisMapStack::Impl {
       known_layer_names.erase(doc_id);
       known_layer_visibility.erase(doc_id);
       mirror_feature_fids.erase(doc_id);
+    mirror_data_revisions.erase(doc_id);
     }
   }
 };
@@ -1431,6 +1441,114 @@ void QgisMapStack::clearProjectLayers() {
   removeMirrorLayersExcept(empty);
 }
 
+bool QgisMapStack::applyMirrorFeatureDelta(QgsVectorLayer& layer,
+                                           const std::string& doc_id,
+                                           const std::string& delta_json,
+                                           std::uint64_t new_revision) {
+  QJsonParseError err{};
+  const QJsonDocument doc = QJsonDocument::fromJson(
+      QByteArray::fromStdString(delta_json), &err);
+  if (err.error != QJsonParseError::NoError || !doc.isObject()) return false;
+  const QJsonObject payload = doc.object();
+  bool ok = false;
+  const std::uint64_t base = static_cast<std::uint64_t>(
+      payload.value(QStringLiteral("base_revision")).toVariant().toULongLong(&ok));
+  if (!ok) return false;
+  const auto revIt = impl_->mirror_data_revisions.find(doc_id);
+  if (revIt == impl_->mirror_data_revisions.end() || revIt->second != base) {
+    return false;  // concurrent reset — caller ships the full collection
+  }
+  QgsVectorDataProvider* provider = layer.dataProvider();
+  if (provider == nullptr) return false;
+
+  // host id → qgis fid from the recorded table (fid → host id)
+  std::unordered_map<std::string, long long> host_to_fid;
+  for (const auto& [fid, host] : impl_->mirror_feature_fids[doc_id]) {
+    host_to_fid.emplace(host, fid);
+  }
+  QgsFeatureIds remove_ids;
+  for (const QJsonValue& removed :
+       payload.value(QStringLiteral("removed_ids")).toArray()) {
+    const auto it = host_to_fid.find(removed.toString().toStdString());
+    if (it != host_to_fid.end()) remove_ids << it->second;
+  }
+  const QJsonArray changed = payload.value(QStringLiteral("changed")).toArray();
+  // #1153 discipline: any kind drift forces the full path (the memory
+  // provider's geometry type is fixed at creation).
+  for (const QJsonValue& value : changed) {
+    const QString type = value.toObject()
+                             .value(QStringLiteral("geometry"))
+                             .toObject()
+                             .value(QStringLiteral("type"))
+                             .toString();
+    if (!type.isEmpty()) {
+      const Qgis::GeometryType kind =
+          QgsWkbTypes::geometryType(QgsWkbTypes::flatType(
+              QgsWkbTypes::parseType(type)));
+      if (kind != layer.geometryType() && kind != Qgis::GeometryType::Unknown) {
+        return false;
+      }
+    }
+  }
+  for (const QJsonValue& value : changed) {
+    const auto it = host_to_fid.find(
+        value.toObject()
+            .value(QStringLiteral("properties"))
+            .toObject()
+            .value(QStringLiteral("__pwb_fid"))
+            .toString()
+            .toStdString());
+    if (it != host_to_fid.end()) remove_ids << it->second;
+  }
+  if (!remove_ids.isEmpty()) {
+    if (!provider->deleteFeatures(remove_ids)) return false;
+  }
+  QgsFeatureList add_list;
+  QStringList changed_ids;
+  for (const QJsonValue& value : changed) {
+    changed_ids << value.toObject()
+                    .value(QStringLiteral("properties"))
+                    .toObject()
+                    .value(QStringLiteral("__pwb_fid"))
+                    .toString();
+    QJsonObject single;
+    single.insert(QStringLiteral("type"), QStringLiteral("FeatureCollection"));
+    QJsonArray single_features;
+    single_features.append(value);
+    single.insert(QStringLiteral("features"), single_features);
+    const QgsFeatureList one = QgsJsonUtils::stringToFeatureList(
+        QString::fromUtf8(QJsonDocument(single).toJson()));
+    if (!one.isEmpty()) add_list.append(one);
+  }
+  if (!add_list.isEmpty()) {
+    if (!provider->addFeatures(add_list)) return false;
+  }
+  // Maintain the fid table exactly like recordMirrorFeatureFids would after
+  // a full ship: drop removed entries, append addFeatures-assigned fids in
+  // order paired with the JSON __pwb_fid sequence.
+  auto& table = impl_->mirror_feature_fids[doc_id];
+  for (const QgsFeatureId fid : remove_ids) table.erase(static_cast<long long>(fid));
+  if (changed_ids.size() == static_cast<int>(add_list.size())) {
+    for (int index = 0; index < changed_ids.size(); ++index) {
+      if (!changed_ids.at(index).isEmpty()) {
+        table[static_cast<long long>(add_list.at(index).id())] =
+            changed_ids.at(index).toStdString();
+      }
+    }
+  } else {
+    // count mismatch (OGR dropped a malformed feature): drop the whole
+    // table — numeric fid fallback beats a shifted mapping (M1 discipline).
+    // v7 R2-F6: also drop the recorded revision so the next publish takes
+    // the full path; otherwise later deltas would resolve zero deletes and
+    // re-add — accumulating duplicates until a coincidental full ship.
+    table.clear();
+    impl_->mirror_data_revisions.erase(doc_id);
+  }
+  layer.updateExtents();
+  impl_->mirror_data_revisions[doc_id] = new_revision;
+  return true;
+}
+
 std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
                                             const std::string& name,
                                             const std::string& geometry_type,
@@ -1443,7 +1561,10 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
                                             double opacity,
                                             bool is_reference,
                                             bool is_editable,
-                                            bool reference_snap) {
+                                            bool reference_snap,
+                                            std::uint64_t data_revision,
+                                            const std::string& delta_json,
+                                            const std::string& fields_json) {
   if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
   if (doc_id.empty()) throw std::invalid_argument("doc_id must not be empty");
   const QByteArray geoBytes = QByteArray::fromStdString(geojson_feature_collection).trimmed();
@@ -1493,19 +1614,35 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
   }
   if (existing) {
     SuppressGuard guard(&impl_->suppress_tree_callbacks);
-    QgsFeatureList features = QgsJsonUtils::stringToFeatureList(
-        QString::fromStdString(geojson_feature_collection));
-    if (existing->dataProvider()) {
-      if (!existing->dataProvider()->truncate()) {
-        throw std::runtime_error("mirror truncate failed for doc_id: " + doc_id);
+    // v7 §9: delta channel — delete+re-add only the changed features when
+    // the mirror provably holds base_revision (offscreen #932 semantics).
+    bool delta_applied = false;
+    if (!delta_json.empty() && data_revision != 0) {
+      delta_applied = applyMirrorFeatureDelta(*existing, doc_id, delta_json,
+                                              data_revision);
+    }
+    QgsFeatureList features;
+    if (!delta_applied) {
+      features = QgsJsonUtils::stringToFeatureList(
+          QString::fromStdString(geojson_feature_collection));
+      if (existing->dataProvider()) {
+        if (!existing->dataProvider()->truncate()) {
+          throw std::runtime_error("mirror truncate failed for doc_id: " + doc_id);
+        }
+      }
+      if (!features.isEmpty()) {
+        if (existing->dataProvider() == nullptr
+            || !existing->dataProvider()->addFeatures(features)) {
+          throw std::runtime_error("mirror addFeatures failed for doc_id: " + doc_id);
+        }
+      }
+      recordMirrorFeatureFids(impl_->mirror_feature_fids[doc_id], features, geoBytes);
+      if (data_revision != 0) {
+        impl_->mirror_data_revisions[doc_id] = data_revision;
+      } else {
+        impl_->mirror_data_revisions.erase(doc_id);
       }
     }
-    if (!features.isEmpty()) {
-      if (!existing->dataProvider() || !existing->dataProvider()->addFeatures(features)) {
-        throw std::runtime_error("mirror addFeatures failed for doc_id: " + doc_id);
-      }
-    }
-    recordMirrorFeatureFids(impl_->mirror_feature_fids[doc_id], features, geoBytes);
     existing->updateExtents();
     std::string new_sig = makeStyleSig(renderer_xml, labeling_xml, legacy_style_json);
     auto sigIt = impl_->mirror_style_sig.find(doc_id);
@@ -1533,6 +1670,10 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
                                 is_editable ? QStringLiteral("true") : QString());
     existing->setCustomProperty(QStringLiteral("pwb/reference_snap"),
                                 reference_snap ? QStringLiteral("true") : QString());
+    if (!fields_json.empty()) {
+      existing->setCustomProperty(QStringLiteral("pwb/fields_json"),
+                                  QString::fromStdString(fields_json));
+    }
     QgsLayerTreeLayer* node = project->layerTreeRoot()->findLayer(existing);
     if (node) node->setItemVisibilityChecked(visible);
     impl_->known_layer_visibility[doc_id] = visible;
@@ -1556,6 +1697,11 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
     layer->updateExtents();
   }
   recordMirrorFeatureFids(impl_->mirror_feature_fids[doc_id], features, geoBytes);
+  if (data_revision != 0) {
+    impl_->mirror_data_revisions[doc_id] = data_revision;
+  } else {
+    impl_->mirror_data_revisions.erase(doc_id);
+  }
   bool hasStyle = !renderer_xml.empty() || !labeling_xml.empty() || !legacy_style_json.empty();
   const bool legacyIsEmpty = legacy_style_empty(legacy_style_json);
   if (hasStyle && (!renderer_xml.empty() || !labeling_xml.empty() || !legacyIsEmpty)) {
@@ -1573,6 +1719,10 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
                            is_editable ? QStringLiteral("true") : QString());
   layer->setCustomProperty(QStringLiteral("pwb/reference_snap"),
                            reference_snap ? QStringLiteral("true") : QString());
+  if (!fields_json.empty()) {
+    layer->setCustomProperty(QStringLiteral("pwb/fields_json"),
+                             QString::fromStdString(fields_json));
+  }
   layer->setOpacity(std::clamp(opacity, 0.0, 1.0));
   const std::string id = layer->id().toStdString();
   {
@@ -1582,6 +1732,136 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
     if (added) {
       QgsLayerTreeLayer* node = project->layerTreeRoot()->findLayer(added);
       if (node) node->setItemVisibilityChecked(visible);
+    }
+    impl_->known_layer_visibility[doc_id] = visible;
+  }
+  impl_->owned_layers.insert(id);
+  impl_->mirror_by_doc[doc_id] = id;
+  impl_->mirror_style_sig[doc_id] = new_sig;
+  impl_->known_layer_names[doc_id] = name;
+  for (auto& kv : impl_->canvas_refs) {
+    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
+  }
+  return id;
+}
+
+std::string QgisMapStack::upsertRasterMirrorLayer(
+    const std::string& doc_id, const std::string& name,
+    const std::string& source_path, const std::string& crs_auth_id,
+    const std::string& renderer_xml, bool visible, double opacity,
+    bool is_reference) {
+  if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
+  if (doc_id.empty()) throw std::invalid_argument("doc_id must not be empty");
+  if (source_path.empty())
+    throw std::invalid_argument("raster source_path must not be empty for doc_id: " + doc_id);
+  // Up-front payload validation: a malformed renderer must not leave the
+  // live mirror half-styled (#519 discipline).
+  if (!renderer_xml.empty()) validate_raster_renderer_xml(renderer_xml);
+
+  QgsProject* project = this->project();
+  QgsRasterLayer* existing = nullptr;
+  std::string existing_id;
+  std::string existing_source;
+  auto mapIt = impl_->mirror_by_doc.find(doc_id);
+  if (mapIt != impl_->mirror_by_doc.end()) {
+    if (auto* base = project->mapLayer(QString::fromStdString(mapIt->second))) {
+      existing = qobject_cast<QgsRasterLayer*>(base);
+      if (existing) {
+        existing_id = mapIt->second;
+        existing_source = existing->source().toStdString();
+      } else {
+        // doc_id currently owns a non-raster mirror: drop the registry
+        // binding (the vector layer itself stays until replaced).
+        impl_->eraseMirrorByDocId(doc_id);
+      }
+    } else {
+      impl_->eraseMirrorByDocId(doc_id);
+    }
+  }
+  if (!existing) {
+    existing = qobject_cast<QgsRasterLayer*>(
+        findMapMirrorByDocId(project, doc_id));
+    if (existing) {
+      existing_id = existing->id().toStdString();
+      existing_source = existing->source().toStdString();
+      impl_->mirror_by_doc[doc_id] = existing_id;
+      impl_->owned_layers.insert(existing_id);
+    }
+  }
+
+  const bool style_only_change = existing != nullptr
+      && existing_source == source_path;
+  if (existing && style_only_change) {
+    SuppressGuard guard(&impl_->suppress_tree_callbacks);
+    std::string new_sig = makeStyleSig(renderer_xml, std::string(), std::string());
+    auto sigIt = impl_->mirror_style_sig.find(doc_id);
+    const bool sig_changed = sigIt == impl_->mirror_style_sig.end()
+        || sigIt->second != new_sig;
+    if (sig_changed) {
+      if (!renderer_xml.empty()
+          && !apply_raster_renderer_xml(*existing, renderer_xml)) {
+        throw std::runtime_error(
+            "raster renderer application failed for doc_id: " + doc_id);
+      }
+      impl_->mirror_style_sig[doc_id] = new_sig;
+      existing->setCustomProperty(QStringLiteral("pwb/style_sig"),
+                                  QString::fromStdString(new_sig));
+    }
+    existing->setName(QString::fromStdString(name));
+    impl_->known_layer_names[doc_id] = name;
+    existing->setOpacity(std::clamp(opacity, 0.0, 1.0));
+    existing->setCustomProperty(QStringLiteral("pwb/reference"),
+                                is_reference ? QStringLiteral("true") : QString());
+    if (!crs_auth_id.empty()) {
+      existing->setCustomProperty(QStringLiteral("pwb/crs_hint"),
+                                  QString::fromStdString(crs_auth_id));
+    }
+    if (QgsLayerTreeLayer* node = project->layerTreeRoot()->findLayer(existing)) {
+      node->setItemVisibilityChecked(visible);
+    }
+    impl_->known_layer_visibility[doc_id] = visible;
+    for (auto& kv : impl_->canvas_refs) {
+      if (!kv.second.isNull()) syncCanvasLayers(kv.first);
+    }
+    return existing_id;
+  }
+
+  // Source changed (or first publish): rebuild the mirror layer.
+  if (existing) {
+    SuppressGuard guard(&impl_->suppress_tree_callbacks);
+    impl_->eraseMirrorByDocId(doc_id);
+    if (impl_->owned_layers.erase(existing_id) > 0) {
+      project->removeMapLayer(QString::fromStdString(existing_id));
+    }
+    existing = nullptr;
+  }
+  auto layer = std::make_unique<QgsRasterLayer>(
+      QString::fromStdString(source_path), QString::fromStdString(name),
+      QStringLiteral("gdal"));
+  if (!layer->isValid())
+    throw std::runtime_error("QGIS could not open raster layer " + doc_id);
+  if (!renderer_xml.empty()
+      && !apply_raster_renderer_xml(*layer, renderer_xml)) {
+    throw std::runtime_error("raster renderer application failed for doc_id: " + doc_id);
+  }
+  const std::string new_sig = makeStyleSig(renderer_xml, std::string(), std::string());
+  layer->setCustomProperty(QStringLiteral("pwb/doc_id"), QString::fromStdString(doc_id));
+  layer->setCustomProperty(QStringLiteral("pwb/style_sig"), QString::fromStdString(new_sig));
+  layer->setCustomProperty(QStringLiteral("pwb/reference"),
+                           is_reference ? QStringLiteral("true") : QString());
+  if (!crs_auth_id.empty()) {
+    layer->setCustomProperty(QStringLiteral("pwb/crs_hint"),
+                             QString::fromStdString(crs_auth_id));
+  }
+  layer->setOpacity(std::clamp(opacity, 0.0, 1.0));
+  const std::string id = layer->id().toStdString();
+  {
+    SuppressGuard guard(&impl_->suppress_tree_callbacks);
+    project->addMapLayer(layer.release());
+    if (QgsMapLayer* added = project->mapLayer(QString::fromStdString(id))) {
+      if (QgsLayerTreeLayer* node = project->layerTreeRoot()->findLayer(added)) {
+        node->setItemVisibilityChecked(visible);
+      }
     }
     impl_->known_layer_visibility[doc_id] = visible;
   }
@@ -1708,15 +1988,14 @@ void QgisMapStack::setMirrorLayerVisibility(const std::string& doc_id, bool visi
   if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
   SuppressGuard guard(&impl_->suppress_tree_callbacks);
   auto it = impl_->mirror_by_doc.find(doc_id);
-  QgsVectorLayer* layer = nullptr;
+  QgsMapLayer* layer = nullptr;
   if (it != impl_->mirror_by_doc.end()) {
-    QgsMapLayer* base = project()->mapLayer(QString::fromStdString(it->second));
-    layer = qobject_cast<QgsVectorLayer*>(base);
+    layer = project()->mapLayer(QString::fromStdString(it->second));
     if (!layer) {
-      layer = findMirrorByDocId(project(), doc_id);
+      layer = findMapMirrorByDocId(project(), doc_id);
     }
   } else {
-    layer = findMirrorByDocId(project(), doc_id);
+    layer = findMapMirrorByDocId(project(), doc_id);
     if (layer) {
       impl_->mirror_by_doc[doc_id] = layer->id().toStdString();
       impl_->owned_layers.insert(layer->id().toStdString());
@@ -1749,13 +2028,12 @@ std::vector<std::string> QgisMapStack::mirrorOrderTopFirst() const {
 }
 
 bool QgisMapStack::mirrorLayerVisibility(const std::string& doc_id) const {
-  QgsVectorLayer* layer = nullptr;
+  QgsMapLayer* layer = nullptr;
   auto it = impl_->mirror_by_doc.find(doc_id);
   if (it != impl_->mirror_by_doc.end()) {
-    QgsMapLayer* base = project()->mapLayer(QString::fromStdString(it->second));
-    layer = qobject_cast<QgsVectorLayer*>(base);
+    layer = project()->mapLayer(QString::fromStdString(it->second));
   }
-  if (!layer) layer = findMirrorByDocId(project(), doc_id);
+  if (!layer) layer = findMapMirrorByDocId(project(), doc_id);
   if (!layer) throw std::invalid_argument("unknown doc_id: " + doc_id);
   QgsLayerTreeLayer* node = project()->layerTreeRoot()->findLayer(layer);
   if (!node) throw std::invalid_argument("layer node not found for doc_id: " + doc_id);
@@ -2170,18 +2448,35 @@ int QgisMapStack::applyProjectXml(const std::string& xml) {
           placements.push_back(
               {doc_id, parent_gid, index, layerNode->itemVisibilityChecked()});
           index++;
-          QgsVectorLayer* live = findMirrorByDocId(project(), doc_id);
-          if (live == nullptr) continue;
-          auto* donorVl = qobject_cast<QgsVectorLayer*>(donorLayer);
-          if (donorVl != nullptr) {
-            if (donorVl->renderer() != nullptr) {
-              live->setRenderer(donorVl->renderer()->clone());
+          QgsMapLayer* live = [&]() {
+            auto liveIt = impl_->mirror_by_doc.find(doc_id);
+            if (liveIt != impl_->mirror_by_doc.end()) {
+              QgsMapLayer* mapped = project()->mapLayer(
+                  QString::fromStdString(liveIt->second));
+              if (mapped) return mapped;
             }
-            live->setLabelsEnabled(donorVl->labelsEnabled());
-            if (donorVl->labeling() != nullptr) {
-              live->setLabeling(donorVl->labeling()->clone());
-            } else {
-              live->setLabeling(nullptr);
+            return findMapMirrorByDocId(project(), doc_id);
+          }();
+          if (live == nullptr) continue;
+          if (auto* donorVl = qobject_cast<QgsVectorLayer*>(donorLayer)) {
+            auto* liveVl = qobject_cast<QgsVectorLayer*>(live);
+            if (liveVl != nullptr) {
+              if (donorVl->renderer() != nullptr) {
+                liveVl->setRenderer(donorVl->renderer()->clone());
+              }
+              liveVl->setLabelsEnabled(donorVl->labelsEnabled());
+              if (donorVl->labeling() != nullptr) {
+                liveVl->setLabeling(donorVl->labeling()->clone());
+              } else {
+                liveVl->setLabeling(nullptr);
+              }
+            }
+          } else if (auto* donorRl = qobject_cast<QgsRasterLayer*>(donorLayer)) {
+            // v7 §5: raster presentation state (pseudocolor renderer)
+            // round-trips through the same envelope as vector styles.
+            auto* liveRl = qobject_cast<QgsRasterLayer*>(live);
+            if (liveRl != nullptr && donorRl->renderer() != nullptr) {
+              liveRl->setRenderer(donorRl->renderer()->clone());
             }
           }
           live->setOpacity(donorLayer->opacity());
@@ -3275,13 +3570,12 @@ bool QgisMapStack::treeViewSelectDoc(std::uintptr_t tree, const std::string& doc
 
 void QgisMapStack::setMirrorLayerOpacity(const std::string& doc_id, double opacity) {
   if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
-  QgsVectorLayer* layer = nullptr;
+  QgsMapLayer* layer = nullptr;
   auto it = impl_->mirror_by_doc.find(doc_id);
   if (it != impl_->mirror_by_doc.end()) {
-    layer = qobject_cast<QgsVectorLayer*>(
-        project()->mapLayer(QString::fromStdString(it->second)));
+    layer = project()->mapLayer(QString::fromStdString(it->second));
   }
-  if (!layer) layer = findMirrorByDocId(project(), doc_id);
+  if (!layer) layer = findMapMirrorByDocId(project(), doc_id);
   if (!layer) throw std::invalid_argument("unknown doc_id: " + doc_id);
   layer->setOpacity(std::clamp(opacity, 0.0, 1.0));  // 触发 repaintRequested → 画布桥自动刷新
 }

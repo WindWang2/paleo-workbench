@@ -481,6 +481,8 @@ template<typename RendererType> class QgsTemplatedCategorizedRendererModel : pub
       return Qt::NoItemFlags;
     }
 
+    // MSVC requires the `typename` keyword for this dependent type;
+    // GCC accepts both forms. Semantics are identical.
     virtual QIcon symbolIcon( const typename RendererType::Category &category ) const = 0;
 
     /**

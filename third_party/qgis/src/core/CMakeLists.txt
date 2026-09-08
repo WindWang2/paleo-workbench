@@ -2502,6 +2502,9 @@ if (WITH_EPT OR WITH_COPC)
 endif()
 
 if(WITH_INTERNAL_SPATIALINDEX)
+  # Windows port: upstream includes CheckFunctionExists only under NOT WIN32
+  # (CMakeLists.txt openpty probe), leaving the module undefined for MSVC.
+  include(CheckFunctionExists)
   set(SIDX_SRCS
     ${CMAKE_SOURCE_DIR}/external/spatialindex/src/capi/BoundsQuery.cc
     ${CMAKE_SOURCE_DIR}/external/spatialindex/src/capi/CountVisitor.cc

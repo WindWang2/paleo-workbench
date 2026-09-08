@@ -3,8 +3,6 @@ from __future__ import annotations
 import os
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, QSettings, QTimer
-from PySide6.QtWidgets import QApplication
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -32,6 +30,91 @@ def isolate_qsettings(tmp_path_factory):
         os.environ.pop("XDG_CONFIG_HOME", None)
     else:
         os.environ["XDG_CONFIG_HOME"] = old_xdg
+
+
+def _register_qgis_dll_directories() -> None:
+    """Windows: make the vendored QGIS + dependency DLLs loadable.
+
+    Since Python 3.8, Windows DLL search no longer consults PATH for
+    extension modules — directories must be registered explicitly.  The
+    build layout is fixed by the v7 goal (neutral reusable vendor dir +
+    conda dependency prefix); both are overridable via env so CI keeps its
+    own layout.  No-op when the directories are absent (bridge stays
+    unimportable and the qgis marker keeps skipping honestly).
+    """
+    if os.name != "nt":
+        return
+    # MINIMAL directory set (bisected): exactly the vendor output bin and
+    # the dependency prefix bin.  Adding any other directory (conda gdal
+    # env, env roots) lets the loader resolve a same-named but
+    # incompatible DLL (e.g. older sqlite3/zlib) and breaks qgis_gui with
+    # ERROR_MOD_NOT_FOUND.  osgeo resolves its own gdal from these two.
+    for sub in (
+        os.path.join(os.environ.get(
+            "PALEO_QGIS_BUILD_DIR",
+            r"C:\Users\wangj.KEVIN\paleo-qgis-build\qgis-vendor"),
+            "output", "bin"),
+        os.path.join(os.environ.get(
+            "PALEO_QGIS_DEPS_DIR", r"C:\Users\wangj.KEVIN\paleo-qgis-deps"),
+            "Library", "bin"),
+    ):
+        if os.path.isdir(sub):
+            try:
+                os.add_dll_directory(sub)
+            except (OSError, ValueError):
+                pass
+    # Windows loader order: qgis_*.dll dependents (Qt Multimedia, QCA,
+    # keychain, Core5Compat, protobuf-lite, spatialindex, ...) must be
+    # pre-resolved before the qgis DLLs themselves, otherwise the import
+    # fails with ERROR_MOD_NOT_FOUND even with the directories registered
+    # (first Windows bridge build, v7). Preload once per session.
+    try:
+        import ctypes
+        import glob as _glob
+
+        _preload_dirs = [
+            os.path.join(os.environ.get(
+                "PALEO_QGIS_DEPS_DIR", r"C:\Users\wangj.KEVIN\paleo-qgis-deps"),
+                "Library", "bin"),
+        ]
+        # Core Qt set FIRST: PySide6 (imported below) and QGIS then
+        # share this one Qt, never the wheel-bundled copy.  Deliberately
+        # NOT the Qml/Quick/extra-widgets family: preloading conda's
+        # Qt6Qml (etc.) before PySide6 poisons the wheel's bundled Qml
+        # modules; those resolve on demand via add_dll_directory instead.
+        _preload_names = ("Qt6Core", "Qt6Gui", "Qt6Widgets",
+                          "Qt6Multimedia", "qca-qt6", "qt6keychain",
+                          "Qt6Core5Compat", "libprotobuf-lite", "Qt6Network",
+                          "Qt6Sql", "Qt6Concurrent", "Qt6Xml",
+                          "Qt6Svg", "Qt6PrintSupport",
+                          "spatialindex-64", "exiv2", "zip",
+                          # Geo C libs FIRST (bisected): native extensions
+                          # (grid_render_core import chain) otherwise pin
+                          # incompatible sqlite3/zlib/expat process-wide and
+                          # qgis_core fails with ERROR_MOD_NOT_FOUND.  These
+                          # are the exact versions QGIS was built against.
+                          "sqlite3", "zlib", "libexpat", "gdal",
+                          "geos_c", "proj_9", "spatialite", "zstd")
+        for _name in _preload_names:
+            for _dir in _preload_dirs:
+                for _hit in _glob.glob(os.path.join(_dir, _name + ".dll")):
+                    try:
+                        ctypes.WinDLL(_hit)
+                    except OSError:
+                        pass
+                    break
+    except Exception:
+        pass
+
+
+_register_qgis_dll_directories()
+
+# PySide6 AFTER the Qt preload above: the whole process (PySide6 + bridge +
+# vendored QGIS) then shares the ONE conda Qt 6.11.2 set, mirroring the CI
+# leg's LD_LIBRARY_PATH unification (ADR 0059 private-ABI rule).  Importing
+# PySide6 first would pin its wheel-bundled Qt and break qgis_gui loads.
+from PySide6.QtCore import QCoreApplication, QEvent, QSettings, QTimer
+from PySide6.QtWidgets import QApplication
 
 
 def pytest_configure(config):

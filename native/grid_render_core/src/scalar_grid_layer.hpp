@@ -19,6 +19,9 @@ public:
 
     int width() const noexcept { return width_; }
     int height() const noexcept { return height_; }
+    /// v7 §5: host-side read access for the scalar DATA mirror (row-major,
+    /// height*width; NaN = nodata).  Read-only — styling never rewrites it.
+    const std::vector<float>& grid_z() const noexcept { return grid_z_; }
 
     void set_grid(std::vector<float> grid_z);
     void set_mask(std::vector<std::uint8_t> mask);

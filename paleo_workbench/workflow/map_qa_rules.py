@@ -30,6 +30,8 @@ from paleo_workbench.workflow.qc import make_issue
 
 __all__ = [
     "EXTENDED_QC_RULES",
+    "CARTOGRAPHIC_QA_RULES",
+    "cartographic_issues",
     "collect_extended_qc_issues",
     "composition_qa_issues",
 ]
@@ -394,3 +396,38 @@ def composition_qa_issues(
                 )
             )
     return issues
+
+
+def cartographic_issues(
+    project,
+    *,
+    snapshot=None,
+    capability: Mapping[str, Any] | None = None,
+    stale_summary=None,
+    catalog=None,
+    confidence_threshold: float = 0.5,
+) -> list[dict[str, Any]]:
+    """Thin delegate to the §14 cartographic rule set (V7).
+
+    The logic lives in :mod:`paleo_workbench.mapping.cartographic_qa`
+    (rule ids ``CARTOGRAPHIC_QA_RULES``); this wrapper keeps the QA-module
+    family one-import for stage QA — the stage action
+    (``ui/workstation/stage_actions.py`` ``run_qa``, main-agent owned) can
+    call ``collect_extended_qc_issues(...)`` and this delegate side by side.
+    Never duplicated here.
+    """
+    # Local import: mapping.cartographic_qa imports workflow.qc/crs_policy —
+    # importing at module scope would be fine, but the lazy form keeps
+    # test-collection of workflow-only suites independent of mapping deps.
+    from paleo_workbench.mapping.cartographic_qa import (
+        collect_cartographic_qa_issues,
+    )
+
+    return collect_cartographic_qa_issues(
+        project,
+        snapshot=snapshot,
+        capability=capability,
+        stale_summary=stale_summary,
+        catalog=catalog,
+        confidence_threshold=confidence_threshold,
+    )

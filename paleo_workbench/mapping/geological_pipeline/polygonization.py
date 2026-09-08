@@ -59,15 +59,10 @@ def _ring_centroid(ring: Sequence[Sequence[float]]) -> tuple[float, float]:
 
 
 def _point_in_ring(x: float, y: float, ring: Sequence[Sequence[float]]) -> bool:
-    """Ray casting point in polygon test."""
-    inside = False
-    n = len(ring)
-    for i in range(n - 1):
-        x1, y1 = ring[i][0], ring[i][1]
-        x2, y2 = ring[i + 1][0], ring[i + 1][1]
-        if ((y1 > y) != (y2 > y)) and (x < (x2 - x1) * (y - y1) / (y2 - y1 + 1e-15) + x1):
-            inside = not inside
-    return inside
+    """Ray casting point in polygon test (shared kernel, v7 §4)."""
+    from paleo_workbench.mapping.geometry_planar import point_in_ring_scalar
+
+    return point_in_ring_scalar(x, y, ring)
 
 
 def simplify_collinear_ring(ring: list[list[float]]) -> list[list[float]]:
@@ -281,35 +276,11 @@ def _mapping_to_lists(obj: Any) -> Any:
 def _clip_polygon_to_ring(
     geom: dict[str, Any], clip_ring: Sequence[Sequence[float]]
 ) -> dict[str, Any] | None:
-    """Intersect a GeoJSON polygon with a user domain ring (shapely).
+    """Intersect a GeoJSON polygon with a user domain ring (shared kernel,
+    v7 §4)."""
+    from paleo_workbench.mapping.geometry_operations import clip_polygon_to_ring
 
-    Returns the clipped polygonal geometry, or ``None`` when the intersection
-    is empty. Requires shapely — callers must not fall back to silently
-    unclipped output.
-    """
-    from shapely.geometry import MultiPolygon, Polygon, mapping, shape
-    from shapely.geometry.collection import GeometryCollection
-
-    ring_poly = Polygon([(float(x), float(y)) for x, y in clip_ring])
-    if not ring_poly.is_valid:
-        from shapely.validation import make_valid
-
-        ring_poly = make_valid(ring_poly)
-    clipped = shape(geom).intersection(ring_poly)
-    if clipped.is_empty:
-        return None
-    if clipped.geom_type == "GeometryCollection":
-        polys = [g for g in clipped.geoms if g.geom_type in ("Polygon", "MultiPolygon")]
-        if not polys:
-            return None
-        polygons = [g for g in polys if g.geom_type == "Polygon"]
-        multipolygons = [g for g in polys if g.geom_type == "MultiPolygon"]
-        clipped = (
-            multipolygons[0]
-            if not polygons and multipolygons
-            else MultiPolygon([p for p in polygons] + [q for mp in multipolygons for q in mp.geoms])
-        )
-    return _mapping_to_lists(mapping(clipped))
+    return clip_polygon_to_ring(geom, clip_ring)
 
 
 def _filter_small_polygons(

@@ -55,7 +55,7 @@
   1 项 Windows PermissionError flake。
 - 剩余 M6 债（登记在 ratchet 预算中）：41 行字号字面量 / 12 处定宽。
 
-## Session 2026-09-08 (M11–M14)
+## Session 2026-09-08 (M11–M14 workstation-ux-v7)
 - M11 a2e502ea: visual_qa_v7 8 状态 + capture --v7 + 1366/2560 尺寸 +
   32 基线 + armed-cancel 真 bug 修复 + 溢出菜单使能求值器化。
 - M12 a2e502ea: 4 条结构 bound（1000 层差分/装饰无重建/求值 O(1)/组聚合）。
@@ -65,7 +65,7 @@
 - M14: docs 04-08 完成；00-03 已在早前落盘。
 - 最终：docs 9 文件齐、114 新测试、基线 32 张、PR 待建。
 
-## Session 2026-09-08 (final)
+## Session 2026-09-08 (final workstation-ux-v7)
 - 全量终扫两部分：A 3036 passed/34 failed（全部 pre-existing 环境域，
   diff 为空 + main 复现抽验）；B 14% 处已知 GC-flaky 崩溃。
 - 注意：后台 shell 会重置到 main checkout——worktree 命令必须显式 cd
@@ -73,3 +73,22 @@
 - PR #1235 已创建：https://github.com/WindWang2/paleo-workbench/pull/1235
 - Goal 完成：14 commits、129 文件 +6668/-879、114 新测试、9 文档、
   32 基线、3 轮评审 P0/P1 清零。
+
+## Session 2026-09-08 (qgis-geolayer-cartography-v7)
+- Worktree .worktrees/qgis-geolayer-cartography-v7 off main db21f6cf; submodules pinned; venv cp312 + geoviz + build deps OK
+- 4 parallel deep audits complete → docs/development/qgis-geolayer-cartography-v7/audit-*.md + 00-baseline (defect register P0 1-4, P1 5-15, P2 16-19)
+- VENDOR BUILD (D1): conda env paleo-qgis-deps (qt6-main 6.11.2, qca-qt6, expat dev, gdal/geos/proj/spatialite/etc); qt6keychain v0.14.0 built from source; vendored QGIS CONFIGURE PASSED on Windows after 2 documented patches (version.rc.in restored, CheckFunctionExists include); build -j2 running in background (1.5-4h)
+- Baseline pytest rerun in background (first run lost summary to faulthandler dump, exit 0)
+- Commits: 9cc04645 (docs), d6f63fba (build patches)
+
+## Session 2026-09-08 (continued, qgis-geolayer-cartography-v7)
+- Commits: c1a40d9a P0 fixes, bf3784ae GeologicalLayerSpec V2, 5e4aefce §4 geometry
+  facade+dedup, 96a9a05e §5 scalar raster (py+c++), e825dcfe §8 presentation
+  (agent), bb40a61c §10-12 stage producers (agent; found+fixed 2 latent bugs:
+  contour overlay always failed, stage_save unpack crash), d2a5f0e1 §9 delta
+  publish + benchmarks (1000-layer noop 30ms)
+- Vendor build in progress: 959 core objs, qgis_native.dll linked; core/gui/analysis pending
+- Baseline rerun died at test_ui_adversarial_v5 theme-switch (passes standalone;
+  full-suite pollution or build contention) — rerun post-build
+- Native exts (grid_render_core etc.) built in worktree venv; grid_array getter added
+

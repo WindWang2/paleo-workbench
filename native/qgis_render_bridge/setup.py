@@ -319,6 +319,18 @@ def _extension() -> Pybind11Extension:
             str(analysis_library),
             f"-Wl,-rpath,{library_rpath}",
         ]
+    extra_include_dirs: list[str] = []
+    prefix = os.environ.get("PALEO_QGIS_CMAKE_PREFIX", "").strip()
+    if not prefix:
+        prefix = os.environ.get("CMAKE_PREFIX_PATH", "").strip().split(os.pathsep)[0]
+    if prefix:
+        # QGIS public headers pull third-party C headers (sqlite3.h,
+        # geos_c.h, proj.h, zip.h, ...); the dependency prefix that fed the
+        # vendor configure also feeds the binding compile (first Windows
+        # build, v7).
+        plain_include = Path(prefix) / "include"
+        if plain_include.is_dir():
+            extra_include_dirs.append(str(plain_include))
     return Pybind11Extension(
         "qgis_render_bridge",
         [
@@ -330,7 +342,11 @@ def _extension() -> Pybind11Extension:
             str(HERE / "src" / "edit_tools.cpp"),
             str(HERE / "src" / "bindings.cpp"),
         ],
-        include_dirs=[*_qgis_core_include_dirs(build_dir), *_qt_include_dirs()],
+        include_dirs=[
+            *_qgis_core_include_dirs(build_dir),
+            *_qt_include_dirs(),
+            *extra_include_dirs,
+        ],
         # Qt6PrintSupport: QgsLayoutExporter (layout PDF export) links QPrinter.
         # Windows: MSVC resolves Qt symbols only from explicit .lib inputs
         # (qgis_*.lib import libs carry QGIS API only), so the full set of

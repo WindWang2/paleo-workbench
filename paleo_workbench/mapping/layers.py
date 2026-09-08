@@ -282,6 +282,11 @@ class GridMapLayer(MapLayer):
         norm = np.zeros_like(self.grid_z)
         if finite.any():
             norm[finite] = np.clip((self.grid_z[finite] - vmin) / span, 0.0, 1.0)
+            # R3-8: reverse flips the ramp (matches ScalarStyleSpec reverse
+            # in the QGIS pseudocolor path) — read from the layer style.
+            style = self.style if isinstance(self.style, dict) else {}
+            if style.get("reverse") or style.get("scalar_style", {}).get("reverse"):
+                norm[finite] = 1.0 - norm[finite]
         indices = (norm * 255.0).astype(np.int32)
         indices[~finite] = 0
 

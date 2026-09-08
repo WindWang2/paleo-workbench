@@ -51,6 +51,12 @@ struct VectorLayerSpec {
     std::string crs;
     Kind kind = Kind::Vector;
     std::string source_path;
+    /// v7 §5: authoritative raster renderer payload (single-band
+    /// pseudocolor + color ramp shader) for Kind::Raster layers.  Empty
+    /// keeps the provider default renderer (legacy RGBA-mirror behaviour).
+    /// A style-only change reapplies the renderer on the live mirror —
+    /// the raster source itself is never rewritten by styling.
+    std::string raster_renderer_xml;
     std::string fill = "#6c8ebf";
     std::string stroke = "#26364d";
     double stroke_width = 1.0;
