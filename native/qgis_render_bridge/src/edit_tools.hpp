@@ -119,7 +119,9 @@ class PwbSelectTool : public PwbEditPickTool {
 // 不写任何层——与其它编辑工具一致，权威在 Python 宿主。
 class PwbMeasureTool : public PwbEditPickTool {
  public:
-  using PwbEditPickTool::PwbEditPickTool;
+  // 需在构造时配置 QgsDistanceArea（画布 CRS + 工程椭球），不能继承基类
+  // 构造（PwbVertexTool/PwbMoveTool 的无状态模式不适用）。
+  PwbMeasureTool(QgsMapCanvas* canvas, Callback callback);
   ~PwbMeasureTool() override;
 
   void canvasPressEvent(QgsMapMouseEvent* e) override;
