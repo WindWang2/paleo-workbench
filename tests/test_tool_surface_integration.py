@@ -280,3 +280,36 @@ def test_command_requested_path_regates_disabled_command(document, monkeypatch):
     assert calls == []
     # 最根本的 blocker 优先（无活动图层先于会话状态）。
     assert any("不可用" in m for m in messages), messages
+
+
+# -- V8 R3：toggle 类命令分派（authority 取反路径；P0 教训：此前零覆盖） --
+
+
+def test_topology_command_dispatch_toggles_from_authority(document):
+    layer = _create_layer(document, "polygon")
+    _assign_role(document, layer.id, LayerRole.INITIAL_FACIES_DRAFT)
+    messages = []
+    document.status_message.connect(messages.append)
+
+    document._on_command_requested("topology")
+    assert document.edit_controller.topology_enabled is True
+    assert document.action_controller.actions["topology"].isChecked()
+    assert any("开启" in m for m in messages), messages
+
+    document._on_command_requested("topology")
+    assert document.edit_controller.topology_enabled is False
+    assert not document.action_controller.actions["topology"].isChecked()
+    assert any("关闭" in m for m in messages), messages
+
+
+def test_snapping_command_dispatch_toggles_from_authority(document):
+    layer = _create_layer(document, "polygon")
+    _assign_role(document, layer.id, LayerRole.INITIAL_FACIES_DRAFT)
+
+    document._on_command_requested("snapping")
+    assert document.edit_controller.snapping.enabled is True
+    assert document.action_controller.actions["snapping"].isChecked()
+
+    document._on_command_requested("snapping")
+    assert document.edit_controller.snapping.enabled is False
+    assert not document.action_controller.actions["snapping"].isChecked()

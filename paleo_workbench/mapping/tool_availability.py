@@ -423,7 +423,7 @@ def _rule_inspection(ctx: ToolContext, tool_id: str) -> ToolAvailability:
 
 def _rule_selection_commands(ctx: ToolContext, tool_id: str) -> ToolAvailability:
     reason = _project_gate(ctx) or _vector_layer_gate(ctx)
-    if reason is None and tool_id != "select_all" and ctx.selection_count == 0:
+    if reason is None and tool_id != "select_all" and ctx.selection_count <= 0:
         reason = "没有选中的要素"
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
 
@@ -510,7 +510,7 @@ def _rule_delete_selected(ctx: ToolContext) -> ToolAvailability:
         or _editing_gate(ctx)
 
     )
-    if reason is None and ctx.selection_count == 0:
+    if reason is None and ctx.selection_count <= 0:
         reason = "没有选中的要素"
     return _ok("delete_selected") if reason is None else _no("delete_selected", reason)
 
@@ -706,7 +706,35 @@ def evaluate_tool(tool_id: str, ctx: ToolContext) -> ToolAvailability:
             tool_id=tool_id, visible=False, enabled=False,
             disabled_reason=f"未知工具 {tool_id!r}",
         )
-    # 全局门禁（集中裁决，优先于一切具体规则）：
+    # -- 表面存在性裁决（组级隐藏）------------------------------------------
+    # 隐藏是呈现语义，不参与「最根本 blocker」的原因竞争：被收纳/阶段外
+    # 的动作整条不显示。必须在 blocking/规则之前裁决——否则后台任务期间
+    # 阶段隐藏的组会以 disabled 闪现（review R3-P2）。
+    group = _GROUP_OF.get(tool_id, "")
+    if (
+        group in _NEEDS_LAYER_GROUPS
+        and not ctx.has_active_layer
+        and tool_id not in {"layer_new", "reference_import"}
+    ):
+        return ToolAvailability(
+            tool_id=tool_id, visible=False, enabled=False,
+            disabled_reason="当前无活动图层——该工具组未显示",
+        )
+    if not _coarsely_blocked(ctx, tool_id):
+        # 阶段裁决（组隐藏 → 受治理编辑动作），单一推导自 StageToolProfile。
+        # 门序总则：工程未开、以及存在于图层之上的角色/事实判词（RAW/
+        # 冻结/组锁/源缺失）优先于阶段呈现；更细的门禁（会话/几何/选择）
+        # 被阶段隐藏覆盖（阶段外动作整条隐藏，QGIS 惯例）。
+        stage_reason = _stage_group_gate(ctx, tool_id)
+        if stage_reason is None:
+            stage_reason = _edit_action_stage_gate(ctx, tool_id)
+        if stage_reason is not None:
+            return ToolAvailability(
+                tool_id=tool_id, visible=False, enabled=False,
+                disabled_reason=stage_reason,
+            )
+
+    # -- 全局门禁（集中裁决，优先于具体规则）--------------------------------
     # 1) blocking task —— 模态全局状态（A 语义：除 cancel 外全部阻断）；
     #    reason 固定可解释，且 toolbar/palette 同因。
     if tool_id != "cancel":
@@ -727,33 +755,6 @@ def evaluate_tool(tool_id: str, ctx: ToolContext) -> ToolAvailability:
                 ctx.edit_gate_reason or "图层处于降级状态（数据不完整）",
             )
     availability = rule(ctx)
-    group = _GROUP_OF.get(tool_id, "")
-
-    # -- presentation visibility (hidden) adjudication -----------------------
-    # 无活动图层时的组级隐藏（layer/symbology 组；layer_new/reference_import
-    # 除外）优先于一切：组未显示是更根本的呈现事实。
-    if (
-        group in _NEEDS_LAYER_GROUPS
-        and not ctx.has_active_layer
-        and tool_id not in {"layer_new", "reference_import"}
-    ):
-        availability = ToolAvailability(
-            tool_id=tool_id, visible=False, enabled=False,
-            disabled_reason="当前无活动图层——该工具组未显示",
-        )
-    elif not _coarsely_blocked(ctx, tool_id):
-        # 阶段裁决（组隐藏 → 受治理编辑动作），单一推导自 StageToolProfile。
-        # 门序总则：project/图层存在/角色门禁等**粗**门禁的判词优先于阶段
-        # 呈现；更细的门禁（会话/几何/选择/原生 manifest）则被阶段隐藏覆盖
-        # （阶段外动作整条隐藏，QGIS 惯例）——review R1-P2 的精确语义。
-        stage_reason = _stage_group_gate(ctx, tool_id)
-        if stage_reason is None:
-            stage_reason = _edit_action_stage_gate(ctx, tool_id)
-        if stage_reason is not None:
-            availability = ToolAvailability(
-                tool_id=tool_id, visible=False, enabled=False,
-                disabled_reason=stage_reason,
-            )
 
     # -- checked follows the actual tool/session/toggle state ---------------
     checked: bool | None = None

@@ -1567,10 +1567,10 @@ class CompositeDocument(QWidget):
                 not self.edit_controller.snapping.enabled)
             self._sync_status_bar()
         elif command_id == "topology":
-            self.edit_controller.set_topology(
-                not self.edit_controller.topology_enabled)
+            enabling = not self.edit_controller.topology_enabled
+            self.edit_controller.set_topology(enabling)
             self.status_message.emit(
-                "拓扑编辑已开启：保存编辑将执行拓扑校验" if enabled else "拓扑编辑已关闭"
+                "拓扑编辑已开启：保存编辑将执行拓扑校验" if enabling else "拓扑编辑已关闭"
             )
         elif command_id in {"clear_selection", "select_all", "invert_selection"}:
             self.edit_controller.selection_command(command_id)
@@ -1822,7 +1822,10 @@ class CompositeDocument(QWidget):
         if tool_id and tool_id != "pan":
             self.edit_controller.activate_tool("pan")
         self._sync_action_state()
-        self.status_message.emit(f"原生工具「{tool_id}」激活失败，已回退平移：{reason}")
+        if tool_id == "pan":
+            self.status_message.emit(f"原生平移工具激活失败：{reason}")
+        else:
+            self.status_message.emit(f"原生工具「{tool_id}」激活失败，已回退平移：{reason}")
 
     def _sync_action_state(self) -> None:
         self._update_empty_hint()
@@ -3087,6 +3090,8 @@ class CompositeDocument(QWidget):
         from paleo_workbench.ui.workstation.tool_surface import TOOL_GROUPS
 
         self._overflow_menu.clear()
+        # QMenu 默认不显示 action tooltip——禁用原因必须可达（R3-P2）。
+        self._overflow_menu.setToolTipsVisible(True)
         labels = self.action_controller._LABELS
         count = 0
         for group in reversed(self._toolbar_group_order):
@@ -3112,8 +3117,9 @@ class CompositeDocument(QWidget):
                 avail = last.get(tool_id)
                 entry.setEnabled(True if avail is None else avail.enabled)
                 if avail is not None and not avail.enabled:
+                    # 与工具条 statusTip 同一词汇（R3-P2：格式三处分叉）。
                     reason = avail.disabled_reason or "当前不可用"
-                    entry.setToolTip(f"{label}（{reason}）")
+                    entry.setToolTip(f"{label}（不可用：{reason}）")
                 count += 1
         self._overflow_button.setVisible(count > 0)
         self._overflow_button.setEnabled(count > 0)

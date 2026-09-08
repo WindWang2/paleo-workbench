@@ -533,3 +533,15 @@ def test_every_shortcut_command_id_is_evaluator_vocabulary():
                                               selection_count=1, can_undo=True,
                                               can_redo=True))
         assert verdict.enabled, f"{tool_id}: {verdict.disabled_reason}"
+
+
+def test_stage_hidden_groups_stay_hidden_during_blocking_task():
+    """R3-P2 回归：阻塞任务不得让阶段隐藏的组以 disabled 闪现。"""
+    ctx = _ctx(mapping_stage="facies_calibration", blocking_task="因子制图")
+    availability = evaluate_all(ctx)
+    assert availability["factor_workbench"].visible is False
+    assert availability["map_export"].visible is False
+    # 可见工具的判词仍是 blocking（原因竞争不受影响）。
+    assert availability["pan"].disabled_reason.startswith("后台任务进行中")
+    # cancel 永远可用。
+    assert availability["cancel"].enabled
