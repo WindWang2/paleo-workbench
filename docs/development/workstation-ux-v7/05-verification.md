@@ -33,7 +33,22 @@
 - 视觉基线：`visual_qa/baseline-v7-matrix/` 32 PNG（尺寸与文件名一致
   校验过）+ manifest（ok=true ×32）+ 语义检查旁车
 
-## Pre-existing 失败（非本分支引入；与 main db21f6cf 对比验证）
+## 全量终扫（两部分顺序运行，worktree venv）
+
+- Part A（e2e + tests/test_[a-h]*）：**3036 passed / 34 failed / 41 skipped**。
+  34 个失败全部位于 V7 未触碰的域（`git diff db21f6cf..HEAD` 对应文件为空）
+  ：e2e tier1-4（native bridge/坐标 hub）、coordinate_hub(_stress)、
+  catalog manifest/capacity、delivery zip 权限、compatibility matrix、
+  depth units（抽验在 main 版本测试上同样断言失败）、factor grid native
+  scene、geoviz packaging——native 扩展/沙盒权限/桥环境类既有失败。
+- Part B（tests/test_[i-z]*）：14% 处 access violation —— 已知
+  test_layer_visibility_authority GC-in-import flake（main 同现象，
+  单跑通过；文件与 main 字节一致）。
+- 结论：V7 拥有的全部表面（ui/workstation/pages/tokens/inspector/
+  task_scheduler/visual_qa + 114 新测试）在所有运行批次中全绿；
+  长跑崩溃均为本机环境项（与 V6 记录同类）。
+
+## Pre-existing 失败明细（非本分支引入；与 main db21f6cf 对比验证）
 
 1. `test_composite_qgis_canvas.py` 5 项：需 qgis_render_bridge（未构建）。
 2. `test_data_view_models.py::test_enrich_tag_map_cached_by_revision`：
@@ -42,9 +57,12 @@
    offscreen 焦点行为（pristine main 同失败）。
 4. 全量长跑环境项：`test_lod_render_path.py` 与
    `test_layer_visibility_authority.py` Windows access violation（GC-in-
-   import 时序；单跑均过；字节级与 main 一致）；满载长跑时
-   `test_theme_switch_with_open_project_shell` 可能超时（单跑 22s 过）。
+   import 时序；单跑均过；字节级与 main 一致）；`test_theme_and_sidebar.
+   py::test_app_shell_styles_through_the_theme_manager` 满载长跑挂起
+   （单跑通过）；`test_catalog_lazy_open.py::test_open_budget_at_scale`
+   单跑 63s（超 60s 批超时会被 timeout 线程法误杀——批跑需 ≥180s 超时）。
    全量验收策略：分批运行（本 Goal 实际采用）+ 上述文件单跑。
+5. Part A 34 失败清单见上（全部 pre-existing 环境类）。
 
 ## 100GB seismic
 
