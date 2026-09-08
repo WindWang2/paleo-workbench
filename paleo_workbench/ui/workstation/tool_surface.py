@@ -185,7 +185,6 @@ _NEEDS_ANY_LAYER = frozenset({
     "identify", "select", "select_rectangle", "measure_distance",
     "clear_selection", "select_all", "invert_selection",
     "layer_properties", "layer_zoom", "layer_export", "symbology",
-    "snapping",
 })
 # attribute_table 是只读查看（QGIS 语义）——只要求图层存在，不要求
 # 可编辑（R1-P2：此前与 toggle_editing 同门禁，RAW 层连查看都被禁）。
@@ -194,7 +193,7 @@ _NEEDS_EDITABLE_LAYER = frozenset({"toggle_editing"})
 #: 需要已开启编辑会话的工具（会话内进一步受选择/撤销栈约束）
 _NEEDS_EDITING = frozenset({
     "save_edits", "rollback", "add_point", "add_line", "add_polygon",
-    "move_feature", "vertex", "reshape", "topology",
+    "move_feature", "vertex", "reshape", "snapping", "topology",
 })
 
 #: 需要活动图层的组（goal §6「根据 active layer 切换组」：无活动图层
@@ -328,8 +327,6 @@ def evaluate_tool(tool_id: str, ctx: ToolContext) -> ToolAvailability:
     # 7) 编辑会话
     if tool_id in _NEEDS_EDITING and not ctx.editing:
         return _no("需要先开始编辑")
-    if tool_id == "save_edits" and not ctx.dirty:
-        return _no("编辑会话没有未保存的修改")
     if tool_id == "toggle_editing":
         if not ctx.has_active_vector_layer:
             return _no("没有活动的矢量图层")

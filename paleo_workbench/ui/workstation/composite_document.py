@@ -1227,7 +1227,27 @@ class CompositeDocument(QWidget):
         return availability_for_context(self.tool_context())
 
     def _apply_tool_availability(self) -> None:
-        availability = self.tool_availability()
+        availability = dict(self.tool_availability())
+        controller = self.edit_controller
+        inputs = controller.tool_context_inputs() if hasattr(controller, "tool_context_inputs") else {}
+        # V7 authoring kernel integration:
+        # 1. 捕捉开关在有活动矢量图层时即可配置（无需处于编辑会话中）
+        if controller.active_layer_id:
+            from paleo_workbench.ui.workstation.tool_surface import ToolAvailability
+            availability["snapping"] = ToolAvailability(enabled=True, visible=True)
+        # 2. save_edits / rollback 在编辑会话中受 dirty 约束
+        is_dirty = bool(inputs.get("dirty", False))
+        if not is_dirty:
+            from paleo_workbench.ui.workstation.tool_surface import ToolAvailability
+            if "save_edits" in availability and availability["save_edits"].enabled:
+                availability["save_edits"] = ToolAvailability(
+                    enabled=False, visible=True, reason="编辑会话没有未保存的修改"
+                )
+            if "rollback" in availability and availability["rollback"].enabled:
+                availability["rollback"] = ToolAvailability(
+                    enabled=False, visible=True, reason="编辑会话没有可回滚的修改"
+                )
+
         self._last_availability = availability
         self.action_controller.apply_availability(availability)
         # 溢出集合优先于求值器可见性（窄画布收纳的组保持隐藏，菜单可达）。
@@ -3019,7 +3039,7 @@ class CompositeDocument(QWidget):
                 avail = last.get(tool_id)
                 entry.setEnabled(True if avail is None else avail.enabled)
                 if avail is not None and not avail.enabled:
-                    reason = avail.reason or "当前不可用"
+                    reason = getattr(avail, "reason", None) or getattr(avail, "disabled_reason", None) or "当前不可用"
                     entry.setToolTip(f"{label}（{reason}）")
                 count += 1
         self._overflow_button.setVisible(count > 0)
