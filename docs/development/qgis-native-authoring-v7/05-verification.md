@@ -62,15 +62,39 @@ tests/test_workstation_context.py tests/test_workstation_lifecycle.py
   单文件运行下**通过**——证实为顺序污染（table_preview + theme
   setStyleSheet 链在 Qt 全局样式表更新时的死循环），08-7 记录。
 
-### 1.6 QGIS 腿（PALEO_REQUIRE_QGIS=1；桥构建完成后）
+### 1.6 QGIS 腿（PALEO_REQUIRE_QGIS=1；已执行，有证据）
 
-- [ ] vendored QGIS 4.2.0 构建（Windows 首建）成功 + 产物清单
-- [ ] `qgis_render_bridge` 0.3.0a0 扩展构建成功（setup.py Windows 路径）
-- [ ] `PALEO_REQUIRE_QGIS=1 pytest -m qgis`：43 个既有 QGIS 文件 + 
-      `test_qgis_v7_authoring.py` 全绿（含 capability manifest 权威性、
-      validate/reshape、原生 measure、endpoint/intersection 下推）
-- [ ] `probe_qgis_capability()` → available；工作站 `_qgis_capability`
-      token 注入端到端
+- [x] vendored QGIS 4.2.0 构建（Windows 首建）成功：`output/lib` 三 lib +
+      `output/bin` 三 DLL + `resources/srs.db`；运行时目录自包含（452 DLL，
+      含 OpenSSL 3.0 对 + Qt6Core5Compat）。
+- [x] `qgis_render_bridge` 0.3.0a0 扩展构建成功（setup.py Windows 路径：
+      Qt include/lib 布局、vendor cmake flags、全 Qt link 集、dep 头）。
+- [x] `PALEO_REQUIRE_QGIS=1 pytest -m qgis`（PROJ_DATA 指向 vcpkg proj.db）：
+      **194 passed**，43 个既有 QGIS 文件全绿 + `test_qgis_v7_authoring.py`
+      15/15（含 capability manifest 权威性、validate/reshape、原生 measure、
+      endpoint/intersection 下推）。剩余：3 个栅格测试需 osgeo（Windows venv
+      无，Linux CI 有；V7 矢量范围外）+ 1 个既有 QMenu teardown error。
+- [x] `probe_qgis_capability()` → available；工作站 `_qgis_capability`
+      token 注入端到端（`test_sessions_carry_engine_token`）。
+- [x] Review-3 后回归：QGIS 腿 194 passed（同口径）；headless 受影响文件
+      278 passed（contracts/workstation/stability/composite/gis/action/
+      tools/topology/dock/mapping-page/context/lifecycle/round3）。
+
+## 4. Windows loader 共存证据（V7 独有）
+
+- 单 Qt 规则：进程 Qt 唯一来自 PySide6 6.8.3（C:/deps Qt 6.8.0 只做编译期
+  头/库，不进运行时）；vendored QGIS DLL 按 6.8.0 构建、跑在 6.8.3 上
+  （Qt 小版本前向兼容，实测 QgisMapStack 初始化/画布/工具全通）。
+- MSVCP 预占：numpy 私有 trimmed msvcp 先占坑会导致 VS2022 构建的 QGIS
+  DLL 报 WinError 127——`.pth` 在 site 初始化期预占系统最新版 + ensure
+  内重复（幂等），contract 全文件 63 passed 为证。
+- OpenSSL 对齐：uv python 占坑 libcrypto 3.5.5；vendor 栈换 conda 3.0 对
+  （前向兼容方向正确），vcpkg 3.6.3 封存備用。
+- CRT 伪 DLL 清理：vendor bin 删除 api-ms-win-*/msvcp/vcruntime 伪 DLL，
+  PATH 前置不再遮蔽系统解析；`os.add_dll_directory` 顺序 vendor 首位。
+- QtLogHandler 双版本兼容：不重写 `logging.Handler.emit`（PySide6 6.8 的
+  Shiboken 把 SignalInstance.emit 误路由到同名实例方法），改写 `handle`
+  入口——6.8/6.11 双绿。
 
 ## 2. 三轮 Review
 
