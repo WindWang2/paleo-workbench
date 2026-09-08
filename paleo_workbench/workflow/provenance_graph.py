@@ -136,44 +136,47 @@ def build_product_lifecycle_graph(
                 )
                 add_edge(task_node_id, group_node_id, "consumed_constraints")
 
-        # fusion outputs referenced through the run parameters, when the
-        # catalog is available
-        if catalog_service is not None:
-            try:
-                for run in catalog_service.document.runs:
-                    if str(run.operation) not in (
-                        "factor_fusion",
-                        "factor_fusion:confidence",
-                        "factor_fusion:variance",
-                    ):
-                        continue
-                    for version_id in run.output_version_ids or []:
-                        node_id = add_node(
+    # Fusion lineage: project-level section (V8 review R2 — hoisted out of
+    # the per-product loop: it was duplicated per record and O(products x
+    # runs)). Lazy-safe list_runs (document.runs is EMPTY pre-warm).
+    if catalog_service is not None:
+        try:
+            runs = catalog_service.list_runs()
+        except Exception:  # noqa: BLE001 — catalog access is optional
+            runs = None
+            gaps.append(
+                {
+                    "scope": "catalog",
+                    "reason": "catalog runs not readable — fusion lineage omitted",
+                }
+            )
+        if runs is not None:
+            for run in runs:
+                if str(run.operation) not in (
+                    "factor_fusion",
+                    "factor_fusion:confidence",
+                    "factor_fusion:variance",
+                ):
+                    continue
+                for version_id in run.output_version_ids or []:
+                    node_id = add_node(
+                        _node(
+                            f"version:{version_id}",
+                            "fusion_output",
+                            f"{run.operation} {str(version_id)[:12]}…",
+                            version_id=str(version_id),
+                            run_id=str(run.id),
+                        )
+                    )
+                    for parent in run.input_version_ids or []:
+                        parent_node = add_node(
                             _node(
-                                f"version:{version_id}",
-                                "fusion_output",
-                                f"{run.operation} {str(version_id)[:12]}…",
-                                version_id=str(version_id),
-                                run_id=str(run.id),
+                                f"version:{parent}",
+                                "factor_output",
+                                f"input {str(parent)[:12]}…",
+                                version_id=str(parent),
                             )
                         )
-                        for parent in run.input_version_ids or []:
-                            parent_node = add_node(
-                                _node(
-                                    f"version:{parent}",
-                                    "factor_output",
-                                    f"input {str(parent)[:12]}…",
-                                    version_id=str(parent),
-                                )
-                            )
-                            add_edge(parent_node, node_id, "fusion_input")
-            except Exception:  # noqa: BLE001 — catalog access is optional
-                gaps.append(
-                    {
-                        "scope": "catalog",
-                        "reason": "catalog document not readable — fusion "
-                        "lineage omitted",
-                    }
-                )
+                        add_edge(parent_node, node_id, "fusion_input")
 
     return {"nodes": nodes, "edges": edges, "gaps": gaps}

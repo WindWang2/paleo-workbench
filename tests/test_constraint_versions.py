@@ -157,7 +157,7 @@ class TestPinsAndStaleness:
         verdict = constraint_pins_staleness(task, project, catalog=None)
         assert verdict["state"] == "stale_content"
         entry = next(e for e in verdict["groups"] if e["state"] == "stale_content")
-        assert "constraint geometry changed" in entry["detail"]
+        assert "constraint content changed" in entry["detail"]
 
     def test_new_commit_marks_stale_version_not_content(self, project, catalog):
         task = FactorMapTask(
@@ -252,16 +252,16 @@ class TestCompareAndResolve:
         self, project, catalog
     ):
         verdict = resolve_constraint_ref(project, catalog, "constraints:current")
-        assert verdict["status"].value == "unknown"
+        assert verdict["status"] == "unknown"
 
     def test_resolve_constraints_current_clean_then_stale(self, project, catalog):
         group = project.constraint_layers[0]
         commit_constraint_group(project, catalog, group)
         verdict = resolve_constraint_ref(project, catalog, "constraints:current")
-        assert verdict["status"].value == "current"
+        assert verdict["status"] == "current"
         group.lines[0].coordinates = [[0.0, 0.0], [20.0, 0.0]]
         verdict2 = resolve_constraint_ref(project, catalog, "constraints:current")
-        assert verdict2["status"].value == "stale"
+        assert verdict2["status"] == "stale"
         assert "differs from latest commit" in verdict2["detail"]
 
     def test_resolve_pinned_constraint_ref_superseded(self, project, catalog):
@@ -269,11 +269,11 @@ class TestCompareAndResolve:
         first = commit_constraint_group(project, catalog, group)
         ref = f"constraints:{group.id}:{first.version_id}"
         verdict = resolve_constraint_ref(project, catalog, ref)
-        assert verdict["status"].value == "current"
+        assert verdict["status"] == "current"
         group.lines[0].coordinates = [[0.0, 0.0], [30.0, 3.0]]
         commit_constraint_group(project, catalog, group)
         verdict2 = resolve_constraint_ref(project, catalog, ref)
-        assert verdict2["status"].value == "superseded"
+        assert verdict2["status"] == "superseded"
 
 
 class TestContentHash:
@@ -298,3 +298,47 @@ class TestContentHash:
         g.lines[0].active = False                       # deactivated
         _h, n = constraint_group_content_hash(g)
         assert n == 0
+
+
+class TestReviewR2LazyAndPort:
+    def test_lazy_reopen_does_not_create_second_asset(self, project, catalog):
+        """R2-P0: a lazy-opened service has an EMPTY document pre-warm — the
+        old catalog.document scan saw the group as uncommitted and created a
+        duplicate asset on the second commit."""
+        group = project.constraint_layers[0]
+        first = commit_constraint_group(project, catalog, group)
+        catalog.close()
+
+        from paleo_workbench.catalog.service import DataCatalogService
+
+        lazy = DataCatalogService.open(catalog.project_path, lazy=True, sweep_temp=False)
+        try:
+            group.lines[0].coordinates = [[0.0, 0.0], [42.0, 0.0]]
+            second = commit_constraint_group(project, lazy, group)
+            assert second.committed
+            assert second.asset_id == first.asset_id  # ONE asset, version 2
+            versions = lazy.list_versions(first.asset_id)
+            assert len(versions) == 2
+        finally:
+            lazy.close()
+
+    def test_port_adapter_is_unwrapped(self, project, catalog):
+        """R2-P1: the mapping workspace injects a CoreCatalogAdapter — the
+        resolve path must unwrap .service instead of crashing on .document."""
+        from paleo_workbench.catalog.adapter import CoreCatalogAdapter
+        from paleo_workbench.workflow.constraint_versions import (
+            current_constraint_version,
+        )
+
+        group = project.constraint_layers[0]
+        commit_constraint_group(project, catalog, group)
+        port = CoreCatalogAdapter(catalog)
+        version = current_constraint_version(port, group.id)
+        assert version is not None
+
+        from paleo_workbench.workflow.constraint_versions import (
+            resolve_constraint_ref,
+        )
+
+        verdict = resolve_constraint_ref(project, port, "constraints:current")
+        assert verdict["status"] == "current"

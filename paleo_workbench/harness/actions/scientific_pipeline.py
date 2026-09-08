@@ -341,9 +341,12 @@ def _factor_interpolate(context: ActionContext, parameters: dict) -> dict:
     except Exception as exc:
         # Cancellation is first-class: geoviz JobCancelled / scheduler
         # TaskCancelled must reach the executor's CANCELLED mapping, never
-        # be laundered into a FAILED payload (review R1-P1).
-        name = type(exc).__name__
-        if "Cancel" in name:
+        # be laundered into a FAILED payload (review R1-P1). Explicit
+        # tuple — name heuristics misroute future exceptions (R2-P2).
+        from geoviz import JobCancelled as _JobCancelled
+        from paleo_workbench.runtime.task_scheduler import TaskCancelled
+
+        if isinstance(exc, (TaskCancelled, _JobCancelled)):
             raise
         return {
             "error": "failed",
@@ -397,12 +400,12 @@ def _verify_factor_interpolate(payload, parameters, context) -> dict:
 
 
 def _factor_polygonize(context: ActionContext, parameters: dict) -> dict:
-    import numpy as np
-
     from paleo_workbench.mapping.geological_pipeline.polygonization import (
-        _polygonize_raster_boundaries,
+        polygonize_factor_grid,
     )
-    from paleo_workbench.project.factor_grid_artifacts import factor_grid_result_for_task
+    from paleo_workbench.project.factor_grid_artifacts import (
+        factor_grid_result_for_task,
+    )
 
     task = _find_task(context, str(parameters.get("task", "")))
     if task is None:
@@ -413,27 +416,16 @@ def _factor_polygonize(context: ActionContext, parameters: dict) -> dict:
             "error": "unavailable",
             "detail": "任务没有可用的因子网格（先运行插值）",
         }
-    z = np.asarray(grid.grid_z, dtype=float)
-    level = (
-        float(parameters["level"])
-        if parameters.get("level") is not None
-        else float(np.nanmedian(z))
+    result = polygonize_factor_grid(
+        grid,
+        level=(
+            float(parameters["level"])
+            if parameters.get("level") is not None
+            else None
+        ),
     )
-    class_grid = (z >= level).astype(int)
-    # (xmin, ymin, xmax, ymax) — the polygonizer's unpack order; grid.extent
-    # is the authority (review R1-P1: a hand-built (xmin, xmax, ymin, ymax)
-    # tuple produced garbage geometry).
-    extent = grid.extent
-    polygons, counts = _polygonize_raster_boundaries(class_grid, z, extent, 1)
-    return {
-        "task": task.name,
-        "level": level,
-        "n_polygons": len(polygons),
-        "counts": counts,
-        "polygons": polygons[:500],  # bounded payload; caller can page
-        "truncated": len(polygons) > 500,
-        "crs": grid.crs,
-    }
+    return {"task": task.name, **result}
+
 
 
 def _factor_compare_versions(context: ActionContext, parameters: dict) -> dict:
@@ -631,12 +623,10 @@ def _fusion_run(context: ActionContext, parameters: dict) -> dict:
             "error": "rejected",
             "detail": "证据集中没有单因素证据（factor 条目）",
         }
-    from paleo_workbench.catalog.runtime import get_catalog_service
-
-    try:
-        catalog = get_catalog_service()
-    except Exception:
-        catalog = None
+    # injected port only — the harness never opens databases by itself
+    # (ActionContext contract; review R2-P1: the process-global singleton
+    # could target the wrong project's catalog).
+    catalog = _catalog_service(context)
     register = bool(parameters.get("register", True)) and catalog is not None
     try:
         summary = run_integrated_fusion(

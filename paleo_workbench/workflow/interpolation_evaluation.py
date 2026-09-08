@@ -454,6 +454,89 @@ def _validate_recommendation_context(
     return warnings, None
 
 
+def adjudicate_recommendation(
+    entries: list[dict[str, Any]],
+    *,
+    gate: str | None = None,
+    unknown_constraints: list[str] | None = None,
+    scheme_caveat: str = "",
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Shared recommendation adjudication (V8 M4, single authority — review
+    R2-P1: the per-method and shared-fold callers used to carry two
+    verbatim copies that already drifted once).
+
+    Applies, in order: the fail-closed gate (unknown unit / invalid CRS /
+    unknown constraint names — nothing recommended, every entry says why),
+    capability disqualification (``:unsupported:``), then metric-best among
+    ELIGIBLE entries only. Mutates entries with ``recommended``/``rationale``
+    and returns ``(entries, recommended_method)``.
+    """
+    gate_rationale = {
+        "unit_unknown": (
+            "no recommendation: measurement unit is unknown — cross-method "
+            "ranking on ununitized data is not a defensible comparison"
+        ),
+        "crs_invalid": (
+            "no recommendation: declared CRS is invalid/unparseable — "
+            "distances and folds cannot be trusted"
+        ),
+    }.get(gate or "")
+    if gate_rationale is None and unknown_constraints:
+        gate_rationale = (
+            "no recommendation: requested constraint(s) "
+            f"{unknown_constraints!r} are unknown to the capability matrix — "
+            "no method can be certified as honoring them"
+        )
+
+    def _score(entry: dict[str, Any]) -> float:
+        metrics = entry.get("metrics") or {}
+        rmse = metrics.get("rmse")
+        return float(rmse) if rmse is not None else float("inf")
+
+    def _eligible(entry: dict[str, Any]) -> bool:
+        return entry.get("metrics") is not None and not any(
+            ":unsupported:" in w for w in entry.get("capability_warnings") or []
+        )
+
+    best: str | None = None
+    scorable = [e for e in entries if _eligible(e)]
+    if scorable:
+        best = min(scorable, key=_score)["method"]
+
+    for entry in entries:
+        if entry.get("metrics") is None:
+            continue  # rationale already set by the caller
+        unsupported = any(
+            ":unsupported:" in w
+            for w in entry.get("capability_warnings") or []
+        )
+        caveat = f"; caveat: {scheme_caveat}" if scheme_caveat else ""
+        if gate_rationale is not None:
+            entry["recommended"] = False
+            entry["rationale"] = gate_rationale
+        elif unsupported:
+            entry["recommended"] = False
+            entry["rationale"] = (
+                "disqualified: requested constraints ignored by this method "
+                "(capability matrix) — metrics alone cannot justify it"
+            )
+        elif entry["method"] == best:
+            entry["recommended"] = True
+            entry["rationale"] = (
+                "best cross-validated RMSE among methods that honor every "
+                "requested constraint" + caveat
+            )
+        else:
+            entry["recommended"] = False
+            entry["rationale"] = f"higher cross-validated RMSE than {best!r}" + caveat
+    recommended_method = (
+        None
+        if gate_rationale is not None
+        else next((e["method"] for e in entries if e.get("recommended")), None)
+    )
+    return entries, recommended_method
+
+
 def recommend_interpolation_methods(
     points: Sequence[Mapping[str, Any]],
     *,
@@ -537,79 +620,21 @@ def recommend_interpolation_methods(
             }
         )
 
-    def _score(entry: dict[str, Any]) -> float:
-        metrics = entry.get("metrics") or {}
-        rmse = metrics.get("rmse")
-        return float(rmse) if rmse is not None else float("inf")
-
-    # choose the metric-best among ELIGIBLE entries only: a disqualified
-    # method must never become the bar other entries are compared against
-    # (review R1-P2).
-    def _eligible(entry: dict[str, Any]) -> bool:
-        return entry.get("metrics") is not None and not any(
-            ":unsupported:" in w for w in entry.get("capability_warnings") or []
-        )
-
-    best_metric_method: str | None = None
-    scorable = [e for e in entries if _eligible(e)]
-    if scorable:
-        best_metric_method = min(scorable, key=_score)["method"]
-
-    gate_rationale = {
-        "unit_unknown": (
-            "no recommendation: measurement unit is unknown — cross-method "
-            "ranking on ununitized data is not a defensible comparison"
-        ),
-        "crs_invalid": (
-            "no recommendation: declared CRS is invalid/unparseable — "
-            "distances and folds cannot be trusted"
-        ),
-    }.get(gate)
-    if gate_rationale is None and unknown_constraints:
-        gate_rationale = (
-            "no recommendation: requested constraint(s) "
-            f"{unknown_constraints!r} are unknown to the capability matrix — "
-            "no method can be certified as honoring them"
-        )
-
-    for entry in entries:
-        warnings = entry.get("capability_warnings") or []
-        unsupported = any(":unsupported:" in w for w in warnings)
-        if entry.get("metrics") is None:
-            continue  # rationale already set
-        if gate_rationale is not None:
-            entry["recommended"] = False
-            entry["rationale"] = gate_rationale
-        elif unsupported:
-            entry["recommended"] = False
-            entry["rationale"] = (
-                "disqualified: requested constraints ignored by this method "
-                "(capability matrix) — metrics alone cannot justify it"
-            )
-        elif entry["method"] == best_metric_method:
-            entry["recommended"] = True
-            entry["rationale"] = (
-                "best cross-validated RMSE among methods that honor every "
-                "requested constraint"
-            )
-        else:
-            entry["recommended"] = False
-            entry["rationale"] = (
-                f"higher cross-validated RMSE than {best_metric_method!r}"
-            )
+    entries, recommended_method = adjudicate_recommendation(
+        entries,
+        gate=gate,
+        unknown_constraints=unknown_constraints or None,
+    )
     return {
         "scheme": "spatial_kfold_surface",
         "k": k,
         "requested_constraints": requested,
         "unit": unit,
         "crs": crs,
-        "recommendation_gate": gate or ("unknown_constraints" if unknown_constraints and gate is None else None),
+        "recommendation_gate": gate
+        or ("unknown_constraints" if unknown_constraints and gate is None else None),
         "methods": entries,
-        "recommended_method": (
-            None
-            if gate_rationale is not None
-            else next((e["method"] for e in entries if e.get("recommended")), None)
-        ),
+        "recommended_method": recommended_method,
     }
 
 

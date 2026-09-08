@@ -168,10 +168,19 @@ def constraint_group_content_hash(group: Any) -> tuple[str, int]:
     return _payload_hash(content), len(content_lines)
 
 
+def _as_service(catalog: Any) -> DataCatalogService:
+    """Unwrap a CatalogPort adapter to the underlying service (no-op for a
+    raw service) — callers inject either shape (review R2-P1)."""
+    return getattr(catalog, "service", catalog)
+
+
 def _constraint_assets(catalog: DataCatalogService) -> list[Any]:
+    # Lazy-safe PUBLIC lookup: catalog.document is EMPTY pre-warm on a
+    # lazy-opened service (the production GUI path) — scanning it created
+    # a SECOND asset per group on re-commit (review R2-P0).
     return [
         asset
-        for asset in (getattr(catalog.document, "assets", None) or [])
+        for asset in catalog.list_assets()
         if str(getattr(asset, "type", "") or "") == CONSTRAINT_ASSET_TYPE
     ]
 
@@ -185,15 +194,9 @@ def _asset_for_group(catalog: DataCatalogService, group_id: str) -> Any | None:
 
 
 def _latest_version(catalog: DataCatalogService, asset_id: str) -> Any | None:
-    versions = [
-        v
-        for v in (getattr(catalog.document, "versions", None) or [])
-        if str(getattr(v, "asset_id", "") or "") == str(asset_id)
-    ]
-    if not versions:
-        return None
-    versions.sort(key=lambda v: (getattr(v, "version_number", 0) or 0))
-    return versions[-1]
+    # list_versions is the lazy-safe per-asset path (already version-sorted).
+    versions = catalog.list_versions(str(asset_id))
+    return versions[-1] if versions else None
 
 
 def _write_payload(payload: dict[str, Any]) -> Path:
@@ -353,9 +356,10 @@ def commit_all_constraints(
 
 
 def current_constraint_version(
-    catalog: DataCatalogService, group_id: str
+    catalog: Any, group_id: str
 ) -> Any | None:
     """Latest committed catalog version for a constraint group (None = never)."""
+    catalog = _as_service(catalog)
     asset = _asset_for_group(catalog, str(group_id))
     if asset is None:
         return None
@@ -418,17 +422,13 @@ def _version_by_content_hash(
         return None
     matches = [
         v
-        for v in (getattr(catalog.document, "versions", None) or [])
-        if str(getattr(v, "asset_id", "") or "") == str(asset.id)
-        and str(
+        for v in catalog.list_versions(str(asset.id))
+        if str(
             dict(getattr(v, "metadata", None) or {}).get("content_hash") or ""
         )
         == str(content_hash)
     ]
-    if not matches:
-        return None
-    matches.sort(key=lambda v: (getattr(v, "version_number", 0) or 0))
-    return matches[-1]
+    return matches[-1] if matches else None  # list_versions is sorted
 
 
 def constraint_pins_staleness(
@@ -448,6 +448,7 @@ def constraint_pins_staleness(
     hash identifies exactly one committed state (content-addressed), so a
     matching commit IS the pinned version, deterministically.
     """
+    catalog = _as_service(catalog) if catalog is not None else None
     pins = pinned_constraint_pins(task)
     pin_by_group = {str(pin.get("group_id")): pin for pin in pins}
     task_horizon = str(getattr(task, "target_horizon", "") or "")
@@ -600,8 +601,10 @@ def resolve_constraint_ref(
     UNKNOWN when nothing was ever committed (the pre-V8 honest state).
     ``constraints:<group_id>:<version_id>`` — pinned commit vs latest commit.
     """
-    from paleo_workbench.mapping_workspace.dependencies import FreshnessStatus
-
+    # Verdicts are plain strings here — dependencies.py maps them to its
+    # FreshnessStatus enum, avoiding a workflow→mapping_workspace import
+    # cycle (review R2-P2).
+    catalog = _as_service(catalog) if catalog is not None else None
     ref = str(ref or "")
     if ref == "constraints:current":
         groups = getattr(project, "constraint_layers", None) or []
@@ -633,11 +636,7 @@ def resolve_constraint_ref(
                     f"{group.name or group.id}: document content differs from "
                     f"latest commit {str(latest.id)[:12]}…"
                 )
-        status = {
-            None: FreshnessStatus.CURRENT if details else FreshnessStatus.UNKNOWN,
-            "unknown": FreshnessStatus.UNKNOWN,
-            "stale": FreshnessStatus.STALE,
-        }[worst]
+        status = "current" if (worst is None and details) else (worst or "unknown")
         return {"status": status, "detail": "; ".join(details) or "no constraints"}
 
     if ref.startswith("constraints:"):
@@ -646,22 +645,22 @@ def resolve_constraint_ref(
         version_id = parts[2] if len(parts) > 2 else ""
         if not version_id or catalog is None:
             return {
-                "status": FreshnessStatus.UNKNOWN,
+                "status": "unknown",
                 "detail": "pinned constraint ref without version or catalog",
             }
         latest = current_constraint_version(catalog, group_id)
         if latest is None:
             return {
-                "status": FreshnessStatus.UNKNOWN,
+                "status": "unknown",
                 "detail": f"constraint group {group_id!r} has no commits",
             }
         if str(latest.id) == version_id:
-            return {"status": FreshnessStatus.CURRENT, "detail": "pinned commit is latest"}
+            return {"status": "current", "detail": "pinned commit is latest"}
         return {
-            "status": FreshnessStatus.SUPERSEDED,
+            "status": "superseded",
             "detail": (
                 f"constraint group has a newer commit {str(latest.id)[:12]}… "
                 f"(pinned {version_id[:12]}…)"
             ),
         }
-    return {"status": FreshnessStatus.UNKNOWN, "detail": f"unrecognized ref {ref!r}"}
+    return {"status": "unknown", "detail": f"unrecognized ref {ref!r}"}

@@ -1329,71 +1329,22 @@ def evaluate_methods_for_task(
             }
         )
 
-    def _score(entry: dict[str, Any]) -> float:
-        metrics = entry.get("metrics") or {}
-        rmse = metrics.get("rmse")
-        return float(rmse) if rmse is not None else float("inf")
+    from paleo_workbench.workflow.interpolation_evaluation import (
+        adjudicate_recommendation,
+    )
 
-    def _eligible(entry: dict[str, Any]) -> bool:
-        return entry.get("metrics") is not None and not any(
-            ":unsupported:" in w for w in entry.get("capability_warnings") or []
-        )
-
-    best: str | None = None
-    scorable = [e for e in entries if _eligible(e)]
-    if scorable:
-        best = min(scorable, key=_score)["method"]
-
-    gate_rationale = {
-        "unit_unknown": (
-            "no recommendation: measurement unit is unknown — cross-method "
-            "ranking on ununitized data is not a defensible comparison"
-        ),
-        "crs_invalid": (
-            "no recommendation: declared CRS is invalid/unparseable — "
-            "distances and folds cannot be trusted"
-        ),
-    }.get(gate)
-    if gate_rationale is None and unknown_constraints:
-        gate_rationale = (
-            "no recommendation: requested constraint(s) "
-            f"{unknown_constraints!r} are unknown to the capability matrix — "
-            "no method can be certified as honoring them"
-        )
     scheme_caveat = (
         "schemes differ across methods (loo_exact vs kfold_surface) — RMSE "
         "comparison is indicative, not a controlled experiment"
         if len(schemes) > 1
         else ""
     )
-
-    for entry in entries:
-        warnings = entry.get("capability_warnings") or []
-        unsupported = any(":unsupported:" in w for w in warnings)
-        if entry.get("metrics") is None:
-            continue
-        if gate_rationale is not None:
-            entry["recommended"] = False
-            entry["rationale"] = gate_rationale
-        elif unsupported:
-            entry["recommended"] = False
-            entry["rationale"] = (
-                "disqualified: requested constraints ignored by this method "
-                "(capability matrix) — metrics alone cannot justify it"
-            )
-        elif entry["method"] == best:
-            entry["recommended"] = True
-            entry["rationale"] = (
-                "best cross-validated RMSE among methods that honor every "
-                "requested constraint"
-                + (f"; caveat: {scheme_caveat}" if scheme_caveat else "")
-            )
-        else:
-            entry["recommended"] = False
-            entry["rationale"] = (
-                f"higher cross-validated RMSE than {best!r}"
-                + (f"; caveat: {scheme_caveat}" if scheme_caveat else "")
-            )
+    entries, recommended_method = adjudicate_recommendation(
+        entries,
+        gate=gate,
+        unknown_constraints=unknown_constraints or None,
+        scheme_caveat=scheme_caveat,
+    )
     return {
         "scheme": "per_method_production_cv",
         "k": k,
@@ -1403,11 +1354,7 @@ def evaluate_methods_for_task(
         "recommendation_gate": gate
         or ("unknown_constraints" if unknown_constraints else None),
         "methods": entries,
-        "recommended_method": (
-            None
-            if gate_rationale is not None
-            else next((e["method"] for e in entries if e.get("recommended")), None)
-        ),
+        "recommended_method": recommended_method,
     }
 
 

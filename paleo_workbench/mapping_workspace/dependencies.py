@@ -41,6 +41,14 @@ class FreshnessStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
+#: constraint_versions.resolve_constraint_ref verdict strings → enum
+_FRESHNESS_FROM_CONSTRAINT = {
+    "current": FreshnessStatus.CURRENT,
+    "stale": FreshnessStatus.STALE,
+    "superseded": FreshnessStatus.SUPERSEDED,
+    "unknown": FreshnessStatus.UNKNOWN,
+}
+
 _STATUS_LABELS = {
     FreshnessStatus.CURRENT: "最新",
     FreshnessStatus.STALE: "已过期",
@@ -333,7 +341,13 @@ class MappingDependencyService:
                         )
 
                         verdict = resolve_constraint_ref(document, catalog, value)
-                        status = verdict["status"]
+                        # constraint_versions speaks plain verdict strings
+                        # (no upward import) — map them onto our enum here.
+                        status = _FRESHNESS_FROM_CONSTRAINT.get(
+                            str(verdict["status"])
+                        )
+                        if status is None:
+                            status = FreshnessStatus.UNKNOWN
                         if status is not FreshnessStatus.CURRENT and (
                             status is not FreshnessStatus.UNKNOWN
                             and worst is not FreshnessStatus.MISSING_INPUT
