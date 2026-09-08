@@ -64,3 +64,12 @@
   可用性冻结、三套阶段词表派生化。
 - M14: docs 04-08 完成；00-03 已在早前落盘。
 - 最终：docs 9 文件齐、114 新测试、基线 32 张、PR 待建。
+
+## Session 2026-09-08 (final)
+- 全量终扫两部分：A 3036 passed/34 failed（全部 pre-existing 环境域，
+  diff 为空 + main 复现抽验）；B 14% 处已知 GC-flaky 崩溃。
+- 注意：后台 shell 会重置到 main checkout——worktree 命令必须显式 cd
+  （本次一度在 main 用 main venv 跑出误导性失败）。
+- PR #1235 已创建：https://github.com/WindWang2/paleo-workbench/pull/1235
+- Goal 完成：14 commits、129 文件 +6668/-879、114 新测试、9 文档、
+  32 基线、3 轮评审 P0/P1 清零。
