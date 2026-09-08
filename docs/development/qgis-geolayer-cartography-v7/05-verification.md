@@ -26,12 +26,19 @@ Neighbouring regression suites (stage e2e, factor pipeline, workspace
 domain, topology, map product, composer, export parity) — green after each
 phase; consolidated numbers in §3.
 
-## 2. Bridge layers (⏳ vendor build)
+## 2. Bridge layers (DONE — first Windows run, 2026-09-08)
 
-| Suite | Covers |
-|---|---|
-| tests/test_qgis_scalar_raster_v7.py (new) | §5 renderer XML codec round-trip, raster mirror lifecycle + project-XML roundtrip, bad-payload rejection; §9 canvas delta apply + stale-base fallback; offscreen scalar render pixels; style-only mirror reuse diagnostics |
-| tests/ -m qgis (46 pre-existing files) | the full existing bridge contract on this machine for the first time |
+Vendor QGIS 4.2.0 (core/gui/analysis + srs.db) built with MSVC 14.38 at a
+neutral reusable path (see 04-implementation-notes); bridge extension links
+Qt6Core/Gui/Widgets/Xml/Svg/PrintSupport + 3 qgis libs.  Runtime recipe
+(tests/conftest.py): two DLL dirs + conda-Qt-first preload + geo-C-lib
+preloads (bisected minimal set — extra dirs break the loader with
+same-named DLLs).
+
+| Suite | Covers | Result |
+|---|---|---|
+| tests/test_qgis_scalar_raster_v7.py (new) | renderer XML codec, raster mirror lifecycle + project-XML roundtrip, bad-payload rejection; canvas delta; offscreen scalar render; style-reuse diagnostics | 8 PASS |
+| tests/ -m qgis (all files) | full existing bridge contract on Windows, first run | 192 PASS, 1 skipped, 1 teardown-only error (shiboken QMenu lifetime in a file untouched by this branch) |
 
 ## 3. Full-suite regression
 
@@ -43,7 +50,20 @@ phase; consolidated numbers in §3.
   perf/e2e/lod_render_path — RESULTS PENDING (in flight; final numbers
   recorded below when complete).
 
-<!-- FINAL_REGRESSION_RESULTS -->
+<!-- FINAL_REGRESSION_RESULTS (2026-09-08, worktree venv, offscreen)
+- Goal-owned + adjacent: 331 PASS (batch-mine)
+- core2 (catalog/well/harness): 306 PASS
+- mapping (stage/render/composer/export): 101 PASS
+- workflow (fusion/interp/QA): 212 PASS
+- UI: composite_gis + composite_editing 53 PASS (after fixing the
+  geometry_service dict-contract regression the branch introduced)
+- -m qgis: 192 PASS (above)
+- Pre-existing/env (verified on pristine main or untouched files):
+  catalog manifest human-readable (fails on main too);
+  composite_qgis_canvas 5 bridge-missing fails (identical on main);
+  theme-switch + seismic-3D suites hang single-process full runs here
+  (pass standalone/in batches; offscreen Qt event-loop exhaustion).
+-->
 
 ## 4. Performance
 
