@@ -462,16 +462,12 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                    const int items = elem.attribute(
                        QStringLiteral("colorrampshader")).toInt(&ok);
                    if (!ok) {
-                       // count <item> children as fallback
-                       int count = 0;
-                       for (QDomElement child = elem.firstChildElement(
-                                QStringLiteral("item"));
-                            !child.isNull();
-                            child = child.nextSiblingElement(
-                                QStringLiteral("item"))) {
-                           ++count;
-                       }
-                       info["item_count"] = count;
+                       // R3-6: QGIS nests <item> under
+                       // rastershader/colorrampshader — count ALL descendant
+                       // items, not just direct children.
+                       info["item_count"] = static_cast<int>(
+                           elem.elementsByTagName(
+                               QStringLiteral("item")).size());
                    } else {
                        info["item_count"] = items;
                    }
