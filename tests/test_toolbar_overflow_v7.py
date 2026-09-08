@@ -58,9 +58,13 @@ def test_wide_canvas_restores_groups(document, qtbot):
 
 
 def test_overflow_menu_respects_disabled_reason(document, qtbot):
-    """菜单条目继承禁用态与原因（如未开编辑的 factor 工具）。"""
+    """菜单条目继承禁用态与原因（如无桥的样式库工具）。"""
     from PySide6.QtWidgets import QApplication
 
+    # 有活动图层时 symbology 组才显示（V8 M1：无图层整组隐藏的原因会
+    # 盖过后端判词），先建图层让禁用原因来自后端三态。
+    document.edit_controller.create_layer("测试", "polygon")
+    document._sync_action_state()
     document.resize(600, 500)
     document._reposition_toolbar()
     QApplication.processEvents()

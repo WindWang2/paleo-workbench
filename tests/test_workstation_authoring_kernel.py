@@ -41,13 +41,16 @@ class TestEvaluatorIntegration:
         document = _document(qtbot, tmp_path)
         actions = document.action_controller.actions
 
-        # No layer: session tools invisible + navigation disabled (no canvas project
-        # state yet is still "open" — navigation on fallback canvas is available).
+        # No layer: session tools visible-but-disabled with the layer reason
+        # (V8 M1: A's old invisible behavior dropped); navigation on the
+        # fallback canvas is available (project open).
         ctx = document._build_tool_context()
         assert ctx.project_open
         assert not ctx.active_layer_id
         availability = evaluate_all(ctx)
-        assert not availability["add_polygon"].visible
+        assert availability["add_polygon"].visible
+        assert not availability["add_polygon"].enabled
+        assert availability["add_polygon"].disabled_reason == "没有活动的矢量图层"
         assert availability["pan"].enabled
 
         controller = document.edit_controller

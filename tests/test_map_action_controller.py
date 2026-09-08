@@ -1,17 +1,27 @@
-"""QAction enablement and exclusive map-tool contracts."""
+"""QAction enablement and exclusive map-tool contracts.
+
+V8 M1：``MapActionState``/``update_state`` 已删除——QAction 状态只经
+``apply_availability`` 消费 canonical evaluator
+（``mapping.tool_availability.evaluate_all``）的输出。
+"""
 
 from __future__ import annotations
 
 from PySide6.QtGui import QKeySequence
 
-from paleo_workbench.ui.map_action_controller import MapActionController, MapActionState
+from paleo_workbench.mapping.tool_availability import ToolContext, evaluate_all
+from paleo_workbench.ui.map_action_controller import MapActionController
+
+
+def _apply(controller: MapActionController, ctx: ToolContext) -> None:
+    controller.apply_availability(evaluate_all(ctx))
 
 
 def test_action_controller_disables_editing_without_a_vector_layer(qtbot) -> None:
     controller = MapActionController()
     qtbot.addWidget(controller.toolbar("Digitizing", ("toggle_editing", "add_polygon", "undo")))
 
-    controller.update_state(MapActionState())
+    _apply(controller, ToolContext())
 
     assert controller.actions["toggle_editing"].isEnabled() is False
     assert controller.actions["add_polygon"].isEnabled() is False
@@ -23,16 +33,19 @@ def test_action_controller_synchronizes_exclusive_tools_and_context_state(qtbot)
     controller = MapActionController()
     chosen: list[str] = []
     controller.tool_requested.connect(chosen.append)
-    controller.update_state(
-        MapActionState(
-            has_active_vector_layer=True,
-            vector_layer_writable=True,
+    _apply(
+        controller,
+        ToolContext(
+            active_layer_id="composite:L1",
+            active_layer_kind="polygon",
+            vector_writable=True,
             editing=True,
-            selected_count=2,
+            selection_count=2,
             compatible_polygon_count=2,
+            merge_ready=True,
             can_undo=True,
             can_redo=True,
-        )
+        ),
     )
 
     controller.actions["select"].trigger()
@@ -59,7 +72,7 @@ def test_action_controller_creates_real_grouped_qtoolbars(qtbot) -> None:
 
 def test_action_controller_tracks_bounded_extent_history_state() -> None:
     controller = MapActionController()
-    controller.update_state(MapActionState(can_previous_extent=True, can_next_extent=False))
+    _apply(controller, ToolContext(can_previous_extent=True, can_next_extent=False))
 
     assert controller.actions["previous_extent"].isEnabled()
     assert not controller.actions["next_extent"].isEnabled()

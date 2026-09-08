@@ -149,6 +149,10 @@ class QgisCanvasShim(QWidget):
     # V7/ADV-2：原生交互提交被会话拒绝时的人类可读原因（坏几何/重复 id/
     # 脱钩会话），宿主转 status_message——采点完成必须有回执。
     commit_rejected = Signal(str)
+    # V8/M1：原生 QgsMapTool 激活失败（payload: tool_id, reason）。宿主必须
+    # 回退 pan 并同步工具条 checked——按钮亮着但画布工具没换是「点了没
+    # 反应」类 UX 缺陷，必须可检测。
+    native_tool_activation_failed = Signal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -194,6 +198,9 @@ class QgisCanvasShim(QWidget):
         # 旧桥（<0.3.0）无原生测距——诚实降级为视口路由路径，不静默。
         self._native_measure_supported = self._probe_native_measure(QgisMapStack)
         self._measure_degrade_warned = False
+        # V8/M1：最近一次成功激活的原生工具 (tool_id, kind)；初值 pan
+        # （set_map_tool_controller 绑定时强制 pan）。
+        self._last_native_tool: tuple[str, str] = ("pan", "pan")
         # Qt 树析构期间触发的 destroyed 回调只做状态记账：半析构画布上再进
         # destroy_canvas/unsetMapTool 会踩悬空子对象（native 栈已证实）。
         # 画布的桥表回收由桥在 canvas destroyed 时自行完成；orderly 关闭仍走
@@ -631,6 +638,17 @@ class QgisCanvasShim(QWidget):
         self._tools_wrapped_target = None
         self._wrapped_func = None
 
+    def active_map_tool_id(self) -> str | None:
+        """画布当前实际原生工具的宿主侧 tool_id（原生画布不可用 → None）。
+
+        V8/M1 checked-state 一致性读取面：工具条 checked 必须与本值一致
+        （激活失败回退后尤其如此）。桥不要求新增 API——该值来自 shim 自身
+        对 ``set_map_tool`` 成败的记录。
+        """
+        if not self._canvas_created or self._canvas_destroyed:
+            return None
+        return self._last_native_tool[0]
+
     def set_map_tool_controller(self, controller) -> None:
         """Host 工具控制器绑定：pan/zoom/编辑工具映射到 QGIS 原生工具。
 
@@ -641,6 +659,7 @@ class QgisCanvasShim(QWidget):
         self._tool_controller = controller
         try:
             self.stack.set_map_tool(self.canvas_address, "pan")
+            self._last_native_tool = ("pan", "pan")
         except Exception:
             pass
         try:
@@ -698,6 +717,9 @@ class QgisCanvasShim(QWidget):
                         kind = "addLine"
                     try:
                         shim.stack.set_map_tool(addr, kind)
+                        # V8/M1：记录最近一次成功的原生工具（可检测一致性的
+                        # 读取面；checked 与画布实际工具不得漂移）。
+                        shim._last_native_tool = (tool_id or "pan", kind)
                     except Exception as exc:
                         # ADV-1：原生工具切换失败必须可见——工具条 checked
                         # 与画布实际工具分叉是"点了没反应"类 UX 缺陷。
@@ -706,6 +728,8 @@ class QgisCanvasShim(QWidget):
                         try:
                             shim.backend_status_changed.emit(
                                 f"qgis: 工具切换失败（{tool_id}）")
+                            shim.native_tool_activation_failed.emit(
+                                tool_id or "pan", str(exc))
                         except Exception:
                             pass
                     try:

@@ -148,15 +148,17 @@ def test_phase1_hides_add_line_via_evaluator(document):
 
 
 def test_style_manager_disabled_without_bridge(document):
-    # 本环境桥未构建（与 main 一致）——QGIS 原因必须可见。
+    # 本环境桥未构建（与 main 一致）——QGIS 原因必须可见。先建活动图层：
+    # 无图层时 symbology 组整组隐藏（V8 M1），后端判词要在组显示后才是
+    # 工具自己的禁用原因。
     actions = document.action_controller.actions
     if document.uses_native_stack:
         pytest.skip("桥已构建（本测试针对无桥环境）")
+    layer = _create_layer(document, "polygon")
+    _assign_role(document, layer.id, LayerRole.INITIAL_FACIES_DRAFT)
     assert not actions["style_manager"].isEnabled()
     assert "QGIS" in actions["style_manager"].statusTip()
     # 符号系统/图层属性走 fallback 对话框——不因缺桥禁用。
-    layer = _create_layer(document, "polygon")
-    _assign_role(document, layer.id, LayerRole.INITIAL_FACIES_DRAFT)
     assert actions["symbology"].isEnabled()
     assert actions["layer_properties"].isEnabled()
 
@@ -178,10 +180,15 @@ def test_tool_context_reflects_active_layer(document):
     layer = _create_layer(document, "line")
     _assign_role(document, layer.id, LayerRole.PALEO_SHORELINE)
     ctx = document.tool_context()
-    assert ctx.layer.kind == "line"
-    assert ctx.layer.role == LayerRole.PALEO_SHORELINE.value
-    assert ctx.layer.editable is True
-    assert ctx.stage == "facies_calibration"
+    # V8 canonical：扁平图层事实 + mapping_stage（无嵌套 .layer/.stage）。
+    assert ctx.active_layer_kind == "line"
+    assert ctx.layer_role == LayerRole.PALEO_SHORELINE.value
+    assert ctx.edit_gate_open is True
+    assert ctx.mapping_stage == "facies_calibration"
+    # 呈现快照仍可经文档取（状态条/inspector 消费）。
+    snapshot = document.active_layer_capability()
+    assert snapshot.kind == "line"
+    assert snapshot.editable is True
 
 
 # ---------------------------------------------------------------------------

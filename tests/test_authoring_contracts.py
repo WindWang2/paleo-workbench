@@ -206,7 +206,7 @@ class TestToolContext:
         assert ctx.current_tool == "pan"
         assert not ctx.editing
         assert ctx.edit_gate_open  # default allows (no gate injected)
-        assert ctx.contract_version == 1
+        assert ctx.contract_version == 2  # V8 M1 canonical contract
 
     def test_to_dict_serializable(self):
         ctx = build_tool_context(controller_state={"active_layer_id": "L"})
@@ -265,7 +265,7 @@ class TestNavigation:
 
     def test_extent_history_gates(self):
         av = evaluate_tool("previous_extent", _ctx(can_previous_extent=False))
-        assert not av.enabled and "视图历史" in av.disabled_reason
+        assert not av.enabled and "上一视图" in av.disabled_reason
         assert evaluate_tool("next_extent", _ctx(can_next_extent=True)).enabled
 
 
@@ -310,12 +310,18 @@ class TestInspection:
 class TestEditSession:
     def test_toggle_editing_gates(self):
         assert evaluate_tool("toggle_editing", _ctx(editing=False)).enabled
-        raw = evaluate_tool("toggle_editing", _ctx(raw_locked=True))
+        # V8 canonical：锁分类事实（raw_locked/stage_locked）只在宿主门禁
+        # 结论 edit_gate_open=False 时作为 fallback 判词。
+        raw = evaluate_tool(
+            "toggle_editing", _ctx(edit_gate_open=False, raw_locked=True))
         assert not raw.enabled and "RAW" in raw.disabled_reason
-        stage = evaluate_tool("toggle_editing", _ctx(stage_locked=True))
+        stage = evaluate_tool(
+            "toggle_editing", _ctx(edit_gate_open=False, stage_locked=True))
         assert not stage.enabled and "锁定" in stage.disabled_reason
         gate = evaluate_tool("toggle_editing", _ctx(edit_gate_open=False, edit_gate_reason="证据组锁定"))
         assert not gate.enabled and "证据组" in gate.disabled_reason
+        unknown = evaluate_tool("toggle_editing", _ctx(edit_gate_open=None))
+        assert not unknown.enabled and "未知" in unknown.disabled_reason
         assert not evaluate_tool("toggle_editing", _ctx(vector_writable=False)).enabled
 
     def test_save_edits_requires_dirty(self):
@@ -351,9 +357,12 @@ class TestCapture:
         assert evaluate_tool("add_point", _ctx(native_canvas_available=True, active_layer_kind="point", capability_flags=flags)).enabled
 
     def test_stage_profile_hides(self):
-        ctx = _ctx(hidden_by_stage_profile=frozenset({"add_polygon"}))
-        av = evaluate_tool("add_polygon", ctx)
+        # V8 canonical：阶段过滤由 mapping_stage 经 StageToolProfile 单点
+        # 推导（hidden_by_stage_profile 已删除）——phase1 隐藏 add_line。
+        ctx = _ctx(mapping_stage="facies_calibration")
+        av = evaluate_tool("add_line", ctx)
         assert not av.visible and "阶段" in av.disabled_reason
+        assert evaluate_tool("add_polygon", ctx).visible
 
 
 class TestGeometryCommands:
@@ -432,10 +441,14 @@ class TestCheckedAndVisible:
         assert evaluate_tool("toggle_editing", _ctx(editing=True)).checked
         assert not evaluate_tool("toggle_editing", _ctx(editing=False)).checked
 
-    def test_session_tools_invisible_without_layer(self):
+    def test_session_tools_visible_but_disabled_without_layer(self):
+        # V8 M1（intentional）：无活动图层的会话工具可见 + 禁用，判词统一
+        # 「没有活动的矢量图层」（旧 A-evaluator 的 invisible 行为已废弃）。
         for tool_id in ("add_point", "split", "save_edits", "undo"):
             av = evaluate_tool(tool_id, ToolContext(project_open=True))
-            assert not av.visible, tool_id
+            assert av.visible, tool_id
+            assert not av.enabled, tool_id
+            assert av.disabled_reason == "没有活动的矢量图层"
 
     def test_blocking_task_blocks_canvas_tools(self):
         ctx = _ctx(blocking_task="导出中")

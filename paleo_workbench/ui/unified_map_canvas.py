@@ -251,6 +251,9 @@ class UnifiedMapCanvas(QWidget):
     frame_ready = Signal(object)
     extent_changed = Signal(tuple)
     map_position_changed = Signal(tuple)
+    # V8/M1：与 QgisCanvasShim 对齐的信号面（fallback 画布永不发射——
+    # 原生工具激活失败是原生路径独有的概念；宿主按鸭子类型统一连接）。
+    native_tool_activation_failed = Signal(str, str)
     # Left-click (press+release without drag) in map coordinates, for hosts
     # without a tool controller (read-only maps) to hit-test features.
     map_clicked = Signal(tuple)
@@ -381,6 +384,14 @@ class UnifiedMapCanvas(QWidget):
                 if layer.source_version_id
             )
         )
+
+    def active_map_tool_id(self) -> str | None:
+        """V8/M1：fallback 画布无原生 QgsMapTool——恒 None（诚实）。
+
+        与 ``QgisCanvasShim.active_map_tool_id`` 构成同一鸭子接口，宿主
+        checked-state 一致性检查统一读取。
+        """
+        return None
 
     def set_map_tool_controller(self, controller) -> None:
         """Attach the one exclusive host map-tool controller.

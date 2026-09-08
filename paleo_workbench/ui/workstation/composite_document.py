@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench.mapping.capability_model import (
-    QgisCapabilitySnapshot,
+    QgisCapabilitySnapshot as QgisCapabilityManifest,
     probe_qgis_capability,
     snapshot_stable_hash,
 )
@@ -71,7 +71,6 @@ from paleo_workbench.ui.workstation.common import workstation_icon
 from paleo_workbench.ui.workstation.tool_surface import (
     LayerCapabilitySnapshot,
     QgisCapabilitySnapshot,
-    ToolAvailability,
     ToolContext,
     availability_for_context,
 )
@@ -246,9 +245,12 @@ class LayerManagerPanel(QFrame):
     # V7 §7：双击定位（zoom to layer；由 CompositeDocument 落地）。
     zoom_to_layer_requested = Signal(str)
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, parent: QWidget | None = None, *, repair_probe=None):
         super().__init__(parent)
         self.setObjectName("PanelCard")
+        # V8 M2：修复几何可用性探针（CompositeDocument 注入，消费 canonical
+        # evaluator——面板不自建第二套 kind/门禁判断；None = 无宿主，禁用）。
+        self._repair_probe = repair_probe
         self._layers: list = []
         self._canvas: QgisCanvasShim | None = None
         self._tree_connected = False
@@ -427,7 +429,15 @@ class LayerManagerPanel(QFrame):
             remove = menu.addAction(workstation_icon("map/tree-remove.svg"), "删除图层")
             menu.addSeparator()
             repair = menu.addAction("修复无效几何…")
-            repair.setEnabled(self._repair_available(layer_id))
+            # V8 M2：可用性与禁用原因来自 canonical evaluator（宿主探针），
+            # 面板不再自建 kind/门禁判断。
+            repair_avail = (
+                self._repair_probe(str(layer_id))
+                if callable(self._repair_probe) else None
+            )
+            repair.setEnabled(bool(repair_avail and repair_avail.enabled))
+            if repair_avail is not None and not repair_avail.enabled:
+                repair.setToolTip(f"不可用：{repair_avail.disabled_reason}")
             export = menu.addAction("导出图层…")
         else:
             open_table = toggle_edit = properties = symbology = labeling = None
@@ -463,11 +473,6 @@ class LayerManagerPanel(QFrame):
             self.repair_layer_requested.emit(layer_id)
         elif chosen is export:
             self.export_layer_requested.emit(layer_id)
-
-    def _repair_available(self, layer_id: str) -> bool:
-        """只有面图层存在 make-valid 修复语义。"""
-        kind = str((getattr(self.layer_by_id(layer_id), "metadata", None) or {}).get("geometry_kind") or "")
-        return kind == "polygon"
 
     def set_editing_layer(self, layer_id: str | None) -> None:
         """标记正在编辑的图层（树项前缀 ✏，QGIS 的 in-edit 视觉语义）。"""
@@ -859,7 +864,7 @@ class CompositeDocument(QWidget):
         self.edit_controller.set_edit_gate(self._role_allows_editing)
         # V7 能力快照：桥面（native/fallback）单次探测；会话的 EditDelta
         # 以此摘要记录引擎溯源（native 执行 vs shapely 兜底可审计）。
-        self._qgis_capability: QgisCapabilitySnapshot = probe_qgis_capability()
+        self._qgis_capability: QgisCapabilityManifest = probe_qgis_capability()
         self.edit_controller.set_qgis_capability_token(
             snapshot_stable_hash(self._qgis_capability)
             if self._qgis_capability.available
@@ -912,6 +917,11 @@ class CompositeDocument(QWidget):
         self.canvas.extent_changed.connect(_on_extent_changed)
         self.canvas.map_position_changed.connect(self._on_map_position)
         self.canvas.backend_status_changed.connect(lambda *_: self._sync_status_bar())
+        # V8/M1：原生 QgsMapTool 激活失败 → 回退 pan + 状态条原因（checked
+        # 与画布实际工具不得漂移）。fallback 画布有同名信号但永不发射。
+        native_failed = getattr(self.canvas, "native_tool_activation_failed", None)
+        if native_failed is not None:
+            native_failed.connect(self._on_native_tool_activation_failed)
         # V7：原生测距结果 → 状态栏（fallback 画布无此信号，鸭子类型跳过）。
         measure_updated = getattr(self.canvas, "measure_updated", None)
         if measure_updated is not None:
@@ -987,6 +997,9 @@ class CompositeDocument(QWidget):
         # V5 分层编图工作区：阶段状态机 + 图层组编排（同一画布/同一工程权威）。
         from paleo_workbench.mapping_workspace.controller import MappingStageController
         from paleo_workbench.mapping_workspace.layer_roles import LayerRole
+        from paleo_workbench.mapping_workspace.artifact_keys import (
+            candidate_artifact_keys,
+        )
 
         self.stage_controller = MappingStageController(parent=self)
         self._layer_role_enum = LayerRole
@@ -1069,7 +1082,7 @@ class CompositeDocument(QWidget):
         """图层管理面板跟随画布形态（两套面板请求信号同构，见类 docstring）。"""
         if self.uses_native_stack:
             return QgisLayerTreePanel()
-        return LayerManagerPanel()
+        return LayerManagerPanel(repair_probe=self._layer_repair_availability)
 
     def _rename_layer_prompt(self, layer_id: str) -> None:
         """回退树面板的改名请求：QInputDialog → edit_controller.rename_layer。"""
@@ -1089,15 +1102,13 @@ class CompositeDocument(QWidget):
     # -- 阶段工具面（V6 §4） ------------------------------------------------------
 
     def apply_stage_tool_profile(self, stage_value: str) -> None:
-        """按 ``StageToolProfile`` 过滤工具条的数字化/编辑动作可见性。
+        """切换阶段并让 canonical evaluator 重新裁决工具面可见性。
 
-        只隐藏受治理全集（``governed_edit_actions``）内的动作；基础导航/
-        识别/选择永不因阶段隐藏。未知阶段值保持现状（宽容：阶段条已校验）。
+        V8 M1：不再直接 ``QAction.setVisible``（消除与 evaluator 并行的
+        第二可见性权威）——阶段进入 :class:`ToolContext`，组隐藏/受治理
+        编辑动作过滤全部由 ``mapping.tool_availability`` 单点推导。
+        未知阶段值保持现状（evaluator 对未知阶段 fail-closed）。
         """
-        from paleo_workbench.mapping_workspace.stage_profiles import (
-            governed_edit_actions,
-            stage_profile,
-        )
         from paleo_workbench.mapping_workspace.stages import stage_from_value
 
         stage = stage_from_value(stage_value)
@@ -1108,48 +1119,45 @@ class CompositeDocument(QWidget):
                 self.stage_controller.set_stage(stage)
             except Exception:
                 pass
-        tools = stage_profile(stage).tools
-        for action_id in governed_edit_actions():
-            action = self.action_controller.actions.get(action_id)
-            if action is not None:
-                action.setVisible(tools.allows_edit_action(action_id))
+        self._sync_action_state()
 
-    # -- V7 上下文驱动工具面 ----------------------------------------------------
+    # -- V7 上下文驱动工具面（V8 M1：canonical contract） ---------------------
 
     def tool_context(self) -> ToolContext:
-        """当前 ``ToolContext``（palette/状态条/工具条共用的求值输入）。
+        """当前 canonical ``ToolContext``（工具条/palette/状态条共用输入）。
 
-        全部字段来自既有权威（edit_controller.action_state /
-        stage_controller / 画布 backend_status / 角色门禁结论），构造廉价。
+        全部字段来自既有权威：``tool_context_inputs``（V7 kernel 采集器，
+        会话/选择/撤销/捕捉/阻塞任务）+ ``action_state`` 的 extent 历史 +
+        图层事实（角色/几何/成熟度/门禁结论）+ 阶段 + 运行期画布后端三态。
+        构造廉价（纯派生，无 Qt 事件循环依赖）。
         """
         controller = self.edit_controller
-        state = controller.action_state(
-            can_previous_extent=self.canvas.can_previous_extent,
-            can_next_extent=self.canvas.can_next_extent,
-        )
         stage_value = None
         stage_controller = getattr(self, "stage_controller", None)
         if stage_controller is not None:
             current = getattr(stage_controller, "current_stage", None)
             stage_value = getattr(current, "value", None)
-        split_inputs = getattr(controller, "_split_inputs", None)
-        inputs = controller.tool_context_inputs() if hasattr(controller, "tool_context_inputs") else {}
-        return ToolContext(
+        backend = self._capability_snapshot()
+        layer = self._layer_capability(controller.active_layer_id)
+        raw_locked, stage_locked = self._layer_lock_classes(
+            str(controller.active_layer_id or ""))
+        inputs = dict(
+            controller.tool_context_inputs()
+            if hasattr(controller, "tool_context_inputs") else {}
+        )
+        inputs["can_previous_extent"] = bool(self.canvas.can_previous_extent)
+        inputs["can_next_extent"] = bool(self.canvas.can_next_extent)
+        inputs["raw_locked"] = raw_locked
+        inputs["stage_locked"] = stage_locked
+        return build_tool_context(
+            controller_state=inputs,
+            qgis=self._qgis_capability,
+            native_canvas_available=bool(self.uses_native_stack),
             project_open=self._project is not None,
-            stage=stage_value,
-            layer=self._layer_capability(controller.active_layer_id),
-            has_active_vector_layer=state.has_active_vector_layer,
-            vector_layer_writable=state.vector_layer_writable,
-            editing=state.editing,
-            dirty=bool(inputs.get("dirty", False)),
-            selected_count=state.selected_count,
-            compatible_polygon_count=state.compatible_polygon_count,
-            can_undo=state.can_undo,
-            can_redo=state.can_redo,
-            can_previous_extent=state.can_previous_extent,
-            can_next_extent=state.can_next_extent,
-            split_inputs_ready=(split_inputs() is not None) if split_inputs else None,
-            capability=self._capability_snapshot(),
+            mapping_stage=stage_value,
+            layer_facts=layer.layer_facts(),
+            backend_mode=backend.mode,
+            backend_reason=backend.reason,
         )
 
     def _capability_snapshot(self) -> QgisCapabilitySnapshot:
@@ -1165,6 +1173,10 @@ class CompositeDocument(QWidget):
         if "degraded" in status:
             return QgisCapabilitySnapshot(mode="degraded", reason=status)
         return QgisCapabilitySnapshot(mode="native")
+
+    def active_layer_capability(self) -> LayerCapabilitySnapshot:
+        """活动图层能力呈现快照（palette/status/inspector 的图层事实源）。"""
+        return self._layer_capability(self.edit_controller.active_layer_id)
 
     def _layer_capability(self, layer_id) -> LayerCapabilitySnapshot:
         """活动图层能力快照（角色/几何/成熟度/门禁结论——全部派生）。"""
@@ -1199,6 +1211,9 @@ class CompositeDocument(QWidget):
 
     def _layer_maturity_value(self, layer_id, role=None) -> str | None:
         """图层级成熟度原始值（None = 未知；raw 角色直接 raw）。"""
+        from paleo_workbench.mapping_workspace.artifact_keys import (
+            candidate_artifact_keys,
+        )
         from paleo_workbench.mapping_workspace.layer_roles import LayerRole
 
         state = self.stage_controller.state
@@ -1208,14 +1223,9 @@ class CompositeDocument(QWidget):
         if role.is_raw_protected:
             return "raw"
         record = state.membership(layer_id)
-        keys: list[str] = []
-        if record is not None:
-            if record.factor_task_id:
-                keys.append(f"factor:{record.factor_task_id}")
-            if record.role == LayerRole.INITIAL_FACIES_DRAFT:
-                keys.append(f"phase1_draft:{layer_id}")
-            if record.role in (LayerRole.INTEGRATED_FACIES, LayerRole.INTEGRATED_BOUNDARY):
-                keys.append(f"integrated:{layer_id}")
+        keys: list[str] = (
+            candidate_artifact_keys(layer_id, record) if record is not None else []
+        )
         for key in keys:
             found = state.artifact_maturity.get(key)
             if found:
@@ -1226,30 +1236,38 @@ class CompositeDocument(QWidget):
         """统一可用性求值（供工具条刷新与 palette applicability 复用）。"""
         return availability_for_context(self.tool_context())
 
-    def _apply_tool_availability(self) -> None:
-        availability = dict(self.tool_availability())
-        controller = self.edit_controller
-        inputs = controller.tool_context_inputs() if hasattr(controller, "tool_context_inputs") else {}
-        # V7 authoring kernel integration:
-        # 1. 捕捉开关在有活动矢量图层时即可配置（无需处于编辑会话中）
-        if controller.active_layer_id:
-            from paleo_workbench.ui.workstation.tool_surface import ToolAvailability
-            availability["snapping"] = ToolAvailability(enabled=True, visible=True)
-        # 2. save_edits / rollback 在编辑会话中受 dirty 约束
-        is_dirty = bool(inputs.get("dirty", False))
-        if not is_dirty:
-            from paleo_workbench.ui.workstation.tool_surface import ToolAvailability
-            if "save_edits" in availability and availability["save_edits"].enabled:
-                availability["save_edits"] = ToolAvailability(
-                    enabled=False, visible=True, reason="编辑会话没有未保存的修改"
-                )
-            if "rollback" in availability and availability["rollback"].enabled:
-                availability["rollback"] = ToolAvailability(
-                    enabled=False, visible=True, reason="编辑会话没有可回滚的修改"
-                )
+    def explain_action(self, tool_id: str):
+        """M4：一个动作的完整上下文解释（Inspector/palette/Agent 共用）。
 
+        动态结论（可用性/原因/checked）来自 canonical evaluator，静态事实
+        来自 ``action_help`` 登记处——没有第二份手写状态表。
+        """
+        from paleo_workbench.ui.workstation.action_help import explain
+
+        return explain(tool_id, self.tool_context())
+
+    def _apply_tool_availability(self) -> None:
+        """把 canonical evaluator 结论应用到 QAction 面（唯一应用点）。
+
+        V8 M1：host 不再改写 evaluator 输出——snapping 只需活动图层、
+        save/rollback 的 dirty 门禁等规则已并入 canonical evaluator。
+        V8 M4：tooltip/statusTip 由 ``action_help`` 从同一契约派生。
+        """
+        from paleo_workbench.ui.workstation.action_help import (
+            explain,
+            format_status,
+            format_tooltip,
+        )
+
+        ctx = self.tool_context()
+        availability = dict(evaluate_all(ctx))
+        help_texts = {
+            tool_id: (format_tooltip(explain(tool_id, ctx)),
+                      format_status(explain(tool_id, ctx)))
+            for tool_id in availability
+        }
         self._last_availability = availability
-        self.action_controller.apply_availability(availability)
+        self.action_controller.apply_availability(availability, help_texts=help_texts)
         # 溢出集合优先于求值器可见性（窄画布收纳的组保持隐藏，菜单可达）。
         hidden = getattr(self, "_toolbar_overflow_hidden", None)
         if hidden:
@@ -1495,7 +1513,26 @@ class CompositeDocument(QWidget):
 
     # -- 命令与工具回调 ----------------------------------------------------------
 
+    #: 画布交互工具（palette/shortcut 复用工具条同一激活路径）。
+    _CANVAS_TOOL_COMMANDS = frozenset({
+        "pan", "zoom_in", "zoom_out", "identify", "select", "select_rectangle",
+        "measure_distance", "add_point", "add_line", "add_polygon",
+        "move_feature", "vertex", "reshape",
+    })
+
     def _on_command_requested(self, command_id: str) -> None:
+        # V8 M6：execution-time re-gate——shortcut/palette/工具条全部经此
+        # 单一入口，禁用动作（含原因）不得被任何表面绕过。求值必须新鲜
+        # （选择/会话可能在上次工具条刷新后又变了）。
+        verdict = self.tool_availability().get(command_id)
+        if verdict is not None and not verdict.enabled:
+            self.status_message.emit(
+                f"不可用：{verdict.disabled_reason}")
+            return
+        if command_id in self._CANVAS_TOOL_COMMANDS:
+            self.edit_controller.activate_tool(command_id)
+            self._sync_action_state()
+            return
         if command_id == "full_extent":
             self._zoom_home()
         elif command_id == "previous_extent":
@@ -1537,6 +1574,10 @@ class CompositeDocument(QWidget):
             ok, message = self.edit_controller.geometry_command(command_id)
             if not ok:
                 self.status_message.emit(message)
+        elif command_id == "repair_geometry":
+            layer_id = self.edit_controller.active_layer_id
+            if layer_id:
+                self._repair_layer(str(layer_id))
         elif command_id == "refresh":
             self.canvas.update()
         elif command_id == "layer_new":
@@ -1747,47 +1788,21 @@ class CompositeDocument(QWidget):
             ]
         )
 
-    def _stage_hidden_edit_actions(self) -> frozenset[str]:
-        """当前阶段 profile 隐藏的受治理编辑动作（evaluator 的可见性输入）。"""
-        from paleo_workbench.mapping_workspace.stage_profiles import (
-            governed_edit_actions,
-            stage_profile,
-        )
-        from paleo_workbench.mapping_workspace.stages import stage_from_value
+    def _build_tool_context(self) -> ToolContext:
+        """V7 kernel 集成入口（V8 起与 :meth:`tool_context` 同一实现）。"""
+        return self.tool_context()
 
-        stage = stage_from_value(getattr(self.stage_controller, "current_stage", None) and self.stage_controller.current_stage.value)
-        if stage is None:
-            return frozenset()
-        tools = stage_profile(stage).tools
-        return frozenset(
-            action_id
-            for action_id in governed_edit_actions()
-            if not tools.allows_edit_action(action_id)
-        )
+    def _on_native_tool_activation_failed(self, tool_id: str, reason: str) -> None:
+        """原生工具激活失败：回退 pan，让 checked 与画布实际工具一致。
 
-    def _build_tool_context(self):
-        """ToolContext 组装（Goal V7 §3）：controller 派生 + 角色/阶段细分注入。"""
-        inputs = self.edit_controller.tool_context_inputs()
-        layer_id = str(inputs.get("active_layer_id") or "")
-        raw_locked, stage_locked = self._layer_lock_classes(layer_id)
-        context = build_tool_context(
-            controller_state=inputs,
-            qgis=self._qgis_capability,
-            native_canvas_available=bool(self.uses_native_stack),
-            project_open=True,
-            mapping_stage=str(
-                (getattr(self.stage_controller, "current_stage", None) and self.stage_controller.current_stage.value)
-                or ""
-            ),
-            hidden_by_stage_profile=self._stage_hidden_edit_actions(),
-        )
-        return replace(
-            context,
-            raw_locked=raw_locked,
-            stage_locked=stage_locked,
-            can_previous_extent=bool(self.canvas.can_previous_extent),
-            can_next_extent=bool(self.canvas.can_next_extent),
-        )
+        evaluator 的 capability 门禁挡住的是「已知不支持」；这里是运行期
+        失败（桥异常等）——按钮亮着但画布没换工具是不允许的。pan 的失败
+        不再递归回退。
+        """
+        if tool_id and tool_id != "pan":
+            self.edit_controller.activate_tool("pan")
+        self._sync_action_state()
+        self.status_message.emit(f"原生工具「{tool_id}」激活失败，已回退平移：{reason}")
 
     def _sync_action_state(self) -> None:
         self._update_empty_hint()
@@ -1796,10 +1811,19 @@ class CompositeDocument(QWidget):
             controller.active_layer_id if controller.editing else None
         )
         # 工具按钮勾选态跟随真实活动工具（会话回落 pan 后按钮不得停留在
-        # 已失效的工具上）。
-        active_tool_id = (
-            getattr(controller.tools.active_tool, "tool_id", "") or "pan"
-        )
+        # 已失效的工具上）。原生画布优先读画布实际工具（shim 记录的最近
+        # 成功激活值）——Python 栈与原生栈分叉时以原生为准。
+        active_tool_id = None
+        native_probe = getattr(self.canvas, "active_map_tool_id", None)
+        if callable(native_probe):
+            try:
+                active_tool_id = native_probe()
+            except Exception:
+                active_tool_id = None
+        if not active_tool_id:
+            active_tool_id = (
+                getattr(controller.tools.active_tool, "tool_id", "") or "pan"
+            )
         for action_id in self.action_controller._TOOL_IDS:
             action = self.action_controller.actions.get(action_id)
             if action is not None:
@@ -2147,6 +2171,33 @@ class CompositeDocument(QWidget):
         else:
             self.edit_controller.start_editing()
         self._sync_action_state()
+
+    def _layer_repair_availability(self, layer_id: str):
+        """图层级「修复几何」可用性（canonical evaluator，供树面板探针）。
+
+        把目标图层的事实投影进 ToolContext 再求值——右键菜单与工具条/
+        palette 消费同一规则（kind/门禁/阻塞），无第二套判断。
+        """
+        from dataclasses import replace as _replace
+
+        from paleo_workbench.mapping.tool_availability import evaluate_tool
+
+        layer = self._layer_capability(str(layer_id))
+        base = self.tool_context()
+        ctx = _replace(
+            base,
+            active_layer_id=str(layer_id),
+            active_layer_kind=layer.kind or "",
+            layer_role=layer.role or "",
+            layer_role_label=layer.role_label or "",
+            edit_gate_open=layer.editable,
+            edit_gate_reason=layer.block_reason or "",
+            layer_frozen=layer.frozen,
+            layer_missing=layer.missing,
+            layer_degraded=layer.degraded,
+            vector_writable=self.edit_controller.layer(str(layer_id)) is not None,
+        )
+        return evaluate_tool("repair_geometry", ctx)
 
     def _repair_layer(self, layer_id: str) -> None:
         allowed, reason = self._role_allows_editing(str(layer_id))
@@ -3039,7 +3090,7 @@ class CompositeDocument(QWidget):
                 avail = last.get(tool_id)
                 entry.setEnabled(True if avail is None else avail.enabled)
                 if avail is not None and not avail.enabled:
-                    reason = getattr(avail, "reason", None) or getattr(avail, "disabled_reason", None) or "当前不可用"
+                    reason = avail.disabled_reason or "当前不可用"
                     entry.setToolTip(f"{label}（{reason}）")
                 count += 1
         self._overflow_button.setVisible(count > 0)
