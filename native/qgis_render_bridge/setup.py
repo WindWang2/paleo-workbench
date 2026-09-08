@@ -159,7 +159,40 @@ def _qgis_core_include_dirs(build_dir: Path) -> list[str]:
         str(build_dir / "src" / "gui"),
         # uic-generated ui_*_base.h headers for the symbology dialogs.
         str(build_dir / "src" / "ui"),
+        *_dependency_include_dirs(),
     ]
+
+
+def _dependency_include_dirs() -> list[str]:
+    """Third-party dependency headers (V7 Windows).
+
+    Public QGIS headers pull system-dependency headers (sqlite3.h, proj.h,
+    geos heads, protobuf, QtKeychain, QCA, QScintilla, ...); on Linux these
+    come from the distro -dev packages on the default include path, on
+    Windows they live in the C:/deps + anaconda trees. Derived from
+    CMAKE_PREFIX_PATH entries + the known anaconda fallback so the bridge
+    build stays reproducible.
+    """
+    if sys.platform != "win32":
+        return []
+    candidates = [
+        "C:/deps/vcpkg/installed/x64-windows/include",
+        "C:/deps/qca-install/include",
+        "C:/deps/qca-install/include/Qca-qt6/QtCrypto",
+        "C:/deps/kc-install/include",
+        "C:/deps/qscintilla-install/include",
+        "C:/ProgramData/anaconda3/Library/include",
+    ]
+    prefix = os.environ.get("PALEO_QGIS_CMAKE_PREFIX", "").strip()
+    if not prefix:
+        prefix = os.environ.get("CMAKE_PREFIX_PATH", "").strip().split(os.pathsep)[0]
+    if prefix and prefix not in {
+        "C:/deps/Qt/6.8.0/msvc2022_64",
+    }:
+        include = Path(prefix) / "include"
+        if include.is_dir():
+            candidates.append(str(include))
+    return [d for d in candidates if Path(d).is_dir()]
 
 
 def _build_vendored_qgis() -> tuple[Path, Path]:
