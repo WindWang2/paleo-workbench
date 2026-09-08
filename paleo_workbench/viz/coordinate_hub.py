@@ -486,12 +486,25 @@ class CoordinateTransformHub:
             raise ValueError(f"Velocity must be positive, got {velocity}")
         with self._lock:
             if origin is CoordinateTransformHub._GRID_UNSET:
-                # Reset call (project clear): geometry goes back to UNKNOWN —
-                # the numeric defaults are placeholders, never answers.
-                self._grid_configured = False
-                self._velocity = None
-                self._crs = None
-                return
+                if (
+                    il_step == (10.0, 0.0)
+                    and xl_step == (0.0, 10.0)
+                    and il_min == 100
+                    and xl_min == 200
+                    and velocity is None
+                    and crs is None
+                ):
+                    # Reset call (project clear): geometry goes back to UNKNOWN —
+                    # the numeric defaults are placeholders, never answers.
+                    self._grid_configured = False
+                    self._velocity = None
+                    self._crs = None
+                    return
+                origin = self._seismic_origin if self._grid_configured else (100.0, 200.0)
+                if velocity is None and self._grid_configured:
+                    velocity = self._velocity
+                if crs is None and self._grid_configured:
+                    crs = self._crs
             self._grid_configured = True
             self._seismic_origin = (float(origin[0]), float(origin[1]))
             self._seismic_il_step = (float(il_step[0]), float(il_step[1]))

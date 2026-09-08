@@ -111,8 +111,8 @@ def test_window_geometry_roundtrip(qtbot, geometry_settings):
     source = QMainWindow()
     qtbot.addWidget(source)
     source.setGeometry(30, 40, 700, 500)
-    source.show()
     blob = source.saveGeometry()
+    source.show()
     _seed_geometry(geometry_settings, blob)
 
     # 持久化 blob 本身完整可还原：隐藏的裸窗口没有 dock 最小约束，

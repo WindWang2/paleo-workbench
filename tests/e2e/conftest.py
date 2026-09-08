@@ -202,6 +202,14 @@ def selection_context() -> SelectionContext:
 def coordinate_hub() -> CoordinateTransformHub:
     """Fixture providing an initialized CoordinateTransformHub."""
     hub = CoordinateTransformHub()
+    hub.configure_seismic_grid(
+        origin=(100.0, 200.0),
+        il_step=(10.0, 0.0),
+        xl_step=(0.0, 10.0),
+        il_min=100,
+        xl_min=200,
+        velocity=2000.0,
+    )
     hub.register_well("W-01", 150.0, 250.0, 50.0)
     hub.register_well("W-02", 300.0, 400.0, 60.0)
     hub.register_well("W-03", 450.0, 550.0, 45.0)

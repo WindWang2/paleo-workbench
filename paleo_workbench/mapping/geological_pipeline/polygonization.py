@@ -433,9 +433,21 @@ def generate_facies_polygon_layer(
             # ``area_approx_m2`` is provided alongside (square degrees are
             # never presented as if physically meaningful).
             raw_area = _compute_geometry_area(geom)
-            geom_area, area_unit, area_warning = ring_area_with_unit(
-                geom["coordinates"][0], grid_result.crs
-            )
+            geom_type = geom.get("type", "Polygon")
+            if geom_type == "MultiPolygon":
+                polys = geom.get("coordinates", [])
+            else:
+                polys = [geom.get("coordinates", [])]
+            geom_area, area_unit, area_warning = 0.0, "unknown-unit²", None
+            for rings in polys:
+                if not rings:
+                    continue
+                ext_val, area_unit, area_warning = ring_area_with_unit(rings[0], grid_result.crs)
+                geom_area += ext_val
+                for hole in rings[1:]:
+                    hole_val, _, _ = ring_area_with_unit(hole, grid_result.crs)
+                    geom_area -= hole_val
+            geom_area = max(geom_area, 0.0)
             if area_warning and area_warning not in polygon_qc.get("area_warnings", []):
                 polygon_qc.setdefault("area_warnings", []).append(area_warning)
             area_pct = (raw_area / total_grid_area) * 100.0

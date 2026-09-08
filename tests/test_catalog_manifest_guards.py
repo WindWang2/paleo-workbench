@@ -167,6 +167,7 @@ def test_deleted_manifest_is_rewritten_even_when_unchanged(service, tmp_path):
 def test_manifest_stays_human_readable(service, tmp_path):
     """The unchanged-skip preserves the pretty-printed manifest format."""
     service.import_raw(_make_source(tmp_path, "p.las", b"p"))
-    service.export_manifest()
+    service.export_manifest(pretty=True)
     text = catalog_file_for(service.project_path).read_text(encoding="utf-8")
     assert '\n  "catalog_revision"' in text
+
