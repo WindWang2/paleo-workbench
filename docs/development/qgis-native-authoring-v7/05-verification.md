@@ -43,12 +43,24 @@ tests/test_workstation_context.py tests/test_workstation_lifecycle.py
 
 ### 1.5 全量批驱动对比（worktree vs main；逐文件，崩溃重试一次）
 
-- [ ] worktree 侧结果（scratch_wt_batched.json 摘要）
-- [ ] main 侧结果（main_batched.json 摘要）
-- [ ] 差集分析：本分支引入的新增失败 = ∅（预期）；两侧共有的环境性失败
-      清单如实列出（非本分支引入）
-- [ ] `tests/test_theme_and_sidebar.py`（批驱动含它）：单文件运行的行为
-      （预期通过——挂死只在全量顺序污染下出现）
+- worktree 侧：~554 文件 → **510 pass / 44 fail（0 crash 未重试成功）**。
+- main 侧：545 文件 → **501 pass / 44 fail**（同口径，共有的环境性失败）。
+- 差集分析（`wt-only - main-only` 交集脚本）：
+  - 本分支引入的新增失败 **2 个**，已全部定位并修复（commit
+    `7ef00861`）：
+    1. `test_map_dock_manager.py::test_single_toolbar_strip_carries_every_action`
+       — reshape 新动作未同步到编图页工具条（已加入工具条分组）。
+    2. `test_round3_convergence.py::test_topology_validate_labels_missing_shapely`
+       — 旧测试只假设 shapely 单引擎；V7 为双引擎（QGIS 优先），
+       `validator_unavailable` 合一判词已更新。
+  - 修复后两腿失败集回归为**同一组环境性失败（42 个共有）**，
+    无分支引入增量。
+- 42 个共有失败均为无桥环境的既有状态：`test_qgis_*` 系列（桥未装，
+  skip/exit=5）、geoviz/数据资产/厂商相关、窗口包完整性等——main 同
+  口径逐文件运行同样失败，非本分支引入。
+- `tests/test_theme_and_sidebar.py`（全量顺序挂死源头）在批驱动的
+  单文件运行下**通过**——证实为顺序污染（table_preview + theme
+  setStyleSheet 链在 Qt 全局样式表更新时的死循环），08-7 记录。
 
 ### 1.6 QGIS 腿（PALEO_REQUIRE_QGIS=1；桥构建完成后）
 
