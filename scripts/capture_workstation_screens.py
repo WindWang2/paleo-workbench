@@ -236,6 +236,11 @@ def main() -> int:
     shots.update(visual_qa_v6.v6_shot_table(lambda: _project(tmp)))
     # V7：工具可用性/树装饰/取消中/溢出/Inspector 因子分节（8 状态）。
     shots.update(visual_qa_v7.v7_shot_table(lambda: _project(tmp)))
+    # V8：canonical contract 状态（空工程/dirty/冻结/palette 原因/
+    # 原生激活失败回退/阻塞任务；6 状态）。
+    import paleo_workbench.ui.visual_qa_v8 as visual_qa_v8
+
+    shots.update(visual_qa_v8.v8_shot_table(lambda: _project(tmp)))
 
     # --shot NAME [--theme T] [--density D] [--size WxH]：单 shot 子进程模式
     # （main 进程逐个 spawn——多窗口同进程会因 QGIS/调度器状态搅扰挂死；
