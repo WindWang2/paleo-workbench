@@ -30,6 +30,11 @@ from dataclasses import dataclass
 from enum import Enum
 
 from paleo_workbench.mapping_workspace.layer_roles import LayerRole
+from paleo_workbench.mapping_workspace.artifact_keys import (
+    factor_key,
+    integrated_key,
+    phase1_draft_key,
+)
 from paleo_workbench.mapping_workspace.stages import MappingStage
 
 
@@ -209,7 +214,7 @@ class MappingDependencyService:
         for layer_id, record in workspace_state.memberships.items():
             if record.role != LayerRole.INITIAL_FACIES_DRAFT:
                 continue
-            key = f"phase1_draft:{layer_id}"
+            key = phase1_draft_key(layer_id)
             pinned = [record.source_version_id] if record.source_version_id else []
             if not pinned:
                 results.append(ArtifactFreshness(
@@ -227,7 +232,7 @@ class MappingDependencyService:
     def _evaluate_factors(self, document, catalog) -> list:
         results: list[ArtifactFreshness] = []
         for task in getattr(document, "factor_map_tasks", None) or []:
-            key = f"factor:{task.id}"
+            key = factor_key(task.id)
             grid_version = str(getattr(task, "grid_artifact_version_id", "") or "")
             if not grid_version:
                 results.append(ArtifactFreshness(
@@ -284,7 +289,7 @@ class MappingDependencyService:
             if record.role not in (LayerRole.INTEGRATED_FACIES,
                                    LayerRole.INTEGRATED_BOUNDARY):
                 continue
-            key = f"integrated:{layer_id}"
+            key = integrated_key(layer_id)
             if not input_set:
                 results.append(ArtifactFreshness(
                     key, "integrated", MappingStage.INTEGRATED_COMPILATION,
