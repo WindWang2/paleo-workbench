@@ -13,6 +13,7 @@
 #include <pybind11/stl.h>
 
 #include <qgis.h>
+#include <qgsconfig.h>  // _QGIS_VERSION（capability manifest 的版本串）
 #include <qgsrenderer.h>
 #include <qgsrendercontext.h>
 #include <qgssymbol.h>
@@ -348,13 +349,70 @@ py::object renderer_info(const std::string& renderer_xml) {
 
 }  // namespace
 
+// ---------------------------------------------------------------------------
+// V7 capability manifest：编译期能力注册表（零 QGIS init 成本）。
+// Python 侧 capability_model.probe_qgis_capability() 从这里派生
+// QgisCapabilitySnapshot——本表是桥能力的唯一权威声明；新增 set_map_tool
+// kind / geometry op / 对话框时必须同步本表（test_qgis_capability_manifest
+// 钉死 kind 与 set_map_tool 的接受集一致）。
+// ---------------------------------------------------------------------------
+
+py::dict capability_manifest() {
+    py::dict manifest;
+    manifest["contract_version"] = 2;
+    manifest["qgis_version"] = std::string(_QGIS_VERSION);
+    // set_map_tool kinds（map_stack_service.cpp::setMapTool）。
+    py::list native_tools;
+    for (const char* kind :
+         {"pan", "zoomIn", "zoomOut", "addPoint", "addLine", "addPolygon",
+          "vertex", "move", "select", "identify", "measure"}) {
+        native_tools.append(kind);
+    }
+    manifest["native_tools"] = native_tools;
+    // geometry 子模块操作（bindings.cpp geometry.def 全集）。
+    py::list geometry_ops;
+    for (const char* op :
+         {"union", "split_by_line", "intersection", "difference", "symdifference",
+          "buffer", "offset_curve", "simplify", "smooth", "densify", "make_valid",
+          "is_valid", "validate", "reshape", "multipart_to_singlepart",
+          "singlepart_to_multipart", "clip"}) {
+        geometry_ops.append(op);
+    }
+    manifest["geometry_ops"] = geometry_ops;
+    py::list dialogs;
+    for (const char* dialog :
+         {"renderer_properties", "symbol_selector", "style_manager",
+          "layer_properties"}) {
+        dialogs.append(dialog);
+    }
+    manifest["dialogs"] = dialogs;
+    // 特性 flag（capability_model.feature() / ToolContext.capability_flags）。
+    py::list features;
+    for (const char* feature :
+         {"snapping_push", "snapping_endpoint", "snapping_intersection",
+          "layer_tree", "selection_highlight", "edit_indicator",
+          "measure_ellipsoidal", "digitize_crs_guard", "native_capture",
+          "native_vertex_move", "native_select_identify"}) {
+        features.append(feature);
+    }
+    manifest["features"] = features;
+    return manifest;
+}
+
 PYBIND11_MODULE(qgis_render_bridge, module) {
     module.doc() = "Narrow optional C++ QGIS map-render bridge";
     // Build metadata for freshness checks (#938-8): aligns with
-    // paleo_workbench.__version__ ("0.2.17a0"); previously missing and drifted.
-    module.attr("__version__") = "0.2.17a0";
+    // paleo_workbench.__version__; previously missing and drifted.
+    // 0.3.0a0 (V7): capability_manifest + native measure + geometry
+    // validate/reshape + snapping endpoint/intersection.
+    module.attr("__version__") = "0.3.0a0";
     module.attr("__build_commit__") = "unknown";
     py::register_exception<GeometryServiceError>(module, "QgisGeometryError");
+
+    // V7 能力清单（见上方注册表注释）。cheap probe：不初始化 QGIS 运行时。
+    module.def("capability_manifest", &capability_manifest,
+               "Compile-time capability registry of this bridge build "
+               "(native tool kinds, geometry ops, dialogs, feature flags).");
 
     py::class_<QgisRenderBridge>(module, "QgisRenderBridge")
         .def(py::init<>())
@@ -524,6 +582,18 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
     geometry.def("is_valid", [&geometry_arg](const py::object& source) {
                       return pwb::qgis_render::geometry_is_valid(geometry_arg(source));
                   });
+    geometry.def("validate", [&geometry_arg](const py::object& source) {
+                      // V7 详细校验：[{"where": [x,y]|null, "message": str}, ...]
+                      return py::module_::import("json")
+                          .attr("loads")(
+                              pwb::qgis_render::geometry_validate(geometry_arg(source)))
+                          .cast<py::list>();
+                  }, py::arg("geometry"));
+    geometry.def("reshape", [&geometry_arg](const py::object& source,
+                                            const py::object& line) {
+                      return pwb::qgis_render::geometry_reshape(
+                          geometry_arg(source), geometry_arg(line));
+                  }, py::arg("geometry"), py::arg("reshape_line"));
     geometry.def("multipart_to_singlepart", [&geometry_arg](const py::object& source) {
                       return pwb::qgis_render::geometry_multipart_to_singlepart(
                           geometry_arg(source));
@@ -671,6 +741,16 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
              [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas,
                 py::function f) {
                self.setSelectionCallback(
+                   canvas, [f = std::move(f)](const std::string& action,
+                                              const std::string& payload) {
+                     py::gil_scoped_acquire gil;
+                     f(action, payload);
+                   });
+             })
+        .def("set_measure_callback",
+             [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas,
+                py::function f) {
+               self.setMeasureCallback(
                    canvas, [f = std::move(f)](const std::string& action,
                                               const std::string& payload) {
                      py::gil_scoped_acquire gil;

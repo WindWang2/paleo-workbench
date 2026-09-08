@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
@@ -160,6 +161,9 @@ Qgis::SnappingTypes parseSnappingTypes(const QJsonArray& arr) {
         else if (s == QLatin1String("midpoint")) types |= Qgis::SnappingType::MiddleOfSegment;
         else if (s == QLatin1String("centroid")) types |= Qgis::SnappingType::Centroid;
         else if (s == QLatin1String("area")) types |= Qgis::SnappingType::Area;
+        // V7：线端点（SnappingType::LineEndpoint，QGIS 3.20+）——Python
+        // SnappingService 的 endpoint 模式原生投影。
+        else if (s == QLatin1String("endpoint")) types |= Qgis::SnappingType::LineEndpoint;
     }
     if (types == Qgis::SnappingTypes()) types = Qgis::SnappingType::Vertex;
     return types;
@@ -598,6 +602,11 @@ struct QgisMapStack::Impl {
   std::unordered_map<std::uintptr_t,
                      std::function<void(const std::string&, const std::string&)>>
       selection_callbacks;
+  // 测距（V7；Qt parent=画布持有）
+  std::unordered_map<std::uintptr_t, PwbMeasureTool*> measure_tools;
+  std::unordered_map<std::uintptr_t,
+                     std::function<void(const std::string&, const std::string&)>>
+      measure_callbacks;
   std::unordered_map<std::uintptr_t, std::vector<std::unique_ptr<QgsHighlight>>>
       highlights;
   std::unordered_map<std::uintptr_t, QMetaObject::Connection> extent_connections;
@@ -665,6 +674,8 @@ struct QgisMapStack::Impl {
       orphan_edit_pick_callbacks;
   std::vector<std::function<void(const std::string&, const std::string&)>>
       orphan_selection_callbacks;
+  std::vector<std::function<void(const std::string&, const std::string&)>>
+      orphan_measure_callbacks;
   std::unordered_map<std::string, std::string> mirror_by_doc;
   // 镜像层 QgsFeatureId → 文档 feature_id（M3 Task 3）：memory provider 不落
   // 属性字段，__pwb_fid 由 upsert 时从 geojson 原文与 addFeatures 后的
@@ -961,6 +972,7 @@ void QgisMapStack::shutdown() {
   impl_->orphan_digitize_callbacks.clear();
   impl_->orphan_edit_pick_callbacks.clear();
   impl_->orphan_selection_callbacks.clear();
+  impl_->orphan_measure_callbacks.clear();
   if (impl_->owned_project) {
     for (auto& kv : impl_->canvas_refs) {
       if (kv.second.isNull()) continue;
@@ -1021,6 +1033,7 @@ void QgisMapStack::shutdown() {
     inTables(impl_->move_tools);
     inTables(impl_->select_tools);
     inTables(impl_->identify_tools);
+    inTables(impl_->measure_tools);
     if (ours) c->unsetMapTool(active);
   }
   impl_->capture_kits.clear();
@@ -1031,6 +1044,8 @@ void QgisMapStack::shutdown() {
   impl_->select_tools.clear();
   impl_->identify_tools.clear();
   impl_->selection_callbacks.clear();
+  impl_->measure_tools.clear();
+  impl_->measure_callbacks.clear();
   impl_->highlights.clear();
   impl_->canvas_refs.clear();
   impl_->dead_canvas_addrs.clear();
@@ -1171,7 +1186,8 @@ void QgisMapStack::destroyCanvas(std::uintptr_t canvas_addr) {
         return tIt != table.end() && tIt->second == active;
       };
       ours = ours || inTable(impl_->vertex_tools) || inTable(impl_->move_tools) ||
-             inTable(impl_->select_tools) || inTable(impl_->identify_tools);
+             inTable(impl_->select_tools) || inTable(impl_->identify_tools) ||
+             inTable(impl_->measure_tools);
       if (ours) c->unsetMapTool(active);
     }
   }
@@ -1211,11 +1227,17 @@ void QgisMapStack::reapCanvasTables(std::uintptr_t canvas_addr) {
       impl_->orphan_selection_callbacks.push_back(std::move(it->second));
       impl_->selection_callbacks.erase(it);
     }
+    if (auto it = impl_->measure_callbacks.find(canvas_addr);
+        it != impl_->measure_callbacks.end()) {
+      impl_->orphan_measure_callbacks.push_back(std::move(it->second));
+      impl_->measure_callbacks.erase(it);
+    }
   }
   impl_->vertex_tools.erase(canvas_addr);
   impl_->move_tools.erase(canvas_addr);
   impl_->select_tools.erase(canvas_addr);
   impl_->identify_tools.erase(canvas_addr);
+  impl_->measure_tools.erase(canvas_addr);
   impl_->highlights.erase(canvas_addr);
   impl_->canvas_refs.erase(canvas_addr);
   // 终局审查 M5：销毁后的地址必须留在 dead-set（拒绝后续同地址调用把
@@ -2263,6 +2285,10 @@ void QgisMapStack::setSnappingConfig(std::uintptr_t canvas_addr,
   config.setUnits(Qgis::MapToolUnit::Pixels);
   config.setTypeFlag(parseSnappingTypes(
       obj.value(QStringLiteral("types")).toArray()));
+  // V7：交点捕捉（Python SnappingService 的 intersection 模式）——
+  // QgsSnappingConfig::intersectionSnapping 对全部配置层启用线段交点。
+  config.setIntersectionSnapping(
+      obj.value(QStringLiteral("intersection_enabled")).toBool(false));
 
   if (hasLayers) {
     const QJsonObject layers = obj.value(QStringLiteral("layers")).toObject();
@@ -2340,6 +2366,9 @@ bool QgisMapStack::nativeToolBusy(std::uintptr_t canvas_addr) const {
   // 顶点/移动拖动中：Esc 归原生工具（取消拖动，不退出工具）。
   if (const auto* pick = dynamic_cast<const PwbEditPickTool*>(tool))
     return pick->dragging();
+  // 测距已采点：Esc 只清折线（V7）。
+  if (const auto* measure = dynamic_cast<const PwbMeasureTool*>(tool))
+    return measure->measuring();
   return false;
 }
 
@@ -2348,7 +2377,8 @@ void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kin
   QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
   impl_->canvas_refs[canvas_addr] = canvas;
   if (impl_->display_mode) {
-    if (kind != "pan" && kind != "zoomIn" && kind != "zoomOut") {
+    // measure 是只读检查工具（不写层），display 模式同样放行。
+    if (kind != "pan" && kind != "zoomIn" && kind != "zoomOut" && kind != "measure") {
       throw std::runtime_error("display map stack does not host edit tools");
     }
   }
@@ -2388,6 +2418,7 @@ void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kin
       canvas->setMapTool(slot);
       return;
     }
+    // identify 分支见下（targetLayer 钉死）。
     // QgsMapToolIdentifyFeature 无 setLayer——目标图层在构造时钉死；
     // 每次激活按当前图层新建（旧工具由 Qt parent=画布回收）。
     // 回调解析同样钉死构造时图层（终局审查 I3）：激活后切当前图层
@@ -2418,6 +2449,22 @@ void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kin
                                      "\",\"feature_id\":\"" + fid + "\"}");
       });
     canvas->setMapTool(tool);
+    return;
+  }
+  if (kind == "measure") {
+    // V7 原生测距：工具实例缓存（Qt parent=画布），回调从 measure_callbacks
+    // 表取——与 select/identify 同一防悬垂模式（alive_token_ + 表查找）。
+    std::weak_ptr<char> alive = alive_token_;
+    auto cb = [this, alive, canvas_addr](const std::string& action,
+                                         const std::string& payload) {
+      if (alive.expired()) return;
+      auto cbIt = impl_->measure_callbacks.find(canvas_addr);
+      if (cbIt == impl_->measure_callbacks.end() || !cbIt->second) return;
+      cbIt->second(action, payload);
+    };
+    auto& slot = impl_->measure_tools[canvas_addr];
+    if (slot == nullptr) slot = new PwbMeasureTool(canvas, std::move(cb));
+    canvas->setMapTool(slot);
     return;
   }
   if (kind == "pan") {
@@ -2557,6 +2604,14 @@ void QgisMapStack::setSelectionCallback(
   ensureNotStale(canvas_addr);
   canvasOrThrow(canvas_addr);
   impl_->selection_callbacks[canvas_addr] = std::move(callback);
+}
+
+void QgisMapStack::setMeasureCallback(
+    std::uintptr_t canvas_addr,
+    std::function<void(const std::string&, const std::string&)> callback) {
+  ensureNotStale(canvas_addr);
+  canvasOrThrow(canvas_addr);
+  impl_->measure_callbacks[canvas_addr] = std::move(callback);
 }
 
 void QgisMapStack::setCurrentLayer(std::uintptr_t canvas_addr,
@@ -3551,6 +3606,11 @@ std::string QgisMapStack::layoutExport(const std::string& spec_json,
     throw std::invalid_argument("format must be pdf|svg|png, got: " + format);
   }
   if (result != QgsLayoutExporter::Success) {
+    // D10/V7 never-fake contract: a failed export (e.g. GeoPDF without a
+    // capable GDAL PDF driver — PrintError) must not leave a partial file
+    // behind that callers could mistake for the requested product.
+    std::error_code remove_error;
+    std::filesystem::remove(output_path, remove_error);
     throw std::runtime_error("layout export failed with result code " +
                              std::to_string(static_cast<int>(result)));
   }

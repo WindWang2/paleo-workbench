@@ -415,10 +415,16 @@ def test_topology_validate_labels_missing_shapely(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", _blocked)
+    # V7：没有 QGIS 桥时 Shapely 是唯一的校验引擎，判词 code 仍是
+    # "validator_unavailable"（Goal 收敛为双引擎合一判词）。
+    monkeypatch.setattr(
+        "paleo_workbench.mapping.topology.TopologyService._bridge_validate_fn",
+        staticmethod(lambda: None),
+    )
     layer = VectorLayer(id="L", name="L")
     issues = TopologyService(enabled=True).validate([layer])
     assert issues
-    assert any(i.get("code") == "shapely_unavailable" for i in issues)
+    assert any(i.get("code") == "validator_unavailable" for i in issues)
 
 
 def test_demo_square_float_drift_is_not_map_compilable():

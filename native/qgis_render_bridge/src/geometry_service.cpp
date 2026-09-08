@@ -1,10 +1,12 @@
 #include "geometry_service.hpp"
 
+#include <cmath>
 #include <iterator>
 
 #include <qgsgeometry.h>
 #include <qgsgeometryengine.h>
 #include <qgsjsonutils.h>
+#include <qgslinestring.h>
 #include <qgsrectangle.h>
 #include <qgsvertexid.h>
 
@@ -141,6 +143,67 @@ std::string geometry_make_valid(const std::string& geometry) {
 
 bool geometry_is_valid(const std::string& geometry) {
     return parse(geometry, "validity input").isGeosValid();
+}
+
+std::string geometry_validate(const std::string& geometry) {
+    // validateGeometry 在该版本非 const（style_codec save 同款约束），取副本。
+    QgsGeometry source = parse(geometry, "validate input");
+    QVector<QgsGeometry::Error> errors;
+    // GEOS 引擎：与 Shapely/GEOS 校验语义一致（TopologyService 的 QGIS
+    // 优先路径）；QgisInternal 会补 QGIS 专有检查（环闭合等），留给宿主
+    // 的 Python 侧语义层做差异化报告。
+    source.validateGeometry(errors, Qgis::GeometryValidationEngine::Geos);
+    QString json = QStringLiteral("[");
+    bool first = true;
+    for (const QgsGeometry::Error& error : errors) {
+        if (!first) json += QStringLiteral(",");
+        first = false;
+        QString where;
+        const QgsPointXY at = error.where();
+        if (std::isfinite(at.x()) && std::isfinite(at.y())) {
+            where = QStringLiteral("[%1,%2]")
+                        .arg(QString::number(at.x(), 'g', 12),
+                             QString::number(at.y(), 'g', 12));
+        } else {
+            where = QStringLiteral("null");
+        }
+        QString message = error.what();
+        message.replace(QLatin1String("\\"), QLatin1String("\\\\"))
+            .replace(QLatin1String("\""), QLatin1String("\\\""));
+        json += QStringLiteral("{\"where\":%1,\"message\":\"%2\"}").arg(where, message);
+    }
+    json += QStringLiteral("]");
+    return json.toStdString();
+}
+
+std::string geometry_reshape(const std::string& geometry,
+                             const std::string& reshape_line) {
+    QgsGeometry source = parse(geometry, "reshape input");
+    QgsGeometry line = parse(reshape_line, "reshape line");
+    if (line.type() != Qgis::GeometryType::Line) {
+        throw GeometryServiceError("reshape line must be a LineString");
+    }
+    const QgsLineString* ls = qgsgeometry_cast<const QgsLineString*>(line.constGet());
+    if (ls == nullptr) {
+        throw GeometryServiceError("reshape line must be a single LineString");
+    }
+    // reshapeGeometry 非 const：在副本上执行（source 保持入参语义）。
+    QgsGeometry target = source;
+    const Qgis::GeometryOperationResult result = target.reshapeGeometry(*ls);
+    switch (result) {
+        case Qgis::GeometryOperationResult::Success:
+            break;
+        case Qgis::GeometryOperationResult::InvalidInputGeometryType:
+            throw GeometryServiceError("reshape target geometry type is invalid");
+        case Qgis::GeometryOperationResult::NothingHappened:
+            throw GeometryServiceError("reshape line does not intersect the target geometry");
+        default:
+            throw GeometryServiceError("reshape failed");
+    }
+    if (target.isNull() || target.isEmpty() || target.equals(source)) {
+        throw GeometryServiceError("reshape produced no changed geometry");
+    }
+    return serialize_geometry(target);
 }
 
 std::vector<std::string> geometry_multipart_to_singlepart(const std::string& geometry) {

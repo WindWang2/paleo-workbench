@@ -230,3 +230,54 @@ def test_capture_edits_data_flag_is_dynamic() -> None:
     assert polygon.mouse_press((0.0, 0.0), button="right") is True
     assert polygon.edits_data is True
     assert session.feature("poly-1") is not None
+
+
+class TestRectangleSelectModifierParity:
+    """V7 P2-4：矩形选择修饰键语义对齐 QGIS 桌面（无=替换 / Ctrl=并 /
+    Shift=差 / Ctrl+Shift=交），与原生 commit_selection 一致。"""
+
+    def _tool(self, selection=None):
+        from paleo_workbench.mapping.map_tools import RectangleSelectTool
+        from paleo_workbench.mapping.vector_layer import VectorFeature, VectorLayer
+
+        layer = VectorLayer(id="composite:L", name="x")
+        layer.start_editing()
+        for i in range(4):
+            layer.edit_session.add_feature(
+                VectorFeature(
+                    f"f{i}",
+                    {"type": "Point", "coordinates": [float(i), 0.0]},
+                    {},
+                )
+            )
+        layer.set_selection(selection or ("f0", "f1"))
+        hits = {"f1", "f2"}
+
+        def _rect(_start, _end):
+            return set(hits)
+
+        return RectangleSelectTool(layer, select_rectangle=_rect), layer
+
+    def test_plain_replace(self):
+        tool, layer = self._tool()
+        tool.mouse_press((0, 0))
+        tool.mouse_release((5, 5))
+        assert layer.selection == {"f1", "f2"}
+
+    def test_ctrl_union(self):
+        tool, layer = self._tool()
+        tool.mouse_press((0, 0))
+        tool.mouse_release((5, 5), modifiers=("ctrl",))
+        assert layer.selection == {"f0", "f1", "f2"}
+
+    def test_shift_difference(self):
+        tool, layer = self._tool()
+        tool.mouse_press((0, 0))
+        tool.mouse_release((5, 5), modifiers=("shift",))
+        assert layer.selection == {"f0"}
+
+    def test_ctrl_shift_intersection(self):
+        tool, layer = self._tool()
+        tool.mouse_press((0, 0))
+        tool.mouse_release((5, 5), modifiers=("ctrl", "shift"))
+        assert layer.selection == {"f1"}

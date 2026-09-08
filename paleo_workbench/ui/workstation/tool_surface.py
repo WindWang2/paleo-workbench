@@ -142,7 +142,7 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
     "edit_session": ("toggle_editing", "save_edits", "rollback"),
     "capture": ("add_point", "add_line", "add_polygon"),
     "geometry": (
-        "move_feature", "vertex", "undo", "redo", "delete_selected",
+        "move_feature", "vertex", "reshape", "undo", "redo", "delete_selected",
         "split", "merge",
     ),
     "snapping": ("snapping", "topology", "cancel"),
@@ -178,7 +178,7 @@ _POLYGON_ROLES = frozenset({
 })
 
 #: 需要 QGIS 原生后端的工具（桥缺失/降级时禁用 + 原因；不隐藏能力假象）
-_NATIVE_ONLY_TOOLS = frozenset({"style_manager"})
+_NATIVE_ONLY_TOOLS = frozenset({"style_manager", "reshape"})
 
 #: 需要活动图层（矢量或任意）的工具
 _NEEDS_ANY_LAYER = frozenset({
@@ -193,7 +193,7 @@ _NEEDS_EDITABLE_LAYER = frozenset({"toggle_editing"})
 #: 需要已开启编辑会话的工具（会话内进一步受选择/撤销栈约束）
 _NEEDS_EDITING = frozenset({
     "save_edits", "rollback", "add_point", "add_line", "add_polygon",
-    "move_feature", "vertex", "snapping", "topology",
+    "move_feature", "vertex", "reshape", "snapping", "topology",
 })
 
 #: 需要活动图层的组（goal §6「根据 active layer 切换组」：无活动图层

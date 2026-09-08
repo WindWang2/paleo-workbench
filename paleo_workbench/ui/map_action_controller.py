@@ -51,6 +51,7 @@ class MapActionController(QObject):
     _TOOL_IDS = (
         "pan", "zoom_in", "zoom_out", "identify", "select", "select_rectangle",
         "measure_distance", "add_point", "add_line", "add_polygon", "move_feature", "vertex",
+        "reshape",
     )
 
     _LABELS = {
@@ -62,6 +63,7 @@ class MapActionController(QObject):
         "toggle_editing": "开始编辑", "save_edits": "保存编辑", "rollback": "回滚",
         "add_point": "添加点", "add_line": "添加线", "add_polygon": "添加面",
         "move_feature": "移动要素", "vertex": "节点编辑", "delete_selected": "删除所选",
+        "reshape": "重塑",
         "undo": "撤销", "redo": "重做", "split": "分割", "merge": "合并",
         "snapping": "捕捉", "topology": "拓扑编辑", "cancel": "取消",
         # V7 专业分组扩展（goal §6 Layer/Symbology/Factor/QA/Layout·Export）
@@ -151,30 +153,34 @@ class MapActionController(QObject):
         self.actions["next_extent"].setEnabled(state.can_next_extent)
         self.actions["cancel"].setEnabled(True)
 
-    def apply_availability(
-        self, availability: dict[str, ToolAvailability]
-    ) -> None:
-        """V7：渲染统一求值结果（enable/visible/原因 → tooltip/status/a11y）。
+    def apply_availability(self, availability) -> None:
+        """Apply ``{tool_id: ToolAvailability}`` from the V7 evaluator.
 
-        必须在 ``update_state`` 之后调用（勾选态归前者，使能/可见/原因归
-        本方法——单一真源 ``tool_surface.evaluate_tool``）。禁用原因统一
-        追加到 tooltip 与 statusTip（QAction 无 accessibleName API；
-        屏幕阅读器经由 statusTip/tooltip 读到同一原因字符串）。
+        Supersedes :meth:`update_state` on the workstation path: enabled state
+        and checkmarks come from the single evaluator, and every disabled
+        action carries its human-readable reason in the tooltip/status tip
+        (Goal V7 §3: never a bare ``setEnabled(False)``). ``update_state``
+        remains for the legacy authoring page host.
         """
-        for action_id, avail in availability.items():
-            action = self.actions.get(action_id)
+        for tool_id, result in dict(availability).items():
+            action = self.actions.get(tool_id)
             if action is None:
-                continue
-            action.setEnabled(avail.enabled)
-            action.setVisible(avail.visible)
-            label = self._LABELS.get(action_id, action_id)
-            if avail.enabled:
-                action.setToolTip(label)
-                action.setStatusTip(label)
-            else:
-                reason = avail.reason or "当前不可用"
+                continue  # evaluator may cover tools this host has no action for
+            label = self._LABELS.get(tool_id, tool_id)
+            action.setEnabled(bool(result.enabled))
+            action.setVisible(bool(result.visible))
+            reason = getattr(result, "reason", None) or getattr(result, "disabled_reason", "") or ""
+            if reason:
                 action.setToolTip(f"{label}\n{reason}")
                 action.setStatusTip(f"{label}（{reason}）")
+            else:
+                action.setToolTip(label)
+                action.setStatusTip(label)
+            checked = getattr(result, "checked", None)
+            if checked is not None and action.isCheckable() and action.isChecked() != bool(checked):
+                action.blockSignals(True)
+                action.setChecked(bool(checked))
+                action.blockSignals(False)
 
     def toolbar(
         self,

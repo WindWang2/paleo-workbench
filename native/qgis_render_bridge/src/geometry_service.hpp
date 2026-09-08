@@ -35,6 +35,12 @@ std::string geometry_smooth(const std::string& geometry, unsigned int iterations
 std::string geometry_densify(const std::string& geometry, double interval);
 std::string geometry_make_valid(const std::string& geometry);
 bool geometry_is_valid(const std::string& geometry);
+/// V7 详细校验：返回 JSON 数组 [{"where": "...", "message": "..."}, ...]
+/// （QgsGeometry::validateGeometry 逐错误报告；空数组 = 有效）。
+std::string geometry_validate(const std::string& geometry);
+/// V7 重塑：QgsGeometry::reshapeGeometry。返回重塑后的 GeoJSON；线与
+/// 目标无有效相交（未改变几何）时抛 GeometryServiceError。
+std::string geometry_reshape(const std::string& geometry, const std::string& reshape_line);
 std::vector<std::string> geometry_multipart_to_singlepart(const std::string& geometry);
 std::string geometry_singlepart_to_multipart(const std::vector<std::string>& geometries);
 std::string geometry_clip(const std::string& geometry, const std::array<double, 4>& extent);

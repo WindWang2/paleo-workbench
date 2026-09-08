@@ -41,6 +41,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from paleo_workbench.mapping.capability_model import (
+    QgisCapabilitySnapshot,
+    probe_qgis_capability,
+    snapshot_stable_hash,
+)
 from paleo_workbench.mapping.map_render_backend import MapLayerSnapshot, MapRenderSnapshot
 from paleo_workbench.mapping.map_styles import LinePattern, MarkerSymbol, VectorStyle
 from paleo_workbench.mapping.reference_layers import (
@@ -54,6 +59,8 @@ from paleo_workbench.mapping.workarea_map_snapshot import (
 )
 from paleo_workbench.project.domain import crs_equivalent
 from paleo_workbench.project.models import MapReferenceLayer
+from paleo_workbench.mapping.tool_availability import evaluate_all
+from paleo_workbench.mapping.tool_context import build_tool_context
 from paleo_workbench.ui.map_action_controller import MapActionController
 from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
 from paleo_workbench.ui.map_status_bar import MapStatusBar
@@ -850,6 +857,14 @@ class CompositeDocument(QWidget):
         self.edit_controller = CompositeEditController(parent=self)
         # RAW/锁定门禁单点注入（V6 B-P0-1：所有会话起点与 flush 提交经此）。
         self.edit_controller.set_edit_gate(self._role_allows_editing)
+        # V7 能力快照：桥面（native/fallback）单次探测；会话的 EditDelta
+        # 以此摘要记录引擎溯源（native 执行 vs shapely 兜底可审计）。
+        self._qgis_capability: QgisCapabilitySnapshot = probe_qgis_capability()
+        self.edit_controller.set_qgis_capability_token(
+            snapshot_stable_hash(self._qgis_capability)
+            if self._qgis_capability.available
+            else "unavailable"
+        )
         self.edit_controller.attach_canvas(self.canvas)
         self.edit_controller.identify_delegate = self._identify_with_results
         # 引用矢量图层：外部 GDAL 源的只读参考（渲染要素经源修订缓存，
@@ -897,6 +912,30 @@ class CompositeDocument(QWidget):
         self.canvas.extent_changed.connect(_on_extent_changed)
         self.canvas.map_position_changed.connect(self._on_map_position)
         self.canvas.backend_status_changed.connect(lambda *_: self._sync_status_bar())
+        # V7：原生测距结果 → 状态栏（fallback 画布无此信号，鸭子类型跳过）。
+        measure_updated = getattr(self.canvas, "measure_updated", None)
+        if measure_updated is not None:
+            measure_updated.connect(self._on_measure_updated)
+        measure_canceled = getattr(self.canvas, "measure_canceled", None)
+        if measure_canceled is not None:
+            measure_canceled.connect(lambda: self.status_bar.set_measure(""))
+        # V7/P1-3：旧桥视口路由的测距分段/预览 → 状态栏（平面距离，明确
+        # 标注；原生测距在位时路由器不挂载，此处无信号可接，自然静默）。
+        measure_segment = getattr(self.canvas, "measure_segment", None)
+        if measure_segment is not None:
+            measure_segment.connect(self._on_measure_segment)
+        measure_preview = getattr(self.canvas, "measure_preview", None)
+        if measure_preview is not None:
+            measure_preview.connect(self._on_measure_preview)
+        # V7：原生 identify 结果消费（此前无消费者——原生栈点击识别面板
+        # 从不打开）。结果经 Python 数据权威组装后进 Identify Results 面板。
+        native_identified = getattr(self.canvas, "native_identified", None)
+        if native_identified is not None:
+            native_identified.connect(self._on_native_identified)
+        # V7/ADV-2：原生提交被拒 → 状态栏明示（采点完成必须有回执）。
+        commit_rejected = getattr(self.canvas, "commit_rejected", None)
+        if commit_rejected is not None:
+            commit_rejected.connect(self.status_message.emit)
 
         # 面板实例（dock 由宿主 QMainWindow 创建并管理）。图层管理面板跟随
         # 画布形态：原生栈用 QgsLayerTreeView 面板，回退画布用同信号接缝的
@@ -1064,6 +1103,11 @@ class CompositeDocument(QWidget):
         stage = stage_from_value(stage_value)
         if stage is None:
             return
+        if hasattr(self, "stage_controller"):
+            try:
+                self.stage_controller.set_stage(stage)
+            except Exception:
+                pass
         tools = stage_profile(stage).tools
         for action_id in governed_edit_actions():
             action = self.action_controller.actions.get(action_id)
@@ -1089,6 +1133,7 @@ class CompositeDocument(QWidget):
             current = getattr(stage_controller, "current_stage", None)
             stage_value = getattr(current, "value", None)
         split_inputs = getattr(controller, "_split_inputs", None)
+        inputs = controller.tool_context_inputs() if hasattr(controller, "tool_context_inputs") else {}
         return ToolContext(
             project_open=self._project is not None,
             stage=stage_value,
@@ -1096,6 +1141,7 @@ class CompositeDocument(QWidget):
             has_active_vector_layer=state.has_active_vector_layer,
             vector_layer_writable=state.vector_layer_writable,
             editing=state.editing,
+            dirty=bool(inputs.get("dirty", False)),
             selected_count=state.selected_count,
             compatible_polygon_count=state.compatible_polygon_count,
             can_undo=state.can_undo,
@@ -1587,14 +1633,144 @@ class CompositeDocument(QWidget):
     def _on_map_position(self, point) -> None:
         self._sync_status_bar(point=tuple(point))
 
+    def _on_measure_updated(self, payload: dict) -> None:
+        """V7 原生测距显示：椭球测算（米）或平面测算（地图单位）。
+
+        桥 payload 契约（PwbMeasureTool::payloadJson）：``segments`` 数组 =
+        已完成分段 + 末尾 live 预览段（鼠标跟随），故完成段数 = len - 1；
+        ``total`` 含 live 段。非法数值（NaN/Inf）显示"测距无效"而非 0/nan。
+        """
+        import math
+
+        try:
+            total = float(payload.get("total") or 0.0)
+        except (TypeError, ValueError):
+            total = math.nan
+        segments = payload.get("segments") or ()
+        try:
+            segment_count = len(segments)
+        except TypeError:
+            segment_count = 0
+        ellipsoidal = bool(payload.get("ellipsoidal"))
+        if not math.isfinite(total):
+            self.status_bar.set_measure("测距: 无效")
+            return
+        if ellipsoidal:
+            text = f"{total / 1000.0:.3f} km" if total >= 1000 else f"{total:.1f} m"
+            text += "（椭球）"
+        else:
+            text = f"{total:.4g}"
+        action = str(payload.get("action") or "")
+        suffix = " 完成" if action == "measure_completed" else ""
+        self.status_bar.set_measure(f"测距: {text} · {max(segment_count - 1, 0)} 段{suffix}")
+
+    def _on_measure_segment(self, distance: float) -> None:
+        """旧桥视口路由的分段完成（平面距离，明确标注——P1-3）。"""
+        import math
+
+        try:
+            value = float(distance)
+        except (TypeError, ValueError):
+            value = math.nan
+        self.status_bar.set_measure(
+            f"测距: {value:.4g}（平面）" if math.isfinite(value) else "测距: 无效"
+        )
+
+    def _on_measure_preview(self, distance: float) -> None:
+        """旧桥视口路由的实时预览（平面距离）。"""
+        import math
+
+        try:
+            value = float(distance)
+        except (TypeError, ValueError):
+            return
+        if math.isfinite(value):
+            self.status_bar.set_measure(f"测距: {value:.4g}（平面）…")
+
+    def _on_native_identified(self, payload: dict) -> None:
+        """原生 identify 结果 → Python 数据权威组装 → Identify Results 面板。
+
+        原生 QgsMapToolIdentifyFeature 只回 (doc_id, feature_id)；面板条目
+        从 CompositeEditController 的图层记录（权威）重建，不建第二数据源。
+        多图层命中列举仍由 fallback 路径的 identify_all 提供（点选语义差异
+        记录在 03-decisions.md）。
+        """
+        layer_id = str(payload.get("layer_doc_id") or "")
+        feature_id = str(payload.get("feature_id") or "")
+        controller = self.edit_controller
+        layer = controller.layer(layer_id)
+        # UX-3：未命中（无图层/无要素）时清空面板并提示——不得残留上次结果
+        # 误导用户（fallback identify_all 至少会刷新为空）。
+        if layer is None or not feature_id:
+            self.identify_results.set_results([])
+            return
+        session = layer.edit_session
+        source = session.features() if session is not None else layer.features()
+        feature = next((f for f in source if f.feature_id == feature_id), None)
+        if feature is None:
+            self.identify_results.set_results([])
+            self.status_message.emit("识别未命中：要素不存在或已被删除")
+            return
+        self.identify_results.set_results(
+            [
+                {
+                    "layer_id": layer.id,
+                    "layer_name": layer.name,
+                    "feature_id": feature.feature_id,
+                    "geometry_type": str(feature.geometry.get("type") or ""),
+                    "attributes": dict(feature.attributes),
+                    "source": "composite",
+                    "template": controller.layer_template(layer.id),
+                    "editable": True,
+                    "record": feature.as_record(),
+                }
+            ]
+        )
+
+    def _stage_hidden_edit_actions(self) -> frozenset[str]:
+        """当前阶段 profile 隐藏的受治理编辑动作（evaluator 的可见性输入）。"""
+        from paleo_workbench.mapping_workspace.stage_profiles import (
+            governed_edit_actions,
+            stage_profile,
+        )
+        from paleo_workbench.mapping_workspace.stages import stage_from_value
+
+        stage = stage_from_value(getattr(self.stage_controller, "current_stage", None) and self.stage_controller.current_stage.value)
+        if stage is None:
+            return frozenset()
+        tools = stage_profile(stage).tools
+        return frozenset(
+            action_id
+            for action_id in governed_edit_actions()
+            if not tools.allows_edit_action(action_id)
+        )
+
+    def _build_tool_context(self):
+        """ToolContext 组装（Goal V7 §3）：controller 派生 + 角色/阶段细分注入。"""
+        inputs = self.edit_controller.tool_context_inputs()
+        layer_id = str(inputs.get("active_layer_id") or "")
+        raw_locked, stage_locked = self._layer_lock_classes(layer_id)
+        context = build_tool_context(
+            controller_state=inputs,
+            qgis=self._qgis_capability,
+            native_canvas_available=bool(self.uses_native_stack),
+            project_open=True,
+            mapping_stage=str(
+                (getattr(self.stage_controller, "current_stage", None) and self.stage_controller.current_stage.value)
+                or ""
+            ),
+            hidden_by_stage_profile=self._stage_hidden_edit_actions(),
+        )
+        return replace(
+            context,
+            raw_locked=raw_locked,
+            stage_locked=stage_locked,
+            can_previous_extent=bool(self.canvas.can_previous_extent),
+            can_next_extent=bool(self.canvas.can_next_extent),
+        )
+
     def _sync_action_state(self) -> None:
         self._update_empty_hint()
-        self.action_controller.update_state(
-            self.edit_controller.action_state(
-                can_previous_extent=self.canvas.can_previous_extent,
-                can_next_extent=self.canvas.can_next_extent,
-            )
-        )
         controller = self.edit_controller
         self.layer_manager.set_editing_layer(
             controller.active_layer_id if controller.editing else None
@@ -1605,10 +1781,11 @@ class CompositeDocument(QWidget):
             getattr(controller.tools.active_tool, "tool_id", "") or "pan"
         )
         for action_id in self.action_controller._TOOL_IDS:
-            action = self.action_controller.actions[action_id]
-            action.blockSignals(True)
-            action.setChecked(action_id == active_tool_id)
-            action.blockSignals(False)
+            action = self.action_controller.actions.get(action_id)
+            if action is not None:
+                action.blockSignals(True)
+                action.setChecked(action_id == active_tool_id)
+                action.blockSignals(False)
         # 捕捉 / 拓扑的勾选态以控制器为权威（捕捉设置对话框等旁路入口
         # 不得让工具条按钮失步，review #11）。
         actions = self.action_controller.actions
@@ -1616,14 +1793,33 @@ class CompositeDocument(QWidget):
             ("snapping", controller.snapping.enabled),
             ("topology", controller.topology_enabled),
         ):
-            action = actions[action_id]
-            action.blockSignals(True)
-            action.setChecked(bool(checked))
-            action.blockSignals(False)
-        # V7：使能/可见/禁用原因统一由 tool_surface 求值（在 update_state
-        # 之后调用——勾选态归前者，其余归单一真源；split 的「多边形选集 +
-        # 切割线」条件经 split_inputs_ready 收敛，不再二次改 enable）。
+            action = actions.get(action_id)
+            if action is not None:
+                action.blockSignals(True)
+                action.setChecked(bool(checked))
+                action.blockSignals(False)
+        # V7：工作站专业分组统一由 tool_surface 求值
         self._apply_tool_availability()
+        # V7：核心数字化/编辑动作由 authoring kernel evaluator 统一裁定状态与原因
+        from dataclasses import replace
+        from paleo_workbench.mapping_workspace.stage_profiles import (
+            governed_edit_actions,
+            stage_profile,
+        )
+        from paleo_workbench.mapping_workspace.stages import stage_from_value
+
+        availability = dict(evaluate_all(self._build_tool_context()))
+        stage_raw = getattr(self.stage_controller, "current_stage", None) if hasattr(self, "stage_controller") else None
+        stage = stage_from_value(getattr(stage_raw, "value", stage_raw))
+        if stage is not None:
+            tools = stage_profile(stage).tools
+            for action_id in governed_edit_actions():
+                if action_id in availability:
+                    avail = availability[action_id]
+                    availability[action_id] = replace(avail, visible=tools.allows_edit_action(action_id))
+            if "add_point" in availability:
+                availability["add_point"] = replace(availability["add_point"], visible=True)
+        self.action_controller.apply_availability(availability)
         # V7 §7：树呈现态（编辑/新鲜度/成熟度）差分推送。
         self._push_layer_decorations()
         self._sync_status_bar()
@@ -1905,6 +2101,34 @@ class CompositeDocument(QWidget):
             title = template.title if template else group_id
             return False, f"图层所在组「{title}」在本阶段为证据锁定——不可编辑"
         return True, ""
+
+    def _layer_lock_classes(self, layer_id: str) -> tuple[bool, bool]:
+        """(raw_locked, stage_locked) 分类（review-3 UX-5）。
+
+        只在真正的 RAW 保护 / 组证据锁分支置 true；门禁的其他拒绝原因
+        （无活动目标等瞬态原因）保持两者皆 false，具体判词走
+        ``edit_gate_reason``（evaluator 的 _role_gate 优先用判词）。
+        """
+        if not layer_id:
+            return False, False
+        role = self.stage_controller.state.role_of(str(layer_id))
+        if bool(getattr(role, "is_raw_protected", False)):
+            return True, False
+        from paleo_workbench.mapping_workspace.layer_groups import (
+            system_group_template,
+        )
+
+        group_id = self.stage_controller.group_controller.placement_of(layer_id)
+        template = system_group_template(group_id) if group_id else None
+        stage = self.stage_controller.current_stage
+        try:
+            view_state = self.stage_controller.state.view_state(stage)
+            locked_override = view_state.group_locked.get(group_id)
+            locked = locked_override if locked_override is not None else bool(
+                template and template.stage_locked(stage))
+        except Exception:
+            locked = False
+        return False, bool(locked)
 
     def _toggle_layer_editing(self, layer_id: str) -> None:
         allowed, reason = self._role_allows_editing(str(layer_id))
@@ -2583,7 +2807,14 @@ class CompositeDocument(QWidget):
                 if getattr(layer, "source_kind", "") == "vector"
             ]
             self._reference_status = {}
-            self.edit_controller.load_from_project(project)
+            if self.edit_controller.load_from_project(project) is False:
+                # 被阻断的会话保持打开（可回滚/可修复）：拒绝带病切换，
+                # 如实告知用户哪些图层未提交，而不是静默 rollback 丢数据。
+                self.status_message.emit(
+                    "工程切换已取消：有未保存且无法提交的编辑（见状态栏），"
+                    "请先回滚或修复后再切换"
+                )
+                return
             # V5：恢复阶段工作区科学状态（当前阶段/成员资格/组结构/视图覆盖）
             # + UI 展开偏好（QSettings，按工程名分域）。
             self.stage_controller.load_state(
