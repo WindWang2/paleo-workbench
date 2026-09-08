@@ -45,6 +45,7 @@ C++/build patches carry a documented compatibility rationale:
   hoisted above the `NOT WIN32` openpty guard: upstream only pulls the module
   in on non-Windows paths while `src/core`'s internal-spatialindex block calls
   `check_function_exists()` on every platform. No behavior change on Linux.
+- `src/gui/symbology/qgstemplatedcategorizedrendererwidget_p.h` (V7, Windows support) — adds `typename` to one dependent-name (`RendererType::Category`) in a template virtual signature. GCC/Clang accept the omission; MSVC in strict conformance mode (error C2061) rejects it. Semantics unchanged.
 - `platform/windows/rc/version.rc.in` (V7, Windows support) — the file is
   part of the upstream tag but was not part of the original import closure;
   it is restored verbatim from `final-4_2_0` because `win32_version_info()`

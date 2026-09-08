@@ -481,7 +481,7 @@ template<typename RendererType> class QgsTemplatedCategorizedRendererModel : pub
       return Qt::NoItemFlags;
     }
 
-    virtual QIcon symbolIcon( const RendererType::Category &category ) const = 0;
+    virtual QIcon symbolIcon( const typename RendererType::Category &category ) const = 0;
 
     /**
      * Called by setData() to handle additional editable columns

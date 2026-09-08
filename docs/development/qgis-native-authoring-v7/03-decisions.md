@@ -66,3 +66,20 @@
 - **背景**：Goal 规定「QGIS/C++ 编译并发默认 -j2，内存紧张时降到 -j1」。实测 -j2 在本机（16 核 / 31.2GB）需 ~9 小时完成 1767 个剩余目标，严重压缩验证窗口。
 - **裁决**：提升至 **-j6** 并持续监控可用内存。
 - **依据**：该约束的目的是防 OOM 而非数字本身；实测空闲内存 >25GB，6 路 cl 峰值估算 ≤9GB，裕量充足；测试套件等竞争负载已让路。若监控发现可用内存 <6GB 立即回退 -j2/-j1。本裁决在此记录以保持与约束文本的可审计关系。
+
+## D12 外部 spatialindex 替代 internal（Windows 官方对齐）
+
+- **背景**：`WITH_INTERNAL_SPATIALINDEX=ON` 时 qgis_core 静态嵌入 sidx 源码，
+  qgis_analysis 消费其符号在 Linux（全局符号可见）可行，在 Windows DLL
+  边界出现 LNK2019（`qgsvectorlayerdirector.cpp` 引 SpatialIndex 符号）。
+- **裁决**：与 QGIS 官方 Windows 构建一致——外部库。复用 anaconda 的
+  libspatialindex 1.9.3（版本门 <2.1 通过；vcpkg 无该包）。新增 configure
+  参数 `-DWITH_INTERNAL_SPATIALINDEX=OFF -DSPATIALINDEX_INCLUDE_DIR/LIBRARY`
+ （configure_vendored_qgis.bat；后续并入 setup.py Windows 分支以保持可复现）。
+
+## D13 MSVC `typename` 补丁（上游模板代码严格一致性）
+
+- **背景**：`qgstemplatedcategorizedrendererwidget_p.h:484` 的
+  `RendererType::Category &` 缺 dependent-name 的 `typename` 前缀；GCC/Clang
+  宽容接受，MSVC 严格模式报 error C2061。文件内仅一处同类问题。
+- **裁决**：加 `typename` 前缀，语义不变，UPSTREAM.md 记录。
