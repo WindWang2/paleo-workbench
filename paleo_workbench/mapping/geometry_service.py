@@ -34,6 +34,9 @@ def qgis_geometry_available() -> bool:
 def _native_geometry():
     if not qgis_bridge_available():
         raise RuntimeError("QGIS geometry service requires the qgis_render_bridge")
+    from paleo_workbench.mapping.qgis_style import ensure_qgis_bridge_dll_dirs
+
+    ensure_qgis_bridge_dll_dirs()  # Windows V7: vendor DLL path before import
     import qgis_render_bridge as native
 
     return native.geometry

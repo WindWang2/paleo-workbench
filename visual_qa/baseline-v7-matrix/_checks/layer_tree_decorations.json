@@ -1,0 +1,15 @@
+{
+  "state_ok": true,
+  "checks": [
+    {
+      "name": "tree_status_column_has_frozen",
+      "ok": true,
+      "detail": " | ❄ 冻结"
+    },
+    {
+      "name": "tree_status_column_has_glyph",
+      "ok": true,
+      "detail": " | ❄ 冻结"
+    }
+  ]
+}

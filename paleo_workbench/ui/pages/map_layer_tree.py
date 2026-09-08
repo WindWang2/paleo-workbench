@@ -86,7 +86,7 @@ class MapLayerTree(QFrame):
         item = self._layer_items.get(layer_key)
         if item is not None:
             self._suppress_item_changed = True
-            item.setText(1, "🔒" if locked else "")
+            item.setText(1, "⊘" if locked else "")
             self._suppress_item_changed = False
         self.layer_lock_changed.emit(layer_key, locked)
 
@@ -146,7 +146,7 @@ class MapLayerTree(QFrame):
                 Qt.CheckState.Checked if visible else Qt.CheckState.Unchecked,
             )
             if self._layer_locked.get(key, False):
-                layer_item.setText(1, "🔒")
+                layer_item.setText(1, "⊘")
             parent.addChild(layer_item)
             self._layer_items[key] = layer_item
             parent.setExpanded(True)

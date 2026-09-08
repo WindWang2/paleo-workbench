@@ -59,6 +59,20 @@ from paleo_workbench.ui.pages.map_workbench_bottom import MapWorkbenchBottom
 from paleo_workbench.ui.panel_float_controller import FloatController
 from paleo_workbench.ui.qgis_stack.display_canvas import create_display_canvas
 from paleo_workbench.ui.map_action_controller import MapActionController, MapActionState
+from paleo_workbench.ui.workstation.tool_surface import (
+    LayerCapabilitySnapshot,
+    QgisCapabilitySnapshot,
+    ToolContext,
+    availability_for_context,
+)
+
+#: 本页 authoring kind（facies/well/line/label）→ 几何 kind（求值器词汇）。
+_AUTHORING_KIND_GEOMETRY = {
+    "facies": "polygon",
+    "line": "line",
+    "well": "point",
+    "label": "point",
+}
 from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
 from paleo_workbench.ui.map_status_bar import MapStatusBar
 from paleo_workbench.viz.mapping_helpers import (
@@ -172,7 +186,7 @@ class MappingPage(QWidget):
                 ("pan", "zoom_in", "zoom_out", "full_extent", "previous_extent", "next_extent", "refresh"),
                 ("identify", "select", "select_rectangle", "measure_distance", "clear_selection", "select_all", "invert_selection"),
                 ("toggle_editing", "save_edits", "rollback"),
-                ("add_point", "add_line", "add_polygon", "move_feature", "vertex"),
+                ("add_point", "add_line", "add_polygon", "move_feature", "vertex", "reshape"),
                 ("undo", "redo", "delete_selected"),
                 ("split", "merge"),
                 ("snapping", "topology", "cancel"),
@@ -1922,6 +1936,9 @@ class MappingPage(QWidget):
         authoring = self._authoring_document
         if authoring is None:
             self.action_controller.update_state(MapActionState())
+            self.action_controller.apply_availability(
+                availability_for_context(ToolContext(project_open=False))
+            )
             return
         session = authoring.active_session
         selected = authoring.active_layer.selection
@@ -1936,17 +1953,48 @@ class MappingPage(QWidget):
                     polygon_count += 1
             except KeyError:
                 continue
-        self.action_controller.update_state(
-            MapActionState(
-                has_active_vector_layer=True,
-                vector_layer_writable=True,
-                editing=session is not None,
-                selected_count=len(selected),
-                compatible_polygon_count=polygon_count,
-                can_undo=bool(session and session.undo_stack),
-                can_redo=bool(session and session.redo_stack),
-                can_previous_extent=self.unified_canvas.can_previous_extent,
-                can_next_extent=self.unified_canvas.can_next_extent,
+        state = MapActionState(
+            has_active_vector_layer=True,
+            vector_layer_writable=True,
+            editing=session is not None,
+            selected_count=len(selected),
+            compatible_polygon_count=polygon_count,
+            can_undo=bool(session and session.undo_stack),
+            can_redo=bool(session and session.redo_stack),
+            can_previous_extent=self.unified_canvas.can_previous_extent,
+            can_next_extent=self.unified_canvas.can_next_extent,
+        )
+        self.action_controller.update_state(state)
+        # V7：使能/禁用原因与工作站共用同一求值器（stage=None——本页是
+        # legacy 编图表面，没有阶段语义；几何/会话/选择门禁语义一致）。
+        layer = authoring.active_layer
+        self.action_controller.apply_availability(
+            availability_for_context(
+                ToolContext(
+                    project_open=True,
+                    stage=None,
+                    layer=LayerCapabilitySnapshot(
+                        layer_id=str(getattr(layer, "id", "") or ""),
+                        name=str(getattr(layer, "name", "") or ""),
+                        kind=_AUTHORING_KIND_GEOMETRY.get(
+                            str(authoring.active_kind or "")
+                        ),
+                        editable=True,
+                    ),
+                    has_active_vector_layer=state.has_active_vector_layer,
+                    vector_layer_writable=state.vector_layer_writable,
+                    editing=state.editing,
+                    selected_count=state.selected_count,
+                    compatible_polygon_count=state.compatible_polygon_count,
+                    can_undo=state.can_undo,
+                    can_redo=state.can_redo,
+                    can_previous_extent=state.can_previous_extent,
+                    can_next_extent=state.can_next_extent,
+                    capability=QgisCapabilitySnapshot(
+                        mode="unavailable",
+                        reason="本页使用自有编辑画布（QGIS 桥栈在工作站中央文档）",
+                    ),
+                )
             )
         )
 

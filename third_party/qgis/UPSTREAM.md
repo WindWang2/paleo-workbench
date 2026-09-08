@@ -33,31 +33,20 @@ directories remain when they are required by the Core/GUI build closure.
 
 Only `CMakeLists.txt` differs from upstream: four non-runtime subdirectories
 (`doc`, `i18n`, `postinstall`, and `linux`) are not added because their source
-is intentionally not part of this minimal runtime closure. One imported C++
-header carries a documented compatibility patch:
+is intentionally not part of this minimal runtime closure. Imported
+C++/build patches carry a documented compatibility rationale:
 
 - `src/core/qgsconnectionpool.h` — `QSemaphore::tryAcquire(int,
   QDeadlineTimer)` does not exist before Qt 6.6; on older Qt runtimes (the
   CI leg builds against Ubuntu noble's Qt 6.4) the call falls back to the
   identical milliseconds overload, guarded by `QT_VERSION`. Semantics are
   unchanged (both forms time out after `timeout` ms).
-
-Windows (MSVC) build support patches — qgis-geolayer-cartography-v7:
-
-- `platform/windows/rc/version.rc.in` — restored verbatim from the pinned
-  upstream commit. The win32_version_info() CMake function
-  (cmake/CreateQgsVersion.cmake) requires it on WIN32, but `platform/` had
-  been dropped from the closure because Linux builds never reference it.
-- `src/core/CMakeLists.txt` — `include(CheckFunctionExists)` added inside
-  `if(WITH_INTERNAL_SPATIALINDEX)`. Upstream only includes that module
-  under `if(NOT WIN32 ...)` (the openpty probe in the top-level
-  CMakeLists.txt), so pure-MSVC configure fails with "Unknown CMake
-  command" at the spatialindex `check_function_exists()` calls. No
-  behavioural change on Linux (the module is idempotent to include).
-- `src/gui/symbology/qgstemplatedcategorizedrendererwidget_p.h` — added
-  the `typename` keyword to the dependent type
-  `RendererType::Category` in the virtual `symbolIcon` declaration
-  (C2061 on MSVC; GCC accepts both). This is an upstream
-  MSVC-incompatibility in the Nov-2025 categorized-renderer-widget
-  rework; the file is otherwise verbatim.
-
+- `CMakeLists.txt` (V7, Windows support) — `include(CheckFunctionExists)` is
+  hoisted above the `NOT WIN32` openpty guard: upstream only pulls the module
+  in on non-Windows paths while `src/core`'s internal-spatialindex block calls
+  `check_function_exists()` on every platform. No behavior change on Linux.
+- `src/gui/symbology/qgstemplatedcategorizedrendererwidget_p.h` (V7, Windows support) — adds `typename` to one dependent-name (`RendererType::Category`) in a template virtual signature. GCC/Clang accept the omission; MSVC in strict conformance mode (error C2061) rejects it. Semantics unchanged.
+- `platform/windows/rc/version.rc.in` (V7, Windows support) — the file is
+  part of the upstream tag but was not part of the original import closure;
+  it is restored verbatim from `final-4_2_0` because `win32_version_info()`
+  (compiled into qgis_core/qgis_gui on MSVC) requires it.

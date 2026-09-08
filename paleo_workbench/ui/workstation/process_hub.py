@@ -14,10 +14,14 @@ LOG_LINE_CAP = 2000
 class QtLogHandler(QObject, logging.Handler):
     """logging → Qt 的轻量桥：记录格式化后经信号送出（跨线程安全）。
 
-    ``emit`` 可能在任意工作线程被调用：这里只做格式化 + Qt 信号发射
-    （跨线程信号由 Qt 排队到接收方线程），绝不直接触碰界面部件；同时
-    把行存入有界内存缓冲，供 1s 轮询定时器兜底取走——信号未连接或事件
+    ``handle``（logging 入口）可能在任意工作线程被调用：这里只做格式化 +
+    Qt 信号发射（跨线程信号由 Qt 排队到接收方线程），绝不直接触碰界面部件；
+    同时把行存入有界内存缓冲，供 1s 轮询定时器兜底取走——信号未连接或事件
     循环繁忙的窗口期内日志不丢行。
+
+    注意：不重写 ``logging.Handler.emit`` —— PySide6 6.8 的 Shiboken 会把
+    ``SignalInstance.emit`` 调用错误路由到同名的实例方法（V7 Qt 6.8 对齐
+    时的真实故障；6.11 已修复）。handle 入口直接实现全部逻辑，双版本兼容。
     """
 
     message_ready = Signal(str)
@@ -30,26 +34,27 @@ class QtLogHandler(QObject, logging.Handler):
         )
         self._pending: deque[str] = deque(maxlen=capacity)
 
-    def emit(self, record: logging.LogRecord) -> None:
+    def handle(self, record: logging.LogRecord) -> bool:
         # 死壳遗留 handler：未走 shutdown() 的拆除路径（failed-stop 的
         # deleteLater）不会摘除包 logger 上的 handler，而下一次壳构建
         # 记录「QGIS 画布栈初始化失败」时就会调用它——死 QObject 一 emit
         # 就抛 RuntimeError，直接炸掉新壳的构建（「打开工程报错」根因）。
         # handler 死了只能丢弃日志，绝不能让日志记录炸掉调用方。
         if not shiboken6.isValid(self):
-            return
+            return True
         try:
             line = self._formatter.format(record)
         except Exception:  # noqa: BLE001 — logging 契约：handler 不得抛出
             self.handleError(record)
-            return
+            return True
         self._pending.append(line)
         try:
             self.message_ready.emit(line)
         except RuntimeError:
-            # emit 瞬间恰好被销毁（DeferredDelete 竞态）：行已在缓冲里，
+            # emit 碰上 DeferredDelete 竞态被销毁：行已在缓冲里，
             # 轮询兜底取不到就算了，不能向上抛。
             pass
+        return True
 
     def take_pending(self) -> list[str]:
         """取走尚未消费的格式化行（轮询路径），取后清空。"""

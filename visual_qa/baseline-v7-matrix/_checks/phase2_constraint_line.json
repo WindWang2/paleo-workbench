@@ -1,0 +1,20 @@
+{
+  "state_ok": true,
+  "checks": [
+    {
+      "name": "line_add_line_enabled",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "line_add_polygon_disabled",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "line_kind_reason",
+      "ok": true,
+      "detail": "添加面（活动图层为线图层，不能使用添加面）"
+    }
+  ]
+}

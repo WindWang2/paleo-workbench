@@ -368,8 +368,10 @@ class TaskScheduler:
                 event = self._cancel_events.get(task_id)
                 if event is not None:
                     event.set()
-                else:
-                    handle.cancel_requested = True
+                # V7 §12：armed 任务同样置 cancel_requested——「取消中」
+                # 呈现（TaskCenter）依赖该标志；此前 armed 取消只设事件，
+                # UI 在协作取消等待期仍显示「运行中 N%」（假状态）。
+                handle.cancel_requested = True
                 return True
         self._wakeup.set()
         if on_cancel is not None:

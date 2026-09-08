@@ -31,8 +31,8 @@ def test_data_stage_and_integrity_enums():
     assert STAGE_LABELS[DataStage.INTERMEDIATE] == "中间结果"
     assert STAGE_LABELS[DataStage.OUTPUT] == "输出成果"
 
-    assert STAGE_ICONS[DataStage.RAW] == "🔒"
-    assert STAGE_ICONS[DataStage.DERIVED] == "🌿"
+    assert STAGE_ICONS[DataStage.RAW] == "▣"
+    assert STAGE_ICONS[DataStage.DERIVED] == "◈"
     assert set(STAGE_COLORS) == set(DataStage)
 
     assert IntegrityState.VERIFIED.label == "已校验"

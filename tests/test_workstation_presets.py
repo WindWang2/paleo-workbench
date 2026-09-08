@@ -134,13 +134,13 @@ def test_current_preset_id_invalidated_by_manual_dock_toggle(qtbot, tmp_path):
     assert frame.app_bar.workspace_combo.currentText() == "自定义"
 
 
-def test_hub_dock_toggle_does_not_invalidate_preset(qtbot, tmp_path):
-    """功能页 hub 浮窗由导航管理，不属于工作区预设矩阵。"""
+def test_hub_dock_toggle_invalidates_preset(qtbot, tmp_path):
+    """V7 D12：hub 不再强制浮动，纳入预设追踪——显隐即用户自定义。"""
     frame = _frame(qtbot, tmp_path)
     frame.apply_layout_preset("composite_default")
     frame.hub_dock.show()
-    frame.hub_dock.hide()  # 显隐信号不得使预设失效
-    assert frame.current_preset_id == "composite_default"
+    frame.hub_dock.hide()  # 用户显式改动 dock 可见性 → 预设失效（自定义）
+    assert frame.current_preset_id is None
 
 
 # --- app bar「工作区」下拉 ----------------------------------------------

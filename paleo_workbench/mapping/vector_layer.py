@@ -7,9 +7,17 @@ items may mirror it for temporary overlays, but neither becomes edit authority.
 from __future__ import annotations
 
 from copy import deepcopy
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 import math
-from typing import Any, Iterable, Mapping
+import uuid
+from typing import Any, Iterable, Iterator, Mapping
+
+from paleo_workbench.mapping.edit_delta import (
+    DELTA_JOURNAL_LIMIT,
+    EditDelta,
+    delta_from_command,
+)
 
 __all__ = [
     "AddFeatureCommand",
@@ -28,6 +36,8 @@ __all__ = [
     "VectorEditSession",
     "VectorFeature",
     "VectorLayer",
+    "DELTA_JOURNAL_LIMIT",
+    "EditDelta",
 ]
 
 
@@ -324,6 +334,18 @@ class VectorEditSession:
         # Contiguous suffix of all revisions that ever bumped; rolled back or
         # trimmed-away history yields None from changes_since (full rebuild).
         self._journal: list[tuple[int, tuple[str, ...]]] = []
+        # EditDelta audit stream (Goal V7 §6): derived from the command flow,
+        # never a second authority — commands remain the edit engine. The
+        # journal is forward-only; undo/redo navigate history rather than
+        # creating new edits and produce no deltas.
+        self.session_id = uuid.uuid4().hex
+        self.delta_journal: list[EditDelta] = []
+        self._delta_order = 0
+        self._delta_source_tool: str | None = None
+        self._pending_deltas: list[EditDelta] | None = None
+        # Engine provenance token (host sets from capability snapshot; the
+        # literal default is honest for hosts without the bridge).
+        self.qgis_capability_token: str = "unavailable"
 
     def _bump_revision(self, touched: Iterable[str] = ()) -> None:
         self.revision += 1
@@ -363,12 +385,15 @@ class VectorEditSession:
         if self._open_command is not None:
             raise RuntimeError("an edit command is already open")
         self._open_command = []
+        self._pending_deltas = []
 
     def end_edit_command(self) -> None:
         if self._open_command is None:
             raise RuntimeError("no edit command is open")
         commands = self._open_command
         self._open_command = None
+        pending = self._pending_deltas
+        self._pending_deltas = None
         if not commands:
             return
         before: dict[str, VectorFeature | None] = {}
@@ -378,6 +403,13 @@ class VectorEditSession:
                 before.setdefault(feature_id, value)
             after.update(command.after)
         self._record(EditCommand("compound", before, after), already_applied=True)
+        if pending:
+            # Compound commands keep their constituent deltas (one per
+            # normalized operation) — e.g. vertex move + topology propagation
+            # stays two deltas, not one opaque blob.
+            self.delta_journal.extend(pending)
+            if len(self.delta_journal) > DELTA_JOURNAL_LIMIT:
+                del self.delta_journal[: len(self.delta_journal) - DELTA_JOURNAL_LIMIT]
 
     def destroy_edit_command(self) -> None:
         if self._open_command is None:
@@ -387,17 +419,59 @@ class VectorEditSession:
             command.revert(self._working)
             touched.update(command.feature_ids)
         self._open_command = None
+        # Discarded compounds discard their deltas too (nothing happened).
+        self._pending_deltas = None
         self._bump_revision(touched)
+
+    @contextmanager
+    def edit_source(self, source_tool: str) -> Iterator["VectorEditSession"]:
+        """Tag deltas recorded inside the block with ``source_tool``.
+
+        Hosts wrap native-tool commit paths with e.g. ``add_polygon(native)``
+        so the audit stream distinguishes QGIS-tool edits from fallback ones.
+        """
+        previous = self._delta_source_tool
+        self._delta_source_tool = str(source_tool)
+        try:
+            yield self
+        finally:
+            self._delta_source_tool = previous
+
+    def _record_delta(self, command: EditCommand) -> None:
+        delta = delta_from_command(
+            command,
+            layer_id=self.layer.id,
+            session_id=self.session_id,
+            order=self._delta_order + 1,
+            source_tool=self._delta_source_tool or "command",
+            qgis_capability=self.qgis_capability_token,
+            selection_context=self.layer.selection,
+        )
+        if delta is None:
+            return
+        self._delta_order += 1
+        if self._pending_deltas is not None:
+            self._pending_deltas.append(delta)
+            return
+        self.delta_journal.append(delta)
+        if len(self.delta_journal) > DELTA_JOURNAL_LIMIT:
+            del self.delta_journal[: len(self.delta_journal) - DELTA_JOURNAL_LIMIT]
+
+    def deltas(self) -> tuple[EditDelta, ...]:
+        """The normalized edit stream (oldest first)."""
+        return tuple(self.delta_journal)
 
     def _record(self, command: EditCommand, *, already_applied: bool = False) -> None:
         if not already_applied:
             command.apply(self._working)
         if self._open_command is not None:
             self._open_command.append(command)
+            self._record_delta(command)
             return
         self.undo_stack.append(command)
         self.redo_stack.clear()
         self._bump_revision(command.feature_ids)
+        self._record_delta(command)
 
     def add_feature(self, feature: VectorFeature) -> None:
         if feature.feature_id in self._working:
@@ -541,6 +615,10 @@ class VectorEditSession:
         self._working = dict(self.layer._features)
         self.undo_stack.clear()
         self.redo_stack.clear()
+        # 回滚 = 本会话的编辑从未落地；delta 审计流随之整段作废（与会话
+        # journal 的 None 语义对齐：不留可误读的"零变更"历史）。
+        self.delta_journal.clear()
+        self._pending_deltas = None
         # 工作副本整体替换：任何旧修订的增量跨度都不可恢复。bump 之后再
         # 清空日志——若留下这条空条目，changes_since(旧修订) 会误判为
         # 「零变更」而保留过期 records；空日志使其返回 None → 全量重建。

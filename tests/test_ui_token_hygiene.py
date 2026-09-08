@@ -31,7 +31,6 @@ ALLOWED_VIOLATIONS: dict[str, int] = {
     "ui/pages/lithology_crossplot_dialog.py": 3,
     "ui/pages/mapping_page.py": 3,
     "ui/pages/ai_check_advisor_dialog.py": 2,
-    "ui/workstation/agent_panel.py": 2,
     "ui/map_symbology_bridge.py": 2,
     "ui/workstation/common.py": 1,
     "ui/status_bar.py": 1,
@@ -83,7 +82,7 @@ def test_no_new_raw_color_literals() -> None:
 
 
 def test_ratchet_only_shrinks() -> None:
-    """登记表中的每项都必须仍有对应违规，防止僵尸预算。"""
+    """登记表中的每项都必须仍有对应违规，防止僵尸预算（V7 扩到全部三表）。"""
     stale: list[str] = []
     known = set()
     for path in _iter_production_py():
@@ -97,4 +96,107 @@ def test_ratchet_only_shrinks() -> None:
             stale.append(f"{rel}: 预算 {budget} > 实际 {actual}，请下调")
         if budget <= 0:
             stale.append(f"{rel}: 预算为 0 请直接移出登记表")
-    assert not stale, "ALLOWED_VIOLATIONS 需要收敛：\n" + "\n".join(stale)
+    # V7 新表（font-size / fixed-size）同样不得有僵尸预算。
+    for table_name, budgets, pattern in (
+        ("FONT_SIZE_BUDGETS", FONT_SIZE_BUDGETS, _FONT_LITERAL),
+        ("FIXED_SIZE_BUDGETS", FIXED_SIZE_BUDGETS, _FIXED_LITERAL),
+    ):
+        for rel, budget in budgets.items():
+            path = ROOT / rel
+            if not path.exists():
+                stale.append(f"{table_name}: {rel} 文件已不存在，请移除登记")
+                continue
+            actual = _count(path, pattern)
+            if actual < budget:
+                stale.append(
+                    f"{table_name}: {rel} 预算 {budget} > 实际 {actual}，请下调")
+            if budget <= 0:
+                stale.append(f"{table_name}: {rel} 预算为 0 请直接移出登记表")
+    assert not stale, "ratchet 登记表需要收敛：\n" + "\n".join(stale)
+
+
+# ---------------------------------------------------------------------------
+# V7 ratchets：字面字号 / 字面定宽 / emoji 禁令（goal §9；只能收缩）
+# 迁移到 token 字号 / 最小-最大宽度对后下调预算；预算归零即移除登记。
+# ---------------------------------------------------------------------------
+
+FONT_SIZE_BUDGETS: dict[str, int] = {
+    "ui/map_layer_properties.py": 2,
+    "ui/page_placeholder.py": 1,
+    "ui/pages/action_header.py": 1,
+    "ui/pages/activity_card.py": 3,
+    "ui/pages/catalog_health_dialog.py": 1,
+    "ui/pages/data_reader_panel.py": 2,
+    "ui/pages/filter_chips_bar.py": 1,
+    "ui/pages/governance_dialog.py": 2,
+    "ui/pages/lithology_crossplot_dialog.py": 1,
+    "ui/pages/map_chrome_panel.py": 1,
+    "ui/pages/map_document_panel.py": 2,
+    "ui/pages/module_relationship.py": 5,
+    "ui/pages/new_project_wizard.py": 2,
+    "ui/pages/relink_dialog.py": 2,
+    "ui/pages/resource_summary.py": 5,
+    "ui/pages/seismic_view_panel.py": 1,
+    "ui/pages/start_guide_card.py": 2,
+    "ui/pages/summary_table_preview_widget.py": 3,
+    "ui/pages/well_seismic_joint_page.py": 1,
+    "ui/pages/well_table_panel.py": 1,
+    "ui/pages/workflow_contract_panel.py": 2,
+}
+
+FIXED_SIZE_BUDGETS: dict[str, int] = {
+    "ui/components/views.py": 1,
+    "ui/pages/map_document_panel.py": 1,
+    "ui/pages/map_edit_toolbar.py": 1,
+    "ui/pages/prediction_evidence_panel.py": 1,
+    "ui/pages/seismic_attribute_panel.py": 1,
+    "ui/pages/seismic_control_panel.py": 1,
+    "ui/pages/seismic_view_panel.py": 1,
+    "ui/pages/stratigraphy_correlation_page.py": 1,
+    "ui/pages/tag_widgets.py": 1,
+    "ui/pages/task_panel_base.py": 1,
+    "ui/pages/visualization_summary_panel.py": 1,
+    "viz/hosts/well_location_preview.py": 1,
+}
+
+_FONT_LITERAL = re.compile(r"font-size:\s*\d+(?:\.\d+)?px")
+_FIXED_LITERAL = re.compile(r"setFixed(?:Width|Height)\(\s*\d+\s*\)")
+
+
+def _count(path: Path, pattern: re.Pattern) -> int:
+    return len(pattern.findall(path.read_text(encoding="utf-8")))
+
+
+def _budget_check(budgets: dict[str, int], pattern: re.Pattern, what: str) -> None:
+    offenders: list[str] = []
+    for path in _iter_production_py():
+        rel = str(path.relative_to(ROOT)).replace("\\", "/")
+        found = _count(path, pattern)
+        if found > budgets.get(rel, 0):
+            offenders.append(f"{rel}: {found} > 预算 {budgets.get(rel, 0)}")
+    assert not offenders, (
+        f"production UI 出现新的{what}（超 ratchet 预算）——改用 tokens 字号或"
+        "最小-最大宽度对:\n" + "\n".join(offenders))
+
+
+def test_no_new_font_size_literals() -> None:
+    _budget_check(FONT_SIZE_BUDGETS, _FONT_LITERAL, "字面 font-size")
+
+
+def test_no_new_fixed_size_literals() -> None:
+    _budget_check(FIXED_SIZE_BUDGETS, _FIXED_LITERAL, "字面 setFixedSize")
+
+
+_EMOJI = re.compile("[🀀-🫿]")
+
+
+def test_no_emoji_in_ui_strings() -> None:
+    """goal §7：emoji 禁令（全范围硬禁；文本字形表 state_language 无 emoji）。"""
+    offenders: list[str] = []
+    for path in _iter_production_py():
+        text = path.read_text(encoding="utf-8")
+        if _EMOJI.search(text):
+            offenders.append(str(path.relative_to(ROOT)).replace("\\", "/"))
+    assert not offenders, (
+        "production UI 含 emoji（goal §7 禁止）——改用 SVG 图标或"
+        " state_language 文本字形:\n" + "\n".join(offenders))

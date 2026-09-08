@@ -40,6 +40,11 @@ class UIContextSnapshot:
     active_layer_role: str | None = None
     active_layer_editable: bool | None = None
     active_layer_block_reason: str | None = None
+    # V7 §3：活动图层几何类型 / 成熟度 / 冻结（palette applicability 与
+    # 工具面求值共用；None = 诚实未知）。
+    active_layer_kind: str | None = None
+    active_layer_maturity: str | None = None
+    active_layer_frozen: bool = False
     editing_active: bool = False
     # SelectionContext 地质槽位摘要（权威仍在 viz.selection_context）
     active_well_id: str | None = None
@@ -48,6 +53,10 @@ class UIContextSnapshot:
     active_interpretation_id: str | None = None
     # 后端能力 / 降级路径
     qgis_bridge_available: bool | None = None
+    # V7 §3：能力三态（native/degraded/unavailable）与原因（比单 bool 更
+    # 诚实——降级≠不可用）；capability_reason 在 native 时为空串。
+    capability_mode: str | None = None
+    capability_reason: str | None = None
     # Harness 权限（WRITE 授权态；权威在 ActionContext.permissions）
     write_granted: bool = False
     # 任务态摘要（TaskScheduler 权威）

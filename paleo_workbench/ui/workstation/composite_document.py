@@ -41,6 +41,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from paleo_workbench.mapping.capability_model import (
+    QgisCapabilitySnapshot,
+    probe_qgis_capability,
+    snapshot_stable_hash,
+)
 from paleo_workbench.mapping.map_render_backend import MapLayerSnapshot, MapRenderSnapshot
 from paleo_workbench.mapping.map_styles import LinePattern, MarkerSymbol, VectorStyle
 from paleo_workbench.mapping.reference_layers import (
@@ -54,6 +59,8 @@ from paleo_workbench.mapping.workarea_map_snapshot import (
 )
 from paleo_workbench.project.domain import crs_equivalent
 from paleo_workbench.project.models import MapReferenceLayer
+from paleo_workbench.mapping.tool_availability import evaluate_all
+from paleo_workbench.mapping.tool_context import build_tool_context
 from paleo_workbench.ui.map_action_controller import MapActionController
 from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
 from paleo_workbench.ui.map_status_bar import MapStatusBar
@@ -61,6 +68,13 @@ from paleo_workbench.ui.qgis_stack.canvas_shim import QgisCanvasShim
 from paleo_workbench.ui.qgis_stack.layer_tree_panel import QgisLayerTreePanel
 from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 from paleo_workbench.ui.workstation.common import workstation_icon
+from paleo_workbench.ui.workstation.tool_surface import (
+    LayerCapabilitySnapshot,
+    QgisCapabilitySnapshot,
+    ToolAvailability,
+    ToolContext,
+    availability_for_context,
+)
 from paleo_workbench.ui.workstation.composite_attribute_table import (
     CompositeAttributeTableDialog,
 )
@@ -159,6 +173,30 @@ def _layer_kind_icon(kind: str, style: dict) -> QIcon:
     return QIcon(pixmap)
 
 
+#: 状态 tone → tokens palette 键（V7 §7 状态列前景色；随主题重取）。
+_TONE_PALETTE_KEYS = {
+    "ok": "SUCCESS",
+    "warn": "WARNING",
+    "error": "ERROR_RED",
+    "info": "PRIMARY",
+    "muted": "TEXT_SECONDARY",
+    "locked": "TEXT_SECONDARY",
+}
+
+
+def _decoration_color(tone: str):
+    """状态列前景色（theme-aware；每次调用重取，勿缓存）。"""
+    from paleo_workbench.ui import style
+
+    palette = style.palette()
+    key = _TONE_PALETTE_KEYS.get(str(tone))
+    value = palette.get(key) if key else None
+    if not value:
+        return None
+    color = QColor(str(value))
+    return color if color.isValid() else None
+
+
 class _LayerPropertiesAdapter:
     """``MapLayerPropertiesDialog`` 的图层视图（VectorLayer + 显示态合成）。
 
@@ -205,6 +243,8 @@ class LayerManagerPanel(QFrame):
     repair_layer_requested = Signal(str)
     # 当前图层变化（无可编辑图层时携带 None）。
     active_layer_changed = Signal(object)
+    # V7 §7：双击定位（zoom to layer；由 CompositeDocument 落地）。
+    zoom_to_layer_requested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -214,6 +254,8 @@ class LayerManagerPanel(QFrame):
         self._tree_connected = False
         self._editing_layer_id: str | None = None
         self._reloading = False
+        # V7 §7 呈现态（id → LayerPresentationState；空 = 无装饰）。
+        self._decorations: dict = {}
         # 项目 CRS 权威来自 ProjectDocument.coordinate（经 CompositeDocument
         # 注入）；面板只提交显示增量，绝不自行猜测 CRS。
         self._project_crs = ""
@@ -250,9 +292,19 @@ class LayerManagerPanel(QFrame):
         self.tree = QTreeWidget(self)
         self.tree.setHeaderHidden(True)
         self.tree.setRootIsDecorated(False)
+        # V7 §7：第 2 列 = 状态装饰（glyph+label；hover 摘要看 tooltip）。
+        self.tree.setColumnCount(2)
+        self.tree.setColumnWidth(0, 320)
+        self.tree.setColumnWidth(1, 96)
         # QGIS 图层面板语义：右键 = 图层上下文菜单（缩放到图层 / 重命名 / 删除）。
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._on_context_menu)
+        # 双击 = 定位问题图层（选中 + 缩放；goal §7「定位问题 feature/layer」）。
+        self.tree.itemDoubleClicked.connect(
+            lambda item, _col: self.zoom_to_layer_requested.emit(
+                str(item.data(0, Qt.ItemDataRole.UserRole) or "")
+            )
+        )
         outer.addWidget(self.tree, 1)
 
         opacity_row = QHBoxLayout()
@@ -526,38 +578,101 @@ class LayerManagerPanel(QFrame):
         current_id = (
             str(current.data(0, Qt.ItemDataRole.UserRole)) if current is not None else None
         )
+        # V7 §12：差分重载——结构（id 顺序）未变时只更新单元格，不清树
+        # （全清重建是 GUI 热点，且破坏滚动位置）。
+        existing_ids = [
+            str(self.tree.topLevelItem(row).data(0, Qt.ItemDataRole.UserRole))
+            for row in range(self.tree.topLevelItemCount())
+        ]
+        desired_ids = [str(layer.id) for layer in self._layers]
+        differential = existing_ids == desired_ids and desired_ids
+        scroll = self.tree.verticalScrollBar().value()
         self._reloading = True
         try:
-            self.tree.clear()
-            restored = None
-            for layer in self._layers:
-                label = layer.name
-                if self.is_editable_layer(layer):
-                    label = f"✏ {label}" if layer.id == self._editing_layer_id else f"{label}（矢量）"
-                item = QTreeWidgetItem([label])
-                item.setData(0, Qt.ItemDataRole.UserRole, layer.id)
-                item.setIcon(
-                    0,
-                    _layer_kind_icon(
-                        _snapshot_geometry_kind(layer), getattr(layer, "style", None)
-                    ),
-                )
-                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                item.setCheckState(
-                    0, Qt.CheckState.Checked if layer.visible else Qt.CheckState.Unchecked
-                )
-                self.tree.addTopLevelItem(item)
-                if current_id is not None and layer.id == current_id:
-                    restored = item
-            if restored is not None:
-                self.tree.setCurrentItem(restored)
+            if differential:
+                for row, layer in enumerate(self._layers):
+                    self._update_tree_item(self.tree.topLevelItem(row), layer)
+                restored = current
+            else:
+                self.tree.clear()
+                restored = None
+                for layer in self._layers:
+                    item = QTreeWidgetItem(["", ""])
+                    self._update_tree_item(item, layer)
+                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                    self.tree.addTopLevelItem(item)
+                    if current_id is not None and layer.id == current_id:
+                        restored = item
+                if restored is not None:
+                    self.tree.setCurrentItem(restored)
             # 重载只刷新按钮态（不emit active_layer_changed——活动图层是
             # 编辑控制器的权威状态，树重载不得将其重置）。
             self._on_current_changed(self.tree.currentItem(), None)
         finally:
             self._reloading = False
+        if differential:
+            self.tree.verticalScrollBar().setValue(scroll)
         self.tree.itemChanged.connect(self._on_item_changed)
         self._tree_connected = True
+
+    def _update_tree_item(self, item: QTreeWidgetItem, layer) -> None:
+        """（差分）刷新一行：名称 / 图标 / 勾选 / 状态装饰。"""
+        label = layer.name
+        if self.is_editable_layer(layer):
+            label = f"{label}（矢量）"
+        item.setText(0, label)
+        item.setData(0, Qt.ItemDataRole.UserRole, layer.id)
+        item.setIcon(
+            0,
+            _layer_kind_icon(
+                _snapshot_geometry_kind(layer), getattr(layer, "style", None)
+            ),
+        )
+        item.setCheckState(
+            0, Qt.CheckState.Checked if layer.visible else Qt.CheckState.Unchecked
+        )
+        self._apply_item_decoration(item, str(layer.id), label)
+
+    def _apply_item_decoration(self, item: QTreeWidgetItem, layer_id: str, label: str) -> None:
+        """状态列 + hover 摘要（V7 §7；词汇来自 state_language）。"""
+        from paleo_workbench.ui.workstation.layer_decorations import (
+            decoration_summary_text,
+            decoration_token,
+        )
+
+        state = self._decorations.get(str(layer_id))
+        token = decoration_token(state) if state is not None else None
+        if token is None:
+            item.setText(1, "")
+            item.setToolTip(0, label)
+            item.setToolTip(1, "")
+            item.setData(1, Qt.ItemDataRole.ForegroundRole, None)
+            return
+        item.setText(1, f"{token.glyph} {token.label}")
+        summary = decoration_summary_text(state) if state is not None else ""
+        tooltip = label if not summary else f"{label}\n{summary}"
+        item.setToolTip(0, tooltip)
+        item.setToolTip(1, tooltip)
+        color = _decoration_color(token.tone)
+        if color is not None:
+            item.setData(1, Qt.ItemDataRole.ForegroundRole, color)
+
+    def set_layer_decorations(self, decorations: dict) -> None:
+        """V7 §7：推送图层级呈现态（差分更新状态列，不重建树）。"""
+        self._decorations = dict(decorations or {})
+        if self._reloading:
+            return
+        if self._tree_connected:
+            self.tree.itemChanged.disconnect(self._on_item_changed)
+            self._tree_connected = False
+        try:
+            for row in range(self.tree.topLevelItemCount()):
+                item = self.tree.topLevelItem(row)
+                layer_id = str(item.data(0, Qt.ItemDataRole.UserRole))
+                self._apply_item_decoration(item, layer_id, item.text(0))
+        finally:
+            self.tree.itemChanged.connect(self._on_item_changed)
+            self._tree_connected = True
 
     def _filter(self, text: str) -> None:
         text = text.strip().lower()
@@ -742,6 +857,14 @@ class CompositeDocument(QWidget):
         self.edit_controller = CompositeEditController(parent=self)
         # RAW/锁定门禁单点注入（V6 B-P0-1：所有会话起点与 flush 提交经此）。
         self.edit_controller.set_edit_gate(self._role_allows_editing)
+        # V7 能力快照：桥面（native/fallback）单次探测；会话的 EditDelta
+        # 以此摘要记录引擎溯源（native 执行 vs shapely 兜底可审计）。
+        self._qgis_capability: QgisCapabilitySnapshot = probe_qgis_capability()
+        self.edit_controller.set_qgis_capability_token(
+            snapshot_stable_hash(self._qgis_capability)
+            if self._qgis_capability.available
+            else "unavailable"
+        )
         self.edit_controller.attach_canvas(self.canvas)
         self.edit_controller.identify_delegate = self._identify_with_results
         # 引用矢量图层：外部 GDAL 源的只读参考（渲染要素经源修订缓存，
@@ -771,9 +894,48 @@ class CompositeDocument(QWidget):
         )
         self.edit_controller.state_changed.connect(self._sync_action_state)
         self.canvas.tool_operation.connect(self._on_tool_operation)
-        self.canvas.extent_changed.connect(lambda *_: self._sync_action_state())
+        # 视野（pan/zoom）是高频事件：走轻路径——勾选态 + 状态条；统一
+        # 可用性/树装饰与 extent 无关（R3-P2：满载 1000 层时每次 pan 全量
+        # 重算 27ms，超 60fps 预算）。
+        def _on_extent_changed(*_):
+            controller = self.edit_controller
+            for action_id in self.action_controller._TOOL_IDS:
+                action = self.action_controller.actions[action_id]
+                active_tool_id = (
+                    getattr(controller.tools.active_tool, "tool_id", "") or "pan"
+                )
+                action.blockSignals(True)
+                action.setChecked(action_id == active_tool_id)
+                action.blockSignals(False)
+            self._sync_status_bar()
+
+        self.canvas.extent_changed.connect(_on_extent_changed)
         self.canvas.map_position_changed.connect(self._on_map_position)
         self.canvas.backend_status_changed.connect(lambda *_: self._sync_status_bar())
+        # V7：原生测距结果 → 状态栏（fallback 画布无此信号，鸭子类型跳过）。
+        measure_updated = getattr(self.canvas, "measure_updated", None)
+        if measure_updated is not None:
+            measure_updated.connect(self._on_measure_updated)
+        measure_canceled = getattr(self.canvas, "measure_canceled", None)
+        if measure_canceled is not None:
+            measure_canceled.connect(lambda: self.status_bar.set_measure(""))
+        # V7/P1-3：旧桥视口路由的测距分段/预览 → 状态栏（平面距离，明确
+        # 标注；原生测距在位时路由器不挂载，此处无信号可接，自然静默）。
+        measure_segment = getattr(self.canvas, "measure_segment", None)
+        if measure_segment is not None:
+            measure_segment.connect(self._on_measure_segment)
+        measure_preview = getattr(self.canvas, "measure_preview", None)
+        if measure_preview is not None:
+            measure_preview.connect(self._on_measure_preview)
+        # V7：原生 identify 结果消费（此前无消费者——原生栈点击识别面板
+        # 从不打开）。结果经 Python 数据权威组装后进 Identify Results 面板。
+        native_identified = getattr(self.canvas, "native_identified", None)
+        if native_identified is not None:
+            native_identified.connect(self._on_native_identified)
+        # V7/ADV-2：原生提交被拒 → 状态栏明示（采点完成必须有回执）。
+        commit_rejected = getattr(self.canvas, "commit_rejected", None)
+        if commit_rejected is not None:
+            commit_rejected.connect(self.status_message.emit)
 
         # 面板实例（dock 由宿主 QMainWindow 创建并管理）。图层管理面板跟随
         # 画布形态：原生栈用 QgsLayerTreeView 面板，回退画布用同信号接缝的
@@ -784,6 +946,11 @@ class CompositeDocument(QWidget):
         self.input_tree.object_selected.connect(self.object_selected.emit)
         self.layer_manager.create_layer_requested.connect(self._create_vector_layer)
         self.layer_manager.remove_layer_requested.connect(self._remove_vector_layer)
+        # V7 §7：双击定位（两套面板同构信号；无桥环境同样生效）。
+        if hasattr(self.layer_manager, "zoom_to_layer_requested"):
+            self.layer_manager.zoom_to_layer_requested.connect(
+                self._zoom_to_layer_by_id
+            )
         if not self.uses_native_stack:
             # 树内改名在回退面板走请求信号（原生 QgsLayerTreeView 直接改名回写）。
             self.layer_manager.rename_layer_requested.connect(
@@ -823,6 +990,28 @@ class CompositeDocument(QWidget):
 
         self.stage_controller = MappingStageController(parent=self)
         self._layer_role_enum = LayerRole
+        # V7 §7：组聚合的成熟度回调（键解析唯一源在本类，controller 只数）。
+        self.stage_controller.group_controller.set_maturity_provider(
+            self._layer_maturity_value
+        )
+        # V7 R3-P1：新鲜度评估变化 → 树装饰即时刷新（此前 stale 推送后
+        # 树要等下一次无关交互才更新——goal §7 的主过期呈现面滞后）。
+        try:
+            self.stage_controller.stale_summary_changed.connect(
+                lambda *_: self._push_layer_decorations()
+            )
+        except (AttributeError, RuntimeError):
+            pass  # 旧 controller 无该信号：保持轮询路径
+        # 主题切换 → 状态列颜色重取（R3-P2：装饰色随 palette()，但只在
+        # 推送时写入 item，切主题后需重推）。
+        from paleo_workbench.ui.theme import theme_manager
+
+        try:
+            theme_manager.theme_changed.connect(
+                lambda *_: self._push_layer_decorations()
+            )
+        except (AttributeError, RuntimeError):
+            pass
         if self.uses_native_stack:
             self.stage_controller.group_controller.attach_canvas(self.canvas)
             if isinstance(self.layer_manager, QgisLayerTreePanel):
@@ -914,11 +1103,246 @@ class CompositeDocument(QWidget):
         stage = stage_from_value(stage_value)
         if stage is None:
             return
+        if hasattr(self, "stage_controller"):
+            try:
+                self.stage_controller.set_stage(stage)
+            except Exception:
+                pass
         tools = stage_profile(stage).tools
         for action_id in governed_edit_actions():
             action = self.action_controller.actions.get(action_id)
             if action is not None:
                 action.setVisible(tools.allows_edit_action(action_id))
+
+    # -- V7 上下文驱动工具面 ----------------------------------------------------
+
+    def tool_context(self) -> ToolContext:
+        """当前 ``ToolContext``（palette/状态条/工具条共用的求值输入）。
+
+        全部字段来自既有权威（edit_controller.action_state /
+        stage_controller / 画布 backend_status / 角色门禁结论），构造廉价。
+        """
+        controller = self.edit_controller
+        state = controller.action_state(
+            can_previous_extent=self.canvas.can_previous_extent,
+            can_next_extent=self.canvas.can_next_extent,
+        )
+        stage_value = None
+        stage_controller = getattr(self, "stage_controller", None)
+        if stage_controller is not None:
+            current = getattr(stage_controller, "current_stage", None)
+            stage_value = getattr(current, "value", None)
+        split_inputs = getattr(controller, "_split_inputs", None)
+        inputs = controller.tool_context_inputs() if hasattr(controller, "tool_context_inputs") else {}
+        return ToolContext(
+            project_open=self._project is not None,
+            stage=stage_value,
+            layer=self._layer_capability(controller.active_layer_id),
+            has_active_vector_layer=state.has_active_vector_layer,
+            vector_layer_writable=state.vector_layer_writable,
+            editing=state.editing,
+            dirty=bool(inputs.get("dirty", False)),
+            selected_count=state.selected_count,
+            compatible_polygon_count=state.compatible_polygon_count,
+            can_undo=state.can_undo,
+            can_redo=state.can_redo,
+            can_previous_extent=state.can_previous_extent,
+            can_next_extent=state.can_next_extent,
+            split_inputs_ready=(split_inputs() is not None) if split_inputs else None,
+            capability=self._capability_snapshot(),
+        )
+
+    def _capability_snapshot(self) -> QgisCapabilitySnapshot:
+        """画布后端能力三态（native / degraded / unavailable）。"""
+        try:
+            status = str(self.canvas.backend_status or "")
+        except Exception:
+            status = ""
+        if not self.uses_native_stack:
+            return QgisCapabilitySnapshot(
+                mode="unavailable", reason="QGIS 桥不可用（回退画布）"
+            )
+        if "degraded" in status:
+            return QgisCapabilitySnapshot(mode="degraded", reason=status)
+        return QgisCapabilitySnapshot(mode="native")
+
+    def _layer_capability(self, layer_id) -> LayerCapabilitySnapshot:
+        """活动图层能力快照（角色/几何/成熟度/门禁结论——全部派生）。"""
+        if not layer_id:
+            return LayerCapabilitySnapshot()
+        layer_id = str(layer_id)
+        state = self.stage_controller.state
+        role = state.role_of(layer_id)
+        layer = self.edit_controller.layer(layer_id)
+        if layer is None:
+            return LayerCapabilitySnapshot(
+                layer_id=layer_id,
+                role=role.value,
+                role_label=role.label,
+                missing=True,
+                editable=False,
+                block_reason="图层不在当前编辑注册表（可能已被移除）",
+            )
+        allowed, reason = self._role_allows_editing(layer_id)
+        maturity = self._layer_maturity_value(layer_id, role)
+        return LayerCapabilitySnapshot(
+            layer_id=layer_id,
+            name=str(layer.name or ""),
+            role=role.value,
+            role_label=role.label,
+            kind=self.edit_controller.kind_of(layer_id) or None,
+            maturity=maturity,
+            editable=allowed,
+            block_reason=reason or None,
+            frozen=maturity in ("frozen", "published"),
+        )
+
+    def _layer_maturity_value(self, layer_id, role=None) -> str | None:
+        """图层级成熟度原始值（None = 未知；raw 角色直接 raw）。"""
+        from paleo_workbench.mapping_workspace.layer_roles import LayerRole
+
+        state = self.stage_controller.state
+        layer_id = str(layer_id)
+        if role is None:
+            role = state.role_of(layer_id)
+        if role.is_raw_protected:
+            return "raw"
+        record = state.membership(layer_id)
+        keys: list[str] = []
+        if record is not None:
+            if record.factor_task_id:
+                keys.append(f"factor:{record.factor_task_id}")
+            if record.role == LayerRole.INITIAL_FACIES_DRAFT:
+                keys.append(f"phase1_draft:{layer_id}")
+            if record.role in (LayerRole.INTEGRATED_FACIES, LayerRole.INTEGRATED_BOUNDARY):
+                keys.append(f"integrated:{layer_id}")
+        for key in keys:
+            found = state.artifact_maturity.get(key)
+            if found:
+                return str(found)
+        return None
+
+    def tool_availability(self) -> dict[str, ToolAvailability]:
+        """统一可用性求值（供工具条刷新与 palette applicability 复用）。"""
+        return availability_for_context(self.tool_context())
+
+    def _apply_tool_availability(self) -> None:
+        availability = self.tool_availability()
+        self._last_availability = availability
+        self.action_controller.apply_availability(availability)
+        # 溢出集合优先于求值器可见性（窄画布收纳的组保持隐藏，菜单可达）。
+        hidden = getattr(self, "_toolbar_overflow_hidden", None)
+        if hidden:
+            for tool_id in hidden:
+                action = self.action_controller.actions.get(tool_id)
+                if action is not None:
+                    action.setVisible(False)
+            self._rebuild_overflow_menu()
+
+    # -- V7 §7 图层树呈现态 ----------------------------------------------------
+
+    def _layer_decorations(self) -> dict:
+        """图层级呈现态（编辑/未保存/新鲜度/成熟度/参考降级）。"""
+        from paleo_workbench.ui.workstation.layer_decorations import (
+            LayerPresentationState,
+            presentation_state,
+        )
+
+        controller = self.edit_controller
+        group_controller = self.stage_controller.group_controller
+        decorations: dict[str, LayerPresentationState] = {}
+        for layer_id in controller.layer_ids():
+            layer = controller.layer(str(layer_id))
+            session = getattr(layer, "edit_session", None) if layer else None
+            freshness = group_controller.layer_freshness(str(layer_id))
+            decorations[str(layer_id)] = presentation_state(
+                editing=session is not None,
+                session_undo_depth=len(getattr(session, "undo_stack", ()) or ()),
+                freshness_status=(
+                    freshness.status.value if freshness is not None else None
+                ),
+                maturity=self._layer_maturity_value(str(layer_id)),
+            )
+        for reference in self._reference_layers:
+            status = str(self._reference_status.get(str(reference.id), "") or "")
+            decorations[str(reference.id)] = LayerPresentationState(
+                degraded=status in {"failed", "error"},
+            )
+        # 树上仍存在、但编辑注册表已没有的行 → 显式「缺失」（R1-P2：承诺
+        # 的 missing 装饰此前从未产生）。
+        from PySide6.QtCore import Qt as _Qt
+
+        tree = getattr(self.layer_manager, "tree", None)
+        if tree is not None:
+            for row in range(tree.topLevelItemCount()):
+                layer_id = str(tree.topLevelItem(row).data(
+                    0, _Qt.ItemDataRole.UserRole) or "")
+                if layer_id and layer_id not in decorations                         and controller.layer(layer_id) is None:
+                    decorations[layer_id] = LayerPresentationState(
+                        missing=True,
+                    )
+        return decorations
+
+    def _group_summaries(self) -> list:
+        """组级聚合（group_summary + 因子任务运行/排队计数）。"""
+        from paleo_workbench.mapping_workspace.layer_groups import (
+            system_group_template,
+        )
+        from paleo_workbench.ui.workstation.layer_decorations import (
+            GroupPresentationSummary,
+        )
+
+        group_controller = self.stage_controller.group_controller
+        running = pending = 0
+        for task in getattr(self._project, "factor_map_tasks", None) or []:
+            status = str(getattr(task, "status", ""))
+            if status == "running":
+                running += 1
+            elif status == "pending":
+                pending += 1
+        summaries = []
+        for group_id in group_controller.group_ids():
+            counts = group_controller.group_summary(group_id)
+            template = system_group_template(group_id)
+            summaries.append(GroupPresentationSummary(
+                group_id=group_id,
+                title=template.title if template else group_id,
+                layers=int(counts.get("layers", 0)),
+                stale=int(counts.get("stale", 0)),
+                errors=int(counts.get("errors", 0)),
+                running=running if group_id == "phase2.factors" else 0,
+                pending=pending if group_id == "phase2.factors" else 0,
+                frozen=int(counts.get("frozen", 0)),
+                published=int(counts.get("published", 0)),
+            ))
+        return summaries
+
+    def _push_layer_decorations(self) -> None:
+        """把呈现态/组聚合推给图层管理面板（面板差分渲染）。"""
+        setters = (
+            getattr(self.layer_manager, "set_layer_decorations", None),
+            getattr(self.layer_manager, "set_group_summaries", None),
+        )
+        try:
+            if callable(setters[0]):
+                setters[0](self._layer_decorations())
+            if callable(setters[1]):
+                setters[1](self._group_summaries())
+        except RuntimeError:
+            pass  # 拆壳期 C++ 对象已销毁
+
+    def _zoom_to_layer_by_id(self, layer_id) -> None:
+        """按 id 缩放到图层（树双击定位；与树菜单同一有效性判据）。"""
+        layer = self.edit_controller.layer(str(layer_id)) if layer_id else None
+        extent = getattr(layer, "extent", None) if layer is not None else None
+        if not (extent and extent[0] < extent[2] and extent[1] < extent[3]):
+            self.status_message.emit("该图层没有可缩放的有效范围")
+            return
+        try:
+            self.canvas.set_extent(tuple(float(v) for v in extent))
+        except Exception:
+            logging.getLogger(__name__).exception("缩放到图层失败")
+            self.status_message.emit("缩放到图层失败（范围无效）")
 
     def _build_toolbar(self) -> None:
         """悬浮工具条：QGIS 命令面（MapActionController）+「面板」菜单。"""
@@ -931,20 +1355,38 @@ class CompositeDocument(QWidget):
         bar_layout.setSpacing(2)
 
         self.action_controller = MapActionController(self)
-        bar_layout.addWidget(
-            self.action_controller.toolbar(
-                "编图",
-                (
-                    ("pan", "zoom_in", "zoom_out", "full_extent", "previous_extent", "next_extent"),
-                    ("identify", "select", "select_rectangle", "measure_distance"),
-                    ("toggle_editing", "save_edits", "rollback"),
-                    ("add_point", "add_line", "add_polygon", "move_feature", "vertex"),
-                    ("undo", "redo", "delete_selected", "split", "merge"),
-                    ("snapping", "topology", "cancel"),
-                ),
-                self.toolbar,
-            )
+        # V7 专业分组（goal §6）：Navigation / Selection / Inspection / Edit
+        # Session / Capture / Geometry / Snapping·Topology / Layer /
+        # Symbology / Factor / QA / Layout·Export——组内动作使能由统一
+        # 求值器管理，组级可见性随阶段/图层切换（_apply_tool_availability）。
+        from paleo_workbench.ui.workstation.tool_surface import TOOL_GROUPS
+
+        self._toolbar_group_order = (
+            "navigate", "selection", "inspection", "edit_session",
+            "capture", "geometry", "snapping", "layer",
+            "symbology", "factor", "qa", "layout_export",
         )
+        self._toolbar_overflow_hidden: set[str] = set()
+        self._map_toolbar = self.action_controller.toolbar(
+            "编图",
+            tuple(tuple(TOOL_GROUPS[group]) for group in self._toolbar_group_order),
+            self.toolbar,
+        )
+        bar_layout.addWidget(self._map_toolbar)
+        # 溢出菜单（goal §6 overflow）：窄画布时低优先组收进「»」菜单，
+        # 动作本体隐藏但可从菜单触发（含禁用原因入 tooltip）。
+        self._overflow_button = QToolButton(self.toolbar)
+        self._overflow_button.setObjectName("WorkstationOverflowButton")
+        self._overflow_button.setText("»")
+        self._overflow_button.setToolTip("更多工具（画布较窄时收纳低优先组）")
+        self._overflow_button.setAccessibleName("更多工具")
+        self._overflow_button.setPopupMode(
+            QToolButton.ToolButtonPopupMode.InstantPopup
+        )
+        self._overflow_menu = QMenu(self._overflow_button)
+        self._overflow_button.setMenu(self._overflow_menu)
+        self._overflow_button.setVisible(False)
+        bar_layout.addWidget(self._overflow_button)
         self.action_controller.tool_requested.connect(
             self.edit_controller.activate_tool
         )
@@ -1075,7 +1517,97 @@ class CompositeDocument(QWidget):
             ok, message = self.edit_controller.geometry_command(command_id)
             if not ok:
                 self.status_message.emit(message)
+        elif command_id == "refresh":
+            self.canvas.update()
+        elif command_id == "layer_new":
+            self._create_vector_layer()
+        elif command_id == "reference_import":
+            self._import_reference_layer()
+        elif command_id == "layer_properties":
+            layer_id = self.edit_controller.active_layer_id
+            if layer_id:
+                self.open_layer_properties(str(layer_id))
+        elif command_id == "symbology":
+            layer_id = self.edit_controller.active_layer_id
+            if layer_id:
+                self.open_layer_properties(str(layer_id), focus="symbology")
+        elif command_id == "style_manager":
+            self._open_style_manager()
+        elif command_id == "attribute_table":
+            layer_id = self.edit_controller.active_layer_id
+            if layer_id:
+                self._open_attribute_table(str(layer_id))
+        elif command_id == "layer_zoom":
+            self._zoom_to_active_layer()
+        elif command_id == "layer_export":
+            layer_id = self.edit_controller.active_layer_id
+            if layer_id:
+                self._export_layer(str(layer_id))
+        elif command_id == "factor_workbench":
+            self.stage_actions.dispatch(
+                str(self.stage_controller.current_stage.value
+                    if self.stage_controller.current_stage else ""),
+                "open_factor_workbench",
+            )
+        elif command_id == "factor_overlay":
+            self.stage_actions.overlay_factor_results()
+        elif command_id == "qa_run":
+            self.stage_actions.dispatch(
+                str(self.stage_controller.current_stage.value
+                    if self.stage_controller.current_stage else ""),
+                "run_qa",
+            )
+        elif command_id == "map_product_assemble":
+            self.stage_actions.assemble_map_product()
+        elif command_id == "map_export":
+            self.hub_page_requested.emit("review")
         self._sync_action_state()
+
+    def _managed_style_db_path(self) -> str:
+        """受管样式库路径（工程 .artifacts/styles.db；无工程 → 用户目录）。"""
+        import pathlib
+
+        root = getattr(getattr(self._project, "meta", None), "project_root", "")
+        if root:
+            directory = pathlib.Path(root) / ".artifacts"
+        else:
+            from PySide6.QtCore import QStandardPaths
+
+            base = QStandardPaths.writableLocation(
+                QStandardPaths.StandardLocation.AppDataLocation
+            )
+            directory = pathlib.Path(base or ".") / "PaleoWorkbench"
+        directory.mkdir(parents=True, exist_ok=True)
+        return str(directory / "styles.db")
+
+    def _open_style_manager(self) -> None:
+        """QGIS 样式库入口（桥能力门禁；失败与 False 返回均如实反馈）。"""
+        try:
+            from paleo_workbench.ui.map_symbology_bridge import open_style_manager
+
+            opened = open_style_manager(
+                self, style_db_path=self._managed_style_db_path()
+            )
+            if not opened:
+                self.status_message.emit("样式库未打开（对话框被取消或未提交）")
+        except Exception as exc:  # 桥缺失/构造失败均必须可见
+            logging.getLogger(__name__).exception("样式库打开失败")
+            self.status_message.emit(f"样式库不可用：{exc}")
+
+    def _zoom_to_active_layer(self) -> None:
+        """缩放到活动图层（与图层树「缩放到图层」同一有效性判据）。"""
+        layer_id = self.edit_controller.active_layer_id
+        layer = self.edit_controller.layer(str(layer_id)) if layer_id else None
+        extent = getattr(layer, "extent", None) if layer is not None else None
+        has_extent = bool(extent) and extent[0] < extent[2] and extent[1] < extent[3]
+        if not has_extent:
+            self.status_message.emit("活动图层没有可缩放的有效范围")
+            return
+        try:
+            self.canvas.set_extent(tuple(float(v) for v in extent))
+        except Exception:
+            logging.getLogger(__name__).exception("缩放到图层失败")
+            self.status_message.emit("缩放到图层失败（范围无效）")
 
     def _save_edits_with_feedback(self) -> None:
         # 纵深防御：RAW 保护角色的会话即使被未知路径打开，也不得提交——
@@ -1101,22 +1633,147 @@ class CompositeDocument(QWidget):
     def _on_map_position(self, point) -> None:
         self._sync_status_bar(point=tuple(point))
 
+    def _on_measure_updated(self, payload: dict) -> None:
+        """V7 原生测距显示：椭球测算（米）或平面测算（地图单位）。
+
+        桥 payload 契约（PwbMeasureTool::payloadJson）：``segments`` 数组 =
+        已完成分段 + 末尾 live 预览段（鼠标跟随），故完成段数 = len - 1；
+        ``total`` 含 live 段。非法数值（NaN/Inf）显示"测距无效"而非 0/nan。
+        """
+        import math
+
+        try:
+            total = float(payload.get("total") or 0.0)
+        except (TypeError, ValueError):
+            total = math.nan
+        segments = payload.get("segments") or ()
+        try:
+            segment_count = len(segments)
+        except TypeError:
+            segment_count = 0
+        ellipsoidal = bool(payload.get("ellipsoidal"))
+        if not math.isfinite(total):
+            self.status_bar.set_measure("测距: 无效")
+            return
+        if ellipsoidal:
+            text = f"{total / 1000.0:.3f} km" if total >= 1000 else f"{total:.1f} m"
+            text += "（椭球）"
+        else:
+            text = f"{total:.4g}"
+        action = str(payload.get("action") or "")
+        suffix = " 完成" if action == "measure_completed" else ""
+        self.status_bar.set_measure(f"测距: {text} · {max(segment_count - 1, 0)} 段{suffix}")
+
+    def _on_measure_segment(self, distance: float) -> None:
+        """旧桥视口路由的分段完成（平面距离，明确标注——P1-3）。"""
+        import math
+
+        try:
+            value = float(distance)
+        except (TypeError, ValueError):
+            value = math.nan
+        self.status_bar.set_measure(
+            f"测距: {value:.4g}（平面）" if math.isfinite(value) else "测距: 无效"
+        )
+
+    def _on_measure_preview(self, distance: float) -> None:
+        """旧桥视口路由的实时预览（平面距离）。"""
+        import math
+
+        try:
+            value = float(distance)
+        except (TypeError, ValueError):
+            return
+        if math.isfinite(value):
+            self.status_bar.set_measure(f"测距: {value:.4g}（平面）…")
+
+    def _on_native_identified(self, payload: dict) -> None:
+        """原生 identify 结果 → Python 数据权威组装 → Identify Results 面板。
+
+        原生 QgsMapToolIdentifyFeature 只回 (doc_id, feature_id)；面板条目
+        从 CompositeEditController 的图层记录（权威）重建，不建第二数据源。
+        多图层命中列举仍由 fallback 路径的 identify_all 提供（点选语义差异
+        记录在 03-decisions.md）。
+        """
+        layer_id = str(payload.get("layer_doc_id") or "")
+        feature_id = str(payload.get("feature_id") or "")
+        controller = self.edit_controller
+        layer = controller.layer(layer_id)
+        # UX-3：未命中（无图层/无要素）时清空面板并提示——不得残留上次结果
+        # 误导用户（fallback identify_all 至少会刷新为空）。
+        if layer is None or not feature_id:
+            self.identify_results.set_results([])
+            return
+        session = layer.edit_session
+        source = session.features() if session is not None else layer.features()
+        feature = next((f for f in source if f.feature_id == feature_id), None)
+        if feature is None:
+            self.identify_results.set_results([])
+            self.status_message.emit("识别未命中：要素不存在或已被删除")
+            return
+        self.identify_results.set_results(
+            [
+                {
+                    "layer_id": layer.id,
+                    "layer_name": layer.name,
+                    "feature_id": feature.feature_id,
+                    "geometry_type": str(feature.geometry.get("type") or ""),
+                    "attributes": dict(feature.attributes),
+                    "source": "composite",
+                    "template": controller.layer_template(layer.id),
+                    "editable": True,
+                    "record": feature.as_record(),
+                }
+            ]
+        )
+
+    def _stage_hidden_edit_actions(self) -> frozenset[str]:
+        """当前阶段 profile 隐藏的受治理编辑动作（evaluator 的可见性输入）。"""
+        from paleo_workbench.mapping_workspace.stage_profiles import (
+            governed_edit_actions,
+            stage_profile,
+        )
+        from paleo_workbench.mapping_workspace.stages import stage_from_value
+
+        stage = stage_from_value(getattr(self.stage_controller, "current_stage", None) and self.stage_controller.current_stage.value)
+        if stage is None:
+            return frozenset()
+        tools = stage_profile(stage).tools
+        return frozenset(
+            action_id
+            for action_id in governed_edit_actions()
+            if not tools.allows_edit_action(action_id)
+        )
+
+    def _build_tool_context(self):
+        """ToolContext 组装（Goal V7 §3）：controller 派生 + 角色/阶段细分注入。"""
+        inputs = self.edit_controller.tool_context_inputs()
+        layer_id = str(inputs.get("active_layer_id") or "")
+        raw_locked, stage_locked = self._layer_lock_classes(layer_id)
+        context = build_tool_context(
+            controller_state=inputs,
+            qgis=self._qgis_capability,
+            native_canvas_available=bool(self.uses_native_stack),
+            project_open=True,
+            mapping_stage=str(
+                (getattr(self.stage_controller, "current_stage", None) and self.stage_controller.current_stage.value)
+                or ""
+            ),
+            hidden_by_stage_profile=self._stage_hidden_edit_actions(),
+        )
+        return replace(
+            context,
+            raw_locked=raw_locked,
+            stage_locked=stage_locked,
+            can_previous_extent=bool(self.canvas.can_previous_extent),
+            can_next_extent=bool(self.canvas.can_next_extent),
+        )
+
     def _sync_action_state(self) -> None:
         self._update_empty_hint()
-        self.action_controller.update_state(
-            self.edit_controller.action_state(
-                can_previous_extent=self.canvas.can_previous_extent,
-                can_next_extent=self.canvas.can_next_extent,
-            )
-        )
         controller = self.edit_controller
         self.layer_manager.set_editing_layer(
             controller.active_layer_id if controller.editing else None
-        )
-        # split 需要「编辑中的多边形选集 + 选中切割线」；通用使能规则之外
-        # 的综合编修特定条件在此收敛（不显示点了没反应的假按钮）。
-        self.action_controller.actions["split"].setEnabled(
-            controller._split_inputs() is not None
         )
         # 工具按钮勾选态跟随真实活动工具（会话回落 pan 后按钮不得停留在
         # 已失效的工具上）。
@@ -1124,10 +1781,11 @@ class CompositeDocument(QWidget):
             getattr(controller.tools.active_tool, "tool_id", "") or "pan"
         )
         for action_id in self.action_controller._TOOL_IDS:
-            action = self.action_controller.actions[action_id]
-            action.blockSignals(True)
-            action.setChecked(action_id == active_tool_id)
-            action.blockSignals(False)
+            action = self.action_controller.actions.get(action_id)
+            if action is not None:
+                action.blockSignals(True)
+                action.setChecked(action_id == active_tool_id)
+                action.blockSignals(False)
         # 捕捉 / 拓扑的勾选态以控制器为权威（捕捉设置对话框等旁路入口
         # 不得让工具条按钮失步，review #11）。
         actions = self.action_controller.actions
@@ -1135,10 +1793,35 @@ class CompositeDocument(QWidget):
             ("snapping", controller.snapping.enabled),
             ("topology", controller.topology_enabled),
         ):
-            action = actions[action_id]
-            action.blockSignals(True)
-            action.setChecked(bool(checked))
-            action.blockSignals(False)
+            action = actions.get(action_id)
+            if action is not None:
+                action.blockSignals(True)
+                action.setChecked(bool(checked))
+                action.blockSignals(False)
+        # V7：工作站专业分组统一由 tool_surface 求值
+        self._apply_tool_availability()
+        # V7：核心数字化/编辑动作由 authoring kernel evaluator 统一裁定状态与原因
+        from dataclasses import replace
+        from paleo_workbench.mapping_workspace.stage_profiles import (
+            governed_edit_actions,
+            stage_profile,
+        )
+        from paleo_workbench.mapping_workspace.stages import stage_from_value
+
+        availability = dict(evaluate_all(self._build_tool_context()))
+        stage_raw = getattr(self.stage_controller, "current_stage", None) if hasattr(self, "stage_controller") else None
+        stage = stage_from_value(getattr(stage_raw, "value", stage_raw))
+        if stage is not None:
+            tools = stage_profile(stage).tools
+            for action_id in governed_edit_actions():
+                if action_id in availability:
+                    avail = availability[action_id]
+                    availability[action_id] = replace(avail, visible=tools.allows_edit_action(action_id))
+            if "add_point" in availability:
+                availability["add_point"] = replace(availability["add_point"], visible=True)
+        self.action_controller.apply_availability(availability)
+        # V7 §7：树呈现态（编辑/新鲜度/成熟度）差分推送。
+        self._push_layer_decorations()
         self._sync_status_bar()
 
     def _update_empty_hint(self) -> None:
@@ -1325,8 +2008,6 @@ class CompositeDocument(QWidget):
         """
         from paleo_workbench.ui.workstation.state_language import state_token
 
-        from paleo_workbench.mapping_workspace.layer_roles import LayerRole
-
         layer_id = str(layer_id)
         state = self.stage_controller.state
         role = state.role_of(layer_id)
@@ -1340,22 +2021,7 @@ class CompositeDocument(QWidget):
         else:
             editability = state_token("editability", "locked")
         # 成熟度：优先工作区权威（artifact_maturity），RAW 角色直接 raw。
-        maturity_value = "raw" if role.is_raw_protected else None
-        if maturity_value is None:
-            record = state.membership(layer_id)
-            keys = []
-            if record is not None:
-                if record.factor_task_id:
-                    keys.append(f"factor:{record.factor_task_id}")
-                if record.role == LayerRole.INITIAL_FACIES_DRAFT:
-                    keys.append(f"phase1_draft:{layer_id}")
-                if record.role in (LayerRole.INTEGRATED_FACIES, LayerRole.INTEGRATED_BOUNDARY):
-                    keys.append(f"integrated:{layer_id}")
-            for key in keys:
-                found = state.artifact_maturity.get(key)
-                if found:
-                    maturity_value = str(found)
-                    break
+        maturity_value = self._layer_maturity_value(layer_id, role)
         maturity = state_token("maturity", maturity_value)
         freshness_artifact = self.stage_controller.group_controller.layer_freshness(layer_id)
         freshness = (
@@ -1398,7 +2064,7 @@ class CompositeDocument(QWidget):
         }
 
     def _role_allows_editing(self, layer_id) -> tuple[bool, str]:
-        """编辑门禁（单点）：RAW 不可变保护（V5 §14）+ 阶段证据组锁（§41）。
+        """编辑门禁（单点）：RAW 不可变保护（V5 §14）+ 成熟度冻结 + 阶段证据组锁（§41）。
 
         所有开启编辑会话的路径（树面板/主工具栏命令/修复几何/保存提交）
         都必须经过本检查——「画物源线写进相带边界」与「改写原始相图」
@@ -1411,6 +2077,14 @@ class CompositeDocument(QWidget):
             return False, (
                 f"图层角色为「{role.label}」（RAW/模型结果）——不可直接编辑；"
                 "请创建 DERIVED 草稿后编辑")
+        # 成熟度冻结/发布：FROZEN/PUBLISHED 工件不可变（goal §5「当前结果
+        # 已冻结」禁用原因的真源——UI 不在门禁之外另判）。
+        maturity = self._layer_maturity_value(str(layer_id), role)
+        if maturity in ("frozen", "published"):
+            label = "已发布" if maturity == "published" else "已冻结"
+            return False, (
+                f"当前结果{label}（{role.label}）——不可编辑；"
+                "如需修改请另存草稿或解除冻结")
         # 阶段证据组锁：图层所在组在本阶段锁定 → 拒绝（用户可在阶段视图
         # 状态中显式解锁）。
         from paleo_workbench.mapping_workspace.layer_groups import (
@@ -1427,6 +2101,34 @@ class CompositeDocument(QWidget):
             title = template.title if template else group_id
             return False, f"图层所在组「{title}」在本阶段为证据锁定——不可编辑"
         return True, ""
+
+    def _layer_lock_classes(self, layer_id: str) -> tuple[bool, bool]:
+        """(raw_locked, stage_locked) 分类（review-3 UX-5）。
+
+        只在真正的 RAW 保护 / 组证据锁分支置 true；门禁的其他拒绝原因
+        （无活动目标等瞬态原因）保持两者皆 false，具体判词走
+        ``edit_gate_reason``（evaluator 的 _role_gate 优先用判词）。
+        """
+        if not layer_id:
+            return False, False
+        role = self.stage_controller.state.role_of(str(layer_id))
+        if bool(getattr(role, "is_raw_protected", False)):
+            return True, False
+        from paleo_workbench.mapping_workspace.layer_groups import (
+            system_group_template,
+        )
+
+        group_id = self.stage_controller.group_controller.placement_of(layer_id)
+        template = system_group_template(group_id) if group_id else None
+        stage = self.stage_controller.current_stage
+        try:
+            view_state = self.stage_controller.state.view_state(stage)
+            locked_override = view_state.group_locked.get(group_id)
+            locked = locked_override if locked_override is not None else bool(
+                template and template.stage_locked(stage))
+        except Exception:
+            locked = False
+        return False, bool(locked)
 
     def _toggle_layer_editing(self, layer_id: str) -> None:
         allowed, reason = self._role_allows_editing(str(layer_id))
@@ -1996,6 +2698,15 @@ class CompositeDocument(QWidget):
         return None
 
     def _locate_identify_result(self, result) -> None:
+        # V7 §8：识别结果同步进入 Inspector（feature 分节；双击仍定位）。
+        try:
+            self.object_selected.emit({
+                "kind": "feature",
+                "object": dict(result or {}),
+                "layer_id": (result or {}).get("layer_id"),
+            })
+        except RuntimeError:
+            pass
         if self.edit_controller.locate_identify_result(result):
             record = result.get("record") or {}
             extent = _feature_extent([record])
@@ -2096,7 +2807,14 @@ class CompositeDocument(QWidget):
                 if getattr(layer, "source_kind", "") == "vector"
             ]
             self._reference_status = {}
-            self.edit_controller.load_from_project(project)
+            if self.edit_controller.load_from_project(project) is False:
+                # 被阻断的会话保持打开（可回滚/可修复）：拒绝带病切换，
+                # 如实告知用户哪些图层未提交，而不是静默 rollback 丢数据。
+                self.status_message.emit(
+                    "工程切换已取消：有未保存且无法提交的编辑（见状态栏），"
+                    "请先回滚或修复后再切换"
+                )
+                return
             # V5：恢复阶段工作区科学状态（当前阶段/成员资格/组结构/视图覆盖）
             # + UI 展开偏好（QSettings，按工程名分域）。
             self.stage_controller.load_state(
@@ -2166,11 +2884,149 @@ class CompositeDocument(QWidget):
             button.setVisible(not overflow)
         if overflow:
             self.toolbar.adjustSize()
+        # 仍溢出：低优先组逐步收进「»」溢出菜单（goal §6 overflow）。
+        self._update_toolbar_overflow(budget)
+        self.toolbar.layout().invalidate()
+        self.toolbar.layout().activate()
+        desired = self._toolbar_desired_width()
+        self.toolbar.resize(
+            desired, max(self.toolbar.sizeHint().height(), 36)
+        )
         y = 8
-        x = max(margin_x, (self.width() - self.toolbar.width()) // 2)
-        max_x = max(margin_x, self.width() - self.toolbar.width() - margin_x)
+        x = max(margin_x, (self.width() - desired) // 2)
+        max_x = max(margin_x, self.width() - desired - margin_x)
         self.toolbar.move(min(x, max_x), y)
         self.toolbar.raise_()
+
+    def _toolbar_desired_width(self) -> int:
+        """可见子部件的期望宽度总和（Qt 布局对隐藏 widget 的 hint 计入
+        行为不可依赖——按可见集合显式求和，确定性收缩）。"""
+        layout = self.toolbar.layout()
+        margins = layout.contentsMargins()
+        total = margins.left() + margins.right()
+        count = 0
+        for index in range(layout.count()):
+            item = layout.itemAt(index)
+            widget = item.widget()
+            if widget is not None:
+                if widget.isHidden():
+                    continue
+                total += max(widget.sizeHint().width(), widget.minimumSizeHint().width())
+            else:
+                total += item.sizeHint().width()
+            count += 1
+        if count > 1:
+            total += layout.spacing() * (count - 1)
+        return total
+
+    def _update_toolbar_overflow(self, budget: int) -> None:
+        """窄画布溢出：按逆优先级隐藏组，动作收进「»」菜单。
+
+        恢复顺序相反（宽画布逐步还原）。可见性语义：求值器给 visible
+        且不在溢出集合 → 显示；溢出集合成员 → 菜单可达。
+        """
+        from paleo_workbench.ui.workstation.tool_surface import TOOL_GROUPS
+
+        actions = self.action_controller.actions
+
+        def _fits() -> bool:
+            return self._toolbar_desired_width() <= budget
+
+        overflow = not _fits()
+        # 逆优先级序（最低优先先隐藏）。核心编辑组（navigate/selection/
+        # inspection/edit_session/capture/geometry）的主体永不收纳；组内
+        # 低频单动作（refresh/measure/反选等）可在极限窄时最后收纳。
+        never_hide = {
+            "navigate", "selection", "inspection", "edit_session",
+            "capture", "geometry",
+        }
+        hide_order = tuple(
+            group for group in reversed(self._toolbar_group_order)
+            if group not in never_hide
+        )
+        index = 0
+        while overflow and index < len(hide_order):
+            group = hide_order[index]
+            index += 1
+            for tool_id in TOOL_GROUPS[group]:
+                if tool_id not in self._toolbar_overflow_hidden:
+                    self._toolbar_overflow_hidden.add(tool_id)
+                    actions[tool_id].setVisible(False)
+            overflow = not _fits()
+        # 极限窄：核心组内的低频单动作最后收纳（数字化/编辑入口仍在条上）。
+        last_resort = (
+            "refresh", "measure_distance", "invert_selection", "select_all",
+            "clear_selection", "full_extent",
+        )
+        for tool_id in last_resort:
+            if not overflow:
+                break
+            if tool_id not in self._toolbar_overflow_hidden:
+                self._toolbar_overflow_hidden.add(tool_id)
+                actions[tool_id].setVisible(False)
+                overflow = not _fits()
+        while not overflow and self._toolbar_overflow_hidden:
+            # 尝试恢复最高优先的隐藏组（hide_order 逆序的末尾）。
+            restore_group = None
+            for group in self._toolbar_group_order:
+                if any(t in self._toolbar_overflow_hidden for t in TOOL_GROUPS[group]):
+                    restore_group = group
+                    break
+            if restore_group is None:
+                break
+            trial = set(self._toolbar_overflow_hidden)
+            for tool_id in TOOL_GROUPS[restore_group]:
+                trial.discard(tool_id)
+            saved = set(self._toolbar_overflow_hidden)
+            self._toolbar_overflow_hidden = trial
+            # 还原可见性以最近一次求值结果为准（组可能因无图层/阶段被
+            # 求值器隐藏——溢出恢复不得越过它）。
+            last = getattr(self, "_last_availability", None) or {}
+            for tool_id in TOOL_GROUPS[restore_group]:
+                avail = last.get(tool_id)
+                actions[tool_id].setVisible(True if avail is None else avail.visible)
+            if not _fits():
+                self._toolbar_overflow_hidden = saved
+                for tool_id in TOOL_GROUPS[restore_group]:
+                    actions[tool_id].setVisible(False)
+                break
+        self._rebuild_overflow_menu()
+
+    def _rebuild_overflow_menu(self) -> None:
+        """「»」菜单 = 溢出集合内的动作（触发真实 QAction；保留禁用态）。"""
+        from paleo_workbench.ui.workstation.tool_surface import TOOL_GROUPS
+
+        self._overflow_menu.clear()
+        labels = self.action_controller._LABELS
+        count = 0
+        for group in reversed(self._toolbar_group_order):
+            entries = [
+                (tool_id, labels.get(tool_id, tool_id))
+                for tool_id in TOOL_GROUPS[group]
+                if tool_id in self._toolbar_overflow_hidden
+            ]
+            if not entries:
+                continue
+            if count:
+                self._overflow_menu.addSeparator()
+            last = getattr(self, "_last_availability", None) or {}
+            for tool_id, label in entries:
+                action = self.action_controller.actions.get(tool_id)
+                if action is None:
+                    continue
+                entry = self._overflow_menu.addAction(
+                    action.icon(), label, action.trigger
+                )
+                # Qt 会把工具条上隐藏的 QAction 自动置 disabled——菜单
+                # 条目的使能必须取自统一求值结果，而不是 action.isEnabled()
+                avail = last.get(tool_id)
+                entry.setEnabled(True if avail is None else avail.enabled)
+                if avail is not None and not avail.enabled:
+                    reason = avail.reason or "当前不可用"
+                    entry.setToolTip(f"{label}（{reason}）")
+                count += 1
+        self._overflow_button.setVisible(count > 0)
+        self._overflow_button.setEnabled(count > 0)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -2181,6 +3037,7 @@ class CompositeDocument(QWidget):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        # 隐藏状态下 Qt 延迟发送 resize：首显时补一次工具条重排（V7）。
         QTimer.singleShot(0, self._reposition_toolbar)
 
     # -- 生命周期 --------------------------------------------------------------

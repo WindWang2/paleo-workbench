@@ -159,6 +159,12 @@ def test_toolbar_actions_track_editing_state(qtbot, tmp_path):
     document._on_command_requested("toggle_editing")
     assert controller.editing
     assert actions["toggle_editing"].isChecked()
+    # V7 状态机：保存编辑需要 dirty（有未保存修改），禁用必须带原因。
+    assert not actions["save_edits"].isEnabled()
+    assert "未保存的修改" in actions["save_edits"].toolTip()
+    controller.activate_tool("add_point")
+    controller.tools.active_tool.mouse_press((1.0, 1.0))
+    document._sync_action_state()
     assert actions["save_edits"].isEnabled()
     assert actions["add_point"].isEnabled()
 

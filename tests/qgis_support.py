@@ -25,6 +25,14 @@ QGIS_MARKER = "qgis"
 def qgis_bridge_available() -> bool:
     """True when the ``qgis_render_bridge`` extension is importable."""
     try:
+        # Windows V7: the vendored-QGIS runtime DLL dirs must join the loader
+        # path before the first bridge import (no-op elsewhere).
+        from paleo_workbench.mapping.qgis_style import ensure_qgis_bridge_dll_dirs
+
+        ensure_qgis_bridge_dll_dirs()
+    except Exception:
+        pass
+    try:
         import qgis_render_bridge  # noqa: F401
 
         return True
@@ -37,12 +45,21 @@ def require_qgis():
     import os
     import pytest
 
+    try:
+        from paleo_workbench.mapping.qgis_style import ensure_qgis_bridge_dll_dirs
+
+        ensure_qgis_bridge_dll_dirs()
+    except Exception:
+        pass
     strict = os.environ.get("PALEO_REQUIRE_QGIS", "").strip().lower() in {"1", "true", "yes"}
     if strict:
         import qgis_render_bridge
 
         return qgis_render_bridge
-    return pytest.importorskip("qgis_render_bridge", reason=QGIS_SKIP_REASON)
+    # pytest>=8.4: importorskip defaults to ModuleNotFoundError only — a
+    # broken bridge DLL raises plain ImportError and must still skip (not
+    # fail) on non-strict legs.
+    return pytest.importorskip("qgis_render_bridge", reason=QGIS_SKIP_REASON, exc_type=ImportError)
 
 
 def require_mapstack():
@@ -55,7 +72,7 @@ def require_mapstack():
         import qgis_render_bridge.mapstack as mapstack
 
         return mapstack
-    return pytest.importorskip("qgis_render_bridge.mapstack", reason=QGIS_SKIP_REASON)
+    return pytest.importorskip("qgis_render_bridge.mapstack", reason=QGIS_SKIP_REASON, exc_type=ImportError)
 
 
 def qgis_env_status() -> dict[str, object]:

@@ -37,7 +37,7 @@ class LithologyCrossplotDialog(PwbDialog):
             基于钻孔分层测井数据计算得到 {total_pts} 组有效采样点。下表展示了不同岩性在“自然伽马 (GR)”与“声波波阻抗 (AI)”空间的聚类中心与离散度特征。
         </p>
 
-        <h3 style='color: {tokens.PRIMARY}; border-bottom: 1px solid {tokens.BORDER}; padding-bottom: 4px;'>📊 岩性聚类特征统计 (Lithology Cluster Statistics)</h3>
+        <h3 style='color: {tokens.PRIMARY}; border-bottom: 1px solid {tokens.BORDER}; padding-bottom: 4px;'>▤ 岩性聚类特征统计 (Lithology Cluster Statistics)</h3>
         <table style='width: 100%; border-collapse: collapse; margin-top: 8px; margin-bottom: 16px;'>
             <tr style='background: {tokens.BG_SEARCH}; color: {tokens.TEXT_PRIMARY};'>
                 <th style='padding: 8px; text-align: left;'>岩性 (Lithology)</th>
@@ -75,7 +75,7 @@ class LithologyCrossplotDialog(PwbDialog):
         html += f"""
         </table>
 
-        <h3 style='color: {tokens.PRIMARY}; border-bottom: 1px solid {tokens.BORDER}; padding-bottom: 4px;'>💡 储层识别与推断结论</h3>
+        <h3 style='color: {tokens.PRIMARY}; border-bottom: 1px solid {tokens.BORDER}; padding-bottom: 4px;'>✦ 储层识别与推断结论</h3>
         <div style='background: {tokens.BG_SEARCH}; border-left: 4px solid {tokens.PRIMARY}; padding: 12px; border-radius: 6px; margin-top: 8px;'>
             <ul style='margin: 0; padding-left: 20px; color: {tokens.TEXT_SECONDARY}; line-height: 1.6;'>
                 <li><b>岩性聚类</b>: 上表统计基于本井 GR/AI 分布；岩性聚类边界应结合实际数据范围（见上方表格）解读，而非固定的 GR/AI 数值门限。</li>

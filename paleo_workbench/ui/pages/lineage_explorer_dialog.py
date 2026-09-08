@@ -48,7 +48,7 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench.catalog.models import CatalogError, DataStage, DataVersion
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.ui.pages.data_view_models import stage_icon, stage_label
 
 # Hard display caps (module constants so tests can tighten them).
@@ -101,7 +101,13 @@ class LineageExplorerDialog(QDialog):
 
         # Inline warning (unknown id / empty input) — never a modal, never a crash.
         self.locate_warning = QLabel("")
-        self.locate_warning.setStyleSheet(f"color: {tokens.WARNING}; font-size: 11px;")
+        style.bind(
+            self.locate_warning,
+            lambda: (
+                f"color: {style.palette()['WARNING']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
+        )
         self.locate_warning.setWordWrap(True)
         self.locate_warning.hide()
         layout.addWidget(self.locate_warning)
@@ -109,30 +115,45 @@ class LineageExplorerDialog(QDialog):
         # -- current node summary card ---------------------------------------
         summary_card = QFrame()
         summary_card.setObjectName("LineageSummaryCard")
-        summary_card.setStyleSheet(
-            f"QFrame#LineageSummaryCard {{ background: {tokens.BG_HEADER};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
+        style.bind(
+            summary_card,
+            lambda: (
+                f"QFrame#LineageSummaryCard {{ background: {style.palette()['BG_HEADER']};"
+                f" border: 1px solid {style.palette()['BORDER']};"
+                f" border-radius: {tokens.RADIUS_CARD}px; }}"
+            ),
         )
         summary_layout = QVBoxLayout(summary_card)
         summary_layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
         summary_layout.setSpacing(tokens.SPACE_1)
         self.summary_title_label = QLabel("未选择版本")
-        self.summary_title_label.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-weight: 600; font-size: {tokens.FONT_SIZE_TITLE};"
+        style.bind(
+            self.summary_title_label,
+            lambda: (
+                f"color: {style.palette()['TEXT_PRIMARY']}; font-weight: 600;"
+                f" font-size: {tokens.FONT_SIZE_TITLE};"
+            ),
         )
         self.summary_title_label.setWordWrap(True)
         summary_layout.addWidget(self.summary_title_label)
         self.summary_meta_label = QLabel("")
-        self.summary_meta_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: {tokens.FONT_SIZE_STATUS};"
+        style.bind(
+            self.summary_meta_label,
+            lambda: (
+                f"color: {style.palette()['TEXT_SECONDARY']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
         )
         self.summary_meta_label.setWordWrap(True)
         summary_layout.addWidget(self.summary_meta_label)
         self.summary_path_label = QLabel("")
-        self.summary_path_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: {tokens.FONT_SIZE_STATUS};"
-            f" font-family: {tokens.FONT_FAMILY_MONO};"
+        style.bind(
+            self.summary_path_label,
+            lambda: (
+                f"color: {style.palette()['TEXT_SECONDARY']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+                f" font-family: {tokens.FONT_FAMILY_MONO};"
+            ),
         )
         self.summary_path_label.setWordWrap(True)
         summary_layout.addWidget(self.summary_path_label)
@@ -141,23 +162,34 @@ class LineageExplorerDialog(QDialog):
         # -- provenance card (producing run) ----------------------------------
         run_card = QFrame()
         run_card.setObjectName("LineageRunCard")
-        run_card.setStyleSheet(
-            f"QFrame#LineageRunCard {{ background: {tokens.BG_HEADER};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
+        style.bind(
+            run_card,
+            lambda: (
+                f"QFrame#LineageRunCard {{ background: {style.palette()['BG_HEADER']};"
+                f" border: 1px solid {style.palette()['BORDER']};"
+                f" border-radius: {tokens.RADIUS_CARD}px; }}"
+            ),
         )
         run_layout = QVBoxLayout(run_card)
         run_layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
         run_layout.setSpacing(tokens.SPACE_1)
         self.run_title_label = QLabel("—")
-        self.run_title_label.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-weight: 600; font-size: {tokens.FONT_SIZE_BASE};"
+        style.bind(
+            self.run_title_label,
+            lambda: (
+                f"color: {style.palette()['TEXT_PRIMARY']}; font-weight: 600;"
+                f" font-size: {tokens.FONT_SIZE_BASE};"
+            ),
         )
         self.run_title_label.setWordWrap(True)
         run_layout.addWidget(self.run_title_label)
         self.run_meta_label = QLabel("")
-        self.run_meta_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: {tokens.FONT_SIZE_STATUS};"
+        style.bind(
+            self.run_meta_label,
+            lambda: (
+                f"color: {style.palette()['TEXT_SECONDARY']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
         )
         self.run_meta_label.setWordWrap(True)
         run_layout.addWidget(self.run_meta_label)
@@ -165,8 +197,12 @@ class LineageExplorerDialog(QDialog):
         self.run_params_view.setReadOnly(True)
         self.run_params_view.setMaximumHeight(110)
         self.run_params_view.setPlaceholderText("运行参数 (JSON)")
-        self.run_params_view.setStyleSheet(
-            f"font-family: {tokens.FONT_FAMILY_MONO}; font-size: {tokens.FONT_SIZE_STATUS};"
+        style.bind(
+            self.run_params_view,
+            lambda: (
+                f"font-family: {tokens.FONT_FAMILY_MONO};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
         )
         run_layout.addWidget(self.run_params_view)
         layout.addWidget(run_card)
@@ -184,8 +220,12 @@ class LineageExplorerDialog(QDialog):
         layout.addWidget(self.tree, 1)
 
         self.status_label = QLabel("")
-        self.status_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: {tokens.FONT_SIZE_STATUS};"
+        style.bind(
+            self.status_label,
+            lambda: (
+                f"color: {style.palette()['TEXT_SECONDARY']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
         )
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
@@ -513,7 +553,7 @@ class LineageExplorerDialog(QDialog):
             f"{stage_label(version.stage)} · {version.id[:_SHORT_ID_LEN]}"
         )
         if version.trashed:
-            label += " 🗑"
+            label += " ✕回收站"
         item = QTreeWidgetItem(parent_item, [label])
         item.setData(
             0,

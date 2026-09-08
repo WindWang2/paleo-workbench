@@ -5,7 +5,7 @@
 在 capture_workstation_screens.py（12 状态，offscreen widget.grab）之上扩展：
 - 矩阵驱动：每个状态 shot 在 (theme, density, size) 组合下各截一张；
 - 确定性：QSettings 沙箱（每 shot 全新进程 + 清空工作站布局）；
-- baseline 管理：``--update-baseline`` 把结果落盘 ``visual_qa/baseline-v5-matrix/``
+- baseline 管理：把 out_dir 指向 baseline 目录即生成基线（旧 --update-baseline 旗标从未被读取，已删除）
   并写 manifest.json；默认对比模式在 baseline 缺项时记 MISSING 而不失败。
 
 用法（worktree 根目录）::
@@ -63,6 +63,9 @@ SIZES = [
     (1440, 900),
     (1180, 720),
     (1920, 1080),
+    # V7 goal §14：1366×768（窄屏基线）与 2560×1440（2K）补齐。
+    (1366, 768),
+    (2560, 1440),
 ]
 
 
@@ -99,16 +102,25 @@ def main() -> int:
     parser.add_argument(
         "--v6", action="store_true",
         help="仅 V6 Phase 8 新状态（6 状态 × 2 密度 @3 尺寸，light 基准）")
-    parser.add_argument("--update-baseline", action="store_true")
+    parser.add_argument(
+        "--v7", action="store_true",
+        help="仅 V7 新状态（8 状态 × light/dark × comfortable @1366/1920）")
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     if args.v6:
         states = V6_STATES
+    elif args.v7:
+        from paleo_workbench.ui.visual_qa_v7 import V7_STATES
+        states = list(V7_STATES)
     else:
         states = FULL_STATES if args.full else CORE_STATES
-    sizes = SIZES
+    if args.v7:
+        # V7 goal §14：每状态至少 light+dark；关键尺寸 1366×768 + 1920×1080。
+        sizes = [(1366, 768), (1920, 1080)]
+    else:
+        sizes = SIZES
 
     script = Path(__file__).with_name("capture_workstation_screens.py").resolve()
     shots: list[dict] = []
@@ -116,9 +128,12 @@ def main() -> int:
     started = time.monotonic()
     for state in states:
         base_theme = "dark" if state == "12-dark-theme" else "light"
-        theme_combos = [(base_theme, d) for d in DENSITIES] + (
-            [(t, "comfortable") for t in THEMES if t != base_theme] if state == "01-default-workstation" else []
-        )
+        if args.v7:
+            theme_combos = [(t, "comfortable") for t in ("light", "dark")]
+        else:
+            theme_combos = [(base_theme, d) for d in DENSITIES] + (
+                [(t, "comfortable") for t in THEMES if t != base_theme] if state == "01-default-workstation" else []
+            )
         for theme, density in theme_combos:
             for w, h in sizes:
                 name = f"{state}__{theme}__{density}__{w}x{h}.png"

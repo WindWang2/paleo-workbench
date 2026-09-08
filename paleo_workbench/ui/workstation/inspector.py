@@ -167,6 +167,12 @@ class WorkstationInspector(QFrame):
             self.show_map_component(payload)
         elif kind == "curve":
             self.show_curve(obj if isinstance(obj, dict) else payload)
+        elif kind == "feature":
+            self.show_feature(payload)
+        elif kind == "factor":
+            self.show_factor(payload)
+        elif kind == "map_product":
+            self.show_map_product(payload)
         else:
             # 未知 kind：通用键值表，不丢弃（B4）。
             self.show_generic(payload)
@@ -361,6 +367,164 @@ class WorkstationInspector(QFrame):
         self.interpretation_form.addRow(
             "提示", self._readonly("拾取自测井引擎；校正操作产生 DERIVED 版本，RAW 不变"))
         self._set_history(["曲线拾取进入检查器（V6）"])
+
+    # -- V7 §8 类型化分节：Feature / Factor raster / MapProduct ------------------
+
+    _GEOMETRY_LABELS = {
+        "Point": "点", "MultiPoint": "多点", "LineString": "线",
+        "MultiLineString": "多线", "Polygon": "面", "MultiPolygon": "多面",
+    }
+
+    def show_feature(self, payload) -> None:
+        """要素级检查（identify 结果 / 树定位）：id/几何摘要/属性/来源。
+
+        ``payload``：``{"kind": "feature", "object": result_dict,
+        "layer_id": …}``（result_dict 即 IdentifyResultsPanel 的行数据：
+        feature_id / geometry_type / attributes / template / source /
+        editable）。缺字段显示「—」，不编造。
+        """
+        payload = payload if isinstance(payload, dict) else {}
+        result = payload.get("object")
+        result = result if isinstance(result, dict) else {}
+        self._current = result or payload
+        name = str(result.get("layer_name") or payload.get("name") or "要素")
+        self.header.setText(f"检查器 · 要素 · {name}")
+        self._clear_form(self.properties_form)
+        self._clear_form(self.interpretation_form)
+        geometry_type = str(result.get("geometry_type") or "")
+        self.properties_form.addRow(
+            "要素 ID", self._readonly(result.get("feature_id")))
+        self.properties_form.addRow(
+            "图层", self._readonly(result.get("layer_name")))
+        self.properties_form.addRow(
+            "几何", self._readonly(self._GEOMETRY_LABELS.get(geometry_type, geometry_type)))
+        self.properties_form.addRow(
+            "可编辑", self._readonly(self._yes_no(result.get("editable"))))
+        attributes = result.get("attributes") or {}
+        if attributes:
+            shown = 0
+            for key in sorted(str(k) for k in attributes):
+                value = attributes.get(key)
+                if value is None:
+                    continue
+                self.properties_form.addRow(str(key), self._readonly(value))
+                shown += 1
+                if shown >= 12:
+                    break
+            if len(attributes) > 12:
+                self.interpretation_form.addRow(
+                    "属性", self._readonly(f"共 {len(attributes)} 项（显示前 12）"))
+        template = str(result.get("template") or "")
+        if template:
+            self.interpretation_form.addRow("模板角色", self._readonly(template))
+        self.interpretation_form.addRow(
+            "来源", self._readonly(result.get("source") or "identify"))
+        self._set_history([f"要素 {result.get('feature_id') or '—'}"])
+
+    def show_factor(self, payload) -> None:
+        """单因素栅格检查（goal §8 Factor raster）。
+
+        ``payload``：``{"kind": "factor", "task": FactorMapTask,
+        "grid": {"min": …, "max": …, "uncertainty": (lo, hi)} | None,
+        "layer_id": …}``。grid 摘要由宿主从 live 网格缓存提取（缓存缺失
+        → None →「—」诚实呈现）。
+        """
+        payload = payload if isinstance(payload, dict) else {}
+        task = payload.get("task")
+        grid = payload.get("grid") if isinstance(payload.get("grid"), dict) else {}
+        self._current = task or payload
+        title = str(getattr(task, "name", "") or payload.get("name") or "单因素")
+        self.header.setText(f"检查器 · 单因素 · {title}")
+        self._clear_form(self.properties_form)
+        self._clear_form(self.interpretation_form)
+        parameters = dict(getattr(task, "parameters", None) or {})
+        method = str(getattr(task, "method", "") or "")
+        self.properties_form.addRow(
+            "因素", self._readonly(getattr(task, "factor_type", None)))
+        self.properties_form.addRow(
+            "目标层位", self._readonly(getattr(task, "target_horizon", None)))
+        self.properties_form.addRow("方法", self._readonly(method or None))
+        self.properties_form.addRow(
+            "单位", self._readonly(parameters.get("unit")))
+        if parameters:
+            compact = ", ".join(
+                f"{key}={parameters[key]}" for key in sorted(parameters)
+                if key != "unit" and parameters[key] is not None
+            )
+            self.properties_form.addRow(
+                "参数", self._readonly(compact or None))
+        self.properties_form.addRow(
+            "取值范围",
+            self._readonly(
+                f"{grid['min']:g} ~ {grid['max']:g}"
+                if grid.get("min") is not None and grid.get("max") is not None
+                else None))
+        uncertainty = grid.get("uncertainty")
+        if isinstance(uncertainty, (tuple, list)) and len(uncertainty) == 2:
+            self.properties_form.addRow(
+                "不确定性", self._readonly(f"{uncertainty[0]:g} ~ {uncertainty[1]:g}"))
+        quality = dict(getattr(task, "quality_metrics", None) or {})
+        if quality:
+            compact = ", ".join(
+                f"{key}={quality[key]}" for key in sorted(quality)
+                if quality[key] is not None)
+            self.properties_form.addRow("QC", self._readonly(compact or None))
+        snapshot = str(getattr(task, "input_snapshot_hash", "") or "")
+        self.interpretation_form.addRow(
+            "源版本",
+            self._readonly(snapshot[:12] + "…" if len(snapshot) > 12 else (snapshot or None)))
+        self.interpretation_form.addRow(
+            "源类型", self._readonly(getattr(task, "source_kind", None)))
+        self.interpretation_form.addRow(
+            "状态", self._readonly(getattr(task, "status", None)))
+        self._set_history([f"单因素任务 {getattr(task, 'id', '—')}"])
+
+    def show_map_product(self, payload) -> None:
+        """MapProduct 检查（goal §8：inputs/版本/run/过期/发布就绪）。
+
+        ``payload``：``{"kind": "map_product", "object": MapProductRecord,
+        "staleness": StateToken | None, "readiness": str | None}``——
+        过期态与发布就绪由宿主从依赖评估/就绪度权威提供；缺席 →「—」。
+        """
+        payload = payload if isinstance(payload, dict) else {}
+        record = payload.get("object") or payload.get("record")
+        self._current = record or payload
+        name = str(getattr(record, "product_name", "") or "MapProduct")
+        self.header.setText(f"检查器 · 成果 · {name}")
+        self._clear_form(self.properties_form)
+        self._clear_form(self.interpretation_form)
+        factor_ids = list(getattr(record, "factor_task_ids", None) or [])
+        interpretation_refs = list(
+            getattr(record, "interpretation_refs", None) or [])
+        status = str(getattr(record, "status", "") or "")
+        frozen = bool(getattr(record, "frozen", False))
+        self.properties_form.addRow("产品", self._readonly(name))
+        self.properties_form.addRow(
+            "状态", self._readonly(
+                "已冻结" if frozen else {"final": "最终", "superseded": "已被取代"}.get(status, status)))
+        self.properties_form.addRow(
+            "因子输入", self._readonly(f"{len(factor_ids)} 项" if factor_ids else None))
+        self.properties_form.addRow(
+            "解释引用", self._readonly(f"{len(interpretation_refs)} 项" if interpretation_refs else None))
+        self.properties_form.addRow(
+            "运行", self._readonly(getattr(record, "run_id", None)))
+        self.properties_form.addRow(
+            "输出版本", self._readonly(getattr(record, "output_version_id", None)))
+        fingerprint = str(getattr(record, "scientific_fingerprint", "") or "")
+        self.properties_form.addRow(
+            "指纹", self._readonly(fingerprint[:16] + "…" if len(fingerprint) > 16 else (fingerprint or None)))
+        adjustments = list(getattr(record, "manual_adjustments", None) or [])
+        self.properties_form.addRow(
+            "手工调整", self._readonly(f"{len(adjustments)} 项" if adjustments else "无"))
+        staleness = payload.get("staleness")
+        if staleness is not None:
+            self.interpretation_form.addRow(
+                "新鲜度",
+                self._readonly(f"{getattr(staleness, 'glyph', '')} {getattr(staleness, 'label', '')}".strip()))
+        readiness = payload.get("readiness")
+        if readiness is not None:
+            self.interpretation_form.addRow("发布就绪", self._readonly(readiness))
+        self._set_history([f"MapProduct {getattr(record, 'id', '—')}"])
 
     def show_layer(self, layer_type: str, obj=None, payload: dict | None = None) -> None:
         self._current = obj or layer_type

@@ -25,16 +25,17 @@ from paleo_workbench.mapping_workspace.stages import STAGE_ORDER, MappingStage
 class StageToolProfile:
     """阶段工具集合（基础 pan/zoom/select/identify 永远保留，不在此列）。
 
-    ``command_groups``/``edit_actions`` 是综合编修工具条的阶段过滤真源
-    （V6 §4：composite toolbar 按此隐藏非本阶段的数字化/编辑动作；
-    基础导航/识别/选择动作不经过该过滤）。
+    ``edit_actions`` 是综合编修工具条的阶段过滤真源（V6 §4：composite
+    toolbar 按此隐藏非本阶段的数字化/编辑动作；基础导航/识别/选择动作
+    不经过该过滤。V7 D3 删除了零消费者的 ``command_groups``——分组 IA
+    由 ui.workstation.tool_surface.TOOL_GROUPS 承担）。
     """
 
-    #: 工具面 id（MapActionController 命令组过滤）。
-    command_groups: tuple[str, ...] = ()
     #: 本阶段可用的数字化/编辑动作 id（existing MapActionController ids）。
     edit_actions: tuple[str, ...] = ()
-    #: 阶段专属上下文动作（Stage Panel 提供，如「新建物源线」「运行因子」）。
+    #: 阶段专属上下文动作 id（镜像 dispatcher 单表，仅域侧编排消费；
+    #: 面板/palette 词表派生自 ui.workstation.stage_actions.
+    #: STAGE_CONTEXT_ACTIONS——V7 R2-F1 后不再三处手维护）。
     context_actions: tuple[str, ...] = ()
 
     def allows_edit_action(self, action_id: str) -> bool:
@@ -88,7 +89,6 @@ _STAGE_PROFILES: dict[MappingStage, StageProfile] = {
         MappingStage.FACIES_CALIBRATION,
         active_editing_roles=(LayerRole.INITIAL_FACIES_DRAFT,),
         tools=StageToolProfile(
-            command_groups=("navigate", "identify", "select", "edit_session", "digitize"),
             edit_actions=(
                 "add_polygon", "move_feature", "vertex", "split", "merge",
                 "delete_selected", "undo", "redo",
@@ -96,7 +96,7 @@ _STAGE_PROFILES: dict[MappingStage, StageProfile] = {
             context_actions=(
                 "load_initial_facies", "add_well_prediction_overlay",
                 "add_seismic_prediction_overlay", "create_facies_draft",
-                "toggle_prediction_confidence", "stage_save", "stage_qc",
+                "stage_save", "stage_qc",
             ),
         ),
         recommended_docks={
@@ -123,14 +123,13 @@ _STAGE_PROFILES: dict[MappingStage, StageProfile] = {
             LayerRole.MASK_BOUNDARY, LayerRole.INTERPOLATION_BOUNDARY,
         ),
         tools=StageToolProfile(
-            command_groups=("navigate", "identify", "select", "edit_session", "digitize"),
             edit_actions=(
                 "add_line", "add_polygon", "move_feature", "vertex", "split",
                 "merge", "delete_selected", "undo", "redo",
             ),
             context_actions=(
                 "create_constraint", "open_factor_workbench", "run_factor",
-                "factor_qc", "compare_factor_versions", "stage_save", "stage_qc",
+                "stage_save", "stage_qc",
             ),
         ),
         recommended_docks={
@@ -151,13 +150,12 @@ _STAGE_PROFILES: dict[MappingStage, StageProfile] = {
         MappingStage.INTEGRATED_COMPILATION,
         active_editing_roles=(LayerRole.INTEGRATED_FACIES, LayerRole.INTEGRATED_BOUNDARY),
         tools=StageToolProfile(
-            command_groups=("navigate", "identify", "select", "edit_session", "digitize"),
             edit_actions=(
                 "add_polygon", "add_line", "move_feature", "vertex", "split",
                 "merge", "delete_selected", "undo", "redo",
             ),
             context_actions=(
-                "select_evidence", "create_integrated_draft", "map_components",
+                "select_evidence", "create_integrated_draft", 
                 "run_qa", "assemble_map_product", "stage_save",
             ),
         ),

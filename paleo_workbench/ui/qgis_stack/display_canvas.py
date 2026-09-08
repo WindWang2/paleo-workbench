@@ -22,6 +22,9 @@ class _DisplayBackend:
 
 
 def create_display_canvas(parent=None) -> QWidget:
+    from paleo_workbench.mapping.qgis_style import ensure_qgis_bridge_dll_dirs
+
+    ensure_qgis_bridge_dll_dirs()  # Windows V7: vendor DLL path before import
     try:
         from qgis_render_bridge.mapstack import QgisMapStack  # noqa: F401
     except ImportError:

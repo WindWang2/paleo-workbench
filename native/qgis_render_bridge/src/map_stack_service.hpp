@@ -167,6 +167,13 @@ public:
   void setSelectionCallback(
       std::uintptr_t canvas,
       std::function<void(const std::string&, const std::string&)> callback);
+
+  // 测距回调（V7）：callback(action, payload_json)，action ∈
+  // "measure_updated"|"measure_completed"（points/segments/total/ellipsoidal）
+  // |"measure_canceled"（空 payload）。set_map_tool kind 扩展 "measure"。
+  void setMeasureCallback(
+      std::uintptr_t canvas,
+      std::function<void(const std::string&, const std::string&)> callback);
   // 画布当前图层（原生选择/identify 的目标图层）；doc_id 未命中镜像抛
   // invalid_argument。
   void setCurrentLayer(std::uintptr_t canvas, const std::string& doc_id);

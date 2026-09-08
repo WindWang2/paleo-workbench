@@ -1,0 +1,20 @@
+{
+  "state_ok": true,
+  "checks": [
+    {
+      "name": "factor_vector_edit_disabled",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "factor_raw_reason",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "factor_view_tools_enabled",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

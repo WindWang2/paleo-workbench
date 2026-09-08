@@ -1,0 +1,20 @@
+{
+  "state_ok": true,
+  "checks": [
+    {
+      "name": "overflow_hidden_set_nonempty",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "overflow_menu_entries",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "overflow_core_visible",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

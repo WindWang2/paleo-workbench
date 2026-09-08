@@ -14,7 +14,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
+from paleo_workbench.ui.components.badges import PwbBadge
+
+# 任务状态 → PwbBadge tone（词汇与 tokens.TASK_STATUS_COLORS 一致）
+_STATUS_TONES = {
+    "complete": "success",
+    "pending": "neutral",
+    "running": "primary",
+    "failed": "error",
+}
 
 
 class FactorTaskPanel(QFrame):
@@ -29,9 +38,12 @@ class FactorTaskPanel(QFrame):
         def __init__(self, task, parent=None):
             super().__init__(parent)
             self.setObjectName("FactorTaskRow")
-            self.setStyleSheet(
-                f"QWidget#FactorTaskRow {{ background: {tokens.BG_SIDEBAR};"
-                f" border-bottom: 1px solid {tokens.BORDER_LIGHT}; }}"
+            style.bind(
+                self,
+                lambda: (
+                    f"QWidget#FactorTaskRow {{ background: {style.palette()['BG_SIDEBAR']};"
+                    f" border-bottom: 1px solid {style.palette()['BORDER_LIGHT']}; }}"
+                ),
             )
             layout = QHBoxLayout(self)
             layout.setContentsMargins(tokens.SPACE_1, tokens.SPACE_2, tokens.SPACE_1, tokens.SPACE_2)
@@ -41,31 +53,34 @@ class FactorTaskPanel(QFrame):
             text_box.setSpacing(tokens.SPACE_1)
             text_box.setContentsMargins(0, 0, 0, 0)
             self.name_label = QLabel(task.name)
-            self.name_label.setStyleSheet(
-                f"color: {tokens.TEXT_PRIMARY}; font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 500;"
-                " border: none; background: transparent;"
+            style.bind(
+                self.name_label,
+                lambda: (
+                    f"color: {style.palette()['TEXT_PRIMARY']};"
+                    f" font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 500;"
+                    " border: none; background: transparent;"
+                ),
             )
             grid = task.parameters.get("grid", "50m") if task.parameters else "50m"
             self.sub_label = QLabel(f"{task.method} · {grid}")
-            self.sub_label.setStyleSheet(
-                f"color: {tokens.TEXT_SECONDARY}; font-size: {tokens.FONT_SIZE_STATUS};"
-                " border: none; background: transparent;"
+            style.bind(
+                self.sub_label,
+                lambda: (
+                    f"color: {style.palette()['TEXT_SECONDARY']};"
+                    f" font-size: {tokens.FONT_SIZE_STATUS};"
+                    " border: none; background: transparent;"
+                ),
             )
             text_box.addWidget(self.name_label)
             text_box.addWidget(self.sub_label)
             wrap = QWidget()
             wrap.setLayout(text_box)
-            wrap.setStyleSheet("border: none; background: transparent;")
+            style.bind(wrap, lambda: "border: none; background: transparent;")
             layout.addWidget(wrap, 1)
 
             status_key = tokens.TASK_STATUS_LABELS.get(task.status, task.status)
-            status_color = tokens.TASK_STATUS_COLORS.get(
-                task.status, tokens.TEXT_SECONDARY
-            )
-            self.status_badge = QLabel(status_key)
-            self.status_badge.setStyleSheet(
-                f"color: {status_color}; font-size: {tokens.FONT_SIZE_STATUS}; font-weight: 500;"
-                " border: none; background: transparent;"
+            self.status_badge = PwbBadge(
+                status_key, tone=_STATUS_TONES.get(task.status, "neutral")
             )
             layout.addWidget(self.status_badge)
 
@@ -124,9 +139,12 @@ class FactorTaskPanel(QFrame):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        self.scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        style.bind(
+            self.scroll,
+            lambda: "QScrollArea { border: none; background: transparent; }",
+        )
         self.task_container = QWidget()
-        self.task_container.setStyleSheet("background: transparent;")
+        style.bind(self.task_container, lambda: "background: transparent;")
         self.task_layout = QVBoxLayout(self.task_container)
         self.task_layout.setContentsMargins(0, 0, 0, 0)
         self.task_layout.setSpacing(0)
@@ -135,8 +153,12 @@ class FactorTaskPanel(QFrame):
         outer.addWidget(self.scroll, 1)
 
         self.summary_label = QLabel("已制备 0 / 0 个单因素图")
-        self.summary_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;"
+        style.bind(
+            self.summary_label,
+            lambda: (
+                f"color: {style.palette()['TEXT_SECONDARY']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+            ),
         )
         outer.addWidget(self.summary_label)
 

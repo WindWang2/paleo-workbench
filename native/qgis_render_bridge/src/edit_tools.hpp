@@ -21,6 +21,7 @@
 class QgsRubberBand;
 class QgsVectorLayer;
 class QgsMapToolSelectionHandler;
+class QgsDistanceArea;
 
 namespace pwb::qgis_render {
 
@@ -110,6 +111,38 @@ class PwbSelectTool : public PwbEditPickTool {
   void onGeometryChanged(Qt::KeyboardModifiers modifiers);
 
   std::unique_ptr<QgsMapToolSelectionHandler> handler_;
+};
+
+// 原生测距工具（V7）：折线采点 + QgsDistanceArea 距离测算。
+// 地理坐标系 + 椭球体配置时自动走椭球测算（修正 Python math.dist 在
+// 地理系下的平面距离错误）；结果经回调上浮（updated/completed/canceled），
+// 不写任何层——与其它编辑工具一致，权威在 Python 宿主。
+class PwbMeasureTool : public PwbEditPickTool {
+ public:
+  // 需在构造时配置 QgsDistanceArea（画布 CRS + 工程椭球），不能继承基类
+  // 构造（PwbVertexTool/PwbMoveTool 的无状态模式不适用）。
+  PwbMeasureTool(QgsMapCanvas* canvas, Callback callback);
+  ~PwbMeasureTool() override;
+
+  void canvasPressEvent(QgsMapMouseEvent* e) override;
+  void canvasMoveEvent(QgsMapMouseEvent* e) override;
+  void canvasReleaseEvent(QgsMapMouseEvent* e) override;
+  void keyPressEvent(QKeyEvent* e) override;
+  void deactivate() override;
+  // 已采点（Esc 归原生工具：只清折线，不退出工具）。
+  bool measuring() const noexcept { return !points_.isEmpty(); }
+
+ private:
+  // payload: {"points":[[x,y]...],"segments":[d...],"total":t,
+  //           "ellipsoidal":bool}（segments 含 hover 段）。
+  std::string payloadJson(const char* action, const QgsPointXY& hover) const;
+  double totalIncluding(const QgsPointXY& hover) const;
+  void reset();
+
+  std::unique_ptr<QgsRubberBand> rubber_;
+  std::unique_ptr<QgsDistanceArea> distance_;
+  QVector<QgsPointXY> points_;
+  bool ellipsoidal_ = false;
 };
 
 }  // namespace pwb::qgis_render
