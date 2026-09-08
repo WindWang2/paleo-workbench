@@ -239,11 +239,26 @@ def test_qgis_backend_composes_the_finished_scalar_grid_without_interpolation(qt
             return frame is not None
 
         qtbot.waitUntil(take_frame, timeout=5_000)
-        cache = backend._scalar_raster_cache
-        assert cache is not None
-        assert cache.uses_virtual_memory
-        assert cache.materialization_count == 1
-        assert cache.disk_materialization_count == 0
+        # v7 §5: when the scalar DATA pipeline is ready (bridge + gdal),
+        # the float32 data mirror materializes INSTEAD of the RGBA mirror
+        # (styling never rewrites science); otherwise the RGBA mirror keeps
+        # its exactly-once contract.  Both are revision-keyed.
+        from paleo_workbench.mapping.scalar_style import (
+            scalar_style_pipeline_ready,
+        )
+
+        if scalar_style_pipeline_ready()["ready"]:
+            data_cache = backend._scalar_data_cache
+            assert data_cache is not None
+            assert data_cache.materialization_count == 1
+            cache = backend._scalar_raster_cache
+            assert cache is None or cache.materialization_count == 0
+        else:
+            cache = backend._scalar_raster_cache
+            assert cache is not None
+            assert cache.uses_virtual_memory
+            assert cache.materialization_count == 1
+            assert cache.disk_materialization_count == 0
 
         # Viewport-only interaction rerenders the QGIS composition but must not
         # materialize the already revision-keyed scalar source a second time.
@@ -251,13 +266,20 @@ def test_qgis_backend_composes_the_finished_scalar_grid_without_interpolation(qt
         backend.request_render()
         frame = None
         qtbot.waitUntil(take_frame, timeout=5_000)
-        assert cache.materialization_count == 1
+        if scalar_style_pipeline_ready()["ready"]:
+            assert backend._scalar_data_cache.materialization_count == 1
+        else:
+            assert cache.materialization_count == 1
     finally:
         backend.shutdown()
 
     assert frame is not None
     assert (frame.width, frame.height) == (160, 120)
-    assert scalar.rasterize_count == 1
+    if scalar_style_pipeline_ready()["ready"]:
+        # DATA path: no RGBA bake happens at all (rasterize_count stays 0).
+        assert scalar.rasterize_count == 0
+    else:
+        assert scalar.rasterize_count == 1
 
 
 @pytest.mark.qgis
