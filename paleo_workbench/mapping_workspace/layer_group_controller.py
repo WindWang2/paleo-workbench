@@ -704,14 +704,11 @@ class LayerGroupController:
         record = self.state.membership(layer_id)
         if record is None:
             return None
-        candidate_keys: list[str] = []
-        if record.factor_task_id:
-            candidate_keys.append(f"factor:{record.factor_task_id}")
-        if record.role == LayerRole.INITIAL_FACIES_DRAFT:
-            candidate_keys.append(f"phase1_draft:{layer_id}")
-        if record.role in (LayerRole.INTEGRATED_FACIES, LayerRole.INTEGRATED_BOUNDARY):
-            candidate_keys.append(f"integrated:{layer_id}")
-        for key in candidate_keys:
+        from paleo_workbench.mapping_workspace.artifact_keys import (
+            candidate_artifact_keys,
+        )
+
+        for key in candidate_artifact_keys(layer_id, record):
             artifact = self._freshness.get(key)
             if artifact is not None:
                 return artifact

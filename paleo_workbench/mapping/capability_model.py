@@ -4,8 +4,9 @@ Single derivation chain::
 
     C++ capability_manifest()  (compile-time registry, zero-init probe)
         -> probe_qgis_capability() -> QgisCapabilitySnapshot
-            -> LayerCapabilitySnapshot(layer state + snapshot + edit gate)
             -> ToolContext.capability_flags -> tool_availability evaluator
+    (V8 M1: per-layer gating lives in tool_availability; the manifest
+     snapshot is the bridge-capability authority only)
 
 Rules of engagement (Goal V7):
 
@@ -25,7 +26,6 @@ from typing import Any, Iterable, Mapping
 __all__ = [
     "BRIDGE_BUILD_HINT",
     "CapabilityFlag",
-    "LayerCapabilitySnapshot",
     "QgisCapabilitySnapshot",
     "probe_qgis_capability",
     "snapshot_stable_hash",
@@ -252,110 +252,4 @@ def probe_qgis_capability(_import_bridge=None) -> QgisCapabilitySnapshot:
         dialogs=_fset(manifest["dialogs"]),
         features=_fset(manifest["features"]),
         contract_version=int(manifest.get("contract_version", 1) or 1),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Layer-level capability derivation
-# ---------------------------------------------------------------------------
-
-_LAYER_CAPABILITIES = (
-    "can_identify",
-    "can_select",
-    "can_edit",
-    "can_add_feature",
-    "can_delete_feature",
-    "can_change_geometry",
-    "can_change_attributes",
-    "can_split",
-    "can_merge",
-    "can_snap",
-    "can_topology",
-    "can_open_properties",
-    "can_symbol_edit",
-)
-
-
-@dataclass(frozen=True, slots=True)
-class LayerCapabilitySnapshot:
-    """Per-layer capability set derived from layer state + bridge + edit gate.
-
-    ``gate_result`` is the ``(allowed, reason)`` pair from the Paleo edit gate
-    (RAW / stage locks). It is *derived per layer*, never cached, because role
-    and stage state change with the project lifecycle.
-    """
-
-    layer_id: str
-    layer_kind: str = ""  # "point" | "line" | "polygon" | ""
-    is_vector: bool = True
-    writable: bool = True
-    gate_allowed: bool = True
-    gate_reason: str = ""
-    editing: bool = False
-    qgis: QgisCapabilitySnapshot = field(default_factory=lambda: QgisCapabilitySnapshot(status="unavailable", reason=BRIDGE_BUILD_HINT))
-
-    def capability(self, name: str) -> CapabilityFlag:
-        if not self.is_vector:
-            return CapabilityFlag(False, "非矢量图层")
-        if name in {"can_identify", "can_select", "can_open_properties", "can_symbol_edit"}:
-            return CapabilityFlag(True)
-        # Everything below mutates layer data or session state.
-        if not self.writable:
-            return CapabilityFlag(False, "图层不可写")
-        if name in {"can_snap", "can_topology"}:
-            # Snapping/topology participate for any vector layer; the engine
-            # itself comes from the bridge but the fallback stays functional.
-            return CapabilityFlag(True)
-        if not self.gate_allowed:
-            return CapabilityFlag(False, self.gate_reason or "图层被锁定")
-        if name in {"can_edit", "can_add_feature", "can_delete_feature", "can_change_geometry", "can_change_attributes"}:
-            return CapabilityFlag(True)
-        if name in {"can_split", "can_merge"}:
-            flag = self.qgis.geometry_op("split_by_line") if name == "can_split" else self.qgis.geometry_op("union")
-            if not flag.available:
-                # Python/shapely fallback keeps the command workable; the
-                # professional engine is degraded but the capability itself
-                # remains (fallback executes with shapely semantics).
-                return CapabilityFlag(True)
-            return CapabilityFlag(True)
-        return CapabilityFlag(False, f"未知图层能力 {name!r}")
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "layer_id": self.layer_id,
-            "layer_kind": self.layer_kind,
-            "is_vector": self.is_vector,
-            "writable": self.writable,
-            "gate_allowed": self.gate_allowed,
-            "gate_reason": self.gate_reason,
-            "editing": self.editing,
-            "capabilities": {name: self.capability(name).available for name in _LAYER_CAPABILITIES},
-            "reasons": {
-                name: reason
-                for name in _LAYER_CAPABILITIES
-                if (reason := self.capability(name).unavailable_reason)
-            },
-        }
-
-
-def layer_capability_snapshot(
-    layer: Any,
-    *,
-    kind: str = "",
-    qgis: QgisCapabilitySnapshot | None = None,
-    gate_result: tuple[bool, str] | None = None,
-) -> LayerCapabilitySnapshot:
-    """Build the snapshot from live layer/controller state (pure derivation)."""
-    qgis = qgis or probe_qgis_capability()
-    allowed, reason = gate_result if gate_result is not None else (True, "")
-    editing = getattr(layer, "edit_session", None) is not None
-    return LayerCapabilitySnapshot(
-        layer_id=str(getattr(layer, "id", "") or ""),
-        layer_kind=str(kind or getattr(layer, "kind", "") or ""),
-        is_vector=True,
-        writable=bool(getattr(layer, "writable", True)),
-        gate_allowed=bool(allowed),
-        gate_reason=str(reason or ""),
-        editing=editing,
-        qgis=qgis,
     )

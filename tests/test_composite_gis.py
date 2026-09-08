@@ -799,13 +799,13 @@ def test_undo_prunes_stale_selection(qtbot, tmp_path):
     layer.edit_session.add_feature(_polygon("p1", 0.0, 0.0, 2.0, 2.0))
     layer.edit_session.add_feature(_polygon("p2", 2.0, 0.0, 4.0, 2.0))
     layer.set_selection({"p1", "p2"})
-    assert controller.action_state().compatible_polygon_count == 2
+    assert controller.action_state()["compatible_polygon_count"] == 2
 
     layer.edit_session.undo()
     layer.edit_session.undo()
     # 撤销两个添加后选集应为空；merge 不再可用。
     assert layer.selection == set()
-    assert controller.action_state().compatible_polygon_count == 0
+    assert controller.action_state()["compatible_polygon_count"] == 0
     ok, message = controller.geometry_command("merge")
     assert ok is False
 

@@ -58,10 +58,8 @@ from paleo_workbench.ui.pages.map_reference_panel import MapReferencePanel
 from paleo_workbench.ui.pages.map_workbench_bottom import MapWorkbenchBottom
 from paleo_workbench.ui.panel_float_controller import FloatController
 from paleo_workbench.ui.qgis_stack.display_canvas import create_display_canvas
-from paleo_workbench.ui.map_action_controller import MapActionController, MapActionState
+from paleo_workbench.ui.map_action_controller import MapActionController
 from paleo_workbench.ui.workstation.tool_surface import (
-    LayerCapabilitySnapshot,
-    QgisCapabilitySnapshot,
     ToolContext,
     availability_for_context,
 )
@@ -1955,7 +1953,6 @@ class MappingPage(QWidget):
     def _sync_action_state(self) -> None:
         authoring = self._authoring_document
         if authoring is None:
-            self.action_controller.update_state(MapActionState())
             self.action_controller.apply_availability(
                 availability_for_context(ToolContext(project_open=False))
             )
@@ -1973,47 +1970,42 @@ class MappingPage(QWidget):
                     polygon_count += 1
             except KeyError:
                 continue
-        state = MapActionState(
-            has_active_vector_layer=True,
-            vector_layer_writable=True,
-            editing=session is not None,
-            selected_count=len(selected),
-            compatible_polygon_count=polygon_count,
-            can_undo=bool(session and session.undo_stack),
-            can_redo=bool(session and session.redo_stack),
-            can_previous_extent=self.unified_canvas.can_previous_extent,
-            can_next_extent=self.unified_canvas.can_next_extent,
-        )
-        self.action_controller.update_state(state)
-        # V7：使能/禁用原因与工作站共用同一求值器（stage=None——本页是
-        # legacy 编图表面，没有阶段语义；几何/会话/选择门禁语义一致）。
         layer = authoring.active_layer
+        editing = session is not None
+        has_undo = bool(session and session.undo_stack)
+        kind = _AUTHORING_KIND_GEOMETRY.get(str(authoring.active_kind or ""))
+        # V8 M1：与工作站共用 canonical evaluator（stage=None——本页是 legacy
+        # 编图表面，没有阶段语义；几何/会话/选择门禁语义一致）。
+        # checked 三态（current_tool/捕捉/拓扑）必须喂真实权威——apply_
+        # availability 会把 checkable 动作统一写成求值结果，漏喂会被
+        # 重置为默认（review R1-P1：捕捉/拓扑开关曾被恒置未勾选）。
         self.action_controller.apply_availability(
             availability_for_context(
                 ToolContext(
                     project_open=True,
-                    stage=None,
-                    layer=LayerCapabilitySnapshot(
-                        layer_id=str(getattr(layer, "id", "") or ""),
-                        name=str(getattr(layer, "name", "") or ""),
-                        kind=_AUTHORING_KIND_GEOMETRY.get(
-                            str(authoring.active_kind or "")
-                        ),
-                        editable=True,
-                    ),
-                    has_active_vector_layer=state.has_active_vector_layer,
-                    vector_layer_writable=state.vector_layer_writable,
-                    editing=state.editing,
-                    selected_count=state.selected_count,
-                    compatible_polygon_count=state.compatible_polygon_count,
-                    can_undo=state.can_undo,
-                    can_redo=state.can_redo,
-                    can_previous_extent=state.can_previous_extent,
-                    can_next_extent=state.can_next_extent,
-                    capability=QgisCapabilitySnapshot(
-                        mode="unavailable",
-                        reason="本页使用自有编辑画布（QGIS 桥栈在工作站中央文档）",
-                    ),
+                    mapping_stage=None,
+                    active_layer_id=str(getattr(layer, "id", "") or ""),
+                    active_layer_kind=kind or "",
+                    layer_name=str(getattr(layer, "name", "") or ""),
+                    vector_writable=True,
+                    edit_gate_open=True,
+                    editing=editing,
+                    dirty=has_undo,
+                    can_undo=has_undo,
+                    can_redo=bool(session and session.redo_stack),
+                    selection_count=len(selected),
+                    compatible_polygon_count=polygon_count,
+                    merge_ready=polygon_count >= 2,
+                    split_ready=len(selected) > 0,
+                    can_previous_extent=self.unified_canvas.can_previous_extent,
+                    can_next_extent=self.unified_canvas.can_next_extent,
+                    current_tool=(
+                        getattr(self._map_tools.active_tool, "tool_id", "")
+                        or "pan"),
+                    snapping_enabled=bool(getattr(self._snapping, "enabled", False)),
+                    topology_enabled=bool(getattr(self._topology, "enabled", False)),
+                    backend_mode="unavailable",
+                    backend_reason="本页使用自有编辑画布（QGIS 桥栈在工作站中央文档）",
                 )
             )
         )

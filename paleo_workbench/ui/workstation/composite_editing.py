@@ -56,7 +56,6 @@ from paleo_workbench.mapping.map_tools import (
 from paleo_workbench.mapping.topology import TopologyService
 from paleo_workbench.mapping.vector_layer import VectorFeature, VectorLayer
 from paleo_workbench.project.models import UserVectorFeature, UserVectorLayer
-from paleo_workbench.ui.map_action_controller import MapActionState
 
 __all__ = [
     "CompositeEditController",
@@ -1663,32 +1662,13 @@ class CompositeEditController(QObject):
             remaining = [lid for lid in self._layers if lid not in seen]
             self._layers = {lid: self._layers[lid] for lid in order + remaining}
 
-    def action_state(self, *, can_previous_extent: bool = False, can_next_extent: bool = False) -> MapActionState:
-        layer = self.active_layer
-        session = layer.edit_session if layer is not None else None
-        # selection ⊆ 会话可选要素（set_selection 过滤），计数无需遍历要素
-        # （review #7：extent 变化高频触发本计算）。
-        compatible_polygon_count = (
-            len(layer.selection)
-            if layer is not None and session is not None and self._kinds.get(layer.id) == "polygon"
-            else 0
-        )
-        return MapActionState(
-            has_active_vector_layer=layer is not None,
-            vector_layer_writable=layer is not None,
-            editing=session is not None,
-            selected_count=len(layer.selection) if layer is not None else 0,
-            compatible_polygon_count=compatible_polygon_count,
-            can_undo=bool(
-                session and (session.undo_stack or self._topology.pending_compound(session))
-            ),
-            # V8 M3：复合组的重做不进单层 redo 栈——可达性必须看组（review-1 P1-2）。
-            can_redo=bool(
-                session and (session.redo_stack or self._topology.pending_compound_redo(session))
-            ),
-            can_previous_extent=can_previous_extent,
-            can_next_extent=can_next_extent,
-        )
+    def action_state(self, *, can_previous_extent: bool = False, can_next_extent: bool = False) -> dict:
+        """兼容别名（V8 M1 删除 MapActionState）：等价 ``tool_context_inputs``
+        的精简字典。生产路径已全部走 ``tool_context_inputs``。"""
+        inputs = self.tool_context_inputs()
+        inputs["can_previous_extent"] = can_previous_extent
+        inputs["can_next_extent"] = can_next_extent
+        return inputs
 
     def tool_context_inputs(self) -> dict[str, Any]:
         """ToolContext 的宿主侧采集器（Goal V7 §3）。

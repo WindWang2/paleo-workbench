@@ -155,18 +155,18 @@ def test_unknown_kind_capture_fails_closed(document):
     layer = _add_layer(document, "polygon", LayerRole.INITIAL_FACIES_DRAFT)
     document._on_command_requested("toggle_editing")
     from paleo_workbench.ui.workstation.tool_surface import (
-        LayerCapabilitySnapshot,
         ToolContext,
         evaluate_tool,
     )
 
+    # V8 canonical：扁平图层事实（kind 未知 = ""），不再嵌套呈现快照。
     ctx = ToolContext(
         project_open=True,
-        stage="constraint_factor",
-        layer=LayerCapabilitySnapshot(
-            layer_id=str(layer.id), kind=None, editable=True),
-        has_active_vector_layer=True,
-        vector_layer_writable=True,
+        mapping_stage="constraint_factor",
+        active_layer_id=str(layer.id),
+        active_layer_kind="",
+        edit_gate_open=True,
+        vector_writable=True,
         editing=True,
     )
     for tool in ("add_point", "add_line", "add_polygon"):

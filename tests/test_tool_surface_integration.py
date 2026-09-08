@@ -148,15 +148,17 @@ def test_phase1_hides_add_line_via_evaluator(document):
 
 
 def test_style_manager_disabled_without_bridge(document):
-    # 本环境桥未构建（与 main 一致）——QGIS 原因必须可见。
+    # 本环境桥未构建（与 main 一致）——QGIS 原因必须可见。先建活动图层：
+    # 无图层时 symbology 组整组隐藏（V8 M1），后端判词要在组显示后才是
+    # 工具自己的禁用原因。
     actions = document.action_controller.actions
     if document.uses_native_stack:
         pytest.skip("桥已构建（本测试针对无桥环境）")
+    layer = _create_layer(document, "polygon")
+    _assign_role(document, layer.id, LayerRole.INITIAL_FACIES_DRAFT)
     assert not actions["style_manager"].isEnabled()
     assert "QGIS" in actions["style_manager"].statusTip()
     # 符号系统/图层属性走 fallback 对话框——不因缺桥禁用。
-    layer = _create_layer(document, "polygon")
-    _assign_role(document, layer.id, LayerRole.INITIAL_FACIES_DRAFT)
     assert actions["symbology"].isEnabled()
     assert actions["layer_properties"].isEnabled()
 
@@ -178,10 +180,15 @@ def test_tool_context_reflects_active_layer(document):
     layer = _create_layer(document, "line")
     _assign_role(document, layer.id, LayerRole.PALEO_SHORELINE)
     ctx = document.tool_context()
-    assert ctx.layer.kind == "line"
-    assert ctx.layer.role == LayerRole.PALEO_SHORELINE.value
-    assert ctx.layer.editable is True
-    assert ctx.stage == "facies_calibration"
+    # V8 canonical：扁平图层事实 + mapping_stage（无嵌套 .layer/.stage）。
+    assert ctx.active_layer_kind == "line"
+    assert ctx.layer_role == LayerRole.PALEO_SHORELINE.value
+    assert ctx.edit_gate_open is True
+    assert ctx.mapping_stage == "facies_calibration"
+    # 呈现快照仍可经文档取（状态条/inspector 消费）。
+    snapshot = document.active_layer_capability()
+    assert snapshot.kind == "line"
+    assert snapshot.editable is True
 
 
 # ---------------------------------------------------------------------------
@@ -225,3 +232,84 @@ def test_stage_palette_commands_carry_applicability(qtbot, tmp_path):
         assert avail.reason
     finally:
         command_registry.clear(keep_core=False)
+
+
+# -- V8 M6：单一受门禁执行路径（tool_requested / command_requested 双入口） --
+
+
+def test_tool_requested_path_regates_with_fresh_context(document, monkeypatch):
+    """checkable 工具动作的 tool_requested 路径同样被 re-gate 拦截。
+
+    构造过期窗口：动作在上一次刷新时可用（编辑会话中），随后会话结束
+    但尚未重刷——直接触发 _on_tool_requested 必须被新鲜求值拒绝并回报
+    原因，而不是透传给 activate_tool。
+    """
+    layer = _create_layer(document, "polygon")
+    _assign_role(document, layer.id, LayerRole.INITIAL_FACIES_DRAFT)
+    document.edit_controller.start_editing()
+    document._sync_action_state()
+    assert document.tool_availability()["add_polygon"].enabled
+
+    # 过期窗口：会话结束后不调用 _sync_action_state。
+    document.edit_controller.rollback_edits()
+
+    calls = []
+    monkeypatch.setattr(
+        document.edit_controller, "activate_tool",
+        lambda tool_id: calls.append(tool_id))
+    messages = []
+    document.status_message.connect(messages.append)
+
+    document._on_tool_requested("add_polygon")
+    assert calls == [], "stale-window tool request must not reach activate_tool"
+    assert any("不可用" in m for m in messages), messages
+    # 拒绝后 checked 已被回同步（QAction 的翻转不得残留）。
+    assert not document.action_controller.actions["add_polygon"].isChecked()
+
+
+def test_command_requested_path_regates_disabled_command(document, monkeypatch):
+    """命令路径 re-gate：结构性前提不满足时 save_edits 被拒并带原因。"""
+    calls = []
+    monkeypatch.setattr(
+        document, "_save_edits_with_feedback",
+        lambda: calls.append("save"))
+    messages = []
+    document.status_message.connect(messages.append)
+
+    document._on_command_requested("save_edits")
+    assert calls == []
+    # 最根本的 blocker 优先（无活动图层先于会话状态）。
+    assert any("不可用" in m for m in messages), messages
+
+
+# -- V8 R3：toggle 类命令分派（authority 取反路径；P0 教训：此前零覆盖） --
+
+
+def test_topology_command_dispatch_toggles_from_authority(document):
+    layer = _create_layer(document, "polygon")
+    _assign_role(document, layer.id, LayerRole.INITIAL_FACIES_DRAFT)
+    messages = []
+    document.status_message.connect(messages.append)
+
+    document._on_command_requested("topology")
+    assert document.edit_controller.topology_enabled is True
+    assert document.action_controller.actions["topology"].isChecked()
+    assert any("开启" in m for m in messages), messages
+
+    document._on_command_requested("topology")
+    assert document.edit_controller.topology_enabled is False
+    assert not document.action_controller.actions["topology"].isChecked()
+    assert any("关闭" in m for m in messages), messages
+
+
+def test_snapping_command_dispatch_toggles_from_authority(document):
+    layer = _create_layer(document, "polygon")
+    _assign_role(document, layer.id, LayerRole.INITIAL_FACIES_DRAFT)
+
+    document._on_command_requested("snapping")
+    assert document.edit_controller.snapping.enabled is True
+    assert document.action_controller.actions["snapping"].isChecked()
+
+    document._on_command_requested("snapping")
+    assert document.edit_controller.snapping.enabled is False
+    assert not document.action_controller.actions["snapping"].isChecked()

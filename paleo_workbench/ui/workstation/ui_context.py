@@ -45,7 +45,23 @@ class UIContextSnapshot:
     active_layer_kind: str | None = None
     active_layer_maturity: str | None = None
     active_layer_frozen: bool = False
+    active_layer_missing: bool = False
+    active_layer_degraded: bool = False
+    # V8 M2：活动图层是否为栅格/参考（select* 等矢量专属工具的门禁输入）。
+    active_layer_is_raster: bool = False
+    # V8 M2：图层可写性（数据源事实）——与 editable（角色门禁结论）是两个
+    # 正交事实：只读参考层可以门禁通过但不可写。None = provider 缺席。
+    active_layer_writable: bool | None = None
     editing_active: bool = False
+    # V8 M6：编辑会话运行细节（palette applicability 与工具条同因的必要
+    # 输入；None = provider 缺席，诚实未知，适配器按保守值处理）。
+    editing_dirty: bool | None = None
+    selection_count: int | None = None
+    can_undo: bool | None = None
+    can_redo: bool | None = None
+    # V8 M2：模态阻塞任务标签（palette 与工具条对 blocking gate 同因；
+    # None = provider 缺席，按无阻塞处理——执行侧 re-gate 仍会拦截）。
+    blocking_task: str | None = None
     # SelectionContext 地质槽位摘要（权威仍在 viz.selection_context）
     active_well_id: str | None = None
     active_horizon_id: str | None = None

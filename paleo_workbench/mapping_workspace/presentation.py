@@ -192,21 +192,9 @@ def _group_template_for(group_id: str):
     return template
 
 
-def _candidate_artifact_keys(layer_id: str, record: LayerMembershipRecord) -> list[str]:
-    """membership → 依赖服务/成熟度共用的 artifact_key 候选（有序）。
-
-    与 ``LayerGroupController.layer_freshness`` 及
-    ``composite_document.layer_domain_status`` 的解析顺序一致：
-    factor 任务 > phase1 草稿 > 综合解释。
-    """
-    keys: list[str] = []
-    if record.factor_task_id:
-        keys.append(f"factor:{record.factor_task_id}")
-    if record.role == LayerRole.INITIAL_FACIES_DRAFT:
-        keys.append(f"phase1_draft:{layer_id}")
-    if record.role in (LayerRole.INTEGRATED_FACIES, LayerRole.INTEGRATED_BOUNDARY):
-        keys.append(f"integrated:{layer_id}")
-    return keys
+from paleo_workbench.mapping_workspace.artifact_keys import (
+    candidate_artifact_keys as _candidate_artifact_keys,
+)
 
 
 def _freshness_index(freshness_summary: Any) -> dict[str, Any]:

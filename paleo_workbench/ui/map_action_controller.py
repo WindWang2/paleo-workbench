@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QIcon, QKeySequence
 from PySide6.QtWidgets import QToolBar, QWidget
 
-from paleo_workbench.ui.workstation.tool_surface import ToolAvailability
+from paleo_workbench.mapping.tool_help import (
+    TOOL_LABELS,
+    TOOL_SHORTCUTS,
+)
 
-__all__ = ["MapActionController", "MapActionState"]
+__all__ = ["MapActionController"]
 
 _MAP_ICONS_DIR = Path(__file__).parent / "assets" / "icons" / "map"
 _ICONS_DIR = Path(__file__).parent / "assets" / "icons"
@@ -29,19 +31,6 @@ def _map_icon(action_id: str, *, fallback: str = "") -> QIcon:
     return QIcon()
 
 
-@dataclass(frozen=True, slots=True)
-class MapActionState:
-    has_active_vector_layer: bool = False
-    vector_layer_writable: bool = False
-    editing: bool = False
-    selected_count: int = 0
-    compatible_polygon_count: int = 0
-    can_undo: bool = False
-    can_redo: bool = False
-    can_previous_extent: bool = False
-    can_next_extent: bool = False
-
-
 class MapActionController(QObject):
     """One source of QAction checked/enabled state across menus and toolbars."""
 
@@ -54,27 +43,8 @@ class MapActionController(QObject):
         "reshape",
     )
 
-    _LABELS = {
-        "pan": "平移", "zoom_in": "放大", "zoom_out": "缩小",
-        "full_extent": "全图", "previous_extent": "上一视图", "next_extent": "下一视图",
-        "refresh": "刷新", "identify": "识别", "select": "选择",
-        "select_rectangle": "框选", "measure_distance": "测距",
-        "clear_selection": "清除选择", "select_all": "全选", "invert_selection": "反选",
-        "toggle_editing": "开始编辑", "save_edits": "保存编辑", "rollback": "回滚",
-        "add_point": "添加点", "add_line": "添加线", "add_polygon": "添加面",
-        "move_feature": "移动要素", "vertex": "节点编辑", "delete_selected": "删除所选",
-        "reshape": "重塑",
-        "undo": "撤销", "redo": "重做", "split": "分割", "merge": "合并",
-        "snapping": "捕捉", "topology": "拓扑编辑", "cancel": "取消",
-        # V7 专业分组扩展（goal §6 Layer/Symbology/Factor/QA/Layout·Export）
-        "layer_new": "新建图层", "reference_import": "导入参考图层",
-        "layer_properties": "图层属性", "attribute_table": "属性表",
-        "layer_zoom": "缩放到图层", "layer_export": "导出图层",
-        "symbology": "符号系统", "style_manager": "样式库",
-        "factor_workbench": "单因素工作台", "factor_overlay": "叠加等值线",
-        "qa_run": "运行 QC", "map_product_assemble": "生成成果",
-        "map_export": "导出图面",
-    }
+    #: 词表单一来源（V8 M4：action_help.TOOL_LABELS；帮助/QAction 同名）。
+    _LABELS = dict(TOOL_LABELS)
 
     #: 扩展面动作的图标（id → map/ 或 assets 根目录下的 svg 名）。
     _SURFACE_ICONS = {
@@ -85,6 +55,8 @@ class MapActionController(QObject):
         "factor_workbench": "rb-grid", "factor_overlay": "btn-contour-draft",
         "qa_run": "rb-qc", "map_product_assemble": "rb-finalize",
         "map_export": "rb-export",
+        # geometry 组的修复命令（TOOL_GROUPS 45 id 之一；复用健康检查图标）。
+        "repair_geometry": "btn-health",
     }
 
     def __init__(self, parent: QObject | None = None):
@@ -93,7 +65,6 @@ class MapActionController(QObject):
         self._tool_group = QActionGroup(self)
         self._tool_group.setExclusive(True)
         self._build_actions()
-        self.update_state(MapActionState())
 
     def _action(self, action_id: str, *, checkable: bool = False, shortcut: str = "") -> QAction:
         icon_name = self._SURFACE_ICONS.get(action_id, action_id)
@@ -116,13 +87,16 @@ class MapActionController(QObject):
             action = self._action(action_id, checkable=True)
             self._tool_group.addAction(action)
             action.triggered.connect(lambda checked=False, name=action_id: checked and self.tool_requested.emit(name))
-        for action_id, shortcut in (
-            ("full_extent", ""), ("previous_extent", ""), ("next_extent", ""), ("refresh", ""),
-            ("clear_selection", ""), ("select_all", ""), ("invert_selection", ""), ("toggle_editing", ""),
-            ("save_edits", "Ctrl+S"), ("rollback", ""), ("delete_selected", "Delete"),
-            ("undo", "Ctrl+Z"), ("redo", "Ctrl+Shift+Z"), ("split", ""), ("merge", ""),
-            ("snapping", ""), ("topology", ""), ("cancel", "Esc"),
+        # 快捷键单一来源（V8 M4：action_help.TOOL_SHORTCUTS；帮助镜像同源）。
+        shortcut_registry = dict(TOOL_SHORTCUTS)
+        for action_id in (
+            "full_extent", "previous_extent", "next_extent", "refresh",
+            "clear_selection", "select_all", "invert_selection", "toggle_editing",
+            "save_edits", "rollback", "delete_selected",
+            "undo", "redo", "split", "merge",
+            "snapping", "topology", "cancel",
         ):
+            shortcut = shortcut_registry.get(action_id, "")
             action = self._action(action_id, checkable=action_id in {"snapping", "topology", "toggle_editing"}, shortcut=shortcut)
             action.triggered.connect(lambda checked=False, name=action_id: self.command_requested.emit(name))
         self.actions["pan"].setChecked(True)
@@ -131,36 +105,16 @@ class MapActionController(QObject):
             action = self._action(action_id)
             action.triggered.connect(lambda checked=False, name=action_id: self.command_requested.emit(name))
 
-    def update_state(self, state: MapActionState) -> None:
-        vector = state.has_active_vector_layer
-        editable = vector and state.vector_layer_writable
-        editing = editable and state.editing
-        for action_id in ("identify", "select", "select_rectangle", "clear_selection", "select_all", "invert_selection"):
-            self.actions[action_id].setEnabled(vector)
-        self.actions["toggle_editing"].setEnabled(editable)
-        if self.actions["toggle_editing"].isChecked() != editing:
-            self.actions["toggle_editing"].blockSignals(True)
-            self.actions["toggle_editing"].setChecked(editing)
-            self.actions["toggle_editing"].blockSignals(False)
-        for action_id in ("save_edits", "rollback", "add_point", "add_line", "add_polygon", "move_feature", "vertex", "snapping", "topology"):
-            self.actions[action_id].setEnabled(editing)
-        self.actions["undo"].setEnabled(editing and state.can_undo)
-        self.actions["redo"].setEnabled(editing and state.can_redo)
-        self.actions["delete_selected"].setEnabled(editing and state.selected_count > 0)
-        self.actions["split"].setEnabled(editing and state.selected_count > 0)
-        self.actions["merge"].setEnabled(editing and state.compatible_polygon_count >= 2)
-        self.actions["previous_extent"].setEnabled(state.can_previous_extent)
-        self.actions["next_extent"].setEnabled(state.can_next_extent)
-        self.actions["cancel"].setEnabled(True)
+    def apply_availability(self, availability, *, help_texts=None) -> None:
+        """Apply ``{tool_id: ToolAvailability}`` from the canonical evaluator.
 
-    def apply_availability(self, availability) -> None:
-        """Apply ``{tool_id: ToolAvailability}`` from the V7 evaluator.
+        V8 M1：输入是 ``mapping.tool_availability.ToolAvailability``（唯一
+        契约）——enabled/visible/checked 与禁用原因全部来自单一求值器，
+        本方法只做 Qt 呈现（图标/tooltip/statusTip/勾选），不做业务判断。
 
-        Supersedes :meth:`update_state` on the workstation path: enabled state
-        and checkmarks come from the single evaluator, and every disabled
-        action carries its human-readable reason in the tooltip/status tip
-        (Goal V7 §3: never a bare ``setEnabled(False)``). ``update_state``
-        remains for the legacy authoring page host.
+        V8 M4：``help_texts`` 为 ``{tool_id: (tooltip, statusTip)}`` 覆盖
+        （宿主用 ``action_help`` 从同一契约派生的解释文本）；缺省回落
+        名称+原因两行式。
         """
         for tool_id, result in dict(availability).items():
             action = self.actions.get(tool_id)
@@ -169,17 +123,22 @@ class MapActionController(QObject):
             label = self._LABELS.get(tool_id, tool_id)
             action.setEnabled(bool(result.enabled))
             action.setVisible(bool(result.visible))
-            reason = getattr(result, "reason", None) or getattr(result, "disabled_reason", "") or ""
-            if reason:
-                action.setToolTip(f"{label}\n{reason}")
-                action.setStatusTip(f"{label}（{reason}）")
+            override = (help_texts or {}).get(tool_id)
+            if override is not None:
+                tooltip, status_tip = override
+                action.setToolTip(tooltip)
+                action.setStatusTip(status_tip)
             else:
-                action.setToolTip(label)
-                action.setStatusTip(label)
-            checked = getattr(result, "checked", None)
-            if checked is not None and action.isCheckable() and action.isChecked() != bool(checked):
+                reason = result.disabled_reason
+                if reason:
+                    action.setToolTip(f"{label}\n{reason}")
+                    action.setStatusTip(f"{label}（{reason}）")
+                else:
+                    action.setToolTip(label)
+                    action.setStatusTip(label)
+            if action.isCheckable() and action.isChecked() != bool(result.checked):
                 action.blockSignals(True)
-                action.setChecked(bool(checked))
+                action.setChecked(bool(result.checked))
                 action.blockSignals(False)
 
     def toolbar(

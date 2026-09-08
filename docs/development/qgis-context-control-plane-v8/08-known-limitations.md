@@ -1,0 +1,18 @@
+# 08 — Known Limitations（V8）
+
+| # | 限制 | 证据/理由 | 影响 |
+|---|---|---|---|
+| 1 | split/merge/reshape 不进 command palette | 前置条件依赖会话几何细节（split_ready/merge_ready 由 CompositeEditController 派生），palette 的 UIContextSnapshot 无法诚实判定；注册会给假可用/假禁用（违反 M2 同因原则） | palette 覆盖 24 个 `map:*` 命令；split/merge 经工具条+右键（execution re-gate 仍生效） |
+| 2 | 「无工程」仅在纯函数层验证 | `PaleoWorkbenchWindow(project=None)` 自动创建 Untitled 工程（app.py:36），工作站永远有工程文档 | 视觉 QA 用「空工程表面」表达（03-decisions D15）；project_open 门禁由 M2 矩阵覆盖 |
+| 3 | 原生工具激活失败回退的视觉 QA 是信号模拟 | fallback 画布无原生 QgsMapTool；QA 直接发射 `native_tool_activation_failed` 驱动宿主回退路径。shim 侧记录/发射逻辑（canvas_shim.py set_map_tool 异常分支）在无桥环境不可端到端驱动 | `-m qgis` 腿（有桥）可补端到端；handler 逻辑本身已被 v8 QA 状态覆盖 |
+| 4 | `_last_availability` 与 QAction 呈现的组级隐藏仍由 overflow 集合覆盖 | 窄画布收纳优先于 evaluator 可见性（V7 决策保留）：溢出组的 QAction 被 Qt 自动置 disabled，QA/测试断言以 evaluator 结论为准 | 溢出菜单条目使能取自 `_last_availability`（V7 已修），无「灰按钮可点」回归 |
+| 5 | M3 深度 token-hygiene 扫描未展开 | 本轮 M3 增量 = 契约驱动的状态语言（M4 help 文本、checked/原因在 tooltip/statusTip 的统一）+ V7 ratchet 全绿（a11y/dpi、visual QA v6/v7/v8、token 测试）。全量 120 页 token 盘点是独立批次 | ratchet 只减不增原则维持；无新增裸 setEnabled 业务判断（grep 证据在 00-overlap-audit §C 基线内） |
+| 6 | issue #1230 stale-QTimer 风险：调查结论为「无新增、存量低危」 | 本分支未新增 QTimer；唯一的 singleShot(0)（_update_empty_hint → _sync_hint_geometry）是 0ms 窗口且目标为长寿命 composite，Qt 事件循环在对象销毁后回调会 RuntimeError 但被 Qt 吞掉（不崩溃）；#1230 主体是 CI 配置诉求，明确不属本 Goal | 无行动；如未来出现真实 dangling-timer 崩溃再立项 |
+| 7 | `update_state`/`MapActionState`/`action_state`（旧签名）删除 | 生产零消费者（source scan：composite_document 只用 tool_context_inputs；mapping_page 已迁移）；测试迁移到 dict 契约/apply_availability | 第三方（无）不受影响；`action_state()` 保留 dict 兼容别名一个版本 |
+| 8 | 100GB seismic 完全排除 | Goal 明确 OUT OF SCOPE；本分支零体数据接触 | — |
+| 9 | Inspector action hint / empty-state 集成只完成 API 侧 | `CompositeDocument.explain_action` 已就绪并被 tooltip/palette 消费；Inspector 面板内的动作提示块与 onboarding 空态文案接入留待下批（避免本轮 UI 面铺得过宽） | M4 的 palette/tooltip/statusTip 三面已交付并测试 |
+| 10 | blocking 期间画布工具 checked 熄灭（含 pan） | checked=(current_tool==id AND enabled) 的保守语义：禁用工具不得留 checked（防陈旧勾选）；代价是模态阻塞时活动工具指示消失。恢复即回来（review R3-F3 取舍） | 纯指示性；无操作误导（按钮同时禁用） |
+| 11 | topology_error_count 无宿主生产者 | 预存（V7 B 时代即从未喂入）；合并的拓扑门只在纯函数层生效。需要 CompositeEditController 在拓扑校验后回填 session 计数（域侧改动，方向 C/D 范围） | 契约字段保留，测试钉语义 |
+| 12 | 预存 main 基线失败（与本分支无关，证据：独立 worktree 中干净 `d5181cb3` 上同样失败） | 25 个测试文件：`test_challenger_m6_adversarial_stress`、`test_compatibility_matrix`（temp PermissionError，环境）、`test_composite_free_graphics_save_restore`、`test_composite_qgis_canvas`（需已构建桥）、`test_coordinate_hub(+_stress)`（d5181cb3 声称修复 seismic grid 但该用例仍红）、`test_data_view_models`（ImportError 私有名）、`test_delivery_profiles`（temp PermissionError，环境）、`test_dependency_audit_and_batch`、`test_depth_cursor_units`、`test_geoviz_package_independence`、`test_geoviz_real_data_smoke`、`test_image_preview_widget`、`test_inference_envelope_protection`、`test_inspector_panel`、`test_interchange_crash_consistency`、`test_keyboard_shortcuts`、`test_map_authoring_architecture_guards`、`test_map_dock_manager`、`test_map_edit_scene`、`test_map_export_worker`、`test_map_preview_mode`、`test_map_tool_operation_performance`、`test_mapping_crs_idw`、`test_mapping_document_io` | 在 PR body 中列出，供各方向跟进 |
+| 13 | 全量套件运行期 import cycle（已修） | 批跑 runner 以 `test_map_action_controller` 为首个导入点暴露了定向运行永远看不到的环（controller → workstation 包 `__init__` 饿加载 → composite_document → controller）；修复：纯数据表移至 `mapping/tool_help.py` 叶子模块。修复后 16 测试全绿。教训已入 07-review-findings | 无残留 |
+| 14 | worktree 环境产物（非代码回归） | `test_native_abi_gate`：共享 venv 的 geoviz 引擎解析到主仓 checkout 路径（`paleo-workbench\geo-viz-engine`）而非 worktree 根——worktree 开发模式与 venv 绝对路径的固有交互，在主仓 checkout 运行即通过；`test_native_compile_flags`：venv 无 pybind11（native 构建工具未装） | 在主仓 checkout 复跑 ABI gate 即绿；compile-flags 需构建环境 |

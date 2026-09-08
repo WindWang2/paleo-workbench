@@ -544,12 +544,11 @@ class AppShell(QWidget):
             "mapping_stage_label", lambda: stage_controller.current_stage.label
         )
 
-        # V7 R2-F2：palette 上下文的图层字段全部从 composite.tool_context()
-        # 单一推导（此前 id/editable 走阶段目标、kind/maturity 走活动图层
-        # ——两套 id 源可漂移，palette 会用图层 B 的几何评估图层 A 的身份）。
+        # V7 R2-F2 / V8 M1：palette 上下文的图层字段全部从 composite 的
+        # 图层能力呈现快照单一推导（canonical ToolContext 的图层事实同源）。
         def _tool_layer_field(field: str):
             def _read():
-                return getattr(composite.tool_context().layer, field)
+                return getattr(composite.active_layer_capability(), field)
 
             return _read
 
@@ -565,9 +564,10 @@ class AppShell(QWidget):
             "editing_active",
             lambda: composite.edit_controller.editing,
         )
-        svc.set_provider(
-            "active_layer_role", _tool_layer_field("role_label")
-        )
+        # V8 M6：role 必须是 LayerRole.value（kind-gate 的线/面角色反抢
+        # 主位判断按 value 匹配；此前喂的是 label，该门禁在 palette 侧
+        # 从未生效）。
+        svc.set_provider("active_layer_role", _tool_layer_field("role"))
         svc.set_provider("active_layer_kind", _tool_layer_field("kind"))
         svc.set_provider(
             "active_layer_maturity", _tool_layer_field("maturity")
@@ -575,6 +575,38 @@ class AppShell(QWidget):
         svc.set_provider(
             "active_layer_frozen", _tool_layer_field("frozen")
         )
+        svc.set_provider(
+            "active_layer_missing", _tool_layer_field("missing")
+        )
+        svc.set_provider(
+            "active_layer_degraded", _tool_layer_field("degraded")
+        )
+        svc.set_provider(
+            "active_layer_is_raster",
+            lambda: composite.tool_context().qgis_layer_type == "raster",
+        )
+
+        # V8 M6：会话运行细节——palette applicability 与工具条同因的必要
+        # 输入（dirty/选择数/撤销栈/可写性/阻塞任务）。读 V7 kernel
+        # 采集器（权威派生）。
+        def _session_input(key: str, default):
+            def _read():
+                collector = getattr(
+                    composite.edit_controller, "tool_context_inputs", None)
+                if collector is None:
+                    return default
+                return collector().get(key, default)
+
+            return _read
+
+        svc.set_provider(
+            "active_layer_writable", _session_input("vector_writable", False)
+        )
+        svc.set_provider("editing_dirty", _session_input("dirty", False))
+        svc.set_provider("selection_count", _session_input("selection_count", 0))
+        svc.set_provider("can_undo", _session_input("can_undo", False))
+        svc.set_provider("can_redo", _session_input("can_redo", False))
+        svc.set_provider("blocking_task", _session_input("blocking_task", ""))
 
         def _capability_field(field: str):
             def _read():

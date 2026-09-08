@@ -583,15 +583,11 @@ class WorkstationFrame(QWidget):
             tool_context_from_ui_snapshot,
         )
 
-        # 阶段动作 id → 工具面 id（无映射的动作不受工具门禁，仅阶段白名单）。
-        stage_action_tools = {
-            "open_factor_workbench": "factor_workbench",
-            "run_factor": "factor_workbench",
-            "overlay_factor_results": "factor_overlay",
-            "run_qa": "qa_run",
-            "stage_qc": "qa_run",
-            "assemble_map_product": "map_product_assemble",
-        }
+        # 阶段动作 id → 工具面 id：单一词表（stage_actions.STAGE_ACTION_TOOLS，
+        # 执行侧 re-gate 共用；无映射的动作不受工具门禁，仅阶段白名单）。
+        from paleo_workbench.ui.workstation.stage_actions import STAGE_ACTION_TOOLS
+
+        stage_action_tools = STAGE_ACTION_TOOLS
 
         for stage, actions in (
             (MappingStage.FACIES_CALIBRATION, MappingStagePanel._PHASE1_ACTIONS),
@@ -607,7 +603,7 @@ class WorkstationFrame(QWidget):
                     avail = evaluate_tool(
                         _tool, tool_context_from_ui_snapshot(ctx)
                     )
-                    return avail.reason or None
+                    return avail.disabled_reason or None
 
                 command_registry.register(
                     CommandSpec(
@@ -629,10 +625,13 @@ class WorkstationFrame(QWidget):
         self._register_surface_palette_commands()
 
     def _register_surface_palette_commands(self) -> None:
-        """V7 §3：工具面动作注册为 palette 命令（applicability 同一求值器）。
+        """V7 §3 / V8 M6：工具面动作注册为 palette 命令（同一求值器）。
 
         palette 与工具条对同一动作给同一禁用原因（goal §5 四表面一致）；
-        回调经 composite 的命令分派（同一执行路径）。
+        回调经 composite 的命令分派（同一执行路径 + execution re-gate）。
+        V8：核心编辑/会话/检查命令进 palette（此前只有 surface 组）——
+        split/merge/reshape 依赖会话几何细节（palette 快照不可精确判定），
+        留在工具条/右键菜单，不进 palette（诚实优先于覆盖）。
         """
         from paleo_workbench.ui.command_registry import CommandSpec, command_registry
         from paleo_workbench.ui.map_action_controller import MapActionController
@@ -646,18 +645,27 @@ class WorkstationFrame(QWidget):
             "attribute_table", "layer_zoom", "layer_export", "symbology",
             "style_manager", "factor_workbench", "factor_overlay",
             "qa_run", "map_product_assemble", "map_export",
+            # V8 M6：核心编辑/会话/检查命令（快照字段足够精确判定的集合）
+            "toggle_editing", "save_edits", "rollback", "undo", "redo",
+            "delete_selected", "snapping", "topology",
+            "identify", "measure_distance", "select_rectangle",
         )
         labels = MapActionController._LABELS
+        from paleo_workbench.ui.workstation.action_help import TOOL_HELP
+
         for tool_id in surface_tools:
 
             def _applicability(ctx, _tool=tool_id):
                 avail = evaluate_tool(_tool, tool_context_from_ui_snapshot(ctx))
-                return avail.reason or None
+                return avail.disabled_reason or None
 
+            spec = TOOL_HELP.get(tool_id)
             command_registry.register(
                 CommandSpec(
                     id=f"map:{tool_id}",
                     label=f"编图 · {labels.get(tool_id, tool_id)}",
+                    # M4：palette details 显示执行影响（静态登记处单一来源）。
+                    hint=spec.impact if spec else "",
                     keywords="map 编图 图层 符号 因子 导出",
                     group="编图工具",
                     applicability=_applicability,
