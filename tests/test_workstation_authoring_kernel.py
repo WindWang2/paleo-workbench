@@ -205,15 +205,24 @@ class TestTopologyPropagationWiring:
         assert ops.count("move_vertex") >= 2
         sources = {d.source_tool for d in session.deltas()}
         assert "vertex(native)" in sources
-        # P1-4：主编辑 + 同会话传播合成一个 undo 命令（一次 Ctrl+Z 整体回退，
-        # 共享节点不因撤销而断裂）。2 个 add_feature + 1 个 compound = 3。
+        # V8 M3（review-2 P0 修复后语义）：传播回调在宏外运行，主编辑与
+        # 同会话传播不再并入一个宏命令，原子性由复合撤销组承载——
+        # 栈 = 2 个 add_feature + 主 set_vertex + 每个共享节点（含闭合
+        # 重合点）的传播 set_vertex；一次用户级 undo（复合组）整体回退。
         undo_steps_before = len(session.undo_stack)
-        assert undo_steps_before == 3
-        assert session.undo()
+        assert undo_steps_before >= 4  # 2 adds + origin + ≥1 propagation
+        group = controller._topology.pending_compound(session)
+        assert group is not None, "生产路径（_commit_vertex → 回调）必须登记复合组"
+        assert controller.edit_command("undo")
         geom_a = session.feature("a").as_record()["geometry"]
         geom_b2 = session.feature("b").as_record()["geometry"]
         assert [0.0, 0.0] in geom_a["coordinates"][0]
         assert [-1.0, 0.0] not in geom_b2["coordinates"][0]
+        # 复合 redo 同样整组可达（can_redo 由组喂给）。
+        assert controller.edit_command("redo")
+        geom_a2 = session.feature("a").as_record()["geometry"]
+        assert [-1.0, 0.0] in geom_a2["coordinates"][0]
+        assert [-1.0, 0.0] in session.feature("b").as_record()["geometry"]["coordinates"][0]
 
     def test_propagation_respects_edit_gate(self, qtbot, tmp_path):
         document = _document(qtbot, tmp_path)

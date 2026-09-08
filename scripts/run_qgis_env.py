@@ -43,8 +43,20 @@ def _pyside_dir() -> Path | None:
         return None
 
 
-def prepare() -> list[Path]:
-    """Idempotent environment preparation; returns dirs added in order."""
+def prepare(*, quiet: bool = False) -> list[Path]:
+    """Idempotent environment preparation; returns dirs added in order.
+
+    Fails loudly (exit) when the vendor dir is missing and no
+    ``PALEO_QGIS_BUILD_DIR`` override is set — a silent no-op here makes
+    every qgis-marked test skip with no pointer to the cause.
+    """
+    if not VENDOR_BIN.is_dir() and not os.environ.get("PALEO_QGIS_BUILD_DIR"):
+        if not quiet:
+            sys.exit(
+                f"run_qgis_env: vendor bin not found: {VENDOR_BIN}\n"
+                "Set PALEO_QGIS_BUILD_DIR to a completed vendored-QGIS build "
+                "(see docs/development/qgis-spatial-authoring-v8/03-decisions.md D6)."
+            )
     dirs: list[Path] = []
     for candidate in (VENDOR_BIN, _pyside_dir()):
         if candidate is None or not candidate.is_dir():

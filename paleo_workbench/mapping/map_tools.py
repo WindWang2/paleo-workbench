@@ -49,12 +49,14 @@ def _commit_vertex(
     *,
     source_suffix: str,
 ) -> bool:
-    """顶点提交公共实现：主编辑 + 同会话拓扑传播 = 单个 undo 命令。
+    """顶点提交公共实现（V8 M3 修订：传播钩子在宏关闭后触发）。
 
-    传播钩子若在同会话内追加 set_vertex（工作站/编图页的共享节点传播），
-    begin/end_edit_command 把它们合成一个 compound——一次 Ctrl+Z 整体回退
-    （QGIS 顶点编辑的 macro 语义；跨图层传播受会话隔离限制，见
-    08-known-limitations）。失败路径绝不留下打开的 compound。
+    主编辑由 begin/end_edit_command 合成单命令；传播回调随后运行——
+    同会话传播不再并入宏，而是由 TopologyService 的复合撤销组承载
+    原子性（一次用户动作 = 一次 undo，跨图层/同图层同语义）。此前
+    回调在宏内触发，复合组恒拒绝登记（宏打开降级），生产路径退化为
+    V7 非原子——review-2 P0 修复。失败路径绝不留下打开的 compound；
+    传播失败不吞主编辑（warning 可诊断）。
     """
     origin: Point | None = None
     try:
@@ -76,16 +78,16 @@ def _commit_vertex(
     try:
         with session.edit_source(f"vertex({source_suffix})"):
             session.set_vertex(feature.feature_id, path, point)
-        if origin is not None and on_vertex_committed is not None:
-            try:
-                on_vertex_committed(feature.feature_id, path, origin, point)
-            except Exception as exc:  # 传播失败不吞主编辑，但必须可诊断
-                _logger.warning("vertex propagation failed: %s", exc)
     except Exception as exc:
         session.destroy_edit_command()
         _logger.debug("vertex commit rejected: %s", exc)
         return False
     session.end_edit_command()
+    if origin is not None and on_vertex_committed is not None:
+        try:
+            on_vertex_committed(feature.feature_id, path, origin, point)
+        except Exception as exc:  # 传播失败不吞主编辑，但必须可诊断
+            _logger.warning("vertex propagation failed: %s", exc)
     return True
 
 

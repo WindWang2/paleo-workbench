@@ -230,6 +230,23 @@ class TopologyService:
         self._last_layers = layer_list
         # 宏打开时传播命令不落 undo 栈——无从按身份追踪，登记降级。
         macro_open = False
+        # origin 命令在传播前捕获（同层传播会把自己的命令压到 origin 之上，
+        # 事后读栈顶会错认 origin——review 修复）。
+        origin_command = None
+        origin_session = None
+        if skip is not None:
+            skip_layer = next(
+                (layer for layer in layer_list if layer.id == skip[0]), None
+            )
+            origin_session = skip_layer.edit_session if skip_layer else None
+            if (
+                origin_session is not None
+                and origin_session._open_command is None
+                and origin_session.undo_stack
+            ):
+                candidate_command = origin_session.undo_stack[-1]
+                if str(skip[1]) in candidate_command.feature_ids:
+                    origin_command = candidate_command
         for layer in layer_list:
             # Snapshot paths before mutation; it makes duplicate closing nodes and
             # adjacent polygons deterministic even as individual commands change data.
@@ -280,10 +297,11 @@ class TopologyService:
                             )
                         )
         compound_registered = False
-        if self.enabled and propagated and not macro_open and skip is not None:
+        if self.enabled and propagated and not macro_open and origin_command is not None:
             skip_layer_id, skip_feature_id, _skip_path = skip
             compound_registered = self._register_compound(
-                skip_layer_id, str(skip_feature_id), propagated
+                skip_layer_id, str(skip_feature_id), propagated,
+                origin_command=origin_command,
             )
         return TopologyEditResult(
             changed=tuple(changed), compound_registered=compound_registered
@@ -296,22 +314,25 @@ class TopologyService:
         origin_layer_id: str,
         origin_feature_id: str,
         propagated: list[SharedVertexEdit],
+        *,
+        origin_command: object,
     ) -> bool:
-        """以 origin 会话栈顶命令为准登记复合组；形状不符 → False（不登记）。"""
+        """以传播前捕获的 origin 命令登记复合组；形状不符 → False。"""
         origin_layer = next(
-            (layer for layer in self._compound_registry_layers() if layer.id == origin_layer_id),
+            (
+                layer
+                for layer in self._last_layers
+                if layer.id == origin_layer_id
+            ),
             None,
         )
         if origin_layer is None:
             return False
         session = origin_layer.edit_session
-        if session is None or session._open_command is not None or not session.undo_stack:
+        if session is None or session._open_command is not None:
             return False
-        command = session.undo_stack[-1]
-        if origin_feature_id not in command.feature_ids:
-            return False
-        before_feature = command.before.get(origin_feature_id)
-        after_feature = command.after.get(origin_feature_id)
+        before_feature = origin_command.before.get(origin_feature_id)
+        after_feature = origin_command.after.get(origin_feature_id)
         if before_feature is None or after_feature is None:
             return False
         before_points = {
@@ -322,8 +343,6 @@ class TopologyService:
             path: point
             for point, path in _vertices(after_feature.geometry["coordinates"])
         }
-        # 栈顶必须是同一要素的顶点级编辑（set_vertex/insert/delete 皆可——
-        # before/after 顶点集给出精确还原值）。
         shared_paths = [path for path in before_points if path in after_points]
         if not shared_paths:
             return False
@@ -344,7 +363,7 @@ class TopologyService:
                     before=before_points[path],
                     after=after_points[path],
                     session=session,
-                    command=command,
+                    command=origin_command,
                 ),
                 propagated=tuple(propagated),
             )
@@ -353,18 +372,15 @@ class TopologyService:
             del self._compounds[: len(self._compounds) - self.COMPOUND_LIMIT]
         return True
 
-    def _compound_registry_layers(self) -> list[VectorLayer]:
-        """最近一次 propagate 调用见过的图层（origin 层必在其中）。"""
-        return self._last_layers
-
     # 复合组保留上限：与 journal 同量级——过旧的组早被会话提交/回滚作废。
     COMPOUND_LIMIT = 256
 
     def pending_compound(self, session: VectorEditSession) -> CompoundUndoGroup | None:
-        """该会话栈顶命令是否是一个未撤销复合组的 origin。
+        """该会话栈顶命令是否属于一个未撤销复合组（origin 或传播副本）。
 
         宿主在单层 undo 前查询：命中则必须走 :meth:`undo_compound`（整组
-        原子撤销），否则一次用户动作只回滚一半。
+        原子撤销），否则一次用户动作只回滚一半。V8 review-1 P1-1：匹配
+        不限于 origin 会话——用户把活动层切到传播层后 undo 同样必须整组。
         """
         if session is None or session._open_command is not None or not session.undo_stack:
             return None
@@ -373,6 +389,11 @@ class TopologyService:
             if group.undone:
                 continue
             if group.origin.session is session and group.origin.command is top:
+                return group
+            if any(
+                edit.session is session and edit.command is top
+                for edit in group.propagated
+            ):
                 return group
         return None
 
@@ -394,37 +415,38 @@ class TopologyService:
         origin = group.origin
         if origin.session._open_command is not None:
             return CompoundUndoResult(False, "an edit command is still open")
-        if not origin.session.undo_stack or origin.session.undo_stack[-1] is not origin.command:
-            return CompoundUndoResult(
-                False,
-                "origin 顶点编辑已不是该图层最近一次编辑——请按编辑顺序逐层撤销",
-            )
         # 先全量检查再执行（all-or-nothing）：传播命令必须仍在各自栈上，
         # 且其后同要素不得再有编辑（否则逐条回滚不等价于那一次地质动作；
         # 快照式命令按要素判定——同组其它命令不算冲突，它们一起弹）。
         group_command_ids = {
             id(edit.command) for edit in (*group.propagated, group.origin)
         }
-        for edit in group.propagated:
+
+        def _conflicts(edit: SharedVertexEdit) -> str:
+            """身份索引 + 同组排除的冲突扫描（origin 与传播命令同律）。"""
             if edit.session._open_command is not None:
-                return CompoundUndoResult(False, "an edit command is still open")
+                return "an edit command is still open"
             stack = edit.session.undo_stack
-            try:
-                index = stack.index(edit.command)
-            except ValueError:
-                return CompoundUndoResult(
-                    False, f"图层 {edit.layer_id} 的传播命令已不在撤销栈上"
-                )
+            index = next(
+                (i for i, command in enumerate(stack) if command is edit.command), -1
+            )
+            if index < 0:
+                return f"图层 {edit.layer_id} 的命令已不在撤销栈上——请按编辑顺序撤销"
             for later in stack[index + 1:]:
                 if (
                     edit.feature_id in later.feature_ids
                     and id(later) not in group_command_ids
                 ):
-                    return CompoundUndoResult(
-                        False,
+                    return (
                         f"图层 {edit.layer_id} 要素 {edit.feature_id} 在拓扑传播后又有编辑"
-                        "——整组拒绝撤销，请先处理该图层",
+                        "——整组拒绝撤销，请先处理该图层"
                     )
+            return ""
+
+        for edit in (origin, *group.propagated):
+            reason = _conflicts(edit)
+            if reason:
+                return CompoundUndoResult(False, reason)
         for edit in reversed(group.propagated):
             if not edit.session.pop_command(edit.command):
                 return CompoundUndoResult(False, f"图层 {edit.layer_id} 的传播命令已失效")
@@ -465,6 +487,32 @@ class TopologyService:
         self._compounds = [
             group for group in self._compounds
             if not stale.intersection(group.involved_layer_ids)
+        ]
+
+    def discard_ended_session_compounds(self) -> None:
+        """丢弃所有涉及会话已终结的复合组（宿主提交/回滚后的统一收口）。
+
+        终结判定 = 会话对象不再是图层的 edit_session（提交/回滚后被图层
+        收回）。比按 layer_id 枚举更完备——覆盖宿主拿不全图层清单的路径
+        （review-2 P1-2：编图页 save_draft/rollback 补线）。
+        """
+        def _alive(edit: SharedVertexEdit) -> bool:
+            return (
+                edit.session._open_command is not None
+                or next(
+                    (
+                        layer.edit_session
+                        for layer in self._last_layers
+                        if layer.id == edit.layer_id
+                        and layer.edit_session is edit.session
+                    ),
+                    None,
+                ) is edit.session
+            )
+
+        self._compounds = [
+            group for group in self._compounds
+            if _alive(group.origin) and all(_alive(e) for e in group.propagated)
         ]
 
     def _session_revision(self, layer_id: str) -> int:

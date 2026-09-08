@@ -368,15 +368,6 @@ def document_render_snapshot(
     return MapRenderSnapshot(project_crs=str(project_crs or ""), layers=tuple(layers))
 
 
-def _coordinates(value: object) -> Iterable[list[float]]:
-    point = _point(value)
-    if point is not None:
-        yield point
-        return
-    if isinstance(value, (list, tuple)):
-        for child in value:
-            yield from _coordinates(child)
-
 
 def _extent_for_features(features: Iterable[Mapping[str, Any]]) -> tuple[float, float, float, float]:
     # V8 M4：范围计算走共享内核；空集合占位与正面积垫宽契约不变。

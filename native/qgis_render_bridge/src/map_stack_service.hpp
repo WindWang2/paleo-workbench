@@ -268,7 +268,8 @@ public:
   std::string writeProjectXml();
   // V8 M1 自省面：doc_id 镜像层上真实应用的 provider schema（fields/
   // constraints/alias/editor widget/default 的 JSON 事实）。未镜像 →
-  // {"exists": false}。供 qgis-marked 测试与 host handshake 消费。
+  // {"exists": false}。当前消费者为 qgis-marked 测试；host 侧
+  // Inspector/handshake 接入为后续（能力事实面，非展示规则）。
   std::string mirrorLayerSchemaJson(const std::string& doc_id) const;
   // V8 M1 自省面（数据侧）：镜像层真实存储的要素 + typed 属性
   // （GeoJSON FeatureCollection，limit 截断）。

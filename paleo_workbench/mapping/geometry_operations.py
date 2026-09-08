@@ -684,9 +684,12 @@ def centroid(geometry: dict) -> tuple[float, float]:
         )
     if geom_type in {"Polygon", "MultiPolygon"}:
         polys = [coords] if geom_type == "Polygon" else list(coords)
+        # 面积矩守恒（review-1 P1-4）：Σ(A_ext·C_ext − Σ A_hole·C_hole) /
+        # Σ(A_ext − Σ A_hole)——洞既减面积也减矩；此前只减面积的版本对
+        # 非对称洞给出错误质心（恰好在中心对称洞上与真值重合）。
         area_total = 0.0
-        cx_total = 0.0
-        cy_total = 0.0
+        moment_x = 0.0
+        moment_y = 0.0
         for rings in polys:
             rings = list(rings or [])
             if not rings:
@@ -694,19 +697,26 @@ def centroid(geometry: dict) -> tuple[float, float]:
             exterior = [p for p in rings[0] if isinstance(p, (list, tuple)) and len(p) >= 2]
             if not exterior:
                 continue
-            cx, cy = ring_area_centroid(exterior)
-            area = abs(calculate_signed_area(exterior))
+            ext_area = abs(calculate_signed_area(exterior))
+            ext_cx, ext_cy = ring_area_centroid(exterior)
+            part_area = ext_area
+            part_moment_x = ext_cx * ext_area
+            part_moment_y = ext_cy * ext_area
             for hole in rings[1:]:
                 cleaned = [p for p in hole if isinstance(p, (list, tuple)) and len(p) >= 2]
                 if cleaned:
-                    area -= abs(calculate_signed_area(cleaned))
-            area = max(area, 0.0)
-            area_total += area
-            cx_total += cx * area
-            cy_total += cy * area
+                    hole_area = abs(calculate_signed_area(cleaned))
+                    hole_cx, hole_cy = ring_area_centroid(cleaned)
+                    part_area -= hole_area
+                    part_moment_x -= hole_cx * hole_area
+                    part_moment_y -= hole_cy * hole_area
+            if part_area > 0.0:
+                area_total += part_area
+                moment_x += part_moment_x
+                moment_y += part_moment_y
         if area_total <= 0.0:
             raise ValueError("centroid needs a non-degenerate polygon")
-        return cx_total / area_total, cy_total / area_total
+        return moment_x / area_total, moment_y / area_total
     raise ValueError(f"centroid: unsupported geometry type {geom_type!r}")
 
 

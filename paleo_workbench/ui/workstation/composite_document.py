@@ -893,6 +893,9 @@ class CompositeDocument(QWidget):
             lambda *_: self._sync_composition(immediate=True)
         )
         self.edit_controller.state_changed.connect(self._sync_action_state)
+        # V8 M3：复合撤销被拒（冲突/顺序）必须可见——接状态消息通道，
+        # 不静默半组回退（review-1 P1 处置的 UI 面）。
+        self.edit_controller.topology_conflict.connect(self.status_message.emit)
         self.canvas.tool_operation.connect(self._on_tool_operation)
         # 视野（pan/zoom）是高频事件：走轻路径——勾选态 + 状态条；统一
         # 可用性/树装饰与 extent 无关（R3-P2：满载 1000 层时每次 pan 全量

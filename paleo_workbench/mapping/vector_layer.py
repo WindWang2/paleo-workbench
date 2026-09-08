@@ -615,9 +615,12 @@ class VectorEditSession:
         """
         if self._open_command is not None:
             return False
-        try:
-            index = self.undo_stack.index(command)
-        except ValueError:
+        # 身份匹配（review-2 P2-3）：EditCommand 是 frozen dataclass，==
+        # 按值比较——快照相同的两条命令会错位互配；组语义要求对象同一。
+        index = next(
+            (i for i, item in enumerate(self.undo_stack) if item is command), -1
+        )
+        if index < 0:
             return False
         del self.undo_stack[index]
         command.revert(self._working)

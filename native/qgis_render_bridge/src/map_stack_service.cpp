@@ -285,21 +285,6 @@ QList<FieldSchemaEntry> parseFieldSchema(const std::string& fields_json) {
     return entries;
 }
 
-QString fieldSchemaSignature(const QList<FieldSchemaEntry>& entries) {
-    // 稳定签名（name:type:len:prec|constraints…）——与 pwb/fields_json 属性
-    // 一起持久化，重复发布同 schema 时零 provider 抖动。
-    QStringList parts;
-    for (const FieldSchemaEntry& e : entries) {
-        QStringList part;
-        part << e.field.name()
-             << QString::number(static_cast<int>(e.field.type()))
-             << QString::number(e.field.length())
-             << QString::number(e.field.precision())
-             << e.alias << e.editor_widget << e.default_expression;
-        parts << part.join(QStringLiteral(":"));
-    }
-    return parts.join(QStringLiteral("|"));
-}
 
 // 把 schema 应用到镜像层。返回 provider 字段是否发生变化（变化即要求
 // 调用方跳过 delta 通道——属性被整体重建，改走全量重发）。
@@ -308,11 +293,15 @@ bool applyFieldSchema(QgsVectorLayer& layer,
     QgsVectorDataProvider* provider = layer.dataProvider();
     if (provider == nullptr) return false;
     const QgsFields current = layer.fields();
+    // 等价 = 名称/类型/长度/精度全同（review-2 P2-4：只比名称/类型时，
+    // 仅改 length/precision 的 spec 漂移静默不应用，自省面会谎报）。
     bool equivalent = current.count() == entries.count();
     if (equivalent) {
         for (int i = 0; i < entries.count(); ++i) {
             if (current.at(i).name() != entries.at(i).field.name()
-                || current.at(i).type() != entries.at(i).field.type()) {
+                || current.at(i).type() != entries.at(i).field.type()
+                || current.at(i).length() != entries.at(i).field.length()
+                || current.at(i).precision() != entries.at(i).field.precision()) {
                 equivalent = false;
                 break;
             }
@@ -388,32 +377,42 @@ QgsFeatureList parseGeoJsonFeatures(const QString& text, const QgsFields& fields
             const QString name = fields.at(index).name();
             const QJsonValue property = properties.value(name);
             if (property.isUndefined()) continue;  // 缺省属性 = NULL（诚实）
+            // 严格类型收窄（review-1 P2-8）：JSON 值类型与字段类型不符 →
+            // 置 NULL（诚实），不做静默截断/猜值（"3.9"→3、"true"→false）。
             QVariant variant;
+            const double number = property.toDouble(0.0);
             switch (fields.at(index).type()) {
               case QMetaType::Type::Double:
-                variant = property.toDouble();
+                if (property.isDouble()) variant = property.toDouble();
                 break;
               case QMetaType::Type::LongLong:
               case QMetaType::Type::Int:
-                variant = property.isDouble()
-                              ? QVariant(static_cast<qint64>(property.toDouble()))
-                              : property.toVariant();
+                if (property.isDouble()
+                    && number == std::floor(number)) {
+                  variant = QVariant(static_cast<qint64>(number));
+                }
                 break;
               case QMetaType::Type::Bool:
-                variant = property.toBool();
+                if (property.isBool()) variant = property.toBool();
                 break;
               case QMetaType::Type::QDateTime:
-                variant = QDateTime::fromString(property.toString(), Qt::ISODate);
+                if (property.isString()) {
+                  const QDateTime parsed =
+                      QDateTime::fromString(property.toString(), Qt::ISODate);
+                  if (parsed.isValid()) variant = parsed;
+                }
                 break;
               default:
-                variant = property.toVariant().toString();
+                if (property.isString()) variant = property.toString();
                 break;
             }
-            record.setAttribute(index, variant);
+            if (variant.isValid()) {
+              record.setAttribute(index, variant);
+            }  // 无效 = 缺省 NULL（setAttribute 未调即保持初始 NULL）
         }
-        if (record.hasGeometry() || !properties.isEmpty()) {
-            out.append(record);
-        }
+        // 与 OGR 路径同律：出现在 features 数组里的要素一律保留（空几何/
+        // 空属性也保留——review-1 P2-7：丢掉会错位 __pwb_fid 顺序配对）。
+        out.append(record);
     }
     return out;
 }
@@ -1888,8 +1887,6 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
       schema_changed = applyFieldSchema(*existing, schema);
       existing->setCustomProperty(QStringLiteral("pwb/fields_json"),
                                   QString::fromStdString(fields_json));
-      existing->setCustomProperty(QStringLiteral("pwb/fields_sig"),
-                                  fieldSchemaSignature(schema));
     } else if (!existing->customProperty(QStringLiteral("pwb/fields_json"))
                     .toString().isEmpty()) {
       // 角色回退（legacy 无 schema 路径）且此前 schema 化过：这是 schema
@@ -1903,7 +1900,6 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
         existing->updateFields();
       }
       existing->removeCustomProperty(QStringLiteral("pwb/fields_json"));
-      existing->removeCustomProperty(QStringLiteral("pwb/fields_sig"));
       schema_changed = true;  // 全量重发（typed → legacy 的属性丢弃语义）
     }
     // v7 §9: delta channel — delete+re-add only the changed features when
@@ -1985,8 +1981,6 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
     applyFieldSchema(*layer, schema);
     layer->setCustomProperty(QStringLiteral("pwb/fields_json"),
                              QString::fromStdString(fields_json));
-    layer->setCustomProperty(QStringLiteral("pwb/fields_sig"),
-                             fieldSchemaSignature(schema));
   }
   QgsFeatureList features = parseGeoJsonFeatures(
       QString::fromStdString(geojson_feature_collection), layer->fields());
@@ -3948,9 +3942,13 @@ void QgisMapStack::setEditIndicator(std::uintptr_t tree_addr,
   if (!layer) return;  // 未镜像（例如尚未上树）时静默忽略——面板状态仍会记录
   QgsLayerTreeLayer* node = project()->layerTreeRoot()->findLayer(layer);
   if (!node) return;
-  // 幂等：先摘除本栈挂过的编辑指示器（removeIndicator 负责销毁对象）。
+  // 幂等：先摘除本栈挂过的编辑指示器；removeIndicator 只出列表，销毁
+  // 由 deleteLater 补齐（与行指示器同律，review-1 P1-5）。
   for (QgsLayerTreeViewIndicator* ind : view->indicators(node)) {
-    if (ind->property("pwb_edit").toBool()) view->removeIndicator(node, ind);
+    if (ind->property("pwb_edit").toBool()) {
+      view->removeIndicator(node, ind);
+      ind->deleteLater();
+    }
   }
   if (!on) return;
   // QGIS 桌面经图层指示器呈现编辑态；vendored 主题无铅笔资源，绘字符图标。
@@ -4029,9 +4027,14 @@ void QgisMapStack::setRowIndicators(std::uintptr_t tree_addr,
   if (!layer) return;  // 未镜像时静默忽略——面板状态记录仍是权威
   QgsLayerTreeLayer* node = project()->layerTreeRoot()->findLayer(layer);
   if (!node) return;
-  // 幂等：先摘除本栈挂过的行指示器（edit 铅笔不动）。
+  // 幂等：先摘除本栈挂过的行指示器（edit 铅笔不动）。removeIndicator 只
+  // 从列表移除不销毁（QGIS 自家 provider 亦随后 deleteLater——review-1
+  // P1-5：不补销毁会在长会话中随刷新无限累积 QObject）。
   for (QgsLayerTreeViewIndicator* ind : view->indicators(node)) {
-    if (ind->property("pwb_row").toBool()) view->removeIndicator(node, ind);
+    if (ind->property("pwb_row").toBool()) {
+      view->removeIndicator(node, ind);
+      ind->deleteLater();
+    }
   }
   QJsonParseError err;
   const QJsonDocument doc = QJsonDocument::fromJson(

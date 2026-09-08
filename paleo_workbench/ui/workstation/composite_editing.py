@@ -28,7 +28,7 @@ _logger = logging.getLogger(__name__)
 from paleo_workbench.mapping.geometry_planar import (
     distance_to_segment,
     extent_of_geometries,
-    point_in_polygon_scalar,
+    point_in_ring_scalar,
 )
 from paleo_workbench.mapping.geometry_schema import new_feature_id
 from paleo_workbench.mapping.map_interaction import SnappingService
@@ -389,15 +389,26 @@ def _geometry_hit(point: tuple[float, float], geometry: Mapping[str, Any], toler
             for start, end in _segments(coordinates)
         )
     if kind == "Polygon":
+        # 迁移前精确语义（review-1 P2-6）：外环内 → 命中=不在任何洞（直接
+        # 返回，洞内点不做顶点回退）；外环之外 → 顶点邻近回退（容差）。
         rings = list(coordinates or [])
-        if rings:
-            try:
-                if point_in_polygon_scalar(
-                    point, {"type": "Polygon", "coordinates": rings}
-                ):
-                    return True
-            except (TypeError, ValueError, IndexError):
-                pass
+
+        def _inside(ring: Any) -> bool:
+            vertices = [
+                (float(node[0]), float(node[1]))
+                for node in ring or ()
+                if isinstance(node, (list, tuple))
+                and len(node) >= 2
+                and isinstance(node[0], (int, float))
+                and isinstance(node[1], (int, float))
+            ]
+            if len(vertices) < 3:
+                return False
+            return point_in_ring_scalar(
+                float(point[0]), float(point[1]), vertices)
+
+        if rings and _inside(rings[0]):
+            return not any(_inside(hole) for hole in rings[1:])
         return any(_math.dist(point, vertex) <= tolerance for vertex, _path in _ring_vertices(rings))
     if kind == "MultiPolygon":
         return any(_geometry_hit(point, {"type": "Polygon", "coordinates": poly}, tolerance) for poly in coordinates or ())
@@ -1509,7 +1520,13 @@ class CompositeEditController(QObject):
                         self.content_changed.emit(changed_layer_id)
                     self.state_changed.emit()
                     return True
+                # 组拒绝（撤销后有新编辑）：线性历史上更晚被单层撤销的
+                # 命令仍可 redo——回退单层路径，不吞掉入口（review-1 P1-3）。
                 self.topology_conflict.emit(result.reason)
+                if session.redo():
+                    self.content_changed.emit(layer.id)
+                    self.state_changed.emit()
+                    return True
                 return False
             if session.redo():
                 self.content_changed.emit(layer.id)
@@ -1662,8 +1679,13 @@ class CompositeEditController(QObject):
             editing=session is not None,
             selected_count=len(layer.selection) if layer is not None else 0,
             compatible_polygon_count=compatible_polygon_count,
-            can_undo=bool(session and session.undo_stack),
-            can_redo=bool(session and session.redo_stack),
+            can_undo=bool(
+                session and (session.undo_stack or self._topology.pending_compound(session))
+            ),
+            # V8 M3：复合组的重做不进单层 redo 栈——可达性必须看组（review-1 P1-2）。
+            can_redo=bool(
+                session and (session.redo_stack or self._topology.pending_compound_redo(session))
+            ),
             can_previous_extent=can_previous_extent,
             can_next_extent=can_next_extent,
         )
@@ -1700,8 +1722,12 @@ class CompositeEditController(QObject):
             "dirty": bool(session is not None and session.is_dirty),
             "edit_gate_open": bool(gate_allowed),
             "edit_gate_reason": str(gate_reason or ""),
-            "can_undo": bool(session and session.undo_stack),
-            "can_redo": bool(session and session.redo_stack),
+            "can_undo": bool(
+                session and (session.undo_stack or self._topology.pending_compound(session))
+            ),
+            "can_redo": bool(
+                session and (session.redo_stack or self._topology.pending_compound_redo(session))
+            ),
             "selection_count": len(layer.selection) if layer is not None else 0,
             "selection_geometry_types": tuple(kinds_among_selection),
             "compatible_polygon_count": (

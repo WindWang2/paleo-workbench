@@ -269,18 +269,6 @@ def _extent_of_features(features: Sequence[Mapping[str, Any]]) -> tuple[float, f
         return (0.0, 0.0, 1.0, 1.0)
 
 
-def _iter_leaf_coordinates(node: Any) -> Iterable[tuple[float, float]]:
-    """Yield (x, y) leaves of a nested GeoJSON coordinate structure."""
-    if not isinstance(node, (list, tuple)):
-        return
-    if len(node) >= 2 and isinstance(node[0], (int, float)) and isinstance(node[1], (int, float)):
-        xy = _finite_xy(node)
-        if xy is not None:
-            yield xy
-        return
-    for child in node:
-        yield from _iter_leaf_coordinates(child)
-
 
 def _content_revision(features: Sequence[Mapping[str, Any]]) -> int:
     """Content-derived ``data_revision``.

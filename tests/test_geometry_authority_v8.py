@@ -127,8 +127,20 @@ def test_centroid_point_and_lines_and_polygons():
     square = {"type": "Polygon", "coordinates": [
         [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0]]]}
     assert centroid(square) == (5.0, 5.0)
-    # 带洞：外 10×10 中心受洞（在中心）拖拽无位移（洞对称）→ 仍 (5,5)
+    # 带洞（中心对称洞）：矩减矩后仍 (5,5)
     assert centroid(_SQUARE_WITH_HOLE) == (5.0, 5.0)
+    # 非对称洞（review-1 P1-4 回归钉）：10×10 面在角落挖 4×4 洞——
+    # 面积矩质心被拉向洞的对角；旧实现（只减面积不减矩）会错回 (5,5)。
+    corner_hole = {
+        "type": "Polygon",
+        "coordinates": [
+            [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0]],
+            [[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0], [0.0, 0.0]],
+        ],
+    }
+    cx, cy = centroid(corner_hole)
+    assert cx == pytest.approx((100 * 5.0 - 16 * 2.0) / 84.0)
+    assert cy == pytest.approx((100 * 5.0 - 16 * 2.0) / 84.0)
     # 多 part 加权：3×3 与 3×3（面积相等）→ 质心中点 (4,4)
     assert centroid(_TWO_PARTS) == (4.0, 4.0)
 
@@ -156,9 +168,11 @@ def test_composite_geometry_hit_semantics_preserved():
 
     assert _geometry_hit((5.0, 5.0), _SQUARE_WITH_HOLE, 0.0) is False  # 洞内
     assert _geometry_hit((2.0, 2.0), _SQUARE_WITH_HOLE, 0.0) is True
-    # 顶点邻近回退（identify 容差语义——与迁移前一致：顶点而非边）
-    assert _geometry_hit((4.1, 4.1), _SQUARE_WITH_HOLE, 0.2) is True
-    assert _geometry_hit((5.0, 4.05), _SQUARE_WITH_HOLE, 0.2) is False  # 近边不近点
+    # 迁移前精确语义（review-1 P2-6）：外环之内（含洞内）不做顶点回退。
+    assert _geometry_hit((4.1, 4.1), _SQUARE_WITH_HOLE, 0.2) is False
+    # 外环之外的顶点邻近回退（identify 容差）
+    assert _geometry_hit((-0.1, -0.1), _SQUARE_WITH_HOLE, 0.2) is True
+    assert _geometry_hit((5.0, 10.05), _SQUARE_WITH_HOLE, 0.2) is False  # 近边不近点
     # MultiPolygon 递归
     assert _geometry_hit((6.5, 6.5), _TWO_PARTS, 0.0) is True
     assert _geometry_hit((4.0, 4.0), _TWO_PARTS, 0.0) is False

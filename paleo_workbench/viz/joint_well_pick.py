@@ -130,15 +130,10 @@ def _dist_point_to_segment(
     a: tuple[float, float],
     b: tuple[float, float],
 ) -> float:
-    ax, ay = a
-    bx, by = b
-    px, py = p
-    dx, dy = bx - ax, by - ay
-    if dx == 0 and dy == 0:
-        return _dist(p, a)
-    t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)
-    t = max(0.0, min(1.0, t))
-    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+    # V8 M4：内联投影距离复刻已删——共享内核唯一实现。
+    from paleo_workbench.mapping.geometry_planar import distance_to_segment
+
+    return distance_to_segment(p, a, b)
 
 
 def _min_traj_dist(p: tuple[float, float], traj: Sequence[tuple[float, float]]) -> float:

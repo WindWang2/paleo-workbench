@@ -57,9 +57,10 @@ def point_in_ring_scalar_inclusive(x: float, y: float, ring, *,
     """Even-odd containment with an explicit on-edge test（V8 M4 唯一内核）。
 
     边界包含语义用于安全相关分类（井位是否属工区——边界井不得在两次
-    分类间振荡）：距任一边 ≤ ``epsilon`` 的点直接判内，不依赖射线奇偶
-    在边界点上的未定义行为。这是共享内核族的一个显式语义变体，不再是
-    调用方各自的复刻（原 project/domain.py 第 5 份 PIP 已删）。
+    分类间振荡）：on-edge 判据是叉积面积阈值（等效距离 epsilon 约为
+    ``epsilon / 边长``，与原 project/domain.py 实现逐字一致——语义保持，
+    措辞按 review-1 P2-12 修正），不依赖射线奇偶在边界点上的未定义行
+    为。共享内核族的显式语义变体，不再是调用方各自的复刻。
     """
     x = float(x)
     y = float(y)

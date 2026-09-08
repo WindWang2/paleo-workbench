@@ -197,3 +197,29 @@ def test_workstation_undo_refusal_is_not_silent() -> None:
 
     assert not harness.controller.edit_command("undo")
     assert harness.conflicts and "又有编辑" in harness.conflicts[-1]
+
+
+def test_production_tool_flow_registers_compound_cross_layer(qtbot) -> None:
+    """review-2 P0 回归钉：真实 _commit_vertex 路径（回调在宏外）必须登记
+    跨图层复合组——此前回调在宏内触发，生产恒降级为 V7 非原子。"""
+    from paleo_workbench.mapping.map_tools import _commit_vertex
+
+    left, right = _adjacent_layers()
+    session = left.start_editing()
+    topology = TopologyService(enabled=True)
+
+    def hook(feature_id, path, origin, replacement):
+        topology.propagate_shared_vertex(
+            [left, right], origin=origin, replacement=replacement,
+            skip=(left.id, str(feature_id), tuple(path)),
+        )
+
+    assert _commit_vertex(
+        session, "a", (0, 1), (1.5, 0), hook, source_suffix="native",
+    )
+    group = topology.pending_compound(session)
+    assert group is not None, "生产路径必须登记复合组（review-2 P0 修复）"
+    undone = topology.undo_compound(group)
+    assert undone.ok, undone.reason
+    assert left.edit_session.feature("a").geometry["coordinates"][0][1] == (1.0, 0.0)
+    assert right.edit_session.feature("b").geometry["coordinates"][0][0] == (1.0, 0.0)

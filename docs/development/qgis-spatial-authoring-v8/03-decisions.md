@@ -53,8 +53,13 @@ GeologicalLayerSpec（唯一字段权威，Python 验证）
   （保持 V7 非原子行为并上报）。
 - **双宿主同语义**：机制在 TopologyService（mapping/topology.py），
   workstation（edit_command）与编图页（_on_action_command_requested）
-  都经 pending_compound 拦截——审计发现编图页传播只传单层，即同层传播
-  此前也非原子，现一并修复。
+  都经 pending_compound 拦截。**修订（review-2）**：V7 里编图页的同层
+  原子性来自宏合并（P1-4 的 begin/end_edit_command），并非本机制——
+  V8 把传播回调移到宏关闭后（map_tools._commit_vertex），同层/跨层统
+  一由复合组承载原子性；生产路径以真实 _commit_vertex 驱动的回归钉
+  钉死（此前测试绕过宏，恒未覆盖真实调用序列——review-2 P0）。
+- **origin 命令传播前捕获**：同层传播会把自己的命令压过 origin，事后
+  读栈顶会错认 origin；origin 于传播循环前按 skip 参数捕获。
 
 ## D3 — M4 收敛边界（W3）
 
