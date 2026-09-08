@@ -210,7 +210,29 @@ def is_well_log_cached(path: str) -> bool:
     return _las_cache.contains((str(file_path), mtime))
 
 
-def load_well_log_from_path(path: str, *, max_samples: int = PREVIEW_MAX_SAMPLES) -> Any | None:
+class WellLogLoadCancelled(Exception):
+    """The load was cancelled at a cooperative checkpoint (#1224).
+
+    Raised BEFORE the parse starts or BETWEEN phases — the engine's
+    single-call LAS/XML parse itself is non-interruptible, so cancellation
+    is honest only at phase boundaries, never pretended mid-parse.
+    """
+
+
+def _cancel_check(cancel) -> None:
+    if cancel is None:
+        return
+    cancelled = cancel() if callable(cancel) else bool(cancel)
+    if cancelled:
+        raise WellLogLoadCancelled("cancelled at a load checkpoint")
+
+
+def load_well_log_from_path(
+    path: str,
+    *,
+    max_samples: int = PREVIEW_MAX_SAMPLES,
+    cancel=None,
+) -> Any | None:
     """Return engine ``WellLogData`` for LAS or XML well log files.
 
     Uses the engine's bounded preview loader, which internally dispatches
@@ -220,12 +242,18 @@ def load_well_log_from_path(path: str, *, max_samples: int = PREVIEW_MAX_SAMPLES
     :func:`load_well_log_full_resolution` for ML/scientific callers that
     must not silently lose samples).
     Results are cached in a bounded LRU cache per (path, mtime).
+
+    *cancel* (V8 M8, #1224): callable returning True / object with
+    ``is_cancelled`` — checked before the parse and between the parse and
+    the unit-inspect phase. The engine parse itself is one non-interruptible
+    call; cancelling during it raises at the NEXT checkpoint, never
+    mid-parse.
     """
     return _load_well_log(path, max_samples=max_samples, cache=_las_cache,
-                          loader_label="preview")
+                          loader_label="preview", cancel=cancel)
 
 
-def load_well_log_full_resolution(path: str) -> Any | None:
+def load_well_log_full_resolution(path: str, *, cancel=None) -> Any | None:
     """Load a well log WITHOUT preview decimation (#1193).
 
     The engine has no ``max_samples=None`` mode; both of its loaders keep
@@ -236,7 +264,8 @@ def load_well_log_full_resolution(path: str) -> Any | None:
     a model as though it were the complete log.
     """
     return _load_well_log(path, max_samples=FULL_RESOLUTION_MAX_SAMPLES,
-                          cache=_full_res_cache, loader_label="full_resolution")
+                          cache=_full_res_cache, loader_label="full_resolution",
+                          cancel=cancel)
 
 
 def _returned_sample_count(well_log: Any) -> int:
@@ -309,7 +338,7 @@ def well_log_decimation_info(
     )
 
 
-def _load_well_log(path: str, *, max_samples: int, cache: WellLogCache, loader_label: str) -> Any | None:
+def _load_well_log(path: str, *, max_samples: int, cache: WellLogCache, loader_label: str, cancel=None) -> Any | None:
     file_path = Path(path)
     if not file_path.is_file():
         return None
@@ -329,6 +358,11 @@ def _load_well_log(path: str, *, max_samples: int, cache: WellLogCache, loader_l
     except Exception:
         return None
 
+    # Cooperative checkpoint #1: refuse to START an expensive parse for a
+    # request that is already cancelled (#1224 — the slot is released
+    # without burning the parse).
+    _cancel_check(cancel)
+
     try:
         if file_path.suffix.lower() == ".xml":
             result = load_xml_preview(
@@ -343,6 +377,11 @@ def _load_well_log(path: str, *, max_samples: int, cache: WellLogCache, loader_l
                 max_samples=max_samples,
                 fast=True,
             )
+
+        # Cooperative checkpoint #2: the parse finished, but the unit
+        # inspect + wrap phases are still ahead — a cancelled request stops
+        # here instead of completing work nobody waits for.
+        _cancel_check(cancel)
 
         if result is not None:
             # #1193: preview decimation is for display — never let it reach
@@ -370,6 +409,8 @@ def _load_well_log(path: str, *, max_samples: int, cache: WellLogCache, loader_l
                 )
             cache.put(cache_key, result)
         return result
+    except WellLogLoadCancelled:
+        raise  # cancellation is a first-class outcome, never a load failure
     except Exception as exc:
         # #1193: distinguish corrupt/unreadable files in logs (was silent).
         logger.warning("could not load well log %s: %s: %s", path, type(exc).__name__, exc)
