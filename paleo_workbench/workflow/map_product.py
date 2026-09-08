@@ -697,6 +697,33 @@ def publish_map_product(
             f"active quality report {getattr(active_qc, 'id', '?')} has status error — "
             "fix the reported issues before publishing"
         )
+    # V8 M11: skipped QC rules must be visible at publish — a rule that
+    # never evaluated is not a pass, and the publisher deserves to know
+    # which guarantees the QC run could NOT make.
+    if active_qc is not None:
+        rule_status = dict(getattr(active_qc, "rule_status", None) or {})
+        skipped_rules = sorted(
+            rule for rule, entry in rule_status.items()
+            if isinstance(entry, dict) and not entry.get("evaluated", False)
+        )
+        if skipped_rules:
+            warnings.append(
+                f"QC skipped {len(skipped_rules)} rule(s) — pass status does "
+                f"not cover them: {skipped_rules}"
+            )
+        # kriging fallback honesty (V8 M1): a factor computed by the numpy
+        # fallback fitter is degraded relative to the engine WLS authority.
+        for task in project.factor_map_tasks:
+            if task.id not in (record.factor_task_ids or []):
+                continue
+            algo = (task.grid_metadata or {}).get("algorithm_parameters") or {}
+            if str(algo.get("method", "")) == "kriging_fallback" or (
+                (task.parameters or {}).get("interp_backend") == "kriging_fallback"
+            ):
+                warnings.append(
+                    f"factor {task.name!r}: computed by the numpy kriging "
+                    "fallback (grid-OLS variogram fit, not engine WLS)"
+                )
 
     # CRS verifiability (review R2-P0): PaleoMapDocument carries no CRS
     # field and the composition document is not addressable from the

@@ -33,6 +33,7 @@ __all__ = [
     "CARTOGRAPHIC_QA_RULES",
     "cartographic_issues",
     "collect_extended_qc_issues",
+    "extended_rule_coverage",
     "composition_qa_issues",
 ]
 
@@ -366,6 +367,46 @@ def collect_extended_qc_issues(
     )
     issues.extend(_export_issues(export_report))
     return issues
+
+
+def extended_rule_coverage(
+    *,
+    map_extent=None,
+    fusion_confidence: Mapping[str, Any] | None = None,
+    export_report: Mapping[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """V8 M11: which extended rules actually EVALUATED vs were SKIPPED.
+
+    Mirrors the silent-return conditions of the issue collectors: rules
+    whose inputs are absent emit nothing and previously counted as an
+    implicit pass. Coverage makes the skip visible with a reason.
+    """
+    coverage: dict[str, dict[str, Any]] = {}
+    for rule in (
+        "crs_undeclared",
+        "crs_mismatch",
+        "class_renderer_mismatch",
+        "well_table_empty",
+        "stale_inputs",
+        "broken_external_reference",
+    ):
+        coverage[rule] = {"evaluated": True, "reason": ""}
+    coverage["out_of_bound_feature"] = (
+        {"evaluated": True, "reason": ""}
+        if map_extent is not None
+        else {"evaluated": False, "reason": "未提供图幅范围（map_extent）"}
+    )
+    coverage["low_confidence"] = (
+        {"evaluated": True, "reason": ""}
+        if fusion_confidence is not None
+        else {"evaluated": False, "reason": "未提供融合置信度数据"}
+    )
+    coverage["export_fallback"] = (
+        {"evaluated": True, "reason": ""}
+        if export_report is not None
+        else {"evaluated": False, "reason": "尚未执行导出（无导出报告）"}
+    )
+    return coverage
 
 
 def composition_qa_issues(

@@ -349,11 +349,19 @@ def run_basic_qc(
             previous_id = report.id
             break
 
+    # V8 M11: basic rules all evaluate (presence checks run on every
+    # document); coverage recorded so pass ≠ skipped is provable.
+    rule_status = {rule: {"evaluated": True, "reason": ""} for rule in BASIC_QC_RULES}
     kwargs: dict = {
         "linked_map_document_id": map_document_id,
         "rules": list(BASIC_QC_RULES),
         "issues": issues,
         "status": status,
+        "rule_status": rule_status,
+        "coverage": {
+            "evaluated": len(rule_status),
+            "skipped": 0,
+        },
     }
     if previous_id is not None:
         kwargs["id"] = previous_id
@@ -492,13 +500,31 @@ def run_map_qc(
         ),
         None,
     )
+    from paleo_workbench.workflow.map_qa_rules import extended_rule_coverage
+
     merged_issues = list(base.issues) + extended
     status = _status_from_issues(merged_issues)
+    rule_status = {
+        rule: {"evaluated": True, "reason": ""} for rule in BASIC_QC_RULES
+    }
+    rule_status.update(
+        extended_rule_coverage(
+            map_extent=map_extent,
+            fusion_confidence=fusion_confidence,
+            export_report=export_report,
+        )
+    )
+    skipped = sum(1 for entry in rule_status.values() if not entry["evaluated"])
     kwargs: dict = {
         "linked_map_document_id": map_document_id,
         "rules": [*BASIC_QC_RULES, *EXTENDED_QC_RULES],
         "issues": merged_issues,
         "status": status,
+        "rule_status": rule_status,
+        "coverage": {
+            "evaluated": len(rule_status) - skipped,
+            "skipped": skipped,
+        },
     }
     if document_index is not None:
         kwargs["id"] = project.quality_reports[document_index].id
