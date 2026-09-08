@@ -172,20 +172,19 @@ class ScalarDataMirror:
             # NaN is the FactorGridResult nodata convention; GDAL stores it
             # verbatim for float32 bands.
             band.SetNoDataValue(float("nan"))
-            if not hasattr(gdal, "array"):
-                # WriteRaster path keeps us independent of the optional
-                # _gdal_array bridge (same policy as the RGBA mirror).
-                status = dataset.WriteRaster(
-                    0, 0, width, height,
-                    memoryview(array),
-                    buf_xsize=width, buf_ysize=height,
-                    buf_type=gdal.GDT_Float32, band_list=[1],
-                    buf_pixel_space=4, buf_line_space=width * 4,
-                )
-                if status not in (None, gdal.CE_None):  # pragma: no cover
-                    raise RuntimeError("could not write scalar data mirror band")
-            else:
-                band.WriteArray(array)
+            # WriteRaster (never WriteArray): keeps us independent of the
+            # optional _gdal_array bridge (same policy as the RGBA mirror),
+            # which matters on Windows where the cp312 _gdal_array binary
+            # may not match the GDAL DLL the QGIS vendor build links.
+            status = dataset.WriteRaster(
+                0, 0, width, height,
+                memoryview(array),
+                buf_xsize=width, buf_ysize=height,
+                buf_type=gdal.GDT_Float32, band_list=[1],
+                buf_pixel_space=4, buf_line_space=width * 4,
+            )
+            if status not in (None, gdal.CE_None):  # pragma: no cover
+                raise RuntimeError("could not write scalar data mirror band")
             dataset.FlushCache()
         finally:
             dataset = None

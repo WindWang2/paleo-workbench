@@ -37,6 +37,15 @@ def _gdal_available() -> bool:
         return False
 
 
+def _read_band(band, width: int, height: int):
+    """Read a float32 band without the optional _gdal_array bridge."""
+    import numpy as np
+    from osgeo import gdal
+
+    raw = band.ReadRaster(0, 0, width, height, buf_type=gdal.GDT_Float32)
+    return np.frombuffer(raw, dtype=np.float32).reshape(height, width)
+
+
 # ---------------------------------------------------------------------------
 # Style spec (pure, always runs)
 
@@ -156,7 +165,7 @@ def test_data_mirror_writes_float32_with_nodata():
         assert band.DataType == gdal.GDT_Float32
         nodata = band.GetNoDataValue()
         assert nodata is not None and np.isnan(nodata)
-        array = band.ReadAsArray()
+        array = _read_band(band, 2, 2)
         assert array.dtype == np.float32
         np.testing.assert_allclose(array, GRID)
         gt = dataset.GetGeoTransform()
@@ -189,8 +198,9 @@ def test_data_mirror_preserves_nan_nodata():
     try:
         from osgeo import gdal
 
-        band = gdal.Open(source).GetRasterBand(1)
-        array = band.ReadAsArray()
+        dataset = gdal.Open(source)
+        array = _read_band(dataset.GetRasterBand(1), 2, 2)
+        dataset = None
         assert np.isnan(array[0, 1])
         assert array[0, 0] == pytest.approx(0.0)
     finally:

@@ -44,7 +44,18 @@ def _write_tif(path, grid=_GRID, extent=(0.0, 0.0, 2.0, 2.0)):
     dataset.SetProjection(reference.ExportToWkt())
     band = dataset.GetRasterBand(1)
     band.SetNoDataValue(float("nan"))
-    band.WriteArray(grid)
+    # WriteRaster (never WriteArray): independent of the optional
+    # _gdal_array bridge (same policy as the production mirror).
+    import numpy as _np
+
+    array = _np.ascontiguousarray(grid, dtype=_np.float32)
+    dataset.WriteRaster(
+        0, 0, array.shape[1], array.shape[0],
+        memoryview(array),
+        buf_xsize=array.shape[1], buf_ysize=array.shape[0],
+        buf_type=gdal.GDT_Float32, band_list=[1],
+        buf_pixel_space=4, buf_line_space=array.shape[1] * 4,
+    )
     dataset.FlushCache()
     dataset = None
     return path

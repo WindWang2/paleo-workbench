@@ -169,7 +169,9 @@ def test_stale_base_falls_back_to_full_ship():
     mirror_snapshot_to_stack(stack, 0x1, _Snap([
         _vector_layer([_feature("a")], revision=5)]))
     # ledger reset underneath (project reload): base 5 unknown → full ship
-    _MIRROR_LEDGER.clear()
+    from paleo_workbench.mapping.qgis_mirror import reset_publish_ledger
+
+    reset_publish_ledger()
     layer = _vector_layer([_feature("a"), _feature("b")], revision=6)
     mirror_snapshot_to_stack(stack, 0x1, _Snap([layer]))
     assert stack.calls[1]["delta"] is None
@@ -212,7 +214,9 @@ def test_removed_layer_drops_ledger():
         _vector_layer([_feature("a")], revision=1)]))
     mirror_snapshot_to_stack(stack, 0x1, _Snap([]))
     assert stack.removed_except == []
-    assert "draft-1" not in _MIRROR_LEDGER
+    from paleo_workbench.mapping.qgis_mirror import _ledger_key
+
+    assert _ledger_key(stack, "draft-1") not in _MIRROR_LEDGER
 
 
 class _StrictSignatureStack(_DeltaCapableStack):

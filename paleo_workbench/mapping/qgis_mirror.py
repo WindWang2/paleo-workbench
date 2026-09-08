@@ -93,7 +93,16 @@ class _LedgerEntry:
         self.features_by_id = features_by_id
 
 
-_MIRROR_LEDGER: dict[str, _LedgerEntry] = {}
+# R2-F8/R3: the ledger is keyed by (stack identity, layer id) — a fresh
+# stack object (new test, new project, re-created canvas) never inherits
+# another stack's tokens, so entries cannot leak across stacks and force a
+# full ship on first publish.  reset_publish_ledger stays for explicit
+# project-switch resets.
+_MIRROR_LEDGER: dict[tuple[int, str], _LedgerEntry] = {}
+
+
+def _ledger_key(stack, layer_id: str) -> tuple[int, str]:
+    return (id(stack), str(layer_id))
 
 
 def reset_publish_ledger() -> None:
@@ -267,7 +276,7 @@ def mirror_snapshot_to_stack(
         # Duck-typed layers (SimpleNamespace, legacy producers) may not
         # carry revisions: 0 = unknown, ledger disabled, delta channel off.
         style_sig = _style_signature(renderer_xml, labeling_xml, legacy_style)
-        entry = _MIRROR_LEDGER.get(layer.id)
+        entry = _MIRROR_LEDGER.get(_ledger_key(stack, layer.id))
         try:
             layer_revision = int(getattr(layer, "data_revision", 0) or 0)
         except (TypeError, ValueError):
@@ -364,7 +373,7 @@ def mirror_snapshot_to_stack(
             _sink(layer.id, str(exc))
             continue
         if ledger_active:
-            _MIRROR_LEDGER[layer.id] = _LedgerEntry(
+            _MIRROR_LEDGER[_ledger_key(stack, layer.id)] = _LedgerEntry(
                 layer_revision, style_sig, bool(layer.visible),
                 float(layer.opacity), geom,
                 {str((f.get("properties") or {}).get("__pwb_fid")
@@ -374,11 +383,12 @@ def mirror_snapshot_to_stack(
         mirrored_qgis_ids.append(qgis_id)
     # v7 §9: ledger follows the mirror registry — entries for layers no
     # longer published are dropped so a re-added layer ships fully.
-    keep_ids = set(seen) | {
-        layer.id for layer in snapshot.layers
+    keep_keys = {_ledger_key(stack, doc_id) for doc_id in seen} | {
+        _ledger_key(stack, layer.id) for layer in snapshot.layers
         if layer.layer_type == "raster_source"}
-    for stale_id in [key for key in _MIRROR_LEDGER if key not in keep_ids]:
-        del _MIRROR_LEDGER[stale_id]
+    for stale_key in [key for key in _MIRROR_LEDGER
+                      if key[0] == id(stack) and key not in keep_keys]:
+        del _MIRROR_LEDGER[stale_key]
     if _SCALAR_DATA_CACHE is not None:
         _SCALAR_DATA_CACHE.retain_layer_ids({
             layer.id for layer in snapshot.layers
