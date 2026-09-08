@@ -213,6 +213,7 @@ def _attach_result_to_task(
     fingerprints: FactorFingerprints | None = None,
     constraint_eval=None,
     normalization: SampleNormalizationReport | None = None,
+    project: ProjectDocument | None = None,
 ) -> FactorMapTask:
     """Write live cache + small metadata onto *task* (no full-grid lists).
 
@@ -272,6 +273,23 @@ def _attach_result_to_task(
     if normalization is not None:
         params["sample_normalization"] = normalization.to_dict()
     params["sample_points"] = list(raw_points if raw_points is not None else points)
+    # V8 M2: pin the constraint state this surface was computed against
+    # (content hashes; version ids bind at commit time). Freshness compares
+    # pins against later commits — a changed constraint marks exactly the
+    # tasks that consumed it.
+    if project is not None:
+        try:
+            from paleo_workbench.workflow.constraint_versions import (
+                constraint_pins_for_task,
+            )
+
+            pins = constraint_pins_for_task(task, project)
+            if pins:
+                params["constraint_pins"] = pins
+            else:
+                params.pop("constraint_pins", None)
+        except Exception:  # noqa: BLE001 — pinning must never break an interp
+            logger.debug("constraint pinning skipped", exc_info=True)
     params["grid"] = f"{result['grid_n']}×{result['grid_n']}"
     params["interp_backend"] = result["backend"]
     # Prefer the values that actually produced the surface (plan-backed path).
@@ -614,6 +632,7 @@ def apply_interpolation_to_task(
             fingerprints=fps,
             constraint_eval=constraint_eval,
             normalization=normalization,
+            project=project,
         )
 
     if engine_method == CONSTRAINED_IDW_ENGINE_LABEL:
@@ -675,6 +694,7 @@ def apply_interpolation_to_task(
         fingerprints=fps,
         constraint_eval=constraint_eval,
         normalization=normalization,
+        project=project,
     )
 
 
@@ -974,6 +994,7 @@ def batch_prepare_factor_maps(
                         fingerprints=fps,
                         constraint_eval=batch_eval,
                         normalization=norm,
+                        project=project,
                     )
             continue
 
