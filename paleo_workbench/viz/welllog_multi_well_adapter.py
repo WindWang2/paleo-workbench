@@ -190,6 +190,29 @@ def adapt_multi_well_section(
     for n in effective_names:
         name_counts[n] = name_counts.get(n, 0) + 1
 
+    # V8 M1: unit truth pre-pass. A section mixing DECLARED m and ft axes
+    # silently misplaces ft wells by ×3.28; the section resolves to ONE unit
+    # (the target well's, else the first declared) and every deviating well
+    # converts with exact whitelisted factors, recorded in diagnostics.
+    # Unknown-unit wells keep the V6 single-well compromise (rendered
+    # labeled-m + undeclared) on a meter/unknown section, but are REFUSED on
+    # a foot/mixed section — placing unknown numbers there would be a guess.
+    from paleo_workbench.workflow.curve_operations import conversion_factor
+    from paleo_workbench.workflow.well_science import depth_unit_of
+
+    axis_units: list[str | None] = [depth_unit_of(data).unit for data in well_logs]
+    target_index = min(max(int(target_well_index), 0), len(well_logs) - 1)
+    section_unit = axis_units[target_index]
+    if section_unit is None:
+        section_unit = next((u for u in axis_units if u), None)
+    declared_units = sorted({u for u in axis_units if u})
+    unit_gate_active = bool(declared_units)
+    if unit_gate_active and len(declared_units) > 1:
+        plan.diagnostics.append(
+            f"depth_units_mixed:{declared_units} → section unit {section_unit!r} "
+            f"(target well); converted with exact factors"
+        )
+
     for index, data in enumerate(well_logs):
         name = effective_names[index]
         rid = rids[index] if index < len(rids) else name
@@ -200,18 +223,49 @@ def adapt_multi_well_section(
                     f"duplicate_well_name:{name} — no resource ids; "
                     "documents disambiguated by slot index"
                 )
+        well_unit = axis_units[index]
+        if unit_gate_active and well_unit is None and section_unit != "m":
+            plan.diagnostics.append(
+                f"well_refused_depth_unit_unknown:{name} — this section is "
+                f"{section_unit!r}-unit and the well's depth axis unit is "
+                "undeclared/unrecognized; refusing the well instead of "
+                "guessing (declare DEPT.M/DEPT.FT)"
+            )
+            continue
         single_plan = single.adapt_well_log_data(data)
         primary = single_plan.primary
         if primary is None:
             plan.diagnostics.append(f"well_empty:{name}")
             continue
+        axis_factor = 1.0
+        if well_unit is not None and well_unit != section_unit:
+            import dataclasses
+
+            axis_factor = conversion_factor(well_unit, section_unit)
+            primary = dataclasses.replace(
+                primary,
+                depth=np.asarray(primary.depth, dtype=float) * axis_factor,
+                depth_unit=section_unit,
+            )
+            plan.diagnostics.append(
+                f"depth_unit_converted:{name}:{well_unit}→{section_unit}"
+            )
+        # External correlation tops are METERS (the overlay authority's
+        # domain, WL-4) — independent of this well's axis unit; lithology
+        # bounds are in the well's OWN axis domain.
         tops = _tops_for_well(name, tops_by_well)
+        if tops and section_unit not in (None, "m"):
+            tops_factor = conversion_factor("m", section_unit)
+            tops = [(label, depth * tops_factor) for label, depth in tops]
         # Also harvest tops from lithology/facies labels if no external tops.
         if not tops:
             for top, _bot, label in single_plan.lithology_bounds:
                 if label:
-                    tops.append((label, top))
+                    tops.append((label, top * axis_factor))
         kb = float((kb_elevations or {}).get(name, 0.0))
+        if kb != 0.0 and section_unit not in (None, "m"):
+            # KB elevations are meters; bring them into the section unit.
+            kb = kb * conversion_factor("m", section_unit)
         shift = _shift_for_well(
             name,
             tops,
