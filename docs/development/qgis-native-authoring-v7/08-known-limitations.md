@@ -43,3 +43,9 @@
     能力已实现 + 测试钉死，UI 分支消费属后续目标（稳定接口已冻结）。
 11. **EditDelta journal 上限 1024**：超过后丢最旧（审计流是滑动窗口而非
     全量账本）；全量账本由 undo 栈/工程版本承载。
+
+12. **QGIS 腿既有问题（非 V7 引入，Windows 本机复现）**：
+    - `test_map_render_backend.py` 3 个栅格测试需 `osgeo.gdal` Python 绑定，
+      Windows venv 无（Linux CI 有）；与 V7 矢量 authoring 范围无关。
+    - `test_qgis_layer_panel_menu.py::test_menu_reference_snap_check_state_follows_authority`
+      的 teardown error（QMenu 悬垂回调）隔离复现，为既有测试问题。
