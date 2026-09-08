@@ -610,7 +610,16 @@ class CompositeEditController(QObject):
     # -- 工程持久化（人工建数据纳入数据管理） --------------------------------------
 
     def load_from_project(self, project) -> None:
-        """从工程文档恢复人工矢量图层（替换当前全部图层）。"""
+        """从工程文档恢复人工矢量图层（替换当前全部图层）。
+
+        Review-3 P1-4：切换前先 flush（提交进行中会话；门禁/拓扑阻断的
+        会话保持打开并上报，不静默 rollback 丢数据）。flush 后仍有未
+        提交会话（被阻断）时拒绝切换并返回 False，调用方必须处理。
+        """
+        committed, blocked = self.flush_edit_sessions()
+        remaining = [layer for layer in self._layers.values() if layer.edit_session is not None]
+        if remaining:
+            return False
         for layer in self._layers.values():
             if layer.edit_session is not None:
                 layer.edit_session.rollback_changes()

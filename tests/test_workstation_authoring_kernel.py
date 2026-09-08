@@ -242,3 +242,45 @@ class TestCapabilityTokenInjection:
         assert session.qgis_capability_token  # non-empty provenance
         # Fallback stack (bridge missing) records honestly.
         assert session.qgis_capability_token == controller.qgis_capability_token
+
+
+class TestProjectSwitchFlush:
+    """Review-3 P1-4：工程切换先 flush，阻断时拒绝带病切换。"""
+
+    def test_dirty_session_committed_on_project_switch(self, qtbot, tmp_path):
+        document = _document(qtbot, tmp_path)
+        controller = document.edit_controller
+        layer = controller.create_layer("相带", "polygon")
+        controller.start_editing()
+        controller.activate_tool("add_polygon")
+        tool = controller.tools.active_tool
+        tool.mouse_press((0.0, 0.0))
+        tool.mouse_press((2.0, 0.0))
+        tool.mouse_press((2.0, 2.0))
+        tool.double_click((0.0, 0.0))
+        assert layer.edit_session is not None  # 脏会话
+
+        assert controller.load_from_project(document._project) is not False
+        # 脏会话已提交（不丢数据），新工程图层已装载。
+        assert layer.edit_session is None
+
+    def test_blocked_session_refuses_project_switch(self, qtbot, tmp_path):
+        document = _document(qtbot, tmp_path)
+        controller = document.edit_controller
+        layer = controller.create_layer("原始相图", "polygon")
+        controller.start_editing()
+        session = layer.edit_session
+        from paleo_workbench.mapping.vector_layer import VectorFeature
+
+        session.add_feature(
+            VectorFeature(
+                "r1",
+                {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]},
+                {},
+            )
+        )
+        # 门禁拒绝提交（模拟 RAW 会话）：flush 留下打开会话。
+        controller.set_edit_gate(lambda layer_id: (False, "RAW 不可变"))
+        assert controller.load_from_project(document._project) is False
+        assert layer.edit_session is not None  # 会话保持打开，可回滚
+        controller.set_edit_gate(document._role_allows_editing)

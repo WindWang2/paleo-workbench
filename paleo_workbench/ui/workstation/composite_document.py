@@ -796,6 +796,14 @@ class CompositeDocument(QWidget):
         measure_canceled = getattr(self.canvas, "measure_canceled", None)
         if measure_canceled is not None:
             measure_canceled.connect(lambda: self.status_bar.set_measure(""))
+        # V7/P1-3：旧桥视口路由的测距分段/预览 → 状态栏（平面距离，明确
+        # 标注；原生测距在位时路由器不挂载，此处无信号可接，自然静默）。
+        measure_segment = getattr(self.canvas, "measure_segment", None)
+        if measure_segment is not None:
+            measure_segment.connect(self._on_measure_segment)
+        measure_preview = getattr(self.canvas, "measure_preview", None)
+        if measure_preview is not None:
+            measure_preview.connect(self._on_measure_preview)
         # V7：原生 identify 结果消费（此前无消费者——原生栈点击识别面板
         # 从不打开）。结果经 Python 数据权威组装后进 Identify Results 面板。
         native_identified = getattr(self.canvas, "native_identified", None)
@@ -1118,10 +1126,27 @@ class CompositeDocument(QWidget):
         self._sync_status_bar(point=tuple(point))
 
     def _on_measure_updated(self, payload: dict) -> None:
-        """V7 原生测距显示：椭球测算（米）或平面测算（地图单位）。"""
-        total = float(payload.get("total") or 0.0)
-        segments = int(len(payload.get("segments") or ()))
+        """V7 原生测距显示：椭球测算（米）或平面测算（地图单位）。
+
+        桥 payload 契约（PwbMeasureTool::payloadJson）：``segments`` 数组 =
+        已完成分段 + 末尾 live 预览段（鼠标跟随），故完成段数 = len - 1；
+        ``total`` 含 live 段。非法数值（NaN/Inf）显示"测距无效"而非 0/nan。
+        """
+        import math
+
+        try:
+            total = float(payload.get("total") or 0.0)
+        except (TypeError, ValueError):
+            total = math.nan
+        segments = payload.get("segments") or ()
+        try:
+            segment_count = len(segments)
+        except TypeError:
+            segment_count = 0
         ellipsoidal = bool(payload.get("ellipsoidal"))
+        if not math.isfinite(total):
+            self.status_bar.set_measure("测距: 无效")
+            return
         if ellipsoidal:
             text = f"{total / 1000.0:.3f} km" if total >= 1000 else f"{total:.1f} m"
             text += "（椭球）"
@@ -1129,7 +1154,30 @@ class CompositeDocument(QWidget):
             text = f"{total:.4g}"
         action = str(payload.get("action") or "")
         suffix = " 完成" if action == "measure_completed" else ""
-        self.status_bar.set_measure(f"测距: {text} · {max(segments - 1, 0)} 段{suffix}")
+        self.status_bar.set_measure(f"测距: {text} · {max(segment_count - 1, 0)} 段{suffix}")
+
+    def _on_measure_segment(self, distance: float) -> None:
+        """旧桥视口路由的分段完成（平面距离，明确标注——P1-3）。"""
+        import math
+
+        try:
+            value = float(distance)
+        except (TypeError, ValueError):
+            value = math.nan
+        self.status_bar.set_measure(
+            f"测距: {value:.4g}（平面）" if math.isfinite(value) else "测距: 无效"
+        )
+
+    def _on_measure_preview(self, distance: float) -> None:
+        """旧桥视口路由的实时预览（平面距离）。"""
+        import math
+
+        try:
+            value = float(distance)
+        except (TypeError, ValueError):
+            return
+        if math.isfinite(value):
+            self.status_bar.set_measure(f"测距: {value:.4g}（平面）…")
 
     def _on_native_identified(self, payload: dict) -> None:
         """原生 identify 结果 → Python 数据权威组装 → Identify Results 面板。
@@ -2180,7 +2228,14 @@ class CompositeDocument(QWidget):
                 if getattr(layer, "source_kind", "") == "vector"
             ]
             self._reference_status = {}
-            self.edit_controller.load_from_project(project)
+            if self.edit_controller.load_from_project(project) is False:
+                # 被阻断的会话保持打开（可回滚/可修复）：拒绝带病切换，
+                # 如实告知用户哪些图层未提交，而不是静默 rollback 丢数据。
+                self.status_message.emit(
+                    "工程切换已取消：有未保存且无法提交的编辑（见状态栏），"
+                    "请先回滚或修复后再切换"
+                )
+                return
             # V5：恢复阶段工作区科学状态（当前阶段/成员资格/组结构/视图覆盖）
             # + UI 展开偏好（QSettings，按工程名分域）。
             self.stage_controller.load_state(
