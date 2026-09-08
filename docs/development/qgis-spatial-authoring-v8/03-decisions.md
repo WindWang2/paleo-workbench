@@ -32,6 +32,11 @@ GeologicalLayerSpec（唯一字段权威，Python 验证）
   静默降级会掩盖 spec↔provider 漂移。
 - **`__pwb_fid` 不进 schema**：身份侧信道继续走原文抓取 + fid 表，与
   provider 字段互不污染。
+- **OGR positional quirk（实现期发现）**：vendored 4.2 的
+  `stringToFeatureList(text, fields)` 对属性按**位置**映射（`__pwb_fid`
+  首键实测错位后续字段值）——W1 不用该路径，手工构建 QgsFeature：
+  几何 `geometryFromGeoJson`、属性按名 `setAttribute`；缺省属性 = NULL
+  （诚实），`__pwb_*` 键天然忽略。
 
 ## D2 — M3 复合撤销原子性（W2）
 

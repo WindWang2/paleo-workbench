@@ -356,48 +356,66 @@ bool applyFieldSchema(QgsVectorLayer& layer,
 }
 
 QgsFeatureList parseGeoJsonFeatures(const QString& text, const QgsFields& fields) {
-    // 带 schema 解析：properties 落成 typed 属性；无 schema 时 fields 为空
-    // （QGIS 默认行为——与 V7 legacy 路径一致，属性仍被丢弃）。
+    // V8 M1：带 schema 解析。不使用 stringToFeatureList(text, fields)——
+    // 该 vendored 构建对额外属性按"位置"映射（__pwb_fid 首键错位实测），
+    // 因此手工构建要素：几何走 geometryFromGeoJson，属性按名 setAttribute
+    // （__pwb_* 侧信道键天然忽略）。无 schema 时保持 QGIS 默认（V7 行为）。
     if (fields.isEmpty()) {
         return QgsJsonUtils::stringToFeatureList(text);
     }
-    QByteArray bytes = text.toUtf8();
-    if (bytes.contains("__pwb_")) {
-        // OGR quirk：下划线前缀键（__pwb_fid 身份侧信道）位于 properties
-        // 首位时会错位后续按名匹配的字段值——typed 解析前剥离 __pwb_*。
-        // fid 通道本就抓取原文，不受影响；仅 schema 路径付这一次重编码。
-        QJsonParseError json_err{};
-        QJsonDocument doc = QJsonDocument::fromJson(bytes, &json_err);
-        bool changed = false;
-        if (json_err.error == QJsonParseError::NoError && doc.isObject()) {
-            QJsonObject root = doc.object();
-            QJsonArray features = root.value(QStringLiteral("features")).toArray();
-            for (int index = 0; index < features.size(); ++index) {
-                QJsonObject feature = features.at(index).toObject();
-                QJsonObject properties =
-                    feature.value(QStringLiteral("properties")).toObject();
-                QStringList drop_keys;
-                for (auto key = properties.begin(); key != properties.end(); ++key) {
-                    if (key.key().startsWith(QStringLiteral("__pwb_"))) {
-                        drop_keys << key.key();
-                    }
-                }
-                for (const QString& key : drop_keys) {
-                    properties.remove(key);
-                    changed = true;
-                }
-                if (!drop_keys.isEmpty()) {
-                    feature.insert(QStringLiteral("properties"), properties);
-                    features.replace(index, feature);
-                }
+    QJsonParseError json_err{};
+    const QJsonDocument doc = QJsonDocument::fromJson(text.toUtf8(), &json_err);
+    if (json_err.error != QJsonParseError::NoError || !doc.isObject()) {
+        return QgsJsonUtils::stringToFeatureList(text);
+    }
+    QgsFeatureList out;
+    const QJsonArray features =
+        doc.object().value(QStringLiteral("features")).toArray();
+    for (const QJsonValue& value : features) {
+        const QJsonObject feature = value.toObject();
+        QgsFeature record(fields);
+        const QJsonObject geometry_json =
+            feature.value(QStringLiteral("geometry")).toObject();
+        if (!geometry_json.isEmpty()) {
+            const QgsGeometry geometry = QgsJsonUtils::geometryFromGeoJson(
+                QString::fromUtf8(
+                    QJsonDocument(geometry_json).toJson(QJsonDocument::Compact)));
+            if (!geometry.isNull()) record.setGeometry(geometry);
+        }
+        const QJsonObject properties =
+            feature.value(QStringLiteral("properties")).toObject();
+        for (int index = 0; index < fields.count(); ++index) {
+            const QString name = fields.at(index).name();
+            const QJsonValue property = properties.value(name);
+            if (property.isUndefined()) continue;  // 缺省属性 = NULL（诚实）
+            QVariant variant;
+            switch (fields.at(index).type()) {
+              case QMetaType::Type::Double:
+                variant = property.toDouble();
+                break;
+              case QMetaType::Type::LongLong:
+              case QMetaType::Type::Int:
+                variant = property.isDouble()
+                              ? QVariant(static_cast<qint64>(property.toDouble()))
+                              : property.toVariant();
+                break;
+              case QMetaType::Type::Bool:
+                variant = property.toBool();
+                break;
+              case QMetaType::Type::QDateTime:
+                variant = QDateTime::fromString(property.toString(), Qt::ISODate);
+                break;
+              default:
+                variant = property.toVariant().toString();
+                break;
             }
-            if (changed) {
-                root.insert(QStringLiteral("features"), features);
-                bytes = QJsonDocument(root).toJson(QJsonDocument::Compact);
-            }
+            record.setAttribute(index, variant);
+        }
+        if (record.hasGeometry() || !properties.isEmpty()) {
+            out.append(record);
         }
     }
-    return QgsJsonUtils::stringToFeatureList(QString::fromUtf8(bytes), fields, nullptr);
+    return out;
 }
 
 Qgis::SnappingTypes parseSnappingTypes(const QJsonArray& arr) {
