@@ -11,3 +11,6 @@
 | 7 | `update_state`/`MapActionState`/`action_state`（旧签名）删除 | 生产零消费者（source scan：composite_document 只用 tool_context_inputs；mapping_page 已迁移）；测试迁移到 dict 契约/apply_availability | 第三方（无）不受影响；`action_state()` 保留 dict 兼容别名一个版本 |
 | 8 | 100GB seismic 完全排除 | Goal 明确 OUT OF SCOPE；本分支零体数据接触 | — |
 | 9 | Inspector action hint / empty-state 集成只完成 API 侧 | `CompositeDocument.explain_action` 已就绪并被 tooltip/palette 消费；Inspector 面板内的动作提示块与 onboarding 空态文案接入留待下批（避免本轮 UI 面铺得过宽） | M4 的 palette/tooltip/statusTip 三面已交付并测试 |
+| 10 | blocking 期间画布工具 checked 熄灭（含 pan） | checked=(current_tool==id AND enabled) 的保守语义：禁用工具不得留 checked（防陈旧勾选）；代价是模态阻塞时活动工具指示消失。恢复即回来（review R3-F3 取舍） | 纯指示性；无操作误导（按钮同时禁用） |
+| 11 | topology_error_count 无宿主生产者 | 预存（V7 B 时代即从未喂入）；合并的拓扑门只在纯函数层生效。需要 CompositeEditController 在拓扑校验后回填 session 计数（域侧改动，方向 C/D 范围） | 契约字段保留，测试钉语义 |
+| 12 | 预存 main 基线失败（与本分支无关，证据：干净 d5181cb3 上同样失败） | `test_coordinate_hub.py::test_velocity_guardrails_and_updates`、`test_coordinate_hub_stress`、`test_data_view_models`（ImportError 私有名）、`test_dependency_audit_and_batch`、`test_challenger_m6_adversarial_stress`、`test_depth_cursor_units`；另 `test_delivery_profiles`/`test_compatibility_matrix` 为本机 temp 目录 PermissionError（环境） | 在 PR body 中列出，供方向 C/运维跟进 |
