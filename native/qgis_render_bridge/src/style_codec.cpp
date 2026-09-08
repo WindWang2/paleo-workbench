@@ -33,9 +33,26 @@
 #include <qgsvectorlayerlabeling.h>
 
 #include <QColor>
+#include <QDomElement>
 #include <QFont>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include "qgis_render_bridge.hpp"
+
+// v7 §5 raster codec QGIS headers (top of TU — never inside a namespace).
+// NOTE: no nlohmann/json here — the vendored copy's <valarray> include
+// breaks MSVC's STL headers in this TU (C2065 align_val_t); Qt's own
+// QJsonDocument parses the flat scalar spec instead.
+#include <qgsapplication.h>
+#include <qgscolorrampshader.h>
+#include <qgsrasterinterface.h>
+#include <qgsrasterlayer.h>
+#include <qgsrasterrenderer.h>
+#include <qgsrasterrendererregistry.h>
+#include <qgsrastershader.h>
+#include <qgssinglebandpseudocolorrenderer.h>
 
 namespace pwb::qgis_render {
 namespace {
@@ -379,20 +396,8 @@ void apply_label_style(QgsVectorLayer& layer, const VectorLayerSpec& spec) {
 }
 
 // ---------------------------------------------------------------------------
-// Raster renderer codec (v7 §5)
-
-#include <QDomElement>
-
-#include <nlohmann/json.hpp>
-
-#include <qgsapplication.h>
-#include <qgscolorrampshader.h>
-#include <qgsrasterinterface.h>
-#include <qgsrasterlayer.h>
-#include <qgsrasterrenderer.h>
-#include <qgsrasterrendererregistry.h>
-#include <qgsrastershader.h>
-#include <qgssinglebandpseudocolorrenderer.h>
+// Raster renderer codec (v7 §5): implementation below; includes live at
+// the top of this file (never inside namespace pwb::qgis_render).
 
 namespace {
 
@@ -412,39 +417,39 @@ QDomElement raster_renderer_element(const std::string& xml) {
 
 }  // namespace
 
-namespace pwb::qgis_render {
-
 std::string build_scalar_renderer_xml(const std::string& spec_json) {
-    nlohmann::json payload = nlohmann::json::parse(
-        spec_json, nullptr, /*allow_exceptions=*/true,
-        /*ignore_comments=*/true);
-    if (!payload.is_object()) {
+    QJsonParseError parse_error{};
+    const QJsonDocument document = QJsonDocument::fromJson(
+        QByteArray::fromStdString(spec_json), &parse_error);
+    if (parse_error.error != QJsonParseError::NoError || !document.isObject()) {
         throw std::runtime_error("scalar renderer spec must be a JSON object");
     }
-    const double vmin = payload.value("min", 0.0);
-    double vmax = payload.value("max", 1.0);
+    const QJsonObject payload = document.object();
+    const double vmin = payload.value(QStringLiteral("min")).toDouble(0.0);
+    double vmax = payload.value(QStringLiteral("max")).toDouble(1.0);
     if (!(vmax > vmin)) vmax = vmin + 1.0;
-    const std::string mode = payload.value("mode", std::string("continuous"));
-    const auto items = payload.find("items");
-    if (items == payload.end() || !items->is_array() || items->empty()) {
+    const QString mode = payload.value(QStringLiteral("mode")).toString(
+        QStringLiteral("continuous"));
+    const QJsonArray items = payload.value(QStringLiteral("items")).toArray();
+    if (items.isEmpty()) {
         throw std::runtime_error("scalar renderer spec needs a non-empty items list");
     }
     auto shader = std::make_unique<QgsColorRampShader>(vmin, vmax);
-    shader->setColorRampType(mode == "classified"
+    shader->setColorRampType(mode == QStringLiteral("classified")
                                   ? Qgis::ShaderInterpolationMethod::Discrete
                                   : Qgis::ShaderInterpolationMethod::Linear);
     QList<QgsColorRampShader::ColorRampItem> ramp_items;
-    ramp_items.reserve(static_cast<int>(items->size()));
-    for (const auto& item : *items) {
-        if (!item.is_object()) {
+    ramp_items.reserve(items.size());
+    for (const QJsonValue& value : items) {
+        if (!value.isObject()) {
             throw std::runtime_error("scalar renderer item must be an object");
         }
-        const double value = item.value("value", 0.0);
-        const std::string color = item.value("color", std::string("#000000"));
-        const std::string label = item.value("label", std::string());
+        const QJsonObject item = value.toObject();
         ramp_items.append(QgsColorRampShader::ColorRampItem(
-            value, QColor(QString::fromStdString(color)),
-            QString::fromStdString(label)));
+            item.value(QStringLiteral("value")).toDouble(0.0),
+            QColor(item.value(QStringLiteral("color")).toString(
+                QStringLiteral("#000000"))),
+            item.value(QStringLiteral("label")).toString()));
     }
     std::sort(ramp_items.begin(), ramp_items.end(),
               [](const QgsColorRampShader::ColorRampItem& a,
@@ -500,8 +505,7 @@ bool apply_raster_renderer_xml(QgsRasterLayer& layer, const std::string& xml) {
     auto renderer = raster_renderer_from_xml(xml, layer.dataProvider());
     if (!renderer) return false;
     layer.setRenderer(renderer.release());
-    layer.setCacheImage(nullptr);
-    layer.repaint();
+    layer.triggerRepaint();
     return true;
 }
 

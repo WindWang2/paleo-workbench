@@ -16,6 +16,7 @@
 #include <qstring.h>
 
 class QgsFeatureRenderer;
+class QgsRasterInterface;
 class QgsRasterLayer;
 class QgsRasterRenderer;
 class QgsVectorLayer;
@@ -74,7 +75,7 @@ std::string build_scalar_renderer_xml(const std::string& spec_json);
 /// build_scalar_renderer_xml or QgsProject saves).  Returns nullptr when the
 /// payload is not a valid raster renderer element.
 std::unique_ptr<QgsRasterRenderer> raster_renderer_from_xml(
-    const std::string& xml, class QgsRasterInterface* input);
+    const std::string& xml, QgsRasterInterface* input);
 
 /// Apply a raster renderer XML payload to a live raster layer.  Returns
 /// false (without mutating the layer) when the payload does not parse.

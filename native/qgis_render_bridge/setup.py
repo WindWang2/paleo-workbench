@@ -244,7 +244,9 @@ def _extension() -> Pybind11Extension:
     if not (include_dir / "qgsapplication.h").is_file():
         raise RuntimeError(f"vendored QGIS include directory is invalid: {include_dir}")
     if sys.platform == "win32":
-        compile_args = ["/O2", "/std:c++20"]
+        # /Zc:__cplusplus: MSVC reports a stale __cplusplus without it and
+        # Qt6 headers refuse to compile (C1189 — first Windows build, v7).
+        compile_args = ["/O2", "/std:c++20", "/Zc:__cplusplus", "/utf-8"]
         link_args = [str(core_library), str(gui_library), str(analysis_library)]
     else:
         compile_args = ["-O2", "-std=c++20", "-Wall", "-Wextra"]
@@ -255,6 +257,18 @@ def _extension() -> Pybind11Extension:
             str(analysis_library),
             f"-Wl,-rpath,{library_rpath}",
         ]
+    extra_include_dirs: list[str] = []
+    prefix = os.environ.get("PALEO_QGIS_CMAKE_PREFIX", "").strip()
+    if not prefix:
+        prefix = os.environ.get("CMAKE_PREFIX_PATH", "").strip().split(os.pathsep)[0]
+    if prefix:
+        # QGIS public headers pull third-party C headers (sqlite3.h,
+        # geos_c.h, proj.h, zip.h, ...); the dependency prefix that fed the
+        # vendor configure also feeds the binding compile (first Windows
+        # build, v7).
+        plain_include = Path(prefix) / "include"
+        if plain_include.is_dir():
+            extra_include_dirs.append(str(plain_include))
     return Pybind11Extension(
         "qgis_render_bridge",
         [
@@ -266,9 +280,25 @@ def _extension() -> Pybind11Extension:
             str(HERE / "src" / "edit_tools.cpp"),
             str(HERE / "src" / "bindings.cpp"),
         ],
-        include_dirs=[*_qgis_core_include_dirs(build_dir), *_qt_include_dirs()],
+        include_dirs=[
+            *_qgis_core_include_dirs(build_dir),
+            *_qt_include_dirs(),
+            *extra_include_dirs,
+        ],
         # Qt6PrintSupport: QgsLayoutExporter (layout PDF export) links QPrinter.
-        libraries=["Qt6Svg", "Qt6PrintSupport"],
+        # Qt6Xml: QDomDocument/QDomElement (raster renderer info + project
+        # XML paths; v7) — headers were already required, the link was not.
+        # Windows (first build, v7): unlike Linux (transitive .so deps),
+        # MSVC needs every Qt import .lib explicit — Core/Gui/Widgets for
+        # the whole bridge, not just the specialty libs.
+        libraries=[
+            "Qt6Core",
+            "Qt6Gui",
+            "Qt6Widgets",
+            "Qt6Xml",
+            "Qt6Svg",
+            "Qt6PrintSupport",
+        ],
         extra_link_args=link_args,
         define_macros=[("PALEO_QGIS_PREFIX_PATH", f'\"{prefix}\"')],
         cxx_std=20,

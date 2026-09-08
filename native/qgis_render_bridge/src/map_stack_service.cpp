@@ -93,6 +93,7 @@
 #include "qgis_render_bridge.hpp"
 #include "style_codec.hpp"
 #include <qgsrasterlayer.h>
+#include <qgsrasterrenderer.h>
 #include "edit_tools.hpp"
 
 namespace pwb::qgis_render {
@@ -1488,11 +1489,13 @@ bool QgisMapStack::applyMirrorFeatureDelta(QgsVectorLayer& layer,
                     .toObject()
                     .value(QStringLiteral("__pwb_fid"))
                     .toString();
+    QJsonObject single;
+    single.insert(QStringLiteral("type"), QStringLiteral("FeatureCollection"));
+    QJsonArray single_features;
+    single_features.append(value);
+    single.insert(QStringLiteral("features"), single_features);
     const QgsFeatureList one = QgsJsonUtils::stringToFeatureList(
-        QString::fromStdString(QJsonDocument(
-            QJsonObject{{QStringLiteral("type"), QStringLiteral("FeatureCollection")},
-                        {QStringLiteral("features"), QJsonArray{value}}})
-            .toJson()));
+        QString::fromUtf8(QJsonDocument(single).toJson()));
     if (!one.isEmpty()) add_list.append(one);
   }
   if (!add_list.isEmpty()) {

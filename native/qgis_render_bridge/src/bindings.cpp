@@ -1,6 +1,4 @@
 #include "qgis_render_bridge.hpp"
-#include <QDomDocument>
-#include <QDomElement>
 
 // pybind11 (and therefore Python.h) must be included BEFORE any Qt/QGIS
 // header: Qt redefines `slots`, which corrupts PyType_Spec in object.h.
@@ -13,6 +11,10 @@
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+
+// Qt DOM (v7 raster_renderer_info): AFTER pybind11 per the rule above.
+#include <QDomDocument>
+#include <QDomElement>
 
 #include <qgis.h>
 #include <qgsrenderer.h>
