@@ -59,25 +59,28 @@ def _busy_ctx() -> ToolContext:
 
 
 def test_evaluate_all_linear_and_cheap():
-    """10k vs 100k 线性比（<1.5x 于 10 倍规模）+ 每调用绝对预算。"""
+    """2k vs 20k 线性比（<1.5x 于 10 倍规模）+ 每调用绝对预算。"""
     ctx = _busy_ctx()
     evaluate_all(ctx)  # warmup
 
+    # 110k evaluations of the full 45-tool matrix exceeded the 45s per-test
+    # ceiling on slow CI runners — the 10x linearity ratio and the 1ms
+    # per-call budget are equally measurable at a tenth of the iterations.
     start = time.perf_counter()
-    for _ in range(10_000):
+    for _ in range(2_000):
         evaluate_all(ctx)
     t10k = time.perf_counter() - start
 
     start = time.perf_counter()
-    for _ in range(100_000):
+    for _ in range(20_000):
         evaluate_all(ctx)
     t100k = time.perf_counter() - start
 
-    # 线性：100k/10k 时间比在 [8, 13]（允许抖动，排除超线性）。
+    # 线性：20k/2k 时间比在 [8, 13]（允许抖动，排除超线性）。
     ratio = t100k / max(t10k, 1e-9)
     assert 8.0 <= ratio <= 13.0, f"超线性或异常快：ratio={ratio:.2f}"
     # 绝对：单次全工具面求值 < 1ms（re-gate 每命令一次的预算基础）。
-    per_call_ms = (t100k / 100_000) * 1000
+    per_call_ms = (t100k / 20_000) * 1000
     assert per_call_ms < 1.0, f"per-call {per_call_ms:.3f}ms exceeds 1ms budget"
 
 
