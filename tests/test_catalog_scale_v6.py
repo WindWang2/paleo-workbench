@@ -13,6 +13,12 @@ from pathlib import Path
 
 import pytest
 
+from paleo_workbench.catalog.models import (
+    CatalogDocument,
+    DataAsset,
+    DataStage,
+    DataVersion,
+)
 from paleo_workbench.catalog.service import (
     CatalogStaleWriteError,
     DataCatalogService,
@@ -33,14 +39,29 @@ def seeded(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("v6scale")
     project = _make_project(tmp)
     service = DataCatalogService.open(project)
-    incoming = tmp / "incoming"
-    incoming.mkdir(exist_ok=True)
     try:
-        with service.batch_save():
-            for i in range(N):
-                src = incoming / f"s{i}.las"
-                src.write_bytes(f"{i}".encode())
-                service.import_raw(src)
+        # Seed via direct document construction: ONE store transaction, no
+        # per-payload temp-file/fsync/rename storm. The import_raw loop paid
+        # N x (file fsync + directory fsync) — the fsync-heavy pattern the
+        # fast gate's 45s per-test ceiling keeps killing under CI runner
+        # load (this is the test the Windows leg timed out on). What these
+        # tests pin is lazy OPEN/query cost at scale, not import throughput
+        # (covered in tests/perf, slow leg).
+        document = CatalogDocument()
+        for i in range(N):
+            asset = DataAsset(name=f"asset_{i:06d}", type="well_log")
+            version = DataVersion(
+                asset_id=asset.id,
+                version_number=1,
+                stage=DataStage.RAW,
+                path=f"raw/{asset.id}/v1/f.las",
+                size_bytes=8,
+            )
+            asset.current_version_id = version.id
+            document.assets.append(asset)
+            document.versions.append(version)
+        service.document = document
+        service.rebuild_index()
     finally:
         service.close()
     return project
