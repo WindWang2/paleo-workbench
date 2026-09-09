@@ -663,10 +663,7 @@ def kriging_leave_one_out(
     report with the engine's error in ``detail``.
     """
     try:
-        from geoviz_plots.factor.kriging import (
-            apply_anisotropy_transform,
-            leave_one_out_predictions,
-        )
+        from geoviz import apply_anisotropy_transform, leave_one_out_predictions
     except ImportError:
         return None
     x, y, z = _points_to_arrays(points)
@@ -767,7 +764,7 @@ def kriging_diagnostics(
     ``"fit": "defaulted"`` instead of being passed off as a real fit.
     """
     try:
-        from geoviz_plots.factor.kriging import empirical_variogram, fit_variogram
+        from geoviz import empirical_variogram, fit_variogram
     except ImportError:
         return None
     x, y, z = _points_to_arrays(points)

@@ -18,7 +18,8 @@ import zipfile
 from setuptools import build_meta
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_SVG = 109
+_ICON_ROOT = REPO_ROOT / "paleo_workbench" / "ui" / "assets" / "icons"
+EXPECTED_SVG = len(list(_ICON_ROOT.rglob("*.svg")))
 EXPECTED_HTML = 3
 EXPECTED_MD = 2
 

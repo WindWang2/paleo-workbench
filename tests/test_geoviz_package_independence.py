@@ -129,6 +129,8 @@ GEOVIZ_PUBLIC_FACADE = frozenset(
         "resolve_anisotropy_params",
         "snapshot_hash",
         "synthetic_sample_points",
+        "apply_anisotropy_transform",
+        "empirical_variogram",
         "fit_variogram",
         "kriging_grid",
         "leave_one_out_predictions",

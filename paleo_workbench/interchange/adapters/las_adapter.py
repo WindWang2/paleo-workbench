@@ -74,7 +74,7 @@ class LasAdapter(FormatAdapter):
 
     def _inspect_header(self, path: Path, result: InspectionResult):
         try:
-            from geoviz_well_log.las_preview import inspect_las_file
+            from geoviz import inspect_las_file
         except Exception:
             inspect_las_file = None
         if inspect_las_file is not None:
@@ -379,7 +379,7 @@ def plan_to_curve_names(plan: ExportPlan) -> set[str]:
     if not source.is_file():
         return set()
     try:
-        from geoviz_well_log.las_preview import inspect_las_file
+        from geoviz import inspect_las_file
 
         header = inspect_las_file(source, header_only=True)
         return {c.mnemonic for c in header.curves}

@@ -192,7 +192,7 @@ def test_canvas_renders_prediction_in_dedicated_tracks_without_altering_bound_la
         ],
     )
 
-    def _fake_resolve(self, ref, project_arg):
+    def _fake_resolve(self, ref, project_arg, *args, **kwargs):
         return VizPayload(kind="well_log", label="from-adapter", well_log=known)
 
     monkeypatch.setattr(VizAdapter, "resolve", _fake_resolve)
