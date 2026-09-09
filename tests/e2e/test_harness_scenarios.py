@@ -58,6 +58,36 @@ def _write_las(path: Path, well: str, samples: int = 120) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+@pytest.fixture(autouse=True, scope="module")
+def spec_machine_budget():
+    """Pin the resource budget to the 32 GB spec machine for these scenarios.
+
+    ``seismic.compute_attribute`` honestly declares the 5 GiB band working
+    set (#1146), and the governor sheds background categories whose estimate
+    exceeds the streaming-buffer cap — which scales with DETECTED RAM
+    (``active_budget``: 2.5 GiB on a 16 GB CI runner, 5 GiB at the 32 GB
+    spec). The action is therefore refused with "ram: streaming buffer soft
+    limit" on 16 GB runners while the spec machine (100G spec §7) admits it
+    exactly. These scenarios verify the production pipeline on the spec
+    machine, not runner-sized admission — pin the budget here and restore
+    the detected one afterwards so no residue leaks into later suites.
+    """
+    from paleo_workbench.runtime import (
+        ResourceBudget,
+        active_budget,
+        get_governor,
+        set_budget,
+    )
+
+    previous = active_budget()
+    spec = ResourceBudget()
+    set_budget(spec)
+    get_governor().set_budget(spec)
+    yield
+    set_budget(previous)
+    get_governor().set_budget(previous)
+
+
 @pytest.fixture(scope="module")
 def harness_project(tmp_path_factory):
     """Project + catalog + zarr volume over synthetic production loaders."""
