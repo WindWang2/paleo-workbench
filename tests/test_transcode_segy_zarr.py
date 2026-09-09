@@ -346,7 +346,7 @@ def test_resume_rejects_swapped_source(tmp_path):
     params = TranscodeParams(chunk=(16, 16, 16), shard=(32, 32, 32), clevel=1)
     transcode_segy_to_zarr(segy, store, params=params)
     _write_segy(segy, seed=8)  # same geometry, different amplitudes
-    with pytest.raises(TranscodeError, match="different source"):
+    with pytest.raises(TranscodeError, match="refusing to mix sources"):
         transcode_segy_to_zarr(segy, store, params=params)
 
 

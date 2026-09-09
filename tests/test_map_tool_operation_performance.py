@@ -116,6 +116,10 @@ def test_digitize_commits_build_one_snapshot_and_touch_only_the_edited_layer(qtb
         pytest.skip("QGIS preview canvas is read-only")
     page.update_state([_document()], project_crs="EPSG:3857")
     canvas = page.unified_canvas
+    # V8 M1 gate semantics: capture tools are enabled per ACTIVE layer kind —
+    # the user picks the well layer first, then toggles editing, then add_point.
+    page._authoring_document.set_active_kind("well")
+    page._sync_action_state()
     page.action_controller.actions["toggle_editing"].trigger()
     page.action_controller.actions["add_point"].trigger()
     authoring = page._authoring_document

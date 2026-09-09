@@ -128,6 +128,12 @@ def test_inspector_localizes_geojson_facies_product_metadata(qtbot):
 
 
 def test_governance_edit_action_shares_the_governance_header_row(qtbot):
+    # Suite-order hygiene: earlier tests may leave a non-default density on
+    # the shared theme manager; the panel bakes minimumHeight at construction
+    # while the assertion recomputes it — pin the density first.
+    from paleo_workbench.ui.theme import DensityMode, theme_manager
+
+    theme_manager.set_density(DensityMode.COMFORTABLE)
     panel = InspectorPanel()
     qtbot.addWidget(panel)
 

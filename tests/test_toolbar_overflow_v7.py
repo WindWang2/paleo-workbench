@@ -84,6 +84,11 @@ def test_1366x768_composite_fits_without_core_overflow(document, qtbot):
     """1366×768：合成文档典型宽度（~860px）核心组完整显示。"""
     from PySide6.QtWidgets import QApplication
 
+    # Suite-order hygiene: the V8 M1 gate keeps add_polygon hidden without
+    # an active editable layer — create one (same pattern as the overflow
+    # test above) so the width measurement sees the full action set.
+    document.edit_controller.create_layer("测试", "polygon")
+    document._sync_action_state()
     document.resize(860, 640)
     document._reposition_toolbar()
     QApplication.processEvents()

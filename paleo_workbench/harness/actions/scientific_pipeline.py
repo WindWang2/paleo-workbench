@@ -57,12 +57,13 @@ def register(registry) -> None:
                     "task_id": {"type": "string"},
                     "method": {"type": ["string", "null"]},
                     "backend": {"type": ["string", "null"]},
-                    "grid": {"type": ["object", "null"]},
+                    "grid": {"type": ["string", "null"]},
                     "quality_metrics": {"type": "object"},
-                    "constraint_diagnostics": {},
-                    "sample_normalization": {},
+                    "constraint_diagnostics": {"type": "object"},
+                    "sample_normalization": {"type": "object"},
                 },
-                "required": ["task", "task_id", "quality_metrics"],
+                # no hard required: honest-error payloads ({"error": ...}) must
+                # pass the same executor-side output validation (#1178)
             },
         )
     )
@@ -99,7 +100,6 @@ def register(registry) -> None:
                         "description": "GeoJSON Polygon/MultiPolygon 要素",
                     },
                 },
-                "required": ["task"],
             },
         )
     )
@@ -201,7 +201,6 @@ def register(registry) -> None:
                     "n_unchanged": {"type": "integer"},
                     "n_no_content": {"type": "integer"},
                 },
-                "required": ["groups", "n_committed"],
             },
         )
     )
@@ -241,11 +240,10 @@ def register(registry) -> None:
             output_schema={
                 "type": "object",
                 "properties": {
-                    "likelihood_descriptor": {},
-                    "confidence_descriptor": {},
+                    "likelihood_descriptor": {"type": "object"},
+                    "confidence_descriptor": {"type": "object"},
                     "registered": {"type": "boolean"},
                 },
-                "required": ["likelihood_descriptor", "confidence_descriptor"],
             },
         )
     )
@@ -279,7 +277,7 @@ def register(registry) -> None:
             action_id="map_product.qa",
             description=(
                 "成图产品 QA：新鲜度指纹比对 + 发布门禁 + QC 规则"
-                "（evaluated/skipped 分开计数，skipped 绝不冒充通过）。",
+                "（evaluated/skipped 分开计数，skipped 绝不冒充通过）。"
             ),
             handler=_map_product_qa,
             risk=ActionRisk.READ,
@@ -327,7 +325,6 @@ def register(registry) -> None:
                     "product_name": {"type": ["string", "null"]},
                     "frozen": {"type": "boolean"},
                 },
-                "required": ["product", "frozen"],
             },
         )
     )
