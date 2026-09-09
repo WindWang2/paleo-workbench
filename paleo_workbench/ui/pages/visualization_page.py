@@ -190,7 +190,7 @@ class VisualizationPage(QWidget):
         self.content_splitter.setObjectName("VisualizationSplitter")
         self.content_splitter.setChildrenCollapsible(False)
 
-        self.summary_panel = VisualizationSummaryPanel()
+        self.summary_panel = VisualizationSummaryPanel(self)
         self.summary_panel.setHidden(True)
 
         self.composite_panel = CompositeVisualizationPanel(

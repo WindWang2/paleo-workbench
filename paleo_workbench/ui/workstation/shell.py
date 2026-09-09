@@ -93,7 +93,14 @@ class WorkstationFrame(QWidget):
         # 不得把「已拆除」状态写进 QSettings（#1124）。
         self._layout_frozen = False
         self._owns_dock_host = dock_host is None
-        self._dock_host: QMainWindow = dock_host if dock_host is not None else QMainWindow()
+        # 自有宿主挂为本部件的子窗口：QMainWindow 仍是顶层窗口（不随父
+        # 显示），但 QObject 父子链保证壳拆除（deleteLater→C++ 析构）时
+        # 宿主连同其 dock/toolbar 子树一并销毁。此前宿主无父，测试路径
+        # （不经过 shutdown_workers/_teardown_docks）每壳泄漏一个
+        # QMainWindow 子树（约 15 个 dock/toolbar）。
+        self._dock_host: QMainWindow = (
+            dock_host if dock_host is not None else QMainWindow(self)
+        )
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(350)

@@ -619,7 +619,7 @@ class GeologicalModeling3DPage(QWidget):
         right_layout.addWidget(card_config)
 
         # CARD 2: 3-Way Interactive Clipping
-        card_clip = QFrame()
+        card_clip = QFrame(self)
         style.bind(card_clip, _frame_card_renderer("QFrame"))
         clip_layout = QVBoxLayout(card_clip)
         clip_layout.setSpacing(tokens.SPACE_2)

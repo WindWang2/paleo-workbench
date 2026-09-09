@@ -153,11 +153,11 @@ class SeismicViewPanel(QFrame):
         )
         outer.setSpacing(tokens.SPACE_2)
 
-        self.title_label = QLabel("地震预测体")
+        self.title_label = QLabel("地震预测体", self)
         self.title_label.setObjectName("MapDockTitle")
         self.title_label.hide()
 
-        self.attribute_strip = QFrame()
+        self.attribute_strip = QFrame(self)
         self.attribute_strip.setObjectName("SeismicAttributeStrip")
         attribute_layout = QHBoxLayout(self.attribute_strip)
         attribute_layout.setContentsMargins(0, 0, 0, 0)
