@@ -50,6 +50,20 @@ def register(registry) -> None:
                 "required": ["task"],
                 "additionalProperties": False,
             },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string"},
+                    "task_id": {"type": "string"},
+                    "method": {"type": ["string", "null"]},
+                    "backend": {"type": ["string", "null"]},
+                    "grid": {"type": ["object", "null"]},
+                    "quality_metrics": {"type": "object"},
+                    "constraint_diagnostics": {},
+                    "sample_normalization": {},
+                },
+                "required": ["task", "task_id", "quality_metrics"],
+            },
         )
     )
     registry.register(
@@ -75,6 +89,17 @@ def register(registry) -> None:
                 },
                 "required": ["task"],
                 "additionalProperties": False,
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string"},
+                    "features": {
+                        "type": ["array", "null"],
+                        "description": "GeoJSON Polygon/MultiPolygon 要素",
+                    },
+                },
+                "required": ["task"],
             },
         )
     )
@@ -165,6 +190,19 @@ def register(registry) -> None:
                 },
                 "additionalProperties": False,
             },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "groups": {
+                        "type": "array",
+                        "description": "每组提交报告（version_id/reason/行数）",
+                    },
+                    "n_committed": {"type": "integer"},
+                    "n_unchanged": {"type": "integer"},
+                    "n_no_content": {"type": "integer"},
+                },
+                "required": ["groups", "n_committed"],
+            },
         )
     )
     # ---- fusion.* ---------------------------------------------------------
@@ -200,6 +238,15 @@ def register(registry) -> None:
                 },
                 "additionalProperties": False,
             },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "likelihood_descriptor": {},
+                    "confidence_descriptor": {},
+                    "registered": {"type": "boolean"},
+                },
+                "required": ["likelihood_descriptor", "confidence_descriptor"],
+            },
         )
     )
     registry.register(
@@ -232,7 +279,7 @@ def register(registry) -> None:
             action_id="map_product.qa",
             description=(
                 "成图产品 QA：新鲜度指纹比对 + 发布门禁 + QC 规则"
-                "（evaluated/skipped 分开计数，skipped 绝不冒充通过）。"
+                "（evaluated/skipped 分开计数，skipped 绝不冒充通过）。",
             ),
             handler=_map_product_qa,
             risk=ActionRisk.READ,
@@ -272,6 +319,15 @@ def register(registry) -> None:
                 },
                 "required": ["product"],
                 "additionalProperties": False,
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "product": {"type": "string"},
+                    "product_name": {"type": ["string", "null"]},
+                    "frozen": {"type": "boolean"},
+                },
+                "required": ["product", "frozen"],
             },
         )
     )
