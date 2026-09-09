@@ -19,7 +19,12 @@ from pathlib import Path
 
 import pytest
 
-from paleo_workbench.catalog.models import DataStage
+from paleo_workbench.catalog.models import (
+    CatalogDocument,
+    DataAsset,
+    DataStage,
+    DataVersion,
+)
 from paleo_workbench.catalog.service import DataCatalogService, CatalogError
 from paleo_workbench.catalog.store import catalog_file_for
 
@@ -289,16 +294,32 @@ def test_open_budget_at_scale(tmp_path):
     import time
 
     project_path = _make_project(tmp_path)
-    # Seed directly through the real API inside one batch (fast: no payload
-    # IO beyond 8-byte files, single transaction per the #1139 batch path).
+    # Seed via direct document construction: ONE store transaction, no
+    # per-payload temp-file/fsync/rename storm. The previous import_raw
+    # loop paid 2000 x (file fsync + directory fsync) — the exact
+    # fsync-heavy pattern the fast gate's 45s per-test ceiling keeps
+    # killing under CI runner load (Linux: thread-method timeout; Windows:
+    # Defender inflates every fsync ~an order and the timeout's hard
+    # process exit lands mid-native-IO). What this test pins is OPEN cost
+    # (lazy skip vs eager materialization), not import throughput — the
+    # import_raw write-path budgets live in tests/perf (slow leg, 300s).
     seeder = DataCatalogService.open(project_path)
     try:
-        with seeder.batch_save():
-            for i in range(2000):  # CI-scale seed; ratio documented in docs
-                src = _make_source(
-                    tmp_path, f"s{i}.las", f"{i}".encode()
-                )
-                seeder.import_raw(src)
+        document = CatalogDocument()
+        for i in range(2000):  # CI-scale seed; ratio documented in docs
+            asset = DataAsset(name=f"asset_{i:06d}", type="well_log")
+            version = DataVersion(
+                asset_id=asset.id,
+                version_number=1,
+                stage=DataStage.RAW,
+                path=f"raw/{asset.id}/v1/f.las",
+                size_bytes=8,
+            )
+            asset.current_version_id = version.id
+            document.assets.append(asset)
+            document.versions.append(version)
+        seeder.document = document
+        seeder.rebuild_index()
     finally:
         seeder.close()
 
