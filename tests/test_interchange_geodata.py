@@ -210,6 +210,8 @@ def test_vector_shapefile_managed_import_bundles_sidecars(tmp_path, vector_adapt
 def test_vector_gpkg_inspect(tmp_path, vector_adapter):
     from osgeo import ogr, osr
 
+    if ogr.GetDriverByName("GPKG") is None:
+        pytest.skip("GPKG driver unavailable (vendored GDAL build lacks it)")
     gpkg = tmp_path / "layers.gpkg"
     driver = ogr.GetDriverByName("GPKG")
     datasource = driver.CreateDataSource(str(gpkg))

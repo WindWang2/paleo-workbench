@@ -657,7 +657,17 @@ def test_compute_attribute_rejects_paths_outside_workspace(tmp_path):
     from paleo_workbench.harness.spec import ActionRisk
     from paleo_workbench.project.models import ProjectDocument
     from paleo_workbench.providers.refs import SeismicVolumeRef
+    from paleo_workbench.runtime import (
+        ResourceBudget,
+        ResourceGovernor,
+        set_governor,
+    )
 
+    # Pin admission: on a 16 GB CI runner the governor's streaming-buffer
+    # cap (RAM-scaled) rejects compute_attribute before the workspace check
+    # under test runs, so the "workspace" refusal reason never surfaces.
+    # This test verifies the path guard, not runner-sized admission.
+    set_governor(ResourceGovernor(ResourceBudget()))
     registry = get_action_registry()
     try:
         executor = HarnessExecutor(registry)
@@ -675,6 +685,7 @@ def test_compute_attribute_rejects_paths_outside_workspace(tmp_path):
         assert outside.status == "failed"
         assert "workspace" in outside.error
     finally:
+        set_governor(None)
         set_action_registry(None)
 
 

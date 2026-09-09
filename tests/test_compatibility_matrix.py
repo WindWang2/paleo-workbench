@@ -57,6 +57,8 @@ def test_normal_multi_layer_gpkg(tmp_path):
         pytest.skip("osgeo.gdal 不可用")
     from osgeo import ogr, osr
 
+    if ogr.GetDriverByName("GPKG") is None:
+        pytest.skip("GPKG driver unavailable (vendored GDAL build lacks it)")
     gpkg = tmp_path / "多层.gpkg"
     datasource = ogr.GetDriverByName("GPKG").CreateDataSource(str(gpkg))
     spatial_ref = osr.SpatialReference()

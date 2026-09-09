@@ -260,6 +260,9 @@ class TestVelocityEdgeCases:
     def test_extreme_high_and_low_velocities(self):
         """Verify extreme but positive velocities perform conversions correctly."""
         hub = CoordinateTransformHub()
+        # A grid is required for any map<->seismic conversion (fail-closed);
+        # velocity is what this test pins, the geometry itself is inert here.
+        hub.configure_seismic_grid(velocity=0.1)
 
         # Near-zero velocity (0.1 m/s)
         hub.set_velocity(0.1)

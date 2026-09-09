@@ -154,6 +154,7 @@ class TestCoordinateTransformHubSeismic:
 
     def test_velocity_guardrails_and_updates(self):
         hub = CoordinateTransformHub()
+        hub.configure_seismic_grid(velocity=3200.0)
         hub.set_velocity(3200.0)
 
         mx, my, mz = hub.seismic_to_map(100, 200, 1000.0)

@@ -88,6 +88,13 @@ def test_theme_manager_persists(qtbot, tmp_path):
 
 
 def test_dynamic_style_registry_rerenders_on_theme_change(qtbot):
+    # Suite-order hygiene: an earlier test may leave a non-default theme on
+    # the shared theme manager; the re-render contract is measured against
+    # the pre-change palette, so start from the default.
+    from paleo_workbench.ui.theme import DensityMode, theme_manager
+
+    theme_manager.set_theme("light")
+    theme_manager.set_density(DensityMode.COMFORTABLE)
     from PySide6.QtWidgets import QLabel
 
     from paleo_workbench.ui import style
