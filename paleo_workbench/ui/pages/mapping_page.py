@@ -1644,6 +1644,8 @@ class MappingPage(QWidget):
                 result = self._topology.redo_compound(compound)
                 if not result.ok and getattr(self, "status_bar", None) is not None:
                     self.status_bar.scale.setText(f"重做被拒绝：{result.reason}")
+                if not result.ok:
+                    session.redo()
             else:
                 session.redo()
         elif command_id == "delete_selected" and authoring is not None and authoring.active_session is not None:

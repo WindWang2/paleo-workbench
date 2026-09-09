@@ -404,7 +404,11 @@ class TopologyService:
         :meth:`redo_compound` 的 revision 守卫会拒绝非线性重做。
         """
         for group in reversed(self._compounds):
-            if group.undone and group.origin.session is session:
+            if not group.undone:
+                continue
+            if any(self._session_revision(lid) != rev for lid, rev in group.revision_guard.items()):
+                continue
+            if group.origin.session is session or any(e.session is session for e in group.propagated):
                 return group
         return None
 

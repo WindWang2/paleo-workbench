@@ -399,11 +399,11 @@ def _factor_interpolate(context: ActionContext, parameters: dict) -> dict:
         from geoviz import JobCancelled as _JobCancelled
         from paleo_workbench.runtime.task_scheduler import TaskCancelled
 
-        if isinstance(exc, (TaskCancelled, _JobCancelled)):
+        if isinstance(exc, (TaskCancelled, _JobCancelled)) or (context.cancel and context.cancel.is_set()):
             raise
         return {
             "error": "failed",
-            "detail": f"{name}: {exc}",
+            "detail": f"{task.name}: {exc}",
             "task_id": task.id,
             "task_status": getattr(task, "status", ""),
         }
@@ -774,7 +774,7 @@ def _compilation_validate_inputs(context: ActionContext, parameters: dict) -> di
             )
             entries.append(
                 {"key": key, "ref": ref, "kind": "constraints",
-                 "resolved": verdict["status"].value != "unknown",
+                 "resolved": verdict["status"] != "unknown",
                  "reason": f"约束新鲜度：{verdict['detail']}"}
             )
         else:

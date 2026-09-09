@@ -325,6 +325,11 @@ def commit_constraint_group(
     except Exception:
         catalog.update_run_status(str(run.id), "failed")
         raise
+    finally:
+        if payload_path is not None and payload_path.parent.exists():
+            import shutil
+
+            shutil.rmtree(payload_path.parent, ignore_errors=True)
     catalog.update_run_status(str(run.id), "complete")
     return ConstraintCommitReport(
         group_id=group_id,
@@ -542,12 +547,23 @@ def compare_constraint_versions(
     """
     def _load(version_id: str) -> dict[str, Any]:
         version = catalog.get_version(version_id)
-        source = getattr(version, "source_uri", "") or ""
-        if not source:
+        path = None
+        if hasattr(catalog, "resolve_path"):
+            try:
+                candidate = catalog.resolve_path(version)
+                if candidate.is_file():
+                    path = candidate
+            except Exception:
+                pass
+        if path is None:
+            source = getattr(version, "source_uri", "") or ""
+            if source and Path(source).is_file():
+                path = Path(source)
+        if path is None:
             raise ValueError(
                 f"constraint version {version_id!r} has no payload location"
             )
-        return json.loads(Path(source).read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
 
     a = _load(version_a)
     b = _load(version_b)
