@@ -18,8 +18,10 @@ Defended cases:
 
 from __future__ import annotations
 
+import logging
 import os
 import re
+import time
 import unicodedata
 from pathlib import Path, PurePosixPath
 
@@ -191,8 +193,27 @@ def is_reserved_or_unsafe(name: str) -> bool:
 
 
 def os_replace_atomic(temp_path: Path, target_path: Path) -> None:
-    """os.replace with a directory fsync so renames survive power loss."""
-    os.replace(temp_path, target_path)
+    """os.replace with a directory fsync so renames survive power loss.
+
+    Windows: renaming a freshly-written tree can transiently fail with
+    PermissionError/WinError 5 because a filter driver (Defender scanning
+    the new files) briefly holds handles inside it — POSIX rename
+    tolerates open handles, Windows does not. Retry with backoff before
+    giving up; the standard pattern for atomic publish on Windows.
+    """
+    last: OSError | None = None
+    for attempt in range(5):
+        try:
+            os.replace(temp_path, target_path)
+            break
+        except PermissionError as exc:  # transient filter-driver lock
+            last = exc
+            time.sleep(0.05 * (2**attempt))
+    else:
+        logging.getLogger(__name__).warning(
+            "atomic replace of %s kept failing after retries: %s", target_path, last
+        )
+        raise last  # type: ignore[misc]
     fd = os.open(str(target_path.parent), os.O_RDONLY)
     try:
         os.fsync(fd)

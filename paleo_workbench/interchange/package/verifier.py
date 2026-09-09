@@ -99,7 +99,11 @@ def materialize_package(package_path: Path, dest_dir: Path) -> Path:
         try:
             with zipfile.ZipFile(package_path) as bundle:
                 extract_archive(bundle, staging, what="package")
-            staging.rename(target)
+            # Same Windows filter-driver race as the builder's publish:
+            # rename the freshly-extracted tree through the retrying helper.
+            from paleo_workbench.interchange.path_safety import os_replace_atomic
+
+            os_replace_atomic(staging, target)
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
             raise

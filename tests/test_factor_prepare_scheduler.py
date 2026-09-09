@@ -316,10 +316,19 @@ def test_progress_is_monotonic():
 
 
 def test_prepare_worker_count_clamped(monkeypatch):
-    monkeypatch.setenv("PALEO_PREPARE_WORKERS", "99")
-    assert prepare_worker_count() == 4
-    monkeypatch.setenv("PALEO_PREPARE_WORKERS", "0")
-    assert prepare_worker_count() == 1
+    # Pin the governor's background allowance: the value is RAM-scaled, so on
+    # a 16 GB CI runner the env override of 99 clamps below 4 — this test
+    # pins the 1..4 env contract, not runner-sized shedding.
+    from paleo_workbench.runtime import ResourceBudget, ResourceGovernor, set_governor
+
+    set_governor(ResourceGovernor(ResourceBudget()))
+    try:
+        monkeypatch.setenv("PALEO_PREPARE_WORKERS", "99")
+        assert prepare_worker_count() == 4
+        monkeypatch.setenv("PALEO_PREPARE_WORKERS", "0")
+        assert prepare_worker_count() == 1
+    finally:
+        set_governor(None)
 
 
 def test_plan_cache_rebuilds_when_power_changes():
