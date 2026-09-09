@@ -1186,7 +1186,7 @@ class WorkstationFrame(QWidget):
                 self.task_dock.raise_()
 
         self.status_message.emit(f"已应用布局：{preset.label}")
-        QTimer.singleShot(0, self._apply_default_pane_sizes)
+        QTimer.singleShot(0, self, self._apply_default_pane_sizes)
         self._save_timer.start()
 
     def _reset_default_layout(self) -> None:
@@ -1360,7 +1360,7 @@ class WorkstationFrame(QWidget):
             self._schedule_restore(50)
         if getattr(self, "_pending_default_sizes", False) and self.isVisible():
             self._pending_default_sizes = False
-            QTimer.singleShot(0, self._apply_default_pane_sizes)
+            QTimer.singleShot(0, self, self._apply_default_pane_sizes)
 
     def _apply_default_pane_sizes(self) -> None:
         """给中央编图主导的空间分配（首运行/预设重置共用，B15/B17）。

@@ -73,8 +73,9 @@ def point_in_ring_scalar_inclusive(x: float, y: float, ring, *,
         cross = (current_x - previous_x) * (y - previous_y) - (
             current_y - previous_y
         ) * (x - previous_x)
+        segment_len = math.hypot(current_x - previous_x, current_y - previous_y)
         if (
-            abs(cross) <= epsilon
+            abs(cross) <= epsilon * max(1.0, segment_len)
             and min(previous_x, current_x) - epsilon <= x <= max(previous_x, current_x) + epsilon
             and min(previous_y, current_y) - epsilon <= y <= max(previous_y, current_y) + epsilon
         ):
