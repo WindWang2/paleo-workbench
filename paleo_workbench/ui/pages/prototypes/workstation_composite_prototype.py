@@ -541,7 +541,7 @@ class CompositeVariants(QWidget):
 
         toggle.clicked.connect(_toggle)
         page.resizeEvent = _relayout  # type: ignore[method-assign]
-        QTimer.singleShot(0, _relayout)
+        QTimer.singleShot(0, page, _relayout)
         return page
 
 

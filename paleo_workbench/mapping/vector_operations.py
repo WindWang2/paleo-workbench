@@ -39,7 +39,10 @@ def _shapely_merge(session: VectorEditSession, feature_ids: Iterable[str]) -> st
 
     merged = union([feature.as_record()["geometry"] for feature in features])
     geometry = merged.geometry
-    if str(geometry.get("type")) not in {"Polygon", "MultiPolygon"}:
+    if (
+        str(geometry.get("type")) not in {"Polygon", "MultiPolygon"}
+        or not geometry.get("coordinates")
+    ):
         raise ValueError("selected polygons cannot form a valid merged polygon")
     feature_id = new_feature_id("merge")
     merged_feature = VectorFeature(feature_id, geometry, features[0].attributes)
@@ -82,6 +85,7 @@ def _shapely_split(
         piece
         for piece in (result.geometries or [])
         if str(piece.get("type")) in {"Polygon", "MultiPolygon"}
+        and bool(piece.get("coordinates"))
     ]
     if len(pieces) < 2:
         raise ValueError("the cutter does not split the selected polygon")

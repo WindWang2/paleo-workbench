@@ -1888,7 +1888,7 @@ class CompositeDocument(QWidget):
             self._empty_hint.raise_()
             # 构造期isVisible 尚为 False（窗口未显示），布局后的真实画布
             # 矩形要等显示完成才拿得到；延迟一拍再对齐一次。
-            QTimer.singleShot(0, self._sync_hint_geometry)
+            QTimer.singleShot(0, self, self._sync_hint_geometry)
 
     def _sync_hint_geometry(self) -> None:
         hint = getattr(self, "_empty_hint", None)
@@ -3140,7 +3140,7 @@ class CompositeDocument(QWidget):
     def showEvent(self, event) -> None:
         super().showEvent(event)
         # 隐藏状态下 Qt 延迟发送 resize：首显时补一次工具条重排（V7）。
-        QTimer.singleShot(0, self._reposition_toolbar)
+        QTimer.singleShot(0, self, self._reposition_toolbar)
 
     # -- 生命周期 --------------------------------------------------------------
 

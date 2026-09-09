@@ -343,6 +343,21 @@ def _fingerprint_memo_key(
             tuple((float(x), float(y)) for x, y in poly)
             for poly in fault_polylines
         )
+    # DEF-D2-05: Incorporate point coordinate & value hash so that modifications
+    # in place with identical point count do not produce false memo hits.
+    points_digest: str | int = 0
+    if points:
+        pt_hasher = hashlib.sha1()
+        for pt in points:
+            if isinstance(pt, dict):
+                x = pt.get("x", pt.get("lng"))
+                y = pt.get("y", pt.get("lat"))
+                v = pt.get("value", pt.get("z", pt.get("v")))
+                pt_hasher.update(f"{x}:{y}:{v};".encode("utf-8", errors="ignore"))
+            else:
+                pt_hasher.update(str(pt).encode("utf-8", errors="ignore"))
+        points_digest = pt_hasher.hexdigest()
+
     return (
         str(getattr(task, "id", "") or ""),
         str(method if method is not None else getattr(task, "method", "IDW")),
@@ -350,7 +365,7 @@ def _fingerprint_memo_key(
         float(power),
         str(generator_version),
         str(getattr(task, "target_horizon", "") or ""),
-        int(len(points)),
+        (int(len(points)), points_digest),
         breaks_key,
     )
 

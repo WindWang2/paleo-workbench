@@ -133,7 +133,7 @@ class QgisLayerTreePanel(QWidget):
         self.remove_button.setEnabled(False)
         from PySide6.QtCore import QTimer
 
-        QTimer.singleShot(0, self._update_manage_button_style)
+        QTimer.singleShot(0, self, self._update_manage_button_style)
         manage_row.addStretch(1)
         outer.addLayout(manage_row)
 

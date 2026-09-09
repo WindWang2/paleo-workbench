@@ -476,7 +476,7 @@ class CompositionPanel(QFrame):
         if name == "chart_type":
             # 表格/JSON 序列编辑器随图表类型切换；延迟重建避免在信号
             # 处理中删除发送者控件。
-            QTimer.singleShot(0, self._refresh_property_editor)
+            QTimer.singleShot(0, self, self._refresh_property_editor)
 
     def _on_schema_json_changed(self, name: str, text: str) -> None:
         try:
