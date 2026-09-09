@@ -227,3 +227,33 @@ class TestPolygonize:
         )
         assert result.ok
         assert "n_polygons" in result.outputs
+
+
+class TestPipelineDefectRemediations:
+    def test_compilation_validate_inputs_with_constraints(self, registry, project, service):
+        executor = HarnessExecutor(registry)
+        result = executor.execute(
+            "compilation.validate_inputs",
+            {"evidence": {"fault_constraints": "constraints:current"}},
+            _ctx(project, service),
+        )
+        assert result.ok
+        assert "entries" in result.outputs
+        constraint_entry = next(e for e in result.outputs["entries"] if e["kind"] == "constraints")
+        assert "resolved" in constraint_entry
+
+    def test_factor_interpolate_error_handling_reports_task_name(self, registry, project, service, monkeypatch):
+        from paleo_workbench.workflow import factor_interpolation
+
+        def _boom(*args, **kwargs):
+            raise ValueError("kriging singular matrix")
+
+        monkeypatch.setattr(factor_interpolation, "apply_interpolation_to_task", _boom)
+        executor = HarnessExecutor(registry)
+        result = executor.execute(
+            "factor.interpolate", {"task": "砂地比"}, _ctx(project, service)
+        )
+        assert not result.ok or result.outputs.get("error") == "failed"
+        assert "砂地比" in str(result.outputs.get("detail", ""))
+        assert "kriging singular matrix" in str(result.outputs.get("detail", ""))
+

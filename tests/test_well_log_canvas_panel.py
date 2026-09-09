@@ -116,7 +116,7 @@ def test_well_log_canvas_uses_bound_las(qtbot, monkeypatch):
         facies_intervals=[],
     )
 
-    def _fake_resolve(self, ref, project_arg):
+    def _fake_resolve(self, ref, project_arg, *args, **kwargs):
         assert ref.kind == "well_log"
         assert ref.id == resource.id
         return VizPayload(kind="well_log", label="from-adapter", well_log=known)
@@ -168,7 +168,7 @@ def test_well_log_canvas_bound_failure_shows_message(qtbot, monkeypatch):
         input_refs={"well_log_resource_ids": [resource.id]},
     )
 
-    def _fake_resolve(self, ref, project_arg):
+    def _fake_resolve(self, ref, project_arg, *args, **kwargs):
         return VizPayload(
             kind="message",
             label="bad.las",
@@ -290,3 +290,44 @@ def test_canvas_panel_engine_path_with_fake_view(qtbot, monkeypatch):
     panel.update_state(None)
     assert panel.engine_load_report() is None
     assert panel.well_log_data is None
+
+
+def test_well_log_canvas_shows_cancelling_message_when_cancelling(qtbot, monkeypatch):
+    import time
+    project = ProjectDocument.new("Cancelling")
+    resource = ResourceItem(
+        name="long.las",
+        path="/fake/long.las",
+        type="well_log",
+        format="las",
+    )
+    project.resources.append(resource)
+    task = PredictionTask(
+        name="cancel-task",
+        status="complete",
+        input_refs={"well_log_resource_ids": [resource.id]},
+    )
+
+    def _slow_resolve(self, ref, project_arg, cancel=None, *args, **kwargs):
+        while not (cancel and cancel()):
+            time.sleep(0.01)
+        return VizPayload(kind="message", label="long.las", message="cancelled")
+
+    from paleo_workbench.viz.adapter import VizAdapter
+
+    monkeypatch.setattr(VizAdapter, "resolve", _slow_resolve)
+
+    panel = WellLogCanvasPanel()
+    qtbot.addWidget(panel)
+    panel.update_state(task, project=project)
+
+    # Wait for the worker to start parsing
+    qtbot.waitUntil(
+        lambda: getattr(panel._well_log_job.worker, "_parse_started", False),
+        timeout=5_000,
+    )
+    # Trigger cancellation while running
+    panel._well_log_job.cancel()
+    qtbot.waitUntil(lambda: "正在取消加载…" in panel.empty_label.text(), timeout=5_000)
+    panel.shutdown()
+

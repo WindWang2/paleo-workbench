@@ -223,3 +223,45 @@ def test_production_tool_flow_registers_compound_cross_layer(qtbot) -> None:
     assert undone.ok, undone.reason
     assert left.edit_session.feature("a").geometry["coordinates"][0][1] == (1.0, 0.0)
     assert right.edit_session.feature("b").geometry["coordinates"][0][0] == (1.0, 0.0)
+
+
+def test_compound_redo_rejected_when_revision_guard_invalidated() -> None:
+    left, right = _adjacent_layers()
+    _commit_origin_vertex(left)
+    topology = TopologyService(enabled=True)
+
+    topology.propagate_shared_vertex(
+        [left, right], origin=(1, 0), replacement=(1.5, 0), skip=("left", "a", (0, 1))
+    )
+    session = left.edit_session
+    group = topology.pending_compound(session)
+    assert group is not None
+    undone = topology.undo_compound(group)
+    assert undone.ok
+
+    # Modify left layer: revision guard should invalidate the undone compound group
+    session.set_vertex("a", (0, 0), (-1.0, -1.0))
+    assert topology.pending_compound_redo(session) is None
+
+
+def test_compound_redo_from_propagated_layer() -> None:
+    left, right = _adjacent_layers()
+    _commit_origin_vertex(left)
+    topology = TopologyService(enabled=True)
+
+    topology.propagate_shared_vertex(
+        [left, right], origin=(1, 0), replacement=(1.5, 0), skip=("left", "a", (0, 1))
+    )
+    session = left.edit_session
+    group = topology.pending_compound(session)
+    assert group is not None
+    undone = topology.undo_compound(group)
+    assert undone.ok
+
+    # Propagated session should also see the pending compound redo
+    right_session = right.edit_session
+    redo_group = topology.pending_compound_redo(right_session)
+    assert redo_group is not None
+    redone = topology.redo_compound(redo_group)
+    assert redone.ok
+

@@ -343,3 +343,22 @@ class TestReviewR2LazyAndPort:
 
         verdict = resolve_constraint_ref(project, port, "constraints:current")
         assert verdict["status"] == "current"
+
+    def test_commit_constraint_group_cleans_up_temp_dir(self, project, catalog, monkeypatch):
+        import tempfile
+        created_dirs = []
+        orig_mkdtemp = tempfile.mkdtemp
+
+        def _tracking_mkdtemp(*args, **kwargs):
+            d = orig_mkdtemp(*args, **kwargs)
+            created_dirs.append(Path(d))
+            return d
+
+        monkeypatch.setattr(tempfile, "mkdtemp", _tracking_mkdtemp)
+        group = project.constraint_layers[0]
+        report = commit_constraint_group(project, catalog, group)
+        assert report.committed
+        assert created_dirs
+        for d in created_dirs:
+            assert not d.exists(), f"Temporary directory {d} was not cleaned up"
+

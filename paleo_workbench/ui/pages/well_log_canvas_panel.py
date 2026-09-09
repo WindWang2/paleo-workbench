@@ -488,6 +488,7 @@ class WellLogCanvasPanel(QFrame):
                     ),
                 ),
                 (worker.failed, lambda message, s=seq: self._on_bound_las_failed(message, s)),
+                (worker.cancelling, lambda: self._show_empty("正在取消加载…")),
             ),
             cancel=worker.cancel,
             target=project,
