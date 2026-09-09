@@ -75,6 +75,9 @@ def _build_host_with_frame(qtbot) -> tuple[QMainWindow, object]:
     frame = WorkstationFrame(
         ProjectDocument.new("布局测试"), QStackedWidget(), dock_host=host
     )
+    # 无父顶层 frame 必须交给 qtbot 拆除：此前每个用例泄漏一个
+    # WorkstationFrame（连带其部件子树），累进抬高 topLevelWidgets。
+    qtbot.addWidget(frame)
     return host, frame
 
 

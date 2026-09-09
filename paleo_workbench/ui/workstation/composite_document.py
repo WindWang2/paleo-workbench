@@ -957,8 +957,11 @@ class CompositeDocument(QWidget):
         # 画布形态：原生栈用 QgsLayerTreeView 面板，回退画布用同信号接缝的
         # LayerManagerPanel（QTreeWidget 自绘树）——两套面板 16 个请求信号同构。
         self.layer_manager = self._create_layer_manager()
-        self.input_tree = InputTreePanel(project)
-        self.linked_views = LinkedViewsPanel()
+        # 面板挂为本部件子部件：dock 宿主路径下 setWidget 会再 reparent 进
+        # dock（所有权随 dock），无 dock 的孤立构造（单测直接建 document）
+        # 则随 document 析构——此前无父，裸 document 每拆一次泄漏 3 个面板。
+        self.input_tree = InputTreePanel(project, self)
+        self.linked_views = LinkedViewsPanel(self)
         self.input_tree.object_selected.connect(self.object_selected.emit)
         self.layer_manager.create_layer_requested.connect(self._create_vector_layer)
         self.layer_manager.remove_layer_requested.connect(self._remove_vector_layer)
@@ -1087,8 +1090,8 @@ class CompositeDocument(QWidget):
     def _create_layer_manager(self) -> QWidget:
         """图层管理面板跟随画布形态（两套面板请求信号同构，见类 docstring）。"""
         if self.uses_native_stack:
-            return QgisLayerTreePanel()
-        return LayerManagerPanel(repair_probe=self._layer_repair_availability)
+            return QgisLayerTreePanel(self)
+        return LayerManagerPanel(self, repair_probe=self._layer_repair_availability)
 
     def _rename_layer_prompt(self, layer_id: str) -> None:
         """回退树面板的改名请求：QInputDialog → edit_controller.rename_layer。"""
