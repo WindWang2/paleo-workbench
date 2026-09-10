@@ -1430,11 +1430,13 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     QFrame#MappingStageTrack[complete="true"] {{
         background: {t.PRIMARY};
     }}
-    /* Composite full-bleed overlay: hairline float strip, no SaaS card chrome */
-    QFrame#WorkstationOverlayToolbar {{
+    /* 地图工具条（宿主第 2 行原生 QToolBar）：与全局栏同底色 hairline */
+    QToolBar#WorkstationMapToolsToolbarTop,
+    QToolBar#WorkstationMapToolsToolbarBottom {{
         background: {t.BG_HEADER};
-        border: 1px solid {t.BORDER_STRONG};
-        border-radius: 3px;
+        border: none;
+        border-bottom: 1px solid {t.BORDER};
+        spacing: 0px;
         padding: 0px;
     }}
     QFrame#WorkstationContextSeparator {{

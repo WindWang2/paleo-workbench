@@ -92,6 +92,9 @@ class WorkstationFrame(QWidget):
         # teardown 阶段冻结布局保存：拆除 dock 触发的 visibilityChanged
         # 不得把「已拆除」状态写进 QSettings（#1124）。
         self._layout_frozen = False
+        # 顶栏行归位：restoreState 按 objectName 认条，旧持久化布局
+        # （阶段条独占一行、无地图条）恢复后必须重排；_restore_layout 在
+        # 每次成功 restore 后都归位（构造 + show 后补投，后者会覆盖前者）。
         self._owns_dock_host = dock_host is None
         # 自有宿主挂为本部件的子窗口：QMainWindow 仍是顶层窗口（不随父
         # 显示），但 QObject 父子链保证壳拆除（deleteLater→C++ 析构）时
@@ -255,7 +258,9 @@ class WorkstationFrame(QWidget):
         self._apply_canonical_dock_layout()
         self._hide_default_closed_docks()
 
-        # 阶段条独占 AppBar 下一行（全宽）；不得与全局栏挤在同一行右侧。
+        # 第 1 行：全局栏 + 阶段条同行（阶段条进 AppBar 空白区；两者共享顶行，
+        # 不再独占一整行）。同行多工具条按 sizeHint 共处：全局栏内搜索框可压
+        # 缩（最小 180），阶段条固定内容，两者在 ≥1440px 下完整可见。
         from paleo_workbench.ui.workstation.mapping_stage_bar import MappingStageBar
 
         self.stage_bar = MappingStageBar(self._dock_host)
@@ -270,9 +275,15 @@ class WorkstationFrame(QWidget):
         self.stage_bar.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.stage_toolbar.addWidget(self.stage_bar)
-        self._dock_host.addToolBarBreak(Qt.ToolBarArea.TopToolBarArea)
         self._dock_host.addToolBar(
             Qt.ToolBarArea.TopToolBarArea, self.stage_toolbar)
+
+        # 第 2 行：地图工具条（composite 建条、宿主托管；画布上不再悬浮）。
+        # Qt 原生允许多工具条并排同行，窄窗时自动换行/原生 » 溢出。
+        self._dock_host.addToolBarBreak(Qt.ToolBarArea.TopToolBarArea)
+        for _map_bar in self.composite.host_map_toolbars():
+            self._dock_host.addToolBar(
+                Qt.ToolBarArea.TopToolBarArea, _map_bar)
 
         self._wire()
         self.set_project(project)
@@ -1458,6 +1469,7 @@ class WorkstationFrame(QWidget):
             # 前触发会被 Qt 静默忽略（视觉 QA 实测 nav/右列各吃 717px），
             # 改为标记 + showEvent 后补投（见下）。
             self._pending_default_sizes = True
+        restored = False
         if data is not None:
             version = self._settings.value(self._STATE_VERSION_KEY, 0, type=int)
             if version != LAYOUT_STATE_VERSION:
@@ -1472,12 +1484,114 @@ class WorkstationFrame(QWidget):
             else:
                 if isinstance(data, QByteArray) and not data.isNull():
                     self._dock_host.restoreState(data)
+                    restored = True
                 # 主窗口几何与 dock 状态同栅栏恢复（V6 audit G-P0-2）。
                 self._restore_host_window_geometry()
+        # restore 之后强制工具条行归位（第 1 行全局栏+阶段条 / 第 2 行地图
+        # 工具条）：旧版本 QSettings 存的是「阶段独占第 2 行、无地图工具条」
+        # 布局，不校正会出现工具条消失或错位；各条均不可移动，用户无自定义
+        # 可丢。每次成功 restore 都重排：本方法每壳最多触发两次（构造 +
+        # show 后补投），后一次 restoreState 会覆盖前一次归位结果，只在
+        # 首轮重排会被迟到的补投反杀（真机：四条被压回同一行）。重排次数
+        # 有界（≤2/壳），break 不会无界堆积；无 restore 时只做残留清扫。
+        if restored:
+            self._enforce_toolbar_rows()
+        else:
+            self._sweep_stray_toolbars()
         # restore 之后必须重新执行响应式策略：restoreState 可能把检查器
         # 在窄屏下重新显示（保存时按「可见」写入），不能让 restore 反杀
         # 响应式隐藏（#1121）。
         self._apply_responsive_panels()
+
+    #: 宿主顶栏四条工具条的 objectName（saveState/restoreState 身份 + 清扫依据）。
+    _HOST_TOOLBAR_NAMES = (
+        "WorkstationAppBarToolbar",
+        "MappingStageToolbar",
+        "WorkstationMapToolsToolbarTop",
+        "WorkstationMapToolsToolbarBottom",
+    )
+
+    def _own_toolbar_rows(self) -> tuple:
+        """本壳四条顶栏（第 1 行全局栏/阶段条，第 2 行两条地图条）。"""
+        return (
+            self.app_bar_toolbar,
+            self.stage_toolbar,
+            *self.composite.host_map_toolbars(),
+        )
+
+    @staticmethod
+    def _retire_toolbar(bar) -> None:
+        """宿主行工具条退役：摘除 + 改名 + 延后销毁。
+
+        改名是关键：``saveState/restoreState`` 按 objectName 认条；旧条
+        C++ 对象在 ``deleteLater`` 落定前仍存活，若保留原名会被后建壳的
+        ``restoreState`` 按名复活（``findChild`` 取最老匹配），造成同名
+        双条挤占顶栏。改名后复活按名查找必然落空。
+        """
+        try:
+            host = bar.parentWidget()
+        except RuntimeError:
+            return
+        if isinstance(host, QMainWindow):
+            try:
+                host.removeToolBar(bar)
+            except RuntimeError:
+                pass
+        try:
+            bar.hide()
+            name = str(bar.objectName() or "")
+            if not name.endswith("_retired"):
+                bar.setObjectName(f"{name}_retired")
+            bar.deleteLater()
+        except RuntimeError:
+            pass
+
+    def _sweep_stray_toolbars(self) -> None:
+        """清除宿主上同名但非本壳的顶栏条（前壳拆除不完全的残留）。
+
+        正常 teardown 已退役旧条；本清扫只处理跳过 teardown 的极端路径
+        （如已销毁壳的重建）。命中即退役（改名防复活），不动本壳四条。
+        """
+        if self._layout_frozen:
+            return
+        try:
+            own = set(self._own_toolbar_rows())
+            wanted = set(self._HOST_TOOLBAR_NAMES)
+            strays = [
+                bar for bar in self._dock_host.findChildren(QToolBar)
+                if str(bar.objectName() or "") in wanted and bar not in own
+            ]
+        except RuntimeError:
+            return  # 拆壳期迟到调用：C++ 已销毁，忽略
+        for bar in strays:
+            self._retire_toolbar(bar)
+
+    def _enforce_toolbar_rows(self) -> None:
+        """把四条顶栏工具条放回正确行/顺序（第 1 行两条，第 2 行两条）。
+
+        ``saveState/restoreState`` 只认 objectName：旧持久化布局没有地图
+        工具条、且阶段条自成一行——恢复后必须重排，否则错位。幂等，可在
+        任何时刻调用（迟到的 restore 定时器同样收敛到同一布局）。
+        """
+        if self._layout_frozen:
+            return
+        host = self._dock_host
+        bars = self._own_toolbar_rows()
+        try:
+            # 先清扫前壳残留：同名旧条不除，restoreState 会按名复活它们。
+            self._sweep_stray_toolbars()
+            for bar in bars:
+                # removeToolBar 会把条显式隐藏（Qt 语义），重加后必须 show。
+                host.removeToolBar(bar)
+            host.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.app_bar_toolbar)
+            host.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.stage_toolbar)
+            host.addToolBarBreak(Qt.ToolBarArea.TopToolBarArea)
+            for bar in self.composite.host_map_toolbars():
+                host.addToolBar(Qt.ToolBarArea.TopToolBarArea, bar)
+            for bar in bars:
+                bar.show()
+        except RuntimeError:
+            pass  # 拆壳期迟到调用：C++ 已销毁，忽略
 
     def _restore_host_window_geometry(self) -> None:
         """恢复主窗口（dock 宿主）几何并 clamp 到可见桌面（V6 G-P0-2）。
@@ -1589,16 +1703,18 @@ class WorkstationFrame(QWidget):
             if isinstance(host, QMainWindow):
                 host.removeDockWidget(dock)
             dock.deleteLater()
-        # App bar 的容器 toolbar 同样注册在宿主上：不摘除的话，壳重建
-        # 一次就多挂一条全局栏。
-        toolbar_host = self.app_bar_toolbar.parentWidget()
-        if isinstance(toolbar_host, QMainWindow):
-            toolbar_host.removeToolBar(self.app_bar_toolbar)
-        self.app_bar_toolbar.deleteLater()
+        # App bar 的容器 toolbar 同样退役：只 remove 不改名的话，C++ 对象
+        # 在 deleteLater 落定前仍以原名存活，下个壳 restoreState 按名复活。
+        self._retire_toolbar(self.app_bar_toolbar)
         # V5 阶段切换条容器 toolbar 同样摘除（防重建叠条）。
-        stage_toolbar_host = self.stage_toolbar.parentWidget()
-        if isinstance(stage_toolbar_host, QMainWindow):
-            stage_toolbar_host.removeToolBar(self.stage_toolbar)
-        self.stage_toolbar.deleteLater()
+        self._retire_toolbar(self.stage_toolbar)
+        # 地图工具条（两条，第 2 行）同样退役：条本体挂在宿主名下，不摘除
+        # 会残留成下个壳的同名旧条（restoreState 按名复活）。
+        try:
+            map_bars = self.composite.host_map_toolbars()
+        except (AttributeError, RuntimeError):
+            map_bars = ()
+        for bar in map_bars:
+            self._retire_toolbar(bar)
         if self._owns_dock_host:
             self._dock_host.deleteLater()

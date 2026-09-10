@@ -46,7 +46,7 @@ class WorkstationAppBar(QFrame):
         )
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 0, 10, 0)
+        layout.setContentsMargins(8, 0, 8, 0)
         layout.setSpacing(8)
 
         brand_icon = QLabel(self)
@@ -96,7 +96,9 @@ class WorkstationAppBar(QFrame):
         self.command_input.setObjectName("WorkstationCommandInput")
         self.command_input.setPlaceholderText("搜索命令、数据或输入 Agent 指令 (Ctrl+K)")
         self.command_input.setClearButtonEnabled(True)
-        self.command_input.setMinimumWidth(300)
+        # 与阶段条共享顶行（第 1 行）：搜索框可压缩，最小 180——常规窗口
+        # （≥1440px）下全局栏与阶段条完整可见；更宽时 Expanding 吃掉剩余。
+        self.command_input.setMinimumWidth(180)
         self.command_input.setMaximumWidth(580)
         self.command_input.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed

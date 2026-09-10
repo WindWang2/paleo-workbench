@@ -55,7 +55,7 @@ class _StageSegment(QFrame):
         self._badge = ""
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(6, 3, 10, 3)
+        row.setContentsMargins(4, 2, 6, 2)
         row.setSpacing(6)
 
         self._index = QLabel(str(stage.order + 1), self)
@@ -139,8 +139,8 @@ class MappingStageBar(QFrame):
         self._last_committed_horizon: str | None = None
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(10, 4, 10, 4)
-        row.setSpacing(8)
+        row.setContentsMargins(8, 2, 8, 2)
+        row.setSpacing(6)
 
         horizon_label = QLabel("层位", self)
         horizon_label.setObjectName("MappingStageMetaLabel")
@@ -149,7 +149,8 @@ class MappingStageBar(QFrame):
         self.horizon_combo.setObjectName("MappingHorizonCombo")
         self.horizon_combo.setEditable(False)
         self.horizon_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.horizon_combo.setFixedWidth(160)
+        # 与全局栏共享顶行（第 1 行）：固定 130 容短层位名，长名进下拉。
+        self.horizon_combo.setFixedWidth(130)
         self.horizon_combo.setPlaceholderText("选择层位")
         self.horizon_combo.setToolTip(
             "编图层位：从工程层序格架或导入的层位数据中选择（相图按层位进行）")
@@ -171,7 +172,7 @@ class MappingStageBar(QFrame):
             if index < len(STAGE_ORDER) - 1:
                 track = QFrame(self)
                 track.setObjectName("MappingStageTrack")
-                track.setFixedSize(28, 2)
+                track.setFixedSize(20, 2)
                 row.addWidget(track, 0, Qt.AlignmentFlag.AlignVCenter)
                 self._tracks.append(track)
         row.addStretch(1)
