@@ -403,3 +403,74 @@ def test_inspector_manual_close_beats_policy_reopen(qtbot, tmp_path):
     shell.resize(1600, 900)  # 宽屏
     qtbot.wait(300)
     assert ws.inspector_dock.isHidden(), "policy must not override user close"
+
+
+# --- R3 review regressions ------------------------------------------------
+
+
+def test_host_resize_triggers_policy_when_docks_absorb_shrink(qtbot, tmp_path):
+    """dock 吸收窗口缩量（帧宽不变）时，宿主 resize 仍触发策略（R3 P1-1）。"""
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+    # 孤立构造双窗口模型：策略宽度输入 = AppShell（frame.window()）；
+    # resizeDocks/宿主 resize 生效要求宿主可见（隐藏顶层忽略 resize）。
+    shell.show()
+    ws._dock_host.show()
+    shell.resize(1600, 900)
+    ws._dock_host.resize(1600, 900)
+    qtbot.wait(300)
+    ws._viewport_timer.stop()
+
+    # 精确验证宿主路径：短路帧的 resizeEvent（帧宽不变的等价模拟），
+    # 只有宿主 eventFilter 能触发评估。生产中两者是同一主窗口。
+    real_frame_resize = type(ws).resizeEvent
+    type(ws).resizeEvent = lambda self, event: super(type(self), self).resizeEvent(event)  # noqa: E731
+    try:
+        shell.resize(1000, 700)  # 策略宽度输入（frame.window()）
+        ws._dock_host.resize(1000, 700)  # 触发宿主 Resize 事件
+        qtbot.wait(300)
+    finally:
+        type(ws).resizeEvent = real_frame_resize
+    assert ws.inspector_dock.isHidden(), (
+        "host-window resize must evaluate the viewport policy even when "
+        "the central frame's own width does not change"
+    )
+    assert ws._responsive_hid_inspector
+
+
+def test_reset_default_layout_reapplies_sizes(qtbot, tmp_path):
+    """「恢复默认布局」必须重应用首运行空间分配（R3 P1-2）。"""
+    from PySide6.QtCore import Qt
+
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+    shell.show()
+    ws._dock_host.show()
+    shell.resize(1600, 900)
+    ws._dock_host.resize(1600, 900)
+    qtbot.wait(300)
+    # 用户把 nav 拖宽（程序化模拟用户拖拽）。
+    ws._dock_host.resizeDocks(
+        [ws.nav_dock], [700], Qt.Orientation.Horizontal
+    )
+    qtbot.wait(100)
+
+    # 断言契约：重置必须发出描述符尺寸请求（resizeDocks 是尽力而为，
+    # 几何效果平台相关——offscreen 下不可稳定断言；几何验证由真实平台
+    # 视觉 QA 覆盖，与首运行测试同一契约层级）。
+    requests: list[list[int]] = []
+    real_resize = ws._dock_host.resizeDocks
+    ws._dock_host.resizeDocks = (
+        lambda docks, sizes, orient: (
+            requests.append(list(sizes)), real_resize(docks, sizes, orient)
+        )[1]
+    )
+    ws._reset_default_layout()
+    qtbot.wait(250)
+    assert requests, "reset must re-issue descriptor pane sizes"
+    flat = [size for batch in requests for size in batch]
+    # 描述符表：nav 280 / stage 280 / input 280 / nav⊥stage 420+280 /
+    # inspector+layer 300+300 / agent 245 / tasks 200 / linked 200。
+    assert 280 in flat and 300 in flat and 420 in flat and 245 in flat

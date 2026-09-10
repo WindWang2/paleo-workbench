@@ -13,6 +13,23 @@ from paleo_workbench.ui.visual_qa_v9 import V9_STATES
 pytestmark = pytest.mark.usefixtures("qapp")
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_global_layout_settings():
+    """清空工作站全局布局 QSettings（R3 P1-1 测试面）。
+
+    QA 窗口 restore 全局 window_state；同会话早先文件残留的布局会把
+    中央画布钉在地板、帧 resizeEvent 不发，compact 断言假失败。
+    """
+    from PySide6.QtCore import QSettings
+
+    settings = QSettings("PaleoWorkbench", "Workstation")
+    settings.clear()
+    settings.sync()
+    yield
+    settings.clear()
+    settings.sync()
+
+
 def _project(tmp_path: Path) -> ProjectDocument:
     project = ProjectDocument.new("Pearl River Mouth", region="HZ26")
     project.meta.project_root = str(tmp_path)

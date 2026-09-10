@@ -152,6 +152,10 @@ class WorkstationFrame(QWidget):
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(350)
         self._save_timer.timeout.connect(self._save_layout)
+        # R3 P1-1：dock 吸收窗口缩量时本帧宽度不变（resizeEvent 不发），
+        # 策略只挂在帧上会失明——恰是紧凑策略该起效的场景。宿主窗口的
+        # Resize 事件同样（经同一 180ms 去抖）触发评估。
+        self._dock_host.installEventFilter(self)
         # V9：viewport 策略评估定时器（180ms 去抖，restart-on-resize）。
         self._viewport_timer = QTimer(self)
         self._viewport_timer.setSingleShot(True)
@@ -1131,12 +1135,20 @@ class WorkstationFrame(QWidget):
             except RuntimeError:
                 return  # 死壳迟到的可见性信号：C++ 已销毁，忽略
 
+    def eventFilter(self, watched, event) -> None:  # noqa: N802 — Qt 契约
+        from PySide6.QtCore import QEvent
+
+        if watched is self._dock_host and event.type() == QEvent.Type.Resize:
+            self._request_viewport_evaluation()
+        return super().eventFilter(watched, event)
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         # V9（B-4 修复）：viewport 策略评估去抖化——绝不在 resizeEvent
         # 热路径里改布局（旧实现拖 dock 时中央帧宽度跨过 1280 阈值会
         # 立即隐藏检查器，整个 dock 布局在光标下重排）。拖拽/连续缩放
-        # 只重启 180ms 定时器，静止后才评估一次。
+        # 只重启 180ms 定时器，静止后才评估一次。窗口级 resize 由
+        # eventFilter（宿主）补充触发（R3 P1-1）。
         self._request_viewport_evaluation()
 
     def _attribute_inspector_user_toggle(self, visible: bool) -> None:
@@ -1385,8 +1397,8 @@ class WorkstationFrame(QWidget):
             dock_manager.set_active_preset(WorkspacePreset.WORKSTATION_COMPOSITE)
         elif preset_id == "integrated":
             dock_manager.set_active_preset(WorkspacePreset.WORKSTATION_INTERPRETATION)
-            if vis.agent:
-                self._expand_agent_dock()
+            # R3 P2-1：预设路径不再触达任何 resizeDocks（B-3 规则的字面
+            # 兑现；grow-only 展开只属于显式打开 Agent 的动作路径）。
             if vis.tasks:
                 self.task_dock.raise_()
 
@@ -1398,9 +1410,21 @@ class WorkstationFrame(QWidget):
         self._save_timer.start()
 
     def _reset_default_layout(self) -> None:
-        """面板菜单「恢复默认布局」→ 停靠几何重置 + 默认编图可见性。"""
+        """面板菜单「恢复默认布局」→ 停靠几何重置 + 默认尺寸 + 默认可见性。
+
+        R3 P1-2：旧实现只重排停靠结构与可见性，不重应用首运行空间
+        分配——被用户拖垮的 dock 几何（如检查器 700px）在「恢复默认」
+        后原样保留，唯一恢复途径是抹 QSettings。显式重置是
+        ``apply_first_run_sizes`` 的合法调用点（与首运行同一份描述符
+        尺寸）。
+        """
         self.dock_all_panels()
         self.apply_layout_preset(RESET_LAYOUT_PRESET_ID)
+        if not self._layout_frozen and self.isVisible():
+            # 50ms：重排后的 QMainWindow 布局需要一轮事件循环安定，
+            # 同帧/0ms 的 resizeDocks 会被布局计算覆盖（实测重置无效
+            # 的根因）；与首运行 restore 的补投节奏一致。
+            QTimer.singleShot(50, self, self._apply_default_pane_sizes)
 
     def _reset_composite_layout(self) -> None:
         """恢复编图面板的默认停靠布局（不改可见性）。"""
