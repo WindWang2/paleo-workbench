@@ -2237,6 +2237,9 @@ class CompositeDocument(QWidget):
     # -- 画布右键菜单（V10 M7） -------------------------------------------------
 
     def _on_canvas_context_menu(self, position) -> None:
+        self._build_canvas_menu().exec(self.canvas.mapToGlobal(position))
+
+    def _build_canvas_menu(self):
         """画布上下文菜单：视图 / 工具 / 选择 / 编辑会话 / 捕捉·拓扑 / 图层。
 
         菜单项直接挂 ``action_controller`` 的 QAction（求值器输出已写入
@@ -2254,43 +2257,38 @@ class CompositeDocument(QWidget):
                 if action is not None and action.isVisible():
                     menu.addAction(action)
 
+        def _group_visible(*ids: str) -> bool:
+            return any(
+                actions.get(tool_id) is not None
+                and actions.get(tool_id).isVisible()
+                for tool_id in ids
+            )
+
         menu = QMenu(self.canvas)
         _add(menu, "zoom_in", "zoom_out", "full_extent",
              "previous_extent", "next_extent", "refresh")
         menu.addSeparator()
         _add(menu, "identify", "select", "select_rectangle", "measure_distance")
         # 选择命令组：无活动矢量层时整组不出现（组语义而非逐项隐藏）。
-        if any(
-            actions.get(tool_id) is not None and actions.get(tool_id).isVisible()
-            for tool_id in ("select_all", "invert_selection", "clear_selection")
-        ):
+        if _group_visible("select_all", "invert_selection", "clear_selection"):
             menu.addSeparator()
             _add(menu, "select_all", "invert_selection", "clear_selection")
         # 编辑会话组。
-        if any(
-            actions.get(tool_id) is not None and actions.get(tool_id).isVisible()
-            for tool_id in ("toggle_editing", "save_edits", "rollback",
-                            "undo", "redo", "delete_selected")
-        ):
+        if _group_visible("toggle_editing", "save_edits", "rollback",
+                          "undo", "redo", "delete_selected"):
             menu.addSeparator()
             _add(menu, "toggle_editing", "save_edits", "rollback")
             _add(menu, "undo", "redo", "delete_selected")
         # 捕捉·拓扑：开关 + 设置入口（设置对话框是配置面，常驻）。
-        if any(
-            actions.get(tool_id) is not None and actions.get(tool_id).isVisible()
-            for tool_id in ("snapping", "topology")
-        ):
+        if _group_visible("snapping", "topology"):
             menu.addSeparator()
             _add(menu, "snapping", "topology")
             menu.addAction("捕捉设置…", self._open_snapping_settings)
         # 图层泛用组。
-        if any(
-            actions.get(tool_id) is not None and actions.get(tool_id).isVisible()
-            for tool_id in ("attribute_table", "layer_properties", "layer_zoom")
-        ):
+        if _group_visible("attribute_table", "layer_properties", "layer_zoom"):
             menu.addSeparator()
             _add(menu, "attribute_table", "layer_properties", "layer_zoom")
-        menu.exec(self.canvas.mapToGlobal(position))
+        return menu
 
     def _on_tool_operation(self, edits_data: bool = True) -> None:
         """工具操作回执：数据编辑重组快照，纯选择 / 指针反馈只刷状态。"""

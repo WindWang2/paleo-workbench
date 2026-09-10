@@ -351,7 +351,14 @@ def stage_group_visibility(stage_value: str | None) -> dict[str, bool]:
     return {group: overrides.get(group, True) for group in TOOL_GROUPS}
 
 def _stage_group_gate(ctx: ToolContext, tool_id: str) -> str | None:
-    """组隐藏（hidden）判据；返回 None 表示该门放行。调用方负责区分 hidden。"""
+    """组隐藏（hidden）判据；返回 None 表示该门放行。调用方负责区分 hidden。
+
+    ``cancel`` 豁免：取消是全局逃生口（Esc 语义），任何阶段裁决（含
+    fail-closed 的未知阶段）都不得把它藏掉——否则未知阶段下 Esc/取消
+    按钮全部失效（V10 状态矩阵发现的 P1）。
+    """
+    if tool_id == "cancel":
+        return None
     if ctx.mapping_stage is None:
         return None
     visibility = _stage_group_visibility_for(ctx)
@@ -752,7 +759,8 @@ def evaluate_tool(tool_id: str, ctx: ToolContext) -> ToolAvailability:
         # 阶段裁决（组隐藏 → 受治理编辑动作），单一推导自 StageToolProfile。
         # 门序总则：工程未开、以及存在于图层之上的角色/事实判词（RAW/
         # 冻结/组锁/源缺失）优先于阶段呈现；更细的门禁（会话/几何/选择）
-        # 被阶段隐藏覆盖（阶段外动作整条隐藏，QGIS 惯例）。
+        # 被阶段隐藏覆盖（阶段外动作整条隐藏，QGIS 惯例）。cancel 豁免
+        # 阶段隐藏（_stage_group_gate 内裁决——Esc 语义不可按阶段下线）。
         stage_reason = _stage_group_gate(ctx, tool_id)
         if stage_reason is None:
             stage_reason = _edit_action_stage_gate(ctx, tool_id)
