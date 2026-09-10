@@ -34,7 +34,6 @@ ALLOWED_VIOLATIONS: dict[str, int] = {
     "ui/map_symbology_bridge.py": 2,
     "ui/workstation/common.py": 1,
     "ui/status_bar.py": 1,
-    "ui/map_status_bar.py": 1,
     "ui/map_layer_properties.py": 1,
 }
 
