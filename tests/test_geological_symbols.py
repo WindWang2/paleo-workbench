@@ -66,7 +66,7 @@ SECTION6_ROLES = (
 # the contract; the STYLE_LIBRARY presets are its established shape).
 _FALLBACK_KEYS = set().union(
     *(set(preset.to_dict()) for preset in STYLE_LIBRARY.values())
-) | set(VectorStyle().to_dict()) | {"categories", "ranges", "labels"}
+) | set(VectorStyle().to_dict()) | {"categories", "ranges", "labels", "fill_patterns"}
 
 
 # -- vocabulary ------------------------------------------------------------

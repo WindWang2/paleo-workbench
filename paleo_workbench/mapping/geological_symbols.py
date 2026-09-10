@@ -32,6 +32,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping
 
+from paleo_workbench.mapping.facies_patterns import pattern_id_for_facies
 from paleo_workbench.mapping.geological_style_library import (
     CATEGORY_BOUNDARY,
     CATEGORY_FACIES,
@@ -305,10 +306,24 @@ def _fault_rules() -> tuple[dict[str, Any], ...]:
     )
 
 
-def _facies_rules() -> tuple[dict[str, Any], ...]:
+def _facies_rules(*, with_patterns: bool = False) -> tuple[dict[str, Any], ...]:
+    rules: list[dict[str, Any]] = []
+    for value, fill, label in _FACIES_CLASSES:
+        rule: dict[str, Any] = {"value": value, "fill": fill, "label": label}
+        if with_patterns:
+            pattern_id = pattern_id_for_facies(value)
+            if pattern_id is not None:
+                rule["pattern"] = pattern_id
+        rules.append(rule)
+    return tuple(rules)
+
+
+def _facies_fill_patterns() -> tuple[tuple[str, str], ...]:
+    """(facies value, pattern id) pairs for classes that have a tile."""
     return tuple(
-        {"value": value, "fill": fill, "label": label}
-        for value, fill, label in _FACIES_CLASSES
+        (value, pattern_id)
+        for value, _fill, _label in _FACIES_CLASSES
+        if (pattern_id := pattern_id_for_facies(value)) is not None
     )
 
 
@@ -437,8 +452,10 @@ _SYMBOL_BUILDERS: tuple[GeologicalSymbolDef, ...] = (
             categories=tuple(
                 (value, fill, label) for value, fill, label in _FACIES_CLASSES
             ),
+            fill_patterns=_facies_fill_patterns(),
         ),
-        renderer_kind="categorized", field_name="facies_name", rules=_facies_rules(),
+        renderer_kind="categorized", field_name="facies_name",
+        rules=_facies_rules(with_patterns=True),
         metadata={
             "legend_label": "沉积相",
             "legend_groups": [dict(group) for group in _FACIES_LEGEND_GROUPS],

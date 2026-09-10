@@ -158,6 +158,9 @@ class VectorStyle:
     field: str = ""
     categories: tuple[tuple[str, str, str], ...] = ()  # (value, fill, label)
     ranges: tuple[tuple[float, float, str, str], ...] = ()  # (lo, hi, fill, label)
+    # Per-category SVG pattern overlay (category value → pattern id, e.g. a
+    # facies_patterns pattern id); kept tuple-styled like ``categories``.
+    fill_patterns: tuple[tuple[str, str], ...] = ()  # (value, pattern_id)
     labels: TextStyle | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -175,6 +178,11 @@ class VectorStyle:
             data["categories"] = [list(entry) for entry in self.categories]
         if self.ranges:
             data["ranges"] = [list(entry) for entry in self.ranges]
+        if self.fill_patterns:
+            data["fill_patterns"] = {
+                str(value): str(pattern_id)
+                for value, pattern_id in self.fill_patterns
+            }
         if self.labels is not None:
             data["labels"] = self.labels.to_dict()
         return data
@@ -245,6 +253,18 @@ class VectorStyle:
                     continue
         if ranges:
             replacements["ranges"] = tuple(ranges)
+        fill_patterns: list[tuple[str, str]] = []
+        raw_patterns = values.get("fill_patterns")
+        if isinstance(raw_patterns, Mapping):
+            fill_patterns.extend(
+                (str(key), str(pattern_id))
+                for key, pattern_id in raw_patterns.items()
+            )
+        for entry in raw_patterns if isinstance(raw_patterns, (list, tuple)) else ():
+            if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                fill_patterns.append((str(entry[0]), str(entry[1])))
+        if fill_patterns:
+            replacements["fill_patterns"] = tuple(fill_patterns)
         if values.get("labels") is not None:
             replacements["labels"] = TextStyle.from_dict(values.get("labels"))
         return cls(**replacements) if replacements else cls()
