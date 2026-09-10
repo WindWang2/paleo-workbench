@@ -73,6 +73,9 @@ def test_load_initial_facies_defaults_to_workarea_blank(qtbot, monkeypatch):
     assert min(xs) <= -2 and max(xs) >= 12
     assert min(ys) <= -2 and max(ys) >= 2
     assert any("空白相" in text for text in messages)
+    # 占位底必须半透明（带 alpha），不得用默认不透明相带填充压住基础层。
+    fill = str((layer.style or {}).get("fill") or "")
+    assert fill.startswith("#") and len(fill) == 9 and fill != "#6c8ebf"
 
 
 def test_load_initial_facies_without_workarea_keeps_dead_road(qtbot, monkeypatch):
