@@ -63,6 +63,7 @@ STAGE_CONTEXT_ACTIONS: dict[str, tuple[tuple[str, str], ...]] = {
     "constraint_factor": (
         ("open_factor_workbench", "单因素工作台"),
         ("overlay_factor_results", "叠加单因素结果"),
+        ("commit_constraints", "提交约束版本"),
         ("stage_save", "保存阶段成果"),
     ),
     "integrated_compilation": (
@@ -133,6 +134,7 @@ class StageActionDispatcher:
             "open_factor_workbench": self.open_factor_workbench,
             "run_factor": self.open_factor_workbench,
             "overlay_factor_results": self.overlay_factor_results,
+            "commit_constraints": self.commit_constraints,
             "select_evidence": self.select_evidence,
             "create_integrated_draft": self.create_integrated_draft,
             "create_integrated_boundary": self.create_integrated_boundary,
@@ -1060,6 +1062,51 @@ class StageActionDispatcher:
         self.composite.layer_manager.select_layer(layer_id)
         self.composite.status_message.emit(
             f"已创建 {kind.label}（自动进入 02 地质约束组；数字化后保存生效）")
+
+    def commit_constraints(self) -> None:
+        """提交约束版本（V9 P0-2）：约束编辑 → catalog DERIVED 版本链。
+
+        与 harness ``constraint.commit`` 调用同一领域函数
+        （``commit_all_constraints``）——单一实现，双入口。此前提交仅
+        agent 可达：生产 UI 永远无法建立约束版本链，
+        ``constraints:current`` 新鲜度永久 UNKNOWN。
+        """
+        document = self.project
+        if document is None:
+            self.composite.status_message.emit("未打开工程")
+            return
+        from paleo_workbench.catalog.runtime import get_catalog_service
+        from paleo_workbench.workflow.constraint_versions import (
+            commit_all_constraints,
+        )
+
+        try:
+            service = get_catalog_service()
+        except Exception:
+            service = None
+        if service is None:
+            self.composite.status_message.emit(
+                "目录服务不可用——无法提交约束版本（不伪称已提交）")
+            return
+        try:
+            reports = commit_all_constraints(
+                document, service, actor="workstation")
+        except Exception as exc:  # 提交失败必须可见
+            self.composite.status_message.emit(f"约束提交失败：{exc}")
+            return
+        committed = [r for r in reports if r.committed]
+        unchanged = sum(1 for r in reports if r.reason == "unchanged")
+        no_content = sum(1 for r in reports if r.reason == "no_content")
+        if committed:
+            versions = ", ".join(r.version_id or "?" for r in committed)
+            self.composite.status_message.emit(
+                f"已提交 {len(committed)} 个约束组新版本（{versions}）；"
+                f"{unchanged} 组内容未变，{no_content} 组无内容")
+            self.composite._sync_workspace_state_to_project()
+        else:
+            self.composite.status_message.emit(
+                f"无新版本：{unchanged} 组内容未变，{no_content} 组无内容"
+                if reports else "工程内没有约束组")
 
     # -- Phase 3 ------------------------------------------------------------------
 
