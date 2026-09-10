@@ -38,6 +38,12 @@ public:
   void reapCanvasTables(std::uintptr_t canvas_addr);
   void setCanvasWhiteBackground(std::uintptr_t canvas);
   void setDestinationCrs(std::uintptr_t canvas, const std::string& crs_auth_id);
+  /// V9 W1: canvas authority scale (QgsMapCanvas::scale()); 0.0 when the
+  /// canvas has no extent yet. Host ToolContext.scale_denominator source.
+  double canvasScale(std::uintptr_t canvas) const;
+  /// V9 W7: current canvas destination CRS auth id ("" when unset/invalid).
+  /// Digitize-commit CRS guard compares it against the session layer's CRS.
+  std::string canvasDestinationCrs(std::uintptr_t canvas) const;
   void setCanvasExtent(std::uintptr_t canvas, double xmin, double ymin,
                        double xmax, double ymax);
   std::vector<double> canvasExtent(std::uintptr_t canvas) const;

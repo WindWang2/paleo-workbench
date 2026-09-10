@@ -52,12 +52,10 @@ def _record_bounds(record: Mapping[str, Any]) -> Bounds:
 
 
 def _intersects(left: Bounds, right: Bounds) -> bool:
-    return not (
-        left[2] < right[0]
-        or left[0] > right[2]
-        or left[3] < right[1]
-        or left[1] > right[3]
-    )
+    # V9 W7：AABB 相交判定收敛到 facade 唯一实现（闭区间语义不变）。
+    from paleo_workbench.mapping.geometry_operations import bbox_intersects
+
+    return bbox_intersects(left, right)
 
 
 @dataclass(slots=True)

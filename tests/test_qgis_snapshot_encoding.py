@@ -285,9 +285,12 @@ def test_data_errors_do_not_trigger_full_reship() -> None:
 
 
 @pytest.mark.qgis
-def test_feature_delta_updates_mirror_in_place_on_qgis_path():
+def test_feature_delta_updates_mirror_in_place_on_qgis_path(qapp):
     """#932 (bridge integration): a single-feature edit updates the live QGIS
-    mirror via the delta channel — no full re-parse, correct final geometry."""
+    mirror via the delta channel — no full re-parse, correct final geometry.
+
+    qapp 显式声明（V9 测试卫生）：桥 initialize 需要 QApplication——此前
+    依赖同批早先测试建 app，单文件运行即断（V8 遗留顺序依赖）。"""
     import numpy as np
     import pytest
 

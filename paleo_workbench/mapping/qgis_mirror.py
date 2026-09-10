@@ -21,8 +21,17 @@ def _normalize_auth_id(crs: str) -> str:
 
 
 def _geographic_auth(crs: str) -> bool:
-    auth = _normalize_auth_id(crs).upper()
-    return auth in {"EPSG:4326", "EPSG:4269", "EPSG:4258"}
+    """V9 W3: axis truth delegated to the CRS contract (single predicate).
+
+    The pre-V9 literal set {4326, 4269, 4258} silently classified CGCS2000
+    (4490), Beijing-1954 (4214), Xian-1980 (4610)… as non-geographic, so
+    their layers skipped the degree-domain extent check. Unverifiable ids
+    stay non-geographic here (fail-open matches the historic contract: the
+    extent check only drops CRSs it can prove wrong).
+    """
+    from paleo_workbench.mapping.crs_contract import crs_is_geographic
+
+    return crs_is_geographic(crs) is True
 
 
 def _extent_fits_crs(crs: str, extent) -> bool:
@@ -37,20 +46,31 @@ def _extent_fits_crs(crs: str, extent) -> bool:
     )
 
 
-def _qgis_crs_for_layer(layer, snapshot) -> str:
+def _qgis_crs_for_layer(layer, snapshot, *, on_drop=None) -> str:
     auth = _normalize_auth_id(
         getattr(layer, "crs", "") or getattr(snapshot, "project_crs", "") or "")
     if auth and not _extent_fits_crs(auth, getattr(layer, "extent", None)):
+        # V9 W3: a dropped CRS is a degraded mirror state, not a silent one.
+        if on_drop is not None:
+            on_drop(
+                getattr(layer, "id", ""),
+                f"layer extent outside degree domain — CRS {auth} not set on mirror",
+            )
         return ""
     return auth
 
 
-def _qgis_crs_for_snapshot(snapshot) -> str:
+def _qgis_crs_for_snapshot(snapshot, *, on_drop=None) -> str:
     auth = _normalize_auth_id(getattr(snapshot, "project_crs", "") or "")
     if not auth:
         return ""
     for layer in getattr(snapshot, "layers", ()) or ():
         if not _extent_fits_crs(auth, getattr(layer, "extent", None)):
+            if on_drop is not None:
+                on_drop(
+                    getattr(layer, "id", ""),
+                    f"snapshot layer extent outside degree domain — canvas CRS {auth} not pushed",
+                )
             return ""
     return auth
 
@@ -73,8 +93,13 @@ def _scalar_data_cache():
     return _SCALAR_DATA_CACHE
 
 
-def _fields_json_for_metadata(metadata: dict) -> str:
-    """fields_json from the layer's recorded role (spec authority)."""
+def _fields_json_for_metadata(metadata: dict, *, on_skip=None) -> str:
+    """fields_json from the layer's recorded role (spec authority).
+
+    V9 W6: a role that fails spec resolution is a diagnosable schema gap,
+    not a silent legacy path — ``on_skip`` receives the reason whenever the
+    caller can record it (mirror diagnostics).
+    """
     role = str((metadata or {}).get("role") or "")
     if not role:
         return ""
@@ -88,9 +113,14 @@ def _fields_json_for_metadata(metadata: dict) -> str:
 
         return json.dumps(
             fields_json_for_spec(spec_for_role(role)), ensure_ascii=False)
-    except (KeyError, ValueError):
-        return ""  # unknown role: legacy path, honestly un-schematized
-
+    except (KeyError, ValueError) as exc:
+        if on_skip is not None:
+            on_skip(
+                str((metadata or {}).get("id") or ""),
+                f"role {role!r} has no GeologicalLayerSpec — layer published "
+                f"un-schematized ({exc})",
+            )
+        return ""
 
 def release_scalar_data_cache() -> None:
     """Drop stale scalar data mirrors (called on host teardown)."""
@@ -216,6 +246,51 @@ def _feature_signature(feature: dict) -> tuple:
     )
 
 
+def _verify_published_schema(stack, doc_id: str, fields_json: str, _sink) -> None:
+    """V9 W6：发布后读回 provider schema 与 spec wire 比对（漂移进诊断）。
+
+    只比对契约面（字段名序 + 类型）——别名/控件/默认值由 V8 M1 的
+    applyFieldSchema 幂等覆盖，等价判据不重复实现。桥缺失自省面或读回
+    失败时记录诊断（不阻塞发布——镜像仍可用，漂移在案）。
+    """
+    probe = getattr(stack, "mirror_layer_schema_json", None)
+    if not callable(probe):
+        return
+    try:
+        import json as _json
+
+        reported = _json.loads(probe(str(doc_id)))
+        want = _json.loads(fields_json)
+    except Exception as exc:
+        _sink(str(doc_id), f"schema verify failed: {exc}")
+        return
+    if not reported.get("exists"):
+        _sink(str(doc_id), "schema verify: layer missing after publish")
+        return
+    # wire 形状 = 字段条目列表（qgis_layer_schema.fields_json_for_spec 与
+    # C++ parseFieldSchema 的契约；兼容 {"fields": [...]} 包装形态）。
+    want_fields = list(want.get("fields") or ()) if isinstance(want, dict) else list(want)
+    got_fields = list(reported.get("fields") or [])
+    want_names = [str(field.get("name")) for field in want_fields]
+    got_names = [str(field.get("name")) for field in got_fields]
+    if want_names != got_names:
+        _sink(
+            str(doc_id),
+            f"schema drift: published fields {got_names} != spec {want_names}",
+        )
+        return
+    want_types = {str(f.get("name")): str(f.get("type")) for f in want_fields}
+    for field in got_fields:
+        name = str(field.get("name"))
+        expected = want_types.get(name, "")
+        actual = str(field.get("type") or "")
+        if expected and actual and expected != actual:
+            _sink(
+                str(doc_id),
+                f"schema drift: field {name} type {actual!r} != spec {expected!r}",
+            )
+
+
 def mirror_snapshot_to_stack(
     stack, canvas_address, snapshot, diags=None, *, groups: bool = False
 ) -> tuple[list[str], list[str], list[str]]:
@@ -244,7 +319,7 @@ def mirror_snapshot_to_stack(
             diags.append((doc_id, message))
 
     failures: list[str] = []
-    canvas_crs = _qgis_crs_for_snapshot(snapshot)
+    canvas_crs = _qgis_crs_for_snapshot(snapshot, on_drop=_sink)
     if canvas_crs:
         try:
             stack.set_destination_crs(canvas_address, canvas_crs)
@@ -326,8 +401,12 @@ def mirror_snapshot_to_stack(
                 style_raw = {}
         # v7 R2-F4: spec-authored field schema (fields_json) reaches the
         # mirror when the layer declares its role; absent roles keep the
-        # legacy property-only path (honest, no fake enforcement).
-        fields_json = _fields_json_for_metadata(metadata)
+        # legacy property-only path (honest, no fake enforcement). Unknown
+        # roles surface a diagnostic (V9 W6) instead of vanishing.
+        fields_json = _fields_json_for_metadata(
+            metadata,
+            on_skip=lambda _ignored, message, _lid=layer.id: _sink(_lid, message),
+        )
         qgis_style = style_raw.get("qgis_style") if isinstance(style_raw, dict) else None
         has_qgis_renderer = False
         has_qgis_labeling = False
@@ -421,7 +500,7 @@ def mirror_snapshot_to_stack(
         try:
             qgis_id = stack.upsert_mirror_layer(
                 layer.id, layer.name or layer.id, geom,
-                _qgis_crs_for_layer(layer, snapshot),
+                _qgis_crs_for_layer(layer, snapshot, on_drop=_sink),
                 full_collection,
                 renderer_xml, labeling_xml, legacy_style,
                 bool(layer.visible), float(layer.opacity),
@@ -433,9 +512,13 @@ def mirror_snapshot_to_stack(
             for drop in ("delta", "fields_json", "data_revision"):
                 upsert_kwargs.pop(drop, None)
             delta_json = ""
+            if fields_json:
+                # V9 W6: the retry silently published without the spec
+                # schema before — now the drift is on the record.
+                _sink(layer.id, "fields_json dropped on signature drift — published un-schematized")
             qgis_id = stack.upsert_mirror_layer(
                 layer.id, layer.name or layer.id, geom,
-                _qgis_crs_for_layer(layer, snapshot),
+                _qgis_crs_for_layer(layer, snapshot, on_drop=_sink),
                 full_collection,
                 renderer_xml, labeling_xml, legacy_style,
                 bool(layer.visible), float(layer.opacity),
@@ -458,6 +541,10 @@ def mirror_snapshot_to_stack(
                  _feature_signature(f) for f in features})
         seen.append(layer.id)
         mirrored_qgis_ids.append(qgis_id)
+        # V9 W6：本次发布了 fields_json 的层做发布后验证（漂移可诊断，
+        # 不再静默）。桥无自省面（旧版本）时 probe 缺席 = 跳过（诚实）。
+        if fields_json and upsert_kwargs.get("fields_json"):
+            _verify_published_schema(stack, layer.id, fields_json, _sink)
     # v7 §9: ledger follows the mirror registry — entries for layers no
     # longer published are dropped so a re-added layer ships fully.
     keep_keys = {_ledger_key(stack, doc_id) for doc_id in seen} | {

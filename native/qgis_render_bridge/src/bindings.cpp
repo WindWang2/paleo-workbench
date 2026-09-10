@@ -405,7 +405,9 @@ py::dict capability_manifest() {
           "native_vertex_move", "native_select_identify",
           // 0.4.0a0 (V8): memory-provider 字段 schema 应用（M1）、
           // 通用行指示器（M5）、legend filter_layers（M8）。
-          "provider_fields", "row_indicators", "legend_filter"}) {
+          "provider_fields", "row_indicators", "legend_filter",
+          // 0.5.0a0 (V9): topological-editing push in set_snapping_config.
+          "snapping_topological_editing"}) {
         features.append(feature);
     }
     manifest["features"] = features;
@@ -421,7 +423,9 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
     // 0.4.0a0 (V8): provider field-schema application (fields_json →
     // QgsFields/constraints/widgets), generic row indicators, legend
     // filter_layers.
-    module.attr("__version__") = "0.4.0a0";
+    // 0.5.0a0 (V9): topological_editing push via set_snapping_config,
+    // canvas_scale / canvas_destination_crs introspection.
+    module.attr("__version__") = "0.5.0a0";
     module.attr("__build_commit__") = "unknown";
     py::register_exception<GeometryServiceError>(module, "QgisGeometryError");
 
@@ -686,6 +690,11 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
         })
         .def("set_canvas_white_background", &pwb::qgis_render::QgisMapStack::setCanvasWhiteBackground)
         .def("set_destination_crs", &pwb::qgis_render::QgisMapStack::setDestinationCrs)
+        // V9 W1/W7: canvas-authority scale + destination-CRS introspection
+        // (ToolContext.scale_denominator source; digitize-commit CRS guard).
+        .def("canvas_scale", &pwb::qgis_render::QgisMapStack::canvasScale)
+        .def("canvas_destination_crs",
+             &pwb::qgis_render::QgisMapStack::canvasDestinationCrs)
         .def("set_canvas_extent", &pwb::qgis_render::QgisMapStack::setCanvasExtent)
         .def("canvas_extent", &pwb::qgis_render::QgisMapStack::canvasExtent)
         .def("zoom_to_full_extent", &pwb::qgis_render::QgisMapStack::zoomToFullExtent)

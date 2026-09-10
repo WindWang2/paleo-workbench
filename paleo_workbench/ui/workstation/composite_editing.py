@@ -484,6 +484,10 @@ class CompositeEditController(QObject):
         # flush 提交都必须经过它——历史旁路：属性表直接 layer.start_editing()、
         # flush 无角色复查（V6 baseline B-P0-1）。
         self._edit_gate: Any = None
+        # V9 W6/W9：角色查询单点注入（宿主 = stage membership 权威）。
+        # 快照 metadata.role（镜像 fields_json 的来源）与捕获 spec 的默认
+        # 属性/捕捉推荐都从这里读——控制器不持有第二份角色表。
+        self._role_lookup: Any = None
 
     # -- RAW/锁定门禁（V6 单点） -------------------------------------------------
 
@@ -497,6 +501,64 @@ class CompositeEditController(QObject):
             return True, ""
         return self._edit_gate(str(layer_id))
 
+    def set_role_lookup(self, lookup) -> None:
+        """注入角色查询 ``layer_id -> LayerRole|value|None``（stage membership 权威）。
+
+        无注入（独立用/测试）= 无角色语义：快照 metadata 不带 role、
+        捕获回落模板默认——与 V8 行为一致，不猜。
+        """
+        self._role_lookup = lookup
+
+    def role_of_layer(self, layer_id: str) -> str:
+        """图层角色值（LayerRole.value；未知/无注入 = ""）。"""
+        if self._role_lookup is None:
+            return ""
+        try:
+            role = self._role_lookup(str(layer_id))
+        except Exception:
+            return ""
+        if role is None:
+            return ""
+        return str(getattr(role, "value", role) or "")
+
+    def _capture_defaults_for_role(self, layer_id: str) -> dict[str, object]:
+        """角色捕获语义的默认属性（spec.template_key → 模板 field_defaults）。
+
+        与显式 ``create_layer(template=)`` 的区别只在派生方向：这里从角色
+        反推模板；两者的字段值同源（同一注册表），不会漂移出第二套默认。
+        """
+        from paleo_workbench.mapping_workspace.capture_spec import (
+            capture_spec_for_role,
+        )
+
+        spec = capture_spec_for_role(self.role_of_layer(layer_id))
+        if spec is None or not spec.template_key:
+            return {}
+        template = _TEMPLATE_BY_KEY.get(spec.template_key)
+        return template.field_defaults() if template is not None else {}
+
+    def apply_capture_spec(self, layer_id: str) -> str | None:
+        """按图层角色应用捕获语义（V9 W9：捕捉推荐 + 拓扑建议）。
+
+        在角色图层创建/角色生效时由宿主调用；返回用户可读的推荐解释
+        （状态条呈现），无角色语义时返回 None 且不改动任何配置。
+        默认属性与模板不在此处应用——它们经 ``create_layer(template=)``
+          /``_capture_defaults`` 在会话捕获时派生。
+        """
+        from paleo_workbench.mapping_workspace.capture_spec import (
+            capture_spec_for_role,
+        )
+
+        spec = capture_spec_for_role(self.role_of_layer(layer_id))
+        if spec is None:
+            return None
+        summary = self._snapping.apply_role_profile(layer_id, spec.role)
+        self._push_snapping_config()
+        hint = "" if summary is None else summary
+        if spec.recommend_topological_editing and not self._topology.enabled:
+            hint += "；建议开启拓扑编辑（相带拼接共享节点）" if hint else "建议开启拓扑编辑"
+        return hint or None
+
     # -- 画布绑定 -------------------------------------------------------------
 
     def attach_canvas(self, canvas) -> None:
@@ -504,7 +566,21 @@ class CompositeEditController(QObject):
         self._canvas = canvas
         canvas.set_map_tool_controller(self.tools)
         canvas.set_overlay_provider(self.overlay_state)
+        # V9 W7：digitize commit 的 CRS 守卫钩子（原生画布才有该面）。
+        set_crs_provider = getattr(canvas, "set_capture_layer_crs_provider", None)
+        if callable(set_crs_provider):
+            set_crs_provider(self._capture_layer_crs)
         self._push_snapping_config()
+
+    def _capture_layer_crs(self, tool) -> str:
+        """采点工具会话所属图层的存储 CRS（找不到层 = ""，不比对）。"""
+        session = getattr(tool, "session", None)
+        if session is None:
+            return ""
+        for layer in self._layers.values():
+            if layer.edit_session is session:
+                return str(layer.crs or "")
+        return ""
 
     # -- 图层 CRUD -------------------------------------------------------------
 
@@ -623,6 +699,8 @@ class CompositeEditController(QObject):
             layer.edit_session.rollback_changes()
         # V8 M3：触及该图层的复合撤销组随层作废（命令身份已无处解析）。
         self._topology.discard_compounds([layer_id])
+        # V9 W2：错误计数缓存随层清理（防跨工程泄漏）。
+        self._topology.forget_error_count([layer_id])
         self._kinds.pop(layer_id, None)
         self._templates.pop(layer_id, None)
         self._schemas.pop(layer_id, None)
@@ -663,6 +741,14 @@ class CompositeEditController(QObject):
         self._display.clear()
         self._records_cache.clear()
         self._persist_cache.clear()
+        # V9（lifecycle 压测发现）：层集全替换时 per-layer 捕捉覆盖与拓扑
+        # 计数缓存必须随之清空——旧层 id 的条目跨工程存活会在同名 id 复用
+        # 时复活过期配置（remove_layer 单层路径已清，整组替换路径漏清）。
+        self._snapping.layer_enabled.clear()
+        self._snapping.layer_modes.clear()
+        self._snapping.layer_tolerance.clear()
+        self._snapping.layer_priority.clear()
+        self._topology.forget_all_error_counts()
         self._active_layer_id = None
         for record in list(getattr(project, "user_vector_layers", None) or []):
             kind = str(getattr(record, "geometry_kind", "") or "line")
@@ -865,6 +951,8 @@ class CompositeEditController(QObject):
             return None
         if self._topology.enabled:
             issues = self._topology.validate([layer])
+            # V9 W2：保存校验结论进运行时计数缓存（merge 门禁事实源）。
+            self._topology.record_validation(layer, len(issues))
             if issues:
                 # UX-4：列出前 3 个 offender（图层名/要素 id/判词），用户可
                 # 定位修复；不再只报首条 transient 消息。
@@ -896,6 +984,9 @@ class CompositeEditController(QObject):
             return
         layer.edit_session.rollback_changes()
         self._topology.discard_compounds([layer.id])
+        # 会话终结：计数缓存随会话作废（cached 读以会话身份判定，这里
+        # 显式清理防同 id 复用误读）。
+        self._topology.forget_error_count([layer.id])
         self.content_changed.emit(layer.id)
         self._rebind_active_tool()
         self.sessions_committed.emit()
@@ -924,6 +1015,7 @@ class CompositeEditController(QObject):
                 continue
             if self._topology.enabled:
                 issues = self._topology.validate([layer])
+                self._topology.record_validation(layer, len(issues))
                 if issues:
                     first = issues[0]
                     blocked.append(
@@ -1062,7 +1154,7 @@ class CompositeEditController(QObject):
                 tool_id=action_id,
             )
         elif action_id == "measure_distance":
-            tool = MeasureDistanceTool()
+            tool = MeasureDistanceTool(crs=self.project_crs)
         else:
             layer = self.active_layer
             if layer is None and action_id == "identify":
@@ -1102,6 +1194,10 @@ class CompositeEditController(QObject):
                     return
                 template = _TEMPLATE_BY_KEY.get(self._templates.get(layer.id, ""))
                 defaults = template.field_defaults() if template is not None else {}
+                if not defaults:
+                    # V9 W9：模板未指定时按角色捕获语义取默认（角色 → spec →
+                    # template_key → field_defaults；无 spec 保持空——不猜）。
+                    defaults = self._capture_defaults_for_role(layer.id)
                 if action_id == "add_point":
                     tool = AddPointTool(session, snap=self._snap, attributes=defaults)
                 elif action_id == "add_line":
@@ -1224,6 +1320,14 @@ class CompositeEditController(QObject):
                 )
                 if mode in snapping.modes and not pushable
             ]
+            # review-2 P2-3：per-layer 推荐含 intersection 而全局未开时，
+            # 原生路径同样不生效（intersection 是整配置 flag）——一并告警。
+            per_layer_intersection = any(
+                "intersection" in (self._snapping.layer_modes.get(layer_id) or ())
+                for layer_id in self._layers
+            ) and "intersection" not in snapping.modes
+            if per_layer_intersection:
+                degraded_modes.append("intersection(per-layer)")
             if degraded_modes:
                 _logger.warning(
                     "捕捉模式 %s 在当前 qgis_render_bridge 版本的 QGIS 捕捉引擎"
@@ -1243,6 +1347,12 @@ class CompositeEditController(QObject):
             "reference_enabled": "reference" in snapping.modes,
             "intersection_enabled": "intersection" in snapping.modes and intersection_pushable,
         }
+        # V9 W2：拓扑编辑状态下推（桥 manifest 声明后才发——旧桥静默忽略
+        # 未知键，会让原生数字化器与宿主 TopologyService 语义漂移）。
+        # 下推后 QGIS 数字化器在捕获时保持共享边界；宿主侧传播/保存校验
+        # 仍是权威（两层同向，无双真源）。
+        if "snapping_topological_editing" in features:
+            config["topological_editing"] = bool(self._topology.enabled)
         if not snapping.current_layer_only:
             layers: dict[str, dict[str, object]] = {}
             for layer_id in self._layers:
@@ -1291,8 +1401,19 @@ class CompositeEditController(QObject):
         return self._snapping
 
     def set_topology(self, enabled: bool) -> None:
-        """拓扑编辑开关：开启后保存编辑执行拓扑校验门禁。"""
+        """拓扑编辑开关：开启后保存编辑执行拓扑校验门禁。
+
+        V9 W2：开启即对全部活跃会话刷新一次错误计数——merge 门禁的
+        ``topology_error_count`` 从此有真实生产者（不再是仅测试写入的死事实）。
+        """
         self._topology.enabled = bool(enabled)
+        if enabled:
+            for layer in self._layers.values():
+                if layer.edit_session is not None:
+                    self._topology.refresh_error_count(layer)
+        # V9 W2：拓扑开关随捕捉配置下推（QgsProject topologicalEditing 与
+        # 宿主 TopologyService 同向）。
+        self._push_snapping_config()
         self.state_changed.emit()
 
     @property
@@ -1300,11 +1421,15 @@ class CompositeEditController(QObject):
         return self._topology.enabled
 
     def validate_active_layer_topology(self) -> list[dict[str, object]]:
-        """对活动图层（或其编辑工作副本）执行拓扑检查，返回问题清单。"""
+        """对活动图层（或其编辑工作副本）执行拓扑检查，返回问题清单。
+
+        V9 W2：显式校验结论同步进运行时计数缓存（inspector/修复入口）。"""
         layer = self.active_layer
         if layer is None:
             return []
-        return self._topology.validate([layer])
+        issues = self._topology.validate([layer])
+        self._topology.record_validation(layer, len(issues))
+        return issues
 
     def repair_layer_geometries(self, layer_id: str) -> int:
         """修复图层无效几何（QGIS make-valid 优先，shapely 兜底）。
@@ -1396,6 +1521,7 @@ class CompositeEditController(QObject):
         session = layer.edit_session
         if session is None:
             return False, "请先开始编辑（几何操作需要编辑会话）"
+        mutated_layers: list = [layer]
         try:
             if command_id == "merge":
                 if not layer.selection:
@@ -1411,6 +1537,8 @@ class CompositeEditController(QObject):
                 if inputs is None:
                     return False, "分割需要一个选中多边形（正在编辑）与一条选中的切割线"
                 polygon_layer, polygon_id, line_feature = inputs
+                if polygon_layer is not layer:
+                    mutated_layers.append(polygon_layer)
                 with polygon_layer.edit_session.edit_source("split(command)"):
                     new_ids = split_polygon_by_line(
                         polygon_layer.edit_session, polygon_id, line_feature
@@ -1424,6 +1552,16 @@ class CompositeEditController(QObject):
                 return True, "已按切割线分割多边形"
         except (KeyError, RuntimeError, ValueError) as exc:
             return False, str(exc)
+        finally:
+            # V9 W2：几何命令改写会话后刷新涉及层错误计数（merge/split 后
+            # 的 merge 门禁立即可见真实拓扑状态）。split 可能改写非活动
+            # polygon 层（review-2 P1-3）——按实际触及集合刷新。
+            for mutated in mutated_layers:
+                if mutated.edit_session is not None:
+                    try:
+                        self._topology.refresh_error_count(mutated)
+                    except Exception:  # noqa: BLE001 — 刷新绝不吞命令结果
+                        pass
         return False, f"未知几何命令 {command_id}"
 
     # -- 多图层识别 -------------------------------------------------------------
@@ -1528,6 +1666,13 @@ class CompositeEditController(QObject):
         self._rebind_active_tool()
         self.state_changed.emit()
 
+    def _refresh_topology_counts(self, layer_ids: Iterable[str]) -> None:
+        """复合撤销/重做触及的层刷新错误计数（V9 W2 刷新点）。"""
+        for layer_id in layer_ids:
+            layer = self._layers.get(str(layer_id))
+            if layer is not None and layer.edit_session is not None:
+                self._topology.refresh_error_count(layer)
+
     def edit_command(self, command_id: str) -> bool:
         """执行编辑命令；返回 True 表示图层内容已变（宿主需重组快照）。"""
         layer = self.active_layer
@@ -1540,6 +1685,7 @@ class CompositeEditController(QObject):
             if group is not None:
                 result = self._topology.undo_compound(group)
                 if result.ok:
+                    self._refresh_topology_counts(result.undone_layer_ids)
                     for changed_layer_id in result.undone_layer_ids:
                         self.content_changed.emit(changed_layer_id)
                     self.state_changed.emit()
@@ -1547,6 +1693,7 @@ class CompositeEditController(QObject):
                 self.topology_conflict.emit(result.reason)
                 return False
             if session.undo():
+                self._topology.refresh_error_count(layer)
                 self.content_changed.emit(layer.id)
                 self.state_changed.emit()
                 return True
@@ -1558,6 +1705,7 @@ class CompositeEditController(QObject):
             if group is not None:
                 result = self._topology.redo_compound(group)
                 if result.ok:
+                    self._refresh_topology_counts(result.undone_layer_ids)
                     for changed_layer_id in result.undone_layer_ids:
                         self.content_changed.emit(changed_layer_id)
                     self.state_changed.emit()
@@ -1566,11 +1714,13 @@ class CompositeEditController(QObject):
                 # 命令仍可 redo——回退单层路径，不吞掉入口（review-1 P1-3）。
                 self.topology_conflict.emit(result.reason)
                 if session.redo():
+                    self._topology.refresh_error_count(layer)
                     self.content_changed.emit(layer.id)
                     self.state_changed.emit()
                     return True
                 return False
             if session.redo():
+                self._topology.refresh_error_count(layer)
                 self.content_changed.emit(layer.id)
                 self.state_changed.emit()
                 return True
@@ -1579,6 +1729,7 @@ class CompositeEditController(QObject):
             for feature_id in sorted(layer.selection):
                 session.delete_feature(feature_id)
             layer.set_selection(())
+            self._topology.refresh_error_count(layer)
             self.content_changed.emit(layer.id)
             self.state_changed.emit()
             return True
@@ -1651,6 +1802,18 @@ class CompositeEditController(QObject):
                 # 面板显示态回写为图层权威，供持久化还原。
                 self._display[layer_id] = (bool(previous.visible), float(previous.opacity))
             visible, opacity = self._display.get(layer_id, (True, 1.0))
+            # V9 W6：快照携带 role（stage membership 单权威派生）——镜像
+            # ``_fields_json_for_metadata`` 据此物化 QgsFields/约束/控件。
+            # 无角色（无注入/未注册）= 不带键，走 legacy 属性路径（诚实）。
+            role_value = self.role_of_layer(layer_id)
+            metadata = {
+                "editable": "true",
+                "geometry_kind": self._kinds.get(layer_id, ""),
+                "template": self._templates.get(layer_id, ""),
+                "editing": "true" if session is not None else "false",
+            }
+            if role_value:
+                metadata["role"] = role_value
             snapshots.append(
                 MapLayerSnapshot(
                     id=layer.id,
@@ -1664,12 +1827,7 @@ class CompositeEditController(QObject):
                     style=dict(layer.style),
                     visible=visible,
                     opacity=opacity,
-                    metadata={
-                        "editable": "true",
-                        "geometry_kind": self._kinds.get(layer_id, ""),
-                        "template": self._templates.get(layer_id, ""),
-                        "editing": "true" if session is not None else "false",
-                    },
+                    metadata=metadata,
                 )
             )
         return tuple(snapshots)
@@ -1771,11 +1929,16 @@ class CompositeEditController(QObject):
                 and self._kinds.get(layer.id) in {"line", "polygon"}
                 and len(layer.selection) == 1
             ),
-            "snapping_available": True,
             "snapping_enabled": self._snapping.enabled,
-            "topology_available": True,
             "topology_enabled": self._topology.enabled,
+            # snapping/topology *可用性*不在此采集（V9 W1）——由
+            # build_tool_context 从桥 manifest/引擎探测派生；此前硬编码
+            # True 是无权威来源的猜测。
             "crs_valid": _crs_parseable(self.project_crs),
+            "project_crs": str(self.project_crs or ""),
+            "layer_crs": str(getattr(layer, "crs", "") or "") if layer is not None else "",
+            "topology_error_count": self._topology.cached_error_count(
+                self._layers.values()),
             "current_tool": getattr(self.tools.active_tool, "tool_id", "") or "pan",
             "blocking_task": str(getattr(self, "blocking_task_label", "") or ""),
         }

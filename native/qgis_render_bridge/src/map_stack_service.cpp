@@ -1529,6 +1529,24 @@ void QgisMapStack::setDestinationCrs(std::uintptr_t canvas, const std::string& c
       QgsCoordinateReferenceSystem(QString::fromStdString(crs)));
 }
 
+// V9 W1/W7（见 hpp 注释）：scale/destination-CRS 只读自省面。二者都读
+// canvas 权威（mapSettings），不引入桥侧缓存——host 上下文采集按需调用。
+double QgisMapStack::canvasScale(std::uintptr_t canvas) const {
+  QgsMapCanvas* c = canvasOrThrow(canvas);
+  if (!c->extent().isEmpty()) {
+    const double scale = c->scale();
+    if (std::isfinite(scale) && scale > 0.0) return scale;
+  }
+  return 0.0;
+}
+
+std::string QgisMapStack::canvasDestinationCrs(std::uintptr_t canvas) const {
+  const QgsCoordinateReferenceSystem crs =
+      canvasOrThrow(canvas)->mapSettings().destinationCrs();
+  if (!crs.isValid()) return std::string();
+  return crs.authid().toStdString();
+}
+
 void QgisMapStack::setCanvasExtent(std::uintptr_t canvas, double xmin, double ymin,
                                    double xmax, double ymax) {
   // #1165: NaN/inf extents (e.g. zoom_by(inf) on the Python side) went
@@ -3010,6 +3028,15 @@ void QgisMapStack::setSnappingConfig(std::uintptr_t canvas_addr,
 
   QgsSnappingConfig config;
   config.setEnabled(obj.value(QStringLiteral("enabled")).toBool(false));
+  // V9 W2: QGIS topological editing rides the same config push — the Python
+  // TopologyService (shared-vertex propagation + save-time validation) is
+  // the host authority; QgsProject::setTopologicalEditing makes the native
+  // digitizer keep shared boundaries while capturing. Absent key = untouched
+  // (old-bridge hosts that never send it see no behavior change).
+  if (obj.contains(QStringLiteral("topological_editing"))) {
+    project()->setTopologicalEditing(
+        obj.value(QStringLiteral("topological_editing")).toBool(false));
+  }
   const bool hasLayers = obj.contains(QStringLiteral("layers"));
   const QString mode =
       obj.value(QStringLiteral("mode")).toString(QStringLiteral("all_layers"));

@@ -604,11 +604,17 @@ def _rule_history(ctx: ToolContext, tool_id: str) -> ToolAvailability:
 
 def _rule_snapping(ctx: ToolContext) -> ToolAvailability:
     # D4-5：捕捉/拓扑只需活动图层（与编辑会话解耦，QGIS desktop 对齐）。
+    # V9 W1：可用性来自桥 manifest 派生（原生路径）或回退画布的既定事实，
+    # 不再是硬编码 True。
     reason = _project_gate(ctx) or _layer_gate(ctx)
+    if reason is None and not ctx.snapping_available:
+        reason = "当前环境的捕捉引擎不可用（桥缺少 snapping 配置通道）"
     return _ok("snapping") if reason is None else _no("snapping", reason)
 
 def _rule_topology(ctx: ToolContext) -> ToolAvailability:
     reason = _project_gate(ctx) or _layer_gate(ctx)
+    if reason is None and not ctx.topology_available:
+        reason = "拓扑校验引擎不可用（需 QGIS 桥 validate 或 Shapely）"
     if reason is None and not ctx.crs_valid:
         reason = "工程 CRS 无效，拓扑校验不可用"
     return _ok("topology") if reason is None else _no("topology", reason)

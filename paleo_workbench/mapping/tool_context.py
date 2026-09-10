@@ -21,6 +21,18 @@ V8 canonical contract (contract_version=2, Goal M1):
   derivation); the host no longer pre-computes hidden-action sets.
 
 Only additive changes are allowed after this contract lands.
+
+V9 (contract_version=3, Goal W1) adds the CRS/scale authority facts:
+
+* ``project_crs`` / ``layer_crs`` — declared CRS strings (``""`` = undeclared,
+  never a silent 4326; resolution goes through
+  :mod:`paleo_workbench.mapping.crs_contract`).
+* ``scale_denominator`` — 0.0 means unknown (honest), otherwise the canvas
+  authority value (native QGIS ``QgsMapCanvas::scale()`` on the bridge path,
+  metre-axis-derived denominator on the fallback path).
+* ``snapping_available`` / ``topology_available`` are now *derived* from the
+  bridge capability manifest on the native path (fallback canvas keeps the
+  sanctioned Python implementations), replacing the pre-V9 hardcoded True.
 """
 
 from __future__ import annotations
@@ -35,7 +47,24 @@ from paleo_workbench.mapping.capability_model import (
 
 __all__ = ["ToolContext", "build_tool_context", "TOOL_CONTEXT_CONTRACT_VERSION"]
 
-TOOL_CONTEXT_CONTRACT_VERSION = 2
+TOOL_CONTEXT_CONTRACT_VERSION = 3
+
+
+def _topology_engine_available(native_canvas: bool, capability: frozenset[str]) -> bool:
+    """拓扑校验引擎可用性：桥 GEOS validate 或 Shapely 回退，任一即真。
+
+    与 :meth:`TopologyService.validate <paleo_workbench.mapping.topology
+    .TopologyService.validate>` 的引擎选择同序（桥优先、Shapely 显式回退）；
+    两者皆无 = 不可用（save 时的校验会如实报 validator_unavailable）。
+    """
+    if native_canvas and "qgis.geometry_op.validate" in capability:
+        return True
+    try:
+        import shapely.geometry  # noqa: F401 — availability probe only
+
+        return True
+    except ImportError:
+        return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +133,12 @@ class ToolContext:
     topology_available: bool = True
     topology_enabled: bool = False
     crs_valid: bool = True
+    #: 声明式工程/图层 CRS（"" = 未声明；解析一律经 crs_contract，不静默 4326）。
+    project_crs: str = ""
+    layer_crs: str = ""
+    #: 画布比例尺分母（0.0 = 未知——原生取 QgsMapCanvas::scale()，
+    #: 回退画布仅在米制轴可证时推导，否则诚实未知）。
+    scale_denominator: float = 0.0
 
     # Tool state
     current_tool: str = "pan"
@@ -159,6 +194,16 @@ def build_tool_context(
     facts: dict[str, Any] = dict(layer_facts or {})
     qgis = qgis or probe_qgis_capability()
 
+    # V9 W1: snapping/topology availability derives from the bridge manifest
+    # on the native path; the fallback canvas keeps the sanctioned Python
+    # implementations (available by construction). Missing collector keys
+    # fall back to this same derivation, never to a hardcoded True.
+    capability = qgis.capability_flags()
+    native_canvas = bool(native_canvas_available and qgis.available)
+    derived_snapping = (
+        ("qgis.snapping_push" in capability) if native_canvas else True
+    )
+    derived_topology = _topology_engine_available(native_canvas, capability)
     gate_value = state.get("edit_gate_open", True)
     gate_allowed: bool | None
     if gate_value is None:
@@ -211,13 +256,16 @@ def build_tool_context(
         split_ready=bool(state.get("split_ready", False)),
         merge_ready=bool(state.get("merge_ready", False)),
         reshape_ready=bool(state.get("reshape_ready", False)),
-        snapping_available=bool(state.get("snapping_available", True)),
+        snapping_available=bool(state.get("snapping_available", derived_snapping)),
         snapping_enabled=bool(state.get("snapping_enabled", False)),
-        topology_available=bool(state.get("topology_available", True)),
+        topology_available=bool(state.get("topology_available", derived_topology)),
         topology_enabled=bool(state.get("topology_enabled", False)),
         crs_valid=bool(state.get("crs_valid", True)),
+        project_crs=str(state.get("project_crs") or ""),
+        layer_crs=str(state.get("layer_crs") or ""),
+        scale_denominator=max(0.0, float(state.get("scale_denominator", 0.0) or 0.0)),
         current_tool=str(state.get("current_tool") or "pan"),
-        capability_flags=qgis.capability_flags(),
+        capability_flags=capability,
         queryable_layer_count=int(state.get("queryable_layer_count", 0) or 0),
         can_previous_extent=bool(state.get("can_previous_extent", False)),
         can_next_extent=bool(state.get("can_next_extent", False)),

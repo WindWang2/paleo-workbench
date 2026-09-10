@@ -318,7 +318,7 @@ class CompositeVariants(QWidget):
     def _publish(self) -> None:
         self.canvas.set_layer_snapshot(
             MapRenderSnapshot(
-                project_crs=self._project_crs or "EPSG:4326",
+                project_crs=self._project_crs,  # 未声明保持空（V9 契约：不伪造 4326）
                 layers=tuple(self.layers),
             )
         )

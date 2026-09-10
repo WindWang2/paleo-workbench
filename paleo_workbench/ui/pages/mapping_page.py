@@ -1557,7 +1557,9 @@ class MappingPage(QWidget):
                 tool_id=action_id,
             )
         elif action_id == "measure_distance":
-            tool = MeasureDistanceTool(measurement_ready=self._on_measurement_ready)
+            tool = MeasureDistanceTool(
+                measurement_ready=self._on_measurement_ready,
+                crs=str(getattr(authoring, "project_crs", "") or ""))
         else:
             kind_for_action = {
                 "add_point": "well", "add_line": "line", "add_polygon": "facies",

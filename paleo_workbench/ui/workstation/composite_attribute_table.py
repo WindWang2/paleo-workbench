@@ -4,6 +4,17 @@
 ``VectorEditSession.change_attribute`` 命令——undo/redo/commit/project
 版本链与画布数字化完全一致；表选择与图层选集双向同步；多选支持批量
 字段修改。不复制旧 MappingPage 的面板实现，编辑权威只在会话。
+
+V9 W5（QGIS provider schema 消费）：
+
+* 列元数据经 :mod:`attribute_schema` 单一派生——图层有角色时与镜像
+  ``fields_json`` 同权威（``GeologicalLayerSpec``），ValueMap/Range/
+  CheckBox 控件词表与 QGIS provider 一致；
+* 表头点击数值列按数值排序（文本列按本地化文本）；
+* 单元格编辑器按控件词表生成（ValueMap → 下拉，CheckBox → 勾选，
+  Range → 带上下界的数值输入），约束（必填/范围）在写入路径反馈；
+* 状态行呈现与 QGIS provider schema 的一致性标注（synced/drift/
+  unavailable——数据权威仍在 Python 会话，drift 只呈现不阻塞）。
 """
 
 from __future__ import annotations
@@ -11,6 +22,7 @@ from __future__ import annotations
 from typing import Mapping
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -21,13 +33,74 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
 )
 
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.workstation.attribute_schema import (
+    AttributeFieldMeta,
+    field_descriptors_for_layer,
+    qgis_schema_parity,
+)
 from paleo_workbench.ui.workstation.composite_editing import schema_fields
+
+
+class _FieldEditorDelegate(QStyledItemDelegate):
+    """按字段元数据生成编辑器（QGIS 编辑控件词表的表内对应物）。"""
+
+    def __init__(self, columns_provider, parent=None) -> None:
+        super().__init__(parent)
+        self._columns_provider = columns_provider
+
+    def createEditor(self, parent, option, index):  # noqa: N802
+        columns = self._columns_provider()
+        column = index.column() - 1
+        if column < 0 or column >= len(columns):
+            return super().createEditor(parent, option, index)
+        field: AttributeFieldMeta = columns[column]
+        if field.choices:
+            combo = QComboBox(parent)
+            combo.setEditable(True)
+            combo.addItems(list(field.choices))
+            return combo
+        if field.kind == "bool":
+            combo = QComboBox(parent)
+            combo.addItems(["true", "false"])
+            return combo
+        if field.numeric:
+            editor = QLineEdit(parent)
+            validator = QDoubleValidator(editor)
+            validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+            if field.value_range is not None:
+                low, high = field.value_range
+                validator.setRange(float(low), float(high))
+            editor.setValidator(validator)
+            return editor
+        return super().createEditor(parent, option, index)
+
+    def setEditorData(self, editor, index) -> None:  # noqa: N802
+        if isinstance(editor, QComboBox) and not editor.isEditable():
+            # review-1 P0-1：编辑器必须落在当前值上——此前硬编码 index 0，
+            # 打开 "false" 单元格按 Enter 会把值翻转成 "true"（数据损坏）。
+            position = editor.findText(str(index.data() or ""))
+            editor.setCurrentIndex(position if position >= 0 else 0)
+            return
+        if isinstance(editor, QComboBox):
+            text = index.data() or ""
+            position = editor.findText(str(text))
+            editor.setCurrentIndex(position if position >= 0 else -1)
+            editor.lineEdit().setText(str(text))
+            return
+        super().setEditorData(editor, index)
+
+    def setModelData(self, editor, model, index) -> None:  # noqa: N802
+        if isinstance(editor, QComboBox):
+            model.setData(index, editor.currentText())
+            return
+        super().setModelData(editor, model, index)
 
 
 class CompositeAttributeTableDialog(QDialog):
@@ -60,10 +133,15 @@ class CompositeAttributeTableDialog(QDialog):
             | QAbstractItemView.EditTrigger.SelectedClicked
             | QAbstractItemView.EditTrigger.EditKeyPressed
         )
+        # V9 W5：表头点击排序（数值列按数值——item 以 typed DisplayRole
+        # 携带数值）。排序移动行后行映射经 _rebuild_row_map 重建。
+        self.table.setSortingEnabled(True)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Interactive
         )
+        self.table.horizontalHeader().setSortIndicatorShown(True)
+        self.table.setItemDelegate(_FieldEditorDelegate(self._columns, self.table))
         outer.addWidget(self.table, 1)
 
         batch = QFrame(self)
@@ -91,6 +169,8 @@ class CompositeAttributeTableDialog(QDialog):
         self.table.itemChanged.connect(self._on_item_changed)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
         self.table.cellDoubleClicked.connect(self._on_cell_double_clicked)
+        self.table.horizontalHeader().sortIndicatorChanged.connect(
+            self._on_sort_changed)
 
         self._controller.content_changed.connect(self._on_content_changed)
         self._controller.state_changed.connect(self._on_state_changed)
@@ -98,6 +178,7 @@ class CompositeAttributeTableDialog(QDialog):
         # 差量刷新基线（C-P0-3）：(session, packed revision, columns, {fid: row})。
         # None = 无基线，首个 content_changed 走全量 refresh。
         self._refresh_state: tuple | None = None
+        self._parity_state: tuple[str, str] = ("unavailable", "")
 
         self.refresh()
         self.resize(720, 420)
@@ -114,35 +195,36 @@ class CompositeAttributeTableDialog(QDialog):
         session = layer.edit_session
         return session.features() if session is not None else layer.features()
 
-    def _columns(self) -> list[tuple[str, str, str]]:
-        """(key, header, kind) — schema 字段优先，额外属性键附加。"""
-        columns: list[tuple[str, str, str]] = []
-        seen: set[str] = set()
-        for field in schema_fields(self._controller.layer_schema(self._layer_id)):
-            columns.append((field.name, field.label, field.kind))
-            seen.add(field.name)
-        for feature in self._features():
-            for key in sorted(feature.attributes):
-                if key not in seen:
-                    columns.append((key, key, "text"))
-                    seen.add(key)
-        return columns or [("id", "ID", "text")]
+    def _columns(self) -> tuple[AttributeFieldMeta, ...]:
+        """列元数据（V9 W5：spec/template/extra 单一派生，带缓存）。"""
+        cached = getattr(self, "_columns_cache", None)
+        if cached is not None:
+            return cached
+        columns = field_descriptors_for_layer(self._controller, self._layer_id)
+        self._columns_cache = columns
+        return columns
+
+    def _invalidate_columns(self) -> None:
+        self._columns_cache = None
 
     def refresh(self) -> None:
         layer = self._layer()
         if layer is None:
             self.reject()
             return
+        self._invalidate_columns()
         columns = self._columns()
         features = self._features()
         # 角色门禁（V6）：RAW/锁定图层整表只读并明示原因，单元格不可编辑。
         editable, gate_reason = self._controller.can_edit_layer(self._layer_id)
+        parity_state, parity_detail = self._qgis_parity(columns)
         self._suppress_item_changed = True
         self._suppress_selection_sync = True
+        self.table.setSortingEnabled(False)
         try:
             self.table.setColumnCount(len(columns) + 1)
             self.table.setHorizontalHeaderLabels(
-                ["fid"] + [header for _key, header, _kind in columns]
+                ["fid"] + [self._header_for(field) for field in columns]
             )
             self.table.setRowCount(len(features))
             selection = layer.selection
@@ -155,34 +237,99 @@ class CompositeAttributeTableDialog(QDialog):
                 self.table.setItem(row, 0, fid_item)
                 if feature.feature_id in selection:
                     fid_item.setSelected(True)
-                for column, (key, _header, kind) in enumerate(columns, start=1):
-                    value = feature.attributes.get(key, "")
-                    item = QTableWidgetItem("" if value is None else str(value))
-                    item.setData(Qt.ItemDataRole.UserRole, (feature.feature_id, key, kind))
+                for column, field in enumerate(columns, start=1):
+                    value = feature.attributes.get(field.key, "")
+                    item = QTableWidgetItem()
+                    self._apply_display(item, field, value)
+                    item.setData(
+                        Qt.ItemDataRole.UserRole, (feature.feature_id, field.key, field.kind))
                     if not editable:
                         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                     self.table.setItem(row, column, item)
-            if not editable:
-                self._info.setText(
-                    f"{len(features)} 个要素 · {len(columns)} 个字段 · 只读 — {gate_reason}")
-            else:
-                self._info.setText(
-                    f"{len(features)} 个要素 · {len(columns)} 个字段 · "
-                    + ("编辑中（修改即时进入编辑会话）" if layer.edit_session is not None else "只读（编辑单元格将自动开始编辑会话）")
-                )
+            self._info.setText(
+                self._status_text(len(features), len(columns), layer, editable,
+                                  gate_reason, parity_state, parity_detail))
             self._batch_field.clear()
-            for key, header, _kind in columns:
-                self._batch_field.addItem(header, key)
+            for field in columns:
+                self._batch_field.addItem(field.label, field.key)
         finally:
+            self.table.setSortingEnabled(True)
             self._suppress_selection_sync = False
             self._suppress_item_changed = False
         session = layer.edit_session
         self._refresh_state = (
             session,
             (layer.data_revision << 32) + (session.revision if session is not None else 0),
-            tuple(columns),
-            {feature.feature_id: row for row, feature in enumerate(features)},
+            columns,
+            self._row_map(),
         )
+
+    def _qgis_parity(self, columns) -> tuple[str, str]:
+        """与 QGIS provider schema 的一致性（每次全量 refresh 各一次桥调用）。
+
+        差量刷新（_refresh_changed_features）不触发本方法——列结构不变时
+        parity 结论不变；桥调用本身为 O(字段) 小自省，不在帧级链上。"""
+        canvas = getattr(self._controller, "_canvas", None)
+        state, detail = qgis_schema_parity(canvas, self._layer_id, columns)
+        self._parity_state = (state, detail)
+        return state, detail
+
+    @staticmethod
+    def _header_for(field: AttributeFieldMeta) -> str:
+        mark = "*" if field.required else ""
+        return f"{field.label}{mark}"
+
+    @staticmethod
+    def _apply_display(item: QTableWidgetItem, field: AttributeFieldMeta, value) -> None:
+        """typed DisplayRole——数值列排序按数值，其余按文本。"""
+        if value is None:
+            item.setData(Qt.ItemDataRole.DisplayRole, "")
+            return
+        if field.numeric and isinstance(value, (int, float)) and not isinstance(value, bool):
+            item.setData(Qt.ItemDataRole.DisplayRole, float(value))
+        elif field.numeric:
+            text = str(value).strip()
+            try:
+                item.setData(Qt.ItemDataRole.DisplayRole, float(text))
+            except ValueError:
+                item.setData(Qt.ItemDataRole.DisplayRole, text)
+        else:
+            item.setData(Qt.ItemDataRole.DisplayRole, str(value))
+
+    @staticmethod
+    def _status_text(feature_count, column_count, layer, editable, gate_reason,
+                     parity_state, parity_detail) -> str:
+        parity_mark = {
+            "synced": " · QGIS provider schema 一致",
+            "drift": f" · ⚠ {parity_detail}",
+            "unavailable": "",
+        }.get(parity_state, "")
+        base = (
+            f"{feature_count} 个要素 · {column_count} 个字段{parity_mark} · "
+        )
+        if not editable:
+            return base + f"只读 — {gate_reason}"
+        return base + (
+            "编辑中（修改即时进入编辑会话）"
+            if layer.edit_session is not None
+            else "只读（编辑单元格将自动开始编辑会话）"
+        )
+
+    def _row_map(self) -> dict[str, int]:
+        """fid → 当前行（排序后重建的映射）。"""
+        mapping: dict[str, int] = {}
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item is not None:
+                mapping[str(item.text())] = row
+        return mapping
+
+    def _on_sort_changed(self, _column: int, _order) -> None:
+        """排序移动行后重建差量刷新基线的行映射。"""
+        state = self._refresh_state
+        if state is None:
+            return
+        self._refresh_state = (state[0], state[1], state[2], self._row_map())
 
     # -- editing ------------------------------------------------------------
 
@@ -195,7 +342,13 @@ class CompositeAttributeTableDialog(QDialog):
         return session
 
     def _write_attribute(self, feature_id: str, key: str, kind: str, text: str) -> bool | None:
-        """写入单元格；返回 False=被门禁拒绝（调用方须恢复渲染）。"""
+        """写入单元格；返回 False=被门禁/约束拒绝（调用方须恢复渲染）。
+
+        V9 W5：spec 约束（必填/数值范围）在写入路径反馈——空值写入必填
+        字段、越界数值写入 Range 字段时拒绝并明示，与 QGIS provider
+        constraint 的 not_null/expression 语义同向（QGIS 侧在镜像层由
+        ``fields_json`` 约束兜底，两侧同源 spec，不漂移）。
+        """
         session = self._edit_session()
         if session is None:
             # 门禁拒绝（含门禁在对话框打开期间翻转的情形——review round 1
@@ -206,12 +359,34 @@ class CompositeAttributeTableDialog(QDialog):
                 f"只读 — {reason or '当前图层不可编辑'}（输入未写入）"
                 if _layer is not None else "只读")
             return False
+        field = next(
+            (entry for entry in self._columns() if entry.key == key), None
+        )
         value: object = text
-        if kind == "number":
+        if field is not None and field.numeric:
             try:
                 value = float(text)
             except ValueError:
-                value = text  # 保留输入；校验在 schema 层标记
+                if field.value_range is not None:
+                    # review-2 P2-2：带 Range 域的字段必须可解析为数值——
+                    # 非数值文本此前静默绕过范围门（含批量路径）。
+                    self._info.setText(
+                        f"字段「{field.label}」需要数值（Range 约束）"
+                        "——输入未写入")
+                    return False
+                value = text  # 无域约束：保留输入；校验在 schema 层标记
+            else:
+                if field.value_range is not None:
+                    low, high = field.value_range
+                    if not (float(low) <= float(value) <= float(high)):
+                        self._info.setText(
+                            f"字段「{field.label}」超出范围 [{low:g}, {high:g}]"
+                            "——输入未写入（QGIS Range 约束同源）")
+                        return False
+        if field is not None and field.required and not str(text).strip():
+            self._info.setText(
+                f"字段「{field.label}」为必填（not-null）——输入未写入")
+            return False
         session.change_attribute(feature_id, key, value)
         # 属性变化驱动画布（标注渲染）与工程同步（review #17）；
         # 本表自身的重建被抑制——不能打断正在编辑的单元格。
@@ -251,7 +426,7 @@ class CompositeAttributeTableDialog(QDialog):
             if fid_item is not None:
                 feature_ids.append(str(fid_item.text()))
         kind = next(
-            (k for c_key, _h, k in self._columns() if c_key == key), "text"
+            (entry.kind for entry in self._columns() if entry.key == key), "text"
         )
         session = self._edit_session()
         if session is None:
@@ -315,7 +490,7 @@ class CompositeAttributeTableDialog(QDialog):
             return False
         row_by_id = state[3]
         columns = state[2]
-        known_keys = {key for key, _header, _kind in columns}
+        known_keys = {field.key for field in columns}
         touched: set[str] = set()
         for ids in entries:
             touched.update(ids)
@@ -328,21 +503,27 @@ class CompositeAttributeTableDialog(QDialog):
             except KeyError:
                 return False  # 要素已删除 → 全量
             if any(key not in known_keys for key in feature.attributes):
-                return False  # 出现新字段 → 列结构变化 → 全量
+                self._invalidate_columns()  # 出现新字段 → 列结构变化
+                return False  # → 全量
             changed[feature_id] = feature
         self._suppress_item_changed = True
+        # review-2 P1-1：排序开启时 setData 会触发即时重排，循环内后续
+        # row 查找解析到别的要素的 item（错行写入）。更新期间关闭排序，
+        # 结束后恢复并由调用侧的 _on_sort_changed/全量 refresh 重建行映射。
+        self.table.setSortingEnabled(False)
         try:
             for feature_id, feature in changed.items():
                 row = row_by_id[feature_id]
-                for column, (key, _header, _kind) in enumerate(columns, start=1):
+                for column, field in enumerate(columns, start=1):
                     item = self.table.item(row, column)
                     if item is None:
                         continue  # 行尾列守卫（正常 refresh 不会出现）
-                    value = feature.attributes.get(key, "")
-                    item.setText("" if value is None else str(value))
+                    value = feature.attributes.get(field.key, "")
+                    self._apply_display(item, field, value)
         finally:
+            self.table.setSortingEnabled(True)
             self._suppress_item_changed = False
-        self._refresh_state = (session, revision, columns, row_by_id)
+        self._refresh_state = (session, revision, columns, self._row_map())
         return True
 
     def _on_state_changed(self) -> None:
