@@ -1612,18 +1612,26 @@ class CompositeDocument(QWidget):
 
         ctx = self.tool_context()
         availability = dict(evaluate_all(ctx))
-        # explain 每工具一次（内含求值），tooltip/status 复用同一解释
-        # （review R2-P2：此前每工具求值两次）。
-        help_texts = {}
-        status_blocks = self._action_status_blocks(ctx)
-        for tool_id in availability:
-            explanation = explain(tool_id, ctx)
-            tooltip, status_tip = (
-                format_tooltip(explanation), format_status(explanation))
-            extra = status_blocks.get(tool_id)
-            if extra:
-                tooltip = f"{tooltip}\n{extra}"
-            help_texts[tool_id] = (tooltip, status_tip)
+        # V10 M12：help 文本按上下文签名差分重建——explain（每工具一次
+        # 求值 + 文本拼装）占刷新成本的大头，而它只依赖 ctx + 静态登记处。
+        # state_changed 风暴（一次操作 ~30 次发射）在上下文未变时不再重拼。
+        # enable/visible/checked 每次照常应用（无漂移风险）。
+        signature = repr(ctx.to_dict())
+        if signature != getattr(self, "_help_signature", None):
+            help_texts = {}
+            status_blocks = self._action_status_blocks(ctx)
+            for tool_id in availability:
+                explanation = explain(tool_id, ctx)
+                tooltip, status_tip = (
+                    format_tooltip(explanation), format_status(explanation))
+                extra = status_blocks.get(tool_id)
+                if extra:
+                    tooltip = f"{tooltip}\n{extra}"
+                help_texts[tool_id] = (tooltip, status_tip)
+            self._help_signature = signature
+            self._help_texts = help_texts
+        else:
+            help_texts = self._help_texts
         self._last_availability = availability
         self.action_controller.apply_availability(availability, help_texts=help_texts)
         # preferred 动态属性（QSS 弱提示）——写入工具条按钮并 repolish；
