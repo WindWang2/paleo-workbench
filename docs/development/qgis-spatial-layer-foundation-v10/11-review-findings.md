@@ -18,6 +18,9 @@
 | ID | 级别 | 发现 | 处置 |
 |---|---|---|---|
 | R1-1 | P0 | vendored 运行时无 proj.db → 全部 CRS 解析失败 → `canvas_destination_crs` 恒 ""（V9 限制 #1 的根因） | **修复**：qgis_runtime.proj_data 部署链 + runtime_facts 实证（EPSG:4326/4490/4214/4610 全 True，transform True） |
+| R0-1 | P0 | V10 拼接 bug：`_verify_published_schema` 的类型漂移循环被误缩进进
+`if want_names != got_names: return` 分支内部 → 永远不可达
+（`test_verify_reports_type_drift` 红） | **修复**：dedent 恢复（commit d6c79e35）；main 对照绿、本地复现确认 |
 | R1-2 | P1 | 桥加载逻辑散布 5+ 处、3 个默认根（qgis_style / conftest / run_qgis_env 硬编码 V7 worktree 路径） | **修复**：qgis_runtime.loader 单一权威，qgis_style/conftest 委托 |
 | R1-3 | P1 | geoviz bootstrap（numpy）先于 conda Qt 预载执行 → ENTRYPOINT_NOT_FOUND（包导入即触发） | **修复**：`paleo_workbench/__init__` 中 loader 先行 + `.env` 先载；MSVCP 预载钉仅 VENDOR 配方（conda 配方钉 System32 CRT 反而破坏加载——loader 二分实证） |
 | R1-4 | P2 | setup.py 0.4.0a0 vs bindings 0.5.0a0 版本漂移 | **修复**：统一 0.6.0a0 + 注释谱系 |
@@ -56,6 +59,14 @@
 - qgis-marked 批次：244+ passed, 12 skipped（skip = osgeo 配方约束 + 旧桥特性面），
   含新增 tests/test_qgis_v10_runtime_foundation.py（10 用例）与
   tests/perf/test_qgis_v10_native_scale.py（4 探针）。
+- host 面全量批次（scripts/run_suite_batched.py，758 文件，712 pass /
+  36 fail / 10 crash，无 env）：与 main_batched.json 基线（668 文件，
+  53 fail）逐文件对照——交集真实回归 = **0**（逐项复现验证：
+  geological_mapping_pipeline / page_transition 的 exit=1 与 6 个 Qt 进程
+  崩溃在 clean-HEAD/main 同机同 env 下同样复现，属于过期基准 + Qt 测试
+  脆弱性，非 V10 回归；崩溃文件在 baseline 里为 pass 是因为 baseline 是
+  旧 commit 的 snapshot，不是当前 HEAD）。V10 期间捕获并修复的唯一真
+  回归 = R0-1。
 - host 面批次（-m "not qgis"）：V10 新增
   tests/test_v10_crs_chain_and_identity.py（14）、
   tests/test_v10_qgis_runtime_health.py（9）、
