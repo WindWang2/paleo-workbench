@@ -934,7 +934,8 @@ class LinkedViewsPanel(QFrame):
 class CompositeDocument(QWidget):
     """编图文档：图件画布即主窗口内容（永不浮动），面板全部为宿主 dock。
 
-    本部件只拥有主图与悬浮工具条；图层管理 / 输入与结果 / 联动视图三个
+    本部件只拥有主图与两条地图工具条（由 WorkstationFrame 托管为宿主顶行）；
+    图层管理 / 输入与结果 / 联动视图三个
     面板实例在此创建、由 ``WorkstationFrame``（QMainWindow）注册为
     dock —— 图件显示区域就是主窗口的中央区域，其余一切皆可浮动。
     """
@@ -1227,7 +1228,7 @@ class CompositeDocument(QWidget):
         if ok and str(name).strip():
             self.edit_controller.rename_layer(str(layer_id), str(name).strip())
 
-    # -- 悬浮工具条 -----------------------------------------------------------
+    # -- 地图工具条（宿主托管，见 _build_toolbar） ----------------------------------
 
     # -- 阶段工具面（V6 §4） ------------------------------------------------------
 
@@ -1498,14 +1499,52 @@ class CompositeDocument(QWidget):
                 format_tooltip(explanation), format_status(explanation))
         self._last_availability = availability
         self.action_controller.apply_availability(availability, help_texts=help_texts)
-        # 溢出集合优先于求值器可见性（窄画布收纳的组保持隐藏，菜单可达）。
-        hidden = getattr(self, "_toolbar_overflow_hidden", None)
-        if hidden:
-            for tool_id in hidden:
-                action = self.action_controller.actions.get(tool_id)
-                if action is not None:
-                    action.setVisible(False)
-            self._rebuild_overflow_menu()
+        # 求值器隐藏整组动作后，组间分隔符会变孤儿「|」（Qt 不随动作联动
+        # 隐藏）——按可见邻居重算，保持条带干净。
+        self._sync_toolbar_separators()
+
+    def _sync_toolbar_separators(self) -> None:
+        """隐藏无动作邻居的分隔符（首/尾/连续可见分隔符一律隐藏）。
+
+        判定只看 ``QAction.isVisible``（``addWidget`` 挂的视图开关按钮以
+        关联 action 计入，与工具动作同一规则）。求值器每次应用后调用。
+
+        隐藏分隔符在判定中视为透明，但同一动作间隔内只保留第一个分隔
+        符——否则「全显→全藏→全显」逐次震荡（非幂等陷阱），永远不
+        收敛。终态：连续隐藏组之间恰好一条 ``|``，首/尾/连续 ``|`` 为零条。
+        """
+        for bar in self.host_map_toolbars():
+            actions = bar.actions()
+            # 间隔端点：最近可见动作（跳过隐藏项与分隔符本身）。
+            prev_action: list = [None] * len(actions)
+            last = None
+            for index, action in enumerate(actions):
+                prev_action[index] = last
+                if action.isVisible() and not action.isSeparator():
+                    last = index
+            next_action: list = [None] * len(actions)
+            coming = None
+            for index in range(len(actions) - 1, -1, -1):
+                next_action[index] = coming
+                action = actions[index]
+                if action.isVisible() and not action.isSeparator():
+                    coming = index
+            # 同一动作间隔（隐藏项延续间隔，不重置）只保留首个分隔符。
+            interval_shown = False
+            for index, action in enumerate(actions):
+                if not action.isSeparator():
+                    if action.isVisible():
+                        interval_shown = False
+                    continue
+                show = (
+                    prev_action[index] is not None
+                    and next_action[index] is not None
+                    and not interval_shown
+                )
+                if show:
+                    interval_shown = True
+                if action.isVisible() != show:
+                    action.setVisible(show)
 
     # -- V7 §7 图层树呈现态 ----------------------------------------------------
 
@@ -1613,15 +1652,15 @@ class CompositeDocument(QWidget):
             self.status_message.emit("缩放到图层失败（范围无效）")
 
     def _build_toolbar(self) -> None:
-        """悬浮工具条：QGIS 命令面（MapActionController）+「面板」菜单。"""
-        self.toolbar = QFrame(self)
-        # Overlay chrome (not the linked-doc context bar): hairline floating strip.
-        self.toolbar.setObjectName("WorkstationOverlayToolbar")
-        self.toolbar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        bar_layout = QHBoxLayout(self.toolbar)
-        bar_layout.setContentsMargins(5, 2, 5, 2)
-        bar_layout.setSpacing(2)
+        """地图工具条：QGIS 命令面（MapActionController）+ 视图开关 +「面板」菜单。
 
+        托管模型（两行布局）：本方法只建条——两条原生 ``QToolBar``（上排核心
+        编图组 / 下排辅助组 + 视图开关与面板菜单），宿主 ``WorkstationFrame``
+        把它们加进 ``_dock_host`` TopToolBarArea 第 2 行（见
+        ``host_map_toolbars``）。画布上不再悬浮任何工具条；窄窗口溢出交给
+        Qt 原生工具条扩展按钮（``»``）。动作使能求值语义见
+        ``_apply_tool_availability``（只改托管父级与布局，逻辑不变）。
+        """
         self.action_controller = MapActionController(self)
         # V7 专业分组（goal §6）：Navigation / Selection / Inspection / Edit
         # Session / Capture / Geometry / Snapping·Topology / Layer /
@@ -1634,53 +1673,57 @@ class CompositeDocument(QWidget):
             "capture", "geometry", "snapping", "layer",
             "symbology", "factor", "qa", "layout_export",
         )
-        self._toolbar_overflow_hidden: set[str] = set()
-        self._map_toolbar = self.action_controller.toolbar(
-            "编图",
-            tuple(tuple(TOOL_GROUPS[group]) for group in self._toolbar_group_order),
-            self.toolbar,
+        self._toolbar_top_groups = (
+            "navigate", "selection", "inspection", "edit_session",
+            "capture", "geometry",
         )
-        bar_layout.addWidget(self._map_toolbar)
-        # 溢出菜单（goal §6 overflow）：窄画布时低优先组收进「»」菜单，
-        # 动作本体隐藏但可从菜单触发（含禁用原因入 tooltip）。
-        self._overflow_button = QToolButton(self.toolbar)
-        self._overflow_button.setObjectName("WorkstationOverflowButton")
-        self._overflow_button.setText("»")
-        self._overflow_button.setToolTip("更多工具（画布较窄时收纳低优先组）")
-        self._overflow_button.setAccessibleName("更多工具")
-        self._overflow_button.setPopupMode(
-            QToolButton.ToolButtonPopupMode.InstantPopup
+        self._toolbar_bottom_groups = (
+            "snapping", "layer", "symbology", "factor", "qa",
+            "layout_export",
         )
-        self._overflow_menu = QMenu(self._overflow_button)
-        self._overflow_button.setMenu(self._overflow_menu)
-        self._overflow_button.setVisible(False)
-        bar_layout.addWidget(self._overflow_button)
+        # 建条时暂挂本部件名下；宿主 addToolBar 时 Qt 自动 reparent 进
+        # QMainWindow（孤立构造/单测则留在此处，随 document 析构）。
+        self._map_toolbar_top = self.action_controller.toolbar(
+            "编图常用",
+            tuple(tuple(TOOL_GROUPS[group]) for group in self._toolbar_top_groups),
+            self,
+        )
+        self._map_toolbar_top.setObjectName("WorkstationMapToolsToolbarTop")
+        self._configure_host_toolbar(self._map_toolbar_top)
+        self._map_toolbar_bottom = self.action_controller.toolbar(
+            "编图扩展",
+            tuple(tuple(TOOL_GROUPS[group]) for group in self._toolbar_bottom_groups),
+            self,
+        )
+        self._map_toolbar_bottom.setObjectName("WorkstationMapToolsToolbarBottom")
+        self._configure_host_toolbar(self._map_toolbar_bottom)
         self.action_controller.tool_requested.connect(self._on_tool_requested)
         self.action_controller.command_requested.connect(self._on_command_requested)
 
         # 视图 dock 开关 + 联动（宿主 WorkstationFrame 接线）。
-        self.well_track_button = QToolButton(self.toolbar)
+        self.well_track_button = QToolButton(self._map_toolbar_bottom)
         self.well_track_button.setObjectName("WorkstationWellTrackButton")
         self.well_track_button.setText("测井轨道")
         self.well_track_button.setCheckable(True)
         self.well_track_button.toggled.connect(self.well_track_toggled)
-        bar_layout.addWidget(self.well_track_button)
-        self.seismic_section_button = QToolButton(self.toolbar)
+        self.seismic_section_button = QToolButton(self._map_toolbar_bottom)
         self.seismic_section_button.setObjectName("WorkstationSeismicSectionButton")
         self.seismic_section_button.setText("地震剖面")
         self.seismic_section_button.setCheckable(True)
         self.seismic_section_button.toggled.connect(self.seismic_section_toggled)
-        bar_layout.addWidget(self.seismic_section_button)
-        self.link_button = QToolButton(self.toolbar)
+        self.link_button = QToolButton(self._map_toolbar_bottom)
         self.link_button.setObjectName("WorkstationLinkButton")
         self.link_button.setText("链接")
         self.link_button.setCheckable(True)
         self.link_button.setChecked(True)
         self.link_button.toggled.connect(self.link_toggled)
-        bar_layout.addWidget(self.link_button)
+        self._map_toolbar_bottom.addSeparator()
+        self._map_toolbar_bottom.addWidget(self.well_track_button)
+        self._map_toolbar_bottom.addWidget(self.seismic_section_button)
+        self._map_toolbar_bottom.addWidget(self.link_button)
 
         # 面板菜单：显隐 / 布局预设 / 全部浮动·停靠 / 恢复默认（由宿主注入）
-        self.panels_button = QToolButton(self.toolbar)
+        self.panels_button = QToolButton(self._map_toolbar_bottom)
         self.panels_button.setObjectName("WorkstationContextButton")
         self.panels_button.setIcon(workstation_icon("map/panel-manager.svg"))
         self.panels_button.setText("面板")
@@ -1696,9 +1739,23 @@ class CompositeDocument(QWidget):
         self.panels_button.setPopupMode(
             QToolButton.ToolButtonPopupMode.InstantPopup
         )
-        bar_layout.addWidget(self.panels_button)
+        self._map_toolbar_bottom.addSeparator()
+        self._map_toolbar_bottom.addWidget(self.panels_button)
 
-        self.toolbar.adjustSize()
+    @staticmethod
+    def _configure_host_toolbar(bar) -> None:
+        """宿主行工具条统一样式：不可移动/浮动、屏蔽右键菜单（与全局栏/阶段条对齐）。"""
+        from PySide6.QtWidgets import QToolBar
+
+        assert isinstance(bar, QToolBar)
+        bar.setMovable(False)
+        bar.setFloatable(False)
+        bar.setContextMenuPolicy(Qt.ContextMenuPolicy.PreventContextMenu)
+        bar.layout().setContentsMargins(0, 0, 0, 0)
+
+    def host_map_toolbars(self) -> tuple:
+        """宿主行挂载顺序：shell 按此顺序把两条工具条加进第 2 行。"""
+        return (self._map_toolbar_top, self._map_toolbar_bottom)
 
     def register_panel_actions(
         self,
@@ -3319,206 +3376,23 @@ class CompositeDocument(QWidget):
             return
         self._project.map_qgis_project_xml = write()
 
-    # -- 悬浮工具条定位 ----------------------------------------------------------
+    # -- 宿主行工具条（画布无悬浮条；定位由 QMainWindow 工具栏区负责） ----------
 
     def _reposition_toolbar(self) -> None:
-        """Centre the overlay on the map; keep a hairline margin from edges.
+        """No-op 兼容垫片（悬浮条已拆除，工具条由宿主 QMainWindow 托管布局）。
 
-        Floating QDockWidgets are separate top-level windows, so they never
-        stack under this toolbar. Within the canvas we always raise the bar
-        above map chrome and leave 8px top / ≥12px side inset so it does not
-        collide with docked panel edges on narrow widths.
+        保留方法名：外部调用方（旧测试/脚本）直接调用仍安全。
         """
-        try:
-            self._reposition_toolbar_impl()
-        except RuntimeError:
-            pass  # 死壳迟到的 resize/定时信号：C++ 已销毁，忽略
-
-    def _reposition_toolbar_impl(self) -> None:
-        # 窄画布：先收起纯文本的 dock 切换钮（面板菜单保留同功能入口），
-        # 否则工具条溢出画布右缘、按钮文字被截断（B17 视觉审查）。
-        margin_x = 12
-        budget = self.width() - 2 * margin_x
-        toggles = (
-            self.well_track_button,
-            self.seismic_section_button,
-            self.link_button,
-        )
-        self.toolbar.adjustSize()
-        overflow = self.toolbar.width() > budget
-        for button in toggles:
-            button.setVisible(not overflow)
-        if overflow:
-            self.toolbar.adjustSize()
-        # 仍溢出：低优先组逐步收进「»」溢出菜单（goal §6 overflow）。
-        self._update_toolbar_overflow(budget)
-        self.toolbar.layout().invalidate()
-        self.toolbar.layout().activate()
-        desired = self._toolbar_desired_width()
-        self.toolbar.resize(
-            desired, max(self.toolbar.sizeHint().height(), 36)
-        )
-        y = 8
-        x = max(margin_x, (self.width() - desired) // 2)
-        max_x = max(margin_x, self.width() - desired - margin_x)
-        self.toolbar.move(min(x, max_x), y)
-        self.toolbar.raise_()
-
-    def _toolbar_desired_width(self) -> int:
-        """可见子部件的期望宽度总和（Qt 布局对隐藏 widget 的 hint 计入
-        行为不可依赖——按可见集合显式求和，确定性收缩）。"""
-        layout = self.toolbar.layout()
-        margins = layout.contentsMargins()
-        total = margins.left() + margins.right()
-        count = 0
-        for index in range(layout.count()):
-            item = layout.itemAt(index)
-            widget = item.widget()
-            if widget is not None:
-                if widget.isHidden():
-                    continue
-                total += max(widget.sizeHint().width(), widget.minimumSizeHint().width())
-            else:
-                total += item.sizeHint().width()
-            count += 1
-        if count > 1:
-            total += layout.spacing() * (count - 1)
-        return total
-
-    def _update_toolbar_overflow(self, budget: int) -> None:
-        """窄画布溢出：按逆优先级隐藏组，动作收进「»」菜单。
-
-        恢复顺序相反（宽画布逐步还原）。可见性语义：求值器给 visible
-        且不在溢出集合 → 显示；溢出集合成员 → 菜单可达。
-        """
-        from paleo_workbench.ui.workstation.tool_surface import TOOL_GROUPS
-
-        actions = self.action_controller.actions
-
-        def _fits() -> bool:
-            return self._toolbar_desired_width() <= budget
-
-        overflow = not _fits()
-        # 逆优先级序（最低优先先隐藏）。核心编辑组（navigate/selection/
-        # inspection/edit_session/capture/geometry）的主体永不收纳；组内
-        # 低频单动作（refresh/measure/反选等）可在极限窄时最后收纳。
-        never_hide = {
-            "navigate", "selection", "inspection", "edit_session",
-            "capture", "geometry",
-        }
-        hide_order = tuple(
-            group for group in reversed(self._toolbar_group_order)
-            if group not in never_hide
-        )
-        index = 0
-        while overflow and index < len(hide_order):
-            group = hide_order[index]
-            index += 1
-            for tool_id in TOOL_GROUPS[group]:
-                if tool_id not in self._toolbar_overflow_hidden:
-                    self._toolbar_overflow_hidden.add(tool_id)
-                    actions[tool_id].setVisible(False)
-            overflow = not _fits()
-        # 极限窄：核心组内的低频单动作最后收纳（数字化/编辑入口仍在条上）。
-        last_resort = (
-            "refresh", "measure_distance", "invert_selection", "select_all",
-            "clear_selection", "full_extent",
-        )
-        for tool_id in last_resort:
-            if not overflow:
-                break
-            if tool_id not in self._toolbar_overflow_hidden:
-                self._toolbar_overflow_hidden.add(tool_id)
-                actions[tool_id].setVisible(False)
-                overflow = not _fits()
-        # 恢复阶段：先尝试恢复 hide_order 中最高优先的隐藏组（hide_order 逆序末尾）。
-        for tool_id in reversed(last_resort):
-            if not overflow and tool_id in self._toolbar_overflow_hidden:
-                self._toolbar_overflow_hidden.discard(tool_id)
-                last = getattr(self, "_last_availability", None) or {}
-                avail = last.get(tool_id)
-                actions[tool_id].setVisible(True if avail is None else avail.visible)
-                if not _fits():
-                    self._toolbar_overflow_hidden.add(tool_id)
-                    actions[tool_id].setVisible(False)
-                    break
-        while not overflow and self._toolbar_overflow_hidden:
-            restore_group = None
-            for group in reversed(hide_order):
-                if any(t in self._toolbar_overflow_hidden for t in TOOL_GROUPS[group]):
-                    restore_group = group
-                    break
-            if restore_group is None:
-                break
-            trial = set(self._toolbar_overflow_hidden)
-            for tool_id in TOOL_GROUPS[restore_group]:
-                trial.discard(tool_id)
-            saved = set(self._toolbar_overflow_hidden)
-            self._toolbar_overflow_hidden = trial
-            # 还原可见性以最近一次求值结果为准（组可能因无图层/阶段被
-            # 求值器隐藏——溢出恢复不得越过它）。
-            last = getattr(self, "_last_availability", None) or {}
-            for tool_id in TOOL_GROUPS[restore_group]:
-                avail = last.get(tool_id)
-                actions[tool_id].setVisible(True if avail is None else avail.visible)
-            if not _fits():
-                self._toolbar_overflow_hidden = saved
-                for tool_id in TOOL_GROUPS[restore_group]:
-                    if tool_id in saved:
-                        actions[tool_id].setVisible(False)
-                break
-        self._rebuild_overflow_menu()
-
-    def _rebuild_overflow_menu(self) -> None:
-        """「»」菜单 = 溢出集合内的动作（触发真实 QAction；保留禁用态）。"""
-        from paleo_workbench.ui.workstation.tool_surface import TOOL_GROUPS
-
-        self._overflow_menu.clear()
-        # QMenu 默认不显示 action tooltip——禁用原因必须可达（R3-P2）。
-        self._overflow_menu.setToolTipsVisible(True)
-        labels = self.action_controller._LABELS
-        count = 0
-        for group in reversed(self._toolbar_group_order):
-            entries = [
-                (tool_id, labels.get(tool_id, tool_id))
-                for tool_id in TOOL_GROUPS[group]
-                if tool_id in self._toolbar_overflow_hidden
-            ]
-            if not entries:
-                continue
-            if count:
-                self._overflow_menu.addSeparator()
-            last = getattr(self, "_last_availability", None) or {}
-            for tool_id, label in entries:
-                action = self.action_controller.actions.get(tool_id)
-                if action is None:
-                    continue
-                entry = self._overflow_menu.addAction(
-                    action.icon(), label, action.trigger
-                )
-                # Qt 会把工具条上隐藏的 QAction 自动置 disabled——菜单
-                # 条目的使能必须取自统一求值结果，而不是 action.isEnabled()
-                avail = last.get(tool_id)
-                entry.setEnabled(True if avail is None else avail.enabled)
-                if avail is not None and not avail.enabled:
-                    # 与工具条 statusTip 同一词汇（R3-P2：格式三处分叉）。
-                    reason = avail.disabled_reason or "当前不可用"
-                    entry.setToolTip(f"{label}（不可用：{reason}）")
-                count += 1
-        self._overflow_button.setVisible(count > 0)
-        self._overflow_button.setEnabled(count > 0)
+        return
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._reposition_toolbar()
         # 画布随窗口/布局变化后，空态提示必须盖满当前画布矩形（否则残留
         # 布局前的小矩形，文字被截断或不可见）。
         self._sync_hint_geometry()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        # 隐藏状态下 Qt 延迟发送 resize：首显时补一次工具条重排（V7）。
-        QTimer.singleShot(0, self, self._reposition_toolbar)
 
     # -- 生命周期 --------------------------------------------------------------
 

@@ -109,7 +109,11 @@ def _renderer_class_issues(project: ProjectDocument, document: PaleoMapDocument)
         field_name = str(style.get("field") or field)
         if not field_name:
             return
-        categories = {str(c[0]) for c in style.get("categories") or [] if c}
+        raw_categories = style.get("categories") or []
+        if isinstance(raw_categories, Mapping):
+            categories = {str(key) for key in raw_categories}
+        else:
+            categories = {str(c[0]) for c in raw_categories if c}
         present: set[str] = set()
         for feature in features:
             props = _feature_field(feature, "properties") or {}

@@ -27,6 +27,7 @@ import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPolygonF
 
+from paleo_workbench.mapping.facies_brush_cache import FaciesPatternBrushCache
 from paleo_workbench.mapping.map_styles import MarkerSymbol, TextStyle, VectorStyle
 
 logger = logging.getLogger(__name__)
@@ -470,6 +471,13 @@ def _category_colors(style: VectorStyle) -> dict[str, str] | None:
     return {str(value): str(fill) for value, fill, _label in style.categories}
 
 
+def _category_patterns(style: VectorStyle) -> dict[str, str] | None:
+    """Value→pattern-id lookup from the (value, pattern_id) fill_patterns tuples."""
+    if style.renderer != "categorized" or not style.fill_patterns:
+        return None
+    return {str(value): str(pattern_id) for value, pattern_id in style.fill_patterns}
+
+
 def _range_color(value: Any, style: VectorStyle) -> str | None:
     """Find matching range fill for a numerical value in a graduated style."""
     if not style.ranges or value is None:
@@ -662,6 +670,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
         #: silent.
         self.crs_warnings: list[str] = []
         self._frame_cache: tuple[tuple, RenderFrame] | None = None
+        self._facies_patterns = FaciesPatternBrushCache()
         _LIVE_FALLBACKS.add(self)
         self._diagnostics = {
             "prepared_layers": 0,
@@ -1169,7 +1178,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
             self._paint_layer_paths(
                 painter, prepared, visible_features, style, view,
                 xmin, ymin, scale_x, scale_y, width, height,
-                marker_radius, stroke_width, transparent_fill, fill,
+                marker_radius, stroke_width, transparent_fill, fill, dpi_scale,
             )
         if prepared.point_xy is not None:
             self._paint_layer_points(
@@ -1209,6 +1218,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
         stroke_width: float,
         transparent_fill: bool,
         fill: QColor,
+        dpi_scale: float,
     ) -> None:
         xy = prepared.path_xy
         screen = np.empty_like(xy)
@@ -1284,6 +1294,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
         part_feature = prepared.path_feature
         drawn_vertices = 0
         categories = _category_colors(style)
+        patterns = _category_patterns(style)
 
         def kept_slice(part: int) -> np.ndarray:
             start, end = offsets[part], offsets[part + 1]
@@ -1327,6 +1338,16 @@ class FallbackMapRenderBackend(MapRenderBackend):
                         painter.setBrush(self._color(color_name, style.fill))
                         painter.drawPath(path)
                         painter.restore()
+                        if patterns is not None:
+                            pattern_brush = self._facies_patterns.brush_for(
+                                patterns.get(key), scale=dpi_scale
+                            )
+                            if pattern_brush is not None:
+                                painter.save()
+                                painter.setPen(Qt.PenStyle.NoPen)
+                                painter.setBrush(pattern_brush)
+                                painter.drawPath(path)
+                                painter.restore()
                         path = None
                         current_feature = -1
                         return

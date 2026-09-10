@@ -4,7 +4,7 @@
 
 * **8 个新捕获状态**（``V7_STATES``）：RAW 阻断（禁用原因可见）、
   phase1 编辑会话、phase2 约束线主捕获、phase2 因子栅格（矢量工具禁
-  而查看工具可用）、图层树状态装饰、任务取消中、窄画布工具条溢出、
+  而查看工具可用）、图层树状态装饰、任务取消中、地图工具条宿主行、
   单因素 Inspector。
 * **语义检查**（``run_state_checks``）：widget 级不变量；harness 内非
   门禁（D8 政策），门禁断言在 ``tests/test_visual_qa_v7.py``。
@@ -152,10 +152,12 @@ def drive_task_cancelling(window) -> None:
 
 
 def drive_toolbar_overflow_narrow(window) -> None:
-    """溢出态驱动：直接以窄预算触发（不 resize 主窗——harness 的尺寸
-    守卫要求实际窗口 == 请求尺寸；窄画布状态由预算参数表达）。"""
-    composite = window.app_shell.workstation.composite
-    composite._update_toolbar_overflow(700)
+    """宿主行布局驱动：建活动图层使求值器给完整可见性，行归位不断言尺寸。
+
+    不 resize 主窗（harness 的尺寸守卫要求实际窗口 == 请求尺寸）；窄窗口
+    溢出已交 Qt 原生工具条扩展按钮，本状态只确认「条在宿主第 2 行」。"""
+    _add_layer(window, "polygon", LayerRole.INITIAL_FACIES_DRAFT, "宿主行探针层")
+    _workstation(window)._enforce_toolbar_rows()
     _settle(120)
 
 
@@ -290,13 +292,21 @@ def _task_cancelling_checks(window) -> list[CheckResult]:
 
 
 def _toolbar_overflow_checks(window) -> list[CheckResult]:
-    composite = _workstation(window).composite
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QWidget
+
+    ws = _workstation(window)
+    composite = ws.composite
+    host = ws._dock_host
     actions = composite.action_controller.actions
+    map_top, map_bottom = composite.host_map_toolbars()
     return [
-        _check("overflow_hidden_set_nonempty",
-               bool(composite._toolbar_overflow_hidden)),
-        _check("overflow_menu_entries",
-               len(composite._overflow_menu.actions()) >= 1),
+        _check("toolbar_row2_top",
+               host.toolBarArea(map_top) is Qt.ToolBarArea.TopToolBarArea),
+        _check("toolbar_row2_bottom",
+               host.toolBarArea(map_bottom) is Qt.ToolBarArea.TopToolBarArea),
+        _check("toolbar_no_overlay",
+               window.findChildren(QWidget, "WorkstationOverlayToolbar") == []),
         _check("overflow_core_visible", actions["add_polygon"].isVisible()
                and actions["toggle_editing"].isVisible()),
     ]

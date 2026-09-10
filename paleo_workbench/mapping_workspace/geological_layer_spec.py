@@ -478,6 +478,11 @@ _FACIES_FIELDS = (
     _F("source", "来源", kind="text", default="interpretation"),
 )
 
+_PREDICTION_FACIES_FIELDS = (
+    _F("facies_name", "相名", kind="text", default=""),
+    _F("facies", "相", kind="text", default=""),
+)
+
 _CONSTRAINT_BASE_FIELDS = (
     _F("name", "名称", kind="text", default=""),
     _F("active", "参与插值", kind="bool", default=True),
@@ -513,8 +518,9 @@ def _build_registry() -> dict[LayerRole, GeologicalLayerSpec]:
     ):
         add(_spec(
             f"{role.value}-v2", role, "polygon", role.label,
-            fields=(_F("probability", "概率", kind="real", value_range=(0.0, 1.0),
-                       default=0.0),),
+            fields=_PREDICTION_FACIES_FIELDS + (
+                _F("probability", "概率", kind="real", value_range=(0.0, 1.0),
+                   default=0.0),),
             renderer=RendererBinding(style_id, "facies", kind,
                                      field="probability" if kind == "graduated"
                                      else None)))

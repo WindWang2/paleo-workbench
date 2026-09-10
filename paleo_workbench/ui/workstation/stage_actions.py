@@ -97,6 +97,96 @@ def _create_structured_input_set_shell(document, workspace_state, *,
         document, workspace_state, created_by=created_by)
 
 
+#: 占位相值：不参与分类样式（无真实相名、无纹理）。
+_BLANK_FACIES_VALUES = frozenset({"", "空白相"})
+
+#: 未知相类的稳定回退调色板（geological_symbols 无对应时按值哈希取用，
+#: 与输入顺序无关，保证同类相在各图层颜色一致）。
+_FACIES_FALLBACK_PALETTE = (
+    "#c47f4e", "#e8c46b", "#8fc7c2", "#d9a066",
+    "#eae2b0", "#6fb3b8", "#3d6b8e", "#9b6b9e",
+)
+
+
+def _categorized_facies_style(features: Any) -> dict:
+    """由要素属性构造带图案的沉积相分类样式 dict（无有效相名 → {}）。
+
+    输入元素兼容三种形态：(geometry, properties) 二元组、带 "properties"
+    键的 GeoJSON 要素、直接的属性 dict。分类值取 facies_name（为空回退
+    facies）；field 按多数要素实际携带的键确定。每类 fill 优先取要素自带
+    color，其次 geological_symbols 同名类色，最后稳定哈希取回退调色板；
+    label 即值本身；fill_patterns 只收录有 SVG 映射的类。
+    """
+    import hashlib
+
+    from paleo_workbench.mapping.facies_patterns import pattern_id_for_facies
+    from paleo_workbench.mapping.map_styles import VectorStyle
+
+    try:
+        from paleo_workbench.mapping.geological_symbols import _FACIES_CLASSES
+    except Exception:
+        _FACIES_CLASSES = ()
+    known_fill = {str(value): str(fill) for value, fill, _label in _FACIES_CLASSES}
+
+    buckets: list[dict] = []
+    for item in features or ():
+        if isinstance(item, (list, tuple)) and len(item) == 2 \
+                and isinstance(item[1], dict):
+            buckets.append(dict(item[1]))
+        elif isinstance(item, dict):
+            nested = item.get("properties")
+            buckets.append(dict(nested) if isinstance(nested, dict) else dict(item))
+
+    def _clean(properties: dict, key: str) -> str:
+        value = properties.get(key)
+        return str(value).strip() if isinstance(value, str) else str(value or "").strip()
+
+    name_hits = sum(1 for props in buckets if _clean(props, "facies_name") not in _BLANK_FACIES_VALUES)
+    facies_hits = sum(1 for props in buckets if _clean(props, "facies") not in _BLANK_FACIES_VALUES)
+    if not name_hits and not facies_hits:
+        return {}
+    field = "facies_name" if name_hits >= facies_hits else "facies"
+    other = "facies" if field == "facies_name" else "facies_name"
+
+    values: list[str] = []
+    seen: set[str] = set()
+    first_color: dict[str, str] = {}
+    for props in buckets:
+        value = _clean(props, field) or _clean(props, other)
+        if value in _BLANK_FACIES_VALUES:
+            continue
+        if value not in seen:
+            seen.add(value)
+            values.append(value)
+        color = _clean(props, "color")
+        if color and value not in first_color:
+            first_color[value] = color
+    if not values:
+        return {}
+
+    categories: list[tuple[str, str, str]] = []
+    patterns: list[tuple[str, str]] = []
+    for value in values:
+        fill = first_color.get(value) or known_fill.get(value)
+        if not fill:
+            digest = int(hashlib.md5(value.encode("utf-8")).hexdigest(), 16)
+            fill = _FACIES_FALLBACK_PALETTE[digest % len(_FACIES_FALLBACK_PALETTE)]
+        categories.append((value, fill, value))
+        pattern_id = pattern_id_for_facies(value)
+        if pattern_id is not None:
+            patterns.append((value, pattern_id))
+    style = VectorStyle(
+        fill="#b0bec5", stroke="#26364d", stroke_width=0.6,
+        renderer="categorized", field=field,
+        categories=tuple(categories), fill_patterns=tuple(patterns),
+    ).to_dict()
+    # 存活图层样式的既定线格式：原生快照线（buildSpecFromLegacyJson）与
+    # 图层属性对话框都只接受 dict 形 categories（{"值": "填充色"}），
+    # list 形会导致每次画布发布崩溃；label 即值本身，故无信息损失。
+    style["categories"] = {value: fill for value, fill, _label in categories}
+    return style
+
+
 class StageActionDispatcher:
     """宿主为 CompositeDocument；动作结果经 status_message 反馈。"""
 
@@ -189,7 +279,8 @@ class StageActionDispatcher:
         V9 W9：角色注册后立即应用捕获语义（捕捉推荐/拓扑建议）——
         「物源方向线」等地质目标从第一笔起就有正确的捕捉配置。
         """
-        layer = self.edit_controller.create_layer(name=name, kind=kind, template=template)
+        layer = self.edit_controller.create_layer(
+            name=name, kind=kind, template=template, role=role)
         if layer is None:
             self.composite.status_message.emit(f"创建图层失败：{name}")
             return None
@@ -222,6 +313,25 @@ class StageActionDispatcher:
             )
         self.composite._sync_composition_now()
         return layer.id
+
+    def _apply_categorized_facies_style(
+        self, layer_id: str, features: Any,
+    ) -> None:
+        """要素带相名时赋带图案的分类样式；否则保持图层默认样式。
+
+        样式失败绝不阻断建层（只记日志）：建层是主契约，样式是增强。
+        """
+        try:
+            style = _categorized_facies_style(features)
+        except Exception:
+            logger.exception("categorized facies style failed for %s", layer_id)
+            return
+        if not style:
+            return
+        try:
+            self.edit_controller.set_layer_style(layer_id, style)
+        except Exception:
+            logger.exception("set_layer_style failed for %s", layer_id)
 
     def _mapping_horizon(self) -> str:
         project = self.project
@@ -328,6 +438,7 @@ class StageActionDispatcher:
             features=features,
         )
         if layer_id:
+            self._apply_categorized_facies_style(layer_id, features)
             self.composite.status_message.emit(
                 f"已叠加初始相图（{len(features)} 个相面，RAW 不可编辑——"
                 "用「创建解释草稿」开始校正）")
@@ -834,18 +945,21 @@ class StageActionDispatcher:
             title = f"{getattr(task, 'name', '') or '预测相'}（{kind_label}预测）"
             if horizon:
                 title = f"{title} · {horizon}"
+            layer_features = [
+                (
+                    dict(f.get("geometry") or {}),
+                    {**dict(f.get("properties") or {}),
+                     **({"horizon": horizon} if horizon else {})},
+                )
+                for f in features
+            ]
             created = self._create_role_layer(
                 title, "polygon", role, factor_task_id=task_marker,
-                features=[
-                    (
-                        dict(f.get("geometry") or {}),
-                        {**dict(f.get("properties") or {}),
-                         **({"horizon": horizon} if horizon else {})},
-                    )
-                    for f in features
-                ],
+                features=layer_features,
             )
-            added += 1 if created else 0
+            if created:
+                self._apply_categorized_facies_style(created, layer_features)
+                added += 1
         if emit:
             label = "测井" if wanted == "well" else "地震"
             if not added:
@@ -937,8 +1051,10 @@ class StageActionDispatcher:
                 for polygon in docs[0].facies_polygons:
                     geometry = polygon.get("geometry") if isinstance(polygon, dict) else None
                     if isinstance(geometry, dict):
-                        source_features.append(
-                            (geometry, dict(polygon.get("properties") or {})))
+                        properties = dict(polygon.get("properties") or {})
+                        properties.setdefault(
+                            "facies", str(polygon.get("facies") or ""))
+                        source_features.append((geometry, properties))
             else:
                 source_features = self._default_blank_facies_features()
                 if source_features:
@@ -956,6 +1072,7 @@ class StageActionDispatcher:
             features=source_features, source_version_id=source_version,
         )
         if layer_id:
+            self._apply_categorized_facies_style(layer_id, source_features)
             self.stage_controller.state.set_maturity(
                 f"phase1_draft:{layer_id}", "draft")
             self.edit_controller.set_active_layer(layer_id)
