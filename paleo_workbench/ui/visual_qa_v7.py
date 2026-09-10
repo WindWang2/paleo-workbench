@@ -276,7 +276,10 @@ def _task_cancelling_checks(window) -> list[CheckResult]:
     handles = get_scheduler().statuses()
     cancelling = [
         h for h in handles
-        if h.cancel_requested and h.state == TaskState.RUNNING
+        # V9 状态词汇：取消中 = CANCELLING（显式态）或 RUNNING+cancel_requested
+        #（claim 窗口竞态，态尚未落定）——两者都是诚实的"取消等待期"呈现。
+        if h.cancel_requested and h.state in (
+            TaskState.RUNNING, TaskState.CANCELLING)
     ]
     return [
         _check("task_cancel_pending", bool(cancelling),

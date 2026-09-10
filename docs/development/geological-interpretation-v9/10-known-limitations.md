@@ -12,7 +12,12 @@
 5. **engine 方法分派映射**：METHOD_LABEL_TO_ENGINE（engine 方法名词表）与
    AlgorithmSpec（算法身份词表）是两个词表，经 ui_label 桥接；统一为单一
    engine-id 字段留待后续。
-6. **本机环境预存失败**（非本分支回归，base 39bc1147 同样失败）：
+6. **本机环境预存失败**（非本分支回归——与 base 的逐项对照见 PR 描述）：
+   在本分支全量 fast 套件（7333 passed）中失败但在 base 干净 worktree
+   同文件集重跑同样失败的 60+ 项（native C++/QGIS 渲染桥未构建、
+   zarr 缺失、Windows 临时文件锁、DPI）。本分支经对照确认修复了唯一
+   真实回归 `visual_qa_v7[task_cancelling]`（CANCELLING 新状态的检查谓词
+   跟进）。基础对照项（base 39bc1147 同样失败）：
    tests/perf/test_interpolation_perf.py constrained-IDW wall-clock 门禁
    （本机慢于参考硬件）；test_project_package/test_dependency_audit_and_batch
    Windows 临时文件 PermissionError；e2e/test_harness_scenarios 缺 zarr；
