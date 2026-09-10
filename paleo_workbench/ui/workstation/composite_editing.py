@@ -597,7 +597,9 @@ class CompositeEditController(QObject):
             return ""
         for layer in self._layers.values():
             if layer.edit_session is session:
-                return str(layer.crs or "")
+                # V10 M-B：未声明层以工程 CRS 为有效存储帧（会话几何按
+                # 工程帧读写——比空串更早暴露画布/存储帧分歧）。
+                return str(layer.crs or self.project_crs or "")
         return ""
 
     # -- 图层 CRUD -------------------------------------------------------------
@@ -645,7 +647,10 @@ class CompositeEditController(QObject):
         role_value = _normalize_layer_role(role)
         if role_value:
             self._layer_roles[layer_id] = role_value
-        self._active_layer_id = layer_id
+        # V10 M-G（D4 修复）：新建层经 set_active_layer 走完整链
+        # （_rebind_active_tool + 原生画布 current layer 推送），不再
+        # 直写 _active_layer_id 把画布侧留在旧层。
+        self.set_active_layer(layer_id)
         self._push_snapping_config()
         self.layers_changed.emit()
         self.state_changed.emit()
@@ -726,7 +731,8 @@ class CompositeEditController(QObject):
         source_role = self._layer_roles.get(str(layer_id))
         if source_role:
             self._layer_roles[layer_id_new] = source_role
-        self._active_layer_id = layer_id_new
+        # V10 M-G（D4 修复）：同 create_layer——副本成为活动层也要走完整链。
+        self.set_active_layer(layer_id_new)
         self.layers_changed.emit()
         self.state_changed.emit()
         return copy
@@ -755,8 +761,9 @@ class CompositeEditController(QObject):
         self._records_cache.pop(layer_id, None)
         self._persist_cache.pop(layer_id, None)
         if self._active_layer_id == layer_id:
-            self._active_layer_id = next(iter(self._layers), None)
-            self._rebind_active_tool()
+            # V10 M-G（D3 修复）：删除层后的活动层重指走 set_active_layer
+            # （含画布 current layer 清理/重推），不再只 rebind 工具。
+            self.set_active_layer(next(iter(self._layers), None))
         self.layers_changed.emit()
         self.state_changed.emit()
 
@@ -793,6 +800,8 @@ class CompositeEditController(QObject):
         self._snapping.layer_priority.clear()
         self._topology.forget_all_error_counts()
         self._active_layer_id = None
+        # V10 M-N：恢复工程持久化的捕捉配置（旧工程无该键 → 保持默认，
+        # restore_state 的 False 返回不视为错误）。
         for record in list(getattr(project, "user_vector_layers", None) or []):
             kind = str(getattr(record, "geometry_kind", "") or "line")
             if kind not in GEOMETRY_KINDS:
@@ -851,6 +860,11 @@ class CompositeEditController(QObject):
         if self._layers:
             self._active_layer_id = next(iter(self._layers))
         self._rebind_active_tool()
+        try:
+            self._snapping.restore_state(
+                dict((project.mapping_workspace or {}).get("snapping") or {}))
+        except Exception:
+            pass
         self._push_snapping_config()
         self.layers_changed.emit()
         self.state_changed.emit()
@@ -892,6 +906,14 @@ class CompositeEditController(QObject):
                 )
             )
         project.user_vector_layers = records
+        # V10 M-N：捕捉配置随工程持久化（SnappingService 是会话态权威，
+        # 此前 project switch/new 后静默回默认）。wire 键 mapping_workspace
+        # ["snapping"]，schema_version 守卫由 restore_state 自带。
+        try:
+            workspace = project.mapping_workspace
+            workspace["snapping"] = self._snapping.snapshot_state()
+        except Exception:
+            pass
 
     # -- 活动图层与编辑会话 -------------------------------------------------------
 
@@ -1429,6 +1451,15 @@ class CompositeEditController(QObject):
                 }
             config["layers"] = layers
         canvas.set_snapping_config(config)
+
+    def repush_snapping(self) -> None:
+        """V10 M-N：外部时机（阶段切换/画布重建）后重推捕捉配置。
+
+        SnappingService 状态是权威；QGIS 侧 config 是投影——阶段切换改变
+        层集可见性/成员资格后，投影必须重建（此前阶段切换没有 re-push
+        钩子，画布侧保留上一阶段的 per-layer 配置）。
+        """
+        self._push_snapping_config()
 
     @staticmethod
     def _bridge_snapping_features() -> frozenset[str]:

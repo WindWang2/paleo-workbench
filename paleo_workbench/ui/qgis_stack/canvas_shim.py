@@ -70,6 +70,30 @@ def _load_mapstack():
         ) from exc
 
 
+# V10：桥 manifest 特性 flag 的进程级缓存（capability_manifest 是编译期
+# 注册表，无 QGIS init 成本；缓存避免每次调用重读）。桥不可导入 → 空表
+# （所有特性诚实为 False，消费方按旧语义降级）。
+_BRIDGE_FEATURES: dict[str, bool] | None = None
+
+
+def _bridge_features() -> dict[str, bool]:
+    global _BRIDGE_FEATURES
+    if _BRIDGE_FEATURES is None:
+        try:
+            import qgis_render_bridge
+
+            manifest = qgis_render_bridge.capability_manifest()
+            features = manifest.get("features") or {}
+            if isinstance(features, dict):
+                _BRIDGE_FEATURES = {
+                    str(k): bool(v) for k, v in features.items()}
+            else:
+                _BRIDGE_FEATURES = {str(f): True for f in features}
+        except Exception:
+            _BRIDGE_FEATURES = {}
+    return _BRIDGE_FEATURES
+
+
 class _CanvasMouseRouter(QObject):
     """B8：measure_distance 激活期把画布视口鼠标事件路由给活动 Python 工具。
 
@@ -292,6 +316,8 @@ class QgisCanvasShim(QWidget):
         self._tool_controller = None
         # V9 W7：digitize commit CRS 守卫钩子（set_capture_layer_crs_provider）。
         self._capture_layer_crs_provider = None
+        # V10 M-B：最近一次镜像发布的工程 CRS（crs_chain_facts 投影用）。
+        self._project_crs_hint: str = ""
         self._pending_programmatic = 0
         self._expected_programmatic_extents: list[tuple[float, float, float, float]] = []
         self._last_emitted_extent: tuple[float, float, float, float] | None = None
@@ -455,8 +481,24 @@ class QgisCanvasShim(QWidget):
     @property
     def backend_status(self) -> str:
         failures = getattr(self, "_mirror_failures", None) or []
+        parts: list[str] = []
         if failures:
-            return f"qgis: degraded ({len(failures)} mirror failures)"
+            parts.append(f"degraded ({len(failures)} mirror failures)")
+        # V10 M-Q：运行时健康（proj 链/CRS 解析）进入后端状态——桥可加载
+        # ≠ 空间运行时完整；降级原因必须可见，不得「画布能渲染就算健康」。
+        # 进程级缓存探测（qgis_runtime.health），此处读取零成本。
+        try:
+            from paleo_workbench.qgis_runtime.health import probe_qgis_runtime
+
+            health = probe_qgis_runtime()
+            if health.qgis_available and health.degraded_reasons:
+                parts.append(
+                    "runtime degraded: " + "; ".join(
+                        reason.split("\n")[0] for reason in health.degraded_reasons[:3]))
+        except Exception:
+            pass
+        if parts:
+            return "qgis: " + "; ".join(parts)
         return "qgis: ready"
 
     @property
@@ -657,11 +699,27 @@ class QgisCanvasShim(QWidget):
         except Exception:
             pass
 
+    def _bridge_feature(self, name: str) -> bool:
+        """V10：桥 manifest 特性查询（进程级缓存；无桥 = False 诚实降级）。"""
+        return bool(_bridge_features().get(name))
+
     def set_current_layer(self, doc_id: str) -> None:
-        """画布当前图层（原生选择/identify 的目标图层）；空串/未知 id 忽略。"""
+        """画布当前图层（原生选择/identify 的目标图层）。
+
+        V10 M-G（D5 漂移修复）：空 doc_id 现在是**显式清除**（选中参考
+        图层等非编辑目标时，原生画布不得残留上一个编辑层——旧桥把空串
+        当未知 id 抛错，Python 因此静默吞掉，三方漂移由此而生）。桥
+        manifest 无 ``current_layer_clear``（<0.6.0a0）时保持旧 no-op
+        语义（诚实降级）。未知 id 仍忽略（与既往一致）。
+        """
         if getattr(self, "_shutdown_done", False) or not self.canvas_address:
             return
         if not doc_id:
+            if self._bridge_feature("current_layer_clear"):
+                try:
+                    self.stack.set_current_layer(self.canvas_address, "")
+                except Exception:
+                    pass
             return
         try:
             self.stack.set_current_layer(self.canvas_address, str(doc_id))
@@ -851,6 +909,60 @@ class QgisCanvasShim(QWidget):
         except Exception:
             return ""
 
+    def map_units(self) -> str:
+        """画布地图单位（V10 M-O；QgsUnitTypes 编码，如 "degrees"/"meters"）。
+
+        权威来自 QGIS mapSettings；桥无此面（<0.6.0a0）→ ""（诚实未知，
+        宿主不得自行估算）。
+        """
+        if not self._canvas_created or self._canvas_destroyed:
+            return ""
+        probe = getattr(self.stack, "canvas_map_units", None)
+        if not callable(probe):
+            return ""
+        try:
+            return str(probe(self.canvas_address) or "")
+        except Exception:
+            return ""
+
+    def output_dpi(self) -> float:
+        """画布输出 DPI（V10 M-O；0.0 = 未知/桥无此面）。"""
+        if not self._canvas_created or self._canvas_destroyed:
+            return 0.0
+        probe = getattr(self.stack, "canvas_output_dpi", None)
+        if not callable(probe):
+            return 0.0
+        try:
+            value = float(probe(self.canvas_address))
+        except Exception:
+            return 0.0
+        return value if value > 0.0 and math.isfinite(value) else 0.0
+
+    def mirror_provider_facts(self, doc_id: str) -> dict | None:
+        """镜像层 provider 能力快照（V10 M-H；None = 桥无自省面）。"""
+        if self._shutdown_done or not self.canvas_address:
+            return None
+        probe = getattr(self.stack, "mirror_provider_facts", None)
+        if not callable(probe):
+            return None
+        try:
+            import json as _json
+
+            return _json.loads(probe(str(doc_id)))
+        except Exception:
+            return None
+
+    def crs_chain_facts(self, storage_crs: str = "") -> "object":
+        """当前链事实投影（V10 M-B；供状态条/ToolContext 消费）。"""
+        from paleo_workbench.mapping import crs_chain
+
+        return crs_chain.CrsChainFacts(
+            project_crs=getattr(self, "_project_crs_hint", "") or "",
+            canvas_crs=self.destination_crs(),
+            storage_crs=storage_crs,
+            runtime_crs_capable=crs_chain.runtime_crs_capable(),
+        )
+
     def set_capture_layer_crs_provider(self, provider) -> None:
         """V9 W7：digitize commit 的 CRS 守卫钩子（宿主提供 tool→层 CRS）。
 
@@ -987,26 +1099,26 @@ class QgisCanvasShim(QWidget):
             commit = getattr(tool, "commit_geometry", None)
             if commit is None:
                 return
-            # V9 W7：画布目标 CRS 与捕获层存储 CRS 可证不同 → 拒绝（坐标
-            # 帧不同的写入是静默损坏，不是降级）。任一侧未知 = 不比对。
-            canvas_crs = shim.destination_crs()
-            if canvas_crs and tool is not None:
-                provider = getattr(shim, "_capture_layer_crs_provider", None)
-                layer_crs = provider(tool) if provider is not None else ""
-                if layer_crs:
-                    from paleo_workbench.mapping.crs_contract import normalize_crs
+            # V9 W7 → V10 M-B 收敛：画布目标 CRS 与捕获层存储 CRS 的比对
+            # 收敛到 mapping.crs_chain.evaluate_commit_guard（单一判定表）。
+            # V9 的「任一侧未知 = 不比对」只对 CRS 无能运行时保留；proj 链
+            # 健康（qgis_runtime.health 判定）时画布未知 = 真实故障 → 拒绝。
+            from paleo_workbench.mapping import crs_chain
 
-                    # review-2 P2-5：只在对得上 auth-id 形态（含 ":"）时比对——
-                    # 散文式 CRS（"WGS 84" 等）无法证明不等，按未知跳过。
-                    canvas_auth = normalize_crs(canvas_crs)
-                    layer_auth = normalize_crs(layer_crs)
-                    if (":" in canvas_auth and ":" in layer_auth
-                            and canvas_auth != layer_auth):
-                        shim.commit_rejected.emit(
-                            f"要素未写入：画布坐标系 {canvas_crs} 与图层坐标系 "
-                            f"{layer_crs} 不一致（请检查工程 CRS/图层降级状态）")
-                        shim.tool_operation.emit(False)
-                        return
+            canvas_crs = shim.destination_crs()
+            provider = getattr(shim, "_capture_layer_crs_provider", None)
+            layer_crs = provider(tool) if (provider is not None and tool is not None) else ""
+            verdict = crs_chain.evaluate_commit_guard(
+                canvas_crs,
+                layer_crs,
+                runtime_crs_capable=crs_chain.runtime_crs_capable(),
+            )
+            if not verdict.allowed:
+                shim.commit_rejected.emit(
+                    f"要素未写入：{verdict.reason}（请检查工程 CRS/"
+                    "图层 CRS/PROJ 运行链状态）")
+                shim.tool_operation.emit(False)
+                return
             # ADV-2：commit 被拒（坏几何/重复 id/脱钩会话）必须让用户感知，
             # 不得静默吞掉一次完成的采点。
             try:
@@ -1157,12 +1269,19 @@ class QgisCanvasShim(QWidget):
 
         Note (M2): reconcile by ``pwb/doc_id`` — unchanged layers keep their
         QgsVectorLayer object, tree state and renderer across publishes.
-        Note (F3 gap, tracked for M2+): legacy ``scale_range`` 仍未转发。
+        V10 M-O：``scale_range`` 经桥 upsert 的 min_scale/max_scale 通道
+        下推（F3 gap 关闭；旧桥无该面 → 跳过，诚实）。
         V5：``layer_groups_enabled`` 为 True 时跳过 root 平铺顺序推送——
         组结构/放置由 LayerGroupController 经 group API reconcile。
         """
         if getattr(self, "_shutdown_done", False):
             return
+        # V10 M-B：记录工程 CRS 供 crs_chain_facts 投影（normalize 与
+        # crs_contract 一致；未声明 = ""）。
+        try:
+            self._project_crs_hint = str(getattr(snapshot, "project_crs", "") or "")
+        except Exception:
+            self._project_crs_hint = ""
         mirrored_qgis_ids, seen, failures = mirror_snapshot_to_stack(
             self.stack, self.canvas_address, snapshot,
             groups=bool(getattr(self, "layer_groups_enabled", False)))

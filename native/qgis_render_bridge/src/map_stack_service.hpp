@@ -234,7 +234,14 @@ public:
                                 // pwb/fields_json custom property and
                                 // re-applied on rebuild; memory-provider field
                                 // application is the documented follow-up.
-                                const std::string& fields_json = "");
+                                const std::string& fields_json = "",
+                                // V10 M-O: scale-based visibility channel
+                                // (denominators; 0 = unbounded on that side;
+                                // both 0 disables). Applied to new AND reused
+                                // mirrors — the native authoring canvas
+                                // previously had no scale-visibility at all.
+                                double min_scale = 0.0,
+                                double max_scale = 0.0);
   /// v7 §5: raster mirror upsert (single-band scalar GeoTIFF + optional
   /// pseudocolor renderer XML).  Same doc-keyed contract as the vector
   /// mirror: reuse by doc_id, rebuild on source change, style-only change
@@ -280,6 +287,32 @@ public:
   // V8 M1 自省面（数据侧）：镜像层真实存储的要素 + typed 属性
   // （GeoJSON FeatureCollection，limit 截断）。
   std::string mirrorFeaturesJson(const std::string& doc_id, int limit = 16) const;
+  // V10 M-A: one-shot runtime facts as JSON — QGIS/PROJ/GDAL versions,
+  // prefix/data/svg paths, provider registry, CRS probes (EPSG:4326/4490/
+  // 4214/4610) and a 4326→4490 transform probe. Headless (no canvas);
+  // requires initialize(). Consumed by qgis_runtime.health — the honest
+  // replacement for "canvas renders, so the runtime must be fine".
+  std::string runtimeFacts() const;
+  // V10 M-C: push the owning project's CRS (+ ellipsoid derived from it) so
+  // QgsProject::transformContext()/ellipsoid() consumers (measure,
+  // identify) stop seeing the empty default. Returns "" on success, else a
+  // human-readable reason (invalid/unresolvable authid).
+  std::string setProjectCrs(const std::string& authid);
+  // V10 M-O: map-settings facts the host must read, not re-estimate.
+  // canvasMapUnits → QgsUnitTypes encoded unit ("degrees"/"meters"/...).
+  std::string canvasMapUnits(std::uintptr_t canvas) const;
+  double canvasOutputDpi(std::uintptr_t canvas) const;
+  // V10 M-H: provider capability snapshot for a mirrored layer (JSON).
+  // Vector: provider/storage/geometry/wkbType, capability flags
+  // (add/delete features, change geometry/attributes, add/delete
+  // attributes, create spatial index), supportsEditing, transactions,
+  // spatial index presence, feature count, extent, CRS. Raster: provider,
+  // extent, bandCount, per-band data type + nodata, CRS. Unmirrored →
+  // {"exists": false}.
+  std::string mirrorProviderFacts(const std::string& doc_id) const;
+  // V10 M-K: applied renderer/labeling XML read-back (drift check on the
+  // Python side, mirroring mirrorLayerSchemaJson for fields).
+  std::string mirrorStyleJson(const std::string& doc_id) const;
   int applyProjectXml(const std::string& xml);
 
   // M7: component-graph → QgsLayout export. The spec is a JSON document

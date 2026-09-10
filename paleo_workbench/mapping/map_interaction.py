@@ -481,3 +481,94 @@ class SnappingService:
             self.last_match = ranked[0][2]
             return self.last_match.point
         return point
+
+    def snapshot_state(self) -> dict:
+        """导出纯数据、可 JSON 序列化的完整状态快照（V10 Milestone N）。
+
+        集合排序成列表保证快照稳定可比较；``layer_overrides`` 只收录
+        真正有覆盖的图层（四个覆盖通道键的并集），不携带索引/last_match
+        等会话内活动对象。带 ``schema_version`` 供工程文档持久化。
+        """
+        layer_ids = set(self.layer_enabled) | set(self.layer_modes) | set(self.layer_tolerance) | set(self.layer_priority)
+        overrides: dict[str, dict] = {}
+        for layer_id in sorted(layer_ids):
+            override: dict = {}
+            if layer_id in self.layer_enabled:
+                override["enabled"] = bool(self.layer_enabled[layer_id])
+            if layer_id in self.layer_modes:
+                override["modes"] = sorted(self.layer_modes[layer_id])
+            if layer_id in self.layer_tolerance:
+                override["tolerance"] = float(self.layer_tolerance[layer_id])
+            if layer_id in self.layer_priority:
+                override["priority"] = int(self.layer_priority[layer_id])
+            overrides[layer_id] = override
+        return {
+            "schema_version": 1,
+            "enabled": bool(self.enabled),
+            "pixel_tolerance": float(self.pixel_tolerance),
+            "modes": sorted(self.modes),
+            "current_layer_only": bool(self.current_layer_only),
+            "layer_overrides": overrides,
+            "grid_origin": [float(self.grid_origin[0]), float(self.grid_origin[1])],
+            "grid_spacing": None
+            if self.grid_spacing is None
+            else [float(self.grid_spacing[0]), float(self.grid_spacing[1])],
+            "reference_points": [[float(x), float(y)] for x, y in self.reference_points],
+        }
+
+    def restore_state(self, state: dict) -> bool:
+        """从快照恢复状态；``schema_version`` 缺失或不认识返回 False。
+
+        严格版本门禁（返回 False 后由调用方决定回退策略）；字段缺失保
+        持当前默认，类型不符的字段跳过、绝不抛错（旧工程文件可能是裸
+        dict）。未知图层的 per-layer 覆盖照常恢复（图层稍后重挂载，过
+        期 id 的清理归调用方）。恢复成功返回 True。
+        """
+        if not isinstance(state, dict):
+            return False
+        if state.get("schema_version") != 1:
+            return False
+        if isinstance(state.get("enabled"), bool):
+            self.enabled = state["enabled"]
+        tolerance = state.get("pixel_tolerance")
+        if isinstance(tolerance, (int, float)) and not isinstance(tolerance, bool):
+            self.pixel_tolerance = max(0.0, float(tolerance))
+        modes = state.get("modes")
+        if isinstance(modes, list) and all(isinstance(mode, str) for mode in modes):
+            self.modes = set(modes)
+        if isinstance(state.get("current_layer_only"), bool):
+            self.current_layer_only = state["current_layer_only"]
+        overrides = state.get("layer_overrides")
+        if isinstance(overrides, dict):
+            for layer_id, override in overrides.items():
+                if not isinstance(override, dict):
+                    continue
+                if isinstance(override.get("enabled"), bool):
+                    self.layer_enabled[layer_id] = override["enabled"]
+                layer_mode_list = override.get("modes")
+                if isinstance(layer_mode_list, list) and all(isinstance(mode, str) for mode in layer_mode_list):
+                    self.layer_modes[layer_id] = set(layer_mode_list)
+                layer_tolerance = override.get("tolerance")
+                if isinstance(layer_tolerance, (int, float)) and not isinstance(layer_tolerance, bool):
+                    self.layer_tolerance[layer_id] = max(0.0, float(layer_tolerance))
+                priority = override.get("priority")
+                if isinstance(priority, int) and not isinstance(priority, bool):
+                    self.layer_priority[layer_id] = priority
+        origin = _point(state["grid_origin"]) if "grid_origin" in state else None
+        if origin is not None:
+            self.grid_origin = origin
+        if "grid_spacing" in state:
+            spacing = _point(state["grid_spacing"])
+            # 非正间距无效（与 set_grid 一致），保持当前值不动。
+            if state["grid_spacing"] is None:
+                self.grid_spacing = None
+            elif spacing is not None and spacing[0] > 0.0 and spacing[1] > 0.0:
+                self.grid_spacing = spacing
+        references = state.get("reference_points")
+        if isinstance(references, list):
+            self.reference_points = tuple(
+                candidate
+                for value in references
+                if (candidate := _point(value)) is not None
+            )
+        return True

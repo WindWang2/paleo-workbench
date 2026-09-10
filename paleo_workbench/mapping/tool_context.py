@@ -47,7 +47,7 @@ from paleo_workbench.mapping.capability_model import (
 
 __all__ = ["ToolContext", "build_tool_context", "TOOL_CONTEXT_CONTRACT_VERSION"]
 
-TOOL_CONTEXT_CONTRACT_VERSION = 3
+TOOL_CONTEXT_CONTRACT_VERSION = 4
 
 
 def _topology_engine_available(native_canvas: bool, capability: frozenset[str]) -> bool:
@@ -139,6 +139,26 @@ class ToolContext:
     #: 画布比例尺分母（0.0 = 未知——原生取 QgsMapCanvas::scale()，
     #: 回退画布仅在米制轴可证时推导，否则诚实未知）。
     scale_denominator: float = 0.0
+
+    # V10 M-B/M-O/M-N（contract v4 additive）：地图事实与捕捉事实一律
+    # 源自权威（QGIS mapSettings / SnappingService），缺失 = 诚实默认，
+    # 宿主不得自行估算后填充。
+    #: 画布目标 CRS auth id（"" = 未设/未知）。
+    canvas_crs: str = ""
+    #: 画布地图单位（QgsUnitTypes 编码 "degrees"/"meters"/…；"" = 未知）。
+    map_units: str = ""
+    #: 画布输出 DPI（0.0 = 未知）。
+    output_dpi: float = 0.0
+    #: 捕捉容差（像素；0.0 = 未配置/未知）。
+    snapping_tolerance_px: float = 0.0
+    #: 全局捕捉模式集（SnappingService 词汇；() = 未配置）。
+    snapping_modes: tuple[str, ...] = ()
+    #: 活动层 provider 能力结论（None = 无自省面（旧桥/回退），不参与门禁；
+    #: False = provider 实测不可写 → fail-closed）。host 角色门禁之外的第二
+    #: 权威——两个都开才可写。
+    provider_writable: bool | None = None
+    #: 活动层 provider 名（"memory"/"ogr"/…；"" = 无自省面）。
+    provider_name: str = ""
 
     # Tool state
     current_tool: str = "pan"
@@ -264,6 +284,19 @@ def build_tool_context(
         project_crs=str(state.get("project_crs") or ""),
         layer_crs=str(state.get("layer_crs") or ""),
         scale_denominator=max(0.0, float(state.get("scale_denominator", 0.0) or 0.0)),
+        canvas_crs=str(state.get("canvas_crs") or ""),
+        map_units=str(state.get("map_units") or ""),
+        output_dpi=max(0.0, float(state.get("output_dpi", 0.0) or 0.0)),
+        snapping_tolerance_px=max(
+            0.0, float(state.get("snapping_tolerance_px", 0.0) or 0.0)),
+        snapping_modes=tuple(
+            str(value) for value in state.get("snapping_modes", ()) or ()
+        ),
+        provider_writable=(
+            None if state.get("provider_writable") is None
+            else bool(state.get("provider_writable"))
+        ),
+        provider_name=str(state.get("provider_name") or ""),
         current_tool=str(state.get("current_tool") or "pan"),
         capability_flags=capability,
         queryable_layer_count=int(state.get("queryable_layer_count", 0) or 0),

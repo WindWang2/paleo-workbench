@@ -57,6 +57,13 @@ def _spec_descriptors(role_value: str) -> list[AttributeFieldMeta] | None:
         from paleo_workbench.mapping_workspace.geological_layer_spec import (
             spec_for_role,
         )
+        # V10 M-I：控件推断不再在本模块复写一份规则——
+        # ``qgis_layer_schema._editor_widget_for`` 是唯一推断权威（与镜像
+        # ``fields_json`` 同源）。按约定导入模块私有名：两处规则曾逐行
+        # 重复，正是本文件 docstring 立誓消灭的第二真源。
+        from paleo_workbench.mapping.qgis_layer_schema import (  # noqa: PLC2701
+            _editor_widget_for,
+        )
     except Exception:
         return None
     try:
@@ -65,14 +72,7 @@ def _spec_descriptors(role_value: str) -> list[AttributeFieldMeta] | None:
         return None
     descriptors: list[AttributeFieldMeta] = []
     for field in spec.fields:
-        widget = str(field.editor_widget or "")
-        if not widget:
-            if field.choices:
-                widget = "ValueMap"
-            elif field.kind == "bool":
-                widget = "CheckBox"
-            elif field.value_range is not None:
-                widget = "Range"
+        widget = _editor_widget_for(field)
         descriptors.append(
             AttributeFieldMeta(
                 key=field.name,

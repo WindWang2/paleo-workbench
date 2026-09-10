@@ -96,6 +96,14 @@
 #include <qgswkbtypes.h>
 #include <qgsvectorlayerlabeling.h>
 #include <qgsvectorlayerproperties.h>
+#include <qgsproviderregistry.h>
+#include <qgsvectordataprovider.h>
+#include <qgsrasterdataprovider.h>
+#include <qgsrenderer.h>
+// V10 M-A runtime facts: PROJ/GDAL live versions + data path introspection.
+#include <proj.h>
+#include <gdal.h>
+#include <cpl_conv.h>
 
 #include "qgis_render_bridge.hpp"
 #include "style_codec.hpp"
@@ -1833,6 +1841,234 @@ bool QgisMapStack::applyMirrorFeatureDelta(QgsVectorLayer& layer,
   return true;
 }
 
+namespace {
+// V10 M-O: QgsMapLayer scale-based visibility from the host's
+// (min_denominator, max_denominator) pair; 0 on a side = unbounded, both 0
+// disables — matching MapLayer.scale_range semantics on the Python side.
+void applyScaleRange(QgsMapLayer* layer, double min_scale, double max_scale) {
+  if (layer == nullptr) return;
+  const bool enabled = min_scale > 0.0 || max_scale > 0.0;
+  if (min_scale > 0.0) layer->setMinimumScale(min_scale);
+  if (max_scale > 0.0) layer->setMaximumScale(max_scale);
+  layer->setScaleBasedVisibility(enabled);
+}
+}  // namespace
+
+// ---------------------------------------------------------------------------
+// V10 M-A: runtime facts — the one-shot health introspection surface.
+// ---------------------------------------------------------------------------
+
+std::string QgisMapStack::runtimeFacts() const {
+  if (!impl_->initialized)
+    throw std::runtime_error("map stack is not initialized");
+  QJsonObject facts;
+  facts["qgis_version"] = Qgis::version();
+  facts["prefix_path"] = QgsApplication::prefixPath();
+  facts["qgis_data_path"] = QgsApplication::pkgDataPath();
+  {
+    QJsonArray paths;
+    const QStringList svgPaths = QgsApplication::svgPaths();
+    for (const QString& p : svgPaths) paths.append(p);
+    facts["svg_paths"] = paths;
+  }
+  // PROJ: live version + the database path the ACTIVE proj library actually
+  // resolved (nullptr context = default context) — this is what makes
+  // "proj.db 缺席" a reported fact, not a silently invalid CRS. (The vendored
+  // PROJ exposes no search-path getter; the resolved database path is the
+  // authoritative equivalent.)
+  {
+    const PJ_INFO info = proj_info();
+    facts["proj_version"] = QString::fromUtf8(info.version);
+    const char* db_path = proj_context_get_database_path(nullptr);
+    const QString db = QString::fromUtf8(db_path == nullptr ? "" : db_path);
+    facts["proj_db_path"] = db;
+    facts["proj_db_reachable"] = !db.isEmpty() && QFile::exists(db);
+  }
+  facts["gdal_version"] = QString::fromUtf8(GDALVersionInfo("RELEASE_NAME"));
+  const char* gdal_data = CPLGetConfigOption("GDAL_DATA", "");
+  facts["gdal_data"] = QString::fromUtf8(gdal_data == nullptr ? "" : gdal_data);
+  // Provider registry (post-initQgis).
+  QStringList providers;
+  if (QgsProviderRegistry::instance() != nullptr) {
+    providers = QgsProviderRegistry::instance()->providerList();
+  }
+  facts["provider_count"] = providers.size();
+  {
+    QJsonArray array;
+    for (const QString& name : providers) array.append(name);
+    facts["providers"] = array;
+  }
+  // CRS probes — the honest replacement for canvas_destination_crs == "".
+  {
+    QJsonObject probes;
+    const QStringList probe_ids = {"EPSG:4326", "EPSG:4490", "EPSG:4214", "EPSG:4610"};
+    for (const QString& authid : probe_ids) {
+      probes[authid] = QgsCoordinateReferenceSystem(authid).isValid();
+    }
+    facts["crs_probes"] = probes;
+  }
+  // Transform probe: 4326 → 4490 (both must resolve; PROJ pipeline live).
+  {
+    const QgsCoordinateReferenceSystem src = QgsCoordinateReferenceSystem("EPSG:4326");
+    const QgsCoordinateReferenceSystem dst = QgsCoordinateReferenceSystem("EPSG:4490");
+    bool ok = false;
+    if (src.isValid() && dst.isValid()) {
+      try {
+        QgsCoordinateTransform transform(src, dst, project()->transformContext());
+        const QgsPointXY out = transform.transform(QgsPointXY(111.0, 34.0));
+        ok = std::isfinite(out.x()) && std::isfinite(out.y());
+      } catch (const std::exception&) {
+        ok = false;
+      }
+    }
+    facts["transform_available"] = ok;
+  }
+  return QJsonDocument(facts).toJson(QJsonDocument::Compact).toStdString();
+}
+
+std::string QgisMapStack::setProjectCrs(const std::string& authid) {
+  if (!impl_->initialized)
+    throw std::runtime_error("map stack is not initialized");
+  const QgsCoordinateReferenceSystem crs =
+      QgsCoordinateReferenceSystem(QString::fromStdString(authid));
+  if (!crs.isValid()) {
+    return "cannot resolve CRS: " + authid;
+  }
+  // adjustEllipsoid=true: QgsProject derives the ellipsoid from the CRS so
+  // QgsDistanceArea's ellipsoidal branch (measure) finally has real input.
+  project()->setCrs(crs, true);
+  return std::string();
+}
+
+std::string QgisMapStack::canvasMapUnits(std::uintptr_t canvas) const {
+  return QgsUnitTypes::encodeUnit(
+      canvasOrThrow(canvas)->mapSettings().mapUnits()).toStdString();
+}
+
+double QgisMapStack::canvasOutputDpi(std::uintptr_t canvas) const {
+  return canvasOrThrow(canvas)->mapSettings().outputDpi();
+}
+
+// ---------------------------------------------------------------------------
+// V10 M-H / M-K: per-mirror provider facts + applied style read-back.
+// ---------------------------------------------------------------------------
+
+std::string QgisMapStack::mirrorProviderFacts(const std::string& doc_id) const {
+  if (!impl_->initialized)
+    throw std::runtime_error("map stack is not initialized");
+  QgsProject* prj = project();
+  QgsMapLayer* base = findMirrorByDocId(prj, doc_id);
+  if (base == nullptr) {
+    QJsonObject missing;
+    missing["exists"] = false;
+    return QJsonDocument(missing).toJson(QJsonDocument::Compact).toStdString();
+  }
+  QJsonObject facts;
+  facts["exists"] = true;
+  facts["doc_id"] = QString::fromStdString(doc_id);
+  facts["name"] = base->name();
+  facts["layer_type"] = base->type() == Qgis::LayerType::Vector ? "vector" : "raster";
+  facts["crs"] = base->crs().isValid() ? base->crs().authid() : QString();
+  facts["is_valid"] = base->isValid();
+  const QgsRectangle extent = base->extent();
+  facts["extent"] = QJsonObject{
+      {"xmin", extent.xMinimum()}, {"ymin", extent.yMinimum()},
+      {"xmax", extent.xMaximum()}, {"ymax", extent.yMaximum()},
+      {"is_empty", extent.isEmpty()}};
+  if (base->type() == Qgis::LayerType::Vector) {
+    const QgsVectorLayer* layer = qobject_cast<const QgsVectorLayer*>(base);
+    if (layer == nullptr) {
+      facts["error"] = "layer registered as vector but cast failed";
+    } else {
+      const QgsVectorDataProvider* provider = layer->dataProvider();
+      facts["provider"] = provider ? provider->name() : QString();
+      facts["storage_type"] = layer->storageType();
+      facts["geometry_type"] = QgsWkbTypes::geometryDisplayString(
+          layer->geometryType());
+      facts["wkb_type"] = static_cast<int>(layer->wkbType());
+      facts["feature_count"] = static_cast<qint64>(layer->featureCount());
+      facts["supports_editing"] = layer->supportsEditing();
+      facts["is_editable"] = layer->isEditable();
+      facts["is_spatial"] = layer->isSpatial();
+      facts["field_count"] = layer->fields().count();
+      if (provider != nullptr) {
+        const Qgis::VectorProviderCapabilities caps = provider->capabilities();
+        QJsonObject capability;
+        capability["add_features"] = static_cast<bool>(caps & Qgis::VectorProviderCapability::AddFeatures);
+        capability["delete_features"] = static_cast<bool>(caps & Qgis::VectorProviderCapability::DeleteFeatures);
+        capability["change_geometries"] = static_cast<bool>(caps & Qgis::VectorProviderCapability::ChangeGeometries);
+        capability["change_attribute_values"] = static_cast<bool>(caps & Qgis::VectorProviderCapability::ChangeAttributeValues);
+        capability["add_attributes"] = static_cast<bool>(caps & Qgis::VectorProviderCapability::AddAttributes);
+        capability["delete_attributes"] = static_cast<bool>(caps & Qgis::VectorProviderCapability::DeleteAttributes);
+        capability["create_spatial_index"] = static_cast<bool>(caps & Qgis::VectorProviderCapability::CreateSpatialIndex);
+        capability["transaction_support"] = static_cast<bool>(caps & Qgis::VectorProviderCapability::TransactionSupport);
+        facts["capability"] = capability;
+      }
+      switch (layer->hasSpatialIndex()) {
+        case Qgis::SpatialIndexPresence::Present: facts["spatial_index"] = QStringLiteral("present"); break;
+        case Qgis::SpatialIndexPresence::NotPresent: facts["spatial_index"] = QStringLiteral("not_present"); break;
+        default: facts["spatial_index"] = QStringLiteral("unknown"); break;
+      }
+    }
+  } else if (base->type() == Qgis::LayerType::Raster) {
+    const QgsRasterLayer* layer = qobject_cast<const QgsRasterLayer*>(base);
+    if (layer == nullptr) {
+      facts["error"] = "layer registered as raster but cast failed";
+    } else {
+      const QgsRasterDataProvider* provider = layer->dataProvider();
+      facts["provider"] = provider ? provider->name() : QString();
+      facts["band_count"] = layer->bandCount();
+      if (provider != nullptr) {
+        QJsonArray bands;
+        for (int band = 1; band <= layer->bandCount(); ++band) {
+          QJsonObject entry;
+          entry["no"] = band;
+          entry["data_type"] = static_cast<int>(provider->dataType(band));  // Qgis::DataType 枚举值（Float32=6 等）
+          if (provider->sourceHasNoDataValue(band)) {
+            entry["nodata"] = provider->sourceNoDataValue(band);
+          }
+          bands.append(entry);
+        }
+        facts["bands"] = bands;
+      }
+    }
+  }
+  return QJsonDocument(facts).toJson(QJsonDocument::Compact).toStdString();
+}
+
+std::string QgisMapStack::mirrorStyleJson(const std::string& doc_id) const {
+  if (!impl_->initialized)
+    throw std::runtime_error("map stack is not initialized");
+  QgsMapLayer* base = findMirrorByDocId(project(), doc_id);
+  if (base == nullptr) {
+    QJsonObject missing;
+    missing["exists"] = false;
+    return QJsonDocument(missing).toJson(QJsonDocument::Compact).toStdString();
+  }
+  QJsonObject facts;
+  facts["exists"] = true;
+  facts["doc_id"] = QString::fromStdString(doc_id);
+  // QgsFeatureRenderer::save 是非 const 面——读回也要非 const 访问。
+  QgsVectorLayer* layer = qobject_cast<QgsVectorLayer*>(base);
+  if (layer == nullptr) {
+    facts["layer_type"] = "raster";
+    return QJsonDocument(facts).toJson(QJsonDocument::Compact).toStdString();
+  }
+  facts["layer_type"] = "vector";
+  QgsReadWriteContext context;
+  if (layer->renderer() != nullptr) {
+    QDomDocument renderer_doc("qgis");
+    renderer_doc.appendChild(layer->renderer()->save(renderer_doc, context));
+    facts["renderer_xml"] = renderer_doc.toString(-1);
+  }
+  if (layer->labeling() != nullptr) {
+    QDomDocument labeling_doc("qgis");
+    labeling_doc.appendChild(layer->labeling()->save(labeling_doc, context));
+    facts["labeling_xml"] = labeling_doc.toString(-1);
+  }
+  return QJsonDocument(facts).toJson(QJsonDocument::Compact).toStdString();
+}
+
 std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
                                             const std::string& name,
                                             const std::string& geometry_type,
@@ -1848,9 +2084,13 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
                                             bool reference_snap,
                                             std::uint64_t data_revision,
                                             const std::string& delta_json,
-                                            const std::string& fields_json) {
+                                            const std::string& fields_json,
+                                            double min_scale,
+                                            double max_scale) {
   if (!impl_->initialized) throw std::runtime_error("map stack is not initialized");
   if (doc_id.empty()) throw std::invalid_argument("doc_id must not be empty");
+  if (min_scale < 0.0 || max_scale < 0.0)
+    throw std::invalid_argument("scale range denominators must be >= 0");
   const QByteArray geoBytes = QByteArray::fromStdString(geojson_feature_collection).trimmed();
   if (geoBytes.isEmpty()) throw std::invalid_argument("geojson must not be empty for doc_id: " + doc_id);
   QgsProject* project = this->project();
@@ -1973,6 +2213,7 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
     existing->setName(QString::fromStdString(name));
     impl_->known_layer_names[doc_id] = name;  // 程序化改名：同步影子表防误报
     existing->setOpacity(std::clamp(opacity, 0.0, 1.0));
+    applyScaleRange(existing, min_scale, max_scale);
     existing->setCustomProperty(QStringLiteral("pwb/reference"),
                                 is_reference ? QStringLiteral("true") : QString());
     existing->setCustomProperty(QStringLiteral("pwb/editable"),
@@ -2033,6 +2274,7 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
   layer->setCustomProperty(QStringLiteral("pwb/reference_snap"),
                            reference_snap ? QStringLiteral("true") : QString());
   layer->setOpacity(std::clamp(opacity, 0.0, 1.0));
+  applyScaleRange(layer.get(), min_scale, max_scale);
   const std::string id = layer->id().toStdString();
   {
     SuppressGuard guard(&impl_->suppress_tree_callbacks);
@@ -3253,9 +3495,11 @@ QgsMapToolDigitizeFeature* QgisMapStack::digitizeToolFor(std::uintptr_t canvas_a
     const QString geom = slot == 0   ? QStringLiteral("Point")
                          : slot == 1 ? QStringLiteral("LineString")
                                      : QStringLiteral("Polygon");
-    const QString uri = QStringLiteral("%1?crs=%2")
-                            .arg(geom, crs.isValid() ? crs.authid()
-                                                     : QStringLiteral("EPSG:4326"));
+    // V10 M-B（quiet-4326 清理）：画布 CRS 无效 = 工程未声明 CRS ——
+    // scratch 不带 crs 参数（raw 画布坐标），绝不静默兜底 EPSG:4326。
+    const QString uri = crs.isValid()
+        ? QStringLiteral("%1?crs=%2").arg(geom, crs.authid())
+        : geom;
     auto layer = std::make_unique<QgsVectorLayer>(
         uri, QStringLiteral("__pwb_capture_scratch"), QStringLiteral("memory"));
     if (!layer->isValid())
@@ -3282,7 +3526,7 @@ QgsMapToolDigitizeFeature* QgisMapStack::digitizeToolFor(std::uintptr_t canvas_a
       if (cbIt == impl_->digitize_callbacks.end() || !cbIt->second) return;
       // 终局审查 I2：scratch CRS 在工具激活时钉死；画布 CRS 中途变更后
       // 旧 CRS 几何不得静默写入权威会话——按 canceled 上报拒绝。
-      // 画布 CRS 无效时 scratch 以 EPSG:4326 兜底创建（见 digitizeToolFor），
+      // V10 M-B：画布 CRS 无效时 scratch 同为无效 CRS（raw 画布坐标），
       // 该情形视为一致。
       auto kitIt = impl_->capture_kits.find(canvas_addr);
       const QgsCoordinateReferenceSystem canvasCrs =
@@ -3384,6 +3628,12 @@ void QgisMapStack::setCurrentLayer(std::uintptr_t canvas_addr,
                                    const std::string& doc_id) {
   ensureNotStale(canvas_addr);
   QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
+  // V10 M-G（D5 漂移修复）：空 doc_id = 显式清除原生画布 current layer
+  // （选择参考图层等非编辑目标时，画布不得残留上一个编辑层）。
+  if (doc_id.empty()) {
+    canvas->setCurrentLayer(nullptr);
+    return;
+  }
   QgsVectorLayer* layer = findMirrorByDocId(project(), doc_id);
   if (layer == nullptr)
     throw std::invalid_argument("unknown doc_id for current layer: " + doc_id);

@@ -407,7 +407,14 @@ py::dict capability_manifest() {
           // 通用行指示器（M5）、legend filter_layers（M8）。
           "provider_fields", "row_indicators", "legend_filter",
           // 0.5.0a0 (V9): topological-editing push in set_snapping_config.
-          "snapping_topological_editing"}) {
+          "snapping_topological_editing",
+          // 0.6.0a0 (V10): runtime facts / project CRS push / map-settings
+          // facts / provider introspection / style read-back / mirror scale
+          // range / explicit current-layer clear / honest scratch CRS
+          // (quiet-4326 removal in digitizeToolFor).
+          "runtime_facts", "project_crs_push", "map_settings_facts",
+          "provider_introspection", "style_readback", "layer_scale_range",
+          "current_layer_clear", "digitize_scratch_honest_crs"}) {
         features.append(feature);
     }
     manifest["features"] = features;
@@ -425,7 +432,11 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
     // filter_layers.
     // 0.5.0a0 (V9): topological_editing push via set_snapping_config,
     // canvas_scale / canvas_destination_crs introspection.
-    module.attr("__version__") = "0.5.0a0";
+    // 0.6.0a0 (V10): runtime_facts / set_project_crs / canvas_map_units /
+    // canvas_output_dpi / mirror_provider_facts / mirror_style_json /
+    // upsert scale-range channel / explicit current-layer clear / honest
+    // digitize scratch CRS.
+    module.attr("__version__") = "0.6.0a0";
     module.attr("__build_commit__") = "unknown";
     py::register_exception<GeometryServiceError>(module, "QgisGeometryError");
 
@@ -695,6 +706,23 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
         .def("canvas_scale", &pwb::qgis_render::QgisMapStack::canvasScale)
         .def("canvas_destination_crs",
              &pwb::qgis_render::QgisMapStack::canvasDestinationCrs)
+        // V10 M-A/M-C/M-O: runtime facts / project CRS push / map facts.
+        .def("runtime_facts",
+             [](pwb::qgis_render::QgisMapStack& self) {
+               const std::string raw = self.runtimeFacts();
+               return py::module_::import("json").attr("loads")(raw).cast<py::dict>();
+             },
+             "V10: one-shot runtime health facts (versions, paths, providers, "
+             "CRS + transform probes) as a dict.")
+        .def("set_project_crs",
+             &pwb::qgis_render::QgisMapStack::setProjectCrs,
+             py::arg("authid"),
+             "V10: push the owning QgsProject CRS (+derived ellipsoid); "
+             "returns an error string, empty on success.")
+        .def("canvas_map_units",
+             &pwb::qgis_render::QgisMapStack::canvasMapUnits)
+        .def("canvas_output_dpi",
+             &pwb::qgis_render::QgisMapStack::canvasOutputDpi)
         .def("set_canvas_extent", &pwb::qgis_render::QgisMapStack::setCanvasExtent)
         .def("canvas_extent", &pwb::qgis_render::QgisMapStack::canvasExtent)
         .def("zoom_to_full_extent", &pwb::qgis_render::QgisMapStack::zoomToFullExtent)
@@ -757,7 +785,8 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                 py::object legacy_style, bool visible, double opacity,
                 bool is_reference, bool is_editable, bool reference_snap,
                 std::uint64_t data_revision, const std::string& delta_json,
-                const std::string& fields_json) {
+                const std::string& fields_json, double min_scale,
+                double max_scale) {
                std::string legacy_json;
                if (!legacy_style.is_none()) {
                    if (py::isinstance<py::str>(legacy_style)) {
@@ -772,7 +801,8 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                return self.upsertMirrorLayer(doc_id, name, geometry_type, crs_auth_id, geojson,
                                              renderer_xml, labeling_xml, legacy_json, visible, opacity,
                                              is_reference, is_editable, reference_snap,
-                                             data_revision, delta_json, fields_json);
+                                             data_revision, delta_json, fields_json,
+                                             min_scale, max_scale);
              },
              py::arg("doc_id"), py::arg("name"), py::arg("geometry_type"), py::arg("crs_auth_id"),
              py::arg("geojson"), py::arg("renderer_xml") = "", py::arg("labeling_xml") = "",
@@ -780,7 +810,8 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
              py::arg("is_reference") = false, py::arg("is_editable") = false,
              py::arg("reference_snap") = false,
              py::arg("data_revision") = 0, py::arg("delta") = "",
-             py::arg("fields_json") = "")
+             py::arg("fields_json") = "",
+             py::arg("min_scale") = 0.0, py::arg("max_scale") = 0.0)
         .def("upsert_raster_mirror_layer",
              &pwb::qgis_render::QgisMapStack::upsertRasterMirrorLayer,
              py::arg("doc_id"), py::arg("name"), py::arg("source_path"),
@@ -928,6 +959,20 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
         .def("tree_snapshot_json",
              &pwb::qgis_render::QgisMapStack::treeSnapshotJson)
         // V8 M1：镜像层已应用 provider schema 的 JSON 自省事实。
+        .def("mirror_provider_facts",
+             [](pwb::qgis_render::QgisMapStack& self, const std::string& doc_id) {
+               const std::string raw = self.mirrorProviderFacts(doc_id);
+               return py::module_::import("json").attr("loads")(raw).cast<py::dict>();
+             },
+             py::arg("doc_id"),
+             "V10 M-H: provider capability snapshot for a mirrored layer.")
+        .def("mirror_style_json",
+             [](pwb::qgis_render::QgisMapStack& self, const std::string& doc_id) {
+               const std::string raw = self.mirrorStyleJson(doc_id);
+               return py::module_::import("json").attr("loads")(raw).cast<py::dict>();
+             },
+             py::arg("doc_id"),
+             "V10 M-K: applied renderer/labeling XML read-back.")
         .def("mirror_layer_schema_json",
              &pwb::qgis_render::QgisMapStack::mirrorLayerSchemaJson,
              py::arg("doc_id"))

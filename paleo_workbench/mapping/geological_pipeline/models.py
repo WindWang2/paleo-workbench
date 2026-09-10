@@ -20,7 +20,11 @@ class GeologicalFactor:
     well_name: str = ""
     x: float = 0.0
     y: float = 0.0
-    crs: str = "EPSG:4326"
+    # Quiet-4326 convergence (V10 M-B): undeclared by default. The service
+    # boundary resolves the project CRS via crs_contract.resolve_crs (recorded
+    # fallback) before building points; an empty string means "no CRS claimed"
+    # and downstream consumers treat it honestly (undeclared, never guessed).
+    crs: str = ""
     formation: str = ""
     interval: str = ""
     quality: float = 1.0
@@ -39,7 +43,9 @@ class GeologicalFactorDataset:
     factor_name: str
     unit: str = ""
     target_horizon: str = ""
-    crs: str = "EPSG:4326"
+    # Quiet-4326 convergence (V10 M-B): undeclared by default — see
+    # GeologicalFactor.crs; the extraction service is the resolution boundary.
+    crs: str = ""
     points: list[GeologicalFactor] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -110,7 +116,10 @@ class InterpolationOptions:
     contour_levels: list[float] | None = None
     contour_interval: float | None = None
     boundary: list[tuple[float, float]] | None = None
-    crs: str = "EPSG:4326"
+    # Quiet-4326 convergence (V10 M-B): undeclared by default — only consulted
+    # when the dataset carries no CRS, and consumers of an empty result CRS
+    # report undeclared rather than assuming geographic coordinates.
+    crs: str = ""
     anisotropy_angle: float | None = None
     anisotropy_ratio: float | None = None
     # D5: declared distance strategy ("planar" | "planar_degrees" |

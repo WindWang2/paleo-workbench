@@ -10,10 +10,24 @@ from pathlib import Path
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# PySide6 imports at module level are side-effect free; the Qt global-state
-# mutations (platform policy, default surface format, geoviz gate) live in
-# main() so a bare `import paleo_workbench.main` cannot change Qt state
-# (packaging #440).
+# V10 M-A: prepare the vendored-QGIS loader BEFORE the first PySide6 import
+# below — the conda recipe (PALEO_QGIS_CONDA_QT=1) must preload its Qt set by
+# absolute path before the wheel's bundled Qt DLLs take the process slot
+# (ADR 0059 private-ABI rule). .env is loaded here too: machine recipe vars
+# (PALEO_QGIS_CONDA_QT / PALEO_QGIS_BUILD_DIR / PALEO_QGIS_DEPS_DIR) live in
+# the ignored repo .env; load_local_env never overrides shell values.
+from paleo_workbench.env_bootstrap import load_local_env
+
+load_local_env()
+
+from paleo_workbench.qgis_runtime.loader import prepare_bridge_load
+
+prepare_bridge_load()
+
+# PySide6 imports at module level are side-effect free (beyond the DLL slots
+# the loader above deliberately claims first); the Qt global-state mutations
+# (platform policy, default surface format, geoviz gate) live in main() so a
+# bare `import paleo_workbench.main` cannot change Qt state (packaging #440).
 from PySide6.QtGui import QGuiApplication, QSurfaceFormat
 from PySide6.QtWidgets import QApplication
 

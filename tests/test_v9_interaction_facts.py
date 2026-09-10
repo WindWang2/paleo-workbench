@@ -77,11 +77,14 @@ class _FakeQgis:
 
 
 # --------------------------------------------------------------------------- #
-# ToolContext v3 — CRS / scale facts
+# ToolContext v3 — CRS / scale facts（V10 起 contract v4：canvas_crs /
+# map_units / output_dpi / snapping 事实 / provider 能力为 additive 字段，
+# v3 字段与语义不变）
 # --------------------------------------------------------------------------- #
 
 def test_contract_version_bumped_to_3():
-    assert TOOL_CONTEXT_CONTRACT_VERSION == 3
+    # V10 M-B/M-O/M-N/M-H：v4 = v3 + additive 字段（默认诚实空/None）。
+    assert TOOL_CONTEXT_CONTRACT_VERSION == 4
 
 
 def test_context_carries_crs_and_scale_facts():
