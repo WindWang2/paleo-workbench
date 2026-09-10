@@ -19,6 +19,9 @@ from paleo_workbench.mapping_workspace.layer_groups import (
 )
 from paleo_workbench.mapping_workspace.layer_roles import LayerRole
 from paleo_workbench.mapping_workspace.stages import STAGE_ORDER, MappingStage
+from paleo_workbench.mapping_workspace.stage_vocabulary import (
+    stage_context_action_ids,
+)
 
 
 @dataclass(frozen=True)
@@ -34,9 +37,9 @@ class StageToolProfile:
 
     #: 本阶段可用的数字化/编辑动作 id（existing MapActionController ids）。
     edit_actions: tuple[str, ...] = ()
-    #: 阶段专属上下文动作 id（镜像 dispatcher 单表，仅域侧编排消费；
-    #: 面板/palette 词表派生自 ui.workstation.stage_actions.
-    #: STAGE_CONTEXT_ACTIONS——V7 R2-F1 后不再三处手维护）。
+    #: 阶段专属上下文动作 id（V10 起从 ``stage_vocabulary`` 派生——
+    #: profile 与 panel/palette/dispatcher 共用同一份词表，结构上不再
+    #: 漂移；此前三处手维护表互不推导）。
     context_actions: tuple[str, ...] = ()
 
     def allows_edit_action(self, action_id: str) -> bool:
@@ -94,11 +97,7 @@ _STAGE_PROFILES: dict[MappingStage, StageProfile] = {
                 "add_polygon", "move_feature", "vertex", "split", "merge",
                 "delete_selected", "undo", "redo",
             ),
-            context_actions=(
-                "add_seismic_prediction_overlay", "add_well_prediction_overlay",
-                "well_prediction_point_to_surface", "load_initial_facies",
-                "create_facies_draft", "stage_save", "stage_qc",
-            ),
+            context_actions=stage_context_action_ids("facies_calibration"),
         ),
         recommended_docks={
             "composite_input": True,   # 左：输入与结果
@@ -129,10 +128,7 @@ _STAGE_PROFILES: dict[MappingStage, StageProfile] = {
                 "add_line", "add_polygon", "move_feature", "vertex", "split",
                 "merge", "delete_selected", "undo", "redo",
             ),
-            context_actions=(
-                "create_constraint", "open_factor_workbench", "run_factor",
-                "stage_save", "stage_qc",
-            ),
+            context_actions=stage_context_action_ids("constraint_factor"),
         ),
         recommended_docks={
             "composite_layer": True,
@@ -157,10 +153,7 @@ _STAGE_PROFILES: dict[MappingStage, StageProfile] = {
                 "add_polygon", "add_line", "move_feature", "vertex", "split",
                 "merge", "delete_selected", "undo", "redo",
             ),
-            context_actions=(
-                "select_evidence", "create_integrated_draft", 
-                "run_qa", "assemble_map_product", "stage_save",
-            ),
+            context_actions=stage_context_action_ids("integrated_compilation"),
         ),
         recommended_docks={
             "composite_layer": True,
