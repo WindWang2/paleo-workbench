@@ -236,6 +236,8 @@ def _record(rid, project):
 def test_publish_gate_blocks_stale(project, catalog, tmp_path):
     result = _assemble(project, catalog, tmp_path)
     record = find_map_product(project, result.record_id)
+    # V9（goal §31）：publish 阶梯——只有 FROZEN 产品可发布。
+    freeze_map_product(record)
     report = publish_map_product(record, project, export_path="/tmp/out.png")
     assert report["ok"] is True
 

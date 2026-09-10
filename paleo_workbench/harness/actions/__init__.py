@@ -10,6 +10,7 @@ def register_all(registry) -> list[str]:
     from paleo_workbench.harness.actions import (
         data,
         geology_workflow,
+        interpretation_v9,
         mapping,
         project,
         scientific,
@@ -32,6 +33,7 @@ def register_all(registry) -> list[str]:
         workflow,
         scientific,
         scientific_pipeline,
+        interpretation_v9,
     ):
         before = set()
         try:

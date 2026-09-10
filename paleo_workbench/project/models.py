@@ -548,6 +548,13 @@ class MapProductRecord(BaseModel):
     frozen: bool = False
     superseded_by: str | None = None
     cloned_from: str | None = None
+    # Lifecycle V3 (V9, goal §31): explicit maturity ladder. Legacy records
+    # reconcile on read (frozen→frozen / superseded→superseded / else draft);
+    # "final" maps to draft-awaiting-review — assembly complete is not review.
+    lifecycle: Literal["draft", "reviewed", "frozen", "published", "superseded"] = "draft"
+    #: 产品级 QA（V9 goal §30/§31）：severity 词汇 INFO/WARNING/ERROR/BLOCKER；
+    #: BLOCKER 阻断 publish。schema 由 workflow.map_product.product_qa 拥有。
+    product_qa: dict[str, Any] = Field(default_factory=dict)
     # Assembly-time manual adjustments (review R1-P2): staleness must rebuild
     # the fingerprint WITH them, or any adjusted product reads stale forever.
     manual_adjustments: list[dict[str, Any]] = Field(default_factory=list)

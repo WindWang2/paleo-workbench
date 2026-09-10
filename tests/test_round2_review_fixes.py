@@ -95,6 +95,9 @@ def test_map_product_kriging_fallback_honesty_without_active_qc() -> None:
     )
     # Project has NO active_quality_report_id (active_qc is None)
     project.active_quality_report_id = None
+    # V9（goal §31）：publish 阶梯——先冻结再发布。
+    from paleo_workbench.workflow.map_product import freeze_map_product
+    freeze_map_product(record)
 
     report = publish_map_product(record, project, accept_warnings=True)
     assert any("computed by the numpy kriging fallback" in w for w in report["warnings"])
