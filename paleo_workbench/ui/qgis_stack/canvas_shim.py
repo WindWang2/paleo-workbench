@@ -290,6 +290,8 @@ class QgisCanvasShim(QWidget):
         self._shutdown_done = False
         _LIVE_SHIMS.add(self)
         self._tool_controller = None
+        # V9 W7：digitize commit CRS 守卫钩子（set_capture_layer_crs_provider）。
+        self._capture_layer_crs_provider = None
         self._pending_programmatic = 0
         self._expected_programmatic_extents: list[tuple[float, float, float, float]] = []
         self._last_emitted_extent: tuple[float, float, float, float] | None = None
@@ -820,6 +822,45 @@ class QgisCanvasShim(QWidget):
             return None
         return self._last_native_tool[0]
 
+    def map_scale(self) -> float:
+        """画布权威比例尺分母（V9 W1；0.0 = 未知/桥无此面）。
+
+        直接读 ``QgsMapCanvas::scale()``（桥 ≥0.5.0a0）；旧桥/异常按
+        诚实未知返回 0.0——宿主 ToolContext.scale_denominator 据此判定。
+        """
+        if not self._canvas_created or self._canvas_destroyed:
+            return 0.0
+        probe = getattr(self.stack, "canvas_scale", None)
+        if not callable(probe):
+            return 0.0
+        try:
+            value = float(probe(self.canvas_address))
+        except Exception:
+            return 0.0
+        return value if value > 0.0 and math.isfinite(value) else 0.0
+
+    def destination_crs(self) -> str:
+        """画布当前目标 CRS auth id（V9 W7；"" = 未设/桥无此面）。"""
+        if not self._canvas_created or self._canvas_destroyed:
+            return ""
+        probe = getattr(self.stack, "canvas_destination_crs", None)
+        if not callable(probe):
+            return ""
+        try:
+            return str(probe(self.canvas_address) or "")
+        except Exception:
+            return ""
+
+    def set_capture_layer_crs_provider(self, provider) -> None:
+        """V9 W7：digitize commit 的 CRS 守卫钩子（宿主提供 tool→层 CRS）。
+
+        原生采点几何以画布目标 CRS 落地；宿主会话层存储 CRS 由本钩子
+        查询。两者可证不同时 commit 拒绝（fail-closed）——防止镜像侧
+        destination CRS 被降级丢弃后，度数坐标静默写进米制图层。
+        无钩子/查不到层 = 不比对（与 V8 行为一致，不新增假失败）。
+        """
+        self._capture_layer_crs_provider = provider
+
     def set_map_tool_controller(self, controller) -> None:
         """Host 工具控制器绑定：pan/zoom/编辑工具映射到 QGIS 原生工具。
 
@@ -946,6 +987,21 @@ class QgisCanvasShim(QWidget):
             commit = getattr(tool, "commit_geometry", None)
             if commit is None:
                 return
+            # V9 W7：画布目标 CRS 与捕获层存储 CRS 可证不同 → 拒绝（坐标
+            # 帧不同的写入是静默损坏，不是降级）。任一侧未知 = 不比对。
+            canvas_crs = shim.destination_crs()
+            if canvas_crs and tool is not None:
+                provider = getattr(shim, "_capture_layer_crs_provider", None)
+                layer_crs = provider(tool) if provider is not None else ""
+                if layer_crs:
+                    from paleo_workbench.mapping.crs_contract import normalize_crs
+
+                    if normalize_crs(canvas_crs) != normalize_crs(layer_crs):
+                        shim.commit_rejected.emit(
+                            f"要素未写入：画布坐标系 {canvas_crs} 与图层坐标系 "
+                            f"{layer_crs} 不一致（请检查工程 CRS/图层降级状态）")
+                        shim.tool_operation.emit(False)
+                        return
             # ADV-2：commit 被拒（坏几何/重复 id/脱钩会话）必须让用户感知，
             # 不得静默吞掉一次完成的采点。
             try:

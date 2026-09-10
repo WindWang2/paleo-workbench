@@ -395,6 +395,25 @@ class SnappingService:
             if (candidate := _point(value)) is not None
         )
 
+    def apply_role_profile(self, layer_id: str, role: object) -> str | None:
+        """应用角色推荐 profile 到该层的 per-layer 覆盖（V9 W4）。
+
+        推荐写进既有 ``layer_modes``/``layer_tolerance`` 覆盖通道（不建
+        第二状态源）；全局开关/其它层配置不动。返回推荐解释（供状态条
+        呈现），角色无 profile 时返回 None 且不改动任何配置。
+        """
+        from paleo_workbench.mapping_workspace.snapping_profiles import (
+            profile_summary,
+            recommended_profile_for_role,
+        )
+
+        profile = recommended_profile_for_role(role)
+        if profile is None:
+            return None
+        self.layer_modes[str(layer_id)] = set(profile.modes)
+        self.layer_tolerance[str(layer_id)] = float(profile.tolerance_px)
+        return profile_summary(profile)
+
     def set_grid(self, spacing: Point | None, *, origin: Point = (0.0, 0.0)) -> None:
         if spacing is None:
             self.grid_spacing = None

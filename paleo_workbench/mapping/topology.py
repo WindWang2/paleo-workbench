@@ -104,6 +104,51 @@ class TopologyService:
         # 定位用——服务不持有图层注册表，宿主每次调用传入全集）。
         self._compounds: list[CompoundUndoGroup] = []
         self._last_layers: list[VectorLayer] = []
+        # V9 W2：每图层最近一次校验的错误计数（运行时 topology_error_count
+        # 生产者）。键 = layer id，值 = (data_revision, session_revision,
+        # count)。只在有界刷新点写（保存/flush 校验、拓扑开关、几何命令、
+        # undo/redo、显式校验）；上下文采集只读缓存——帧级链不做 O(要素)
+        # 校验。会话终结（提交/回滚）后 cached_error_count 不再计入该层。
+        self._error_counts: dict[str, tuple[int, int, int]] = {}
+
+    # -- V9 W2：运行时拓扑错误计数（merge 门禁的事实生产者） -------------------
+
+    def record_validation(self, layer: VectorLayer, error_count: int) -> None:
+        """记录一次校验结论（缓存写；刷新点调用）。"""
+        session = layer.edit_session
+        self._error_counts[layer.id] = (
+            int(getattr(layer, "data_revision", 0) or 0),
+            int(session.revision if session is not None else -1),
+            max(0, int(error_count)),
+        )
+
+    def refresh_error_count(self, layer: VectorLayer) -> int:
+        """校验一层并记录（有界刷新点）；返回错误数。"""
+        count = len(self.validate([layer]))
+        self.record_validation(layer, count)
+        return count
+
+    def cached_error_count(self, layers: Iterable[VectorLayer]) -> int:
+        """各**活跃编辑会话**最近一次校验的错误数之和（缓存读，O(层数)）。
+
+        语义与 save 时校验门禁一致：从未校验过 = 0（门不因未知而拦），
+        校验后发现编辑 → 计数保持最近已知值，直到下一个刷新点重算；
+        会话提交/回滚后该层不再计入（无会话即无未决拓扑错误）。
+        """
+        total = 0
+        for layer in layers:
+            if layer.edit_session is None:
+                continue
+            entry = self._error_counts.get(layer.id)
+            if entry is not None:
+                total += entry[2]
+        return total
+
+    def forget_error_count(self, layer_ids: Iterable[str]) -> None:
+        """丢弃这些图层的计数（图层删除时随生命周期清理）。"""
+        stale = set(layer_ids)
+        for key in stale.intersection(self._error_counts):
+            del self._error_counts[key]
 
     # -- 校验引擎选择（V7：QGIS GEOS 优先，Shapely 显式回退） ------------------
 

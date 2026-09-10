@@ -174,7 +174,12 @@ class ZoomTool(MapTool):
 class MeasureDistanceTool(MapTool):
     tool_id = "measure_distance"
 
-    def __init__(self, *, measurement_ready: Callable[[float], None] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        measurement_ready: Callable[[float], None] | None = None,
+        crs: str = "",
+    ) -> None:
         super().__init__()
         self._measurement_ready = measurement_ready
         self.start: Point | None = None
@@ -182,10 +187,32 @@ class MeasureDistanceTool(MapTool):
         # 最近一次完成的分段长度。QGIS 画布路径（canvas_shim 事件路由）没有
         # measurement_ready 回调可用——宿主经该只读状态 + 信号给出分段距离。
         self.last_distance: float | None = None
+        # V9 W8：地理 CRS 下平面 math.dist 是度不是米——经 crs_contract
+        # 的 Geod 走测地线（米）；投影/未知 CRS 保持平面（单位 = 地图单位）。
+        # ``last_geodesic`` 让宿主能诚实标注「测地(米)」vs「平面(地图单位)」。
+        self._geod = None
+        if str(crs or "").strip():
+            from paleo_workbench.mapping.crs_contract import geod_for_crs
+
+            self._geod = geod_for_crs(crs)
+        self.last_geodesic = False
 
     @property
     def points(self) -> list[Point]:
         return [point for point in (self.start, self.current) if point is not None]
+
+    def _measure(self, start: Point, end: Point) -> float:
+        if self._geod is not None:
+            try:
+                _azimuth1, _azimuth2, distance = self._geod.inv(
+                    float(start[0]), float(start[1]), float(end[0]), float(end[1]))
+                if math.isfinite(distance):
+                    self.last_geodesic = True
+                    return float(distance)
+            except Exception:
+                pass
+        self.last_geodesic = False
+        return math.dist(start, end)
 
     def mouse_press(self, point: Point, *, button: str = "left", modifiers: Iterable[str] = ()) -> bool:
         if button == "right":
@@ -196,7 +223,7 @@ class MeasureDistanceTool(MapTool):
             self.start = point
             self.current = point
             return True
-        distance = math.dist(self.start, point)
+        distance = self._measure(self.start, point)
         self.last_distance = distance
         if self._measurement_ready is not None:
             self._measurement_ready(distance)

@@ -387,8 +387,10 @@ def singlepart_to_multipart(parts: Sequence[dict]) -> GeometryResult:
         coordinates = [p["coordinates"] for p in parts]
     else:
         coordinates = [p["coordinates"] for p in parts]
+    # V9 W7：纯 dict 组装不经 shapely——引擎如实标 host（"每个结果披露
+    # 真实引擎"契约；此前误标 shapely）。
     return GeometryResult(
-        {"type": prefix, "coordinates": coordinates}, ENGINE_SHAPELY)
+        {"type": prefix, "coordinates": coordinates}, ENGINE_HOST)
 
 
 def split_by_line(geometry: dict, cutter: dict) -> GeometryListResult:

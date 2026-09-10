@@ -229,7 +229,14 @@ class SnappingSettingsDialog(QDialog):
         )
         self._table.verticalHeader().setVisible(False)
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        # V9 W4：推荐解释呈现面（按角色推荐应用后显示 rationale）。
+        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._table.customContextMenuRequested.connect(self._show_row_menu)
         outer.addWidget(self._table, 1)
+        self._hint = QLabel("", self)
+        self._hint.setObjectName("WorkstationPanelFootnote")
+        self._hint.setWordWrap(True)
+        outer.addWidget(self._hint)
 
         self._well_snap = QCheckBox(
             f"参考点捕捉（井位 / 参与捕捉的引用图层，{len(self._well_points)} 个）"
@@ -278,6 +285,14 @@ class SnappingSettingsDialog(QDialog):
 
             name_item = QTableWidgetItem(label)
             name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            # V9 W4：角色捕捉推荐可解释——行 tooltip 携带完整推荐语。
+            profile = self._role_profile(layer_id)
+            if profile is not None:
+                from paleo_workbench.mapping_workspace.snapping_profiles import (
+                    profile_summary,
+                )
+
+                name_item.setToolTip(profile_summary(profile))
             self._table.setItem(row, 0, name_item)
 
             entries: dict[str, object] = {}
@@ -315,6 +330,63 @@ class SnappingSettingsDialog(QDialog):
             entries["priority"] = priority_cell
 
             self._layer_rows[layer_id] = entries
+
+    def _show_row_menu(self, position) -> None:
+        """行右键菜单：按角色推荐应用（V9 W4——推荐可解释、可改）。"""
+        from PySide6.QtWidgets import QMenu
+
+        row = self._table.rowAt(int(position.y()))
+        if row < 0:
+            return
+        layer_id = next(
+            (lid for index, lid in enumerate(self._layer_rows) if index == row),
+            "",
+        )
+        if not layer_id:
+            return
+        profile = self._role_profile(layer_id)
+        menu = QMenu(self)
+        if profile is None:
+            action = menu.addAction("该图层无角色捕捉推荐")
+            action.setEnabled(False)
+        else:
+            menu.addAction(
+                f"按「{profile.role.label}」推荐设置").triggered.connect(
+                lambda: self._apply_role_profile_to_row(layer_id))
+        menu.exec(self._table.viewport().mapToGlobal(position))
+
+    def _role_profile(self, layer_id: str):
+        """行图层的角色捕捉推荐（无角色/RAW 保护 → None）。"""
+        from paleo_workbench.mapping_workspace.snapping_profiles import (
+            recommended_profile_for_role,
+        )
+
+        return recommended_profile_for_role(
+            getattr(self._controller, "role_of_layer", lambda _lid: "")(layer_id))
+
+    def _apply_role_profile_to_row(self, layer_id: str) -> None:
+        """按角色推荐设置：全局模式框 = profile 模式；本行容差/顶点/线段。
+
+        全局框是 per-row 无法表达的 endpoint/intersection/midpoint 的唯一
+        表达面（accept 的单写径不变）；推荐语经状态标签呈现，用户可改。
+        """
+        from paleo_workbench.mapping_workspace.snapping_profiles import (
+            profile_summary,
+        )
+
+        profile = self._role_profile(layer_id)
+        if profile is None:
+            return
+        for mode, box in self._mode_boxes.items():
+            box.setChecked(mode in profile.modes)
+        entries = self._layer_rows.get(layer_id)
+        if entries is not None:
+            entries["vertex"].setChecked("vertex" in profile.modes
+                                          or "endpoint" in profile.modes)
+            entries["segment"].setChecked("segment" in profile.modes)
+            entries["tolerance"].setValue(float(profile.tolerance_px))
+            entries["enabled"].setChecked(True)
+        self._hint.setText(profile_summary(profile))
 
     def accept(self) -> None:
         snapping = self._snapping

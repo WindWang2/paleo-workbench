@@ -169,7 +169,11 @@ class StageActionDispatcher:
         source_version_id: str = "",
         features: list | None = None,
     ) -> str | None:
-        """创建图层 + 注册角色成员资格 + 触发组合同步；返回 layer_id。"""
+        """创建图层 + 注册角色成员资格 + 触发组合同步；返回 layer_id。
+
+        V9 W9：角色注册后立即应用捕获语义（捕捉推荐/拓扑建议）——
+        「物源方向线」等地质目标从第一笔起就有正确的捕捉配置。
+        """
         layer = self.edit_controller.create_layer(name=name, kind=kind, template=template)
         if layer is None:
             self.composite.status_message.emit(f"创建图层失败：{name}")
@@ -180,6 +184,12 @@ class StageActionDispatcher:
             constraint_kind=constraint_kind,
             source_version_id=source_version_id,
         )
+        try:
+            hint = self.edit_controller.apply_capture_spec(layer.id)
+        except Exception:
+            hint = None
+        if hint:
+            self.composite.status_message.emit(hint)
         if features:
             from paleo_workbench.mapping.vector_layer import VectorFeature
 

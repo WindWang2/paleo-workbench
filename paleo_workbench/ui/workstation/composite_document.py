@@ -975,6 +975,9 @@ class CompositeDocument(QWidget):
         self.edit_controller = CompositeEditController(parent=self)
         # RAW/锁定门禁单点注入（V6 B-P0-1：所有会话起点与 flush 提交经此）。
         self.edit_controller.set_edit_gate(self._role_allows_editing)
+        # V9 W6/W9：角色查询单点注入——快照 metadata.role（镜像 QgsFields 来源）
+        # 与捕获 spec 默认值都派生自 stage membership（单一角色权威）。
+        self.edit_controller.set_role_lookup(self._layer_role_value)
         # V7 能力快照：桥面（native/fallback）单次探测；会话的 EditDelta
         # 以此摘要记录引擎溯源（native 执行 vs shapely 兜底可审计）。
         self._qgis_capability: QgisCapabilityManifest = probe_qgis_capability()
@@ -1269,6 +1272,14 @@ class CompositeDocument(QWidget):
         inputs["raw_locked"] = raw_locked
         inputs["stage_locked"] = stage_locked
         inputs["queryable_layer_count"] = self.queryable_layer_count()
+        # V9 W1：画布权威比例尺 + 运行时阻塞任务（文档拥有画布与调度器视野，
+        # 控制器不持有——注入而非在采集器里猜）。控制器上显式设置的标签
+        # （visual-QA 驱动面/宿主模态操作）优先于调度器派生。
+        inputs["scale_denominator"] = self._canvas_scale_denominator()
+        inputs["blocking_task"] = (
+            str(getattr(controller, "blocking_task_label", "") or "")
+            or self._mapping_blocking_task_label()
+        )
         return build_tool_context(
             controller_state=inputs,
             qgis=self._qgis_capability,
@@ -1306,6 +1317,68 @@ class CompositeDocument(QWidget):
             if str(status or "") == "ready":
                 reference_count += 1
         return edit_count + base_count + reference_count
+
+    # -- V9 W1：画布比例尺与阻塞任务（上下文权威事实） --------------------------
+
+    def _canvas_scale_denominator(self) -> float:
+        """画布比例尺分母（0.0 = 诚实未知）。
+
+        原生路径取 QGIS ``QgsMapCanvas::scale()``（桥 getter，探针门控）；
+        回退画布仅在 CRS 可证米制轴时由像素几何推导（QGIS 同式
+        ``mupp × 39.3701 × logicalDpi``），否则未知——绝不给一个貌似
+        精确的错误数字。
+        """
+        canvas = self.canvas
+        if canvas is None:
+            return 0.0
+        native_scale = getattr(canvas, "map_scale", None)
+        if callable(native_scale):
+            try:
+                value = float(native_scale())
+                if value > 0.0:
+                    return value
+            except Exception:
+                pass
+        from paleo_workbench.mapping.crs_contract import (
+            scale_denominator_from_pixels,
+        )
+
+        try:
+            mupp = float(canvas.map_units_per_pixel)
+            width = int(canvas.width() or 0)
+            dpi = float(canvas.logicalDotsPerInch() or 0.0)
+        except Exception:
+            return 0.0
+        if mupp <= 0.0 or width <= 0 or dpi <= 0.0:
+            return 0.0
+        return scale_denominator_from_pixels(
+            mupp, dpi, self.edit_controller.project_crs)
+
+    def _mapping_blocking_task_label(self) -> str:
+        """持有编图工程独占权的运行中任务标签（blocking_task 生产生产者）。
+
+        V9 W1 契约：不是所有后台任务都阻塞编图（渲染/转码不阻塞）——
+        只有改写编图工程产物的工作流 DAG 运行（kind=background.compute、
+        title=workflow:*）会让 merge/assemble/QA 等读到半成品，须以全局
+        阻塞呈现。判定词表集中在此，采集廉价（statuses() 快照）。
+        """
+        try:
+            from paleo_workbench.runtime.task_scheduler import (
+                TaskState,
+                get_scheduler,
+            )
+
+            handles = get_scheduler().statuses()
+        except Exception:
+            return ""
+        for handle in handles:
+            if handle.state is not TaskState.RUNNING:
+                continue
+            kind = str(handle.spec.kind or "")
+            title = str(handle.spec.title or "")
+            if kind == "background.compute" and title.startswith("workflow:"):
+                return title.split("(", 1)[0].strip() or "工作流运行中"
+        return ""
 
     def _capability_snapshot(self) -> QgisCapabilitySnapshot:
         """画布后端能力三态（native / degraded / unavailable）。"""
@@ -1919,28 +1992,37 @@ class CompositeDocument(QWidget):
         suffix = " 完成" if action == "measure_completed" else ""
         self.status_bar.set_measure(f"测距: {text} · {max(segment_count - 1, 0)} 段{suffix}")
 
-    def _on_measure_segment(self, distance: float) -> None:
-        """旧桥视口路由的分段完成（平面距离，明确标注——P1-3）。"""
+    def _measure_segment_label(self, distance: float) -> str:
+        """分段距离的诚实标注（V9 W8）：测地(米) / 平面(地图单位)。
+
+        距离来自活动 MeasureDistanceTool 的 last_distance；测地与否由
+        工具的 ``last_geodesic`` 决定（地理 CRS + Geod 可用 → 测地米；
+        投影/未知 CRS → 平面地图单位）。工具不可达时按平面标注（保守）。
+        """
         import math
 
         try:
             value = float(distance)
         except (TypeError, ValueError):
             value = math.nan
-        self.status_bar.set_measure(
-            f"测距: {value:.4g}（平面）" if math.isfinite(value) else "测距: 无效"
-        )
+        if not math.isfinite(value):
+            return "测距: 无效"
+        tool = self.edit_controller.tools.active_tool
+        geodesic = bool(getattr(tool, "last_geodesic", False))
+        if geodesic:
+            text = f"{value / 1000.0:.3f} km" if value >= 1000 else f"{value:.1f} m"
+            return f"测距: {text}（测地）"
+        return f"测距: {value:.4g}（平面，地图单位）"
+
+    def _on_measure_segment(self, distance: float) -> None:
+        """旧桥视口路由的分段完成（标注测地/平面——V9 W8 后地理 CRS 为测地米）。"""
+        self.status_bar.set_measure(self._measure_segment_label(distance))
 
     def _on_measure_preview(self, distance: float) -> None:
-        """旧桥视口路由的实时预览（平面距离）。"""
-        import math
-
-        try:
-            value = float(distance)
-        except (TypeError, ValueError):
-            return
-        if math.isfinite(value):
-            self.status_bar.set_measure(f"测距: {value:.4g}（平面）…")
+        """旧桥视口路由的实时预览（标注同分段路径）。"""
+        label = self._measure_segment_label(distance)
+        if "无效" not in label:
+            self.status_bar.set_measure(f"{label}…")
 
     def _show_identify_popup(self, results) -> None:
         """识别结果 → 点击处 QToolTip 悬浮（有结果才弹）。
@@ -2305,6 +2387,15 @@ class CompositeDocument(QWidget):
             "block_reason": reason,
             "editing_active": self.edit_controller.editing,
         }
+
+    def _layer_role_value(self, layer_id) -> str:
+        """图层角色值（stage membership 单权威；无 = ""）。
+
+        V9 W6/W9 注入给编辑控制器的角色查询——快照 metadata.role 与
+        捕获 spec 都从这里派生，控制器不自持角色表。
+        """
+        role = self.stage_controller.state.role_of(str(layer_id or ""))
+        return str(getattr(role, "value", "") or "")
 
     def _role_allows_editing(self, layer_id) -> tuple[bool, str]:
         """编辑门禁（单点）：RAW 不可变保护（V5 §14）+ 成熟度冻结 + 阶段证据组锁（§41）。
@@ -2740,10 +2831,17 @@ class CompositeDocument(QWidget):
         """
         imported = 0
         for path in paths:
+            # V9 W3：CRS 经契约解析——未声明时拒绝导入并说明，不静默按 4326 转换。
+            from paleo_workbench.mapping.crs_contract import resolve_crs
+
+            resolution = resolve_crs(
+                self.edit_controller.project_crs, purpose="参考图层导入")
+            if not resolution.declared:
+                self.status_message.emit(
+                    resolution.degraded_reason + "——请先在工程设置中声明坐标系")
+                continue
             try:
-                layer = self._reference_service.import_layer(
-                    path, self.edit_controller.project_crs or "EPSG:4326"
-                )
+                layer = self._reference_service.import_layer(path, resolution.crs)
             except ReferenceLayerError as exc:
                 self.status_message.emit(str(exc))
                 continue
