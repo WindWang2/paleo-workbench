@@ -54,6 +54,8 @@ def _ctx(**overrides) -> ToolContext:
         backend_mode="native",
         backend_reason="",
         write_granted=False,
+        # Task 8：identify 门禁唯一图层输入（有活动层 ⇒ 至少一层可查询）。
+        queryable_layer_count=1,
     )
     base.update(overrides)
     return derived_context(**base)
@@ -354,6 +356,8 @@ def test_no_active_layer_reasons() -> None:
         artifact_maturity="",
         vector_writable=False,
         editing=False,
+        # Task 8：无活动层 + 零可查询图层（identify 仍禁用，判词如实）。
+        queryable_layer_count=0,
     )
     avail = availability_for_context(ctx)
     assert not avail["identify"].enabled

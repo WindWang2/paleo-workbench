@@ -44,6 +44,8 @@ def _ctx(**changes) -> ToolContext:
         layer_role="initial_facies_draft",
         vector_writable=True,
         edit_gate_open=True,
+        # Task 8：identify 门禁唯一图层输入（有活动层 ⇒ 至少一层可查询）。
+        queryable_layer_count=1,
     )
     base.update(changes)
     return ToolContext(**base)
@@ -59,7 +61,8 @@ MATRIX: list[tuple[str, ToolContext, dict[str, bool]]] = [
     ),
     (
         "project_ready_no_layer",
-        _ctx(mapping_stage=None, active_layer_id="", active_layer_kind="", layer_role=""),
+        _ctx(mapping_stage=None, active_layer_id="", active_layer_kind="", layer_role="",
+             queryable_layer_count=0),
         {"pan": True, "layer_new": True, "toggle_editing": False, "identify": False},
     ),
     (
@@ -324,6 +327,7 @@ class _FakeSnapshot:
         self.capability_mode = ctx.backend_mode
         self.capability_reason = ctx.backend_reason
         self.write_granted = ctx.write_granted
+        self.queryable_layer_count = ctx.queryable_layer_count
 
 
 @pytest.mark.parametrize(
@@ -377,6 +381,7 @@ def _native_ctx(**changes) -> ToolContext:
         edit_gate_open=True,
         editing=True,
         capability_flags=frozenset(flags),
+        queryable_layer_count=1,
     )
     base.update(changes)
     return ToolContext(**base)

@@ -198,6 +198,8 @@ def _ctx(**overrides) -> ToolContext:
         editing=True,
         dirty=True,
         current_tool="pan",
+        # Task 8：有活动层 ⇒ 至少一层可查询（identify 门禁输入）。
+        queryable_layer_count=1,
     )
     base.update(overrides)
     return ToolContext(**base)
@@ -238,10 +240,19 @@ class TestNavigation:
 
 class TestInspection:
     def test_requires_layer(self):
-        for tool_id in ("identify", "select", "select_rectangle", "clear_selection", "select_all", "invert_selection"):
+        for tool_id in ("select", "select_rectangle", "clear_selection", "select_all", "invert_selection"):
             av = evaluate_tool(tool_id, _ctx(active_layer_id=""))
             assert not av.enabled
             assert "矢量图层" in av.disabled_reason
+
+    def test_identify_requires_queryable_layers_not_active_layer(self):
+        # Task 8：无活动层但有可查询图层 → 可用；零可查询 → 禁用 + 如实判词。
+        assert evaluate_tool(
+            "identify", _ctx(active_layer_id="", queryable_layer_count=2)).enabled
+        av = evaluate_tool(
+            "identify", _ctx(active_layer_id="", queryable_layer_count=0))
+        assert not av.enabled
+        assert av.disabled_reason == "没有可查询的图层"
 
     def test_clear_selection_needs_selection(self):
         av = evaluate_tool("clear_selection", _ctx(selection_count=0))
