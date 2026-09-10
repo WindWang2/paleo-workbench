@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
 
 from paleo_workbench.ui.dock_manager import WorkspacePreset, dock_manager
 from paleo_workbench.ui.dock_framework import (
+    INSPECTOR_HIDE_BELOW,
+    INSPECTOR_RESTORE_ABOVE,
     ensure_dock_usable,
     apply_first_run_sizes,
     classify_viewport,
@@ -296,9 +298,6 @@ class WorkstationFrame(QWidget):
         # 中央永远是编图，无需切换。
         self._schedule_restore(0)
 
-    # 浮动最小尺寸默认值；GL 等特殊 dock 的浮动最小值在描述符中覆盖。
-    _FLOAT_MIN_SIZE = (220, 160)
-
     _AREA_BY_NAME = {
         "left": Qt.DockWidgetArea.LeftDockWidgetArea,
         "right": Qt.DockWidgetArea.RightDockWidgetArea,
@@ -325,7 +324,7 @@ class WorkstationFrame(QWidget):
             features |= QDockWidget.DockWidgetFeature.DockWidgetFloatable
         dock.setFeatures(features)
         dock.setMinimumSize(0, 0)
-        float_min = descriptor.min_floating_size or self._FLOAT_MIN_SIZE
+        float_min = descriptor.min_floating_size
         dock.topLevelChanged.connect(
             lambda floating, d=dock, m=float_min: self._sync_float_min_size(d, floating, m)
         )
@@ -432,11 +431,16 @@ class WorkstationFrame(QWidget):
         from paleo_workbench.ui.panel_float_controller import clamp_geometry_to_screens
 
         host = self._dock_host
-        if host.isVisible() and not (host.isMaximized() or host.isFullScreen()):
-            current = host.geometry()
-            clamped = clamp_geometry_to_screens(current)
-            if clamped != current:
-                host.setGeometry(clamped)
+        try:
+            if host.isVisible() and not (
+                host.isMaximized() or host.isFullScreen()
+            ):
+                current = host.geometry()
+                clamped = clamp_geometry_to_screens(current)
+                if clamped != current:
+                    host.setGeometry(clamped)
+        except RuntimeError:
+            return  # teardown 竞态：宿主 C++ 已析构（与下方 dock 同类）
         for dock in self._shell_docks():
             try:
                 if dock.isFloating() and dock.isVisible():
@@ -1144,11 +1148,6 @@ class WorkstationFrame(QWidget):
         1366@125% ≈ 1093 逻辑像素）才折叠检查器。恢复阈值 1200 构成
         滞回带，杜绝临界宽度上的隐藏↔显示风暴。
         """
-        from paleo_workbench.ui.dock_framework import (
-            INSPECTOR_HIDE_BELOW,
-            INSPECTOR_RESTORE_ABOVE,
-        )
-
         window_width = self._window_width()
         if window_width <= 0:
             return
@@ -1571,10 +1570,13 @@ class WorkstationFrame(QWidget):
         data = self._settings.value(self._WINDOW_STATE_KEY)
         if data is None:
             # 首运行：没有可恢复的布局，显式给中央编图主导的空间分配，
-            # 不靠 QMainWindow 的均分默认值。singleShot 若在 dock 首次布局
-            # 前触发会被 Qt 静默忽略（视觉 QA 实测 nav/右列各吃 717px），
-            # 改为标记 + showEvent 后补投（见下）。
+            # 不靠 QMainWindow 的均分默认值。生产构造顺序是同步
+            # show()（showEvent 先于本定时器执行），标记必须在此立即消费；
+            # showEvent 补投路径保留给「restore 早于首帧显示」的测试序。
             self._pending_default_sizes = True
+            if self.isVisible():
+                self._pending_default_sizes = False
+                QTimer.singleShot(0, self, self._apply_default_pane_sizes)
         if data is not None:
             version = self._settings.value(self._STATE_VERSION_KEY, 0, type=int)
             if version != LAYOUT_STATE_VERSION:
@@ -1586,6 +1588,9 @@ class WorkstationFrame(QWidget):
                     LAYOUT_STATE_VERSION,
                 )
                 self._pending_default_sizes = True
+                if self.isVisible():
+                    self._pending_default_sizes = False
+                    QTimer.singleShot(0, self, self._apply_default_pane_sizes)
             else:
                 if isinstance(data, QByteArray) and not data.isNull():
                     self._dock_host.restoreState(data)
@@ -1595,16 +1600,20 @@ class WorkstationFrame(QWidget):
         # 在窄屏下重新显示（保存时按「可见」写入），不能让 restore 反杀
         # 响应式隐藏（#1121）。
         self._apply_responsive_panels()
-        # 归一化「隐藏但无归属」状态：restoreState 也可能恢复出隐藏检查器
-        # 而两个显隐标志均为 False（旧会话保存的中间态）——归入响应式
-        # 隐藏，宽屏下策略才能自动恢复；用户显式隐藏仍由
-        # _user_hid_inspector 语义独占。
+        # 归一化「隐藏但无归属」状态：restoreState 恢复出隐藏检查器而两个
+        # 显隐标志均为 False。_save_layout 的 suppress hack（#1121）保证
+        # 响应式隐藏从不以「隐藏」落盘——因此恢复出的隐藏只可能是用户
+        # 手动关闭（原生标题栏 X / 面板菜单均不写 user 标志）。归入
+        # 用户隐藏并持久化，宽屏绝不违背用户意愿弹回；toggle 重开即恢复。
         if (
             self.inspector_dock.isHidden()
             and not self._user_hid_inspector
             and not self._responsive_hid_inspector
         ):
-            self._responsive_hid_inspector = True
+            self._user_hid_inspector = True
+            self._settings.setValue(
+                "layout/inspector_user_hidden", self._user_hid_inspector
+            )
 
     def _restore_host_window_geometry(self) -> None:
         """恢复主窗口（dock 宿主）几何并 clamp 到可见桌面（V6 G-P0-2）。
@@ -1691,22 +1700,12 @@ class WorkstationFrame(QWidget):
         return self.linked_workspace.shutdown_workers(wait_ms)
 
     def _teardown_docks(self) -> None:
-        """工程切换 / 退出时把 dock 从宿主上摘除（宿主可被重建复用）。"""
-        docks = (
-            self.nav_dock,
-            self.inspector_dock,
-            self.agent_dock,
-            self.task_dock,
-            self.logs_dock,
-            self.console_dock,
-            self.composite_layer_dock,
-            self.composite_input_dock,
-            self.composite_linked_dock,
-            self.well_dock,
-            self.seismic_dock,
-            self.hub_dock,
-            self.mapping_stage_dock,
-        )
+        """工程切换 / 退出时把 dock 从宿主上摘除（宿主可被重建复用）。
+
+        dock 清单单一来源 ``_shell_docks()``：本地复制一份 13 元组曾在
+        save 接线修复（C-4）中漏掉三个 dock——同类隐患不再留门。
+        """
+        docks = self._shell_docks()
         # 先断开布局信号再拆除：removeDockWidget/hide 触发的
         # visibilityChanged 不得重新调度 350ms 后的保存（#1124）。
         for dock in docks:

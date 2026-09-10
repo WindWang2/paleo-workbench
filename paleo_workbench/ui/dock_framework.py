@@ -16,7 +16,7 @@ the registry directly); the resize helpers import Qt lazily.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
 
@@ -325,6 +325,11 @@ VIEWPORT_ULTRAWIDE_MIN = 2200
 #: narrow windows need the inspector to fold away.
 INSPECTOR_HIDE_BELOW = 1100
 INSPECTOR_RESTORE_ABOVE = 1200
+
+#: App-bar command input minimum width per viewport class (compact shrinks
+#: the floor to free top-bar space; normal restores it).
+COMMAND_INPUT_FLOOR_COMPACT = 220
+COMMAND_INPUT_FLOOR_NORMAL = 300
 
 
 def classify_viewport(width: int) -> ViewportClass:

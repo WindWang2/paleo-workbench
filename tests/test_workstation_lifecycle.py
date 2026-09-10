@@ -116,7 +116,8 @@ def test_workarea_map_click_survives_degenerate_extent(qtbot):
 
 
 def test_responsive_hide_is_not_persisted_as_user_layout(qtbot, workstation):
-    workstation.resize(1180, 720)
+    # V9：紧凑阈值 1100——1180 属正常宽度不再折叠（与 sibling 测试同步）。
+    workstation.resize(1000, 700)
     workstation.show()
     qtbot.waitExposed(workstation)
     # 窄屏：响应式隐藏检查器。
@@ -135,8 +136,12 @@ def test_responsive_hide_is_not_persisted_as_user_layout(qtbot, workstation):
 
 
 def test_restore_reapplies_responsive_policy_on_narrow_width(qtbot, workstation):
-    """restore 之后必须再跑响应式：restoreState 不得在窄屏反杀自动隐藏。"""
-    workstation.resize(1180, 720)
+    """restore 之后必须再跑响应式：restoreState 不得在窄屏反杀自动隐藏。
+
+    V9 阈值：紧凑（<1100 逻辑像素）才折叠检查器——1180 属正常宽度不再
+    折叠（B-2/B-4 收敛的刻意行为变化）。
+    """
+    workstation.resize(1000, 700)
     workstation.show()
     qtbot.waitExposed(workstation)
     workstation._apply_responsive_panels()
@@ -167,7 +172,9 @@ def test_user_hide_flag_persists(qtbot, workstation):
 def test_dock_minimum_size_follows_floating_state(qtbot, workstation):
     dock = workstation.nav_dock
     assert not dock.isFloating()
-    assert dock.minimumSize().width() == 0  # docked: 无强制 220px 底宽
+    # V9：docked 状态无「强制」底宽——只允许内容驱动的布局最小值
+    # （rail 48 + explorer 180 ≈ 234；#1123 的 220px 强制底已拆除）。
+    assert dock.minimumSize().width() <= 240
 
     dock.setFloating(True)
     assert dock.minimumSize().width() >= 220

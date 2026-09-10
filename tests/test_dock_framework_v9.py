@@ -11,7 +11,6 @@ Regression tests for the V9 audit P0 fixes:
 
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -118,6 +117,7 @@ def test_preset_apply_never_calls_programmatic_sizing(qtbot, tmp_path, monkeypat
     )
     for preset_id in ws.preset_ids():
         ws.apply_layout_preset(preset_id)
+    qtbot.wait(60)  # 捕获 deferred singleShot 形态的回卷（旧缺陷形状）
     assert called == [], "presets must be visibility-only (audit B-3)"
 
 
@@ -191,10 +191,12 @@ def test_constraint_stack_is_relaxed(qtbot, tmp_path):
     assert ws.explorer.minimumSizeHint().width() <= 200
     assert ws.composite.minimumWidth() <= 340
     # 窗口最小尺寸（app.py）：960x600——1366@125% 逻辑屏可完整容纳。
-    from paleo_workbench import app as app_module
+    from paleo_workbench.app import PaleoWorkbenchWindow
 
-    source = inspect.getsource(app_module.PaleoWorkbenchWindow.__init__)
-    assert "setMinimumSize(960, 600)" in source
+    window = PaleoWorkbenchWindow(project=_project(tmp_path))
+    qtbot.addWidget(window)
+    assert window.minimumWidth() == 960
+    assert window.minimumHeight() == 600
 
 
 # --- responsive viewport policies (B-4 debounced + compact surfaces) -----
@@ -256,3 +258,61 @@ def test_all_docks_wired_to_layout_save(qtbot, tmp_path):
             f"{dock.objectName()} missing layout-save wiring "
             f"(receivers={count})"
         )
+
+
+# --- R1 review regressions ------------------------------------------------
+
+
+def test_user_closed_inspector_stays_closed_after_restart(qtbot, tmp_path):
+    """原生 X 关闭（无 user 标志路径）→ 下次会话宽屏不得弹回（R1 P1-1）。"""
+    from PySide6.QtCore import QSettings
+
+    ini_path = tmp_path / "session.ini"
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+    ws._settings = QSettings(str(ini_path), QSettings.Format.IniFormat)
+    ws._settings.clear()
+    shell.show()
+    shell.resize(1600, 900)
+    qtbot.wait(300)
+    ws.inspector_dock.close()  # 原生 X：唯一生产关闭路径，不写 user 标志
+    ws._save_timer.stop()
+    ws._save_layout(force=True)
+    assert ws.inspector_dock.isHidden()
+
+    # 第二会话：同一 QSettings 冷启动恢复。
+    shell2 = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell2)
+    ws2 = shell2.workstation
+    ws2._settings = QSettings(str(ini_path), QSettings.Format.IniFormat)
+    shell2.show()
+    shell2.resize(1500, 900)
+    qtbot.wait(300)
+    assert ws2.inspector_dock.isHidden(), "user hide must survive restart"
+    assert ws2._user_hid_inspector, "restored hide must classify as user intent"
+    ws2._apply_responsive_panels()  # 宽屏策略不得违背用户意愿弹回
+    assert ws2.inspector_dock.isHidden()
+
+
+def test_first_run_applies_map_dominant_sizes(qtbot, tmp_path):
+    """首运行（无持久化布局）：默认尺寸必须真的被执行（R1 P1-2）。
+
+    生产构造顺序是同步 show（showEvent 先于 restore 定时器）；旧实现
+    的 _pending_default_sizes 标志在该顺序下永远无人消费，首运行以
+    QMainWindow 均分布局打开（检查器列吃 ~700px）。
+    """
+    from PySide6.QtCore import QSettings
+
+    ini_path = tmp_path / "fresh.ini"
+    applied = []
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+    ws._settings = QSettings(str(ini_path), QSettings.Format.IniFormat)
+    ws._settings.clear()
+    real = ws._apply_default_pane_sizes
+    ws._apply_default_pane_sizes = lambda: (applied.append(True), real())[1]
+    shell.show()  # 同步 show（生产顺序）
+    qtbot.wait(200)
+    assert applied, "first-run default pane sizes must actually run"

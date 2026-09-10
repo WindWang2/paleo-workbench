@@ -4,10 +4,9 @@ The V9 audit classified 454 sizing call sites; 62 were FORBIDDEN_LARGE (rigid
 constraints on docks/trees/panels/pages/central content) and the worst of them
 locked dock resizing (see docs/development/adaptive-workstation-ui-v9/).
 This ratchet fails when NEW rigid sizing appears, or when an allowlisted
-count grows. Shrinking an allowlist count without updating this file also
-fails loudly (so cleanups get recorded here) — no, actually it passes
-silently: the ratchet is an upper bound, cleanups only tighten it. Update the
-snapshot when you remove allowlisted sites.
+count grows. It is an upper bound: shrinking a count passes silently —
+please update the snapshot when you remove allowlisted sites so the next
+tightening is still visible.
 """
 
 from __future__ import annotations
@@ -44,6 +43,13 @@ RULE_RESIZE_DOCKS = re.compile(r"\.resizeDocks\(")
 #: non-collapsible splitters (page side panels must stay collapsible-or-
 #: scrollable; new ones need a documented entry).
 RULE_NON_COLLAPSIBLE = re.compile(r"\.setChildrenCollapsible\(False\)")
+
+#: literal maximum width caps >= 300 px on large containers (min+max pairs
+#: are fixed width by other means; toolbar controls below 300 stay legal).
+RULE_MAX_LARGE = re.compile(r"\.setMaximumWidth\(\s*(\d{3,})\s*\)")
+MAX_LARGE_SNAPSHOT: dict[str, int] = {
+    "paleo_workbench/ui/workstation/app_bar.py": 1,  # command input 580
+}
 
 #: theme-drift pattern: setStyleSheet whose statement references compile-time
 #: token color constants (light-theme snapshots). Migrate to style.bind.
@@ -224,6 +230,21 @@ def test_no_new_non_collapsible_page_splitters():
     assert not offenders, (
         "page splitters must stay collapsible (narrow workspaces rely on "
         "collapse + scroll degradation):\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_no_new_large_maximum_widths():
+    offenders = []
+    for path in _iter_py_files():
+        source = path.read_text(encoding="utf-8")
+        rel = path.relative_to(REPO).as_posix()
+        hits = _rule_hits(source, RULE_MAX_LARGE, 300)
+        allowed = MAX_LARGE_SNAPSHOT.get(rel, 0)
+        if hits > allowed:
+            offenders.append(f"{rel}: {hits} max<=literal site(s) (allowed {allowed})")
+    assert not offenders, (
+        "new literal setMaximumWidth >= 300 on UI chrome — a min+max pair is "
+        "a fixed width by other means: " + "; ".join(offenders)
     )
 
 

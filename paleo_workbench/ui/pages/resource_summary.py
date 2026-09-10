@@ -74,6 +74,7 @@ class ResourceSummaryBar(QFrame):
         else:
             missing_labels = [tokens.RESOURCE_LABELS.get(m, m) for m in missing]
             self.status_label.setText(f"缺少: {'、'.join(missing_labels)}")
-        # 重注册即重渲染（数据态变化立即生效，主题切换时由 style 注册表刷新）
+        # 数据态变化只重渲染（R1 P2-8：重复 bind 会累积 destroyed 连接；
+        # 注册一次，_ready 变化经 registry 重跑同一渲染器）。
         self._ready = bool(ready)
-        style.bind(self.status_label, self._status_qss)
+        style.refresh(self.status_label)

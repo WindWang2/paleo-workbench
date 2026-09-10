@@ -77,7 +77,7 @@ class DockManager:
             docks=[
                 DockPanelConfig("workstation:explorer", "资源管理器", visible=True, area="left"),
                 DockPanelConfig("workstation:inspector", "检查器", visible=True, area="right"),
-                DockPanelConfig("workstation:process", "Agent", visible=False, area="bottom"),
+                DockPanelConfig("workstation:agent", "Agent", visible=False, area="bottom"),
                 DockPanelConfig("workstation:tasks", "任务中心", visible=False, area="bottom"),
                 DockPanelConfig(
                     "workstation:composite_layer", "图层管理", visible=True, area="right"
@@ -96,7 +96,7 @@ class DockManager:
             docks=[
                 DockPanelConfig("workstation:explorer", "资源管理器", visible=True, area="left"),
                 DockPanelConfig("workstation:inspector", "检查器", visible=True, area="right"),
-                DockPanelConfig("workstation:process", "Agent", visible=True, area="bottom"),
+                DockPanelConfig("workstation:agent", "Agent", visible=True, area="bottom"),
                 DockPanelConfig("workstation:tasks", "任务中心", visible=True, area="bottom"),
                 DockPanelConfig(
                     "workstation:composite_layer", "图层管理", visible=False, area="right"

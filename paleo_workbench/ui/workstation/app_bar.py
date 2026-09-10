@@ -221,9 +221,17 @@ class WorkstationAppBar(QFrame):
         密度（字号/控件高度）仍是用户显式设置；viewport 策略只调整
         布局下限这类非偏好性约束。
         """
-        from paleo_workbench.ui.dock_framework import ViewportClass
+        from paleo_workbench.ui.dock_framework import (
+            COMMAND_INPUT_FLOOR_COMPACT,
+            COMMAND_INPUT_FLOOR_NORMAL,
+            ViewportClass,
+        )
 
-        floor = 220 if viewport is ViewportClass.COMPACT else 300
+        floor = (
+            COMMAND_INPUT_FLOOR_COMPACT
+            if viewport is ViewportClass.COMPACT
+            else COMMAND_INPUT_FLOOR_NORMAL
+        )
         self.command_input.setMinimumWidth(floor)
 
     def _sync_view_checks(self, *_args) -> None:

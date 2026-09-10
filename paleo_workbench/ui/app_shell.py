@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
@@ -211,8 +213,9 @@ class AdaptivePageStack(QStackedWidget):
 
     QStackedWidget 默认 minimumSizeHint 取全部页的最大值——只要栈里有
     一个宽页（如首页关系图 min 1080），其它窄页也会带着幽灵横向滚动
-    条。覆盖为逐页计算后，hub dock 的滚动降级尺寸逐页准确；隐藏页的
-    布局最小值不再影响当前布局。
+    条。覆盖为逐页计算后，滚动降级尺寸按「当前 hub」为准（HubPage
+    内部子模块栈仍取该 hub 各子模块的最大值——精度止于 hub 级，
+    滚动降级不受影响）。
     """
 
     def __init__(self, parent=None):
@@ -862,7 +865,7 @@ class AppShell(QWidget):
     #: （见 __init__ 首次落地注释；offscreen CI 曾死在 pyqtgraph
     #: initializeGL）。150ms 的观感收益不抵该隐患——需要时用
     #: PALEO_PAGE_FADE=1 显式开启。
-    _PAGE_FADE_ENABLED = False
+    _PAGE_FADE_ENABLED = os.environ.get("PALEO_PAGE_FADE") == "1"
 
     def _animate_page_fade(self, index: int) -> None:
         """Fade the newly switched page in from 0.7 to 1.0 opacity (150ms).

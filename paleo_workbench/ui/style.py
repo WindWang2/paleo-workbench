@@ -78,6 +78,16 @@ def bind(widget: QObject, render) -> None:
     _apply(widget)
 
 
+def refresh(widget: QObject) -> None:
+    """Re-render a bound widget's stylesheet now (e.g. data-state changed).
+
+    The renderer must read its inputs inside the call (same contract as
+    :func:`bind`) — rebinding instead of refreshing accumulates a
+    ``destroyed`` connection per call (R1 P2-8).
+    """
+    _apply(widget)
+
+
 def _apply(widget: QObject) -> None:
     render = _registry.get(widget)
     if render is None:
