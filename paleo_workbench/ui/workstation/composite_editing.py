@@ -279,6 +279,19 @@ def template_by_key(key: str) -> GeoTemplate | None:
 
 _LAYER_ID_PREFIX = "composite:"
 
+#: 快照 metadata["role"] 不落盘的角色：无成员资格的通用层（""）、旧工程
+#: 未分类与用户通用层。这些角色没有字段 schema 语义（LEGACY 无 spec；
+#: USER_GENERAL 为空字段表），写 role 会把它们从 legacy 无 schema 路径
+#: （桥侧丢属性留几何）迁走——保持无 role 即保持既有行为（qgis_mirror
+#: `_fields_json_for_metadata` 契约；test_legacy_untyped_mirror_stays_geometry_only）。
+_SNAPSHOT_ROLELESS = frozenset({"", "legacy_unclassified", "user_general"})
+
+
+def _normalize_layer_role(role: object) -> str:
+    """LayerRole / 原始字符串 → 快照 metadata 用角色值（"" = 无角色）。"""
+    value = getattr(role, "value", role)
+    return str(value or "").strip()
+
 _LAYER_BOUND_TOOLS = frozenset(
     {"identify", "select", "select_rectangle", "move_feature", "vertex"}
 )
@@ -465,6 +478,11 @@ class CompositeEditController(QObject):
         self._kinds: dict[str, str] = {}
         self._templates: dict[str, str] = {}
         self._schemas: dict[str, dict] = {}
+        # 图层科学角色（LayerRole 值）：阶段动作经 set_layer_role 登记，
+        # 快照时写入 metadata["role"] 供桥侧取字段 schema；权威仍是阶段
+        # 工作区的成员资格表，此处只是编辑侧的快照携带副本（重开工程时
+        # 由 load_from_project 从 mapping_workspace memberships 恢复）。
+        self._layer_roles: dict[str, str] = {}
         # 图层管理面板的显示态（可见性 / 不透明度），供持久化还原。
         self._display: dict[str, tuple[bool, float]] = {}
         self._active_layer_id: str | None = None
@@ -521,7 +539,7 @@ class CompositeEditController(QObject):
     def is_composite_layer(layer_id: str) -> bool:
         return str(layer_id).startswith(_LAYER_ID_PREFIX)
 
-    def create_layer(self, name: str, kind: str, template: str = "") -> VectorLayer:
+    def create_layer(self, name: str, kind: str, template: str = "", *, role: object = "") -> VectorLayer:
         kind = str(kind)
         if kind not in GEOMETRY_KINDS:
             raise ValueError(f"unsupported geometry kind {kind!r}")
@@ -548,6 +566,9 @@ class CompositeEditController(QObject):
         self._kinds[layer_id] = kind
         self._templates[layer_id] = template
         self._schemas[layer_id] = dict(schema)
+        role_value = _normalize_layer_role(role)
+        if role_value:
+            self._layer_roles[layer_id] = role_value
         self._active_layer_id = layer_id
         self._push_snapping_config()
         self.layers_changed.emit()
@@ -571,6 +592,21 @@ class CompositeEditController(QObject):
         if layer is not None and layer.schema:
             return dict(layer.schema)
         return dict(self._schemas.get(str(layer_id), {}))
+
+    def set_layer_role(self, layer_id: str, role: object) -> None:
+        """登记图层的科学角色（阶段动作建层后调用；"" 清除）。"""
+        layer_id = str(layer_id)
+        if layer_id not in self._layers:
+            return
+        role_value = _normalize_layer_role(role)
+        if role_value:
+            self._layer_roles[layer_id] = role_value
+        else:
+            self._layer_roles.pop(layer_id, None)
+
+    def layer_role(self, layer_id: str) -> str:
+        """图层的科学角色值（"" = 无角色，走 legacy 无 schema 路径）。"""
+        return self._layer_roles.get(str(layer_id), "")
 
     def set_layer_style(self, layer_id: str, style: Mapping[str, object]) -> None:
         """写入图层样式（图层属性 / 符号系统 / 标注对话框的落地路径）。"""
@@ -609,6 +645,11 @@ class CompositeEditController(QObject):
         self._kinds[layer_id_new] = kind
         self._templates[layer_id_new] = self._templates.get(str(layer_id), "")
         self._schemas[layer_id_new] = dict(source.schema)
+        # 副本继承科学角色：内容同源，快照携带同一 schema 语义（桥侧不断链）；
+        # 阶段成员资格仍由宿主按需登记，此处不动。
+        source_role = self._layer_roles.get(str(layer_id))
+        if source_role:
+            self._layer_roles[layer_id_new] = source_role
         self._active_layer_id = layer_id_new
         self.layers_changed.emit()
         self.state_changed.emit()
@@ -626,6 +667,7 @@ class CompositeEditController(QObject):
         self._kinds.pop(layer_id, None)
         self._templates.pop(layer_id, None)
         self._schemas.pop(layer_id, None)
+        self._layer_roles.pop(layer_id, None)
         self._display.pop(layer_id, None)
         self._snapping.layer_enabled.pop(layer_id, None)
         self._snapping.layer_modes.pop(layer_id, None)
@@ -660,6 +702,7 @@ class CompositeEditController(QObject):
         self._kinds.clear()
         self._templates.clear()
         self._schemas.clear()
+        self._layer_roles.clear()
         self._display.clear()
         self._records_cache.clear()
         self._persist_cache.clear()
@@ -707,6 +750,18 @@ class CompositeEditController(QObject):
                 bool(getattr(record, "visible", True)),
                 float(getattr(record, "opacity", 1.0) or 1.0),
             )
+        # 科学角色随层恢复：权威是 mapping_workspace 的成员资格表（阶段控制
+        # 器稍后才 load_state，此处直接读工程上的原始 dict，不经过它）。
+        workspace = getattr(project, "mapping_workspace", None) or {}
+        memberships = (
+            workspace.get("memberships") if isinstance(workspace, Mapping) else None
+        ) or {}
+        for layer_id in self._layers:
+            entry = memberships.get(layer_id)
+            role_value = _normalize_layer_role(
+                entry.get("role") if isinstance(entry, Mapping) else "")
+            if role_value:
+                self._layer_roles[layer_id] = role_value
         if self._layers:
             self._active_layer_id = next(iter(self._layers))
         self._rebind_active_tool()
@@ -1651,6 +1706,23 @@ class CompositeEditController(QObject):
                 # 面板显示态回写为图层权威，供持久化还原。
                 self._display[layer_id] = (bool(previous.visible), float(previous.opacity))
             visible, opacity = self._display.get(layer_id, (True, 1.0))
+            # 科学角色进快照：桥侧 `_fields_json_for_metadata` 按
+            # metadata["role"] 取字段 schema；无角色的层不写该键，继续走
+            # legacy 无 schema 路径。图层自带的 role（若有）优先，不覆盖。
+            pre_metadata = getattr(layer, "metadata", None)
+            pre_role = (
+                str(pre_metadata.get("role") or "").strip()
+                if isinstance(pre_metadata, Mapping) else ""
+            )
+            role_value = pre_role or self._layer_roles.get(layer_id, "")
+            metadata = {
+                "editable": "true",
+                "geometry_kind": self._kinds.get(layer_id, ""),
+                "template": self._templates.get(layer_id, ""),
+                "editing": "true" if session is not None else "false",
+            }
+            if role_value and role_value not in _SNAPSHOT_ROLELESS:
+                metadata["role"] = role_value
             snapshots.append(
                 MapLayerSnapshot(
                     id=layer.id,
@@ -1664,12 +1736,7 @@ class CompositeEditController(QObject):
                     style=dict(layer.style),
                     visible=visible,
                     opacity=opacity,
-                    metadata={
-                        "editable": "true",
-                        "geometry_kind": self._kinds.get(layer_id, ""),
-                        "template": self._templates.get(layer_id, ""),
-                        "editing": "true" if session is not None else "false",
-                    },
+                    metadata=metadata,
                 )
             )
         return tuple(snapshots)
