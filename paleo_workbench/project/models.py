@@ -646,6 +646,15 @@ class ProjectDocument(BaseModel):
     # 纯 dict 载体——schema 由 mapping_workspace.stage_state 拥有；用户 UI
     # 偏好（dock 几何/组展开）留在 QSettings，不进科学工程。
     mapping_workspace: dict[str, Any] = Field(default_factory=dict)
+    # V9 CompilationInputSet（ADR-7）：Phase 3 科学运行的 pinned 输入集。
+    # 纯 dict 载体——schema 由 workflow.interpretation.compilation 拥有；
+    # mapping_workspace.compilation_input_set 保留为兼容视图。
+    compilation_input_sets: list[dict[str, Any]] = Field(default_factory=list)
+    # V9 IntegratedInterpretation / InterpretationRevision（ADR-8）：综合
+    # 解释一等成果与人工修订溯源（dict 载体，schema 由
+    # workflow.interpretation.integrated_interpretation / revision 拥有）。
+    integrated_interpretations: list[dict[str, Any]] = Field(default_factory=list)
+    interpretation_revisions: list[dict[str, Any]] = Field(default_factory=list)
 
     @classmethod
     def new(cls, name: str, region: str = "") -> "ProjectDocument":

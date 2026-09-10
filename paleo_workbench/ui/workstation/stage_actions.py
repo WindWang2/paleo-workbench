@@ -85,6 +85,40 @@ def stage_context_actions(stage_value: str) -> tuple[tuple[str, str], ...]:
     return STAGE_CONTEXT_ACTIONS.get(stage.value, ())
 
 
+def _create_structured_input_set_shell(document, workspace_state, *,
+                                       created_by: str = ""):
+    """首次选择证据时创建结构化输入集外壳（V9 权威载体）。"""
+    try:
+        from paleo_workbench.workflow.interpretation.compilation import (
+            CompilationInputSet,
+            persist_input_set,
+        )
+
+        shell = CompilationInputSet(name="综合编图输入集", created_by=created_by)
+        # 迁移既有 legacy 视图条目（label → selector）。
+        for label, selector in dict(
+                getattr(workspace_state, "compilation_input_set", None) or {}).items():
+            from paleo_workbench.workflow.interpretation.compilation import (
+                CompilationInputSetEntry,
+            )
+            from paleo_workbench.workflow.interpretation.evidence import (
+                parse_evidence_selector,
+            )
+
+            try:
+                parsed = parse_evidence_selector(str(selector))
+            except ValueError:
+                continue
+            shell.entries.append(CompilationInputSetEntry(
+                selector=parsed.raw, label=str(label),
+                evidence_kind=parsed.kind.value, added_by=created_by))
+        persist_input_set(document, shell)
+        return shell
+    except Exception:  # noqa: BLE001 — 结构化载体失败不阻断旧视图路径
+        logger.debug("structured input set shell creation skipped", exc_info=True)
+        return None
+
+
 class StageActionDispatcher:
     """宿主为 CompositeDocument；动作结果经 status_message 反馈。"""
 
@@ -1111,41 +1145,67 @@ class StageActionDispatcher:
     # -- Phase 3 ------------------------------------------------------------------
 
     def select_evidence(self) -> None:
-        """证据版本选择（Compilation Input Set，V5 §57）。"""
-        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QInputDialog, QVBoxLayout
+        """证据版本选择（Compilation Input Set，V5 §57；V9 ADR-3/7）。
+
+        V9 (P0-3)：预测结果（地震/测井相预测）与约束组与 factor/草稿
+        同列可选——此前预测仅是叠加层，永远进不了科学输入集。
+        选择器经统一 Evidence 契约解析（状态诚实标注）。
+        """
+        from PySide6.QtWidgets import QInputDialog
+
+        from paleo_workbench.workflow.interpretation.compilation import (
+            CompilationInputSetEntry,
+            active_input_set,
+            persist_input_set,
+        )
+        from paleo_workbench.workflow.interpretation.evidence import (
+            available_evidence,
+        )
 
         document = self.project
         if document is None:
             return
-        entries: list[tuple[str, str]] = []
-        # 阶段1解释草稿（draft:<layer_id>——dependencies 传播式评估契约）
-        for layer_id in self.stage_controller.state.layers_with_role(
-                LayerRole.INITIAL_FACIES_DRAFT):
-            layer = self.edit_controller.layer(str(layer_id))
-            if layer is not None:
-                entries.append((f"阶段1解释草稿：{layer.name}", f"draft:{layer_id}"))
-        # 单因素任务（版本钉住）
-        for task in getattr(document, "factor_map_tasks", None) or []:
-            if str(getattr(task, "status", "")) != FACTOR_TASK_STATUS_COMPLETE:
-                continue
-            version = str(getattr(task, "grid_artifact_version_id", "") or "")
-            entries.append((f"单因素：{task.name}", f"factor:{task.id}:{version}"))
-        # 约束内容指纹
-        entries.append(("地质约束（当前内容）", "constraints:current"))
-        if not entries:
+        state = self.stage_controller.state
+        resolutions = available_evidence(document, state)
+        if not resolutions:
             self.composite.status_message.emit("没有可选证据——先完成上阶段成果")
             return
-        labels = [label for label, _ in entries]
+        status_tag = {
+            "resolved": "", "floating": "（当前内容）",
+            "unpinned": "（未钉版本）", "stale": "（已过期）",
+            "missing": "（缺失）", "unknown": "（未知）",
+        }
+        entries: list[tuple[str, str, str]] = [
+            (f"{r.display}{status_tag.get(r.status.value, '')}",
+             r.selector.raw, r.status.value)
+            for r in resolutions
+        ]
+        labels = [label for label, _, _ in entries]
         chosen, ok = QInputDialog.getItem(
             self.composite, "选择证据版本",
             "综合编图输入证据（可多选经重复执行本动作累积）：",
             labels, 0, False,
         )
-        del QDialog, QDialogButtonBox, QVBoxLayout
         if not ok or not chosen:
             return
-        value = dict(entries)[chosen]
-        self.stage_controller.state.compilation_input_set[chosen] = value
+        index = labels.index(chosen)
+        _, selector, status = entries[index]
+        # 旧视图（dependencies/存档兼容）+ 结构化输入集（V9 权威）双写。
+        state.compilation_input_set[chosen] = selector
+        input_set = active_input_set(document)
+        if input_set is None:
+            input_set = _create_structured_input_set_shell(
+                document, state, created_by="workstation")
+        if input_set is not None:
+            if input_set.entry_for_selector(selector) is None:
+                input_set.entries.append(CompilationInputSetEntry(
+                    selector=selector,
+                    label=chosen,
+                    evidence_kind=selector.split(":", 1)[0],
+                    status_at_add=status,
+                    added_by="workstation",
+                ))
+                persist_input_set(document, input_set)
         self.composite._sync_workspace_state_to_project()
         self.composite.status_message.emit(f"已加入证据集：{chosen}")
 
