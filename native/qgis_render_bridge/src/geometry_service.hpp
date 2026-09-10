@@ -43,6 +43,10 @@ std::string geometry_validate(const std::string& geometry);
 std::string geometry_reshape(const std::string& geometry, const std::string& reshape_line);
 std::vector<std::string> geometry_multipart_to_singlepart(const std::string& geometry);
 std::string geometry_singlepart_to_multipart(const std::vector<std::string>& geometries);
+/// V10 部件操作：QgsGeometry::addPart（单部件自动升多部件）与 deletePart。
+/// 返回新整体几何的 GeoJSON；非法输入/越界部件号抛 GeometryServiceError。
+std::string geometry_add_part(const std::string& geometry, const std::string& part);
+std::string geometry_delete_part(const std::string& geometry, int part_index);
 std::string geometry_clip(const std::string& geometry, const std::array<double, 4>& extent);
 
 }  // namespace pwb::qgis_render

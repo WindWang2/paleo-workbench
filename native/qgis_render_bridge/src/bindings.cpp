@@ -385,7 +385,9 @@ py::dict capability_manifest() {
          {"union", "split_by_line", "intersection", "difference", "symdifference",
           "buffer", "offset_curve", "simplify", "smooth", "densify", "make_valid",
           "is_valid", "validate", "reshape", "multipart_to_singlepart",
-          "singlepart_to_multipart", "clip"}) {
+          "singlepart_to_multipart", "clip",
+          // 0.6.0a0 (V10): part operations (QgsGeometry::addPart/deletePart).
+          "add_part", "delete_part"}) {
         geometry_ops.append(op);
     }
     manifest["geometry_ops"] = geometry_ops;
@@ -407,7 +409,12 @@ py::dict capability_manifest() {
           // 通用行指示器（M5）、legend filter_layers（M8）。
           "provider_fields", "row_indicators", "legend_filter",
           // 0.5.0a0 (V9): topological-editing push in set_snapping_config.
-          "snapping_topological_editing"}) {
+          "snapping_topological_editing",
+          // 0.6.0a0 (V10): vertex insert/delete via PwbVertexTool (double-click
+          // on segment / Delete on hover), snap feedback indicator + throttled
+          // "snap_feedback" callback, capture progress "digitizing" callback.
+          "native_vertex_insert", "native_vertex_delete", "snap_feedback",
+          "digitize_progress"}) {
         features.append(feature);
     }
     manifest["features"] = features;
@@ -425,7 +432,9 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
     // filter_layers.
     // 0.5.0a0 (V9): topological_editing push via set_snapping_config,
     // canvas_scale / canvas_destination_crs introspection.
-    module.attr("__version__") = "0.5.0a0";
+    // 0.6.0a0 (V10): vertex insert/delete callbacks, snap indicator feedback,
+    // digitize progress callback, geometry add_part/delete_part.
+    module.attr("__version__") = "0.6.0a0";
     module.attr("__build_commit__") = "unknown";
     py::register_exception<GeometryServiceError>(module, "QgisGeometryError");
 
@@ -666,6 +675,19 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                       }
                       return pwb::qgis_render::geometry_singlepart_to_multipart(items);
                   });
+    // V10 部件操作：QgsGeometry::addPart / deletePart（新整体几何 GeoJSON）。
+    geometry.def("add_part", [&geometry_arg](const py::object& source,
+                                             const py::object& part) {
+                      const std::string source_json = geometry_arg(source);
+                      const std::string part_json = geometry_arg(part);
+                      return pwb::qgis_render::geometry_add_part(source_json, part_json);
+                  },
+                 py::arg("geometry"), py::arg("part"));
+    geometry.def("delete_part", [&geometry_arg](const py::object& source, int part_index) {
+                      const std::string source_json = geometry_arg(source);
+                      return pwb::qgis_render::geometry_delete_part(source_json, part_index);
+                  },
+                 py::arg("geometry"), py::arg("part_index"));
     geometry.def("clip", [&geometry_arg](const py::object& source, const py::sequence& extent) {
                       return pwb::qgis_render::geometry_clip(
                           geometry_arg(source), parse_extent(extent));

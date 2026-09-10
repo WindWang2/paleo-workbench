@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <filesystem>
 #include <functional>
 #include <mutex>
@@ -832,6 +833,87 @@ void appendTreeEvent(QJsonArray* events, const QString& type, const QString& nod
 }
 
 }  // namespace
+
+// V10：捕获过程反馈——QgsMapToolDigitizeFeature 只发 completed/canceled，
+// 这里薄覆写 cadCanvasMoveEvent，把已采顶点 + hover 点 + 捕捉命中信息以
+// "digitizing" 动作流式回传（节流：位移 <= 1 像素且已采点数未变则不打 FFI）。
+class PwbDigitizeTool : public QgsMapToolDigitizeFeature {
+ public:
+  using Callback = std::function<void(const std::string&, const std::string&)>;
+
+  PwbDigitizeTool(QgsMapCanvas* canvas, QgsAdvancedDigitizingDockWidget* cad,
+                  QgsMapToolCapture::CaptureMode mode, Callback callback)
+      : QgsMapToolDigitizeFeature(canvas, cad, mode), callback_(std::move(callback)) {}
+
+  void cadCanvasMoveEvent(QgsMapMouseEvent* e) override {
+    QgsMapToolDigitizeFeature::cadCanvasMoveEvent(e);
+    emitProgress(e);
+  }
+
+ private:
+  void emitProgress(QgsMapMouseEvent* e) {
+    if (!callback_) return;
+    const QgsPointSequence captured = pointsZM();
+    const QgsPointXY hover = e->mapPoint();
+    const double mup = canvas()->mapSettings().mapUnitsPerPixel();
+    const bool pointCountChanged = captured.size() != last_point_count_;
+    const bool moved = std::hypot(hover.x() - last_x_, hover.y() - last_y_) > mup;
+    if (!pointCountChanged && !moved) return;
+    last_point_count_ = captured.size();
+    last_x_ = hover.x();
+    last_y_ = hover.y();
+    // 平面长度（画布 CRS 地图单位）：与 QGIS 状态栏数字化反馈同语义；
+    // 椭球测算归 measure 工具（那里有 QgsDistanceArea 权威配置）。
+    QStringList pts;
+    double total = 0.0;
+    QgsPoint prev;
+    bool hasPrev = false;
+    for (const QgsPoint& p : captured) {
+      pts << QStringLiteral("[%1,%2]")
+                 .arg(QString::number(p.x(), 'g', 12),
+                      QString::number(p.y(), 'g', 12));
+      if (hasPrev) {
+        total += std::hypot(p.x() - prev.x(), p.y() - prev.y());
+      }
+      prev = p;
+      hasPrev = true;
+    }
+    double live = 0.0;
+    if (!captured.isEmpty()) {
+      const QgsPoint& last = captured.constLast();
+      live = std::hypot(hover.x() - last.x(), hover.y() - last.y());
+    }
+    const QgsPointLocator::Match m = e->mapPointMatch();
+    std::string snap;
+    if (m.isValid()) {
+      std::string docId;
+      if (m.layer() != nullptr) {
+        docId = m.layer()->customProperty(QStringLiteral("pwb/doc_id"))
+                    .toString()
+                    .toStdString();
+      }
+      snap = std::string(",\"snap\":{\"matched\":true,\"x\":") +
+             QString::number(m.point().x(), 'g', 12).toStdString() + ",\"y\":" +
+             QString::number(m.point().y(), 'g', 12).toStdString() +
+             ",\"layer_doc_id\":\"" + docId + "\"}";
+    }
+    const std::string payload =
+        std::string("{\"action\":\"digitizing\",\"points\":[") +
+        pts.join(QStringLiteral(",")).toStdString() + "],\"hover\":[" +
+        QString::number(hover.x(), 'g', 12).toStdString() + "," +
+        QString::number(hover.y(), 'g', 12).toStdString() +
+        "],\"segments\":" +
+        QString::number(!captured.isEmpty() ? live : 0.0, 'g', 12).toStdString() +
+        ",\"total\":" + QString::number(total, 'g', 12).toStdString() +
+        ",\"planar\":true" + snap + "}";
+    callback_("digitizing", payload);
+  }
+
+  Callback callback_;
+  int last_point_count_ = -1;
+  double last_x_ = std::numeric_limits<double>::quiet_NaN();
+  double last_y_ = std::numeric_limits<double>::quiet_NaN();
+};
 
 struct QgisMapStack::Impl {
   bool initialized = false;
@@ -3090,6 +3172,24 @@ void QgisMapStack::setSnappingConfig(std::uintptr_t canvas_addr,
     }
   }
   canvas->snappingUtils()->setConfig(config);
+  // V10 预热：数字化工具的 QgsMapMouseEvent::snapPoint() 走 relaxed=true
+  // 查询——定位器索引未就绪时静默无命中（捕获期 snapping "开着却不吸"）。
+  // 这里对参与捕捉的画布层同步构建索引（成本 = 一次索引构建，仅在配置
+  // 变更时发生），使捕获/顶点编辑的 relaxed 查询确定可用。
+  if (config.enabled() && config.mode() != Qgis::SnappingMode::ActiveLayer) {
+    const bool advanced =
+        config.mode() == Qgis::SnappingMode::AdvancedConfiguration;
+    const auto individual = config.individualLayerSettings();
+    for (QgsMapLayer* ml : canvas->mapSettings().layers()) {
+      auto* vl = qobject_cast<QgsVectorLayer*>(ml);
+      if (vl == nullptr) continue;
+      if (advanced) {
+        const auto it = individual.constFind(vl);
+        if (it == individual.constEnd() || !it->enabled()) continue;
+      }
+      canvas->snappingUtils()->locatorForLayer(vl)->init(-1, false);
+    }
+  }
 }
 
 std::string QgisMapStack::snapToMap(std::uintptr_t canvas_addr, double x,
@@ -3272,9 +3372,17 @@ QgsMapToolDigitizeFeature* QgisMapStack::digitizeToolFor(std::uintptr_t canvas_a
     const auto mode = slot == 0   ? QgsMapToolCapture::CapturePoint
                       : slot == 1 ? QgsMapToolCapture::CaptureLine
                                   : QgsMapToolCapture::CapturePolygon;
-    auto* tool = new QgsMapToolDigitizeFeature(canvas, dock, mode);
-    tool->setLayer(kit.scratch[slot].get());
     std::weak_ptr<char> alive = alive_token_;
+    auto* tool = new PwbDigitizeTool(canvas, dock, mode,
+                                    [this, alive, canvas_addr](const std::string& action,
+                                                               const std::string& payload) {
+                                      if (alive.expired()) return;
+                                      auto cbIt = impl_->digitize_callbacks.find(canvas_addr);
+                                      if (cbIt == impl_->digitize_callbacks.end() || !cbIt->second)
+                                        return;
+                                      cbIt->second(action, payload);
+                                    });
+    tool->setLayer(kit.scratch[slot].get());
     QObject::connect(tool, &QgsMapToolDigitizeFeature::digitizingCompleted, canvas,
                      [this, alive, canvas_addr, slot, canvas](const QgsFeature& feature) {
       if (alive.expired()) return;

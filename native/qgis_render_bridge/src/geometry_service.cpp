@@ -235,6 +235,46 @@ std::string geometry_singlepart_to_multipart(const std::vector<std::string>& geo
     return serialize_geometry(QgsGeometry::collectGeometry(parts));
 }
 
+std::string geometry_add_part(const std::string& geometry, const std::string& part) {
+    QgsGeometry source = parse(geometry, "add_part input");
+    QgsGeometry partGeometry = parse(part, "add_part part");
+    if (partGeometry.isEmpty()) {
+        throw GeometryServiceError("add_part part geometry is empty");
+    }
+    // addPart 语义在多部件容器上定义：单部件输入显式升多部件（结果确定性，
+    // 不依赖 QGIS 内部隐式转换分支）。
+    if (source.constGet() != nullptr && !source.isMultipart()) {
+        if (!source.convertToMultiType()) {
+            throw GeometryServiceError("add_part requires a convertible geometry type");
+        }
+    }
+    QgsGeometry target = source;
+    const Qgis::GeometryOperationResult result = target.addPart(partGeometry);
+    if (result != Qgis::GeometryOperationResult::Success) {
+        throw GeometryServiceError("add_part failed (geometry operation result " +
+                                   std::to_string(static_cast<int>(result)) + ")");
+    }
+    return serialize_geometry(target);
+}
+
+std::string geometry_delete_part(const std::string& geometry, int part_index) {
+    QgsGeometry source = parse(geometry, "delete_part input");
+    if (!source.isMultipart()) {
+        throw GeometryServiceError("delete_part requires a multipart geometry");
+    }
+    if (part_index < 0 || part_index >= source.constGet()->partCount()) {
+        throw GeometryServiceError("delete_part index outside the geometry parts");
+    }
+    QgsGeometry target = source;
+    if (!target.deletePart(part_index)) {
+        throw GeometryServiceError("delete_part failed");
+    }
+    if (target.isEmpty()) {
+        throw GeometryServiceError("delete_part would empty the geometry");
+    }
+    return serialize_geometry(target);
+}
+
 std::string geometry_clip(const std::string& geometry,
                           const std::array<double, 4>& extent) {
     const QgsRectangle rectangle(extent[0], extent[1], extent[2], extent[3]);
