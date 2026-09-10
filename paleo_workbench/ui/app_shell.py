@@ -857,6 +857,13 @@ class AppShell(QWidget):
         if app is not None:
             app.setStyleSheet(qss)
 
+    #: V9（审计 D-2）：页面渐变默认禁用。窗口内任何 graphics effect 都会
+    #: 强制隐藏兄弟页的 QOpenGLWidget 在首次显示时提前 initializeGL
+    #: （见 __init__ 首次落地注释；offscreen CI 曾死在 pyqtgraph
+    #: initializeGL）。150ms 的观感收益不抵该隐患——需要时用
+    #: PALEO_PAGE_FADE=1 显式开启。
+    _PAGE_FADE_ENABLED = False
+
     def _animate_page_fade(self, index: int) -> None:
         """Fade the newly switched page in from 0.7 to 1.0 opacity (150ms).
 
@@ -865,6 +872,8 @@ class AppShell(QWidget):
         stopped and both the previous and current pages are restored to full
         opacity before the new fade begins.
         """
+        if not self._PAGE_FADE_ENABLED:
+            return
         page = self.page_stack.widget(index)
         if page is None:
             return

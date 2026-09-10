@@ -197,6 +197,47 @@ def test_constraint_stack_is_relaxed(qtbot, tmp_path):
     assert "setMinimumSize(960, 600)" in source
 
 
+# --- responsive viewport policies (B-4 debounced + compact surfaces) -----
+
+
+def test_viewport_policies_compact_vs_wide(qtbot, tmp_path):
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    shell.show()
+    shell.resize(1600, 900)
+    qtbot.wait(300)
+    ws = shell.workstation
+
+    shell.resize(1000, 700)
+    qtbot.wait(250)  # 180ms 去抖窗口
+    assert ws.app_bar.command_input.minimumWidth() <= 220
+    assert not ws.stage_bar.horizon_label.isVisibleTo(ws.stage_bar)
+    assert ws.inspector_dock.isHidden()
+    assert ws._responsive_hid_inspector is True
+
+    shell.resize(1600, 900)
+    qtbot.wait(250)
+    assert ws.app_bar.command_input.minimumWidth() >= 300
+    assert ws.stage_bar.horizon_label.isVisibleTo(ws.stage_bar)
+    assert not ws.inspector_dock.isHidden()
+    assert ws._responsive_hid_inspector is False
+
+
+def test_responsive_policy_is_debounced_out_of_resize_path(qtbot, tmp_path):
+    """resizeEvent 不得直接改布局（B-4）：策略只在 180ms 静止后评估。"""
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    shell.show()
+    shell.resize(1600, 900)
+    qtbot.wait(300)
+    ws = shell.workstation
+    ws._viewport_timer.stop()
+    shell.resize(1000, 700)
+    # resizeEvent 刚发生：检查器尚未被隐藏（未过去抖窗）。
+    assert ws.inspector_dock.isHidden() is False
+    assert ws._viewport_timer.isActive()
+
+
 # --- lifecycle wiring (C-4) ----------------------------------------------
 
 

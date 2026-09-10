@@ -1109,19 +1109,22 @@ class WorkstationFrame(QWidget):
             return
         self._viewport_timer.start()
 
-    def _viewport_class(self):
-        """窗口逻辑宽度分类（compact/normal/wide/ultrawide）。
+    def _window_width(self) -> int:
+        """工作站顶层窗口逻辑宽度（策略判定输入）。
 
-        以宿主窗口（而非本帧）宽度为准：帧宽度已被 dock 占用扣减，
-        在其上判定「窗口窄」会对正常宽度二次惩罚（V9 审计 B-4）。
+        生产中 frame.window() 即 dock 宿主（PaleoWorkbenchWindow）；
+        孤立构造时是 AppShell（普通顶层部件，可 resize 驱动测试）。
+        不用本帧宽度：帧宽已被 dock 占用扣减，在其上判定「窗口窄」会
+        对正常宽度二次惩罚（V9 审计 B-4）。
         """
-        try:
-            width = self._dock_host.width()
-        except RuntimeError:
-            width = self.width()
-        if width <= 0:
-            width = self.width()
-        return classify_viewport(width)
+        for source in (self.window(), self._dock_host, self):
+            try:
+                width = source.width()
+            except RuntimeError:
+                continue
+            if width > 0:
+                return width
+        return 0
 
     def _apply_responsive_panels(self) -> None:
         if self._layout_frozen:
@@ -1146,12 +1149,18 @@ class WorkstationFrame(QWidget):
             INSPECTOR_RESTORE_ABOVE,
         )
 
-        try:
-            window_width = self._dock_host.width() or self.width()
-        except RuntimeError:
-            return
+        window_width = self._window_width()
         if window_width <= 0:
             return
+        # viewport 分类策略（非偏好性布局约束）：紧凑视口收缩顶栏命令
+        # 输入下限、隐藏阶段条前缀标签。密度（字号/控件高度）是用户
+        # 显式设置，viewport 策略绝不触碰。
+        viewport = classify_viewport(window_width)
+        try:
+            self.app_bar.set_viewport_class(viewport)
+            self.stage_bar.set_viewport_class(viewport)
+        except RuntimeError:
+            return  # 死壳迟到信号（与 D-3 同类）
         if window_width < INSPECTOR_HIDE_BELOW and not self.inspector_dock.isHidden():
             self._responsive_hid_inspector = True
             self.inspector_dock.hide()
@@ -1586,6 +1595,16 @@ class WorkstationFrame(QWidget):
         # 在窄屏下重新显示（保存时按「可见」写入），不能让 restore 反杀
         # 响应式隐藏（#1121）。
         self._apply_responsive_panels()
+        # 归一化「隐藏但无归属」状态：restoreState 也可能恢复出隐藏检查器
+        # 而两个显隐标志均为 False（旧会话保存的中间态）——归入响应式
+        # 隐藏，宽屏下策略才能自动恢复；用户显式隐藏仍由
+        # _user_hid_inspector 语义独占。
+        if (
+            self.inspector_dock.isHidden()
+            and not self._user_hid_inspector
+            and not self._responsive_hid_inspector
+        ):
+            self._responsive_hid_inspector = True
 
     def _restore_host_window_geometry(self) -> None:
         """恢复主窗口（dock 宿主）几何并 clamp 到可见桌面（V6 G-P0-2）。

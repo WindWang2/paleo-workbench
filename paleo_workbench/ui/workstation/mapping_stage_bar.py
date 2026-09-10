@@ -142,9 +142,9 @@ class MappingStageBar(QFrame):
         row.setContentsMargins(10, 4, 10, 4)
         row.setSpacing(8)
 
-        horizon_label = QLabel("层位", self)
-        horizon_label.setObjectName("MappingStageMetaLabel")
-        row.addWidget(horizon_label)
+        self.horizon_label = QLabel("层位", self)
+        self.horizon_label.setObjectName("MappingStageMetaLabel")
+        row.addWidget(self.horizon_label)
         self.horizon_combo = QComboBox(self)
         self.horizon_combo.setObjectName("MappingHorizonCombo")
         self.horizon_combo.setEditable(False)
@@ -175,6 +175,13 @@ class MappingStageBar(QFrame):
                 row.addWidget(track, 0, Qt.AlignmentFlag.AlignVCenter)
                 self._tracks.append(track)
         row.addStretch(1)
+
+    def set_viewport_class(self, viewport) -> None:
+        """V9 viewport 策略：紧凑视口隐藏「层位」前缀标签（下拉自带占位
+        文案，语义不丢失），换取阶段条横向空间。"""
+        from paleo_workbench.ui.dock_framework import ViewportClass
+
+        self.horizon_label.setVisible(viewport is not ViewportClass.COMPACT)
 
     # -- 状态同步（由宿主/MappingStageController 驱动） --------------------------
 

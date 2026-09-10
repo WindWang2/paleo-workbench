@@ -96,6 +96,7 @@ class WorkstationAppBar(QFrame):
         self.command_input.setObjectName("WorkstationCommandInput")
         self.command_input.setPlaceholderText("搜索命令、数据或输入 Agent 指令 (Ctrl+K)")
         self.command_input.setClearButtonEnabled(True)
+        # 命令输入下限随 viewport 策略收缩（V9：紧凑视口 220）。
         self.command_input.setMinimumWidth(300)
         self.command_input.setMaximumWidth(580)
         self.command_input.setSizePolicy(
@@ -213,6 +214,17 @@ class WorkstationAppBar(QFrame):
         self.task_button.setProperty("activeTasks", count > 0)
         self.task_button.style().unpolish(self.task_button)
         self.task_button.style().polish(self.task_button)
+
+    def set_viewport_class(self, viewport) -> None:
+        """V9 viewport 策略：紧凑视口收缩命令输入下限，释放顶栏空间。
+
+        密度（字号/控件高度）仍是用户显式设置；viewport 策略只调整
+        布局下限这类非偏好性约束。
+        """
+        from paleo_workbench.ui.dock_framework import ViewportClass
+
+        floor = 220 if viewport is ViewportClass.COMPACT else 300
+        self.command_input.setMinimumWidth(floor)
 
     def _sync_view_checks(self, *_args) -> None:
         from paleo_workbench.ui.theme import DensityMode, ThemeMode, theme_manager
