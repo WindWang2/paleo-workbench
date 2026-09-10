@@ -98,6 +98,35 @@ def test_categorized_style_missing_class_reported():
     assert mismatch[0]["missing_classes"] == ["深湖"]
 
 
+def test_categorized_style_dict_categories_missing_class_reported():
+    """dict 形 categories（stage_actions 产出的实际形状）同样参与缺类检查。"""
+    project = _project()
+    project.user_vector_layers = [
+        UserVectorLayer(
+            id="l1",
+            name="相带",
+            crs="EPSG:32650",
+            style={
+                "renderer": "categorized",
+                "field": "facies_name",
+                "categories": {"浅湖": "#cccccc"},
+            },
+            features=[
+                UserVectorFeature(
+                    id="f1",
+                    geometry={"type": "Point", "coordinates": [1.0, 2.0]},
+                    properties={"facies_name": "深湖"},
+                ),
+            ],
+        ),
+    ]
+    document = _document(map_crs="EPSG:32650")
+    issues = collect_extended_qc_issues(project, document)
+    mismatch = [i for i in issues if i["rule"] == "class_renderer_mismatch"]
+    assert len(mismatch) == 1
+    assert mismatch[0]["missing_classes"] == ["深湖"]
+
+
 def test_facies_style_missing_class_reported():
     project = _project()
     document = _document(
