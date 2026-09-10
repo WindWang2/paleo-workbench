@@ -538,8 +538,11 @@ def _build_registry() -> dict[LayerRole, GeologicalLayerSpec]:
         renderer=RendererBinding("fault_v2", "fault", "categorized",
                                  field="fault_type"),
         constraint_kind=ConstraintKind.FAULT,
-        snapping=SnappingPolicy(enabled=True, modes=("vertex", "segment"),
-                                topological=True)))
+        # V10 三权威对齐：与 snapping_profiles 的 fault 簇（topological=False，
+        # vertex+endpoint+segment）及 capture_spec 的 recommend=False 同向——
+        # 断层是插值 break-line，捕获期不应拓扑共享顶点。
+        snapping=SnappingPolicy(enabled=True, modes=("vertex", "endpoint", "segment"),
+                                topological=False)))
     add(_spec(
         "provenance-line-v2", LayerRole.PROVENANCE_LINE, "line", "物源线",
         fields=_CONSTRAINT_BASE_FIELDS,

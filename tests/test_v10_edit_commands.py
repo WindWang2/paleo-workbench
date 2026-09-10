@@ -196,6 +196,56 @@ def test_ring_and_part_commands_need_single_selection(qtbot, tmp_path):
     assert not ok and "恰好" in message
 
 
+# -- split / merge 属性策略（D2 显性化锁定） -------------------------------------
+
+
+def test_merge_attribute_policy_first_sorted_feature(qtbot, tmp_path):
+    """merge 属性 = 排序后首个选中要素（确定性；选集 set 无序）。"""
+    document = _document(qtbot, tmp_path)
+    controller, layer, session = _polygon_layer_with(
+        document,
+        [("f1", _SQUARE_A), ("f2", _SQUARE_B)],
+    )
+    session.change_attribute("f1", "facies_name", "alluvial_fan")
+    session.change_attribute("f2", "facies_name", "delta")
+    layer.set_selection(("f2", "f1"))
+    ok, message = controller.geometry_command("merge")
+    assert ok, message
+    merged = [f for f in session.features() if f.feature_id.startswith("merge")]
+    assert len(merged) == 1
+    assert merged[0].attributes["facies_name"] == "alluvial_fan"  # sorted: f1 首位
+
+
+def test_split_attribute_policy_inherits_all(qtbot, tmp_path):
+    """split 每个 replacement 继承原要素全部属性。"""
+    document = _document(qtbot, tmp_path)
+    controller, layer, session = _polygon_layer_with(
+        document, [("f1", _SQUARE_A)])
+    session.change_attribute("f1", "facies_name", "delta")
+    session.change_attribute("f1", "note", "phase2")
+    # 切割线：线图层 + 选中切割线
+    line_layer = controller.create_layer("切割线", "line")
+    from paleo_workbench.mapping.vector_layer import VectorFeature
+
+    line_layer.start_editing()
+    cutter = VectorFeature(
+        "cutter",
+        {"type": "LineString", "coordinates": [[5.0, -2.0], [5.0, 12.0]]},
+        {},
+    )
+    line_layer.edit_session.add_feature(cutter)
+    controller.save_edits()
+    line_layer.set_selection(("cutter",))
+    layer.set_selection(("f1",))
+    controller.set_active_layer(layer.id)
+    ok, message = controller.geometry_command("split")
+    assert ok, message
+    pieces = [f for f in session.features() if f.feature_id != "f1"]
+    assert len(pieces) == 2
+    assert all(p.attributes["facies_name"] == "delta" for p in pieces)
+    assert all(p.attributes["note"] == "phase2" for p in pieces)
+
+
 # -- 工具可用性矩阵（contract v4 事实 → 新工具门禁） -----------------------------
 
 

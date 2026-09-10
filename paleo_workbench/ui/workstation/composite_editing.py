@@ -1002,6 +1002,10 @@ class CompositeEditController(QObject):
         if not allowed:
             return  # 原因由调用方（门禁入口）负责呈现
         self._open_session(layer)
+        # V10：新会话开启后 kind-bound 工具的失配重绑（此前只在切层/内容同步
+        # 链上触发——"add_line 激活 → 切到面层 → 开始编辑"会把线捕获工具留在
+        # 面图层上）。
+        self._rebind_active_tool()
         self.state_changed.emit()
 
     def ensure_layer_session(self, layer_id: str):
@@ -1714,8 +1718,10 @@ class CompositeEditController(QObject):
             if command_id == "merge":
                 if not layer.selection:
                     return False, "请先选择要合并的要素"
+                # D2 属性策略确定性：选集是 set（无序）——按 feature_id 排序
+                # 后"首个选中要素"的属性成为合并结果属性。
                 with session.edit_source("merge(command)"):
-                    new_id = merge_selected_polygons(session, layer.selection)
+                    new_id = merge_selected_polygons(session, sorted(layer.selection))
                 layer.set_selection((new_id,))
                 self.content_changed.emit(layer.id)
                 self.state_changed.emit()

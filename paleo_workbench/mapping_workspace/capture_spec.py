@@ -137,6 +137,24 @@ _CAPTURE_SPECS: dict[LayerRole, GeologicalCaptureSpec] = {
         snapping_profile=recommended_profile_for_role(LayerRole.USER_GENERAL),
         recommend_topological_editing=False,
     ),
+    # V10 补齐：可编辑角色先前无捕获语义（apply_capture_spec 返回 None，
+    # snapping 推荐永远不生效）。INTEGRATED_BOUNDARY 是 P3 active_editing_roles
+    # 成员；INTERPRETATION_ANNOTATION 是 ROLE_EDITABLE 成员。
+    LayerRole.INTEGRATED_BOUNDARY: GeologicalCaptureSpec(
+        role=LayerRole.INTEGRATED_BOUNDARY,
+        geometry_kind="line",
+        template_key="",
+        snapping_profile=recommended_profile_for_role(LayerRole.INTEGRATED_BOUNDARY),
+        recommend_topological_editing=True,
+        constraint_kind=ConstraintKind.FACIES_BOUNDARY,
+    ),
+    LayerRole.INTERPRETATION_ANNOTATION: GeologicalCaptureSpec(
+        role=LayerRole.INTERPRETATION_ANNOTATION,
+        geometry_kind="line",
+        template_key="",
+        snapping_profile=recommended_profile_for_role(LayerRole.INTERPRETATION_ANNOTATION),
+        recommend_topological_editing=False,
+    ),
 }
 
 
