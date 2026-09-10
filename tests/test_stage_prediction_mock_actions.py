@@ -132,6 +132,7 @@ def test_run_seismic_facies_mock_end_to_end(qtbot, monkeypatch, catalog):
             for x, y in ring:
                 assert -3 <= x <= 13 and -3 <= y <= 3  # 工区 bbox 附近
     run = catalog.get_run(task.model_metadata["run_id"])
+    assert run.parameters["extent_source"] == "workarea_boundary"
     stages = {
         version.stage
         for version in catalog.document.versions
@@ -150,6 +151,54 @@ def test_repeat_runs_create_distinct_tasks(qtbot, monkeypatch, catalog):
     doc.stage_actions.dispatch("facies_calibration", "run_well_facies_mock")
     assert len(project.prediction_tasks) == 2
     assert project.prediction_tasks[0].id != project.prediction_tasks[1].id
+
+
+def test_repeat_well_runs_refresh_point_overlay(qtbot, monkeypatch, catalog):
+    """连点两次测井 mock：井点层重建，要素集合同覆盖两个 task（Finding 1）。"""
+    from paleo_workbench.mapping.well_prediction_surface import (
+        POINTS_LAYER_TASK_ID,
+    )
+
+    project = _project()
+    doc = _composite(qtbot, monkeypatch, project)
+    doc.stage_actions.dispatch("facies_calibration", "run_well_facies_mock")
+    doc.stage_actions.dispatch("facies_calibration", "run_well_facies_mock")
+    assert len(project.prediction_tasks) == 2
+    task_ids = {task.id for task in project.prediction_tasks}
+    state = doc.stage_controller.state
+    point_layers = [
+        layer_id
+        for layer_id in state.layers_with_role(LayerRole.WELL_FACIES_PREDICTION)
+        if state.membership(layer_id).factor_task_id == POINTS_LAYER_TASK_ID
+        and doc.edit_controller.layer(str(layer_id)) is not None
+    ]
+    assert len(point_layers) == 1
+    layer = doc.edit_controller.layer(str(point_layers[0]))
+    covered = {
+        str(feature.attributes.get("prediction_task_id") or "")
+        for feature in layer.features()
+    }
+    assert task_ids <= covered
+
+
+def test_intermediate_registration_failure_keeps_primary(qtbot, monkeypatch, catalog):
+    """INTERMEDIATE 登记抛错：task 照建 + 状态栏明示（Finding 2，不 orphan 主结果）。"""
+    from paleo_workbench.ui.workstation import stage_actions as stage_actions_module
+
+    project = _project()
+    doc = _composite(qtbot, monkeypatch, project)
+    messages = []
+    doc.status_message.connect(messages.append)
+
+    def _boom(self, service, run_id, payload, *, kind):
+        raise RuntimeError("disk gone")
+
+    monkeypatch.setattr(
+        stage_actions_module.StageActionDispatcher,
+        "_register_mock_intermediates", _boom)
+    doc.stage_actions.dispatch("facies_calibration", "run_well_facies_mock")
+    assert len(project.prediction_tasks) == 1
+    assert any("中间文件登记失败" in text for text in messages)
 
 
 def test_run_mock_without_catalog_graceful(qtbot, monkeypatch):

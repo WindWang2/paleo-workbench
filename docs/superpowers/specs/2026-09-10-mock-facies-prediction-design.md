@@ -67,7 +67,7 @@
 
 ### MockSeismicFaciesProvider
 
-- 平面范围（按优先级）：目标层位已有解释版本 → 其 `grid_xy` bbox；否则 `project.workarea.boundary` bbox；再否则地震工区角点 bbox。来源记入 parameters。
+- 平面范围（按优先级）：`project.workarea.boundary` bbox（带 clip ring）→ 井位 bbox +10% padding → 地震工区角点 bbox；**来源以 `extent_source` 记入 run parameters**。（执行期批准的偏离：不做「目标层位解释版本 grid_xy 优先」分支——与在途 `point_to_surface_features` 的工区优先惯例一致。）
 - 生成：workarea 惯例网格（默认 `grid_n=80`）上按 seed 做最近邻斑块分类（mock_facies.py 自实现简化填格：12 个随机相类中心 + 最近邻归类，**不依赖在途的 mapping/well_prediction_surface.py**，保持 prediction 层自包含）→ `FactorGridResult` → `generate_facies_polygon_layer(thresholds=[i+0.5])`（基线模块 `mapping/polygonization.py`）产出多边形 features。
 - 结果形状：`result_summary.spatial = {type: "VECTOR_POLYGONS", crs: project_crs, features: [GeoJSON Polygon, properties 含 facies/probability/horizon]}`。坐标落在工程范围内，**不得**触碰 demo 固定方块 `(114.0, 22.5, 0.04)` 邻域（`spatial_result.py` 脏数据探测器）。
 - 中间文件：mock 栅格写 `.factor_grid.npz`（`grid_artifact.write_grid_artifact` 惯例）→ `register_intermediate` 挂 `run_id`；多边形 GeoJSON 为 DERIVED 结果 payload 主体。

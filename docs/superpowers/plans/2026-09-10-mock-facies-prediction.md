@@ -1105,3 +1105,14 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest \
 - DERIVED 结果 JSON 内仍带 `well_detail`/`mock_grid` 副本（execute_run 先于中间登记落盘）——mock 规模无害，真模型接入时如需瘦身再议。
 - 地震 mock 的 clip ring 在地理 CRS 下只是平面近似（polygonization 既有 `area_warnings` 语义），与工区既有惯例一致。
 - mock 结果图层为 RAW 保护角色（WELL/SEISMIC_FACIES_PREDICTION），不可人工编辑——符合预测层契约。
+
+---
+
+## 执行期修正记录（2026-09-10，与代码一致）
+
+- **A**：`execute_run` 调 provider 前剥掉所有 `_` 前缀参数（inference_service.py:370-374）——provider 读键改为 `_x or x` 双路回退；handler 传双键（非下划线键进 snapshot hash：井集合属于计算身份）。
+- **D1**：run 成功状态实为 `"complete"`（非 `"completed"`），测试按真实值断言。
+- **D2**：`execute_run` 对 provider 错误**不抛出**，返回 `result=None`——handler 以 `result is None` 守卫为主失败路径，try/except 仅防意外抛出；空结果绝不建任务。
+- **D4**：`input_refs` 按 kind 只记本类资源 id——否则双非空键在 Task-2 语义下误判类别。
+- **extent 偏离批准**：不做层位解释版本 grid_xy 优先分支（与 point_to_surface 工区优先惯例一致）；`extent_source` 记入 run parameters。
+- **终局审查修复（3 Important）**：① 重复运行测井 mock 时 handler 先删旧井点层再叠加（不动 overlay 幂等契约）；② `_register_mock_intermediates` 加 try/except，失败不 orphan 主结果；③ `extent_source` 进血缘。复审通过：Ready to merge = Yes。
