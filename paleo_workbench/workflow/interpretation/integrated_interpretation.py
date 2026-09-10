@@ -23,6 +23,7 @@ from typing import Any
 
 from paleo_workbench.workflow.interpretation.revision import (
     InterpretationRevision,
+    latest_revision_for_layer,
     record_interpretation_revision,
 )
 
@@ -338,9 +339,23 @@ def commit_integrated_interpretation(
         note="综合解释提交（commit → DERIVED 版本）",
     )
     if revision is not None:
-        interpretation.revision_ids.append(revision.revision_id)
-        interpretation.last_committed_revision_id = revision.revision_id
-        _upsert_interpretation(document, interpretation)
+        # revision 链接已由领域函数维护（防止拷贝双写）；此处只钉
+        # last_committed 锚点——重读文档侧对象避免覆盖中间状态。
+        fresh = find_by_layer(document, interpretation.layer_id)
+        target = fresh if fresh is not None else interpretation
+        if revision.revision_id not in target.revision_ids:
+            target.revision_ids.append(revision.revision_id)
+        target.last_committed_revision_id = revision.revision_id
+        _upsert_interpretation(document, target)
+    else:
+        # 内容自上次修订未变（例如：手工保存已记录修订、commit 紧随其后）
+        # ——仍推进 last_committed 锚点到链尾：本次提交覆盖了该内容。
+        latest = latest_revision_for_layer(document, interpretation.layer_id)
+        if latest is not None:
+            fresh = find_by_layer(document, interpretation.layer_id)
+            target = fresh if fresh is not None else interpretation
+            target.last_committed_revision_id = latest.revision_id
+            _upsert_interpretation(document, target)
     return version_id
 
 

@@ -428,9 +428,34 @@ class WorkstationInspector(QFrame):
         "grid": {"min": …, "max": …, "uncertainty": (lo, hi)} | None,
         "layer_id": …}``。grid 摘要由宿主从 live 网格缓存提取（缓存缺失
         → None →「—」诚实呈现）。
+
+        V9（goal §25 摘要契约）：``payload["summary_rows"]`` 提供时优先渲染
+        （FactorSummary.to_display_dict()["rows"]——方法/单位/CRS/输入版本/
+        结果版本/新鲜度/不确定度/QC 的诚实状态），内部模型直读作为回退。
         """
         payload = payload if isinstance(payload, dict) else {}
         task = payload.get("task")
+        summary_rows = payload.get("summary_rows")
+        if isinstance(summary_rows, list) and summary_rows:
+            self._current = task or payload
+            title = str(getattr(task, "name", "") or payload.get("name") or "单因素")
+            self.header.setText(f"检查器 · 单因素 · {title}")
+            self._clear_form(self.properties_form)
+            self._clear_form(self.interpretation_form)
+            for row in summary_rows:
+                if not isinstance(row, dict):
+                    continue
+                label = str(row.get("label") or "")
+                value = row.get("value")
+                state = str(row.get("state") or "ok")
+                text = "—" if value in (None, "") else str(value)
+                if state in ("missing", "unknown"):
+                    text = f"{text}（{'缺失' if state == 'missing' else '未知'}）"
+                elif state == "warn":
+                    text = f"{text}（注意）"
+                self.properties_form.addRow(label, self._readonly(text))
+            self._set_history([f"单因素任务 {getattr(task, 'id', '—')}"])
+            return
         grid = payload.get("grid") if isinstance(payload.get("grid"), dict) else {}
         self._current = task or payload
         title = str(getattr(task, "name", "") or payload.get("name") or "单因素")

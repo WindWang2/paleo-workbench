@@ -192,6 +192,24 @@ def record_interpretation_revision(
         document.interpretation_revisions = revisions
     except AttributeError:
         setattr(document, "interpretation_revisions", revisions)
+    # 领域链接：integrated 目标的修订自动挂到对应解释记录（UI 接线不再
+    # 各自追加，杜绝双写漂移）。
+    if interpretation_id or target_kind in (
+            "integrated_facies", "integrated_boundary"):
+        try:
+            from paleo_workbench.workflow.interpretation.integrated_interpretation import (
+                _upsert_interpretation,
+                interpretations_for_document,
+            )
+
+            for interpretation in interpretations_for_document(document):
+                if interpretation.layer_id != str(target_layer_id):
+                    continue
+                if revision.revision_id not in interpretation.revision_ids:
+                    interpretation.revision_ids.append(revision.revision_id)
+                _upsert_interpretation(document, interpretation)
+        except Exception:  # noqa: BLE001 — 链接失败不阻断修订本身
+            pass
     return revision
 
 

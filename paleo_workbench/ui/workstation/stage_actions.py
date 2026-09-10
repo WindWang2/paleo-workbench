@@ -1715,13 +1715,7 @@ class StageActionDispatcher:
                 evidence_refs=list(evidence_refs or []),
                 note=note,
             )
-            if revision is not None and interpretation is not None:
-                interpretation.revision_ids.append(revision.revision_id)
-                from paleo_workbench.workflow.interpretation.integrated_interpretation import (
-                    _upsert_interpretation,
-                )
-
-                _upsert_interpretation(document, interpretation)
+            # 修订 → 解释记录的链接由领域函数维护（防双写）。
             return revision
         except Exception:  # noqa: BLE001 — 修订失败不阻断保存路径
             logger.exception("revision recording failed for %s", layer_id)
