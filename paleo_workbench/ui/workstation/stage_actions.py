@@ -1237,8 +1237,55 @@ class StageActionDispatcher:
                 f"integrated:{layer_id}", "draft")
             self.edit_controller.set_active_layer(layer_id)
             self.composite.layer_manager.select_layer(layer_id)
+            # V9 (P0-4)：综合解释是一等成果——创建即登记身份
+            #（input_set 引用 + Phase1 草稿底稿 + QA/修订链锚点）。
+            self._register_integrated_interpretation(
+                layer_id,
+                name="综合沉积相（草稿）",
+                class_names=[],
+                fusion_version_id="",
+                base_kind="draft",
+                base_version_id="",
+            )
             self.composite.status_message.emit(
                 f"已创建综合解释草稿（证据 {len(self.stage_controller.state.compilation_input_set)} 项）")
+
+    def _register_integrated_interpretation(
+        self, layer_id: str, *, name: str, class_names: list[str],
+        fusion_version_id: str, base_kind: str, base_version_id: str,
+        confidence_summary: dict | None = None,
+        conflicts: dict | None = None,
+    ) -> None:
+        """登记 IntegratedInterpretation 一等成果记录（V9 ADR-8）。"""
+        document = self.project
+        if document is None:
+            return
+        try:
+            from paleo_workbench.workflow.interpretation.compilation import (
+                active_input_set,
+            )
+            from paleo_workbench.workflow.interpretation.integrated_interpretation import (
+                create_integrated_interpretation,
+                find_by_layer,
+            )
+
+            if find_by_layer(document, layer_id) is not None:
+                return  # 幂等：已有记录不重复创建
+            input_set = active_input_set(document)
+            create_integrated_interpretation(
+                document,
+                name=name,
+                layer_id=layer_id,
+                input_set_id=input_set.id if input_set else "",
+                fusion_version_id=fusion_version_id,
+                class_schema=[str(c) for c in class_names],
+                confidence_summary=confidence_summary or {},
+                conflicts=conflicts or {},
+                created_by="workstation",
+            )
+        except Exception:  # noqa: BLE001 — 登记失败不阻断图层创建（诚实日志）
+            logger.exception(
+                "integrated interpretation registration failed for %s", layer_id)
 
     def create_integrated_boundary(self) -> None:
         """综合相带边界（V5 §30，§12）：从综合/阶段1草稿的相面环提取边界线。
@@ -1382,6 +1429,31 @@ class StageActionDispatcher:
             if created:
                 self.stage_controller.state.set_maturity(
                     f"integrated:{created}", "draft")
+                qc = dict(summary.get("qc") or {})
+                # V9 (P0-4/P0-6)：融合播种的综合解释登记为一等成果
+                #（fusion 版本 = 算法种子；冲突/置信度摘要随记录）。
+                self._register_integrated_interpretation(
+                    created,
+                    name="综合沉积相（融合初稿）",
+                    class_names=list(summary.get("class_names") or []),
+                    fusion_version_id=str(summary.get("catalog_version_id") or ""),
+                    base_kind="fusion",
+                    base_version_id=str(summary.get("catalog_version_id") or ""),
+                    confidence_summary=dict(qc.get("confidence_coverage") or {}),
+                    conflicts={
+                        key: qc.get(key)
+                        for key in ("low_confidence_fraction",
+                                    "mean_conflict_fraction",
+                                    "high_conflict_fraction",
+                                    "low_margin_fraction")
+                        if qc.get(key) is not None
+                    },
+                )
+                self._record_revision_for_layer(
+                    created, "integrated_facies",
+                    base_kind="fusion",
+                    base_version_id=str(summary.get("catalog_version_id") or ""),
+                    note="融合初稿（算法播种，人工修编起点）")
                 draft_note = f"；已创建融合初稿（{len(features)} 个分级面，可编辑修编）"
             else:
                 draft_note = ""
@@ -1554,20 +1626,106 @@ class StageActionDispatcher:
             })
 
     def stage_save(self) -> None:
-        """保存阶段成果：flush 编辑会话 + 约束几何回填 + 工作区状态落工程。
+        """保存阶段成果：flush 编辑会话 + 约束几何回填 + 解释修订溯源 + 落工程。
 
         blocked（RAW 门禁拒绝/拓扑失败）逐条原因已由 flush 自身经
         status_message 发出（composite.flush 只返回提交数）。
+
+        V9 (P0-6)：解释面（Phase1 草稿/综合解释/相带边界）的每次保存
+        记录 InterpretationRevision——谁改的、基于哪些证据（当前输入集）、
+        从哪个父修订开始；内容未变不产生空修订。
         """
         committed = self.composite.flush_edit_sessions()
         synced = self._sync_constraint_geometry()
+        recorded = self._record_interpretation_revisions()
         self.composite._sync_workspace_state_to_project()
         message = "阶段成果已保存"
         if committed:
             message += f"（提交 {committed} 个编辑会话）"
         if synced:
             message += f"；回填 {synced} 条约束几何（含内容指纹）"
+        if recorded:
+            message += f"；记录 {recorded} 条解释修订（人工解释溯源）"
         self.composite.status_message.emit(message)
+
+    def _record_interpretation_revisions(self) -> int:
+        """对有内容变化的解释面记录修订（证据归因=当前输入集）。"""
+        document = self.project
+        state = self.stage_controller.state
+        if document is None:
+            return 0
+        evidence_refs = [
+            str(value) for value in (state.compilation_input_set or {}).values()
+            if str(value)
+        ]
+        targets: list[tuple[str, str]] = []
+        for layer_id in state.layers_with_role(LayerRole.INITIAL_FACIES_DRAFT):
+            targets.append((str(layer_id), "phase1_draft"))
+        for layer_id in state.layers_with_role(LayerRole.INTEGRATED_FACIES):
+            targets.append((str(layer_id), "integrated_facies"))
+        for layer_id in state.layers_with_role(LayerRole.INTEGRATED_BOUNDARY):
+            targets.append((str(layer_id), "integrated_boundary"))
+        recorded = 0
+        for layer_id, target_kind in targets:
+            try:
+                layer = self.edit_controller.layer(layer_id)
+                if layer is None:
+                    continue
+                revision = self._record_revision_for_layer(
+                    layer_id, target_kind,
+                    evidence_refs=evidence_refs,
+                    note="人工解释保存（stage_save 溯源）")
+                if revision is not None:
+                    recorded += 1
+            except Exception:  # noqa: BLE001 — 修订记录失败不阻断保存
+                logger.exception("revision recording failed for %s", layer_id)
+        return recorded
+
+    def _record_revision_for_layer(self, layer_id: str, target_kind: str, *,
+                                   evidence_refs: list[str] | None = None,
+                                   base_kind: str = "manual",
+                                   base_version_id: str = "",
+                                   note: str = ""):
+        """单层修订记录（无变化 → None）。"""
+        document = self.project
+        if document is None:
+            return None
+        try:
+            from paleo_workbench.workflow.interpretation.integrated_interpretation import (
+                find_by_layer,
+            )
+            from paleo_workbench.workflow.interpretation.revision import (
+                record_interpretation_revision,
+            )
+
+            layer = self.edit_controller.layer(layer_id)
+            if layer is None:
+                return None
+            interpretation = find_by_layer(document, layer_id)
+            revision = record_interpretation_revision(
+                document,
+                target_kind=target_kind,
+                target_layer_id=layer_id,
+                layer=layer,
+                actor="workstation",
+                interpretation_id=interpretation.interpretation_id
+                if interpretation else "",
+                base_kind=base_kind,
+                base_version_id=base_version_id,
+                evidence_refs=list(evidence_refs or []),
+                note=note,
+            )
+            if revision is not None and interpretation is not None:
+                interpretation.revision_ids.append(revision.revision_id)
+                from paleo_workbench.workflow.interpretation.integrated_interpretation import (
+                    _upsert_interpretation,
+                )
+
+                _upsert_interpretation(document, interpretation)
+            return revision
+        except Exception:  # noqa: BLE001 — 修订失败不阻断保存路径
+            logger.exception("revision recording failed for %s", layer_id)
+            return None
 
     def _sync_constraint_geometry(self) -> int:
         """约束几何回填（§11 P0-3）：数字化矢量 → ConstraintLine.coordinates。

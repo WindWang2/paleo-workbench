@@ -113,3 +113,69 @@ def factor_summary_for_task(
 ) -> FactorSummary:
     return factor_summary(factor_product_for_task(
         document, task_id, catalog=catalog, workspace_state=workspace_state))
+
+
+@dataclass(frozen=True)
+class InterpretationSummary:
+    """综合解释成果摘要（Inspector 直接消费）。"""
+
+    interpretation_id: str
+    title: str
+    rows: tuple[SummaryRow, ...] = field(default_factory=tuple)
+
+    def to_display_dict(self) -> dict[str, Any]:
+        return {
+            "kind": "integrated_interpretation",
+            "interpretation_id": self.interpretation_id,
+            "title": self.title,
+            "rows": [
+                {"label": r.label, "value": r.value, "state": r.state}
+                for r in self.rows
+            ],
+        }
+
+
+def interpretation_summary_rows(document: Any, layer_id: str) -> InterpretationSummary:
+    from paleo_workbench.workflow.interpretation.integrated_interpretation import (
+        find_by_layer,
+    )
+    from paleo_workbench.workflow.interpretation.revision import (
+        latest_revision_for_layer,
+    )
+
+    interpretation = find_by_layer(document, layer_id)
+    if interpretation is None:
+        return InterpretationSummary("", "综合解释（无记录）", (
+            _row("状态", "无综合解释记录（旧工程或未创建）", state="missing"),))
+    revision = latest_revision_for_layer(document, layer_id)
+    rows = [
+        _row("输入集", interpretation.input_set_id or "未绑定（旧工程）",
+             state="ok" if interpretation.input_set_id else "unknown"),
+        _row("算法种子",
+             interpretation.fusion_version_id or "人工起草（无算法种子）",
+             state="ok" if interpretation.fusion_version_id else "unknown"),
+        _row("提交版本",
+             interpretation.committed_version_id or "未提交（编辑中）",
+             state="ok" if interpretation.committed_version_id else "unknown"),
+        _row("成熟度", interpretation.maturity),
+        _row("分类", "、".join(interpretation.class_schema) or "未声明",
+             state="ok" if interpretation.class_schema else "unknown"),
+        _row("未提交编辑", "有" if interpretation.has_uncommitted_edits else "无",
+             state="warn" if interpretation.has_uncommitted_edits else "ok"),
+        _row("修订", f"{len(interpretation.revision_ids)} 条"),
+    ]
+    if revision is not None:
+        rows.append(_row("最近修订",
+                         f"{revision.actor or '未知'} @ {revision.created_at or '?'}"
+                         f"（base={revision.base_kind}"
+                         f"{':' + revision.base_version_id[:12] if revision.base_version_id else ''}）"))
+        if revision.evidence_refs:
+            rows.append(_row("依据证据", "；".join(revision.evidence_refs)))
+    for key in ("low_confidence_fraction", "mean_conflict_fraction",
+                "high_conflict_fraction"):
+        if key in interpretation.conflicts:
+            rows.append(_row(f"冲突·{key}", interpretation.conflicts[key]))
+    return InterpretationSummary(
+        interpretation.interpretation_id,
+        f"{interpretation.name}（{interpretation.layer_id}）",
+        tuple(rows))
