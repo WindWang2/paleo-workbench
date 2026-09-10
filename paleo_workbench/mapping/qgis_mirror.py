@@ -340,16 +340,16 @@ def _verify_published_schema(stack, doc_id: str, fields_json: str, _sink) -> Non
             f"schema drift: published fields {got_names} != spec {want_names}",
         )
         return
-        want_types = {str(f.get("name")): str(f.get("type")) for f in want_fields}
-        for field in got_fields:
-            name = str(field.get("name"))
-            expected = want_types.get(name, "")
-            actual = str(field.get("type") or "")
-            if expected and actual and expected != actual:
-                _sink(
-                    str(doc_id),
-                    f"schema drift: field {name} type {actual!r} != spec {expected!r}",
-                )
+    want_types = {str(f.get("name")): str(f.get("type")) for f in want_fields}
+    for field in got_fields:
+        name = str(field.get("name"))
+        expected = want_types.get(name, "")
+        actual = str(field.get("type") or "")
+        if expected and actual and expected != actual:
+            _sink(
+                str(doc_id),
+                f"schema drift: field {name} type {actual!r} != spec {expected!r}",
+            )
 
 
 def _renderer_semantic_signature(renderer_xml: str):
