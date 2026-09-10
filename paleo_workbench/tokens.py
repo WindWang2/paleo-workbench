@@ -310,7 +310,14 @@ TASK_STATUS_LABELS = {"complete": "已生成", "pending": "待生成", "running"
 # empirical variogram fit + OK solve with kriging variance output (ISS-KRIG-01
 # resolved — the MVP linear placeholder is gone). The workflow routes the UI
 # label to the engine method via METHOD_LABEL_TO_ENGINE.
-INTERPOLATION_METHODS = ["克里金", "IDW", "约束IDW", "样条", "方向趋势"]
+# V9 (ADR-5): the method list is DERIVED from the AlgorithmSpec registry —
+# the single capability authority (supported constraints / uncertainty /
+# cancel are declared there; UI never hardcodes capability knowledge again).
+from paleo_workbench.workflow.interpretation.algorithm_registry import (  # noqa: E402
+    ui_interpolation_methods as _ui_interpolation_methods,
+)
+
+INTERPOLATION_METHODS = _ui_interpolation_methods()
 INTERPOLATION_METHOD_TOOLTIPS = {
     "克里金": "真实普通克里金：经验变差函数拟合 + 克里金求解（含克里金方差）",
     "IDW": "反距离加权；支持断层屏障 fault_polylines",

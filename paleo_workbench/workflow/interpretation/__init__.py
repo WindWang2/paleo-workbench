@@ -17,6 +17,13 @@
 （DataAsset/DataVersion/DataRun）+ ProjectDocument；本包绝不复制载荷，
 不建第二数据库。
 """
+from paleo_workbench.workflow.interpretation.algorithm_registry import (
+    AlgorithmSpec,
+    canonical_algorithm_id,
+    display_label,
+    get_algorithm,
+    ui_interpolation_methods,
+)
 from paleo_workbench.workflow.interpretation.evidence import (
     EvidenceKind,
     EvidenceResolution,
@@ -27,14 +34,37 @@ from paleo_workbench.workflow.interpretation.evidence import (
     parse_evidence_selector,
     resolve_evidence,
 )
+from paleo_workbench.workflow.interpretation.factor_product import (
+    FactorArtifactRef,
+    FactorProduct,
+    factor_product_for_task,
+    factor_products,
+)
+from paleo_workbench.workflow.interpretation.summaries import (
+    FactorSummary,
+    factor_summary,
+    factor_summary_for_task,
+)
 
 __all__ = [
+    "AlgorithmSpec",
     "EvidenceKind",
     "EvidenceResolution",
     "EvidenceSelector",
     "EvidenceStatus",
+    "FactorArtifactRef",
+    "FactorProduct",
+    "FactorSummary",
     "available_evidence",
+    "canonical_algorithm_id",
+    "display_label",
+    "factor_product_for_task",
+    "factor_products",
+    "factor_summary",
+    "factor_summary_for_task",
     "format_evidence_selector",
+    "get_algorithm",
     "parse_evidence_selector",
     "resolve_evidence",
+    "ui_interpolation_methods",
 ]
