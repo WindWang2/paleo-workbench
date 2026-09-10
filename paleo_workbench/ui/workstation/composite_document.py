@@ -2697,6 +2697,10 @@ class CompositeDocument(QWidget):
 
         角色/成熟度/可编辑/新鲜度四行，值经 state_language 词汇渲染
         （glyph+文字）；未知项诚实「未知」，不编造。
+        V10 M11（§19）：补齐专业 GIS 上下文行——几何类型/CRS/编辑会话/
+        选择/推荐动作（推荐动作 = canonical evaluator 的 preferred 捕获
+        工具或 toggle_editing 结论，禁用带原因——V8 08 #9 的 Inspector
+        action-hint 闭环）。
         """
         from paleo_workbench.ui.workstation.state_language import state_token
 
@@ -2721,13 +2725,53 @@ class CompositeDocument(QWidget):
             if freshness_artifact is not None
             else state_token("freshness", None)
         )
-        return {
+        rows = {
             "角色": f"{role.label}",
             "成熟度": f"{maturity.glyph} {maturity.label}",
             "可编辑": f"{editability.glyph} {editability.label}" + (
                 f"（{reason}）" if not allowed and reason else ""),
             "新鲜度": f"{freshness.glyph} {freshness.label}",
         }
+        # V10 M11：几何/CRS/会话/选择（图层级事实，O(1)）。
+        layer = self.edit_controller.layer(layer_id)
+        if layer is not None:
+            from paleo_workbench.mapping.tool_availability import LAYER_CAPTION
+
+            rows["几何"] = LAYER_CAPTION(self.edit_controller.kind_of(layer_id))
+            rows["CRS"] = str(getattr(layer, "crs", "") or "") or "未声明"
+            session = getattr(layer, "edit_session", None)
+            if session is not None:
+                rows["编辑"] = (
+                    "编辑中 · 未保存" if getattr(session, "is_dirty", False)
+                    else "编辑中")
+            selection = getattr(layer, "selection", None) or ()
+            if selection:
+                rows["已选"] = f"{len(selection)} 个要素"
+        # 推荐动作：活动图层 = preferred 捕获工具；否则 toggle_editing 结论。
+        if layer_id == str(self.edit_controller.active_layer_id or ""):
+            rows["推荐动作"] = self._recommended_action_text(layer_id)
+        return rows
+
+    def _recommended_action_text(self, layer_id: str) -> str:
+        """推荐动作行（V10 M11）：preferred 捕获工具 / toggle_editing 结论。
+
+        结论与禁用原因全部来自 canonical evaluator（explain 同源）；本
+        方法只拼呈现文本，不改写判词。
+        """
+        from paleo_workbench.mapping.tool_help import TOOL_LABELS
+        from paleo_workbench.mapping.tool_availability import evaluate_tool
+
+        verdict = self._layer_tool_availability(layer_id, "toggle_editing")
+        if verdict.enabled and not self.edit_controller.editing:
+            return "开始编辑（工具条/右键/命令面板同入口）"
+        for tool_id in ("add_point", "add_line", "add_polygon"):
+            capture = self._layer_tool_availability(layer_id, tool_id)
+            if capture.enabled and capture.preferred:
+                return f"{TOOL_LABELS.get(tool_id, tool_id)}（推荐捕获工具）"
+        if not verdict.enabled:
+            return f"开始编辑（不可用：{verdict.disabled_reason}）"
+        # 会话已开启但无 preferred 捕获（未知 kind 等）——诚实说明。
+        return "编辑会话进行中" if self.edit_controller.editing else "开始编辑"
 
     def active_editing_target_status(self) -> dict:
         """活动编辑目标摘要（V6 §5：UIContext/状态条/检查器共用 seam）。

@@ -739,9 +739,10 @@ class WorkstationFrame(QWidget):
 
         palette 与工具条对同一动作给同一禁用原因（goal §5 四表面一致）；
         回调经 composite 的命令分派（同一执行路径 + execution re-gate）。
-        V8：核心编辑/会话/检查命令进 palette（此前只有 surface 组）——
-        split/merge/reshape 依赖会话几何细节（palette 快照不可精确判定），
-        留在工具条/右键菜单，不进 palette（诚实优先于覆盖）。
+        V8：核心编辑/会话/检查命令进 palette（此前只有 surface 组）。
+        V10 M9：split/merge/reshape 进 palette——UIContextSnapshot 新增
+        split/merge/reshape_ready 事实（宿主采集器同源），快照可以诚实
+        判定三个几何命令（V8 08 #1 闭环）；执行侧仍以完整上下文 re-gate。
         """
         from paleo_workbench.ui.command_registry import CommandSpec, command_registry
         from paleo_workbench.ui.map_action_controller import MapActionController
@@ -759,6 +760,8 @@ class WorkstationFrame(QWidget):
             "toggle_editing", "save_edits", "rollback", "undo", "redo",
             "delete_selected", "snapping", "topology",
             "identify", "measure_distance", "select_rectangle",
+            # V10 M9：几何命令三件套（快照几何前提就位）。
+            "split", "merge", "reshape",
         )
         labels = MapActionController._LABELS
         from paleo_workbench.ui.workstation.action_help import TOOL_HELP

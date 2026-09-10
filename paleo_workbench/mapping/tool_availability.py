@@ -58,6 +58,7 @@ __all__ = [
     "evaluate_all",
     "evaluate_tool",
     "stage_group_visibility",
+    "stage_whitelist_reason",
 ]
 
 Point = tuple[float, float]
@@ -368,9 +369,19 @@ def _stage_whitelist_gate(ctx: ToolContext, tool_id: str) -> str | None:
     if whitelist is None or ctx.mapping_stage is None:
         return None
     if ctx.mapping_stage not in whitelist:
-        labels = "/".join(_stage_label(v) for v in whitelist)
-        return f"当前阶段不允许该操作（限 {labels}）"
+        return stage_whitelist_reason(whitelist)
     return None
+
+
+def stage_whitelist_reason(stage_values) -> str:
+    """阶段白名单禁用判词（V10 M10：单一措辞真源）。
+
+    palette 的 ``CommandSpec.stages`` 白名单与 evaluator 的
+    ``_STAGE_ACTION_WHITELIST`` 对同一语义此前有两套文案（「当前编图
+    阶段不可用（限 …）」vs「当前阶段不允许该操作（限 …）」）——本函数
+    是唯一措辞，两侧共用（reason 字符串不改写原则的措辞面）。
+    """
+    return f"当前阶段不允许该操作（限 {'/'.join(_stage_label(v) for v in stage_values)}）"
 
 def _edit_action_stage_gate(ctx: ToolContext, tool_id: str) -> str | None:
     """编辑/数字化动作的阶段过滤（真源 StageToolProfile.edit_actions）。

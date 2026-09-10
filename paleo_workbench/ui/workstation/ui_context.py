@@ -59,6 +59,18 @@ class UIContextSnapshot:
     selection_count: int | None = None
     can_undo: bool | None = None
     can_redo: bool | None = None
+    # V10 M9：split/merge/reshape 的会话几何前提（宿主采集器
+    # tool_context_inputs 同源派生）——palette 快照从此可以诚实判定
+    # 三个几何命令（V8 08 #1 的闭环；None = provider 缺席，保守禁用，
+    # 执行侧 re-gate 用完整上下文兜底）。
+    split_ready: bool | None = None
+    merge_ready: bool | None = None
+    reshape_ready: bool | None = None
+    # V10 M9：原生画布可用性与能力旗标（reshape 等原生专属命令的 palette
+    # 判定输入；None/() = provider 缺席，保守按不可用处理——执行侧 re-gate
+    # 以桥 manifest 完整判定）。
+    native_canvas_available: bool | None = None
+    native_capability_flags: tuple[str, ...] = ()
     # V8 M2：模态阻塞任务标签（palette 与工具条对 blocking gate 同因；
     # None = provider 缺席，按无阻塞处理——执行侧 re-gate 仍会拦截）。
     blocking_task: str | None = None

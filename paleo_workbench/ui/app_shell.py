@@ -649,6 +649,22 @@ class AppShell(QWidget):
         svc.set_provider("can_undo", _session_input("can_undo", False))
         svc.set_provider("can_redo", _session_input("can_redo", False))
         svc.set_provider("blocking_task", _session_input("blocking_task", ""))
+        # V10 M9：split/merge/reshape 会话几何前提（同采集器；palette 对
+        # 三个几何命令的禁用原因从此与工具条同因）。
+        svc.set_provider("split_ready", _session_input("split_ready", False))
+        svc.set_provider("merge_ready", _session_input("merge_ready", False))
+        svc.set_provider("reshape_ready", _session_input("reshape_ready", False))
+        # V10 M9：原生画布/能力旗标（reshape 等原生专属命令的 palette 判定）。
+        svc.set_provider(
+            "native_canvas_available",
+            lambda: bool(composite.uses_native_stack
+                         and composite._qgis_capability.available),
+        )
+        svc.set_provider(
+            "native_capability_flags",
+            lambda: tuple(sorted(
+                composite._qgis_capability.capability_flags())),
+        )
 
         def _capability_field(field: str):
             def _read():
@@ -756,6 +772,18 @@ class AppShell(QWidget):
                     ),
                 )
             )
+        # V10 M9：Inspector 面板切换进 palette（V9 08 #8 的 toggle_inspector
+        # 孤儿入口闭环——恢复默认布局之外的首个生产调用方）。
+        command_registry.register(
+            CommandSpec(
+                id="core:inspector",
+                label="检查器 · 显示/隐藏",
+                hint="切换右侧 Inspector 上下文面板",
+                keywords="inspector 检查器 面板 panel",
+                group="视图",
+                callback=lambda: self.workstation.toggle_inspector(),
+            )
+        )
         command_registry.register(
             CommandSpec(
                 id="core:theme.light",

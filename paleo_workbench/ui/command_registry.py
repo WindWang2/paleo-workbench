@@ -68,7 +68,11 @@ class CommandAvailability:
 
 
 def _stage_reason(stages: tuple[str, ...]) -> str:
-    return f"当前编图阶段不可用（限 {'/'.join(stages)}）"
+    # V10 M10：措辞真源 = canonical evaluator（palette 与工具条同一判词；
+    # 此前两套文案对同一语义漂移）。
+    from paleo_workbench.mapping.tool_availability import stage_whitelist_reason
+
+    return stage_whitelist_reason(stages)
 
 
 class CommandRegistry:
