@@ -349,6 +349,28 @@ def mirror_snapshot_to_stack(
             legacy_style = {k: v for k, v in style_raw.items() if k != "qgis_style"} if isinstance(style_raw, dict) else None
             if legacy_style is not None and not legacy_style:
                 legacy_style = None
+        if (not has_qgis_renderer and isinstance(legacy_style, dict)
+                and legacy_style.get("fill_patterns")
+                and str(legacy_style.get("renderer") or "") == "categorized"
+                and geom in ("Polygon", "MultiPolygon")):
+            try:
+                from paleo_workbench.mapping.facies_renderer_xml import (
+                    categorized_fill_renderer_xml,
+                )
+                from paleo_workbench.mapping.map_styles import VectorStyle
+
+                parsed = VectorStyle.from_dict(legacy_style)
+                if parsed.field and parsed.categories:
+                    generated = categorized_fill_renderer_xml(
+                        field=parsed.field,
+                        categories=parsed.categories,
+                        fill_patterns=dict(legacy_style.get("fill_patterns") or {}),
+                    )
+                    if generated.strip():
+                        renderer_xml = generated
+                        legacy_style = None
+            except Exception as exc:
+                _sink(layer.id, f"facies pattern renderer skipped: {exc}")
         # v7 §9: consult the publish ledger — ship only what changed.
         # Duck-typed layers (SimpleNamespace, legacy producers) may not
         # carry revisions: 0 = unknown, ledger disabled, delta channel off.
