@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QMainWindow,
+    QScrollArea,
     QSizePolicy,
     QTabWidget,
     QToolBar,
@@ -19,6 +20,12 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench.ui.dock_manager import WorkspacePreset, dock_manager
+from paleo_workbench.ui.dock_framework import (
+    ensure_dock_usable,
+    apply_first_run_sizes,
+    classify_viewport,
+    workstation_dock_registry,
+)
 from paleo_workbench.ui.layout_persistence import (
     LAYOUT_STATE_VERSION,
     SETTINGS_APP,
@@ -44,6 +51,27 @@ from paleo_workbench.ui.workstation.process_hub import ConsolePane, LogViewer
 from paleo_workbench.ui.workstation.task_center import TaskCenter
 
 _log = logging.getLogger(__name__)
+
+
+class HubScrollArea(QScrollArea):
+    """功能页自适应滚动宿主（V9 审计 B-1 结构性修复）。
+
+    hub dock 的最小宽度此前等于「当前功能页」的布局最小值（侧板
+    fixed width + 不可折叠 splitter），页面一换 dock 就锁死。现在页面
+    栈由本滚动区承载：dock 宽于页面最小宽度时按自然布局铺满；被压到
+    页面最小宽度以下时出现滚动条（诚实降级），dock 本身永远可以自由
+    调整宽度。中央画布不受影响（编图不在页面栈里）。
+    """
+
+    def __init__(self, page_stack: QWidget, parent=None):
+        super().__init__(parent)
+        self.setObjectName("WorkstationHubScroll")
+        self.setWidget(page_stack)
+        self.setWidgetResizable(True)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setMinimumSize(0, 0)
 
 
 class WorkstationFrame(QWidget):
@@ -105,6 +133,11 @@ class WorkstationFrame(QWidget):
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(350)
         self._save_timer.timeout.connect(self._save_layout)
+        # V9：viewport 策略评估定时器（180ms 去抖，restart-on-resize）。
+        self._viewport_timer = QTimer(self)
+        self._viewport_timer.setSingleShot(True)
+        self._viewport_timer.setInterval(180)
+        self._viewport_timer.timeout.connect(self._apply_responsive_panels)
 
         self._dock_host.setDockOptions(
             QMainWindow.DockOption.AnimatedDocks
@@ -151,13 +184,16 @@ class WorkstationFrame(QWidget):
         self.linked_workspace.hide()
         self.composite = CompositeDocument(project, self)
         self.page_stack = page_stack
-        self.page_stack.setMinimumSize(0, 0)
+        # V9：页面栈保留自然 minimumSizeHint——HubScrollArea 会在 dock
+        # 过窄时以滚动条降级（见 HubScrollArea），不再需要清零式豁免。
         layout.addWidget(self.composite, 1)
 
         # --- 面板：全部为宿主窗口上的可浮动 dock -------------------------
         # 中央编图最小宽度：再糟糕的持久化布局（或极端拖拽）也不能把
         # 地图挤没了——dock 布局由 QMainWindow 在中央 minimum 之上分配。
-        self.composite.setMinimumWidth(420)
+        # V9：420 → 320（B-2 约束栈收敛；配合窗口最小 960x600，紧凑
+        # 屏下左导航 + 检查器 + 画布仍各有可用空间）。
+        self.composite.setMinimumWidth(320)
         self.navigation_region = QFrame(self._dock_host)
         self.navigation_region.setObjectName("WorkstationNavigationRegion")
         nav_layout = QHBoxLayout(self.navigation_region)
@@ -194,52 +230,34 @@ class WorkstationFrame(QWidget):
         # 任务中心是独立面板：与 Agent 各自浮动 / 显隐，不再焊在同一 dock 里。
         self.task_center = TaskCenter(self._dock_host)
 
-        self.nav_dock = self._add_dock(
-            "资源管理器", self.navigation_region,
-            Qt.DockWidgetArea.LeftDockWidgetArea,
-        )
-        self.inspector_dock = self._add_dock(
-            "检查器", self.inspector, Qt.DockWidgetArea.RightDockWidgetArea
-        )
-        self.agent_dock = self._add_dock(
-            "Agent", self.agent_panel, Qt.DockWidgetArea.BottomDockWidgetArea
-        )
-        self.task_dock = self._add_dock(
-            "任务中心", self.task_center, Qt.DockWidgetArea.BottomDockWidgetArea
-        )
-        self.logs_dock = self._add_dock(
-            "日志", self.log_viewer, Qt.DockWidgetArea.BottomDockWidgetArea
-        )
-        self.console_dock = self._add_dock(
-            "控制台", self.console_pane, Qt.DockWidgetArea.BottomDockWidgetArea
-        )
+        # Dock 身份/几何偏好统一来自 Dock Framework V2 描述符（V9）：
+        # 本壳不再散落标题/区域/浮动性字面量；描述符是唯一词表。
+        self.nav_dock = self._add_dock("nav", self.navigation_region)
+        self.inspector_dock = self._add_dock("inspector", self.inspector)
+        self.agent_dock = self._add_dock("agent", self.agent_panel)
+        self.task_dock = self._add_dock("tasks", self.task_center)
+        self.logs_dock = self._add_dock("logs", self.log_viewer)
+        self.console_dock = self._add_dock("console", self.console_pane)
 
         # 编图面板（由宿主 QMainWindow 持有 dock）
         self.composite_layer_dock = self._add_dock(
-            "图层管理", self.composite.layer_manager,
-            Qt.DockWidgetArea.RightDockWidgetArea,
+            "composite_layer", self.composite.layer_manager
         )
         self.composite_input_dock = self._add_dock(
-            "输入与结果", self.composite.input_tree,
-            Qt.DockWidgetArea.LeftDockWidgetArea,
+            "composite_input", self.composite.input_tree
         )
         self.composite_linked_dock = self._add_dock(
-            "联动视图", self.composite.linked_views,
-            Qt.DockWidgetArea.BottomDockWidgetArea,
+            "composite_linked", self.composite.linked_views
         )
         # 测井轨道 / 地震剖面 / 功能页：宿主级 dock，动作打开，默认隐藏。
-        self.well_dock = self._add_dock(
-            "测井轨道", self.linked_workspace.well_pane,
-            Qt.DockWidgetArea.BottomDockWidgetArea,
-        )
+        self.well_dock = self._add_dock("well", self.linked_workspace.well_pane)
         self.seismic_dock = self._add_dock(
-            "地震剖面", self.linked_workspace.seismic_pane,
-            Qt.DockWidgetArea.BottomDockWidgetArea,
+            "seismic", self.linked_workspace.seismic_pane
         )
-        self.hub_dock = self._add_dock(
-            "功能页", self.page_stack,
-            Qt.DockWidgetArea.RightDockWidgetArea,
-        )
+        # 功能页经 HubScrollArea 承载（B-1）：dock 可自由调整宽度，
+        # 窄 dock 下页面滚动降级而不是锁死手柄。
+        self.hub_scroll = HubScrollArea(self.page_stack, self._dock_host)
+        self.hub_dock = self._add_dock("hub", self.hub_scroll)
         from paleo_workbench.ui.workstation.tool_page_dialog import ToolPageDialog
 
         self.tool_page_dialog = ToolPageDialog(self._dock_host)
@@ -248,8 +266,7 @@ class WorkstationFrame(QWidget):
 
         self.mapping_stage_panel = MappingStagePanel(self._dock_host)
         self.mapping_stage_dock = self._add_dock(
-            "编图阶段", self.mapping_stage_panel,
-            Qt.DockWidgetArea.LeftDockWidgetArea,
+            "mapping_stage", self.mapping_stage_panel
         )
         self._wire_composite_panel_menu()
         self._apply_canonical_dock_layout()
@@ -279,36 +296,50 @@ class WorkstationFrame(QWidget):
         # 中央永远是编图，无需切换。
         self._schedule_restore(0)
 
-    # 浮动时避免邮票窗；停靠时交还内容 hint（否则 220px 最小宽在多面板
-    # 停靠时撑爆布局，#1123）。
+    # 浮动最小尺寸默认值；GL 等特殊 dock 的浮动最小值在描述符中覆盖。
     _FLOAT_MIN_SIZE = (220, 160)
 
-    def _add_dock(self, title: str, widget: QWidget, area) -> QDockWidget:
+    _AREA_BY_NAME = {
+        "left": Qt.DockWidgetArea.LeftDockWidgetArea,
+        "right": Qt.DockWidgetArea.RightDockWidgetArea,
+        "top": Qt.DockWidgetArea.TopDockWidgetArea,
+        "bottom": Qt.DockWidgetArea.BottomDockWidgetArea,
+    }
+
+    def _add_dock(self, dock_id: str, widget: QWidget) -> QDockWidget:
         # 纯原生 QDockWidget（B18）：原生标题栏负责拖拽停靠 / 浮动 / 叠
         # tab / 浮动关闭按钮，不再安装自绘标题栏（ setTitleBarWidget 会
         # 架空 Qt 原生拖拽——「窗口拖不动 / 不响应停靠」的根因）。壳层
         # 只负责 dock 的创建位置与显隐时机；中央固定为绘图区。
-        dock = QDockWidget(title, self._dock_host)
-        dock.setObjectName(f"WorkstationDock_{title}")
+        # V9：标题 / 初始区域 / 浮动性 / 浮动最小尺寸全部来自描述符
+        # （dock_framework.workstation_dock_registry），单一词表。
+        descriptor = workstation_dock_registry.require(dock_id)
+        dock = QDockWidget(descriptor.title, self._dock_host)
+        dock.setObjectName(descriptor.object_name)
         dock.setWidget(widget)
-        dock.setFeatures(
+        features = (
             QDockWidget.DockWidgetFeature.DockWidgetMovable
-            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
             | QDockWidget.DockWidgetFeature.DockWidgetClosable
         )
+        if descriptor.can_float:
+            features |= QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        dock.setFeatures(features)
         dock.setMinimumSize(0, 0)
+        float_min = descriptor.min_floating_size or self._FLOAT_MIN_SIZE
         dock.topLevelChanged.connect(
-            lambda floating, d=dock: self._sync_float_min_size(d, floating)
+            lambda floating, d=dock, m=float_min: self._sync_float_min_size(d, floating, m)
         )
         if dock.isFloating():
-            dock.setMinimumSize(*self._FLOAT_MIN_SIZE)
-        self._dock_host.addDockWidget(area, dock)
+            dock.setMinimumSize(*float_min)
+        self._dock_host.addDockWidget(
+            self._AREA_BY_NAME[descriptor.preferred_area], dock
+        )
         return dock
 
-    @classmethod
-    def _sync_float_min_size(cls, dock: QDockWidget, floating: bool) -> None:
+    @staticmethod
+    def _sync_float_min_size(dock: QDockWidget, floating: bool, min_size) -> None:
         if floating:
-            dock.setMinimumSize(*cls._FLOAT_MIN_SIZE)
+            dock.setMinimumSize(*min_size)
         else:
             dock.setMinimumSize(0, 0)
 
@@ -363,18 +394,9 @@ class WorkstationFrame(QWidget):
         self.app_bar.workspace_preset_requested.connect(self.apply_layout_preset)
         # 样式编辑走真实符号系统：检查器只提供入口，编辑发生在图层属性。
         self.inspector.edit_style_requested.connect(self._open_style_editor)
-        for dock in (
-            self.nav_dock,
-            self.inspector_dock,
-            self.agent_dock,
-            self.task_dock,
-            self.composite_layer_dock,
-            self.composite_input_dock,
-            self.composite_linked_dock,
-            self.well_dock,
-            self.seismic_dock,
-            self.hub_dock,
-        ):
+        # V9：布局保存信号覆盖全部 shell dock（旧实现漏接 logs/console/
+        # mapping_stage——单独切换这三个 dock 时布局不会落盘，C-4）。
+        for dock in self._shell_docks():
             dock.topLevelChanged.connect(lambda *_: self._schedule_state_save())
             dock.dockLocationChanged.connect(lambda *_: self._schedule_state_save())
             dock.visibilityChanged.connect(lambda *_: self._schedule_state_save())
@@ -384,6 +406,48 @@ class WorkstationFrame(QWidget):
         for dock in self._preset_tracked_docks():
             dock.visibilityChanged.connect(lambda *_: self._mark_layout_customized())
         self._wire_mapping_stage()
+        self._wire_screen_changes()
+
+    def _wire_screen_changes(self) -> None:
+        """运行时屏幕集变化（C-7）：显示器拔插/主屏切换 → 重新钳位。
+
+        旧实现只在启动 restore 和面板浮动时 clamp：拔掉显示器后主窗口
+        与浮动 dock 可能在不可见桌面上滞留直到重启。连接以本壳为
+        receiver，壳销毁时自动断开。
+        """
+        from PySide6.QtGui import QGuiApplication
+
+        app = QGuiApplication.instance()
+        if app is None:
+            return
+        app.screenAdded.connect(self._on_screen_set_changed)
+        app.screenRemoved.connect(self._on_screen_set_changed)
+        app.primaryScreenChanged.connect(self._on_screen_set_changed)
+
+    def _on_screen_set_changed(self, *_args) -> None:
+        if self._layout_frozen:
+            return
+        # 函数内导入：panel_float_controller 经 floating_panel 依赖本包
+        # __init__，模块级导入会闭合成环。
+        from paleo_workbench.ui.panel_float_controller import clamp_geometry_to_screens
+
+        host = self._dock_host
+        if host.isVisible() and not (host.isMaximized() or host.isFullScreen()):
+            current = host.geometry()
+            clamped = clamp_geometry_to_screens(current)
+            if clamped != current:
+                host.setGeometry(clamped)
+        for dock in self._shell_docks():
+            try:
+                if dock.isFloating() and dock.isVisible():
+                    current = dock.geometry()
+                    clamped = clamp_geometry_to_screens(current)
+                    if clamped != current:
+                        dock.setGeometry(clamped)
+            except RuntimeError:
+                # teardown 竞态：dock 已 C++ 析构而本壳尚存（与 D-3 同类
+                # 迟到信号面，_layout_frozen 之外的残余窗口）。
+                continue
 
     def _wire_mapping_stage(self) -> None:
         """V5 阶段工作区接线：阶段条/阶段面板 ↔ MappingStageController。
@@ -1034,7 +1098,30 @@ class WorkstationFrame(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._apply_responsive_panels()
+        # V9（B-4 修复）：viewport 策略评估去抖化——绝不在 resizeEvent
+        # 热路径里改布局（旧实现拖 dock 时中央帧宽度跨过 1280 阈值会
+        # 立即隐藏检查器，整个 dock 布局在光标下重排）。拖拽/连续缩放
+        # 只重启 180ms 定时器，静止后才评估一次。
+        self._request_viewport_evaluation()
+
+    def _request_viewport_evaluation(self) -> None:
+        if self._layout_frozen:
+            return
+        self._viewport_timer.start()
+
+    def _viewport_class(self):
+        """窗口逻辑宽度分类（compact/normal/wide/ultrawide）。
+
+        以宿主窗口（而非本帧）宽度为准：帧宽度已被 dock 占用扣减，
+        在其上判定「窗口窄」会对正常宽度二次惩罚（V9 审计 B-4）。
+        """
+        try:
+            width = self._dock_host.width()
+        except RuntimeError:
+            width = self.width()
+        if width <= 0:
+            width = self.width()
+        return classify_viewport(width)
 
     def _apply_responsive_panels(self) -> None:
         if self._layout_frozen:
@@ -1047,7 +1134,25 @@ class WorkstationFrame(QWidget):
             self._preset_tracking_paused = False
 
     def _apply_responsive_panels_unlocked(self) -> None:
-        if self.width() < 1280 and not self.inspector_dock.isHidden():
+        """窄窗检查器折叠策略（V9 阈值：宿主窗口逻辑宽度）。
+
+        V9 尺寸地板收敛后（nav≈230 + inspector 220 + 中央 320），1280
+        级窗口已能完整容纳核心 dock；只有真正紧凑（<1100，如
+        1366@125% ≈ 1093 逻辑像素）才折叠检查器。恢复阈值 1200 构成
+        滞回带，杜绝临界宽度上的隐藏↔显示风暴。
+        """
+        from paleo_workbench.ui.dock_framework import (
+            INSPECTOR_HIDE_BELOW,
+            INSPECTOR_RESTORE_ABOVE,
+        )
+
+        try:
+            window_width = self._dock_host.width() or self.width()
+        except RuntimeError:
+            return
+        if window_width <= 0:
+            return
+        if window_width < INSPECTOR_HIDE_BELOW and not self.inspector_dock.isHidden():
             self._responsive_hid_inspector = True
             self.inspector_dock.hide()
             return
@@ -1056,12 +1161,7 @@ class WorkstationFrame(QWidget):
             and self._responsive_hid_inspector
             and not self._user_hid_inspector
         ):
-            # 恢复条件必须保证「显示后」宽度仍不低于隐藏阈值，否则
-            # 隐藏↔显示在临界宽度上往复，形成 resize 风暴（画布渲染被饿死）。
-            inspector_width = self.inspector_dock.sizeHint().width()
-            if inspector_width <= 0:
-                inspector_width = 286
-            if self.width() - inspector_width >= 1280:
+            if window_width >= INSPECTOR_RESTORE_ABOVE:
                 self._responsive_hid_inspector = False
                 self.inspector_dock.show()
 
@@ -1206,7 +1306,10 @@ class WorkstationFrame(QWidget):
                 self.task_dock.raise_()
 
         self.status_message.emit(f"已应用布局：{preset.label}")
-        QTimer.singleShot(0, self, self._apply_default_pane_sizes)
+        # V9（B-3 修复）：具名预设只切可见性，绝不触碰 dock 几何——
+        # 旧实现在此追加 _apply_default_pane_sizes，用户手工尺寸被
+        # 280/300/200 系列硬编码值整体回卷。默认尺寸只在首运行/
+        # 显式「恢复默认布局」时应用。
         self._save_timer.start()
 
     def _reset_default_layout(self) -> None:
@@ -1389,9 +1492,17 @@ class WorkstationFrame(QWidget):
             self.status_message.emit("该 Agent 动作没有已记录的撤销状态")
 
     def _expand_agent_dock(self) -> None:
+        """打开 Agent 面板时保证底行可用高度（grow-only，V9 B-3）。
+
+        旧实现无条件 resizeDocks([agent_dock],[245])——每次打开 Agent 都
+        把用户调好的底行高度压回 245px。现在只在当前高度低于可用下限时
+        增长，绝不缩小、绝不钉住。
+        """
         self.agent_dock.show()
-        self._dock_host.resizeDocks(
-            [self.agent_dock], [245], Qt.Orientation.Vertical
+        descriptor = workstation_dock_registry.get("agent")
+        floor = descriptor.preferred_height if descriptor else 245
+        ensure_dock_usable(
+            self._dock_host, self.agent_dock, minimum=floor, vertical=True
         )
 
     def _schedule_state_save(self) -> None:
@@ -1420,31 +1531,28 @@ class WorkstationFrame(QWidget):
             QTimer.singleShot(0, self, self._apply_default_pane_sizes)
 
     def _apply_default_pane_sizes(self) -> None:
-        """给中央编图主导的空间分配（首运行/预设重置共用，B15/B17）。
+        """首运行/显式重置的空间分配（V9：尺寸来自 dock 描述符）。
 
         QMainWindow 对新 dock 默认近似均分窗口宽度：无持久化布局时中央
         画布会被挤到接近零宽——专业工作站必须让地图拿到绝大部分空间。
         resizeDocks 是尽力而为：不可见 dock 由 Qt 忽略，属预期。
+        调用点仅两处：首运行（无持久化状态）与「恢复默认布局」；
+        具名预设应用不再触达（B-3）。
         """
         if getattr(self, "_layout_frozen", False):
             return  # teardown 已拆 dock：迟到的 singleShot 不得触碰
-        host = self._dock_host
-        horizontal = Qt.Orientation.Horizontal
-        vertical = Qt.Orientation.Vertical
-        host.resizeDocks([self.nav_dock], [280], horizontal)
-        host.resizeDocks(
-            [self.mapping_stage_dock, self.composite_input_dock], [280, 280], horizontal
-        )
-        host.resizeDocks(
-            [self.nav_dock, self.mapping_stage_dock], [420, 280], vertical
-        )
-        host.resizeDocks(
-            [self.inspector_dock, self.composite_layer_dock], [300, 300], horizontal
-        )
-        host.resizeDocks(
-            [self.agent_dock, self.task_dock, self.composite_linked_dock],
-            [200, 200, 200],
-            vertical,
+        apply_first_run_sizes(
+            self._dock_host,
+            {
+                "nav": self.nav_dock,
+                "mapping_stage": self.mapping_stage_dock,
+                "composite_input": self.composite_input_dock,
+                "inspector": self.inspector_dock,
+                "composite_layer": self.composite_layer_dock,
+                "agent": self.agent_dock,
+                "tasks": self.task_dock,
+                "composite_linked": self.composite_linked_dock,
+            },
         )
 
     def _restore_layout(self) -> None:

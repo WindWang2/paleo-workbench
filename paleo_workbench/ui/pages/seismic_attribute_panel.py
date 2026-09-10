@@ -48,7 +48,8 @@ class SeismicAttributePanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("SeismicAttributePanel")
-        self.setFixedWidth(220)
+        # V9：固定 220 → 最小 200 地板（可自由调整宽度）。
+        self.setMinimumWidth(200)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(

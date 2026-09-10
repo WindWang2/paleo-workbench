@@ -45,7 +45,9 @@ class WorkstationInspector(QFrame):
     def __init__(self, project=None, parent=None):
         super().__init__(parent)
         self.setObjectName("WorkstationInspector")
-        self.setMinimumWidth(280)
+        # V9：280 → 220（约束栈收敛）。内容在 220 宽下仍可用（表单两列
+        # 降为截断文本）；更窄时 dock 本身可继续压缩（无结构性下限）。
+        self.setMinimumWidth(220)
         # 不设最大宽度：dock 加宽或浮动放大时内容要占满面板。
         self._project = project
         self._current = None

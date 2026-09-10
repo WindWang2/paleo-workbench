@@ -1,0 +1,217 @@
+"""Dock Framework V9 — resize-authority and descriptor contracts.
+
+Regression tests for the V9 audit P0 fixes:
+- B-1: hub dock content must not impose the current page's layout minimum
+  (HubScrollArea + AdaptivePageStack).
+- B-2: relaxed constraint stack (window/inspector/explorer floors).
+- B-3: presets change visibility only; action affordances resize grow-only.
+- B-5: GL-bearing docks are not floatable.
+- C-4: every shell dock is wired to layout save scheduling.
+"""
+
+from __future__ import annotations
+
+import inspect
+from pathlib import Path
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QDockWidget, QMainWindow, QWidget
+
+from paleo_workbench.project.models import ProjectDocument, ResourceItem
+from paleo_workbench.project.domain import WellEntity
+from paleo_workbench.ui.app_shell import AdaptivePageStack, AppShell
+from paleo_workbench.ui.dock_framework import (
+    DockImportance,
+    classify_viewport,
+    ensure_dock_usable,
+    workstation_dock_registry,
+    ViewportClass,
+)
+from paleo_workbench.ui.workstation.shell import HubScrollArea
+
+
+def _project(tmp_path: Path) -> ProjectDocument:
+    project = ProjectDocument.new("Pearl River Mouth", region="HZ26")
+    project.meta.project_root = str(tmp_path)
+    project.wells.append(
+        WellEntity(name="A12", surface_x=1.0, surface_y=2.0, project_x=1.0, project_y=2.0)
+    )
+    project.resources.extend(
+        [
+            ResourceItem(name="A12.Las", path="wells/A12.Las", type="well_log", format="las"),
+            ResourceItem(name="D63.dat", path="horizons/D63.dat", type="horizon", format="dat"),
+        ]
+    )
+    project.stratigraphy.target_horizon = "D63"
+    return project
+
+
+# --- descriptor registry ------------------------------------------------
+
+
+def test_registry_describes_all_workstation_docks():
+    ids = workstation_dock_registry.ids()
+    assert set(ids) == {
+        "nav", "mapping_stage", "inspector", "composite_layer", "hub",
+        "composite_input", "agent", "tasks", "logs", "console",
+        "composite_linked", "well", "seismic",
+    }
+    for dock_id in ids:
+        descriptor = workstation_dock_registry.require(dock_id)
+        # objectName 保持历史方案：持久化 saveState 字节跨 V8→V9 可解析。
+        assert descriptor.object_name == f"WorkstationDock_{descriptor.title}"
+        assert descriptor.preferred_area in ("left", "right", "top", "bottom")
+        assert isinstance(descriptor.importance, DockImportance)
+
+
+def test_gl_bearing_docks_are_not_floatable():
+    for dock_id in ("well", "seismic", "hub"):
+        assert workstation_dock_registry.require(dock_id).can_float is False, dock_id
+    # 普通 dock 仍可浮动。
+    assert workstation_dock_registry.require("inspector").can_float is True
+
+
+def test_viewport_classification():
+    assert classify_viewport(1093) is ViewportClass.COMPACT  # 1366 @125%
+    assert classify_viewport(1366) is ViewportClass.NORMAL
+    assert classify_viewport(1920) is ViewportClass.WIDE
+    assert classify_viewport(2560) is ViewportClass.ULTRAWIDE
+
+
+# --- resize authority (B-3) ---------------------------------------------
+
+
+def test_ensure_dock_usable_is_grow_only(qtbot):
+    window = QMainWindow()
+    window.resize(1600, 900)
+    qtbot.addWidget(window)
+    content = QWidget()
+    dock = QDockWidget("agent", window)
+    dock.setWidget(content)
+    window.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
+    window.show()
+
+    issued = []
+    window.resizeDocks = lambda docks, sizes, orient: issued.append(list(sizes))
+
+    # 情形一：底行已被用户调高（经 resizeDocks 语义无法回读，直接以
+    # resize 模拟高度）→ 低于地板才增长；高于地板零调用。
+    dock.resize(dock.width(), 420)
+    assert ensure_dock_usable(window, dock, minimum=245, vertical=True) is False
+    assert issued == []
+
+    # 情形二：高度低于地板 → 发出一次增长请求（尺寸即地板值）。
+    dock.resize(dock.width(), 100)
+    assert ensure_dock_usable(window, dock, minimum=245, vertical=True) is True
+    assert issued == [[245]]
+
+
+def test_preset_apply_never_calls_programmatic_sizing(qtbot, tmp_path, monkeypatch):
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+
+    called = []
+    monkeypatch.setattr(
+        "paleo_workbench.ui.workstation.shell.apply_first_run_sizes",
+        lambda *a, **k: called.append(a),
+    )
+    for preset_id in ws.preset_ids():
+        ws.apply_layout_preset(preset_id)
+    assert called == [], "presets must be visibility-only (audit B-3)"
+
+
+def test_show_agent_grows_only(qtbot, tmp_path, monkeypatch):
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+
+    issued = []
+    monkeypatch.setattr(
+        ws._dock_host, "resizeDocks",
+        lambda docks, sizes, orient: issued.append(list(sizes)),
+    )
+    # 用户把 Agent 底行调得很高 → 打开 Agent 不得压回 245。
+    ws.agent_dock.show()
+    ws.agent_dock.resize(ws.agent_dock.width(), 400)
+    ws.show_agent()
+    for sizes in issued:
+        assert sizes[0] >= 400, "agent affordance must never shrink the row"
+
+
+# --- hub content: scroll degradation, per-page minimum (B-1) -------------
+
+
+def test_hub_dock_content_is_scroll_host(qtbot, tmp_path):
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+    assert isinstance(ws.hub_dock.widget(), HubScrollArea)
+    assert ws.hub_scroll.widget() is ws.page_stack
+    # 滚动宿主自身不设结构性最小尺寸——dock 手柄永远可拖。
+    assert ws.hub_scroll.minimumSize().width() <= 32
+
+
+def test_page_stack_minimum_reflects_current_page_only(qtbot):
+    stack = AdaptivePageStack()
+    qtbot.addWidget(stack)
+    narrow = QWidget()
+    narrow.setMinimumWidth(300)
+    wide = QWidget()
+    wide.setMinimumWidth(1000)
+    stack.addWidget(narrow)
+    stack.addWidget(wide)
+    stack.setCurrentIndex(0)
+    assert stack.minimumSizeHint().width() <= 400
+    stack.setCurrentIndex(1)
+    assert stack.minimumSizeHint().width() >= 900
+
+
+def test_hub_scroll_degrades_instead_of_blocking(qtbot, tmp_path):
+    """hub dock 打开时窗口压到最小尺寸，滚动宿主仍可继续压缩（B-1 集成）。"""
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+    ws.show_hub_page("数据管理")
+    shell.resize(960, 600)
+    qtbot.wait(50)
+    # 滚动宿主的最小宽度远小于任何页面布局最小值（页面最小值由
+    # AdaptivePageStack 逐页给出，宽页以滚动条降级）。
+    assert ws.hub_scroll.minimumSizeHint().width() < 200
+
+
+# --- constraint stack (B-2) ----------------------------------------------
+
+
+def test_constraint_stack_is_relaxed(qtbot, tmp_path):
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+    assert ws.inspector.minimumSizeHint().width() <= 240
+    assert ws.explorer.minimumSizeHint().width() <= 200
+    assert ws.composite.minimumWidth() <= 340
+    # 窗口最小尺寸（app.py）：960x600——1366@125% 逻辑屏可完整容纳。
+    from paleo_workbench import app as app_module
+
+    source = inspect.getsource(app_module.PaleoWorkbenchWindow.__init__)
+    assert "setMinimumSize(960, 600)" in source
+
+
+# --- lifecycle wiring (C-4) ----------------------------------------------
+
+
+def test_all_docks_wired_to_layout_save(qtbot, tmp_path):
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+    # 孤立构造（宿主未显示）下 isHidden() 恒为 False、setVisible 是空
+    # 操作，行为验证不可行；改为验证信号接线本身：每个 shell dock 的
+    # visibilityChanged 至少接两路（布局保存调度 + 预设定制追踪）。
+    from PySide6.QtCore import SIGNAL
+
+    for dock in ws._shell_docks():
+        count = dock.receivers(SIGNAL("visibilityChanged(bool)"))
+        assert count >= 2, (
+            f"{dock.objectName()} missing layout-save wiring "
+            f"(receivers={count})"
+        )

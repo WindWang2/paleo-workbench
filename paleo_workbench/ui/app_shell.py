@@ -206,6 +206,39 @@ class CommandPalette(QFrame):
         return super().eventFilter(source, event)
 
 
+class AdaptivePageStack(QStackedWidget):
+    """页面栈：最小尺寸只反映「当前页」（V9 审计 B-1）。
+
+    QStackedWidget 默认 minimumSizeHint 取全部页的最大值——只要栈里有
+    一个宽页（如首页关系图 min 1080），其它窄页也会带着幽灵横向滚动
+    条。覆盖为逐页计算后，hub dock 的滚动降级尺寸逐页准确；隐藏页的
+    布局最小值不再影响当前布局。
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.currentChanged.connect(lambda *_: self.updateGeometry())
+
+    def _page_minimum(self):
+        page = self.currentWidget()
+        if page is None:
+            return None
+        # 有效最小 = 布局 hint 与显式 setMinimumSize 的较大者。
+        return page.minimumSizeHint().expandedTo(page.minimumSize())
+
+    def minimumSizeHint(self):  # noqa: N802 — Qt 契约
+        page_min = self._page_minimum()
+        if page_min is not None:
+            return page_min
+        return super().minimumSizeHint()
+
+    def sizeHint(self):  # noqa: N802 — Qt 契约
+        page = self.currentWidget()
+        if page is not None:
+            return page.sizeHint().expandedTo(page.minimumSize())
+        return super().sizeHint()
+
+
 class AppShell(QWidget):
     """Application shell (workstation V4).
 
@@ -271,7 +304,7 @@ class AppShell(QWidget):
         outer.setSpacing(0)
 
         # --- hub pages -------------------------------------------------
-        self.page_stack = QStackedWidget(self)
+        self.page_stack = AdaptivePageStack(self)
 
         self.home_page = HomePage(self.page_stack)
         self.data_page = DataPage(

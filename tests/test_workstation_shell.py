@@ -171,7 +171,11 @@ def test_well_and_seismic_are_host_docks(qtbot, tmp_path):
     for dock in (ws.well_dock, ws.seismic_dock):
         assert dock.parentWidget() is ws._dock_host
         features = dock.features()
-        assert features & QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        # V9（B-5）：GL 承载 dock 禁止浮动——浮动会在顶层窗口间重父级化
+        # GL 上下文（qt_platform.py 记录的 EGL segfault 类）。仍可移动/
+        # 关闭/重开。
+        assert not (features & QDockWidget.DockWidgetFeature.DockWidgetFloatable)
+        assert features & QDockWidget.DockWidgetFeature.DockWidgetMovable
         assert features & QDockWidget.DockWidgetFeature.DockWidgetClosable
     ws.well_dock.close()
     assert ws.well_dock.isHidden()

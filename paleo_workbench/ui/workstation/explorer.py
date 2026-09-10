@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
+    QSizePolicy,
     QToolButton,
     QTreeView,
     QVBoxLayout,
@@ -74,6 +75,41 @@ class _TreeNode:
     children: list["_TreeNode"] = field(default_factory=list)
 
 
+class ElidedFootnoteLabel(QLabel):
+    """面板脚注：超宽文本省略号显示（V9 审计 B-2）。
+
+    QLabel 默认 minimumSizeHint = 整段文本宽度——长工程统计会把资源
+    管理器（连带 nav dock）锁到文本宽。Ignored 水平策略 + 逐像素省略
+    后，脚注永不驱动布局最小值；完整文本进 tooltip。
+    """
+
+    def __init__(self, parent=None):
+        super().__init__("", parent)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._full_text = ""
+
+    def setText(self, text) -> None:  # noqa: N802 — Qt 契约
+        self._full_text = str(text or "")
+        self.setToolTip(self._full_text)
+        self._apply_elided()
+
+    def text(self) -> str:  # noqa: N802 — Qt 契约
+        """完整文本（省略只发生在绘制层；调用方拿到原文）。"""
+        return self._full_text
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 — Qt 契约
+        super().resizeEvent(event)
+        self._apply_elided()
+
+    def _apply_elided(self) -> None:
+        metrics = self.fontMetrics()
+        super().setText(
+            metrics.elidedText(
+                self._full_text, Qt.TextElideMode.ElideRight, max(self.width() - 2, 0)
+            )
+        )
+
+
 class WorkstationExplorer(QFrame):
     """Project-scoped objects with explicit Data and Layer modes."""
 
@@ -94,7 +130,8 @@ class WorkstationExplorer(QFrame):
     def __init__(self, project=None, parent=None):
         super().__init__(parent)
         self.setObjectName("WorkstationExplorer")
-        self.setMinimumWidth(210)
+        # V9：210 → 180（约束栈收敛；树列在 180 下仍可读）。
+        self.setMinimumWidth(180)
         # 不设最大宽度：dock 加宽或浮动放大时内容要占满面板。
         self._project = project
         self._mode = "project"
@@ -156,7 +193,7 @@ class WorkstationExplorer(QFrame):
         self.tree.doubleClicked.connect(self._on_activated)
         outer.addWidget(self.tree, 1)
 
-        self.footer_label = QLabel("", self)
+        self.footer_label = ElidedFootnoteLabel(self)
         self.footer_label.setObjectName("WorkstationPanelFootnote")
         outer.addWidget(self.footer_label)
 
