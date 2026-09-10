@@ -224,7 +224,7 @@ def _dirty_chip_checks(window) -> list[CheckResult]:
     return [
         _check("dirty_chip_modified_text", "未保存" in chip.text(), chip.text()),
         _check("dirty_chip_not_color_only",
-               "Edit" in chip.text() and "●" in chip.text(), chip.text()),
+               "编辑" in chip.text() and "●" in chip.text(), chip.text()),
         _check("dirty_save_enabled", availability["save_edits"].enabled),
     ]
 

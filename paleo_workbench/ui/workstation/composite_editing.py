@@ -556,6 +556,18 @@ class CompositeEditController(QObject):
         """
         self._role_lookup = lookup
 
+    def set_layer_role(self, layer_id: str, role_value: str) -> None:
+        """覆写控制器角色登记（V10 R2-2：复制为草稿的 RAW 源角色阴影）。
+
+        快照 metadata.role 的优先序是 图层自带 > 阶段成员资格(role_of_layer)
+        > 本登记。宿主在登记阶段成员资格后调用本方法同步控制器登记，
+        保证三个来源读到的角色一致。
+        """
+        if role_value:
+            self._layer_roles[str(layer_id)] = str(role_value)
+        else:
+            self._layer_roles.pop(str(layer_id), None)
+
     def role_of_layer(self, layer_id: str) -> str:
         """图层角色值（LayerRole.value；未知/无注入 = ""）。"""
         if self._role_lookup is None:
@@ -1503,6 +1515,22 @@ class CompositeEditController(QObject):
     @property
     def topology_enabled(self) -> bool:
         return self._topology.enabled
+
+    def validate_open_session_topology(self) -> list[dict[str, object]]:
+        """校验全部打开的编辑会话（V10 R4-3；chip 计数同口径）。
+
+        每层显式校验并回写运行时计数缓存；返回合并问题清单（空 = 全部
+        通过）。活动层校验（save 门禁）仍走 validate_active_layer_topology。
+        """
+        issues: list[dict[str, object]] = []
+        for layer_id in list(self._layers):
+            layer = self._layers[layer_id]
+            if getattr(layer, "edit_session", None) is None:
+                continue
+            layer_issues = self._topology.validate([layer])
+            issues.extend(layer_issues)
+            self._topology.record_validation(layer, len(layer_issues))
+        return issues
 
     def validate_active_layer_topology(self) -> list[dict[str, object]]:
         """对活动图层（或其编辑工作副本）执行拓扑检查，返回问题清单。

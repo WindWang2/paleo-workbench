@@ -766,6 +766,21 @@ class WorkstationFrame(QWidget):
         labels = MapActionController._LABELS
         from paleo_workbench.ui.workstation.action_help import TOOL_HELP
 
+        # R3-7：拓扑校验/定位的键盘路径（问题 chip 是鼠标专属；palette
+        # 命令补可达性）。回调走 composite 的 chip 同一处理器。
+        command_registry.register(
+            CommandSpec(
+                id="map:topology_validate",
+                label="编图 · 拓扑校验（定位首问题）",
+                hint="校验全部打开的编辑会话并定位首个拓扑问题",
+                keywords="拓扑 校验 问题 定位 topology",
+                group="编图工具",
+                callback=lambda: (
+                    self.composite._on_topology_issue_activated()
+                ),
+            )
+        )
+
         for tool_id in surface_tools:
 
             def _applicability(ctx, _tool=tool_id):

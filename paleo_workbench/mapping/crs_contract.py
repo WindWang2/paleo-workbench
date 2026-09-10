@@ -21,6 +21,8 @@ Leaf module: standard library + optional pyproj only.
 """
 from __future__ import annotations
 
+from functools import lru_cache
+
 import logging
 from dataclasses import dataclass
 
@@ -116,17 +118,7 @@ def resolve_crs(
     )
 
 
-def crs_axis_unit_metres(crs: object) -> bool | None:
-    """True when the CRS horizontal axis unit is exactly metres.
-
-    ``None`` = unverifiable (unknown id / no pyproj). Used by the honest
-    scale-denominator derivation: a denominator computed from pixel metrics
-    is only meaningful for metre axes, everything else reports unknown
-    rather than a plausible-looking wrong number.
-    """
-    text = str(crs or "").strip()
-    if not text:
-        return None
+def _axis_unit_metres_uncached(text: str) -> bool | None:
     try:
         from pyproj import CRS
 
@@ -139,6 +131,28 @@ def crs_axis_unit_metres(crs: object) -> bool | None:
         }
     except Exception:
         return None
+
+
+@lru_cache(maxsize=64)
+def _axis_unit_metres_cached(text: str) -> bool | None:
+    return _axis_unit_metres_uncached(text)
+
+
+def crs_axis_unit_metres(crs: object) -> bool | None:
+    """True when the CRS horizontal axis unit is exactly metres.
+
+    ``None`` = unverifiable (unknown id / no pyproj). Used by the honest
+    scale-denominator derivation: a denominator computed from pixel metrics
+    is only meaningful for metre axes, everything else reports unknown
+    rather than a plausible-looking wrong number.
+
+    V10 R5：按归一化字符串 lru_cache（pyproj 解析在 extent 高频链上，
+    同一 CRS 反复解析是纯浪费；未知串也缓存——失败路径同样昂贵）。
+    """
+    text = str(crs or "").strip()
+    if not text:
+        return None
+    return _axis_unit_metres_cached(text)
 
 
 def panel_publish_crs(value: object, *, purpose: str = "图层面板发布") -> str:

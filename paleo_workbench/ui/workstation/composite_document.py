@@ -511,6 +511,8 @@ class LayerManagerPanel(QFrame):
         editable = self.is_editable_layer(layer)
         is_reference = self.is_reference_layer(layer)
         menu = QMenu(self.tree)
+        # R2-1：禁用原因直达菜单（Qt 默认不显示菜单项 tooltip——必须显式开）。
+        menu.setToolTipsVisible(True)
         zoom = menu.addAction(workstation_icon("map/tree-zoom.svg"), "缩放到图层")
         extent = getattr(layer, "extent", None)
         has_extent = (
@@ -544,15 +546,16 @@ class LayerManagerPanel(QFrame):
         labeling = menu.addAction("标注…")
         export = menu.addAction("导出图层…")
         rename = duplicate = remove = repair = draft = toggle_edit = None
-        if editable:
+        # V10 M5/R2-6：编辑入口的可用性与禁用原因来自 canonical evaluator
+        # （宿主探针把目标图层事实投影进 ToolContext 求值）。facts 先取——
+        # RAW 工作流入口按 facts.raw_protected 编排，不受 metadata 旗标
+        # 限制（无旗标的 RAW 层同样要拿到「复制为草稿」）。
+        facts = (
+            self._menu_probe(str(layer_id))
+            if callable(self._menu_probe) else None
+        )
+        if editable or (facts is not None and facts.raw_protected):
             menu.addSeparator()
-            # V10 M5：编辑入口的可用性与禁用原因来自 canonical evaluator
-            # （宿主探针把目标图层事实投影进 ToolContext 求值）。无探针
-            # （独立用/测试）回落旧行为（可编辑旗标即启用）。
-            facts = (
-                self._menu_probe(str(layer_id))
-                if callable(self._menu_probe) else None
-            )
             toggle_verdict = getattr(facts, "toggle_editing", None)
             if layer_id == self._editing_layer_id:
                 toggle_edit = menu.addAction("停止编辑（保存编辑）")
@@ -578,13 +581,14 @@ class LayerManagerPanel(QFrame):
             menu.addSeparator()
             repair = menu.addAction("修复无效几何…")
             # V8 M2：可用性与禁用原因来自 canonical evaluator（宿主探针），
-            # 面板不再自建 kind/门禁判断。
-            repair_avail = (
-                self._repair_probe(str(layer_id))
-                if callable(self._repair_probe) else None
-            )
-            if repair_avail is None and facts is not None:
+            # 面板不再自建 kind/门禁判断。R1-5：facts 探针优先（menu_probe
+            # 已求值过 repair——避免每次开菜单三次全量求值），独立用/测试
+            # 回落 repair_probe（旧行为）。
+            repair_avail = None
+            if facts is not None:
                 repair_avail = facts.repair_geometry
+            if repair_avail is None and callable(self._repair_probe):
+                repair_avail = self._repair_probe(str(layer_id))
             repair.setEnabled(bool(repair_avail and repair_avail.enabled))
             if repair_avail is not None and not repair_avail.enabled:
                 repair.setToolTip(f"不可用：{repair_avail.disabled_reason}")
@@ -1006,9 +1010,14 @@ class CompositeDocument(QWidget):
         layout.addWidget(self.identify_results)
         self.status_bar = MapStatusBar(self)
         layout.addWidget(self.status_bar)
-        # V10 §15：拓扑问题 chip 的进入路径（显式校验 + 首问题定位反馈）。
+        # V10 §15：拓扑问题 chip 的进入路径（显式校验 + 首问题定位反馈）；
+        # 捕捉读数点击 → 捕捉设置（QGIS 状态条磁铁惯例）。
         self.status_bar.topology_activated.connect(
             self._on_topology_issue_activated)
+        self.status_bar.snapping_activated.connect(
+            self._open_snapping_settings)
+        # V10 R5：最近地图坐标缓存（画布右键「复制坐标」与状态条轻路径）。
+        self._last_map_point: tuple[float, float] | None = None
 
         # 矢量图层新建 / 编辑（QGIS 式编辑会话，见 composite_editing.py）
         self.edit_controller = CompositeEditController(parent=self)
@@ -1077,7 +1086,9 @@ class CompositeDocument(QWidget):
                 action.blockSignals(True)
                 action.setChecked(action_id == active_tool_id)
                 action.blockSignals(False)
-            self._sync_status_bar()
+            # V10 R5-2：extent 是逐帧事件——只轻量更新比例尺读数（全量
+            # 上下文重建留在状态同步链；R3-P2 的 pan 预算不被回退）。
+            self.status_bar.update_scale(self._canvas_scale_denominator())
 
         self.canvas.extent_changed.connect(_on_extent_changed)
         self.canvas.map_position_changed.connect(self._on_map_position)
@@ -1326,9 +1337,12 @@ class CompositeDocument(QWidget):
         # 控制器不持有——注入而非在采集器里猜）。控制器上显式设置的标签
         # （visual-QA 驱动面/宿主模态操作）优先于调度器派生。
         inputs["scale_denominator"] = self._canvas_scale_denominator()
+        # V10 R5-3：调度器快照只取一次（blocking 判定与计数共用——此前
+        # 每次上下文构建两次 statuses() 拷贝）。
+        scheduler_statuses = self._scheduler_statuses()
         inputs["blocking_task"] = (
             str(getattr(controller, "blocking_task_label", "") or "")
-            or self._mapping_blocking_task_label()
+            or self._mapping_blocking_task_label(scheduler_statuses)
         )
         # V10 M3：CRS 呈现事实（画布目标 CRS + 工程/图层 CRS 不一致判定）
         # 与状态计数（失败引用/运行任务/参与捕捉引用）——全部派生自既有
@@ -1338,7 +1352,7 @@ class CompositeDocument(QWidget):
             inputs.get("project_crs", ""), inputs.get("layer_crs", ""))
         inputs["reference_failed_count"] = self._reference_failed_count()
         inputs["snapping_reference_count"] = self._snapping_reference_count()
-        inputs["running_task_count"] = self._running_task_count()
+        inputs["running_task_count"] = self._running_task_count(scheduler_statuses)
         return build_tool_context(
             controller_state=inputs,
             qgis=self._qgis_capability,
@@ -1413,7 +1427,16 @@ class CompositeDocument(QWidget):
         return scale_denominator_from_pixels(
             mupp, dpi, self.edit_controller.project_crs)
 
-    def _mapping_blocking_task_label(self) -> str:
+    def _scheduler_statuses(self) -> tuple:
+        """调度器状态快照（一次取用，blocking/计数共用；None = 不可用）。"""
+        try:
+            from paleo_workbench.runtime.task_scheduler import get_scheduler
+
+            return tuple(get_scheduler().statuses())
+        except Exception:
+            return ()
+
+    def _mapping_blocking_task_label(self, statuses=None) -> str:
         """持有编图工程独占权的运行中任务标签（blocking_task 生产生产者）。
 
         V9 W1 契约：不是所有后台任务都阻塞编图（渲染/转码不阻塞）——
@@ -1422,12 +1445,9 @@ class CompositeDocument(QWidget):
         阻塞呈现。判定词表集中在此，采集廉价（statuses() 快照）。
         """
         try:
-            from paleo_workbench.runtime.task_scheduler import (
-                TaskState,
-                get_scheduler,
-            )
+            from paleo_workbench.runtime.task_scheduler import TaskState
 
-            handles = get_scheduler().statuses()
+            handles = self._scheduler_statuses() if statuses is None else statuses
         except Exception:
             return ""
         for handle in handles:
@@ -1492,15 +1512,16 @@ class CompositeDocument(QWidget):
                 count += 1
         return count
 
-    def _running_task_count(self) -> int:
-        """运行中+排队任务总数（V10 M3 呈现计数；门禁事实是 blocking_task）。"""
-        try:
-            from paleo_workbench.runtime.task_scheduler import (
-                TaskState,
-                get_scheduler,
-            )
+    def _running_task_count(self, statuses=None) -> int:
+        """运行中+排队任务总数（V10 M3 呈现计数；门禁事实是 blocking_task）。
 
-            handles = get_scheduler().statuses()
+        ``statuses`` 可传入共享调度器快照（tool_context 一次取用，
+        R5-3——避免每次上下文构建两次 statuses() 拷贝）。
+        """
+        try:
+            from paleo_workbench.runtime.task_scheduler import TaskState
+
+            handles = self._scheduler_statuses() if statuses is None else statuses
         except Exception:
             return 0
         return sum(
@@ -1672,12 +1693,14 @@ class CompositeDocument(QWidget):
                 details.append(ctx.artifact_maturity)
             target += "（" + " · ".join(details) + "）"
             for tool_id in ("add_point", "add_line", "add_polygon",
-                            "move_feature", "vertex", "toggle_editing"):
+                            "move_feature", "vertex", "toggle_editing",
+                            "delete_selected", "split", "merge", "reshape"):
                 blocks[tool_id] = target
         snap_lines = []
         if ctx.snapping_enabled:
-            if ctx.snapping_tolerance_px > 0.0:
-                snap_lines.append(f"容差 {ctx.snapping_tolerance_px:g} px")
+            effective = self._effective_snapping_tolerance()
+            if effective > 0.0:
+                snap_lines.append(f"有效容差 {effective:g} px（含图层覆盖）")
             if ctx.snapping_modes:
                 snap_lines.append("模式：" + "、".join(ctx.snapping_modes))
             if ctx.snapping_reference_count > 0:
@@ -2212,8 +2235,12 @@ class CompositeDocument(QWidget):
             self.status_message.emit(error)
 
     def _on_topology_issue_activated(self) -> None:
-        """拓扑问题 chip：显式校验活动图层 + 首问题定位反馈（V10 §15）。"""
-        issues = self.edit_controller.validate_active_layer_topology()
+        """拓扑问题 chip：显式校验 + 首问题定位反馈（V10 §15 / R4-3）。
+
+        R4-3：chip 计数覆盖全部打开的会话——校验也必须覆盖全部（此前
+        只校验活动层：多会话时点击永远报「通过」而计数不清零）。
+        """
+        issues = self.edit_controller.validate_open_session_topology()
         if not issues:
             self.status_message.emit("拓扑校验通过（问题计数已刷新）")
             self._sync_action_state()
@@ -2237,7 +2264,35 @@ class CompositeDocument(QWidget):
     # -- 画布右键菜单（V10 M7） -------------------------------------------------
 
     def _on_canvas_context_menu(self, position) -> None:
-        self._build_canvas_menu().exec(self.canvas.mapToGlobal(position))
+        # R4-1：捕获进行中（有 pending 采点）右键是「完成捕获」手势——
+        # 工具已消费按键，此处不得再弹菜单（双重动作 = 意外提交 + 焦点
+        # 被模态菜单劫走）。无 pending 采点时才提供上下文菜单。
+        tool = self.edit_controller.tools.active_tool
+        if list(getattr(tool, "points", ()) or ()):
+            return
+        menu = self._build_canvas_menu()
+        menu.exec(self.canvas.mapToGlobal(position))
+        menu.deleteLater()  # R4-6：exec 后释放（父挂 canvas，否则逐次累积）
+
+    def _copy_canvas_coordinate(self) -> None:
+        """复制最近地图坐标（画布右键；无坐标诚实提示，不复制垃圾）。"""
+        from PySide6.QtWidgets import QApplication
+
+        point = getattr(self, "_last_map_point", None)
+        if point is None:
+            self.status_message.emit("尚无地图坐标（移动鼠标后再复制）")
+            return
+        QApplication.clipboard().setText(f"{point[0]:.6f}, {point[1]:.6f}")
+        self.status_message.emit(f"已复制坐标 {point[0]:.6f}, {point[1]:.6f}")
+
+    def _open_snapping_settings_gated(self) -> None:
+        """菜单/状态条入口的捕捉设置：阻塞任务期间拒绝（与其它菜单项
+        的 blocking 门禁同语义；R4-7）。"""
+        if self.tool_context().blocking_task:
+            self.status_message.emit(
+                f"后台任务进行中，暂不能打开捕捉设置：{self.tool_context().blocking_task}")
+            return
+        self._open_snapping_settings()
 
     def _build_canvas_menu(self):
         """画布上下文菜单：视图 / 工具 / 选择 / 编辑会话 / 捕捉·拓扑 / 图层。
@@ -2265,8 +2320,13 @@ class CompositeDocument(QWidget):
             )
 
         menu = QMenu(self.canvas)
-        _add(menu, "zoom_in", "zoom_out", "full_extent",
+        # R2-1：菜单项 tooltip 必须显式开启（Qt 默认不在菜单里显示——
+        # 禁用原因直达菜单是 M5 的核心承诺）。
+        menu.setToolTipsVisible(True)
+        _add(menu, "pan", "zoom_in", "zoom_out", "full_extent",
              "previous_extent", "next_extent", "refresh")
+        # R2-8：复制坐标（QGIS 画布右键惯例；地质师粘贴坐标的高频动作）。
+        menu.addAction("复制坐标", self._copy_canvas_coordinate)
         menu.addSeparator()
         _add(menu, "identify", "select", "select_rectangle", "measure_distance")
         # 选择命令组：无活动矢量层时整组不出现（组语义而非逐项隐藏）。
@@ -2283,7 +2343,10 @@ class CompositeDocument(QWidget):
         if _group_visible("snapping", "topology"):
             menu.addSeparator()
             _add(menu, "snapping", "topology")
-            menu.addAction("捕捉设置…", self._open_snapping_settings)
+            settings = menu.addAction(
+                workstation_icon("map/snapping.svg"), "捕捉设置…",
+                self._open_snapping_settings_gated)
+            settings.setToolTip("打开捕捉设置（容差/模式/参与层）")
         # 图层泛用组。
         if _group_visible("attribute_table", "layer_properties", "layer_zoom"):
             menu.addSeparator()
@@ -2299,7 +2362,11 @@ class CompositeDocument(QWidget):
         self._sync_action_state()
 
     def _on_map_position(self, point) -> None:
-        self._sync_status_bar(point=tuple(point))
+        # V10 R5-1：指针事件以最高频率到达——只更新坐标读数（全量事实
+        # 重建在状态同步链上；本方法不再触发 tool_context()）。
+        self._last_map_point = tuple(point)
+        self.status_bar.update_coordinate(
+            tuple(point), self.edit_controller.project_crs or "")
 
     def _on_measure_updated(self, payload: dict) -> None:
         """V7 原生测距显示：椭球测算（米）或平面测算（地图单位）。
@@ -2525,6 +2592,14 @@ class CompositeDocument(QWidget):
             hint.setGeometry(target)
             hint.raise_()
 
+    def _effective_snapping_tolerance(self) -> float:
+        """活动图层的有效捕捉容差（per-layer 覆盖优先，R2-5）。"""
+        snapping = self.edit_controller.snapping
+        active_id = str(self.edit_controller.active_layer_id or "")
+        if active_id and active_id in getattr(snapping, "layer_tolerance", {}):
+            return float(snapping.layer_tolerance[active_id] or 0.0)
+        return float(snapping.pixel_tolerance or 0.0)
+
     def _sync_status_bar(self, *, point=None) -> None:
         """状态条刷新：全部读数经 canonical ToolContext 投影（V10 §14–§17）。
 
@@ -2559,6 +2634,12 @@ class CompositeDocument(QWidget):
             "raw_locked": ctx.raw_locked,
             "layer_frozen": ctx.layer_frozen,
             "edit_gate_open": ctx.edit_gate_open,
+            # R1-1：gate 关闭的原因直达 chip tooltip（判词来自宿主门禁，
+            # 不在此改写）；R2-5：捕捉容差按活动图层有效值（覆盖优先）。
+            "edit_gate_reason": ctx.edit_gate_reason,
+            "save_blocked": bool(
+                controller.editing and ctx.dirty and ctx.topology_error_count > 0),
+            "snapping_tolerance_px": self._effective_snapping_tolerance(),
         })
 
     # -- 矢量图层新建 / 删除 / 重命名 ------------------------------------------------
@@ -2649,8 +2730,35 @@ class CompositeDocument(QWidget):
         self.edit_controller.remove_layer(layer_id)
 
     def _duplicate_vector_layer(self, layer_id: str) -> None:
+        # R1-6：结构性动作（内存副本，不写源数据）不进 evaluator 矩阵，
+        # 但保留工程级守卫（无工程无复制）。
+        if self._project is None:
+            self.status_message.emit("未打开工程")
+            return
         copy = self.edit_controller.duplicate_layer(layer_id)
-        if copy is not None:
+        if copy is None:
+            return
+        # R2-2：RAW 源的副本 = DERIVED 草稿（本工作流的语义承诺）——登记
+        # 阶段成员资格为草稿角色，并覆写控制器角色登记。否则副本落在
+        # 角色体系之外：抢主位防护失效、快照仍按 RAW 角色 badge。
+        from paleo_workbench.mapping_workspace.layer_roles import LayerRole
+        from paleo_workbench.mapping_workspace.stage_state import (
+            LayerMembershipRecord,
+        )
+
+        source_role = self.stage_controller.state.role_of(str(layer_id))
+        if source_role.is_raw_protected:
+            draft_role = (
+                LayerRole.INITIAL_FACIES_DRAFT
+                if source_role == LayerRole.INITIAL_FACIES_SOURCE
+                else LayerRole.USER_GENERAL
+            )
+            self.stage_controller.state.set_membership(
+                LayerMembershipRecord(layer_id=str(copy.id), role=draft_role))
+            self.edit_controller.set_layer_role(str(copy.id), draft_role.value)
+            self.status_message.emit(
+                f"已复制为可编辑草稿「{copy.name}」（RAW 源保持不变）")
+        else:
             self.status_message.emit(f"已复制图层为「{copy.name}」")
 
     def stage_action(self, stage_value: str, action_id: str) -> None:
@@ -2765,7 +2873,6 @@ class CompositeDocument(QWidget):
         方法只拼呈现文本，不改写判词。
         """
         from paleo_workbench.mapping.tool_help import TOOL_LABELS
-        from paleo_workbench.mapping.tool_availability import evaluate_tool
 
         verdict = self._layer_tool_availability(layer_id, "toggle_editing")
         if verdict.enabled and not self.edit_controller.editing:
@@ -2893,6 +3000,10 @@ class CompositeDocument(QWidget):
         if not verdict.enabled:
             self.status_message.emit(f"不可用：{verdict.disabled_reason}")
             return
+        # R4-2：另一图层尚有打开的编辑会话时，先提交它（QGIS 切层即询问
+        # 保存的语义）——否则半途会话被静默遗弃，后续 flush 会把没看过
+        # 的修改一并落盘。
+        self._commit_other_open_sessions(str(layer_id))
         self.edit_controller.set_active_layer(layer_id)
         if self.edit_controller.editing:
             self._save_edits_with_feedback()
@@ -2900,20 +3011,51 @@ class CompositeDocument(QWidget):
             self.edit_controller.start_editing()
         self._sync_action_state()
 
-    def _layer_tool_availability(self, layer_id: str, tool_id: str):
+    def _commit_other_open_sessions(self, exclude_layer_id: str) -> None:
+        """提交除目标图层外所有打开的编辑会话（切层保护，R4-2）。
+
+        会话被拒提交（RAW 纵深防御等）时回滚——绝不带着未知状态的会话
+        切换编辑目标。
+        """
+        controller = self.edit_controller
+        for other_id in list(controller.layer_ids()):
+            if other_id == exclude_layer_id:
+                continue
+            layer = controller.layer(str(other_id))
+            session = getattr(layer, "edit_session", None) if layer else None
+            if session is None:
+                continue
+            original_active = controller.active_layer_id
+            controller.set_active_layer(str(other_id))
+            allowed, _reason = self._role_allows_editing(str(other_id))
+            if allowed:
+                error = controller.save_edits()
+                if error:
+                    self.status_message.emit(f"图层 {layer.name} 会话未提交：{error}")
+            else:
+                controller.rollback_edits()
+                self.status_message.emit(
+                    f"图层 {layer.name} 的会话已回滚（门禁拒绝提交）")
+            controller.set_active_layer(
+                str(original_active) if original_active else None)
+
+    def _layer_tool_availability(
+        self, layer_id: str, tool_id: str, *, base=None,
+    ):
         """图层级工具可用性（canonical evaluator，供树面板探针/re-gate）。
 
         把目标图层的事实投影进 ToolContext 再求值——右键菜单、工具条、
         palette、执行 re-gate 消费同一规则（kind/门禁/阻塞），无第二套
         判断。投影语义与 ``_layer_repair_availability``（V8 M2）一致，
-        本方法是它的泛化。
+        本方法是它的泛化。``base`` 可传入共享上下文（一次构建多次投影，
+        R5-6——菜单探针每开一次菜单省两次全量采集）。
         """
         from dataclasses import replace as _replace
 
         from paleo_workbench.mapping.tool_availability import evaluate_tool
 
         layer = self._layer_capability(str(layer_id))
-        base = self.tool_context()
+        base = base if base is not None else self.tool_context()
         raw_locked, stage_locked = self._layer_lock_classes(str(layer_id))
         ctx = _replace(
             base,
@@ -2945,9 +3087,12 @@ class CompositeDocument(QWidget):
 
         layer_id = str(layer_id or "")
         role = self.stage_controller.state.role_of(layer_id)
+        base = self.tool_context()  # R5-6：一次采集，两次投影共用
         return LayerMenuFacts(
-            toggle_editing=self._layer_tool_availability(layer_id, "toggle_editing"),
-            repair_geometry=self._layer_tool_availability(layer_id, "repair_geometry"),
+            toggle_editing=self._layer_tool_availability(
+                layer_id, "toggle_editing", base=base),
+            repair_geometry=self._layer_tool_availability(
+                layer_id, "repair_geometry", base=base),
             raw_protected=bool(getattr(role, "is_raw_protected", False)),
         )
 

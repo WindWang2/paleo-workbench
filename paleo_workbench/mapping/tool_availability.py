@@ -342,7 +342,12 @@ def _stage_group_visibility_for(ctx: ToolContext) -> dict[str, bool] | None:
     return {group: overrides.get(group, True) for group in TOOL_GROUPS}
 
 def stage_group_visibility(stage_value: str | None) -> dict[str, bool]:
-    """该阶段的组可见性（全组条目；None = 无阶段语义全可见）。"""
+    """该阶段的组可见性（全组条目；None = 无阶段语义全可见）。
+
+    注：``cancel`` 豁免阶段隐藏（evaluate_tool 内 _stage_group_gate 的
+    全局逃生口语义），因此 snapping 组在未知阶段显示为 False 时 cancel
+    仍可见——组级映射描述组呈现，不覆盖该逐工具豁免（V10 review 记录）。
+    """
     if stage_value is None:
         return {group: True for group in TOOL_GROUPS}
     if stage_from_value(stage_value) is None:

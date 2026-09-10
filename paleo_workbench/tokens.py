@@ -377,6 +377,8 @@ _DARK_OVERRIDES = {
     "BG_DISABLED": "#161d1c",
     "TEXT_DISABLED": "#64716c",
     "STATUS_DEGRADED": "#d97706",
+    # R3-5：WARNING 在深色底上 1px 描边对比不足（≈3.05:1），按同族提亮。
+    "WARNING": "#d97706",
     "BG_CHART": "#141c1b",
     "CANVAS_INK": "#c9d2ce",
     "CANVAS_CHROME_BG": "rgba(20, 28, 27, 0.92)",

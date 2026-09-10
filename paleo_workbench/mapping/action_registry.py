@@ -25,7 +25,7 @@ visible/reason 永远来自 :mod:`paleo_workbench.mapping.tool_availability`
 * ``requires_native`` —— 是否原生后端专属（桥缺失时 disabled 而非隐藏，
   保持能力可发现）。
 
-完整性由 ``tests/test_action_registry_v10.py`` 钉住：TOOL_IDS 全覆盖、
+完整性由 ``tests/test_authoring_ux_v10.py`` 钉住：TOOL_IDS 全覆盖、
 无重复、无 surface-only 残留。
 """
 from __future__ import annotations
