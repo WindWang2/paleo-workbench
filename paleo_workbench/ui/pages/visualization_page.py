@@ -26,7 +26,7 @@ from paleo_workbench.resources.export_service import (
     register_exported_view,
     view_export_capabilities,
 )
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.ui.dock_manager import dock_manager
 from paleo_workbench.ui.layout_persistence import LayoutPersistence
 from paleo_workbench.ui.map_export_worker import (
@@ -52,6 +52,36 @@ _PANEL_MAX_WIDTH = 16_777_215
 
 #: Delay before a splitter drag is persisted (avoid a QSettings sync per tick).
 _DOCKED_SIZES_DELAY_MS = 400
+
+
+def _temp_banner_qss() -> str:
+    pal = style.palette()
+    return (
+        f"color: {pal['WARNING']}; background: {pal['BG_SEARCH']};"
+        f" border: 1px solid {pal['BORDER']}; border-radius: 4px; padding: 4px 10px;"
+    )
+
+
+def _asset_label_qss() -> str:
+    pal = style.palette()
+    return f"font-weight: bold; color: {pal['TEXT_SECONDARY']};"
+
+
+def _asset_combo_qss() -> str:
+    pal = style.palette()
+    return (
+        f"QComboBox {{ border: 1px solid {pal['BORDER']}; border-radius: 4px;"
+        f" padding: 4px 8px; background: {pal['BG_SIDEBAR']}; color: {pal['TEXT_PRIMARY']}; }}"
+    )
+
+
+def _coord_button_qss() -> str:
+    pal = style.palette()
+    return (
+        f"QPushButton {{ border: 1px solid {pal['BORDER']}; border-radius: 4px;"
+        f" padding: 5px 14px; background: {pal['BG_SIDEBAR']}; color: {pal['TEXT_PRIMARY']}; font-weight: bold; }}"
+        f"QPushButton:checked {{ background: {pal['PRIMARY']}; color: {pal['ON_PRIMARY']}; border-color: {pal['PRIMARY_PRESSED']}; }}"
+    )
 
 
 class PanelFloatButton(QToolButton):
@@ -150,10 +180,7 @@ class VisualizationPage(QWidget):
         # home will be inside the 数据/井/地震/编图 hubs.
         temp_banner = QLabel("临时页面 —— 用于验证可视化能力，正式版将并入数据 / 井 / 地震 / 编图各页")
         temp_banner.setObjectName("TemporaryPageBanner")
-        temp_banner.setStyleSheet(
-            f"color: {tokens.WARNING}; background: {tokens.BG_SEARCH};"
-            f" border: 1px solid {tokens.BORDER}; border-radius: 4px; padding: 4px 10px;"
-        )
+        style.bind(temp_banner, _temp_banner_qss)
         outer.addWidget(temp_banner)
 
         # Top bar with asset selector dropdown + Coordinate System Toggle
@@ -161,24 +188,19 @@ class VisualizationPage(QWidget):
         top_bar.setSpacing(tokens.SPACE_2)
 
         asset_label = QLabel("▤ 选择数据资产:")
-        asset_label.setStyleSheet(f"font-weight: bold; color: {tokens.TEXT_SECONDARY};")
+        style.bind(asset_label, _asset_label_qss)
         top_bar.addWidget(asset_label)
 
         self.asset_combo = QComboBox()
         self.asset_combo.setMinimumWidth(280)
-        self.asset_combo.setStyleSheet(
-            f"QComboBox {{ border: 1px solid {tokens.BORDER}; border-radius: 4px; padding: 4px 8px; background: {tokens.BG_SIDEBAR}; color: {tokens.TEXT_PRIMARY}; }}"
-        )
+        style.bind(self.asset_combo, _asset_combo_qss)
         self.asset_combo.currentIndexChanged.connect(self._on_asset_combo_changed)
         top_bar.addWidget(self.asset_combo)
 
         # 1-Click Geographic / Grid coordinate toggle
         self.btn_coord = QPushButton("◆ 网格(IL/XL)")
         self.btn_coord.setCheckable(True)
-        self.btn_coord.setStyleSheet(
-            f"QPushButton {{ border: 1px solid {tokens.BORDER}; border-radius: 4px; padding: 5px 14px; background: {tokens.BG_SIDEBAR}; color: {tokens.TEXT_PRIMARY}; font-weight: bold; }}"
-            f"QPushButton:checked {{ background: {tokens.PRIMARY}; color: {tokens.ON_PRIMARY}; border-color: {tokens.PRIMARY_PRESSED}; }}"
-        )
+        style.bind(self.btn_coord, _coord_button_qss)
         self.btn_coord.clicked.connect(self._on_coord_toggle_clicked)
         top_bar.addWidget(self.btn_coord)
 

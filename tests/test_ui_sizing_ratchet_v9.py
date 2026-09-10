@@ -45,6 +45,44 @@ RULE_RESIZE_DOCKS = re.compile(r"\.resizeDocks\(")
 #: scrollable; new ones need a documented entry).
 RULE_NON_COLLAPSIBLE = re.compile(r"\.setChildrenCollapsible\(False\)")
 
+#: theme-drift pattern: setStyleSheet whose statement references compile-time
+#: token color constants (light-theme snapshots). Migrate to style.bind.
+RULE_DRIFTED_STYLESHEET = re.compile(r"setStyleSheet\(")
+_DRIFT_COLOR_TOKEN = re.compile(
+    r"tokens\.\w*(BG_|TEXT_|BORDER|ACCENT|SUCCESS|WARNING|DANGER|DISABLED|SELECTION)\w*"
+)
+
+#: snapshot of remaining raw setStyleSheet+token-color sites (2026-09-10,
+#: after the V9 migration of the 9 worst offender files). Ratchet: no growth.
+DRIFTED_STYLESHEET_SNAPSHOT: dict[str, int] = {
+    "paleo_workbench/ui/map_status_bar.py": 3,
+    "paleo_workbench/ui/pages/activity_card.py": 3,
+    "paleo_workbench/ui/pages/action_header.py": 2,
+    "paleo_workbench/ui/pages/map_canvas_panel.py": 2,
+    "paleo_workbench/ui/pages/map_chrome_panel.py": 2,
+    "paleo_workbench/ui/pages/preview_settings_panel.py": 2,
+    "paleo_workbench/ui/pages/relink_dialog.py": 2,
+    "paleo_workbench/ui/pages/start_guide_card.py": 2,
+    "paleo_workbench/ui/pages/well_seismic_joint_page.py": 2,
+    "paleo_workbench/ui/pages/well_table_panel.py": 2,
+    "paleo_workbench/viz/hosts/well_log_host.py": 1,
+    "paleo_workbench/ui/pages/catalog_health_dialog.py": 1,
+    "paleo_workbench/ui/pages/composite_visualization_panel.py": 1,
+    "paleo_workbench/ui/pages/data_asset_table.py": 1,
+    "paleo_workbench/ui/pages/data_toolbar.py": 1,
+    "paleo_workbench/ui/pages/filter_chips_bar.py": 1,
+    "paleo_workbench/ui/pages/governance_dialog.py": 1,
+    "paleo_workbench/ui/pages/home_page.py": 1,
+    "paleo_workbench/ui/pages/map_edit_view.py": 1,
+    "paleo_workbench/ui/pages/map_reference_panel.py": 1,
+    "paleo_workbench/ui/pages/module_relationship.py": 1,
+    "paleo_workbench/ui/pages/pdf_preview_widget.py": 1,
+    "paleo_workbench/ui/pages/resource_table.py": 1,
+    "paleo_workbench/ui/pages/seismic_view_panel.py": 1,
+    "paleo_workbench/ui/pages/well_log_canvas_panel.py": 1,
+    "paleo_workbench/ui/pages/workflow_contract_panel.py": 1,
+}
+
 #: snapshot of sanctioned exceptions. Keys are repo-relative posix paths.
 #: Counts may only shrink — never raise them without an ADR note in
 #: docs/development/adaptive-workstation-ui-v9/.
@@ -78,8 +116,13 @@ ALLOWLIST: dict[str, dict[str, int]] = {
 
 #: single construction site for QDockWidget (dock identity is declarative).
 QDOCK_ALLOWED_FILES = {"paleo_workbench/ui/workstation/shell.py"}
-#: single authority for programmatic dock resizing.
-RESIZE_DOCKS_ALLOWED_FILES = {"paleo_workbench/ui/dock_framework.py"}
+#: single authority for programmatic dock resizing. visual_qa_* drivers
+#: simulate user interactions (including programmatic sizing to set up the
+#: "user arranged this dock" precondition) — they never run in production.
+RESIZE_DOCKS_ALLOWED_FILES = {
+    "paleo_workbench/ui/dock_framework.py",
+    "paleo_workbench/ui/visual_qa_v9.py",
+}
 
 
 def _iter_py_files():
@@ -181,4 +224,29 @@ def test_no_new_non_collapsible_page_splitters():
     assert not offenders, (
         "page splitters must stay collapsible (narrow workspaces rely on "
         "collapse + scroll degradation):\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_no_new_theme_drifted_stylesheets():
+    """setStyleSheet + 编译期 token 颜色常量 = 主题切换漂移（暗色下保持浅色）。
+
+    新代码必须走 ``style.bind(widget, render)``（render 内重取
+    ``style.palette()``）。存量站点被快照锁定，只减不增。
+    """
+    offenders = []
+    for path in _iter_py_files():
+        source = path.read_text(encoding="utf-8")
+        rel = path.relative_to(REPO).as_posix()
+        hits = 0
+        for match in RULE_DRIFTED_STYLESHEET.finditer(source):
+            window = source[match.start() : match.start() + 500]
+            if _DRIFT_COLOR_TOKEN.search(window):
+                hits += 1
+        allowed = DRIFTED_STYLESHEET_SNAPSHOT.get(rel, 0)
+        if hits > allowed:
+            offenders.append(f"{rel}: {hits} drifted site(s) (allowed {allowed})")
+    assert not offenders, (
+        "new setStyleSheet with compile-time token colors — use "
+        "style.bind() with a re-fetching palette() renderer:\n  "
+        + "\n  ".join(offenders)
     )

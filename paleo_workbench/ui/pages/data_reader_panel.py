@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.ui.pages.lazy_visualization_tabs import LazyVisualizationTabs
 from paleo_workbench.ui.pages.preview_provider import PreviewProvider, PreviewResult
 from paleo_workbench.ui.pages.preview_settings import PreviewSettingsStore
@@ -37,6 +37,30 @@ from paleo_workbench.ui.pages.preview_widgets import (
     WebDocumentPreviewWidget,
     SeismicSlicePreviewWidget,
 )
+
+
+def _panel_qss() -> str:
+    pal = style.palette()
+    return (
+        f"QFrame#DataReaderPanel {{ background: {pal['BG_SIDEBAR']};"
+        f" border: 1px solid {pal['BORDER']};"
+        f" border-radius: {tokens.RADIUS_CARD}px; }}"
+    )
+
+
+def _title_qss() -> str:
+    pal = style.palette()
+    return f"color: {pal['TEXT_PRIMARY']}; font-weight: 600;"
+
+
+def _meta_qss() -> str:
+    pal = style.palette()
+    return f"color: {pal['TEXT_SECONDARY']}; font-size: 12px;"
+
+
+def _warning_qss() -> str:
+    pal = style.palette()
+    return f"color: {pal['WARNING']}; font-size: 12px;"
 
 
 class DataReaderPanel(QFrame):
@@ -75,11 +99,7 @@ class DataReaderPanel(QFrame):
         self.provider = provider.with_settings(self.preview_settings)
         self.current_mode = "empty"
         self._current_result = PreviewResult(mode="empty", title="请选择数据项")
-        self.setStyleSheet(
-            f"QFrame#DataReaderPanel {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
+        style.bind(self, _panel_qss)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3)
@@ -88,13 +108,13 @@ class DataReaderPanel(QFrame):
         self.title_label = QLabel("请选择数据项")
         self.title_label.setObjectName("DataReaderTitle")
         self.title_label.setWordWrap(True)
-        self.title_label.setStyleSheet(f"color: {tokens.TEXT_PRIMARY}; font-weight: 600;")
+        style.bind(self.title_label, _title_qss)
         layout.addWidget(self.title_label)
 
         self.meta_label = QLabel("")
         self.meta_label.setObjectName("DataReaderMeta")
         self.meta_label.setWordWrap(True)
-        self.meta_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;")
+        style.bind(self.meta_label, _meta_qss)
         layout.addWidget(self.meta_label)
 
         # 复制全部 toolbar — 仅在表格预览时显示，匹配面板现有布局语义
@@ -210,7 +230,7 @@ class DataReaderPanel(QFrame):
 
         self.warning_label = QLabel("")
         self.warning_label.setWordWrap(True)
-        self.warning_label.setStyleSheet(f"color: {tokens.WARNING}; font-size: 12px;")
+        style.bind(self.warning_label, _warning_qss)
         layout.addWidget(self.warning_label)
 
         self.stack.setCurrentWidget(self.empty_label)

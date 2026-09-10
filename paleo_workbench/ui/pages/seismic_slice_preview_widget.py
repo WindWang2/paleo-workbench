@@ -6,17 +6,61 @@ from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QSlider, QVBoxLayout, QWidget
 
 from paleo_workbench.tokens import (
-    BG_SEARCH,
-    BORDER,
-    ON_PRIMARY,
-    PRIMARY,
-    PRIMARY_HOVER,
     RADIUS_BUTTON,
     SPACE_2,
     SPACE_3,
-    TEXT_SECONDARY,
 )
+from paleo_workbench.ui import style
 from paleo_workbench.viz.seismic_3d_api import fast_slice_to_indexed8, global_stretch_range
+
+
+def _type_label_qss() -> str:
+    pal = style.palette()
+    return f"color: {pal['TEXT_SECONDARY']}; font-weight: 500;"
+
+
+def _slider_qss() -> str:
+    pal = style.palette()
+    return (
+        f"""
+        QSlider::groove:horizontal {{
+            border: 1px solid {pal['BORDER']};
+            height: 6px;
+            background: {pal['BG_SEARCH']};
+            border-radius: 3px;
+        }}
+        QSlider::sub-page:horizontal {{
+            background: {pal['PRIMARY']};
+            border-radius: 3px;
+        }}
+        QSlider::handle:horizontal {{
+            background: {pal['ON_PRIMARY']};
+            border: 2px solid {pal['PRIMARY']};
+            width: 14px;
+            height: 14px;
+            margin-top: -5px;
+            margin-bottom: -5px;
+            border-radius: 7px;
+        }}
+        QSlider::handle:horizontal:hover {{
+            background: {pal['PRIMARY_HOVER']};
+            border-color: {pal['PRIMARY_HOVER']};
+        }}
+        """
+    )
+
+
+def _index_label_qss() -> str:
+    pal = style.palette()
+    return f"color: {pal['TEXT_SECONDARY']}; font-family: monospace; font-weight: 500;"
+
+
+def _image_label_qss() -> str:
+    pal = style.palette()
+    return (
+        f"border: 1px solid {pal['BORDER']}; border-radius: {RADIUS_BUTTON}px;"
+        f" background: {pal['BG_SEARCH']};"
+    )
 
 
 class SeismicSlicePreviewWidget(QWidget):
@@ -40,7 +84,7 @@ class SeismicSlicePreviewWidget(QWidget):
         control_layout.setSpacing(SPACE_3)
 
         type_label = QLabel("切片方向:")
-        type_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-weight: 500;")
+        style.bind(type_label, _type_label_qss)
         self.type_combo = QComboBox()
         self.type_combo.addItems(["Inline (剖面)", "Crossline (剖面)", "Time (切片)"])
         self.type_combo.currentIndexChanged.connect(self._on_type_changed)
@@ -48,33 +92,7 @@ class SeismicSlicePreviewWidget(QWidget):
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.setMinimum(0)
         self.slider.setMaximum(0)
-        self.slider.setStyleSheet(
-            f"""
-            QSlider::groove:horizontal {{
-                border: 1px solid {BORDER};
-                height: 6px;
-                background: {BG_SEARCH};
-                border-radius: 3px;
-            }}
-            QSlider::sub-page:horizontal {{
-                background: {PRIMARY};
-                border-radius: 3px;
-            }}
-            QSlider::handle:horizontal {{
-                background: {ON_PRIMARY};
-                border: 2px solid {PRIMARY};
-                width: 14px;
-                height: 14px;
-                margin-top: -5px;
-                margin-bottom: -5px;
-                border-radius: 7px;
-            }}
-            QSlider::handle:horizontal:hover {{
-                background: {PRIMARY_HOVER};
-                border-color: {PRIMARY_HOVER};
-            }}
-            """
-        )
+        style.bind(self.slider, _slider_qss)
         self._render_timer = QTimer(self)
         self._render_timer.setSingleShot(True)
         self._render_timer.setInterval(16)
@@ -82,7 +100,7 @@ class SeismicSlicePreviewWidget(QWidget):
         self.slider.valueChanged.connect(self._on_slider_changed)
 
         self.index_label = QLabel("0 / 0")
-        self.index_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-family: monospace; font-weight: 500;")
+        style.bind(self.index_label, _index_label_qss)
 
         control_layout.addWidget(type_label)
         control_layout.addWidget(self.type_combo)
@@ -95,10 +113,7 @@ class SeismicSlicePreviewWidget(QWidget):
         self.image_label = QLabel("请选择数据")
         self.message_label = self.image_label  # Backwards compatibility
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_label.setStyleSheet(
-            f"border: 1px solid {BORDER}; border-radius: {RADIUS_BUTTON}px;"
-            f" background: {BG_SEARCH};"
-        )
+        style.bind(self.image_label, _image_label_qss)
         layout.addWidget(self.image_label, 1)
 
     def load_seismic(

@@ -2,10 +2,20 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QWidget
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.workflow.service import REQUIRED_RESOURCE_TYPES
 
 RESOURCE_TYPES = REQUIRED_RESOURCE_TYPES
+
+
+def _name_qss() -> str:
+    pal = style.palette()
+    return f"color: {pal['TEXT_SECONDARY']}; font-size: 12px;"
+
+
+def _count_qss() -> str:
+    pal = style.palette()
+    return f"color: {pal['TEXT_PRIMARY']}; font-size: 12px; font-weight: 500;"
 
 
 class ResourceSummaryBar(QFrame):
@@ -27,15 +37,11 @@ class ResourceSummaryBar(QFrame):
             group_layout.setSpacing(tokens.SPACE_1)
 
             name_label = QLabel(tokens.RESOURCE_LABELS[rtype])
-            name_label.setStyleSheet(
-                f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;"
-            )
+            style.bind(name_label, _name_qss)
             group_layout.addWidget(name_label)
 
             count_label = QLabel(f"0{tokens.RESOURCE_UNITS.get(rtype, '')}")
-            count_label.setStyleSheet(
-                f"color: {tokens.TEXT_PRIMARY}; font-size: 12px; font-weight: 500;"
-            )
+            style.bind(count_label, _count_qss)
             group_layout.addWidget(count_label)
 
             self.name_labels[rtype] = name_label
@@ -43,10 +49,16 @@ class ResourceSummaryBar(QFrame):
             layout.addWidget(group)
         layout.addStretch()
         self.status_label = QLabel("—")
-        self.status_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;"
-        )
+        self._ready: bool | None = None
+        style.bind(self.status_label, self._status_qss)
         layout.addWidget(self.status_label)
+
+    def _status_qss(self) -> str:
+        pal = style.palette()
+        if self._ready is None:
+            return f"color: {pal['TEXT_SECONDARY']}; font-size: 12px;"
+        token = "SUCCESS" if self._ready else "ERROR_RED"
+        return f"color: {pal[token]}; font-size: 12px; font-weight: 500;"
 
     def update_state(self, state: dict) -> None:
         readiness = state.get("resource_readiness", {})
@@ -59,12 +71,9 @@ class ResourceSummaryBar(QFrame):
             self.count_labels[rtype].setText(f"{count}{unit}")
         if ready:
             self.status_label.setText("数据完整")
-            self.status_label.setStyleSheet(
-                f"color: {tokens.SUCCESS}; font-size: 12px; font-weight: 500;"
-            )
         else:
             missing_labels = [tokens.RESOURCE_LABELS.get(m, m) for m in missing]
             self.status_label.setText(f"缺少: {'、'.join(missing_labels)}")
-            self.status_label.setStyleSheet(
-                f"color: {tokens.ERROR_RED}; font-size: 12px; font-weight: 500;"
-            )
+        # 重注册即重渲染（数据态变化立即生效，主题切换时由 style 注册表刷新）
+        self._ready = bool(ready)
+        style.bind(self.status_label, self._status_qss)
