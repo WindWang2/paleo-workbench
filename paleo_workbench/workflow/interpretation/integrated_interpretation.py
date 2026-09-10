@@ -28,6 +28,14 @@ from paleo_workbench.workflow.interpretation.revision import (
 )
 
 OPERATION_INTEGRATED_INTERPRETATION = "integrated_interpretation"
+
+#: fusion QC → 综合解释 conflicts 摘要的键（stage/summary 共用，防漂移）。
+FUSION_CONFLICT_KEYS: tuple[str, ...] = (
+    "low_confidence_fraction",
+    "mean_conflict_fraction",
+    "high_conflict_fraction",
+    "low_margin_fraction",
+)
 ASSET_TYPE_INTEGRATED_INTERPRETATION = "integrated_interpretation"
 
 #: 成熟度（goal §31 与 MapProduct 对齐的语义阶梯）。
@@ -258,14 +266,10 @@ def commit_integrated_interpretation(
         asset = _asset_for_interpretation(catalog, interpretation.interpretation_id)
         previous_version = ""
         if asset is not None:
-            try:
-                versions = catalog.list_versions(asset_id=str(asset.id)) or []
-                if versions:
-                    previous_version = str(max(
-                        versions, key=lambda v: int(
-                            getattr(v, "version_number", 0) or 0)).id)
-            except Exception:  # noqa: BLE001 — 版本查询失败按首次提交处理
-                previous_version = ""
+            # 评审 R2-F6：用 catalog 认可的当前版本指针（而非自行推导
+            # max(version_number)——两套"最新"会漂移）。
+            current = str(getattr(asset, "current_version_id", "") or "")
+            previous_version = current
         run = catalog.register_run(
             OPERATION_INTEGRATED_INTERPRETATION,
             input_version_ids=[v for v in (

@@ -78,6 +78,50 @@ class MapProductAssembly:
         return hashlib.sha256(blob).hexdigest()
 
 
+def assembly_from_workspace(
+    project: ProjectDocument,
+    *,
+    product_name: str,
+    workspace_state: Any = None,
+    interpretation_refs: list[str] | None = None,
+    composition_ref: str | None = None,
+) -> MapProductAssembly:
+    """从工作区输入集构建装配配方（评审 R2-F3：三个入口共用一个构造器）。
+
+    factor ids 取自 Compilation Input Set 的 factor: 条目；V9 科学谱系引用
+    （fusion 版本 / 综合解释 / 输入集 id）自动携带。
+    """
+    from paleo_workbench.workflow.interpretation.compilation import (
+        active_input_set,
+        evidence_view,
+    )
+
+    view = evidence_view(project, workspace_state)
+    factor_ids = [
+        value.split(":")[1] for value in view.values()
+        if str(value).startswith("factor:") and len(str(value).split(":")) > 1
+    ]
+    input_set = active_input_set(project)
+    fusion_version = ""
+    integrated_id = ""
+    for interpretation in getattr(project, "integrated_interpretations", None) or []:
+        if not isinstance(interpretation, dict):
+            continue
+        if interpretation.get("fusion_version_id"):
+            fusion_version = str(interpretation["fusion_version_id"])
+        if interpretation.get("interpretation_id"):
+            integrated_id = str(interpretation["interpretation_id"])
+    return MapProductAssembly(
+        product_name=product_name,
+        factor_task_ids=factor_ids,
+        interpretation_refs=list(interpretation_refs or []),
+        composition_ref=composition_ref,
+        fusion_version_id=fusion_version,
+        integrated_interpretation_id=integrated_id,
+        input_set_id=input_set.id if input_set else "",
+    )
+
+
 def write_product_manifest(
     project: ProjectDocument,
     *,
@@ -185,6 +229,9 @@ def assemble_map_product(
             "manual_adjustments": list(assembly.manual_adjustments),
             "notes": assembly.notes,
             "scientific_fingerprint": fingerprint,
+            "fusion_version_id": assembly.fusion_version_id,
+            "integrated_interpretation_id": assembly.integrated_interpretation_id,
+            "input_set_id": assembly.input_set_id,
             # Assembly-time per-factor truth: what the product ACTUALLY
             # consumed. Comparisons must read this, not the live tasks
             # (which keep evolving after the product exists).
@@ -246,6 +293,10 @@ def assemble_map_product(
         run_id=run.id,
         scientific_fingerprint=fingerprint,
         manual_adjustments=list(assembly.manual_adjustments),
+        # V9（评审 R1-F5）：科学谱系引用持久化到记录（staleness 重建用）。
+        fusion_version_id=assembly.fusion_version_id,
+        integrated_interpretation_id=assembly.integrated_interpretation_id,
+        input_set_id=assembly.input_set_id,
     )
     project.map_products = [*list(getattr(project, "map_products", None) or []), record]
     return MapProductResult(
@@ -777,6 +828,9 @@ def product_staleness(
 
     A product is stale when any factor task re-interpolated (new grid
     version) or the assembly membership changed since it was built.
+    V9（评审 R1-F5）：重建当前装配时携带持久化在记录上的 V9 引用
+    （fusion/integrated/input_set）——否则凡是带引用组装的产品永久误报
+    stale，publish 被砖死。
     """
     current = MapProductAssembly(
         product_name=record.product_name,
@@ -786,6 +840,10 @@ def product_staleness(
         manual_adjustments=[
             dict(a) for a in getattr(record, "manual_adjustments", None) or []
         ],
+        fusion_version_id=str(getattr(record, "fusion_version_id", "") or ""),
+        integrated_interpretation_id=str(
+            getattr(record, "integrated_interpretation_id", "") or ""),
+        input_set_id=str(getattr(record, "input_set_id", "") or ""),
     )
     current_fingerprint = current.scientific_fingerprint(project)
     stale = current_fingerprint != record.scientific_fingerprint
@@ -800,18 +858,31 @@ def product_staleness(
 def freeze_map_product(record: MapProductRecord, *, frozen: bool = True) -> None:
     """Freeze/unfreeze a record: frozen records refuse clone/rerun/supersede.
 
-    V9：freeze 同步显式 lifecycle（frozen 阶梯；unfreeze 回 draft——冻结
-    解除即回到草稿语义，绝不停留在较高阶梯）。
+    V9：freeze 同步显式 lifecycle——
+    * freeze 要求 REVIEWED（goal §31 阶梯：评审 → 冻结；legacy frozen
+      标志和解除外——旧记录本就处于冻结语义）；
+    * unfreeze 回 draft（冻结解除即回到草稿语义，绝不停留在较高阶梯），
+      但 PUBLISHED 不可解冻（发布不可变；取代走 supersede）。
     """
-    record.frozen = bool(frozen)
+    lifecycle = effective_lifecycle(record)
     if frozen:
-        lifecycle = effective_lifecycle(record)
         if lifecycle == LIFECYCLE_PUBLISHED:
             raise ValueError(
                 f"product {record.id} is published — published products are "
                 "immutable; supersede instead")
+        if lifecycle == LIFECYCLE_DRAFT and not getattr(record, "frozen", False):
+            raise ValueError(
+                f"product {record.id} is draft — review before freezing "
+                "(goal §31 ladder: review → freeze → publish)")
+        record.frozen = True
         record.lifecycle = LIFECYCLE_FROZEN
     else:
+        if lifecycle == LIFECYCLE_PUBLISHED or getattr(record, "lifecycle", "") \
+                == LIFECYCLE_PUBLISHED:
+            raise ValueError(
+                f"product {record.id} is published — published products are "
+                "immutable; supersede instead of unfreezing")
+        record.frozen = False
         record.lifecycle = LIFECYCLE_DRAFT
 
 

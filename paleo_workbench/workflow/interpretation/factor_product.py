@@ -139,6 +139,21 @@ def _task_run_inputs(catalog: Any, run_id: str) -> list[str]:
     return [str(v) for v in (getattr(run, "input_version_ids", None) or [])]
 
 
+def _uncertainty_absent_reason(algorithm_id: str, metadata: dict) -> str:
+    """不确定度缺失的诚实原因（评审 R1-F10：从注册表能力推导，不硬编码）。"""
+    from paleo_workbench.workflow.interpretation.algorithm_registry import (
+        get_algorithm,
+    )
+
+    spec = get_algorithm(algorithm_id) if algorithm_id else None
+    params = dict((metadata or {}).get("algorithm_parameters") or {})
+    if str(params.get("method", "")) == "kriging_fallback":
+        return "numpy kriging fallback（不产生克里金方差面）"
+    if spec is not None and not spec.produces_uncertainty:
+        return f"方法 {spec.display_label} 不产生不确定度面（注册表能力声明）"
+    return "任务无方差记录（方法声明产方差但本次运行未产出）"
+
+
 def factor_product_for_task(
     document: Any,
     task_id: str,
@@ -188,7 +203,10 @@ def factor_product_for_task(
             unit_declared = False  # 家族默认，非本任务声明
 
     crs = metadata.get("crs") or ""
-    grid_shape = tuple(metadata.get("shape") or ())
+    # to_descriptor 的键是 width/height（评审 R1-F9：shape 键不存在）。
+    grid_shape = tuple(
+        v for v in (metadata.get("height"), metadata.get("width"))
+        if isinstance(v, int))
 
     grid_version_id = str(task.grid_artifact_version_id or "")
     run_id = ""
@@ -225,7 +243,7 @@ def factor_product_for_task(
         freshness_detail = str(getattr(freshness_entry, "detail", "") or "")
 
     has_variance = bool(metrics.get("variance_min") is not None
-                        or metadata.get("has_variance"))
+                        or metadata.get("has_variance_grid"))
     artifacts = (
         FactorArtifactRef(
             "grid", bool(grid_version_id or metadata), grid_version_id,
@@ -238,9 +256,8 @@ def factor_product_for_task(
             "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"),
         FactorArtifactRef(
             "uncertainty", has_variance,
-            "", "" if has_variance else
-            ("本方法不产生不确定度面（algorithm_registry.produces_uncertainty）"
-             if algorithm_id == "idw" else "任务无方差记录")),
+            "", "" if has_variance else _uncertainty_absent_reason(
+                algorithm_id, metadata)),
         FactorArtifactRef(
             "qc", bool(qc), "",
             "" if qc else "无质量指标记录"),

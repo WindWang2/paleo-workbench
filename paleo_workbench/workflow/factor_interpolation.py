@@ -910,6 +910,19 @@ def batch_prepare_factor_maps(
                 layers = constraint_layers_for_project(
                     project, target_horizon=first.target_horizon
                 )
+                # V9（评审 R1-F3）：批量共享 plan 消费约束前做同一条 CRS
+                # 纪律检查——单任务路径拒绝的混合坐标不能在批路径静默混入。
+                from paleo_workbench.workflow.interpretation.constraint_product import (
+                    assert_constraints_crs_compatible,
+                )
+
+                _project_crs = getattr(
+                    getattr(project, "coordinate", None), "project_crs", None)
+                for _group in layers or []:
+                    assert_constraints_crs_compatible(
+                        _project_crs,
+                        getattr(_group, "crs", "") or "",
+                        context=f"batch factor {first.name}")
                 breaks = break_polylines_for_idw(
                     layers, target_horizon=first.target_horizon
                 )

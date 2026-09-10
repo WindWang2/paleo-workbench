@@ -558,6 +558,12 @@ class MapProductRecord(BaseModel):
     # Assembly-time manual adjustments (review R1-P2): staleness must rebuild
     # the fingerprint WITH them, or any adjusted product reads stale forever.
     manual_adjustments: list[dict[str, Any]] = Field(default_factory=list)
+    # V9 (R1-F5/R2-F2): the assembly's scientific-lineage refs persist on the
+    # record — staleness reconstructs the fingerprint from them; without
+    # persistence every V9-enriched product reads stale forever.
+    fusion_version_id: str = ""
+    integrated_interpretation_id: str = ""
+    input_set_id: str = ""
 
 
 class UserVectorFeature(BaseModel):

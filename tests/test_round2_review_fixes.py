@@ -95,8 +95,14 @@ def test_map_product_kriging_fallback_honesty_without_active_qc() -> None:
     )
     # Project has NO active_quality_report_id (active_qc is None)
     project.active_quality_report_id = None
-    # V9（goal §31）：publish 阶梯——先冻结再发布。
-    from paleo_workbench.workflow.map_product import freeze_map_product
+    # V9（goal §31）：publish 阶梯——评审 → 冻结 → 发布。
+    from paleo_workbench.workflow.map_product import (
+        freeze_map_product,
+        review_map_product,
+    )
+    record.run_id = "run_r2"
+    record.output_version_id = "ver_r2"
+    record.lifecycle = "reviewed"  # 合成记录：QA error 会被评审拒（直置阶梯）
     freeze_map_product(record)
 
     report = publish_map_product(record, project, accept_warnings=True)

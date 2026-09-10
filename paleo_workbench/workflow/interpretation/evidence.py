@@ -92,6 +92,12 @@ def format_evidence_selector(
     if kind is EvidenceKind.CONSTRAINT_GROUP:
         if floating or (not ref_id and not version_id):
             return "constraints:current"
+        # 评审 R1-F8：名为 "current" 的组与浮动引用撞词表——无版本时拒绝
+        # （identity 不可静默翻转）；带版本的形式无歧义。
+        if ref_id == "current" and not version_id:
+            raise ValueError(
+                "constraint group named 'current' collides with the floating "
+                "constraints:current reference — pin an explicit version")
         return f"constraints:{ref_id}:{version_id}" if version_id \
             else f"constraints:{ref_id}"
     # CATALOG_VERSION：规范形态带前缀；裸 id 由 parse 兜底兼容。

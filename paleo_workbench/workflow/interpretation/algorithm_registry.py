@@ -212,21 +212,27 @@ ALGORITHMS: dict[str, AlgorithmSpec] = {
 }
 
 
+def _rebuild_alias_index() -> None:
+    _ALIAS_INDEX.clear()
+    for spec in ALGORITHMS.values():
+        _ALIAS_INDEX[spec.algorithm_id.lower()] = spec.algorithm_id
+        for alias in spec.aliases:
+            _ALIAS_INDEX[alias.lower()] = spec.algorithm_id
+
+
 def register_algorithm(spec: AlgorithmSpec) -> None:
-    """注册（或替换）算法声明（测试/扩展用；生产注册表为冻结常量）。"""
+    """注册（或替换）算法声明（测试/扩展用）；别名索引同步重建。"""
     ALGORITHMS[spec.algorithm_id] = spec
+    _rebuild_alias_index()
 
 
 def get_algorithm(algorithm_id: str) -> AlgorithmSpec | None:
     return ALGORITHMS.get(str(algorithm_id or "").strip())
 
 
-#: 别名 → algorithm_id（构造一次；含大小写变体）。
+#: 别名 → algorithm_id（注册时经 _rebuild_alias_index 重建）。
 _ALIAS_INDEX: dict[str, str] = {}
-for _spec in ALGORITHMS.values():
-    _ALIAS_INDEX[_spec.algorithm_id.lower()] = _spec.algorithm_id
-    for _alias in _spec.aliases:
-        _ALIAS_INDEX[_alias.lower()] = _spec.algorithm_id
+_rebuild_alias_index()
 
 
 def canonical_algorithm_id(label_or_id: str) -> str:

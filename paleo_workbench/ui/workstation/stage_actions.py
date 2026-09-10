@@ -70,6 +70,7 @@ STAGE_CONTEXT_ACTIONS: dict[str, tuple[tuple[str, str], ...]] = {
         ("select_evidence", "选择证据版本"),
         ("create_integrated_draft", "创建综合草稿"),
         ("run_qa", "运行 QA"),
+        ("commit_interpretation", "提交综合解释"),
         ("assemble_map_product", "生成 MapProduct"),
     ),
 }
@@ -87,36 +88,13 @@ def stage_context_actions(stage_value: str) -> tuple[tuple[str, str], ...]:
 
 def _create_structured_input_set_shell(document, workspace_state, *,
                                        created_by: str = ""):
-    """首次选择证据时创建结构化输入集外壳（V9 权威载体）。"""
-    try:
-        from paleo_workbench.workflow.interpretation.compilation import (
-            CompilationInputSet,
-            persist_input_set,
-        )
+    """首次选择证据时创建结构化输入集外壳（迁移逻辑在领域层，R2-F9）。"""
+    from paleo_workbench.workflow.interpretation.compilation import (
+        create_input_set_shell_from_legacy,
+    )
 
-        shell = CompilationInputSet(name="综合编图输入集", created_by=created_by)
-        # 迁移既有 legacy 视图条目（label → selector）。
-        for label, selector in dict(
-                getattr(workspace_state, "compilation_input_set", None) or {}).items():
-            from paleo_workbench.workflow.interpretation.compilation import (
-                CompilationInputSetEntry,
-            )
-            from paleo_workbench.workflow.interpretation.evidence import (
-                parse_evidence_selector,
-            )
-
-            try:
-                parsed = parse_evidence_selector(str(selector))
-            except ValueError:
-                continue
-            shell.entries.append(CompilationInputSetEntry(
-                selector=parsed.raw, label=str(label),
-                evidence_kind=parsed.kind.value, added_by=created_by))
-        persist_input_set(document, shell)
-        return shell
-    except Exception:  # noqa: BLE001 — 结构化载体失败不阻断旧视图路径
-        logger.debug("structured input set shell creation skipped", exc_info=True)
-        return None
+    return create_input_set_shell_from_legacy(
+        document, workspace_state, created_by=created_by)
 
 
 class StageActionDispatcher:
@@ -174,6 +152,7 @@ class StageActionDispatcher:
             "create_integrated_boundary": self.create_integrated_boundary,
             "run_fusion": self.run_fusion,
             "run_qa": self.run_qa,
+            "commit_interpretation": self.commit_interpretation,
             "assemble_map_product": self.assemble_map_product,
             "stage_save": self.stage_save,
             "stage_qc": self.run_qa,
@@ -1377,10 +1356,18 @@ class StageActionDispatcher:
         from paleo_workbench.workflow.integrated_compilation import (
             run_integrated_fusion,
         )
+        from paleo_workbench.workflow.interpretation.integrated_interpretation import (
+            FUSION_CONFLICT_KEYS,
+        )
 
         document = self.project
         state = self.stage_controller.state
-        evidence = dict(state.compilation_input_set or {})
+        # V9（评审 R2-F1）：经单一适配器读证据集（结构化激活输入集优先）。
+        from paleo_workbench.workflow.interpretation.compilation import (
+            evidence_view,
+        )
+
+        evidence = evidence_view(document, state)
         if not evidence:
             self.composite.status_message.emit("证据集为空——先选择证据版本（Compilation Input Set）")
             return
@@ -1442,10 +1429,7 @@ class StageActionDispatcher:
                     confidence_summary=dict(qc.get("confidence_coverage") or {}),
                     conflicts={
                         key: qc.get(key)
-                        for key in ("low_confidence_fraction",
-                                    "mean_conflict_fraction",
-                                    "high_conflict_fraction",
-                                    "low_margin_fraction")
+                        for key in FUSION_CONFLICT_KEYS
                         if qc.get(key) is not None
                     },
                 )
@@ -1548,6 +1532,68 @@ class StageActionDispatcher:
         else:
             self.composite.status_message.emit(f"QA 发现 {len(issues)} 个问题（见 05 QA/QC）")
 
+    def commit_interpretation(self) -> None:
+        """提交综合解释（V9，评审 R2-F7）：编辑层 → catalog DERIVED 版本。
+
+        与 harness ``interpretation.commit`` 调用同一领域函数
+        （``commit_integrated_interpretation``）——单一实现，双入口。
+        证据归因 = 当前输入集选择器。
+        """
+        document = self.project
+        if document is None:
+            self.composite.status_message.emit("未打开工程")
+            return
+        state = self.stage_controller.state
+        layer_ids = state.layers_with_role(LayerRole.INTEGRATED_FACIES)
+        if not layer_ids:
+            self.composite.status_message.emit("没有综合解释层——先创建综合草稿")
+            return
+        layer_id = str(layer_ids[0])
+        from paleo_workbench.workflow.interpretation.integrated_interpretation import (
+            commit_integrated_interpretation,
+            find_by_layer,
+        )
+
+        interpretation = find_by_layer(document, layer_id)
+        if interpretation is None:
+            self.composite.status_message.emit(
+                f"层 {layer_id} 无综合解释记录（旧工程——重开或重建草稿）")
+            return
+        layer = self.edit_controller.layer(layer_id)
+        if layer is None:
+            from paleo_workbench.project.models import UserVectorLayer
+
+            layer = next(
+                (l for l in (getattr(document, "user_vector_layers", None) or [])
+                 if str(l.id) == layer_id), None)
+        if layer is None:
+            self.composite.status_message.emit(f"解释层 {layer_id} 不可达")
+            return
+        try:
+            from paleo_workbench.catalog.runtime import get_catalog_service
+
+            catalog = get_catalog_service()
+        except Exception:
+            catalog = None
+        if catalog is None:
+            self.composite.status_message.emit(
+                "目录服务不可用——提交需要 catalog（不伪称已提交）")
+            return
+        evidence_refs = [
+            str(value) for value in (state.compilation_input_set or {}).values()
+            if str(value)
+        ]
+        try:
+            version_id = commit_integrated_interpretation(
+                document, interpretation, layer, catalog,
+                actor="workstation", evidence_refs=evidence_refs)
+        except ValueError as exc:
+            self.composite.status_message.emit(f"综合解释提交被拒绝：{exc}")
+            return
+        self.composite.status_message.emit(
+            f"综合解释已提交（版本 {version_id[:12]}…；修订链 "
+            f"{len(find_by_layer(document, layer_id).revision_ids)} 条）")
+
     def assemble_map_product(self) -> None:
         """生成 MapProduct（复用 workflow.map_product 组装器，V5 §58）。"""
         document = self.project
@@ -1556,18 +1602,21 @@ class StageActionDispatcher:
         try:
             from paleo_workbench.catalog.runtime import get_catalog_service
             from paleo_workbench.workflow.map_product import (
-                MapProductAssembly,
                 assemble_map_product,
+                assembly_from_workspace,
+                write_product_manifest,
             )
         except Exception:
             self.composite.status_message.emit("MapProduct 组装需要打开工程与数据目录")
             return
-        factor_ids = []
-        for value in self.stage_controller.state.compilation_input_set.values():
-            text = str(value)
-            if text.startswith("factor:"):
-                factor_ids.append(text.split(":")[1])
-        if not factor_ids:
+        # V9（评审 R2-F3）：共享构造器——factor ids/科学谱系引用由
+        # workflow.map_product 统一从输入集推导，三个入口不再分叉。
+        assembly = assembly_from_workspace(
+            document,
+            product_name=f"综合编图 {document.meta.name}",
+            workspace_state=self.stage_controller.state,
+        )
+        if not assembly.factor_task_ids:
             self.composite.status_message.emit(
                 "证据集中没有单因素任务——先选择证据（含 factor 版本）")
             return
@@ -1576,18 +1625,12 @@ class StageActionDispatcher:
         except Exception:
             self.composite.status_message.emit("数据目录不可用（先打开工程文件）")
             return
-        from paleo_workbench.workflow.map_product import write_product_manifest
-
         staged_path = None
         try:
             staged_path = write_product_manifest(
                 document,
                 product_name=f"综合编图 {document.meta.name}",
-                factor_task_ids=factor_ids,
-            )
-            assembly = MapProductAssembly(
-                product_name=f"综合编图 {document.meta.name}",
-                factor_task_ids=factor_ids,
+                factor_task_ids=list(assembly.factor_task_ids),
             )
             result = assemble_map_product(
                 document, assembly=assembly, catalog=catalog,

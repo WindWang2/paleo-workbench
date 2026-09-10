@@ -218,6 +218,7 @@ def register(registry) -> None:
                 "含 ERROR/BLOCKER 时拒绝。"
             ),
             handler=_map_product_review,
+            verifier=_verify_map_product_review,
             risk=ActionRisk.WRITE,
             side_effect_notes="runs product-level QA and advances record lifecycle draft->reviewed",
             category="interactive.query",
@@ -253,6 +254,7 @@ def register(registry) -> None:
                 "成功后 lifecycle=published 不可再隐式修改）。"
             ),
             handler=_map_product_publish,
+            verifier=_verify_map_product_publish,
             risk=ActionRisk.WRITE,
             side_effect_notes="runs the publish gate and advances record lifecycle frozen->published",
             category="background.compute",
@@ -427,6 +429,7 @@ def _map_product_assemble(context: ActionContext, parameters: dict) -> dict:
     from paleo_workbench.workflow.map_product import (
         MapProductAssembly,
         assemble_map_product,
+        assembly_from_workspace,
         write_product_manifest,
     )
 
@@ -441,13 +444,26 @@ def _map_product_assemble(context: ActionContext, parameters: dict) -> dict:
             product_name=str(parameters.get("product_name") or "综合编图"),
             factor_task_ids=[str(t) for t in (parameters.get("factor_task_ids") or [])],
         )
-        assembly = MapProductAssembly(
+        # V9（评审 R2-F3）：共享构造器打底（补齐 fusion/integrated 引用），
+        # 显式参数覆盖。
+        base = assembly_from_workspace(
+            context.project,
             product_name=str(parameters.get("product_name") or "综合编图"),
-            factor_task_ids=[str(t) for t in (parameters.get("factor_task_ids") or [])],
+            workspace_state=_workspace_state(context),
+        )
+        assembly = MapProductAssembly(
+            product_name=base.product_name,
+            factor_task_ids=[str(t) for t in
+                             (parameters.get("factor_task_ids")
+                              or base.factor_task_ids)],
             interpretation_refs=[str(r) for r in
-                                 (parameters.get("interpretation_refs") or [])],
-            composition_ref=parameters.get("composition_ref") or None,
-            input_set_id=str(parameters.get("input_set_id") or ""),
+                                 (parameters.get("interpretation_refs")
+                                  or base.interpretation_refs)],
+            composition_ref=parameters.get("composition_ref")
+            or base.composition_ref,
+            fusion_version_id=base.fusion_version_id,
+            integrated_interpretation_id=base.integrated_interpretation_id,
+            input_set_id=str(parameters.get("input_set_id") or base.input_set_id),
         )
         result = assemble_map_product(
             context.project, assembly=assembly, catalog=catalog,
@@ -492,6 +508,38 @@ def _verify_map_product_assemble(payload, parameters, context) -> dict:
     if run is None or str(run.status) != "complete":
         return {"verdict": "fail",
                 "reasons": [f"run {run_id} missing or incomplete"]}
+    return {"verdict": "pass", "reasons": []}
+
+
+def _verify_map_product_review(payload, parameters, context) -> dict:
+    if payload.get("error"):
+        return {"verdict": "fail", "reasons": [str(payload.get("error"))]}
+    record = _find_product(context, str(payload.get("product") or ""))
+    if record is None:
+        return {"verdict": "fail", "reasons": ["record vanished"]}
+    if str(getattr(record, "lifecycle", "")) != "reviewed":
+        return {
+            "verdict": "fail",
+            "reasons": [
+                f"lifecycle={getattr(record, 'lifecycle', '')}, expected reviewed"],
+        }
+    if not getattr(record, "product_qa", None):
+        return {"verdict": "fail", "reasons": ["no product_qa recorded"]}
+    return {"verdict": "pass", "reasons": []}
+
+
+def _verify_map_product_publish(payload, parameters, context) -> dict:
+    if payload.get("error"):
+        return {"verdict": "fail", "reasons": [str(payload.get("error"))]}
+    record = _find_product(context, str(payload.get("product") or ""))
+    if record is None:
+        return {"verdict": "fail", "reasons": ["record vanished"]}
+    if str(getattr(record, "lifecycle", "")) != "published":
+        return {
+            "verdict": "fail",
+            "reasons": [
+                f"lifecycle={getattr(record, 'lifecycle', '')}, expected published"],
+        }
     return {"verdict": "pass", "reasons": []}
 
 

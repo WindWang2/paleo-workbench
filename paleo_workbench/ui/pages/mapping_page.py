@@ -525,6 +525,7 @@ class MappingPage(QWidget):
 
         from paleo_workbench.workflow.map_product import (
             MapProductAssembly,
+            assembly_from_workspace,
             assemble_map_product,
         )
 
@@ -562,12 +563,24 @@ class MappingPage(QWidget):
             str(ref.id)
             for ref in (getattr(self._project, "horizon_interpretations", None) or [])
         ]
-        assembly = MapProductAssembly(
+        # V9（评审 R2-F3）：共享构造器（此入口保留自己的任务过滤与
+        # interpretation/composition 引用，科学谱系引用由构造器补齐）。
+        base_assembly = assembly_from_workspace(
+            self._project,
             product_name=f"{getattr(self._project.stratigraphy, 'target_horizon', '') or '综合'} 古地理成果图",
+            workspace_state=None,
+            interpretation_refs=interpretation_refs,
+            composition_ref=composition_ref,
+        )
+        assembly = MapProductAssembly(
+            product_name=base_assembly.product_name,
             factor_task_ids=[str(t.id) for t in tasks],
             interpretation_refs=interpretation_refs,
             composition_ref=composition_ref,
             notes="多因素古地理综合成果",
+            fusion_version_id=base_assembly.fusion_version_id,
+            integrated_interpretation_id=base_assembly.integrated_interpretation_id,
+            input_set_id=base_assembly.input_set_id,
         )
         manifest = {
             "product_name": assembly.product_name,

@@ -281,7 +281,13 @@ class MappingDependencyService:
         results: list[ArtifactFreshness] = []
         if workspace_state is None:
             return results
-        input_set = dict(workspace_state.compilation_input_set or {})
+        # V9（评审 R2-F1）：单一消费适配器——结构化激活输入集优先，
+        # legacy dict 回退；两个载体不再各自为政。
+        from paleo_workbench.workflow.interpretation.compilation import (
+            evidence_view,
+        )
+
+        input_set = evidence_view(document, workspace_state)
         # 先算上游（draft/factor），传播时复用。
         upstream: dict[str, ArtifactFreshness] = {
             entry.artifact_key: entry

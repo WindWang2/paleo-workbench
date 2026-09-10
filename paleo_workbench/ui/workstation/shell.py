@@ -761,12 +761,27 @@ class WorkstationFrame(QWidget):
                         task = candidate
                         break
                 if task is not None:
+                    # V9（goal §25）：优先提供 FactorSummary 契约行（诚实
+                    # 状态），Inspector 无契约时回退 legacy 直读。
+                    summary_rows = None
+                    try:
+                        from paleo_workbench.workflow.interpretation.summaries import (
+                            factor_summary_for_task,
+                        )
+
+                        summary_rows = factor_summary_for_task(
+                            self._project, str(task.id),
+                            workspace_state=state,
+                        ).to_display_dict()["rows"]
+                    except Exception:  # noqa: BLE001 — 契约失败回退直读
+                        summary_rows = None
                     self.inspector.show_payload({
                         "kind": "factor",
                         "task": task,
                         "grid": self._factor_grid_summary(record.factor_task_id),
                         "layer_id": str(layer_id),
                         "name": getattr(task, "name", None),
+                        "summary_rows": summary_rows,
                     })
                     return
             role = state.role_of(str(layer_id))

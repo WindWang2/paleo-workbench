@@ -361,15 +361,17 @@ class GeologicalMappingService:
                 stamp_fingerprints_on_task,
             )
 
+            # GeologicalFactor dataclass 字段（评审 R1-F4：此前按 dict 取键，
+            # 首点即 AttributeError 被吞——指纹从未真正盖上）。
             samples = [
                 {
-                    "well_id": p.get("well_id", ""),
-                    "x": p.get("x"),
-                    "y": p.get("y"),
-                    "z": p.get("z"),
-                    "qc_flag": p.get("qc_flag", ""),
-                    "q": p.get("q"),
-                    "b_i": p.get("b_i"),
+                    "well_id": getattr(p, "well_id", ""),
+                    "x": getattr(p, "x", None),
+                    "y": getattr(p, "y", None),
+                    "z": getattr(p, "value", None),
+                    "qc_flag": getattr(p, "qc_flag", ""),
+                    "q": getattr(p, "quality", None),
+                    "b_i": None,
                 }
                 for p in (getattr(dataset, "valid_points", None) or [])
             ]
@@ -382,8 +384,10 @@ class GeologicalMappingService:
                 target_horizon=task.target_horizon,
             )
             stamp_fingerprints_on_task(task, fingerprints)
-        except Exception:  # noqa: BLE001 — fingerprints must never break creation
-            logger.debug("fingerprint stamping skipped", exc_info=True)
+        except Exception:  # noqa: BLE001 — 指纹失败必须可见（不静默）
+            logger.warning(
+                "factor fingerprint stamping failed for task %s "
+                "(staleness anchors incomplete)", task.id, exc_info=True)
         unit = getattr(dataset, "unit", None)
         if unit:
             task.quality_metrics = {**(task.quality_metrics or {}), "unit": unit}

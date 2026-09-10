@@ -171,8 +171,11 @@ def interpretation_summary_rows(document: Any, layer_id: str) -> InterpretationS
                          f"{':' + revision.base_version_id[:12] if revision.base_version_id else ''}）"))
         if revision.evidence_refs:
             rows.append(_row("依据证据", "；".join(revision.evidence_refs)))
-    for key in ("low_confidence_fraction", "mean_conflict_fraction",
-                "high_conflict_fraction"):
+    from paleo_workbench.workflow.interpretation.integrated_interpretation import (
+        FUSION_CONFLICT_KEYS,
+    )
+
+    for key in FUSION_CONFLICT_KEYS:
         if key in interpretation.conflicts:
             rows.append(_row(f"冲突·{key}", interpretation.conflicts[key]))
     return InterpretationSummary(

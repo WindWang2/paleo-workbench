@@ -242,11 +242,15 @@ def validate_input_set(
 
 
 def _selector_with_version(selector: str, version_id: str) -> str:
-    """把钉住版本写回选择器字符串（factor/constraints/prediction 词汇）。"""
+    """把钉住版本写回选择器字符串（factor/prediction/constraint_group 词汇）。
+
+    约束组钉住时重写为**组解析后的显式选择器**（freeze 已把浮动条目展开
+    为 per-group pin——绝不产出 ``constraints::<ver>`` 这类不可解析形态）。
+    """
     parsed = parse_evidence_selector(selector)
     if parsed.kind.value in ("factor", "prediction"):
         return f"{parsed.kind.value}:{parsed.ref_id}:{version_id}"
-    if parsed.kind is not None and parsed.kind.value == "constraint_group":
+    if parsed.kind.value == "constraint_group" and parsed.ref_id:
         return f"constraints:{parsed.ref_id}:{version_id}"
     return selector
 
@@ -263,7 +267,9 @@ def freeze_input_set(
 
     钉法（诚实、按证据类型）：
     * RESOLVED → 解析出的 pinned_version_id；
-    * FLOATING（constraints:current）→ 钉到该组最新提交版本（无提交→拒绝）；
+    * FLOATING（constraints:current）→ **仅当恰好一个约束组有提交**时钉到
+      该组版本并把选择器重写为显式 ``constraints:<group>:<ver>``；多组有
+      提交 → 拒绝（浮动引用钉住一个组=给其余组留暗洞，评审 R1-F1）；
     * STALE → 仍按其钉住版本冻结（stale 是评估层判断，不阻断 freeze）；
     * UNPINNED/MISSING/UNKNOWN → 拒绝并列出全部原因（绝不带暗洞冻结）。
     """
@@ -280,12 +286,15 @@ def freeze_input_set(
             continue
         if resolution.status is EvidenceStatus.FLOATING:
             pinned = _pin_floating_constraints(document, catalog)
-            if pinned:
-                entry.pinned_version_id = pinned
-            else:
+            if pinned is None:
                 refusals.append(
-                    f"{entry.label}：constraints:current 无已提交版本——"
-                    "先提交约束版本再冻结")
+                    f"{entry.label}：constraints:current 无法安全钉住——"
+                    "无目录/无提交，或多个约束组各有提交（请改用显式 "
+                    "constraints:<组>:<版本> 条目逐组钉住）")
+                continue
+            group_id, version_id = pinned
+            entry.pinned_version_id = version_id
+            entry.selector = f"constraints:{group_id}:{version_id}"
             continue
         if resolution.status in (EvidenceStatus.RESOLVED,
                                  EvidenceStatus.STALE):
@@ -293,7 +302,7 @@ def freeze_input_set(
             continue
         refusals.append(f"{entry.label}：{resolution.status.value}（{resolution.detail}）")
     if refusals:
-        # 回滚本次尝试的 pin（freeze 是原子语义）。
+        # 回滚本次尝试的 pin 与选择器重写（freeze 是原子语义）。
         for entry in input_set.entries:
             entry.pinned_version_id = ""
         raise ValueError(
@@ -304,25 +313,32 @@ def freeze_input_set(
     return input_set
 
 
-def _pin_floating_constraints(document: Any, catalog: Any) -> str:
-    """constraints:current → 最新提交版本 id（无目录/无提交 → ""）。"""
+def _pin_floating_constraints(document: Any, catalog: Any) -> tuple[str, str] | None:
+    """constraints:current → (group_id, version_id)。
+
+    仅当**恰好一个**约束组有已提交版本时返回；零组或多组 → None
+    （多组时钉住任一组都会给其余组留下暗洞——评审 R1-F1/R2-F4）。
+    """
     if catalog is None:
-        return ""
+        return None
     try:
         from paleo_workbench.workflow.constraint_versions import (
             current_constraint_version,
         )
 
-        # 逐组取最新提交；冻结钉 per-group：这里返回首个组（调用方按
-        # entry 粒度钉——多组工程应使用显式 constraints:<group>:<ver> 条目）。
+        pinned: tuple[str, str] | None = None
         for group in getattr(document, "constraint_layers", None) or []:
             latest = current_constraint_version(
                 catalog, str(getattr(group, "id", "") or ""))
-            if latest is not None:
-                return str(getattr(latest, "id", "") or "")
+            if latest is None:
+                continue
+            if pinned is not None:
+                return None  # 多组有提交：拒绝浮动钉住
+            pinned = (str(getattr(group, "id", "") or ""),
+                      str(getattr(latest, "id", "") or ""))
+        return pinned
     except Exception:  # noqa: BLE001 — 查询失败=不可钉
-        return ""
-    return ""
+        return None
 
 
 # ----------------------------------------------------------------- 持久化辅助
@@ -364,3 +380,58 @@ def input_sets_for_document(document: Any) -> list[CompilationInputSet]:
     return [CompilationInputSet.from_dict(s)
             for s in (getattr(document, "compilation_input_sets", None) or [])
             if isinstance(s, dict) and s.get("id")]
+
+
+def evidence_view(document: Any, workspace_state: Any = None) -> dict[str, str]:
+    """Compilation Input Set 的**单一消费适配器**（评审 R2-F1）。
+
+    结构化激活输入集存在 → 其 ``legacy_view()``（label → selector）；
+    否则 → 工作区旧 ``compilation_input_set`` dict。fusion/staleness/
+    validation 一律经本函数读证据集——两个载体不再各自为政。
+    """
+    input_set = active_input_set(document)
+    if input_set is not None:
+        view = input_set.legacy_view()
+        if view:
+            return view
+    if workspace_state is None:
+        return {}
+    return {
+        str(k): str(v)
+        for k, v in (getattr(workspace_state, "compilation_input_set", None)
+                     or {}).items()
+    }
+
+
+def create_input_set_shell_from_legacy(
+    document: Any,
+    workspace_state: Any,
+    *,
+    created_by: str = "",
+) -> CompilationInputSet | None:
+    """首次结构化时从 legacy 视图迁移创建输入集外壳（评审 R2-F9：
+    迁移逻辑属于领域层，不属于 UI 模块）。"""
+    try:
+        import uuid
+
+        shell = CompilationInputSet(
+            id=f"ciset_{uuid.uuid4().hex[:12]}",
+            name="综合编图输入集", created_by=created_by)
+        for label, selector in dict(
+                getattr(workspace_state, "compilation_input_set", None)
+                or {}).items():
+            try:
+                parsed = parse_evidence_selector(str(selector))
+            except ValueError:
+                continue
+            shell.entries.append(CompilationInputSetEntry(
+                selector=parsed.raw, label=str(label),
+                evidence_kind=parsed.kind.value, added_by=created_by))
+        persist_input_set(document, shell)
+        return shell
+    except Exception:  # noqa: BLE001 — 迁移失败不阻断旧视图路径
+        import logging
+
+        logging.getLogger(__name__).debug(
+            "structured input set shell migration skipped", exc_info=True)
+        return None
