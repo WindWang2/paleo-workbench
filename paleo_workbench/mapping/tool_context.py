@@ -47,7 +47,7 @@ from paleo_workbench.mapping.capability_model import (
 
 __all__ = ["ToolContext", "build_tool_context", "TOOL_CONTEXT_CONTRACT_VERSION"]
 
-TOOL_CONTEXT_CONTRACT_VERSION = 3
+TOOL_CONTEXT_CONTRACT_VERSION = 4
 
 
 def _topology_engine_available(native_canvas: bool, capability: frozenset[str]) -> bool:
@@ -126,6 +126,12 @@ class ToolContext:
     split_ready: bool = False
     merge_ready: bool = False
     reshape_ready: bool = False
+
+    # V10 complex-geometry facts (contract_version=4): multipart selection count
+    # (explode gate) and collect readiness (>=2 selected singlepart features of
+    # one geometry type). O(selection), computed with the other selection facts.
+    selection_multipart_count: int = 0
+    collect_ready: bool = False
 
     # GIS state
     snapping_available: bool = True
@@ -252,6 +258,8 @@ def build_tool_context(
             str(value) for value in state.get("selection_geometry_types", ()) or ()
         ),
         compatible_polygon_count=int(state.get("compatible_polygon_count", 0) or 0),
+        selection_multipart_count=int(state.get("selection_multipart_count", 0) or 0),
+        collect_ready=bool(state.get("collect_ready", False)),
         topology_error_count=int(state.get("topology_error_count", 0) or 0),
         split_ready=bool(state.get("split_ready", False)),
         merge_ready=bool(state.get("merge_ready", False)),

@@ -29,8 +29,10 @@ __all__ = [
     "MeasureDistanceTool",
     "MoveFeatureTool",
     "PanTool",
+    "PartCaptureTool",
     "RectangleSelectTool",
     "ReshapeTool",
+    "RingCaptureTool",
     "SelectTool",
     "VertexTool",
     "ZoomTool",
@@ -610,3 +612,95 @@ class VertexTool(MapTool):
             on_vertex_committed=self._on_vertex_committed,
             source_suffix="native",
         )
+
+    def commit_vertex_insert(
+        self, feature_id: str, path: tuple[int, ...], point: Point
+    ) -> bool:
+        """V10 原生双击段上插点落会话（native-only，无 fallback 输入路径）。
+
+        一个手势 = 一个宏 = 一个 undo 单元；insert 不做跨层共享顶点传播
+        （TopologyService 传播语义目前仅覆盖 move——见 V10 known limitations）。
+        最少顶点守卫在 session（权威），失败即拒绝（False）。
+        """
+        try:
+            self.session.begin_edit_command()
+            with self.session.edit_source("vertex(native)"):
+                self.session.insert_vertex(
+                    str(feature_id), tuple(int(i) for i in path), point)
+        except Exception as exc:
+            self.session.destroy_edit_command()
+            _logger.debug("native vertex insert rejected: %s", exc)
+            return False
+        self.session.end_edit_command()
+        return True
+
+    def commit_vertex_delete(self, feature_id: str, path: tuple[int, ...]) -> bool:
+        """V10 原生 Delete 键删点落会话（native-only）。守卫同 insert。"""
+        try:
+            self.session.begin_edit_command()
+            with self.session.edit_source("vertex(native)"):
+                self.session.delete_vertex(str(feature_id), tuple(int(i) for i in path))
+        except Exception as exc:
+            self.session.destroy_edit_command()
+            _logger.debug("native vertex delete rejected: %s", exc)
+            return False
+        self.session.end_edit_command()
+        return True
+
+
+class RingCaptureTool(MapTool):
+    """V10 添加内环（native-only）：原生 addPolygon 数字化器采环 → 会话 add_ring。
+
+    无鼠标路径（fallback 不获得 native 专属能力，V7 §5）。环几何取捕获
+    面要素的外环坐标（数字化器输出），session.add_ring 负责 ≥3 点与自动
+    闭合守卫。
+    """
+
+    tool_id = "add_ring"
+    edits_data = True
+
+    def __init__(
+        self,
+        session: VectorEditSession,
+        *,
+        feature_id: str,
+        apply_ring: Callable[[Mapping[str, object]], bool],
+    ) -> None:
+        super().__init__()
+        self.session = session
+        self.feature_id = str(feature_id)
+        self._apply_ring = apply_ring
+
+    def commit_geometry(self, geometry: Mapping[str, object]) -> bool:
+        if not geometry or str(geometry.get("type")) not in {"Polygon", "MultiPolygon"}:
+            return False
+        with self.session.edit_source(f"{self.tool_id}(native)"):
+            return bool(self._apply_ring(geometry))
+
+
+class PartCaptureTool(MapTool):
+    """V10 添加部件（native-only）：原生数字化器采部件 → 桥 add_part → 会话。
+
+    部件几何类型随图层 kind（addPoint/addLine/addPolygon digitizer）。
+    """
+
+    tool_id = "add_part"
+    edits_data = True
+
+    def __init__(
+        self,
+        session: VectorEditSession,
+        *,
+        feature_id: str,
+        apply_part: Callable[[Mapping[str, object]], bool],
+    ) -> None:
+        super().__init__()
+        self.session = session
+        self.feature_id = str(feature_id)
+        self._apply_part = apply_part
+
+    def commit_geometry(self, geometry: Mapping[str, object]) -> bool:
+        if not geometry or "type" not in geometry:
+            return False
+        with self.session.edit_source(f"{self.tool_id}(native)"):
+            return bool(self._apply_part(geometry))

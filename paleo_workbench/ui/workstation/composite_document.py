@@ -1802,7 +1802,7 @@ class CompositeDocument(QWidget):
     _CANVAS_TOOL_COMMANDS = frozenset({
         "pan", "zoom_in", "zoom_out", "identify", "select", "select_rectangle",
         "measure_distance", "add_point", "add_line", "add_polygon",
-        "move_feature", "vertex", "reshape",
+        "move_feature", "vertex", "reshape", "add_ring", "add_part",
     })
 
     def _ensure_identify_layer_current(self) -> None:
@@ -1900,11 +1900,13 @@ class CompositeDocument(QWidget):
             self._save_edits_with_feedback()
         elif command_id == "rollback":
             self.edit_controller.rollback_edits()
-        elif command_id in {"undo", "redo", "delete_selected"}:
+        elif command_id in {"undo", "redo", "delete_selected", "duplicate_selected"}:
             self.edit_controller.edit_command(command_id)
-        elif command_id in {"split", "merge"}:
+        elif command_id in {"split", "merge", "explode_multipart", "collect_multipart"}:
             ok, message = self.edit_controller.geometry_command(command_id)
             if not ok:
+                self.status_message.emit(message)
+            else:
                 self.status_message.emit(message)
         elif command_id == "repair_geometry":
             layer_id = self.edit_controller.active_layer_id

@@ -244,6 +244,9 @@ class QgisCanvasShim(QWidget):
     # PwbMeasureTool::payloadJson：{"action", "points", "segments", "total",
     # "ellipsoidal"}；action ∈ measure_updated|measure_completed。
     measure_updated = Signal(dict)
+    # V10：捕捉反馈（层/要素/类型/距离）与捕获过程（点列/段长/总长 + snap）。
+    snap_feedback = Signal(dict)
+    capture_progress = Signal(dict)
     measure_canceled = Signal()
     # V7/ADV-2：原生交互提交被会话拒绝时的人类可读原因（坏几何/重复 id/
     # 脱钩会话），宿主转 status_message——采点完成必须有回执。
@@ -927,6 +930,12 @@ class QgisCanvasShim(QWidget):
                         # V7 重塑：原生 addLine 数字化器采重塑线；语义应用在
                         # Python 会话（ReshapeTool.commit_geometry）。
                         kind = "addLine"
+                    elif tool_id == "add_ring":
+                        # V10 捕获环：addPolygon 数字化器采环。
+                        kind = "addPolygon"
+                    elif tool_id == "add_part":
+                        # V10 捕获部件：digitizer 随图层 kind（控制器注入属性）。
+                        kind = getattr(tool, "native_digitize_kind", "pan")
                     try:
                         shim.stack.set_map_tool(addr, kind)
                         # V8/M1：记录最近一次成功的原生工具（可检测一致性的
@@ -976,6 +985,13 @@ class QgisCanvasShim(QWidget):
         def _on_digitize(status: str, geom_json: str) -> None:
             shim = self_ref()
             if shim is None or getattr(shim, "_shutdown_done", False):
+                return
+            if status == "digitizing":
+                # V10：捕获过程反馈（info-only，不驱动工具操作计数）。
+                try:
+                    shim.capture_progress.emit(dict(json.loads(geom_json)))
+                except Exception:
+                    pass
                 return
             if status != "completed":
                 # M3 Task 5：canceled（Esc/右键空取消）时工具条状态回流，
@@ -1060,6 +1076,27 @@ class QgisCanvasShim(QWidget):
                             payload["feature_id"],
                             float(payload["dx"]), float(payload["dy"]),
                         ))
+                elif action == "vertex_inserted":
+                    commit = getattr(tool, "commit_vertex_insert", None)
+                    if commit is not None:
+                        ok = bool(commit(
+                            payload["feature_id"],
+                            tuple(payload["path"]),
+                            (float(payload["x"]), float(payload["y"])),
+                        ))
+                elif action == "vertex_deleted":
+                    commit = getattr(tool, "commit_vertex_delete", None)
+                    if commit is not None:
+                        ok = bool(commit(
+                            payload["feature_id"],
+                            tuple(payload["path"]),
+                        ))
+                elif action == "snap_feedback":
+                    # V10：捕捉反馈上浮（info-only 信号，与工具操作解耦）。
+                    try:
+                        shim.snap_feedback.emit(dict(payload))
+                    except Exception:
+                        pass
             except Exception:
                 ok = False
             if ok:

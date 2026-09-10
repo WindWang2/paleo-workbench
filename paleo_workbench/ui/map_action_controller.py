@@ -40,7 +40,7 @@ class MapActionController(QObject):
     _TOOL_IDS = (
         "pan", "zoom_in", "zoom_out", "identify", "select", "select_rectangle",
         "measure_distance", "add_point", "add_line", "add_polygon", "move_feature", "vertex",
-        "reshape",
+        "reshape", "add_ring", "add_part",
     )
 
     #: 词表单一来源（V8 M4：action_help.TOOL_LABELS；帮助/QAction 同名）。
@@ -94,6 +94,7 @@ class MapActionController(QObject):
             "clear_selection", "select_all", "invert_selection", "toggle_editing",
             "save_edits", "rollback", "delete_selected",
             "undo", "redo", "split", "merge",
+            "duplicate_selected", "explode_multipart", "collect_multipart",
             "snapping", "topology", "cancel",
         ):
             shortcut = shortcut_registry.get(action_id, "")
