@@ -104,6 +104,16 @@ _LINEAGE_EXPECTED_OPS = frozenset(
         "map_compile",
         "qc",
         "modeling",
+        # V9 (P1-12): scientific ops that previously escaped lineage
+        # expectations — a lineage-less fusion/commit/assembly run read as
+        # fresh-by-default instead of UNKNOWN, and could never be planned
+        # for recompute.
+        "factor_fusion",
+        "factor_fusion:confidence",
+        "factor_fusion:variance",
+        "constraint_commit",
+        "map_product_assembly",
+        "integrated_interpretation",
     }
 )
 
@@ -825,6 +835,9 @@ class FreshnessService:
             "map_compile": "map_compile",
             "qc": "qc",
             "export": "export",
+            # V9 (P1-12): fusion-stage freshness for the home workflow strip
+            # (fusion runs previously had no staleness slot at all).
+            "factor_fusion": "factor_fusion",
         }
         op = op_map.get(step_type)
         if op is None:

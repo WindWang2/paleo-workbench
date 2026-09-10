@@ -29,6 +29,7 @@ from paleo_workbench.workflow.map_product import (
     compare_map_products,
     find_map_product,
     freeze_map_product,
+    review_map_product,
     product_staleness,
     promote_map_product,
     publish_map_product,
@@ -101,6 +102,7 @@ def test_clone_is_independent_record_over_same_versions(project, catalog, tmp_pa
 def test_clone_frozen_record_refused(project, catalog, tmp_path):
     result = _assemble(project, catalog, tmp_path)
     record = find_map_product(project, result.record_id)
+    review_map_product(record, project)
     freeze_map_product(record)
     with pytest.raises(ValueError, match="frozen"):
         clone_map_product(record, project)
@@ -204,6 +206,7 @@ def test_staleness_detects_rerendered_inputs(project, catalog, tmp_path):
 def test_freeze_blocks_rerun(project, catalog, tmp_path):
     result = _assemble(project, catalog, tmp_path)
     record = find_map_product(project, result.record_id)
+    review_map_product(record, project)
     freeze_map_product(record)
     assert record.frozen is True
     (tmp_path / "x.json").write_text("{}", encoding="utf-8")
@@ -236,6 +239,9 @@ def _record(rid, project):
 def test_publish_gate_blocks_stale(project, catalog, tmp_path):
     result = _assemble(project, catalog, tmp_path)
     record = find_map_product(project, result.record_id)
+    # V9（goal §31）：publish 阶梯——评审 → 冻结 → 发布。
+    review_map_product(record, project)
+    freeze_map_product(record)
     report = publish_map_product(record, project, export_path="/tmp/out.png")
     assert report["ok"] is True
 
@@ -278,6 +284,7 @@ def test_supersede_frozen_and_double_supersede_refused(project):
     record_a = _record("sa", project)
     record_b = _record("sb", project)
     record_c = _record("sc", project)
+    record_a.lifecycle = "reviewed"  # 阶梯：冻结需先评审（legacy 直置）
     freeze_map_product(record_a)
     with pytest.raises(ValueError, match="frozen"):
         supersede_map_product(record_a, project, successor=record_b)

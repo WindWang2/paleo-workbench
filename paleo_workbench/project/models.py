@@ -548,9 +548,22 @@ class MapProductRecord(BaseModel):
     frozen: bool = False
     superseded_by: str | None = None
     cloned_from: str | None = None
+    # Lifecycle V3 (V9, goal §31): explicit maturity ladder. Legacy records
+    # reconcile on read (frozen→frozen / superseded→superseded / else draft);
+    # "final" maps to draft-awaiting-review — assembly complete is not review.
+    lifecycle: Literal["draft", "reviewed", "frozen", "published", "superseded"] = "draft"
+    #: 产品级 QA（V9 goal §30/§31）：severity 词汇 INFO/WARNING/ERROR/BLOCKER；
+    #: BLOCKER 阻断 publish。schema 由 workflow.map_product.product_qa 拥有。
+    product_qa: dict[str, Any] = Field(default_factory=dict)
     # Assembly-time manual adjustments (review R1-P2): staleness must rebuild
     # the fingerprint WITH them, or any adjusted product reads stale forever.
     manual_adjustments: list[dict[str, Any]] = Field(default_factory=list)
+    # V9 (R1-F5/R2-F2): the assembly's scientific-lineage refs persist on the
+    # record — staleness reconstructs the fingerprint from them; without
+    # persistence every V9-enriched product reads stale forever.
+    fusion_version_id: str = ""
+    integrated_interpretation_id: str = ""
+    input_set_id: str = ""
 
 
 class UserVectorFeature(BaseModel):
@@ -646,6 +659,15 @@ class ProjectDocument(BaseModel):
     # 纯 dict 载体——schema 由 mapping_workspace.stage_state 拥有；用户 UI
     # 偏好（dock 几何/组展开）留在 QSettings，不进科学工程。
     mapping_workspace: dict[str, Any] = Field(default_factory=dict)
+    # V9 CompilationInputSet（ADR-7）：Phase 3 科学运行的 pinned 输入集。
+    # 纯 dict 载体——schema 由 workflow.interpretation.compilation 拥有；
+    # mapping_workspace.compilation_input_set 保留为兼容视图。
+    compilation_input_sets: list[dict[str, Any]] = Field(default_factory=list)
+    # V9 IntegratedInterpretation / InterpretationRevision（ADR-8）：综合
+    # 解释一等成果与人工修订溯源（dict 载体，schema 由
+    # workflow.interpretation.integrated_interpretation / revision 拥有）。
+    integrated_interpretations: list[dict[str, Any]] = Field(default_factory=list)
+    interpretation_revisions: list[dict[str, Any]] = Field(default_factory=list)
 
     @classmethod
     def new(cls, name: str, region: str = "") -> "ProjectDocument":

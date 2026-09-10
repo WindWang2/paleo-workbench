@@ -320,6 +320,7 @@ def test_scheduler_marks_cancelled_task_not_failed():
         while _time.monotonic() < deadline and handle.state in (
             TaskState.QUEUED,
             TaskState.RUNNING,
+            TaskState.CANCELLING,
         ):
             _time.sleep(0.01)
         assert handle.state is TaskState.CANCELLED

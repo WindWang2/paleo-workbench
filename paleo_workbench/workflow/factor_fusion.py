@@ -292,7 +292,8 @@ class FusionResult:
         }
 
 
-def _aligned_or_raise(grids: Sequence[FactorGridResult]) -> None:
+def _aligned_or_raise(grids: Sequence[FactorGridResult]) -> str | None:
+    """ CRS 纪律检查；返回融合结果应携带的已声明 CRS（全未声明→None）。"""
     first = grids[0]
     for other in grids[1:]:
         if other.shape != first.shape:
@@ -306,13 +307,30 @@ def _aligned_or_raise(grids: Sequence[FactorGridResult]) -> None:
             raise ValueError("evidence grid axes differ — resample to a common grid first")
         # V6 §16 (P1-11): same-shape grids in DIFFERENT CRSs fuse silently —
         # refuse: the coordinates are not comparable until reprojected.
+        # V9 (P0-5): a DECLARED grid fused with an UNDECLARED (crs=None) grid
+        # is the same scientific error — the None side bypassed the old
+        # `crs_a and crs_b` guard and produced a confidently wrong surface.
+        # Undeclared CRS is never guessed (FactorGridResult contract): refuse.
         crs_a = str(first.crs or "").strip()
         crs_b = str(other.crs or "").strip()
+        if crs_a and not crs_b:
+            raise ValueError(
+                f"evidence grid {other.factor_name!r} declares no CRS while "
+                f"{first.factor_name!r} declares {crs_a!r} — mixed CRS "
+                "discipline is not fusable; reproject or declare first"
+            )
+        if crs_b and not crs_a:
+            raise ValueError(
+                f"evidence grid {first.factor_name!r} declares no CRS while "
+                f"{other.factor_name!r} declares {crs_b!r} — mixed CRS "
+                "discipline is not fusable; reproject or declare first"
+            )
         if crs_a and crs_b and crs_a != crs_b:
             raise ValueError(
                 f"evidence grids declare different CRSs ({crs_a!r} vs {crs_b!r}); "
                 "reproject to a common CRS before fusing"
             )
+    return str(first.crs or "").strip() or None
 
 
 def _build_grid(
@@ -351,7 +369,7 @@ def fuse(model: FusionModel) -> FusionResult:
 
 def _fuse_weighted(model: FusionModel) -> FusionResult:
     grids = [ev.grid for ev in model.evidences]
-    _aligned_or_raise(grids)
+    fused_crs = _aligned_or_raise(grids)
     reference = grids[0]
     # V6 §16 (P1-11): normalization bounds live in each factor's OWN unit;
     # a bounds-vs-grid unit mismatch (percent grid with 0..1 bounds) or a
@@ -519,6 +537,11 @@ def _fuse_weighted(model: FusionModel) -> FusionResult:
         "high_conflict_fraction": high_conflict_fraction,
         "low_margin_fraction": low_margin_fraction,
     }
+    if fused_crs is None:
+        # V9 (P0-5) honesty: every input CRS undeclared — the fusion still
+        # runs on the shared project grid, but the product must never read
+        # as CRS-verified.
+        qc["crs_undeclared"] = True
     result = FusionResult(
         model=model,
         model_dict=model.to_dict(),
@@ -534,7 +557,7 @@ def _fuse_weighted(model: FusionModel) -> FusionResult:
 
 def _fuse_rule_based(model: FusionModel) -> FusionResult:
     grids = {ev.factor_name: ev.grid for ev in model.evidences}
-    _aligned_or_raise([ev.grid for ev in model.evidences])
+    fused_crs = _aligned_or_raise([ev.grid for ev in model.evidences])
     reference = next(iter(grids.values()))
     shape = reference.shape
     fields = {name: g.grid_z.astype(float) for name, g in grids.items()}
@@ -580,6 +603,11 @@ def _fuse_rule_based(model: FusionModel) -> FusionResult:
         "unclassified_cells": int(no_evidence.sum()),
         "rule_hits": {model.rules[i].class_name: hits for i, hits in rule_hits.items()},
     }
+    if fused_crs is None:
+        # V9 (P0-5) honesty: every input CRS undeclared — the fusion still
+        # runs on the shared project grid, but the product must never read
+        # as CRS-verified.
+        qc["crs_undeclared"] = True
     result = FusionResult(
         model=model,
         model_dict=model.to_dict(),

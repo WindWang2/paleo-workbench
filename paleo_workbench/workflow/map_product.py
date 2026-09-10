@@ -40,6 +40,12 @@ class MapProductAssembly:
     # Manual adjustments are recorded as free-form entries (author, what,
     # why) — the honest representation of expert editing before finalization.
     manual_adjustments: list[dict[str, Any]] = field(default_factory=list)
+    # V9 (P1-6): the computational interpretation is composable into the
+    # product — fusion seed version, integrated interpretation record, and
+    # the pinned compilation input set join the recipe + fingerprint.
+    fusion_version_id: str = ""
+    integrated_interpretation_id: str = ""
+    input_set_id: str = ""
 
     def scientific_fingerprint(self, project: ProjectDocument) -> str:
         """Deterministic content fingerprint over the assembly's inputs.
@@ -64,9 +70,58 @@ class MapProductAssembly:
                 json.dumps(a, sort_keys=True, ensure_ascii=False)
                 for a in self.manual_adjustments
             ),
+            "fusion_version": self.fusion_version_id,
+            "integrated_interpretation": self.integrated_interpretation_id,
+            "input_set": self.input_set_id,
         }
         blob = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
         return hashlib.sha256(blob).hexdigest()
+
+
+def assembly_from_workspace(
+    project: ProjectDocument,
+    *,
+    product_name: str,
+    workspace_state: Any = None,
+    interpretation_refs: list[str] | None = None,
+    composition_ref: str | None = None,
+) -> MapProductAssembly:
+    """从工作区输入集构建装配配方（评审 R2-F3：三个入口共用一个构造器）。
+
+    factor ids 取自 Compilation Input Set 的 factor: 条目；V9 科学谱系引用
+    （fusion 版本 / 综合解释 / 输入集 id）自动携带。
+    """
+    from paleo_workbench.workflow.interpretation.compilation import (
+        active_input_set,
+        evidence_view,
+    )
+
+    view = evidence_view(project, workspace_state)
+    factor_ids = [
+        value.split(":")[1] for value in view.values()
+        if str(value).startswith("factor:") and len(str(value).split(":")) > 1
+    ]
+    input_set = active_input_set(project)
+    fusion_version = ""
+    integrated_id = ""
+    for interpretation in getattr(project, "integrated_interpretations", None) or []:
+        if not isinstance(interpretation, dict):
+            continue
+        # 评审 R3-F9：谱系引用最新融合版本（种子可能已被重跑取代）。
+        candidate = interpretation.get("latest_fusion_version_id")             or interpretation.get("fusion_version_id")
+        if candidate:
+            fusion_version = str(candidate)
+        if interpretation.get("interpretation_id"):
+            integrated_id = str(interpretation["interpretation_id"])
+    return MapProductAssembly(
+        product_name=product_name,
+        factor_task_ids=factor_ids,
+        interpretation_refs=list(interpretation_refs or []),
+        composition_ref=composition_ref,
+        fusion_version_id=fusion_version,
+        integrated_interpretation_id=integrated_id,
+        input_set_id=input_set.id if input_set else "",
+    )
 
 
 def write_product_manifest(
@@ -176,6 +231,9 @@ def assemble_map_product(
             "manual_adjustments": list(assembly.manual_adjustments),
             "notes": assembly.notes,
             "scientific_fingerprint": fingerprint,
+            "fusion_version_id": assembly.fusion_version_id,
+            "integrated_interpretation_id": assembly.integrated_interpretation_id,
+            "input_set_id": assembly.input_set_id,
             # Assembly-time per-factor truth: what the product ACTUALLY
             # consumed. Comparisons must read this, not the live tasks
             # (which keep evolving after the product exists).
@@ -237,6 +295,10 @@ def assemble_map_product(
         run_id=run.id,
         scientific_fingerprint=fingerprint,
         manual_adjustments=list(assembly.manual_adjustments),
+        # V9（评审 R1-F5）：科学谱系引用持久化到记录（staleness 重建用）。
+        fusion_version_id=assembly.fusion_version_id,
+        integrated_interpretation_id=assembly.integrated_interpretation_id,
+        input_set_id=assembly.input_set_id,
     )
     project.map_products = [*list(getattr(project, "map_products", None) or []), record]
     return MapProductResult(
@@ -394,7 +456,178 @@ def find_map_product(project: ProjectDocument, record_id: str) -> MapProductReco
 def _record_is_frozen(record: MapProductRecord) -> bool:
     if getattr(record, "frozen", False):
         return True
-    return False
+    return effective_lifecycle(record) in ("frozen", "published")
+
+
+#: V9 生命周期阶梯（goal §31）。legacy 记录在读取时和解：
+#: frozen=True → frozen；status=superseded → superseded；其余（含旧
+#: "final"）→ draft——组装完成不等于已评审。
+LIFECYCLE_DRAFT = "draft"
+LIFECYCLE_REVIEWED = "reviewed"
+LIFECYCLE_FROZEN = "frozen"
+LIFECYCLE_PUBLISHED = "published"
+LIFECYCLE_SUPERSEDED = "superseded"
+
+_LIFECYCLE_ORDER = {
+    LIFECYCLE_DRAFT: 0,
+    LIFECYCLE_REVIEWED: 1,
+    LIFECYCLE_FROZEN: 2,
+    LIFECYCLE_PUBLISHED: 3,
+    LIFECYCLE_SUPERSEDED: 4,
+}
+
+
+def effective_lifecycle(record: MapProductRecord) -> str:
+    """记录的有效生命周期（显式字段优先，legacy 标志和解兜底）。"""
+    explicit = str(getattr(record, "lifecycle", "") or "")
+    if explicit == LIFECYCLE_DRAFT:
+        # draft 也可能与 legacy frozen 标志共存（旧 freeze 只翻布尔）。
+        if getattr(record, "frozen", False):
+            return LIFECYCLE_FROZEN
+        if record.status == PRODUCT_STATUS_SUPERSEDED:
+            return LIFECYCLE_SUPERSEDED
+        return LIFECYCLE_DRAFT
+    if explicit in _LIFECYCLE_ORDER:
+        return explicit
+    # 无字段（极旧记录）：按 legacy 标志推导。
+    if getattr(record, "frozen", False):
+        return LIFECYCLE_FROZEN
+    if record.status == PRODUCT_STATUS_SUPERSEDED:
+        return LIFECYCLE_SUPERSEDED
+    return LIFECYCLE_DRAFT
+
+
+#: 产品级 QA severity 词汇（goal §30）。BLOCKER 阻断 publish。
+QA_INFO = "info"
+QA_WARNING = "warning"
+QA_ERROR = "error"
+QA_BLOCKER = "blocker"
+
+
+def product_qa(
+    record: MapProductRecord,
+    project: ProjectDocument,
+    *,
+    catalog: Any = None,
+    workspace_state: Any = None,
+) -> dict[str, Any]:
+    """产品级 QA（goal §30）：input/geometry/result/publication 检查 + 统一
+    staleness verdict → severity 分级 findings（INFO/WARNING/ERROR/BLOCKER）。
+
+    报告挂到 ``record.product_qa``（产品域，不再只看工程级 active report）。
+    """
+    findings: list[dict[str, Any]] = []
+
+    def add(severity: str, stage: str, message: str) -> None:
+        findings.append({"severity": severity, "stage": stage, "message": message})
+
+    # 输入完备性。
+    if not (record.factor_task_ids or []):
+        add(QA_ERROR, "input", "产品未引用任何单因素任务")
+    catalog_present = catalog is not None
+    for task_id in record.factor_task_ids or []:
+        task = next(
+            (t for t in getattr(project, "factor_map_tasks", None) or []
+             if str(t.id) == str(task_id)), None)
+        if task is None:
+            add(QA_ERROR, "input", f"单因素任务 {task_id} 不存在（输入缺失）")
+            continue
+        grid_version = str(getattr(task, "grid_artifact_version_id", "") or "")
+        if not grid_version:
+            add(QA_ERROR, "input", f"单因素 {task.name}：结果无登记版本")
+        elif catalog_present:
+            try:
+                resolved = catalog.resolve_version(grid_version)
+            except Exception:  # noqa: BLE001 — 解析失败按不可解析处理
+                resolved = None
+            if resolved is None:
+                # goal §30 BLOCKER：产品输入载荷已不可解析——产品科学上
+                # 已失效，发布不可被 accept_warnings 豁免。
+                add(QA_BLOCKER, "input",
+                    f"单因素 {task.name}：结果版本 {grid_version} 在目录中"
+                    "不可解析（载荷缺失/被清理）——产品输入已失效")
+        unit = (task.quality_metrics or {}).get("unit") \
+            or (task.parameters or {}).get("unit")
+        if not str(unit or "").strip():
+            add(QA_WARNING, "input", f"单因素 {task.name}：单位未声明")
+        if (task.quality_metrics or {}).get("variance_min") is None:
+            add(QA_WARNING, "result", f"单因素 {task.name}：无不确定度面")
+        constraint_diag = (task.parameters or {}).get("constraint_diagnostics") or {}
+        if constraint_diag.get("unsupported_constraints"):
+            add(QA_WARNING, "input",
+                f"单因素 {task.name}：约束 "
+                f"{constraint_diag['unsupported_constraints']} 被方法忽略")
+        if str(getattr(task, "source_kind", "")) in ("mock", "mixed"):
+            add(QA_WARNING, "input", f"单因素 {task.name}：含模拟数据")
+
+    # 统一 staleness verdict（V9：产品域）。
+    try:
+        from paleo_workbench.workflow.interpretation.staleness import (
+            evaluate_verdict,
+        )
+
+        verdict = evaluate_verdict(
+            project, f"mapproduct:{record.id}",
+            catalog=catalog, workspace_state=workspace_state)
+        if verdict.verdict.value == "missing_input":
+            add(QA_ERROR, "input", f"产品输入缺失：{verdict.detail}")
+        elif verdict.verdict.value == "unknown":
+            add(QA_WARNING, "input",
+                f"产品新鲜度未知（{verdict.detail or '无溯源 run'}）——不可证明为最新")
+        elif verdict.is_problem:
+            add(QA_ERROR, "input",
+                f"产品{verdict.label}：{verdict.detail or '上游已变化'}")
+    except Exception as exc:  # noqa: BLE001 — QA 评估失败=未知，不猜通过
+        add(QA_WARNING, "input", f"产品新鲜度评估失败：{exc}")
+
+    # 溯源完备性。
+    if not str(getattr(record, "run_id", "") or ""):
+        add(QA_ERROR, "provenance", "产品无溯源 run（组装未登记）")
+    if not str(getattr(record, "output_version_id", "") or ""):
+        add(QA_ERROR, "provenance", "产品无输出版本")
+
+    severities = {f["severity"] for f in findings}
+    report = {
+        "schema": 1,
+        "product_id": record.id,
+        "findings": findings,
+        "counts": {
+            severity: sum(1 for f in findings if f["severity"] == severity)
+            for severity in (QA_INFO, QA_WARNING, QA_ERROR, QA_BLOCKER)
+        },
+        "has_blocker": QA_BLOCKER in severities,
+        "has_error": QA_ERROR in severities,
+        "status": ("blocked" if QA_BLOCKER in severities
+                   else "error" if QA_ERROR in severities
+                   else "warning" if QA_WARNING in severities
+                   else "passed"),
+    }
+    record.product_qa = report
+    return report
+
+
+def review_map_product(
+    record: MapProductRecord,
+    project: ProjectDocument,
+    *,
+    catalog: Any = None,
+    workspace_state: Any = None,
+) -> dict[str, Any]:
+    """draft → reviewed（需产品级 QA 无 ERROR/BLOCKER）。"""
+    lifecycle = effective_lifecycle(record)
+    if lifecycle != LIFECYCLE_DRAFT:
+        raise ValueError(
+            f"product {record.id} lifecycle is {lifecycle}; only draft products can be reviewed")
+    report = product_qa(record, project, catalog=catalog,
+                        workspace_state=workspace_state)
+    if report["has_error"] or report["has_blocker"]:
+        raise ValueError(
+            f"product {record.id} cannot pass review — QA status "
+            f"{report['status']}: "
+            + "; ".join(f["message"] for f in report["findings"]
+                        if f["severity"] in (QA_ERROR, QA_BLOCKER)))
+    record.lifecycle = LIFECYCLE_REVIEWED
+    return report
 
 
 def clone_map_product(
@@ -475,6 +708,7 @@ def rerun_map_product(
     successor.cloned_from = successor.cloned_from or record.id
     record.status = PRODUCT_STATUS_SUPERSEDED
     record.superseded_by = successor.id
+    record.lifecycle = LIFECYCLE_SUPERSEDED
     result.superseded_record_id = record.id
     return result
 
@@ -596,6 +830,9 @@ def product_staleness(
 
     A product is stale when any factor task re-interpolated (new grid
     version) or the assembly membership changed since it was built.
+    V9（评审 R1-F5）：重建当前装配时携带持久化在记录上的 V9 引用
+    （fusion/integrated/input_set）——否则凡是带引用组装的产品永久误报
+    stale，publish 被砖死。
     """
     current = MapProductAssembly(
         product_name=record.product_name,
@@ -605,6 +842,10 @@ def product_staleness(
         manual_adjustments=[
             dict(a) for a in getattr(record, "manual_adjustments", None) or []
         ],
+        fusion_version_id=str(getattr(record, "fusion_version_id", "") or ""),
+        integrated_interpretation_id=str(
+            getattr(record, "integrated_interpretation_id", "") or ""),
+        input_set_id=str(getattr(record, "input_set_id", "") or ""),
     )
     current_fingerprint = current.scientific_fingerprint(project)
     stale = current_fingerprint != record.scientific_fingerprint
@@ -617,8 +858,34 @@ def product_staleness(
 
 
 def freeze_map_product(record: MapProductRecord, *, frozen: bool = True) -> None:
-    """Freeze/unfreeze a record: frozen records refuse clone/rerun/supersede."""
-    record.frozen = bool(frozen)
+    """Freeze/unfreeze a record: frozen records refuse clone/rerun/supersede.
+
+    V9：freeze 同步显式 lifecycle——
+    * freeze 要求 REVIEWED（goal §31 阶梯：评审 → 冻结；legacy frozen
+      标志和解除外——旧记录本就处于冻结语义）；
+    * unfreeze 回 draft（冻结解除即回到草稿语义，绝不停留在较高阶梯），
+      但 PUBLISHED 不可解冻（发布不可变；取代走 supersede）。
+    """
+    lifecycle = effective_lifecycle(record)
+    if frozen:
+        if lifecycle == LIFECYCLE_PUBLISHED:
+            raise ValueError(
+                f"product {record.id} is published — published products are "
+                "immutable; supersede instead")
+        if lifecycle == LIFECYCLE_DRAFT and not getattr(record, "frozen", False):
+            raise ValueError(
+                f"product {record.id} is draft — review before freezing "
+                "(goal §31 ladder: review → freeze → publish)")
+        record.frozen = True
+        record.lifecycle = LIFECYCLE_FROZEN
+    else:
+        if lifecycle == LIFECYCLE_PUBLISHED or getattr(record, "lifecycle", "") \
+                == LIFECYCLE_PUBLISHED:
+            raise ValueError(
+                f"product {record.id} is published — published products are "
+                "immutable; supersede instead of unfreezing")
+        record.frozen = False
+        record.lifecycle = LIFECYCLE_DRAFT
 
 
 def supersede_map_product(
@@ -639,6 +906,7 @@ def supersede_map_product(
         )
     record.status = PRODUCT_STATUS_SUPERSEDED
     record.superseded_by = successor.id
+    record.lifecycle = LIFECYCLE_SUPERSEDED
 
 
 def promote_map_product(record: MapProductRecord, *, catalog: Any) -> str:
@@ -665,6 +933,8 @@ def publish_map_product(
     *,
     export_path: str | Path | None = None,
     accept_warnings: bool = True,
+    catalog: Any = None,
+    workspace_state: Any = None,
 ) -> dict[str, Any]:
     """Publish gate: refuse stale/superseded/unverifiable products (V6 §17).
 
@@ -676,11 +946,32 @@ def publish_map_product(
     refuse on them too): factor units undeclared, unreviewed constraint
     diagnostics, missing uncertainty surfaces. The product publishes with
     its honesty record attached; nothing is dropped silently.
+
+    V9 (goal §31): publish additionally requires the explicit lifecycle —
+    only FROZEN products publish (draft/reviewed must review+freeze
+    first), and any product-level BLOCKER finding (product_qa) refuses the
+    publish regardless of ``accept_warnings``.
     """
     problems: list[str] = []
     warnings: list[str] = []
     if record.status == PRODUCT_STATUS_SUPERSEDED:
         problems.append(f"superseded by {record.superseded_by}")
+    lifecycle = effective_lifecycle(record)
+    if lifecycle != LIFECYCLE_FROZEN:
+        problems.append(
+            f"lifecycle is {lifecycle} — only frozen products publish "
+            "(review → freeze first; goal §31 ladder)"
+        )
+    # 产品级 QA：BLOCKER 一票否决（不可被 accept_warnings 豁免）；ERROR
+    # 同样阻断（评审 R3-F1：指纹说"没变"而统一 staleness 说"上游已过期"
+    # 时，发布绝不能拣乐观的那个引擎放行）。
+    qa = product_qa(record, project, catalog=catalog,
+                    workspace_state=workspace_state)
+    for finding in qa.get("findings") or []:
+        if finding.get("severity") == QA_BLOCKER:
+            problems.append(f"[BLOCKER] {finding.get('message', '')}")
+        elif finding.get("severity") == QA_ERROR:
+            problems.append(f"[ERROR] {finding.get('message', '')}")
     staleness = product_staleness(record, project)
     if staleness["stale"]:
         problems.append(staleness["reason"])
@@ -774,10 +1065,13 @@ def publish_map_product(
         "problems": problems,
         "warnings": warnings,
         "staleness": staleness,
+        "product_qa": qa,
+        "lifecycle_before": lifecycle,
         "export_path": str(export_path) if export_path else None,
     }
     if problems:
         raise ValueError("product cannot be published: " + "; ".join(problems))
+    record.lifecycle = LIFECYCLE_PUBLISHED  # 冻结阶梯顶点（不可再改）
     return report
 
 

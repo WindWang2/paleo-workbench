@@ -303,6 +303,13 @@ class GeologicalMappingService:
                 }
         project.factor_map_tasks.append(task)
 
+        # V9 (P0-1): this service path must carry the SAME staleness anchors
+        # as the factor_interpolation path — constraint pins (content hashes
+        # bound at interpolation time) + input fingerprints + declared unit.
+        # Without them a later constraint edit can never mark this task
+        # stale_content and incremental recompute skips it forever.
+        self._stamp_staleness_anchors(task, project, dataset, options)
+
         # 3. Create or update PaleoMapDocument compatibility record.
         # The vector features below are the interoperable payload; the
         # continuous GridMapLayer stays reachable through the factor task
@@ -339,6 +346,59 @@ class GeologicalMappingService:
 
         logger.info("Created geological factor map %r with %d layers", doc_title, len(map_doc.layers))
         return map_doc, task
+
+
+    def _stamp_staleness_anchors(self, task, project, dataset, options) -> None:
+        """约束 pin + 输入指纹 + 单位（与 factor_interpolation 路径对等，P0-1）。"""
+        try:
+            from paleo_workbench.workflow.constraint_versions import (
+                constraint_pins_for_task,
+            )
+
+            pins = constraint_pins_for_task(task, project)
+            if pins:
+                task.parameters = {
+                    **(task.parameters or {}),
+                    "constraint_pins": pins,
+                }
+        except Exception:  # noqa: BLE001 — pinning must never break creation
+            logger.debug("constraint pinning skipped", exc_info=True)
+        try:
+            from paleo_workbench.workflow.interpolation_fingerprint import (
+                build_factor_fingerprints,
+                stamp_fingerprints_on_task,
+            )
+
+            # GeologicalFactor dataclass 字段（评审 R1-F4：此前按 dict 取键，
+            # 首点即 AttributeError 被吞——指纹从未真正盖上）。
+            samples = [
+                {
+                    "well_id": getattr(p, "well_id", ""),
+                    "x": getattr(p, "x", None),
+                    "y": getattr(p, "y", None),
+                    "z": getattr(p, "value", None),
+                    "qc_flag": getattr(p, "qc_flag", ""),
+                    "q": getattr(p, "quality", None),
+                    "b_i": None,
+                }
+                for p in (getattr(dataset, "valid_points", None) or [])
+            ]
+            fingerprints = build_factor_fingerprints(
+                sample_points=samples,
+                method=options.method,
+                grid_n=options.grid_n,
+                power=getattr(options, "power", 2.0) or 2.0,
+                crs=getattr(dataset, "crs", None),
+                target_horizon=task.target_horizon,
+            )
+            stamp_fingerprints_on_task(task, fingerprints)
+        except Exception:  # noqa: BLE001 — 指纹失败必须可见（不静默）
+            logger.warning(
+                "factor fingerprint stamping failed for task %s "
+                "(staleness anchors incomplete)", task.id, exc_info=True)
+        unit = getattr(dataset, "unit", None)
+        if unit:
+            task.quality_metrics = {**(task.quality_metrics or {}), "unit": unit}
 
 
 DEFAULT_GEOLOGICAL_MAPPING_SERVICE = GeologicalMappingService()

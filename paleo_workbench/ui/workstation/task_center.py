@@ -228,6 +228,9 @@ class _TaskRowDelegate(QStyledItemDelegate):
             elif handle.state is TaskState.CANCELLED:
                 painter.setPen(QColor(pal["TEXT_SECONDARY"]))
                 painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "已取消")
+            elif handle.state is TaskState.DEGRADED:
+                painter.setPen(QColor(pal["WARNING"]))
+                painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "降级完成")
             else:
                 track = QColor(pal["BORDER_LIGHT"])
                 painter.fillRect(rect, track)
@@ -263,7 +266,9 @@ class _TaskRowDelegate(QStyledItemDelegate):
         labels = {
             TaskState.QUEUED: "排队",
             TaskState.RUNNING: "运行中",
+            TaskState.CANCELLING: "取消中",
             TaskState.DONE: "完成",
+            TaskState.DEGRADED: "降级完成",
             TaskState.FAILED: "失败",
             TaskState.CANCELLED: "已取消",
         }

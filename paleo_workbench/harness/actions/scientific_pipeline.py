@@ -358,7 +358,12 @@ def _workspace_evidence(context: ActionContext) -> dict[str, str]:
         state = getattr(controller, "state", None) if controller else None
     if state is None:
         return {}
-    return {str(k): str(v) for k, v in (state.compilation_input_set or {}).items()}
+    # V9（评审 R2-F1）：经单一适配器读证据集（结构化激活输入集优先）。
+    from paleo_workbench.workflow.interpretation.compilation import (
+        evidence_view,
+    )
+
+    return evidence_view(context.project, state)
 
 
 # ---------------------------------------------------------------------------
@@ -729,7 +734,9 @@ def _compilation_validate_inputs(context: ActionContext, parameters: dict) -> di
     resolved: dict = {}
     resolution_error: str = ""
     try:
-        resolved = fusion_inputs_from_document(context.project, evidence)
+        mismatches: list[str] = []
+        resolved = fusion_inputs_from_document(
+            context.project, evidence, mismatches=mismatches)
     except ValueError as exc:
         resolution_error = str(exc)
     except Exception as exc:

@@ -63,12 +63,14 @@ STAGE_CONTEXT_ACTIONS: dict[str, tuple[tuple[str, str], ...]] = {
     "constraint_factor": (
         ("open_factor_workbench", "单因素工作台"),
         ("overlay_factor_results", "叠加单因素结果"),
+        ("commit_constraints", "提交约束版本"),
         ("stage_save", "保存阶段成果"),
     ),
     "integrated_compilation": (
         ("select_evidence", "选择证据版本"),
         ("create_integrated_draft", "创建综合草稿"),
         ("run_qa", "运行 QA"),
+        ("commit_interpretation", "提交综合解释"),
         ("assemble_map_product", "生成 MapProduct"),
     ),
 }
@@ -82,6 +84,17 @@ def stage_context_actions(stage_value: str) -> tuple[tuple[str, str], ...]:
     if stage is None:
         return ()
     return STAGE_CONTEXT_ACTIONS.get(stage.value, ())
+
+
+def _create_structured_input_set_shell(document, workspace_state, *,
+                                       created_by: str = ""):
+    """首次选择证据时创建结构化输入集外壳（迁移逻辑在领域层，R2-F9）。"""
+    from paleo_workbench.workflow.interpretation.compilation import (
+        create_input_set_shell_from_legacy,
+    )
+
+    return create_input_set_shell_from_legacy(
+        document, workspace_state, created_by=created_by)
 
 
 class StageActionDispatcher:
@@ -133,11 +146,13 @@ class StageActionDispatcher:
             "open_factor_workbench": self.open_factor_workbench,
             "run_factor": self.open_factor_workbench,
             "overlay_factor_results": self.overlay_factor_results,
+            "commit_constraints": self.commit_constraints,
             "select_evidence": self.select_evidence,
             "create_integrated_draft": self.create_integrated_draft,
             "create_integrated_boundary": self.create_integrated_boundary,
             "run_fusion": self.run_fusion,
             "run_qa": self.run_qa,
+            "commit_interpretation": self.commit_interpretation,
             "assemble_map_product": self.assemble_map_product,
             "stage_save": self.stage_save,
             "stage_qc": self.run_qa,
@@ -1071,44 +1086,163 @@ class StageActionDispatcher:
         self.composite.status_message.emit(
             f"已创建 {kind.label}（自动进入 02 地质约束组；数字化后保存生效）")
 
+    def _remove_evidence(self, existing: list[str]) -> None:
+        """移除证据（V9，评审 R3-F5）：双载体同步删除，绝不残留。"""
+        from PySide6.QtWidgets import QInputDialog
+
+        if not existing:
+            self.composite.status_message.emit("证据集为空——无可移除项")
+            return
+        chosen, ok = QInputDialog.getItem(
+            self.composite, "移除证据", "选择要移除的证据：",
+            existing, 0, False)
+        if not ok or not chosen:
+            return
+        state = self.stage_controller.state
+        document = self.project
+        # legacy dict：按值删（显示名键随状态漂移，值才是身份）。
+        removed_legacy = [k for k, v in
+                          dict(state.compilation_input_set or {}).items()
+                          if str(v) == chosen]
+        for key in removed_legacy:
+            state.compilation_input_set.pop(key, None)
+        # 结构化集（权威载体）：按选择器删。
+        try:
+            from paleo_workbench.workflow.interpretation.compilation import (
+                active_input_set,
+                persist_input_set,
+            )
+
+            input_set = active_input_set(document) if document is not None else None
+            if input_set is not None:
+                input_set.entries = [
+                    entry for entry in input_set.entries
+                    if entry.selector != chosen]
+                persist_input_set(document, input_set)
+        except Exception:  # noqa: BLE001 — 结构化删除失败不阻断 legacy 删除
+            logger.debug("structured evidence removal skipped", exc_info=True)
+        self.composite._sync_workspace_state_to_project()
+        self.composite.status_message.emit(f"已移除证据：{chosen}")
+
+    def commit_constraints(self) -> None:
+        """提交约束版本（V9 P0-2）：约束编辑 → catalog DERIVED 版本链。
+
+        与 harness ``constraint.commit`` 调用同一领域函数
+        （``commit_all_constraints``）——单一实现，双入口。此前提交仅
+        agent 可达：生产 UI 永远无法建立约束版本链，
+        ``constraints:current`` 新鲜度永久 UNKNOWN。
+        """
+        document = self.project
+        if document is None:
+            self.composite.status_message.emit("未打开工程")
+            return
+        from paleo_workbench.catalog.runtime import get_catalog_service
+        from paleo_workbench.workflow.constraint_versions import (
+            commit_all_constraints,
+        )
+
+        try:
+            service = get_catalog_service()
+        except Exception:
+            service = None
+        if service is None:
+            self.composite.status_message.emit(
+                "目录服务不可用——无法提交约束版本（不伪称已提交）")
+            return
+        try:
+            reports = commit_all_constraints(
+                document, service, actor="workstation")
+        except Exception as exc:  # 提交失败必须可见
+            self.composite.status_message.emit(f"约束提交失败：{exc}")
+            return
+        committed = [r for r in reports if r.committed]
+        unchanged = sum(1 for r in reports if r.reason == "unchanged")
+        no_content = sum(1 for r in reports if r.reason == "no_content")
+        if committed:
+            versions = ", ".join(r.version_id or "?" for r in committed)
+            self.composite.status_message.emit(
+                f"已提交 {len(committed)} 个约束组新版本（{versions}）；"
+                f"{unchanged} 组内容未变，{no_content} 组无内容")
+            self.composite._sync_workspace_state_to_project()
+        else:
+            self.composite.status_message.emit(
+                f"无新版本：{unchanged} 组内容未变，{no_content} 组无内容"
+                if reports else "工程内没有约束组")
+
     # -- Phase 3 ------------------------------------------------------------------
 
     def select_evidence(self) -> None:
-        """证据版本选择（Compilation Input Set，V5 §57）。"""
-        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QInputDialog, QVBoxLayout
+        """证据版本选择（Compilation Input Set，V5 §57；V9 ADR-3/7）。
+
+        V9 (P0-3)：预测结果（地震/测井相预测）与约束组与 factor/草稿
+        同列可选——此前预测仅是叠加层，永远进不了科学输入集。
+        选择器经统一 Evidence 契约解析（状态诚实标注）。
+        """
+        from PySide6.QtWidgets import QInputDialog
+
+        from paleo_workbench.workflow.interpretation.compilation import (
+            CompilationInputSetEntry,
+            active_input_set,
+            persist_input_set,
+        )
+        from paleo_workbench.workflow.interpretation.compilation import (
+            evidence_view,
+        )
+        from paleo_workbench.workflow.interpretation.evidence import (
+            available_evidence,
+        )
 
         document = self.project
         if document is None:
             return
-        entries: list[tuple[str, str]] = []
-        # 阶段1解释草稿（draft:<layer_id>——dependencies 传播式评估契约）
-        for layer_id in self.stage_controller.state.layers_with_role(
-                LayerRole.INITIAL_FACIES_DRAFT):
-            layer = self.edit_controller.layer(str(layer_id))
-            if layer is not None:
-                entries.append((f"阶段1解释草稿：{layer.name}", f"draft:{layer_id}"))
-        # 单因素任务（版本钉住）
-        for task in getattr(document, "factor_map_tasks", None) or []:
-            if str(getattr(task, "status", "")) != FACTOR_TASK_STATUS_COMPLETE:
-                continue
-            version = str(getattr(task, "grid_artifact_version_id", "") or "")
-            entries.append((f"单因素：{task.name}", f"factor:{task.id}:{version}"))
-        # 约束内容指纹
-        entries.append(("地质约束（当前内容）", "constraints:current"))
-        if not entries:
+        state = self.stage_controller.state
+        resolutions = available_evidence(document, state)
+        if not resolutions:
             self.composite.status_message.emit("没有可选证据——先完成上阶段成果")
             return
-        labels = [label for label, _ in entries]
+        status_tag = {
+            "resolved": "", "floating": "（当前内容）",
+            "unpinned": "（未钉版本）", "stale": "（已过期）",
+            "missing": "（缺失）", "unknown": "（未知）",
+        }
+        entries: list[tuple[str, str, str]] = [
+            (f"{r.display}{status_tag.get(r.status.value, '')}",
+             r.selector.raw, r.status.value)
+            for r in resolutions
+        ]
+        labels = [label for label, _, _ in entries]
+        existing = sorted({
+            str(v) for v in evidence_view(document, state).values()})
+        if existing:
+            labels = labels + ["〔移除证据〕…"]
         chosen, ok = QInputDialog.getItem(
             self.composite, "选择证据版本",
-            "综合编图输入证据（可多选经重复执行本动作累积）：",
+            "综合编图输入证据（可多选经重复执行本动作累积；选末项移除）：",
             labels, 0, False,
         )
-        del QDialog, QDialogButtonBox, QVBoxLayout
         if not ok or not chosen:
             return
-        value = dict(entries)[chosen]
-        self.stage_controller.state.compilation_input_set[chosen] = value
+        if chosen == "〔移除证据〕…":
+            self._remove_evidence(existing)
+            return
+        index = labels.index(chosen)
+        _, selector, status = entries[index]
+        # 旧视图（dependencies/存档兼容）+ 结构化输入集（V9 权威）双写。
+        state.compilation_input_set[chosen] = selector
+        input_set = active_input_set(document)
+        if input_set is None:
+            input_set = _create_structured_input_set_shell(
+                document, state, created_by="workstation")
+        if input_set is not None:
+            if input_set.entry_for_selector(selector) is None:
+                input_set.entries.append(CompilationInputSetEntry(
+                    selector=selector,
+                    label=chosen,
+                    evidence_kind=selector.split(":", 1)[0],
+                    status_at_add=status,
+                    added_by="workstation",
+                ))
+                persist_input_set(document, input_set)
         self.composite._sync_workspace_state_to_project()
         self.composite.status_message.emit(f"已加入证据集：{chosen}")
 
@@ -1140,8 +1274,73 @@ class StageActionDispatcher:
                 f"integrated:{layer_id}", "draft")
             self.edit_controller.set_active_layer(layer_id)
             self.composite.layer_manager.select_layer(layer_id)
+            # V9 (P0-4)：综合解释是一等成果——创建即登记身份
+            #（input_set 引用 + Phase1 草稿底稿 + QA/修订链锚点）。
+            self._register_integrated_interpretation(
+                layer_id,
+                name="综合沉积相（草稿）",
+                class_names=[],
+                fusion_version_id="",
+                base_kind="draft",
+                base_version_id="",
+            )
             self.composite.status_message.emit(
                 f"已创建综合解释草稿（证据 {len(self.stage_controller.state.compilation_input_set)} 项）")
+
+    def _track_latest_fusion_version(self, fusion_version_id: str) -> None:
+        if not fusion_version_id:
+            return
+        document = self.project
+        if document is None:
+            return
+        try:
+            from paleo_workbench.workflow.interpretation.integrated_interpretation import (
+                _upsert_interpretation,
+                interpretations_for_document,
+            )
+
+            for interpretation in interpretations_for_document(document):
+                interpretation.latest_fusion_version_id = fusion_version_id
+                _upsert_interpretation(document, interpretation)
+        except Exception:  # noqa: BLE001 — 追踪失败不阻断融合
+            logger.debug("latest fusion tracking skipped", exc_info=True)
+
+    def _register_integrated_interpretation(
+        self, layer_id: str, *, name: str, class_names: list[str],
+        fusion_version_id: str, base_kind: str, base_version_id: str,
+        confidence_summary: dict | None = None,
+        conflicts: dict | None = None,
+    ) -> None:
+        """登记 IntegratedInterpretation 一等成果记录（V9 ADR-8）。"""
+        document = self.project
+        if document is None:
+            return
+        try:
+            from paleo_workbench.workflow.interpretation.compilation import (
+                active_input_set,
+            )
+            from paleo_workbench.workflow.interpretation.integrated_interpretation import (
+                create_integrated_interpretation,
+                find_by_layer,
+            )
+
+            if find_by_layer(document, layer_id) is not None:
+                return  # 幂等：已有记录不重复创建
+            input_set = active_input_set(document)
+            create_integrated_interpretation(
+                document,
+                name=name,
+                layer_id=layer_id,
+                input_set_id=input_set.id if input_set else "",
+                fusion_version_id=fusion_version_id,
+                class_schema=[str(c) for c in class_names],
+                confidence_summary=confidence_summary or {},
+                conflicts=conflicts or {},
+                created_by="workstation",
+            )
+        except Exception:  # noqa: BLE001 — 登记失败不阻断图层创建（诚实日志）
+            logger.exception(
+                "integrated interpretation registration failed for %s", layer_id)
 
     def create_integrated_boundary(self) -> None:
         """综合相带边界（V5 §30，§12）：从综合/阶段1草稿的相面环提取边界线。
@@ -1233,10 +1432,18 @@ class StageActionDispatcher:
         from paleo_workbench.workflow.integrated_compilation import (
             run_integrated_fusion,
         )
+        from paleo_workbench.workflow.interpretation.integrated_interpretation import (
+            FUSION_CONFLICT_KEYS,
+        )
 
         document = self.project
         state = self.stage_controller.state
-        evidence = dict(state.compilation_input_set or {})
+        # V9（评审 R2-F1）：经单一适配器读证据集（结构化激活输入集优先）。
+        from paleo_workbench.workflow.interpretation.compilation import (
+            evidence_view,
+        )
+
+        evidence = evidence_view(document, state)
         if not evidence:
             self.composite.status_message.emit("证据集为空——先选择证据版本（Compilation Input Set）")
             return
@@ -1285,6 +1492,28 @@ class StageActionDispatcher:
             if created:
                 self.stage_controller.state.set_maturity(
                     f"integrated:{created}", "draft")
+                qc = dict(summary.get("qc") or {})
+                # V9 (P0-4/P0-6)：融合播种的综合解释登记为一等成果
+                #（fusion 版本 = 算法种子；冲突/置信度摘要随记录）。
+                self._register_integrated_interpretation(
+                    created,
+                    name="综合沉积相（融合初稿）",
+                    class_names=list(summary.get("class_names") or []),
+                    fusion_version_id=str(summary.get("catalog_version_id") or ""),
+                    base_kind="fusion",
+                    base_version_id=str(summary.get("catalog_version_id") or ""),
+                    confidence_summary=dict(qc.get("confidence_coverage") or {}),
+                    conflicts={
+                        key: qc.get(key)
+                        for key in FUSION_CONFLICT_KEYS
+                        if qc.get(key) is not None
+                    },
+                )
+                self._record_revision_for_layer(
+                    created, "integrated_facies",
+                    base_kind="fusion",
+                    base_version_id=str(summary.get("catalog_version_id") or ""),
+                    note="融合初稿（算法播种，人工修编起点）")
                 draft_note = f"；已创建融合初稿（{len(features)} 个分级面，可编辑修编）"
             else:
                 draft_note = ""
@@ -1292,6 +1521,10 @@ class StageActionDispatcher:
             draft_note = "；已有综合解释草稿，融合分级未覆盖（人工解释优先，见融合登记）"
         else:
             draft_note = "；融合分级无多边形（阈值内无有效面，未建初稿）"
+        # V9（评审 R3-F9）：重跑融合后，既有解释记录追踪最新融合版本
+        #（种子不变——已提交内容仍指向旧版本；latest 供产品谱系引用）。
+        self._track_latest_fusion_version(
+            str(summary.get("catalog_version_id") or ""))
         counts = dict((summary["qc"].get("class_counts") or {}))
         counts_text = "，".join(f"{n} {c}" for n, c in counts.items()) or "无"
         coverage = dict(summary["qc"].get("confidence_coverage") or {})
@@ -1379,6 +1612,69 @@ class StageActionDispatcher:
         else:
             self.composite.status_message.emit(f"QA 发现 {len(issues)} 个问题（见 05 QA/QC）")
 
+    def commit_interpretation(self) -> None:
+        """提交综合解释（V9，评审 R2-F7）：编辑层 → catalog DERIVED 版本。
+
+        与 harness ``interpretation.commit`` 调用同一领域函数
+        （``commit_integrated_interpretation``）——单一实现，双入口。
+        证据归因 = 当前输入集选择器。
+        """
+        document = self.project
+        if document is None:
+            self.composite.status_message.emit("未打开工程")
+            return
+        state = self.stage_controller.state
+        layer_ids = state.layers_with_role(LayerRole.INTEGRATED_FACIES)
+        if not layer_ids:
+            self.composite.status_message.emit("没有综合解释层——先创建综合草稿")
+            return
+        layer_id = str(layer_ids[0])
+        from paleo_workbench.workflow.interpretation.integrated_interpretation import (
+            commit_integrated_interpretation,
+            find_by_layer,
+        )
+
+        interpretation = find_by_layer(document, layer_id)
+        if interpretation is None:
+            self.composite.status_message.emit(
+                f"层 {layer_id} 无综合解释记录（旧工程——重开或重建草稿）")
+            return
+        layer = self.edit_controller.layer(layer_id)
+        if layer is None:
+            from paleo_workbench.project.models import UserVectorLayer
+
+            layer = next(
+                (l for l in (getattr(document, "user_vector_layers", None) or [])
+                 if str(l.id) == layer_id), None)
+        if layer is None:
+            self.composite.status_message.emit(f"解释层 {layer_id} 不可达")
+            return
+        try:
+            from paleo_workbench.catalog.runtime import get_catalog_service
+
+            catalog = get_catalog_service()
+        except Exception:
+            catalog = None
+        if catalog is None:
+            self.composite.status_message.emit(
+                "目录服务不可用——提交需要 catalog（不伪称已提交）")
+            return
+        from paleo_workbench.workflow.interpretation.compilation import (
+            evidence_view,
+        )
+
+        evidence_refs = sorted(set(evidence_view(document, state).values()))
+        try:
+            version_id = commit_integrated_interpretation(
+                document, interpretation, layer, catalog,
+                actor="workstation", evidence_refs=evidence_refs)
+        except ValueError as exc:
+            self.composite.status_message.emit(f"综合解释提交被拒绝：{exc}")
+            return
+        self.composite.status_message.emit(
+            f"综合解释已提交（版本 {version_id[:12]}…；修订链 "
+            f"{len(find_by_layer(document, layer_id).revision_ids)} 条）")
+
     def assemble_map_product(self) -> None:
         """生成 MapProduct（复用 workflow.map_product 组装器，V5 §58）。"""
         document = self.project
@@ -1387,18 +1683,21 @@ class StageActionDispatcher:
         try:
             from paleo_workbench.catalog.runtime import get_catalog_service
             from paleo_workbench.workflow.map_product import (
-                MapProductAssembly,
                 assemble_map_product,
+                assembly_from_workspace,
+                write_product_manifest,
             )
         except Exception:
             self.composite.status_message.emit("MapProduct 组装需要打开工程与数据目录")
             return
-        factor_ids = []
-        for value in self.stage_controller.state.compilation_input_set.values():
-            text = str(value)
-            if text.startswith("factor:"):
-                factor_ids.append(text.split(":")[1])
-        if not factor_ids:
+        # V9（评审 R2-F3）：共享构造器——factor ids/科学谱系引用由
+        # workflow.map_product 统一从输入集推导，三个入口不再分叉。
+        assembly = assembly_from_workspace(
+            document,
+            product_name=f"综合编图 {document.meta.name}",
+            workspace_state=self.stage_controller.state,
+        )
+        if not assembly.factor_task_ids:
             self.composite.status_message.emit(
                 "证据集中没有单因素任务——先选择证据（含 factor 版本）")
             return
@@ -1407,18 +1706,12 @@ class StageActionDispatcher:
         except Exception:
             self.composite.status_message.emit("数据目录不可用（先打开工程文件）")
             return
-        from paleo_workbench.workflow.map_product import write_product_manifest
-
         staged_path = None
         try:
             staged_path = write_product_manifest(
                 document,
                 product_name=f"综合编图 {document.meta.name}",
-                factor_task_ids=factor_ids,
-            )
-            assembly = MapProductAssembly(
-                product_name=f"综合编图 {document.meta.name}",
-                factor_task_ids=factor_ids,
+                factor_task_ids=list(assembly.factor_task_ids),
             )
             result = assemble_map_product(
                 document, assembly=assembly, catalog=catalog,
@@ -1457,20 +1750,101 @@ class StageActionDispatcher:
             })
 
     def stage_save(self) -> None:
-        """保存阶段成果：flush 编辑会话 + 约束几何回填 + 工作区状态落工程。
+        """保存阶段成果：flush 编辑会话 + 约束几何回填 + 解释修订溯源 + 落工程。
 
         blocked（RAW 门禁拒绝/拓扑失败）逐条原因已由 flush 自身经
         status_message 发出（composite.flush 只返回提交数）。
+
+        V9 (P0-6)：解释面（Phase1 草稿/综合解释/相带边界）的每次保存
+        记录 InterpretationRevision——谁改的、基于哪些证据（当前输入集）、
+        从哪个父修订开始；内容未变不产生空修订。
         """
         committed = self.composite.flush_edit_sessions()
         synced = self._sync_constraint_geometry()
+        recorded = self._record_interpretation_revisions()
         self.composite._sync_workspace_state_to_project()
         message = "阶段成果已保存"
         if committed:
             message += f"（提交 {committed} 个编辑会话）"
         if synced:
             message += f"；回填 {synced} 条约束几何（含内容指纹）"
+        if recorded:
+            message += f"；记录 {recorded} 条解释修订（人工解释溯源）"
         self.composite.status_message.emit(message)
+
+    def _record_interpretation_revisions(self) -> int:
+        """对有内容变化的解释面记录修订（证据归因=当前输入集）。"""
+        document = self.project
+        state = self.stage_controller.state
+        if document is None:
+            return 0
+        from paleo_workbench.workflow.interpretation.compilation import (
+            evidence_view,
+        )
+
+        evidence_refs = sorted(set(evidence_view(document, state).values()))
+        targets: list[tuple[str, str]] = []
+        for layer_id in state.layers_with_role(LayerRole.INITIAL_FACIES_DRAFT):
+            targets.append((str(layer_id), "phase1_draft"))
+        for layer_id in state.layers_with_role(LayerRole.INTEGRATED_FACIES):
+            targets.append((str(layer_id), "integrated_facies"))
+        for layer_id in state.layers_with_role(LayerRole.INTEGRATED_BOUNDARY):
+            targets.append((str(layer_id), "integrated_boundary"))
+        recorded = 0
+        for layer_id, target_kind in targets:
+            try:
+                layer = self.edit_controller.layer(layer_id)
+                if layer is None:
+                    continue
+                revision = self._record_revision_for_layer(
+                    layer_id, target_kind,
+                    evidence_refs=evidence_refs,
+                    note="人工解释保存（stage_save 溯源）")
+                if revision is not None:
+                    recorded += 1
+            except Exception:  # noqa: BLE001 — 修订记录失败不阻断保存
+                logger.exception("revision recording failed for %s", layer_id)
+        return recorded
+
+    def _record_revision_for_layer(self, layer_id: str, target_kind: str, *,
+                                   evidence_refs: list[str] | None = None,
+                                   base_kind: str = "manual",
+                                   base_version_id: str = "",
+                                   note: str = ""):
+        """单层修订记录（无变化 → None）。"""
+        document = self.project
+        if document is None:
+            return None
+        try:
+            from paleo_workbench.workflow.interpretation.integrated_interpretation import (
+                find_by_layer,
+            )
+            from paleo_workbench.workflow.interpretation.revision import (
+                record_interpretation_revision,
+            )
+
+            layer = self.edit_controller.layer(layer_id)
+            if layer is None:
+                return None
+            interpretation = find_by_layer(document, layer_id)
+            revision = record_interpretation_revision(
+                document,
+                target_kind=target_kind,
+                target_layer_id=layer_id,
+                layer=layer,
+                actor="workstation",
+                interpretation_id=interpretation.interpretation_id
+                if interpretation else "",
+                base_kind=base_kind,
+                base_version_id=base_version_id,
+                evidence_refs=list(evidence_refs or []),
+                note=note,
+            )
+            # 修订 → 解释记录的链接由领域函数维护（防双写）。
+            return revision
+        except Exception:  # noqa: BLE001 — 修订失败不阻断保存路径
+            logger.exception("revision recording failed for %s", layer_id)
+            return None
 
     def _sync_constraint_geometry(self) -> int:
         """约束几何回填（§11 P0-3）：数字化矢量 → ConstraintLine.coordinates。

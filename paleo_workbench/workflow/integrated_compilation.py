@@ -99,19 +99,23 @@ def _task_id_of_evidence(value: object) -> str | None:
 def fusion_inputs_from_document(
     document: Any,
     evidence_set: Mapping[str, str],
+    mismatches: list[str] | None = None,
 ) -> dict[str, FactorGridResult]:
     """Resolve every ``factor:<task>:<version>`` evidence entry to its grid.
 
     Resolution per task follows :func:`project.factor_grid_artifacts.\
-    factor_grid_result_for_task` (live cache → managed npz artifact → legacy
-    inline parameters); **no interpolation is ever triggered**.  Non-factor
-    evidence entries (``draft:<layer_id>``, ``constraints:current``, bare
-    version ids) belong to the manual interpretation path and are skipped.
+factor_grid_result_for_task` (live cache → managed npz artifact → legacy
+    inline parameters); **no interpolation is ever triggered**.  Non-factor evidence entries (``draft:<layer_id>``,
+    ``constraints:current``, bare version ids) belong to the manual
+    interpretation path and are skipped.
 
     The fusion always reads the task's *current* grid; whether a pinned
     evidence version has been superseded is judged separately by the workspace
     staleness evaluation (``mapping_workspace.dependencies``), which marks the
     integrated artifact STALE — fusion results are never silently refreshed.
+    V9 (P1-7): when *mismatches* is provided, entries whose PINNED version
+    differs from the task's current grid version are appended there — the
+    fusion ran on data other than the pin and the product must say so.
 
     Raises:
         ValueError: listing every unresolvable factor task (unknown task id,
@@ -136,6 +140,17 @@ def fusion_inputs_from_document(
             unresolvable.append(
                 f"{label}（{value}）：工程中没有该单因素任务")
             continue
+        pinned_version = ""
+        parts = str(value).split(":")
+        if len(parts) >= 3:
+            pinned_version = parts[2]
+        current_version = str(
+            getattr(task, "grid_artifact_version_id", "") or "")
+        if pinned_version and current_version \
+                and pinned_version != current_version and mismatches is not None:
+            mismatches.append(
+                f"{label}：钉住版本 {pinned_version} ≠ 任务当前版本 "
+                f"{current_version}——融合使用当前网格（评估层另行标记过期）")
         try:
             resolved[task_id] = factor_grid_result_for_task(task)
         except Exception as exc:  # noqa: BLE001 — report, never partial-fuse
@@ -527,7 +542,9 @@ def run_integrated_fusion(
     * ``registered`` / ``catalog_version_id`` — registration outcome (honest
       ``False`` with a reason when ``register=False`` or no catalog service).
     """
-    factor_results = fusion_inputs_from_document(document, evidence_set)
+    pin_mismatches: list[str] = []
+    factor_results = fusion_inputs_from_document(
+        document, evidence_set, mismatches=pin_mismatches)
     model = build_fusion_model(
         evidence_set,
         factor_results,
@@ -539,6 +556,12 @@ def run_integrated_fusion(
         weight_provenance=weight_provenance,
     )
     result = fuse(model)
+
+    # V9 (P1-7): pin-vs-current mismatch must ride the QC — the fusion used
+    # the current grid while the evidence set pinned older versions; the
+    # product may never read as if it fused exactly the pinned inputs.
+    if pin_mismatches:
+        result.qc["pinned_version_mismatches"] = list(pin_mismatches)
 
     # qc extras FIRST: register_output snapshots result.qc into the run
     # provenance, so the defaults record must be on it before registration.

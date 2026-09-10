@@ -87,6 +87,9 @@ def test_map_product_kriging_fallback_honesty_without_active_qc() -> None:
         product_name="Test",
         factor_task_ids=[task.id],
     )
+    # 产品级 QA：factor 无登记版本是 ERROR（R3-F1 后阻断 publish）——
+    # 本测试聚焦 fallback 警告可见性，给任务补登记版本号（须在指纹前）。
+    task.grid_artifact_version_id = "ver_kf1"
     record = MapProductRecord(
         id="prod-1",
         product_name="Test",
@@ -95,6 +98,15 @@ def test_map_product_kriging_fallback_honesty_without_active_qc() -> None:
     )
     # Project has NO active_quality_report_id (active_qc is None)
     project.active_quality_report_id = None
+    # V9（goal §31）：publish 阶梯——评审 → 冻结 → 发布。
+    from paleo_workbench.workflow.map_product import (
+        freeze_map_product,
+        review_map_product,
+    )
+    record.run_id = "run_r2"
+    record.output_version_id = "ver_r2"
+    record.lifecycle = "reviewed"  # 合成记录：QA error 会被评审拒（直置阶梯）
+    freeze_map_product(record)
 
     report = publish_map_product(record, project, accept_warnings=True)
     assert any("computed by the numpy kriging fallback" in w for w in report["warnings"])

@@ -580,6 +580,20 @@ def apply_interpolation_to_task(
 
     engine_method = METHOD_LABEL_TO_ENGINE.get(method, method)
     crs = project.coordinate.project_crs if project is not None else None
+    # V9 (P1-3): CRS discipline — a constraint group declaring a DIFFERENT
+    # CRS than the factor/project CRS refuses the interpolation (mixed
+    # coordinates were previously consumed silently); undeclared groups get
+    # an honest annotation in the constraint diagnostics.
+    crs_notes: list[str] = []
+    for group in layers or []:
+        from paleo_workbench.workflow.interpretation.constraint_product import (
+            assert_constraints_crs_compatible,
+        )
+
+        note = assert_constraints_crs_compatible(
+            crs, getattr(group, "crs", "") or "", context=f"factor {task.name}")
+        if note:
+            crs_notes.append(note)
     directions = (
         direction_line_params(layers, target_horizon=task.target_horizon)
         if layers is not None
@@ -593,6 +607,7 @@ def apply_interpolation_to_task(
         layers=layers, breaks=breaks, directions=directions, points=points, task=task
     )
     constraint_eval = evaluate_request(engine_method, requested_kinds)
+    constraint_eval.diagnostics.extend(crs_notes)
     for diagnostic in constraint_eval.diagnostics:
         logger.warning("factor interpolation %s [%s]: %s", task.name, method, diagnostic)
     fps = fingerprints_for_task(
@@ -895,6 +910,19 @@ def batch_prepare_factor_maps(
                 layers = constraint_layers_for_project(
                     project, target_horizon=first.target_horizon
                 )
+                # V9（评审 R1-F3）：批量共享 plan 消费约束前做同一条 CRS
+                # 纪律检查——单任务路径拒绝的混合坐标不能在批路径静默混入。
+                from paleo_workbench.workflow.interpretation.constraint_product import (
+                    assert_constraints_crs_compatible,
+                )
+
+                _project_crs = getattr(
+                    getattr(project, "coordinate", None), "project_crs", None)
+                for _group in layers or []:
+                    assert_constraints_crs_compatible(
+                        _project_crs,
+                        getattr(_group, "crs", "") or "",
+                        context=f"batch factor {first.name}")
                 breaks = break_polylines_for_idw(
                     layers, target_horizon=first.target_horizon
                 )
