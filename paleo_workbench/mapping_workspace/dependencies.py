@@ -229,6 +229,13 @@ class MappingDependencyService:
                     key, "phase1_draft", MappingStage.FACIES_CALIBRATION,
                     FreshnessStatus.UNKNOWN, "草稿未钉住 RAW 版本（旧工程迁移）"))
                 continue
+            if catalog is None:
+                # 评审 R3-F7：无目录=不可验证（UNKNOWN），不是"输入被清理"。
+                results.append(ArtifactFreshness(
+                    key, "phase1_draft", MappingStage.FACIES_CALIBRATION,
+                    FreshnessStatus.UNKNOWN, "无目录服务，钉住的 RAW 版本不可验证",
+                    pinned_inputs=tuple(("version", p) for p in pinned)))
+                continue
             status, culprits, detail = self._check_pinned_versions(catalog, pinned)
             results.append(ArtifactFreshness(
                 key, "phase1_draft", MappingStage.FACIES_CALIBRATION,
@@ -332,6 +339,24 @@ class MappingDependencyService:
                     task_id = parts[1] if len(parts) > 1 else ""
                     pinned_version = parts[2] if len(parts) > 2 else ""
                     pinned_inputs.append((ref_key, value))
+                    # V9（评审 R3-F3）：先看上游 factor 评估——任务被删除/
+                    # 无结果版本时其 factor 条目即 MISSING/UNKNOWN，综合
+                    # 解释绝不能因此读作 CURRENT。
+                    upstream_entry = upstream.get(f"factor:{task_id}")
+                    if upstream_entry is None:
+                        if worst is not FreshnessStatus.MISSING_INPUT:
+                            worst = FreshnessStatus.MISSING_INPUT
+                            culprits.append(f"factor:{task_id}")
+                            detail = f"证据单因素任务不存在（{ref_key}）"
+                    elif upstream_entry.is_problem and (
+                            worst is not FreshnessStatus.MISSING_INPUT):
+                        worst = upstream_entry.status
+                        culprits.append(upstream_entry.artifact_key)
+                        detail = f"上游证据已过期：{upstream_entry.artifact_key}"
+                    elif upstream_entry.status is FreshnessStatus.UNKNOWN:
+                        if worst is None:
+                            worst = FreshnessStatus.UNKNOWN
+                            detail = f"证据单因素状态未知（{ref_key}）"
                     if pinned_version and task_grid_version.get(task_id) \
                             and task_grid_version[task_id] != pinned_version:
                         if worst is not FreshnessStatus.MISSING_INPUT:

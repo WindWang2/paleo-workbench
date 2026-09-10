@@ -270,6 +270,15 @@ def _resolve_factor(document: Any, selector: EvidenceSelector,
             selector, EvidenceStatus.MISSING, display=display,
             pinned_version_id=version_id,
             detail=f"钉住版本不可解析：{version_id}")
+    # 评审 R3-F6：pin 仍可解析但任务当前结果版本已前移 → STALE（与约束
+    # supersession 同语义；此前恒 RESOLVED 掩盖了取代）。
+    current_version = str(getattr(task, "grid_artifact_version_id", "") or "")
+    if current_version and current_version != version_id:
+        return EvidenceResolution(
+            selector, EvidenceStatus.STALE, display=display,
+            pinned_version_id=version_id,
+            asset_id=str(getattr(info, "asset_id", "") or ""),
+            detail=f"钉住 {version_id}，任务当前结果版本为 {current_version}")
     quality = {}
     metrics = getattr(task, "quality_metrics", None) or {}
     for key in ("r2", "n_points", "variance_min", "variance_max"):

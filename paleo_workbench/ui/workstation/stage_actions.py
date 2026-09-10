@@ -1076,6 +1076,44 @@ class StageActionDispatcher:
         self.composite.status_message.emit(
             f"已创建 {kind.label}（自动进入 02 地质约束组；数字化后保存生效）")
 
+    def _remove_evidence(self, existing: list[str]) -> None:
+        """移除证据（V9，评审 R3-F5）：双载体同步删除，绝不残留。"""
+        from PySide6.QtWidgets import QInputDialog
+
+        if not existing:
+            self.composite.status_message.emit("证据集为空——无可移除项")
+            return
+        chosen, ok = QInputDialog.getItem(
+            self.composite, "移除证据", "选择要移除的证据：",
+            existing, 0, False)
+        if not ok or not chosen:
+            return
+        state = self.stage_controller.state
+        document = self.project
+        # legacy dict：按值删（显示名键随状态漂移，值才是身份）。
+        removed_legacy = [k for k, v in
+                          dict(state.compilation_input_set or {}).items()
+                          if str(v) == chosen]
+        for key in removed_legacy:
+            state.compilation_input_set.pop(key, None)
+        # 结构化集（权威载体）：按选择器删。
+        try:
+            from paleo_workbench.workflow.interpretation.compilation import (
+                active_input_set,
+                persist_input_set,
+            )
+
+            input_set = active_input_set(document) if document is not None else None
+            if input_set is not None:
+                input_set.entries = [
+                    entry for entry in input_set.entries
+                    if entry.selector != chosen]
+                persist_input_set(document, input_set)
+        except Exception:  # noqa: BLE001 — 结构化删除失败不阻断 legacy 删除
+            logger.debug("structured evidence removal skipped", exc_info=True)
+        self.composite._sync_workspace_state_to_project()
+        self.composite.status_message.emit(f"已移除证据：{chosen}")
+
     def commit_constraints(self) -> None:
         """提交约束版本（V9 P0-2）：约束编辑 → catalog DERIVED 版本链。
 
@@ -1137,6 +1175,9 @@ class StageActionDispatcher:
             active_input_set,
             persist_input_set,
         )
+        from paleo_workbench.workflow.interpretation.compilation import (
+            evidence_view,
+        )
         from paleo_workbench.workflow.interpretation.evidence import (
             available_evidence,
         )
@@ -1160,12 +1201,19 @@ class StageActionDispatcher:
             for r in resolutions
         ]
         labels = [label for label, _, _ in entries]
+        existing = sorted({
+            str(v) for v in evidence_view(document, state).values()})
+        if existing:
+            labels = labels + ["〔移除证据〕…"]
         chosen, ok = QInputDialog.getItem(
             self.composite, "选择证据版本",
-            "综合编图输入证据（可多选经重复执行本动作累积）：",
+            "综合编图输入证据（可多选经重复执行本动作累积；选末项移除）：",
             labels, 0, False,
         )
         if not ok or not chosen:
+            return
+        if chosen == "〔移除证据〕…":
+            self._remove_evidence(existing)
             return
         index = labels.index(chosen)
         _, selector, status = entries[index]
@@ -1228,6 +1276,24 @@ class StageActionDispatcher:
             )
             self.composite.status_message.emit(
                 f"已创建综合解释草稿（证据 {len(self.stage_controller.state.compilation_input_set)} 项）")
+
+    def _track_latest_fusion_version(self, fusion_version_id: str) -> None:
+        if not fusion_version_id:
+            return
+        document = self.project
+        if document is None:
+            return
+        try:
+            from paleo_workbench.workflow.interpretation.integrated_interpretation import (
+                _upsert_interpretation,
+                interpretations_for_document,
+            )
+
+            for interpretation in interpretations_for_document(document):
+                interpretation.latest_fusion_version_id = fusion_version_id
+                _upsert_interpretation(document, interpretation)
+        except Exception:  # noqa: BLE001 — 追踪失败不阻断融合
+            logger.debug("latest fusion tracking skipped", exc_info=True)
 
     def _register_integrated_interpretation(
         self, layer_id: str, *, name: str, class_names: list[str],
@@ -1445,6 +1511,10 @@ class StageActionDispatcher:
             draft_note = "；已有综合解释草稿，融合分级未覆盖（人工解释优先，见融合登记）"
         else:
             draft_note = "；融合分级无多边形（阈值内无有效面，未建初稿）"
+        # V9（评审 R3-F9）：重跑融合后，既有解释记录追踪最新融合版本
+        #（种子不变——已提交内容仍指向旧版本；latest 供产品谱系引用）。
+        self._track_latest_fusion_version(
+            str(summary.get("catalog_version_id") or ""))
         counts = dict((summary["qc"].get("class_counts") or {}))
         counts_text = "，".join(f"{n} {c}" for n, c in counts.items()) or "无"
         coverage = dict(summary["qc"].get("confidence_coverage") or {})
@@ -1579,10 +1649,11 @@ class StageActionDispatcher:
             self.composite.status_message.emit(
                 "目录服务不可用——提交需要 catalog（不伪称已提交）")
             return
-        evidence_refs = [
-            str(value) for value in (state.compilation_input_set or {}).values()
-            if str(value)
-        ]
+        from paleo_workbench.workflow.interpretation.compilation import (
+            evidence_view,
+        )
+
+        evidence_refs = sorted(set(evidence_view(document, state).values()))
         try:
             version_id = commit_integrated_interpretation(
                 document, interpretation, layer, catalog,
@@ -1697,10 +1768,11 @@ class StageActionDispatcher:
         state = self.stage_controller.state
         if document is None:
             return 0
-        evidence_refs = [
-            str(value) for value in (state.compilation_input_set or {}).values()
-            if str(value)
-        ]
+        from paleo_workbench.workflow.interpretation.compilation import (
+            evidence_view,
+        )
+
+        evidence_refs = sorted(set(evidence_view(document, state).values()))
         targets: list[tuple[str, str]] = []
         for layer_id in state.layers_with_role(LayerRole.INITIAL_FACIES_DRAFT):
             targets.append((str(layer_id), "phase1_draft"))

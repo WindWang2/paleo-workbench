@@ -512,12 +512,17 @@ def test_freshness_stale_when_upstream_superseded():
 
 
 def test_freshness_missing_input():
+    # V9（评审 R3-F7）：有目录且版本不可解析 → MISSING_INPUT；
+    # 无目录 → 不可验证 = UNKNOWN（绝不是"输入被清理"）。
     state = MappingWorkspaceState()
     state.set_membership(LayerMembershipRecord(
         layer_id="draft", role=LayerRole.INITIAL_FACIES_DRAFT,
         source_version_id="ver_gone"))
-    summary = MappingDependencyService().evaluate(_FakeDoc([]), state, None)
+    summary = MappingDependencyService().evaluate(
+        _FakeDoc([]), state, _FakeCatalog())
     assert summary.get("phase1_draft:draft").status == FreshnessStatus.MISSING_INPUT
+    summary = MappingDependencyService().evaluate(_FakeDoc([]), state, None)
+    assert summary.get("phase1_draft:draft").status == FreshnessStatus.UNKNOWN
 
 
 def test_factor_freshness_via_run_inputs():

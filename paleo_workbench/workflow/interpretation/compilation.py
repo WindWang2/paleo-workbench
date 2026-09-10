@@ -266,12 +266,17 @@ def freeze_input_set(
     """冻结输入集：钉死每条可解析证据的版本；不可钉 → ValueError。
 
     钉法（诚实、按证据类型）：
-    * RESOLVED → 解析出的 pinned_version_id；
+    * RESOLVED → 解析出的 pinned_version_id，且**选择器重写为带版本的
+      显式形态**（评审 R3-F2：selector 不带版本时 pin 会从 legacy 视图
+      消失，融合/staleness 都看不见——冻结语义=输入不可漂移，必须可查）；
     * FLOATING（constraints:current）→ **仅当恰好一个约束组有提交**时钉到
       该组版本并把选择器重写为显式 ``constraints:<group>:<ver>``；多组有
       提交 → 拒绝（浮动引用钉住一个组=给其余组留暗洞，评审 R1-F1）；
     * STALE → 仍按其钉住版本冻结（stale 是评估层判断，不阻断 freeze）；
     * UNPINNED/MISSING/UNKNOWN → 拒绝并列出全部原因（绝不带暗洞冻结）。
+
+    原子性（评审 R3-F4）：拒绝时回滚**全部**变更——pin 与选择器重写都
+    恢复到冻结前快照，绝不留下半转换的条目。
     """
     if input_set.frozen:
         raise ValueError("输入集已冻结（不可重复冻结——新建输入集替代）")
@@ -279,6 +284,8 @@ def freeze_input_set(
         input_set, document, catalog=catalog, workspace_state=workspace_state)
     refusals: list[str] = []
     by_selector = {r.selector.raw: r for r in validation.resolutions}
+    snapshots: list[tuple[str, str]] = [
+        (entry.selector, entry.pinned_version_id) for entry in input_set.entries]
     for entry in input_set.entries:
         resolution = by_selector.get(entry.selector)
         if resolution is None:
@@ -299,18 +306,31 @@ def freeze_input_set(
         if resolution.status in (EvidenceStatus.RESOLVED,
                                  EvidenceStatus.STALE):
             entry.pinned_version_id = resolution.pinned_version_id
+            rewritten = _selector_with_version(
+                entry.selector, resolution.pinned_version_id)
+            if rewritten != entry.selector and _parses(rewritten):
+                entry.selector = rewritten
             continue
         refusals.append(f"{entry.label}：{resolution.status.value}（{resolution.detail}）")
     if refusals:
-        # 回滚本次尝试的 pin 与选择器重写（freeze 是原子语义）。
-        for entry in input_set.entries:
-            entry.pinned_version_id = ""
+        # 回滚本次尝试的全部变更：选择器重写 + pin（freeze 原子语义）。
+        for entry, (selector, pinned) in zip(input_set.entries, snapshots):
+            entry.selector = selector
+            entry.pinned_version_id = pinned
         raise ValueError(
             "输入集冻结被拒绝——以下证据无法钉住版本："
             + "；".join(refusals))
     input_set.frozen = True
     input_set.frozen_at = now
     return input_set
+
+
+def _parses(selector: str) -> bool:
+    try:
+        parse_evidence_selector(selector)
+        return True
+    except ValueError:
+        return False
 
 
 def _pin_floating_constraints(document: Any, catalog: Any) -> tuple[str, str] | None:

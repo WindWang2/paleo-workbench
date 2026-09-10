@@ -107,8 +107,10 @@ def assembly_from_workspace(
     for interpretation in getattr(project, "integrated_interpretations", None) or []:
         if not isinstance(interpretation, dict):
             continue
-        if interpretation.get("fusion_version_id"):
-            fusion_version = str(interpretation["fusion_version_id"])
+        # 评审 R3-F9：谱系引用最新融合版本（种子可能已被重跑取代）。
+        candidate = interpretation.get("latest_fusion_version_id")             or interpretation.get("fusion_version_id")
+        if candidate:
+            fusion_version = str(candidate)
         if interpretation.get("interpretation_id"):
             integrated_id = str(interpretation["interpretation_id"])
     return MapProductAssembly(
@@ -960,12 +962,16 @@ def publish_map_product(
             f"lifecycle is {lifecycle} — only frozen products publish "
             "(review → freeze first; goal §31 ladder)"
         )
-    # 产品级 QA：BLOCKER 一票否决（不可被 accept_warnings 豁免）。
+    # 产品级 QA：BLOCKER 一票否决（不可被 accept_warnings 豁免）；ERROR
+    # 同样阻断（评审 R3-F1：指纹说"没变"而统一 staleness 说"上游已过期"
+    # 时，发布绝不能拣乐观的那个引擎放行）。
     qa = product_qa(record, project, catalog=catalog,
                     workspace_state=workspace_state)
     for finding in qa.get("findings") or []:
         if finding.get("severity") == QA_BLOCKER:
             problems.append(f"[BLOCKER] {finding.get('message', '')}")
+        elif finding.get("severity") == QA_ERROR:
+            problems.append(f"[ERROR] {finding.get('message', '')}")
     staleness = product_staleness(record, project)
     if staleness["stale"]:
         problems.append(staleness["reason"])

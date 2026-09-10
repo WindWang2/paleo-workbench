@@ -734,7 +734,9 @@ def _compilation_validate_inputs(context: ActionContext, parameters: dict) -> di
     resolved: dict = {}
     resolution_error: str = ""
     try:
-        resolved = fusion_inputs_from_document(context.project, evidence)
+        mismatches: list[str] = []
+        resolved = fusion_inputs_from_document(
+            context.project, evidence, mismatches=mismatches)
     except ValueError as exc:
         resolution_error = str(exc)
     except Exception as exc:

@@ -58,6 +58,8 @@ class IntegratedInterpretation:
     layer_id: str = ""
     #: fusion catalog 版本（算法种子；""=人工起草）。
     fusion_version_id: str = ""
+    #: 最新一次融合 run 的版本（重跑融合后前移；种子不变——评审 R3-F9）。
+    latest_fusion_version_id: str = ""
     run_id: str = ""
     #: 提交后的 catalog DERIVED 版本（""=从未提交）。
     committed_version_id: str = ""
@@ -87,6 +89,7 @@ class IntegratedInterpretation:
             "input_set_id": self.input_set_id,
             "layer_id": self.layer_id,
             "fusion_version_id": self.fusion_version_id,
+            "latest_fusion_version_id": self.latest_fusion_version_id,
             "run_id": self.run_id,
             "committed_version_id": self.committed_version_id,
             "class_schema": list(self.class_schema),
@@ -111,6 +114,8 @@ class IntegratedInterpretation:
             input_set_id=str(data.get("input_set_id") or ""),
             layer_id=str(data.get("layer_id") or ""),
             fusion_version_id=str(data.get("fusion_version_id") or ""),
+            latest_fusion_version_id=str(
+                data.get("latest_fusion_version_id") or ""),
             run_id=str(data.get("run_id") or ""),
             committed_version_id=str(data.get("committed_version_id") or ""),
             class_schema=[str(c) for c in (data.get("class_schema") or [])],

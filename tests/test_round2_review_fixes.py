@@ -87,6 +87,9 @@ def test_map_product_kriging_fallback_honesty_without_active_qc() -> None:
         product_name="Test",
         factor_task_ids=[task.id],
     )
+    # 产品级 QA：factor 无登记版本是 ERROR（R3-F1 后阻断 publish）——
+    # 本测试聚焦 fallback 警告可见性，给任务补登记版本号（须在指纹前）。
+    task.grid_artifact_version_id = "ver_kf1"
     record = MapProductRecord(
         id="prod-1",
         product_name="Test",

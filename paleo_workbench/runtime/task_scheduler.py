@@ -371,10 +371,15 @@ class TaskScheduler:
 
     # ------------------------------------------------------------ control --
     def cancel(self, task_id: str) -> bool:
-        """Cooperative cancel: queued tasks drop; running tasks get the event."""
+        """Cooperative cancel: queued tasks drop; running tasks get the event.
+
+        CANCELLING 任务的重试幂等接受（评审 R3-F8：取消进行中再点取消不该
+        报"取消失败"——事件重设无害）。
+        """
         with self._lock:
             handle = self._handles.get(task_id)
-            if handle is None or handle.state not in (TaskState.QUEUED, TaskState.RUNNING):
+            if handle is None or handle.state not in (
+                    TaskState.QUEUED, TaskState.RUNNING, TaskState.CANCELLING):
                 return False
             if handle.state == TaskState.QUEUED:
                 self._heap = [e for e in self._heap if e[2] != task_id]
