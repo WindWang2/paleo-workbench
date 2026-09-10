@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from paleo_workbench.mapping.crs_contract import panel_publish_crs
 from paleo_workbench.mapping.capability_model import (
     QgisCapabilitySnapshot as QgisCapabilityManifest,
     probe_qgis_capability,
@@ -677,7 +678,7 @@ class LayerManagerPanel(QFrame):
             return
         self._canvas.set_layer_snapshot(
             MapRenderSnapshot(
-                project_crs=self._project_crs or "EPSG:4326",
+                project_crs=panel_publish_crs(self._project_crs),
                 layers=tuple(self._layers),
             )
         )
@@ -2019,7 +2020,18 @@ class CompositeDocument(QWidget):
         self.status_bar.set_measure(self._measure_segment_label(distance))
 
     def _on_measure_preview(self, distance: float) -> None:
-        """旧桥视口路由的实时预览（标注同分段路径）。"""
+        """旧桥视口路由的实时预览（review-2 P2-4：预览经工具同一测距）。
+
+        路由侧给的是平面 mupp 距离；活动工具持有起/终点与同一 Geod——
+        有两点时用工具的 ``_measure`` 重算（与完成段同语义），否则退回
+        平面值并按平面标注。"""
+        tool = self.edit_controller.tools.active_tool
+        points = list(getattr(tool, "points", ()) or ())
+        if len(points) == 2 and hasattr(tool, "_measure"):
+            try:
+                distance = float(tool._measure(points[0], points[1]))
+            except Exception:
+                pass
         label = self._measure_segment_label(distance)
         if "无效" not in label:
             self.status_bar.set_measure(f"{label}…")
@@ -2180,7 +2192,9 @@ class CompositeDocument(QWidget):
         self.status_bar.update_state(
             point=point,
             extent=self.canvas.view_extent,
-            crs=controller.project_crs or "EPSG:4326",
+            # V9 W3：状态条 CRS 呈现经契约——未声明显示「未声明」，
+            # 不伪造 4326（review-1 P1-1 存量清理）。
+            crs=controller.project_crs or "未声明",
             renderer=self.canvas.backend_status,
             selection_count=len(layer.selection) if layer is not None else 0,
             editing=controller.editing,
@@ -3230,6 +3244,10 @@ class CompositeDocument(QWidget):
         snapshot = build_workarea_map_snapshot(project)
         self._base_layers = list(snapshot.layers)
         self.edit_controller.project_crs = snapshot.project_crs
+        # V9 W8（review-2 P2-4）：测距工具不在 rebind 集合（非会话/图层/
+        # 几何绑定），CRS 变更后其 Geod 过期——显式重建保持测地语义。
+        if getattr(self.edit_controller, "_active_tool_action", "pan") == "measure_distance":
+            self.edit_controller.activate_tool("measure_distance")
         self._home_extent = workarea_view_extent(snapshot)
         if self._home_extent is not None:
             self.canvas.set_extent(self._home_extent)

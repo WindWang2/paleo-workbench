@@ -83,7 +83,10 @@ class _FieldEditorDelegate(QStyledItemDelegate):
 
     def setEditorData(self, editor, index) -> None:  # noqa: N802
         if isinstance(editor, QComboBox) and not editor.isEditable():
-            editor.setCurrentIndex(0)
+            # review-1 P0-1：编辑器必须落在当前值上——此前硬编码 index 0，
+            # 打开 "false" 单元格按 Enter 会把值翻转成 "true"（数据损坏）。
+            position = editor.findText(str(index.data() or ""))
+            editor.setCurrentIndex(position if position >= 0 else 0)
             return
         if isinstance(editor, QComboBox):
             text = index.data() or ""
@@ -262,7 +265,10 @@ class CompositeAttributeTableDialog(QDialog):
         )
 
     def _qgis_parity(self, columns) -> tuple[str, str]:
-        """与 QGIS provider schema 的一致性（缓存到列结构变化）。"""
+        """与 QGIS provider schema 的一致性（每次全量 refresh 各一次桥调用）。
+
+        差量刷新（_refresh_changed_features）不触发本方法——列结构不变时
+        parity 结论不变；桥调用本身为 O(字段) 小自省，不在帧级链上。"""
         canvas = getattr(self._controller, "_canvas", None)
         state, detail = qgis_schema_parity(canvas, self._layer_id, columns)
         self._parity_state = (state, detail)
@@ -361,7 +367,14 @@ class CompositeAttributeTableDialog(QDialog):
             try:
                 value = float(text)
             except ValueError:
-                value = text  # 保留输入；校验在 schema 层标记
+                if field.value_range is not None:
+                    # review-2 P2-2：带 Range 域的字段必须可解析为数值——
+                    # 非数值文本此前静默绕过范围门（含批量路径）。
+                    self._info.setText(
+                        f"字段「{field.label}」需要数值（Range 约束）"
+                        "——输入未写入")
+                    return False
+                value = text  # 无域约束：保留输入；校验在 schema 层标记
             else:
                 if field.value_range is not None:
                     low, high = field.value_range
@@ -494,6 +507,10 @@ class CompositeAttributeTableDialog(QDialog):
                 return False  # → 全量
             changed[feature_id] = feature
         self._suppress_item_changed = True
+        # review-2 P1-1：排序开启时 setData 会触发即时重排，循环内后续
+        # row 查找解析到别的要素的 item（错行写入）。更新期间关闭排序，
+        # 结束后恢复并由调用侧的 _on_sort_changed/全量 refresh 重建行映射。
+        self.table.setSortingEnabled(False)
         try:
             for feature_id, feature in changed.items():
                 row = row_by_id[feature_id]
@@ -504,8 +521,9 @@ class CompositeAttributeTableDialog(QDialog):
                     value = feature.attributes.get(field.key, "")
                     self._apply_display(item, field, value)
         finally:
+            self.table.setSortingEnabled(True)
             self._suppress_item_changed = False
-        self._refresh_state = (session, revision, columns, row_by_id)
+        self._refresh_state = (session, revision, columns, self._row_map())
         return True
 
     def _on_state_changed(self) -> None:

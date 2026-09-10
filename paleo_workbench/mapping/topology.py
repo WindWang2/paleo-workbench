@@ -106,10 +106,11 @@ class TopologyService:
         self._last_layers: list[VectorLayer] = []
         # V9 W2：每图层最近一次校验的错误计数（运行时 topology_error_count
         # 生产者）。键 = layer id，值 = (data_revision, session_revision,
-        # count)。只在有界刷新点写（保存/flush 校验、拓扑开关、几何命令、
-        # undo/redo、显式校验）；上下文采集只读缓存——帧级链不做 O(要素)
-        # 校验。会话终结（提交/回滚）后 cached_error_count 不再计入该层。
-        self._error_counts: dict[str, tuple[int, int, int]] = {}
+        # count, session)。只在有界刷新点写（保存/flush 校验、拓扑开关、
+        # 几何命令、undo/redo、显式校验）；上下文采集只读缓存——帧级链
+        # 不做 O(要素) 校验。会话对象身份入键值（review-2 P1-2）：回滚/
+        # 提交后新建的会话即使 layer id 相同也不继承旧计数。
+        self._error_counts: dict[str, tuple[int, int, int, VectorEditSession | None]] = {}
 
     # -- V9 W2：运行时拓扑错误计数（merge 门禁的事实生产者） -------------------
 
@@ -120,6 +121,7 @@ class TopologyService:
             int(getattr(layer, "data_revision", 0) or 0),
             int(session.revision if session is not None else -1),
             max(0, int(error_count)),
+            session,
         )
 
     def refresh_error_count(self, layer: VectorLayer) -> int:
@@ -131,16 +133,18 @@ class TopologyService:
     def cached_error_count(self, layers: Iterable[VectorLayer]) -> int:
         """各**活跃编辑会话**最近一次校验的错误数之和（缓存读，O(层数)）。
 
-        语义与 save 时校验门禁一致：从未校验过 = 0（门不因未知而拦），
-        校验后发现编辑 → 计数保持最近已知值，直到下一个刷新点重算；
-        会话提交/回滚后该层不再计入（无会话即无未决拓扑错误）。
+        语义与 save 时校验门禁一致：从未校验过 = 0（门不因未知而拦）；
+        同一会话内校验后又编辑 → 保持最近已知值直到下一刷新点；会话
+        终结（提交/回滚）或**换新会话对象**后不计入（新会话内容未经
+        校验，旧计数对它既不可信也不可用——按未知处理，门不拦）。
         """
         total = 0
         for layer in layers:
-            if layer.edit_session is None:
+            session = layer.edit_session
+            if session is None:
                 continue
             entry = self._error_counts.get(layer.id)
-            if entry is not None:
+            if entry is not None and entry[3] is session:
                 total += entry[2]
         return total
 
@@ -149,6 +153,10 @@ class TopologyService:
         stale = set(layer_ids)
         for key in stale.intersection(self._error_counts):
             del self._error_counts[key]
+
+    def forget_all_error_counts(self) -> None:
+        """清空全部计数（工程切换层集全替换时；宿主不触私有状态）。"""
+        self._error_counts.clear()
 
     # -- 校验引擎选择（V7：QGIS GEOS 优先，Shapely 显式回退） ------------------
 

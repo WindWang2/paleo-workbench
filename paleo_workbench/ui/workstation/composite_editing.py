@@ -741,6 +741,14 @@ class CompositeEditController(QObject):
         self._display.clear()
         self._records_cache.clear()
         self._persist_cache.clear()
+        # V9（lifecycle 压测发现）：层集全替换时 per-layer 捕捉覆盖与拓扑
+        # 计数缓存必须随之清空——旧层 id 的条目跨工程存活会在同名 id 复用
+        # 时复活过期配置（remove_layer 单层路径已清，整组替换路径漏清）。
+        self._snapping.layer_enabled.clear()
+        self._snapping.layer_modes.clear()
+        self._snapping.layer_tolerance.clear()
+        self._snapping.layer_priority.clear()
+        self._topology.forget_all_error_counts()
         self._active_layer_id = None
         for record in list(getattr(project, "user_vector_layers", None) or []):
             kind = str(getattr(record, "geometry_kind", "") or "line")
@@ -976,6 +984,9 @@ class CompositeEditController(QObject):
             return
         layer.edit_session.rollback_changes()
         self._topology.discard_compounds([layer.id])
+        # 会话终结：计数缓存随会话作废（cached 读以会话身份判定，这里
+        # 显式清理防同 id 复用误读）。
+        self._topology.forget_error_count([layer.id])
         self.content_changed.emit(layer.id)
         self._rebind_active_tool()
         self.sessions_committed.emit()
@@ -1309,6 +1320,14 @@ class CompositeEditController(QObject):
                 )
                 if mode in snapping.modes and not pushable
             ]
+            # review-2 P2-3：per-layer 推荐含 intersection 而全局未开时，
+            # 原生路径同样不生效（intersection 是整配置 flag）——一并告警。
+            per_layer_intersection = any(
+                "intersection" in (self._snapping.layer_modes.get(layer_id) or ())
+                for layer_id in self._layers
+            ) and "intersection" not in snapping.modes
+            if per_layer_intersection:
+                degraded_modes.append("intersection(per-layer)")
             if degraded_modes:
                 _logger.warning(
                     "捕捉模式 %s 在当前 qgis_render_bridge 版本的 QGIS 捕捉引擎"
@@ -1502,6 +1521,7 @@ class CompositeEditController(QObject):
         session = layer.edit_session
         if session is None:
             return False, "请先开始编辑（几何操作需要编辑会话）"
+        mutated_layers: list = [layer]
         try:
             if command_id == "merge":
                 if not layer.selection:
@@ -1517,6 +1537,8 @@ class CompositeEditController(QObject):
                 if inputs is None:
                     return False, "分割需要一个选中多边形（正在编辑）与一条选中的切割线"
                 polygon_layer, polygon_id, line_feature = inputs
+                if polygon_layer is not layer:
+                    mutated_layers.append(polygon_layer)
                 with polygon_layer.edit_session.edit_source("split(command)"):
                     new_ids = split_polygon_by_line(
                         polygon_layer.edit_session, polygon_id, line_feature
@@ -1531,10 +1553,15 @@ class CompositeEditController(QObject):
         except (KeyError, RuntimeError, ValueError) as exc:
             return False, str(exc)
         finally:
-            # V9 W2：几何命令改写会话后刷新该层错误计数（merge/split 后的
-            # merge 门禁立即可见真实拓扑状态）。
-            if layer.edit_session is not None:
-                self._topology.refresh_error_count(layer)
+            # V9 W2：几何命令改写会话后刷新涉及层错误计数（merge/split 后
+            # 的 merge 门禁立即可见真实拓扑状态）。split 可能改写非活动
+            # polygon 层（review-2 P1-3）——按实际触及集合刷新。
+            for mutated in mutated_layers:
+                if mutated.edit_session is not None:
+                    try:
+                        self._topology.refresh_error_count(mutated)
+                    except Exception:  # noqa: BLE001 — 刷新绝不吞命令结果
+                        pass
         return False, f"未知几何命令 {command_id}"
 
     # -- 多图层识别 -------------------------------------------------------------

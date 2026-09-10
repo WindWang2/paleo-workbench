@@ -26,6 +26,7 @@ from dataclasses import dataclass
 
 __all__ = [
     "CRSResolution",
+    "panel_publish_crs",
     "crs_axis_unit_metres",
     "crs_is_geographic",
     "geod_for_crs",
@@ -140,6 +141,20 @@ def crs_axis_unit_metres(crs: object) -> bool | None:
         return None
 
 
+def panel_publish_crs(value: object, *, purpose: str = "图层面板发布") -> str:
+    """面板/发布路径的 CRS：未声明返回 ""（按原坐标呈现）。
+
+    V9 W3（review-1 P1-1 存量清理）：面板发布快照的 ``or "EPSG:4326"``
+    在未声明时伪造坐标系。诚实语义 = 未声明就不设 CRS（渲染按原坐标、
+    降级可查），工程模型的默认值照常声明 4326——本函数只消灭伪造路径。
+    """
+    resolution = resolve_crs(value, purpose=purpose)
+    if not resolution.declared:
+        logger.warning("%s（按原坐标呈现）", resolution.degraded_reason)
+        return ""
+    return resolution.crs
+
+
 def scale_denominator_from_pixels(
     map_units_per_pixel: float,
     pixels_per_inch: float,
@@ -178,12 +193,16 @@ def geod_for_crs(crs: object):
         ellipsoid = CRS.from_user_input(str(crs)).ellipsoid
         return Geod(
             a=ellipsoid.semi_major_metre, b=ellipsoid.semi_minor_metre)
-    except Exception:
+    except Exception as exc:
         try:
             # WGS84 remains the geodesic default for unknown ellipsoids —
-            # recorded here as an explicit, reviewed fallback (V9 W8).
+            # an explicit, reviewed fallback (V9 W8, review-1 P2-2)：降级
+            # 记入日志而非静默替换。
             from pyproj import Geod
 
+            logger.warning(
+                "geod_for_crs: %r 椭球不可解析（%s）——测地计算回退 WGS84",
+                crs, exc)
             return Geod("WGS84")
         except Exception:
             return None

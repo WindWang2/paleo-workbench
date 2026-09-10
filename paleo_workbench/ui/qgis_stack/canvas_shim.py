@@ -996,7 +996,12 @@ class QgisCanvasShim(QWidget):
                 if layer_crs:
                     from paleo_workbench.mapping.crs_contract import normalize_crs
 
-                    if normalize_crs(canvas_crs) != normalize_crs(layer_crs):
+                    # review-2 P2-5：只在对得上 auth-id 形态（含 ":"）时比对——
+                    # 散文式 CRS（"WGS 84" 等）无法证明不等，按未知跳过。
+                    canvas_auth = normalize_crs(canvas_crs)
+                    layer_auth = normalize_crs(layer_crs)
+                    if (":" in canvas_auth and ":" in layer_auth
+                            and canvas_auth != layer_auth):
                         shim.commit_rejected.emit(
                             f"要素未写入：画布坐标系 {canvas_crs} 与图层坐标系 "
                             f"{layer_crs} 不一致（请检查工程 CRS/图层降级状态）")

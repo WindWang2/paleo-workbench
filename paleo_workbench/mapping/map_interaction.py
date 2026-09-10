@@ -410,6 +410,9 @@ class SnappingService:
         profile = recommended_profile_for_role(role)
         if profile is None:
             return None
+        # 应用推荐即恢复该层参与捕捉（review-2 P2-6：不复活历史禁用——
+        # 推荐的语义是「该角色如此捕捉」，被禁用的层上推荐无从生效）。
+        self.layer_enabled[str(layer_id)] = True
         self.layer_modes[str(layer_id)] = set(profile.modes)
         self.layer_tolerance[str(layer_id)] = float(profile.tolerance_px)
         return profile_summary(profile)

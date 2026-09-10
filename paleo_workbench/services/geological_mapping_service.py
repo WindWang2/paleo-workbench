@@ -158,12 +158,20 @@ class GeologicalMappingService:
         # False and every factor dataset silently rendered as EPSG:4326.
         # Fallback only when the field is absent/empty.
         project_crs = str(getattr(project.coordinate, "project_crs", "") or "").strip()
+        # V9 W3（review-1 P1-1 存量清理）：fallback 经 crs_contract 记录在案
+        # （legacy 显式策略 + 降级判词），不再是静默 `or`。
+        from paleo_workbench.mapping.crs_contract import resolve_crs
+
+        resolution = resolve_crs(
+            project_crs, purpose="因子提取", fallback="EPSG:4326")
+        if not resolution.declared:
+            logger.warning("factor extraction: %s", resolution.degraded_reason)
         dataset = self.pipeline.extract_factors(
             records,
             factor_name=factor_name,
             target_horizon=resolved_horizon,
             unit=unit,
-            crs=project_crs or "EPSG:4326",
+            crs=resolution.crs,
         )
         # Anti-laundering (#848 discipline): a dataset synthesized for an
         # empty project must never be stamped "real" downstream.

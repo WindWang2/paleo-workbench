@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QLabel,
 )
 
+from paleo_workbench.mapping.crs_contract import panel_publish_crs
 from paleo_workbench.ui.qgis_stack.tree_sync import parse_tree_change, parse_tree_events
 from paleo_workbench.ui.qgis_stack.widgets import QgisLayerTreeHost
 
@@ -277,7 +278,7 @@ class QgisLayerTreePanel(QWidget):
         from paleo_workbench.mapping.map_render_backend import MapRenderSnapshot
 
         return MapRenderSnapshot(
-            project_crs=self._project_crs or "EPSG:4326",
+            project_crs=panel_publish_crs(self._project_crs),
             layers=tuple(self._layers),
         )
 
