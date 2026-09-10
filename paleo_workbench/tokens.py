@@ -659,6 +659,15 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         background-color: {t.BG_NAV_ACTIVE};
         border: 1px solid {t.PRIMARY};
     }}
+    /* V10 M8：preferred 工具的轻微可识别提示（推荐捕获工具——kind/角色
+       相符时 evaluator 置 preferred）。下缘细accent线，弱于 checked。 */
+    QToolButton[preferred="true"] {{
+        border-bottom: 2px solid {t.PRIMARY};
+    }}
+    QToolButton[preferred="true"]:checked {{
+        border: 1px solid {t.PRIMARY};
+        border-bottom: 2px solid {t.PRIMARY};
+    }}
     QToolButton:disabled {{
         background-color: transparent;
         border: 1px solid transparent;

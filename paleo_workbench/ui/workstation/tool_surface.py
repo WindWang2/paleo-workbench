@@ -41,6 +41,7 @@ __all__ = [
     "TOOL_GROUPS",
     "TOOL_IDS",
     "LayerCapabilitySnapshot",
+    "LayerMenuFacts",
     "QgisCapabilitySnapshot",
     "ToolAvailability",
     "ToolContext",
@@ -116,6 +117,22 @@ class LayerCapabilitySnapshot:
             "layer_missing": self.missing,
             "layer_degraded": self.degraded,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class LayerMenuFacts:
+    """图层级菜单呈现事实（V10 M5：树右键菜单消费 canonical evaluator）。
+
+    宿主（CompositeDocument）把目标图层的事实投影进 ToolContext 后经
+    ``evaluate_tool`` 求值，产出本冻结快照——面板只据此呈现，不再自建
+    第二业务 gate（此前编辑入口只看 metadata.editable 旗标，RAW/冻结/
+    组锁/阻塞的禁用原因无法进入菜单）。``raw_protected`` 是菜单**编排**
+    事实（RAW 图层显示「复制为草稿」工作流入口），不是新的门禁。
+    """
+
+    toggle_editing: ToolAvailability | None = None
+    repair_geometry: ToolAvailability | None = None
+    raw_protected: bool = False
 
 
 # ---------------------------------------------------------------------------

@@ -519,6 +519,35 @@ class CompositeEditController(QObject):
             return True, ""
         return self._edit_gate(str(layer_id))
 
+    def _snapping_role_recommended(self, layer) -> bool | None:
+        """活动图层的捕捉配置是否等于角色推荐（V10 M3 呈现事实）。
+
+        None = 该角色无推荐 profile（RAW 保护/未知角色——「推荐」无意义）；
+        有 profile 时，per-layer 覆盖通道的模式集与容差都等于推荐值才为
+        True（部分相等或无覆盖 = False，用户自定义/未应用）。只读
+        ``SnappingService`` 既有覆盖通道与 V9 W4 profile，不建第二配置。
+        """
+        if layer is None:
+            return None
+        role = self.role_of_layer(layer.id)
+        if not role:
+            return None
+        from paleo_workbench.mapping_workspace.snapping_profiles import (
+            recommended_profile_for_role,
+        )
+
+        profile = recommended_profile_for_role(role)
+        if profile is None:
+            return None
+        modes = self._snapping.layer_modes.get(str(layer.id))
+        tolerance = self._snapping.layer_tolerance.get(str(layer.id))
+        if modes is None or tolerance is None:
+            return False
+        return (
+            set(modes) == set(profile.modes)
+            and abs(float(tolerance) - float(profile.tolerance_px)) < 1e-9
+        )
+
     def set_role_lookup(self, lookup) -> None:
         """注入角色查询 ``layer_id -> LayerRole|value|None``（stage membership 权威）。
 
@@ -1995,6 +2024,12 @@ class CompositeEditController(QObject):
             ),
             "snapping_enabled": self._snapping.enabled,
             "topology_enabled": self._topology.enabled,
+            # V10 M3：捕捉配置事实（呈现详情——容差/模式/角色推荐态）。
+            # 全部读 SnappingService 既有权威（全局值 + per-layer 覆盖通道），
+            # 不建第二配置源；采集 O(1)。
+            "snapping_tolerance_px": float(self._snapping.pixel_tolerance or 0.0),
+            "snapping_modes": tuple(sorted(self._snapping.modes or ())),
+            "snapping_role_recommended": self._snapping_role_recommended(layer),
             # snapping/topology *可用性*不在此采集（V9 W1）——由
             # build_tool_context 从桥 manifest/引擎探测派生；此前硬编码
             # True 是无权威来源的猜测。
