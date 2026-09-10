@@ -243,6 +243,13 @@ def _layer_gate(ctx: ToolContext) -> str | None:
     return None
 
 
+def _queryable_gate(ctx: ToolContext) -> str | None:
+    """identify 门禁：工程已打开且存在可查询图层（不过问活动层）。"""
+    if ctx.queryable_layer_count <= 0:
+        return "没有可查询的图层"
+    return None
+
+
 def _vector_layer_gate(ctx: ToolContext) -> str | None:
     if not ctx.has_active_vector_layer:
         return "没有活动的矢量图层"
@@ -408,11 +415,15 @@ def _rule_extent_history(ctx: ToolContext, tool_id: str) -> ToolAvailability:
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
 
 def _rule_inspection(ctx: ToolContext, tool_id: str) -> ToolAvailability:
-    # identify 对任意图层合法（栅格也可识别）；select* 只对矢量。
-    reason = _project_gate(ctx) or (
-        _vector_layer_gate(ctx) if tool_id in {"select", "select_rectangle"}
-        else _layer_gate(ctx)
-    )
+    # identify 对任意可查询图层合法（栅格/基础/引用皆可识别，不问活动层）；
+    # select* 只对矢量活动层；measure 仍要活动层。
+    if tool_id == "identify":
+        reason = _project_gate(ctx) or _queryable_gate(ctx)
+    else:
+        reason = _project_gate(ctx) or (
+            _vector_layer_gate(ctx) if tool_id in {"select", "select_rectangle"}
+            else _layer_gate(ctx)
+        )
     if reason is None and tool_id == "identify":
         reason = _native_tool_gate(ctx, "identify", "识别")
     if reason is None and tool_id in {"select", "select_rectangle"}:

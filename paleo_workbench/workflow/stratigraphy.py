@@ -2,9 +2,13 @@
 
 Sequence page is the editor; preparation / mapping / compilation runs consume
 ``ProjectDocument.stratigraphy.target_horizon`` (and linked map horizons).
+Facies mapping picks a horizon from this catalog (preset boundaries, else
+horizons discovered from project data) — not free-text.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 from paleo_workbench.project.models import ProjectDocument, StratigraphicFramework
 
@@ -105,3 +109,70 @@ def active_target_horizon(project: ProjectDocument) -> str:
         if th:
             return th
     return (project.stratigraphy.target_horizon or "").strip()
+
+
+def _horizon_label(name: str) -> str:
+    text = str(name or "").strip()
+    if not text:
+        return ""
+    return Path(text).stem.strip() or text
+
+
+def horizons_from_data(project: ProjectDocument) -> list[str]:
+    """Horizon names discovered from project data (not the stratigraphy editor).
+
+    Sources, in order: ``resources`` of type ``horizon``, geological entities
+    with ``entity_kind == "horizon"``, then ``horizon_interpretations``.
+    """
+    options: list[str] = []
+
+    def _add(name: str) -> None:
+        text = _horizon_label(name)
+        if text and text not in options:
+            options.append(text)
+
+    for resource in getattr(project, "resources", None) or []:
+        if getattr(resource, "type", "") == "horizon":
+            _add(getattr(resource, "name", "") or "")
+    for entity in getattr(project, "geological_entities", None) or []:
+        if getattr(entity, "entity_kind", "") == "horizon":
+            _add(getattr(entity, "name", "") or "")
+    for ref in getattr(project, "horizon_interpretations", None) or []:
+        _add(getattr(ref, "horizon_key", "") or getattr(ref, "name", "") or "")
+    return options
+
+
+def ensure_horizon_catalog(project: ProjectDocument) -> list[str]:
+    """Fill empty ``sequence_boundaries`` from data so the project has a catalog.
+
+    Does not overwrite an existing framework and does not pick a target.
+    """
+    strat = project.stratigraphy
+    existing = [
+        str(name).strip()
+        for name in list(getattr(strat, "sequence_boundaries", None) or [])
+        if str(name).strip()
+    ]
+    if not existing:
+        discovered = horizons_from_data(project)
+        if discovered:
+            strat.sequence_boundaries = list(discovered)
+    return horizon_choices(project)
+
+
+def horizon_choices(project: ProjectDocument) -> list[str]:
+    """Layer-picker options: preset boundaries, data-derived horizons, then target."""
+    options: list[str] = []
+    strat = getattr(project, "stratigraphy", None)
+    for name in list(getattr(strat, "sequence_boundaries", None) or []):
+        text = str(name or "").strip()
+        if text and text not in options:
+            options.append(text)
+    if project is not None:
+        for name in horizons_from_data(project):
+            if name not in options:
+                options.append(name)
+        target = active_target_horizon(project)
+        if target and target not in options:
+            options.insert(0, target)
+    return options

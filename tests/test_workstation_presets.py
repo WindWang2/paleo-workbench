@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QStackedWidget
 from paleo_workbench.project.domain import WellEntity
 from paleo_workbench.project.models import ProjectDocument, ResourceItem
 from paleo_workbench.ui.layout_persistence import (
+    LAYOUT_STATE_VERSION,
     SETTINGS_APP,
     SETTINGS_ORG,
     LayoutPersistence,
@@ -52,6 +53,7 @@ _DOCK_ATTRS = {
     "well": "well_dock",
     "seismic": "seismic_dock",
     "hub": "hub_dock",
+    "mapping_stage": "mapping_stage_dock",
 }
 
 
@@ -180,7 +182,7 @@ def test_migrate_moves_legacy_window_state_and_removes_old_keys():
     target.sync()
     assert target.value("layout/window_state") == QByteArray(b"fake-state-blob")
     assert target.value("layout/inspector_user_hidden", False, type=bool) is True
-    assert target.value("layout/state_version", 0, type=int) == 4
+    assert target.value("layout/state_version", 0, type=int) == LAYOUT_STATE_VERSION
     legacy.sync()
     assert "layout/windowState.v4" not in legacy.allKeys()
     assert "layout/inspector_user_hidden" not in legacy.allKeys()
@@ -250,7 +252,7 @@ def test_restore_skips_unknown_state_version(qtbot, tmp_path, monkeypatch):
     frame._restore_layout()
     assert restore_calls == []
 
-    frame._settings.setValue("layout/state_version", 4)
+    frame._settings.setValue("layout/state_version", LAYOUT_STATE_VERSION)
     frame._settings.sync()
     frame._restore_layout()
     assert len(restore_calls) == 1

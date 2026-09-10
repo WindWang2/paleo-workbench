@@ -2,8 +2,9 @@
 
 动作语义按阶段（V5 §12/§19/§27）：
 
-* Phase 1：加载初始相图（RAW）、叠加测井/地震预测（模型结果，不可编辑）、
-  **RAW→DERIVED 建稿**（人工解释绝不动 RAW）、保存阶段成果。
+* Phase 1（智能预测）：叠加地震相预测、叠加测井相预测（井点；
+  VECTOR_POLYGONS 仍按面叠加）、测井点到面、可选加载初始相图 /
+  RAW→DERIVED 建稿、保存阶段成果。
 * Phase 2：typed 约束创建（物源线/展布线/古岸线/相带边界/断层/掩膜…）、
   单因素工作台/运行（导航至既有制备 UI，不在本分支重实现插值）、
   叠加单因素结果（factor 组自动组织）。
@@ -50,9 +51,12 @@ STAGE_ACTION_TOOLS: dict[str, str] = {
 #: context_actions）互不推导，存在漂移（评审 R2-F1）。
 STAGE_CONTEXT_ACTIONS: dict[str, tuple[tuple[str, str], ...]] = {
     "facies_calibration": (
+        ("add_seismic_prediction_overlay", "叠加地震相预测"),
+        ("add_well_prediction_overlay", "叠加测井相预测"),
+        ("well_prediction_point_to_surface", "测井点到面"),
+        ("run_well_facies_mock", "运行测井相预测（mock）"),
+        ("run_seismic_facies_mock", "运行地震相面预测（mock）"),
         ("load_initial_facies", "加载初始相图"),
-        ("add_well_prediction_overlay", "叠加测井预测"),
-        ("add_seismic_prediction_overlay", "叠加地震预测"),
         ("create_facies_draft", "创建解释草稿"),
         ("stage_save", "保存阶段成果"),
     ),
@@ -90,11 +94,40 @@ class StageActionDispatcher:
 
     # -- 入口 -------------------------------------------------------------------
 
+    #: 相图按层位进行：这些动作在未设定编图层位时拒绝执行。
+    _REQUIRES_HORIZON = frozenset({
+        "load_initial_facies",
+        "add_well_prediction_overlay",
+        "add_seismic_prediction_overlay",
+        "well_prediction_point_to_surface",
+        "run_well_facies_mock",
+        "run_seismic_facies_mock",
+        "toggle_prediction_confidence",
+        "create_facies_draft",
+        "open_factor_workbench",
+        "run_factor",
+        "overlay_factor_results",
+        "select_evidence",
+        "create_integrated_draft",
+        "create_integrated_boundary",
+        "run_fusion",
+        "run_qa",
+        "assemble_map_product",
+        "stage_qc",
+    })
+
     def dispatch(self, stage_value: str, action_id: str) -> None:
+        if str(action_id) in self._REQUIRES_HORIZON and not self._mapping_horizon():
+            self.composite.status_message.emit(
+                "请先设定编图层位（相图按层位进行）")
+            return
         handler = {
             "load_initial_facies": self.load_initial_facies,
             "add_well_prediction_overlay": self.add_well_prediction_overlay,
             "add_seismic_prediction_overlay": self.add_seismic_prediction_overlay,
+            "well_prediction_point_to_surface": self.well_prediction_point_to_surface,
+            "run_well_facies_mock": self.run_well_facies_mock,
+            "run_seismic_facies_mock": self.run_seismic_facies_mock,
             "toggle_prediction_confidence": self.toggle_prediction_confidence,
             "create_facies_draft": self.create_facies_draft,
             "open_factor_workbench": self.open_factor_workbench,
@@ -165,6 +198,20 @@ class StageActionDispatcher:
         self.composite._sync_composition_now()
         return layer.id
 
+    def _mapping_horizon(self) -> str:
+        project = self.project
+        if project is None:
+            return ""
+        try:
+            from paleo_workbench.workflow.stratigraphy import active_target_horizon
+
+            return active_target_horizon(project)
+        except Exception:
+            return str(
+                getattr(getattr(project, "stratigraphy", None), "target_horizon", "")
+                or ""
+            ).strip()
+
     def _stage_role_layer(self, role: LayerRole) -> str | None:
         for layer_id in self.stage_controller.state.layers_with_role(role):
             if self.edit_controller.layer(str(layer_id)) is not None:
@@ -173,10 +220,37 @@ class StageActionDispatcher:
 
     # -- Phase 1 ------------------------------------------------------------------
 
+    def _default_blank_facies_features(self) -> list[tuple[dict, dict]]:
+        """工区默认空白相：未指定初始相图时的回退（一整块工区范围）。
+
+        工区边界有效点 ≥3 则闭合 ring 并产出单个 Polygon 特征；否则返回 []。
+        """
+        import math
+
+        project = self.project
+        boundary = getattr(getattr(project, "workarea", None), "boundary", None) or []
+        ring: list[list[float]] = []
+        for vertex in boundary:
+            try:
+                x, y = float(vertex[0]), float(vertex[1])
+            except (TypeError, ValueError, IndexError):
+                continue
+            if math.isfinite(x) and math.isfinite(y):
+                ring.append([x, y])
+        if len(ring) < 3:
+            return []
+        if ring[0] != ring[-1]:
+            ring.append(list(ring[0]))
+        return [(
+            {"type": "Polygon", "coordinates": [ring]},
+            {"facies": "空白相", "source": "workarea_default"},
+        )]
+
     def load_initial_facies(self) -> None:
         """初始沉积相图（PaleoMapDocument.facies_polygons）→ RAW 叠加图层。
 
-        RAW 不可变（V5 §14）：角色 INITIAL_FACIES_SOURCE 阻止编辑会话。
+        未指定初始相图时回退到工区默认空白相；RAW 不可变（V5 §14）：角色
+        INITIAL_FACIES_SOURCE 阻止编辑会话。
         """
         existing = self._stage_role_layer(LayerRole.INITIAL_FACIES_SOURCE)
         if existing is not None:
@@ -188,8 +262,29 @@ class StageActionDispatcher:
             if getattr(doc, "facies_polygons", None)
         ]
         if not candidates:
-            self.composite.status_message.emit(
-                "工程中没有初始沉积相图——先在编图页生成或导入相图文档")
+            features = self._default_blank_facies_features()
+            if not features:
+                self.composite.status_message.emit(
+                    "工程中没有初始沉积相图——先在编图页生成或导入相图文档")
+                return
+            layer_id = self._create_role_layer(
+                "初始相图（工区默认空白相）", "polygon",
+                LayerRole.INITIAL_FACIES_SOURCE, features=features,
+            )
+            if layer_id:
+                from paleo_workbench.mapping.map_styles import VectorStyle
+
+                # 默认空白相只是占位底：一整块不透明填充会压住基础层，
+                # 淡色半透明（#AARRGGBB 约 10%，比工区边界 13% 更淡）只示意范围。
+                self.edit_controller.set_layer_style(
+                    layer_id,
+                    VectorStyle(
+                        fill="#1a64748b", stroke="#94a3b8", stroke_width=1.0,
+                    ).to_dict(),
+                )
+                self.composite.status_message.emit(
+                    "工程未指定初始相图，已按工区范围默认生成空白相"
+                    "（1 个相面，RAW 不可编辑——用「创建解释草稿」开始校正）")
             return
         doc = candidates[0]
         features = []
@@ -212,18 +307,434 @@ class StageActionDispatcher:
                 f"已叠加初始相图（{len(features)} 个相面，RAW 不可编辑——"
                 "用「创建解释草稿」开始校正）")
 
-    def add_well_prediction_overlay(self) -> None:
-        """测井预测结果叠加。
+    # -- Phase 1：mock 预测生成（生产 → 落编目 → 自动叠加） ---------------------
 
-        测井预测是井曲线域结果（WELL_INTERVALS）——地图上以选中井的快速
-        联动为主（点击井预测打开测井 dock，V5 §16）。曲线本身不入地图；
-        有 VECTOR_POLYGONS 空间结果的预测任务按面叠加。
+    def run_well_facies_mock(self) -> None:
+        """对目标层位的全部井生成 mock 测井沉积相，并叠加井点显示。"""
+        self._run_mock_prediction(kind="well")
+
+    def run_seismic_facies_mock(self) -> None:
+        """对目标层位平面范围生成 mock 面状沉积相，并叠加相区显示。"""
+        self._run_mock_prediction(kind="seismic")
+
+    def _run_mock_prediction(self, *, kind: str) -> None:
+        from paleo_workbench.catalog.runtime import get_catalog_service
+
+        service = get_catalog_service()
+        if service is None:
+            self.composite.status_message.emit(
+                "数据编目不可用——无法运行 mock 预测（预测结果必须落编目建血缘）")
+            return
+        project = self.project
+        horizon = self._mapping_horizon()
+        import secrets
+
+        from paleo_workbench.prediction.inference_service import (
+            execute_run,
+            link_run_to_domain_task,
+            materialize_prediction_task,
+            resolve_prediction_inputs,
+            start_inference,
+        )
+        from paleo_workbench.prediction.mock_facies import (
+            ensure_mock_facies_models,
+        )
+        from paleo_workbench.prediction.providers import InferenceInputError
+
+        well_version, seismic_version = ensure_mock_facies_models(service)
+        model_version = well_version if kind == "well" else seismic_version
+        try:
+            parameters = self._mock_run_parameters(project, horizon, kind=kind)
+        except InferenceInputError as exc:
+            self.composite.status_message.emit(str(exc))
+            return
+        parameters["seed"] = secrets.randbelow(2**31)
+        operation = "well_facies_mock" if kind == "well" else "seismic_facies_mock"
+        input_ids = resolve_prediction_inputs(project, service)
+        run = start_inference(
+            service,
+            model_version_id=model_version.id,
+            input_version_ids=input_ids,
+            parameters=parameters,
+            operation=operation,
+        )
+        try:
+            outcome = execute_run(service, run.id)
+        except Exception as exc:
+            # execute_run 已把 run 置 failed（诚实失败）；此处只负责可见性。
+            self.composite.status_message.emit(f"mock 预测失败：{exc}")
+            return
+        if outcome.get("result") is None:
+            # execute_run 失败时返回 result=None 而不抛出（失败已记在 run
+            # 上）；空结果绝不 materialize 成任务，只报可见失败。
+            detail = ""
+            try:
+                failed_run = service.get_run(run.id)
+                error = str((failed_run.parameters or {}).get("error") or "")
+                if error:
+                    detail = f"：{error}"
+            except Exception:
+                detail = ""
+            self.composite.status_message.emit(f"mock 预测失败{detail}")
+            return
+        payload = dict(outcome.get("result") or {})
+        try:
+            self._register_mock_intermediates(service, run.id, payload, kind=kind)
+        except Exception as exc:
+            # 中间登记失败不得 orphan 主结果：DERIVED 已落盘、run 已 complete，
+            # task 照建，只是明示中间文件缺失。
+            self.composite.status_message.emit(
+                f"中间文件登记失败（主结果已保留）：{exc}")
+        resources = getattr(project, "resources", None) or []
+        # input_refs 按 kind 只记本类输入：Task 2 分类语义看“键值非空”，
+        # 跨类全带会把 seismic 任务误判为 well（反之亦然）。
+        well_ids = [
+            str(r.id) for r in resources
+            if getattr(r, "type", "") == "well_log"
+        ]
+        seismic_ids = [
+            str(r.id) for r in resources
+            if getattr(r, "type", "") == "seismic"
+        ]
+        task = materialize_prediction_task(
+            project,
+            payload,
+            name_prefix=(
+                "测井相预测（mock）" if kind == "well" else "地震相面预测（mock）"),
+            workflow=operation,
+            target_horizon=horizon,
+            well_log_resource_ids=well_ids if kind == "well" else [],
+            seismic_resource_ids=seismic_ids if kind == "seismic" else [],
+            run_id=run.id,
+            output_version_id=str(
+                getattr(outcome.get("output_version"), "id", "") or ""),
+        )
+        project.prediction_tasks.append(task)
+        try:
+            link_run_to_domain_task(service, run.id, task.id)
+        except Exception:
+            task.model_metadata["link_failed"] = True
+            logger.exception("link_run_to_domain_task failed for run %s", run.id)
+        summary = dict(task.result_summary or {})
+        if kind == "well":
+            self._drop_stale_well_points_layer()
+            self.add_well_prediction_overlay()
+            count = len(summary.get("predicted_regions") or [])
+            self.composite.status_message.emit(
+                f"已生成 {count} 口井的预测沉积相（mock，层位 {horizon}），"
+                "已叠加井点显示")
+        else:
+            self.add_seismic_prediction_overlay()
+            features = (summary.get("spatial") or {}).get("features") or []
+            self.composite.status_message.emit(
+                f"已生成面状沉积相（mock，层位 {horizon}）："
+                f"{len(features)} 个相区，已叠加显示")
+
+    def _drop_stale_well_points_layer(self) -> None:
+        """删掉旧井点层，让随后的叠加重建出含新任务的层。
+
+        `_overlay_well_prediction_points` 是单层幂等语义（层在即复用、不重建）——
+        那是「叠加已有结果」动作的契约，本生成路径不碰它；但每次 mock 生成都产出
+        新 task，不先删旧层新任务在图上不可见。删旧建新 precedented by
+        `well_prediction_point_to_surface`。
         """
-        self._overlay_polygon_predictions(prefer="well")
+        from paleo_workbench.mapping.well_prediction_surface import (
+            POINTS_LAYER_TASK_ID,
+        )
+
+        role = LayerRole.WELL_FACIES_PREDICTION
+        stale = [
+            lid for lid in self.stage_controller.state.layers_with_role(role)
+            if self.stage_controller.state.membership(lid).factor_task_id
+            == POINTS_LAYER_TASK_ID
+            and self.edit_controller.layer(str(lid)) is not None
+        ]
+        for lid in stale:
+            self.stage_controller.group_controller.unregister_layer(lid)
+            self.edit_controller.remove_layer(lid)
+
+    def _mock_run_parameters(self, project, horizon: str, *, kind: str) -> dict:
+        from paleo_workbench.prediction.providers import InferenceInputError
+
+        if kind == "well":
+            wells = list(getattr(project, "wells", None) or [])
+            if not wells:
+                raise InferenceInputError("工程中没有井，无法生成测井相预测")
+            # 双键：`_` 键留作 run 参数留存（血缘可见），非下划线键穿过
+            # execute_run 的 `_` 过滤真正到达 provider（服务语义使然）。
+            well_rows = [
+                {
+                    "well_id": str(getattr(w, "id", "") or ""),
+                    "well_name": str(getattr(w, "name", "") or ""),
+                    "td": getattr(w, "td", None),
+                }
+                for w in wells
+            ]
+            return {
+                "target_horizon": horizon,
+                "_wells": well_rows,
+                "wells": well_rows,
+            }
+        extent, ring, extent_source = self._mock_areal_extent(project)
+        if extent is None:
+            raise InferenceInputError(
+                "无可用平面范围（工区边界 / 井位 / 地震工区均为空），"
+                "无法生成面状沉积相")
+        crs = str(
+            getattr(getattr(project, "coordinate", None), "project_crs", "")
+            or "")
+        return {
+            "target_horizon": horizon,
+            "_extent": extent,
+            "extent": extent,
+            "_clip_ring": ring,
+            "clip_ring": ring,
+            "_crs": crs,
+            "crs": crs,
+            "grid_n": 80,
+            # 非下划线键：进 run parameters 与 snapshot，进血缘。
+            "extent_source": extent_source,
+        }
+
+    @staticmethod
+    def _mock_areal_extent(project):
+        """mock 面状相的平面范围：工区边界 bbox（带 clip ring）→ 井位 bbox
+        +10% padding → 地震工区角点 bbox。
+
+        返回 (extent|None, ring|None, extent_source)。extent_source 记范围出处
+        （"workarea_boundary" / "well_bbox" / "seismic_survey" / ""），随 run
+        parameters 进血缘；与在途 point_to_surface 的工区优先惯例一致。
+        """
+        import math
+
+        def _bbox(points):
+            xs = [p[0] for p in points]
+            ys = [p[1] for p in points]
+            return (min(xs), min(ys), max(xs), max(ys))
+
+        boundary = getattr(getattr(project, "workarea", None), "boundary", None) or []
+        ring = [
+            (float(x), float(y)) for x, y, *_ in boundary
+            if math.isfinite(float(x)) and math.isfinite(float(y))
+        ]
+        if len(ring) >= 3:
+            return _bbox(ring), ring, "workarea_boundary"
+        well_points = [
+            (float(w.project_x), float(w.project_y))
+            for w in (getattr(project, "wells", None) or [])
+            if math.isfinite(float(getattr(w, "project_x", float("nan"))))
+            and math.isfinite(float(getattr(w, "project_y", float("nan"))))
+        ]
+        if well_points:
+            xmin, ymin, xmax, ymax = _bbox(well_points)
+            pad_x = max((xmax - xmin) * 0.1, 1.0)
+            pad_y = max((ymax - ymin) * 0.1, 1.0)
+            return (xmin - pad_x, ymin - pad_y, xmax + pad_x, ymax + pad_y), None, "well_bbox"
+        corners = []
+        for survey in (getattr(project, "seismic_surveys", None) or []):
+            for point in (getattr(survey, "extent", None) or []):
+                try:
+                    x, y = float(point[0]), float(point[1])
+                except (TypeError, ValueError, IndexError):
+                    continue
+                if math.isfinite(x) and math.isfinite(y):
+                    corners.append((x, y))
+        if len(corners) >= 3:
+            return _bbox(corners), None, "seismic_survey"
+        return None, None, ""
+
+    def _register_mock_intermediates(
+            self, service, run_id: str, payload: dict, *, kind: str) -> None:
+        """中间文件登记：同 run 的 INTERMEDIATE 版本（用户硬性要求）。
+
+        注意 DERIVED 结果 JSON（execute_run 已落盘）仍含这些数据——此处
+        弹出只是为了 task.result_summary 干净；中间版本才是规范留存。
+        """
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from paleo_workbench.catalog.models import DataStage
+
+        if kind == "well":
+            detail = payload.pop("well_detail", None)
+            if not detail:
+                return
+            fd, tmp = tempfile.mkstemp(
+                prefix="mock_well_facies_", suffix=".json")
+            try:
+                with open(fd, "w", encoding="utf-8") as handle:
+                    json.dump({"wells": detail}, handle,
+                              ensure_ascii=False, indent=2)
+                service.register_result_asset(
+                    name="测井相预测（mock）逐井明细",
+                    type="prediction_intermediate",
+                    format="json",
+                    asset_metadata={"kind": "prediction_intermediate"},
+                    source_path=tmp,
+                    stage=DataStage.INTERMEDIATE,
+                    run_id=run_id,
+                    version_metadata={
+                        "kind": "prediction_intermediate", "mock": True},
+                )
+            finally:
+                try:
+                    Path(tmp).unlink()
+                except OSError:
+                    pass
+            return
+        grid = payload.pop("mock_grid", None)
+        if not grid:
+            return
+        import numpy as np
+
+        from paleo_workbench.catalog.grid_artifact import write_grid_artifact
+        from paleo_workbench.workflow.factor_grid_result import FactorGridResult
+
+        result = FactorGridResult(
+            grid_z=np.asarray(grid["grid_z"], dtype=np.float32),
+            grid_x=np.asarray(grid["grid_x"], dtype=np.float64),
+            grid_y=np.asarray(grid["grid_y"], dtype=np.float64),
+            factor_name="地震相面预测（mock）中间栅格",
+            algorithm_id="mock_nearest_neighbor",
+            algorithm_parameters={"grid_n": int(grid.get("grid_n", 80))},
+            crs=grid.get("crs") or None,
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            artifact = write_grid_artifact(result, tmpdir, "mock_seismic_facies")
+            service.register_result_asset(
+                name="地震相面预测（mock）中间栅格",
+                type="prediction_intermediate",
+                format="npz",
+                asset_metadata={"kind": "prediction_intermediate"},
+                source_path=artifact,
+                stage=DataStage.INTERMEDIATE,
+                run_id=run_id,
+                version_metadata={
+                    "kind": "prediction_intermediate", "mock": True},
+            )
+
+    def add_well_prediction_overlay(self) -> None:
+        """测井相预测结果叠加：井点（区间 + 井位）以及已有相面。"""
+        poly_added, poly_already, unmatched = self._overlay_polygon_predictions(
+            prefer="well", emit=False)
+        point_added, point_already, missing_xy = self._overlay_well_prediction_points()
+        parts: list[str] = []
+        if point_added:
+            parts.append(f"已叠加 {point_added} 个测井预测井点")
+        elif point_already:
+            parts.append("测井预测井点已在图层树")
+        if poly_added:
+            parts.append(f"已叠加 {poly_added} 个测井预测相面（不可编辑）")
+        elif poly_already:
+            parts.append(f"{poly_already} 个测井预测相面此前已叠加")
+        if not parts:
+            detail = ["没有可叠加的测井相预测结果（需要井位坐标 + 预测区间，或 VECTOR_POLYGONS）"]
+            if missing_xy:
+                detail.append(f"{missing_xy} 个测井任务缺少井位，未落点")
+            if unmatched:
+                detail.append(f"{unmatched} 个任务无法判别井/震类别")
+            self.composite.status_message.emit("；".join(detail))
+            return
+        if missing_xy:
+            parts.append(f"{missing_xy} 个测井任务缺少井位，未落点")
+        self.composite.status_message.emit("；".join(parts))
 
     def add_seismic_prediction_overlay(self) -> None:
         """地震预测相叠加（VECTOR_POLYGONS 空间结果 → 独立预测图层）。"""
         self._overlay_polygon_predictions(prefer="seismic")
+
+    def well_prediction_point_to_surface(self) -> None:
+        """测井预测井点 → 最近邻相面（明确动作，不在阶段切换时重算）。"""
+        from paleo_workbench.mapping.well_prediction_surface import (
+            SURFACE_LAYER_TASK_ID,
+            point_to_surface_features,
+            well_facies_points,
+        )
+
+        role = LayerRole.WELL_FACIES_PREDICTION
+        existing = [
+            lid for lid in self.stage_controller.state.memberships
+            if self.stage_controller.state.membership(lid).role == role
+            and self.stage_controller.state.membership(lid).factor_task_id
+            == SURFACE_LAYER_TASK_ID
+            and self.edit_controller.layer(lid) is not None
+        ]
+        points = well_facies_points(self.project)
+        if not points:
+            self.composite.status_message.emit(
+                "没有可做点到面的测井预测井点——需要测井相预测结果，且井位要有坐标")
+            return
+        features = point_to_surface_features(points, project=self.project)
+        if not features:
+            self.composite.status_message.emit(
+                "点到面未生成相面（井点不足或工区范围无效）")
+            return
+        horizon = self._mapping_horizon()
+        if horizon:
+            features = [
+                (geometry, {**dict(properties), "horizon": horizon})
+                for geometry, properties in features
+            ]
+        for lid in existing:
+            self.stage_controller.group_controller.unregister_layer(lid)
+            self.edit_controller.remove_layer(lid)
+        title = "测井预测相（点到面）"
+        if horizon:
+            title = f"{title} · {horizon}"
+        created = self._create_role_layer(
+            title, "polygon", role,
+            factor_task_id=SURFACE_LAYER_TASK_ID,
+            features=features,
+        )
+        if created:
+            scope = f"（层位 {horizon}）" if horizon else ""
+            self.composite.status_message.emit(
+                f"已由 {len(points)} 个测井预测井点生成点到面相面{scope}"
+                f"（{len(features)} 个相多边形，不可编辑）")
+        else:
+            self.composite.status_message.emit("测井点到面图层创建失败")
+
+    def _overlay_well_prediction_points(self) -> tuple[int, int, int]:
+        """返回 (added_points, already, tasks_missing_xy)。"""
+        from paleo_workbench.mapping.well_prediction_surface import (
+            POINTS_LAYER_TASK_ID,
+            point_features,
+            well_facies_points,
+            well_prediction_tasks,
+        )
+
+        role = LayerRole.WELL_FACIES_PREDICTION
+        existing = [
+            lid for lid in self.stage_controller.state.memberships
+            if self.stage_controller.state.membership(lid).role == role
+            and self.stage_controller.state.membership(lid).factor_task_id
+            == POINTS_LAYER_TASK_ID
+            and self.edit_controller.layer(lid) is not None
+        ]
+        points = well_facies_points(self.project)
+        well_tasks = well_prediction_tasks(self.project)
+        missing_xy = max(0, len(well_tasks) - len({p.task_id for p in points if p.task_id}))
+        if existing:
+            return 0, len(points) or 1, missing_xy
+        if not points:
+            return 0, 0, missing_xy
+        horizon = self._mapping_horizon()
+        features = point_features(points)
+        if horizon:
+            features = [
+                (geometry, {**dict(properties), "horizon": horizon})
+                for geometry, properties in features
+            ]
+        title = "测井预测相（井点）"
+        if horizon:
+            title = f"{title} · {horizon}"
+        created = self._create_role_layer(
+            title, "point", role,
+            factor_task_id=POINTS_LAYER_TASK_ID,
+            features=features,
+        )
+        return (len(points) if created else 0), 0, missing_xy
 
     @staticmethod
     def _classify_prediction_task(task) -> str:
@@ -231,9 +742,12 @@ class StageActionDispatcher:
 
         优先 ``input_refs`` 键（well/logs vs seismic）；键无信号时回退任务名
         的显式类别词（此处是展示归类而非科学语义判定，允许名称提示）。
+        materialize_prediction_task 恒写双键（值可为空列表），只看键名会把 pipeline 任务误判为 seismic。
         """
         refs = getattr(task, "input_refs", None) or {}
-        keys = " ".join(str(key).lower() for key in refs.keys())
+        keys = " ".join(
+            str(key).lower() for key, value in refs.items() if value
+        )
         if "seis" in keys:
             return "seismic"
         if "well" in keys or "log" in keys:
@@ -245,7 +759,9 @@ class StageActionDispatcher:
             return "well"
         return "unknown"
 
-    def _overlay_polygon_predictions(self, *, prefer: str) -> None:
+    def _overlay_polygon_predictions(
+        self, *, prefer: str, emit: bool = True,
+    ) -> tuple[int, int, int]:
         from paleo_workbench.prediction.spatial_result import extract_polygon_features
 
         tasks = getattr(self.project, "prediction_tasks", None) or []
@@ -281,28 +797,44 @@ class StageActionDispatcher:
                     features = extract_polygon_features(payload)
                 except Exception:
                     features = []
+            features = [
+                feat for feat in features
+                if isinstance(feat.get("geometry"), dict)
+                and feat["geometry"].get("type") in {"Polygon", "MultiPolygon"}
+            ]
             if not features:
                 continue
-            label = f"{getattr(task, 'name', '') or '预测相'}（{'测井' if wanted == 'well' else '地震'}预测）"
+            horizon = self._mapping_horizon()
+            kind_label = "测井" if wanted == "well" else "地震"
+            title = f"{getattr(task, 'name', '') or '预测相'}（{kind_label}预测）"
+            if horizon:
+                title = f"{title} · {horizon}"
             created = self._create_role_layer(
-                label, "polygon", role, factor_task_id=task_marker,
+                title, "polygon", role, factor_task_id=task_marker,
                 features=[
-                    (dict(f.get("geometry") or {}), dict(f.get("properties") or {}))
+                    (
+                        dict(f.get("geometry") or {}),
+                        {**dict(f.get("properties") or {}),
+                         **({"horizon": horizon} if horizon else {})},
+                    )
                     for f in features
                 ],
             )
             added += 1 if created else 0
-        label = "测井" if wanted == "well" else "地震"
-        if not added:
-            parts = [f"没有可叠加的{label}预测空间结果（需要 VECTOR_POLYGONS 预测任务）"]
-            if unmatched:
-                parts.append(f"{unmatched} 个任务无法判别井/震类别（经 input_refs/任务名），未叠加")
-            self.composite.status_message.emit("；".join(parts))
-        else:
-            message = f"已叠加 {added} 个{label}预测结果图层（不可编辑）"
-            if already:
-                message += f"；{already} 个此前已叠加，跳过"
-            self.composite.status_message.emit(message)
+        if emit:
+            label = "测井" if wanted == "well" else "地震"
+            if not added:
+                parts = [f"没有可叠加的{label}预测空间结果（需要 VECTOR_POLYGONS 预测任务）"]
+                if unmatched:
+                    parts.append(
+                        f"{unmatched} 个任务无法判别井/震类别（经 input_refs/任务名），未叠加")
+                self.composite.status_message.emit("；".join(parts))
+            else:
+                message = f"已叠加 {added} 个{label}预测结果图层（不可编辑）"
+                if already:
+                    message += f"；{already} 个此前已叠加，跳过"
+                self.composite.status_message.emit(message)
+        return added, already, unmatched
 
     def toggle_prediction_confidence(self) -> None:
         """预测置信度叠加开关（§10 P1；stage_profiles 已声明动作 id）。
@@ -382,6 +914,10 @@ class StageActionDispatcher:
                     if isinstance(geometry, dict):
                         source_features.append(
                             (geometry, dict(polygon.get("properties") or {})))
+            else:
+                source_features = self._default_blank_facies_features()
+                if source_features:
+                    source_name = "初始相图（工区默认空白相）校正稿"
         if not source_features:
             self.composite.status_message.emit(
                 "没有可校正的初始相图——先加载初始相图（RAW）")

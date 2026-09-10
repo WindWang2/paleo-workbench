@@ -7,10 +7,13 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from paleo_workbench.ui.qgis_stack.events import StackEvents
 from paleo_workbench.ui.qgis_stack.mirror import mirror_snapshot_to_stack
-from paleo_workbench.ui.qgis_stack.widgets import QgisCanvasHost
+from paleo_workbench.ui.qgis_stack.widgets import QgisCanvasHost, canvas_viewport
 from paleo_workbench import tokens
 from paleo_workbench.ui.theme import theme_manager
-from paleo_workbench.ui.unified_map_canvas import paint_map_decorations
+from paleo_workbench.ui.unified_map_canvas import (
+    ensure_basic_map_chrome,
+    paint_map_decorations,
+)
 
 
 class _DisplayBackend:
@@ -58,6 +61,8 @@ class _Overlay(QWidget):
         self._host = host
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setAutoFillBackground(False)
 
     def paintEvent(self, _event) -> None:  # noqa: N802
         host = self._host
@@ -89,13 +94,12 @@ class _Overlay(QWidget):
                     continue
                 screen = host.map_to_screen((float(coords[0]), float(coords[1])))
                 painter.drawEllipse(QPointF(screen.x(), screen.y()), 8.0, 8.0)
-        decorations = state.get("decorations") or {}
-        if decorations:
-            paint_map_decorations(
-                painter, decorations,
-                width=self.width(), height=self.height(),
-                extent=host.view_extent, dark_chrome=False,
-            )
+        decorations = ensure_basic_map_chrome(state.get("decorations"))
+        paint_map_decorations(
+            painter, decorations,
+            width=self.width(), height=self.height(),
+            extent=host.view_extent, dark_chrome=True,
+        )
         painter.end()
 
 
@@ -134,11 +138,11 @@ class QgisDisplayCanvas(QWidget):
         self._overlay = _Overlay(self)
         self._filter = _ClickFilter(self)
         self.canvas.installEventFilter(self._filter)
-        viewport = getattr(self.canvas, "viewport", None)
-        if callable(viewport):
-            vp = viewport()
-            if vp is not None:
-                vp.installEventFilter(self._filter)
+        vp = canvas_viewport(self.canvas)
+        if vp is not None:
+            vp.installEventFilter(self._filter)
+            self._overlay.setParent(vp)
+        self._install_chrome_overlay()
         self.stack.set_map_tool(self.canvas_address, "pan")
         # Qt 树析构期间绝不能 shutdown 整个栈（在半析构画布上进
         # destroyCanvas/unsetMapTool 会踩悬空子对象）；只做状态记账。
@@ -149,8 +153,22 @@ class QgisDisplayCanvas(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        self._overlay.setGeometry(self.rect())
-        self._overlay.raise_()
+        self._install_chrome_overlay()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._install_chrome_overlay()
+
+    def _install_chrome_overlay(self) -> None:
+        overlay = getattr(self, "_overlay", None)
+        if overlay is None:
+            return
+        host = canvas_viewport(self.canvas) or self
+        if overlay.parent() is not host:
+            overlay.setParent(host)
+        overlay.setGeometry(host.rect())
+        overlay.raise_()
+        overlay.show()
 
     def _emit_map_click(self, pos: QPointF) -> None:
         self.map_clicked.emit(self.screen_to_map((pos.x(), pos.y())))

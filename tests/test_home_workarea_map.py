@@ -268,6 +268,34 @@ def test_single_point_extent_is_not_degenerate():
     assert xmax > xmin and ymax > ymin
 
 
+def test_qgis_crs_blank_when_4326_label_has_projected_coords():
+    """工程写成 EPSG:4326 但坐标是工区网格时，不能把画布设成地理系（否则不画）。"""
+    from types import SimpleNamespace
+
+    from paleo_workbench.mapping.qgis_mirror import (
+        _qgis_crs_for_layer,
+        _qgis_crs_for_snapshot,
+    )
+
+    projected = SimpleNamespace(
+        project_crs="EPSG:4326 / WGS84",
+        layers=[
+            SimpleNamespace(
+                extent=(328.15, 1264.18, 12843.24, 15882.8),
+                crs="EPSG:4326 / WGS84",
+            )
+        ],
+    )
+    assert _qgis_crs_for_snapshot(projected) == ""
+    assert _qgis_crs_for_layer(projected.layers[0], projected) == ""
+
+    geographic = SimpleNamespace(
+        project_crs="EPSG:4326",
+        layers=[SimpleNamespace(extent=(116.0, 39.0, 117.0, 40.0), crs="EPSG:4326")],
+    )
+    assert _qgis_crs_for_snapshot(geographic) == "EPSG:4326"
+
+
 # ---------------------------------------------------------------------------
 # page embedding
 # ---------------------------------------------------------------------------

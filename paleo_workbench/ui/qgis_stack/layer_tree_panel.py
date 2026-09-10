@@ -115,6 +115,8 @@ class QgisLayerTreePanel(QWidget):
              self.create_layer_requested.emit),
             ("导入参考图层", "map/tree-add-layer.svg",
              "导入外部矢量文件作为只读参考（GDAL）", self.import_reference_requested.emit),
+            ("添加分组", "map/tree-add-group.svg",
+             "新建图层组（可拖入图层）", self.create_group_requested.emit),
             ("删除图层", "map/tree-remove.svg", "删除当前矢量图层（编修图层）",
              self._on_remove_layer),
         ):
@@ -254,6 +256,16 @@ class QgisLayerTreePanel(QWidget):
             canvas.stack.set_tree_change_callback(tree, self._on_tree_change)
             canvas.stack.set_tree_menu_callback(tree, self._on_tree_menu)
         self._publish()
+        self.expand_layer_groups()
+
+    def expand_layer_groups(self) -> None:
+        """分组必须能点开：树创建/reconcile 后展开全部组。"""
+        host = getattr(self, "tree_host", None)
+        if host is None:
+            return
+        from paleo_workbench.ui.qgis_stack.widgets import configure_layer_tree_view
+
+        configure_layer_tree_view(host.tree_view)
 
     def set_project_crs(self, crs: str) -> None:
         """注入项目 CRS 权威（ProjectDocument.coordinate → 渲染快照）。"""

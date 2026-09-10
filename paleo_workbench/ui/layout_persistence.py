@@ -16,7 +16,7 @@ SETTINGS_ORG = "PaleoWorkbench"
 SETTINGS_APP = "Workstation"
 
 #: 布局状态版本：不认识（更新或缺失）的版本一律丢弃走默认布局。
-LAYOUT_STATE_VERSION = 4
+LAYOUT_STATE_VERSION = 5
 
 _WINDOW_STATE_KEY = "layout/window_state"
 _STATE_VERSION_KEY = "layout/state_version"

@@ -95,9 +95,9 @@ _STAGE_PROFILES: dict[MappingStage, StageProfile] = {
                 "delete_selected", "undo", "redo",
             ),
             context_actions=(
-                "load_initial_facies", "add_well_prediction_overlay",
-                "add_seismic_prediction_overlay", "create_facies_draft",
-                "stage_save", "stage_qc",
+                "add_seismic_prediction_overlay", "add_well_prediction_overlay",
+                "well_prediction_point_to_surface", "load_initial_facies",
+                "create_facies_draft", "stage_save", "stage_qc",
             ),
         ),
         recommended_docks={
@@ -109,6 +109,7 @@ _STAGE_PROFILES: dict[MappingStage, StageProfile] = {
             "composite_linked": False,
         },
         readiness_checks=(
+            "target_horizon",
             "initial_facies_present", "initial_facies_crs", "initial_facies_geometry",
             "well_prediction_linked", "seismic_prediction_confidence",
             "interpretation_saved",
@@ -142,6 +143,7 @@ _STAGE_PROFILES: dict[MappingStage, StageProfile] = {
             "composite_linked": False,
         },
         readiness_checks=(
+            "target_horizon",
             "phase1_interpretation", "constraints_present", "factors_complete",
             "factor_staleness",
         ),
@@ -169,6 +171,7 @@ _STAGE_PROFILES: dict[MappingStage, StageProfile] = {
             "composite_linked": False,
         },
         readiness_checks=(
+            "target_horizon",
             "evidence_available", "evidence_staleness", "integrated_draft",
             "qa_geometry_errors",
         ),

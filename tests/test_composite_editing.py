@@ -492,3 +492,27 @@ def test_native_properties_apply_to_base_workarea_layers(qtbot, tmp_path):
     refreshed = document.layer_manager.layer_by_id(base.id)
     assert refreshed.name == f"{original_name}改"
     assert abs(refreshed.opacity - 0.55) < 1e-9
+
+
+def test_fallback_opens_properties_for_base_workarea_layers(qtbot, tmp_path, monkeypatch):
+    """回退画布上，工程预设/基础工区图层右键「图层属性」必须弹出对话框。
+
+    回归：_open_layer_properties 原先在 fallback 上对非编辑控制器图层只
+    发状态栏消息然后 return——井位 / 工区边界 / 参考层点了等于没点。
+    """
+    from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
+
+    document = _document(qtbot, tmp_path)
+    assert not document.uses_native_stack
+    assert document._base_layers, "工区基础图层应已随 set_project 组装"
+    base = document._base_layers[0]
+    opened = []
+
+    def _fake_exec(self):
+        opened.append(self.windowTitle())
+        return 0
+
+    monkeypatch.setattr(MapLayerPropertiesDialog, "exec", _fake_exec)
+    document._open_layer_properties(base.id)
+    assert opened, "回退画布应对基础图层弹出属性对话框"
+    assert base.name in opened[0]

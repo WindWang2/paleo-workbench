@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
 from dataclasses import replace
 import zlib
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QCursor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -35,6 +36,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QSlider,
     QToolButton,
+    QToolTip,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -82,6 +84,7 @@ from paleo_workbench.ui.workstation.composite_editing import (
     GEO_TEMPLATES,
     CompositeEditController,
     _feature_extent,
+    pick_topmost_visible_layer_id,
     schema_fields,
 )
 from paleo_workbench.ui.workstation.composite_panels import (
@@ -139,6 +142,110 @@ def _snapshot_geometry_kind(layer) -> str:
         if isinstance(geometry, dict):
             return _GEOMETRY_TYPE_KIND.get(str(geometry.get("type") or ""), "")
     return ""
+
+
+#: 点击悬浮框每行上限（QGIS maptip 式摘要；全量仍在识别结果面板）。
+_IDENTIFY_POPUP_MAX_LINES = 5
+
+#: 悬浮主属性跳过的几何类键（大小写不敏感；后缀匹配 *_geometry/*_geom）。
+_IDENTIFY_POPUP_GEOMETRY_KEYS = frozenset({
+    "geometry", "geom", "the_geom", "coordinates", "extent", "bbox",
+    "wkt", "geo_json", "geojson",
+})
+
+
+def _identify_popup_key_is_geometry(key: str) -> bool:
+    lowered = str(key or "").strip().lower()
+    if lowered in _IDENTIFY_POPUP_GEOMETRY_KEYS:
+        return True
+    return lowered.endswith(("_geometry", "_geom"))
+
+
+def _identify_popup_main(result: Mapping) -> str:
+    """一条识别结果的悬浮主属性：name → facies → 首个非几何属性 → 要素 id。"""
+    attributes = result.get("attributes") if isinstance(result, Mapping) else None
+    if isinstance(attributes, Mapping):
+        for key in ("name", "facies"):
+            value = attributes.get(key)
+            if value is not None and str(value) != "":
+                return str(value)
+        for key, value in attributes.items():
+            if _identify_popup_key_is_geometry(key):
+                continue
+            return "" if value is None else str(value)
+    return str(result.get("feature_id") or "") if isinstance(result, Mapping) else ""
+
+
+def _identify_popup_text(results) -> str:
+    """识别结果 → 点击悬浮文本（纯函数，无 Qt）。
+
+    每行「图层名：主属性」，至多 ``_IDENTIFY_POPUP_MAX_LINES`` 行；超出
+    追加「共 N 项 · 详见识别结果面板」；无结果返回空串（调用方不弹框）。
+    """
+    items = list(results or ())
+    if not items:
+        return ""
+    lines = []
+    for result in items[:_IDENTIFY_POPUP_MAX_LINES]:
+        layer_name = str(result.get("layer_name") or "") if isinstance(result, Mapping) else ""
+        main = _identify_popup_main(result)
+        if not main:
+            main = "（无属性）"
+        lines.append(f"{layer_name or '（未知图层）'}：{main}")
+    if len(items) > _IDENTIFY_POPUP_MAX_LINES:
+        lines.append(f"共 {len(items)} 项 · 详见识别结果面板")
+    return "\n".join(lines)
+
+
+def _pick_base_identify_target_id(base_layers) -> str | None:
+    """最上可见基础镜像层 doc_id（纯函数；原生 identify 的 current 备选）。
+
+    ``base_layers`` 为组装顺序（自下而上）的工区快照层；复用
+    ``pick_topmost_visible_layer_id``（反向首个可见即最上），缺
+    ``visible`` 视为可见（与 ``identify_all`` 的缺省一致）。
+    """
+    layers = [
+        layer for layer in (base_layers or ()) if str(getattr(layer, "id", "") or "")
+    ]
+    return pick_topmost_visible_layer_id(
+        tuple(str(layer.id) for layer in layers),
+        frozenset(str(layer.id) for layer in layers if getattr(layer, "visible", True)),
+    )
+
+
+def _base_identify_entry(base_layers, layer_id, feature_id) -> dict | None:
+    """基础镜像层原生 identify 回调 → 面板条目（纯函数，未命中返 None）。
+
+    桥 ``fidResolver`` 回写的是文档记录 id（``record["id"]``，如
+    ``wells:<well_id>``），故按记录 id 反查、与顺序无关；条目与
+    ``identify_all`` 基础分支同形（``editable=False``），悬浮框复用。
+    """
+    if not layer_id or not feature_id:
+        return None
+    for snapshot_layer in base_layers or ():
+        if str(getattr(snapshot_layer, "id", "")) != str(layer_id):
+            continue
+        for record in getattr(snapshot_layer, "features", ()) or ():
+            if not isinstance(record, Mapping):
+                continue
+            if str(record.get("id") or "") != str(feature_id):
+                continue
+            geometry = record.get("geometry")
+            geometry = geometry if isinstance(geometry, Mapping) else {}
+            return {
+                "layer_id": str(getattr(snapshot_layer, "id", "")),
+                "layer_name": str(getattr(snapshot_layer, "name", "")),
+                "feature_id": str(record.get("id") or ""),
+                "geometry_type": str(geometry.get("type") or ""),
+                "attributes": dict(record.get("properties") or {}),
+                "source": str(
+                    getattr(snapshot_layer, "source_version_id", "") or "workarea"
+                ),
+                "template": "",
+                "editable": False,
+                "record": dict(record),
+            }
+    return None
 
 
 def _layer_kind_icon(kind: str, style: dict) -> QIcon:
@@ -206,14 +313,17 @@ class _LayerPropertiesAdapter:
     def __init__(self, layer, *, opacity: float = 1.0, metadata: dict | None = None):
         self.id = layer.id
         self.name = layer.name
-        self.type = "vector"
+        self.type = getattr(layer, "type", None) or getattr(layer, "layer_type", "vector")
         self.crs = layer.crs
         self.opacity = opacity
-        self.source_ref = "composite-digitizing"
-        self.data_revision = layer.data_revision
-        self.style_revision = layer.style_revision
-        self.metadata = metadata or {}
-        self.provenance_ref = ""
+        self.source_ref = getattr(layer, "source_ref", "") or "managed"
+        self.data_revision = getattr(layer, "data_revision", 0)
+        self.style_revision = getattr(layer, "style_revision", 0)
+        self.metadata = metadata if metadata is not None else dict(getattr(layer, "metadata", {}) or {})
+        self.provenance_ref = (
+            getattr(layer, "provenance_ref", "")
+            or getattr(layer, "source_version_id", "")
+        )
 
 
 class LayerManagerPanel(QFrame):
@@ -1158,6 +1268,7 @@ class CompositeDocument(QWidget):
         inputs["can_next_extent"] = bool(self.canvas.can_next_extent)
         inputs["raw_locked"] = raw_locked
         inputs["stage_locked"] = stage_locked
+        inputs["queryable_layer_count"] = self.queryable_layer_count()
         return build_tool_context(
             controller_state=inputs,
             qgis=self._qgis_capability,
@@ -1168,6 +1279,33 @@ class CompositeDocument(QWidget):
             backend_mode=backend.mode,
             backend_reason=backend.reason,
         )
+
+    def queryable_layer_count(self) -> int:
+        """可查询图层计数（identify 门禁输入）：编修层 + 可见基础层 + 可见就绪引用层。
+
+        引用层以面板写回的 ``visible`` 与运行期状态（``_reference_status``，
+        缺键回落模型 ``status``）为准——离线/失败的外部源不是可查询图层。
+        """
+        controller = self.edit_controller
+        try:
+            edit_count = len(controller.layer_ids())
+        except Exception:  # noqa: BLE001 — 门禁输入缺席按零层处理，不崩工具条
+            edit_count = 0
+        base_count = sum(
+            1 for layer in (self._base_layers or ())
+            if getattr(layer, "visible", True)
+        )
+        reference_count = 0
+        for reference in (self._reference_layers or ()):
+            if not getattr(reference, "visible", True):
+                continue
+            status = self._reference_status.get(
+                getattr(reference, "id", ""),
+                getattr(reference, "status", "ready"),
+            )
+            if str(status or "") == "ready":
+                reference_count += 1
+        return edit_count + base_count + reference_count
 
     def _capability_snapshot(self) -> QgisCapabilitySnapshot:
         """画布后端能力三态（native / degraded / unavailable）。"""
@@ -1529,6 +1667,32 @@ class CompositeDocument(QWidget):
         "move_feature", "vertex", "reshape",
     })
 
+    def _ensure_identify_layer_current(self) -> None:
+        """原生 identify 前置：无活动层时把识别目标置为当前。
+
+        有可见编修层 → 最上层经 set_active_layer 置为活动（即传播
+        set_current_layer，Task 8 语义）；零可见编修层 → 最上可见基础
+        镜像层经画布 set_current_layer 直设（**不**在 edit_controller
+        里伪造活动层——这只是原生 identify 的目标图层）。
+        fallback 路径不走这里（activate_tool 内绑定可见层即可，
+        不替用户切换活动层）。
+        """
+        controller = self.edit_controller
+        if controller.active_layer_id:
+            return
+        if not self.uses_native_stack:
+            return
+        topmost = controller.topmost_visible_layer_id()
+        if topmost is not None:
+            controller.set_active_layer(topmost)
+            return
+        base_target = _pick_base_identify_target_id(self._base_layers)
+        if base_target is not None:
+            try:
+                self.canvas.set_current_layer(base_target)
+            except Exception:  # noqa: BLE001, S110 — 识别目标置位失败不拦工具激活
+                pass
+
     def _on_tool_requested(self, tool_id: str) -> None:
         """画布工具激活（checkable QAction 路径）——同样经过 re-gate。
 
@@ -1541,6 +1705,8 @@ class CompositeDocument(QWidget):
             self.status_message.emit(f"不可用：{verdict.disabled_reason}")
             self._sync_action_state()
             return
+        if tool_id == "identify":
+            self._ensure_identify_layer_current()
         self.edit_controller.activate_tool(tool_id)
 
     def _on_command_requested(self, command_id: str) -> None:
@@ -1555,6 +1721,8 @@ class CompositeDocument(QWidget):
             self._sync_action_state()
             return
         if command_id in self._CANVAS_TOOL_COMMANDS:
+            if command_id == "identify":
+                self._ensure_identify_layer_current()
             self.edit_controller.activate_tool(command_id)
             self._sync_action_state()
             return
@@ -1774,11 +1942,25 @@ class CompositeDocument(QWidget):
         if math.isfinite(value):
             self.status_bar.set_measure(f"测距: {value:.4g}（平面）…")
 
+    def _show_identify_popup(self, results) -> None:
+        """识别结果 → 点击处 QToolTip 悬浮（有结果才弹）。
+
+        调用点恒在点击处理中（fallback 鼠标路径同步调用 / 原生信号直达
+        GUI 线程），光标位置即点击处；无结果时只收旧提示，不弹空框。
+        """
+        text = _identify_popup_text(results)
+        if text:
+            QToolTip.showText(QCursor.pos(), text, self)
+        else:
+            QToolTip.hideText()
+
     def _on_native_identified(self, payload: dict) -> None:
         """原生 identify 结果 → Python 数据权威组装 → Identify Results 面板。
 
         原生 QgsMapToolIdentifyFeature 只回 (doc_id, feature_id)；面板条目
         从 CompositeEditController 的图层记录（权威）重建，不建第二数据源。
+        基础镜像层不在编辑控制器里——此时从工区快照（``_base_layers``）按
+        文档记录 id 反查重建（与 identify_all 基础分支同形），同样复用悬浮框。
         多图层命中列举仍由 fallback 路径的 identify_all 提供（点选语义差异
         记录在 03-decisions.md）。
         """
@@ -1786,33 +1968,41 @@ class CompositeDocument(QWidget):
         feature_id = str(payload.get("feature_id") or "")
         controller = self.edit_controller
         layer = controller.layer(layer_id)
+        if layer is None:
+            entry = _base_identify_entry(self._base_layers, layer_id, feature_id)
+            if entry is not None:
+                self.identify_results.set_results([entry])
+                self._show_identify_popup([entry])
+                return
         # UX-3：未命中（无图层/无要素）时清空面板并提示——不得残留上次结果
         # 误导用户（fallback identify_all 至少会刷新为空）。
         if layer is None or not feature_id:
             self.identify_results.set_results([])
+            self._show_identify_popup(())
             return
         session = layer.edit_session
         source = session.features() if session is not None else layer.features()
         feature = next((f for f in source if f.feature_id == feature_id), None)
         if feature is None:
             self.identify_results.set_results([])
+            self._show_identify_popup(())
             self.status_message.emit("识别未命中：要素不存在或已被删除")
             return
-        self.identify_results.set_results(
-            [
-                {
-                    "layer_id": layer.id,
-                    "layer_name": layer.name,
-                    "feature_id": feature.feature_id,
-                    "geometry_type": str(feature.geometry.get("type") or ""),
-                    "attributes": dict(feature.attributes),
-                    "source": "composite",
-                    "template": controller.layer_template(layer.id),
-                    "editable": True,
-                    "record": feature.as_record(),
-                }
-            ]
-        )
+        results = [
+            {
+                "layer_id": layer.id,
+                "layer_name": layer.name,
+                "feature_id": feature.feature_id,
+                "geometry_type": str(feature.geometry.get("type") or ""),
+                "attributes": dict(feature.attributes),
+                "source": "composite",
+                "template": controller.layer_template(layer.id),
+                "editable": True,
+                "record": feature.as_record(),
+            }
+        ]
+        self.identify_results.set_results(results)
+        self._show_identify_popup(results)
 
     def _build_tool_context(self) -> ToolContext:
         """V7 kernel 集成入口（V8 起与 :meth:`tool_context` 同一实现）。"""
@@ -2270,10 +2460,10 @@ class CompositeDocument(QWidget):
                 self._apply_native_layer_properties(str(layer_id), result)
             return
         if layer is None:
-            # 回退画布的 legacy 属性对话框绑定编辑控制器图层模型；基础
-            # 工区 / 引用图层只在原生栈上提供属性（诚实告知，不静默）。
-            self.status_message.emit(
-                "基础图层属性对话框需要 QGIS 原生地图栈（当前为回退画布）")
+            snapshot = self.layer_manager.layer_by_id(str(layer_id))
+            if snapshot is None:
+                return
+            self._open_snapshot_properties_dialog(str(layer_id), snapshot, focus=focus)
             return
         session = layer.edit_session
         features = tuple(
@@ -2315,6 +2505,49 @@ class CompositeDocument(QWidget):
                         break
         dialog.properties_applied.connect(
             lambda _layer_id, payload: self._apply_layer_properties(layer_id, payload)
+        )
+        dialog.exec()
+        self._sync_composition()
+
+    def _open_snapshot_properties_dialog(
+        self, layer_id: str, snapshot, *, focus: str = ""
+    ) -> None:
+        """回退画布：为基础工区 / 引用快照层打开同一套属性对话框。"""
+        features = tuple(
+            dict(record)
+            for record in (snapshot.features or ())
+            if isinstance(record, dict)
+        )
+        fields: list[str] = []
+        for record in features:
+            properties = record.get("properties") or {}
+            for key in sorted(properties):
+                if key not in fields:
+                    fields.append(str(key))
+        adapter = _LayerPropertiesAdapter(
+            snapshot,
+            opacity=float(getattr(snapshot, "opacity", 1.0) or 1.0),
+            metadata=dict(getattr(snapshot, "metadata", {}) or {}),
+        )
+        dialog = MapLayerPropertiesDialog(
+            adapter,
+            style=dict(snapshot.style or {}),
+            parent=self,
+            features=features,
+            fields=tuple(fields),
+        )
+        if focus:
+            titles = {"symbology": "Symbology", "labels": "Labels", "general": "General"}
+            target = titles.get(focus)
+            if target is not None:
+                for index in range(dialog.tabs.count()):
+                    if dialog.tabs.tabText(index) == target:
+                        dialog.tabs.setCurrentIndex(index)
+                        break
+        dialog.properties_applied.connect(
+            lambda _id, payload: self._apply_native_snapshot_layer_properties(
+                layer_id, payload
+            )
         )
         dialog.exec()
         self._sync_composition()
@@ -2393,15 +2626,25 @@ class CompositeDocument(QWidget):
         name = str(result.get("name") or "").strip()
         opacity = result.get("opacity")
         has_opacity = isinstance(opacity, (int, float)) and 0.0 <= float(opacity) <= 1.0
+        new_style = dict(snapshot.style or {})
+        if isinstance(result.get("style"), dict):
+            new_style.update(dict(result["style"]))
+        if isinstance(result.get("qgis_style"), dict):
+            new_style["qgis_style"] = dict(result["qgis_style"])
+        if isinstance(result.get("labels"), dict):
+            new_style["labels"] = dict(result["labels"])
+        new_crs = str(result.get("crs") or "").strip() or snapshot.crs
+        style_changed = new_style != dict(snapshot.style or {})
         # 快照是 frozen dataclass：以 replace 重建后换回面板列表。
-        from dataclasses import replace as _dc_replace
-
-        new_snapshot = _dc_replace(
+        new_snapshot = replace(
             snapshot,
             name=(name or snapshot.name),
+            crs=new_crs,
             opacity=(
                 min(1.0, max(0.05, float(opacity))) if has_opacity else snapshot.opacity
             ),
+            style=new_style,
+            style_revision=snapshot.style_revision + (1 if style_changed else 0),
         )
         panel_layers = self.layer_manager._layers
         for index, existing in enumerate(panel_layers):
@@ -2414,14 +2657,17 @@ class CompositeDocument(QWidget):
         # （重组 list(self._base_layers) 直接复用这里的对象，不回滚）。
         for index, base in enumerate(self._base_layers):
             if base.id == layer_id:
-                self._base_layers[index] = _dc_replace(
+                self._base_layers[index] = replace(
                     base,
                     name=(name or base.name),
+                    crs=new_crs,
                     opacity=(
                         min(1.0, max(0.05, float(opacity)))
                         if has_opacity
                         else base.opacity
                     ),
+                    style=new_style,
+                    style_revision=new_snapshot.style_revision,
                 )
                 break
         # 引用描述符（工程文档权威，_sync_reference_layers_to_project 持久化）。
@@ -2775,10 +3021,11 @@ class CompositeDocument(QWidget):
     # -- 识别结果 -------------------------------------------------------------
 
     def _identify_with_results(self, point):
-        """多图层识别：全部可见可查询图层 → Identify Results 面板。"""
+        """多图层识别：全部可见可查询图层 → Identify Results 面板 + 点击悬浮。"""
         controller = self.edit_controller
         results = controller.identify_all(point, base_layers=self._base_layers)
         self.identify_results.set_results(results)
+        self._show_identify_popup(results)
         active_id = controller.active_layer_id
         for result in results:
             if result.get("editable") and result.get("layer_id") == active_id:
@@ -2872,6 +3119,9 @@ class CompositeDocument(QWidget):
                 self.stage_controller.group_controller.attach_tree_view(
                     tree_host.tree_view_address)
             self.stage_controller.sync_composition()
+            expand = getattr(self.layer_manager, "expand_layer_groups", None)
+            if callable(expand):
+                expand()
         except Exception:
             logging.getLogger(__name__).exception("stage workspace reconcile failed")
 
@@ -2924,12 +3174,17 @@ class CompositeDocument(QWidget):
             if xml and callable(apply):
                 apply(xml)
             self._sync_composition_now()
+            if self._home_extent is not None:
+                self.canvas.set_extent(self._home_extent)
         finally:
             self._loading = False
         if project is not None:
             self._write_map_project_xml()
             # 工程装载完成后恢复阶段上下文（组显隐 + 编辑目标 + 就绪度评估）。
             self.stage_controller.restore_stage_view()
+            expand = getattr(self.layer_manager, "expand_layer_groups", None)
+            if callable(expand):
+                expand()
         self.input_tree.refresh(project)
 
     def _write_map_project_xml(self) -> None:

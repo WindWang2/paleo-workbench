@@ -155,6 +155,18 @@ def test_group_summary_includes_maturity_counts(document):
     assert summaries[placement].published >= 1
 
 
+def test_native_panel_manage_row_includes_add_group(qtbot):
+    """图层管理工具条含「添加分组」（分组是图层面板能力，不只右键菜单）。"""
+    panel = QgisLayerTreePanel()
+    qtbot.addWidget(panel)
+    labels = [button.text() for button in panel._manage_buttons]
+    assert "添加分组" in labels
+    hits = []
+    panel.create_group_requested.connect(lambda: hits.append("group"))
+    next(button for button in panel._manage_buttons if button.text() == "添加分组").click()
+    assert hits == ["group"]
+
+
 def test_native_panel_group_summary_strip_without_bridge(qtbot):
     """原生面板无桥也可构造：组摘要行如实渲染（接口同构性）。"""
     panel = QgisLayerTreePanel()

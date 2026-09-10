@@ -43,6 +43,7 @@ from paleo_workbench.mapping.map_tools import (
     AddLineTool,
     AddPointTool,
     AddPolygonTool,
+    IdentifyTool,
     MapToolController,
     MeasureDistanceTool,
     MoveFeatureTool,
@@ -282,6 +283,20 @@ _LAYER_BOUND_TOOLS = frozenset(
     {"identify", "select", "select_rectangle", "move_feature", "vertex"}
 )
 _KIND_BOUND_TOOLS = {"add_point": "point", "add_line": "line", "add_polygon": "polygon"}
+
+
+def pick_topmost_visible_layer_id(layer_ids_bottom_up, visible_ids) -> str | None:
+    """自上而下首个可见图层 id（纯函数）。
+
+    输入顺序恒为组装顺序（自下而上：基础 → 引用 → 编修），故反向首个
+    可见即最上。调用方负责把「从未显隐过的图层视为可见」的缺省解开成
+    ``visible_ids``（此处不读任何权威，只做顺序选择）。
+    """
+    visible = set(visible_ids)
+    for layer_id in reversed(tuple(layer_ids_bottom_up)):
+        if layer_id in visible:
+            return layer_id
+    return None
 
 
 def _crs_parseable(crs: str) -> bool:
@@ -747,6 +762,19 @@ class CompositeEditController(QObject):
     def active_layer(self) -> VectorLayer | None:
         return self._layers.get(self._active_layer_id or "")
 
+    def topmost_visible_layer_id(self) -> str | None:
+        """最上可见编修图层（无活动层时 identify 的绑定/置 current 目标）。
+
+        顺序权威是组装顺序（自下而上）；``_display`` 缺键的图层视为可见
+        （从未被面板改过显隐，与 identify_all 的缺省一致）。
+        """
+        visible = {
+            layer_id
+            for layer_id in self._layers
+            if self._display.get(layer_id, (True, 1.0))[0]
+        }
+        return pick_topmost_visible_layer_id(tuple(self._layers), visible)
+
     @property
     def topology(self):
         """拓扑校验服务（只读公共访问；stage_actions QA 等宿主消费）。"""
@@ -1037,6 +1065,21 @@ class CompositeEditController(QObject):
             tool = MeasureDistanceTool()
         else:
             layer = self.active_layer
+            if layer is None and action_id == "identify":
+                # 无活动层时 identify 仍可激活：优先绑最上可见编修层
+                # （多图层回调经 identify_delegate 进面板）；连编修层都
+                # 没有（仅基础/引用可查询）时走无层 IdentifyTool。
+                fallback_id = self.topmost_visible_layer_id()
+                if fallback_id is not None:
+                    layer = self._layers[fallback_id]
+                elif callable(self.identify_delegate):
+                    tool = IdentifyTool(identify=self.identify_delegate)
+                    self._active_tool_action = action_id
+                    self.tools.set_active_tool(tool)
+                    if canvas is not None and _cpp_alive(canvas):
+                        canvas.setFocus()
+                    self.state_changed.emit()
+                    return
             if layer is None:
                 return
             index = self._snapping.index_for(layer)
@@ -1761,8 +1804,17 @@ class CompositeEditController(QObject):
         tool = self.tools.active_tool
         capture = list(getattr(tool, "points", ()) or ())
         snap = self._snapping.last_match.point if self._snapping.last_match is not None else None
+        from paleo_workbench.mapping.workarea_map_snapshot import WORKAREA_LEGEND_ITEMS
+
         return {
             "selected_features": selected,
             "capture_points": capture,
             "snap_point": snap,
+            "decorations": {
+                "elements": ["比例尺", "指北针", "图例"],
+                "legend_items": [
+                    {"label": label, "color": color}
+                    for label, color in WORKAREA_LEGEND_ITEMS
+                ],
+            },
         }

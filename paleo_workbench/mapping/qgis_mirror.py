@@ -10,6 +10,50 @@ _GEOMETRY_TYPE = {"Point": "Point", "MultiPoint": "Point",
                   "LineString": "LineString", "MultiLineString": "LineString",
                   "Polygon": "MultiPolygon", "MultiPolygon": "MultiPolygon"}
 
+
+def _normalize_auth_id(crs: str) -> str:
+    text = str(crs or "").strip()
+    if not text:
+        return ""
+    from paleo_workbench.mapping.map_render_backend import _normalize_crs_name
+
+    return _normalize_crs_name(text)
+
+
+def _geographic_auth(crs: str) -> bool:
+    auth = _normalize_auth_id(crs).upper()
+    return auth in {"EPSG:4326", "EPSG:4269", "EPSG:4258"}
+
+
+def _extent_fits_crs(crs: str, extent) -> bool:
+    if not extent or len(extent) < 4:
+        return True
+    if not _geographic_auth(crs):
+        return True
+    xmin, ymin, xmax, ymax = extent[:4]
+    return (
+        abs(float(xmin)) <= 180 and abs(float(xmax)) <= 180
+        and abs(float(ymin)) <= 90 and abs(float(ymax)) <= 90
+    )
+
+
+def _qgis_crs_for_layer(layer, snapshot) -> str:
+    auth = _normalize_auth_id(
+        getattr(layer, "crs", "") or getattr(snapshot, "project_crs", "") or "")
+    if auth and not _extent_fits_crs(auth, getattr(layer, "extent", None)):
+        return ""
+    return auth
+
+
+def _qgis_crs_for_snapshot(snapshot) -> str:
+    auth = _normalize_auth_id(getattr(snapshot, "project_crs", "") or "")
+    if not auth:
+        return ""
+    for layer in getattr(snapshot, "layers", ()) or ():
+        if not _extent_fits_crs(auth, getattr(layer, "extent", None)):
+            return ""
+    return auth
+
 # v7 §5: process-level scalar data mirror shared by every canvas publish
 # (both the authoring shim and the display canvas mirror the same science).
 _SCALAR_DATA_CACHE = None
@@ -110,27 +154,59 @@ def reset_publish_ledger() -> None:
     _MIRROR_LEDGER.clear()
 
 
-def _stack_supports_delta(stack) -> bool:
-    """Capability probe for the delta channel (R3: signature-based, never a
-    docstring sniff; the outcome is honest, not silent)."""
-    import inspect
+def _doc_declares(method, *names: str) -> bool:
+    """pybind11 binding 声明兜底：builtin 方法无 inspect 签名，但其
+    ``__doc__`` 首行即完整绑定声明。按「参数名 + 冒号」词边界匹配（裸子串
+    会误命中别的词的一部分），无任何可判定信息时 False。"""
+    import re
 
     try:
-        params = inspect.signature(stack.upsert_mirror_layer).parameters
-        return "data_revision" in params and "delta" in params
+        doc = getattr(method, "__doc__", None) or ""
+        if not isinstance(doc, str):
+            return False
+        return all(
+            re.search(r"\b%s:" % name, doc) is not None for name in names)
     except (TypeError, ValueError):
         return False
+
+
+def _stack_supports_delta(stack) -> bool:
+    """Capability probe for the delta channel (R3).
+
+    ``inspect.signature`` first (pure-Python fake stacks / older bridges
+    behave as before); pybind11 builtins expose no inspect signature
+    (``ValueError``), but their ``__doc__`` first line IS the binding
+    declaration — fall back to matching its parameter declarations
+    (``data_revision:`` + ``delta:``). No usable signal → False
+    (honest failure, never a silent assumption). Probing is side-effect
+    free and uncached: the bridge method itself is never invoked, and
+    monkeypatched stack classes in tests always see a fresh probe.
+    """
+    import inspect
+
+    method = stack.upsert_mirror_layer
+    try:
+        params = inspect.signature(method).parameters
+        return "data_revision" in params and "delta" in params
+    except (TypeError, ValueError):
+        return _doc_declares(method, "data_revision", "delta")
 
 
 def _stack_supports_fields_json(stack) -> bool:
-    """R3-1: probe for the fields_json kwarg (older bridges ignore it)."""
+    """R3-1: probe for the fields_json kwarg (older bridges ignore it).
+
+    Same two-tier rule as :func:`_stack_supports_delta` (signature first,
+    pybind11 ``__doc__`` binding declaration as fallback); see its
+    docstring for the rationale.
+    """
     import inspect
 
+    method = stack.upsert_mirror_layer
     try:
-        params = inspect.signature(stack.upsert_mirror_layer).parameters
+        params = inspect.signature(method).parameters
         return "fields_json" in params
     except (TypeError, ValueError):
-        return False
+        return _doc_declares(method, "fields_json")
 
 
 def _feature_signature(feature: dict) -> tuple:
@@ -168,11 +244,12 @@ def mirror_snapshot_to_stack(
             diags.append((doc_id, message))
 
     failures: list[str] = []
-    if snapshot.project_crs:
+    canvas_crs = _qgis_crs_for_snapshot(snapshot)
+    if canvas_crs:
         try:
-            stack.set_destination_crs(canvas_address, str(snapshot.project_crs))
+            stack.set_destination_crs(canvas_address, canvas_crs)
         except Exception as exc:
-            failures.append(f"crs {snapshot.project_crs}: {exc}")
+            failures.append(f"crs {canvas_crs}: {exc}")
     seen: list[str] = []
     mirrored_qgis_ids: list[str] = []
     data_cache = _scalar_data_cache()
@@ -344,7 +421,7 @@ def mirror_snapshot_to_stack(
         try:
             qgis_id = stack.upsert_mirror_layer(
                 layer.id, layer.name or layer.id, geom,
-                layer.crs or snapshot.project_crs,
+                _qgis_crs_for_layer(layer, snapshot),
                 full_collection,
                 renderer_xml, labeling_xml, legacy_style,
                 bool(layer.visible), float(layer.opacity),
@@ -358,7 +435,7 @@ def mirror_snapshot_to_stack(
             delta_json = ""
             qgis_id = stack.upsert_mirror_layer(
                 layer.id, layer.name or layer.id, geom,
-                layer.crs or snapshot.project_crs,
+                _qgis_crs_for_layer(layer, snapshot),
                 full_collection,
                 renderer_xml, labeling_xml, legacy_style,
                 bool(layer.visible), float(layer.opacity),

@@ -62,6 +62,10 @@ class UIContextSnapshot:
     # V8 M2：模态阻塞任务标签（palette 与工具条对 blocking gate 同因；
     # None = provider 缺席，按无阻塞处理——执行侧 re-gate 仍会拦截）。
     blocking_task: str | None = None
+    # Task 8：可查询图层计数（identify 门禁输入；None = provider 缺席，
+    # 适配器按「有活动层即 1」回落——palette 宁可保守禁用，执行侧 re-gate
+    # 仍以 CompositeDocument 完整上下文二次判定）。
+    queryable_layer_count: int | None = None
     # SelectionContext 地质槽位摘要（权威仍在 viz.selection_context）
     active_well_id: str | None = None
     active_horizon_id: str | None = None

@@ -23,6 +23,7 @@ __all__ = [
     "AddLineTool",
     "AddPointTool",
     "AddPolygonTool",
+    "IdentifyTool",
     "MapTool",
     "MapToolController",
     "MeasureDistanceTool",
@@ -301,6 +302,26 @@ class RectangleSelectTool(MapTool):
         had_start = self.start is not None
         self.start = None
         return had_start
+
+
+class IdentifyTool(MapTool):
+    """无层识别工具（无编修图层时 identify 的 fallback 绑定）。
+
+    只把点击喂给多图层识别回调（面板 + 悬浮框由回调的副作用呈现），
+    不碰任何图层选集——没有可绑定的活动层，也就没有可写的选择集。
+    """
+
+    tool_id = "identify"
+
+    def __init__(self, *, identify: Callable[[Point], object]) -> None:
+        super().__init__()
+        self._identify = identify
+
+    def mouse_press(self, point: Point, *, button: str = "left", modifiers: Iterable[str] = ()) -> bool:
+        if button != "left":
+            return False
+        self._identify(point)
+        return True
 
 
 class _CaptureTool(MapTool):

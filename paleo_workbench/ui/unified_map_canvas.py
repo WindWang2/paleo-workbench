@@ -51,7 +51,25 @@ def _canvas_palette() -> dict:
     return tokens.palette_for(_theme_manager.current_theme.value)
 from paleo_workbench.ui import tokens
 
-__all__ = ["UnifiedMapCanvas", "paint_map_decorations"]
+__all__ = ["UnifiedMapCanvas", "paint_map_decorations", "ensure_basic_map_chrome"]
+
+#: 图层/画布界面始终显示的制图基本要素（可与其它 decorations 并存）。
+BASIC_MAP_CHROME = ("比例尺", "指北针")
+
+
+def ensure_basic_map_chrome(decorations: Mapping[str, Any] | None) -> dict[str, Any]:
+    """保证比例尺与指北针出现在 decorations.elements 里。"""
+    out = dict(decorations or {})
+    elements = [str(item) for item in (out.get("elements") or ())]
+    aliases = {
+        "比例尺": ("比例尺", "scale_bar"),
+        "指北针": ("指北针", "north_arrow"),
+    }
+    for name, keys in aliases.items():
+        if not any(key in elements for key in keys):
+            elements.append(name)
+    out["elements"] = elements
+    return out
 
 
 def _nice_scale_units_impl(value: float) -> float:
@@ -133,6 +151,7 @@ def _paint_decorations_impl(
     ``dark_chrome`` selects the dark ink palette for light map bodies (all
     built-in backends render a light/white background).
     """
+    decorations = ensure_basic_map_chrome(decorations)
     ink = _CHROME_INK_ON_LIGHT_BODY if dark_chrome else _CHROME_INK_ON_DARK_BODY
     canvas_width = int(width)
     canvas_height = int(height)
@@ -154,7 +173,7 @@ def _paint_decorations_impl(
         _paint_scale_bar_impl(painter, extent, canvas_width, canvas_height, scale, ink=ink)
     if not elements or "指北针" in elements or "north_arrow" in elements:
         painter.save()
-        center = QPointF(canvas_width - 28 * scale, 37 * scale)
+        center = QPointF(28 * scale, 37 * scale)
         painter.setPen(QPen(QColor(ink), 1.5 * scale))
         painter.setBrush(
             QColor(_CHROME_INK_ON_DARK_BODY)

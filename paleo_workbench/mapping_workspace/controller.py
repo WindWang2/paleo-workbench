@@ -230,6 +230,8 @@ class MappingStageController(QObject):
         self.group_controller.ensure_memberships(snapshots)
         self.group_controller.reconcile(snapshots)
         self.group_controller.apply_stage_visibility(self.state.current_stage)
+        self.group_controller.apply_group_expanded(
+            self.group_controller.expand_states.get(self.state.current_stage.value, {}))
         # 组合变化（建稿/约束/叠加/删除）后重算就绪度与过期——用户完成
         # 清单推荐的动作后，清单不得继续显示旧结论。
         self.refresh_evaluation()

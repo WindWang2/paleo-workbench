@@ -52,7 +52,9 @@ class MockWellFaciesProvider:
     ) -> dict[str, Any]:
         seed = int(parameters.get("seed", 0) or 0)
         horizon = str(parameters.get("target_horizon") or "")
-        wells = parameters.get("_wells") or []
+        # 服务路径（execute_run）剥掉 `_` 前缀键后再调 provider，直调（Task 1
+        # 测试）则保留 `_` 键：`_` 优先，非下划线回退，两路都通。
+        wells = parameters.get("_wells") or parameters.get("wells") or []
         if not wells:
             raise InferenceInputError(
                 "mock 测井相预测需要至少一口井（_wells 为空）")
@@ -119,7 +121,7 @@ class MockSeismicFaciesProvider:
 
         seed = int(parameters.get("seed", 0) or 0)
         horizon = str(parameters.get("target_horizon") or "")
-        extent = parameters.get("_extent")
+        extent = parameters.get("_extent") or parameters.get("extent")
         if not extent or len(extent) < 4:
             raise InferenceInputError(
                 "mock 地震相面预测需要有效平面范围（_extent 缺失）")
@@ -128,9 +130,9 @@ class MockSeismicFaciesProvider:
         if not all(math.isfinite(v) for v in values) or xmax <= xmin or ymax <= ymin:
             raise InferenceInputError(
                 f"mock 地震相面预测的平面范围无效：{extent!r}")
-        crs = str(parameters.get("_crs") or "")
+        crs = str(parameters.get("_crs") or parameters.get("crs") or "")
         grid_n = max(2, int(parameters.get("grid_n", 80) or 80))
-        ring = parameters.get("_clip_ring") or None
+        ring = parameters.get("_clip_ring") or parameters.get("clip_ring") or None
 
         rng = random.Random(seed)
         anchors = [

@@ -51,21 +51,21 @@ STAGE_ORDER: tuple[MappingStage, ...] = (
 )
 
 STAGE_LABELS: dict[MappingStage, str] = {
-    MappingStage.FACIES_CALIBRATION: "① 初始相图校正",
+    MappingStage.FACIES_CALIBRATION: "① 智能预测",
     MappingStage.CONSTRAINT_FACTOR: "② 约束与单因素",
     MappingStage.INTEGRATED_COMPILATION: "③ 综合编图",
 }
 
 STAGE_SHORT_LABELS: dict[MappingStage, str] = {
-    MappingStage.FACIES_CALIBRATION: "初始相图",
+    MappingStage.FACIES_CALIBRATION: "智能预测",
     MappingStage.CONSTRAINT_FACTOR: "约束/单因素",
     MappingStage.INTEGRATED_COMPILATION: "综合编图",
 }
 
 STAGE_DESCRIPTIONS: dict[MappingStage, str] = {
     MappingStage.FACIES_CALIBRATION: (
-        "在初始沉积相图上叠加测井预测相、地震预测相及其置信度/辅助结果，"
-        "经矢量编辑形成人工校正的阶段性沉积相解释成果。"
+        "先设定编图层位，再叠加该层位的地震相预测与测井相预测；"
+        "测井预测支持由井点生成相面（点到面）。"
     ),
     MappingStage.CONSTRAINT_FACTOR: (
         "以上一阶段成果为背景，编辑物源/展布/岸线/相带边界/断层等线面约束，"
@@ -117,6 +117,8 @@ _STAGE_ALIASES: dict[str, MappingStage] = {
     "facies": MappingStage.FACIES_CALIBRATION,
     "phase1": MappingStage.FACIES_CALIBRATION,
     "phase 1": MappingStage.FACIES_CALIBRATION,
+    "intelligent_prediction": MappingStage.FACIES_CALIBRATION,
+    "智能预测": MappingStage.FACIES_CALIBRATION,
     "constraints": MappingStage.CONSTRAINT_FACTOR,
     "factor": MappingStage.CONSTRAINT_FACTOR,
     "phase2": MappingStage.CONSTRAINT_FACTOR,

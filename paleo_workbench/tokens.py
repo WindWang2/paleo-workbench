@@ -15,6 +15,8 @@ all primary text pairs improve on the old slate sheet (pinned in
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 # ---------------------------------------------------------------------------
 # Workstation palette — signal colors
 # ---------------------------------------------------------------------------
@@ -480,6 +482,9 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     from types import SimpleNamespace
 
     t = SimpleNamespace(**palette_for(theme))
+    _icon_dir = Path(__file__).resolve().parent / "ui" / "assets" / "icons" / "map"
+    branch_closed = (_icon_dir / "tree-branch-closed.svg").as_posix()
+    branch_open = (_icon_dir / "tree-branch-open.svg").as_posix()
     density_tokens = DENSITY_TOKENS.get(density, DENSITY_TOKENS["comfortable"])
     padding_y = density_tokens["padding_y"]
     padding_x = density_tokens["padding_x"]
@@ -673,6 +678,19 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     }}
     QTreeView::item:hover, QListView::item:hover {{
         background-color: {t.BG_SEARCH};
+    }}
+    QTreeView::branch {{
+        background: transparent;
+    }}
+    QTreeView::branch:has-children:!has-siblings:closed,
+    QTreeView::branch:closed:has-children:has-siblings {{
+        border-image: none;
+        image: url("{branch_closed}");
+    }}
+    QTreeView::branch:open:has-children:!has-siblings,
+    QTreeView::branch:open:has-children:has-siblings {{
+        border-image: none;
+        image: url("{branch_open}");
     }}
     QHeaderView::section {{
         background-color: {t.BG_SEARCH};
@@ -1321,6 +1339,96 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         background: {t.BG_SIDEBAR};
         border: none;
         border-bottom: 1px solid {t.BORDER};
+    }}
+    QToolBar#MappingStageToolbar {{
+        background: {t.BG_HEADER};
+        border: none;
+        border-bottom: 1px solid {t.BORDER};
+        spacing: 0px;
+        padding: 0px;
+    }}
+    QFrame#MappingStageBar {{
+        background: transparent;
+        border: none;
+    }}
+    QLabel#MappingStageMetaLabel {{
+        color: {t.TEXT_SECONDARY};
+        font-size: {t.FONT_SIZE_STATUS};
+        font-weight: 600;
+    }}
+    QComboBox#MappingHorizonCombo {{
+        background: {t.BG_SEARCH};
+        color: {t.TEXT_PRIMARY};
+        border: 1px solid {t.BORDER};
+        border-radius: 3px;
+        padding: 2px 8px;
+        min-height: 24px;
+        max-height: 26px;
+    }}
+    QComboBox#MappingHorizonCombo:focus {{
+        border-color: {t.PRIMARY};
+    }}
+    QFrame#MappingStageDivider {{
+        background: {t.BORDER_STRONG};
+        border: none;
+    }}
+    QFrame#MappingStageSegment {{
+        background: {t.BG_SEARCH};
+        border: 1px solid {t.BORDER};
+        border-radius: 14px;
+    }}
+    QFrame#MappingStageSegment:hover {{
+        background: {t.BG_SELECTION};
+        border-color: {t.PRIMARY};
+    }}
+    QFrame#MappingStageSegment[active="true"] {{
+        background: {t.PRIMARY};
+        border-color: {t.PRIMARY};
+    }}
+    QLabel#MappingStageIndex {{
+        background: {t.BG_SIDEBAR};
+        color: {t.TEXT_SECONDARY};
+        border: 1px solid {t.BORDER};
+        border-radius: 9px;
+        font-size: 10px;
+        font-weight: 700;
+    }}
+    QFrame#MappingStageSegment[active="true"] QLabel#MappingStageIndex {{
+        background: {t.ON_PRIMARY};
+        color: {t.PRIMARY};
+        border-color: {t.ON_PRIMARY};
+    }}
+    QLabel#MappingStageName {{
+        color: {t.TEXT_PRIMARY};
+        font-size: {t.FONT_SIZE_STATUS};
+        font-weight: 600;
+        background: transparent;
+        border: none;
+    }}
+    QFrame#MappingStageSegment[active="true"] QLabel#MappingStageName {{
+        color: {t.ON_PRIMARY};
+    }}
+    QLabel#MappingStageBadge {{
+        color: {t.TEXT_SECONDARY};
+        background: transparent;
+        border: none;
+        font-size: 10px;
+        font-weight: 700;
+        padding: 0px 2px;
+    }}
+    QLabel#MappingStageBadge[tone="ok"] {{ color: {t.SUCCESS}; }}
+    QLabel#MappingStageBadge[tone="warn"] {{ color: {t.WARNING}; }}
+    QLabel#MappingStageBadge[tone="error"] {{ color: {t.ERROR_RED}; }}
+    QFrame#MappingStageSegment[active="true"] QLabel#MappingStageBadge {{
+        color: {t.ON_PRIMARY};
+    }}
+    QFrame#MappingStageTrack {{
+        background: {t.BORDER_STRONG};
+        border: none;
+        border-radius: 1px;
+    }}
+    QFrame#MappingStageTrack[complete="true"] {{
+        background: {t.PRIMARY};
     }}
     /* Composite full-bleed overlay: hairline float strip, no SaaS card chrome */
     QFrame#WorkstationOverlayToolbar {{

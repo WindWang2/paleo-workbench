@@ -58,10 +58,20 @@ from paleo_workbench.mapping_workspace.stages import (
 # ---------------------------------------------------------------------------
 
 def test_stage_order_and_navigation():
+    from paleo_workbench.mapping_workspace.stages import STAGE_ORDER
+
+    assert STAGE_ORDER[0] is MappingStage.FACIES_CALIBRATION
     assert next_stage(MappingStage.FACIES_CALIBRATION) == MappingStage.CONSTRAINT_FACTOR
     assert next_stage(MappingStage.INTEGRATED_COMPILATION) is None
     assert previous_stage(MappingStage.FACIES_CALIBRATION) is None
     assert previous_stage(MappingStage.INTEGRATED_COMPILATION) == MappingStage.CONSTRAINT_FACTOR
+
+
+def test_first_stage_is_intelligent_prediction():
+    first = MappingStage.FACIES_CALIBRATION
+    assert first.short_label == "智能预测"
+    assert "智能预测" in first.label
+    assert previous_stage(first) is None
 
 
 def test_stage_labels_are_professional_not_pages():
@@ -72,6 +82,8 @@ def test_stage_labels_are_professional_not_pages():
 
 def test_stage_from_value_aliases():
     assert stage_from_value("phase1") == MappingStage.FACIES_CALIBRATION
+    assert stage_from_value("intelligent_prediction") == MappingStage.FACIES_CALIBRATION
+    assert stage_from_value("智能预测") == MappingStage.FACIES_CALIBRATION
     assert stage_from_value("integrated") == MappingStage.INTEGRATED_COMPILATION
     assert stage_from_value(MappingStage.CONSTRAINT_FACTOR) == MappingStage.CONSTRAINT_FACTOR
     assert stage_from_value("bogus") is None
@@ -197,6 +209,23 @@ def test_system_groups_have_stable_ids_not_display_names():
 def test_shared_base_group_visible_in_all_stages():
     template = system_group_template(BASE_REFERENCE_GROUP_ID)
     assert template.stages == frozenset(set(MappingStage))
+
+
+def test_desired_tree_shows_current_stage_groups_and_base_reference():
+    from paleo_workbench.mapping_workspace.layer_group_controller import (
+        LayerGroupController,
+    )
+    from paleo_workbench.mapping_workspace.stage_state import MappingWorkspaceState
+
+    controller = LayerGroupController(MappingWorkspaceState())
+    tree = controller.build_desired_tree([])
+    ids = [child.group_id for child in tree.children if isinstance(child, GroupNode)]
+    assert BASE_REFERENCE_GROUP_ID in ids
+    assert "phase1.well_predictions" in ids
+    assert "phase1.seismic_predictions" in ids
+    assert "phase1.interpretation" in ids
+    assert "phase3.cartography" not in ids
+    assert "phase2.constraints" not in ids
 
 
 def test_legacy_fallback_group_exists():
@@ -373,6 +402,22 @@ def test_readiness_empty_project_is_not_ready_but_never_blocks():
     readiness = evaluate_stage_readiness(MappingStage.FACIES_CALIBRATION, document=None)
     assert readiness.status == StageReadinessStatus.NOT_READY
     # 就绪度是提示不是 wizard（返回值从不抛异常阻止调用方切换）。
+
+
+def test_target_horizon_is_first_readiness_check():
+    from paleo_workbench.project.models import ProjectDocument
+
+    for stage in MappingStage:
+        assert stage_profile(stage).readiness_checks[0] == "target_horizon"
+    empty = ProjectDocument.new("无层位")
+    readiness = evaluate_stage_readiness(MappingStage.FACIES_CALIBRATION, document=empty)
+    item = next(row for row in readiness.items if row.check_id == "target_horizon")
+    assert item.status is ReadinessItemStatus.ERROR
+    empty.stratigraphy.target_horizon = "D63"
+    ready = evaluate_stage_readiness(MappingStage.FACIES_CALIBRATION, document=empty)
+    item = next(row for row in ready.items if row.check_id == "target_horizon")
+    assert item.status is ReadinessItemStatus.OK
+    assert item.detail == "D63"
 
 
 def test_readiness_items_carry_locate_targets():

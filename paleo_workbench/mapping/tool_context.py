@@ -108,6 +108,9 @@ class ToolContext:
     # Tool state
     current_tool: str = "pan"
     capability_flags: frozenset[str] = frozenset()
+    #: 可查询图层计数（编修层 + 基础工区层 + 就绪引用层，宿主派生；
+    #: identify 门禁的唯一图层输入——无活动层时仍可识别）。
+    queryable_layer_count: int = 0
 
     # Extent history (canvas-level navigation state)
     can_previous_extent: bool = False
@@ -215,6 +218,7 @@ def build_tool_context(
         crs_valid=bool(state.get("crs_valid", True)),
         current_tool=str(state.get("current_tool") or "pan"),
         capability_flags=qgis.capability_flags(),
+        queryable_layer_count=int(state.get("queryable_layer_count", 0) or 0),
         can_previous_extent=bool(state.get("can_previous_extent", False)),
         can_next_extent=bool(state.get("can_next_extent", False)),
     )

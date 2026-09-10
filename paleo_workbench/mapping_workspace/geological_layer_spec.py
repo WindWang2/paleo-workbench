@@ -670,6 +670,7 @@ def _build_registry() -> dict[LayerRole, GeologicalLayerSpec]:
     # -- base / user / QC ------------------------------------------------------
     add(_spec(
         "base-reference-v2", LayerRole.BASE_REFERENCE, "vector", "基础参考图层",
+        fields=(_F("name", "名称", kind="text", default=""),),
         renderer=RendererBinding("base_reference_v1", "line", "single")))
     add(_spec(
         "user-general-v2", LayerRole.USER_GENERAL, "vector", "用户图层"))

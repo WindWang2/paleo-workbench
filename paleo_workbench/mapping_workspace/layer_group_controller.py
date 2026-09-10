@@ -19,6 +19,7 @@ import logging
 from typing import Any, Callable, Iterable
 
 from paleo_workbench.mapping_workspace.layer_groups import (
+    BASE_REFERENCE_GROUP_ID,
     FACTOR_CHILD_ORDER,
     FACTOR_ROOT_GROUP_ID,
     SYSTEM_GROUP_TEMPLATES,
@@ -320,8 +321,20 @@ class LayerGroupController:
                              children=())
 
         roots: list[GroupNode | LayerRef] = []
+        current = self.state.current_stage
         for template in SYSTEM_GROUP_TEMPLATES:
-            roots.append(make_group(template.group_id))
+            group = make_group(template.group_id)
+            # 当前阶段的组（即使还空）保留，形成可展开的树；其它阶段的空组
+            # 不占位，避免把工区「基础与参考」压没。工区组始终保留。
+            if not group.children:
+                if template.group_id == BASE_REFERENCE_GROUP_ID:
+                    roots.append(group)
+                    continue
+                if template.stage_visible(current):
+                    roots.append(group)
+                    continue
+                continue
+            roots.append(group)
         for user_group in self._user_groups.values():
             roots.append(user_group)
         for layer_id in root_layers:
@@ -497,10 +510,14 @@ class LayerGroupController:
             return
         if not self._tree_view_address:
             return
-        for node_id, expanded in (expanded_map or {}).items():
+        expanded = dict(expanded_map or {})
+        expanded.setdefault(BASE_REFERENCE_GROUP_ID, True)
+        for template in SYSTEM_GROUP_TEMPLATES:
+            expanded.setdefault(template.group_id, True)
+        for node_id, is_open in expanded.items():
             try:
                 self._stack.set_group_expanded(
-                    self._tree_view_address, str(node_id), bool(expanded))
+                    self._tree_view_address, str(node_id), bool(is_open))
             except Exception:
                 pass
 

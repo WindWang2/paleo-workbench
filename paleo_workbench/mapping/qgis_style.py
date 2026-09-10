@@ -44,22 +44,85 @@ QGIS_STYLE_SCHEMA_VERSION = 1
 _DLL_DIRS_INJECTED = False
 
 
-def ensure_qgis_bridge_dll_dirs() -> None:
-    """Windows V7: put the vendored-QGIS runtime DLLs on the loader path.
+def _vendor_qgis_root() -> Path | None:
+    env_dir = os.environ.get("PALEO_QGIS_BUILD_DIR", "").strip()
+    if env_dir:
+        root = Path(env_dir)
+        if root.is_dir():
+            return root
+    repo_root = Path(__file__).resolve().parents[2]
+    root = repo_root / "native" / "qgis_render_bridge" / "build" / "qgis-vendor"
+    return root if root.is_dir() else None
 
-    The bridge ``.pyd`` imports ``qgis_core.dll`` etc. from the vendor build's
-    ``output/bin``; MSVC has no rpath equivalent, so the directory must join
-    the DLL search path **before** the first ``import qgis_render_bridge``.
-    The QGIS DLLs themselves pull third-party runtimes (GDAL/GEOS/PROJ/Qt/
-    QCA/keychain/QScintilla/GSL/...), so those bin dirs join as well.
-    Idempotent; no-op on non-Windows. Dev-layout driven (editable install is
-    the only supported mode): repo ``native/qgis_render_bridge/build/qgis-vendor``
-    or ``PALEO_QGIS_BUILD_DIR`` override, plus the Qt + third-party trees.
+
+def _ensure_linux_qgis_protobuf_compat() -> None:
+    """Vendored libqgis_core NEEDED ``libprotobuf-lite.so.36.0.0``.
+
+    Distro packages often ship 36.1.0 with a new SONAME. qgis_core's RUNPATH
+    is the in-tree ``src/core`` / ``src/gui`` dirs (not ``output/lib``), so a
+    compat symlink must live on those RUNPATHs or the native stack — including
+    ``QgsVectorLayerProperties`` — fails to load.
+    """
+    if os.name == "nt":
+        return
+    root = _vendor_qgis_root()
+    if root is None:
+        return
+    needed_name = "libprotobuf-lite.so.36.0.0"
+    source = None
+    for candidate in (
+        Path("/usr/lib/libprotobuf-lite.so.36.0.0"),
+        Path("/usr/lib/libprotobuf-lite.so.36.1.0"),
+        Path("/usr/lib64/libprotobuf-lite.so.36.0.0"),
+        Path("/usr/lib64/libprotobuf-lite.so.36.1.0"),
+        Path("/usr/lib/libprotobuf-lite.so"),
+        Path("/usr/lib64/libprotobuf-lite.so"),
+    ):
+        if candidate.is_file():
+            source = candidate.resolve()
+            break
+    if source is None:
+        return
+    for directory in (
+        root / "output" / "lib",
+        root / "src" / "core",
+        root / "src" / "gui",
+    ):
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            continue
+        dest = directory / needed_name
+        if dest.exists() or dest.is_symlink():
+            continue
+        try:
+            dest.symlink_to(source)
+        except OSError:
+            continue
+
+
+def ensure_qgis_bridge_dll_dirs() -> None:
+    """Put vendored-QGIS runtime libraries on the loader path.
+
+    Windows V7: the bridge ``.pyd`` imports ``qgis_core.dll`` from the vendor
+    build's ``output/bin``; MSVC has no rpath, so the directory must join the
+    DLL search path **before** the first ``import qgis_render_bridge``.
+
+    Linux: drop a protobuf SONAME compatibility symlink onto qgis_core's
+    RUNPATH so a distro ``libprotobuf-lite.so.36.1.0`` satisfies the
+    vendored QGIS ``NEEDED libprotobuf-lite.so.36.0.0``.
+
+    Idempotent. Dev-layout driven (editable install is the only supported
+    mode): repo ``native/qgis_render_bridge/build/qgis-vendor`` or
+    ``PALEO_QGIS_BUILD_DIR`` override.
     """
     global _DLL_DIRS_INJECTED
-    if _DLL_DIRS_INJECTED or os.name != "nt":
+    if _DLL_DIRS_INJECTED:
         return
     _DLL_DIRS_INJECTED = True
+    _ensure_linux_qgis_protobuf_compat()
+    if os.name != "nt":
+        return
     # MSVCP pre-pin (V7 loader investigation): numpy wheels ship a TRIMMED
     # msvcp140 (only the OpenBLAS-needed symbol subset). If numpy imports
     # first, its copy squats the process-wide MSVCP slot and the VS2022-built

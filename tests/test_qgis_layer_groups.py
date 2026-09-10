@@ -254,13 +254,16 @@ def test_controller_reconcile_places_layers_by_role(qtbot, stack):
     assert controller.placement_of("doc-draft") == "phase1.interpretation"
     assert controller.placement_of("doc-pl") == "phase2.constraints"
     assert controller.placement_of("doc-fac") == "phase3.integrated"
-    # 系统组全部就位。
     ids = set(gid for _type, gid in _snapshot_ids(stack))
-    from paleo_workbench.mapping_workspace.layer_groups import (
-        SYSTEM_GROUP_TEMPLATES,
-    )
-    for template in SYSTEM_GROUP_TEMPLATES:
-        assert template.group_id in ids
+    # 有成员的组必须在树上；空系统组不占位（工区「基础与参考」始终保留）。
+    from paleo_workbench.mapping_workspace.layer_groups import BASE_REFERENCE_GROUP_ID
+
+    assert "phase1.initial_facies" in ids
+    assert "phase1.interpretation" in ids
+    assert "phase2.constraints" in ids
+    assert "phase3.integrated" in ids
+    assert BASE_REFERENCE_GROUP_ID in ids
+    assert "phase3.cartography" not in ids
 
 
 def test_controller_factor_group_organization(qtbot, stack):
@@ -370,3 +373,106 @@ def test_invalid_move_self_heals_via_force_reconcile(qtbot, stack):
     assert factor_group and any(
         g["id"] == "fac-g" for g in factor_group[0]["children"]), \
         "fac-g must be back in its factor group"
+
+
+def test_composite_workarea_layers_visible_on_canvas_and_tree(qtbot, qapp):
+    """工区井/边界必须出现在图层树和画布上（分组开启后不得被空组或浮层吃掉）。"""
+    from tests.test_home_workarea_map import make_project
+    from paleo_workbench.ui.workstation.composite_document import CompositeDocument
+    from paleo_workbench.mapping_workspace.layer_groups import BASE_REFERENCE_GROUP_ID
+
+    project = make_project()
+    doc = CompositeDocument(project)
+    qtbot.addWidget(doc)
+    doc.resize(900, 600)
+    doc.show()
+    qtbot.waitExposed(doc)
+    qtbot.wait(200)
+
+    gc = doc.stage_controller.group_controller
+    assert gc.groups_available
+    layer_ids = [layer.id for layer in doc.layer_manager._layers]
+    assert any(lid.startswith("home_workarea:") for lid in layer_ids), layer_ids
+    tree_rows = doc.layer_manager.tree_row_count()
+    assert tree_rows >= 1, "layer tree is empty"
+    canvas_layers = doc.canvas.stack.canvas_layer_count(doc.canvas.canvas_address)
+    assert canvas_layers >= 1, (
+        f"canvas has no layers; tree_rows={tree_rows} "
+        f"doc_ids={layer_ids} groups={gc.groups_available}"
+    )
+    assert gc.placement_of("home_workarea:wells") == BASE_REFERENCE_GROUP_ID
+    overlay = doc.canvas._overlay
+    assert overlay is not None
+    from PySide6.QtCore import Qt as _Qt
+
+    assert overlay.testAttribute(_Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    viewport = doc.canvas.canvas
+    from paleo_workbench.ui.qgis_stack.widgets import canvas_viewport
+
+    host = canvas_viewport(viewport) or viewport
+    center = host.rect().center()
+    assert not overlay.geometry().contains(center)
+    expand = getattr(doc.layer_manager, "expand_layer_groups", None)
+    if callable(expand):
+        expand()
+
+
+def test_workarea_layers_live_in_base_reference_group(qtbot, stack):
+    """工区边界/井位进入「基础与参考」，不进空的编图要素组。"""
+    from paleo_workbench.mapping_workspace.layer_groups import BASE_REFERENCE_GROUP_ID
+
+    canvas = stack.create_canvas()
+    controller, _state = _make_controller()
+    controller.attach_canvas(_ShimLikeCanvas(stack, canvas))
+    _mirror(stack, "home_workarea:wells", "井位")
+    _mirror(stack, "home_workarea:boundary", "工区边界", geom="Polygon")
+    snaps = [
+        _Snap("home_workarea:wells", "井位"),
+        _Snap("home_workarea:boundary", "工区边界"),
+    ]
+    controller.ensure_memberships(snaps)
+    controller.reconcile(snaps)
+    qtbot.wait(50)
+    assert controller.placement_of("home_workarea:wells") == BASE_REFERENCE_GROUP_ID
+    assert controller.placement_of("home_workarea:boundary") == BASE_REFERENCE_GROUP_ID
+    payload = json.loads(stack.tree_snapshot_json())
+    base = [node for node in payload["children"] if node["id"] == BASE_REFERENCE_GROUP_ID]
+    assert base
+    child_ids = [child["id"] for child in base[0]["children"]]
+    assert "home_workarea:wells" in child_ids
+    assert "home_workarea:boundary" in child_ids
+    top_ids = [node["id"] for node in payload["children"] if node["type"] == "group"]
+    assert "phase3.cartography" not in top_ids
+
+
+def test_apply_saved_envelope_keeps_mirror_layers(qtbot, stack):
+    """已存信封往返不丢镜像层（apply 路径注册表桥设防回归，#1154）。
+
+    applyProjectXml 的组恢复曾无 RegistryBridgeDetach：takeChild 瞬时离树
+    即使同步挂回，仍被排队的注册表注销在下个事件循环删工程——保存再打开
+    即「基础与参考」被静默清空。本用例在桥侧直接复现该往返。
+    """
+    from paleo_workbench.mapping_workspace.layer_groups import BASE_REFERENCE_GROUP_ID
+
+    canvas = stack.create_canvas()
+    _mirror(stack, "home_workarea:wells", "井位")
+    _mirror(stack, "home_workarea:boundary", "工区边界", geom="Polygon")
+    stack.upsert_group(BASE_REFERENCE_GROUP_ID, "基础与参考", "")
+    stack.move_layer_to_group("home_workarea:wells", BASE_REFERENCE_GROUP_ID, 0)
+    stack.move_layer_to_group("home_workarea:boundary", BASE_REFERENCE_GROUP_ID, 1)
+    qtbot.wait(50)
+    assert stack.project_layer_count() == 2
+    xml = stack.write_project_xml()
+    assert "<qgis" in xml
+    stack.apply_project_xml(xml)
+    assert stack.project_layer_count() == 2  # 同步段内不得删层
+    qtbot.wait(300)  # 排队注销只在事件循环触发
+    assert stack.project_layer_count() == 2, \
+        "apply 信封后镜像层被注册表桥注销（#1154 apply 路径未设防）"
+    payload = json.loads(stack.tree_snapshot_json())
+    base = [node for node in payload["children"]
+            if node["id"] == BASE_REFERENCE_GROUP_ID]
+    assert base
+    child_ids = [child["id"] for child in base[0]["children"]]
+    assert "home_workarea:wells" in child_ids
+    assert "home_workarea:boundary" in child_ids

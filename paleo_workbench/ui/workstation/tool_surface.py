@@ -154,6 +154,11 @@ def tool_context_from_ui_snapshot(snap: object) -> ToolContext:
     can_undo = _get("can_undo", None)
     can_redo = _get("can_redo", None)
     blocking_task = _get("blocking_task", None)
+    queryable = _get("queryable_layer_count", None)
+    if queryable is None:
+        # provider 缺席的回落：有活动层 ≈ 至少一个可查询图层（执行侧
+        # re-gate 会用完整计数二次判定，此处只保 palette 不假禁用）。
+        queryable = 1 if layer_id else 0
     return ToolContext(
         project_open=bool(_get("project_open", False)),
         mapping_stage=_get("mapping_stage", None),
@@ -182,6 +187,7 @@ def tool_context_from_ui_snapshot(snap: object) -> ToolContext:
         can_redo=False if can_redo is None else bool(can_redo),
         blocking_task="" if blocking_task is None else str(blocking_task),
         write_granted=bool(_get("write_granted", False)),
+        queryable_layer_count=int(queryable or 0),
     )
 
 

@@ -99,8 +99,38 @@ def _iter_polygon_features(document, polygons: list) -> int:
     return count
 
 
+def check_target_horizon(document) -> ReadinessItem:
+    """相图按层位进行：未设定目标层位则本阶段未就绪。"""
+    horizon = ""
+    if document is not None:
+        horizon = str(
+            getattr(getattr(document, "stratigraphy", None), "target_horizon", "")
+            or ""
+        ).strip()
+        if not horizon:
+            try:
+                from paleo_workbench.workflow.stratigraphy import active_target_horizon
+
+                horizon = active_target_horizon(document)
+            except Exception:
+                horizon = ""
+    if horizon:
+        return ReadinessItem(
+            "target_horizon", ReadinessItemStatus.OK, "编图层位已设定", horizon)
+    return ReadinessItem(
+        "target_horizon", ReadinessItemStatus.ERROR, "未设定编图层位",
+        "相图按层位进行——请先在阶段条选择或输入层位")
+
+
 def check_initial_facies_present(document) -> ReadinessItem:
-    """✓ 初始相图存在：PaleoMapDocument 的 facies_polygons 非空或 RAW 引用。"""
+    """✓ 初始相图存在：PaleoMapDocument 的 facies_polygons 非空或 RAW 引用。
+
+    未指定初始相图时，工区默认空白相规则（stage_actions
+    ``_default_blank_facies_features`` 同规则：工区边界 ≥3 个有限数值点）
+    同样算存在——加载后可校正，不再把整体拖成未就绪。
+    """
+    import math
+
     documents = getattr(document, "paleomap_documents", None) or []
     has = any(_iter_polygon_features(doc, getattr(doc, "facies_polygons", None))
               for doc in documents)
@@ -108,6 +138,20 @@ def check_initial_facies_present(document) -> ReadinessItem:
         return ReadinessItem(
             "initial_facies_present", ReadinessItemStatus.OK, "初始相图存在",
             f"{len(documents)} 个相图文档含相面多边形")
+    boundary = getattr(getattr(document, "workarea", None), "boundary", None) or []
+    valid = 0
+    for vertex in boundary:
+        try:
+            x, y = float(vertex[0]), float(vertex[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if math.isfinite(x) and math.isfinite(y):
+            valid += 1
+    if valid >= 3:
+        return ReadinessItem(
+            "initial_facies_present", ReadinessItemStatus.OK,
+            "初始相图（工区默认空白相）",
+            "未指定初始相图——按默认规则以工区范围为空白相，加载后可校正")
     return ReadinessItem(
         "initial_facies_present", ReadinessItemStatus.ERROR, "初始相图缺失",
         "未找到初始沉积相图——导入或生成初始相图后才能进行校正")
@@ -167,14 +211,20 @@ def check_initial_facies_geometry(document) -> ReadinessItem:
 
 
 def check_well_prediction_linked(document) -> ReadinessItem:
-    tasks = [
-        task for task in (getattr(document, "prediction_tasks", None) or [])
+    tasks = list(getattr(document, "prediction_tasks", None) or [])
+    real = [
+        task for task in tasks
         if str(getattr(task, "adapter_kind", "")) != "mock"
     ]
+    if real:
+        return ReadinessItem(
+            "well_prediction_linked", ReadinessItemStatus.OK,
+            "测井预测已关联", f"{len(real)} 个预测任务")
     if tasks:
         return ReadinessItem(
             "well_prediction_linked", ReadinessItemStatus.OK,
-            "测井预测已关联", f"{len(tasks)} 个预测任务")
+            "测井预测已关联",
+            f"{len(tasks)} 个 mock 演示任务（非科学预测，仅供流程演示）")
     return ReadinessItem(
         "well_prediction_linked", ReadinessItemStatus.WARNING, "测井预测未关联",
         "无真实测井预测任务——校正只能基于初始相图人工解释")
@@ -185,14 +235,19 @@ def check_seismic_prediction_confidence(document) -> ReadinessItem:
         task for task in (getattr(document, "prediction_tasks", None) or [])
         if getattr(task, "probability_summary", None)
     ]
-    low_confidence = 0
-    for task in tasks:
-        summary = task.probability_summary or {}
-        low_confidence += int(summary.get("low_confidence_regions") or 0)
     if not tasks:
         return ReadinessItem(
             "seismic_prediction_confidence", ReadinessItemStatus.WARNING,
             "地震预测缺失", "未关联地震预测结果")
+    if all(str(getattr(task, "adapter_kind", "")) == "mock" for task in tasks):
+        return ReadinessItem(
+            "seismic_prediction_confidence", ReadinessItemStatus.OK,
+            "地震预测已关联",
+            f"{len(tasks)} 个 mock 演示任务（概率未标定）")
+    low_confidence = 0
+    for task in tasks:
+        summary = task.probability_summary or {}
+        low_confidence += int(summary.get("low_confidence_regions") or 0)
     if low_confidence:
         return ReadinessItem(
             "seismic_prediction_confidence", ReadinessItemStatus.WARNING,
@@ -345,6 +400,7 @@ def check_qa_geometry_errors(document) -> ReadinessItem:
 
 
 _CHECK_IMPLEMENTATIONS = {
+    "target_horizon": lambda doc, ws, fresh: check_target_horizon(doc),
     "initial_facies_present": lambda doc, ws, fresh: check_initial_facies_present(doc),
     "initial_facies_crs": lambda doc, ws, fresh: check_initial_facies_crs(doc),
     "initial_facies_geometry": lambda doc, ws, fresh: check_initial_facies_geometry(doc),

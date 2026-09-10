@@ -33,6 +33,7 @@ class DockVisibilityMatrix:
     well: bool = False
     seismic: bool = False
     hub: bool = False
+    mapping_stage: bool = True
 
 
 @dataclass(frozen=True)
@@ -192,6 +193,7 @@ def visibility_dict(matrix: DockVisibilityMatrix) -> dict[str, bool]:
         "well": matrix.well,
         "seismic": matrix.seismic,
         "hub": matrix.hub,
+        "mapping_stage": matrix.mapping_stage,
     }
 
 

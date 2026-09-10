@@ -11,14 +11,16 @@
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -43,6 +45,17 @@ _STATUS_GLYPHS = {
 }
 
 
+def _narrow_list(widget: QListWidget) -> None:
+    """侧栏清单不得用长文本撑开 dock 最小宽度。"""
+    widget.setMinimumWidth(0)
+    widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    widget.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    widget.setWordWrap(True)
+    widget.setTextElideMode(Qt.TextElideMode.ElideRight)
+    widget.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+    widget.setAlternatingRowColors(False)
+
+
 class _ReadinessList(QListWidget):
     """就绪度清单：每项 status glyph + 标题；点击发定位请求。"""
 
@@ -51,10 +64,13 @@ class _ReadinessList(QListWidget):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("StageReadinessList")
-        self.setAlternatingRowColors(False)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        _narrow_list(self)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         self.itemClicked.connect(self._on_clicked)
+
+    def minimumSizeHint(self) -> QSize:
+        hint = super().minimumSizeHint()
+        return QSize(0, hint.height())
 
     def _on_clicked(self, item: QListWidgetItem) -> None:
         target = str(item.data(Qt.ItemDataRole.UserRole) or "")
@@ -75,6 +91,49 @@ class _ReadinessList(QListWidget):
             row.setToolTip(item.detail or item.title)
 
 
+class _CommandList(QListWidget):
+    """阶段动作清单：一行一个动作，点击执行。宽度跟随侧栏，不横向撑开。"""
+
+    action_requested = Signal(str)
+
+    def __init__(self, commands: list[tuple[str, str]], parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setObjectName("StageCommandList")
+        _narrow_list(self)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.itemClicked.connect(self._on_clicked)
+        for action_id, title in commands:
+            row = QListWidgetItem(title, self)
+            row.setData(Qt.ItemDataRole.UserRole, action_id)
+            row.setToolTip(title)
+
+    def _on_clicked(self, item: QListWidgetItem) -> None:
+        action_id = str(item.data(Qt.ItemDataRole.UserRole) or "")
+        if action_id:
+            self.action_requested.emit(action_id)
+
+    def sizeHint(self) -> QSize:
+        rows = self.count()
+        if rows <= 0:
+            return QSize(0, 0)
+        row_h = max(int(self.sizeHintForRow(0) or 0), 22)
+        return QSize(0, rows * row_h + 2 * self.frameWidth() + 4)
+
+    def minimumSizeHint(self) -> QSize:
+        hint = self.sizeHint()
+        return QSize(0, hint.height())
+
+
+def _fill_button(title: str, parent: QWidget, tooltip: str = "") -> QPushButton:
+    button = QPushButton(title, parent)
+    button.setObjectName("WorkstationContextButton")
+    button.setToolTip(tooltip or title)
+    button.setMinimumWidth(0)
+    button.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+    button.setCursor(Qt.CursorShape.PointingHandCursor)
+    return button
+
+
 class _StagePage(QFrame):
     """单阶段页：就绪度 + 上下文动作 + 说明脚注。"""
 
@@ -90,6 +149,8 @@ class _StagePage(QFrame):
         super().__init__(parent)
         self.stage = stage
         self.setObjectName("PanelCard")
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -97,36 +158,42 @@ class _StagePage(QFrame):
 
         header = QLabel(stage.label, self)
         header.setObjectName("WorkstationPanelHeader")
+        header.setWordWrap(True)
+        header.setMinimumWidth(0)
+        header.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         layout.addWidget(header)
 
+        ready_row = QHBoxLayout()
+        ready_row.setContentsMargins(0, 0, 0, 0)
         readiness_label = QLabel("就绪度", self)
         readiness_label.setObjectName("WorkstationPanelFootnote")
-        layout.addWidget(readiness_label)
-        self.readiness = _ReadinessList(self)
         self.readiness_status = QLabel("", self)
         self.readiness_status.setObjectName("WorkstationPanelFootnote")
+        self.readiness_status.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        ready_row.addWidget(readiness_label)
+        ready_row.addStretch(1)
+        ready_row.addWidget(self.readiness_status)
+        layout.addLayout(ready_row)
+
+        self.readiness = _ReadinessList(self)
         self.readiness.item_located.connect(self.locate_requested.emit)
-        layout.addWidget(self.readiness_status)
         layout.addWidget(self.readiness, 1)
 
+        self.actions: _CommandList | None = None
         if actions:
             actions_label = QLabel("阶段动作", self)
             actions_label.setObjectName("WorkstationPanelFootnote")
             layout.addWidget(actions_label)
-            grid = QHBoxLayout()
-            grid.setSpacing(4)
-            for action_id, title in actions:
-                button = QPushButton(title, self)
-                button.setObjectName("WorkstationContextButton")
-                button.setToolTip(title)
-                button.clicked.connect(
-                    lambda _checked=False, key=action_id: self.action_requested.emit(key))
-                grid.addWidget(button)
-            layout.addLayout(grid)
+            self.actions = _CommandList(list(actions), self)
+            self.actions.action_requested.connect(self.action_requested.emit)
+            layout.addWidget(self.actions, 0)
 
         footer = QLabel(stage.description, self)
         footer.setObjectName("WorkstationPanelFootnote")
         footer.setWordWrap(True)
+        footer.setMinimumWidth(0)
+        footer.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         layout.addWidget(footer)
 
     def show_readiness(self, readiness: StageReadiness | None) -> None:
@@ -161,10 +228,14 @@ class MappingStagePanel(QWidget):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("MappingStagePanel")
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
         self.stack = QStackedWidget(self)
+        self.stack.setMinimumWidth(0)
+        self.stack.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self._pages: dict[MappingStage, _StagePage] = {}
         self._constraints_row: QWidget | None = None
         for stage, actions in (
@@ -188,20 +259,21 @@ class MappingStagePanel(QWidget):
     def _build_constraints_row(self, layout: QVBoxLayout) -> None:
         box = QFrame(self)
         box.setObjectName("PanelCard")
+        box.setMinimumWidth(0)
         row = QVBoxLayout(box)
         row.setContentsMargins(8, 6, 8, 6)
         label = QLabel("新建地质约束", box)
         label.setObjectName("WorkstationPanelFootnote")
         row.addWidget(label)
-        buttons = QHBoxLayout()
-        buttons.setSpacing(3)
-        for kind, title in self._CONSTRAINT_ACTIONS:
-            button = QPushButton(title, box)
-            button.setObjectName("WorkstationContextButton")
-            button.setToolTip(f"新建 {kind.label}（{kind.geometry_kind}）")
+        buttons = QGridLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.setSpacing(4)
+        for index, (kind, title) in enumerate(self._CONSTRAINT_ACTIONS):
+            button = _fill_button(
+                title, box, tooltip=f"新建 {kind.label}（{kind.geometry_kind}）")
             button.clicked.connect(
                 lambda _checked=False, value=kind.value: self.constraint_requested.emit(value))
-            buttons.addWidget(button)
+            buttons.addWidget(button, index // 2, index % 2)
         row.addLayout(buttons)
         layout.addWidget(box)
         self._constraints_row = box

@@ -44,6 +44,7 @@ from paleo_workbench.mapping.map_styles import (
     TextStyle,
     VectorStyle,
 )
+from paleo_workbench.mapping_workspace.layer_roles import LayerRole
 from paleo_workbench.project.domain import (
     CoordinateStatus,
     complete_survey_corners,
@@ -323,6 +324,7 @@ def _boundary_layer(project: Any, project_crs: str) -> MapLayerSnapshot | None:
         style_revision=1,
         features=features,
         style=_BOUNDARY_STYLE,
+        metadata={"role": LayerRole.BASE_REFERENCE.value},
     )
 
 
@@ -377,6 +379,7 @@ def _survey_layer(project: Any, project_crs: str) -> MapLayerSnapshot | None:
         style_revision=1,
         features=tuple(features),
         style=_SURVEY_STYLE,
+        metadata={"role": LayerRole.BASE_REFERENCE.value},
     )
 
 
@@ -405,6 +408,7 @@ def _survey_label_layer(project: Any, project_crs: str) -> MapLayerSnapshot | No
         style_revision=1,
         features=label_features,
         style=_SURVEY_LABEL_STYLE,
+        metadata={"role": LayerRole.BASE_REFERENCE.value},
     )
 
 
@@ -443,4 +447,5 @@ def _well_layer(project: Any, project_crs: str, *, flagged: bool) -> MapLayerSna
         style_revision=1,
         features=tuple(features),
         style=_WELL_FLAGGED_STYLE if flagged else _WELL_OK_STYLE,
+        metadata={"role": LayerRole.BASE_REFERENCE.value},
     )

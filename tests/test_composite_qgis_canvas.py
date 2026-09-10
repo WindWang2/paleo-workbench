@@ -24,6 +24,17 @@ def test_composite_document_hosts_qgis_canvas(qtbot):
     assert doc.canvas.canvas.width() > 0  # 真 QgsMapCanvas 已在布局中
     doc.canvas.backend_status_changed.emit  # 信号存在
     assert "qgis" in doc.canvas.backend_status.lower()
+    overlay = getattr(doc.canvas, "_overlay", None)
+    assert overlay is not None
+    from paleo_workbench.ui.qgis_stack.widgets import canvas_viewport
+
+    viewport = canvas_viewport(doc.canvas.canvas) or doc.canvas
+    assert overlay.parent() is viewport
+    # 比例尺是边角小控件，不得盖住地图中心。
+    center = viewport.rect().center()
+    assert not overlay.geometry().contains(center)
+    north = getattr(doc.canvas, "_chrome_north", None)
+    assert north is not None and north.isVisible()
 
 
 @pytest.mark.qgis

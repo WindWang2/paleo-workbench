@@ -19,6 +19,7 @@
 #include <QDialog>
 #include <QDomDocument>
 #include <QFile>
+#include <QHeaderView>
 #include <QIODevice>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -2372,6 +2373,10 @@ bool QgisMapStack::upsertGroup(const std::string& group_id, const std::string& n
     if (existing != parent && existing->parent() != parent) {
       // 挂错父组：整体搬移。takeChild 会先递归卸下后代——先做子树
       // 保护性卸载再搬空组、按原结构挂回。
+      // 注册表桥 detach（#1154）：root 层 takeChild（组及其全部后代图层）
+      // 会被无条件收集并排队注销，同步挂回也救不回来——reconcile 每次
+      // upsert 全量组，此分支一触发即整组蒸发。
+      RegistryBridgeDetach bridgeDetach{project(), root};
       QgsLayerTreeNode* oldParent = existing->parent();
       if (oldParent != nullptr && oldParent->children().indexOf(existing) >= 0) {
         QList<SubtreeDetachEntry*> subtreeLog;
@@ -2526,6 +2531,9 @@ void QgisMapStack::moveGroup(const std::string& group_id,
   }
   {
     SuppressGuard guard(&impl_->suppress_tree_callbacks);
+    // 注册表桥 detach（#1154）：整组 takeChild 时全部后代图层被无条件
+    // 收集并排队注销——reconcile 组排序/用户拖组都会走到这里。
+    RegistryBridgeDetach bridgeDetach{project(), root};
     QgsLayerTreeNode* parent = group->parent();
     const int count = static_cast<int>(target->children().size());
     const int clamped = index < 0 ? count : std::min(index, count);
@@ -2789,6 +2797,9 @@ std::string QgisMapStack::applyTreePlacements(const std::string& placements_json
   for (auto& kv : impl_->canvas_refs) {
     if (!kv.second.isNull()) syncCanvasLayers(kv.first);
   }
+  for (auto& kv : impl_->tree_views) {
+    if (!kv.second.isNull()) kv.second->expandAllNodes();
+  }
   QJsonObject out;
   out.insert(QStringLiteral("applied"), applied);
   out.insert(QStringLiteral("skipped"), skipped);
@@ -2922,6 +2933,10 @@ int QgisMapStack::applyProjectXml(const std::string& xml) {
 
   if (!groupPlacements.empty()) {
     // 组结构恢复：donor 出现序自上而下（父先于子），嵌套父级按 donor 挂载。
+    // 注册表桥 detach（#1154）：moveLayerToGroupUnderLock 的
+    // takeChild/insertChildNode 瞬时离树——即使同步挂回，排队的注销仍会
+    // 在下个事件循环把镜像层从工程删掉（base.reference 静默清空即此因）。
+    RegistryBridgeDetach bridgeDetach{project(), project()->layerTreeRoot()};
     for (const auto& [gid, name, parent_gid] : groupPlacements) {
       upsertGroupUnderLock(gid, name, parent_gid);
     }
@@ -2946,7 +2961,8 @@ int QgisMapStack::applyProjectXml(const std::string& xml) {
 void QgisMapStack::upsertGroupUnderLock(const std::string& group_id,
                                         const std::string& name,
                                         const std::string& parent_group_id) {
-  // applyProjectXml 已持 SuppressGuard；donor 出现序保证父组先建。
+  // applyProjectXml 已持 SuppressGuard + RegistryBridgeDetach；donor 出现序
+  // 保证父组先建。此处只有 addChildNode（无 takeChild），无需重复设防。
   QgsLayerTree* root = project()->layerTreeRoot();
   if (findGroupByGroupIdIn(root, group_id) != nullptr) return;
   QgsLayerTreeGroup* parent = root;
@@ -3485,11 +3501,18 @@ std::uintptr_t QgisMapStack::createLayerTreeView(std::uintptr_t canvas_addr) {
   auto* model = new QgsLayerTreeModel(root);
   auto* view = new QgsLayerTreeView();
   model->setParent(view);
-  model->setFlag(QgsLayerTreeModel::ShowLegend);
+  // 图层管理要的是「组 → 图层」树，不要图层下再挂图例行（否则点开组
+  // 只看到符号图例，分组像打不开）。
+  model->setFlag(QgsLayerTreeModel::ShowLegend, false);
   model->setFlag(QgsLayerTreeModel::AllowNodeReorder);
   model->setFlag(QgsLayerTreeModel::AllowNodeRename);
   model->setFlag(QgsLayerTreeModel::AllowNodeChangeVisibility);
   view->setModel(model);
+  view->setRootIsDecorated(true);
+  view->setItemsExpandable(true);
+  view->setExpandsOnDoubleClick(true);
+  view->setIndentation(18);
+  view->header()->setStretchLastSection(true);
   const auto addr = reinterpret_cast<std::uintptr_t>(view);
   cleanupTreeViewState(addr);  // 地址复用：先清残留（正常路径全为空，幂等）
   std::weak_ptr<char> alive = alive_token_;
@@ -3865,15 +3888,18 @@ void QgisMapStack::treeViewMoveRow(std::uintptr_t tree, int from, int to) {
   }
   if (from == to) return;
   // 用户拖拽等价物（与 QGIS DnD 同序）：先在目标位插入同一 layer 的新节点，
-  // 再移除旧节点——registry bridge 的延迟删除按 findLayer 检查跳过仍在树中的
-  // 图层（groupRemovedChildren: "ignores layers that were dragged'n'dropped:
-  // 1. drop new 2. remove old"）。反过来先 take 后插会把图层从 project 误删。
+  // 再移除旧节点。注意：克隆先插救不了旧节点——排队注销不复查树归属，
+  // 旧节点 takeChild 照样被删工程（#1154），故仍需 RegistryBridgeDetach。
   // QgsLayerTreeModel 不实现 moveRows，不能直接走模型。
   QgsLayerTreeGroup* root = project()->layerTreeRoot();
   QgsLayerTreeLayer* node = treeLayerCast(root->children().value(from));
   if (!node || !node->layer()) throw std::runtime_error("tree view moveRow: source node missing");
   QgsLayerTreeNode* parent = node->parent();
   if (!parent) throw std::runtime_error("tree view moveRow: node has no parent");
+  // 注册表桥 detach（#1154）：旧节点 takeChild（root 层）同样会被收集并
+  // 排队注销——克隆先插并不能救它（排队注销不复查）。只断注册表桥，
+  // 不碰 SuppressGuard：用户拖拽回声（tree 回调）必须照常触发。
+  RegistryBridgeDetach bridgeDetach{project(), root};
   auto* clone = new QgsLayerTreeLayer(node->layer());
   clone->setItemVisibilityChecked(node->itemVisibilityChecked());
   clone->setExpanded(node->isExpanded());

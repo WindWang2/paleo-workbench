@@ -240,6 +240,9 @@ class WorkstationFrame(QWidget):
             "功能页", self.page_stack,
             Qt.DockWidgetArea.RightDockWidgetArea,
         )
+        from paleo_workbench.ui.workstation.tool_page_dialog import ToolPageDialog
+
+        self.tool_page_dialog = ToolPageDialog(self._dock_host)
         # V5 编图阶段面板（QStackedWidget 三阶段；中央地图永不切换）。
         from paleo_workbench.ui.workstation.mapping_stage_panel import MappingStagePanel
 
@@ -248,29 +251,11 @@ class WorkstationFrame(QWidget):
             "编图阶段", self.mapping_stage_panel,
             Qt.DockWidgetArea.LeftDockWidgetArea,
         )
-        self.well_dock.hide()
-        self.seismic_dock.hide()
-        self.hub_dock.hide()
-        self.logs_dock.hide()
-        self.console_dock.hide()
-        # 默认视图：图件最大化（variant C），仅图层管理随编图打开。
-        self.composite_input_dock.hide()
-        self.composite_linked_dock.hide()
         self._wire_composite_panel_menu()
-        # 编图阶段 dock 与输入与结果叠 tab（左侧组）。
-        self._dock_host.tabifyDockWidget(
-            self.composite_input_dock, self.mapping_stage_dock)
-        # 图层管理与检查器在右侧叠 tab，底部面板（Agent/任务中心/日志/
-        # 控制台/联动/测井/地震）叠 tab。
-        self._dock_host.tabifyDockWidget(self.inspector_dock, self.composite_layer_dock)
-        self._dock_host.tabifyDockWidget(self.agent_dock, self.composite_linked_dock)
-        self._dock_host.tabifyDockWidget(self.agent_dock, self.task_dock)
-        self._dock_host.tabifyDockWidget(self.agent_dock, self.well_dock)
-        self._dock_host.tabifyDockWidget(self.well_dock, self.seismic_dock)
-        self._dock_host.tabifyDockWidget(self.agent_dock, self.logs_dock)
-        self._dock_host.tabifyDockWidget(self.agent_dock, self.console_dock)
+        self._apply_canonical_dock_layout()
+        self._hide_default_closed_docks()
 
-        # V5 阶段切换条：AppBar 下方的紧凑固定行（Petrel 风格分段控件）。
+        # 阶段条独占 AppBar 下一行（全宽）；不得与全局栏挤在同一行右侧。
         from paleo_workbench.ui.workstation.mapping_stage_bar import MappingStageBar
 
         self.stage_bar = MappingStageBar(self._dock_host)
@@ -282,7 +267,10 @@ class WorkstationFrame(QWidget):
             Qt.ContextMenuPolicy.PreventContextMenu
         )
         self.stage_toolbar.layout().setContentsMargins(0, 0, 0, 0)
+        self.stage_bar.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.stage_toolbar.addWidget(self.stage_bar)
+        self._dock_host.addToolBarBreak(Qt.ToolBarArea.TopToolBarArea)
         self._dock_host.addToolBar(
             Qt.ToolBarArea.TopToolBarArea, self.stage_toolbar)
 
@@ -414,6 +402,7 @@ class WorkstationFrame(QWidget):
 
         self.stage_bar.stage_requested.connect(_request_stage)
         self.mapping_stage_panel.stage_switch_requested.connect(_request_stage)
+        self.stage_bar.horizon_requested.connect(self._on_mapping_horizon)
 
         def _on_stage_changed(stage_value: str) -> None:
             self.stage_bar.set_current_stage(stage_value)
@@ -702,6 +691,40 @@ class WorkstationFrame(QWidget):
                 continue
             dock.setVisible(bool(visible))
 
+    def _sync_mapping_horizon(self) -> None:
+        from paleo_workbench.workflow.stratigraphy import (
+            active_target_horizon,
+            ensure_horizon_catalog,
+        )
+
+        project = self._project
+        if project is None:
+            self.stage_bar.set_horizon_state("", [])
+            return
+        self.stage_bar.set_horizon_state(
+            active_target_horizon(project), ensure_horizon_catalog(project))
+
+    def _on_mapping_horizon(self, horizon: str) -> None:
+        from paleo_workbench.workflow.stratigraphy import (
+            active_target_horizon,
+            set_target_from_boundary,
+        )
+
+        project = self._project
+        text = str(horizon or "").strip()
+        if project is None:
+            return
+        if not text:
+            self._sync_mapping_horizon()
+            self.status_message.emit("请先设定编图层位（相图按层位进行）")
+            return
+        if text == active_target_horizon(project):
+            return
+        set_target_from_boundary(project, text)
+        self._sync_mapping_horizon()
+        self.composite.stage_controller.refresh_evaluation()
+        self.status_message.emit(f"编图层位：{text}（相图在此层位下进行）")
+
     def _dispatch_stage_action(self, stage_value: str, action_id: str) -> None:
         """阶段面板上下文动作分派（composite 实现具体工作流）。"""
         handler = getattr(self.composite, "stage_action", None)
@@ -819,6 +842,7 @@ class WorkstationFrame(QWidget):
         # V5：工程装载后同步阶段条/面板（composite.set_project 已恢复状态）。
         stage_value = self.composite.stage_controller.current_stage.value
         self.stage_bar.set_current_stage(stage_value)
+        self._sync_mapping_horizon()
         self.mapping_stage_panel.set_stage(stage_value)
         self.mapping_stage_panel.show_readiness(
             self.composite.stage_controller.current_stage,
@@ -893,6 +917,9 @@ class WorkstationFrame(QWidget):
                 f"地震剖面 · {name}" if name else "地震剖面"
             )
 
+    #: 编图旁边的工具页：弹出对话框，不进「功能页」dock。
+    _TOOL_DIALOG_KEYS = frozenset({"preparation", "review"})
+
     def show_hub_page(self, title: str) -> None:
         """功能页 dock 显示（V7 D12：不再强制浮动）。
 
@@ -901,6 +928,7 @@ class WorkstationFrame(QWidget):
         停靠 dock，导航 = show + raise；用户可自由拖出/叠 tab/关闭，
         与其余 dock 行为一致（重开路径：面板菜单/palette 不变）。
         """
+        self.tool_page_dialog.hide()
         self.hub_dock.setWindowTitle(str(title or "功能页"))
         self.hub_dock.show()
         self.hub_dock.raise_()
@@ -913,8 +941,31 @@ class WorkstationFrame(QWidget):
         if layer_id:
             self.composite.layer_manager.select_layer(layer_id)
 
-    def activate_legacy(self, title: str = "功能页") -> None:
+    def activate_legacy(
+        self,
+        title: str = "功能页",
+        *,
+        hub_index: int | None = None,
+        subkey: str = "",
+    ) -> None:
+        if subkey in self._TOOL_DIALOG_KEYS and hub_index is not None:
+            self._open_tool_page_dialog(title, hub_index, subkey)
+            return
+        if subkey == "canvas":
+            self.hub_dock.hide()
+            self.tool_page_dialog.hide()
+            return
         self.show_hub_page(title)
+
+    def _open_tool_page_dialog(self, title: str, hub_index: int, subkey: str) -> None:
+        hub = self.page_stack.widget(hub_index)
+        page = hub.page(subkey) if hasattr(hub, "page") else None
+        if page is None:
+            self.show_hub_page(title)
+            return
+        home = getattr(hub, "_stack", None)
+        self.hub_dock.hide()
+        self.tool_page_dialog.present(page, title, home)
 
     def show_agent(self) -> None:
         self.agent_dock.show()
@@ -1098,39 +1149,7 @@ class WorkstationFrame(QWidget):
 
     def dock_all_panels(self) -> None:
         """Dock back every floating shell dock to its default area."""
-        self._reset_composite_layout()
-        for dock in (
-            self.nav_dock,
-            self.inspector_dock,
-            self.agent_dock,
-            self.task_dock,
-            self.logs_dock,
-            self.console_dock,
-            self.well_dock,
-            self.seismic_dock,
-            self.hub_dock,
-            # 编图阶段 dock 曾缺席本清单：全部停靠后仍浮动（V6 基线 P0 家族）。
-            self.mapping_stage_dock,
-        ):
-            if dock.isFloating():
-                dock.setFloating(False)
-        self._dock_host.addDockWidget(
-            Qt.DockWidgetArea.LeftDockWidgetArea, self.nav_dock
-        )
-        self._dock_host.addDockWidget(
-            Qt.DockWidgetArea.RightDockWidgetArea, self.inspector_dock
-        )
-        self._dock_host.addDockWidget(
-            Qt.DockWidgetArea.BottomDockWidgetArea, self.agent_dock
-        )
-        self._dock_host.addDockWidget(
-            Qt.DockWidgetArea.BottomDockWidgetArea, self.task_dock
-        )
-        self._dock_host.tabifyDockWidget(self.inspector_dock, self.composite_layer_dock)
-        self._dock_host.tabifyDockWidget(self.agent_dock, self.composite_linked_dock)
-        self._dock_host.tabifyDockWidget(self.agent_dock, self.task_dock)
-        self._dock_host.tabifyDockWidget(self.agent_dock, self.logs_dock)
-        self._dock_host.tabifyDockWidget(self.agent_dock, self.console_dock)
+        self._apply_canonical_dock_layout()
         self._save_timer.start()
 
     def apply_layout_preset(self, preset_id: str) -> None:
@@ -1157,6 +1176,7 @@ class WorkstationFrame(QWidget):
             self.composite_layer_dock.setVisible(vis.composite_layer)
             self.composite_input_dock.setVisible(vis.composite_input)
             self.composite_linked_dock.setVisible(vis.composite_linked)
+            self.mapping_stage_dock.setVisible(vis.mapping_stage)
             for dock_name, flag in (
                 ("well_dock", vis.well),
                 ("seismic_dock", vis.seismic),
@@ -1196,18 +1216,55 @@ class WorkstationFrame(QWidget):
 
     def _reset_composite_layout(self) -> None:
         """恢复编图面板的默认停靠布局（不改可见性）。"""
+        self._apply_canonical_dock_layout()
+        self._save_timer.start()
+
+    def _apply_canonical_dock_layout(self) -> None:
+        """固定默认停靠几何：左资源+编图阶段，右图层/检查器，底辅助面板叠 tab。"""
         host = self._dock_host
-        for dock, area in (
-            (self.composite_input_dock, Qt.DockWidgetArea.LeftDockWidgetArea),
-            (self.composite_layer_dock, Qt.DockWidgetArea.RightDockWidgetArea),
-            (self.composite_linked_dock, Qt.DockWidgetArea.BottomDockWidgetArea),
-        ):
+        for dock in self._shell_docks():
             if dock.isFloating():
                 dock.setFloating(False)
-            host.addDockWidget(area, dock)
+        left = Qt.DockWidgetArea.LeftDockWidgetArea
+        right = Qt.DockWidgetArea.RightDockWidgetArea
+        bottom = Qt.DockWidgetArea.BottomDockWidgetArea
+        host.addDockWidget(left, self.nav_dock)
+        host.addDockWidget(left, self.mapping_stage_dock)
+        host.splitDockWidget(
+            self.nav_dock, self.mapping_stage_dock, Qt.Orientation.Vertical)
+        host.tabifyDockWidget(self.mapping_stage_dock, self.composite_input_dock)
+        host.addDockWidget(right, self.inspector_dock)
+        host.addDockWidget(right, self.composite_layer_dock)
         host.tabifyDockWidget(self.inspector_dock, self.composite_layer_dock)
+        self.composite_layer_dock.raise_()
+        host.addDockWidget(right, self.hub_dock)
+        host.addDockWidget(bottom, self.agent_dock)
+        host.addDockWidget(bottom, self.task_dock)
+        host.tabifyDockWidget(self.agent_dock, self.task_dock)
+        host.tabifyDockWidget(self.agent_dock, self.logs_dock)
+        host.tabifyDockWidget(self.agent_dock, self.console_dock)
         host.tabifyDockWidget(self.agent_dock, self.composite_linked_dock)
-        self._save_timer.start()
+        host.tabifyDockWidget(self.agent_dock, self.well_dock)
+        host.tabifyDockWidget(self.well_dock, self.seismic_dock)
+
+    def _hide_default_closed_docks(self) -> None:
+        """编图默认：地图为主，只留资源管理器、编图阶段、图层管理、检查器。"""
+        for dock in (
+            self.well_dock,
+            self.seismic_dock,
+            self.hub_dock,
+            self.logs_dock,
+            self.console_dock,
+            self.composite_input_dock,
+            self.composite_linked_dock,
+            self.agent_dock,
+            self.task_dock,
+        ):
+            dock.hide()
+        self.nav_dock.show()
+        self.mapping_stage_dock.show()
+        self.composite_layer_dock.show()
+        self.inspector_dock.show()
 
     def layout_preset_visibility(self, preset_id: str) -> dict[str, bool] | None:
         """Test/diagnostic seam: flat visibility matrix for a preset id."""
@@ -1374,13 +1431,19 @@ class WorkstationFrame(QWidget):
         host = self._dock_host
         horizontal = Qt.Orientation.Horizontal
         vertical = Qt.Orientation.Vertical
-        host.resizeDocks([self.nav_dock], [264], horizontal)
+        host.resizeDocks([self.nav_dock], [280], horizontal)
         host.resizeDocks(
-            [self.inspector_dock, self.composite_layer_dock], [312, 312], horizontal
+            [self.mapping_stage_dock, self.composite_input_dock], [280, 280], horizontal
+        )
+        host.resizeDocks(
+            [self.nav_dock, self.mapping_stage_dock], [420, 280], vertical
+        )
+        host.resizeDocks(
+            [self.inspector_dock, self.composite_layer_dock], [300, 300], horizontal
         )
         host.resizeDocks(
             [self.agent_dock, self.task_dock, self.composite_linked_dock],
-            [224, 224, 200],
+            [200, 200, 200],
             vertical,
         )
 

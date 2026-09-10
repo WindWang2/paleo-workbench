@@ -24,6 +24,9 @@ def test_named_presets_cover_composite_and_interpretation():
     assert matrix["seismic"] is False
     assert matrix["hub"] is False
     assert matrix["nav"] is True
+    assert matrix["mapping_stage"] is True
+    assert matrix["agent"] is False
+    assert matrix["tasks"] is False
 
     integrated = get_preset("integrated")
     assert integrated is not None

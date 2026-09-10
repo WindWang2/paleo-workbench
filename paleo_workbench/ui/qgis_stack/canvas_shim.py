@@ -22,7 +22,7 @@ import time
 import weakref
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtGui import QKeyEvent, QPainter
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 import logging
@@ -50,7 +50,7 @@ def shutdown_live_shims() -> int:
             pass  # 底层 C++ 已析构
     return cleaned
 from paleo_workbench.ui.qgis_stack.mirror import mirror_snapshot_to_stack
-from paleo_workbench.ui.qgis_stack.widgets import QgisCanvasHost
+from paleo_workbench.ui.qgis_stack.widgets import QgisCanvasHost, canvas_viewport
 
 
 def _load_mapstack():
@@ -125,6 +125,105 @@ class _CanvasMouseRouter(QObject):
             return False
 
 
+def _prepare_chrome_widget(widget: QWidget) -> None:
+    widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+    widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+    widget.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+    widget.setAutoFillBackground(False)
+
+
+class _ScaleChrome(QWidget):
+    """左下角比例尺（小控件，不能盖住整幅地图）。"""
+
+    def __init__(self, host: "QgisCanvasShim", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._host = host
+        _prepare_chrome_widget(self)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        host = self._host
+        if getattr(host, "_shutdown_done", False):
+            return
+        from paleo_workbench.ui.unified_map_canvas import (
+            _CHROME_INK_ON_LIGHT_BODY,
+            _paint_scale_bar_impl,
+        )
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        map_width = max(1, int(host._chrome_map_size()[0]))
+        _paint_scale_bar_impl(
+            painter, host.view_extent, map_width, self.height(), 1.0,
+            ink=_CHROME_INK_ON_LIGHT_BODY,
+        )
+        painter.end()
+
+
+class _NorthChrome(QWidget):
+    """左上角指北针。"""
+
+    def __init__(self, host: "QgisCanvasShim", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._host = host
+        _prepare_chrome_widget(self)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        from PySide6.QtCore import QPointF
+        from PySide6.QtGui import QColor, QFont, QPen, QPolygonF
+        from paleo_workbench.ui.unified_map_canvas import (
+            _CHROME_INK_ON_DARK_BODY,
+            _CHROME_INK_ON_LIGHT_BODY,
+        )
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        center = QPointF(self.width() / 2.0, 28.0)
+        painter.setPen(QPen(QColor(_CHROME_INK_ON_LIGHT_BODY), 1.5))
+        painter.setBrush(QColor(_CHROME_INK_ON_DARK_BODY))
+        painter.drawPolygon(QPolygonF([
+            center + QPointF(0, -18),
+            center + QPointF(-6, 10),
+            center + QPointF(0, 5),
+            center + QPointF(6, 10),
+        ]))
+        font = QFont(painter.font())
+        font.setPixelSize(10)
+        painter.setFont(font)
+        painter.setPen(QColor(_CHROME_INK_ON_LIGHT_BODY))
+        painter.drawText(center + QPointF(-5, -22), "N")
+        painter.end()
+
+
+class _LegendChrome(QWidget):
+    """右下角工区图例。"""
+
+    def __init__(self, host: "QgisCanvasShim", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._host = host
+        _prepare_chrome_widget(self)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        host = self._host
+        if getattr(host, "_shutdown_done", False):
+            return
+        from paleo_workbench.ui.unified_map_canvas import paint_map_decorations
+
+        provider = getattr(host, "_overlay_provider", None)
+        state = provider() if callable(provider) else {}
+        if not isinstance(state, dict):
+            state = {}
+        decorations = dict(state.get("decorations") or {})
+        decorations["elements"] = ["图例"]
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        paint_map_decorations(
+            painter, decorations,
+            width=self.width(), height=self.height(),
+            extent=host.view_extent, dark_chrome=True,
+        )
+        painter.end()
+
+
 class QgisCanvasShim(QWidget):
     # 实际消费者 CompositeDocument 消费的信号契约与 QgisCanvasShim（原 UnifiedMapCanvas）一致：
     # tool_operation(bool), extent_changed(tuple), map_position_changed(tuple),
@@ -176,6 +275,12 @@ class QgisCanvasShim(QWidget):
         self.events.extent_changed.connect(self._on_stack_extent)
         self.events.map_position_changed.connect(self._on_stack_position)
         self._overlay_provider = None
+        self._chrome_scale = None
+        self._chrome_north = None
+        self._chrome_legend = None
+        self._overlay = None  # 兼容旧测试：指向比例尺控件
+        self._chrome_filter_installed = False
+        self._install_chrome_overlay()
         self._mirrored_layers: list[str] = []
         self._mirrored_doc_ids: list[str] = []
         self._mirror_failures: list[str] = []
@@ -255,6 +360,12 @@ class QgisCanvasShim(QWidget):
         return True
 
     def _on_stack_extent(self, xmin, ymin, xmax, ymax) -> None:
+        try:
+            self._on_stack_extent_impl(xmin, ymin, xmax, ymax)
+        finally:
+            self._refresh_chrome_overlay()
+
+    def _on_stack_extent_impl(self, xmin, ymin, xmax, ymax) -> None:
         extent = (float(xmin), float(ymin), float(xmax), float(ymax))
         # F2/F4: differentiate programmatic set_extent vs user pan/zoom (native tool)
         # Use expected list with fitted-compatibility to avoid consuming pending for unrelated resize events
@@ -466,7 +577,67 @@ class QgisCanvasShim(QWidget):
         return tuple(self.stack.screen_to_map(self.canvas_address, float(point[0]), float(point[1])))
 
     def set_overlay_provider(self, provider) -> None:
-        self._overlay_provider = provider  # M1 存而不画
+        self._overlay_provider = provider
+        self._install_chrome_overlay()
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if event.type() == QEvent.Type.Resize and obj is canvas_viewport(self.canvas):
+            self._install_chrome_overlay()
+        return super().eventFilter(obj, event)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._install_chrome_overlay()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._install_chrome_overlay()
+
+    def _chrome_map_size(self) -> tuple[int, int]:
+        host = canvas_viewport(self.canvas) or self
+        return max(1, host.width()), max(1, host.height())
+
+    def _install_chrome_overlay(self) -> None:
+        host = canvas_viewport(self.canvas) or self
+        if self._chrome_scale is None:
+            self._chrome_scale = _ScaleChrome(self, host)
+            self._chrome_north = _NorthChrome(self, host)
+            self._chrome_legend = _LegendChrome(self, host)
+            self._overlay = self._chrome_scale
+        for piece in (self._chrome_scale, self._chrome_north, self._chrome_legend):
+            if piece.parent() is not host:
+                piece.setParent(host)
+        map_w, map_h = self._chrome_map_size()
+        from paleo_workbench.ui.unified_map_canvas import _scale_bar_spec_impl
+
+        spec = _scale_bar_spec_impl(self.view_extent, map_w, 1.0)
+        bar_w = int((spec[1] if spec else 120) + 40)
+        self._chrome_scale.setGeometry(8, max(0, map_h - 44), min(bar_w, map_w - 16), 40)
+        self._chrome_north.setGeometry(8, 48, 48, 56)
+        provider = getattr(self, "_overlay_provider", None)
+        state = provider() if callable(provider) else {}
+        items = []
+        if isinstance(state, dict):
+            items = list((state.get("decorations") or {}).get("legend_items") or ())
+        if items:
+            legend_h = 10 + 18 * min(8, len(items)) + 16
+            self._chrome_legend.setGeometry(
+                max(0, map_w - 196), max(0, map_h - legend_h - 8), 180, legend_h)
+            self._chrome_legend.show()
+            self._chrome_legend.raise_()
+            self._chrome_legend.update()
+        else:
+            self._chrome_legend.hide()
+        for piece in (self._chrome_scale, self._chrome_north):
+            piece.raise_()
+            piece.show()
+            piece.update()
+        if host is not self and not self._chrome_filter_installed:
+            host.installEventFilter(self)
+            self._chrome_filter_installed = True
+
+    def _refresh_chrome_overlay(self) -> None:
+        self._install_chrome_overlay()
 
     def set_snapping_config(self, config: dict) -> None:
         """捕捉配置下推 QGIS canvas snappingUtils（M3）。

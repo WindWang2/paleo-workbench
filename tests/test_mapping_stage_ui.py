@@ -43,12 +43,59 @@ def _frame(qtbot, monkeypatch, project=None):
 # 阶段条 / 阶段面板
 # ---------------------------------------------------------------------------
 
+def test_stage_bar_horizon_is_set_before_stages(qtbot, monkeypatch):
+    from paleo_workbench.project.models import ProjectDocument
+
+    project = ProjectDocument.new("层位优先")
+    project.stratigraphy.sequence_boundaries = ["T1", "D63"]
+    frame = _frame(qtbot, monkeypatch, project)
+    combo = frame.stage_bar.horizon_combo
+    assert combo.objectName() == "MappingHorizonCombo"
+    assert not combo.isEditable()
+    requested = []
+    frame.stage_bar.horizon_requested.connect(requested.append)
+    frame.stage_bar.set_horizon_state("D63", ["T1", "D63"])
+    assert frame.stage_bar.current_horizon() == "D63"
+    combo.setCurrentIndex(combo.findText("T1"))
+    assert requested == ["T1"]
+    assert project.stratigraphy.target_horizon == "T1"
+
+
+def test_stage_bar_horizon_dropdown_from_data(qtbot, monkeypatch):
+    from paleo_workbench.project.models import ProjectDocument, ResourceItem
+
+    project = ProjectDocument.new("数据层位")
+    project.resources.extend(
+        [
+            ResourceItem(
+                name="C3.dat", path="层位/C3.dat", type="horizon", format="dat"),
+            ResourceItem(
+                name="D63.dat", path="层位/D63.dat", type="horizon", format="dat"),
+        ]
+    )
+    frame = _frame(qtbot, monkeypatch, project)
+    combo = frame.stage_bar.horizon_combo
+    shown = [combo.itemText(i) for i in range(combo.count())]
+    assert shown == ["C3", "D63"]
+    assert not combo.isEditable()
+    assert frame.stage_bar.current_horizon() == ""
+    assert project.stratigraphy.sequence_boundaries == ["C3", "D63"]
+    assert project.stratigraphy.target_horizon == ""
+
+    requested = []
+    frame.stage_bar.horizon_requested.connect(requested.append)
+    combo.setCurrentIndex(combo.findText("D63"))
+    assert requested == ["D63"]
+    assert project.stratigraphy.target_horizon == "D63"
+
+
 def test_stage_bar_signals_and_highlight(qtbot, monkeypatch):
     frame = _frame(qtbot, monkeypatch)
     requests = []
     frame.stage_bar.stage_requested.connect(requests.append)
     # 点击第 2 阶段按钮（约束与单因素）。
     buttons = list(frame.stage_bar._buttons.values())
+    assert "智能预测" in buttons[0].text()
     buttons[1].click()
     assert requests == [MappingStage.CONSTRAINT_FACTOR.value]
     # 宿主处理（flush + set_stage）后高亮。
@@ -56,6 +103,40 @@ def test_stage_bar_signals_and_highlight(qtbot, monkeypatch):
     frame.composite.stage_controller.set_stage(MappingStage.CONSTRAINT_FACTOR)
     assert buttons[1].isChecked()
     assert not buttons[0].isChecked()
+    assert buttons[0].objectName() == "MappingStageSegment"
+    tracks = frame.stage_bar._tracks
+    assert len(tracks) == 2
+    assert tracks[0].property("complete") is True
+    assert tracks[1].property("complete") is False
+
+
+def test_stage_panel_actions_are_a_list_not_a_wide_row(qtbot, monkeypatch):
+    from PySide6.QtWidgets import QListWidget
+
+    from paleo_workbench.ui.workstation.stage_actions import stage_context_actions
+
+    frame = _frame(qtbot, monkeypatch)
+    panel = frame.mapping_stage_panel
+    page = panel._pages[MappingStage.FACIES_CALIBRATION]
+    assert isinstance(page.actions, QListWidget)
+    expected = [title for _id, title in stage_context_actions("facies_calibration")]
+    shown = [page.actions.item(i).text() for i in range(page.actions.count())]
+    assert shown == expected
+    # 侧栏最小宽度不得被一排长按钮撑死。
+    assert panel.minimumSizeHint().width() < 280
+    requested = []
+    panel.action_requested.connect(lambda stage, action: requested.append((stage, action)))
+    target = None
+    for index in range(page.actions.count()):
+        item = page.actions.item(index)
+        if item.text() == "测井点到面":
+            target = item
+            break
+    assert target is not None
+    page.actions.itemClicked.emit(target)
+    assert requested == [
+        (MappingStage.FACIES_CALIBRATION.value, "well_prediction_point_to_surface")
+    ]
 
 
 def test_stage_panel_pages_and_constraint_row(qtbot, monkeypatch):

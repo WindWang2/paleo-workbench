@@ -65,6 +65,17 @@ def test_navigation_arrays_stay_index_aligned():
     assert ui_tokens.palette_for is tokens.palette_for
 
 
+def test_qss_includes_tree_branch_expanders():
+    qss = tokens.build_qss()
+    assert "QTreeView::branch:has-children" in qss
+    assert "tree-branch-closed.svg" in qss
+    assert "tree-branch-open.svg" in qss
+    assert "tree-branch-closed.svg" in qss
+    icon_dir = Path(tokens.__file__).parent / "ui" / "assets" / "icons" / "map"
+    assert (icon_dir / "tree-branch-closed.svg").exists()
+    assert (icon_dir / "tree-branch-open.svg").exists()
+
+
 def test_palette_functions_keep_their_signatures():
     for theme in ("light", "dark", "high_contrast"):
         qss = tokens.build_qss(density="comfortable", theme=theme)

@@ -89,7 +89,7 @@ def test_explain_disabled_merge_full_answer():
     assert "兼容面" in explanation.missing
     assert "至少" in explanation.requirements
     assert explanation.current_layer == "沉积相解释草稿"
-    assert "初始相图校正" in explanation.current_stage or explanation.current_stage
+    assert "智能预测" in explanation.current_stage
     details = format_details(explanation)
     assert "不可用" in details
     assert explanation.missing in details

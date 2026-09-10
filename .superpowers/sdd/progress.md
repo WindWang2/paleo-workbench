@@ -15,3 +15,16 @@ Task 6: 进行中。菜单端到端测试 tests/test_qgis_layer_panel_menu.py 3 
 Task 6: complete (commits 79eb9bab teardown 守卫 + 197870d1 菜单端到端/文档)。全量回归对账：51F/6E 初跑中唯一真回归是 test_composite_editing teardown（QgisCanvasShim 已删 setFocus，isValid 守卫修复）；其余 51F/5E 全部在基线 d9440e06 worktree 上逐条复现（缺 layer_model_core/grid_render_core 环境性 + keyboard_shortcuts/shell teardown 预存 flake）。
 终局审查 agent-37: With fixes（1C+4I+7M，报告 .superpowers/sdd/m2-final-review.md）。修复 commit 55fcb640：C1 树改名写回权威（include_names 仅 notify 路径，防 stale 面板副本回滚）；I1 零要素图层上树；I2 per-view 生命周期清理（关键坑：destroyed 信号内销毁含 py::function 的 std::function 会在 shiboken 延迟删除链上 GC_Del segfault——孤儿坟场延后到 shutdown/dtor 销毁）；I3 排序测试期望值修正；I4 显式记录接受删除（搜索框列 M3 候选）；M6 死信号删除。修复后 114 例相关套件全绿。
 M2 终局全量回归（55fcb640 后）：51F/3E，与基线逐条核对全部预存环境性（缺 layer_model_core/grid_render_core）或预存 flake，零新增红。合并 main（fast-forward d9440e06→55fcb640），本地分支 feat/qgis-native-map-stack-m2 已删，临时 worktree 已清。剩余：用户真机验收（M2 DoD #5）。
+
+## Mock 沉积相预测（plan: docs/superpowers/plans/2026-09-10-mock-facies-prediction.md, base: 7f8a4462）
+Task 1: complete (commit 见上行, review clean: spec✅/approved; Minor 记录: clipped payload 含 NaN 需 NaN-aware 比较; seismic 诚实标记无显式测试(probe 已验证); _clip_ring 分支无测试; extent 非数值抛 ValueError 而非 InferenceInputError; ensure_mock_facies_models 耦合 providers 私有 helper)
+Task 2: complete (commit 见上行, review clean: spec✅/approved; Minor: 单空键+无信号名的 unknown 回退未显式覆盖; 非 Mapping input_refs 两处分叉为修前已存在(暂 memo))
+Task 3: complete (commit 见上行 + 未提交修改: stage_actions.py/mock_facies.py/providers.py/factor_layer_products.py, review clean: spec✅/approved; 阻塞已解: execute_run 剥 _ 前缀参数 → 选项A 双键回退; 偏离记录 D1 run状态="complete" / D2 execute_run 返回 result=None 不抛出(已加守卫) / D4 input_refs 只记本类; Minor 移交终局: mock_facies 错误文案只提 _ 键、stage_actions.py:376 注释易误读、诚实标记 e2e 断言 3/7 可补强)
+Task 3 fix wave: complete (3 Important 修复 + 测试; 复审 Ready=Yes)
+终局全分支审查: complete (agent-15, With fixes → 修复 → 复审 Yes; 9 条 Minor 全部裁定可留; 文档对齐 commit 见上行)
+Task 4 (追加: 无初始相图默认工区空白相): complete (commit 见上行 + stage_actions.py 未提交修改, review approved 无 C/I; Minor: 层名/source 断言可加固、草稿侧死路对称用例、空白相建层失败无提示(极低概率))
+Task 5 (追加: readiness 对齐 mock/空白相): complete (commit 见上行 + readiness.py 未提交修改, review approved 无 C/I; Minor 可留: real+mock 混合时计数为 len(real)(更诚实); ≥3 有限点规则两处实现靠注释互指)
+Task 6 (基础层 name 字段 schema + 空白相淡化): complete (review approved; 原生探针: fields 有 name、文字像素 20→1236、遮挡缓解)
+Task 7 (pybind11 能力探测修复): complete (review approved; _stack_supports_fields_json/_stack_supports_delta 真桥由恒 False 变 True——fields_json 与 delta 通道首次在真桥启用; Minor 可留: alpha 10.2%、_doc_declares 可限首行)
+Task 8 (识别工具启用 + 悬浮框): complete (review approved; Important(a) palette 新鲜度已核实=实时 lambda, 无修; Minor 可留: 编修层不判可见口径注释、popup 单值截断、provider 缺席回落)
+Task 9 (原生识别覆盖基础镜像层): complete (真桥端到端: 点击井点→回调→面板+悬浮; 引用参考层原生识别仍无覆盖=后续)

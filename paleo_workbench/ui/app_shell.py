@@ -449,9 +449,13 @@ class AppShell(QWidget):
         self.command_palette.dismiss()
         self._animate_page_fade(hub_index)
         title = navigation.HUB_NAMES[hub_index]
+        subkey = ""
         if isinstance(hub, HubPage):
-            title = navigation.submodule_title(hub_index, hub.current_key())
-        self.workstation.activate_legacy(title)
+            subkey = str(submodule_key or hub.current_key() or "")
+            title = navigation.submodule_title(hub_index, subkey)
+        self.workstation.activate_legacy(
+            title, hub_index=hub_index, subkey=subkey
+        )
 
     def _handle_workstation_command(self, text: str) -> None:
         """Route natural-language work to Agent; keep Ctrl+K page search."""
@@ -481,7 +485,9 @@ class AppShell(QWidget):
     def _on_hub_page_activated(self, hub_index: int, key: str) -> None:
         if self._workstation_ready:
             self.workstation.activate_legacy(
-                navigation.submodule_title(hub_index, key)
+                navigation.submodule_title(hub_index, key),
+                hub_index=hub_index,
+                subkey=key,
             )
 
     def _setup_shortcuts(self) -> None:
@@ -626,6 +632,10 @@ class AppShell(QWidget):
 
         svc.set_provider(
             "qgis_bridge_available", lambda: composite.uses_native_stack
+        )
+        # Task 8：可查询图层计数（palette 侧 identify 门禁与工具条同因）。
+        svc.set_provider(
+            "queryable_layer_count", lambda: composite.queryable_layer_count()
         )
 
         def _running_tasks() -> int:

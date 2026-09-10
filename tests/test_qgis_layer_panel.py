@@ -176,3 +176,16 @@ def test_empty_layer_appears_in_tree(qtbot, qapp):
     panel.show()
     qtbot.waitUntil(lambda: panel.tree_row_count() >= 2, timeout=3000)
     panel.select_layer("doc-empty")
+
+
+def test_manage_row_includes_add_group(qtbot, qapp):
+    from paleo_workbench.ui.qgis_stack.layer_tree_panel import QgisLayerTreePanel
+
+    panel = QgisLayerTreePanel()
+    qtbot.addWidget(panel)
+    labels = [button.text() for button in panel._manage_buttons]
+    assert labels == ["新建矢量图层", "导入参考图层", "添加分组", "删除图层"]
+    hits = []
+    panel.create_group_requested.connect(lambda: hits.append("group"))
+    next(button for button in panel._manage_buttons if button.text() == "添加分组").click()
+    assert hits == ["group"]

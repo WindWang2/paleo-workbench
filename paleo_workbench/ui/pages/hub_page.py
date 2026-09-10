@@ -32,6 +32,7 @@ class HubPage(QWidget):
         self._keys: list[str] = []
         self._buttons: list[QPushButton] = []
         self._pages: dict[str, QWidget] = {}
+        self._current = ""
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -77,7 +78,9 @@ class HubPage(QWidget):
         page = self._pages.get(key)
         if page is None:
             return
-        self._stack.setCurrentWidget(page)
+        self._current = key
+        if page.parent() is self._stack:
+            self._stack.setCurrentWidget(page)
         for btn, k in zip(self._buttons, self._keys):
             btn.setProperty("active", k == key)
             btn.style().unpolish(btn)
@@ -90,6 +93,8 @@ class HubPage(QWidget):
             self.submodule_changed.emit(self.hub_index, key)
 
     def current_key(self) -> str:
+        if self._current:
+            return self._current
         index = self._stack.currentIndex()
         if 0 <= index < len(self._keys):
             return self._keys[index]

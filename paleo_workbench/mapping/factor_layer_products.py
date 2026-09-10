@@ -548,7 +548,11 @@ def classify_prediction_task(task: Any) -> str:
     """Classify a prediction task as well/seismic/unknown from
     machine-readable signals (mirrors the stage-action heuristics)."""
     refs = getattr(task, "input_refs", None) or {}
-    keys = " ".join(str(key).lower() for key in refs.keys()) if isinstance(refs, Mapping) else ""
+    keys = (
+        " ".join(str(key).lower() for key, value in refs.items() if value)
+        if isinstance(refs, Mapping)
+        else ""
+    )
     if "seis" in keys:
         return "seismic"
     if "well" in keys or "log" in keys:

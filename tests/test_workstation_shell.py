@@ -70,12 +70,15 @@ def test_composite_document_is_default_with_dock_panels(qtbot, tmp_path):
         assert features & QDockWidget.DockWidgetFeature.DockWidgetMovable
         assert features & QDockWidget.DockWidgetFeature.DockWidgetClosable
 
-    # 默认视图：图件最大化（variant C），仅图层管理随编图打开
+    # 默认视图：图件最大化；左侧资源+编图阶段，右侧图层；Agent/任务默认关闭
     assert not workstation.composite_layer_dock.isHidden()
+    assert not workstation.mapping_stage_dock.isHidden()
     assert workstation.composite_input_dock.isHidden()
     assert workstation.composite_linked_dock.isHidden()
     assert workstation.well_dock.isHidden()
     assert workstation.seismic_dock.isHidden()
+    assert workstation.agent_dock.isHidden()
+    assert workstation.task_dock.isHidden()
 
     # 面板菜单语义：toggleViewAction 重开 / 关闭面板
     workstation.composite_input_dock.toggleViewAction().trigger()
@@ -127,8 +130,24 @@ def test_hub_navigation_does_not_replace_bian_tu(qtbot, tmp_path):
     ws = shell.workstation
     shell.navigate_to(navigation.PAGE_INDEX_MAPPING, "review")
     assert ws.central_document() is ws.composite
-    assert not ws.hub_dock.isHidden()
-    assert "成图审核" in ws.hub_dock.windowTitle()
+    assert ws.hub_dock.isHidden()
+    assert ws.tool_page_dialog.isVisible()
+    assert "成图审核" in ws.tool_page_dialog.windowTitle()
+
+
+def test_preparation_opens_as_dialog_not_dock(qtbot, tmp_path):
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+    shell.navigate_to(navigation.PAGE_INDEX_MAPPING, "preparation")
+    assert ws.central_document() is ws.composite
+    assert ws.hub_dock.isHidden()
+    assert ws.tool_page_dialog.isVisible()
+    assert "数据制备" in ws.tool_page_dialog.windowTitle()
+    assert shell.preparation_page.isVisible()
+    ws.tool_page_dialog.close()
+    assert not ws.tool_page_dialog.isVisible()
+    assert ws.central_document() is ws.composite
 
 
 def test_hub_dock_close_keeps_bian_tu(qtbot, tmp_path):

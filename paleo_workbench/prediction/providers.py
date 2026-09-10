@@ -481,6 +481,16 @@ def _install_bundled_providers() -> None:
     except Exception:  # pragma: no cover - optional dependency path
         pass
 
+    from paleo_workbench.prediction.mock_facies import (
+        PROVIDER_MOCK_SEISMIC_FACIES,
+        PROVIDER_MOCK_WELL_FACIES,
+        MockSeismicFaciesProvider,
+        MockWellFaciesProvider,
+    )
+
+    PROVIDER_BY_NAME.setdefault(PROVIDER_MOCK_WELL_FACIES, MockWellFaciesProvider)
+    PROVIDER_BY_NAME.setdefault(PROVIDER_MOCK_SEISMIC_FACIES, MockSeismicFaciesProvider)
+
 
 _install_bundled_providers()
 
