@@ -51,9 +51,25 @@ class TaskCancelled(Exception):
 class TaskState(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
+    #: V9 (goal §27): cancel requested on a RUNNING task — the worker still
+    #: yields cooperatively; this state makes the wait visible instead of
+    #: reading as plain RUNNING.
+    CANCELLING = "cancelling"
     DONE = "done"
+    #: V9 (goal §27): completed WITH caveats (e.g. registration failed /
+    #: honest degraded result) — never reported as plain DONE success.
+    DEGRADED = "degraded"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+#: Terminal states (no further transitions; persisted-safe to serialize).
+TERMINAL_TASK_STATES = frozenset({
+    TaskState.DONE,
+    TaskState.DEGRADED,
+    TaskState.FAILED,
+    TaskState.CANCELLED,
+})
 
 
 @dataclass
@@ -99,6 +115,9 @@ class TaskSpec:
     on_done: Callable[[Any], None] | None = None
     on_fail: Callable[[BaseException], None] | None = None
     on_cancel: Callable[[], None] | None = None
+    #: V9 (goal §27): result-level degraded predicate — True ⇒ the task
+    #: finishes DEGRADED (success with caveats), never plain DONE.
+    degraded_when: Callable[[Any], bool] | None = None
     keep_work_dir: bool = True
 
 
@@ -332,6 +351,7 @@ class TaskScheduler:
             if handle.task_key == key and handle.state in (
                 TaskState.QUEUED,
                 TaskState.RUNNING,
+                TaskState.CANCELLING,
             ):
                 return handle
         return None
@@ -362,6 +382,8 @@ class TaskScheduler:
                 self._finish_locked(handle, TaskState.CANCELLED)
                 on_cancel = handle.spec.on_cancel
             else:
+                if handle.state == TaskState.RUNNING:
+                    handle.state = TaskState.CANCELLING
                 # Claimed-but-not-yet-armed window: the event may not be
                 # registered yet — mark the handle so _run_task_inner arms
                 # an already-set event via the shared dict lookup below.
@@ -417,7 +439,8 @@ class TaskScheduler:
 
     def active_count(self) -> int:
         with self._lock:
-            return sum(1 for h in self._handles.values() if h.state == TaskState.RUNNING)
+            return sum(1 for h in self._handles.values() if h.state in (
+                TaskState.RUNNING, TaskState.CANCELLING))
 
     # ---------------------------------------------------------- work dirs --
     def work_dir(self, task_id: str) -> Path:
@@ -595,9 +618,18 @@ class TaskScheduler:
                     handle.spec.on_done(result)
                 except Exception:
                     logger.exception("on_done callback failed for %s", task_id)
+            degraded = False
+            if handle.spec.degraded_when is not None:
+                try:
+                    degraded = bool(handle.spec.degraded_when(result))
+                except Exception:
+                    logger.exception(
+                        "degraded_when predicate failed for %s", task_id)
+                    degraded = True  # predicate failure is itself a caveat
             with self._lock:
                 handle.progress = 1.0
-                self._finish_locked(handle, TaskState.DONE)
+                self._finish_locked(
+                    handle, TaskState.DEGRADED if degraded else TaskState.DONE)
         finally:
             with self._lock:
                 self._cancel_events.pop(task_id, None)

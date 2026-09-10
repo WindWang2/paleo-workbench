@@ -113,6 +113,15 @@ OPERATION_LABELS_ZH: dict[str, str] = {
     "modeling": "三维建模",
     "stratigraphic_correlation": "连井对比",
     "fault_interpretation": "断层解释",
+    # V9 (P1-12): the fusion/commit/assembly/interpretation ops join the
+    # recompute vocabulary — stale fusion runs can now be PLANNED, not just
+    # labelled (labels only here; execution handlers remain opt-in).
+    "factor_fusion": "多因素融合",
+    "factor_fusion:confidence": "融合置信度",
+    "factor_fusion:variance": "融合方差",
+    "constraint_commit": "约束版本提交",
+    "map_product_assembly": "地图产品组装",
+    "integrated_interpretation": "综合解释提交",
 }
 
 
