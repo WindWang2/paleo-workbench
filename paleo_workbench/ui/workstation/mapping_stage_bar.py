@@ -151,6 +151,9 @@ class MappingStageBar(QFrame):
         self.horizon_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.horizon_combo.setFixedWidth(160)
         self.horizon_combo.setPlaceholderText("选择层位")
+        # R2 P2-3：紧凑视口隐藏「层位」前缀标签后，选中态唯一的语境说明；
+        # 屏幕阅读器需要显式名（组合框本身不读占位文本）。
+        self.horizon_combo.setAccessibleName("层位")
         self.horizon_combo.setToolTip(
             "编图层位：从工程层序格架或导入的层位数据中选择（相图按层位进行）")
         self.horizon_combo.currentIndexChanged.connect(

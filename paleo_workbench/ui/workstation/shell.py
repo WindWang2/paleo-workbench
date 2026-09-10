@@ -74,6 +74,23 @@ class HubScrollArea(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setMinimumSize(0, 0)
+        # R2 P1-2：滚动区自身不作 Tab 停靠点/不偷点击焦点（QScrollArea
+        # 默认 StrongFocus）；键盘焦点落在子控件时滚动到其可见（QScrollArea
+        # 原生不保证）。
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 — Qt 契约
+        from PySide6.QtCore import QEvent
+
+        if (
+            watched is self.widget()
+            and event.type() == QEvent.Type.FocusIn
+        ):
+            focused = self.widget().focusWidget()
+            if focused is not None:
+                self.ensureWidgetVisible(focused)
+        return super().eventFilter(watched, event)
 
 
 class WorkstationFrame(QWidget):
@@ -315,6 +332,10 @@ class WorkstationFrame(QWidget):
         descriptor = workstation_dock_registry.require(dock_id)
         dock = QDockWidget(descriptor.title, self._dock_host)
         dock.setObjectName(descriptor.object_name)
+        # dock_id 属性：批量动作（全部浮动等）据此查阅描述符约束；
+        # setTitleBarWidget 之外 Qt 不承载自定义元数据，属性名带 V9
+        # 前缀避免与 Qt 动态属性冲突。
+        dock.setProperty("pwbDockId", dock_id)
         dock.setWidget(widget)
         features = (
             QDockWidget.DockWidgetFeature.DockWidgetMovable
@@ -399,6 +420,16 @@ class WorkstationFrame(QWidget):
             dock.topLevelChanged.connect(lambda *_: self._schedule_state_save())
             dock.dockLocationChanged.connect(lambda *_: self._schedule_state_save())
             dock.visibilityChanged.connect(lambda *_: self._schedule_state_save())
+        # R2 P1-1：检查器显隐归因。visibilityChanged 无法区分来源且异步
+        # 发射（策略标志已复位），不能作归因依据；用户显隐全部经过
+        # toggleViewAction（标题栏 X / 面板菜单 / palette），而
+        # action.triggered 只在用户交互时发射——程序化 setVisible 与
+        # restoreState 均不触发。据此归因：显式重开清两类隐藏，显式
+        # 关闭独占用户隐藏语义。否则：紧凑下自动折叠 → 用户重开 → 再
+        # 关 → 宽屏时策略把面板弹回，跨会话还会复活。
+        self.inspector_dock.toggleViewAction().triggered.connect(
+            self._attribute_inspector_user_toggle
+        )
         # 预设追踪走同一条 visibilityChanged 路径（不新增机制）：预设矩阵
         # 覆盖的 dock 被手动显隐后，当前预设失效（hub_dock 除外——功能页
         # 浮窗由导航管理，不属于工作区布局）。
@@ -1108,6 +1139,25 @@ class WorkstationFrame(QWidget):
         # 只重启 180ms 定时器，静止后才评估一次。
         self._request_viewport_evaluation()
 
+    def _attribute_inspector_user_toggle(self, visible: bool) -> None:
+        """用户经 toggleViewAction 显隐检查器 → 归因为用户意图（R2 P1-1）。
+
+        仅用户交互触发（triggered）；策略 hide/show、程序 dock.show()、
+        restoreState 均不进本路径。
+        """
+        if getattr(self, "_layout_frozen", False):
+            return
+        if visible:
+            # 用户重开：清两类隐藏归属（此后策略不再自作主张收回）。
+            self._responsive_hid_inspector = False
+            self._user_hid_inspector = False
+            self._settings.setValue("layout/inspector_user_hidden", False)
+        else:
+            # 用户显式关闭（X / 面板菜单）：独占用户隐藏语义。
+            self._responsive_hid_inspector = False
+            self._user_hid_inspector = True
+            self._settings.setValue("layout/inspector_user_hidden", True)
+
     def _request_viewport_evaluation(self) -> None:
         if self._layout_frozen:
             return
@@ -1160,9 +1210,19 @@ class WorkstationFrame(QWidget):
             self.stage_bar.set_viewport_class(viewport)
         except RuntimeError:
             return  # 死壳迟到信号（与 D-3 同类）
-        if window_width < INSPECTOR_HIDE_BELOW and not self.inspector_dock.isHidden():
+        # 折叠前提：面板未被用户显式隐藏过。user=True 且可见只在
+        # 「构造读入跨会话偏好 + 首运行默认显示」的边界态出现——策略
+        # 此时不接管标记（否则宽屏恢复被 user 阻断，面板卡死在折叠）。
+        if (
+            window_width < INSPECTOR_HIDE_BELOW
+            and not self.inspector_dock.isHidden()
+            and not self._user_hid_inspector
+        ):
             self._responsive_hid_inspector = True
             self.inspector_dock.hide()
+            # R2 P1-1：折叠不是静默的——用户必须能解释面板去哪了。
+            self.status_message.emit(
+                "窗口较窄：检查器已自动折叠，加宽窗口后自动恢复")
             return
         if (
             self.inspector_dock.isHidden()
@@ -1172,6 +1232,7 @@ class WorkstationFrame(QWidget):
             if window_width >= INSPECTOR_RESTORE_ABOVE:
                 self._responsive_hid_inspector = False
                 self.inspector_dock.show()
+                self.status_message.emit("窗口已加宽：检查器已恢复")
 
     def _schedule_restore(self, delay_ms: int) -> None:
         # 定时器必须挂在本部件上：壳被拆除（deleteLater）后，迟到的
@@ -1248,11 +1309,27 @@ class WorkstationFrame(QWidget):
         )
 
     def float_all_panels(self) -> None:
-        """Float every currently visible shell dock (map stays central)."""
+        """Float every currently visible shell dock (map stays central).
+
+        R2 P0-1：DockWidgetFloatable 特性位只拦「用户」浮动；程序化
+        setFloating(True) 不受其约束。GL 承载 dock（well/seismic/hub）
+        绝不能走浮动路径——重父级化 GL 上下文是已记录的 EGL segfault
+        类（qt_platform.py）。按描述符 can_float 过滤。
+        """
+        floated = False
         for dock in self._shell_docks():
+            dock_id = str(dock.property("pwbDockId") or "")
+            descriptor = workstation_dock_registry.get(dock_id)
+            if descriptor is not None and not descriptor.can_float:
+                continue
             if not dock.isHidden() and not dock.isFloating():
                 dock.setFloating(True)
                 dock.raise_()
+                floated = True
+        if floated:
+            self.status_message.emit(
+                "已浮动可停靠面板（测井轨道 / 地震剖面 / 功能页含 3D 视图，"
+                "不支持浮动以避免 GL 上下文跨窗口重定位崩溃）")
         self._save_timer.start()
 
     def dock_all_panels(self) -> None:
@@ -1375,7 +1452,12 @@ class WorkstationFrame(QWidget):
         self.nav_dock.show()
         self.mapping_stage_dock.show()
         self.composite_layer_dock.show()
-        self.inspector_dock.show()
+        # 检查器尊重跨会话的用户偏好（user 标志在构造时同步读入）：
+        # 用户上会话显式关闭过，首运行/无持久化布局时不强行弹出。
+        if self._user_hid_inspector:
+            self.inspector_dock.hide()
+        else:
+            self.inspector_dock.show()
 
     def layout_preset_visibility(self, preset_id: str) -> dict[str, bool] | None:
         """Test/diagnostic seam: flat visibility matrix for a preset id."""

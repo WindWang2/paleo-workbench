@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDockWidget, QMainWindow, QWidget
 
@@ -27,6 +28,25 @@ from paleo_workbench.ui.dock_framework import (
     ViewportClass,
 )
 from paleo_workbench.ui.workstation.shell import HubScrollArea
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_global_layout_settings():
+    """清空（并事后恢复清空）工作站全局布局 QSettings。
+
+    本模块多个用例构造真实 AppShell 并 show——未替换 settings 的路径
+    （归因 handler、save 定时器）会写「PaleoWorkbench/Workstation」全局
+    ini，把 inspector 偏好泄漏给同会话后续文件（workstation fixture 在
+    构造期同步读该键）。测试环境的全局布局状态必须无菌。
+    """
+    from PySide6.QtCore import QSettings
+
+    settings = QSettings("PaleoWorkbench", "Workstation")
+    settings.clear()
+    settings.sync()
+    yield
+    settings.clear()
+    settings.sync()
 
 
 def _project(tmp_path: Path) -> ProjectDocument:
@@ -273,6 +293,10 @@ def test_user_closed_inspector_stays_closed_after_restart(qtbot, tmp_path):
     ws = shell.workstation
     ws._settings = QSettings(str(ini_path), QSettings.Format.IniFormat)
     ws._settings.clear()
+    # 构造期同步读发生在替换前——重置被全局状态可能污染的初始标志，
+    # 本测试自身的可见性行为完全由会话内动作决定（hermetic）。
+    ws._user_hid_inspector = False
+    ws._responsive_hid_inspector = False
     shell.show()
     shell.resize(1600, 900)
     qtbot.wait(300)
@@ -286,6 +310,8 @@ def test_user_closed_inspector_stays_closed_after_restart(qtbot, tmp_path):
     qtbot.addWidget(shell2)
     ws2 = shell2.workstation
     ws2._settings = QSettings(str(ini_path), QSettings.Format.IniFormat)
+    ws2._user_hid_inspector = False
+    ws2._responsive_hid_inspector = False
     shell2.show()
     shell2.resize(1500, 900)
     qtbot.wait(300)
@@ -316,3 +342,64 @@ def test_first_run_applies_map_dominant_sizes(qtbot, tmp_path):
     shell.show()  # 同步 show（生产顺序）
     qtbot.wait(200)
     assert applied, "first-run default pane sizes must actually run"
+
+
+# --- R2 review regressions ------------------------------------------------
+
+
+def test_float_all_panels_never_floats_gl_docks(qtbot, tmp_path):
+    """「全部浮动」不得浮动 GL 承载 dock（R2 P0-1：程序化 setFloating
+    不受 DockWidgetFloatable 特性位约束——一键回到 EGL 崩溃类）。"""
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    shell.show()
+    qtbot.wait(200)
+    ws = shell.workstation
+    ws.well_dock.show()
+    ws.seismic_dock.show()
+    ws.hub_dock.show()
+    ws.float_all_panels()
+    for dock in (ws.well_dock, ws.seismic_dock, ws.hub_dock):
+        assert not dock.isFloating(), (
+            f"{dock.objectName()} must never float (GL reparent segfault class)"
+        )
+    # 普通可浮动 dock 仍被浮动（功能不回退）。
+    floated_any = any(
+        d.isFloating()
+        for d in (ws.nav_dock, ws.inspector_dock, ws.composite_layer_dock)
+        if not d.isHidden()
+    )
+    assert floated_any, "float_all_panels must still float non-GL docks"
+
+
+def test_inspector_manual_close_beats_policy_reopen(qtbot, tmp_path):
+    """紧凑下用户显式关闭检查器 → 宽屏策略不得弹回（R2 P1-1 活跃路径）。
+
+    归因依赖 visibilityChanged：dock 宿主必须可见（生产中宿主即主窗口；
+    孤立构造的隐藏宿主下 show/close 不产生可见性信号）。
+    """
+    shell = AppShell(project=_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+    shell.show()
+    shell.resize(1600, 900)
+    qtbot.wait(300)
+
+    shell.resize(1000, 700)  # compact：策略折叠
+    qtbot.wait(300)
+    assert ws._responsive_hid_inspector
+
+    # 用户显式重开，再显式关闭（生产路径 = toggleViewAction：面板菜单 /
+    # palette / 标题栏 X 同一 action 语义）。
+    ws.inspector_dock.toggleViewAction().trigger()
+    qtbot.wait(50)
+    assert not ws._responsive_hid_inspector, "manual reopen clears policy claim"
+    assert not ws._user_hid_inspector
+    assert not ws.inspector_dock.isHidden()
+    ws.inspector_dock.toggleViewAction().trigger()
+    qtbot.wait(50)
+    assert ws._user_hid_inspector, "manual close must attribute to user"
+
+    shell.resize(1600, 900)  # 宽屏
+    qtbot.wait(300)
+    assert ws.inspector_dock.isHidden(), "policy must not override user close"

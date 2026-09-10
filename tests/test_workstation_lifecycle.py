@@ -39,7 +39,13 @@ def _project(tmp_path: Path) -> ProjectDocument:
 @pytest.fixture()
 def workstation(qtbot, tmp_path):
     """WorkstationFrame with a per-test QSettings ini (hermetic layout state)."""
+    import sys
+    g = QSettings("PaleoWorkbench", "Workstation")
+    print(f"\nDBG-FIXTURE global-user={g.value('layout/inspector_user_hidden', 'unset')} "
+          f"global-state={g.value('layout/window_state') is not None}", file=sys.stderr)
     frame = WorkstationFrame(_project(tmp_path), QStackedWidget())
+    print(f"DBG-FIXTURE post-init hidden={frame.inspector_dock.isHidden()} "
+          f"user={frame._user_hid_inspector}", file=sys.stderr)
     qtbot.addWidget(frame)
     frame._settings = QSettings(str(tmp_path / "workstation.ini"), QSettings.Format.IniFormat)
     frame._settings.clear()
@@ -158,6 +164,12 @@ def test_user_hide_flag_persists(qtbot, workstation):
     workstation.resize(1600, 900)  # 宽屏：排除响应式自动隐藏的干扰
     workstation.show()
     qtbot.waitExposed(workstation)
+    import sys
+    print(f"\nDBG-TEST hidden={workstation.inspector_dock.isHidden()} "
+          f"user={workstation._user_hid_inspector} "
+          f"resp={workstation._responsive_hid_inspector} "
+          f"win_w={workstation._window_width()} frame_w={workstation.width()}",
+          file=sys.stderr)
     assert not workstation.inspector_dock.isHidden()
     workstation.toggle_inspector()
     assert workstation.inspector_dock.isHidden()
