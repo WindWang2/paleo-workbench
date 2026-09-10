@@ -179,7 +179,9 @@ class WellLogPredictionPage(QWidget):
 
         self.content_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.content_splitter.setObjectName("WellLogPredictionSplitter")
-        self.content_splitter.setChildrenCollapsible(False)
+        # V9：允许折叠侧板——空间紧张时用户可完全收起（配合侧板
+        # 最小宽地板与 HubScrollArea，dock 永远可以自由调整）。
+
 
         self.task_panel = PredictionTaskPanel()
         # 任务 | 画布 | 证据: canvas stays the stretchy center; the side

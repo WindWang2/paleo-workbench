@@ -79,7 +79,9 @@ class SequenceFrameworkPage(QWidget):
 
         self.content_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.content_splitter.setObjectName("SequenceFrameworkSplitter")
-        self.content_splitter.setChildrenCollapsible(False)
+        # V9：允许折叠侧板——空间紧张时用户可完全收起（配合侧板
+        # 最小宽地板与 HubScrollArea，dock 永远可以自由调整）。
+
 
         self.target_panel = SequenceTargetPanel()
         # 目标 | 层序界面表 | 方案: the boundary table stays the stretchy

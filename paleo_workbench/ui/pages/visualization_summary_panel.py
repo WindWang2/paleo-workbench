@@ -25,7 +25,8 @@ class VisualizationSummaryPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("VisualizationSummaryPanel")
-        self.setFixedWidth(220)
+        # V9：固定 220 → 最小 200 地板（可自由调整宽度）。
+        self.setMinimumWidth(200)
 
         self._adapter = VizAdapter()
         self._resources: list = []

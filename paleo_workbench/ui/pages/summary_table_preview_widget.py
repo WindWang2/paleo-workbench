@@ -3,8 +3,13 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSplitter, QTabWidget, QVBoxLayout, QWidget
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.ui.pages.table_preview_widget import TablePreviewWidget
+
+
+def _message_qss() -> str:
+    pal = style.palette()
+    return f"color: {pal['TEXT_SECONDARY']}; font-size: 11.5px;"
 
 
 class SummaryTablePreviewWidget(QWidget):
@@ -16,9 +21,7 @@ class SummaryTablePreviewWidget(QWidget):
 
         self.message_label = QLabel("")
         self.message_label.setWordWrap(True)
-        self.message_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 11.5px;"
-        )
+        style.bind(self.message_label, _message_qss)
         layout.addWidget(self.message_label)
 
         # Tabs inherit their styling from the global QSS (tokens.build_qss),
@@ -38,13 +41,13 @@ class SummaryTablePreviewWidget(QWidget):
         stat_layout.setSpacing(8)
 
         self.chip_well = self._create_stat_chip(
-            "◆ 井名", "—", tokens.PRIMARY, tokens.BG_SELECTION
+            "◆ 井名", "—", "PRIMARY", "BG_SELECTION"
         )
         self.chip_curves = self._create_stat_chip(
-            "▤ 曲线数", "0 条", tokens.TEAL, tokens.BG_SEARCH
+            "▤ 曲线数", "0 条", "TEAL", "BG_SEARCH"
         )
         self.chip_samples = self._create_stat_chip(
-            "◌ 采样点", "0 点", tokens.SUCCESS, tokens.BG_SEARCH
+            "◌ 采样点", "0 点", "SUCCESS", "BG_SEARCH"
         )
 
         stat_layout.addWidget(self.chip_well)
@@ -84,26 +87,38 @@ class SummaryTablePreviewWidget(QWidget):
         layout.addWidget(self.tabs, 1)
 
     @staticmethod
-    def _create_stat_chip(title: str, default_val: str, fg_color: str, bg_color: str) -> QWidget:
+    def _create_stat_chip(title: str, default_val: str, fg_token: str, bg_token: str) -> QWidget:
+        def _box_qss() -> str:
+            pal = style.palette()
+            return (
+                f"""
+                QWidget {{
+                    background-color: {pal[bg_token]};
+                    border: 1px solid {pal[fg_token]}33;
+                    border-radius: {tokens.RADIUS_BUTTON}px;
+                }}
+                """
+            )
+
+        def _title_qss() -> str:
+            pal = style.palette()
+            return f"color: {pal[fg_token]}; font-size: 11px; font-weight: 500;"
+
+        def _val_qss() -> str:
+            pal = style.palette()
+            return f"color: {pal[fg_token]}; font-size: 12px; font-weight: 700;"
+
         box = QWidget()
-        box.setStyleSheet(
-            f"""
-            QWidget {{
-                background-color: {bg_color};
-                border: 1px solid {fg_color}33;
-                border-radius: {tokens.RADIUS_BUTTON}px;
-            }}
-            """
-        )
+        style.bind(box, _box_qss)
         lay = QHBoxLayout(box)
         lay.setContentsMargins(8, 4, 10, 4)
         lay.setSpacing(6)
 
         t_lbl = QLabel(title)
-        t_lbl.setStyleSheet(f"color: {fg_color}; font-size: 11px; font-weight: 500;")
+        style.bind(t_lbl, _title_qss)
         val_lbl = QLabel(default_val)
         val_lbl.setObjectName("chip_val")
-        val_lbl.setStyleSheet(f"color: {fg_color}; font-size: 12px; font-weight: 700;")
+        style.bind(val_lbl, _val_qss)
 
         lay.addWidget(t_lbl)
         lay.addWidget(val_lbl)

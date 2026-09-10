@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QSlider,
+    QSizePolicy,
     QToolButton,
     QToolTip,
     QTreeWidget,
@@ -394,6 +395,12 @@ class LayerManagerPanel(QFrame):
             button.setText(label)
             button.setToolTip(tip)
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            # R3 P2-4：文字按钮的完整文本宽是图层列 360px 地板的来源
+            #（连带 hub dock 同列）；给紧凑地板，正文交给省略。
+            button.setMinimumWidth(0)
+            button.setSizePolicy(
+                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+            )
             button.clicked.connect(callback)
             manage_row.addWidget(button)
             if label == "删除图层":

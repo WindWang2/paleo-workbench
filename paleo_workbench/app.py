@@ -41,8 +41,10 @@ class PaleoWorkbenchWindow(QMainWindow):
         self.workflow_controller = WorkflowController(self)
 
         self.resize(1440, 900)
-        # 低于该尺寸时多页工作台（图标栏 + 页面栈）会挤压变形，禁止缩到不可用。
-        self.setMinimumSize(1180, 720)
+        # V9：1180x720 → 960x600。紧凑屏（1366@125% ≈ 1093 逻辑像素）必须
+        # 能完整容纳工作站；dock 内容的尺寸地板已在 V9 收敛（nav≈230 +
+        # inspector 220 + 中央 320），更小的窗口交给响应式折叠策略。
+        self.setMinimumSize(960, 600)
 
         # QMainWindow 必须是顶层窗口：可浮动 dock（资源管理器 / 检查器 /
         # 任务 / 图层面板等）全部注册在本窗口上；AppShell 与文档区是中央内容。

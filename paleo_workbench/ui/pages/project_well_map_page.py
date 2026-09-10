@@ -41,7 +41,7 @@ from paleo_workbench.project.domain import (
     coordinate_status_flag,
     crs_equivalent,
 )
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 
 _WELL_ID_ROLE = Qt.ItemDataRole.UserRole + 1
 
@@ -112,6 +112,23 @@ def _geometry_rings(geometry: dict[str, Any]) -> list[list[tuple[Any, Any]]]:
     if gtype == "MultiLineString":
         return [list(line) for line in coords]
     return []  # Points carry no line work for this view
+
+
+def _status_secondary_qss() -> str:
+    pal = style.palette()
+    return (
+        f"color: {pal['TEXT_SECONDARY']}; font-size: {tokens.FONT_SIZE_STATUS}px;"
+    )
+
+
+def _crs_warning_qss() -> str:
+    pal = style.palette()
+    return f"color: {pal['WARNING']}; font-size: {tokens.FONT_SIZE_STATUS}px;"
+
+
+def _empty_label_qss() -> str:
+    pal = style.palette()
+    return f"color: {pal['TEXT_SECONDARY']};"
 
 
 class _WellFilterProxy(QSortFilterProxyModel):
@@ -231,17 +248,13 @@ class ProjectWellMapPage(QWidget):
             toolbar.addWidget(btn)
         toolbar.addStretch(1)
         self.crs_label = QLabel("")
-        self.crs_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: {tokens.FONT_SIZE_STATUS}px;"
-        )
+        style.bind(self.crs_label, _status_secondary_qss)
         toolbar.addWidget(self.crs_label)
         # ⚠ banner for withheld overlays (CRS frames that don't match the
         # project) — skipping silently would hide a real problem (§20).
         self.crs_warning_label = QLabel("")
         self.crs_warning_label.setWordWrap(True)
-        self.crs_warning_label.setStyleSheet(
-            f"color: {tokens.WARNING}; font-size: {tokens.FONT_SIZE_STATUS}px;"
-        )
+        style.bind(self.crs_warning_label, _crs_warning_qss)
         self.crs_warning_label.setVisible(False)
         center_layout.addWidget(self.crs_warning_label)
         self.coord_label = QLabel("")
@@ -249,9 +262,7 @@ class ProjectWellMapPage(QWidget):
         self.coord_label.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
-        self.coord_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: {tokens.FONT_SIZE_STATUS}px;"
-        )
+        style.bind(self.coord_label, _status_secondary_qss)
         toolbar.addWidget(self.coord_label)
         center_layout.addLayout(toolbar)
 
@@ -272,7 +283,7 @@ class ProjectWellMapPage(QWidget):
 
         self.empty_label = QLabel("暂无测区井。在数据页导入井位文件后自动识别；其他参考井在数据树中单独管理。")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
+        style.bind(self.empty_label, _empty_label_qss)
         self.empty_label.setVisible(True)
         center_layout.addWidget(self.empty_label)
         splitter.addWidget(center)

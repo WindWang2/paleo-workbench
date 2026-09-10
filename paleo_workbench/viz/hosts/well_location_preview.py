@@ -248,7 +248,8 @@ class WellLocationPreview(QWidget):
 
         self.well_panel = QFrame(self)
         self.well_panel.setObjectName("WellLocationListPanel")
-        self.well_panel.setFixedWidth(240)
+        # V9：固定 240 → 最小 200 地板（可自由调整宽度）。
+        self.well_panel.setMinimumWidth(200)
         panel_layout = QVBoxLayout(self.well_panel)
         panel_layout.setContentsMargins(12, 12, 12, 12)
         panel_layout.setSpacing(8)

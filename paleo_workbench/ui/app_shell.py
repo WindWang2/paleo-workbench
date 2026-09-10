@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
@@ -206,6 +208,40 @@ class CommandPalette(QFrame):
         return super().eventFilter(source, event)
 
 
+class AdaptivePageStack(QStackedWidget):
+    """页面栈：最小尺寸只反映「当前页」（V9 审计 B-1）。
+
+    QStackedWidget 默认 minimumSizeHint 取全部页的最大值——只要栈里有
+    一个宽页（如首页关系图 min 1080），其它窄页也会带着幽灵横向滚动
+    条。覆盖为逐页计算后，滚动降级尺寸按「当前 hub」为准（HubPage
+    内部子模块栈仍取该 hub 各子模块的最大值——精度止于 hub 级，
+    滚动降级不受影响）。
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.currentChanged.connect(lambda *_: self.updateGeometry())
+
+    def _page_minimum(self):
+        page = self.currentWidget()
+        if page is None:
+            return None
+        # 有效最小 = 布局 hint 与显式 setMinimumSize 的较大者。
+        return page.minimumSizeHint().expandedTo(page.minimumSize())
+
+    def minimumSizeHint(self):  # noqa: N802 — Qt 契约
+        page_min = self._page_minimum()
+        if page_min is not None:
+            return page_min
+        return super().minimumSizeHint()
+
+    def sizeHint(self):  # noqa: N802 — Qt 契约
+        page = self.currentWidget()
+        if page is not None:
+            return page.sizeHint().expandedTo(page.minimumSize())
+        return super().sizeHint()
+
+
 class AppShell(QWidget):
     """Application shell (workstation V4).
 
@@ -271,7 +307,7 @@ class AppShell(QWidget):
         outer.setSpacing(0)
 
         # --- hub pages -------------------------------------------------
-        self.page_stack = QStackedWidget(self)
+        self.page_stack = AdaptivePageStack(self)
 
         self.home_page = HomePage(self.page_stack)
         self.data_page = DataPage(
@@ -824,6 +860,13 @@ class AppShell(QWidget):
         if app is not None:
             app.setStyleSheet(qss)
 
+    #: V9（审计 D-2）：页面渐变默认禁用。窗口内任何 graphics effect 都会
+    #: 强制隐藏兄弟页的 QOpenGLWidget 在首次显示时提前 initializeGL
+    #: （见 __init__ 首次落地注释；offscreen CI 曾死在 pyqtgraph
+    #: initializeGL）。150ms 的观感收益不抵该隐患——需要时用
+    #: PALEO_PAGE_FADE=1 显式开启。
+    _PAGE_FADE_ENABLED = os.environ.get("PALEO_PAGE_FADE") == "1"
+
     def _animate_page_fade(self, index: int) -> None:
         """Fade the newly switched page in from 0.7 to 1.0 opacity (150ms).
 
@@ -832,6 +875,8 @@ class AppShell(QWidget):
         stopped and both the previous and current pages are restored to full
         opacity before the new fade begins.
         """
+        if not self._PAGE_FADE_ENABLED:
+            return
         page = self.page_stack.widget(index)
         if page is None:
             return

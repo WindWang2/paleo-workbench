@@ -22,7 +22,9 @@ class TaskPanelBase(QFrame):
     ):
         super().__init__(parent)
         self.setObjectName(object_name)
-        self.setFixedWidth(240)
+        # V9：固定 240 → 最小 200 地板。面板可在 splitter/dock 中自由
+        # 调整宽度（页面对最大宽度的提升已解除上限）。
+        self.setMinimumWidth(200)
         self._tasks: list = []
         self._suppress = False
 

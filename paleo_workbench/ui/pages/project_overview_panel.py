@@ -17,14 +17,32 @@ from typing import Any
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
+
+
+def _caption_qss() -> str:
+    pal = style.palette()
+    return f"color: {pal['TEXT_SECONDARY']};"
 
 
 def _caption(text: str) -> QLabel:
     label = QLabel(text)
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
+    style.bind(label, _caption_qss)
     return label
+
+
+def _title_qss() -> str:
+    return f"font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 700;"
+
+
+def _value_qss() -> str:
+    return f"font-size: {tokens.FONT_SIZE_BASE}; font-weight: 600;"
+
+
+def _hint_qss() -> str:
+    pal = style.palette()
+    return f"color: {pal['TEXT_SECONDARY']};"
 
 
 class ProjectOverviewPanel(QWidget):
@@ -38,7 +56,7 @@ class ProjectOverviewPanel(QWidget):
         root.setSpacing(tokens.SPACE_4)
 
         self.title_label = QLabel("工区概览")
-        self.title_label.setStyleSheet(f"font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 700;")
+        style.bind(self.title_label, _title_qss)
         root.addWidget(self.title_label)
 
         self.meta_label = QLabel("未打开工程")
@@ -67,7 +85,7 @@ class ProjectOverviewPanel(QWidget):
             block_layout.setSpacing(tokens.SPACE_1)
             value = QLabel("—")
             value.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            value.setStyleSheet(f"font-size: {tokens.FONT_SIZE_BASE}; font-weight: 600;")
+            style.bind(value, _value_qss)
             self._values[key] = value
             block_layout.addWidget(value)
             block_layout.addWidget(_caption(caption))
@@ -76,7 +94,7 @@ class ProjectOverviewPanel(QWidget):
 
         self.hint_label = QLabel("")
         self.hint_label.setWordWrap(True)
-        self.hint_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
+        style.bind(self.hint_label, _hint_qss)
         self.hint_label.setVisible(False)
         root.addWidget(self.hint_label)
         # The 工区内容 (well-location map) goes below via set_map_widget.

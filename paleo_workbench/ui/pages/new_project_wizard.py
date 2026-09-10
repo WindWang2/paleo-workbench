@@ -33,9 +33,24 @@ from PySide6.QtWidgets import (
 
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.project.onboarding import analyze_data_folder
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 from paleo_workbench.ui.pages.well_map_panel import WellMapPanel
+
+
+def _error_qss() -> str:
+    pal = style.palette()
+    return f"color: {pal['ERROR_RED']}; font-size: 11px;"
+
+
+def _status_qss() -> str:
+    pal = style.palette()
+    return f"color: {pal['TEXT_SECONDARY']};"
+
+
+def _summary_qss() -> str:
+    pal = style.palette()
+    return f"font-weight: 600; color: {pal['TEXT_PRIMARY']};"
 
 
 class _AnalyzeWorker(QObject):
@@ -141,7 +156,7 @@ class NewProjectWizardDialog(QDialog):
         self._error_label = QLabel("", self._page0)
         self._error_label.setObjectName("WizardErrorLabel")
         self._error_label.setWordWrap(True)
-        self._error_label.setStyleSheet(f"color: {tokens.ERROR_RED}; font-size: 11px;")
+        style.bind(self._error_label, _error_qss)
         self._error_label.hide()
         page0_layout.addWidget(self._error_label)
         page0_layout.addStretch(1)
@@ -161,13 +176,13 @@ class NewProjectWizardDialog(QDialog):
 
         self._status_label = QLabel("", self._page1)
         self._status_label.setWordWrap(True)
-        self._status_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
+        style.bind(self._status_label, _status_qss)
         self._status_label.hide()
         self._step2_layout.addWidget(self._status_label)
 
         self._summary_label = QLabel("", self._page1)
         self._summary_label.setWordWrap(True)
-        self._summary_label.setStyleSheet(f"font-weight: 600; color: {tokens.TEXT_PRIMARY};")
+        style.bind(self._summary_label, _summary_qss)
         self._summary_label.hide()
         self._step2_layout.addWidget(self._summary_label)
 
@@ -196,7 +211,7 @@ class NewProjectWizardDialog(QDialog):
         self._step2_error = QLabel("", self._page1)
         self._step2_error.setObjectName("WizardStep2ErrorLabel")
         self._step2_error.setWordWrap(True)
-        self._step2_error.setStyleSheet(f"color: {tokens.ERROR_RED}; font-size: 11px;")
+        style.bind(self._step2_error, _error_qss)
         self._step2_error.hide()
         self._step2_layout.addWidget(self._step2_error)
 
