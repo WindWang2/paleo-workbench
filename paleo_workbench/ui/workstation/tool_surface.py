@@ -41,6 +41,7 @@ __all__ = [
     "TOOL_GROUPS",
     "TOOL_IDS",
     "LayerCapabilitySnapshot",
+    "LayerMenuFacts",
     "QgisCapabilitySnapshot",
     "ToolAvailability",
     "ToolContext",
@@ -118,6 +119,22 @@ class LayerCapabilitySnapshot:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class LayerMenuFacts:
+    """图层级菜单呈现事实（V10 M5：树右键菜单消费 canonical evaluator）。
+
+    宿主（CompositeDocument）把目标图层的事实投影进 ToolContext 后经
+    ``evaluate_tool`` 求值，产出本冻结快照——面板只据此呈现，不再自建
+    第二业务 gate（此前编辑入口只看 metadata.editable 旗标，RAW/冻结/
+    组锁/阻塞的禁用原因无法进入菜单）。``raw_protected`` 是菜单**编排**
+    事实（RAW 图层显示「复制为草稿」工作流入口），不是新的门禁。
+    """
+
+    toggle_editing: ToolAvailability | None = None
+    repair_geometry: ToolAvailability | None = None
+    raw_protected: bool = False
+
+
 # ---------------------------------------------------------------------------
 # UIContextSnapshot 适配（palette / 状态条共用单一求值）
 # ---------------------------------------------------------------------------
@@ -144,6 +161,10 @@ def tool_context_from_ui_snapshot(snap: object) -> ToolContext:
             mode = "unavailable"
         else:
             mode = "unknown"
+    native_canvas = _get("native_canvas_available", None)
+    capability_flags = frozenset(
+        str(flag) for flag in (_get("native_capability_flags", ()) or ())
+    )
     editable = _get("active_layer_editable", None)
     layer_id = _get("active_layer_id", None)
     writable = _get("active_layer_writable", None)
@@ -154,6 +175,11 @@ def tool_context_from_ui_snapshot(snap: object) -> ToolContext:
     can_undo = _get("can_undo", None)
     can_redo = _get("can_redo", None)
     blocking_task = _get("blocking_task", None)
+    # V10 M9：split/merge/reshape 会话几何前提（provider 缺席 = None →
+    # 保守 False；执行侧 re-gate 用完整上下文兜底）。
+    split_ready = _get("split_ready", None)
+    merge_ready = _get("merge_ready", None)
+    reshape_ready = _get("reshape_ready", None)
     queryable = _get("queryable_layer_count", None)
     if queryable is None:
         # provider 缺席的回落：有活动层 ≈ 至少一个可查询图层（执行侧
@@ -185,9 +211,14 @@ def tool_context_from_ui_snapshot(snap: object) -> ToolContext:
         selection_count=0 if selection_count is None else int(selection_count),
         can_undo=False if can_undo is None else bool(can_undo),
         can_redo=False if can_redo is None else bool(can_redo),
+        split_ready=False if split_ready is None else bool(split_ready),
+        merge_ready=False if merge_ready is None else bool(merge_ready),
+        reshape_ready=False if reshape_ready is None else bool(reshape_ready),
         blocking_task="" if blocking_task is None else str(blocking_task),
         write_granted=bool(_get("write_granted", False)),
         queryable_layer_count=int(queryable or 0),
+        native_canvas_available=bool(native_canvas),
+        capability_flags=capability_flags,
     )
 
 

@@ -33,6 +33,26 @@ V9 (contract_version=3, Goal W1) adds the CRS/scale authority facts:
 * ``snapping_available`` / ``topology_available`` are now *derived* from the
   bridge capability manifest on the native path (fallback canvas keeps the
   sanctioned Python implementations), replacing the pre-V9 hardcoded True.
+
+V10 (contract_version=4, Goal M3) adds the authoring-UX presentation facts.
+All are additive with safe defaults — surfaces that don't produce them keep
+the V3 behavior:
+
+* ``snapping_tolerance_px`` / ``snapping_modes`` /
+  ``snapping_reference_count`` — the *configuration* facts behind the
+  snapping toggle (tooltip detail: tolerance, modes, participating
+  references). 0.0/()/0 = unknown-or-none, never a guessed default.
+* ``snapping_role_recommended`` — None = no role recommendation exists
+  (RAW/unknown role); otherwise whether the active layer's per-layer
+  override equals the role profile (recommended vs user-custom).
+* ``canvas_destination_crs`` — bridge canvas destination CRS auth id
+  (``""`` = not exposed by this bridge / not created).
+* ``crs_mismatch`` — None = not judgeable (either CRS undeclared); True when
+  project CRS and layer CRS are both declared and different (normalized via
+  crs_contract — presentation warning fact, not a gate).
+* ``reference_failed_count`` / ``running_task_count`` — context counters for
+  status presentation (``blocking_task`` remains the *gate*; these are the
+  informational totals).
 """
 
 from __future__ import annotations
@@ -47,7 +67,7 @@ from paleo_workbench.mapping.capability_model import (
 
 __all__ = ["ToolContext", "build_tool_context", "TOOL_CONTEXT_CONTRACT_VERSION"]
 
-TOOL_CONTEXT_CONTRACT_VERSION = 3
+TOOL_CONTEXT_CONTRACT_VERSION = 4
 
 
 def _topology_engine_available(native_canvas: bool, capability: frozenset[str]) -> bool:
@@ -65,6 +85,13 @@ def _topology_engine_available(native_canvas: bool, capability: frozenset[str]) 
         return True
     except ImportError:
         return False
+
+
+def _optional_bool(value: object) -> bool | None:
+    """三态 bool 采集：None 保持 None（未知），其余按 bool。"""
+    if value is None:
+        return None
+    return bool(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +167,24 @@ class ToolContext:
     #: 回退画布仅在米制轴可证时推导，否则诚实未知）。
     scale_denominator: float = 0.0
 
+    # V10 M3：捕捉配置事实（tooltip 详情：容差/模式/参与引用）与 CRS 呈现事实。
+    #: 全局捕捉容差（px；0.0 = 服务默认/未知——呈现层不猜）。
+    snapping_tolerance_px: float = 0.0
+    #: 当前全局捕捉模式集（() = 默认集/未采集）。
+    snapping_modes: tuple[str, ...] = ()
+    #: 参与捕捉的引用图层数（0 = 无）。
+    snapping_reference_count: int = 0
+    #: 活动图层捕捉配置是否等于角色推荐（None = 该角色无推荐）。
+    snapping_role_recommended: bool | None = None
+    #: 画布目标 CRS auth id（"" = 桥未暴露/未创建；只读呈现事实）。
+    canvas_destination_crs: str = ""
+    #: 工程 CRS 与图层 CRS 可证不一致（None = 不可判定——任一未声明）。
+    crs_mismatch: bool | None = None
+    #: 失败/错误的引用图层数（呈现计数；门禁事实是 blocking_task）。
+    reference_failed_count: int = 0
+    #: 运行中+排队任务总数（呈现计数）。
+    running_task_count: int = 0
+
     # Tool state
     current_tool: str = "pan"
     capability_flags: frozenset[str] = frozenset()
@@ -167,6 +212,7 @@ class ToolContext:
     def to_dict(self) -> dict[str, Any]:
         data = {k: getattr(self, k) for k in self.__dataclass_fields__}
         data["selection_geometry_types"] = list(self.selection_geometry_types)
+        data["snapping_modes"] = list(self.snapping_modes)
         data["capability_flags"] = sorted(self.capability_flags)
         return data
 
@@ -264,6 +310,19 @@ def build_tool_context(
         project_crs=str(state.get("project_crs") or ""),
         layer_crs=str(state.get("layer_crs") or ""),
         scale_denominator=max(0.0, float(state.get("scale_denominator", 0.0) or 0.0)),
+        snapping_tolerance_px=max(
+            0.0, float(state.get("snapping_tolerance_px", 0.0) or 0.0)),
+        snapping_modes=tuple(
+            str(mode) for mode in state.get("snapping_modes", ()) or ()
+        ),
+        snapping_reference_count=int(
+            state.get("snapping_reference_count", 0) or 0),
+        snapping_role_recommended=_optional_bool(
+            state.get("snapping_role_recommended", None)),
+        canvas_destination_crs=str(state.get("canvas_destination_crs") or ""),
+        crs_mismatch=_optional_bool(state.get("crs_mismatch", None)),
+        reference_failed_count=int(state.get("reference_failed_count", 0) or 0),
+        running_task_count=int(state.get("running_task_count", 0) or 0),
         current_tool=str(state.get("current_tool") or "pan"),
         capability_flags=capability,
         queryable_layer_count=int(state.get("queryable_layer_count", 0) or 0),

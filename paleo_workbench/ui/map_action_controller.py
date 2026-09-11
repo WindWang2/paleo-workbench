@@ -8,6 +8,7 @@ from PySide6.QtCore import QObject, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QIcon, QKeySequence
 from PySide6.QtWidgets import QToolBar, QWidget
 
+from paleo_workbench.mapping.action_registry import ACTION_SPECS
 from paleo_workbench.mapping.tool_help import (
     TOOL_LABELS,
     TOOL_SHORTCUTS,
@@ -46,17 +47,19 @@ class MapActionController(QObject):
     #: 词表单一来源（V8 M4：action_help.TOOL_LABELS；帮助/QAction 同名）。
     _LABELS = dict(TOOL_LABELS)
 
-    #: 扩展面动作的图标（id → map/ 或 assets 根目录下的 svg 名）。
+    #: 工具条第三段动作（layer/symbology/factor/qa/layout 组的扩展面命令
+    #: + geometry 组的 repair_geometry）。V10 Milestone B：图标/身份登记
+    #: 单一来源 = mapping.action_registry；此处只保留**构建顺序**。
+    _SURFACE_EXTENSION_IDS = (
+        "layer_new", "reference_import", "layer_properties", "attribute_table",
+        "layer_zoom", "layer_export", "symbology", "style_manager",
+        "factor_workbench", "factor_overlay", "qa_run", "map_product_assemble",
+        "map_export", "repair_geometry",
+    )
+
+    #: id → svg 名（登记处派生；缺省回落 id 本名）。
     _SURFACE_ICONS = {
-        "layer_new": "tree-add-layer", "reference_import": "btn-import",
-        "layer_properties": "tree-properties", "attribute_table": "attribute_table",
-        "layer_zoom": "tree-zoom", "layer_export": "tree-export",
-        "symbology": "rb-colorbar", "style_manager": "rb-settings",
-        "factor_workbench": "rb-grid", "factor_overlay": "btn-contour-draft",
-        "qa_run": "rb-qc", "map_product_assemble": "rb-finalize",
-        "map_export": "rb-export",
-        # geometry 组的修复命令（TOOL_GROUPS 45 id 之一；复用健康检查图标）。
-        "repair_geometry": "btn-health",
+        tool_id: spec.icon for tool_id, spec in ACTION_SPECS.items()
     }
 
     def __init__(self, parent: QObject | None = None):
@@ -101,7 +104,7 @@ class MapActionController(QObject):
             action.triggered.connect(lambda checked=False, name=action_id: self.command_requested.emit(name))
         self.actions["pan"].setChecked(True)
         # V7 专业分组扩展（Layer / Symbology / Factor / QA / Layout·Export）。
-        for action_id in self._SURFACE_ICONS:
+        for action_id in self._SURFACE_EXTENSION_IDS:
             action = self._action(action_id)
             action.triggered.connect(lambda checked=False, name=action_id: self.command_requested.emit(name))
 

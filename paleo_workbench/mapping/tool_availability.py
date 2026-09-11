@@ -58,6 +58,7 @@ __all__ = [
     "evaluate_all",
     "evaluate_tool",
     "stage_group_visibility",
+    "stage_whitelist_reason",
 ]
 
 Point = tuple[float, float]
@@ -341,7 +342,12 @@ def _stage_group_visibility_for(ctx: ToolContext) -> dict[str, bool] | None:
     return {group: overrides.get(group, True) for group in TOOL_GROUPS}
 
 def stage_group_visibility(stage_value: str | None) -> dict[str, bool]:
-    """该阶段的组可见性（全组条目；None = 无阶段语义全可见）。"""
+    """该阶段的组可见性（全组条目；None = 无阶段语义全可见）。
+
+    注：``cancel`` 豁免阶段隐藏（evaluate_tool 内 _stage_group_gate 的
+    全局逃生口语义），因此 snapping 组在未知阶段显示为 False 时 cancel
+    仍可见——组级映射描述组呈现，不覆盖该逐工具豁免（V10 review 记录）。
+    """
     if stage_value is None:
         return {group: True for group in TOOL_GROUPS}
     if stage_from_value(stage_value) is None:
@@ -350,7 +356,14 @@ def stage_group_visibility(stage_value: str | None) -> dict[str, bool]:
     return {group: overrides.get(group, True) for group in TOOL_GROUPS}
 
 def _stage_group_gate(ctx: ToolContext, tool_id: str) -> str | None:
-    """组隐藏（hidden）判据；返回 None 表示该门放行。调用方负责区分 hidden。"""
+    """组隐藏（hidden）判据；返回 None 表示该门放行。调用方负责区分 hidden。
+
+    ``cancel`` 豁免：取消是全局逃生口（Esc 语义），任何阶段裁决（含
+    fail-closed 的未知阶段）都不得把它藏掉——否则未知阶段下 Esc/取消
+    按钮全部失效（V10 状态矩阵发现的 P1）。
+    """
+    if tool_id == "cancel":
+        return None
     if ctx.mapping_stage is None:
         return None
     visibility = _stage_group_visibility_for(ctx)
@@ -368,9 +381,19 @@ def _stage_whitelist_gate(ctx: ToolContext, tool_id: str) -> str | None:
     if whitelist is None or ctx.mapping_stage is None:
         return None
     if ctx.mapping_stage not in whitelist:
-        labels = "/".join(_stage_label(v) for v in whitelist)
-        return f"当前阶段不允许该操作（限 {labels}）"
+        return stage_whitelist_reason(whitelist)
     return None
+
+
+def stage_whitelist_reason(stage_values) -> str:
+    """阶段白名单禁用判词（V10 M10：单一措辞真源）。
+
+    palette 的 ``CommandSpec.stages`` 白名单与 evaluator 的
+    ``_STAGE_ACTION_WHITELIST`` 对同一语义此前有两套文案（「当前编图
+    阶段不可用（限 …）」vs「当前阶段不允许该操作（限 …）」）——本函数
+    是唯一措辞，两侧共用（reason 字符串不改写原则的措辞面）。
+    """
+    return f"当前阶段不允许该操作（限 {'/'.join(_stage_label(v) for v in stage_values)}）"
 
 def _edit_action_stage_gate(ctx: ToolContext, tool_id: str) -> str | None:
     """编辑/数字化动作的阶段过滤（真源 StageToolProfile.edit_actions）。
@@ -741,7 +764,8 @@ def evaluate_tool(tool_id: str, ctx: ToolContext) -> ToolAvailability:
         # 阶段裁决（组隐藏 → 受治理编辑动作），单一推导自 StageToolProfile。
         # 门序总则：工程未开、以及存在于图层之上的角色/事实判词（RAW/
         # 冻结/组锁/源缺失）优先于阶段呈现；更细的门禁（会话/几何/选择）
-        # 被阶段隐藏覆盖（阶段外动作整条隐藏，QGIS 惯例）。
+        # 被阶段隐藏覆盖（阶段外动作整条隐藏，QGIS 惯例）。cancel 豁免
+        # 阶段隐藏（_stage_group_gate 内裁决——Esc 语义不可按阶段下线）。
         stage_reason = _stage_group_gate(ctx, tool_id)
         if stage_reason is None:
             stage_reason = _edit_action_stage_gate(ctx, tool_id)

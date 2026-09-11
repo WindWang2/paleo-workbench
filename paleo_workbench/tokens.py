@@ -377,6 +377,8 @@ _DARK_OVERRIDES = {
     "BG_DISABLED": "#161d1c",
     "TEXT_DISABLED": "#64716c",
     "STATUS_DEGRADED": "#d97706",
+    # R3-5：WARNING 在深色底上 1px 描边对比不足（≈3.05:1），按同族提亮。
+    "WARNING": "#d97706",
     "BG_CHART": "#141c1b",
     "CANVAS_INK": "#c9d2ce",
     "CANVAS_CHROME_BG": "rgba(20, 28, 27, 0.92)",
@@ -658,6 +660,15 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     QToolButton:checked {{
         background-color: {t.BG_NAV_ACTIVE};
         border: 1px solid {t.PRIMARY};
+    }}
+    /* V10 M8：preferred 工具的轻微可识别提示（推荐捕获工具——kind/角色
+       相符时 evaluator 置 preferred）。下缘细accent线，弱于 checked。 */
+    QToolButton[preferred="true"] {{
+        border-bottom: 2px solid {t.PRIMARY};
+    }}
+    QToolButton[preferred="true"]:checked {{
+        border: 1px solid {t.PRIMARY};
+        border-bottom: 2px solid {t.PRIMARY};
     }}
     QToolButton:disabled {{
         background-color: transparent;
