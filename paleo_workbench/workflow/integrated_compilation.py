@@ -118,9 +118,12 @@ def fusion_inputs_from_document(
 ) -> dict[str, FactorGridResult]:
     """Resolve every ``factor:<task>:<version>`` evidence entry to its grid.
 
-    When a selector carries a pinned version, that catalog artifact is the
-    runtime input (#1271). The live task grid is used only when no pin is
-    present (or pin equals the current version). Missing pins fail closed.
+    When a selector carries a pinned version different from the task's
+    current grid, that catalog artifact is the runtime input if it loads
+    (#1271). A missing pin fails closed when the task already has a
+    current version (refuse to fuse "current" as the pin). Catalogless
+    live tokens (no current version, pin not in catalog) still resolve
+    from the live cache.
 
     Raises:
         ValueError: listing every unresolvable factor task (unknown task id,
@@ -151,19 +154,21 @@ def fusion_inputs_from_document(
             pinned_version = parts[2]
         current_version = str(
             getattr(task, "grid_artifact_version_id", "") or "")
-        if pinned_version and current_version and pinned_version != current_version:
+        if pinned_version and pinned_version != current_version:
             pinned = _grid_from_catalog_version(catalog, pinned_version)
-            if pinned is None:
+            if pinned is not None:
+                if mismatches is not None:
+                    mismatches.append(
+                        f"{label}：钉住版本 {pinned_version} ≠ 任务当前版本 "
+                        f"{current_version or '∅'}——融合使用钉住网格")
+                resolved[task_id] = pinned
+                continue
+            if current_version:
                 unresolvable.append(
                     f"{label}（{value}）：钉住版本 {pinned_version} 无法从目录"
                     "装载网格（拒绝用当前网格冒充冻结输入）")
                 continue
-            if mismatches is not None:
-                mismatches.append(
-                    f"{label}：钉住版本 {pinned_version} ≠ 任务当前版本 "
-                    f"{current_version}——融合使用钉住网格")
-            resolved[task_id] = pinned
-            continue
+            # No current version and pin not in catalog: legacy live token.
         try:
             resolved[task_id] = factor_grid_result_for_task(task)
         except Exception as exc:  # noqa: BLE001 — report, never partial-fuse
@@ -556,6 +561,13 @@ def run_integrated_fusion(
     * ``registered`` / ``catalog_version_id`` — registration outcome (honest
       ``False`` with a reason when ``register=False`` or no catalog service).
     """
+    from paleo_workbench.workflow.interpretation.compilation import (
+        active_input_set,
+    )
+
+    input_set = active_input_set(document)
+    if input_set is not None and not getattr(input_set, "frozen", False):
+        raise ValueError("请先冻结 Compilation Input Set 再运行融合")
     pin_mismatches: list[str] = []
     factor_results = fusion_inputs_from_document(
         document, evidence_set, mismatches=pin_mismatches, catalog=catalog)

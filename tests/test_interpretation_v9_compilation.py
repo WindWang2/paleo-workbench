@@ -146,6 +146,62 @@ def test_legacy_view_maps_labels_to_selectors():
     assert view == {input_set.entries[0].label: "constraints:current"}
 
 
+def test_fusion_uses_catalog_pin_when_current_version_blank(tmp_path):
+    """#1271：当前版本为空时，能装载的目录 pin 仍是运行输入。"""
+    import numpy as np
+
+    from paleo_workbench.catalog.grid_artifact import write_grid_artifact
+    from paleo_workbench.project.factor_grid_artifacts import store_live_factor_grid
+    from paleo_workbench.workflow.factor_grid_result import FactorGridResult
+    from paleo_workbench.workflow.integrated_compilation import (
+        fusion_inputs_from_document,
+    )
+
+    doc = _document()
+    task = doc.factor_map_tasks[0]
+    task.grid_artifact_version_id = ""
+    live = FactorGridResult(
+        grid_z=np.array([[99.0, 99.0], [99.0, 99.0]], dtype=np.float32),
+        grid_x=np.linspace(0, 2, 2), grid_y=np.linspace(0, 2, 2),
+        factor_name="砂厚", algorithm_id="idw", crs="EPSG:32650", unit="m",
+        source_refs=["live"])
+    pinned = FactorGridResult(
+        grid_z=np.array([[3.0, 3.0], [3.0, 3.0]], dtype=np.float32),
+        grid_x=np.linspace(0, 2, 2), grid_y=np.linspace(0, 2, 2),
+        factor_name="砂厚", algorithm_id="idw", crs="EPSG:32650", unit="m",
+        source_refs=["pin"])
+    store_live_factor_grid(task.id, live)
+    artifact = write_grid_artifact(pinned, tmp_path, "pin")
+
+    class _PinCatalog:
+        def get_version(self, version_id):
+            assert version_id == "ver_old"
+            return type("V", (), {"id": version_id})()
+
+        def resolve_path(self, version):
+            return artifact
+
+    resolved = fusion_inputs_from_document(
+        doc, {f"单因素：{task.name}": f"factor:{task.id}:ver_old"},
+        catalog=_PinCatalog())
+    assert float(resolved[task.id].grid_z[0, 0]) == pytest.approx(3.0)
+
+
+def test_fusion_refuses_unfrozen_active_input_set():
+    from paleo_workbench.workflow.integrated_compilation import (
+        run_integrated_fusion,
+    )
+
+    doc = _document()
+    task = doc.factor_map_tasks[0]
+    input_set = create_input_set(doc, [f"factor:{task.id}:ver_f1"])
+    persist_input_set(doc, input_set, active=True)
+    with pytest.raises(ValueError, match="冻结"):
+        run_integrated_fusion(
+            doc, {f"单因素：{task.name}": f"factor:{task.id}:ver_f1"},
+            catalog=None, register=False)
+
+
 def test_fusion_reports_pinned_version_mismatch():
     """#1271：pin ≠ current 且目录无法装载钉住网格时 fail-closed。"""
     import numpy as np

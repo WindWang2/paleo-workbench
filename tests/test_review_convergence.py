@@ -58,6 +58,46 @@ def test_phase3_vocabulary_has_freeze_and_fusion():
     assert "run_fusion" in ids
 
 
+def test_fusion_pin_blank_current_loads_catalog_artifact(tmp_path):
+    from paleo_workbench.catalog.grid_artifact import write_grid_artifact
+    from paleo_workbench.project.factor_grid_artifacts import store_live_factor_grid
+    from paleo_workbench.project.models import FactorMapTask, ProjectDocument
+    from paleo_workbench.workflow.factor_grid_result import FactorGridResult
+    from paleo_workbench.workflow.integrated_compilation import (
+        fusion_inputs_from_document,
+    )
+
+    doc = ProjectDocument.new("pin")
+    task = FactorMapTask(
+        name="砂厚", target_horizon="T1", factor_type="砂岩厚度",
+        method="idw", status="complete", source_kind="real")
+    task.grid_artifact_version_id = ""
+    doc.factor_map_tasks.append(task)
+    live = FactorGridResult(
+        grid_z=np.array([[99.0]], dtype=np.float32),
+        grid_x=np.array([0.0]), grid_y=np.array([0.0]),
+        factor_name="砂厚", algorithm_id="idw", crs="EPSG:32650", unit="m",
+        source_refs=["live"])
+    pinned = FactorGridResult(
+        grid_z=np.array([[7.0]], dtype=np.float32),
+        grid_x=np.array([0.0]), grid_y=np.array([0.0]),
+        factor_name="砂厚", algorithm_id="idw", crs="EPSG:32650", unit="m",
+        source_refs=["pin"])
+    store_live_factor_grid(task.id, live)
+    artifact = write_grid_artifact(pinned, tmp_path, "pin")
+
+    class _PinCatalog:
+        def get_version(self, version_id):
+            return type("V", (), {"id": version_id})()
+
+        def resolve_path(self, version):
+            return artifact
+
+    resolved = fusion_inputs_from_document(
+        doc, {"砂厚": f"factor:{task.id}:ver_old"}, catalog=_PinCatalog())
+    assert float(resolved[task.id].grid_z[0, 0]) == pytest.approx(7.0)
+
+
 def test_raw_snapshot_editable_false(qtbot, tmp_path):
     from paleo_workbench.project.models import ProjectDocument
     from paleo_workbench.ui.workstation.composite_document import CompositeDocument
