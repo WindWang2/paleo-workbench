@@ -53,6 +53,14 @@ the V3 behavior:
 * ``reference_failed_count`` / ``running_task_count`` — context counters for
   status presentation (``blocking_task`` remains the *gate*; these are the
   informational totals).
+
+V10 spatial-layer foundation (same contract_version=4, additive):
+
+* ``canvas_crs`` / ``map_units`` / ``output_dpi`` — map-settings facts from
+  the canvas authority (``""``/0.0 = unknown, never estimated).
+* ``provider_writable`` / ``provider_name`` — activity-layer provider
+  introspection (``None``/``""`` = no probe surface; ``False`` fail-closes
+  the write gate).
 """
 
 from __future__ import annotations
@@ -190,6 +198,19 @@ class ToolContext:
     reference_failed_count: int = 0
     #: 运行中+排队任务总数（呈现计数）。
     running_task_count: int = 0
+    # V10 M-B/M-O/M-N（contract v4 additive）：地图事实与 provider 自省。
+    #: 画布目标 CRS auth id（"" = 未设/未知）。
+    canvas_crs: str = ""
+    #: 画布地图单位（QgsUnitTypes 编码 "degrees"/"meters"/…；"" = 未知）。
+    map_units: str = ""
+    #: 画布输出 DPI（0.0 = 未知）。
+    output_dpi: float = 0.0
+    #: 活动层 provider 能力结论（None = 无自省面（旧桥/回退），不参与门禁；
+    #: False = provider 实测不可写 → fail-closed）。host 角色门禁之外的第二
+    #: 权威——两个都开才可写。
+    provider_writable: bool | None = None
+    #: 活动层 provider 名（"memory"/"ogr"/…；"" = 无自省面）。
+    provider_name: str = ""
 
     # Tool state
     current_tool: str = "pan"
@@ -331,6 +352,14 @@ def build_tool_context(
         crs_mismatch=_optional_bool(state.get("crs_mismatch", None)),
         reference_failed_count=int(state.get("reference_failed_count", 0) or 0),
         running_task_count=int(state.get("running_task_count", 0) or 0),
+        canvas_crs=str(state.get("canvas_crs") or ""),
+        map_units=str(state.get("map_units") or ""),
+        output_dpi=max(0.0, float(state.get("output_dpi", 0.0) or 0.0)),
+        provider_writable=(
+            None if state.get("provider_writable") is None
+            else bool(state.get("provider_writable"))
+        ),
+        provider_name=str(state.get("provider_name") or ""),
         current_tool=str(state.get("current_tool") or "pan"),
         capability_flags=capability,
         queryable_layer_count=int(state.get("queryable_layer_count", 0) or 0),

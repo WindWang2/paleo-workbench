@@ -74,11 +74,14 @@ def test_project_crs_propagates_to_factor_dataset() -> None:
     dataset = service.extract_well_factors(_project_with_wells(_UTM49N), "孔隙度")
     assert dataset.crs == _UTM49N
     assert len(dataset.valid_points) == 9
-    # A descriptive alias spelling must propagate verbatim too.
+    # V10 M-B：描述式拼写经 crs_contract 边界后传播**规范 authid**
+    # （“EPSG:32649 / WGS84 UTM 49N” → “EPSG:32649”）——逐字传播曾是
+    # V9 前行为，与本文件钉死的 resolve_crs 规范化语义冲突（main 上的
+    # 既有红测）；#1050 的意图（CRS 到达数据集）由首个断言覆盖。
     descriptive = service.extract_well_factors(
         _project_with_wells(f"{_UTM49N} / WGS84 UTM 49N"), "孔隙度"
     )
-    assert descriptive.crs == f"{_UTM49N} / WGS84 UTM 49N"
+    assert descriptive.crs == _UTM49N
 
 
 def test_empty_project_crs_falls_back_to_4326() -> None:

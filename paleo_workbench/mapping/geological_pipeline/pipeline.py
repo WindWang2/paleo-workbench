@@ -125,7 +125,12 @@ class GeologicalMappingPipeline:
         *,
         target_horizon: str = "",
         unit: str | None = None,
-        crs: str = "EPSG:4326",
+        # Quiet-4326 convergence (V10 M-B): undeclared by default — the
+        # geological mapping service resolves the project CRS via
+        # crs_contract.resolve_crs (recorded fallback) and always passes the
+        # resolved value in, so this default only shows up in direct callers
+        # that genuinely have no CRS claim.
+        crs: str = "",
     ) -> GeologicalFactorDataset:
         """Extract typed GeologicalFactor points from raw well table rows or dictionary records."""
         defaults = FACTOR_DEFAULTS.get(factor_name, FACTOR_DEFAULTS.get(factor_name.lower(), {}))

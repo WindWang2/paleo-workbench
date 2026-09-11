@@ -6,6 +6,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
+from paleo_workbench.mapping.qgis_style import qgis_scalar_pipeline_ready
 from paleo_workbench.mapping.map_render_backend import (
     FallbackMapRenderBackend,
     MapLayerSnapshot,
@@ -211,6 +212,12 @@ def test_qgis_backend_composes_the_finished_scalar_grid_without_interpolation(qt
     backend = QgisMapRenderBackend()
     if not backend.is_available:
         pytest.skip(QGIS_SKIP_REASON)
+    # V10：标量栅格路径还需 osgeo（#925 诚实面）——ABI 不匹配/缺席的
+    # 机器（如 cp312 venv 对 cp314 deps 绑定）按配方约束诚实跳过，
+    # 不产生 RuntimeError 失败（V8 known-limitations #1 家族）。
+    ready, reason = qgis_scalar_pipeline_ready()
+    if not ready:
+        pytest.skip(reason)
     result = FactorGridResult.from_engine_dict(
         {
             "grid_x": [0.0, 10.0],
@@ -287,6 +294,12 @@ def test_qgis_backend_renders_an_external_raster_reference_mirror(tmp_path, qtbo
     backend = QgisMapRenderBackend()
     if not backend.is_available:
         pytest.skip(QGIS_SKIP_REASON)
+    # V10：标量栅格路径还需 osgeo（#925 诚实面）——ABI 不匹配/缺席的
+    # 机器（如 cp312 venv 对 cp314 deps 绑定）按配方约束诚实跳过，
+    # 不产生 RuntimeError 失败（V8 known-limitations #1 家族）。
+    ready, reason = qgis_scalar_pipeline_ready()
+    if not ready:
+        pytest.skip(reason)
     from osgeo import gdal, osr
 
     source = tmp_path / "reference.tif"
@@ -329,6 +342,12 @@ def test_qgis_display_operations_never_reinvoke_factor_interpolation(monkeypatch
     backend = QgisMapRenderBackend()
     if not backend.is_available:
         pytest.skip(QGIS_SKIP_REASON)
+    # V10：标量栅格路径还需 osgeo（#925 诚实面）——ABI 不匹配/缺席的
+    # 机器（如 cp312 venv 对 cp314 deps 绑定）按配方约束诚实跳过，
+    # 不产生 RuntimeError 失败（V8 known-limitations #1 家族）。
+    ready, reason = qgis_scalar_pipeline_ready()
+    if not ready:
+        pytest.skip(reason)
     import paleo_workbench.workflow.factor_interpolation as interpolation
 
     calls = 0

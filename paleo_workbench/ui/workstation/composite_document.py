@@ -1308,6 +1308,11 @@ class CompositeDocument(QWidget):
                 self.stage_controller.set_stage(stage)
             except Exception:
                 pass
+        # V10 M-N：阶段切换改变层集成员资格/可见性——捕捉配置投影重建。
+        try:
+            self.edit_controller.repush_snapping()
+        except Exception:
+            pass
         self._sync_action_state()
 
     # -- V7 上下文驱动工具面（V8 M1：canonical contract） ---------------------
@@ -1359,6 +1364,37 @@ class CompositeDocument(QWidget):
         inputs["reference_failed_count"] = self._reference_failed_count()
         inputs["snapping_reference_count"] = self._snapping_reference_count()
         inputs["running_task_count"] = self._running_task_count(scheduler_statuses)
+        # V10 M-B/M-O/M-N：地图事实（canvas 权威）+ 捕捉事实（SnappingService
+        # 权威）注入。回退画布无对应方法 → 诚实默认（""/0.0）。
+        canvas = self.canvas
+        inputs["canvas_crs"] = str(
+            getattr(canvas, "destination_crs", lambda: "")() or "")
+        inputs["map_units"] = str(
+            getattr(canvas, "map_units", lambda: "")() or "")
+        inputs["output_dpi"] = float(
+            getattr(canvas, "output_dpi", lambda: 0.0)() or 0.0)
+        snapping_service = getattr(controller, "snapping", None)
+        if snapping_service is not None:
+            inputs["snapping_tolerance_px"] = float(
+                getattr(snapping_service, "pixel_tolerance", 0.0) or 0.0)
+            inputs["snapping_modes"] = tuple(
+                getattr(snapping_service, "modes", ()) or ())
+        # V10 M-H：活动层 provider 能力（桥自省面；无面 = None 不参与门禁）。
+        provider_writable = None
+        provider_name = ""
+        active_id = str(controller.active_layer_id or "")
+        if active_id and self.uses_native_stack:
+            facts = canvas.mirror_provider_facts(active_id) if hasattr(
+                canvas, "mirror_provider_facts") else None
+            if facts and facts.get("exists"):
+                provider_name = str(facts.get("provider") or "")
+                capability = facts.get("capability") or {}
+                provider_writable = bool(
+                    capability.get("add_features")
+                    and capability.get("change_geometries")
+                    and capability.get("change_attribute_values"))
+        inputs["provider_writable"] = provider_writable
+        inputs["provider_name"] = provider_name
         return build_tool_context(
             controller_state=inputs,
             qgis=self._qgis_capability,
@@ -2048,6 +2084,12 @@ class CompositeDocument(QWidget):
         topmost = controller.topmost_visible_layer_id()
         if topmost is not None:
             controller.set_active_layer(topmost)
+            # V10 M-G（D2 修复）：identify 自动置位也同步树选中——否则
+            # QgsLayerTreeView current ≠ 控制器活动层（三方漂移）。
+            try:
+                self.layer_manager.select_layer(topmost)
+            except Exception:
+                pass
             return
         base_target = _pick_base_identify_target_id(self._base_layers)
         if base_target is not None:

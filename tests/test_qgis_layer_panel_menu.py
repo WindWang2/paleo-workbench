@@ -122,6 +122,11 @@ def _inspect_menu_action(qtbot, qapp, panel, action_text):
     def on_menu(menu):
         def inspect():
             state["done"] = True
+            # V10：菜单可能已在 50ms 延迟内关闭销毁（Qt 6.11 事件循环
+            # 时序）——shiboken 有效性守卫，不把测试工件当产品缺陷。
+            from shiboken6 import Shiboken
+            if not Shiboken.isValid(menu):
+                return
             for action in menu.actions():
                 if action.text() == action_text:
                     state["result"] = (action.isCheckable(), action.isChecked())

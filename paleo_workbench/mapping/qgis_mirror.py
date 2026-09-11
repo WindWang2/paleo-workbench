@@ -154,17 +154,23 @@ def _style_signature(renderer_xml: str, labeling_xml: str, legacy_style) -> str:
 
 
 class _LedgerEntry:
+    # V10 M-E（R1 修复）：name 进入 token 集——程序化改名（rename_layer /
+    # 属性对话框）现在会触发真实 upsert，C++ upsertMirrorLayer 里的
+    # setName 得以执行；此前 no-op 判定漏掉名字，镜像树残留旧名。
+    # V10 M-O：scale_range token —— 比例尺可见域变化重新发布。
     __slots__ = ("data_revision", "style_sig", "visible", "opacity",
-                 "geom_kind", "features_by_id")
+                 "geom_kind", "features_by_id", "name", "scale_range")
 
     def __init__(self, data_revision, style_sig, visible, opacity,
-                 geom_kind, features_by_id):
+                 geom_kind, features_by_id, name="", scale_range=None):
         self.data_revision = data_revision
         self.style_sig = style_sig
         self.visible = visible
         self.opacity = opacity
         self.geom_kind = geom_kind
         self.features_by_id = features_by_id
+        self.name = name
+        self.scale_range = scale_range
 
 
 # R2-F8/R3: the ledger is keyed by (stack identity, layer id) — a fresh
@@ -174,14 +180,44 @@ class _LedgerEntry:
 # project-switch resets.
 _MIRROR_LEDGER: dict[tuple[int, str], _LedgerEntry] = {}
 
+# V10 M-E（R2 修复）：id(stack) 复用防护——栈对象被 GC 后其地址可能被新栈
+# 复用，旧 token 会让新栈的首次发布被误判 no-op（静默空镜像）。能建弱引用
+# 的栈（Python 对象 / 支持弱引用的绑定对象）登记 live 引用，复用即清；
+# 不能建弱引用的栈保持旧语义（诚实降级，不虚构安全性）。
+_STACK_ID_REFS: dict[int, object] = {}
+
+
+def _purge_stack_entries(stack_id: int) -> None:
+    for key in [key for key in _MIRROR_LEDGER if key[0] == stack_id]:
+        del _MIRROR_LEDGER[key]
+
 
 def _ledger_key(stack, layer_id: str) -> tuple[int, str]:
-    return (id(stack), str(layer_id))
+    stack_id = id(stack)
+    registered = _STACK_ID_REFS.get(stack_id)
+    if registered is not None and registered is not False:
+        live = registered()
+        if live is None or live is not stack:
+            # 旧栈已亡（回调未及清理）或地址被新栈复用——旧 token 全部失效。
+            _purge_stack_entries(stack_id)
+            registered = None
+    if registered is None:
+        try:
+            import weakref
+
+            _STACK_ID_REFS[stack_id] = weakref.ref(
+                stack, lambda _ref, _sid=stack_id: _purge_stack_entries(_sid))
+        except TypeError:
+            # 不可弱引用：标记为「不可校验」而非假装安全（旧语义保留）。
+            _STACK_ID_REFS[stack_id] = False
+    return (stack_id, str(layer_id))
 
 
 def reset_publish_ledger() -> None:
     """Clear the publish ledger (stack re-created / project switched)."""
     _MIRROR_LEDGER.clear()
+    # V10：栈 id 登记一并清（防长期进程里 False 标记累积）。
+    _STACK_ID_REFS.clear()
 
 
 def _doc_declares(method, *names: str) -> bool:
@@ -246,6 +282,31 @@ def _feature_signature(feature: dict) -> tuple:
     )
 
 
+def _scale_range_token(layer) -> tuple[float, float] | None:
+    """V10 M-O：MapLayer.scale_range (min_denominator, max_denominator)。"""
+    raw = getattr(layer, "scale_range", None)
+    if not raw:
+        return None
+    try:
+        lo, hi = float(raw[0]), float(raw[1])
+    except (TypeError, ValueError, IndexError):
+        return None
+    if lo <= 0.0 and hi <= 0.0:
+        return None
+    return (lo, hi)
+
+
+def _stack_supports_scale_range(stack) -> bool:
+    """V10 M-O：桥 upsert_mirror_layer 是否带 min_scale/max_scale 通道。"""
+    import inspect
+
+    method = stack.upsert_mirror_layer
+    try:
+        return "min_scale" in inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        return _doc_declares(method, "min_scale")
+
+
 def _verify_published_schema(stack, doc_id: str, fields_json: str, _sink) -> None:
     """V9 W6：发布后读回 provider schema 与 spec wire 比对（漂移进诊断）。
 
@@ -291,6 +352,64 @@ def _verify_published_schema(stack, doc_id: str, fields_json: str, _sink) -> Non
             )
 
 
+def _renderer_semantic_signature(renderer_xml: str):
+    """V10 M-K：渲染器语义签名（类型 + 符号数 + categorized 字段）。
+
+    QGIS 对 renderer XML 有自己的规范化（属性顺序/默认值补全），逐字节
+    比对只会产生噪声；漂移判据取「换了渲染器类型 / 符号数变化 /
+    categorized 分类字段变化」这些真实漂移信号。
+    """
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(renderer_xml)
+    except ET.ParseError:
+        return None
+    renderer_type = root.get("type") or root.tag
+    symbols = len(list(root.iter("symbol")))
+    categories = len(list(root.iter("category")))
+    field = ""
+    for category in root.iter("category"):
+        field = str(category.get("attribute") or category.get("attr") or "")
+        break
+    return (str(renderer_type), symbols, categories, field)
+
+
+def _verify_published_style(stack, doc_id: str, renderer_xml: str, _sink) -> None:
+    """V10 M-K：发布后读回已应用 renderer，与下发负载做语义比对。
+
+    桥无 mirror_style_json 面（<0.6.0a0）→ 跳过（诚实，不虚构验证）；
+    读回失败或语义签名漂移 → 诊断（不阻塞发布——镜像仍按旧样式渲染，
+    漂移在案）。
+    """
+    probe = getattr(stack, "mirror_style_json", None)
+    if not callable(probe):
+        return
+    try:
+        import json as _json
+
+        reported = _json.loads(probe(str(doc_id)))
+    except Exception as exc:
+        _sink(str(doc_id), f"style verify failed: {exc}")
+        return
+    if not reported.get("exists"):
+        _sink(str(doc_id), "style verify: layer missing after publish")
+        return
+    applied = str(reported.get("renderer_xml") or "")
+    if not applied.strip():
+        _sink(str(doc_id), "style drift: renderer missing after publish")
+        return
+    want_sig = _renderer_semantic_signature(renderer_xml)
+    got_sig = _renderer_semantic_signature(applied)
+    if want_sig is None or got_sig is None:
+        return
+    if want_sig[0] != got_sig[0] or want_sig[1] != got_sig[1] or want_sig[3] != got_sig[3]:
+        _sink(
+            str(doc_id),
+            f"style drift: applied renderer {got_sig[:1] + got_sig[2:]} != payload {want_sig[:1] + want_sig[2:]}",
+        )
+
+
 def mirror_snapshot_to_stack(
     stack, canvas_address, snapshot, diags=None, *, groups: bool = False
 ) -> tuple[list[str], list[str], list[str]]:
@@ -320,15 +439,45 @@ def mirror_snapshot_to_stack(
 
     failures: list[str] = []
     canvas_crs = _qgis_crs_for_snapshot(snapshot, on_drop=_sink)
-    if canvas_crs:
+    # V10 M-B（陈旧 CRS 清理）：canvas_crs 为空（工程未声明）时也要显式
+    # set_destination_crs("")——否则切工程后画布残留上一个工程的 CRS，
+    # 未声明工程会在外国 CRS 下渲染（甚至采集）。无效目标 CRS = QGIS 的
+    # no-OTF 模式（raw 坐标渲染），与回退渲染器「未声明即 raw 坐标」对齐。
+    try:
+        stack.set_destination_crs(canvas_address, canvas_crs)
+    except Exception as exc:
+        failures.append(f"crs {canvas_crs!r}: {exc}")
+    # V10 M-C（transform context 链）：同一 authid 推进 owning QgsProject 的
+    # CRS（+由 CRS 派生的 ellipsoid）——measure/identify 等读取
+    # QgsProject::transformContext()/ellipsoid() 的消费方不再吃到空默认。
+    # 旧桥无此面 → 跳过（诚实降级；manifest flag project_crs_push 标记）。
+    if canvas_crs and callable(getattr(stack, "set_project_crs", None)):
         try:
-            stack.set_destination_crs(canvas_address, canvas_crs)
+            error = stack.set_project_crs(canvas_crs)
+            if error:
+                _sink("<crs>", f"project CRS push failed: {error}")
         except Exception as exc:
-            failures.append(f"crs {canvas_crs}: {exc}")
+            _sink("<crs>", f"project CRS push failed: {exc}")
+    # V10 M-E（R4）：快照内重复 doc_id 会静默塌缩成一个镜像层——显式诊断
+    # 并拒绝第二个（一个 Paleo 层恰好一个 QgsMapLayer 的不变量）。
+    seen_ids: set[str] = set()
+    duplicate_ids: set[str] = set()
+    for layer in snapshot.layers:
+        if layer.id in seen_ids:
+            duplicate_ids.add(layer.id)
+        else:
+            seen_ids.add(layer.id)
+    if duplicate_ids:
+        for dup in sorted(duplicate_ids):
+            failures.append(f"layer {dup}: duplicate layer id in snapshot")
+            _sink(dup, "duplicate layer id in snapshot; publishing first occurrence only")
     seen: list[str] = []
     mirrored_qgis_ids: list[str] = []
     data_cache = _scalar_data_cache()
     for layer in snapshot.layers:
+        if layer.id in duplicate_ids and layer.id in seen:
+            # 重复 id：首个已发布，后续出现跳过（不再静默塌缩）。
+            continue
         if layer.layer_type in ("scalar_grid", "raster_source"):
             try:
                 from paleo_workbench.mapping.scalar_publish import (
@@ -468,7 +617,9 @@ def mirror_snapshot_to_stack(
             and entry.style_sig == style_sig
             and entry.visible == bool(layer.visible)
             and entry.opacity == float(layer.opacity)
-            and entry.geom_kind == geom)
+            and entry.geom_kind == geom
+            and entry.name == str(layer.name or layer.id)
+            and _scale_range_token(layer) == entry.scale_range)
         if unchanged:
             # no-op publish for this layer: tokens unchanged, nothing ships
             _sink(layer.id, "publish:no-op")
@@ -519,6 +670,12 @@ def mirror_snapshot_to_stack(
             delta_json = ""
         if fields_json and _stack_supports_fields_json(stack):
             upsert_kwargs["fields_json"] = fields_json
+        # V10 M-O：比例尺可见域通道（桥有面才推；语义 = QGIS 分母，
+        # 0 一侧不限）。
+        scale_token = _scale_range_token(layer)
+        if scale_token is not None and _stack_supports_scale_range(stack):
+            upsert_kwargs["min_scale"] = scale_token[0]
+            upsert_kwargs["max_scale"] = scale_token[1]
         try:
             qgis_id = stack.upsert_mirror_layer(
                 layer.id, layer.name or layer.id, geom,
@@ -531,7 +688,8 @@ def mirror_snapshot_to_stack(
         except TypeError:
             # signature drift despite the probes — retry once with the
             # minimal legacy kwargs (R3-1: never a blind second full upsert).
-            for drop in ("delta", "fields_json", "data_revision"):
+            for drop in ("delta", "fields_json", "data_revision",
+                         "min_scale", "max_scale"):
                 upsert_kwargs.pop(drop, None)
             delta_json = ""
             if fields_json:
@@ -560,13 +718,20 @@ def mirror_snapshot_to_stack(
                 float(layer.opacity), geom,
                 {str((f.get("properties") or {}).get("__pwb_fid")
                  or (f.get("properties") or {}).get("id") or ""):
-                 _feature_signature(f) for f in features})
+                 _feature_signature(f) for f in features},
+                name=str(layer.name or layer.id),
+                scale_range=scale_token)
         seen.append(layer.id)
         mirrored_qgis_ids.append(qgis_id)
         # V9 W6：本次发布了 fields_json 的层做发布后验证（漂移可诊断，
         # 不再静默）。桥无自省面（旧版本）时 probe 缺席 = 跳过（诚实）。
         if fields_json and upsert_kwargs.get("fields_json"):
             _verify_published_schema(stack, layer.id, fields_json, _sink)
+        # V10 M-K：renderer/labeling 同样读回验证（语义签名比对——渲染器
+        # 类型 + 符号数 + categorized 字段；逐字节比对会被 QGIS 的 XML
+        # 规范化噪声淹没）。
+        if renderer_xml:
+            _verify_published_style(stack, layer.id, renderer_xml, _sink)
     # v7 §9: ledger follows the mirror registry — entries for layers no
     # longer published are dropped so a re-added layer ships fully.
     keep_keys = {_ledger_key(stack, doc_id) for doc_id in seen} | {

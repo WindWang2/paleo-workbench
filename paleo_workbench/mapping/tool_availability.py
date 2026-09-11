@@ -264,6 +264,12 @@ def _vector_layer_gate(ctx: ToolContext) -> str | None:
 def _writable_gate(ctx: ToolContext) -> str | None:
     if not ctx.vector_writable:
         return "图层不可写"
+    # V10 M-H：宿主角色门禁之外的第二权威——provider 实测能力。None =
+    # 无自省面（旧桥/回退画布）不参与门禁（不虚构拒绝）；False = provider
+    # 实测不可写 → fail-closed（"不要假设所有图层可写"）。
+    if ctx.provider_writable is False:
+        provider = ctx.provider_name or "provider"
+        return f"图层 provider（{provider}）不支持编辑——只读数据源"
     return None
 
 def _role_gate(ctx: ToolContext) -> str | None:

@@ -348,6 +348,9 @@ class CompositeAttributeTableDialog(QDialog):
         字段、越界数值写入 Range 字段时拒绝并明示，与 QGIS provider
         constraint 的 not_null/expression 语义同向（QGIS 侧在镜像层由
         ``fields_json`` 约束兜底，两侧同源 spec，不漂移）。
+        V10 M-I：unique 约束同路径反馈——同层其他要素已持有该值时拒绝。
+        表达式约束（expression）不在此实现——provider 侧职责，会话保持
+        schema 无关。
         """
         session = self._edit_session()
         if session is None:
@@ -387,6 +390,12 @@ class CompositeAttributeTableDialog(QDialog):
             self._info.setText(
                 f"字段「{field.label}」为必填（not-null）——输入未写入")
             return False
+        if field is not None and field.unique and self._unique_value_taken(
+                field, feature_id, value):
+            self._info.setText(
+                f"字段「{field.label}」的值已被其他要素占用"
+                "（unique 约束）——输入未写入")
+            return False
         session.change_attribute(feature_id, key, value)
         # 属性变化驱动画布（标注渲染）与工程同步（review #17）；
         # 本表自身的重建被抑制——不能打断正在编辑的单元格。
@@ -395,6 +404,35 @@ class CompositeAttributeTableDialog(QDialog):
             self._controller.content_changed.emit(self._layer_id)
         finally:
             self._suppress_content_refresh = False
+
+    def _unique_value_taken(
+        self, field: AttributeFieldMeta, feature_id: str, value: object,
+    ) -> bool:
+        """unique 字段占位检查：同层其他要素已持有该值时返回 True。
+
+        仅在描述符带 ``unique`` 标志时被调用，单次写入 O(n) 扫描本层
+        要素。空值不占用唯一域（与 QGIS unique 约束的 NULL 语义同向：
+        清空/未填互不撞车，空值由必填约束另行把关）；数值字段按 float
+        归一比较（``"12"`` 与 ``12.0`` 视为同值），其余按去空白文本比较。
+        """
+        text = str(value).strip()
+        if not text:
+            return False
+        for feature in self._features():
+            if feature.feature_id == feature_id:
+                continue  # 自身当前值不构成冲突（原地重写/清空合法）
+            other = feature.attributes.get(field.key)
+            if other is None or not str(other).strip():
+                continue
+            if field.numeric:
+                try:
+                    if float(other) == float(value):
+                        return True
+                except (TypeError, ValueError):
+                    continue
+            elif str(other).strip() == text:
+                return True
+        return False
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
         if self._suppress_item_changed:

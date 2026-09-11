@@ -65,11 +65,14 @@ def _float_or_none(value: str) -> float | None:
         return None
 
 
-def _crs_from(values: dict[str, str], inherited: str, *, lon_lat: bool) -> str:
-    value = _first(values, _CRS_KEYS) or inherited
-    if not value and lon_lat:
-        return "EPSG:4326"
-    return value
+def _crs_from(values: dict[str, str], inherited: str) -> str:
+    # Quiet-4326 convergence (V10 M-B): lon/lat-shaped key names are no
+    # longer a CRS declaration — an explicit key or an inherited root
+    # attribute or nothing. The binding consumer (domain_binding.
+    # project_coordinates) treats "" as UNTRANSFORMED pass-through, which is
+    # the honest, flaggable state; guessing 4326 from value shape laundered
+    # an assumption into a "declared" CRS.
+    return _first(values, _CRS_KEYS) or inherited
 
 
 def _record_from_values(
@@ -92,14 +95,13 @@ def _record_from_values(
         return None
     z = _float_or_none(_first(values, _Z_KEYS))
     uwi = _first(values, _UWI_KEYS)
-    lon_lat = x_key in {"longitude", "lon"} and y_key in {"latitude", "lat"}
     return XMLWellLocation(
         name=name,
         x=x,
         y=y,
         z=z,
         uwi=uwi,
-        source_crs=_crs_from(values, inherited_crs, lon_lat=lon_lat),
+        source_crs=_crs_from(values, inherited_crs),
     )
 
 

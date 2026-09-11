@@ -173,7 +173,8 @@ class TestToolContext:
         assert ctx.current_tool == "pan"
         assert not ctx.editing
         assert ctx.edit_gate_open  # default allows (no gate injected)
-        assert ctx.contract_version == 4  # V10 canonical contract (V9 CRS/scale + V10 multipart selection facts)
+        # V10：v4 = v3 + multipart 选择事实 + 地图/捕捉/provider 加性字段。
+        assert ctx.contract_version == 4
 
     def test_to_dict_serializable(self):
         ctx = build_tool_context(controller_state={"active_layer_id": "L"})

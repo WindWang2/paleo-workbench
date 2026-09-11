@@ -362,7 +362,13 @@ def _extension() -> Pybind11Extension:
 
 def _windows_link_libraries() -> list[str]:
     if sys.platform == "win32":
-        return ["Qt6Core", "Qt6Gui", "Qt6Widgets", "Qt6Xml", "Qt6Svg", "Qt6PrintSupport"]
+        # V10: gdal/proj import libs — runtime_facts() calls GDALVersionInfo /
+        # CPLGetConfigOption / proj_info / proj_context_get_database_path
+        # directly (the same deps-prefix DLLs the vendored QGIS loads).
+        return [
+            "Qt6Core", "Qt6Gui", "Qt6Widgets", "Qt6Xml", "Qt6Svg",
+            "Qt6PrintSupport", "gdal", "proj",
+        ]
     return ["Qt6Svg", "Qt6PrintSupport"]
 
 
@@ -396,7 +402,13 @@ setup(
     # 0.4.0a0 (V8): provider field-schema application (fields_json →
     # QgsFields/constraints/widgets), generic row indicators, legend
     # filter_layers.
-    version="0.4.0a0",
+    # 0.5.0a0 (V9): topological_editing push, canvas_scale /
+    # canvas_destination_crs introspection (setup.py had drifted to 0.4.0a0
+    # while bindings.cpp reported 0.5.0a0 — V10 fixes the drift).
+    # 0.6.0a0 (V10): runtime facts / project CRS push / map-settings facts /
+    # provider introspection / style read-back / mirror scale range /
+    # explicit current-layer clear / honest digitize scratch CRS.
+    version="0.6.0a0",
     description="Optional narrow C++ QGIS renderer bridge for paleo-workbench",
     ext_modules=[_extension()] if _enabled() else [],
     cmdclass={"build_ext": build_ext},
