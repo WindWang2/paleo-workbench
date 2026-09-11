@@ -39,10 +39,10 @@
 | delete selected | COMPLETE | 不变 | session.delete_feature |
 | duplicate selected | MISSING | **V10-NEW** | controller edit_command("duplicate_selected") → add_feature |
 | add ring（内环） | PARTIAL（session API 无人调用） | **V10-NEW** | 捕获环 → session.add_ring（QGIS validate 校验） |
-| delete ring | 同上 | **V10-NEW** | 选择含内环面要素 → 最近内环节点定环 → session.delete_ring |
-| add part | MISSING | **V10-NEW** | 捕获部件 → bridge `geometry.add_part` → session |
-| delete part | MISSING | **V10-NEW** | 部件选择（pick part）→ bridge `geometry.delete_part` → session |
-| move part | MISSING | **V10-NEW** | 部件平移（翻译 part 坐标）→ session |
+| delete ring | 同上 | **V10 API 面**（画布拾取 DEFERRED） | `_ring_and_part_commands("delete_ring", pick_point)`（已测）；工具面不登记（11-#1） |
+| add part | MISSING | **V10-NEW**（native-only） | 捕获部件 → bridge `geometry.add_part` → session.add_part；单选门禁 + ADV-3 重绑守卫 |
+| delete part | MISSING | **V10 API 面**（画布拾取 DEFERRED） | `_ring_and_part_commands("delete_part", pick_point)` → bridge delete_part → session |
+| move part | MISSING | **V10 API 面**（画布拾取 DEFERRED） | `_ring_and_part_commands("move_part", {"point","delta"})` → session.move_part |
 | multipart→singlepart（explode） | PARTIAL（几何库函数无 session 写入） | **V10-NEW** | split_feature 命令（属性继承） |
 | singlepart→multipart（collect） | 同上 | **V10-NEW** | merge_features 命令（collect 不 dissolve） |
 | geometry repair | BOTH | 不变+测试 | make_valid → set_geometry |
