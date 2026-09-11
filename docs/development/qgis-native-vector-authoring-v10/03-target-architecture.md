@@ -23,7 +23,9 @@ hover             → QgsVertexMarker 提示；Delete 键 → vertex_deleted {..
 ```
 
 - insert 的 path 语义 =「新顶点应插入的坐标下标」（与 session
-  `insert_vertex` 的 `parent.insert(index, point)` 对齐）；native 端用
+  `insert_vertex` 的 `parent.insert(index, point)` 对齐）；locator 边命中经
+  `Match.vertexIndex()+1`（QGIS 语义：段首顶点）得段终点，snapping 关闭时
+  回退 `QgsGeometry::closestSegmentWithContext`（review-1 重构）。
   `QgsGeometry::vertexNrFromVertexId` 反查 beforeVertex 计算。
 - delete 前置守卫：删除后顶点数 < 类型最小值（Line 2 / Ring 4 / Triangle 3）
   → 拒绝回调（fail-closed，不发半成品）。
@@ -80,13 +82,17 @@ hover             → QgsVertexMarker 提示；Delete 键 → vertex_deleted {..
 
 `tool_availability.py` 新增/扩展工具 id（canonical evaluator 唯一真源）：
 
-- `vertex_insert` / `vertex_delete`（并入 vertex 工具的交互，不单列按钮——
-  availability 由 vertex 工具同一门禁 + 几何类型守卫）
-- `add_ring` / `delete_ring` / `add_part` / `delete_part` / `explode_multipart`
-  / `collect_multipart` / `duplicate_selected` / `select_all` / `invert_selection`
-  / `clear_selection`（edit_command 族，菜单/面板入口）
+- `add_ring` / `add_part` / `explode_multipart` / `collect_multipart` /
+  `duplicate_selected`（+ 既有 `select_all` / `invert_selection` /
+  `clear_selection` 已接线）。vertex insert/delete 并入 vertex 工具交互
+  （不单列按钮，同门禁）。
 
 全部走既有 `edit_command` 单入口 re-gate，不产生第二执行路径。
+
+**V10 范围修订（review-1 #2）**：delete_ring / delete_part / move_part 的
+画布拾取交互（点击选环/部件的专用 MapTool）DEFERRED——本轮交付其 API 面
+（`_ring_and_part_commands`，pick_point 驱动，已测）并在工具面**不登记**
+这三个 id（不为完整假实现）。
 
 ## B. 明确不做（V10 边界）
 
