@@ -147,7 +147,7 @@ def test_legacy_view_maps_labels_to_selectors():
 
 
 def test_fusion_reports_pinned_version_mismatch():
-    """P1-7：pin 与当前版本不一致时 qc 诚实记录（不伪称按 pin 计算）。"""
+    """#1271：pin ≠ current 且目录无法装载钉住网格时 fail-closed。"""
     import numpy as np
 
     from paleo_workbench.project.factor_grid_artifacts import store_live_factor_grid
@@ -164,9 +164,7 @@ def test_fusion_reports_pinned_version_mismatch():
         factor_name="砂厚", algorithm_id="idw", crs="EPSG:32650", unit="m",
         source_refs=["w@v1"])
     store_live_factor_grid(task.id, grid)
-    # 证据集钉住旧版本 ver_old，任务当前是 ver_f1 → mismatch 进 qc。
-    summary = run_integrated_fusion(
-        doc, {f"单因素：{task.name}": f"factor:{task.id}:ver_old"},
-        catalog=None, register=False)
-    assert summary["qc"].get("pinned_version_mismatches")
-    assert "ver_old" in summary["qc"]["pinned_version_mismatches"][0]
+    with pytest.raises(ValueError, match="钉住版本 ver_old"):
+        run_integrated_fusion(
+            doc, {f"单因素：{task.name}": f"factor:{task.id}:ver_old"},
+            catalog=None, register=False)

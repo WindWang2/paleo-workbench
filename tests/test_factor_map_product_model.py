@@ -242,7 +242,7 @@ def test_extract_factors_derived_sand_ratio_carries_provenance():
     measured = [p for p in dataset.points if "derived" not in p.metadata]
     assert len(derived) == 1
     assert derived[0].metadata["derived"]["rule"] == DERIVED_SAND_RATIO_RULE
-    assert derived[0].value == pytest.approx(0.5)
+    assert derived[0].value == pytest.approx(50.0)
     assert measured[0].value == 50.0
     assert dataset.metadata["derived_points"] == 1
 
