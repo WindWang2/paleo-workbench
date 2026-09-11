@@ -196,6 +196,7 @@ class StageActionDispatcher:
             "overlay_factor_results": self.overlay_factor_results,
             "commit_constraints": self.commit_constraints,
             "select_evidence": self.select_evidence,
+            "freeze_input_set": self.freeze_evidence_set,
             "create_integrated_draft": self.create_integrated_draft,
             "create_integrated_boundary": self.create_integrated_boundary,
             "run_fusion": self.run_fusion,
@@ -1246,6 +1247,42 @@ class StageActionDispatcher:
 
     # -- Phase 3 ------------------------------------------------------------------
 
+    def freeze_evidence_set(self) -> None:
+        """冻结当前 CompilationInputSet（#1271）。"""
+        from paleo_workbench.workflow.interpretation.compilation import (
+            active_input_set,
+            freeze_input_set,
+            persist_input_set,
+        )
+
+        document = self.project
+        if document is None:
+            return
+        input_set = active_input_set(document)
+        if input_set is None:
+            self.composite.status_message.emit(
+                "没有激活的证据集——先选择证据版本")
+            return
+        catalog = None
+        try:
+            from paleo_workbench.catalog.runtime import get_catalog_service
+            catalog = get_catalog_service()
+        except Exception:
+            catalog = None
+        try:
+            frozen = freeze_input_set(
+                input_set, document,
+                catalog=catalog,
+                workspace_state=self.stage_controller.state,
+            )
+        except Exception as exc:
+            self.composite.status_message.emit(f"冻结失败：{exc}")
+            return
+        persist_input_set(document, frozen, active=True)
+        self.composite._sync_workspace_state_to_project()
+        self.composite.status_message.emit(
+            f"已冻结证据集（{len(frozen.entries)} 条）")
+
     def select_evidence(self) -> None:
         """证据版本选择（Compilation Input Set，V5 §57；V9 ADR-3/7）。
 
@@ -1518,6 +1555,15 @@ class StageActionDispatcher:
             evidence_view,
         )
 
+        from paleo_workbench.workflow.interpretation.compilation import (
+            active_input_set,
+        )
+
+        input_set = active_input_set(document)
+        if input_set is not None and not getattr(input_set, "frozen", False):
+            self.composite.status_message.emit(
+                "请先冻结 Compilation Input Set 再运行融合")
+            return
         evidence = evidence_view(document, state)
         if not evidence:
             self.composite.status_message.emit("证据集为空——先选择证据版本（Compilation Input Set）")

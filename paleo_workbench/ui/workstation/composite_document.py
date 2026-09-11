@@ -1158,7 +1158,7 @@ class CompositeDocument(QWidget):
             self._toggle_reference_snap
         )
         self.layer_manager.active_layer_changed.connect(
-            self.edit_controller.set_active_layer)
+            self._on_user_active_layer_changed)
         self.layer_manager.attribute_table_requested.connect(
             self._open_attribute_table
         )
@@ -1205,9 +1205,7 @@ class CompositeDocument(QWidget):
         from paleo_workbench.ui.theme import theme_manager
 
         try:
-            theme_manager.theme_changed.connect(
-                lambda *_: self._push_layer_decorations()
-            )
+            theme_manager.theme_changed.connect(self._on_theme_changed)
         except (AttributeError, RuntimeError):
             pass
         if self.uses_native_stack:
@@ -1884,6 +1882,9 @@ class CompositeDocument(QWidget):
                 published=int(counts.get("published", 0)),
             ))
         return summaries
+
+    def _on_theme_changed(self, *_args) -> None:
+        self._push_layer_decorations()
 
     def _push_layer_decorations(self) -> None:
         """把呈现态/组聚合推给图层管理面板（面板差分渲染）。"""
@@ -2861,6 +2862,18 @@ class CompositeDocument(QWidget):
                 return str(layer_id)
         return None
 
+    def _on_user_active_layer_changed(self, layer_id) -> None:
+        """树选择：用户切层必须先提交/回滚其他打开会话（#1268）。
+
+        ``bind``/``_publish`` 仍直调 ``set_active_layer``，不受本路径影响。
+        """
+        target = str(layer_id or "")
+        current = str(self.edit_controller.active_layer_id or "")
+        if target == current:
+            return
+        self._commit_other_open_sessions(target)
+        self.edit_controller.set_active_layer(target or None)
+
     def _apply_active_target(self, layer_id) -> None:
         """阶段编辑目标应用（active_target_changed → 编辑权威 + 树选中）。
 
@@ -2869,10 +2882,11 @@ class CompositeDocument(QWidget):
         """
         if not layer_id:
             if self.edit_controller.active_layer_id is not None:
+                self._commit_other_open_sessions("")
                 self.edit_controller.set_active_layer(None)
             return
         if self.edit_controller.layer(str(layer_id)) is not None:
-            self.edit_controller.set_active_layer(str(layer_id))
+            self._on_user_active_layer_changed(str(layer_id))
             self.layer_manager.select_layer(str(layer_id))
 
     def layer_domain_status(self, layer_id: str) -> dict[str, str]:
@@ -3101,6 +3115,7 @@ class CompositeDocument(QWidget):
                 error = controller.save_edits()
                 if error:
                     self.status_message.emit(f"图层 {layer.name} 会话未提交：{error}")
+                    controller.rollback_edits()
             else:
                 controller.rollback_edits()
                 self.status_message.emit(

@@ -52,6 +52,8 @@ STAGE_CONTEXT_ACTIONS: dict[str, tuple[tuple[str, str], ...]] = {
     ),
     "integrated_compilation": (
         ("select_evidence", "选择证据版本"),
+        ("freeze_input_set", "冻结证据版本"),
+        ("run_fusion", "运行融合"),
         ("create_integrated_draft", "创建综合草稿"),
         ("run_qa", "运行 QA"),
         ("commit_interpretation", "提交综合解释"),
