@@ -121,7 +121,7 @@ def test_vertex_commit_during_macro_open_destroyed_cleanly(qtbot, tmp_path):
     assert not tool.commit_vertex_delete("nonexistent", (99,))
     # 后续操作不受影响（宏状态干净）
     tool.commit_vertex_insert("nonexistent", (0,), (0.0, 0.0))  # feature 不存在 → False
-    assert controller.edit_command("undo") is False or True  # 无死锁即通过
+    assert controller.edit_command("undo") is False
 
 
 # -- 新回调的停机纪律（shim 层） ---------------------------------------------------

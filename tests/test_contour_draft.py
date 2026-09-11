@@ -65,7 +65,7 @@ def test_contour_draft_from_factor_task_extracts_segments():
     # step anchored at the data range), so the count is a *target*, not an
     # exact promise; the ramp 0..3 with n=5 snaps to step 1.0 → [1, 2].
     assert 2 <= len(draft.levels) <= 8
-    assert all(level != 0.0 or True for level in draft.levels)
+    assert all(isinstance(level, (int, float)) for level in draft.levels)
     assert len(draft.segments) >= 1
     for seg in draft.segments:
         assert len(seg.coordinates) >= 2

@@ -37,6 +37,17 @@ def _is_truthy_constant(node: ast.expr) -> bool:
     return False
 
 
+def _boolop_has_truthy(node: ast.AST) -> bool:
+    """True when any BoolOp in *node* (including generators / call args) has a truthy constant operand."""
+    for child in ast.walk(node):
+        if not isinstance(child, ast.BoolOp):
+            continue
+        for value in child.values:
+            if _is_truthy_constant(value):
+                return True
+    return False
+
+
 def _assert_tautologies(tree: ast.AST) -> list[str]:
     findings = []
     for node in ast.walk(tree):
@@ -54,13 +65,10 @@ def _assert_tautologies(tree: ast.AST) -> list[str]:
                     and _is_truthy_constant(inner.operand)
                 ):
                     findings.append(f"line {node.lineno}: assert not not <truthy>")
-            elif isinstance(node.test, ast.BoolOp):
-                for value in node.test.values:
-                    if _is_truthy_constant(value):
-                        findings.append(
-                            f"line {node.lineno}: `or/and True` tautology operand"
-                        )
-                        break
+            elif _boolop_has_truthy(node.test):
+                findings.append(
+                    f"line {node.lineno}: `or/and True` tautology operand"
+                )
             elif isinstance(node.test, ast.Call):
                 func = node.test.func
                 if (
