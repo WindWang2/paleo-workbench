@@ -686,7 +686,7 @@ class QgisCanvasShim(QWidget):
     def _refresh_chrome_overlay(self) -> None:
         self._install_chrome_overlay()
 
-    def set_snapping_config(self, config: dict) -> None:
+    def set_snapping_config(self, config: dict) -> bool:
         """捕捉配置下推 QGIS canvas snappingUtils（M3）。
 
         config 形如 ``{"enabled": bool, "mode": "all_layers"|"active_layer",

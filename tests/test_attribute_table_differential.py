@@ -337,6 +337,23 @@ def test_composite_full_rebuild_on_structure_changes(qtbot, item_factory):
     assert dialog.table.rowCount() == 81
 
 
+def test_composite_header_sort_reorders_model_rows(qtbot):
+    from PySide6.QtCore import Qt
+
+    controller, layer, dialog = _composite_dialog(qtbot, 3)
+    layer.edit_session.change_attribute("f00000", "facies", "C")
+    layer.edit_session.change_attribute("f00001", "facies", "A")
+    layer.edit_session.change_attribute("f00002", "facies", "B")
+    controller.content_changed.emit(layer.id)
+    column = _column_of(dialog, "相带类型")
+    dialog._model.sort(column, Qt.SortOrder.AscendingOrder)
+    assert [dialog._model._fids[row] for row in range(3)] == [
+        "f00001", "f00002", "f00000",
+    ]
+    dialog._model.sort(column, Qt.SortOrder.DescendingOrder)
+    assert dialog._model._fids[0] == "f00000"
+
+
 # --- 性能回归（宽时限 + 差量性质双断言）-------------------------------------------
 
 

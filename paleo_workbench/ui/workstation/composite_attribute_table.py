@@ -174,11 +174,37 @@ class _AttributeTableModel(QAbstractTableModel):
         self.dataChanged.emit(index, index)
         return True
 
-    def emit_rows(self, fids) -> None:
+    def sort(self, column: int, order=Qt.SortOrder.AscendingOrder) -> None:  # noqa: N802
+        if column < 0 or column >= self.columnCount():
+            return
+        reverse = order == Qt.SortOrder.DescendingOrder
+        keyed: list[tuple[str, object]] = []
+        for row, fid in enumerate(self._fids):
+            keyed.append((
+                fid,
+                self.data(self.index(row, column), Qt.ItemDataRole.DisplayRole),
+            ))
+
+        def sort_key(item: tuple[str, object]):
+            value = item[1]
+            if value is None or value == "":
+                return (1, 0.0, "")
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return (0, float(value), "")
+            return (0, 0.0, str(value))
+
+        self.layoutAboutToBeChanged.emit()
+        keyed.sort(key=sort_key, reverse=reverse)
+        self._fids = [fid for fid, _ in keyed]
+        self.layoutChanged.emit()
+
+    def emit_rows(self, fids, row_by_id=None) -> None:
+        lookup = row_by_id if row_by_id is not None else {
+            fid: index for index, fid in enumerate(self._fids)
+        }
         for fid in fids:
-            try:
-                row = self._fids.index(fid)
-            except ValueError:
+            row = lookup.get(fid)
+            if row is None:
                 continue
             left = self.index(row, 0)
             right = self.index(row, self.columnCount() - 1)
@@ -406,23 +432,6 @@ class CompositeAttributeTableDialog(QDialog):
         return f"{field.label}{mark}"
 
     @staticmethod
-    def _apply_display(item: QTableWidgetItem, field: AttributeFieldMeta, value) -> None:
-        """typed DisplayRole——数值列排序按数值，其余按文本。"""
-        if value is None:
-            item.setData(Qt.ItemDataRole.DisplayRole, "")
-            return
-        if field.numeric and isinstance(value, (int, float)) and not isinstance(value, bool):
-            item.setData(Qt.ItemDataRole.DisplayRole, float(value))
-        elif field.numeric:
-            text = str(value).strip()
-            try:
-                item.setData(Qt.ItemDataRole.DisplayRole, float(text))
-            except ValueError:
-                item.setData(Qt.ItemDataRole.DisplayRole, text)
-        else:
-            item.setData(Qt.ItemDataRole.DisplayRole, str(value))
-
-    @staticmethod
     def _status_text(feature_count, column_count, layer, editable, gate_reason,
                      parity_state, parity_detail) -> str:
         parity_mark = {
@@ -538,6 +547,7 @@ class CompositeAttributeTableDialog(QDialog):
             self._controller.content_changed.emit(self._layer_id)
         finally:
             self._suppress_content_refresh = False
+        return True
 
     def _unique_value_taken(
         self, field: AttributeFieldMeta, feature_id: str, value: object,
@@ -590,7 +600,7 @@ class CompositeAttributeTableDialog(QDialog):
 
     # -- selection sync -------------------------------------------------------
 
-    def _on_selection_changed(self) -> None:
+    def _on_selection_changed(self, *_args) -> None:
         if self._suppress_selection_sync:
             return
         layer = self._layer()
@@ -659,7 +669,7 @@ class CompositeAttributeTableDialog(QDialog):
         self._suppress_item_changed = True
         self.table.setSortingEnabled(False)
         try:
-            self._model.emit_rows(changed)
+            self._model.emit_rows(changed, row_by_id)
         finally:
             self.table.setSortingEnabled(True)
             self._suppress_item_changed = False
