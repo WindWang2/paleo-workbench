@@ -151,6 +151,7 @@ def test_single_feature_edit_ships_delta_not_full_collection():
     assert len(delta["changed"]) == 1
     assert delta["changed"][0]["properties"]["__pwb_fid"] == "p7"
     assert delta["removed_ids"] == []
+    assert stack.calls[1]["geojson"]["features"] == []
 
 
 def test_feature_removal_ships_removed_ids():
@@ -187,6 +188,37 @@ def test_legacy_bridge_without_delta_channel():
     mirror_snapshot_to_stack(stack, 0x1, _Snap([_vector_layer(edited, revision=2)]))
     # TypeError fallback: full ship still succeeds
     assert len(stack.calls) == 2
+    assert len(stack.calls[1]["geojson"]["features"]) == 10
+
+
+class _DeltaFailsOnEmptyCollection(_DeltaCapableStack):
+    """Native contract: empty FC + failed delta must not wipe the layer."""
+
+    def upsert_mirror_layer(self, doc_id, name, geom, crs, geojson,
+                            renderer_xml="", labeling_xml="",
+                            legacy_style=None, visible=True, opacity=1.0,
+                            is_reference=False, is_editable=False,
+                            reference_snap=False, data_revision=0, delta="",
+                            fields_json=""):
+        parsed = json.loads(geojson)
+        if delta and not parsed.get("features"):
+            raise RuntimeError(
+                "mirror delta not applied and geojson is empty; refuse truncate")
+        return super().upsert_mirror_layer(
+            doc_id, name, geom, crs, geojson, renderer_xml, labeling_xml,
+            legacy_style, visible, opacity, is_reference, is_editable,
+            reference_snap, data_revision, delta, fields_json)
+
+
+def test_failed_delta_retries_full_feature_collection():
+    stack = _DeltaFailsOnEmptyCollection()
+    features = [_feature(f"p{i}") for i in range(10)]
+    mirror_snapshot_to_stack(stack, 0x1, _Snap([_vector_layer(features, revision=1)]))
+    edited = list(features)
+    edited[3] = _feature("p3", name="moved")
+    mirror_snapshot_to_stack(stack, 0x1, _Snap([_vector_layer(edited, revision=2)]))
+    assert len(stack.calls) == 2
+    assert stack.calls[1]["delta"] is None
     assert len(stack.calls[1]["geojson"]["features"]) == 10
 
 
