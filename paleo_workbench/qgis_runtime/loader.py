@@ -165,7 +165,6 @@ def prepare_bridge_load(*, force: bool = False) -> LoadReport:
             recipe=recipe, prepared=True, paths=paths,
             warnings=("already prepared",)
         )
-    _PREPARED = True
 
     _ensure_linux_protobuf_compat(paths, warnings)
     if recipe is LoadRecipe.VENDOR:
@@ -201,12 +200,23 @@ def prepare_bridge_load(*, force: bool = False) -> LoadReport:
             candidates.append(paths.pyside_dir)
 
     valid: list[str] = []
+    # Windows DLL search (PEP 739 / 3.8+). POSIX has no add_dll_directory —
+    # the dynamic loader / LD_LIBRARY_PATH owns shared objects. Never raise:
+    # this function is called from ``import paleo_workbench`` (#1265).
+    register_dll = os.name == "nt" and hasattr(os, "add_dll_directory")
+    if candidates and not register_dll:
+        warnings.append(
+            "POSIX: DLL search-path registration skipped "
+            "(os.add_dll_directory is Windows-only); shared libraries resolve "
+            "via the dynamic loader / LD_LIBRARY_PATH"
+        )
     for directory in candidates:
-        try:
-            os.add_dll_directory(str(directory))
-        except OSError:
-            warnings.append(f"add_dll_directory failed: {directory}")
-            continue
+        if register_dll:
+            try:
+                os.add_dll_directory(str(directory))
+            except OSError:
+                warnings.append(f"add_dll_directory failed: {directory}")
+                continue
         valid.append(str(directory))
     # Single PATH prepend in candidate order (loader resolves in PATH order;
     # per-directory prepends would reverse priority — V7 bisection).
@@ -221,6 +231,7 @@ def prepare_bridge_load(*, force: bool = False) -> LoadReport:
     # bisection; the legacy conftest recipe had this order all along).
     if recipe is LoadRecipe.CONDA_QT and paths.deps_bin is not None:
         preload_failures = _conda_preload(paths.deps_bin, warnings)
+    _PREPARED = True
     return LoadReport(
         recipe=recipe,
         prepared=True,

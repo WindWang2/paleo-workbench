@@ -117,7 +117,7 @@ def qgis_bridge_available() -> bool:
     ensure_qgis_bridge_dll_dirs()
     try:
         import qgis_render_bridge  # noqa: F401
-    except ImportError:
+    except Exception:
         return False
     return True
 

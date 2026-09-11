@@ -62,10 +62,11 @@ def prepare(*, quiet: bool = False) -> list[Path]:
         if candidate is None or not candidate.is_dir():
             continue
         dirs.append(candidate)
-        try:
-            os.add_dll_directory(str(candidate))
-        except OSError:
-            continue
+        if os.name == "nt" and hasattr(os, "add_dll_directory"):
+            try:
+                os.add_dll_directory(str(candidate))
+            except OSError:
+                continue
     # PATH order mirrors add order: vendor → PySide6 (single-Qt rule).
     if dirs:
         os.environ["PATH"] = (
