@@ -211,3 +211,46 @@ def test_snap_feedback_unmatched_when_disabled(qtbot, stack):
         timeout=2000)
     unmatched = [p for a, p in events if a == "snap_feedback" and not p.get("matched")]
     assert unmatched and unmatched[-1] == {"matched": False}
+
+
+def test_vertex_tool_delete_on_square_ring_allowed(qtbot, stack):
+    """方块环（4 真实 + 闭合 = 5 坐标）删任一顶点合法：native 守卫与 session
+    守卫同向（review-5 #12：钉死镜像闭合存储假设下的计数一致性）。"""
+    w, events = _setup(qtbot, stack, "vertex")
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    QTest.mouseMove(w.viewport(), _pixel(8.0, 5.0))
+    QTest.qWait(60)
+    QTest.keyClick(w, Qt.Key_Delete)
+    qtbot.waitUntil(lambda: any(a == "vertex_deleted" for a, _ in events), timeout=2000)
+    payload = [p for a, p in events if a == "vertex_deleted"][-1]
+    assert payload["feature_id"] == "f1"
+    assert payload["path"] == [0, 1]  # (8,5) 是外环顶点 1
+
+
+def test_vertex_tool_zero_displacement_click_no_commit(qtbot, stack):
+    """press→release 无位移（<1px）不产生 vertex_moved（review-5 #5：
+    同值 SetVertexCommand = undo 栈噪音 + 幻影脏会话）。"""
+    w, events = _setup(qtbot, stack, "vertex")
+    from PySide6.QtCore import Qt, QPoint
+    from PySide6.QtTest import QTest
+
+    QTest.mousePress(w.viewport(), Qt.LeftButton, Qt.NoModifier, QPoint(200, 200))
+    QTest.mouseRelease(w.viewport(), Qt.LeftButton, Qt.NoModifier, QPoint(200, 200))
+    QTest.qWait(120)
+    assert not [p for a, p in events if a == "vertex_moved"]
+
+
+def test_vertex_tool_delete_rejected_emits_receipt(qtbot, stack):
+    """守卫拒绝（三角形低于最少顶点）发 vertex_delete_rejected 回执（review-5 #10）。"""
+    w, events = _setup(qtbot, stack, "vertex", fc=_TRIANGLE_FC)
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    QTest.mouseMove(w.viewport(), _pixel(5.0, 5.0))
+    QTest.qWait(60)
+    QTest.keyClick(w, Qt.Key_Delete)
+    qtbot.waitUntil(lambda: any(a == "vertex_delete_rejected" for a, _ in events),
+                    timeout=2000)
+    assert not [p for a, p in events if a == "vertex_deleted"]

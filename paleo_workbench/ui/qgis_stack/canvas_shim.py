@@ -988,8 +988,11 @@ class QgisCanvasShim(QWidget):
                 return
             if status == "digitizing":
                 # V10：捕获过程反馈（info-only，不驱动工具操作计数）。
+                # 无消费者时跳过 json.loads（review-4 #5：长折线 payload 的
+                # 解析在无人显示时是纯浪费）。
                 try:
-                    shim.capture_progress.emit(dict(json.loads(geom_json)))
+                    if shim.capture_progress.receivers() > 0:
+                        shim.capture_progress.emit(dict(json.loads(geom_json)))
                 except Exception:
                     pass
                 return
@@ -1102,6 +1105,15 @@ class QgisCanvasShim(QWidget):
             if ok:
                 try:
                     shim.tool_operation.emit(True)
+                except Exception:
+                    pass
+            elif action in {"vertex_inserted", "vertex_deleted"}:
+                # ADV-2 同款回执（review-5 #25）：被拒绝的节点编辑必须可感知，
+                # 不做无声死键（最常见原因：守卫拒绝/陈旧镜像路径）。
+                try:
+                    shim.commit_rejected.emit(
+                        "节点编辑未写入：会话校验未通过（目标要素/路径已变化或低于最少顶点）")
+                    shim.tool_operation.emit(False)
                 except Exception:
                     pass
 

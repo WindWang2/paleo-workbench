@@ -92,9 +92,11 @@ def test_explode_multipart_command(qtbot, tmp_path):
     assert all(f.geometry["type"] == "Polygon" for f in features)
     # 属性全继承
     assert all(f.attributes["facies_name"] == "delta" for f in features)
-    # 单一 undo 单元回到 multipart
+    # 单一 undo 单元回到 multipart（V10 review-4 #6：批量拆分单宏 = compound，
+    # 成员命令/delta 仍逐要素 split_feature）
     assert len(session.undo_stack) == 1
-    assert session.undo_stack[0].command_type == "split_feature"
+    assert session.undo_stack[0].command_type == "compound"
+    assert [d.operation for d in session.deltas()] == ["split_feature"]
     assert session.undo()
     assert len(session.features()) == 1
     assert session.features()[0].geometry["type"] == "MultiPolygon"

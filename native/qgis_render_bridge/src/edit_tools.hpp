@@ -72,8 +72,10 @@ class PwbEditPickTool : public QgsMapTool {
   // 查询捕捉命中（不吸附坐标）：hover 检测与反馈共用。
   QgsPointLocator::Match snapMatch(const QgsPointXY& mapPoint) const;
   // 指示器更新 + "snap_feedback" 回调（签名变化或命中点位移 > 1 像素才回传，
-  // 60Hz 纯 hover 不打 FFI）。
-  void updateSnapIndicator(const QgsPointXY& mapPoint);
+  // 60Hz 纯 hover 不打 FFI）。已有命中的调用方传 match（复用同一查询——
+  // 每次 move 只允许一次 snapToMap，review-4 #2）。
+  void updateSnapIndicator(const QgsPointXY& mapPoint,
+                           const QgsPointLocator::Match* match = nullptr);
   void hideSnapIndicator();
 
   Callback callback_;
@@ -115,6 +117,8 @@ class PwbVertexTool : public PwbEditPickTool {
 
   // 刷新 hover（snapping locator 优先；关闭时容差拾取回退）。返回是否有命中。
   bool updateHover(const QgsPointXY& mapPoint);
+  // 同 updateHover，但把已查询的 locator 命中返回给调用方复用（单 move 单查询）。
+  QgsPointLocator::Match updateHoverMatch(const QgsPointXY& mapPoint);
   bool nearestSegmentOnFeature(const Pick& pick, const QgsPointXY& mapPoint,
                                QgsVertexId& endVid, QgsPointXY& projOut) const;
   // 删除后仍满足最少顶点（ring>=4 含闭合点 / line>=2）；点/多点不支持。

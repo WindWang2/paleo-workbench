@@ -843,11 +843,21 @@ class PwbDigitizeTool : public QgsMapToolDigitizeFeature {
 
   PwbDigitizeTool(QgsMapCanvas* canvas, QgsAdvancedDigitizingDockWidget* cad,
                   QgsMapToolCapture::CaptureMode mode, Callback callback)
-      : QgsMapToolDigitizeFeature(canvas, cad, mode), callback_(std::move(callback)) {}
+      : QgsMapToolDigitizeFeature(canvas, cad, mode), callback_(std::move(callback)) {
+    elapsed_.start();
+  }
 
   void cadCanvasMoveEvent(QgsMapMouseEvent* e) override {
     QgsMapToolDigitizeFeature::cadCanvasMoveEvent(e);
     emitProgress(e);
+  }
+
+  // V10（review-3 #6）：QgsMapToolCapture::deactivate 只藏临时带，采点序列
+  // 存活 deactivate→reactivate 短路——工具切换/会话关闭后旧点会提交进新
+  // 会话。deactivate 显式 clean()（public），与 QGIS 桌面"切工具弃捕获"一致。
+  void deactivate() override {
+    clean();
+    QgsMapToolDigitizeFeature::deactivate();
   }
 
  private:
@@ -858,7 +868,10 @@ class PwbDigitizeTool : public QgsMapToolDigitizeFeature {
     const double mup = canvas()->mapSettings().mapUnitsPerPixel();
     const bool pointCountChanged = captured.size() != last_point_count_;
     const bool moved = std::hypot(hover.x() - last_x_, hover.y() - last_y_) > mup;
-    if (!pointCountChanged && !moved) return;
+    // 时间节流（review-4 #5）：连续移动时 30ms 至多一发——O(captured) 的
+    // payload 序列化在长折线（1k+ 顶点）下会吃满帧预算。
+    if (!pointCountChanged && (!moved || elapsed_.elapsed() < 30)) return;
+    elapsed_.restart();
     last_point_count_ = captured.size();
     last_x_ = hover.x();
     last_y_ = hover.y();
@@ -913,6 +926,7 @@ class PwbDigitizeTool : public QgsMapToolDigitizeFeature {
   int last_point_count_ = -1;
   double last_x_ = std::numeric_limits<double>::quiet_NaN();
   double last_y_ = std::numeric_limits<double>::quiet_NaN();
+  QElapsedTimer elapsed_;
 };
 
 struct QgisMapStack::Impl {
@@ -1911,6 +1925,20 @@ bool QgisMapStack::applyMirrorFeatureDelta(QgsVectorLayer& layer,
     impl_->mirror_data_revisions.erase(doc_id);
   }
   layer.updateExtents();
+  // V10（review-4 #3b）：镜像几何已变更——QgsPointLocator 索引只在
+  // layer dataChanged 信号时失效，而 provider 级 add/delete 不发该信号，
+  // 捕捉会持续命中过期几何。这里对已建索引的定位器失效并同步重建
+  // （仅 hasIndex() 的层：未预热的层留给下次 set_snapping_config）。
+  for (const auto& kv : impl_->canvas_refs) {
+    QgsMapCanvas* cv = kv.second.data();
+    if (cv == nullptr) continue;
+    QgsPointLocator* loc =
+        cv->snappingUtils()->locatorForLayer(&layer);
+    if (loc != nullptr && loc->hasIndex()) {
+      loc->setExtent(nullptr);  // 销毁索引
+      loc->init(-1, false);     // 同步重建（参与捕捉的层保持确定性可用）
+    }
+  }
   impl_->mirror_data_revisions[doc_id] = new_revision;
   return true;
 }
@@ -2035,6 +2063,10 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
       }
     }
     existing->updateExtents();
+    // V10 P0（review-4）：镜像层建 provider 空间索引——无索引时编辑工具的
+    // bbox 拾取（pickFeature）是全表线性扫描（100k 层 10-30ms/移动）。memory
+    // provider 在后续 provider 增量 add/delete 时自行维护索引。
+    existing->dataProvider()->createSpatialIndex();
     std::string new_sig = makeStyleSig(renderer_xml, labeling_xml, legacy_style_json);
     auto sigIt = impl_->mirror_style_sig.find(doc_id);
     bool sig_changed = (sigIt == impl_->mirror_style_sig.end() || sigIt->second != new_sig);
@@ -2089,6 +2121,7 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
     if (!layer->dataProvider()->addFeatures(features)) {
       throw std::runtime_error("addFeatures failed for new mirror layer: " + name);
     }
+    layer->dataProvider()->createSpatialIndex();  // V10 P0：见 upsert 既有镜像路径注释
     layer->updateExtents();
   }
   recordMirrorFeatureFids(impl_->mirror_feature_fids[doc_id], features, geoBytes);

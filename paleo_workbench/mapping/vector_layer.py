@@ -640,6 +640,10 @@ class VectorEditSession:
     def duplicate_feature(self, feature_id: str, new_feature_id: str | None = None) -> VectorFeature:
         """复制要素（V10）：几何 + 属性全拷贝，新 id（默认派生 uuid 后缀）。"""
         source = self.feature(feature_id)
+        if new_feature_id and new_feature_id in self._working:
+            # 显式 id 冲突即拒绝（review-2 #2）：DuplicateFeatureCommand 的
+            # before={id: None} 会让 apply 覆盖既有要素、undo 删除原要素。
+            raise ValueError(f"feature {new_feature_id!r} already exists")
         duplicate = VectorFeature(
             new_feature_id if new_feature_id else f"{source.feature_id}-copy-{uuid.uuid4().hex[:8]}",
             _thaw(source.geometry),

@@ -29,6 +29,7 @@ _logger = logging.getLogger(__name__)
 from paleo_workbench.mapping.geometry_planar import (
     distance_to_segment,
     extent_of_geometries,
+    point_in_polygon_scalar,
     point_in_ring_scalar,
 )
 from paleo_workbench.mapping.geometry_schema import new_feature_id
@@ -317,12 +318,13 @@ def pick_topmost_visible_layer_id(layer_ids_bottom_up, visible_ids) -> str | Non
 
 def _plain_geometry(result):
     """facade GeometryResult/GeometryListResult → 纯 GeoJSON（engine 披露留给
-    EditDelta 溯源；session 命令只消费纯几何）。"""
-    return (
-        getattr(result, "geometry", None)
-        or getattr(result, "geometries", None)
-        or result
-    )
+    EditDelta 溯源；session 命令只消费纯几何）。显式属性判定：空列表/空 dict
+    是合法结果，不得 falsy-fallthrough 回 result 本身（review-2 #5）。"""
+    if hasattr(result, "geometries"):
+        return list(result.geometries)
+    if hasattr(result, "geometry"):
+        return result.geometry
+    return result
 
 
 def _nearest_interior_ring(geometry: Mapping[str, Any], point) -> int | None:
@@ -333,8 +335,14 @@ def _nearest_interior_ring(geometry: Mapping[str, Any], point) -> int | None:
     best = math.inf
     for index in range(1, len(coords)):
         ring = coords[index]
-        for i in range(len(ring) - 1):
-            d = distance_to_segment((px, py), ring[i], ring[i + 1])
+        edges = len(ring) - 1
+        # 未闭合存储的环（外部导入可达）：补 wrap-around 边（review-2 #4）。
+        unclosed = list(ring[0]) != list(ring[-1])
+        total_edges = edges + (1 if unclosed and len(ring) >= 3 else 0)
+        for i in range(total_edges):
+            a = ring[i]
+            b = ring[(i + 1) % len(ring)]
+            d = distance_to_segment((px, py), a, b)
             if d < best:
                 best = d
                 best_index = index
@@ -343,7 +351,13 @@ def _nearest_interior_ring(geometry: Mapping[str, Any], point) -> int | None:
 
 def _nearest_part(geometry: Mapping[str, Any], point) -> int | None:
     """部件定位（V10 delete/move_part）：Multi 几何中含 pick 点的部件，
-    否则最近顶点距离的部件。非 Multi 几何返回 None。"""
+    否则最近顶点距离的部件。非 Multi 几何返回 None。
+
+    - MultiPoint：part 是裸坐标（无嵌套），按点距离处理（review-2 #1 修复：
+      此前按环遍历顶点会 TypeError）。
+    - MultiPolygon 包含判定用洞感知的 point_in_polygon_scalar（review-2 #3：
+      point_in_ring_scalar 只测外环，嵌套部件会错位）。
+    """
     gtype = str(geometry.get("type") or "")
     if not gtype.startswith("Multi"):
         return None
@@ -352,10 +366,20 @@ def _nearest_part(geometry: Mapping[str, Any], point) -> int | None:
     best_index: int | None = None
     best = math.inf
     for index, part in enumerate(parts):
-        ring = part[0] if gtype == "MultiPolygon" else part
-        if gtype == "MultiPolygon" and point_in_ring_scalar(px, py, ring):
-            return index
-        for vertex in ring:
+        if gtype == "MultiPoint":
+            d = math.hypot(px - float(part[0]), py - float(part[1]))
+            if d < best:
+                best = d
+                best_index = index
+            continue
+        if gtype == "MultiPolygon":
+            if point_in_polygon_scalar((px, py),
+                                       {"type": "Polygon", "coordinates": part}):
+                return index
+            ring = part[0] if part else []
+        else:
+            ring = part
+        for vertex in ring or ():
             d = math.hypot(px - float(vertex[0]), py - float(vertex[1]))
             if d < best:
                 best = d
@@ -1193,7 +1217,12 @@ class CompositeEditController(QObject):
         return _apply
 
     def _apply_captured_ring(self, session, feature_id: str, ring_geometry) -> bool:
-        """V10 捕获环 → session.add_ring（外环坐标，自动闭合守卫在 session）。"""
+        """V10 捕获环 → session.add_ring（外环坐标，自动闭合守卫在 session）。
+
+        包含性守卫（review-5 #24 最小诚实版）：内环至少一个顶点须严格落在
+        目标面外环内——完全在外/跨界的"洞"拒绝（QGIS addRing 同语义的宿主
+        近似；洞-洞重叠与完整 OGC 校验仍归保存期 validate，见 limitations）。
+        """
         try:
             ring: list = []
             gtype = str(ring_geometry.get("type") or "")
@@ -1202,6 +1231,13 @@ class CompositeEditController(QObject):
                 ring = [list(p) for p in coords[0]]
             elif gtype == "MultiPolygon" and coords and coords[0]:
                 ring = [list(p) for p in coords[0][0]]
+            feature = session.feature(feature_id)
+            exterior = (feature.as_record()["geometry"].get("coordinates") or [[None]])[0]
+            if not any(
+                point_in_ring_scalar(float(p[0]), float(p[1]), exterior)
+                for p in ring
+            ):
+                return False
             session.add_ring(feature_id, ring)
             self.content_changed.emit(session.layer.id)
             return True
@@ -1462,7 +1498,14 @@ class CompositeEditController(QObject):
                 return
             # ADV-3：reshape 目标是单选集要素——选集变化（删除/清空）导致
             # 失配时回落 pan 并提示，不得把用户卡在无目标的重塑工具里。
-            if action == "reshape" and len(layer.selection) != 1:
+            # V10（review-3 #5）：add_ring/add_part 同为"激活时锁定单选目标"
+            # 的工具，获得同款守卫——否则选集扰动后陈旧 feature_id 工具静默
+            # 存活，捕获提交到已被取消选择/删除的要素。
+            if action in {"reshape", "add_ring", "add_part"} and len(layer.selection) != 1:
+                self.activate_tool("pan")
+                self.state_changed.emit()
+                return
+            if action == "add_ring" and self._kinds.get(layer.id) != "polygon":
                 self.activate_tool("pan")
                 self.state_changed.emit()
                 return
@@ -1773,36 +1816,54 @@ class CompositeEditController(QObject):
 
         try:
             exploded_any = False
+            skipped = 0
             new_selection: list[str] = []
-            for feature_id in sorted(layer.selection):
-                feature = session.feature(feature_id)
-                gtype = str(feature.geometry.get("type") or "")
-                if not gtype.startswith("Multi"):
-                    new_selection.append(feature_id)
-                    continue
-                parts = _plain_geometry(multipart_to_singlepart(feature.as_record()["geometry"]))
-                if len(parts) < 2:
-                    new_selection.append(feature_id)
-                    continue
-                replacements = [
-                    VectorFeature(
-                        new_feature_id("explode"),
-                        part,
-                        feature.attributes,
-                    )
-                    for part in parts
-                ]
-                with session.edit_source("explode_multipart(command)"):
-                    session.split_feature(feature_id, replacements)
-                new_selection.extend(r.feature_id for r in replacements)
-                exploded_any = True
+            session.begin_edit_command()  # V10（review-4 #6）：批量拆分单宏 = 单 undo
+            try:
+                for feature_id in sorted(layer.selection):
+                    feature = session.feature(feature_id)
+                    gtype = str(feature.geometry.get("type") or "")
+                    if not gtype.startswith("Multi"):
+                        new_selection.append(feature_id)
+                        skipped += 1
+                        continue
+                    parts = [
+                        part
+                        for part in _plain_geometry(multipart_to_singlepart(
+                            feature.as_record()["geometry"]))
+                        if str(part.get("type") or "") in {"Point", "LineString", "Polygon"}
+                        and bool(part.get("coordinates"))
+                    ]
+                    if len(parts) < 2:
+                        new_selection.append(feature_id)
+                        skipped += 1
+                        continue
+                    replacements = [
+                        VectorFeature(
+                            new_feature_id("explode"),
+                            part,
+                            feature.attributes,
+                        )
+                        for part in parts
+                    ]
+                    with session.edit_source("explode_multipart(command)"):
+                        session.split_feature(feature_id, replacements)
+                    new_selection.extend(r.feature_id for r in replacements)
+                    exploded_any = True
+            except Exception:
+                session.destroy_edit_command()
+                raise
+            session.end_edit_command()
             if not exploded_any:
                 return False, "选中的要素都不是多部件几何"
             layer.set_selection(new_selection)
             self._topology.refresh_error_count(layer)
             self.content_changed.emit(layer.id)
             self.state_changed.emit()
-            return True, "已拆分为单部件要素"
+            message = "已拆分为单部件要素"
+            if skipped:
+                message += f"（{skipped} 个非多部件要素保持原样）"
+            return True, message
         except (KeyError, RuntimeError, ValueError) as exc:
             return False, str(exc)
 
@@ -2083,6 +2144,9 @@ class CompositeEditController(QObject):
                     duplicate = session.duplicate_feature(feature_id)
                 duplicates.append(duplicate.feature_id)
             layer.set_selection(duplicates)
+            # 精确重叠副本即拓扑重叠事实：与 delete/几何命令同步刷新计数
+            # （review-1 #10——否则 merge/collect 门禁读到过期 0）。
+            self._topology.refresh_error_count(layer)
             self.content_changed.emit(layer.id)
             self.state_changed.emit()
             return True
@@ -2233,37 +2297,41 @@ class CompositeEditController(QObject):
         inputs["can_next_extent"] = can_next_extent
         return inputs
 
-    @staticmethod
-    def _selection_multipart_count(layer, session) -> int:
-        """选集中多部件几何数（explode 门禁事实，O(selection)）。"""
+    # V10（review-4 #4）：两个选集事实合一趟扫描 + memo。宿主每次 state_changed
+    # 会重建 collector 多次（各 provider 各取一键）——O(selection) 的扫描不
+    # memo 会在大选集下放大成数百毫秒。memo 键含 (会话修订, 选集内容指纹)。
+    def _selection_geometry_facts(self, layer, session) -> tuple[int, bool]:
         if layer is None or session is None or not layer.selection:
-            return 0
-        count = 0
-        for feature_id in layer.selection:
-            try:
-                if str(session.feature(feature_id).geometry.get("type") or "").startswith("Multi"):
-                    count += 1
-            except KeyError:
-                continue
-        return count
-
-    @staticmethod
-    def _selection_collect_ready(layer, session) -> bool:
-        """collect 门禁：>=2 个同几何类型的单部件选中要素（O(selection)）。"""
-        if layer is None or session is None or len(layer.selection) < 2:
-            return False
+            return (0, False)
+        key = (id(session), session.revision, frozenset(layer.selection))
+        cache = getattr(self, "_selection_facts_cache_store", None)
+        if cache is None:
+            cache = self._selection_facts_cache_store = {}
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+        multipart = 0
         kinds: set[str] = set()
+        collect_valid = len(layer.selection) >= 2
         for feature_id in layer.selection:
             try:
                 kind = str(session.feature(feature_id).geometry.get("type") or "")
             except KeyError:
-                return False
-            if kind.startswith("Multi") or kind not in {"Point", "LineString", "Polygon"}:
-                return False
+                collect_valid = False
+                continue
+            if kind.startswith("Multi"):
+                multipart += 1
+                collect_valid = False
+            elif kind not in {"Point", "LineString", "Polygon"}:
+                collect_valid = False
             kinds.add(kind)
             if len(kinds) > 1:
-                return False
-        return len(kinds) == 1
+                collect_valid = False
+        facts = (multipart, collect_valid and len(kinds) == 1)
+        if len(cache) > 8:
+            cache.clear()
+        cache[key] = facts
+        return facts
 
     def tool_context_inputs(self) -> dict[str, Any]:
         """ToolContext 的宿主侧采集器（Goal V7 §3）。
@@ -2325,10 +2393,8 @@ class CompositeEditController(QObject):
             ),
             # V10 复杂几何事实（contract v4）：O(selection) 的选集形状扫描，
             # 仅选集变化时重算成本，帧级链上无 O(features) 热点。
-            "selection_multipart_count": (
-                self._selection_multipart_count(layer, session)
-            ),
-            "collect_ready": self._selection_collect_ready(layer, session),
+            "selection_multipart_count": self._selection_geometry_facts(layer, session)[0],
+            "collect_ready": self._selection_geometry_facts(layer, session)[1],
             "snapping_enabled": self._snapping.enabled,
             "topology_enabled": self._topology.enabled,
             # snapping/topology *可用性*不在此采集（V9 W1）——由
