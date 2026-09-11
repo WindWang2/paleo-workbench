@@ -44,6 +44,18 @@ class MapActionController(QObject):
         "reshape", "add_ring", "add_part",
     )
 
+    #: 命令面动作（区别于画布 MapTool：触发一次命令，不置 current_tool）。
+    #: V10（#1256）：提为类常量——图标资产完整性与"无 surface-only 幽灵
+    #: 动作"两条断言都要枚举这份清单，内联在 _build_actions 里无法审计。
+    _COMMAND_IDS = (
+        "full_extent", "previous_extent", "next_extent", "refresh",
+        "clear_selection", "select_all", "invert_selection", "toggle_editing",
+        "save_edits", "rollback", "delete_selected",
+        "undo", "redo", "split", "merge",
+        "duplicate_selected", "explode_multipart", "collect_multipart",
+        "snapping", "topology", "cancel",
+    )
+
     #: 词表单一来源（V8 M4：action_help.TOOL_LABELS；帮助/QAction 同名）。
     _LABELS = dict(TOOL_LABELS)
 
@@ -92,14 +104,7 @@ class MapActionController(QObject):
             action.triggered.connect(lambda checked=False, name=action_id: checked and self.tool_requested.emit(name))
         # 快捷键单一来源（V8 M4：action_help.TOOL_SHORTCUTS；帮助镜像同源）。
         shortcut_registry = dict(TOOL_SHORTCUTS)
-        for action_id in (
-            "full_extent", "previous_extent", "next_extent", "refresh",
-            "clear_selection", "select_all", "invert_selection", "toggle_editing",
-            "save_edits", "rollback", "delete_selected",
-            "undo", "redo", "split", "merge",
-            "duplicate_selected", "explode_multipart", "collect_multipart",
-            "snapping", "topology", "cancel",
-        ):
+        for action_id in self._COMMAND_IDS:
             shortcut = shortcut_registry.get(action_id, "")
             action = self._action(action_id, checkable=action_id in {"snapping", "topology", "toggle_editing"}, shortcut=shortcut)
             action.triggered.connect(lambda checked=False, name=action_id: self.command_requested.emit(name))

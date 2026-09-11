@@ -87,6 +87,29 @@
 - **P2** 连续 Delete 需重新 hover → 记录（反陈旧镜像守卫，有意）。
 - **P2** snap_feedback/capture_progress 死接线 → capture_progress 已接
   状态栏测距标签（工具互斥复用）；snap_feedback 保持信号面（11 记录）。
+
+## Review 6 — 复核（#1255–#1264）
+
+- **P0** `action_registry` 的 `native_only` / `write_tools` 未登记
+  `add_ring` / `add_part` / `duplicate_selected` / `explode_multipart` /
+  `collect_multipart` → 已修（词表补齐 + 求值器/控制器单一清单对齐）。
+- **P1** `vertex_delete_rejected` 回执无 Python 消费分支 → 已修
+  （`dispatch_edit_pick` 承接分发；源码扫描钉住 C++ 回执全集）。
+- **P1** 多选 delete/duplicate 逐要素 undo → 已修（单宏 = 1 undo 单元）。
+- **P1** `add_ring`/`add_part` 成功后拓扑错误计数不刷新 → 已修
+  （applier 内 `refresh_error_count`，刷新失败不吞命令结果）。
+- **P1** `provider_writable` 用能力位推断而非桥的权威 `supports_editing`
+  → 已修（优先采信权威位；退化为推断时标记"近似"并经 tooltip 披露）。
+- **P1** `_CHECKED_CANVAS_TOOLS` 与控制器工具组漂移 → 已修
+  （`MapActionController._COMMAND_IDS` 单一来源 + 求值器/控制器互等测试）。
+- **P1** 性能门禁用裸计时断言（随机红）→ 已修（结构性断言
+  "首行 item 身份复用"+ 反向对照；预算按实测曲线重设）。
+- **P1** `paths.py` / `run_qgis_env.py` 硬编码开发机绝对路径 → 已修
+  （repo-relative 约定 + 可操作 warning；源码扫描禁 `C:\Users` 等）。
+- **P1** `probe_qgis_runtime` 失败返回真值 dict 使降级永不触发 → 已修
+  （返回 None；`transform_available` 按往返实测而非硬编码）。
+- **P2** 09-verification §C 列出 4 个不存在的测试文件名 → 已修（按实况
+  校正并合并）。
 - **P2** 混合选集 explode 消息夸大 → 已修（跳过计数）。
 - OK：快速切工具/Esc 连击/双击边界（顶点上、空白、拖动中、MultiPoint）/
   Delete 与 delete_selected 快捷键无冲突/捕获中切层保存回滚/undo 后选集

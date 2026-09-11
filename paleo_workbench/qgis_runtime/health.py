@@ -85,15 +85,23 @@ def _manifest_features(bridge: Any) -> dict[str, Any]:
 
 
 def _probe_via_runtime_facts(stack: Any) -> dict[str, Any] | None:
-    """New-bridge (>=0.6.0a0) one-shot facts: no canvas needed."""
+    """New-bridge (>=0.6.0a0) one-shot facts: no canvas needed.
+
+    Returns ``None`` when the probe is *unavailable or failed*, so the caller
+    falls through to :func:`_probe_via_canvas_roundtrip`.  V10（#1262）：探针
+    抛异常时曾返回 ``{"runtime_facts_error": ...}`` 真值 dict，而调用方的
+    降级判定是 ``if probed is None`` → 文档承诺的"探针失败降级"这一支永不
+    可达；同时该键还会抑制 CRS 不完整的降级提示。失败原因写入模块日志，
+    信号与"旧桥没有该属性"统一为 None。
+    """
     probe = getattr(stack, "runtime_facts", None)
     if not callable(probe):
         return None
     try:
         return dict(probe())
     except Exception as exc:
-        logger.warning("runtime_facts() 探测失败: %s", exc)
-        return {"runtime_facts_error": str(exc)}
+        logger.warning("runtime_facts() 探测失败，降级到 canvas roundtrip: %s", exc)
+        return None
 
 
 def _probe_via_canvas_roundtrip(stack: Any) -> dict[str, Any] | None:
@@ -108,7 +116,10 @@ def _probe_via_canvas_roundtrip(stack: Any) -> dict[str, Any] | None:
         return None
     if QApplication.instance() is None:
         return None
-    facts: dict[str, Any] = {"crs_probes": {}, "transform_available": False}
+    # V10（#1262）：transform_available 不再硬编码 False——本路径逐个 CRS
+    # 做 set/read 往返，往返本身即一次真实坐标变换；全部成功才声明可用。
+    # （旧实现在函数内从不更新该键，旧桥环境恒定报告变换不可用。）
+    facts: dict[str, Any] = {"crs_probes": {}}
     try:
         addr = stack.create_canvas()
         try:
@@ -124,6 +135,11 @@ def _probe_via_canvas_roundtrip(stack: Any) -> dict[str, Any] | None:
             stack.destroy_canvas(addr)
     except Exception as exc:
         facts["probe_error"] = str(exc)
+    facts["transform_available"] = (
+        bool(facts["crs_probes"])
+        and all(facts["crs_probes"].values())
+        and "probe_error" not in facts
+    )
     return facts
 
 
@@ -196,7 +212,7 @@ def probe_qgis_runtime(*, refresh: bool = False) -> QgisRuntimeStatus:
     for authid in KEY_CRS_PROBES:
         crs_probe_map.setdefault(authid, False)
     canvas_crs_available = all(crs_probe_map.get(a, False) for a in KEY_CRS_PROBES)
-    if not canvas_crs_available and "probe_error" not in facts and "runtime_facts_error" not in facts:
+    if not canvas_crs_available and "probe_error" not in facts:
         missing = [a for a in KEY_CRS_PROBES if not crs_probe_map.get(a)]
         degraded.append(
             "CRS 解析不完整（"

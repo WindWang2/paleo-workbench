@@ -80,20 +80,29 @@ def _specs() -> dict[str, ActionSpec]:
         "map_export": "rb-export", "repair_geometry": "btn-health",
     }
     # 画布交互工具（checked ← current_tool；与求值器 _CHECKED_CANVAS_TOOLS
-    # 同集，测试钉一致）。
+    # 同集，测试钉一致）。V10（#1256）：add_ring / add_part 与本集同步——
+    # 缺失时按钮勾选后立刻被 apply_availability 回弹。
     canvas_tools = {
         "pan", "zoom_in", "zoom_out", "identify", "select", "select_rectangle",
         "measure_distance", "add_point", "add_line", "add_polygon",
-        "move_feature", "vertex", "reshape",
+        "move_feature", "vertex", "reshape", "add_ring", "add_part",
     }
     # 原生专属（桥缺失/降级时 disabled + 原因；不隐藏能力假象）。
-    native_only = {"style_manager", "reshape"}
+    # V10（#1255）：与求值器 _NATIVE_ONLY_TOOLS 同集，两表由测试互钉。
+    native_only = {"style_manager", "reshape", "add_ring", "add_part"}
     # 写风险动作（修改图层/工程数据；Agent WRITE 授权与评审语义）。
+    # V10（#1255）：duplicate_selected / add_ring / add_part /
+    # explode_multipart / collect_multipart 也是数据改写作，此前被误登记
+    # 为 read——判据见 ``tests/test_authoring_ux_v10.py`` 的
+    # ``test_edit_session_tools_are_not_read_risk``（凡进入求值器
+    # _NEEDS_EDITING 的 id 一律不得是 read）。
     write_tools = {
         "toggle_editing", "save_edits", "rollback", "add_point", "add_line",
         "add_polygon", "move_feature", "vertex", "reshape", "delete_selected",
         "split", "merge", "repair_geometry", "undo", "redo", "topology",
         "layer_new", "factor_overlay", "map_product_assemble",
+        "duplicate_selected", "add_ring", "add_part", "explode_multipart",
+        "collect_multipart",
     }
     # 选择集动作（改选择集，不改数据）。
     selection_tools = {

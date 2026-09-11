@@ -178,3 +178,54 @@ def test_native_side_mirror_writes_confined_to_bridge():
         if re.search(r"->(deleteFeatures|addFeatures|startEditing)\s*\(", text):
             offenders.append(rel)
     assert not offenders, f"mirror writes outside sanctioned bridge files: {offenders}"
+
+
+# -- #1257：镜像几何变更后定位器必须失效（否则捕捉吸附过期几何） -------------------
+
+
+def _mirror_full_ship_body() -> str:
+    """截取 upsertMirrorLayer 内 `if (!delta_applied)` 起的分支正文。"""
+    text = (REPO / "native" / "qgis_render_bridge" / "src"
+            / "map_stack_service.cpp").read_text(encoding="utf-8")
+    start = text.index("if (!delta_applied) {")
+    return text[start:text.index("existing->updateExtents();", start)]
+
+
+def test_full_ship_branch_invalidates_point_locators():
+    """#1257：全量 truncate+add 绕过 layer dataChanged，必须显式失效定位器。
+
+    锁定"全量分支在同一作用域内调用了 invalidateLocators"这一事实——
+    否则 undo/redo、角色回退、schema 漂移后的全量重发会让 QgsPointLocator
+    持续命中重建前的旧几何（捕捉吸附到已移动/已删除顶点）。
+    """
+    body = _mirror_full_ship_body()
+    assert "truncate()" in body, "分支裁剪失效（未拿到全量重发正文）"
+    assert "addFeatures(" in body, "分支裁剪失效（未拿到全量重发正文）"
+    assert "invalidateLocators(" in body, (
+        "全量重发分支必须调用 invalidateLocators（否则定位器索引不清）"
+    )
+
+
+def test_locator_invalidation_is_shared_not_inlined():
+    """#1257：定位器失效逻辑集中在一处 helper，delta 与全量两条路径共用；
+    禁止再次内联复制（平行实现会各自漂移）。"""
+    text = (REPO / "native" / "qgis_render_bridge" / "src"
+            / "map_stack_service.cpp").read_text(encoding="utf-8")
+    header = (REPO / "native" / "qgis_render_bridge" / "src"
+              / "map_stack_service.hpp").read_text(encoding="utf-8")
+    assert "void QgisMapStack::invalidateLocators(" in text, "缺少 helper 定义"
+    assert "void invalidateLocators(const QgsVectorLayer& layer);" in header, (
+        "缺少 helper 声明"
+    )
+    # delta 路径经 helper（不再内联 locatorForLayer 循环）。唯一允许的
+    # 另一处 locatorForLayer 是 set_snapping_config 的预热路径（不同职责：
+    # 首次建索引，不经 hasIndex 守卫）。
+    warmup = text.count("locatorForLayer(") - 1
+    assert warmup == 1, (
+        f"locatorForLayer 出现 {text.count('locatorForLayer(')} 次："
+        "helper 内 1 次 + snapping 预热 1 次；多出即为内联复制"
+    )
+    # 两条镜像写路径都必须调用 helper
+    assert text.count("invalidateLocators(") >= 3, (
+        "helper 定义 + delta 调用 + 全量调用（至少 3 处）"
+    )

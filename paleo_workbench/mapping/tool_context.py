@@ -211,6 +211,10 @@ class ToolContext:
     provider_writable: bool | None = None
     #: 活动层 provider 名（"memory"/"ogr"/…；"" = 无自省面）。
     provider_name: str = ""
+    #: ``provider_writable`` 是否来自宿主近似判据（桥未给出
+    #: ``supports_editing`` 时的三位合取回落；#1260）。True 时禁用判词须
+    #: 标注"近似"，不冒充 QGIS 的权威结论。
+    provider_writable_approximate: bool = False
 
     # Tool state
     current_tool: str = "pan"
@@ -360,6 +364,8 @@ def build_tool_context(
             else bool(state.get("provider_writable"))
         ),
         provider_name=str(state.get("provider_name") or ""),
+        provider_writable_approximate=bool(
+            state.get("provider_writable_approximate", False)),
         current_tool=str(state.get("current_tool") or "pan"),
         capability_flags=capability,
         queryable_layer_count=int(state.get("queryable_layer_count", 0) or 0),

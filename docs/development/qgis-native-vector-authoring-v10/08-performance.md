@@ -36,11 +36,21 @@
 ## D. V10 call-count/复杂度测试
 
 - `test_v10_edit_paths_callcount.py`：
-  - digitizing 过程回调 ≤ 每 captured 顶点 1 次；
-  - snap_feedback 节流契约（见 C1）；
-  - native vertex 三操作每次手势恰 1 次 session 命令 + 1 次 revision bump。
+  - `test_selection_facts_single_pass_over_selection` /
+    `test_selection_facts_memoized_across_rebuilds`：选集事实单趟扫描
+    （`session.feature` 调用数 == 选集大小，非 2×）+ 同修订 memo 命中 0 读；
+  - `test_macro_batch_bumps_revision_once`：宏内 N 条命令 = 1 修订 + 1 undo 单元；
+  - `test_native_vertex_gestures_are_single_command_and_revision`：native
+    vertex 三操作（move/insert/delete）每次手势恰 1 个 undo 单元 + 1 次
+    revision bump（对应 07 §B.1 单一 undo 单元契约）；
+  - `test_native_vertex_gesture_does_not_scan_all_features`：手势只读被编辑
+    要素，与层内要素总数无关（500 要素下 feature 读取 ≤ 4 次）；
+  - `test_rejected_native_vertex_gesture_leaves_no_command`：被守卫拒绝的手势
+    不留 undo 单元、不 bump 修订（`destroy_edit_command` 空宏不得污染水位线）。
 - 100k 层单要素 insert/delete vertex：delta publish 恰 1 要素
-  （沿用 v7_goal_perf 模式）。
+  （沿用 v7_goal_perf 模式，见 `tests/perf/test_v7_goal_perf.py`）。
+- snap_feedback 节流契约（见 C1）：由 C++ 侧 `edit_tools.cpp` 的
+  `snap_feedback` 发出条件锁定（纯 hover 位移不跨语言边界）。
 
 ## E. 明确不测
 

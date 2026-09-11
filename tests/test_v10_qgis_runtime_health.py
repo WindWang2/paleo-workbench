@@ -46,6 +46,31 @@ def test_paths_missing_vendor_is_none(monkeypatch):
     assert resolved.vendor_bin is None
 
 
+def test_deps_prefix_has_no_machine_specific_absolute_path():
+    """deps 前缀默认值不得含开发者本机绝对路径（#1263）。
+
+    旧实现 ``C:\\Users\\<developer>\\paleo-qgis-deps`` 只在作者机器上成立：
+    换机/换账号时静默返回 None，真实病因（deps 前缀缺失）被掩盖成"桥不可
+    导入"。本测试把"生产路径真源不含用户目录字面量"钉死。
+    """
+    import inspect
+
+    source = inspect.getsource(paths)
+    for marker in ("C:\\Users", "C:/Users", "/home/", "/Users/"):
+        assert marker not in source, f"paths.py 含机器相关路径字面量: {marker}"
+
+
+def test_deps_prefix_falls_back_to_repo_relative_convention(monkeypatch, tmp_path):
+    """无 env override 时走仓库内 build/qgis-deps 约定（不在则 None + 警告）。"""
+    monkeypatch.delenv("PALEO_QGIS_DEPS_DIR", raising=False)
+    monkeypatch.setattr(paths, "repo_root", lambda: tmp_path)
+    assert paths.deps_prefix() is None  # 干净目录：诚实 None
+    deps = tmp_path.joinpath(*paths._DEPS_BUILD_SUBDIR)
+    deps.mkdir(parents=True)
+    assert paths.deps_prefix() == deps
+
+
+
 def test_recipe_selection_env(monkeypatch):
     monkeypatch.delenv("PALEO_QGIS_CONDA_QT", raising=False)
     assert loader.resolve_recipe() is loader.LoadRecipe.VENDOR
@@ -137,3 +162,76 @@ def test_crs_chain_runtime_capable_fails_safe_without_bridge():
     from paleo_workbench.mapping import crs_chain as chain
 
     assert chain.runtime_crs_capable() is False
+
+
+# -- #1262：探针失败必须降级到 canvas roundtrip --------------------------------
+
+def test_runtime_facts_failure_yields_none_for_fallback():
+    """探针抛异常 → None（可降级），而不是真值 dict（永不降级）。
+
+    旧实现返回 ``{"runtime_facts_error": ...}``，而调用方判定 ``is None``
+    → 文档承诺的"探针失败降级走 canvas roundtrip"这一支永不成立。
+    """
+    from paleo_workbench.qgis_runtime import health
+
+    class _Boom:
+        def runtime_facts(self):
+            raise RuntimeError("nope")
+
+    assert health._probe_via_runtime_facts(_Boom()) is None
+
+
+def test_runtime_facts_absent_yields_none():
+    from paleo_workbench.qgis_runtime import health
+
+    class _Legacy:
+        pass
+
+    assert health._probe_via_runtime_facts(_Legacy()) is None
+
+
+def test_canvas_roundtrip_reports_transform_available(qapp):
+    """roundtrip 路径真探测 transform_available（不再恒 False，#1262）。"""
+    from paleo_workbench.qgis_runtime import health
+
+    class _Stack:
+        def __init__(self):
+            self.crs = ""
+
+        def create_canvas(self):
+            return 1
+
+        def destroy_canvas(self, addr):
+            return None
+
+        def set_destination_crs(self, addr, authid):
+            self.crs = authid
+
+        def canvas_destination_crs(self, addr):
+            return self.crs
+
+    facts = health._probe_via_canvas_roundtrip(_Stack())
+    assert facts is not None
+    assert facts["transform_available"] is True
+    assert set(facts["crs_probes"]) == set(health.KEY_CRS_PROBES)
+
+    class _Broken(_Stack):
+        def set_destination_crs(self, addr, authid):
+            raise RuntimeError("no crs authority")
+
+    broken = health._probe_via_canvas_roundtrip(_Broken())
+    assert broken is not None
+    assert broken["transform_available"] is False
+    assert set(broken["crs_probes"].values()) == {False}
+
+
+def test_canvas_roundtrip_skipped_without_qapplication(monkeypatch):
+    """无 QApplication（headless CLI）→ None：降级诚实，不伪造事实。"""
+    from PySide6.QtWidgets import QApplication
+
+    from paleo_workbench.qgis_runtime import health
+
+    monkeypatch.setattr(
+        QApplication, "instance", staticmethod(lambda: None))
+    assert health._probe_via_canvas_roundtrip(object()) is None
+

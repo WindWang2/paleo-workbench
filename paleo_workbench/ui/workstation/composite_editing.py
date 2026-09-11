@@ -1302,6 +1302,13 @@ class CompositeEditController(QObject):
             ):
                 return False
             session.add_ring(feature_id, ring)
+            # V10（#1264）：新增内环会引入新的拓扑关系（自交/环重叠），
+            # 必须挂上同族命令共用的刷新点——否则 merge/collect 门禁读到
+            # 过期计数。刷新失败绝不改写命令结果。
+            try:
+                self._topology.refresh_error_count(session.layer)
+            except Exception:  # noqa: BLE001 — 刷新绝不吞命令结果
+                pass
             self.content_changed.emit(session.layer.id)
             return True
         except Exception:
@@ -1326,6 +1333,12 @@ class CompositeEditController(QObject):
                 part = json.dumps(dict(part_geometry), ensure_ascii=False)
                 merged = json.loads(add_part_fn(target, part))
                 session.add_part(feature_id, merged)
+                # V10（#1264）：新增部件同 add_ring——挂上拓扑计数刷新点，
+                # 刷新失败不改写命令结果。
+                try:
+                    self._topology.refresh_error_count(session.layer)
+                except Exception:  # noqa: BLE001 — 刷新绝不吞命令结果
+                    pass
                 self.content_changed.emit(session.layer.id)
                 return True
             except Exception:
@@ -2217,20 +2230,35 @@ class CompositeEditController(QObject):
                 return True
             return False
         if command_id == "delete_selected" and session is not None and layer.selection:
-            for feature_id in sorted(layer.selection):
-                session.delete_feature(feature_id)
+            # V10（#1259）：N 选删除是一条宏 = 一个 undo 单元（07 §B.1）——
+            # 此前逐要素 delete_feature 产生 N 条命令，要按 N 次 undo。
+            session.begin_edit_command()
+            try:
+                for feature_id in sorted(layer.selection):
+                    session.delete_feature(feature_id)
+            except Exception:
+                session.destroy_edit_command()
+                raise
+            session.end_edit_command()
             layer.set_selection(())
             self._topology.refresh_error_count(layer)
             self.content_changed.emit(layer.id)
             self.state_changed.emit()
             return True
         if command_id == "duplicate_selected" and session is not None and layer.selection:
-            # V10：全属性 + 几何复制，新 id；一个动作 = 一个 undo 单元/要素。
+            # V10：全属性 + 几何复制，新 id；整个多选是一条宏 = 一个 undo
+            # 单元（#1259，与 explode 同款）。
             duplicates: list[str] = []
-            for feature_id in sorted(layer.selection):
-                with session.edit_source("duplicate_selected(command)"):
-                    duplicate = session.duplicate_feature(feature_id)
-                duplicates.append(duplicate.feature_id)
+            session.begin_edit_command()
+            try:
+                for feature_id in sorted(layer.selection):
+                    with session.edit_source("duplicate_selected(command)"):
+                        duplicate = session.duplicate_feature(feature_id)
+                    duplicates.append(duplicate.feature_id)
+            except Exception:
+                session.destroy_edit_command()
+                raise
+            session.end_edit_command()
             layer.set_selection(duplicates)
             # 精确重叠副本即拓扑重叠事实：与 delete/几何命令同步刷新计数
             # （review-1 #10——否则 merge/collect 门禁读到过期 0）。

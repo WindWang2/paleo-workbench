@@ -223,10 +223,13 @@ _STAGE_ACTION_WHITELIST: dict[str, frozenset[str]] = {
 _BASIC_GROUPS = frozenset({"navigate", "selection", "inspection", "layer"})
 
 #: 画布交互工具（checked 跟随 current_tool）
+#: V10（#1256）：add_ring / add_part 是 checkable 的原生 MapTool 且会置
+#: current_tool——缺席本集时 evaluate_tool 恒给 checked=False，按钮勾选后
+#: 被 apply_availability 回弹（"点了看不出已选中"）。
 _CHECKED_CANVAS_TOOLS = frozenset({
     "pan", "zoom_in", "zoom_out", "identify", "select", "select_rectangle",
     "measure_distance", "add_point", "add_line", "add_polygon",
-    "move_feature", "vertex", "reshape",
+    "move_feature", "vertex", "reshape", "add_ring", "add_part",
 })
 
 # ---------------------------------------------------------------------------
@@ -269,6 +272,12 @@ def _writable_gate(ctx: ToolContext) -> str | None:
     # 实测不可写 → fail-closed（"不要假设所有图层可写"）。
     if ctx.provider_writable is False:
         provider = ctx.provider_name or "provider"
+        # 近似判据（#1260）：桥未给出 supports_editing 时宿主用三个
+        # capability 位合取推断——判词必须自曝近似，不冒充 QGIS 的结论。
+        if ctx.provider_writable_approximate:
+            return (
+                f"图层 provider（{provider}）按能力位推断不支持编辑"
+                "（桥未提供 supports_editing，判据为近似）——只读数据源")
         return f"图层 provider（{provider}）不支持编辑——只读数据源"
     return None
 

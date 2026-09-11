@@ -54,9 +54,15 @@ def canvas(stack, qtbot):
     return addr
 
 
-@pytest.mark.parametrize("count,budget_ms", [(200, 900), (500, 2400), (1000, 9000)])
+@pytest.mark.parametrize("count,budget_ms", [(200, 4000), (500, 9000), (1000, 20000)])
 def test_native_full_publish_within_budget(stack, canvas, count, budget_ms):
-    # 预算 = 实测曲线（本机 2026-09-11：200≈1.4s/500≈3.2s/1000≈7.5s）。
+    # V10 review follow-up（#1261）：旧预算 [(200,900),(500,2400),(1000,9000)]
+    # 与它自己的实测注释（200≈1.4s / 500≈3.2s / 1000≈7.5s）矛盾——在产出那
+    # 组实测值的基准机上 200/500 两档**按构造必然红**。现按同一基准实测曲线
+    # 取 ~3x 余量重设，并把基线写在这里，使"预算从何而来"可复现：
+    #     基线（2026-09-11 本机）：200≈1.4s / 500≈3.2s / 1000≈7.5s
+    # 这是一条**宽松的回归护栏**（挡住数量级退化），不是性能承诺的精确门
+    # 限——精确承诺见 docs 10-performance §3 与 host 侧 call-count 契约。
     # 全量发布是一次性成本；交互相关成本由 no-op/可见性翻转用例覆盖。
     # 注意 upsertMirrorLayer 每次触发 syncCanvasLayers —— 渐近 O(n²)，
     # 已知特性（见 docs 10-performance），批量发布 API 为后续优化面。

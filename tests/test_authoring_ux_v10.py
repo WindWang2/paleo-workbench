@@ -113,6 +113,62 @@ def test_action_registry_flags_match_evaluator_tables():
         assert spec.requires_native == (tool_id in _NATIVE_ONLY_TOOLS), tool_id
 
 
+def test_edit_session_tools_are_not_read_risk():
+    """凡求值器要求"已开启编辑会话"的工具，登记处不得标 read。
+
+    长期钉（#1255）：add_ring 等 V10 新命令曾只进了 ``TOOL_IDS`` 与求值器
+    的 ``_NEEDS_EDITING``，没进登记处的 ``write_tools``，于是 risk 回落
+    ``read``——写动作在 Agent 授权面上伪装成只读。判据从求值器派生，新增
+    编辑类命令漏登记表时本测试即红。
+    """
+    from paleo_workbench.mapping.tool_availability import _NEEDS_EDITING
+
+    for tool_id in _NEEDS_EDITING:
+        spec = ACTION_SPECS[tool_id]
+        assert spec.risk in {"write", "structural"}, (
+            f"{tool_id} 需要编辑会话却登记为 {spec.risk}")
+
+
+def test_controller_action_icons_resolve_to_assets():
+    """工具条/命令面每个 id 的图标都能解析成真实资产（#1256）。
+
+    ``MapActionController`` 以 ``ToolButtonIconOnly`` 呈现（18×18），图标
+    缺失 = 一个空白按钮。此前 5 个 V10 新命令的 svg 根本不存在，而旧断言
+    只查 ``spec.icon`` 非空，因此是绿的。
+    """
+    from paleo_workbench.ui import map_action_controller as mac
+
+    ids = (
+        tuple(mac.MapActionController._TOOL_IDS)
+        + tuple(mac.MapActionController._COMMAND_IDS)
+        + tuple(mac.MapActionController._SURFACE_EXTENSION_IDS)
+    )
+    assert ids, "控制器动作清单为空——断言失去意义"
+    missing = [
+        action_id for action_id in ids
+        if mac._map_icon(ACTION_SPECS[action_id].icon).isNull()
+    ]
+    assert not missing, f"图标资产缺失: {missing}"
+
+
+def test_checked_canvas_tools_match_controller_tool_group():
+    """求值器 checked 词表 == 控制器建按钮的画布工具组（#1256）。
+
+    ``_CHECKED_CANVAS_TOOLS`` 与登记处 ``canvas_tools`` 的互等只能证明"两
+    表同错"；真正的消费者是控制器——它给哪些 id 建了 checkable 按钮，求值
+    器就必须给哪些 id 算 checked，否则勾选被回弹。
+    """
+    from paleo_workbench.mapping.action_registry import ACTION_SPECS
+    from paleo_workbench.ui import map_action_controller as mac
+
+    controller_canvas = set(mac.MapActionController._TOOL_IDS)
+    assert controller_canvas == set(_CHECKED_CANVAS_TOOLS), (
+        f"控制器独有: {controller_canvas - set(_CHECKED_CANVAS_TOOLS)}；"
+        f"求值器独有: {set(_CHECKED_CANVAS_TOOLS) - controller_canvas}")
+    for tool_id in controller_canvas:
+        assert ACTION_SPECS[tool_id].canvas_interaction, tool_id
+
+
 def test_action_registry_surface_queries():
     assert "toggle_editing" in surface_tools("layer_menu")
     assert "split" not in surface_tools("layer_menu")
@@ -585,17 +641,42 @@ def test_thousand_layer_refresh_structural_bound(qtbot, tmp_path):
     finally:
         document.edit_controller.layers_changed.connect(
             lambda *_: document._sync_composition(immediate=True))
-    # 一次真实全量发布（基础层 + 编修层 → 画布快照 + 树重建）
+    # 一次真实全量发布（基础层 + 编图快照 + 树重建）
     document._sync_composition_now()
     start = time.perf_counter()
     document.layer_manager._reload()
     full_seconds = time.perf_counter() - start
     assert document.layer_manager.tree_row_count() >= 1000
-    # 差分路径（结构未变）：只更新单元格，远快于全清重建
-    start = time.perf_counter()
-    document.layer_manager._reload()
-    differential_seconds = time.perf_counter() - start
-    assert differential_seconds < full_seconds
+    # 差分路径（结构未变）：只更新单元格，不重建——判据是结构性事实
+    # （首行 item 对象身份复用 + 不清树），不用裸计时比较。V10 review
+    # follow-up（#1261）：旧断言 ``differential_seconds < full_seconds``
+    # 是两次 ~0.1s 的裸计时对比，无预热/无容差/无重复取样，噪声量级与
+    # 差值相当（实测跑出 0.0986 < 0.0959 随机红）——随机红会训练团队
+    # 忽略红色信号。
+    manager = document.layer_manager
+    manager._reload()  # 先跑一次全量，建立基线行
+    assert manager.tree_row_count() >= 1000, "全量刷新后应有 1000 行"
+    baseline_rows = [
+        manager.tree.topLevelItem(row)
+        for row in range(min(8, manager.tree.topLevelItemCount()))
+    ]
+    baseline_count = manager.tree.topLevelItemCount()
+    # 结构未变的差分刷新：清树会销毁全部 QTreeWidgetItem 并重新分配，
+    # 因此"首行对象身份被复用"等价于"没有走 tree.clear() 全量分支"。
+    # 该判据不依赖任何计时，且差分↔全量两侧都会真实翻转（见下）。
+    manager._reload()
+    assert manager.tree.topLevelItemCount() == baseline_count, "行数不得变化"
+    assert all(
+        manager.tree.topLevelItem(row) is item
+        for row, item in enumerate(baseline_rows)
+    ), "结构未变时差分刷新不得重建整棵树（首行 item 身份应复用）"
+    # 反向对照：结构变化必须走全量分支（身份翻转），否则上面的断言
+    # 可能在"永远不清树"的实现下恒绿。
+    document.edit_controller.create_layer("L-extra", "polygon")
+    document._sync_composition_now()
+    assert manager.tree.topLevelItem(0) is not baseline_rows[0], (
+        "结构变化时必须全量重建（首行 item 身份应替换）"
+    )
     # 状态同步（含 evaluator + help 缓存）在 1000 层下有界
     start = time.perf_counter()
     document._sync_action_state()

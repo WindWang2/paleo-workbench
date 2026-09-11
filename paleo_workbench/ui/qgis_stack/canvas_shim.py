@@ -248,6 +248,82 @@ class _LegendChrome(QWidget):
         painter.end()
 
 
+def dispatch_edit_pick(shim, tool, action: str, payload: dict) -> bool:
+    """edit-pick 回执的单一分发点（与 C++ ``edit_tools.cpp`` 回执词表对齐）。
+
+    返回 ``True`` = 工具已接受并提交（``tool_operation(True)``）；否则按回执
+    语义发 ``commit_rejected`` + ``tool_operation(False)``。
+
+    V10（#1258）：此前这段判定内联在 ``_on_edit_pick`` 闭包里，无法在
+    shim 层测试——`vertex_delete_rejected` 从 C++ 发出后在这里落空，Delete
+    键仍是"无声死键"，而测试因为直接打裸回调而显示通过。提成模块级函数后
+    "C++ 有回执 / shim 已消费" 这一对可以被纯 Python 测试钉住。
+    """
+    ok = False
+    rejection = ""
+    try:
+        if action == "vertex_moved":
+            commit = getattr(tool, "commit_vertex_move", None)
+            if commit is not None:
+                ok = bool(commit(
+                    payload["feature_id"],
+                    tuple(payload["path"]),
+                    (float(payload["x"]), float(payload["y"])),
+                ))
+        elif action == "feature_moved":
+            commit = getattr(tool, "commit_move", None)
+            if commit is not None:
+                ok = bool(commit(
+                    payload["feature_id"],
+                    float(payload["dx"]), float(payload["dy"]),
+                ))
+        elif action == "vertex_inserted":
+            commit = getattr(tool, "commit_vertex_insert", None)
+            if commit is not None:
+                ok = bool(commit(
+                    payload["feature_id"],
+                    tuple(payload["path"]),
+                    (float(payload["x"]), float(payload["y"])),
+                ))
+        elif action == "vertex_deleted":
+            commit = getattr(tool, "commit_vertex_delete", None)
+            if commit is not None:
+                ok = bool(commit(
+                    payload["feature_id"],
+                    tuple(payload["path"]),
+                ))
+        elif action == "vertex_delete_rejected":
+            # 守卫拒绝（低于最少顶点 / 无悬停顶点）——C++ 已发回执，这里
+            # 必须上浮成可感知的拒绝，不做无声死键。
+            rejection = "节点删除未生效：低于最少顶点或未悬停在可删除的顶点上"
+        elif action == "snap_feedback":
+            # V10：捕捉反馈上浮（info-only 信号，与工具操作解耦）。
+            try:
+                shim.snap_feedback.emit(dict(payload))
+            except Exception:
+                pass
+    except Exception:
+        ok = False
+    if ok:
+        try:
+            shim.tool_operation.emit(True)
+        except Exception:
+            pass
+        return True
+    if not rejection and action in {"vertex_inserted", "vertex_deleted"}:
+        # ADV-2 同款回执（review-5 #25）：被拒绝的节点编辑必须可感知，
+        # 不做无声死键（最常见原因：守卫拒绝/陈旧镜像路径）。
+        rejection = (
+            "节点编辑未写入：会话校验未通过（目标要素/路径已变化或低于最少顶点）")
+    if rejection:
+        try:
+            shim.commit_rejected.emit(rejection)
+            shim.tool_operation.emit(False)
+        except Exception:
+            pass
+    return False
+
+
 class QgisCanvasShim(QWidget):
     # 实际消费者 CompositeDocument 消费的信号契约与 QgisCanvasShim（原 UnifiedMapCanvas）一致：
     # tool_operation(bool), extent_changed(tuple), map_position_changed(tuple),
@@ -1174,60 +1250,7 @@ class QgisCanvasShim(QWidget):
                 payload = json.loads(payload_json)
             except Exception:
                 return
-            ok = False
-            try:
-                if action == "vertex_moved":
-                    commit = getattr(tool, "commit_vertex_move", None)
-                    if commit is not None:
-                        ok = bool(commit(
-                            payload["feature_id"],
-                            tuple(payload["path"]),
-                            (float(payload["x"]), float(payload["y"])),
-                        ))
-                elif action == "feature_moved":
-                    commit = getattr(tool, "commit_move", None)
-                    if commit is not None:
-                        ok = bool(commit(
-                            payload["feature_id"],
-                            float(payload["dx"]), float(payload["dy"]),
-                        ))
-                elif action == "vertex_inserted":
-                    commit = getattr(tool, "commit_vertex_insert", None)
-                    if commit is not None:
-                        ok = bool(commit(
-                            payload["feature_id"],
-                            tuple(payload["path"]),
-                            (float(payload["x"]), float(payload["y"])),
-                        ))
-                elif action == "vertex_deleted":
-                    commit = getattr(tool, "commit_vertex_delete", None)
-                    if commit is not None:
-                        ok = bool(commit(
-                            payload["feature_id"],
-                            tuple(payload["path"]),
-                        ))
-                elif action == "snap_feedback":
-                    # V10：捕捉反馈上浮（info-only 信号，与工具操作解耦）。
-                    try:
-                        shim.snap_feedback.emit(dict(payload))
-                    except Exception:
-                        pass
-            except Exception:
-                ok = False
-            if ok:
-                try:
-                    shim.tool_operation.emit(True)
-                except Exception:
-                    pass
-            elif action in {"vertex_inserted", "vertex_deleted"}:
-                # ADV-2 同款回执（review-5 #25）：被拒绝的节点编辑必须可感知，
-                # 不做无声死键（最常见原因：守卫拒绝/陈旧镜像路径）。
-                try:
-                    shim.commit_rejected.emit(
-                        "节点编辑未写入：会话校验未通过（目标要素/路径已变化或低于最少顶点）")
-                    shim.tool_operation.emit(False)
-                except Exception:
-                    pass
+            dispatch_edit_pick(shim, tool, action, payload)
 
         try:
             self.stack.set_edit_pick_callback(self.canvas_address, _on_edit_pick)

@@ -25,10 +25,14 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 
+# V10 review follow-up（#1263）：不再硬编码作者机器的 worktree 绝对路径——
+# 那让"默认可用"只在作者机器上成立。改为本仓库的相对约定位置；跨 worktree
+# 复用请显式设 PALEO_QGIS_BUILD_DIR。
+_VENDOR_SUBDIR = ("native", "qgis_render_bridge", "build", "qgis-vendor")
+
 VENDOR_BIN = Path(os.environ.get(
     "PALEO_QGIS_BUILD_DIR",
-    r"C:\Users\wangj.KEVIN\projects\paleo-workbench\.worktrees"
-    r"\qgis-native-authoring-v7\native\qgis_render_bridge\build\qgis-vendor",
+    str(REPO.joinpath(*_VENDOR_SUBDIR)),
 )) / "output" / "bin"
 
 
