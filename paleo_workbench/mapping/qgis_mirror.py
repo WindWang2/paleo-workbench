@@ -651,9 +651,14 @@ def mirror_snapshot_to_stack(
                         "changed": changed,
                         "removed_ids": removed,
                     })
-        full_collection = json.dumps(
-            {"type": "FeatureCollection", "features": features})
         delta_supported = _stack_supports_delta(stack)
+        if delta_json and delta_supported:
+            # C++ applies the delta and ignores the FeatureCollection when
+            # delta_applied (#1272). Do not serialize 100k features.
+            full_collection = '{"type":"FeatureCollection","features":[]}'
+        else:
+            full_collection = json.dumps(
+                {"type": "FeatureCollection", "features": features})
         upsert_kwargs = {
             "is_reference": metadata.get("reference") == "true",
             "is_editable": metadata.get("editable") == "true",

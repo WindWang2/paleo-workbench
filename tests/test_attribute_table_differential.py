@@ -280,7 +280,7 @@ def test_composite_single_attribute_change_updates_one_row_in_place(qtbot, item_
     controller, layer, dialog = _composite_dialog(qtbot, 300)
     facies_column = _column_of(dialog, "相带类型")
     row = _row_of(dialog, "f00007")
-    untouched_item = dialog.table.item(_row_of(dialog, "f00008"), facies_column)
+    untouched = dialog.table.item(_row_of(dialog, "f00008"), facies_column).text()
 
     item_factory["n"] = 0  # 只统计编辑之后的创建
     layer.edit_session.change_attribute("f00007", "facies", "深湖")
@@ -288,8 +288,7 @@ def test_composite_single_attribute_change_updates_one_row_in_place(qtbot, item_
 
     assert item_factory["n"] == 0, "单要素属性变更不得重建任何单元格 item"
     assert dialog.table.item(row, facies_column).text() == "深湖"
-    # 未触及行的 item 对象原样保留（非重建）
-    assert dialog.table.item(_row_of(dialog, "f00008"), facies_column) is untouched_item
+    assert dialog.table.item(_row_of(dialog, "f00008"), facies_column).text() == untouched
     assert dialog.table.rowCount() == 300
     # 权威数据一致
     assert layer.edit_session.feature("f00007").attributes["facies"] == "深湖"
@@ -321,20 +320,20 @@ def test_composite_full_rebuild_on_structure_changes(qtbot, item_factory):
     layer.edit_session.add_feature(_polygon_feature("brand-new", "New"))
     controller.content_changed.emit(layer.id)
     assert dialog.table.rowCount() == 81
-    assert item_factory["n"] > 0
+    assert item_factory["n"] == 0  # virtual model: no QTableWidgetItem
 
     # 新属性字段 → 列结构变化 → 全量重建
     item_factory["n"] = 0
     layer.edit_session.change_attribute("f00007", "brand_new_key", "x")
     controller.content_changed.emit(layer.id)
     assert dialog.table.columnCount() > facies_column + 1
-    assert item_factory["n"] > 0
+    assert item_factory["n"] == 0
 
     # 提交（保存编辑）→ 会话更替 → 全量重建
     item_factory["n"] = 0
     layer.edit_session.commit_changes()
     controller.content_changed.emit(layer.id)
-    assert item_factory["n"] > 0
+    assert item_factory["n"] == 0
     assert dialog.table.rowCount() == 81
 
 

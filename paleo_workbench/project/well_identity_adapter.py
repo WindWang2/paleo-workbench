@@ -80,10 +80,11 @@ class WellIdentityAdapter:
         mapping: dict[str, str] = {}
         if self._service is not None:
             try:
-                for asset in self._service.list_assets(include_trashed=False):
-                    legacy = getattr(asset, "legacy_resource_id", None)
+                identities = self._service.list_asset_identities(
+                    include_trashed=False)
+                for asset_id, _name, legacy in identities:
                     if legacy:
-                        mapping[asset.id] = str(legacy)
+                        mapping[asset_id] = str(legacy)
             except Exception:
                 mapping = {}
         self._legacy_by_asset = mapping
