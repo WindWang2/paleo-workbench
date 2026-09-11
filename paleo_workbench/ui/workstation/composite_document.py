@@ -1102,6 +1102,12 @@ class CompositeDocument(QWidget):
         measure_updated = getattr(self.canvas, "measure_updated", None)
         if measure_updated is not None:
             measure_updated.connect(self._on_measure_updated)
+        # V10（review-5 #20）：捕获过程反馈接到测距栏（数字化与测距互斥，
+        # 标签复用零 UI 改动）；snap_feedback 保持纯信号面（消费方按需接线，
+        # 状态栏 snapping 标签归 update_state 所有——避免高频闪烁）。
+        capture_progress = getattr(self.canvas, "capture_progress", None)
+        if capture_progress is not None:
+            capture_progress.connect(self._on_capture_progress)
         measure_canceled = getattr(self.canvas, "measure_canceled", None)
         if measure_canceled is not None:
             measure_canceled.connect(lambda: self.status_bar.set_measure(""))
@@ -2021,7 +2027,7 @@ class CompositeDocument(QWidget):
     _CANVAS_TOOL_COMMANDS = frozenset({
         "pan", "zoom_in", "zoom_out", "identify", "select", "select_rectangle",
         "measure_distance", "add_point", "add_line", "add_polygon",
-        "move_feature", "vertex", "reshape",
+        "move_feature", "vertex", "reshape", "add_ring", "add_part",
     })
 
     def _ensure_identify_layer_current(self) -> None:
@@ -2119,11 +2125,13 @@ class CompositeDocument(QWidget):
             self._save_edits_with_feedback()
         elif command_id == "rollback":
             self.edit_controller.rollback_edits()
-        elif command_id in {"undo", "redo", "delete_selected"}:
+        elif command_id in {"undo", "redo", "delete_selected", "duplicate_selected"}:
             self.edit_controller.edit_command(command_id)
-        elif command_id in {"split", "merge"}:
+        elif command_id in {"split", "merge", "explode_multipart", "collect_multipart"}:
             ok, message = self.edit_controller.geometry_command(command_id)
             if not ok:
+                self.status_message.emit(message)
+            else:
                 self.status_message.emit(message)
         elif command_id == "repair_geometry":
             layer_id = self.edit_controller.active_layer_id
@@ -2398,6 +2406,25 @@ class CompositeDocument(QWidget):
         action = str(payload.get("action") or "")
         suffix = " 完成" if action == "measure_completed" else ""
         self.status_bar.set_measure(f"测距: {text} · {max(segment_count - 1, 0)} 段{suffix}")
+
+    def _on_capture_progress(self, payload: dict) -> None:
+        """V10 捕获过程反馈（PwbDigitizeTool "digitizing" 流）：已采点数/段长/总长。
+
+        平面地图单位（与桥 payload 的 planar:true 一致）；有 snapping 命中时
+        附层名提示（数字化过程中即可见吸附目标）。
+        """
+        try:
+            points = payload.get("points") or ()
+            count = len(points)
+            total = float(payload.get("total") or 0.0)
+            segment = float(payload.get("segments") or 0.0)
+            text = f"数字化: {count} 点 · 段长 {segment:.4g} · 总长 {total:.4g}"
+            snap = payload.get("snap") or {}
+            if snap.get("matched") and snap.get("layer_doc_id"):
+                text += f" · 吸附 {snap['layer_doc_id']}"
+            self.status_bar.set_measure(text)
+        except Exception:
+            pass
 
     def _measure_segment_label(self, distance: float) -> str:
         """分段距离的诚实标注（V9 W8）：测地(米) / 平面(地图单位)。

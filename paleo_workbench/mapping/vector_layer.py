@@ -21,15 +21,19 @@ from paleo_workbench.mapping.edit_delta import (
 
 __all__ = [
     "AddFeatureCommand",
+    "AddPartCommand",
     "AddRingCommand",
     "ChangeAttributeCommand",
     "DeleteFeatureCommand",
+    "DeletePartCommand",
     "DeleteRingCommand",
     "DeleteVertexCommand",
+    "DuplicateFeatureCommand",
     "EditCommand",
     "InsertVertexCommand",
     "MergeFeaturesCommand",
     "MoveFeatureCommand",
+    "MovePartCommand",
     "SetGeometryCommand",
     "SetVertexCommand",
     "SplitFeatureCommand",
@@ -93,7 +97,7 @@ def _translate(value: object, dx: float, dy: float) -> object:
     return [_translate(item, dx, dy) for item in value]
 
 
-def _path_parent(value: object, path: tuple[int, ...]) -> tuple[list, int]:
+def _path_parent(value: object, path: tuple[int, ...], *, allow_append: bool = False) -> tuple[list, int]:
     if not path:
         raise ValueError("vertex path is required")
     current = value
@@ -101,9 +105,34 @@ def _path_parent(value: object, path: tuple[int, ...]) -> tuple[list, int]:
         if not isinstance(current, list) or index < 0 or index >= len(current):
             raise IndexError("vertex path is outside the geometry")
         current = current[index]
-    if not isinstance(current, list) or path[-1] < 0 or path[-1] >= len(current):
+    # allow_append：插入语义允许 index == len（追加到末位）。
+    limit = len(current) + 1 if allow_append else len(current)
+    if not isinstance(current, list) or path[-1] < 0 or path[-1] >= limit:
         raise IndexError("vertex path is outside the geometry")
     return current, path[-1]
+
+
+def _closed_ring(parent: object) -> bool:
+    """多边形 ring 坐标表是否以闭合形式存储（首 == 尾且 ≥4 点）。
+
+    仅对 Polygon/MultiPolygon 的 ring 调用；闭合 LineString 的首尾重合是
+    独立顶点（移动一端不带动另一端），不适用本判定。
+    """
+    return (
+        isinstance(parent, list)
+        and len(parent) >= 4
+        and isinstance(parent[0], list)
+        and parent[0] == parent[-1]
+    )
+
+
+def _is_ring_context(kind: str, path: tuple[int, ...]) -> bool:
+    """路径末层容器是否为多边形 ring（Polygon [ring,v] / MultiPolygon [part,ring,v]）。"""
+    if kind == "Polygon":
+        return len(path) == 2
+    if kind == "MultiPolygon":
+        return len(path) == 3
+    return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,6 +246,28 @@ class AddRingCommand(SetGeometryCommand):
 class DeleteRingCommand(SetGeometryCommand):
     def __init__(self, before: VectorFeature, after: VectorFeature):
         EditCommand.__init__(self, "delete_ring", {before.feature_id: before}, {after.feature_id: after})
+
+
+class DuplicateFeatureCommand(EditCommand):
+    """复制要素（V10）：全属性 + 几何复制，新 id；审计流与 add 区分。"""
+
+    def __init__(self, feature: VectorFeature):
+        EditCommand.__init__(self, "duplicate_feature", {feature.feature_id: None}, {feature.feature_id: feature})
+
+
+class AddPartCommand(SetGeometryCommand):
+    def __init__(self, before: VectorFeature, after: VectorFeature):
+        EditCommand.__init__(self, "add_part", {before.feature_id: before}, {after.feature_id: after})
+
+
+class DeletePartCommand(SetGeometryCommand):
+    def __init__(self, before: VectorFeature, after: VectorFeature):
+        EditCommand.__init__(self, "delete_part", {before.feature_id: before}, {after.feature_id: after})
+
+
+class MovePartCommand(SetGeometryCommand):
+    def __init__(self, before: VectorFeature, after: VectorFeature):
+        EditCommand.__init__(self, "move_part", {before.feature_id: before}, {after.feature_id: after})
 
 
 class VectorLayer:
@@ -501,23 +552,55 @@ class VectorEditSession:
             self._record(SetVertexCommand(before, after))
             return
         parent, index = _path_parent(geometry["coordinates"], tuple(path))
+        closed = _is_ring_context(str(geometry["type"]), tuple(path)) and _closed_ring(parent)
         parent[index] = list(_point(coordinate))
+        if closed:
+            # 闭环不变量（V10）：拖动 ring 首顶点或闭合重复点必须同步另一端，
+            # 否则权威 GeoJSON ring 不闭合（RFC 7946 违规，下游校验被打爆）。
+            if index == 0:
+                parent[-1] = list(parent[0])
+            elif index == len(parent) - 1:
+                parent[0] = list(parent[-1])
         after = VectorFeature(before.feature_id, geometry, before.attributes)
         self._record(SetVertexCommand(before, after))
 
     def insert_vertex(self, feature_id: str, path: tuple[int, ...], coordinate: object) -> None:
         before = self.feature(feature_id)
         geometry = _thaw(before.geometry)
-        parent, index = _path_parent(geometry["coordinates"], tuple(path))
-        parent.insert(index, list(_point(coordinate)))
+        key = tuple(path)
+        parent, index = _path_parent(geometry["coordinates"], key, allow_append=True)
+        value = list(_point(coordinate))
+        closed = _is_ring_context(str(geometry["type"]), key) and _closed_ring(parent)
+        if closed and index >= len(parent) - 1:
+            # 追加到闭合重复点之后会打开 ring；唯一有意义的"末尾插入"位是
+            # 闭合点之前。
+            index = len(parent) - 1
+        parent.insert(index, value)
+        if closed and index == 0:
+            # 新首顶点成为环起点，闭合重复点跟随。
+            parent[-1] = list(value)
         after = VectorFeature(before.feature_id, geometry, before.attributes)
         self._record(InsertVertexCommand(before, after))
 
     def delete_vertex(self, feature_id: str, path: tuple[int, ...]) -> None:
         before = self.feature(feature_id)
         geometry = _thaw(before.geometry)
-        parent, index = _path_parent(geometry["coordinates"], tuple(path))
+        key = tuple(path)
+        parent, index = _path_parent(geometry["coordinates"], key)
+        closed = _is_ring_context(str(geometry["type"]), key) and _closed_ring(parent)
+        if closed and index == len(parent) - 1:
+            # 只删闭合重复点等于打开 ring；该路径语义上删除最后一个真实顶点。
+            index = len(parent) - 2
         del parent[index]
+        kind = str(geometry["type"])
+        if closed:
+            if len(parent) < 4:
+                raise ValueError("a polygon ring must keep at least three vertices")
+            parent[-1] = list(parent[0])
+        elif kind in ("LineString", "MultiLineString") and len(parent) < 2:
+            raise ValueError("a line must keep at least two vertices")
+        elif kind == "MultiPoint" and not parent:
+            raise ValueError("a multipoint must keep at least one vertex")
         after = VectorFeature(before.feature_id, geometry, before.attributes)
         self._record(DeleteVertexCommand(before, after))
 
@@ -553,6 +636,51 @@ class VectorEditSession:
         del rings[ring_index]
         after = VectorFeature(before.feature_id, geometry, before.attributes)
         self._record(DeleteRingCommand(before, after))
+
+    def duplicate_feature(self, feature_id: str, new_feature_id: str | None = None) -> VectorFeature:
+        """复制要素（V10）：几何 + 属性全拷贝，新 id（默认派生 uuid 后缀）。"""
+        source = self.feature(feature_id)
+        if new_feature_id and new_feature_id in self._working:
+            # 显式 id 冲突即拒绝（review-2 #2）：DuplicateFeatureCommand 的
+            # before={id: None} 会让 apply 覆盖既有要素、undo 删除原要素。
+            raise ValueError(f"feature {new_feature_id!r} already exists")
+        duplicate = VectorFeature(
+            new_feature_id if new_feature_id else f"{source.feature_id}-copy-{uuid.uuid4().hex[:8]}",
+            _thaw(source.geometry),
+            source.attributes,
+        )
+        self._record(DuplicateFeatureCommand(duplicate))
+        return duplicate
+
+    def add_part(self, feature_id: str, geometry: Mapping[str, Any]) -> None:
+        """附加部件（V10）：新整体几何（QGIS addPart 语义：单部件自动升多部件）
+        由调用方（QGIS 几何执行）计算，本会话只落命令——事务/undo/delta 链完整。"""
+        before = self.feature(feature_id)
+        after = VectorFeature(before.feature_id, geometry, before.attributes)
+        self._record(AddPartCommand(before, after))
+
+    def delete_part(self, feature_id: str, geometry: Mapping[str, Any]) -> None:
+        """移除部件（V10）：同 :meth:`add_part`，几何由 QGIS deletePart 计算。"""
+        before = self.feature(feature_id)
+        after = VectorFeature(before.feature_id, geometry, before.attributes)
+        self._record(DeletePartCommand(before, after))
+
+    def move_part(self, feature_id: str, part_index: int, dx: float, dy: float) -> None:
+        """平移单个部件（V10）：纯坐标平移（无几何语义争议，会话内执行）。"""
+        before = self.feature(feature_id)
+        geometry = _thaw(before.geometry)
+        kind = str(geometry["type"])
+        if kind not in {"MultiPoint", "MultiLineString", "MultiPolygon"}:
+            raise ValueError("moving a part requires a multipart geometry")
+        parts = geometry["coordinates"]
+        if part_index < 0 or part_index >= len(parts):
+            raise IndexError("part index is outside the geometry")
+        if kind == "MultiPolygon":
+            parts[part_index] = [_translate(ring, dx, dy) for ring in parts[part_index]]
+        else:
+            parts[part_index] = _translate(parts[part_index], dx, dy)
+        after = VectorFeature(before.feature_id, geometry, before.attributes)
+        self._record(MovePartCommand(before, after))
 
     def split_feature(self, feature_id: str, replacements: Iterable[VectorFeature]) -> None:
         before_feature = self.feature(feature_id)

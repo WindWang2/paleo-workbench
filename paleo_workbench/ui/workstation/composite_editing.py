@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
@@ -28,6 +29,7 @@ _logger = logging.getLogger(__name__)
 from paleo_workbench.mapping.geometry_planar import (
     distance_to_segment,
     extent_of_geometries,
+    point_in_polygon_scalar,
     point_in_ring_scalar,
 )
 from paleo_workbench.mapping.geometry_schema import new_feature_id
@@ -48,8 +50,10 @@ from paleo_workbench.mapping.map_tools import (
     MeasureDistanceTool,
     MoveFeatureTool,
     PanTool,
+    PartCaptureTool,
     RectangleSelectTool,
     ReshapeTool,
+    RingCaptureTool,
     SelectTool,
     VertexTool,
     ZoomTool,
@@ -310,6 +314,77 @@ def pick_topmost_visible_layer_id(layer_ids_bottom_up, visible_ids) -> str | Non
         if layer_id in visible:
             return layer_id
     return None
+
+
+def _plain_geometry(result):
+    """facade GeometryResult/GeometryListResult → 纯 GeoJSON（engine 披露留给
+    EditDelta 溯源；session 命令只消费纯几何）。显式属性判定：空列表/空 dict
+    是合法结果，不得 falsy-fallthrough 回 result 本身（review-2 #5）。"""
+    if hasattr(result, "geometries"):
+        return list(result.geometries)
+    if hasattr(result, "geometry"):
+        return result.geometry
+    return result
+
+
+def _nearest_interior_ring(geometry: Mapping[str, Any], point) -> int | None:
+    """内环定位（V10 delete_ring）：pick 点到各内环边段最近者。"""
+    px, py = float(point[0]), float(point[1])
+    coords = geometry.get("coordinates") or []
+    best_index: int | None = None
+    best = math.inf
+    for index in range(1, len(coords)):
+        ring = coords[index]
+        edges = len(ring) - 1
+        # 未闭合存储的环（外部导入可达）：补 wrap-around 边（review-2 #4）。
+        unclosed = list(ring[0]) != list(ring[-1])
+        total_edges = edges + (1 if unclosed and len(ring) >= 3 else 0)
+        for i in range(total_edges):
+            a = ring[i]
+            b = ring[(i + 1) % len(ring)]
+            d = distance_to_segment((px, py), a, b)
+            if d < best:
+                best = d
+                best_index = index
+    return best_index
+
+
+def _nearest_part(geometry: Mapping[str, Any], point) -> int | None:
+    """部件定位（V10 delete/move_part）：Multi 几何中含 pick 点的部件，
+    否则最近顶点距离的部件。非 Multi 几何返回 None。
+
+    - MultiPoint：part 是裸坐标（无嵌套），按点距离处理（review-2 #1 修复：
+      此前按环遍历顶点会 TypeError）。
+    - MultiPolygon 包含判定用洞感知的 point_in_polygon_scalar（review-2 #3：
+      point_in_ring_scalar 只测外环，嵌套部件会错位）。
+    """
+    gtype = str(geometry.get("type") or "")
+    if not gtype.startswith("Multi"):
+        return None
+    px, py = float(point[0]), float(point[1])
+    parts = geometry.get("coordinates") or []
+    best_index: int | None = None
+    best = math.inf
+    for index, part in enumerate(parts):
+        if gtype == "MultiPoint":
+            d = math.hypot(px - float(part[0]), py - float(part[1]))
+            if d < best:
+                best = d
+                best_index = index
+            continue
+        if gtype == "MultiPolygon":
+            if point_in_polygon_scalar((px, py),
+                                       {"type": "Polygon", "coordinates": part}):
+                return index
+            ring = part[0] if part else []
+        else:
+            ring = part
+        for vertex in ring or ():
+            d = math.hypot(px - float(vertex[0]), py - float(vertex[1]))
+            if d < best:
+                best = d
+                best_index = index
+    return best_index
 
 
 def _crs_parseable(crs: str) -> bool:
@@ -992,6 +1067,10 @@ class CompositeEditController(QObject):
         if not allowed:
             return  # 原因由调用方（门禁入口）负责呈现
         self._open_session(layer)
+        # V10：新会话开启后 kind-bound 工具的失配重绑（此前只在切层/内容同步
+        # 链上触发——"add_line 激活 → 切到面层 → 开始编辑"会把线捕获工具留在
+        # 面图层上）。
+        self._rebind_active_tool()
         self.state_changed.emit()
 
     def ensure_layer_session(self, layer_id: str):
@@ -1178,6 +1257,64 @@ class CompositeEditController(QObject):
 
         return _apply
 
+    def _apply_captured_ring(self, session, feature_id: str, ring_geometry) -> bool:
+        """V10 捕获环 → session.add_ring（外环坐标，自动闭合守卫在 session）。
+
+        包含性守卫（review-5 #24 最小诚实版）：内环至少一个顶点须严格落在
+        目标面外环内——完全在外/跨界的"洞"拒绝（QGIS addRing 同语义的宿主
+        近似；洞-洞重叠与完整 OGC 校验仍归保存期 validate，见 limitations）。
+        """
+        try:
+            ring: list = []
+            gtype = str(ring_geometry.get("type") or "")
+            coords = ring_geometry.get("coordinates")
+            if gtype == "Polygon" and coords:
+                ring = [list(p) for p in coords[0]]
+            elif gtype == "MultiPolygon" and coords and coords[0]:
+                ring = [list(p) for p in coords[0][0]]
+            feature = session.feature(feature_id)
+            exterior = (feature.as_record()["geometry"].get("coordinates") or [[None]])[0]
+            if not any(
+                point_in_ring_scalar(float(p[0]), float(p[1]), exterior)
+                for p in ring
+            ):
+                return False
+            session.add_ring(feature_id, ring)
+            self.content_changed.emit(session.layer.id)
+            return True
+        except Exception:
+            return False
+
+    def _make_part_applier(self, session, feature_id: str):
+        """构建部件应用器（桥 geometry.add_part → session.add_part）。"""
+        try:
+            import qgis_render_bridge as native
+
+            add_part_fn = getattr(native.geometry, "add_part", None)
+            if not callable(add_part_fn):
+                return None
+        except Exception:
+            return None
+        import json
+
+        def _apply(part_geometry) -> bool:
+            try:
+                feature = session.feature(feature_id)
+                target = json.dumps(feature.as_record()["geometry"], ensure_ascii=False)
+                part = json.dumps(dict(part_geometry), ensure_ascii=False)
+                merged = json.loads(add_part_fn(target, part))
+                session.add_part(feature_id, merged)
+                self.content_changed.emit(session.layer.id)
+                return True
+            except Exception:
+                return False
+
+        return _apply
+
+    def _apply_captured_part(self, session, feature_id: str, part_geometry) -> bool:
+        applier = self._make_part_applier(session, feature_id)
+        return bool(applier and applier(part_geometry))
+
     def _propagate_shared_vertex(
         self,
         feature_id: str,
@@ -1329,6 +1466,41 @@ class CompositeEditController(QObject):
                         feature_id=feature_id,
                         apply_reshape=applier,
                     )
+                elif action_id == "add_ring":
+                    # V10：native-only 捕获环——addPolygon 数字化器采环，
+                    # session.add_ring 落命令（与 reshape 同款双重防御）。
+                    if not hasattr(self._canvas, "canvas_address"):
+                        return
+                    if self._kinds.get(layer.id) != "polygon" or len(layer.selection) != 1:
+                        return
+                    feature_id = next(iter(sorted(layer.selection)), "")
+                    if not feature_id:
+                        return
+                    tool = RingCaptureTool(
+                        session,
+                        feature_id=feature_id,
+                        apply_ring=lambda ring_geometry, _s=session, _f=feature_id:
+                            self._apply_captured_ring(_s, _f, ring_geometry),
+                    )
+                elif action_id == "add_part":
+                    # V10：native-only 捕获部件——digitizer 随图层 kind，
+                    # 桥 geometry.add_part 执行，session.add_part 落命令。
+                    if not hasattr(self._canvas, "canvas_address"):
+                        return
+                    if len(layer.selection) != 1:
+                        return
+                    feature_id = next(iter(sorted(layer.selection)), "")
+                    if not feature_id or self._make_part_applier(session, feature_id) is None:
+                        return
+                    tool = PartCaptureTool(
+                        session,
+                        feature_id=feature_id,
+                        apply_part=lambda part_geometry, _s=session, _f=feature_id:
+                            self._apply_captured_part(_s, _f, part_geometry),
+                    )
+                    tool.native_digitize_kind = {
+                        "point": "addPoint", "line": "addLine", "polygon": "addPolygon",
+                    }.get(self._kinds.get(layer.id, ""), "pan")
                 else:
                     return
         self._active_tool_action = action_id
@@ -1341,7 +1513,8 @@ class CompositeEditController(QObject):
 
     def _rebind_active_tool(self) -> None:
         action = self._active_tool_action
-        session_actions = {"add_point", "add_line", "add_polygon", "move_feature", "vertex", "reshape"}
+        session_actions = {"add_point", "add_line", "add_polygon", "move_feature",
+                           "vertex", "reshape", "add_ring", "add_part"}
         if action in session_actions:
             layer = self.active_layer
             # 会话级工具在会话消失（保存/回滚/flush 提交）后必须回落 pan：
@@ -1366,7 +1539,14 @@ class CompositeEditController(QObject):
                 return
             # ADV-3：reshape 目标是单选集要素——选集变化（删除/清空）导致
             # 失配时回落 pan 并提示，不得把用户卡在无目标的重塑工具里。
-            if action == "reshape" and len(layer.selection) != 1:
+            # V10（review-3 #5）：add_ring/add_part 同为"激活时锁定单选目标"
+            # 的工具，获得同款守卫——否则选集扰动后陈旧 feature_id 工具静默
+            # 存活，捕获提交到已被取消选择/删除的要素。
+            if action in {"reshape", "add_ring", "add_part"} and len(layer.selection) != 1:
+                self.activate_tool("pan")
+                self.state_changed.emit()
+                return
+            if action == "add_ring" and self._kinds.get(layer.id) != "polygon":
                 self.activate_tool("pan")
                 self.state_changed.emit()
                 return
@@ -1638,8 +1818,10 @@ class CompositeEditController(QObject):
             if command_id == "merge":
                 if not layer.selection:
                     return False, "请先选择要合并的要素"
+                # D2 属性策略确定性：选集是 set（无序）——按 feature_id 排序
+                # 后"首个选中要素"的属性成为合并结果属性。
                 with session.edit_source("merge(command)"):
-                    new_id = merge_selected_polygons(session, layer.selection)
+                    new_id = merge_selected_polygons(session, sorted(layer.selection))
                 layer.set_selection((new_id,))
                 self.content_changed.emit(layer.id)
                 self.state_changed.emit()
@@ -1662,6 +1844,10 @@ class CompositeEditController(QObject):
                 self.content_changed.emit(polygon_layer.id)
                 self.state_changed.emit()
                 return True, "已按切割线分割多边形"
+            if command_id == "explode_multipart":
+                return self._explode_selected_multipart(layer, session)
+            if command_id == "collect_multipart":
+                return self._collect_selected_multipart(layer, session)
         except (KeyError, RuntimeError, ValueError) as exc:
             return False, str(exc)
         finally:
@@ -1675,6 +1861,168 @@ class CompositeEditController(QObject):
                     except Exception:  # noqa: BLE001 — 刷新绝不吞命令结果
                         pass
         return False, f"未知几何命令 {command_id}"
+
+    def _explode_selected_multipart(self, layer, session) -> tuple[bool, str]:
+        """V10 拆分多部件：每个选中的 multipart 要素按部件拆为 N 个要素。
+
+        几何走桥 multipart_to_singlepart（shapely 回退 facade）；属性全继承
+        （一个地质体被细分）；命令复用 split_feature（delta=split_feature，
+        replacements=related ids）。返回 (ok, 消息)。
+        """
+        from paleo_workbench.mapping.geometry_operations import multipart_to_singlepart
+
+        try:
+            exploded_any = False
+            skipped = 0
+            new_selection: list[str] = []
+            session.begin_edit_command()  # V10（review-4 #6）：批量拆分单宏 = 单 undo
+            try:
+                for feature_id in sorted(layer.selection):
+                    feature = session.feature(feature_id)
+                    gtype = str(feature.geometry.get("type") or "")
+                    if not gtype.startswith("Multi"):
+                        new_selection.append(feature_id)
+                        skipped += 1
+                        continue
+                    parts = [
+                        part
+                        for part in _plain_geometry(multipart_to_singlepart(
+                            feature.as_record()["geometry"]))
+                        if str(part.get("type") or "") in {"Point", "LineString", "Polygon"}
+                        and bool(part.get("coordinates"))
+                    ]
+                    if len(parts) < 2:
+                        new_selection.append(feature_id)
+                        skipped += 1
+                        continue
+                    replacements = [
+                        VectorFeature(
+                            new_feature_id("explode"),
+                            part,
+                            feature.attributes,
+                        )
+                        for part in parts
+                    ]
+                    with session.edit_source("explode_multipart(command)"):
+                        session.split_feature(feature_id, replacements)
+                    new_selection.extend(r.feature_id for r in replacements)
+                    exploded_any = True
+            except Exception:
+                session.destroy_edit_command()
+                raise
+            session.end_edit_command()
+            if not exploded_any:
+                return False, "选中的要素都不是多部件几何"
+            layer.set_selection(new_selection)
+            self._topology.refresh_error_count(layer)
+            self.content_changed.emit(layer.id)
+            self.state_changed.emit()
+            message = "已拆分为单部件要素"
+            if skipped:
+                message += f"（{skipped} 个非多部件要素保持原样）"
+            return True, message
+        except (KeyError, RuntimeError, ValueError) as exc:
+            return False, str(exc)
+
+    def _collect_selected_multipart(self, layer, session) -> tuple[bool, str]:
+        """V10 组合多部件：>=2 个同类型单部件选中要素 → 一个多部件要素。
+
+        几何走桥 singlepart_to_multipart（collect 不 dissolve——与 merge 的
+        union 语义区分）；属性 = 首个选中要素（选择序，D2 策略）；命令复用
+        merge_features。
+        """
+        from paleo_workbench.mapping.geometry_operations import singlepart_to_multipart
+
+        try:
+            selected = sorted(layer.selection)
+            if len(selected) < 2:
+                return False, "组合多部件需要至少两个要素"
+            features = [session.feature(feature_id) for feature_id in selected]
+            kinds = {str(f.geometry.get("type") or "") for f in features}
+            if len(kinds) != 1 or any(k.startswith("Multi") for k in kinds):
+                return False, "组合多部件需要同类型的单部件要素"
+            collected = _plain_geometry(singlepart_to_multipart(
+                [f.as_record()["geometry"] for f in features]))
+            merged = VectorFeature(
+                new_feature_id("collect"), collected, features[0].attributes)
+            with session.edit_source("collect_multipart(command)"):
+                session.merge_features(selected, merged)
+            layer.set_selection((merged.feature_id,))
+            self._topology.refresh_error_count(layer)
+            self.content_changed.emit(layer.id)
+            self.state_changed.emit()
+            return True, "已组合为多部件要素"
+        except (KeyError, RuntimeError, ValueError) as exc:
+            return False, str(exc)
+
+    def _ring_and_part_commands(self, command_id: str, pick_point=None) -> tuple[bool, str]:
+        """V10 环/部件编辑命令（显式 pick_point 定位目标环/部件）。
+
+        delete_ring：单选面要素，pick 点落在（或最近于）某个内环的边界 →
+        删除该内环。delete_part：单选多部件要素，pick 点命中/最近于某部件
+        → 桥 delete_part。move_part：同 delete_part 定位 + dx/dy 平移。
+        pick_point=None 时返回提示（工具面交互模式后续轮次接线，见
+        known-limitations）。
+        """
+        layer = self.active_layer
+        if layer is None:
+            return False, "没有活动的矢量图层"
+        session = layer.edit_session
+        if session is None:
+            return False, "请先开始编辑"
+        if len(layer.selection) != 1:
+            return False, "该操作需要恰好选中一个要素"
+        if pick_point is None:
+            return False, "需要提供定位点（pick_point）"
+        feature_id = next(iter(layer.selection))
+        try:
+            feature = session.feature(feature_id)
+            geometry = feature.as_record()["geometry"]
+            if command_id == "delete_ring":
+                ring_index = _nearest_interior_ring(geometry, pick_point)
+                if ring_index is None:
+                    return False, "定位点附近没有内环"
+                with session.edit_source("delete_ring(command)"):
+                    session.delete_ring(feature_id, ring_index)
+                self._topology.refresh_error_count(layer)
+                self.content_changed.emit(layer.id)
+                self.state_changed.emit()
+                return True, "已删除内环"
+            if command_id == "delete_part":
+                part_index = _nearest_part(geometry, pick_point)
+                if part_index is None:
+                    return False, "定位点附近没有部件"
+                import json as _json
+
+                try:
+                    import qgis_render_bridge as native
+
+                    new_geometry = _json.loads(
+                        native.geometry.delete_part(_json.dumps(geometry), part_index))
+                except Exception as exc:
+                    return False, f"删除部件失败：{exc}"
+                with session.edit_source("delete_part(command)"):
+                    session.delete_part(feature_id, new_geometry)
+                self._topology.refresh_error_count(layer)
+                self.content_changed.emit(layer.id)
+                self.state_changed.emit()
+                return True, "已删除部件"
+            if command_id == "move_part":
+                if "delta" not in (pick_point if isinstance(pick_point, dict) else {}):
+                    return False, "move_part 需要 pick_point={'point':(x,y),'delta':(dx,dy)}"
+                spec = pick_point
+                part_index = _nearest_part(geometry, spec.get("point"))
+                if part_index is None:
+                    return False, "定位点附近没有部件"
+                dx, dy = spec.get("delta", (0.0, 0.0))
+                with session.edit_source("move_part(command)"):
+                    session.move_part(feature_id, part_index, float(dx), float(dy))
+                self.content_changed.emit(layer.id)
+                self.state_changed.emit()
+                return True, "已平移部件"
+        except (KeyError, RuntimeError, ValueError) as exc:
+            return False, str(exc)
+        return False, f"未知命令 {command_id}"
 
     # -- 多图层识别 -------------------------------------------------------------
 
@@ -1845,6 +2193,20 @@ class CompositeEditController(QObject):
             self.content_changed.emit(layer.id)
             self.state_changed.emit()
             return True
+        if command_id == "duplicate_selected" and session is not None and layer.selection:
+            # V10：全属性 + 几何复制，新 id；一个动作 = 一个 undo 单元/要素。
+            duplicates: list[str] = []
+            for feature_id in sorted(layer.selection):
+                with session.edit_source("duplicate_selected(command)"):
+                    duplicate = session.duplicate_feature(feature_id)
+                duplicates.append(duplicate.feature_id)
+            layer.set_selection(duplicates)
+            # 精确重叠副本即拓扑重叠事实：与 delete/几何命令同步刷新计数
+            # （review-1 #10——否则 merge/collect 门禁读到过期 0）。
+            self._topology.refresh_error_count(layer)
+            self.content_changed.emit(layer.id)
+            self.state_changed.emit()
+            return True
         return False
 
     # -- 快照与状态 -------------------------------------------------------------
@@ -1992,6 +2354,42 @@ class CompositeEditController(QObject):
         inputs["can_next_extent"] = can_next_extent
         return inputs
 
+    # V10（review-4 #4）：两个选集事实合一趟扫描 + memo。宿主每次 state_changed
+    # 会重建 collector 多次（各 provider 各取一键）——O(selection) 的扫描不
+    # memo 会在大选集下放大成数百毫秒。memo 键含 (会话修订, 选集内容指纹)。
+    def _selection_geometry_facts(self, layer, session) -> tuple[int, bool]:
+        if layer is None or session is None or not layer.selection:
+            return (0, False)
+        key = (id(session), session.revision, frozenset(layer.selection))
+        cache = getattr(self, "_selection_facts_cache_store", None)
+        if cache is None:
+            cache = self._selection_facts_cache_store = {}
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+        multipart = 0
+        kinds: set[str] = set()
+        collect_valid = len(layer.selection) >= 2
+        for feature_id in layer.selection:
+            try:
+                kind = str(session.feature(feature_id).geometry.get("type") or "")
+            except KeyError:
+                collect_valid = False
+                continue
+            if kind.startswith("Multi"):
+                multipart += 1
+                collect_valid = False
+            elif kind not in {"Point", "LineString", "Polygon"}:
+                collect_valid = False
+            kinds.add(kind)
+            if len(kinds) > 1:
+                collect_valid = False
+        facts = (multipart, collect_valid and len(kinds) == 1)
+        if len(cache) > 8:
+            cache.clear()
+        cache[key] = facts
+        return facts
+
     def tool_context_inputs(self) -> dict[str, Any]:
         """ToolContext 的宿主侧采集器（Goal V7 §3）。
 
@@ -2050,6 +2448,10 @@ class CompositeEditController(QObject):
                 and self._kinds.get(layer.id) in {"line", "polygon"}
                 and len(layer.selection) == 1
             ),
+            # V10 复杂几何事实（contract v4）：O(selection) 的选集形状扫描，
+            # 仅选集变化时重算成本，帧级链上无 O(features) 热点。
+            "selection_multipart_count": self._selection_geometry_facts(layer, session)[0],
+            "collect_ready": self._selection_geometry_facts(layer, session)[1],
             "snapping_enabled": self._snapping.enabled,
             "topology_enabled": self._topology.enabled,
             # V10 M3：捕捉配置事实（呈现详情——容差/模式/角色推荐态）。

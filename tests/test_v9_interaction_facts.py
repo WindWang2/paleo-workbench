@@ -80,8 +80,8 @@ class _FakeQgis:
 # ToolContext v3 — CRS / scale facts
 # --------------------------------------------------------------------------- #
 
-def test_contract_version_bumped_to_3():
-    assert TOOL_CONTEXT_CONTRACT_VERSION == 3
+def test_contract_version_bumped_to_v10():
+    assert TOOL_CONTEXT_CONTRACT_VERSION == 4
 
 
 def test_context_carries_crs_and_scale_facts():

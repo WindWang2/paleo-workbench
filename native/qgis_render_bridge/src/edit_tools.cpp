@@ -16,7 +16,9 @@
 #include <qgsproject.h>
 #include <qgsrubberband.h>
 #include <qgssnappingutils.h>
+#include <qgssnapindicator.h>
 #include <qgsvectorlayer.h>
+#include <qgsvertexmarker.h>
 #include <qgswkbtypes.h>
 
 namespace pwb::qgis_render {
@@ -148,12 +150,100 @@ QgsPointXY PwbEditPickTool::snapOrRaw(const QgsPointXY& mapPoint) const {
   return m.isValid() ? m.point() : mapPoint;
 }
 
+QgsPointLocator::Match PwbEditPickTool::snapMatch(const QgsPointXY& mapPoint) const {
+  return canvas()->snappingUtils()->snapToMap(mapPoint);
+}
+
+namespace {
+
+const char* matchTypeName(QgsPointLocator::Type type) {
+  switch (type) {
+    case QgsPointLocator::Vertex:
+      return "vertex";
+    case QgsPointLocator::Edge:
+      return "segment";
+    case QgsPointLocator::MiddleOfSegment:
+      return "midpoint";
+    case QgsPointLocator::Centroid:
+      return "centroid";
+    case QgsPointLocator::Area:
+      return "area";
+    case QgsPointLocator::LineEndpoint:
+      return "endpoint";
+    default:
+      return "unknown";
+  }
+}
+
+}  // namespace
+
+void PwbEditPickTool::updateSnapIndicator(
+    const QgsPointXY& mapPoint, const QgsPointLocator::Match* match) {
+  // 复用调用方已查的命中（updateHover 同一 move 内已查过）；未传则自查。
+  const QgsPointLocator::Match local =
+      match == nullptr ? snapMatch(mapPoint) : QgsPointLocator::Match();
+  const QgsPointLocator::Match& m = match != nullptr ? *match : local;
+  if (!snap_indicator_) snap_indicator_ = std::make_unique<QgsSnapIndicator>(canvas());
+  snap_indicator_->setMatch(m);
+  // 节流：命中签名（类型/层/要素）不变且命中点位移 <= 1 像素时不回传。
+  std::string signature;
+  if (m.isValid()) {
+    signature = std::to_string(static_cast<int>(m.type()));
+    if (m.layer() != nullptr) {
+      signature += ":" + m.layer()->customProperty(QStringLiteral("pwb/doc_id"))
+                                .toString()
+                                .toStdString();
+    }
+    signature += ":" + std::to_string(static_cast<long long>(m.featureId()));
+  }
+  const double mup = canvas()->mapSettings().mapUnitsPerPixel();
+  const bool moved =
+      m.isValid() &&
+      std::hypot(m.point().x() - snap_feedback_x_, m.point().y() - snap_feedback_y_) > mup;
+  // 初始态 signature 为空且从未发射：unmatched（空签名）必须能发出——否则
+  // snapping 关闭时宿主永远收不到"无命中"回执（首次发射守卫）。
+  if (snap_feedback_emitted_ && signature == snap_feedback_signature_ && !moved) return;
+  snap_feedback_signature_ = signature;
+  snap_feedback_emitted_ = true;
+  std::string payload;
+  if (m.isValid()) {
+    std::string docId;
+    std::string featureId;
+    if (m.layer() != nullptr) {
+      docId = m.layer()->customProperty(QStringLiteral("pwb/doc_id")).toString().toStdString();
+      featureId = resolver_ ? resolver_(m.layer(), m.featureId())
+                            : std::to_string(static_cast<long long>(m.featureId()));
+    }
+    payload = std::string("{\"matched\":true,\"x\":") +
+              QString::number(m.point().x(), 'g', 12).toStdString() +
+              ",\"y\":" + QString::number(m.point().y(), 'g', 12).toStdString() +
+              ",\"layer_doc_id\":\"" + docId + "\",\"feature_id\":\"" + featureId +
+              "\",\"match_type\":\"" + matchTypeName(m.type()) + "\",\"distance\":" +
+              QString::number(m.distance(), 'g', 12).toStdString() + "}";
+    snap_feedback_x_ = m.point().x();
+    snap_feedback_y_ = m.point().y();
+  } else {
+    payload = "{\"matched\":false}";
+  }
+  callback_("snap_feedback", payload);
+}
+
+void PwbEditPickTool::hideSnapIndicator() {
+  if (snap_indicator_) snap_indicator_->setMatch(QgsPointLocator::Match());
+  if (snap_feedback_emitted_ && !snap_feedback_signature_.empty()) {
+    snap_feedback_signature_.clear();
+    callback_("snap_feedback", "{\"matched\":false}");
+  }
+}
+
 std::string PwbEditPickTool::basePayload(const Pick& pick) const {
   return std::string("\"layer_doc_id\":\"") + pick.docId +
          "\",\"feature_id\":\"" + pick.featureId + "\"";
 }
 
 // -- 顶点编辑 ---------------------------------------------------------------
+
+PwbVertexTool::~PwbVertexTool() = default;
 
 void PwbVertexTool::canvasPressEvent(QgsMapMouseEvent* e) {
   if (e->button() != Qt::LeftButton) return;
@@ -166,6 +256,8 @@ void PwbVertexTool::canvasPressEvent(QgsMapMouseEvent* e) {
   current_ = pick;
   vertex_id_ = vid;
   dragging_ = true;
+  clearHover();
+  hideSnapIndicator();  // 拖动期间指示器冻结在原位（review-5 #19）——隐藏，松手后 move 重建
   rubber_ = std::make_unique<QgsRubberBand>(canvas(), Qgis::GeometryType::Point);
   rubber_->setColor(QColor(255, 0, 0, 200));
   rubber_->setWidth(2);
@@ -174,7 +266,14 @@ void PwbVertexTool::canvasPressEvent(QgsMapMouseEvent* e) {
 }
 
 void PwbVertexTool::canvasMoveEvent(QgsMapMouseEvent* e) {
-  if (!dragging_) return;
+  if (!dragging_) {
+    // V10：非拖动 hover——顶点/段命中 marker + snap 指示与节流反馈。
+    // updateHover 返回它已查到的 locator 命中，指示器复用（单次 move 单次
+    // snapToMap，review-4 #2）。
+    const QgsPointLocator::Match m = updateHoverMatch(e->mapPoint());
+    updateSnapIndicator(e->mapPoint(), &m);
+    return;
+  }
   const QgsPointXY p = snapOrRaw(e->mapPoint());
   rubber_->reset(Qgis::GeometryType::Point);
   rubber_->addPoint(p);
@@ -185,12 +284,204 @@ void PwbVertexTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
   const QgsPointXY p = snapOrRaw(e->mapPoint());
   const Pick pick = current_;
   const QgsVertexId vid = vertex_id_;
+  // 零位移抑制（review-5 #5）：press→release 顶点位移小于拖动阈值（拾取容差
+  // 像素数，QGIS 桌面 click-vs-drag 同语义）= 单击而非拖动——提交会产生
+  // 同值 SetVertexCommand（undo 栈噪音 + 幻影脏会话）。
+  {
+    const QgsPoint orig = pick.geometry.constGet()->vertexAt(vid);
+    const double mup = canvas()->mapSettings().mapUnitsPerPixel();
+    if (std::hypot(p.x() - orig.x(), p.y() - orig.y()) < kTolerancePx * mup) {
+      cancelDrag();
+      return;
+    }
+  }
   cancelDrag();
+  clearHover();  // 提交后镜像异步刷新（120ms 防抖）：立即失效，防止 stale 几何上删点
   std::string payload = "{" + basePayload(pick) + ",\"path\":" +
                         vertexPathJson(pick.geometry.wkbType(), vid) +
                         ",\"x\":" + QString::number(p.x(), 'g', 12).toStdString() +
                         ",\"y\":" + QString::number(p.y(), 'g', 12).toStdString() + "}";
   callback_("vertex_moved", payload);
+}
+
+void PwbVertexTool::canvasDoubleClickEvent(QgsMapMouseEvent* e) {
+  if (dragging_) {
+    cancelDrag();
+    return;
+  }
+  updateHover(e->mapPoint());
+  if (!hover_.has_segment) return;
+  const auto flat = QgsWkbTypes::flatType(hover_.pick.geometry.wkbType());
+  if (flat == Qgis::WkbType::Point || flat == Qgis::WkbType::MultiPoint) return;
+  const Pick pick = hover_.pick;
+  const QgsVertexId at = hover_.insert_before;
+  const QgsPointXY p = hover_.segment_point;
+  clearHover();
+  std::string payload = "{" + basePayload(pick) + ",\"path\":" +
+                        vertexPathJson(pick.geometry.wkbType(), at) +
+                        ",\"x\":" + QString::number(p.x(), 'g', 12).toStdString() +
+                        ",\"y\":" + QString::number(p.y(), 'g', 12).toStdString() + "}";
+  callback_("vertex_inserted", payload);
+  e->accept();
+}
+
+void PwbVertexTool::keyPressEvent(QKeyEvent* e) {
+  if (e->key() == Qt::Key_Delete && !dragging_) {
+    if (hover_.has_vertex && minVerticesAfterDelete(hover_.pick, hover_.vertex)) {
+      const Pick pick = hover_.pick;
+      const QgsVertexId vid = hover_.vertex;
+      clearHover();
+      std::string payload = "{" + basePayload(pick) + ",\"path\":" +
+                            vertexPathJson(pick.geometry.wkbType(), vid) + "}";
+      callback_("vertex_deleted", payload);
+    } else {
+      // 守卫拒绝（无 hover / 低于最少顶点）给出可诊断回执（review-5 #10），
+      // 不再是无声死键；按键仍消费：不冒泡成其它快捷键。
+      callback_("vertex_delete_rejected", "{}");
+    }
+    e->accept();
+    return;
+  }
+  PwbEditPickTool::keyPressEvent(e);
+}
+
+void PwbVertexTool::deactivate() {
+  clearHover();
+  hideSnapIndicator();
+  PwbEditPickTool::deactivate();
+}
+
+bool PwbVertexTool::updateHover(const QgsPointXY& mapPoint) {
+  updateHoverMatch(mapPoint);
+  return hover_.has_vertex || hover_.has_segment;
+}
+
+QgsPointLocator::Match PwbVertexTool::updateHoverMatch(const QgsPointXY& mapPoint) {
+  hover_ = HoverState();
+  const QgsPointLocator::Match m = snapMatch(mapPoint);
+  if (m.isValid() && m.layer() != nullptr) {
+    const QString docId =
+        m.layer()->customProperty(QStringLiteral("pwb/doc_id")).toString();
+    if (!docId.isEmpty()) {
+      QgsFeature f;
+      if (m.layer()->getFeatures(QgsFeatureRequest(m.featureId())).nextFeature(f) &&
+          f.hasGeometry()) {
+        hover_.pick.layer = m.layer();
+        hover_.pick.fid = m.featureId();
+        hover_.pick.geometry = f.geometry();
+        hover_.pick.docId = docId.toStdString();
+        hover_.pick.featureId =
+            resolver_ ? resolver_(m.layer(), m.featureId())
+                      : std::to_string(static_cast<long long>(m.featureId()));
+        QgsVertexId vid;
+        if (m.hasVertex()) {
+          if (f.geometry().vertexIdFromVertexNr(m.vertexIndex(), vid) && vid.isValid()) {
+            hover_.has_vertex = true;
+            hover_.vertex = vid;
+          }
+        } else if (m.hasEdge()) {
+          // Match 语义：段命中的 vertexIndex 是段首顶点；插点位置 = 段终点。
+          if (f.geometry().vertexIdFromVertexNr(m.vertexIndex() + 1, vid) &&
+              vid.isValid()) {
+            hover_.has_segment = true;
+            hover_.insert_before = vid;
+            hover_.segment_point = m.point();
+          }
+        }
+      }
+    }
+  }
+  if (!hover_.has_vertex && !hover_.has_segment) {
+    // 2) snapping 关闭时的回退：容差拾取 + 单几何顶点/段扫描（O(单要素顶点)）。
+    Pick pick;
+    if (pickFeature(mapPoint, pick)) {
+      QgsVertexId vid;
+      if (nearestVertex(pick, mapPoint, vid)) {
+        hover_.has_vertex = true;
+        hover_.pick = pick;
+        hover_.vertex = vid;
+      } else {
+        QgsVertexId endVid;
+        QgsPointXY proj;
+        if (nearestSegmentOnFeature(pick, mapPoint, endVid, proj)) {
+          hover_.has_segment = true;
+          hover_.pick = pick;
+          hover_.insert_before = endVid;
+          hover_.segment_point = proj;
+        }
+      }
+    }
+  }
+  updateHoverMarker();
+  return m;
+}
+
+bool PwbVertexTool::nearestSegmentOnFeature(const Pick& pick,
+                                            const QgsPointXY& mapPoint,
+                                            QgsVertexId& endVid,
+                                            QgsPointXY& projOut) const {
+  // V10（review-1 #3 重构）：投影/最近段查询交给 QGIS 核心公开算子——
+  // closestSegmentWithContext 返回投影点 + 段后顶点号（= 插入位置），不再
+  // 手写逐段扫描（第二几何内核气味；且核心算子覆盖曲线段）。
+  if (QgsWkbTypes::geometryType(pick.geometry.wkbType()) == Qgis::GeometryType::Point)
+    return false;
+  QgsPointXY proj;
+  int nextVertexNr = -1;
+  const double dist2 = pick.geometry.closestSegmentWithContext(mapPoint, proj, nextVertexNr);
+  if (dist2 < 0.0) return false;
+  const double mup = canvas()->mapSettings().mapUnitsPerPixel();
+  if (std::sqrt(dist2) >= kTolerancePx * mup) return false;
+  QgsVertexId id;
+  if (!pick.geometry.vertexIdFromVertexNr(nextVertexNr, id) || !id.isValid())
+    return false;
+  endVid = id;
+  projOut = proj;
+  return true;
+}
+
+bool PwbVertexTool::minVerticesAfterDelete(const Pick& pick,
+                                           const QgsVertexId& vid) const {
+  const QgsAbstractGeometry* g = pick.geometry.constGet();
+  if (g == nullptr) return false;
+  const auto flat = QgsWkbTypes::flatType(pick.geometry.wkbType());
+  const int count = g->vertexCount(vid.part, vid.ring);
+  if (flat == Qgis::WkbType::Polygon || flat == Qgis::WkbType::MultiPolygon) {
+    // 宿主 GeoJSON ring 存闭合重复点：>=4（3 真实 + 闭合）为下限。
+    return count - 1 >= 4;
+  }
+  if (flat == Qgis::WkbType::LineString || flat == Qgis::WkbType::MultiLineString) {
+    return count - 1 >= 2;
+  }
+  // Point/MultiPoint 不走删点（多点删点 = 删部件，走 delete_part 命令）。
+  return false;
+}
+
+void PwbVertexTool::updateHoverMarker() {
+  if (hover_.has_vertex) {
+    if (!hover_marker_) hover_marker_ = std::make_unique<QgsVertexMarker>(canvas());
+    const QgsPoint p = hover_.pick.geometry.constGet()->vertexAt(hover_.vertex);
+    hover_marker_->setCenter(QgsPointXY(p.x(), p.y()));
+    hover_marker_->setIconType(QgsVertexMarker::ICON_CIRCLE);
+    hover_marker_->setColor(QColor(255, 0, 0, 190));
+    hover_marker_->setIconSize(10);
+    hover_marker_->setPenWidth(2);
+    hover_marker_->show();
+  } else if (hover_.has_segment) {
+    if (!hover_marker_) hover_marker_ = std::make_unique<QgsVertexMarker>(canvas());
+    hover_marker_->setCenter(hover_.segment_point);
+    hover_marker_->setIconType(QgsVertexMarker::ICON_BOX);
+    hover_marker_->setColor(QColor(255, 128, 0, 190));
+    hover_marker_->setIconSize(8);
+    hover_marker_->setPenWidth(2);
+    hover_marker_->show();
+  } else {
+    hover_marker_.reset();
+  }
+}
+
+void PwbVertexTool::clearHover() {
+  hover_ = HoverState();
+  hover_marker_.reset();
 }
 
 // -- 要素移动 ---------------------------------------------------------------

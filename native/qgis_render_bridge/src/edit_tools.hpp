@@ -15,10 +15,13 @@
 #include <qgsfeaturerequest.h>
 #include <qgsgeometry.h>
 #include <qgsmaptool.h>
+#include <qgspointlocator.h>
 #include <qgspointxy.h>
 #include <qgsvertexid.h>
+#include <qgsvertexmarker.h>
 
 class QgsRubberBand;
+class QgsSnapIndicator;
 class QgsVectorLayer;
 class QgsMapToolSelectionHandler;
 class QgsDistanceArea;
@@ -65,22 +68,67 @@ class PwbEditPickTool : public QgsMapTool {
   std::string basePayload(const Pick& pick) const;
   void cancelDrag();
 
+  // -- V10：snap 指示 + 节流反馈（QgsSnapIndicator 为 GUI 公开类，直接复用）--
+  // 查询捕捉命中（不吸附坐标）：hover 检测与反馈共用。
+  QgsPointLocator::Match snapMatch(const QgsPointXY& mapPoint) const;
+  // 指示器更新 + "snap_feedback" 回调（签名变化或命中点位移 > 1 像素才回传，
+  // 60Hz 纯 hover 不打 FFI）。已有命中的调用方传 match（复用同一查询——
+  // 每次 move 只允许一次 snapToMap，review-4 #2）。
+  void updateSnapIndicator(const QgsPointXY& mapPoint,
+                           const QgsPointLocator::Match* match = nullptr);
+  void hideSnapIndicator();
+
   Callback callback_;
   FeatureIdResolver resolver_;
   std::unique_ptr<QgsRubberBand> rubber_;
   Pick current_;
   bool dragging_ = false;
+  std::unique_ptr<QgsSnapIndicator> snap_indicator_;
+  std::string snap_feedback_signature_;
+  bool snap_feedback_emitted_ = false;
+  double snap_feedback_x_ = 0.0;
+  double snap_feedback_y_ = 0.0;
 };
 
 class PwbVertexTool : public PwbEditPickTool {
  public:
   using PwbEditPickTool::PwbEditPickTool;
+  // unique_ptr 成员的析构需完整类型：显式声明，定义在 edit_tools.cpp。
+  ~PwbVertexTool() override;
   void canvasPressEvent(QgsMapMouseEvent* e) override;
   void canvasMoveEvent(QgsMapMouseEvent* e) override;
   void canvasReleaseEvent(QgsMapMouseEvent* e) override;
+  // V10：双击段上插点 / Delete 删除 hover 顶点（QGIS 桌面顶点工具语义）。
+  void canvasDoubleClickEvent(QgsMapMouseEvent* e) override;
+  void keyPressEvent(QKeyEvent* e) override;
+  void deactivate() override;
 
  private:
+  // hover 状态：顶点命中（Delete 删点）或段命中（双击插点，insert_before 为
+  // 段终点 QgsVertexId——Python insert 语义 = parent.insert(index, point)）。
+  struct HoverState {
+    bool has_vertex = false;
+    bool has_segment = false;
+    Pick pick;
+    QgsVertexId vertex;
+    QgsVertexId insert_before;
+    QgsPointXY segment_point;
+  };
+
+  // 刷新 hover（snapping locator 优先；关闭时容差拾取回退）。返回是否有命中。
+  bool updateHover(const QgsPointXY& mapPoint);
+  // 同 updateHover，但把已查询的 locator 命中返回给调用方复用（单 move 单查询）。
+  QgsPointLocator::Match updateHoverMatch(const QgsPointXY& mapPoint);
+  bool nearestSegmentOnFeature(const Pick& pick, const QgsPointXY& mapPoint,
+                               QgsVertexId& endVid, QgsPointXY& projOut) const;
+  // 删除后仍满足最少顶点（ring>=4 含闭合点 / line>=2）；点/多点不支持。
+  bool minVerticesAfterDelete(const Pick& pick, const QgsVertexId& vid) const;
+  void updateHoverMarker();
+  void clearHover();
+
   QgsVertexId vertex_id_;
+  HoverState hover_;
+  std::unique_ptr<QgsVertexMarker> hover_marker_;
 };
 
 class PwbMoveTool : public PwbEditPickTool {

@@ -55,6 +55,7 @@ EDIT_OPERATIONS = frozenset(
 # session command_type -> EditDelta operation
 _COMMAND_OPERATION: dict[str, str] = {
     "add_feature": OP_CREATE_FEATURE,
+    "duplicate_feature": OP_CREATE_FEATURE,
     "delete_feature": OP_DELETE_FEATURE,
     "move_feature": OP_MOVE_FEATURE,
     "set_vertex": OP_MOVE_VERTEX,
@@ -66,6 +67,9 @@ _COMMAND_OPERATION: dict[str, str] = {
     "set_geometry": OP_REPLACE_GEOMETRY,
     "add_ring": OP_REPLACE_GEOMETRY,
     "delete_ring": OP_REPLACE_GEOMETRY,
+    "add_part": OP_REPLACE_GEOMETRY,
+    "delete_part": OP_REPLACE_GEOMETRY,
+    "move_part": OP_REPLACE_GEOMETRY,
 }
 
 

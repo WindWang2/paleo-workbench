@@ -130,6 +130,9 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
     "geometry": (
         "move_feature", "vertex", "reshape", "undo", "redo", "delete_selected",
         "split", "merge", "repair_geometry",
+        # V10：复杂几何/要素命令族（duplicate / 环 / 部件 / 单多部件转换）。
+        "duplicate_selected", "add_ring", "add_part", "explode_multipart",
+        "collect_multipart",
     ),
     "snapping": ("snapping", "topology", "cancel"),
     "layer": (
@@ -172,7 +175,7 @@ _POLYGON_ROLES = frozenset({
 })
 
 #: 需要 QGIS 原生后端的工具（桥缺失/降级时禁用 + 原因；不隐藏能力假象）
-_NATIVE_ONLY_TOOLS = frozenset({"style_manager", "reshape"})
+_NATIVE_ONLY_TOOLS = frozenset({"style_manager", "reshape", "add_ring", "add_part"})
 
 #: 需要活动图层（矢量或任意）的工具
 _NEEDS_ANY_LAYER = frozenset({
@@ -190,6 +193,8 @@ _NEEDS_EDITING = frozenset({
     "save_edits", "rollback", "add_point", "add_line", "add_polygon",
     "move_feature", "vertex", "reshape", "undo", "redo", "delete_selected",
     "split", "merge", "repair_geometry",
+    "duplicate_selected", "add_ring", "add_part", "explode_multipart",
+    "collect_multipart",
 })
 
 #: 需要活动图层的组（无活动图层时整组隐藏，layer_new/reference_import 除外）
@@ -612,6 +617,95 @@ def _rule_repair(ctx: ToolContext) -> ToolAvailability:
         reason = "几何修复针对面图层"
     return _ok("repair_geometry") if reason is None else _no("repair_geometry", reason)
 
+def _rule_duplicate_selected(ctx: ToolContext) -> ToolAvailability:
+    reason = (
+        _project_gate(ctx)
+        or _layer_gate(ctx)
+        or _role_gate(ctx)
+        or _editing_gate(ctx)
+
+    )
+    if reason is None and ctx.selection_count <= 0:
+        reason = "没有选中的要素"
+    return _ok("duplicate_selected") if reason is None else _no("duplicate_selected", reason)
+
+
+def _rule_add_ring(ctx: ToolContext) -> ToolAvailability:
+    reason = (
+        _project_gate(ctx)
+        or _layer_gate(ctx)
+        or _role_gate(ctx)
+        or _editing_gate(ctx)
+
+    )
+    if reason is None and ctx.active_layer_kind != "polygon":
+        reason = "添加环需要面图层"
+    if reason is None and ctx.selection_count != 1:
+        reason = "添加环需要恰好选中一个面要素"
+    if reason is None:
+        # 环捕获走原生 addPolygon 数字化器（native-only，与 reshape 同规）
+        if not ctx.native_canvas_available:
+            reason = "添加环需要原生 QGIS 画布（无回退实现）"
+        elif "qgis.native_tool.addPolygon" not in ctx.capability_flags:
+            reason = "添加环需要原生数字化工具（无回退实现）"
+    return _ok("add_ring") if reason is None else _no("add_ring", reason)
+
+
+def _rule_add_part(ctx: ToolContext) -> ToolAvailability:
+    reason = (
+        _project_gate(ctx)
+        or _layer_gate(ctx)
+        or _role_gate(ctx)
+        or _editing_gate(ctx)
+
+    )
+    if reason is None and not ctx.active_layer_kind:
+        reason = "未知图层几何类型"
+    if reason is None and ctx.selection_count != 1:
+        reason = "添加部件需要恰好选中一个要素"
+    if reason is None:
+        # 部件捕获走原生数字化器（随图层 kind）；几何执行需桥 add_part 算子
+        # （单部件自动升多部件的语义由 QGIS 定义）。
+        if not ctx.native_canvas_available:
+            reason = "添加部件需要原生 QGIS 画布（无回退实现）"
+        elif "qgis.geometry_op.add_part" not in ctx.capability_flags:
+            reason = "添加部件需要 QGIS add_part 几何算子（重建 qgis_render_bridge）"
+        else:
+            kind = {"point": "addPoint", "line": "addLine", "polygon": "addPolygon"}.get(
+                ctx.active_layer_kind, "")
+            if kind and f"qgis.native_tool.{kind}" not in ctx.capability_flags:
+                reason = "添加部件需要原生数字化工具（无回退实现）"
+    return _ok("add_part") if reason is None else _no("add_part", reason)
+
+
+def _rule_explode_multipart(ctx: ToolContext) -> ToolAvailability:
+    reason = (
+        _project_gate(ctx)
+        or _layer_gate(ctx)
+        or _role_gate(ctx)
+        or _editing_gate(ctx)
+
+    )
+    if reason is None and ctx.selection_multipart_count < 1:
+        reason = "拆分多部件需要选中至少一个多部件要素"
+    return _ok("explode_multipart") if reason is None else _no("explode_multipart", reason)
+
+
+def _rule_collect_multipart(ctx: ToolContext) -> ToolAvailability:
+    reason = (
+        _project_gate(ctx)
+        or _layer_gate(ctx)
+        or _role_gate(ctx)
+        or _editing_gate(ctx)
+
+    )
+    if reason is None and ctx.topology_error_count > 0:
+        reason = "当前编辑会话存在拓扑错误，不能合并部件"
+    if reason is None and not ctx.collect_ready:
+        reason = "组合多部件需要至少两个同类型的单部件要素"
+    return _ok("collect_multipart") if reason is None else _no("collect_multipart", reason)
+
+
 def _rule_history(ctx: ToolContext, tool_id: str) -> ToolAvailability:
     reason = (
         _project_gate(ctx)
@@ -704,6 +798,11 @@ _RULE_TABLE: dict[str, Rule] = {
     "merge": _rule_merge,
     "reshape": _rule_reshape,
     "repair_geometry": _rule_repair,
+    "duplicate_selected": _rule_duplicate_selected,
+    "add_ring": _rule_add_ring,
+    "add_part": _rule_add_part,
+    "explode_multipart": _rule_explode_multipart,
+    "collect_multipart": _rule_collect_multipart,
     "undo": lambda ctx: _rule_history(ctx, "undo"),
     "redo": lambda ctx: _rule_history(ctx, "redo"),
     "snapping": _rule_snapping,

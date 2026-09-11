@@ -29,6 +29,10 @@ TOOL_LABELS: dict[str, str] = {
     "move_feature": "移动要素", "vertex": "节点编辑", "delete_selected": "删除所选",
     "reshape": "重塑",
     "undo": "撤销", "redo": "重做", "split": "分割", "merge": "合并",
+    # V10 复杂几何/要素命令族。
+    "duplicate_selected": "复制要素", "add_ring": "添加内环",
+    "add_part": "添加部件", "explode_multipart": "拆分多部件",
+    "collect_multipart": "组合多部件",
     "repair_geometry": "修复几何",
     "snapping": "捕捉", "topology": "拓扑编辑", "cancel": "取消",
     "layer_new": "新建图层", "reference_import": "导入参考图层",
@@ -129,6 +133,21 @@ TOOL_HELP: dict[str, ToolHelpSpec] = {
     "repair_geometry": _spec(
         "修复几何", "可写面图层 + 角色门禁通过",
         "对面图层执行 make-valid 修复（可撤销）", modifies=True),
+    "duplicate_selected": _spec(
+        "复制要素", "编辑会话中 + 已选中要素",
+        "复制选中要素（几何+属性，新要素 id，可撤销）", modifies=True),
+    "add_ring": _spec(
+        "添加内环", "原生画布 + 面图层 + 恰好选中 1 个面要素 + 编辑会话",
+        "在选中面要素内数字化一个内环（洞）", modifies=True),
+    "add_part": _spec(
+        "添加部件", "原生画布 + 恰好选中 1 个要素 + 编辑会话",
+        "为选中要素数字化并附加部件（单部件自动升多部件）", modifies=True),
+    "explode_multipart": _spec(
+        "拆分多部件", "编辑会话中 + 选中至少一个多部件要素",
+        "把多部件要素拆分为单部件要素（属性全继承）", modifies=True),
+    "collect_multipart": _spec(
+        "组合多部件", "编辑会话中 + ≥2 个同类型单部件要素 + 无拓扑错误",
+        "把选中单部件要素组合为一个多部件要素（不融合边界）", modifies=True),
     "undo": _spec("撤销", "编辑会话中有可撤销操作", "撤销上一步编辑", modifies=True),
     "redo": _spec("重做", "编辑会话中有可重做操作", "重做被撤销的编辑", modifies=True),
     "snapping": _spec(
