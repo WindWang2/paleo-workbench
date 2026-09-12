@@ -29,6 +29,13 @@
 - M9 topology M0: spec docs/specs/topological-editing-migration-spec.md
   (agent assembly, 366 lines); crs_gate.py + pre-entry gate + guided fix
   (#1285); two-phase all-or-nothing flush (#1283); 14 tests.
+- M10 lifecycle+scale (42146767, 1b228914): save-intent channel,
+  changed_hints O(changed), raster ledger, single-mount fix, scale suite.
+- M11 review round (40b8c2e6): R1–R4 parallel agents (P0×7: ghost-container
+  drop, self/cycle recursion, unfiltered mount, skipped-drift, stale-hints
+  loss, ledger poisoning, fast-path bypass) + R5 CRS / R6 fallback / R7
+  scale / R8 final. Docs 05–08/10–14 complete (15 files).
+- Final validation: 204 passed Python family + 39 passed native family.
 - Incidents: sed over-reach self-recursion (probe4 hang, fixed); json.loads
   on dict in my test (teardown hang, fixed + C++ shutdown reset);
   gate-phase-1 abort semantics; layer-only declaration check.

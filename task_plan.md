@@ -48,12 +48,16 @@ Docs: docs/development/qgis-cartography-runtime-v11/
       mirrorTreeOrderTopFirst; flat top-first reversal + parity tests)
 - [x] PHASE 12-M0: Topology spec materialized (docs/specs/) + CRS gate
       (#1285) + two-phase all-or-nothing Python save (#1283 partial)
-- [ ] PHASE 9: Save-intent in-memory buffer + per-feature signature cache +
-      raster ledger + lifecycle docs (09-mirror-lifecycle)
-- [ ] PHASE 10: Nested groups UI polish + restore/reopen docs
-- [ ] PHASE 13: Scale structural suite (13-scale)
-- [ ] PHASE 14: 8 review rounds + P0/P1 fixes
-- [ ] PHASE 15: Remaining docs 02–15 + milestone commits + PR + URL
+- [x] PHASE 9: Save-intent channel + O(changed) signatures (changed_hints)
+      + raster ledger + lifecycle docs 09 (42146767, 1b228914)
+- [x] PHASE 10: Nested groups (plan + controller + single-mount regression)
+      + restore semantics (order keys persisted; expand-state migration noted
+      in 13-known-limitations as deferred)
+- [x] PHASE 13: Scale structural suite (test_runtime_scale_v11, 8 tests) +
+      docs 12-scale.md
+- [x] PHASE 14: 8 review rounds (4 parallel agents R1–R4 + R5 CRS / R6
+      fallback / R7 scale / R8 final) — P0×7 + P1/P2 batch fixed (40b8c2e6)
+- [x] PHASE 15: Docs 00–14 complete (15 files) + milestone commits + PR
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
