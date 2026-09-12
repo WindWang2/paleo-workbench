@@ -100,16 +100,31 @@ class ExplainService:
             explanation.output_ports = [p.model_dump() for p in ports["output"]]
         explanation.regenerable = run is not None
 
+        # --- upstream closure (entity context + dependency view) ----------
+        from paleo_workbench.catalog.impact import ImpactService
+
+        upstream = ImpactService(service).upstream_impact(version_id)
+
         # --- entity context ---------------------------------------------
         if project is not None:
             from paleo_workbench.project.domain import entity_ids_for_asset
 
-            for entity_type, entity_id in entity_ids_for_asset(
-                project, asset.id
-            ):
-                explanation.entities.append(
-                    {"entity_type": entity_type, "entity_id": entity_id}
-                )
+            seen_entities: set[tuple[str, str]] = set()
+            # Own asset first, then the ancestor closure's assets: results
+            # usually carry no direct link — their wells/surveys answer
+            # through lineage (goal §15 "which well/survey?").
+            ancestor_assets = list(upstream.ancestor_asset_ids)
+            if version.asset_id not in ancestor_assets:
+                ancestor_assets.append(version.asset_id)
+            for related_asset_id in ancestor_assets:
+                for entity_type, entity_id in entity_ids_for_asset(
+                    project, related_asset_id
+                ):
+                    if (entity_type, entity_id) not in seen_entities:
+                        seen_entities.add((entity_type, entity_id))
+                        explanation.entities.append(
+                            {"entity_type": entity_type, "entity_id": entity_id}
+                        )
 
         # --- downstream usage --------------------------------------------
         for run_iter in maps.run_by_id.values():

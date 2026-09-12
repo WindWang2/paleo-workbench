@@ -121,6 +121,14 @@ class ImpactService:
         except Exception:
             cache_key = None
 
+        def _remember(items: list[StaleItem]) -> list[StaleItem]:
+            if cache_key is not None:
+                _STALE_CACHE[cache_key] = (service.document, items)
+                _STALE_CACHE.move_to_end(cache_key)
+                while len(_STALE_CACHE) > _STALE_CACHE_MAX:
+                    _STALE_CACHE.popitem(last=False)
+            return list(items)
+
         maps = service._ensure_maps()
         version_by_id = maps.version_by_id
         children_by_parent = maps.children_by_parent
@@ -145,7 +153,9 @@ class ImpactService:
                     if version.trashed:
                         triggers.add(version.id)
         if not triggers:
-            return []
+            # The empty verdict caches too — a "nothing changed" catalog must
+            # not pay the full asset scan on every staleness query.
+            return _remember([])
 
         # Descendant closure over children edges, breadth-first with a node
         # budget; depth bookkeeping distinguishes direct (depth 1) from
@@ -224,12 +234,7 @@ class ImpactService:
         items.sort(key=lambda item: (not item.direct, item.version_id))
         if truncated and items:
             items[-1].reason += "（结果已截断：影响面超出节点上限）"
-        if cache_key is not None:
-            _STALE_CACHE[cache_key] = (service.document, items)
-            _STALE_CACHE.move_to_end(cache_key)
-            while len(_STALE_CACHE) > _STALE_CACHE_MAX:
-                _STALE_CACHE.popitem(last=False)
-        return list(items)
+        return _remember(items)
 
     def _nearest_changed_ancestor(
         self,

@@ -283,7 +283,13 @@ def _propose_identities(plan: IngestPlan, project: Any) -> None:
 
     # Track per (entity, role) member order so primaries can be proposed.
     for item in plan.items:
-        if item.type in WELL_BOUND_TYPES:
+        if item.type in WELL_BOUND_TYPES or (
+            # Generically-typed files whose ROLE inference already claimed a
+            # well data role (deviation.xlsx → trajectory…) bind through the
+            # same low-confidence directory/stem chain as typed files.
+            item.role in {"trajectory", "tops", "time_depth", "core"}
+            and item.type in {"table", "tabular", "spreadsheet", "csv", "unknown"}
+        ):
             name = _extract_well_name(item.path, item.type)
             confidence = "high" if name else "low"
             strategy_hint = "header"
