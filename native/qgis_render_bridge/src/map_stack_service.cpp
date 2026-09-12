@@ -2800,6 +2800,23 @@ std::vector<std::string> QgisMapStack::mirrorOrderTopFirst() const {
   return result;
 }
 
+std::vector<std::string> QgisMapStack::mirrorTreeOrderTopFirst() const {
+  // V11：QgsLayerTree::layerOrder() 是全树 DFS（组内图层在内）且与
+  // QgsLayerTreeMapCanvasBridge 驱动画布的层集同源——布局导出改用它后，
+  // grouped 图层不再从导出地图中消失，且顺序与画布按构造一致。
+  std::vector<std::string> result;
+  const QList<QgsMapLayer*> order = project()->layerTreeRoot()->layerOrder();
+  for (QgsMapLayer* layer : order) {
+    if (layer == nullptr) continue;
+    const QVariant docVar = layer->customProperty(QStringLiteral("pwb/doc_id"));
+    if (!docVar.isValid() || docVar.toString().isEmpty()) continue;
+    if (impl_->owned_layers.find(layer->id().toStdString())
+        == impl_->owned_layers.end()) continue;
+    result.push_back(docVar.toString().toStdString());
+  }
+  return result;
+}
+
 bool QgisMapStack::mirrorLayerVisibility(const std::string& doc_id) const {
   QgsMapLayer* layer = nullptr;
   auto it = impl_->mirror_by_doc.find(doc_id);
@@ -5620,10 +5637,11 @@ std::string QgisMapStack::layoutExport(const std::string& spec_json,
                                     extent.at(2).toDouble(),
                                     extent.at(3).toDouble()));
       }
-      // Layers: mirrorOrderTopFirst is top-first; QgsLayoutItemMap consumes
-      // bottom-first draw order.
+      // Layers: V11 mirrorTreeOrderTopFirst is the FULL-tree top-first order
+      // (grouped layers included — root-only walk silently dropped them);
+      // QgsLayoutItemMap consumes bottom-first draw order.
       QList<QgsMapLayer*> ordered;
-      const std::vector<std::string> order = mirrorOrderTopFirst();
+      const std::vector<std::string> order = mirrorTreeOrderTopFirst();
       for (auto it = order.rbegin(); it != order.rend(); ++it) {
         QgsMapLayer* layer = project()->mapLayer(
             QString::fromStdString(*it));

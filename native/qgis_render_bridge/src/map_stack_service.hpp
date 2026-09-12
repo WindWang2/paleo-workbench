@@ -279,6 +279,11 @@ public:
   void setMirrorLayerOrder(const std::vector<std::string>& doc_ids_top_first);
   void setMirrorLayerVisibility(const std::string& doc_id, bool visible);
   std::vector<std::string> mirrorOrderTopFirst() const;
+  // V11：全树自上而下的镜像 doc 序（= QgsLayerTree::layerOrder 语义，含
+  // 组内图层）。画布/图例/布局导出共用它——「canvas == tree == legend
+  // == layout」顺序一致性的唯一来源；root-only 的 mirrorOrderTopFirst 仅
+  // 保留给 legacy 平铺 order 事件。
+  std::vector<std::string> mirrorTreeOrderTopFirst() const;
   bool mirrorLayerVisibility(const std::string& doc_id) const;
   bool treeEchoSuppressed() const noexcept;
   // ✏ 编辑态图层指示器（M2 移交项：QGIS 桌面经图层指示器呈现编辑态）；

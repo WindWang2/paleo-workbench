@@ -859,6 +859,9 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
         .def("set_mirror_layer_order", &pwb::qgis_render::QgisMapStack::setMirrorLayerOrder)
         .def("set_mirror_layer_visibility", &pwb::qgis_render::QgisMapStack::setMirrorLayerVisibility)
         .def("mirror_order_top_first", &pwb::qgis_render::QgisMapStack::mirrorOrderTopFirst)
+        // V11：全树（含组）自上而下 doc 序——顺序一致性的统一来源。
+        .def("mirror_tree_order_top_first",
+             &pwb::qgis_render::QgisMapStack::mirrorTreeOrderTopFirst)
         .def("mirror_layer_visibility", &pwb::qgis_render::QgisMapStack::mirrorLayerVisibility)
         .def("tree_echo_suppressed", &pwb::qgis_render::QgisMapStack::treeEchoSuppressed)
         .def("set_map_tool", &pwb::qgis_render::QgisMapStack::setMapTool)

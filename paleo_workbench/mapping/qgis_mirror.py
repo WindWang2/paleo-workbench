@@ -940,7 +940,10 @@ def mirror_snapshot_to_stack(
             _sink("<tail>", str(exc))
         if not groups:
             try:
-                stack.set_mirror_layer_order(seen)
+                # V11 顺序约定统一（04-ordering §5）：组装序自下而上，
+                # 桥约定 top-first——显式反转，原生平铺画布与 fallback
+                # 画笔（后绘在上）对同一快照渲染出相同堆叠（平价测试钉死）。
+                stack.set_mirror_layer_order(list(reversed(seen)))
             except Exception as exc:
                 failures.append(f"set_order: {exc}")
                 _sink("<tail>", str(exc))
