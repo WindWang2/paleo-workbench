@@ -945,6 +945,15 @@ class PwbDigitizeTool : public QgsMapToolDigitizeFeature {
 struct QgisMapStack::Impl {
   bool initialized = false;
   bool display_mode = false;
+  // V11 树事务窗口：depth>0 时全部画布同步挂起（pending 标记），收口一次
+  // 执行；revision 随每次图层集同步递增（程序化 + 用户树编辑）；计数器
+  // 进 runtime_facts 供规模测试做结构性断言。
+  int tree_update_depth = 0;
+  std::uint64_t tree_update_token = 0;
+  bool pending_canvas_sync = false;
+  std::uint64_t tree_revision = 0;
+  std::uint64_t canvas_sync_count = 0;
+  std::uint64_t tree_update_windows = 0;
   std::unique_ptr<QgsProject> owned_project;
   std::unordered_map<std::uintptr_t, std::unique_ptr<QgsLayerTreeMapCanvasBridge>>
       tree_bridges;
@@ -1376,6 +1385,11 @@ int QgisMapStack::canvasLayerCount(std::uintptr_t canvas_addr) const {
 }
 
 void QgisMapStack::shutdown() {
+  // V11：任何未收口的树事务窗口在此强制复位（客户端异常路径遗留的
+  // 开窗不得永久挂起后续同步——shutdown 后同步本身已无意义，直接丢弃
+  // pending 标记并归零深度）。
+  impl_->tree_update_depth = 0;
+  impl_->pending_canvas_sync = false;
   for (auto& kv : impl_->extent_connections) {
     QObject::disconnect(kv.second);
   }
@@ -1774,9 +1788,7 @@ void QgisMapStack::refreshCanvas(std::uintptr_t canvas) {
   // on the same QgisMapStack mid-refresh. Callers that need a finished frame
   // pump the (outer) event loop or poll isCanvasRendering.
   QgsMapCanvas* c = canvasOrThrow(canvas);
-  for (auto& kv : impl_->canvas_refs) {
-    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
-  }
+  syncCanvasesAll();
   c->refresh();
 }
 
@@ -1832,9 +1844,7 @@ std::string QgisMapStack::addVectorLayerGeoJson(
   const std::string id = layer->id().toStdString();
   project()->addMapLayer(layer.release());
   impl_->owned_layers.insert(id);
-  for (auto& kv : impl_->canvas_refs) {
-    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
-  }
+  syncCanvasesAll();
   return id;
 }
 
@@ -1855,9 +1865,7 @@ void QgisMapStack::setLayerStyle(const std::string& layer_id,
   spec.id = layer_id;
   applyStyleToLayer(*layer, spec);
   layer->triggerRepaint();
-  for (auto& kv : impl_->canvas_refs) {
-    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
-  }
+  syncCanvasesAll();
 }
 
 bool QgisMapStack::removeLayer(const std::string& layer_id) {
@@ -1882,9 +1890,7 @@ bool QgisMapStack::removeLayer(const std::string& layer_id) {
   } else {
     eraseMirrorByQgisId(layer_id);
   }
-  for (auto& kv : impl_->canvas_refs) {
-    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
-  }
+  syncCanvasesAll();
   return true;
 }
 
@@ -1900,9 +1906,7 @@ void QgisMapStack::setLayerVisibility(const std::string& layer_id, bool visible)
   if (docVar.isValid() && !docVar.toString().isEmpty()) {
     impl_->known_layer_visibility[docVar.toString().toStdString()] = visible;
   }
-  for (auto& kv : impl_->canvas_refs) {
-    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
-  }
+  syncCanvasesAll();
 }
 
 void QgisMapStack::setLayerOpacity(const std::string& layer_id, double opacity) {
@@ -2127,6 +2131,11 @@ std::string QgisMapStack::runtimeFacts() const {
     }
     facts["transform_available"] = ok;
   }
+  // V11 树事务观测面：修订号 + 结构性计数（规模测试断言调用数）。
+  facts["tree_revision"] = static_cast<double>(impl_->tree_revision);
+  facts["canvas_sync_count"] = static_cast<double>(impl_->canvas_sync_count);
+  facts["tree_update_windows"] = static_cast<double>(impl_->tree_update_windows);
+  facts["tree_update_depth"] = impl_->tree_update_depth;
   return QJsonDocument(facts).toJson(QJsonDocument::Compact).toStdString();
 }
 
@@ -2513,9 +2522,7 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
   impl_->mirror_by_doc[doc_id] = id;
   impl_->mirror_style_sig[doc_id] = new_sig;
   impl_->known_layer_names[doc_id] = name;
-  for (auto& kv : impl_->canvas_refs) {
-    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
-  }
+  syncCanvasesAll();
   return id;
 }
 
@@ -2643,9 +2650,7 @@ std::string QgisMapStack::upsertRasterMirrorLayer(
   impl_->mirror_by_doc[doc_id] = id;
   impl_->mirror_style_sig[doc_id] = new_sig;
   impl_->known_layer_names[doc_id] = name;
-  for (auto& kv : impl_->canvas_refs) {
-    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
-  }
+  syncCanvasesAll();
   return id;
 }
 
@@ -2685,9 +2690,7 @@ void QgisMapStack::removeMirrorLayersExcept(const std::vector<std::string>& doc_
     }
   }
   for (const auto& d : stale_docs) impl_->eraseMirrorByDocId(d);
-  for (auto& kv : impl_->canvas_refs) {
-    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
-  }
+  syncCanvasesAll();
 }
 
 void QgisMapStack::setMirrorLayerOrder(const std::vector<std::string>& doc_ids_top_first) {
@@ -2753,9 +2756,7 @@ void QgisMapStack::setMirrorLayerOrder(const std::vector<std::string>& doc_ids_t
       root->insertChildNode(0, node);
     }
   }
-  for (auto& kv : impl_->canvas_refs) {
-    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
-  }
+  syncCanvasesAll();
 }
 
 void QgisMapStack::setMirrorLayerVisibility(const std::string& doc_id, bool visible) {
@@ -2780,9 +2781,7 @@ void QgisMapStack::setMirrorLayerVisibility(const std::string& doc_id, bool visi
   if (!node) throw std::invalid_argument("layer node not found for doc_id: " + doc_id);
   node->setItemVisibilityChecked(visible);
   impl_->known_layer_visibility[doc_id] = visible;
-  for (auto& kv : impl_->canvas_refs) {
-    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
-  }
+  syncCanvasesAll();
 }
 
 std::vector<std::string> QgisMapStack::mirrorOrderTopFirst() const {
@@ -2816,6 +2815,72 @@ bool QgisMapStack::mirrorLayerVisibility(const std::string& doc_id) const {
 
 bool QgisMapStack::treeEchoSuppressed() const noexcept {
   return impl_ && impl_->suppress_tree_callbacks > 0;
+}
+
+// ------------------------------------------------------- V11 树事务窗口
+
+void QgisMapStack::syncCanvasesAll() {
+  if (impl_->tree_update_depth > 0) {
+    // 窗口内：挂起到收口（一次 sync + 一次 refresh）。
+    impl_->pending_canvas_sync = true;
+    ++impl_->tree_revision;
+    return;
+  }
+  ++impl_->tree_revision;
+  ++impl_->canvas_sync_count;
+  for (const auto& kv : impl_->canvas_refs) {
+    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
+  }
+}
+
+std::uint64_t QgisMapStack::beginTreeUpdate() {
+  if (!impl_->initialized)
+    throw std::runtime_error("map stack is not initialized");
+  if (impl_->tree_update_depth == 0) {
+    impl_->pending_canvas_sync = false;
+    // token 单调：新窗口新 token；嵌套沿用最外层 token（配对校验用）。
+    impl_->tree_update_token = impl_->tree_revision + 1;
+  }
+  ++impl_->tree_update_depth;
+  return impl_->tree_update_token;
+}
+
+std::string QgisMapStack::endTreeUpdate(std::uint64_t token) {
+  if (!impl_->initialized)
+    throw std::runtime_error("map stack is not initialized");
+  if (impl_->tree_update_depth == 0) {
+    throw std::runtime_error(
+        "end_tree_update without a matching begin_tree_update");
+  }
+  if (token != impl_->tree_update_token) {
+    throw std::runtime_error(
+        "tree update token mismatch: unbalanced begin/end nesting");
+  }
+  --impl_->tree_update_depth;
+  QJsonObject result;
+  result["revision"] = static_cast<double>(impl_->tree_revision);
+  if (impl_->tree_update_depth == 0) {
+    ++impl_->tree_update_windows;
+    const bool flush = impl_->pending_canvas_sync;
+    result["deferred_sync"] = flush;
+    if (flush) {
+      impl_->pending_canvas_sync = false;
+      ++impl_->canvas_sync_count;
+      for (const auto& kv : impl_->canvas_refs) {
+        if (kv.second.isNull()) continue;
+        syncCanvasLayers(kv.first);
+        // 收口统一重绘：窗口内零中间帧。
+        kv.second->refresh();
+      }
+    }
+  } else {
+    result["deferred_sync"] = bool(impl_->pending_canvas_sync);
+  }
+  return QJsonDocument(result).toJson(QJsonDocument::Compact).toStdString();
+}
+
+std::uint64_t QgisMapStack::treeRevision() const noexcept {
+  return impl_ ? impl_->tree_revision : 0;
 }
 
 // ---------------------------------------------------------------- V5 groups
@@ -2874,9 +2939,7 @@ bool QgisMapStack::upsertGroup(const std::string& group_id, const std::string& n
   impl_->known_group_names[group_id] = name;
   // 可见性基线同步建立（否则用户首次勾选被当"首次见面"吞掉）。
   impl_->known_group_visibility[group_id] = existing->itemVisibilityChecked();
-  for (auto& kv : impl_->canvas_refs) {
-    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
-  }
+  syncCanvasesAll();
   return true;
 }
 
@@ -2922,9 +2985,7 @@ int QgisMapStack::removeGroupsExcept(const std::vector<std::string>& group_ids) 
       removed++;
     }
   }
-  for (auto& kv : impl_->canvas_refs) {
-    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
-  }
+  syncCanvasesAll();
   return removed;
 }
 
@@ -2948,9 +3009,7 @@ void QgisMapStack::setGroupVisibility(const std::string& group_id, bool visible)
     group->setItemVisibilityChecked(visible);
   }
   impl_->known_group_visibility[group_id] = visible;
-  for (auto& kv : impl_->canvas_refs) {
-    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
-  }
+  syncCanvasesAll();
 }
 
 void QgisMapStack::moveLayerToGroup(const std::string& doc_id,
@@ -2991,9 +3050,7 @@ void QgisMapStack::moveLayerToGroup(const std::string& doc_id,
     }
     target->insertChildNode(clamped, node);
   }
-  for (auto& kv : impl_->canvas_refs) {
-    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
-  }
+  syncCanvasesAll();
 }
 
 void QgisMapStack::moveGroup(const std::string& group_id,
@@ -3032,9 +3089,7 @@ void QgisMapStack::moveGroup(const std::string& group_id,
       target->insertChildNode(clamped, group);
     }
   }
-  for (auto& kv : impl_->canvas_refs) {
-    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
-  }
+  syncCanvasesAll();
 }
 
 std::string QgisMapStack::treeSnapshotJson() const {
@@ -3862,15 +3917,15 @@ std::string QgisMapStack::applyTreePlacements(const std::string& placements_json
       applied++;
     }
   }
-  for (auto& kv : impl_->canvas_refs) {
-    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
-  }
-  for (auto& kv : impl_->tree_views) {
-    if (!kv.second.isNull()) kv.second->expandAllNodes();
-  }
+  syncCanvasesAll();
+  // V11：不再 expandAllNodes——那会把用户的收起状态在每次批量放置后清掉
+  //（audit D3-native）。新建组节点在 QGIS 侧默认展开；已存在节点的展开
+  // 态由 setGroupExpanded/用户交互持有，放置操作不触碰。
   QJsonObject out;
   out.insert(QStringLiteral("applied"), applied);
   out.insert(QStringLiteral("skipped"), skipped);
+  out.insert(QStringLiteral("revision"),
+             static_cast<double>(impl_->tree_revision));
   return QJsonDocument(out).toJson(QJsonDocument::Compact).toStdString();
 }
 
@@ -4020,9 +4075,7 @@ int QgisMapStack::applyProjectXml(const std::string& xml) {
   } else if (!flatOrder.empty()) {
     setMirrorLayerOrder(flatOrder);
   }
-  for (auto& kv : impl_->canvas_refs) {
-    if (!kv.second.isNull()) syncCanvasLayers(kv.first);
-  }
+  syncCanvasesAll();
   return applied;
 }
 
@@ -5099,7 +5152,12 @@ void QgisMapStack::flushTreeChange(std::uintptr_t tree_addr) {
   auto cbIt = impl_->tree_change_callbacks.find(tree_addr);
   if (cbIt == impl_->tree_change_callbacks.end() || !cbIt->second) return;
   if (batch.empty()) return;
+  // V11：用户树编辑同样推进修订号——Python 回写侧据此识别“窗口内/窗口后
+  // 的并发变更”，丢弃过期回声。
+  ++impl_->tree_revision;
   QJsonObject root;
+  root.insert(QStringLiteral("tree_revision"),
+              static_cast<double>(impl_->tree_revision));
   // V5 schema 2：保留 legacy visibility/order/renames 键（平铺图层语义，
   // 旧消费者不破），追加 typed events 与全层级 tree 快照。
   root.insert(QStringLiteral("schema"), 2);

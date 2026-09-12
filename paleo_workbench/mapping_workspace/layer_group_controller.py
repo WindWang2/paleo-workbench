@@ -45,6 +45,7 @@ from paleo_workbench.mapping_workspace.layer_tree_plan import (
     effective_home_group,
 )
 from paleo_workbench.mapping_workspace.layer_tree_diff import diff_trees
+from paleo_workbench.mapping_workspace.tree_transaction import tree_transaction
 from paleo_workbench.mapping_workspace.stage_profiles import stage_profile
 from paleo_workbench.mapping_workspace.stage_state import (
     LayerMembershipRecord,
@@ -314,12 +315,17 @@ class LayerGroupController:
     # -- 增量 reconcile ----------------------------------------------------------
 
     def reconcile(self, layer_snapshots: Iterable, *, force: bool = False) -> None:
-        """把期望树增量应用到 QGIS 树（桥无 group 能力时诚实 no-op）。"""
+        """把期望树增量应用到 QGIS 树（桥无 group 能力时诚实 no-op）。
+
+        V11：整次应用包在原生树事务窗口内（桥 0.7.0a0+）——create/rename/
+        清理/批量放置零中间画布同步，收口一次 sync+refresh；旧桥透明降级。
+        """
         if self._stack is None or not self.groups_available:
             return
         desired = self.build_desired_tree(layer_snapshots)
         try:
-            self._apply_tree(desired, force=force)
+            with tree_transaction(self._stack):
+                self._apply_tree(desired, force=force)
             self._last_applied = desired
             self.state.tree = desired.to_dict()
         except Exception:

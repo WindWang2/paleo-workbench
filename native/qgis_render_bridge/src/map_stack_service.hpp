@@ -127,6 +127,21 @@ public:
   // 返回应用的放置数；未知节点跳过并计数在返回 JSON {"applied":n,"skipped":m}。
   std::string applyTreePlacements(const std::string& placements_json);
 
+  // V11 树事务窗口：begin..end 之间的全部树/镜像变更合并为
+  //   * 零中间画布同步（收口一次 syncCanvasLayers + 一次 refresh）；
+  //   * 零中间闪烁与回声风暴（程序化回声本就逐调用抑制）。
+  // begin 返回 token；end 必须配对传入（嵌套计数，乱序抛错）。
+  // end 返回 JSON {"revision":uint64,"deferred_sync":bool}。
+  // 失败语义：窗口内单个调用仍可抛（Python 逐操作捕获）；end 总会收口
+  // 窗口——已应用的变更保留（partial failure 由调用方经 revision/diff 对账）。
+  std::uint64_t beginTreeUpdate();
+  std::string endTreeUpdate(std::uint64_t token);
+  // 树修订号：每次画布图层集同步（含窗口收口）递增；用户树编辑亦递增。
+  // Python 回写侧用其丢弃过期回声（revision ≤ 已应用值）。
+  std::uint64_t treeRevision() const noexcept;
+  // 全画布同步（窗口感知：窗口内挂起，收口执行）。计数入 runtime_facts。
+  void syncCanvasesAll();
+
   // 右键菜单：C++ 侧组装（QGIS 默认动作 + 自定义动作键），自定义动作触发
   // callback(action_key, doc_id)。重设会替换旧 provider（view 接管所有权）。
   void setTreeMenuCallback(
