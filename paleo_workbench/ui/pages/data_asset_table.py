@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.ui.pages.asset_table_model import (
     RESOURCE_TYPE_LABELS,
     AssetTableModel,
@@ -135,10 +135,15 @@ class DataAssetTable(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setAlternatingRowColors(True)
-        self.table.setStyleSheet(
-            f"QTableView#DataAssetGrid {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; gridline-color: {tokens.BORDER}; }}"
+        # E1：表格 chrome 经 style.bind 按当前主题重渲染（不再快照 light 值）。
+        style.bind(
+            self.table,
+            lambda: (
+                f"QTableView#DataAssetGrid {{ background: {style.palette()['BG_SIDEBAR']};"
+                f" border: 1px solid {style.palette()['BORDER']};"
+                f" border-radius: {tokens.RADIUS_CARD}px;"
+                f" gridline-color: {style.palette()['BORDER']}; }}"
+            ),
         )
         self.table.selectionModel().selectionChanged.connect(self._emit_selection)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)

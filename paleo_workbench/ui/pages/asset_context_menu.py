@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QMenu
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.resources.exporters import get_available_formats
+from paleo_workbench.mapping.tool_availability import raw_layer_gate_reason
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.workstation.common import workstation_icon
 from paleo_workbench.ui.pages.data_view_models import (
@@ -84,7 +85,10 @@ class AssetContextMenu(QMenu):
             # Direct edit disabled for RAW
             edit_raw = self._add_action("ctx_edit_original", "编辑原始数据 (已锁定 ⊘)")
             edit_raw.setEnabled(False)
-            edit_raw.setToolTip("原始数据已锁定，不能直接编辑。请创建派生副本。")
+            # V11 Goal §7（A3）：RAW 门禁措辞与 evaluator/状态条同源
+            # （tool_availability.raw_layer_gate_reason），不再手写第二份；
+            # 「不可用：」前缀与其余禁用表面（阶段面板/原生树/执行态）一致。
+            edit_raw.setToolTip(f"不可用：{raw_layer_gate_reason()}")
 
         elif view.stage in (DataStage.DERIVED, DataStage.INTERMEDIATE):
             # 新建版本 / 工作副本: create a mutable working copy of the current

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from PySide6.QtCore import QObject, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QIcon, QKeySequence
 from PySide6.QtWidgets import QToolBar, QWidget
@@ -16,19 +14,23 @@ from paleo_workbench.mapping.tool_help import (
 
 __all__ = ["MapActionController"]
 
-_MAP_ICONS_DIR = Path(__file__).parent / "assets" / "icons" / "map"
-_ICONS_DIR = Path(__file__).parent / "assets" / "icons"
-
 
 def _map_icon(action_id: str, *, fallback: str = "") -> QIcon:
-    """Load a toolbar icon (map/ 优先，assets 根目录兜底)，缺失返回空 QIcon。"""
+    """Load a toolbar icon (map/ 优先，assets 根目录兜底)，缺失返回空 QIcon。
+
+    E2：经主题感知 tint 工厂加载——中性灰色字形按当前主题 TEXT_SECONDARY
+    重染；多色/语义色 SVG 原样返回（拉平会破坏图义）。tint 工厂懒加载：
+    workstation 包 init 经 composite_document 模块级导入本模块，顶层
+    import common 会成环。
+    """
+    from paleo_workbench.ui.workstation.common import tinted_map_icon
+
     for name in (action_id, fallback):
         if not name:
             continue
-        for directory in (_MAP_ICONS_DIR, _ICONS_DIR):
-            path = directory / f"{name}.svg"
-            if path.exists():
-                return QIcon(str(path))
+        icon = tinted_map_icon(name)
+        if not icon.isNull():
+            return icon
     return QIcon()
 
 

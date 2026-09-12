@@ -147,7 +147,9 @@ def test_semantic_checks_command_palette_context(qtbot, tmp_path):
         for row in range(palette.result_list.count())
         if not palette.result_list.item(row).flags() & Qt.ItemFlag.ItemIsEnabled
     ]
-    assert disabled and any("当前编图阶段不可用" in text for text, _ in disabled)
+    # V11：措辞断言对齐 V10 M10 的单一真源 stage_whitelist_reason
+    # （「当前阶段不允许该操作（限 …）」——base 上该测试期望已过时）。
+    assert disabled and any("当前阶段不允许该操作" in text for text, _ in disabled)
 
 
 def test_semantic_checks_write_grant_dialog(qtbot, tmp_path):

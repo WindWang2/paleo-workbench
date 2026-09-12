@@ -20,7 +20,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QMenu, QTreeWidget, QTreeWidgetItem
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.ui.pages.data_view_models import DataStage, IntegrityState
 from paleo_workbench.ui.pages.filter_index import (
     AUXILIARY_TYPES,
@@ -29,6 +29,16 @@ from paleo_workbench.ui.pages.filter_index import (
     FilterQuery,
     compute_catalog_counts,
 )
+
+
+def _tree_qss() -> str:
+    pal = style.palette()
+    return (
+        f"QTreeWidget#NavigationTree {{ background: {pal['BG_SIDEBAR']};"
+        f" border: 1px solid {pal['BORDER']};"
+        f" border-radius: {tokens.RADIUS_CARD}px; }}"
+    )
+
 
 TYPE_LEAVES = [
     ("测井", "well_log"),
@@ -109,7 +119,8 @@ class NavigationTree(QTreeWidget):
         self.setObjectName("NavigationTree")
         self.setHeaderHidden(True)
         self.setRootIsDecorated(True)
-        self._apply_themed_sheet()
+        # 主题切换经 style.bind 重渲染（E1：替代此前的手工订阅 + 快照）。
+        style.bind(self, _tree_qss)
         self.setMinimumWidth(200)
         self.tag_parent_item: QTreeWidgetItem | None = None
         # WorkArea domain state (None until a project with entities arrives).
@@ -133,25 +144,6 @@ class NavigationTree(QTreeWidget):
         self.itemClicked.connect(self._on_item_clicked)
         self.itemActivated.connect(self._on_item_activated)
         self._build_tree()
-        # follow theme switches instead of baking a light-only sheet (#1047)
-        from paleo_workbench.ui.theme import theme_manager
-
-        theme_manager.theme_changed.connect(
-            self._on_theme_changed
-        )
-
-    def _apply_themed_sheet(self) -> None:
-        from paleo_workbench.ui.theme import theme_manager
-
-        palette = tokens.palette_for(theme_manager.current_theme.value)
-        self.setStyleSheet(
-            f"QTreeWidget#NavigationTree {{ background: {palette['BG_SIDEBAR']};"
-            f" border: 1px solid {palette['BORDER']};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
-
-    def _on_theme_changed(self, _theme: str, _density: str = "") -> None:
-        self._apply_themed_sheet()
 
     def _build_tree(self) -> None:
         self.clear()

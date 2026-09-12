@@ -45,8 +45,11 @@ class QCIssueTable(QWidget):
             rule = str(issue.get("rule") or "")
             self._spatial_by_rule.setdefault(rule, []).append(issue)
 
-        for row, rule in enumerate(report.rules):
-            self.table.insertRow(row)
+        # V11：一次 setRowCount 定行数再 setItem（替代 insertRow-in-loop；
+        # 固定 4 列小表保留 widget 形态——行高逐行设置，模型化无增益）。
+        rules = list(report.rules)
+        self.table.setRowCount(len(rules))
+        for row, rule in enumerate(rules):
             description = tokens.RULE_DESCRIPTIONS.get(rule, rule)
             severity, result_text, result_color = derive_rule_result(rule, report.issues)
             spatial = self._spatial_by_rule.get(rule) or []

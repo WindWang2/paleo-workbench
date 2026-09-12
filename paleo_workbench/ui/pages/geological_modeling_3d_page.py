@@ -891,6 +891,77 @@ class GeologicalModeling3DPage(QWidget):
         self._main_splitter = splitter
 
         main_layout.addWidget(splitter)
+        self._setup_tab_order()
+
+    def _setup_tab_order(self) -> None:
+        """Explicit tab chain for the page's primary interactive controls.
+
+        Visual order (audit F1, v11): left scene tree + geo3d panel → joint
+        toolbar → slice card → analysis tabs → bottom 2D strip. The hidden
+        legacy right rail (modeling/export cards) is deliberately left out;
+        QSliders are not primary chainable controls per the audit. Hidden or
+        collapsed cards are safe in the chain — Qt skips invisible widgets.
+        """
+        chain: list[QWidget] = [
+            # -- left: scene tree + geo3d panel --------------------------------
+            self.model_tree,
+            self.geo_measure_combo,
+            self.geo_btn_measure_clear,
+            self._geo_clip_rows["x"][0],
+            self._geo_clip_rows["y"][0],
+            self._geo_clip_rows["z"][0],
+            self.geo_btn_clip_reset,
+            self.geo_btn_fit,
+            self.geo_view_combo,
+            self.geo_btn_save_view,
+            self.geo_qc_list,
+            # -- joint toolbar (top) ------------------------------------------
+            self._joint_domain,
+            self._joint_3d_mode,
+            self._joint_slice_card_btn,
+            self._joint_analysis_btn,
+            self._joint_pick_mode,
+            self._joint_well_a,
+            self._joint_well_b,
+            self._joint_fence_btn,
+            self._joint_del_fence_btn,
+            self._joint_add_btn,
+            self.btn_orbit,
+            self.btn_pan,
+            self.btn_reset,
+            # -- orthogonal slice card ----------------------------------------
+            self._joint_inline_slice,
+            self._joint_crossline_slice,
+            self._joint_time_selector,
+            self._joint_active_time_editor,
+            self._joint_active_time_visible,
+            self._joint_delete_time_slice,
+            self._joint_new_time,
+            self._joint_add_time_slice,
+            self._joint_time_opacity,
+            # -- analysis tabs (stratal → proxies) ----------------------------
+            self._stratal_top_combo,
+            self._stratal_top_browse,
+            self._stratal_bot_combo,
+            self._stratal_bot_browse,
+            self._stratal_fractions,
+            self._stratal_demo_check,
+            self.btn_stratal_generate,
+            self.btn_stratal_clear,
+            self._wtie_auto_proxy,
+            self._facies_rgb_proxy,
+            self._facies_crossplot_proxy,
+            self._diag_export_proxy,
+            self._diag_ai_proxy,
+            # -- bottom joint 2D strip ----------------------------------------
+            self._joint_color_card_btn,
+            self.btn_toggle_joint_2d,
+            self._joint_seismic_color,
+            self._joint_gr_color,
+            self._joint_well_width,
+        ]
+        for earlier, later in zip(chain, chain[1:]):
+            QWidget.setTabOrder(earlier, later)
 
     # ------------------------------------------------------------------ #
     # V5 geological workspace (domain objects / QC / measure / clip)

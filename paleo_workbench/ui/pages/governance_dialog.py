@@ -19,7 +19,15 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench.catalog.governance import GOVERNANCE_FIELDS
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
+
+
+def _hint_qss() -> str:
+    return f"color: {style.palette()['TEXT_SECONDARY']}; font-size: {tokens.FONT_SIZE_STATUS};"
+
+
+def _error_qss() -> str:
+    return f"color: {style.palette()['ERROR_RED']}; font-size: {tokens.FONT_SIZE_STATUS};"
 
 
 class GovernanceMetadataDialog(QDialog):
@@ -69,12 +77,12 @@ class GovernanceMetadataDialog(QDialog):
             "版本数据保持不可变 — 治理信息仅记录在资产级别。"
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;")
+        style.bind(hint, _hint_qss)  # E1: theme-switch re-render
         layout.addWidget(hint)
 
         self.error_label = QLabel("")
         self.error_label.setWordWrap(True)
-        self.error_label.setStyleSheet(f"color: {tokens.ERROR_RED}; font-size: 11px;")
+        style.bind(self.error_label, _error_qss)
         self.error_label.hide()
         layout.addWidget(self.error_label)
 

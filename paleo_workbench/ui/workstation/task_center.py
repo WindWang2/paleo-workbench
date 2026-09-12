@@ -47,7 +47,9 @@ def _state_colors() -> dict[str, str]:
     return {
         "queued": p["TEXT_SECONDARY"],
         "running": p["WARNING"],
+        "cancelling": p["WARNING"],
         "done": p["SUCCESS"],
+        "degraded": p["WARNING"],
         "failed": p["ERROR_RED"],
         "cancelled": p["TEXT_SECONDARY"],
     }
@@ -56,6 +58,65 @@ _MAX_ROWS = 100
 # 列：状态 / 任务 / 进度 / 用时 / 操作
 _COL_STATE, _COL_TITLE, _COL_PROGRESS, _COL_ELAPSED, _COL_ACTION = range(5)
 _COLUMNS = 5
+
+
+class _OpSpecShim:
+    """OperationRecord → 模型期望的 spec 形状（title/kind）。"""
+
+    def __init__(self, record) -> None:
+        self.title = record.title
+        self.kind = "operation"
+
+
+class _OperationHandleAdapter:
+    """把 OperationRegistry 记录适配成任务模型可消费的 handle 形状。
+
+    V11（goal §12）：页面级长操作（校验/导入/导出/重算…）与调度器任务
+    在任务中心**同一张表**呈现，同一状态词表、同一取消交互。
+    """
+
+    registry_op = True
+
+    def __init__(self, record, registry) -> None:
+        self._record = record
+        self._registry = registry
+        self.task_id = f"op:{record.op_id}"
+        self.spec = _OpSpecShim(record)
+        from paleo_workbench.runtime.task_scheduler import TaskState
+
+        mapping = {
+            "queued": TaskState.QUEUED,
+            "running": TaskState.RUNNING,
+            "cancelling": TaskState.CANCELLING,
+            "completed": TaskState.DONE,
+            "warning": TaskState.DEGRADED,
+            "failed": TaskState.FAILED,
+            "cancelled": TaskState.CANCELLED,
+        }
+        self.state = mapping.get(record.state.value, TaskState.RUNNING)
+        fraction = record.progress_fraction
+        self.progress = fraction if fraction is not None else 0.0
+        parts = []
+        if record.object_label:
+            parts.append(str(record.object_label))
+        if record.stage:
+            parts.append(str(record.stage))
+        if record.state.terminal and record.result_label:
+            parts.append(str(record.result_label))
+        self.message = " · ".join(parts) if parts else None
+        self.error = record.error
+        self.result = None
+        self.submitted_at = record.started_at
+        self.started_at = record.started_at
+        self.finished_at = record.finished_at
+        self.cancel_requested = record.state.value == "cancelling"
+
+    def cancel(self) -> bool:
+        return self._registry.request_cancel(self._record.op_id)
+
+    @property
+    def record(self):
+        return self._record
 
 
 class _TaskTableModel(QAbstractItemModel):
@@ -294,6 +355,9 @@ class _TaskRowDelegate(QStyledItemDelegate):
             return super().editorEvent(event, model, option, index)
         if handle.state not in (TaskState.QUEUED, TaskState.RUNNING):
             return True
+        if getattr(handle, "registry_op", False):
+            handle.cancel()
+            return True
         from paleo_workbench.runtime.task_scheduler import get_scheduler
 
         get_scheduler().cancel(handle.task_id)
@@ -310,6 +374,9 @@ class TaskCenter(QFrame):
         self.setObjectName("WorkstationTaskCenter")
         self._last_active = -1
         self._selected_task_id: str | None = None
+        self._registry = None
+        self._registry_op_changed = None
+        self._registry_op_removed = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
@@ -337,6 +404,7 @@ class TaskCenter(QFrame):
         header.resizeSection(_COL_ACTION, 64)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
+        self.tree.doubleClicked.connect(self._on_double_clicked)
         self.tree.selectionModel().selectionChanged.connect(self._remember_selection)
         outer.addWidget(self.tree, 1)
 
@@ -373,10 +441,43 @@ class TaskCenter(QFrame):
 
     # -- 刷新 ----------------------------------------------------------------
 
+    def attach_registry(self, registry) -> None:
+        """V11：接入 OperationRegistry（页面级操作与调度器任务同表呈现）。"""
+        if self._registry is registry:
+            return
+        if self._registry is not None:
+            try:
+                self._registry.operation_changed.disconnect(self._registry_op_changed)
+                self._registry.operation_removed.disconnect(self._registry_op_removed)
+            except (RuntimeError, TypeError):
+                pass
+        self._registry = registry
+        # 批量操作的逐文件进度 tick 会高频发 operation_changed——
+        # 用 100ms 单发合并刷新（400ms 轮询兜底；评审 P1-2 刷新风暴）。
+        self._registry_refresh_timer = QTimer(self)
+        self._registry_refresh_timer.setSingleShot(True)
+        self._registry_refresh_timer.setInterval(100)
+        self._registry_refresh_timer.timeout.connect(self.refresh)
+        self._registry_op_changed = self._schedule_registry_refresh
+        self._registry_op_removed = self._schedule_registry_refresh
+        registry.operation_changed.connect(self._registry_op_changed)
+        registry.operation_removed.connect(self._registry_op_removed)
+        self.refresh()
+
+    def _schedule_registry_refresh(self, _op: str = "") -> None:
+        timer = getattr(self, "_registry_refresh_timer", None)
+        if timer is not None:
+            timer.start()
+
     def refresh(self) -> None:
         from paleo_workbench.runtime.task_scheduler import TaskState, get_scheduler
 
-        handles = get_scheduler().statuses()
+        handles = list(get_scheduler().statuses())
+        if self._registry is not None:
+            handles.extend(
+                _OperationHandleAdapter(record, self._registry)
+                for record in self._registry.records()
+            )
         active = sum(
             handle.state in (TaskState.QUEUED, TaskState.RUNNING) for handle in handles
         )
@@ -388,6 +489,7 @@ class TaskCenter(QFrame):
         at_top = scroll_before == 0
         self.model.refresh(handles)
         self._restore_selection()
+        self._update_empty_state()
         if not at_top:
             self.tree.verticalScrollBar().setValue(min(scroll_before, self.tree.verticalScrollBar().maximum()))
 
@@ -420,12 +522,26 @@ class TaskCenter(QFrame):
             if handle.cancel_requested:
                 action.setEnabled(False)
                 action.setToolTip("正在等待任务协作取消（长计算步骤间检查取消点）")
-            action.triggered.connect(lambda: scheduler.cancel(handle.task_id))
+            action.triggered.connect(
+                lambda: (
+                    handle.cancel()
+                    if getattr(handle, "registry_op", False)
+                    else scheduler.cancel(handle.task_id)
+                )
+            )
+        # V11：终态操作记录提供结果跳转（goal §12 jump-to-output）。
+        record = getattr(handle, "record", None)
+        if record is not None and record.jump is not None and record.state.terminal:
+            jump_action = menu.addAction(
+                f"跳转：{record.result_label}" if record.result_label else "跳转到结果"
+            )
+            jump_action.triggered.connect(lambda: self._run_jump(record))
         if handle.state in (TaskState.FAILED, TaskState.CANCELLED):
             action = menu.addAction("重试")
             # V7 §12：如实说明重试语义——重新提交相同 spec（闭包参数原样
             # 重放，输入若已变化不会自动更新）。
             action.setToolTip("用完全相同的参数重新提交该任务")
+            action.setEnabled(not getattr(handle, "registry_op", False))
             action.triggered.connect(lambda: scheduler.submit(handle.spec))
         action = menu.addAction("复制任务 ID")
         action.triggered.connect(
@@ -434,6 +550,24 @@ class TaskCenter(QFrame):
         detail = menu.addAction("详情…")
         detail.triggered.connect(lambda: self._show_details(handle))
         menu.exec(self.tree.viewport().mapToGlobal(position))
+
+    @staticmethod
+    def _run_jump(record) -> None:
+        if record.jump is None:
+            return
+        try:
+            record.jump()
+        except RuntimeError:
+            pass  # 目标页面已销毁（迟到跳转）
+
+    def _on_double_clicked(self, index) -> None:
+        """双击终态操作记录 → 结果跳转（goal §12 jump-to-output）。"""
+        if not index.isValid():
+            return
+        handle = self.model.handle_at(index.row())
+        record = getattr(handle, "record", None) if handle is not None else None
+        if record is not None and record.jump is not None and record.state.terminal:
+            self._run_jump(record)
 
     def _show_details(self, handle) -> None:
         from PySide6.QtWidgets import QDialog, QDialogButtonBox, QPlainTextEdit, QVBoxLayout

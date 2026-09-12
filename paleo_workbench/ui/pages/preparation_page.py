@@ -105,6 +105,23 @@ class PreparationPage(QWidget):
         self.task_panel.contour_draft_requested.connect(self._on_contour_draft_requested)
         self.well_table_panel.run_qc_btn.clicked.connect(self._on_run_well_qc)
 
+        self._setup_tab_order()
+
+    def _setup_tab_order(self) -> None:
+        """Explicit tab chain: left task panel → center well table → boundary.
+
+        Visual/logical order (audit F1, v11): 制备方法与生成动作 → 井表 +
+        QC → 边界参数。Preview grids are canvases (no chainable controls).
+        """
+        QWidget.setTabOrder(self.task_panel.method_combo, self.task_panel.generate_btn)
+        QWidget.setTabOrder(self.task_panel.generate_btn, self.task_panel.contour_draft_btn)
+        QWidget.setTabOrder(self.task_panel.contour_draft_btn, self.well_table_panel.table)
+        QWidget.setTabOrder(self.well_table_panel.table, self.well_table_panel.run_qc_btn)
+        QWidget.setTabOrder(self.well_table_panel.run_qc_btn, self.boundary_panel.threshold_spin)
+        QWidget.setTabOrder(self.boundary_panel.threshold_spin, self.boundary_panel.smoothing_combo)
+        QWidget.setTabOrder(self.boundary_panel.smoothing_combo, self.boundary_panel.area_spin)
+        QWidget.setTabOrder(self.boundary_panel.area_spin, self.boundary_panel.generate_btn)
+
     def set_project(self, project) -> None:
         """Bind the live ProjectDocument so batch generate can mutate factor_map_tasks."""
         # Project switch supersedes any in-flight prepare generation.

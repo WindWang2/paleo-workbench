@@ -2,10 +2,26 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.workflow.service import STEP_ORDER
 
 STEP_TYPES = STEP_ORDER
+
+
+def _title_qss() -> str:
+    return (
+        f"color: {style.palette()['TEXT_PRIMARY']};"
+        f" font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 600;"
+    )
+
+
+def _time_qss() -> str:
+    return f"color: {style.palette()['TEXT_SECONDARY']}; font-size: {tokens.FONT_SIZE_STATUS};"
+
+
+def _desc_qss() -> str:
+    # 12.5px 是历史微调值（无对应刻度 token，保留字面量、ratchet 登记）。
+    return f"color: {style.palette()['TEXT_PRIMARY']}; font-size: 12.5px;"
 
 
 class RecentActivityCard(QFrame):
@@ -16,9 +32,7 @@ class RecentActivityCard(QFrame):
         layout.setContentsMargins(tokens.SPACE_4, tokens.SPACE_4, tokens.SPACE_4, tokens.SPACE_4)
         layout.setSpacing(tokens.SPACE_2)
         self.title_label = QLabel("最近活动")
-        self.title_label.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 14px; font-weight: 600;"
-        )
+        style.bind(self.title_label, _title_qss)  # E1: theme-switch re-render
         layout.addWidget(self.title_label)
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
@@ -75,13 +89,9 @@ class RecentActivityCard(QFrame):
 
     def _append_entry(self, when: str, description: str) -> int:
         time_label = QLabel(when)
-        time_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
-        )
+        style.bind(time_label, _time_qss)
         desc_label = QLabel(description)
-        desc_label.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 12.5px;"
-        )
+        style.bind(desc_label, _desc_qss)
         entry_layout = QHBoxLayout()
         entry_layout.setContentsMargins(0, 0, 0, 0)
         entry_layout.setSpacing(tokens.SPACE_2)

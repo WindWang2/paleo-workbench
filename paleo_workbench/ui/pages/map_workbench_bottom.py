@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QTabWidget
@@ -9,12 +8,11 @@ from paleo_workbench.ui.pages.map_attribute_table import MapAttributeTable
 from paleo_workbench.ui.pages.map_factor_shelf import MapFactorShelf
 from paleo_workbench.ui.pages.map_topology_issue_panel import MapTopologyIssuePanel
 
-_ICONS_DIR = Path(__file__).parent.parent.parent / "ui" / "assets" / "icons" / "map"
-
-
 def _panel_icon(name: str) -> QIcon:
-    path = _ICONS_DIR / f"{name}.svg"
-    return QIcon(str(path)) if path.exists() else QIcon()
+    """Theme-aware loader (E2): neutral glyphs re-tinted per theme via the
+    shared factory; multi-color SVGs pass through; missing asset → empty."""
+    from paleo_workbench.ui.workstation.common import tinted_map_icon  # 懒加载（E2）：避免拉起 workstation shell 导入链
+    return tinted_map_icon(name)
 
 
 class MapWorkbenchBottom(QTabWidget):

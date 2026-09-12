@@ -10,12 +10,12 @@ RESOURCE_TYPES = REQUIRED_RESOURCE_TYPES
 
 def _name_qss() -> str:
     pal = style.palette()
-    return f"color: {pal['TEXT_SECONDARY']}; font-size: 12px;"
+    return f"color: {pal['TEXT_SECONDARY']}; font-size: {tokens.FONT_SIZE_MINOR};"
 
 
 def _count_qss() -> str:
     pal = style.palette()
-    return f"color: {pal['TEXT_PRIMARY']}; font-size: 12px; font-weight: 500;"
+    return f"color: {pal['TEXT_PRIMARY']}; font-size: {tokens.FONT_SIZE_MINOR}; font-weight: 500;"
 
 
 class ResourceSummaryBar(QFrame):
@@ -56,9 +56,9 @@ class ResourceSummaryBar(QFrame):
     def _status_qss(self) -> str:
         pal = style.palette()
         if self._ready is None:
-            return f"color: {pal['TEXT_SECONDARY']}; font-size: 12px;"
+            return f"color: {pal['TEXT_SECONDARY']}; font-size: {tokens.FONT_SIZE_MINOR};"
         token = "SUCCESS" if self._ready else "ERROR_RED"
-        return f"color: {pal[token]}; font-size: 12px; font-weight: 500;"
+        return f"color: {pal[token]}; font-size: {tokens.FONT_SIZE_MINOR}; font-weight: 500;"
 
     def update_state(self, state: dict) -> None:
         readiness = state.get("resource_readiness", {})

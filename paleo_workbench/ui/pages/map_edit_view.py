@@ -6,11 +6,20 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QWheelEvent
 from PySide6.QtWidgets import QGraphicsView
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.ui.pages.map_edit_scene import MapEditScene
 
 # Idle delay before full-detail rendering is restored after navigation.
 _NAV_LOD_IDLE_MS = 120
+
+
+def _view_qss() -> str:
+    pal = style.palette()
+    return (
+        f"QGraphicsView#MapEditView {{ background: {pal['BG_SEARCH']};"
+        f" border: 1px solid {pal['BORDER']};"
+        f" border-radius: {tokens.RADIUS_CARD}px; }}"
+    )
 
 
 def _same_view_state(a: dict, b: dict) -> bool:
@@ -32,11 +41,8 @@ class MapEditView(QGraphicsView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("MapEditView")
-        self.setStyleSheet(
-            f"QGraphicsView#MapEditView {{ background: {tokens.BG_SEARCH};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
+        # E1：动态注册（style.bind）——主题切换时按当前 palette 重渲染。
+        style.bind(self, _view_qss)
         self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)

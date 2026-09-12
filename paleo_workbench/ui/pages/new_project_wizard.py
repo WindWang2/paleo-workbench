@@ -40,7 +40,7 @@ from paleo_workbench.ui.pages.well_map_panel import WellMapPanel
 
 def _error_qss() -> str:
     pal = style.palette()
-    return f"color: {pal['ERROR_RED']}; font-size: 11px;"
+    return f"color: {pal['ERROR_RED']}; font-size: {tokens.FONT_SIZE_STATUS};"
 
 
 def _status_qss() -> str:

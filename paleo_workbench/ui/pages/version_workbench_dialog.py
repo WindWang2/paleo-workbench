@@ -32,11 +32,18 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QTableView,
     QVBoxLayout,
 )
 
 from paleo_workbench.catalog.models import CatalogError, DataStage, DataVersion
 from paleo_workbench.ui import style, tokens
+from paleo_workbench.ui.modelview.object_table import (
+    ColumnSpec,
+    ObjectTableModel,
+    StableSelection,
+    bind_table_defaults,
+)
 
 _STAGE_DISPLAY = {
     DataStage.RAW: "RAW",
@@ -48,6 +55,37 @@ _STAGE_DISPLAY = {
 _TRASHED_STAGE_DISPLAY = "已删除"
 
 _MISSING = "—"
+
+
+class _TimelineTableView(QTableView):
+    """QTableView + 旧 QTableWidget 访问面（rowCount/item/currentRow）。
+
+    既有测试经 ``item(row, col).text()`` / ``rowCount()`` 读时间线——虚拟
+    模型下以 QModelIndex 代理满足同一契约（模式取自综合编修属性表）。
+    """
+
+    def rowCount(self) -> int:  # noqa: N802 — QTableWidget 兼容
+        model = self.model()
+        return 0 if model is None else model.rowCount()
+
+    def currentRow(self) -> int:  # noqa: N802 — QTableWidget 兼容
+        return self.currentIndex().row()
+
+    def item(self, row: int, column: int):
+        model = self.model()
+        if model is None:
+            return None
+        if row < 0 or column < 0 or row >= model.rowCount() or column >= model.columnCount():
+            return None
+
+        class _CellText:
+            def __init__(self, text: str) -> None:
+                self._text = text
+
+            def text(self) -> str:
+                return self._text
+
+        return _CellText(str(model.data(model.index(row, column)) or ""))
 
 
 def _stage_display(version: DataVersion) -> str:
@@ -198,26 +236,65 @@ class VersionWorkbenchDialog(QDialog):
         layout.addLayout(header)
 
         # -- version timeline (newest first) ----------------------------------
-        self.versions_table = QTableWidget(0, 7)
-        self.versions_table.setHorizontalHeaderLabels(
-            ["版本", "阶段", "校验和", "大小", "生成 Run", "时间", "源"]
+        # V11 D2 ④：QTableWidget 全量 item 重灌 → 虚拟行模型（零
+        # item-per-cell）。“（当前）”标记经取值闭包延迟求值（依赖
+        # _current_version_id），已删除行经前景 token（TEXT_SECONDARY）
+        # 置灰——reload 后同一键行原地刷新，主题切换由 palette 取色。
+        self._current_version_id: str | None = None
+
+        def _trashed_fg(v: DataVersion) -> str | None:
+            return "TEXT_SECONDARY" if v.trashed else None
+
+        self._versions_model = ObjectTableModel(
+            columns=[
+                ColumnSpec(
+                    "version",
+                    "版本",
+                    lambda v: f"v{v.version_number}"
+                    + ("（当前）" if v.id == self._current_version_id else ""),
+                    foreground_role=_trashed_fg,
+                ),
+                ColumnSpec("stage", "阶段", _stage_display, foreground_role=_trashed_fg),
+                ColumnSpec(
+                    "checksum", "校验和", lambda v: _checksum_display(v.sha256),
+                    foreground_role=_trashed_fg,
+                ),
+                ColumnSpec(
+                    "size", "大小", lambda v: str(tokens.format_size(v.size_bytes)),
+                    foreground_role=_trashed_fg,
+                ),
+                ColumnSpec(
+                    "run", "生成 Run", lambda v: _short_id(v.run_id),
+                    foreground_role=_trashed_fg,
+                ),
+                ColumnSpec(
+                    "created", "时间", lambda v: v.created_at[:19],
+                    foreground_role=_trashed_fg,
+                ),
+                ColumnSpec(
+                    "source", "源", lambda v: "托管" if v.managed else "外部",
+                    foreground_role=_trashed_fg,
+                ),
+            ],
+            key_of=lambda v: v.id,
+            parent=self,
+        )
+        self.versions_table = _TimelineTableView()
+        self.versions_table.setModel(self._versions_model)
+        bind_table_defaults(self.versions_table)
+        # ExtendedSelection: exactly-two selection gates 对比元数据.
+        self.versions_table.setSelectionMode(
+            QTableView.SelectionMode.ExtendedSelection
         )
         self.versions_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents
         )
         self.versions_table.horizontalHeader().setStretchLastSection(True)
-        self.versions_table.verticalHeader().setVisible(False)
         self.versions_table.verticalHeader().setDefaultSectionSize(28)
-        self.versions_table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows
+        self.versions_table.selectionModel().selectionChanged.connect(
+            self._on_selection_changed
         )
-        # ExtendedSelection: exactly-two selection gates 对比元数据.
-        self.versions_table.setSelectionMode(
-            QTableWidget.SelectionMode.ExtendedSelection
-        )
-        self.versions_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.versions_table.setAlternatingRowColors(True)
-        self.versions_table.itemSelectionChanged.connect(self._on_selection_changed)
+        self._timeline_selection = StableSelection(self.versions_table)
         layout.addWidget(self.versions_table, 1)
 
         # -- detail panel ------------------------------------------------------
@@ -329,13 +406,19 @@ class VersionWorkbenchDialog(QDialog):
     # -- data loading ----------------------------------------------------------
 
     def reload_versions(self) -> None:
-        """Re-read asset + versions from the service (cache nothing)."""
+        """Re-read asset + versions from the service (cache nothing).
+
+        V11 D2 ④：整表 set_rows（键 = version id，零 item-per-cell），
+        StableSelection 跨 reload 保持当前版本选中——选中版本仍存在时
+        详情/按钮门控不再被每次变更打断。
+        """
         service = self._service_provider()
         if service is None:
             self.header_label.setText("未连接数据目录（请先打开项目）")
             self.count_label.setText("")
             self._versions = []
-            self.versions_table.setRowCount(0)
+            self._current_version_id = None
+            self._apply_timeline_rows()
             self._show_detail(None)
             self._sync_action_buttons()
             return
@@ -347,13 +430,15 @@ class VersionWorkbenchDialog(QDialog):
             self.header_label.setText("该数据资产已不存在（可能已被彻底删除）")
             self.count_label.setText("")
             self._versions = []
-            self.versions_table.setRowCount(0)
+            self._current_version_id = None
+            self._apply_timeline_rows()
             self._show_detail(None)
             self._sync_action_buttons()
             return
         # list_versions returns ascending version_number; the timeline is
         # newest-first.
         self._versions = list(reversed(service.list_versions(self._asset_id)))
+        self._current_version_id = asset.current_version_id
         current = next(
             (v for v in self._versions if v.id == asset.current_version_id), None
         )
@@ -363,29 +448,20 @@ class VersionWorkbenchDialog(QDialog):
         )
         self.count_label.setText(f"共 {len(self._versions)} 个版本")
 
-        self.versions_table.setRowCount(len(self._versions))
-        for row, version in enumerate(self._versions):
-            is_current = version.id == asset.current_version_id
-            cells = [
-                f"v{version.version_number}" + ("（当前）" if is_current else ""),
-                _stage_display(version),
-                _checksum_display(version.sha256),
-                str(tokens.format_size(version.size_bytes)),
-                _short_id(version.run_id),
-                version.created_at[:19],
-                "托管" if version.managed else "外部",
-            ]
-            for col, text in enumerate(cells):
-                item = QTableWidgetItem(text)
-                if col == 0:
-                    item.setData(Qt.ItemDataRole.UserRole, version.id)
-                if version.trashed:
-                    item.setForeground(Qt.GlobalColor.gray)
-                self.versions_table.setItem(row, col, item)
-
-        self.versions_table.clearSelection()
-        self._show_detail(None)
+        self._apply_timeline_rows()
+        # 选择保持后由 selectionChanged 驱动详情；无选中时回到占位详情。
+        if self._single_selection() is None:
+            self._show_detail(None)
         self._sync_action_buttons()
+
+    def _apply_timeline_rows(self) -> None:
+        """差分重置时间线行并按稳定键恢复选择（键消失时自然清空）。"""
+        keys = self._timeline_selection.capture()
+        current_key = self._versions_model.key_for_index(
+            self.versions_table.currentIndex()
+        )
+        self._versions_model.set_rows(self._versions)
+        self._timeline_selection.restore(keys, current_key=current_key)
 
     # -- selection -------------------------------------------------------------
 

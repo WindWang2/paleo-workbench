@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any, Callable
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -24,14 +24,18 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QTableWidget,
-    QTableWidgetItem,
+    QTableView,
     QVBoxLayout,
     QWidget,
 )
 
 from paleo_workbench.catalog import CatalogError
 from paleo_workbench.ui import style, tokens
+from paleo_workbench.ui.modelview import (
+    ColumnSpec,
+    ObjectTableModel,
+    bind_table_defaults,
+)
 from paleo_workbench.ui.workstation.common import workstation_icon
 
 # Multi-tag input separators: whitespace (incl. TAB / U+3000) plus ASCII and
@@ -300,6 +304,52 @@ class BulkRemoveTagDialog(QDialog):
         return [cb.text() for cb in self.checkboxes if cb.isChecked()]
 
 
+class _UsageCellProxy:
+    """Test-facing cell handle: ``item(row, col).text()`` without QTableWidgetItem."""
+
+    def __init__(self, model, row: int, column: int) -> None:
+        self._model = model
+        self._row = row
+        self._column = column
+
+    def text(self) -> str:
+        value = self._model.data(self._model.index(self._row, self._column))
+        return "" if value is None else str(value)
+
+
+class _UsageTableView(QTableView):
+    """QTableView + QTableWidget 兼容访问器（差分测试沿用 widget 式断言）。"""
+
+    # QTableWidget 兼容信号：双击路径仍按 (row, column) 语义分发。
+    cellDoubleClicked = Signal(int, int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.doubleClicked.connect(
+            lambda index: self.cellDoubleClicked.emit(index.row(), index.column())
+        )
+
+    def rowCount(self) -> int:  # noqa: N802
+        model = self.model()
+        return 0 if model is None else model.rowCount()
+
+    def columnCount(self) -> int:  # noqa: N802
+        model = self.model()
+        return 0 if model is None else model.columnCount()
+
+    def currentRow(self) -> int:  # noqa: N802
+        index = self.currentIndex()
+        return index.row() if index.isValid() else -1
+
+    def item(self, row: int, column: int):
+        model = self.model()
+        if model is None:
+            return None
+        if row < 0 or column < 0 or row >= model.rowCount() or column >= model.columnCount():
+            return None
+        return _UsageCellProxy(model, row, column)
+
+
 class TagManagerDialog(QDialog):
     """Tag governance dialog backed by the Core catalog service.
 
@@ -307,12 +357,17 @@ class TagManagerDialog(QDialog):
     create / rename / merge / delete-unused / prune operations. Double-clicking
     a row emits :attr:`tag_selected` so the DataPage can filter the asset
     table by that tag ("查看关联数据").
+
+    V11（goal §8 / 01-ui-audit D2）：使用表改 ``QTableView + ObjectTableModel``
+    （零 item-per-cell）；搜索输入 200ms 去抖——连续击键只在停顿后做一次
+    目录查询往返（此前每敲一个字符就全量重建表格）。
     """
 
     tag_selected = Signal(str)
     tags_changed = Signal()
 
     _COLUMNS = ("标签", "Asset 使用数", "Version 使用数")
+    _SEARCH_DEBOUNCE_MS = 200
 
     def __init__(
         self,
@@ -336,24 +391,36 @@ class TagManagerDialog(QDialog):
         self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.hint_label)
 
+        # 搜索去抖：textChanged 只重启单发定时器，超时才真正重载。
+        self._search_debounce = QTimer(self)
+        self._search_debounce.setSingleShot(True)
+        self._search_debounce.setInterval(self._SEARCH_DEBOUNCE_MS)
+        self._search_debounce.timeout.connect(self._reload_table)
+
         search_row = QHBoxLayout()
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("搜索标签...")
-        self.search_input.textChanged.connect(self._reload_table)
+        self.search_input.textChanged.connect(self._on_search_text_changed)
         search_row.addWidget(self.search_input, 1)
         layout.addLayout(search_row)
 
-        self.table = QTableWidget(self)
-        self.table.setColumnCount(len(self._COLUMNS))
-        self.table.setHorizontalHeaderLabels(list(self._COLUMNS))
+        self._model = ObjectTableModel(
+            columns=[
+                ColumnSpec("tag", self._COLUMNS[0], lambda row: row["display_name"]),
+                ColumnSpec("assets", self._COLUMNS[1], lambda row: row["assets"]),
+                ColumnSpec("versions", self._COLUMNS[2], lambda row: row["versions"]),
+            ],
+            key_of=lambda row: row["name"],
+            parent=self,
+        )
+        self.table = _UsageTableView(self)
+        self.table.setModel(self._model)
+        bind_table_defaults(self.table)
         self.table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch
         )
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.itemSelectionChanged.connect(self._sync_row_actions)
+        self.table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        self.table.selectionModel().selectionChanged.connect(self._sync_row_actions)
         self.table.cellDoubleClicked.connect(self._on_row_double_clicked)
         layout.addWidget(self.table, 1)
 
@@ -431,6 +498,10 @@ class TagManagerDialog(QDialog):
     def _reload(self) -> None:
         self._reload_table()
 
+    def _on_search_text_changed(self, _text: str) -> None:
+        """去抖入口：只重启定时器，重载在停顿 200ms 后发生一次。"""
+        self._search_debounce.start()
+
     def _reload_table(self) -> None:
         """Refresh usage rows (honouring the search filter) and re-render."""
         has_service = self._service() is not None
@@ -448,11 +519,7 @@ class TagManagerDialog(QDialog):
         else:
             self.hint_label.setVisible(False)
 
-        self.table.setRowCount(len(self._rows))
-        for r, row in enumerate(self._rows):
-            self.table.setItem(r, 0, QTableWidgetItem(row["display_name"]))
-            self.table.setItem(r, 1, QTableWidgetItem(str(row["assets"])))
-            self.table.setItem(r, 2, QTableWidgetItem(str(row["versions"])))
+        self._model.set_rows(self._rows)
 
         for btn in (
             self.create_btn,
@@ -471,7 +538,7 @@ class TagManagerDialog(QDialog):
             return None
         return self._rows[row]
 
-    def _sync_row_actions(self) -> None:
+    def _sync_row_actions(self, *_args) -> None:
         """Row-scoped operations need a selected row (delete additionally
         refuses in-use tags at click time with a usage-count prompt)."""
         has_row = self._current_row() is not None

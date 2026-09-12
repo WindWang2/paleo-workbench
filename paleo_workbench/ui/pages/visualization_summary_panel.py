@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QLabel, QListWidget, QListWidgetItem, QVBoxLayout
 
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.modelview import reconcile_widget_items
 from paleo_workbench.viz.adapter import VizAdapter
 from paleo_workbench.viz.models import VizRef
 
@@ -15,6 +16,9 @@ _KIND_LABELS = {
     "engine_preview": "引擎",
     "prediction": "预测",
 }
+
+# 虚拟「连井剖面」条目的稳定键（≥2 口 LAS 井时出现，键固定）。
+_CROSS_WELL_KEY = "cross_well"
 
 
 class VisualizationSummaryPanel(QFrame):
@@ -76,31 +80,26 @@ class VisualizationSummaryPanel(QFrame):
         self.resource_count_value.setText(f"{len(resources or [])} 项")
         self._rebuild_asset_list()
 
-    def _rebuild_asset_list(self) -> None:
-        self.asset_list.clear()
+    def _asset_entries(self) -> list[tuple[str, VizRef, str]]:
+        """(稳定键, VizRef, 展示文本) 序列——键控差分同步的输入。"""
+        entries: list[tuple[str, VizRef, str]] = []
         for resource in self._resources:
             ref = self._adapter.ref_from_resource(resource)
             if ref is None:
                 continue
             name = str(getattr(resource, "name", "") or ref.label or ref.id or "未命名")
-            kind_label = _KIND_LABELS.get(ref.kind, ref.kind)
-            item = QListWidgetItem(f"{kind_label} · {name}")
-            item.setData(Qt.ItemDataRole.UserRole, ref)
-            self.asset_list.addItem(item)
+            label = _KIND_LABELS.get(ref.kind, ref.kind)
+            entries.append((f"res:{ref.id}", ref, f"{label} · {name}"))
 
         for doc in self._map_documents:
             ref = self._adapter.ref_from_map_document(doc)
             name = str(getattr(doc, "name", "") or ref.label or "未命名图件")
-            item = QListWidgetItem(f"古地理 · {name}")
-            item.setData(Qt.ItemDataRole.UserRole, ref)
-            self.asset_list.addItem(item)
+            entries.append((f"map:{ref.id}", ref, f"古地理 · {name}"))
 
         for task in self._prediction_tasks:
             ref = self._adapter.ref_from_prediction(task)
             name = str(getattr(task, "name", "") or ref.label or "预测任务")
-            item = QListWidgetItem(f"预测 · {name}")
-            item.setData(Qt.ItemDataRole.UserRole, ref)
-            self.asset_list.addItem(item)
+            entries.append((f"pred:{ref.id}", ref, f"预测 · {name}"))
 
         # Virtual multi-well section when ≥2 LAS resources exist.
         well_ids = [
@@ -117,9 +116,32 @@ class VisualizationSummaryPanel(QFrame):
                 label=f"连井剖面 ({len(well_ids)} 口井)",
                 related_ids=tuple(well_ids[:8]),
             )
-            item = QListWidgetItem(f"连井 · {ref.label}")
+            entries.append((_CROSS_WELL_KEY, ref, f"连井 · {ref.label}"))
+        return entries
+
+    def _rebuild_asset_list(self) -> None:
+        """按稳定键差分同步清单（V11 goal §8：消灭 clear+rebuild）。
+
+        键集合不变时项对象原样保留——选择/滚动位置与 UserRole 上的
+        VizRef 引用不丢；``asset_selected`` 激活路径完全不变。
+        """
+        entries = self._asset_entries()
+        by_key = {key: (ref, text) for key, ref, text in entries}
+
+        def make_item(key: str) -> QListWidgetItem:
+            return QListWidgetItem(by_key[key][1])
+
+        def update_item(item: QListWidgetItem, key: str) -> None:
+            ref, text = by_key[key]
+            item.setText(text)
             item.setData(Qt.ItemDataRole.UserRole, ref)
-            self.asset_list.addItem(item)
+
+        reconcile_widget_items(
+            self.asset_list,
+            [key for key, _ref, _text in entries],
+            make_item=make_item,
+            update_item=update_item,
+        )
 
     def _on_item_activated(self, item: QListWidgetItem | None) -> None:
         if item is None:

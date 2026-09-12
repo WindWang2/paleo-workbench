@@ -18,6 +18,7 @@ from paleo_workbench.ui.components.buttons import (
     PwbSplitButton,
     PwbToolButton,
 )
+from paleo_workbench.ui.components.dialog import PwbDialog
 from paleo_workbench.ui.components.headers import (
     PwbInspectorSection,
     PwbPropertyEditor,
@@ -42,6 +43,7 @@ __all__ = [
     "PwbBadge",
     "PwbButton",
     "PwbCommandBar",
+    "PwbDialog",
     "PwbEmptyState",
     "PwbErrorState",
     "PwbInlineStatus",

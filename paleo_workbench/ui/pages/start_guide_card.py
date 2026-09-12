@@ -3,7 +3,18 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
+
+
+def _title_qss() -> str:
+    return (
+        f"color: {style.palette()['TEXT_PRIMARY']};"
+        f" font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 600;"
+    )
+
+
+def _subtitle_qss() -> str:
+    return f"color: {style.palette()['TEXT_SECONDARY']}; font-size: {tokens.FONT_SIZE_MINOR};"
 
 
 class StartGuideCard(QFrame):
@@ -19,16 +30,12 @@ class StartGuideCard(QFrame):
         layout.setSpacing(tokens.SPACE_2)
 
         self.title_label = QLabel("开始使用 Paleogeography Workbench")
-        self.title_label.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 14px; font-weight: 600;"
-        )
+        style.bind(self.title_label, _title_qss)  # E1: theme-switch re-render
         layout.addWidget(self.title_label)
 
         self.subtitle_label = QLabel("新建工程从数据文件夹自动构建工区，或打开已有工程文件。")
         self.subtitle_label.setWordWrap(True)
-        self.subtitle_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;"
-        )
+        style.bind(self.subtitle_label, _subtitle_qss)
         layout.addWidget(self.subtitle_label)
 
         btn_row = QHBoxLayout()

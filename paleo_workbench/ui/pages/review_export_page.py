@@ -48,6 +48,8 @@ class PanelFloatButton(QToolButton):
         self.setObjectName("PanelFloatButton")
         self.setText("⇱")
         self.setToolTip("浮动面板 (Float panel)")
+        # Icon-glyph text carries no semantics for assistive tech (audit F4).
+        self.setAccessibleName("浮动面板")
         self.setFixedSize(18, 18)
         self.clicked.connect(lambda: self._controller.toggle(self._key))
         panel.installEventFilter(self)
@@ -139,6 +141,20 @@ class ReviewExportPage(QWidget):
         self.action_header.export_requested.connect(self.export_report)
         self.action_header.config_requested.connect(self._on_config)
         self.action_header.finalize_requested.connect(self.finalize_version)
+        self._setup_tab_order()
+
+    def _setup_tab_order(self) -> None:
+        """Explicit tab chain for the page's primary interactive controls.
+
+        Visual order (audit F1, v11): action header buttons (运行 → 规则 →
+        导出 → 定稿) → QC issue table. The result summary panel holds no
+        primary interactive controls.
+        """
+        header = self.action_header
+        QWidget.setTabOrder(header.run_btn, header.config_btn)
+        QWidget.setTabOrder(header.config_btn, header.export_btn)
+        QWidget.setTabOrder(header.export_btn, header.finalize_btn)
+        QWidget.setTabOrder(header.finalize_btn, self.qc_table.table)
 
 
     def ribbon_panel_entries(self) -> list[dict]:

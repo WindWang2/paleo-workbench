@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -26,13 +27,21 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from paleo_workbench.mapping.tool_availability import (
+    evaluate_tool,
+    stage_whitelist_reason,
+)
 from paleo_workbench.mapping_workspace.layer_roles import ConstraintKind
 from paleo_workbench.mapping_workspace.readiness import (
     ReadinessItemStatus,
     StageReadiness,
 )
 from paleo_workbench.mapping_workspace.stages import MappingStage
-from paleo_workbench.ui.workstation.stage_actions import stage_context_actions
+# V11 Goal §7：阶段动作可用性镜像命令面板判定（stage_vocabulary 单表）。
+from paleo_workbench.ui.workstation.stage_actions import (
+    STAGE_ACTION_TOOLS,
+    stage_context_actions,
+)
 
 # V7 §6：就绪度 glyph 归一到 state_language（readiness 词表）。
 from paleo_workbench.ui.workstation.state_language import state_token as _state_token
@@ -54,6 +63,61 @@ def _narrow_list(widget: QListWidget) -> None:
     widget.setTextElideMode(Qt.TextElideMode.ElideRight)
     widget.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
     widget.setAlternatingRowColors(False)
+
+
+def evaluate_stage_commands(
+    stage_value: str, snapshot,
+) -> dict[str, tuple[bool, str | None]]:
+    """阶段面板动作可用性：``{action_id: (enabled, reason|None)}``（V11 §7）。
+
+    与命令面板同一判定规则（shell._register_stage_palette_commands 的注册
+    语义 + command_registry.evaluate 的判定序），词表全部复用单一真源：
+
+    * 阶段动作词表：``stage_vocabulary.stage_context_actions``（面板行、
+      palette 注册、profile 派生共用）；
+    * 工具面映射：``stage_vocabulary.STAGE_ACTION_TOOLS``（映射动作吃
+      canonical evaluator 判词，经 ``tool_surface`` 的快照适配器）；
+    * 判定序遵循 evaluator 门序总则（工程 → 阶段 → 工具面）：工程未开是
+      更根本的 blocker；阶段白名单判词 = ``stage_whitelist_reason``。
+
+    保守原则：无工具映射的动作一律放行（enabled=True）——层位/证据等
+    执行期事实由 dispatcher 的 re-gate 判定，本函数不自建第二判断。
+    未知阶段 → 空表（fail-closed，与 stage_context_actions 一致）。
+    """
+    from paleo_workbench.ui.workstation.tool_surface import (
+        tool_context_from_ui_snapshot,
+    )
+
+    actions = stage_context_actions(str(stage_value or ""))
+    if not actions:
+        return {}
+    project_open = bool(getattr(snapshot, "project_open", False))
+    mapping_stage = getattr(snapshot, "mapping_stage", None)
+    availability: dict[str, tuple[bool, str | None]] = {}
+    for action_id, _title in actions:
+        if not project_open:
+            availability[action_id] = (False, "未打开工程")
+            continue
+        # 阶段白名单（palette ``stages=(stage.value,)`` 同语义；fail-closed）。
+        if mapping_stage is None:
+            availability[action_id] = (False, "当前编图阶段未知")
+            continue
+        if str(mapping_stage) != str(stage_value):
+            availability[action_id] = (
+                False, stage_whitelist_reason((str(stage_value),)))
+            continue
+        tool_id = STAGE_ACTION_TOOLS.get(action_id)
+        if tool_id is None:
+            availability[action_id] = (True, None)
+            continue
+        verdict = evaluate_tool(
+            tool_id, tool_context_from_ui_snapshot(snapshot))
+        if verdict.enabled:
+            availability[action_id] = (True, None)
+        else:
+            availability[action_id] = (
+                False, verdict.disabled_reason or "当前不可用")
+    return availability
 
 
 class _ReadinessList(QListWidget):
@@ -92,7 +156,11 @@ class _ReadinessList(QListWidget):
 
 
 class _CommandList(QListWidget):
-    """阶段动作清单：一行一个动作，点击执行。宽度跟随侧栏，不横向撑开。"""
+    """阶段动作清单：一行一个动作，点击执行。宽度跟随侧栏，不横向撑开。
+
+    V11 Goal §7：动作行不再恒可点——``set_action_availability`` 按 canonical
+    判词灰化/禁用（禁用行保持可见 + 「不可用：{reason}」tooltip）。
+    """
 
     action_requested = Signal(str)
 
@@ -107,7 +175,35 @@ class _CommandList(QListWidget):
             row.setData(Qt.ItemDataRole.UserRole, action_id)
             row.setToolTip(title)
 
+    def set_action_availability(
+        self, availability: dict[str, tuple[bool, str | None]],
+    ) -> None:
+        """按判词投影行的可用性（缺席的动作保守放行——执行侧有 re-gate）。
+
+        禁用行：TEXT_DISABLED 前景 + 去除 ItemIsEnabled（不可点）+ 判词
+        tooltip；恢复可用时回填纯标题 tooltip 与默认前景。
+        """
+        from paleo_workbench.ui import style
+
+        disabled_color = QColor(style.palette()["TEXT_DISABLED"])
+        for row in range(self.count()):
+            item = self.item(row)
+            action_id = str(item.data(Qt.ItemDataRole.UserRole) or "")
+            enabled, reason = availability.get(action_id, (True, None))
+            if enabled:
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEnabled)
+                item.setData(Qt.ItemDataRole.ForegroundRole, None)
+                item.setToolTip(item.text())
+            else:
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+                item.setData(Qt.ItemDataRole.ForegroundRole, disabled_color)
+                item.setToolTip(f"不可用：{reason}" if reason else "不可用")
+
     def _on_clicked(self, item: QListWidgetItem) -> None:
+        # V11：禁用行点击是 no-op（ItemIsEnabled 移除已挡 UI 路径，此处
+        # 再护程序化触发）。
+        if not (item.flags() & Qt.ItemFlag.ItemIsEnabled):
+            return
         action_id = str(item.data(Qt.ItemDataRole.UserRole) or "")
         if action_id:
             self.action_requested.emit(action_id)
@@ -200,6 +296,13 @@ class _StagePage(QFrame):
         self.readiness.show_readiness(readiness)
         if readiness is not None:
             self.readiness_status.setText(readiness.label)
+
+    def set_action_availability(
+        self, availability: dict[str, tuple[bool, str | None]],
+    ) -> None:
+        """判词投影到动作行（无动作区 = no-op）。"""
+        if self.actions is not None:
+            self.actions.set_action_availability(availability)
 
 
 class MappingStagePanel(QWidget):
@@ -294,6 +397,26 @@ class MappingStagePanel(QWidget):
         if page is not None:
             self.stack.setCurrentWidget(page)
         self._update_constraints_visibility(stage)
+
+    def set_action_availability(
+        self, availability: dict[str, tuple[bool, str | None]],
+        stage_value: str | None = None,
+    ) -> None:
+        """判词投影到阶段页动作行（``stage_value`` 缺省 = 当前页）。
+
+        宿主（UIContext 变更 → ``evaluate_stage_commands``）调用；面板
+        自身不判定（单一动作权威）。
+        """
+        from paleo_workbench.mapping_workspace.stages import stage_from_value
+
+        page = None
+        if stage_value:
+            stage = stage_from_value(str(stage_value))
+            page = self._pages.get(stage) if stage is not None else None
+        if page is None:
+            page = self.stack.currentWidget()
+        if isinstance(page, _StagePage):
+            page.set_action_availability(availability)
 
     def show_readiness(self, stage: MappingStage, readiness: StageReadiness | None) -> None:
         page = self._pages.get(stage)

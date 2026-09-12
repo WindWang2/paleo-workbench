@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import time
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -1388,10 +1389,53 @@ class DataLifecycleController:
             catalog_service=service,
             bridged_versions=bridged,
         )
+        # V11（01-ui-audit D4）：校验进入统一操作注册表——进度信号此前
+        # 存在但从未接线，批量 SHA-256 全程不可见。
+        from paleo_workbench.ui.operations import (
+            OperationState,
+            operation_registry,
+        )
+
+        # 优先本 shell 的注册表（app_shell 注入）；测试/离线环境回落全局。
+        registry = (
+            getattr(page, "_operations_registry", None) or operation_registry()
+        )
+        op_id = registry.begin(
+            f"verify:{time.monotonic()}",
+            "完整性校验",
+            object_label=f"{len(items)} 项资产",
+            cancellable=True,
+            total=len(items),
+            stage="SHA-256",
+        )
+        registry.set_cancel(op_id, worker.cancel)
+
+        def _op_progress(current: int, total: int, name: str) -> None:
+            stage = f"SHA-256 · {name}" if name else "SHA-256"
+            registry.update(op_id, done=current, total=total, stage=stage)
+
+        def _op_finished(report) -> None:
+            cancelled = any("已取消" in detail for detail in report.details)
+            if cancelled:
+                state = OperationState.CANCELLED
+            elif (
+                report.missing_count or report.modified_count or report.unknown_count
+            ):
+                state = OperationState.WARNING
+            else:
+                state = OperationState.COMPLETED
+            registry.finish(op_id, state, result_label=report.summary_text)
+
+        def _op_failed(message: str) -> None:
+            registry.finish(op_id, OperationState.FAILED, error=str(message))
+
         page._verify_job.start(
             worker,
             terminal_signals=(worker.finished, worker.failed),
             result_connections=(
+                (worker.progress, _op_progress),
+                (worker.finished, _op_finished),
+                (worker.failed, _op_failed),
                 (worker.finished, page._on_verify_finished),
                 (worker.failed, page._on_verify_failed),
             ),

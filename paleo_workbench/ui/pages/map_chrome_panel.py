@@ -1,20 +1,18 @@
 from __future__ import annotations
 
-from pathlib import Path
 
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QCheckBox, QFrame, QLabel, QLineEdit, QPushButton, QVBoxLayout
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.viz.mapping_helpers import field_value
 
-_ICONS_DIR = Path(__file__).parent.parent.parent / "ui" / "assets" / "icons" / "map"
-
-
 def _panel_icon(name: str) -> QIcon:
-    path = _ICONS_DIR / f"{name}.svg"
-    return QIcon(str(path)) if path.exists() else QIcon()
+    """Theme-aware loader (E2): neutral glyphs re-tinted per theme via the
+    shared factory; multi-color SVGs pass through; missing asset → empty."""
+    from paleo_workbench.ui.workstation.common import tinted_map_icon  # 懒加载（E2）：避免拉起 workstation shell 导入链
+    return tinted_map_icon(name)
 
 
 DEFAULT_CHROME_ELEMENTS = ["图例", "指北针", "比例尺", "标题栏"]
@@ -62,16 +60,25 @@ class MapChromePanel(QFrame):
 
     def _add_value(self, layout: QVBoxLayout, label_text: str, value_text: str) -> QLabel:
         label = QLabel(label_text)
-        label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
-            " border: none; background: transparent;"
+        # E1：经 style.bind 重取当前主题色（WorkFieldLabel 同款外观）。
+        style.bind(
+            label,
+            lambda: (
+                f"color: {style.palette()['TEXT_SECONDARY']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS};"
+                " border: none; background: transparent;"
+            ),
         )
         layout.addWidget(label)
         value = QLabel(value_text)
         value.setWordWrap(True)
-        value.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 500;"
-            " border: none; background: transparent;"
+        style.bind(
+            value,
+            lambda: (
+                f"color: {style.palette()['TEXT_PRIMARY']};"
+                f" font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 500;"
+                " border: none; background: transparent;"
+            ),
         )
         layout.addWidget(value)
         return value

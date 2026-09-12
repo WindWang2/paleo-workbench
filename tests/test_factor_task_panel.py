@@ -60,9 +60,9 @@ def test_panel_update_populates_rows(qtbot):
     assert len(rows) == 3
     assert rows[0].name_label.text() == "地层厚度图"
     assert rows[2].name_label.text() == "水深图"
-    # status badge text comes from TASK_STATUS_LABELS
-    assert rows[0].status_badge.text() == "已生成"
-    assert rows[2].status_badge.text() == "待生成"
+    # V11：状态徽章统一走 state_language 任务词表（原 TASK_STATUS_LABELS 词表退役）
+    assert rows[0].status_badge.text() == "完成"
+    assert rows[2].status_badge.text() == "排队中"
 
 
 def test_panel_row_stylesheet_is_scoped(qtbot):

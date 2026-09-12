@@ -318,6 +318,8 @@ def test_tag_manager_search_filters_table(qtbot, tmp_path, catalog):
     dlg = TagManagerDialog(service_provider=lambda: catalog)
     qtbot.addWidget(dlg)
     dlg.search_input.setText("重点")
+    # V11：搜索输入 200ms 去抖——过滤在停顿后才发生一次。
+    qtbot.wait(dlg._SEARCH_DEBOUNCE_MS + 50)
     assert dlg.table.rowCount() == 1
     assert dlg.table.item(0, 0).text() == "重点井"
 

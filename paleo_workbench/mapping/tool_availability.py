@@ -57,7 +57,10 @@ __all__ = [
     "ToolAvailability",
     "evaluate_all",
     "evaluate_tool",
+    "frozen_layer_gate_reason",
+    "raw_layer_gate_reason",
     "stage_group_visibility",
+    "stage_lock_reason",
     "stage_whitelist_reason",
 ]
 
@@ -71,6 +74,13 @@ class ToolAvailability:
     ``reason`` 是 V7 workstation 侧的兼容别名（同值）。``visible=False``
     是阶段/图层组的呈现语义（工具条隐藏），palette 对同一动作选择
     disabled+同一 reason（可发现性）。
+
+    V11（Goal §7）附加呈现元数据（只读禁用态）：``severity`` 是结构化
+    严重度（``"info"``/``"warning"``/``"critical"``；None = 未分类，不猜），
+    ``remediation`` 是可执行的补救提示。两者只在语义明确的门禁族上由
+    evaluator 标注（RAW/角色门、阶段白名单、provider 只读、选择前提）；
+    呈现层不得据此自建第二判断或改写判词。不变量：enabled ⇒ 无 reason
+    且无 severity/remediation（同 reason 不变量风格）。
     """
 
     tool_id: str
@@ -80,12 +90,19 @@ class ToolAvailability:
     disabled_reason: str = ""
     preferred: bool = False
     conflicts: tuple[str, ...] = ()
+    severity: str | None = None
+    remediation: str | None = None
 
     def __post_init__(self) -> None:
         if self.enabled and self.disabled_reason:
             raise ValueError("an enabled tool must not carry a disabled_reason")
         if not self.visible and self.enabled:
             raise ValueError("an invisible tool cannot be enabled")
+        if self.enabled and (self.severity is not None or self.remediation is not None):
+            raise ValueError(
+                "an enabled tool must not carry severity/remediation")
+        if self.severity not in (None, "info", "warning", "critical"):
+            raise ValueError(f"unknown severity {self.severity!r}")
 
     @property
     def reason(self) -> str:
@@ -101,6 +118,8 @@ class ToolAvailability:
             "disabled_reason": self.disabled_reason,
             "preferred": self.preferred,
             "conflicts": list(self.conflicts),
+            "severity": self.severity,
+            "remediation": self.remediation,
         }
 
 def _ok(tool_id: str, *, visible: bool = True, preferred: bool = False) -> ToolAvailability:
@@ -284,16 +303,17 @@ def _writable_gate(ctx: ToolContext) -> str | None:
 def _role_gate(ctx: ToolContext) -> str | None:
     # 拒绝判定的优先序：宿主门禁的具体判词（RAW/冻结/组锁语义的权威文本，
     # 最具体）→ 事实分类文案（frozen/raw_locked/stage_locked）→ 未知 → 兜底。
+    # 事实分类文案 = 下方共享措辞函数（A3 单一措辞真源）。
     if ctx.edit_gate_open is False:
         if ctx.edit_gate_reason:
             return ctx.edit_gate_reason
         if ctx.layer_frozen:
-            return "当前结果已冻结——需先解除冻结或另存草稿"
+            return frozen_layer_gate_reason()
         if ctx.raw_locked:
-            return "RAW 图层不可变，请创建 DERIVED 草稿后编辑"
+            return raw_layer_gate_reason()
         if ctx.stage_locked:
             return "当前阶段的证据组已锁定，禁止编辑"
-        return "图层被编辑门禁锁定"
+        return stage_lock_reason()
     if ctx.edit_gate_open is None:
         return "当前图层可编辑性未知"
     return None
@@ -414,6 +434,40 @@ def stage_whitelist_reason(stage_values) -> str:
     是唯一措辞，两侧共用（reason 字符串不改写原则的措辞面）。
     """
     return f"当前阶段不允许该操作（限 {'/'.join(_stage_label(v) for v in stage_values)}）"
+
+
+# ---------------------------------------------------------------------------
+# 共享门禁措辞（V11 Goal §7 / A3）：RAW/冻结/组锁的判词此前在三处表面
+# 各写一份（evaluator 兜底、资产右键菜单、状态条 chip），措辞漂移且无法
+# 跨表面断言一致——以下函数是唯一措辞，evaluator 的 ``_role_gate`` 兜底
+# 与各呈现面（tooltip/chip 正文）共用同一字符串。
+# ---------------------------------------------------------------------------
+
+def raw_layer_gate_reason(layer_label: str | None = None) -> str:
+    """RAW/模型结果图层不可直接编辑的统一措辞（A3 三处词表合一）。
+
+    无标签形态与 ``_role_gate`` 的 raw_locked 兜底逐字一致（evaluator
+    判词即本函数输出）；带标签形态供宿主在能给出图层名时使用。
+    """
+    if layer_label:
+        return (
+            f"RAW/模型结果图层「{layer_label}」不可直接编辑——"
+            "请创建 DERIVED 草稿后编辑")
+    return "RAW 图层不可变，请创建 DERIVED 草稿后编辑"
+
+
+def frozen_layer_gate_reason(layer_label: str | None = None) -> str:
+    """成熟度冻结/发布结果的统一禁用措辞（evaluator 兜底同源）。"""
+    if layer_label:
+        return f"当前结果（{layer_label}）已冻结——需先解除冻结或另存草稿"
+    return "当前结果已冻结——需先解除冻结或另存草稿"
+
+
+def stage_lock_reason(reason: str = "") -> str:
+    """组锁/编辑门禁兜底措辞：有宿主判词则并入，无则用统一兜底。"""
+    if reason:
+        return f"图层被编辑门禁锁定：{reason}"
+    return "图层被编辑门禁锁定"
 
 def _edit_action_stage_gate(ctx: ToolContext, tool_id: str) -> str | None:
     """编辑/数字化动作的阶段过滤（真源 StageToolProfile.edit_actions）。
@@ -852,6 +906,51 @@ def _coarsely_blocked(ctx: ToolContext, tool_id: str) -> bool:
     return False
 
 
+#: 规则内经 ``_role_gate`` 的工具（severity 分类的角色门词族适用范围）。
+_ROLE_GATED_TOOLS = _NEEDS_EDITABLE_LAYER | _NEEDS_EDITING
+
+
+def _disable_metadata(
+    ctx: ToolContext, tool_id: str, reason: str,
+) -> tuple[str | None, str | None]:
+    """禁用判词的 (severity, remediation) 标注（V11：只在明确词族上标注）。
+
+    按事实而非判词文本分类（判词可能来自宿主）；门序前提（工程/图层
+    已过）用来排除「更粗的门先挡住、事实仍然命中」的误归类。语义不明
+    确的门禁（blocking/原生能力/几何类型等）保持 (None, None)——不猜。
+    """
+    if not reason:
+        return None, None
+    # RAW/角色/冻结/组锁门（_role_gate 词族）：可补救的编辑拒绝，warning。
+    if (
+        ctx.project_open
+        and ctx.has_active_layer
+        and ctx.edit_gate_open is False
+        and tool_id in _ROLE_GATED_TOOLS
+    ):
+        if ctx.raw_locked:
+            return "warning", "创建 DERIVED 草稿后编辑"
+        if ctx.layer_frozen:
+            return "warning", "另存草稿或解除冻结"
+        return "warning", None
+    # 阶段白名单（stage_whitelist_reason 词族）：阶段治理拒绝，warning。
+    whitelist = _STAGE_ACTION_WHITELIST.get(tool_id)
+    if (
+        ctx.project_open
+        and whitelist is not None
+        and ctx.mapping_stage is not None
+        and ctx.mapping_stage not in whitelist
+    ):
+        return "warning", None
+    # provider 实测只读（_writable_gate 的自省分支）：数据源级拒绝。
+    if ctx.provider_writable is False and reason.startswith("图层 provider（"):
+        return "warning", None
+    # 选择前提（选择数不足的轻量提示，非治理拒绝）。
+    if reason == "没有选中的要素":
+        return "info", None
+    return None, None
+
+
 def evaluate_tool(tool_id: str, ctx: ToolContext) -> ToolAvailability:
     """Evaluate one tool. Unknown ids are invisible+disabled (fail-honest)."""
     rule = _RULE_TABLE.get(tool_id)
@@ -910,6 +1009,19 @@ def evaluate_tool(tool_id: str, ctx: ToolContext) -> ToolAvailability:
                 ctx.edit_gate_reason or "图层处于降级状态（数据不完整）",
             )
     availability = rule(ctx)
+    # V11：明确词族的禁用判词附结构化 severity/remediation（呈现层只读）。
+    if not availability.enabled:
+        severity, remediation = _disable_metadata(
+            ctx, tool_id, availability.disabled_reason)
+        if severity is not None or remediation is not None:
+            availability = ToolAvailability(
+                tool_id=tool_id, visible=availability.visible,
+                enabled=False, checked=availability.checked,
+                disabled_reason=availability.disabled_reason,
+                preferred=availability.preferred,
+                conflicts=availability.conflicts,
+                severity=severity, remediation=remediation,
+            )
 
     # -- checked follows the actual tool/session/toggle state ---------------
     checked: bool | None = None
@@ -926,6 +1038,7 @@ def evaluate_tool(tool_id: str, ctx: ToolContext) -> ToolAvailability:
             tool_id=tool_id, visible=availability.visible, enabled=availability.enabled,
             checked=checked, disabled_reason=availability.disabled_reason,
             preferred=availability.preferred, conflicts=availability.conflicts,
+            severity=availability.severity, remediation=availability.remediation,
         )
     return availability
 

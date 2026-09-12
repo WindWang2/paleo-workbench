@@ -35,6 +35,8 @@ class SelectionSnapshot:
     active_fault_id: str | None = None
     active_interpretation_id: str | None = None
     active_layer_id: str | None = None         # active map layer
+    selected_layer_id: str | None = None       # V11: tree-highlighted layer
+    selected_asset_id: str | None = None       # V11: data asset under focus
     map_extent: tuple[float, float, float, float] | None = None
     map_crs: str | None = None                 # declared CRS of the map context
     selected_feature_refs: tuple[str, ...] = ()  # feature identities, not geometries
@@ -52,6 +54,8 @@ class SelectionSnapshot:
             "active_fault_id": self.active_fault_id,
             "active_interpretation_id": self.active_interpretation_id,
             "active_layer_id": self.active_layer_id,
+            "selected_layer_id": self.selected_layer_id,
+            "selected_asset_id": self.selected_asset_id,
             "map_extent": list(self.map_extent) if self.map_extent else None,
             "map_crs": self.map_crs,
             "selected_feature_refs": list(self.selected_feature_refs),
@@ -239,7 +243,13 @@ class ActionContext:
                     target_horizon=getattr(state, "active_horizon_id", None),
                     active_fault_id=getattr(state, "active_fault_id", None),
                     active_interpretation_id=getattr(state, "active_interpretation_id", None),
-                    active_layer_id=getattr(state, "active_layer_id", None),
+                    # V11：active（编辑控制器权威）优先，回落 selected（树点选）。
+                    active_layer_id=(
+                        getattr(state, "active_layer_id", None)
+                        or getattr(state, "selected_layer_id", None)
+                    ),
+                    selected_layer_id=getattr(state, "selected_layer_id", None),
+                    selected_asset_id=getattr(state, "selected_asset_id", None),
                     map_extent=tuple(state.map_extent)
                     if getattr(state, "map_extent", None)
                     else None,

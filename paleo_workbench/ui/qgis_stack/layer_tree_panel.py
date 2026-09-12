@@ -26,6 +26,14 @@ from paleo_workbench.mapping.crs_contract import panel_publish_crs
 from paleo_workbench.ui.qgis_stack.tree_sync import parse_tree_change, parse_tree_events
 from paleo_workbench.ui.qgis_stack.widgets import QgisLayerTreeHost
 
+# 原生菜单（C++ provider 产词）里接受 evaluator 判词门禁的动作文案 →
+# 菜单键。contextMenuAboutToShow 阶段按文案匹配（provider 不暴露键）。
+_MENU_GATED_TEXTS = {
+    "toggle_editing": "开始/停止编辑",
+    "repair": "修复无效几何…",
+    "remove_layer": "删除图层",
+}
+
 
 def _icon(name: str):
     """延迟导入：workstation/__init__ → composite_document → 本模块存在环。"""
@@ -87,7 +95,8 @@ class QgisLayerTreePanel(QWidget):
     # 组勾选/结构变化经 controller 处理后的额外持久化通知。
     group_state_changed = Signal()
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, parent: QWidget | None = None, *, menu_probe=None,
+                 repair_probe=None):
         super().__init__(parent)
         self.setObjectName("PanelCard")
         self._manage_buttons: list[QToolButton] = []
@@ -96,6 +105,13 @@ class QgisLayerTreePanel(QWidget):
         self._project_crs = ""
         self._editing_layer_id: str | None = None
         self._selected_doc_id: str | None = None
+        # V11 Goal §7（A1）：与 LayerManagerPanel 同构的 evaluator 探针——
+        # 编辑/修复/删除入口的可用性来自 canonical evaluator（宿主注入
+        # layer_menu_facts / _layer_repair_availability），不再只看
+        # metadata["editable"] 旧旗标。None = 无宿主（独立用/测试）：回落
+        # 旧行为（metadata 旗标）。
+        self._menu_probe = menu_probe
+        self._repair_probe = repair_probe
         # V5 分组编排（LayerGroupController；树事件经此回写领域状态）。
         self._group_controller = None
         # 程序化发布中（set_layer_snapshot / set_mirror_layer_order 经由原生
@@ -254,6 +270,14 @@ class QgisLayerTreePanel(QWidget):
             canvas.stack.set_tree_selection_callback(tree, self._on_tree_selection)
             canvas.stack.set_tree_change_callback(tree, self._on_tree_change)
             canvas.stack.set_tree_menu_callback(tree, self._on_tree_menu)
+            # V11（A1）：原生菜单由 C++ provider 构建且不暴露键级门禁——
+            # 在菜单弹出前（contextMenuAboutToShow）按判词门禁编辑/修复/
+            # 删除项。旧桥无该信号时诚实跳过（判词消费只剩执行侧 re-gate）。
+            try:
+                self.tree_host.tree_view.contextMenuAboutToShow.connect(
+                    self._on_native_menu_about_to_show)
+            except (AttributeError, RuntimeError):
+                pass
         self._publish()
         self.expand_layer_groups()
 
@@ -402,19 +426,132 @@ class QgisLayerTreePanel(QWidget):
             return
         self._selected_doc_id = doc_id or None
         self._sync_opacity(self._selected_doc_id)
-        layer = self.layer_by_id(doc_id) if doc_id else None
-        self.remove_button.setEnabled(
-            layer is not None and self.is_editable_layer(layer))
+        # V11（A1）：探针在场时删除按钮按 facts 门禁（editable 旗标或 RAW
+        # 编排事实）；无探针保持旧行为（metadata 旗标）。
+        if callable(self._menu_probe):
+            allowed, _reason = self._remove_gate(str(doc_id or ""))
+            self.remove_button.setEnabled(allowed)
+        else:
+            layer = self.layer_by_id(doc_id) if doc_id else None
+            self.remove_button.setEnabled(
+                layer is not None and self.is_editable_layer(layer))
         self.active_layer_changed.emit(doc_id or None)
 
     def set_group_controller(self, controller) -> None:
         """注入 LayerGroupController（V5 分组事件回写；None = 平铺模式）。"""
         self._group_controller = controller
 
+    def set_layer_probes(self, *, menu_probe=None, repair_probe=None) -> None:
+        """注入/更新 evaluator 探针（构造之后的宿主接线口；None = 不改）。"""
+        if menu_probe is not None:
+            self._menu_probe = menu_probe
+        if repair_probe is not None:
+            self._repair_probe = repair_probe
+
+    # -- evaluator 判词消费（V11 Goal §7 / A1，与 LayerManagerPanel 同语义） ----
+
+    def _layer_menu_facts(self, doc_id: str):
+        """menu_probe 产事实（LayerMenuFacts 鸭型：toggle/repair 判词 +
+        raw_protected 编排事实）；无探针/探针失败 = None（回落旧行为）。"""
+        if not callable(self._menu_probe) or not doc_id:
+            return None
+        try:
+            return self._menu_probe(str(doc_id))
+        except Exception:
+            return None
+
+    def _layer_repair_verdict(self, doc_id: str, facts=None):
+        """修复判词：facts 探针优先（已求值过），独立用回落 repair_probe。"""
+        verdict = getattr(facts, "repair_geometry", None) if facts else None
+        if verdict is None and callable(self._repair_probe) and doc_id:
+            try:
+                verdict = self._repair_probe(str(doc_id))
+            except Exception:
+                verdict = None
+        return verdict
+
+    def _remove_gate(self, doc_id: str, facts=None) -> tuple[bool, str | None]:
+        """删除入口门禁：探针在场时按 facts（editable 旗标或 RAW 编排事实，
+        与回退树菜单的出现语义一致——RAW 图层可删，删除不是要素编辑）；
+        无探针 = 旧行为（metadata 旗标）。``facts`` 可传入已取事实避免重复
+        探针求值。"""
+        layer = self.layer_by_id(doc_id) if doc_id else None
+        if layer is None:
+            return False, None
+        if facts is None:
+            facts = self._layer_menu_facts(doc_id)
+        if facts is None:
+            return self.is_editable_layer(layer), None
+        if self.is_editable_layer(layer) or bool(
+                getattr(facts, "raw_protected", False)):
+            return True, None
+        return False, "仅编修图层 / RAW 图层可从文档删除"
+
+    def _apply_menu_gating(self, menu, doc_id: str) -> None:
+        """把 evaluator 判词投影到原生菜单项（禁用保持可见 + 判词 tooltip）。
+
+        与回退树 ``LayerManagerPanel._on_context_menu`` 同判词源（宿主
+        menu_probe）同一呈现语义（「不可用：{reason}」）；facts 只取一次
+        （menu_probe 每次调用都是一次完整 evaluator 求值）。删除项走
+        ``_remove_gate``（编排事实，非 toggle 判词——RAW 可删）。C++ 菜单
+        默认不显示 QAction tooltip，须显式开（同回退树 R2-1）。
+        """
+        if menu is None or not doc_id or not callable(self._menu_probe):
+            return
+        facts = self._layer_menu_facts(doc_id)
+        if facts is None:
+            return
+        verdicts = {
+            "toggle_editing": getattr(facts, "toggle_editing", None),
+            "repair": self._layer_repair_verdict(doc_id, facts=facts),
+        }
+        remove_allowed, remove_reason = self._remove_gate(doc_id, facts=facts)
+        menu.setToolTipsVisible(True)
+        for action in menu.actions():
+            key = next(
+                (k for k, text in _MENU_GATED_TEXTS.items()
+                 if action.text() == text), None)
+            if key is None:
+                continue
+            if key == "remove_layer":
+                if not remove_allowed:
+                    action.setEnabled(False)
+                    if remove_reason:
+                        action.setToolTip(f"不可用：{remove_reason}")
+                continue
+            verdict = verdicts.get(key)
+            if verdict is not None and not verdict.enabled:
+                action.setEnabled(False)
+                action.setToolTip(f"不可用：{verdict.disabled_reason or '当前不可用'}")
+
+    def _on_native_menu_about_to_show(self, menu) -> None:
+        """原生菜单弹出前：右键已置当前图层（selection 回调先于本信号），
+        以 ``_selected_doc_id`` 为门禁对象。"""
+        self._apply_menu_gating(menu, self._current_doc_id() or "")
+
     def _on_tree_menu(self, key: str, doc_id: str) -> None:
         signal_name = _MENU_SIGNALS.get(str(key))
         if signal_name is None:
             return
+        # V11：执行护栏（呈现门禁之外的防线；宿主仍有 execution re-gate）。
+        # 判词禁用的动作不外发请求信号——菜单项已禁用，此处只拦键盘/陈旧
+        # 菜单等旁路触发。
+        if callable(self._menu_probe) and doc_id:
+            facts = self._layer_menu_facts(str(doc_id))
+            if facts is not None:
+                if signal_name == "toggle_editing_requested":
+                    verdict = getattr(facts, "toggle_editing", None)
+                    if verdict is not None and not verdict.enabled:
+                        return
+                elif signal_name == "repair_layer_requested":
+                    verdict = self._layer_repair_verdict(
+                        str(doc_id), facts=facts)
+                    if verdict is not None and not verdict.enabled:
+                        return
+                elif signal_name == "remove_layer_requested":
+                    allowed, _reason = self._remove_gate(str(doc_id), facts=facts)
+                    if not allowed:
+                        return
         signal = getattr(self, signal_name)
         if signal_name in ("create_layer_requested", "import_reference_requested",
                            "create_group_requested"):
@@ -478,8 +615,9 @@ class QgisLayerTreePanel(QWidget):
         layer_id = self._current_doc_id()
         if layer_id is None:
             return
-        layer = self.layer_by_id(layer_id)
-        if layer is not None and self.is_editable_layer(layer):
+        # V11：与菜单/按钮同一门禁（探针 facts 优先，无探针回落 metadata）。
+        allowed, _reason = self._remove_gate(str(layer_id))
+        if allowed:
             self.remove_layer_requested.emit(str(layer_id))
 
     def _current_doc_id(self) -> str | None:

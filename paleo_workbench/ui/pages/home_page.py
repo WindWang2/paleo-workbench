@@ -34,7 +34,7 @@ from paleo_workbench.mapping.workarea_map_snapshot import (
     workarea_crs_warnings,
     workarea_view_extent,
 )
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.ui.pages.activity_card import RecentActivityCard
 from paleo_workbench.ui.pages.completeness_card import DataCompletenessCard
 from paleo_workbench.ui.pages.module_relationship import (
@@ -108,8 +108,13 @@ class HomePage(QWidget):
         # match the project — withholding must be visible, never silent (§20).
         self.crs_warning_label = QLabel("")
         self.crs_warning_label.setWordWrap(True)
-        self.crs_warning_label.setStyleSheet(
-            f"color: {tokens.WARNING}; font-size: {tokens.FONT_SIZE_STATUS}px;"
+        # E1：构造期不快照 WARNING light 值——主题切换经 style.bind 重渲染。
+        style.bind(
+            self.crs_warning_label,
+            lambda: (
+                f"color: {style.palette()['WARNING']};"
+                f" font-size: {tokens.FONT_SIZE_STATUS}px;"
+            ),
         )
         self.crs_warning_label.setVisible(False)
         map_layout.addWidget(self.crs_warning_label)
@@ -155,12 +160,15 @@ class HomePage(QWidget):
         title_container.setContentsMargins(4, 0, 4, 0)
 
         title_label = QLabel("智能岩相古地理重建系统 - 模块关系图")
-        title_label.setStyleSheet(f"""
-            font-size: {tokens.FONT_SIZE_TITLE};
-            font-weight: {tokens.FONT_WEIGHT_TITLE};
-            color: {tokens.PRIMARY};
-            font-family: {tokens.FONT_FAMILY};
-        """)
+        style.bind(
+            title_label,
+            lambda: (
+                f"font-size: {tokens.FONT_SIZE_TITLE};"
+                f" font-weight: {tokens.FONT_WEIGHT_TITLE};"
+                f" color: {style.palette()['PRIMARY']};"
+                f" font-family: {tokens.FONT_FAMILY};"
+            ),
+        )
         title_container.addWidget(title_label)
 
         # Add legend widget
@@ -202,6 +210,21 @@ class HomePage(QWidget):
         bottom.addWidget(self.contract_panel, 1)
         bottom.addWidget(self.completeness_card, 0)
         layout.addLayout(bottom, 0)
+
+        self._setup_tab_order()
+
+    def _setup_tab_order(self) -> None:
+        """Explicit tab chain for the page's primary interactive controls.
+
+        Construction order on this page interleaves scroll containers and
+        canvases; the visual order is: right-column start guide (new/open/
+        sample) → bottom workflow contract toggle. Cards and the map canvas
+        are skipped (no focusable primary controls). Audit F1 (v11).
+        """
+        guide = self.start_guide_card
+        QWidget.setTabOrder(guide.new_project_button, guide.open_project_button)
+        QWidget.setTabOrder(guide.open_project_button, guide.open_sample_button)
+        QWidget.setTabOrder(guide.open_sample_button, self.contract_panel.dev_btn)
 
     # ------------------------------------------------------------------
     # map centerpiece

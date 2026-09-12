@@ -42,7 +42,22 @@ class SelectionState:
     active_interpretation_id: str | None = None
     spatial_cursor: tuple[float, float] | None = None
     depth_cursor: tuple[str, float] | None = None
+    # -- V11 UIContext 槽位（goal §6）------------------------------------
+    # selected_layer_id：用户在任一图层树里**点选/高亮**的层（注意力焦点）。
+    # active_layer_id：工具实际作用的「活动层」（QGIS 语义；编辑控制器权威）。
+    # edit_target_layer_id：阶段控制器的**编辑目标**（角色解析结果）。
+    # 三者是不同状态，禁止混用（01-ui-audit C3）。
+    selected_layer_id: str | None = None
     active_layer_id: str | None = None
+    edit_target_layer_id: str | None = None
+    # 数据资产 / 版本（catalog 稳定 id；Data 页与 Inspector 权威）
+    selected_asset_id: str | None = None
+    selected_version_id: str | None = None
+    # 地震工区（survey 资源 id）与预测/计算任务 id
+    active_survey_id: str | None = None
+    active_task_id: str | None = None
+    # 工作流阶段（MappingStage.value；发布者：MappingStageController）
+    workflow_stage: str | None = None
     map_extent: tuple[float, float, float, float] | None = None
     source_widget_id: str | None = None
     timestamp: float = field(default_factory=time.time)
@@ -84,7 +99,14 @@ class SelectionContext(QObject):
         self.active_interpretation_id: str | None = None
         self.spatial_cursor: tuple[float, float] | None = None
         self.depth_cursor: tuple[str, float] | None = None
+        self.selected_layer_id: str | None = None
         self.active_layer_id: str | None = None
+        self.edit_target_layer_id: str | None = None
+        self.selected_asset_id: str | None = None
+        self.selected_version_id: str | None = None
+        self.active_survey_id: str | None = None
+        self.active_task_id: str | None = None
+        self.workflow_stage: str | None = None
         self.map_extent: tuple[float, float, float, float] | None = None
         self.source_widget_id: str | None = source_widget_id
         self.timestamp: float = (
@@ -114,7 +136,14 @@ class SelectionContext(QObject):
         active_interpretation_id: str | None = _UNSET,
         spatial_cursor: tuple[float, float] | None = _UNSET,
         depth_cursor: tuple[str, float] | None = _UNSET,
+        selected_layer_id: str | None = _UNSET,
         active_layer_id: str | None = _UNSET,
+        edit_target_layer_id: str | None = _UNSET,
+        selected_asset_id: str | None = _UNSET,
+        selected_version_id: str | None = _UNSET,
+        active_survey_id: str | None = _UNSET,
+        active_task_id: str | None = _UNSET,
+        workflow_stage: str | None = _UNSET,
         map_extent: tuple[float, float, float, float] | None = _UNSET,
         source_widget_id: str | None = _UNSET,
         custom_attributes: dict[str, Any] | None = _UNSET,
@@ -145,8 +174,22 @@ class SelectionContext(QObject):
                 self.spatial_cursor = spatial_cursor
             if depth_cursor is not _UNSET:
                 self.depth_cursor = depth_cursor
+            if selected_layer_id is not _UNSET:
+                self.selected_layer_id = selected_layer_id
             if active_layer_id is not _UNSET:
                 self.active_layer_id = active_layer_id
+            if edit_target_layer_id is not _UNSET:
+                self.edit_target_layer_id = edit_target_layer_id
+            if selected_asset_id is not _UNSET:
+                self.selected_asset_id = selected_asset_id
+            if selected_version_id is not _UNSET:
+                self.selected_version_id = selected_version_id
+            if active_survey_id is not _UNSET:
+                self.active_survey_id = active_survey_id
+            if active_task_id is not _UNSET:
+                self.active_task_id = active_task_id
+            if workflow_stage is not _UNSET:
+                self.workflow_stage = workflow_stage
             if map_extent is not _UNSET:
                 self.map_extent = map_extent
             if source_widget_id is not _UNSET:
@@ -171,7 +214,14 @@ class SelectionContext(QObject):
             active_interpretation_id=None,
             spatial_cursor=None,
             depth_cursor=None,
+            selected_layer_id=None,
             active_layer_id=None,
+            edit_target_layer_id=None,
+            selected_asset_id=None,
+            selected_version_id=None,
+            active_survey_id=None,
+            active_task_id=None,
+            workflow_stage=None,
             map_extent=None,
             source_widget_id=source_widget_id,
             custom_attributes={},
@@ -190,7 +240,14 @@ class SelectionContext(QObject):
                 active_interpretation_id=self.active_interpretation_id,
                 spatial_cursor=self.spatial_cursor,
                 depth_cursor=self.depth_cursor,
+                selected_layer_id=self.selected_layer_id,
                 active_layer_id=self.active_layer_id,
+                edit_target_layer_id=self.edit_target_layer_id,
+                selected_asset_id=self.selected_asset_id,
+                selected_version_id=self.selected_version_id,
+                active_survey_id=self.active_survey_id,
+                active_task_id=self.active_task_id,
+                workflow_stage=self.workflow_stage,
                 map_extent=self.map_extent,
                 source_widget_id=self.source_widget_id,
                 timestamp=self.timestamp,

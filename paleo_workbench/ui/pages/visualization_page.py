@@ -100,6 +100,8 @@ class PanelFloatButton(QToolButton):
         self.setObjectName("PanelFloatButton")
         self.setText("⇱")
         self.setToolTip("浮动面板 (Float panel)")
+        # Icon-glyph text carries no semantics for assistive tech (audit F4).
+        self.setAccessibleName("浮动面板")
         self.setFixedSize(18, 18)
         self.clicked.connect(lambda: self._controller.toggle(self._key))
         panel.installEventFilter(self)
@@ -263,6 +265,22 @@ class VisualizationPage(QWidget):
             lambda _index: self._sync_export_capabilities()
         )
         self._sync_export_capabilities()
+        self._setup_tab_order()
+
+    def _setup_tab_order(self) -> None:
+        """Explicit tab chain for the page's primary interactive controls.
+
+        Visual order (audit F1, v11): top asset bar (combo → coordinate
+        toggle) → trace panel actions (refresh → exports). The composite
+        visualization center is a tabbed canvas surface; the hidden summary
+        panel is skipped.
+        """
+        QWidget.setTabOrder(self.asset_combo, self.btn_coord)
+        trace = self.trace_panel
+        QWidget.setTabOrder(self.btn_coord, trace.refresh_btn)
+        QWidget.setTabOrder(trace.refresh_btn, trace.export_btn)
+        QWidget.setTabOrder(trace.export_btn, trace.export_svg_btn)
+        QWidget.setTabOrder(trace.export_svg_btn, trace.export_pdf_btn)
 
 
     def ribbon_panel_entries(self) -> list[dict]:

@@ -9,7 +9,23 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
+
+
+def _title_qss() -> str:
+    return (
+        f"color: {style.palette()['TEXT_PRIMARY']};"
+        f" font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 600;"
+        " border: none; background: transparent;"
+    )
+
+
+def _rules_qss() -> str:
+    return (
+        f"color: {style.palette()['TEXT_SECONDARY']};"
+        f" font-size: {tokens.FONT_SIZE_STATUS};"
+        " border: none; background: transparent;"
+    )
 
 
 class ActionHeader(QFrame):
@@ -31,10 +47,7 @@ class ActionHeader(QFrame):
         self.title_label = QLabel(
             "成图与审核 · — 古地理图（自动质检 + 人工审核）"
         )
-        self.title_label.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 600;"
-            " border: none; background: transparent;"
-        )
+        style.bind(self.title_label, _title_qss)  # E1: theme-switch re-render
         layout.addWidget(self.title_label)
 
         button_row = QHBoxLayout()
@@ -65,10 +78,7 @@ class ActionHeader(QFrame):
         self.rules_label = QLabel(
             f"检查规则: {' · '.join(tokens.DEFAULT_QC_RULES)}"
         )
-        self.rules_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
-            " border: none; background: transparent;"
-        )
+        style.bind(self.rules_label, _rules_qss)
         layout.addWidget(self.rules_label)
 
     def update_state(self, reports: list, map_documents: list) -> None:

@@ -116,6 +116,11 @@ FONT_SIZE_NAV_LABEL = "9px"          # ms(-2) — 导航标签
 FONT_WEIGHT_NAV_LABEL = "600"        # 加重以在深色栏上保持小字可读
 FONT_SIZE_TITLE = "14px"             # ms(0)+1 — 面板标题抬升一档
 FONT_WEIGHT_TITLE = "700"
+# E3 type-scale 收口：QSS 此前散落的 12px/10px 字面量归位到刻度（视觉不变）。
+FONT_SIZE_MINOR = "12px"             # ms(0)-1 邻档 — 次要说明 / 浮层标题
+FONT_SIZE_MICRO = "10px"             # 超小徽章 / 阶段索引字
+# 徽章/深色信号底上的文字色：BADGE_* 与 ERROR_RED 深底三主题均配白字（≥ 4.5:1）。
+ON_SOLID = "#ffffff"
 
 MENU_BAR_HEIGHT = 40
 HEADER_TOOLBAR_HEIGHT = 40
@@ -170,6 +175,11 @@ DENSITY_TOKENS = {
         "rail_width": 48,
         "rail_item_size": 44,
         "font_delta": 0,  # 字号不缩：专业可读性优先（13px 底线）
+        # E5 密度参数化：此前 build_qss 硬编码的视图 chrome 内距/行高。
+        "tab_padding": "6px 12px",
+        "menu_padding": "4px 18px 4px 8px",
+        "item_padding": "3px 6px",
+        "combo_item_height": 22,
     },
     "comfortable": {
         "padding_y": 6,
@@ -181,6 +191,10 @@ DENSITY_TOKENS = {
         "rail_width": 54,
         "rail_item_size": 48,
         "font_delta": 0,
+        "tab_padding": "8px 16px",
+        "menu_padding": "6px 24px 6px 12px",
+        "item_padding": "4px 6px",
+        "combo_item_height": 26,
     },
 }
 CONTROL_HEIGHT = DENSITY_TOKENS["comfortable"]["btn_height"]
@@ -498,6 +512,15 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     padding_y = density_tokens["padding_y"]
     padding_x = density_tokens["padding_x"]
     btn_height = density_tokens["btn_height"]
+    # E5：视图 chrome 内距/行高随密度；.get(...) 缺键回落 comfortable 值
+    # （自定义密度表向后兼容——新增键非必填）。
+    _comfortable = DENSITY_TOKENS["comfortable"]
+    tab_padding = density_tokens.get("tab_padding", _comfortable["tab_padding"])
+    menu_padding = density_tokens.get("menu_padding", _comfortable["menu_padding"])
+    item_padding = density_tokens.get("item_padding", _comfortable["item_padding"])
+    combo_item_height = density_tokens.get(
+        "combo_item_height", _comfortable["combo_item_height"]
+    )
     # 结构性 chrome 尺寸随密度（rail/app bar），QSS 重建即生效
     rail_width = density_tokens["rail_width"]
     rail_item = density_tokens["rail_item_size"]
@@ -593,7 +616,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         outline: none;
     }}
     QComboBox QAbstractItemView::item {{
-        min-height: 26px;
+        min-height: {combo_item_height}px;
         padding: 2px 8px;
         border-radius: 3px;
     }}
@@ -685,10 +708,14 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         outline: none;
     }}
     QTableView::item, QTreeView::item, QListView::item {{
-        padding: 4px 6px;
+        padding: {item_padding};
     }}
     QTreeView::item, QListView::item {{
         border-radius: 3px;
+    }}
+    /* E4：视图项键盘焦点可见（QListView/QTreeView/QTableView 默认无焦点环） */
+    QTableView::item:focus, QTreeView::item:focus, QListView::item:focus {{
+        border: 1px solid {t.FOCUS_RING};
     }}
     QTreeView::item:selected, QListView::item:selected {{
         background-color: {t.BG_SELECTION};
@@ -732,7 +759,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     QTabBar::tab {{
         background-color: {t.BG_SEARCH};
         color: {t.TEXT_SECONDARY};
-        padding: 8px 16px;
+        padding: {tab_padding};
         border-top-left-radius: {t.RADIUS_BUTTON}px;
         border-top-right-radius: {t.RADIUS_BUTTON}px;
         margin-right: 2px;
@@ -759,7 +786,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     }}
     QMenu::item {{
         background-color: transparent;
-        padding: 6px 24px 6px 12px;
+        padding: {menu_padding};
         border-radius: 3px;
         color: {t.TEXT_PRIMARY};
     }}
@@ -780,7 +807,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         color: {t.TOOLTIP_TEXT};
         border: 1px solid {t.ACCENT};
         padding: 6px 8px;
-        font-size: 12px;
+        font-size: {t.FONT_SIZE_MINOR};
     }}
     QProgressBar {{
         background-color: {t.BG_SEARCH};
@@ -1272,7 +1299,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     QLabel#WorkstationPanelTitle,
     QLabel#WorkstationInspectorHeader {{
         color: {t.TEXT_PRIMARY};
-        font-size: 12px;
+        font-size: {t.FONT_SIZE_MINOR};
         font-weight: 700;
     }}
     QLabel#WorkstationInspectorHeader {{
@@ -1408,7 +1435,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         color: {t.TEXT_SECONDARY};
         border: 1px solid {t.BORDER};
         border-radius: 9px;
-        font-size: 10px;
+        font-size: {t.FONT_SIZE_MICRO};
         font-weight: 700;
     }}
     QFrame#MappingStageSegment[active="true"] QLabel#MappingStageIndex {{
@@ -1430,7 +1457,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         color: {t.TEXT_SECONDARY};
         background: transparent;
         border: none;
-        font-size: 10px;
+        font-size: {t.FONT_SIZE_MICRO};
         font-weight: 700;
         padding: 0px 2px;
     }}
@@ -1501,7 +1528,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         border: 1px solid {t.BORDER};
         border-radius: 3px;
         padding: 1px 5px;
-        font-size: 10px;
+        font-size: {t.FONT_SIZE_MICRO};
     }}
     QFrame#WorkstationDocumentPaneHost {{
         background: {t.BG_SIDEBAR};
@@ -1512,7 +1539,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
         color: {t.TEXT_SECONDARY};
         border: 1px dashed {t.BORDER_STRONG};
         border-radius: 4px;
-        font-size: 12px;
+        font-size: {t.FONT_SIZE_MINOR};
         padding: 18px 14px;
     }}
     QFrame#WorkstationInspector {{
@@ -1539,7 +1566,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     /* 综合编修 / shell：可浮动 dock 标题条（对齐 V3 light tokens） */
     QDockWidget {{
         color: {t.TEXT_PRIMARY};
-        font-size: 12px;
+        font-size: {t.FONT_SIZE_MINOR};
         border: 1px solid {t.BORDER};
         border-radius: 0px;
     }}
@@ -1583,7 +1610,7 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     }}
     QLabel#FloatingPanelTitle {{
         color: {t.TEXT_PRIMARY};
-        font-size: 12px;
+        font-size: {t.FONT_SIZE_MINOR};
         font-weight: 700;
         padding-left: 2px;
     }}
@@ -1657,13 +1684,13 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     }}
     QPushButton#PwbDangerButton:hover {{
         background: {t.ERROR_RED};
-        color: #ffffff;
+        color: {t.ON_SOLID};
         border-color: {t.ERROR_RED};
     }}
     QPushButton#PwbDangerButton:pressed {{
         background: {t.ERROR};
         border-color: {t.ERROR};
-        color: #ffffff;
+        color: {t.ON_SOLID};
     }}
     QPushButton#PwbDangerButton:disabled {{
         background: {t.BG_DISABLED};
@@ -1707,16 +1734,16 @@ def build_qss(density: str = "comfortable", theme: str = "light") -> str:
     }}
     /* 徽章深底色全部按白字 ≥ 4.5:1 策展（BADGE_*），三主题皆用白字 */
     QLabel#PwbBadge[tone="primary"] {{
-        background: {t.BADGE_PRIMARY}; color: #ffffff;
+        background: {t.BADGE_PRIMARY}; color: {t.ON_SOLID};
     }}
     QLabel#PwbBadge[tone="success"] {{
-        background: {t.BADGE_SUCCESS}; color: #ffffff;
+        background: {t.BADGE_SUCCESS}; color: {t.ON_SOLID};
     }}
     QLabel#PwbBadge[tone="warning"] {{
-        background: {t.BADGE_WARNING}; color: #ffffff;
+        background: {t.BADGE_WARNING}; color: {t.ON_SOLID};
     }}
     QLabel#PwbBadge[tone="error"] {{
-        background: {t.ERROR_RED}; color: #ffffff;
+        background: {t.ERROR_RED}; color: {t.ON_SOLID};
     }}
     QLabel#PwbInlineStatusText {{
         font-size: {t.FONT_SIZE_STATUS};

@@ -139,6 +139,7 @@ class WellLogPredictionPage(QWidget):
         self._project_path: Path | None = None
         self._tasks: list = []
         self._selected_index: int | None = None
+        self._selected_task_id: str | None = None
         self._inference_service = None
         self._inference_job = OwnedWorkerJob(self)
         self._session_token = object()
@@ -294,12 +295,17 @@ class WellLogPredictionPage(QWidget):
     def update_state(self, prediction_tasks: list | tuple | None, project=None) -> None:
         if project is not None:
             self.set_project(project)
+        # V11（01-ui-audit C4）：选择锚定**任务 id**——此前只按索引钳位，
+        # 任务列表重建后同一索引可能指向另一个任务（选择静默改目标）。
+        selected_id = self._selected_task_id
         self._tasks = list(prediction_tasks or [])
+        self._selected_index = None
+        if selected_id is not None:
+            for index, task in enumerate(self._tasks):
+                if str(getattr(task, "id", "") or "") == selected_id:
+                    self._selected_index = index
+                    break
         self._sync_well_sources()
-        if self._selected_index is not None and not (
-            0 <= self._selected_index < len(self._tasks)
-        ):
-            self._selected_index = None
         task = self._current_task()
         self.task_panel.update_state(self._tasks, selected_index=self._selected_index)
         if task is not None:
@@ -343,6 +349,9 @@ class WellLogPredictionPage(QWidget):
     def _on_task_selected(self, index: int) -> None:
         self._selected_index = index
         task = self._current_task()
+        self._selected_task_id = (
+            str(getattr(task, "id", "") or "") if task is not None else None
+        )
         self.task_panel.update_state(self._tasks, selected_index=index)
         self.canvas_panel.update_state(task, project=self._project)
         self.evidence_panel.update_state(
@@ -468,6 +477,7 @@ class WellLogPredictionPage(QWidget):
             self.well_source_combo.setCurrentIndex(combo_index)
             self.well_source_combo.blockSignals(False)
         self._selected_index = None
+        self._selected_task_id = None
         self.task_panel.update_state(self._tasks, selected_index=None)
         self.canvas_panel.show_resource(resource, self._project)
         self.evidence_panel.update_state(
@@ -501,6 +511,9 @@ class WellLogPredictionPage(QWidget):
                     lst.setCurrentItem(item)
                 lst.blockSignals(False)
                 self._selected_index = index
+                self._selected_task_id = str(
+                    getattr(self._tasks[index], "id", "") or ""
+                ) if 0 <= index < len(self._tasks) else None
                 task = self._current_task()
                 self.canvas_panel.update_state(task, project=self._project)
                 self.evidence_panel.update_state(
@@ -738,6 +751,11 @@ class WellLogPredictionPage(QWidget):
                 task.model_metadata["link_failed"] = True
         self._tasks = list(self._project.prediction_tasks)
         self._selected_index = len(self._tasks) - 1
+        self._selected_task_id = (
+            str(getattr(self._tasks[self._selected_index], "id", "") or "")
+            if self._selected_index is not None and 0 <= self._selected_index < len(self._tasks)
+            else None
+        )
         self.update_state(self._tasks, project=self._project)
         if (task.result_summary or {}).get("model_type") in {
             "geoviz_online",

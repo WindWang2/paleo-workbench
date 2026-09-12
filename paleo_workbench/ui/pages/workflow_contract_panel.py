@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.workflow.contracts.models import ExpertQuestionStatus, ReadinessStatus
 from paleo_workbench.workflow.contracts.readiness import evaluate_readiness
 from paleo_workbench.workflow.contracts.registry import get_default_registry
@@ -50,8 +50,12 @@ class WorkflowContractPanel(QFrame):
 
         header = QHBoxLayout()
         self.title = QLabel("专业工作流合同")
-        self.title.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-weight: 600; font-size: 13px;"
+        style.bind(
+            self.title,
+            lambda: (
+                f"color: {style.palette()['TEXT_PRIMARY']}; font-weight: 600;"
+                f" font-size: {tokens.FONT_SIZE_BASE};"
+            ),
         )
         header.addWidget(self.title, 1)
         self.dev_btn = QPushButton("开发/咨询详情")
@@ -97,11 +101,19 @@ class WorkflowContractPanel(QFrame):
     def _add(self, text: str, *, primary: bool = False, warn: bool = False) -> None:
         lab = QLabel(text)
         lab.setWordWrap(True)
-        color = tokens.WARNING if warn else (
-            tokens.TEXT_PRIMARY if primary else tokens.TEXT_SECONDARY
+        token = (
+            "WARNING" if warn
+            else ("TEXT_PRIMARY" if primary else "TEXT_SECONDARY")
         )
         weight = "600" if primary else "400"
-        lab.setStyleSheet(f"color: {color}; font-size: 12px; font-weight: {weight};")
+        # E1：经 style.bind 在主题切换时按当前 palette 重取色（不快照 light 值）。
+        style.bind(
+            lab,
+            lambda tok=token, w=weight: (
+                f"color: {style.palette()[tok]};"
+                f" font-size: {tokens.FONT_SIZE_MINOR}; font-weight: {w};"
+            ),
+        )
         lab.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.body_layout.addWidget(lab)
         self._lines.append(lab)

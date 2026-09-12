@@ -25,5 +25,5 @@ def test_seismic_task_panel_update_state(qtbot):
 
     assert panel.name_value.text() == task.name
     assert panel.adapter_value.text() == "mock"
-    assert panel.status_value.text() == "complete"
+    assert panel.status_value.text() == "完成"  # V11：状态经任务词表渲染
     assert panel.task_list.count() == 1

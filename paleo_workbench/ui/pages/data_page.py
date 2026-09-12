@@ -328,6 +328,12 @@ class DataPage(QWidget):
         # run off the GUI thread like import/rescan/delivery/export.
         self._catalog_copy_job = OwnedWorkerJob(self)
         self._aggregates_job = OwnedWorkerJob(self)
+        # V11（D1）：选择变化的血缘双链遍历移出 GUI 线程（latest-only）。
+        from paleo_workbench.ui.modelview import AsyncQuery
+
+        self._lineage_query = AsyncQuery(self)
+        self._lineage_cache: dict[str, tuple] = {}  # version_id → (up, down)，有界
+        self._lineage_cache_order: list[str] = []
         self._last_import_report: ImportReport | None = None
         self._last_registered_asset_ids: dict[str, str] = {}
         self._rescan_context: tuple | None = None
@@ -530,6 +536,10 @@ class DataPage(QWidget):
         domain_bind_joined = self._domain_bind_job.shutdown(wait_ms)
         catalog_copy_joined = self._catalog_copy_job.shutdown(wait_ms)
         aggregates_joined = self._aggregates_job.shutdown(wait_ms)
+        # V11（D1）：血缘异步查询一并停止（迟到链按 epoch 拒绝）。
+        self._lineage_query.shutdown(200)
+        self._lineage_cache.clear()
+        self._lineage_cache_order.clear()
         # The paged model's fetch pool (large-catalog mode) must stop too.
         self.asset_table.shutdown()
         joined = all(
@@ -2011,9 +2021,14 @@ class DataPage(QWidget):
 
     def _update_inspector(self, asset: object | None) -> None:
         """Build the inspector AssetView, enriched from the catalog when the
-        asset is bridged (legacy plain view otherwise). Catalog-bridged assets
-        additionally get their full lineage chains (上游至 RAW / 下游) pushed
-        into the 血缘 tree."""
+        asset is bridged (legacy plain view otherwise).
+
+        V11（01-ui-audit D1）：血缘双链遍历**移出 GUI 线程**——此前每次选择
+        变化同步跑两次 ``get_lineage_chain`` 图遍历（上行+下行），大目录下
+        选择即卡顿。现在：视图立即呈现（血缘页显示加载占位），链在后台取
+        回后单独刷新（latest-only，迟到结果按 epoch 拒绝；小有界缓存避免
+        来回切换重复遍历）。
+        """
         if asset is None:
             self.inspector_panel.update_asset(None)
             self.inspector_panel.set_version_tags_enabled(False)
@@ -2021,18 +2036,57 @@ class DataPage(QWidget):
             return
         view = asset_view_from_object(asset)
         view = self._enrich_view_from_catalog(view)
-        lineage_up = lineage_down = None
         service = self._catalog_service()
         version_id = self._current_version_id_for(view)
-        if service is not None and version_id is not None:
-            try:
-                lineage_up = service.get_lineage_chain(version_id)
-                lineage_down = service.get_lineage_chain(
-                    version_id, direction="descendants"
+        cached = self._lineage_cache.get(version_id or "")
+        if cached is not None:
+            self.inspector_panel.update_asset(
+                view, lineage_up=cached[0], lineage_down=cached[1]
+            )
+        elif service is not None and version_id is not None:
+            self.inspector_panel.update_asset(view)
+            self.inspector_panel.show_lineage_loading()
+            target_version = version_id
+
+            def _fetch_lineage():
+                up = service.get_lineage_chain(target_version)
+                down = service.get_lineage_chain(
+                    target_version, direction="descendants"
                 )
-            except Exception:
-                lineage_up = lineage_down = None
-        self.inspector_panel.update_asset(view, lineage_up=lineage_up, lineage_down=lineage_down)
+                return up, down
+
+            def _on_lineage_ready(result) -> None:
+                up, down = result
+                self._lineage_cache_remember(target_version, (up, down))
+                # 迟到防护：资产已切换时不回写旧链（当前视图版本为准）。
+                current_version = (
+                    self._current_version_id_for(self.inspector_panel._current_view)
+                    if self.inspector_panel._current_view is not None
+                    else None
+                )
+                if current_version != target_version:
+                    return
+                self.inspector_panel.update_lineage(up, down)
+
+            def _on_lineage_error(_exc) -> None:
+                # 与 on_ready 同口径的迟到防护：目标已切换时不降级当前
+                # 资产已正确显示的血缘（评审 UX P1-1）。
+                current_version = (
+                    self._current_version_id_for(self.inspector_panel._current_view)
+                    if self.inspector_panel._current_view is not None
+                    else None
+                )
+                if current_version != target_version:
+                    return
+                self.inspector_panel.update_lineage(None, None)
+
+            self._lineage_query.submit(
+                _fetch_lineage,
+                on_ready=_on_lineage_ready,
+                on_error=_on_lineage_error,
+            )
+        else:
+            self.inspector_panel.update_asset(view)
         # Version tag editing needs a catalog-bridged asset (F6).
         resource = view.raw_asset
         service, ref = (
@@ -2045,6 +2099,18 @@ class DataPage(QWidget):
         self.inspector_panel.set_governance_enabled(
             bridged or self._lifecycle.resolve_catalog_asset_id(asset) is not None
         )
+
+    _LINEAGE_CACHE_MAX = 32
+
+    def _lineage_cache_remember(self, version_id: str, chains: tuple) -> None:
+        if not version_id:
+            return
+        if version_id not in self._lineage_cache:
+            self._lineage_cache_order.append(version_id)
+            while len(self._lineage_cache_order) > self._LINEAGE_CACHE_MAX:
+                evicted = self._lineage_cache_order.pop(0)
+                self._lineage_cache.pop(evicted, None)
+        self._lineage_cache[version_id] = chains
 
     def _current_version_id_for(self, view: AssetView) -> str | None:
         """The catalog version id backing *view* (None when unbridged)."""
@@ -2936,6 +3002,32 @@ class DataPage(QWidget):
         self.data_toolbar.reader_btn.setChecked(not self.right_splitter.isHidden())
 
     def _emit_data_context(self) -> None:
+        """V11：选择/摘要变化 → 总线发布（替换无订阅者的死信号路径）。
+
+        ``selected_asset_id`` / ``selected_version_id`` 槽位由
+        ViewCoordinationController 写入 SelectionContext；UIContext 快照、
+        状态条与 palette 适用性从此与 Data 页同源（01-ui-audit C2）。
+        """
+        coordination = getattr(self, "_view_coordination", None)
+        if coordination is not None:
+            asset_id = None
+            selected = self._selected_asset
+            if selected is not None:
+                asset_id = self._lifecycle.resolve_catalog_asset_id(selected)
+                if not asset_id:
+                    asset_id = str(getattr(selected, "id", "") or "") or None
+            version_id = None
+            view = getattr(self.inspector_panel, "_current_view", None)
+            if view is not None:
+                version_id = self._current_version_id_for(view)
+            try:
+                coordination.publish_asset_selection(
+                    asset_id,
+                    version_id=version_id,
+                    source=coordination.SOURCE_DATA_PAGE,
+                )
+            except RuntimeError:
+                pass  # 拆壳期迟到调用
         issue_count = sum(
             1
             for resource in self.project.resources

@@ -9,7 +9,6 @@ document — see ``paleo_workbench.project.well_location_map``.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt
@@ -18,12 +17,14 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLay
 
 from paleo_workbench.ui.pages.project_well_map_page import ProjectWellMapPage
 
-_ICONS_DIR = Path(__file__).parent.parent / "assets" / "icons"
-
 
 def _icon(name: str) -> QIcon:
-    path = _ICONS_DIR / name
-    return QIcon(str(path)) if path.exists() else QIcon()
+    """Theme-aware loader (E2)：接受相对 assets 的子路径（如 map/panel-bottom.svg）。
+
+    中性灰色字形按当前主题重染，多色 SVG 原样返回；缺失 → 空 QIcon。
+    """
+    from paleo_workbench.ui.workstation.common import tinted_map_icon  # 懒加载（E2）：避免拉起 workstation shell 导入链
+    return tinted_map_icon(name)
 
 
 class WellMapPanel(QFrame):

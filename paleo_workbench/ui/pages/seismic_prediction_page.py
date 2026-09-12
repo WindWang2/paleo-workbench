@@ -58,6 +58,8 @@ class PanelFloatButton(QToolButton):
         self.setObjectName("PanelFloatButton")
         self.setText("⇱")
         self.setToolTip("浮动面板 (Float panel)")
+        # Icon-glyph text carries no semantics for assistive tech (audit F4).
+        self.setAccessibleName("浮动面板")
         self.setFixedSize(18, 18)
         self.clicked.connect(lambda: self._controller.toggle(self._key))
         panel.installEventFilter(self)
@@ -168,6 +170,33 @@ class SeismicPredictionPage(QWidget):
         self.attribute_panel.attribute_changed.connect(self._on_attribute)
         self.control_panel.well_tie_toggled.connect(self.view_panel.set_well_tie_enabled)
         self.view_panel.view_ready.connect(self._on_view_ready)
+
+        self._setup_tab_order()
+
+    def _setup_tab_order(self) -> None:
+        """Explicit tab chain for the page's primary interactive controls.
+
+        Visual order (audit F1, v11): context toolbar (source → attribute →
+        settings → demo → run) → left attribute tree → right control panel →
+        view-panel interpretation lifecycle row. The GL seismic view itself
+        is a canvas and is skipped.
+        """
+        toolbar = self.context_toolbar
+        QWidget.setTabOrder(toolbar.seismic_source_combo, toolbar.attribute_combo)
+        QWidget.setTabOrder(toolbar.attribute_combo, toolbar.settings_btn)
+        QWidget.setTabOrder(toolbar.settings_btn, toolbar.demo_btn)
+        QWidget.setTabOrder(toolbar.demo_btn, toolbar.run_btn)
+        QWidget.setTabOrder(toolbar.run_btn, self.attribute_panel.attribute_tree)
+        QWidget.setTabOrder(self.attribute_panel.attribute_tree, self.control_panel.mode_combo)
+        QWidget.setTabOrder(self.control_panel.mode_combo, self.control_panel.well_tie_btn)
+        QWidget.setTabOrder(self.control_panel.well_tie_btn, self.control_panel.send_btn)
+        view = self.view_panel
+        QWidget.setTabOrder(self.control_panel.send_btn, view.interp_draft_btn)
+        QWidget.setTabOrder(view.interp_draft_btn, view.interp_sync_btn)
+        QWidget.setTabOrder(view.interp_sync_btn, view.interp_undo_btn)
+        QWidget.setTabOrder(view.interp_undo_btn, view.interp_redo_btn)
+        QWidget.setTabOrder(view.interp_redo_btn, view.interp_save_btn)
+        QWidget.setTabOrder(view.interp_save_btn, view.interp_reload_btn)
 
 
     def ribbon_panel_entries(self) -> list[dict]:

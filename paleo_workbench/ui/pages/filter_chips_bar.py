@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.ui.pages.filter_index import FilterQuery
 
 SAVED_FILTERS_KEY = "data_explorer/saved_filters"
@@ -51,6 +51,16 @@ _DIM_OPERATOR = "tag_operator"
 
 def _settings() -> QSettings:
     return QSettings()
+
+
+def _chip_qss() -> str:
+    pal = style.palette()
+    return (
+        f"QLabel#FilterChip {{ background: {pal['BG_SIDEBAR']};"
+        f" border: 1px solid {pal['BORDER']}; border-radius: 9px;"
+        f" padding: 1px 8px; color: {pal['TEXT_PRIMARY']};"
+        f" font-size: {tokens.FONT_SIZE_MINOR}; }}"
+    )
 
 
 class FilterChipsBar(QWidget):
@@ -226,11 +236,8 @@ class FilterChip(QLabel):
         self._key = key
         self.setObjectName("FilterChip")
         self.setToolTip("点击移除该过滤条件")
-        self.setStyleSheet(
-            f"QLabel#FilterChip {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER}; border-radius: 9px;"
-            f" padding: 1px 8px; color: {tokens.TEXT_PRIMARY}; font-size: 12px; }}"
-        )
+        # E1：构造期不再快照 light 值——经 style.bind 在主题切换时重渲染。
+        style.bind(self, _chip_qss)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def mousePressEvent(self, event) -> bool:  # noqa: N802

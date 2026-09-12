@@ -26,6 +26,11 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel
 
+from paleo_workbench.mapping.tool_availability import (
+    frozen_layer_gate_reason,
+    raw_layer_gate_reason,
+    stage_lock_reason,
+)
 from paleo_workbench.ui import style, tokens
 
 __all__ = ["MapStatusBar"]
@@ -281,15 +286,16 @@ class MapStatusBar(QFrame):
             mode = _CHIP_EMPHASIS
         elif raw_locked:
             text = "RAW · 只读"
-            tip = "RAW/模型结果图层——不可直接编辑；复制为草稿后编辑"
+            # V11 Goal §7（A3）：判词句与 evaluator/资产菜单同源（单一措辞）。
+            tip = raw_layer_gate_reason()
             mode = _CHIP_NEUTRAL
         elif frozen:
             text = "已冻结"
-            tip = "当前结果已冻结/发布——不可编辑；另存草稿或解除冻结"
+            tip = frozen_layer_gate_reason()
             mode = _CHIP_NEUTRAL
         elif gate_closed:
             text = "锁定"
-            tip = f"图层被编辑门禁锁定：{gate_reason}" if gate_reason else "图层被编辑门禁锁定"
+            tip = stage_lock_reason(gate_reason)
             mode = _CHIP_NEUTRAL
         elif editable_unknown:
             text = "可编辑性未知"
