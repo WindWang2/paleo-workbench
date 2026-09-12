@@ -46,7 +46,9 @@ class _SectionCard(QFrame):
         )
         self._layout.setSpacing(tokens.SPACE_2)
         title_label = QLabel(title)
-        title_label.setStyleSheet("font-weight: 600;")
+        title_font = title_label.font()
+        title_font.setBold(True)
+        title_label.setFont(title_font)
         self._layout.addWidget(title_label)
         self.body = QVBoxLayout()
         self._layout.addLayout(self.body)
@@ -69,9 +71,14 @@ class WellDetailPanel(QWidget):
         layout.setSpacing(tokens.SPACE_3)
 
         self._title = QLabel("井数据视图")
-        self._title.setStyleSheet("font-size: 16px; font-weight: 600;")
+        title_font = self._title.font()
+        title_font.setPointSizeF(max(title_font.pointSizeF(), 0.0) + 3)
+        title_font.setBold(True)
+        self._title.setFont(title_font)
         self._subtitle = QLabel("")
-        self._subtitle.setStyleSheet("color: #666;")
+        self._subtitle.setStyleSheet(
+            f"color: {tokens.palette_for('light')['TEXT_SECONDARY']};"
+        )
         layout.addWidget(self._title)
         layout.addWidget(self._subtitle)
 
