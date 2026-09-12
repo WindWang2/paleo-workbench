@@ -93,6 +93,154 @@ def _run_model_from_row(row, inputs: list[str], outputs: list[str]) -> DataRun:
     return run
 
 
+# -- V11 typed-lineage / compound-payload row helpers -------------------------
+# run_ports and version_members rows are derived collections owned by their
+# parent record (run / version). One serialization + one attachment path each,
+# shared by load / rebuild / incremental apply so all three agree by
+# construction — the same discipline the core tables follow.
+
+
+def _run_port_rows(run) -> list[tuple]:
+    rows: list[tuple] = []
+    for port in run.input_ports or ():
+        rows.append(
+            (
+                run.id,
+                "input",
+                port.role,
+                port.version_id,
+                int(port.ordinal),
+                int(port.required),
+                port.entity_type,
+                port.entity_id,
+                port.note,
+            )
+        )
+    for port in run.output_ports or ():
+        rows.append(
+            (
+                run.id,
+                "output",
+                port.role,
+                port.version_id,
+                int(port.ordinal),
+                int(port.required),
+                port.entity_type,
+                port.entity_id,
+                port.note,
+            )
+        )
+    return rows
+
+
+def _write_run_ports(conn: sqlite3.Connection, run) -> None:
+    """Make the run's port rows equal its ``input_ports``/``output_ports``."""
+    conn.execute(_RUN_PORTS_DDL)  # tolerate stores whose connect DDL broke early
+    conn.execute("DELETE FROM run_ports WHERE run_id = ?", (run.id,))
+    conn.executemany(
+        "INSERT OR IGNORE INTO run_ports (run_id, direction, role, version_id,"
+        " ordinal, required, entity_type, entity_id, note)"
+        " VALUES (?,?,?,?,?,?,?,?,?)",
+        _run_port_rows(run),
+    )
+
+
+def _attach_run_ports(run: DataRun, rows: list) -> None:
+    from paleo_workbench.catalog.models import RunPort
+
+    for row in rows:
+        port = RunPort(
+            role=row["role"],
+            version_id=row["version_id"],
+            ordinal=int(row["ordinal"]),
+            required=bool(row["required"]),
+            entity_type=row["entity_type"],
+            entity_id=row["entity_id"],
+            note=row["note"],
+        )
+        if row["direction"] == "output":
+            run.output_ports.append(port)
+        else:
+            run.input_ports.append(port)
+
+
+def _ports_for_runs(conn: sqlite3.Connection, run_ids) -> dict[str, list]:
+    """Batched port-row read keyed by run id (document/rowid order kept)."""
+    out: dict[str, list] = {}
+    ids = [str(r) for r in run_ids]
+    for start in range(0, len(ids), 500):
+        chunk = ids[start : start + 500]
+        placeholders = ",".join("?" for _ in chunk)
+        for row in conn.execute(
+            f"SELECT * FROM run_ports WHERE run_id IN ({placeholders})"
+            " ORDER BY rowid",
+            chunk,
+        ):
+            out.setdefault(row["run_id"], []).append(row)
+    return out
+
+
+def _version_member_rows(version) -> list[tuple]:
+    return [
+        (
+            version.id,
+            member.name,
+            member.rel_path,
+            member.member_role,
+            int(member.ordinal),
+            int(member.required),
+            member.sha256,
+            member.size_bytes,
+        )
+        for member in version.members or ()
+    ]
+
+
+def _write_version_members(conn: sqlite3.Connection, version) -> None:
+    """Make the version's member rows equal its ``members`` list."""
+    conn.execute(_VERSION_MEMBERS_DDL)  # tolerate early-broken connect DDL
+    conn.execute("DELETE FROM version_members WHERE version_id = ?", (version.id,))
+    conn.executemany(
+        "INSERT OR IGNORE INTO version_members (version_id, name, rel_path,"
+        " member_role, ordinal, required, sha256, size_bytes)"
+        " VALUES (?,?,?,?,?,?,?,?)",
+        _version_member_rows(version),
+    )
+
+
+def _attach_version_members(version: DataVersion, rows: list) -> None:
+    from paleo_workbench.catalog.models import VersionMember
+
+    for row in rows:
+        version.members.append(
+            VersionMember(
+                name=row["name"],
+                rel_path=row["rel_path"],
+                member_role=row["member_role"],
+                ordinal=int(row["ordinal"]),
+                required=bool(row["required"]),
+                sha256=row["sha256"],
+                size_bytes=row["size_bytes"],
+            )
+        )
+
+
+def _members_for_versions(conn: sqlite3.Connection, version_ids) -> dict[str, list]:
+    """Batched member-row read keyed by version id (document/rowid order)."""
+    out: dict[str, list] = {}
+    ids = [str(v) for v in version_ids]
+    for start in range(0, len(ids), 500):
+        chunk = ids[start : start + 500]
+        placeholders = ",".join("?" for _ in chunk)
+        for row in conn.execute(
+            f"SELECT * FROM version_members WHERE version_id IN ({placeholders})"
+            " ORDER BY rowid",
+            chunk,
+        ):
+            out.setdefault(row["version_id"], []).append(row)
+    return out
+
+
 class CatalogStaleWriteError(OSError):
     """Another process/session committed to the canonical store after this
     session's baseline (#411). Raised transactionally: the compare happens
@@ -162,6 +310,46 @@ def normalize_asset_search_name(name: str) -> str:
 # found and pinned by test when the two version constants were conflated).
 INDEX_SCHEMA_VERSION = 5
 STORE_SCHEMA_VERSION = 5  # first version with canonical semantics
+
+# V11 typed-lineage / compound-payload tables. Shared by _SCHEMA_DDL (fresh
+# builds/rebuilds), the connect-time idempotent DDL (existing v5 stores gain
+# them without a version bump) and the derived-collection writers (which
+# ensure the table exists before touching rows — a store whose connect-time
+# DDL loop broke early on a transient error must not fail the next save).
+_RUN_PORTS_DDL = """CREATE TABLE IF NOT EXISTS run_ports (
+    run_id TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT '',
+    version_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL DEFAULT 0,
+    required INTEGER NOT NULL DEFAULT 1,
+    entity_type TEXT NOT NULL DEFAULT '',
+    entity_id TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (run_id, direction, version_id, role, ordinal)
+)"""
+
+_RUN_PORTS_INDEX_DDL = (
+    "CREATE INDEX IF NOT EXISTS idx_run_ports_version ON run_ports(version_id)"
+)
+
+_VERSION_MEMBERS_DDL = """CREATE TABLE IF NOT EXISTS version_members (
+    version_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    rel_path TEXT NOT NULL,
+    member_role TEXT NOT NULL DEFAULT '',
+    ordinal INTEGER NOT NULL DEFAULT 0,
+    required INTEGER NOT NULL DEFAULT 1,
+    sha256 TEXT,
+    size_bytes INTEGER,
+    PRIMARY KEY (version_id, name)
+)"""
+
+_VERSION_MEMBERS_INDEX_DDL = (
+    "CREATE INDEX IF NOT EXISTS idx_version_members_version"
+    " ON version_members(version_id)"
+)
+
 
 # Table/DDL definitions. Deliberately FK-free: the store is a projection of
 # the in-memory document, and delete order must never matter.
@@ -338,10 +526,23 @@ _SCHEMA_DDL = [
         source_size_bytes INTEGER
     )""",
     "CREATE INDEX IF NOT EXISTS idx_working_copies_source ON working_copies(source_version_id)",
+    # V11 typed lineage: role-annotated run endpoints. Rows are owned by the
+    # run record (rewritten whenever the run row is dirty); stores predating
+    # V11 get the table via the idempotent connect-time DDL below — no
+    # STORE_SCHEMA_VERSION bump (that would reclassify healthy v5 stores as
+    # legacy and rebuild them from a possibly stale manifest).
+    _RUN_PORTS_DDL,
+    _RUN_PORTS_INDEX_DDL,
+    # V11 compound versions: member files of a bundle version. Owned by the
+    # version record; (version_id, name) is the identity within the bundle.
+    _VERSION_MEMBERS_DDL,
+    _VERSION_MEMBERS_INDEX_DDL,
 ]
 
 # Children first so a future PRAGMA foreign_keys=ON stays safe.
 _DELETE_ORDER = [
+    "run_ports",
+    "version_members",
     "working_copies",
     "staging_leases",
     "lineage",
@@ -913,6 +1114,13 @@ class CatalogIndex:
                 source_size_bytes INTEGER
             )""",
             "CREATE INDEX IF NOT EXISTS idx_working_copies_source ON working_copies(source_version_id)",
+            # V11: typed-lineage and compound-version tables on ANY store this
+            # code opens (same rationale as staging_leases/working_copies: no
+            # version-bump rebuild, the tables fill lazily as data appears).
+            _RUN_PORTS_DDL,
+            _RUN_PORTS_INDEX_DDL,
+            _VERSION_MEMBERS_DDL,
+            _VERSION_MEMBERS_INDEX_DDL,
         ):
             try:
                 conn.execute(ddl)
@@ -968,6 +1176,15 @@ class CatalogIndex:
         row = conn.execute(
             "SELECT 1 FROM sqlite_master"
             " WHERE type = 'table' AND name = 'sync_state'"
+        ).fetchone()
+        return row is not None
+
+    def _table_exists(self, conn: sqlite3.Connection, table: str) -> bool:
+        """True when *table* exists (V11 additive tables may be absent on a
+        store opened read-only before the connect-time DDL could run)."""
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table,),
         ).fetchone()
         return row is not None
 
@@ -1394,24 +1611,33 @@ class CatalogIndex:
                 _asset_model_from_row(row)
                 for row in conn.execute("SELECT * FROM assets ORDER BY rowid")
             ]
-            versions = [
-                _version_model_from_row(row)
-                for row in conn.execute("SELECT * FROM versions ORDER BY rowid")
-            ]
+            version_rows = conn.execute(
+                "SELECT * FROM versions ORDER BY rowid"
+            ).fetchall()
+            versions = [_version_model_from_row(row) for row in version_rows]
+            members_by_version = _members_for_versions(
+                conn, [row["id"] for row in version_rows]
+            )
+            for version in versions:
+                _attach_version_members(version, members_by_version.get(version.id, ()))
             inputs_by_run: dict[str, list[str]] = {}
-            outputs_by_run: dict[str, list[str]] = {}
             for row in conn.execute("SELECT run_id, version_id FROM run_inputs"):
                 inputs_by_run.setdefault(row["run_id"], []).append(row["version_id"])
+            outputs_by_run: dict[str, list[str]] = {}
             for row in conn.execute("SELECT run_id, version_id FROM run_outputs"):
                 outputs_by_run.setdefault(row["run_id"], []).append(row["version_id"])
+            run_rows = conn.execute("SELECT * FROM runs ORDER BY rowid").fetchall()
             runs = [
                 _run_model_from_row(
                     row,
                     inputs_by_run.get(row["id"], []),
                     outputs_by_run.get(row["id"], []),
                 )
-                for row in conn.execute("SELECT * FROM runs ORDER BY rowid")
+                for row in run_rows
             ]
+            ports_by_run = _ports_for_runs(conn, [row["id"] for row in run_rows])
+            for run in runs:
+                _attach_run_ports(run, ports_by_run.get(run.id, ()))
             tags = [
                 Tag(
                     id=row["id"],
@@ -1526,7 +1752,11 @@ class CatalogIndex:
 
     def get_version_model(self, version_id: str) -> DataVersion | None:
         row = self._read_rows("SELECT * FROM versions WHERE id = ?", (version_id,))
-        return _version_model_from_row(row[0]) if row else None
+        if not row:
+            return None
+        version = _version_model_from_row(row[0])
+        self._attach_members([version])
+        return version
 
     def get_run_model(self, run_id: str) -> DataRun | None:
         rows = self._read_rows("SELECT * FROM runs WHERE id = ?", (run_id,))
@@ -1546,7 +1776,12 @@ class CatalogIndex:
                 (run_id,),
             )
         ]
-        return _run_model_from_row(rows[0], inputs, outputs)
+        run = _run_model_from_row(rows[0], inputs, outputs)
+        if self.db_path.is_file():
+            conn = self._connect()
+            if self._schema_present(conn):
+                _attach_run_ports(run, _ports_for_runs(conn, [run_id]).get(run_id, ()))
+        return run
 
     def list_asset_models(
         self, *, include_trashed: bool = True, trashed_only: bool = False
@@ -1577,7 +1812,7 @@ class CatalogIndex:
             "SELECT run_id, version_id FROM run_outputs ORDER BY rowid", ()
         ):
             outputs_by_run.setdefault(r["run_id"], []).append(r["version_id"])
-        return [
+        runs = [
             _run_model_from_row(
                 row,
                 inputs_by_run.get(row["id"], []),
@@ -1585,6 +1820,14 @@ class CatalogIndex:
             )
             for row in rows
         ]
+        if not self.db_path.is_file():
+            return runs
+        conn = self._connect()
+        if self._schema_present(conn):
+            ports_by_run = _ports_for_runs(conn, [row["id"] for row in rows])
+            for run in runs:
+                _attach_run_ports(run, ports_by_run.get(run.id, ()))
+        return runs
 
     def list_version_models_for_asset(self, asset_id: str) -> list[DataVersion]:
         # Document order within an asset is rowid; the service's public
@@ -1592,11 +1835,28 @@ class CatalogIndex:
         rows = self._read_rows(
             "SELECT * FROM versions WHERE asset_id = ? ORDER BY rowid", (asset_id,)
         )
-        return [_version_model_from_row(row) for row in rows]
+        versions = [_version_model_from_row(row) for row in rows]
+        self._attach_members(versions)
+        return versions
 
     def list_all_version_models(self) -> list[DataVersion]:
         rows = self._read_rows("SELECT * FROM versions ORDER BY rowid", ())
-        return [_version_model_from_row(row) for row in rows]
+        versions = [_version_model_from_row(row) for row in rows]
+        self._attach_members(versions)
+        return versions
+
+    def _attach_members(self, versions: list[DataVersion]) -> None:
+        """Attach bundle member rows to already-built version models."""
+        if not versions or not self.db_path.is_file():
+            return
+        conn = self._connect()
+        if not self._schema_present(conn):
+            return
+        members_by_version = _members_for_versions(
+            conn, [version.id for version in versions]
+        )
+        for version in versions:
+            _attach_version_members(version, members_by_version.get(version.id, ()))
 
     def child_version_models(self, parent_version_id: str) -> list[DataVersion]:
         """Versions whose parent_version_ids include *parent_version_id*.
@@ -1610,7 +1870,9 @@ class CatalogIndex:
             "WHERE l.parent_version_id = ? ORDER BY v.rowid",
             (parent_version_id,),
         )
-        return [_version_model_from_row(row) for row in rows]
+        versions = [_version_model_from_row(row) for row in rows]
+        self._attach_members(versions)
+        return versions
 
     def list_tag_models(self) -> list[Tag]:
         rows = self._read_rows("SELECT * FROM tags ORDER BY rowid", ())
@@ -1770,6 +2032,7 @@ class CatalogIndex:
                         _VERSION_UPSERT_SQL, (version_id, *_version_row(version))
                     )
                     self._reconcile_version_parents(conn, version)
+                    _write_version_members(conn, version)
             for run_id in _ordered(dirty.runs, "runs"):
                 run = run_by_id.get(run_id)
                 if run is None:
@@ -1792,6 +2055,7 @@ class CatalogIndex:
                         " VALUES (?,?)",
                         [(run_id, vid) for vid in run.output_version_ids],
                     )
+                    _write_run_ports(conn, run)
                     self._reconcile_run_edges(conn, run)
             for tag_id in _ordered(dirty.tags, "tags"):
                 tag = tag_by_id.get(tag_id)
@@ -1910,6 +2174,9 @@ class CatalogIndex:
     ) -> None:
         conn.execute("DELETE FROM versions WHERE id = ?", (version_id,))
         conn.execute("DELETE FROM version_tags WHERE version_id = ?", (version_id,))
+        conn.execute(
+            "DELETE FROM version_members WHERE version_id = ?", (version_id,)
+        )
         # Run input/output link rows are NOT deleted: they are owned by the
         # run record, which retains purged version ids as historical
         # provenance (service.purge_trashed keeps runs) — a full rebuild
@@ -1970,6 +2237,7 @@ class CatalogIndex:
         conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
         conn.execute("DELETE FROM run_inputs WHERE run_id = ?", (run_id,))
         conn.execute("DELETE FROM run_outputs WHERE run_id = ?", (run_id,))
+        conn.execute("DELETE FROM run_ports WHERE run_id = ?", (run_id,))
         for parent, child in io_pairs:
             if self._version_owns_edge(conn, parent, child):
                 continue
@@ -2092,6 +2360,32 @@ class CatalogIndex:
             if db_run_io.get(run.id, set()) != expected:
                 dirty.mark_runs(run.id)
 
+        # V11 derived-collection drift: typed ports and bundle members are
+        # owned by their parent record, so their rows diff against the same
+        # parent's dirty mark (apply_changes rewrites both with the row).
+        if self._table_exists(conn, "run_ports"):
+            db_ports: dict[str, set[tuple]] = {}
+            for row in conn.execute(
+                "SELECT run_id, direction, role, version_id, ordinal, required,"
+                " entity_type, entity_id, note FROM run_ports"
+            ):
+                db_ports.setdefault(row[0], set()).add(tuple(row[1:]))
+            for run in document.runs:
+                expected_ports = {row[1:] for row in _run_port_rows(run)}
+                if db_ports.get(run.id, set()) != expected_ports:
+                    dirty.mark_runs(run.id)
+        if self._table_exists(conn, "version_members"):
+            db_members: dict[str, set[tuple]] = {}
+            for row in conn.execute(
+                "SELECT version_id, name, rel_path, member_role, ordinal,"
+                " required, sha256, size_bytes FROM version_members"
+            ):
+                db_members.setdefault(row[0], set()).add(tuple(row[1:]))
+            for version in document.versions:
+                expected_members = {row[1:] for row in _version_member_rows(version)}
+                if db_members.get(version.id, set()) != expected_members:
+                    dirty.mark_versions(version.id)
+
         if dirty.is_empty():
             # Still refresh the revision stamp (the caller bumped it) — under
             # the same CAS contract as apply_changes (#1220): a foreign
@@ -2148,6 +2442,16 @@ class CatalogIndex:
                 _VERSION_UPSERT_SQL,
                 [(version.id, *_version_row(version)) for version in document.versions],
             )
+            conn.executemany(
+                "INSERT OR IGNORE INTO version_members (version_id, name, rel_path,"
+                " member_role, ordinal, required, sha256, size_bytes)"
+                " VALUES (?,?,?,?,?,?,?,?)",
+                [
+                    row
+                    for version in document.versions
+                    for row in _version_member_rows(version)
+                ],
+            )
             # Tag name is stored normalized so lookups are case/whitespace-safe;
             # the display form lives in display_name.
             # INSERT OR IGNORE (not the upsert): a legacy document can hold
@@ -2185,6 +2489,12 @@ class CatalogIndex:
             conn.executemany(
                 _RUN_UPSERT_SQL,
                 [(run.id, *_run_row(run)) for run in document.runs],
+            )
+            conn.executemany(
+                "INSERT OR IGNORE INTO run_ports (run_id, direction, role, version_id,"
+                " ordinal, required, entity_type, entity_id, note)"
+                " VALUES (?,?,?,?,?,?,?,?,?)",
+                [row for run in document.runs for row in _run_port_rows(run)],
             )
             conn.executemany(
                 "INSERT OR IGNORE INTO run_inputs (run_id, version_id) VALUES (?,?)",

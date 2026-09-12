@@ -76,6 +76,7 @@ from paleo_workbench.catalog.storage import (
     trash_dir_for as _trash_dir_for,
     trash_payload as _move_to_trash,
 )
+from paleo_workbench.catalog.service_v11 import DataFabricV11Mixin
 from paleo_workbench.catalog.store import CatalogStore, catalog_file_for
 from paleo_workbench.project.models import _now_iso
 from paleo_workbench.project.paths import artifact_dir_for
@@ -259,8 +260,15 @@ def _record_manifest_mtime_ns(index: CatalogIndex, path: Path) -> None:
         pass  # bookkeeping only; never fails a checkpoint
 
 
-class DataCatalogService:
-    """Unified lifecycle service for one project."""
+class DataCatalogService(DataFabricV11Mixin):
+    """Unified lifecycle service for one project.
+
+    The V11 data-fabric surface (typed run ports, compound bundle versions,
+    pin / retention / cleanup eligibility, lifecycle status) lives in
+    :mod:`paleo_workbench.catalog.service_v11` and is mixed in here so there
+    remains exactly ONE catalog service class with one lock, one document
+    and one persistence path.
+    """
 
     def __init__(
         self,

@@ -39,6 +39,66 @@ class ImmutableVersionError(RuntimeError):
     """Raised when an operation would mutate a committed DataVersion."""
 
 
+class VersionMember(BaseModel):
+    """One physical member file of a compound (multi-file) DataVersion.
+
+    V11 compound-asset model (docs/development/data-fabric-v11/04): a version
+    whose ``members`` list is non-empty is a bundle — ``DataVersion.path``
+    then points at the member directory and each member is addressed by
+    ``rel_path`` (POSIX, relative to that directory, never escaping it).
+    A version's aggregate integrity credential is the re-hash of its sorted
+    member checksums (see :func:`aggregate_member_sha256`).
+    """
+
+    name: str  # unique display key within the version
+    rel_path: str
+    member_role: str = ""  # data | index | attributes | projection | sidecar | part | manifest | ...
+    ordinal: int = 0
+    required: bool = True
+    sha256: str | None = None
+    size_bytes: int | None = None
+
+
+def aggregate_member_sha256(members: list[VersionMember]) -> str | None:
+    """Version-level integrity credential over ordered member checksums.
+
+    ``sha256( "name:sha256" lines of the ordinally sorted members )`` —
+    recomputable from the member table alone, stable under member insertion
+    order changes, and sensitive to any member path/content change. Returns
+    None when no member carries a checksum (nothing to aggregate honestly).
+    """
+    import hashlib
+
+    lines: list[str] = []
+    for member in sorted(members, key=lambda m: (m.ordinal, m.name)):
+        if not member.sha256:
+            return None
+        lines.append(f"{member.name}:{member.sha256}")
+    if not lines:
+        return None
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+
+
+class RunPort(BaseModel):
+    """One typed lineage endpoint binding on a DataRun.
+
+    V11 typed lineage (docs/development/data-fabric-v11/06): ports annotate
+    WHICH ROLE each consumed/produced version played (sonic log, time-depth
+    curve, normalized output, …). The flat ``input_version_ids`` /
+    ``output_version_ids`` lists stay authoritative and always remain a
+    superset of the port version ids — old runs without ports are valid and
+    read back with anonymous ``input``/``output`` roles.
+    """
+
+    role: str
+    version_id: str
+    ordinal: int = 0
+    required: bool = True
+    entity_type: str = ""
+    entity_id: str = ""
+    note: str = ""
+
+
 class CatalogError(RuntimeError):
     """Base error for catalog operations (missing asset/version, conflicts)."""
 
@@ -88,6 +148,10 @@ class DataVersion(BaseModel):
     run_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=_now_iso)
+    # Compound payload (V11): empty list = traditional single-file version.
+    # When non-empty, ``path`` is the member directory and members address
+    # files by ``rel_path`` relative to it.
+    members: list[VersionMember] = Field(default_factory=list)
     # Tombstone (soft delete): see ``DataAsset.trashed``. ``metadata["trash"]``
     # records ``{reason, original_stage, original_path, trashed_at}``.
     trashed: bool = False
@@ -106,6 +170,13 @@ class DataRun(BaseModel):
     operation: str
     input_version_ids: list[str] = Field(default_factory=list)
     output_version_ids: list[str] = Field(default_factory=list)
+    # Typed lineage ports (V11): role-annotated bindings over the flat id
+    # lists above. Invariant (enforced by the single write-in
+    # ``DataCatalogService.set_run_ports``): every port version id is a
+    # member of the corresponding flat list. Runs predating V11 simply carry
+    # empty port lists and are read as anonymous inputs/outputs.
+    input_ports: list[RunPort] = Field(default_factory=list)
+    output_ports: list[RunPort] = Field(default_factory=list)
     parameters: dict[str, Any] = Field(default_factory=dict)
     generator: str = ""
     status: str = "completed"

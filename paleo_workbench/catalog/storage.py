@@ -472,6 +472,82 @@ def place_managed_file(
     return target.relative_to(project_dir).as_posix(), size, hex_digest
 
 
+def place_managed_tree(
+    source_dir: Path,
+    project_path: Path,
+    stage: DataStage,
+    asset_id: str,
+    version_id: str,
+    *,
+    keep_source: bool = True,
+) -> list[tuple[str, str, int]]:
+    """Place a compound (multi-file) payload atomically (V11 bundles).
+
+    Copies every regular file under *source_dir* (recursively) into
+    ``{stage}/{asset_id}/{version_id}/…`` via temp-file + fsync + rename per
+    file, then makes each committed member read-only. Returns one
+    ``(rel_path, sha256, size_bytes)`` triple per copied file, in sorted
+    rel-path order. On failure every partial member is removed — no partial
+    bundle is ever left behind.
+
+    ``keep_source=False`` removes the source directory after every file is
+    placed (move semantics, used by working-copy commits of bundles).
+    """
+    source_dir = Path(source_dir)
+    project = Path(project_path)
+    _require_safe_entity_id("asset", asset_id)
+    _require_safe_entity_id("version", version_id)
+    root = ensure_catalog_layout(project)
+    target_dir = root / STAGE_DIRS[stage] / asset_id / version_id
+    if target_dir.exists() and any(target_dir.iterdir()):
+        raise FileExistsError(f"Managed payload already exists: {target_dir}")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    if not source_dir.is_dir():
+        raise CatalogError(f"Bundle source directory not found: {source_dir}")
+
+    project_dir = _project_dir(project)
+    placed: list[tuple[str, str, int]] = []
+    try:
+        for member in sorted(p for p in source_dir.rglob("*") if p.is_file()):
+            member_target = target_dir / member.relative_to(source_dir)
+            member_target.parent.mkdir(parents=True, exist_ok=True)
+            digest = hashlib.sha256()
+            size = 0
+            fd, tmp_name = tempfile.mkstemp(
+                prefix=".place-", dir=str(member_target.parent)
+            )
+            try:
+                with os.fdopen(fd, "wb") as out, member.open("rb") as handle:
+                    for chunk in iter(lambda: handle.read(CHUNK_SIZE), b""):
+                        digest.update(chunk)
+                        out.write(chunk)
+                        size += len(chunk)
+                    out.flush()
+                    os.fsync(out.fileno())
+                os.replace(tmp_name, member_target)
+                fsync_dir(member_target.parent)
+            except Exception:
+                safe_unlink(tmp_name)
+                raise
+            _make_readonly(member_target)
+            placed.append(
+                (
+                    member_target.relative_to(project_dir).as_posix(),
+                    digest.hexdigest(),
+                    size,
+                )
+            )
+    except Exception:
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise
+    if not placed:
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise CatalogError(f"Bundle source directory is empty: {source_dir}")
+    if not keep_source:
+        shutil.rmtree(source_dir, ignore_errors=True)
+    return placed
+
+
 def create_working_copy(project_path: Path, version_path: Path, version_id: str) -> Path:
     """Copy a committed payload into ``working/`` as a mutable file.
 
